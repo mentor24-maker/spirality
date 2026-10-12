@@ -12,7 +12,7 @@
     "doctor": "node scripts/doctor.mjs",
     "check:syntax": "node scripts/check_syntax.mjs",
     "check:secrets": "node scripts/check_secrets.mjs",
-    "test": "node --test scripts/lib/*.test.mjs",
+    "test": "node --test scripts/lib/*.test.mjs lib/*.test.mjs",
     "verify": "npm run check:syntax && npm run check:secrets && npm test"
   }
 }

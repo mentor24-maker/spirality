@@ -35,19 +35,31 @@ import {
 import { buildCard, cardSurvived, findBlockquoteLines, CONTEXT_MIN_WORDS, CONTEXT_MAX_WORDS } from './lib/operatorCard.mjs';
 import { stampCommentBody, isCommentPostPath, isMachineComment, stripMachineMarker } from './lib/machineComment.mjs';
 
+import { loadProjectConfig, ProjectConfigError } from '../lib/projectConfig.mjs';
+
 // ── The ids, written down once ───────────────────────────────────────────────
-// Everything here is overridable from the environment, so a moved list or a
+// They live in spirality.project.json at the repository root (see
+// lib/projectConfig.mjs). Each is still overridable from the environment
+// (CLICKUP_LOOP_QUEUE_LIST, CLICKUP_OPERATOR_ID, ...), so a moved list or a
 // renamed seat is a one-line change in Doppler, not a code change.
+let project;
+try {
+  project = loadProjectConfig();
+} catch (err) {
+  if (!(err instanceof ProjectConfigError)) throw err;
+  console.error(`clickup: the project config is not usable — ${err.message}`);
+  process.exit(1);
+}
 const TOKEN = process.env.CLICKUP_API_TOKEN;
-export const WORKSPACE = process.env.CLICKUP_WORKSPACE_ID || '90141423066';
-export const SPACE = process.env.CLICKUP_SPACE_ID || '90146476540';            // the Spirality SPACE
-export const LOOP_QUEUE_LIST = process.env.CLICKUP_LOOP_QUEUE_LIST || '901418065068'; // the Loop Queue LIST
-/** Dane's seat (dane@alphire.agency). Every handoff assigns this id. The token
- *  ALSO acts as this seat (`whoami` says so), which is why every comment this
- *  script posts is stamped with the machine marker — see lib/machineComment.mjs. */
-export const OPERATOR_ID = Number(process.env.CLICKUP_OPERATOR_ID || 48012725);
-/** Pulse / mentor24 — the workspace's service account. NEVER assign it. */
-export const MACHINE_ID = Number(process.env.CLICKUP_MACHINE_ID || 54254347);
+export const WORKSPACE = project.workspaceId;
+export const SPACE = project.spaceId;                // the product's SPACE
+export const LOOP_QUEUE_LIST = project.loopQueueListId; // the Loop Queue LIST
+/** Dane's seat. Every handoff assigns this id. The token ALSO acts as this
+ *  seat (`whoami` says so), which is why every comment this script posts is
+ *  stamped with the machine marker — see lib/machineComment.mjs. */
+export const OPERATOR_ID = Number(project.operatorUserId);
+/** The workspace's service account. NEVER assign it. */
+export const MACHINE_ID = Number(project.machineUserId);
 const API = process.env.CLICKUP_API_BASE || 'https://api.clickup.com';
 const HTTP_TIMEOUT_MS = Number(process.env.CLICKUP_HTTP_TIMEOUT_MS) || 60 * 1000;
 
@@ -118,11 +130,11 @@ function die(label, { res, json, text }) {
   if (res.status === 401) {
     if (/team not authorized/i.test(String(json?.err || json?.error || text))) {
       console.error('\n"Team not authorized" usually means the ID is the wrong KIND of thing — a space id where a');
-      console.error(`list id belongs (the Spirality SPACE is ${SPACE}; the Loop Queue LIST is ${LOOP_QUEUE_LIST}).`);
+      console.error(`list id belongs (the SPACE is ${SPACE}; the Loop Queue LIST is ${LOOP_QUEUE_LIST}).`);
       console.error('Run `npm run clickup -- lists` to resolve list ids by name before blaming the token.');
     } else {
       console.error('\n401 means the token is wrong or expired — not that ClickUp is down.');
-      console.error('The token lives in Doppler (spirality/dev, CLICKUP_API_TOKEN, a reference to starcaster/dev).');
+      console.error(`The token lives in Doppler (${project.dopplerProject}/${project.dopplerConfig}, CLICKUP_API_TOKEN).`);
       console.error('Run through `npm run clickup -- ...` so Doppler supplies it.');
     }
   }
@@ -133,10 +145,10 @@ function die(label, { res, json, text }) {
 
 function usage(code = 2) {
   console.error(`
-npm run clickup -- <command> [flags]      (Spirality Loop Queue: list ${LOOP_QUEUE_LIST}, space ${SPACE})
+npm run clickup -- <command> [flags]      (Loop Queue: list ${LOOP_QUEUE_LIST}, space ${SPACE})
 
   whoami                                          prove the token works and say who it acts as
-  lists [--space <id>]                            resolve list ids by name (default: the Spirality space)
+  lists [--space <id>]                            resolve list ids by name (default: the project's space)
   queue [--list <id>] [--claimable | --status S]  the tickets, one per line: id, status, priority, created, name
   get --task <id>                                 header + body
   task-name --task <id>                           the name and nothing else (for a PR title)
@@ -251,7 +263,7 @@ async function postComment(task, body) {
 if (!TOKEN) {
   console.error('CLICKUP_API_TOKEN is not set in this environment.\n');
   console.error('The sanctioned route is Doppler, which holds the token:  npm run clickup -- <command> ...');
-  console.error('(package.json wraps this script in `doppler run --project spirality --config dev`.)');
+  console.error(`(package.json wraps this script in \`doppler run --project ${project.dopplerProject} --config ${project.dopplerConfig}\`.)`);
   process.exit(2);
 }
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Parse every script in scripts/ with `node --check`. A syntax error in a
+ * Parse every script in scripts/ and lib/ with `node --check`. A syntax error in a
  * script that only runs on a schedule, or only on another machine, is a
  * script that quietly never runs — this makes it a red CI line instead.
  */
@@ -17,7 +17,7 @@ function walk(dir, out = []) {
   return out;
 }
 
-const files = walk('scripts');
+const files = ['scripts', 'lib'].flatMap((dir) => walk(dir));
 let failed = 0;
 for (const file of files) {
   const r = spawnSync(process.execPath, ['--check', file], { encoding: 'utf8' });
@@ -27,7 +27,7 @@ for (const file of files) {
   }
 }
 if (!files.length) {
-  console.error('check:syntax found no files under scripts/ — that is a failure, not a pass.');
+  console.error('check:syntax found no files under scripts/ or lib/ — that is a failure, not a pass.');
   process.exit(1);
 }
 console.log(`check:syntax: ${files.length - failed} of ${files.length} files parse${failed ? ` — ${failed} FAILED` : ''}.`);
