@@ -6,6 +6,17 @@ file directly on `main`.
 
 ---
 
+## 2026-10-11 — The loop's rules are written down once (#2)
+
+Until now each product kept its own description of how a ticket moves from
+idea to shipped: which statuses exist, who may move a ticket out of each, how
+Dane's "merge" comment is recognised, how a loop asks him a question. Those
+copies had already started to disagree, and StarCaster's even described a
+two-account setup the code stopped using. `docs/LOOP_CONTRACT.md` is now the
+one description, checked line by line against StarCaster's code, with the
+real incident behind each rule. Each product will link to it instead of
+restating it, so a lesson learned in one product reaches the others.
+
 ## 2026-10-11 — Spirality is born: the seed loop, copied from WaveCenter (#1)
 
 Dane decided that the development loop StarCaster and WaveCenter each run a
