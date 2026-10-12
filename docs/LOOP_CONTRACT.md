@@ -101,13 +101,13 @@ checks on it. Every write is read back before the command reports success.
 
 | From | To | Who | How, and what has to be true |
 |---|---|---|---|
-| `Rework` or `Queued` | `Building` | loop-build | `claim`. It reads the ticket's status itself and refuses (exit 3) if that status is not `Rework` or `Queued`; then it writes `Building` guarded on the status it just read, so a ticket that moved in the moment between the read and the write is not claimed. The guard is on what `claim` read, not on what `queue --claimable` listed: a ticket listed as `Queued` that has since moved to `Rework` is still claimed. |
+| `Rework` or `Queued` | `Building` | loop-build | `claim`. It reads the ticket's status itself and refuses (exit 3) if that status is not `Rework` or `Queued`; then it hands over to `status` guarded on the status it just read. `status` reads the ticket again, refuses if it has moved, and only then writes. That is still check-then-write, not an atomic swap: the guard narrows the window in which two passes can both claim, it does not close it, which is why only one build loop runs per product. The guard is on what `claim` read, not on what `queue --claimable` listed: a ticket listed as `Queued` that has since moved to `Rework` is still claimed. |
 | `Building` | `In review` | loop-build | *(Skill rule.)* Only after the PR is open, its body links the ticket, and `pr-opened` has recorded it on the ticket (see "Markers"). `status` does not check for a PR. |
 | `Building` | `Needs your input` | loop-build | `ask`, with an operator card. Used when the gates fail and the fix is out of scope, the ticket is too vague, or the work is too big for one pass. |
 | `In review` | `Ready to launch` | loop-review | `verdict --pass --if-status "In review"`, then `ask --status "Ready to launch"`. `ask` refuses unless the newest review verdict on the ticket is a PASS. |
 | `In review` | `Rework` | loop-review | `verdict --fail --if-status "In review"`, then `status --status Rework --if-status "In review"`. |
 | `In review` | `Needs your input` | loop-review | `ask`. Required instead of a fourth send-back (see "Four rounds, then ask"). |
-| `Needs your input` | `Queued`, `Rework` or `Live` | Dane, by replying | The relay moves it on his reply. A reply that is a close phrase ("close it") → `Live`, decided **before** the PR is looked at, so it closes the ticket even when its PR is still open (that PR is left untouched and the note says so) or its state cannot be read. Any other reply goes by the ticket's PR: none, or closed unmerged → `Queued`; still open → `Rework`; already merged → `Live`; state cannot be read → nothing moves. |
+| `Needs your input` | `Queued`, `Rework` or `Live` | Dane, by replying | The relay moves it on his reply. The relay reads the ticket's PR state first, then decides. If his reply answers a machine-written question card and is a close phrase ("close it") → `Live`, whatever that PR state says: it closes the ticket even when its PR is still open (that PR is left untouched and the note says so) or its state could not be read. With no card on the ticket (for example one parked by `status --no-card`), a close phrase is not treated specially and goes by the PR like any other reply. Any other reply goes by the ticket's PR: none, or closed unmerged → `Queued`; still open → `Rework`; already merged → `Live`; state cannot be read → nothing moves. |
 | `Ready to launch` | `Live` | Dane, by a merge phrase | The relay merges the PR and closes the ticket, after re-checking every gate (see "Merge phrases"). |
 | `Ready to launch` | `Live` | StarCaster's relay, with no word from Dane | **StarCaster only: auto-merge Lanes A and B** (see "StarCaster's auto-merge lanes"). |
 | any | `Live` + `wont-do` tag | Dane's decision | Killing a ticket. *(Convention.)* |
@@ -122,6 +122,12 @@ Four rules sit over that table:
    (still refused into `Ready to launch` without a PASS), and
    `--operator-asked` (on `ask`, or on `status --no-card`) skips the PASS
    check.
+   Both `ask` and `status --no-card` also refuse (exit 2, nothing written) to
+   hand a ticket to Dane when **his own comment is already the newest** on
+   it: a machine owes the next move, and handing it back would make him
+   answer twice (2026-08-23). If the comments cannot be read they refuse with
+   exit 1 rather than guess. Written override: `--after-his-answer`, for a
+   genuinely new question.
 2. **No loop takes a ticket out of Dane's two statuses.** Once it is handed
    to him it stays handed to him until he acts. A loop that could quietly
    reclaim its own escalation would defeat the checkpoint. His reply is him
@@ -142,7 +148,10 @@ Four rules sit over that table:
 
 Moving a ticket into one of Dane's statuses **assigns Dane**. Moving it into
 any machine status **clears every assignee**. `status` and `ask` both do this
-themselves and verify it stuck. Dane's one view is ClickUp's "Assigned to
+themselves and verify it stuck, from the write's own response rather than a
+second read. Written overrides on `status`: `--assign <id>` names the
+assignee instead, `--clear-assignees` clears them even on a move into
+Dane's status, and `--no-auto-assign` turns the rule off for that one move. Dane's one view is ClickUp's "Assigned to
 me", which works across every product's space; a ticket in his status but
 not assigned to him is invisible to him, and is treated as a defect, not a
 cosmetic slip.
@@ -151,7 +160,8 @@ cosmetic slip.
 
 loop-build takes **every `Rework` ticket before any `Queued` one**:
 
-- `Rework`: oldest first, **priority ignored**. Priority says what to
+- `Rework`: oldest first (by the ticket's creation date, not by when it was
+  sent back), **priority ignored**. Priority says what to
   *start*; rework is not started, it is finished. Ordering it by priority
   recreated the same starvation one tier down.
 - `Queued`: priority first (urgent, high, normal, low; anything else last),
@@ -219,7 +229,9 @@ line:
   machine-written.
 - If Dane quotes a machine card and types his words *under* it, it is still
   his. If he types *above* a pasted card, the stamp ends up last and the
-  comment reads as a machine's. At the escalation that fails safe (his
+  comment reads as a machine's. The same goes for quoting an **old** card
+  that opens with a bracketed tag: his comment then starts with that tag and
+  reads as a machine's, wherever he types. At the escalation that fails safe (his
   ticket stays with him, loudly). Anywhere a misreading would cause an
   action instead of a stall, the caller must ask a second question; the
   stamp alone is not enough there.
@@ -300,12 +312,22 @@ comment so the same answer is never posted twice:
   same reason still holds, nothing new is posted; the moment the reason
   changes or goes away, it merges on his original word. He never has to say
   "merge" twice.
-- A **conflict hand-off** (the branch conflicts with `main` and a person has
-  to resolve it) is a `refused:` marker, so it is not spent either. Older
-  hand-offs written as `conflict hand-off on PR #<n>` with no `refused:` are
-  read the same way. The one case where an unchanged refusal **is** posted
-  again: a conflict hand-off that has stalled (nothing is going to pick it
-  up), so the ticket says so plainly instead of sitting under an old promise.
+- A **conflict hand-off** (the branch conflicts with `main`) files a new
+  `Queued` ticket in the Loop Queue for the build loop to catch the branch
+  up; a person is needed only if filing that ticket fails, and the comment
+  then says so in bold. The hand-off is a `refused:` marker, so it is not
+  spent either. Older hand-offs written as `conflict hand-off on PR #<n>`
+  with no `refused:` are read the same way.
+- An unchanged hand-off is normally quiet, with two exceptions. A pass that
+  has **just filed** the conflict ticket says so, because the actor is new.
+  And a hand-off that has **stalled** is announced: no conflict ticket was
+  filed (and the branch is not expected to clear on its own), the marker's
+  time cannot be read, the hand-off is more than 24 hours old, or the same
+  refusal has come back three or more times. The stall announcement goes to
+  the **bus** (StarCaster's shared channel), not to the ticket; the ticket
+  only gets its `[merge-on-comment]` marker re-stamped with a fresh time, and
+  only if the bus post succeeded, so the next reminder is a day away and a
+  failed post is retried next pass.
 - The **newest** marker on the thread decides. The machine stamp is removed
   before the marker is read.
 
@@ -331,14 +353,22 @@ own work.
 Everything a loop puts in front of Dane is a short **card** in the comments
 (the narrow right-hand column). Detail and the spec go in the ticket
 **description** (the wide left-hand column). `ask` takes the card as plain
-text with these sections, each on its own line:
+text. Each section marker stands **alone on its own line**, with the
+section's text on the lines below it; text on the same line as a marker is
+not accepted (the parser reads it as text before the first section and
+refuses):
 
 ```
-@@ASKED     his own words that caused this ticket, verbatim. Never invented.
-@@WHEN      optional: when and where he said it
-@@CONTEXT   the problem and the fix in plain English, 50 to 100 words
-@@NEEDED    the specific ask, with named options where possible
-@@EVIDENCE  required when the ask costs money, changes a plan, or cannot be undone
+@@ASKED
+his own words that caused this ticket, verbatim. Never invented.
+@@WHEN
+optional: when and where he said it
+@@CONTEXT
+the problem and the fix in plain English, 50 to 100 words
+@@NEEDED
+the specific ask, with named options where possible
+@@EVIDENCE
+required when the ask costs money, changes a plan, or cannot be undone
 ```
 
 The rules `ask` enforces:
@@ -388,8 +418,9 @@ approve
 ```
 
 Before matching, the formatting his editor adds is removed (code fences,
-backticks, bold and italic markers, invisible characters, dash variants),
-letter case and repeated spaces are ignored, and trailing `.` or `!` is
+backticks, bold and italic markers, invisible characters), dash variants
+(en dash, em dash, minus sign and similar) become a plain `-`, letter case
+and repeated spaces are ignored, and trailing `.`, `!` and whitespace are
 dropped. Anything longer is just a comment: "merge after the other one
 lands" and "do not merge this yet" do nothing.
 
@@ -406,21 +437,26 @@ Before merging, the relay checks, on that pass, that:
 2. the comment carries Dane's user id (a machine comment always ends in the
    stamp, so it can never be exactly a merge phrase);
 3. the newest review verdict on the ticket is a PASS, **and his comment is
-   newer than it**, so a "merge" from an earlier round cannot release a PR
-   rebuilt since;
+   not older than it** (one with the very same timestamp passes), so a
+   "merge" from an earlier round cannot release a PR rebuilt since;
 4. the ticket has a `PR opened:` line;
 5. that PR passes GitHub's own reading (`githubGate` in
    `mergeOnComment.js`). The main points: it is open and not a draft; its
    checks are green (a PR with no checks is refused: unverified is not
    green; checks still running are waited on); and it does not conflict
-   with `main`. If it is merely behind `main`, the relay catches it up and
+   with `main`. If GitHub reports a conflict but `git merge-tree` merges
+   `main` in cleanly, the two sources disagree, so no conflict is claimed:
+   the relay merges `main` into the branch locally, pushes, and decides
+   again on a later pass. If it is merely behind `main`, the relay catches it up and
    waits for checks to re-run rather than merging on a stale green. GitHub's
    unclear answers are never read as yes: `UNKNOWN` (still computing) is
    waited on, and `UNSTABLE` and `BLOCKED` are refused. Only `CLEAN` or
    `HAS_HOOKS` merges. The code is the full list.
 
-A merge conflict is never resolved by a script. Any refusal is written on the
-ticket in plain words, once, and leaves the authorization unspent.
+A merge conflict is never resolved by a script (merging `main` in when git
+finds no conflict is a catch-up, not a resolution). Any refusal is written on
+the ticket in plain words, once (the stalled hand-off above is the
+exception), and leaves the authorization unspent.
 
 **Why (2026-08-21):** on 2026-08-20 three tickets Dane had approved by comment
 sat unmerged for hours until a person noticed. The checkpoint was doing its
@@ -428,7 +464,10 @@ job; the wait after it was pure friction. The relay moves the hands, not the
 decision.
 
 On a `Needs your input` ticket, a reply that is exactly a **close phrase**,
-matched the same whole-comment way, closes the ticket as `Live`. The full
+matched the same whole-comment way, closes the ticket as `Live`, but only
+when it is his answer to a machine-written question card on that ticket.
+On a ticket with no card (one parked by `status --no-card`, say), "close it"
+is an ordinary reply and goes by the PR's state like any other. The full
 list (`CLOSE_PHRASES` in `busRelayPlan.js`):
 
 ```
@@ -448,10 +487,11 @@ closed
 ```
 
 "done" and "nothing to do" are deliberately **not** close phrases: Dane
-writes them after doing what a card asked of him, which means carry on. A
-close phrase is acted on before the ticket's PR is read, so it closes the
+writes them after doing what a card asked of him, which means carry on. The
+relay reads the ticket's PR state before deciding, but a close phrase that
+answers a card is decided before that state is consulted, so it closes the
 ticket even when the PR is still open (the PR is left alone and the note
-says so) or its state cannot be read.
+says so) or its state could not be read.
 
 ### StarCaster's auto-merge lanes (a StarCaster extension)
 
@@ -461,13 +501,28 @@ word: Lane A was ratified with his rulings on 2026-08-24, and Lane B was
 added on 2026-09-04 after a night of work on the pipeline's own tooling,
 which Lane A did not cover, went seven hours with no merge while he slept:
 
+- **Governance first, in both lanes.** A PR that touches any governance path
+  is refused outright, whatever else it holds: `.github/`, `.claude/`,
+  skills, any `CLAUDE.md`, `docs/DOCTRINE.md`, `docs/LOOP_ENGINEERING.md`,
+  `scripts/check_*`, `scripts/install_*`, `scripts/git-hooks/`, and the
+  merge machinery itself with its tests. A machine may never auto-merge a
+  change to the rules that govern machines. `autoMergeLane.js` holds the
+  full list.
 - **Lane A:** every file the PR changes is a test, a file under `docs/`, or a
   Markdown document.
-- **Lane B:** every file the PR changes is the pipeline's own tooling under
-  `scripts/`.
+- **Lane B:** every file is either Lane A material or a script under
+  `scripts/` ending `.js`, `.mjs`, `.cjs`, `.ts` or `.json`. Shell scripts
+  (`.sh`) and files with no extension do not count. A PR may mix the two
+  kinds; it runs in the widest lane any one of its files needs.
+
+So "every file is a test, a document or a script" is necessary, not
+sufficient: the governance check comes first.
 
 The relay announces the ticket, waits a **one-hour** window, and merges
-unless Dane comments in that hour. Nothing else is loosened: the PASS
+unless Dane comments in that hour. A comment cancels unless it is
+positively recognised as machine-written by the tail stamp; the older
+bracketed tags do not count here, so an unstamped comment carrying his id
+is always read as his objection. Nothing else is loosened: the PASS
 verdict and every PR check in the list above are still required. It is
 capped per hour and per day, turns itself off on trouble, and can be stopped
 with a switch phrase on any ticket or the bus. Spirality and WaveCenter have
@@ -492,7 +547,8 @@ The checks run in this order, and the first that applies decides:
 
 CANNOT TELL is never treated as either of the others.
 
-Run with no ticket, it checks every open ticket and says how many it checked
+Run with no ticket, it checks every open ticket in two lists, the Loop
+Queue and StarCaster's Agent Response list, and says how many it checked
 and how many it could not decide, so "nothing is waiting" and "I could only
 read four of them" never look the same.
 
