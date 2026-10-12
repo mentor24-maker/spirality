@@ -1,0 +1,23 @@
+name: CI
+
+# Engineering rule 1 (CLAUDE.md): main never ships unchecked. Every pull
+# request and every push to main runs `npm run verify`, which is the ONE name
+# for the definition of done — add a gate to that script and it is a gate in
+# CI, locally, and for the loops, all at once.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run verify
