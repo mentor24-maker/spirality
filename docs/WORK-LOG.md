@@ -24,6 +24,17 @@ It names every override flag. It describes StarCaster's auto-merge lanes,
 which merge test, document and tooling changes after an hour without a word
 from Dane. And it gives the true status order of all three lists.
 
+## 2026-10-11 — One file holds every product-specific id (#3)
+
+The ClickUp door had Spirality's ids (its queue, its space, Dane's seat)
+typed straight into the code. That is fine for one product and wrong for a
+shared one: the same code has to work StarCaster's queue and WaveCenter's.
+Now those values live in one small file, `spirality.project.json`, and the
+code reads them from there. If a value is missing or mistyped, every command
+stops straight away and names the setting at fault, instead of quietly
+working the wrong queue. Each product will get its own copy of that file;
+the code stays the same for all three.
+
 ## 2026-10-11 — Spirality is born: the seed loop, copied from WaveCenter (#1)
 
 Dane decided that the development loop StarCaster and WaveCenter each run a

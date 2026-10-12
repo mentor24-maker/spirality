@@ -1,0 +1,15 @@
+{
+  "workspaceId": "90141423066",
+  "spaceId": "90146476540",
+  "loopQueueListId": "901418065068",
+  "operatorUserId": "48012725",
+  "machineUserId": "54254347",
+  "githubRepo": "mentor24-maker/spirality",
+  "dopplerProject": "spirality",
+  "dopplerConfig": "dev",
+  "launchdPrefix": "com.spirality",
+  "logDir": "~/loop-logs",
+  "mergePhrases": ["merge", "merge it", "ship it", "approve"],
+  "governancePaths": ["CLAUDE.md", "docs/LOOP_ENGINEERING.md", ".claude/skills/", ".claude/settings.json", ".github/workflows/"],
+  "autoMergeLanes": []
+}
