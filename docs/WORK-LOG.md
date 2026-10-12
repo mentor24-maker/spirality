@@ -6,6 +6,55 @@ file directly on `main`.
 
 ---
 
+## 2026-10-12 — The first of StarCaster's loop pieces become shared (#4)
+
+StarCaster's loop has grown to about fifty thousand lines over three months of
+real incidents. WaveCenter runs a 1,700-line copy of a much earlier version.
+Nothing either one learns ever reaches the other. This is the first delivery
+of the fix: twelve of StarCaster's small decision-making pieces now live here,
+where both products can share one copy of each.
+
+These are the pieces that answer narrow questions — was this ClickUp comment
+written by Dane or by a loop running under his login? Is this ticket genuinely
+waiting on him, or does it only look that way? Has review already sent this
+ticket back three times? Each answer was got wrong at least once in a real
+incident, and each piece carries the tests written the day it was got wrong.
+They came across unchanged, tests included, because the tests are the only
+proof the move was faithful.
+
+One real change: the pieces no longer have StarCaster's own names written
+inside them. Where a sentence said "Dane", it now asks the project's settings
+file what to call the operator; where a loop signed a message `[CC-starcaster]`,
+it now builds that tag from the product's short name. That is the whole point
+of the exercise — the same code has to serve three products without knowing
+which one it is running for.
+
+Building it turned up a bug worth recording. The first version worked out which
+settings file to read by looking next to its own folder. That is wrong once the
+package is installed somewhere else: a copy running inside StarCaster read
+SPIRALITY's settings and started signing StarCaster's messages `[CC-spirality]`.
+It was caught by installing the package into a scratch project and reading the
+tag back, rather than by reasoning about it, and there is now a test that fails
+if anyone writes it that way again.
+
+Deliberately unfinished, and Dane chose this shape: this is the first of three
+slices, smallest and safest first. The ticket's own list of files turned out to
+be incomplete — the pieces it named depend on nine more that it did not, which
+is exactly why it is being done in three steps rather than one. Also left for
+later, on purpose: pointing this repository's own ClickUp command at the moved
+pieces. That looked like a one-line change and is not — the command asks for
+fourteen names the moved pieces do not offer, six of which do not exist in
+StarCaster's versions at all. Doing it here would have altered the behaviour of
+the one tool these loops use to reach ClickUp, so it gets its own ticket.
+
+Forty-six of the five hundred and ten tests are skipped rather than run, and
+each one says why: it wants to read a product's own script to check that the
+product is really wired up to the piece, and this repository has no such script
+yet. The path it looks for is a setting, so whichever slice brings a script
+over switches those tests on with nothing further to edit.
+
+---
+
 ## 2026-10-11 — The loop's rules are written down once (#2)
 
 Until now each product kept its own description of how a ticket moves from
