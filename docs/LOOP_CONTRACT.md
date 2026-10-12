@@ -8,9 +8,25 @@ file disagree, this file is right and the product's docs are a bug.
 Every rule below was checked against StarCaster's code as of 2026-10-11:
 `scripts/builder/loopStatuses.js`, `machineComment.js`, `operatorCard.js`,
 `costlyAsk.js`, `mergeOnComment.js`, `waitingOnOperator.js`, `loopTrail.js`,
-`sendBackRounds.js`, `busRelayPlan.js` and `scripts/clickup_direct.mjs`. Where
-a rule exists because something went wrong, the incident is named with its
-date, so the next person to want to "simplify" it can see what it costs.
+`sendBackRounds.js`, `busRelayPlan.js`, `autoMergeLane.js`,
+`clickupTicketLink.js`, `pullRequestTitle.js`, `wipCap.js`,
+`pipelineSweep.js`, `scripts/pipeline.mjs` and `scripts/clickup_direct.mjs`.
+Where a rule exists because something went wrong, the incident is named with
+its date, so the next person to want to "simplify" it can see what it costs.
+
+Three kinds of rule appear below, and the difference matters:
+
+- **Code rules**: the script refuses or acts on its own. These are what the
+  code does today.
+- **Skill rules**: written in the loop's skill file and followed by the agent;
+  no script checks them. Each is marked *(skill rule)*.
+- **Conventions**: how the ClickUp list is set up or how the team works;
+  nothing in code reads them. Each is marked *(convention)*.
+
+Some refusals have a **written override**: a flag that walks past the
+refusal and leaves a line in the session's transcript saying so. Every one is
+named where its rule is stated. An override is for a person who has checked
+by eye, never a loop's shortcut.
 
 ## The words used here
 
@@ -30,7 +46,9 @@ date, so the next person to want to "simplify" it can see what it costs.
 
 ## The seven statuses
 
-Every ticket is in exactly one of these, shown here in board order:
+Every ticket is in exactly one of these, shown here in display order (the
+code's `STAGE_ORDER`, which is how the scripts print them; a ClickUp board
+may order its columns differently, see "Known differences today"):
 
 | Status | What it means | Whose move |
 |---|---|---|
@@ -46,18 +64,23 @@ The two in bold are **Dane's statuses** and ask different things of him:
 `Needs your input` wants an **answer**, `Ready to launch` wants a **yes**.
 On a normal day he can ignore the other five.
 
-Three facts about the list itself:
+Facts about the list itself:
 
-- `Live` must be a **closed-type** status in ClickUp, not merely the last
-  one. That is what makes finished work leave the open view.
-- `Live` is the **only** finished status (Dane's decision, 2026-09-02).
-  `complete`, `closed` and `done` are not synonyms; a ticket wearing one of
-  them is reported by name as unrecognised. Before that decision two parts of
-  StarCaster disagreed about what "done" meant, four names against one, and
-  both were steering the loop at once.
+- `Live` is a **closed-type** status in ClickUp, not merely the last one.
+  That is what makes finished work leave the open view. *(Convention: list
+  setup. No code checks it; all three live lists are set up this way.)*
+- `Live` is the **only** finished status the loop's own status list names
+  (Dane's decision, 2026-09-02). `complete`, `closed` and `done` are not
+  synonyms. StarCaster's work-in-progress count (`wipCap.js`) reports a
+  ticket wearing one of them by name as unrecognised; other readers (the
+  `task-open` check, for one) treat any status of ClickUp's closed or done
+  type as finished. Before that decision two parts of StarCaster disagreed
+  about what "done" meant, four names against one, and both were steering
+  the loop at once.
 - There is no `Won't do` status. A ticket that is not going to be built is
   closed as `Live` with the `wont-do` tag and a comment saying what was
   decided. A real finding not worth a slot is tagged `deferred` instead.
+  *(Convention: no code reads either tag.)*
 
 ### Why `Rework` is its own status (2026-08-31)
 
@@ -78,15 +101,16 @@ checks on it. Every write is read back before the command reports success.
 
 | From | To | Who | How, and what has to be true |
 |---|---|---|---|
-| `Rework` or `Queued` | `Building` | loop-build | `claim`. It reads the ticket's own status and refuses to write (exit 3) if the ticket has moved since. |
-| `Building` | `In review` | loop-build | Only after the PR is open, its body links the ticket, and `pr-opened` has recorded it on the ticket (see "Markers"). |
+| `Rework` or `Queued` | `Building` | loop-build | `claim`. It reads the ticket's status itself and refuses (exit 3) if that status is not `Rework` or `Queued`; then it writes `Building` guarded on the status it just read, so a ticket that moved in the moment between the read and the write is not claimed. The guard is on what `claim` read, not on what `queue --claimable` listed: a ticket listed as `Queued` that has since moved to `Rework` is still claimed. |
+| `Building` | `In review` | loop-build | *(Skill rule.)* Only after the PR is open, its body links the ticket, and `pr-opened` has recorded it on the ticket (see "Markers"). `status` does not check for a PR. |
 | `Building` | `Needs your input` | loop-build | `ask`, with an operator card. Used when the gates fail and the fix is out of scope, the ticket is too vague, or the work is too big for one pass. |
 | `In review` | `Ready to launch` | loop-review | `verdict --pass --if-status "In review"`, then `ask --status "Ready to launch"`. `ask` refuses unless the newest review verdict on the ticket is a PASS. |
 | `In review` | `Rework` | loop-review | `verdict --fail --if-status "In review"`, then `status --status Rework --if-status "In review"`. |
 | `In review` | `Needs your input` | loop-review | `ask`. Required instead of a fourth send-back (see "Four rounds, then ask"). |
-| `Needs your input` | `Queued`, `Rework` or `Live` | Dane, by replying | The relay moves it on his reply. Where it goes depends on the ticket's PR: none, or closed unmerged → `Queued`; still open → `Rework`; already merged → `Live`. A reply that is a close phrase ("close it") → `Live`. If the PR's state cannot be read, nothing moves. |
+| `Needs your input` | `Queued`, `Rework` or `Live` | Dane, by replying | The relay moves it on his reply. A reply that is a close phrase ("close it") → `Live`, decided **before** the PR is looked at, so it closes the ticket even when its PR is still open (that PR is left untouched and the note says so) or its state cannot be read. Any other reply goes by the ticket's PR: none, or closed unmerged → `Queued`; still open → `Rework`; already merged → `Live`; state cannot be read → nothing moves. |
 | `Ready to launch` | `Live` | Dane, by a merge phrase | The relay merges the PR and closes the ticket, after re-checking every gate (see "Merge phrases"). |
-| any | `Live` + `wont-do` tag | Dane's decision | Killing a ticket. |
+| `Ready to launch` | `Live` | StarCaster's relay, with no word from Dane | **StarCaster only: auto-merge Lanes A and B** (see "StarCaster's auto-merge lanes"). |
+| any | `Live` + `wont-do` tag | Dane's decision | Killing a ticket. *(Convention.)* |
 
 Four rules sit over that table:
 
@@ -94,16 +118,25 @@ Four rules sit over that table:
    launch`.** `status` refuses both. Since 2026-08-22, when two tickets
    reached `Ready to launch` with no passing review and Dane approved both in
    good faith, `ask` also refuses `Ready to launch` without a PASS verdict.
+   Written overrides: `status --no-card` sets either status without a card
+   (still refused into `Ready to launch` without a PASS), and
+   `--operator-asked` (on `ask`, or on `status --no-card`) skips the PASS
+   check.
 2. **No loop takes a ticket out of Dane's two statuses.** Once it is handed
    to him it stays handed to him until he acts. A loop that could quietly
    reclaim its own escalation would defeat the checkpoint. His reply is him
-   acting; the relay is only his hands.
-3. **No loop moves a ticket into `Live`.** Only a merge Dane authorized, or
-   his own decision to close it, does.
-4. **A pass never ends with its ticket in `Building`.** No loop claims from
-   `Building`, so a ticket left there is unreachable, not late. Before a build
-   pass reports, its ticket is in `In review`, handed back to `Rework` or
-   `Queued` with a comment saying why, or escalated with `ask`.
+   acting; the relay is only his hands. *StarCaster extension:* auto-merge
+   Lanes A and B take a `Ready to launch` ticket to `Live` after a one-hour
+   window in which he did not object.
+3. **No loop moves a ticket into `Live` on its own judgement.** A merge Dane
+   authorized, or his own decision to close it, does. *StarCaster
+   extension:* auto-merge Lanes A and B, which merge on a standing policy he
+   ruled on instead of a per-ticket word.
+4. **A pass never ends with its ticket in `Building`.** *(Skill rule.)* No
+   loop claims from `Building`, so a ticket left there is unreachable, not
+   late. Before a build pass reports, its ticket is in `In review`, handed
+   back to `Rework` or `Queued` with a comment saying why, or escalated with
+   `ask`.
 
 ### Assignment is the handoff signal
 
@@ -135,17 +168,21 @@ safe because every claim and every verdict names the status it expects
 (`--if-status`) and refuses, writing nothing, if the ticket has moved. On
 2026-08-22 at 3:41am two review passes checked the same PR at once; the
 slower one, working from a 25-minute-old snapshot, wrote `Ready to launch`
-over the faster one's FAIL and over a fresh `Building` claim. Since then a
-review **claims its ticket visibly before checking anything**, by setting the
-Loop note to `🔍 being checked — a review pass started <date> <time>`, and
-`verdict` refuses to run without `--if-status "In review"`.
+over the faster one's FAIL and over a fresh `Building` claim. Since then:
+
+- `verdict` refuses to run without `--if-status "In review"`. Written
+  override: `verdict --no-guard`.
+- A review **claims its ticket visibly before checking anything**, by setting
+  the Loop note to `🔍 being checked — a review pass started <date> <time>`.
+  *(Skill rule: `verdict` does not check for the note.)*
 
 ### Four rounds, then ask (2026-08-25)
 
 A ticket may be sent back three times. On what would be the fourth, review
 escalates to Dane with `ask` instead: three rounds means the spec was wrong,
 not the builder. The round count is never stored; it is counted from the
-`REVIEW:` verdict comments already on the ticket.
+`REVIEW:` verdict comments already on the ticket. `verdict --fail` refuses
+the fourth send-back. Written override: `verdict --fourth-round-anyway`.
 
 ## Who is talking: the machine stamp
 
@@ -167,10 +204,13 @@ line:
 [machine] posted by a loop under Dane's token — not his word
 ```
 
-- The stamp is added at **one choke point**, the function in the ClickUp
-  script that sends every request, so a newly added caller cannot forget it.
-  It is added whether the comment is plain text or ClickUp's rich-text form,
-  and adding it twice is impossible.
+- The stamp is added where requests are sent, not by each caller, so a newly
+  added caller cannot forget it. In StarCaster that is more than one place:
+  the ClickUp script's request function (`callOnce` in `clickup_direct.mjs`),
+  the pipeline runner's own request function (`scripts/pipeline.mjs`), and
+  the pipeline sweep's note (`pipelineSweep.js`), which stamps explicitly. It
+  is added whether the comment is plain text or ClickUp's rich-text form, and
+  adding it twice is impossible: a body already stamped is left unchanged.
 - A comment is **machine-written** if its last non-empty line starts with
   `[machine]`. Comments from before the stamp existed are recognised by a
   bracketed tag at the very start (`[CC-starcaster ...]`, `[auto-merge]`,
@@ -203,16 +243,24 @@ mentions the words does nothing.
 PR opened: https://github.com/<owner>/<repo>/pull/<number>
 ```
 
-A line of its own, written as the first line of a comment by `pr-opened`
-(loop-build, before it hands the ticket to review). It is **the only** way a
-ticket names its PR;
-PRs mentioned anywhere else in the comments are ignored. If there are
+`pr-opened` (loop-build, before it hands the ticket to review) writes it as
+the first line of a comment. The reader accepts it at the start of **any**
+line of a comment, not only the first. It is **the only** way a ticket names
+its PR; PRs mentioned any other way in the comments are ignored. If there are
 several, the newest wins, so a rebuilt ticket points at its latest PR.
 
-`pr-opened` first checks the other direction: the PR body must carry the full
-ticket link, `https://app.clickup.com/t/<id>`, on a line of its own, or it
-refuses. The PR title is the ticket's name, byte for byte. Then it reads its
-own comment back and fails the run if the merge step could not parse it.
+`pr-opened` first checks the other direction: the PR body must carry a link
+to this ticket, or it refuses (exit 4) and writes nothing. The check finds
+the link anywhere in the body, not only on a line of its own, and accepts
+`http://` as well as `https://`, and the `/t/<team id>/<id>` form as well as
+`/t/<id>`. Then it reads its own comment back and fails the run if the merge
+step could not parse it.
+
+The PR title is the ticket's name, byte for byte. `pr-opened` does **not**
+check this. In StarCaster the rule lives in `npm run ship`
+(`pullRequestTitle.js`), which titles the PR from the ticket and only warns,
+loudly, when it cannot; it never stops a ship over it. Elsewhere it is a
+*(skill rule)*.
 
 **Why (2026-08-22):** four approved tickets had no `PR opened:` comment, so
 the merge step correctly refused to guess which PR they meant, and two of
@@ -255,7 +303,9 @@ comment so the same answer is never posted twice:
 - A **conflict hand-off** (the branch conflicts with `main` and a person has
   to resolve it) is a `refused:` marker, so it is not spent either. Older
   hand-offs written as `conflict hand-off on PR #<n>` with no `refused:` are
-  read the same way.
+  read the same way. The one case where an unchanged refusal **is** posted
+  again: a conflict hand-off that has stalled (nothing is going to pick it
+  up), so the ticket says so plainly instead of sitting under an old promise.
 - The **newest** marker on the thread decides. The machine stamp is removed
   before the marker is read.
 
@@ -297,9 +347,11 @@ The rules `ask` enforces:
   section may appear twice, and no text may sit before the first section.
 - `@@CONTEXT` is **50 to 100 words**. Under 50 it cannot be acted on; over
   100 it is the wall of text the card replaced.
-- **No `> ` blockquotes anywhere**, in a card or a description. ClickUp
-  deletes quoted lines on save, silently. Quote Dane's words inside a
-  fenced code block instead.
+- **No `> ` blockquotes**, in a card or a description. ClickUp deletes
+  quoted lines on save, silently. Quote Dane's words inside a fenced code
+  block instead. `ask` refuses a blockquote in `@@ASKED`, `@@CONTEXT`,
+  `@@NEEDED` and `@@EVIDENCE`; it does not check `@@WHEN`, so keeping
+  blockquotes out of that one is on the writer.
 - `@@EVIDENCE` is **required** when `@@NEEDED` asks for money (spend, buy,
   pay, subscribe...), a plan change (upgrade...) or something irreversible.
   It must hold a fenced block with the command and what it printed, and a
@@ -357,10 +409,15 @@ Before merging, the relay checks, on that pass, that:
    newer than it**, so a "merge" from an earlier round cannot release a PR
    rebuilt since;
 4. the ticket has a `PR opened:` line;
-5. that PR is open, not a draft, its checks are green (a PR with no checks
-   is refused: unverified is not green), and it does not conflict with
-   `main`. If it is merely behind `main`, the relay catches it up and waits
-   for checks to re-run rather than merging on a stale green.
+5. that PR passes GitHub's own reading (`githubGate` in
+   `mergeOnComment.js`). The main points: it is open and not a draft; its
+   checks are green (a PR with no checks is refused: unverified is not
+   green; checks still running are waited on); and it does not conflict
+   with `main`. If it is merely behind `main`, the relay catches it up and
+   waits for checks to re-run rather than merging on a stale green. GitHub's
+   unclear answers are never read as yes: `UNKNOWN` (still computing) is
+   waited on, and `UNSTABLE` and `BLOCKED` are refused. Only `CLEAN` or
+   `HAS_HOOKS` merges. The code is the full list.
 
 A merge conflict is never resolved by a script. Any refusal is written on the
 ticket in plain words, once, and leaves the authorization unspent.
@@ -370,9 +427,51 @@ sat unmerged for hours until a person noticed. The checkpoint was doing its
 job; the wait after it was pure friction. The relay moves the hands, not the
 decision.
 
-On a `Needs your input` ticket, a close phrase (`close`, `close it`,
-`close this`, `please close`, `closed` and a few similar, matched the same
-whole-comment way) closes the ticket as `Live`.
+On a `Needs your input` ticket, a reply that is exactly a **close phrase**,
+matched the same whole-comment way, closes the ticket as `Live`. The full
+list (`CLOSE_PHRASES` in `busRelayPlan.js`):
+
+```
+close
+close it
+close this
+close this ticket
+close the ticket
+close it please
+please close it
+please close
+yes close it
+yes, close it
+ok close it
+ok, close it
+closed
+```
+
+"done" and "nothing to do" are deliberately **not** close phrases: Dane
+writes them after doing what a card asked of him, which means carry on. A
+close phrase is acted on before the ticket's PR is read, so it closes the
+ticket even when the PR is still open (the PR is left alone and the note
+says so) or its state cannot be read.
+
+### StarCaster's auto-merge lanes (a StarCaster extension)
+
+StarCaster's relay merges some `Ready to launch` tickets **with no word from
+Dane** (`autoMergeLane.js`). This is a standing policy, not a per-ticket
+word: Lane A was ratified with his rulings on 2026-08-24, and Lane B was
+added on 2026-09-04 after a night of work on the pipeline's own tooling,
+which Lane A did not cover, went seven hours with no merge while he slept:
+
+- **Lane A:** every file the PR changes is a test, a file under `docs/`, or a
+  Markdown document.
+- **Lane B:** every file the PR changes is the pipeline's own tooling under
+  `scripts/`.
+
+The relay announces the ticket, waits a **one-hour** window, and merges
+unless Dane comments in that hour. Nothing else is loosened: the PASS
+verdict and every PR check in the list above are still required. It is
+capped per hour and per day, turns itself off on trouble, and can be stopped
+with a switch phrase on any ticket or the bus. Spirality and WaveCenter have
+no lanes.
 
 ## "Is this waiting on Dane?" — the three verdicts
 
@@ -381,11 +480,17 @@ No agent tells Dane something is waiting on him without running
 facts and nothing else: the status, whether Dane is assigned, and whether the
 newest comment is his (by the rule in "Who is talking").
 
-| Verdict | Exit code | When |
-|---|---|---|
-| **NOT waiting on Dane** | 0 | His own comment is the newest word on it (a machine owes the next move, whatever the status says), **or** the status is a machine status. |
-| **WAITING ON DANE** | 3 | The status is one of his two, he is assigned, and the newest comment is not his. |
-| **CANNOT TELL** | 1 | The ticket, its assignees or its comments could not be read, **or** it is in his status but not assigned to him (a half-finished handoff). Never treated as either of the others. |
+The checks run in this order, and the first that applies decides:
+
+| Order | Verdict | Exit code | When |
+|---|---|---|---|
+| 1 | **CANNOT TELL** | 1 | The ticket could not be read, it has no readable status, or its assignees or its comments could not be read. A failed read decides before anything else, even if Dane's comment would have been newest. |
+| 2 | **NOT waiting on Dane** | 0 | His own comment is the newest word on it: a machine owes the next move, whatever the status says. |
+| 3 | **NOT waiting on Dane** | 0 | The status is a machine status. |
+| 4 | **WAITING ON DANE** | 3 | The status is one of his two, he is assigned, and the newest comment is not his. |
+| 5 | **CANNOT TELL** | 1 | It is in his status but not assigned to him (a half-finished handoff). |
+
+CANNOT TELL is never treated as either of the others.
 
 Run with no ticket, it checks every open ticket and says how many it checked
 and how many it could not decide, so "nothing is waiting" and "I could only
@@ -415,11 +520,23 @@ many times."
 
 Written down so nobody mistakes them for the contract:
 
-- **Board order differs per list.** The order above is the one the code
-  uses for display. Spirality's Loop Queue matches it, plus ClickUp's default
-  `to do` status in first place, which no loop uses. StarCaster's and
-  WaveCenter's lists show `Queued` first and `Rework` third, and StarCaster's
-  shows `Ready to launch` before `Needs your input`. The order on the board
-  changes nothing the machine does.
+- **Board order differs per list.** The order in "The seven statuses" is
+  the code's display order (`STAGE_ORDER`). Read from ClickUp's API on
+  2026-10-11, the three live lists have the same seven statuses and no
+  others, in these orders:
+  - Spirality: `Queued`, `Rework`, `Building`, `In review`,
+    `Needs your input`, `Ready to launch`, `Live`
+  - WaveCenter: `Queued`, `Building`, `Rework`, `In review`,
+    `Needs your input`, `Ready to launch`, `Live`
+  - StarCaster: `Queued`, `Building`, `Rework`, `In review`,
+    `Ready to launch`, `Needs your input`, `Live`
+
+  In all three `Queued` is first because it is the open-type status, which
+  ClickUp puts first, and `Live` is the closed-type status at the end. The order
+  on the board changes nothing the machine does: claim order comes from
+  `queue --claimable`, not from the board.
 - **Spirality and WaveCenter have no relay.** On those two products a merge
-  phrase or a reply is acted on only when a session next looks.
+  phrase or a reply is acted on only when a session next looks, and nothing
+  merges without Dane's word.
+- **Only StarCaster has auto-merge lanes.** See "StarCaster's auto-merge
+  lanes" above.

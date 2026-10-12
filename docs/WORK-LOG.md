@@ -17,6 +17,13 @@ one description, checked line by line against StarCaster's code, with the
 real incident behind each rule. Each product will link to it instead of
 restating it, so a lesson learned in one product reaches the others.
 
+The first draft was sent back by review for stating some rules more strictly
+than the code keeps them. The contract now says which rules a script
+enforces, which are only written in a skill, and which are list conventions.
+It names every override flag. It describes StarCaster's auto-merge lanes,
+which merge test, document and tooling changes after an hour without a word
+from Dane. And it gives the true status order of all three lists.
+
 ## 2026-10-11 — Spirality is born: the seed loop, copied from WaveCenter (#1)
 
 Dane decided that the development loop StarCaster and WaveCenter each run a
