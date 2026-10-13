@@ -47,7 +47,7 @@ fourteen names the moved pieces do not offer, six of which do not exist in
 StarCaster's versions at all. Doing it here would have altered the behaviour of
 the one tool these loops use to reach ClickUp, so it gets its own ticket.
 
-Forty-two of the five hundred and twelve tests are skipped rather than run, and
+Forty of the five hundred and sixteen tests are skipped rather than run, and
 each one says why: it wants to read a product's own script to check that the
 product is really wired up to the piece, and this repository has no such script
 yet. The path it looks for is a setting, so whichever slice brings a script
@@ -63,6 +63,37 @@ the operator's name once, when they were first loaded: a loop started by the
 Mac's scheduler loads them from a folder with no settings in it, so every card
 it stamped would have said "the operator" instead of a name. They now read the
 name each time they write it, and a test proves it.
+
+Review sent it back a second time, and found two more things of the same kind.
+The list of words that mean "merge it" — `merge`, `ship it`, `approve` — was
+still written inside the code, even though the settings file has had a place for
+it since the settings work landed. A product that wanted to add a word could not
+have merged with it, and one that dropped `approve` would have merged on
+`approve` anyway. It now reads that list from the settings, and because all
+three products happen to list the same four words today, nothing in service
+behaves differently.
+
+The second was worse and is the more interesting of the two. If the settings
+file was THERE but had a mistake in it — one key misspelled, `operatorNmae` for
+`operatorName` — the code quietly treated it as though there were no settings at
+all. Everything fell back to neutral wording: messages signed `[CC-loop]`, cards
+saying "the operator" instead of a name, and the product's list of scripts
+emptied, which silently switched the wiring checks back off and undid one of the
+first round's own fixes. Nothing failed, and nothing said anything. A missing
+settings file is an ordinary state and still falls back; a settings file that is
+present and wrong now stops with the name of the key it could not understand.
+
+The third fix is about how the first two kinds of mistake kept being found. Some
+tests are deliberately switched off here, because they read a product's own
+script and this repository has none. That guard had been put on five tests that
+read no script at all and were simply switched off by it, and each review round
+caught some of them by reading the diff. Reading by eye is what kept missing
+one, so there is now a check that does it mechanically: for every switched-off
+test, it works out whether the test actually reaches a product's script, and
+fails with the file and line if it does not. Run over this slice it found the
+one review had named and a second one review had not. It also tests itself
+against a deliberately switched-off test, so it cannot pass by looking at
+nothing.
 
 ---
 
