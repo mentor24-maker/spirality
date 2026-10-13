@@ -109,10 +109,13 @@ Two rules keep it honest:
 - **No loop ever puts a ticket into `Live`.** Only a merge does, and only you
   authorize a merge.
 - **No loop ever takes a ticket out of `Needs your input` or `Ready to
-  launch`.** Once handed to you it stays yours until you act. (StarCaster has
-  a relay that reads your reply and moves the ticket for you. Spirality does
-  not yet: when you answer a question, also drag the ticket back to `Queued`,
-  or tell a session to.)
+  launch`.** Once handed to you it stays yours until you act. Your merge
+  phrase on a `Ready to launch` ticket is you acting: the relay
+  (`com.spirality.relay`, every 10 minutes) reads it, re-checks every gate,
+  merges and moves the ticket. Your reply on a `Needs your input` ticket is
+  not read by the relay yet (that half arrives with `busRelayPlan`): when you
+  answer a question, also drag the ticket back to `Queued`, or tell a
+  session to.
 
 `Live` is a **closed**-type status in ClickUp. That is what makes finished
 work disappear from the open view. The click-by-click setup of this status
@@ -170,7 +173,10 @@ three reasons listed and named options (respec / split / drop).
 **They run on the Mac Mini.** Since 2026-10-11 both lanes run unattended on
 the Mac Mini (account `daneofearth`, checkout `~/WebApps/spirality`) as
 launchd agents, `com.spirality.loop-build` and `com.spirality.loop-review`,
-beside StarCaster's. Each keeps the committed `scripts/loop_runner.sh` alive
+beside StarCaster's; since 2026-10-13 a third agent, `com.spirality.relay`,
+runs the merge lane every 10 minutes (see "Merges: the relay" below). The
+labels come from `launchdPrefix` in `spirality.project.json`. Each lane
+keeps the committed `scripts/loop_runner.sh` alive
 across crashes and reboots; each pass is a fresh headless Claude Code session
 that pulls `main`, runs one skill, and sleeps 30 minutes. A pass has a
 two-hour time limit. Nobody starts a loop by hand while those are loaded: a
@@ -196,9 +202,25 @@ Three things the log can say that need a person:
 - **Nothing written for hours** while the queue has work: `--status` says
   whether the runner is alive. A stale lock clears itself on the next start.
 
-**Merges still need a session.** There is no relay yet: when you comment
-`merge` on a `Ready to launch` ticket, a Claude Code session has to see it and
-merge. Tell one, or leave one watching.
+**Merges: the relay.** The third job, `com.spirality.relay`, runs
+`scripts/run_relay.sh` every 10 minutes: one `npm run clickup -- relay` pass
+that reads every `Ready to launch` ticket, and when your comment is exactly a
+merge phrase (`merge`, `merge it`, `ship it`, `approve`; the list is
+`mergePhrases` in `spirality.project.json`) re-checks every gate (ticket still
+`Ready to launch`, your comment newer than a PASS verdict, a recorded PR that
+is open, green, current and conflict-free), squash-merges it, and moves the
+ticket to `Live` (or back to `Queued` when the description has a `Next
+slice:` line). A refused gate is written on the ticket once, naming the gate,
+and your word stays good: the next pass merges on it when the reason clears.
+"merge PR #N" is not a phrase and does nothing.
+
+```bash
+ssh mac-mini 'tail -40 ~/loop-logs/spirality-relay.log'                                # what the last relay pass said
+ssh mac-mini 'cd ~/WebApps/spirality && npm run clickup -- relay --dry-run'           # what it WOULD do now, writing nothing
+```
+
+If `--status` shows the relay is not loaded, a session has to merge: tell one
+**"merge PR #N"**.
 
 ### Starting one by hand — only when the Mini's agents are unloaded
 
@@ -213,8 +235,9 @@ loop makes its own worktree per task):
 ### Installing or moving the runner
 
 `./scripts/install_loop_runner.sh` on the machine that will own the loops,
-from its **main checkout** (never a worktree). It refuses if `npm`, `doppler`,
-`claude` or `git` is missing. `--uninstall` removes both agents. Before
+from its **main checkout** (never a worktree). It refuses if `npm`, `node`,
+`doppler`, `claude`, `git` or `gh` is missing. It installs all three jobs
+(the two lanes and the relay); `--uninstall` removes all three. Before
 installing on a second machine, uninstall on the first: two machines claiming
 is the collision the lock exists to prevent.
 
@@ -231,8 +254,11 @@ Your day:
    the task list.
 2. **During the day:** the loops build and review. Each `Ready to launch`
    ticket lands in *Assigned to me* with a preview link and test steps.
-3. **When you're ready:** tell a session **"merge PR #N"**. It merges only
-   with the `verify` check green, then sets the ticket `Live`.
+3. **When you're ready:** comment **`merge`** (or `merge it`, `ship it`,
+   `approve`) on the ticket, the whole comment and nothing else. The relay
+   merges within ten minutes, only with the `verify` check green, then sets
+   the ticket `Live`. If the relay is not running, tell a session
+   **"merge PR #N"**.
 4. **When a ticket asks you a question** (`Needs your input`): answer as a
    comment on the ticket and move it back to `Queued` (or tell a session to).
 
@@ -248,7 +274,9 @@ added to that script, and every lane inherits it at once.
 
 - `main` is what ships. A hook refuses edits on `main`; every change is a
   branch, a PR and a green check.
-- No loop merges. Ever. `Ready to launch` is a request, not an action.
+- No loop merges on its own judgement. Ever. `Ready to launch` is a request,
+  not an action; only your exact merge phrase releases it, and the relay that
+  carries it out is your hands, not a decision-maker.
 - Every write to ClickUp is verified by reading it back.
 - Urgent priority is yours alone; the script refuses to set it without a
   written claim that you asked.

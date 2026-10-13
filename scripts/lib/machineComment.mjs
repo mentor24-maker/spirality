@@ -56,8 +56,13 @@ export function stampCommentBody(body) {
   return body;
 }
 
+/** A top-level comment on a task, or a threaded reply on a comment: the relay
+ *  writes its markers as replies, and a machine's reply is still a machine's.
+ *  Same two shapes as StarCaster's scripts/builder/machineComment.js. */
 export function isCommentPostPath(path) {
-  return /^\/api\/v2\/task\/[^/]+\/comment(\?|$)/.test(String(path || ''));
+  const p = String(path || '');
+  return /^\/api\/v2\/task\/[^/]+\/comment(\?|$)/.test(p)
+    || /^\/api\/v2\/comment\/[^/]+\/reply(\?|$)/.test(p);
 }
 
 /** The comment without its marker line, for display. */

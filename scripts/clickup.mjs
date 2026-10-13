@@ -24,8 +24,8 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import {
-  DISPLAY, STAGE_ORDER, CLAIMABLE_BY_BUILD, OPERATOR_STATUSES, BUILDING, PRIORITY_VALUE,
-  isClaimableByBuild, isOperatorStatus, isReadyToLaunch, claimOrder, compareWithinStatus,
+  DISPLAY, STAGE_ORDER, CLAIMABLE_BY_BUILD, OPERATOR_STATUSES, BUILDING, NEEDS_YOUR_INPUT, PRIORITY_VALUE,
+  isClaimableByBuild, isOperatorStatus, isReadyToLaunch, claimOrder, compareWithinStatus, statusOf,
 } from './lib/loopStatuses.mjs';
 import {
   prOpenedComment, verdictComment, commentsReadable, prTrailLanded, bodyNamesTicket,
@@ -36,6 +36,17 @@ import { buildCard, cardSurvived, findBlockquoteLines, CONTEXT_MIN_WORDS, CONTEX
 import { stampCommentBody, isCommentPostPath, isMachineComment, stripMachineMarker } from './lib/machineComment.mjs';
 
 import { loadProjectConfig, ProjectConfigError } from '../lib/projectConfig.mjs';
+// The merge lane's decisions (task 86bchpkxz). `mergeDecision` says whether
+// Dane's word authorizes a merge, `githubGate` whether GitHub allows it; the
+// notices pair the words he reads with the marker the next pass reads. All
+// from the package, so every product's relay decides the same way.
+import {
+  mergeDecision, githubGate, isMergeCommand, MERGE_MARKER, parseMergeMarker,
+  refusalNotice, conflictHandOffNotice, mergedNotice, REFUSAL_CODES,
+} from '../lib/mergeOnComment.js';
+import {
+  PR_VIEW_FIELDS, markerBookkeeping, recordBookkeeping, emptyBooks, mergeDestination, relayLine,
+} from '../lib/relayLane.js';
 
 // ── The ids, written down once ───────────────────────────────────────────────
 // They live in spirality.project.json at the repository root (see
@@ -164,6 +175,9 @@ npm run clickup -- <command> [flags]      (Loop Queue: list ${LOOP_QUEUE_LIST}, 
   verdict --task <id> --pass|--fail --if-status "In review" [--body-file <f|->] [--no-guard] [--fourth-round-anyway]
   priority --task <id> --priority urgent|high|normal|low [--operator-asked]
   tag --task <id> --add <name> | --remove <name>  e.g. wont-do, deferred, an epic name
+  relay [--list <id>] [--dry-run]                 the merge lane: act on Dane's merge phrase on every "Ready to launch"
+                                                  ticket (re-check every gate, merge, move the ticket, write the record);
+                                                  one line per ticket he holds. --dry-run prints what it would do, writes nothing
 
 Statuses (matched case-insensitively): ${STAGE_ORDER.join(' / ')}.
 Two are Dane's and only \`ask\` may set them: ${OPERATOR_STATUSES.map((s) => DISPLAY[s]).join(', ')}.
@@ -639,6 +653,236 @@ if (cmd === 'whoami') {
   if (!(moved.json.assignees || []).some((a) => a.id === OPERATOR_ID)) { console.error(`Card posted and status moved to "${now}", but Dane is NOT assigned — the handoff is incomplete.`); process.exit(1); }
   console.log(`Task ${task}: card ${cardId} posted, "${was}" -> "${now}", assigned: ${assigneeNames(moved.json)}.`);
   reportLimits();
+
+} else if (cmd === 'relay') {
+  // ── The merge lane (task 86bchpkxz) ───────────────────────────────────────
+  // Dane's merge phrase on a `Ready to launch` ticket IS the merge
+  // authorization the loop contract requires; this pass is the hands. It is
+  // the same shape as StarCaster's bus-relay merge step, built on the
+  // package's mergeOnComment: only his user id authorizes, only a ticket in
+  // Ready to launch NOW, only with a PASS verdict his word is not older than,
+  // only a PR the ticket recorded, and only when GitHub's own reading of that
+  // PR is open, green, current and conflict-free. Every refusal is written on
+  // the ticket once, naming the gate, and leaves his word unspent so the next
+  // pass merges on it the moment the reason clears. A merged PR's marker is
+  // spent forever. A script never resolves a conflict.
+  //
+  // The `Needs your input` hand-back (moving a ticket on his reply) is NOT in
+  // this pass yet: it arrives with `busRelayPlan`. Until then those tickets
+  // get one honest read-only line each.
+  const list = arg('list') || LOOP_QUEUE_LIST;
+  const dryRun = flag('dry-run');
+  const repo = project.githubRepo;
+  const who = project.operatorName;
+  const unchecked = [];
+  const say = (task, outcome, detail) => console.log(relayLine({ task, status: task.status?.status, outcome, detail }));
+
+  /** Write the dedup marker as a threaded reply on his comment, and read it back.
+   *  An unverified marker means the next pass may act on the same word again,
+   *  which is reported, never assumed away. Returns true only when it stuck. */
+  const markMergeHandled = async (commentId, task, what) => {
+    const wanted = parseMergeMarker(`${MERGE_MARKER} ${what}`);
+    const out = await call('POST', `/api/v2/comment/${commentId}/reply`, { comment_text: `${MERGE_MARKER} ${what} — ${new Date().toISOString()}` });
+    if (!out.res.ok) {
+      unchecked.push(`${task.id} comment ${commentId}: acted on the merge command (${what}) but could NOT write the dedup marker (HTTP ${out.res.status}) — the NEXT pass will see this authorization as unhandled`);
+      return false;
+    }
+    const verify = await call('GET', `/api/v2/comment/${commentId}/reply`);
+    const replies = verify.res.ok ? (verify.json?.comments || verify.json?.replies || []) : [];
+    const stuck = replies.some((r) => {
+      const got = parseMergeMarker(r?.comment_text);
+      return got && got.kind === wanted.kind && got.reason === wanted.reason;
+    });
+    if (!stuck) unchecked.push(`${task.id} comment ${commentId}: the merge marker did not read back — the NEXT pass may act on this authorization again`);
+    return stuck;
+  };
+
+  /** Post a plain comment on the ticket and read it back. Returns the id, or null. */
+  const postNote = async (task, body, about) => {
+    const out = await call('POST', `/api/v2/task/${task.id}/comment`, { comment_text: body });
+    if (!out.res.ok) { unchecked.push(`${task.id}: ${about}, but the note FAILED to post (HTTP ${out.res.status}) — ${who} has not been told`); return null; }
+    const id = String(out.json?.id ?? '');
+    const stored = (await readComments(task.id)).find((c) => String(c.id) === id);
+    if (!stored || !(stored.comment_text || '').trim()) { unchecked.push(`${task.id}: ${about}, but the note did not read back intact (id ${id || 'none'})`); return null; }
+    return id;
+  };
+
+  /** Move a merged ticket to its destination and read the move back. */
+  const moveMergedTicket = async (task, prNumber, dest) => {
+    const rem = (task.assignees || []).map((a) => a.id);
+    const out = await call('PUT', `/api/v2/task/${task.id}`, { status: dest.status, assignees: { add: [], rem } });
+    if (!out.res.ok) { unchecked.push(`${task.id}: PR #${prNumber} MERGED but the ticket did NOT move to ${dest.status} (HTTP ${out.res.status}) — move it by hand`); return false; }
+    const back = await readTask(task.id);
+    const now = back.status?.status ?? '?';
+    if (now.toLowerCase() !== dest.status.toLowerCase()) { unchecked.push(`${task.id}: PR #${prNumber} MERGED but the move to ${dest.status} did not stick (reads back "${now}") — move it by hand`); return false; }
+    const leftover = (back.assignees || []).map((a) => a.id);
+    if (leftover.length) unchecked.push(`${task.id}: moved to ${dest.status} but assignees did not clear ([${leftover.join(', ')}])`);
+    return true;
+  };
+
+  const relayReadyToLaunch = async (task) => {
+    const comments = await readComments(task.id);
+    // Only his merge phrases need their reply threads read — that is where an
+    // earlier pass left its marker. Everything else costs a request and says nothing.
+    const books = emptyBooks();
+    const hisPhrases = comments.filter((c) => Number(c.user?.id) === OPERATOR_ID && !isMachineComment(c.comment_text) && isMergeCommand(c.comment_text));
+    for (const c of hisPhrases) {
+      const out = await call('GET', `/api/v2/comment/${c.id}/reply`);
+      if (!out.res.ok) {
+        unchecked.push(`${task.id} comment ${c.id}: could not read its replies (HTTP ${out.res.status}) — NOT eligible to merge this pass`);
+        books.handled.add(String(c.id));
+        continue;
+      }
+      recordBookkeeping(books, c.id, markerBookkeeping(out.json?.comments || out.json?.replies || []));
+    }
+    const decision = mergeDecision({ status: task.status?.status, comments, operatorId: OPERATOR_ID, ...books });
+    if (decision.act === 'ignore') { say(task, 'nothing', decision.reason); return; }
+
+    // A refusal already given, for a reason that is still the true one, is not
+    // news: quiet. Anything else is written on the ticket once, with its marker.
+    const refuse = async (why, plainEnglish, refusalCode) => {
+      if (decision.priorRefusal === why) { say(task, 'refused-quiet', `${why} (already said; nothing posted)`); return; }
+      if (dryRun) { say(task, 'would-refuse', why); return; }
+      let notice;
+      try {
+        notice = refusalNotice({ commentId: decision.commentId, why, plainEnglish, refusalCode });
+      } catch (err) {
+        // An unclassified code is a defect in the relay, not in the PR. Nothing
+        // is invented for him to read; his word stays unspent; the pass goes on.
+        unchecked.push(`${task.id}: merge refused (${why}) but the reason could not be classified (${err.message}) — nothing was posted; this is a defect in the relay`);
+        say(task, 'unchecked', why);
+        return;
+      }
+      const noteId = await postNote(task, notice.body, `merge refused (${why})`);
+      if (!noteId) { say(task, 'unchecked', why); return; }
+      const stuck = await markMergeHandled(decision.commentId, task, notice.marker);
+      say(task, 'refused', `${why} — explained in comment ${noteId}, marker ${stuck ? 'verified' : 'UNVERIFIED'}`);
+    };
+
+    if (decision.act === 'refuse') { await refuse(decision.reason, 'This ticket is not in a state a script may merge from.', decision.refusalCode); return; }
+
+    const pr = decision.pr;
+    if (`${pr.owner}/${pr.repo}`.toLowerCase() !== String(repo).toLowerCase()) {
+      unchecked.push(`${task.id}: the recorded PR ${pr.url} is in ${pr.owner}/${pr.repo}, not this project's ${repo} — not merged; an agent session has to look`);
+      say(task, 'unchecked', `PR #${pr.number} is in another repository (${pr.owner}/${pr.repo})`);
+      return;
+    }
+    const view = gh(['pr', 'view', String(pr.number), '--repo', repo, '--json', PR_VIEW_FIELDS.join(',')]);
+    if (!view.ok) {
+      unchecked.push(`${task.id}: could not read PR #${pr.number} from GitHub (${view.stderr.trim().slice(0, 200)}) — merge authorization still pending`);
+      say(task, 'unchecked', `could not read PR #${pr.number}`);
+      return;
+    }
+    let prJson;
+    try { prJson = JSON.parse(view.stdout); } catch { unchecked.push(`${task.id}: gh returned non-JSON for PR #${pr.number} — merge authorization still pending`); say(task, 'unchecked', `PR #${pr.number} unreadable`); return; }
+
+    let gate = githubGate(prJson);
+
+    // Behind main: the machine's own job. Catch it up through GitHub, let the
+    // checks re-run, and decide on a later pass against the new run — never
+    // merge on a green that described an older branch.
+    if (gate.action === 'update-branch') {
+      if (dryRun) { say(task, 'would-update-branch', `PR #${pr.number}: ${gate.reason}`); return; }
+      const upd = gh(['pr', 'update-branch', String(pr.number), '--repo', repo]);
+      if (upd.ok) { say(task, 'caught-up', `PR #${pr.number} was behind main; caught up, its checks re-run, the next pass decides`); return; }
+      gate = { action: 'conflict', cannotTell: false, reason: `the branch could not be caught up with main (${upd.stderr.trim().slice(0, 200)})` };
+    }
+
+    if (gate.action === 'wait') { say(task, 'waiting', `PR #${pr.number}: ${gate.reason}`); return; }
+
+    // A conflict is never resolved by a script. This pass does no local
+    // cross-check (no scratch checkout on the relay machine yet), so the
+    // notice says exactly that: GitHub reported it, nothing confirmed it, and
+    // nobody is working on it until a session is pointed at the branch. The
+    // marker is re-decidable, so his word merges the branch once it is fixed.
+    if (gate.action === 'conflict' || gate.action === 'catch-up-locally') {
+      const notice = conflictHandOffNotice({ commentId: decision.commentId, pr: { number: pr.number, url: pr.url }, localVerdict: null, filed: null });
+      const reason = notice.marker.replace(/^refused:\s*/i, '');
+      if (decision.priorRefusal === reason) { say(task, 'refused-quiet', `${gate.reason} (already said; nothing posted)`); return; }
+      if (dryRun) { say(task, 'would-refuse', `PR #${pr.number}: ${gate.reason}`); return; }
+      const noteId = await postNote(task, notice.body, `merge refused (${gate.reason})`);
+      if (!noteId) { say(task, 'unchecked', gate.reason); return; }
+      const stuck = await markMergeHandled(decision.commentId, task, notice.marker);
+      say(task, 'refused', `PR #${pr.number}: ${gate.reason} — explained in comment ${noteId}, marker ${stuck ? 'verified' : 'UNVERIFIED'}`);
+      return;
+    }
+
+    if (gate.action === 'refuse') { await refuse(gate.reason, `PR #${pr.number} is not in a state that can be merged safely.`, gate.refusalCode); return; }
+
+    // gate.action === 'merge'. Where the ticket goes afterwards is decided
+    // from the description BEFORE merging, so the dry run can say it too.
+    const fresh = await readTask(task.id);
+    const dest = mergeDestination(fresh.markdown_description || fresh.description);
+    if (dryRun) { say(task, 'would-merge', `PR #${pr.number} (${gate.reason}); then "${dest.status}" because ${dest.why}`); return; }
+
+    // --squash, never --admin, never any force: a convenience command does not
+    // get to route around a standing decision.
+    const merged = gh(['pr', 'merge', String(pr.number), '--repo', repo, '--squash', '--delete-branch']);
+    if (!merged.ok) { await refuse(`the merge command itself failed (${merged.stderr.trim().slice(0, 300)})`, `PR #${pr.number} could not be merged.`, REFUSAL_CODES.mergeCommandFailed); return; }
+
+    // `gh` exiting 0 is not a merge. Read the PR back; only MERGED earns the record.
+    const after = gh(['pr', 'view', String(pr.number), '--repo', repo, '--json', 'state,mergedAt']);
+    let afterJson = null;
+    try { afterJson = after.ok ? JSON.parse(after.stdout) : null; } catch { afterJson = null; }
+    const state = String(afterJson?.state || '').toUpperCase();
+    if (state !== 'MERGED') {
+      unchecked.push(`${task.id}: \`gh pr merge\` exited 0 but PR #${pr.number} reads back as "${state || 'unreadable'}", not MERGED — nothing recorded on the ticket; the next pass re-decides`);
+      say(task, 'unchecked', `PR #${pr.number} merge not observed`);
+      return;
+    }
+    const mergedAt = afterJson.mergedAt || new Date().toISOString();
+
+    // Spent forever, FIRST: if anything after this fails, the one thing that
+    // must never happen (a second decision on a merged PR) still cannot.
+    const record = mergedNotice({ commentId: decision.commentId, pr: { number: pr.number, url: pr.url }, mergedAt });
+    await markMergeHandled(decision.commentId, task, record.marker);
+
+    const body = [
+      `Merged: PR #${pr.number} (${pr.url}) squash-merged into main at ${mergedAt}, on your comment ${decision.commentId}.`,
+      'Checks were green and the branch was up to date at merge time; the branch has been deleted.',
+      '',
+      dest.status.toLowerCase() === 'live'
+        ? `This ticket is now Live (${dest.why}).`
+        : `This ticket goes back to ${dest.status} for the next build pass, because ${dest.why}.`,
+      '',
+      '(Automatic — relay merge step.)',
+    ].join('\n');
+    await postNote(task, body, `PR #${pr.number} MERGED`);
+    const moved = await moveMergedTicket(task, pr.number, dest);
+    say(task, 'merged', `PR #${pr.number} at ${mergedAt}; ticket -> ${dest.status}${moved ? '' : ' (MOVE FAILED, see below)'} (${dest.why})`);
+  };
+
+  const tasks = await fetchAllTasks(list);
+  const ready = tasks.filter((t) => isReadyToLaunch(t.status?.status)).sort(compareWithinStatus);
+  const asked = tasks.filter((t) => statusOf(t) === NEEDS_YOUR_INPUT).sort(compareWithinStatus);
+  console.error(`relay${dryRun ? ' — DRY RUN, nothing will be written' : ''}: ${ready.length} "Ready to launch", ${asked.length} "Needs your input" in list ${list}`);
+
+  for (const t of ready) {
+    // One ticket's crash must not end the pass for the tickets after it.
+    try { await relayReadyToLaunch(t); } catch (err) {
+      unchecked.push(`${t.id}: the relay stopped on this ticket (${err.message}) — nothing more was written for it`);
+      say(t, 'unchecked', `the relay stopped on this ticket: ${err.message}`);
+    }
+  }
+  for (const t of asked) {
+    // Read-only until the hand-back lands: say whether his answer is waiting on a machine.
+    try {
+      const comments = await readComments(t.id);
+      if (operatorSpokeLast(comments, OPERATOR_ID)) say(t, 'answered', `${who}'s reply is the newest comment, and this relay does not move "Needs your input" tickets yet — a session must`);
+      else say(t, 'waiting', `waiting on ${who}; nothing to do`);
+    } catch (err) {
+      unchecked.push(`${t.id}: could not read its comments (${err.message})`);
+      say(t, 'unchecked', `could not read comments: ${err.message}`);
+    }
+  }
+
+  if (unchecked.length) {
+    console.error(`\nUNCHECKED — ${unchecked.length} step(s) failed and say so:`);
+    for (const line of unchecked) console.error(`  - ${line}`);
+  }
+  console.error(`relay done: ${ready.length + asked.length} ticket(s) looked at${dryRun ? ', nothing written (dry run)' : ''}.`);
+  reportLimits();
+  process.exit(unchecked.length ? 1 : 0);
 
 } else {
   console.error(`Unknown command "${cmd}".`);
