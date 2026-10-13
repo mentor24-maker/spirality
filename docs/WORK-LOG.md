@@ -95,6 +95,21 @@ one review had named and a second one review had not. It also tests itself
 against a deliberately switched-off test, so it cannot pass by looking at
 nothing.
 
+Review sent it back a third time, over a bug the second round's own fix had
+introduced. Moving the merge words into the settings file made them something a
+person types, and people type "Ship it", not "ship it". The matcher tidied up
+the COMMENT before comparing — lower-cased it, dropped a trailing full stop —
+but compared it against the settings words exactly as written. So a product
+whose settings said "Ship it" would have loaded with no complaint and then
+never merged on anything: Dane's merge word read and ignored, in silence. While
+those words were fixed inside the code this could not happen, because the code
+only ever spelled them one way. Both sides are tidied up before comparing now,
+so capitals, punctuation, bold and a stray double space in the settings are all
+harmless, and the settings file says what it looks like it says. One kind of
+word is refused outright instead: a "word" with no letter or digit in it, like
+a lone full stop, which tidies away to nothing and would then match an empty
+comment — that is, merge on silence. It now stops at load with the entry named.
+
 ---
 
 ## 2026-10-11 — The loop's rules are written down once (#2)
