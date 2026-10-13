@@ -47,11 +47,22 @@ fourteen names the moved pieces do not offer, six of which do not exist in
 StarCaster's versions at all. Doing it here would have altered the behaviour of
 the one tool these loops use to reach ClickUp, so it gets its own ticket.
 
-Forty-six of the five hundred and ten tests are skipped rather than run, and
+Forty-two of the five hundred and twelve tests are skipped rather than run, and
 each one says why: it wants to read a product's own script to check that the
 product is really wired up to the piece, and this repository has no such script
 yet. The path it looks for is a setting, so whichever slice brings a script
-over switches those tests on with nothing further to edit.
+over switches those tests on with nothing further to edit. If the setting names
+a script that is not there, the tests fail rather than skip, so a typo cannot
+quietly switch the checks off.
+
+Review sent the first version back, and was right to. Four ordinary tests had
+been switched off by mistake and are back on. Three places still said "Dane"
+outright and now ask the settings file like the rest — so another product's
+operator is no longer told something is "WAITING ON DANE". And two pieces read
+the operator's name once, when they were first loaded: a loop started by the
+Mac's scheduler loads them from a folder with no settings in it, so every card
+it stamped would have said "the operator" instead of a name. They now read the
+name each time they write it, and a test proves it.
 
 ---
 

@@ -5,10 +5,12 @@
   "description": "Alphire Spirality — the AI development system: the shared loop that builds StarCaster, WaveCenter and itself.",
   "type": "module",
   "engines": {
-    "node": ">=22"
+    "node": ">=22.12"
   },
   "exports": {
     "./lib/*": "./lib/*.js",
+    "./lib/*.js": "./lib/*.js",
+    "./lib/*.mjs": "./lib/*.mjs",
     "./lib/projectConfig": "./lib/projectConfig.mjs"
   },
   "files": [
