@@ -6,6 +6,33 @@ file directly on `main`.
 
 ---
 
+## 2026-10-13 — The pieces that decide what one pass may do become shared (#5)
+
+The second of three deliveries moving StarCaster's loop pieces into the shared
+package. Slice 1 brought the small questions a loop asks about a comment or a
+ticket. This slice brings the bigger questions a loop asks about itself before
+and after a pass: is too much work already open to claim another ticket? Did
+the previous pass drop the ticket it was holding? What should the relay do with
+Dane's reply? May this small, safe pull request merge on its own? And when the
+two-hour limit stops a pass, what was it actually doing? Five pieces answer
+those, five more helpers hold them up, and all of it came across with the
+tests written the day each answer was first got wrong.
+
+Two things changed in the move, on purpose. First, as in slice 1, every
+sentence that named Dane, StarCaster or StarCaster's log folder now asks the
+project's settings file instead, so the same code serves any product. Second,
+Spirality's own loop runner learned a trick StarCaster learned the hard way:
+when it has to stop a pass at the time limit, it now writes down what the pass
+was running, so a stuck test can never again look like a dead machine.
+
+One part of the plan turned out to be wrong when measured, and was corrected
+on the ticket before building: five files the plan listed are StarCaster's
+description of its own two Macs and scheduled jobs, not shared loop logic, so
+they stay where they are until someone decides what a shared version of that
+should look like.
+
+---
+
 ## 2026-10-12 — The first of StarCaster's loop pieces become shared (#4)
 
 StarCaster's loop has grown to about fifty thousand lines over three months of
