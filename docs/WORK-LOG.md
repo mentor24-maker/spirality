@@ -110,6 +110,19 @@ word is refused outright instead: a "word" with no letter or digit in it, like
 a lone full stop, which tidies away to nothing and would then match an empty
 comment — that is, merge on silence. It now stops at load with the entry named.
 
+A fourth review found one more, from the first round's fix, and Dane chose one
+last round limited to it. JavaScript has two ways to pull in a piece of code —
+the older `require` and the newer `import`. The pieces here are written the
+older way, and Node works out what an `import` may take from them by reading
+their list of names from the top, stopping at the first entry it does not
+understand. Round 1 had put a "read the settings when asked" entry near the
+top of three lists, so 56 names below it vanished for anyone using `import` —
+which is how WaveCenter and Spirality's own ClickUp script are written. It
+failed loudly, never silently, but the first product to switch over would have
+hit it. Those entries now sit at the end of each list, and a new test checks
+every piece in the folder, so a misplaced entry fails `verify` instead of
+waiting for a product to find it.
+
 ---
 
 ## 2026-10-11 — The loop's rules are written down once (#2)
