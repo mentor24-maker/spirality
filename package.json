@@ -5,14 +5,25 @@
   "description": "Alphire Spirality — the AI development system: the shared loop that builds StarCaster, WaveCenter and itself.",
   "type": "module",
   "engines": {
-    "node": ">=22"
+    "node": ">=22.12"
   },
+  "exports": {
+    "./lib/*": "./lib/*.js",
+    "./lib/*.js": "./lib/*.js",
+    "./lib/*.mjs": "./lib/*.mjs",
+    "./lib/projectConfig": "./lib/projectConfig.mjs"
+  },
+  "files": [
+    "lib/",
+    "scripts/",
+    "docs/"
+  ],
   "scripts": {
     "clickup": "doppler run --project spirality --config dev --no-check-version -- node scripts/clickup.mjs",
     "doctor": "node scripts/doctor.mjs",
     "check:syntax": "node scripts/check_syntax.mjs",
     "check:secrets": "node scripts/check_secrets.mjs",
-    "test": "node --test scripts/lib/*.test.mjs lib/*.test.mjs",
+    "test": "node --test scripts/lib/*.test.mjs lib/*.test.mjs lib/*.test.js",
     "verify": "npm run check:syntax && npm run check:secrets && npm test"
   }
 }

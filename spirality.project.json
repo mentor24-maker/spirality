@@ -9,7 +9,22 @@
   "dopplerConfig": "dev",
   "launchdPrefix": "com.spirality",
   "logDir": "~/loop-logs",
-  "mergePhrases": ["merge", "merge it", "ship it", "approve"],
-  "governancePaths": ["CLAUDE.md", "docs/LOOP_ENGINEERING.md", ".claude/skills/", ".claude/settings.json", ".github/workflows/"],
-  "autoMergeLanes": []
+  "mergePhrases": [
+    "merge",
+    "merge it",
+    "ship it",
+    "approve"
+  ],
+  "governancePaths": [
+    "CLAUDE.md",
+    "docs/LOOP_ENGINEERING.md",
+    ".claude/skills/",
+    ".claude/settings.json",
+    ".github/workflows/"
+  ],
+  "autoMergeLanes": [],
+  "operatorName": "Dane",
+  "productSlug": "spirality",
+  "legacyMachinePrefixes": [],
+  "productScripts": {}
 }
