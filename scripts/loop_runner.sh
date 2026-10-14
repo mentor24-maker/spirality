@@ -93,6 +93,12 @@ while true; do
   echo "===== $(date "+%Y-%m-%d %H:%M:%S") START /$SKILL =====" >> "$LOG"
   # The pass's output goes to the log as it happens AND to its own file, so
   # the sign-in check below reads this pass only, not an older one.
+  # The time limit writes what the pass was running into this file when it has
+  # to stop it; the pass's own report never arrives in that case. Cleared
+  # first, so a stop never reports the previous stop's snapshot.
+  SNAPSHOT="$HOME/loop-logs/spirality-$SKILL.timeout-snapshot"
+  rm -f "$SNAPSHOT"
+  RUN_WITH_TIME_LIMIT_SNAPSHOT="$SNAPSHOT" \
   "$REPO/scripts/run_with_time_limit.sh" "${LOOP_PASS_LIMIT_SECONDS:-7200}" -- \
     "$CLAUDE_BIN" -p "/$SKILL" \
     --allowedTools Bash Edit Write Read Glob Grep Task TodoWrite WebFetch \
@@ -101,7 +107,14 @@ while true; do
   # `claude -p` exits 0 whenever it produced output, so the code is a fact
   # about the process, not a verdict on the pass. The pass's own report is.
   echo "===== $(date "+%Y-%m-%d %H:%M:%S") END /$SKILL (exit $CODE — not a verdict; the pass's report above is) =====" >> "$LOG"
+  # A pass the time limit stopped has no report, so the door is asked to say
+  # what it was doing, on the ticket the pass held (lib/passTimeout.js). It
+  # never fails the runner: until the door has a `pass-timeout` command the
+  # line below logs its "Unknown command" answer and carries on.
   if [ "$CODE" -eq 124 ]; then
+    npm run --silent clickup -- pass-timeout --pass "$SKILL" \
+      --limit "${LOOP_PASS_LIMIT_SECONDS:-7200}" --snapshot "$SNAPSHOT" \
+      >> "$LOG" 2>&1 || true
     echo "[loop-runner] the pass hit the ${LOOP_PASS_LIMIT_SECONDS:-7200}s time limit and was stopped; its ticket may still be in Building — the next pass or a person should hand it back." >> "$LOG"
   fi
   # Only Claude's own sign-in errors, and only in this pass's last lines: a
