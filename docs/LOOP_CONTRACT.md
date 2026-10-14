@@ -40,9 +40,13 @@ by eye, never a loop's shortcut.
   merged into `main`.
 - **The operator**: Dane. The only person who decides what ships.
 - **The machine**: any loop, script or relay. Never a person.
-- **The relay**: StarCaster's `bus-relay` pass, which runs every few minutes,
-  reads Dane's comments on tickets in his two statuses and carries out what
-  they say. Spirality and WaveCenter do not run one yet.
+- **The relay**: a pass that runs every few minutes, reads Dane's comments on
+  tickets in his two statuses and carries out what they say. StarCaster's is
+  `bus-relay`. Spirality's is `npm run clickup -- relay` (the launchd job
+  `<launchdPrefix>.relay`, every 10 minutes), built from the package's
+  `mergeOnComment`; today it carries out the **merge phrase** on `Ready to
+  launch` and only reports on `Needs your input` (the hand-back arrives with
+  `busRelayPlan`). WaveCenter does not run one yet.
 
 ## The seven statuses
 
@@ -463,6 +467,25 @@ sat unmerged for hours until a person noticed. The checkpoint was doing its
 job; the wait after it was pure friction. The relay moves the hands, not the
 decision.
 
+**Where the ticket goes after the merge.** `Live`, unless the ticket's
+description carries, on a line of its own, a declaration that another slice
+is still to come:
+
+```
+Next slice: <what the next slice is>
+```
+
+Then the ticket goes back to `Queued` (assignees cleared) for the next build
+pass, and the merge record on the ticket says so. `Next slice: none` reads as
+no next slice. Prose about slices is deliberately not read: a ticket moves on
+a declaration, never on how a paragraph was worded. The build pass that
+narrows a description to one slice writes the line
+(`mergeDestination` in `relayLane.js`).
+
+**Why (2026-10-13, Spirality):** "merge PR #4" sat four hours on a sliced
+ticket, and the session that finally merged it by hand also had to drag the
+ticket back to `Queued` for slice 2 by hand.
+
 On a `Needs your input` ticket, a reply that is exactly a **close phrase**,
 matched the same whole-comment way, closes the ticket as `Live`, but only
 when it is his answer to a machine-written question card on that ticket.
@@ -591,8 +614,11 @@ Written down so nobody mistakes them for the contract:
   ClickUp puts first, and `Live` is the closed-type status at the end. The order
   on the board changes nothing the machine does: claim order comes from
   `queue --claimable`, not from the board.
-- **Spirality and WaveCenter have no relay.** On those two products a merge
-  phrase or a reply is acted on only when a session next looks, and nothing
-  merges without Dane's word.
+- **WaveCenter has no relay.** There a merge phrase or a reply is acted on
+  only when a session next looks. **Spirality's relay merges on a merge
+  phrase** (`npm run clickup -- relay`) and does not yet move a `Needs your
+  input` ticket on a reply: that half arrives with `busRelayPlan`, and until
+  then a session moves the ticket. On every product nothing merges without
+  Dane's word.
 - **Only StarCaster has auto-merge lanes.** See "StarCaster's auto-merge
   lanes" above.

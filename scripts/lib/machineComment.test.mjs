@@ -20,9 +20,11 @@ test('a structured (card) body is stamped as a trailing run', () => {
   assert.equal(isMachineComment(body.comment.map((r) => r.text).join('')), true);
 });
 
-test('only task comment posts are stamped', () => {
+test('only task comment posts and threaded replies are stamped', () => {
   assert.equal(isCommentPostPath('/api/v2/task/abc/comment'), true);
+  assert.equal(isCommentPostPath('/api/v2/comment/123/reply'), true);
   assert.equal(isCommentPostPath('/api/v2/task/abc'), false);
+  assert.equal(isCommentPostPath('/api/v2/comment/123'), false);
   assert.equal(stampCommentBody({ status: 'Queued' }).status, 'Queued');
 });
 
