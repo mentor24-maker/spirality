@@ -44,19 +44,15 @@ interval_of() {
     *)           echo 3600 ;;
   esac
 }
+# loaded_line and reload_job: read launchd's list safely, and replace a job
+# only once the old one is really gone.
+# shellcheck source=lib/launchd_reload.sh
+source "$REPO/scripts/lib/launchd_reload.sh"
+
 label_of() { echo "$PREFIX.$1"; }
 plist_of() { echo "$HOME/Library/LaunchAgents/$(label_of "$1").plist"; }
 log_of() { echo "$LOG_DIR/$SLUG-$1.log"; }
 lock_of() { echo "$LOG_DIR/$SLUG-$1.lock"; }
-
-loaded_line() {
-  # Read launchctl's list into a variable first. Piping it straight into
-  # `grep -q` under pipefail reported a live lane as "loaded: no": grep quits
-  # at the first match, launchctl dies of SIGPIPE, and the pipeline "fails".
-  local listing
-  listing="$(launchctl list 2>/dev/null || true)"
-  awk -v l="$1" '$3 == l' <<<"$listing"
-}
 
 status_one() {
   local job="$1" label plist lock log line
@@ -158,6 +154,10 @@ install() {
   fi
   chmod +x "$REPO/scripts/loop_runner.sh" "$REPO/scripts/run_with_time_limit.sh" "$REPO/scripts/run_relay.sh"
 
+  # Jobs that could not be loaded. Every job is still tried; the list decides
+  # the exit code at the end.
+  not_loaded=()
+
   # The two kept-alive lanes: the runner script loops forever, launchd restarts it.
   for s in "${SKILLS[@]}"; do
     local_label="$(label_of "$s")"; local_plist="$(plist_of "$s")"
@@ -191,9 +191,11 @@ $(plist_env)
 </dict>
 </plist>
 PLIST_BODY
-    launchctl bootout "gui/$(id -u)/$local_label" 2>/dev/null || true
-    launchctl bootstrap "gui/$(id -u)" "$local_plist"
-    echo "Installed $local_label — kept alive from $REPO (every $(interval_of "$s")s)."
+    if reload_job "$local_label" "$local_plist"; then
+      echo "Installed $local_label — kept alive from $REPO (every $(interval_of "$s")s)."
+    else
+      not_loaded+=("$local_label")
+    fi
   done
 
   # The relay: one pass per wake, on a timer. Its own output IS its log, so the
@@ -224,11 +226,22 @@ $(plist_env)
 </dict>
 </plist>
 PLIST_BODY
-  launchctl bootout "gui/$(id -u)/$local_label" 2>/dev/null || true
-  launchctl bootstrap "gui/$(id -u)" "$local_plist"
-  echo "Installed $local_label — one pass every $(( $(interval_of "$RELAY") / 60 )) minutes from $REPO, log $local_rlog."
+  if reload_job "$local_label" "$local_plist"; then
+    echo "Installed $local_label — one pass every $(( $(interval_of "$RELAY") / 60 )) minutes from $REPO, log $local_rlog."
+  else
+    not_loaded+=("$local_label")
+  fi
   echo
   status
+
+  # One job failing to load does not stop the others from being tried, but the
+  # run as a whole fails and says which (CLAUDE.md engineering rule 6).
+  if [ "${#not_loaded[@]}" -gt 0 ]; then
+    echo >&2
+    echo "FAILED: ${#not_loaded[@]} job(s) are NOT loaded on this machine: ${not_loaded[*]}" >&2
+    echo "        Run this installer again; if it fails the same way, check $0 --status." >&2
+    exit 1
+  fi
 }
 
 case "${1:-}" in
