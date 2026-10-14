@@ -33,6 +33,35 @@ should look like.
 
 ---
 
+## 2026-10-13 — Dane's merge word is finally read: Spirality gets its relay (#6)
+
+Until today, when Dane wrote "merge" on a finished ticket, nothing on
+Spirality was listening. Two background jobs ran on the Mac Mini: one that
+builds tickets and one that reviews them. Neither merges, so his approval sat
+there until a person happened to look. On 10/13 that wait was four hours.
+
+Now a third job runs every ten minutes. It reads every ticket waiting on
+Dane's go-ahead, and when his comment is exactly one of the agreed merge
+words (`merge`, `merge it`, `ship it` or `approve`, nothing more), it checks
+everything again on the spot: the ticket is still waiting on him, the review
+passed before he spoke, the pull request is open, its checks are green, it is
+current with the main branch and it does not conflict. Only then does it
+merge, write a short record on the ticket, and move the ticket along, reading
+each of those writes back to make sure they landed. If any check fails it
+merges nothing and leaves one plain-language note naming what failed. His
+word stays good, so the moment that reason clears a later pass merges without
+him having to say it twice. "merge PR #4" is not one of the words and does
+nothing, on purpose: the exact-phrase rule is what keeps a stray sentence
+from shipping code.
+
+Everything the job needs to know about the product, from the merge words to
+the name of the background job and where its log goes, comes from the
+product's settings file, so the same code will run StarCaster's and
+WaveCenter's merges when those products move onto it. Moving an answered
+question ticket back into the queue is the next slice.
+
+---
+
 ## 2026-10-12 — The first of StarCaster's loop pieces become shared (#4)
 
 StarCaster's loop has grown to about fifty thousand lines over three months of

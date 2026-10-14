@@ -106,8 +106,18 @@ look at; this is a check that runs in CI"*).
      instruction the ticket came from; `@@CONTEXT` says in 50-100 words what
      changed and what he will see; `@@NEEDED` is the merge approval, with the
      PR link, the preview link, the exact address and clicks to check it, and
-     the line **"Tell a session to merge PR #N when you're ready."** Do
-     **NOT** merge.
+     **how to merge**, in exactly these words:
+
+     > **To merge:** reply with one of the merge phrases as the whole comment
+     > and nothing else — `merge`, `merge it`, `ship it` or `approve` (the
+     > list is `mergePhrases` in `spirality.project.json`). The relay
+     > (`com.spirality.relay`, every 10 minutes) re-checks every gate, merges
+     > PR #N and moves this ticket. "merge PR #N" is *not* a phrase and does
+     > nothing. If `./scripts/install_loop_runner.sh --status` says the relay
+     > is not loaded on the Mini, tell a session **"merge PR #N"** instead.
+
+     (Write it into the card as plain lines, not a blockquote — ClickUp deletes
+     `> ` lines.) Do **NOT** merge.
    - **Fail, and a machine can fix it** → `verdict --fail` first (its FIRST
      LINE is the reason the board shows — one short clause), then
      `status --status Rework --if-status "In review"`. Do not fix it yourself
@@ -127,7 +137,9 @@ look at; this is a check that runs in CI"*).
 ## Guardrails
 
 - **Never merge autonomously.** `Ready to launch` ≠ merged. Dane merges by
-  telling a session to, and only with the `verify` check green.
+  writing a merge phrase on the ticket (the relay is his hands and re-checks
+  every gate, `verify` included) or by telling a session to. The review loop
+  never does.
 - **Only Dane moves a task out of `Ready to launch` or `Needs your input`.**
 - **Independence is the whole point.** Re-run everything; don't rubber-stamp.
 - **Never write a verdict past a refused guard.**
