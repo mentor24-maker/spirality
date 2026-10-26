@@ -44,9 +44,9 @@ by eye, never a loop's shortcut.
   tickets in his two statuses and carries out what they say. StarCaster's is
   `bus-relay`. Spirality's is `npm run clickup -- relay` (the launchd job
   `<launchdPrefix>.relay`, every 10 minutes), built from the package's
-  `mergeOnComment`; today it carries out the **merge phrase** on `Ready to
-  launch` and only reports on `Needs your input` (the hand-back arrives with
-  `busRelayPlan`). WaveCenter does not run one yet.
+  `mergeOnComment` and `busRelayPlan`; it carries out the **merge phrase** on
+  `Ready to launch` and the **hand-back** on `Needs your input`. WaveCenter
+  does not run one yet.
 
 ## The seven statuses
 
@@ -111,7 +111,7 @@ checks on it. Every write is read back before the command reports success.
 | `In review` | `Ready to launch` | loop-review | `verdict --pass --if-status "In review"`, then `ask --status "Ready to launch"`. `ask` refuses unless the newest review verdict on the ticket is a PASS. |
 | `In review` | `Rework` | loop-review | `verdict --fail --if-status "In review"`, then `status --status Rework --if-status "In review"`. |
 | `In review` | `Needs your input` | loop-review | `ask`. Required instead of a fourth send-back (see "Four rounds, then ask"). |
-| `Needs your input` | `Queued`, `Rework` or `Live` | Dane, by replying | The relay moves it on his reply. The relay reads the ticket's PR state first, then decides. If his reply answers a machine-written question card and is a close phrase ("close it") → `Live`, whatever that PR state says: it closes the ticket even when its PR is still open (that PR is left untouched and the note says so) or its state could not be read. With no card on the ticket (for example one parked by `status --no-card`), a close phrase is not treated specially and goes by the PR like any other reply. Any other reply goes by the ticket's PR: none, or closed unmerged → `Queued`; still open → `Rework`; already merged → `Live`; state cannot be read → nothing moves. |
+| `Needs your input` | `Queued`, `Rework` or `Live` | Dane, by replying | The relay moves it on his reply. The relay reads the ticket's PR state first, then decides. If his reply answers a machine-written question card and is a close phrase ("close it") → `Live`, whatever that PR state says: it closes the ticket even when its PR is still open (that PR is left untouched and the note says so) or its state could not be read. With no card on the ticket (for example one parked by `status --no-card`), a close phrase is not treated specially and goes by the PR like any other reply (Spirality's relay does not move a ticket with no card at all; see "Known differences today"). Any other reply goes by the ticket's PR: none, or closed unmerged → `Queued`; still open → `Rework`; already merged → `Live`; state cannot be read → nothing moves. |
 | `Ready to launch` | `Live` | Dane, by a merge phrase | The relay merges the PR and closes the ticket, after re-checking every gate (see "Merge phrases"). |
 | `Ready to launch` | `Live` | StarCaster's relay, with no word from Dane | **StarCaster only: auto-merge Lanes A and B** (see "StarCaster's auto-merge lanes"). |
 | any | `Live` + `wont-do` tag | Dane's decision | Killing a ticket. *(Convention.)* |
@@ -616,9 +616,12 @@ Written down so nobody mistakes them for the contract:
   `queue --claimable`, not from the board.
 - **WaveCenter has no relay.** There a merge phrase or a reply is acted on
   only when a session next looks. **Spirality's relay merges on a merge
-  phrase** (`npm run clickup -- relay`) and does not yet move a `Needs your
-  input` ticket on a reply: that half arrives with `busRelayPlan`, and until
-  then a session moves the ticket. On every product nothing merges without
-  Dane's word.
+  phrase** and moves a `Needs your input` ticket on his reply to its card
+  (`npm run clickup -- relay`). It has no party line, so his answer on the
+  ticket counts as delivered by being written there; and for the same
+  reason it has no "first time relayed" marker, so a ticket with **no**
+  machine-written card is reported and left where it is, where StarCaster's
+  bus-relay would move it on a fresh reply. On every product nothing merges
+  without Dane's word.
 - **Only StarCaster has auto-merge lanes.** See "StarCaster's auto-merge
   lanes" above.
