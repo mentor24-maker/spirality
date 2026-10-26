@@ -6,6 +6,21 @@ file directly on `main`.
 
 ---
 
+## 2026-10-26 — Answering a question now puts the ticket back to work (#8)
+
+When a loop got stuck and asked Dane a question, the ticket sat in "Needs
+your input" until someone dragged it back by hand, even after he had
+answered. Now the relay, the same background job that merges on his word,
+also reads his answer: the next pass sends the ticket back to the build
+queue, back to rework if a pull request is already open, or closes it if he
+said "close it" or the work has already shipped. It reads every move back,
+marks his answer as used so the same reply never moves the ticket twice,
+and says so out loud when a move fails. A ticket with no written question
+on it is left alone, because without one the relay cannot tell a new reply
+from an old one.
+
+---
+
 ## 2026-10-13 — The pieces that decide what one pass may do become shared (#5)
 
 The second of three deliveries moving StarCaster's loop pieces into the shared
