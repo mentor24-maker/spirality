@@ -19,6 +19,14 @@ and says so out loud when a move fails. A ticket with no written question
 on it is left alone, because without one the relay cannot tell a new reply
 from an old one.
 
+After review, three fixes rode along. ClickUp hands over only the newest 25
+comments at a time, so on a long ticket the line naming its pull request
+could be missed and finished work sent back to the start; every comment
+read now pages through the whole history. The relay looks at the ticket
+once more right before moving it, so if Dane moved it himself a moment
+earlier, his move stands. And the note left when a move fails is read back
+and says where the ticket actually is.
+
 ---
 
 ## 2026-10-13 — The pieces that decide what one pass may do become shared (#5)
