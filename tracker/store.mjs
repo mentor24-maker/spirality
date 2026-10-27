@@ -28,7 +28,10 @@
  *    comment with its ORIGINAL time, and record the old id beside the new one
  *    in `imported_ids` in the same transaction. A ticket can therefore never
  *    exist without its map row, so a re-run cannot file it twice.
+ *  - An actor's sign-in token is stored only as its SHA-256 hash. The token
+ *    itself is handed back once, by issueToken, and never kept.
  */
+import { createHash, randomBytes } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import loopStatuses from '../lib/loopStatuses.js';
 
@@ -55,7 +58,8 @@ const SCHEMA = `
 CREATE TABLE IF NOT EXISTS actors (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   kind        TEXT NOT NULL CHECK (kind IN ('human', 'machine')),
-  name        TEXT NOT NULL
+  name        TEXT NOT NULL,
+  token_hash  TEXT
 );
 CREATE TABLE IF NOT EXISTS projects (
   slug        TEXT PRIMARY KEY,
@@ -104,6 +108,7 @@ CREATE TABLE IF NOT EXISTS imported_ids (
   new_id      TEXT NOT NULL,
   PRIMARY KEY (source, kind, source_id)
 );
+CREATE UNIQUE INDEX IF NOT EXISTS actors_by_token ON actors (token_hash);
 CREATE INDEX IF NOT EXISTS tickets_by_project ON tickets (project, status);
 CREATE INDEX IF NOT EXISTS comments_by_ticket ON comments (ticket, id);
 CREATE INDEX IF NOT EXISTS events_by_ticket ON events (ticket, id);
@@ -166,6 +171,11 @@ function requireText(value, what) {
     throw new StoreError('missing', `${what} is required.`);
   }
   return value;
+}
+
+/** A token's SHA-256, as hex: the only form a token is ever stored in. */
+function hashToken(token) {
+  return createHash('sha256').update(token, 'utf8').digest('hex');
 }
 
 /** SQLite hands integers back as numbers; keep ids plain numbers. */
@@ -231,6 +241,12 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
   db.exec('PRAGMA busy_timeout = 5000');
   db.exec('PRAGMA foreign_keys = ON');
   if (path !== ':memory:') db.exec('PRAGMA journal_mode = WAL');
+  // A database made before actors had tokens gains the column; the unique
+  // index in SCHEMA needs it, so this runs first.
+  const hasActors = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'actors'").get();
+  if (hasActors && !db.prepare('PRAGMA table_info(actors)').all().some((c) => c.name === 'token_hash')) {
+    db.exec('ALTER TABLE actors ADD COLUMN token_hash TEXT');
+  }
   db.exec(SCHEMA);
 
   /**
@@ -358,6 +374,28 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
     getActor(id) {
       const row = db.prepare('SELECT * FROM actors WHERE id = ?').get(id);
       return row ? { id: num(row.id), kind: row.kind, name: row.name } : null;
+    },
+
+    /**
+     * Give an actor a new sign-in token, replacing any old one. The token is
+     * returned here and nowhere else: only its hash is stored.
+     */
+    issueToken(actorId) {
+      requireActor(actorId, 'the actor');
+      const token = randomBytes(32).toString('base64url');
+      const r = db.prepare('UPDATE actors SET token_hash = ? WHERE id = ?').run(hashToken(token), actorId);
+      if (num(r.changes) !== 1) throw new StoreError('write-failed', `actor ${actorId} was not given a token.`);
+      if (this.actorForToken(token)?.id !== actorId) {
+        throw new StoreError('write-failed', `actor ${actorId}'s token did not read back.`);
+      }
+      return token;
+    },
+
+    /** The actor a token belongs to, or null for a missing or unknown token. */
+    actorForToken(token) {
+      if (typeof token !== 'string' || !token) return null;
+      const row = db.prepare('SELECT id FROM actors WHERE token_hash = ?').get(hashToken(token));
+      return row ? this.getActor(num(row.id)) : null;
     },
 
     /** A product: its slug, its name, its ticket-id prefix, its operator. */

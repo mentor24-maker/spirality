@@ -19,6 +19,25 @@ new. If ClickUp fails partway through, it says so and doesn't call the
 copy finished. A trial run on Spirality's own queue copied 13 tickets,
 114 comments and 16 replies. Nothing reads that copy yet.
 
+---
+
+## 2026-10-27 — The tracker gets a front door, and every loop signs in as itself (#15)
+
+The new tracker's database could only be used from inside the same program,
+so no loop could reach it. Now it has a web API: a handful of web addresses
+a loop calls to see the queue, file a ticket, move one, or leave a comment.
+Each loop and each person signs in with their own token (a long random
+password made for them alone), so the tracker knows for a fact who wrote
+every comment. Today every comment in ClickUp is posted under Dane's name and
+the loops have to guess from a `[machine]` stamp; here, a request that claims
+to be someone else is simply refused. Two loops trying to claim the same
+ticket at the same moment can never both win: one gets it, the other is told
+where the ticket is now. Tokens are never stored or written to a log, only a
+fingerprint of them. Nothing the loops run uses this yet; switching over is a
+later ticket.
+
+---
+
 ## 2026-10-27 — A conflict no longer stalls Dane's merge word (#14)
 
 When Dane said "merge" on a change that clashed with newer work, the
