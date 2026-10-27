@@ -26,5 +26,6 @@
   "operatorName": "Dane",
   "productSlug": "spirality",
   "legacyMachinePrefixes": [],
-  "productScripts": {}
+  "productScripts": {},
+  "trackerPrefix": "SP"
 }
