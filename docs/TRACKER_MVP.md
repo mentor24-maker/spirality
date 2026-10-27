@@ -34,6 +34,7 @@ modules in `lib/`, the three skills and `docs/LOOP_CONTRACT.md`.
 | **Threaded replies** | The relay replies on Dane's comment with a `[merge-on-comment]` marker so it never acts twice on one word. | `relay` |
 | **Loop note** | One short text field (255 characters) saying what is happening now. | `lib/loopNote.js` |
 | **Who wrote it** | Each comment carries a user id. | `waitingOnOperator`, `mergeOnComment` |
+| **The token's own user** | `whoami` checks the token and shows whose seat it is (Dane's, which is why every comment carries the machine stamp). | `whoami` |
 
 ### Things Dane uses as a person
 
@@ -76,7 +77,10 @@ the place they are stored moves.
 
 A small program, plain Node with no outside packages, that keeps tickets and
 comments in one SQLite database file (SQLite is a database that lives in a
-single file; Node 22, which we already run, has it built in). It offers:
+single file; Node 22, which we already run, has it built in as
+`node:sqlite`. On Node 22.23 it loads without a flag but prints
+"ExperimentalWarning: SQLite is an experimental feature" once per run; the
+store ticket should expect that line). It offers:
 
 1. **An HTTP API** (a set of web addresses the loops call) that the door
    uses instead of ClickUp's.
