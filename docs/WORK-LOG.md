@@ -6,6 +6,20 @@ file directly on `main`.
 
 ---
 
+## 2026-10-26 — The last of the module move: three more tests, and none switched off for no reason (#12)
+
+The final delivery of moving StarCaster's loop pieces into the shared package.
+Dane chose the small, safe version: finish what the last review asked for, and
+leave StarCaster's big ClickUp script for its own ticket. Three helpers that
+came over last time without their tests now have them: the pre-pass checklist,
+the half-hourly repair, and the fallback that keeps an alarm from being lost.
+Some older tests had been switched off whole just because one line needed a
+StarCaster file; now the rest of each test runs, and only that one line waits.
+The work log's claim that every helper came with its tests is corrected. Run
+against StarCaster's real files, all the moved tests pass.
+
+---
+
 ## 2026-10-26 — The new tracker has a place to keep tickets (#11)
 
 When Spirality moves off ClickUp, its tickets and comments need a home.
@@ -96,8 +110,10 @@ and after a pass: is too much work already open to claim another ticket? Did
 the previous pass drop the ticket it was holding? What should the relay do with
 Dane's reply? May this small, safe pull request merge on its own? And when the
 two-hour limit stops a pass, what was it actually doing? Five pieces answer
-those, five more helpers hold them up, and all of it came across with the
-tests written the day each answer was first got wrong.
+those, and they came across with the tests written the day each answer was
+first got wrong. Five more helpers hold them up; those came without their own
+tests at first (corrected in slice 3: three of the five tests have come since,
+and the other two wait on StarCaster files that are not here yet).
 
 Two things changed in the move, on purpose. First, as in slice 1, every
 sentence that named Dane, StarCaster or StarCaster's log folder now asks the
