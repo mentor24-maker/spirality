@@ -1,0 +1,243 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { Worker } from 'node:worker_threads';
+import { openStore, StoreError, STATUSES } from './store.mjs';
+
+/** A fresh store on disk, with one operator, one machine and one project. */
+function fixture() {
+  const dir = mkdtempSync(join(tmpdir(), 'tracker-store-'));
+  const path = join(dir, 'tracker.db');
+  let tick = 0;
+  const store = openStore(path, { now: () => new Date(Date.UTC(2026, 9, 26, 12, 0, tick++)).toISOString() });
+  const human = store.createActor({ kind: 'human', name: 'Operator' });
+  const machine = store.createActor({ kind: 'machine', name: 'Loop' });
+  store.createProject({ slug: 'alpha', name: 'Alpha', prefix: 'AL', operator: human.id });
+  const cleanup = () => { store.close(); rmSync(dir, { recursive: true, force: true }); };
+  return { dir, path, store, human, machine, cleanup };
+}
+
+test('the store knows exactly the seven statuses from lib/loopStatuses.js', () => {
+  assert.deepEqual([...STATUSES].sort(), [
+    'building', 'in review', 'live', 'needs your input', 'queued', 'ready to launch', 'rework',
+  ]);
+});
+
+test('filing a ticket gives it the project prefix and next number, and it reads back', () => {
+  const { store, machine, cleanup } = fixture();
+  try {
+    const a = store.fileTicket({ project: 'alpha', actor: machine.id, name: 'First', status: 'Queued', priority: 'High', tags: ['tracker'] });
+    const b = store.fileTicket({ project: 'alpha', actor: machine.id, name: 'Second', status: 'queued' });
+    assert.equal(a.id, 'AL-1');
+    assert.equal(b.id, 'AL-2');
+    const read = store.getTicket('AL-1');
+    assert.equal(read.name, 'First');
+    assert.equal(read.status, 'queued');
+    assert.equal(read.priority, 'high');
+    assert.deepEqual(read.tags, ['tracker']);
+    assert.equal(read.version, 1);
+    assert.equal(read.project, 'alpha');
+    assert.equal(store.getTicket('AL-99'), null);
+  } finally { cleanup(); }
+});
+
+test('two projects number their tickets independently, each with its own prefix', () => {
+  const { store, machine, cleanup } = fixture();
+  try {
+    store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE' });
+    store.fileTicket({ project: 'alpha', actor: machine.id, name: 'a', status: 'queued' });
+    const b = store.fileTicket({ project: 'beta', actor: machine.id, name: 'b', status: 'queued' });
+    assert.equal(b.id, 'BE-1');
+    assert.throws(() => store.createProject({ slug: 'gamma', name: 'G', prefix: 'AL' }), { code: 'duplicate-project' });
+    assert.throws(() => store.createProject({ slug: 'delta', name: 'D', prefix: 'sp-' }), { code: 'bad-prefix' });
+  } finally { cleanup(); }
+});
+
+test('an unknown status is refused, on filing, on changing and on listing, and nothing is written', () => {
+  const { store, machine, cleanup } = fixture();
+  try {
+    assert.throws(() => store.fileTicket({ project: 'alpha', actor: machine.id, name: 'x', status: 'done' }),
+      (err) => err instanceof StoreError && err.code === 'unknown-status');
+    assert.equal(store.listTickets('alpha').length, 0);
+    const t = store.fileTicket({ project: 'alpha', actor: machine.id, name: 'x', status: 'queued' });
+    assert.throws(() => store.changeTicket(t.id, { actor: machine.id, status: 'closed' }), { code: 'unknown-status' });
+    assert.throws(() => store.changeTicket(t.id, { actor: machine.id, ifStatus: 'pending', status: 'building' }), { code: 'unknown-status' });
+    assert.throws(() => store.listTickets('alpha', { status: 'complete' }), { code: 'unknown-status' });
+    const after = store.getTicket(t.id);
+    assert.equal(after.status, 'queued');
+    assert.equal(after.version, 1);
+    assert.equal(store.listEvents(t.id).length, 1);
+  } finally { cleanup(); }
+});
+
+test('a guarded move succeeds when the ticket is where the caller said, and the version goes up by one', () => {
+  const { store, machine, cleanup } = fixture();
+  try {
+    const t = store.fileTicket({ project: 'alpha', actor: machine.id, name: 'x', status: 'queued' });
+    const r = store.changeTicket(t.id, { actor: machine.id, ifStatus: 'Queued', ifVersion: 1, status: 'Building' });
+    assert.equal(r.ok, true);
+    assert.deepEqual(r.changed, ['status']);
+    assert.equal(r.ticket.status, 'building');
+    assert.equal(r.ticket.version, 2);
+    assert.deepEqual(store.getTicket(t.id), r.ticket);
+  } finally { cleanup(); }
+});
+
+test('a guarded move is refused when the status has moved, naming where it is now, with nothing written', () => {
+  const { store, machine, cleanup } = fixture();
+  try {
+    const t = store.fileTicket({ project: 'alpha', actor: machine.id, name: 'x', status: 'queued' });
+    store.changeTicket(t.id, { actor: machine.id, status: 'in review' });
+    const before = store.getTicket(t.id);
+    const eventsBefore = store.listEvents(t.id).length;
+
+    const r = store.changeTicket(t.id, { actor: machine.id, ifStatus: 'queued', status: 'building', loopNote: 'claimed' });
+    assert.deepEqual(r, { ok: false, refused: 'moved', ticket: t.id, status: 'in review', version: 2 });
+    assert.deepEqual(store.getTicket(t.id), before);
+    assert.equal(store.listEvents(t.id).length, eventsBefore);
+
+    const v = store.changeTicket(t.id, { actor: machine.id, ifVersion: 1, priority: 'low' });
+    assert.equal(v.ok, false);
+    assert.equal(v.refused, 'moved');
+    assert.deepEqual(store.getTicket(t.id), before);
+  } finally { cleanup(); }
+});
+
+test('two claims of one Queued ticket from two connections: exactly one wins', () => {
+  const { path, store, machine, cleanup } = fixture();
+  const other = openStore(path);
+  try {
+    const t = store.fileTicket({ project: 'alpha', actor: machine.id, name: 'x', status: 'queued' });
+    const first = store.changeTicket(t.id, { actor: machine.id, ifStatus: 'queued', status: 'building' });
+    const second = other.changeTicket(t.id, { actor: machine.id, ifStatus: 'queued', status: 'building' });
+    assert.equal([first, second].filter((r) => r.ok).length, 1);
+    assert.equal(second.refused, 'moved');
+    assert.equal(store.listEvents(t.id).filter((e) => e.field === 'status').length, 1);
+  } finally { other.close(); cleanup(); }
+});
+
+test('eight claims of one Queued ticket racing in eight threads: exactly one wins', async () => {
+  const { path, store, machine, cleanup } = fixture();
+  try {
+    const t = store.fileTicket({ project: 'alpha', actor: machine.id, name: 'x', status: 'queued' });
+    const storeUrl = new URL('./store.mjs', import.meta.url).href;
+    const source = `
+      import { workerData, parentPort } from 'node:worker_threads';
+      const { openStore } = await import(workerData.storeUrl);
+      const s = openStore(workerData.path);
+      Atomics.wait(new Int32Array(workerData.gate), 0, 0);
+      const r = s.changeTicket(workerData.id, { actor: workerData.actor, ifStatus: 'queued', status: 'building', loopNote: 'claimed by ' + workerData.n });
+      s.close();
+      parentPort.postMessage(r.ok);
+    `;
+    const gate = new SharedArrayBuffer(4);
+    const results = Array.from({ length: 8 }, (_, n) => new Promise((resolve, reject) => {
+      const w = new Worker(source, { eval: true, type: 'module', workerData: { storeUrl, path, id: t.id, actor: machine.id, n, gate } });
+      w.once('message', resolve);
+      w.once('error', reject);
+    }));
+    // Give every thread time to open its connection, then release them at once.
+    await new Promise((r) => setTimeout(r, 300));
+    Atomics.store(new Int32Array(gate), 0, 1);
+    Atomics.notify(new Int32Array(gate), 0);
+    const wins = (await Promise.all(results)).filter(Boolean).length;
+    assert.equal(wins, 1);
+    const after = store.getTicket(t.id);
+    assert.equal(after.status, 'building');
+    assert.equal(after.version, 2);
+    assert.equal(store.listEvents(t.id).filter((e) => e.field === 'status').length, 1);
+  } finally { cleanup(); }
+});
+
+test('every change leaves one event per changed field, with actor, from, to and time', () => {
+  const { store, human, machine, cleanup } = fixture();
+  try {
+    const t = store.fileTicket({ project: 'alpha', actor: machine.id, name: 'x', status: 'queued' });
+    assert.deepEqual(store.listEvents(t.id).map((e) => [e.field, e.from, e.to]), [['created', null, 'queued']]);
+
+    store.changeTicket(t.id, { actor: machine.id, status: 'building' });
+    store.changeTicket(t.id, { actor: human.id, priority: 'urgent' });
+    store.changeTicket(t.id, { actor: machine.id, assignee: human.id, status: 'needs your input' });
+    // Same value again is not a change: no event, no version bump.
+    const same = store.changeTicket(t.id, { actor: machine.id, status: 'needs your input' });
+    assert.deepEqual(same.changed, []);
+
+    const events = store.listEvents(t.id);
+    assert.deepEqual(events.map((e) => [e.actor, e.field, e.from, e.to]), [
+      [machine.id, 'created', null, 'queued'],
+      [machine.id, 'status', 'queued', 'building'],
+      [human.id, 'priority', null, 'urgent'],
+      [machine.id, 'assignee', null, String(human.id)],
+      [machine.id, 'status', 'building', 'needs your input'],
+    ]);
+    assert.ok(events.every((e) => /^\d{4}-\d\d-\d\dT/.test(e.at)));
+    assert.equal(store.getTicket(t.id).version, 4);
+  } finally { cleanup(); }
+});
+
+test('comments come back oldest first, replies linked to their parent, and a parent from another ticket is refused', () => {
+  const { store, human, machine, cleanup } = fixture();
+  try {
+    const t = store.fileTicket({ project: 'alpha', actor: machine.id, name: 'x', status: 'queued' });
+    const u = store.fileTicket({ project: 'alpha', actor: machine.id, name: 'y', status: 'queued' });
+    const a = store.postComment({ ticket: t.id, author: machine.id, body: 'first' });
+    const b = store.postComment({ ticket: t.id, author: human.id, body: 'second' });
+    const reply = store.postComment({ ticket: t.id, author: machine.id, body: 'reply to first', parent: a.id });
+    const list = store.listComments(t.id);
+    assert.deepEqual(list.map((c) => c.body), ['first', 'second', 'reply to first']);
+    assert.deepEqual(list.map((c) => c.parent), [null, null, a.id]);
+    assert.equal(list[1].author, human.id);
+    assert.equal(reply.ticket, t.id);
+    assert.ok(list[0].createdAt < list[1].createdAt);
+    assert.throws(() => store.postComment({ ticket: u.id, author: machine.id, body: 'x', parent: b.id }), { code: 'bad-parent' });
+    assert.equal(store.listComments(u.id).length, 0);
+  } finally { cleanup(); }
+});
+
+test('comments are append-only: the store has no way to edit or delete one', () => {
+  const { store, cleanup } = fixture();
+  try {
+    const names = Object.keys(store);
+    assert.ok(names.includes('postComment'));
+    assert.deepEqual(names.filter((n) => /comment/i.test(n)).sort(), ['listComments', 'postComment']);
+  } finally { cleanup(); }
+});
+
+test('listing filters by status, and "open only" drops Live tickets', () => {
+  const { store, machine, cleanup } = fixture();
+  try {
+    store.fileTicket({ project: 'alpha', actor: machine.id, name: 'a', status: 'queued' });
+    store.fileTicket({ project: 'alpha', actor: machine.id, name: 'b', status: 'in review' });
+    store.fileTicket({ project: 'alpha', actor: machine.id, name: 'c', status: 'live' });
+    assert.deepEqual(store.listTickets('alpha').map((t) => t.name), ['a', 'b', 'c']);
+    assert.deepEqual(store.listTickets('alpha', { open: true }).map((t) => t.name), ['a', 'b']);
+    assert.deepEqual(store.listTickets('alpha', { status: 'In review' }).map((t) => t.name), ['b']);
+    assert.deepEqual(store.listTickets('alpha', { status: 'live', open: true }), []);
+  } finally { cleanup(); }
+});
+
+test('a failed write throws and leaves nothing behind', () => {
+  const { store, machine, cleanup } = fixture();
+  try {
+    assert.throws(() => store.fileTicket({ project: 'nope', actor: machine.id, name: 'x', status: 'queued' }), { code: 'unknown-project' });
+    assert.throws(() => store.fileTicket({ project: 'alpha', actor: 999, name: 'x', status: 'queued' }), { code: 'unknown-actor' });
+    assert.throws(() => store.changeTicket('AL-404', { actor: machine.id, status: 'building' }), { code: 'unknown-ticket' });
+    const t = store.fileTicket({ project: 'alpha', actor: machine.id, name: 'x', status: 'queued' });
+    assert.equal(t.id, 'AL-1', 'a refused filing must not use up a number');
+    assert.throws(() => store.changeTicket(t.id, { actor: machine.id, status: 'building', assignee: 999 }), { code: 'unknown-actor' });
+    assert.throws(() => store.changeTicket(t.id, { actor: machine.id, version: 7 }), { code: 'bad-field' });
+    assert.throws(() => store.postComment({ ticket: t.id, author: machine.id, body: '  ' }), { code: 'missing' });
+    assert.equal(store.getTicket(t.id).version, 1);
+    assert.equal(store.getTicket(t.id).status, 'queued');
+    assert.equal(store.listEvents(t.id).length, 1);
+  } finally { cleanup(); }
+});
+
+test('the store hard-codes no product: no names, ids or ticket prefixes in its source', () => {
+  const source = readFileSync(new URL('./store.mjs', import.meta.url), 'utf8');
+  for (const word of [/starcaster/i, /wavecenter/i, /spirality/i, /\bSP-/, /\bSC-/, /\bWC-/, /\b9014\d{8}\b/, /86b[a-z0-9]{6}/]) {
+    assert.doesNotMatch(source, word);
+  }
+});
