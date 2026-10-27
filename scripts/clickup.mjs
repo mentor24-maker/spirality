@@ -927,7 +927,20 @@ if (cmd === 'whoami') {
       }
     }
     const pr = verdict.state === 'answered' ? handbackPr(comments) : null;
-    const plan = handbackPlan({ status: task.status?.status, verdict, answerReplies: replies, pr });
+    // A merged PR goes to Live unless the description's "Next slice:" line
+    // names more work (task 86bcrvwam) — the list read carries no markdown
+    // description, so read the ticket itself, and never guess when it fails.
+    let description;
+    if (String(pr?.state || '').toUpperCase() === 'MERGED') {
+      const out = await call('GET', `/api/v2/task/${task.id}?include_markdown_description=true`);
+      if (!out.res.ok || !out.json) {
+        unchecked.push(`${task.id}: ${who} answered and PR #${pr.number} is merged, but the description could not be read (HTTP ${out.res.status}) to see whether a next slice remains — not moved this pass`);
+        say(task, 'unchecked', `could not read the description (HTTP ${out.res.status})`);
+        return;
+      }
+      description = out.json.markdown_description || out.json.description || '';
+    }
+    const plan = handbackPlan({ status: task.status?.status, verdict, answerReplies: replies, pr, description });
     if (plan.act === 'waiting') { say(task, 'waiting', `waiting on ${who}: ${plan.why}`); return; }
     if (plan.act === 'cannot-tell') {
       unchecked.push(`${task.id}: ${who} answered, but ${plan.why}`);

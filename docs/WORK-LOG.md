@@ -19,6 +19,35 @@ that. Comments can only be added, never changed or deleted, so the trail the
 loops read cannot shift. Nothing uses the store yet; the connection to the
 loops comes in later tickets.
 
+---
+
+## 2026-10-26 — A written plan for leaving ClickUp (#10)
+
+The loops keep every ticket, status and comment in ClickUp, and a lot of
+the loop's rules exist only to work around ClickUp's quirks: it cannot tell
+Dane from a machine, it cannot refuse a move that two passes race for, and
+it rewrites what Dane types. This adds `docs/TRACKER_MVP.md`, the design for
+a small tracker of our own: what ClickUp does for us today (every call the
+ClickUp script makes is listed), what it costs us, the smallest replacement
+(one database file, a web address the loops call, a page for Dane), how the
+loops switch over without a rewrite, Dane's four decisions of 2026-10-26,
+and the tickets that build it. No code changes.
+
+---
+
+## 2026-10-26 — Answering a question between slices no longer closes the ticket (#9)
+
+Some tickets are built in slices, one pull request at a time. If a loop
+asked Dane a question between two slices, the relay saw that the last pull
+request was already merged and closed the whole ticket, even though more
+work remained (it happened tonight, and a session had to reopen it by hand).
+Now the relay checks the ticket's "Next slice:" line first, the same line it
+already reads when it merges: if it names more work, the ticket goes back to
+the build queue; if it says "none" or there is no such line, it closes as
+before. Answering "close it" still closes it either way.
+
+---
+
 ## 2026-10-26 — Answering a question now puts the ticket back to work (#8)
 
 When a loop got stuck and asked Dane a question, the ticket sat in "Needs
