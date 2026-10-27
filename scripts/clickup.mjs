@@ -29,7 +29,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import {
   DISPLAY, STAGE_ORDER, CLAIMABLE_BY_BUILD, OPERATOR_STATUSES, BUILDING, NEEDS_YOUR_INPUT, QUEUED, PRIORITY_VALUE,
-  isClaimableByBuild, isOperatorStatus, isReadyToLaunch, claimOrder, compareWithinStatus, statusOf,
+  isClaimableByBuild, isOperatorStatus, isReadyToLaunch, claimOrder, compareWithinStatus, statusOf, TERMINAL_STATUSES,
 } from './lib/loopStatuses.mjs';
 import {
   prOpenedComment, verdictComment, prTrailLanded, bodyNamesTicket,
@@ -59,6 +59,9 @@ import {
 import {
   handbackDoneText, handbackFailureText, repliesShowHandbackDone, repliesShowHandbackFailure, HANDBACK_FAILURE_MARKER,
 } from '../lib/busRelayPlan.js';
+// A ticket's `Waits on:` line (task 86bctfun6): the claim leaves it alone
+// until every ticket it names is closed.
+import { waitsOn, stillWaitingOn } from '../lib/waitsOn.js';
 
 // ── The ids, written down once ───────────────────────────────────────────────
 // They live in spirality.project.json at the repository root (see
@@ -287,6 +290,20 @@ if (cmd === 'claim') {
     console.error(`Claimable statuses, in drain order: ${CLAIMABLE_BY_BUILD.map((x) => DISPLAY[x]).join(', ')}. Take the next task.`);
     process.exit(3);
   }
+  const open = [];
+  for (const id of waitsOn(seen.markdown_description ?? seen.description)) {
+    const pre = await readTaskOrNull(id);
+    if (!pre) {
+      console.error(`NOT claimed: "${task}" waits on ${id}, which could not be read. Nothing was written.`);
+      process.exit(1);
+    }
+    const closed = ['closed', 'done'].includes(pre.status?.type) || TERMINAL_STATUSES.includes(statusOf(pre));
+    if (!closed) open.push(`${id} ("${pre.status?.status ?? '?'}")`);
+  }
+  if (open.length) {
+    console.error(`NOT claimed: "${task}" waits on ${open.join(', ')}, still open. Take the next task.`);
+    process.exit(3);
+  }
   process.argv = [...process.argv.slice(0, 2), 'status', ...process.argv.slice(3), '--status', DISPLAY[BUILDING], '--if-status', now];
   console.error(`claiming ${task} out of "${now}" (guarded on that exact status)`);
   cmd = 'status';
@@ -321,8 +338,16 @@ if (cmd === 'whoami') {
   }
   const tasks = await fetchAllTasks(list);
   let wanted;
-  if (claimable) wanted = claimOrder(tasks);
-  else {
+  if (claimable) {
+    // fetchAllTasks leaves closed tickets out, so a prerequisite missing
+    // from this list is closed (or in another list, which is not held for).
+    const openIds = tasks.map((t) => t.id);
+    wanted = claimOrder(tasks).filter((t) => {
+      const waiting = stillWaitingOn(t.description, openIds);
+      if (waiting.length) console.error(`skipped ${t.id}: waits on ${waiting.join(', ')} (still open)`);
+      return !waiting.length;
+    });
+  } else {
     wanted = status ? tasks.filter((t) => (t.status?.status ?? '').toLowerCase() === status.toLowerCase()) : tasks.slice();
     wanted.sort(compareWithinStatus);
   }

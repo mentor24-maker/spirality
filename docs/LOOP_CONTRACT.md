@@ -175,6 +175,25 @@ loop-build takes **every `Rework` ticket before any `Queued` one**:
 the first line is the one to take. A `Rework` ticket is finished on its
 existing branch and PR, never on a second one.
 
+### A ticket that waits on another (2026-10-27)
+
+A ticket that builds on another says so on a line of its own in its
+description:
+
+```
+Waits on: <ticket id or link>[, <ticket id or link> ...]
+```
+
+While any ticket it names is still open, `queue --claimable` leaves it out
+(and says on stderr which ticket it skipped and why), and `claim` refuses it
+(exit 3; exit 1 if a named ticket cannot be read). Once they are all closed
+it takes its normal place in line. Prose that mentions waiting does nothing;
+only the line counts (`lib/waitsOn.js`).
+
+**Why (2026-10-27):** the tracker plan had to be filed one wave at a time, so
+a build loop could not start a step before the step it builds on had merged,
+and Dane looked for the plan in the Loop Queue and could not find it.
+
 ### Two passes, one ticket (2026-08-22)
 
 Claiming is check-then-act: read the status, compare, write. That is only
