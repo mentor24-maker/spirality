@@ -20,6 +20,21 @@ against StarCaster's real files, all the moved tests pass.
 
 ---
 
+## 2026-10-26 — The new tracker has a place to keep tickets (#11)
+
+When Spirality moves off ClickUp, its tickets and comments need a home.
+This adds that home: a small database file, built into Node itself, that
+holds projects, people and machines, tickets, comments and a full history
+of every change. Its most important job is stopping two loops from grabbing
+the same ticket: a move can say "only if it is still Queued", and the check
+and the move happen as one step, so exactly one of two racing claims wins
+and the other is told the ticket has moved. ClickUp never could promise
+that. Comments can only be added, never changed or deleted, so the trail the
+loops read cannot shift. Nothing uses the store yet; the connection to the
+loops comes in later tickets.
+
+---
+
 ## 2026-10-26 — A written plan for leaving ClickUp (#10)
 
 The loops keep every ticket, status and comment in ClickUp, and a lot of
