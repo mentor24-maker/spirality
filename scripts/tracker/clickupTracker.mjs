@@ -87,9 +87,10 @@ export function createClickupTracker({ token, apiBase, timeoutMs, log = console.
     listsInSpace: (space) => call('GET', `/api/v2/space/${space}/list?archived=false`),
     foldersInSpace: (space) => call('GET', `/api/v2/space/${space}/folder?archived=false`),
 
-    /** One page of a list's tasks; `json.last_page` says whether more follow. */
-    listTasksPage: (list, page, { includeClosed = false } = {}) =>
-      call('GET', `/api/v2/list/${list}/task?archived=false${includeClosed ? '&include_closed=true' : ''}&page=${page}`),
+    /** One page of a list's tasks; `json.last_page` says whether more follow.
+     *  `markdown: true` adds `markdown_description` to each ticket. */
+    listTasksPage: (list, page, { includeClosed = false, markdown = false } = {}) =>
+      call('GET', `/api/v2/list/${list}/task?archived=false${includeClosed ? '&include_closed=true' : ''}${markdown ? '&include_markdown_description=true' : ''}&page=${page}`),
 
     /** `markdown: true` adds `markdown_description` to the ticket. */
     getTask: (task, { markdown = false } = {}) =>
