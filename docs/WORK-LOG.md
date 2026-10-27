@@ -6,6 +6,20 @@ file directly on `main`.
 
 ---
 
+## 2026-10-26 — A written plan for leaving ClickUp (#10)
+
+The loops keep every ticket, status and comment in ClickUp, and a lot of
+the loop's rules exist only to work around ClickUp's quirks: it cannot tell
+Dane from a machine, it cannot refuse a move that two passes race for, and
+it rewrites what Dane types. This adds `docs/TRACKER_MVP.md`, the design for
+a small tracker of our own: what ClickUp does for us today (every call the
+ClickUp script makes is listed), what it costs us, the smallest replacement
+(one database file, a web address the loops call, a page for Dane), how the
+loops switch over without a rewrite, Dane's four decisions of 2026-10-26,
+and the tickets that build it. No code changes.
+
+---
+
 ## 2026-10-26 — Answering a question between slices no longer closes the ticket (#9)
 
 Some tickets are built in slices, one pull request at a time. If a loop
