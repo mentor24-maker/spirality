@@ -27,6 +27,7 @@
 
 import { readFileSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import {
   DISPLAY, STAGE_ORDER, CLAIMABLE_BY_BUILD, OPERATOR_STATUSES, BUILDING, NEEDS_YOUR_INPUT, QUEUED, PRIORITY_VALUE,
   isClaimableByBuild, isOperatorStatus, isReadyToLaunch, claimOrder, compareWithinStatus, statusOf, TERMINAL_STATUSES,
@@ -62,6 +63,11 @@ import {
 // A ticket's `Waits on:` line (task 86bctfun6): the claim leaves it alone
 // until every ticket it names is closed.
 import { waitsOn, waitsOnText, holdReasons } from '../lib/waitsOn.js';
+// Telling in-flight tickets that main moved under them (task 86bctjffu).
+import {
+  isNotifyTarget, checkBranch, mainMovedComment, findMainMovedNote, latestMainMoved,
+} from '../lib/mainMoved.js';
+import { parseRepoFromRemoteUrl } from '../lib/branchCatchUp.js';
 
 // ── The ids, written down once ───────────────────────────────────────────────
 // They live in spirality.project.json at the repository root (see
@@ -161,6 +167,10 @@ npm run clickup -- <command> [flags]      (Loop Queue: list ${LOOP_QUEUE_LIST}, 
                                                   and the hand-back: his answer to the question card on a "Needs your input"
                                                   ticket moves it to Queued, Rework or Live by the contract's table.
                                                   One line per ticket he holds. --dry-run prints what it would do, writes nothing
+  main-moved --pr <merged #> [--list <id>] [--dry-run]
+                                                  tell every Building / In review / Rework ticket with an open PR whether
+                                                  that merge moved main under it: no-overlap, same-files, conflict or
+                                                  cannot-tell (the relay runs this after each merge it makes)
 
 Statuses (matched case-insensitively): ${STAGE_ORDER.join(' / ')}.
 Two are Dane's and only \`ask\` may set them: ${OPERATOR_STATUSES.map((s) => DISPLAY[s]).join(', ')}.
@@ -287,6 +297,75 @@ async function postComment(task, body) {
   return { id, stored };
 }
 
+// ── Main moved: tell every ticket still in flight (task 86bctjffu) ───────────
+// The checkout this script lives in. The relay runs from the main checkout;
+// the git reads here are a fetch and an in-memory merge, so nothing in it moves.
+const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url));
+
+/**
+ * After PR `mergedNumber` merged: one `MAIN MOVED:` note on every ticket in a
+ * machine status whose recorded PR is still open against the same base, each
+ * read back. Never exits: the relay calls this after a merge it has already
+ * recorded, so a failure is returned in `problems` and the pass carries on.
+ *
+ * @param tasks the list's open tickets when the caller already has them
+ * @returns {{ lines: string[], problems: string[], told: number }}
+ */
+async function tellMainMoved({ mergedNumber, list, dryRun, tasks = null }) {
+  const lines = [], problems = [];
+  let told = 0;
+  const repo = project.githubRepo;
+  const view = gh(['pr', 'view', String(mergedNumber), '--repo', repo, '--json', 'number,url,state,baseRefName,mergeCommit']);
+  let merged = null;
+  try { merged = view.ok ? JSON.parse(view.stdout) : null; } catch { merged = null; }
+  if (!merged || String(merged.state).toUpperCase() !== 'MERGED' || !merged.mergeCommit?.oid) {
+    problems.push(`PR #${mergedNumber} ${merged ? `is ${merged.state || 'in no readable state'}, not merged` : `could not be read (${view.stderr.trim().slice(0, 200)})`} — no ticket was told`);
+    return { lines, problems, told };
+  }
+  const base = String(merged.baseRefName || '');
+  const remote = spawnSync('git', ['remote', 'get-url', 'origin'], { cwd: REPO_ROOT, encoding: 'utf8' });
+  const here = parseRepoFromRemoteUrl(remote.status === 0 ? remote.stdout : '');
+  if (here.toLowerCase() !== String(repo).toLowerCase()) {
+    problems.push(`this checkout is ${here || 'an unknown repo'}, not ${repo} — no ticket was told`);
+    return { lines, problems, told };
+  }
+  const fetched = spawnSync('git', ['fetch', '--quiet', '--prune', 'origin'], { cwd: REPO_ROOT, encoding: 'utf8' });
+  if (fetched.status !== 0) {
+    problems.push(`git fetch failed (${String(fetched.stderr || '').trim().slice(0, 200)}) — no ticket was told`);
+    return { lines, problems, told };
+  }
+  const listed = gh(['pr', 'list', '--repo', repo, '--state', 'open', '--base', base, '--json', 'number,headRefName', '--limit', '200']);
+  let openPrs;
+  try { openPrs = new Map(JSON.parse(listed.stdout).map((p) => [Number(p.number), String(p.headRefName)])); } catch { openPrs = null; }
+  if (!listed.ok || !openPrs) {
+    problems.push(`the open PRs could not be listed (${listed.stderr.trim().slice(0, 200)}) — no ticket was told`);
+    return { lines, problems, told };
+  }
+
+  const merge = { number: Number(merged.number), url: merged.url };
+  for (const t of (tasks || await fetchAllTasks(list)).filter(isNotifyTarget)) {
+    const line = (pr, what) => lines.push(`${t.id}\t${t.status?.status ?? '?'}\t${pr}\t${what}\t${t.name}`);
+    const comments = await readComments(t.id);
+    const found = findPullRequest(comments);
+    if (!found || `${found.owner}/${found.repo}`.toLowerCase() !== String(repo).toLowerCase()) { line('-', 'no PR of this repository recorded — nothing to tell'); continue; }
+    const prRef = `PR #${found.number}`;
+    if (found.number === merge.number) continue;
+    const branch = openPrs.get(found.number);
+    if (!branch) { line(prRef, `not open against ${base} — nothing to tell`); continue; }
+    if (findMainMovedNote(comments, merge.number, found.number)) { line(prRef, `already told about PR #${merge.number}`); continue; }
+    const verdict = checkBranch({ base, branch, mergeCommit: merged.mergeCommit.oid, cwd: REPO_ROOT });
+    const what = `${verdict.kind}${verdict.files.length ? ` (${verdict.files.join(', ')})` : ''}${verdict.reason ? ` — ${verdict.reason}` : ''}`;
+    if (dryRun) { line(prRef, `would tell: ${what}`); continue; }
+    const out = await tracker.postComment(t.id, { comment_text: mainMovedComment({ merged: merge, pr: { number: found.number }, base, verdict }) });
+    if (!out.res.ok) { problems.push(`${t.id}: the ${verdict.kind} note about PR #${merge.number} FAILED to post (HTTP ${out.res.status})`); line(prRef, 'NOT told — the note failed to post'); continue; }
+    const back = findMainMovedNote(await readComments(t.id), merge.number, found.number);
+    if (!back || back.kind !== verdict.kind) { problems.push(`${t.id}: the ${verdict.kind} note about PR #${merge.number} posted but does not read back`); line(prRef, 'NOT told — the note did not read back'); continue; }
+    told += 1;
+    line(prRef, `told: ${what}`);
+  }
+  return { lines, problems, told };
+}
+
 // ── Commands ─────────────────────────────────────────────────────────────────
 if (!TOKEN) {
   console.error('CLICKUP_API_TOKEN is not set in this environment.\n');
@@ -387,6 +466,8 @@ if (cmd === 'whoami') {
   console.log(`list:     ${t.list?.name} (${t.list?.id})`);
   console.log(`pr:       ${pr ? pr.url : '(none recorded)'}`);
   console.log(`rounds:   ${sendBackRounds(comments)} send-back(s) so far`);
+  const moved = pr ? latestMainMoved(comments, pr.number) : null;
+  console.log(`main:     ${moved ? `moved — newest note: PR #${moved.merged} merged, this branch ${moved.kind} (comment ${moved.commentId})` : '(no MAIN MOVED note)'}`);
   console.log(`url:      ${t.url}`);
   console.log('---');
   console.log(t.markdown_description || t.description || '(no body)');
@@ -948,6 +1029,13 @@ if (cmd === 'whoami') {
     await postNote(task, body, `PR #${pr.number} MERGED`);
     const moved = await moveMergedTicket(task, pr.number, dest);
     say(task, 'merged', `PR #${pr.number} at ${mergedAt}; ticket -> ${dest.status}${moved ? '' : ' (MOVE FAILED, see below)'} (${dest.why})`);
+
+    // main just moved: tell every ticket still in flight, so its next pass
+    // catches up before review instead of after (task 86bctjffu).
+    const news = await tellMainMoved({ mergedNumber: pr.number, list, dryRun: false, tasks });
+    for (const l of news.lines) console.log(`  main-moved\t${l}`);
+    unchecked.push(...news.problems.map((p) => `main-moved after PR #${pr.number}: ${p}`));
+    say(task, 'main-moved', `${news.told} in-flight ticket(s) told that PR #${pr.number} moved main`);
   };
 
   const tasks = await fetchAllTasks(list);
@@ -1101,6 +1189,21 @@ if (cmd === 'whoami') {
   console.error(`relay done: ${ready.length + asked.length} ticket(s) looked at${dryRun ? ', nothing written (dry run)' : ''}.`);
   reportLimits();
   process.exit(unchecked.length ? 1 : 0);
+
+} else if (cmd === 'main-moved') {
+  // The relay runs this step after every merge it makes; a session that
+  // merged by hand runs it with the PR it merged.
+  const mergedNumber = Number(String(arg('pr', '')).replace(/^#/, ''));
+  if (!Number.isInteger(mergedNumber) || mergedNumber <= 0) usage();
+  const list = arg('list') || LOOP_QUEUE_LIST;
+  const dryRun = flag('dry-run');
+  const { lines, problems, told } = await tellMainMoved({ mergedNumber, list, dryRun });
+  for (const l of lines) console.log(l);
+  if (!lines.length && !problems.length) console.error(`No ticket in Building, In review or Rework in list ${list} — nobody to tell.`);
+  for (const p of problems) console.error(`FAILED: ${p}`);
+  console.error(`main-moved: PR #${mergedNumber}, ${dryRun ? 'DRY RUN, nothing written' : `${told} ticket(s) told`}.`);
+  reportLimits();
+  process.exit(problems.length ? 1 : 0);
 
 } else {
   console.error(`Unknown command "${cmd}".`);
