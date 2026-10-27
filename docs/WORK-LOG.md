@@ -16,7 +16,10 @@ on each ticket still being built or reviewed: "nothing you touch changed",
 "the same files changed but still fit together", or "this now clashes, in
 these files". The build loop catches up before review instead of after, and
 the review loop sends a clash straight back instead of testing code that
-cannot land. Nothing moves on its own; the note only tells.
+cannot land. Nothing moves on its own; the note only tells. Each ticket is
+checked again just before its note goes on, so one that has reached Dane in
+the meantime is left alone, and one unreadable ticket no longer stops the
+relay from telling the rest or from finishing its pass.
 
 ---
 

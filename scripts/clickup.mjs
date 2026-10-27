@@ -65,7 +65,7 @@ import {
 import { waitsOn, waitsOnText, holdReasons } from '../lib/waitsOn.js';
 // Telling in-flight tickets that main moved under them (task 86bctjffu).
 import {
-  isNotifyTarget, checkBranch, mainMovedComment, findMainMovedNote, latestMainMoved,
+  checkBranch, branchContains, tellTickets, latestMainMoved,
 } from '../lib/mainMoved.js';
 import { parseRepoFromRemoteUrl } from '../lib/branchCatchUp.js';
 
@@ -237,6 +237,18 @@ async function readComments(task) {
   return paged.comments;
 }
 
+/** readComments for a caller that must carry on: { comments } or { problem }, never an exit. */
+async function readCommentsOrProblem(task) {
+  try {
+    const { paged, bad } = await tracker.listComments(task);
+    if (bad) return { problem: bad.res.ok ? 'no comment list in the body' : `HTTP ${bad.res.status}` };
+    if (!paged.complete) return { problem: `stopped after ${paged.comments.length} comment(s) without reaching the oldest` };
+    return { comments: paged.comments };
+  } catch (err) {
+    return { problem: String(err?.message || err) };
+  }
+}
+
 function assigneeNames(t) {
   return (t.assignees || []).map((a) => `${a.username} (${a.id})`).join(', ') || '(nobody)';
 }
@@ -306,7 +318,8 @@ const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url));
  * After PR `mergedNumber` merged: one `MAIN MOVED:` note on every ticket in a
  * machine status whose recorded PR is still open against the same base, each
  * read back. Never exits: the relay calls this after a merge it has already
- * recorded, so a failure is returned in `problems` and the pass carries on.
+ * recorded, so a failure — even a failed comment read on one ticket — is
+ * returned in `problems` and the pass carries on (lib/mainMoved.js tellTickets).
  *
  * @param tasks the list's open tickets when the caller already has them
  * @returns {{ lines: string[], problems: string[], told: number }}
@@ -342,28 +355,20 @@ async function tellMainMoved({ mergedNumber, list, dryRun, tasks = null }) {
     return { lines, problems, told };
   }
 
-  const merge = { number: Number(merged.number), url: merged.url };
-  for (const t of (tasks || await fetchAllTasks(list)).filter(isNotifyTarget)) {
-    const line = (pr, what) => lines.push(`${t.id}\t${t.status?.status ?? '?'}\t${pr}\t${what}\t${t.name}`);
-    const comments = await readComments(t.id);
-    const found = findPullRequest(comments);
-    if (!found || `${found.owner}/${found.repo}`.toLowerCase() !== String(repo).toLowerCase()) { line('-', 'no PR of this repository recorded — nothing to tell'); continue; }
-    const prRef = `PR #${found.number}`;
-    if (found.number === merge.number) continue;
-    const branch = openPrs.get(found.number);
-    if (!branch) { line(prRef, `not open against ${base} — nothing to tell`); continue; }
-    if (findMainMovedNote(comments, merge.number, found.number)) { line(prRef, `already told about PR #${merge.number}`); continue; }
-    const verdict = checkBranch({ base, branch, mergeCommit: merged.mergeCommit.oid, cwd: REPO_ROOT });
-    const what = `${verdict.kind}${verdict.files.length ? ` (${verdict.files.join(', ')})` : ''}${verdict.reason ? ` — ${verdict.reason}` : ''}`;
-    if (dryRun) { line(prRef, `would tell: ${what}`); continue; }
-    const out = await tracker.postComment(t.id, { comment_text: mainMovedComment({ merged: merge, pr: { number: found.number }, base, verdict }) });
-    if (!out.res.ok) { problems.push(`${t.id}: the ${verdict.kind} note about PR #${merge.number} FAILED to post (HTTP ${out.res.status})`); line(prRef, 'NOT told — the note failed to post'); continue; }
-    const back = findMainMovedNote(await readComments(t.id), merge.number, found.number);
-    if (!back || back.kind !== verdict.kind) { problems.push(`${t.id}: the ${verdict.kind} note about PR #${merge.number} posted but does not read back`); line(prRef, 'NOT told — the note did not read back'); continue; }
-    told += 1;
-    line(prRef, `told: ${what}`);
-  }
-  return { lines, problems, told };
+  const merge = { number: Number(merged.number), url: merged.url, oid: merged.mergeCommit.oid };
+  const io = {
+    readComments: readCommentsOrProblem,
+    readStatus: async (id) => (await readTaskOrNull(id))?.status?.status ?? null,
+    postNote: async (id, text) => {
+      const out = await tracker.postComment(id, { comment_text: text });
+      return out.res.ok ? { ok: true, id: String(out.json?.id ?? '') } : { ok: false, problem: `HTTP ${out.res.status}` };
+    },
+    findPullRequest,
+    contains: ({ branch }) => branchContains({ branch, mergeCommit: merge.oid, cwd: REPO_ROOT }),
+    check: ({ branch }) => checkBranch({ base, branch, mergeCommit: merge.oid, cwd: REPO_ROOT }),
+  };
+  // The relay passes its own list; the standalone command reads it here.
+  return tellTickets({ tasks: tasks || await fetchAllTasks(list), merge, base, repo, openPrs, dryRun, io });
 }
 
 // ── Commands ─────────────────────────────────────────────────────────────────

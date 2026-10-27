@@ -341,7 +341,10 @@ Written by `main-moved`, which the relay runs after every merge it makes (a
 session that merged by hand runs `npm run clickup -- main-moved --pr <n>`).
 It goes on every ticket in `Building`, `In review` or `Rework` whose
 recorded PR is still open against the same base, and never on Dane's two
-statuses. The kind comes from `git merge-tree`, a merge done in memory with
+statuses: each ticket's status is re-read just before its note is posted, so
+one that moved to his statuses during the relay pass is skipped. A branch
+that already contains the merged PR is not told. One ticket whose comments
+cannot be read is reported and skipped; the rest are still told. The kind comes from `git merge-tree`, a merge done in memory with
 no checkout: `no-overlap` (none of the same files, merges cleanly),
 `same-files` (shared files, still merges cleanly), `conflict` (names the
 files), `cannot-tell` (the check did not run, treated as `same-files`, never
