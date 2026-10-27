@@ -6,6 +6,21 @@ file directly on `main`.
 
 ---
 
+## 2026-10-27 — The ClickUp script gets a tracker switch (#13)
+
+The script every loop uses to read and move tickets had ClickUp's web
+addresses written all through it, so it could only ever talk to ClickUp.
+Now every one of those addresses lives in a single new file (the "ClickUp
+tracker"), and the script asks that file for what it needs. The project's
+settings file gets an optional `tracker` setting that says which tracker
+to use; today the only choice is ClickUp, and leaving it out means ClickUp.
+Nothing the script does or prints changed: the same commands were run
+before and after and gave identical output. This is the first step toward
+the tracker of our own described in `docs/TRACKER_MVP.md`, because a second
+tracker can now be plugged in behind the same commands.
+
+---
+
 ## 2026-10-26 — A written plan for leaving ClickUp (#10)
 
 The loops keep every ticket, status and comment in ClickUp, and a lot of
