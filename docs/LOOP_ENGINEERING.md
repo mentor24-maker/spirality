@@ -112,10 +112,15 @@ Two rules keep it honest:
   launch`.** Once handed to you it stays yours until you act. Your merge
   phrase on a `Ready to launch` ticket is you acting: the relay
   (`com.spirality.relay`, every 10 minutes) reads it, re-checks every gate,
-  merges and moves the ticket. Your reply on a `Needs your input` ticket is
-  not read by the relay yet (that half arrives with `busRelayPlan`): when you
-  answer a question, also drag the ticket back to `Queued`, or tell a
-  session to.
+  merges and moves the ticket. Your reply to the question card on a `Needs
+  your input` ticket is you acting too: the same relay moves the ticket to
+  `Queued`, `Rework` or `Live` by the contract's table, and notes on your
+  reply that it did. On a ticket with no question card on it (one parked by
+  hand) the relay cannot tell a new reply from an old one, so it leaves the
+  ticket where it is and a session moves it. It re-reads the ticket right
+  before the move, so a move you made yourself during the pass stands, and
+  it reads the whole comment trail (ClickUp serves 25 at a time) so the
+  ticket's PR is never missed on a long one.
 
 `Live` is a **closed**-type status in ClickUp. That is what makes finished
 work disappear from the open view. The click-by-click setup of this status

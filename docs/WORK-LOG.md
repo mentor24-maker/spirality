@@ -6,6 +6,29 @@ file directly on `main`.
 
 ---
 
+## 2026-10-26 — Answering a question now puts the ticket back to work (#8)
+
+When a loop got stuck and asked Dane a question, the ticket sat in "Needs
+your input" until someone dragged it back by hand, even after he had
+answered. Now the relay, the same background job that merges on his word,
+also reads his answer: the next pass sends the ticket back to the build
+queue, back to rework if a pull request is already open, or closes it if he
+said "close it" or the work has already shipped. It reads every move back,
+marks his answer as used so the same reply never moves the ticket twice,
+and says so out loud when a move fails. A ticket with no written question
+on it is left alone, because without one the relay cannot tell a new reply
+from an old one.
+
+After review, three fixes rode along. ClickUp hands over only the newest 25
+comments at a time, so on a long ticket the line naming its pull request
+could be missed and finished work sent back to the start; every comment
+read now pages through the whole history. The relay looks at the ticket
+once more right before moving it, so if Dane moved it himself a moment
+earlier, his move stands. And the note left when a move fails is read back
+and says where the ticket actually is.
+
+---
+
 ## 2026-10-14 — Reinstalling the loop jobs no longer leaves a lane stopped (#7)
 
 Reinstalling Spirality's background jobs on the Mac Mini failed twice on
@@ -19,6 +42,8 @@ then starts the new one, and checks that it is actually running before it
 says "Installed". If a job still will not start, it says which one, keeps
 going with the others, and ends with a clear failure instead of a quiet one.
 A reinstall no longer needs someone who knows the workaround.
+
+---
 
 ## 2026-10-13 — The pieces that decide what one pass may do become shared (#5)
 

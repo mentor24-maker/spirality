@@ -46,7 +46,12 @@ import {
 } from '../lib/mergeOnComment.js';
 import {
   PR_VIEW_FIELDS, markerBookkeeping, recordBookkeeping, emptyBooks, mergeDestination, relayLine,
+  handbackAnswer, handbackPlan,
 } from '../lib/relayLane.js';
+import {
+  handbackDoneText, handbackFailureText, repliesShowHandbackDone, repliesShowHandbackFailure, HANDBACK_FAILURE_MARKER,
+} from '../lib/busRelayPlan.js';
+import { pageComments } from '../lib/commentPages.js';
 
 // ── The ids, written down once ───────────────────────────────────────────────
 // They live in spirality.project.json at the repository root (see
@@ -176,8 +181,10 @@ npm run clickup -- <command> [flags]      (Loop Queue: list ${LOOP_QUEUE_LIST}, 
   priority --task <id> --priority urgent|high|normal|low [--operator-asked]
   tag --task <id> --add <name> | --remove <name>  e.g. wont-do, deferred, an epic name
   relay [--list <id>] [--dry-run]                 the merge lane: act on Dane's merge phrase on every "Ready to launch"
-                                                  ticket (re-check every gate, merge, move the ticket, write the record);
-                                                  one line per ticket he holds. --dry-run prints what it would do, writes nothing
+                                                  ticket (re-check every gate, merge, move the ticket, write the record),
+                                                  and the hand-back: his answer to the question card on a "Needs your input"
+                                                  ticket moves it to Queued, Rework or Live by the contract's table.
+                                                  One line per ticket he holds. --dry-run prints what it would do, writes nothing
 
 Statuses (matched case-insensitively): ${STAGE_ORDER.join(' / ')}.
 Two are Dane's and only \`ask\` may set them: ${OPERATOR_STATUSES.map((s) => DISPLAY[s]).join(', ')}.
@@ -206,11 +213,32 @@ async function readTask(task) {
   return out.json;
 }
 
+/** The ticket, or null when it could not be read: for a caller that reports
+ *  a failed read on one ticket and carries on with the rest. */
+async function readTaskOrNull(task) {
+  const out = await call('GET', `/api/v2/task/${task}`);
+  return out.res.ok && out.json && out.json.status ? out.json : null;
+}
+
+/** Every comment on the ticket, newest first, across ALL pages: ClickUp
+ *  returns only the newest 25 per request (lib/commentPages.js). Half a
+ *  trail that looks whole is how a reader concludes something never
+ *  happened, so an incomplete read stops the command. */
 async function readComments(task) {
-  const out = await call('GET', `/api/v2/task/${task}/comment`);
-  if (!out.res.ok) die('read comments', out);
-  if (!commentsReadable(out.json)) die('read comments (no comment list in the body)', out);
-  return out.json.comments;
+  let bad = null;
+  const get = async (path) => {
+    const out = await call('GET', path);
+    const ok = out.res.ok && commentsReadable(out.json);
+    if (!ok) bad = out;
+    return { ok, json: out.json };
+  };
+  const paged = await pageComments({ get, taskId: task });
+  if (bad) die(bad.res.ok ? 'read comments (no comment list in the body)' : 'read comments', bad);
+  if (!paged.complete) {
+    console.error(`\nread comments FAILED — stopped after ${paged.comments.length} comment(s) without reaching the oldest; the trail is INCOMPLETE`);
+    process.exit(1);
+  }
+  return paged.comments;
 }
 
 function assigneeNames(t) {
@@ -667,9 +695,11 @@ if (cmd === 'whoami') {
   // pass merges on it the moment the reason clears. A merged PR's marker is
   // spent forever. A script never resolves a conflict.
   //
-  // The `Needs your input` hand-back (moving a ticket on his reply) is NOT in
-  // this pass yet: it arrives with `busRelayPlan`. Until then those tickets
-  // get one honest read-only line each.
+  // The `Needs your input` hand-back (slice 2): his answer to the newest
+  // machine-written question card releases the ticket to Queued, Rework or
+  // Live by the contract's table (`handbackPlan` in lib/relayLane.js, on
+  // busRelayPlan's rules). The move is read back, then his answer is marked
+  // spent so a ticket he parks there again by hand stays put.
   const list = arg('list') || LOOP_QUEUE_LIST;
   const dryRun = flag('dry-run');
   const repo = project.githubRepo;
@@ -864,15 +894,122 @@ if (cmd === 'whoami') {
       say(t, 'unchecked', `the relay stopped on this ticket: ${err.message}`);
     }
   }
+  /** Read a comment's reply thread, or null when it could not be read. */
+  const readReplies = async (commentId) => {
+    const out = await call('GET', `/api/v2/comment/${commentId}/reply`);
+    return out.res.ok ? (out.json?.comments || out.json?.replies || []) : null;
+  };
+
+  /** The ticket's recorded PR, as handbackDestination wants it: null for no
+   *  `PR opened:` line, else { number, state }, with state '' and a `why`
+   *  when GitHub could not be read. A reading that failed is never a guess. */
+  const handbackPr = (comments) => {
+    const found = findPullRequest(comments);
+    if (!found) return null;
+    if (`${found.owner}/${found.repo}`.toLowerCase() !== String(repo).toLowerCase()) {
+      return { number: found.number, state: '', why: `the recorded PR is in ${found.owner}/${found.repo}, not ${repo}` };
+    }
+    const view = gh(['pr', 'view', String(found.number), '--repo', repo, '--json', 'state,number']);
+    if (!view.ok) return { number: found.number, state: '', why: view.stderr.trim().slice(0, 200) || 'gh failed' };
+    try { return { number: found.number, state: String(JSON.parse(view.stdout).state || '') }; } catch { return { number: found.number, state: '', why: 'gh returned non-JSON' }; }
+  };
+
+  const relayNeedsYourInput = async (task) => {
+    const comments = await readComments(task.id);
+    const verdict = handbackAnswer({ comments, operatorId: OPERATOR_ID, isMachine: isMachineComment });
+    let replies = [];
+    if (verdict.state === 'answered') {
+      replies = await readReplies(verdict.answer.id);
+      if (replies === null) {
+        unchecked.push(`${task.id}: could not read the replies under ${who}'s answer (comment ${verdict.answer.id}) — not moved this pass`);
+        say(task, 'unchecked', `could not read the replies under comment ${verdict.answer.id}`);
+        return;
+      }
+    }
+    const pr = verdict.state === 'answered' ? handbackPr(comments) : null;
+    const plan = handbackPlan({ status: task.status?.status, verdict, answerReplies: replies, pr });
+    if (plan.act === 'waiting') { say(task, 'waiting', `waiting on ${who}: ${plan.why}`); return; }
+    if (plan.act === 'cannot-tell') {
+      unchecked.push(`${task.id}: ${who} answered, but ${plan.why}`);
+      say(task, 'unchecked', plan.why);
+      return;
+    }
+    if (plan.act !== 'move') { say(task, plan.act, plan.why); return; }
+
+    const target = plan.target;
+    const answerId = verdict.answer.id;
+    if (dryRun) { say(task, 'would-hand-back', `-> "${target}" on ${who}'s comment ${answerId}: ${plan.why}`); return; }
+
+    // The status above came from the list read at the start of the pass, and
+    // the merge lane may have spent minutes since. Read it again right before
+    // the write, the guard --if-status gives every other writer: if he moved
+    // or re-parked it meanwhile, his move stands.
+    const fresh = await readTaskOrNull(task.id);
+    if (!fresh) {
+      unchecked.push(`${task.id}: ${who} answered, but the ticket could not be re-read before the move — not moved this pass`);
+      say(task, 'unchecked', 'could not re-read the ticket before the move');
+      return;
+    }
+    const before = fresh.status?.status ?? '';
+    if (before.toLowerCase() !== 'needs your input') {
+      say(task, 'skip', `it moved to "${before || '?'}" during this pass — left where it is`);
+      return;
+    }
+
+    // A machine status carries no assignees (the handoff rule): clear them in
+    // the same write, then read the ticket back before believing either half.
+    const rem = (fresh.assignees || []).map((a) => a.id);
+    const out = await call('PUT', `/api/v2/task/${task.id}`, { status: target, assignees: { add: [], rem } });
+    const back = out.res.ok ? await readTaskOrNull(task.id) : null;
+    const now = back?.status?.status ?? '';
+    if (!out.res.ok || now.toLowerCase() !== target.toLowerCase()) {
+      const why = !out.res.ok ? `HTTP ${out.res.status}`
+        : back ? `the ticket reads back as "${now || '?'}"` : 'the ticket could not be read back';
+      // Still in his status (or unreadable): the next pass re-derives it and
+      // retries. Anywhere else: no pass reads it again, and the note says so.
+      const stillHis = !back || now.toLowerCase() === 'needs your input';
+      unchecked.push(stillHis
+        ? `${task.id}: ${who} answered, but the move to "${target}" FAILED (${why}) — still in "${before}"; the next pass re-derives it and tries again`
+        : `${task.id}: ${who} answered; the move to "${target}" was accepted but the ticket reads back as "${now}" — a session must look, no later pass will retry`);
+      // Noted on his answer ONCE, not once per pass: a status write that keeps
+      // failing would otherwise write the same note every ten minutes. Read
+      // back like every other write.
+      if (!plan.failureNoted) {
+        const at = new Date().toISOString();
+        const text = stillHis
+          ? handbackFailureText({ target, status: before, why, at })
+          : `${HANDBACK_FAILURE_MARKER} Your answer was delivered, but returning this ticket to "${target}" `
+            + `did not stick: it reads back as "${now}". The relay only reads tickets in "Needs your input", `
+            + `so no later pass will retry this; a session needs to look. (Automatic — bus-relay, ${at}.)`;
+        const note = await call('POST', `/api/v2/comment/${answerId}/reply`, { comment_text: text });
+        const noteBack = note.res.ok ? await readReplies(answerId) : null;
+        if (!(noteBack && repliesShowHandbackFailure(noteBack))) {
+          unchecked.push(`${task.id}: could not record the failed move on comment ${answerId} either (${note.res.ok ? 'it did not read back' : `HTTP ${note.res.status}`})`);
+        }
+      }
+      say(task, 'unchecked', `move to "${target}" failed (${why})`);
+      return;
+    }
+    const leftover = (back.assignees || []).map((a) => a.id);
+    if (leftover.length) unchecked.push(`${task.id}: moved to "${now}" but assignees did not clear ([${leftover.join(', ')}])`);
+
+    // The move stuck, so his answer is spent. Written AFTER the read-back,
+    // never before: a marker on a move that did not happen would stop the
+    // retry. If it does not stick, the cost is that re-parking this ticket by
+    // hand could release it again, and that is said out loud.
+    const done = await call('POST', `/api/v2/comment/${answerId}/reply`, {
+      comment_text: handbackDoneText({ target: now, at: new Date().toISOString() }),
+    });
+    const doneBack = done.res.ok ? await readReplies(answerId) : null;
+    const stuck = Boolean(doneBack && repliesShowHandbackDone(doneBack));
+    if (!stuck) unchecked.push(`${task.id}: moved to "${now}", but the hand-back marker on comment ${answerId} ${done.res.ok ? 'did not read back' : `FAILED (HTTP ${done.res.status})`} — parking this ticket here again by hand could release it again`);
+    say(task, 'handed-back', `-> "${now}" on ${who}'s comment ${answerId}, marker ${stuck ? 'verified' : 'UNVERIFIED'}: ${plan.why}`);
+  };
+
   for (const t of asked) {
-    // Read-only until the hand-back lands: say whether his answer is waiting on a machine.
-    try {
-      const comments = await readComments(t.id);
-      if (operatorSpokeLast(comments, OPERATOR_ID)) say(t, 'answered', `${who}'s reply is the newest comment, and this relay does not move "Needs your input" tickets yet — a session must`);
-      else say(t, 'waiting', `waiting on ${who}; nothing to do`);
-    } catch (err) {
-      unchecked.push(`${t.id}: could not read its comments (${err.message})`);
-      say(t, 'unchecked', `could not read comments: ${err.message}`);
+    try { await relayNeedsYourInput(t); } catch (err) {
+      unchecked.push(`${t.id}: the relay stopped on this ticket (${err.message}) — nothing more was written for it`);
+      say(t, 'unchecked', `the relay stopped on this ticket: ${err.message}`);
     }
   }
 
