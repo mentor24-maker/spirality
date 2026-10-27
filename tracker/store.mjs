@@ -207,6 +207,9 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
    * Run `fn` inside one transaction. IMMEDIATE takes the write lock before
    * the first read, so a compare-then-write can never interleave with
    * another connection's. Anything thrown rolls the whole thing back.
+   * SQLite may already have rolled back by itself (disk full, I/O error);
+   * then ROLLBACK fails with "no transaction is active", and the caller
+   * must still see the real error, not that one.
    */
   function transaction(fn) {
     db.exec('BEGIN IMMEDIATE');
@@ -215,7 +218,11 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
       db.exec('COMMIT');
       return result;
     } catch (err) {
-      db.exec('ROLLBACK');
+      try {
+        db.exec('ROLLBACK');
+      } catch {
+        // already rolled back; the original error is the one that matters
+      }
       throw err;
     }
   }
