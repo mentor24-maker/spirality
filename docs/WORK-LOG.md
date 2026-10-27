@@ -6,6 +6,19 @@ file directly on `main`.
 
 ---
 
+## 2026-10-26 — Answering a question between slices no longer closes the ticket (#9)
+
+Some tickets are built in slices, one pull request at a time. If a loop
+asked Dane a question between two slices, the relay saw that the last pull
+request was already merged and closed the whole ticket, even though more
+work remained (it happened tonight, and a session had to reopen it by hand).
+Now the relay checks the ticket's "Next slice:" line first, the same line it
+already reads when it merges: if it names more work, the ticket goes back to
+the build queue; if it says "none" or there is no such line, it closes as
+before. Answering "close it" still closes it either way.
+
+---
+
 ## 2026-10-26 — Answering a question now puts the ticket back to work (#8)
 
 When a loop got stuck and asked Dane a question, the ticket sat in "Needs
