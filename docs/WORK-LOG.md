@@ -6,6 +6,17 @@ file directly on `main`.
 
 ---
 
+## 2026-10-27 — A ticket can wait on another (#17)
+
+The build loop always took the oldest waiting ticket, whatever it built
+on, so a plan whose steps depend on each other had to be filed one step at
+a time, and Dane could not see the whole plan in the queue. Now a ticket
+can carry a line `Waits on: <ticket>` in its description, and the build
+loop leaves it alone until that ticket is closed. The whole tracker plan
+can be filed at once, in order, and built in order.
+
+---
+
 ## 2026-10-27 — Spirality's ticket history can now be copied out of ClickUp (#16)
 
 Before the loop can leave ClickUp, every ticket it has ever worked on has

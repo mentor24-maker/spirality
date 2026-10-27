@@ -28,7 +28,7 @@ loop makes:
 
 ```bash
 npm run clickup -- queue --claimable                                   # FIRST LINE is the task to claim (all Rework, then Queued)
-npm run clickup -- claim --task <id>                                   # safe claim; exit 3 = someone beat you, take the next
+npm run clickup -- claim --task <id>                                   # safe claim; exit 3 = moved or still waits on a ticket, take the next
 npm run clickup -- get --task <id>                                     # header + body; also shows any recorded PR and send-back rounds
 npm run clickup -- comments --task <id>                                # the review notes live here on a Rework ticket
 npm run clickup -- pr-opened --task <id> --pr <pr-url>                 # record the PR — REQUIRED, and it verifies itself
@@ -82,7 +82,10 @@ Exit **0** nothing of his / **3** something IS his / **1** could not tell.
    back empty, report "queue empty" and stop — do not invent work.
 
    `claim` reads the ticket's own status and guards the write on it. Exit 3
-   means it moved underneath you — take the next task.
+   means it moved underneath you, or its `Waits on:` line names a ticket
+   still open (or a line it cannot read) — take the next task. Exit 1 on a
+   `Waits on:` ticket that cannot be read: say so on the ticket, take the
+   next.
 
    **On a `Rework` ticket, do NOT start a second branch.** `get` prints the
    recorded PR. Check out that branch into a worktree
