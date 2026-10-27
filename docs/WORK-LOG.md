@@ -6,7 +6,7 @@ file directly on `main`.
 
 ---
 
-## 2026-10-27 — A ticket can wait on another (#PRNUM)
+## 2026-10-27 — A ticket can wait on another (#17)
 
 The build loop always took the oldest waiting ticket, whatever it built
 on, so a plan whose steps depend on each other had to be filed one step at
