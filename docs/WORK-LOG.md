@@ -20,6 +20,19 @@ and the tickets that build it. No code changes.
 
 ---
 
+## 2026-10-26 — Answering a question between slices no longer closes the ticket (#9)
+
+Some tickets are built in slices, one pull request at a time. If a loop
+asked Dane a question between two slices, the relay saw that the last pull
+request was already merged and closed the whole ticket, even though more
+work remained (it happened tonight, and a session had to reopen it by hand).
+Now the relay checks the ticket's "Next slice:" line first, the same line it
+already reads when it merges: if it names more work, the ticket goes back to
+the build queue; if it says "none" or there is no such line, it closes as
+before. Answering "close it" still closes it either way.
+
+---
+
 ## 2026-10-26 — Answering a question now puts the ticket back to work (#8)
 
 When a loop got stuck and asked Dane a question, the ticket sat in "Needs
@@ -40,6 +53,22 @@ read now pages through the whole history. The relay looks at the ticket
 once more right before moving it, so if Dane moved it himself a moment
 earlier, his move stands. And the note left when a move fails is read back
 and says where the ticket actually is.
+
+---
+
+## 2026-10-14 — Reinstalling the loop jobs no longer leaves a lane stopped (#7)
+
+Reinstalling Spirality's background jobs on the Mac Mini failed twice on
+10/14 with "Bootstrap failed", and left the build lane stopped and the relay
+not installed. The installer was asking macOS to stop the old job and then,
+in the very next breath, to start the new one, but macOS had not finished
+stopping the old one yet. The two collided and the installer gave up halfway.
+
+Now the installer waits until the old job is really gone (up to 30 seconds),
+then starts the new one, and checks that it is actually running before it
+says "Installed". If a job still will not start, it says which one, keeps
+going with the others, and ends with a clear failure instead of a quiet one.
+A reinstall no longer needs someone who knows the workaround.
 
 ---
 
