@@ -10,6 +10,10 @@
  * (bus relay, auto-merge lanes, pacing, heartbeat) left out until Spirality
  * needs it.
  *
+ * Every ClickUp web address lives in scripts/tracker/clickupTracker.mjs; this
+ * file talks to the tracker the project config names (`tracker`, default
+ * "clickup"), so the commands and their guards do not know which one it is.
+ *
  * The token comes from the environment, never printed and never logged.
  * package.json wraps this in `doppler run --project spirality --config dev`,
  * so no agent or human handles the value:
@@ -28,12 +32,13 @@ import {
   isClaimableByBuild, isOperatorStatus, isReadyToLaunch, claimOrder, compareWithinStatus, statusOf,
 } from './lib/loopStatuses.mjs';
 import {
-  prOpenedComment, verdictComment, commentsReadable, prTrailLanded, bodyNamesTicket,
+  prOpenedComment, verdictComment, prTrailLanded, bodyNamesTicket,
   readyToLaunchGate, nextRound, wouldEscalate, roundSummaryLines, sendBackRounds, operatorSpokeLast,
   findPullRequest, newestFirst, ESCALATE_AT_ROUND,
 } from './lib/loopTrail.mjs';
 import { buildCard, cardSurvived, findBlockquoteLines, CONTEXT_MIN_WORDS, CONTEXT_MAX_WORDS } from './lib/operatorCard.mjs';
-import { stampCommentBody, isCommentPostPath, isMachineComment, stripMachineMarker } from './lib/machineComment.mjs';
+import { isMachineComment, stripMachineMarker } from './lib/machineComment.mjs';
+import { createClickupTracker } from './tracker/clickupTracker.mjs';
 
 import { loadProjectConfig, ProjectConfigError } from '../lib/projectConfig.mjs';
 // The merge lane's decisions (task 86bchpkxz). `mergeDecision` says whether
@@ -51,7 +56,6 @@ import {
 import {
   handbackDoneText, handbackFailureText, repliesShowHandbackDone, repliesShowHandbackFailure, HANDBACK_FAILURE_MARKER,
 } from '../lib/busRelayPlan.js';
-import { pageComments } from '../lib/commentPages.js';
 
 // ── The ids, written down once ───────────────────────────────────────────────
 // They live in spirality.project.json at the repository root (see
@@ -76,8 +80,22 @@ export const LOOP_QUEUE_LIST = project.loopQueueListId; // the Loop Queue LIST
 export const OPERATOR_ID = Number(project.operatorUserId);
 /** The workspace's service account. NEVER assign it. */
 export const MACHINE_ID = Number(project.machineUserId);
-const API = process.env.CLICKUP_API_BASE || 'https://api.clickup.com';
-const HTTP_TIMEOUT_MS = Number(process.env.CLICKUP_HTTP_TIMEOUT_MS) || 60 * 1000;
+
+// ── The tracker ──────────────────────────────────────────────────────────────
+// The project config names it (lib/projectConfig.mjs refuses any other value
+// before we get here); this table is the door's half of that agreement.
+const TRACKERS = {
+  clickup: () => createClickupTracker({
+    token: TOKEN,
+    apiBase: process.env.CLICKUP_API_BASE,
+    timeoutMs: process.env.CLICKUP_HTTP_TIMEOUT_MS,
+  }),
+};
+if (!Object.hasOwn(TRACKERS, project.tracker)) {
+  console.error(`clickup: the project config is not usable — "tracker" is ${JSON.stringify(project.tracker)}, and this door knows only: ${Object.keys(TRACKERS).join(', ')}`);
+  process.exit(1);
+}
+const tracker = TRACKERS[project.tracker]();
 
 const PRIORITY = PRIORITY_VALUE;
 
@@ -88,57 +106,9 @@ function arg(name, fallback = null) {
 }
 function flag(name) { return process.argv.includes(`--${name}`); }
 function readBody(spec) { return spec === '-' ? readFileSync(0, 'utf8') : readFileSync(spec, 'utf8'); }
-function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
-// ── The HTTP door ────────────────────────────────────────────────────────────
-let requests = 0;
-const limits = { limit: null, remaining: null, reset: null };
-
-function unreachable(err) {
-  return { res: { ok: false, status: 0, headers: { get: () => null } }, json: null, text: `the request never reached ClickUp (${err?.message || err})` };
-}
-
-async function callOnce(method, path, body) {
-  requests += 1;
-  // THE ONE PLACE A MACHINE COMMENT IS MARKED. The loops post under Dane's own
-  // seat, so a reader cannot tell their writing from his by author alone.
-  const sendBody = (method === 'POST' && isCommentPostPath(path)) ? stampCommentBody(body) : body;
-  let res;
-  try {
-    res = await fetch(`${API}${path}`, {
-      method,
-      headers: { Authorization: TOKEN, 'Content-Type': 'application/json' },
-      body: sendBody ? JSON.stringify(sendBody) : undefined,
-      signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
-    });
-  } catch (err) {
-    return unreachable(err);
-  }
-  limits.limit = res.headers.get('x-ratelimit-limit') ?? limits.limit;
-  limits.remaining = res.headers.get('x-ratelimit-remaining') ?? limits.remaining;
-  limits.reset = res.headers.get('x-ratelimit-reset') ?? limits.reset;
-  const text = await res.text();
-  let json = null;
-  try { json = text ? JSON.parse(text) : null; } catch { json = null; }
-  return { res, json, text };
-}
-
-/** A 429 is ClickUp itself throttling; it clears within a minute and is safe to repeat. */
-async function call(method, path, body) {
-  for (let attempt = 1; ; attempt += 1) {
-    const out = await callOnce(method, path, body);
-    if (out.res.status !== 429 || attempt >= 3) return out;
-    const reset = Number(out.res.headers.get('x-ratelimit-reset'));
-    const waitMs = Number.isFinite(reset) && reset > 0 ? Math.max(1000, reset * 1000 - Date.now()) : 15000;
-    console.error(`  ClickUp rate limit (attempt ${attempt}) — waiting ${Math.round(waitMs / 1000)}s and trying again`);
-    await sleep(Math.min(waitMs, 65000));
-  }
-}
-
-function reportLimits() {
-  if (limits.limit == null && limits.remaining == null) return;
-  console.error(`  ClickUp's own limit: ${limits.remaining ?? '?'} of ${limits.limit ?? '?'} left this minute (${requests} request(s) this run)`);
-}
+// ── Failures ─────────────────────────────────────────────────────────────────
+function reportLimits() { tracker.reportLimits(); }
 
 function die(label, { res, json, text }) {
   console.error(`\n${label} FAILED — HTTP ${res.status}`);
@@ -195,9 +165,8 @@ Two are Dane's and only \`ask\` may set them: ${OPERATOR_STATUSES.map((s) => DIS
 // ── Readers ──────────────────────────────────────────────────────────────────
 async function fetchAllTasks(list, { includeClosed = false } = {}) {
   const tasks = [];
-  const closed = includeClosed ? '&include_closed=true' : '';
   for (let page = 0; page < 50; page += 1) {
-    const out = await call('GET', `/api/v2/list/${list}/task?archived=false${closed}&page=${page}`);
+    const out = await tracker.listTasksPage(list, page, { includeClosed });
     if (!out.res.ok) die('list tasks', out);
     if (!out.json || !Array.isArray(out.json.tasks)) die('list tasks (the response body was not the expected JSON)', out);
     tasks.push(...out.json.tasks);
@@ -208,7 +177,7 @@ async function fetchAllTasks(list, { includeClosed = false } = {}) {
 }
 
 async function readTask(task) {
-  const out = await call('GET', `/api/v2/task/${task}?include_markdown_description=true`);
+  const out = await tracker.getTask(task, { markdown: true });
   if (!out.res.ok) die('read the task', out);
   return out.json;
 }
@@ -216,7 +185,7 @@ async function readTask(task) {
 /** The ticket, or null when it could not be read: for a caller that reports
  *  a failed read on one ticket and carries on with the rest. */
 async function readTaskOrNull(task) {
-  const out = await call('GET', `/api/v2/task/${task}`);
+  const out = await tracker.getTask(task);
   return out.res.ok && out.json && out.json.status ? out.json : null;
 }
 
@@ -225,14 +194,7 @@ async function readTaskOrNull(task) {
  *  trail that looks whole is how a reader concludes something never
  *  happened, so an incomplete read stops the command. */
 async function readComments(task) {
-  let bad = null;
-  const get = async (path) => {
-    const out = await call('GET', path);
-    const ok = out.res.ok && commentsReadable(out.json);
-    if (!ok) bad = out;
-    return { ok, json: out.json };
-  };
-  const paged = await pageComments({ get, taskId: task });
+  const { paged, bad } = await tracker.listComments(task);
   if (bad) die(bad.res.ok ? 'read comments (no comment list in the body)' : 'read comments', bad);
   if (!paged.complete) {
     console.error(`\nread comments FAILED — stopped after ${paged.comments.length} comment(s) without reaching the oldest; the trail is INCOMPLETE`);
@@ -290,7 +252,7 @@ async function alreadyAnsweredRefused(task, status) {
 }
 
 async function postComment(task, body) {
-  const out = await call('POST', `/api/v2/task/${task}/comment`, body);
+  const out = await tracker.postComment(task, body);
   if (!out.res.ok) die('post comment', out);
   const id = String(out.json?.id ?? '');
   const stored = (await readComments(task)).find((c) => String(c.id) === id);
@@ -328,7 +290,7 @@ if (cmd === 'claim') {
 }
 
 if (cmd === 'whoami') {
-  const out = await call('GET', '/api/v2/user');
+  const out = await tracker.whoAmI();
   if (!out.res.ok) die('whoami', out);
   console.log(`Token valid. Acting as: ${out.json.user.username} <${out.json.user.email}> (id ${out.json.user.id})`);
   if (Number(out.json.user.id) === OPERATOR_ID) console.error("  (This is Dane's own seat, as on StarCaster. Every comment this script posts carries the [machine] marker so readers can tell.)");
@@ -337,8 +299,8 @@ if (cmd === 'whoami') {
 } else if (cmd === 'lists') {
   const space = arg('space') || SPACE;
   const [folderless, folders] = await Promise.all([
-    call('GET', `/api/v2/space/${space}/list?archived=false`),
-    call('GET', `/api/v2/space/${space}/folder?archived=false`),
+    tracker.listsInSpace(space),
+    tracker.foldersInSpace(space),
   ]);
   if (!folderless.res.ok || !folderless.json) die('list folderless lists', folderless);
   if (!folders.res.ok || !folders.json) die('list folders', folders);
@@ -447,7 +409,7 @@ if (cmd === 'whoami') {
     process.exit(2);
   }
   const tags = arg('tags') ? arg('tags').split(',').map((s) => s.trim()).filter(Boolean) : undefined;
-  const out = await call('POST', `/api/v2/list/${list}/task`, {
+  const out = await tracker.createTask(list, {
     name,
     markdown_description: body,
     status: arg('status') || undefined,
@@ -486,7 +448,7 @@ if (cmd === 'whoami') {
   if (!body.trim()) { console.error('Refusing to replace the description with an empty body.'); process.exit(2); }
   const quoted = findBlockquoteLines(body);
   if (quoted.length) { console.error(`The body has "> " blockquote lines (${quoted.join(', ')}). ClickUp DELETES them. Nothing was written.`); process.exit(2); }
-  const out = await call('PUT', `/api/v2/task/${task}`, { markdown_description: body });
+  const out = await tracker.updateTask(task, { markdown_description: body });
   if (!out.res.ok) die('replace description', out);
   const t = await readTask(task);
   const chars = (t.description || '').length;
@@ -538,7 +500,7 @@ if (cmd === 'whoami') {
   const rem = clearing ? (before.assignees || []).map((a) => a.id).filter((id) => !add.includes(id)) : [];
   const body = { status };
   if (add.length || rem.length) body.assignees = { add, rem };
-  const out = await call('PUT', `/api/v2/task/${task}`, body);
+  const out = await tracker.updateTask(task, body);
   if (!out.res.ok) die('set status', out);
   const t = out.json;
   const now = t.status?.status ?? '?';
@@ -558,7 +520,7 @@ if (cmd === 'whoami') {
   if (!task || !(wanted in PRIORITY)) usage();
   if (wanted === 'urgent' && !flag('operator-asked')) { console.error('Urgent is reserved for Dane. Add --operator-asked only if he explicitly asked.'); process.exit(1); }
   const before = await readTask(task);
-  const out = await call('PUT', `/api/v2/task/${task}`, { priority: PRIORITY[wanted] });
+  const out = await tracker.updateTask(task, { priority: PRIORITY[wanted] });
   if (!out.res.ok) die('set priority', out);
   const now = out.json.priority?.priority ?? '(none)';
   if (now !== wanted) { console.error(`Priority did NOT stick: asked "${wanted}", got "${now}".`); process.exit(1); }
@@ -568,8 +530,7 @@ if (cmd === 'whoami') {
 } else if (cmd === 'tag') {
   const task = arg('task'), add = arg('add'), remove = arg('remove');
   if (!task || (!add && !remove) || (add && remove)) usage();
-  const name = encodeURIComponent(add || remove);
-  const out = await call(add ? 'POST' : 'DELETE', `/api/v2/task/${task}/tag/${name}`);
+  const out = await tracker.setTag(task, add || remove, Boolean(add));
   if (!out.res.ok) die(add ? 'add tag' : 'remove tag', out);
   const t = await readTask(task);
   const has = (t.tags || []).some((x) => String(x.name).toLowerCase() === String(add || remove).toLowerCase());
@@ -674,7 +635,7 @@ if (cmd === 'whoami') {
   if (lost) { console.error(`\n${lost}\nComment ${cardId} is on the task. The status has NOT been moved.`); process.exit(1); }
   if (noMove) { console.log(`Task ${task}: card ${cardId} posted (status untouched, --no-move).`); reportLimits(); process.exit(0); }
   const was = (await readTask(task)).status?.status ?? '?';
-  const moved = await call('PUT', `/api/v2/task/${task}`, { status, assignees: { add: [OPERATOR_ID], rem: [] } });
+  const moved = await tracker.updateTask(task, { status, assignees: { add: [OPERATOR_ID], rem: [] } });
   if (!moved.res.ok) { console.error(`The card posted (comment ${cardId}) but the status did NOT move.`); die('set status', moved); }
   const now = moved.json.status?.status ?? '?';
   if (now.toLowerCase() !== status.toLowerCase()) { console.error(`Card posted (comment ${cardId}), but the status did NOT stick: asked "${status}", got "${now}".`); process.exit(1); }
@@ -712,12 +673,12 @@ if (cmd === 'whoami') {
    *  which is reported, never assumed away. Returns true only when it stuck. */
   const markMergeHandled = async (commentId, task, what) => {
     const wanted = parseMergeMarker(`${MERGE_MARKER} ${what}`);
-    const out = await call('POST', `/api/v2/comment/${commentId}/reply`, { comment_text: `${MERGE_MARKER} ${what} — ${new Date().toISOString()}` });
+    const out = await tracker.replyToComment(commentId, { comment_text: `${MERGE_MARKER} ${what} — ${new Date().toISOString()}` });
     if (!out.res.ok) {
       unchecked.push(`${task.id} comment ${commentId}: acted on the merge command (${what}) but could NOT write the dedup marker (HTTP ${out.res.status}) — the NEXT pass will see this authorization as unhandled`);
       return false;
     }
-    const verify = await call('GET', `/api/v2/comment/${commentId}/reply`);
+    const verify = await tracker.listReplies(commentId);
     const replies = verify.res.ok ? (verify.json?.comments || verify.json?.replies || []) : [];
     const stuck = replies.some((r) => {
       const got = parseMergeMarker(r?.comment_text);
@@ -729,7 +690,7 @@ if (cmd === 'whoami') {
 
   /** Post a plain comment on the ticket and read it back. Returns the id, or null. */
   const postNote = async (task, body, about) => {
-    const out = await call('POST', `/api/v2/task/${task.id}/comment`, { comment_text: body });
+    const out = await tracker.postComment(task.id, { comment_text: body });
     if (!out.res.ok) { unchecked.push(`${task.id}: ${about}, but the note FAILED to post (HTTP ${out.res.status}) — ${who} has not been told`); return null; }
     const id = String(out.json?.id ?? '');
     const stored = (await readComments(task.id)).find((c) => String(c.id) === id);
@@ -740,7 +701,7 @@ if (cmd === 'whoami') {
   /** Move a merged ticket to its destination and read the move back. */
   const moveMergedTicket = async (task, prNumber, dest) => {
     const rem = (task.assignees || []).map((a) => a.id);
-    const out = await call('PUT', `/api/v2/task/${task.id}`, { status: dest.status, assignees: { add: [], rem } });
+    const out = await tracker.updateTask(task.id, { status: dest.status, assignees: { add: [], rem } });
     if (!out.res.ok) { unchecked.push(`${task.id}: PR #${prNumber} MERGED but the ticket did NOT move to ${dest.status} (HTTP ${out.res.status}) — move it by hand`); return false; }
     const back = await readTask(task.id);
     const now = back.status?.status ?? '?';
@@ -757,7 +718,7 @@ if (cmd === 'whoami') {
     const books = emptyBooks();
     const hisPhrases = comments.filter((c) => Number(c.user?.id) === OPERATOR_ID && !isMachineComment(c.comment_text) && isMergeCommand(c.comment_text));
     for (const c of hisPhrases) {
-      const out = await call('GET', `/api/v2/comment/${c.id}/reply`);
+      const out = await tracker.listReplies(c.id);
       if (!out.res.ok) {
         unchecked.push(`${task.id} comment ${c.id}: could not read its replies (HTTP ${out.res.status}) — NOT eligible to merge this pass`);
         books.handled.add(String(c.id));
@@ -896,7 +857,7 @@ if (cmd === 'whoami') {
   }
   /** Read a comment's reply thread, or null when it could not be read. */
   const readReplies = async (commentId) => {
-    const out = await call('GET', `/api/v2/comment/${commentId}/reply`);
+    const out = await tracker.listReplies(commentId);
     return out.res.ok ? (out.json?.comments || out.json?.replies || []) : null;
   };
 
@@ -932,7 +893,7 @@ if (cmd === 'whoami') {
     // description, so read the ticket itself, and never guess when it fails.
     let description;
     if (String(pr?.state || '').toUpperCase() === 'MERGED') {
-      const out = await call('GET', `/api/v2/task/${task.id}?include_markdown_description=true`);
+      const out = await tracker.getTask(task.id, { markdown: true });
       if (!out.res.ok || !out.json) {
         unchecked.push(`${task.id}: ${who} answered and PR #${pr.number} is merged, but the description could not be read (HTTP ${out.res.status}) to see whether a next slice remains — not moved this pass`);
         say(task, 'unchecked', `could not read the description (HTTP ${out.res.status})`);
@@ -972,7 +933,7 @@ if (cmd === 'whoami') {
     // A machine status carries no assignees (the handoff rule): clear them in
     // the same write, then read the ticket back before believing either half.
     const rem = (fresh.assignees || []).map((a) => a.id);
-    const out = await call('PUT', `/api/v2/task/${task.id}`, { status: target, assignees: { add: [], rem } });
+    const out = await tracker.updateTask(task.id, { status: target, assignees: { add: [], rem } });
     const back = out.res.ok ? await readTaskOrNull(task.id) : null;
     const now = back?.status?.status ?? '';
     if (!out.res.ok || now.toLowerCase() !== target.toLowerCase()) {
@@ -994,7 +955,7 @@ if (cmd === 'whoami') {
           : `${HANDBACK_FAILURE_MARKER} Your answer was delivered, but returning this ticket to "${target}" `
             + `did not stick: it reads back as "${now}". The relay only reads tickets in "Needs your input", `
             + `so no later pass will retry this; a session needs to look. (Automatic — bus-relay, ${at}.)`;
-        const note = await call('POST', `/api/v2/comment/${answerId}/reply`, { comment_text: text });
+        const note = await tracker.replyToComment(answerId, { comment_text: text });
         const noteBack = note.res.ok ? await readReplies(answerId) : null;
         if (!(noteBack && repliesShowHandbackFailure(noteBack))) {
           unchecked.push(`${task.id}: could not record the failed move on comment ${answerId} either (${note.res.ok ? 'it did not read back' : `HTTP ${note.res.status}`})`);
@@ -1010,7 +971,7 @@ if (cmd === 'whoami') {
     // never before: a marker on a move that did not happen would stop the
     // retry. If it does not stick, the cost is that re-parking this ticket by
     // hand could release it again, and that is said out loud.
-    const done = await call('POST', `/api/v2/comment/${answerId}/reply`, {
+    const done = await tracker.replyToComment(answerId, {
       comment_text: handbackDoneText({ target: now, at: new Date().toISOString() }),
     });
     const doneBack = done.res.ok ? await readReplies(answerId) : null;
