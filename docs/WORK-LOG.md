@@ -23,6 +23,20 @@ later ticket.
 
 ---
 
+## 2026-10-27 — A conflict no longer stalls Dane's merge word (#14)
+
+When Dane said "merge" on a change that clashed with newer work, the
+relay (the background pass that carries out his merge word) left a note
+saying it had tried to hand the fix to the build loop and failed. It had
+never tried, so nobody picked the work up: two changes sat that way this
+morning until Dane asked. Now the relay files that fix as an ordinary
+Queued ticket the build loop picks up, writes on Dane's ticket which one
+it is, and checks both landed. It files only one per change, however many
+times it runs, and if filing really does fail, the note says so and the
+next run tries again. Dane still never has to say "merge" twice.
+
+---
+
 ## 2026-10-27 — The ClickUp script gets a tracker switch (#13)
 
 The script every loop uses to read and move tickets had ClickUp's web

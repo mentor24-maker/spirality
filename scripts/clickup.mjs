@@ -28,7 +28,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import {
-  DISPLAY, STAGE_ORDER, CLAIMABLE_BY_BUILD, OPERATOR_STATUSES, BUILDING, NEEDS_YOUR_INPUT, PRIORITY_VALUE,
+  DISPLAY, STAGE_ORDER, CLAIMABLE_BY_BUILD, OPERATOR_STATUSES, BUILDING, NEEDS_YOUR_INPUT, QUEUED, PRIORITY_VALUE,
   isClaimableByBuild, isOperatorStatus, isReadyToLaunch, claimOrder, compareWithinStatus, statusOf,
 } from './lib/loopStatuses.mjs';
 import {
@@ -51,8 +51,11 @@ import {
 } from '../lib/mergeOnComment.js';
 import {
   PR_VIEW_FIELDS, markerBookkeeping, recordBookkeeping, emptyBooks, mergeDestination, relayLine,
-  handbackAnswer, handbackPlan,
+  handbackAnswer, handbackPlan, conflictFilingPlan,
 } from '../lib/relayLane.js';
+import {
+  conflictTicketName, conflictTicketBody, conflictTicketFiledComment, findConflictTicket,
+} from '../lib/conflictWork.js';
 import {
   handbackDoneText, handbackFailureText, repliesShowHandbackDone, repliesShowHandbackFailure, HANDBACK_FAILURE_MARKER,
 } from '../lib/busRelayPlan.js';
@@ -711,6 +714,45 @@ if (cmd === 'whoami') {
     return true;
   };
 
+  /** File the catch-up ticket for a conflicting PR in the Loop Queue, as
+   *  Queued, and read it back. Returns { id, url } only when the ticket reads
+   *  back with that name, in Queued, with a description; otherwise null, with
+   *  the reason in `unchecked`. */
+  const fileCatchUp = async (task, prRef, branch, name, commentId) => {
+    const body = conflictTicketBody({ task, pr: prRef, branch, localVerdict: null, commentId });
+    const out = await tracker.createTask(list, {
+      name, markdown_description: body, status: DISPLAY[QUEUED], priority: PRIORITY.high,
+    });
+    const id = out.res.ok && out.json?.id ? String(out.json.id) : '';
+    if (!id) {
+      unchecked.push(`${task.id}: PR #${prRef.number} conflicts, and filing the catch-up ticket FAILED (HTTP ${out.res.status}) — the next pass tries again`);
+      return null;
+    }
+    const back = await readTaskOrNull(id);
+    const now = String(back?.status?.status ?? '');
+    if (!back || back.name !== name || now.toLowerCase() !== QUEUED || !String(back.description || '').trim()) {
+      const why = !back ? 'it could not be read back' : `it reads back as "${back.name}" in "${now || '?'}"${String(back.description || '').trim() ? '' : ' with an empty description'}`;
+      unchecked.push(`${task.id}: PR #${prRef.number} conflicts; catch-up ticket ${id} was created but ${why} — not counted as filed, a session must look`);
+      return null;
+    }
+    return { id, url: out.json.url || back.url || `https://app.clickup.com/t/${id}` };
+  };
+
+  /** Write the `CONFLICT TICKET FILED:` trail on the waiting ticket — the
+   *  line the next pass reads so it never files twice — and read it back
+   *  through the same parser. Returns true only when it reads back. */
+  const recordCatchUp = async (task, filed, prNumber) => {
+    const body = conflictTicketFiledComment({ id: filed.id, url: filed.url, prNumber, localVerdict: null });
+    const noteId = await postNote(task, body, `catch-up ticket ${filed.id} filed for PR #${prNumber}`);
+    if (!noteId) return false;
+    const found = findConflictTicket(await readComments(task.id), prNumber);
+    if (!found || found.id !== filed.id) {
+      unchecked.push(`${task.id}: the "CONFLICT TICKET FILED" line for ${filed.id} posted but does not read back — the next pass finds the ticket by name instead`);
+      return false;
+    }
+    return true;
+  };
+
   const relayReadyToLaunch = async (task) => {
     const comments = await readComments(task.id);
     // Only his merge phrases need their reply threads read — that is where an
@@ -783,18 +825,46 @@ if (cmd === 'whoami') {
 
     // A conflict is never resolved by a script. This pass does no local
     // cross-check (no scratch checkout on the relay machine yet), so the
-    // notice says exactly that: GitHub reported it, nothing confirmed it, and
-    // nobody is working on it until a session is pointed at the branch. The
-    // marker is re-decidable, so his word merges the branch once it is fixed.
+    // notice says exactly that: GitHub reported it and nothing confirmed it.
+    // What it does do is file the work (task 86bctbev9): a Queued ticket the
+    // build loop drains, recorded on this ticket so no later pass files a
+    // second one. The marker is re-decidable, so his word merges the branch
+    // once it is fixed.
     if (gate.action === 'conflict' || gate.action === 'catch-up-locally') {
-      const notice = conflictHandOffNotice({ commentId: decision.commentId, pr: { number: pr.number, url: pr.url }, localVerdict: null, filed: null });
-      const reason = notice.marker.replace(/^refused:\s*/i, '');
-      if (decision.priorRefusal === reason) { say(task, 'refused-quiet', `${gate.reason} (already said; nothing posted)`); return; }
-      if (dryRun) { say(task, 'would-refuse', `PR #${pr.number}: ${gate.reason}`); return; }
+      const localVerdict = null;
+      const prRef = { number: pr.number, url: pr.url };
+      const branch = String(prJson.headRefName || '');
+      const ticketName = conflictTicketName({ pr: prRef, branch, localVerdict });
+      const plan = conflictFilingPlan({ comments, prNumber: pr.number, queueTasks: tasks, ticketName, localVerdict });
+      const reason = conflictHandOffNotice({ commentId: decision.commentId, pr: prRef, localVerdict, filed: null }).marker.replace(/^refused:\s*/i, '');
+      const alreadySaid = decision.priorRefusal === reason;
+
+      // Filing comes BEFORE the "already said" check: a hand-off written
+      // before this fix (or one whose filing failed) still gets its ticket
+      // on the next pass, instead of staying quiet forever.
+      if (dryRun) {
+        const filing = plan.act === 'file' ? `would file "${ticketName}" as Queued in list ${list}`
+          : plan.act === 'already-filed' ? `catch-up ticket ${plan.filed.id} already on file${plan.recorded ? '' : ' (would record it on this ticket)'}`
+            : 'no catch-up ticket needed';
+        say(task, plan.act === 'file' ? 'would-file-catch-up' : alreadySaid ? 'refused-quiet' : 'would-refuse', `PR #${pr.number}: ${gate.reason} — ${filing}${alreadySaid ? '; hand-off already said' : ''}`);
+        return;
+      }
+      let filed = plan.filed;
+      if (plan.act === 'file') filed = await fileCatchUp(task, prRef, branch, ticketName, decision.commentId);
+      let recordedNow = false;
+      if (filed && !plan.recorded) recordedNow = await recordCatchUp(task, filed, pr.number);
+
+      if (alreadySaid) {
+        say(task, recordedNow ? 'filed' : 'refused-quiet', recordedNow
+          ? `PR #${pr.number}: ${gate.reason} — catch-up ticket ${filed.id} filed and recorded (hand-off already said)`
+          : `${gate.reason} (already said; nothing posted)${filed ? '' : ' — the catch-up ticket could NOT be filed, see below'}`);
+        return;
+      }
+      const notice = conflictHandOffNotice({ commentId: decision.commentId, pr: prRef, localVerdict, filed });
       const noteId = await postNote(task, notice.body, `merge refused (${gate.reason})`);
       if (!noteId) { say(task, 'unchecked', gate.reason); return; }
       const stuck = await markMergeHandled(decision.commentId, task, notice.marker);
-      say(task, 'refused', `PR #${pr.number}: ${gate.reason} — explained in comment ${noteId}, marker ${stuck ? 'verified' : 'UNVERIFIED'}`);
+      say(task, 'refused', `PR #${pr.number}: ${gate.reason} — explained in comment ${noteId}, marker ${stuck ? 'verified' : 'UNVERIFIED'}${filed ? `, catch-up ticket ${filed.id}` : ', NO catch-up ticket'}`);
       return;
     }
 

@@ -623,5 +623,12 @@ Written down so nobody mistakes them for the contract:
   machine-written card is reported and left where it is, where StarCaster's
   bus-relay would move it on a fresh reply. On every product nothing merges
   without Dane's word.
+- **Spirality's relay files the conflict ticket but checks nothing locally
+  and announces no stall.** On a conflict it files the `Queued` catch-up
+  ticket and records it (`CONFLICT TICKET FILED: PR #<n>`) on the waiting
+  ticket, as above. It runs no `git merge-tree` cross-check, so every
+  hand-off reads "no local check was attempted" and the ticket asks its
+  builder to find out first. It has no bus, so a stalled hand-off is not
+  announced; a filing that fails is retried on the next pass.
 - **Only StarCaster has auto-merge lanes.** See "StarCaster's auto-merge
   lanes" above.
