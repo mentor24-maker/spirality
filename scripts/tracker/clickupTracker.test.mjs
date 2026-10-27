@@ -34,6 +34,7 @@ test('every method reaches the same ClickUp address the door used to call', asyn
     await t.foldersInSpace('9');
     await t.listTasksPage('5', 2);
     await t.listTasksPage('5', 0, { includeClosed: true });
+    await t.listTasksPage('5', 1, { markdown: true });
     await t.getTask('abc');
     await t.getTask('abc', { markdown: true });
     await t.createTask('5', { name: 'n' });
@@ -48,6 +49,7 @@ test('every method reaches the same ClickUp address the door used to call', asyn
       'GET /api/v2/space/9/folder?archived=false',
       'GET /api/v2/list/5/task?archived=false&page=2',
       'GET /api/v2/list/5/task?archived=false&include_closed=true&page=0',
+      'GET /api/v2/list/5/task?archived=false&include_markdown_description=true&page=1',
       'GET /api/v2/task/abc',
       'GET /api/v2/task/abc?include_markdown_description=true',
       'POST /api/v2/list/5/task',
@@ -59,7 +61,7 @@ test('every method reaches the same ClickUp address the door used to call', asyn
     ]);
     assert.ok(api.seen.every((r) => r.auth === 'tok'));
     t.reportLimits();
-    assert.deepEqual(lines, ["  ClickUp's own limit: 42 of 100 left this minute (13 request(s) this run)"]);
+    assert.deepEqual(lines, ["  ClickUp's own limit: 42 of 100 left this minute (14 request(s) this run)"]);
   } finally { await api.close(); }
 });
 

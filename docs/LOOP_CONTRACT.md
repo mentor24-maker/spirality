@@ -184,11 +184,23 @@ description:
 Waits on: <ticket id or link>[, <ticket id or link> ...]
 ```
 
-While any ticket it names is still open, `queue --claimable` leaves it out
-(and says on stderr which ticket it skipped and why), and `claim` refuses it
-(exit 3; exit 1 if a named ticket cannot be read). Once they are all closed
-it takes its normal place in line. Prose that mentions waiting does nothing;
-only the line counts (`lib/waitsOn.js`).
+The line may sit in a list item, a quote or bold (`- **Waits on:** <id>`).
+Both `queue --claimable` and `claim` read it from the same text, the
+markdown description, and apply the same rule:
+
+- While any ticket it names is still open, **wherever that ticket lives**
+  (this list or another), `queue --claimable` leaves it out and says on
+  stderr which ticket it skipped and why, and `claim` refuses it (exit 3,
+  nothing written).
+- A named ticket that cannot be read (a misspelled id, say) holds it back
+  the same way: `queue` says "could not be read", `claim` exits 1.
+- A `Waits on:` line that names something that is not a ticket id or link
+  (`aaa1 and bbb2`, `aaa1 (the API ticket)`, `aaa1; bbb2`) holds it back
+  too, and says what it could not read. Separate ids with commas.
+
+Once every ticket it names is closed it takes its normal place in line.
+Prose that mentions waiting does nothing; only the line counts
+(`lib/waitsOn.js`).
 
 **Why (2026-10-27):** the tracker plan had to be filed one wave at a time, so
 a build loop could not start a step before the step it builds on had merged,

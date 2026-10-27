@@ -61,7 +61,7 @@ import {
 } from '../lib/busRelayPlan.js';
 // A ticket's `Waits on:` line (task 86bctfun6): the claim leaves it alone
 // until every ticket it names is closed.
-import { waitsOn, stillWaitingOn } from '../lib/waitsOn.js';
+import { waitsOn, waitsOnText, holdReasons } from '../lib/waitsOn.js';
 
 // ── The ids, written down once ───────────────────────────────────────────────
 // They live in spirality.project.json at the repository root (see
@@ -169,10 +169,10 @@ Two are Dane's and only \`ask\` may set them: ${OPERATOR_STATUSES.map((s) => DIS
 }
 
 // ── Readers ──────────────────────────────────────────────────────────────────
-async function fetchAllTasks(list, { includeClosed = false } = {}) {
+async function fetchAllTasks(list, { includeClosed = false, markdown = false } = {}) {
   const tasks = [];
   for (let page = 0; page < 50; page += 1) {
-    const out = await tracker.listTasksPage(list, page, { includeClosed });
+    const out = await tracker.listTasksPage(list, page, { includeClosed, markdown });
     if (!out.res.ok) die('list tasks', out);
     if (!out.json || !Array.isArray(out.json.tasks)) die('list tasks (the response body was not the expected JSON)', out);
     tasks.push(...out.json.tasks);
@@ -193,6 +193,24 @@ async function readTask(task) {
 async function readTaskOrNull(task) {
   const out = await tracker.getTask(task);
   return out.res.ok && out.json && out.json.status ? out.json : null;
+}
+
+/** 'open', 'closed' or 'unreadable' for every ticket the given tickets'
+ *  `Waits on:` lines name (lib/waitsOn.js). Ids in `openIds` are known open
+ *  without a read; every other one is read, once. */
+async function prerequisiteStates(tickets, openIds = []) {
+  const open = new Set(openIds.map((id) => String(id).toLowerCase()));
+  const states = new Map();
+  for (const t of tickets) {
+    for (const id of waitsOn(waitsOnText(t))) {
+      if (states.has(id)) continue;
+      if (open.has(id)) { states.set(id, 'open'); continue; }
+      const pre = await readTaskOrNull(id);
+      if (!pre) states.set(id, 'unreadable');
+      else states.set(id, ['closed', 'done'].includes(pre.status?.type) || TERMINAL_STATUSES.includes(statusOf(pre)) ? 'closed' : 'open');
+    }
+  }
+  return states;
 }
 
 /** Every comment on the ticket, newest first, across ALL pages: ClickUp
@@ -290,19 +308,11 @@ if (cmd === 'claim') {
     console.error(`Claimable statuses, in drain order: ${CLAIMABLE_BY_BUILD.map((x) => DISPLAY[x]).join(', ')}. Take the next task.`);
     process.exit(3);
   }
-  const open = [];
-  for (const id of waitsOn(seen.markdown_description ?? seen.description)) {
-    const pre = await readTaskOrNull(id);
-    if (!pre) {
-      console.error(`NOT claimed: "${task}" waits on ${id}, which could not be read. Nothing was written.`);
-      process.exit(1);
-    }
-    const closed = ['closed', 'done'].includes(pre.status?.type) || TERMINAL_STATUSES.includes(statusOf(pre));
-    if (!closed) open.push(`${id} ("${pre.status?.status ?? '?'}")`);
-  }
-  if (open.length) {
-    console.error(`NOT claimed: "${task}" waits on ${open.join(', ')}, still open. Take the next task.`);
-    process.exit(3);
+  const states = await prerequisiteStates([seen]);
+  const held = holdReasons(seen, (id) => states.get(id));
+  if (held.reasons.length) {
+    console.error(`NOT claimed: "${task}" ${held.reasons.join('; ')}. Nothing was written.${held.unreadable ? '' : ' Take the next task.'}`);
+    process.exit(held.unreadable ? 1 : 3);
   }
   process.argv = [...process.argv.slice(0, 2), 'status', ...process.argv.slice(3), '--status', DISPLAY[BUILDING], '--if-status', now];
   console.error(`claiming ${task} out of "${now}" (guarded on that exact status)`);
@@ -336,16 +346,18 @@ if (cmd === 'whoami') {
     console.error('--claimable and --status are two different questions; pass one.');
     process.exit(2);
   }
-  const tasks = await fetchAllTasks(list);
+  // --claimable reads the markdown description, as claim does (waitsOnText).
+  const tasks = await fetchAllTasks(list, { markdown: claimable });
   let wanted;
   if (claimable) {
-    // fetchAllTasks leaves closed tickets out, so a prerequisite missing
-    // from this list is closed (or in another list, which is not held for).
-    const openIds = tasks.map((t) => t.id);
-    wanted = claimOrder(tasks).filter((t) => {
-      const waiting = stillWaitingOn(t.description, openIds);
-      if (waiting.length) console.error(`skipped ${t.id}: waits on ${waiting.join(', ')} (still open)`);
-      return !waiting.length;
+    // A ticket from this (open-only) list is open; any other prerequisite
+    // is read on its own, so queue and claim apply the same rule.
+    const ordered = claimOrder(tasks);
+    const states = await prerequisiteStates(ordered, tasks.map((t) => t.id));
+    wanted = ordered.filter((t) => {
+      const held = holdReasons(t, (id) => states.get(id));
+      if (held.reasons.length) console.error(`skipped ${t.id}: ${held.reasons.join('; ')}`);
+      return !held.reasons.length;
     });
   } else {
     wanted = status ? tasks.filter((t) => (t.status?.status ?? '').toLowerCase() === status.toLowerCase()) : tasks.slice();
