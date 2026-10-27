@@ -6,6 +6,20 @@ file directly on `main`.
 
 ---
 
+## 2026-10-26 — The last of the module move: three more tests, and none switched off for no reason (#12)
+
+The final delivery of moving StarCaster's loop pieces into the shared package.
+Dane chose the small, safe version: finish what the last review asked for, and
+leave StarCaster's big ClickUp script for its own ticket. Three helpers that
+came over last time without their tests now have them: the pre-pass checklist,
+the half-hourly repair, and the fallback that keeps an alarm from being lost.
+Some older tests had been switched off whole just because one line needed a
+StarCaster file; now the rest of each test runs, and only that one line waits.
+The work log's claim that every helper came with its tests is corrected. Run
+against StarCaster's real files, all the moved tests pass.
+
+---
+
 ## 2026-10-26 — A written plan for leaving ClickUp (#10)
 
 The loops keep every ticket, status and comment in ClickUp, and a lot of
