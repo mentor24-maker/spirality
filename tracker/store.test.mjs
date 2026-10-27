@@ -4,6 +4,8 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Worker } from 'node:worker_threads';
+import { createHash } from 'node:crypto';
+import { DatabaseSync } from 'node:sqlite';
 import { openStore, StoreError, STATUSES } from './store.mjs';
 
 /** A fresh store on disk, with one operator, one machine and one project. */
@@ -240,4 +242,51 @@ test('the store hard-codes no product: no names, ids or ticket prefixes in its s
   for (const word of [/starcaster/i, /wavecenter/i, /spirality/i, /\bSP-/, /\bSC-/, /\bWC-/, /\b9014\d{8}\b/, /86b[a-z0-9]{6}/]) {
     assert.doesNotMatch(source, word);
   }
+});
+
+test('a token is issued once, finds its actor, and only its hash is stored', () => {
+  const { dir, path, store, machine, human } = fixture();
+  try {
+    const token = store.issueToken(machine.id);
+    assert.match(token, /^[A-Za-z0-9_-]{40,}$/);
+    assert.deepEqual(store.actorForToken(token), machine);
+    assert.equal(store.actorForToken('not-a-token'), null);
+    assert.equal(store.actorForToken(''), null);
+    assert.equal(store.actorForToken(undefined), null);
+    assert.equal(store.actorForToken(store.issueToken(human.id))?.id, human.id);
+
+    // A new token replaces the old one.
+    const second = store.issueToken(machine.id);
+    assert.equal(store.actorForToken(token), null);
+    assert.equal(store.actorForToken(second)?.id, machine.id);
+
+    // The database file holds the hash, never the token.
+    store.close();
+    const raw = readFileSync(path).toString('latin1') + (() => {
+      try { return readFileSync(`${path}-wal`).toString('latin1'); } catch { return ''; }
+    })();
+    assert.ok(!raw.includes(second));
+    assert.ok(raw.includes(createHash('sha256').update(second).digest('hex')));
+    const again = openStore(path);
+    try {
+      assert.equal(again.actorForToken(second)?.id, machine.id);
+      assert.throws(() => again.issueToken(999), { code: 'unknown-actor' });
+    } finally { again.close(); }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('a database made before actors had tokens gains the column, and its rows survive', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tracker-store-'));
+  const path = join(dir, 'old.db');
+  try {
+    const old = new DatabaseSync(path);
+    old.exec("CREATE TABLE actors (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL CHECK (kind IN ('human', 'machine')), name TEXT NOT NULL)");
+    old.exec("INSERT INTO actors (kind, name) VALUES ('machine', 'Old loop')");
+    old.close();
+    const store = openStore(path);
+    try {
+      const token = store.issueToken(1);
+      assert.deepEqual(store.actorForToken(token), { id: 1, kind: 'machine', name: 'Old loop' });
+    } finally { store.close(); }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
