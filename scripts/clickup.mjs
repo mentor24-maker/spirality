@@ -10,8 +10,9 @@
  * (bus relay, auto-merge lanes, pacing, heartbeat) left out until Spirality
  * needs it.
  *
- * Every ClickUp web address lives in scripts/tracker/clickupTracker.mjs; this
- * file talks to the tracker the project config names (`tracker`, default
+ * Every ClickUp web address lives in scripts/tracker/clickupTracker.mjs, and
+ * every address of the tracker's own API in scripts/tracker/apiTracker.mjs;
+ * this file talks to the one the project config names (`tracker`, default
  * "clickup"), so the commands and their guards do not know which one it is.
  *
  * The token comes from the environment, never printed and never logged.
@@ -39,6 +40,7 @@ import {
 import { buildCard, cardSurvived, findBlockquoteLines, CONTEXT_MIN_WORDS, CONTEXT_MAX_WORDS } from './lib/operatorCard.mjs';
 import { isMachineComment, stripMachineMarker } from './lib/machineComment.mjs';
 import { createClickupTracker } from './tracker/clickupTracker.mjs';
+import { createApiTracker } from './tracker/apiTracker.mjs';
 
 import { loadProjectConfig, ProjectConfigError } from '../lib/projectConfig.mjs';
 // The merge lane's decisions (task 86bchpkxz). `mergeDecision` says whether
@@ -76,7 +78,6 @@ try {
   console.error(`clickup: the project config is not usable — ${err.message}`);
   process.exit(1);
 }
-const TOKEN = process.env.CLICKUP_API_TOKEN;
 export const WORKSPACE = project.workspaceId;
 export const SPACE = project.spaceId;                // the product's SPACE
 export const LOOP_QUEUE_LIST = project.loopQueueListId; // the Loop Queue LIST
@@ -90,18 +91,35 @@ export const MACHINE_ID = Number(project.machineUserId);
 // ── The tracker ──────────────────────────────────────────────────────────────
 // The project config names it (lib/projectConfig.mjs refuses any other value
 // before we get here); this table is the door's half of that agreement.
+// `tokenEnv` names the environment variable that holds the token: Doppler
+// supplies it, and the door never prints it.
 const TRACKERS = {
-  clickup: () => createClickupTracker({
-    token: TOKEN,
-    apiBase: process.env.CLICKUP_API_BASE,
-    timeoutMs: process.env.CLICKUP_HTTP_TIMEOUT_MS,
-  }),
+  clickup: {
+    tokenEnv: 'CLICKUP_API_TOKEN',
+    make: (token) => createClickupTracker({
+      token,
+      apiBase: process.env.CLICKUP_API_BASE,
+      timeoutMs: process.env.CLICKUP_HTTP_TIMEOUT_MS,
+    }),
+  },
+  api: {
+    tokenEnv: 'TRACKER_TOKEN',
+    make: (token) => createApiTracker({
+      token,
+      baseUrl: project.trackerUrl,
+      project: project.productSlug,
+      listId: LOOP_QUEUE_LIST,
+      timeoutMs: process.env.TRACKER_HTTP_TIMEOUT_MS,
+    }),
+  },
 };
 if (!Object.hasOwn(TRACKERS, project.tracker)) {
   console.error(`clickup: the project config is not usable — "tracker" is ${JSON.stringify(project.tracker)}, and this door knows only: ${Object.keys(TRACKERS).join(', ')}`);
   process.exit(1);
 }
-const tracker = TRACKERS[project.tracker]();
+const TOKEN_ENV = TRACKERS[project.tracker].tokenEnv;
+const TOKEN = process.env[TOKEN_ENV];
+const tracker = TRACKERS[project.tracker].make(TOKEN);
 
 const PRIORITY = PRIORITY_VALUE;
 
@@ -126,7 +144,7 @@ function die(label, { res, json, text }) {
       console.error('Run `npm run clickup -- lists` to resolve list ids by name before blaming the token.');
     } else {
       console.error('\n401 means the token is wrong or expired — not that ClickUp is down.');
-      console.error(`The token lives in Doppler (${project.dopplerProject}/${project.dopplerConfig}, CLICKUP_API_TOKEN).`);
+      console.error(`The token lives in Doppler (${project.dopplerProject}/${project.dopplerConfig}, ${TOKEN_ENV}).`);
       console.error('Run through `npm run clickup -- ...` so Doppler supplies it.');
     }
   }
@@ -289,7 +307,7 @@ async function postComment(task, body) {
 
 // ── Commands ─────────────────────────────────────────────────────────────────
 if (!TOKEN) {
-  console.error('CLICKUP_API_TOKEN is not set in this environment.\n');
+  console.error(`${TOKEN_ENV} is not set in this environment.\n`);
   console.error('The sanctioned route is Doppler, which holds the token:  npm run clickup -- <command> ...');
   console.error(`(package.json wraps this script in \`doppler run --project ${project.dopplerProject} --config ${project.dopplerConfig}\`.)`);
   process.exit(2);
@@ -540,7 +558,13 @@ if (cmd === 'whoami') {
   const rem = clearing ? (before.assignees || []).map((a) => a.id).filter((id) => !add.includes(id)) : [];
   const body = { status };
   if (add.length || rem.length) body.assignees = { add, rem };
-  const out = await tracker.updateTask(task, body);
+  // The same guard, handed to the tracker: the tracker's own store refuses a
+  // raced write atomically (ClickUp cannot, and ignores it).
+  const out = await tracker.updateTask(task, body, { ifStatus: ifStatus || undefined });
+  if (out.moved) {
+    console.error(`NOT moved: expected status "${ifStatus}" but the tracker refused the write — ${String(out.json?.err || 'the ticket moved').replace(/\.$/, '')}. Another loop or Dane got there first. Take the next task.`);
+    process.exit(3);
+  }
   if (!out.res.ok) die('set status', out);
   const t = out.json;
   const now = t.status?.status ?? '?';
