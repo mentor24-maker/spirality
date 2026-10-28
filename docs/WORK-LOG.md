@@ -6,6 +6,21 @@ file directly on `main`.
 
 ---
 
+## 2026-10-27 — Dane can see and answer his tickets in a browser page of our own (#21)
+
+Until now the only way to see what was waiting on Dane, and to answer it,
+was ClickUp. The tracker now has its own page for his desktop browser. It
+opens on "Waiting on you": every ticket that needs him, across every
+product, newest first. It decides that with exactly the same rule the
+loops' own `waiting` check uses, and a test runs both against the same
+tickets to prove they agree. Opening a ticket shows its description and
+its comments; anything a loop wrote is shaded and tagged "loop", and a
+question to him ends in the red "NEEDED FROM DANE" box he knows from
+ClickUp. A reply box at the bottom posts exactly what he types, so "merge"
+arrives as "merge". Anything that looks like web code inside a ticket is
+shown as plain text and can never run. No product uses the page yet; the
+board, the waiting count in the tab title and the email come next.
+
 ## 2026-10-27 — The loops can now work a queue in our own tracker (#19)
 
 Every loop reads and moves tickets through one door, and until now that
