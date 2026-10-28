@@ -6,6 +6,23 @@ file directly on `main`.
 
 ---
 
+## 2026-10-28 — Written steps for moving off ClickUp, and a "safe to switch?" check (#25)
+
+Moving Spirality's loops from ClickUp to our own tracker is a delicate
+moment: the loops have to stop, every ticket has to be copied across, and
+nothing may move while that happens. Rather than do it in one go, Dane chose
+to have the steps written down and checkable first. The tracker notes now
+have "Switching a product over": eight steps in order, each with the exact
+command and what a good result looks like, written so WaveCenter and
+StarCaster can follow them too, plus how to switch back. A new command,
+`npm run tracker:switch-check`, looks without touching anything and says
+whether it is safe: is the tracker running, does every sign-in work, does
+the tracker hold the same tickets as ClickUp with the same statuses, and
+would the copy go through cleanly. Run on the Mini today it already caught
+something: the tracker does not yet know which of its people is Dane's
+ClickUp account, so the copy would have refused. The steps now fix that
+before copying. Nothing was switched; the loops still run on ClickUp.
+
 ## 2026-10-28 — Each loop gets its own sign-in to the tracker (#22)
 
 In ClickUp every loop writes under Dane's name, so the loop has to guess

@@ -103,7 +103,7 @@ export function compareQueues({ clickupTasks, trackerTickets, importedFrom }) {
   name('STATUS DIFFERS', mismatched);
   const ok = !missing.length && !extra.length && !mismatched.length;
   if (ok) lines.push('Every ticket is in both, with the same status.');
-  else if (missing.length === clickupTasks.length && !extra.length) lines.push('Nothing is imported yet: run `npm run tracker:import -- --db <database>` (the runbook, step 3).');
+  else if (missing.length === clickupTasks.length && !extra.length) lines.push('Nothing is imported yet: run `npm run tracker:import -- --db <database>` (the runbook, step 4).');
   return { ok, lines, missing, extra, mismatched };
 }
 
@@ -140,7 +140,7 @@ export async function runSwitchCheck({ config, env, db, clickup, fetchImpl = fet
     live = p.answers;
     section('tracker service', live, [live
       ? `${url} answers (${p.why}).`
-      : `NOTHING ANSWERS at ${url} (${p.why}). Install and start the tracker service first (the runbook, step 1).`]);
+      : `NOTHING ANSWERS at ${url} (${p.why}). Start the tracker first (the runbook, step 2).`]);
   }
   section('config', true, [`tracker is "${config.tracker ?? 'clickup'}"${config.trackerUrl ? `, trackerUrl ${config.trackerUrl}` : ', no trackerUrl yet'}. The switch sets tracker "api" and trackerUrl "${url ?? '(none)'}".`]);
 
