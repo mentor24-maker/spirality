@@ -23,7 +23,10 @@
  *   a ticket id, any case           the store's id, upper case (`AL-1`):
  *                                   ClickUp ids are lower case and lib/
  *                                   lowercases what it reads (waitsOn)
- *   a ticket's web page             none yet; `url` says so in plain words
+ *   a ticket's web page             the API's own `<trackerUrl>/tickets/<id>`
+ *                                   (JSON, signed in; no web page until
+ *                                   Phase 3): one word ending in the id, as
+ *                                   lib/conflictWork reads a filed ticket back
  *   a reply on comment C            a comment on C's ticket with parent C
  *
  * A guarded write (`updateTask(..., { ifStatus })`) is the store's atomic
@@ -155,9 +158,11 @@ export function createApiTracker({ token, baseUrl, project, listId, timeoutMs, l
       assignees,
       tags: (t.tags || []).map((name) => ({ name })),
       list: { id: t.project, name: t.project },
-      // tracker/server.mjs has no page for a ticket yet (Phase 3 builds it),
-      // so this says so rather than printing a link that answers 404.
-      url: `tracker ticket ${t.id} at ${BASE} (no web page for a ticket yet)`,
+      // The API route tracker/server.mjs serves for this ticket (a web page
+      // comes in Phase 3). It must stay one word whose last path part is the
+      // id: the relay's conflict trail reads the filed ticket's id back from
+      // it (lib/conflictWork.js findConflictTicket).
+      url: `${BASE}/tickets/${t.id}`,
       date_created: ms(t.createdAt),
       date_updated: ms(t.updatedAt),
       version: t.version,

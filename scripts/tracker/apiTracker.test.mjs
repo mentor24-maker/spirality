@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { openStore } from '../../tracker/store.mjs';
 import { startServer } from '../../tracker/server.mjs';
 import { createApiTracker } from './apiTracker.mjs';
+import { conflictTicketFiledComment, findConflictTicket } from '../../lib/conflictWork.js';
 import { isMachineComment } from '../lib/machineComment.mjs';
 
 const DOOR = fileURLToPath(new URL('../clickup.mjs', import.meta.url));
@@ -104,7 +105,7 @@ test('task files a ticket and reads it back; get and task-name print it as on Cl
   try {
     const r = await f.door(['task', '--name', 'Fix the thing', '--body-file', '-', '--priority', 'high', '--tags', 'tracker,phase-2'], { stdin: '## Goal\nDo it.\n' });
     assert.equal(r.code, 0, r.err);
-    assert.ok(r.out.startsWith(`\nCreated task AL-1\n  tracker ticket AL-1 at ${f.url} (no web page for a ticket yet)\n`), r.out);
+    assert.ok(r.out.startsWith(`\nCreated task AL-1\n  ${f.url}/tickets/AL-1\n`), r.out);
     assert.match(r.out, / {2}status: {6}queued\n {2}priority: {4}high\n {2}tags: {8}tracker, phase-2\n {2}description: 15 characters\n/);
 
     const get = await f.door(['get', '--task', 'AL-1']);
@@ -112,7 +113,7 @@ test('task files a ticket and reads it back; get and task-name print it as on Cl
     assert.equal(get.out, [
       'id:       AL-1', 'name:     Fix the thing', 'status:   queued', 'priority: high', 'assigned: (nobody)',
       'tags:     tracker, phase-2', 'list:     alpha (alpha)', 'pr:       (none recorded)', 'rounds:   0 send-back(s) so far',
-      `url:      tracker ticket AL-1 at ${f.url} (no web page for a ticket yet)`, '---', '## Goal\nDo it.\n', '',
+      `url:      ${f.url}/tickets/AL-1`, '---', '## Goal\nDo it.\n', '',
     ].join('\n'));
 
     const name = await f.door(['task-name', '--task', 'AL-1']);
@@ -226,6 +227,30 @@ test('the store refuses a raced guarded write, even when both writers read the s
     assert.equal(lost[0].moved, true);
     assert.match(lost[0].json.err, /has moved: it is "building"/);
     assert.equal(f.store.getTicket(t.id).version, 2);
+  } finally { await f.cleanup(); }
+});
+
+test('a filed catch-up ticket reads back by its own id through the relay\'s conflict trail', async () => {
+  const f = await fixture();
+  try {
+    const waiting = f.file({ name: 'waiting on a merge', status: 'ready to launch' });
+    const t = createApiTracker({ token: f.machineToken, baseUrl: f.url, project: 'alpha', listId: LIST, log: () => {} });
+    const filed = await t.createTask(LIST, { name: 'catch up PR #7', markdown_description: '## Goal\nCatch up.\n' });
+    assert.equal(filed.res.ok, true, filed.text);
+    const { id, url } = filed.json;
+    assert.equal(url, `${f.url}/tickets/${id}`);
+
+    // The url is a route the server answers, not a dead link.
+    const page = await fetch(url, { headers: { authorization: `Bearer ${f.machineToken}` } });
+    assert.equal(page.status, 200);
+    assert.equal((await page.json()).id, id);
+
+    // What recordCatchUp writes and reads back, end to end through the store.
+    const body = conflictTicketFiledComment({ id, url, prNumber: 7, localVerdict: null });
+    const posted = await t.postComment(waiting.id, { comment_text: body });
+    assert.equal(posted.res.ok, true, posted.text);
+    const read = await t.listComments(waiting.id);
+    assert.deepEqual(findConflictTicket(read.paged.comments, 7), { id, url, prNumber: 7 });
   } finally { await f.cleanup(); }
 });
 
