@@ -26,7 +26,7 @@ import { readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { openStore, StoreError } from './store.mjs';
-import { threadOf, waitingFor } from './pageData.mjs';
+import { boardOf, projectsList, threadOf, waitingFor } from './pageData.mjs';
 
 /** The largest request body accepted, in bytes. A ticket description fits easily. */
 const MAX_BODY = 1024 * 1024;
@@ -43,8 +43,9 @@ const CHANGE_FIELDS = Object.freeze(['name', 'description', 'status', 'priority'
 /**
  * Dane's page (tracker/web/): the only files served without a token, and the
  * only ones served at all, by name. The page holds no data; everything it
- * shows comes through the API below with his token. `/` and `/t/<id>` both
- * answer the page itself, so a ticket's address opens it.
+ * shows comes through the API below with his token. `/`, `/t/<id>`, `/board`
+ * and `/board/<project>` all answer the page itself, so each address opens
+ * its own view.
  */
 const WEB_DIR = new URL('./web/', import.meta.url);
 const WEB_FILES = Object.freeze({
@@ -68,7 +69,7 @@ const PAGE_HEADERS = Object.freeze({
 
 /** The page file a GET of `pathname` answers with, or null when it is not a page address. */
 function pageFile(pathname) {
-  if (pathname === '/' || /^\/t\/[^/]+$/.test(pathname)) return 'index.html';
+  if (pathname === '/' || pathname === '/board' || /^\/(?:t|board)\/[^/]+$/.test(pathname)) return 'index.html';
   const m = /^\/web\/([^/]+)$/.exec(pathname);
   return m && Object.hasOwn(WEB_FILES, m[1]) ? m[1] : null;
 }
@@ -191,6 +192,19 @@ export function createHandler(store, { log = () => {} } = {}) {
     // loop's own verdict (tracker/pageData.mjs).
     if (parts.length === 1 && parts[0] === 'waiting' && method === 'GET') {
       return [200, waitingFor(store, me.id)];
+    }
+
+    // Dane's page: the board's project switcher.
+    if (parts.length === 1 && parts[0] === 'projects' && method === 'GET') {
+      return [200, { projects: projectsList(store) }];
+    }
+
+    // Dane's page: one project's board, the seven statuses in the contract's
+    // order, each column in `queue` order.
+    if (parts.length === 3 && parts[0] === 'projects' && parts[2] === 'board' && method === 'GET') {
+      const board = boardOf(store, parts[1]);
+      if (!board) throw new HttpError(404, 'unknown-project', `no project "${parts[1]}".`);
+      return [200, board];
     }
 
     if (parts.length === 3 && parts[0] === 'projects' && parts[2] === 'tickets') {

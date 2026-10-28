@@ -6,6 +6,20 @@ file directly on `main`.
 
 ---
 
+## 2026-10-27 — Dane can see a whole product's queue on a board of our own (#23)
+
+ClickUp's board shows every ticket of a product in one picture, a column
+per stage. The tracker's page now has the same thing. A "Board" link opens
+one product's queue as seven columns, in the order the loop contract sets,
+from "Rework" through "Live". Each ticket is a small card with its name,
+priority and labels, and clicking it opens the ticket. "Live" only ever
+grows, so it starts folded. A switcher at the top changes product. Inside
+each column the tickets are in exactly the order the loops' own `queue`
+command lists them, and a test checks the two against each other. The
+board only shows tickets; moving them stays with the loops.
+
+---
+
 ## 2026-10-27 — Dane can see and answer his tickets in a browser page of our own (#21)
 
 Until now the only way to see what was waiting on Dane, and to answer it,
