@@ -4,15 +4,18 @@
  * `npm run doctor` starts reporting it the moment the code depends on it.
  * Names only: no value ever appears in this repository (it is public).
  *
- * The substrate holds no database and no deploy, so today the only key is
- * the ClickUp token, and it is a reference to StarCaster's (one token to
- * rotate for every project).
+ * The substrate holds no database and no deploy. The keys are the ClickUp
+ * token, a reference to StarCaster's (one token to rotate for every
+ * project), and the tracker's hand-over email: the Resend key and the
+ * address it goes to (tracker/notify.mjs).
  */
 export const DOPPLER_PROJECT = 'spirality';
 export const CONFIGS = ['dev'];
 
 export const EXPECTED_SECRETS = [
   { name: 'CLICKUP_API_TOKEN', configs: ['dev'], what: 'the ClickUp token, for scripts only' },
+  { name: 'RESEND_API_KEY', configs: ['dev'], what: 'the Resend key the tracker sends the hand-over email with' },
+  { name: 'TRACKER_NOTIFY_TO', configs: ['dev'], what: "the operator's address for the hand-over email" },
 ];
 
 /**

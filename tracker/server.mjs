@@ -22,11 +22,16 @@
  * address it listens on: 127.0.0.1 (this machine only) unless set, and
  * 0.0.0.0 for every machine on the home network.
  */
+import { execFile } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
+import { hostname } from 'node:os';
+import { promisify } from 'node:util';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { openStore, StoreError } from './store.mjs';
 import { boardOf, projectsList, threadOf, waitingFor } from './pageData.mjs';
+import { createNotifier, MAIL_KEY, mailEnvFromDoppler, mailSettingsFromEnv } from './notify.mjs';
+import { loadProjectConfig } from '../lib/projectConfig.mjs';
 
 /** The largest request body accepted, in bytes. A ticket description fits easily. */
 const MAX_BODY = 1024 * 1024;
@@ -154,8 +159,10 @@ function flag(value) {
 /**
  * Build the request handler around an open store. `log` gets one line per
  * request (method, path, status, actor id); it is never handed a token.
+ * `notifier` (tracker/notify.mjs) hears about every write once its answer
+ * has gone back, so a hand-over email can never slow or fail the write.
  */
-export function createHandler(store, { log = () => {} } = {}) {
+export function createHandler(store, { log = () => {}, notifier = null } = {}) {
   function requireProject(slug) {
     const project = store.getProject(slug);
     if (!project) throw new HttpError(404, 'unknown-project', `no project "${slug}".`);
@@ -220,7 +227,8 @@ export function createHandler(store, { log = () => {} } = {}) {
       if (method === 'POST') {
         const body = await readJson(req);
         checkBody(body, me, FILE_FIELDS);
-        return [201, store.fileTicket({ ...pick(body, FILE_FIELDS), project: project.slug, actor: me.id })];
+        const ticket = store.fileTicket({ ...pick(body, FILE_FIELDS), project: project.slug, actor: me.id });
+        return [201, ticket, { ticket, changed: ['status'] }];
       }
     }
 
@@ -241,7 +249,7 @@ export function createHandler(store, { log = () => {} } = {}) {
           throw new HttpError(409, 'moved', `ticket ${r.ticket} has moved: it is "${r.status}" at version ${r.version}.`,
             { ticket: r.ticket, status: r.status, version: r.version });
         }
-        return [200, { ticket: r.ticket, changed: r.changed }];
+        return [200, { ticket: r.ticket, changed: r.changed }, { ticket: r.ticket, changed: r.changed }];
       }
     }
 
@@ -252,7 +260,7 @@ export function createHandler(store, { log = () => {} } = {}) {
       if (body.parent != null && !Number.isInteger(body.parent)) {
         throw new HttpError(400, 'bad-parent', `parent must be a comment id, not "${body.parent}".`);
       }
-      return [201, store.postComment({ ticket: ticket.id, author: me.id, body: body.body, parent: body.parent ?? null })];
+      return [201, store.postComment({ ticket: ticket.id, author: me.id, body: body.body, parent: body.parent ?? null }), { ticket: null, changed: [] }];
     }
 
     // Dane's page: one ticket with each comment's author named and machine
@@ -275,6 +283,7 @@ export function createHandler(store, { log = () => {} } = {}) {
     const url = new URL(req.url, 'http://tracker.invalid');
     let me = null;
     let status;
+    let wrote = null;
     try {
       const page = (req.method === 'GET' || req.method === 'HEAD') ? pageFile(url.pathname) : null;
       if (page) {
@@ -285,9 +294,10 @@ export function createHandler(store, { log = () => {} } = {}) {
       }
       me = store.actorForToken(bearerToken(req));
       if (!me) throw new HttpError(401, 'unauthorized', 'a valid token is required.');
-      const [code, body] = await route(req, me, url);
+      const [code, body, write] = await route(req, me, url);
       status = code;
       send(res, code, body);
+      wrote = write ?? null;
     } catch (err) {
       if (err instanceof HttpError) {
         status = err.status;
@@ -302,12 +312,13 @@ export function createHandler(store, { log = () => {} } = {}) {
       }
     }
     log(`${req.method} ${url.pathname} ${status} actor=${me ? me.id : '-'}`);
+    if (wrote && notifier) await notifier.afterWrite(wrote.ticket, wrote.changed);
   };
 }
 
 /** Start a server on `port` (0 = any free port) against an open store. Resolves to the http.Server. */
-export function startServer({ store, port, host = '127.0.0.1', log }) {
-  const server = createServer(createHandler(store, { log }));
+export function startServer({ store, port, host = '127.0.0.1', log, notifier }) {
+  const server = createServer(createHandler(store, { log, notifier }));
   return new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(port, host, () => {
@@ -329,11 +340,50 @@ export function settingsFromEnv(env = process.env) {
   return { db: env.TRACKER_DB, port, host };
 }
 
+/**
+ * The tracker's address as Dane opens it, for the link in an email: the
+ * project config's trackerUrl, or else this machine by name on the
+ * configured port (a server listening on every address is reached by the
+ * machine's name, not 0.0.0.0).
+ */
+export function pageUrlOf({ trackerUrl, host, port }) {
+  if (trackerUrl) return trackerUrl;
+  const name = host === '0.0.0.0' || host === '::' ? hostname() : host;
+  return `http://${name}:${port}`;
+}
+
+/**
+ * The hand-over email's settings. launchd starts the server without Doppler,
+ * so the mail names are read from the project's Doppler config here; any
+ * failure leaves the email off, said in the log, and never stops the server.
+ */
+export async function loadMailSettings({ host, port, log = () => {} }) {
+  if (process.env[MAIL_KEY]) return mailSettingsFromEnv(process.env, { pageUrl: pageUrlOf({ host, port }) });
+  let config;
+  try {
+    config = loadProjectConfig();
+  } catch (err) {
+    return { send: null, why: `the project config is not usable (${err.message}), so the hand-over email is off.` };
+  }
+  const { env, error } = await mailEnvFromDoppler({
+    project: config.dopplerProject, config: config.dopplerConfig, run: promisify(execFile),
+  });
+  if (error) return { send: null, why: `${error}, so the hand-over email is off.` };
+  const pageUrl = pageUrlOf({ trackerUrl: config.trackerUrl, host, port });
+  const mail = mailSettingsFromEnv(env, { pageUrl });
+  if (mail.send) log(`hand-over email: on, through Resend, linking to ${pageUrl}.`);
+  return mail;
+}
+
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   try {
     const { db, port, host } = settingsFromEnv();
     const store = openStore(db);
-    const server = await startServer({ store, port, host, log: (line) => console.log(`${new Date().toISOString()} ${line}`) });
+    const log = (line) => console.log(`${new Date().toISOString()} ${line}`);
+    const mail = await loadMailSettings({ host, port, log });
+    const notifier = mail.send ? createNotifier({ store, ...mail, log }) : null;
+    if (!notifier) log(`hand-over email: off. ${mail.why}`);
+    const server = await startServer({ store, port, host, log, notifier });
     console.log(`tracker listening on http://${host}:${server.address().port}/`);
   } catch (err) {
     console.error(`tracker server did not start: ${err.message}`);

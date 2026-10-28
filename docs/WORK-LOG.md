@@ -6,6 +6,24 @@ file directly on `main`.
 
 ---
 
+## 2026-10-28 — Dane hears when a ticket is handed to him: a count in the tab and an email (#24)
+
+Once the loop leaves ClickUp, Dane loses ClickUp's own notifications, and
+would only see a hand-over by opening the tracker page. Now the page's
+browser tab reads "(3) Tracker" while three tickets wait on him, and it
+re-reads the count every minute, so a pinned tab tells him at a glance.
+The tracker can also send one email each time a ticket enters one of his
+two statuses: the ticket's name, its product, what is needed from him and
+a link straight to it. Never two for the same hand-over. A failed email
+never stops the ticket moving; it is noted in the log and tried again on
+the next change. The email goes out through Resend, the
+service Dane chose. Its key and his address are read from Doppler when the
+tracker starts, never written anywhere else; until both are there, the
+tracker runs with the email off and says so in its log. One command,
+`npm run tracker:test-email`, sends him a test hand-over to prove it works.
+
+---
+
 ## 2026-10-27 — Dane can see a whole product's queue on a board of our own (#23)
 
 ClickUp's board shows every ticket of a product in one picture, a column
