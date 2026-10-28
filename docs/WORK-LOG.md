@@ -6,6 +6,19 @@ file directly on `main`.
 
 ---
 
+## 2026-10-27 — The tracker runs on the Mini by itself, and is backed up every night (#20)
+
+The tracker only ran while someone had started it by hand, and its tickets
+lived in one file with no copy. Now the Mini runs it as a service, the same
+way it runs the loops: it starts on its own, comes back within seconds if it
+stops, and Dane's desktop can reach it over the home network. Every night at
+3:15 a second job makes a safe copy of the database (SQLite makes the copy
+itself, so it is never caught half-written) and keeps the last two weeks.
+`--status` on the installer now shows whether it is up and when the last
+backup ran, and the tracker document says how to restore one.
+
+---
+
 ## 2026-10-27 — A ticket can wait on another (#17)
 
 The build loop always took the oldest waiting ticket, whatever it built
