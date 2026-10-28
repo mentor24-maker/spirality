@@ -119,6 +119,7 @@ text programs read).
 | Call | Does |
 |---|---|
 | `GET /me` | who this token is |
+| `GET /actors/:id` | an actor's id, kind and name (never a token), for showing who wrote a comment |
 | `GET /projects/:slug/tickets?status=&open=` | the queue |
 | `POST /projects/:slug/tickets` | file a ticket |
 | `GET /tickets/:id` | one ticket with its comments, oldest first |

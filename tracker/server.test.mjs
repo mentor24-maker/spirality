@@ -59,6 +59,19 @@ test('GET /me names the token\'s own actor, for a loop and for a person', async 
   } finally { await f.cleanup(); }
 });
 
+test('GET /actors/:id names an actor (never its token); an unknown or malformed id is 404', async () => {
+  const f = await fixture();
+  try {
+    const human = await f.call('GET', `/actors/${f.human.id}`);
+    assert.equal(human.status, 200);
+    assert.deepEqual(human.body, f.human);
+    for (const token of f.tokens) assert.ok(!human.text.includes(token));
+    assert.equal((await f.call('GET', '/actors/999')).status, 404);
+    assert.equal((await f.call('GET', '/actors/1x')).status, 404);
+    assert.equal((await f.call('GET', `/actors/${f.human.id}`, { token: null })).status, 401);
+  } finally { await f.cleanup(); }
+});
+
 test('no token and a wrong token both get 401, on reads and on writes, and nothing is written', async () => {
   const f = await fixture();
   try {

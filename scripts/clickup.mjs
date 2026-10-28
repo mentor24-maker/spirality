@@ -10,8 +10,9 @@
  * (bus relay, auto-merge lanes, pacing, heartbeat) left out until Spirality
  * needs it.
  *
- * Every ClickUp web address lives in scripts/tracker/clickupTracker.mjs; this
- * file talks to the tracker the project config names (`tracker`, default
+ * Every ClickUp web address lives in scripts/tracker/clickupTracker.mjs, and
+ * every address of the tracker's own API in scripts/tracker/apiTracker.mjs;
+ * this file talks to the one the project config names (`tracker`, default
  * "clickup"), so the commands and their guards do not know which one it is.
  *
  * The token comes from the environment, never printed and never logged.
@@ -27,6 +28,7 @@
 
 import { readFileSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import {
   DISPLAY, STAGE_ORDER, CLAIMABLE_BY_BUILD, OPERATOR_STATUSES, BUILDING, NEEDS_YOUR_INPUT, QUEUED, PRIORITY_VALUE,
   isClaimableByBuild, isOperatorStatus, isReadyToLaunch, claimOrder, compareWithinStatus, statusOf, TERMINAL_STATUSES,
@@ -39,6 +41,7 @@ import {
 import { buildCard, cardSurvived, findBlockquoteLines, CONTEXT_MIN_WORDS, CONTEXT_MAX_WORDS } from './lib/operatorCard.mjs';
 import { isMachineComment, stripMachineMarker } from './lib/machineComment.mjs';
 import { createClickupTracker } from './tracker/clickupTracker.mjs';
+import { createApiTracker } from './tracker/apiTracker.mjs';
 
 import { loadProjectConfig, ProjectConfigError } from '../lib/projectConfig.mjs';
 // The merge lane's decisions (task 86bchpkxz). `mergeDecision` says whether
@@ -62,6 +65,11 @@ import {
 // A ticket's `Waits on:` line (task 86bctfun6): the claim leaves it alone
 // until every ticket it names is closed.
 import { waitsOn, waitsOnText, holdReasons } from '../lib/waitsOn.js';
+// Telling in-flight tickets that main moved under them (task 86bctjffu).
+import {
+  checkBranch, branchContains, tellTickets, latestMainMoved,
+} from '../lib/mainMoved.js';
+import { parseRepoFromRemoteUrl } from '../lib/branchCatchUp.js';
 
 // ── The ids, written down once ───────────────────────────────────────────────
 // They live in spirality.project.json at the repository root (see
@@ -76,7 +84,6 @@ try {
   console.error(`clickup: the project config is not usable — ${err.message}`);
   process.exit(1);
 }
-const TOKEN = process.env.CLICKUP_API_TOKEN;
 export const WORKSPACE = project.workspaceId;
 export const SPACE = project.spaceId;                // the product's SPACE
 export const LOOP_QUEUE_LIST = project.loopQueueListId; // the Loop Queue LIST
@@ -90,18 +97,35 @@ export const MACHINE_ID = Number(project.machineUserId);
 // ── The tracker ──────────────────────────────────────────────────────────────
 // The project config names it (lib/projectConfig.mjs refuses any other value
 // before we get here); this table is the door's half of that agreement.
+// `tokenEnv` names the environment variable that holds the token: Doppler
+// supplies it, and the door never prints it.
 const TRACKERS = {
-  clickup: () => createClickupTracker({
-    token: TOKEN,
-    apiBase: process.env.CLICKUP_API_BASE,
-    timeoutMs: process.env.CLICKUP_HTTP_TIMEOUT_MS,
-  }),
+  clickup: {
+    tokenEnv: 'CLICKUP_API_TOKEN',
+    make: (token) => createClickupTracker({
+      token,
+      apiBase: process.env.CLICKUP_API_BASE,
+      timeoutMs: process.env.CLICKUP_HTTP_TIMEOUT_MS,
+    }),
+  },
+  api: {
+    tokenEnv: 'TRACKER_TOKEN',
+    make: (token) => createApiTracker({
+      token,
+      baseUrl: project.trackerUrl,
+      project: project.productSlug,
+      listId: LOOP_QUEUE_LIST,
+      timeoutMs: process.env.TRACKER_HTTP_TIMEOUT_MS,
+    }),
+  },
 };
 if (!Object.hasOwn(TRACKERS, project.tracker)) {
   console.error(`clickup: the project config is not usable — "tracker" is ${JSON.stringify(project.tracker)}, and this door knows only: ${Object.keys(TRACKERS).join(', ')}`);
   process.exit(1);
 }
-const tracker = TRACKERS[project.tracker]();
+const TOKEN_ENV = TRACKERS[project.tracker].tokenEnv;
+const TOKEN = process.env[TOKEN_ENV];
+const tracker = TRACKERS[project.tracker].make(TOKEN);
 
 const PRIORITY = PRIORITY_VALUE;
 
@@ -124,9 +148,13 @@ function die(label, { res, json, text }) {
       console.error('\n"Team not authorized" usually means the ID is the wrong KIND of thing — a space id where a');
       console.error(`list id belongs (the SPACE is ${SPACE}; the Loop Queue LIST is ${LOOP_QUEUE_LIST}).`);
       console.error('Run `npm run clickup -- lists` to resolve list ids by name before blaming the token.');
+    } else if (project.tracker === 'api') {
+      console.error(`\n401 means the tracker refused ${TOKEN_ENV}: it is wrong, or not this loop's — not that the tracker is down.`);
+      console.error(`The token lives in Doppler (${project.dopplerProject}/${project.dopplerConfig}, ${TOKEN_ENV}).`);
+      console.error('Run through `npm run clickup -- ...` so Doppler supplies it.');
     } else {
       console.error('\n401 means the token is wrong or expired — not that ClickUp is down.');
-      console.error(`The token lives in Doppler (${project.dopplerProject}/${project.dopplerConfig}, CLICKUP_API_TOKEN).`);
+      console.error(`The token lives in Doppler (${project.dopplerProject}/${project.dopplerConfig}, ${TOKEN_ENV}).`);
       console.error('Run through `npm run clickup -- ...` so Doppler supplies it.');
     }
   }
@@ -161,6 +189,10 @@ npm run clickup -- <command> [flags]      (Loop Queue: list ${LOOP_QUEUE_LIST}, 
                                                   and the hand-back: his answer to the question card on a "Needs your input"
                                                   ticket moves it to Queued, Rework or Live by the contract's table.
                                                   One line per ticket he holds. --dry-run prints what it would do, writes nothing
+  main-moved --pr <merged #> [--list <id>] [--dry-run]
+                                                  tell every Building / In review / Rework ticket with an open PR whether
+                                                  that merge moved main under it: no-overlap, same-files, conflict or
+                                                  cannot-tell (the relay runs this after each merge it makes)
 
 Statuses (matched case-insensitively): ${STAGE_ORDER.join(' / ')}.
 Two are Dane's and only \`ask\` may set them: ${OPERATOR_STATUSES.map((s) => DISPLAY[s]).join(', ')}.
@@ -227,6 +259,18 @@ async function readComments(task) {
   return paged.comments;
 }
 
+/** readComments for a caller that must carry on: { comments } or { problem }, never an exit. */
+async function readCommentsOrProblem(task) {
+  try {
+    const { paged, bad } = await tracker.listComments(task);
+    if (bad) return { problem: bad.res.ok ? 'no comment list in the body' : `HTTP ${bad.res.status}` };
+    if (!paged.complete) return { problem: `stopped after ${paged.comments.length} comment(s) without reaching the oldest` };
+    return { comments: paged.comments };
+  } catch (err) {
+    return { problem: String(err?.message || err) };
+  }
+}
+
 function assigneeNames(t) {
   return (t.assignees || []).map((a) => `${a.username} (${a.id})`).join(', ') || '(nobody)';
 }
@@ -287,9 +331,71 @@ async function postComment(task, body) {
   return { id, stored };
 }
 
+// ── Main moved: tell every ticket still in flight (task 86bctjffu) ───────────
+// The checkout this script lives in. The relay runs from the main checkout;
+// the git reads here are a fetch and an in-memory merge, so nothing in it moves.
+const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url));
+
+/**
+ * After PR `mergedNumber` merged: one `MAIN MOVED:` note on every ticket in a
+ * machine status whose recorded PR is still open against the same base, each
+ * read back. Never exits: the relay calls this after a merge it has already
+ * recorded, so a failure — even a failed comment read on one ticket — is
+ * returned in `problems` and the pass carries on (lib/mainMoved.js tellTickets).
+ *
+ * @param tasks the list's open tickets when the caller already has them
+ * @returns {{ lines: string[], problems: string[], told: number }}
+ */
+async function tellMainMoved({ mergedNumber, list, dryRun, tasks = null }) {
+  const lines = [], problems = [];
+  let told = 0;
+  const repo = project.githubRepo;
+  const view = gh(['pr', 'view', String(mergedNumber), '--repo', repo, '--json', 'number,url,state,baseRefName,mergeCommit']);
+  let merged = null;
+  try { merged = view.ok ? JSON.parse(view.stdout) : null; } catch { merged = null; }
+  if (!merged || String(merged.state).toUpperCase() !== 'MERGED' || !merged.mergeCommit?.oid) {
+    problems.push(`PR #${mergedNumber} ${merged ? `is ${merged.state || 'in no readable state'}, not merged` : `could not be read (${view.stderr.trim().slice(0, 200)})`} — no ticket was told`);
+    return { lines, problems, told };
+  }
+  const base = String(merged.baseRefName || '');
+  const remote = spawnSync('git', ['remote', 'get-url', 'origin'], { cwd: REPO_ROOT, encoding: 'utf8' });
+  const here = parseRepoFromRemoteUrl(remote.status === 0 ? remote.stdout : '');
+  if (here.toLowerCase() !== String(repo).toLowerCase()) {
+    problems.push(`this checkout is ${here || 'an unknown repo'}, not ${repo} — no ticket was told`);
+    return { lines, problems, told };
+  }
+  const fetched = spawnSync('git', ['fetch', '--quiet', '--prune', 'origin'], { cwd: REPO_ROOT, encoding: 'utf8' });
+  if (fetched.status !== 0) {
+    problems.push(`git fetch failed (${String(fetched.stderr || '').trim().slice(0, 200)}) — no ticket was told`);
+    return { lines, problems, told };
+  }
+  const listed = gh(['pr', 'list', '--repo', repo, '--state', 'open', '--base', base, '--json', 'number,headRefName', '--limit', '200']);
+  let openPrs;
+  try { openPrs = new Map(JSON.parse(listed.stdout).map((p) => [Number(p.number), String(p.headRefName)])); } catch { openPrs = null; }
+  if (!listed.ok || !openPrs) {
+    problems.push(`the open PRs could not be listed (${listed.stderr.trim().slice(0, 200)}) — no ticket was told`);
+    return { lines, problems, told };
+  }
+
+  const merge = { number: Number(merged.number), url: merged.url, oid: merged.mergeCommit.oid };
+  const io = {
+    readComments: readCommentsOrProblem,
+    readStatus: async (id) => (await readTaskOrNull(id))?.status?.status ?? null,
+    postNote: async (id, text) => {
+      const out = await tracker.postComment(id, { comment_text: text });
+      return out.res.ok ? { ok: true, id: String(out.json?.id ?? '') } : { ok: false, problem: `HTTP ${out.res.status}` };
+    },
+    findPullRequest,
+    contains: ({ branch }) => branchContains({ branch, mergeCommit: merge.oid, cwd: REPO_ROOT }),
+    check: ({ branch }) => checkBranch({ base, branch, mergeCommit: merge.oid, cwd: REPO_ROOT }),
+  };
+  // The relay passes its own list; the standalone command reads it here.
+  return tellTickets({ tasks: tasks || await fetchAllTasks(list), merge, base, repo, openPrs, dryRun, io });
+}
+
 // ── Commands ─────────────────────────────────────────────────────────────────
 if (!TOKEN) {
-  console.error('CLICKUP_API_TOKEN is not set in this environment.\n');
+  console.error(`${TOKEN_ENV} is not set in this environment.\n`);
   console.error('The sanctioned route is Doppler, which holds the token:  npm run clickup -- <command> ...');
   console.error(`(package.json wraps this script in \`doppler run --project ${project.dopplerProject} --config ${project.dopplerConfig}\`.)`);
   process.exit(2);
@@ -387,6 +493,8 @@ if (cmd === 'whoami') {
   console.log(`list:     ${t.list?.name} (${t.list?.id})`);
   console.log(`pr:       ${pr ? pr.url : '(none recorded)'}`);
   console.log(`rounds:   ${sendBackRounds(comments)} send-back(s) so far`);
+  const moved = pr ? latestMainMoved(comments, pr.number) : null;
+  console.log(`main:     ${moved ? `moved — newest note: PR #${moved.merged} merged, this branch ${moved.kind} (comment ${moved.commentId})` : '(no MAIN MOVED note)'}`);
   console.log(`url:      ${t.url}`);
   console.log('---');
   console.log(t.markdown_description || t.description || '(no body)');
@@ -540,7 +648,13 @@ if (cmd === 'whoami') {
   const rem = clearing ? (before.assignees || []).map((a) => a.id).filter((id) => !add.includes(id)) : [];
   const body = { status };
   if (add.length || rem.length) body.assignees = { add, rem };
-  const out = await tracker.updateTask(task, body);
+  // The same guard, handed to the tracker: the tracker's own store refuses a
+  // raced write atomically (ClickUp cannot, and ignores it).
+  const out = await tracker.updateTask(task, body, { ifStatus: ifStatus || undefined });
+  if (out.moved) {
+    console.error(`NOT moved: expected status "${ifStatus}" but the tracker refused the write — ${String(out.json?.err || 'the ticket moved').replace(/\.$/, '')}. Another loop or Dane got there first. Take the next task.`);
+    process.exit(3);
+  }
   if (!out.res.ok) die('set status', out);
   const t = out.json;
   const now = t.status?.status ?? '?';
@@ -948,6 +1062,13 @@ if (cmd === 'whoami') {
     await postNote(task, body, `PR #${pr.number} MERGED`);
     const moved = await moveMergedTicket(task, pr.number, dest);
     say(task, 'merged', `PR #${pr.number} at ${mergedAt}; ticket -> ${dest.status}${moved ? '' : ' (MOVE FAILED, see below)'} (${dest.why})`);
+
+    // main just moved: tell every ticket still in flight, so its next pass
+    // catches up before review instead of after (task 86bctjffu).
+    const news = await tellMainMoved({ mergedNumber: pr.number, list, dryRun: false, tasks });
+    for (const l of news.lines) console.log(`  main-moved\t${l}`);
+    unchecked.push(...news.problems.map((p) => `main-moved after PR #${pr.number}: ${p}`));
+    say(task, 'main-moved', `${news.told} in-flight ticket(s) told that PR #${pr.number} moved main`);
   };
 
   const tasks = await fetchAllTasks(list);
@@ -1101,6 +1222,21 @@ if (cmd === 'whoami') {
   console.error(`relay done: ${ready.length + asked.length} ticket(s) looked at${dryRun ? ', nothing written (dry run)' : ''}.`);
   reportLimits();
   process.exit(unchecked.length ? 1 : 0);
+
+} else if (cmd === 'main-moved') {
+  // The relay runs this step after every merge it makes; a session that
+  // merged by hand runs it with the PR it merged.
+  const mergedNumber = Number(String(arg('pr', '')).replace(/^#/, ''));
+  if (!Number.isInteger(mergedNumber) || mergedNumber <= 0) usage();
+  const list = arg('list') || LOOP_QUEUE_LIST;
+  const dryRun = flag('dry-run');
+  const { lines, problems, told } = await tellMainMoved({ mergedNumber, list, dryRun });
+  for (const l of lines) console.log(l);
+  if (!lines.length && !problems.length) console.error(`No ticket in Building, In review or Rework in list ${list} — nobody to tell.`);
+  for (const p of problems) console.error(`FAILED: ${p}`);
+  console.error(`main-moved: PR #${mergedNumber}, ${dryRun ? 'DRY RUN, nothing written' : `${told} ticket(s) told`}.`);
+  reportLimits();
+  process.exit(problems.length ? 1 : 0);
 
 } else {
   console.error(`Unknown command "${cmd}".`);

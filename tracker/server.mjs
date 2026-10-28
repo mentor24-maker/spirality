@@ -139,6 +139,13 @@ export function createHandler(store, { log = () => {} } = {}) {
       return [200, me];
     }
 
+    // An actor's name, for a reader showing who wrote a comment. Never its token.
+    if (parts.length === 2 && parts[0] === 'actors' && method === 'GET') {
+      const actor = /^[0-9]+$/.test(parts[1]) ? store.getActor(Number(parts[1])) : null;
+      if (!actor) throw new HttpError(404, 'unknown-actor', `no actor ${parts[1]}.`);
+      return [200, actor];
+    }
+
     if (parts.length === 3 && parts[0] === 'projects' && parts[2] === 'tickets') {
       const project = requireProject(parts[1]);
       if (method === 'GET') {
