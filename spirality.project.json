@@ -27,6 +27,7 @@
   "productSlug": "spirality",
   "legacyMachinePrefixes": [],
   "productScripts": {},
+  "trackerPrefix": "SP",
   "trackerPort": 4180,
   "trackerHost": "0.0.0.0",
   "trackerDataDir": "~/spirality-tracker"

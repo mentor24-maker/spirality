@@ -121,6 +121,21 @@ can be filed at once, in order, and built in order.
 
 ---
 
+## 2026-10-27 — Spirality's ticket history can now be copied out of ClickUp (#16)
+
+Before the loop can leave ClickUp, every ticket it has ever worked on has
+to come with it: the spec, every comment and every reply. Otherwise the
+new tracker starts with no memory. The importer does that copy. It only
+reads ClickUp, and it keeps each comment's real time and who wrote it.
+Loop comments are marked as the machine's and Dane's as his. Each old
+ClickUp link is mapped to its new ticket number (86bctbw76 is now SP-13),
+so old links still lead somewhere. Run it again and it copies only what's
+new. If ClickUp fails partway through, it says so and doesn't call the
+copy finished. A trial run on Spirality's own queue copied 13 tickets,
+114 comments and 16 replies. Nothing reads that copy yet.
+
+---
+
 ## 2026-10-27 — The tracker gets a front door, and every loop signs in as itself (#15)
 
 The new tracker's database could only be used from inside the same program,

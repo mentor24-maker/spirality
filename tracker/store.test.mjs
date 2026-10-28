@@ -203,7 +203,82 @@ test('comments are append-only: the store has no way to edit or delete one', () 
   try {
     const names = Object.keys(store);
     assert.ok(names.includes('postComment'));
-    assert.deepEqual(names.filter((n) => /comment/i.test(n)).sort(), ['listComments', 'postComment']);
+    // importComment only appends too (with an original time); nothing edits or deletes.
+    assert.deepEqual(names.filter((n) => /comment/i.test(n)).sort(), ['importComment', 'listComments', 'postComment']);
+  } finally { cleanup(); }
+});
+
+test('an imported ticket keeps its original times and maps its old id; a second import of it writes nothing', () => {
+  const { store, machine, cleanup } = fixture();
+  try {
+    const t = store.importTicket({
+      source: 'clickup', sourceId: 'abc1', createdAt: '2026-01-02T03:04:05.000Z', updatedAt: '2026-02-01T00:00:00.000Z',
+      project: 'alpha', actor: machine.id, name: 'Old', status: 'Live', priority: 'normal', loopNote: 'shipped',
+    });
+    assert.equal(t.id, 'AL-1');
+    assert.equal(t.createdAt, '2026-01-02T03:04:05.000Z');
+    assert.equal(t.updatedAt, '2026-02-01T00:00:00.000Z');
+    assert.equal(t.loopNote, 'shipped');
+    assert.equal(store.listEvents('AL-1')[0].at, '2026-01-02T03:04:05.000Z');
+    assert.equal(store.importedId({ source: 'clickup', kind: 'ticket', sourceId: 'abc1' }), 'AL-1');
+    assert.equal(store.importedId({ source: 'clickup', kind: 'ticket', sourceId: 'nope' }), null);
+    assert.throws(() => store.importTicket({
+      source: 'clickup', sourceId: 'abc1', createdAt: '2026-01-02T03:04:05.000Z',
+      project: 'alpha', actor: machine.id, name: 'Old again', status: 'live',
+    }), { code: 'already-imported' });
+    assert.equal(store.listTickets('alpha').length, 1);
+    // The refused attempt did not use up a number.
+    assert.equal(store.fileTicket({ project: 'alpha', actor: machine.id, name: 'Next', status: 'queued' }).id, 'AL-2');
+    assert.throws(() => store.importTicket({
+      source: 'clickup', sourceId: 'abc2', createdAt: 'not a date', project: 'alpha', actor: machine.id, name: 'x', status: 'queued',
+    }), { code: 'bad-time' });
+    assert.throws(() => store.importTicket({
+      source: 'clickup', sourceId: 'abc3', createdAt: '2026-01-02T00:00:00Z', project: 'alpha', actor: machine.id, name: 'x', status: 'Doing',
+    }), { code: 'unknown-status' });
+    assert.equal(store.importedId({ source: 'clickup', kind: 'ticket', sourceId: 'abc3' }), null);
+  } finally { cleanup(); }
+});
+
+test('imported comments and replies keep their times, bodies and parents, and map their old ids', () => {
+  const { store, human, machine, cleanup } = fixture();
+  try {
+    const t = store.importTicket({ source: 'clickup', sourceId: 't1', createdAt: '2026-01-01T00:00:00Z', project: 'alpha', actor: machine.id, name: 'T', status: 'queued' });
+    const c = store.importComment({ source: 'clickup', sourceId: 'c1', createdAt: '2026-01-01T01:00:00Z', ticket: t.id, author: human.id, body: 'hi  \n' });
+    const r = store.importComment({ source: 'clickup', sourceId: 'r1', createdAt: '2026-01-01T02:00:00Z', ticket: t.id, author: machine.id, body: 'reply', parent: c.id });
+    assert.deepEqual(store.listComments(t.id).map((x) => [x.body, x.parent, x.createdAt]), [
+      ['hi  \n', null, '2026-01-01T01:00:00.000Z'],
+      ['reply', c.id, '2026-01-01T02:00:00.000Z'],
+    ]);
+    assert.equal(store.importedId({ source: 'clickup', kind: 'comment', sourceId: 'r1' }), r.id);
+    assert.throws(() => store.importComment({ source: 'clickup', sourceId: 'c1', createdAt: '2026-01-01T01:00:00Z', ticket: t.id, author: human.id, body: 'again' }), { code: 'already-imported' });
+    assert.equal(store.listComments(t.id).length, 2);
+    assert.deepEqual(store.listImportedIds('clickup').map((m) => [m.kind, m.sourceId, m.newId]), [
+      ['ticket', 't1', t.id], ['comment', 'c1', String(c.id)], ['comment', 'r1', String(r.id)],
+    ]);
+  } finally { cleanup(); }
+});
+
+test('an imported actor is created once and found again by its old id', () => {
+  const { store, cleanup } = fixture();
+  try {
+    const a = store.importActor({ source: 'clickup', sourceId: 'user:9', kind: 'human', name: 'Someone' });
+    const b = store.importActor({ source: 'clickup', sourceId: 'user:9', kind: 'human', name: 'Someone' });
+    assert.deepEqual(a, b);
+    assert.equal(store.importedId({ source: 'clickup', kind: 'actor', sourceId: 'user:9' }), a.id);
+    assert.throws(() => store.importedId({ source: 'clickup', kind: 'project', sourceId: 'x' }), { code: 'bad-import' });
+  } finally { cleanup(); }
+});
+
+test('imported actors have no sign-in token, and several can sit beside a signed-in one', () => {
+  const { store, machine, cleanup } = fixture();
+  try {
+    const token = store.issueToken(machine.id);
+    const a = store.importActor({ source: 'clickup', sourceId: 'user:1', kind: 'human', name: 'One' });
+    const b = store.importActor({ source: 'clickup', sourceId: 'user:2', kind: 'machine', name: 'Two' });
+    assert.notEqual(a.id, b.id);
+    assert.equal(store.actorForToken(token).id, machine.id);
+    assert.equal(store.actorForToken(''), null);
+    assert.equal(store.actorForToken('not-a-token'), null);
   } finally { cleanup(); }
 });
 
