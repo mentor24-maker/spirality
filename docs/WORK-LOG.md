@@ -6,6 +6,20 @@ file directly on `main`.
 
 ---
 
+## 2026-10-27 — Each loop gets its own sign-in to the tracker (#22)
+
+In ClickUp every loop writes under Dane's name, so the loop has to guess
+which comments are really his. The tracker can tell people apart, but only if
+each one signs in as itself. Now there is one command that makes a sign-in
+for Dane and for each loop (build, review, relay), puts each one straight
+into Doppler, the locked box that holds our keys, without ever showing it on
+screen, and checks it arrived. A second command asks the tracker "who am I?"
+with each one and expects the right name back. Each loop's runner tells the
+door only which key is its own, never the key itself, so a key can't end up
+in a log. `npm run doctor` now reports the four new keys.
+
+---
+
 ## 2026-10-27 — The tracker runs on the Mini by itself, and is backed up every night (#20)
 
 The tracker only ran while someone had started it by hand, and its tickets
