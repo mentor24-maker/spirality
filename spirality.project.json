@@ -26,5 +26,8 @@
   "operatorName": "Dane",
   "productSlug": "spirality",
   "legacyMachinePrefixes": [],
-  "productScripts": {}
+  "productScripts": {},
+  "trackerPort": 4180,
+  "trackerHost": "0.0.0.0",
+  "trackerDataDir": "~/spirality-tracker"
 }

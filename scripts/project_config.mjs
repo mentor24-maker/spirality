@@ -36,7 +36,11 @@ try {
 
 const expandHome = (v) => (typeof v === 'string' && /^~(\/|$)/.test(v) ? v.replace(/^~/, homedir()) : v);
 const value = config[key];
-if (Array.isArray(value)) {
+if (value == null) {
+  // An optional key left out, with no default: an empty line, so a shell
+  // script can test for it with [ -n "$x" ].
+  process.stdout.write('\n');
+} else if (Array.isArray(value)) {
   for (const v of value) process.stdout.write(`${expandHome(v)}\n`);
 } else if (value && typeof value === 'object') {
   process.stdout.write(`${JSON.stringify(value)}\n`);
