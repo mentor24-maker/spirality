@@ -85,6 +85,9 @@ fi
 
 # The pass itself. Through npm, so Doppler supplies the ClickUp token the same
 # way every other write to ClickUp gets it. A dry run is passed straight through.
+# On the tracker, the relay signs in as itself: TRACKER_TOKEN_NAME names its
+# own Doppler secret (never the value), which the door reads.
+export TRACKER_TOKEN_NAME=TRACKER_TOKEN_RELAY
 "$REPO/scripts/run_with_time_limit.sh" "$PASS_LIMIT" -- \
   npm run --silent clickup -- relay "$@"
 status=$?

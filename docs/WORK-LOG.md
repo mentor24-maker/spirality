@@ -6,6 +6,25 @@ file directly on `main`.
 
 ---
 
+## 2026-10-28 — Each loop gets its own sign-in to the tracker (#22)
+
+In ClickUp every loop writes under Dane's name, so the loop has to guess
+which comments are really his. The tracker can tell people apart, but only if
+each one signs in as itself. Now there is one command that makes a sign-in
+for Dane and for each loop (build, review, relay), puts each one straight
+into Doppler, the locked box that holds our keys, without ever showing it on
+screen, and checks it arrived. A second command asks the tracker "who am I?"
+with each one and expects the right name back. Each loop's runner tells the
+door only which key is its own, never the key itself, so a key can't end up
+in a log. `npm run doctor` now reports the four new keys.
+
+Review caught two holes, both fixed here. The history import would have made
+a second "Dane" and filed all his old comments under that one, so the tracker
+would misread who spoke last; now the sign-in command tells the importer
+which Dane is the real one, and the importer refuses to run if they disagree.
+And a loop could have been pointed at Dane's own key and signed in as him;
+now a loop may use only one of the three loop keys.
+
 ## 2026-10-28 — Dane hears when a ticket is handed to him: a count in the tab and an email (#24)
 
 Once the loop leaves ClickUp, Dane loses ClickUp's own notifications, and

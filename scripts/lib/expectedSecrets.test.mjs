@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { EXPECTED_SECRETS, CONFIGS, doctorReport, formatReport } from './expectedSecrets.mjs';
 
 const all = (config) => new Set(EXPECTED_SECRETS.filter((s) => s.configs.includes(config)).map((s) => s.name));
@@ -44,4 +45,18 @@ test('the table has a header and one line per expected name', () => {
   assert.equal(lines.length, EXPECTED_SECRETS.length + 1);
   assert.match(lines[0], /^NAME\s+dev$/);
   assert.match(text, /CLICKUP_API_TOKEN\s+present/);
+});
+
+test('every tracker token a runner names is on the list, so doctor reports it', () => {
+  const names = new Set(EXPECTED_SECRETS.map((s) => s.name));
+  const installer = readFileSync(new URL('../install_loop_runner.sh', import.meta.url), 'utf8');
+  const skills = installer.match(/^SKILLS=\(([^)]*)\)/m)[1].trim().split(/\s+/);
+  assert.ok(skills.length > 0);
+  // loop_runner.sh: TRACKER_TOKEN_ + the skill name, upper case, dashes to underscores.
+  const runner = readFileSync(new URL('../loop_runner.sh', import.meta.url), 'utf8');
+  assert.match(runner, /export TRACKER_TOKEN_NAME="TRACKER_TOKEN_\$\(printf '%s' "\$SKILL" \| tr 'a-z-' 'A-Z_'\)"/);
+  for (const skill of skills) assert.ok(names.has(`TRACKER_TOKEN_${skill.toUpperCase().replaceAll('-', '_')}`), skill);
+  const relay = readFileSync(new URL('../run_relay.sh', import.meta.url), 'utf8');
+  assert.ok(names.has(relay.match(/^export TRACKER_TOKEN_NAME=(\S+)$/m)[1]));
+  assert.ok(names.has('TRACKER_TOKEN_OPERATOR'));
 });

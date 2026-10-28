@@ -58,6 +58,12 @@ const { statusOf } = loopStatuses;
 /** The name `imported_ids` files every row from ClickUp under. */
 export const SOURCE = 'clickup';
 
+/**
+ * The map key the operator's ClickUp seat is filed under. tracker/signins.mjs
+ * records the operator's sign-in under the same key, so both find one actor.
+ */
+export const operatorImportKey = (config) => ({ source: SOURCE, sourceId: `user:${config.operatorUserId}` });
+
 /** The ClickUp custom field that holds the Loop note (lib/loopNote.js). */
 const LOOP_NOTE_FIELD = 'Loop note';
 
@@ -193,24 +199,36 @@ export async function importLoopQueue({ tracker, store, config, log = () => {} }
   return { counts, refusals };
 }
 
-/** The operator, the machine and the project, created on the first run and found on every later one. */
+/**
+ * The operator, the machine and the project, created on the first run and
+ * found on every later one. A project already in the store is checked before
+ * anything is written: its prefix must be the config's, and its operator the
+ * actor the operator's ClickUp seat maps to (tracker/signins.mjs records that
+ * mapping), so his history is never filed under a second operator.
+ */
 function prepare(store, config) {
   if (!config.trackerPrefix) {
     throw new ProjectConfigError('"trackerPrefix" is not set in the project config; the importer needs it to number tickets (a prefix "AB" gives AB-1, AB-2, ...)');
   }
-  const operator = store.importActor({
-    source: SOURCE, sourceId: `user:${config.operatorUserId}`, kind: 'human', name: config.operatorName,
-  });
+  const operatorKey = operatorImportKey(config);
+  let project = store.getProject(config.productSlug);
+  if (project) {
+    if (project.prefix !== config.trackerPrefix) {
+      throw new ProjectConfigError(`the store already holds project "${project.slug}" with prefix "${project.prefix}", but the config says "${config.trackerPrefix}"; refusing to mix the two`);
+    }
+    const mapped = store.importedId({ ...operatorKey, kind: 'actor' });
+    if (project.operator != null && mapped !== project.operator) {
+      throw new ProjectConfigError(`project "${project.slug}" names actor ${project.operator} as its operator, but the operator's ClickUp seat maps to ${mapped == null ? 'no actor yet' : `actor ${mapped}`}; refusing to file his history under a second operator (run \`npm run tracker:signins -- create\` first, which records the mapping)`);
+    }
+  }
+  const operator = store.importActor({ ...operatorKey, kind: 'human', name: config.operatorName });
   const machine = store.importActor({
     source: SOURCE, sourceId: 'machine', kind: 'machine', name: `${config.productSlug} loop (imported from ClickUp)`,
   });
-  let project = store.getProject(config.productSlug);
   if (!project) {
     project = store.createProject({
       slug: config.productSlug, name: config.productSlug, prefix: config.trackerPrefix, operator: operator.id,
     });
-  } else if (project.prefix !== config.trackerPrefix) {
-    throw new ProjectConfigError(`the store already holds project "${project.slug}" with prefix "${project.prefix}", but the config says "${config.trackerPrefix}"; refusing to mix the two`);
   }
   return { operator, machine, project };
 }

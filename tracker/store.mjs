@@ -376,6 +376,12 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
       return row ? { id: num(row.id), kind: row.kind, name: row.name } : null;
     },
 
+    /** Every actor of this kind with this name, oldest first. */
+    actorsNamed({ kind, name }) {
+      return db.prepare('SELECT id FROM actors WHERE kind = ? AND name = ? ORDER BY id').all(kind, name)
+        .map((row) => this.getActor(num(row.id)));
+    },
+
     /**
      * Give an actor a new sign-in token, replacing any old one. The token is
      * returned here and nowhere else: only its hash is stored.
@@ -593,6 +599,24 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
         const actor = this.createActor({ kind, name });
         recordImport(...key, actor.id);
         return actor;
+      });
+    },
+
+    /**
+     * IMPORT ONLY. Record an actor that already exists (one made by
+     * tracker/signins.mjs) as the one standing for `sourceId`, so a later
+     * import finds it instead of making a second. Answers `'recorded'`, or
+     * `'already'` when it is already that actor's; a key that maps to a
+     * different actor is refused with `already-imported`.
+     */
+    adoptImportedActor({ source, sourceId, actor }) {
+      const key = requireImportKey(source, 'actor', sourceId);
+      return transaction(() => {
+        requireActor(actor, 'the adopted actor');
+        const known = importedRow(...key);
+        if (known != null && Number(known) === actor) return 'already';
+        recordImport(...key, actor);
+        return 'recorded';
       });
     },
 

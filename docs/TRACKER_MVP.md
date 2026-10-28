@@ -243,6 +243,56 @@ checked with SQLite's own integrity check, and only a copy that passes is
 given its dated name. A failed night says `backup FAILED` and why, and
 leaves the older backups alone.
 
+### Sign-ins
+
+Every actor signs in with its own token, so the tracker records who really
+made each move. The tokens live only in Doppler (project `spirality`, config
+`dev`); this repository holds their names, never their values.
+
+| Actor | Kind | Doppler secret | Used by |
+|---|---|---|---|
+| the operator (`operatorName`, "Dane") | human | `TRACKER_TOKEN_OPERATOR` | Dane, to sign in to the page |
+| `loop-build` | machine | `TRACKER_TOKEN_LOOP_BUILD` | `scripts/loop_runner.sh loop-build` |
+| `loop-review` | machine | `TRACKER_TOKEN_LOOP_REVIEW` | `scripts/loop_runner.sh loop-review` |
+| `relay` | machine | `TRACKER_TOKEN_RELAY` | `scripts/run_relay.sh` |
+
+The list is `TRACKER_SEATS` in `scripts/lib/expectedSecrets.mjs`, so
+`npm run doctor` reports each one as present or MISSING.
+
+A runner never handles the token itself. It sets `TRACKER_TOKEN_NAME` to
+the secret's **name** (`loop_runner.sh` derives it from the skill: `loop-build`
+→ `TRACKER_TOKEN_LOOP_BUILD`), and the door reads that secret inside its own
+`doppler run`. The value never enters the loop session's environment or its
+log. Only the three loop seats can be named: the door refuses
+`TRACKER_TOKEN_OPERATOR` (or any other name), so no loop can sign in as the
+operator. A session started by hand names none and falls back to
+`TRACKER_TOKEN`.
+Until the switch-over, Spirality's `tracker` is still `clickup`, so none of
+this is read yet.
+
+Making them, once, on the Mini (it uses the database at `trackerDataDir`,
+and creates it if the service has not yet):
+
+```bash
+npm run tracker:signins -- create --name Spirality
+npm run tracker:signins -- check
+```
+
+`create` makes each actor (with `tracker/admin.mjs`'s store calls), puts each
+token straight into Doppler, reads it back from Doppler, records the
+operator's actor as the one the history import (`tracker/import.mjs`) stands
+for his ClickUp seat, then makes the `spirality` project with the operator as
+its operator and the config's `trackerPrefix` as its ticket prefix (`--prefix`
+may be given, but must match). Without that record, the import would make a
+second operator and file all of his history under it; the import now refuses
+a project whose operator is not the one his seat maps to. Running `create`
+again finishes what a failed run left, records that mapping on a database
+made before it existed, and never replaces a working token. `check`
+asks `GET /me` with each token and expects that actor's own name back. To
+replace a lost or leaked token, delete that secret in Doppler and run
+`create` again: the same actor gets a new token, and the old one stops
+signing in.
+
 ### Checking it
 
 ```bash

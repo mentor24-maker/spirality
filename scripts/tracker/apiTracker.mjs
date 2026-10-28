@@ -46,6 +46,7 @@
 
 import { stampCommentBody } from '../lib/machineComment.mjs';
 import { PRIORITY_VALUE, QUEUED, TERMINAL_STATUSES } from '../lib/loopStatuses.mjs';
+import { TRACKER_SEATS } from '../lib/expectedSecrets.mjs';
 
 /** ClickUp's priority number -> the tracker's name. */
 const PRIORITY_NAME = Object.freeze(Object.fromEntries(Object.entries(PRIORITY_VALUE).map(([k, v]) => [v, k])));
@@ -90,7 +91,27 @@ function commentText(body) {
 const ms = (iso) => String(Date.parse(iso));
 
 /**
- * `token` is the loop's tracker token (TRACKER_TOKEN). `baseUrl` is the
+ * Which environment variable holds this caller's tracker token. Each loop
+ * has its own sign-in, kept in Doppler under its own name
+ * (`TRACKER_TOKEN_LOOP_BUILD`, ...). Its runner sets `TRACKER_TOKEN_NAME` to
+ * that NAME, never the value, so the token reaches only the door's own
+ * process (through `doppler run`) and never the loop session's environment.
+ * Without it, `TRACKER_TOKEN`. Only a machine seat's secret is accepted
+ * (TRACKER_SEATS): any other name is refused, above all the operator's own,
+ * so a loop can never sign in as him or be pointed at another key.
+ */
+export function trackerTokenEnv(env = process.env, seats = TRACKER_SEATS) {
+  const name = env.TRACKER_TOKEN_NAME;
+  if (name == null || name === '') return 'TRACKER_TOKEN';
+  const machine = seats.filter((s) => s.kind === 'machine').map((s) => s.secret);
+  if (!machine.includes(name)) {
+    throw new Error(`TRACKER_TOKEN_NAME must name a loop's own tracker secret (${machine.join(', ')}), not "${name}".`);
+  }
+  return name;
+}
+
+/**
+ * `token` is the loop's tracker token (see trackerTokenEnv). `baseUrl` is the
  * project config's `trackerUrl`. `project` is the tracker's project slug and
  * `listId` the configured Loop Queue list it stands for. `timeoutMs`
  * defaults to one minute. `log` takes the one request-count line (stderr in

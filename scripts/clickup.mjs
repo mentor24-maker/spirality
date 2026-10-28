@@ -41,7 +41,7 @@ import {
 import { buildCard, cardSurvived, findBlockquoteLines, CONTEXT_MIN_WORDS, CONTEXT_MAX_WORDS } from './lib/operatorCard.mjs';
 import { isMachineComment, stripMachineMarker } from './lib/machineComment.mjs';
 import { createClickupTracker } from './tracker/clickupTracker.mjs';
-import { createApiTracker } from './tracker/apiTracker.mjs';
+import { createApiTracker, trackerTokenEnv } from './tracker/apiTracker.mjs';
 
 import { loadProjectConfig, ProjectConfigError } from '../lib/projectConfig.mjs';
 // The merge lane's decisions (task 86bchpkxz). `mergeDecision` says whether
@@ -98,10 +98,11 @@ export const MACHINE_ID = Number(project.machineUserId);
 // The project config names it (lib/projectConfig.mjs refuses any other value
 // before we get here); this table is the door's half of that agreement.
 // `tokenEnv` names the environment variable that holds the token: Doppler
-// supplies it, and the door never prints it.
+// supplies it, and the door never prints it. Each loop's runner names its
+// own tracker token (trackerTokenEnv), so the tracker knows which loop wrote.
 const TRACKERS = {
   clickup: {
-    tokenEnv: 'CLICKUP_API_TOKEN',
+    tokenEnv: () => 'CLICKUP_API_TOKEN',
     make: (token) => createClickupTracker({
       token,
       apiBase: process.env.CLICKUP_API_BASE,
@@ -109,7 +110,7 @@ const TRACKERS = {
     }),
   },
   api: {
-    tokenEnv: 'TRACKER_TOKEN',
+    tokenEnv: () => trackerTokenEnv(),
     make: (token) => createApiTracker({
       token,
       baseUrl: project.trackerUrl,
@@ -123,7 +124,13 @@ if (!Object.hasOwn(TRACKERS, project.tracker)) {
   console.error(`clickup: the project config is not usable — "tracker" is ${JSON.stringify(project.tracker)}, and this door knows only: ${Object.keys(TRACKERS).join(', ')}`);
   process.exit(1);
 }
-const TOKEN_ENV = TRACKERS[project.tracker].tokenEnv;
+let TOKEN_ENV;
+try {
+  TOKEN_ENV = TRACKERS[project.tracker].tokenEnv();
+} catch (err) {
+  console.error(`clickup: ${err.message}`);
+  process.exit(1);
+}
 const TOKEN = process.env[TOKEN_ENV];
 const tracker = TRACKERS[project.tracker].make(TOKEN);
 
