@@ -4,7 +4,7 @@
  *
  * Plain Node, no outside packages: the built-in `node:sqlite` (SQLite, a
  * database kept in one ordinary file). Nothing reads this yet; the API, the
- * page and the importer are later tickets.
+ * page are later tickets; the importer (tracker/import.mjs) fills it.
  *
  * What the store enforces, and only this (the contract's own rules stay in
  * the package modules and the door):
@@ -24,6 +24,10 @@
  *    trail the loop reads can never shift under it.
  *  - Ticket ids are the project's own prefix plus a number (`<PREFIX>-1`). The
  *    prefix lives on the project row; nothing here knows any product.
+ *  - Imports (tracker/import.mjs, and nothing else) file a ticket or post a
+ *    comment with its ORIGINAL time, and record the old id beside the new one
+ *    in `imported_ids` in the same transaction. A ticket can therefore never
+ *    exist without its map row, so a re-run cannot file it twice.
  *  - An actor's sign-in token is stored only as its SHA-256 hash. The token
  *    itself is handed back once, by issueToken, and never kept.
  */
@@ -37,6 +41,7 @@ const { DISPLAY, TERMINAL_STATUSES, PRIORITY_RANK, statusOf } = loopStatuses;
 const STATUSES = Object.freeze(Object.keys(DISPLAY));
 const PRIORITIES = Object.freeze(Object.keys(PRIORITY_RANK));
 const ACTOR_KINDS = Object.freeze(['human', 'machine']);
+const IMPORT_KINDS = Object.freeze(['ticket', 'comment', 'actor']);
 
 /** The ticket fields a change may touch, and their column names. */
 const CHANGEABLE = Object.freeze({
@@ -96,6 +101,13 @@ CREATE TABLE IF NOT EXISTS events (
   to_value    TEXT,
   at          TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS imported_ids (
+  source      TEXT NOT NULL,
+  kind        TEXT NOT NULL CHECK (kind IN ('ticket', 'comment', 'actor')),
+  source_id   TEXT NOT NULL,
+  new_id      TEXT NOT NULL,
+  PRIMARY KEY (source, kind, source_id)
+);
 CREATE UNIQUE INDEX IF NOT EXISTS actors_by_token ON actors (token_hash);
 CREATE INDEX IF NOT EXISTS tickets_by_project ON tickets (project, status);
 CREATE INDEX IF NOT EXISTS comments_by_ticket ON comments (ticket, id);
@@ -134,6 +146,24 @@ function canonicalTags(tags) {
     throw new StoreError('bad-tags', 'tags must be an array of strings.');
   }
   return JSON.stringify(tags);
+}
+
+/** An original timestamp handed to an import: a valid date, kept as ISO text. */
+function requireTime(value, what) {
+  const d = new Date(value);
+  if (value == null || value === '' || Number.isNaN(d.getTime())) {
+    throw new StoreError('bad-time', `${what} must be a date, not "${value}".`);
+  }
+  return d.toISOString();
+}
+
+function requireImportKey(source, kind, sourceId) {
+  requireText(source, "an import's source");
+  if (!IMPORT_KINDS.includes(kind)) {
+    throw new StoreError('bad-import', `an imported id's kind is ${IMPORT_KINDS.join(', ')}, not "${kind}".`);
+  }
+  requireText(sourceId == null ? sourceId : String(sourceId), "an import's source id");
+  return [source, kind, String(sourceId)];
 }
 
 function requireText(value, what) {
@@ -270,6 +300,66 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
     ).run(ticket, actor, field, from, to, at);
   }
 
+  /** A new ticket's fields, checked before any transaction opens. */
+  function checkNewTicket({ project, actor, name, description = '', status, priority = null, tags = [], assignee = null, loopNote = '' }) {
+    requireText(name, "a ticket's name");
+    return {
+      project, actor, name, description: String(description), status: canonicalStatus(status),
+      priority: canonicalPriority(priority), tags: canonicalTags(tags), assignee, loopNote: String(loopNote),
+    };
+  }
+
+  /** Insert a checked ticket at `at`; call inside a transaction. */
+  function insertTicket(t, at, updatedAt) {
+    requireActor(t.actor, 'the filer');
+    if (t.assignee != null) requireActor(t.assignee, 'the assignee');
+    const proj = db.prepare('SELECT prefix, next_number FROM projects WHERE slug = ?').get(t.project);
+    if (!proj) throw new StoreError('unknown-project', `no project "${t.project}".`);
+    const number = num(proj.next_number);
+    const id = `${proj.prefix}-${number}`;
+    db.prepare('UPDATE projects SET next_number = ? WHERE slug = ?').run(number + 1, t.project);
+    db.prepare(
+      `INSERT INTO tickets (id, project, number, name, description, status, priority, tags, assignee, loop_note, created_at, updated_at, version)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+    ).run(id, t.project, number, t.name, t.description, t.status, t.priority, t.tags, t.assignee, t.loopNote, at, updatedAt ?? at);
+    writeEvent(id, t.actor, 'created', null, t.status, at);
+    return ticketFromRow(ticketRow(id));
+  }
+
+  /** Insert a comment at `at`; call inside a transaction. */
+  function insertComment({ ticket, author, body, parent }, at) {
+    requireActor(author, 'the author');
+    const row = requireTicketRow(ticket);
+    if (parent != null) {
+      const p = db.prepare('SELECT ticket FROM comments WHERE id = ?').get(parent);
+      if (!p || p.ticket !== row.id) {
+        throw new StoreError('bad-parent', `comment ${parent} is not on ticket ${row.id}.`);
+      }
+    }
+    const r = db.prepare('INSERT INTO comments (ticket, parent, author, body, created_at) VALUES (?, ?, ?, ?, ?)')
+      .run(row.id, parent, author, body, at);
+    return commentFromRow(db.prepare('SELECT * FROM comments WHERE id = ?').get(r.lastInsertRowid));
+  }
+
+  function importedRow(source, kind, sourceId) {
+    const row = db.prepare('SELECT new_id FROM imported_ids WHERE source = ? AND kind = ? AND source_id = ?')
+      .get(source, kind, sourceId);
+    return row ? row.new_id : null;
+  }
+
+  function refuseIfImported(source, kind, sourceId) {
+    if (importedRow(source, kind, sourceId) != null) {
+      throw new StoreError('already-imported', `${source} ${kind} ${sourceId} is already imported.`);
+    }
+  }
+
+  /** Record a map row; refuses if this old id already maps somewhere. Inside a transaction. */
+  function recordImport(source, kind, sourceId, newId) {
+    refuseIfImported(source, kind, sourceId);
+    db.prepare('INSERT INTO imported_ids (source, kind, source_id, new_id) VALUES (?, ?, ?, ?)')
+      .run(source, kind, sourceId, String(newId));
+  }
+
   return {
     /** A person or a machine that acts on tickets. */
     createActor({ kind, name }) {
@@ -340,27 +430,9 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
     },
 
     /** File a ticket. Its id is the project's prefix and next number. */
-    fileTicket({ project, actor, name, description = '', status, priority = null, tags = [], assignee = null, loopNote = '' }) {
-      requireText(name, "a ticket's name");
-      const s = canonicalStatus(status);
-      const p = canonicalPriority(priority);
-      const t = canonicalTags(tags);
-      return transaction(() => {
-        requireActor(actor, 'the filer');
-        if (assignee != null) requireActor(assignee, 'the assignee');
-        const proj = db.prepare('SELECT prefix, next_number FROM projects WHERE slug = ?').get(project);
-        if (!proj) throw new StoreError('unknown-project', `no project "${project}".`);
-        const number = num(proj.next_number);
-        const id = `${proj.prefix}-${number}`;
-        const at = now();
-        db.prepare('UPDATE projects SET next_number = ? WHERE slug = ?').run(number + 1, project);
-        db.prepare(
-          `INSERT INTO tickets (id, project, number, name, description, status, priority, tags, assignee, loop_note, created_at, updated_at, version)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
-        ).run(id, project, number, name, String(description), s, p, t, assignee, String(loopNote), at, at);
-        writeEvent(id, actor, 'created', null, s, at);
-        return ticketFromRow(ticketRow(id));
-      });
+    fileTicket(fields) {
+      const checked = checkNewTicket(fields);
+      return transaction(() => insertTicket(checked, now(), null));
     },
 
     /** One ticket, or null. */
@@ -451,18 +523,76 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
     /** Post a comment, or a reply when `parent` names one on the same ticket. */
     postComment({ ticket, author, body, parent = null }) {
       requireText(body, "a comment's body");
+      return transaction(() => insertComment({ ticket, author, body, parent }, now()));
+    },
+
+    /**
+     * The new id an imported thing was given, or null if it was never
+     * imported. Ticket ids are text (`<PREFIX>-4`); comment and actor ids come back
+     * as numbers.
+     */
+    importedId({ source, kind, sourceId }) {
+      const key = requireImportKey(source, kind, sourceId);
+      const id = importedRow(...key);
+      if (id == null) return null;
+      return kind === 'ticket' ? id : Number(id);
+    },
+
+    /** Every map row from one source, in the order they were written. */
+    listImportedIds(source) {
+      return db.prepare('SELECT source, kind, source_id, new_id FROM imported_ids WHERE source = ? ORDER BY rowid')
+        .all(source).map((r) => ({ source: r.source, kind: r.kind, sourceId: r.source_id, newId: r.new_id }));
+    },
+
+    /**
+     * IMPORT ONLY. File a ticket with its original `createdAt` (and
+     * `updatedAt`, default the same) and record `sourceId` against its new id,
+     * in one transaction. A source id already imported is refused with
+     * `already-imported` and nothing is written.
+     */
+    importTicket({ source, sourceId, createdAt, updatedAt, ...fields }) {
+      const key = requireImportKey(source, 'ticket', sourceId);
+      const at = requireTime(createdAt, "a ticket's original time");
+      const upd = updatedAt == null ? at : requireTime(updatedAt, "a ticket's original update time");
+      const checked = checkNewTicket(fields);
       return transaction(() => {
-        requireActor(author, 'the author');
-        const row = requireTicketRow(ticket);
-        if (parent != null) {
-          const p = db.prepare('SELECT ticket FROM comments WHERE id = ?').get(parent);
-          if (!p || p.ticket !== row.id) {
-            throw new StoreError('bad-parent', `comment ${parent} is not on ticket ${row.id}.`);
-          }
-        }
-        const r = db.prepare('INSERT INTO comments (ticket, parent, author, body, created_at) VALUES (?, ?, ?, ?, ?)')
-          .run(row.id, parent, author, body, now());
-        return commentFromRow(db.prepare('SELECT * FROM comments WHERE id = ?').get(r.lastInsertRowid));
+        refuseIfImported(...key);
+        const ticket = insertTicket(checked, at, upd);
+        recordImport(...key, ticket.id);
+        return ticket;
+      });
+    },
+
+    /**
+     * IMPORT ONLY. Post a comment (or a reply, with `parent`) with its
+     * original `createdAt`, and record `sourceId` against its new id, in one
+     * transaction. The body is stored exactly as given.
+     */
+    importComment({ source, sourceId, createdAt, ticket, author, body, parent = null }) {
+      const key = requireImportKey(source, 'comment', sourceId);
+      const at = requireTime(createdAt, "a comment's original time");
+      requireText(body, "a comment's body");
+      return transaction(() => {
+        refuseIfImported(...key);
+        const comment = insertComment({ ticket, author, body, parent }, at);
+        recordImport(...key, comment.id);
+        return comment;
+      });
+    },
+
+    /**
+     * IMPORT ONLY. The actor that stands for `sourceId` (a person or a
+     * machine in the old tracker), created on first use and found again on
+     * every later run.
+     */
+    importActor({ source, sourceId, kind, name }) {
+      const key = requireImportKey(source, 'actor', sourceId);
+      return transaction(() => {
+        const known = importedRow(...key);
+        if (known != null) return this.getActor(Number(known));
+        const actor = this.createActor({ kind, name });
+        recordImport(...key, actor.id);
+        return actor;
       });
     },
 
