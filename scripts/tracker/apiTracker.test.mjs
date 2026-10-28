@@ -7,7 +7,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { openStore } from '../../tracker/store.mjs';
 import { startServer } from '../../tracker/server.mjs';
-import { createApiTracker } from './apiTracker.mjs';
+import { createApiTracker, trackerTokenEnv } from './apiTracker.mjs';
 import { conflictTicketFiledComment, findConflictTicket } from '../../lib/conflictWork.js';
 import { isMachineComment } from '../lib/machineComment.mjs';
 
@@ -53,9 +53,9 @@ async function fixture() {
   const f = {
     dir, store, human, machine, humanToken, machineToken, url, product,
     set prBody(body) { writeFileSync(prFile, JSON.stringify({ body, url: 'https://github.com/owner/repo/pull/7' })); },
-    door(args, { stdin = '', token = machineToken } = {}) {
+    door(args, { stdin = '', token = machineToken, env: extra = {} } = {}) {
       return new Promise((resolve) => {
-        const env = { PATH: `${bin}:${process.env.PATH}`, HOME: process.env.HOME, TRACKER_TOKEN: token };
+        const env = { PATH: `${bin}:${process.env.PATH}`, HOME: process.env.HOME, TRACKER_TOKEN: token, ...extra };
         const child = spawn(process.execPath, [DOOR, ...args], { cwd: product, env });
         let out = '';
         let err = '';
@@ -97,6 +97,30 @@ test('a missing or wrong token is refused the way ClickUp\'s is, naming TRACKER_
     assert.match(wrong.err, /whoami FAILED — HTTP 401/);
     assert.match(wrong.err, /proj\/dev, TRACKER_TOKEN/);
     assert.doesNotMatch(wrong.err + wrong.out, new RegExp(f.machineToken));
+  } finally { await f.cleanup(); }
+});
+
+test('trackerTokenEnv: TRACKER_TOKEN by default, the named TRACKER_TOKEN_ secret when a runner names one, nothing else', () => {
+  assert.equal(trackerTokenEnv({}), 'TRACKER_TOKEN');
+  assert.equal(trackerTokenEnv({ TRACKER_TOKEN_NAME: '' }), 'TRACKER_TOKEN');
+  assert.equal(trackerTokenEnv({ TRACKER_TOKEN_NAME: 'TRACKER_TOKEN_LOOP_BUILD' }), 'TRACKER_TOKEN_LOOP_BUILD');
+  for (const bad of ['CLICKUP_API_TOKEN', 'TRACKER_TOKEN', 'TRACKER_TOKEN_', 'tracker_token_relay', 'TRACKER_TOKEN_A;B']) {
+    assert.throws(() => trackerTokenEnv({ TRACKER_TOKEN_NAME: bad }), /must name a TRACKER_TOKEN_/, bad);
+  }
+});
+
+test('a runner that names its own secret signs the door in as that loop, and a missing one is named', async () => {
+  const f = await fixture();
+  try {
+    const r = await f.door(['whoami'], { token: f.humanToken, env: { TRACKER_TOKEN_NAME: 'TRACKER_TOKEN_LOOP_BUILD', TRACKER_TOKEN_LOOP_BUILD: f.machineToken } });
+    assert.equal(r.code, 0, r.err);
+    assert.match(r.out, new RegExp(`Acting as: Loop .*\\(id ${f.machine.id}\\)`));
+    const missing = await f.door(['whoami'], { env: { TRACKER_TOKEN_NAME: 'TRACKER_TOKEN_RELAY' } });
+    assert.equal(missing.code, 2);
+    assert.match(missing.err, /TRACKER_TOKEN_RELAY is not set/);
+    const bad = await f.door(['whoami'], { env: { TRACKER_TOKEN_NAME: 'CLICKUP_API_TOKEN' } });
+    assert.equal(bad.code, 1);
+    assert.match(bad.err, /must name a TRACKER_TOKEN_/);
   } finally { await f.cleanup(); }
 });
 

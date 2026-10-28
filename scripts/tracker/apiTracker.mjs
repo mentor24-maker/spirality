@@ -90,7 +90,25 @@ function commentText(body) {
 const ms = (iso) => String(Date.parse(iso));
 
 /**
- * `token` is the loop's tracker token (TRACKER_TOKEN). `baseUrl` is the
+ * Which environment variable holds this caller's tracker token. Each loop
+ * has its own sign-in, kept in Doppler under its own name
+ * (`TRACKER_TOKEN_LOOP_BUILD`, ...). Its runner sets `TRACKER_TOKEN_NAME` to
+ * that NAME, never the value, so the token reaches only the door's own
+ * process (through `doppler run`) and never the loop session's environment.
+ * Without it, `TRACKER_TOKEN`. A name outside the `TRACKER_TOKEN_` family is
+ * refused, so the door can never be pointed at another key.
+ */
+export function trackerTokenEnv(env = process.env) {
+  const name = env.TRACKER_TOKEN_NAME;
+  if (name == null || name === '') return 'TRACKER_TOKEN';
+  if (!/^TRACKER_TOKEN_[A-Z0-9_]+$/.test(name)) {
+    throw new Error(`TRACKER_TOKEN_NAME must name a TRACKER_TOKEN_... secret, not "${name}".`);
+  }
+  return name;
+}
+
+/**
+ * `token` is the loop's tracker token (see trackerTokenEnv). `baseUrl` is the
  * project config's `trackerUrl`. `project` is the tracker's project slug and
  * `listId` the configured Loop Queue list it stands for. `timeoutMs`
  * defaults to one minute. `log` takes the one request-count line (stderr in

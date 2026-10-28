@@ -286,6 +286,12 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
       return row ? { id: num(row.id), kind: row.kind, name: row.name } : null;
     },
 
+    /** Every actor of this kind with this name, oldest first. */
+    actorsNamed({ kind, name }) {
+      return db.prepare('SELECT id FROM actors WHERE kind = ? AND name = ? ORDER BY id').all(kind, name)
+        .map((row) => this.getActor(num(row.id)));
+    },
+
     /**
      * Give an actor a new sign-in token, replacing any old one. The token is
      * returned here and nowhere else: only its hash is stored.

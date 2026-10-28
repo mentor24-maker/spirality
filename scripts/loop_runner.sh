@@ -38,6 +38,12 @@ LOCK="$HOME/loop-logs/spirality-$SKILL.lock"
 mkdir -p "$HOME/loop-logs"
 CLAUDE_BIN="${CLAUDE_BIN:-$(command -v claude || echo "$HOME/.local/bin/claude")}"
 
+# This loop's own tracker sign-in (docs/TRACKER_MVP.md, "Running it"): the
+# NAME of its Doppler secret, e.g. loop-build -> TRACKER_TOKEN_LOOP_BUILD.
+# The door reads the value inside its own `doppler run`, so the token never
+# enters this session's environment or its log.
+export TRACKER_TOKEN_NAME="TRACKER_TOKEN_$(printf '%s' "$SKILL" | tr 'a-z-' 'A-Z_')"
+
 # One runner per skill. A stale lock (its pid gone) is announced and taken over,
 # so a reboot never leaves the loop dead behind a lock nobody holds.
 if ! mkdir "$LOCK" 2>/dev/null; then
