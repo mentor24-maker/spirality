@@ -42,8 +42,8 @@ export function seedDemo(store, { operatorName = substrateConfig.operatorName() 
   store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE', operator: op.id });
 
   const expect = {};
-  const file = (project, name, status, { assigned = false, description = '' } = {}, outcome) => {
-    const t = store.fileTicket({ project, actor: loop.id, name, status, description, assignee: assigned ? op.id : null });
+  const file = (project, name, status, { assigned = false, description = '', priority = null, tags = [] } = {}, outcome) => {
+    const t = store.fileTicket({ project, actor: loop.id, name, status, description, priority, tags, assignee: assigned ? op.id : null });
     expect[t.id] = outcome;
     return t.id;
   };
@@ -68,6 +68,16 @@ export function seedDemo(store, { operatorName = substrateConfig.operatorName() 
   say(answered, op.id, 'merge');
 
   file('alpha', 'The board is missing: draw the seven columns', 'queued', { description: 'Later.' }, 'machine');
+
+  // One of each machine status, and Live, for the board. Queued holds three
+  // of mixed priority, filed out of order, so its column shows `queue` order
+  // (priority, then oldest) rather than filing order.
+  file('alpha', 'A low-priority chore filed first', 'queued', { priority: 'low', tags: ['chore'] }, 'machine');
+  file('alpha', 'An urgent fix filed after it', 'queued', { priority: 'urgent', tags: ['tracker', 'fix'] }, 'machine');
+  file('alpha', 'A send-back with review notes', 'rework', { priority: 'normal' }, 'machine');
+  file('alpha', 'A ticket a build loop is on', 'building', { priority: 'high' }, 'machine');
+  file('alpha', 'A pull request waiting for review', 'in review', { tags: ['tracker'] }, 'machine');
+  file('alpha', 'Finished and merged', 'live', { priority: 'normal' }, 'machine');
 
   const review = file('beta', 'Descriptions with HTML break the page: show them as text', 'ready to launch', {
     assigned: true,

@@ -1,6 +1,7 @@
 /**
  * Dane's page (docs/TRACKER_MVP.md, "Dane's page"): sign in, see what waits
- * on you, open a ticket, answer it. Plain browser JavaScript, no packages,
+ * on you, open a ticket, answer it, and see one project's whole queue on
+ * the board. Plain browser JavaScript, no packages,
  * no build step; tracker/server.mjs serves it.
  *
  * Every word of ticket text reaches the page through render.mjs, which
@@ -121,6 +122,47 @@ async function drawWaiting() {
       ${table(unsure)}` : ''}`;
 }
 
+/**
+ * One project's board: the seven statuses as columns in the contract's
+ * order, as the server sends them, each card opening its ticket. Read-only:
+ * moves stay with the door and the loops. `Live` starts folded, its count
+ * showing, because it only grows.
+ */
+async function drawBoard(slug) {
+  const { projects } = await api('GET', '/projects');
+  if (!slug) {
+    if (!projects.length) {
+      main.innerHTML = '<h1>Board</h1><p class="quiet">There are no projects yet.</p>';
+      return;
+    }
+    history.replaceState(null, '', `/board/${encodeURIComponent(projects[0].slug)}`);
+    slug = projects[0].slug;
+  }
+  const board = await api('GET', `/projects/${encodeURIComponent(slug)}/board`);
+  setTitle(`${board.projectName} board · Tracker`);
+  const switcher = projects.map((p) => (p.slug === board.project
+    ? `<strong>${escapeHtml(p.name)}</strong>`
+    : `<a href="/board/${encodeURIComponent(p.slug)}">${escapeHtml(p.name)}</a>`)).join('');
+  const card = (t) => `
+    <a class="card" href="/t/${encodeURIComponent(t.id)}">
+      <span class="name">${escapeHtml(t.name)}</span>
+      <span class="quiet">${escapeHtml(t.id)}${t.priority ? ` · ${escapeHtml(t.priority)}` : ''}</span>
+      ${t.tags.length ? `<span class="tags">${t.tags.map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join('')}</span>` : ''}
+    </a>`;
+  const column = (c) => {
+    const cards = c.tickets.map(card).join('') || '<p class="quiet">None.</p>';
+    const head = `${escapeHtml(c.status)} <span class="quiet">${c.tickets.length}</span>`;
+    return c.status === 'Live'
+      ? `<details class="column"><summary><h2>${head}</h2></summary>${cards}</details>`
+      : `<section class="column"><h2>${head}</h2>${cards}</section>`;
+  };
+  main.classList.add('wide');
+  main.innerHTML = `
+    <h1>${escapeHtml(board.projectName)} board</h1>
+    <nav class="projects">${switcher}</nav>
+    <div class="board">${board.columns.map(column).join('')}</div>`;
+}
+
 async function drawTicket(id) {
   const t = await api('GET', `/tickets/${encodeURIComponent(id)}/thread`);
   setTitle(`${t.name} · Tracker`);
@@ -175,9 +217,14 @@ async function route() {
     me = await api('GET', '/me');
     who.textContent = `Signed in as ${me.name}`;
     signOut.hidden = false;
+    main.classList.remove('wide');
     const ticket = /^\/t\/([^/]+)$/.exec(location.pathname);
+    const board = /^\/board(?:\/([^/]+))?$/.exec(location.pathname);
     if (ticket) {
       await drawTicket(decodeURIComponent(ticket[1]));
+      await refreshCount();
+    } else if (board) {
+      await drawBoard(board[1] == null ? null : decodeURIComponent(board[1]));
       await refreshCount();
     } else {
       await drawWaiting();

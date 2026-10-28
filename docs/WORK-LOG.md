@@ -16,9 +16,27 @@ The tracker can also send one email each time a ticket enters one of his
 two statuses: the ticket's name, its product, what is needed from him and
 a link straight to it. Never two for the same hand-over. A failed email
 never stops the ticket moving; it is noted in the log and tried again on
-the next change. The email is built and tested with a stand-in mail
-service. The real one waits on Dane's choice of service and its key, which
-he has been asked for on the ticket.
+the next change. The email goes out through Resend, the
+service Dane chose. Its key and his address are read from Doppler when the
+tracker starts, never written anywhere else; until both are there, the
+tracker runs with the email off and says so in its log. One command,
+`npm run tracker:test-email`, sends him a test hand-over to prove it works.
+
+---
+
+## 2026-10-27 — Dane can see a whole product's queue on a board of our own (#23)
+
+ClickUp's board shows every ticket of a product in one picture, a column
+per stage. The tracker's page now has the same thing. A "Board" link opens
+one product's queue as seven columns, in the order the loop contract sets,
+from "Rework" through "Live". Each ticket is a small card with its name,
+priority and labels, and clicking it opens the ticket. "Live" only ever
+grows, so it starts folded. A switcher at the top changes product. Inside
+each column the tickets are in exactly the order the loops' own `queue`
+command lists them, and a test checks the two against each other. The
+board only shows tickets; moving them stays with the loops.
+
+---
 
 ## 2026-10-27 — Dane can see and answer his tickets in a browser page of our own (#21)
 

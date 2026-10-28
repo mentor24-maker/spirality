@@ -5,7 +5,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openStore } from './store.mjs';
 import { startServer } from './server.mjs';
-import { createNotifier, handOverEmail, mailSettingsFromEnv, newestAsk } from './notify.mjs';
+import {
+  createNotifier, DEFAULT_FROM, handOverEmail, mailEnvFromDoppler, mailSettingsFromEnv, newestAsk, resendSender,
+} from './notify.mjs';
+import { pageUrlOf } from './server.mjs';
 import { cardAsk, tabTitle } from './web/render.mjs';
 
 const PAGE = 'http://tracker.example:8787/';
@@ -204,9 +207,9 @@ test('with no mail service the notifier does nothing, and the server runs withou
     assert.equal(notifier.enabled, false);
     await notifier.afterWrite({ id: 'AL-1', status: 'needs your input', version: 2 }, ['status']);
     assert.deepEqual(notifier.pending(), []);
-    const off = mailSettingsFromEnv();
+    const off = mailSettingsFromEnv({}, { pageUrl: PAGE });
     assert.equal(off.send, null);
-    assert.match(off.why, /hand-over email is off/);
+    assert.match(off.why, /RESEND_API_KEY and TRACKER_NOTIFY_TO are not in Doppler, so the hand-over email is off/);
   } finally { store.close(); }
 });
 
@@ -234,4 +237,100 @@ test('tabTitle: (N) Tracker while N wait, the page\'s own title otherwise', () =
   assert.equal(tabTitle(1, 'Some ticket · Tracker'), '(1) Tracker');
   assert.equal(tabTitle(0, 'Waiting on you · Tracker'), 'Waiting on you · Tracker');
   assert.equal(tabTitle(null, 'Sign in · Tracker'), 'Sign in · Tracker');
+});
+
+const KEY = 're_test_0123456789abcdef';
+
+/** A stand-in for fetch: records each call and answers with `answer`. */
+function fakeFetch(answer) {
+  const calls = [];
+  const doFetch = async (url, init) => {
+    calls.push({ url, init });
+    if (answer instanceof Error) throw answer;
+    return answer;
+  };
+  return { calls, doFetch };
+}
+
+test('resendSender: one POST to Resend with the key as a bearer and the email as JSON', async () => {
+  const { calls, doFetch } = fakeFetch(new Response('{"id":"x"}', { status: 200 }));
+  const send = resendSender({ apiKey: KEY, fetch: doFetch });
+  await send({ to: 'dane@example.com', subject: 'Waiting on you: X', text: 'body' });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, 'https://api.resend.com/emails');
+  assert.equal(calls[0].init.method, 'POST');
+  assert.equal(calls[0].init.headers.authorization, `Bearer ${KEY}`);
+  assert.deepEqual(JSON.parse(calls[0].init.body), {
+    from: DEFAULT_FROM, to: ['dane@example.com'], subject: 'Waiting on you: X', text: 'body',
+  });
+});
+
+test('resendSender: a refusal or no answer throws with the reason, and never with the key', async () => {
+  const refused = resendSender({
+    apiKey: KEY,
+    fetch: fakeFetch(new Response(JSON.stringify({ message: `API key ${KEY} is invalid` }), { status: 401 })).doFetch,
+  });
+  await assert.rejects(refused({ to: 'a@b', subject: 's', text: 't' }), (err) => {
+    assert.match(err.message, /^Resend answered 401: API key \[key\] is invalid$/);
+    return true;
+  });
+  const down = resendSender({ apiKey: KEY, fetch: fakeFetch(new Error('getaddrinfo ENOTFOUND')).doFetch });
+  await assert.rejects(down({ to: 'a@b', subject: 's', text: 't' }), /Resend could not be reached: getaddrinfo ENOTFOUND/);
+  const bare = resendSender({ apiKey: KEY, fetch: fakeFetch(new Response('oops', { status: 500 })).doFetch });
+  await assert.rejects(bare({ to: 'a@b', subject: 's', text: 't' }), /^Error: Resend answered 500$/);
+});
+
+test('a Resend refusal through the notifier: the move stands, the log has the reason and no key', async () => {
+  const store = openStore(':memory:');
+  try {
+    const dane = store.createActor({ kind: 'human', name: 'Dane' });
+    const loop = store.createActor({ kind: 'machine', name: 'Loop' });
+    store.createProject({ slug: 'alpha', name: 'Alpha', prefix: 'AL', operator: dane.id });
+    const t = store.fileTicket({ project: 'alpha', actor: loop.id, name: 'X', status: 'building' });
+    const moved = store.changeTicket(t.id, { actor: loop.id, status: 'needs your input', assignee: dane.id });
+    const lines = [];
+    const mail = mailSettingsFromEnv(
+      { RESEND_API_KEY: KEY, TRACKER_NOTIFY_TO: 'dane@example.com' },
+      { pageUrl: PAGE, fetch: fakeFetch(new Response(JSON.stringify({ message: `bad key ${KEY}` }), { status: 403 })).doFetch },
+    );
+    const notifier = createNotifier({ store, ...mail, log: (l) => lines.push(l) });
+    await notifier.afterWrite(moved.ticket, moved.changed);
+    assert.equal(store.getTicket(t.id).status, 'needs your input');
+    assert.equal(notifier.pending().length, 1);
+    assert.match(lines.join('\n'), /NOT sent: AL-1 .*Resend answered 403: bad key \[key\]/);
+    assert.ok(!lines.join('\n').includes(KEY));
+  } finally { store.close(); }
+});
+
+test('mailSettingsFromEnv: both names make a Resend sender; one missing, or no address for the link, keeps it off', () => {
+  const on = mailSettingsFromEnv({ RESEND_API_KEY: KEY, TRACKER_NOTIFY_TO: 'dane@example.com' }, { pageUrl: PAGE });
+  assert.equal(typeof on.send, 'function');
+  assert.equal(on.to, 'dane@example.com');
+  assert.equal(on.pageUrl, PAGE);
+  assert.ok(!JSON.stringify(on).includes(KEY), 'the key stays inside the sender');
+  assert.match(mailSettingsFromEnv({ RESEND_API_KEY: KEY }, { pageUrl: PAGE }).why, /^TRACKER_NOTIFY_TO is not in Doppler/);
+  assert.match(mailSettingsFromEnv({ RESEND_API_KEY: KEY, TRACKER_NOTIFY_TO: 'd@e' }).why, /address is unknown/);
+});
+
+test('mailEnvFromDoppler keeps only the mail names, and a failed read says so without values', async () => {
+  const seen = [];
+  const run = async (cmd, args) => {
+    seen.push([cmd, ...args]);
+    return { stdout: JSON.stringify({ CLICKUP_API_TOKEN: 'pk_other', RESEND_API_KEY: KEY, TRACKER_NOTIFY_TO: 'd@e' }) };
+  };
+  const { env } = await mailEnvFromDoppler({ project: 'proj', config: 'dev', run });
+  assert.deepEqual(env, { RESEND_API_KEY: KEY, TRACKER_NOTIFY_TO: 'd@e' });
+  assert.deepEqual(seen[0].slice(0, 3), ['doppler', 'secrets', 'download']);
+  assert.ok(seen[0].includes('proj') && seen[0].includes('dev'));
+  const failed = await mailEnvFromDoppler({
+    project: 'proj', config: 'dev', run: async () => { throw Object.assign(new Error('boom'), { code: 'ENOENT' }); },
+  });
+  assert.deepEqual(failed, { error: 'could not read Doppler proj/dev (ENOENT)' });
+});
+
+test('pageUrlOf: the configured trackerUrl, else this machine by name on the port', () => {
+  assert.equal(pageUrlOf({ trackerUrl: 'http://mini.local:4180', host: '0.0.0.0', port: 4180 }), 'http://mini.local:4180');
+  assert.equal(pageUrlOf({ host: '127.0.0.1', port: 4180 }), 'http://127.0.0.1:4180');
+  assert.match(pageUrlOf({ host: '0.0.0.0', port: 4180 }), /^http:\/\/[^/]+:4180$/);
+  assert.ok(!pageUrlOf({ host: '0.0.0.0', port: 4180 }).includes('0.0.0.0'));
 });

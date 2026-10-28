@@ -22,12 +22,16 @@
  * address it listens on: 127.0.0.1 (this machine only) unless set, and
  * 0.0.0.0 for every machine on the home network.
  */
+import { execFile } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
+import { hostname } from 'node:os';
+import { promisify } from 'node:util';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { openStore, StoreError } from './store.mjs';
-import { threadOf, waitingFor } from './pageData.mjs';
-import { createNotifier, mailSettingsFromEnv } from './notify.mjs';
+import { boardOf, projectsList, threadOf, waitingFor } from './pageData.mjs';
+import { createNotifier, MAIL_KEY, mailEnvFromDoppler, mailSettingsFromEnv } from './notify.mjs';
+import { loadProjectConfig } from '../lib/projectConfig.mjs';
 
 /** The largest request body accepted, in bytes. A ticket description fits easily. */
 const MAX_BODY = 1024 * 1024;
@@ -44,8 +48,9 @@ const CHANGE_FIELDS = Object.freeze(['name', 'description', 'status', 'priority'
 /**
  * Dane's page (tracker/web/): the only files served without a token, and the
  * only ones served at all, by name. The page holds no data; everything it
- * shows comes through the API below with his token. `/` and `/t/<id>` both
- * answer the page itself, so a ticket's address opens it.
+ * shows comes through the API below with his token. `/`, `/t/<id>`, `/board`
+ * and `/board/<project>` all answer the page itself, so each address opens
+ * its own view.
  */
 const WEB_DIR = new URL('./web/', import.meta.url);
 const WEB_FILES = Object.freeze({
@@ -69,7 +74,7 @@ const PAGE_HEADERS = Object.freeze({
 
 /** The page file a GET of `pathname` answers with, or null when it is not a page address. */
 function pageFile(pathname) {
-  if (pathname === '/' || /^\/t\/[^/]+$/.test(pathname)) return 'index.html';
+  if (pathname === '/' || pathname === '/board' || /^\/(?:t|board)\/[^/]+$/.test(pathname)) return 'index.html';
   const m = /^\/web\/([^/]+)$/.exec(pathname);
   return m && Object.hasOwn(WEB_FILES, m[1]) ? m[1] : null;
 }
@@ -194,6 +199,19 @@ export function createHandler(store, { log = () => {}, notifier = null } = {}) {
     // loop's own verdict (tracker/pageData.mjs).
     if (parts.length === 1 && parts[0] === 'waiting' && method === 'GET') {
       return [200, waitingFor(store, me.id)];
+    }
+
+    // Dane's page: the board's project switcher.
+    if (parts.length === 1 && parts[0] === 'projects' && method === 'GET') {
+      return [200, { projects: projectsList(store) }];
+    }
+
+    // Dane's page: one project's board, the seven statuses in the contract's
+    // order, each column in `queue` order.
+    if (parts.length === 3 && parts[0] === 'projects' && parts[2] === 'board' && method === 'GET') {
+      const board = boardOf(store, parts[1]);
+      if (!board) throw new HttpError(404, 'unknown-project', `no project "${parts[1]}".`);
+      return [200, board];
     }
 
     if (parts.length === 3 && parts[0] === 'projects' && parts[2] === 'tickets') {
@@ -322,12 +340,47 @@ export function settingsFromEnv(env = process.env) {
   return { db: env.TRACKER_DB, port, host };
 }
 
+/**
+ * The tracker's address as Dane opens it, for the link in an email: the
+ * project config's trackerUrl, or else this machine by name on the
+ * configured port (a server listening on every address is reached by the
+ * machine's name, not 0.0.0.0).
+ */
+export function pageUrlOf({ trackerUrl, host, port }) {
+  if (trackerUrl) return trackerUrl;
+  const name = host === '0.0.0.0' || host === '::' ? hostname() : host;
+  return `http://${name}:${port}`;
+}
+
+/**
+ * The hand-over email's settings. launchd starts the server without Doppler,
+ * so the mail names are read from the project's Doppler config here; any
+ * failure leaves the email off, said in the log, and never stops the server.
+ */
+export async function loadMailSettings({ host, port, log = () => {} }) {
+  if (process.env[MAIL_KEY]) return mailSettingsFromEnv(process.env, { pageUrl: pageUrlOf({ host, port }) });
+  let config;
+  try {
+    config = loadProjectConfig();
+  } catch (err) {
+    return { send: null, why: `the project config is not usable (${err.message}), so the hand-over email is off.` };
+  }
+  const { env, error } = await mailEnvFromDoppler({
+    project: config.dopplerProject, config: config.dopplerConfig, run: promisify(execFile),
+  });
+  if (error) return { send: null, why: `${error}, so the hand-over email is off.` };
+  const pageUrl = pageUrlOf({ trackerUrl: config.trackerUrl, host, port });
+  const mail = mailSettingsFromEnv(env, { pageUrl });
+  if (mail.send) log(`hand-over email: on, through Resend, linking to ${pageUrl}.`);
+  return mail;
+}
+
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   try {
     const { db, port, host } = settingsFromEnv();
     const store = openStore(db);
     const log = (line) => console.log(`${new Date().toISOString()} ${line}`);
-    const mail = mailSettingsFromEnv();
+    const mail = await loadMailSettings({ host, port, log });
     const notifier = mail.send ? createNotifier({ store, ...mail, log }) : null;
     if (!notifier) log(`hand-over email: off. ${mail.why}`);
     const server = await startServer({ store, port, host, log, notifier });

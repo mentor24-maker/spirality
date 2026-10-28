@@ -225,6 +225,17 @@ per request: method, address, answer, actor id; never a token) and
 `<productSlug>-tracker-backup.log` (one `backup OK` or `backup FAILED` line
 per night).
 
+**The hand-over email** goes out through Resend (Dane's choice,
+2026-10-28) when a ticket enters one of his two statuses. The server reads
+two names from the project's Doppler config when it starts: `RESEND_API_KEY`
+(the service's key) and `TRACKER_NOTIFY_TO` (his address). With either one
+missing, or Doppler unreadable, the server runs with the email off and says
+so once in its log. After adding or changing them, restart the server so it
+reads them again:
+`launchctl kickstart -k gui/$(id -u)/<launchdPrefix>.tracker`.
+`npm run tracker:test-email` sends one test hand-over through the same code,
+from a throwaway tracker in memory, without touching the real one.
+
 **A backup is made by SQLite itself**, not by copying the file: copying a
 database while it is being written can catch it half-done. `VACUUM INTO`
 reads the whole database at one moment while writes carry on, the copy is

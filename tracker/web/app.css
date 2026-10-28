@@ -29,3 +29,14 @@ form.reply .row { display: flex; gap: 1rem; align-items: center; margin-top: 0.5
 form.sign-in { max-width: 28rem; }
 form.sign-in input { width: 100%; font: inherit; padding: 0.5rem; box-sizing: border-box; margin: 0.5rem 0; }
 button { font: inherit; padding: 0.4rem 1rem; }
+main.wide { max-width: none; }
+nav.projects { display: flex; gap: 1rem; margin-bottom: 1rem; }
+.board { display: flex; gap: 0.75rem; align-items: flex-start; overflow-x: auto; padding-bottom: 1rem; }
+.column { flex: 0 0 15rem; background: #f5f5f7; border-radius: 8px; padding: 0.5rem; }
+.column h2 { font-size: 0.95rem; margin: 0.25rem 0.25rem 0.5rem; display: inline-block; }
+details.column > summary { cursor: pointer; }
+details.column:not([open]) { flex-basis: auto; }
+.card { display: flex; flex-direction: column; gap: 0.25rem; background: #fff; border: 1px solid var(--line); border-radius: 6px; padding: 0.5rem 0.6rem; margin-bottom: 0.5rem; color: var(--ink); text-decoration: none; font-size: 0.9rem; }
+.card:hover { border-color: var(--quiet); }
+.card .quiet { font-size: 0.8rem; }
+.card .tag { margin-left: 0; margin-right: 0.3rem; }

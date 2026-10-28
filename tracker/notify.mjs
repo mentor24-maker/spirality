@@ -23,11 +23,12 @@
  *
  * The mail service itself is a `send({ to, subject, text })` function handed
  * in, which resolves when the service accepted the message and throws when
- * it did not. Tests hand in a fake. Which service sends the real email, and
- * its key, are Dane's choice and live in Doppler; until one is wired in,
- * `mailSenderFromEnv` answers null and the email is off, said once in the
- * server's log. The key never reaches this module, and a log line here
- * carries only a ticket id, a status and the service's error message.
+ * it did not. Tests hand in a fake. The real one is Resend (Dane's choice,
+ * 2026-10-28): `resendSender` makes it, and `mailSettingsFromEnv` builds it
+ * from RESEND_API_KEY and TRACKER_NOTIFY_TO, which live in Doppler. With
+ * either one missing the email is off, said once in the server's log. The
+ * key stays inside the sender; a log line here carries only a ticket id, a
+ * status and the service's error message, with the key cut out of it.
  *
  * What is kept between tries lives in memory: a restart of the server drops
  * an unsent email. The page's waiting count is the backstop for that.
@@ -149,13 +150,80 @@ export function createNotifier({ store, send, to, pageUrl, log = () => {} }) {
   };
 }
 
+/** The Doppler names the email reads: the service's key and Dane's address. */
+export const MAIL_KEY = 'RESEND_API_KEY';
+export const MAIL_TO = 'TRACKER_NOTIFY_TO';
+/** Optional: a sender of our own once a domain is set up in Resend. */
+export const MAIL_FROM = 'TRACKER_NOTIFY_FROM';
 /**
- * The mail service, from the environment. No service is chosen yet (Dane's
- * decision: the service, and its key in Doppler), so this answers why the
- * email is off. The ticket that wires one in returns
- * `{ send, to, pageUrl }` here, with the names it reads added to
- * scripts/lib/expectedSecrets.mjs.
+ * Resend's shared sender. It needs no domain of our own, and Resend lets it
+ * deliver only to the account's own address, which is exactly who this
+ * email is for.
  */
-export function mailSettingsFromEnv(/* env = process.env */) {
-  return { send: null, why: 'no mail service is chosen yet, so the hand-over email is off.' };
+export const DEFAULT_FROM = 'Tracker <onboarding@resend.dev>';
+const RESEND_URL = 'https://api.resend.com/emails';
+
+/**
+ * A `send` that hands one email to Resend's API. Resolves once Resend has
+ * accepted it; throws with Resend's own answer when it has not, or when it
+ * could not be reached within `timeoutMs`. The key is cut out of every
+ * error message, so a log line can never carry it.
+ */
+export function resendSender({ apiKey, from = DEFAULT_FROM, fetch: doFetch = globalThis.fetch, timeoutMs = 15_000 }) {
+  const scrub = (text) => String(text ?? '').split(apiKey).join('[key]');
+  return async function send({ to, subject, text }) {
+    let res;
+    try {
+      res = await doFetch(RESEND_URL, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ from, to: [to], subject, text }),
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+    } catch (err) {
+      throw new Error(`Resend could not be reached: ${scrub(err?.message ?? err)}`);
+    }
+    if (res.ok) return;
+    let detail = '';
+    try { detail = (await res.json())?.message ?? ''; } catch { /* no JSON body: the status says enough */ }
+    throw new Error(`Resend answered ${res.status}${detail ? `: ${scrub(detail)}` : ''}`);
+  };
+}
+
+/**
+ * The mail settings from the environment: `{ send, to, pageUrl }`, or
+ * `{ send: null, why }` naming what is missing. `pageUrl` is the tracker's
+ * address as Dane opens it, for the link in the email.
+ */
+export function mailSettingsFromEnv(env = process.env, { pageUrl = null, fetch } = {}) {
+  const missing = [MAIL_KEY, MAIL_TO].filter((name) => !env[name]);
+  if (missing.length) {
+    return { send: null, why: `${missing.join(' and ')} ${missing.length > 1 ? 'are' : 'is'} not in Doppler, so the hand-over email is off.` };
+  }
+  if (!pageUrl) return { send: null, why: 'the tracker\'s own address is unknown, so the hand-over email is off.' };
+  const send = resendSender({ apiKey: env[MAIL_KEY], from: env[MAIL_FROM] || DEFAULT_FROM, ...(fetch ? { fetch } : {}) });
+  return { send, to: env[MAIL_TO], pageUrl };
+}
+
+/**
+ * The mail names from Doppler, for the server on the Mini, which launchd
+ * starts without them. Answers `{ env }` holding only the mail names found
+ * (never any other key), or `{ error }` when Doppler could not be read; the
+ * server then runs with the email off. `run` is execFile, promised.
+ */
+export async function mailEnvFromDoppler({ project, config, run }) {
+  let out;
+  try {
+    ({ stdout: out } = await run('doppler', [
+      'secrets', 'download', '--no-file', '--format', 'json',
+      '--project', project, '--config', config, '--no-check-version',
+    ], { timeout: 20_000, maxBuffer: 1024 * 1024 }));
+  } catch (err) {
+    return { error: `could not read Doppler ${project}/${config} (${err?.code ?? 'failed'})` };
+  }
+  let all;
+  try { all = JSON.parse(out); } catch { return { error: `Doppler ${project}/${config} did not answer JSON` }; }
+  const env = {};
+  for (const name of [MAIL_KEY, MAIL_TO, MAIL_FROM]) if (all[name]) env[name] = all[name];
+  return { env };
 }
