@@ -91,7 +91,8 @@ Exit **0** nothing of his / **3** something IS his / **1** could not tell.
    recorded PR. Check out that branch into a worktree
    (`git worktree add .claude/worktrees/<slug> -b <branch> origin/<branch>`),
    read the send-back in `comments`, fix what it named, and push to the SAME
-   PR.
+   PR. A `MAIN MOVED: ... — conflict` note newer than the send-back is part of
+   the rework even when review did not name it.
 
    The seven statuses are `Rework → Queued → Building → In review →
    Needs your input / Ready to launch → Live`. Two belong to Dane and no loop
@@ -125,6 +126,15 @@ Exit **0** nothing of his / **3** something IS his / **1** could not tell.
    the ticket FIRST (a `comment`), then build what is true.
 
 4. **Run the gates — the definition of done.**
+
+   **Catch up with `main` first.** Another ticket may have merged while you
+   built. Run `npm run clickup -- get --task <id>` and read its `main:` line:
+   the relay writes a `MAIN MOVED:` note on your ticket after every merge.
+   On anything but `no-overlap` (or always, it is cheap), merge it in now,
+   before review finds it: `git fetch origin && git merge origin/main
+   --no-edit`. A real conflict here is yours to resolve, inside the task's
+   scope, with the conflicted files read and understood, never by taking one
+   side blind.
 
    ```bash
    npm run verify

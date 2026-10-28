@@ -113,7 +113,7 @@ test('task files a ticket and reads it back; get and task-name print it as on Cl
     assert.equal(get.out, [
       'id:       AL-1', 'name:     Fix the thing', 'status:   queued', 'priority: high', 'assigned: (nobody)',
       'tags:     tracker, phase-2', 'list:     alpha (alpha)', 'pr:       (none recorded)', 'rounds:   0 send-back(s) so far',
-      `url:      ${f.url}/tickets/AL-1`, '---', '## Goal\nDo it.\n', '',
+      'main:     (no MAIN MOVED note)', `url:      ${f.url}/tickets/AL-1`, '---', '## Goal\nDo it.\n', '',
     ].join('\n'));
 
     const name = await f.door(['task-name', '--task', 'AL-1']);

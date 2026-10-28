@@ -331,6 +331,35 @@ beside a PASS contains a line starting "Review re-ran everything...", which
 is newer than the verdict, so four approved tickets were refused overnight
 with "the most recent review verdict is not a PASS".
 
+### `MAIN MOVED:` — main changed under an in-flight ticket
+
+```
+MAIN MOVED: PR #<merged> -> PR #<this ticket's PR> — no-overlap | same-files | conflict | cannot-tell
+```
+
+Written by `main-moved`, which the relay runs after every merge it makes (a
+session that merged by hand runs `npm run clickup -- main-moved --pr <n>`).
+It goes on every ticket in `Building`, `In review` or `Rework` whose
+recorded PR is still open against the same base, and never on Dane's two
+statuses: each ticket's status is re-read just before its note is posted, so
+one that moved to his statuses during the relay pass is skipped. A branch
+that already contains the merged PR is not told. One ticket whose comments
+cannot be read is reported and skipped; the rest are still told. The kind comes from `git merge-tree`, a merge done in memory with
+no checkout: `no-overlap` (none of the same files, merges cleanly),
+`same-files` (shared files, still merges cleanly), `conflict` (names the
+files), `cannot-tell` (the check did not run, treated as `same-files`, never
+as clean). The pair of PR numbers is the duplicate guard: one note per merge
+per PR. `get` prints the newest one on its `main:` line.
+
+What the loops do with it: loop-build merges `main` in and re-runs `verify`
+before handing over to review on anything but `no-overlap`; loop-review sends
+a `conflict` straight back to `Rework`, without spending a test pass first.
+The note moves no status by itself.
+
+**Why (2026-10-27, task 86bctjffu):** two tickets built at once branch from
+the same `main`; the second learned the first had merged only at review or at
+Dane's merge word, then went round the whole cycle again.
+
 ### `[merge-on-comment]`: spent and unspent authorizations
 
 When the relay acts on Dane's merge phrase, it writes a threaded reply on his

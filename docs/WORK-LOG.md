@@ -6,6 +6,23 @@ file directly on `main`.
 
 ---
 
+## 2026-10-27 — Every open ticket hears when main moves under it (#18)
+
+Two tickets built at the same time start from the same copy of the code.
+When the first one merged, the second found out only at review, or when
+Dane's merge word was refused, and then went round the whole build and
+review cycle again. Now, right after every merge, the relay leaves one note
+on each ticket still being built or reviewed: "nothing you touch changed",
+"the same files changed but still fit together", or "this now clashes, in
+these files". The build loop catches up before review instead of after, and
+the review loop sends a clash straight back instead of testing code that
+cannot land. Nothing moves on its own; the note only tells. Each ticket is
+checked again just before its note goes on, so one that has reached Dane in
+the meantime is left alone, and one unreadable ticket no longer stops the
+relay from telling the rest or from finishing its pass.
+
+---
+
 ## 2026-10-27 — The loops can now work a queue in our own tracker (#19)
 
 Every loop reads and moves tickets through one door, and until now that
