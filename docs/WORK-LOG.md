@@ -23,6 +23,31 @@ relay from telling the rest or from finishing its pass.
 
 ---
 
+## 2026-10-27 — The loops can now work a queue in our own tracker (#19)
+
+Every loop reads and moves tickets through one door, and until now that
+door could only talk to ClickUp. Now it can also talk to our own tracker:
+a product switches by changing two lines in its settings file, and every
+command works exactly as before, with the same messages and the same
+results. No product has been switched yet; that comes later. The real gain
+is claiming work. On ClickUp, two loops could both grab the same ticket in
+the moment between checking it and taking it. In the tracker, the check and
+the take happen as one step, so only one loop can ever win, and the other
+is told to take the next ticket.
+
+The first review caught five places where the tracker still behaved
+differently from ClickUp, and they are fixed in the same pull request: a
+ticket that waits on another can now be claimed once the other is done
+(the ticket number was being looked up in the wrong letter case); a
+ticket's link says plainly that the tracker has no page for it yet instead
+of pointing at a page that does not exist; questions to Dane keep their
+bold headings and the box around his own words; adding a tag no longer
+fails when something else changed the ticket at the same moment; and a
+tracker address written with stray spaces or a trailing "?" is cleaned up
+before it is stored.
+
+---
+
 ## 2026-10-27 — A ticket can wait on another (#17)
 
 The build loop always took the oldest waiting ticket, whatever it built
