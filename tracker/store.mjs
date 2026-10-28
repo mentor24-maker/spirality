@@ -333,6 +333,12 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
       return row ? { slug: row.slug, name: row.name, prefix: row.prefix, operator: num(row.operator) } : null;
     },
 
+    /** Every project, by slug: Dane's page lists what waits on him across all of them. */
+    listProjects() {
+      return db.prepare('SELECT slug, name, prefix, operator FROM projects ORDER BY slug').all()
+        .map((row) => ({ slug: row.slug, name: row.name, prefix: row.prefix, operator: num(row.operator) }));
+    },
+
     /** File a ticket. Its id is the project's prefix and next number. */
     fileTicket({ project, actor, name, description = '', status, priority = null, tags = [], assignee = null, loopNote = '' }) {
       requireText(name, "a ticket's name");
