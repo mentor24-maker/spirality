@@ -416,7 +416,10 @@ ClickUp seat ids the config holds until then.
    `STATUS DIFFERS` line means a ticket moved after it was imported (the
    importer adds new tickets and comments on a re-run but does not refresh
    one it already has): move that ticket in the tracker to ClickUp's status,
-   by hand, then check again.
+   by hand, then check again. A `NOT YET IMPORTED` line under
+   `dry-run import` means something reached ClickUp after the import (a
+   comment, say, which leaves the statuses matching): run the real import
+   again (step 4), then check again.
 
 6. **Dane merges the switch PR.** His word, as for every merge. Then bring
    the checkout up to date: `git pull` on `main`.

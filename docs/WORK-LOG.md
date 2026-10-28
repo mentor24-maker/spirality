@@ -21,7 +21,11 @@ the tracker hold the same tickets as ClickUp with the same statuses, and
 would the copy go through cleanly. Run on the Mini today it already caught
 something: the tracker does not yet know which of its people is Dane's
 ClickUp account, so the copy would have refused. The steps now fix that
-before copying. Nothing was switched; the loops still run on ClickUp.
+before copying. After review, the check is also stricter: it no longer says
+"safe" when a comment reached ClickUp after the copy (the statuses would
+still match, but that comment would be lost), and it points at the Mini's
+network name for the tracker's address, the one Dane's browser and the
+email use. Nothing was switched; the loops still run on ClickUp.
 
 ## 2026-10-28 — Each loop gets its own sign-in to the tracker (#22)
 

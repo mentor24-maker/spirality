@@ -358,12 +358,18 @@ function arg(argv, name) {
 export function dryRunCopy(db) {
   const dir = mkdtempSync(join(tmpdir(), 'tracker-import-dry-'));
   const copy = join(dir, 'tracker.db');
-  if (existsSync(db)) {
-    for (const ext of ['', '-wal', '-shm']) {
-      if (existsSync(db + ext)) copyFileSync(db + ext, copy + ext);
+  const cleanup = () => rmSync(dir, { recursive: true, force: true });
+  try {
+    if (existsSync(db)) {
+      for (const ext of ['', '-wal', '-shm']) {
+        if (existsSync(db + ext)) copyFileSync(db + ext, copy + ext);
+      }
     }
+  } catch (err) {
+    cleanup();
+    throw err;
   }
-  return { path: copy, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+  return { path: copy, cleanup };
 }
 
 async function main(argv) {

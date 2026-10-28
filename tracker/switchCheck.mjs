@@ -17,7 +17,9 @@
  *                       tracker with the same status, and the tracker holds
  *                       no ticket ClickUp does not.
  *  4. dry-run import    `tracker/import.mjs` into a copy of the database
- *                       reads everything and refuses nothing.
+ *                       reads everything, refuses nothing and has nothing
+ *                       left to write (a comment added in ClickUp after the
+ *                       import would be written, so it fails).
  *
  * It writes NOTHING: ClickUp is only read (through the ClickUp tracker), and
  * the database is only ever opened as a throwaway copy, so the real file is
@@ -142,15 +144,27 @@ export async function runSwitchCheck({ config, env, db, clickup, fetchImpl = fet
       ? `${url} answers (${p.why}).`
       : `NOTHING ANSWERS at ${url} (${p.why}). Start the tracker first (the runbook, step 2).`]);
   }
-  section('config', true, [`tracker is "${config.tracker ?? 'clickup'}"${config.trackerUrl ? `, trackerUrl ${config.trackerUrl}` : ', no trackerUrl yet'}. The switch sets tracker "api" and trackerUrl "${url ?? '(none)'}".`]);
+  section('config', true, [
+    `tracker is "${config.tracker ?? 'clickup'}"${config.trackerUrl ? `, trackerUrl ${config.trackerUrl}` : ', no trackerUrl yet'}.`,
+    `The switch sets tracker "api" and trackerUrl to the Mini's network address, http://<\`scutil --get LocalHostName\`>.local:${config.trackerPort ?? '<trackerPort>'}`,
+    '(not 127.0.0.1: Dane\'s browser and the hand-over email use it; the runbook, "The switch").',
+  ]);
 
   const haveDb = Boolean(db) && existsSync(db);
   if (!haveDb) section('database', false, [`There is no tracker database at ${db ?? '(no path: set trackerDataDir)'}. Make the sign-ins first: \`npm run tracker:signins -- create --name <project name>\`.`]);
 
   // A copy of the database (an empty one when there is none): the real file is never opened.
-  const scratch = dryRunCopy(haveDb ? db : '');
-  const store = openStore(scratch.path);
+  let scratch = null;
+  let store = null;
   try {
+    try {
+      scratch = dryRunCopy(haveDb ? db : '');
+      store = openStore(scratch.path);
+    } catch (err) {
+      section('database copy', false, [`Could not open a copy of the database: ${err.message}. Nothing else is checked.`]);
+      return { ok: false, sections };
+    }
+
     // 2. Sign-ins.
     const seats = seatsFor(config.operatorName);
     if (live) {
@@ -182,16 +196,18 @@ export async function runSwitchCheck({ config, env, db, clickup, fetchImpl = fet
     // 4. Dry-run import into the same copy.
     try {
       const r = await importLoopQueue({ tracker: clickup, store, config });
-      section('dry-run import', r.refusals.length === 0, [
-        ...formatReport(r, { dryRun: true }).split('\n'),
-        r.refusals.length ? 'The real import would refuse the items above.' : 'The real import would copy all of it.',
-      ]);
+      const left = Object.entries(r.counts).filter(([, c]) => c.written > 0).map(([kind, c]) => `${c.written} ${kind}`);
+      const lines = formatReport(r, { dryRun: true }).split('\n');
+      if (r.refusals.length) lines.push('The real import would refuse the items above.');
+      if (left.length) lines.push(`NOT YET IMPORTED: ${left.join(', ')}. Run the real import again (the runbook, step 4).`);
+      if (!r.refusals.length && !left.length) lines.push('Nothing left to copy: the tracker already holds all of it.');
+      section('dry-run import', r.refusals.length === 0 && left.length === 0, lines);
     } catch (err) {
       section('dry-run import', false, [`FAILED: ${err.message}`]);
     }
   } finally {
-    store.close();
-    scratch.cleanup();
+    store?.close();
+    scratch?.cleanup();
   }
   return { ok: sections.every((s) => s.ok), sections };
 }

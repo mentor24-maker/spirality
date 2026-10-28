@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer as createHttpServer } from 'node:http';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -31,11 +31,11 @@ function task(id, status = 'queued', name = `Ticket ${id}`) {
 }
 
 /** A fake ClickUp with only the reads; a write would throw, because it is not there. */
-function fakeClickup(tasks) {
+function fakeClickup(tasks, comments = {}) {
   return {
     async listTasksPage(list, page) { return ok({ tasks: page === 0 ? tasks : [], last_page: true }); },
     async getTask(id) { return ok({ ...tasks.find((t) => t.id === id), markdown_description: '' }); },
-    async listComments() { return { paged: { complete: true, comments: [] }, bad: null }; },
+    async listComments(id) { return { paged: { complete: true, comments: comments[id] ?? [] }, bad: null }; },
     async listReplies() { return ok({ comments: [] }); },
   };
 }
@@ -192,6 +192,52 @@ test('runSwitchCheck: a ticket that moved in ClickUp after the import, and a mis
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('runSwitchCheck: a comment added in ClickUp after the import is not safe to switch, though the statuses match', async () => {
+  const tasks = [task('a'), task('b', 'live')];
+  const { dir, db, store, env } = await preparedDatabase(tasks);
+  const server = await startServer({ store, port: 0 });
+  try {
+    const url = `http://127.0.0.1:${server.address().port}`;
+    const later = { a: [{ id: 'c1', comment_text: 'One more thing', user: { id: 700, username: 'pat' }, date: '1767312000000', reply_count: 0 }] };
+    const r = await runSwitchCheck({ config: { ...CONFIG, trackerUrl: url }, env, db, clickup: fakeClickup(tasks, later) });
+    const by = Object.fromEntries(r.sections.map((s) => [s.name, s]));
+    assert.equal(by['queues match'].ok, true);
+    assert.equal(by['dry-run import'].ok, false);
+    assert.match(by['dry-run import'].lines.join('\n'), /NOT YET IMPORTED: 1 comments\. Run the real import again \(the runbook, step 4\)/);
+    assert.equal(r.ok, false);
+    assert.match(formatSwitchCheck(r), /NOT SAFE TO SWITCH/);
+  } finally {
+    await new Promise((res) => server.close(res));
+    store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('runSwitchCheck: a database copy that will not open fails as a NOT OK line and leaves no copy behind', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'switch-check-bad-'));
+  const db = join(dir, 'tracker.db');
+  writeFileSync(db, 'this is not a database, it is only long enough to look like one'.repeat(20));
+  const before = new Set(readdirSync(tmpdir()).filter((n) => n.startsWith('tracker-import-dry-')));
+  try {
+    const r = await runSwitchCheck({ config: { ...CONFIG, trackerPort: await closedPort() }, env: {}, db, clickup: fakeClickup([]) });
+    const copy = r.sections.find((s) => s.name === 'database copy');
+    assert.equal(r.ok, false);
+    assert.equal(copy.ok, false);
+    assert.match(copy.lines[0], /Could not open a copy of the database/);
+    const after = readdirSync(tmpdir()).filter((n) => n.startsWith('tracker-import-dry-') && !before.has(n));
+    assert.deepEqual(after, [], 'the temporary copy is removed');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('runSwitchCheck: the config line points at the Mini\'s network name, never 127.0.0.1', async () => {
+  const r = await runSwitchCheck({ config: { ...CONFIG, trackerPort: await closedPort() }, env: {}, db: null, clickup: fakeClickup([]) });
+  const text = r.sections.find((s) => s.name === 'config').lines.join('\n');
+  assert.match(text, /scutil --get LocalHostName/);
+  assert.doesNotMatch(text, /127\.0\.0\.1:\d/);
 });
 
 test('runSwitchCheck: no database and no tracker configured each fail plainly', async () => {
