@@ -70,6 +70,13 @@ look at; this is a check that runs in CI"*).
    Run `npm ci` if there is a lockfile. Merge `origin/main` in first so you
    test the code as it would land.
 
+   **A conflict is a fast send-back.** If `get` shows `main: ... conflict`
+   (the relay's `MAIN MOVED:` note) and that merge of `origin/main` does
+   conflict, stop here: `verdict --fail` with "conflicts with main after
+   PR #<merged>, in <files>", then `status --status Rework --if-status "In
+   review"`. Do not spend a test pass on code that cannot land as it is. If
+   the merge goes in cleanly after all, the note is out of date; carry on.
+
 3. **Verify independently — do not trust the build loop's word.**
    - Re-run the gates: `npm run verify`.
    - Run `/code-review` on the branch diff for correctness and quality.

@@ -292,8 +292,9 @@ test('a token never appears in any answer or any log line, and every request is 
   } finally { await f.cleanup(); }
 });
 
-test('the server reads its database and port from the environment, and refuses to guess either', () => {
-  assert.deepEqual(settingsFromEnv({ TRACKER_DB: '/tmp/x.db', TRACKER_PORT: '4100' }), { db: '/tmp/x.db', port: 4100 });
+test('the server reads its database, port and host from the environment, and refuses to guess the first two', () => {
+  assert.deepEqual(settingsFromEnv({ TRACKER_DB: '/tmp/x.db', TRACKER_PORT: '4100' }), { db: '/tmp/x.db', port: 4100, host: '127.0.0.1' });
+  assert.deepEqual(settingsFromEnv({ TRACKER_DB: '/tmp/x.db', TRACKER_PORT: '4100', TRACKER_HOST: '0.0.0.0' }), { db: '/tmp/x.db', port: 4100, host: '0.0.0.0' });
   assert.throws(() => settingsFromEnv({}), /TRACKER_DB and TRACKER_PORT/);
   assert.throws(() => settingsFromEnv({ TRACKER_DB: '/tmp/x.db' }), /TRACKER_PORT/);
   assert.throws(() => settingsFromEnv({ TRACKER_DB: '/tmp/x.db', TRACKER_PORT: 'eighty' }), /port number/);
@@ -340,8 +341,8 @@ test('admin: create-actor prints only the token on stdout, and that token signs 
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('the server and admin hard-code no product: no names, ids, prefixes or ports in their source', () => {
-  for (const file of ['./server.mjs', './admin.mjs']) {
+test('the server, admin and backup hard-code no product: no names, ids, prefixes or ports in their source', () => {
+  for (const file of ['./server.mjs', './admin.mjs', './backup.mjs']) {
     const source = readFileSync(new URL(file, import.meta.url), 'utf8');
     for (const word of [/starcaster/i, /wavecenter/i, /spirality/i, /\bSP-/, /\bSC-/, /\bWC-/, /\b9014\d{8}\b/, /86b[a-z0-9]{6}/, /listen\(\s*\d/, /\bport\s*=\s*\d/i]) {
       assert.doesNotMatch(source, word, `${file} matches ${word}`);
