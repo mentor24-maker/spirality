@@ -119,6 +119,7 @@ text programs read).
 | Call | Does |
 |---|---|
 | `GET /me` | who this token is |
+| `GET /actors/:id` | an actor's id, kind and name (never a token), for showing who wrote a comment |
 | `GET /projects/:slug/tickets?status=&open=` | the queue |
 | `POST /projects/:slug/tickets` | file a ticket |
 | `GET /tickets/:id` | one ticket with its comments, oldest first |
@@ -184,6 +185,78 @@ Built later, from this core, only when a real need appears: a phone layout
 and phone notifications, the bus (StarCaster's alarm list),
 search, attachments, more than one person, per-client environments, live
 updates instead of the relay's 10-minute poll, server-side contract rules.
+
+## Running it
+
+The tracker runs on the Mini as two launchd jobs (launchd is the Mac's own
+service manager: it starts a job at login, restarts it if it stops, and
+survives a reboot). `scripts/install_loop_runner.sh` installs them beside the
+loop lanes, but only for a product whose project config names a
+`trackerPort`; a product without one gets no tracker jobs.
+
+| Job | What it does |
+|---|---|
+| `<launchdPrefix>.tracker` | Runs `tracker/server.mjs`, kept alive: if it stops, launchd starts it again within seconds. |
+| `<launchdPrefix>.tracker-backup` | Runs `tracker/backup.mjs` every night at 03:15 Mini time. |
+
+The settings come from the project config (`spirality.project.json`):
+
+- **`trackerPort`**: the port it listens on (Spirality: `4180`).
+- **`trackerHost`**: `0.0.0.0` lets every machine on the home network reach
+  it, so Dane's desktop opens `http://<the Mini's address>:4180`. Leave it out
+  for `127.0.0.1`, the Mini only. Nothing outside the home network can reach
+  it either way unless the router is told to forward that port, which it is
+  not. The first start may make macOS ask whether `node` may accept incoming
+  connections; answer Allow.
+- **`trackerDataDir`**: the folder holding everything (Spirality:
+  `~/spirality-tracker`):
+  - `tracker.db`: the database (with `tracker.db-wal` and `tracker.db-shm`
+    beside it while the server runs; they belong to it, never delete them).
+  - `backups/tracker-YYYY-MM-DD.db`: one copy per night, the newest 14 kept.
+
+Logs are in the configured log folder: `<productSlug>-tracker.log` (one line
+per request: method, address, answer, actor id; never a token) and
+`<productSlug>-tracker-backup.log` (one `backup OK` or `backup FAILED` line
+per night).
+
+**A backup is made by SQLite itself**, not by copying the file: copying a
+database while it is being written can catch it half-done. `VACUUM INTO`
+reads the whole database at one moment while writes carry on, the copy is
+checked with SQLite's own integrity check, and only a copy that passes is
+given its dated name. A failed night says `backup FAILED` and why, and
+leaves the older backups alone.
+
+### Checking it
+
+```bash
+./scripts/install_loop_runner.sh --status
+```
+
+The `tracker` section should say `loaded: yes` with a number (the running
+process) and `answers: yes`. The `tracker-backup` section should say
+`loaded: yes`, how many backups there are, and the last night's line.
+
+To make a backup now instead of waiting for the night:
+
+```bash
+launchctl kickstart gui/$(id -u)/com.spirality.tracker-backup
+```
+
+### Restoring a backup
+
+1. Stop the server, or launchd will restart it mid-restore:
+   `launchctl bootout gui/$(id -u)/com.spirality.tracker`
+2. Set the current database aside rather than deleting it:
+   `mv ~/spirality-tracker/tracker.db ~/spirality-tracker/tracker.db.before-restore`
+   and the same for its `-wal` and `-shm` files, if present.
+3. Copy the backup in:
+   `cp ~/spirality-tracker/backups/tracker-YYYY-MM-DD.db ~/spirality-tracker/tracker.db`
+4. Start it again (this touches only the tracker, not the loop lanes):
+   `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.spirality.tracker.plist`,
+   then `./scripts/install_loop_runner.sh --status` to see `answers: yes`.
+
+Anything written after that backup was made is not in it; the set-aside file
+still has it.
 
 ## Decisions (Dane, 2026-10-26)
 

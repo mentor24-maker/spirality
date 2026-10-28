@@ -1,12 +1,14 @@
 #!/bin/bash
 #
 # Install (or remove) the Spirality loop jobs on THIS machine: loop-build and
-# loop-review (each a launchd agent that keeps the committed runner alive) and
-# the relay (a launchd agent that runs one pass every ten minutes).
+# loop-review (each a launchd agent that keeps the committed runner alive),
+# the relay (a launchd agent that runs one pass every ten minutes) and, when
+# the project config names a trackerPort, the tracker (a kept-alive web
+# server, docs/TRACKER_MVP.md) with its nightly database backup.
 #
-#   ./scripts/install_loop_runner.sh              # install all three here
+#   ./scripts/install_loop_runner.sh              # install them all here
 #   ./scripts/install_loop_runner.sh --status     # installed? running? locks? last pass?
-#   ./scripts/install_loop_runner.sh --uninstall  # remove all three from here
+#   ./scripts/install_loop_runner.sh --uninstall  # remove them all from here
 #
 # Copied from StarCaster's installer. launchd starts a job at load, restarts a
 # kept-alive one if it dies, and survives a reboot; a screen session does none
@@ -24,6 +26,11 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # which is a plain node pass on a timer. Different plist shapes, one installer.
 SKILLS=(loop-build loop-review)
 RELAY=relay
+TRACKER=tracker
+BACKUP=tracker-backup
+# When the nightly backup runs, in the machine's own time zone.
+BACKUP_HOUR=3
+BACKUP_MINUTE=15
 
 # The PATH launchd gives the jobs. The installer checks the tools against
 # THIS, not its own shell's PATH, because launchd is what will run them.
@@ -35,6 +42,14 @@ config_value() { PATH="$LAUNCHD_PATH" node "$REPO/scripts/project_config.mjs" "$
 PREFIX="$(config_value launchdPrefix)"
 LOG_DIR="$(config_value logDir)"
 SLUG="$(config_value productSlug)"
+# The tracker's settings. An empty port means this product runs no tracker
+# service here, and every tracker step below is skipped.
+TRACKER_PORT="$(config_value trackerPort)"
+TRACKER_HOST="$(config_value trackerHost)"
+TRACKER_DATA_DIR="$(config_value trackerDataDir)"
+TRACKER_DB="$TRACKER_DATA_DIR/tracker.db"
+TRACKER_BACKUP_DIR="$TRACKER_DATA_DIR/backups"
+tracker_configured() { [ -n "$TRACKER_PORT" ]; }
 
 interval_of() {
   case "$1" in
@@ -107,32 +122,167 @@ checkout_state() {
   fi
 }
 
+# The address to knock on: the configured host, or this machine itself when
+# the server listens on every address.
+tracker_url() {
+  local host="$TRACKER_HOST"
+  if [ "$host" = "0.0.0.0" ]; then host=127.0.0.1; fi
+  echo "http://$host:$TRACKER_PORT"
+}
+
+status_job_header() {
+  local job="$1" label plist line
+  label="$(label_of "$job")"; plist="$(plist_of "$job")"
+  echo "── $job"
+  if [ -f "$plist" ]; then echo "schedule: INSTALLED at $plist"; else echo "schedule: not installed on this machine"; fi
+  line="$(loaded_line "$label")"
+  if [ -n "$line" ]; then echo "loaded:   yes — $line"; else echo "loaded:   no"; fi
+}
+
+status_tracker() {
+  local log code newest
+  if ! tracker_configured; then
+    echo "── $TRACKER"
+    echo "tracker:  not run by this product (no trackerPort in the project config)"
+    return
+  fi
+  status_job_header "$TRACKER"
+  echo "          (columns: PID, last exit code, label. A PID here means the server is up right now.)"
+  # /me without a token answers 401: the tracker's own answer to a knock with
+  # no key. Silence, or any other answer, means it is not the tracker there.
+  code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 "$(tracker_url)/me" 2>/dev/null || true)"
+  if [ "$code" = "401" ]; then
+    echo "answers:  yes — $(tracker_url) (listening on $TRACKER_HOST:$TRACKER_PORT)"
+  else
+    echo "answers:  NO — nothing answered at $(tracker_url)${code:+ (got HTTP $code)}"
+  fi
+  if [ -f "$TRACKER_DB" ]; then echo "database: $TRACKER_DB ($(du -h "$TRACKER_DB" | cut -f1 | xargs))"
+  else echo "database: $TRACKER_DB (not created yet; the server makes it on first start)"; fi
+  log="$(log_of "$TRACKER")"
+  if [ -f "$log" ]; then echo "log:      $log (last modified $(date -r "$log" '+%Y-%m-%d %H:%M'))"
+  else echo "log:      $log (nothing written yet)"; fi
+
+  status_job_header "$BACKUP"
+  echo "          (runs nightly at $(printf '%02d:%02d' "$BACKUP_HOUR" "$BACKUP_MINUTE"); '-' for PID is normal between runs.)"
+  newest="$(ls -1 "$TRACKER_BACKUP_DIR"/tracker-*.db 2>/dev/null | tail -1 || true)"
+  if [ -n "$newest" ]; then
+    echo "backups:  $(ls -1 "$TRACKER_BACKUP_DIR"/tracker-*.db | wc -l | xargs) in $TRACKER_BACKUP_DIR, newest $(basename "$newest")"
+  else
+    echo "backups:  none yet in $TRACKER_BACKUP_DIR"
+  fi
+  log="$(log_of "$BACKUP")"
+  if [ -f "$log" ]; then echo "last run: $(grep -E 'backup (OK|FAILED)' "$log" | tail -1 || echo '(none yet)')"
+  else echo "last run: (none yet)"; fi
+}
+
 status() {
   echo "product:  $SLUG (labels $PREFIX.*, logs in $LOG_DIR)"
   checkout_state
   for s in "${SKILLS[@]}"; do status_one "$s"; done
   status_one "$RELAY"
+  status_tracker
+}
+
+# The tracker server (kept alive, like the lanes) and its nightly backup (on
+# a calendar, like nothing else here). Appends to not_loaded on failure.
+install_tracker() {
+  local node label plist log
+  node="$(PATH="$LAUNCHD_PATH" command -v node)"
+  mkdir -p "$TRACKER_DATA_DIR" "$TRACKER_BACKUP_DIR"
+
+  label="$(label_of "$TRACKER")"; plist="$(plist_of "$TRACKER")"; log="$(log_of "$TRACKER")"
+  cat > "$plist" <<PLIST_BODY
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>$label</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>$node</string>
+        <string>--disable-warning=ExperimentalWarning</string>
+        <string>$REPO/tracker/server.mjs</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>$REPO</string>
+    <key>KeepAlive</key>
+    <true/>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+$(plist_env TRACKER_DB "$TRACKER_DB" TRACKER_PORT "$TRACKER_PORT" TRACKER_HOST "$TRACKER_HOST")
+    <key>StandardOutPath</key>
+    <string>$log</string>
+    <key>StandardErrorPath</key>
+    <string>$log</string>
+</dict>
+</plist>
+PLIST_BODY
+  if reload_job "$label" "$plist"; then
+    echo "Installed $label — kept alive, listening on $TRACKER_HOST:$TRACKER_PORT, database $TRACKER_DB, log $log."
+  else
+    not_loaded+=("$label")
+  fi
+
+  label="$(label_of "$BACKUP")"; plist="$(plist_of "$BACKUP")"; log="$(log_of "$BACKUP")"
+  cat > "$plist" <<PLIST_BODY
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>$label</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>$node</string>
+        <string>--disable-warning=ExperimentalWarning</string>
+        <string>$REPO/tracker/backup.mjs</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>$REPO</string>
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>$BACKUP_HOUR</integer>
+        <key>Minute</key>
+        <integer>$BACKUP_MINUTE</integer>
+    </dict>
+$(plist_env TRACKER_DB "$TRACKER_DB" TRACKER_BACKUP_DIR "$TRACKER_BACKUP_DIR")
+    <key>StandardOutPath</key>
+    <string>$log</string>
+    <key>StandardErrorPath</key>
+    <string>$log</string>
+</dict>
+</plist>
+PLIST_BODY
+  if reload_job "$label" "$plist"; then
+    echo "Installed $label — nightly at $(printf '%02d:%02d' "$BACKUP_HOUR" "$BACKUP_MINUTE") into $TRACKER_BACKUP_DIR (newest 14 kept), log $log."
+  else
+    not_loaded+=("$label")
+  fi
 }
 
 uninstall() {
-  for s in "${SKILLS[@]}" "$RELAY"; do
+  # The tracker jobs are removed whether or not the config still names them;
+  # their database and backups are left where they are.
+  for s in "${SKILLS[@]}" "$RELAY" "$TRACKER" "$BACKUP"; do
     launchctl bootout "gui/$(id -u)/$(label_of "$s")" 2>/dev/null || true
     rm -f "$(plist_of "$s")"
     echo "Removed $(label_of "$s") from this machine."
   done
   echo "Locks are left for the runners' own stale-lock handling. Confirm with: $0 --status"
+  if [ -n "$TRACKER_DATA_DIR" ]; then echo "The tracker's database and backups are left in $TRACKER_DATA_DIR."; fi
 }
 
+# plist_env [NAME VALUE]...: the environment block, PATH and HOME plus any
+# extra pairs given.
 plist_env() {
-  cat <<ENV_BODY
-    <key>EnvironmentVariables</key>
-    <dict>
-        <key>PATH</key>
-        <string>$LAUNCHD_PATH</string>
-        <key>HOME</key>
-        <string>$HOME</string>
-    </dict>
-ENV_BODY
+  echo "    <key>EnvironmentVariables</key>"
+  echo "    <dict>"
+  printf '        <key>%s</key>\n        <string>%s</string>\n' PATH "$LAUNCHD_PATH" HOME "$HOME" "$@"
+  echo "    </dict>"
 }
 
 install() {
@@ -147,6 +297,10 @@ install() {
       exit 1
     fi
   done
+  if tracker_configured && [ -z "$TRACKER_DATA_DIR" ]; then
+    echo "Refusing to install: the project config names trackerPort but no trackerDataDir, so the tracker has nowhere to keep its database." >&2
+    exit 1
+  fi
   if [ "$(git -C "$REPO" rev-parse --abbrev-ref HEAD)" != "main" ]; then
     echo "WARNING: $REPO is not on main. The jobs will install, but they never pull" >&2
     echo "         anything but a clean main, so they will run this branch's code until" >&2
@@ -231,6 +385,8 @@ PLIST_BODY
   else
     not_loaded+=("$local_label")
   fi
+
+  if tracker_configured; then install_tracker; else echo "Skipped the tracker: this product's config names no trackerPort."; fi
   echo
   status
 

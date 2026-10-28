@@ -6,6 +6,61 @@ file directly on `main`.
 
 ---
 
+## 2026-10-27 — The tracker runs on the Mini by itself, and is backed up every night (#20)
+
+The tracker only ran while someone had started it by hand, and its tickets
+lived in one file with no copy. Now the Mini runs it as a service, the same
+way it runs the loops: it starts on its own, comes back within seconds if it
+stops, and Dane's desktop can reach it over the home network. Every night at
+3:15 a second job makes a safe copy of the database (SQLite makes the copy
+itself, so it is never caught half-written) and keeps the last two weeks.
+`--status` on the installer now shows whether it is up and when the last
+backup ran, and the tracker document says how to restore one.
+
+---
+
+## 2026-10-27 — Every open ticket hears when main moves under it (#18)
+
+Two tickets built at the same time start from the same copy of the code.
+When the first one merged, the second found out only at review, or when
+Dane's merge word was refused, and then went round the whole build and
+review cycle again. Now, right after every merge, the relay leaves one note
+on each ticket still being built or reviewed: "nothing you touch changed",
+"the same files changed but still fit together", or "this now clashes, in
+these files". The build loop catches up before review instead of after, and
+the review loop sends a clash straight back instead of testing code that
+cannot land. Nothing moves on its own; the note only tells. Each ticket is
+checked again just before its note goes on, so one that has reached Dane in
+the meantime is left alone, and one unreadable ticket no longer stops the
+relay from telling the rest or from finishing its pass.
+
+---
+
+## 2026-10-27 — The loops can now work a queue in our own tracker (#19)
+
+Every loop reads and moves tickets through one door, and until now that
+door could only talk to ClickUp. Now it can also talk to our own tracker:
+a product switches by changing two lines in its settings file, and every
+command works exactly as before, with the same messages and the same
+results. No product has been switched yet; that comes later. The real gain
+is claiming work. On ClickUp, two loops could both grab the same ticket in
+the moment between checking it and taking it. In the tracker, the check and
+the take happen as one step, so only one loop can ever win, and the other
+is told to take the next ticket.
+
+The first review caught five places where the tracker still behaved
+differently from ClickUp, and they are fixed in the same pull request: a
+ticket that waits on another can now be claimed once the other is done
+(the ticket number was being looked up in the wrong letter case); a
+ticket's link says plainly that the tracker has no page for it yet instead
+of pointing at a page that does not exist; questions to Dane keep their
+bold headings and the box around his own words; adding a tag no longer
+fails when something else changed the ticket at the same moment; and a
+tracker address written with stray spaces or a trailing "?" is cleaned up
+before it is stored.
+
+---
+
 ## 2026-10-27 — A ticket can wait on another (#17)
 
 The build loop always took the oldest waiting ticket, whatever it built

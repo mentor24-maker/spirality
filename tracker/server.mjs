@@ -18,7 +18,9 @@
  * log line: the log names the actor id, never the header.
  *
  * Run directly, it opens the store at TRACKER_DB and listens on
- * TRACKER_PORT; both must be set, nothing is assumed.
+ * TRACKER_PORT; both must be set, nothing is assumed. TRACKER_HOST is the
+ * address it listens on: 127.0.0.1 (this machine only) unless set, and
+ * 0.0.0.0 for every machine on the home network.
  */
 import { createServer } from 'node:http';
 import { pathToFileURL } from 'node:url';
@@ -137,6 +139,13 @@ export function createHandler(store, { log = () => {} } = {}) {
       return [200, me];
     }
 
+    // An actor's name, for a reader showing who wrote a comment. Never its token.
+    if (parts.length === 2 && parts[0] === 'actors' && method === 'GET') {
+      const actor = /^[0-9]+$/.test(parts[1]) ? store.getActor(Number(parts[1])) : null;
+      if (!actor) throw new HttpError(404, 'unknown-actor', `no actor ${parts[1]}.`);
+      return [200, actor];
+    }
+
     if (parts.length === 3 && parts[0] === 'projects' && parts[2] === 'tickets') {
       const project = requireProject(parts[1]);
       if (method === 'GET') {
@@ -240,15 +249,16 @@ export function settingsFromEnv(env = process.env) {
   if (!Number.isInteger(port) || port < 0 || port > 65535) {
     throw new Error(`TRACKER_PORT must be a port number, not "${env.TRACKER_PORT}".`);
   }
-  return { db: env.TRACKER_DB, port };
+  const host = env.TRACKER_HOST || '127.0.0.1';
+  return { db: env.TRACKER_DB, port, host };
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   try {
-    const { db, port } = settingsFromEnv();
+    const { db, port, host } = settingsFromEnv();
     const store = openStore(db);
-    const server = await startServer({ store, port, log: (line) => console.log(`${new Date().toISOString()} ${line}`) });
-    console.log(`tracker listening on 127.0.0.1:${server.address().port}`);
+    const server = await startServer({ store, port, host, log: (line) => console.log(`${new Date().toISOString()} ${line}`) });
+    console.log(`tracker listening on ${host}:${server.address().port}`);
   } catch (err) {
     console.error(`tracker server did not start: ${err.message}`);
     process.exit(1);

@@ -74,6 +74,7 @@ npm run clickup -- verdict --task <id> --pass|--fail --if-status "In review" --b
 npm run clickup -- describe --task <id> --body-file -           # REPLACE the description (left column)
 npm run clickup -- comment --task <id> --body-file -            # a plain note
 npm run clickup -- tag --task <id> --add wont-do                # kill or park (see below)
+npm run clickup -- main-moved --pr <n> [--dry-run]               # after a merge: tell every in-flight ticket whether main moved under it
 ```
 
 Every write reads itself back. A 200 from ClickUp proves a request landed,
