@@ -11,13 +11,37 @@
  * holds. It is kept in this browser's local storage so a pinned tab stays
  * signed in, and sent only to this server. "Sign out" forgets it.
  */
-import { escapeHtml, renderComment, renderMarkdown } from './render.mjs';
+import { escapeHtml, renderComment, renderMarkdown, tabTitle } from './render.mjs';
 
 const TOKEN_KEY = 'tracker-token';
 const main = document.getElementById('main');
 const who = document.getElementById('who');
 const signOut = document.getElementById('sign-out');
 let me = null;
+
+/** How often the waiting count in the tab title is read again. */
+const COUNT_EVERY_MS = 60_000;
+/** The title the page itself asks for, and the last waiting count read (null: none yet). */
+let pageTitle = 'Tracker';
+let waitingCount = null;
+
+function setTitle(title) {
+  pageTitle = title;
+  document.title = tabTitle(waitingCount, pageTitle);
+}
+
+/** Read the waiting count again and put it in the tab title. A failed read leaves the title alone. */
+async function refreshCount() {
+  if (!me) return;
+  try {
+    const { waiting } = await api('GET', '/waiting');
+    waitingCount = waiting.length;
+  } catch (err) {
+    if (err instanceof SignedOut) drawSignIn();
+    return;
+  }
+  document.title = tabTitle(waitingCount, pageTitle);
+}
 
 /** A status as the contract writes it: "needs your input" -> "Needs your input". */
 const statusName = (s) => String(s ?? '').replace(/^./, (c) => c.toUpperCase());
@@ -55,9 +79,10 @@ function showError(err) {
 
 function drawSignIn(problem) {
   me = null;
+  waitingCount = null;
   who.textContent = '';
   signOut.hidden = true;
-  document.title = 'Sign in · Tracker';
+  setTitle('Sign in · Tracker');
   main.innerHTML = `
     <h1>Sign in</h1>
     <form class="sign-in">
@@ -77,7 +102,8 @@ function drawSignIn(problem) {
 
 async function drawWaiting() {
   const { waiting, unsure } = await api('GET', '/waiting');
-  document.title = 'Waiting on you · Tracker';
+  waitingCount = waiting.length;
+  setTitle('Waiting on you · Tracker');
   const rows = (list) => list.map((t) => `
     <tr>
       <td class="project">${escapeHtml(t.projectName)}</td>
@@ -97,7 +123,7 @@ async function drawWaiting() {
 
 async function drawTicket(id) {
   const t = await api('GET', `/tickets/${encodeURIComponent(id)}/thread`);
-  document.title = `${t.name} · Tracker`;
+  setTitle(`${t.name} · Tracker`);
   const comments = t.comments.map((c) => `
     <article class="comment${c.machine ? ' machine' : ''}">
       <div class="by">
@@ -150,8 +176,12 @@ async function route() {
     who.textContent = `Signed in as ${me.name}`;
     signOut.hidden = false;
     const ticket = /^\/t\/([^/]+)$/.exec(location.pathname);
-    if (ticket) await drawTicket(decodeURIComponent(ticket[1]));
-    else await drawWaiting();
+    if (ticket) {
+      await drawTicket(decodeURIComponent(ticket[1]));
+      await refreshCount();
+    } else {
+      await drawWaiting();
+    }
   } catch (err) {
     if (err instanceof SignedOut) drawSignIn();
     else showError(err);
@@ -172,5 +202,8 @@ signOut.addEventListener('click', () => {
   history.pushState(null, '', '/');
   drawSignIn();
 });
+
+// The count in the tab title stays current while the tab sits pinned.
+setInterval(refreshCount, COUNT_EVERY_MS);
 
 route();

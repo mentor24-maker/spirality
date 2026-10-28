@@ -147,6 +147,20 @@ function findBanner(lines, operatorName) {
 }
 
 /**
+ * The ask in an operator card's banner, as plain text without its `NEEDED
+ * FROM …:` label, or null when the comment carries no card. The hand-over
+ * email (tracker/notify.mjs) reads a card through this, so it quotes the
+ * same words the page draws in red.
+ */
+export function cardAsk(body) {
+  const lines = String(body ?? '').replace(/\r\n?/g, '\n').split('\n');
+  const banner = findBanner(lines, '');
+  if (!banner) return null;
+  const [first, ...rest] = banner.lines;
+  return [first.replace(BANNER_LABEL, ''), ...rest].join('\n').trim();
+}
+
+/**
  * A comment as HTML: its Markdown, with an operator card's banner drawn as
  * the red `NEEDED FROM …` block. Everything else in the comment, before or
  * after the banner, renders as ordinary Markdown.
@@ -164,4 +178,13 @@ export function renderComment(body, { operatorName } = {}) {
     box,
     renderMarkdown(lines.slice(banner.end).join('\n')),
   ].filter(Boolean).join('\n');
+}
+
+/**
+ * The browser tab's title: `(N) Tracker` while N tickets wait on the person
+ * signed in, so a pinned tab shows a hand-over without being opened, and the
+ * page's own title when nothing waits (or the count could not be read).
+ */
+export function tabTitle(waitingCount, pageTitle) {
+  return Number.isInteger(waitingCount) && waitingCount > 0 ? `(${waitingCount}) Tracker` : pageTitle;
 }
