@@ -6,6 +6,37 @@ file directly on `main`.
 
 ---
 
+## 2026-10-27 — Dane can see a whole product's queue on a board of our own (#23)
+
+ClickUp's board shows every ticket of a product in one picture, a column
+per stage. The tracker's page now has the same thing. A "Board" link opens
+one product's queue as seven columns, in the order the loop contract sets,
+from "Rework" through "Live". Each ticket is a small card with its name,
+priority and labels, and clicking it opens the ticket. "Live" only ever
+grows, so it starts folded. A switcher at the top changes product. Inside
+each column the tickets are in exactly the order the loops' own `queue`
+command lists them, and a test checks the two against each other. The
+board only shows tickets; moving them stays with the loops.
+
+---
+
+## 2026-10-27 — Dane can see and answer his tickets in a browser page of our own (#21)
+
+Until now the only way to see what was waiting on Dane, and to answer it,
+was ClickUp. The tracker now has its own page for his desktop browser. It
+opens on "Waiting on you": every ticket that needs him, across every
+product, newest first. It decides that with exactly the same rule the
+loops' own `waiting` check uses, and a test runs both against the same
+tickets to prove they agree. Opening a ticket shows its description and
+its comments; anything a loop wrote is shaded and tagged "loop", and a
+question to him ends in the red "NEEDED FROM DANE" box he knows from
+ClickUp. A reply box at the bottom posts exactly what he types, so "merge"
+arrives as "merge". Anything that looks like web code inside a ticket is
+shown as plain text and can never run. No product uses the page yet; the
+board, the waiting count in the tab title and the email come next.
+
+---
+
 ## 2026-10-27 — The tracker runs on the Mini by itself, and is backed up every night (#20)
 
 The tracker only ran while someone had started it by hand, and its tickets
