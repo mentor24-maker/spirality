@@ -114,7 +114,7 @@ test('the installer parses, loads every job through reload_job, and fails the ru
   const src = readFileSync(INSTALLER, 'utf8');
   assert.match(src, /source "\$REPO\/scripts\/lib\/launchd_reload\.sh"/);
   assert.doesNotMatch(src, /launchctl bootstrap/, 'every load goes through reload_job');
-  assert.equal((src.match(/if reload_job /g) || []).length, 2, 'the skill lanes and the relay');
-  assert.match(src, /not_loaded\+=\("\$local_label"\)/);
+  assert.equal((src.match(/if reload_job /g) || []).length, 4, 'the skill lanes, the relay, the tracker and its backup');
+  assert.equal((src.match(/not_loaded\+=\("\$(local_)?label"\)/g) || []).length, 4, 'every load that fails is counted');
   assert.match(src, /exit 1\n {2}fi\n\}/, 'a job not loaded fails the whole run');
 });
