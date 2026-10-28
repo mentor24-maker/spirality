@@ -100,12 +100,14 @@ test('a missing or wrong token is refused the way ClickUp\'s is, naming TRACKER_
   } finally { await f.cleanup(); }
 });
 
-test('trackerTokenEnv: TRACKER_TOKEN by default, the named TRACKER_TOKEN_ secret when a runner names one, nothing else', () => {
+test('trackerTokenEnv: TRACKER_TOKEN by default, a loop\'s own secret when a runner names one, never the operator\'s', () => {
   assert.equal(trackerTokenEnv({}), 'TRACKER_TOKEN');
   assert.equal(trackerTokenEnv({ TRACKER_TOKEN_NAME: '' }), 'TRACKER_TOKEN');
-  assert.equal(trackerTokenEnv({ TRACKER_TOKEN_NAME: 'TRACKER_TOKEN_LOOP_BUILD' }), 'TRACKER_TOKEN_LOOP_BUILD');
-  for (const bad of ['CLICKUP_API_TOKEN', 'TRACKER_TOKEN', 'TRACKER_TOKEN_', 'tracker_token_relay', 'TRACKER_TOKEN_A;B']) {
-    assert.throws(() => trackerTokenEnv({ TRACKER_TOKEN_NAME: bad }), /must name a TRACKER_TOKEN_/, bad);
+  for (const ok of ['TRACKER_TOKEN_LOOP_BUILD', 'TRACKER_TOKEN_LOOP_REVIEW', 'TRACKER_TOKEN_RELAY']) {
+    assert.equal(trackerTokenEnv({ TRACKER_TOKEN_NAME: ok }), ok);
+  }
+  for (const bad of ['TRACKER_TOKEN_OPERATOR', 'TRACKER_TOKEN_LOOP_SPEC', 'CLICKUP_API_TOKEN', 'TRACKER_TOKEN', 'TRACKER_TOKEN_', 'tracker_token_relay', 'TRACKER_TOKEN_A;B']) {
+    assert.throws(() => trackerTokenEnv({ TRACKER_TOKEN_NAME: bad }), /must name a loop's own tracker secret/, bad);
   }
 });
 
@@ -120,7 +122,11 @@ test('a runner that names its own secret signs the door in as that loop, and a m
     assert.match(missing.err, /TRACKER_TOKEN_RELAY is not set/);
     const bad = await f.door(['whoami'], { env: { TRACKER_TOKEN_NAME: 'CLICKUP_API_TOKEN' } });
     assert.equal(bad.code, 1);
-    assert.match(bad.err, /must name a TRACKER_TOKEN_/);
+    assert.match(bad.err, /must name a loop's own tracker secret/);
+    const operator = await f.door(['whoami'], { env: { TRACKER_TOKEN_NAME: 'TRACKER_TOKEN_OPERATOR', TRACKER_TOKEN_OPERATOR: f.humanToken } });
+    assert.equal(operator.code, 1);
+    assert.match(operator.err, /must name a loop's own tracker secret.*not "TRACKER_TOKEN_OPERATOR"/);
+    assert.doesNotMatch(operator.out, /Acting as/);
   } finally { await f.cleanup(); }
 });
 

@@ -109,6 +109,75 @@ test('a token that does not reach Doppler fails loudly, never prints the token, 
 
     const misread = createSignins({ ...f, env: { ...f.vault }, project: PROJECT, getSecret: () => 'something else' });
     assert.equal(misread.ok, false);
-    assert.match(misread.lines.join('\n'), /TRACKER_TOKEN_OPERATOR: FAILED\..*not the one written/);
+    assert.match(misread.lines.join('\n'), /TRACKER_TOKEN_OPERATOR: FAILED\..*written to Doppler but not confirmed: the value Doppler gives back is not the one written/);
+    assert.doesNotMatch(misread.lines.join('\n'), /did not reach Doppler/);
+  } finally { f.cleanup(); }
+});
+
+test('a project the store refuses (a bad or taken prefix) is named as NOT made, after the tokens are stored', () => {
+  const f = fixture();
+  try {
+    const bad = createSignins({ ...f, env: {}, project: { ...PROJECT, prefix: 'al' } });
+    assert.equal(bad.ok, false);
+    assert.match(bad.lines.join('\n'), /project "alpha": NOT made: .*capital letters/);
+    assert.equal(Object.keys(f.vault).length, TRACKER_SEATS.length);
+
+    f.store.createProject({ slug: 'other', name: 'Other', prefix: 'AL' });
+    const taken = createSignins({ ...f, env: { ...f.vault }, project: PROJECT });
+    assert.equal(taken.ok, false);
+    assert.match(taken.lines.join('\n'), /project "alpha": NOT made: .*already exists/);
+  } finally { f.cleanup(); }
+});
+
+test('an existing project whose operator is not the one who signs in is called WRONG', () => {
+  const f = fixture();
+  try {
+    const someone = f.store.createActor({ kind: 'human', name: 'Someone' });
+    f.store.createProject({ ...PROJECT, operator: someone.id });
+    const r = createSignins({ ...f, env: {}, project: PROJECT });
+    assert.equal(r.ok, false);
+    assert.match(r.lines.join('\n'), new RegExp(`project "alpha": WRONG\\. Its operator is actor ${someone.id}`));
+  } finally { f.cleanup(); }
+});
+
+test('the operator is recorded under the import key once; a key held by another actor is called WRONG, not overwritten', () => {
+  const f = fixture();
+  const operatorImport = { source: 'clickup', sourceId: 'user:7' };
+  try {
+    const first = createSignins({ ...f, env: {}, project: PROJECT, operatorImport });
+    assert.equal(first.ok, true, first.lines.join('\n'));
+    const op = f.store.actorForToken(f.vault.TRACKER_TOKEN_OPERATOR);
+    assert.match(first.lines.join('\n'), new RegExp(`clickup user:7 now maps to actor ${op.id}`));
+    const again = createSignins({ ...f, env: { ...f.vault }, project: PROJECT, operatorImport });
+    assert.match(again.lines.join('\n'), new RegExp(`clickup user:7 already maps to actor ${op.id}`));
+
+    const stray = f.store.importActor({ source: 'clickup', sourceId: 'user:8', kind: 'human', name: 'Dana' });
+    const clash = createSignins({ ...f, env: { ...f.vault }, project: PROJECT, operatorImport: { source: 'clickup', sourceId: 'user:8' } });
+    assert.equal(clash.ok, false);
+    assert.match(clash.lines.join('\n'), new RegExp(`WRONG\\. The history import already stands actor ${stray.id} for clickup user:8, not actor ${op.id}`));
+    assert.equal(f.store.importedId({ source: 'clickup', kind: 'actor', sourceId: 'user:8' }), stray.id);
+  } finally { f.cleanup(); }
+});
+
+test('check: one seat whose request fails is named, and the others are still checked', async () => {
+  const f = fixture();
+  try {
+    createSignins({ ...f, env: {}, project: PROJECT });
+    const server = await startServer({ store: f.store, port: 0 });
+    const url = `http://127.0.0.1:${server.address().port}`;
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (u, opts) => (opts.headers.Authorization.endsWith(f.vault.TRACKER_TOKEN_RELAY)
+      ? Promise.reject(new Error(`socket hang up for ${f.vault.TRACKER_TOKEN_RELAY}`)) : realFetch(u, opts));
+    try {
+      const r = await checkSignins({ url, seats: f.seats, env: f.vault });
+      assert.equal(r.ok, false);
+      const text = r.lines.join('\n');
+      assert.match(text, /TRACKER_TOKEN_RELAY: WRONG\. GET \/me did not answer usably: socket hang up for \[token\]/);
+      assert.match(text, /TRACKER_TOKEN_LOOP_REVIEW: GET \/me answers "loop-review"/);
+      assert.ok(!text.includes(f.vault.TRACKER_TOKEN_RELAY));
+    } finally {
+      globalThis.fetch = realFetch;
+      await new Promise((res) => server.close(res));
+    }
   } finally { f.cleanup(); }
 });

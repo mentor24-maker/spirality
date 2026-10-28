@@ -18,6 +18,13 @@ with each one and expects the right name back. Each loop's runner tells the
 door only which key is its own, never the key itself, so a key can't end up
 in a log. `npm run doctor` now reports the four new keys.
 
+Review caught two holes, both fixed here. The history import would have made
+a second "Dane" and filed all his old comments under that one, so the tracker
+would misread who spoke last; now the sign-in command tells the importer
+which Dane is the real one, and the importer refuses to run if they disagree.
+And a loop could have been pointed at Dane's own key and signed in as him;
+now a loop may use only one of the three loop keys.
+
 ## 2026-10-28 — Dane hears when a ticket is handed to him: a count in the tab and an email (#24)
 
 Once the loop leaves ClickUp, Dane loses ClickUp's own notifications, and

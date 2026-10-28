@@ -6,6 +6,8 @@ import { join } from 'node:path';
 import { openStore } from './store.mjs';
 import { importLoopQueue, formatReport, ImportReadError, SOURCE } from './import.mjs';
 import { MACHINE_MARKER_LINE } from '../scripts/lib/machineComment.mjs';
+import { createSignins, seatsFor } from './signins.mjs';
+import { operatorImportKey } from './import.mjs';
 
 const OPERATOR = '700';
 const SERVICE = '800';
@@ -242,6 +244,69 @@ test('a missing trackerPrefix, or a store holding the project under another pref
     const before = tracker.calls.length;
     await assert.rejects(importLoopQueue({ tracker, store, config: { ...CONFIG, trackerPrefix: 'XX' } }), /prefix "WG", but the config says "XX"/);
     assert.equal(tracker.calls.length, before);
+  } finally { cleanup(); }
+});
+
+/** Run tracker/signins.mjs's create against `store` with a fake Doppler; answers the vault. */
+function signIn(store, env = {}) {
+  const vault = {};
+  const r = createSignins({
+    store, seats: seatsFor(CONFIG.operatorName), env,
+    project: { slug: CONFIG.productSlug, name: 'Widget', prefix: CONFIG.trackerPrefix },
+    operatorImport: operatorImportKey(CONFIG),
+    setSecret: (name, value) => { vault[name] = value; }, getSecret: (name) => vault[name],
+  });
+  assert.equal(r.ok, true, r.lines.join('\n'));
+  return { vault, lines: r.lines };
+}
+
+/** The one human named as the operator, and every comment of his ClickUp seat on cu-closed. */
+function oneOperator(store) {
+  const humans = store.actorsNamed({ kind: 'human', name: CONFIG.operatorName });
+  assert.equal(humans.length, 1, `humans named ${CONFIG.operatorName}: ${humans.map((a) => a.id)}`);
+  assert.equal(store.getProject(CONFIG.productSlug).operator, humans[0].id);
+  const closed = store.importedId({ source: SOURCE, kind: 'ticket', sourceId: 'cu-closed' });
+  assert.deepEqual(store.listComments(closed).map((c) => c.author), [humans[0].id]);
+  return humans[0];
+}
+
+test('sign-ins made first, then the import: one operator, the project\'s, and his history is filed under him', async () => {
+  const { store, cleanup } = freshStore();
+  try {
+    const { vault } = signIn(store);
+    await importLoopQueue({ tracker: fakeTracker(queue()), store, config: CONFIG });
+    const operator = oneOperator(store);
+    assert.equal(store.actorForToken(vault.TRACKER_TOKEN_OPERATOR).id, operator.id);
+  } finally { cleanup(); }
+});
+
+test('the import made first, then the sign-ins: the operator\'s seat is given to the imported operator, not a second one', async () => {
+  const { store, cleanup } = freshStore();
+  try {
+    await importLoopQueue({ tracker: fakeTracker(queue()), store, config: CONFIG });
+    const { vault } = signIn(store);
+    const operator = oneOperator(store);
+    assert.equal(store.actorForToken(vault.TRACKER_TOKEN_OPERATOR).id, operator.id);
+  } finally { cleanup(); }
+});
+
+test('a database whose sign-ins predate the mapping is refused by the import untouched, repaired by running create again, then imported under him', async () => {
+  const { store, cleanup } = freshStore();
+  try {
+    // As the first create left the live database: operator and project, no map row.
+    const op = store.createActor({ kind: 'human', name: CONFIG.operatorName });
+    const env = { TRACKER_TOKEN_OPERATOR: store.issueToken(op.id) };
+    store.createProject({ slug: CONFIG.productSlug, name: 'Widget', prefix: CONFIG.trackerPrefix, operator: op.id });
+    const tracker = fakeTracker(queue());
+    await assert.rejects(importLoopQueue({ tracker, store, config: CONFIG }),
+      new RegExp(`names actor ${op.id} as its operator, but the operator's ClickUp seat maps to no actor yet`));
+    assert.equal(tracker.calls.length, 0);
+    assert.deepEqual(store.listImportedIds(SOURCE), []);
+
+    const { lines } = signIn(store, env);
+    assert.match(lines.join('\n'), new RegExp(`TRACKER_TOKEN_OPERATOR: clickup user:${OPERATOR} now maps to actor ${op.id}`));
+    await importLoopQueue({ tracker, store, config: CONFIG });
+    assert.equal(oneOperator(store).id, op.id);
   } finally { cleanup(); }
 });
 

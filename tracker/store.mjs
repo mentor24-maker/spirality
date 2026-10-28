@@ -602,6 +602,24 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
       });
     },
 
+    /**
+     * IMPORT ONLY. Record an actor that already exists (one made by
+     * tracker/signins.mjs) as the one standing for `sourceId`, so a later
+     * import finds it instead of making a second. Answers `'recorded'`, or
+     * `'already'` when it is already that actor's; a key that maps to a
+     * different actor is refused with `already-imported`.
+     */
+    adoptImportedActor({ source, sourceId, actor }) {
+      const key = requireImportKey(source, 'actor', sourceId);
+      return transaction(() => {
+        requireActor(actor, 'the adopted actor');
+        const known = importedRow(...key);
+        if (known != null && Number(known) === actor) return 'already';
+        recordImport(...key, actor);
+        return 'recorded';
+      });
+    },
+
     /** A ticket's comments, oldest first. */
     listComments(ticket) {
       return db.prepare('SELECT * FROM comments WHERE ticket = ? ORDER BY id').all(String(ticket)).map(commentFromRow);
