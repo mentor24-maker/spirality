@@ -126,6 +126,8 @@ text programs read).
 | `PATCH /tickets/:id` | change status, priority, tags, assignee, description or Loop note, with optional `ifStatus` / `ifVersion`; answers 409 ("conflict") and writes nothing if the ticket has moved |
 | `POST /tickets/:id/comments` | a comment, or a reply when `parent` is given |
 | `GET /tickets/:id/events` | the history |
+| `GET /waiting` | for Dane's page: tickets in the operator's two statuses across every project, by the loop's own `waiting` verdict for the caller, newest first |
+| `GET /tickets/:id/thread` | for Dane's page: the ticket with each comment's author named and machine comments marked |
 
 The store enforces only what keeps the data true: valid statuses, the
 atomic guards, authorship from the token. The contract's rules (only `ask`
@@ -145,6 +147,10 @@ more:
    `NEEDED FROM DANE` banner, machine comments visibly marked as such), and a
    reply box. He answers and says "merge" here.
 3. **A board** per product: read-only columns of the seven statuses.
+
+The page is served by `tracker/server.mjs` at `/` (a ticket at `/t/<id>`)
+from `tracker/web/`. `node tracker/demo.mjs` starts a throwaway tracker
+with test data to try it.
 
 Sign-in is a single password for Dane in the MVP. The page shows a count of
 tickets waiting on him in the browser tab's title, so a pinned tab tells him
@@ -218,6 +224,17 @@ Logs are in the configured log folder: `<productSlug>-tracker.log` (one line
 per request: method, address, answer, actor id; never a token) and
 `<productSlug>-tracker-backup.log` (one `backup OK` or `backup FAILED` line
 per night).
+
+**The hand-over email** goes out through Resend (Dane's choice,
+2026-10-28) when a ticket enters one of his two statuses. The server reads
+two names from the project's Doppler config when it starts: `RESEND_API_KEY`
+(the service's key) and `TRACKER_NOTIFY_TO` (his address). With either one
+missing, or Doppler unreadable, the server runs with the email off and says
+so once in its log. After adding or changing them, restart the server so it
+reads them again:
+`launchctl kickstart -k gui/$(id -u)/<launchdPrefix>.tracker`.
+`npm run tracker:test-email` sends one test hand-over through the same code,
+from a throwaway tracker in memory, without touching the real one.
 
 **A backup is made by SQLite itself**, not by copying the file: copying a
 database while it is being written can catch it half-done. `VACUUM INTO`

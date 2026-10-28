@@ -4,10 +4,12 @@
  * `npm run doctor` starts reporting it the moment the code depends on it.
  * Names only: no value ever appears in this repository (it is public).
  *
- * The substrate holds no deploy. The ClickUp token is a reference to
- * StarCaster's (one token to rotate for every project). The tracker tokens
- * are one sign-in per actor (docs/TRACKER_MVP.md, "Running it"), made by
- * `tracker/admin.mjs create-actor` and piped straight into Doppler.
+ * The substrate holds no database and no deploy. The ClickUp token is a
+ * reference to StarCaster's (one token to rotate for every project). The
+ * tracker tokens are one sign-in per actor (docs/TRACKER_MVP.md, "Running
+ * it"), made by `tracker/admin.mjs create-actor` and piped straight into
+ * Doppler. The tracker's hand-over email needs the Resend key and the
+ * address it goes to (tracker/notify.mjs).
  */
 export const DOPPLER_PROJECT = 'spirality';
 export const CONFIGS = ['dev'];
@@ -28,6 +30,8 @@ export const TRACKER_SEATS = [
 export const EXPECTED_SECRETS = [
   { name: 'CLICKUP_API_TOKEN', configs: ['dev'], what: 'the ClickUp token, for scripts only' },
   ...TRACKER_SEATS.map(({ secret, what }) => ({ name: secret, configs: ['dev'], what })),
+  { name: 'RESEND_API_KEY', configs: ['dev'], what: 'the Resend key the tracker sends the hand-over email with' },
+  { name: 'TRACKER_NOTIFY_TO', configs: ['dev'], what: "the operator's address for the hand-over email" },
 ];
 
 /**

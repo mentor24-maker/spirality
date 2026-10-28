@@ -6,7 +6,7 @@ file directly on `main`.
 
 ---
 
-## 2026-10-27 — Each loop gets its own sign-in to the tracker (#22)
+## 2026-10-28 — Each loop gets its own sign-in to the tracker (#22)
 
 In ClickUp every loop writes under Dane's name, so the loop has to guess
 which comments are really his. The tracker can tell people apart, but only if
@@ -17,6 +17,53 @@ screen, and checks it arrived. A second command asks the tracker "who am I?"
 with each one and expects the right name back. Each loop's runner tells the
 door only which key is its own, never the key itself, so a key can't end up
 in a log. `npm run doctor` now reports the four new keys.
+
+## 2026-10-28 — Dane hears when a ticket is handed to him: a count in the tab and an email (#24)
+
+Once the loop leaves ClickUp, Dane loses ClickUp's own notifications, and
+would only see a hand-over by opening the tracker page. Now the page's
+browser tab reads "(3) Tracker" while three tickets wait on him, and it
+re-reads the count every minute, so a pinned tab tells him at a glance.
+The tracker can also send one email each time a ticket enters one of his
+two statuses: the ticket's name, its product, what is needed from him and
+a link straight to it. Never two for the same hand-over. A failed email
+never stops the ticket moving; it is noted in the log and tried again on
+the next change. The email goes out through Resend, the
+service Dane chose. Its key and his address are read from Doppler when the
+tracker starts, never written anywhere else; until both are there, the
+tracker runs with the email off and says so in its log. One command,
+`npm run tracker:test-email`, sends him a test hand-over to prove it works.
+
+---
+
+## 2026-10-27 — Dane can see a whole product's queue on a board of our own (#23)
+
+ClickUp's board shows every ticket of a product in one picture, a column
+per stage. The tracker's page now has the same thing. A "Board" link opens
+one product's queue as seven columns, in the order the loop contract sets,
+from "Rework" through "Live". Each ticket is a small card with its name,
+priority and labels, and clicking it opens the ticket. "Live" only ever
+grows, so it starts folded. A switcher at the top changes product. Inside
+each column the tickets are in exactly the order the loops' own `queue`
+command lists them, and a test checks the two against each other. The
+board only shows tickets; moving them stays with the loops.
+
+---
+
+## 2026-10-27 — Dane can see and answer his tickets in a browser page of our own (#21)
+
+Until now the only way to see what was waiting on Dane, and to answer it,
+was ClickUp. The tracker now has its own page for his desktop browser. It
+opens on "Waiting on you": every ticket that needs him, across every
+product, newest first. It decides that with exactly the same rule the
+loops' own `waiting` check uses, and a test runs both against the same
+tickets to prove they agree. Opening a ticket shows its description and
+its comments; anything a loop wrote is shaded and tagged "loop", and a
+question to him ends in the red "NEEDED FROM DANE" box he knows from
+ClickUp. A reply box at the bottom posts exactly what he types, so "merge"
+arrives as "merge". Anything that looks like web code inside a ticket is
+shown as plain text and can never run. No product uses the page yet; the
+board, the waiting count in the tab title and the email come next.
 
 ---
 
@@ -83,6 +130,21 @@ a time, and Dane could not see the whole plan in the queue. Now a ticket
 can carry a line `Waits on: <ticket>` in its description, and the build
 loop leaves it alone until that ticket is closed. The whole tracker plan
 can be filed at once, in order, and built in order.
+
+---
+
+## 2026-10-27 — Spirality's ticket history can now be copied out of ClickUp (#16)
+
+Before the loop can leave ClickUp, every ticket it has ever worked on has
+to come with it: the spec, every comment and every reply. Otherwise the
+new tracker starts with no memory. The importer does that copy. It only
+reads ClickUp, and it keeps each comment's real time and who wrote it.
+Loop comments are marked as the machine's and Dane's as his. Each old
+ClickUp link is mapped to its new ticket number (86bctbw76 is now SP-13),
+so old links still lead somewhere. Run it again and it copies only what's
+new. If ClickUp fails partway through, it says so and doesn't call the
+copy finished. A trial run on Spirality's own queue copied 13 tickets,
+114 comments and 16 replies. Nothing reads that copy yet.
 
 ---
 

@@ -20,11 +20,13 @@
   ],
   "scripts": {
     "clickup": "doppler run --project spirality --config dev --no-check-version -- node scripts/clickup.mjs",
+    "tracker:import": "doppler run --project spirality --config dev --no-check-version -- node tracker/import.mjs",
     "doctor": "node scripts/doctor.mjs",
     "tracker:signins": "doppler run --project spirality --config dev --no-check-version -- node --no-warnings tracker/signins.mjs",
     "check:syntax": "node scripts/check_syntax.mjs",
     "check:secrets": "node scripts/check_secrets.mjs",
     "test": "node --test scripts/lib/*.test.mjs scripts/tracker/*.test.mjs lib/*.test.mjs lib/*.test.js tracker/*.test.mjs",
-    "verify": "npm run check:syntax && npm run check:secrets && npm test"
+    "verify": "npm run check:syntax && npm run check:secrets && npm test",
+    "tracker:test-email": "node --disable-warning=ExperimentalWarning tracker/testEmail.mjs"
   }
 }
