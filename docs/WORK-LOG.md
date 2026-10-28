@@ -18,6 +18,17 @@ the moment between checking it and taking it. In the tracker, the check and
 the take happen as one step, so only one loop can ever win, and the other
 is told to take the next ticket.
 
+The first review caught five places where the tracker still behaved
+differently from ClickUp, and they are fixed in the same pull request: a
+ticket that waits on another can now be claimed once the other is done
+(the ticket number was being looked up in the wrong letter case); a
+ticket's link says plainly that the tracker has no page for it yet instead
+of pointing at a page that does not exist; questions to Dane keep their
+bold headings and the box around his own words; adding a tag no longer
+fails when something else changed the ticket at the same moment; and a
+tracker address written with stray spaces or a trailing "?" is cleaned up
+before it is stored.
+
 ---
 
 ## 2026-10-27 — A ticket can wait on another (#17)

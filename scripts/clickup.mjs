@@ -142,6 +142,10 @@ function die(label, { res, json, text }) {
       console.error('\n"Team not authorized" usually means the ID is the wrong KIND of thing — a space id where a');
       console.error(`list id belongs (the SPACE is ${SPACE}; the Loop Queue LIST is ${LOOP_QUEUE_LIST}).`);
       console.error('Run `npm run clickup -- lists` to resolve list ids by name before blaming the token.');
+    } else if (project.tracker === 'api') {
+      console.error(`\n401 means the tracker refused ${TOKEN_ENV}: it is wrong, or not this loop's — not that the tracker is down.`);
+      console.error(`The token lives in Doppler (${project.dopplerProject}/${project.dopplerConfig}, ${TOKEN_ENV}).`);
+      console.error('Run through `npm run clickup -- ...` so Doppler supplies it.');
     } else {
       console.error('\n401 means the token is wrong or expired — not that ClickUp is down.');
       console.error(`The token lives in Doppler (${project.dopplerProject}/${project.dopplerConfig}, ${TOKEN_ENV}).`);

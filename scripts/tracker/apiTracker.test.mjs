@@ -104,7 +104,7 @@ test('task files a ticket and reads it back; get and task-name print it as on Cl
   try {
     const r = await f.door(['task', '--name', 'Fix the thing', '--body-file', '-', '--priority', 'high', '--tags', 'tracker,phase-2'], { stdin: '## Goal\nDo it.\n' });
     assert.equal(r.code, 0, r.err);
-    assert.match(r.out, /^\nCreated task AL-1\n {2}http:\/\/127\.0\.0\.1:\d+\/t\/AL-1\n/);
+    assert.ok(r.out.startsWith(`\nCreated task AL-1\n  tracker ticket AL-1 at ${f.url} (no web page for a ticket yet)\n`), r.out);
     assert.match(r.out, / {2}status: {6}queued\n {2}priority: {4}high\n {2}tags: {8}tracker, phase-2\n {2}description: 15 characters\n/);
 
     const get = await f.door(['get', '--task', 'AL-1']);
@@ -112,11 +112,16 @@ test('task files a ticket and reads it back; get and task-name print it as on Cl
     assert.equal(get.out, [
       'id:       AL-1', 'name:     Fix the thing', 'status:   queued', 'priority: high', 'assigned: (nobody)',
       'tags:     tracker, phase-2', 'list:     alpha (alpha)', 'pr:       (none recorded)', 'rounds:   0 send-back(s) so far',
-      `url:      ${f.url}/t/AL-1`, '---', '## Goal\nDo it.\n', '',
+      `url:      tracker ticket AL-1 at ${f.url} (no web page for a ticket yet)`, '---', '## Goal\nDo it.\n', '',
     ].join('\n'));
 
     const name = await f.door(['task-name', '--task', 'AL-1']);
     assert.equal(name.out, 'Fix the thing\n');
+
+    // lib/ lowercases the ids it reads (ClickUp's are lower case), so any case is the same ticket.
+    const lower = await f.door(['get', '--task', 'al-1']);
+    assert.equal(lower.code, 0, lower.err);
+    assert.equal(lower.out, get.out);
 
     const missing = await f.door(['get', '--task', 'AL-99']);
     assert.equal(missing.code, 1);
@@ -145,6 +150,30 @@ test('queue --claimable lists every Rework ticket first (oldest first), then Que
 
     const all = await f.door(['queue']);
     assert.ok(!all.out.includes('AL-5'), 'a Live ticket is closed, and the queue leaves it out as on ClickUp');
+  } finally { await f.cleanup(); }
+});
+
+test('Waits on: a dependent is skipped while its prerequisite is open, and claimable once it is Live', async () => {
+  const f = await fixture();
+  try {
+    f.file({ name: 'first' });
+    f.file({ name: 'second', description: 'Waits on: AL-1\n\n## Goal\nAfter the first.' });
+    const before = await f.door(['queue', '--claimable']);
+    assert.equal(before.code, 0, before.err);
+    assert.deepEqual(before.out.trim().split('\n').map((l) => l.split('\t')[0]), ['AL-1']);
+    assert.match(before.err, /skipped AL-2: waits on al-1 \(still open\)/);
+    const early = await f.door(['claim', '--task', 'AL-2']);
+    assert.equal(early.code, 3, early.err);
+    assert.equal(f.store.getTicket('AL-2').status, 'queued');
+
+    f.store.changeTicket('AL-1', { actor: f.human.id, status: 'live' });
+    const after = await f.door(['queue', '--claimable']);
+    assert.equal(after.code, 0, after.err);
+    assert.deepEqual(after.out.trim().split('\n').map((l) => l.split('\t')[0]), ['AL-2']);
+    assert.doesNotMatch(after.err, /skipped|could not be read/);
+    const claim = await f.door(['claim', '--task', 'AL-2']);
+    assert.equal(claim.code, 0, claim.err);
+    assert.equal(f.store.getTicket('AL-2').status, 'building');
   } finally { await f.cleanup(); }
 });
 
@@ -231,6 +260,9 @@ test('ask posts the card, moves to Needs your input and assigns the operator; wa
     assert.match(r.out, /^Task AL-1: card \d+ posted, "building" -> "needs your input", assigned: Dana \(1\)\.\n$/);
     const [card] = f.store.listComments('AL-1');
     assert.ok(card.body.includes('build the to-do list'));
+    // The card keeps its marks as markdown: his words fenced, the headings bold.
+    assert.ok(card.body.includes("**DANE'S WORDS — the instruction behind this ticket**\n\n```\nbuild the to-do list\n```\n"), card.body);
+    assert.ok(card.body.includes("**WHAT'S GOING ON**\n\n"), card.body);
     assert.ok(isMachineComment(card.body), 'the card carries the machine stamp');
     assert.equal(card.author, f.machine.id);
 
@@ -309,6 +341,27 @@ test('comment, describe, priority and tag each write and read back', async () =>
     assert.equal(add.out, 'Task AL-1: tags now [wont-do].\n');
     const rem = await f.door(['tag', '--task', 'AL-1', '--remove', 'wont-do']);
     assert.equal(rem.out, 'Task AL-1: tags now [].\n');
+  } finally { await f.cleanup(); }
+});
+
+test('tag re-reads and tries once more when another write lands between its read and its write', async () => {
+  const f = await fixture();
+  try {
+    f.file({ name: 'one', status: 'building' });
+    const t = createApiTracker({ token: f.machineToken, baseUrl: f.url, project: 'alpha', listId: LIST, log: () => {} });
+    const realFetch = globalThis.fetch;
+    let patches = 0;
+    globalThis.fetch = async (url, init) => {
+      if (init?.method === 'PATCH' && patches++ === 0) f.store.changeTicket('AL-1', { actor: f.human.id, status: 'in review' });
+      return realFetch(url, init);
+    };
+    let out;
+    try { out = await t.setTag('AL-1', 'wont-do', true); } finally { globalThis.fetch = realFetch; }
+    assert.equal(out.res.ok, true, out.text);
+    assert.equal(patches, 2);
+    const now = f.store.getTicket('AL-1');
+    assert.deepEqual(now.tags, ['wont-do']);
+    assert.equal(now.status, 'in review', 'the other write is kept, not overwritten');
   } finally { await f.cleanup(); }
 });
 

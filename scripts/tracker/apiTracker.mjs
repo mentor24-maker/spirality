@@ -18,7 +18,12 @@
  *   assignees { add, rem }          the one `assignee` (actor id) a ticket has
  *   priority 1..4                   "urgent" .. "low"
  *   markdown_description            description
- *   a rich-text comment (blocks)    its text, joined
+ *   a rich-text comment (blocks)    its markdown: bold, italic, code and
+ *                                   code-block runs keep their marks
+ *   a ticket id, any case           the store's id, upper case (`AL-1`):
+ *                                   ClickUp ids are lower case and lib/
+ *                                   lowercases what it reads (waitsOn)
+ *   a ticket's web page             none yet; `url` says so in plain words
  *   a reply on comment C            a comment on C's ticket with parent C
  *
  * A guarded write (`updateTask(..., { ifStatus })`) is the store's atomic
@@ -57,10 +62,25 @@ function withJson(out, json) {
   return { ...out, json, text: JSON.stringify(json) };
 }
 
-/** A ClickUp rich-text comment (an array of runs) as the plain text it reads back as. */
+/** One ClickUp rich-text run as markdown, keeping the marks the operator card uses. */
+function runMarkdown(run) {
+  const text = String(run?.text ?? '');
+  const a = run?.attributes || {};
+  if (a['code-block']) return `\`\`\`\n${text.endsWith('\n') ? text : `${text}\n`}\`\`\``;
+  if (!text.trim()) return text;
+  // Marks go round the words, never round the spaces either side of them.
+  const [, lead, core, trail] = /^(\s*)([\s\S]*?)(\s*)$/.exec(text);
+  if (a.code) return `${lead}\`${core}\`${trail}`;
+  if (a.bold && a.italic) return `${lead}***${core}***${trail}`;
+  if (a.bold) return `${lead}**${core}**${trail}`;
+  if (a.italic) return `${lead}*${core}*${trail}`;
+  return text;
+}
+
+/** A ClickUp comment body as the markdown text the tracker stores. */
 function commentText(body) {
   if (typeof body?.comment_text === 'string') return body.comment_text;
-  if (Array.isArray(body?.comment)) return body.comment.map((b) => String(b?.text ?? '')).join('');
+  if (Array.isArray(body?.comment)) return body.comment.map(runMarkdown).join('');
   return '';
 }
 
@@ -106,7 +126,10 @@ export function createApiTracker({ token, baseUrl, project, listId, timeoutMs, l
     return { res, json, text };
   }
 
-  const ticketPath = (id) => `/tickets/${encodeURIComponent(id)}`;
+  // Tracker ids are a capital prefix and a number (tracker/store.mjs refuses
+  // any other prefix), and the store looks them up exactly; lib/waitsOn.js
+  // lowercases the ids it reads, as ClickUp's are. So any case is the same id.
+  const ticketPath = (id) => `/tickets/${encodeURIComponent(String(id).toUpperCase())}`;
   const projectFor = (list) => (list == null || String(list) === String(listId) ? project : String(list));
 
   /** An actor's name, or `actor <id>` when it cannot be read. Never fails the caller. */
@@ -132,7 +155,9 @@ export function createApiTracker({ token, baseUrl, project, listId, timeoutMs, l
       assignees,
       tags: (t.tags || []).map((name) => ({ name })),
       list: { id: t.project, name: t.project },
-      url: `${BASE}/t/${t.id}`,
+      // tracker/server.mjs has no page for a ticket yet (Phase 3 builds it),
+      // so this says so rather than printing a link that answers 404.
+      url: `tracker ticket ${t.id} at ${BASE} (no web page for a ticket yet)`,
       date_created: ms(t.createdAt),
       date_updated: ms(t.updatedAt),
       version: t.version,
@@ -251,16 +276,22 @@ export function createApiTracker({ token, baseUrl, project, listId, timeoutMs, l
     },
 
     /** Add or drop one tag, guarded on the version read just before, so a
-     *  tag written by someone else in between is never overwritten. */
+     *  tag written by someone else in between is never overwritten. Any
+     *  write in between (a status move, a comment) bumps that version, so a
+     *  refused write is re-read and tried once more before it says "moved";
+     *  ClickUp's tag call has no guard and never refuses for that. */
     async setTag(task, name, on) {
-      const read = await readTicket(task);
-      if (!read.res.ok || !read.json?.id) return read;
-      const tags = read.json.tags || [];
       const has = (t) => t.toLowerCase() === String(name).toLowerCase();
-      const next = on ? (tags.some(has) ? tags : [...tags, name]) : tags.filter((t) => !has(t));
-      const out = await call('PATCH', ticketPath(task), { tags: next, ifVersion: read.json.version });
-      if (out.res.status === 409) return { ...out, moved: true };
-      return out;
+      let out;
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const read = await readTicket(task);
+        if (!read.res.ok || !read.json?.id) return read;
+        const tags = read.json.tags || [];
+        const next = on ? (tags.some(has) ? tags : [...tags, name]) : tags.filter((t) => !has(t));
+        out = await call('PATCH', ticketPath(task), { tags: next, ifVersion: read.json.version });
+        if (out.res.status !== 409) return out;
+      }
+      return { ...out, moved: true };
     },
 
     /**
