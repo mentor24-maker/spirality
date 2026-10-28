@@ -325,6 +325,143 @@ launchctl kickstart gui/$(id -u)/com.spirality.tracker-backup
 Anything written after that backup was made is not in it; the set-aside file
 still has it.
 
+## Switching a product over
+
+The same steps for every product; only the values come from its project
+config (`spirality.project.json` for Spirality). Each step says what a good
+result looks like. Stop at the first one that does not look like that.
+
+**Who runs it.** A hand-run session (Claude in a terminal, or Dane) on the
+Mini, from the product's main checkout on `main`. **Never a loop session**:
+a loop pass runs inside the lanes step 1 stops, and would cut itself off
+mid-pass. The one step that is Dane's is the merge in step 6.
+
+**Before the day.** A small pull request (the "switch PR") is open and green,
+not merged. It changes the project config, and only that, plus the
+"where tickets live" wording in `CLAUDE.md` and the skills:
+
+```json
+"tracker": "api",
+"trackerUrl": "http://<the Mini's network name>.local:<trackerPort>",
+"operatorUserId": "<the operator's tracker actor id>",
+"machineUserId": "<loop-build's tracker actor id>"
+```
+
+`scutil --get LocalHostName` prints the Mini's network name (Spirality:
+`mac-mini`, so `http://mac-mini.local:4180`); Dane's browser and the loops
+both use this address, and the hand-over email links to it. The actor ids
+are the ones `npm run tracker:signins -- check` prints (Spirality: the
+operator is actor 1, `loop-build` actor 2). With the tracker, the operator
+id is who a hand-over is assigned to, and the machine id is only used to
+refuse assigning a ticket to the machine.
+
+The import (step 4) must run **before** the switch PR merges: it reads the
+ClickUp seat ids the config holds until then.
+
+### The steps
+
+1. **Stop the loops.** First wait until no pass is in flight:
+   `./scripts/install_loop_runner.sh --status` shows no lock held, and
+   `npm run clickup -- queue` shows no ticket in `Building`. Then:
+
+   ```bash
+   ./scripts/install_loop_runner.sh --uninstall
+   ./scripts/install_loop_runner.sh --status
+   ```
+
+   Good: every job says `loaded: no`. From here until step 7 nothing writes
+   to ClickUp's Loop Queue, so what is imported is what the loops left.
+
+2. **Start the tracker by hand**, in a second terminal tab, against the real
+   database (it runs as a service from step 7 on):
+
+   ```bash
+   TRACKER_DB=<trackerDataDir>/tracker.db TRACKER_PORT=<trackerPort> TRACKER_HOST=<trackerHost> \
+     node --disable-warning=ExperimentalWarning tracker/server.mjs
+   ```
+
+   Good: `tracker listening on http://...`. Leave it running.
+
+3. **Make sure the sign-ins are whole:**
+
+   ```bash
+   npm run tracker:signins -- create --name <project name>
+   ```
+
+   Good: each seat `already signs in ... left alone`, and the operator's
+   line says his ClickUp seat `now maps` or `already maps` to his actor. A
+   database made before that mapping existed gets it here; without it, the
+   import refuses to run rather than file his history under a second
+   operator.
+
+4. **Import the queue.** A dry run first, then the real one:
+
+   ```bash
+   npm run tracker:import -- --db <trackerDataDir>/tracker.db --dry-run
+   npm run tracker:import -- --db <trackerDataDir>/tracker.db
+   ```
+
+   Good: `Import finished.`, nothing refused. A run that stops part way is
+   safe to run again; it carries on.
+
+5. **Check it is safe to switch:**
+
+   ```bash
+   npm run tracker:switch-check
+   ```
+
+   It writes nothing, anywhere. Good: every line `OK` and `Safe to switch.`,
+   exit 0. In particular `queues match` says every ticket is in both with
+   the same status, so the import counts match ClickUp's. A
+   `STATUS DIFFERS` line means a ticket moved after it was imported (the
+   importer adds new tickets and comments on a re-run but does not refresh
+   one it already has): move that ticket in the tracker to ClickUp's status,
+   by hand, then check again.
+
+6. **Dane merges the switch PR.** His word, as for every merge. Then bring
+   the checkout up to date: `git pull` on `main`.
+
+7. **Start everything again**, now on the tracker. Stop the hand-started
+   server first (Ctrl-C in its tab), then:
+
+   ```bash
+   ./scripts/install_loop_runner.sh
+   ./scripts/install_loop_runner.sh --status
+   ```
+
+   Good: the lanes, the relay, the tracker and its backup all
+   `loaded: yes`, and the tracker `answers: yes`.
+
+8. **Check the loops see the same queue.** `npm run clickup --` now talks to
+   the tracker:
+
+   ```bash
+   npm run clickup -- queue
+   npm run clickup -- waiting
+   ```
+
+   Good: `queue` lists the same open tickets ClickUp's Loop Queue showed at
+   step 1, with tracker ids (`SP-12`); `waiting` lists the same tickets as
+   the page's "Waiting on you" at `trackerUrl`. After the next relay pass
+   (ten minutes), its log (`<logDir>/<productSlug>-relay.log`) ends with a
+   pass that read the tracker without errors.
+
+### The week side by side
+
+ClickUp's Loop Queue is left exactly as it was at step 1 and is not written
+to: every loop, and Dane, works in the tracker. ClickUp is the record to
+compare against if anything looks wrong. Making the list read-only, and
+letting ClickUp go, is a later ticket.
+
+### Switching back
+
+The switch is one config change, so going back is too, done the same way:
+stop the loops (step 1), a pull request that sets `tracker` back to
+`"clickup"` and the ids back to the ClickUp seats, Dane's merge, start the
+loops (step 7). Anything done in the tracker during the week stays in the
+tracker and is not copied back to ClickUp; a ticket moved there is moved by
+hand in ClickUp.
+
 ## Decisions (Dane, 2026-10-26)
 
 Dane agreed to all four recommendations:

@@ -23,6 +23,7 @@
     "tracker:import": "doppler run --project spirality --config dev --no-check-version -- node tracker/import.mjs",
     "doctor": "node scripts/doctor.mjs",
     "tracker:signins": "doppler run --project spirality --config dev --no-check-version -- node --no-warnings tracker/signins.mjs",
+    "tracker:switch-check": "doppler run --project spirality --config dev --no-check-version -- node --no-warnings tracker/switchCheck.mjs",
     "check:syntax": "node scripts/check_syntax.mjs",
     "check:secrets": "node scripts/check_secrets.mjs",
     "test": "node --test scripts/lib/*.test.mjs scripts/tracker/*.test.mjs lib/*.test.mjs lib/*.test.js tracker/*.test.mjs",
