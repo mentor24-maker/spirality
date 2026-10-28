@@ -1,6 +1,7 @@
 /**
  * The data behind Dane's page (docs/TRACKER_MVP.md, "Dane's page"): what
- * waits on him, and one ticket's thread with each comment's author named.
+ * waits on him, one ticket's thread with each comment's author named, and
+ * one project's board.
  *
  * The page never decides anything itself. "Is this waiting on him?" is the
  * loop's own verdict, lib/waitingOnOperator.js, the same module `npm run
@@ -12,9 +13,12 @@
  */
 import waitingOnOperator from '../lib/waitingOnOperator.js';
 import machineComment from '../lib/machineComment.js';
+import loopStatuses from '../lib/loopStatuses.js';
+import { compareWithinStatus } from '../scripts/lib/loopStatuses.mjs';
 
 const { OPERATOR_LANE, WAITING, CANNOT_TELL, waitingVerdict } = waitingOnOperator;
 const { isMachineComment, stripMachineMarker } = machineComment;
+const { STAGE_ORDER, statusOf } = loopStatuses;
 
 /**
  * A ticket and its comments in the shape waitingVerdict reads. Comments go
@@ -100,5 +104,43 @@ export function threadOf(store, ticketId) {
     projectName: project?.name ?? ticket.project,
     assignee: ticket.assignee == null ? null : actor(ticket.assignee),
     comments,
+  };
+}
+
+/** Every project, for the board's switcher: slug and name, in the store's order. */
+export function projectsList(store) {
+  return store.listProjects().map((p) => ({ slug: p.slug, name: p.name }));
+}
+
+/**
+ * One project's board: the seven statuses as columns, left to right in the
+ * contract's STAGE_ORDER, each holding its tickets in the order `npm run
+ * clickup -- queue --status <S>` prints them. The order is the door's own
+ * comparator (compareWithinStatus: priority, then oldest), fed each ticket
+ * in the ClickUp shape it reads, so the board and `queue` cannot disagree.
+ * Null when there is no such project.
+ */
+export function boardOf(store, slug) {
+  const project = store.getProject(slug);
+  if (!project) return null;
+  const byStatus = new Map(STAGE_ORDER.map((name) => [statusOf(name), []]));
+  for (const ticket of store.listTickets(project.slug)) byStatus.get(ticket.status)?.push(ticket);
+  const queueShape = (t) => ({
+    priority: t.priority ? { priority: t.priority } : null,
+    date_created: String(Date.parse(t.createdAt)),
+  });
+  const inQueueOrder = (a, b) => compareWithinStatus(queueShape(a), queueShape(b));
+  return {
+    project: project.slug,
+    projectName: project.name,
+    columns: STAGE_ORDER.map((name) => ({
+      status: name,
+      tickets: byStatus.get(statusOf(name)).slice().sort(inQueueOrder).map((t) => ({
+        id: t.id,
+        name: t.name,
+        priority: t.priority,
+        tags: t.tags,
+      })),
+    })),
   };
 }

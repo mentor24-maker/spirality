@@ -11,6 +11,7 @@ import { seedDemo, tickingClock } from './demoData.mjs';
 import { escapeHtml, renderComment, renderInline, renderMarkdown } from './web/render.mjs';
 import operatorCard from '../lib/operatorCard.js';
 import machineComment from '../lib/machineComment.js';
+import loopStatuses from '../lib/loopStatuses.js';
 
 const DOOR = fileURLToPath(new URL('../scripts/clickup.mjs', import.meta.url));
 const WEB = (name) => fileURLToPath(new URL(`./web/${name}`, import.meta.url));
@@ -32,8 +33,8 @@ async function fixture() {
     try { json = JSON.parse(text); } catch { /* a page, not JSON */ }
     return { status: res.status, headers: res.headers, text, body: json };
   }
-  /** Run the real door's `waiting` against this tracker, for one project, as the loop. */
-  function waitingCommand(slug) {
+  /** Run the real door against this tracker, for one project, as the loop. */
+  function door(slug, ...args) {
     const product = join(dir, slug);
     mkdirSync(product, { recursive: true });
     writeFileSync(join(product, 'spirality.project.json'), JSON.stringify({
@@ -46,7 +47,7 @@ async function fixture() {
     }));
     return new Promise((resolve) => {
       const env = { PATH: process.env.PATH, HOME: process.env.HOME, TRACKER_TOKEN: loopToken };
-      const child = spawn(process.execPath, [DOOR, 'waiting'], { cwd: product, env });
+      const child = spawn(process.execPath, [DOOR, ...args], { cwd: product, env });
       let out = '';
       let err = '';
       child.stdout.on('data', (c) => { out += c; });
@@ -59,7 +60,8 @@ async function fixture() {
     store.close();
     rmSync(dir, { recursive: true, force: true });
   }
-  return { ...seed, store, url, call, waitingCommand, cleanup };
+  const waitingCommand = (slug) => door(slug, 'waiting');
+  return { ...seed, store, url, call, door, waitingCommand, cleanup };
 }
 
 const idsWhere = (expect, outcome) => Object.keys(expect).filter((id) => expect[id] === outcome).sort();
@@ -127,6 +129,63 @@ test('once Dane answers on the page, the ticket leaves "Waiting on you"', async 
   } finally { await f.cleanup(); }
 });
 
+// ── The board ────────────────────────────────────────────────────────────────
+
+test('the board\'s columns are the seven statuses in STAGE_ORDER, each ticket in its own status\'s column', async () => {
+  const f = await fixture();
+  try {
+    const r = await f.call('GET', '/projects/alpha/board');
+    assert.equal(r.status, 200);
+    assert.equal(r.body.projectName, 'Alpha');
+    assert.deepEqual(r.body.columns.map((c) => c.status), [...loopStatuses.STAGE_ORDER]);
+    const all = f.store.listTickets('alpha');
+    for (const column of r.body.columns) {
+      const want = all.filter((t) => t.status === column.status.toLowerCase()).map((t) => t.id).sort();
+      assert.deepEqual(column.tickets.map((t) => t.id).sort(), want, column.status);
+      assert.ok(want.length > 0, `the test data has a ${column.status} ticket`);
+    }
+    const urgent = r.body.columns[1].tickets.find((t) => t.name === 'An urgent fix filed after it');
+    assert.deepEqual({ priority: urgent.priority, tags: urgent.tags }, { priority: 'urgent', tags: ['tracker', 'fix'] });
+  } finally { await f.cleanup(); }
+});
+
+test('within each column the board\'s order is exactly what `queue --status` prints', async () => {
+  const f = await fixture();
+  try {
+    const { columns } = (await f.call('GET', '/projects/alpha/board')).body;
+    // `queue` lists open tickets only, so Live is not in it.
+    for (const column of columns.filter((c) => c.status !== 'Live')) {
+      const r = await f.door('alpha', 'queue', '--status', column.status);
+      assert.equal(r.code, 0, r.err);
+      const printed = r.out.trim().split('\n').filter(Boolean).map((line) => line.split('\t')[0]);
+      assert.deepEqual(column.tickets.map((t) => t.id), printed, column.status);
+    }
+    // And the test data makes that order matter: filed low first, urgent shows first.
+    const queued = columns.find((c) => c.status === 'Queued').tickets.map((t) => t.name);
+    assert.ok(queued.indexOf('An urgent fix filed after it') < queued.indexOf('A low-priority chore filed first'));
+  } finally { await f.cleanup(); }
+});
+
+test('the board\'s switcher lists every project; an unknown project is 404; both need a token', async () => {
+  const f = await fixture();
+  try {
+    assert.deepEqual((await f.call('GET', '/projects')).body.projects, [
+      { slug: 'alpha', name: 'Alpha' }, { slug: 'beta', name: 'Beta' },
+    ]);
+    assert.equal((await f.call('GET', '/projects/beta/board')).body.projectName, 'Beta');
+    assert.equal((await f.call('GET', '/projects/nope/board')).status, 404);
+    assert.equal((await f.call('GET', '/projects', { token: null })).status, 401);
+    assert.equal((await f.call('GET', '/projects/alpha/board', { token: null })).status, 401);
+  } finally { await f.cleanup(); }
+});
+
+test('the board page folds Live by default, and every card opens its ticket page', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  assert.match(app, /c\.status === 'Live'\s*\?\s*`<details class="column">/);
+  assert.match(app, /<a class="card" href="\/t\/\$\{encodeURIComponent\(t\.id\)\}">/);
+  assert.ok(!/<details[^>]*\bopen\b/.test(app), 'Live is never drawn open');
+});
+
 // ── A ticket's thread ────────────────────────────────────────────────────────
 
 test('a ticket\'s thread is oldest first, names each author, and marks machine comments, stamped or not', async () => {
@@ -168,10 +227,10 @@ test('a reply from the page is stored exactly as typed, under Dane\'s actor, and
 
 // ── The page itself ──────────────────────────────────────────────────────────
 
-test('the page is served at / and at a ticket\'s address without a token, locked to its own scripts', async () => {
+test('the page is served at /, at a ticket\'s address and at the board without a token, locked to its own scripts', async () => {
   const f = await fixture();
   try {
-    for (const path of ['/', '/t/AL-1']) {
+    for (const path of ['/', '/t/AL-1', '/board', '/board/alpha']) {
       const r = await f.call('GET', path, { token: null });
       assert.equal(r.status, 200);
       assert.match(r.headers.get('content-type'), /^text\/html/);
