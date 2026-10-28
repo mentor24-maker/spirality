@@ -6,6 +6,20 @@ file directly on `main`.
 
 ---
 
+## 2026-10-28 — Dane hears when a ticket is handed to him: a count in the tab and an email (#24)
+
+Once the loop leaves ClickUp, Dane loses ClickUp's own notifications, and
+would only see a hand-over by opening the tracker page. Now the page's
+browser tab reads "(3) Tracker" while three tickets wait on him, and it
+re-reads the count every minute, so a pinned tab tells him at a glance.
+The tracker can also send one email each time a ticket enters one of his
+two statuses: the ticket's name, its product, what is needed from him and
+a link straight to it. Never two for the same hand-over. A failed email
+never stops the ticket moving; it is noted in the log and tried again on
+the next change. The email is built and tested with a stand-in mail
+service. The real one waits on Dane's choice of service and its key, which
+he has been asked for on the ticket.
+
 ## 2026-10-27 — Dane can see and answer his tickets in a browser page of our own (#21)
 
 Until now the only way to see what was waiting on Dane, and to answer it,
