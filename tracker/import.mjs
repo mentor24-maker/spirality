@@ -233,7 +233,8 @@ function prepare(store, config) {
   return { operator, machine, project };
 }
 
-async function readAllTasks(tracker, list) {
+/** Every ticket in the list, open and closed; throws ImportReadError on a failed or partial read. */
+export async function readAllTasks(tracker, list) {
   const tasks = [];
   for (let page = 0; page < MAX_TASK_PAGES; page += 1) {
     const out = await tracker.listTasksPage(list, page, { includeClosed: true });
@@ -354,15 +355,21 @@ function arg(argv, name) {
  * there is no store yet), so its counts are exactly what a real run would
  * write, and the real file is never opened.
  */
-function dryRunCopy(db) {
+export function dryRunCopy(db) {
   const dir = mkdtempSync(join(tmpdir(), 'tracker-import-dry-'));
   const copy = join(dir, 'tracker.db');
-  if (existsSync(db)) {
-    for (const ext of ['', '-wal', '-shm']) {
-      if (existsSync(db + ext)) copyFileSync(db + ext, copy + ext);
+  const cleanup = () => rmSync(dir, { recursive: true, force: true });
+  try {
+    if (existsSync(db)) {
+      for (const ext of ['', '-wal', '-shm']) {
+        if (existsSync(db + ext)) copyFileSync(db + ext, copy + ext);
+      }
     }
+  } catch (err) {
+    cleanup();
+    throw err;
   }
-  return { path: copy, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+  return { path: copy, cleanup };
 }
 
 async function main(argv) {
