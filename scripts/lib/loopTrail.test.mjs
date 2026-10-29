@@ -33,6 +33,16 @@ test('a PR body names its ticket by either ClickUp link shape', () => {
   assert.equal(bodyNamesTicket('anything', ''), false);
 });
 
+test('a PR body names a tracker ticket by the tracker link or the ClickUp link, never a neighbour (SP-32)', () => {
+  const opts = { tracker: 'api', trackerPrefix: 'SP', trackerUrl: 'http://mac-mini.local:4180' };
+  for (const body of ['Ticket: http://mac-mini.local:4180/tickets/SP-12', 'ClickUp: https://app.clickup.com/t/SP-12']) {
+    assert.equal(bodyNamesTicket(body, 'SP-12', opts), true, body);
+    assert.equal(bodyNamesTicket(body, 'SP-1', opts), false, `${body} does not name SP-1`);
+  }
+  // A ClickUp ticket is read as before when no tracker is configured.
+  assert.equal(bodyNamesTicket('ClickUp: https://app.clickup.com/t/86c12abcd', '86c12abcd', { tracker: 'clickup' }), true);
+});
+
 test('Ready to launch needs the NEWEST verdict to be a PASS', () => {
   assert.equal(readyToLaunchGate([]).ok, false);
   const passThenFail = [c(1, verdictComment(true, 'all gates green'), 10), c(2, verdictComment(false, 'test missing'), 20)];

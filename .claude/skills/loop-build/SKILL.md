@@ -171,8 +171,8 @@ Exit **0** nothing of his / **3** something IS his / **1** could not tell.
      Live tickets against the deploy list by name.
    - Push the branch and open a PR to `main` with `gh pr create`. The body
      must include **the ticket link `pr-opened` reads**, on a line of its
-     own. It still reads the ClickUp shape, so for a tracker ticket the line
-     is `ClickUp: https://app.clickup.com/t/SP-12`; `pr-opened` refuses
+     own: the tracker's own link, `Ticket: <trackerUrl>/tickets/SP-12` (the
+     `url:` line `get` prints). `pr-opened` refuses
      without it and prints the exact line, a plain-language
      summary, and the task's "How to test" steps. End with the Generated-with
      trailer.
