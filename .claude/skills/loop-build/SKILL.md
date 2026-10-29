@@ -1,6 +1,6 @@
 ---
 name: loop-build
-description: Pick the next claimable task (all "Rework" first, then "Queued") from the Spirality "Loop Queue" ClickUp list and build it end-to-end into a pull request — in its own git worktree, passing `npm run verify` — then move the task to "In review". Designed to be run on a timer with `/loop 30m loop-build`. Never edits main, never merges.
+description: Pick the next claimable task (all "Rework" first, then "Queued") from the Spirality queue in the tracker and build it end-to-end into a pull request — in its own git worktree, passing `npm run verify` — then move the task to "In review". Designed to be run on a timer with `/loop 30m loop-build`. Never edits main, never merges.
 ---
 
 # Loop: Build
@@ -19,9 +19,9 @@ runner yet, so the rule is simple: **do not start this loop if another session
 is already running it.** If `queue --claimable` shows a ticket in `Building`
 that is not yours, a pass is already in flight — stop and say so.
 
-## ClickUp access: the direct script, not the connector
+## Ticket access: the direct script, not the connector
 
-Every ClickUp touch goes through **`npm run clickup -- <command>`** — a full
+Every ticket touch (the tracker, since the switch from ClickUp) goes through **`npm run clickup -- <command>`** — a full
 standalone command each time (shell state does not survive between tool
 calls). Doppler supplies the token; you never see or handle it. The moves this
 loop makes:
@@ -166,12 +166,14 @@ Exit **0** nothing of his / **3** something IS his / **1** could not tell.
    - Inspect `git diff --cached` before committing: no stray edits, no
      generated files, no `.env`. **This repository is public.**
    - Commit message ends with the Co-Authored-By trailer.
-   - **The PR title is the ClickUp task name, copied exactly**
+   - **The PR title is the ticket name, copied exactly**
      (`npm run clickup -- task-name --task <id>` prints it). Dane pairs the
-     ClickUp Closed list against the deploy list by name.
+     Live tickets against the deploy list by name.
    - Push the branch and open a PR to `main` with `gh pr create`. The body
-     must include **the ClickUp task URL** (`https://app.clickup.com/t/<id>`,
-     on a line of its own — `pr-opened` refuses without it), a plain-language
+     must include **the ticket link `pr-opened` reads**, on a line of its
+     own. It still reads the ClickUp shape, so for a tracker ticket the line
+     is `ClickUp: https://app.clickup.com/t/SP-12`; `pr-opened` refuses
+     without it and prints the exact line, a plain-language
      summary, and the task's "How to test" steps. End with the Generated-with
      trailer.
    - Wait for the `verify` check: `gh pr checks <pr> --watch`. If no check

@@ -1,6 +1,6 @@
 ---
 name: loop-spec
-description: Turn a rough idea from Dane into a set of small, well-scoped, independently-shippable work items filed as ClickUp tasks in the Spirality "Loop Queue" list, each with acceptance criteria and test steps. This is the ONLY manual step of the loop — run it at the start of a work session to feed the build/review loops.
+description: Turn a rough idea from Dane into a set of small, well-scoped, independently-shippable work items filed as tickets in the Spirality queue in the tracker, each with acceptance criteria and test steps. This is the ONLY manual step of the loop — run it at the start of a work session to feed the build/review loops.
 ---
 
 # Loop: Spec
@@ -15,8 +15,8 @@ NOT write any code here. You produce well-formed tasks.
 ## Inputs
 
 - A rough idea or goal from Dane (one sentence is fine to start).
-- The target list is the Spirality **Loop Queue**, list id `901418065068`
-  (the script's default). File tasks through the direct script, which carries
+- The target is the Spirality queue in **the tracker** (the script's
+  default; ids like `SP-12`). File tasks through the direct script, which carries
   priority and tags and verifies the body saved:
 
   ```bash
@@ -166,7 +166,8 @@ says plainly "not measured".
 
 ## First-time setup
 
-If the Spirality "Loop Queue" list does not carry the seven statuses yet,
+(ClickUp products only; the tracker carries the statuses itself.) If a
+ClickUp "Loop Queue" list does not carry the seven statuses yet,
 point Dane at `docs/CLICKUP_SETUP.md` — ClickUp's API cannot edit a list's
 status set, so that is a click-by-click step in the ClickUp web app. The loops
 key off these exact names, matched case-insensitively:
