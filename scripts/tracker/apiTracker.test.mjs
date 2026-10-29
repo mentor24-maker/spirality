@@ -42,7 +42,7 @@ async function fixture() {
     githubRepo: 'owner/repo', dopplerProject: 'proj', dopplerConfig: 'dev',
     launchdPrefix: 'com.example', logDir: '~/loop-logs', mergePhrases: ['merge'],
     governancePaths: [], autoMergeLanes: [], operatorName: 'Dane', productSlug: 'alpha',
-    legacyMachinePrefixes: [], productScripts: {}, tracker: 'api', trackerUrl: url,
+    legacyMachinePrefixes: [], productScripts: {}, tracker: 'api', trackerUrl: url, trackerPrefix: 'AL',
   }));
   const bin = join(dir, 'bin');
   mkdirSync(bin);
@@ -346,9 +346,28 @@ test('pr-opened records the PR and reads it back; then verdict --pass reads back
     const refused = await f.door(['pr-opened', '--task', 'AL-1', '--pr', 'https://github.com/owner/repo/pull/7']);
     assert.equal(refused.code, 4);
     assert.equal(f.store.listComments('AL-1').length, 0);
+    // The refusal prints the line for THIS tracker: its own link, not ClickUp's (SP-32).
+    // The page (/t/), not the API route, on the config file's address.
+    assert.ok(refused.err.includes(`\n  Ticket: ${f.url}/t/AL-1\n`), refused.err);
+    // Reached through a TRACKER_URL override (Doppler's 127.0.0.1 on the Mini),
+    // the line it prints still uses the address in the config file.
+    const viaOverride = await f.door(['pr-opened', '--task', 'AL-1', '--pr', 'https://github.com/owner/repo/pull/7'],
+      { env: { TRACKER_URL: `http://localhost:${new URL(f.url).port}` } });
+    assert.equal(viaOverride.code, 4, viaOverride.err);
+    assert.ok(viaOverride.err.includes(`\n  Ticket: ${f.url}/t/AL-1\n`), viaOverride.err);
 
-    // The PR-body link reader (lib, unchanged in this phase) still reads the ClickUp link form.
+    // A neighbour's id is not this ticket's: AL-10 does not name AL-1. On the
+    // fixture's own port, so it is refused for the id and not the port.
+    f.prBody = 'Summary.\n\nTicket: http://127.0.0.1:' + new URL(f.url).port + '/t/AL-10\n';
+    assert.equal((await f.door(['pr-opened', '--task', 'AL-1', '--pr', 'https://github.com/owner/repo/pull/7'])).code, 4);
+
+    // The ClickUp link form, which PRs opened before the switch carry, still names a tracker id.
     f.prBody = 'Summary.\n\nhttps://app.clickup.com/t/AL-1\n';
+    const old = await f.door(['pr-opened', '--task', 'AL-1', '--pr', 'https://github.com/owner/repo/pull/7', '--if-missing']);
+    assert.equal(old.code, 0, old.err);
+
+    // The tracker's own link, by another name for the same machine, is the line a PR now carries.
+    f.prBody = 'Summary.\n\nTicket: http://mac-mini.local:' + new URL(f.url).port + '/tickets/AL-1\n';
     const r = await f.door(['pr-opened', '--task', 'AL-1', '--pr', 'https://github.com/owner/repo/pull/7']);
     assert.equal(r.code, 0, r.err);
     assert.equal(r.out, 'Task AL-1: PR #7 recorded (https://github.com/owner/repo/pull/7), read back and parsed by the gate\'s own reader.\n');

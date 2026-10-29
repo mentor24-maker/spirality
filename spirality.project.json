@@ -32,5 +32,6 @@
   "trackerHost": "0.0.0.0",
   "trackerDataDir": "~/spirality-tracker",
   "tracker": "api",
-  "trackerUrl": "http://mac-mini.local:4180"
+  "trackerUrl": "http://mac-mini.local:4180",
+  "trackerApiUrl": "http://127.0.0.1:4180"
 }

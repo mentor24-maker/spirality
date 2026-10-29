@@ -11,6 +11,7 @@
  */
 
 import { isMachineComment } from './machineComment.mjs';
+import { bodyNamesTicket as namesTicket } from '../../lib/clickupTicketLink.js';
 
 export const ESCALATE_AT_ROUND = 4;
 
@@ -55,12 +56,16 @@ export function prTrailLanded(comments, prNumber) {
   return { ok: true, why: '', pr: found };
 }
 
-/** Does a PR body link back to its ticket? Accepts /t/<id> and /t/<workspace>/<id>. */
-export function bodyNamesTicket(body, taskId) {
-  const id = String(taskId || '').trim();
-  if (!id) return false;
-  const re = new RegExp(`app\\.clickup\\.com/t/(?:\\d+/)?${id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![a-z0-9])`, 'i');
-  return re.test(String(body || ''));
+/**
+ * Does a PR body link back to its ticket? The ClickUp link (/t/<id> and
+ * /t/<workspace>/<id>) or the tracker's own <trackerUrl>/tickets/<id>. One
+ * definition, lib/clickupTicketLink.js, which the review gate reads too, so
+ * the command that records a PR and the gate that judges it cannot disagree
+ * (SP-32). `opts` is `{ tracker, trackerPrefix, trackerUrl }`; omitted, the
+ * project config's.
+ */
+export function bodyNamesTicket(body, taskId, opts) {
+  return namesTicket(body, taskId, '', opts);
 }
 
 export function isReviewVerdict(text) {

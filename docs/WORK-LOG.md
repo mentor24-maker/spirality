@@ -16,6 +16,45 @@ such session uses automatically. It is a machine sign-in, never Dane's, so
 the tracker shows hand-run moves apart from the loops' and never as his.
 It gets made once on the Mini after this merges.
 
+---
+
+## 2026-10-29 — The loops reach the tracker without a patch in Doppler (#28)
+
+Right after Spirality switched to its own tracker, every loop and the relay
+stopped with "fetch failed". The cause: the program the loops run on (Node)
+cannot look up the Mini's own network name, `mac-mini.local`, even though
+the browser and `curl` can. A quick fix in the secret store (Doppler) had
+the loops call the Mini as `127.0.0.1`, "this machine", instead. That fix
+now lives where it belongs: the project's settings file has a second
+address, `trackerApiUrl`, just for the loops, while Dane's browser and the
+hand-over email keep the network name. The "safe to switch?" check also
+tests that address the way the loops do, so the next product that switches
+finds this problem before the switch, with the address to use written out.
+Once this merges, the Doppler patch can be deleted.
+
+---
+
+## 2026-10-28 — Pull requests can name a tracker ticket again (#27)
+
+Every pull request has to say which ticket it belongs to, and a small piece of
+code checks that it does. Since Spirality's tickets moved to our own tracker
+they are named like `SP-12`, and that checker stopped reading at the hyphen: it
+saw a ticket called "SP". It also did not recognise the tracker's own ticket
+link at all. Now it reads both the old ClickUp-style link and the tracker's
+link, using the ticket prefix and address from the project's settings, so
+nothing about Spirality is written into the shared code. The command that
+records a pull request on its ticket and the open-work counter now use that
+same checker instead of keeping copies of their own. StarCaster and WaveCenter,
+still on ClickUp, read their tickets exactly as before.
+
+The link the loops tell people to paste is now the ticket's web page
+(`http://mac-mini.local:4180/t/SP-12`), not the tracker's behind-the-scenes
+address, which showed an error in a browser. And it always uses the Mini's
+network name from the settings file, never the `127.0.0.1` the Mini uses to
+talk to itself, so the link opens from the MacBook and from GitHub too.
+
+---
+
 ## 2026-10-28 — Written steps for moving off ClickUp, and a "safe to switch?" check (#25)
 
 Moving Spirality's loops from ClickUp to our own tracker is a delicate

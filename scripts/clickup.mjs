@@ -65,6 +65,7 @@ import {
 // A ticket's `Waits on:` line (task 86bctfun6): the claim leaves it alone
 // until every ticket it names is closed.
 import { waitsOn, waitsOnText, holdReasons } from '../lib/waitsOn.js';
+import { ticketLine } from '../lib/clickupTicketLink.js';
 // Telling in-flight tickets that main moved under them (task 86bctjffu).
 import {
   checkBranch, branchContains, tellTickets, latestMainMoved,
@@ -113,7 +114,7 @@ const TRACKERS = {
     tokenEnv: () => trackerTokenEnv(),
     make: (token) => createApiTracker({
       token,
-      baseUrl: project.trackerUrl,
+      baseUrl: project.trackerApiUrl,
       project: project.productSlug,
       listId: LOOP_QUEUE_LIST,
       timeoutMs: process.env.TRACKER_HTTP_TIMEOUT_MS,
@@ -714,9 +715,10 @@ if (cmd === 'whoami') {
   if (!view.ok) { console.error(`Could not read PR #${prNumber} from ${repo}: ${view.stderr.slice(0, 300)}\nNothing was written.`); process.exit(1); }
   let prJson;
   try { prJson = JSON.parse(view.stdout); } catch { console.error('gh returned non-JSON. Nothing was written.'); process.exit(1); }
-  if (!bodyNamesTicket(prJson.body, task)) {
+  if (!bodyNamesTicket(prJson.body, task, project)) {
     console.error(`\nPR #${prNumber} has no link back to this ticket in its body, so nothing was written.`);
-    console.error(`Add this line to the PR body and run again:\n  ClickUp: https://app.clickup.com/t/${task}\n`);
+    // No `project` here: the line people paste uses the config FILE's address, not TRACKER_URL (SP-32).
+    console.error(`Add this line to the PR body and run again:\n  ${ticketLine(task)}\n`);
     process.exit(4);
   }
   let already = false;
