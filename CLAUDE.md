@@ -65,7 +65,8 @@ work goes here, never mixed.
 
 - Every ticket touch goes through `npm run clickup -- <command>`. The name
   stayed: it talks to whichever tracker `spirality.project.json` names, and
-  Doppler supplies the token. Never the claude.ai connector.
+  Doppler supplies the token. Never the claude.ai connector. A session
+  started by hand signs in as `hand-run`, never as Dane.
 - A pull request's title is the ticket's name, byte for byte, and its body
   carries the ticket link (`pr-opened` prints the exact line it accepts). `npm run verify` is the definition of done; CI runs
   it on every pull request.

@@ -17,7 +17,9 @@ export const CONFIGS = ['dev'];
 /**
  * Who signs in to the tracker, and the Doppler secret holding each one's
  * token. A loop's actor is named after its skill (the relay after itself);
- * the operator's actor takes the project config's `operatorName`.
+ * the operator's actor takes the project config's `operatorName`. The
+ * `handRun` seat is the one a session started by hand signs in as, when no
+ * runner names a seat (scripts/tracker/apiTracker.mjs, trackerTokenEnv).
  * `tracker/signins.mjs create` makes exactly these.
  */
 export const TRACKER_SEATS = [
@@ -25,6 +27,7 @@ export const TRACKER_SEATS = [
   { secret: 'TRACKER_TOKEN_LOOP_BUILD', kind: 'machine', name: 'loop-build', what: "the build loop's tracker sign-in" },
   { secret: 'TRACKER_TOKEN_LOOP_REVIEW', kind: 'machine', name: 'loop-review', what: "the review loop's tracker sign-in" },
   { secret: 'TRACKER_TOKEN_RELAY', kind: 'machine', name: 'relay', what: "the relay's tracker sign-in" },
+  { secret: 'TRACKER_TOKEN_HAND_RUN', kind: 'machine', name: 'hand-run', handRun: true, what: "a hand-run session's tracker sign-in" },
 ];
 
 export const EXPECTED_SECRETS = [

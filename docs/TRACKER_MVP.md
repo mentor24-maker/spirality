@@ -255,6 +255,7 @@ made each move. The tokens live only in Doppler (project `spirality`, config
 | `loop-build` | machine | `TRACKER_TOKEN_LOOP_BUILD` | `scripts/loop_runner.sh loop-build` |
 | `loop-review` | machine | `TRACKER_TOKEN_LOOP_REVIEW` | `scripts/loop_runner.sh loop-review` |
 | `relay` | machine | `TRACKER_TOKEN_RELAY` | `scripts/run_relay.sh` |
+| `hand-run` | machine | `TRACKER_TOKEN_HAND_RUN` | a session started by hand (no runner) |
 
 The list is `TRACKER_SEATS` in `scripts/lib/expectedSecrets.mjs`, so
 `npm run doctor` reports each one as present or MISSING.
@@ -263,10 +264,11 @@ A runner never handles the token itself. It sets `TRACKER_TOKEN_NAME` to
 the secret's **name** (`loop_runner.sh` derives it from the skill: `loop-build`
 → `TRACKER_TOKEN_LOOP_BUILD`), and the door reads that secret inside its own
 `doppler run`. The value never enters the loop session's environment or its
-log. Only the three loop seats can be named: the door refuses
+log. Only the machine seats can be named: the door refuses
 `TRACKER_TOKEN_OPERATOR` (or any other name), so no loop can sign in as the
-operator. A session started by hand names none and falls back to
-`TRACKER_TOKEN`.
+operator. A session started by hand (the switch session, a debugging
+session) names none and signs in as `hand-run`, its own machine seat, so
+the tracker shows its moves apart from the loops' and never as the operator's.
 Until the switch-over, Spirality's `tracker` is still `clickup`, so none of
 this is read yet.
 

@@ -96,13 +96,18 @@ const ms = (iso) => String(Date.parse(iso));
  * (`TRACKER_TOKEN_LOOP_BUILD`, ...). Its runner sets `TRACKER_TOKEN_NAME` to
  * that NAME, never the value, so the token reaches only the door's own
  * process (through `doppler run`) and never the loop session's environment.
- * Without it, `TRACKER_TOKEN`. Only a machine seat's secret is accepted
+ * Without it (a session started by hand), the hand-run seat's
+ * (`TRACKER_TOKEN_HAND_RUN`). Only a machine seat's secret is accepted
  * (TRACKER_SEATS): any other name is refused, above all the operator's own,
  * so a loop can never sign in as him or be pointed at another key.
  */
 export function trackerTokenEnv(env = process.env, seats = TRACKER_SEATS) {
   const name = env.TRACKER_TOKEN_NAME;
-  if (name == null || name === '') return 'TRACKER_TOKEN';
+  if (name == null || name === '') {
+    const handRun = seats.find((s) => s.handRun && s.kind === 'machine');
+    if (!handRun) throw new Error('no TRACKER_TOKEN_NAME is set and no hand-run seat is listed in TRACKER_SEATS.');
+    return handRun.secret;
+  }
   const machine = seats.filter((s) => s.kind === 'machine').map((s) => s.secret);
   if (!machine.includes(name)) {
     throw new Error(`TRACKER_TOKEN_NAME must name a loop's own tracker secret (${machine.join(', ')}), not "${name}".`);
