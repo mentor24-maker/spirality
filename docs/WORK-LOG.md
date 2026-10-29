@@ -6,6 +6,16 @@ file directly on `main`.
 
 ---
 
+## 2026-10-29 — A session started by hand gets its own tracker sign-in (#29)
+
+Each loop signs in to the tracker as itself, so the tracker knows who made
+each move. But a Claude session Dane starts by hand had no sign-in of its
+own and could not read or write a single ticket; during the switch it had
+to borrow the loops'. Now there is a fourth sign-in, "hand-run", that any
+such session uses automatically. It is a machine sign-in, never Dane's, so
+the tracker shows hand-run moves apart from the loops' and never as his.
+It gets made once on the Mini after this merges.
+
 ## 2026-10-28 — Written steps for moving off ClickUp, and a "safe to switch?" check (#25)
 
 Moving Spirality's loops from ClickUp to our own tracker is a delicate
