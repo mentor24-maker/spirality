@@ -55,7 +55,7 @@ async function fixture() {
     set prBody(body) { writeFileSync(prFile, JSON.stringify({ body, url: 'https://github.com/owner/repo/pull/7' })); },
     door(args, { stdin = '', token = machineToken, env: extra = {} } = {}) {
       return new Promise((resolve) => {
-        const env = { PATH: `${bin}:${process.env.PATH}`, HOME: process.env.HOME, TRACKER_TOKEN: token, ...extra };
+        const env = { PATH: `${bin}:${process.env.PATH}`, HOME: process.env.HOME, TRACKER_TOKEN_HAND_RUN: token, ...extra };
         const child = spawn(process.execPath, [DOOR, ...args], { cwd: product, env });
         let out = '';
         let err = '';
@@ -86,24 +86,26 @@ test('whoami names the loop\'s own actor in the tracker', async () => {
   } finally { await f.cleanup(); }
 });
 
-test('a missing or wrong token is refused the way ClickUp\'s is, naming TRACKER_TOKEN', async () => {
+test('a missing or wrong token is refused the way ClickUp\'s is, naming TRACKER_TOKEN_HAND_RUN', async () => {
   const f = await fixture();
   try {
     const none = await f.door(['whoami'], { token: '' });
     assert.equal(none.code, 2);
-    assert.match(none.err, /TRACKER_TOKEN is not set/);
+    assert.match(none.err, /TRACKER_TOKEN_HAND_RUN is not set/);
     const wrong = await f.door(['whoami'], { token: 'not-a-token' });
     assert.equal(wrong.code, 1);
     assert.match(wrong.err, /whoami FAILED — HTTP 401/);
-    assert.match(wrong.err, /proj\/dev, TRACKER_TOKEN/);
+    assert.match(wrong.err, /proj\/dev, TRACKER_TOKEN_HAND_RUN/);
     assert.doesNotMatch(wrong.err + wrong.out, new RegExp(f.machineToken));
   } finally { await f.cleanup(); }
 });
 
-test('trackerTokenEnv: TRACKER_TOKEN by default, a loop\'s own secret when a runner names one, never the operator\'s', () => {
-  assert.equal(trackerTokenEnv({}), 'TRACKER_TOKEN');
-  assert.equal(trackerTokenEnv({ TRACKER_TOKEN_NAME: '' }), 'TRACKER_TOKEN');
-  for (const ok of ['TRACKER_TOKEN_LOOP_BUILD', 'TRACKER_TOKEN_LOOP_REVIEW', 'TRACKER_TOKEN_RELAY']) {
+test('trackerTokenEnv: the hand-run seat by default, a loop\'s own secret when a runner names one, never the operator\'s', () => {
+  assert.equal(trackerTokenEnv({}), 'TRACKER_TOKEN_HAND_RUN');
+  assert.equal(trackerTokenEnv({ TRACKER_TOKEN_NAME: '' }), 'TRACKER_TOKEN_HAND_RUN');
+  const noHandRun = [{ secret: 'TRACKER_TOKEN_RELAY', kind: 'machine', name: 'relay' }, { secret: 'TRACKER_TOKEN_OPERATOR', kind: 'human', name: null, handRun: true }];
+  assert.throws(() => trackerTokenEnv({}, noHandRun), /no hand-run seat/);
+  for (const ok of ['TRACKER_TOKEN_LOOP_BUILD', 'TRACKER_TOKEN_LOOP_REVIEW', 'TRACKER_TOKEN_RELAY', 'TRACKER_TOKEN_HAND_RUN']) {
     assert.equal(trackerTokenEnv({ TRACKER_TOKEN_NAME: ok }), ok);
   }
   for (const bad of ['TRACKER_TOKEN_OPERATOR', 'TRACKER_TOKEN_LOOP_SPEC', 'CLICKUP_API_TOKEN', 'TRACKER_TOKEN', 'TRACKER_TOKEN_', 'tracker_token_relay', 'TRACKER_TOKEN_A;B']) {

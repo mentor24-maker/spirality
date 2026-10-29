@@ -30,6 +30,8 @@ test('every seat is an expected secret, so doctor reports each one; the operator
   const seats = seatsFor('Dana');
   assert.deepEqual(seats.filter((s) => s.kind === 'human').map((s) => s.name), ['Dana']);
   assert.ok(seats.every((s) => s.name));
+  // A session started by hand signs in as its own machine seat, never the operator.
+  assert.deepEqual(TRACKER_SEATS.filter((s) => s.handRun).map((s) => [s.secret, s.kind, s.name]), [['TRACKER_TOKEN_HAND_RUN', 'machine', 'hand-run']]);
 });
 
 test('create makes each actor and the project, stores every token, and GET /me then names each seat', async () => {

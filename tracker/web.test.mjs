@@ -46,7 +46,7 @@ async function fixture() {
       legacyMachinePrefixes: [], productScripts: {}, tracker: 'api', trackerUrl: url,
     }));
     return new Promise((resolve) => {
-      const env = { PATH: process.env.PATH, HOME: process.env.HOME, TRACKER_TOKEN: loopToken };
+      const env = { PATH: process.env.PATH, HOME: process.env.HOME, TRACKER_TOKEN_HAND_RUN: loopToken };
       const child = spawn(process.execPath, [DOOR, ...args], { cwd: product, env });
       let out = '';
       let err = '';
