@@ -23,7 +23,7 @@
  *   a ticket id, any case           the store's id, upper case (`AL-1`):
  *                                   ClickUp ids are lower case and lib/
  *                                   lowercases what it reads (waitsOn)
- *   a ticket's web page             the API's own `<trackerUrl>/tickets/<id>`
+ *   a ticket's web page             the API's own `<trackerApiUrl>/tickets/<id>`
  *                                   (JSON, signed in; no web page until
  *                                   Phase 3): one word ending in the id, as
  *                                   lib/conflictWork reads a filed ticket back
@@ -112,13 +112,13 @@ export function trackerTokenEnv(env = process.env, seats = TRACKER_SEATS) {
 
 /**
  * `token` is the loop's tracker token (see trackerTokenEnv). `baseUrl` is the
- * project config's `trackerUrl`. `project` is the tracker's project slug and
+ * project config's `trackerApiUrl` (the address the loops call). `project` is the tracker's project slug and
  * `listId` the configured Loop Queue list it stands for. `timeoutMs`
  * defaults to one minute. `log` takes the one request-count line (stderr in
  * the door).
  */
 export function createApiTracker({ token, baseUrl, project, listId, timeoutMs, log = console.error } = {}) {
-  if (!baseUrl) throw new Error('the api tracker needs a trackerUrl.');
+  if (!baseUrl) throw new Error('the api tracker needs a trackerApiUrl (or a trackerUrl).');
   if (!project) throw new Error('the api tracker needs a project slug.');
   const BASE = String(baseUrl).replace(/\/+$/, '');
   const HTTP_TIMEOUT_MS = Number(timeoutMs) || 60 * 1000;

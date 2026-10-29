@@ -6,10 +6,15 @@
  *
  *   npm run tracker:switch-check            (Doppler supplies the tokens)
  *
- * Four checks, each OK or what is wrong:
+ * Five checks, each OK or what is wrong:
  *
- *  1. tracker service   the tracker answers at its address (the config's
- *                       trackerUrl, else 127.0.0.1:<trackerPort>).
+ *  1. tracker service   the tracker answers at its address (this machine,
+ *                       127.0.0.1:<trackerPort>, else the config's
+ *                       trackerApiUrl or trackerUrl).
+ *     loops' address    Node itself reaches the tracker at the address the
+ *                       loops call (trackerApiUrl, else trackerUrl): Node
+ *                       may not find a ".local" name that ping and curl do,
+ *                       and then every loop pass fails with "fetch failed".
  *  2. sign-ins          each seat's token (TRACKER_SEATS) signs in as itself:
  *                       against the running tracker when it answers, else
  *                       against a throwaway server on a copy of the database.
@@ -50,11 +55,18 @@ const ANSWER_TIMEOUT_MS = 3000;
 
 const shown = (status) => DISPLAY[status] ?? `"${status}"`;
 
-/** The address the loops will reach the tracker at, or null when the config names none. */
+const trimmed = (url) => String(url).replace(/\/+$/, '');
+
+/** Where the tracker service answers on this machine, or null when the config names none. */
 export function trackerAddress(config) {
-  if (config.trackerUrl) return String(config.trackerUrl).replace(/\/+$/, '');
   if (config.trackerPort) return `http://127.0.0.1:${config.trackerPort}`;
-  return null;
+  return loopsAddress(config);
+}
+
+/** The address the loops call (trackerApiUrl, else trackerUrl), or null when the config names neither. */
+export function loopsAddress(config) {
+  const url = config.trackerApiUrl || config.trackerUrl;
+  return url ? trimmed(url) : null;
 }
 
 /** The tracker database: TRACKER_DB, else the config's trackerDataDir/tracker.db, else null. */
@@ -144,10 +156,31 @@ export async function runSwitchCheck({ config, env, db, clickup, fetchImpl = fet
       ? `${url} answers (${p.why}).`
       : `NOTHING ANSWERS at ${url} (${p.why}). Start the tracker first (the runbook, step 2).`]);
   }
+
+  // 1b. The loops' address, fetched by Node as the door fetches it (not curl).
+  const loops = loopsAddress(config);
+  if (!loops) {
+    section("loops' address", true, [`The config names no address for the loops yet; the switch sets trackerApiUrl to this machine's own, ${url ?? 'http://127.0.0.1:<trackerPort>'}.`]);
+  } else if (url && loops === url) {
+    section("loops' address", live, [live ? `The loops call ${loops}, the address above, and Node reaches it.` : `The loops call ${loops}, the address above, where nothing answers.`]);
+  } else {
+    const p = await probe(loops, fetchImpl);
+    const lines = [p.answers
+      ? `The loops call ${loops}, and Node reaches the tracker there (${p.why}).`
+      : `The loops call ${loops}, and Node cannot reach the tracker there (${p.why}): every loop and relay pass would fail with "fetch failed".`];
+    if (!p.answers) {
+      lines.push(live && url
+        ? `The tracker answers at ${url}: set "trackerApiUrl": "${url}" in the project config, so the loops call that instead.`
+        : 'Start the tracker first (the runbook, step 2), then check again.');
+    }
+    section("loops' address", p.answers, lines);
+  }
+
   section('config', true, [
-    `tracker is "${config.tracker ?? 'clickup'}"${config.trackerUrl ? `, trackerUrl ${config.trackerUrl}` : ', no trackerUrl yet'}.`,
-    `The switch sets tracker "api" and trackerUrl to the Mini's network address, http://<\`scutil --get LocalHostName\`>.local:${config.trackerPort ?? '<trackerPort>'}`,
-    '(not 127.0.0.1: Dane\'s browser and the hand-over email use it; the runbook, "The switch").',
+    `tracker is "${config.tracker ?? 'clickup'}"${config.trackerUrl ? `, trackerUrl ${config.trackerUrl}` : ', no trackerUrl yet'}${config.trackerApiUrl ? `, trackerApiUrl ${config.trackerApiUrl}` : ''}.`,
+    `The switch sets tracker "api", trackerUrl to the Mini's network address, http://<\`scutil --get LocalHostName\`>.local:${config.trackerPort ?? '<trackerPort>'}`,
+    '(Dane\'s browser and the hand-over email use it), and trackerApiUrl to the address the loops call',
+    `on the Mini itself, ${url ?? 'http://127.0.0.1:<trackerPort>'} (the runbook, "Switching a product over").`,
   ]);
 
   const haveDb = Boolean(db) && existsSync(db);

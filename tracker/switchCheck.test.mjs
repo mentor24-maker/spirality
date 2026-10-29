@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { openStore } from './store.mjs';
 import { startServer } from './server.mjs';
 import { importLoopQueue } from './import.mjs';
-import { compareQueues, databasePath, formatSwitchCheck, runSwitchCheck, trackerAddress } from './switchCheck.mjs';
+import { compareQueues, databasePath, formatSwitchCheck, loopsAddress, runSwitchCheck, trackerAddress } from './switchCheck.mjs';
 
 /** A config with made-up values, so nothing can pass by matching a real product. */
 const CONFIG = Object.freeze({
@@ -100,7 +100,11 @@ test('compareQueues: nothing imported yet says to run the import, and a long lis
 test('trackerAddress and databasePath come from the config', () => {
   assert.equal(trackerAddress({ trackerUrl: 'http://mini.local:4180/' }), 'http://mini.local:4180');
   assert.equal(trackerAddress({ trackerPort: 4999 }), 'http://127.0.0.1:4999');
+  assert.equal(trackerAddress({ trackerPort: 4999, trackerUrl: 'http://mini.local:4999' }), 'http://127.0.0.1:4999');
   assert.equal(trackerAddress({}), null);
+  assert.equal(loopsAddress({ trackerUrl: 'http://mini.local:4180/' }), 'http://mini.local:4180');
+  assert.equal(loopsAddress({ trackerUrl: 'http://mini.local:4180', trackerApiUrl: 'http://127.0.0.1:4180/' }), 'http://127.0.0.1:4180');
+  assert.equal(loopsAddress({ trackerPort: 4999 }), null);
   assert.equal(databasePath({ trackerDataDir: '/data/x' }, {}), '/data/x/tracker.db');
   assert.equal(databasePath({ trackerDataDir: '/data/x' }, { TRACKER_DB: '/elsewhere.db' }), '/elsewhere.db');
   assert.equal(databasePath({}, {}), null);
@@ -233,11 +237,53 @@ test('runSwitchCheck: a database copy that will not open fails as a NOT OK line 
   }
 });
 
-test('runSwitchCheck: the config line points at the Mini\'s network name, never 127.0.0.1', async () => {
-  const r = await runSwitchCheck({ config: { ...CONFIG, trackerPort: await closedPort() }, env: {}, db: null, clickup: fakeClickup([]) });
+test('runSwitchCheck: the config line points the browser at the Mini\'s network name and the loops at this machine', async () => {
+  const port = await closedPort();
+  const r = await runSwitchCheck({ config: { ...CONFIG, trackerPort: port }, env: {}, db: null, clickup: fakeClickup([]) });
   const text = r.sections.find((s) => s.name === 'config').lines.join('\n');
-  assert.match(text, /scutil --get LocalHostName/);
-  assert.doesNotMatch(text, /127\.0\.0\.1:\d/);
+  assert.match(text, /trackerUrl to the Mini's network address, http:\/\/<`scutil --get LocalHostName`>\.local/);
+  assert.match(text, new RegExp(`trackerApiUrl to the address the loops call[\\s\\S]*http://127\\.0\\.0\\.1:${port}`));
+  const loops = r.sections.find((s) => s.name === "loops' address");
+  assert.equal(loops.ok, true);
+  assert.match(loops.lines[0], /names no address for the loops yet/);
+});
+
+/** Node's fetch as it fails when it cannot look a name up: the cause carries ENOTFOUND. */
+function fetchThatCannotFind(host) {
+  return (url, opts) => {
+    if (new URL(url).hostname === host) {
+      return Promise.reject(Object.assign(new TypeError('fetch failed'), { cause: Object.assign(new Error(`getaddrinfo ENOTFOUND ${host}`), { code: 'ENOTFOUND' }) }));
+    }
+    return fetch(url, opts);
+  };
+}
+
+test('runSwitchCheck: a loops\' address Node cannot look up fails plainly and names the address that works', async () => {
+  const tasks = [task('a')];
+  const { dir, db, store, env } = await preparedDatabase(tasks);
+  const server = await startServer({ store, port: 0 });
+  try {
+    const port = server.address().port;
+    const config = { ...CONFIG, tracker: 'api', trackerPort: port, trackerUrl: `http://mini.local:${port}` };
+    const r = await runSwitchCheck({ config, env, db, clickup: fakeClickup(tasks), fetchImpl: fetchThatCannotFind('mini.local') });
+    const by = Object.fromEntries(r.sections.map((s) => [s.name, s]));
+    assert.equal(by['tracker service'].ok, true, 'the tracker itself runs');
+    assert.equal(by["loops' address"].ok, false);
+    const text = by["loops' address"].lines.join('\n');
+    assert.match(text, new RegExp(`The loops call http://mini.local:${port}, and Node cannot reach the tracker there \\(ENOTFOUND\\): every loop and relay pass would fail with "fetch failed"\\.`));
+    assert.match(text, new RegExp(`set "trackerApiUrl": "http://127.0.0.1:${port}" in the project config`));
+    assert.equal(r.ok, false);
+    assert.match(formatSwitchCheck(r), /NOT OK  loops' address[\s\S]*NOT SAFE TO SWITCH/);
+
+    // With trackerApiUrl set to this machine's address, the same check passes.
+    const fixed = await runSwitchCheck({ config: { ...config, trackerApiUrl: `http://127.0.0.1:${port}` }, env, db, clickup: fakeClickup(tasks), fetchImpl: fetchThatCannotFind('mini.local') });
+    assert.equal(fixed.ok, true, formatSwitchCheck(fixed));
+    assert.match(fixed.sections.find((s) => s.name === "loops' address").lines[0], /the address above, and Node reaches it/);
+  } finally {
+    await new Promise((res) => server.close(res));
+    store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('runSwitchCheck: no database and no tracker configured each fail plainly', async () => {
