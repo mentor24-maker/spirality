@@ -114,7 +114,7 @@ const TRACKERS = {
     tokenEnv: () => trackerTokenEnv(),
     make: (token) => createApiTracker({
       token,
-      baseUrl: project.trackerUrl,
+      baseUrl: project.trackerApiUrl,
       project: project.productSlug,
       listId: LOOP_QUEUE_LIST,
       timeoutMs: process.env.TRACKER_HTTP_TIMEOUT_MS,

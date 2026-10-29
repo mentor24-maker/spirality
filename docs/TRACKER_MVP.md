@@ -343,17 +343,27 @@ not merged. It changes the project config, and only that, plus the
 ```json
 "tracker": "api",
 "trackerUrl": "http://<the Mini's network name>.local:<trackerPort>",
+"trackerApiUrl": "http://127.0.0.1:<trackerPort>",
 "operatorUserId": "<the operator's tracker actor id>",
 "machineUserId": "<loop-build's tracker actor id>"
 ```
 
 `scutil --get LocalHostName` prints the Mini's network name (Spirality:
-`mac-mini`, so `http://mac-mini.local:4180`); Dane's browser and the loops
-both use this address, and the hand-over email links to it. The actor ids
-are the ones `npm run tracker:signins -- check` prints (Spirality: the
-operator is actor 1, `loop-build` actor 2). With the tracker, the operator
-id is who a hand-over is assigned to, and the machine id is only used to
-refuse assigning a ticket to the machine.
+`mac-mini`, so `http://mac-mini.local:4180`); Dane's browser uses this
+address, and the hand-over email links to it.
+
+`trackerApiUrl` is the address the loops themselves call: the door, so
+every runner and the relay. On the Mini it is the Mini's own address,
+`127.0.0.1`, because Node on the Mini cannot look up the Mini's own
+`.local` name (`getaddrinfo` answers "not known"; only `ping` and `curl`
+find it). Spirality learned this the hard way: after its switch every loop
+and relay pass failed with "fetch failed" until a `TRACKER_URL` value in
+Doppler patched it. Left out, `trackerApiUrl` is `trackerUrl`.
+
+The actor ids are the ones `npm run tracker:signins -- check` prints
+(Spirality: the operator is actor 1, `loop-build` actor 2). With the
+tracker, the operator id is who a hand-over is assigned to, and the machine
+id is only used to refuse assigning a ticket to the machine.
 
 The import (step 4) must run **before** the switch PR merges: it reads the
 ClickUp seat ids the config holds until then.
@@ -411,8 +421,11 @@ ClickUp seat ids the config holds until then.
    ```
 
    It writes nothing, anywhere. Good: every line `OK` and `Safe to switch.`,
-   exit 0. In particular `queues match` says every ticket is in both with
-   the same status, so the import counts match ClickUp's. A
+   exit 0. `loops' address` fetches the tracker with Node, as the loops do
+   (not `curl`, which finds names Node cannot); a `NOT OK` there names the
+   address to put in `trackerApiUrl`. In particular `queues match` says
+   every ticket is in both with the same status, so the import counts match
+   ClickUp's. A
    `STATUS DIFFERS` line means a ticket moved after it was imported (the
    importer adds new tickets and comments on a re-run but does not refresh
    one it already has): move that ticket in the tracker to ClickUp's status,
