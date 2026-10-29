@@ -6,6 +6,20 @@ file directly on `main`.
 
 ---
 
+## 2026-10-29 — The loops reach the tracker without a patch in Doppler (#28)
+
+Right after Spirality switched to its own tracker, every loop and the relay
+stopped with "fetch failed". The cause: the program the loops run on (Node)
+cannot look up the Mini's own network name, `mac-mini.local`, even though
+the browser and `curl` can. A quick fix in the secret store (Doppler) had
+the loops call the Mini as `127.0.0.1`, "this machine", instead. That fix
+now lives where it belongs: the project's settings file has a second
+address, `trackerApiUrl`, just for the loops, while Dane's browser and the
+hand-over email keep the network name. The "safe to switch?" check also
+tests that address the way the loops do, so the next product that switches
+finds this problem before the switch, with the address to use written out.
+Once this merges, the Doppler patch can be deleted.
+
 ## 2026-10-28 — Written steps for moving off ClickUp, and a "safe to switch?" check (#25)
 
 Moving Spirality's loops from ClickUp to our own tracker is a delicate
