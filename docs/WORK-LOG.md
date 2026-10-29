@@ -6,6 +6,21 @@ file directly on `main`.
 
 ---
 
+## 2026-10-28 — Pull requests can name a tracker ticket again (#27)
+
+Every pull request has to say which ticket it belongs to, and a small piece of
+code checks that it does. Since Spirality's tickets moved to our own tracker
+they are named like `SP-12`, and that checker stopped reading at the hyphen: it
+saw a ticket called "SP". It also did not recognise the tracker's own ticket
+link at all. Now it reads both the old ClickUp-style link and the tracker's
+link, using the ticket prefix and address from the project's settings, so
+nothing about Spirality is written into the shared code. The command that
+records a pull request on its ticket and the open-work counter now use that
+same checker instead of keeping copies of their own. StarCaster and WaveCenter,
+still on ClickUp, read their tickets exactly as before.
+
+---
+
 ## 2026-10-28 — Written steps for moving off ClickUp, and a "safe to switch?" check (#25)
 
 Moving Spirality's loops from ClickUp to our own tracker is a delicate
