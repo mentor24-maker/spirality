@@ -171,8 +171,11 @@ Exit **0** nothing of his / **3** something IS his / **1** could not tell.
      Live tickets against the deploy list by name.
    - Push the branch and open a PR to `main` with `gh pr create`. The body
      must include **the ticket link `pr-opened` reads**, on a line of its
-     own: the tracker's own link, `Ticket: <trackerUrl>/tickets/SP-12` (the
-     `url:` line `get` prints). `pr-opened` refuses
+     own: the ticket's page, `Ticket: <trackerUrl>/t/SP-12`, with the
+     `trackerUrl` written in `spirality.project.json`
+     (`Ticket: http://mac-mini.local:4180/t/SP-12`). Not the `url:` line
+     `get` prints: that is the API address the loop itself uses. `pr-opened`
+     refuses
      without it and prints the exact line, a plain-language
      summary, and the task's "How to test" steps. End with the Generated-with
      trailer.

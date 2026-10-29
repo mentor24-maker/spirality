@@ -19,6 +19,12 @@ records a pull request on its ticket and the open-work counter now use that
 same checker instead of keeping copies of their own. StarCaster and WaveCenter,
 still on ClickUp, read their tickets exactly as before.
 
+The link the loops tell people to paste is now the ticket's web page
+(`http://mac-mini.local:4180/t/SP-12`), not the tracker's behind-the-scenes
+address, which showed an error in a browser. And it always uses the Mini's
+network name from the settings file, never the `127.0.0.1` the Mini uses to
+talk to itself, so the link opens from the MacBook and from GitHub too.
+
 ---
 
 ## 2026-10-28 — Written steps for moving off ClickUp, and a "safe to switch?" check (#25)

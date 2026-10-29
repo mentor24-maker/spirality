@@ -717,7 +717,8 @@ if (cmd === 'whoami') {
   try { prJson = JSON.parse(view.stdout); } catch { console.error('gh returned non-JSON. Nothing was written.'); process.exit(1); }
   if (!bodyNamesTicket(prJson.body, task, project)) {
     console.error(`\nPR #${prNumber} has no link back to this ticket in its body, so nothing was written.`);
-    console.error(`Add this line to the PR body and run again:\n  ${ticketLine(task, project)}\n`);
+    // No `project` here: the line people paste uses the config FILE's address, not TRACKER_URL (SP-32).
+    console.error(`Add this line to the PR body and run again:\n  ${ticketLine(task)}\n`);
     process.exit(4);
   }
   let already = false;
