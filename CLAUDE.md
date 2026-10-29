@@ -53,16 +53,21 @@ The same as WaveCenter, because they were learned the hard way:
 
 ## Where the work is tracked
 
-Every piece of work on this repository is a ticket in the **Loop Queue** list
-of the **Spirality** space in ClickUp (list id `901418065068`, space
-`90146476540`). StarCaster's queue is `901418546619` and WaveCenter's is
+Every piece of work on this repository is a ticket in the **Spirality**
+project of **the tracker**, the ticket system that runs on the Mini
+(`http://mac-mini.local:4180`, ids like `SP-12`). It moved there from
+ClickUp's Loop Queue (list `901418065068`, space `90146476540`) in October
+2026; that list is kept untouched as the record to compare against during the
+week side by side, and nothing writes to it (`docs/TRACKER_MVP.md`).
+StarCaster's queue is still ClickUp list `901418546619` and WaveCenter's is
 `901422159126`; work for a product goes in that product's queue, substrate
 work goes here, never mixed.
 
-- Every ClickUp touch goes through `npm run clickup -- <command>` (Doppler
-  supplies the token). Never the claude.ai connector.
+- Every ticket touch goes through `npm run clickup -- <command>`. The name
+  stayed: it talks to whichever tracker `spirality.project.json` names, and
+  Doppler supplies the token. Never the claude.ai connector.
 - A pull request's title is the ticket's name, byte for byte, and its body
-  carries the ticket link. `npm run verify` is the definition of done; CI runs
+  carries the ticket link (`pr-opened` prints the exact line it accepts). `npm run verify` is the definition of done; CI runs
   it on every pull request.
 - Two statuses are Dane's: `Needs your input` and `Ready to launch`. Only
   `ask` may set them, and no loop takes a ticket back out of them.
@@ -77,7 +82,7 @@ work goes here, never mixed.
 3. **Move, don't rewrite.** StarCaster's modules come across with their tests;
    behaviour changes are separate tickets.
 4. **Secret keys never reach the repository or a log.**
-5. **Every write to ClickUp is read back.**
+5. **Every write to the tracker is read back.**
 6. **A step that fails says so.** Never a success line over a failed write.
 7. **One topic, one folder.** A separate git worktree per thread.
 8. **Standard tooling only.** Plain Node, bash and launchd; no host-specific

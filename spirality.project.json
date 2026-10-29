@@ -2,8 +2,8 @@
   "workspaceId": "90141423066",
   "spaceId": "90146476540",
   "loopQueueListId": "901418065068",
-  "operatorUserId": "48012725",
-  "machineUserId": "54254347",
+  "operatorUserId": "1",
+  "machineUserId": "2",
   "githubRepo": "mentor24-maker/spirality",
   "dopplerProject": "spirality",
   "dopplerConfig": "dev",
@@ -30,5 +30,7 @@
   "trackerPrefix": "SP",
   "trackerPort": 4180,
   "trackerHost": "0.0.0.0",
-  "trackerDataDir": "~/spirality-tracker"
+  "trackerDataDir": "~/spirality-tracker",
+  "tracker": "api",
+  "trackerUrl": "http://mac-mini.local:4180"
 }

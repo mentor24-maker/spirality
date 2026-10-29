@@ -1,6 +1,6 @@
 ---
 name: loop-review
-description: Pick the next "In review" task from the Spirality "Loop Queue" ClickUp list, independently verify its pull request (`npm run verify` + code review + a real test pass), then either mark it "Ready to launch" and ping Dane to merge, or send it back to "Rework" with notes. Designed to be run on a timer with `/loop 30m loop-review`. Never merges on its own.
+description: Pick the next "In review" task from the Spirality queue in the tracker, independently verify its pull request (`npm run verify` + code review + a real test pass), then either mark it "Ready to launch" and ping Dane to merge, or send it back to "Rework" with notes. Designed to be run on a timer with `/loop 30m loop-review`. Never merges on its own.
 ---
 
 # Loop: Review
@@ -17,7 +17,7 @@ Two review passes verifying the same ticket overwrite each other's verdict.
 Spirality has no scheduled runner yet, so: **do not start this loop if
 another session is already running it.**
 
-## ClickUp access: the direct script, not the connector
+## Ticket access: the direct script, not the connector
 
 ```bash
 npm run clickup -- queue --status "In review"                                 # FIRST LINE is the one to review
