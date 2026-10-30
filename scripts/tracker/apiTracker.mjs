@@ -47,6 +47,7 @@
 import { stampCommentBody } from '../lib/machineComment.mjs';
 import { PRIORITY_VALUE, QUEUED, TERMINAL_STATUSES } from '../lib/loopStatuses.mjs';
 import { TRACKER_SEATS } from '../lib/expectedSecrets.mjs';
+import { fenceFor } from '../lib/operatorCard.mjs';
 
 /** ClickUp's priority number -> the tracker's name. */
 const PRIORITY_NAME = Object.freeze(Object.fromEntries(Object.entries(PRIORITY_VALUE).map(([k, v]) => [v, k])));
@@ -70,7 +71,9 @@ function withJson(out, json) {
 function runMarkdown(run) {
   const text = String(run?.text ?? '');
   const a = run?.attributes || {};
-  if (a['code-block']) return `\`\`\`\n${text.endsWith('\n') ? text : `${text}\n`}\`\`\``;
+  // The fence is longer than any backtick run inside, so a ``` of Dane's
+  // own cannot close the block early.
+  if (a['code-block']) { const fence = fenceFor(text); return `${fence}\n${text.endsWith('\n') ? text : `${text}\n`}${fence}`; }
   if (!text.trim()) return text;
   // Marks go round the words, never round the spaces either side of them.
   const [, lead, core, trail] = /^(\s*)([\s\S]*?)(\s*)$/.exec(text);

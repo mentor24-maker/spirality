@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseCard, validateCard, buildCard, renderCard, cardSurvived, findBlockquoteLines, countWords } from './operatorCard.mjs';
+import { parseCard, validateCard, buildCard, renderCard, cardSurvived, findBlockquoteLines, countWords, fenceFor } from './operatorCard.mjs';
 
 const sixty = Array.from({ length: 60 }, (_, i) => `word${i}`).join(' ');
 
@@ -49,8 +49,14 @@ test('blockquotes are refused anywhere outside a fence', () => {
 test('his own ``` inside a four-backtick @@ASKED fence does not end the fence', () => {
   assert.deepEqual(findBlockquoteLines('````\nsee:\n```\n> from the email\n```\n````'), []);
   assert.deepEqual(findBlockquoteLines('~~~\n```\n> from the email\n~~~\n> c'), [5]);
-  const card = parseCard(`${good.replace('@@ASKED\n', '@@ASKED\n````\n> his pasted line\n```\n````\n')}`);
+});
+
+test('@@ASKED may carry his own "> " and ``` lines bare: the card fences it with a longer run (SP-44)', () => {
+  const card = parseCard(good.replace('@@ASKED\n', '@@ASKED\n> his pasted line\n```\nnpm run thing\n```\n'));
   assert.ok(!validateCard(card).some((p) => p.includes('blockquote')));
+  const fence = fenceFor(card.asked);
+  assert.equal(fence, '````');
+  assert.ok(renderCard(card).includes(`${fence}\n${card.asked}\n${fence}\n`), renderCard(card));
 });
 
 test('a costly ask needs evidence with a fence, output and a measured line', () => {

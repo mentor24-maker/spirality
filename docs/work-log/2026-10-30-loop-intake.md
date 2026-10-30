@@ -14,11 +14,21 @@ tracker sign-in, which has to be made once on the Mini before it runs.
 
 After review, three ways it could jam were closed. A request with a quoted
 line in it (a pasted email, say) used to fail the same way every half hour
-and hold up every request behind it; now Dane's words always sit in a
-"code box" the checker accepts, and a request that fails once gets one
+and hold up every request behind it; now the card's own "code box" round
+Dane's words is always bigger than any code box inside them, and the checker
+lets a quoted line through there, and a request that fails once gets one
 plain card telling him what went wrong, then is set aside so the others keep
 moving. A pass that stopped halfway through splitting a request now leaves a
 note of the pieces it filed, so the next pass finishes the job instead of
 filing them twice. And the checker, and the tracker page, now understand a
 code box that itself contains a smaller code box, so his text shows exactly
 as he wrote it.
+
+A second review found the first fix made things worse: the intake job put
+his words in a code box, and the card puts that whole section in a code box
+too, so on the tracker page the box closed early and the red "needed from
+Dane" banner showed as code he could not read. Now the job hands his words
+over as they are, and the card and the tracker size their own box to fit
+whatever is inside. A test posts a card with a quoted line and a code box in
+his words through the real tracker, draws the page, and checks the banner
+is outside the box.

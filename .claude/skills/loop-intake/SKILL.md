@@ -171,10 +171,8 @@ stick. **A non-zero exit is a failure you report**, never one you talk past.
 
    ````
    @@ASKED
-   ```
    <his title and description, verbatim — the same words as under ## Asked,
-   inside the same kind of fence you chose in step 4>
-   ```
+   with NO fence of your own round them>
    @@CONTEXT
    What you understood him to want and what this ticket does about it, in
    plain English, 50-100 words. For a slice: which slice of how many, and
@@ -183,8 +181,10 @@ stick. **A non-zero exit is a failure you report**, never one you talk past.
    Reply "go" to queue it as written, or reply with what to change.
    ````
 
-   His words always go inside a fence in `@@ASKED`: a pasted email with a
-   `> ` line would otherwise fail the card on every pass.
+   His words go into `@@ASKED` bare. The card puts that section in a code
+   block of its own, with a fence longer than any backtick run in his text,
+   so his `> ` lines and his own ``` lines arrive as he wrote them. A fence
+   you add there would land inside the card's and break it on the page.
 
    **Retry only on the one refusal that is safe to retry.** If `ask` exits 2
    and its output says `REFUSED — Dane's own comment is the NEWEST one`,
@@ -225,8 +225,8 @@ stick. **A non-zero exit is a failure you report**, never one you talk past.
    - If a card from this lane is already on the ticket (the `ask` exit 1
      case), say in `@@CONTEXT` that the card above did not finish handing
      it over and this one does.
-   - The card: `@@ASKED` is **his title only**, in a fence (his full text
-     may be what failed); `@@CONTEXT` says in plain words that the intake
+   - The card: `@@ASKED` is **his title only**, bare (his full text may be
+     what failed); `@@CONTEXT` says in plain words that the intake
      pass could not finish this request and why (the FAILED note's step and
      error); `@@NEEDED`: reply with the request reworded, or "go" to send it
      to the build queue as it is.

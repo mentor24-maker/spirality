@@ -90,6 +90,16 @@ export function findBlockquoteLines(text) {
   return found;
 }
 
+/**
+ * A backtick fence that `text` cannot close: one longer than its longest
+ * backtick run, and never shorter than three. Dane's words may carry their
+ * own ``` lines; a plain ``` round them would end at his first one.
+ */
+export function fenceFor(text) {
+  const longest = Math.max(0, ...(String(text || '').match(/`+/g) || []).map((r) => r.length));
+  return '`'.repeat(Math.max(3, longest + 1));
+}
+
 /** Words in an ask that mean it spends money or cannot be undone. */
 const COSTLY = /\b(spend|spending|buy|pay|paying|purchase|subscribe|subscription|upgrade|plan change|rotate|rotation|delete|deletes|deleting|drop|drops|cannot be undone|irreversible|wipe|wipes)\b/i;
 
@@ -165,7 +175,9 @@ export function validateCard(card) {
   else if (words > CONTEXT_MAX_WORDS) problems.push(`@@CONTEXT is ${words} words; the ceiling is ${CONTEXT_MAX_WORDS}. The long version belongs in the description (use describe).`);
   if (!card.needed) problems.push('@@NEEDED is empty. State the specific ask. "Nothing right now" is a fine answer, but write it down.');
   problems.push(...evidenceProblems(card));
-  for (const name of ['asked', 'context', 'needed', 'evidence']) {
+  // @@ASKED is exempt: the card puts his words in a fence of its own, where a
+  // "> " line of his is literal text and survives.
+  for (const name of ['context', 'needed', 'evidence']) {
     const offending = findBlockquoteLines(card[name]);
     if (offending.length) {
       problems.push(`@@${name.toUpperCase()} uses a "> " blockquote (line ${offending.join(', ')}). ClickUp DELETES those lines. Use plain text, **bold** or a fenced block.`);
@@ -273,7 +285,7 @@ export function renderCard(card) {
     switch (block.kind) {
       case 'heading': parts.push(`**${block.text}**`, ''); break;
       case 'note': parts.push(`*${block.text}*`, ''); break;
-      case 'fence': parts.push('```', block.text, '```', ''); break;
+      case 'fence': { const fence = fenceFor(block.text); parts.push(fence, block.text, fence, ''); break; }
       case 'prose': parts.push(block.text, ''); break;
       case 'banner': parts.push(...block.lines); break;
       default: throw new Error(`unknown card block "${block.kind}"`);
