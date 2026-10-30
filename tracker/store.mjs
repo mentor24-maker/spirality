@@ -9,7 +9,7 @@
  * What the store enforces, and only this (the contract's own rules stay in
  * the package modules and the door):
  *
- *  - Statuses are exactly the seven in lib/loopStatuses.js. Anything else is
+ *  - Statuses are exactly the eight in lib/loopStatuses.js. Anything else is
  *    refused, never stored.
  *  - A change may carry `ifStatus` and/or `ifVersion`. The comparison and the
  *    write happen inside ONE transaction that holds the write lock from its
@@ -37,7 +37,7 @@ import loopStatuses from '../lib/loopStatuses.js';
 
 const { DISPLAY, TERMINAL_STATUSES, PRIORITY_RANK, statusOf } = loopStatuses;
 
-/** The seven statuses, lower-cased, as the store keeps them. */
+/** The eight statuses, lower-cased, as the store keeps them. */
 const STATUSES = Object.freeze(Object.keys(DISPLAY));
 const PRIORITIES = Object.freeze(Object.keys(PRIORITY_RANK));
 const ACTOR_KINDS = Object.freeze(['human', 'machine']);
@@ -127,7 +127,7 @@ export class StoreError extends Error {
 function canonicalStatus(status) {
   const s = statusOf(String(status ?? ''));
   if (!STATUSES.includes(s)) {
-    throw new StoreError('unknown-status', `"${status}" is not one of the seven statuses: ${Object.values(DISPLAY).join(', ')}.`);
+    throw new StoreError('unknown-status', `"${status}" is not one of the eight statuses: ${Object.values(DISPLAY).join(', ')}.`);
   }
   return s;
 }

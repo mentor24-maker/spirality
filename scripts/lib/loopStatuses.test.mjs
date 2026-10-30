@@ -2,7 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   claimOrder, isClaimableByBuild, isOperatorStatus, claimTier, compareWithinStatus, STAGE_ORDER, DISPLAY,
+  REQUESTED, MACHINE_STATUSES, TERMINAL_STATUSES,
 } from './loopStatuses.mjs';
+import cjs from '../../lib/loopStatuses.js';
 
 const t = (id, status, priority, created) => ({
   id, status: { status }, priority: priority ? { priority } : null, date_created: String(created),
@@ -44,9 +46,25 @@ test('the two operator statuses are the only ones that hand work to Dane', () =>
   assert.equal(isOperatorStatus('In review'), false);
 });
 
-test('the board lists all seven statuses and DISPLAY spells each one', () => {
-  assert.equal(STAGE_ORDER.length, 7);
+test('the board lists all eight statuses and DISPLAY spells each one', () => {
+  assert.equal(STAGE_ORDER.length, 8);
   for (const name of STAGE_ORDER) assert.equal(DISPLAY[name.toLowerCase()], name);
+});
+
+test('both status modules spell the eight statuses the same, in the same order', () => {
+  assert.deepEqual([...STAGE_ORDER], [...cjs.STAGE_ORDER]);
+  assert.deepEqual({ ...DISPLAY }, { ...cjs.DISPLAY });
+});
+
+test('Requested is first, a machine status, and not claimable, not Dane\'s, not terminal', () => {
+  assert.equal(STAGE_ORDER[0], 'Requested');
+  assert.equal(DISPLAY[REQUESTED], 'Requested');
+  assert.equal(isClaimableByBuild('Requested'), false);
+  assert.equal(claimTier('requested'), null);
+  assert.deepEqual(claimOrder([t('r', 'Requested', 'urgent', 1)]), []);
+  assert.equal(isOperatorStatus('Requested'), false);
+  assert.ok(MACHINE_STATUSES.includes(REQUESTED), 'a spec pass owns it');
+  assert.ok(!TERMINAL_STATUSES.includes(REQUESTED));
 });
 
 test('claimOrder never mutates its input', () => {

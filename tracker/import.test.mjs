@@ -185,7 +185,7 @@ test('an unknown status is refused and named, and that ticket costs no further r
     const tracker = fakeTracker(queue());
     const result = await importLoopQueue({ tracker, store, config: CONFIG });
     assert.equal(result.refusals.length, 1);
-    assert.match(result.refusals[0], /cu-odd "Odd one".*status "Doing" is not one of the seven/);
+    assert.match(result.refusals[0], /cu-odd "Odd one".*status "Doing" is not one of the eight/);
     assert.equal(store.importedId({ source: SOURCE, kind: 'ticket', sourceId: 'cu-odd' }), null);
     assert.ok(!tracker.calls.some((c) => c[1] === 'cu-odd'), 'no reads for a refused ticket');
     assert.match(formatReport(result), /Refused \(1\):\n {2}- ticket cu-odd "Odd one"/);
