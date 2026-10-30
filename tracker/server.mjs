@@ -48,9 +48,9 @@ const CHANGE_FIELDS = Object.freeze(['name', 'description', 'status', 'priority'
 /**
  * Dane's page (tracker/web/): the only files served without a token, and the
  * only ones served at all, by name. The page holds no data; everything it
- * shows comes through the API below with his token. `/`, `/t/<id>`, `/board`
- * and `/board/<project>` all answer the page itself, so each address opens
- * its own view.
+ * shows comes through the API below with his token. `/`, `/t/<id>`, `/board`,
+ * `/board/<project>`, `/list` and `/list/<project>` all answer the page
+ * itself, so each address opens its own view.
  */
 const WEB_DIR = new URL('./web/', import.meta.url);
 const WEB_FILES = Object.freeze({
@@ -58,6 +58,8 @@ const WEB_FILES = Object.freeze({
   'app.css': 'text/css; charset=utf-8',
   'app.mjs': 'text/javascript; charset=utf-8',
   'render.mjs': 'text/javascript; charset=utf-8',
+  'wordmark.png': 'image/png',
+  'icon.png': 'image/png',
 });
 
 /**
@@ -74,7 +76,7 @@ const PAGE_HEADERS = Object.freeze({
 
 /** The page file a GET of `pathname` answers with, or null when it is not a page address. */
 function pageFile(pathname) {
-  if (pathname === '/' || pathname === '/board' || /^\/(?:t|board)\/[^/]+$/.test(pathname)) return 'index.html';
+  if (pathname === '/' || /^\/(?:board|list)$/.test(pathname) || /^\/(?:t|board|list)\/[^/]+$/.test(pathname)) return 'index.html';
   const m = /^\/web\/([^/]+)$/.exec(pathname);
   return m && Object.hasOwn(WEB_FILES, m[1]) ? m[1] : null;
 }

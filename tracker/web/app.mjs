@@ -1,7 +1,7 @@
 /**
  * Dane's page (docs/TRACKER_MVP.md, "Dane's page"): sign in, see what waits
- * on you, open a ticket, answer it, and see one project's whole queue on
- * the board. Plain browser JavaScript, no packages,
+ * on you, open a ticket, answer it, and see one project's whole queue as a
+ * board or as a list. Plain browser JavaScript, no packages,
  * no build step; tracker/server.mjs serves it.
  *
  * Every word of ticket text reaches the page through render.mjs, which
@@ -15,6 +15,8 @@
 import { escapeHtml, renderComment, renderMarkdown, tabTitle } from './render.mjs';
 
 const TOKEN_KEY = 'tracker-token';
+/** Board or list: the last one opened, so "Projects" in the header opens it again. */
+const VIEW_KEY = 'tracker-view';
 const main = document.getElementById('main');
 const who = document.getElementById('who');
 const signOut = document.getElementById('sign-out');
@@ -112,7 +114,7 @@ async function drawWaiting() {
       <td><a href="/t/${encodeURIComponent(t.id)}">${escapeHtml(t.name)}</a> <span class="quiet">${escapeHtml(t.id)}</span></td>
       <td class="when">${escapeHtml(when(t.updatedAt))}</td>
     </tr>`).join('');
-  const table = (list) => `<table><thead><tr><th>Project</th><th>Status</th><th>Ticket</th><th>Last change</th></tr></thead><tbody>${rows(list)}</tbody></table>`;
+  const table = (list) => `<table class="tickets"><thead><tr><th>Project</th><th>Status</th><th>Ticket</th><th>Last change</th></tr></thead><tbody>${rows(list)}</tbody></table>`;
   main.innerHTML = `
     <h1>Waiting on you</h1>
     ${waiting.length ? table(waiting) : '<p class="quiet">Nothing is waiting on you.</p>'}
@@ -122,45 +124,77 @@ async function drawWaiting() {
       ${table(unsure)}` : ''}`;
 }
 
+/** The remembered view; a browser that will not keep it answers "board". */
+function savedView() {
+  try { return localStorage.getItem(VIEW_KEY) === 'list' ? 'list' : 'board'; } catch { return 'board'; }
+}
+
 /**
- * One project's board: the seven statuses as columns in the contract's
- * order, as the server sends them, each card opening its ticket. Read-only:
- * moves stay with the door and the loops. `Live` starts folded, its count
- * showing, because it only grows.
+ * One project, as a board or as a list. Both draw the same object, the
+ * server's board (pageData.mjs boardOf): the seven statuses in the
+ * contract's order, each holding its tickets in `queue` order, so the two
+ * views cannot disagree about what is where. Read-only: moves stay with the
+ * door and the loops. `Live` starts folded in both, its count showing,
+ * because it only grows.
+ *
+ * The board is the statuses as columns of cards; the list is the same
+ * statuses as groups of rows, with a ticket's priority, tags, assignee and
+ * last change in their own columns, like ClickUp's List.
  */
-async function drawBoard(slug) {
+async function drawProject(slug, view) {
+  try { localStorage.setItem(VIEW_KEY, view); } catch { /* the toggle still works; it is only not remembered */ }
   const { projects } = await api('GET', '/projects');
   if (!slug) {
     if (!projects.length) {
-      main.innerHTML = '<h1>Board</h1><p class="quiet">There are no projects yet.</p>';
+      main.innerHTML = '<h1>Projects</h1><p class="quiet">There are no projects yet.</p>';
       return;
     }
-    history.replaceState(null, '', `/board/${encodeURIComponent(projects[0].slug)}`);
+    history.replaceState(null, '', `/${view}/${encodeURIComponent(projects[0].slug)}`);
     slug = projects[0].slug;
   }
   const board = await api('GET', `/projects/${encodeURIComponent(slug)}/board`);
-  setTitle(`${board.projectName} board · Tracker`);
+  setTitle(`${board.projectName} ${view} · Tracker`);
+  const at = (v, s) => `/${v}/${encodeURIComponent(s)}`;
   const switcher = projects.map((p) => (p.slug === board.project
     ? `<strong>${escapeHtml(p.name)}</strong>`
-    : `<a href="/board/${encodeURIComponent(p.slug)}">${escapeHtml(p.name)}</a>`)).join('');
+    : `<a href="${at(view, p.slug)}">${escapeHtml(p.name)}</a>`)).join('');
+  const toggle = ['board', 'list'].map((v) => `<a href="${at(v, board.project)}"${v === view ? ' class="current" aria-current="page"' : ''}>${v === 'board' ? 'Board' : 'List'}</a>`).join('');
+  const head = (c) => `${escapeHtml(c.status)} <span class="quiet">${c.tickets.length}</span>`;
+  /** A status's block: folded when it is Live, open otherwise. */
+  const block = (c, cls, body) => (c.status === 'Live'
+    ? `<details class="${cls}"><summary><h2>${head(c)}</h2></summary>${body}</details>`
+    : `<section class="${cls}"><h2>${head(c)}</h2>${body}</section>`);
+
   const card = (t) => `
     <a class="card" href="/t/${encodeURIComponent(t.id)}">
       <span class="name">${escapeHtml(t.name)}</span>
       <span class="quiet">${escapeHtml(t.id)}${t.priority ? ` · ${escapeHtml(t.priority)}` : ''}</span>
       ${t.tags.length ? `<span class="tags">${t.tags.map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join('')}</span>` : ''}
     </a>`;
-  const column = (c) => {
-    const cards = c.tickets.map(card).join('') || '<p class="quiet">None.</p>';
-    const head = `${escapeHtml(c.status)} <span class="quiet">${c.tickets.length}</span>`;
-    return c.status === 'Live'
-      ? `<details class="column"><summary><h2>${head}</h2></summary>${cards}</details>`
-      : `<section class="column"><h2>${head}</h2>${cards}</section>`;
-  };
+  const column = (c) => block(c, 'column', c.tickets.map(card).join('') || '<p class="quiet">None.</p>');
+
+  const row = (t) => `
+    <tr>
+      <td class="name"><a href="/t/${encodeURIComponent(t.id)}">${escapeHtml(t.name)}</a> <span class="quiet">${escapeHtml(t.id)}</span></td>
+      <td class="priority">${t.priority ? escapeHtml(statusName(t.priority)) : '<span class="quiet">–</span>'}</td>
+      <td class="tags">${t.tags.map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join('')}</td>
+      <td class="assignee">${t.assignee ? escapeHtml(t.assignee) : '<span class="quiet">nobody</span>'}</td>
+      <td class="when">${escapeHtml(when(t.updatedAt))}</td>
+    </tr>`;
+  const group = (c) => block(c, 'group', c.tickets.length
+    ? `<table><thead><tr><th class="name">Ticket</th><th class="priority">Priority</th><th class="tags">Tags</th><th class="assignee">Assigned to</th><th class="when">Last change</th></tr></thead><tbody>${c.tickets.map(row).join('')}</tbody></table>`
+    : '');
+
   main.classList.add('wide');
   main.innerHTML = `
-    <h1>${escapeHtml(board.projectName)} board</h1>
-    <nav class="projects">${switcher}</nav>
-    <div class="board">${board.columns.map(column).join('')}</div>`;
+    <h1>${escapeHtml(board.projectName)}</h1>
+    <div class="toolbar">
+      <nav class="projects">${switcher}</nav>
+      <nav class="views" aria-label="View">${toggle}</nav>
+    </div>
+    ${view === 'board'
+    ? `<div class="board">${board.columns.map(column).join('')}</div>`
+    : `<div class="list">${board.columns.map(group).join('')}</div>`}`;
 }
 
 async function drawTicket(id) {
@@ -212,6 +246,11 @@ async function drawTicket(id) {
   });
 }
 
+/** Underline the header link for the screen showing. */
+function markNav(which) {
+  for (const a of document.querySelectorAll('nav.site a')) a.classList.toggle('current', a.dataset.nav === which);
+}
+
 async function route() {
   try {
     me = await api('GET', '/me');
@@ -219,12 +258,15 @@ async function route() {
     signOut.hidden = false;
     main.classList.remove('wide');
     const ticket = /^\/t\/([^/]+)$/.exec(location.pathname);
-    const board = /^\/board(?:\/([^/]+))?$/.exec(location.pathname);
+    const project = /^\/(board|list)(?:\/([^/]+))?$/.exec(location.pathname);
+    markNav(ticket || project ? 'projects' : 'waiting');
     if (ticket) {
       await drawTicket(decodeURIComponent(ticket[1]));
       await refreshCount();
-    } else if (board) {
-      await drawBoard(board[1] == null ? null : decodeURIComponent(board[1]));
+    } else if (project) {
+      // "Projects" in the header is /board with no project: open the view last used.
+      const view = project[2] == null && project[1] === 'board' ? savedView() : project[1];
+      await drawProject(project[2] == null ? null : decodeURIComponent(project[2]), view);
       await refreshCount();
     } else {
       await drawWaiting();
