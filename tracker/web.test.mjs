@@ -12,6 +12,7 @@ import { escapeHtml, renderComment, renderInline, renderMarkdown } from './web/r
 import operatorCard from '../lib/operatorCard.js';
 import machineComment from '../lib/machineComment.js';
 import loopStatuses from '../lib/loopStatuses.js';
+import mergeOnComment from '../lib/mergeOnComment.js';
 
 const DOOR = fileURLToPath(new URL('../scripts/clickup.mjs', import.meta.url));
 const WEB = (name) => fileURLToPath(new URL(`./web/${name}`, import.meta.url));
@@ -179,11 +180,61 @@ test('the board\'s switcher lists every project; an unknown project is 404; both
   } finally { await f.cleanup(); }
 });
 
-test('the board page folds Live by default, and every card opens its ticket page', () => {
+test('the board and the list both fold Live by default, and every card and row opens its ticket page', () => {
   const app = readFileSync(WEB('app.mjs'), 'utf8');
-  assert.match(app, /c\.status === 'Live'\s*\?\s*`<details class="column">/);
+  assert.match(app, /c\.status === 'Live'\s*\?\s*`<details class="\$\{cls\}">/);
+  assert.match(app, /block\(c, 'column',/);
+  assert.match(app, /block\(c, 'group',/);
   assert.match(app, /<a class="card" href="\/t\/\$\{encodeURIComponent\(t\.id\)\}">/);
+  assert.match(app, /<td class="name"><a href="\/t\/\$\{encodeURIComponent\(t\.id\)\}">/);
   assert.ok(!/<details[^>]*\bopen\b/.test(app), 'Live is never drawn open');
+});
+
+test('a ticket\'s pull request on the list is the one the merge step would act on, and null without one', async () => {
+  const f = await fixture();
+  try {
+    const tickets = (await f.call('GET', '/projects/alpha/board')).body.columns.flatMap((c) => c.tickets);
+    for (const t of tickets) {
+      const comments = f.store.listComments(t.id).map((c) => ({ id: c.id, comment_text: c.body, date: String(Date.parse(c.createdAt)) }));
+      assert.equal(t.pullRequest, mergeOnComment.findPullRequest(comments)?.url ?? null, t.id);
+    }
+    assert.equal(tickets.find((t) => t.id === 'AL-2').pullRequest, 'https://github.com/example/repo/pull/7');
+    assert.ok(tickets.some((t) => t.pullRequest === null), 'the test data has a ticket with no PR');
+  } finally { await f.cleanup(); }
+});
+
+test('the list\'s actions only go where the page already goes: the ticket, its reply box, its pull request', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  assert.match(app, /action\(at, 'Open ticket', ICONS\.open\)/);
+  assert.match(app, /action\(`\$\{at\}#reply`, 'Reply', ICONS\.reply\)/);
+  // The PR icon shows only when there is one, and opens GitHub in its own tab.
+  assert.match(app, /t\.pullRequest \? action\(t\.pullRequest, '[^']+', ICONS\.pullRequest, true\) : ''/);
+  assert.match(app, /target="_blank" rel="noopener noreferrer"/);
+  // The address keeps #reply when the page moves to it, and the ticket page acts on it.
+  assert.match(app, /history\.pushState\(null, '', a\.pathname \+ a\.hash\)/);
+  assert.match(app, /location\.hash === '#reply'[\s\S]{0,120}box\.focus\(\)/);
+});
+
+test('the list and the board draw one object: the toggle keeps the project and only the view changes', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  // One fetch serves both views, so they cannot disagree about what is where.
+  assert.equal(app.match(/\/board`\);/g)?.length, 1);
+  assert.match(app, /\['board', 'list'\]\.map\(\(v\) => `<a href="\$\{at\(v, board\.project\)\}"/);
+});
+
+test('each ticket on the board carries its assignee\'s name and its last change, for the list', async () => {
+  const f = await fixture();
+  try {
+    const { columns } = (await f.call('GET', '/projects/alpha/board')).body;
+    const tickets = columns.flatMap((c) => c.tickets);
+    for (const t of tickets) {
+      const stored = f.store.getTicket(t.id);
+      assert.equal(t.updatedAt, stored.updatedAt, t.id);
+      assert.equal(t.assignee, stored.assignee == null ? null : f.store.getActor(stored.assignee).name, t.id);
+    }
+    assert.ok(tickets.some((t) => t.assignee === 'Dane'), 'the test data assigns a ticket to Dane');
+    assert.ok(tickets.some((t) => t.assignee === null), 'and leaves one unassigned');
+  } finally { await f.cleanup(); }
 });
 
 // ── A ticket's thread ────────────────────────────────────────────────────────
@@ -227,10 +278,10 @@ test('a reply from the page is stored exactly as typed, under Dane\'s actor, and
 
 // ── The page itself ──────────────────────────────────────────────────────────
 
-test('the page is served at /, at a ticket\'s address and at the board without a token, locked to its own scripts', async () => {
+test('the page is served at /, at a ticket\'s address, at the board and at the list without a token, locked to its own scripts', async () => {
   const f = await fixture();
   try {
-    for (const path of ['/', '/t/AL-1', '/board', '/board/alpha']) {
+    for (const path of ['/', '/t/AL-1', '/board', '/board/alpha', '/list', '/list/alpha']) {
       const r = await f.call('GET', path, { token: null });
       assert.equal(r.status, 200);
       assert.match(r.headers.get('content-type'), /^text\/html/);
@@ -242,6 +293,14 @@ test('the page is served at /, at a ticket\'s address and at the board without a
       assert.equal(r.status, 200, name);
       assert.equal(r.text, readFileSync(WEB(name), 'utf8'));
     }
+    // The header's wordmark and the tab's icon, as images the page's lock allows.
+    for (const name of ['wordmark.png', 'icon.png']) {
+      const r = await fetch(`${f.url}/web/${name}`);
+      assert.equal(r.status, 200, name);
+      assert.equal(r.headers.get('content-type'), 'image/png');
+      assert.deepEqual(Buffer.from(await r.arrayBuffer()), readFileSync(WEB(name)));
+    }
+    assert.match(readFileSync(WEB('index.html'), 'utf8'), /<img src="\/web\/wordmark\.png" alt="Spirality"/);
     // Only those files: nothing else on disk is reachable, with or without a token.
     for (const path of ['/web/../store.mjs', '/web/%2e%2e%2fstore.mjs', '/web/demo.mjs', '/store.mjs']) {
       assert.notEqual((await f.call('GET', path, { token: null })).status, 200, path);
