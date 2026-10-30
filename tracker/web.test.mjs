@@ -284,7 +284,7 @@ test('a reply from the page is stored exactly as typed, under Dane\'s actor, and
 test('the page is served at /, at a ticket\'s address, at Projects, at Tasks, at the board and at the list without a token, locked to its own scripts', async () => {
   const f = await fixture();
   try {
-    for (const path of ['/', '/t/AL-1', '/p', '/tasks', '/board', '/board/alpha', '/list', '/list/alpha']) {
+    for (const path of ['/', '/t/AL-1', '/tasks', '/board', '/board/alpha', '/list', '/list/alpha']) {
       const r = await f.call('GET', path, { token: null });
       assert.equal(r.status, 200);
       assert.match(r.headers.get('content-type'), /^text\/html/);
@@ -304,8 +304,14 @@ test('the page is served at /, at a ticket\'s address, at Projects, at Tasks, at
       assert.deepEqual(Buffer.from(await r.arrayBuffer()), readFileSync(WEB(name)));
     }
     assert.match(readFileSync(WEB('index.html'), 'utf8'), /<img src="\/web\/wordmark\.png" alt="Spirality"/);
+    // /projects is the page to a browser opening it, and still the data to the page's own call.
+    const opened = await fetch(`${f.url}/projects`, { headers: { accept: 'text/html,application/xhtml+xml,*/*;q=0.8' } });
+    assert.equal(opened.status, 200);
+    assert.equal(await opened.text(), readFileSync(WEB('index.html'), 'utf8'));
+    assert.equal((await f.call('GET', '/projects')).body.projects.length, 2);
+    assert.equal((await f.call('GET', '/projects', { token: null })).status, 401);
     // The header: Projects picks a project, Tasks opens the one picked.
-    assert.match(readFileSync(WEB('index.html'), 'utf8'), /<a href="\/p" data-nav="projects">Projects<\/a>\s*<a href="\/tasks" data-nav="tasks">Tasks<\/a>/);
+    assert.match(readFileSync(WEB('index.html'), 'utf8'), /<a href="\/projects" data-nav="projects">Projects<\/a>\s*<a href="\/tasks" data-nav="tasks">Tasks<\/a>/);
     // Only those files: nothing else on disk is reachable, with or without a token.
     for (const path of ['/web/../store.mjs', '/web/%2e%2e%2fstore.mjs', '/web/demo.mjs', '/store.mjs']) {
       assert.notEqual((await f.call('GET', path, { token: null })).status, 200, path);

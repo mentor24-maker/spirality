@@ -74,9 +74,15 @@ const PAGE_HEADERS = Object.freeze({
   'cache-control': 'no-cache',
 });
 
-/** The page file a GET of `pathname` answers with, or null when it is not a page address. */
-function pageFile(pathname) {
-  if (pathname === '/' || /^\/(?:p|tasks|board|list)$/.test(pathname) || /^\/(?:t|board|list)\/[^/]+$/.test(pathname)) return 'index.html';
+/**
+ * The page file a GET of `pathname` answers with, or null when it is not a
+ * page address. `/projects` is both the Projects screen and the call that
+ * lists them: a browser opening the address asks for HTML and gets the page;
+ * the page's own call asks for anything and gets the data.
+ */
+function pageFile(pathname, accept = '') {
+  if (pathname === '/projects') return /\btext\/html\b/.test(accept) ? 'index.html' : null;
+  if (pathname === '/' || /^\/(?:tasks|board|list)$/.test(pathname) || /^\/(?:t|board|list)\/[^/]+$/.test(pathname)) return 'index.html';
   const m = /^\/web\/([^/]+)$/.exec(pathname);
   return m && Object.hasOwn(WEB_FILES, m[1]) ? m[1] : null;
 }
@@ -287,7 +293,7 @@ export function createHandler(store, { log = () => {}, notifier = null } = {}) {
     let status;
     let wrote = null;
     try {
-      const page = (req.method === 'GET' || req.method === 'HEAD') ? pageFile(url.pathname) : null;
+      const page = (req.method === 'GET' || req.method === 'HEAD') ? pageFile(url.pathname, req.headers.accept) : null;
       if (page) {
         status = 200;
         sendPage(res, page);

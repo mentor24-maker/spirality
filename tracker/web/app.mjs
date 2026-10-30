@@ -250,7 +250,7 @@ async function drawProject(slug, view) {
   main.innerHTML = `
     <h1>${escapeHtml(board.projectName)}</h1>
     <div class="toolbar">
-      <a href="/p">Change project</a>
+      <a href="/projects">Change project</a>
       <nav class="views" aria-label="View">${toggle}</nav>
     </div>
     ${view === 'board'
@@ -325,7 +325,7 @@ async function route() {
     main.classList.remove('wide');
     const ticket = /^\/t\/([^/]+)$/.exec(location.pathname);
     const project = /^\/(board|list)(?:\/([^/]+))?$/.exec(location.pathname);
-    const projects = location.pathname === '/p';
+    const projects = location.pathname === '/projects';
     const tasks = location.pathname === '/tasks';
     markNav(projects ? 'projects' : ticket || project || tasks ? 'tasks' : 'waiting');
     if (ticket) {
