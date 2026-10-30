@@ -166,7 +166,9 @@ says plainly "not measured".
 
 ## First-time setup
 
-(ClickUp products only; the tracker carries the statuses itself.) If a
+(ClickUp products only; the tracker carries the statuses itself, eight of
+them, `Requested` first: a request Dane filed from the tracker page that
+nobody has specced yet. ClickUp lists never carry `Requested`.) If a
 ClickUp "Loop Queue" list does not carry the seven statuses yet,
 point Dane at `docs/CLICKUP_SETUP.md` — ClickUp's API cannot edit a list's
 status set, so that is a click-by-click step in the ClickUp web app. The loops

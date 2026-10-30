@@ -49,8 +49,8 @@ const CHANGE_FIELDS = Object.freeze(['name', 'description', 'status', 'priority'
  * Dane's page (tracker/web/): the only files served without a token, and the
  * only ones served at all, by name. The page holds no data; everything it
  * shows comes through the API below with his token. `/`, `/t/<id>`, `/board`,
- * `/board/<project>`, `/list` and `/list/<project>` all answer the page
- * itself, so each address opens its own view.
+ * `/board/<project>`, `/list`, `/list/<project>` and `/new` (the New request
+ * form) all answer the page itself, so each address opens its own view.
  */
 const WEB_DIR = new URL('./web/', import.meta.url);
 const WEB_FILES = Object.freeze({
@@ -82,7 +82,7 @@ const PAGE_HEADERS = Object.freeze({
  */
 function pageFile(pathname, accept = '') {
   if (pathname === '/projects') return /\btext\/html\b/.test(accept) ? 'index.html' : null;
-  if (pathname === '/' || /^\/(?:tasks|board|list)$/.test(pathname) || /^\/(?:t|board|list)\/[^/]+$/.test(pathname)) return 'index.html';
+  if (pathname === '/' || /^\/(?:tasks|board|list|new)$/.test(pathname) || /^\/(?:t|board|list)\/[^/]+$/.test(pathname)) return 'index.html';
   const m = /^\/web\/([^/]+)$/.exec(pathname);
   return m && Object.hasOwn(WEB_FILES, m[1]) ? m[1] : null;
 }
@@ -169,8 +169,11 @@ function flag(value) {
  * request (method, path, status, actor id); it is never handed a token.
  * `notifier` (tracker/notify.mjs) hears about every write once its answer
  * has gone back, so a hand-over email can never slow or fail the write.
+ * `defaultProject` is the slug the New request form starts on: the project
+ * config's productSlug, never a literal here. One the store does not hold
+ * is answered as null, and the page falls back to the first project.
  */
-export function createHandler(store, { log = () => {}, notifier = null } = {}) {
+export function createHandler(store, { log = () => {}, notifier = null, defaultProject = null } = {}) {
   function requireProject(slug) {
     const project = store.getProject(slug);
     if (!project) throw new HttpError(404, 'unknown-project', `no project "${slug}".`);
@@ -209,12 +212,15 @@ export function createHandler(store, { log = () => {}, notifier = null } = {}) {
       return [200, waitingFor(store, me.id)];
     }
 
-    // Dane's page: the Projects screen, and the project Tasks opens.
+    // Dane's page: the Projects screen, the project Tasks opens, and the New
+    // request form's picker with the project it starts on.
     if (parts.length === 1 && parts[0] === 'projects' && method === 'GET') {
-      return [200, { projects: projectsList(store) }];
+      const projects = projectsList(store);
+      const fallback = projects.some((p) => p.slug === defaultProject) ? defaultProject : null;
+      return [200, { projects, default: fallback }];
     }
 
-    // Dane's page: one project's board, the seven statuses in the contract's
+    // Dane's page: one project's board, the eight statuses in the contract's
     // order, each column in `queue` order.
     if (parts.length === 3 && parts[0] === 'projects' && parts[2] === 'board' && method === 'GET') {
       const board = boardOf(store, parts[1]);
@@ -325,8 +331,8 @@ export function createHandler(store, { log = () => {}, notifier = null } = {}) {
 }
 
 /** Start a server on `port` (0 = any free port) against an open store. Resolves to the http.Server. */
-export function startServer({ store, port, host = '127.0.0.1', log, notifier }) {
-  const server = createServer(createHandler(store, { log, notifier }));
+export function startServer({ store, port, host = '127.0.0.1', log, notifier, defaultProject }) {
+  const server = createServer(createHandler(store, { log, notifier, defaultProject }));
   return new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(port, host, () => {
@@ -391,7 +397,13 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     const mail = await loadMailSettings({ host, port, log });
     const notifier = mail.send ? createNotifier({ store, ...mail, log }) : null;
     if (!notifier) log(`hand-over email: off. ${mail.why}`);
-    const server = await startServer({ store, port, host, log, notifier });
+    let defaultProject = null;
+    try {
+      defaultProject = loadProjectConfig().productSlug;
+    } catch (err) {
+      log(`the New request form starts on the first project: the project config is not usable (${err.message}).`);
+    }
+    const server = await startServer({ store, port, host, log, notifier, defaultProject });
     console.log(`tracker listening on http://${host}:${server.address().port}/`);
   } catch (err) {
     console.error(`tracker server did not start: ${err.message}`);

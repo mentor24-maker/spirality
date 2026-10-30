@@ -21,9 +21,9 @@ function fixture() {
   return { dir, path, store, human, machine, cleanup };
 }
 
-test('the store knows exactly the seven statuses from lib/loopStatuses.js', () => {
+test('the store knows exactly the eight statuses from lib/loopStatuses.js', () => {
   assert.deepEqual([...STATUSES].sort(), [
-    'building', 'in review', 'live', 'needs your input', 'queued', 'ready to launch', 'rework',
+    'building', 'in review', 'live', 'needs your input', 'queued', 'ready to launch', 'requested', 'rework',
   ]);
 });
 

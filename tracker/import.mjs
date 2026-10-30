@@ -32,7 +32,7 @@
  * adds only what is new (a ticket's fields are not refreshed; only new
  * tickets, comments and replies are added).
  *
- * Refusals, never guesses: a status that is not one of the seven
+ * Refusals, never guesses: a status that is not one of the eight
  * (lib/loopStatuses.js) stops that ticket, and the end-of-run report names
  * it. A read that fails stops the whole run, says so and exits non-zero;
  * everything a ticket needs is read before anything of it is written, so a
@@ -147,7 +147,7 @@ export async function importLoopQueue({ tracker, store, config, log = () => {} }
       // The status is checked from the list itself, before any more reads:
       // a refused ticket costs nothing further.
       if (ticketId == null && !STATUSES.includes(statusOf(task))) {
-        refuse('tickets', label, `status "${task.status?.status ?? ''}" is not one of the seven, so it was not copied (nor its comments)`);
+        refuse('tickets', label, `status "${task.status?.status ?? ''}" is not one of the eight, so it was not copied (nor its comments)`);
         continue;
       }
 

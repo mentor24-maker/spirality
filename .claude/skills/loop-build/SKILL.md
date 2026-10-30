@@ -94,8 +94,10 @@ Exit **0** nothing of his / **3** something IS his / **1** could not tell.
    PR. A `MAIN MOVED: ... — conflict` note newer than the send-back is part of
    the rework even when review did not name it.
 
-   The seven statuses are `Rework → Queued → Building → In review →
-   Needs your input / Ready to launch → Live`. Two belong to Dane and no loop
+   The eight statuses are `Requested → Rework → Queued → Building →
+   In review → Needs your input / Ready to launch → Live`. `Requested` is
+   Dane's unspecced words from the tracker page: never claimed, never built
+   from; a spec pass owns it. Two belong to Dane and no loop
    may set or clear them except through `ask`. **Assignment is the handoff
    signal**: moving into his statuses assigns him; moving into a machine
    status clears assignees. `status` enforces both and verifies they stuck.

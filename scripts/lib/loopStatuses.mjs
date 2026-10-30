@@ -10,6 +10,10 @@
  *  - loop-build claims every `Rework` ticket before any `Queued` one, rework
  *    OLDEST FIRST with priority ignored. Priority says what to START; rework
  *    is not started, it is finished.
+ *  - `Requested` is first on the board: Dane filed it from the tracker page
+ *    and nobody has specced it yet. A spec pass owns it, so it is a machine
+ *    status, but the build loop never claims it and it is never his. It
+ *    exists only in the tracker, never in a ClickUp list.
  *  - `Live` is the ONLY terminal status, and it must be a closed-type status
  *    in ClickUp, or finished work never leaves Dane's open view.
  *
@@ -17,6 +21,7 @@
  * status reads it from here.
  */
 
+export const REQUESTED = 'requested';
 export const REWORK = 'rework';
 export const QUEUED = 'queued';
 export const BUILDING = 'building';
@@ -27,6 +32,7 @@ export const LIVE = 'live';
 
 /** How each status is spelled when WRITTEN. ClickUp matches case-insensitively. */
 export const DISPLAY = Object.freeze({
+  [REQUESTED]: 'Requested',
   [REWORK]: 'Rework',
   [QUEUED]: 'Queued',
   [BUILDING]: 'Building',
@@ -38,7 +44,7 @@ export const DISPLAY = Object.freeze({
 
 /** The board, left to right. */
 export const STAGE_ORDER = Object.freeze([
-  'Rework', 'Queued', 'Building', 'In review', 'Needs your input', 'Ready to launch', 'Live',
+  'Requested', 'Rework', 'Queued', 'Building', 'In review', 'Needs your input', 'Ready to launch', 'Live',
 ]);
 
 /** What loop-build may claim, in drain order. */
@@ -48,7 +54,7 @@ export const CLAIMABLE_BY_BUILD = Object.freeze([REWORK, QUEUED]);
 export const OPERATOR_STATUSES = Object.freeze([READY_TO_LAUNCH, NEEDS_YOUR_INPUT]);
 
 /** Work a machine is still moving. */
-export const MACHINE_STATUSES = Object.freeze([REWORK, QUEUED, BUILDING, IN_REVIEW]);
+export const MACHINE_STATUSES = Object.freeze([REQUESTED, REWORK, QUEUED, BUILDING, IN_REVIEW]);
 
 export const TERMINAL_STATUSES = Object.freeze([LIVE]);
 

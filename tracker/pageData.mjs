@@ -123,7 +123,7 @@ export function projectsList(store) {
 }
 
 /**
- * One project's board: the seven statuses as columns, left to right in the
+ * One project's board: the eight statuses as columns, left to right in the
  * contract's STAGE_ORDER, each holding its tickets in the order `npm run
  * clickup -- queue --status <S>` prints them. The order is the door's own
  * comparator (compareWithinStatus: priority, then oldest), fed each ticket

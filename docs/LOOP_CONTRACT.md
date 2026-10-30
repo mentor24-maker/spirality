@@ -48,7 +48,7 @@ by eye, never a loop's shortcut.
   `Ready to launch` and the **hand-back** on `Needs your input`. WaveCenter
   does not run one yet.
 
-## The seven statuses
+## The eight statuses
 
 Every ticket is in exactly one of these, shown here in display order (the
 code's `STAGE_ORDER`, which is how the scripts print them; a ClickUp board
@@ -56,6 +56,7 @@ may order its columns differently, see "Known differences today"):
 
 | Status | What it means | Whose move |
 |---|---|---|
+| `Requested` | Dane asked for it from the tracker page; nobody has specced it yet | machine (spec pass) |
 | `Rework` | review sent it back; a branch, an open PR and review notes already exist | machine |
 | `Queued` | waiting for a build loop to pick it up | machine |
 | `Building` | a build loop has claimed it and is writing the code | machine |
@@ -66,7 +67,12 @@ may order its columns differently, see "Known differences today"):
 
 The two in bold are **Dane's statuses** and ask different things of him:
 `Needs your input` wants an **answer**, `Ready to launch` wants a **yes**.
-On a normal day he can ignore the other five.
+On a normal day he can ignore the other six.
+
+`Requested` is first on the board and no build loop claims it: the build
+loop never builds from his unspecced words. A spec pass turns each request
+into `Queued` tickets. It exists only in the tracker (see "Known differences
+today").
 
 Facts about the list itself:
 
@@ -659,7 +665,7 @@ many times."
 
 Written down so nobody mistakes them for the contract:
 
-- **Board order differs per list.** The order in "The seven statuses" is
+- **Board order differs per list.** The order in "The eight statuses" is
   the code's display order (`STAGE_ORDER`). Read from ClickUp's API on
   2026-10-11, the three live lists have the same seven statuses and no
   others, in these orders:
@@ -690,5 +696,8 @@ Written down so nobody mistakes them for the contract:
   hand-off reads "no local check was attempted" and the ticket asks its
   builder to find out first. It has no bus, so a stalled hand-off is not
   announced; a filing that fails is retried on the next pass.
+- **`Requested` exists only in the tracker.** StarCaster's and WaveCenter's
+  ClickUp Loop Queue lists do not carry it, so a request filed from a page
+  can only be a tracker ticket.
 - **Only StarCaster has auto-merge lanes.** See "StarCaster's auto-merge
   lanes" above.

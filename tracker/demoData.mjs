@@ -78,6 +78,7 @@ export function seedDemo(store, { operatorName = substrateConfig.operatorName() 
   file('alpha', 'A ticket a build loop is on', 'building', { priority: 'high' }, 'machine');
   file('alpha', 'A pull request waiting for review', 'in review', { tags: ['tracker'] }, 'machine');
   file('alpha', 'Finished and merged', 'live', { priority: 'normal' }, 'machine');
+  file('alpha', 'A request filed from the page', 'requested', { description: 'Nobody has specced it yet.' }, 'machine');
 
   const review = file('beta', 'Descriptions with HTML break the page: show them as text', 'ready to launch', {
     assigned: true,

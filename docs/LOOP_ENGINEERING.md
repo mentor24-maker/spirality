@@ -83,10 +83,11 @@ for a status the list does not have), descriptions can save empty, and
 ClickUp **deletes `> ` blockquote lines** from comments and descriptions
 without saying so. The script refuses a blockquote before sending.
 
-## The seven statuses — and the two that are yours
+## The eight statuses — and the two that are yours
 
 | Status | What it means | Whose move |
 |---|---|---|
+| `Requested` | you asked for it from the tracker page; nobody has specced it yet | machine (spec pass) |
 | `Rework` | review sent it back — a branch and a PR already exist | machine |
 | `Queued` | waiting for a build loop to pick it up | machine |
 | `Building` | a loop is writing the code | machine |
@@ -98,7 +99,14 @@ without saying so. The script refuses a blockquote before sending.
 The two human statuses ask different things. `Needs your input` wants an
 **answer**: a loop stopped and wrote you a plain-language question. `Ready to
 launch` wants a **yes**: nothing is wrong, it is finished and waiting on the
-merge only you authorize. On a normal day you can ignore the other five.
+merge only you authorize. On a normal day you can ignore the other six.
+
+**`Requested` exists** so you can file work from the tracker page
+("New request" in its header, or http://mac-mini.local:4180/new) without
+opening Claude Code, and so the build loop never builds from your unspecced
+words: no loop claims a `Requested` ticket, and a spec pass turns it into
+`Queued` tickets for you to approve. It exists only in the tracker, never in
+a ClickUp list.
 
 **`Rework` exists** so a half-built ticket is never mistaken for one nobody
 has started. loop-build drains every `Rework` ticket before any `Queued` one,
