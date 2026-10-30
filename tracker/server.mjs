@@ -74,9 +74,15 @@ const PAGE_HEADERS = Object.freeze({
   'cache-control': 'no-cache',
 });
 
-/** The page file a GET of `pathname` answers with, or null when it is not a page address. */
-function pageFile(pathname) {
-  if (pathname === '/' || /^\/(?:board|list|new)$/.test(pathname) || /^\/(?:t|board|list)\/[^/]+$/.test(pathname)) return 'index.html';
+/**
+ * The page file a GET of `pathname` answers with, or null when it is not a
+ * page address. `/projects` is both the Projects screen and the call that
+ * lists them: a browser opening the address asks for HTML and gets the page;
+ * the page's own call asks for anything and gets the data.
+ */
+function pageFile(pathname, accept = '') {
+  if (pathname === '/projects') return /\btext\/html\b/.test(accept) ? 'index.html' : null;
+  if (pathname === '/' || /^\/(?:tasks|board|list|new)$/.test(pathname) || /^\/(?:t|board|list)\/[^/]+$/.test(pathname)) return 'index.html';
   const m = /^\/web\/([^/]+)$/.exec(pathname);
   return m && Object.hasOwn(WEB_FILES, m[1]) ? m[1] : null;
 }
@@ -206,8 +212,8 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
       return [200, waitingFor(store, me.id)];
     }
 
-    // Dane's page: the board's project switcher, and the New request form's
-    // picker with the project it starts on.
+    // Dane's page: the Projects screen, the project Tasks opens, and the New
+    // request form's picker with the project it starts on.
     if (parts.length === 1 && parts[0] === 'projects' && method === 'GET') {
       const projects = projectsList(store);
       const fallback = projects.some((p) => p.slug === defaultProject) ? defaultProject : null;
@@ -293,7 +299,7 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     let status;
     let wrote = null;
     try {
-      const page = (req.method === 'GET' || req.method === 'HEAD') ? pageFile(url.pathname) : null;
+      const page = (req.method === 'GET' || req.method === 'HEAD') ? pageFile(url.pathname, req.headers.accept) : null;
       if (page) {
         status = 200;
         sendPage(res, page);

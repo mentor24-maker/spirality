@@ -167,11 +167,14 @@ test('within each column the board\'s order is exactly what `queue --status` pri
   } finally { await f.cleanup(); }
 });
 
-test('the board\'s switcher lists every project; an unknown project is 404; both need a token', async () => {
+test('the Projects screen lists every project with its open count; an unknown project is 404; both need a token', async () => {
   const f = await fixture();
   try {
+    const openIn = (slug) => f.store.listTickets(slug, { open: true }).length;
+    assert.ok(openIn('alpha') > 0 && openIn('alpha') < f.store.listTickets('alpha').length, 'the demo data has open and Live tickets');
     assert.deepEqual((await f.call('GET', '/projects')).body.projects, [
-      { slug: 'alpha', name: 'Alpha' }, { slug: 'beta', name: 'Beta' },
+      { slug: 'alpha', name: 'Alpha', prefix: 'AL', open: openIn('alpha') },
+      { slug: 'beta', name: 'Beta', prefix: 'BE', open: openIn('beta') },
     ]);
     assert.equal((await f.call('GET', '/projects/beta/board')).body.projectName, 'Beta');
     assert.equal((await f.call('GET', '/projects/nope/board')).status, 404);
@@ -338,10 +341,10 @@ test('the New request form files into Requested as typed, keeps the text when re
 
 // ── The page itself ──────────────────────────────────────────────────────────
 
-test('the page is served at /, at a ticket\'s address, at the board, at the list and at the New request form without a token, locked to its own scripts', async () => {
+test('the page is served at /, at a ticket\'s address, at Projects, at Tasks, at the board, at the list and at the New request form without a token, locked to its own scripts', async () => {
   const f = await fixture();
   try {
-    for (const path of ['/', '/t/AL-1', '/board', '/board/alpha', '/list', '/list/alpha', '/new']) {
+    for (const path of ['/', '/t/AL-1', '/tasks', '/board', '/board/alpha', '/list', '/list/alpha', '/new']) {
       const r = await f.call('GET', path, { token: null });
       assert.equal(r.status, 200);
       assert.match(r.headers.get('content-type'), /^text\/html/);
@@ -361,6 +364,14 @@ test('the page is served at /, at a ticket\'s address, at the board, at the list
       assert.deepEqual(Buffer.from(await r.arrayBuffer()), readFileSync(WEB(name)));
     }
     assert.match(readFileSync(WEB('index.html'), 'utf8'), /<img src="\/web\/wordmark\.png" alt="Spirality"/);
+    // /projects is the page to a browser opening it, and still the data to the page's own call.
+    const opened = await fetch(`${f.url}/projects`, { headers: { accept: 'text/html,application/xhtml+xml,*/*;q=0.8' } });
+    assert.equal(opened.status, 200);
+    assert.equal(await opened.text(), readFileSync(WEB('index.html'), 'utf8'));
+    assert.equal((await f.call('GET', '/projects')).body.projects.length, 2);
+    assert.equal((await f.call('GET', '/projects', { token: null })).status, 401);
+    // The header: Projects picks a project, Tasks opens the one picked.
+    assert.match(readFileSync(WEB('index.html'), 'utf8'), /<a href="\/projects" data-nav="projects">Projects<\/a>\s*<a href="\/tasks" data-nav="tasks">Tasks<\/a>/);
     // Only those files: nothing else on disk is reachable, with or without a token.
     for (const path of ['/web/../store.mjs', '/web/%2e%2e%2fstore.mjs', '/web/demo.mjs', '/store.mjs']) {
       assert.notEqual((await f.call('GET', path, { token: null })).status, 200, path);
