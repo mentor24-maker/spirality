@@ -76,7 +76,7 @@ const PAGE_HEADERS = Object.freeze({
 
 /** The page file a GET of `pathname` answers with, or null when it is not a page address. */
 function pageFile(pathname) {
-  if (pathname === '/' || /^\/(?:board|list)$/.test(pathname) || /^\/(?:t|board|list)\/[^/]+$/.test(pathname)) return 'index.html';
+  if (pathname === '/' || /^\/(?:p|tasks|board|list)$/.test(pathname) || /^\/(?:t|board|list)\/[^/]+$/.test(pathname)) return 'index.html';
   const m = /^\/web\/([^/]+)$/.exec(pathname);
   return m && Object.hasOwn(WEB_FILES, m[1]) ? m[1] : null;
 }
@@ -203,7 +203,7 @@ export function createHandler(store, { log = () => {}, notifier = null } = {}) {
       return [200, waitingFor(store, me.id)];
     }
 
-    // Dane's page: the board's project switcher.
+    // Dane's page: the Projects screen, and the project Tasks opens.
     if (parts.length === 1 && parts[0] === 'projects' && method === 'GET') {
       return [200, { projects: projectsList(store) }];
     }
