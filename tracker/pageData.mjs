@@ -14,11 +14,13 @@
 import waitingOnOperator from '../lib/waitingOnOperator.js';
 import machineComment from '../lib/machineComment.js';
 import loopStatuses from '../lib/loopStatuses.js';
+import mergeOnComment from '../lib/mergeOnComment.js';
 import { compareWithinStatus } from '../scripts/lib/loopStatuses.mjs';
 
 const { OPERATOR_LANE, WAITING, CANNOT_TELL, waitingVerdict } = waitingOnOperator;
 const { isMachineComment, stripMachineMarker } = machineComment;
 const { STAGE_ORDER, statusOf } = loopStatuses;
+const { findPullRequest } = mergeOnComment;
 
 /**
  * A ticket and its comments in the shape waitingVerdict reads. Comments go
@@ -119,7 +121,10 @@ export function projectsList(store) {
  * comparator (compareWithinStatus: priority, then oldest), fed each ticket
  * in the ClickUp shape it reads, so the board and `queue` cannot disagree.
  * The list view draws the same object as rows, so each ticket also carries
- * its assignee's name and its last change. Null when there is no such project.
+ * its assignee's name, its last change, and its pull request's address (or
+ * null). The pull request is the merge step's own answer, findPullRequest
+ * over the ticket's comments, so the list's link and the PR a "merge" would
+ * act on cannot differ. Null when there is no such project.
  */
 export function boardOf(store, slug) {
   const project = store.getProject(slug);
@@ -131,6 +136,9 @@ export function boardOf(store, slug) {
     date_created: String(Date.parse(t.createdAt)),
   });
   const inQueueOrder = (a, b) => compareWithinStatus(queueShape(a), queueShape(b));
+  const pullRequestOf = (id) => findPullRequest(store.listComments(id).map((c) => ({
+    id: c.id, comment_text: c.body, date: String(Date.parse(c.createdAt)),
+  })))?.url ?? null;
   const names = new Map();
   const nameOf = (id) => {
     if (id == null) return null;
@@ -149,6 +157,7 @@ export function boardOf(store, slug) {
         tags: t.tags,
         assignee: nameOf(t.assignee),
         updatedAt: t.updatedAt,
+        pullRequest: pullRequestOf(t.id),
       })),
     })),
   };

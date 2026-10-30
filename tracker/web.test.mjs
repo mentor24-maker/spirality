@@ -12,6 +12,7 @@ import { escapeHtml, renderComment, renderInline, renderMarkdown } from './web/r
 import operatorCard from '../lib/operatorCard.js';
 import machineComment from '../lib/machineComment.js';
 import loopStatuses from '../lib/loopStatuses.js';
+import mergeOnComment from '../lib/mergeOnComment.js';
 
 const DOOR = fileURLToPath(new URL('../scripts/clickup.mjs', import.meta.url));
 const WEB = (name) => fileURLToPath(new URL(`./web/${name}`, import.meta.url));
@@ -187,6 +188,31 @@ test('the board and the list both fold Live by default, and every card and row o
   assert.match(app, /<a class="card" href="\/t\/\$\{encodeURIComponent\(t\.id\)\}">/);
   assert.match(app, /<td class="name"><a href="\/t\/\$\{encodeURIComponent\(t\.id\)\}">/);
   assert.ok(!/<details[^>]*\bopen\b/.test(app), 'Live is never drawn open');
+});
+
+test('a ticket\'s pull request on the list is the one the merge step would act on, and null without one', async () => {
+  const f = await fixture();
+  try {
+    const tickets = (await f.call('GET', '/projects/alpha/board')).body.columns.flatMap((c) => c.tickets);
+    for (const t of tickets) {
+      const comments = f.store.listComments(t.id).map((c) => ({ id: c.id, comment_text: c.body, date: String(Date.parse(c.createdAt)) }));
+      assert.equal(t.pullRequest, mergeOnComment.findPullRequest(comments)?.url ?? null, t.id);
+    }
+    assert.equal(tickets.find((t) => t.id === 'AL-2').pullRequest, 'https://github.com/example/repo/pull/7');
+    assert.ok(tickets.some((t) => t.pullRequest === null), 'the test data has a ticket with no PR');
+  } finally { await f.cleanup(); }
+});
+
+test('the list\'s actions only go where the page already goes: the ticket, its reply box, its pull request', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  assert.match(app, /action\(at, 'Open ticket', ICONS\.open\)/);
+  assert.match(app, /action\(`\$\{at\}#reply`, 'Reply', ICONS\.reply\)/);
+  // The PR icon shows only when there is one, and opens GitHub in its own tab.
+  assert.match(app, /t\.pullRequest \? action\(t\.pullRequest, '[^']+', ICONS\.pullRequest, true\) : ''/);
+  assert.match(app, /target="_blank" rel="noopener noreferrer"/);
+  // The address keeps #reply when the page moves to it, and the ticket page acts on it.
+  assert.match(app, /history\.pushState\(null, '', a\.pathname \+ a\.hash\)/);
+  assert.match(app, /location\.hash === '#reply'[\s\S]{0,120}box\.focus\(\)/);
 });
 
 test('the list and the board draw one object: the toggle keeps the project and only the view changes', () => {
