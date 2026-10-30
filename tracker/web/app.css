@@ -63,8 +63,12 @@ table.tickets, details.group, section.group { border: var(--hairline); border-ra
 .group td.name a:hover { text-decoration: underline; }
 .group .tag { margin-left: 0; margin-right: 0.3rem; }
 .group table { table-layout: fixed; }
-.group th.name { width: 42%; }
-.group th.priority { width: 9%; }
-.group th.tags { width: 15%; }
+.group th.name { width: 38%; }
+.group th.priority { width: 8%; }
+.group th.tags { width: 13%; }
+.group th.actions { width: 8%; }
+.group td.actions { white-space: nowrap; }
+a.action { display: inline-flex; padding: 0.2rem; margin-right: 0.15rem; border-radius: 4px; color: var(--quiet); }
+a.action:hover { color: #000; background: #e8e8ed; }
 .group th.assignee { width: 12%; }
 .group td { overflow-wrap: anywhere; }

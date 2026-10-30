@@ -124,6 +124,20 @@ async function drawWaiting() {
       ${table(unsure)}` : ''}`;
 }
 
+/** The list's action icons: drawn here, never from ticket text. 24-unit outline icons. */
+const ICONS = Object.freeze({
+  open: '<path d="M14 4h6v6"/><path d="M20 4l-9 9"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>',
+  reply: '<path d="M4 5h16v11H9l-5 4z"/>',
+  pullRequest: '<circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M6 8.5v7"/><path d="M18 15.5V9a3 3 0 0 0-3-3h-4"/><path d="M13 3.5L10.5 6 13 8.5"/>',
+});
+
+/** One action icon: a link with its name as tooltip and for screen readers. Off-site links open a new tab. */
+function action(href, label, icon, offSite = false) {
+  const target = offSite ? ' target="_blank" rel="noopener noreferrer"' : '';
+  return `<a class="action" href="${escapeHtml(href)}" title="${label}" aria-label="${label}"${target}>`
+    + `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icon}</svg></a>`;
+}
+
 /** The remembered view; a browser that will not keep it answers "board". */
 function savedView() {
   try { return localStorage.getItem(VIEW_KEY) === 'list' ? 'list' : 'board'; } catch { return 'board'; }
@@ -139,7 +153,9 @@ function savedView() {
  *
  * The board is the statuses as columns of cards; the list is the same
  * statuses as groups of rows, with a ticket's priority, tags, assignee and
- * last change in their own columns, like ClickUp's List.
+ * last change in their own columns, like ClickUp's List, and an Actions
+ * column of icons. Each icon goes somewhere that already exists: the ticket,
+ * the ticket's reply box, the ticket's pull request on GitHub.
  */
 async function drawProject(slug, view) {
   try { localStorage.setItem(VIEW_KEY, view); } catch { /* the toggle still works; it is only not remembered */ }
@@ -173,6 +189,14 @@ async function drawProject(slug, view) {
     </a>`;
   const column = (c) => block(c, 'column', c.tickets.map(card).join('') || '<p class="quiet">None.</p>');
 
+  const actions = (t) => {
+    const at = `/t/${encodeURIComponent(t.id)}`;
+    return [
+      action(at, 'Open ticket', ICONS.open),
+      action(`${at}#reply`, 'Reply', ICONS.reply),
+      t.pullRequest ? action(t.pullRequest, 'Open pull request on GitHub', ICONS.pullRequest, true) : '',
+    ].join('');
+  };
   const row = (t) => `
     <tr>
       <td class="name"><a href="/t/${encodeURIComponent(t.id)}">${escapeHtml(t.name)}</a> <span class="quiet">${escapeHtml(t.id)}</span></td>
@@ -180,9 +204,10 @@ async function drawProject(slug, view) {
       <td class="tags">${t.tags.map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join('')}</td>
       <td class="assignee">${t.assignee ? escapeHtml(t.assignee) : '<span class="quiet">nobody</span>'}</td>
       <td class="when">${escapeHtml(when(t.updatedAt))}</td>
+      <td class="actions">${actions(t)}</td>
     </tr>`;
   const group = (c) => block(c, 'group', c.tickets.length
-    ? `<table><thead><tr><th class="name">Ticket</th><th class="priority">Priority</th><th class="tags">Tags</th><th class="assignee">Assigned to</th><th class="when">Last change</th></tr></thead><tbody>${c.tickets.map(row).join('')}</tbody></table>`
+    ? `<table><thead><tr><th class="name">Ticket</th><th class="priority">Priority</th><th class="tags">Tags</th><th class="assignee">Assigned to</th><th class="when">Last change</th><th class="actions">Actions</th></tr></thead><tbody>${c.tickets.map(row).join('')}</tbody></table>`
     : '');
 
   main.classList.add('wide');
@@ -225,6 +250,11 @@ async function drawTicket(id) {
     </form>`;
   const form = main.querySelector('form.reply');
   const box = form.querySelector('textarea');
+  // Arrived by a Reply icon: go straight to the box.
+  if (location.hash === '#reply') {
+    form.scrollIntoView({ block: 'center' });
+    box.focus();
+  }
   const note = form.querySelector('.note');
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -282,7 +312,7 @@ document.addEventListener('click', (e) => {
   const a = e.target.closest('a');
   if (!a || a.target === '_blank' || a.origin !== location.origin || e.metaKey || e.ctrlKey) return;
   e.preventDefault();
-  history.pushState(null, '', a.pathname);
+  history.pushState(null, '', a.pathname + a.hash);
   route();
 });
 window.addEventListener('popstate', route);
