@@ -32,6 +32,13 @@ npm run clickup -- comment --task <id> --body-file -                          # 
 npm run clickup -- waiting [--task <id>]                                      # read-only: is this ACTUALLY waiting on Dane?
 ```
 
+## The statuses
+
+Eight, in board order: `Requested → Rework → Queued → Building → In review →
+Needs your input / Ready to launch → Live`. Review only ever takes from
+`In review`. `Requested` is Dane's unspecced request from the tracker page;
+no build or review loop touches it.
+
 ## The two columns
 
 Detail goes **left** (the description). The **right** column carries only the

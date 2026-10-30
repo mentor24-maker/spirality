@@ -132,7 +132,7 @@ test('once Dane answers on the page, the ticket leaves "Waiting on you"', async 
 
 // ── The board ────────────────────────────────────────────────────────────────
 
-test('the board\'s columns are the seven statuses in STAGE_ORDER, each ticket in its own status\'s column', async () => {
+test('the board\'s columns are the eight statuses in STAGE_ORDER, each ticket in its own status\'s column', async () => {
   const f = await fixture();
   try {
     const r = await f.call('GET', '/projects/alpha/board');
@@ -145,7 +145,7 @@ test('the board\'s columns are the seven statuses in STAGE_ORDER, each ticket in
       assert.deepEqual(column.tickets.map((t) => t.id).sort(), want, column.status);
       assert.ok(want.length > 0, `the test data has a ${column.status} ticket`);
     }
-    const urgent = r.body.columns[1].tickets.find((t) => t.name === 'An urgent fix filed after it');
+    const urgent = r.body.columns.find((c) => c.status === 'Queued').tickets.find((t) => t.name === 'An urgent fix filed after it');
     assert.deepEqual({ priority: urgent.priority, tags: urgent.tags }, { priority: 'urgent', tags: ['tracker', 'fix'] });
   } finally { await f.cleanup(); }
 });
@@ -276,12 +276,72 @@ test('a reply from the page is stored exactly as typed, under Dane\'s actor, and
   } finally { await f.cleanup(); }
 });
 
-// ── The page itself ──────────────────────────────────────────────────────────
+// ── A new request ────────────────────────────────────────────────────────────
 
-test('the page is served at /, at a ticket\'s address, at the board and at the list without a token, locked to its own scripts', async () => {
+test('a request filed from the page lands in Requested, unassigned, under Dane, exactly as typed, first on the board', async () => {
   const f = await fixture();
   try {
-    for (const path of ['/', '/t/AL-1', '/board', '/board/alpha', '/list', '/list/alpha']) {
+    const typed = '  Please add a thing.\n\n**not bold**\n> kept\n';
+    const filed = await f.call('POST', '/projects/beta/tickets', {
+      body: { name: 'Test request, please close', description: typed, status: 'Requested' },
+    });
+    assert.equal(filed.status, 201, filed.text);
+    const back = await f.call('GET', `/tickets/${filed.body.id}`);
+    assert.equal(back.status, 200);
+    assert.deepEqual(
+      [back.body.project, back.body.name, back.body.status, back.body.assignee, back.body.description],
+      ['beta', 'Test request, please close', 'requested', null, typed],
+    );
+    const [created] = f.store.listEvents(filed.body.id);
+    assert.deepEqual([created.field, created.to, created.actor], ['created', 'requested', f.operator.id]);
+    const [first] = (await f.call('GET', '/projects/beta/board')).body.columns;
+    assert.equal(first.status, 'Requested');
+    assert.deepEqual(first.tickets.map((t) => t.id), [filed.body.id]);
+  } finally { await f.cleanup(); }
+});
+
+test('a refused request writes nothing and says why', async () => {
+  const f = await fixture();
+  try {
+    const before = f.store.listTickets('beta').length;
+    const refused = await f.call('POST', '/projects/beta/tickets', { body: { name: '', description: 'kept', status: 'Requested' } });
+    assert.equal(refused.status, 400);
+    assert.ok(refused.body.message, 'the server gives a reason the form can show');
+    assert.equal(f.store.listTickets('beta').length, before);
+  } finally { await f.cleanup(); }
+});
+
+test('the form starts on the project the server was given, and on none it does not hold', async () => {
+  const f = await fixture();
+  try {
+    assert.equal((await f.call('GET', '/projects')).body.default, null, 'no project config named: the page takes the first');
+    for (const [given, want] of [['beta', 'beta'], ['gamma', null]]) {
+      const server = await startServer({ store: f.store, port: 0, defaultProject: given });
+      try {
+        const res = await fetch(`http://127.0.0.1:${server.address().port}/projects`, { headers: { authorization: `Bearer ${f.token}` } });
+        assert.equal((await res.json()).default, want, given);
+      } finally { await new Promise((r) => server.close(r)); }
+    }
+  } finally { await f.cleanup(); }
+});
+
+test('the New request form files into Requested as typed, keeps the text when refused or signed out, and is in the header', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  assert.match(app, /api\('POST', `\/projects\/\$\{encodeURIComponent\(project\.value\)\}\/tickets`, \{\s*name: title\.value, description: description\.value, status: 'Requested',\s*\}\)/);
+  assert.ok(!/assignee/.test(app.slice(app.indexOf('async function drawNew'), app.indexOf('/** Underline'))), 'a request is filed unassigned');
+  assert.match(app, /note\.textContent = `Not filed: \$\{err\.message\}`;/);
+  assert.match(app, /localStorage\.setItem\(DRAFT_KEY,/);
+  assert.match(app, /title\.value = draft\.title;\s*description\.value = draft\.description;/);
+  assert.match(app, /history\.pushState\(null, '', `\/t\/\$\{encodeURIComponent\(ticket\.id\)\}`\)/);
+  assert.match(readFileSync(WEB('index.html'), 'utf8'), /<a href="\/new" data-nav="new">New request<\/a>/);
+});
+
+// ── The page itself ──────────────────────────────────────────────────────────
+
+test('the page is served at /, at a ticket\'s address, at the board, at the list and at the New request form without a token, locked to its own scripts', async () => {
+  const f = await fixture();
+  try {
+    for (const path of ['/', '/t/AL-1', '/board', '/board/alpha', '/list', '/list/alpha', '/new']) {
       const r = await f.call('GET', path, { token: null });
       assert.equal(r.status, 200);
       assert.match(r.headers.get('content-type'), /^text\/html/);
