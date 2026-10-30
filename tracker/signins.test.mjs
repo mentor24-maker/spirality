@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openStore } from './store.mjs';
 import { startServer } from './server.mjs';
-import { createSignins, checkSignins, seatsFor, whoIs } from './signins.mjs';
+import { createSignins, checkSignins, seatsFor, whoIs, trackerAddress } from './signins.mjs';
 import { TRACKER_SEATS, EXPECTED_SECRETS } from '../scripts/lib/expectedSecrets.mjs';
 
 const PROJECT = { slug: 'alpha', name: 'Alpha', prefix: 'AL' };
@@ -179,7 +179,7 @@ test('check: one seat whose request fails is named, and the others are still che
       const r = await checkSignins({ url, seats: f.seats, env: f.vault });
       assert.equal(r.ok, false);
       const text = r.lines.join('\n');
-      assert.match(text, /TRACKER_TOKEN_RELAY: WRONG\. GET \/me did not answer usably: socket hang up for \[token\]/);
+      assert.match(text, /TRACKER_TOKEN_RELAY: WRONG\. GET \/me did not answer \(socket hang up for \[token\]\)/);
       assert.match(text, /TRACKER_TOKEN_LOOP_REVIEW: GET \/me answers "loop-review"/);
       assert.ok(!text.includes(f.vault.TRACKER_TOKEN_RELAY));
     } finally {
@@ -245,7 +245,10 @@ test('create with no tracker answering at all writes nothing, and never prints t
       tracker: { url: 'http://127.0.0.1:1', home: 'mini.test' },
     });
     assert.equal(r.ok, false);
-    assert.match(r.lines.join('\n'), /REFUSED\. .*the tracker at http:\/\/127\.0\.0\.1:1 did not answer usably/);
+    const text = r.lines.join('\n');
+    assert.match(text, /REFUSED\. .*the tracker at http:\/\/127\.0\.0\.1:1 did not answer \(.*\), so no token can be proven\. Run it again once the tracker is up\. Nothing was written to Doppler; the new token is revoked\./);
+    // A tracker that is down says nothing about which database this is.
+    assert.doesNotMatch(text, /this database is not/);
     assert.deepEqual(stray.vault, {});
   } finally { stray.cleanup(); }
 });
@@ -299,4 +302,61 @@ test('the command: create with no database file and no --new-database makes no f
     assert.equal(existsSync(db), false);
     assert.equal(existsSync(join(dir, 'nested')), false);
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('a stray database with every good token in Doppler: says the database is wrong, never to delete them, and stops', async () => {
+  const real = await realTracker();
+  const stray = fixture();
+  try {
+    const written = [];
+    const r = await createSignins({
+      ...stray, env: { ...real.vault }, project: PROJECT,
+      setSecret: (name) => { written.push(name); },
+      proveToken: (token) => whoIs(real.url, token),
+      tracker: { url: real.url, home: 'mini.test' },
+    });
+    assert.equal(r.ok, false);
+    assert.deepEqual(written, []);
+    const text = r.lines.join('\n');
+    assert.match(text, new RegExp(`${TRACKER_SEATS[0].secret}: WRONG\\. Doppler's token signs in as .* at the tracker at ${real.url}, so it is good, but not in this database: this database is not the one the tracker at ${real.url} serves\\. Run this on the machine the tracker runs on \\(mini\\.test\\)\\. Nothing changed; keep that secret\\.`));
+    for (const seat of TRACKER_SEATS.slice(1)) assert.match(text, new RegExp(`${seat.secret}: NOT tried`));
+    assert.doesNotMatch(text, /remove that secret/);
+    assert.equal(stray.store.actorsNamed({ kind: 'machine', name: 'relay' }).length, 0, 'no actor made here');
+    for (const [name, token] of Object.entries(real.vault)) assert.ok(real.store.actorForToken(token), name);
+  } finally { await real.close(); stray.cleanup(); }
+});
+
+test('a held token the tracker cannot be asked about is NOT checked, and nothing changes', async () => {
+  const f = fixture();
+  try {
+    await createSignins({ ...f, env: {}, project: PROJECT });
+    const before = { ...f.vault };
+    for (const proveToken of [async () => ({ status: 503, me: null }), async () => { throw new Error('connect ECONNREFUSED'); }]) {
+      const r = await createSignins({ ...f, env: { ...before }, project: PROJECT, proveToken });
+      assert.equal(r.ok, false);
+      const text = r.lines.join('\n');
+      assert.match(text, new RegExp(`${TRACKER_SEATS[0].secret}: NOT checked: the tracker at http://tracker\\.test did not answer.*Run it again once the tracker is up\\. Nothing changed\\.`));
+      assert.doesNotMatch(text, /this database is not|remove that secret/);
+      assert.deepEqual(f.vault, before);
+    }
+  } finally { f.cleanup(); }
+});
+
+test('a token dead both here and at the tracker is stale: REFUSED, the line says to remove it, and the other seats are still checked', async () => {
+  const f = fixture();
+  try {
+    await createSignins({ ...f, env: {}, project: PROJECT });
+    const r = await createSignins({ ...f, env: { ...f.vault, TRACKER_TOKEN_RELAY: 'not-a-token' }, project: PROJECT });
+    const text = r.lines.join('\n');
+    assert.match(text, /TRACKER_TOKEN_RELAY: REFUSED\. Doppler holds a token that signs in as "relay" neither here nor at the tracker at http:\/\/tracker\.test \(it answered 401.*remove that secret in Doppler/);
+    assert.doesNotMatch(text, /NOT tried/);
+  } finally { f.cleanup(); }
+});
+
+test('the tracker is asked at the filed network name, or at 127.0.0.1 on its own machine; never at a dev tracker elsewhere', () => {
+  const filed = 'http://mac-mini.local:4180';
+  assert.deepEqual(trackerAddress(filed, ['Mac-Mini.local', 'mac-mini']), { url: 'http://127.0.0.1:4180', home: 'mac-mini.local', onHome: true });
+  assert.deepEqual(trackerAddress(filed, ['danes-laptop.local', 'danes-laptop']), { url: 'http://mac-mini.local:4180', home: 'mac-mini.local', onHome: false });
+  assert.equal(trackerAddress('http://localhost:9000/', ['anything']).url, 'http://127.0.0.1:9000');
+  assert.equal(trackerAddress('https://tracker.example.com', ['laptop']).url, 'https://tracker.example.com');
 });
