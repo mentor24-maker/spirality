@@ -212,7 +212,6 @@ async function drawProject(slug, view) {
 
   main.classList.add('wide');
   main.innerHTML = `
-    <h1>${escapeHtml(board.projectName)}</h1>
     <div class="toolbar">
       <nav class="projects">${switcher}</nav>
       <nav class="views" aria-label="View">${toggle}</nav>
