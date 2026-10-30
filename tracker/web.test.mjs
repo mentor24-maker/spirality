@@ -422,6 +422,11 @@ test('a description renders from Markdown: headings, lists, checkboxes, code and
   assert.match(html, /<hr>$/);
 });
 
+test('a fence closes only on its own kind and length, so his own ``` inside a ```` block shows as written', () => {
+  assert.equal(renderMarkdown('````\n```\n> his line\n```\n````\nafter'), '<pre><code>```\n&gt; his line\n```</code></pre>\n<p>after</p>');
+  assert.equal(renderMarkdown('~~~\n```\nx\n~~~'), '<pre><code>```\nx</code></pre>');
+});
+
 test('an operator card draws its NEEDED FROM DANE banner in the red box, as `ask` posts it and as the tracker stores it', () => {
   const sixty = Array.from({ length: 60 }, (_, i) => `word${i}`).join(' ');
   const { rendered } = operatorCard.buildCard(`@@ASKED\nbuild the list\n@@CONTEXT\n${sixty}\n@@NEEDED\nReply A or B.\nA is cheaper.`);

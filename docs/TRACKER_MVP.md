@@ -254,6 +254,7 @@ made each move. The tokens live only in Doppler (project `spirality`, config
 | the operator (`operatorName`, "Dane") | human | `TRACKER_TOKEN_OPERATOR` | Dane, to sign in to the page |
 | `loop-build` | machine | `TRACKER_TOKEN_LOOP_BUILD` | `scripts/loop_runner.sh loop-build` |
 | `loop-review` | machine | `TRACKER_TOKEN_LOOP_REVIEW` | `scripts/loop_runner.sh loop-review` |
+| `loop-intake` | machine | `TRACKER_TOKEN_LOOP_INTAKE` | `scripts/loop_runner.sh loop-intake` |
 | `relay` | machine | `TRACKER_TOKEN_RELAY` | `scripts/run_relay.sh` |
 | `hand-run` | machine | `TRACKER_TOKEN_HAND_RUN` | a session started by hand (no runner) |
 

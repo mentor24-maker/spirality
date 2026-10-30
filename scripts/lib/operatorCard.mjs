@@ -74,12 +74,20 @@ export function parseCard(text) {
 /** 1-based lines that start a markdown blockquote, outside fences. */
 export function findBlockquoteLines(text) {
   const found = [];
-  let fenced = false;
-  String(text || '').split('\n').forEach((line, i) => {
-    if (/^\s*```/.test(line)) { fenced = !fenced; return; }
-    if (!fenced && /^\s*>/.test(line)) found.push(i + 1);
+  fenceLines(text).forEach(({ line, role }, i) => {
+    if (role === 'prose' && /^\s*>/.test(line)) found.push(i + 1);
   });
   return found;
+}
+
+/**
+ * A backtick fence that `text` cannot close: one longer than its longest
+ * backtick run, and never shorter than three. Dane's words may carry their
+ * own ``` lines; a plain ``` round them would end at his first one.
+ */
+export function fenceFor(text) {
+  const longest = Math.max(0, ...(String(text || '').match(/`+/g) || []).map((r) => r.length));
+  return '`'.repeat(Math.max(3, longest + 1));
 }
 
 /** Words in an ask that mean it spends money or cannot be undone. */
@@ -96,17 +104,40 @@ export function costlyTriggers(needed) {
 const CLOCK = /^((?:\d{4}-\d{2}-\d{2}\s+|\d{1,2}\/\d{1,2}\s+)?\d{1,2}:\d{2}\s*(?:am|pm))$/i;
 const MEASURED_LINE = /^[ \t]*@@MEASURED\b[ \t]*(.*?)[ \t]*$/i;
 
+const FENCE_MARK = /^\s*(`{3,}|~{3,})/;
+
+/**
+ * Every line of `text` with its place in the fences: 'open', 'close', 'body'
+ * (inside a fence) or 'prose'. The ONE scanner the card check and the card
+ * builders share, so they cannot disagree on where a fence ends. A fence opens
+ * on ``` or ~~~ and closes only on the same character, at least as long,
+ * with nothing after it: a ``` inside a ```` block is literal text. The
+ * tracker page's renderer (tracker/web/render.mjs) follows the same rule.
+ */
+export function fenceLines(text) {
+  let fence = null;
+  return String(text || '').split('\n').map((line) => {
+    const mark = FENCE_MARK.exec(line);
+    if (fence === null) {
+      if (!mark) return { line, role: 'prose' };
+      fence = mark[1];
+      return { line, role: 'open' };
+    }
+    if (mark && mark[1][0] === fence[0] && mark[1].length >= fence.length && !line.trim().slice(mark[1].length).trim()) {
+      fence = null;
+      return { line, role: 'close' };
+    }
+    return { line, role: 'body' };
+  });
+}
+
 export function splitFences(text) {
   const prose = [];
   const blocks = [];
   let open = null;
-  for (const line of String(text || '').split('\n')) {
-    if (/^\s*```/.test(line)) {
-      if (open === null) open = [];
-      else { blocks.push(open); open = null; }
-      continue;
-    }
-    if (open !== null) open.push(line);
+  for (const { line, role } of fenceLines(text)) {
+    if (role === 'open') open = [];
+    else if (role === 'close') { blocks.push(open); open = null; } else if (role === 'body') open.push(line);
     else prose.push(line);
   }
   if (open !== null && open.length) blocks.push(open);
@@ -157,7 +188,9 @@ export function validateCard(card) {
   else if (words > CONTEXT_MAX_WORDS) problems.push(`@@CONTEXT is ${words} words; the ceiling is ${CONTEXT_MAX_WORDS}. The long version belongs in the description (use describe).`);
   if (!card.needed) problems.push('@@NEEDED is empty. State the specific ask. "Nothing right now" is a fine answer, but write it down.');
   problems.push(...evidenceProblems(card));
-  for (const name of ['asked', 'context', 'needed', 'evidence']) {
+  // @@ASKED is exempt: the card puts his words in a fence of its own, where a
+  // "> " line of his is literal text and survives.
+  for (const name of ['context', 'needed', 'evidence']) {
     const offending = findBlockquoteLines(card[name]);
     if (offending.length) {
       problems.push(`@@${name.toUpperCase()} uses a "> " blockquote (line ${offending.join(', ')}). ClickUp DELETES those lines. Use plain text, **bold** or a fenced block.`);
@@ -172,11 +205,9 @@ function bannerLines(needed) {
 }
 
 function evidenceBody(text) {
-  let fenced = false;
-  return String(text || '').split('\n').filter((line) => {
-    if (/^\s*```/.test(line)) { fenced = !fenced; return true; }
-    return fenced || !MEASURED_LINE.test(line);
-  }).join('\n').trim();
+  return fenceLines(text)
+    .filter(({ line, role }) => role !== 'prose' || !MEASURED_LINE.test(line))
+    .map(({ line }) => line).join('\n').trim();
 }
 
 /** The card as blocks — the one description both renderers read. Banner LAST. */
@@ -224,16 +255,11 @@ function proseRuns(text) {
     runs.push(...inlineRuns(paragraph.join('\n') + '\n'));
     paragraph = [];
   };
-  for (const line of String(text || '').split('\n')) {
-    if (/^\s*```/.test(line)) {
-      if (!open) { flush(); open = true; } else {
-        open = false;
-        runs.push({ text: `${(fences[fenceIndex++] || []).join('\n')}\n`, attributes: { 'code-block': 'plain' } });
-      }
-      continue;
-    }
-    if (open) continue;
-    paragraph.push(line);
+  for (const { line, role } of fenceLines(text)) {
+    if (role === 'open') { flush(); open = true; } else if (role === 'close') {
+      open = false;
+      runs.push({ text: `${(fences[fenceIndex++] || []).join('\n')}\n`, attributes: { 'code-block': 'plain' } });
+    } else if (role === 'prose') paragraph.push(line);
   }
   if (open) runs.push({ text: `${(fences[fenceIndex] || []).join('\n')}\n`, attributes: { 'code-block': 'plain' } });
   flush();
@@ -265,7 +291,7 @@ export function renderCard(card) {
     switch (block.kind) {
       case 'heading': parts.push(`**${block.text}**`, ''); break;
       case 'note': parts.push(`*${block.text}*`, ''); break;
-      case 'fence': parts.push('```', block.text, '```', ''); break;
+      case 'fence': { const fence = fenceFor(block.text); parts.push(fence, block.text, fence, ''); break; }
       case 'prose': parts.push(block.text, ''); break;
       case 'banner': parts.push(...block.lines); break;
       default: throw new Error(`unknown card block "${block.kind}"`);

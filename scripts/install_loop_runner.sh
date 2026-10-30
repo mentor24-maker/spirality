@@ -1,7 +1,8 @@
 #!/bin/bash
 #
-# Install (or remove) the Spirality loop jobs on THIS machine: loop-build and
-# loop-review (each a launchd agent that keeps the committed runner alive),
+# Install (or remove) the Spirality loop jobs on THIS machine: loop-build,
+# loop-review and loop-intake (each a launchd agent that keeps the committed
+# runner alive, with its own lock and log),
 # the relay (a launchd agent that runs one pass every ten minutes) and, when
 # the project config names a trackerPort, the tracker (a kept-alive web
 # server, docs/TRACKER_MVP.md) with its nightly database backup.
@@ -22,9 +23,9 @@
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-# The two lanes that run a Claude skill in a kept-alive loop, and the relay,
+# The lanes that run a Claude skill in a kept-alive loop, and the relay,
 # which is a plain node pass on a timer. Different plist shapes, one installer.
-SKILLS=(loop-build loop-review)
+SKILLS=(loop-build loop-review loop-intake)
 RELAY=relay
 TRACKER=tracker
 BACKUP=tracker-backup
@@ -55,6 +56,7 @@ interval_of() {
   case "$1" in
     loop-build)  echo 1800 ;;
     loop-review) echo 1800 ;;
+    loop-intake) echo 1800 ;;
     relay)       echo 600 ;;
     *)           echo 3600 ;;
   esac
@@ -312,7 +314,7 @@ install() {
   # the exit code at the end.
   not_loaded=()
 
-  # The two kept-alive lanes: the runner script loops forever, launchd restarts it.
+  # The kept-alive lanes: the runner script loops forever, launchd restarts it.
   for s in "${SKILLS[@]}"; do
     local_label="$(label_of "$s")"; local_plist="$(plist_of "$s")"
     local_llog="$HOME/Library/Logs/$local_label.launchd.log"
