@@ -26,6 +26,7 @@ export const TRACKER_SEATS = [
   { secret: 'TRACKER_TOKEN_OPERATOR', kind: 'human', name: null, what: "the operator's own tracker sign-in, for the page" },
   { secret: 'TRACKER_TOKEN_LOOP_BUILD', kind: 'machine', name: 'loop-build', what: "the build loop's tracker sign-in" },
   { secret: 'TRACKER_TOKEN_LOOP_REVIEW', kind: 'machine', name: 'loop-review', what: "the review loop's tracker sign-in" },
+  { secret: 'TRACKER_TOKEN_LOOP_INTAKE', kind: 'machine', name: 'loop-intake', what: "the intake loop's tracker sign-in" },
   { secret: 'TRACKER_TOKEN_RELAY', kind: 'machine', name: 'relay', what: "the relay's tracker sign-in" },
   { secret: 'TRACKER_TOKEN_HAND_RUN', kind: 'machine', name: 'hand-run', handRun: true, what: "a hand-run session's tracker sign-in" },
 ];
