@@ -291,9 +291,13 @@ added to that script, and every lane inherits it at once.
 
 ## The work log
 
-`docs/WORK-LOG.md` is a plain-English record, newest first, one entry per
-merged PR, written inside the PR it describes. It is for you, not for the
-machine.
+`docs/work-log/` is a plain-English record, one file per merged PR, named
+`<YYYY-MM-DD>-<branch>.md` and written inside the PR it describes. One file
+per entry means two PRs built at the same time never conflict on the log
+(when every entry went at the top of one shared file, they always did).
+`ls -r docs/work-log` lists it newest first. `docs/WORK-LOG.md` holds the
+entries from before 2026-10-29 and is closed to new ones. The log is for
+you, not for the machine.
 
 ## Cost
 

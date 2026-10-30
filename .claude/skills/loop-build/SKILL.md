@@ -151,11 +151,14 @@ Exit **0** nothing of his / **3** something IS his / **1** could not tell.
    `npm run dev` once it exists) and walk the ticket's "How to test" steps
    yourself. Say in the PR where you looked and what you saw.
 
-5. **Add a plain-English work-log entry.** Prepend one dated entry to
-   `docs/WORK-LOG.md` (newest first): what changed and why it mattered, the
-   way you would explain it to a non-programmer, plus the `(#PR)` number. This
-   entry rides in the task's own PR, so the log lands on `main` with the work.
-   Never edit `docs/WORK-LOG.md` directly on `main`.
+5. **Add a plain-English work-log entry.** Write one new file,
+   `docs/work-log/<YYYY-MM-DD>-<branch>.md` (today's date, Mountain time, and
+   this task's branch name): a heading `## <date> — <title> (#PR)`, then what
+   changed and why it mattered, the way you would explain it to a
+   non-programmer. One file per PR, so two PRs built at once never clash on
+   the log. This entry rides in the task's own PR, so the log lands on `main`
+   with the work. Never add entries directly on `main`. `docs/WORK-LOG.md` is
+   the older history, closed to new entries: never edit it.
 
    You do not have the PR number yet. **Never amend a pushed commit to add
    it** — that needs a force-push, which is forbidden. Either commit the code,
