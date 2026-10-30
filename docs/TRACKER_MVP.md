@@ -272,13 +272,37 @@ the tracker shows its moves apart from the loops' and never as the operator's.
 Until the switch-over, Spirality's `tracker` is still `clickup`, so none of
 this is read yet.
 
-Making them, once, on the Mini (it uses the database at `trackerDataDir`,
-and creates it if the service has not yet):
+Making them, once, **on the Mini**, the machine the tracker runs on (it uses
+the database at `trackerDataDir`). Doppler is shared by every machine, but
+the database is the Mini's alone, so both commands belong there:
 
 ```bash
 npm run tracker:signins -- create --name Spirality
 npm run tracker:signins -- check
 ```
+
+Run anywhere else, `create` changes nothing. With no database at
+`trackerDataDir` it stops before touching anything:
+
+```
+There is no tracker database at /Users/<you>/spirality-tracker/tracker.db, so this is not the machine the tracker runs on. Nothing was made or written. Run it on the machine the tracker runs on (mac-mini.local). ...
+```
+
+With some other database there, it proves each token at the tracker
+(`GET /me` at the config's `trackerUrl`, which Doppler's `TRACKER_URL`
+overrides) before Doppler sees it. A token the tracker does not know is
+revoked on the spot, nothing is written to Doppler, and the line says why:
+
+```
+TRACKER_TOKEN_OPERATOR: REFUSED. Actor 1 ("Dane") was given a new token here, but the tracker at http://127.0.0.1:4180 did not answer usably (fetch failed): this database is not the one the tracker at http://127.0.0.1:4180 serves. Run this on the machine the tracker runs on (mac-mini.local). Nothing was written to Doppler; the new token is revoked.
+```
+
+`check` asks the tracker itself, the same way, so a token that only works
+against some other machine's database is called WRONG. `check --local`
+asks a private server on this machine's database instead, which says
+nothing about the tracker everyone uses. The first-ever setup, before the
+tracker has run anywhere, gives `create --new-database`: that makes the
+database and proves the tokens against a private server on it, and says so.
 
 `create` makes each actor (with `tracker/admin.mjs`'s store calls), puts each
 token straight into Doppler, reads it back from Doppler, records the
@@ -290,7 +314,7 @@ second operator and file all of his history under it; the import now refuses
 a project whose operator is not the one his seat maps to. Running `create`
 again finishes what a failed run left, records that mapping on a database
 made before it existed, and never replaces a working token. `check`
-asks `GET /me` with each token and expects that actor's own name back. To
+asks the tracker `GET /me` with each token and expects that actor's own name back. To
 replace a lost or leaked token, delete that secret in Doppler and run
 `create` again: the same actor gets a new token, and the old one stops
 signing in.

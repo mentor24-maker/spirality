@@ -248,13 +248,15 @@ test('a missing trackerPrefix, or a store holding the project under another pref
 });
 
 /** Run tracker/signins.mjs's create against `store` with a fake Doppler; answers the vault. */
-function signIn(store, env = {}) {
+async function signIn(store, env = {}) {
   const vault = {};
-  const r = createSignins({
+  const r = await createSignins({
     store, seats: seatsFor(CONFIG.operatorName), env,
     project: { slug: CONFIG.productSlug, name: 'Widget', prefix: CONFIG.trackerPrefix },
     operatorImport: operatorImportKey(CONFIG),
     setSecret: (name, value) => { vault[name] = value; }, getSecret: (name) => vault[name],
+    proveToken: async (token) => { const me = store.actorForToken(token); return { status: me ? 200 : 401, me }; },
+    tracker: { url: 'http://tracker.test' },
   });
   assert.equal(r.ok, true, r.lines.join('\n'));
   return { vault, lines: r.lines };
@@ -273,7 +275,7 @@ function oneOperator(store) {
 test('sign-ins made first, then the import: one operator, the project\'s, and his history is filed under him', async () => {
   const { store, cleanup } = freshStore();
   try {
-    const { vault } = signIn(store);
+    const { vault } = await signIn(store);
     await importLoopQueue({ tracker: fakeTracker(queue()), store, config: CONFIG });
     const operator = oneOperator(store);
     assert.equal(store.actorForToken(vault.TRACKER_TOKEN_OPERATOR).id, operator.id);
@@ -284,7 +286,7 @@ test('the import made first, then the sign-ins: the operator\'s seat is given to
   const { store, cleanup } = freshStore();
   try {
     await importLoopQueue({ tracker: fakeTracker(queue()), store, config: CONFIG });
-    const { vault } = signIn(store);
+    const { vault } = await signIn(store);
     const operator = oneOperator(store);
     assert.equal(store.actorForToken(vault.TRACKER_TOKEN_OPERATOR).id, operator.id);
   } finally { cleanup(); }
@@ -303,7 +305,7 @@ test('a database whose sign-ins predate the mapping is refused by the import unt
     assert.equal(tracker.calls.length, 0);
     assert.deepEqual(store.listImportedIds(SOURCE), []);
 
-    const { lines } = signIn(store, env);
+    const { lines } = await signIn(store, env);
     assert.match(lines.join('\n'), new RegExp(`TRACKER_TOKEN_OPERATOR: clickup user:${OPERATOR} now maps to actor ${op.id}`));
     await importLoopQueue({ tracker, store, config: CONFIG });
     assert.equal(oneOperator(store).id, op.id);
