@@ -74,18 +74,8 @@ export function parseCard(text) {
 /** 1-based lines that start a markdown blockquote, outside fences. */
 export function findBlockquoteLines(text) {
   const found = [];
-  let fence = null;
-  String(text || '').split('\n').forEach((line, i) => {
-    const mark = /^\s*(`{3,}|~{3,})/.exec(line);
-    if (mark) {
-      const run = mark[1];
-      if (fence === null) { fence = run; return; }
-      // A fence closes only on its own character, at least as long, and
-      // nothing after it: a ``` inside a ```` block is literal text.
-      if (run[0] === fence[0] && run.length >= fence.length && !line.trim().slice(run.length).trim()) { fence = null; }
-      return;
-    }
-    if (fence === null && /^\s*>/.test(line)) found.push(i + 1);
+  fenceLines(text).forEach(({ line, role }, i) => {
+    if (role === 'prose' && /^\s*>/.test(line)) found.push(i + 1);
   });
   return found;
 }
@@ -114,17 +104,40 @@ export function costlyTriggers(needed) {
 const CLOCK = /^((?:\d{4}-\d{2}-\d{2}\s+|\d{1,2}\/\d{1,2}\s+)?\d{1,2}:\d{2}\s*(?:am|pm))$/i;
 const MEASURED_LINE = /^[ \t]*@@MEASURED\b[ \t]*(.*?)[ \t]*$/i;
 
+const FENCE_MARK = /^\s*(`{3,}|~{3,})/;
+
+/**
+ * Every line of `text` with its place in the fences: 'open', 'close', 'body'
+ * (inside a fence) or 'prose'. The ONE scanner the card check and the card
+ * builders share, so they cannot disagree on where a fence ends. A fence opens
+ * on ``` or ~~~ and closes only on the same character, at least as long,
+ * with nothing after it: a ``` inside a ```` block is literal text. The
+ * tracker page's renderer (tracker/web/render.mjs) follows the same rule.
+ */
+export function fenceLines(text) {
+  let fence = null;
+  return String(text || '').split('\n').map((line) => {
+    const mark = FENCE_MARK.exec(line);
+    if (fence === null) {
+      if (!mark) return { line, role: 'prose' };
+      fence = mark[1];
+      return { line, role: 'open' };
+    }
+    if (mark && mark[1][0] === fence[0] && mark[1].length >= fence.length && !line.trim().slice(mark[1].length).trim()) {
+      fence = null;
+      return { line, role: 'close' };
+    }
+    return { line, role: 'body' };
+  });
+}
+
 export function splitFences(text) {
   const prose = [];
   const blocks = [];
   let open = null;
-  for (const line of String(text || '').split('\n')) {
-    if (/^\s*```/.test(line)) {
-      if (open === null) open = [];
-      else { blocks.push(open); open = null; }
-      continue;
-    }
-    if (open !== null) open.push(line);
+  for (const { line, role } of fenceLines(text)) {
+    if (role === 'open') open = [];
+    else if (role === 'close') { blocks.push(open); open = null; } else if (role === 'body') open.push(line);
     else prose.push(line);
   }
   if (open !== null && open.length) blocks.push(open);
@@ -192,11 +205,9 @@ function bannerLines(needed) {
 }
 
 function evidenceBody(text) {
-  let fenced = false;
-  return String(text || '').split('\n').filter((line) => {
-    if (/^\s*```/.test(line)) { fenced = !fenced; return true; }
-    return fenced || !MEASURED_LINE.test(line);
-  }).join('\n').trim();
+  return fenceLines(text)
+    .filter(({ line, role }) => role !== 'prose' || !MEASURED_LINE.test(line))
+    .map(({ line }) => line).join('\n').trim();
 }
 
 /** The card as blocks — the one description both renderers read. Banner LAST. */
@@ -244,16 +255,11 @@ function proseRuns(text) {
     runs.push(...inlineRuns(paragraph.join('\n') + '\n'));
     paragraph = [];
   };
-  for (const line of String(text || '').split('\n')) {
-    if (/^\s*```/.test(line)) {
-      if (!open) { flush(); open = true; } else {
-        open = false;
-        runs.push({ text: `${(fences[fenceIndex++] || []).join('\n')}\n`, attributes: { 'code-block': 'plain' } });
-      }
-      continue;
-    }
-    if (open) continue;
-    paragraph.push(line);
+  for (const { line, role } of fenceLines(text)) {
+    if (role === 'open') { flush(); open = true; } else if (role === 'close') {
+      open = false;
+      runs.push({ text: `${(fences[fenceIndex++] || []).join('\n')}\n`, attributes: { 'code-block': 'plain' } });
+    } else if (role === 'prose') paragraph.push(line);
   }
   if (open) runs.push({ text: `${(fences[fenceIndex] || []).join('\n')}\n`, attributes: { 'code-block': 'plain' } });
   flush();

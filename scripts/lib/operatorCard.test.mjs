@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseCard, validateCard, buildCard, renderCard, cardSurvived, findBlockquoteLines, countWords, fenceFor } from './operatorCard.mjs';
+import { parseCard, validateCard, buildCard, renderCard, cardSurvived, findBlockquoteLines, countWords, fenceFor, fenceLines, splitFences, renderCardComment } from './operatorCard.mjs';
 
 const sixty = Array.from({ length: 60 }, (_, i) => `word${i}`).join(' ');
 
@@ -74,4 +74,16 @@ test("cardSurvived notices when Dane's words were eaten", () => {
   assert.equal(cardSurvived(card, rendered), null);
   assert.ok(cardSurvived(card, rendered.replace('build the to-do list', '')));
   assert.equal(countWords('a — b, c!'), 3);
+});
+
+test('the card check and the card builder agree on where a fence ends (SP-44)', () => {
+  for (const fenced of ['~~~\n> line from the email\n~~~', '````\n```\n> x\n```\n````']) {
+    const card = parseCard(good.replace(sixty, `${sixty}\n${fenced}`));
+    assert.deepEqual(validateCard(card), []);
+    const quoted = renderCardComment(card).filter((r) => /^> /m.test(r.text));
+    assert.ok(quoted.length, 'the quoted line is in the comment');
+    for (const r of quoted) assert.equal(r.attributes?.['code-block'], 'plain', `"${r.text}" went out as plain text`);
+  }
+  assert.deepEqual(splitFences('a\n````\n```\nb\n```\n````\nc').blocks, [['```', 'b', '```']]);
+  assert.deepEqual(fenceLines('~~~\nx\n```\n~~~').map((l) => l.role), ['open', 'body', 'body', 'close']);
 });

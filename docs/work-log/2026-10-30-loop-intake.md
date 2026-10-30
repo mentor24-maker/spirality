@@ -32,3 +32,13 @@ over as they are, and the card and the tracker size their own box to fit
 whatever is inside. A test posts a card with a quoted line and a code box in
 his words through the real tracker, draws the page, and checks the banner
 is outside the box.
+
+A third review found that the part of the card that checks for quoted lines
+and the part that builds the comment disagreed on where a code box ends.
+A quoted line inside a `~~~` box passed the check, then went out as plain
+text, which ClickUp deletes. Both parts now read code boxes through one
+shared rule, so they cannot disagree again; tests send the two cards the
+review used and find the quoted lines inside a code box. The job's last
+resort for a stuck request also changed: if the request was already split
+into smaller tickets, its card now names them and warns that "go" would
+build the same work twice, instead of offering a bare "go".

@@ -230,6 +230,15 @@ stick. **A non-zero exit is a failure you report**, never one you talk past.
      pass could not finish this request and why (the FAILED note's step and
      error); `@@NEEDED`: reply with the request reworded, or "go" to send it
      to the build queue as it is.
+   - **If it was sliced** (it has a `loop-intake slices filed:` note, or a
+     `Requested` ticket says `Sliced from <this id>`), his whole request is
+     no longer the only copy of the work. `@@CONTEXT` names each filed slice
+     by id and exact name and what it covers, and `@@NEEDED` says it plainly:
+     "go" queues this full request as well as the slices, so the same work
+     would be built twice; to avoid that, reply with only the part the slices
+     leave out. (Any reply queues this ticket, the contract's known gap; the
+     build loop reads his reply before building.) Never offer a bare "go" on
+     a sliced original.
    - `ask` it, with `--after-his-answer` only on the refusal step 5 names.
 
    It works: that is this pass's one request; report it and stop. It fails:
