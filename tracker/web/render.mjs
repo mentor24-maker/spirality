@@ -55,7 +55,12 @@ export function renderInline(text) {
   return out + escapeHtml(s.slice(last));
 }
 
-const FENCE = /^\s*```/;
+const FENCE = /^\s*(`{3,}|~{3,})/;
+/** Does `line` close a fence opened by `run`? Same character, at least as long, nothing after. */
+const closesFence = (line, run) => {
+  const m = FENCE.exec(line);
+  return Boolean(m) && m[1][0] === run[0] && m[1].length >= run.length && !line.trim().slice(m[1].length).trim();
+};
 const HEADING = /^(#{1,6})\s+(.*)$/;
 const RULE = /^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/;
 const BULLET = /^\s*[-*+]\s+(.*)$/;
@@ -78,9 +83,10 @@ export function renderMarkdown(text) {
     const line = lines[i];
     if (!line.trim()) { i += 1; continue; }
     if (FENCE.test(line)) {
+      const run = FENCE.exec(line)[1];
       const body = [];
       i += 1;
-      while (i < lines.length && !FENCE.test(lines[i])) body.push(lines[i++]);
+      while (i < lines.length && !closesFence(lines[i], run)) body.push(lines[i++]);
       i += 1; // the closing fence, or past the end of an unclosed one
       out.push(`<pre><code>${escapeHtml(body.join('\n'))}</code></pre>`);
       continue;

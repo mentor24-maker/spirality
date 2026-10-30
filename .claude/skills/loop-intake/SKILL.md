@@ -48,6 +48,20 @@ stick. **A non-zero exit is a failure you report**, never one you talk past.
    a request from the page carries no priority, so the first line is the
    oldest). Read it with `get` and `comments`.
 
+   **One bad request must not block the ones behind it.** Look at this
+   lane's own notes in `comments`, newest first, and stop at the first
+   comment of Dane's (anything he wrote after a note answers it, so the
+   ticket starts fresh):
+
+   - The newest is `loop-intake GAVE UP:` → skip it and take the next line.
+     Never write to it again; it waits for him.
+   - The newest is `loop-intake FAILED:` → an earlier pass failed on it.
+     Do not spec it again. Go to **step 8** (the stuck ticket) with it.
+   - Neither → this is your request; carry on with step 2.
+
+   If every line is skipped, print one line, `loop-intake: every Requested
+   ticket has given up — nothing to do (<ids>).`, and stop.
+
 2. **Keep his words.** His words are the ticket's **name** and its
    **description** exactly as `get` prints them, plus any comment of his on
    the ticket. Copy them byte for byte; never tidy, shorten or "fix" them.
@@ -57,6 +71,14 @@ stick. **A non-zero exit is a failure you report**, never one you talk past.
    before a crash, say). Do not spec it again: his words are the fenced block
    under `## Asked`, the spec is already there; go straight to step 5 for that
    ticket alone.
+
+   **A ticket without `## Asked` may still have been sliced** by a pass that
+   stopped before its `describe`. Before you spec it, look for its slices:
+   a `loop-intake slices filed:` comment on it (step 4 posts one), and, in
+   case the pass stopped before that comment, any `Requested` ticket whose
+   description says `Sliced from <this id>` (`get` each line of the queue).
+   Found any: do not file them again. Reuse them, file only the slices still
+   missing, then carry on from step 4's `describe`.
 
 3. **Decide: clear, or a question.** Read the repository as far as you need
    to (`CLAUDE.md`, `docs/`, the files the request touches) to know what it
@@ -96,9 +118,13 @@ stick. **A non-zero exit is a failure you report**, never one you talk past.
    ## Risk
    ````
 
-   If his text itself contains a line of three backticks, fence it with four
-   (or with `~~~`) so the block cannot close early. Never a `> ` blockquote:
-   the script refuses them.
+   **Pick a fence his text cannot close.** A fence closes only on a line of
+   the same character, at least as long, with nothing after it. So if his
+   text has a line starting with three backticks, open and close yours with
+   four (more than his longest run); or use `~~~`, which no backtick line
+   closes. A `> ` line of his is fine inside the fence. Outside a fence,
+   never a `> ` blockquote: the script refuses them (`describe`, `task`,
+   `comment` and `ask` all exit 2).
 
    **Affected files are real paths, checked**, and the "How to test" steps
    follow `loop-spec`'s rule: a link he can click, or an exact command with
@@ -129,47 +155,95 @@ stick. **A non-zero exit is a failure you report**, never one you talk past.
 
    (Leave out the `Waits on:` line for a slice that needs nothing first.)
    They are filed as `Requested` so no build loop can claim one before he has
-   approved it. Then `describe` the original with slice 1, whose `## Order`
-   names the other slices' ids.
+   approved it. **Before the `describe`, record what you filed** on the
+   original, so a pass that stops here never slices it twice:
+
+   ```bash
+   npm run clickup -- comment --task <original id> --body-file -   # "loop-intake slices filed: <id>, <id> (slice 2 and 3 of 3)"
+   ```
+
+   Then `describe` the original with slice 1, whose `## Order` names the
+   other slices' ids.
 
    File at **normal** priority or none. Never Urgent, never High.
 
 5. **Hand every ticket to him.** For the original and each slice, one `ask`:
 
-   ```
+   ````
    @@ASKED
-   <his title and description, verbatim — the same words as under ## Asked>
+   ```
+   <his title and description, verbatim — the same words as under ## Asked,
+   inside the same kind of fence you chose in step 4>
+   ```
    @@CONTEXT
    What you understood him to want and what this ticket does about it, in
    plain English, 50-100 words. For a slice: which slice of how many, and
    what the others cover.
    @@NEEDED
    Reply "go" to queue it as written, or reply with what to change.
-   ```
+   ````
 
-   If `ask` refuses because **his own comment is the newest** on the ticket
-   (exit 2), that comment is part of the request you just read, not an answer
-   to a question: run the same `ask` again with `--after-his-answer`.
+   His words always go inside a fence in `@@ASKED`: a pasted email with a
+   `> ` line would otherwise fail the card on every pass.
+
+   **Retry only on the one refusal that is safe to retry.** If `ask` exits 2
+   and its output says `REFUSED — Dane's own comment is the NEWEST one`,
+   that comment is part of the request you just read, not an answer to a
+   question: run the same `ask` again with `--after-his-answer`. Exit 2 for
+   anything else (a card word count, a blockquote, a bad status) is a
+   mistake in your card: fix the card and run it once more; if it still
+   refuses, it is a failure for step 6.
+
+   **Exit 1 is never retried in the same pass.** It means the card may
+   already be on the ticket (`Card posted ... the status did NOT move` or
+   `did NOT stick`); a second `ask` would post a second card. Record it as a
+   failure (step 6) and let step 8 finish it on a later pass.
 
 6. **Account for every write.** Collect the outcome of each `task`,
    `describe` and `ask`. If any one failed (non-zero exit, a read-back that
    did not match):
 
-   - Post a `comment` on the **original** ticket naming each failed step and
-     the ticket it was for, and what was left in which status.
+   - Post a `comment` starting `loop-intake FAILED:` on **each ticket a step
+     failed for**, naming the failed step, its exit and the first line of its
+     error, and what was left in which status. On the original, also name
+     any slice that failed.
    - Print the same, starting `FAILED:`.
    - Never print a success line for that step.
 
-   A slice that was filed but whose `ask` failed is still in `Requested` with
-   `## Asked` in its description: the next pass hands it over (step 2).
+   That note is what step 1 reads: the next pass does not spec the ticket
+   again, it goes to step 8 with it. If the note itself cannot be posted,
+   print `FAILED:` saying so; the next pass simply retries the ticket.
 
 7. **Report** in a few lines: the request (id and exact name), each ticket
-   now in `Needs your input` (id and exact name), and anything that failed.
+   now in `Needs your input` (id and exact name), any ticket skipped as
+   given up, and anything that failed.
+
+8. **The stuck ticket** (step 1 sent you here: its newest note is
+   `loop-intake FAILED:`). Make **one** attempt to hand it to him as it is:
+   no spec, no `describe`, no new slice.
+
+   - If a card from this lane is already on the ticket (the `ask` exit 1
+     case), say in `@@CONTEXT` that the card above did not finish handing
+     it over and this one does.
+   - The card: `@@ASKED` is **his title only**, in a fence (his full text
+     may be what failed); `@@CONTEXT` says in plain words that the intake
+     pass could not finish this request and why (the FAILED note's step and
+     error); `@@NEEDED`: reply with the request reworded, or "go" to send it
+     to the build queue as it is.
+   - `ask` it, with `--after-his-answer` only on the refusal step 5 names.
+
+   It works: that is this pass's one request; report it and stop. It fails:
+   post `loop-intake GAVE UP:` with the step and error (step 1 then skips
+   the ticket for good), print `FAILED:` the same, and go back to step 1
+   for the next line. A give-up does not count as the pass's one request.
 
 ## Guardrails
 
 - **One request per pass.** Never a second `Requested` ticket in the same
-  pass, even when the first was quick.
+  pass, even when the first was quick. (A ticket given up in step 8 does
+  not count; the pass moves on to the next.)
+- **No ticket gets more than two cards from this lane**: step 5's, and one
+  more from step 8. Never a third.
 - **Never move a ticket anywhere but `Needs your input`**, and only with
   `ask`. Never `Queued`: his "go" is what queues it (the relay's hand-back).
 - **Never invent his words.** `@@ASKED` and `## Asked` are his, verbatim.

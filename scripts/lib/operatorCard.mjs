@@ -74,10 +74,18 @@ export function parseCard(text) {
 /** 1-based lines that start a markdown blockquote, outside fences. */
 export function findBlockquoteLines(text) {
   const found = [];
-  let fenced = false;
+  let fence = null;
   String(text || '').split('\n').forEach((line, i) => {
-    if (/^\s*```/.test(line)) { fenced = !fenced; return; }
-    if (!fenced && /^\s*>/.test(line)) found.push(i + 1);
+    const mark = /^\s*(`{3,}|~{3,})/.exec(line);
+    if (mark) {
+      const run = mark[1];
+      if (fence === null) { fence = run; return; }
+      // A fence closes only on its own character, at least as long, and
+      // nothing after it: a ``` inside a ```` block is literal text.
+      if (run[0] === fence[0] && run.length >= fence.length && !line.trim().slice(run.length).trim()) { fence = null; }
+      return;
+    }
+    if (fence === null && /^\s*>/.test(line)) found.push(i + 1);
   });
   return found;
 }

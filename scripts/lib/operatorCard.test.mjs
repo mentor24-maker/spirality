@@ -46,6 +46,13 @@ test('blockquotes are refused anywhere outside a fence', () => {
   assert.ok(validateCard(card).some((p) => p.includes('blockquote')));
 });
 
+test('his own ``` inside a four-backtick @@ASKED fence does not end the fence', () => {
+  assert.deepEqual(findBlockquoteLines('````\nsee:\n```\n> from the email\n```\n````'), []);
+  assert.deepEqual(findBlockquoteLines('~~~\n```\n> from the email\n~~~\n> c'), [5]);
+  const card = parseCard(`${good.replace('@@ASKED\n', '@@ASKED\n````\n> his pasted line\n```\n````\n')}`);
+  assert.ok(!validateCard(card).some((p) => p.includes('blockquote')));
+});
+
 test('a costly ask needs evidence with a fence, output and a measured line', () => {
   const costly = good.replace('Pick option A or B.', 'Please upgrade the plan.');
   assert.ok(validateCard(parseCard(costly)).some((p) => p.startsWith('@@EVIDENCE is missing')));
