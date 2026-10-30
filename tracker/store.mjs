@@ -397,6 +397,16 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
       return token;
     },
 
+    /**
+     * Stop an actor signing in: its token, if any, no longer finds it. For a
+     * token that was issued but must not be used (tracker/signins.mjs).
+     */
+    revokeToken(actorId) {
+      requireActor(actorId, 'the actor');
+      const r = db.prepare('UPDATE actors SET token_hash = NULL WHERE id = ?').run(actorId);
+      if (num(r.changes) !== 1) throw new StoreError('write-failed', `actor ${actorId}'s token was not revoked.`);
+    },
+
     /** The actor a token belongs to, or null for a missing or unknown token. */
     actorForToken(token) {
       if (typeof token !== 'string' || !token) return null;

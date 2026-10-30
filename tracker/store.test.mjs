@@ -350,6 +350,19 @@ test('a token is issued once, finds its actor, and only its hash is stored', () 
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+test('a revoked token signs in as nobody, and the actor can be given a new one', () => {
+  const { dir, store, machine, human } = fixture();
+  try {
+    const token = store.issueToken(machine.id);
+    const other = store.issueToken(human.id);
+    store.revokeToken(machine.id);
+    assert.equal(store.actorForToken(token), null);
+    assert.equal(store.actorForToken(other)?.id, human.id);
+    assert.throws(() => store.revokeToken(999), { code: 'unknown-actor' });
+    assert.equal(store.actorForToken(store.issueToken(machine.id))?.id, machine.id);
+  } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
 test('a database made before actors had tokens gains the column, and its rows survive', () => {
   const dir = mkdtempSync(join(tmpdir(), 'tracker-store-'));
   const path = join(dir, 'old.db');

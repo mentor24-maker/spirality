@@ -4,14 +4,30 @@
  * (docs/TRACKER_MVP.md, "Running it"). Run it under `doppler run` (the npm
  * script does), so the tokens already stored are in the environment:
  *
- *   npm run tracker:signins -- create --name <project name> [--prefix <PREFIX>]
- *   npm run tracker:signins -- check
+ *   npm run tracker:signins -- create --name <project name> [--prefix <PREFIX>] [--new-database]
+ *   npm run tracker:signins -- check [--local]
  *
- * create  For each seat in TRACKER_SEATS (scripts/lib/expectedSecrets.mjs):
- *         a seat whose Doppler token already signs in as it is left alone;
- *         otherwise its actor (found by kind and name, or made with
+ * Run both on the machine the tracker runs on: Doppler is shared by every
+ * machine, but the database is that machine's alone.
+ *
+ * create  Refuses when the database file does not exist, unless
+ *         --new-database is given (the first-ever setup, before the tracker
+ *         has run): a missing database means the wrong machine, not a
+ *         database to make.
+ *         For each seat in TRACKER_SEATS (scripts/lib/expectedSecrets.mjs):
+ *         a seat whose Doppler token already signs in as it, here and at
+ *         the tracker (found from the config file's trackerUrl, never
+ *         Doppler's TRACKER_URL override: trackerAddress), is left alone.
+ *         A held token that works in one place but not the other means this
+ *         database is not the tracker's: nothing changes and no later seat
+ *         is tried. Nor when the tracker does not answer.
+ *         Otherwise its actor (found by kind and name, or made with
  *         tracker/admin.mjs's store calls) is given a new token, which
- *         stops any old one, and it goes straight into Doppler (`doppler secrets set`,
+ *         stops any old one. Before that token goes anywhere, `GET /me` at
+ *         the tracker must answer with the seat's own name and kind: if it
+ *         does not, this database is not the one the tracker serves, so the
+ *         token is revoked, nothing reaches Doppler, and no later seat is
+ *         tried. A proven token goes straight into Doppler (`doppler secrets set`,
  *         fed on stdin), then is read back from Doppler and compared. Then
  *         the operator's actor is recorded as the one the history import
  *         (tracker/import.mjs) stands for his ClickUp seat, so the import
@@ -21,17 +37,18 @@
  *         Running it again finishes what a failed run left, and records that
  *         mapping on a database made before it existed; it never replaces a
  *         working token.
- * check   Starts the tracker on a free local port against the same database
- *         and asks `GET /me` with each seat's token: each must answer with
- *         that seat's own name.
+ * check   Asks `GET /me` at the tracker (the same address) with each seat's token: each must
+ *         answer with that seat's own name. --local asks a private server on
+ *         this machine's database instead, which says nothing about the
+ *         tracker everyone uses.
  *
  * No token is ever printed: only names, ids and verdicts. The database is
  * the project config's trackerDataDir/tracker.db, or TRACKER_DB.
  */
 import { parseArgs } from 'node:util';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { existsSync, mkdirSync } from 'node:fs';
+import { homedir, hostname } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { openStore } from './store.mjs';
@@ -49,26 +66,117 @@ export function seatsFor(operatorName, seats = TRACKER_SEATS) {
 const scrub = (text, secret) => (secret ? String(text).split(secret).join('[token]') : String(text));
 
 /**
- * Make what is missing. `setSecret(name, value)` and `getSecret(name)` talk
- * to Doppler (injected so tests never do); each throws on failure. Returns
- * `{ ok, lines }`: one line per seat and one for the project.
+ * Ask the tracker at `url` who a token is: `GET /me`. Returns
+ * `{ status, me }` (`me` null unless it answered 200); throws, with the
+ * token blanked, when it does not answer at all.
  */
-export function createSignins({ store, seats, env, project, operatorImport = null, setSecret, getSecret }) {
+export async function whoIs(url, token) {
+  try {
+    const res = await fetch(`${url}/me`, { headers: { Authorization: `Bearer ${token}` } });
+    return { status: res.status, me: res.ok ? await res.json() : null };
+  } catch (err) {
+    throw new Error(scrub(err.message, token));
+  }
+}
+
+/**
+ * Ask the tracker whether `token` signs in as `seat`. Returns `{ me }`
+ * when it does, else `{ why }`, with `down` set when the tracker did not
+ * answer at all or failed (a 5xx): that says nothing about the token, or
+ * about which database it serves.
+ */
+async function askTracker(proveToken, token, seat) {
+  let answer;
+  try {
+    answer = await proveToken(token);
+  } catch (err) {
+    return { down: true, why: `did not answer (${scrub(err.message, token)})` };
+  }
+  const { status, me } = answer;
+  if (status >= 500) return { down: true, why: `did not answer usably (${status})` };
+  if (me && me.name === seat.name && me.kind === seat.kind) return { me };
+  return { why: `answered ${status}${me ? ` "${me.name}" (${me.kind})` : ''}, not "${seat.name}" (${seat.kind})` };
+}
+
+/**
+ * Where to prove tokens: the tracker everyone uses, found from the network
+ * address the config FILE holds (`filedUrl`), never from Doppler's
+ * same-machine TRACKER_URL override, which on any machine asks whatever
+ * tracker runs THERE. On the tracker's own machine (`ownNames` holds its
+ * host name) it is asked at 127.0.0.1 on the filed port, which no other
+ * tracker can hold, because Node cannot look up the machine's own `.local`
+ * name (#28). Anywhere else it is asked by that name, so a dev tracker on
+ * a laptop is never the one asked. Returns `{ url, home, onHome }`.
+ */
+export function trackerAddress(filedUrl, ownNames) {
+  const filed = new URL(filedUrl);
+  const home = filed.hostname.toLowerCase();
+  const own = new Set(ownNames.filter(Boolean).map((n) => n.toLowerCase()));
+  const onHome = own.has(home) || ['localhost', '127.0.0.1', '[::1]'].includes(home);
+  const url = onHome ? `${filed.protocol}//127.0.0.1${filed.port ? `:${filed.port}` : ''}` : filed.origin;
+  return { url, home, onHome };
+}
+
+/** The names this machine answers to: `mac-mini`, `mac-mini.local`, and macOS's own Bonjour name. */
+export function ownHostNames() {
+  const names = [hostname()];
+  if (process.platform === 'darwin') {
+    const r = spawnSync('scutil', ['--get', 'LocalHostName'], { encoding: 'utf8' });
+    if (r.status === 0 && r.stdout.trim()) names.push(r.stdout.trim());
+  }
+  return names.flatMap((n) => (n.includes('.') ? [n, n.split('.')[0]] : [n, `${n}.local`]));
+}
+
+/**
+ * Make what is missing. `setSecret(name, value)` and `getSecret(name)` talk
+ * to Doppler (injected so tests never do); each throws on failure.
+ * `proveToken(token)` asks the tracker who a token is (`whoIs`), and
+ * `tracker` is `{ url, home }`: its address and the machine to run this on,
+ * for the messages. Returns `{ ok, lines }`: one line per seat and one for
+ * the project.
+ */
+export async function createSignins({ store, seats, env, project, operatorImport = null, setSecret, getSecret, proveToken, tracker }) {
   const lines = [];
   let ok = true;
   const ids = {};
   const operatorSeat = seats.find((s) => s.kind === 'human');
+  const elsewhere = `this database is not the one the tracker at ${tracker.url} serves. Run this on the machine the tracker runs on${tracker.home ? ` (${tracker.home})` : ''}`;
+  const down = (why) => `the tracker at ${tracker.url} ${why}, so no token can be proven. Run it again once the tracker is up`;
+  // Once the tracker has turned one seat down, every other seat would be
+  // turned down too: stop, rather than issue tokens nobody can use.
+  let stopped = false;
   for (const seat of seats) {
+    if (stopped) {
+      lines.push(`${seat.secret}: NOT tried, because of the seat above. Nothing changed.`);
+      continue;
+    }
     const held = env[seat.secret];
     if (held) {
       const actor = store.actorForToken(held);
-      if (actor && actor.name === seat.name && actor.kind === seat.kind) {
+      const here = actor && actor.name === seat.name && actor.kind === seat.kind;
+      const there = await askTracker(proveToken, held, seat);
+      if (there.down) {
+        ok = false;
+        stopped = true;
+        lines.push(`${seat.secret}: NOT checked: ${down(there.why)}. Nothing changed.`);
+        continue;
+      }
+      if (here && there.me) {
         ids[seat.secret] = actor.id;
         lines.push(`${seat.secret}: already signs in as "${actor.name}" (actor ${actor.id}), left alone.`);
         continue;
       }
       ok = false;
-      lines.push(`${seat.secret}: REFUSED. Doppler holds a token that does not sign in as "${seat.name}" here${actor ? ` (it is "${actor.name}")` : ''}. Nothing replaced; remove that secret in Doppler first if it is truly stale.`);
+      if (here || there.me) {
+        // It works in one place and not the other: two databases, and this
+        // one is not the tracker's. Every other seat would say the same.
+        stopped = true;
+        lines.push(here
+          ? `${seat.secret}: WRONG. Doppler's token signs in as "${seat.name}" in this database, but the tracker at ${tracker.url} ${there.why}: ${elsewhere}. Nothing changed.`
+          : `${seat.secret}: WRONG. Doppler's token signs in as "${seat.name}" at the tracker at ${tracker.url}, so it is good, but not in this database${actor ? ` (here it is "${actor.name}")` : ''}: ${elsewhere}. Nothing changed; keep that secret.`);
+        continue;
+      }
+      lines.push(`${seat.secret}: REFUSED. Doppler holds a token that signs in as "${seat.name}" neither here${actor ? ` (it is "${actor.name}")` : ''} nor at the tracker at ${tracker.url} (it ${there.why}). Nothing replaced; it is stale, so remove that secret in Doppler and run create again.`);
       continue;
     }
     // A seat keeps one actor: a later run (a lost token, a failed run) gives
@@ -77,6 +185,15 @@ export function createSignins({ store, seats, env, project, operatorImport = nul
     const kept = (seat === operatorSeat && importedOperator(store, operatorImport, seat)) || store.actorsNamed({ kind: seat.kind, name: seat.name })[0];
     const actor = kept ?? store.createActor({ kind: seat.kind, name: seat.name });
     const token = store.issueToken(actor.id);
+    const proof = await askTracker(proveToken, token, seat);
+    if (!proof.me) {
+      ok = false;
+      stopped = true;
+      let revoked = 'revoked';
+      try { store.revokeToken(actor.id); } catch (err) { revoked = `NOT revoked (${err.message})`; }
+      lines.push(`${seat.secret}: REFUSED. Actor ${actor.id} ("${seat.name}") was given a new token here, but ${proof.down ? down(proof.why) : `the tracker at ${tracker.url} ${proof.why}: ${elsewhere}`}. Nothing was written to Doppler; the new token is ${revoked}.`);
+      continue;
+    }
     try {
       setSecret(seat.secret, token);
     } catch (err) {
@@ -154,21 +271,12 @@ export async function checkSignins({ url, seats, env }) {
       lines.push(`${seat.secret}: MISSING from this environment.`);
       continue;
     }
-    let res;
-    let me;
-    try {
-      res = await fetch(`${url}/me`, { headers: { Authorization: `Bearer ${token}` } });
-      me = res.ok ? await res.json() : null;
-    } catch (err) {
-      ok = false;
-      lines.push(`${seat.secret}: WRONG. GET /me did not answer usably: ${scrub(err.message, token)}.`);
-      continue;
-    }
-    if (me && me.name === seat.name && me.kind === seat.kind) {
+    const { me, why } = await askTracker((t) => whoIs(url, t), token, seat);
+    if (me) {
       lines.push(`${seat.secret}: GET /me answers "${me.name}" (${me.kind}, actor ${me.id}). OK`);
     } else {
       ok = false;
-      lines.push(`${seat.secret}: WRONG. GET /me answered ${res.status}${me ? ` "${me.name}" (${me.kind})` : ''}, expected "${seat.name}" (${seat.kind}).`);
+      lines.push(`${seat.secret}: WRONG. GET /me ${why}.`);
     }
   }
   return { ok, lines };
@@ -181,16 +289,27 @@ function doppler(args, input) {
   return r.stdout;
 }
 
-const USAGE = `usage (under doppler run, as the npm script does):
-  npm run tracker:signins -- create --name <project name> [--prefix <PREFIX>]
-  npm run tracker:signins -- check
---prefix defaults to trackerPrefix in the project config, and must match it.`;
+const USAGE = `usage (under doppler run, as the npm script does), on the machine the tracker runs on:
+  npm run tracker:signins -- create --name <project name> [--prefix <PREFIX>] [--new-database]
+  npm run tracker:signins -- check [--local]
+--prefix defaults to trackerPrefix in the project config, and must match it.
+--new-database lets create make the database, for the first-ever setup only.
+--local makes check ask a private server on this machine's database, not the tracker.`;
+
+/** Start a private tracker on `store` at a free local port: `{ url, close }`. */
+async function privateTracker(store) {
+  const server = await startServer({ store, port: 0 });
+  return { url: `http://127.0.0.1:${server.address().port}`, close: () => new Promise((r) => server.close(r)) };
+}
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   const [command, ...rest] = process.argv.slice(2);
   let values;
   try {
-    ({ values } = parseArgs({ args: rest, options: { name: { type: 'string' }, prefix: { type: 'string' } }, strict: true }));
+    ({ values } = parseArgs({
+      args: rest, strict: true,
+      options: { name: { type: 'string' }, prefix: { type: 'string' }, 'new-database': { type: 'boolean' }, local: { type: 'boolean' } },
+    }));
   } catch (err) {
     console.error(`${err.message}\n${USAGE}`);
     process.exit(1);
@@ -214,32 +333,58 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     console.error(`Run this under doppler run, so the tokens already stored are seen:\n${USAGE}`);
     process.exit(1);
   }
+  // The tracker everyone uses, from the network address the config FILE
+  // holds, not Doppler's same-machine TRACKER_URL override (trackerAddress).
+  const filed = loadProjectConfig({ env: { ...process.env, TRACKER_URL: '' } }).trackerUrl;
+  const tracker = filed ? trackerAddress(filed, ownHostNames()) : null;
+  const home = tracker?.home ?? null;
+  const runOn = `Run it on the machine the tracker runs on${home ? ` (${home})` : ''}.`;
+  const makeNew = command === 'create' && values['new-database'] && !existsSync(db);
+  const usePrivate = makeNew || (command === 'check' && values.local);
+  // check asks the tracker itself, which needs no database here.
+  const needsDb = command === 'create' || usePrivate;
+  if (needsDb && !existsSync(db) && !makeNew) {
+    console.error(`There is no tracker database at ${db}, so this is not the machine the tracker runs on. Nothing was made or written. ${runOn}${command === 'create' ? ' Only for the first-ever setup, before the tracker has run anywhere, give --new-database.' : ''}`);
+    process.exit(1);
+  }
+  const trackerUrl = tracker?.url;
+  if (!usePrivate && !trackerUrl) {
+    console.error('The project config file names no trackerUrl, so there is no tracker to prove a token at. Nothing was made or written.');
+    process.exit(1);
+  }
   const seats = seatsFor(config.operatorName);
-  if (!process.env.TRACKER_DB) mkdirSync(dataDir, { recursive: true });
-  const store = openStore(db);
+  if (makeNew && !process.env.TRACKER_DB) mkdirSync(dataDir, { recursive: true });
+  const store = needsDb ? openStore(db) : null;
   let result;
+  let asked = trackerUrl;
   try {
-    if (command === 'create') {
-      const where = ['--project', config.dopplerProject, '--config', config.dopplerConfig];
-      result = createSignins({
-        store, seats, env: process.env,
-        project: { slug: config.productSlug, name: values.name, prefix: values.prefix ?? config.trackerPrefix },
-        operatorImport: operatorImportKey(config),
-        setSecret: (name, value) => { doppler(['secrets', 'set', name, ...where, '--silent'], value); },
-        getSecret: (name) => doppler(['secrets', 'get', name, ...where, '--plain']).replace(/\n$/, ''),
-      });
-    } else {
-      const server = await startServer({ store, port: 0 });
-      try {
-        result = await checkSignins({ url: `http://127.0.0.1:${server.address().port}`, seats, env: process.env });
-      } finally {
-        await new Promise((r) => server.close(r));
+    // A brand-new database has no tracker serving it yet, so its tokens can
+    // only be proven against a private server on it; --local asks for that.
+    const own = usePrivate ? await privateTracker(store) : null;
+    if (own) asked = own.url;
+    try {
+      if (command === 'create') {
+        const where = ['--project', config.dopplerProject, '--config', config.dopplerConfig];
+        result = await createSignins({
+          store, seats, env: process.env,
+          project: { slug: config.productSlug, name: values.name, prefix: values.prefix ?? config.trackerPrefix },
+          operatorImport: operatorImportKey(config),
+          setSecret: (name, value) => { doppler(['secrets', 'set', name, ...where, '--silent'], value); },
+          getSecret: (name) => doppler(['secrets', 'get', name, ...where, '--plain']).replace(/\n$/, ''),
+          proveToken: (token) => whoIs(asked, token),
+          tracker: { url: asked, home },
+        });
+      } else {
+        result = await checkSignins({ url: asked, seats, env: process.env });
       }
+    } finally {
+      await own?.close();
     }
   } finally {
-    store.close();
+    store?.close();
   }
-  console.log(`tracker database: ${db}`);
+  if (needsDb) console.log(`tracker database: ${db}${makeNew ? ' (made new by --new-database)' : ''}`);
+  console.log(`tokens asked of: ${usePrivate ? `a private server on that database (${asked}), not the tracker everyone uses` : `the tracker at ${asked} (${tracker.onHome ? `this machine is ${home}, where it runs` : `it runs on ${home}, not this machine`})`}`);
   for (const line of result.lines) console.log(line);
   console.log(result.ok ? `${command}: every sign-in is in order.` : `${command}: SOMETHING ABOVE FAILED.`);
   process.exit(result.ok ? 0 : 1);
