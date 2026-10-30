@@ -1,8 +1,12 @@
 # Spirality work log
 
-A plain-English record, newest first, one entry per merged pull request.
-Each entry is written INSIDE the pull request it describes. Never edit this
-file directly on `main`.
+A plain-English record, newest first, one entry per merged pull request,
+up to 2026-10-29. This file is closed to new entries: never edit it.
+
+New entries live in `docs/work-log/`, one file per pull request, named
+`<YYYY-MM-DD>-<branch>.md` and written INSIDE the pull request it describes.
+Listed with `ls` they come newest last; `ls -r docs/work-log` reads them
+newest first.
 
 ---
 
