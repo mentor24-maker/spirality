@@ -118,7 +118,8 @@ export function projectsList(store) {
  * clickup -- queue --status <S>` prints them. The order is the door's own
  * comparator (compareWithinStatus: priority, then oldest), fed each ticket
  * in the ClickUp shape it reads, so the board and `queue` cannot disagree.
- * Null when there is no such project.
+ * The list view draws the same object as rows, so each ticket also carries
+ * its assignee's name and its last change. Null when there is no such project.
  */
 export function boardOf(store, slug) {
   const project = store.getProject(slug);
@@ -130,6 +131,12 @@ export function boardOf(store, slug) {
     date_created: String(Date.parse(t.createdAt)),
   });
   const inQueueOrder = (a, b) => compareWithinStatus(queueShape(a), queueShape(b));
+  const names = new Map();
+  const nameOf = (id) => {
+    if (id == null) return null;
+    if (!names.has(id)) names.set(id, store.getActor(id)?.name ?? `actor ${id}`);
+    return names.get(id);
+  };
   return {
     project: project.slug,
     projectName: project.name,
@@ -140,6 +147,8 @@ export function boardOf(store, slug) {
         name: t.name,
         priority: t.priority,
         tags: t.tags,
+        assignee: nameOf(t.assignee),
+        updatedAt: t.updatedAt,
       })),
     })),
   };
