@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { startServer } from './server.mjs';
 import { seedDemo, tickingClock } from './demoData.mjs';
-import { escapeHtml, renderComment, renderInline, renderMarkdown, renderQuickAction, renderMergeAction, mergeQuestion, cardContext, firstParagraph } from './web/render.mjs';
+import { escapeHtml, renderComment, renderInline, renderMarkdown, renderQuickAction, renderMergeAction, mergeQuestion, renderTrail, cardContext, firstParagraph } from './web/render.mjs';
 import { loadProjectConfig } from '../lib/projectConfig.mjs';
 import operatorCard from '../lib/operatorCard.js';
 import machineComment from '../lib/machineComment.js';
@@ -644,6 +644,48 @@ test('every word of ticket text in Quick Action is escaped', () => {
   });
   assert.doesNotMatch(html, /<script|<img/);
   assert.equal(html.match(/&lt;script&gt;alert\(1\)&lt;\/script&gt;/g).length, 3);
+});
+
+test('the trail links every step but the last, and the last is the page itself', () => {
+  const html = renderTrail([
+    { label: 'Spirality', href: '/board/spirality' },
+    { label: 'Task SP-47', href: '/t/SP-47' },
+    { label: 'Details' },
+  ]);
+  assert.equal(html, '<nav class="trail" aria-label="You are here">'
+    + '<a href="/board/spirality">Spirality</a><span class="sep"> &gt; </span>'
+    + '<a href="/t/SP-47">Task SP-47</a><span class="sep"> &gt; </span>'
+    + '<span aria-current="page">Details</span></nav>');
+  // A last step given an address is still not a link.
+  assert.equal(renderTrail([{ label: 'Projects', href: '/projects' }]),
+    '<nav class="trail" aria-label="You are here"><span aria-current="page">Projects</span></nav>');
+});
+
+test('every name in the trail is escaped, in its text and in its address', () => {
+  const html = renderTrail([
+    { label: 'R&D <b>', href: '/list/a"b' },
+    { label: 'Task <script>alert(1)</script>' },
+  ]);
+  assert.doesNotMatch(html, /<b>|<script|a"b/);
+  assert.match(html, /<a href="\/list\/a&quot;b">R&amp;D &lt;b&gt;<\/a>/);
+  assert.match(html, /<span aria-current="page">Task &lt;script&gt;alert\(1\)&lt;\/script&gt;<\/span>/);
+});
+
+test('every page puts its trail at the top: ticket, board, list, Waiting on you, Projects, New request', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const body = (name) => new RegExp(`async function ${name}\\(([^)]*)\\) \\{([\\s\\S]*?)\\n\\}`).exec(app)[2];
+  // The ticket: its project in the view last used, then the ticket, then this page of it.
+  assert.match(body('drawTicket'), /putTrail\(\[\s*\{ label: t\.projectName, href: `\/\$\{savedView\(\)\}\/\$\{encodeURIComponent\(t\.project\)\}` \},\s*\{ label: `Task \$\{t\.id\}`, href: `\/t\/\$\{encodeURIComponent\(t\.id\)\}` \},\s*\{ label: 'Details' \},\s*\]\)/);
+  // A project's board or list climbs to Projects.
+  assert.match(body('drawProject'), /putTrail\(\[\{ label: board\.projectName, href: '\/projects' \}, \{ label: view === 'board' \? 'Board' : 'List' \}\]\)/);
+  assert.match(body('drawWaiting'), /putTrail\(\[\{ label: 'Waiting on you' \}\]\)/);
+  assert.match(body('drawProjects'), /putTrail\(\[\{ label: 'Projects' \}\]\)/);
+  assert.match(body('drawNew'), /putTrail\(\[\{ label: 'New request' \}\]\)/);
+  // Each trail goes in after its page is drawn, so it sits first in main.
+  assert.match(app, /main\.insertAdjacentHTML\('afterbegin', renderTrail\(steps\)\)/);
+  assert.doesNotMatch(/function drawSignIn[\s\S]*?\n\}/.exec(app)[0], /putTrail/, 'no trail on the sign-in screen');
+  const css = readFileSync(WEB('app.css'), 'utf8');
+  assert.match(css, /nav\.trail \{ font-size: 0\.85rem;/, 'a small, quiet line, not a heading');
 });
 
 // ── Create Project ───────────────────────────────────────────────────────────

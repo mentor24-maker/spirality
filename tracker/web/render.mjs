@@ -268,6 +268,21 @@ export function renderQuickAction({ name, description, comments = [] }) {
   ].filter(Boolean).join('\n');
 }
 
+/**
+ * The trail under the main menu: where the page sits, as `{ label, href }`
+ * steps from the outside in (Spirality > Task SP-47 > Details). Every step
+ * before the last is a link back up; the last is the page itself and never
+ * a link. Every label is escaped: project and ticket names are typed by
+ * people.
+ */
+export function renderTrail(steps) {
+  const parts = steps.map(({ label, href }, i) => {
+    if (i === steps.length - 1) return `<span aria-current="page">${escapeHtml(label)}</span>`;
+    return href ? `<a href="${escapeHtml(href)}">${escapeHtml(label)}</a>` : `<span>${escapeHtml(label)}</span>`;
+  });
+  return `<nav class="trail" aria-label="You are here">${parts.join('<span class="sep"> &gt; </span>')}</nav>`;
+}
+
 /** The status the relay merges from, as the tracker stores it (lib/mergeOnComment.js). */
 const READY_TO_LAUNCH = 'ready to launch';
 
