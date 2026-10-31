@@ -30,6 +30,9 @@
  *    exist without its map row, so a re-run cannot file it twice.
  *  - An actor's sign-in token is stored only as its SHA-256 hash. The token
  *    itself is handed back once, by issueToken, and never kept.
+ *  - A stage's colour (the Admin page's pickers) is one of the eight
+ *    statuses and a `#rrggbb` value, or no row at all. One set for the whole
+ *    tracker, not one per project.
  */
 import { createHash, randomBytes } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
@@ -108,6 +111,10 @@ CREATE TABLE IF NOT EXISTS imported_ids (
   new_id      TEXT NOT NULL,
   PRIMARY KEY (source, kind, source_id)
 );
+CREATE TABLE IF NOT EXISTS stage_colours (
+  status      TEXT PRIMARY KEY,
+  colour      TEXT NOT NULL
+);
 CREATE UNIQUE INDEX IF NOT EXISTS actors_by_token ON actors (token_hash);
 CREATE INDEX IF NOT EXISTS tickets_by_project ON tickets (project, status);
 CREATE INDEX IF NOT EXISTS comments_by_ticket ON comments (ticket, id);
@@ -130,6 +137,15 @@ function canonicalStatus(status) {
     throw new StoreError('unknown-status', `"${status}" is not one of the eight statuses: ${Object.values(DISPLAY).join(', ')}.`);
   }
   return s;
+}
+
+/** A stage colour as the store keeps it: `#rrggbb`, lower-cased; null clears it. */
+function canonicalColour(colour, status) {
+  if (colour === null) return null;
+  if (typeof colour !== 'string' || !/^#[0-9a-f]{6}$/i.test(colour)) {
+    throw new StoreError('bad-colour', `the colour for ${DISPLAY[status]} must be #rrggbb (like #2b9cf2), not "${colour}".`);
+  }
+  return colour.toLowerCase();
 }
 
 function canonicalPriority(priority) {
@@ -652,6 +668,41 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
         if (known != null && Number(known) === actor) return 'already';
         recordImport(...key, actor);
         return 'recorded';
+      });
+    },
+
+    /** Every stage's colour that is set, by its stored status: `{ queued: '#2b9cf2' }`. */
+    stageColours() {
+      return Object.fromEntries(db.prepare('SELECT status, colour FROM stage_colours ORDER BY status').all()
+        .map((r) => [r.status, r.colour]));
+    },
+
+    /**
+     * Set or clear stage colours: `{ Queued: '#2b9cf2', Live: null }`, any
+     * spelling of a status; a stage not named is left as it is. Every value
+     * is checked before anything is written, so one bad one writes nothing.
+     * The result is read back in the same transaction and answered.
+     */
+    setStageColours(colours) {
+      if (!colours || typeof colours !== 'object' || Array.isArray(colours)) {
+        throw new StoreError('bad-colour', 'the colours must be an object of status to #rrggbb (or null to clear).');
+      }
+      const wanted = Object.entries(colours).map(([status, colour]) => {
+        const s = canonicalStatus(status);
+        return [s, canonicalColour(colour, s)];
+      });
+      return transaction(() => {
+        for (const [status, colour] of wanted) {
+          if (colour === null) db.prepare('DELETE FROM stage_colours WHERE status = ?').run(status);
+          else db.prepare('INSERT INTO stage_colours (status, colour) VALUES (?, ?) ON CONFLICT (status) DO UPDATE SET colour = excluded.colour').run(status, colour);
+        }
+        const after = this.stageColours();
+        for (const [status, colour] of wanted) {
+          if ((after[status] ?? null) !== colour) {
+            throw new StoreError('write-failed', `the colour for ${DISPLAY[status]} read back as ${after[status] ?? 'none'}, not ${colour ?? 'none'}.`);
+          }
+        }
+        return after;
       });
     },
 

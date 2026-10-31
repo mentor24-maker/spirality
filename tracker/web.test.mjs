@@ -491,6 +491,33 @@ test('the page is served at /, at a ticket\'s address, at Projects, at Tasks, at
   } finally { await f.cleanup(); }
 });
 
+test('the Admin page is in the header after New request, lists the stages the server gives, saves them all, reads them back, and shows a refusal', async () => {
+  const html = readFileSync(WEB('index.html'), 'utf8');
+  assert.match(html, /<a href="\/new" data-nav="new">New request<\/a>\s*<a href="\/admin" data-nav="admin">Admin<\/a>/);
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const draw = app.slice(app.indexOf('async function drawAdmin'), app.indexOf('/** Underline'));
+  assert.match(draw, /const \{ stages \} = await api\('GET', '\/stage-colours'\);/, 'the stages come from the server, never typed out');
+  assert.doesNotMatch(draw, /'Queued'|'Requested'|'Live'/);
+  assert.match(draw, /type="color"/);
+  assert.match(draw, /chosen\[tr\.dataset\.status\] = null;/, 'Clear sets no colour');
+  assert.match(draw, /await api\('PUT', '\/stage-colours', \{ colours: chosen \}\);\s*\/\/ Read back before saying it worked\.\s*const back = await api\('GET', '\/stage-colours'\);/);
+  assert.match(draw, /note\.textContent = `Not saved: \$\{err\.message\}`;/);
+  assert.match(draw, /escapeHtml\(s\.status\)/);
+  assert.match(app, /markNav\(admin \? 'admin' :/);
+  const f = await fixture();
+  try {
+    const page = await f.call('GET', '/admin', { token: null });
+    assert.equal(page.status, 200);
+    assert.equal(page.text, readFileSync(WEB('index.html'), 'utf8'));
+    // The demo's loop is refused with a message the page can show.
+    const loop = await f.call('PUT', '/stage-colours', { token: f.store.issueToken(f.loop.id), body: { colours: { Queued: '#2b9cf2' } } });
+    assert.equal(loop.status, 403);
+    assert.ok(loop.body.message);
+    const saved = await f.call('PUT', '/stage-colours', { body: { colours: { Queued: '#2b9cf2' } } });
+    assert.equal(saved.status, 200, saved.text);
+  } finally { await f.cleanup(); }
+});
+
 test('the page has no inline script or style, so its lock does not have to be loosened', () => {
   const html = readFileSync(WEB('index.html'), 'utf8');
   assert.doesNotMatch(html, /<script(?![^>]*\bsrc=)[^>]*>/);
