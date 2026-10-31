@@ -106,6 +106,9 @@ export function threadOf(store, ticketId) {
     projectName: project?.name ?? ticket.project,
     assignee: ticket.assignee == null ? null : actor(ticket.assignee),
     comments,
+    pullRequest: findPullRequest(store.listComments(ticket.id).map((c) => ({
+      id: c.id, comment_text: c.body, date: String(Date.parse(c.createdAt)),
+    })))?.url ?? null,
   };
 }
 

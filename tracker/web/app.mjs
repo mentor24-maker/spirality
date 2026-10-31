@@ -15,7 +15,7 @@
  * holds. It is kept in this browser's local storage so a pinned tab stays
  * signed in, and sent only to this server. "Sign out" forgets it.
  */
-import { escapeHtml, renderComment, renderMarkdown, renderQuickAction, tabTitle } from './render.mjs';
+import { escapeHtml, mergeQuestion, renderComment, renderMarkdown, renderMergeAction, renderQuickAction, tabTitle } from './render.mjs';
 
 const TOKEN_KEY = 'tracker-token';
 /** Board or list: the last one opened, so "Tasks" in the header opens it again. */
@@ -428,11 +428,14 @@ async function drawTicket(id) {
   main.innerHTML = `
     <section class="quick">
       <div class="ask">${renderQuickAction(t)}</div>
+      <div class="act">
+      ${renderMergeAction(t)}
       <form class="reply">
         <label for="reply">Reply as ${escapeHtml(me?.name ?? 'you')}</label>
         <textarea id="reply" required></textarea>
         <div class="row"><button type="submit">Post reply</button><span class="note"></span></div>
       </form>
+      </div>
     </section>
     <details class="details">
       <summary>Details</summary>
@@ -470,6 +473,29 @@ async function drawTicket(id) {
       if (err instanceof SignedOut) return drawSignIn('You were signed out; the ticket was not copied.');
       copyNote.className = 'note error';
       copyNote.textContent = `Not copied: ${err.message}`;
+      button.disabled = false;
+    }
+  });
+  // Merge: his word from the server's project config, posted as his own
+  // reply through the same call the reply box uses. The relay merges it.
+  const mergeForm = main.querySelector('form.merge-action');
+  mergeForm?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (!confirm(mergeQuestion(t))) return;
+    const button = mergeForm.querySelector('button');
+    const mergeNote = mergeForm.querySelector('.note');
+    button.disabled = true;
+    mergeNote.className = 'note quiet';
+    mergeNote.textContent = 'Posting…';
+    try {
+      await api('POST', `/tickets/${encodeURIComponent(t.id)}/comments`, { body: t.mergePhrase });
+      await drawTicket(t.id);
+      main.querySelector('details.details').open = true;
+      main.querySelector('.comment:last-of-type')?.scrollIntoView({ block: 'center' });
+    } catch (err) {
+      if (err instanceof SignedOut) return drawSignIn('You were signed out; the merge word was not posted.');
+      mergeNote.className = 'note error';
+      mergeNote.textContent = `Not posted: ${err.message}`;
       button.disabled = false;
     }
   });
