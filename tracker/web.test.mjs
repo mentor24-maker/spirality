@@ -8,7 +8,8 @@ import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { startServer } from './server.mjs';
 import { seedDemo, tickingClock } from './demoData.mjs';
-import { escapeHtml, renderComment, renderInline, renderMarkdown, renderQuickAction, cardContext, firstParagraph } from './web/render.mjs';
+import { escapeHtml, renderComment, renderInline, renderMarkdown, renderQuickAction, renderMergeAction, mergeQuestion, cardContext, firstParagraph } from './web/render.mjs';
+import { loadProjectConfig } from '../lib/projectConfig.mjs';
 import operatorCard from '../lib/operatorCard.js';
 import machineComment from '../lib/machineComment.js';
 import loopStatuses from '../lib/loopStatuses.js';
@@ -18,12 +19,12 @@ const DOOR = fileURLToPath(new URL('../scripts/clickup.mjs', import.meta.url));
 const WEB = (name) => fileURLToPath(new URL(`./web/${name}`, import.meta.url));
 
 /** The demo data in a fresh store, a server on a free port, and a caller signed in as the operator. */
-async function fixture() {
+async function fixture({ mergePhrase } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'tracker-web-'));
   const store = openStore(join(dir, 'tracker.db'), { now: tickingClock() });
   const seed = seedDemo(store, { operatorName: 'Dane' });
   const loopToken = store.issueToken(seed.loop.id);
-  const server = await startServer({ store, port: 0 });
+  const server = await startServer({ store, port: 0, mergePhrase });
   const url = `http://127.0.0.1:${server.address().port}`;
   async function call(method, path, { token = seed.token, body } = {}) {
     const headers = token ? { authorization: `Bearer ${token}` } : {};
@@ -173,8 +174,8 @@ test('the Projects screen lists every project with its open count; an unknown pr
     const openIn = (slug) => f.store.listTickets(slug, { open: true }).length;
     assert.ok(openIn('alpha') > 0 && openIn('alpha') < f.store.listTickets('alpha').length, 'the demo data has open and Live tickets');
     assert.deepEqual((await f.call('GET', '/projects')).body.projects, [
-      { slug: 'alpha', name: 'Alpha', prefix: 'AL', open: openIn('alpha') },
-      { slug: 'beta', name: 'Beta', prefix: 'BE', open: openIn('beta') },
+      { slug: 'alpha', name: 'Alpha', prefix: 'AL', url: null, logo: null, owner: null, open: openIn('alpha') },
+      { slug: 'beta', name: 'Beta', prefix: 'BE', url: null, logo: null, owner: null, open: openIn('beta') },
     ]);
     assert.equal((await f.call('GET', '/projects/beta/board')).body.projectName, 'Beta');
     assert.equal((await f.call('GET', '/projects/nope/board')).status, 404);
@@ -194,6 +195,9 @@ test('a project\'s details name its prefix, operator, open count and a count per
       name: 'Alpha',
       prefix: 'AL',
       operator: { id: f.operator.id, name: 'Dane' },
+      url: null,
+      logo: null,
+      owner: null,
       open: f.store.listTickets('alpha', { open: true }).length,
       statuses: loopStatuses.STAGE_ORDER.map((name) => ({
         status: name,
@@ -491,6 +495,35 @@ test('the page is served at /, at a ticket\'s address, at Projects, at Tasks, at
   } finally { await f.cleanup(); }
 });
 
+test('the Settings page is in the header after New request, lists the stages the server gives, saves them all, reads them back, and shows a refusal', async () => {
+  const html = readFileSync(WEB('index.html'), 'utf8');
+  assert.match(html, /<a href="\/new" data-nav="new">New request<\/a>\s*<a href="\/settings" data-nav="settings">Settings<\/a>/);
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const draw = app.slice(app.indexOf('async function drawSettings'), app.indexOf('/** Underline'));
+  assert.match(draw, /const \{ stages \} = await api\('GET', '\/stage-colours'\);/, 'the stages come from the server, never typed out');
+  assert.doesNotMatch(draw, /'Queued'|'Requested'|'Live'/);
+  assert.match(draw, /type="color"/);
+  assert.match(draw, /chosen\[tr\.dataset\.status\] = null;/, 'Clear sets no colour');
+  assert.match(draw, /await api\('PUT', '\/stage-colours', \{ colours: chosen \}\);\s*\/\/ Read back before saying it worked\.\s*const back = await api\('GET', '\/stage-colours'\);/);
+  assert.match(draw, /note\.textContent = `Not saved: \$\{err\.message\}`;/);
+  assert.match(draw, /escapeHtml\(s\.status\)/);
+  assert.match(app, /markNav\(settings \? 'settings' :/);
+  const f = await fixture();
+  try {
+    const page = await f.call('GET', '/settings', { token: null });
+    assert.equal(page.status, 200);
+    assert.equal(page.text, readFileSync(WEB('index.html'), 'utf8'));
+    // Dane renamed it from Admin: the old address is not the page.
+    assert.notEqual((await f.call('GET', '/admin', { token: null })).text, page.text);
+    // The demo's loop is refused with a message the page can show.
+    const loop = await f.call('PUT', '/stage-colours', { token: f.store.issueToken(f.loop.id), body: { colours: { Queued: '#2b9cf2' } } });
+    assert.equal(loop.status, 403);
+    assert.ok(loop.body.message);
+    const saved = await f.call('PUT', '/stage-colours', { body: { colours: { Queued: '#2b9cf2' } } });
+    assert.equal(saved.status, 200, saved.text);
+  } finally { await f.cleanup(); }
+});
+
 test('the page has no inline script or style, so its lock does not have to be loosened', () => {
   const html = readFileSync(WEB('index.html'), 'utf8');
   assert.doesNotMatch(html, /<script(?![^>]*\bsrc=)[^>]*>/);
@@ -611,4 +644,132 @@ test('every word of ticket text in Quick Action is escaped', () => {
   });
   assert.doesNotMatch(html, /<script|<img/);
   assert.equal(html.match(/&lt;script&gt;alert\(1\)&lt;\/script&gt;/g).length, 3);
+});
+
+// ── Create Project ───────────────────────────────────────────────────────────
+
+test('a project added from the page shows on the Projects screen and its details page with its logo, web address and owner', async () => {
+  const f = await fixture();
+  try {
+    const people = await f.call('GET', '/people');
+    assert.deepEqual(people.body.people.map((p) => p.name), ['Dane'], 'the owner picker offers the people, not the loop');
+    const made = await f.call('POST', '/projects', {
+      body: { name: 'Try me', slug: 'try-me', prefix: 'TRY', url: 'https://try.example', logo: 'https://try.example/logo.png', owner: f.operator.id },
+    });
+    assert.equal(made.status, 201);
+    const row = (await f.call('GET', '/projects')).body.projects.find((p) => p.slug === 'try-me');
+    assert.deepEqual(row, {
+      slug: 'try-me', name: 'Try me', prefix: 'TRY', url: 'https://try.example', logo: 'https://try.example/logo.png',
+      owner: { id: f.operator.id, name: 'Dane' }, open: 0,
+    });
+    const details = (await f.call('GET', '/projects/try-me')).body;
+    assert.deepEqual([details.url, details.logo, details.owner], [row.url, row.logo, row.owner]);
+    // The loop's sign-in cannot, and leaves the projects as they were.
+    const before = (await f.call('GET', '/projects')).body.projects;
+    const loop = await f.call('POST', '/projects', { token: f.store.issueToken(f.loop.id), body: { name: 'L', slug: 'loop-made', prefix: 'LM' } });
+    assert.equal(loop.status, 403);
+    assert.deepEqual((await f.call('GET', '/projects')).body.projects, before);
+  } finally { await f.cleanup(); }
+});
+
+test('/projects/new is the page to a browser, and its logo can be drawn: the lock lets images in, never scripts', async () => {
+  const f = await fixture();
+  try {
+    const page = await fetch(`${f.url}/projects/new`, { headers: { accept: 'text/html,application/xhtml+xml,*/*;q=0.8' } });
+    assert.equal(page.status, 200);
+    assert.equal(await page.text(), readFileSync(WEB('index.html'), 'utf8'));
+    const csp = page.headers.get('content-security-policy');
+    assert.match(csp, /img-src 'self' http: https:/);
+    assert.match(csp, /script-src 'self';/);
+    assert.match(csp, /default-src 'none'/);
+  } finally { await f.cleanup(); }
+});
+
+test('the New project button and form are a person\'s only; a refused save keeps what was typed and says why; success opens the details page', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  assert.match(app, /me\?\.kind === 'human' \? '<div class="toolbar"><a class="button" href="\/projects\/new">New project<\/a><\/div>' : ''/);
+  const form = app.slice(app.indexOf('async function drawCreateProject'), app.indexOf('/**', app.indexOf('async function drawCreateProject')));
+  assert.match(form, /if \(me\?\.kind !== 'human'\)[\s\S]{0,200}Only a person signed in to the tracker can add a project\./);
+  for (const id of ['name', 'slug', 'prefix', 'url', 'logo']) assert.match(form, new RegExp(`field\\('${id}',`), id);
+  assert.match(form, /<select id="owner"><option value="">Nobody<\/option>\$\{people\.map/);
+  assert.match(form, /api\('GET', '\/people'\)/);
+  assert.match(form, /api\('POST', '\/projects', \{/);
+  assert.match(form, /note\.textContent = `Not added: \$\{err\.message\}`;/);
+  assert.ok(!/main\.innerHTML/.test(form.slice(form.indexOf("addEventListener('submit'"))), 'a refused save never redraws the form, so nothing typed is lost');
+  assert.match(form, /history\.pushState\(null, '', `\/projects\/\$\{encodeURIComponent\(made\.slug\)\}`\)/);
+  // /projects/new is the form, never a project called "new".
+  assert.match(app, /const details = !newProject && /);
+  // The table and details page draw a logo and web address only for an http(s) address, escaped.
+  assert.match(app, /const isWebAddress = \(v\) => typeof v === 'string' && \/\^https\?:\\\/\\\/\/i\.test\(v\);/);
+  assert.match(app, /<img class="\$\{cls\}" src="\$\{escapeHtml\(p\.logo\)\}"/);
+  assert.match(app, /<td class="owner">\$\{p\.owner \? escapeHtml\(p\.owner\.name\)/);
+  assert.match(app, /<dt>Owner<\/dt><dd>\$\{p\.owner \? escapeHtml\(p\.owner\.name\)/);
+});
+
+// ── Quick Action's Merge button ──────────────────────────────────────────────
+
+test('only a Ready to launch ticket gets the Merge button, and only when the server named a merge phrase', () => {
+  for (const name of loopStatuses.STAGE_ORDER) {
+    const html = renderMergeAction({ status: loopStatuses.statusOf(name), mergePhrase: 'merge' });
+    if (loopStatuses.statusOf(name) === loopStatuses.READY_TO_LAUNCH) assert.match(html, /<form class="merge-action">\s*<button type="submit">Merge<\/button>/, name);
+    else assert.equal(html, '', name);
+  }
+  assert.equal(renderMergeAction({ status: 'ready to launch', mergePhrase: null }), '', 'no phrase, no button');
+  assert.doesNotMatch(renderMergeAction({ status: 'ready to launch', mergePhrase: '<b>go</b>' }), /<b>/, 'the phrase is escaped');
+});
+
+test('the Merge button asks once, naming the PR number and the ticket', () => {
+  assert.equal(mergeQuestion({ name: 'Fix it', pullRequest: 'https://github.com/o/r/pull/41' }), 'Merge PR #41 for Fix it?');
+  assert.equal(mergeQuestion({ name: 'Fix it', pullRequest: null }), 'Merge the pull request for Fix it?');
+});
+
+test('the ticket page gets the first merge phrase from spirality.project.json, and the PR the merge step would act on', async () => {
+  const config = loadProjectConfig();
+  const f = await fixture({ mergePhrase: config.mergePhrases[0] });
+  try {
+    for (const t of f.store.listTickets('alpha')) {
+      const thread = (await f.call('GET', `/tickets/${t.id}/thread`)).body;
+      assert.equal(thread.mergePhrase, config.mergePhrases[0]);
+      const comments = f.store.listComments(t.id).map((c) => ({ id: c.id, comment_text: c.body, date: String(Date.parse(c.createdAt)) }));
+      assert.equal(thread.pullRequest, mergeOnComment.findPullRequest(comments)?.url ?? null, t.id);
+    }
+  } finally { await f.cleanup(); }
+  const none = await fixture();
+  try {
+    assert.equal((await none.call('GET', '/tickets/AL-1/thread')).body.mergePhrase, null, 'no config phrase: no button');
+  } finally { await none.cleanup(); }
+});
+
+test('clicking Merge and confirming posts exactly the merge phrase as Dane\'s own comment, one the relay reads as a merge', async () => {
+  const f = await fixture({ mergePhrase: loadProjectConfig().mergePhrases[0] });
+  try {
+    const { mergePhrase } = (await f.call('GET', '/tickets/AL-1/thread')).body;
+    // The page's own call, with the page's own body.
+    const posted = await f.call('POST', '/tickets/AL-1/comments', { body: { body: mergePhrase } });
+    assert.equal(posted.status, 201);
+    const stored = f.store.listComments('AL-1').at(-1);
+    assert.deepEqual([stored.body, stored.author], [mergePhrase, f.operator.id]);
+    assert.ok(mergeOnComment.isMergeCommand(stored.body), 'the relay reads it as a merge');
+  } finally { await f.cleanup(); }
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const handler = /mergeForm\?\.addEventListener\('submit', async \(e\) => \{([\s\S]*?)\n  \}\);/.exec(app)?.[1];
+  assert.ok(handler, 'the Merge button has a submit handler');
+  // It asks first; cancelling returns before anything is posted.
+  assert.match(handler, /^\s*e\.preventDefault\(\);\s*if \(!confirm\(mergeQuestion\(t\)\)\) return;/);
+  // The same call the reply box makes, with the phrase the server sent, the button held while it posts.
+  assert.match(handler, /button\.disabled = true;[\s\S]*api\('POST', `\/tickets\/\$\{encodeURIComponent\(t\.id\)\}\/comments`, \{ body: t\.mergePhrase \}\)/);
+  // A failed post says so, in red, and frees the button; no success line.
+  assert.match(handler, /catch \(err\) \{[\s\S]*mergeNote\.className = 'note error';\s*mergeNote\.textContent = `Not posted: \$\{err\.message\}`;\s*button\.disabled = false;/);
+  assert.doesNotMatch(handler, /Merged|merged!/);
+  assert.match(app, /<div class="act">\s*\$\{renderMergeAction\(t\)\}\s*<form class="reply">/, 'Merge sits above the reply box on the right');
+});
+
+test('no merge phrase is written into the page\'s code', () => {
+  const code = (name) => readFileSync(WEB(name), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+  for (const name of ['app.mjs', 'render.mjs', 'index.html']) {
+    for (const phrase of loadProjectConfig().mergePhrases) {
+      const quoted = new RegExp(`['"\`]${phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}['"\`]`, 'i');
+      assert.doesNotMatch(code(name), quoted, `${name} spells "${phrase}"`);
+    }
+  }
 });

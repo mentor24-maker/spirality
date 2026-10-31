@@ -546,3 +546,108 @@ test('deleting an imported ticket keeps its map rows, so the import cannot file 
     assert.equal(store.listTickets('alpha').length, 0);
   } finally { cleanup(); }
 });
+
+test('a project keeps its web address, logo and owner, and reads them back; none given is null', () => {
+  const { store, human, cleanup } = fixture();
+  try {
+    assert.deepEqual(store.getProject('alpha'), { slug: 'alpha', name: 'Alpha', prefix: 'AL', operator: human.id, url: null, logo: null, owner: null });
+    const made = store.createProject({
+      slug: 'beta', name: 'Beta', prefix: 'BE',
+      url: 'https://beta.example', logo: 'https://beta.example/logo.png', owner: human.id,
+    });
+    assert.deepEqual(made, {
+      slug: 'beta', name: 'Beta', prefix: 'BE', operator: null,
+      url: 'https://beta.example', logo: 'https://beta.example/logo.png', owner: human.id,
+    });
+    assert.deepEqual(store.getProject('beta'), made);
+    assert.deepEqual(store.listProjects().map((p) => p.slug), ['alpha', 'beta']);
+    assert.equal(store.createProject({ slug: 'gamma', name: 'G', prefix: 'GA', url: '', logo: '' }).url, null, 'an empty address is none');
+  } finally { cleanup(); }
+});
+
+test('a project\'s owner must be a person, and its addresses must be http(s); a refusal writes nothing', () => {
+  const { store, machine, cleanup } = fixture();
+  try {
+    for (const [fields, code] of [
+      [{ owner: machine.id }, 'bad-owner'],
+      [{ owner: 999 }, 'unknown-actor'],
+      [{ url: 'javascript:alert(1)' }, 'bad-address'],
+      [{ logo: 'data:image/png;base64,AAAA' }, 'bad-address'],
+      [{ url: 'not an address' }, 'bad-address'],
+      [{ slug: 'alpha' }, 'duplicate-project'],
+      [{ prefix: 'AL' }, 'duplicate-project'],
+      [{ name: '' }, 'missing'],
+    ]) {
+      assert.throws(() => store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE', ...fields }), { code }, JSON.stringify(fields));
+    }
+    assert.deepEqual(store.listProjects().map((p) => p.slug), ['alpha']);
+  } finally { cleanup(); }
+});
+
+test('the people are the human actors only, by id and name, never a token', () => {
+  const { store, human, machine, cleanup } = fixture();
+  try {
+    store.issueToken(human.id);
+    const second = store.createActor({ kind: 'human', name: 'Second' });
+    assert.deepEqual(store.listPeople(), [{ id: human.id, name: 'Operator' }, { id: second.id, name: 'Second' }]);
+    assert.ok(!store.listPeople().some((p) => p.id === machine.id));
+  } finally { cleanup(); }
+});
+
+test('a database made before projects had a web address, logo and owner gains the columns, and every project and ticket is unchanged', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tracker-store-'));
+  const path = join(dir, 'old.db');
+  try {
+    // The shape the live tracker was made with, before this change.
+    const old = new DatabaseSync(path);
+    old.exec(`
+      CREATE TABLE actors (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL CHECK (kind IN ('human', 'machine')), name TEXT NOT NULL, token_hash TEXT);
+      CREATE TABLE projects (slug TEXT PRIMARY KEY, name TEXT NOT NULL, prefix TEXT NOT NULL UNIQUE, operator INTEGER REFERENCES actors(id), next_number INTEGER NOT NULL DEFAULT 1);
+      CREATE TABLE tickets (id TEXT PRIMARY KEY, project TEXT NOT NULL REFERENCES projects(slug), number INTEGER NOT NULL, name TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '', status TEXT NOT NULL, priority TEXT, tags TEXT NOT NULL DEFAULT '[]', assignee INTEGER REFERENCES actors(id),
+        loop_note TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, version INTEGER NOT NULL DEFAULT 1, UNIQUE (project, number));
+      INSERT INTO actors (kind, name) VALUES ('human', 'Old operator');
+      INSERT INTO projects (slug, name, prefix, operator, next_number) VALUES ('old', 'Old', 'OL', 1, 3);
+      INSERT INTO tickets (id, project, number, name, description, status, priority, tags, assignee, loop_note, created_at, updated_at, version)
+        VALUES ('OL-1', 'old', 1, 'First', 'the spec', 'queued', 'high', '["x"]', 1, 'note', '2026-10-01T00:00:00.000Z', '2026-10-02T00:00:00.000Z', 4),
+               ('OL-2', 'old', 2, 'Second', '', 'live', NULL, '[]', NULL, '', '2026-10-03T00:00:00.000Z', '2026-10-03T00:00:00.000Z', 1);
+    `);
+    const ticketsBefore = old.prepare('SELECT * FROM tickets ORDER BY id').all();
+    old.close();
+
+    const store = openStore(path);
+    try {
+      assert.deepEqual(store.getProject('old'), { slug: 'old', name: 'Old', prefix: 'OL', operator: 1, url: null, logo: null, owner: null });
+      assert.deepEqual(store.listTickets('old').map((t) => [t.id, t.name, t.status, t.version]), [['OL-1', 'First', 'queued', 4], ['OL-2', 'Second', 'live', 1]]);
+      // The next ticket still takes the old project's next number.
+      assert.equal(store.fileTicket({ project: 'old', actor: 1, name: 'Third', status: 'queued' }).id, 'OL-3');
+      assert.equal(store.createProject({ slug: 'new-one', name: 'New', prefix: 'NW', owner: 1, url: 'https://n.example' }).owner, 1);
+    } finally { store.close(); }
+
+    // Opened a second time, nothing is added twice, and the old rows are byte-for-byte what they were.
+    const again = openStore(path);
+    again.close();
+    const raw = new DatabaseSync(path);
+    try {
+      assert.deepEqual(raw.prepare('PRAGMA table_info(projects)').all().map((c) => c.name),
+        ['slug', 'name', 'prefix', 'operator', 'next_number', 'url', 'logo', 'owner']);
+      assert.deepEqual(raw.prepare("SELECT * FROM tickets WHERE id IN ('OL-1', 'OL-2') ORDER BY id").all(), ticketsBefore);
+    } finally { raw.close(); }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('stage colours: set, read back, cleared, kept across a reopen; a bad colour or status writes nothing', () => {
+  const { path, store, cleanup } = fixture();
+  try {
+    assert.deepEqual(store.stageColours(), {});
+    assert.deepEqual(store.setStageColours({ Queued: '#2B9CF2', 'In review': '#cc0000' }), { 'in review': '#cc0000', queued: '#2b9cf2' });
+    assert.deepEqual(store.setStageColours({ queued: null, Live: '#00aa00' }), { 'in review': '#cc0000', live: '#00aa00' });
+    const again = openStore(path);
+    try { assert.deepEqual(again.stageColours(), { 'in review': '#cc0000', live: '#00aa00' }); } finally { again.close(); }
+    const before = store.stageColours();
+    for (const colours of [{ Queued: 'blue' }, { Queued: '#abc' }, { Queued: '#2b9cf2', Live: '#zzzzzz' }, { Nope: '#2b9cf2' }, null, ['#2b9cf2']]) {
+      assert.throws(() => store.setStageColours(colours), StoreError, JSON.stringify(colours));
+    }
+    assert.deepEqual(store.stageColours(), before, 'a refused set writes nothing, not even its good values');
+  } finally { cleanup(); }
+});

@@ -414,7 +414,7 @@ test('admin: create-actor prints only the token on stdout, and that token signs 
     const store = openStore(db);
     try {
       assert.deepEqual(store.actorForToken(token), { id: 1, kind: 'machine', name: 'Build loop' });
-      assert.deepEqual(store.getProject('beta'), { slug: 'beta', name: 'Beta', prefix: 'BE', operator: 2 });
+      assert.deepEqual(store.getProject('beta'), { slug: 'beta', name: 'Beta', prefix: 'BE', operator: 2, url: null, logo: null, owner: null });
       assert.equal(store.getProject('gamma'), null);
       const server = await startServer({ store, port: 0 });
       try {
@@ -433,4 +433,102 @@ test('the server, admin and backup hard-code no product: no names, ids, prefixes
       assert.doesNotMatch(source, word, `${file} matches ${word}`);
     }
   }
+});
+
+test('POST /projects lets a person add a project, read back with its owner by name; a machine gets 403 and nothing is written', async () => {
+  const f = await fixture();
+  try {
+    const before = f.store.listProjects();
+    const refused = await f.call('POST', '/projects', { body: { name: 'Beta', slug: 'beta', prefix: 'BE' } });
+    assert.equal(refused.status, 403);
+    assert.equal(refused.body.error, 'people-only');
+    assert.deepEqual(f.store.listProjects(), before, 'a machine wrote nothing');
+    assert.equal((await f.call('POST', '/projects', { token: null, body: { name: 'Beta', slug: 'beta', prefix: 'BE' } })).status, 401);
+
+    const made = await f.call('POST', '/projects', {
+      token: f.humanToken,
+      body: { name: 'Beta', slug: 'beta', prefix: 'BE', url: 'https://beta.example', logo: 'https://beta.example/l.png', owner: f.human.id },
+    });
+    assert.equal(made.status, 201);
+    assert.equal(made.body.slug, 'beta');
+    assert.deepEqual(made.body.owner, { id: f.human.id, name: 'Operator' });
+    assert.equal(made.body.url, 'https://beta.example');
+    assert.equal(made.body.logo, 'https://beta.example/l.png');
+    assert.equal(made.body.operator, null, 'the operator is not set by the form');
+    assert.deepEqual((await f.call('GET', '/projects/beta')).body, made.body);
+    assert.ok(f.lines.some((l) => /POST \/projects 201 actor=1/.test(l)));
+  } finally { await f.cleanup(); }
+});
+
+test('POST /projects refuses a missing field, a duplicate slug or prefix, a bad slug, a machine owner and an unknown field, and writes nothing', async () => {
+  const f = await fixture();
+  try {
+    const good = { name: 'Beta', slug: 'beta', prefix: 'BE' };
+    for (const [body, error] of [
+      [{ ...good, name: '' }, 'missing'],
+      [{ ...good, slug: '' }, 'missing'],
+      [{ ...good, prefix: '' }, 'bad-prefix'],
+      [{ ...good, slug: 'alpha' }, 'duplicate-project'],
+      [{ ...good, prefix: 'AL' }, 'duplicate-project'],
+      [{ ...good, slug: 'Has Spaces' }, 'bad-slug'],
+      [{ ...good, slug: 'a/b' }, 'bad-slug'],
+      [{ ...good, slug: 'new' }, 'bad-slug'],
+      [{ ...good, owner: f.machine.id }, 'bad-owner'],
+      [{ ...good, owner: 'Operator' }, 'bad-owner'],
+      [{ ...good, url: 'javascript:alert(1)' }, 'bad-address'],
+      [{ ...good, operator: f.human.id }, 'bad-field'],
+      [{ ...good, actor: f.machine.id }, 'not-your-name'],
+    ]) {
+      const r = await f.call('POST', '/projects', { token: f.humanToken, body });
+      assert.equal(r.status, 400, JSON.stringify(body));
+      assert.equal(r.body.error, error, JSON.stringify(body));
+      assert.ok(r.body.message, 'the form has a reason to show');
+    }
+    assert.deepEqual(f.store.listProjects().map((p) => p.slug), ['alpha']);
+  } finally { await f.cleanup(); }
+});
+
+test('GET /people lists the tracker\'s people for the owner picker: humans only, never a token', async () => {
+  const f = await fixture();
+  try {
+    const r = await f.call('GET', '/people', { token: f.humanToken });
+    assert.equal(r.status, 200);
+    assert.deepEqual(r.body, { people: [{ id: f.human.id, name: 'Operator' }] });
+    for (const token of f.tokens) assert.ok(!r.text.includes(token));
+    assert.equal((await f.call('GET', '/people', { token: null })).status, 401);
+  } finally { await f.cleanup(); }
+});
+
+test('stage colours: anyone signed in reads all eight in STAGE_ORDER; a person saves and clears them; a loop is refused 403; a bad value is 400; neither writes', async () => {
+  const f = await fixture();
+  try {
+    const read = await f.call('GET', '/stage-colours');
+    assert.equal(read.status, 200);
+    assert.deepEqual(read.body.stages.map((s) => s.status), ['Requested', 'Rework', 'Queued', 'Building', 'In review', 'Needs your input', 'Ready to launch', 'Live']);
+    assert.ok(read.body.stages.every((s) => s.colour === null));
+    assert.equal((await f.call('GET', '/stage-colours', { token: null })).status, 401);
+
+    const saved = await f.call('PUT', '/stage-colours', { token: f.humanToken, body: { colours: { Queued: '#2b9cf2', Live: '#00aa00' } } });
+    assert.equal(saved.status, 200, saved.text);
+    const colourOf = (body, status) => body.stages.find((s) => s.status === status).colour;
+    assert.equal(colourOf(saved.body, 'Queued'), '#2b9cf2');
+    // Read back by another sign-in: the colours are the tracker's, not one browser's.
+    const back = (await f.call('GET', '/stage-colours')).body;
+    assert.deepEqual([colourOf(back, 'Queued'), colourOf(back, 'Live'), colourOf(back, 'Rework')], ['#2b9cf2', '#00aa00', null]);
+
+    const cleared = await f.call('PUT', '/stage-colours', { token: f.humanToken, body: { colours: { Queued: null } } });
+    assert.equal(colourOf(cleared.body, 'Queued'), null);
+    assert.equal(colourOf((await f.call('GET', '/stage-colours')).body, 'Queued'), null);
+
+    const before = f.store.stageColours();
+    const loop = await f.call('PUT', '/stage-colours', { token: f.machineToken, body: { colours: { Queued: '#123456' } } });
+    assert.equal(loop.status, 403);
+    assert.match(loop.body.message, /only a person/);
+    for (const body of [{ colours: { Queued: 'red' } }, { colours: { Queued: '#12345' } }, { colours: { Nope: '#123456' } }, { colours: 'red' }, { colours: { Queued: '#123456' }, extra: 1 }]) {
+      const bad = await f.call('PUT', '/stage-colours', { token: f.humanToken, body });
+      assert.equal(bad.status, 400, JSON.stringify(body));
+      assert.ok(bad.body.message);
+    }
+    assert.deepEqual(f.store.stageColours(), before, 'a refused save stores nothing');
+  } finally { await f.cleanup(); }
 });
