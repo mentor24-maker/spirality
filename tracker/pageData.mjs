@@ -194,3 +194,13 @@ export function boardOf(store, slug) {
     })),
   };
 }
+
+/**
+ * The Settings page's stage colours: the eight statuses in the contract's
+ * STAGE_ORDER, each with its `#rrggbb` colour, or null when it has none.
+ * The page lists exactly these, so it never types the stages out itself.
+ */
+export function stageColoursOf(store) {
+  const colours = store.stageColours();
+  return { stages: STAGE_ORDER.map((name) => ({ status: name, colour: colours[statusOf(name)] ?? null })) };
+}
