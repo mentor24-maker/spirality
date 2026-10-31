@@ -1,8 +1,8 @@
 /**
  * Dane's page (docs/TRACKER_MVP.md, "Dane's page"): sign in, see what waits
  * on you, open a ticket, answer it, pick a project, see that project's
- * whole queue as a board or as a list, see one project's details, add a
- * project (a person only), file a new request, copy a ticket into another
+ * whole queue as a board or as a list, see one project's details, add,
+ * change or delete a project (a person only), file a new request, copy a ticket into another
  * project, and choose a colour for each stage on the Settings page. Plain browser
  * JavaScript, no packages,
  * no build step; tracker/server.mjs serves it.
@@ -154,6 +154,8 @@ const ICONS = Object.freeze({
   open: '<path d="M14 4h6v6"/><path d="M20 4l-9 9"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>',
   reply: '<path d="M4 5h16v11H9l-5 4z"/>',
   view: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+  edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>',
+  delete: '<path d="M4 7h16"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M6 7l1 13h10l1-13"/><path d="M9 7V4h6v3"/>',
   pullRequest: '<circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M6 8.5v7"/><path d="M18 15.5V9a3 3 0 0 0-3-3h-4"/><path d="M13 3.5L10.5 6 13 8.5"/>',
 });
 
@@ -162,6 +164,13 @@ function action(href, label, icon, offSite = false) {
   const target = offSite ? ' target="_blank" rel="noopener noreferrer"' : '';
   return `<a class="action" href="${escapeHtml(href)}" title="${label}" aria-label="${label}"${target}>`
     + `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icon}</svg></a>`;
+}
+
+/** The same icon as a button, for an action that writes rather than goes somewhere. `data` is its own data-* attributes. */
+function actionButton(label, icon, data) {
+  const attrs = Object.entries(data).map(([k, v]) => ` data-${k}="${escapeHtml(v)}"`).join('');
+  return `<button type="button" class="action" title="${label}" aria-label="${label}"${attrs}>`
+    + `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icon}</svg></button>`;
 }
 
 /** Only an http(s) address is ever drawn as a link or an image; anything else is not drawn. */
@@ -200,13 +209,18 @@ function showProject() {
  * address, owner, how many tickets are open, and an Actions column whose
  * View icon opens its details page. Choosing a name selects the project and
  * opens its tasks; the selected one is marked, and "Tasks" in the header
- * goes back to it. A person signed in gets a New project button; a loop's
- * sign-in does not, and the server refuses it anyway.
+ * goes back to it. A person signed in gets a New project button and, on
+ * each row, Edit and Delete icons; a loop's sign-in gets none of them, and
+ * the server refuses it anyway. Delete asks first, then draws the table
+ * again from the server, so a deleted project is gone because the server
+ * says so; a refusal (a project with tickets) shows the server's own words
+ * and the table is left as it was. `done` is a line to show above the table.
  */
-async function drawProjects() {
+async function drawProjects(done = '') {
   const { projects } = await api('GET', '/projects');
   setTitle('Projects · Tracker');
   const selected = savedProject();
+  const people = me?.kind === 'human';
   // A renamed project shows its new name in the header from here on.
   const chosen = projects.find((p) => p.slug === selected);
   if (chosen) {
@@ -222,16 +236,53 @@ async function drawProjects() {
       <td class="url">${addressOf(p)}</td>
       <td class="owner">${p.owner ? escapeHtml(p.owner.name) : '<span class="quiet">nobody</span>'}</td>
       <td class="open">${p.open}</td>
-      <td class="actions">${action(`/projects/${encodeURIComponent(p.slug)}`, 'View project', ICONS.view)}</td>
+      <td class="actions">${action(`/projects/${encodeURIComponent(p.slug)}`, 'View project', ICONS.view)}${people
+    ? action(`/projects/${encodeURIComponent(p.slug)}/edit`, 'Edit project', ICONS.edit)
+      + actionButton('Delete project', ICONS.delete, { delete: p.slug, name: p.name })
+    : ''}</td>
     </tr>`;
   main.innerHTML = `
     <h1>Projects</h1>
     ${me?.kind === 'human' ? '<div class="toolbar"><a class="button" href="/projects/new">New project</a></div>' : ''}
+    <p class="note${done ? ' quiet' : ''}" role="status">${escapeHtml(done)}</p>
     ${projects.length
     ? `<p class="quiet">Choose a project's name to see its tasks.</p>
       <table class="projects"><thead><tr><th class="logo"><span class="hidden">Logo</span></th><th class="name">Name</th><th class="slug">Slug</th><th class="prefix">Ticket prefix</th><th class="url">Web address</th><th class="owner">Owner</th><th class="open">Open tickets</th><th class="actions">Actions</th></tr></thead><tbody>${projects.map(row).join('')}</tbody></table>`
     : '<p class="quiet">There are no projects yet.</p>'}`;
   putTrail([{ label: 'Projects' }]);
+  const note = main.querySelector('p.note');
+  for (const button of main.querySelectorAll('button[data-delete]')) {
+    button.addEventListener('click', async () => {
+      const { delete: slug, name } = button.dataset;
+      if (!confirm(`Delete ${name}?`)) return;
+      button.disabled = true;
+      note.className = 'note quiet';
+      note.textContent = `Deleting ${name}…`;
+      try {
+        await api('DELETE', `/projects/${encodeURIComponent(slug)}`);
+      } catch (err) {
+        if (err instanceof SignedOut) return drawSignIn(`You were signed out; ${name} was not deleted.`);
+        note.className = 'note error';
+        note.textContent = `Not deleted: ${err.message}`;
+        button.disabled = false;
+        return;
+      }
+      // Deleted: forget it if it was the selected one, and read the table again.
+      if (savedProject() === slug) {
+        try {
+          localStorage.removeItem(PROJECT_KEY);
+          localStorage.removeItem(PROJECT_NAME_KEY);
+        } catch { /* nothing remembered */ }
+        showProject();
+      }
+      try {
+        await drawProjects(`Deleted ${name}.`);
+      } catch (err) {
+        if (err instanceof SignedOut) return drawSignIn();
+        showError(err);
+      }
+    });
+  }
 }
 
 /**
@@ -273,6 +324,12 @@ async function drawProjectDetails(slug) {
   putTrail([{ label: p.name, href: '/projects' }, { label: 'Details' }]);
 }
 
+/** One labelled text box of the project forms. `attrs` is its own extra attributes, already safe. */
+const field = (id, label, hint, attrs = '') => `
+      <label for="${id}">${label}</label>
+      ${hint ? `<span class="hint quiet">${hint}</span>` : ''}
+      <input id="${id}" type="text"${attrs}>`;
+
 /**
  * The Create Project form, for a person only: name, slug, ticket prefix, web
  * address, logo (an image's web address) and owner, picked from the
@@ -287,10 +344,6 @@ async function drawCreateProject() {
     return;
   }
   const { people } = await api('GET', '/people');
-  const field = (id, label, hint, attrs = '') => `
-      <label for="${id}">${label}</label>
-      ${hint ? `<span class="hint quiet">${hint}</span>` : ''}
-      <input id="${id}" type="text"${attrs}>`;
   main.innerHTML = `
     <h1>New project</h1>
     <form class="request project">
@@ -323,6 +376,69 @@ async function drawCreateProject() {
       if (err instanceof SignedOut) return drawSignIn('You were signed out; the project was not added.');
       note.className = 'note error';
       note.textContent = `Not added: ${err.message}`;
+      button.disabled = false;
+    }
+  });
+  form.querySelector('#name').focus();
+}
+
+/**
+ * The Edit project form, for a person only: the Create Project form filled
+ * in with what the server holds. Name, web address, logo and owner change;
+ * the slug and ticket prefix are shown but cannot, since every ticket's id
+ * is built from them. Saving sends the change and opens the details page,
+ * which reads it back from the server. A refused save shows the server's own
+ * message and leaves every field as typed.
+ */
+async function drawEditProject(slug) {
+  setTitle('Edit project · Tracker');
+  if (me?.kind !== 'human') {
+    main.innerHTML = '<h1>Edit project</h1><p>Only a person signed in to the tracker can change a project.</p><p><a href="/projects">Back to Projects</a></p>';
+    return;
+  }
+  let p;
+  try {
+    p = await api('GET', `/projects/${encodeURIComponent(slug)}`);
+  } catch (err) {
+    if (!(err instanceof Refused) || err.status !== 404) throw err;
+    main.innerHTML = `<h1>Edit project</h1><p>There is no project ${escapeHtml(slug)}.</p><p><a href="/projects">Back to Projects</a></p>`;
+    return;
+  }
+  const { people } = await api('GET', '/people');
+  const filled = (v) => ` value="${escapeHtml(v ?? '')}"`;
+  const fixed = 'It cannot change: every ticket\'s id is built from it.';
+  main.innerHTML = `
+    <h1>Edit project</h1>
+    <form class="request project">
+      ${field('name', 'Name', '', ` required${filled(p.name)}`)}
+      ${field('slug', 'Slug', fixed, ` disabled${filled(p.slug)}`)}
+      ${field('prefix', 'Ticket prefix', fixed, ` disabled${filled(p.prefix)}`)}
+      ${field('url', 'Web address', 'Optional. Starts http:// or https://.', ` inputmode="url" spellcheck="false"${filled(p.url)}`)}
+      ${field('logo', 'Logo', "Optional. An image's web address, starting http:// or https://.", ` inputmode="url" spellcheck="false"${filled(p.logo)}`)}
+      <label for="owner">Owner</label>
+      <select id="owner"><option value="">Nobody</option>${people.map((o) => `<option value="${escapeHtml(o.id)}"${o.id === p.owner?.id ? ' selected' : ''}>${escapeHtml(o.name)}</option>`).join('')}</select>
+      <div class="row"><button type="submit">Save</button><a href="/projects">Cancel</a><span class="note"></span></div>
+    </form>`;
+  putTrail([{ label: p.name, href: '/projects' }, { label: 'Edit' }]);
+  const form = main.querySelector('form.project');
+  const value = (id) => form.querySelector(`#${id}`).value;
+  const note = form.querySelector('.note');
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const button = form.querySelector('button');
+    button.disabled = true;
+    note.className = 'note quiet';
+    note.textContent = 'Saving…';
+    try {
+      const saved = await api('PATCH', `/projects/${encodeURIComponent(p.slug)}`, {
+        name: value('name'), url: value('url'), logo: value('logo'), owner: value('owner') ? Number(value('owner')) : null,
+      });
+      history.pushState(null, '', `/projects/${encodeURIComponent(saved.slug)}`);
+      await route();
+    } catch (err) {
+      if (err instanceof SignedOut) return drawSignIn('You were signed out; the project was not changed.');
+      note.className = 'note error';
+      note.textContent = `Not saved: ${err.message}`;
       button.disabled = false;
     }
   });
@@ -745,10 +861,11 @@ async function route() {
     const projects = location.pathname === '/projects';
     const newProject = location.pathname === '/projects/new';
     const details = !newProject && /^\/projects\/([^/]+)$/.exec(location.pathname);
+    const editProject = /^\/projects\/([^/]+)\/edit$/.exec(location.pathname);
     const tasks = location.pathname === '/tasks';
     const isNew = location.pathname === '/new';
     const settings = location.pathname === '/settings';
-    markNav(settings ? 'settings' : isNew ? 'new' : projects || newProject || details ? 'projects' : ticket || project || tasks ? 'tasks' : 'waiting');
+    markNav(settings ? 'settings' : isNew ? 'new' : projects || newProject || details || editProject ? 'projects' : ticket || project || tasks ? 'tasks' : 'waiting');
     if (settings) {
       await drawSettings();
       await refreshCount();
@@ -763,6 +880,9 @@ async function route() {
       await refreshCount();
     } else if (newProject) {
       await drawCreateProject();
+      await refreshCount();
+    } else if (editProject) {
+      await drawEditProject(decodeURIComponent(editProject[1]));
       await refreshCount();
     } else if (details) {
       await drawProjectDetails(decodeURIComponent(details[1]));
