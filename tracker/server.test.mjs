@@ -440,3 +440,37 @@ test('GET /people lists the tracker\'s people for the owner picker: humans only,
     assert.equal((await f.call('GET', '/people', { token: null })).status, 401);
   } finally { await f.cleanup(); }
 });
+
+test('stage colours: anyone signed in reads all eight in STAGE_ORDER; a person saves and clears them; a loop is refused 403; a bad value is 400; neither writes', async () => {
+  const f = await fixture();
+  try {
+    const read = await f.call('GET', '/stage-colours');
+    assert.equal(read.status, 200);
+    assert.deepEqual(read.body.stages.map((s) => s.status), ['Requested', 'Rework', 'Queued', 'Building', 'In review', 'Needs your input', 'Ready to launch', 'Live']);
+    assert.ok(read.body.stages.every((s) => s.colour === null));
+    assert.equal((await f.call('GET', '/stage-colours', { token: null })).status, 401);
+
+    const saved = await f.call('PUT', '/stage-colours', { token: f.humanToken, body: { colours: { Queued: '#2b9cf2', Live: '#00aa00' } } });
+    assert.equal(saved.status, 200, saved.text);
+    const colourOf = (body, status) => body.stages.find((s) => s.status === status).colour;
+    assert.equal(colourOf(saved.body, 'Queued'), '#2b9cf2');
+    // Read back by another sign-in: the colours are the tracker's, not one browser's.
+    const back = (await f.call('GET', '/stage-colours')).body;
+    assert.deepEqual([colourOf(back, 'Queued'), colourOf(back, 'Live'), colourOf(back, 'Rework')], ['#2b9cf2', '#00aa00', null]);
+
+    const cleared = await f.call('PUT', '/stage-colours', { token: f.humanToken, body: { colours: { Queued: null } } });
+    assert.equal(colourOf(cleared.body, 'Queued'), null);
+    assert.equal(colourOf((await f.call('GET', '/stage-colours')).body, 'Queued'), null);
+
+    const before = f.store.stageColours();
+    const loop = await f.call('PUT', '/stage-colours', { token: f.machineToken, body: { colours: { Queued: '#123456' } } });
+    assert.equal(loop.status, 403);
+    assert.match(loop.body.message, /only a person/);
+    for (const body of [{ colours: { Queued: 'red' } }, { colours: { Queued: '#12345' } }, { colours: { Nope: '#123456' } }, { colours: 'red' }, { colours: { Queued: '#123456' }, extra: 1 }]) {
+      const bad = await f.call('PUT', '/stage-colours', { token: f.humanToken, body });
+      assert.equal(bad.status, 400, JSON.stringify(body));
+      assert.ok(bad.body.message);
+    }
+    assert.deepEqual(f.store.stageColours(), before, 'a refused save stores nothing');
+  } finally { await f.cleanup(); }
+});

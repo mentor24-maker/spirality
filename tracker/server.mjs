@@ -15,6 +15,7 @@
  *   404  an unknown project, ticket or address
  *   409  a guarded move found the ticket moved: `{ error, status, version }`
  *   400  a bad field, or a body that names another author
+ *   403  a write only a person may make, asked by a loop's token
  * A refused write writes nothing. A token never appears in an answer or a
  * log line: the log names the actor id, never the header.
  *
@@ -30,7 +31,7 @@ import { hostname } from 'node:os';
 import { promisify } from 'node:util';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { openStore, StoreError } from './store.mjs';
-import { boardOf, projectDetailsOf, projectsList, threadOf, waitingFor } from './pageData.mjs';
+import { boardOf, projectDetailsOf, projectsList, stageColoursOf, threadOf, waitingFor } from './pageData.mjs';
 import { createNotifier, MAIL_KEY, mailEnvFromDoppler, mailSettingsFromEnv } from './notify.mjs';
 import { loadProjectConfig } from '../lib/projectConfig.mjs';
 
@@ -61,8 +62,8 @@ const CHANGE_FIELDS = Object.freeze(['name', 'description', 'status', 'priority'
  * Dane's page (tracker/web/): the only files served without a token, and the
  * only ones served at all, by name. The page holds no data; everything it
  * shows comes through the API below with his token. `/`, `/t/<id>`, `/board`,
- * `/board/<project>`, `/list`, `/list/<project>` and `/new` (the New request
- * form) all answer the page itself, so each address opens its own view;
+ * `/board/<project>`, `/list`, `/list/<project>`, `/new` (the New request
+ * form) and `/settings` (the stage colours) all answer the page itself, so each address opens its own view;
  * `/projects` and `/projects/<project>` do too, for a browser opening them.
  */
 const WEB_DIR = new URL('./web/', import.meta.url);
@@ -98,7 +99,7 @@ const PAGE_HEADERS = Object.freeze({
  */
 function pageFile(pathname, accept = '') {
   if (/^\/projects(?:\/[^/]+)?$/.test(pathname)) return /\btext\/html\b/.test(accept) ? 'index.html' : null;
-  if (pathname === '/' || /^\/(?:tasks|board|list|new)$/.test(pathname) || /^\/(?:t|board|list)\/[^/]+$/.test(pathname)) return 'index.html';
+  if (pathname === '/' || /^\/(?:tasks|board|list|new|settings)$/.test(pathname) || /^\/(?:t|board|list)\/[^/]+$/.test(pathname)) return 'index.html';
   const m = /^\/web\/([^/]+)$/.exec(pathname);
   return m && Object.hasOwn(WEB_FILES, m[1]) ? m[1] : null;
 }
@@ -260,6 +261,21 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     // owner picker. Names and ids only; never a machine, never a token.
     if (parts.length === 1 && parts[0] === 'people' && method === 'GET') {
       return [200, { people: store.listPeople() }];
+    }
+
+    // Dane's page: the Settings page's stage colours. Anyone signed in reads
+    // them; only a person changes them, never a loop.
+    if (parts.length === 1 && parts[0] === 'stage-colours') {
+      if (method === 'GET') return [200, stageColoursOf(store)];
+      if (method === 'PUT') {
+        if (me.kind !== 'human') {
+          throw new HttpError(403, 'people-only', 'only a person can change the stage colours; a loop sign-in may not.');
+        }
+        const body = await readJson(req);
+        checkBody(body, me, ['colours']);
+        store.setStageColours(body.colours);
+        return [200, stageColoursOf(store)];
+      }
     }
 
     // Dane's page: one project's details page.

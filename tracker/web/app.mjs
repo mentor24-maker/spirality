@@ -2,8 +2,8 @@
  * Dane's page (docs/TRACKER_MVP.md, "Dane's page"): sign in, see what waits
  * on you, open a ticket, answer it, pick a project, see that project's
  * whole queue as a board or as a list, see one project's details, add a
- * project (a person only), file a new request, and copy a ticket into
- * another project. Plain browser
+ * project (a person only), file a new request, copy a ticket into another
+ * project, and choose a colour for each stage on the Settings page. Plain browser
  * JavaScript, no packages,
  * no build step; tracker/server.mjs serves it.
  *
@@ -578,6 +578,70 @@ async function drawNew() {
   title.focus();
 }
 
+/**
+ * The Settings page: every stage in the contract's order, as the server lists
+ * them, each with a colour picker and a Clear button. One Save stores them
+ * all; the page then reads the colours back and says they were saved only
+ * when what it reads is what it sent. A loop's sign-in is refused by the
+ * server, and the page shows that refusal as it is.
+ */
+async function drawSettings() {
+  const { stages } = await api('GET', '/stage-colours');
+  setTitle('Settings · Tracker');
+  /** What each stage will be saved as: `#rrggbb`, or null for no colour. */
+  const chosen = Object.fromEntries(stages.map((s) => [s.status, s.colour]));
+  const row = (s, i) => `
+    <tr data-status="${escapeHtml(s.status)}">
+      <td class="status"><label for="colour-${i}">${escapeHtml(s.status)}</label></td>
+      <td class="picker"><input id="colour-${i}" type="color"></td>
+      <td class="value"></td>
+      <td class="clear"><button type="button">Clear</button></td>
+    </tr>`;
+  main.innerHTML = `
+    <h1>Settings</h1>
+    <h2>Stage colours</h2>
+    <p class="quiet">Choose a colour for each stage of the loop. The same colours show for everyone.</p>
+    <form class="colours">
+      <table class="colours"><thead><tr><th>Stage</th><th>Colour</th><th></th><th></th></tr></thead><tbody>${stages.map(row).join('')}</tbody></table>
+      <div class="row"><button type="submit">Save</button><span class="note"></span></div>
+    </form>`;
+  const form = main.querySelector('form.colours');
+  const rows = [...form.querySelectorAll('tbody tr')];
+  const show = (tr) => {
+    const colour = chosen[tr.dataset.status];
+    // A picker cannot show "none": it shows black, greyed, beside the words "no colour".
+    tr.querySelector('input').value = colour ?? '#000000';
+    tr.classList.toggle('unset', colour == null);
+    tr.querySelector('.value').textContent = colour ?? 'no colour';
+  };
+  for (const tr of rows) {
+    show(tr);
+    tr.querySelector('input').addEventListener('input', (e) => { chosen[tr.dataset.status] = e.target.value; show(tr); });
+    tr.querySelector('button').addEventListener('click', () => { chosen[tr.dataset.status] = null; show(tr); });
+  }
+  const note = form.querySelector('.note');
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const button = form.querySelector('button[type="submit"]');
+    button.disabled = true;
+    note.className = 'note quiet';
+    note.textContent = 'Saving…';
+    try {
+      await api('PUT', '/stage-colours', { colours: chosen });
+      // Read back before saying it worked.
+      const back = await api('GET', '/stage-colours');
+      const wrong = back.stages.filter((s) => s.colour !== (chosen[s.status] ?? null));
+      if (wrong.length) throw new Error(`the tracker read back different colours for ${wrong.map((s) => s.status).join(', ')}.`);
+      note.textContent = 'Saved: the colours are stored on the tracker.';
+    } catch (err) {
+      if (err instanceof SignedOut) return drawSignIn('You were signed out; the colours were not saved.');
+      note.className = 'note error';
+      note.textContent = `Not saved: ${err.message}`;
+    }
+    button.disabled = false;
+  });
+}
+
 /** Underline the header link for the screen showing. */
 function markNav(which) {
   for (const a of document.querySelectorAll('nav.site a')) a.classList.toggle('current', a.dataset.nav === which);
@@ -597,8 +661,12 @@ async function route() {
     const details = !newProject && /^\/projects\/([^/]+)$/.exec(location.pathname);
     const tasks = location.pathname === '/tasks';
     const isNew = location.pathname === '/new';
-    markNav(isNew ? 'new' : projects || newProject || details ? 'projects' : ticket || project || tasks ? 'tasks' : 'waiting');
-    if (isNew) {
+    const settings = location.pathname === '/settings';
+    markNav(settings ? 'settings' : isNew ? 'new' : projects || newProject || details ? 'projects' : ticket || project || tasks ? 'tasks' : 'waiting');
+    if (settings) {
+      await drawSettings();
+      await refreshCount();
+    } else if (isNew) {
       await drawNew();
       await refreshCount();
     } else if (ticket) {
