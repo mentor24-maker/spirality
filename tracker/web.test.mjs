@@ -8,7 +8,8 @@ import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { startServer } from './server.mjs';
 import { seedDemo, tickingClock } from './demoData.mjs';
-import { escapeHtml, renderComment, renderInline, renderMarkdown, renderQuickAction, cardContext, firstParagraph } from './web/render.mjs';
+import { escapeHtml, renderComment, renderInline, renderMarkdown, renderQuickAction, renderMergeAction, mergeQuestion, cardContext, firstParagraph } from './web/render.mjs';
+import { loadProjectConfig } from '../lib/projectConfig.mjs';
 import operatorCard from '../lib/operatorCard.js';
 import machineComment from '../lib/machineComment.js';
 import loopStatuses from '../lib/loopStatuses.js';
@@ -18,12 +19,12 @@ const DOOR = fileURLToPath(new URL('../scripts/clickup.mjs', import.meta.url));
 const WEB = (name) => fileURLToPath(new URL(`./web/${name}`, import.meta.url));
 
 /** The demo data in a fresh store, a server on a free port, and a caller signed in as the operator. */
-async function fixture() {
+async function fixture({ mergePhrase } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'tracker-web-'));
   const store = openStore(join(dir, 'tracker.db'), { now: tickingClock() });
   const seed = seedDemo(store, { operatorName: 'Dane' });
   const loopToken = store.issueToken(seed.loop.id);
-  const server = await startServer({ store, port: 0 });
+  const server = await startServer({ store, port: 0, mergePhrase });
   const url = `http://127.0.0.1:${server.address().port}`;
   async function call(method, path, { token = seed.token, body } = {}) {
     const headers = token ? { authorization: `Bearer ${token}` } : {};
@@ -611,4 +612,72 @@ test('every word of ticket text in Quick Action is escaped', () => {
   });
   assert.doesNotMatch(html, /<script|<img/);
   assert.equal(html.match(/&lt;script&gt;alert\(1\)&lt;\/script&gt;/g).length, 3);
+});
+
+// ── Quick Action's Merge button ──────────────────────────────────────────────
+
+test('only a Ready to launch ticket gets the Merge button, and only when the server named a merge phrase', () => {
+  for (const name of loopStatuses.STAGE_ORDER) {
+    const html = renderMergeAction({ status: loopStatuses.statusOf(name), mergePhrase: 'merge' });
+    if (loopStatuses.statusOf(name) === loopStatuses.READY_TO_LAUNCH) assert.match(html, /<form class="merge-action">\s*<button type="submit">Merge<\/button>/, name);
+    else assert.equal(html, '', name);
+  }
+  assert.equal(renderMergeAction({ status: 'ready to launch', mergePhrase: null }), '', 'no phrase, no button');
+  assert.doesNotMatch(renderMergeAction({ status: 'ready to launch', mergePhrase: '<b>go</b>' }), /<b>/, 'the phrase is escaped');
+});
+
+test('the Merge button asks once, naming the PR number and the ticket', () => {
+  assert.equal(mergeQuestion({ name: 'Fix it', pullRequest: 'https://github.com/o/r/pull/41' }), 'Merge PR #41 for Fix it?');
+  assert.equal(mergeQuestion({ name: 'Fix it', pullRequest: null }), 'Merge the pull request for Fix it?');
+});
+
+test('the ticket page gets the first merge phrase from spirality.project.json, and the PR the merge step would act on', async () => {
+  const config = loadProjectConfig();
+  const f = await fixture({ mergePhrase: config.mergePhrases[0] });
+  try {
+    for (const t of f.store.listTickets('alpha')) {
+      const thread = (await f.call('GET', `/tickets/${t.id}/thread`)).body;
+      assert.equal(thread.mergePhrase, config.mergePhrases[0]);
+      const comments = f.store.listComments(t.id).map((c) => ({ id: c.id, comment_text: c.body, date: String(Date.parse(c.createdAt)) }));
+      assert.equal(thread.pullRequest, mergeOnComment.findPullRequest(comments)?.url ?? null, t.id);
+    }
+  } finally { await f.cleanup(); }
+  const none = await fixture();
+  try {
+    assert.equal((await none.call('GET', '/tickets/AL-1/thread')).body.mergePhrase, null, 'no config phrase: no button');
+  } finally { await none.cleanup(); }
+});
+
+test('clicking Merge and confirming posts exactly the merge phrase as Dane\'s own comment, one the relay reads as a merge', async () => {
+  const f = await fixture({ mergePhrase: loadProjectConfig().mergePhrases[0] });
+  try {
+    const { mergePhrase } = (await f.call('GET', '/tickets/AL-1/thread')).body;
+    // The page's own call, with the page's own body.
+    const posted = await f.call('POST', '/tickets/AL-1/comments', { body: { body: mergePhrase } });
+    assert.equal(posted.status, 201);
+    const stored = f.store.listComments('AL-1').at(-1);
+    assert.deepEqual([stored.body, stored.author], [mergePhrase, f.operator.id]);
+    assert.ok(mergeOnComment.isMergeCommand(stored.body), 'the relay reads it as a merge');
+  } finally { await f.cleanup(); }
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const handler = /mergeForm\?\.addEventListener\('submit', async \(e\) => \{([\s\S]*?)\n  \}\);/.exec(app)?.[1];
+  assert.ok(handler, 'the Merge button has a submit handler');
+  // It asks first; cancelling returns before anything is posted.
+  assert.match(handler, /^\s*e\.preventDefault\(\);\s*if \(!confirm\(mergeQuestion\(t\)\)\) return;/);
+  // The same call the reply box makes, with the phrase the server sent, the button held while it posts.
+  assert.match(handler, /button\.disabled = true;[\s\S]*api\('POST', `\/tickets\/\$\{encodeURIComponent\(t\.id\)\}\/comments`, \{ body: t\.mergePhrase \}\)/);
+  // A failed post says so, in red, and frees the button; no success line.
+  assert.match(handler, /catch \(err\) \{[\s\S]*mergeNote\.className = 'note error';\s*mergeNote\.textContent = `Not posted: \$\{err\.message\}`;\s*button\.disabled = false;/);
+  assert.doesNotMatch(handler, /Merged|merged!/);
+  assert.match(app, /<div class="act">\s*\$\{renderMergeAction\(t\)\}\s*<form class="reply">/, 'Merge sits above the reply box on the right');
+});
+
+test('no merge phrase is written into the page\'s code', () => {
+  const code = (name) => readFileSync(WEB(name), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+  for (const name of ['app.mjs', 'render.mjs', 'index.html']) {
+    for (const phrase of loadProjectConfig().mergePhrases) {
+      const quoted = new RegExp(`['"\`]${phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}['"\`]`, 'i');
+      assert.doesNotMatch(code(name), quoted, `${name} spells "${phrase}"`);
+    }
+  }
 });
