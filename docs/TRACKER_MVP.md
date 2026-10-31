@@ -100,8 +100,16 @@ comments  id, ticket, parent (for replies), author, body, created_at
 events    id, ticket, actor, what changed, from, to, at   -- written by the store, never by callers
 ```
 
+- **Tickets are never deleted, except an unstarted one.** A ticket in
+  `Requested` or `Queued` can be deleted by `DELETE /tickets/:id`; one in any
+  other status is refused. The status check and the delete are one
+  transaction, so a loop claiming the ticket at that moment either wins (the
+  delete is refused) or loses (the claim finds no ticket). A deleted ticket
+  is gone, with its comments and events; an imported one keeps its
+  `imported_ids` rows, so a re-run of the importer cannot file it again.
 - **Comments are append-only.** Nothing edits or deletes one, so the trail
-  the loop reads can never shift under it.
+  the loop reads can never shift under it. A comment is deleted only with
+  its ticket, by the call above.
 - **`version`** goes up by one on every change to a ticket. A write may say
   "only if the version (or status) is still X", and is refused if not. This
   is the atomic claim.
@@ -124,6 +132,7 @@ text programs read).
 | `POST /projects/:slug/tickets` | file a ticket |
 | `GET /tickets/:id` | one ticket with its comments, oldest first |
 | `PATCH /tickets/:id` | change status, priority, tags, assignee, description or Loop note, with optional `ifStatus` / `ifVersion`; answers 409 ("conflict") and writes nothing if the ticket has moved |
+| `DELETE /tickets/:id` | delete a ticket nobody has started (`Requested` or `Queued`) with its comments and events; answers 409 `not-deletable` with its status for any other, 404 for an unknown one; the server log names the ticket and the actor |
 | `POST /tickets/:id/comments` | a comment, or a reply when `parent` is given |
 | `GET /tickets/:id/events` | the history |
 | `GET /waiting` | for Dane's page: tickets in the operator's two statuses across every project, by the loop's own `waiting` verdict for the caller, newest first |
