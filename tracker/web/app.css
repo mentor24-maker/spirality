@@ -8,7 +8,9 @@ header nav.site { display: flex; gap: 1.5rem; align-self: stretch; }
 header nav.site a { display: flex; align-items: center; color: #b8b8be; font-weight: 600; text-decoration: none; border-bottom: 2px solid transparent; }
 header nav.site a:hover { color: #fff; }
 header nav.site a.current { color: #fff; border-bottom-color: var(--blue); }
-header #who { margin-left: auto; color: #b8b8be; font-size: 0.9rem; }
+header .me { margin-left: auto; display: flex; gap: 1rem; align-items: center; }
+header #project { color: #fff; font-weight: 600; }
+header #who { color: #b8b8be; font-size: 0.9rem; }
 header button { background: transparent; color: #fff; border: 1px solid #555; border-radius: 6px; cursor: pointer; }
 header button:hover { border-color: #fff; }
 main { max-width: 60rem; margin: 0 auto; padding: 1.5rem 2rem 4rem; }

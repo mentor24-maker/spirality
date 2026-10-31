@@ -21,10 +21,13 @@ const TOKEN_KEY = 'tracker-token';
 const VIEW_KEY = 'tracker-view';
 /** The selected project: the one "Tasks" in the header opens. */
 const PROJECT_KEY = 'tracker-project';
+/** The selected project's name, shown in the header beside the person signed in. */
+const PROJECT_NAME_KEY = 'tracker-project-name';
 /** The New request form's text while it is being typed, so a sign-out or a reload does not lose it. */
 const DRAFT_KEY = 'tracker-request-draft';
 const main = document.getElementById('main');
 const who = document.getElementById('who');
+const headerProject = document.getElementById('project');
 const signOut = document.getElementById('sign-out');
 let me = null;
 
@@ -98,6 +101,7 @@ function drawSignIn(problem) {
   me = null;
   waitingCount = null;
   who.textContent = '';
+  headerProject.hidden = true;
   signOut.hidden = true;
   setTitle('Sign in · Tracker');
   main.innerHTML = `
@@ -163,6 +167,14 @@ function savedProject() {
   try { return localStorage.getItem(PROJECT_KEY); } catch { return null; }
 }
 
+/** Put the selected project's name in the header; none selected, nothing shown. */
+function showProject() {
+  let name = null;
+  try { name = localStorage.getItem(PROJECT_NAME_KEY); } catch { /* nothing remembered */ }
+  headerProject.textContent = name ?? '';
+  headerProject.hidden = !name;
+}
+
 /**
  * Every project, one row each: its name, slug, ticket ids, how many tickets
  * are open, and an Actions column whose View icon opens its details page.
@@ -173,6 +185,12 @@ async function drawProjects() {
   const { projects } = await api('GET', '/projects');
   setTitle('Projects · Tracker');
   const selected = savedProject();
+  // A renamed project shows its new name in the header from here on.
+  const chosen = projects.find((p) => p.slug === selected);
+  if (chosen) {
+    try { localStorage.setItem(PROJECT_NAME_KEY, chosen.name); } catch { /* not remembered */ }
+    showProject();
+  }
   const row = (p) => `
     <tr${p.slug === selected ? ' class="selected"' : ''}>
       <td class="name"><a href="/${savedView()}/${encodeURIComponent(p.slug)}"${p.slug === selected ? ' aria-current="true"' : ''}>${escapeHtml(p.name)}</a>${p.slug === selected ? '<span class="tag">Selected</span>' : ''}</td>
@@ -259,7 +277,9 @@ async function drawProject(slug, view) {
   try {
     localStorage.setItem(VIEW_KEY, view);
     localStorage.setItem(PROJECT_KEY, board.project);
+    localStorage.setItem(PROJECT_NAME_KEY, board.projectName);
   } catch { /* the page still works; it is only not remembered */ }
+  showProject();
   setTitle(`${board.projectName} ${view} · Tracker`);
   const at = (v, s) => `/${v}/${encodeURIComponent(s)}`;
   const toggle = ['board', 'list'].map((v) => `<a href="${at(v, board.project)}"${v === view ? ' class="current" aria-current="page"' : ''}>${v === 'board' ? 'Board' : 'List'}</a>`).join('');
@@ -300,7 +320,7 @@ async function drawProject(slug, view) {
 
   main.classList.add('wide');
   main.innerHTML = `
-    <h1>${escapeHtml(board.projectName)}</h1>
+    <h1>Tasks</h1>
     <div class="toolbar">
       <a href="/projects">Change project</a>
       <nav class="views" aria-label="View">${toggle}</nav>
@@ -449,6 +469,7 @@ async function route() {
     me = await api('GET', '/me');
     who.textContent = `Signed in as ${me.name}`;
     signOut.hidden = false;
+    showProject();
     main.classList.remove('wide');
     const ticket = /^\/t\/([^/]+)$/.exec(location.pathname);
     const project = /^\/(board|list)(?:\/([^/]+))?$/.exec(location.pathname);
