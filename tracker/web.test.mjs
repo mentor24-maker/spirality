@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { startServer } from './server.mjs';
 import { seedDemo, tickingClock } from './demoData.mjs';
-import { escapeHtml, renderComment, renderInline, renderMarkdown } from './web/render.mjs';
+import { escapeHtml, renderComment, renderInline, renderMarkdown, renderQuickAction, cardContext, firstParagraph } from './web/render.mjs';
 import operatorCard from '../lib/operatorCard.js';
 import machineComment from '../lib/machineComment.js';
 import loopStatuses from '../lib/loopStatuses.js';
@@ -181,6 +181,56 @@ test('the Projects screen lists every project with its open count; an unknown pr
     assert.equal((await f.call('GET', '/projects', { token: null })).status, 401);
     assert.equal((await f.call('GET', '/projects/alpha/board', { token: null })).status, 401);
   } finally { await f.cleanup(); }
+});
+
+test('a project\'s details name its prefix, operator, open count and a count per status in STAGE_ORDER; an unknown slug is 404; it needs a token', async () => {
+  const f = await fixture();
+  try {
+    const r = await f.call('GET', '/projects/alpha');
+    assert.equal(r.status, 200);
+    const tickets = f.store.listTickets('alpha');
+    assert.deepEqual(r.body, {
+      slug: 'alpha',
+      name: 'Alpha',
+      prefix: 'AL',
+      operator: { id: f.operator.id, name: 'Dane' },
+      open: f.store.listTickets('alpha', { open: true }).length,
+      statuses: loopStatuses.STAGE_ORDER.map((name) => ({
+        status: name,
+        count: tickets.filter((t) => t.status === loopStatuses.statusOf(name)).length,
+      })),
+    });
+    assert.equal(r.body.statuses.reduce((n, s) => n + s.count, 0), tickets.length, 'every ticket is counted once');
+    assert.equal((await f.call('GET', '/projects/beta')).body.name, 'Beta');
+    const unknown = await f.call('GET', '/projects/no-such-thing');
+    assert.equal(unknown.status, 404);
+    assert.equal(unknown.body.error, 'unknown-project');
+    assert.equal((await f.call('GET', '/projects/alpha', { token: null })).status, 401);
+  } finally { await f.cleanup(); }
+});
+
+test('a project with no operator shows none, not a guess', async () => {
+  const f = await fixture();
+  try {
+    f.store.createProject({ slug: 'gamma', name: 'Gamma', prefix: 'GA' });
+    const { body } = await f.call('GET', '/projects/gamma');
+    assert.equal(body.operator, null);
+    assert.equal(body.open, 0);
+    assert.ok(body.statuses.every((s) => s.count === 0));
+  } finally { await f.cleanup(); }
+});
+
+test('the Projects screen is a table whose View icon opens the details page; a name still selects the project and opens its tasks', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  assert.match(app, /<table class="projects">/);
+  assert.match(app, /<th class="actions">Actions<\/th><\/tr><\/thead><tbody>\$\{projects\.map\(row\)/);
+  assert.match(app, /action\(`\/projects\/\$\{encodeURIComponent\(p\.slug\)\}`, 'View project', ICONS\.view\)/);
+  // SP-42's behaviour: the name goes to the project's tasks in the last view, and opening it selects it.
+  assert.match(app, /<td class="name"><a href="\/\$\{savedView\(\)\}\/\$\{encodeURIComponent\(p\.slug\)\}"/);
+  assert.match(app, /localStorage\.setItem\(PROJECT_KEY, board\.project\)/);
+  // The details page links to the project's board and list, and says plainly when there is no such project.
+  assert.match(app, /<a href="\$\{at\('board'\)\}">Board<\/a><a href="\$\{at\('list'\)\}">List<\/a>/);
+  assert.match(app, /err\.status !== 404[\s\S]{0,200}There is no project \$\{escapeHtml\(slug\)\}\./);
 });
 
 test('the board and the list both fold Live by default, and every card and row opens its ticket page', () => {
@@ -422,6 +472,13 @@ test('the page is served at /, at a ticket\'s address, at Projects, at Tasks, at
     assert.equal(await opened.text(), readFileSync(WEB('index.html'), 'utf8'));
     assert.equal((await f.call('GET', '/projects')).body.projects.length, 2);
     assert.equal((await f.call('GET', '/projects', { token: null })).status, 401);
+    // So is a project's details page, known or not: the page itself says when there is no such project.
+    for (const path of ['/projects/alpha', '/projects/no-such-thing']) {
+      const page = await fetch(`${f.url}${path}`, { headers: { accept: 'text/html,application/xhtml+xml,*/*;q=0.8' } });
+      assert.equal(page.status, 200, path);
+      assert.equal(await page.text(), readFileSync(WEB('index.html'), 'utf8'), path);
+    }
+    assert.equal((await f.call('GET', '/projects/alpha')).body.slug, 'alpha');
     // The header: Projects picks a project, Tasks opens the one picked.
     assert.match(readFileSync(WEB('index.html'), 'utf8'), /<a href="\/projects" data-nav="projects">Projects<\/a>\s*<a href="\/tasks" data-nav="tasks">Tasks<\/a>/);
     // Only those files: nothing else on disk is reachable, with or without a token.
@@ -495,4 +552,63 @@ test('an operator card draws its NEEDED FROM DANE banner in the red box, as `ask
   const raw = renderComment(`@@ASKED\nx\n@@NEEDED\nPick one.`, { operatorName: 'Dane' });
   assert.match(raw, /<div class="banner"><strong>NEEDED FROM DANE:<\/strong> Pick one\.<\/div>/);
   assert.doesNotMatch(renderComment('An ordinary comment.'), /banner/);
+});
+
+// ── The ticket page's Quick Action section ───────────────────────────────────
+
+test('the ticket page opens on the Quick Action section, with everything it showed before in a closed Details box', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const page = /main\.innerHTML = `\s*<section class="quick">([\s\S]*?)<\/section>\s*<details class="details">([\s\S]*?)<\/details>`;/.exec(app);
+  assert.ok(page, 'Quick Action first, then Details');
+  const [, quick, details] = page;
+  assert.match(quick, /renderQuickAction\(t\)/);
+  assert.match(quick, /<form class="reply">[\s\S]*<textarea id="reply" required>/, 'the reply box is on the right of Quick Action');
+  assert.match(details, /^\s*<summary>Details<\/summary>/);
+  // The status line, the description and the comments, all inside Details.
+  for (const part of [/statusName\(t\.status\)/, /renderMarkdown\(t\.description\)/, /\$\{comments \|\|/]) assert.match(details, part);
+  assert.ok(!/<details[^>]*\bopen\b/.test(app), 'Details is never drawn open');
+  // The reply posts exactly as typed, and #reply still lands in the box (it is outside Details, so focusable).
+  assert.match(app, /\/comments`, \{ body: box\.value \}\)/);
+  assert.match(app, /location\.hash === '#reply'[\s\S]{0,120}box\.focus\(\)/);
+});
+
+test('Quick Action\'s left side: the title, the newest card\'s context and its ask in bold red', () => {
+  const sixty = (tag) => Array.from({ length: 60 }, (_, i) => `${tag}${i}`).join(' ');
+  const card = (tag, ask) => machineComment.stripMachineMarker(machineComment.stampMachineComment(
+    operatorCard.buildCard(`@@ASKED\nbuild it\n@@CONTEXT\n${sixty(tag)}\n@@NEEDED\n${ask}`).rendered));
+  const html = renderQuickAction({
+    name: 'Make the page',
+    description: '## Goal\nThe description.',
+    comments: [{ body: card('old', 'Old ask.') }, { body: card('new', 'Reply A or B.\nA is cheaper.') }, { body: 'go' }],
+  });
+  assert.match(html, /^<h1>Make the page<\/h1>/);
+  assert.match(html, /<p class="summary">new0 new1 [^<]*new59<\/p>/, 'the newest card\'s WHAT\'S GOING ON');
+  assert.match(html, /<p class="needed">Reply A or B\.<br>A is cheaper\.<\/p>/);
+  assert.doesNotMatch(html, /old|The description|NEEDED FROM/);
+  const css = readFileSync(WEB('app.css'), 'utf8');
+  assert.match(css, /\.quick \.needed \{ color: var\(--red\); font-weight: 700;/, 'the same red as the banner, bold');
+  // An authored card that reached the tracker as @@ text reads the same way.
+  assert.equal(cardContext('@@ASKED\nx\n@@CONTEXT\nWhy it\nmatters.\n@@NEEDED\nPick.'), 'Why it matters.');
+});
+
+test('Quick Action with no card: the title and the description\'s first paragraph, and no red line', () => {
+  const html = renderQuickAction({
+    name: 'Fix it',
+    description: '## Asked\n~~~\nhis words\n~~~\n\n## Goal\nOpen a ticket and\nsee it.\n\nMore.',
+    comments: [{ body: 'An ordinary comment.' }],
+  });
+  assert.equal(html, '<h1>Fix it</h1>\n<p class="summary">Open a ticket and see it.</p>');
+  assert.equal(renderQuickAction({ name: 'Empty', description: '' }), '<h1>Empty</h1>');
+  assert.equal(firstParagraph('- a list\n\nProse.'), 'Prose.');
+});
+
+test('every word of ticket text in Quick Action is escaped', () => {
+  const nasty = '<script>alert(1)</script>';
+  const html = renderQuickAction({
+    name: nasty,
+    description: '',
+    comments: [{ body: `@@ASKED\nx\n@@CONTEXT\n${nasty}\n@@NEEDED\n${nasty} <img src=x onerror="y">` }],
+  });
+  assert.doesNotMatch(html, /<script|<img/);
+  assert.equal(html.match(/&lt;script&gt;alert\(1\)&lt;\/script&gt;/g).length, 3);
 });

@@ -29,7 +29,7 @@ import { hostname } from 'node:os';
 import { promisify } from 'node:util';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { openStore, StoreError } from './store.mjs';
-import { boardOf, projectsList, threadOf, waitingFor } from './pageData.mjs';
+import { boardOf, projectDetailsOf, projectsList, threadOf, waitingFor } from './pageData.mjs';
 import { createNotifier, MAIL_KEY, mailEnvFromDoppler, mailSettingsFromEnv } from './notify.mjs';
 import { loadProjectConfig } from '../lib/projectConfig.mjs';
 
@@ -50,7 +50,8 @@ const CHANGE_FIELDS = Object.freeze(['name', 'description', 'status', 'priority'
  * only ones served at all, by name. The page holds no data; everything it
  * shows comes through the API below with his token. `/`, `/t/<id>`, `/board`,
  * `/board/<project>`, `/list`, `/list/<project>` and `/new` (the New request
- * form) all answer the page itself, so each address opens its own view.
+ * form) all answer the page itself, so each address opens its own view;
+ * `/projects` and `/projects/<project>` do too, for a browser opening them.
  */
 const WEB_DIR = new URL('./web/', import.meta.url);
 const WEB_FILES = Object.freeze({
@@ -77,11 +78,12 @@ const PAGE_HEADERS = Object.freeze({
 /**
  * The page file a GET of `pathname` answers with, or null when it is not a
  * page address. `/projects` is both the Projects screen and the call that
- * lists them: a browser opening the address asks for HTML and gets the page;
- * the page's own call asks for anything and gets the data.
+ * lists them, and `/projects/<project>` both a project's details page and
+ * the call that reads them: a browser opening the address asks for HTML and
+ * gets the page; the page's own call asks for anything and gets the data.
  */
 function pageFile(pathname, accept = '') {
-  if (pathname === '/projects') return /\btext\/html\b/.test(accept) ? 'index.html' : null;
+  if (/^\/projects(?:\/[^/]+)?$/.test(pathname)) return /\btext\/html\b/.test(accept) ? 'index.html' : null;
   if (pathname === '/' || /^\/(?:tasks|board|list|new)$/.test(pathname) || /^\/(?:t|board|list)\/[^/]+$/.test(pathname)) return 'index.html';
   const m = /^\/web\/([^/]+)$/.exec(pathname);
   return m && Object.hasOwn(WEB_FILES, m[1]) ? m[1] : null;
@@ -218,6 +220,13 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
       const projects = projectsList(store);
       const fallback = projects.some((p) => p.slug === defaultProject) ? defaultProject : null;
       return [200, { projects, default: fallback }];
+    }
+
+    // Dane's page: one project's details page.
+    if (parts.length === 2 && parts[0] === 'projects' && method === 'GET') {
+      const details = projectDetailsOf(store, parts[1]);
+      if (!details) throw new HttpError(404, 'unknown-project', `no project "${parts[1]}".`);
+      return [200, details];
     }
 
     // Dane's page: one project's board, the eight statuses in the contract's

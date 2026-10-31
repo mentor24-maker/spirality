@@ -222,6 +222,33 @@ test('GET /tickets/:id/events answers the history, each move with the token\'s a
   } finally { await f.cleanup(); }
 });
 
+test('GET /projects/:slug answers one project\'s details to a call and the page to a browser; an unknown slug is 404 and writes nothing', async () => {
+  const f = await fixture();
+  try {
+    f.store.fileTicket({ project: 'alpha', actor: f.machine.id, name: 'x', status: 'queued' });
+    f.store.fileTicket({ project: 'alpha', actor: f.machine.id, name: 'y', status: 'live' });
+    const r = await f.call('GET', '/projects/alpha');
+    assert.equal(r.status, 200);
+    assert.equal(r.body.prefix, 'AL');
+    assert.deepEqual(r.body.operator, { id: f.human.id, name: 'Operator' });
+    assert.equal(r.body.open, 1);
+    assert.equal(r.body.statuses.find((s) => s.status === 'Queued').count, 1);
+    assert.equal(r.body.statuses.find((s) => s.status === 'Live').count, 1);
+    const before = f.store.listTickets('alpha').length;
+    const unknown = await f.call('GET', '/projects/nope');
+    assert.equal(unknown.status, 404);
+    assert.equal(unknown.body.error, 'unknown-project');
+    assert.equal(f.store.listTickets('alpha').length, before);
+    assert.equal((await f.call('GET', '/projects/alpha', { token: null })).status, 401);
+    // A browser opening the address gets the page, without a token; the page then asks for the data.
+    const base = f.lines.length;
+    const page = await fetch(`${await f.serve()}/projects/nope`, { headers: { accept: 'text/html' } });
+    assert.equal(page.status, 200);
+    assert.match(page.headers.get('content-type'), /^text\/html/);
+    assert.ok(f.lines.slice(base).some((l) => /GET \/projects\/nope 200 page/.test(l)));
+  } finally { await f.cleanup(); }
+});
+
 test('unknown projects, tickets and addresses get 404; bad fields get 400; none of them writes anything', async () => {
   const f = await fixture();
   try {

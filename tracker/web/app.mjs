@@ -1,8 +1,8 @@
 /**
  * Dane's page (docs/TRACKER_MVP.md, "Dane's page"): sign in, see what waits
  * on you, open a ticket, answer it, pick a project, see that project's
- * whole queue as a board or as a list, file a new request, and copy a
- * ticket into another project. Plain browser
+ * whole queue as a board or as a list, see one project's details, file a
+ * new request, and copy a ticket into another project. Plain browser
  * JavaScript, no packages,
  * no build step; tracker/server.mjs serves it.
  *
@@ -14,7 +14,7 @@
  * holds. It is kept in this browser's local storage so a pinned tab stays
  * signed in, and sent only to this server. "Sign out" forgets it.
  */
-import { escapeHtml, renderComment, renderMarkdown, tabTitle } from './render.mjs';
+import { escapeHtml, renderComment, renderMarkdown, renderQuickAction, tabTitle } from './render.mjs';
 
 const TOKEN_KEY = 'tracker-token';
 /** Board or list: the last one opened, so "Tasks" in the header opens it again. */
@@ -65,6 +65,14 @@ const when = (iso) => new Date(iso).toLocaleString(undefined, {
 
 class SignedOut extends Error {}
 
+/** A refused call, carrying the HTTP status the tracker answered with. */
+class Refused extends Error {
+  constructor(message, status) {
+    super(message);
+    this.status = status;
+  }
+}
+
 /** Call the tracker as the signed-in person. Answers the parsed JSON, or throws with the server's own message. */
 async function api(method, path, body) {
   const token = localStorage.getItem(TOKEN_KEY);
@@ -80,7 +88,7 @@ async function api(method, path, body) {
   }
   let json = null;
   try { json = await res.json(); } catch { /* reported below */ }
-  if (!res.ok) throw new Error(json?.message ?? `the tracker answered ${res.status}.`);
+  if (!res.ok) throw new Refused(json?.message ?? `the tracker answered ${res.status}.`, res.status);
   if (!json) throw new Error('the tracker answered with something that is not JSON.');
   return json;
 }
@@ -138,6 +146,7 @@ async function drawWaiting() {
 const ICONS = Object.freeze({
   open: '<path d="M14 4h6v6"/><path d="M20 4l-9 9"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>',
   reply: '<path d="M4 5h16v11H9l-5 4z"/>',
+  view: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
   pullRequest: '<circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M6 8.5v7"/><path d="M18 15.5V9a3 3 0 0 0-3-3h-4"/><path d="M13 3.5L10.5 6 13 8.5"/>',
 });
 
@@ -167,8 +176,9 @@ function showProject() {
 }
 
 /**
- * Every project, one card each: its name, its ticket ids, how many tickets
- * are open. Choosing one selects it and opens its tasks; the selected one
+ * Every project, one row each: its name, slug, ticket ids, how many tickets
+ * are open, and an Actions column whose View icon opens its details page.
+ * Choosing a name selects the project and opens its tasks; the selected one
  * is marked, and "Tasks" in the header goes back to it.
  */
 async function drawProjects() {
@@ -181,16 +191,54 @@ async function drawProjects() {
     try { localStorage.setItem(PROJECT_NAME_KEY, chosen.name); } catch { /* not remembered */ }
     showProject();
   }
-  const card = (p) => `
-    <a class="project-card${p.slug === selected ? ' selected' : ''}" href="/${savedView()}/${encodeURIComponent(p.slug)}"${p.slug === selected ? ' aria-current="true"' : ''}>
-      <span class="name">${escapeHtml(p.name)}${p.slug === selected ? '<span class="tag">Selected</span>' : ''}</span>
-      <span class="quiet">${escapeHtml(p.prefix)}- tickets · ${p.open} open</span>
-    </a>`;
+  const row = (p) => `
+    <tr${p.slug === selected ? ' class="selected"' : ''}>
+      <td class="name"><a href="/${savedView()}/${encodeURIComponent(p.slug)}"${p.slug === selected ? ' aria-current="true"' : ''}>${escapeHtml(p.name)}</a>${p.slug === selected ? '<span class="tag">Selected</span>' : ''}</td>
+      <td class="slug">${escapeHtml(p.slug)}</td>
+      <td class="prefix">${escapeHtml(p.prefix)}</td>
+      <td class="open">${p.open}</td>
+      <td class="actions">${action(`/projects/${encodeURIComponent(p.slug)}`, 'View project', ICONS.view)}</td>
+    </tr>`;
   main.innerHTML = `
     <h1>Projects</h1>
     ${projects.length
-    ? `<p class="quiet">Choose a project to see its tasks.</p><div class="project-cards">${projects.map(card).join('')}</div>`
+    ? `<p class="quiet">Choose a project's name to see its tasks.</p>
+      <table class="projects"><thead><tr><th class="name">Name</th><th class="slug">Slug</th><th class="prefix">Ticket prefix</th><th class="open">Open tickets</th><th class="actions">Actions</th></tr></thead><tbody>${projects.map(row).join('')}</tbody></table>`
     : '<p class="quiet">There are no projects yet.</p>'}`;
+}
+
+/**
+ * One project's details: its name, slug, ticket prefix, operator, how many
+ * tickets are open and how many sit in each status, with links to its board
+ * and its list. Read-only. An unknown slug says so plainly.
+ */
+async function drawProjectDetails(slug) {
+  let p;
+  try {
+    p = await api('GET', `/projects/${encodeURIComponent(slug)}`);
+  } catch (err) {
+    if (!(err instanceof Refused) || err.status !== 404) throw err;
+    setTitle('No such project · Tracker');
+    main.innerHTML = `<h1>Projects</h1><p>There is no project ${escapeHtml(slug)}.</p><p><a href="/projects">Back to Projects</a></p>`;
+    return;
+  }
+  setTitle(`${p.name} · Tracker`);
+  const at = (v) => `/${v}/${encodeURIComponent(p.slug)}`;
+  const counts = p.statuses.map((s) => `<tr><td class="status">${escapeHtml(s.status)}</td><td class="count">${s.count}</td></tr>`).join('');
+  main.innerHTML = `
+    <h1>${escapeHtml(p.name)}</h1>
+    <div class="toolbar">
+      <a href="/projects">All projects</a>
+      <nav class="views" aria-label="Open"><a href="${at('board')}">Board</a><a href="${at('list')}">List</a></nav>
+    </div>
+    <dl class="details">
+      <dt>Slug</dt><dd>${escapeHtml(p.slug)}</dd>
+      <dt>Ticket prefix</dt><dd>${escapeHtml(p.prefix)}</dd>
+      <dt>Operator</dt><dd>${p.operator ? escapeHtml(p.operator.name) : '<span class="quiet">nobody</span>'}</dd>
+      <dt>Open tickets</dt><dd>${p.open}</dd>
+    </dl>
+    <h2>Tickets by status</h2>
+    <table class="counts"><thead><tr><th>Status</th><th class="count">Tickets</th></tr></thead><tbody>${counts}</tbody></table>`;
 }
 
 /**
@@ -297,30 +345,36 @@ async function drawTicket(id) {
       </div>
       ${renderComment(c.body, { operatorName: me?.name })}
     </article>`).join('');
+  // What it needs from Dane on top; everything else folded away, closed until he opens it.
   main.innerHTML = `
-    <h1>${escapeHtml(t.name)}</h1>
-    <p class="meta">
-      <span>${escapeHtml(t.id)}</span><span>${escapeHtml(t.projectName)}</span>
-      <span>${escapeHtml(statusName(t.status))}</span>
-      <span>${t.assignee ? `assigned to ${escapeHtml(t.assignee.name)}` : 'not assigned'}</span>
-    </p>
-    <section class="description">${renderMarkdown(t.description) || '<p class="quiet">No description.</p>'}</section>
-    <h2>Comments</h2>
-    ${comments || '<p class="quiet">No comments yet.</p>'}
-    <form class="reply">
-      <label for="reply">Reply as ${escapeHtml(me?.name ?? 'you')}</label>
-      <textarea id="reply" required></textarea>
-      <div class="row"><button type="submit">Post reply</button><span class="note"></span></div>
-    </form>
-    <h2>Copy to another project</h2>
-    ${others.length ? `
-    <form class="copy">
-      <label for="copy-to">A new ticket with this title and description, in Requested there. This ticket stays exactly as it is.</label>
-      <div class="row">
-        <select id="copy-to">${others.map((p) => `<option value="${escapeHtml(p.slug)}">${escapeHtml(p.name)}</option>`).join('')}</select>
-        <button type="submit">Copy</button><span class="note"></span>
-      </div>
-    </form>` : '<p class="quiet">There is no other project to copy into yet.</p>'}`;
+    <section class="quick">
+      <div class="ask">${renderQuickAction(t)}</div>
+      <form class="reply">
+        <label for="reply">Reply as ${escapeHtml(me?.name ?? 'you')}</label>
+        <textarea id="reply" required></textarea>
+        <div class="row"><button type="submit">Post reply</button><span class="note"></span></div>
+      </form>
+    </section>
+    <details class="details">
+      <summary>Details</summary>
+      <p class="meta">
+        <span>${escapeHtml(t.id)}</span><span>${escapeHtml(t.projectName)}</span>
+        <span>${escapeHtml(statusName(t.status))}</span>
+        <span>${t.assignee ? `assigned to ${escapeHtml(t.assignee.name)}` : 'not assigned'}</span>
+      </p>
+      <section class="description">${renderMarkdown(t.description) || '<p class="quiet">No description.</p>'}</section>
+      <h2>Comments</h2>
+      ${comments || '<p class="quiet">No comments yet.</p>'}
+      <h2>Copy to another project</h2>
+      ${others.length ? `
+      <form class="copy">
+        <label for="copy-to">A new ticket with this title and description, in Requested there. This ticket stays exactly as it is.</label>
+        <div class="row">
+          <select id="copy-to">${others.map((p) => `<option value="${escapeHtml(p.slug)}">${escapeHtml(p.name)}</option>`).join('')}</select>
+          <button type="submit">Copy</button><span class="note"></span>
+        </div>
+      </form>` : '<p class="quiet">There is no other project to copy into yet.</p>'}
+    </details>`;
   const copyForm = main.querySelector('form.copy');
   copyForm?.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -358,6 +412,8 @@ async function drawTicket(id) {
       // Exactly as typed: no trimming, no formatting. "merge" arrives as "merge".
       await api('POST', `/tickets/${encodeURIComponent(t.id)}/comments`, { body: box.value });
       await drawTicket(t.id);
+      // Show the reply he just posted: open Details at the end of the thread.
+      main.querySelector('details.details').open = true;
       main.querySelector('.comment:last-of-type')?.scrollIntoView({ block: 'center' });
     } catch (err) {
       if (err instanceof SignedOut) return drawSignIn('You were signed out; your reply was not posted.');
@@ -458,9 +514,10 @@ async function route() {
     const ticket = /^\/t\/([^/]+)$/.exec(location.pathname);
     const project = /^\/(board|list)(?:\/([^/]+))?$/.exec(location.pathname);
     const projects = location.pathname === '/projects';
+    const details = /^\/projects\/([^/]+)$/.exec(location.pathname);
     const tasks = location.pathname === '/tasks';
     const isNew = location.pathname === '/new';
-    markNav(isNew ? 'new' : projects ? 'projects' : ticket || project || tasks ? 'tasks' : 'waiting');
+    markNav(isNew ? 'new' : projects || details ? 'projects' : ticket || project || tasks ? 'tasks' : 'waiting');
     if (isNew) {
       await drawNew();
       await refreshCount();
@@ -469,6 +526,9 @@ async function route() {
       await refreshCount();
     } else if (projects) {
       await drawProjects();
+      await refreshCount();
+    } else if (details) {
+      await drawProjectDetails(decodeURIComponent(details[1]));
       await refreshCount();
     } else if (tasks || (project && project[2] == null)) {
       // "Tasks" in the header: the selected project, in the view last used.

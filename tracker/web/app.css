@@ -47,11 +47,18 @@ form.sign-in input { width: 100%; font: inherit; padding: 0.5rem; box-sizing: bo
 button { font: inherit; padding: 0.4rem 1rem; }
 main.wide { max-width: none; }
 .toolbar { display: flex; gap: 2rem; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
-.project-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr)); gap: 1rem; }
-.project-card { display: flex; flex-direction: column; gap: 0.35rem; border: var(--hairline); border-radius: 8px; padding: 1rem 1.25rem; color: var(--ink); text-decoration: none; }
-.project-card:hover { box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18); }
-.project-card.selected { border-color: var(--blue); box-shadow: inset 0 0 0 1px var(--blue); }
-.project-card .name { font-size: 1.15rem; font-weight: 600; }
+table.projects, table.counts { border: var(--hairline); border-radius: 8px; border-collapse: separate; border-spacing: 0; overflow: hidden; }
+table.projects tbody tr:last-child td, table.counts tbody tr:last-child td { border-bottom: 0; }
+table.projects tbody tr:hover { background: #f5f5f7; }
+table.projects tr.selected td.name { box-shadow: inset 3px 0 0 var(--blue); }
+table.projects td.name a { color: var(--ink); text-decoration: none; font-weight: 600; }
+table.projects td.name a:hover { text-decoration: underline; }
+table.projects td.actions { white-space: nowrap; width: 1%; }
+table.counts { max-width: 24rem; }
+th.count, td.count, th.open, td.open { text-align: right; font-variant-numeric: tabular-nums; }
+dl.details { display: grid; grid-template-columns: max-content 1fr; gap: 0.4rem 1.5rem; margin: 0 0 1.5rem; }
+dl.details dt { color: var(--quiet); }
+dl.details dd { margin: 0; }
 .views { display: inline-flex; border: var(--hairline); border-radius: 6px; overflow: hidden; }
 .views a { padding: 0.3rem 1rem; color: var(--ink); text-decoration: none; font-size: 0.9rem; }
 .views a + a { border-left: var(--hairline); }
@@ -85,3 +92,8 @@ a.action { display: inline-flex; padding: 0.2rem; margin-right: 0.15rem; border-
 a.action:hover { color: #000; background: #e8e8ed; }
 .group th.assignee { width: 12%; }
 .group td { overflow-wrap: anywhere; }
+.quick { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; align-items: start; margin-bottom: 2rem; }
+.quick h1 { margin-top: 0; }
+.quick .needed { color: var(--red); font-weight: 700; white-space: pre-wrap; }
+details.details { border-top: var(--hairline); padding-top: 0.75rem; }
+details.details > summary { cursor: pointer; font-weight: 600; margin-bottom: 0.5rem; }
