@@ -15,7 +15,7 @@
  * holds. It is kept in this browser's local storage so a pinned tab stays
  * signed in, and sent only to this server. "Sign out" forgets it.
  */
-import { escapeHtml, mergeQuestion, renderCommands, renderComment, renderMarkdown, renderMergeAction, renderQuickAction, renderTrail, tabTitle } from './render.mjs';
+import { canDelete, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderDeleteAction, renderMarkdown, renderMergeAction, renderQuickAction, renderTrail, tabTitle } from './render.mjs';
 
 const TOKEN_KEY = 'tracker-token';
 /** Board or list: the last one opened, so "Tasks" in the header opens it again. */
@@ -155,6 +155,7 @@ const ICONS = Object.freeze({
   reply: '<path d="M4 5h16v11H9l-5 4z"/>',
   view: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
   pullRequest: '<circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M6 8.5v7"/><path d="M18 15.5V9a3 3 0 0 0-3-3h-4"/><path d="M13 3.5L10.5 6 13 8.5"/>',
+  delete: '<path d="M4 7h16"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M6 7l1 12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-12"/><path d="M9 7V4h6v3"/>',
 });
 
 /** One action icon: a link with its name as tooltip and for screen readers. Off-site links open a new tab. */
@@ -162,6 +163,12 @@ function action(href, label, icon, offSite = false) {
   const target = offSite ? ' target="_blank" rel="noopener noreferrer"' : '';
   return `<a class="action" href="${escapeHtml(href)}" title="${label}" aria-label="${label}"${target}>`
     + `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icon}</svg></a>`;
+}
+
+/** One action icon that does something on this page rather than go somewhere: a button, named the same way. */
+function actionButton(label, icon, data) {
+  return `<button type="button" class="action" title="${label}" aria-label="${label}"${data}>`
+    + `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icon}</svg></button>`;
 }
 
 /** Only an http(s) address is ever drawn as a link or an image; anything else is not drawn. */
@@ -358,7 +365,8 @@ async function drawTasks(view) {
  * statuses as groups of rows, with a ticket's priority, tags, assignee and
  * last change in their own columns, like ClickUp's List, and an Actions
  * column of icons. Each icon goes somewhere that already exists: the ticket,
- * the ticket's reply box, the ticket's pull request on GitHub.
+ * the ticket's reply box, the ticket's pull request on GitHub. The one
+ * exception is the bin, on a ticket nobody has started: it asks, then deletes.
  */
 async function drawProject(slug, view) {
   const board = await api('GET', `/projects/${encodeURIComponent(slug)}/board`);
@@ -386,25 +394,26 @@ async function drawProject(slug, view) {
     </a>`;
   const column = (c) => block(c, 'column', c.tickets.map(card).join('') || '<p class="quiet">None.</p>');
 
-  const actions = (t) => {
+  const actions = (t, status) => {
     const at = `/t/${encodeURIComponent(t.id)}`;
     return [
       action(at, 'Open ticket', ICONS.open),
       action(`${at}#reply`, 'Reply', ICONS.reply),
       t.pullRequest ? action(t.pullRequest, 'Open pull request on GitHub', ICONS.pullRequest, true) : '',
+      canDelete(status) ? actionButton('Delete ticket', ICONS.delete, ` data-delete="${escapeHtml(t.id)}"`) : '',
     ].join('');
   };
-  const row = (t) => `
+  const row = (status) => (t) => `
     <tr>
       <td class="name"><a href="/t/${encodeURIComponent(t.id)}">${escapeHtml(t.name)}</a> <span class="quiet">${escapeHtml(t.id)}</span></td>
       <td class="priority">${t.priority ? escapeHtml(statusName(t.priority)) : '<span class="quiet">–</span>'}</td>
       <td class="tags">${t.tags.map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join('')}</td>
       <td class="assignee">${t.assignee ? escapeHtml(t.assignee) : '<span class="quiet">nobody</span>'}</td>
       <td class="when">${escapeHtml(when(t.updatedAt))}</td>
-      <td class="actions">${actions(t)}</td>
+      <td class="actions">${actions(t, status)}</td>
     </tr>`;
   const group = (c) => block(c, 'group', c.tickets.length
-    ? `<table><thead><tr><th class="name">Ticket</th><th class="priority">Priority</th><th class="tags">Tags</th><th class="assignee">Assigned to</th><th class="when">Last change</th><th class="actions">Actions</th></tr></thead><tbody>${c.tickets.map(row).join('')}</tbody></table>`
+    ? `<table><thead><tr><th class="name">Ticket</th><th class="priority">Priority</th><th class="tags">Tags</th><th class="assignee">Assigned to</th><th class="when">Last change</th><th class="actions">Actions</th></tr></thead><tbody>${c.tickets.map(row(c.status)).join('')}</tbody></table>`
     : '');
 
   main.classList.add('wide');
@@ -414,10 +423,33 @@ async function drawProject(slug, view) {
       <a href="/projects">Change project</a>
       <nav class="views" aria-label="View">${toggle}</nav>
     </div>
+    <p class="error list-note" role="alert" hidden></p>
     ${view === 'board'
     ? `<div class="board">${board.columns.map(column).join('')}</div>`
     : `<div class="list">${board.columns.map(group).join('')}</div>`}`;
   putTrail([{ label: board.projectName, href: '/projects' }, { label: view === 'board' ? 'Board' : 'List' }]);
+  // Delete: ask first, naming the ticket; then redraw from the server. A
+  // refusal is said in words and nothing leaves the list until a redraw.
+  const listNote = main.querySelector('.list-note');
+  const names = new Map(board.columns.flatMap((c) => c.tickets).map((t) => [t.id, t.name]));
+  for (const button of main.querySelectorAll('button[data-delete]')) {
+    button.addEventListener('click', async () => {
+      const id = button.dataset.delete;
+      if (!confirm(deleteQuestion({ id, name: names.get(id) }))) return;
+      button.disabled = true;
+      listNote.hidden = true;
+      try {
+        await api('DELETE', `/tickets/${encodeURIComponent(id)}`);
+      } catch (err) {
+        if (err instanceof SignedOut) return drawSignIn(`You were signed out; ${id} was not deleted.`);
+        listNote.textContent = deleteRefusal(id, err);
+        listNote.hidden = false;
+        button.disabled = false;
+        return;
+      }
+      await drawProject(slug, view);
+    });
+  }
 }
 
 /**
@@ -477,6 +509,7 @@ async function drawTicket(id) {
         <textarea id="reply" required></textarea>
         <div class="row"><button type="submit">Post reply</button><span class="note"></span></div>
       </form>
+      ${renderDeleteAction(t)}
       </div>
     </section>
     <details class="details">
@@ -556,6 +589,28 @@ async function drawTicket(id) {
       mergeNote.textContent = `Not posted: ${err.message}`;
       button.disabled = false;
     }
+  });
+  // Delete: ask first, naming the ticket; on success go to its project's list.
+  const deleteForm = main.querySelector('form.delete-action');
+  deleteForm?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (!confirm(deleteQuestion(t))) return;
+    const button = deleteForm.querySelector('button');
+    const deleteNote = deleteForm.querySelector('.note');
+    button.disabled = true;
+    deleteNote.className = 'note quiet';
+    deleteNote.textContent = 'Deleting…';
+    try {
+      await api('DELETE', `/tickets/${encodeURIComponent(t.id)}`);
+    } catch (err) {
+      if (err instanceof SignedOut) return drawSignIn(`You were signed out; ${t.id} was not deleted.`);
+      deleteNote.className = 'note error';
+      deleteNote.textContent = deleteRefusal(t.id, err);
+      button.disabled = false;
+      return;
+    }
+    history.pushState(null, '', `/list/${encodeURIComponent(t.project)}`);
+    await route();
   });
   const form = main.querySelector('form.reply');
   const box = form.querySelector('textarea');
