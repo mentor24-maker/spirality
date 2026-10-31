@@ -174,8 +174,8 @@ test('the Projects screen lists every project with its open count; an unknown pr
     const openIn = (slug) => f.store.listTickets(slug, { open: true }).length;
     assert.ok(openIn('alpha') > 0 && openIn('alpha') < f.store.listTickets('alpha').length, 'the demo data has open and Live tickets');
     assert.deepEqual((await f.call('GET', '/projects')).body.projects, [
-      { slug: 'alpha', name: 'Alpha', prefix: 'AL', open: openIn('alpha') },
-      { slug: 'beta', name: 'Beta', prefix: 'BE', open: openIn('beta') },
+      { slug: 'alpha', name: 'Alpha', prefix: 'AL', url: null, logo: null, owner: null, open: openIn('alpha') },
+      { slug: 'beta', name: 'Beta', prefix: 'BE', url: null, logo: null, owner: null, open: openIn('beta') },
     ]);
     assert.equal((await f.call('GET', '/projects/beta/board')).body.projectName, 'Beta');
     assert.equal((await f.call('GET', '/projects/nope/board')).status, 404);
@@ -195,6 +195,9 @@ test('a project\'s details name its prefix, operator, open count and a count per
       name: 'Alpha',
       prefix: 'AL',
       operator: { id: f.operator.id, name: 'Dane' },
+      url: null,
+      logo: null,
+      owner: null,
       open: f.store.listTickets('alpha', { open: true }).length,
       statuses: loopStatuses.STAGE_ORDER.map((name) => ({
         status: name,
@@ -641,6 +644,66 @@ test('every word of ticket text in Quick Action is escaped', () => {
   });
   assert.doesNotMatch(html, /<script|<img/);
   assert.equal(html.match(/&lt;script&gt;alert\(1\)&lt;\/script&gt;/g).length, 3);
+});
+
+// ── Create Project ───────────────────────────────────────────────────────────
+
+test('a project added from the page shows on the Projects screen and its details page with its logo, web address and owner', async () => {
+  const f = await fixture();
+  try {
+    const people = await f.call('GET', '/people');
+    assert.deepEqual(people.body.people.map((p) => p.name), ['Dane'], 'the owner picker offers the people, not the loop');
+    const made = await f.call('POST', '/projects', {
+      body: { name: 'Try me', slug: 'try-me', prefix: 'TRY', url: 'https://try.example', logo: 'https://try.example/logo.png', owner: f.operator.id },
+    });
+    assert.equal(made.status, 201);
+    const row = (await f.call('GET', '/projects')).body.projects.find((p) => p.slug === 'try-me');
+    assert.deepEqual(row, {
+      slug: 'try-me', name: 'Try me', prefix: 'TRY', url: 'https://try.example', logo: 'https://try.example/logo.png',
+      owner: { id: f.operator.id, name: 'Dane' }, open: 0,
+    });
+    const details = (await f.call('GET', '/projects/try-me')).body;
+    assert.deepEqual([details.url, details.logo, details.owner], [row.url, row.logo, row.owner]);
+    // The loop's sign-in cannot, and leaves the projects as they were.
+    const before = (await f.call('GET', '/projects')).body.projects;
+    const loop = await f.call('POST', '/projects', { token: f.store.issueToken(f.loop.id), body: { name: 'L', slug: 'loop-made', prefix: 'LM' } });
+    assert.equal(loop.status, 403);
+    assert.deepEqual((await f.call('GET', '/projects')).body.projects, before);
+  } finally { await f.cleanup(); }
+});
+
+test('/projects/new is the page to a browser, and its logo can be drawn: the lock lets images in, never scripts', async () => {
+  const f = await fixture();
+  try {
+    const page = await fetch(`${f.url}/projects/new`, { headers: { accept: 'text/html,application/xhtml+xml,*/*;q=0.8' } });
+    assert.equal(page.status, 200);
+    assert.equal(await page.text(), readFileSync(WEB('index.html'), 'utf8'));
+    const csp = page.headers.get('content-security-policy');
+    assert.match(csp, /img-src 'self' http: https:/);
+    assert.match(csp, /script-src 'self';/);
+    assert.match(csp, /default-src 'none'/);
+  } finally { await f.cleanup(); }
+});
+
+test('the New project button and form are a person\'s only; a refused save keeps what was typed and says why; success opens the details page', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  assert.match(app, /me\?\.kind === 'human' \? '<div class="toolbar"><a class="button" href="\/projects\/new">New project<\/a><\/div>' : ''/);
+  const form = app.slice(app.indexOf('async function drawCreateProject'), app.indexOf('/**', app.indexOf('async function drawCreateProject')));
+  assert.match(form, /if \(me\?\.kind !== 'human'\)[\s\S]{0,200}Only a person signed in to the tracker can add a project\./);
+  for (const id of ['name', 'slug', 'prefix', 'url', 'logo']) assert.match(form, new RegExp(`field\\('${id}',`), id);
+  assert.match(form, /<select id="owner"><option value="">Nobody<\/option>\$\{people\.map/);
+  assert.match(form, /api\('GET', '\/people'\)/);
+  assert.match(form, /api\('POST', '\/projects', \{/);
+  assert.match(form, /note\.textContent = `Not added: \$\{err\.message\}`;/);
+  assert.ok(!/main\.innerHTML/.test(form.slice(form.indexOf("addEventListener('submit'"))), 'a refused save never redraws the form, so nothing typed is lost');
+  assert.match(form, /history\.pushState\(null, '', `\/projects\/\$\{encodeURIComponent\(made\.slug\)\}`\)/);
+  // /projects/new is the form, never a project called "new".
+  assert.match(app, /const details = !newProject && /);
+  // The table and details page draw a logo and web address only for an http(s) address, escaped.
+  assert.match(app, /const isWebAddress = \(v\) => typeof v === 'string' && \/\^https\?:\\\/\\\/\/i\.test\(v\);/);
+  assert.match(app, /<img class="\$\{cls\}" src="\$\{escapeHtml\(p\.logo\)\}"/);
+  assert.match(app, /<td class="owner">\$\{p\.owner \? escapeHtml\(p\.owner\.name\)/);
+  assert.match(app, /<dt>Owner<\/dt><dd>\$\{p\.owner \? escapeHtml\(p\.owner\.name\)/);
 });
 
 // ── Quick Action's Merge button ──────────────────────────────────────────────

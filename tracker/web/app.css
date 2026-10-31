@@ -39,6 +39,14 @@ form.request label { display: block; margin-top: 1rem; font-weight: 600; }
 form.request select, form.request input, form.request textarea { display: block; width: 100%; font: inherit; padding: 0.5rem; box-sizing: border-box; margin-top: 0.35rem; }
 form.request textarea { min-height: 12rem; }
 form.request .row { display: flex; gap: 1rem; align-items: center; margin-top: 1rem; }
+form.request .hint { display: block; font-size: 0.85rem; margin-top: 0.15rem; }
+a.button { display: inline-block; padding: 0.4rem 1rem; border: var(--hairline); border-radius: 6px; background: #000; color: #fff; text-decoration: none; font-weight: 600; }
+a.button:hover { background: #333; }
+.hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+img.logo { width: 1.75rem; height: 1.75rem; object-fit: contain; vertical-align: middle; }
+img.logo.big { width: 2.5rem; height: 2.5rem; margin-right: 0.75rem; }
+table.projects td.logo { width: 1%; padding-right: 0; }
+table.projects td.url { overflow-wrap: anywhere; }
 form.copy label { display: block; }
 form.copy .row { display: flex; gap: 1rem; align-items: center; margin-top: 0.5rem; }
 form.copy select { font: inherit; padding: 0.4rem; }
