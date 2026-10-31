@@ -97,3 +97,7 @@ a.action:hover { color: #000; background: #e8e8ed; }
 .quick .needed { color: var(--red); font-weight: 700; white-space: pre-wrap; }
 details.details { border-top: var(--hairline); padding-top: 0.75rem; }
 details.details > summary { cursor: pointer; font-weight: 600; margin-bottom: 0.5rem; }
+nav.trail { font-size: 0.85rem; color: var(--quiet); margin: -0.5rem 0 1rem; }
+nav.trail a { color: var(--quiet); }
+nav.trail a:hover { color: var(--ink); }
+nav.trail [aria-current] { color: var(--ink); }
