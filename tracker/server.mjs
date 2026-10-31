@@ -13,7 +13,8 @@
  *   401  no token, or a token no actor holds
  *   403  a call only a person may make, from a machine's token
  *   404  an unknown project, ticket or address
- *   409  a guarded move found the ticket moved: `{ error, status, version }`
+ *   409  a guarded move found the ticket moved: `{ error, status, version }`,
+ *        or a delete found the ticket started: `{ error: 'not-deletable', status }`
  *   400  a bad field, or a body that names another author
  *   403  a write only a person may make, asked by a loop's token
  * A refused write writes nothing. A token never appears in an answer or a
@@ -332,6 +333,21 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
             { ticket: r.ticket, status: r.status, version: r.version });
         }
         return [200, { ticket: r.ticket, changed: r.changed }, { ticket: r.ticket, changed: r.changed }];
+      }
+      // Delete a ticket nobody has started; the store refuses any other.
+      // The log line names the ticket and the actor, the deletion's record.
+      if (method === 'DELETE') {
+        let gone;
+        try {
+          gone = store.deleteTicket(parts[1], { actor: me.id });
+        } catch (err) {
+          if (err instanceof StoreError && err.code === 'not-deletable') {
+            throw new HttpError(409, 'not-deletable', err.message, { ticket: parts[1], status: err.status });
+          }
+          throw err;
+        }
+        log(`deleted ticket ${gone.id} (was "${gone.status}") actor=${me.id}`);
+        return [200, { deleted: gone.id, status: gone.status }];
       }
     }
 

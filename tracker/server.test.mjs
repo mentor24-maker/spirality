@@ -82,6 +82,7 @@ test('no token and a wrong token both get 401, on reads and on writes, and nothi
       assert.equal((await f.call('PATCH', `/tickets/${t.id}`, { token, body: { status: 'building' } })).status, 401);
       assert.equal((await f.call('POST', `/tickets/${t.id}/comments`, { token, body: { body: 'hi' } })).status, 401);
       assert.equal((await f.call('POST', '/projects/alpha/tickets', { token, body: { name: 'y', status: 'queued' } })).status, 401);
+      assert.equal((await f.call('DELETE', `/tickets/${t.id}`, { token })).status, 401);
     }
     const after = f.store.getTicket(t.id);
     assert.equal(after.status, 'queued');
@@ -206,6 +207,63 @@ test('two concurrent guarded claims of one Queued ticket over HTTP, through two 
   } finally { await f.cleanup(); }
 });
 
+test('DELETE /tickets/:id removes an unstarted ticket with its comments; a started one is 409 not-deletable; an unknown one is 404', async () => {
+  const f = await fixture();
+  try {
+    for (const status of ['requested', 'queued']) {
+      const t = f.store.fileTicket({ project: 'alpha', actor: f.machine.id, name: `gone ${status}`, status });
+      f.store.postComment({ ticket: t.id, author: f.human.id, body: 'note' });
+      const r = await f.call('DELETE', `/tickets/${t.id}`, { token: f.humanToken });
+      assert.equal(r.status, 200);
+      assert.deepEqual(r.body, { deleted: t.id, status });
+      assert.equal((await f.call('GET', `/tickets/${t.id}`)).status, 404);
+      assert.equal((await f.call('GET', `/tickets/${t.id}/events`)).status, 404);
+      assert.deepEqual(f.store.listComments(t.id), []);
+      assert.ok(f.lines.includes(`deleted ticket ${t.id} (was "${status}") actor=${f.human.id}`));
+    }
+    for (const status of ['rework', 'building', 'in review', 'needs your input', 'ready to launch', 'live']) {
+      const t = f.store.fileTicket({ project: 'alpha', actor: f.machine.id, name: status, status });
+      f.store.postComment({ ticket: t.id, author: f.human.id, body: 'note' });
+      const r = await f.call('DELETE', `/tickets/${t.id}`, { token: f.humanToken });
+      assert.equal(r.status, 409, status);
+      assert.equal(r.body.error, 'not-deletable');
+      assert.equal(r.body.status, status);
+      const after = await f.call('GET', `/tickets/${t.id}`);
+      assert.equal(after.body.status, status);
+      assert.equal(after.body.comments.length, 1);
+      assert.equal(f.store.listEvents(t.id).length, 1);
+    }
+    const unknown = await f.call('DELETE', '/tickets/AL-999', { token: f.humanToken });
+    assert.equal(unknown.status, 404);
+    assert.equal(unknown.body.error, 'unknown-ticket');
+  } finally { await f.cleanup(); }
+});
+
+test('a delete and a claim of one Queued ticket over HTTP, through two servers on one database: exactly one wins', async () => {
+  const f = await fixture();
+  try {
+    const second = openStore(f.path);
+    f.stores.push(second);
+    const otherBase = await f.serve(second);
+    for (let round = 0; round < 5; round++) {
+      const t = f.store.fileTicket({ project: 'alpha', actor: f.machine.id, name: `race ${round}`, status: 'queued' });
+      const [del, claim] = await Promise.all([
+        f.call('DELETE', `/tickets/${t.id}`, { token: f.humanToken }),
+        f.call('PATCH', `/tickets/${t.id}`, { body: { ifStatus: 'queued', status: 'building' }, at: otherBase }),
+      ]);
+      if (del.status === 200) {
+        assert.equal(claim.status, 404);
+        assert.equal(f.store.getTicket(t.id), null);
+      } else {
+        assert.equal(del.status, 409);
+        assert.equal(del.body.status, 'building');
+        assert.equal(claim.status, 200);
+        assert.equal(f.store.getTicket(t.id).status, 'building');
+      }
+    }
+  } finally { await f.cleanup(); }
+});
+
 test('GET /tickets/:id/events answers the history, each move with the token\'s actor', async () => {
   const f = await fixture();
   try {
@@ -260,7 +318,7 @@ test('unknown projects, tickets and addresses get 404; bad fields get 400; none 
     assert.equal((await f.call('POST', '/tickets/AL-99/comments', { body: { body: 'hi' } })).status, 404);
     assert.equal((await f.call('GET', '/tickets/AL-99/events')).status, 404);
     assert.equal((await f.call('GET', '/nowhere')).status, 404);
-    assert.equal((await f.call('DELETE', `/tickets/${t.id}`)).status, 404);
+    assert.equal((await f.call('PUT', `/tickets/${t.id}`)).status, 404);
 
     const bad = [
       ['PATCH', `/tickets/${t.id}`, { status: 'done' }],
