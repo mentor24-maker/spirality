@@ -14,7 +14,7 @@
  * holds. It is kept in this browser's local storage so a pinned tab stays
  * signed in, and sent only to this server. "Sign out" forgets it.
  */
-import { escapeHtml, renderComment, renderMarkdown, renderQuickAction, tabTitle } from './render.mjs';
+import { escapeHtml, renderCommands, renderComment, renderMarkdown, renderQuickAction, tabTitle } from './render.mjs';
 
 const TOKEN_KEY = 'tracker-token';
 /** Board or list: the last one opened, so "Tasks" in the header opens it again. */
@@ -330,6 +330,33 @@ async function drawProject(slug, view) {
     : `<div class="list">${board.columns.map(group).join('')}</div>`}`;
 }
 
+/**
+ * Put `text` on the clipboard; true when it got there. The page is served
+ * over plain http on the Mini, where the browser hides navigator.clipboard,
+ * so off a secure page it copies from a hidden text box instead.
+ */
+async function copyText(text) {
+  if (window.isSecureContext && navigator.clipboard) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch { /* fall through to the text box */ }
+  }
+  const area = document.createElement('textarea');
+  area.value = text;
+  area.setAttribute('readonly', '');
+  area.className = 'offscreen';
+  document.body.append(area);
+  area.select();
+  try {
+    return document.execCommand('copy');
+  } catch {
+    return false;
+  } finally {
+    area.remove();
+  }
+}
+
 async function drawTicket(id) {
   const [t, { projects }] = await Promise.all([
     api('GET', `/tickets/${encodeURIComponent(id)}/thread`),
@@ -349,11 +376,14 @@ async function drawTicket(id) {
   main.innerHTML = `
     <section class="quick">
       <div class="ask">${renderQuickAction(t)}</div>
+      <div class="act">
+      ${renderCommands(t)}
       <form class="reply">
         <label for="reply">Reply as ${escapeHtml(me?.name ?? 'you')}</label>
         <textarea id="reply" required></textarea>
         <div class="row"><button type="submit">Post reply</button><span class="note"></span></div>
       </form>
+      </div>
     </section>
     <details class="details">
       <summary>Details</summary>
@@ -375,6 +405,14 @@ async function drawTicket(id) {
         </div>
       </form>` : '<p class="quiet">There is no other project to copy into yet.</p>'}
     </details>`;
+  // Copy: the command exactly as drawn, onto the clipboard. The page never runs it.
+  for (const button of main.querySelectorAll('button.copy-command')) {
+    button.addEventListener('click', async () => {
+      const text = button.parentElement.querySelector('code').textContent;
+      button.textContent = (await copyText(text)) ? 'Copied' : 'Not copied';
+      setTimeout(() => { button.textContent = 'Copy'; }, 1500);
+    });
+  }
   const copyForm = main.querySelector('form.copy');
   copyForm?.addEventListener('submit', async (e) => {
     e.preventDefault();

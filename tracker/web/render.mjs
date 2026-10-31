@@ -250,6 +250,59 @@ export function firstParagraph(markdown) {
   return '';
 }
 
+/** The newest comment that carries an operator card, or undefined. */
+const newestCard = (comments = []) => [...comments].reverse().find((c) => cardAsk(c.body) !== null);
+
+/** A banner line as written: any `**…**` wrapping taken off, its indent kept. */
+const unwrap = (line) => {
+  const m = /^(\s*)\*\*([\s\S]*)\*\*\s*$/.exec(line);
+  return (m ? m[1] + m[2] : line).replace(/\s+$/, '');
+};
+
+/**
+ * The commands an operator card's ask gives him to run: the text of each
+ * fenced block in its banner, without the fence, blank lines at either end,
+ * trailing spaces or an indent every line shares. [] when the comment
+ * carries no card or the ask has no fenced block.
+ */
+export function cardCommands(body) {
+  const lines = String(body ?? '').replace(/\r\n?/g, '\n').split('\n');
+  const banner = findBanner(lines, '');
+  if (!banner) return [];
+  // The ask's own lines: no # rules, and no label, so a fence may open on its line.
+  const ask = lines.slice(banner.start, banner.end).map(unwrap)
+    .filter((l) => !BANNER_RULE.test(l.trim()) && !RAW_SECTION.test(l.trim()))
+    .map((l) => l.replace(/^\s*NEEDED FROM [^:\n]+:\s*/, ''));
+  const commands = [];
+  for (let i = 0; i < ask.length; i += 1) {
+    const fence = FENCE.exec(ask[i]);
+    if (!fence) continue;
+    const block = [];
+    i += 1;
+    while (i < ask.length && !closesFence(ask[i], fence[1])) block.push(ask[i++]);
+    while (block.length && !block[0].trim()) block.shift();
+    while (block.length && !block.at(-1).trim()) block.pop();
+    if (!block.length) continue;
+    const indent = Math.min(...block.filter((l) => l.trim()).map((l) => /^\s*/.exec(l)[0].length));
+    commands.push(block.map((l) => l.slice(indent)).join('\n'));
+  }
+  return commands;
+}
+
+/**
+ * The commands of a ticket's newest operator card, for the right side of its
+ * Quick Action section, as HTML: each one escaped, with its own Copy button.
+ * The page copies the `<code>` element's text, so what lands on the
+ * clipboard is exactly what is drawn. '' when the card has no command.
+ */
+export function renderCommands({ comments = [] }) {
+  const card = newestCard(comments);
+  const commands = card ? cardCommands(card.body) : [];
+  if (!commands.length) return '';
+  const rows = commands.map((c) => `<div class="command"><pre><code>${escapeHtml(c)}</code></pre><button type="button" class="copy-command">Copy</button></div>`);
+  return `<div class="commands">${rows.join('')}</div>`;
+}
+
 /**
  * The left side of a ticket page's Quick Action section, as HTML: the
  * ticket's title, a short description and, in bold red, what is needed. The
@@ -258,7 +311,7 @@ export function firstParagraph(markdown) {
  * needed is that newest card's ask, and there is no red line without one.
  */
 export function renderQuickAction({ name, description, comments = [] }) {
-  const card = [...comments].reverse().find((c) => cardAsk(c.body) !== null);
+  const card = newestCard(comments);
   const summary = card ? cardContext(card.body) ?? firstParagraph(description) : firstParagraph(description);
   const ask = card ? cardAsk(card.body) : null;
   return [
