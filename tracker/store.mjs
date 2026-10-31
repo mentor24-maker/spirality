@@ -30,7 +30,7 @@
  *    exist without its map row, so a re-run cannot file it twice.
  *  - An actor's sign-in token is stored only as its SHA-256 hash. The token
  *    itself is handed back once, by issueToken, and never kept.
- *  - A stage's colour (the Admin page's pickers) is one of the eight
+ *  - A stage's colour (the Settings page's pickers) is one of the eight
  *    statuses and a `#rrggbb` value, or no row at all. One set for the whole
  *    tracker, not one per project.
  */

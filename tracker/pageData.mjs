@@ -196,7 +196,7 @@ export function boardOf(store, slug) {
 }
 
 /**
- * The Admin page's stage colours: the eight statuses in the contract's
+ * The Settings page's stage colours: the eight statuses in the contract's
  * STAGE_ORDER, each with its `#rrggbb` colour, or null when it has none.
  * The page lists exactly these, so it never types the stages out itself.
  */

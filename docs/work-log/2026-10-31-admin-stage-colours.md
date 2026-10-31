@@ -1,6 +1,8 @@
 ## 2026-10-31 — In the Admin page, a setting to choose colors to represent stages (#46)
 
-The tracker's page now has an **Admin** screen, reached from the header menu.
+The tracker's page now has a **Settings** screen (at `/settings`), reached from
+the header menu. The ticket asked for an "Admin" page; Dane renamed it to
+Settings before it was built, so that is the name everywhere.
 It lists the eight stages a ticket moves through (Requested, Rework, Queued,
 Building, In review, Needs your input, Ready to launch, Live), in the same
 order as the board, each with a colour picker and a Clear button. Pressing

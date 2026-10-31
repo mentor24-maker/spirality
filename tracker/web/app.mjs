@@ -3,7 +3,7 @@
  * on you, open a ticket, answer it, pick a project, see that project's
  * whole queue as a board or as a list, see one project's details, file a
  * new request, copy a ticket into another project, and choose a colour for
- * each stage on the Admin page. Plain browser
+ * each stage on the Settings page. Plain browser
  * JavaScript, no packages,
  * no build step; tracker/server.mjs serves it.
  *
@@ -501,15 +501,15 @@ async function drawNew() {
 }
 
 /**
- * The Admin page: every stage in the contract's order, as the server lists
+ * The Settings page: every stage in the contract's order, as the server lists
  * them, each with a colour picker and a Clear button. One Save stores them
  * all; the page then reads the colours back and says they were saved only
  * when what it reads is what it sent. A loop's sign-in is refused by the
  * server, and the page shows that refusal as it is.
  */
-async function drawAdmin() {
+async function drawSettings() {
   const { stages } = await api('GET', '/stage-colours');
-  setTitle('Admin · Tracker');
+  setTitle('Settings · Tracker');
   /** What each stage will be saved as: `#rrggbb`, or null for no colour. */
   const chosen = Object.fromEntries(stages.map((s) => [s.status, s.colour]));
   const row = (s, i) => `
@@ -520,7 +520,7 @@ async function drawAdmin() {
       <td class="clear"><button type="button">Clear</button></td>
     </tr>`;
   main.innerHTML = `
-    <h1>Admin</h1>
+    <h1>Settings</h1>
     <h2>Stage colours</h2>
     <p class="quiet">Choose a colour for each stage of the loop. The same colours show for everyone.</p>
     <form class="colours">
@@ -582,10 +582,10 @@ async function route() {
     const details = /^\/projects\/([^/]+)$/.exec(location.pathname);
     const tasks = location.pathname === '/tasks';
     const isNew = location.pathname === '/new';
-    const admin = location.pathname === '/admin';
-    markNav(admin ? 'admin' : isNew ? 'new' : projects || details ? 'projects' : ticket || project || tasks ? 'tasks' : 'waiting');
-    if (admin) {
-      await drawAdmin();
+    const settings = location.pathname === '/settings';
+    markNav(settings ? 'settings' : isNew ? 'new' : projects || details ? 'projects' : ticket || project || tasks ? 'tasks' : 'waiting');
+    if (settings) {
+      await drawSettings();
       await refreshCount();
     } else if (isNew) {
       await drawNew();

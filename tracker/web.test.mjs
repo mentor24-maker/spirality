@@ -491,11 +491,11 @@ test('the page is served at /, at a ticket\'s address, at Projects, at Tasks, at
   } finally { await f.cleanup(); }
 });
 
-test('the Admin page is in the header after New request, lists the stages the server gives, saves them all, reads them back, and shows a refusal', async () => {
+test('the Settings page is in the header after New request, lists the stages the server gives, saves them all, reads them back, and shows a refusal', async () => {
   const html = readFileSync(WEB('index.html'), 'utf8');
-  assert.match(html, /<a href="\/new" data-nav="new">New request<\/a>\s*<a href="\/admin" data-nav="admin">Admin<\/a>/);
+  assert.match(html, /<a href="\/new" data-nav="new">New request<\/a>\s*<a href="\/settings" data-nav="settings">Settings<\/a>/);
   const app = readFileSync(WEB('app.mjs'), 'utf8');
-  const draw = app.slice(app.indexOf('async function drawAdmin'), app.indexOf('/** Underline'));
+  const draw = app.slice(app.indexOf('async function drawSettings'), app.indexOf('/** Underline'));
   assert.match(draw, /const \{ stages \} = await api\('GET', '\/stage-colours'\);/, 'the stages come from the server, never typed out');
   assert.doesNotMatch(draw, /'Queued'|'Requested'|'Live'/);
   assert.match(draw, /type="color"/);
@@ -503,12 +503,14 @@ test('the Admin page is in the header after New request, lists the stages the se
   assert.match(draw, /await api\('PUT', '\/stage-colours', \{ colours: chosen \}\);\s*\/\/ Read back before saying it worked\.\s*const back = await api\('GET', '\/stage-colours'\);/);
   assert.match(draw, /note\.textContent = `Not saved: \$\{err\.message\}`;/);
   assert.match(draw, /escapeHtml\(s\.status\)/);
-  assert.match(app, /markNav\(admin \? 'admin' :/);
+  assert.match(app, /markNav\(settings \? 'settings' :/);
   const f = await fixture();
   try {
-    const page = await f.call('GET', '/admin', { token: null });
+    const page = await f.call('GET', '/settings', { token: null });
     assert.equal(page.status, 200);
     assert.equal(page.text, readFileSync(WEB('index.html'), 'utf8'));
+    // Dane renamed it from Admin: the old address is not the page.
+    assert.notEqual((await f.call('GET', '/admin', { token: null })).text, page.text);
     // The demo's loop is refused with a message the page can show.
     const loop = await f.call('PUT', '/stage-colours', { token: f.store.issueToken(f.loop.id), body: { colours: { Queued: '#2b9cf2' } } });
     assert.equal(loop.status, 403);

@@ -51,7 +51,7 @@ const CHANGE_FIELDS = Object.freeze(['name', 'description', 'status', 'priority'
  * only ones served at all, by name. The page holds no data; everything it
  * shows comes through the API below with his token. `/`, `/t/<id>`, `/board`,
  * `/board/<project>`, `/list`, `/list/<project>`, `/new` (the New request
- * form) and `/admin` (the stage colours) all answer the page itself, so each address opens its own view;
+ * form) and `/settings` (the stage colours) all answer the page itself, so each address opens its own view;
  * `/projects` and `/projects/<project>` do too, for a browser opening them.
  */
 const WEB_DIR = new URL('./web/', import.meta.url);
@@ -85,7 +85,7 @@ const PAGE_HEADERS = Object.freeze({
  */
 function pageFile(pathname, accept = '') {
   if (/^\/projects(?:\/[^/]+)?$/.test(pathname)) return /\btext\/html\b/.test(accept) ? 'index.html' : null;
-  if (pathname === '/' || /^\/(?:tasks|board|list|new|admin)$/.test(pathname) || /^\/(?:t|board|list)\/[^/]+$/.test(pathname)) return 'index.html';
+  if (pathname === '/' || /^\/(?:tasks|board|list|new|settings)$/.test(pathname) || /^\/(?:t|board|list)\/[^/]+$/.test(pathname)) return 'index.html';
   const m = /^\/web\/([^/]+)$/.exec(pathname);
   return m && Object.hasOwn(WEB_FILES, m[1]) ? m[1] : null;
 }
@@ -223,7 +223,7 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
       return [200, { projects, default: fallback }];
     }
 
-    // Dane's page: the Admin page's stage colours. Anyone signed in reads
+    // Dane's page: the Settings page's stage colours. Anyone signed in reads
     // them; only a person changes them, never a loop.
     if (parts.length === 1 && parts[0] === 'stage-colours') {
       if (method === 'GET') return [200, stageColoursOf(store)];
