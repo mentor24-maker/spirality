@@ -194,3 +194,76 @@ export function renderComment(body, { operatorName } = {}) {
 export function tabTitle(waitingCount, pageTitle) {
   return Number.isInteger(waitingCount) && waitingCount > 0 ? `(${waitingCount}) Tracker` : pageTitle;
 }
+
+const CONTEXT_HEADING = "WHAT'S GOING ON";
+
+/**
+ * The "WHAT'S GOING ON" text of an operator card, as plain text, or null when
+ * the comment carries no card. Two forms, as for the banner: the heading line
+ * `ask` posts (maybe in `**…**`) and the paragraph under it, or an authored
+ * card's `@@CONTEXT` section, up to the next `@@` marker.
+ */
+export function cardContext(body) {
+  const lines = String(body ?? '').replace(/\r\n?/g, '\n').split('\n');
+  const heading = lines.findIndex((l) => unbold(l) === CONTEXT_HEADING);
+  const text = [];
+  if (heading !== -1) {
+    let i = heading + 1;
+    while (i < lines.length && !lines[i].trim()) i += 1;
+    while (i < lines.length && lines[i].trim() && !BANNER_RULE.test(unbold(lines[i])) && !BANNER_LABEL.test(unbold(lines[i]))) {
+      text.push(lines[i++].trim());
+    }
+  } else {
+    const raw = lines.findIndex((l) => RAW_SECTION.exec(l.trim())?.[1] === 'CONTEXT');
+    if (raw === -1) return null;
+    for (let i = raw + 1; i < lines.length && !RAW_SECTION.test(lines[i].trim()); i += 1) {
+      if (lines[i].trim()) text.push(lines[i].trim());
+    }
+  }
+  return text.join(' ') || null;
+}
+
+/**
+ * The description's first paragraph of prose, as plain text: headings,
+ * fenced code, rules and lists are passed over. Empty when there is none.
+ */
+export function firstParagraph(markdown) {
+  const lines = String(markdown ?? '').replace(/\r\n?/g, '\n').split('\n');
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (FENCE.test(line)) {
+      const run = FENCE.exec(line)[1];
+      i += 1;
+      while (i < lines.length && !closesFence(lines[i], run)) i += 1;
+      i += 1;
+      continue;
+    }
+    if (!line.trim() || HEADING.test(line) || RULE.test(line) || BULLET.test(line) || NUMBERED.test(line)) { i += 1; continue; }
+    const para = [];
+    while (i < lines.length && lines[i].trim() && !FENCE.test(lines[i]) && !HEADING.test(lines[i])
+      && !RULE.test(lines[i]) && !BULLET.test(lines[i]) && !NUMBERED.test(lines[i])) {
+      para.push(lines[i++].trim());
+    }
+    return para.join(' ');
+  }
+  return '';
+}
+
+/**
+ * The left side of a ticket page's Quick Action section, as HTML: the
+ * ticket's title, a short description and, in bold red, what is needed. The
+ * short description is the newest operator card's "WHAT'S GOING ON" text, or
+ * the description's first paragraph when no comment carries a card; what is
+ * needed is that newest card's ask, and there is no red line without one.
+ */
+export function renderQuickAction({ name, description, comments = [] }) {
+  const card = [...comments].reverse().find((c) => cardAsk(c.body) !== null);
+  const summary = card ? cardContext(card.body) ?? firstParagraph(description) : firstParagraph(description);
+  const ask = card ? cardAsk(card.body) : null;
+  return [
+    `<h1>${escapeHtml(name)}</h1>`,
+    summary ? `<p class="summary">${renderInline(summary)}</p>` : '',
+    ask ? `<p class="needed">${ask.split('\n').map(renderInline).join('<br>')}</p>` : '',
+  ].filter(Boolean).join('\n');
+}

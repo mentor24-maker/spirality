@@ -89,3 +89,8 @@ a.action { display: inline-flex; padding: 0.2rem; margin-right: 0.15rem; border-
 a.action:hover { color: #000; background: #e8e8ed; }
 .group th.assignee { width: 12%; }
 .group td { overflow-wrap: anywhere; }
+.quick { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; align-items: start; margin-bottom: 2rem; }
+.quick h1 { margin-top: 0; }
+.quick .needed { color: var(--red); font-weight: 700; white-space: pre-wrap; }
+details.details { border-top: var(--hairline); padding-top: 0.75rem; }
+details.details > summary { cursor: pointer; font-weight: 600; margin-bottom: 0.5rem; }
