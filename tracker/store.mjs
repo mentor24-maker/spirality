@@ -21,7 +21,12 @@
  *    writes one `events` row in the same transaction. Callers never write
  *    events.
  *  - Comments are append-only. No function edits or deletes one, so the
- *    trail the loop reads can never shift under it.
+ *    trail the loop reads can never shift under it. The one exception is
+ *    deleteTicket: an unstarted ticket goes with its comments and events.
+ *  - A ticket is never deleted once started. deleteTicket removes only a
+ *    `Requested` or `Queued` one, checking the status inside the same
+ *    transaction as the delete, so a claim at that moment either wins (the
+ *    delete is refused) or loses (it finds no ticket), never half of each.
  *  - Ticket ids are the project's own prefix plus a number (`<PREFIX>-1`). The
  *    prefix lives on the project row; nothing here knows any product.
  *  - Imports (tracker/import.mjs, and nothing else) file a ticket or post a
@@ -42,6 +47,9 @@ const STATUSES = Object.freeze(Object.keys(DISPLAY));
 const PRIORITIES = Object.freeze(Object.keys(PRIORITY_RANK));
 const ACTOR_KINDS = Object.freeze(['human', 'machine']);
 const IMPORT_KINDS = Object.freeze(['ticket', 'comment', 'actor']);
+
+/** The statuses a ticket may be deleted from: nobody has started it yet. */
+const DELETABLE = Object.freeze(['requested', 'queued']);
 
 /** The ticket fields a change may touch, and their column names. */
 const CHANGEABLE = Object.freeze({
@@ -561,6 +569,35 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
       });
     },
 
+    /**
+     * Delete a ticket nobody has started (`Requested` or `Queued`), with its
+     * comments and events. The status check and the delete are one
+     * transaction holding the write lock from its first read. Any other
+     * status is refused with `not-deletable` (the error carries `status`),
+     * an unknown id with `unknown-ticket`; either way nothing is removed.
+     * An imported ticket's `imported_ids` rows are kept, so a re-run of the
+     * importer still cannot file it again. Answers `{ id, status }`.
+     */
+    deleteTicket(id, { actor }) {
+      return transaction(() => {
+        requireActor(actor, 'the actor');
+        const row = requireTicketRow(id);
+        if (!DELETABLE.includes(row.status)) {
+          const err = new StoreError('not-deletable',
+            `ticket ${row.id} is "${row.status}": only a ticket nobody has started (${DELETABLE.join(' or ')}) can be deleted.`);
+          err.status = row.status;
+          throw err;
+        }
+        db.prepare('DELETE FROM events WHERE ticket = ?').run(row.id);
+        db.prepare('DELETE FROM comments WHERE ticket = ?').run(row.id);
+        const r = db.prepare('DELETE FROM tickets WHERE id = ? AND status = ?').run(row.id, row.status);
+        if (num(r.changes) !== 1 || ticketRow(row.id)) {
+          throw new StoreError('write-failed', `ticket ${row.id} was not deleted.`);
+        }
+        return { id: row.id, status: row.status };
+      });
+    },
+
     /** Post a comment, or a reply when `parent` names one on the same ticket. */
     postComment({ ticket, author, body, parent = null }) {
       requireText(body, "a comment's body");
@@ -671,4 +708,4 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
   };
 }
 
-export { STATUSES };
+export { STATUSES, DELETABLE };

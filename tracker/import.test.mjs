@@ -318,3 +318,24 @@ test('the importer hard-codes no product: no ids, names, slugs or prefixes in it
   assert.doesNotMatch(src, /spirality|starcaster|wavecenter|\bDane\b/i);
   assert.doesNotMatch(src, /\b(SP|SC|WC)-/);
 });
+
+test('a deleted unstarted ticket is not filed again by a re-run, and its comments are not re-posted', async () => {
+  const { store, cleanup } = freshStore();
+  try {
+    const data = {
+      tasks: [task('cu-q', { status: 'Queued', created: '2026-03-01T00:00:00Z', name: 'Queued one' })],
+      comments: { 'cu-q': [comment('cq1', { at: '2026-03-02T00:00:00Z', text: 'A note' })] },
+    };
+    await importLoopQueue({ tracker: fakeTracker(data), store, config: CONFIG });
+    const [t] = store.listTickets('widget');
+    assert.equal(t.status, 'queued');
+    store.deleteTicket(t.id, { actor: store.listComments(t.id)[0].author });
+    assert.equal(store.importedId({ source: SOURCE, kind: 'ticket', sourceId: 'cu-q' }), t.id);
+
+    const again = await importLoopQueue({ tracker: fakeTracker(data), store, config: CONFIG });
+    assert.deepEqual(again.counts.tickets, { read: 1, written: 0, skipped: 1, refused: 0 });
+    assert.equal(again.counts.comments.written, 0);
+    assert.deepEqual(store.listTickets('widget'), []);
+    assert.equal(store.getTicket(t.id), null);
+  } finally { cleanup(); }
+});
