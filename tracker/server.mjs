@@ -14,7 +14,8 @@
  *   403  a call only a person may make, from a machine's token
  *   404  an unknown project, ticket or address
  *   409  a guarded move found the ticket moved: `{ error, status, version }`,
- *        or a delete found the ticket started: `{ error: 'not-deletable', status }`
+ *        or a delete found the ticket started: `{ error: 'not-deletable', status }`,
+ *        or a project delete found it holds tickets: `{ error: 'has-tickets', tickets }`
  *   400  a bad field, or a body that names another author
  *   403  a write only a person may make, asked by a loop's token
  * A refused write writes nothing. A token never appears in an answer or a
@@ -48,6 +49,10 @@ const FILE_FIELDS = Object.freeze(['name', 'description', 'status', 'priority', 
 /** The fields a new project may carry. */
 const PROJECT_FIELDS = Object.freeze(['name', 'slug', 'prefix', 'url', 'logo', 'owner']);
 
+/** The fields a project change may carry. Its slug and prefix build every ticket's id, so they never change. */
+const PROJECT_CHANGE_FIELDS = Object.freeze(['name', 'url', 'logo', 'owner']);
+const PROJECT_FIXED_FIELDS = Object.freeze(['slug', 'prefix']);
+
 /**
  * A slug is the project's own part of every address (`/projects/<slug>`):
  * small letters, digits and single hyphens. `new` is the Create Project
@@ -65,7 +70,8 @@ const CHANGE_FIELDS = Object.freeze(['name', 'description', 'status', 'priority'
  * shows comes through the API below with his token. `/`, `/t/<id>`, `/board`,
  * `/board/<project>`, `/list`, `/list/<project>`, `/new` (the New request
  * form) and `/settings` (the stage colours) all answer the page itself, so each address opens its own view;
- * `/projects` and `/projects/<project>` do too, for a browser opening them.
+ * `/projects` and `/projects/<project>` do too, for a browser opening them,
+ * and `/projects/<project>/edit` (the Edit project form) always does.
  */
 const WEB_DIR = new URL('./web/', import.meta.url);
 const WEB_FILES = Object.freeze({
@@ -101,6 +107,7 @@ const PAGE_HEADERS = Object.freeze({
 function pageFile(pathname, accept = '') {
   if (/^\/projects(?:\/[^/]+)?$/.test(pathname)) return /\btext\/html\b/.test(accept) ? 'index.html' : null;
   if (pathname === '/' || /^\/(?:tasks|board|list|new|settings)$/.test(pathname) || /^\/(?:t|board|list)\/[^/]+$/.test(pathname)) return 'index.html';
+  if (/^\/projects\/[^/]+\/edit$/.test(pathname)) return 'index.html';
   const m = /^\/web\/([^/]+)$/.exec(pathname);
   return m && Object.hasOwn(WEB_FILES, m[1]) ? m[1] : null;
 }
@@ -287,6 +294,40 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
       const details = projectDetailsOf(store, parts[1]);
       if (!details) throw new HttpError(404, 'unknown-project', `no project "${parts[1]}".`);
       return [200, details];
+    }
+
+    // Dane's page: the Edit project form and the Delete icon. Only a person
+    // may change or delete a project; a machine's token is refused and
+    // nothing is written. A project with tickets is never deleted.
+    if (parts.length === 2 && parts[0] === 'projects' && (method === 'PATCH' || method === 'DELETE')) {
+      if (me.kind !== 'human') {
+        throw new HttpError(403, 'people-only', `only a person signed in to the tracker may ${method === 'PATCH' ? 'change' : 'delete'} a project; a machine may not.`);
+      }
+      const project = requireProject(parts[1]);
+      if (method === 'PATCH') {
+        const body = await readJson(req);
+        const fixed = PROJECT_FIXED_FIELDS.filter((k) => k in body);
+        if (fixed.length) {
+          throw new HttpError(400, 'not-changeable', `a project's ${fixed.join(' and ')} cannot change: every ticket's id and its project link are built from them.`);
+        }
+        checkBody(body, me, PROJECT_CHANGE_FIELDS);
+        if (body.owner != null && !Number.isInteger(body.owner)) {
+          throw new HttpError(400, 'bad-owner', `owner must be a person's actor id, not "${body.owner}".`);
+        }
+        store.updateProject(project.slug, pick(body, PROJECT_CHANGE_FIELDS));
+        return [200, projectDetailsOf(store, project.slug)];
+      }
+      let gone;
+      try {
+        gone = store.deleteProject(project.slug);
+      } catch (err) {
+        if (err instanceof StoreError && err.code === 'has-tickets') {
+          throw new HttpError(409, 'has-tickets', err.message, { project: project.slug, tickets: err.tickets });
+        }
+        throw err;
+      }
+      log(`deleted project ${gone.slug} (prefix ${gone.prefix}) actor=${me.id}`);
+      return [200, { deleted: gone.slug }];
     }
 
     // Dane's page: one project's board, the eight statuses in the contract's

@@ -96,8 +96,10 @@ table.tickets, details.group, section.group { border: var(--hairline); border-ra
 .group th.tags { width: 13%; }
 .group th.actions { width: 8%; }
 .group td.actions { white-space: nowrap; }
-a.action { display: inline-flex; padding: 0.2rem; margin-right: 0.15rem; border-radius: 4px; color: var(--quiet); }
-a.action:hover { color: #000; background: #e8e8ed; }
+a.action, button.action { display: inline-flex; padding: 0.2rem; margin-right: 0.15rem; border-radius: 4px; color: var(--quiet); }
+a.action:hover, button.action:hover { color: #000; background: #e8e8ed; }
+button.action { border: 0; background: transparent; cursor: pointer; vertical-align: middle; }
+button.action:disabled { opacity: 0.4; cursor: default; }
 .group th.assignee { width: 12%; }
 .group td { overflow-wrap: anywhere; }
 .quick { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; align-items: start; margin-bottom: 2rem; }

@@ -38,6 +38,13 @@
  *  - A project's owner is a person (a `human` actor), apart from its
  *    operator, who the loops hand tickets to. Its web address and logo are
  *    http(s) addresses, or nothing.
+ *  - A project's slug and ticket prefix never change once it is made: every
+ *    ticket's id and its project link are built from them. updateProject
+ *    changes its name, web address, logo and owner, nothing else.
+ *  - A project is deleted only while it holds no tickets. deleteProject
+ *    counts them inside the same transaction as the delete, so a ticket
+ *    filed at that moment either lands first (the delete is refused) or
+ *    finds no project, never a ticket left without one.
  *  - A stage's colour (the Settings page's pickers) is one of the eight
  *    statuses and a `#rrggbb` value, or no row at all. One set for the whole
  *    tracker, not one per project.
@@ -210,6 +217,9 @@ function hashToken(token) {
 
 /** SQLite hands integers back as numbers; keep ids plain numbers. */
 const num = (v) => (v == null ? null : Number(v));
+
+/** The project fields updateProject may change; the slug and prefix never do. */
+const PROJECT_CHANGEABLE = Object.freeze(['name', 'url', 'logo', 'owner']);
 
 /** The columns a project gained after the first databases were made, and their types. */
 const LATER_PROJECT_COLUMNS = Object.freeze({ url: 'TEXT', logo: 'TEXT', owner: 'INTEGER REFERENCES actors(id)' });
@@ -511,6 +521,67 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
         throw new StoreError('write-failed', `project "${slug}" did not read back as written.`);
       }
       return made;
+    },
+
+    /**
+     * Change a project's name, web address, logo or owner: only the fields
+     * given change. Its slug, prefix and operator are refused, never
+     * changed. Read back before it is answered.
+     */
+    updateProject(slug, changes = {}) {
+      const project = this.getProject(slug);
+      if (!project) throw new StoreError('unknown-project', `no project "${slug}".`);
+      const fields = Object.keys(changes);
+      const fixed = fields.filter((k) => !PROJECT_CHANGEABLE.includes(k));
+      if (fixed.length) {
+        throw new StoreError('not-changeable',
+          `a project's ${fixed.join(', ')} cannot be changed; only its ${PROJECT_CHANGEABLE.join(', ')} can.`);
+      }
+      const wanted = { ...project };
+      if ('name' in changes) {
+        requireText(changes.name, "a project's name");
+        wanted.name = changes.name;
+      }
+      if ('url' in changes) wanted.url = optionalAddress(changes.url, "a project's web address");
+      if ('logo' in changes) wanted.logo = optionalAddress(changes.logo, "a project's logo");
+      if ('owner' in changes) {
+        const owner = changes.owner ?? null;
+        if (owner != null && this.getActor(requireActor(owner, 'the owner')).kind !== 'human') {
+          throw new StoreError('bad-owner', `the owner must be a person; actor ${owner} is a machine.`);
+        }
+        wanted.owner = owner;
+      }
+      const r = db.prepare('UPDATE projects SET name = ?, url = ?, logo = ?, owner = ? WHERE slug = ?')
+        .run(wanted.name, wanted.url, wanted.logo, wanted.owner, slug);
+      const saved = this.getProject(slug);
+      if (num(r.changes) !== 1 || !saved || Object.keys(wanted).some((k) => saved[k] !== wanted[k])) {
+        throw new StoreError('write-failed', `project "${slug}" did not read back as changed.`);
+      }
+      return saved;
+    },
+
+    /**
+     * Delete a project that holds no tickets. One with tickets is refused
+     * (`has-tickets`, with their count) and nothing is removed. The count and
+     * the delete are one transaction. Answers `{ slug, prefix }`.
+     */
+    deleteProject(slug) {
+      return transaction(() => {
+        const project = this.getProject(slug);
+        if (!project) throw new StoreError('unknown-project', `no project "${slug}".`);
+        const tickets = num(db.prepare('SELECT COUNT(*) AS n FROM tickets WHERE project = ?').get(slug).n);
+        if (tickets > 0) {
+          const err = new StoreError('has-tickets',
+            `${project.prefix} has ${tickets} ticket${tickets === 1 ? '' : 's'}; a project with tickets cannot be deleted.`);
+          err.tickets = tickets;
+          throw err;
+        }
+        const r = db.prepare('DELETE FROM projects WHERE slug = ?').run(slug);
+        if (num(r.changes) !== 1 || this.getProject(slug)) {
+          throw new StoreError('write-failed', `project "${slug}" was not deleted.`);
+        }
+        return { slug: project.slug, prefix: project.prefix };
+      });
     },
 
     getProject(slug) {
