@@ -128,6 +128,9 @@ text programs read).
 | `GET /tickets/:id/events` | the history |
 | `GET /waiting` | for Dane's page: tickets in the operator's two statuses across every project, by the loop's own `waiting` verdict for the caller, newest first |
 | `GET /tickets/:id/thread` | for Dane's page: the ticket with each comment's author named and machine comments marked |
+| `GET /projects` | for Dane's page: every project with its slug, name, ticket prefix and open count, and the project the New request form starts on |
+| `GET /projects/:slug` | for Dane's page: one project's details, its operator by name, its open count and a count per status; 404 for an unknown slug |
+| `GET /projects/:slug/board` | for Dane's page: one project's tickets in the eight statuses, each in `queue` order |
 
 The store enforces only what keeps the data true: valid statuses, the
 atomic guards, authorship from the token. The contract's rules (only `ask`
@@ -149,7 +152,12 @@ more:
 3. **A board** per product: read-only columns of the seven statuses.
 
 The page is served by `tracker/server.mjs` at `/` (a ticket at `/t/<id>`)
-from `tracker/web/`. `node tracker/demo.mjs` starts a throwaway tracker
+from `tracker/web/`. `/projects` is a table of every project: choosing a
+name selects it and opens its tasks, and the View icon in its Actions column
+opens `/projects/<slug>`, that project's details (prefix, operator, open
+count, a count per status) with links to its board and list. A browser
+opening `/projects` or `/projects/<slug>` gets the page; the page's own
+call to the same address gets the data. `node tracker/demo.mjs` starts a throwaway tracker
 with test data to try it.
 
 Sign-in is a single password for Dane in the MVP. The page shows a count of
