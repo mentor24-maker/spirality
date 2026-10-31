@@ -421,3 +421,233 @@ test('a database made before actors had tokens gains the column, and its rows su
     } finally { store.close(); }
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('a Requested or Queued ticket is deleted with its comments and events; nothing of it reads back', () => {
+  const { store, human, machine, cleanup } = fixture();
+  try {
+    for (const status of ['requested', 'queued']) {
+      const keep = store.fileTicket({ project: 'alpha', actor: machine.id, name: 'kept', status });
+      store.postComment({ ticket: keep.id, author: human.id, body: 'stays' });
+      const t = store.fileTicket({ project: 'alpha', actor: machine.id, name: `gone ${status}`, status });
+      const a = store.postComment({ ticket: t.id, author: human.id, body: 'first' });
+      store.postComment({ ticket: t.id, author: machine.id, body: 'reply', parent: a.id });
+      store.changeTicket(t.id, { actor: human.id, priority: 'high' });
+
+      assert.deepEqual(store.deleteTicket(t.id, { actor: human.id }), { id: t.id, status });
+      assert.equal(store.getTicket(t.id), null);
+      assert.deepEqual(store.listComments(t.id), []);
+      assert.deepEqual(store.listEvents(t.id), []);
+      // Its neighbour is untouched.
+      assert.equal(store.getTicket(keep.id).name, 'kept');
+      assert.equal(store.listComments(keep.id).length, 1);
+      assert.equal(store.listEvents(keep.id).length, 1);
+    }
+  } finally { cleanup(); }
+});
+
+test('a started ticket, in any of the other six statuses, is refused with not-deletable naming its status, and all of it stays', () => {
+  const { store, human, machine, cleanup } = fixture();
+  try {
+    for (const status of STATUSES.filter((s) => !['requested', 'queued'].includes(s))) {
+      const t = store.fileTicket({ project: 'alpha', actor: machine.id, name: status, status });
+      store.postComment({ ticket: t.id, author: human.id, body: 'note' });
+      assert.throws(() => store.deleteTicket(t.id, { actor: human.id }),
+        (err) => err instanceof StoreError && err.code === 'not-deletable' && err.status === status
+          && err.message.includes(`"${status}"`), status);
+      assert.equal(store.getTicket(t.id).status, status);
+      assert.equal(store.listComments(t.id).length, 1);
+      assert.equal(store.listEvents(t.id).length, 1);
+    }
+    assert.throws(() => store.deleteTicket('AL-99', { actor: human.id }), { code: 'unknown-ticket' });
+    const q = store.fileTicket({ project: 'alpha', actor: machine.id, name: 'q', status: 'queued' });
+    assert.throws(() => store.deleteTicket(q.id, { actor: 999 }), { code: 'unknown-actor' });
+    assert.equal(store.getTicket(q.id).status, 'queued');
+  } finally { cleanup(); }
+});
+
+test('the check and the delete are one transaction: a ticket claimed after the caller read it Queued is refused', () => {
+  const { path, store, human, machine, cleanup } = fixture();
+  const loop = openStore(path);
+  try {
+    const t = store.fileTicket({ project: 'alpha', actor: machine.id, name: 'x', status: 'queued' });
+    assert.equal(store.getTicket(t.id).status, 'queued'); // the caller's read
+    assert.ok(loop.changeTicket(t.id, { actor: machine.id, ifStatus: 'queued', status: 'building' }).ok);
+    assert.throws(() => store.deleteTicket(t.id, { actor: human.id }), { code: 'not-deletable', status: 'building' });
+    assert.equal(store.getTicket(t.id).status, 'building');
+    // And the other way round: a delete that wins leaves the claim nothing to find.
+    const u = store.fileTicket({ project: 'alpha', actor: machine.id, name: 'y', status: 'queued' });
+    store.deleteTicket(u.id, { actor: human.id });
+    assert.throws(() => loop.changeTicket(u.id, { actor: machine.id, ifStatus: 'queued', status: 'building' }), { code: 'unknown-ticket' });
+  } finally { loop.close(); cleanup(); }
+});
+
+test('a delete and a claim racing in two threads: exactly one wins, never half of each', async () => {
+  const { path, store, human, machine, cleanup } = fixture();
+  try {
+    const storeUrl = new URL('./store.mjs', import.meta.url).href;
+    const source = `
+      import { workerData, parentPort } from 'node:worker_threads';
+      const { openStore } = await import(workerData.storeUrl);
+      const s = openStore(workerData.path);
+      Atomics.wait(new Int32Array(workerData.gate), 0, 0);
+      let ok;
+      try {
+        ok = workerData.op === 'delete'
+          ? Boolean(s.deleteTicket(workerData.id, { actor: workerData.actor }))
+          : s.changeTicket(workerData.id, { actor: workerData.actor, ifStatus: 'queued', status: 'building' }).ok;
+      } catch (err) {
+        ok = false;
+        if (!['not-deletable', 'unknown-ticket'].includes(err.code)) throw err;
+      }
+      s.close();
+      parentPort.postMessage(ok);
+    `;
+    for (let round = 0; round < 4; round++) {
+      const t = store.fileTicket({ project: 'alpha', actor: machine.id, name: `race ${round}`, status: 'queued' });
+      const gate = new SharedArrayBuffer(4);
+      const ops = [['delete', human.id], ['claim', machine.id]];
+      const results = ops.map(([op, actor]) => new Promise((resolve, reject) => {
+        const w = new Worker(source, { eval: true, type: 'module', workerData: { storeUrl, path, id: t.id, actor, op, gate } });
+        w.once('message', resolve);
+        w.once('error', reject);
+      }));
+      await new Promise((r) => setTimeout(r, 200));
+      Atomics.store(new Int32Array(gate), 0, 1);
+      Atomics.notify(new Int32Array(gate), 0);
+      const [deleted, claimed] = await Promise.all(results);
+      assert.equal(Number(deleted) + Number(claimed), 1, `round ${round}`);
+      const after = store.getTicket(t.id);
+      if (deleted) {
+        assert.equal(after, null);
+        assert.deepEqual(store.listEvents(t.id), []);
+      } else {
+        assert.equal(after.status, 'building');
+        assert.equal(store.listEvents(t.id).length, 2);
+      }
+    }
+  } finally { cleanup(); }
+});
+
+test('deleting an imported ticket keeps its map rows, so the import cannot file it again', () => {
+  const { store, human, cleanup } = fixture();
+  try {
+    const t = store.importTicket({
+      source: 'old', sourceId: 'x1', createdAt: '2026-01-01T00:00:00Z',
+      project: 'alpha', actor: human.id, name: 'imported', status: 'queued',
+    });
+    store.importComment({ source: 'old', sourceId: 'c1', createdAt: '2026-01-02T00:00:00Z', ticket: t.id, author: human.id, body: 'hi' });
+    store.deleteTicket(t.id, { actor: human.id });
+    assert.equal(store.importedId({ source: 'old', kind: 'ticket', sourceId: 'x1' }), t.id);
+    assert.equal(typeof store.importedId({ source: 'old', kind: 'comment', sourceId: 'c1' }), 'number');
+    assert.throws(() => store.importTicket({
+      source: 'old', sourceId: 'x1', createdAt: '2026-01-01T00:00:00Z',
+      project: 'alpha', actor: human.id, name: 'imported', status: 'queued',
+    }), { code: 'already-imported' });
+    assert.equal(store.listTickets('alpha').length, 0);
+  } finally { cleanup(); }
+});
+
+test('a project keeps its web address, logo and owner, and reads them back; none given is null', () => {
+  const { store, human, cleanup } = fixture();
+  try {
+    assert.deepEqual(store.getProject('alpha'), { slug: 'alpha', name: 'Alpha', prefix: 'AL', operator: human.id, url: null, logo: null, owner: null });
+    const made = store.createProject({
+      slug: 'beta', name: 'Beta', prefix: 'BE',
+      url: 'https://beta.example', logo: 'https://beta.example/logo.png', owner: human.id,
+    });
+    assert.deepEqual(made, {
+      slug: 'beta', name: 'Beta', prefix: 'BE', operator: null,
+      url: 'https://beta.example', logo: 'https://beta.example/logo.png', owner: human.id,
+    });
+    assert.deepEqual(store.getProject('beta'), made);
+    assert.deepEqual(store.listProjects().map((p) => p.slug), ['alpha', 'beta']);
+    assert.equal(store.createProject({ slug: 'gamma', name: 'G', prefix: 'GA', url: '', logo: '' }).url, null, 'an empty address is none');
+  } finally { cleanup(); }
+});
+
+test('a project\'s owner must be a person, and its addresses must be http(s); a refusal writes nothing', () => {
+  const { store, machine, cleanup } = fixture();
+  try {
+    for (const [fields, code] of [
+      [{ owner: machine.id }, 'bad-owner'],
+      [{ owner: 999 }, 'unknown-actor'],
+      [{ url: 'javascript:alert(1)' }, 'bad-address'],
+      [{ logo: 'data:image/png;base64,AAAA' }, 'bad-address'],
+      [{ url: 'not an address' }, 'bad-address'],
+      [{ slug: 'alpha' }, 'duplicate-project'],
+      [{ prefix: 'AL' }, 'duplicate-project'],
+      [{ name: '' }, 'missing'],
+    ]) {
+      assert.throws(() => store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE', ...fields }), { code }, JSON.stringify(fields));
+    }
+    assert.deepEqual(store.listProjects().map((p) => p.slug), ['alpha']);
+  } finally { cleanup(); }
+});
+
+test('the people are the human actors only, by id and name, never a token', () => {
+  const { store, human, machine, cleanup } = fixture();
+  try {
+    store.issueToken(human.id);
+    const second = store.createActor({ kind: 'human', name: 'Second' });
+    assert.deepEqual(store.listPeople(), [{ id: human.id, name: 'Operator' }, { id: second.id, name: 'Second' }]);
+    assert.ok(!store.listPeople().some((p) => p.id === machine.id));
+  } finally { cleanup(); }
+});
+
+test('a database made before projects had a web address, logo and owner gains the columns, and every project and ticket is unchanged', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tracker-store-'));
+  const path = join(dir, 'old.db');
+  try {
+    // The shape the live tracker was made with, before this change.
+    const old = new DatabaseSync(path);
+    old.exec(`
+      CREATE TABLE actors (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL CHECK (kind IN ('human', 'machine')), name TEXT NOT NULL, token_hash TEXT);
+      CREATE TABLE projects (slug TEXT PRIMARY KEY, name TEXT NOT NULL, prefix TEXT NOT NULL UNIQUE, operator INTEGER REFERENCES actors(id), next_number INTEGER NOT NULL DEFAULT 1);
+      CREATE TABLE tickets (id TEXT PRIMARY KEY, project TEXT NOT NULL REFERENCES projects(slug), number INTEGER NOT NULL, name TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '', status TEXT NOT NULL, priority TEXT, tags TEXT NOT NULL DEFAULT '[]', assignee INTEGER REFERENCES actors(id),
+        loop_note TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, version INTEGER NOT NULL DEFAULT 1, UNIQUE (project, number));
+      INSERT INTO actors (kind, name) VALUES ('human', 'Old operator');
+      INSERT INTO projects (slug, name, prefix, operator, next_number) VALUES ('old', 'Old', 'OL', 1, 3);
+      INSERT INTO tickets (id, project, number, name, description, status, priority, tags, assignee, loop_note, created_at, updated_at, version)
+        VALUES ('OL-1', 'old', 1, 'First', 'the spec', 'queued', 'high', '["x"]', 1, 'note', '2026-10-01T00:00:00.000Z', '2026-10-02T00:00:00.000Z', 4),
+               ('OL-2', 'old', 2, 'Second', '', 'live', NULL, '[]', NULL, '', '2026-10-03T00:00:00.000Z', '2026-10-03T00:00:00.000Z', 1);
+    `);
+    const ticketsBefore = old.prepare('SELECT * FROM tickets ORDER BY id').all();
+    old.close();
+
+    const store = openStore(path);
+    try {
+      assert.deepEqual(store.getProject('old'), { slug: 'old', name: 'Old', prefix: 'OL', operator: 1, url: null, logo: null, owner: null });
+      assert.deepEqual(store.listTickets('old').map((t) => [t.id, t.name, t.status, t.version]), [['OL-1', 'First', 'queued', 4], ['OL-2', 'Second', 'live', 1]]);
+      // The next ticket still takes the old project's next number.
+      assert.equal(store.fileTicket({ project: 'old', actor: 1, name: 'Third', status: 'queued' }).id, 'OL-3');
+      assert.equal(store.createProject({ slug: 'new-one', name: 'New', prefix: 'NW', owner: 1, url: 'https://n.example' }).owner, 1);
+    } finally { store.close(); }
+
+    // Opened a second time, nothing is added twice, and the old rows are byte-for-byte what they were.
+    const again = openStore(path);
+    again.close();
+    const raw = new DatabaseSync(path);
+    try {
+      assert.deepEqual(raw.prepare('PRAGMA table_info(projects)').all().map((c) => c.name),
+        ['slug', 'name', 'prefix', 'operator', 'next_number', 'url', 'logo', 'owner']);
+      assert.deepEqual(raw.prepare("SELECT * FROM tickets WHERE id IN ('OL-1', 'OL-2') ORDER BY id").all(), ticketsBefore);
+    } finally { raw.close(); }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('stage colours: set, read back, cleared, kept across a reopen; a bad colour or status writes nothing', () => {
+  const { path, store, cleanup } = fixture();
+  try {
+    assert.deepEqual(store.stageColours(), {});
+    assert.deepEqual(store.setStageColours({ Queued: '#2B9CF2', 'In review': '#cc0000' }), { 'in review': '#cc0000', queued: '#2b9cf2' });
+    assert.deepEqual(store.setStageColours({ queued: null, Live: '#00aa00' }), { 'in review': '#cc0000', live: '#00aa00' });
+    const again = openStore(path);
+    try { assert.deepEqual(again.stageColours(), { 'in review': '#cc0000', live: '#00aa00' }); } finally { again.close(); }
+    const before = store.stageColours();
+    for (const colours of [{ Queued: 'blue' }, { Queued: '#abc' }, { Queued: '#2b9cf2', Live: '#zzzzzz' }, { Nope: '#2b9cf2' }, null, ['#2b9cf2']]) {
+      assert.throws(() => store.setStageColours(colours), StoreError, JSON.stringify(colours));
+    }
+    assert.deepEqual(store.stageColours(), before, 'a refused set writes nothing, not even its good values');
+  } finally { cleanup(); }
+});

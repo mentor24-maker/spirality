@@ -1,8 +1,9 @@
 /**
  * Dane's page (docs/TRACKER_MVP.md, "Dane's page"): sign in, see what waits
  * on you, open a ticket, answer it, pick a project, see that project's
- * whole queue as a board or as a list, see one project's details, file a
- * new request, and copy a ticket into another project. Plain browser
+ * whole queue as a board or as a list, see one project's details, add a
+ * project (a person only), file a new request, copy a ticket into another
+ * project, and choose a colour for each stage on the Settings page. Plain browser
  * JavaScript, no packages,
  * no build step; tracker/server.mjs serves it.
  *
@@ -14,7 +15,7 @@
  * holds. It is kept in this browser's local storage so a pinned tab stays
  * signed in, and sent only to this server. "Sign out" forgets it.
  */
-import { escapeHtml, renderComment, renderMarkdown, renderQuickAction, renderTrail, tabTitle } from './render.mjs';
+import { escapeHtml, mergeQuestion, renderComment, renderMarkdown, renderMergeAction, renderQuickAction, renderTrail, tabTitle } from './render.mjs';
 
 const TOKEN_KEY = 'tracker-token';
 /** Board or list: the last one opened, so "Tasks" in the header opens it again. */
@@ -163,6 +164,19 @@ function action(href, label, icon, offSite = false) {
     + `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icon}</svg></a>`;
 }
 
+/** Only an http(s) address is ever drawn as a link or an image; anything else is not drawn. */
+const isWebAddress = (v) => typeof v === 'string' && /^https?:\/\//i.test(v);
+
+/** A project's logo, drawn small, or nothing when it has none. */
+const logoOf = (p, cls = 'logo') => (isWebAddress(p.logo)
+  ? `<img class="${cls}" src="${escapeHtml(p.logo)}" alt="" referrerpolicy="no-referrer">`
+  : '');
+
+/** A project's web address as a link that opens a new tab, or "none". */
+const addressOf = (p) => (isWebAddress(p.url)
+  ? `<a href="${escapeHtml(p.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(p.url)}</a>`
+  : '<span class="quiet">none</span>');
+
 /** The remembered view; a browser that will not keep it answers "list". */
 function savedView() {
   try { return localStorage.getItem(VIEW_KEY) === 'board' ? 'board' : 'list'; } catch { return 'list'; }
@@ -182,10 +196,12 @@ function showProject() {
 }
 
 /**
- * Every project, one row each: its name, slug, ticket ids, how many tickets
- * are open, and an Actions column whose View icon opens its details page.
- * Choosing a name selects the project and opens its tasks; the selected one
- * is marked, and "Tasks" in the header goes back to it.
+ * Every project, one row each: its logo, name, slug, ticket ids, web
+ * address, owner, how many tickets are open, and an Actions column whose
+ * View icon opens its details page. Choosing a name selects the project and
+ * opens its tasks; the selected one is marked, and "Tasks" in the header
+ * goes back to it. A person signed in gets a New project button; a loop's
+ * sign-in does not, and the server refuses it anyway.
  */
 async function drawProjects() {
   const { projects } = await api('GET', '/projects');
@@ -199,23 +215,28 @@ async function drawProjects() {
   }
   const row = (p) => `
     <tr${p.slug === selected ? ' class="selected"' : ''}>
+      <td class="logo">${logoOf(p)}</td>
       <td class="name"><a href="/${savedView()}/${encodeURIComponent(p.slug)}"${p.slug === selected ? ' aria-current="true"' : ''}>${escapeHtml(p.name)}</a>${p.slug === selected ? '<span class="tag">Selected</span>' : ''}</td>
       <td class="slug">${escapeHtml(p.slug)}</td>
       <td class="prefix">${escapeHtml(p.prefix)}</td>
+      <td class="url">${addressOf(p)}</td>
+      <td class="owner">${p.owner ? escapeHtml(p.owner.name) : '<span class="quiet">nobody</span>'}</td>
       <td class="open">${p.open}</td>
       <td class="actions">${action(`/projects/${encodeURIComponent(p.slug)}`, 'View project', ICONS.view)}</td>
     </tr>`;
   main.innerHTML = `
     <h1>Projects</h1>
+    ${me?.kind === 'human' ? '<div class="toolbar"><a class="button" href="/projects/new">New project</a></div>' : ''}
     ${projects.length
     ? `<p class="quiet">Choose a project's name to see its tasks.</p>
-      <table class="projects"><thead><tr><th class="name">Name</th><th class="slug">Slug</th><th class="prefix">Ticket prefix</th><th class="open">Open tickets</th><th class="actions">Actions</th></tr></thead><tbody>${projects.map(row).join('')}</tbody></table>`
+      <table class="projects"><thead><tr><th class="logo"><span class="hidden">Logo</span></th><th class="name">Name</th><th class="slug">Slug</th><th class="prefix">Ticket prefix</th><th class="url">Web address</th><th class="owner">Owner</th><th class="open">Open tickets</th><th class="actions">Actions</th></tr></thead><tbody>${projects.map(row).join('')}</tbody></table>`
     : '<p class="quiet">There are no projects yet.</p>'}`;
   putTrail([{ label: 'Projects' }]);
 }
 
 /**
- * One project's details: its name, slug, ticket prefix, operator, how many
+ * One project's details: its logo, name, slug, ticket prefix, web address,
+ * owner, operator, how many
  * tickets are open and how many sit in each status, with links to its board
  * and its list. Read-only. An unknown slug says so plainly.
  */
@@ -234,7 +255,7 @@ async function drawProjectDetails(slug) {
   const at = (v) => `/${v}/${encodeURIComponent(p.slug)}`;
   const counts = p.statuses.map((s) => `<tr><td class="status">${escapeHtml(s.status)}</td><td class="count">${s.count}</td></tr>`).join('');
   main.innerHTML = `
-    <h1>${escapeHtml(p.name)}</h1>
+    <h1 class="project">${logoOf(p, 'logo big')}${escapeHtml(p.name)}</h1>
     <div class="toolbar">
       <a href="/projects">All projects</a>
       <nav class="views" aria-label="Open"><a href="${at('board')}">Board</a><a href="${at('list')}">List</a></nav>
@@ -242,12 +263,70 @@ async function drawProjectDetails(slug) {
     <dl class="details">
       <dt>Slug</dt><dd>${escapeHtml(p.slug)}</dd>
       <dt>Ticket prefix</dt><dd>${escapeHtml(p.prefix)}</dd>
+      <dt>Web address</dt><dd>${addressOf(p)}</dd>
+      <dt>Owner</dt><dd>${p.owner ? escapeHtml(p.owner.name) : '<span class="quiet">nobody</span>'}</dd>
       <dt>Operator</dt><dd>${p.operator ? escapeHtml(p.operator.name) : '<span class="quiet">nobody</span>'}</dd>
       <dt>Open tickets</dt><dd>${p.open}</dd>
     </dl>
     <h2>Tickets by status</h2>
     <table class="counts"><thead><tr><th>Status</th><th class="count">Tickets</th></tr></thead><tbody>${counts}</tbody></table>`;
   putTrail([{ label: p.name, href: '/projects' }, { label: 'Details' }]);
+}
+
+/**
+ * The Create Project form, for a person only: name, slug, ticket prefix, web
+ * address, logo (an image's web address) and owner, picked from the
+ * tracker's people. Saving files the project and opens its details page,
+ * which reads it back from the server. A refused save shows the server's own
+ * message and leaves every field as typed: the form is not redrawn.
+ */
+async function drawCreateProject() {
+  setTitle('New project · Tracker');
+  if (me?.kind !== 'human') {
+    main.innerHTML = '<h1>New project</h1><p>Only a person signed in to the tracker can add a project.</p><p><a href="/projects">Back to Projects</a></p>';
+    return;
+  }
+  const { people } = await api('GET', '/people');
+  const field = (id, label, hint, attrs = '') => `
+      <label for="${id}">${label}</label>
+      ${hint ? `<span class="hint quiet">${hint}</span>` : ''}
+      <input id="${id}" type="text"${attrs}>`;
+  main.innerHTML = `
+    <h1>New project</h1>
+    <form class="request project">
+      ${field('name', 'Name', '', ' required')}
+      ${field('slug', 'Slug', 'Its part of every address, like my-project: small letters, digits and hyphens.', ' required autocapitalize="off" spellcheck="false"')}
+      ${field('prefix', 'Ticket prefix', 'The start of its ticket ids, like SP in SP-12: capital letters and digits.', ' required autocapitalize="characters" spellcheck="false"')}
+      ${field('url', 'Web address', 'Optional. Starts http:// or https://.', ' inputmode="url" spellcheck="false"')}
+      ${field('logo', 'Logo', "Optional. An image's web address, starting http:// or https://.", ' inputmode="url" spellcheck="false"')}
+      <label for="owner">Owner</label>
+      <select id="owner"><option value="">Nobody</option>${people.map((p) => `<option value="${escapeHtml(p.id)}"${p.id === me.id ? ' selected' : ''}>${escapeHtml(p.name)}</option>`).join('')}</select>
+      <div class="row"><button type="submit">Add project</button><a href="/projects">Cancel</a><span class="note"></span></div>
+    </form>`;
+  const form = main.querySelector('form.project');
+  const value = (id) => form.querySelector(`#${id}`).value;
+  const note = form.querySelector('.note');
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const button = form.querySelector('button');
+    button.disabled = true;
+    note.className = 'note quiet';
+    note.textContent = 'Adding…';
+    try {
+      const made = await api('POST', '/projects', {
+        name: value('name'), slug: value('slug'), prefix: value('prefix'),
+        url: value('url'), logo: value('logo'), owner: value('owner') ? Number(value('owner')) : null,
+      });
+      history.pushState(null, '', `/projects/${encodeURIComponent(made.slug)}`);
+      await route();
+    } catch (err) {
+      if (err instanceof SignedOut) return drawSignIn('You were signed out; the project was not added.');
+      note.className = 'note error';
+      note.textContent = `Not added: ${err.message}`;
+      button.disabled = false;
+    }
+  });
+  form.querySelector('#name').focus();
 }
 
 /**
@@ -360,11 +439,14 @@ async function drawTicket(id) {
   main.innerHTML = `
     <section class="quick">
       <div class="ask">${renderQuickAction(t)}</div>
+      <div class="act">
+      ${renderMergeAction(t)}
       <form class="reply">
         <label for="reply">Reply as ${escapeHtml(me?.name ?? 'you')}</label>
         <textarea id="reply" required></textarea>
         <div class="row"><button type="submit">Post reply</button><span class="note"></span></div>
       </form>
+      </div>
     </section>
     <details class="details">
       <summary>Details</summary>
@@ -408,6 +490,29 @@ async function drawTicket(id) {
       if (err instanceof SignedOut) return drawSignIn('You were signed out; the ticket was not copied.');
       copyNote.className = 'note error';
       copyNote.textContent = `Not copied: ${err.message}`;
+      button.disabled = false;
+    }
+  });
+  // Merge: his word from the server's project config, posted as his own
+  // reply through the same call the reply box uses. The relay merges it.
+  const mergeForm = main.querySelector('form.merge-action');
+  mergeForm?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (!confirm(mergeQuestion(t))) return;
+    const button = mergeForm.querySelector('button');
+    const mergeNote = mergeForm.querySelector('.note');
+    button.disabled = true;
+    mergeNote.className = 'note quiet';
+    mergeNote.textContent = 'Posting…';
+    try {
+      await api('POST', `/tickets/${encodeURIComponent(t.id)}/comments`, { body: t.mergePhrase });
+      await drawTicket(t.id);
+      main.querySelector('details.details').open = true;
+      main.querySelector('.comment:last-of-type')?.scrollIntoView({ block: 'center' });
+    } catch (err) {
+      if (err instanceof SignedOut) return drawSignIn('You were signed out; the merge word was not posted.');
+      mergeNote.className = 'note error';
+      mergeNote.textContent = `Not posted: ${err.message}`;
       button.disabled = false;
     }
   });
@@ -518,6 +623,70 @@ async function drawNew() {
   title.focus();
 }
 
+/**
+ * The Settings page: every stage in the contract's order, as the server lists
+ * them, each with a colour picker and a Clear button. One Save stores them
+ * all; the page then reads the colours back and says they were saved only
+ * when what it reads is what it sent. A loop's sign-in is refused by the
+ * server, and the page shows that refusal as it is.
+ */
+async function drawSettings() {
+  const { stages } = await api('GET', '/stage-colours');
+  setTitle('Settings · Tracker');
+  /** What each stage will be saved as: `#rrggbb`, or null for no colour. */
+  const chosen = Object.fromEntries(stages.map((s) => [s.status, s.colour]));
+  const row = (s, i) => `
+    <tr data-status="${escapeHtml(s.status)}">
+      <td class="status"><label for="colour-${i}">${escapeHtml(s.status)}</label></td>
+      <td class="picker"><input id="colour-${i}" type="color"></td>
+      <td class="value"></td>
+      <td class="clear"><button type="button">Clear</button></td>
+    </tr>`;
+  main.innerHTML = `
+    <h1>Settings</h1>
+    <h2>Stage colours</h2>
+    <p class="quiet">Choose a colour for each stage of the loop. The same colours show for everyone.</p>
+    <form class="colours">
+      <table class="colours"><thead><tr><th>Stage</th><th>Colour</th><th></th><th></th></tr></thead><tbody>${stages.map(row).join('')}</tbody></table>
+      <div class="row"><button type="submit">Save</button><span class="note"></span></div>
+    </form>`;
+  const form = main.querySelector('form.colours');
+  const rows = [...form.querySelectorAll('tbody tr')];
+  const show = (tr) => {
+    const colour = chosen[tr.dataset.status];
+    // A picker cannot show "none": it shows black, greyed, beside the words "no colour".
+    tr.querySelector('input').value = colour ?? '#000000';
+    tr.classList.toggle('unset', colour == null);
+    tr.querySelector('.value').textContent = colour ?? 'no colour';
+  };
+  for (const tr of rows) {
+    show(tr);
+    tr.querySelector('input').addEventListener('input', (e) => { chosen[tr.dataset.status] = e.target.value; show(tr); });
+    tr.querySelector('button').addEventListener('click', () => { chosen[tr.dataset.status] = null; show(tr); });
+  }
+  const note = form.querySelector('.note');
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const button = form.querySelector('button[type="submit"]');
+    button.disabled = true;
+    note.className = 'note quiet';
+    note.textContent = 'Saving…';
+    try {
+      await api('PUT', '/stage-colours', { colours: chosen });
+      // Read back before saying it worked.
+      const back = await api('GET', '/stage-colours');
+      const wrong = back.stages.filter((s) => s.colour !== (chosen[s.status] ?? null));
+      if (wrong.length) throw new Error(`the tracker read back different colours for ${wrong.map((s) => s.status).join(', ')}.`);
+      note.textContent = 'Saved: the colours are stored on the tracker.';
+    } catch (err) {
+      if (err instanceof SignedOut) return drawSignIn('You were signed out; the colours were not saved.');
+      note.className = 'note error';
+      note.textContent = `Not saved: ${err.message}`;
+    }
+    button.disabled = false;
+  });
+}
+
 /** Underline the header link for the screen showing. */
 function markNav(which) {
   for (const a of document.querySelectorAll('nav.site a')) a.classList.toggle('current', a.dataset.nav === which);
@@ -533,11 +702,16 @@ async function route() {
     const ticket = /^\/t\/([^/]+)$/.exec(location.pathname);
     const project = /^\/(board|list)(?:\/([^/]+))?$/.exec(location.pathname);
     const projects = location.pathname === '/projects';
-    const details = /^\/projects\/([^/]+)$/.exec(location.pathname);
+    const newProject = location.pathname === '/projects/new';
+    const details = !newProject && /^\/projects\/([^/]+)$/.exec(location.pathname);
     const tasks = location.pathname === '/tasks';
     const isNew = location.pathname === '/new';
-    markNav(isNew ? 'new' : projects || details ? 'projects' : ticket || project || tasks ? 'tasks' : 'waiting');
-    if (isNew) {
+    const settings = location.pathname === '/settings';
+    markNav(settings ? 'settings' : isNew ? 'new' : projects || newProject || details ? 'projects' : ticket || project || tasks ? 'tasks' : 'waiting');
+    if (settings) {
+      await drawSettings();
+      await refreshCount();
+    } else if (isNew) {
       await drawNew();
       await refreshCount();
     } else if (ticket) {
@@ -545,6 +719,9 @@ async function route() {
       await refreshCount();
     } else if (projects) {
       await drawProjects();
+      await refreshCount();
+    } else if (newProject) {
+      await drawCreateProject();
       await refreshCount();
     } else if (details) {
       await drawProjectDetails(decodeURIComponent(details[1]));

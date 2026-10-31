@@ -21,7 +21,12 @@
  *    writes one `events` row in the same transaction. Callers never write
  *    events.
  *  - Comments are append-only. No function edits or deletes one, so the
- *    trail the loop reads can never shift under it.
+ *    trail the loop reads can never shift under it. The one exception is
+ *    deleteTicket: an unstarted ticket goes with its comments and events.
+ *  - A ticket is never deleted once started. deleteTicket removes only a
+ *    `Requested` or `Queued` one, checking the status inside the same
+ *    transaction as the delete, so a claim at that moment either wins (the
+ *    delete is refused) or loses (it finds no ticket), never half of each.
  *  - Ticket ids are the project's own prefix plus a number (`<PREFIX>-1`). The
  *    prefix lives on the project row; nothing here knows any product.
  *  - Imports (tracker/import.mjs, and nothing else) file a ticket or post a
@@ -30,6 +35,12 @@
  *    exist without its map row, so a re-run cannot file it twice.
  *  - An actor's sign-in token is stored only as its SHA-256 hash. The token
  *    itself is handed back once, by issueToken, and never kept.
+ *  - A project's owner is a person (a `human` actor), apart from its
+ *    operator, who the loops hand tickets to. Its web address and logo are
+ *    http(s) addresses, or nothing.
+ *  - A stage's colour (the Settings page's pickers) is one of the eight
+ *    statuses and a `#rrggbb` value, or no row at all. One set for the whole
+ *    tracker, not one per project.
  */
 import { createHash, randomBytes } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
@@ -42,6 +53,9 @@ const STATUSES = Object.freeze(Object.keys(DISPLAY));
 const PRIORITIES = Object.freeze(Object.keys(PRIORITY_RANK));
 const ACTOR_KINDS = Object.freeze(['human', 'machine']);
 const IMPORT_KINDS = Object.freeze(['ticket', 'comment', 'actor']);
+
+/** The statuses a ticket may be deleted from: nobody has started it yet. */
+const DELETABLE = Object.freeze(['requested', 'queued']);
 
 /** The ticket fields a change may touch, and their column names. */
 const CHANGEABLE = Object.freeze({
@@ -66,7 +80,10 @@ CREATE TABLE IF NOT EXISTS projects (
   name        TEXT NOT NULL,
   prefix      TEXT NOT NULL UNIQUE,
   operator    INTEGER REFERENCES actors(id),
-  next_number INTEGER NOT NULL DEFAULT 1
+  next_number INTEGER NOT NULL DEFAULT 1,
+  url         TEXT,
+  logo        TEXT,
+  owner       INTEGER REFERENCES actors(id)
 );
 CREATE TABLE IF NOT EXISTS tickets (
   id          TEXT PRIMARY KEY,
@@ -108,6 +125,10 @@ CREATE TABLE IF NOT EXISTS imported_ids (
   new_id      TEXT NOT NULL,
   PRIMARY KEY (source, kind, source_id)
 );
+CREATE TABLE IF NOT EXISTS stage_colours (
+  status      TEXT PRIMARY KEY,
+  colour      TEXT NOT NULL
+);
 CREATE UNIQUE INDEX IF NOT EXISTS actors_by_token ON actors (token_hash);
 CREATE INDEX IF NOT EXISTS tickets_by_project ON tickets (project, status);
 CREATE INDEX IF NOT EXISTS comments_by_ticket ON comments (ticket, id);
@@ -130,6 +151,15 @@ function canonicalStatus(status) {
     throw new StoreError('unknown-status', `"${status}" is not one of the eight statuses: ${Object.values(DISPLAY).join(', ')}.`);
   }
   return s;
+}
+
+/** A stage colour as the store keeps it: `#rrggbb`, lower-cased; null clears it. */
+function canonicalColour(colour, status) {
+  if (colour === null) return null;
+  if (typeof colour !== 'string' || !/^#[0-9a-f]{6}$/i.test(colour)) {
+    throw new StoreError('bad-colour', `the colour for ${DISPLAY[status]} must be #rrggbb (like #2b9cf2), not "${colour}".`);
+  }
+  return colour.toLowerCase();
 }
 
 function canonicalPriority(priority) {
@@ -180,6 +210,29 @@ function hashToken(token) {
 
 /** SQLite hands integers back as numbers; keep ids plain numbers. */
 const num = (v) => (v == null ? null : Number(v));
+
+/** The columns a project gained after the first databases were made, and their types. */
+const LATER_PROJECT_COLUMNS = Object.freeze({ url: 'TEXT', logo: 'TEXT', owner: 'INTEGER REFERENCES actors(id)' });
+
+/** An optional web address: null for none, an http(s) address, or a thrown refusal. */
+function optionalAddress(value, what) {
+  if (value == null || value === '') return null;
+  if (typeof value === 'string') {
+    try {
+      const u = new URL(value);
+      if ((u.protocol === 'http:' || u.protocol === 'https:') && value === value.trim()) return value;
+    } catch { /* refused below */ }
+  }
+  throw new StoreError('bad-address', `${what} must be a web address starting http:// or https://, not "${value}".`);
+}
+
+function projectFromRow(row) {
+  if (!row) return null;
+  return {
+    slug: row.slug, name: row.name, prefix: row.prefix, operator: num(row.operator),
+    url: row.url, logo: row.logo, owner: num(row.owner),
+  };
+}
 
 function ticketFromRow(row) {
   if (!row) return null;
@@ -248,6 +301,12 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
     db.exec('ALTER TABLE actors ADD COLUMN token_hash TEXT');
   }
   db.exec(SCHEMA);
+  // A database made before projects had a web address, a logo and an owner
+  // gains the columns, empty; every existing row is otherwise untouched.
+  const projectColumns = new Set(db.prepare('PRAGMA table_info(projects)').all().map((c) => c.name));
+  for (const [column, type] of Object.entries(LATER_PROJECT_COLUMNS)) {
+    if (!projectColumns.has(column)) db.exec(`ALTER TABLE projects ADD COLUMN ${column} ${type}`);
+  }
 
   /**
    * Run `fn` inside one transaction. IMMEDIATE takes the write lock before
@@ -414,35 +473,53 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
       return row ? this.getActor(num(row.id)) : null;
     },
 
-    /** A product: its slug, its name, its ticket-id prefix, its operator. */
-    createProject({ slug, name, prefix, operator = null }) {
+    /** Every person (never a machine), oldest first: the owner a project may name. Never a token. */
+    listPeople() {
+      return db.prepare("SELECT id, name FROM actors WHERE kind = 'human' ORDER BY id").all()
+        .map((row) => ({ id: num(row.id), name: row.name }));
+    },
+
+    /**
+     * A product: its slug, its name, its ticket-id prefix, its operator, and
+     * optionally its web address, its logo (an image's web address) and its
+     * owner (a person). Read back before it is answered.
+     */
+    createProject({ slug, name, prefix, operator = null, url = null, logo = null, owner = null }) {
       requireText(slug, "a project's slug");
       requireText(name, "a project's name");
       if (typeof prefix !== 'string' || !/^[A-Z][A-Z0-9]*$/.test(prefix)) {
         throw new StoreError('bad-prefix', `a ticket prefix is capital letters and digits, starting with a letter, not "${prefix}".`);
       }
       if (operator != null) requireActor(operator, 'the operator');
+      const address = optionalAddress(url, "a project's web address");
+      const image = optionalAddress(logo, "a project's logo");
+      if (owner != null && this.getActor(requireActor(owner, 'the owner')).kind !== 'human') {
+        throw new StoreError('bad-owner', `the owner must be a person; actor ${owner} is a machine.`);
+      }
       try {
-        db.prepare('INSERT INTO projects (slug, name, prefix, operator) VALUES (?, ?, ?, ?)')
-          .run(slug, name, prefix, operator);
+        db.prepare('INSERT INTO projects (slug, name, prefix, operator, url, logo, owner) VALUES (?, ?, ?, ?, ?, ?, ?)')
+          .run(slug, name, prefix, operator, address, image, owner);
       } catch (err) {
         if (/UNIQUE/.test(err.message)) {
           throw new StoreError('duplicate-project', `a project with slug "${slug}" or prefix "${prefix}" already exists.`);
         }
         throw err;
       }
-      return this.getProject(slug);
+      const made = this.getProject(slug);
+      const wanted = { slug, name, prefix, operator, url: address, logo: image, owner };
+      if (!made || Object.keys(wanted).some((k) => made[k] !== wanted[k])) {
+        throw new StoreError('write-failed', `project "${slug}" did not read back as written.`);
+      }
+      return made;
     },
 
     getProject(slug) {
-      const row = db.prepare('SELECT slug, name, prefix, operator FROM projects WHERE slug = ?').get(slug);
-      return row ? { slug: row.slug, name: row.name, prefix: row.prefix, operator: num(row.operator) } : null;
+      return projectFromRow(db.prepare('SELECT * FROM projects WHERE slug = ?').get(slug));
     },
 
     /** Every project, by slug: Dane's page lists what waits on him across all of them. */
     listProjects() {
-      return db.prepare('SELECT slug, name, prefix, operator FROM projects ORDER BY slug').all()
-        .map((row) => ({ slug: row.slug, name: row.name, prefix: row.prefix, operator: num(row.operator) }));
+      return db.prepare('SELECT * FROM projects ORDER BY slug').all().map(projectFromRow);
     },
 
     /** File a ticket. Its id is the project's prefix and next number. */
@@ -561,6 +638,35 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
       });
     },
 
+    /**
+     * Delete a ticket nobody has started (`Requested` or `Queued`), with its
+     * comments and events. The status check and the delete are one
+     * transaction holding the write lock from its first read. Any other
+     * status is refused with `not-deletable` (the error carries `status`),
+     * an unknown id with `unknown-ticket`; either way nothing is removed.
+     * An imported ticket's `imported_ids` rows are kept, so a re-run of the
+     * importer still cannot file it again. Answers `{ id, status }`.
+     */
+    deleteTicket(id, { actor }) {
+      return transaction(() => {
+        requireActor(actor, 'the actor');
+        const row = requireTicketRow(id);
+        if (!DELETABLE.includes(row.status)) {
+          const err = new StoreError('not-deletable',
+            `ticket ${row.id} is "${row.status}": only a ticket nobody has started (${DELETABLE.join(' or ')}) can be deleted.`);
+          err.status = row.status;
+          throw err;
+        }
+        db.prepare('DELETE FROM events WHERE ticket = ?').run(row.id);
+        db.prepare('DELETE FROM comments WHERE ticket = ?').run(row.id);
+        const r = db.prepare('DELETE FROM tickets WHERE id = ? AND status = ?').run(row.id, row.status);
+        if (num(r.changes) !== 1 || ticketRow(row.id)) {
+          throw new StoreError('write-failed', `ticket ${row.id} was not deleted.`);
+        }
+        return { id: row.id, status: row.status };
+      });
+    },
+
     /** Post a comment, or a reply when `parent` names one on the same ticket. */
     postComment({ ticket, author, body, parent = null }) {
       requireText(body, "a comment's body");
@@ -655,6 +761,41 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
       });
     },
 
+    /** Every stage's colour that is set, by its stored status: `{ queued: '#2b9cf2' }`. */
+    stageColours() {
+      return Object.fromEntries(db.prepare('SELECT status, colour FROM stage_colours ORDER BY status').all()
+        .map((r) => [r.status, r.colour]));
+    },
+
+    /**
+     * Set or clear stage colours: `{ Queued: '#2b9cf2', Live: null }`, any
+     * spelling of a status; a stage not named is left as it is. Every value
+     * is checked before anything is written, so one bad one writes nothing.
+     * The result is read back in the same transaction and answered.
+     */
+    setStageColours(colours) {
+      if (!colours || typeof colours !== 'object' || Array.isArray(colours)) {
+        throw new StoreError('bad-colour', 'the colours must be an object of status to #rrggbb (or null to clear).');
+      }
+      const wanted = Object.entries(colours).map(([status, colour]) => {
+        const s = canonicalStatus(status);
+        return [s, canonicalColour(colour, s)];
+      });
+      return transaction(() => {
+        for (const [status, colour] of wanted) {
+          if (colour === null) db.prepare('DELETE FROM stage_colours WHERE status = ?').run(status);
+          else db.prepare('INSERT INTO stage_colours (status, colour) VALUES (?, ?) ON CONFLICT (status) DO UPDATE SET colour = excluded.colour').run(status, colour);
+        }
+        const after = this.stageColours();
+        for (const [status, colour] of wanted) {
+          if ((after[status] ?? null) !== colour) {
+            throw new StoreError('write-failed', `the colour for ${DISPLAY[status]} read back as ${after[status] ?? 'none'}, not ${colour ?? 'none'}.`);
+          }
+        }
+        return after;
+      });
+    },
+
     /** A ticket's comments, oldest first. */
     listComments(ticket) {
       return db.prepare('SELECT * FROM comments WHERE ticket = ? ORDER BY id').all(String(ticket)).map(commentFromRow);
@@ -671,4 +812,4 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
   };
 }
 
-export { STATUSES };
+export { STATUSES, DELETABLE };

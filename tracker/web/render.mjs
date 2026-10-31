@@ -282,3 +282,27 @@ export function renderTrail(steps) {
   });
   return `<nav class="trail" aria-label="You are here">${parts.join('<span class="sep"> &gt; </span>')}</nav>`;
 }
+
+/** The status the relay merges from, as the tracker stores it (lib/mergeOnComment.js). */
+const READY_TO_LAUNCH = 'ready to launch';
+
+/**
+ * The Merge button for a ticket page's Quick Action section, as HTML, or ''
+ * when the ticket is not in Ready to launch or the server named no merge
+ * phrase. The phrase comes from the server (the project config's first
+ * mergePhrases entry); the button posts it as his reply and the relay does
+ * the merge, exactly as if he had typed it.
+ */
+export function renderMergeAction({ status, mergePhrase }) {
+  if (String(status ?? '').toLowerCase() !== READY_TO_LAUNCH || !mergePhrase) return '';
+  return `<form class="merge-action">
+        <button type="submit">Merge</button><span class="note"></span>
+        <p class="quiet">Posts &ldquo;${escapeHtml(mergePhrase)}&rdquo; as your reply; the relay merges it within a few minutes.</p>
+      </form>`;
+}
+
+/** The one question the Merge button asks before it posts. Plain text, for confirm(). */
+export function mergeQuestion({ name, pullRequest }) {
+  const number = /\/pull\/(\d+)/.exec(pullRequest ?? '')?.[1];
+  return `Merge ${number ? `PR #${number}` : 'the pull request'} for ${name}?`;
+}
