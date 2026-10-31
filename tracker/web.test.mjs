@@ -339,6 +339,58 @@ test('the New request form files into Requested as typed, keeps the text when re
   assert.match(readFileSync(WEB('index.html'), 'utf8'), /<a href="\/new" data-nav="new">New request<\/a>/);
 });
 
+// ── Copy to another project ──────────────────────────────────────────────────
+
+test('a ticket copied from the page lands in the other project in Requested, under Dane, and the original does not change', async () => {
+  const f = await fixture();
+  try {
+    const before = (await f.call('GET', '/tickets/AL-1')).body;
+    const events = f.store.listEvents('AL-1');
+    const copied = await f.call('POST', '/tickets/AL-1/clone', { body: { project: 'beta' } });
+    assert.equal(copied.status, 201, copied.text);
+    const back = (await f.call('GET', `/tickets/${copied.body.id}/thread`)).body;
+    assert.deepEqual(
+      [back.project, back.name, back.description, back.status, back.assignee],
+      ['beta', before.name, before.description, 'requested', null],
+    );
+    assert.deepEqual(back.comments.map((c) => [c.author.name, c.body]), [['Dane', 'Copied from AL-1 in Alpha.']]);
+    assert.deepEqual((await f.call('GET', '/tickets/AL-1')).body, before, 'the original and its comments are as they were');
+    assert.deepEqual(f.store.listEvents('AL-1'), events);
+    const [first] = (await f.call('GET', '/projects/beta/board')).body.columns;
+    assert.ok(first.tickets.some((t) => t.id === copied.body.id), 'the copy is in Requested on the other board');
+  } finally { await f.cleanup(); }
+});
+
+test('a refused copy writes nothing and says why: its own project, an unknown one, none named, another author, no token', async () => {
+  const f = await fixture();
+  try {
+    const count = () => f.store.listTickets('alpha').length + f.store.listTickets('beta').length;
+    const before = count();
+    for (const [body, status, opts] of [
+      [{ project: 'alpha' }, 400], [{ project: 'gamma' }, 404], [{}, 400],
+      [{ project: 'beta', actor: 999 }, 400], [{ project: 'beta', extra: 1 }, 400],
+      [{ project: 'beta' }, 401, { token: null }],
+    ]) {
+      const res = await f.call('POST', '/tickets/AL-1/clone', { body, ...opts });
+      assert.equal(res.status, status, JSON.stringify(body));
+      assert.ok(res.body.message, 'the server gives a reason the form can show');
+    }
+    assert.equal((await f.call('POST', '/tickets/NOPE-1/clone', { body: { project: 'beta' } })).status, 404);
+    assert.equal(count(), before);
+  } finally { await f.cleanup(); }
+});
+
+test('the ticket page offers every other project to copy into, opens the copy, and says so when there is none', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const draw = app.slice(app.indexOf('async function drawTicket'), app.indexOf('/** The draft kept'));
+  assert.match(draw, /const others = projects\.filter\(\(p\) => p\.slug !== t\.project\);/);
+  assert.match(draw, /api\('POST', `\/tickets\/\$\{encodeURIComponent\(t\.id\)\}\/clone`, \{ project: copyForm\.querySelector\('#copy-to'\)\.value \}\)/);
+  assert.match(draw, /history\.pushState\(null, '', `\/t\/\$\{encodeURIComponent\(copy\.id\)\}`\)/);
+  assert.match(draw, /copyNote\.textContent = `Not copied: \$\{err\.message\}`;/);
+  assert.match(draw, /There is no other project to copy into yet\./);
+  assert.match(draw, /escapeHtml\(p\.name\)/, 'project names are escaped');
+});
+
 // ── The page itself ──────────────────────────────────────────────────────────
 
 test('the page is served at /, at a ticket\'s address, at Projects, at Tasks, at the board, at the list and at the New request form without a token, locked to its own scripts', async () => {

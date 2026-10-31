@@ -128,6 +128,7 @@ text programs read).
 | `GET /tickets/:id/events` | the history |
 | `GET /waiting` | for Dane's page: tickets in the operator's two statuses across every project, by the loop's own `waiting` verdict for the caller, newest first |
 | `GET /tickets/:id/thread` | for Dane's page: the ticket with each comment's author named and machine comments marked |
+| `POST /tickets/:id/clone` | for Dane's page: copy a ticket into another project (`{ project }`), as a new ticket in `Requested` there with one comment naming where it came from; the original does not change |
 
 The store enforces only what keeps the data true: valid statuses, the
 atomic guards, authorship from the token. The contract's rules (only `ask`

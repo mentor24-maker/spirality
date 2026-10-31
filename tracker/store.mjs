@@ -451,6 +451,31 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
       return transaction(() => insertTicket(checked, now(), null));
     },
 
+    /**
+     * Copy a ticket into another project: its name, description, priority
+     * and tags, as a new ticket in `Requested` there, unassigned, filed by
+     * `actor`, with one comment on the copy naming the ticket it came from.
+     * The original is only read: no field, version, event or comment of it
+     * changes. Copying into the ticket's own project is refused.
+     */
+    cloneTicket(id, { project, actor }) {
+      return transaction(() => {
+        const from = ticketFromRow(requireTicketRow(id));
+        if (!this.getProject(project)) throw new StoreError('unknown-project', `no project "${project}".`);
+        if (project === from.project) {
+          throw new StoreError('same-project', `ticket ${from.id} is already in project "${project}"; copy it into another one.`);
+        }
+        const at = now();
+        const copy = insertTicket(checkNewTicket({
+          project, actor, name: from.name, description: from.description,
+          status: 'requested', priority: from.priority, tags: from.tags,
+        }), at, null);
+        const source = this.getProject(from.project);
+        insertComment({ ticket: copy.id, author: actor, body: `Copied from ${from.id} in ${source.name}.`, parent: null }, at);
+        return copy;
+      });
+    },
+
     /** One ticket, or null. */
     getTicket(id) {
       return ticketFromRow(ticketRow(id));

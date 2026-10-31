@@ -282,6 +282,49 @@ test('imported actors have no sign-in token, and several can sit beside a signed
   } finally { cleanup(); }
 });
 
+test('copying a ticket files a new one in the other project, in Requested, and leaves the original exactly as it was', () => {
+  const { store, human, machine, cleanup } = fixture();
+  try {
+    store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE' });
+    const t = store.fileTicket({
+      project: 'alpha', actor: machine.id, name: 'Copy me', description: '## Goal\nKeep **this**.\n',
+      status: 'building', priority: 'high', tags: ['tracker'], assignee: human.id, loopNote: 'note',
+    });
+    store.postComment({ ticket: t.id, author: machine.id, body: 'a comment that stays here' });
+    const before = { ticket: store.getTicket(t.id), comments: store.listComments(t.id), events: store.listEvents(t.id) };
+
+    const copy = store.cloneTicket(t.id, { project: 'beta', actor: human.id });
+    assert.equal(copy.id, 'BE-1');
+    assert.deepEqual(
+      [copy.project, copy.name, copy.description, copy.status, copy.priority, copy.tags, copy.assignee, copy.loopNote, copy.version],
+      ['beta', 'Copy me', '## Goal\nKeep **this**.\n', 'requested', 'high', ['tracker'], null, '', 1],
+    );
+    assert.deepEqual(store.getTicket('BE-1'), copy, 'the copy reads back');
+    assert.deepEqual(store.listComments('BE-1').map((c) => [c.author, c.body]), [[human.id, 'Copied from AL-1 in Alpha.']]);
+    assert.deepEqual(store.listEvents('BE-1').map((e) => [e.field, e.to, e.actor]), [['created', 'requested', human.id]]);
+
+    assert.deepEqual(store.getTicket(t.id), before.ticket, 'no field or version of the original changed');
+    assert.deepEqual(store.listComments(t.id), before.comments);
+    assert.deepEqual(store.listEvents(t.id), before.events);
+  } finally { cleanup(); }
+});
+
+test('copying into the ticket\'s own project, an unknown project or from an unknown ticket is refused, and nothing is written', () => {
+  const { store, human, machine, cleanup } = fixture();
+  try {
+    store.fileTicket({ project: 'alpha', actor: machine.id, name: 'Stay', status: 'queued' });
+    assert.throws(() => store.cloneTicket('AL-1', { project: 'alpha', actor: human.id }), { code: 'same-project' });
+    assert.throws(() => store.cloneTicket('AL-1', { project: 'gamma', actor: human.id }), { code: 'unknown-project' });
+    assert.throws(() => store.cloneTicket('AL-9', { project: 'alpha', actor: human.id }), { code: 'unknown-ticket' });
+    store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE' });
+    assert.throws(() => store.cloneTicket('AL-1', { project: 'beta', actor: 999 }), { code: 'unknown-actor' });
+    assert.deepEqual(store.listTickets('alpha').map((t) => t.id), ['AL-1']);
+    assert.deepEqual(store.listTickets('beta'), []);
+    const next = store.fileTicket({ project: 'beta', actor: machine.id, name: 'b', status: 'queued' });
+    assert.equal(next.id, 'BE-1', 'a refused copy used up no number');
+  } finally { cleanup(); }
+});
+
 test('listing filters by status, and "open only" drops Live tickets', () => {
   const { store, machine, cleanup } = fixture();
   try {

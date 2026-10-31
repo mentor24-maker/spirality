@@ -277,6 +277,19 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
       return [201, store.postComment({ ticket: ticket.id, author: me.id, body: body.body, parent: body.parent ?? null }), { ticket: null, changed: [] }];
     }
 
+    // Dane's page: copy a ticket into another project, filed under the
+    // caller. The original is left exactly as it was.
+    if (parts.length === 3 && parts[0] === 'tickets' && parts[2] === 'clone' && method === 'POST') {
+      const body = await readJson(req);
+      checkBody(body, me, ['project']);
+      const ticket = requireTicket(parts[1]);
+      if (typeof body.project !== 'string' || !body.project) {
+        throw new HttpError(400, 'bad-field', 'project must name the project to copy into.');
+      }
+      const copy = store.cloneTicket(ticket.id, { project: body.project, actor: me.id });
+      return [201, copy, { ticket: copy, changed: ['status'] }];
+    }
+
     // Dane's page: one ticket with each comment's author named and machine
     // comments marked.
     if (parts.length === 3 && parts[0] === 'tickets' && parts[2] === 'thread' && method === 'GET') {
