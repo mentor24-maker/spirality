@@ -11,8 +11,10 @@
  *
  * Answers are JSON:
  *   401  no token, or a token no actor holds
+ *   403  a call only a person may make, from a machine's token
  *   404  an unknown project, ticket or address
- *   409  a guarded move found the ticket moved: `{ error, status, version }`
+ *   409  a guarded move found the ticket moved: `{ error, status, version }`,
+ *        or a delete found the ticket started: `{ error: 'not-deletable', status }`
  *   400  a bad field, or a body that names another author
  *   403  a write only a person may make, asked by a loop's token
  * A refused write writes nothing. A token never appears in an answer or a
@@ -43,6 +45,17 @@ const NOT_FOUND_CODES = new Set(['unknown-ticket', 'unknown-project']);
 /** The fields a new ticket may carry. */
 const FILE_FIELDS = Object.freeze(['name', 'description', 'status', 'priority', 'tags', 'assignee', 'loopNote']);
 
+/** The fields a new project may carry. */
+const PROJECT_FIELDS = Object.freeze(['name', 'slug', 'prefix', 'url', 'logo', 'owner']);
+
+/**
+ * A slug is the project's own part of every address (`/projects/<slug>`):
+ * small letters, digits and single hyphens. `new` is the Create Project
+ * form's own address, so no project may take it.
+ */
+const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const RESERVED_SLUGS = Object.freeze(['new']);
+
 /** The fields a change may carry, besides its guards. */
 const CHANGE_FIELDS = Object.freeze(['name', 'description', 'status', 'priority', 'tags', 'assignee', 'loopNote']);
 
@@ -65,12 +78,14 @@ const WEB_FILES = Object.freeze({
 });
 
 /**
- * The page may run only its own scripts and talk only to this server. With
+ * The page may run only its own scripts and talk only to this server; it may
+ * show images from elsewhere (a project's logo is an image's web address),
+ * which cannot run anything, and sends them no referrer. With
  * every ticket's text escaped before it is drawn, this is the second lock: an
  * injected script would not run even if escaping ever missed one.
  */
 const PAGE_HEADERS = Object.freeze({
-  'content-security-policy': "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+  'content-security-policy': "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' http: https:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
   'x-content-type-options': 'nosniff',
   'referrer-policy': 'no-referrer',
   'cache-control': 'no-cache',
@@ -80,7 +95,7 @@ const PAGE_HEADERS = Object.freeze({
  * The page file a GET of `pathname` answers with, or null when it is not a
  * page address. `/projects` is both the Projects screen and the call that
  * lists them, and `/projects/<project>` both a project's details page and
- * the call that reads them: a browser opening the address asks for HTML and
+ * the call that reads them (`/projects/new` is the Create Project form): a browser opening the address asks for HTML and
  * gets the page; the page's own call asks for anything and gets the data.
  */
 function pageFile(pathname, accept = '') {
@@ -175,8 +190,11 @@ function flag(value) {
  * `defaultProject` is the slug the New request form starts on: the project
  * config's productSlug, never a literal here. One the store does not hold
  * is answered as null, and the page falls back to the first project.
+ * `mergePhrase` is the word the ticket page's Merge button posts: the first
+ * of the project config's mergePhrases, never a literal here. Null means no
+ * Merge button; the reply box still takes the word typed by hand.
  */
-export function createHandler(store, { log = () => {}, notifier = null, defaultProject = null } = {}) {
+export function createHandler(store, { log = () => {}, notifier = null, defaultProject = null, mergePhrase = null } = {}) {
   function requireProject(slug) {
     const project = store.getProject(slug);
     if (!project) throw new HttpError(404, 'unknown-project', `no project "${slug}".`);
@@ -221,6 +239,32 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
       const projects = projectsList(store);
       const fallback = projects.some((p) => p.slug === defaultProject) ? defaultProject : null;
       return [200, { projects, default: fallback }];
+    }
+
+    // Dane's page: the Create Project form. Only a person may add a project:
+    // a loop's or a hand-run session's token is refused and nothing is written.
+    if (parts.length === 1 && parts[0] === 'projects' && method === 'POST') {
+      if (me.kind !== 'human') {
+        throw new HttpError(403, 'people-only', 'only a person signed in to the tracker may add a project; a machine may not.');
+      }
+      const body = await readJson(req);
+      checkBody(body, me, PROJECT_FIELDS);
+      if (typeof body.slug === 'string' && body.slug.trim() && (!SLUG.test(body.slug) || RESERVED_SLUGS.includes(body.slug))) {
+        throw new HttpError(400, 'bad-slug', RESERVED_SLUGS.includes(body.slug)
+          ? `"${body.slug}" is the form's own address; choose another slug.`
+          : `a slug is small letters, digits and single hyphens (like "my-project"), not "${body.slug}".`);
+      }
+      if (body.owner != null && !Number.isInteger(body.owner)) {
+        throw new HttpError(400, 'bad-owner', `owner must be a person's actor id, not "${body.owner}".`);
+      }
+      const made = store.createProject(pick(body, PROJECT_FIELDS));
+      return [201, projectDetailsOf(store, made.slug)];
+    }
+
+    // Dane's page: the people in the tracker, for the Create Project form's
+    // owner picker. Names and ids only; never a machine, never a token.
+    if (parts.length === 1 && parts[0] === 'people' && method === 'GET') {
+      return [200, { people: store.listPeople() }];
     }
 
     // Dane's page: the Settings page's stage colours. Anyone signed in reads
@@ -290,6 +334,21 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
         }
         return [200, { ticket: r.ticket, changed: r.changed }, { ticket: r.ticket, changed: r.changed }];
       }
+      // Delete a ticket nobody has started; the store refuses any other.
+      // The log line names the ticket and the actor, the deletion's record.
+      if (method === 'DELETE') {
+        let gone;
+        try {
+          gone = store.deleteTicket(parts[1], { actor: me.id });
+        } catch (err) {
+          if (err instanceof StoreError && err.code === 'not-deletable') {
+            throw new HttpError(409, 'not-deletable', err.message, { ticket: parts[1], status: err.status });
+          }
+          throw err;
+        }
+        log(`deleted ticket ${gone.id} (was "${gone.status}") actor=${me.id}`);
+        return [200, { deleted: gone.id, status: gone.status }];
+      }
     }
 
     if (parts.length === 3 && parts[0] === 'tickets' && parts[2] === 'comments' && method === 'POST') {
@@ -320,7 +379,7 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     if (parts.length === 3 && parts[0] === 'tickets' && parts[2] === 'thread' && method === 'GET') {
       const thread = threadOf(store, parts[1]);
       if (!thread) throw new HttpError(404, 'unknown-ticket', `no ticket ${parts[1]}.`);
-      return [200, thread];
+      return [200, { ...thread, mergePhrase }];
     }
 
     if (parts.length === 3 && parts[0] === 'tickets' && parts[2] === 'events' && method === 'GET') {
@@ -369,8 +428,8 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
 }
 
 /** Start a server on `port` (0 = any free port) against an open store. Resolves to the http.Server. */
-export function startServer({ store, port, host = '127.0.0.1', log, notifier, defaultProject }) {
-  const server = createServer(createHandler(store, { log, notifier, defaultProject }));
+export function startServer({ store, port, host = '127.0.0.1', log, notifier, defaultProject, mergePhrase }) {
+  const server = createServer(createHandler(store, { log, notifier, defaultProject, mergePhrase }));
   return new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(port, host, () => {
@@ -436,12 +495,15 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     const notifier = mail.send ? createNotifier({ store, ...mail, log }) : null;
     if (!notifier) log(`hand-over email: off. ${mail.why}`);
     let defaultProject = null;
+    let mergePhrase = null;
     try {
-      defaultProject = loadProjectConfig().productSlug;
+      const config = loadProjectConfig();
+      defaultProject = config.productSlug;
+      mergePhrase = config.mergePhrases[0] ?? null;
     } catch (err) {
-      log(`the New request form starts on the first project: the project config is not usable (${err.message}).`);
+      log(`the New request form starts on the first project and the ticket page has no Merge button: the project config is not usable (${err.message}).`);
     }
-    const server = await startServer({ store, port, host, log, notifier, defaultProject });
+    const server = await startServer({ store, port, host, log, notifier, defaultProject, mergePhrase });
     console.log(`tracker listening on http://${host}:${server.address().port}/`);
   } catch (err) {
     console.error(`tracker server did not start: ${err.message}`);

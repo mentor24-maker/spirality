@@ -82,6 +82,7 @@ test('no token and a wrong token both get 401, on reads and on writes, and nothi
       assert.equal((await f.call('PATCH', `/tickets/${t.id}`, { token, body: { status: 'building' } })).status, 401);
       assert.equal((await f.call('POST', `/tickets/${t.id}/comments`, { token, body: { body: 'hi' } })).status, 401);
       assert.equal((await f.call('POST', '/projects/alpha/tickets', { token, body: { name: 'y', status: 'queued' } })).status, 401);
+      assert.equal((await f.call('DELETE', `/tickets/${t.id}`, { token })).status, 401);
     }
     const after = f.store.getTicket(t.id);
     assert.equal(after.status, 'queued');
@@ -206,6 +207,63 @@ test('two concurrent guarded claims of one Queued ticket over HTTP, through two 
   } finally { await f.cleanup(); }
 });
 
+test('DELETE /tickets/:id removes an unstarted ticket with its comments; a started one is 409 not-deletable; an unknown one is 404', async () => {
+  const f = await fixture();
+  try {
+    for (const status of ['requested', 'queued']) {
+      const t = f.store.fileTicket({ project: 'alpha', actor: f.machine.id, name: `gone ${status}`, status });
+      f.store.postComment({ ticket: t.id, author: f.human.id, body: 'note' });
+      const r = await f.call('DELETE', `/tickets/${t.id}`, { token: f.humanToken });
+      assert.equal(r.status, 200);
+      assert.deepEqual(r.body, { deleted: t.id, status });
+      assert.equal((await f.call('GET', `/tickets/${t.id}`)).status, 404);
+      assert.equal((await f.call('GET', `/tickets/${t.id}/events`)).status, 404);
+      assert.deepEqual(f.store.listComments(t.id), []);
+      assert.ok(f.lines.includes(`deleted ticket ${t.id} (was "${status}") actor=${f.human.id}`));
+    }
+    for (const status of ['rework', 'building', 'in review', 'needs your input', 'ready to launch', 'live']) {
+      const t = f.store.fileTicket({ project: 'alpha', actor: f.machine.id, name: status, status });
+      f.store.postComment({ ticket: t.id, author: f.human.id, body: 'note' });
+      const r = await f.call('DELETE', `/tickets/${t.id}`, { token: f.humanToken });
+      assert.equal(r.status, 409, status);
+      assert.equal(r.body.error, 'not-deletable');
+      assert.equal(r.body.status, status);
+      const after = await f.call('GET', `/tickets/${t.id}`);
+      assert.equal(after.body.status, status);
+      assert.equal(after.body.comments.length, 1);
+      assert.equal(f.store.listEvents(t.id).length, 1);
+    }
+    const unknown = await f.call('DELETE', '/tickets/AL-999', { token: f.humanToken });
+    assert.equal(unknown.status, 404);
+    assert.equal(unknown.body.error, 'unknown-ticket');
+  } finally { await f.cleanup(); }
+});
+
+test('a delete and a claim of one Queued ticket over HTTP, through two servers on one database: exactly one wins', async () => {
+  const f = await fixture();
+  try {
+    const second = openStore(f.path);
+    f.stores.push(second);
+    const otherBase = await f.serve(second);
+    for (let round = 0; round < 5; round++) {
+      const t = f.store.fileTicket({ project: 'alpha', actor: f.machine.id, name: `race ${round}`, status: 'queued' });
+      const [del, claim] = await Promise.all([
+        f.call('DELETE', `/tickets/${t.id}`, { token: f.humanToken }),
+        f.call('PATCH', `/tickets/${t.id}`, { body: { ifStatus: 'queued', status: 'building' }, at: otherBase }),
+      ]);
+      if (del.status === 200) {
+        assert.equal(claim.status, 404);
+        assert.equal(f.store.getTicket(t.id), null);
+      } else {
+        assert.equal(del.status, 409);
+        assert.equal(del.body.status, 'building');
+        assert.equal(claim.status, 200);
+        assert.equal(f.store.getTicket(t.id).status, 'building');
+      }
+    }
+  } finally { await f.cleanup(); }
+});
+
 test('GET /tickets/:id/events answers the history, each move with the token\'s actor', async () => {
   const f = await fixture();
   try {
@@ -260,7 +318,7 @@ test('unknown projects, tickets and addresses get 404; bad fields get 400; none 
     assert.equal((await f.call('POST', '/tickets/AL-99/comments', { body: { body: 'hi' } })).status, 404);
     assert.equal((await f.call('GET', '/tickets/AL-99/events')).status, 404);
     assert.equal((await f.call('GET', '/nowhere')).status, 404);
-    assert.equal((await f.call('DELETE', `/tickets/${t.id}`)).status, 404);
+    assert.equal((await f.call('PUT', `/tickets/${t.id}`)).status, 404);
 
     const bad = [
       ['PATCH', `/tickets/${t.id}`, { status: 'done' }],
@@ -356,7 +414,7 @@ test('admin: create-actor prints only the token on stdout, and that token signs 
     const store = openStore(db);
     try {
       assert.deepEqual(store.actorForToken(token), { id: 1, kind: 'machine', name: 'Build loop' });
-      assert.deepEqual(store.getProject('beta'), { slug: 'beta', name: 'Beta', prefix: 'BE', operator: 2 });
+      assert.deepEqual(store.getProject('beta'), { slug: 'beta', name: 'Beta', prefix: 'BE', operator: 2, url: null, logo: null, owner: null });
       assert.equal(store.getProject('gamma'), null);
       const server = await startServer({ store, port: 0 });
       try {
@@ -375,6 +433,70 @@ test('the server, admin and backup hard-code no product: no names, ids, prefixes
       assert.doesNotMatch(source, word, `${file} matches ${word}`);
     }
   }
+});
+
+test('POST /projects lets a person add a project, read back with its owner by name; a machine gets 403 and nothing is written', async () => {
+  const f = await fixture();
+  try {
+    const before = f.store.listProjects();
+    const refused = await f.call('POST', '/projects', { body: { name: 'Beta', slug: 'beta', prefix: 'BE' } });
+    assert.equal(refused.status, 403);
+    assert.equal(refused.body.error, 'people-only');
+    assert.deepEqual(f.store.listProjects(), before, 'a machine wrote nothing');
+    assert.equal((await f.call('POST', '/projects', { token: null, body: { name: 'Beta', slug: 'beta', prefix: 'BE' } })).status, 401);
+
+    const made = await f.call('POST', '/projects', {
+      token: f.humanToken,
+      body: { name: 'Beta', slug: 'beta', prefix: 'BE', url: 'https://beta.example', logo: 'https://beta.example/l.png', owner: f.human.id },
+    });
+    assert.equal(made.status, 201);
+    assert.equal(made.body.slug, 'beta');
+    assert.deepEqual(made.body.owner, { id: f.human.id, name: 'Operator' });
+    assert.equal(made.body.url, 'https://beta.example');
+    assert.equal(made.body.logo, 'https://beta.example/l.png');
+    assert.equal(made.body.operator, null, 'the operator is not set by the form');
+    assert.deepEqual((await f.call('GET', '/projects/beta')).body, made.body);
+    assert.ok(f.lines.some((l) => /POST \/projects 201 actor=1/.test(l)));
+  } finally { await f.cleanup(); }
+});
+
+test('POST /projects refuses a missing field, a duplicate slug or prefix, a bad slug, a machine owner and an unknown field, and writes nothing', async () => {
+  const f = await fixture();
+  try {
+    const good = { name: 'Beta', slug: 'beta', prefix: 'BE' };
+    for (const [body, error] of [
+      [{ ...good, name: '' }, 'missing'],
+      [{ ...good, slug: '' }, 'missing'],
+      [{ ...good, prefix: '' }, 'bad-prefix'],
+      [{ ...good, slug: 'alpha' }, 'duplicate-project'],
+      [{ ...good, prefix: 'AL' }, 'duplicate-project'],
+      [{ ...good, slug: 'Has Spaces' }, 'bad-slug'],
+      [{ ...good, slug: 'a/b' }, 'bad-slug'],
+      [{ ...good, slug: 'new' }, 'bad-slug'],
+      [{ ...good, owner: f.machine.id }, 'bad-owner'],
+      [{ ...good, owner: 'Operator' }, 'bad-owner'],
+      [{ ...good, url: 'javascript:alert(1)' }, 'bad-address'],
+      [{ ...good, operator: f.human.id }, 'bad-field'],
+      [{ ...good, actor: f.machine.id }, 'not-your-name'],
+    ]) {
+      const r = await f.call('POST', '/projects', { token: f.humanToken, body });
+      assert.equal(r.status, 400, JSON.stringify(body));
+      assert.equal(r.body.error, error, JSON.stringify(body));
+      assert.ok(r.body.message, 'the form has a reason to show');
+    }
+    assert.deepEqual(f.store.listProjects().map((p) => p.slug), ['alpha']);
+  } finally { await f.cleanup(); }
+});
+
+test('GET /people lists the tracker\'s people for the owner picker: humans only, never a token', async () => {
+  const f = await fixture();
+  try {
+    const r = await f.call('GET', '/people', { token: f.humanToken });
+    assert.equal(r.status, 200);
+    assert.deepEqual(r.body, { people: [{ id: f.human.id, name: 'Operator' }] });
+    for (const token of f.tokens) assert.ok(!r.text.includes(token));
+    assert.equal((await f.call('GET', '/people', { token: null })).status, 401);
+  } finally { await f.cleanup(); }
 });
 
 test('stage colours: anyone signed in reads all eight in STAGE_ORDER; a person saves and clears them; a loop is refused 403; a bad value is 400; neither writes', async () => {

@@ -341,3 +341,42 @@ export function renderQuickAction({ name, description, comments = [] }) {
     ask ? `<p class="needed">${ask.split('\n').map(renderInline).join('<br>')}</p>` : '',
   ].filter(Boolean).join('\n');
 }
+
+/**
+ * The trail under the main menu: where the page sits, as `{ label, href }`
+ * steps from the outside in (Spirality > Task SP-47 > Details). Every step
+ * before the last is a link back up; the last is the page itself and never
+ * a link. Every label is escaped: project and ticket names are typed by
+ * people.
+ */
+export function renderTrail(steps) {
+  const parts = steps.map(({ label, href }, i) => {
+    if (i === steps.length - 1) return `<span aria-current="page">${escapeHtml(label)}</span>`;
+    return href ? `<a href="${escapeHtml(href)}">${escapeHtml(label)}</a>` : `<span>${escapeHtml(label)}</span>`;
+  });
+  return `<nav class="trail" aria-label="You are here">${parts.join('<span class="sep"> &gt; </span>')}</nav>`;
+}
+
+/** The status the relay merges from, as the tracker stores it (lib/mergeOnComment.js). */
+const READY_TO_LAUNCH = 'ready to launch';
+
+/**
+ * The Merge button for a ticket page's Quick Action section, as HTML, or ''
+ * when the ticket is not in Ready to launch or the server named no merge
+ * phrase. The phrase comes from the server (the project config's first
+ * mergePhrases entry); the button posts it as his reply and the relay does
+ * the merge, exactly as if he had typed it.
+ */
+export function renderMergeAction({ status, mergePhrase }) {
+  if (String(status ?? '').toLowerCase() !== READY_TO_LAUNCH || !mergePhrase) return '';
+  return `<form class="merge-action">
+        <button type="submit">Merge</button><span class="note"></span>
+        <p class="quiet">Posts &ldquo;${escapeHtml(mergePhrase)}&rdquo; as your reply; the relay merges it within a few minutes.</p>
+      </form>`;
+}
+
+/** The one question the Merge button asks before it posts. Plain text, for confirm(). */
+export function mergeQuestion({ name, pullRequest }) {
+  const number = /\/pull\/(\d+)/.exec(pullRequest ?? '')?.[1];
+  return `Merge ${number ? `PR #${number}` : 'the pull request'} for ${name}?`;
+}

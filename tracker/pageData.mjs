@@ -106,25 +106,39 @@ export function threadOf(store, ticketId) {
     projectName: project?.name ?? ticket.project,
     assignee: ticket.assignee == null ? null : actor(ticket.assignee),
     comments,
+    pullRequest: findPullRequest(store.listComments(ticket.id).map((c) => ({
+      id: c.id, comment_text: c.body, date: String(Date.parse(c.createdAt)),
+    })))?.url ?? null,
   };
 }
 
+/** An actor by id and name, or null for none; one that is gone is named by its id. */
+function namedActor(store, id) {
+  if (id == null) return null;
+  return { id, name: store.getActor(id)?.name ?? `actor ${id}` };
+}
+
 /**
- * Every project, for the Projects screen: slug, name, ticket-id prefix, and
- * how many of its tickets are open (any status but Live), in the store's order.
+ * Every project, for the Projects screen: slug, name, ticket-id prefix, web
+ * address, logo and owner by name (each null when it has none), and how many
+ * of its tickets are open (any status but Live), in the store's order.
  */
 export function projectsList(store) {
   return store.listProjects().map((p) => ({
     slug: p.slug,
     name: p.name,
     prefix: p.prefix,
+    url: p.url,
+    logo: p.logo,
+    owner: namedActor(store, p.owner),
     open: store.listTickets(p.slug, { open: true }).length,
   }));
 }
 
 /**
  * One project's details page: its slug, name, ticket-id prefix, its
- * operator by name (null when it has none), how many tickets are open, and
+ * operator by name (null when it has none), its web address, logo and owner
+ * by name (each null when it has none), how many tickets are open, and
  * a count for each of the eight statuses in the contract's STAGE_ORDER, the
  * board's own column order. Null when there is no such project.
  */
@@ -135,12 +149,14 @@ export function projectDetailsOf(store, slug) {
   for (const ticket of store.listTickets(project.slug)) {
     if (counts.has(ticket.status)) counts.set(ticket.status, counts.get(ticket.status) + 1);
   }
-  const operator = project.operator == null ? null : store.getActor(project.operator);
   return {
     slug: project.slug,
     name: project.name,
     prefix: project.prefix,
-    operator: project.operator == null ? null : { id: project.operator, name: operator?.name ?? `actor ${project.operator}` },
+    operator: namedActor(store, project.operator),
+    url: project.url,
+    logo: project.logo,
+    owner: namedActor(store, project.owner),
     open: store.listTickets(project.slug, { open: true }).length,
     statuses: STAGE_ORDER.map((name) => ({ status: name, count: counts.get(statusOf(name)) })),
   };
