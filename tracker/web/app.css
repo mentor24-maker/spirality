@@ -95,6 +95,9 @@ a.action:hover { color: #000; background: #e8e8ed; }
 .quick { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; align-items: start; margin-bottom: 2rem; }
 .quick h1 { margin-top: 0; }
 .quick .needed { color: var(--red); font-weight: 700; white-space: pre-wrap; }
+.quick form.merge-action { margin-bottom: 1.25rem; }
+.quick form.merge-action button { font-weight: 700; padding: 0.6rem 2rem; }
+.quick form.merge-action p { margin: 0.4rem 0 0; font-size: 0.9em; }
 details.details { border-top: var(--hairline); padding-top: 0.75rem; }
 details.details > summary { cursor: pointer; font-weight: 600; margin-bottom: 0.5rem; }
 table.colours { max-width: 32rem; }
