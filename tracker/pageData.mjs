@@ -1,7 +1,7 @@
 /**
  * The data behind Dane's page (docs/TRACKER_MVP.md, "Dane's page"): what
- * waits on him, one ticket's thread with each comment's author named, and
- * one project's board.
+ * waits on him, one ticket's thread with each comment's author named, the
+ * projects, one project's details, and one project's board.
  *
  * The page never decides anything itself. "Is this waiting on him?" is the
  * loop's own verdict, lib/waitingOnOperator.js, the same module `npm run
@@ -120,6 +120,30 @@ export function projectsList(store) {
     prefix: p.prefix,
     open: store.listTickets(p.slug, { open: true }).length,
   }));
+}
+
+/**
+ * One project's details page: its slug, name, ticket-id prefix, its
+ * operator by name (null when it has none), how many tickets are open, and
+ * a count for each of the eight statuses in the contract's STAGE_ORDER, the
+ * board's own column order. Null when there is no such project.
+ */
+export function projectDetailsOf(store, slug) {
+  const project = store.getProject(slug);
+  if (!project) return null;
+  const counts = new Map(STAGE_ORDER.map((name) => [statusOf(name), 0]));
+  for (const ticket of store.listTickets(project.slug)) {
+    if (counts.has(ticket.status)) counts.set(ticket.status, counts.get(ticket.status) + 1);
+  }
+  const operator = project.operator == null ? null : store.getActor(project.operator);
+  return {
+    slug: project.slug,
+    name: project.name,
+    prefix: project.prefix,
+    operator: project.operator == null ? null : { id: project.operator, name: operator?.name ?? `actor ${project.operator}` },
+    open: store.listTickets(project.slug, { open: true }).length,
+    statuses: STAGE_ORDER.map((name) => ({ status: name, count: counts.get(statusOf(name)) })),
+  };
 }
 
 /**

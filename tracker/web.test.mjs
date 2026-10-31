@@ -183,6 +183,56 @@ test('the Projects screen lists every project with its open count; an unknown pr
   } finally { await f.cleanup(); }
 });
 
+test('a project\'s details name its prefix, operator, open count and a count per status in STAGE_ORDER; an unknown slug is 404; it needs a token', async () => {
+  const f = await fixture();
+  try {
+    const r = await f.call('GET', '/projects/alpha');
+    assert.equal(r.status, 200);
+    const tickets = f.store.listTickets('alpha');
+    assert.deepEqual(r.body, {
+      slug: 'alpha',
+      name: 'Alpha',
+      prefix: 'AL',
+      operator: { id: f.operator.id, name: 'Dane' },
+      open: f.store.listTickets('alpha', { open: true }).length,
+      statuses: loopStatuses.STAGE_ORDER.map((name) => ({
+        status: name,
+        count: tickets.filter((t) => t.status === loopStatuses.statusOf(name)).length,
+      })),
+    });
+    assert.equal(r.body.statuses.reduce((n, s) => n + s.count, 0), tickets.length, 'every ticket is counted once');
+    assert.equal((await f.call('GET', '/projects/beta')).body.name, 'Beta');
+    const unknown = await f.call('GET', '/projects/no-such-thing');
+    assert.equal(unknown.status, 404);
+    assert.equal(unknown.body.error, 'unknown-project');
+    assert.equal((await f.call('GET', '/projects/alpha', { token: null })).status, 401);
+  } finally { await f.cleanup(); }
+});
+
+test('a project with no operator shows none, not a guess', async () => {
+  const f = await fixture();
+  try {
+    f.store.createProject({ slug: 'gamma', name: 'Gamma', prefix: 'GA' });
+    const { body } = await f.call('GET', '/projects/gamma');
+    assert.equal(body.operator, null);
+    assert.equal(body.open, 0);
+    assert.ok(body.statuses.every((s) => s.count === 0));
+  } finally { await f.cleanup(); }
+});
+
+test('the Projects screen is a table whose View icon opens the details page; a name still selects the project and opens its tasks', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  assert.match(app, /<table class="projects">/);
+  assert.match(app, /<th class="actions">Actions<\/th><\/tr><\/thead><tbody>\$\{projects\.map\(row\)/);
+  assert.match(app, /action\(`\/projects\/\$\{encodeURIComponent\(p\.slug\)\}`, 'View project', ICONS\.view\)/);
+  // SP-42's behaviour: the name goes to the project's tasks in the last view, and opening it selects it.
+  assert.match(app, /<td class="name"><a href="\/\$\{savedView\(\)\}\/\$\{encodeURIComponent\(p\.slug\)\}"/);
+  assert.match(app, /localStorage\.setItem\(PROJECT_KEY, board\.project\)/);
+  // The details page links to the project's board and list, and says plainly when there is no such project.
+  assert.match(app, /<a href="\$\{at\('board'\)\}">Board<\/a><a href="\$\{at\('list'\)\}">List<\/a>/);
+  assert.match(app, /err\.status !== 404[\s\S]{0,200}There is no project \$\{escapeHtml\(slug\)\}\./);
+});
+
 test('the board and the list both fold Live by default, and every card and row opens its ticket page', () => {
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   assert.match(app, /c\.status === 'Live'\s*\?\s*`<details class="\$\{cls\}">/);
@@ -370,6 +420,13 @@ test('the page is served at /, at a ticket\'s address, at Projects, at Tasks, at
     assert.equal(await opened.text(), readFileSync(WEB('index.html'), 'utf8'));
     assert.equal((await f.call('GET', '/projects')).body.projects.length, 2);
     assert.equal((await f.call('GET', '/projects', { token: null })).status, 401);
+    // So is a project's details page, known or not: the page itself says when there is no such project.
+    for (const path of ['/projects/alpha', '/projects/no-such-thing']) {
+      const page = await fetch(`${f.url}${path}`, { headers: { accept: 'text/html,application/xhtml+xml,*/*;q=0.8' } });
+      assert.equal(page.status, 200, path);
+      assert.equal(await page.text(), readFileSync(WEB('index.html'), 'utf8'), path);
+    }
+    assert.equal((await f.call('GET', '/projects/alpha')).body.slug, 'alpha');
     // The header: Projects picks a project, Tasks opens the one picked.
     assert.match(readFileSync(WEB('index.html'), 'utf8'), /<a href="\/projects" data-nav="projects">Projects<\/a>\s*<a href="\/tasks" data-nav="tasks">Tasks<\/a>/);
     // Only those files: nothing else on disk is reachable, with or without a token.
