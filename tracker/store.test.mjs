@@ -584,6 +584,72 @@ test('a project\'s owner must be a person, and its addresses must be http(s); a 
   } finally { cleanup(); }
 });
 
+test('updateProject changes only the name, web address, logo and owner it is given, and reads them back', () => {
+  const { store, human, cleanup } = fixture();
+  try {
+    const changed = store.updateProject('alpha', { name: 'Alpha Two', url: 'https://alpha.example', owner: human.id });
+    assert.deepEqual(changed, {
+      slug: 'alpha', name: 'Alpha Two', prefix: 'AL', operator: human.id,
+      url: 'https://alpha.example', logo: null, owner: human.id,
+    });
+    assert.deepEqual(store.getProject('alpha'), changed);
+    // Only what is given changes; an empty address and a null owner are none.
+    assert.deepEqual(store.updateProject('alpha', { logo: 'https://alpha.example/l.png' }).url, 'https://alpha.example');
+    const cleared = store.updateProject('alpha', { url: '', logo: '', owner: null });
+    assert.deepEqual([cleared.name, cleared.url, cleared.logo, cleared.owner], ['Alpha Two', null, null, null]);
+    // Tickets keep their ids and their project.
+    const t = store.fileTicket({ project: 'alpha', actor: human.id, name: 'x', status: 'queued' });
+    store.updateProject('alpha', { name: 'Alpha Three' });
+    assert.deepEqual([store.getTicket(t.id).id, store.getTicket(t.id).project], ['AL-1', 'alpha']);
+  } finally { cleanup(); }
+});
+
+test('updateProject refuses a new slug, prefix or operator, a machine owner, a bad address or an empty name, and writes nothing', () => {
+  const { store, machine, cleanup } = fixture();
+  try {
+    const before = store.getProject('alpha');
+    for (const [changes, code] of [
+      [{ slug: 'beta' }, 'not-changeable'],
+      [{ prefix: 'BE' }, 'not-changeable'],
+      [{ operator: machine.id }, 'not-changeable'],
+      [{ name: 'Fine', prefix: 'BE' }, 'not-changeable'],
+      [{ owner: machine.id }, 'bad-owner'],
+      [{ owner: 999 }, 'unknown-actor'],
+      [{ url: 'javascript:alert(1)' }, 'bad-address'],
+      [{ logo: 'not an address' }, 'bad-address'],
+      [{ name: '' }, 'missing'],
+      [{ name: '   ' }, 'missing'],
+    ]) {
+      assert.throws(() => store.updateProject('alpha', changes), { code }, JSON.stringify(changes));
+      assert.deepEqual(store.getProject('alpha'), before, JSON.stringify(changes));
+    }
+    assert.throws(() => store.updateProject('nope', { name: 'x' }), { code: 'unknown-project' });
+  } finally { cleanup(); }
+});
+
+test('deleteProject removes a project with no tickets, and refuses one with tickets, naming how many, removing nothing', () => {
+  const { store, human, cleanup } = fixture();
+  try {
+    store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE' });
+    assert.deepEqual(store.deleteProject('beta'), { slug: 'beta', prefix: 'BE' });
+    assert.equal(store.getProject('beta'), null);
+    assert.deepEqual(store.listProjects().map((p) => p.slug), ['alpha']);
+    assert.throws(() => store.deleteProject('beta'), { code: 'unknown-project' });
+
+    // One ticket, then two: refused both times, the project and its tickets untouched. Live ones count too.
+    store.fileTicket({ project: 'alpha', actor: human.id, name: 'x', status: 'queued' });
+    assert.throws(() => store.deleteProject('alpha'), { code: 'has-tickets', message: 'AL has 1 ticket; a project with tickets cannot be deleted.', tickets: 1 });
+    store.fileTicket({ project: 'alpha', actor: human.id, name: 'y', status: 'live' });
+    assert.throws(() => store.deleteProject('alpha'), { code: 'has-tickets', message: 'AL has 2 tickets; a project with tickets cannot be deleted.', tickets: 2 });
+    assert.equal(store.getProject('alpha').name, 'Alpha');
+    assert.equal(store.listTickets('alpha').length, 2);
+
+    // A deleted project's slug and prefix are free again.
+    store.createProject({ slug: 'beta', name: 'Beta again', prefix: 'BE' });
+    assert.equal(store.getProject('beta').name, 'Beta again');
+  } finally { cleanup(); }
+});
+
 test('the people are the human actors only, by id and name, never a token', () => {
   const { store, human, machine, cleanup } = fixture();
   try {
