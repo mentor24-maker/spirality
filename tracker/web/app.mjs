@@ -13,7 +13,7 @@
  * holds. It is kept in this browser's local storage so a pinned tab stays
  * signed in, and sent only to this server. "Sign out" forgets it.
  */
-import { escapeHtml, renderComment, renderMarkdown, tabTitle } from './render.mjs';
+import { escapeHtml, renderComment, renderMarkdown, renderQuickAction, tabTitle } from './render.mjs';
 
 const TOKEN_KEY = 'tracker-token';
 /** Board or list: the last one opened, so "Tasks" in the header opens it again. */
@@ -292,21 +292,27 @@ async function drawTicket(id) {
       </div>
       ${renderComment(c.body, { operatorName: me?.name })}
     </article>`).join('');
+  // What it needs from Dane on top; everything else folded away, closed until he opens it.
   main.innerHTML = `
-    <h1>${escapeHtml(t.name)}</h1>
-    <p class="meta">
-      <span>${escapeHtml(t.id)}</span><span>${escapeHtml(t.projectName)}</span>
-      <span>${escapeHtml(statusName(t.status))}</span>
-      <span>${t.assignee ? `assigned to ${escapeHtml(t.assignee.name)}` : 'not assigned'}</span>
-    </p>
-    <section class="description">${renderMarkdown(t.description) || '<p class="quiet">No description.</p>'}</section>
-    <h2>Comments</h2>
-    ${comments || '<p class="quiet">No comments yet.</p>'}
-    <form class="reply">
-      <label for="reply">Reply as ${escapeHtml(me?.name ?? 'you')}</label>
-      <textarea id="reply" required></textarea>
-      <div class="row"><button type="submit">Post reply</button><span class="note"></span></div>
-    </form>`;
+    <section class="quick">
+      <div class="ask">${renderQuickAction(t)}</div>
+      <form class="reply">
+        <label for="reply">Reply as ${escapeHtml(me?.name ?? 'you')}</label>
+        <textarea id="reply" required></textarea>
+        <div class="row"><button type="submit">Post reply</button><span class="note"></span></div>
+      </form>
+    </section>
+    <details class="details">
+      <summary>Details</summary>
+      <p class="meta">
+        <span>${escapeHtml(t.id)}</span><span>${escapeHtml(t.projectName)}</span>
+        <span>${escapeHtml(statusName(t.status))}</span>
+        <span>${t.assignee ? `assigned to ${escapeHtml(t.assignee.name)}` : 'not assigned'}</span>
+      </p>
+      <section class="description">${renderMarkdown(t.description) || '<p class="quiet">No description.</p>'}</section>
+      <h2>Comments</h2>
+      ${comments || '<p class="quiet">No comments yet.</p>'}
+    </details>`;
   const form = main.querySelector('form.reply');
   const box = form.querySelector('textarea');
   // Arrived by a Reply icon: go straight to the box.
@@ -325,6 +331,8 @@ async function drawTicket(id) {
       // Exactly as typed: no trimming, no formatting. "merge" arrives as "merge".
       await api('POST', `/tickets/${encodeURIComponent(t.id)}/comments`, { body: box.value });
       await drawTicket(t.id);
+      // Show the reply he just posted: open Details at the end of the thread.
+      main.querySelector('details.details').open = true;
       main.querySelector('.comment:last-of-type')?.scrollIntoView({ block: 'center' });
     } catch (err) {
       if (err instanceof SignedOut) return drawSignIn('You were signed out; your reply was not posted.');
