@@ -15,7 +15,7 @@
  * holds. It is kept in this browser's local storage so a pinned tab stays
  * signed in, and sent only to this server. "Sign out" forgets it.
  */
-import { escapeHtml, mergeQuestion, renderCommands, renderComment, renderMarkdown, renderMergeAction, renderQuickAction, renderTrail, tabTitle } from './render.mjs';
+import { escapeHtml, mergeQuestion, renderCommands, renderComment, renderMarkdown, renderMergeAction, renderQuickAction, renderTrail, stageLooks, tabTitle } from './render.mjs';
 
 const TOKEN_KEY = 'tracker-token';
 /** Board or list: the last one opened, so "Tasks" in the header opens it again. */
@@ -359,9 +359,18 @@ async function drawTasks(view) {
  * last change in their own columns, like ClickUp's List, and an Actions
  * column of icons. Each icon goes somewhere that already exists: the ticket,
  * the ticket's reply box, the ticket's pull request on GitHub.
+ *
+ * Each status wears the colour chosen for it on the Settings page: its
+ * border, a light tint behind its heading, its heading text. The colours go
+ * on as properties after drawing, never as markup (the page allows no inline
+ * style), and a stage with none, or colours that cannot be read, looks as
+ * it always did.
  */
 async function drawProject(slug, view) {
-  const board = await api('GET', `/projects/${encodeURIComponent(slug)}/board`);
+  const [board, looks] = await Promise.all([
+    api('GET', `/projects/${encodeURIComponent(slug)}/board`),
+    api('GET', '/stage-colours').then(stageLooks, () => ({})),
+  ]);
   // Opening a project selects it, and remembers the view: "Tasks" comes back here.
   try {
     localStorage.setItem(VIEW_KEY, view);
@@ -375,8 +384,8 @@ async function drawProject(slug, view) {
   const head = (c) => `${escapeHtml(c.status)} <span class="quiet">${c.tickets.length}</span>`;
   /** A status's block: folded when it is Live, open otherwise. */
   const block = (c, cls, body) => (c.status === 'Live'
-    ? `<details class="${cls}"><summary><h2>${head(c)}</h2></summary>${body}</details>`
-    : `<section class="${cls}"><h2>${head(c)}</h2>${body}</section>`);
+    ? `<details class="${cls}" data-stage="${escapeHtml(c.status)}"><summary><h2>${head(c)}</h2></summary>${body}</details>`
+    : `<section class="${cls}" data-stage="${escapeHtml(c.status)}"><h2>${head(c)}</h2>${body}</section>`);
 
   const card = (t) => `
     <a class="card" href="/t/${encodeURIComponent(t.id)}">
@@ -417,6 +426,14 @@ async function drawProject(slug, view) {
     ${view === 'board'
     ? `<div class="board">${board.columns.map(column).join('')}</div>`
     : `<div class="list">${board.columns.map(group).join('')}</div>`}`;
+  for (const el of main.querySelectorAll('[data-stage]')) {
+    const look = looks[el.dataset.stage];
+    if (!look) continue;
+    el.classList.add('coloured');
+    el.style.setProperty('--stage-border', look.border);
+    el.style.setProperty('--stage-tint', look.tint);
+    el.style.setProperty('--stage-text', look.text);
+  }
   putTrail([{ label: board.projectName, href: '/projects' }, { label: view === 'board' ? 'Board' : 'List' }]);
 }
 

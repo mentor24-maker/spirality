@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { startServer } from './server.mjs';
 import { seedDemo, tickingClock } from './demoData.mjs';
-import { escapeHtml, renderComment, renderInline, renderMarkdown, renderQuickAction, renderCommands, cardCommands, cardAsk, renderMergeAction, mergeQuestion, renderTrail, cardContext, firstParagraph } from './web/render.mjs';
+import { escapeHtml, renderComment, renderInline, renderMarkdown, renderQuickAction, renderCommands, cardCommands, cardAsk, renderMergeAction, mergeQuestion, renderTrail, cardContext, firstParagraph, stageLook, stageLooks, contrast } from './web/render.mjs';
 import { loadProjectConfig } from '../lib/projectConfig.mjs';
 import operatorCard from '../lib/operatorCard.js';
 import machineComment from '../lib/machineComment.js';
@@ -239,7 +239,7 @@ test('the Projects screen is a table whose View icon opens the details page; a n
 
 test('the board and the list both fold Live by default, and every card and row opens its ticket page', () => {
   const app = readFileSync(WEB('app.mjs'), 'utf8');
-  assert.match(app, /c\.status === 'Live'\s*\?\s*`<details class="\$\{cls\}">/);
+  assert.match(app, /c\.status === 'Live'\s*\?\s*`<details class="\$\{cls\}"[^>]*>/);
   assert.match(app, /block\(c, 'column',/);
   assert.match(app, /block\(c, 'group',/);
   assert.match(app, /<a class="card" href="\/t\/\$\{encodeURIComponent\(t\.id\)\}">/);
@@ -275,7 +275,7 @@ test('the list\'s actions only go where the page already goes: the ticket, its r
 test('the list and the board draw one object: the toggle keeps the project and only the view changes', () => {
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   // One fetch serves both views, so they cannot disagree about what is where.
-  assert.equal(app.match(/\/board`\);/g)?.length, 1);
+  assert.equal(app.match(/\/board`\)[;,]/g)?.length, 1);
   assert.match(app, /\['board', 'list'\]\.map\(\(v\) => `<a href="\$\{at\(v, board\.project\)\}"/);
 });
 
@@ -922,4 +922,49 @@ test('no merge phrase is written into the page\'s code', () => {
       assert.doesNotMatch(code(name), quoted, `${name} spells "${phrase}"`);
     }
   }
+});
+
+// ── Stage colours on the Tasks page ──────────────────────────────────────────
+
+test('a stage with a colour gets that border, a light tint behind its heading, and heading text in the colour', () => {
+  const look = stageLook('#CC0000');
+  assert.equal(look.border, '#cc0000');
+  assert.equal(look.text, '#cc0000', 'a colour that reads on its own tint is used as it is');
+  assert.notEqual(look.tint, look.text, 'the bar is never the same solid colour as the text');
+  assert.ok(contrast(look.tint, '#000000') > 15, 'the tint is light: dark text reads on it');
+});
+
+test('the heading text reads on its bar for any colour picked, darkening only one too pale to read', () => {
+  for (let r = 0; r < 256; r += 51) for (let g = 0; g < 256; g += 51) for (let b = 0; b < 256; b += 51) {
+    const colour = `#${[r, g, b].map((v) => v.toString(16).padStart(2, '0')).join('')}`;
+    const look = stageLook(colour);
+    assert.ok(contrast(look.text, look.tint) >= 3, colour);
+    assert.notEqual(look.text, look.tint, colour);
+  }
+  const yellow = stageLook('#ffff00');
+  assert.notEqual(yellow.text, '#ffff00', 'yellow on pale yellow would not read');
+  assert.equal(yellow.border, '#ffff00', 'the border keeps the colour as picked');
+});
+
+test('a stage with no colour, or a bad saved value, draws as it always did', () => {
+  for (const bad of [null, undefined, '', 'red', '#abc', '#zzzzzz', '#2b9cf2;background:url(x)', '"><script>', 42, {}]) {
+    assert.equal(stageLook(bad), null, String(bad));
+  }
+  assert.deepEqual(stageLooks({ stages: [
+    { status: 'Queued', colour: '#2b9cf2' },
+    { status: 'Building', colour: null },
+    { status: 'Live', colour: 'javascript:alert(1)' },
+  ] }), { Queued: stageLook('#2b9cf2') });
+  for (const answer of [null, undefined, {}, { stages: 'x' }]) assert.deepEqual(stageLooks(answer), {});
+});
+
+test('the Tasks page reads the stage colours with the board, puts them on as properties, and still draws when they cannot be read', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const draw = app.slice(app.indexOf('async function drawProject'), app.indexOf('async function copyText'));
+  assert.match(draw, /api\('GET', '\/stage-colours'\)\.then\(stageLooks, \(\) => \(\{\}\)\)/, 'an unreadable answer is no colours, not a broken page');
+  assert.match(draw, /data-stage="\$\{escapeHtml\(c\.status\)\}"/);
+  assert.match(draw, /el\.style\.setProperty\('--stage-border', look\.border\);/);
+  assert.doesNotMatch(draw, /'Queued'|'Requested'|'Building'/, 'the stages come from the board, never typed out');
+  const css = readFileSync(WEB('app.css'), 'utf8');
+  for (const prop of ['--stage-border', '--stage-tint', '--stage-text']) assert.match(css, new RegExp(`var\\(${prop}\\)`), prop);
 });
