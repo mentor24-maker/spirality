@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { startServer } from './server.mjs';
 import { seedDemo, tickingClock } from './demoData.mjs';
-import { escapeHtml, renderComment, renderInline, renderMarkdown, renderQuickAction, renderCommands, cardCommands, cardContext, firstParagraph } from './web/render.mjs';
+import { escapeHtml, renderComment, renderInline, renderMarkdown, renderQuickAction, renderCommands, cardCommands, cardAsk, cardContext, firstParagraph } from './web/render.mjs';
 import operatorCard from '../lib/operatorCard.js';
 import machineComment from '../lib/machineComment.js';
 import loopStatuses from '../lib/loopStatuses.js';
@@ -681,4 +681,42 @@ test('command text reaches the page escaped through render.mjs', () => {
   assert.deepEqual(codes(html), [nasty]);
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   assert.match(app, /import \{[^}]*\brenderCommands\b[^}]*\} from '\.\/render\.mjs'/);
+});
+
+test('lines inside a command block are copied as written, even ones that look like banner rules, sections or bold', () => {
+  const heredoc = "cat <<'EOF' > notes.md\n" + '#'.repeat(29) + "\nls **/*.md**\nNEEDED FROM DANE: nothing\nEOF";
+  const needed = `Run this in Terminal:\n\`\`\`bash\n${heredoc}\n\`\`\`\nReply done.`;
+  const cards = commandCards(needed);
+  for (const body of [cards.plain, cards.stored]) {
+    assert.deepEqual(cardCommands(body), [heredoc]);
+    assert.deepEqual(codes(renderCommands({ comments: [{ body }] })), [heredoc]);
+    // The red ask reads the same banner, so it ends at the closing rule, not inside the block.
+    assert.match(cardAsk(body), /Reply done\.$/);
+  }
+  // An authored card that reached the tracker unrendered: an @@ line inside the block does not end the ask.
+  const withSection = "cat <<'EOF' > notes.md\n@@END\n" + '#'.repeat(29) + '\nEOF';
+  const raw = `@@ASKED\nbuild it\n@@NEEDED\nRun this:\n\`\`\`\n${withSection}\n\`\`\`\nReply done.\n@@EVIDENCE\nnone`;
+  assert.deepEqual(cardCommands(raw), [withSection]);
+});
+
+test('a command block that is never closed is not offered to copy', () => {
+  const needed = 'Run:\n```\nnpm run verify\n```\nthen:\n```\nnpm run clickup -- get --task SP-1\nReply done.';
+  for (const body of Object.values(commandCards(needed))) {
+    assert.deepEqual(cardCommands(body), ['npm run verify']);
+    assert.doesNotMatch(renderCommands({ comments: [{ body }] }), /Reply done/);
+  }
+  // Its red ask still ends at the closing rule, as before.
+  assert.match(cardAsk(commandCards(needed).plain), /Reply done\.$/);
+});
+
+test('Copy works on the Mini\'s plain http page and a second click restarts the "Copied" timer', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const copy = /async function copyText[\s\S]*?\n}\n/.exec(app)[0];
+  // The hidden box is focused before its text is selected, and the button gets focus back.
+  assert.match(copy, /area\.focus\(\);\s*area\.setSelectionRange\(0, area\.value\.length\);[\s\S]*execCommand\('copy'\)/);
+  assert.match(copy, /button\?\.focus\(\)/);
+  assert.match(app, /clearTimeout\(reset\);\s*reset = setTimeout/);
+  const css = readFileSync(WEB('app.css'), 'utf8');
+  assert.match(css, /\.quick \.act \{[^}]*min-width: 0/);
+  assert.match(css, /\.quick \.command pre \{[^}]*min-width: 0/);
 });

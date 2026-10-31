@@ -125,31 +125,62 @@ const BANNER_RULE = /^#{20,}$/;
 const BANNER_LABEL = /^NEEDED FROM [^:\n]+:/;
 const RAW_SECTION = /^@@([A-Z]+)\s*$/;
 
+/** A line with one `**…**` wrapping taken off, its indent kept. */
+const unwrap = (line) => {
+  const m = /^(\s*)\*\*([\s\S]*)\*\*\s*$/.exec(line);
+  return (m ? m[1] + m[2] : line).replace(/\s+$/, '');
+};
+
 /**
- * Where an operator card's banner is in a comment: `{ start, end, lines }`
+ * The first index from `from` where `isEnd(lines[i])` holds outside a fenced
+ * block (`run` is a fence already open at `from`), so a command line inside a
+ * fence never ends a banner. A fence left open falls back to the first match
+ * anywhere, so a broken card still ends where it used to.
+ */
+function endOutsideFences(lines, from, isEnd, peel, run = null) {
+  let i = from;
+  for (; i < lines.length; i += 1) {
+    const line = peel(lines[i]);
+    if (run) { if (closesFence(line, run)) run = null; continue; }
+    const fence = FENCE.exec(line);
+    if (fence) { run = fence[1]; continue; }
+    if (isEnd(lines[i])) return i;
+  }
+  if (!run) return i;
+  for (i = from; i < lines.length && !isEnd(lines[i]); i += 1);
+  return i;
+}
+
+/**
+ * Where an operator card's banner is in a comment: `{ start, end, lines, ask }`
  * over the comment's lines, or null. Two forms:
  *
  *  - as `ask` posts it: a rule of #, `NEEDED FROM <NAME>: <the ask>`, any
  *    more lines of the ask, a closing rule (each line maybe in `**…**`);
  *  - an authored card that reached the tracker unrendered: the `@@NEEDED`
  *    section, up to the next `@@` marker. Its label is `operatorName`'s.
+ *
+ * `lines` is the banner as drawn, each line trimmed, label first. `ask` is
+ * the ask as written, without its label: one `**…**` layer off each line when
+ * the tracker stored the banner bold, and nothing else touched, so a fenced
+ * command inside it reads exactly as it was posted.
  */
 function findBanner(lines, operatorName) {
   const label = lines.findIndex((l) => BANNER_LABEL.test(unbold(l)));
   if (label !== -1) {
     const start = label > 0 && BANNER_RULE.test(unbold(lines[label - 1])) ? label - 1 : label;
-    let end = label + 1;
-    while (end < lines.length && !BANNER_RULE.test(unbold(lines[end]))) end += 1;
-    const ask = lines.slice(label, end).map(unbold);
-    return { start, end: Math.min(end + 1, lines.length), lines: ask };
+    const peel = /^\s*\*\*[\s\S]*\*\*\s*$/.test(lines[label]) ? unwrap : (l) => l;
+    const first = unbold(lines[label]).replace(BANNER_LABEL, '').trim();
+    const end = endOutsideFences(lines, label + 1, (l) => BANNER_RULE.test(unbold(l)), peel, FENCE.exec(first)?.[1]);
+    const ask = [first, ...lines.slice(label + 1, end).map(peel)];
+    return { start, end: Math.min(end + 1, lines.length), lines: lines.slice(label, end).map(unbold), ask };
   }
   const raw = lines.findIndex((l) => RAW_SECTION.exec(l.trim())?.[1] === 'NEEDED');
   if (raw === -1) return null;
-  let end = raw + 1;
-  while (end < lines.length && !RAW_SECTION.test(lines[end].trim())) end += 1;
+  const end = endOutsideFences(lines, raw + 1, (l) => RAW_SECTION.test(l.trim()), (l) => l);
   const ask = lines.slice(raw + 1, end).map((l) => l.trim()).filter(Boolean);
   const who = String(operatorName || 'you').toUpperCase();
-  return { start: raw, end, lines: [`NEEDED FROM ${who}: ${ask[0] ?? ''}`, ...ask.slice(1)] };
+  return { start: raw, end, lines: [`NEEDED FROM ${who}: ${ask[0] ?? ''}`, ...ask.slice(1)], ask: lines.slice(raw + 1, end) };
 }
 
 /**
@@ -253,12 +284,6 @@ export function firstParagraph(markdown) {
 /** The newest comment that carries an operator card, or undefined. */
 const newestCard = (comments = []) => [...comments].reverse().find((c) => cardAsk(c.body) !== null);
 
-/** A banner line as written: any `**…**` wrapping taken off, its indent kept. */
-const unwrap = (line) => {
-  const m = /^(\s*)\*\*([\s\S]*)\*\*\s*$/.exec(line);
-  return (m ? m[1] + m[2] : line).replace(/\s+$/, '');
-};
-
 /**
  * The commands an operator card's ask gives him to run: the text of each
  * fenced block in its banner, without the fence, blank lines at either end,
@@ -267,12 +292,7 @@ const unwrap = (line) => {
  */
 export function cardCommands(body) {
   const lines = String(body ?? '').replace(/\r\n?/g, '\n').split('\n');
-  const banner = findBanner(lines, '');
-  if (!banner) return [];
-  // The ask's own lines: no # rules, and no label, so a fence may open on its line.
-  const ask = lines.slice(banner.start, banner.end).map(unwrap)
-    .filter((l) => !BANNER_RULE.test(l.trim()) && !RAW_SECTION.test(l.trim()))
-    .map((l) => l.replace(/^\s*NEEDED FROM [^:\n]+:\s*/, ''));
+  const ask = findBanner(lines, '')?.ask ?? [];
   const commands = [];
   for (let i = 0; i < ask.length; i += 1) {
     const fence = FENCE.exec(ask[i]);
@@ -280,11 +300,12 @@ export function cardCommands(body) {
     const block = [];
     i += 1;
     while (i < ask.length && !closesFence(ask[i], fence[1])) block.push(ask[i++]);
+    if (i >= ask.length) break; // never closed: not a command he can trust
     while (block.length && !block[0].trim()) block.shift();
     while (block.length && !block.at(-1).trim()) block.pop();
     if (!block.length) continue;
     const indent = Math.min(...block.filter((l) => l.trim()).map((l) => /^\s*/.exec(l)[0].length));
-    commands.push(block.map((l) => l.slice(indent)).join('\n'));
+    commands.push(block.map((l) => l.slice(indent).replace(/\s+$/, '')).join('\n'));
   }
   return commands;
 }

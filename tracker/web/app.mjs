@@ -335,7 +335,7 @@ async function drawProject(slug, view) {
  * over plain http on the Mini, where the browser hides navigator.clipboard,
  * so off a secure page it copies from a hidden text box instead.
  */
-async function copyText(text) {
+async function copyText(text, button) {
   if (window.isSecureContext && navigator.clipboard) {
     try {
       await navigator.clipboard.writeText(text);
@@ -347,13 +347,16 @@ async function copyText(text) {
   area.setAttribute('readonly', '');
   area.className = 'offscreen';
   document.body.append(area);
-  area.select();
+  // Safari copies the page's selection, which a text box only holds while focused.
+  area.focus();
+  area.setSelectionRange(0, area.value.length);
   try {
     return document.execCommand('copy');
   } catch {
     return false;
   } finally {
     area.remove();
+    button?.focus();
   }
 }
 
@@ -407,10 +410,12 @@ async function drawTicket(id) {
     </details>`;
   // Copy: the command exactly as drawn, onto the clipboard. The page never runs it.
   for (const button of main.querySelectorAll('button.copy-command')) {
+    let reset;
     button.addEventListener('click', async () => {
       const text = button.parentElement.querySelector('code').textContent;
-      button.textContent = (await copyText(text)) ? 'Copied' : 'Not copied';
-      setTimeout(() => { button.textContent = 'Copy'; }, 1500);
+      button.textContent = (await copyText(text, button)) ? 'Copied' : 'Not copied';
+      clearTimeout(reset);
+      reset = setTimeout(() => { button.textContent = 'Copy'; }, 1500);
     });
   }
   const copyForm = main.querySelector('form.copy');

@@ -95,9 +95,10 @@ a.action:hover { color: #000; background: #e8e8ed; }
 .quick { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; align-items: start; margin-bottom: 2rem; }
 .quick h1 { margin-top: 0; }
 .quick .needed { color: var(--red); font-weight: 700; white-space: pre-wrap; }
+.quick .act { min-width: 0; }
 .quick .commands { margin-bottom: 1.25rem; }
 .quick .command { display: flex; gap: 0.5rem; align-items: flex-start; margin-bottom: 0.5rem; }
-.quick .command pre { flex: 1; margin: 0; }
+.quick .command pre { flex: 1; min-width: 0; margin: 0; }
 .offscreen { position: fixed; left: -9999px; top: 0; }
 details.details { border-top: var(--hairline); padding-top: 0.75rem; }
 details.details > summary { cursor: pointer; font-weight: 600; margin-bottom: 0.5rem; }
