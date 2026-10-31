@@ -421,3 +421,19 @@ test('a database made before actors had tokens gains the column, and its rows su
     } finally { store.close(); }
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('stage colours: set, read back, cleared, kept across a reopen; a bad colour or status writes nothing', () => {
+  const { path, store, cleanup } = fixture();
+  try {
+    assert.deepEqual(store.stageColours(), {});
+    assert.deepEqual(store.setStageColours({ Queued: '#2B9CF2', 'In review': '#cc0000' }), { 'in review': '#cc0000', queued: '#2b9cf2' });
+    assert.deepEqual(store.setStageColours({ queued: null, Live: '#00aa00' }), { 'in review': '#cc0000', live: '#00aa00' });
+    const again = openStore(path);
+    try { assert.deepEqual(again.stageColours(), { 'in review': '#cc0000', live: '#00aa00' }); } finally { again.close(); }
+    const before = store.stageColours();
+    for (const colours of [{ Queued: 'blue' }, { Queued: '#abc' }, { Queued: '#2b9cf2', Live: '#zzzzzz' }, { Nope: '#2b9cf2' }, null, ['#2b9cf2']]) {
+      assert.throws(() => store.setStageColours(colours), StoreError, JSON.stringify(colours));
+    }
+    assert.deepEqual(store.stageColours(), before, 'a refused set writes nothing, not even its good values');
+  } finally { cleanup(); }
+});
