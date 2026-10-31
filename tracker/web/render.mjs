@@ -389,3 +389,39 @@ export function mergeQuestion({ name, pullRequest }) {
   const number = /\/pull\/(\d+)/.exec(pullRequest ?? '')?.[1];
   return `Merge ${number ? `PR #${number}` : 'the pull request'} for ${name}?`;
 }
+
+/**
+ * The statuses a ticket may be deleted from, as the tracker stores them:
+ * nobody has started it yet. The server holds the rule (store.mjs
+ * DELETABLE) and refuses any other; this only decides where a Delete is drawn.
+ */
+const DELETABLE = Object.freeze(['requested', 'queued']);
+
+/** True when the page offers to delete a ticket in `status` (either spelling: "Queued" or "queued"). */
+export function canDelete(status) {
+  return DELETABLE.includes(String(status ?? '').toLowerCase());
+}
+
+/** The one question a Delete asks before it sends anything. Plain text, for confirm(). */
+export function deleteQuestion({ id, name }) {
+  return `Delete ${id} "${name}"? This cannot be undone.`;
+}
+
+/**
+ * Why a delete was refused, in plain words: started since the page was
+ * drawn (409), already gone (404), or the server's own message.
+ */
+export function deleteRefusal(id, err) {
+  if (err?.status === 409) return `Not deleted: ${id} has been started since this page was drawn, so it stays. Reload the page to see where it is now.`;
+  if (err?.status === 404) return `Not deleted: ${id} is no longer in the tracker. Reload the page to see the list as it is now.`;
+  return `Not deleted: ${err?.message ?? 'the tracker did not answer.'}`;
+}
+
+/** The ticket page's Delete button, as HTML, or '' when the ticket has been started. */
+export function renderDeleteAction({ status }) {
+  if (!canDelete(status)) return '';
+  return `<form class="delete-action">
+        <button type="submit">Delete</button><span class="note"></span>
+        <p class="quiet">Nobody has started this ticket yet, so it can still be deleted, with its comments.</p>
+      </form>`;
+}

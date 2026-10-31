@@ -131,3 +131,9 @@ table.colours td.value { color: var(--quiet); font-family: ui-monospace, Menlo, 
 table.colours tr.unset input { opacity: 0.25; }
 table.colours input[type="color"] { width: 3rem; height: 2rem; padding: 0; border: var(--hairline); border-radius: 4px; cursor: pointer; }
 form.colours .row { display: flex; gap: 1rem; align-items: center; margin-top: 1rem; }
+button.action { display: inline-flex; padding: 0.2rem; margin-right: 0.15rem; border: 0; border-radius: 4px; background: transparent; color: var(--quiet); cursor: pointer; }
+button.action:hover { color: var(--red); background: #fbe9e9; }
+.quick form.delete-action { margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--line); }
+.quick form.delete-action button { color: var(--red); border: 1px solid var(--red); background: #fff; border-radius: 6px; cursor: pointer; }
+.quick form.delete-action .note { margin-left: 1rem; }
+.quick form.delete-action p { margin: 0.4rem 0 0; font-size: 0.9em; }

@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { startServer } from './server.mjs';
 import { seedDemo, tickingClock } from './demoData.mjs';
-import { escapeHtml, renderComment, renderInline, renderMarkdown, renderQuickAction, renderCommands, cardCommands, cardAsk, renderMergeAction, mergeQuestion, renderTrail, cardContext, firstParagraph, bellColour } from './web/render.mjs';
+import { escapeHtml, renderComment, renderInline, renderMarkdown, renderQuickAction, renderCommands, cardCommands, cardAsk, renderMergeAction, mergeQuestion, renderTrail, cardContext, firstParagraph, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, bellColour } from './web/render.mjs';
 import { loadProjectConfig } from '../lib/projectConfig.mjs';
 import operatorCard from '../lib/operatorCard.js';
 import machineComment from '../lib/machineComment.js';
@@ -1038,4 +1038,70 @@ test('no merge phrase is written into the page\'s code', () => {
       assert.doesNotMatch(code(name), quoted, `${name} spells "${phrase}"`);
     }
   }
+});
+
+// ── Deleting a ticket nobody has started ─────────────────────────────────────
+
+test('Delete is offered only for Requested and Queued, in either spelling of the status', () => {
+  for (const name of loopStatuses.STAGE_ORDER) {
+    const unstarted = name === 'Requested' || name === 'Queued';
+    for (const status of [name, loopStatuses.statusOf(name)]) {
+      assert.equal(canDelete(status), unstarted, status);
+      if (unstarted) assert.match(renderDeleteAction({ status }), /<form class="delete-action">\s*<button type="submit">Delete<\/button>/, status);
+      else assert.equal(renderDeleteAction({ status }), '', status);
+    }
+  }
+  assert.equal(canDelete(undefined), false);
+});
+
+test('Delete asks once, naming the ticket by id and exact name, and says a refusal in plain words', () => {
+  assert.equal(deleteQuestion({ id: 'SP-12', name: 'Fix "it" now' }), 'Delete SP-12 "Fix "it" now"? This cannot be undone.');
+  assert.match(deleteRefusal('AL-3', { status: 409, message: 'ticket AL-3 is "building"' }), /^Not deleted: AL-3 has been started since this page was drawn, so it stays\./);
+  assert.match(deleteRefusal('AL-3', { status: 404, message: 'no ticket AL-3.' }), /^Not deleted: AL-3 is no longer in the tracker\./);
+  assert.equal(deleteRefusal('AL-3', { status: 500, message: 'the disk is full.' }), 'Not deleted: the disk is full.');
+});
+
+test('the list draws the bin on exactly the board\'s Requested and Queued rows, and the page\'s delete call removes one', async () => {
+  const f = await fixture();
+  try {
+    const { columns } = (await f.call('GET', '/projects/alpha/board')).body;
+    const deletable = columns.filter((c) => canDelete(c.status)).flatMap((c) => c.tickets);
+    assert.ok(deletable.length >= 1, 'the test data has an unstarted ticket');
+    assert.ok(columns.some((c) => !canDelete(c.status) && c.tickets.length), 'and a started one');
+    const target = deletable[0];
+    const r = await f.call('DELETE', `/tickets/${target.id}`);
+    assert.equal(r.status, 200);
+    const after = (await f.call('GET', '/projects/alpha/board')).body.columns.flatMap((c) => c.tickets);
+    assert.ok(!after.some((t) => t.id === target.id), 'redrawn from the server, the row is gone');
+    // A started ticket is refused, and stays.
+    const started = columns.find((c) => c.status === 'Building').tickets[0];
+    const refused = await f.call('DELETE', `/tickets/${started.id}`);
+    assert.equal(refused.status, 409);
+    assert.ok(f.store.getTicket(started.id));
+  } finally { await f.cleanup(); }
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  assert.match(app, /canDelete\(status\) \? actionButton\('Delete ticket', ICONS\.delete, \{ delete: t\.id \}\) : ''/);
+  assert.match(app, /c\.tickets\.map\(row\(c\.status\)\)/);
+  // No bin on the board's cards.
+  const card = /const card = \(t\) => `([\s\S]*?)`;/.exec(app)[1];
+  assert.doesNotMatch(card, /delete/i);
+});
+
+test('both Deletes confirm before any request, show a refusal on the page, and keep the ticket in view', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const listHandler = /button\.addEventListener\('click', async \(\) => \{\s*const id = button\.dataset\.delete;([\s\S]*?)\n    \}\);/.exec(app)?.[1];
+  assert.ok(listHandler, 'the bin has a click handler');
+  assert.match(listHandler, /^\s*if \(!confirm\(deleteQuestion\(\{ id, name: names\.get\(id\) \}\)\)\) return;/);
+  assert.match(listHandler, /catch \(err\) \{[\s\S]*listNote\.textContent = deleteRefusal\(id, err\);\s*listNote\.hidden = false;\s*button\.disabled = false;\s*return;/);
+  assert.match(listHandler, /\}\s*await drawProject\(slug, view\);$/, 'only a delete that succeeded redraws the list');
+  const pageHandler = /deleteForm\?\.addEventListener\('submit', async \(e\) => \{([\s\S]*?)\n  \}\);/.exec(app)?.[1];
+  assert.ok(pageHandler, 'the Delete button has a submit handler');
+  assert.match(pageHandler, /^\s*e\.preventDefault\(\);\s*if \(!confirm\(deleteQuestion\(t\)\)\) return;/);
+  assert.match(pageHandler, /catch \(err\) \{[\s\S]*deleteNote\.className = 'note error';\s*deleteNote\.textContent = deleteRefusal\(t\.id, err\);\s*button\.disabled = false;\s*return;/);
+  assert.match(pageHandler, /history\.pushState\(null, '', `\/list\/\$\{encodeURIComponent\(t\.project\)\}`\);\s*await route\(\);$/);
+  for (const handler of [listHandler, pageHandler]) {
+    assert.equal(handler.match(/api\('DELETE', `\/tickets\/\$\{encodeURIComponent\((?:id|t\.id)\)\}`\)/g)?.length, 1);
+    assert.ok(handler.indexOf('confirm(') < handler.indexOf("api('DELETE'"), 'asks before it sends');
+  }
+  assert.match(app, /\$\{renderDeleteAction\(t\)\}\s*<\/div>/, 'Delete sits at the foot of Quick Action\'s right side');
 });
