@@ -97,3 +97,9 @@ a.action:hover { color: #000; background: #e8e8ed; }
 .quick .needed { color: var(--red); font-weight: 700; white-space: pre-wrap; }
 details.details { border-top: var(--hairline); padding-top: 0.75rem; }
 details.details > summary { cursor: pointer; font-weight: 600; margin-bottom: 0.5rem; }
+table.colours { max-width: 32rem; }
+table.colours td { vertical-align: middle; }
+table.colours td.value { color: var(--quiet); font-family: ui-monospace, Menlo, monospace; font-size: 0.85rem; }
+table.colours tr.unset input { opacity: 0.25; }
+table.colours input[type="color"] { width: 3rem; height: 2rem; padding: 0; border: var(--hairline); border-radius: 4px; cursor: pointer; }
+form.colours .row { display: flex; gap: 1rem; align-items: center; margin-top: 1rem; }
