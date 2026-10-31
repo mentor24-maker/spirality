@@ -307,6 +307,100 @@ test('GET /projects/:slug answers one project\'s details to a call and the page 
   } finally { await f.cleanup(); }
 });
 
+test('PATCH /projects/:slug changes a project\'s name, web address, logo and owner for a person, answered read back', async () => {
+  const f = await fixture();
+  try {
+    const r = await f.call('PATCH', '/projects/alpha', {
+      token: f.humanToken, body: { name: 'Alpha Two', url: 'https://alpha.example', logo: 'https://alpha.example/l.png', owner: f.human.id },
+    });
+    assert.equal(r.status, 200);
+    assert.deepEqual([r.body.slug, r.body.prefix, r.body.name, r.body.url, r.body.logo, r.body.owner],
+      ['alpha', 'AL', 'Alpha Two', 'https://alpha.example', 'https://alpha.example/l.png', { id: f.human.id, name: 'Operator' }]);
+    assert.deepEqual(f.store.getProject('alpha'), {
+      slug: 'alpha', name: 'Alpha Two', prefix: 'AL', operator: f.human.id,
+      url: 'https://alpha.example', logo: 'https://alpha.example/l.png', owner: f.human.id,
+    });
+    const listed = (await f.call('GET', '/projects')).body.projects.find((p) => p.slug === 'alpha');
+    assert.equal(listed.name, 'Alpha Two');
+  } finally { await f.cleanup(); }
+});
+
+test('PATCH /projects/:slug refuses a machine (403), a slug or prefix change, a bad field or owner (400), an unknown project (404), and writes nothing', async () => {
+  const f = await fixture();
+  try {
+    const before = f.store.getProject('alpha');
+    const machine = await f.call('PATCH', '/projects/alpha', { body: { name: 'Loop was here' } });
+    assert.equal(machine.status, 403);
+    assert.equal(machine.body.error, 'people-only');
+    for (const [body, error] of [
+      [{ slug: 'beta' }, 'not-changeable'],
+      [{ prefix: 'BE' }, 'not-changeable'],
+      [{ name: 'Fine', slug: 'beta' }, 'not-changeable'],
+      [{ operator: f.machine.id }, 'bad-field'],
+      [{ owner: 'Operator' }, 'bad-owner'],
+      [{ owner: f.machine.id }, 'bad-owner'],
+      [{ url: 'javascript:alert(1)' }, 'bad-address'],
+      [{ name: '' }, 'missing'],
+      [{ actor: f.machine.id, name: 'x' }, 'not-your-name'],
+    ]) {
+      const r = await f.call('PATCH', '/projects/alpha', { token: f.humanToken, body });
+      assert.equal(r.status, 400, JSON.stringify(body));
+      assert.equal(r.body.error, error, JSON.stringify(body));
+    }
+    assert.equal((await f.call('PATCH', '/projects/nope', { token: f.humanToken, body: { name: 'x' } })).status, 404);
+    assert.equal((await f.call('PATCH', '/projects/alpha', { token: null, body: { name: 'x' } })).status, 401);
+    assert.deepEqual(f.store.getProject('alpha'), before);
+  } finally { await f.cleanup(); }
+});
+
+test('DELETE /projects/:slug removes a project with no tickets for a person; one with tickets is 409 and nothing is removed', async () => {
+  const f = await fixture();
+  try {
+    f.store.createProject({ slug: 'try-me', name: 'Try me', prefix: 'TRY' });
+    const base = f.lines.length;
+    const gone = await f.call('DELETE', '/projects/try-me', { token: f.humanToken });
+    assert.equal(gone.status, 200);
+    assert.deepEqual(gone.body, { deleted: 'try-me' });
+    assert.equal(f.store.getProject('try-me'), null);
+    assert.equal((await f.call('GET', '/projects/try-me')).status, 404);
+    assert.ok(f.lines.slice(base).some((l) => l === `deleted project try-me (prefix TRY) actor=${f.human.id}`), 'the log records the deletion');
+    assert.equal((await f.call('DELETE', '/projects/try-me', { token: f.humanToken })).status, 404);
+
+    // The guard that matters: a project with tickets is refused, in plain words, and stays whole.
+    f.store.fileTicket({ project: 'alpha', actor: f.machine.id, name: 'x', status: 'queued' });
+    f.store.fileTicket({ project: 'alpha', actor: f.machine.id, name: 'y', status: 'live' });
+    const refused = await f.call('DELETE', '/projects/alpha', { token: f.humanToken });
+    assert.equal(refused.status, 409);
+    assert.deepEqual(refused.body, {
+      error: 'has-tickets', message: 'AL has 2 tickets; a project with tickets cannot be deleted.', project: 'alpha', tickets: 2,
+    });
+    assert.ok(f.store.getProject('alpha'));
+    assert.equal(f.store.listTickets('alpha').length, 2);
+  } finally { await f.cleanup(); }
+});
+
+test('DELETE /projects/:slug from a machine is 403 and removes nothing, even an empty project', async () => {
+  const f = await fixture();
+  try {
+    f.store.createProject({ slug: 'try-me', name: 'Try me', prefix: 'TRY' });
+    const r = await f.call('DELETE', '/projects/try-me');
+    assert.equal(r.status, 403);
+    assert.equal(r.body.error, 'people-only');
+    assert.ok(f.store.getProject('try-me'));
+    assert.equal((await f.call('DELETE', '/projects/try-me', { token: null })).status, 401);
+    assert.ok(f.store.getProject('try-me'));
+  } finally { await f.cleanup(); }
+});
+
+test('/projects/:slug/edit is the page to a browser, without a token', async () => {
+  const f = await fixture();
+  try {
+    const res = await fetch(`${await f.serve()}/projects/alpha/edit`, { headers: { accept: 'text/html' } });
+    assert.equal(res.status, 200);
+    assert.match(res.headers.get('content-type'), /^text\/html/);
+  } finally { await f.cleanup(); }
+});
+
 test('unknown projects, tickets and addresses get 404; bad fields get 400; none of them writes anything', async () => {
   const f = await fixture();
   try {
