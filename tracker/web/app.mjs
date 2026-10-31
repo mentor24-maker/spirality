@@ -14,7 +14,7 @@
  * holds. It is kept in this browser's local storage so a pinned tab stays
  * signed in, and sent only to this server. "Sign out" forgets it.
  */
-import { escapeHtml, renderComment, renderMarkdown, renderQuickAction, tabTitle } from './render.mjs';
+import { escapeHtml, renderComment, renderMarkdown, renderQuickAction, renderTrail, tabTitle } from './render.mjs';
 
 const TOKEN_KEY = 'tracker-token';
 /** Board or list: the last one opened, so "Tasks" in the header opens it again. */
@@ -93,6 +93,11 @@ async function api(method, path, body) {
   return json;
 }
 
+/** Put the trail at the top of the page just drawn: `steps` as renderTrail takes them. */
+function putTrail(steps) {
+  main.insertAdjacentHTML('afterbegin', renderTrail(steps));
+}
+
 function showError(err) {
   main.innerHTML = `<p class="error">${escapeHtml(err.message)}</p><p><a href="/">Back to Waiting on you</a></p>`;
 }
@@ -140,6 +145,7 @@ async function drawWaiting() {
       <h2>In your statuses but not assigned to you</h2>
       <p class="quiet">A hand-off that did not finish: the loop cannot tell whether these need you.</p>
       ${table(unsure)}` : ''}`;
+  putTrail([{ label: 'Waiting on you' }]);
 }
 
 /** The list's action icons: drawn here, never from ticket text. 24-unit outline icons. */
@@ -205,6 +211,7 @@ async function drawProjects() {
     ? `<p class="quiet">Choose a project's name to see its tasks.</p>
       <table class="projects"><thead><tr><th class="name">Name</th><th class="slug">Slug</th><th class="prefix">Ticket prefix</th><th class="open">Open tickets</th><th class="actions">Actions</th></tr></thead><tbody>${projects.map(row).join('')}</tbody></table>`
     : '<p class="quiet">There are no projects yet.</p>'}`;
+  putTrail([{ label: 'Projects' }]);
 }
 
 /**
@@ -220,6 +227,7 @@ async function drawProjectDetails(slug) {
     if (!(err instanceof Refused) || err.status !== 404) throw err;
     setTitle('No such project · Tracker');
     main.innerHTML = `<h1>Projects</h1><p>There is no project ${escapeHtml(slug)}.</p><p><a href="/projects">Back to Projects</a></p>`;
+    putTrail([{ label: 'Projects' }]);
     return;
   }
   setTitle(`${p.name} · Tracker`);
@@ -239,6 +247,7 @@ async function drawProjectDetails(slug) {
     </dl>
     <h2>Tickets by status</h2>
     <table class="counts"><thead><tr><th>Status</th><th class="count">Tickets</th></tr></thead><tbody>${counts}</tbody></table>`;
+  putTrail([{ label: p.name, href: '/projects' }, { label: 'Details' }]);
 }
 
 /**
@@ -250,6 +259,7 @@ async function drawTasks(view) {
   if (!projects.length) {
     setTitle('Tasks · Tracker');
     main.innerHTML = '<h1>Tasks</h1><p class="quiet">There are no projects yet.</p>';
+    putTrail([{ label: 'Tasks' }]);
     return;
   }
   const slug = projects.some((p) => p.slug === savedProject()) ? savedProject() : projects[0].slug;
@@ -328,6 +338,7 @@ async function drawProject(slug, view) {
     ${view === 'board'
     ? `<div class="board">${board.columns.map(column).join('')}</div>`
     : `<div class="list">${board.columns.map(group).join('')}</div>`}`;
+  putTrail([{ label: board.projectName, href: '/projects' }, { label: view === 'board' ? 'Board' : 'List' }]);
 }
 
 async function drawTicket(id) {
@@ -375,6 +386,12 @@ async function drawTicket(id) {
         </div>
       </form>` : '<p class="quiet">There is no other project to copy into yet.</p>'}
     </details>`;
+  // The ticket's own project, in the view last used; then the ticket; then this page of it.
+  putTrail([
+    { label: t.projectName, href: `/${savedView()}/${encodeURIComponent(t.project)}` },
+    { label: `Task ${t.id}`, href: `/t/${encodeURIComponent(t.id)}` },
+    { label: 'Details' },
+  ]);
   const copyForm = main.querySelector('form.copy');
   copyForm?.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -445,6 +462,7 @@ async function drawNew() {
   setTitle('New request · Tracker');
   if (!projects.length) {
     main.innerHTML = '<h1>New request</h1><p class="quiet">There are no projects to file into yet.</p>';
+    putTrail([{ label: 'New request' }]);
     return;
   }
   const draft = savedDraft();
@@ -460,6 +478,7 @@ async function drawNew() {
       <textarea id="description"></textarea>
       <div class="row"><button type="submit">File request</button><span class="note"></span></div>
     </form>`;
+  putTrail([{ label: 'New request' }]);
   const form = main.querySelector('form.request');
   const project = form.querySelector('#project');
   const title = form.querySelector('#title');
