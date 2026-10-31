@@ -10,6 +10,7 @@ import { startServer } from '../../tracker/server.mjs';
 import { createApiTracker, trackerTokenEnv } from './apiTracker.mjs';
 import { conflictTicketFiledComment, findConflictTicket } from '../../lib/conflictWork.js';
 import { isMachineComment } from '../lib/machineComment.mjs';
+import { renderMarkdown } from '../../tracker/web/render.mjs';
 
 const DOOR = fileURLToPath(new URL('../clickup.mjs', import.meta.url));
 const LIST = '333';
@@ -186,6 +187,27 @@ test('queue --claimable lists every Rework ticket first (oldest first), then Que
   } finally { await f.cleanup(); }
 });
 
+test('a Requested ticket is never claimable and never waiting on Dane, even assigned to him with the newest word a loop\'s', async () => {
+  const f = await fixture();
+  try {
+    f.file({ name: 'asked for from the page', status: 'requested', priority: 'urgent', assignee: f.human.id });
+    f.store.postComment({ ticket: 'AL-1', author: f.machine.id, body: 'a loop spoke last' });
+    f.file({ name: 'queued low', priority: 'low' });
+    const claimable = await f.door(['queue', '--claimable']);
+    assert.equal(claimable.code, 0, claimable.err);
+    assert.deepEqual(claimable.out.trim().split('\n').map((l) => l.split('\t')[0]), ['AL-2']);
+
+    const all = await f.door(['waiting']);
+    assert.equal(all.code, 0, all.err);
+    assert.ok(!all.out.includes('AL-1'), all.out);
+    assert.match(all.err, /0 ticket\(s\) actually waiting on Dane/);
+
+    const one = await f.door(['waiting', '--task', 'AL-1']);
+    assert.equal(one.code, 0, one.err);
+    assert.match(one.out, /^AL-1\trequested\t.*NOT HIS — status "requested" is a machine status/);
+  } finally { await f.cleanup(); }
+});
+
 test('Waits on: a dependent is skipped while its prerequisite is open, and claimable once it is Live', async () => {
   const f = await fixture();
   try {
@@ -304,7 +326,7 @@ test('status --if-status refuses with exit 3 when the ticket moved, and In revie
 
     const bad = await f.door(['status', '--task', 'AL-1', '--status', 'Shipped']);
     assert.equal(bad.code, 1);
-    assert.match(bad.err, /set status FAILED — HTTP 400\n"Shipped" is not one of the seven statuses/);
+    assert.match(bad.err, /set status FAILED — HTTP 400\n"Shipped" is not one of the eight statuses/);
   } finally { await f.cleanup(); }
 });
 
@@ -335,6 +357,27 @@ test('ask posts the card, moves to Needs your input and assigns the operator; wa
     const again = await f.door(['ask', '--task', 'AL-1', '--body-file', '-'], { stdin: CARD });
     assert.equal(again.code, 2);
     assert.match(again.err, /REFUSED — Dane's own comment is the NEWEST one on AL-1/);
+  } finally { await f.cleanup(); }
+});
+
+test('a card whose @@ASKED holds his own "> " and ``` lines posts, stores and renders with the ask outside the code box (SP-44)', async () => {
+  const f = await fixture();
+  try {
+    f.file({ name: 'one', status: 'building' });
+    const asked = 'forward this:\n> the old email line\n```\nnpm run thing\n```\nthanks';
+    const card = `@@ASKED\n${asked}\n@@CONTEXT\n${sixty}\n@@NEEDED\nReply "go" to queue it.`;
+    const r = await f.door(['ask', '--task', 'AL-1', '--body-file', '-'], { stdin: card });
+    assert.equal(r.code, 0, r.err);
+    const [stored] = f.store.listComments('AL-1');
+    // His words sit in one fence longer than his own ```, so it holds them all.
+    assert.ok(stored.body.includes(`\`\`\`\`\n${asked}\n\`\`\`\``), stored.body);
+    const html = renderMarkdown(stored.body);
+    const pres = html.match(/<pre><code>[\s\S]*?<\/code><\/pre>/g) || [];
+    assert.equal(pres.length, 1, html);
+    assert.ok(pres[0].includes('&gt; the old email line') && pres[0].includes('npm run thing') && pres[0].includes('thanks'), pres[0]);
+    const outside = html.replace(pres[0], '');
+    assert.match(outside, /NEEDED FROM DANE: Reply/);
+    assert.match(outside, /WHAT&#39;S GOING ON|WHAT'S GOING ON/);
   } finally { await f.cleanup(); }
 });
 

@@ -1,7 +1,8 @@
 /**
  * Dane's page (docs/TRACKER_MVP.md, "Dane's page"): sign in, see what waits
- * on you, open a ticket, answer it, and see one project's whole queue as a
- * board or as a list. Plain browser JavaScript, no packages,
+ * on you, open a ticket, answer it, pick a project, see that project's
+ * whole queue as a board or as a list, and file a new request. Plain browser
+ * JavaScript, no packages,
  * no build step; tracker/server.mjs serves it.
  *
  * Every word of ticket text reaches the page through render.mjs, which
@@ -15,8 +16,12 @@
 import { escapeHtml, renderComment, renderMarkdown, tabTitle } from './render.mjs';
 
 const TOKEN_KEY = 'tracker-token';
-/** Board or list: the last one opened, so "Projects" in the header opens it again. */
+/** Board or list: the last one opened, so "Tasks" in the header opens it again. */
 const VIEW_KEY = 'tracker-view';
+/** The selected project: the one "Tasks" in the header opens. */
+const PROJECT_KEY = 'tracker-project';
+/** The New request form's text while it is being typed, so a sign-out or a reload does not lose it. */
+const DRAFT_KEY = 'tracker-request-draft';
 const main = document.getElementById('main');
 const who = document.getElementById('who');
 const signOut = document.getElementById('sign-out');
@@ -138,14 +143,56 @@ function action(href, label, icon, offSite = false) {
     + `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icon}</svg></a>`;
 }
 
-/** The remembered view; a browser that will not keep it answers "board". */
+/** The remembered view; a browser that will not keep it answers "list". */
 function savedView() {
-  try { return localStorage.getItem(VIEW_KEY) === 'list' ? 'list' : 'board'; } catch { return 'board'; }
+  try { return localStorage.getItem(VIEW_KEY) === 'board' ? 'board' : 'list'; } catch { return 'list'; }
+}
+
+/** The selected project's slug, or null when none is remembered. */
+function savedProject() {
+  try { return localStorage.getItem(PROJECT_KEY); } catch { return null; }
+}
+
+/**
+ * Every project, one card each: its name, its ticket ids, how many tickets
+ * are open. Choosing one selects it and opens its tasks; the selected one
+ * is marked, and "Tasks" in the header goes back to it.
+ */
+async function drawProjects() {
+  const { projects } = await api('GET', '/projects');
+  setTitle('Projects · Tracker');
+  const selected = savedProject();
+  const card = (p) => `
+    <a class="project-card${p.slug === selected ? ' selected' : ''}" href="/${savedView()}/${encodeURIComponent(p.slug)}"${p.slug === selected ? ' aria-current="true"' : ''}>
+      <span class="name">${escapeHtml(p.name)}${p.slug === selected ? '<span class="tag">Selected</span>' : ''}</span>
+      <span class="quiet">${escapeHtml(p.prefix)}- tickets · ${p.open} open</span>
+    </a>`;
+  main.innerHTML = `
+    <h1>Projects</h1>
+    ${projects.length
+    ? `<p class="quiet">Choose a project to see its tasks.</p><div class="project-cards">${projects.map(card).join('')}</div>`
+    : '<p class="quiet">There are no projects yet.</p>'}`;
+}
+
+/**
+ * "Tasks" in the header: the selected project, in the view last used. With
+ * none selected, or one that no longer exists, the first project.
+ */
+async function drawTasks(view) {
+  const { projects } = await api('GET', '/projects');
+  if (!projects.length) {
+    setTitle('Tasks · Tracker');
+    main.innerHTML = '<h1>Tasks</h1><p class="quiet">There are no projects yet.</p>';
+    return;
+  }
+  const slug = projects.some((p) => p.slug === savedProject()) ? savedProject() : projects[0].slug;
+  history.replaceState(null, '', `/${view}/${encodeURIComponent(slug)}`);
+  await drawProject(slug, view);
 }
 
 /**
  * One project, as a board or as a list. Both draw the same object, the
- * server's board (pageData.mjs boardOf): the seven statuses in the
+ * server's board (pageData.mjs boardOf): the eight statuses in the
  * contract's order, each holding its tickets in `queue` order, so the two
  * views cannot disagree about what is where. Read-only: moves stay with the
  * door and the loops. `Live` starts folded in both, its count showing,
@@ -158,22 +205,14 @@ function savedView() {
  * the ticket's reply box, the ticket's pull request on GitHub.
  */
 async function drawProject(slug, view) {
-  try { localStorage.setItem(VIEW_KEY, view); } catch { /* the toggle still works; it is only not remembered */ }
-  const { projects } = await api('GET', '/projects');
-  if (!slug) {
-    if (!projects.length) {
-      main.innerHTML = '<h1>Projects</h1><p class="quiet">There are no projects yet.</p>';
-      return;
-    }
-    history.replaceState(null, '', `/${view}/${encodeURIComponent(projects[0].slug)}`);
-    slug = projects[0].slug;
-  }
   const board = await api('GET', `/projects/${encodeURIComponent(slug)}/board`);
+  // Opening a project selects it, and remembers the view: "Tasks" comes back here.
+  try {
+    localStorage.setItem(VIEW_KEY, view);
+    localStorage.setItem(PROJECT_KEY, board.project);
+  } catch { /* the page still works; it is only not remembered */ }
   setTitle(`${board.projectName} ${view} · Tracker`);
   const at = (v, s) => `/${v}/${encodeURIComponent(s)}`;
-  const switcher = projects.map((p) => (p.slug === board.project
-    ? `<strong>${escapeHtml(p.name)}</strong>`
-    : `<a href="${at(view, p.slug)}">${escapeHtml(p.name)}</a>`)).join('');
   const toggle = ['board', 'list'].map((v) => `<a href="${at(v, board.project)}"${v === view ? ' class="current" aria-current="page"' : ''}>${v === 'board' ? 'Board' : 'List'}</a>`).join('');
   const head = (c) => `${escapeHtml(c.status)} <span class="quiet">${c.tickets.length}</span>`;
   /** A status's block: folded when it is Live, open otherwise. */
@@ -213,7 +252,7 @@ async function drawProject(slug, view) {
   main.classList.add('wide');
   main.innerHTML = `
     <div class="toolbar">
-      <nav class="projects">${switcher}</nav>
+      <a href="/projects">Change project</a>
       <nav class="views" aria-label="View">${toggle}</nav>
     </div>
     ${view === 'board'
@@ -275,6 +314,81 @@ async function drawTicket(id) {
   });
 }
 
+/** The draft kept for the New request form, or empty fields. */
+function savedDraft() {
+  try {
+    const d = JSON.parse(localStorage.getItem(DRAFT_KEY) ?? '{}');
+    return { project: String(d.project ?? ''), title: String(d.title ?? ''), description: String(d.description ?? '') };
+  } catch { return { project: '', title: '', description: '' }; }
+}
+
+/**
+ * The New request form: a project, a title and a description, filed into
+ * `Requested`, which no loop builds from, unassigned and under the signed-in
+ * person. The projects come from the server, and it starts on the one the
+ * server's project config names. What he types is kept in this browser as
+ * he types it, so a refused submit, a sign-out or a reload never loses it;
+ * it is forgotten once the ticket is filed.
+ */
+async function drawNew() {
+  const { projects, default: start } = await api('GET', '/projects');
+  setTitle('New request · Tracker');
+  if (!projects.length) {
+    main.innerHTML = '<h1>New request</h1><p class="quiet">There are no projects to file into yet.</p>';
+    return;
+  }
+  const draft = savedDraft();
+  const chosen = projects.some((p) => p.slug === draft.project) ? draft.project : (start ?? projects[0].slug);
+  main.innerHTML = `
+    <h1>New request</h1>
+    <form class="request">
+      <label for="project">Project</label>
+      <select id="project">${projects.map((p) => `<option value="${escapeHtml(p.slug)}"${p.slug === chosen ? ' selected' : ''}>${escapeHtml(p.name)}</option>`).join('')}</select>
+      <label for="title">Title</label>
+      <input id="title" type="text" required>
+      <label for="description">Description</label>
+      <textarea id="description"></textarea>
+      <div class="row"><button type="submit">File request</button><span class="note"></span></div>
+    </form>`;
+  const form = main.querySelector('form.request');
+  const project = form.querySelector('#project');
+  const title = form.querySelector('#title');
+  const description = form.querySelector('#description');
+  title.value = draft.title;
+  description.value = draft.description;
+  const keep = () => {
+    try {
+      localStorage.setItem(DRAFT_KEY, JSON.stringify({ project: project.value, title: title.value, description: description.value }));
+    } catch { /* the form still works; a sign-out would lose the text */ }
+  };
+  form.addEventListener('input', keep);
+  form.addEventListener('change', keep);
+  const note = form.querySelector('.note');
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    keep();
+    const button = form.querySelector('button');
+    button.disabled = true;
+    note.className = 'note quiet';
+    note.textContent = 'Filing…';
+    try {
+      // Exactly as typed: no trimming, no formatting, the same rule as the reply box.
+      const ticket = await api('POST', `/projects/${encodeURIComponent(project.value)}/tickets`, {
+        name: title.value, description: description.value, status: 'Requested',
+      });
+      try { localStorage.removeItem(DRAFT_KEY); } catch { /* nothing kept */ }
+      history.pushState(null, '', `/t/${encodeURIComponent(ticket.id)}`);
+      await route();
+    } catch (err) {
+      if (err instanceof SignedOut) return drawSignIn('You were signed out; your request was not filed. What you typed is kept: it will be back in the form once you sign in.');
+      note.className = 'note error';
+      note.textContent = `Not filed: ${err.message}`;
+      button.disabled = false;
+    }
+  });
+  title.focus();
+}
+
 /** Underline the header link for the screen showing. */
 function markNav(which) {
   for (const a of document.querySelectorAll('nav.site a')) a.classList.toggle('current', a.dataset.nav === which);
@@ -288,14 +402,25 @@ async function route() {
     main.classList.remove('wide');
     const ticket = /^\/t\/([^/]+)$/.exec(location.pathname);
     const project = /^\/(board|list)(?:\/([^/]+))?$/.exec(location.pathname);
-    markNav(ticket || project ? 'projects' : 'waiting');
-    if (ticket) {
+    const projects = location.pathname === '/projects';
+    const tasks = location.pathname === '/tasks';
+    const isNew = location.pathname === '/new';
+    markNav(isNew ? 'new' : projects ? 'projects' : ticket || project || tasks ? 'tasks' : 'waiting');
+    if (isNew) {
+      await drawNew();
+      await refreshCount();
+    } else if (ticket) {
       await drawTicket(decodeURIComponent(ticket[1]));
       await refreshCount();
+    } else if (projects) {
+      await drawProjects();
+      await refreshCount();
+    } else if (tasks || (project && project[2] == null)) {
+      // "Tasks" in the header: the selected project, in the view last used.
+      await drawTasks(tasks ? savedView() : project[1]);
+      await refreshCount();
     } else if (project) {
-      // "Projects" in the header is /board with no project: open the view last used.
-      const view = project[2] == null && project[1] === 'board' ? savedView() : project[1];
-      await drawProject(project[2] == null ? null : decodeURIComponent(project[2]), view);
+      await drawProject(decodeURIComponent(project[2]), project[1]);
       await refreshCount();
     } else {
       await drawWaiting();

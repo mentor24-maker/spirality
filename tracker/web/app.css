@@ -33,12 +33,20 @@ code { font-family: ui-monospace, Menlo, monospace; font-size: 0.9em; }
 li.check { list-style: none; margin-left: -1.25rem; }
 form.reply textarea { width: 100%; min-height: 7rem; font: inherit; padding: 0.5rem; box-sizing: border-box; }
 form.reply .row { display: flex; gap: 1rem; align-items: center; margin-top: 0.5rem; }
+form.request label { display: block; margin-top: 1rem; font-weight: 600; }
+form.request select, form.request input, form.request textarea { display: block; width: 100%; font: inherit; padding: 0.5rem; box-sizing: border-box; margin-top: 0.35rem; }
+form.request textarea { min-height: 12rem; }
+form.request .row { display: flex; gap: 1rem; align-items: center; margin-top: 1rem; }
 form.sign-in { max-width: 28rem; }
 form.sign-in input { width: 100%; font: inherit; padding: 0.5rem; box-sizing: border-box; margin: 0.5rem 0; }
 button { font: inherit; padding: 0.4rem 1rem; }
 main.wide { max-width: none; }
 .toolbar { display: flex; gap: 2rem; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
-nav.projects { display: flex; gap: 1rem; }
+.project-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr)); gap: 1rem; }
+.project-card { display: flex; flex-direction: column; gap: 0.35rem; border: var(--hairline); border-radius: 8px; padding: 1rem 1.25rem; color: var(--ink); text-decoration: none; }
+.project-card:hover { box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18); }
+.project-card.selected { border-color: var(--blue); box-shadow: inset 0 0 0 1px var(--blue); }
+.project-card .name { font-size: 1.15rem; font-weight: 600; }
 .views { display: inline-flex; border: var(--hairline); border-radius: 6px; overflow: hidden; }
 .views a { padding: 0.3rem 1rem; color: var(--ink); text-decoration: none; font-size: 0.9rem; }
 .views a + a { border-left: var(--hairline); }

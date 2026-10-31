@@ -48,7 +48,7 @@ by eye, never a loop's shortcut.
   `Ready to launch` and the **hand-back** on `Needs your input`. WaveCenter
   does not run one yet.
 
-## The seven statuses
+## The eight statuses
 
 Every ticket is in exactly one of these, shown here in display order (the
 code's `STAGE_ORDER`, which is how the scripts print them; a ClickUp board
@@ -56,6 +56,7 @@ may order its columns differently, see "Known differences today"):
 
 | Status | What it means | Whose move |
 |---|---|---|
+| `Requested` | Dane asked for it from the tracker page; nobody has specced it yet | machine (loop-intake) |
 | `Rework` | review sent it back; a branch, an open PR and review notes already exist | machine |
 | `Queued` | waiting for a build loop to pick it up | machine |
 | `Building` | a build loop has claimed it and is writing the code | machine |
@@ -66,7 +67,13 @@ may order its columns differently, see "Known differences today"):
 
 The two in bold are **Dane's statuses** and ask different things of him:
 `Needs your input` wants an **answer**, `Ready to launch` wants a **yes**.
-On a normal day he can ignore the other five.
+On a normal day he can ignore the other six.
+
+`Requested` is first on the board and no build loop claims it: the build
+loop never builds from his unspecced words. The intake pass (`loop-intake`,
+its own lane on the Mini) turns each request into specced tickets and hands
+every one to him in `Needs your input`; his "go" queues it. It exists only in the tracker (see "Known differences
+today").
 
 Facts about the list itself:
 
@@ -105,6 +112,7 @@ checks on it. Every write is read back before the command reports success.
 
 | From | To | Who | How, and what has to be true |
 |---|---|---|---|
+| `Requested` | `Needs your input` | loop-intake | `ask`, one request per pass, the oldest first. Before the move the description is the spec in `loop-spec`'s shape with his words verbatim under a first `## Asked` heading, and the card's `@@ASKED` is those words; `@@NEEDED` says reply "go" to queue it, or what to change. A request too big for one pull request is sliced: each further slice is filed in `Requested` (so no build loop can claim it) and handed over the same way. A request too unclear to spec gets the question on the card and nothing else changes. *(Skill rule: the door checks the card, not the spec.)* |
 | `Rework` or `Queued` | `Building` | loop-build | `claim`. It reads the ticket's status itself and refuses (exit 3) if that status is not `Rework` or `Queued`; then it hands over to `status` guarded on the status it just read. `status` reads the ticket again, refuses if it has moved, and only then writes. That is still check-then-write, not an atomic swap: the guard narrows the window in which two passes can both claim, it does not close it, which is why only one build loop runs per product. The guard is on what `claim` read, not on what `queue --claimable` listed: a ticket listed as `Queued` that has since moved to `Rework` is still claimed. |
 | `Building` | `In review` | loop-build | *(Skill rule.)* Only after the PR is open, its body links the ticket, and `pr-opened` has recorded it on the ticket (see "Markers"). `status` does not check for a PR. |
 | `Building` | `Needs your input` | loop-build | `ask`, with an operator card. Used when the gates fail and the fix is out of scope, the ticket is too vague, or the work is too big for one pass. |
@@ -659,7 +667,7 @@ many times."
 
 Written down so nobody mistakes them for the contract:
 
-- **Board order differs per list.** The order in "The seven statuses" is
+- **Board order differs per list.** The order in "The eight statuses" is
   the code's display order (`STAGE_ORDER`). Read from ClickUp's API on
   2026-10-11, the three live lists have the same seven statuses and no
   others, in these orders:
@@ -690,5 +698,16 @@ Written down so nobody mistakes them for the contract:
   hand-off reads "no local check was attempted" and the ticket asks its
   builder to find out first. It has no bus, so a stalled hand-off is not
   announced; a filing that fails is retried on the next pass.
+- **Any reply to an intake card queues the ticket.** The relay does not
+  read what Dane said on a ticket `loop-intake` handed over: "go", "change
+  the title" and an answer to a question all move it to `Queued` (no PR, so
+  the hand-back's `Queued` row), and the builder reads his comment there. An
+  answer to an intake *question* therefore queues a ticket whose description
+  is still his raw request, and the build loop's own "too vague to build,
+  `ask`" rule is what stops it. If that costs something, it is its own
+  ticket.
+- **`Requested` exists only in the tracker.** StarCaster's and WaveCenter's
+  ClickUp Loop Queue lists do not carry it, so a request filed from a page
+  can only be a tracker ticket.
 - **Only StarCaster has auto-merge lanes.** See "StarCaster's auto-merge
   lanes" above.

@@ -9,7 +9,7 @@
 # Spirality has an incident that needs them.
 #
 # Each iteration is a FRESH headless Claude Code session started in the main
-# checkout. Both loop skills pick the next ticket from ClickUp on every run,
+# checkout. Every loop skill picks the next ticket from the tracker on each run,
 # so there is no state to carry between runs, and a crashed run costs one
 # interval rather than the whole night.
 #
@@ -58,8 +58,9 @@ if ! mkdir "$LOCK" 2>/dev/null; then
 fi
 echo "$$" > "$LOCK/pid"
 
-# The sync lock both lanes take around pull + npm ci. Wait up to 10 minutes
-# for the other lane; a lock whose pid is gone is cleared, as above.
+# The sync lock every lane takes around pull + npm ci (the only lock the lanes
+# share; each lane's own lock above is its alone). Wait up to 10 minutes
+# for another lane; a lock whose pid is gone is cleared, as above.
 SYNC_LOCK="$HOME/loop-logs/spirality-sync.lock"
 take_sync_lock() {
   local waited=0 holder
@@ -79,7 +80,7 @@ cd "$REPO" || exit 1
 
 while true; do
   # 1. A timid pull: only main, only a clean tree, only fast-forward. A refusal
-  #    is logged but never blocks the pass. Both lanes share this checkout, so
+  #    is logged but never blocks the pass. Every lane shares this checkout, so
   #    the pull and `npm ci` happen under one shared lock: two at once collide
   #    on .git/index.lock and rebuild node_modules under each other.
   if [ "$(git rev-parse --abbrev-ref HEAD 2>/dev/null)" = "main" ] && [ -z "$(git status --porcelain)" ]; then
@@ -89,7 +90,7 @@ while true; do
       npm ci --silent >> "$LOG" 2>&1 || echo "[loop-runner] $(date "+%H:%M:%S") npm ci failed — running with the node_modules already present" >> "$LOG"
       rm -rf "$SYNC_LOCK"
     else
-      echo "[loop-runner] $(date "+%H:%M:%S") the other lane held the sync lock for 10 minutes — not pulling this pass" >> "$LOG"
+      echo "[loop-runner] $(date "+%H:%M:%S") another lane held the sync lock for 10 minutes — not pulling this pass" >> "$LOG"
     fi
   else
     echo "[loop-runner] $(date "+%H:%M:%S") main checkout is not on a clean main — not pulling. Every pass runs stale code until it is put back on main." >> "$LOG"

@@ -21,6 +21,7 @@ guide (`~/WebApps/starcaster/docs/LOOP_ENGINEERING.md`) has the incident.
 | Step | Skill | Who runs it | What it does |
 |---|---|---|---|
 | 1 | `loop-spec` | a session, with Dane | interviews him, files small tasks with acceptance criteria and test steps |
+| 1 | `loop-intake` | a loop | takes the oldest request he filed from the tracker page (`Requested`), writes it up in `loop-spec`'s shape with his words kept verbatim, slices it if it is more than one PR, and hands each ticket to him (`Needs your input`); his "go" queues it |
 | 2 | `loop-build` | a loop | claims the next task, builds it in its own worktree, passes `npm run verify`, opens a PR, hands it to review |
 | 3 | `loop-review` | a loop | independently re-verifies the PR, then hands it to Dane (`Ready to launch`) or back to build (`Rework`) |
 
@@ -83,10 +84,11 @@ for a status the list does not have), descriptions can save empty, and
 ClickUp **deletes `> ` blockquote lines** from comments and descriptions
 without saying so. The script refuses a blockquote before sending.
 
-## The seven statuses — and the two that are yours
+## The eight statuses — and the two that are yours
 
 | Status | What it means | Whose move |
 |---|---|---|
+| `Requested` | you asked for it from the tracker page; nobody has specced it yet | machine (spec pass) |
 | `Rework` | review sent it back — a branch and a PR already exist | machine |
 | `Queued` | waiting for a build loop to pick it up | machine |
 | `Building` | a loop is writing the code | machine |
@@ -98,7 +100,14 @@ without saying so. The script refuses a blockquote before sending.
 The two human statuses ask different things. `Needs your input` wants an
 **answer**: a loop stopped and wrote you a plain-language question. `Ready to
 launch` wants a **yes**: nothing is wrong, it is finished and waiting on the
-merge only you authorize. On a normal day you can ignore the other five.
+merge only you authorize. On a normal day you can ignore the other six.
+
+**`Requested` exists** so you can file work from the tracker page
+("New request" in its header, or http://mac-mini.local:4180/new) without
+opening Claude Code, and so the build loop never builds from your unspecced
+words: no loop claims a `Requested` ticket, and a spec pass turns it into
+`Queued` tickets for you to approve. It exists only in the tracker, never in
+a ClickUp list.
 
 **`Rework` exists** so a half-built ticket is never mistaken for one nobody
 has started. loop-build drains every `Rework` ticket before any `Queued` one,
@@ -180,7 +189,9 @@ three reasons listed and named options (respec / split / drop).
 the Mac Mini (account `daneofearth`, checkout `~/WebApps/spirality`) as
 launchd agents, `com.spirality.loop-build` and `com.spirality.loop-review`,
 beside StarCaster's; since 2026-10-13 a third agent, `com.spirality.relay`,
-runs the merge lane every 10 minutes (see "Merges: the relay" below). The
+runs the merge lane every 10 minutes (see "Merges: the relay" below), and a
+fourth, `com.spirality.loop-intake`, specs the requests filed from the
+tracker page (see "Requests: the intake lane" below). The
 labels come from `launchdPrefix` in `spirality.project.json`. Each lane
 keeps the committed `scripts/loop_runner.sh` alive
 across crashes and reboots; each pass is a fresh headless Claude Code session
@@ -194,6 +205,7 @@ So the question is never "shall I start one", it is "what is it doing":
 ssh mac-mini 'cd ~/WebApps/spirality && ./scripts/install_loop_runner.sh --status'   # installed? alive? lock? last pass?
 ssh mac-mini 'tail -40 ~/loop-logs/spirality-loop-build.log'                          # what the last build pass said
 ssh mac-mini 'tail -40 ~/loop-logs/spirality-loop-review.log'
+ssh mac-mini 'tail -40 ~/loop-logs/spirality-loop-intake.log'
 ```
 
 Three things the log can say that need a person:
@@ -202,7 +214,7 @@ Three things the log can say that need a person:
   expired. Only Dane can sign in, at the Mini's own screen or Screen Sharing
   (an ssh sign-in does not reach launchd). Then restart the jobs:
   `launchctl kickstart -k gui/$(id -u)/com.spirality.loop-build` and the same
-  for `loop-review`.
+  for `loop-review` and `loop-intake`.
 - **"hit the time limit"** twice on one ticket: a gate that will not go green.
   Read the ticket and hand it back or `ask`.
 - **Nothing written for hours** while the queue has work: `--status` says
@@ -227,6 +239,24 @@ ssh mac-mini 'cd ~/WebApps/spirality && npm run clickup -- relay --dry-run'     
 
 If `--status` shows the relay is not loaded, a session has to merge: tell one
 **"merge PR #N"**.
+
+**Requests: the intake lane.** The fourth job, `com.spirality.loop-intake`,
+runs the `loop-intake` skill every 30 minutes through the same
+`scripts/loop_runner.sh`, with its own lock
+(`~/loop-logs/spirality-loop-intake.lock`) and log
+(`~/loop-logs/spirality-loop-intake.log`); the only lock it shares with the
+other lanes is the brief one around pulling `main`. One pass takes the
+oldest `Requested` ticket, writes the spec (your words stay verbatim under
+`## Asked`), files further slices when it is more than one pull request, and
+moves every ticket to `Needs your input` with a card: reply **"go"** to
+queue it, or say what to change. With no request waiting, a pass writes
+nothing and logs one line saying so. It signs in to the tracker as itself
+(`TRACKER_TOKEN_LOOP_INTAKE`, docs/TRACKER_MVP.md "Sign-ins"). To run a pass
+now instead of waiting:
+
+```bash
+ssh mac-mini 'launchctl kickstart -k gui/$(id -u)/com.spirality.loop-intake'
+```
 
 ### Starting one by hand — only when the Mini's agents are unloaded
 

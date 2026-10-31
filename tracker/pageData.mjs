@@ -109,13 +109,21 @@ export function threadOf(store, ticketId) {
   };
 }
 
-/** Every project, for the board's switcher: slug and name, in the store's order. */
+/**
+ * Every project, for the Projects screen: slug, name, ticket-id prefix, and
+ * how many of its tickets are open (any status but Live), in the store's order.
+ */
 export function projectsList(store) {
-  return store.listProjects().map((p) => ({ slug: p.slug, name: p.name }));
+  return store.listProjects().map((p) => ({
+    slug: p.slug,
+    name: p.name,
+    prefix: p.prefix,
+    open: store.listTickets(p.slug, { open: true }).length,
+  }));
 }
 
 /**
- * One project's board: the seven statuses as columns, left to right in the
+ * One project's board: the eight statuses as columns, left to right in the
  * contract's STAGE_ORDER, each holding its tickets in the order `npm run
  * clickup -- queue --status <S>` prints them. The order is the door's own
  * comparator (compareWithinStatus: priority, then oldest), fed each ticket
