@@ -11,6 +11,7 @@
  *
  * Answers are JSON:
  *   401  no token, or a token no actor holds
+ *   403  a call only a person may make, from a machine's token
  *   404  an unknown project, ticket or address
  *   409  a guarded move found the ticket moved: `{ error, status, version }`
  *   400  a bad field, or a body that names another author
@@ -42,6 +43,17 @@ const NOT_FOUND_CODES = new Set(['unknown-ticket', 'unknown-project']);
 /** The fields a new ticket may carry. */
 const FILE_FIELDS = Object.freeze(['name', 'description', 'status', 'priority', 'tags', 'assignee', 'loopNote']);
 
+/** The fields a new project may carry. */
+const PROJECT_FIELDS = Object.freeze(['name', 'slug', 'prefix', 'url', 'logo', 'owner']);
+
+/**
+ * A slug is the project's own part of every address (`/projects/<slug>`):
+ * small letters, digits and single hyphens. `new` is the Create Project
+ * form's own address, so no project may take it.
+ */
+const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const RESERVED_SLUGS = Object.freeze(['new']);
+
 /** The fields a change may carry, besides its guards. */
 const CHANGE_FIELDS = Object.freeze(['name', 'description', 'status', 'priority', 'tags', 'assignee', 'loopNote']);
 
@@ -64,12 +76,14 @@ const WEB_FILES = Object.freeze({
 });
 
 /**
- * The page may run only its own scripts and talk only to this server. With
+ * The page may run only its own scripts and talk only to this server; it may
+ * show images from elsewhere (a project's logo is an image's web address),
+ * which cannot run anything, and sends them no referrer. With
  * every ticket's text escaped before it is drawn, this is the second lock: an
  * injected script would not run even if escaping ever missed one.
  */
 const PAGE_HEADERS = Object.freeze({
-  'content-security-policy': "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+  'content-security-policy': "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' http: https:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
   'x-content-type-options': 'nosniff',
   'referrer-policy': 'no-referrer',
   'cache-control': 'no-cache',
@@ -79,7 +93,7 @@ const PAGE_HEADERS = Object.freeze({
  * The page file a GET of `pathname` answers with, or null when it is not a
  * page address. `/projects` is both the Projects screen and the call that
  * lists them, and `/projects/<project>` both a project's details page and
- * the call that reads them: a browser opening the address asks for HTML and
+ * the call that reads them (`/projects/new` is the Create Project form): a browser opening the address asks for HTML and
  * gets the page; the page's own call asks for anything and gets the data.
  */
 function pageFile(pathname, accept = '') {
@@ -220,6 +234,32 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
       const projects = projectsList(store);
       const fallback = projects.some((p) => p.slug === defaultProject) ? defaultProject : null;
       return [200, { projects, default: fallback }];
+    }
+
+    // Dane's page: the Create Project form. Only a person may add a project:
+    // a loop's or a hand-run session's token is refused and nothing is written.
+    if (parts.length === 1 && parts[0] === 'projects' && method === 'POST') {
+      if (me.kind !== 'human') {
+        throw new HttpError(403, 'people-only', 'only a person signed in to the tracker may add a project; a machine may not.');
+      }
+      const body = await readJson(req);
+      checkBody(body, me, PROJECT_FIELDS);
+      if (typeof body.slug === 'string' && body.slug.trim() && (!SLUG.test(body.slug) || RESERVED_SLUGS.includes(body.slug))) {
+        throw new HttpError(400, 'bad-slug', RESERVED_SLUGS.includes(body.slug)
+          ? `"${body.slug}" is the form's own address; choose another slug.`
+          : `a slug is small letters, digits and single hyphens (like "my-project"), not "${body.slug}".`);
+      }
+      if (body.owner != null && !Number.isInteger(body.owner)) {
+        throw new HttpError(400, 'bad-owner', `owner must be a person's actor id, not "${body.owner}".`);
+      }
+      const made = store.createProject(pick(body, PROJECT_FIELDS));
+      return [201, projectDetailsOf(store, made.slug)];
+    }
+
+    // Dane's page: the people in the tracker, for the Create Project form's
+    // owner picker. Names and ids only; never a machine, never a token.
+    if (parts.length === 1 && parts[0] === 'people' && method === 'GET') {
+      return [200, { people: store.listPeople() }];
     }
 
     // Dane's page: one project's details page.

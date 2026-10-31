@@ -92,7 +92,8 @@ store ticket should expect that line). It offers:
 Five tables. That is the whole model.
 
 ```
-projects  slug, name, operator actor        -- replaces workspace + space + list
+projects  slug, name, prefix, operator actor,  -- replaces workspace + space + list
+          url, logo, owner (a person)
 actors    id, kind (human|machine), name, token hash
 tickets   id, project, name, description, status, priority, tags,
           assignee, loop_note, created_at, updated_at, version
@@ -110,6 +111,10 @@ events    id, ticket, actor, what changed, from, to, at   -- written by the stor
   never gave us.
 - Ticket ids are short and readable (`SP-42`), and a ticket's address is
   `<tracker>/t/SP-42`.
+- A project's **owner** is a person (a `human` actor), separate from its
+  **operator**, who the loops hand tickets to. Its **url** (web address) and
+  **logo** (an image's web address) are http(s) addresses or empty. A
+  database made before these three existed gains them, empty, on start-up.
 
 ### The API
 
@@ -129,7 +134,9 @@ text programs read).
 | `GET /waiting` | for Dane's page: tickets in the operator's two statuses across every project, by the loop's own `waiting` verdict for the caller, newest first |
 | `GET /tickets/:id/thread` | for Dane's page: the ticket with each comment's author named and machine comments marked |
 | `GET /projects` | for Dane's page: every project with its slug, name, ticket prefix and open count, and the project the New request form starts on |
-| `GET /projects/:slug` | for Dane's page: one project's details, its operator by name, its open count and a count per status; 404 for an unknown slug |
+| `POST /projects` | for Dane's page: add a project (`{ name, slug, prefix, url?, logo?, owner? }`), answered with its details read back; **a person's token only**: a machine's gets 403 and nothing is written. A duplicate slug or prefix, a slug that is not small letters, digits and hyphens (or is `new`), an owner who is not a person, or an address that is not http(s) gets 400 |
+| `GET /people` | for Dane's page: the tracker's people (humans only) by id and name, for the owner picker; never a token |
+| `GET /projects/:slug` | for Dane's page: one project's details, its operator and owner by name, its web address and logo, its open count and a count per status; 404 for an unknown slug |
 | `GET /projects/:slug/board` | for Dane's page: one project's tickets in the eight statuses, each in `queue` order |
 | `POST /tickets/:id/clone` | for Dane's page: copy a ticket into another project (`{ project }`), as a new ticket in `Requested` there with one comment naming where it came from; the original does not change |
 
@@ -156,8 +163,12 @@ The page is served by `tracker/server.mjs` at `/` (a ticket at `/t/<id>`)
 from `tracker/web/`. `/projects` is a table of every project: choosing a
 name selects it and opens its tasks, and the View icon in its Actions column
 opens `/projects/<slug>`, that project's details (prefix, operator, open
-count, a count per status) with links to its board and list. A browser
-opening `/projects` or `/projects/<slug>` gets the page; the page's own
+count, a count per status) with links to its board and list. The table and
+the details page show each project's logo, web address and owner. A person
+signed in sees a **New project** button above the table: it opens
+`/projects/new`, the Create Project form, which files the project and opens
+its details page; a refused save shows the server's reason and keeps what
+was typed. A browser opening `/projects` or `/projects/<slug>` gets the page; the page's own
 call to the same address gets the data. `node tracker/demo.mjs` starts a throwaway tracker
 with test data to try it.
 
