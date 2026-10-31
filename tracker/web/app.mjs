@@ -15,7 +15,7 @@
  * holds. It is kept in this browser's local storage so a pinned tab stays
  * signed in, and sent only to this server. "Sign out" forgets it.
  */
-import { canDelete, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderDeleteAction, renderMarkdown, renderMergeAction, renderQuickAction, renderTrail, tabTitle } from './render.mjs';
+import { canDelete, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderDeleteAction, renderMarkdown, renderMergeAction, renderQuickAction, renderTrail, tabTitle, bellColour } from './render.mjs';
 
 const TOKEN_KEY = 'tracker-token';
 /** Board or list: the last one opened, so "Tasks" in the header opens it again. */
@@ -30,6 +30,7 @@ const main = document.getElementById('main');
 const who = document.getElementById('who');
 const headerProject = document.getElementById('project');
 const signOut = document.getElementById('sign-out');
+const bell = document.getElementById('bell');
 let me = null;
 
 /** How often the waiting count in the tab title is read again. */
@@ -43,7 +44,12 @@ function setTitle(title) {
   document.title = tabTitle(waitingCount, pageTitle);
 }
 
-/** Read the waiting count again and put it in the tab title. A failed read leaves the title alone. */
+/** Colour the header bell from the last count read; before any read it stays grey. */
+function showBell() {
+  bell.dataset.colour = bellColour(waitingCount);
+}
+
+/** Read the waiting count again and put it in the tab title and the bell. A failed read leaves both alone. */
 async function refreshCount() {
   if (!me) return;
   try {
@@ -54,6 +60,7 @@ async function refreshCount() {
     return;
   }
   document.title = tabTitle(waitingCount, pageTitle);
+  showBell();
 }
 
 /** A status as the contract writes it: "needs your input" -> "Needs your input". */
@@ -109,6 +116,7 @@ function drawSignIn(problem) {
   who.textContent = '';
   headerProject.hidden = true;
   signOut.hidden = true;
+  bell.hidden = true;
   setTitle('Sign in · Tracker');
   main.innerHTML = `
     <h1>Sign in</h1>
@@ -130,6 +138,7 @@ function drawSignIn(problem) {
 async function drawWaiting() {
   const { waiting, unsure } = await api('GET', '/waiting');
   waitingCount = waiting.length;
+  showBell();
   setTitle('Waiting on you · Tracker');
   const rows = (list) => list.map((t) => `
     <tr>
@@ -892,9 +901,12 @@ async function drawSettings() {
   });
 }
 
-/** Underline the header link for the screen showing. */
+/** Underline the header link (or the bell, for Waiting on you) for the screen showing. */
 function markNav(which) {
   for (const a of document.querySelectorAll('nav.site a')) a.classList.toggle('current', a.dataset.nav === which);
+  bell.classList.toggle('current', which === 'waiting');
+  if (which === 'waiting') bell.setAttribute('aria-current', 'page');
+  else bell.removeAttribute('aria-current');
 }
 
 async function route() {
@@ -902,6 +914,7 @@ async function route() {
     me = await api('GET', '/me');
     who.textContent = `Signed in as ${me.name}`;
     signOut.hidden = false;
+    bell.hidden = false;
     showProject();
     main.classList.remove('wide');
     const ticket = /^\/t\/([^/]+)$/.exec(location.pathname);

@@ -226,6 +226,15 @@ export function tabTitle(waitingCount, pageTitle) {
   return Number.isInteger(waitingCount) && waitingCount > 0 ? `(${waitingCount}) Tracker` : pageTitle;
 }
 
+/**
+ * The header bell's colour for the same count: grey while nothing waits (or
+ * the count is missing), yellow for one to three, red for more than three.
+ */
+export function bellColour(waitingCount) {
+  if (!Number.isInteger(waitingCount) || waitingCount <= 0) return 'grey';
+  return waitingCount <= 3 ? 'yellow' : 'red';
+}
+
 const CONTEXT_HEADING = "WHAT'S GOING ON";
 
 /**
