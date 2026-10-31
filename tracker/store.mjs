@@ -30,6 +30,9 @@
  *    exist without its map row, so a re-run cannot file it twice.
  *  - An actor's sign-in token is stored only as its SHA-256 hash. The token
  *    itself is handed back once, by issueToken, and never kept.
+ *  - A project's owner is a person (a `human` actor), apart from its
+ *    operator, who the loops hand tickets to. Its web address and logo are
+ *    http(s) addresses, or nothing.
  */
 import { createHash, randomBytes } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
@@ -66,7 +69,10 @@ CREATE TABLE IF NOT EXISTS projects (
   name        TEXT NOT NULL,
   prefix      TEXT NOT NULL UNIQUE,
   operator    INTEGER REFERENCES actors(id),
-  next_number INTEGER NOT NULL DEFAULT 1
+  next_number INTEGER NOT NULL DEFAULT 1,
+  url         TEXT,
+  logo        TEXT,
+  owner       INTEGER REFERENCES actors(id)
 );
 CREATE TABLE IF NOT EXISTS tickets (
   id          TEXT PRIMARY KEY,
@@ -181,6 +187,29 @@ function hashToken(token) {
 /** SQLite hands integers back as numbers; keep ids plain numbers. */
 const num = (v) => (v == null ? null : Number(v));
 
+/** The columns a project gained after the first databases were made, and their types. */
+const LATER_PROJECT_COLUMNS = Object.freeze({ url: 'TEXT', logo: 'TEXT', owner: 'INTEGER REFERENCES actors(id)' });
+
+/** An optional web address: null for none, an http(s) address, or a thrown refusal. */
+function optionalAddress(value, what) {
+  if (value == null || value === '') return null;
+  if (typeof value === 'string') {
+    try {
+      const u = new URL(value);
+      if ((u.protocol === 'http:' || u.protocol === 'https:') && value === value.trim()) return value;
+    } catch { /* refused below */ }
+  }
+  throw new StoreError('bad-address', `${what} must be a web address starting http:// or https://, not "${value}".`);
+}
+
+function projectFromRow(row) {
+  if (!row) return null;
+  return {
+    slug: row.slug, name: row.name, prefix: row.prefix, operator: num(row.operator),
+    url: row.url, logo: row.logo, owner: num(row.owner),
+  };
+}
+
 function ticketFromRow(row) {
   if (!row) return null;
   return {
@@ -248,6 +277,12 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
     db.exec('ALTER TABLE actors ADD COLUMN token_hash TEXT');
   }
   db.exec(SCHEMA);
+  // A database made before projects had a web address, a logo and an owner
+  // gains the columns, empty; every existing row is otherwise untouched.
+  const projectColumns = new Set(db.prepare('PRAGMA table_info(projects)').all().map((c) => c.name));
+  for (const [column, type] of Object.entries(LATER_PROJECT_COLUMNS)) {
+    if (!projectColumns.has(column)) db.exec(`ALTER TABLE projects ADD COLUMN ${column} ${type}`);
+  }
 
   /**
    * Run `fn` inside one transaction. IMMEDIATE takes the write lock before
@@ -414,35 +449,53 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
       return row ? this.getActor(num(row.id)) : null;
     },
 
-    /** A product: its slug, its name, its ticket-id prefix, its operator. */
-    createProject({ slug, name, prefix, operator = null }) {
+    /** Every person (never a machine), oldest first: the owner a project may name. Never a token. */
+    listPeople() {
+      return db.prepare("SELECT id, name FROM actors WHERE kind = 'human' ORDER BY id").all()
+        .map((row) => ({ id: num(row.id), name: row.name }));
+    },
+
+    /**
+     * A product: its slug, its name, its ticket-id prefix, its operator, and
+     * optionally its web address, its logo (an image's web address) and its
+     * owner (a person). Read back before it is answered.
+     */
+    createProject({ slug, name, prefix, operator = null, url = null, logo = null, owner = null }) {
       requireText(slug, "a project's slug");
       requireText(name, "a project's name");
       if (typeof prefix !== 'string' || !/^[A-Z][A-Z0-9]*$/.test(prefix)) {
         throw new StoreError('bad-prefix', `a ticket prefix is capital letters and digits, starting with a letter, not "${prefix}".`);
       }
       if (operator != null) requireActor(operator, 'the operator');
+      const address = optionalAddress(url, "a project's web address");
+      const image = optionalAddress(logo, "a project's logo");
+      if (owner != null && this.getActor(requireActor(owner, 'the owner')).kind !== 'human') {
+        throw new StoreError('bad-owner', `the owner must be a person; actor ${owner} is a machine.`);
+      }
       try {
-        db.prepare('INSERT INTO projects (slug, name, prefix, operator) VALUES (?, ?, ?, ?)')
-          .run(slug, name, prefix, operator);
+        db.prepare('INSERT INTO projects (slug, name, prefix, operator, url, logo, owner) VALUES (?, ?, ?, ?, ?, ?, ?)')
+          .run(slug, name, prefix, operator, address, image, owner);
       } catch (err) {
         if (/UNIQUE/.test(err.message)) {
           throw new StoreError('duplicate-project', `a project with slug "${slug}" or prefix "${prefix}" already exists.`);
         }
         throw err;
       }
-      return this.getProject(slug);
+      const made = this.getProject(slug);
+      const wanted = { slug, name, prefix, operator, url: address, logo: image, owner };
+      if (!made || Object.keys(wanted).some((k) => made[k] !== wanted[k])) {
+        throw new StoreError('write-failed', `project "${slug}" did not read back as written.`);
+      }
+      return made;
     },
 
     getProject(slug) {
-      const row = db.prepare('SELECT slug, name, prefix, operator FROM projects WHERE slug = ?').get(slug);
-      return row ? { slug: row.slug, name: row.name, prefix: row.prefix, operator: num(row.operator) } : null;
+      return projectFromRow(db.prepare('SELECT * FROM projects WHERE slug = ?').get(slug));
     },
 
     /** Every project, by slug: Dane's page lists what waits on him across all of them. */
     listProjects() {
-      return db.prepare('SELECT slug, name, prefix, operator FROM projects ORDER BY slug').all()
-        .map((row) => ({ slug: row.slug, name: row.name, prefix: row.prefix, operator: num(row.operator) }));
+      return db.prepare('SELECT * FROM projects ORDER BY slug').all().map(projectFromRow);
     },
 
     /** File a ticket. Its id is the project's prefix and next number. */

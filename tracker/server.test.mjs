@@ -356,7 +356,7 @@ test('admin: create-actor prints only the token on stdout, and that token signs 
     const store = openStore(db);
     try {
       assert.deepEqual(store.actorForToken(token), { id: 1, kind: 'machine', name: 'Build loop' });
-      assert.deepEqual(store.getProject('beta'), { slug: 'beta', name: 'Beta', prefix: 'BE', operator: 2 });
+      assert.deepEqual(store.getProject('beta'), { slug: 'beta', name: 'Beta', prefix: 'BE', operator: 2, url: null, logo: null, owner: null });
       assert.equal(store.getProject('gamma'), null);
       const server = await startServer({ store, port: 0 });
       try {
@@ -375,4 +375,68 @@ test('the server, admin and backup hard-code no product: no names, ids, prefixes
       assert.doesNotMatch(source, word, `${file} matches ${word}`);
     }
   }
+});
+
+test('POST /projects lets a person add a project, read back with its owner by name; a machine gets 403 and nothing is written', async () => {
+  const f = await fixture();
+  try {
+    const before = f.store.listProjects();
+    const refused = await f.call('POST', '/projects', { body: { name: 'Beta', slug: 'beta', prefix: 'BE' } });
+    assert.equal(refused.status, 403);
+    assert.equal(refused.body.error, 'people-only');
+    assert.deepEqual(f.store.listProjects(), before, 'a machine wrote nothing');
+    assert.equal((await f.call('POST', '/projects', { token: null, body: { name: 'Beta', slug: 'beta', prefix: 'BE' } })).status, 401);
+
+    const made = await f.call('POST', '/projects', {
+      token: f.humanToken,
+      body: { name: 'Beta', slug: 'beta', prefix: 'BE', url: 'https://beta.example', logo: 'https://beta.example/l.png', owner: f.human.id },
+    });
+    assert.equal(made.status, 201);
+    assert.equal(made.body.slug, 'beta');
+    assert.deepEqual(made.body.owner, { id: f.human.id, name: 'Operator' });
+    assert.equal(made.body.url, 'https://beta.example');
+    assert.equal(made.body.logo, 'https://beta.example/l.png');
+    assert.equal(made.body.operator, null, 'the operator is not set by the form');
+    assert.deepEqual((await f.call('GET', '/projects/beta')).body, made.body);
+    assert.ok(f.lines.some((l) => /POST \/projects 201 actor=1/.test(l)));
+  } finally { await f.cleanup(); }
+});
+
+test('POST /projects refuses a missing field, a duplicate slug or prefix, a bad slug, a machine owner and an unknown field, and writes nothing', async () => {
+  const f = await fixture();
+  try {
+    const good = { name: 'Beta', slug: 'beta', prefix: 'BE' };
+    for (const [body, error] of [
+      [{ ...good, name: '' }, 'missing'],
+      [{ ...good, slug: '' }, 'missing'],
+      [{ ...good, prefix: '' }, 'bad-prefix'],
+      [{ ...good, slug: 'alpha' }, 'duplicate-project'],
+      [{ ...good, prefix: 'AL' }, 'duplicate-project'],
+      [{ ...good, slug: 'Has Spaces' }, 'bad-slug'],
+      [{ ...good, slug: 'a/b' }, 'bad-slug'],
+      [{ ...good, slug: 'new' }, 'bad-slug'],
+      [{ ...good, owner: f.machine.id }, 'bad-owner'],
+      [{ ...good, owner: 'Operator' }, 'bad-owner'],
+      [{ ...good, url: 'javascript:alert(1)' }, 'bad-address'],
+      [{ ...good, operator: f.human.id }, 'bad-field'],
+      [{ ...good, actor: f.machine.id }, 'not-your-name'],
+    ]) {
+      const r = await f.call('POST', '/projects', { token: f.humanToken, body });
+      assert.equal(r.status, 400, JSON.stringify(body));
+      assert.equal(r.body.error, error, JSON.stringify(body));
+      assert.ok(r.body.message, 'the form has a reason to show');
+    }
+    assert.deepEqual(f.store.listProjects().map((p) => p.slug), ['alpha']);
+  } finally { await f.cleanup(); }
+});
+
+test('GET /people lists the tracker\'s people for the owner picker: humans only, never a token', async () => {
+  const f = await fixture();
+  try {
+    const r = await f.call('GET', '/people', { token: f.humanToken });
+    assert.equal(r.status, 200);
+    assert.deepEqual(r.body, { people: [{ id: f.human.id, name: 'Operator' }] });
+    for (const token of f.tokens) assert.ok(!r.text.includes(token));
+    assert.equal((await f.call('GET', '/people', { token: null })).status, 401);
+  } finally { await f.cleanup(); }
 });
