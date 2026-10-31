@@ -131,6 +131,7 @@ text programs read).
 | `GET /projects` | for Dane's page: every project with its slug, name, ticket prefix and open count, and the project the New request form starts on |
 | `GET /projects/:slug` | for Dane's page: one project's details, its operator by name, its open count and a count per status; 404 for an unknown slug |
 | `GET /projects/:slug/board` | for Dane's page: one project's tickets in the eight statuses, each in `queue` order |
+| `POST /tickets/:id/clone` | for Dane's page: copy a ticket into another project (`{ project }`), as a new ticket in `Requested` there with one comment naming where it came from; the original does not change |
 
 The store enforces only what keeps the data true: valid statuses, the
 atomic guards, authorship from the token. The contract's rules (only `ask`

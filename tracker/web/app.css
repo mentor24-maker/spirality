@@ -39,6 +39,9 @@ form.request label { display: block; margin-top: 1rem; font-weight: 600; }
 form.request select, form.request input, form.request textarea { display: block; width: 100%; font: inherit; padding: 0.5rem; box-sizing: border-box; margin-top: 0.35rem; }
 form.request textarea { min-height: 12rem; }
 form.request .row { display: flex; gap: 1rem; align-items: center; margin-top: 1rem; }
+form.copy label { display: block; }
+form.copy .row { display: flex; gap: 1rem; align-items: center; margin-top: 0.5rem; }
+form.copy select { font: inherit; padding: 0.4rem; }
 form.sign-in { max-width: 28rem; }
 form.sign-in input { width: 100%; font: inherit; padding: 0.5rem; box-sizing: border-box; margin: 0.5rem 0; }
 button { font: inherit; padding: 0.4rem 1rem; }

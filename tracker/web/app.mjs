@@ -1,8 +1,8 @@
 /**
  * Dane's page (docs/TRACKER_MVP.md, "Dane's page"): sign in, see what waits
  * on you, open a ticket, answer it, pick a project, see that project's
- * whole queue as a board or as a list, see one project's details, and file
- * a new request. Plain browser
+ * whole queue as a board or as a list, see one project's details, file a
+ * new request, and copy a ticket into another project. Plain browser
  * JavaScript, no packages,
  * no build step; tracker/server.mjs serves it.
  *
@@ -331,7 +331,11 @@ async function drawProject(slug, view) {
 }
 
 async function drawTicket(id) {
-  const t = await api('GET', `/tickets/${encodeURIComponent(id)}/thread`);
+  const [t, { projects }] = await Promise.all([
+    api('GET', `/tickets/${encodeURIComponent(id)}/thread`),
+    api('GET', '/projects'),
+  ]);
+  const others = projects.filter((p) => p.slug !== t.project);
   setTitle(`${t.name} · Tracker`);
   const comments = t.comments.map((c) => `
     <article class="comment${c.machine ? ' machine' : ''}">
@@ -361,7 +365,35 @@ async function drawTicket(id) {
       <section class="description">${renderMarkdown(t.description) || '<p class="quiet">No description.</p>'}</section>
       <h2>Comments</h2>
       ${comments || '<p class="quiet">No comments yet.</p>'}
+      <h2>Copy to another project</h2>
+      ${others.length ? `
+      <form class="copy">
+        <label for="copy-to">A new ticket with this title and description, in Requested there. This ticket stays exactly as it is.</label>
+        <div class="row">
+          <select id="copy-to">${others.map((p) => `<option value="${escapeHtml(p.slug)}">${escapeHtml(p.name)}</option>`).join('')}</select>
+          <button type="submit">Copy</button><span class="note"></span>
+        </div>
+      </form>` : '<p class="quiet">There is no other project to copy into yet.</p>'}
     </details>`;
+  const copyForm = main.querySelector('form.copy');
+  copyForm?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const button = copyForm.querySelector('button');
+    const copyNote = copyForm.querySelector('.note');
+    button.disabled = true;
+    copyNote.className = 'note quiet';
+    copyNote.textContent = 'Copying…';
+    try {
+      const copy = await api('POST', `/tickets/${encodeURIComponent(t.id)}/clone`, { project: copyForm.querySelector('#copy-to').value });
+      history.pushState(null, '', `/t/${encodeURIComponent(copy.id)}`);
+      await route();
+    } catch (err) {
+      if (err instanceof SignedOut) return drawSignIn('You were signed out; the ticket was not copied.');
+      copyNote.className = 'note error';
+      copyNote.textContent = `Not copied: ${err.message}`;
+      button.disabled = false;
+    }
+  });
   const form = main.querySelector('form.reply');
   const box = form.querySelector('textarea');
   // Arrived by a Reply icon: go straight to the box.
