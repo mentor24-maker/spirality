@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { startServer } from './server.mjs';
 import { seedDemo, tickingClock } from './demoData.mjs';
-import { escapeHtml, renderComment, renderInline, renderMarkdown, renderQuickAction, renderCommands, cardCommands, cardAsk, renderMergeAction, mergeQuestion, renderTrail, cardContext, firstParagraph } from './web/render.mjs';
+import { escapeHtml, renderComment, renderInline, renderMarkdown, renderQuickAction, renderCommands, cardCommands, cardAsk, renderMergeAction, mergeQuestion, renderTrail, cardContext, firstParagraph, bellColour } from './web/render.mjs';
 import { loadProjectConfig } from '../lib/projectConfig.mjs';
 import operatorCard from '../lib/operatorCard.js';
 import machineComment from '../lib/machineComment.js';
@@ -522,6 +522,40 @@ test('the Settings page is in the header after New request, lists the stages the
     const saved = await f.call('PUT', '/stage-colours', { body: { colours: { Queued: '#2b9cf2' } } });
     assert.equal(saved.status, 200, saved.text);
   } finally { await f.cleanup(); }
+});
+
+test('bellColour: grey while nothing waits, yellow for 1 to 3, red for more than 3', () => {
+  assert.equal(bellColour(0), 'grey');
+  assert.equal(bellColour(1), 'yellow');
+  assert.equal(bellColour(2), 'yellow');
+  assert.equal(bellColour(3), 'yellow');
+  assert.equal(bellColour(4), 'red');
+  assert.equal(bellColour(12), 'red');
+  assert.equal(bellColour(null), 'grey');
+  assert.equal(bellColour(undefined), 'grey');
+});
+
+test('Waiting on you is a bell on the right, just before "Signed in as", coloured from the count wherever it is read', () => {
+  const html = readFileSync(WEB('index.html'), 'utf8');
+  const nav = /<nav class="site">([\s\S]*?)<\/nav>/.exec(html)[1];
+  assert.deepEqual([...nav.matchAll(/>([^<]+)<\/a>/g)].map((m) => m[1]), ['Projects', 'Tasks', 'New request', 'Settings']);
+  assert.doesNotMatch(nav, /Waiting on you/);
+  const me = /<span class="me">([\s\S]*?)<\/span>\s*<\/header>/.exec(html)[1];
+  assert.match(me, /<a id="bell" href="\/" title="Waiting on you" aria-label="Waiting on you" data-colour="grey" hidden><svg [^>]*aria-hidden="true">[\s\S]*?<\/svg><\/a>\s*<span id="who"><\/span>/);
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  assert.match(app, /function showBell\(\) \{\s*bell\.dataset\.colour = bellColour\(waitingCount\);\s*\}/);
+  // Every place the count is read colours the bell: the one-minute refresh and the Waiting on you page.
+  const refresh = /async function refreshCount\(\) \{[\s\S]*?\n\}/.exec(app)[0];
+  assert.match(refresh, /catch \(err\) \{[\s\S]*?return;\s*\}\s*document\.title = tabTitle\(waitingCount, pageTitle\);\s*showBell\(\);/, 'a failed read leaves the colour alone');
+  assert.match(/async function drawWaiting\(\) \{[\s\S]*?\n\}/.exec(app)[0], /waitingCount = waiting\.length;\s*showBell\(\);/);
+  assert.match(app, /setInterval\(refreshCount, COUNT_EVERY_MS\);/);
+  // Hidden while signed out, shown once signed in, and marked current on its own page.
+  assert.match(/function drawSignIn[\s\S]*?\n\}/.exec(app)[0], /bell\.hidden = true;/);
+  assert.match(/async function route\(\) \{[\s\S]*?\n\}/.exec(app)[0], /signOut\.hidden = false;\s*bell\.hidden = false;/);
+  assert.match(app, /bell\.classList\.toggle\('current', which === 'waiting'\);/);
+  const css = readFileSync(WEB('app.css'), 'utf8');
+  for (const colour of ['grey', 'yellow', 'red']) assert.match(css, new RegExp(`header #bell\\[data-colour="${colour}"\\] \\{ color: #`));
+  assert.match(css, /header #bell\[hidden\] \{ display: none; \}/, 'display: flex must not undo hidden');
 });
 
 test('the page has no inline script or style, so its lock does not have to be loosened', () => {

@@ -11,6 +11,12 @@ header nav.site a.current { color: #fff; border-bottom-color: var(--blue); }
 header .me { margin-left: auto; display: flex; gap: 1rem; align-items: center; }
 header #project { color: #fff; font-weight: 600; }
 header #who { color: #b8b8be; font-size: 0.9rem; }
+header #bell { display: flex; align-self: stretch; align-items: center; border-bottom: 2px solid transparent; }
+header #bell[hidden] { display: none; }
+header #bell.current { border-bottom-color: var(--blue); }
+header #bell[data-colour="grey"] { color: #8e8e93; }
+header #bell[data-colour="yellow"] { color: #ffcc00; }
+header #bell[data-colour="red"] { color: #ff453a; }
 header button { background: transparent; color: #fff; border: 1px solid #555; border-radius: 6px; cursor: pointer; }
 header button:hover { border-color: #fff; }
 main { max-width: 60rem; margin: 0 auto; padding: 1.5rem 2rem 4rem; }

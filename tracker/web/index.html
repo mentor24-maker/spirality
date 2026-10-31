@@ -11,7 +11,6 @@
   <header>
     <a class="brand" href="/"><img src="/web/wordmark.png" alt="Spirality" width="160" height="40"></a>
     <nav class="site">
-      <a href="/" data-nav="waiting">Waiting on you</a>
       <a href="/projects" data-nav="projects">Projects</a>
       <a href="/tasks" data-nav="tasks">Tasks</a>
       <a href="/new" data-nav="new">New request</a>
@@ -19,6 +18,7 @@
     </nav>
     <span class="me">
       <span id="project" hidden></span>
+      <a id="bell" href="/" title="Waiting on you" aria-label="Waiting on you" data-colour="grey" hidden><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20a2 2 0 0 0 4 0"/></svg></a>
       <span id="who"></span>
       <button id="sign-out" type="button" hidden>Sign out</button>
     </span>
