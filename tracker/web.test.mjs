@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { startServer } from './server.mjs';
 import { seedDemo, tickingClock } from './demoData.mjs';
-import { escapeHtml, renderComment, renderInline, renderMarkdown, renderQuickAction, cardContext, firstParagraph } from './web/render.mjs';
+import { escapeHtml, renderComment, renderInline, renderMarkdown, renderQuickAction, renderCommands, cardCommands, cardAsk, cardContext, firstParagraph } from './web/render.mjs';
 import operatorCard from '../lib/operatorCard.js';
 import machineComment from '../lib/machineComment.js';
 import loopStatuses from '../lib/loopStatuses.js';
@@ -611,4 +611,112 @@ test('every word of ticket text in Quick Action is escaped', () => {
   });
   assert.doesNotMatch(html, /<script|<img/);
   assert.equal(html.match(/&lt;script&gt;alert\(1\)&lt;\/script&gt;/g).length, 3);
+});
+
+// ── Quick Action: commands he is asked to run, click-to-copy ─────────────────
+
+/** A card as `ask` posts it, and as the tracker stores it (every banner line in **…**). */
+function commandCards(needed) {
+  const sixty = Array.from({ length: 60 }, (_, i) => `w${i}`).join(' ');
+  const plain = machineComment.stripMachineMarker(machineComment.stampMachineComment(
+    operatorCard.buildCard(`@@ASKED\nbuild it\n@@CONTEXT\n${sixty}\n@@NEEDED\n${needed}`).rendered));
+  const lines = plain.split('\n');
+  const from = lines.findIndex((l) => /^#{29}$/.test(l));
+  const stored = lines.map((l, i) => (i >= from && l.trim() ? `**${l}**` : l)).join('\n');
+  return { plain, stored, raw: `@@ASKED\nbuild it\n@@NEEDED\n${needed}` };
+}
+
+/** The text a `<code>` element holds, as the browser's textContent reads it. */
+const unescape = (html) => html.replace(/&(amp|lt|gt|quot|#39);/g, (_, e) => ({ amp: '&', lt: '<', gt: '>', quot: '"', '#39': "'" })[e]);
+const codes = (html) => [...html.matchAll(/<code>([\s\S]*?)<\/code>/g)].map((m) => unescape(m[1]));
+
+test('a card whose ask has command blocks shows each one on the right with its own Copy button', () => {
+  const needed = 'Run these in Terminal:\n```bash\nnpm run clickup -- get --task SP-1\n```\nthen\n~~~\ncd ~/WebApps && ls\n~~~\nReply done.';
+  for (const body of Object.values(commandCards(needed))) {
+    const html = renderCommands({ comments: [{ body }, { body: 'go' }] });
+    assert.equal(codes(html).length, 2);
+    assert.equal(html.match(/<button type="button" class="copy-command">Copy<\/button>/g).length, 2);
+    assert.match(html, /^<div class="commands">(<div class="command"><pre><code>[^<]*<\/code><\/pre><button[^>]*>Copy<\/button><\/div>){2}<\/div>$/);
+  }
+  // Only the newest card counts.
+  const older = commandCards('```\nold command\n```').plain;
+  const newer = commandCards('```\nnew command\n```').plain;
+  assert.deepEqual(codes(renderCommands({ comments: [{ body: older }, { body: newer }] })), ['new command']);
+});
+
+test('Copy copies exactly the block\'s text: no fence, no extra spaces or line breaks', () => {
+  const needed = 'Run:\n```bash\n\n  cat <<\'EOF\' > x.txt   \n    a "quoted" & <b>\n  EOF\n\n```';
+  const exact = 'cat <<\'EOF\' > x.txt\n  a "quoted" & <b>\nEOF';
+  for (const body of Object.values(commandCards(needed))) {
+    assert.deepEqual(cardCommands(body), [exact]);
+    assert.deepEqual(codes(renderCommands({ comments: [{ body }] })), [exact]);
+  }
+  // The page copies the drawn <code>'s own text, through the clipboard or, on the Mini's plain http, a hidden box.
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  assert.match(app, /button\.parentElement\.querySelector\('code'\)\.textContent/);
+  assert.match(app, /navigator\.clipboard\.writeText\(text\)/);
+  assert.match(app, /document\.execCommand\('copy'\)/);
+  assert.match(app, /'Copied'/);
+  const quick = /<section class="quick">([\s\S]*?)<\/section>/.exec(app)[1];
+  assert.match(quick, /\$\{renderCommands\(t\)\}[\s\S]*<form class="reply">/, 'the commands sit on the right, above the reply box');
+});
+
+test('a card with no command block, or no card at all, shows no Copy buttons', () => {
+  for (const body of Object.values(commandCards('Reply A or B.'))) {
+    assert.equal(renderCommands({ comments: [{ body }] }), '');
+  }
+  // A fence outside the banner is not his to run.
+  const { plain } = commandCards('Reply A or B.');
+  assert.equal(renderCommands({ comments: [{ body: `${plain}\n\n\`\`\`\nnot an ask\n\`\`\`` }] }), '');
+  assert.equal(renderCommands({ comments: [{ body: '```\nls\n```' }] }), '');
+  assert.equal(renderCommands({ comments: [] }), '');
+  assert.equal(renderCommands({}), '');
+});
+
+test('command text reaches the page escaped through render.mjs', () => {
+  const nasty = '<script>alert(1)</script> "x" \'y\' & <img src=x onerror="z">';
+  const html = renderCommands({ comments: [{ body: commandCards(`\`\`\`\n${nasty}\n\`\`\``).plain }] });
+  assert.doesNotMatch(html, /<script|<img/);
+  assert.match(html, /<code>&lt;script&gt;alert\(1\)&lt;\/script&gt; &quot;x&quot; &#39;y&#39; &amp; &lt;img/);
+  assert.deepEqual(codes(html), [nasty]);
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  assert.match(app, /import \{[^}]*\brenderCommands\b[^}]*\} from '\.\/render\.mjs'/);
+});
+
+test('lines inside a command block are copied as written, even ones that look like banner rules, sections or bold', () => {
+  const heredoc = "cat <<'EOF' > notes.md\n" + '#'.repeat(29) + "\nls **/*.md**\nNEEDED FROM DANE: nothing\nEOF";
+  const needed = `Run this in Terminal:\n\`\`\`bash\n${heredoc}\n\`\`\`\nReply done.`;
+  const cards = commandCards(needed);
+  for (const body of [cards.plain, cards.stored]) {
+    assert.deepEqual(cardCommands(body), [heredoc]);
+    assert.deepEqual(codes(renderCommands({ comments: [{ body }] })), [heredoc]);
+    // The red ask reads the same banner, so it ends at the closing rule, not inside the block.
+    assert.match(cardAsk(body), /Reply done\.$/);
+  }
+  // An authored card that reached the tracker unrendered: an @@ line inside the block does not end the ask.
+  const withSection = "cat <<'EOF' > notes.md\n@@END\n" + '#'.repeat(29) + '\nEOF';
+  const raw = `@@ASKED\nbuild it\n@@NEEDED\nRun this:\n\`\`\`\n${withSection}\n\`\`\`\nReply done.\n@@EVIDENCE\nnone`;
+  assert.deepEqual(cardCommands(raw), [withSection]);
+});
+
+test('a command block that is never closed is not offered to copy', () => {
+  const needed = 'Run:\n```\nnpm run verify\n```\nthen:\n```\nnpm run clickup -- get --task SP-1\nReply done.';
+  for (const body of Object.values(commandCards(needed))) {
+    assert.deepEqual(cardCommands(body), ['npm run verify']);
+    assert.doesNotMatch(renderCommands({ comments: [{ body }] }), /Reply done/);
+  }
+  // Its red ask still ends at the closing rule, as before.
+  assert.match(cardAsk(commandCards(needed).plain), /Reply done\.$/);
+});
+
+test('Copy works on the Mini\'s plain http page and a second click restarts the "Copied" timer', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const copy = /async function copyText[\s\S]*?\n}\n/.exec(app)[0];
+  // The hidden box is focused before its text is selected, and the button gets focus back.
+  assert.match(copy, /area\.focus\(\);\s*area\.setSelectionRange\(0, area\.value\.length\);[\s\S]*execCommand\('copy'\)/);
+  assert.match(copy, /button\?\.focus\(\)/);
+  assert.match(app, /clearTimeout\(reset\);\s*reset = setTimeout/);
+  const css = readFileSync(WEB('app.css'), 'utf8');
+  assert.match(css, /\.quick \.act \{[^}]*min-width: 0/);
+  assert.match(css, /\.quick \.command pre \{[^}]*min-width: 0/);
 });
