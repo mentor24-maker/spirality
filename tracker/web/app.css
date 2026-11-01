@@ -69,6 +69,12 @@ table.projects td.name a { color: var(--ink); text-decoration: none; font-weight
 table.projects td.name a:hover { text-decoration: underline; }
 table.projects td.actions { white-space: nowrap; width: 1%; }
 table.counts { max-width: 24rem; }
+table.counts.report { max-width: 40rem; }
+form.report-scope { display: flex; gap: 0.75rem; align-items: center; margin: 0.5rem 0 1rem; }
+form.report-scope select { font: inherit; padding: 0.35rem; }
+/* A stage's colour from the Settings page (app.mjs drawReporting sets the properties). */
+table.counts tr.coloured td { background: var(--stage-tint); color: var(--stage-text); }
+table.counts tr.coloured td.status { box-shadow: inset 4px 0 0 var(--stage-border); }
 th.count, td.count, th.open, td.open { text-align: right; font-variant-numeric: tabular-nums; }
 dl.details { display: grid; grid-template-columns: max-content 1fr; gap: 0.4rem 1.5rem; margin: 0 0 1.5rem; }
 dl.details dt { color: var(--quiet); }

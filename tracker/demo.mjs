@@ -19,8 +19,9 @@ import { seedDemo, tickingClock } from './demoData.mjs';
 import { loadProjectConfig } from '../lib/projectConfig.mjs';
 
 const dir = mkdtempSync(join(tmpdir(), 'tracker-demo-'));
-const store = openStore(join(dir, 'tracker.db'), { now: tickingClock(Date.now() - 60 * 60_000) });
-const { operator, token } = seedDemo(store);
+const clock = tickingClock(Date.now() - 60 * 60_000);
+const store = openStore(join(dir, 'tracker.db'), { now: clock });
+const { operator, token } = seedDemo(store, { clock });
 // The Merge button posts the project config's first merge phrase, as on the real server.
 let mergePhrase = null;
 try { mergePhrase = loadProjectConfig().mergePhrases[0] ?? null; } catch (err) { console.log(`no Merge button: the project config is not usable (${err.message}).`); }

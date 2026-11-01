@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { startServer } from './server.mjs';
 import { seedDemo, tickingClock } from './demoData.mjs';
+import { reportsOf, REPORT_RANGES } from './pageData.mjs';
 import { escapeHtml, renderComment, renderInline, renderMarkdown, renderQuickAction, renderCommands, cardCommands, cardAsk, renderMergeAction, mergeQuestion, renderCloseAction, closeQuestion, cardMove, renderTrail, cardContext, firstParagraph, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, stageLook, stageLooks, contrast } from './web/render.mjs';
 import { loadProjectConfig } from '../lib/projectConfig.mjs';
 import operatorCard from '../lib/operatorCard.js';
@@ -22,8 +23,9 @@ const WEB = (name) => fileURLToPath(new URL(`./web/${name}`, import.meta.url));
 /** The demo data in a fresh store, a server on a free port, and a caller signed in as the operator. */
 async function fixture({ mergePhrase, closePhrase } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'tracker-web-'));
-  const store = openStore(join(dir, 'tracker.db'), { now: tickingClock() });
-  const seed = seedDemo(store, { operatorName: 'Dane' });
+  const clock = tickingClock();
+  const store = openStore(join(dir, 'tracker.db'), { now: clock });
+  const seed = seedDemo(store, { operatorName: 'Dane', clock });
   const loopToken = store.issueToken(seed.loop.id);
   const server = await startServer({ store, port: 0, mergePhrase, closePhrase });
   const url = `http://127.0.0.1:${server.address().port}`;
@@ -508,7 +510,7 @@ test('the Settings page is in the header after New request, lists the stages the
   assert.match(draw, /await api\('PUT', '\/stage-colours', \{ colours: chosen \}\);\s*\/\/ Read back before saying it worked\.\s*const back = await api\('GET', '\/stage-colours'\);/);
   assert.match(draw, /note\.textContent = `Not saved: \$\{err\.message\}`;/);
   assert.match(draw, /escapeHtml\(s\.status\)/);
-  assert.match(app, /markNav\(settings \? 'settings' :/);
+  assert.match(app, /markNav\(reporting \? 'reporting' : settings \? 'settings' :/);
   const f = await fixture();
   try {
     const page = await f.call('GET', '/settings', { token: null });
@@ -539,7 +541,7 @@ test('bellColour: grey while nothing waits, yellow for 1 to 3, red for more than
 test('Waiting on you is a bell on the right, just before "Signed in as", coloured from the count wherever it is read', () => {
   const html = readFileSync(WEB('index.html'), 'utf8');
   const nav = /<nav class="site">([\s\S]*?)<\/nav>/.exec(html)[1];
-  assert.deepEqual([...nav.matchAll(/>([^<]+)<\/a>/g)].map((m) => m[1]), ['Projects', 'Tasks', 'New request', 'Settings']);
+  assert.deepEqual([...nav.matchAll(/>([^<]+)<\/a>/g)].map((m) => m[1]), ['Projects', 'Tasks', 'Reporting', 'New request', 'Settings']);
   assert.doesNotMatch(nav, /Waiting on you/);
   const me = /<span class="me">([\s\S]*?)<\/span>\s*<\/header>/.exec(html)[1];
   assert.match(me, /<a id="bell" href="\/" title="Waiting on you" aria-label="Waiting on you" data-colour="grey" hidden><svg [^>]*aria-hidden="true">[\s\S]*?<\/svg><\/a>\s*<span id="who"><\/span>/);
@@ -1358,4 +1360,149 @@ test('a save whose redraw fails says what happened instead of sitting on "Saving
   assert.match(redraw, /note\.textContent = `The page could not refresh \(\$\{err\.message\}\): \$\{outcome\}\. Reload to see the ticket as stored\.`/);
   assert.match(wire, /`the \$\{field\} was saved`/);
   assert.match(wire, /`the \$\{field\} was not saved`/);
+});
+
+// ── Reporting ────────────────────────────────────────────────────────────────
+
+const DAY = 24 * 60 * 60_000;
+
+/** A fresh store whose clock the test sets, one project and a loop to move tickets. */
+function reportingStore() {
+  const dir = mkdtempSync(join(tmpdir(), 'tracker-reports-'));
+  const clock = tickingClock();
+  const store = openStore(join(dir, 'tracker.db'), { now: clock });
+  const loop = store.createActor({ kind: 'machine', name: 'Loop' });
+  store.createProject({ slug: 'alpha', name: 'Alpha', prefix: 'AL' });
+  store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE' });
+  const now = Date.parse('2026-10-27T15:00:00Z');
+  /** File a ticket `filedDaysAgo` before `now`; each later [days, status] moves it then. */
+  const ticket = (project, filedDaysAgo, ...moves) => {
+    clock.moveTo(now - filedDaysAgo * DAY);
+    const { id } = store.fileTicket({ project, actor: loop.id, name: `filed ${filedDaysAgo} days ago`, status: 'queued' });
+    for (const [days, status] of moves) {
+      clock.moveTo(now - days * DAY);
+      store.changeTicket(id, { actor: loop.id, status });
+    }
+    return id;
+  };
+  const done = () => { store.close(); rmSync(dir, { recursive: true, force: true }); };
+  return { store, loop, ticket, now, done };
+}
+
+test('Reporting: a task finished 3 days ago counts in all three ranges, 20 days ago in two, 60 days ago only in all time', () => {
+  const r = reportingStore();
+  try {
+    r.ticket('alpha', 70, [3, 'live']);
+    r.ticket('alpha', 70, [20, 'live']);
+    r.ticket('alpha', 70, [60, 'live']);
+    assert.deepEqual(reportsOf(r.store, { now: r.now }).finished, { week: 1, month: 2, all: 3 });
+    for (const [days, expected] of [[3, { week: 1, month: 1, all: 1 }], [20, { week: 0, month: 1, all: 1 }], [60, { week: 0, month: 0, all: 1 }]]) {
+      const one = reportingStore();
+      try {
+        one.ticket('alpha', 70, [days, 'live']);
+        assert.deepEqual(reportsOf(one.store, { now: one.now }).finished, expected, `${days} days ago`);
+      } finally { one.done(); }
+    }
+  } finally { r.done(); }
+});
+
+test('Reporting: a task moved to Live and back out counts nowhere; moved to Live twice, once, at its latest move', () => {
+  const r = reportingStore();
+  try {
+    r.ticket('alpha', 70, [40, 'live'], [35, 'rework']);
+    r.ticket('alpha', 70, [40, 'live'], [35, 'rework'], [2, 'live']);
+    assert.deepEqual(reportsOf(r.store, { now: r.now }).finished, { week: 1, month: 1, all: 1 });
+  } finally { r.done(); }
+});
+
+test('Reporting: tasks started are those filed in each range; a task filed already Live counts as finished then', () => {
+  const r = reportingStore();
+  try {
+    r.ticket('alpha', 2);
+    r.ticket('alpha', 15);
+    r.ticket('beta', 90);
+    const born = r.store.fileTicket({ project: 'beta', actor: r.loop.id, name: 'filed already Live', status: 'live' });
+    // The clock last stood 90 days back, so that is when it was filed, and finished.
+    const back = reportsOf(r.store, { now: Date.parse(born.createdAt) + DAY });
+    assert.deepEqual(back.finished, { week: 1, month: 1, all: 1 });
+    assert.deepEqual(reportsOf(r.store, { now: r.now }).started, { week: 1, month: 2, all: 4 });
+  } finally { r.done(); }
+});
+
+test('Reporting: one project or all of them; an unknown project is null; open counts every stage but Live, in STAGE_ORDER, with its colour', () => {
+  const r = reportingStore();
+  try {
+    r.ticket('alpha', 5, [4, 'building']);
+    r.ticket('alpha', 5);
+    r.ticket('beta', 5);
+    r.ticket('beta', 5, [1, 'live']);
+    r.store.setStageColours({ Queued: '#2b9cf2' });
+    const all = reportsOf(r.store, { now: r.now });
+    assert.equal(all.project, null);
+    assert.deepEqual(all.ranges, REPORT_RANGES.map(({ key, label }) => ({ key, label })));
+    const stages = loopStatuses.STAGE_ORDER.filter((s) => s !== 'Live');
+    assert.deepEqual(all.open.map((s) => s.status), stages);
+    const count = (rep, s) => rep.open.find((o) => o.status === s).count;
+    assert.equal(count(all, 'Queued'), 2);
+    assert.equal(count(all, 'Building'), 1);
+    assert.equal(all.open.find((o) => o.status === 'Queued').colour, '#2b9cf2');
+    assert.equal(all.open.find((o) => o.status === 'Building').colour, null);
+    const beta = reportsOf(r.store, { project: 'beta', now: r.now });
+    assert.equal(beta.project, 'beta');
+    assert.equal(beta.projectName, 'Beta');
+    assert.equal(count(beta, 'Queued'), 1);
+    assert.equal(count(beta, 'Building'), 0);
+    assert.deepEqual(beta.finished, { week: 1, month: 1, all: 1 });
+    assert.equal(reportsOf(r.store, { project: 'no-such-thing' }), null);
+  } finally { r.done(); }
+});
+
+test('Reporting is in the header after Tasks, served at /reporting, and its figures need a sign-in; the demo holds finished tasks', async () => {
+  const html = readFileSync(WEB('index.html'), 'utf8');
+  assert.match(html, /<a href="\/tasks" data-nav="tasks">Tasks<\/a>\s*<a href="\/reporting" data-nav="reporting">Reporting<\/a>/);
+  const f = await fixture();
+  try {
+    const page = await f.call('GET', '/reporting', { token: null });
+    assert.equal(page.status, 200);
+    assert.equal(page.text, html);
+    assert.equal((await f.call('GET', '/reports', { token: null })).status, 401);
+    assert.equal((await f.call('GET', '/reports?project=alpha', { token: null })).status, 401);
+    const all = await f.call('GET', '/reports');
+    assert.equal(all.status, 200);
+    // The board's Live column is what "all time" finished counts.
+    const live = (slug) => f.store.listTickets(slug, { status: 'live' }).length;
+    assert.equal(all.body.finished.all, live('alpha') + live('beta'));
+    assert.ok(all.body.finished.all >= 7, 'the demo files finished tasks over the last month');
+    const alpha = await f.call('GET', '/reports?project=alpha');
+    assert.equal(alpha.body.project, 'alpha');
+    assert.equal(alpha.body.finished.all, live('alpha'));
+    assert.equal((await f.call('GET', '/reports?project=no-such-thing')).status, 404);
+  } finally { await f.cleanup(); }
+});
+
+test('the demo spreads its finished tasks over the last month, so every range has some', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tracker-demo-reports-'));
+  const clock = tickingClock();
+  const store = openStore(join(dir, 'tracker.db'), { now: clock });
+  try {
+    seedDemo(store, { operatorName: 'Dane', clock });
+    const { finished } = reportsOf(store, { now: clock.time() });
+    assert.ok(finished.week > 0 && finished.month > finished.week && finished.all > finished.month, JSON.stringify(finished));
+  } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('the Reporting page draws only the server\'s figures: ranges and stages from its answer, colours as properties, the selected project first', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const draw = app.slice(app.indexOf('async function drawReporting'), app.indexOf('/**\n * The Settings page'));
+  assert.ok(draw.length > 0);
+  assert.match(draw, /api\('GET', `\/reports\$\{slug \? `\?project=\$\{encodeURIComponent\(slug\)\}` : ''\}`\)/);
+  assert.match(draw, /r\.ranges\.map/);
+  assert.match(draw, /r\.open\.map/);
+  assert.match(draw, /savedProject\(\)/, 'it opens on the selected project');
+  assert.match(draw, /<option value="">All projects<\/option>/);
+  assert.doesNotMatch(draw, /'Queued'|'Requested'|'Building'|'Live'/, 'the stages come from the server, never typed out');
+  assert.match(draw, /el\.style\.setProperty\('--stage-border', look\.border\);/);
+  assert.match(draw, /escapeHtml\(s\.status\)/);
+  assert.match(app, /markNav\(reporting \? 'reporting' :/);
+  assert.match(app, /if \(reporting\) \{\s*await drawReporting\(\);/);
 });

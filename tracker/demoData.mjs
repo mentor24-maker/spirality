@@ -19,22 +19,36 @@ const CONTEXT = 'The page that shows tickets outside ClickUp needs a place to ru
   + 'work and would be reachable from anywhere, but it costs a few dollars a month and '
   + 'adds a second machine to keep running. Nothing is spent until you choose.';
 
-/** A clock for `openStore` that moves one minute per reading, starting `start`. */
+/**
+ * A clock for `openStore` that moves one minute per reading, starting
+ * `start`. `time()` is where it stands; `moveTo(ms)` sets it, so seedDemo
+ * can file the Reporting page's finished tasks days in the past.
+ */
 export function tickingClock(start = Date.parse('2026-10-27T15:00:00Z')) {
   let t = start;
-  return () => {
+  const clock = () => {
     const at = new Date(t).toISOString();
     t += 60_000;
     return at;
   };
+  clock.time = () => t;
+  clock.moveTo = (ms) => { t = ms; };
+  return clock;
 }
+
+/** How many days before the demo's start each of its earlier finished tasks moved to Live. */
+const FINISHED_DAYS_AGO = Object.freeze([1, 3, 6, 12, 20, 27, 45]);
 
 /**
  * Fill an empty store. Answers the actors (with the operator's token, for
  * signing in), and each ticket's id with what `waiting` would say about it:
  * 'waiting', 'answered', 'machine' (a machine status) or 'unassigned'.
+ *
+ * Given the store's `clock` (a tickingClock), it also files tasks finished
+ * over the last month and a half, each built and moved to Live on its own
+ * day, for the Reporting page, then puts the clock back where it was.
  */
-export function seedDemo(store, { operatorName = substrateConfig.operatorName() } = {}) {
+export function seedDemo(store, { operatorName = substrateConfig.operatorName(), clock = null } = {}) {
   const op = store.createActor({ kind: 'human', name: operatorName });
   const loop = store.createActor({ kind: 'machine', name: 'Loop (build)' });
   const token = store.issueToken(op.id);
@@ -109,6 +123,18 @@ export function seedDemo(store, { operatorName = substrateConfig.operatorName() 
     '@@ASKED', 'merge', '@@CONTEXT', CONTEXT,
     '@@NEEDED', 'Nothing to merge: PR #7 has already landed.', 'Your move: Close — its work is live.',
   ].join('\n')).rendered));
+
+  if (clock) {
+    const start = clock.time();
+    const DAY = 24 * 60 * 60_000;
+    FINISHED_DAYS_AGO.forEach((days, i) => {
+      clock.moveTo(start - days * DAY - 2 * 60 * 60_000);
+      const id = file(i % 2 ? 'beta' : 'alpha', `A task finished ${days} day${days === 1 ? '' : 's'} ago`, 'in review', {}, 'machine');
+      clock.moveTo(start - days * DAY);
+      store.changeTicket(id, { actor: loop.id, status: 'live' });
+    });
+    clock.moveTo(start);
+  }
 
   return { operator: op, loop, token, expect };
 }
