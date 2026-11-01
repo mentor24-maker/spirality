@@ -48,8 +48,17 @@
  *  - A stage's colour (the Settings page's pickers) is one of the eight
  *    statuses and a `#rrggbb` value, or no row at all. One set for the whole
  *    tracker, not one per project.
+ *  - A person's account is an email (unique, kept lower-case) and a password
+ *    of at least 12 characters, stored only as a salted scrypt hash. A
+ *    machine never holds an email, a password or a session: the loops keep
+ *    their tokens.
+ *  - A session token and an emailed link's token are stored only as their
+ *    SHA-256 hash, like a sign-in token. Each is handed back once, by
+ *    startSession or makeLink. A session lasts 30 days; a setup or invite
+ *    link 7 days, a reset link 1 hour. A link is used once: the check and
+ *    the use are one transaction, so two uses racing cannot both pass.
  */
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import loopStatuses from '../lib/loopStatuses.js';
 
@@ -60,6 +69,13 @@ const STATUSES = Object.freeze(Object.keys(DISPLAY));
 const PRIORITIES = Object.freeze(Object.keys(PRIORITY_RANK));
 const ACTOR_KINDS = Object.freeze(['human', 'machine']);
 const IMPORT_KINDS = Object.freeze(['ticket', 'comment', 'actor']);
+
+/** How long a session lasts, and each kind of emailed link, in milliseconds. */
+const HOUR = 60 * 60 * 1000;
+const SESSION_LIFETIME = 30 * 24 * HOUR;
+const LINK_LIFETIME = Object.freeze({ setup: 7 * 24 * HOUR, invite: 7 * 24 * HOUR, reset: HOUR });
+const LINK_PURPOSES = Object.freeze(Object.keys(LINK_LIFETIME));
+const MIN_PASSWORD = 12;
 
 /** The statuses a ticket may be deleted from: nobody has started it yet. */
 const DELETABLE = Object.freeze(['requested', 'queued']);
@@ -80,7 +96,9 @@ CREATE TABLE IF NOT EXISTS actors (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   kind        TEXT NOT NULL CHECK (kind IN ('human', 'machine')),
   name        TEXT NOT NULL,
-  token_hash  TEXT
+  token_hash  TEXT,
+  email       TEXT,
+  password_hash TEXT
 );
 CREATE TABLE IF NOT EXISTS projects (
   slug        TEXT PRIMARY KEY,
@@ -136,7 +154,25 @@ CREATE TABLE IF NOT EXISTS stage_colours (
   status      TEXT PRIMARY KEY,
   colour      TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS sessions (
+  token_hash  TEXT PRIMARY KEY,
+  actor       INTEGER NOT NULL REFERENCES actors(id),
+  created_at  TEXT NOT NULL,
+  expires_at  TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS account_links (
+  token_hash  TEXT PRIMARY KEY,
+  purpose     TEXT NOT NULL CHECK (purpose IN ('setup', 'invite', 'reset')),
+  email       TEXT NOT NULL,
+  actor       INTEGER REFERENCES actors(id),
+  made_by     INTEGER NOT NULL REFERENCES actors(id),
+  created_at  TEXT NOT NULL,
+  expires_at  TEXT NOT NULL,
+  used_at     TEXT
+);
 CREATE UNIQUE INDEX IF NOT EXISTS actors_by_token ON actors (token_hash);
+CREATE UNIQUE INDEX IF NOT EXISTS actors_by_email ON actors (email);
+CREATE INDEX IF NOT EXISTS sessions_by_actor ON sessions (actor);
 CREATE INDEX IF NOT EXISTS tickets_by_project ON tickets (project, status);
 CREATE INDEX IF NOT EXISTS comments_by_ticket ON comments (ticket, id);
 CREATE INDEX IF NOT EXISTS events_by_ticket ON events (ticket, id);
@@ -215,11 +251,54 @@ function hashToken(token) {
   return createHash('sha256').update(token, 'utf8').digest('hex');
 }
 
+/** An email as the store keeps it: trimmed and lower-cased, or a thrown refusal. */
+function canonicalEmail(email) {
+  const e = typeof email === 'string' ? email.trim().toLowerCase() : '';
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) {
+    throw new StoreError('bad-email', `"${email}" is not an email address.`);
+  }
+  return e;
+}
+
+function requirePassword(password) {
+  if (typeof password !== 'string' || [...password].length < MIN_PASSWORD) {
+    throw new StoreError('weak-password', `a password must be at least ${MIN_PASSWORD} characters.`);
+  }
+  return password;
+}
+
+/** scrypt's settings, kept in the stored hash so they can rise later without breaking old ones. */
+const SCRYPT = Object.freeze({ N: 16384, r: 8, p: 1, length: 64 });
+
+/** A password as it is stored: `scrypt$N$r$p$<salt>$<hash>`, a fresh random salt each time. */
+function hashPassword(password) {
+  const salt = randomBytes(16);
+  const { N, r, p, length } = SCRYPT;
+  const hash = scryptSync(password, salt, length, { N, r, p });
+  return ['scrypt', N, r, p, salt.toString('base64url'), hash.toString('base64url')].join('$');
+}
+
+/** Whether `password` matches a stored hash, compared in constant time. */
+function passwordMatches(password, stored) {
+  const parts = String(stored ?? '').split('$');
+  if (parts.length !== 6 || parts[0] !== 'scrypt') return false;
+  const [, N, r, p, salt, hash] = parts;
+  const expected = Buffer.from(hash, 'base64url');
+  const actual = scryptSync(String(password), Buffer.from(salt, 'base64url'), expected.length, { N: Number(N), r: Number(r), p: Number(p) });
+  return timingSafeEqual(actual, expected);
+}
+
+/** A stored hash nobody's password matches: checked against for an unknown email, so it takes as long as a known one. */
+const NOBODY = hashPassword(randomBytes(32).toString('base64url'));
+
 /** SQLite hands integers back as numbers; keep ids plain numbers. */
 const num = (v) => (v == null ? null : Number(v));
 
 /** The project fields updateProject may change; the slug and prefix never do. */
 const PROJECT_CHANGEABLE = Object.freeze(['name', 'url', 'logo', 'owner']);
+
+/** The columns an actor gained after the first databases were made. */
+const LATER_ACTOR_COLUMNS = Object.freeze({ token_hash: 'TEXT', email: 'TEXT', password_hash: 'TEXT' });
 
 /** The columns a project gained after the first databases were made, and their types. */
 const LATER_PROJECT_COLUMNS = Object.freeze({ url: 'TEXT', logo: 'TEXT', owner: 'INTEGER REFERENCES actors(id)' });
@@ -304,11 +383,14 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
   db.exec('PRAGMA busy_timeout = 5000');
   db.exec('PRAGMA foreign_keys = ON');
   if (path !== ':memory:') db.exec('PRAGMA journal_mode = WAL');
-  // A database made before actors had tokens gains the column; the unique
-  // index in SCHEMA needs it, so this runs first.
+  // A database made before actors had tokens, emails and passwords gains the
+  // columns, empty; the unique indexes in SCHEMA need them, so this runs first.
   const hasActors = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'actors'").get();
-  if (hasActors && !db.prepare('PRAGMA table_info(actors)').all().some((c) => c.name === 'token_hash')) {
-    db.exec('ALTER TABLE actors ADD COLUMN token_hash TEXT');
+  if (hasActors) {
+    const actorColumns = new Set(db.prepare('PRAGMA table_info(actors)').all().map((c) => c.name));
+    for (const [column, type] of Object.entries(LATER_ACTOR_COLUMNS)) {
+      if (!actorColumns.has(column)) db.exec(`ALTER TABLE actors ADD COLUMN ${column} ${type}`);
+    }
   }
   db.exec(SCHEMA);
   // A database made before projects had a web address, a logo and an owner
@@ -351,6 +433,51 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
       throw new StoreError('unknown-actor', `${what} ${id} is not a known actor.`);
     }
     return id;
+  }
+
+  /** A person's id, or a thrown refusal: unknown, or a machine. */
+  function requirePerson(id, what) {
+    requireActor(id, what);
+    const row = db.prepare('SELECT kind FROM actors WHERE id = ?').get(id);
+    if (row.kind !== 'human') {
+      throw new StoreError('machine-account', `${what} ${id} is a machine; a machine never holds an email, a password or a session.`);
+    }
+    return id;
+  }
+
+  /** `now()` plus `ms`, as ISO text. */
+  function later(ms) {
+    return new Date(new Date(now()).getTime() + ms).toISOString();
+  }
+
+  /** Whether an ISO time has passed by the store's clock. */
+  function passed(at) {
+    return new Date(at).getTime() <= new Date(now()).getTime();
+  }
+
+  /** Set a person's email; inside or outside a transaction. Refuses one another person holds. */
+  function writeEmail(actorId, email) {
+    const holder = db.prepare('SELECT id FROM actors WHERE email = ?').get(email);
+    if (holder && num(holder.id) !== actorId) {
+      throw new StoreError('duplicate-email', `${email} already belongs to another person.`);
+    }
+    const r = db.prepare('UPDATE actors SET email = ? WHERE id = ?').run(email, actorId);
+    if (num(r.changes) !== 1 || db.prepare('SELECT email FROM actors WHERE id = ?').get(actorId).email !== email) {
+      throw new StoreError('write-failed', `actor ${actorId}'s email did not read back.`);
+    }
+  }
+
+  /** Set a person's password (already checked for length); read back by matching it. */
+  function writePassword(actorId, password) {
+    const r = db.prepare('UPDATE actors SET password_hash = ? WHERE id = ?').run(hashPassword(password), actorId);
+    const stored = db.prepare('SELECT password_hash FROM actors WHERE id = ?').get(actorId)?.password_hash;
+    if (num(r.changes) !== 1 || !passwordMatches(password, stored)) {
+      throw new StoreError('write-failed', `actor ${actorId}'s password did not read back.`);
+    }
+  }
+
+  function endSessionsOf(actorId) {
+    return num(db.prepare('DELETE FROM sessions WHERE actor = ?').run(actorId).changes);
   }
 
   function ticketRow(id) {
@@ -481,6 +608,164 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
       if (typeof token !== 'string' || !token) return null;
       const row = db.prepare('SELECT id FROM actors WHERE token_hash = ?').get(hashToken(token));
       return row ? this.getActor(num(row.id)) : null;
+    },
+
+    /**
+     * Set a person's email: trimmed, lower-cased, unique whatever its case.
+     * A machine is refused (`machine-account`), an email another person
+     * holds is refused (`duplicate-email`). Read back.
+     */
+    setEmail(actorId, email) {
+      const e = canonicalEmail(email);
+      requirePerson(actorId, 'the actor');
+      transaction(() => writeEmail(actorId, e));
+      return e;
+    },
+
+    /** A person's email, or null if they have none. */
+    emailOf(actorId) {
+      return db.prepare("SELECT email FROM actors WHERE id = ? AND kind = 'human'").get(actorId)?.email ?? null;
+    },
+
+    /** The person an email belongs to, in any case, or null. */
+    actorForEmail(email) {
+      if (typeof email !== 'string') return null;
+      const row = db.prepare("SELECT id FROM actors WHERE email = ? AND kind = 'human'").get(email.trim().toLowerCase());
+      return row ? this.getActor(num(row.id)) : null;
+    },
+
+    /**
+     * Set a person's password: at least 12 characters (`weak-password`),
+     * stored only as a salted scrypt hash. A machine is refused. Read back.
+     */
+    setPassword(actorId, password) {
+      requirePassword(password);
+      requirePerson(actorId, 'the actor');
+      writePassword(actorId, password);
+    },
+
+    /**
+     * The person this email and password belong to, or null for a wrong
+     * password, an unknown email or a person with no password yet. Never says
+     * which: an unknown email takes as long to refuse as a wrong password.
+     */
+    checkPassword({ email, password }) {
+      const e = typeof email === 'string' ? email.trim().toLowerCase() : '';
+      const row = db.prepare("SELECT id, password_hash FROM actors WHERE email = ? AND kind = 'human'").get(e);
+      const matches = passwordMatches(typeof password === 'string' ? password : '', row?.password_hash ?? NOBODY);
+      return row?.password_hash && matches ? this.getActor(num(row.id)) : null;
+    },
+
+    /**
+     * Start a 30-day session for a person. Answers `{ token, expiresAt }`;
+     * the token is returned here and nowhere else, only its hash is stored.
+     * A machine is refused.
+     */
+    startSession(actorId) {
+      requirePerson(actorId, 'the actor');
+      const token = randomBytes(32).toString('base64url');
+      const expiresAt = later(SESSION_LIFETIME);
+      db.prepare('INSERT INTO sessions (token_hash, actor, created_at, expires_at) VALUES (?, ?, ?, ?)')
+        .run(hashToken(token), actorId, now(), expiresAt);
+      if (this.actorForSession(token)?.id !== actorId) {
+        throw new StoreError('write-failed', `actor ${actorId}'s session did not read back.`);
+      }
+      return { token, expiresAt };
+    },
+
+    /** The person a session token belongs to, or null for a missing, unknown, ended or expired one. */
+    actorForSession(token) {
+      if (typeof token !== 'string' || !token) return null;
+      const row = db.prepare('SELECT actor, expires_at FROM sessions WHERE token_hash = ?').get(hashToken(token));
+      if (!row || passed(row.expires_at)) return null;
+      return this.getActor(num(row.actor));
+    },
+
+    /** End one session (signing out). Answers whether there was one to end. */
+    endSession(token) {
+      if (typeof token !== 'string' || !token) return false;
+      return num(db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(hashToken(token)).changes) === 1;
+    },
+
+    /** End every session a person has. Answers how many ended. */
+    endAllSessions(actorId) {
+      requireActor(actorId, 'the actor');
+      return endSessionsOf(actorId);
+    },
+
+    /**
+     * Make a single-use emailed link. `setup` gives an existing person
+     * (`actor`) an email and a password; `invite` makes a new person at
+     * `email` (which nobody may hold yet); `reset` sets a new password for
+     * the person `email` belongs to (`unknown-email` if nobody). `madeBy` is
+     * who asked for it (for a reset, the person themselves when omitted).
+     * Answers `{ token, expiresAt }`; only the token's hash is stored.
+     */
+    makeLink({ purpose, email, actor = null, madeBy = null }) {
+      if (!LINK_PURPOSES.includes(purpose)) {
+        throw new StoreError('bad-link', `a link's purpose is ${LINK_PURPOSES.join(', ')}, not "${purpose}".`);
+      }
+      const e = canonicalEmail(email);
+      return transaction(() => {
+        const holder = this.actorForEmail(e);
+        let forActor = null;
+        if (purpose === 'setup') {
+          forActor = requirePerson(actor, 'the person being set up');
+          if (holder && holder.id !== forActor) throw new StoreError('duplicate-email', `${e} already belongs to another person.`);
+        } else if (purpose === 'invite') {
+          if (actor != null) throw new StoreError('bad-link', 'an invite is for a new person; it names no actor.');
+          if (holder) throw new StoreError('duplicate-email', `${e} already belongs to a person.`);
+        } else {
+          if (!holder) throw new StoreError('unknown-email', `no person has the email ${e}.`);
+          if (actor != null && actor !== holder.id) throw new StoreError('bad-link', `${e} is not actor ${actor}'s email.`);
+          forActor = holder.id;
+        }
+        const by = requireActor(madeBy ?? (purpose === 'reset' ? forActor : null), 'the maker of the link');
+        const token = randomBytes(32).toString('base64url');
+        const expiresAt = later(LINK_LIFETIME[purpose]);
+        db.prepare(
+          'INSERT INTO account_links (token_hash, purpose, email, actor, made_by, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        ).run(hashToken(token), purpose, e, forActor, by, now(), expiresAt);
+        if (!db.prepare('SELECT 1 FROM account_links WHERE token_hash = ? AND used_at IS NULL').get(hashToken(token))) {
+          throw new StoreError('write-failed', `the ${purpose} link for ${e} did not read back.`);
+        }
+        return { token, expiresAt };
+      });
+    },
+
+    /**
+     * Use an emailed link with a new password (and, for an invite, the new
+     * person's name). A setup link sets that person's email and password;
+     * an invite makes the person; a reset sets the password and ends every
+     * session that person had. Refused, with nothing written: `unknown-link`,
+     * `used-link`, `expired-link`, and `weak-password` before the link is
+     * spent. The check and the use are one transaction. Answers
+     * `{ purpose, actor }`.
+     */
+    useLink({ token, password, name }) {
+      requirePassword(password);
+      return transaction(() => {
+        const row = typeof token === 'string' && token
+          ? db.prepare('SELECT * FROM account_links WHERE token_hash = ?').get(hashToken(token))
+          : null;
+        if (!row) throw new StoreError('unknown-link', 'this link is not one the tracker made.');
+        if (row.used_at != null) throw new StoreError('used-link', 'this link has already been used.');
+        if (passed(row.expires_at)) throw new StoreError('expired-link', 'this link has expired.');
+        let actorId = num(row.actor);
+        if (row.purpose === 'invite') {
+          requireText(name, "the new person's name");
+          actorId = this.createActor({ kind: 'human', name: name.trim() }).id;
+        } else {
+          requirePerson(actorId, 'the person the link is for');
+        }
+        if (row.purpose !== 'reset') writeEmail(actorId, row.email);
+        writePassword(actorId, password);
+        if (row.purpose === 'reset') endSessionsOf(actorId);
+        const r = db.prepare('UPDATE account_links SET used_at = ?, actor = ? WHERE token_hash = ? AND used_at IS NULL')
+          .run(now(), actorId, row.token_hash);
+        if (num(r.changes) !== 1) throw new StoreError('write-failed', 'the link was not marked used.');
+        return { purpose: row.purpose, actor: this.getActor(actorId) };
+      });
     },
 
     /** Every person (never a machine), oldest first: the owner a project may name. Never a token. */
