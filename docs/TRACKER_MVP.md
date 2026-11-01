@@ -89,16 +89,23 @@ store ticket should expect that line). It offers:
 
 ### The data
 
-Five tables. That is the whole model.
+Five tables hold the work; two more hold people's sign-ins.
 
 ```
 projects  slug, name, prefix, operator actor,  -- replaces workspace + space + list
           url, logo, owner (a person)
-actors    id, kind (human|machine), name, token hash
+actors    id, kind (human|machine), name, token hash,
+          email, password hash                   -- people only
 tickets   id, project, name, description, status, priority, tags,
           assignee, loop_note, created_at, updated_at, version
 comments  id, ticket, parent (for replies), author, body, created_at
 events    id, ticket, actor, what changed, from, to, at   -- written by the store, never by callers
+```
+
+```
+sessions       token hash, actor, created_at, expires_at   -- a person signed in, 30 days
+account_links  token hash, purpose (setup|invite|reset), email, actor,
+               made_by, created_at, expires_at, used_at   -- single-use emailed links
 ```
 
 - **Tickets are never deleted, except an unstarted one.** A ticket in
@@ -123,6 +130,22 @@ events    id, ticket, actor, what changed, from, to, at   -- written by the stor
   **operator**, who the loops hand tickets to. Its **url** (web address) and
   **logo** (an image's web address) are http(s) addresses or empty. A
   database made before these three existed gains them, empty, on start-up.
+- **People sign in with an email and a password** (invite only; Dane's
+  decisions of 2026-11-01). The email is unique whatever its case and kept
+  lower-case. A password is at least 12 characters and is stored only as a
+  salted scrypt hash (scrypt: a deliberately slow scramble built into Node,
+  so a stolen database file cannot be turned back into passwords quickly). A
+  machine never holds an email, a password or a session; the loops keep
+  their tokens.
+- **A session** is one signed-in browser: it lasts 30 days, and signing out
+  ends it. Only its token's hash is stored, like a loop's token.
+- **An account link** is a single-use emailed link: `setup` gives an
+  existing person (Dane's own actor, so his history stays his) an email and
+  a password; `invite` makes a new person; `reset` sets a forgotten
+  password and ends every session that person had. Setup and invite links
+  last 7 days, a reset link 1 hour. A used, expired or unknown link is
+  refused, each with its own reason. A database made before these existed
+  gains the columns and tables, empty, on start-up; no existing row changes.
 
 ### The API
 

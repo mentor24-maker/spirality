@@ -717,3 +717,295 @@ test('stage colours: set, read back, cleared, kept across a reopen; a bad colour
     assert.deepEqual(store.stageColours(), before, 'a refused set writes nothing, not even its good values');
   } finally { cleanup(); }
 });
+
+/** A store whose clock only moves when the test moves it, with one person and one machine. */
+function accountsFixture() {
+  const dir = mkdtempSync(join(tmpdir(), 'tracker-store-'));
+  const path = join(dir, 'tracker.db');
+  const clock = { at: Date.UTC(2026, 10, 1, 12, 0, 0) };
+  const store = openStore(path, { now: () => new Date(clock.at).toISOString() });
+  const person = store.createActor({ kind: 'human', name: 'Person' });
+  const machine = store.createActor({ kind: 'machine', name: 'Loop' });
+  const advance = (ms) => { clock.at += ms; };
+  const cleanup = () => { store.close(); rmSync(dir, { recursive: true, force: true }); };
+  return { dir, path, store, person, machine, advance, cleanup };
+}
+
+const HOUR = 60 * 60 * 1000;
+const DAY = 24 * HOUR;
+
+/** The database file and its write-ahead log, as text, to search for things that must not be there. */
+function rawBytes(path) {
+  let wal = '';
+  try { wal = readFileSync(`${path}-wal`).toString('latin1'); } catch { /* no log */ }
+  return readFileSync(path).toString('latin1') + wal;
+}
+
+test('a person\'s password: the right one finds them, a wrong one, an unknown email or no password finds nobody', () => {
+  const { store, person, cleanup } = accountsFixture();
+  try {
+    assert.equal(store.setEmail(person.id, '  Person@Example.COM '), 'person@example.com');
+    assert.equal(store.emailOf(person.id), 'person@example.com');
+    assert.equal(store.checkPassword({ email: 'person@example.com', password: 'correct horse battery' }), null);
+    store.setPassword(person.id, 'correct horse battery');
+    assert.deepEqual(store.checkPassword({ email: 'PERSON@example.com', password: 'correct horse battery' }), person);
+    assert.equal(store.checkPassword({ email: 'person@example.com', password: 'correct horse batterY' }), null);
+    assert.equal(store.checkPassword({ email: 'nobody@example.com', password: 'correct horse battery' }), null);
+    assert.equal(store.checkPassword({ email: 'person@example.com', password: undefined }), null);
+    // A new password replaces the old one.
+    store.setPassword(person.id, 'a different long one');
+    assert.equal(store.checkPassword({ email: 'person@example.com', password: 'correct horse battery' }), null);
+    assert.equal(store.checkPassword({ email: 'person@example.com', password: 'a different long one' })?.id, person.id);
+    // getActor and listPeople still never show an email or a password.
+    assert.deepEqual(store.getActor(person.id), person);
+    assert.deepEqual(store.listPeople(), [{ id: person.id, name: 'Person' }]);
+  } finally { cleanup(); }
+});
+
+test('a password under 12 characters is refused and the old one stays', () => {
+  const { store, person, cleanup } = accountsFixture();
+  try {
+    store.setEmail(person.id, 'p@example.com');
+    store.setPassword(person.id, 'twelve chars');
+    for (const bad of ['elevenchars', '', undefined, 12345678901234]) {
+      assert.throws(() => store.setPassword(person.id, bad), { code: 'weak-password' });
+    }
+    assert.equal(store.checkPassword({ email: 'p@example.com', password: 'twelve chars' })?.id, person.id);
+  } finally { cleanup(); }
+});
+
+test('an email is unique whatever its case, and a bad one is refused', () => {
+  const { store, person, cleanup } = accountsFixture();
+  try {
+    const other = store.createActor({ kind: 'human', name: 'Other' });
+    store.setEmail(person.id, 'same@example.com');
+    assert.throws(() => store.setEmail(other.id, 'SAME@Example.com'), { code: 'duplicate-email' });
+    assert.equal(store.emailOf(other.id), null);
+    assert.equal(store.setEmail(person.id, 'Same@example.com'), 'same@example.com');
+    assert.deepEqual(store.actorForEmail('SAME@EXAMPLE.COM'), person);
+    assert.equal(store.actorForEmail('else@example.com'), null);
+    for (const bad of ['', 'not-an-email', 'a@b', 'two words@example.com', null]) {
+      assert.throws(() => store.setEmail(other.id, bad), { code: 'bad-email' });
+    }
+  } finally { cleanup(); }
+});
+
+test('a machine is refused an email, a password, a session and a setup link, and nothing is written', () => {
+  const { store, person, machine, cleanup } = accountsFixture();
+  try {
+    assert.throws(() => store.setEmail(machine.id, 'loop@example.com'), { code: 'machine-account' });
+    assert.throws(() => store.setPassword(machine.id, 'a long enough password'), { code: 'machine-account' });
+    assert.throws(() => store.startSession(machine.id), { code: 'machine-account' });
+    assert.throws(() => store.makeLink({ purpose: 'setup', email: 'loop@example.com', actor: machine.id, madeBy: person.id }), { code: 'machine-account' });
+    assert.throws(() => store.startSession(999), { code: 'unknown-actor' });
+    assert.equal(store.actorForEmail('loop@example.com'), null);
+    // Its sign-in token still works exactly as before.
+    assert.equal(store.actorForToken(store.issueToken(machine.id))?.id, machine.id);
+  } finally { cleanup(); }
+});
+
+test('a session finds its person, lasts 30 days, and ends one at a time or all at once', () => {
+  const { store, person, advance, cleanup } = accountsFixture();
+  try {
+    const a = store.startSession(person.id);
+    const b = store.startSession(person.id);
+    assert.match(a.token, /^[A-Za-z0-9_-]{40,}$/);
+    assert.equal(a.expiresAt, '2026-12-01T12:00:00.000Z');
+    assert.deepEqual(store.actorForSession(a.token), person);
+    assert.equal(store.actorForSession('not-a-session'), null);
+    assert.equal(store.actorForSession(undefined), null);
+    // A session token is not a sign-in token, nor the other way round.
+    assert.equal(store.actorForToken(a.token), null);
+
+    assert.equal(store.endSession(a.token), true);
+    assert.equal(store.endSession(a.token), false);
+    assert.equal(store.actorForSession(a.token), null);
+    assert.equal(store.actorForSession(b.token)?.id, person.id);
+
+    const c = store.startSession(person.id);
+    assert.equal(store.endAllSessions(person.id), 2);
+    assert.equal(store.actorForSession(b.token), null);
+    assert.equal(store.actorForSession(c.token), null);
+
+    const d = store.startSession(person.id);
+    advance(30 * DAY - 1);
+    assert.equal(store.actorForSession(d.token)?.id, person.id);
+    advance(1);
+    assert.equal(store.actorForSession(d.token), null);
+  } finally { cleanup(); }
+});
+
+test('a setup link gives an existing person an email and a password, once', () => {
+  const { store, person, machine, cleanup } = accountsFixture();
+  try {
+    const link = store.makeLink({ purpose: 'setup', email: 'Dane@Example.com', actor: person.id, madeBy: machine.id });
+    assert.equal(link.expiresAt, '2026-11-08T12:00:00.000Z');
+    assert.equal(store.emailOf(person.id), null);
+    const used = store.useLink({ token: link.token, password: 'my first password' });
+    assert.deepEqual(used, { purpose: 'setup', actor: person });
+    assert.equal(store.emailOf(person.id), 'dane@example.com');
+    assert.equal(store.checkPassword({ email: 'dane@example.com', password: 'my first password' })?.id, person.id);
+    assert.throws(() => store.useLink({ token: link.token, password: 'a second password' }), { code: 'used-link' });
+    assert.equal(store.checkPassword({ email: 'dane@example.com', password: 'a second password' }), null);
+  } finally { cleanup(); }
+});
+
+test('an invite link makes a new person with its email, the name given and the password, once', () => {
+  const { store, person, cleanup } = accountsFixture();
+  try {
+    const link = store.makeLink({ purpose: 'invite', email: 'new@example.com', madeBy: person.id });
+    assert.equal(link.expiresAt, '2026-11-08T12:00:00.000Z');
+    assert.throws(() => store.useLink({ token: link.token, password: 'a long password' }), { code: 'missing' });
+    const { purpose, actor } = store.useLink({ token: link.token, password: 'a long password', name: ' New Person ' });
+    assert.equal(purpose, 'invite');
+    assert.deepEqual(actor, { id: actor.id, kind: 'human', name: 'New Person' });
+    assert.equal(store.checkPassword({ email: 'new@example.com', password: 'a long password' })?.id, actor.id);
+    assert.throws(() => store.useLink({ token: link.token, password: 'a long password', name: 'Twice' }), { code: 'used-link' });
+    assert.equal(store.actorsNamed({ kind: 'human', name: 'Twice' }).length, 0);
+    // Nobody can be invited at an email a person already holds.
+    assert.throws(() => store.makeLink({ purpose: 'invite', email: 'NEW@example.com', madeBy: person.id }), { code: 'duplicate-email' });
+  } finally { cleanup(); }
+});
+
+test('a reset link sets a new password, once, and ends every session that person had', () => {
+  const { store, person, cleanup } = accountsFixture();
+  try {
+    const other = store.createActor({ kind: 'human', name: 'Other' });
+    store.setEmail(person.id, 'p@example.com');
+    store.setPassword(person.id, 'the old password');
+    const mine = store.startSession(person.id);
+    const theirs = store.startSession(other.id);
+    assert.throws(() => store.makeLink({ purpose: 'reset', email: 'nobody@example.com' }), { code: 'unknown-email' });
+    const link = store.makeLink({ purpose: 'reset', email: 'P@example.com' });
+    assert.equal(link.expiresAt, '2026-11-01T13:00:00.000Z');
+    assert.deepEqual(store.useLink({ token: link.token, password: 'the new password' }), { purpose: 'reset', actor: person });
+    assert.equal(store.checkPassword({ email: 'p@example.com', password: 'the old password' }), null);
+    assert.equal(store.checkPassword({ email: 'p@example.com', password: 'the new password' })?.id, person.id);
+    assert.equal(store.actorForSession(mine.token), null);
+    assert.equal(store.actorForSession(theirs.token)?.id, other.id);
+    assert.throws(() => store.useLink({ token: link.token, password: 'yet another one' }), { code: 'used-link' });
+  } finally { cleanup(); }
+});
+
+test('each kind of link is refused once it has expired, and an unknown link or a short password spends nothing', () => {
+  const { store, person, machine, advance, cleanup } = accountsFixture();
+  try {
+    const other = store.createActor({ kind: 'human', name: 'Other' });
+    store.setEmail(other.id, 'other@example.com');
+    const setup = store.makeLink({ purpose: 'setup', email: 'p@example.com', actor: person.id, madeBy: machine.id });
+    const invite = store.makeLink({ purpose: 'invite', email: 'new@example.com', madeBy: person.id });
+    const reset = store.makeLink({ purpose: 'reset', email: 'other@example.com' });
+
+    assert.throws(() => store.useLink({ token: 'no-such-link', password: 'a long password' }), { code: 'unknown-link' });
+    assert.throws(() => store.useLink({ token: undefined, password: 'a long password' }), { code: 'unknown-link' });
+    // A short password is refused before the link is looked at, so the link still works.
+    assert.throws(() => store.useLink({ token: reset.token, password: 'short' }), { code: 'weak-password' });
+
+    advance(HOUR);
+    assert.throws(() => store.useLink({ token: reset.token, password: 'a long password' }), { code: 'expired-link' });
+    advance(7 * DAY - HOUR - 1);
+    assert.equal(store.useLink({ token: setup.token, password: 'a long password' }).purpose, 'setup');
+    advance(1);
+    assert.throws(() => store.useLink({ token: invite.token, password: 'a long password', name: 'Late' }), { code: 'expired-link' });
+    assert.equal(store.actorForEmail('new@example.com'), null);
+    assert.throws(() => store.makeLink({ purpose: 'forgot', email: 'p@example.com', madeBy: person.id }), { code: 'bad-link' });
+    assert.throws(() => store.makeLink({ purpose: 'invite', email: 'x@example.com' }), { code: 'unknown-actor' });
+  } finally { cleanup(); }
+});
+
+test('no password, session token or link token is ever in the database file, only their hashes', () => {
+  const { dir, path, store, person, machine } = accountsFixture();
+  try {
+    const setup = store.makeLink({ purpose: 'setup', email: 'p@example.com', actor: person.id, madeBy: machine.id });
+    store.useLink({ token: setup.token, password: 'setup password xyz' });
+    store.setPassword(person.id, 'changed password xyz');
+    const session = store.startSession(person.id);
+    const invite = store.makeLink({ purpose: 'invite', email: 'n@example.com', madeBy: person.id });
+    const reset = store.makeLink({ purpose: 'reset', email: 'p@example.com' });
+    store.close();
+
+    const raw = rawBytes(path);
+    for (const secret of ['setup password xyz', 'changed password xyz', session.token, setup.token, invite.token, reset.token]) {
+      assert.ok(!raw.includes(secret), 'a raw secret is in the database file');
+    }
+    const db = new DatabaseSync(path);
+    try {
+      const sha = (t) => createHash('sha256').update(t).digest('hex');
+      assert.equal(db.prepare('SELECT COUNT(*) AS n FROM sessions WHERE token_hash = ?').get(sha(session.token)).n, 1);
+      assert.equal(db.prepare('SELECT COUNT(*) AS n FROM account_links WHERE token_hash IN (?, ?, ?)').get(sha(setup.token), sha(invite.token), sha(reset.token)).n, 3);
+      assert.match(db.prepare('SELECT password_hash FROM actors WHERE id = ?').get(person.id).password_hash, /^scrypt\$\d+\$\d+\$\d+\$[\w-]+\$[\w-]+$/);
+    } finally { db.close(); }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('two people with the same password get different stored hashes (a salt each)', () => {
+  const { path, store, person, cleanup } = accountsFixture();
+  try {
+    const other = store.createActor({ kind: 'human', name: 'Other' });
+    store.setPassword(person.id, 'the very same one');
+    store.setPassword(other.id, 'the very same one');
+    const db = new DatabaseSync(path);
+    try {
+      const [a, b] = db.prepare('SELECT password_hash FROM actors WHERE id IN (?, ?)').all(person.id, other.id).map((r) => r.password_hash);
+      assert.notEqual(a, b);
+    } finally { db.close(); }
+  } finally { cleanup(); }
+});
+
+test('today\'s database gains emails, passwords, sessions and links, and every existing row is unchanged', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tracker-store-'));
+  const path = join(dir, 'old.db');
+  try {
+    // The shape the live tracker has before this change.
+    const old = new DatabaseSync(path);
+    old.exec(`
+      CREATE TABLE actors (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL CHECK (kind IN ('human', 'machine')), name TEXT NOT NULL, token_hash TEXT);
+      CREATE TABLE projects (slug TEXT PRIMARY KEY, name TEXT NOT NULL, prefix TEXT NOT NULL UNIQUE, operator INTEGER REFERENCES actors(id),
+        next_number INTEGER NOT NULL DEFAULT 1, url TEXT, logo TEXT, owner INTEGER REFERENCES actors(id));
+      CREATE TABLE tickets (id TEXT PRIMARY KEY, project TEXT NOT NULL REFERENCES projects(slug), number INTEGER NOT NULL, name TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '', status TEXT NOT NULL, priority TEXT, tags TEXT NOT NULL DEFAULT '[]', assignee INTEGER REFERENCES actors(id),
+        loop_note TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, version INTEGER NOT NULL DEFAULT 1, UNIQUE (project, number));
+      CREATE TABLE comments (id INTEGER PRIMARY KEY AUTOINCREMENT, ticket TEXT NOT NULL REFERENCES tickets(id), parent INTEGER REFERENCES comments(id),
+        author INTEGER NOT NULL REFERENCES actors(id), body TEXT NOT NULL, created_at TEXT NOT NULL);
+      CREATE TABLE stage_colours (status TEXT PRIMARY KEY, colour TEXT NOT NULL);
+      CREATE UNIQUE INDEX actors_by_token ON actors (token_hash);
+      INSERT INTO actors (kind, name, token_hash) VALUES ('human', 'Dane', 'aaaa'), ('machine', 'Loop', 'bbbb');
+      INSERT INTO projects (slug, name, prefix, operator, next_number, owner) VALUES ('old', 'Old', 'OL', 1, 2, 1);
+      INSERT INTO tickets (id, project, number, name, status, created_at, updated_at, version)
+        VALUES ('OL-1', 'old', 1, 'First', 'queued', '2026-10-01T00:00:00.000Z', '2026-10-02T00:00:00.000Z', 3);
+      INSERT INTO comments (ticket, author, body, created_at) VALUES ('OL-1', 2, 'a note', '2026-10-02T00:00:00.000Z');
+      INSERT INTO stage_colours (status, colour) VALUES ('queued', '#2b9cf2');
+    `);
+    const before = Object.fromEntries(['actors', 'projects', 'tickets', 'comments', 'stage_colours']
+      .map((t) => [t, old.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all()]));
+    old.close();
+
+    // Opening it adds the columns and tables; a second opening adds nothing twice.
+    openStore(path).close();
+    const store = openStore(path);
+    let link;
+    try {
+      assert.deepEqual(store.getActor(1), { id: 1, kind: 'human', name: 'Dane' });
+      assert.equal(store.emailOf(1), null);
+      link = store.makeLink({ purpose: 'setup', email: 'dane@example.com', actor: 1, madeBy: 2 });
+    } finally { store.close(); }
+
+    const raw = new DatabaseSync(path);
+    try {
+      assert.deepEqual(raw.prepare('PRAGMA table_info(actors)').all().map((c) => c.name), ['id', 'kind', 'name', 'token_hash', 'email', 'password_hash']);
+      assert.deepEqual(raw.prepare('SELECT id, kind, name, token_hash FROM actors ORDER BY id').all(), before.actors);
+      for (const t of ['projects', 'tickets', 'comments', 'stage_colours']) {
+        assert.deepEqual(raw.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all(), before[t], t);
+      }
+    } finally { raw.close(); }
+
+    // Dane's existing actor takes the setup link, so his history stays his.
+    const again = openStore(path);
+    try {
+      assert.equal(again.useLink({ token: link.token, password: 'dane first password' }).actor.id, 1);
+      assert.equal(again.checkPassword({ email: 'dane@example.com', password: 'dane first password' })?.id, 1);
+      assert.equal(again.listComments('OL-1')[0].author, 2);
+      assert.equal(again.getProject('old').owner, 1);
+    } finally { again.close(); }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
