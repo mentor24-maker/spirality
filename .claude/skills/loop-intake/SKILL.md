@@ -179,7 +179,11 @@ stick. **A non-zero exit is a failure you report**, never one you talk past.
    what the others cover.
    @@NEEDED
    Reply "go" to queue it as written, or reply with what to change.
+   Your move: Reply — "go", or what to change.
    ````
+
+   The last line of `@@NEEDED` is always his move, `Your move: Reply` here
+   (`ask` refuses a card without one).
 
    His words go into `@@ASKED` bare. The card puts that section in a code
    block of its own, with a fence longer than any backtick run in his text,

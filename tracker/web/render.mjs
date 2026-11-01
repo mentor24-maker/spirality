@@ -368,16 +368,36 @@ export function renderTrail(steps) {
 
 /** The status the relay merges from, as the tracker stores it (lib/mergeOnComment.js). */
 const READY_TO_LAUNCH = 'ready to launch';
+/** The two statuses that are his, where a card can ask him to close (lib/loopStatuses.js). */
+const HIS_STATUSES = [READY_TO_LAUNCH, 'needs your input'];
 
 /**
- * The Merge button for a ticket page's Quick Action section, as HTML, or ''
- * when the ticket is not in Ready to launch or the server named no merge
- * phrase. The phrase comes from the server (the project config's first
- * mergePhrases entry); the button posts it as his reply and the relay does
- * the merge, exactly as if he had typed it.
+ * The move an operator card ends its ask with, `Your move: Merge`, `Close`
+ * or `Reply` (SP-68), as 'Merge' | 'Close' | 'Reply', or null when the
+ * comment carries no card or its ask names no move. The same rule `ask`
+ * enforces (readYourMove in lib/operatorCard.js), read off the ask as drawn.
  */
-export function renderMergeAction({ status, mergePhrase }) {
-  if (String(status ?? '').toLowerCase() !== READY_TO_LAUNCH || !mergePhrase) return '';
+export function cardMove(body) {
+  const lines = String(cardAsk(body) ?? '').split('\n').map((l) => l.trim()).filter(Boolean);
+  const m = /^\**\s*Your move:\s*\**\s*(Merge|Close|Reply)\b/i.exec(lines.at(-1) ?? '');
+  return m ? m[1][0].toUpperCase() + m[1].slice(1).toLowerCase() : null;
+}
+
+/**
+ * The Merge button for a ticket page's Quick Action section, as HTML, or ''.
+ * Shown only on a Ready to launch ticket with a pull request of its own
+ * (SP-64 showed Merge on a ticket that had none) whose newest card does not
+ * name another move, and only when the server named a merge phrase. The
+ * phrase comes from the server (the project config's first mergePhrases
+ * entry); the button posts it as his reply and the relay does the merge,
+ * exactly as if he had typed it.
+ */
+export function renderMergeAction({ status, mergePhrase, pullRequest, comments = [] }) {
+  if (String(status ?? '').toLowerCase() !== READY_TO_LAUNCH || !mergePhrase || !pullRequest) return '';
+  const card = newestCard(comments);
+  const move = card ? cardMove(card.body) : null;
+  // A regex, not a quoted word: the page's code spells no merge phrase.
+  if (move && !/^Merge$/.test(move)) return '';
   return `<form class="merge-action">
         <button type="submit">Merge</button><span class="note"></span>
         <p class="quiet">Posts &ldquo;${escapeHtml(mergePhrase)}&rdquo; as your reply; the relay merges it within a few minutes.</p>
@@ -388,6 +408,27 @@ export function renderMergeAction({ status, mergePhrase }) {
 export function mergeQuestion({ name, pullRequest }) {
   const number = /\/pull\/(\d+)/.exec(pullRequest ?? '')?.[1];
   return `Merge ${number ? `PR #${number}` : 'the pull request'} for ${name}?`;
+}
+
+/**
+ * The Close button, as HTML, or '': shown on a ticket in one of his two
+ * statuses whose newest card's move is Close, when the server named a close
+ * word (the relay's own close list, lib/busRelayPlan.js). Like Merge, it
+ * only posts his word as a reply; the relay decides and moves the ticket.
+ */
+export function renderCloseAction({ status, closePhrase, comments = [] }) {
+  if (!HIS_STATUSES.includes(String(status ?? '').toLowerCase()) || !closePhrase) return '';
+  const card = newestCard(comments);
+  if (!card || cardMove(card.body) !== 'Close') return '';
+  return `<form class="close-action">
+        <button type="submit">Close</button><span class="note"></span>
+        <p class="quiet">Posts &ldquo;${escapeHtml(closePhrase)}&rdquo; as your reply; the relay closes it within a few minutes once its work is merged.</p>
+      </form>`;
+}
+
+/** The one question the Close button asks before it posts. Plain text, for confirm(). */
+export function closeQuestion({ name }) {
+  return `Close ${name}?`;
 }
 
 /** A stage colour the page will use: `#rrggbb` only, anything else is no colour. */

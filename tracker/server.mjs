@@ -36,6 +36,7 @@ import { openStore, StoreError } from './store.mjs';
 import { boardOf, projectDetailsOf, projectsList, stageColoursOf, threadOf, waitingFor } from './pageData.mjs';
 import { createNotifier, MAIL_KEY, mailEnvFromDoppler, mailSettingsFromEnv } from './notify.mjs';
 import { loadProjectConfig } from '../lib/projectConfig.mjs';
+import busRelayPlan from '../lib/busRelayPlan.js';
 
 /** The largest request body accepted, in bytes. A ticket description fits easily. */
 const MAX_BODY = 1024 * 1024;
@@ -200,8 +201,17 @@ function flag(value) {
  * `mergePhrase` is the word the ticket page's Merge button posts: the first
  * of the project config's mergePhrases, never a literal here. Null means no
  * Merge button; the reply box still takes the word typed by hand.
+ * `closePhrase` is the word the Close button posts (CLOSE_PHRASE below,
+ * the relay's own close list). Null means no Close button.
  */
-export function createHandler(store, { log = () => {}, notifier = null, defaultProject = null, mergePhrase = null } = {}) {
+/**
+ * The word the ticket page's Close button posts: the first of the relay's
+ * close list (CLOSE_PHRASES in lib/busRelayPlan.js), so the button can only
+ * ever say something the relay reads as "close it".
+ */
+export const CLOSE_PHRASE = busRelayPlan.CLOSE_PHRASES[0];
+
+export function createHandler(store, { log = () => {}, notifier = null, defaultProject = null, mergePhrase = null, closePhrase = null } = {}) {
   function requireProject(slug) {
     const project = store.getProject(slug);
     if (!project) throw new HttpError(404, 'unknown-project', `no project "${slug}".`);
@@ -420,7 +430,7 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     if (parts.length === 3 && parts[0] === 'tickets' && parts[2] === 'thread' && method === 'GET') {
       const thread = threadOf(store, parts[1]);
       if (!thread) throw new HttpError(404, 'unknown-ticket', `no ticket ${parts[1]}.`);
-      return [200, { ...thread, mergePhrase }];
+      return [200, { ...thread, mergePhrase, closePhrase }];
     }
 
     if (parts.length === 3 && parts[0] === 'tickets' && parts[2] === 'events' && method === 'GET') {
@@ -469,8 +479,8 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
 }
 
 /** Start a server on `port` (0 = any free port) against an open store. Resolves to the http.Server. */
-export function startServer({ store, port, host = '127.0.0.1', log, notifier, defaultProject, mergePhrase }) {
-  const server = createServer(createHandler(store, { log, notifier, defaultProject, mergePhrase }));
+export function startServer({ store, port, host = '127.0.0.1', log, notifier, defaultProject, mergePhrase, closePhrase }) {
+  const server = createServer(createHandler(store, { log, notifier, defaultProject, mergePhrase, closePhrase }));
   return new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(port, host, () => {
@@ -544,7 +554,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     } catch (err) {
       log(`the New request form starts on the first project and the ticket page has no Merge button: the project config is not usable (${err.message}).`);
     }
-    const server = await startServer({ store, port, host, log, notifier, defaultProject, mergePhrase });
+    const server = await startServer({ store, port, host, log, notifier, defaultProject, mergePhrase, closePhrase: CLOSE_PHRASE });
     console.log(`tracker listening on http://${host}:${server.address().port}/`);
   } catch (err) {
     console.error(`tracker server did not start: ${err.message}`);

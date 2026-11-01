@@ -15,7 +15,7 @@
  * holds. It is kept in this browser's local storage so a pinned tab stays
  * signed in, and sent only to this server. "Sign out" forgets it.
  */
-import { canDelete, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderDeleteAction, renderMarkdown, renderMergeAction, renderQuickAction, renderTrail, stageLooks, tabTitle, bellColour } from './render.mjs';
+import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderDeleteAction, renderMarkdown, renderCloseAction, renderMergeAction, renderQuickAction, renderTrail, stageLooks, tabTitle, bellColour } from './render.mjs';
 
 const TOKEN_KEY = 'tracker-token';
 /** Board or list: the last one opened, so "Tasks" in the header opens it again. */
@@ -639,6 +639,7 @@ async function drawTicket(id) {
       <div class="act">
       ${renderCommands(t)}
       ${renderMergeAction(t)}
+      ${renderCloseAction(t)}
       <form class="reply">
         <label for="reply">Reply as ${escapeHtml(me?.name ?? 'you')}</label>
         <textarea id="reply" required></textarea>
@@ -702,29 +703,35 @@ async function drawTicket(id) {
       button.disabled = false;
     }
   });
-  // Merge: his word from the server's project config, posted as his own
-  // reply through the same call the reply box uses. The relay merges it.
-  const mergeForm = main.querySelector('form.merge-action');
-  mergeForm?.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    if (!confirm(mergeQuestion(t))) return;
-    const button = mergeForm.querySelector('button');
-    const mergeNote = mergeForm.querySelector('.note');
-    button.disabled = true;
-    mergeNote.className = 'note quiet';
-    mergeNote.textContent = 'Posting…';
-    try {
-      await api('POST', `/tickets/${encodeURIComponent(t.id)}/comments`, { body: t.mergePhrase });
-      await drawTicket(t.id);
-      main.querySelector('details.details').open = true;
-      main.querySelector('.comment:last-of-type')?.scrollIntoView({ block: 'center' });
-    } catch (err) {
-      if (err instanceof SignedOut) return drawSignIn('You were signed out; the merge word was not posted.');
-      mergeNote.className = 'note error';
-      mergeNote.textContent = `Not posted: ${err.message}`;
-      button.disabled = false;
-    }
-  });
+  // Merge and Close: his word from the server (the project config's merge
+  // phrase, the relay's close word), posted as his own reply through the
+  // same call the reply box uses. The relay acts on it; the page never moves
+  // a status itself.
+  const wordButton = (selector, question, word, signedOut) => {
+    const form = main.querySelector(selector);
+    form?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (!confirm(question)) return;
+      const button = form.querySelector('button');
+      const note = form.querySelector('.note');
+      button.disabled = true;
+      note.className = 'note quiet';
+      note.textContent = 'Posting…';
+      try {
+        await api('POST', `/tickets/${encodeURIComponent(t.id)}/comments`, { body: word });
+        await drawTicket(t.id);
+        main.querySelector('details.details').open = true;
+        main.querySelector('.comment:last-of-type')?.scrollIntoView({ block: 'center' });
+      } catch (err) {
+        if (err instanceof SignedOut) return drawSignIn(signedOut);
+        note.className = 'note error';
+        note.textContent = `Not posted: ${err.message}`;
+        button.disabled = false;
+      }
+    });
+  };
+  wordButton('form.merge-action', mergeQuestion(t), t.mergePhrase, 'You were signed out; the merge word was not posted.');
+  wordButton('form.close-action', closeQuestion(t), t.closePhrase, 'You were signed out; the close word was not posted.');
   // Delete: ask first, naming the ticket; on success go to its project's list.
   const deleteForm = main.querySelector('form.delete-action');
   deleteForm?.addEventListener('submit', async (e) => {
