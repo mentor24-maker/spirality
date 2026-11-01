@@ -8,23 +8,24 @@ import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { startServer } from './server.mjs';
 import { seedDemo, tickingClock } from './demoData.mjs';
-import { escapeHtml, renderComment, renderInline, renderMarkdown, renderQuickAction, renderCommands, cardCommands, cardAsk, renderMergeAction, mergeQuestion, renderTrail, cardContext, firstParagraph, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, bellColour, stageLook, stageLooks, contrast } from './web/render.mjs';
+import { escapeHtml, renderComment, renderInline, renderMarkdown, renderQuickAction, renderCommands, cardCommands, cardAsk, renderMergeAction, mergeQuestion, renderCloseAction, closeQuestion, cardMove, renderTrail, cardContext, firstParagraph, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, bellColour, stageLook, stageLooks, contrast } from './web/render.mjs';
 import { loadProjectConfig } from '../lib/projectConfig.mjs';
 import operatorCard from '../lib/operatorCard.js';
 import machineComment from '../lib/machineComment.js';
 import loopStatuses from '../lib/loopStatuses.js';
 import mergeOnComment from '../lib/mergeOnComment.js';
+import busRelayPlan from '../lib/busRelayPlan.js';
 
 const DOOR = fileURLToPath(new URL('../scripts/clickup.mjs', import.meta.url));
 const WEB = (name) => fileURLToPath(new URL(`./web/${name}`, import.meta.url));
 
 /** The demo data in a fresh store, a server on a free port, and a caller signed in as the operator. */
-async function fixture({ mergePhrase } = {}) {
+async function fixture({ mergePhrase, closePhrase } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'tracker-web-'));
   const store = openStore(join(dir, 'tracker.db'), { now: tickingClock() });
   const seed = seedDemo(store, { operatorName: 'Dane' });
   const loopToken = store.issueToken(seed.loop.id);
-  const server = await startServer({ store, port: 0, mergePhrase });
+  const server = await startServer({ store, port: 0, mergePhrase, closePhrase });
   const url = `http://127.0.0.1:${server.address().port}`;
   async function call(method, path, { token = seed.token, body } = {}) {
     const headers = token ? { authorization: `Bearer ${token}` } : {};
@@ -605,13 +606,13 @@ test('a fence closes only on its own kind and length, so his own ``` inside a ``
 
 test('an operator card draws its NEEDED FROM DANE banner in the red box, as `ask` posts it and as the tracker stores it', () => {
   const sixty = Array.from({ length: 60 }, (_, i) => `word${i}`).join(' ');
-  const { rendered } = operatorCard.buildCard(`@@ASKED\nbuild the list\n@@CONTEXT\n${sixty}\n@@NEEDED\nReply A or B.\nA is cheaper.`);
+  const { rendered } = operatorCard.buildCard(`@@ASKED\nbuild the list\n@@CONTEXT\n${sixty}\n@@NEEDED\nReply A or B.\nA is cheaper.\nYour move: Reply — A or B.`);
   const plain = machineComment.stripMachineMarker(machineComment.stampMachineComment(rendered));
   // The tracker keeps a card's red banner runs as **bold** lines (scripts/tracker/apiTracker.mjs).
-  const stored = plain.split('\n').map((l) => (/^#{29}$|^NEEDED FROM|^A is cheaper/.test(l) ? `**${l}**` : l)).join('\n');
+  const stored = plain.split('\n').map((l) => (/^#{29}$|^NEEDED FROM|^A is cheaper|^Your move/.test(l) ? `**${l}**` : l)).join('\n');
   for (const body of [plain, stored]) {
     const html = renderComment(body);
-    assert.match(html, /<div class="banner"><strong>NEEDED FROM DANE:<\/strong> Reply A or B\.<br>A is cheaper\.<\/div>/);
+    assert.match(html, /<div class="banner"><strong>NEEDED FROM DANE:<\/strong> Reply A or B\.<br>A is cheaper\.<br>Your move: Reply — A or B\.<\/div>/);
     assert.doesNotMatch(html, /#{29}/, 'the rules are the box, not text');
     assert.match(html, /<strong>DANE&#39;S WORDS/);
   }
@@ -642,7 +643,7 @@ test('the ticket page opens on the Quick Action section, with everything it show
 test('Quick Action\'s left side: the title, the newest card\'s context and its ask in bold red', () => {
   const sixty = (tag) => Array.from({ length: 60 }, (_, i) => `${tag}${i}`).join(' ');
   const card = (tag, ask) => machineComment.stripMachineMarker(machineComment.stampMachineComment(
-    operatorCard.buildCard(`@@ASKED\nbuild it\n@@CONTEXT\n${sixty(tag)}\n@@NEEDED\n${ask}`).rendered));
+    operatorCard.buildCard(`@@ASKED\nbuild it\n@@CONTEXT\n${sixty(tag)}\n@@NEEDED\n${ask}\nYour move: Reply — ${tag}.`).rendered));
   const html = renderQuickAction({
     name: 'Make the page',
     description: '## Goal\nThe description.',
@@ -650,7 +651,7 @@ test('Quick Action\'s left side: the title, the newest card\'s context and its a
   });
   assert.match(html, /^<h1>Make the page<\/h1>/);
   assert.match(html, /<p class="summary">new0 new1 [^<]*new59<\/p>/, 'the newest card\'s WHAT\'S GOING ON');
-  assert.match(html, /<p class="needed">Reply A or B\.<br>A is cheaper\.<\/p>/);
+  assert.match(html, /<p class="needed">Reply A or B\.<br>A is cheaper\.<br>Your move: Reply — new\.<\/p>/);
   assert.doesNotMatch(html, /old|The description|NEEDED FROM/);
   const css = readFileSync(WEB('app.css'), 'utf8');
   assert.match(css, /\.quick \.needed \{ color: var\(--red\); font-weight: 700;/, 'the same red as the banner, bold');
@@ -686,7 +687,7 @@ test('every word of ticket text in Quick Action is escaped', () => {
 function commandCards(needed) {
   const sixty = Array.from({ length: 60 }, (_, i) => `w${i}`).join(' ');
   const plain = machineComment.stripMachineMarker(machineComment.stampMachineComment(
-    operatorCard.buildCard(`@@ASKED\nbuild it\n@@CONTEXT\n${sixty}\n@@NEEDED\n${needed}`).rendered));
+    operatorCard.buildCard(`@@ASKED\nbuild it\n@@CONTEXT\n${sixty}\n@@NEEDED\n${needed}\nYour move: Reply — done.`).rendered));
   const lines = plain.split('\n');
   const from = lines.findIndex((l) => /^#{29}$/.test(l));
   const stored = lines.map((l, i) => (i >= from && l.trim() ? `**${l}**` : l)).join('\n');
@@ -758,7 +759,7 @@ test('lines inside a command block are copied as written, even ones that look li
     assert.deepEqual(cardCommands(body), [heredoc]);
     assert.deepEqual(codes(renderCommands({ comments: [{ body }] })), [heredoc]);
     // The red ask reads the same banner, so it ends at the closing rule, not inside the block.
-    assert.match(cardAsk(body), /Reply done\.$/);
+    assert.match(cardAsk(body), /Reply done\.\nYour move: Reply — done\.$/);
   }
   // An authored card that reached the tracker unrendered: an @@ line inside the block does not end the ask.
   const withSection = "cat <<'EOF' > notes.md\n@@END\n" + '#'.repeat(29) + '\nEOF';
@@ -773,7 +774,7 @@ test('a command block that is never closed is not offered to copy', () => {
     assert.doesNotMatch(renderCommands({ comments: [{ body }] }), /Reply done/);
   }
   // Its red ask still ends at the closing rule, as before.
-  assert.match(cardAsk(commandCards(needed).plain), /Reply done\.$/);
+  assert.match(cardAsk(commandCards(needed).plain), /Reply done\.\nYour move: Reply — done\.$/);
 });
 
 test('Copy works on the Mini\'s plain http page and a second click restarts the "Copied" timer', () => {
@@ -974,14 +975,100 @@ test('the Edit project form is a person\'s only, filled in, with the slug and pr
 
 // ── Quick Action's Merge button ──────────────────────────────────────────────
 
+const PR = 'https://github.com/o/r/pull/41';
+
 test('only a Ready to launch ticket gets the Merge button, and only when the server named a merge phrase', () => {
   for (const name of loopStatuses.STAGE_ORDER) {
-    const html = renderMergeAction({ status: loopStatuses.statusOf(name), mergePhrase: 'merge' });
+    const html = renderMergeAction({ status: loopStatuses.statusOf(name), mergePhrase: 'merge', pullRequest: PR });
     if (loopStatuses.statusOf(name) === loopStatuses.READY_TO_LAUNCH) assert.match(html, /<form class="merge-action">\s*<button type="submit">Merge<\/button>/, name);
     else assert.equal(html, '', name);
   }
-  assert.equal(renderMergeAction({ status: 'ready to launch', mergePhrase: null }), '', 'no phrase, no button');
-  assert.doesNotMatch(renderMergeAction({ status: 'ready to launch', mergePhrase: '<b>go</b>' }), /<b>/, 'the phrase is escaped');
+  assert.equal(renderMergeAction({ status: 'ready to launch', mergePhrase: null, pullRequest: PR }), '', 'no phrase, no button');
+  assert.doesNotMatch(renderMergeAction({ status: 'ready to launch', mergePhrase: '<b>go</b>', pullRequest: PR }), /<b>/, 'the phrase is escaped');
+});
+
+/** A card as `ask` posts it, whose ask ends with `move`. */
+function moveCard(move) {
+  const sixty = Array.from({ length: 60 }, (_, i) => `w${i}`).join(' ');
+  return machineComment.stripMachineMarker(machineComment.stampMachineComment(
+    operatorCard.buildCard(`@@ASKED\nx\n@@CONTEXT\n${sixty}\n@@NEEDED\nThe ask.\nYour move: ${move} — a reason.`).rendered));
+}
+
+test('Merge shows only for a pull request of its own whose card does not name another move (SP-64)', () => {
+  const rtl = { status: 'ready to launch', mergePhrase: 'merge' };
+  assert.equal(renderMergeAction({ ...rtl, pullRequest: null }), '', 'no PR of its own: nothing to merge');
+  assert.match(renderMergeAction({ ...rtl, pullRequest: PR }), /merge-action/, 'an open PR and an older card with no move line: Merge, as today');
+  assert.match(renderMergeAction({ ...rtl, pullRequest: PR, comments: [{ body: moveCard('Merge') }] }), /merge-action/);
+  for (const move of ['Close', 'Reply']) {
+    assert.equal(renderMergeAction({ ...rtl, pullRequest: PR, comments: [{ body: moveCard(move) }] }), '', move);
+  }
+});
+
+test('the page reads a card\'s move exactly as `ask` checks it', () => {
+  for (const move of operatorCard.YOUR_MOVES) assert.equal(cardMove(moveCard(move)), move);
+  // Stored by the tracker with each banner line in **…**, as the Copy tests do.
+  const stored = moveCard('Close').split('\n').map((l) => (/^Your move/.test(l) ? `**${l}**` : l)).join('\n');
+  assert.equal(cardMove(stored), 'Close');
+  for (const needed of ['x\nYour move: Close — y', 'Your move: Merge\nthen more', 'x\nYour move: Approve', 'Pick A.']) {
+    assert.equal(cardMove(`@@ASKED\nx\n@@NEEDED\n${needed}`), operatorCard.readYourMove(needed), needed);
+  }
+  assert.equal(cardMove('An ordinary comment.'), null);
+});
+
+test('Close shows on his two statuses when the newest card\'s move is Close, and only with a close word from the server', () => {
+  const comments = [{ body: moveCard('Close') }];
+  for (const name of loopStatuses.STAGE_ORDER) {
+    const status = loopStatuses.statusOf(name);
+    const html = renderCloseAction({ status, closePhrase: 'close', comments });
+    if (loopStatuses.OPERATOR_HELD_STATUSES.includes(status)) assert.match(html, /<form class="close-action">\s*<button type="submit">Close<\/button>/, name);
+    else assert.equal(html, '', name);
+  }
+  assert.equal(renderCloseAction({ status: 'ready to launch', closePhrase: null, comments }), '', 'no word, no button');
+  assert.equal(renderCloseAction({ status: 'ready to launch', closePhrase: 'close', comments: [{ body: moveCard('Merge') }] }), '');
+  assert.equal(renderCloseAction({ status: 'ready to launch', closePhrase: 'close', comments: [] }), '', 'no card, no Close');
+  // The newest card decides: an older Close card under a newer Reply one is spent.
+  assert.equal(renderCloseAction({ status: 'needs your input', closePhrase: 'close', comments: [...comments, { body: moveCard('Reply') }] }), '');
+  assert.doesNotMatch(renderCloseAction({ status: 'ready to launch', closePhrase: '<b>x</b>', comments }), /<b>/, 'the word is escaped');
+  assert.equal(closeQuestion({ name: 'Fix it' }), 'Close Fix it?');
+});
+
+test('the Close note on Ready to launch promises the merge check the relay makes there', () => {
+  const html = renderCloseAction({ status: 'ready to launch', closePhrase: 'close', comments: [{ body: moveCard('Close') }] });
+  assert.match(html, /once its work is merged/);
+});
+
+test('the Close note on Needs your input says it closes on the next pass, with no merge check (the hand-back closes at once)', () => {
+  const html = renderCloseAction({ status: 'needs your input', closePhrase: 'close', comments: [{ body: moveCard('Close') }] });
+  assert.match(html, /on its next pass/);
+  assert.doesNotMatch(html, /merged/);
+});
+
+test('the demo\'s SP-64-shaped ticket shows Close and no Merge; a ticket with its own PR shows Merge', async () => {
+  const f = await fixture({ mergePhrase: 'merge' });
+  try {
+    const threads = await Promise.all(f.store.listTickets('beta').map(async (t) => (await f.call('GET', `/tickets/${t.id}/thread`)).body));
+    const unstuck = threads.find((t) => /will not merge/.test(t.name));
+    const own = threads.find((t) => t.status === 'ready to launch' && t.pullRequest);
+    const page = (t) => ({ ...t, closePhrase: busRelayPlan.CLOSE_PHRASES[0] });
+    assert.equal(renderMergeAction(page(unstuck)), '');
+    assert.match(renderCloseAction(page(unstuck)), /close-action/);
+    assert.match(renderMergeAction(page(own)), /merge-action/);
+    assert.equal(renderCloseAction(page(own)), '');
+  } finally { await f.cleanup(); }
+});
+
+test('the ticket page gets the close word from the relay\'s own close list, so Close posts something the relay closes on', async () => {
+  const { CLOSE_PHRASE } = await import('./server.mjs');
+  assert.equal(CLOSE_PHRASE, busRelayPlan.CLOSE_PHRASES[0]);
+  assert.ok(busRelayPlan.isCloseCommand(CLOSE_PHRASE));
+  const f = await fixture({ closePhrase: CLOSE_PHRASE });
+  try {
+    assert.equal((await f.call('GET', '/tickets/AL-1/thread')).body.closePhrase, CLOSE_PHRASE);
+  } finally { await f.cleanup(); }
+  const none = await fixture();
+  try {
+    assert.equal((await none.call('GET', '/tickets/AL-1/thread')).body.closePhrase, null, 'no word: no button');
+  } finally { await none.cleanup(); }
 });
 
 test('the Merge button asks once, naming the PR number and the ticket', () => {
@@ -1018,16 +1105,22 @@ test('clicking Merge and confirming posts exactly the merge phrase as Dane\'s ow
     assert.ok(mergeOnComment.isMergeCommand(stored.body), 'the relay reads it as a merge');
   } finally { await f.cleanup(); }
   const app = readFileSync(WEB('app.mjs'), 'utf8');
-  const handler = /mergeForm\?\.addEventListener\('submit', async \(e\) => \{([\s\S]*?)\n  \}\);/.exec(app)?.[1];
-  assert.ok(handler, 'the Merge button has a submit handler');
+  const handler = /const wordButton = \(selector, question, word, signedOut\) => \{([\s\S]*?)\n  \};/.exec(app)?.[1];
+  assert.ok(handler, 'Merge and Close share one submit handler');
   // It asks first; cancelling returns before anything is posted.
-  assert.match(handler, /^\s*e\.preventDefault\(\);\s*if \(!confirm\(mergeQuestion\(t\)\)\) return;/);
-  // The same call the reply box makes, with the phrase the server sent, the button held while it posts.
-  assert.match(handler, /button\.disabled = true;[\s\S]*api\('POST', `\/tickets\/\$\{encodeURIComponent\(t\.id\)\}\/comments`, \{ body: t\.mergePhrase \}\)/);
+  assert.match(handler, /e\.preventDefault\(\);\s*if \(!confirm\(question\)\) return;/);
+  // The same call the reply box makes, with the word the server sent, the button held while it posts.
+  assert.match(handler, /button\.disabled = true;[\s\S]*api\('POST', `\/tickets\/\$\{encodeURIComponent\(t\.id\)\}\/comments`, \{ body: word \}\)/);
   // A failed post says so, in red, and frees the button; no success line.
-  assert.match(handler, /catch \(err\) \{[\s\S]*mergeNote\.className = 'note error';\s*mergeNote\.textContent = `Not posted: \$\{err\.message\}`;\s*button\.disabled = false;/);
-  assert.doesNotMatch(handler, /Merged|merged!/);
-  assert.match(app, /<div class="act">\s*(?:\$\{renderCommands\(t\)\}\s*)?\$\{renderMergeAction\(t\)\}\s*<form class="reply">/, 'Merge sits above the reply box on the right');
+  assert.match(handler, /catch \(err\) \{[\s\S]*note\.className = 'note error';\s*note\.textContent = `Not posted: \$\{err\.message\}`;\s*button\.disabled = false;/);
+  assert.doesNotMatch(handler, /Merged|merged!|Closed/);
+  assert.match(app, /wordButton\('form\.merge-action', mergeQuestion\(t\), t\.mergePhrase,/);
+  assert.match(app, /wordButton\('form\.close-action', closeQuestion\(t\), t\.closePhrase,/);
+  // Wired inside the ticket page's own drawing, where `t` is that ticket, not at module level.
+  const draw = /\nasync function drawTicket\(id\) \{[\s\S]*?\n\}\n/.exec(app)?.[0] ?? '';
+  assert.match(draw, /const wordButton = [\s\S]*wordButton\('form\.merge-action'[\s\S]*wordButton\('form\.close-action'/);
+  assert.equal(app.match(/const wordButton = /g).length, 1);
+  assert.match(app, /<div class="act">\s*(?:\$\{renderCommands\(t\)\}\s*)?\$\{renderMergeAction\(t\)\}\s*\$\{renderCloseAction\(t\)\}\s*<form class="reply">/, 'Merge and Close sit above the reply box on the right');
 });
 
 test('no merge phrase is written into the page\'s code', () => {

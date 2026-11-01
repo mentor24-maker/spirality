@@ -126,9 +126,9 @@ button.action:disabled { opacity: 0.4; cursor: default; }
 .quick .command { display: flex; gap: 0.5rem; align-items: flex-start; margin-bottom: 0.5rem; }
 .quick .command pre { flex: 1; min-width: 0; margin: 0; }
 .offscreen { position: fixed; left: -9999px; top: 0; }
-.quick form.merge-action { margin-bottom: 1.25rem; }
-.quick form.merge-action button { font-weight: 700; padding: 0.6rem 2rem; }
-.quick form.merge-action p { margin: 0.4rem 0 0; font-size: 0.9em; }
+.quick form.merge-action, .quick form.close-action { margin-bottom: 1.25rem; }
+.quick form.merge-action button, .quick form.close-action button { font-weight: 700; padding: 0.6rem 2rem; }
+.quick form.merge-action p, .quick form.close-action p { margin: 0.4rem 0 0; font-size: 0.9em; }
 details.details { border-top: var(--hairline); padding-top: 0.75rem; }
 details.details > summary { cursor: pointer; font-weight: 600; margin-bottom: 0.5rem; }
 nav.trail { font-size: 0.85rem; color: var(--quiet); margin: -0.5rem 0 1rem; }

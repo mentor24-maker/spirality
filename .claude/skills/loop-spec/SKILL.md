@@ -136,6 +136,7 @@ his own words that caused this ticket, verbatim — never invented
 The problem and the fix in plain English. 50-100 words, enforced.
 @@NEEDED
 The specific ask. "Nothing right now" is a good answer, but write it down.
+Your move: Reply — a short reason   (Merge / Close / Reply; required, last line)
 @@EVIDENCE
 Only when the ask costs money or cannot be undone: the command, its ACTUAL
 output in a ``` fence, and one line "@@MEASURED 8:04pm" (Mountain time).

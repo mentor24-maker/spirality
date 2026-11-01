@@ -53,7 +53,7 @@ export function seedDemo(store, { operatorName = substrateConfig.operatorName() 
     '@@ASKED', 'put the tracker somewhere I can reach it',
     '@@WHEN', '2026-10-26, on the tracker plan',
     '@@CONTEXT', CONTEXT,
-    '@@NEEDED', 'Reply A (the Mini) or B (a hosted server).',
+    '@@NEEDED', 'Reply A (the Mini) or B (a hosted server).', 'Your move: Reply — A or B.',
   ].join('\n'));
 
   const asked = file('alpha', 'The tracker has nowhere to run: choose where it lives', 'needs your input',
@@ -97,6 +97,18 @@ export function seedDemo(store, { operatorName = substrateConfig.operatorName() 
   say(underToken, op.id, stampMachineComment('Which name should the tab show?'));
 
   file('beta', 'A question with no comments yet', 'needs your input', { assigned: true }, 'waiting');
+
+  // Shaped like SP-64: a catch-up ticket with no PR of its own, whose work
+  // landed when the PR it unstuck merged. Its card's move is Close (SP-68).
+  const unstuck = file('beta', 'Find out why PR #7 (conflict-fix) will not merge', 'ready to launch', {
+    assigned: true,
+    description: '## The branch\n\n- PR: https://github.com/example/repo/pull/7\n- Branch: `conflict-fix`',
+  }, 'waiting');
+  say(unstuck, loop.id, 'REVIEW: PASSED. PR #7 is merged; this ticket has no pull request of its own.');
+  say(unstuck, loop.id, stampMachineComment(buildCard([
+    '@@ASKED', 'merge', '@@CONTEXT', CONTEXT,
+    '@@NEEDED', 'Nothing to merge: PR #7 has already landed.', 'Your move: Close — its work is live.',
+  ].join('\n')).rendered));
 
   return { operator: op, loop, token, expect };
 }

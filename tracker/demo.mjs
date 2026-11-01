@@ -14,7 +14,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openStore } from './store.mjs';
-import { startServer } from './server.mjs';
+import { CLOSE_PHRASE, startServer } from './server.mjs';
 import { seedDemo, tickingClock } from './demoData.mjs';
 import { loadProjectConfig } from '../lib/projectConfig.mjs';
 
@@ -24,7 +24,7 @@ const { operator, token } = seedDemo(store);
 // The Merge button posts the project config's first merge phrase, as on the real server.
 let mergePhrase = null;
 try { mergePhrase = loadProjectConfig().mergePhrases[0] ?? null; } catch (err) { console.log(`no Merge button: the project config is not usable (${err.message}).`); }
-const server = await startServer({ store, port: Number(process.env.TRACKER_PORT ?? 0), log: (line) => console.log(line), mergePhrase });
+const server = await startServer({ store, port: Number(process.env.TRACKER_PORT ?? 0), log: (line) => console.log(line), mergePhrase, closePhrase: CLOSE_PHRASE });
 
 console.log(`\nDemo tracker (test data only) at http://127.0.0.1:${server.address().port}/`);
 console.log(`Sign in as ${operator.name} with this throwaway token:\n\n  ${token}\n`);

@@ -15,7 +15,7 @@ import { renderMarkdown } from '../../tracker/web/render.mjs';
 const DOOR = fileURLToPath(new URL('../clickup.mjs', import.meta.url));
 const LIST = '333';
 const sixty = Array.from({ length: 60 }, (_, i) => `word${i}`).join(' ');
-const CARD = `@@ASKED\nbuild the to-do list\n@@CONTEXT\n${sixty}\n@@NEEDED\nPick option A or B.`;
+const CARD = `@@ASKED\nbuild the to-do list\n@@CONTEXT\n${sixty}\n@@NEEDED\nPick option A or B.\nYour move: Reply — A or B.`;
 
 /**
  * A real tracker server on a temporary database, an operator and a loop each
@@ -54,6 +54,8 @@ async function fixture() {
   const f = {
     dir, store, human, machine, humanToken, machineToken, url, product,
     set prBody(body) { writeFileSync(prFile, JSON.stringify({ body, url: 'https://github.com/owner/repo/pull/7' })); },
+    /** What the fake `gh pr view` prints, as an object. */
+    set prJson(json) { writeFileSync(prFile, JSON.stringify(json)); },
     door(args, { stdin = '', token = machineToken, env: extra = {} } = {}) {
       return new Promise((resolve) => {
         const env = { PATH: `${bin}:${process.env.PATH}`, HOME: process.env.HOME, TRACKER_TOKEN_HAND_RUN: token, ...extra };
@@ -365,7 +367,7 @@ test('a card whose @@ASKED holds his own "> " and ``` lines posts, stores and re
   try {
     f.file({ name: 'one', status: 'building' });
     const asked = 'forward this:\n> the old email line\n```\nnpm run thing\n```\nthanks';
-    const card = `@@ASKED\n${asked}\n@@CONTEXT\n${sixty}\n@@NEEDED\nReply "go" to queue it.`;
+    const card = `@@ASKED\n${asked}\n@@CONTEXT\n${sixty}\n@@NEEDED\nReply "go" to queue it.\nYour move: Reply — go.`;
     const r = await f.door(['ask', '--task', 'AL-1', '--body-file', '-'], { stdin: card });
     assert.equal(r.code, 0, r.err);
     const [stored] = f.store.listComments('AL-1');
@@ -505,6 +507,60 @@ test('relay hands a ticket back on his answer: the move and the reply marker are
     const quiet = await f.door(['relay']);
     assert.equal(quiet.code, 0, quiet.err);
     assert.match(quiet.err, /0 "Needs your input"/);
+  } finally { await f.cleanup(); }
+});
+
+/** A Ready to launch catch-up ticket shaped like SP-64: no PR of its own, a Close card, and his close word. */
+async function closeOnReadyToLaunch(f) {
+  f.file({ name: 'Find out why PR #7 (fix) will not merge', status: 'ready to launch', description: '## The branch\n\n- PR: https://github.com/owner/repo/pull/7\n- Branch: `fix`' });
+  const card = `@@ASKED\nmerge\n@@CONTEXT\n${sixty}\n@@NEEDED\nNothing to merge: PR #7 has already landed.\nYour move: Close — its work is live.`;
+  const ask = await f.door(['ask', '--task', 'AL-1', '--no-move', '--body-file', '-'], { stdin: card });
+  assert.equal(ask.code, 0, ask.err);
+  return f.store.postComment({ ticket: 'AL-1', author: f.human.id, body: 'close' });
+}
+
+test('relay closes a Ready to launch ticket on his close word once the PR it unstuck is merged, and replies saying so (SP-68)', async () => {
+  const f = await fixture();
+  try {
+    const answer = await closeOnReadyToLaunch(f);
+    f.prJson = { number: 7, state: 'MERGED' };
+    const dry = await f.door(['relay', '--dry-run']);
+    assert.equal(dry.code, 0, `${dry.out}\n${dry.err}`);
+    assert.match(dry.out, /AL-1.*would-close.*"Live".*PR #7, the pull request this ticket was filed to unstick, is merged/);
+    assert.equal(f.store.getTicket('AL-1').status, 'ready to launch', 'a dry run moves nothing');
+
+    const r = await f.door(['relay']);
+    assert.equal(r.code, 0, `${r.out}\n${r.err}`);
+    assert.match(r.out, /AL-1.*closed.*reply verified/);
+    const t = f.store.getTicket('AL-1');
+    assert.equal(t.status, 'live');
+    assert.equal(t.assignee, null);
+    const replies = f.store.listComments('AL-1').filter((c) => c.parent === answer.id);
+    assert.equal(replies.length, 1);
+    assert.match(replies[0].body, /this ticket was closed \(moved to "live"\), as you asked/i);
+  } finally { await f.cleanup(); }
+});
+
+test('a close word on a ticket whose work is not merged moves nothing, and the relay says why once (SP-68)', async () => {
+  const f = await fixture();
+  try {
+    const answer = await closeOnReadyToLaunch(f);
+    f.prJson = { number: 7, state: 'OPEN' };
+    for (let pass = 0; pass < 2; pass += 1) {
+      const r = await f.door(['relay']);
+      assert.equal(r.code, 0, `${r.out}\n${r.err}`);
+      assert.match(r.out, pass === 0 ? /AL-1.*close-refused\t.*is still open/ : /AL-1.*close-refused-quiet/);
+      assert.equal(f.store.getTicket('AL-1').status, 'ready to launch');
+    }
+    const replies = f.store.listComments('AL-1').filter((c) => c.parent === answer.id);
+    assert.equal(replies.length, 1, 'said once, not once per pass');
+    assert.match(replies[0].body, /Not closed yet: PR #7, the pull request this ticket was filed to unstick, is still open/);
+
+    // The PR merges: his same word now closes it.
+    f.prJson = { number: 7, state: 'MERGED' };
+    const r = await f.door(['relay']);
+    assert.match(r.out, /AL-1.*closed/);
+    assert.equal(f.store.getTicket('AL-1').status, 'live');
   } finally { await f.cleanup(); }
 });
 

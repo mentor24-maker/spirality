@@ -439,6 +439,7 @@ optional: when and where he said it
 the problem and the fix in plain English, 50 to 100 words
 @@NEEDED
 the specific ask, with named options where possible
+Your move: Merge | Close | Reply — a short reason
 @@EVIDENCE
 required when the ask costs money, changes a plan, or cannot be undone
 ```
@@ -449,6 +450,13 @@ The rules `ask` enforces:
   section may appear twice, and no text may sit before the first section.
 - `@@CONTEXT` is **50 to 100 words**. Under 50 it cannot be acted on; over
   100 it is the wall of text the card replaced.
+- `@@NEEDED` **ends with one line naming his move**: `Your move: Merge`,
+  `Your move: Close` or `Your move: Reply`, then a short reason. The ticket
+  page reads that line to draw the button for the move (Merge, Close), with
+  the reply box underneath for anything else. A card never tells him to move
+  a ticket himself ("move this ticket to Live yourself" is refused): the
+  page cannot, and only the relay moves his tickets, on his word. *(SP-68,
+  after SP-64's card asked exactly that.)*
 - **No `> ` blockquotes**, in a card or a description. ClickUp deletes
   quoted lines on save, silently. Quote Dane's words inside a fenced code
   block instead. `ask` refuses a blockquote in `@@ASKED`, `@@CONTEXT`,
@@ -583,6 +591,18 @@ relay reads the ticket's PR state before deciding, but a close phrase that
 answers a card is decided before that state is consulted, so it closes the
 ticket even when the PR is still open (the PR is left alone and the note
 says so) or its state could not be read.
+
+On a **`Ready to launch`** ticket a close phrase is read on the same terms
+(his answer to the newest machine card; a `HELD BY HAND` note newer than the
+card withholds it; an answer already carrying the done reply is spent), with
+one rule more, because that status waits on a merge: the ticket moves to
+`Live` only when its work **is merged**. That is its own PR, or, when it has
+no PR of its own, the PR it was filed to unstick (the `- PR:` line under
+`## The branch` in a catch-up ticket's description). Otherwise the relay
+replies under his word once, saying why (`[bus-relay-close-refused]`), and
+leaves the ticket where it is; the same word closes it on the first pass
+after the merge. The ticket page's **Close** button, shown when the newest
+card's move is `Close`, posts the first close phrase as his reply.
 
 ### StarCaster's auto-merge lanes (a StarCaster extension)
 

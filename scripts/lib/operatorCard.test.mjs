@@ -11,7 +11,8 @@ build the to-do list
 @@CONTEXT
 ${sixty}
 @@NEEDED
-Pick option A or B.`;
+Pick option A or B.
+Your move: Reply — A or B.`;
 
 test('a well-formed card parses, validates and renders with the banner last', () => {
   const { card, rendered, comment } = buildCard(good);
@@ -86,4 +87,14 @@ test('the card check and the card builder agree on where a fence ends (SP-44)', 
   }
   assert.deepEqual(splitFences('a\n````\n```\nb\n```\n````\nc').blocks, [['```', 'b', '```']]);
   assert.deepEqual(fenceLines('~~~\nx\n```\n~~~').map((l) => l.role), ['open', 'body', 'body', 'close']);
+});
+
+test('the card `ask` posts needs the same one-line move as the shared module (SP-68)', async () => {
+  const shared = (await import('../../lib/operatorCard.js')).default;
+  const mjs = await import('./operatorCard.mjs');
+  const sixty = Array.from({ length: 60 }, (_, i) => `w${i}`).join(' ');
+  const without = mjs.parseCard(`@@ASKED\nx\n@@CONTEXT\n${sixty}\n@@NEEDED\nPick A or B.`);
+  assert.ok(mjs.validateCard(without).some((p) => /must END with one line naming his move/.test(p)));
+  assert.equal(mjs.readYourMove, shared.readYourMove, 'one rule, not a copy');
+  assert.throws(() => mjs.buildCard(`@@ASKED\nx\n@@CONTEXT\n${sixty}\n@@NEEDED\nmove this ticket to Live yourself\nYour move: Reply — ok`), /move the ticket himself/);
 });

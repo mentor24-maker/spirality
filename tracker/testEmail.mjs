@@ -37,7 +37,7 @@ const ticket = store.fileTicket({
 });
 store.postComment({
   ticket: ticket.id, author: loop.id,
-  body: '@@NEEDED\nNothing. This is a test email; if you are reading it, the hand-over email works.\n',
+  body: '@@NEEDED\nNothing. This is a test email; if you are reading it, the hand-over email works.\nYour move: Reply — only if it did not arrive.\n',
 });
 const moved = store.changeTicket(ticket.id, { actor: loop.id, status: 'needs your input', assignee: operator.id });
 

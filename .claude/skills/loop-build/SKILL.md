@@ -49,7 +49,10 @@ refuses on its own. Use `ask`, whose body is the operator card:
 @@ASKED     his own words that caused this ticket, verbatim — never invented
 @@WHEN      optional — when and where he said it
 @@CONTEXT   the problem and the fix in plain English, 50-100 words (enforced)
-@@NEEDED    the specific ask; give him named options where you can
+@@NEEDED    the specific ask; give him named options where you can.
+            Its LAST line is his move: "Your move: Merge", "Your move: Close"
+            or "Your move: Reply", then a short reason (enforced). Never tell
+            him to move a ticket himself; offer "Your move: Close" instead.
 @@EVIDENCE  required ONLY when the ask costs money or cannot be undone
 ```
 

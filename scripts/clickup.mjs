@@ -54,13 +54,14 @@ import {
 } from '../lib/mergeOnComment.js';
 import {
   PR_VIEW_FIELDS, markerBookkeeping, recordBookkeeping, emptyBooks, mergeDestination, relayLine,
-  handbackAnswer, handbackPlan, conflictFilingPlan,
+  handbackAnswer, handbackPlan, closePlan, conflictFilingPlan,
 } from '../lib/relayLane.js';
 import {
-  conflictTicketName, conflictTicketBody, conflictTicketFiledComment, findConflictTicket,
+  conflictTicketName, conflictTicketBody, conflictTicketFiledComment, findConflictTicket, unstuckPullRequest,
 } from '../lib/conflictWork.js';
 import {
   handbackDoneText, handbackFailureText, repliesShowHandbackDone, repliesShowHandbackFailure, HANDBACK_FAILURE_MARKER,
+  isCloseCommand, closeRefusedText, latestCloseRefusal,
 } from '../lib/busRelayPlan.js';
 // A ticket's `Waits on:` line (task 86bctfun6): the claim leaves it alone
 // until every ticket it names is closed.
@@ -631,7 +632,7 @@ if (cmd === 'whoami') {
   if (isOperatorStatus(status) && !flag('no-card')) {
     console.error(`\n"${status}" is a handoff to Dane, not just a status. Use \`ask\`, which posts the operator card and moves the status together:`);
     console.error(`  npm run clickup -- ask --task ${task} --status "${status}" --body-file -\n`);
-    console.error(`The card: @@ASKED (his words, verbatim) / @@WHEN (optional) / @@CONTEXT (${CONTEXT_MIN_WORDS}-${CONTEXT_MAX_WORDS} words) / @@NEEDED (the ask) / @@EVIDENCE (costly asks only).`);
+    console.error(`The card: @@ASKED (his words, verbatim) / @@WHEN (optional) / @@CONTEXT (${CONTEXT_MIN_WORDS}-${CONTEXT_MAX_WORDS} words) / @@NEEDED (the ask, ending "Your move: Merge|Close|Reply — why") / @@EVIDENCE (costly asks only).`);
     console.error('If this really is a status move with no ask attached, pass --no-card — your written claim that a card is not owed.\n');
     process.exit(2);
   }
@@ -913,8 +914,113 @@ if (cmd === 'whoami') {
     return true;
   };
 
+  /** Read a comment's reply thread, or null when it could not be read. */
+  const readReplies = async (commentId) => {
+    const out = await tracker.listReplies(commentId);
+    return out.res.ok ? (out.json?.comments || out.json?.replies || []) : null;
+  };
+
+  /** The ticket's recorded PR, as handbackDestination wants it: null for no
+   *  `PR opened:` line, else { number, state }, with state '' and a `why`
+   *  when GitHub could not be read. A reading that failed is never a guess. */
+  const handbackPr = (comments) => prStateOf(findPullRequest(comments));
+
+  /** { owner, repo, number } -> { number, state }, the same way: null for
+   *  none, state '' with a `why` when it could not be read. */
+  const prStateOf = (found) => {
+    if (!found) return null;
+    if (`${found.owner}/${found.repo}`.toLowerCase() !== String(repo).toLowerCase()) {
+      return { number: found.number, state: '', why: `the recorded PR is in ${found.owner}/${found.repo}, not ${repo}` };
+    }
+    const view = gh(['pr', 'view', String(found.number), '--repo', repo, '--json', 'state,number']);
+    if (!view.ok) return { number: found.number, state: '', why: view.stderr.trim().slice(0, 200) || 'gh failed' };
+    try { return { number: found.number, state: String(JSON.parse(view.stdout).state || '') }; } catch { return { number: found.number, state: '', why: 'gh returned non-JSON' }; }
+  };
+
+  // ── His close word on a Ready to launch ticket (SP-68) ──────────────────
+  // Live once its work is merged (its own PR, or the PR a catch-up ticket
+  // was filed to unstick); otherwise the reason, said once under his word.
+  // The decision is closePlan's (lib/relayLane.js). Returns true when it
+  // decided this ticket, so the merge step does not also act on it.
+  const relayCloseReadyToLaunch = async (task, comments) => {
+    const verdict = handbackAnswer({ comments, operatorId: OPERATOR_ID, isMachine: isMachineComment });
+    if (verdict.state !== 'answered' || !isCloseCommand(verdict.answer?.comment_text)) return false;
+    const answerId = verdict.answer.id;
+    const replies = await readReplies(answerId);
+    if (replies === null) {
+      unchecked.push(`${task.id}: ${who} said to close it, but the replies under comment ${answerId} could not be read — not closed this pass`);
+      say(task, 'unchecked', `could not read the replies under comment ${answerId}`);
+      return true;
+    }
+    if (repliesShowHandbackDone(replies)) return false;
+    const ownPr = handbackPr(comments);
+    let unstuckPr = null;
+    if (!ownPr) {
+      const out = await tracker.getTask(task.id, { markdown: true });
+      if (!out.res.ok || !out.json) {
+        unchecked.push(`${task.id}: ${who} said to close it, but the description could not be read (HTTP ${out.res.status}) to find the PR it was filed to unstick — not closed this pass`);
+        say(task, 'unchecked', `could not read the description (HTTP ${out.res.status})`);
+        return true;
+      }
+      unstuckPr = prStateOf(unstuckPullRequest(out.json.markdown_description || out.json.description || ''));
+    }
+    const plan = closePlan({ verdict, answerReplies: replies, ownPr, unstuckPr });
+    if (plan.act === 'not-close') return false;
+    if (plan.act === 'cannot-tell') {
+      unchecked.push(`${task.id}: ${who} said to close it, but ${plan.why}`);
+      say(task, 'unchecked', plan.why);
+      return true;
+    }
+    if (plan.act === 'refused-quiet') { say(task, 'close-refused-quiet', plan.why); return true; }
+
+    if (plan.act === 'refuse') {
+      if (dryRun) { say(task, 'would-refuse-close', plan.why); return true; }
+      const note = await tracker.replyToComment(answerId, { comment_text: closeRefusedText({ why: plan.why, pending: plan.pending, at: new Date().toISOString() }) });
+      const back = note.res.ok ? await readReplies(answerId) : null;
+      if (!(back && latestCloseRefusal(back) === plan.why)) {
+        unchecked.push(`${task.id}: did not close it (${plan.why}), and the reply saying so ${note.res.ok ? 'did not read back' : `FAILED (HTTP ${note.res.status})`} under comment ${answerId}`);
+        say(task, 'unchecked', `close refused (${plan.why}); the reply did not stick`);
+        return true;
+      }
+      say(task, 'close-refused', `${plan.why} — said under ${who}'s comment ${answerId}`);
+      return true;
+    }
+
+    // plan.act === 'move'
+    const target = plan.target;
+    if (dryRun) { say(task, 'would-close', `-> "${target}" on ${who}'s comment ${answerId}: ${plan.why}`); return true; }
+    // Re-read right before the write: if he moved it meanwhile, his move stands.
+    const fresh = await readTaskOrNull(task.id);
+    const before = String(fresh?.status?.status ?? '');
+    if (!fresh || !isReadyToLaunch(before)) {
+      if (!fresh) unchecked.push(`${task.id}: ${who} said to close it, but the ticket could not be re-read before the move — not closed this pass`);
+      say(task, fresh ? 'skip' : 'unchecked', fresh ? `it moved to "${before || '?'}" during this pass — left where it is` : 'could not re-read the ticket before the move');
+      return true;
+    }
+    const rem = (fresh.assignees || []).map((a) => a.id);
+    const out = await tracker.updateTask(task.id, { status: target, assignees: { add: [], rem } });
+    const back = out.res.ok ? await readTaskOrNull(task.id) : null;
+    const now = String(back?.status?.status ?? '');
+    if (!out.res.ok || now.toLowerCase() !== target.toLowerCase()) {
+      const why = !out.res.ok ? `HTTP ${out.res.status}` : back ? `the ticket reads back as "${now || '?'}"` : 'the ticket could not be read back';
+      // No done marker was written, so the next pass re-derives this and tries again.
+      unchecked.push(`${task.id}: ${who} said to close it and its work is merged, but the move to "${target}" FAILED (${why}) — the next pass tries again`);
+      say(task, 'unchecked', `move to "${target}" failed (${why})`);
+      return true;
+    }
+    const leftover = (back.assignees || []).map((a) => a.id);
+    if (leftover.length) unchecked.push(`${task.id}: closed to "${now}" but assignees did not clear ([${leftover.join(', ')}])`);
+    const done = await tracker.replyToComment(answerId, { comment_text: handbackDoneText({ target: now, at: new Date().toISOString() }) });
+    const doneBack = done.res.ok ? await readReplies(answerId) : null;
+    const stuck = Boolean(doneBack && repliesShowHandbackDone(doneBack));
+    if (!stuck) unchecked.push(`${task.id}: closed to "${now}", but the reply saying so under comment ${answerId} ${done.res.ok ? 'did not read back' : `FAILED (HTTP ${done.res.status})`}`);
+    say(task, 'closed', `-> "${now}" on ${who}'s comment ${answerId}, reply ${stuck ? 'verified' : 'UNVERIFIED'}: ${plan.why}`);
+    return true;
+  };
+
   const relayReadyToLaunch = async (task) => {
     const comments = await readComments(task.id);
+    if (await relayCloseReadyToLaunch(task, comments)) return;
     // Only his merge phrases need their reply threads read — that is where an
     // earlier pass left its marker. Everything else costs a request and says nothing.
     const books = emptyBooks();
@@ -1092,26 +1198,6 @@ if (cmd === 'whoami') {
       say(t, 'unchecked', `the relay stopped on this ticket: ${err.message}`);
     }
   }
-  /** Read a comment's reply thread, or null when it could not be read. */
-  const readReplies = async (commentId) => {
-    const out = await tracker.listReplies(commentId);
-    return out.res.ok ? (out.json?.comments || out.json?.replies || []) : null;
-  };
-
-  /** The ticket's recorded PR, as handbackDestination wants it: null for no
-   *  `PR opened:` line, else { number, state }, with state '' and a `why`
-   *  when GitHub could not be read. A reading that failed is never a guess. */
-  const handbackPr = (comments) => {
-    const found = findPullRequest(comments);
-    if (!found) return null;
-    if (`${found.owner}/${found.repo}`.toLowerCase() !== String(repo).toLowerCase()) {
-      return { number: found.number, state: '', why: `the recorded PR is in ${found.owner}/${found.repo}, not ${repo}` };
-    }
-    const view = gh(['pr', 'view', String(found.number), '--repo', repo, '--json', 'state,number']);
-    if (!view.ok) return { number: found.number, state: '', why: view.stderr.trim().slice(0, 200) || 'gh failed' };
-    try { return { number: found.number, state: String(JSON.parse(view.stdout).state || '') }; } catch { return { number: found.number, state: '', why: 'gh returned non-JSON' }; }
-  };
-
   const relayNeedsYourInput = async (task) => {
     const comments = await readComments(task.id);
     const verdict = handbackAnswer({ comments, operatorId: OPERATOR_ID, isMachine: isMachineComment });

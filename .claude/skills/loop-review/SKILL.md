@@ -49,7 +49,9 @@ refuses to set `Ready to launch` or `Needs your input` and points at `ask`:
 @@ASKED     his own words that caused this ticket, verbatim — never invented
 @@WHEN      optional — when and where he said it
 @@CONTEXT   the problem and the fix in plain English, 50-100 words (enforced)
-@@NEEDED    the specific ask, under a banner he can spot without reading
+@@NEEDED    the specific ask, under a banner he can spot without reading.
+            Its LAST line is his move: "Your move: Merge", "Your move: Close"
+            or "Your move: Reply", then a short reason (enforced)
 @@EVIDENCE  required ONLY when the ask costs money or cannot be undone
 ```
 
@@ -131,7 +133,14 @@ look at; this is a check that runs in CI"*).
      > is not loaded on the Mini, tell a session **"merge PR #N"** instead.
 
      (Write it into the card as plain lines, not a blockquote — ClickUp deletes
-     `> ` lines.) Do **NOT** merge.
+     `> ` lines.) Then end `@@NEEDED` with **`Your move: Merge — PR #N`**: the
+     ticket page draws the Merge button from that line. Do **NOT** merge.
+
+     **A ticket with nothing of its own to merge** (a catch-up ticket whose
+     work landed when the PR it unstuck merged, as SP-64's did) is not a merge
+     approval. Say what landed, then end with **`Your move: Close — <why its
+     work is live>`**; the page shows a Close button and the relay moves it to
+     Live once that PR is merged. Never tell him to move the ticket himself.
    - **Fail, and a machine can fix it** → `verdict --fail` first (its FIRST
      LINE is the reason the board shows — one short clause), then
      `status --status Rework --if-status "In review"`. Do not fix it yourself

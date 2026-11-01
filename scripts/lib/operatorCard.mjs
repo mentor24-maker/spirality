@@ -28,6 +28,12 @@
  * and Dane's words go in a fence, the one form ClickUp keeps verbatim.
  */
 
+import sharedCard from '../../lib/operatorCard.js';
+
+// The one-line move ("Your move: Close — …") is the shared module's rule, read
+// from there so the card `ask` posts and the card the page reads agree (SP-68).
+export const { YOUR_MOVES, readYourMove, yourMoveProblems } = sharedCard;
+
 export const MARKERS = ['ASKED', 'WHEN', 'CONTEXT', 'NEEDED', 'EVIDENCE'];
 export const CONTEXT_MIN_WORDS = 50;
 export const CONTEXT_MAX_WORDS = 100;
@@ -187,6 +193,7 @@ export function validateCard(card) {
   else if (words < CONTEXT_MIN_WORDS) problems.push(`@@CONTEXT is ${words} words; the floor is ${CONTEXT_MIN_WORDS}. Under that it stops carrying enough to act on.`);
   else if (words > CONTEXT_MAX_WORDS) problems.push(`@@CONTEXT is ${words} words; the ceiling is ${CONTEXT_MAX_WORDS}. The long version belongs in the description (use describe).`);
   if (!card.needed) problems.push('@@NEEDED is empty. State the specific ask. "Nothing right now" is a fine answer, but write it down.');
+  problems.push(...yourMoveProblems(card.needed));
   problems.push(...evidenceProblems(card));
   // @@ASKED is exempt: the card puts his words in a fence of its own, where a
   // "> " line of his is literal text and survives.
