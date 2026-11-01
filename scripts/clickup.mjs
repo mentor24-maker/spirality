@@ -975,7 +975,7 @@ if (cmd === 'whoami') {
 
     if (plan.act === 'refuse') {
       if (dryRun) { say(task, 'would-refuse-close', plan.why); return true; }
-      const note = await tracker.replyToComment(answerId, { comment_text: closeRefusedText({ why: plan.why, at: new Date().toISOString() }) });
+      const note = await tracker.replyToComment(answerId, { comment_text: closeRefusedText({ why: plan.why, pending: plan.pending, at: new Date().toISOString() }) });
       const back = note.res.ok ? await readReplies(answerId) : null;
       if (!(back && latestCloseRefusal(back) === plan.why)) {
         unchecked.push(`${task.id}: did not close it (${plan.why}), and the reply saying so ${note.res.ok ? 'did not read back' : `FAILED (HTTP ${note.res.status})`} under comment ${answerId}`);

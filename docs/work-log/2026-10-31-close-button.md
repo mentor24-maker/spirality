@@ -11,8 +11,11 @@ The new **Close** button works like the Merge button. It asks once, then posts
 words) closes the ticket a few minutes later. On a Ready to launch ticket the
 relay only closes it once its work has actually landed: either the ticket's
 own pull request, or the one it was filed to unstick, must be merged. If not,
-it leaves the ticket alone and replies once to say why. His same word then
-closes it as soon as the work does land. On a Needs your input ticket, where
+it leaves the ticket alone and replies once to say why. If the pull request
+is still open, his same word then closes it as soon as the work does land. If
+it was closed without merging, or there is none at all, no merge is coming,
+so the reply says plainly that his word cannot close it and that he can ask a
+session to close it or reply with what should happen. On a Needs your input ticket, where
 closing was already allowed, it closes on the relay's next pass, and the note
 under the button says so.
 
