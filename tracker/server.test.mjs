@@ -626,3 +626,34 @@ test('stage colours: anyone signed in reads all eight in STAGE_ORDER; a person s
     assert.deepEqual(f.store.stageColours(), before, 'a refused save stores nothing');
   } finally { await f.cleanup(); }
 });
+
+test('a person may assign a ticket only to its project\'s operator or to nobody; anyone else is refused and nothing is written', async () => {
+  const f = await fixture();
+  try {
+    const other = f.store.createActor({ kind: 'human', name: 'Someone else' });
+    const t = f.store.fileTicket({ project: 'alpha', actor: f.machine.id, name: 'x', status: 'queued' });
+    const refused = await f.call('PATCH', `/tickets/${t.id}`, { token: f.humanToken, body: { assignee: other.id, priority: 'low' } });
+    assert.equal(refused.status, 400);
+    assert.equal(refused.body.error, 'bad-assignee');
+    assert.match(refused.body.message, /operator \(actor \d+\) or to nobody/);
+    assert.deepEqual(f.store.getTicket(t.id), t, 'nothing was written, not even the priority');
+    const toOperator = await f.call('PATCH', `/tickets/${t.id}`, { token: f.humanToken, body: { assignee: f.human.id } });
+    assert.equal(toOperator.status, 200);
+    assert.equal(f.store.getTicket(t.id).assignee, f.human.id);
+    const toNobody = await f.call('PATCH', `/tickets/${t.id}`, { token: f.humanToken, body: { assignee: null } });
+    assert.equal(toNobody.status, 200);
+    assert.equal(f.store.getTicket(t.id).assignee, null);
+  } finally { await f.cleanup(); }
+});
+
+test('the thread answer names the project\'s operator and the choices the ticket page offers', async () => {
+  const f = await fixture();
+  try {
+    const t = f.store.fileTicket({ project: 'alpha', actor: f.machine.id, name: 'x', status: 'building' });
+    const { body } = await f.call('GET', `/tickets/${t.id}/thread`, { token: f.humanToken });
+    assert.deepEqual(body.operator, { id: f.human.id, name: 'Operator' });
+    assert.deepEqual(body.choices.priorities, ['urgent', 'high', 'normal', 'low']);
+    assert.deepEqual(body.choices.statuses.map((s) => s.label), ['Requested', 'Rework', 'Queued', 'Live']);
+    assert.equal(body.version, 1);
+  } finally { await f.cleanup(); }
+});

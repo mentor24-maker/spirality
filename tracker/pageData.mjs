@@ -105,6 +105,8 @@ export function threadOf(store, ticketId) {
     ...ticket,
     projectName: project?.name ?? ticket.project,
     assignee: ticket.assignee == null ? null : actor(ticket.assignee),
+    // The one person the ticket may be assigned to, for the ticket page's picker.
+    operator: namedActor(store, project?.operator),
     comments,
     pullRequest: findPullRequest(store.listComments(ticket.id).map((c) => ({
       id: c.id, comment_text: c.body, date: String(Date.parse(c.createdAt)),

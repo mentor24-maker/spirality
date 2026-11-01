@@ -1,6 +1,7 @@
 /**
  * Dane's page (docs/TRACKER_MVP.md, "Dane's page"): sign in, see what waits
- * on you, open a ticket, answer it, pick a project, see that project's
+ * on you, open a ticket, answer it, change its priority, tags, assignee,
+ * status, name or description (a person only), pick a project, see that project's
  * whole queue as a board or as a list, see one project's details, add,
  * change or delete a project (a person only), file a new request, copy a ticket into another
  * project, and choose a colour for each stage on the Settings page. Plain browser
@@ -15,7 +16,7 @@
  * holds. It is kept in this browser's local storage so a pinned tab stays
  * signed in, and sent only to this server. "Sign out" forgets it.
  */
-import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderDeleteAction, renderMarkdown, renderCloseAction, renderMergeAction, renderQuickAction, renderTrail, stageLooks, tabTitle, bellColour } from './render.mjs';
+import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, renderCloseAction, renderMergeAction, renderQuickAction, renderTrail, stageLooks, tabTitle, bellColour } from './render.mjs';
 
 const TOKEN_KEY = 'tracker-token';
 /** Board or list: the last one opened, so "Tasks" in the header opens it again. */
@@ -617,7 +618,15 @@ async function copyText(text, button) {
   }
 }
 
-async function drawTicket(id) {
+/**
+ * One ticket. A person signed in also gets the Change panel above the
+ * description: each change is sent on its own with the ticket's version as
+ * `ifVersion`, and the page is then drawn again from the server, so what it
+ * shows is what was stored. `said` is a line to show after that redraw:
+ * `{ field, text, error }`, `field` naming the note it goes in (none: the
+ * panel's own note at its top).
+ */
+async function drawTicket(id, said = null) {
   const [t, { projects }] = await Promise.all([
     api('GET', `/tickets/${encodeURIComponent(id)}/thread`),
     api('GET', '/projects'),
@@ -655,6 +664,7 @@ async function drawTicket(id) {
         <span>${escapeHtml(statusName(t.status))}</span>
         <span>${t.assignee ? `assigned to ${escapeHtml(t.assignee.name)}` : 'not assigned'}</span>
       </p>
+      ${me?.kind === 'human' ? renderEditPanel(t) : ''}
       <section class="description">${renderMarkdown(t.description) || '<p class="quiet">No description.</p>'}</section>
       <h2>Comments</h2>
       ${comments || '<p class="quiet">No comments yet.</p>'}
@@ -754,6 +764,15 @@ async function drawTicket(id) {
     history.pushState(null, '', `/list/${encodeURIComponent(t.project)}`);
     await route();
   });
+  wireEditPanel(t);
+  if (said) {
+    main.querySelector('details.details').open = true;
+    const where = main.querySelector(said.field ? `.edit [data-note="${said.field}"]` : '.edit-note');
+    if (where) {
+      where.className = `note${said.error ? ' error' : ' quiet'}${said.field ? '' : ' edit-note'}`;
+      where.textContent = said.text;
+    }
+  }
   const form = main.querySelector('form.reply');
   const box = form.querySelector('textarea');
   // Arrived by a Reply icon: go straight to the box.
@@ -781,6 +800,86 @@ async function drawTicket(id) {
       note.textContent = `Not posted: ${err.message}`;
       button.disabled = false;
     }
+  });
+}
+
+/**
+ * The Change panel's controls (render.mjs renderEditPanel): selects save on
+ * change, tags on add or remove, name and description on Save. Each sends
+ * only its own field with `ifVersion: t.version`. A 409 means a loop moved
+ * the ticket: the page says so, draws it again as stored, and does not try
+ * again. Any other refusal shows the server's words beside the field and
+ * keeps what was typed.
+ */
+function wireEditPanel(t) {
+  const panel = main.querySelector('details.edit');
+  if (!panel) return;
+  const save = async (field, value, note, controls = []) => {
+    for (const c of controls) c.disabled = true;
+    note.className = 'note quiet';
+    note.textContent = 'Saving…';
+    try {
+      await api('PATCH', `/tickets/${encodeURIComponent(t.id)}`, { [field]: value, ifVersion: t.version });
+    } catch (err) {
+      if (err instanceof SignedOut) return drawSignIn(`You were signed out; the ${field} was not saved.`);
+      if (err instanceof Refused && err.status === 409) return drawTicket(t.id, { text: MOVED_MESSAGE, error: true });
+      note.className = 'note error';
+      note.textContent = `Not saved: ${err.message}`;
+      for (const c of controls) c.disabled = false;
+      return;
+    }
+    await drawTicket(t.id, { field, text: 'Saved' });
+  };
+  for (const select of panel.querySelectorAll('select[data-field]')) {
+    select.addEventListener('change', () => {
+      const { field } = select.dataset;
+      const value = field === 'assignee' ? (select.value ? Number(select.value) : null) : (select.value || null);
+      save(field, value, panel.querySelector(`[data-note="${field}"]`), [select]);
+    });
+  }
+  const tagNote = panel.querySelector('[data-note="tags"]');
+  const tagBox = panel.querySelector('#edit-tag');
+  tagBox.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    const tag = tagBox.value.trim();
+    if (!tag) return;
+    if (t.tags.includes(tag)) {
+      tagNote.className = 'note quiet';
+      tagNote.textContent = `${tag} is already a tag.`;
+      return;
+    }
+    save('tags', [...t.tags, tag], tagNote, [tagBox]);
+  });
+  for (const button of panel.querySelectorAll('button.remove-tag')) {
+    button.addEventListener('click', () => {
+      save('tags', t.tags.filter((tag) => tag !== button.dataset.tag), tagNote, [button]);
+    });
+  }
+  const nameForm = panel.querySelector('form.edit-name');
+  const nameBox = nameForm.querySelector('input#edit-name');
+  nameForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    // Exactly as typed, the same rule as the reply box.
+    if (nameBox) save('name', nameBox.value, nameForm.querySelector('[data-note="name"]'), [nameBox, nameForm.querySelector('button')]);
+  });
+  const descForm = panel.querySelector('form.edit-description');
+  const editor = descForm.querySelector('.editor');
+  const shown = main.querySelector('section.description');
+  const area = descForm.querySelector('textarea');
+  descForm.querySelector('.edit-open').addEventListener('click', () => {
+    editor.hidden = false;
+    shown.hidden = true;
+    area.focus();
+  });
+  descForm.querySelector('.edit-cancel').addEventListener('click', () => {
+    area.value = t.description ?? '';
+    editor.hidden = true;
+    shown.hidden = false;
+  });
+  descForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    save('description', area.value, descForm.querySelector('[data-note="description"]'), [...editor.querySelectorAll('button'), area]);
   });
 }
 
