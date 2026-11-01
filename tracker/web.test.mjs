@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { startServer } from './server.mjs';
 import { seedDemo, tickingClock } from './demoData.mjs';
-import { escapeHtml, renderComment, renderInline, renderMarkdown, renderQuickAction, renderCommands, cardCommands, cardAsk, renderMergeAction, mergeQuestion, renderCloseAction, closeQuestion, cardMove, renderTrail, cardContext, firstParagraph, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, bellColour, stageLook, stageLooks, contrast } from './web/render.mjs';
+import { escapeHtml, renderComment, renderInline, renderMarkdown, renderQuickAction, renderCommands, cardCommands, cardAsk, renderMergeAction, mergeQuestion, renderCloseAction, closeQuestion, cardMove, renderTrail, cardContext, firstParagraph, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, stageLook, stageLooks, contrast } from './web/render.mjs';
 import { loadProjectConfig } from '../lib/projectConfig.mjs';
 import operatorCard from '../lib/operatorCard.js';
 import machineComment from '../lib/machineComment.js';
@@ -1117,7 +1117,7 @@ test('clicking Merge and confirming posts exactly the merge phrase as Dane\'s ow
   assert.match(app, /wordButton\('form\.merge-action', mergeQuestion\(t\), t\.mergePhrase,/);
   assert.match(app, /wordButton\('form\.close-action', closeQuestion\(t\), t\.closePhrase,/);
   // Wired inside the ticket page's own drawing, where `t` is that ticket, not at module level.
-  const draw = /\nasync function drawTicket\(id\) \{[\s\S]*?\n\}\n/.exec(app)?.[0] ?? '';
+  const draw = /\nasync function drawTicket\(id(?:, said = null(?:, kept = null)?)?\) \{[\s\S]*?\n\}\n/.exec(app)?.[0] ?? '';
   assert.match(draw, /const wordButton = [\s\S]*wordButton\('form\.merge-action'[\s\S]*wordButton\('form\.close-action'/);
   assert.equal(app.match(/const wordButton = /g).length, 1);
   assert.match(app, /<div class="act">\s*(?:\$\{renderCommands\(t\)\}\s*)?\$\{renderMergeAction\(t\)\}\s*\$\{renderCloseAction\(t\)\}\s*<form class="reply">/, 'Merge and Close sit above the reply box on the right');
@@ -1242,4 +1242,120 @@ test('both Deletes confirm before any request, show a refusal on the page, and k
     assert.ok(handler.indexOf('confirm(') < handler.indexOf("api('DELETE'"), 'asks before it sends');
   }
   assert.match(app, /\$\{renderDeleteAction\(t\)\}\s*<\/div>/, 'Delete sits at the foot of Quick Action\'s right side');
+});
+
+test('the Change panel offers the server\'s priorities and person statuses, keeps the current status in view, and names the operator from the ticket', () => {
+  const choices = { priorities: ['urgent', 'high', 'normal', 'low'], statuses: ['requested', 'rework', 'queued', 'live'].map((v) => ({ value: v, label: v[0].toUpperCase() + v.slice(1) })) };
+  const operator = { id: 7, name: 'Pat <b>' };
+  const html = renderEditPanel({ name: 'A <name>', description: 'Line', status: 'in review', priority: 'high', tags: ['x"y'], assignee: operator, operator, pullRequest: null, choices });
+  const statusSelect = /<select id="edit-status"[^>]*>([\s\S]*?)<\/select>/.exec(html)[1];
+  const labels = [...statusSelect.matchAll(/>([^<]+)<\/option>/g)].map((m) => m[1]);
+  assert.deepEqual(labels, ['In review (now)', 'Requested', 'Rework', 'Queued', 'Live']);
+  assert.match(statusSelect, /<option value="in review" selected>/);
+  for (const never of ['Needs your input', 'Ready to launch', 'Building']) assert.ok(!statusSelect.includes(never), never);
+  // A status a person may choose is not doubled.
+  const queued = renderEditPanel({ name: 'n', status: 'queued', choices });
+  assert.equal(/<select id="edit-status"[^>]*>([\s\S]*?)<\/select>/.exec(queued)[1].match(/<option/g).length, 4);
+  assert.match(html, /<option value="high" selected>High<\/option>/);
+  assert.match(html, /<option value="7" selected>Pat &lt;b&gt;<\/option><option value="">Nobody<\/option>/);
+  assert.match(html, /value="A &lt;name&gt;"/);
+  assert.match(html, /data-tag="x&quot;y"/);
+  assert.match(html, /<details class="edit" open>/);
+  // No priority yet: "None" shows and is chosen; nobody assigned: Nobody is chosen.
+  const bare = renderEditPanel({ name: 'n', status: 'queued', priority: null, assignee: null, operator, choices });
+  assert.match(bare, /<option value="" selected>None<\/option>/);
+  assert.match(bare, /<option value="" selected>Nobody<\/option>/);
+});
+
+test('the name is locked, with the reason, once a pull request is recorded', () => {
+  const open = renderEditPanel({ name: 'n', status: 'queued', pullRequest: null });
+  assert.match(open, /<input id="edit-name" type="text" value="n" required>/);
+  const locked = renderEditPanel({ name: 'n', status: 'in review', pullRequest: 'https://github.com/o/r/pull/3' });
+  assert.ok(!/<input id="edit-name"/.test(locked));
+  assert.match(locked, /a pull request is recorded, and its title must match the name exactly/);
+});
+
+test('every Change panel field saves through the API and reads back; a stale version gets 409 and overwrites nothing; a refusal keeps nothing half-written', async () => {
+  const f = await fixture();
+  try {
+    const queued = f.store.listTickets('alpha', { status: 'queued' })[0];
+    const thread = (await f.call('GET', `/tickets/${queued.id}/thread`)).body;
+    assert.deepEqual(thread.operator, { id: f.operator.id, name: 'Dane' });
+    let version = thread.version;
+    const change = async (body) => {
+      const r = await f.call('PATCH', `/tickets/${queued.id}`, { body: { ...body, ifVersion: version } });
+      assert.equal(r.status, 200, JSON.stringify(r.body));
+      const back = (await f.call('GET', `/tickets/${queued.id}/thread`)).body;
+      version = back.version;
+      return back;
+    };
+    assert.equal((await change({ priority: 'low' })).priority, 'low');
+    assert.deepEqual((await change({ tags: [...thread.tags, 'try-me'] })).tags, [...thread.tags, 'try-me']);
+    assert.deepEqual((await change({ tags: thread.tags })).tags, thread.tags);
+    assert.equal((await change({ assignee: null })).assignee, null);
+    assert.equal((await change({ assignee: f.operator.id })).assignee.name, 'Dane');
+    assert.equal((await change({ status: 'rework' })).status, 'rework');
+    assert.equal((await change({ name: 'A new name' })).name, 'A new name');
+    assert.equal((await change({ description: 'One\n\nTwo' })).description, 'One\n\nTwo');
+    // A loop moves it; the page's next save carries the old version.
+    f.store.changeTicket(queued.id, { actor: f.loop.id, loopNote: 'a loop was here' });
+    const stale = await f.call('PATCH', `/tickets/${queued.id}`, { body: { priority: 'urgent', ifVersion: version } });
+    assert.equal(stale.status, 409);
+    assert.equal(f.store.getTicket(queued.id).priority, 'low', 'nothing was overwritten');
+    // A refusal says why.
+    const refused = await f.call('PATCH', `/tickets/${queued.id}`, { body: { name: '', ifVersion: version + 1 } });
+    assert.equal(refused.status, 400);
+    assert.ok(refused.body.message);
+    assert.equal(f.store.getTicket(queued.id).name, 'A new name');
+  } finally { await f.cleanup(); }
+});
+
+test('the page sends each change with ifVersion, redraws from the server after a save, says "has moved" without retrying, and keeps typed text on a refusal', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const wire = /function wireEditPanel\(t\) \{([\s\S]*?)\n\}/.exec(app)?.[1];
+  assert.ok(wire, 'the panel has its wiring');
+  assert.equal(wire.match(/api\('PATCH'/g).length, 1, 'one save path for every field');
+  assert.match(wire, /api\('PATCH', `\/tickets\/\$\{encodeURIComponent\(t\.id\)\}`, \{ \[field\]: value, ifVersion: t\.version \}\)/);
+  assert.match(wire, /err\.status === 409\) return redraw\(\{ text: MOVED_MESSAGE, error: true \}, typed\(\), note, /);
+  assert.match(wire, /note\.textContent = `Not saved: \$\{err\.message\}`;\s*for \(const c of held\) c\.disabled = false;\s*saving = false;\s*return;/, 'a refusal shows the reason, redraws nothing and frees the panel');
+  assert.match(wire, /await redraw\(\{ field, text: 'Saved' \}, typed\(field\), note, /);
+  assert.match(wire, /await drawTicket\(t\.id, said, kept\);/, 'the one redraw, carrying what was typed');
+  assert.match(app, /\$\{me\?\.kind === 'human' \? renderEditPanel\(t\) : ''\}\s*<section class="description">/, 'a person only, above the description');
+  assert.match(MOVED_MESSAGE, /nothing was overwritten/);
+  // Nothing project-specific: no operator name, priority or status list written into the page.
+  for (const literal of ["'Dane'", "'urgent'", "'needs your input'", "'ready to launch'"]) assert.ok(!wire.includes(literal), literal);
+});
+
+test('a save holds the whole panel until it answers, so two quick changes never share one version', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const wire = /function wireEditPanel\(t\) \{([\s\S]*?)\n\}/.exec(app)?.[1];
+  const save = wire.slice(wire.indexOf('const save = async'), wire.indexOf("for (const select of"));
+  assert.match(save, /if \(saving\) return;\s*saving = true;/, 'a second save while one is in flight does nothing');
+  assert.match(save, /panel\.querySelectorAll\('input, select, textarea, button'\)/, 'every control in the panel is held, not just the one changed');
+  // The flag only comes back down on a refusal; after a save the panel is drawn anew.
+  assert.equal(save.match(/saving = false/g).length, 1);
+});
+
+test('a save carries over what is typed elsewhere on the page: the reply box, an open description edit, an unsaved name or tag', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const wire = /function wireEditPanel\(t\) \{([\s\S]*?)\n\}/.exec(app)?.[1];
+  const typed = wire.slice(wire.indexOf('const typed ='), wire.indexOf('const redraw ='));
+  assert.match(typed, /reply: main\.querySelector\('form\.reply textarea'\)\?\.value/);
+  assert.match(typed, /description: field !== 'description' && !editor\.hidden \? area\.value : null/, 'an open edit is kept unless it is what was saved');
+  assert.match(typed, /name: field !== 'name' && nameBox && nameBox\.value !== t\.name \? nameBox\.value : null/);
+  assert.match(typed, /tag: field === 'tags' \? '' : tagBox\.value/);
+  const draw = /\nasync function drawTicket\(id, said = null, kept = null\) \{[\s\S]*?\n\}\n/.exec(app)?.[0] ?? '';
+  assert.match(draw, /const panel = wireEditPanel\(t\);\s*if \(kept\) \{\s*main\.querySelector\('form\.reply textarea'\)\.value = kept\.reply;\s*panel\?\.restore\(kept\);/);
+  assert.match(wire, /restore\(kept\) \{[\s\S]*area\.value = kept\.description;\s*openEditor\(\);/, 'the description edit opens again with its text');
+});
+
+test('a save whose redraw fails says what happened instead of sitting on "Saving…"', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const wire = /function wireEditPanel\(t\) \{([\s\S]*?)\n\}/.exec(app)?.[1];
+  const redraw = wire.slice(wire.indexOf('const redraw ='), wire.indexOf('let saving'));
+  assert.match(redraw, /try \{\s*await drawTicket\(t\.id, said, kept\);\s*\} catch \(err\) \{/);
+  assert.match(redraw, /if \(err instanceof SignedOut\) return drawSignIn\(/);
+  assert.match(redraw, /note\.textContent = `The page could not refresh \(\$\{err\.message\}\): \$\{outcome\}\. Reload to see the ticket as stored\.`/);
+  assert.match(wire, /`the \$\{field\} was saved`/);
+  assert.match(wire, /`the \$\{field\} was not saved`/);
 });

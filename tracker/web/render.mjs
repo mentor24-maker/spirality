@@ -525,3 +525,69 @@ export function renderDeleteAction({ status }) {
         <p class="quiet">Nobody has started this ticket yet, so it can still be deleted, with its comments.</p>
       </form>`;
 }
+
+/** A status or priority as the page writes it: "in review" -> "In review". */
+const capital = (s) => String(s ?? '').replace(/^./, (c) => c.toUpperCase());
+
+/** One <option>, chosen when `on`. */
+const option = (value, label, on) => `<option value="${escapeHtml(value)}"${on ? ' selected' : ''}>${escapeHtml(label)}</option>`;
+
+/**
+ * The ticket page's Change panel, as HTML: priority, tags, assignee, status,
+ * name and description, each with its own note for "Saving…", "Saved" or the
+ * server's refusal. The choices come from the server's thread answer
+ * (`choices`, `operator`); none is written here. The current status and
+ * assignee always show, even when a person could not choose them. The name
+ * is locked once a pull request is recorded: its title must match the name.
+ */
+export function renderEditPanel({ name, description, status, priority, tags = [], assignee, operator, pullRequest, choices = {} }) {
+  const statuses = choices.statuses ?? [];
+  const current = String(status ?? '').toLowerCase();
+  const statusOptions = [
+    ...(statuses.some((s) => s.value === current) ? [] : [{ value: current, label: capital(status), fixed: true }]),
+    ...statuses,
+  ].map((s) => option(s.value, s.fixed ? `${s.label} (now)` : s.label, s.value === current)).join('');
+  const priorityOptions = [
+    ...(priority == null ? [option('', 'None', true)] : []),
+    ...(choices.priorities ?? []).map((p) => option(p, capital(p), p === priority)),
+  ].join('');
+  const who = [
+    ...(operator ? [option(operator.id, operator.name, assignee?.id === operator.id)] : []),
+    ...(assignee && assignee.id !== operator?.id ? [option(assignee.id, `${assignee.name} (now)`, true)] : []),
+    option('', 'Nobody', assignee == null),
+  ].join('');
+  const chips = tags.map((tag) => `<span class="tag">${escapeHtml(tag)}<button type="button" class="remove-tag" data-tag="${escapeHtml(tag)}" title="Remove ${escapeHtml(tag)}" aria-label="Remove tag ${escapeHtml(tag)}">×</button></span>`).join('');
+  const nameField = pullRequest
+    ? `<p id="edit-name" class="locked">${escapeHtml(name)}</p>
+          <p class="quiet">The name cannot change now: a pull request is recorded, and its title must match the name exactly.</p>`
+    : `<div class="row"><input id="edit-name" type="text" value="${escapeHtml(name)}" required><button type="submit">Save</button></div>`;
+  return `<details class="edit" open>
+      <summary>Change this ticket</summary>
+      <p class="note edit-note" role="status"></p>
+      <form class="edit-fields">
+        <label for="edit-priority">Priority</label>
+        <div class="row"><select id="edit-priority" data-field="priority">${priorityOptions}</select><span class="note" data-note="priority"></span></div>
+        <label for="edit-tag">Tags</label>
+        <div class="row"><span class="tags">${chips || '<span class="quiet">none</span>'}</span><input id="edit-tag" type="text" placeholder="Add a tag, then Enter"><span class="note" data-note="tags"></span></div>
+        <label for="edit-assignee">Assigned to</label>
+        <div class="row"><select id="edit-assignee" data-field="assignee">${who}</select><span class="note" data-note="assignee"></span></div>
+        <label for="edit-status">Status</label>
+        <div class="row"><select id="edit-status" data-field="status">${statusOptions}</select><span class="note" data-note="status"></span></div>
+      </form>
+      <form class="edit-name">
+        <label for="edit-name">Name</label>
+        ${nameField}
+        <span class="note" data-note="name"></span>
+      </form>
+      <form class="edit-description">
+        <div class="row"><span class="label">Description</span><button type="button" class="edit-open">Edit</button><span class="note" data-note="description"></span></div>
+        <div class="editor" hidden>
+          <textarea id="edit-description">${escapeHtml(description ?? '')}</textarea>
+          <div class="row"><button type="submit">Save</button><button type="button" class="edit-cancel">Cancel</button></div>
+        </div>
+      </form>
+    </details>`;
+}
+
+/** What a save that found the ticket moved says: nothing was overwritten, and it is not tried again. */
+export const MOVED_MESSAGE = 'Not saved: this ticket changed while you were looking at it (a loop moved it, or another page saved first), so nothing was overwritten. The page now shows what is stored; make your change again if it still applies.';

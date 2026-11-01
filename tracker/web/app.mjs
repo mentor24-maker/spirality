@@ -1,6 +1,7 @@
 /**
  * Dane's page (docs/TRACKER_MVP.md, "Dane's page"): sign in, see what waits
- * on you, open a ticket, answer it, pick a project, see that project's
+ * on you, open a ticket, answer it, change its priority, tags, assignee,
+ * status, name or description (a person only), pick a project, see that project's
  * whole queue as a board or as a list, see one project's details, add,
  * change or delete a project (a person only), file a new request, copy a ticket into another
  * project, and choose a colour for each stage on the Settings page. Plain browser
@@ -15,7 +16,7 @@
  * holds. It is kept in this browser's local storage so a pinned tab stays
  * signed in, and sent only to this server. "Sign out" forgets it.
  */
-import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderDeleteAction, renderMarkdown, renderCloseAction, renderMergeAction, renderQuickAction, renderTrail, stageLooks, tabTitle, bellColour } from './render.mjs';
+import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, renderCloseAction, renderMergeAction, renderQuickAction, renderTrail, stageLooks, tabTitle, bellColour } from './render.mjs';
 
 const TOKEN_KEY = 'tracker-token';
 /** Board or list: the last one opened, so "Tasks" in the header opens it again. */
@@ -617,7 +618,16 @@ async function copyText(text, button) {
   }
 }
 
-async function drawTicket(id) {
+/**
+ * One ticket. A person signed in also gets the Change panel above the
+ * description: each change is sent on its own with the ticket's version as
+ * `ifVersion`, and the page is then drawn again from the server, so what it
+ * shows is what was stored. `said` is a line to show after that redraw:
+ * `{ field, text, error }`, `field` naming the note it goes in (none: the
+ * panel's own note at its top). `kept` is what was typed and not saved
+ * when a save redrew the page (wireEditPanel's `typed`), put back as it was.
+ */
+async function drawTicket(id, said = null, kept = null) {
   const [t, { projects }] = await Promise.all([
     api('GET', `/tickets/${encodeURIComponent(id)}/thread`),
     api('GET', '/projects'),
@@ -655,6 +665,7 @@ async function drawTicket(id) {
         <span>${escapeHtml(statusName(t.status))}</span>
         <span>${t.assignee ? `assigned to ${escapeHtml(t.assignee.name)}` : 'not assigned'}</span>
       </p>
+      ${me?.kind === 'human' ? renderEditPanel(t) : ''}
       <section class="description">${renderMarkdown(t.description) || '<p class="quiet">No description.</p>'}</section>
       <h2>Comments</h2>
       ${comments || '<p class="quiet">No comments yet.</p>'}
@@ -754,6 +765,19 @@ async function drawTicket(id) {
     history.pushState(null, '', `/list/${encodeURIComponent(t.project)}`);
     await route();
   });
+  const panel = wireEditPanel(t);
+  if (kept) {
+    main.querySelector('form.reply textarea').value = kept.reply;
+    panel?.restore(kept);
+  }
+  if (said) {
+    main.querySelector('details.details').open = true;
+    const where = main.querySelector(said.field ? `.edit [data-note="${said.field}"]` : '.edit-note');
+    if (where) {
+      where.className = `note${said.error ? ' error' : ' quiet'}${said.field ? '' : ' edit-note'}`;
+      where.textContent = said.text;
+    }
+  }
   const form = main.querySelector('form.reply');
   const box = form.querySelector('textarea');
   // Arrived by a Reply icon: go straight to the box.
@@ -782,6 +806,127 @@ async function drawTicket(id) {
       button.disabled = false;
     }
   });
+}
+
+/**
+ * The Change panel's controls (render.mjs renderEditPanel): selects save on
+ * change, tags on add or remove, name and description on Save. Each sends
+ * only its own field with `ifVersion: t.version`. One save at a time: the
+ * whole panel is held while a save is in flight, so two quick changes never
+ * both carry the same version and the second never reads as "has moved". A
+ * 409 means a loop moved the ticket: the page says so, draws it again as
+ * stored, and does not try again. Any other refusal shows the server's words
+ * beside the field and keeps what was typed. Every redraw carries over what
+ * is typed elsewhere on the page (the reply box, an open description edit,
+ * an unsaved name or tag), so a save never wipes it.
+ */
+function wireEditPanel(t) {
+  const panel = main.querySelector('details.edit');
+  if (!panel) return;
+  const descForm = panel.querySelector('form.edit-description');
+  const editor = descForm.querySelector('.editor');
+  const area = descForm.querySelector('textarea');
+  const nameBox = panel.querySelector('input#edit-name');
+  const tagBox = panel.querySelector('#edit-tag');
+  // What is typed and not yet saved, except the field this save sends.
+  const typed = (field) => ({
+    reply: main.querySelector('form.reply textarea')?.value ?? '',
+    tag: field === 'tags' ? '' : tagBox.value,
+    name: field !== 'name' && nameBox && nameBox.value !== t.name ? nameBox.value : null,
+    description: field !== 'description' && !editor.hidden ? area.value : null,
+  });
+  // Draw the ticket again; if that fails the save already happened (or was
+  // refused), so say which, and leave the panel held: it shows an old version.
+  const redraw = async (said, kept, note, outcome) => {
+    try {
+      await drawTicket(t.id, said, kept);
+    } catch (err) {
+      if (err instanceof SignedOut) return drawSignIn(`You were signed out; ${outcome}, but the page could not show it.`);
+      note.className = 'note error';
+      note.textContent = `The page could not refresh (${err.message}): ${outcome}. Reload to see the ticket as stored.`;
+    }
+  };
+  let saving = false;
+  const save = async (field, value, note) => {
+    if (saving) return;
+    saving = true;
+    const held = [...panel.querySelectorAll('input, select, textarea, button')].filter((c) => !c.disabled);
+    for (const c of held) c.disabled = true;
+    note.className = 'note quiet';
+    note.textContent = 'Saving…';
+    try {
+      await api('PATCH', `/tickets/${encodeURIComponent(t.id)}`, { [field]: value, ifVersion: t.version });
+    } catch (err) {
+      if (err instanceof SignedOut) return drawSignIn(`You were signed out; the ${field} was not saved.`);
+      if (err instanceof Refused && err.status === 409) return redraw({ text: MOVED_MESSAGE, error: true }, typed(), note, `the ${field} was not saved`);
+      note.className = 'note error';
+      note.textContent = `Not saved: ${err.message}`;
+      for (const c of held) c.disabled = false;
+      saving = false;
+      return;
+    }
+    await redraw({ field, text: 'Saved' }, typed(field), note, `the ${field} was saved`);
+  };
+  for (const select of panel.querySelectorAll('select[data-field]')) {
+    select.addEventListener('change', () => {
+      const { field } = select.dataset;
+      const value = field === 'assignee' ? (select.value ? Number(select.value) : null) : (select.value || null);
+      save(field, value, panel.querySelector(`[data-note="${field}"]`));
+    });
+  }
+  const tagNote = panel.querySelector('[data-note="tags"]');
+  tagBox.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    const tag = tagBox.value.trim();
+    if (!tag) return;
+    if (t.tags.includes(tag)) {
+      tagNote.className = 'note quiet';
+      tagNote.textContent = `${tag} is already a tag.`;
+      return;
+    }
+    save('tags', [...t.tags, tag], tagNote);
+  });
+  for (const button of panel.querySelectorAll('button.remove-tag')) {
+    button.addEventListener('click', () => {
+      save('tags', t.tags.filter((tag) => tag !== button.dataset.tag), tagNote);
+    });
+  }
+  const nameForm = panel.querySelector('form.edit-name');
+  nameForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    // Exactly as typed, the same rule as the reply box.
+    if (nameBox) save('name', nameBox.value, nameForm.querySelector('[data-note="name"]'));
+  });
+  const shown = main.querySelector('section.description');
+  const openEditor = () => {
+    editor.hidden = false;
+    shown.hidden = true;
+  };
+  descForm.querySelector('.edit-open').addEventListener('click', () => {
+    openEditor();
+    area.focus();
+  });
+  descForm.querySelector('.edit-cancel').addEventListener('click', () => {
+    area.value = t.description ?? '';
+    editor.hidden = true;
+    shown.hidden = false;
+  });
+  descForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    save('description', area.value, descForm.querySelector('[data-note="description"]'));
+  });
+  return {
+    // Put back what `typed` kept from the page before this redraw.
+    restore(kept) {
+      tagBox.value = kept.tag;
+      if (kept.name != null && nameBox) nameBox.value = kept.name;
+      if (kept.description != null) {
+        area.value = kept.description;
+        openEditor();
+      }
+    },
+  };
 }
 
 /** The draft kept for the New request form, or empty fields. */
