@@ -19,3 +19,11 @@ nobody, because the assignee is the loop's "whose turn is it" signal. The
 tracker itself now refuses any other assignee from a person. Once a pull
 request exists, the name is locked: the pull request's title has to match it
 exactly.
+
+After the first review, three rough edges were smoothed. Saving a change no
+longer wipes anything he was halfway through typing elsewhere on the page: a
+reply, a description edit, a new name or tag all stay as they were. While
+one change is saving, the whole panel waits, so two quick clicks can no
+longer trip over each other and falsely report that a loop moved the
+ticket. And if the change was stored but the page could not refresh
+afterwards, it now says exactly that instead of sitting on "Saving…".

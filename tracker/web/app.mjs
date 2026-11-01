@@ -624,9 +624,10 @@ async function copyText(text, button) {
  * `ifVersion`, and the page is then drawn again from the server, so what it
  * shows is what was stored. `said` is a line to show after that redraw:
  * `{ field, text, error }`, `field` naming the note it goes in (none: the
- * panel's own note at its top).
+ * panel's own note at its top). `kept` is what was typed and not saved
+ * when a save redrew the page (wireEditPanel's `typed`), put back as it was.
  */
-async function drawTicket(id, said = null) {
+async function drawTicket(id, said = null, kept = null) {
   const [t, { projects }] = await Promise.all([
     api('GET', `/tickets/${encodeURIComponent(id)}/thread`),
     api('GET', '/projects'),
@@ -764,7 +765,11 @@ async function drawTicket(id, said = null) {
     history.pushState(null, '', `/list/${encodeURIComponent(t.project)}`);
     await route();
   });
-  wireEditPanel(t);
+  const panel = wireEditPanel(t);
+  if (kept) {
+    main.querySelector('form.reply textarea').value = kept.reply;
+    panel?.restore(kept);
+  }
   if (said) {
     main.querySelector('details.details').open = true;
     const where = main.querySelector(said.field ? `.edit [data-note="${said.field}"]` : '.edit-note');
@@ -806,39 +811,70 @@ async function drawTicket(id, said = null) {
 /**
  * The Change panel's controls (render.mjs renderEditPanel): selects save on
  * change, tags on add or remove, name and description on Save. Each sends
- * only its own field with `ifVersion: t.version`. A 409 means a loop moved
- * the ticket: the page says so, draws it again as stored, and does not try
- * again. Any other refusal shows the server's words beside the field and
- * keeps what was typed.
+ * only its own field with `ifVersion: t.version`. One save at a time: the
+ * whole panel is held while a save is in flight, so two quick changes never
+ * both carry the same version and the second never reads as "has moved". A
+ * 409 means a loop moved the ticket: the page says so, draws it again as
+ * stored, and does not try again. Any other refusal shows the server's words
+ * beside the field and keeps what was typed. Every redraw carries over what
+ * is typed elsewhere on the page (the reply box, an open description edit,
+ * an unsaved name or tag), so a save never wipes it.
  */
 function wireEditPanel(t) {
   const panel = main.querySelector('details.edit');
   if (!panel) return;
-  const save = async (field, value, note, controls = []) => {
-    for (const c of controls) c.disabled = true;
+  const descForm = panel.querySelector('form.edit-description');
+  const editor = descForm.querySelector('.editor');
+  const area = descForm.querySelector('textarea');
+  const nameBox = panel.querySelector('input#edit-name');
+  const tagBox = panel.querySelector('#edit-tag');
+  // What is typed and not yet saved, except the field this save sends.
+  const typed = (field) => ({
+    reply: main.querySelector('form.reply textarea')?.value ?? '',
+    tag: field === 'tags' ? '' : tagBox.value,
+    name: field !== 'name' && nameBox && nameBox.value !== t.name ? nameBox.value : null,
+    description: field !== 'description' && !editor.hidden ? area.value : null,
+  });
+  // Draw the ticket again; if that fails the save already happened (or was
+  // refused), so say which, and leave the panel held: it shows an old version.
+  const redraw = async (said, kept, note, outcome) => {
+    try {
+      await drawTicket(t.id, said, kept);
+    } catch (err) {
+      if (err instanceof SignedOut) return drawSignIn(`You were signed out; ${outcome}, but the page could not show it.`);
+      note.className = 'note error';
+      note.textContent = `The page could not refresh (${err.message}): ${outcome}. Reload to see the ticket as stored.`;
+    }
+  };
+  let saving = false;
+  const save = async (field, value, note) => {
+    if (saving) return;
+    saving = true;
+    const held = [...panel.querySelectorAll('input, select, textarea, button')].filter((c) => !c.disabled);
+    for (const c of held) c.disabled = true;
     note.className = 'note quiet';
     note.textContent = 'Saving…';
     try {
       await api('PATCH', `/tickets/${encodeURIComponent(t.id)}`, { [field]: value, ifVersion: t.version });
     } catch (err) {
       if (err instanceof SignedOut) return drawSignIn(`You were signed out; the ${field} was not saved.`);
-      if (err instanceof Refused && err.status === 409) return drawTicket(t.id, { text: MOVED_MESSAGE, error: true });
+      if (err instanceof Refused && err.status === 409) return redraw({ text: MOVED_MESSAGE, error: true }, typed(), note, `the ${field} was not saved`);
       note.className = 'note error';
       note.textContent = `Not saved: ${err.message}`;
-      for (const c of controls) c.disabled = false;
+      for (const c of held) c.disabled = false;
+      saving = false;
       return;
     }
-    await drawTicket(t.id, { field, text: 'Saved' });
+    await redraw({ field, text: 'Saved' }, typed(field), note, `the ${field} was saved`);
   };
   for (const select of panel.querySelectorAll('select[data-field]')) {
     select.addEventListener('change', () => {
       const { field } = select.dataset;
       const value = field === 'assignee' ? (select.value ? Number(select.value) : null) : (select.value || null);
-      save(field, value, panel.querySelector(`[data-note="${field}"]`), [select]);
+      save(field, value, panel.querySelector(`[data-note="${field}"]`));
     });
   }
   const tagNote = panel.querySelector('[data-note="tags"]');
-  const tagBox = panel.querySelector('#edit-tag');
   tagBox.addEventListener('keydown', (e) => {
     if (e.key !== 'Enter') return;
     e.preventDefault();
@@ -849,27 +885,26 @@ function wireEditPanel(t) {
       tagNote.textContent = `${tag} is already a tag.`;
       return;
     }
-    save('tags', [...t.tags, tag], tagNote, [tagBox]);
+    save('tags', [...t.tags, tag], tagNote);
   });
   for (const button of panel.querySelectorAll('button.remove-tag')) {
     button.addEventListener('click', () => {
-      save('tags', t.tags.filter((tag) => tag !== button.dataset.tag), tagNote, [button]);
+      save('tags', t.tags.filter((tag) => tag !== button.dataset.tag), tagNote);
     });
   }
   const nameForm = panel.querySelector('form.edit-name');
-  const nameBox = nameForm.querySelector('input#edit-name');
   nameForm.addEventListener('submit', (e) => {
     e.preventDefault();
     // Exactly as typed, the same rule as the reply box.
-    if (nameBox) save('name', nameBox.value, nameForm.querySelector('[data-note="name"]'), [nameBox, nameForm.querySelector('button')]);
+    if (nameBox) save('name', nameBox.value, nameForm.querySelector('[data-note="name"]'));
   });
-  const descForm = panel.querySelector('form.edit-description');
-  const editor = descForm.querySelector('.editor');
   const shown = main.querySelector('section.description');
-  const area = descForm.querySelector('textarea');
-  descForm.querySelector('.edit-open').addEventListener('click', () => {
+  const openEditor = () => {
     editor.hidden = false;
     shown.hidden = true;
+  };
+  descForm.querySelector('.edit-open').addEventListener('click', () => {
+    openEditor();
     area.focus();
   });
   descForm.querySelector('.edit-cancel').addEventListener('click', () => {
@@ -879,8 +914,19 @@ function wireEditPanel(t) {
   });
   descForm.addEventListener('submit', (e) => {
     e.preventDefault();
-    save('description', area.value, descForm.querySelector('[data-note="description"]'), [...editor.querySelectorAll('button'), area]);
+    save('description', area.value, descForm.querySelector('[data-note="description"]'));
   });
+  return {
+    // Put back what `typed` kept from the page before this redraw.
+    restore(kept) {
+      tagBox.value = kept.tag;
+      if (kept.name != null && nameBox) nameBox.value = kept.name;
+      if (kept.description != null) {
+        area.value = kept.description;
+        openEditor();
+      }
+    },
+  };
 }
 
 /** The draft kept for the New request form, or empty fields. */
