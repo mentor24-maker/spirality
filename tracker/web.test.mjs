@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { startServer } from './server.mjs';
 import { seedDemo, tickingClock } from './demoData.mjs';
-import { escapeHtml, renderComment, renderInline, renderMarkdown, renderQuickAction, renderCommands, cardCommands, cardAsk, renderMergeAction, mergeQuestion, renderTrail, cardContext, firstParagraph, stageLook, stageLooks, contrast } from './web/render.mjs';
+import { escapeHtml, renderComment, renderInline, renderMarkdown, renderQuickAction, renderCommands, cardCommands, cardAsk, renderMergeAction, mergeQuestion, renderTrail, cardContext, firstParagraph, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, bellColour, stageLook, stageLooks, contrast } from './web/render.mjs';
 import { loadProjectConfig } from '../lib/projectConfig.mjs';
 import operatorCard from '../lib/operatorCard.js';
 import machineComment from '../lib/machineComment.js';
@@ -524,6 +524,40 @@ test('the Settings page is in the header after New request, lists the stages the
   } finally { await f.cleanup(); }
 });
 
+test('bellColour: grey while nothing waits, yellow for 1 to 3, red for more than 3', () => {
+  assert.equal(bellColour(0), 'grey');
+  assert.equal(bellColour(1), 'yellow');
+  assert.equal(bellColour(2), 'yellow');
+  assert.equal(bellColour(3), 'yellow');
+  assert.equal(bellColour(4), 'red');
+  assert.equal(bellColour(12), 'red');
+  assert.equal(bellColour(null), 'grey');
+  assert.equal(bellColour(undefined), 'grey');
+});
+
+test('Waiting on you is a bell on the right, just before "Signed in as", coloured from the count wherever it is read', () => {
+  const html = readFileSync(WEB('index.html'), 'utf8');
+  const nav = /<nav class="site">([\s\S]*?)<\/nav>/.exec(html)[1];
+  assert.deepEqual([...nav.matchAll(/>([^<]+)<\/a>/g)].map((m) => m[1]), ['Projects', 'Tasks', 'New request', 'Settings']);
+  assert.doesNotMatch(nav, /Waiting on you/);
+  const me = /<span class="me">([\s\S]*?)<\/span>\s*<\/header>/.exec(html)[1];
+  assert.match(me, /<a id="bell" href="\/" title="Waiting on you" aria-label="Waiting on you" data-colour="grey" hidden><svg [^>]*aria-hidden="true">[\s\S]*?<\/svg><\/a>\s*<span id="who"><\/span>/);
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  assert.match(app, /function showBell\(\) \{\s*bell\.dataset\.colour = bellColour\(waitingCount\);\s*\}/);
+  // Every place the count is read colours the bell: the one-minute refresh and the Waiting on you page.
+  const refresh = /async function refreshCount\(\) \{[\s\S]*?\n\}/.exec(app)[0];
+  assert.match(refresh, /catch \(err\) \{[\s\S]*?return;\s*\}\s*document\.title = tabTitle\(waitingCount, pageTitle\);\s*showBell\(\);/, 'a failed read leaves the colour alone');
+  assert.match(/async function drawWaiting\(\) \{[\s\S]*?\n\}/.exec(app)[0], /waitingCount = waiting\.length;\s*showBell\(\);/);
+  assert.match(app, /setInterval\(refreshCount, COUNT_EVERY_MS\);/);
+  // Hidden while signed out, shown once signed in, and marked current on its own page.
+  assert.match(/function drawSignIn[\s\S]*?\n\}/.exec(app)[0], /bell\.hidden = true;/);
+  assert.match(/async function route\(\) \{[\s\S]*?\n\}/.exec(app)[0], /signOut\.hidden = false;\s*bell\.hidden = false;/);
+  assert.match(app, /bell\.classList\.toggle\('current', which === 'waiting'\);/);
+  const css = readFileSync(WEB('app.css'), 'utf8');
+  for (const colour of ['grey', 'yellow', 'red']) assert.match(css, new RegExp(`header #bell\\[data-colour="${colour}"\\] \\{ color: #`));
+  assert.match(css, /header #bell\[hidden\] \{ display: none; \}/, 'display: flex must not undo hidden');
+});
+
 test('the page has no inline script or style, so its lock does not have to be loosened', () => {
   const html = readFileSync(WEB('index.html'), 'utf8');
   assert.doesNotMatch(html, /<script(?![^>]*\bsrc=)[^>]*>/);
@@ -856,6 +890,88 @@ test('the New project button and form are a person\'s only; a refused save keeps
   assert.match(app, /<dt>Owner<\/dt><dd>\$\{p\.owner \? escapeHtml\(p\.owner\.name\)/);
 });
 
+// ── Editing and deleting a project ───────────────────────────────────────────
+
+test('a project edited from the page shows its new name, web address, logo and owner on the table and its details page', async () => {
+  const f = await fixture();
+  try {
+    await f.call('POST', '/projects', { body: { name: 'Try me', slug: 'try-me', prefix: 'TRY' } });
+    const saved = await f.call('PATCH', '/projects/try-me', {
+      body: { name: 'Tried', url: 'https://tried.example', logo: 'https://tried.example/l.png', owner: f.operator.id },
+    });
+    assert.equal(saved.status, 200);
+    const row = (await f.call('GET', '/projects')).body.projects.find((p) => p.slug === 'try-me');
+    assert.deepEqual(row, {
+      slug: 'try-me', name: 'Tried', prefix: 'TRY', url: 'https://tried.example', logo: 'https://tried.example/l.png',
+      owner: { id: f.operator.id, name: 'Dane' }, open: 0,
+    });
+    const details = (await f.call('GET', '/projects/try-me')).body;
+    assert.deepEqual([details.name, details.url, details.logo, details.owner], [row.name, row.url, row.logo, row.owner]);
+  } finally { await f.cleanup(); }
+});
+
+test('a project deleted from the page is gone; the demo\'s own project, which has tickets, is refused and stays', async () => {
+  const f = await fixture();
+  try {
+    await f.call('POST', '/projects', { body: { name: 'Try me', slug: 'try-me', prefix: 'TRY' } });
+    assert.equal((await f.call('DELETE', '/projects/try-me')).status, 200);
+    assert.ok(!(await f.call('GET', '/projects')).body.projects.some((p) => p.slug === 'try-me'));
+    const before = (await f.call('GET', '/projects')).body.projects;
+    const full = before.find((p) => p.open > 0);
+    const refused = await f.call('DELETE', `/projects/${full.slug}`);
+    assert.equal(refused.status, 409);
+    assert.match(refused.body.message, /^[A-Z][A-Z0-9]* has \d+ tickets?; a project with tickets cannot be deleted\.$/);
+    assert.deepEqual((await f.call('GET', '/projects')).body.projects, before);
+    // The loop's sign-in can do neither, and nothing changes.
+    const loop = f.store.issueToken(f.loop.id);
+    await f.call('POST', '/projects', { body: { name: 'Empty', slug: 'empty', prefix: 'EM' } });
+    const now = (await f.call('GET', '/projects')).body.projects;
+    assert.equal((await f.call('PATCH', '/projects/empty', { token: loop, body: { name: 'x' } })).status, 403);
+    assert.equal((await f.call('DELETE', '/projects/empty', { token: loop })).status, 403);
+    assert.deepEqual((await f.call('GET', '/projects')).body.projects, now);
+  } finally { await f.cleanup(); }
+});
+
+test('the Projects table gives a person Edit and Delete on every row and a loop\'s sign-in neither; Delete asks first and a refusal says so', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const table = app.slice(app.indexOf('async function drawProjects'), app.indexOf('/**', app.indexOf('async function drawProjects')));
+  // Both icons are drawn only for a person; otherwise the cell holds the View icon alone.
+  assert.match(table, /const people = me\?\.kind === 'human';/);
+  assert.match(table, /\$\{people\n\s+\? action\(`\/projects\/\$\{encodeURIComponent\(p\.slug\)\}\/edit`, 'Edit project', ICONS\.edit\)\n\s+\+ actionButton\('Delete project', ICONS\.delete, \{ delete: p\.slug, name: p\.name \}\)\n\s+: ''\}/);
+  assert.equal((table.match(/ICONS\.edit/g) ?? []).length, 1, 'Edit is drawn in one place, behind the person check');
+  assert.equal((table.match(/ICONS\.delete/g) ?? []).length, 1, 'Delete is drawn in one place, behind the person check');
+  // Delete asks, by name, before anything is sent.
+  const click = table.slice(table.indexOf("addEventListener('click'"));
+  assert.ok(click.indexOf('if (!confirm(`Delete ${name}?`)) return;') < click.indexOf("api('DELETE'"), 'it asks before it deletes');
+  assert.match(click, /api\('DELETE', `\/projects\/\$\{encodeURIComponent\(slug\)\}`\)/);
+  // A refusal shows the server's own words and returns before any success line.
+  assert.match(click, /note\.className = 'note error';\n\s+note\.textContent = `Not deleted: \$\{err\.message\}`;\n\s+button\.disabled = false;\n\s+return;/);
+  assert.ok(click.indexOf('Not deleted:') < click.indexOf('Deleted ${name}.'), 'the success line is only reached after the call succeeded');
+  // A deleted project is gone because the server's table says so: the table is read again.
+  assert.match(click, /await drawProjects\(`Deleted \$\{name\}\.`\)/);
+  assert.match(click, /localStorage\.removeItem\(PROJECT_KEY\)/);
+  // Every name reaches the button's attributes escaped.
+  assert.match(app, /Object\.entries\(data\)\.map\(\(\[k, v\]\) => ` data-\$\{k\}="\$\{escapeHtml\(v\)\}"`\)/);
+});
+
+test('the Edit project form is a person\'s only, filled in, with the slug and prefix shown but locked; a refused save keeps what was typed and says why', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const form = app.slice(app.indexOf('async function drawEditProject'), app.indexOf('/**', app.indexOf('async function drawEditProject')));
+  assert.match(form, /if \(me\?\.kind !== 'human'\)[\s\S]{0,200}Only a person signed in to the tracker can change a project\./);
+  assert.match(form, /p = await api\('GET', `\/projects\/\$\{encodeURIComponent\(slug\)\}`\)/);
+  assert.match(form, /const filled = \(v\) => ` value="\$\{escapeHtml\(v \?\? ''\)\}"`;/);
+  for (const id of ['name', 'url', 'logo']) assert.match(form, new RegExp(`field\\('${id}',[^\\n]*filled\\(p\\.${id}\\)`), id);
+  for (const id of ['slug', 'prefix']) assert.match(form, new RegExp(`field\\('${id}',[^\\n]* disabled\\$\\{filled\\(p\\.${id}\\)\\}`), id);
+  assert.match(form, /o\.id === p\.owner\?\.id \? ' selected' : ''/);
+  // The change names only what may change; never the slug or prefix.
+  assert.match(form, /api\('PATCH', `\/projects\/\$\{encodeURIComponent\(p\.slug\)\}`, \{\n\s+name: value\('name'\), url: value\('url'\), logo: value\('logo'\), owner: value\('owner'\) \? Number\(value\('owner'\)\) : null,\n\s+\}\)/);
+  assert.match(form, /note\.textContent = `Not saved: \$\{err\.message\}`;/);
+  assert.ok(!/main\.innerHTML/.test(form.slice(form.indexOf("addEventListener('submit'"))), 'a refused save never redraws the form, so nothing typed is lost');
+  // Saving opens the details page, which reads the project back from the server.
+  assert.match(form, /history\.pushState\(null, '', `\/projects\/\$\{encodeURIComponent\(saved\.slug\)\}`\);\n\s+await route\(\);/);
+  assert.match(app, /const editProject = \/\^\\\/projects\\\/\(\[\^\/\]\+\)\\\/edit\$\/\.exec\(location\.pathname\);/);
+});
+
 // ── Quick Action's Merge button ──────────────────────────────────────────────
 
 test('only a Ready to launch ticket gets the Merge button, and only when the server named a merge phrase', () => {
@@ -967,4 +1083,70 @@ test('the Tasks page reads the stage colours with the board, puts them on as pro
   assert.doesNotMatch(draw, /'Queued'|'Requested'|'Building'/, 'the stages come from the board, never typed out');
   const css = readFileSync(WEB('app.css'), 'utf8');
   for (const prop of ['--stage-border', '--stage-tint', '--stage-text']) assert.match(css, new RegExp(`var\\(${prop}\\)`), prop);
+});
+
+// ── Deleting a ticket nobody has started ─────────────────────────────────────
+
+test('Delete is offered only for Requested and Queued, in either spelling of the status', () => {
+  for (const name of loopStatuses.STAGE_ORDER) {
+    const unstarted = name === 'Requested' || name === 'Queued';
+    for (const status of [name, loopStatuses.statusOf(name)]) {
+      assert.equal(canDelete(status), unstarted, status);
+      if (unstarted) assert.match(renderDeleteAction({ status }), /<form class="delete-action">\s*<button type="submit">Delete<\/button>/, status);
+      else assert.equal(renderDeleteAction({ status }), '', status);
+    }
+  }
+  assert.equal(canDelete(undefined), false);
+});
+
+test('Delete asks once, naming the ticket by id and exact name, and says a refusal in plain words', () => {
+  assert.equal(deleteQuestion({ id: 'SP-12', name: 'Fix "it" now' }), 'Delete SP-12 "Fix "it" now"? This cannot be undone.');
+  assert.match(deleteRefusal('AL-3', { status: 409, message: 'ticket AL-3 is "building"' }), /^Not deleted: AL-3 has been started since this page was drawn, so it stays\./);
+  assert.match(deleteRefusal('AL-3', { status: 404, message: 'no ticket AL-3.' }), /^Not deleted: AL-3 is no longer in the tracker\./);
+  assert.equal(deleteRefusal('AL-3', { status: 500, message: 'the disk is full.' }), 'Not deleted: the disk is full.');
+});
+
+test('the list draws the bin on exactly the board\'s Requested and Queued rows, and the page\'s delete call removes one', async () => {
+  const f = await fixture();
+  try {
+    const { columns } = (await f.call('GET', '/projects/alpha/board')).body;
+    const deletable = columns.filter((c) => canDelete(c.status)).flatMap((c) => c.tickets);
+    assert.ok(deletable.length >= 1, 'the test data has an unstarted ticket');
+    assert.ok(columns.some((c) => !canDelete(c.status) && c.tickets.length), 'and a started one');
+    const target = deletable[0];
+    const r = await f.call('DELETE', `/tickets/${target.id}`);
+    assert.equal(r.status, 200);
+    const after = (await f.call('GET', '/projects/alpha/board')).body.columns.flatMap((c) => c.tickets);
+    assert.ok(!after.some((t) => t.id === target.id), 'redrawn from the server, the row is gone');
+    // A started ticket is refused, and stays.
+    const started = columns.find((c) => c.status === 'Building').tickets[0];
+    const refused = await f.call('DELETE', `/tickets/${started.id}`);
+    assert.equal(refused.status, 409);
+    assert.ok(f.store.getTicket(started.id));
+  } finally { await f.cleanup(); }
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  assert.match(app, /canDelete\(status\) \? actionButton\('Delete ticket', ICONS\.delete, \{ delete: t\.id \}\) : ''/);
+  assert.match(app, /c\.tickets\.map\(row\(c\.status\)\)/);
+  // No bin on the board's cards.
+  const card = /const card = \(t\) => `([\s\S]*?)`;/.exec(app)[1];
+  assert.doesNotMatch(card, /delete/i);
+});
+
+test('both Deletes confirm before any request, show a refusal on the page, and keep the ticket in view', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const listHandler = /button\.addEventListener\('click', async \(\) => \{\s*const id = button\.dataset\.delete;([\s\S]*?)\n    \}\);/.exec(app)?.[1];
+  assert.ok(listHandler, 'the bin has a click handler');
+  assert.match(listHandler, /^\s*if \(!confirm\(deleteQuestion\(\{ id, name: names\.get\(id\) \}\)\)\) return;/);
+  assert.match(listHandler, /catch \(err\) \{[\s\S]*listNote\.textContent = deleteRefusal\(id, err\);\s*listNote\.hidden = false;\s*button\.disabled = false;\s*return;/);
+  assert.match(listHandler, /\}\s*await drawProject\(slug, view\);$/, 'only a delete that succeeded redraws the list');
+  const pageHandler = /deleteForm\?\.addEventListener\('submit', async \(e\) => \{([\s\S]*?)\n  \}\);/.exec(app)?.[1];
+  assert.ok(pageHandler, 'the Delete button has a submit handler');
+  assert.match(pageHandler, /^\s*e\.preventDefault\(\);\s*if \(!confirm\(deleteQuestion\(t\)\)\) return;/);
+  assert.match(pageHandler, /catch \(err\) \{[\s\S]*deleteNote\.className = 'note error';\s*deleteNote\.textContent = deleteRefusal\(t\.id, err\);\s*button\.disabled = false;\s*return;/);
+  assert.match(pageHandler, /history\.pushState\(null, '', `\/list\/\$\{encodeURIComponent\(t\.project\)\}`\);\s*await route\(\);$/);
+  for (const handler of [listHandler, pageHandler]) {
+    assert.equal(handler.match(/api\('DELETE', `\/tickets\/\$\{encodeURIComponent\((?:id|t\.id)\)\}`\)/g)?.length, 1);
+    assert.ok(handler.indexOf('confirm(') < handler.indexOf("api('DELETE'"), 'asks before it sends');
+  }
+  assert.match(app, /\$\{renderDeleteAction\(t\)\}\s*<\/div>/, 'Delete sits at the foot of Quick Action\'s right side');
 });

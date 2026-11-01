@@ -144,6 +144,8 @@ text programs read).
 | `GET /tickets/:id/thread` | for Dane's page: the ticket with each comment's author named and machine comments marked |
 | `GET /projects` | for Dane's page: every project with its slug, name, ticket prefix and open count, and the project the New request form starts on |
 | `POST /projects` | for Dane's page: add a project (`{ name, slug, prefix, url?, logo?, owner? }`), answered with its details read back; **a person's token only**: a machine's gets 403 and nothing is written. A duplicate slug or prefix, a slug that is not small letters, digits and hyphens (or is `new`), an owner who is not a person, or an address that is not http(s) gets 400 |
+| `PATCH /projects/:slug` | for Dane's page: change a project's name, web address, logo or owner (`{ name?, url?, logo?, owner? }`), answered with its details read back; **a person's token only**: a machine's gets 403 and nothing is written. The slug and ticket prefix never change (every ticket's id and its project link are built from them): naming either gets 400 `not-changeable`; an owner who is not a person or an address that is not http(s) gets 400; an unknown slug 404 |
+| `DELETE /projects/:slug` | for Dane's page: delete a project that has no tickets; **a person's token only**: a machine's gets 403. One with tickets gets 409 `has-tickets` (`"SP has 48 tickets; a project with tickets cannot be deleted"`) and nothing is removed; the count and the delete are one transaction; the server log names the project and the actor |
 | `GET /people` | for Dane's page: the tracker's people (humans only) by id and name, for the owner picker; never a token |
 | `GET /projects/:slug` | for Dane's page: one project's details, its operator and owner by name, its web address and logo, its open count and a count per status; 404 for an unknown slug |
 | `GET /projects/:slug/board` | for Dane's page: one project's tickets in the eight statuses, each in `queue` order |
@@ -177,7 +179,12 @@ the details page show each project's logo, web address and owner. A person
 signed in sees a **New project** button above the table: it opens
 `/projects/new`, the Create Project form, which files the project and opens
 its details page; a refused save shows the server's reason and keeps what
-was typed. A browser opening `/projects` or `/projects/<slug>` gets the page; the page's own
+was typed. Each row also gives a person an **Edit** icon, opening
+`/projects/<slug>/edit` (the same form filled in, with the slug and ticket
+prefix shown but locked), and a **Delete** icon, which asks "Delete
+<name>?" and then reads the table again; a project with tickets is refused
+with the server's reason and stays. A loop's sign-in sees neither icon.
+A browser opening `/projects` or `/projects/<slug>` gets the page; the page's own
 call to the same address gets the data. `node tracker/demo.mjs` starts a throwaway tracker
 with test data to try it.
 

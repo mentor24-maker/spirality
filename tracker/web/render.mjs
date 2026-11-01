@@ -226,6 +226,15 @@ export function tabTitle(waitingCount, pageTitle) {
   return Number.isInteger(waitingCount) && waitingCount > 0 ? `(${waitingCount}) Tracker` : pageTitle;
 }
 
+/**
+ * The header bell's colour for the same count: grey while nothing waits (or
+ * the count is missing), yellow for one to three, red for more than three.
+ */
+export function bellColour(waitingCount) {
+  if (!Number.isInteger(waitingCount) || waitingCount <= 0) return 'grey';
+  return waitingCount <= 3 ? 'yellow' : 'red';
+}
+
 const CONTEXT_HEADING = "WHAT'S GOING ON";
 
 /**
@@ -433,4 +442,40 @@ export function stageLooks(answer) {
     if (look && typeof status === 'string') looks[status] = look;
   }
   return looks;
+}
+
+/**
+ * The statuses a ticket may be deleted from, as the tracker stores them:
+ * nobody has started it yet. The server holds the rule (store.mjs
+ * DELETABLE) and refuses any other; this only decides where a Delete is drawn.
+ */
+const DELETABLE = Object.freeze(['requested', 'queued']);
+
+/** True when the page offers to delete a ticket in `status` (either spelling: "Queued" or "queued"). */
+export function canDelete(status) {
+  return DELETABLE.includes(String(status ?? '').toLowerCase());
+}
+
+/** The one question a Delete asks before it sends anything. Plain text, for confirm(). */
+export function deleteQuestion({ id, name }) {
+  return `Delete ${id} "${name}"? This cannot be undone.`;
+}
+
+/**
+ * Why a delete was refused, in plain words: started since the page was
+ * drawn (409), already gone (404), or the server's own message.
+ */
+export function deleteRefusal(id, err) {
+  if (err?.status === 409) return `Not deleted: ${id} has been started since this page was drawn, so it stays. Reload the page to see where it is now.`;
+  if (err?.status === 404) return `Not deleted: ${id} is no longer in the tracker. Reload the page to see the list as it is now.`;
+  return `Not deleted: ${err?.message ?? 'the tracker did not answer.'}`;
+}
+
+/** The ticket page's Delete button, as HTML, or '' when the ticket has been started. */
+export function renderDeleteAction({ status }) {
+  if (!canDelete(status)) return '';
+  return `<form class="delete-action">
+        <button type="submit">Delete</button><span class="note"></span>
+        <p class="quiet">Nobody has started this ticket yet, so it can still be deleted, with its comments.</p>
+      </form>`;
 }
