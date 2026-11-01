@@ -390,6 +390,60 @@ export function mergeQuestion({ name, pullRequest }) {
   return `Merge ${number ? `PR #${number}` : 'the pull request'} for ${name}?`;
 }
 
+/** A stage colour the page will use: `#rrggbb` only, anything else is no colour. */
+const HEX = /^#[0-9a-f]{6}$/i;
+
+const channels = (hex) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+const toHex = (rgb) => `#${rgb.map((v) => Math.round(v).toString(16).padStart(2, '0')).join('')}`;
+/** `share` of `rgb` mixed into `toward` (both `[r, g, b]`). */
+const mix = (rgb, toward, share) => rgb.map((v, i) => v * share + toward[i] * (1 - share));
+function luminance(rgb) {
+  const [r, g, b] = rgb.map((v) => { const c = v / 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+/** WCAG contrast ratio between two colours, 1 to 21. */
+export function contrast(a, b) {
+  const [hi, lo] = [luminance(channels(a)), luminance(channels(b))].sort((x, y) => y - x);
+  return (hi + 0.05) / (lo + 0.05);
+}
+
+/** How much of the stage colour is in its heading bar: a light tint, so the heading reads on it. */
+const TINT_SHARE = 0.15;
+/** The contrast a heading's text keeps against its bar (WCAG's figure for bold headings). */
+const HEADING_CONTRAST = 3;
+const WHITE = [255, 255, 255];
+const BLACK = [0, 0, 0];
+
+/**
+ * How a stage with a chosen colour is drawn on the Tasks page, or null when
+ * it has none (or the saved value is not `#rrggbb`), so it looks as it
+ * always did. `border` is the colour itself; `tint` is the heading bar, the
+ * colour lightened towards white; `text` is the heading's text: the colour
+ * itself, unless it is too pale to read on its own tint (a yellow, say), in
+ * which case it is darkened just enough to read. The text and the bar are
+ * never the same solid colour.
+ */
+export function stageLook(colour) {
+  if (typeof colour !== 'string' || !HEX.test(colour)) return null;
+  const border = colour.toLowerCase();
+  const rgb = channels(border);
+  const tint = toHex(mix(rgb, WHITE, TINT_SHARE));
+  let text = border;
+  for (let share = 0.9; contrast(text, tint) < HEADING_CONTRAST && share > 0; share -= 0.1) text = toHex(mix(rgb, BLACK, share));
+  if (contrast(text, tint) < HEADING_CONTRAST) text = '#000000';
+  return { border, tint, text };
+}
+
+/** The server's `/stage-colours` answer as `{ status: look }`, only for stages with a usable colour. */
+export function stageLooks(answer) {
+  const looks = {};
+  for (const { status, colour } of Array.isArray(answer?.stages) ? answer.stages : []) {
+    const look = stageLook(colour);
+    if (look && typeof status === 'string') looks[status] = look;
+  }
+  return looks;
+}
+
 /**
  * The statuses a ticket may be deleted from, as the tracker stores them:
  * nobody has started it yet. The server holds the rule (store.mjs
