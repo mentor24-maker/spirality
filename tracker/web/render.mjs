@@ -420,9 +420,14 @@ export function renderCloseAction({ status, closePhrase, comments = [] }) {
   if (!HIS_STATUSES.includes(String(status ?? '').toLowerCase()) || !closePhrase) return '';
   const card = newestCard(comments);
   if (!card || cardMove(card.body) !== 'Close') return '';
+  // The relay's two close paths differ: on Ready to launch it waits for the
+  // work to be merged; on Needs your input the hand-back closes it at once.
+  const when = String(status).toLowerCase() === READY_TO_LAUNCH
+    ? 'the relay closes it within a few minutes once its work is merged'
+    : 'the relay closes it on its next pass, a few minutes from now';
   return `<form class="close-action">
         <button type="submit">Close</button><span class="note"></span>
-        <p class="quiet">Posts &ldquo;${escapeHtml(closePhrase)}&rdquo; as your reply; the relay closes it within a few minutes once its work is merged.</p>
+        <p class="quiet">Posts &ldquo;${escapeHtml(closePhrase)}&rdquo; as your reply; ${when}.</p>
       </form>`;
 }
 

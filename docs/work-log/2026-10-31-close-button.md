@@ -8,15 +8,17 @@ short line saying his move: **Your move: Merge**, **Your move: Close** or
 
 The new **Close** button works like the Merge button. It asks once, then posts
 "close" as his reply, and the relay (the background job that acts on his
-words) closes the ticket a few minutes later. The relay only closes a ticket
-whose work has actually landed: either the ticket's own pull request, or the
-one it was filed to unstick, must be merged. If not, it leaves the ticket
-alone and replies once to say why. His same word then closes it as soon as
-the work does land.
+words) closes the ticket a few minutes later. On a Ready to launch ticket the
+relay only closes it once its work has actually landed: either the ticket's
+own pull request, or the one it was filed to unstick, must be merged. If not,
+it leaves the ticket alone and replies once to say why. His same word then
+closes it as soon as the work does land. On a Needs your input ticket, where
+closing was already allowed, it closes on the relay's next pass, and the note
+under the button says so.
 
-The **Merge** button now only appears when there is something of the
-ticket's own to merge. It no longer shows up for a pull request that already
-went in.
+The **Merge** button now only appears when the ticket has a pull request of
+its own. A ticket with none, like one filed to unstick another pull request,
+no longer shows it.
 
 Loops can no longer post a card that is missing the "Your move" line, or one
 that tells him to move a ticket himself. The instructions every loop follows

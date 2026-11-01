@@ -1032,6 +1032,17 @@ test('Close shows on his two statuses when the newest card\'s move is Close, and
   assert.equal(closeQuestion({ name: 'Fix it' }), 'Close Fix it?');
 });
 
+test('the Close note on Ready to launch promises the merge check the relay makes there', () => {
+  const html = renderCloseAction({ status: 'ready to launch', closePhrase: 'close', comments: [{ body: moveCard('Close') }] });
+  assert.match(html, /once its work is merged/);
+});
+
+test('the Close note on Needs your input says it closes on the next pass, with no merge check (the hand-back closes at once)', () => {
+  const html = renderCloseAction({ status: 'needs your input', closePhrase: 'close', comments: [{ body: moveCard('Close') }] });
+  assert.match(html, /on its next pass/);
+  assert.doesNotMatch(html, /merged/);
+});
+
 test('the demo\'s SP-64-shaped ticket shows Close and no Merge; a ticket with its own PR shows Merge', async () => {
   const f = await fixture({ mergePhrase: 'merge' });
   try {
