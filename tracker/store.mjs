@@ -768,6 +768,36 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
       });
     },
 
+    /**
+     * What an emailed link is for, without using it: `{ purpose, email,
+     * expiresAt }`, for the set-password page to show. Refused as useLink
+     * refuses: `unknown-link`, `used-link`, `expired-link`.
+     */
+    linkInfo(token) {
+      const row = typeof token === 'string' && token
+        ? db.prepare('SELECT purpose, email, expires_at, used_at FROM account_links WHERE token_hash = ?').get(hashToken(token))
+        : null;
+      if (!row) throw new StoreError('unknown-link', 'this link is not one the tracker made.');
+      if (row.used_at != null) throw new StoreError('used-link', 'this link has already been used.');
+      if (passed(row.expires_at)) throw new StoreError('expired-link', 'this link has expired.');
+      return { purpose: row.purpose, email: row.email, expiresAt: row.expires_at };
+    },
+
+    /**
+     * Withdraw an emailed link nobody has used, so it can never be used (an
+     * email that did not go out). Answers whether there was one to withdraw;
+     * read back.
+     */
+    cancelLink(token) {
+      if (typeof token !== 'string' || !token) return false;
+      const hash = hashToken(token);
+      const gone = num(db.prepare('DELETE FROM account_links WHERE token_hash = ? AND used_at IS NULL').run(hash).changes) === 1;
+      if (db.prepare('SELECT 1 FROM account_links WHERE token_hash = ? AND used_at IS NULL').get(hash)) {
+        throw new StoreError('write-failed', 'the link was not withdrawn.');
+      }
+      return gone;
+    },
+
     /** Every person (never a machine), oldest first: the owner a project may name. Never a token. */
     listPeople() {
       return db.prepare("SELECT id, name FROM actors WHERE kind = 'human' ORDER BY id").all()

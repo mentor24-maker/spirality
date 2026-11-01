@@ -913,6 +913,38 @@ test('each kind of link is refused once it has expired, and an unknown link or a
   } finally { cleanup(); }
 });
 
+test('linkInfo says what a link is for without spending it, and refuses as useLink does', () => {
+  const { store, person, machine, advance, cleanup } = accountsFixture();
+  try {
+    const setup = store.makeLink({ purpose: 'setup', email: 'P@Example.com', actor: person.id, madeBy: machine.id });
+    assert.deepEqual(store.linkInfo(setup.token), { purpose: 'setup', email: 'p@example.com', expiresAt: setup.expiresAt });
+    assert.deepEqual(store.linkInfo(setup.token).email, 'p@example.com', 'asking twice spends nothing');
+    assert.throws(() => store.linkInfo('no-such-link'), { code: 'unknown-link' });
+    assert.throws(() => store.linkInfo(undefined), { code: 'unknown-link' });
+    store.useLink({ token: setup.token, password: 'a long password' });
+    assert.throws(() => store.linkInfo(setup.token), { code: 'used-link' });
+    const invite = store.makeLink({ purpose: 'invite', email: 'new@example.com', madeBy: person.id });
+    advance(7 * DAY);
+    assert.throws(() => store.linkInfo(invite.token), { code: 'expired-link' });
+  } finally { cleanup(); }
+});
+
+test('cancelLink withdraws an unused link for good, and leaves a used one as the record', () => {
+  const { store, person, machine, cleanup } = accountsFixture();
+  try {
+    const link = store.makeLink({ purpose: 'setup', email: 'p@example.com', actor: person.id, madeBy: machine.id });
+    assert.equal(store.cancelLink(link.token), true);
+    assert.throws(() => store.useLink({ token: link.token, password: 'a long password' }), { code: 'unknown-link' });
+    assert.equal(store.emailOf(person.id), null);
+    assert.equal(store.cancelLink(link.token), false);
+    assert.equal(store.cancelLink(undefined), false);
+    const used = store.makeLink({ purpose: 'setup', email: 'p@example.com', actor: person.id, madeBy: machine.id });
+    store.useLink({ token: used.token, password: 'a long password' });
+    assert.equal(store.cancelLink(used.token), false);
+    assert.throws(() => store.linkInfo(used.token), { code: 'used-link' });
+  } finally { cleanup(); }
+});
+
 test('no password, session token or link token is ever in the database file, only their hashes', () => {
   const { dir, path, store, person, machine } = accountsFixture();
   try {

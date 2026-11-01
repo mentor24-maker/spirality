@@ -149,8 +149,9 @@ account_links  token hash, purpose (setup|invite|reset), email, actor,
 
 ### The API
 
-Every call carries the caller's own token. The answers are JSON (structured
-text programs read).
+Every call carries the caller's own token, except the two an emailed link
+makes (the link is their proof). The answers are JSON (structured text
+programs read).
 
 | Call | Does |
 |---|---|
@@ -172,6 +173,8 @@ text programs read).
 | `GET /people` | for Dane's page: the tracker's people (humans only) by id and name, for the owner picker; never a token |
 | `GET /projects/:slug` | for Dane's page: one project's details, its operator and owner by name, its web address and logo, its open count and a count per status; 404 for an unknown slug |
 | `GET /projects/:slug/board` | for Dane's page: one project's tickets in the eight statuses, each in `queue` order |
+| `POST /account/link` | **no token**: what an emailed link is for (`{ link }` → `{ purpose, email, expiresAt }`), for the set-password page; a used, expired or unknown link answers 400 `used-link`, `expired-link` or `unknown-link` |
+| `POST /account/set-password` | **no token**: use an emailed link (`{ link, password, name? }`, a name only for an invite) → `{ purpose, name, email }`; refused with the store's code (`used-link`, `expired-link`, `unknown-link`, `weak-password`, `missing`) and nothing written. The link and the password travel only in the body, never in an address, so neither reaches the log |
 | `POST /tickets/:id/clone` | for Dane's page: copy a ticket into another project (`{ project }`), as a new ticket in `Requested` there with one comment naming where it came from; the original does not change |
 
 The store enforces only what keeps the data true: valid statuses, the
@@ -403,6 +406,42 @@ asks the tracker `GET /me` with each token and expects that actor's own name bac
 replace a lost or leaked token, delete that secret in Doppler and run
 `create` again: the same actor gets a new token, and the old one stops
 signing in.
+
+**A person's password, by email.** A person sets a password from an emailed
+link: `<trackerUrl>/set-password?link=<token>`, a page that needs no
+sign-in. It shows the email the link is for (read-only), asks for the
+password twice (and a name, for an invite), and once saved says "Password
+set. Sign in at <tracker address>." The same link a second time, or an
+expired or unknown one, says which in plain words and saves nothing.
+Signing in with the password comes in the next ticket; the token box stays
+until then.
+
+Dane's first link comes from a command a session runs **on the Mini**, so
+his existing actor, and all his history, becomes his account:
+
+```bash
+npm run tracker:account -- setup-link --actor <id> --email <address>
+```
+
+It refuses a machine actor, an email another person holds, a missing
+`RESEND_API_KEY`, or a config file with no `trackerUrl`, each with its
+reason, and sends nothing. Otherwise it makes a 7-day `setup` link, emails it
+through Resend (the hand-over email's sender; `TRACKER_NOTIFY_FROM` if set),
+titled "Set your <project name> password", and prints one line:
+
+```
+sent to dane@example.com, good for 7 days
+```
+
+A send Resend refuses prints `NOT sent to <address>: <Resend's answer>`
+and withdraws the link, so no usable link is left behind. The link's
+address is the config **file's** `trackerUrl`, never Doppler's
+same-machine `TRACKER_URL` override, which would not open from another
+computer. Neither the link's token nor a password is ever printed or logged.
+Resend's shared sender delivers only to the Resend account's own address
+until a domain is set up there, so for now this reaches Dane and nobody
+else. `node tracker/demo.mjs` prints a throwaway set-password link for the
+test operator, for trying the page.
 
 ### Checking it
 
