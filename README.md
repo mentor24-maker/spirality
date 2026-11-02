@@ -6,3 +6,6 @@ done, parameterised by a project config so every product runs the same loop
 and every lesson lands once.
 
 Start with `CLAUDE.md`, then `docs/LOOP_ENGINEERING.md`.
+
+Putting a new product on Spirality: [`docs/ONBOARDING_A_PRODUCT.md`](docs/ONBOARDING_A_PRODUCT.md),
+the checklist of everything it needs and what is still missing.
