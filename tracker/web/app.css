@@ -52,7 +52,7 @@ a.button:hover { background: #333; }
 img.logo { width: 1.75rem; height: 1.75rem; object-fit: contain; vertical-align: middle; }
 img.logo.big { width: 2.5rem; height: 2.5rem; margin-right: 0.75rem; }
 table.projects td.logo { width: 1%; padding-right: 0; }
-table.projects td.url { overflow-wrap: anywhere; }
+table.projects td.url, table.projects td.repo { overflow-wrap: anywhere; }
 form.copy label { display: block; }
 form.copy .row { display: flex; gap: 1rem; align-items: center; margin-top: 0.5rem; }
 form.copy select { font: inherit; padding: 0.4rem; }

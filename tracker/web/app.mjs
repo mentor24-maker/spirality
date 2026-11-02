@@ -304,6 +304,14 @@ const addressOf = (p) => (isWebAddress(p.url)
   ? `<a href="${escapeHtml(p.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(p.url)}</a>`
   : '<span class="quiet">none</span>');
 
+/** A GitHub repository's owner and name, the store's own shape; anything else is not drawn as a link. */
+const isRepo = (v) => typeof v === 'string' && /^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/.test(v);
+
+/** A project's GitHub repository as a link to it on GitHub that opens a new tab, or "none". */
+const repoOf = (p) => (isRepo(p.repo)
+  ? `<a href="https://github.com/${escapeHtml(p.repo)}" target="_blank" rel="noopener noreferrer">${escapeHtml(p.repo)}</a>`
+  : '<span class="quiet">none</span>');
+
 /** The remembered view; a browser that will not keep it answers "list". */
 function savedView() {
   try { return localStorage.getItem(VIEW_KEY) === 'board' ? 'board' : 'list'; } catch { return 'list'; }
@@ -324,7 +332,7 @@ function showProject() {
 
 /**
  * Every project, one row each: its logo, name, slug, ticket ids, web
- * address, owner, how many tickets are open, and an Actions column whose
+ * address, GitHub repository, owner, how many tickets are open, and an Actions column whose
  * View icon opens its details page. Choosing a name selects the project and
  * opens its tasks; the selected one is marked, and "Tasks" in the header
  * goes back to it. A person signed in gets a New project button and, on
@@ -352,6 +360,7 @@ async function drawProjects(done = '') {
       <td class="slug">${escapeHtml(p.slug)}</td>
       <td class="prefix">${escapeHtml(p.prefix)}</td>
       <td class="url">${addressOf(p)}</td>
+      <td class="repo">${repoOf(p)}</td>
       <td class="owner">${p.owner ? escapeHtml(p.owner.name) : '<span class="quiet">nobody</span>'}</td>
       <td class="open">${p.open}</td>
       <td class="actions">${action(`/projects/${encodeURIComponent(p.slug)}`, 'View project', ICONS.view)}${people
@@ -365,7 +374,7 @@ async function drawProjects(done = '') {
     <p class="note${done ? ' quiet' : ''}" role="status">${escapeHtml(done)}</p>
     ${projects.length
     ? `<p class="quiet">Choose a project's name to see its tasks.</p>
-      <table class="projects"><thead><tr><th class="logo"><span class="hidden">Logo</span></th><th class="name">Name</th><th class="slug">Slug</th><th class="prefix">Ticket prefix</th><th class="url">Web address</th><th class="owner">Owner</th><th class="open">Open tickets</th><th class="actions">Actions</th></tr></thead><tbody>${projects.map(row).join('')}</tbody></table>`
+      <table class="projects"><thead><tr><th class="logo"><span class="hidden">Logo</span></th><th class="name">Name</th><th class="slug">Slug</th><th class="prefix">Ticket prefix</th><th class="url">Web address</th><th class="repo">GitHub repository</th><th class="owner">Owner</th><th class="open">Open tickets</th><th class="actions">Actions</th></tr></thead><tbody>${projects.map(row).join('')}</tbody></table>`
     : '<p class="quiet">There are no projects yet.</p>'}`;
   putTrail([{ label: 'Projects' }]);
   const note = main.querySelector('p.note');
@@ -405,7 +414,7 @@ async function drawProjects(done = '') {
 
 /**
  * One project's details: its logo, name, slug, ticket prefix, web address,
- * owner, operator, how many
+ * GitHub repository, owner, operator, how many
  * tickets are open and how many sit in each status, with links to its board
  * and its list. Read-only. An unknown slug says so plainly.
  */
@@ -433,6 +442,7 @@ async function drawProjectDetails(slug) {
       <dt>Slug</dt><dd>${escapeHtml(p.slug)}</dd>
       <dt>Ticket prefix</dt><dd>${escapeHtml(p.prefix)}</dd>
       <dt>Web address</dt><dd>${addressOf(p)}</dd>
+      <dt>GitHub repository</dt><dd>${repoOf(p)}</dd>
       <dt>Owner</dt><dd>${p.owner ? escapeHtml(p.owner.name) : '<span class="quiet">nobody</span>'}</dd>
       <dt>Operator</dt><dd>${p.operator ? escapeHtml(p.operator.name) : '<span class="quiet">nobody</span>'}</dd>
       <dt>Open tickets</dt><dd>${p.open}</dd>
@@ -448,9 +458,12 @@ const field = (id, label, hint, attrs = '') => `
       ${hint ? `<span class="hint quiet">${hint}</span>` : ''}
       <input id="${id}" type="text"${attrs}>`;
 
+/** The GitHub repository box's hint, the same on both project forms. */
+const REPO_HINT = 'Optional. Where its pull requests live: owner/name, like my-org/my-app, or its https://github.com/ address.';
+
 /**
  * The Create Project form, for a person only: name, slug, ticket prefix, web
- * address, logo (an image's web address) and owner, picked from the
+ * address, logo (an image's web address), GitHub repository and owner, picked from the
  * tracker's people. Saving files the project and opens its details page,
  * which reads it back from the server. A refused save shows the server's own
  * message and leaves every field as typed: the form is not redrawn.
@@ -470,6 +483,7 @@ async function drawCreateProject() {
       ${field('prefix', 'Ticket prefix', 'The start of its ticket ids, like SP in SP-12: capital letters and digits.', ' required autocapitalize="characters" spellcheck="false"')}
       ${field('url', 'Web address', 'Optional. Starts http:// or https://.', ' inputmode="url" spellcheck="false"')}
       ${field('logo', 'Logo', "Optional. An image's web address, starting http:// or https://.", ' inputmode="url" spellcheck="false"')}
+      ${field('repo', 'GitHub repository', REPO_HINT, ' autocapitalize="off" spellcheck="false"')}
       <label for="owner">Owner</label>
       <select id="owner"><option value="">Nobody</option>${people.map((p) => `<option value="${escapeHtml(p.id)}"${p.id === me.id ? ' selected' : ''}>${escapeHtml(p.name)}</option>`).join('')}</select>
       <div class="row"><button type="submit">Add project</button><a href="/projects">Cancel</a><span class="note"></span></div>
@@ -486,7 +500,7 @@ async function drawCreateProject() {
     try {
       const made = await api('POST', '/projects', {
         name: value('name'), slug: value('slug'), prefix: value('prefix'),
-        url: value('url'), logo: value('logo'), owner: value('owner') ? Number(value('owner')) : null,
+        url: value('url'), logo: value('logo'), repo: value('repo'), owner: value('owner') ? Number(value('owner')) : null,
       });
       history.pushState(null, '', `/projects/${encodeURIComponent(made.slug)}`);
       await route();
@@ -502,7 +516,7 @@ async function drawCreateProject() {
 
 /**
  * The Edit project form, for a person only: the Create Project form filled
- * in with what the server holds. Name, web address, logo and owner change;
+ * in with what the server holds. Name, web address, logo, GitHub repository and owner change;
  * the slug and ticket prefix are shown but cannot, since every ticket's id
  * is built from them. Saving sends the change and opens the details page,
  * which reads it back from the server. A refused save shows the server's own
@@ -533,6 +547,7 @@ async function drawEditProject(slug) {
       ${field('prefix', 'Ticket prefix', fixed, ` disabled${filled(p.prefix)}`)}
       ${field('url', 'Web address', 'Optional. Starts http:// or https://.', ` inputmode="url" spellcheck="false"${filled(p.url)}`)}
       ${field('logo', 'Logo', "Optional. An image's web address, starting http:// or https://.", ` inputmode="url" spellcheck="false"${filled(p.logo)}`)}
+      ${field('repo', 'GitHub repository', REPO_HINT, ` autocapitalize="off" spellcheck="false"${filled(p.repo)}`)}
       <label for="owner">Owner</label>
       <select id="owner"><option value="">Nobody</option>${people.map((o) => `<option value="${escapeHtml(o.id)}"${o.id === p.owner?.id ? ' selected' : ''}>${escapeHtml(o.name)}</option>`).join('')}</select>
       <div class="row"><button type="submit">Save</button><a href="/projects">Cancel</a><span class="note"></span></div>
@@ -549,7 +564,7 @@ async function drawEditProject(slug) {
     note.textContent = 'Saving…';
     try {
       const saved = await api('PATCH', `/projects/${encodeURIComponent(p.slug)}`, {
-        name: value('name'), url: value('url'), logo: value('logo'), owner: value('owner') ? Number(value('owner')) : null,
+        name: value('name'), url: value('url'), logo: value('logo'), repo: value('repo'), owner: value('owner') ? Number(value('owner')) : null,
       });
       history.pushState(null, '', `/projects/${encodeURIComponent(saved.slug)}`);
       await route();
