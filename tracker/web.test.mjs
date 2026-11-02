@@ -9,7 +9,7 @@ import { openStore } from './store.mjs';
 import { startServer } from './server.mjs';
 import { seedDemo, tickingClock } from './demoData.mjs';
 import { reportsOf, REPORT_RANGES, searchTickets } from './pageData.mjs';
-import { escapeHtml, renderComment, renderInline, renderMarkdown, renderQuickAction, renderCommands, cardCommands, cardAsk, renderMergeAction, mergeQuestion, renderCloseAction, closeQuestion, cardMove, renderTrail, cardContext, firstParagraph, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults } from './web/render.mjs';
+import { escapeHtml, renderComment, renderInline, renderMarkdown, renderQuickAction, renderCommands, cardCommands, cardAsk, renderMergeAction, mergeQuestion, renderCloseAction, closeQuestion, cardMove, renderTrail, cardContext, firstParagraph, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, activeFilters } from './web/render.mjs';
 import { loadProjectConfig } from '../lib/projectConfig.mjs';
 import operatorCard from '../lib/operatorCard.js';
 import machineComment from '../lib/machineComment.js';
@@ -1787,6 +1787,43 @@ test('the search finds the demo\'s tickets in every project and names its status
 test('the Tasks page\'s toolbar holds the Search field, and Enter opens the results page', () => {
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   assert.match(app, /<a href="\/projects">Change project<\/a>\s*\$\{searchForm\(''\)\}/);
-  assert.match(app, /history\.pushState\(null, '', `\/search\?q=\$\{encodeURIComponent\(term\)\}`\)/);
+  assert.match(app, /history\.pushState\(null, '', searchAddress\(form\.elements\.q\.value\.trim\(\)\)\)/);
   assert.match(app, /renderSearchResults\(answer\)/);
+});
+
+/** The filters as the server answers them, Status set to Queued and Assigned to to Nobody. */
+const FILTERS = [
+  { key: 'status', label: 'Status', value: 'Queued', options: [{ value: 'Rework', label: 'Rework' }, { value: 'Queued', label: 'Queued' }] },
+  { key: 'priority', label: 'Priority', value: null, options: [{ value: 'urgent', label: 'Urgent' }, { value: 'none', label: 'None' }] },
+  { key: 'createdBy', label: 'Created by', value: null, options: [{ value: '3', label: 'Tom & <Jerry>' }] },
+  { key: 'assignee', label: 'Assigned to', value: 'nobody', options: [{ value: 'nobody', label: 'Nobody' }, { value: '3', label: 'Tom & <Jerry>' }] },
+];
+
+test('the search filters are one picker each, "Any" first, the server\'s choices in its order, the chosen one selected', () => {
+  const html = renderSearchFilters(FILTERS);
+  assert.match(html, /^<div class="search-filters">/);
+  assert.equal((html.match(/<select /g) ?? []).length, 4);
+  assert.match(html, /<label>Status\s*<select name="status"><option value="">Any<\/option><option value="Rework">Rework<\/option><option value="Queued" selected>Queued<\/option><\/select>/);
+  assert.match(html, /<select name="priority"><option value="" selected>Any<\/option><option value="urgent">Urgent<\/option><option value="none">None<\/option>/);
+  assert.match(html, /<select name="createdBy"><option value="" selected>Any<\/option><option value="3">Tom &amp; &lt;Jerry&gt;<\/option>/);
+  assert.match(html, /<select name="assignee"><option value="">Any<\/option><option value="nobody" selected>Nobody<\/option>/);
+  assert.deepEqual(activeFilters(FILTERS), ['Status: Queued', 'Assigned to: Nobody']);
+  assert.match(renderSearchResults({ query: 'widget', filters: FILTERS, results: [] }),
+    /<p class="quiet search-note">No tickets match widget with Status: Queued, Assigned to: Nobody<\/p>/);
+  assert.match(renderSearchResults({ query: 'widget', filters: FILTERS.map((f) => ({ ...f, value: null })), results: [] }),
+    /<p class="quiet search-note">No tickets match widget<\/p>/);
+});
+
+test('the search results page draws the filters from the server\'s answer, keeps them in the address, and shows a refusal', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const draw = app.slice(app.indexOf('function searchAddress('), app.indexOf('/**\n * Put `text` on the clipboard'));
+  assert.match(draw, /renderSearchFilters\(answer\.filters\)/);
+  assert.match(draw, /api\('GET', `\/search\?\$\{params\}`\)/);
+  assert.match(draw, /for \(const select of main\.querySelectorAll\('\.search-filters select'\)\) select\.addEventListener\('change', go\)/);
+  assert.match(draw, /<p class="error">\$\{escapeHtml\(refusal\)\}<\/p>/);
+  // No status, priority or person is typed out: every choice comes from the server.
+  for (const word of [...loopStatuses.STAGE_ORDER, 'urgent', 'Urgent', 'Nobody', 'nobody']) {
+    assert.ok(!draw.includes(`'${word}'`), word);
+  }
+  assert.match(app, /await drawSearch\(new URLSearchParams\(location\.search\)\)/);
 });

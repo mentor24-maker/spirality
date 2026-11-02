@@ -712,17 +712,40 @@ const PLACE_WORDS = Object.freeze({
   development: 'in the development',
 });
 
+/** The filters chosen in the server's answer, as the page says them: "Status: Queued". */
+export function activeFilters(filters = []) {
+  return filters.filter((f) => f.value != null)
+    .map((f) => `${f.label}: ${f.options.find((o) => o.value === f.value)?.label ?? f.value}`);
+}
+
+/**
+ * The search results page's filter row, from the server's answer: one
+ * picker for each filter, its choices as the server lists them, "Any"
+ * first, the chosen value selected.
+ */
+export function renderSearchFilters(filters = []) {
+  const picker = (f) => `
+    <label>${escapeHtml(f.label)}
+      <select name="${escapeHtml(f.key)}">${option('', 'Any', f.value == null)}${f.options.map((o) => option(o.value, o.label, o.value === f.value)).join('')}</select>
+    </label>`;
+  return `<div class="search-filters">${filters.map(picker).join('')}</div>`;
+}
+
 /**
  * The search results page's list, from the server's answer
- * (`{ query, results }`): one plain line for an empty search or one with no
- * matches; otherwise each ticket with its id, its title as a link to its
- * page, its project and status, and its excerpt with the place it was
- * found, the term bold in title and excerpt.
+ * (`{ query, filters, results }`): one plain line for an empty search or
+ * one with no matches, naming the filters chosen; otherwise each ticket
+ * with its id, its title as a link to its page, its project and status,
+ * and its excerpt with the place it was found, the term bold in title and
+ * excerpt.
  */
-export function renderSearchResults({ query, results = [] }) {
+export function renderSearchResults({ query, filters = [], results = [] }) {
   const term = String(query ?? '').trim();
   if (!term) return '<p class="quiet search-note">Type a word to search every task.</p>';
-  if (!results.length) return `<p class="quiet search-note">No tickets match ${escapeHtml(term)}</p>`;
+  if (!results.length) {
+    const active = activeFilters(filters);
+    return `<p class="quiet search-note">No tickets match ${escapeHtml(term)}${active.length ? ` with ${escapeHtml(active.join(', '))}` : ''}</p>`;
+  }
   const item = (r) => `
     <li>
       <p class="result-head"><span class="quiet">${escapeHtml(r.id)}</span> <a href="/t/${encodeURIComponent(r.id)}">${boldMatches(r.name, term)}</a></p>

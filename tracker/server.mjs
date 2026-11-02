@@ -51,7 +51,7 @@ import { hostname } from 'node:os';
 import { promisify } from 'node:util';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { openStore, StoreError } from './store.mjs';
-import { boardOf, projectDetailsOf, projectsList, reportsOf, searchTickets, stageColoursOf, threadOf, waitingFor } from './pageData.mjs';
+import { boardOf, PRIORITIES, projectDetailsOf, projectsList, readSearchFilters, reportsOf, searchTickets, stageColoursOf, threadOf, waitingFor } from './pageData.mjs';
 import { createNotifier, DEFAULT_FROM, MAIL_FROM, MAIL_KEY, mailEnvFromDoppler, mailSettingsFromEnv, resendSender } from './notify.mjs';
 import { sendInvite, sendResetLink } from './account.mjs';
 import { loadProjectConfig } from '../lib/projectConfig.mjs';
@@ -115,10 +115,6 @@ const CHANGE_FIELDS = Object.freeze(['name', 'description', 'status', 'priority'
  */
 const PERSON_STATUSES = Object.freeze(['requested', 'rework', 'queued', 'live']
   .map((s) => ({ value: s, label: loopStatuses.DISPLAY[s] })));
-
-/** The priorities the store keeps, most urgent first, for the ticket page's picker. */
-const PRIORITIES = Object.freeze(Object.keys(loopStatuses.PRIORITY_RANK)
-  .sort((a, b) => loopStatuses.PRIORITY_RANK[a] - loopStatuses.PRIORITY_RANK[b]));
 
 /**
  * Dane's page (tracker/web/): the only files served without a token, and the
@@ -465,9 +461,13 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     }
 
     // Dane's page: the search results page's tickets, across every project,
-    // best matches first (tracker/pageData.mjs searchTickets). Read-only.
+    // best matches first (tracker/pageData.mjs searchTickets), narrowed by
+    // its filters (`status`, `priority`, `createdBy`, `assignee`); a value
+    // that is none of the choices is refused, never an empty list. Read-only.
     if (parts.length === 1 && parts[0] === 'search' && method === 'GET') {
-      return [200, searchTickets(store, url.searchParams.get('q'))];
+      const { filters, problem } = readSearchFilters(store, (key) => url.searchParams.get(key));
+      if (problem) throw new HttpError(400, 'unknown-filter', problem);
+      return [200, searchTickets(store, url.searchParams.get('q'), filters)];
     }
 
     // Dane's page: one project's details page.
