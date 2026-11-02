@@ -173,6 +173,11 @@ details.edit button.remove-tag:hover { color: var(--red); }
 details.edit p.locked { margin: 0.3rem 0 0; }
 details.edit p.locked + p { margin: 0.2rem 0 0; font-size: 0.9em; }
 details.edit .edit-note:empty { display: none; }
+details.add-task { border: var(--hairline); border-radius: 8px; padding: 0.5rem 1.25rem; margin-bottom: 1rem; }
+details.add-task[open] { padding-bottom: 1rem; }
+details.add-task > summary { cursor: pointer; font-weight: 600; }
+details.add-task form.request textarea { min-height: 8rem; }
+p.filed-note { margin: 0 0 1rem; }
 form.invite { max-width: 36rem; margin-bottom: 1.5rem; }
 form.invite label { display: block; font-weight: 600; }
 form.invite .row { display: flex; gap: 0.75rem; align-items: center; margin-top: 0.35rem; }
