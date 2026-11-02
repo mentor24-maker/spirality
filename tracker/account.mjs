@@ -51,6 +51,53 @@ export function setupEmail({ name, productName, link, days }) {
   };
 }
 
+/** The reset email: `{ subject, text }`. `link` is the whole set-password address. */
+export function resetEmail({ name, productName, link }) {
+  return {
+    subject: `Reset your ${productName} password`,
+    text: [
+      `Hello ${name},`,
+      '',
+      `Someone asked to reset your password for the ${productName} tracker. Here is your link to set a new one:`,
+      '',
+      link,
+      '',
+      'It works once, for the next hour. Using it signs you out everywhere you were signed in. If you did not ask for this, ignore it: your password stays as it is.',
+      '',
+    ].join('\n'),
+  };
+}
+
+/**
+ * The page's "Forgot password?": make a 1-hour `reset` link for the person
+ * `email` belongs to and send it. An email nobody holds gets nothing, and
+ * the caller answers the page the same either way. Answers `{ ok, line }`
+ * for the server log; the line never carries the link's token or the email.
+ * A send the mail service refuses withdraws the link.
+ */
+export async function sendResetLink({ store, email, send, trackerUrl, productName }) {
+  const person = store.actorForEmail(email);
+  if (!person) return { ok: true, line: 'reset asked for an email with no account; nothing sent' };
+  if (!send) return { ok: false, line: `reset NOT sent to actor ${person.id}: ${MAIL_KEY} is not in Doppler, so no email can go out` };
+  if (!trackerUrl) return { ok: false, line: `reset NOT sent to actor ${person.id}: the tracker's own address is unknown` };
+  let link;
+  try {
+    link = store.makeLink({ purpose: 'reset', email, madeBy: person.id });
+  } catch (err) {
+    if (err instanceof StoreError) return { ok: false, line: `reset NOT sent to actor ${person.id}: ${err.message}` };
+    throw err;
+  }
+  const scrub = (text) => String(text ?? '').split(link.token).join('[link]');
+  try {
+    await send({ to: store.emailOf(person.id), ...resetEmail({ name: person.name, productName, link: setPasswordUrl(trackerUrl, link.token) }) });
+  } catch (err) {
+    let withdrawn = 'the link was withdrawn';
+    try { store.cancelLink(link.token); } catch (e) { withdrawn = `the link could NOT be withdrawn (${scrub(e.message)}), but it was never sent`; }
+    return { ok: false, line: `reset NOT sent to actor ${person.id}: ${scrub(err?.message ?? err)}; ${withdrawn}` };
+  }
+  return { ok: true, line: `reset link sent to actor ${person.id}, good for 1 hour` };
+}
+
 /** The set-password page's address for a link token, under the tracker's address. */
 export function setPasswordUrl(trackerUrl, token) {
   return `${String(trackerUrl).replace(/\/+$/, '')}/set-password?link=${encodeURIComponent(token)}`;
