@@ -1478,18 +1478,19 @@ function reportingStore() {
   store.createProject({ slug: 'alpha', name: 'Alpha', prefix: 'AL' });
   store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE' });
   const now = Date.parse('2026-10-27T15:00:00Z');
-  /** File a ticket `filedDaysAgo` before `now`; each later [days, status] moves it then. */
-  const ticket = (project, filedDaysAgo, ...moves) => {
+  /** File a ticket in `status` `filedDaysAgo` before `now`; each later [days, status] moves it then. */
+  const filedAs = (status, project, filedDaysAgo, ...moves) => {
     clock.moveTo(now - filedDaysAgo * DAY);
-    const { id } = store.fileTicket({ project, actor: loop.id, name: `filed ${filedDaysAgo} days ago`, status: 'queued' });
-    for (const [days, status] of moves) {
+    const { id } = store.fileTicket({ project, actor: loop.id, name: `filed ${filedDaysAgo} days ago`, status });
+    for (const [days, to] of moves) {
       clock.moveTo(now - days * DAY);
-      store.changeTicket(id, { actor: loop.id, status });
+      store.changeTicket(id, { actor: loop.id, status: to });
     }
     return id;
   };
+  const ticket = (...args) => filedAs('queued', ...args);
   const done = () => { store.close(); rmSync(dir, { recursive: true, force: true }); };
-  return { store, loop, ticket, now, done };
+  return { store, loop, ticket, filedAs, now, done };
 }
 
 test('Reporting: a task finished 3 days ago counts in all three ranges, 20 days ago in two, 60 days ago only in all time', () => {
@@ -1583,14 +1584,91 @@ test('Reporting is in the header after Tasks, served at /reporting, and its figu
   } finally { await f.cleanup(); }
 });
 
+/** True when `ms` is within ten minutes of `days` days: the test clock ticks a minute per reading. */
+const near = (ms, days) => ms != null && Math.abs(ms - days * DAY) < 10 * 60_000;
+
+test('Reporting flow: time to finish, sent back and waiting, from known status changes; a task sent back twice counts once; one never Queued is left out', () => {
+  const r = reportingStore();
+  try {
+    // Sent back twice; 9 days from Queued to Live; a day in Ready to launch.
+    r.ticket('alpha', 10, [9, 'building'], [8, 'in review'], [7, 'rework'], [6, 'building'], [5, 'in review'],
+      [4.5, 'rework'], [4, 'building'], [3, 'in review'], [2, 'ready to launch'], [1, 'live']);
+    // 3.5 days from Queued to Live; a day in Needs your input, half a day in Ready to launch.
+    r.ticket('beta', 5, [4, 'needs your input'], [3, 'building'], [2, 'ready to launch'], [1.5, 'live']);
+    // Filed straight into review, never Queued: left out of time to finish; half a day waiting.
+    r.filedAs('in review', 'alpha', 3, [2.5, 'ready to launch'], [2, 'live']);
+    // Finished 20 days ago, 5 days from Queued; never waited.
+    r.ticket('alpha', 25, [21, 'in review'], [20, 'live']);
+    // Still open: counts nowhere in flow; the two in the operator's stages are waiting now.
+    r.ticket('alpha', 3, [2, 'building']);
+    r.ticket('alpha', 3, [1, 'needs your input']);
+    r.ticket('beta', 3, [1, 'ready to launch']);
+    const { flow, waitingNow } = reportsOf(r.store, { now: r.now });
+    assert.equal(waitingNow, 2);
+
+    const week = flow.week;
+    assert.equal(week.finished, 3);
+    assert.equal(week.timeToFinish.counted, 2);
+    assert.equal(week.timeToFinish.leftOut, 1);
+    assert.ok(near(week.timeToFinish.median, (9 + 3.5) / 2), String(week.timeToFinish.median / DAY));
+    assert.ok(near(week.timeToFinish.longest, 9));
+    assert.deepEqual(week.sentBack, { count: 1, share: 1 / 3 });
+    assert.ok(near(week.waiting.total, 1 + 1.5 + 0.5), String(week.waiting.total / DAY));
+    assert.ok(near(week.waiting.median, 1));
+
+    const month = flow.month;
+    assert.equal(month.finished, 4);
+    assert.equal(month.timeToFinish.counted, 3);
+    assert.ok(near(month.timeToFinish.median, 5));
+    assert.ok(near(month.timeToFinish.longest, 9));
+    assert.deepEqual(month.sentBack, { count: 1, share: 1 / 4 });
+    assert.ok(near(month.waiting.total, 3));
+    assert.ok(near(month.waiting.median, (0.5 + 1) / 2));
+    assert.deepEqual(flow.all, month);
+
+    const beta = reportsOf(r.store, { project: 'beta', now: r.now });
+    assert.equal(beta.flow.all.finished, 1);
+    assert.equal(beta.flow.all.sentBack.count, 0);
+    assert.equal(beta.waitingNow, 1);
+  } finally { r.done(); }
+});
+
+test('Reporting flow: a range with no finished tasks has no times and no share, never a zero', () => {
+  const r = reportingStore();
+  try {
+    r.ticket('alpha', 70, [65, 'rework'], [60, 'live']);
+    const { flow } = reportsOf(r.store, { now: r.now });
+    assert.deepEqual(flow.week, {
+      finished: 0,
+      timeToFinish: { counted: 0, leftOut: 0, median: null, longest: null },
+      sentBack: { count: 0, share: null },
+      waiting: { total: null, median: null },
+    });
+    assert.deepEqual(flow.month, flow.week);
+    assert.equal(flow.all.finished, 1);
+    assert.deepEqual(flow.all.sentBack, { count: 1, share: 1 });
+    assert.ok(near(flow.all.timeToFinish.median, 10));
+  } finally { r.done(); }
+});
+
 test('the demo spreads its finished tasks over the last month, so every range has some', () => {
   const dir = mkdtempSync(join(tmpdir(), 'tracker-demo-reports-'));
   const clock = tickingClock();
   const store = openStore(join(dir, 'tracker.db'), { now: clock });
   try {
     seedDemo(store, { operatorName: 'Dane', clock });
-    const { finished } = reportsOf(store, { now: clock.time() });
+    const { finished, flow, waitingNow } = reportsOf(store, { now: clock.time() });
     assert.ok(finished.week > 0 && finished.month > finished.week && finished.all > finished.month, JSON.stringify(finished));
+    // Every flow report shows a figure in every range. All time leaves two out,
+    // never Queued: the oldest, filed into review, and one filed already Live.
+    for (const key of ['week', 'month', 'all']) {
+      const f = flow[key];
+      assert.ok(f.timeToFinish.median > 0 && f.timeToFinish.longest >= f.timeToFinish.median, `${key} ${JSON.stringify(f)}`);
+      assert.ok(f.sentBack.count > 0, `${key} sent back`);
+      assert.ok(f.waiting.total > 0 && f.waiting.median > 0, `${key} waiting`);
+    }
+    assert.equal(flow.all.timeToFinish.leftOut, 2);
+    assert.ok(waitingNow > 0);
   } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -1606,6 +1684,10 @@ test('the Reporting page draws only the server\'s figures: ranges and stages fro
   assert.doesNotMatch(draw, /'Queued'|'Requested'|'Building'|'Live'/, 'the stages come from the server, never typed out');
   assert.match(draw, /el\.style\.setProperty\('--stage-border', look\.border\);/);
   assert.match(draw, /escapeHtml\(s\.status\)/);
+  for (const title of ['Time to finish', 'Sent back', 'Waiting on you']) assert.match(draw, new RegExp(`flow\\('${title}',\\s*'[^']+'`), `${title} has its how-it-is-counted line`);
+  assert.match(draw, /r\.flow\[g\.key\]/, 'flow figures per range, from the server');
+  assert.match(draw, /f\.finished \? .* : '<span class="quiet">none finished in this range<\/span>'/);
+  assert.match(draw, /r\.waitingNow/);
   assert.match(app, /markNav\(reporting \? 'reporting' :/);
   assert.match(app, /if \(reporting\) \{\s*await drawReporting\(\);/);
 });

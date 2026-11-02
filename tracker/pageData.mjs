@@ -20,7 +20,7 @@ import { compareWithinStatus } from '../scripts/lib/loopStatuses.mjs';
 
 const { OPERATOR_LANE, WAITING, CANNOT_TELL, waitingVerdict } = waitingOnOperator;
 const { isMachineComment, stripMachineMarker } = machineComment;
-const { STAGE_ORDER, LIVE, TERMINAL_STATUSES, statusOf } = loopStatuses;
+const { STAGE_ORDER, LIVE, QUEUED, REWORK, OPERATOR_HELD_STATUSES, TERMINAL_STATUSES, statusOf } = loopStatuses;
 const { findPullRequest } = mergeOnComment;
 
 /**
@@ -253,6 +253,74 @@ function finishedAt(store, ticket) {
 }
 
 /**
+ * A ticket's status history as [time in ms, status] steps, oldest first: its
+ * filing, then every status change. Steps whose time cannot be read are
+ * left out.
+ */
+function statusSteps(store, ticket) {
+  const steps = [];
+  for (const e of store.listEvents(ticket.id)) {
+    if (e.field !== 'status' && e.field !== 'created') continue;
+    const at = Date.parse(e.at);
+    if (!Number.isNaN(at)) steps.push([at, e.to]);
+  }
+  return steps;
+}
+
+/**
+ * How a finished ticket's work flowed, from its status steps up to `doneAt`
+ * (ms, when it last entered Live):
+ *  - toFinish: ms from first entering Queued to doneAt, or null when it
+ *    never entered Queued (an import, or a ticket filed straight past it);
+ *  - sentBack: whether it ever entered Rework;
+ *  - waited: ms spent in the operator's two stages (Needs your input,
+ *    Ready to launch) before doneAt.
+ */
+function flowOf(steps, doneAt) {
+  const queued = steps.find(([, status]) => status === QUEUED);
+  let waited = 0;
+  steps.forEach(([at, status], i) => {
+    if (at >= doneAt || !OPERATOR_HELD_STATUSES.includes(status)) return;
+    const until = i + 1 < steps.length ? Math.min(steps[i + 1][0], doneAt) : doneAt;
+    waited += Math.max(0, until - at);
+  });
+  return {
+    toFinish: queued && queued[0] <= doneAt ? doneAt - queued[0] : null,
+    sentBack: steps.some(([at, status]) => status === REWORK && at <= doneAt),
+    waited,
+  };
+}
+
+/** The middle of a list of numbers (the mean of the middle two when even); null when empty. */
+function median(values) {
+  if (!values.length) return null;
+  const sorted = values.slice().sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+/**
+ * One range's flow figures from the flows of the tickets finished in it.
+ * Durations are in ms; a figure with nothing to count is null, never 0.
+ */
+function flowFigures(flows) {
+  const timed = flows.map((f) => f.toFinish).filter((ms) => ms != null);
+  const waits = flows.map((f) => f.waited);
+  const sentBack = flows.filter((f) => f.sentBack).length;
+  return {
+    finished: flows.length,
+    timeToFinish: {
+      counted: timed.length,
+      leftOut: flows.length - timed.length,
+      median: median(timed),
+      longest: timed.length ? Math.max(...timed) : null,
+    },
+    sentBack: { count: sentBack, share: flows.length ? sentBack / flows.length : null },
+    waiting: { total: flows.length ? waits.reduce((a, b) => a + b, 0) : null, median: median(waits) },
+  };
+}
+
+/**
  * The Reporting page's figures for one project (`project`, a slug) or, with
  * none, every project:
  *  - finished: how many tickets entered Live in each REPORT_RANGES range,
@@ -260,7 +328,12 @@ function finishedAt(store, ticket) {
  *  - started: how many tickets were filed in each range;
  *  - open: a count for every stage that is not terminal (not Live), in the
  *    contract's STAGE_ORDER, with the colour chosen for it in Settings (or
- *    null).
+ *    null);
+ *  - flow: per range, for the tickets finished in it (flowOf, flowFigures):
+ *    time from first Queued to Live (median and longest, leaving out and
+ *    counting those never Queued), how many went to Rework at least once
+ *    and their share, and total and median time in the operator's stages;
+ *  - waitingNow: how many tickets sit in the operator's stages now.
  * A range counts what happened in the last `days` days before `now`.
  * Null when `project` names no project.
  */
@@ -273,13 +346,16 @@ export function reportsOf(store, { project = null, now = Date.now() } = {}) {
   const zero = () => Object.fromEntries(REPORT_RANGES.map((r) => [r.key, 0]));
   const finished = zero();
   const started = zero();
+  const inRange = (r, when) => r.days == null || (when > now - r.days * DAY_MS && when <= now);
   const tally = (counts, at) => {
     const when = Date.parse(at);
     if (Number.isNaN(when)) return;
     for (const r of REPORT_RANGES) {
-      if (r.days == null || (when > now - r.days * DAY_MS && when <= now)) counts[r.key] += 1;
+      if (inRange(r, when)) counts[r.key] += 1;
     }
   };
+  const flows = Object.fromEntries(REPORT_RANGES.map((r) => [r.key, []]));
+  let waitingNow = 0;
   const colours = store.stageColours();
   const openStages = STAGE_ORDER.filter((name) => !TERMINAL_STATUSES.includes(statusOf(name)));
   const open = new Map(openStages.map((name) => [statusOf(name), 0]));
@@ -287,8 +363,16 @@ export function reportsOf(store, { project = null, now = Date.now() } = {}) {
     for (const ticket of store.listTickets(p.slug)) {
       tally(started, ticket.createdAt);
       const done = finishedAt(store, ticket);
-      if (done) tally(finished, done);
+      if (done) {
+        tally(finished, done);
+        const doneAt = Date.parse(done);
+        if (!Number.isNaN(doneAt)) {
+          const flow = flowOf(statusSteps(store, ticket), doneAt);
+          for (const r of REPORT_RANGES) if (inRange(r, doneAt)) flows[r.key].push(flow);
+        }
+      }
       if (open.has(ticket.status)) open.set(ticket.status, open.get(ticket.status) + 1);
+      if (OPERATOR_HELD_STATUSES.includes(ticket.status)) waitingNow += 1;
     }
   }
   return {
@@ -298,5 +382,7 @@ export function reportsOf(store, { project = null, now = Date.now() } = {}) {
     finished,
     started,
     open: openStages.map((name) => ({ status: name, count: open.get(statusOf(name)), colour: colours[statusOf(name)] ?? null })),
+    flow: Object.fromEntries(REPORT_RANGES.map((r) => [r.key, flowFigures(flows[r.key])])),
+    waitingNow,
   };
 }
