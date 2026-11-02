@@ -138,6 +138,8 @@ button.action:disabled { opacity: 0.4; cursor: default; }
 .quick .command pre { flex: 1; min-width: 0; margin: 0; }
 .offscreen { position: fixed; left: -9999px; top: 0; }
 .quick form.merge-action, .quick form.close-action { margin-bottom: 1.25rem; }
+/* Every button on a ticket's page is green, Delete included (SP-76); the tag chips' small × keeps its own look. */
+.quick button, details.details form.copy button, details.edit button:not(.remove-tag) { background: #00AA00; border: 1px solid #006600; border-radius: 10px; color: #fff; cursor: pointer; }
 .quick form.merge-action button, .quick form.close-action button { font-weight: 700; padding: 0.6rem 2rem; }
 .quick form.merge-action p, .quick form.close-action p { margin: 0.4rem 0 0; font-size: 0.9em; }
 details.details { border-top: var(--hairline); padding-top: 0.75rem; }
@@ -155,7 +157,6 @@ form.colours .row { display: flex; gap: 1rem; align-items: center; margin-top: 1
 button.action { display: inline-flex; padding: 0.2rem; margin-right: 0.15rem; border: 0; border-radius: 4px; background: transparent; color: var(--quiet); cursor: pointer; }
 button.action:hover { color: var(--red); background: #fbe9e9; }
 .quick form.delete-action { margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--line); }
-.quick form.delete-action button { color: var(--red); border: 1px solid var(--red); background: #fff; border-radius: 6px; cursor: pointer; }
 .quick form.delete-action .note { margin-left: 1rem; }
 .quick form.delete-action p { margin: 0.4rem 0 0; font-size: 0.9em; }
 /* The ticket page's Change panel (render.mjs renderEditPanel). */

@@ -1673,6 +1673,18 @@ test('the Reporting page draws only the server\'s figures: ranges and stages fro
   assert.match(app, /if \(reporting\) \{\s*await drawReporting\(\);/);
 });
 
+test('every button on a ticket\'s page is green with a darker border and rounded corners; other pages keep theirs', () => {
+  const css = readFileSync(WEB('app.css'), 'utf8');
+  const rule = /^\.quick button, details\.details form\.copy button, details\.edit button:not\(\.remove-tag\) \{([^}]*)\}/m.exec(css);
+  assert.ok(rule, 'one rule covers Copy, Merge, Close, Post reply, Delete, the Change panel and the Details Copy');
+  for (const part of ['background: #00AA00;', 'border: 1px solid #006600;', 'border-radius: 10px;', 'color: #fff;']) assert.ok(rule[1].includes(part), part);
+  // Delete no longer overrides the green with its old red outline.
+  assert.doesNotMatch(css, /\.quick form\.delete-action button \{/);
+  // Scoped to the ticket page: the plain button rule every other page uses is untouched.
+  assert.match(css, /^button \{ font: inherit; padding: 0\.4rem 1rem; \}$/m);
+  assert.doesNotMatch(css, /^button \{[^}]*#00AA00/m);
+});
+
 // ── People ───────────────────────────────────────────────────────────────────
 
 test('People is in the header before Settings, served at /people to a browser, and its data needs a sign-in', async () => {
