@@ -31,7 +31,7 @@ npm run clickup -- queue --claimable                                   # FIRST L
 npm run clickup -- claim --task <id>                                   # safe claim; exit 3 = moved or still waits on a ticket, take the next
 npm run clickup -- get --task <id>                                     # header + body; also shows any recorded PR and send-back rounds
 npm run clickup -- comments --task <id>                                # the review notes live here on a Rework ticket
-npm run clickup -- pr-opened --task <id> --pr <pr-url>                 # record the PR — REQUIRED, and it verifies itself
+npm run clickup -- pr-opened --task <id> --pr <pr-url> --human-hours <N> --body-file -   # record the PR — REQUIRED, and it verifies itself
 npm run clickup -- status --task <id> --status "In review"             # hand off (assignees auto-cleared)
 npm run clickup -- ask --task <id> --status "Needs your input" --body-file -   # escalate: card + status together
 npm run clickup -- comment --task <id> --body-file -                   # a plain note
@@ -198,12 +198,27 @@ Exit **0** nothing of his / **3** something IS his / **1** could not tell.
 7. **Record the PR on the ticket — with the command, and check what it says.**
 
    ```bash
-   npm run clickup -- pr-opened --task <id> --pr <pr-url>
+   echo "Why that estimate: <one line>" | \
+     npm run clickup -- pr-opened --task <id> --pr <pr-url> --human-hours <N> --body-file -
    ```
 
    It refuses if the PR body has no link back to the ticket, posts the one
    line the review and merge steps read (`PR opened: <url>`), and parses it
    back. **A non-zero exit fails the run** — do not hand the ticket to review.
+
+   **`--human-hours` goes on every time.** It is the Reporting page's count of
+   how much human programmer work the loops did (SP-78). Estimate it from the
+   finished pull request, the same way every time: the hours an experienced
+   programmer **new to this code** would take to read the ticket, find their
+   way around the files it touches, make the change, write the tests and get
+   it through review. Not how long this pass took, and not a guess at what
+   Dane would pay. Whole or half hours, more than 0 and at most 200 (anything
+   else exits 2 and writes nothing; a job worth more than 200 should have been
+   sliced). The reason is ONE line on stdin, starting `Why that estimate:`,
+   naming what drove the number (e.g. "Why that estimate: a new module with
+   tests, two existing tests extended, one skill file edited"). On a `Rework`
+   ticket, the newest `PR opened:` comment is the one counted, so if you
+   record the PR again, estimate the whole pull request as it now stands.
 
 8. **Hand off to review.** `npm run clickup -- status --task <id> --status
    "In review"`. Leave it unassigned (it is the machine's turn). **Do NOT

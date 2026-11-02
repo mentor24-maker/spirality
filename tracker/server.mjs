@@ -51,7 +51,7 @@ import { hostname } from 'node:os';
 import { promisify } from 'node:util';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { openStore, StoreError } from './store.mjs';
-import { boardOf, projectDetailsOf, projectsList, reportsOf, stageColoursOf, threadOf, waitingFor } from './pageData.mjs';
+import { boardOf, projectDetailsOf, projectsList, reportsOf, searchTickets, stageColoursOf, threadOf, waitingFor } from './pageData.mjs';
 import { createNotifier, DEFAULT_FROM, MAIL_FROM, MAIL_KEY, mailEnvFromDoppler, mailSettingsFromEnv, resendSender } from './notify.mjs';
 import { sendInvite, sendResetLink } from './account.mjs';
 import { loadProjectConfig } from '../lib/projectConfig.mjs';
@@ -128,7 +128,7 @@ const PRIORITIES = Object.freeze(Object.keys(loopStatuses.PRIORITY_RANK)
  * form), `/settings` (the stage colours) and `/set-password` (an emailed
  * link's page, `?link=<token>`, which the page reads and never sends back
  * in an address) all answer the page itself, so each address opens its own view;
- * `/projects`, `/projects/<project>` and `/people` do too, for a browser opening them,
+ * `/projects`, `/projects/<project>`, `/people` and `/search` do too, for a browser opening them,
  * and `/projects/<project>/edit` (the Edit project form) always does.
  */
 const WEB_DIR = new URL('./web/', import.meta.url);
@@ -159,11 +159,12 @@ const PAGE_HEADERS = Object.freeze({
  * The page file a GET of `pathname` answers with, or null when it is not a
  * page address. `/projects` is both the Projects screen and the call that
  * lists them, and `/projects/<project>` both a project's details page and
- * the call that reads them (`/projects/new` is the Create Project form): a browser opening the address asks for HTML and
+ * the call that reads them (`/projects/new` is the Create Project form), and
+ * `/search?q=<term>` both the search results page and the search itself: a browser opening the address asks for HTML and
  * gets the page; the page's own call asks for anything and gets the data.
  */
 function pageFile(pathname, accept = '') {
-  if (/^\/(?:projects(?:\/[^/]+)?|people)$/.test(pathname)) return /\btext\/html\b/.test(accept) ? 'index.html' : null;
+  if (/^\/(?:projects(?:\/[^/]+)?|people|search)$/.test(pathname)) return /\btext\/html\b/.test(accept) ? 'index.html' : null;
   if (pathname === '/' || /^\/(?:tasks|board|list|new|settings|set-password|reporting)$/.test(pathname) || /^\/(?:t|board|list)\/[^/]+$/.test(pathname)) return 'index.html';
   if (/^\/projects\/[^/]+\/edit$/.test(pathname)) return 'index.html';
   const m = /^\/web\/([^/]+)$/.exec(pathname);
@@ -461,6 +462,12 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
       const reports = reportsOf(store, { project: slug == null || slug === '' ? null : slug });
       if (!reports) throw new HttpError(404, 'unknown-project', `no project "${slug}".`);
       return [200, reports];
+    }
+
+    // Dane's page: the search results page's tickets, across every project,
+    // best matches first (tracker/pageData.mjs searchTickets). Read-only.
+    if (parts.length === 1 && parts[0] === 'search' && method === 'GET') {
+      return [200, searchTickets(store, url.searchParams.get('q'))];
     }
 
     // Dane's page: one project's details page.

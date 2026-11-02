@@ -40,6 +40,7 @@ import {
 } from './lib/loopTrail.mjs';
 import { buildCard, cardSurvived, findBlockquoteLines, CONTEXT_MIN_WORDS, CONTEXT_MAX_WORDS } from './lib/operatorCard.mjs';
 import { isMachineComment, stripMachineMarker } from './lib/machineComment.mjs';
+import { parseHumanHours, findHumanHours } from '../lib/humanHours.js';
 import { createClickupTracker } from './tracker/clickupTracker.mjs';
 import { createApiTracker, trackerTokenEnv } from './tracker/apiTracker.mjs';
 
@@ -189,7 +190,7 @@ npm run clickup -- <command> [flags]      (Loop Queue: list ${LOOP_QUEUE_LIST}, 
   claim --task <id>                               safe claim: reads the status and guards the write on it
   status --task <id> --status S [--if-status S] [--assign <uid>] [--clear-assignees] [--no-auto-assign] [--no-card]
   ask --task <id> [--status "Needs your input"|"Ready to launch"] --body-file <f|-> [--no-move] [--after-his-answer]
-  pr-opened --task <id> --pr <url|number> [--repo owner/name] [--if-missing] [--body-file <f|->]
+  pr-opened --task <id> --pr <url|number> [--repo owner/name] [--if-missing] [--human-hours <N>] [--body-file <f|->]
   verdict --task <id> --pass|--fail --if-status "In review" [--body-file <f|->] [--no-guard] [--fourth-round-anyway]
   priority --task <id> --priority urgent|high|normal|low [--operator-asked]
   tag --task <id> --add <name> | --remove <name>  e.g. wont-do, deferred, an epic name
@@ -705,6 +706,13 @@ if (cmd === 'whoami') {
 } else if (cmd === 'pr-opened') {
   const task = arg('task'), prArg = arg('pr');
   if (!task || !prArg) usage();
+  // Checked before anything is read or written: a bad estimate writes nothing (SP-78).
+  let humanHours = null;
+  if (flag('human-hours')) {
+    const parsed = parseHumanHours(arg('human-hours'));
+    if (!parsed.ok) { console.error(`--human-hours: ${parsed.why}. Nothing was written.`); process.exit(2); }
+    humanHours = parsed.hours;
+  }
   const m = /^https:\/\/github\.com\/([^/\s]+)\/([^/\s]+)\/pull\/(\d+)/.exec(prArg.trim());
   let repo = arg('repo'), prNumber;
   if (m) { repo = repo || `${m[1]}/${m[2]}`; prNumber = Number(m[3]); } else if (/^\d+$/.test(prArg.trim())) {
@@ -728,11 +736,17 @@ if (cmd === 'whoami') {
     console.log(`Task ${task}: PR #${prNumber} is already recorded — nothing written.`);
   }
   if (!already) {
-    const text = prOpenedComment(prUrl, arg('body-file') ? readBody(arg('body-file')) : '');
+    const text = prOpenedComment(prUrl, arg('body-file') ? readBody(arg('body-file')) : '', { humanHours });
     await postComment(task, { comment_text: text });
-    const landed = prTrailLanded(await readComments(task), prNumber);
+    const after = await readComments(task);
+    const landed = prTrailLanded(after, prNumber);
     if (!landed.ok) { console.error(`\nThe "PR opened" trail did NOT land: ${landed.why}. Fix the comment by hand before handing this to review.\n`); process.exit(1); }
+    if (humanHours != null && findHumanHours(after) !== humanHours) {
+      console.error(`\nThe PR was recorded, but the human-hours estimate (${humanHours}) does NOT read back from it. Fix the comment by hand.\n`);
+      process.exit(1);
+    }
     console.log(`Task ${task}: PR #${prNumber} recorded (${prUrl}), read back and parsed by the gate's own reader.`);
+    if (humanHours != null) console.log(`Task ${task}: human-hours estimate ${humanHours} recorded and read back.`);
   }
   reportLimits();
 
