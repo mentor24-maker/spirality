@@ -26,7 +26,7 @@
  * an emailed link's own page. The link's token is sent only in a JSON body,
  * never in an address.
  */
-import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, renderCloseAction, renderMergeAction, renderQuickAction, renderTrail, stageLooks, tabTitle, bellColour, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot } from './render.mjs';
+import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, renderCloseAction, renderMergeAction, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot } from './render.mjs';
 
 /** Where an earlier version of the page kept a pasted token; removed on load, never read. */
 const OLD_TOKEN_KEY = 'tracker-token';
@@ -606,9 +606,10 @@ async function drawTasks(view, opts = {}) {
  * id of the ticket the box just filed, named in a note after the redraw.
  */
 async function drawProject(slug, view, { adding = false, filed = null } = {}) {
-  const [board, looks] = await Promise.all([
+  const [board, looks, { projects }] = await Promise.all([
     api('GET', `/projects/${encodeURIComponent(slug)}/board`),
     api('GET', '/stage-colours').then(stageLooks, () => ({})),
+    api('GET', '/projects'),
   ]);
   // Opening a project selects it, and remembers the view: "Tasks" comes back here.
   try {
@@ -660,7 +661,7 @@ async function drawProject(slug, view, { adding = false, filed = null } = {}) {
   main.innerHTML = `
     <h1>Tasks</h1>
     <div class="toolbar">
-      <a href="/projects">Change project</a>
+      ${renderProjectPicker(projects, board.project)}
       <nav class="views" aria-label="View">${toggle}</nav>
     </div>
     ${filed ? `<p class="filed-note">Filed <a href="/t/${encodeURIComponent(filed)}">${escapeHtml(filed)}</a></p>` : ''}
@@ -688,6 +689,11 @@ async function drawProject(slug, view, { adding = false, filed = null } = {}) {
   }
   putTrail([{ label: board.projectName, href: '/projects' }, { label: view === 'board' ? 'Board' : 'List' }]);
   wireAddTask(board.project, view, adding);
+  // Picking a project opens it in this same view, as a link would: Back returns here.
+  main.querySelector('.project-picker select').addEventListener('change', (e) => {
+    history.pushState(null, '', at(view, e.target.value));
+    route();
+  });
   // Delete: ask first, naming the ticket; then redraw from the server. A
   // refusal is said in words and nothing leaves the list until a redraw.
   const listNote = main.querySelector('.list-note');

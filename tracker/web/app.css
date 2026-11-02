@@ -66,6 +66,8 @@ form.sign-in input[readonly] { background: var(--machine); color: var(--quiet); 
 button { font: inherit; padding: 0.4rem 1rem; }
 main.wide { max-width: none; }
 .toolbar { display: flex; gap: 2rem; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
+.toolbar .project-picker { font-weight: 600; }
+.toolbar .project-picker select { font: inherit; font-weight: normal; padding: 0.35rem; margin-left: 0.25rem; }
 table.projects, table.counts { border: var(--hairline); border-radius: 8px; border-collapse: separate; border-spacing: 0; overflow: hidden; }
 table.projects tbody tr:last-child td, table.counts tbody tr:last-child td { border-bottom: 0; }
 table.projects tbody tr:hover { background: #f5f5f7; }

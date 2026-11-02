@@ -9,7 +9,7 @@ import { openStore } from './store.mjs';
 import { startServer } from './server.mjs';
 import { seedDemo, tickingClock } from './demoData.mjs';
 import { reportsOf, REPORT_RANGES } from './pageData.mjs';
-import { escapeHtml, renderComment, renderInline, renderMarkdown, renderQuickAction, renderCommands, cardCommands, cardAsk, renderMergeAction, mergeQuestion, renderCloseAction, closeQuestion, cardMove, renderTrail, cardContext, firstParagraph, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD } from './web/render.mjs';
+import { escapeHtml, renderComment, renderInline, renderMarkdown, renderQuickAction, renderCommands, cardCommands, cardAsk, renderMergeAction, mergeQuestion, renderCloseAction, closeQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD } from './web/render.mjs';
 import { loadProjectConfig } from '../lib/projectConfig.mjs';
 import operatorCard from '../lib/operatorCard.js';
 import machineComment from '../lib/machineComment.js';
@@ -1714,4 +1714,26 @@ test('the People page escapes every name and email, offers the form and Cancel t
   // Each write is read back with GET /people before the page says it worked.
   assert.equal(draw.match(/await api\('GET', '\/people'\)\.catch/g).length, 2);
   assert.match(draw, /putTrail\(\[\{ label: 'People' \}\]\)/);
+});
+
+test('the Tasks toolbar picks a project from a dropdown, "Project: ", the one in view selected', () => {
+  const projects = [{ slug: 'alpha', name: 'Alpha' }, { slug: 'beta', name: 'Beta' }];
+  assert.equal(renderProjectPicker(projects, 'beta'),
+    '<label class="project-picker">Project: <select name="project">'
+    + '<option value="alpha">Alpha</option><option value="beta" selected>Beta</option></select></label>');
+  // One project: still shown, selected.
+  assert.equal(renderProjectPicker([projects[0]], 'alpha'),
+    '<label class="project-picker">Project: <select name="project"><option value="alpha" selected>Alpha</option></select></label>');
+  // Names and slugs are typed by people: escaped.
+  const odd = renderProjectPicker([{ slug: 'a"b', name: 'R&D <b>' }], 'a"b');
+  assert.doesNotMatch(odd, /<b>|a"b/);
+  assert.match(odd, /<option value="a&quot;b" selected>R&amp;D &lt;b&gt;<\/option>/);
+  // The board and list draw it from GET /projects, in place of the old link, and a pick opens that project in the same view.
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const draw = app.slice(app.indexOf('async function drawProject'), app.indexOf('async function copyText'));
+  assert.match(draw, /api\('GET', '\/projects'\),\n  \]\);/);
+  assert.match(draw, /<div class="toolbar">\s*\$\{renderProjectPicker\(projects, board\.project\)\}\s*<nav class="views"/);
+  assert.doesNotMatch(app, /Change project/);
+  assert.match(draw, /querySelector\('\.project-picker select'\)\.addEventListener\('change', \(e\) => \{\s*history\.pushState\(null, '', at\(view, e\.target\.value\)\);\s*route\(\);/);
+  assert.match(readFileSync(WEB('app.css'), 'utf8'), /\.toolbar \.project-picker select \{/);
 });
