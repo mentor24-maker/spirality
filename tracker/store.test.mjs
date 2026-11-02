@@ -550,14 +550,14 @@ test('deleting an imported ticket keeps its map rows, so the import cannot file 
 test('a project keeps its web address, logo and owner, and reads them back; none given is null', () => {
   const { store, human, cleanup } = fixture();
   try {
-    assert.deepEqual(store.getProject('alpha'), { slug: 'alpha', name: 'Alpha', prefix: 'AL', operator: human.id, url: null, logo: null, owner: null });
+    assert.deepEqual(store.getProject('alpha'), { slug: 'alpha', name: 'Alpha', prefix: 'AL', operator: human.id, url: null, logo: null, owner: null, repo: null });
     const made = store.createProject({
       slug: 'beta', name: 'Beta', prefix: 'BE',
       url: 'https://beta.example', logo: 'https://beta.example/logo.png', owner: human.id,
     });
     assert.deepEqual(made, {
       slug: 'beta', name: 'Beta', prefix: 'BE', operator: null,
-      url: 'https://beta.example', logo: 'https://beta.example/logo.png', owner: human.id,
+      url: 'https://beta.example', logo: 'https://beta.example/logo.png', owner: human.id, repo: null,
     });
     assert.deepEqual(store.getProject('beta'), made);
     assert.deepEqual(store.listProjects().map((p) => p.slug), ['alpha', 'beta']);
@@ -590,7 +590,7 @@ test('updateProject changes only the name, web address, logo and owner it is giv
     const changed = store.updateProject('alpha', { name: 'Alpha Two', url: 'https://alpha.example', owner: human.id });
     assert.deepEqual(changed, {
       slug: 'alpha', name: 'Alpha Two', prefix: 'AL', operator: human.id,
-      url: 'https://alpha.example', logo: null, owner: human.id,
+      url: 'https://alpha.example', logo: null, owner: human.id, repo: null,
     });
     assert.deepEqual(store.getProject('alpha'), changed);
     // Only what is given changes; an empty address and a null owner are none.
@@ -650,6 +650,38 @@ test('deleteProject removes a project with no tickets, and refuses one with tick
   } finally { cleanup(); }
 });
 
+test('a project keeps its GitHub repository as owner/name: a github.com address is saved the same way, set, changed and cleared, and read back', () => {
+  const { store, cleanup } = fixture();
+  try {
+    assert.equal(store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE', repo: 'my-org/my-app' }).repo, 'my-org/my-app');
+    assert.equal(store.getProject('beta').repo, 'my-org/my-app');
+    for (const pasted of ['https://github.com/my-org/my.app', 'https://github.com/my-org/my.app/', 'https://github.com/my-org/my.app.git', 'HTTPS://GitHub.com/my-org/my.app']) {
+      assert.equal(store.updateProject('beta', { repo: pasted }).repo, 'my-org/my.app', pasted);
+    }
+    assert.equal(store.getProject('beta').repo, 'my-org/my.app');
+    assert.equal(store.updateProject('beta', { name: 'Beta Two' }).repo, 'my-org/my.app', 'only what is given changes');
+    assert.equal(store.updateProject('beta', { repo: '' }).repo, null, 'an empty box is none');
+    assert.equal(store.updateProject('beta', { repo: 'my-org/again' }).repo, 'my-org/again');
+    assert.equal(store.updateProject('beta', { repo: null }).repo, null);
+    assert.equal(store.createProject({ slug: 'gamma', name: 'G', prefix: 'GA', repo: '' }).repo, null);
+  } finally { cleanup(); }
+});
+
+test('a GitHub repository that is not owner/name or a github.com address is refused, and nothing is written', () => {
+  const { store, cleanup } = fixture();
+  try {
+    store.updateProject('alpha', { repo: 'my-org/my-app' });
+    const before = store.getProject('alpha');
+    for (const bad of ['not a repo', 'my-app', 'my-org/my-app/extra', 'https://gitlab.com/my-org/my-app', 'http://github.com/my-org/my-app',
+      'github.com/my-org/my-app', ' my-org/my-app', 'my org/my-app', 'my-org/..', 'my-org/.', 'my-org/', '/my-app', 42]) {
+      assert.throws(() => store.updateProject('alpha', { repo: bad }), { code: 'bad-repo' }, JSON.stringify(bad));
+      assert.deepEqual(store.getProject('alpha'), before, JSON.stringify(bad));
+      assert.throws(() => store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE', repo: bad }), { code: 'bad-repo' }, JSON.stringify(bad));
+    }
+    assert.deepEqual(store.listProjects().map((p) => p.slug), ['alpha']);
+  } finally { cleanup(); }
+});
+
 test('the people are the human actors only, by id and name, never a token', () => {
   const { store, human, machine, cleanup } = fixture();
   try {
@@ -683,7 +715,7 @@ test('a database made before projects had a web address, logo and owner gains th
 
     const store = openStore(path);
     try {
-      assert.deepEqual(store.getProject('old'), { slug: 'old', name: 'Old', prefix: 'OL', operator: 1, url: null, logo: null, owner: null });
+      assert.deepEqual(store.getProject('old'), { slug: 'old', name: 'Old', prefix: 'OL', operator: 1, url: null, logo: null, owner: null, repo: null });
       assert.deepEqual(store.listTickets('old').map((t) => [t.id, t.name, t.status, t.version]), [['OL-1', 'First', 'queued', 4], ['OL-2', 'Second', 'live', 1]]);
       // The next ticket still takes the old project's next number.
       assert.equal(store.fileTicket({ project: 'old', actor: 1, name: 'Third', status: 'queued' }).id, 'OL-3');
@@ -696,7 +728,7 @@ test('a database made before projects had a web address, logo and owner gains th
     const raw = new DatabaseSync(path);
     try {
       assert.deepEqual(raw.prepare('PRAGMA table_info(projects)').all().map((c) => c.name),
-        ['slug', 'name', 'prefix', 'operator', 'next_number', 'url', 'logo', 'owner']);
+        ['slug', 'name', 'prefix', 'operator', 'next_number', 'url', 'logo', 'owner', 'repo']);
       assert.deepEqual(raw.prepare("SELECT * FROM tickets WHERE id IN ('OL-1', 'OL-2') ORDER BY id").all(), ticketsBefore);
     } finally { raw.close(); }
   } finally { rmSync(dir, { recursive: true, force: true }); }
@@ -1069,7 +1101,8 @@ test('today\'s database gains emails, passwords, sessions and links, and every e
     try {
       assert.deepEqual(raw.prepare('PRAGMA table_info(actors)').all().map((c) => c.name), ['id', 'kind', 'name', 'token_hash', 'email', 'password_hash']);
       assert.deepEqual(raw.prepare('SELECT id, kind, name, token_hash FROM actors ORDER BY id').all(), before.actors);
-      for (const t of ['projects', 'tickets', 'comments', 'stage_colours']) {
+      assert.deepEqual(raw.prepare('SELECT slug, name, prefix, operator, next_number, url, logo, owner FROM projects ORDER BY rowid').all(), before.projects);
+      for (const t of ['tickets', 'comments', 'stage_colours']) {
         assert.deepEqual(raw.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all(), before[t], t);
       }
     } finally { raw.close(); }

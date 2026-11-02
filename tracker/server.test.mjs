@@ -319,7 +319,7 @@ test('PATCH /projects/:slug changes a project\'s name, web address, logo and own
       ['alpha', 'AL', 'Alpha Two', 'https://alpha.example', 'https://alpha.example/l.png', { id: f.human.id, name: 'Operator' }]);
     assert.deepEqual(f.store.getProject('alpha'), {
       slug: 'alpha', name: 'Alpha Two', prefix: 'AL', operator: f.human.id,
-      url: 'https://alpha.example', logo: 'https://alpha.example/l.png', owner: f.human.id,
+      url: 'https://alpha.example', logo: 'https://alpha.example/l.png', owner: f.human.id, repo: null,
     });
     const listed = (await f.call('GET', '/projects')).body.projects.find((p) => p.slug === 'alpha');
     assert.equal(listed.name, 'Alpha Two');
@@ -509,7 +509,7 @@ test('admin: create-actor prints only the token on stdout, and that token signs 
     const store = openStore(db);
     try {
       assert.deepEqual(store.actorForToken(token), { id: 1, kind: 'machine', name: 'Build loop' });
-      assert.deepEqual(store.getProject('beta'), { slug: 'beta', name: 'Beta', prefix: 'BE', operator: 2, url: null, logo: null, owner: null });
+      assert.deepEqual(store.getProject('beta'), { slug: 'beta', name: 'Beta', prefix: 'BE', operator: 2, url: null, logo: null, owner: null, repo: null });
       assert.equal(store.getProject('gamma'), null);
       const server = await startServer({ store, port: 0 });
       try {

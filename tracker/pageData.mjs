@@ -124,7 +124,7 @@ function namedActor(store, id) {
 
 /**
  * Every project, for the Projects screen: slug, name, ticket-id prefix, web
- * address, logo and owner by name (each null when it has none), and how many
+ * address, logo, owner by name and GitHub repository (each null when it has none), and how many
  * of its tickets are open (any status but Live), in the store's order.
  */
 export function projectsList(store) {
@@ -135,14 +135,15 @@ export function projectsList(store) {
     url: p.url,
     logo: p.logo,
     owner: namedActor(store, p.owner),
+    repo: p.repo,
     open: store.listTickets(p.slug, { open: true }).length,
   }));
 }
 
 /**
  * One project's details page: its slug, name, ticket-id prefix, its
- * operator by name (null when it has none), its web address, logo and owner
- * by name (each null when it has none), how many tickets are open, and
+ * operator by name (null when it has none), its web address, logo, owner
+ * by name and GitHub repository (each null when it has none), how many tickets are open, and
  * a count for each of the eight statuses in the contract's STAGE_ORDER, the
  * board's own column order. Null when there is no such project.
  */
@@ -161,6 +162,7 @@ export function projectDetailsOf(store, slug) {
     url: project.url,
     logo: project.logo,
     owner: namedActor(store, project.owner),
+    repo: project.repo,
     open: store.listTickets(project.slug, { open: true }).length,
     statuses: STAGE_ORDER.map((name) => ({ status: name, count: counts.get(statusOf(name)) })),
   };
