@@ -714,7 +714,13 @@ Written down so nobody mistakes them for the contract:
 - **Spirality's relay files the conflict ticket but checks nothing locally
   and announces no stall.** On a conflict it files the `Queued` catch-up
   ticket and records it (`CONFLICT TICKET FILED: PR #<n>`) on the waiting
-  ticket, as above. It runs no `git merge-tree` cross-check, so every
+  ticket, as above. That record counts as "on file" only while its ticket
+  is in `Queued`, `Rework`, `Building` or `In review`: once the catch-up has
+  left those (it landed in `Ready to launch` or `Live`, or is parked on
+  Dane), a fresh conflict on the same PR files a new catch-up ticket and the
+  record says the first one landed but `main` moved again. A catch-up ticket
+  that cannot be read is reported as unchecked, never as on file. It runs
+  no `git merge-tree` cross-check, so every
   hand-off reads "no local check was attempted" and the ticket asks its
   builder to find out first. It has no bus, so a stalled hand-off is not
   announced; a filing that fails is retried on the next pass.
