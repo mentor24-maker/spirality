@@ -5,8 +5,9 @@
  * whole queue as a board or as a list, see one project's details, add,
  * change or delete a project (a person only), file a new request from the
  * Tasks page's Add Task box, copy a ticket into another
- * project, choose a colour for each stage on the Settings page, and read the
- * Reporting page's figures. Plain browser
+ * project, choose a colour for each stage on the Settings page, read the
+ * Reporting page's figures, and see and invite people on the People page
+ * (a person only). Plain browser
  * JavaScript, no packages,
  * no build step; tracker/server.mjs serves it.
  *
@@ -1224,6 +1225,87 @@ async function drawSettings() {
   });
 }
 
+/**
+ * The People page: everyone who has an account (name and email), the open
+ * invites (email, who invited, when it expires) each with a Cancel button,
+ * and an "Invite someone" form. Inviting emails a 7-day link; the server
+ * makes the invite only if the email went out, and says so if it did not.
+ * After every invite or cancel the page reads the list again and says it
+ * worked only when what it reads agrees. A loop's sign-in sees no form and
+ * no buttons, and the server refuses it anyway.
+ */
+async function drawPeople(done = '', problem = '') {
+  const { people, invites = [] } = await api('GET', '/people');
+  setTitle('People · Tracker');
+  const person = me?.kind === 'human';
+  const personRow = (p) => `
+    <tr><td class="name">${escapeHtml(p.name)}</td><td class="email">${p.email ? escapeHtml(p.email) : '<span class="quiet">no email yet</span>'}</td></tr>`;
+  const inviteRow = (i) => `
+    <tr><td class="email">${escapeHtml(i.email)}</td><td class="by">${escapeHtml(i.invitedBy.name)}</td><td class="expires">${escapeHtml(when(i.expiresAt))}</td>
+      <td class="actions">${person ? `<button type="button" data-cancel="${escapeHtml(i.id)}" data-email="${escapeHtml(i.email)}">Cancel</button>` : ''}</td></tr>`;
+  main.innerHTML = `
+    <h1>People</h1>
+    <p class="note${problem ? ' error' : ' quiet'}" role="status">${escapeHtml(problem || done)}</p>
+    ${person ? `<form class="invite">
+      <label for="invite-email">Invite someone</label>
+      <div class="row"><input id="invite-email" type="email" autocomplete="off" placeholder="their@email.com" required><button type="submit">Send invite</button></div>
+      <span class="hint quiet">They get an email with a link to choose their name and password. It works once, for 7 days.</span>
+    </form>` : ''}
+    <h2>People with an account</h2>
+    <table class="projects people"><thead><tr><th class="name">Name</th><th class="email">Email</th></tr></thead><tbody>${people.map(personRow).join('')}</tbody></table>
+    <h2>Open invites</h2>
+    ${invites.length
+    ? `<table class="projects invites"><thead><tr><th class="email">Email</th><th class="by">Invited by</th><th class="expires">Expires</th><th class="actions"><span class="hidden">Actions</span></th></tr></thead><tbody>${invites.map(inviteRow).join('')}</tbody></table>`
+    : '<p class="quiet">No open invites.</p>'}`;
+  putTrail([{ label: 'People' }]);
+  const note = main.querySelector('p.note');
+  const busy = (text) => { note.className = 'note quiet'; note.textContent = text; };
+  const again = (text, failed) => drawPeople(failed ? '' : text, failed ? text : '')
+    .catch((err) => (err instanceof SignedOut ? drawSignIn() : showError(err)));
+  const form = main.querySelector('form.invite');
+  form?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const email = form.querySelector('input').value.trim();
+    const button = form.querySelector('button');
+    button.disabled = true;
+    busy(`Sending an invite to ${email}…`);
+    let sent;
+    try {
+      sent = await api('POST', '/invites', { email });
+    } catch (err) {
+      if (err instanceof SignedOut) return drawSignIn(`You were signed out; ${email} was not invited.`);
+      note.className = 'note error';
+      note.textContent = err.message;
+      button.disabled = false;
+      return;
+    }
+    // Read back before saying it worked.
+    const back = await api('GET', '/people').catch(() => null);
+    const listed = back?.invites?.some((i) => i.email === email.toLowerCase());
+    again(listed ? sent.sent : `The tracker said the invite was sent, but it is not in the open invites when read back: ${sent.sent}`, !listed);
+  });
+  for (const button of main.querySelectorAll('button[data-cancel]')) {
+    button.addEventListener('click', async () => {
+      const { cancel: id, email } = button.dataset;
+      if (!confirm(`Cancel the invite to ${email}? Its link will stop working.`)) return;
+      button.disabled = true;
+      busy(`Cancelling the invite to ${email}…`);
+      try {
+        await api('DELETE', `/invites/${encodeURIComponent(id)}`);
+      } catch (err) {
+        if (err instanceof SignedOut) return drawSignIn(`You were signed out; the invite to ${email} was not cancelled.`);
+        note.className = 'note error';
+        note.textContent = `Not cancelled: ${err.message}`;
+        button.disabled = false;
+        return;
+      }
+      const back = await api('GET', '/people').catch(() => null);
+      const gone = back && !back.invites?.some((i) => String(i.id) === id);
+      again(gone ? `Cancelled the invite to ${email}; its link no longer works.` : `The tracker said the invite to ${email} was cancelled, but it is still listed when read back.`, !gone);
+    });
+  }
+}
+
 /** Underline the header link (or the bell, for Waiting on you) for the screen showing. */
 function markNav(which) {
   for (const a of document.querySelectorAll('nav.site a')) a.classList.toggle('current', a.dataset.nav === which);
@@ -1254,12 +1336,16 @@ async function route() {
     const isNew = location.pathname === '/new';
     const settings = location.pathname === '/settings';
     const reporting = location.pathname === '/reporting';
-    markNav(reporting ? 'reporting' : settings ? 'settings' : projects || newProject || details || editProject ? 'projects' : ticket || project || tasks || isNew ? 'tasks' : 'waiting');
+    const peoplePage = location.pathname === '/people';
+    markNav(reporting ? 'reporting' : settings ? 'settings' : peoplePage ? 'people' : projects || newProject || details || editProject ? 'projects' : ticket || project || tasks || isNew ? 'tasks' : 'waiting');
     if (reporting) {
       await drawReporting();
       await refreshCount();
     } else if (settings) {
       await drawSettings();
+      await refreshCount();
+    } else if (peoplePage) {
+      await drawPeople();
       await refreshCount();
     } else if (isNew) {
       // The old New request address: the Tasks page with its Add Task box open.
