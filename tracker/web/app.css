@@ -58,6 +58,9 @@ form.copy .row { display: flex; gap: 1rem; align-items: center; margin-top: 0.5r
 form.copy select { font: inherit; padding: 0.4rem; }
 form.sign-in { max-width: 28rem; }
 form.sign-in input { width: 100%; font: inherit; padding: 0.5rem; box-sizing: border-box; margin: 0.5rem 0; }
+form.sign-in > a { margin-left: 1rem; }
+/* "Forgot password?": a button that looks like a link. */
+form.sign-in button.link { background: none; border: none; padding: 0; margin-left: 1rem; color: inherit; text-decoration: underline; cursor: pointer; font: inherit; }
 /* The set-password page's email: shown, never changed there. */
 form.sign-in input[readonly] { background: var(--machine); color: var(--quiet); border: 1px solid var(--line); }
 button { font: inherit; padding: 0.4rem 1rem; }
