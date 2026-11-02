@@ -9,7 +9,7 @@ import { openStore } from './store.mjs';
 import { startServer } from './server.mjs';
 import { seedDemo, tickingClock } from './demoData.mjs';
 import { reportsOf, REPORT_RANGES, searchTickets } from './pageData.mjs';
-import { escapeHtml, renderComment, renderInline, renderMarkdown, renderQuickAction, renderCommands, cardCommands, cardAsk, renderMergeAction, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, cardContext, firstParagraph, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, activeFilters } from './web/render.mjs';
+import { escapeHtml, renderComment, renderInline, renderMarkdown, renderQuickAction, renderCommands, cardCommands, cardAsk, renderMergeAction, renderAnswerIn, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, cardContext, firstParagraph, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, activeFilters } from './web/render.mjs';
 import { loadProjectConfig } from '../lib/projectConfig.mjs';
 import operatorCard from '../lib/operatorCard.js';
 import machineComment from '../lib/machineComment.js';
@@ -132,6 +132,101 @@ test('once Dane answers on the page, the ticket leaves "Waiting on you"', async 
     assert.equal((await f.call('POST', '/tickets/BE-1/comments', { body: { body: 'merge' } })).status, 201);
     assert.ok(!(await f.call('GET', '/waiting')).body.waiting.some((t) => t.id === 'BE-1'));
   } finally { await f.cleanup(); }
+});
+
+// ── His answer is in (SP-93) ─────────────────────────────────────────────────
+
+/** Every ticket on a project's board, flattened, by id. */
+async function boardTickets(f, slug) {
+  const board = (await f.call('GET', `/projects/${slug}/board`)).body;
+  return new Map(board.columns.flatMap((c) => c.tickets).map((t) => [t.id, t]));
+}
+
+test('pressing Merge puts "your answer is in" on the ticket page and the board, until a machine comment is newest', async () => {
+  const f = await fixture({ mergePhrase: 'merge' });
+  try {
+    // BE-1: Ready to launch, a PR, the review's word newest: the Merge button, no note.
+    let thread = (await f.call('GET', '/tickets/BE-1/thread')).body;
+    assert.equal(thread.answerIn, false);
+    assert.match(renderMergeAction(thread), /merge-action/);
+    assert.equal(renderAnswerIn(thread), '');
+    assert.equal((await boardTickets(f, 'beta')).get('BE-1').answerIn, false);
+
+    // He presses Merge: the button posts his word, and the page redraws.
+    assert.equal((await f.call('POST', '/tickets/BE-1/comments', { body: { body: 'merge' } })).status, 201);
+    thread = (await f.call('GET', '/tickets/BE-1/thread')).body;
+    assert.equal(thread.answerIn, true);
+    assert.equal(renderMergeAction(thread), '', 'no second Merge button');
+    assert.match(renderAnswerIn(thread), /Your answer is in\. The relay acts on it at its next pass\./);
+    assert.equal(statusLabel(thread), `Ready to launch · ${ANSWER_IN_NOTE}`);
+    assert.equal((await boardTickets(f, 'beta')).get('BE-1').answerIn, true, 'the board and list say so too');
+
+    // The relay answers (here with a refusal): its comment is newest, the note goes, the button returns.
+    const loopToken = f.store.issueToken(f.loop.id);
+    assert.equal((await f.call('POST', '/tickets/BE-1/comments', { token: loopToken, body: { body: 'MERGE REFUSED: the check is red.' } })).status, 201);
+    thread = (await f.call('GET', '/tickets/BE-1/thread')).body;
+    assert.equal(thread.answerIn, false);
+    assert.match(renderMergeAction(thread), /merge-action/);
+    assert.equal(statusLabel(thread), 'Ready to launch');
+    assert.equal((await boardTickets(f, 'beta')).get('BE-1').answerIn, false);
+  } finally { await f.cleanup(); }
+});
+
+test('a loop writing under his token does not count as his answer', async () => {
+  const f = await fixture();
+  try {
+    const tickets = await boardTickets(f, 'beta');
+    const underToken = [...tickets.values()].find((t) => t.name === 'A question a loop asked under your token');
+    assert.equal(underToken.answerIn, false);
+  } finally { await f.cleanup(); }
+});
+
+test('a ticket outside his two statuses never shows "your answer is in", even with his comment newest', async () => {
+  const f = await fixture();
+  try {
+    for (const [id, t] of await boardTickets(f, 'alpha')) {
+      if (['needs your input', 'ready to launch'].includes(f.store.getTicket(id).status)) continue;
+      assert.equal((await f.call('POST', `/tickets/${id}/comments`, { body: { body: 'any news?' } })).status, 201);
+      assert.equal((await f.call('GET', `/tickets/${id}/thread`)).body.answerIn, false, `${id}: ${t.name}`);
+    }
+    for (const t of (await boardTickets(f, 'alpha')).values()) {
+      if (!['needs your input', 'ready to launch'].includes(f.store.getTicket(t.id).status)) assert.equal(t.answerIn, false, t.id);
+    }
+  } finally { await f.cleanup(); }
+});
+
+test('"your answer is in" and "Waiting on you" never disagree: an answered ticket is never on the list', async () => {
+  const f = await fixture();
+  try {
+    const { waiting } = (await f.call('GET', '/waiting')).body;
+    const listed = new Set(waiting.map((t) => t.id));
+    let answered = 0;
+    for (const slug of ['alpha', 'beta']) {
+      for (const t of (await boardTickets(f, slug)).values()) {
+        if (!t.answerIn) continue;
+        answered += 1;
+        assert.ok(!listed.has(t.id), `${t.id} is answered and on the list`);
+      }
+    }
+    assert.ok(answered >= 1, 'the demo data holds an answered ticket');
+    // The rule is the waiting module's own, not a second copy of it.
+    const source = readFileSync(fileURLToPath(new URL('./pageData.mjs', import.meta.url)), 'utf8');
+    assert.match(source, /operatorSpokeLast\(/);
+  } finally { await f.cleanup(); }
+});
+
+test('once his answer is in, Close and Go stand down too, and the ticket page, board and list draw the note', () => {
+  const closeCard = moveCard('Close');
+  const goCard = intakeCard();
+  assert.match(renderCloseAction({ status: 'needs your input', closePhrase: 'close', comments: [{ body: closeCard }] }), /close-action/);
+  assert.equal(renderCloseAction({ status: 'needs your input', closePhrase: 'close', comments: [{ body: closeCard }], answerIn: true }), '');
+  assert.match(renderGoAction({ status: 'needs your input', goPhrase: 'go', comments: [{ body: goCard }] }), /go-action/);
+  assert.equal(renderGoAction({ status: 'needs your input', goPhrase: 'go', comments: [{ body: goCard }], answerIn: true }), '');
+  assert.equal(statusLabel({ status: 'needs your input', answerIn: false }), 'Needs your input');
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  assert.match(app, /\$\{renderAnswerIn\(t\)\}/, 'the ticket page draws the line');
+  assert.match(app, /statusLabel\(t\)/, 'the ticket page writes the status with the note');
+  assert.equal(app.match(/t\.answerIn \? /g)?.length, 2, 'the board card and the list row both draw the note');
 });
 
 // ── The board ────────────────────────────────────────────────────────────────
@@ -649,7 +744,7 @@ test('the ticket page opens on the Quick Action section, with everything it show
   assert.match(quick, /<form class="reply">[\s\S]*<textarea id="reply" required>/, 'the reply box is on the right of Quick Action');
   assert.match(details, /^\s*<summary>Details<\/summary>/);
   // The status line, the description and the comments, all inside Details.
-  for (const part of [/statusName\(t\.status\)/, /renderMarkdown\(t\.description\)/, /\$\{comments \|\|/]) assert.match(details, part);
+  for (const part of [/statusLabel\(t\)/, /renderMarkdown\(t\.description\)/, /\$\{comments \|\|/]) assert.match(details, part);
   assert.ok(!/<details[^>]*\bopen\b/.test(app), 'Details is never drawn open');
   // The reply posts exactly as typed, and #reply still lands in the box (it is outside Details, so focusable).
   assert.match(app, /\/comments`, \{ body: box\.value \}\)/);
@@ -1221,7 +1316,7 @@ test('clicking Merge and confirming posts exactly the merge phrase as Dane\'s ow
   const draw = /\nasync function drawTicket\(id(?:, said = null(?:, kept = null)?)?\) \{[\s\S]*?\n\}\n/.exec(app)?.[0] ?? '';
   assert.match(draw, /const wordButton = [\s\S]*wordButton\('form\.merge-action'[\s\S]*wordButton\('form\.close-action'/);
   assert.equal(app.match(/const wordButton = /g).length, 1);
-  assert.match(app, /<div class="act">\s*(?:\$\{renderCommands\(t\)\}\s*)?\$\{renderMergeAction\(t\)\}\s*\$\{renderCloseAction\(t\)\}\s*\$\{renderGoAction\(t\)\}\s*<form class="reply">/, 'Merge, Close and Go sit above the reply box on the right');
+  assert.match(app, /<div class="act">\s*(?:\$\{renderCommands\(t\)\}\s*)?\$\{renderAnswerIn\(t\)\}\s*\$\{renderMergeAction\(t\)\}\s*\$\{renderCloseAction\(t\)\}\s*\$\{renderGoAction\(t\)\}\s*<form class="reply">/, 'the answer-is-in line, then Merge, Close and Go, sit above the reply box on the right');
 });
 
 test('no merge phrase is written into the page\'s code', () => {
