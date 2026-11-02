@@ -43,6 +43,7 @@ import { boardOf, projectDetailsOf, projectsList, stageColoursOf, threadOf, wait
 import { createNotifier, MAIL_KEY, mailEnvFromDoppler, mailSettingsFromEnv } from './notify.mjs';
 import { loadProjectConfig } from '../lib/projectConfig.mjs';
 import busRelayPlan from '../lib/busRelayPlan.js';
+import loopStatuses from '../lib/loopStatuses.js';
 
 /** The largest request body accepted, in bytes. A ticket description fits easily. */
 const MAX_BODY = 1024 * 1024;
@@ -70,6 +71,19 @@ const RESERVED_SLUGS = Object.freeze(['new']);
 
 /** The fields a change may carry, besides its guards. */
 const CHANGE_FIELDS = Object.freeze(['name', 'description', 'status', 'priority', 'tags', 'assignee', 'loopNote']);
+
+/**
+ * The statuses a person may move a ticket to from the ticket page, in the
+ * contract's order. Not `Needs your input` or `Ready to launch`: only `ask`
+ * sets those, with an operator card. Not `Building` or `In review`: a loop
+ * claims and verifies those. The page offers only these; it does not decide them.
+ */
+const PERSON_STATUSES = Object.freeze(['requested', 'rework', 'queued', 'live']
+  .map((s) => ({ value: s, label: loopStatuses.DISPLAY[s] })));
+
+/** The priorities the store keeps, most urgent first, for the ticket page's picker. */
+const PRIORITIES = Object.freeze(Object.keys(loopStatuses.PRIORITY_RANK)
+  .sort((a, b) => loopStatuses.PRIORITY_RANK[a] - loopStatuses.PRIORITY_RANK[b]));
 
 /**
  * Dane's page (tracker/web/): the only files served without a token, and the
@@ -391,6 +405,15 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
         const body = await readJson(req);
         checkBody(body, me, [...CHANGE_FIELDS, 'ifStatus', 'ifVersion']);
         const ticket = requireTicket(parts[1]);
+        // The contract's hand-off signal: a ticket is assigned to its
+        // project's operator or to nobody. A person's change is held to it
+        // here; a loop's goes through the door, which already keeps it.
+        if (me.kind === 'human' && body.assignee != null) {
+          const operator = store.getProject(ticket.project)?.operator ?? null;
+          if (body.assignee !== operator) {
+            throw new HttpError(400, 'bad-assignee', `a ticket is assigned to its project's operator${operator == null ? '' : ` (actor ${operator})`} or to nobody, not to actor ${body.assignee}.`);
+          }
+        }
         const r = store.changeTicket(ticket.id, {
           ...pick(body, [...CHANGE_FIELDS, 'ifStatus', 'ifVersion']),
           actor: me.id,
@@ -446,7 +469,7 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     if (parts.length === 3 && parts[0] === 'tickets' && parts[2] === 'thread' && method === 'GET') {
       const thread = threadOf(store, parts[1]);
       if (!thread) throw new HttpError(404, 'unknown-ticket', `no ticket ${parts[1]}.`);
-      return [200, { ...thread, mergePhrase, closePhrase }];
+      return [200, { ...thread, mergePhrase, closePhrase, choices: { priorities: PRIORITIES, statuses: PERSON_STATUSES } }];
     }
 
     if (parts.length === 3 && parts[0] === 'tickets' && parts[2] === 'events' && method === 'GET') {

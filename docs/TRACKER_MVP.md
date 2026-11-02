@@ -160,12 +160,12 @@ programs read).
 | `GET /projects/:slug/tickets?status=&open=` | the queue |
 | `POST /projects/:slug/tickets` | file a ticket |
 | `GET /tickets/:id` | one ticket with its comments, oldest first |
-| `PATCH /tickets/:id` | change status, priority, tags, assignee, description or Loop note, with optional `ifStatus` / `ifVersion`; answers 409 ("conflict") and writes nothing if the ticket has moved |
+| `PATCH /tickets/:id` | change name, status, priority, tags, assignee, description or Loop note, with optional `ifStatus` / `ifVersion`; answers 409 ("conflict") and writes nothing if the ticket has moved. A person's token may assign the ticket only to its project's operator or to nobody: anyone else gets 400 `bad-assignee` and nothing is written |
 | `DELETE /tickets/:id` | delete a ticket nobody has started (`Requested` or `Queued`) with its comments and events; answers 409 `not-deletable` with its status for any other, 404 for an unknown one; the server log names the ticket and the actor |
 | `POST /tickets/:id/comments` | a comment, or a reply when `parent` is given |
 | `GET /tickets/:id/events` | the history |
 | `GET /waiting` | for Dane's page: tickets in the operator's two statuses across every project, by the loop's own `waiting` verdict for the caller, newest first |
-| `GET /tickets/:id/thread` | for Dane's page: the ticket with each comment's author named and machine comments marked |
+| `GET /tickets/:id/thread` | for Dane's page: the ticket with each comment's author named and machine comments marked, its project's operator by id and name, and the Change panel's choices: the store's priorities and the four statuses a person may pick (Requested, Rework, Queued, Live) |
 | `GET /projects` | for Dane's page: every project with its slug, name, ticket prefix and open count, and the project the New request form starts on |
 | `POST /projects` | for Dane's page: add a project (`{ name, slug, prefix, url?, logo?, owner? }`), answered with its details read back; **a person's token only**: a machine's gets 403 and nothing is written. A duplicate slug or prefix, a slug that is not small letters, digits and hyphens (or is `new`), an owner who is not a person, or an address that is not http(s) gets 400 |
 | `PATCH /projects/:slug` | for Dane's page: change a project's name, web address, logo or owner (`{ name?, url?, logo?, owner? }`), answered with its details read back; **a person's token only**: a machine's gets 403 and nothing is written. The slug and ticket prefix never change (every ticket's id and its project link are built from them): naming either gets 400 `not-changeable`; an owner who is not a person or an address that is not http(s) gets 400; an unknown slug 404 |
@@ -193,7 +193,22 @@ more:
    newest first. This is the one view he uses today.
 2. **A ticket**: the description, the comments (cards drawn with the red
    `NEEDED FROM DANE` banner, machine comments visibly marked as such), and a
-   reply box. He answers and says "merge" here.
+   reply box. He answers and says "merge" here. Under Details, a person
+   signed in gets a **Change this ticket** panel, open by default: priority,
+   tags (chips with a remove button, and a box where Enter adds one),
+   assignee (the project's operator or nobody, the only two the contract
+   allows), status, name and description (an Edit button opens the stored
+   markdown in a text box, with Save and Cancel). The status list offers
+   only Requested, Rework, Queued and Live, plus the current status: `ask`
+   alone sets Dane's two, and a loop claims and verifies Building and In
+   review. The name is locked, saying why, once a pull request is recorded,
+   since the pull request's title must match it. Each change is saved on its
+   own with the ticket's `version` as `ifVersion`, says "Saving…" then
+   "Saved", and the page is drawn again from the server, so what shows is
+   what was stored. If a loop moved the ticket meanwhile, the save gets 409:
+   the page says nothing was overwritten, shows the ticket as stored, and
+   does not try again. Any other refusal shows the server's reason beside
+   the field and keeps what was typed.
 3. **A board** per product: read-only columns of the seven statuses.
 
 The page is served by `tracker/server.mjs` at `/` (a ticket at `/t/<id>`)

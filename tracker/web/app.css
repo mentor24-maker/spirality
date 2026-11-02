@@ -149,3 +149,18 @@ button.action:hover { color: var(--red); background: #fbe9e9; }
 .quick form.delete-action button { color: var(--red); border: 1px solid var(--red); background: #fff; border-radius: 6px; cursor: pointer; }
 .quick form.delete-action .note { margin-left: 1rem; }
 .quick form.delete-action p { margin: 0.4rem 0 0; font-size: 0.9em; }
+/* The ticket page's Change panel (render.mjs renderEditPanel). */
+details.edit { border: var(--hairline); border-radius: 8px; padding: 0.5rem 1.25rem 1rem; margin-bottom: 1.5rem; }
+details.edit > summary { cursor: pointer; font-weight: 600; }
+details.edit label, details.edit .label { display: block; margin-top: 0.75rem; font-weight: 600; }
+details.edit .row { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; margin-top: 0.3rem; }
+details.edit .row .label { margin-top: 0; }
+details.edit select, details.edit input { font: inherit; padding: 0.35rem; }
+details.edit input#edit-name { flex: 1; min-width: 16rem; }
+details.edit textarea { width: 100%; min-height: 14rem; font: inherit; font-family: ui-monospace, Menlo, monospace; font-size: 0.9rem; padding: 0.5rem; box-sizing: border-box; margin-top: 0.5rem; }
+details.edit .tags .tag { margin-left: 0; margin-right: 0.3rem; }
+details.edit button.remove-tag { border: 0; background: transparent; padding: 0 0 0 0.3rem; cursor: pointer; color: var(--quiet); font-size: 0.85rem; }
+details.edit button.remove-tag:hover { color: var(--red); }
+details.edit p.locked { margin: 0.3rem 0 0; }
+details.edit p.locked + p { margin: 0.2rem 0 0; font-size: 0.9em; }
+details.edit .edit-note:empty { display: none; }
