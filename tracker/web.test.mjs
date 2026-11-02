@@ -8,8 +8,8 @@ import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { startServer } from './server.mjs';
 import { seedDemo, tickingClock } from './demoData.mjs';
-import { reportsOf, REPORT_RANGES } from './pageData.mjs';
-import { escapeHtml, renderComment, renderInline, renderMarkdown, renderQuickAction, renderCommands, cardCommands, cardAsk, renderMergeAction, mergeQuestion, renderCloseAction, closeQuestion, cardMove, renderTrail, cardContext, firstParagraph, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD } from './web/render.mjs';
+import { reportsOf, REPORT_RANGES, searchTickets } from './pageData.mjs';
+import { escapeHtml, renderComment, renderInline, renderMarkdown, renderQuickAction, renderCommands, cardCommands, cardAsk, renderMergeAction, mergeQuestion, renderCloseAction, closeQuestion, cardMove, renderTrail, cardContext, firstParagraph, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults } from './web/render.mjs';
 import { loadProjectConfig } from '../lib/projectConfig.mjs';
 import operatorCard from '../lib/operatorCard.js';
 import machineComment from '../lib/machineComment.js';
@@ -1714,4 +1714,60 @@ test('the People page escapes every name and email, offers the form and Cancel t
   // Each write is read back with GET /people before the page says it worked.
   assert.equal(draw.match(/await api\('GET', '\/people'\)\.catch/g).length, 2);
   assert.match(draw, /putTrail\(\[\{ label: 'People' \}\]\)/);
+});
+
+test('search bolds every occurrence of the term, any case, after escaping the ticket\'s own text', () => {
+  assert.equal(boldMatches('Widget and widget and WIDGET', 'widget'), '<b>Widget</b> and <b>widget</b> and <b>WIDGET</b>');
+  assert.equal(boldMatches('a <b>bold</b> claim', 'bold'), 'a &lt;b&gt;<b>bold</b>&lt;/b&gt; claim');
+  assert.equal(boldMatches('<script>alert(1)</script>', 'alert'), '&lt;script&gt;<b>alert</b>(1)&lt;/script&gt;');
+  // A term that spells part of an escape never breaks one; one that is markup is matched as text.
+  assert.equal(boldMatches('Tom & Jerry', 'amp'), 'Tom &amp; Jerry');
+  assert.equal(boldMatches('a <b> tag', '<b>'), 'a <b>&lt;b&gt;</b> tag');
+  assert.equal(boldMatches('cost (1+1)?', '(1+1)?'), 'cost <b>(1+1)?</b>');
+  assert.equal(boldMatches('nothing here', ''), 'nothing here');
+  assert.equal(searchPattern('  '), null);
+  assert.ok(searchPattern('Sign-In').test('the sign-in page'));
+});
+
+test('the search results show each ticket\'s id, a link to its page, its project and status, and the excerpt\'s place', () => {
+  const html = renderSearchResults({
+    query: 'widget',
+    results: [
+      { id: 'AL-1', name: '<script>Widget</script> <b>x</b>', projectName: 'Alpha & Co', status: 'In review', place: null, excerpt: null },
+      { id: 'BE-2', name: 'Other', projectName: 'Beta', status: 'Live', place: 'description', excerpt: '…the widget <img src=x> breaks…' },
+    ],
+  });
+  assert.match(html, /<a href="\/t\/AL-1">&lt;script&gt;<b>Widget<\/b>&lt;\/script&gt; &lt;b&gt;x&lt;\/b&gt;<\/a>/);
+  assert.ok(!/<script>|<img/.test(html), 'no ticket text reaches the page as markup');
+  assert.match(html, /Alpha &amp; Co · In review/);
+  assert.match(html, /Beta · Live/);
+  assert.match(html, /…the <b>widget<\/b> &lt;img src=x&gt; breaks… <span class="quiet">in the description<\/span>/);
+  assert.ok(html.indexOf('AL-1') < html.indexOf('BE-2'), 'drawn in the server\'s order');
+  assert.match(renderSearchResults({ query: 'zzqqxx', results: [] }), /<p class="quiet search-note">No tickets match zzqqxx<\/p>/);
+  assert.match(renderSearchResults({ query: '  ', results: [] }), /<p class="quiet search-note">Type a word to search every task\.<\/p>/);
+  assert.match(renderSearchResults({ query: '<i>', results: [] }), /No tickets match &lt;i&gt;/);
+});
+
+test('the search finds the demo\'s tickets in every project and names its statuses from the contract', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tracker-search-'));
+  const store = openStore(join(dir, 'tracker.db'), { now: tickingClock() });
+  try {
+    seedDemo(store, { operatorName: 'Dane', clock: tickingClock() });
+    const all = store.listProjects().flatMap((p) => store.listTickets(p.slug));
+    const word = all[0].name.split(/\s+/).find((w) => w.length > 3);
+    const { results } = searchTickets(store, word);
+    assert.ok(results.length >= 1);
+    for (const r of results) {
+      assert.ok(Object.values(loopStatuses.DISPLAY).includes(r.status), r.status);
+      assert.ok(store.getProject(r.project));
+    }
+    for (let i = 1; i < results.length; i += 1) assert.ok(results[i - 1].score >= results[i].score);
+  } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('the Tasks page\'s toolbar holds the Search field, and Enter opens the results page', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  assert.match(app, /<a href="\/projects">Change project<\/a>\s*\$\{searchForm\(''\)\}/);
+  assert.match(app, /history\.pushState\(null, '', `\/search\?q=\$\{encodeURIComponent\(term\)\}`\)/);
+  assert.match(app, /renderSearchResults\(answer\)/);
 });
