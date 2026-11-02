@@ -126,12 +126,25 @@ export function seedDemo(store, { operatorName = substrateConfig.operatorName(),
 
   if (clock) {
     const start = clock.time();
-    const DAY = 24 * 60 * 60_000;
+    const HOUR = 60 * 60_000;
+    // Each one queued, built, reviewed and waiting on the operator before it
+    // went Live, so the flow reports have figures; every third was sent back
+    // once, and the oldest was filed straight into review (never Queued).
     FINISHED_DAYS_AGO.forEach((days, i) => {
-      clock.moveTo(start - days * DAY - 2 * 60 * 60_000);
-      const id = file(i % 2 ? 'beta' : 'alpha', `A task finished ${days} day${days === 1 ? '' : 's'} ago`, 'in review', {}, 'machine');
-      clock.moveTo(start - days * DAY);
-      store.changeTicket(id, { actor: loop.id, status: 'live' });
+      const live = start - days * 24 * HOUR;
+      const oldest = i === FINISHED_DAYS_AGO.length - 1;
+      const name = `A task finished ${days} day${days === 1 ? '' : 's'} ago`;
+      const steps = oldest
+        ? [[2, 'in review']]
+        : [[30 + 4 * i, 'queued'], [26, 'building'], ...(i % 3 ? [] : [[20, 'in review'], [18, 'rework'], [14, 'building']]),
+          [8, 'in review'], [4 + (i % 4), 'ready to launch']];
+      const [[firstAt, firstStatus], ...rest] = steps;
+      clock.moveTo(live - firstAt * HOUR);
+      const id = file(i % 2 ? 'beta' : 'alpha', name, firstStatus, {}, 'machine');
+      for (const [hoursBefore, status] of [...rest, [0, 'live']]) {
+        clock.moveTo(live - hoursBefore * HOUR);
+        store.changeTicket(id, { actor: loop.id, status });
+      }
     });
     clock.moveTo(start);
   }
