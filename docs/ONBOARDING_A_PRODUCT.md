@@ -191,10 +191,15 @@ changing the file: `CLICKUP_WORKSPACE_ID`, `CLICKUP_SPACE_ID`,
     token.
   - `create` and `check` refuse unless `doppler run` is for the config's own
     `dopplerProject`, so one product's run never reads or writes another's
-    secrets. And `create` refuses to give a new token to an actor that
-    already exists while this tracker holds other products' projects but
-    not this one's: that is a second product whose config wrongly sets
-    `trackerPort`, about to take over the first product's sign-ins.
+    secrets. And once the tracker holds another product's project,
+    `create` gives a new token to an actor under a bare lane name (or to
+    the operator) only when this run's Doppler project holds the
+    operator's own working sign-in, which only the product that runs the
+    tracker has. Otherwise it is a second product whose config wrongly sets
+    `trackerPort`, about to take over the first product's sign-ins, and it
+    is refused, whether or not that product's project already exists (made
+    by `create` or on the page). A guest's own seats, named for it, are
+    never refused: a rerun after a lost token just re-keys them.
 - **Who.**
   - The project: `npm run tracker:signins -- create --name <project name>`
     makes it if it does not exist, or Dane makes it with the tracker page's

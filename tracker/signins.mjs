@@ -166,15 +166,21 @@ export function ownHostNames() {
  * for the messages. Returns `{ ok, lines }`: one line per seat and one for
  * the project.
  */
-export async function createSignins({ store, seats, env, project, operatorImport = null, operatorName = null, setSecret, getSecret, proveToken, tracker }) {
+export async function createSignins({ store, seats, env, project, guest = false, operatorImport = null, operatorName = null, setSecret, getSecret, proveToken, tracker }) {
   const lines = [];
   let ok = true;
   const ids = {};
   const operatorSeat = seats.find((s) => s.kind === 'human');
-  // Another product's project here, and not this one's: an actor found by
-  // name may be that product's, so giving it a new token would stop that
-  // product's loops. Only a seat made fresh is safe then.
-  const others = store.getProject(project.slug) ? [] : store.listProjects().map((p) => p.slug);
+  // A guest's seats carry its own product's name, so an actor found under
+  // one is its own. A seat under a bare lane name belongs to the product
+  // that runs the tracker, and with another product's project on the
+  // tracker it may not be this run's: a new token would stop that
+  // product's sign-in. Only the home's Doppler holds the operator's own
+  // token (a guest has no operator seat), so a held operator token that
+  // signs in proves this run is the home's, whichever projects exist and
+  // in whatever order they were made.
+  const others = guest ? [] : store.listProjects().map((p) => p.slug).filter((slug) => slug !== project.slug);
+  let home = false;
   const elsewhere = `this database is not the one the tracker at ${tracker.url} serves. Run this on the machine the tracker runs on${tracker.home ? ` (${tracker.home})` : ''}`;
   const down = (why) => `the tracker at ${tracker.url} ${why}, so no token can be proven. Run it again once the tracker is up`;
   // Once the tracker has turned one seat down, every other seat would be
@@ -198,6 +204,7 @@ export async function createSignins({ store, seats, env, project, operatorImport
       }
       if (here && there.me) {
         ids[seat.secret] = actor.id;
+        if (seat === operatorSeat) home = true;
         lines.push(`${seat.secret}: already signs in as "${actor.name}" (actor ${actor.id}), left alone.`);
         continue;
       }
@@ -218,9 +225,9 @@ export async function createSignins({ store, seats, env, project, operatorImport
     // that actor a fresh token, which also stops the old one signing in.
     // The operator an earlier import already made is the one to keep.
     const kept = (seat === operatorSeat && importedOperator(store, operatorImport, seat)) || store.actorsNamed({ kind: seat.kind, name: seat.name })[0];
-    if (kept && others.length) {
+    if (kept && others.length && !home) {
       ok = false;
-      lines.push(`${seat.secret}: REFUSED. Actor ${kept.id} ("${seat.name}") already exists, and this tracker holds project${others.length > 1 ? 's' : ''} ${others.map((o) => `"${o}"`).join(', ')} but not "${project.slug}": that actor may be another product's, and a new token would stop its sign-in. Nothing changed. If this product does not run the tracker, its config must not set trackerPort, so its seats get names of their own.`);
+      lines.push(`${seat.secret}: REFUSED. Actor ${kept.id} ("${seat.name}") already exists, this tracker also holds project${others.length > 1 ? 's' : ''} ${others.map((o) => `"${o}"`).join(', ')}, and this Doppler project holds no working operator sign-in to show this is the product that runs the tracker: that actor may be another product's, and a new token would stop its sign-in. Nothing changed. If this product does not run the tracker, its config must not set trackerPort, so its seats get names of their own; if it does, put the operator's working token back in ${operatorSeat?.secret ?? 'its Doppler project'} and run create again.`);
       continue;
     }
     const actor = kept ?? store.createActor({ kind: seat.kind, name: seat.name });
@@ -424,6 +431,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
         result = await createSignins({
           store, seats, env: process.env,
           project: { slug: config.productSlug, name: values.name, prefix: values.prefix ?? config.trackerPrefix },
+          guest,
           operatorImport: guest ? null : operatorImportKey(config),
           operatorName: guest ? config.operatorName : null,
           setSecret: (name, value) => { doppler(['secrets', 'set', name, ...where, '--silent'], value); },

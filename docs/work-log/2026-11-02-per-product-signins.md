@@ -14,3 +14,12 @@ refuses to run against the wrong product's Doppler keys, and refuses to
 re-key a sign-in that may belong to another product. The onboarding
 checklist records the decision. Nothing was run for Normie yet; that is its
 own setup ticket.
+
+Review found a hole in that last refusal: if Dane made Normie's project on
+the tracker page first, a wrongly copied settings file would have slipped
+past it and re-keyed all six of Spirality's sign-ins, his own included.
+The check now asks something that does not depend on which projects exist:
+does this run's Doppler hold Dane's own working sign-in? Only Spirality's
+does, so only Spirality may re-key the plain-named sign-ins once another
+product is on the tracker. Normie's own sign-ins are never refused, so
+retrying after a failed key write just works.
