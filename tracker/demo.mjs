@@ -18,7 +18,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openStore } from './store.mjs';
-import { CLOSE_PHRASE, startServer } from './server.mjs';
+import { CLOSE_PHRASE, GO_PHRASE, startServer } from './server.mjs';
 import { seedDemo, tickingClock } from './demoData.mjs';
 import { setPasswordUrl } from './account.mjs';
 import { loadProjectConfig } from '../lib/projectConfig.mjs';
@@ -47,7 +47,7 @@ const port = Number(process.env.TRACKER_PORT ?? 0);
 let mergePhrase = null;
 try { mergePhrase = loadProjectConfig().mergePhrases[0] ?? null; } catch (err) { console.log(`no Merge button: the project config is not usable (${err.message}).`); }
 const accountMail = { send: printEmail, pageUrl: null, productName: 'Demo' };
-const server = await startServer({ store, port, log: (line) => console.log(line), mergePhrase, closePhrase: CLOSE_PHRASE, accountMail });
+const server = await startServer({ store, port, log: (line) => console.log(line), mergePhrase, closePhrase: CLOSE_PHRASE, goPhrase: GO_PHRASE, accountMail });
 accountMail.pageUrl = `http://127.0.0.1:${server.address().port}`;
 
 console.log(`\nDemo tracker (test data only) at http://127.0.0.1:${server.address().port}/`);

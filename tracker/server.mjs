@@ -310,6 +310,8 @@ function flag(value) {
  * Merge button; the reply box still takes the word typed by hand.
  * `closePhrase` is the word the Close button posts (CLOSE_PHRASE below,
  * the relay's own close list). Null means no Close button.
+ * `goPhrase` is the word the Go button posts on an intake card (GO_PHRASE
+ * below). Null means no Go button.
  * `accountMail` sends the "Forgot password?" and invite emails: `{ send,
  * pageUrl, productName }`, each link opening under `pageUrl`. With no
  * `send`, an invite is refused and nothing is made. Null (or no
@@ -322,8 +324,10 @@ function flag(value) {
  * ever say something the relay reads as "close it".
  */
 export const CLOSE_PHRASE = busRelayPlan.CLOSE_PHRASES[0];
+/** The word the Go button posts: the one an intake card asks for (GO_PHRASE in lib/busRelayPlan.js). */
+export const GO_PHRASE = busRelayPlan.GO_PHRASE;
 
-export function createHandler(store, { log = () => {}, notifier = null, defaultProject = null, mergePhrase = null, closePhrase = null, accountMail = null, now = Date.now } = {}) {
+export function createHandler(store, { log = () => {}, notifier = null, defaultProject = null, mergePhrase = null, closePhrase = null, goPhrase = null, accountMail = null, now = Date.now } = {}) {
   const failures = failureCounter(now);
 
   /** The People page's data: each person with their email, and the open invites. */
@@ -610,7 +614,7 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     if (parts.length === 3 && parts[0] === 'tickets' && parts[2] === 'thread' && method === 'GET') {
       const thread = threadOf(store, parts[1]);
       if (!thread) throw new HttpError(404, 'unknown-ticket', `no ticket ${parts[1]}.`);
-      return [200, { ...thread, mergePhrase, closePhrase, choices: { priorities: PRIORITIES, statuses: PERSON_STATUSES } }];
+      return [200, { ...thread, mergePhrase, closePhrase, goPhrase, choices: { priorities: PRIORITIES, statuses: PERSON_STATUSES } }];
     }
 
     if (parts.length === 3 && parts[0] === 'tickets' && parts[2] === 'events' && method === 'GET') {
@@ -745,8 +749,8 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
 }
 
 /** Start a server on `port` (0 = any free port) against an open store. Resolves to the http.Server. */
-export function startServer({ store, port, host = '127.0.0.1', log, notifier, defaultProject, mergePhrase, closePhrase, accountMail, now }) {
-  const server = createServer(createHandler(store, { log, notifier, defaultProject, mergePhrase, closePhrase, accountMail, now }));
+export function startServer({ store, port, host = '127.0.0.1', log, notifier, defaultProject, mergePhrase, closePhrase, goPhrase, accountMail, now }) {
+  const server = createServer(createHandler(store, { log, notifier, defaultProject, mergePhrase, closePhrase, goPhrase, accountMail, now }));
   return new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(port, host, () => {
@@ -842,7 +846,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
       log(`the New request form starts on the first project and the ticket page has no Merge button: the project config is not usable (${err.message}).`);
     }
     const accountMail = mail.account && { ...mail.account, productName: store.getProject(defaultProject)?.name ?? 'tracker' };
-    const server = await startServer({ store, port, host, log, notifier, defaultProject, mergePhrase, closePhrase: CLOSE_PHRASE, accountMail });
+    const server = await startServer({ store, port, host, log, notifier, defaultProject, mergePhrase, closePhrase: CLOSE_PHRASE, goPhrase: GO_PHRASE, accountMail });
     console.log(`tracker listening on http://${host}:${server.address().port}/`);
   } catch (err) {
     console.error(`tracker server did not start: ${err.message}`);

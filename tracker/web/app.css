@@ -137,11 +137,13 @@ button.action:disabled { opacity: 0.4; cursor: default; }
 .quick .command { display: flex; gap: 0.5rem; align-items: flex-start; margin-bottom: 0.5rem; }
 .quick .command pre { flex: 1; min-width: 0; margin: 0; }
 .offscreen { position: fixed; left: -9999px; top: 0; }
-.quick form.merge-action, .quick form.close-action { margin-bottom: 1.25rem; }
+.quick form.merge-action, .quick form.close-action, .quick form.go-action { margin-bottom: 1.25rem; }
 /* Every button on a ticket's page is green, Delete included (SP-76); the tag chips' small × keeps its own look. */
 .quick button, details.details form.copy button, details.edit button:not(.remove-tag) { background: #00AA00; border: 1px solid #006600; border-radius: 10px; color: #fff; cursor: pointer; }
-.quick form.merge-action button, .quick form.close-action button { font-weight: 700; padding: 0.6rem 2rem; }
-.quick form.merge-action p, .quick form.close-action p { margin: 0.4rem 0 0; font-size: 0.9em; }
+.quick form.merge-action button, .quick form.close-action button, .quick form.go-action button { font-weight: 700; padding: 0.6rem 2rem; }
+/* Go is asked for in 10px corners (SP-86), whatever the shared rule above says. */
+.quick form.go-action button { border-radius: 10px; }
+.quick form.merge-action p, .quick form.close-action p, .quick form.go-action p { margin: 0.4rem 0 0; font-size: 0.9em; }
 details.details { border-top: var(--hairline); padding-top: 0.75rem; }
 details.details > summary { cursor: pointer; font-weight: 600; margin-bottom: 0.5rem; }
 nav.trail { font-size: 0.85rem; color: var(--quiet); margin: -0.5rem 0 1rem; }
