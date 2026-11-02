@@ -7,6 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { startServer, settingsFromEnv } from './server.mjs';
+import loopStatuses from '../lib/loopStatuses.js';
 
 /**
  * A fresh store in a temporary file, an operator and a loop each holding a
@@ -943,6 +944,121 @@ test('GET /reports answers the Reporting figures for every project or one, 404 f
     assert.equal(unknown.status, 404);
     assert.equal(unknown.body.error, 'unknown-project');
     assert.equal(f.store.getTicket(t.id).version, 2);
+  } finally { await f.cleanup(); }
+});
+
+test('GET /search ranks title over description over people\'s comments over loop comments, across every project, and writes nothing', async () => {
+  const f = await fixture();
+  try {
+    f.store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE', operator: f.human.id });
+    const file = (project, name, description = '') => f.store.fileTicket({ project, actor: f.machine.id, name, description, status: 'queued' });
+    const loopsOnly = file('alpha', 'Fourth');
+    f.store.postComment({ ticket: loopsOnly.id, author: f.machine.id, body: 'PR opened for the widget fix.' });
+    const stamped = file('alpha', 'Fifth');
+    f.store.postComment({ ticket: stamped.id, author: f.human.id, body: 'Built the widget.\n[machine] posted by a loop under Operator\'s token — not his word' });
+    const discussed = file('alpha', 'Third');
+    f.store.postComment({ ticket: discussed.id, author: f.human.id, body: 'The WIDGET is broken again.' });
+    const described = file('beta', 'Other', `${'Long words before it. '.repeat(10)}the Widget breaks on sign-in.`);
+    f.store.changeTicket(described.id, { actor: f.machine.id, status: 'live' });
+    const titled = file('alpha', 'Fix the widget page');
+    file('alpha', 'Nothing to see');
+
+    const before = f.store.listProjects().flatMap((p) => f.store.listTickets(p.slug))
+      .map((t) => [t.id, t.version, t.updatedAt, f.store.listEvents(t.id).length, f.store.listComments(t.id).length]);
+    const r = await f.call('GET', '/search?q=widget');
+    assert.equal(r.status, 200);
+    assert.equal(r.body.query, 'widget');
+    const ids = r.body.results.map((x) => x.id);
+    assert.deepEqual(ids.slice(0, 3), [titled.id, described.id, discussed.id]);
+    assert.deepEqual(ids.slice(3).sort(), [loopsOnly.id, stamped.id].sort());
+    const byId = Object.fromEntries(r.body.results.map((x) => [x.id, x]));
+    assert.deepEqual([titled, described, discussed, loopsOnly, stamped].map((t) => byId[t.id].score), [8, 4, 2, 1, 1]);
+    assert.equal(byId[titled.id].place, null);
+    assert.equal(byId[titled.id].excerpt, null);
+    assert.equal(byId[described.id].place, 'description');
+    assert.equal(byId[described.id].projectName, 'Beta');
+    assert.equal(byId[described.id].status, 'Live');
+    assert.match(byId[described.id].excerpt, /^….*the Widget breaks on sign-in\.$/);
+    assert.ok(byId[described.id].excerpt.length <= 162);
+    assert.equal(byId[discussed.id].place, 'discussion');
+    assert.equal(byId[loopsOnly.id].place, 'development');
+    assert.equal(byId[stamped.id].place, 'development');
+    assert.equal(byId[stamped.id].excerpt, 'Built the widget.');
+
+    // One phrase, as typed, any case; regular-expression characters are plain text.
+    assert.deepEqual((await f.call('GET', '/search?q=WIDGET%20PAGE')).body.results.map((x) => x.id), [titled.id]);
+    assert.deepEqual((await f.call('GET', '/search?q=page%20widget')).body.results, []);
+    assert.deepEqual((await f.call('GET', '/search?q=w.dget')).body.results, []);
+    for (const empty of ['/search?q=', '/search']) {
+      const { query, results } = (await f.call('GET', empty)).body;
+      assert.deepEqual({ query, results }, { query: '', results: [] });
+    }
+
+    const after = f.store.listProjects().flatMap((p) => f.store.listTickets(p.slug))
+      .map((t) => [t.id, t.version, t.updatedAt, f.store.listEvents(t.id).length, f.store.listComments(t.id).length]);
+    assert.deepEqual(after, before);
+    assert.equal((await f.call('GET', '/search?q=widget', { token: null })).status, 401);
+    // A browser opening the address gets the page, without a token; the page then asks for the results.
+    const page = await fetch(`${await f.serve()}/search?q=widget`, { headers: { accept: 'text/html' } });
+    assert.equal(page.status, 200);
+    assert.match(page.headers.get('content-type'), /^text\/html/);
+  } finally { await f.cleanup(); }
+});
+
+test('GET /search narrows by Status, Priority, Created by and Assigned to, alone and together, keeping the order', async () => {
+  const f = await fixture();
+  try {
+    const other = f.store.createActor({ kind: 'human', name: 'Someone Else' });
+    const file = (actor, name, status, { priority = null, assignee = null } = {}) =>
+      f.store.fileTicket({ project: 'alpha', actor, name, status, priority, assignee });
+    const a = file(f.machine.id, 'Widget one', 'queued', { priority: 'urgent' });
+    const b = file(other.id, 'Widget two', 'queued', { priority: 'low', assignee: f.human.id });
+    const c = file(f.machine.id, 'Widget three', 'rework');
+    const d = file(other.id, 'Widget four', 'queued');
+    f.store.postComment({ ticket: d.id, author: f.human.id, body: 'about the widget' });
+    const e = file(f.machine.id, 'Four', 'queued');
+    f.store.postComment({ ticket: e.id, author: f.human.id, body: 'the widget again' });
+    const ids = async (query) => (await f.call('GET', `/search?q=widget${query}`)).body.results.map((x) => x.id).sort();
+
+    const all = (await f.call('GET', '/search?q=widget')).body;
+    assert.deepEqual(all.filters.map((x) => [x.key, x.label, x.value]),
+      [['status', 'Status', null], ['priority', 'Priority', null], ['createdBy', 'Created by', null], ['assignee', 'Assigned to', null]]);
+    assert.deepEqual(all.filters[0].options.map((o) => o.value), loopStatuses.STAGE_ORDER);
+    assert.deepEqual(all.filters[1].options.map((o) => o.value), ['urgent', 'high', 'normal', 'low', 'none']);
+    assert.deepEqual(all.filters[2].options, [f.human, f.machine, other].map((x) => ({ value: String(x.id), label: x.name })));
+    assert.deepEqual(all.filters[3].options[0], { value: 'nobody', label: 'Nobody' });
+
+    assert.deepEqual(await ids('&status=Queued'), [a.id, b.id, d.id, e.id].sort());
+    assert.deepEqual(await ids('&status=rework'), [c.id]);
+    assert.deepEqual(await ids('&priority=urgent'), [a.id]);
+    assert.deepEqual(await ids('&priority=none'), [c.id, d.id, e.id].sort());
+    assert.deepEqual(await ids(`&createdBy=${other.id}`), [b.id, d.id].sort());
+    assert.deepEqual(await ids(`&assignee=${f.human.id}`), [b.id]);
+    assert.deepEqual(await ids('&assignee=nobody'), [a.id, c.id, d.id, e.id].sort());
+    assert.deepEqual(await ids(`&status=Queued&priority=none&createdBy=${other.id}&assignee=nobody`), [d.id]);
+    assert.deepEqual(await ids('&status=Queued&priority=high'), []);
+    assert.deepEqual(await ids('&status=&priority='), [a.id, b.id, c.id, d.id, e.id].sort());
+
+    // The weighted order holds: a title match before a comment match, whatever the filter.
+    const ranked = (await f.call('GET', `/search?q=widget&status=Queued&createdBy=${f.machine.id}`)).body;
+    assert.deepEqual(ranked.results.map((x) => x.id), [a.id, e.id]);
+    assert.deepEqual(ranked.filters.map((x) => x.value), ['Queued', null, String(f.machine.id), null]);
+
+    // Created by is the actor on the `created` event, not whoever changed the ticket last.
+    f.store.changeTicket(b.id, { actor: f.machine.id, status: 'rework' });
+    assert.deepEqual(await ids(`&createdBy=${other.id}`), [b.id, d.id].sort());
+
+    for (const [query, words] of [
+      ['&status=Nonsense', /no status "Nonsense"/],
+      ['&priority=whenever', /no priority "whenever"/],
+      ['&createdBy=999', /no actor "999"/],
+      ['&assignee=someone', /no actor "someone"/],
+    ]) {
+      const r = await f.call('GET', `/search?q=widget${query}`);
+      assert.equal(r.status, 400, query);
+      assert.equal(r.body.error, 'unknown-filter');
+      assert.match(r.body.message, words);
+    }
   } finally { await f.cleanup(); }
 });
 

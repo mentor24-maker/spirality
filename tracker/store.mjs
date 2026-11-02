@@ -857,6 +857,12 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
       });
     },
 
+    /** Every actor, people and machines, oldest first: the search's Created by and Assigned to. Never a token. */
+    listActors() {
+      return db.prepare('SELECT id, kind, name FROM actors ORDER BY id').all()
+        .map((row) => ({ id: num(row.id), kind: row.kind, name: row.name }));
+    },
+
     /** Every person (never a machine), oldest first: the owner a project may name. Never a token. */
     listPeople() {
       return db.prepare("SELECT id, name FROM actors WHERE kind = 'human' ORDER BY id").all()

@@ -2,6 +2,7 @@
  * The two traces a ticket must carry, and the readers that check them.
  *
  *   PR opened: <url>              written by loop-build (`pr-opened`)
+ *   Human-hours estimate: <N>     its optional second line (`--human-hours`, SP-78)
  *   REVIEW: PASSED — <why>        written by loop-review (`verdict --pass`)
  *   REVIEW: sent back to Rework — <why>              (`verdict --fail`)
  *
@@ -12,15 +13,17 @@
 
 import { isMachineComment } from './machineComment.mjs';
 import { bodyNamesTicket as namesTicket } from '../../lib/clickupTicketLink.js';
+import { humanHoursLine } from '../../lib/humanHours.js';
 
 export const ESCALATE_AT_ROUND = 4;
 
 const PR_LINE = /PR opened:\s*(https:\/\/github\.com\/([^/\s]+)\/([^/\s]+)\/pull\/(\d+))/i;
 const VERDICT_LINE = /^\s*REVIEW:\s*(PASSED|sent back to Rework)\b/i;
 
-export function prOpenedComment(prUrl, extra) {
+export function prOpenedComment(prUrl, extra, { humanHours } = {}) {
   const tail = String(extra || '').trim();
-  return `PR opened: ${prUrl}${tail ? `\n\n${tail}` : ''}`;
+  const hours = humanHours == null ? '' : `\n${humanHoursLine(humanHours)}`;
+  return `PR opened: ${prUrl}${hours}${tail ? `\n\n${tail}` : ''}`;
 }
 
 export function verdictComment(passed, note) {

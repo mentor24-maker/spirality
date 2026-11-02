@@ -17,6 +17,18 @@ test('the PR trail is written by one function and read back by the other', () =>
   assert.equal(prTrailLanded([], 7).ok, false);
 });
 
+test('a PR line carrying a human-hours estimate still verifies and passes review the same way (SP-78)', () => {
+  const comments = [
+    c(1, prOpenedComment('https://github.com/o/r/pull/7', 'Why: one module.', { humanHours: 2.5 }), 10),
+    c(2, verdictComment(true, 'All good.'), 20),
+  ];
+  assert.match(comments[0].comment_text, /^PR opened: https:\/\/github\.com\/o\/r\/pull\/7\nHuman-hours estimate: 2\.5\n\nWhy/);
+  assert.equal(findPullRequest(comments).number, 7);
+  assert.equal(prTrailLanded(comments, 7).ok, true);
+  assert.equal(readyToLaunchGate(comments).ok, true);
+  assert.equal(prOpenedComment('https://github.com/o/r/pull/7'), 'PR opened: https://github.com/o/r/pull/7');
+});
+
 test('the newest PR line wins', () => {
   const comments = [
     c(1, 'PR opened: https://github.com/o/r/pull/1', 10),

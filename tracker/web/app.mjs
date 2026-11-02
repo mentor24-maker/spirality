@@ -6,8 +6,8 @@
  * change or delete a project (a person only), file a new request from the
  * Tasks page's Add Task box, copy a ticket into another
  * project, choose a colour for each stage on the Settings page, read the
- * Reporting page's figures, and see and invite people on the People page
- * (a person only). Plain browser
+ * Reporting page's figures, see and invite people on the People page
+ * (a person only), and search every ticket from the Tasks page's Search field. Plain browser
  * JavaScript, no packages,
  * no build step; tracker/server.mjs serves it.
  *
@@ -26,7 +26,7 @@
  * an emailed link's own page. The link's token is sent only in a JSON body,
  * never in an address.
  */
-import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderQuickAction, renderTrail, stageLooks, tabTitle, bellColour, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot } from './render.mjs';
+import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderQuickAction, renderTrail, stageLooks, tabTitle, bellColour, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults } from './render.mjs';
 
 /** Where an earlier version of the page kept a pasted token; removed on load, never read. */
 const OLD_TOKEN_KEY = 'tracker-token';
@@ -676,6 +676,7 @@ async function drawProject(slug, view, { adding = false, filed = null } = {}) {
     <h1>Tasks</h1>
     <div class="toolbar">
       <a href="/projects">Change project</a>
+      ${searchForm('')}
       <nav class="views" aria-label="View">${toggle}</nav>
     </div>
     ${filed ? `<p class="filed-note">Filed <a href="/t/${encodeURIComponent(filed)}">${escapeHtml(filed)}</a></p>` : ''}
@@ -702,6 +703,7 @@ async function drawProject(slug, view, { adding = false, filed = null } = {}) {
     el.style.setProperty('--stage-text', look.text);
   }
   putTrail([{ label: board.projectName, href: '/projects' }, { label: view === 'board' ? 'Board' : 'List' }]);
+  wireSearch();
   wireAddTask(board.project, view, adding);
   // Delete: ask first, naming the ticket; then redraw from the server. A
   // refusal is said in words and nothing leaves the list until a redraw.
@@ -725,6 +727,73 @@ async function drawProject(slug, view, { adding = false, filed = null } = {}) {
       await drawProject(slug, view);
     });
   }
+}
+
+/** The Search field, holding `term`. The page allows no form to submit itself; wireSearch sends it. */
+const searchForm = (term) => `
+  <form class="search" role="search">
+    <input type="search" name="q" aria-label="Search every task" placeholder="Search every task" value="${escapeHtml(term)}">
+  </form>`;
+
+/**
+ * The search results page's address: the term, then each filter chosen on
+ * the page's filter row (none on the Tasks page), so a reload or a pasted
+ * link shows the same results.
+ */
+function searchAddress(term) {
+  const params = new URLSearchParams({ q: term });
+  for (const select of main.querySelectorAll('.search-filters select')) {
+    if (select.value) params.set(select.name, select.value);
+  }
+  return `/search?${params}`;
+}
+
+/** Enter in the Search field, or a filter changed, opens the results page at searchAddress. */
+function wireSearch() {
+  const form = main.querySelector('form.search');
+  const go = () => {
+    history.pushState(null, '', searchAddress(form.elements.q.value.trim()));
+    route();
+  };
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    go();
+  });
+  for (const select of main.querySelectorAll('.search-filters select')) select.addEventListener('change', go);
+}
+
+/**
+ * The search results page: every ticket in every project matching the
+ * address's term and filters, best matches first, as the server ranks and
+ * filters them (pageData.mjs searchTickets), drawn by render.mjs
+ * renderSearchResults, which escapes each ticket's text before bolding the
+ * term. The Search field holds the term and the filter row the filters,
+ * each choice from the server's answer; changing either searches again. A
+ * filter the server refuses shows its message in place of the results.
+ * Read-only.
+ */
+async function drawSearch(params) {
+  const term = (params.get('q') ?? '').trim();
+  let answer;
+  let refusal = null;
+  try {
+    answer = await api('GET', `/search?${params}`);
+  } catch (err) {
+    if (!(err instanceof Refused) || err.status !== 400) throw err;
+    refusal = err.message;
+    answer = await api('GET', `/search?${new URLSearchParams({ q: term })}`);
+  }
+  setTitle(answer.query ? `Search: ${answer.query} · Tracker` : 'Search · Tracker');
+  main.innerHTML = `
+    <h1>Search</h1>
+    <div class="toolbar">${searchForm(answer.query)}</div>
+    ${renderSearchFilters(answer.filters)}
+    ${refusal ? `<p class="error">${escapeHtml(refusal)}</p>` : `
+    ${answer.results.length ? `<p class="quiet">${answer.results.length} ${answer.results.length === 1 ? 'ticket matches' : 'tickets match'}</p>` : ''}
+    ${renderSearchResults(answer)}`}`;
+  putTrail([{ label: 'Tasks', href: '/tasks' }, { label: 'Search' }]);
+  wireSearch();
+  if (!answer.query) main.querySelector('form.search input').focus();
 }
 
 /**
@@ -1389,8 +1458,12 @@ async function route() {
     const settings = location.pathname === '/settings';
     const reporting = location.pathname === '/reporting';
     const peoplePage = location.pathname === '/people';
-    markNav(reporting ? 'reporting' : settings ? 'settings' : peoplePage ? 'people' : projects || newProject || details || editProject ? 'projects' : ticket || project || tasks || isNew ? 'tasks' : 'waiting');
-    if (reporting) {
+    const search = location.pathname === '/search';
+    markNav(reporting ? 'reporting' : settings ? 'settings' : peoplePage ? 'people' : projects || newProject || details || editProject ? 'projects' : ticket || project || tasks || isNew || search ? 'tasks' : 'waiting');
+    if (search) {
+      await drawSearch(new URLSearchParams(location.search));
+      await refreshCount();
+    } else if (reporting) {
       await drawReporting();
       await refreshCount();
     } else if (settings) {
