@@ -6,9 +6,10 @@
  *
  * It makes a fresh store in a temporary folder (never the real one), fills
  * it from tracker/demoData.mjs, starts the server on a free port and prints
- * the address and a sign-in token for the test operator. The token is for
- * this throwaway store only and dies with it. Ctrl-C stops it and deletes
- * the folder.
+ * the address, a sign-in token for the test operator, and a set-password
+ * link for the operator at a test email address, as the setup email would
+ * carry. Both are for this throwaway store only and die with it. Ctrl-C
+ * stops it and deletes the folder.
  */
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -16,7 +17,11 @@ import { join } from 'node:path';
 import { openStore } from './store.mjs';
 import { CLOSE_PHRASE, startServer } from './server.mjs';
 import { seedDemo, tickingClock } from './demoData.mjs';
+import { setPasswordUrl } from './account.mjs';
 import { loadProjectConfig } from '../lib/projectConfig.mjs';
+
+/** The test operator's email, on a domain kept for examples, so nothing is ever sent to it. */
+const DEMO_EMAIL = 'operator@example.com';
 
 const dir = mkdtempSync(join(tmpdir(), 'tracker-demo-'));
 const clock = tickingClock(Date.now() - 60 * 60_000);
@@ -29,6 +34,8 @@ const server = await startServer({ store, port: Number(process.env.TRACKER_PORT 
 
 console.log(`\nDemo tracker (test data only) at http://127.0.0.1:${server.address().port}/`);
 console.log(`Sign in as ${operator.name} with this throwaway token:\n\n  ${token}\n`);
+const link = store.makeLink({ purpose: 'setup', email: DEMO_EMAIL, actor: operator.id, madeBy: operator.id });
+console.log(`Set-password link for ${operator.name} (test data only): ${setPasswordUrl(`http://127.0.0.1:${server.address().port}`, link.token)}\n`);
 console.log('Ctrl-C stops it and deletes the test data.');
 
 function stop() {

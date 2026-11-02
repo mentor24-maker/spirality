@@ -21,6 +21,12 @@
  * A refused write writes nothing. A token never appears in an answer or a
  * log line: the log names the actor id, never the header.
  *
+ * Two calls answer without a token, because an emailed link is their proof
+ * (docs/TRACKER_MVP.md, "Sign-ins"): `POST /account/link` says what a link
+ * is for, and `POST /account/set-password` uses it. The link's token and the
+ * password travel only in the JSON body, never in an address, so neither
+ * can reach the log; a refusal answers the store's own code.
+ *
  * Run directly, it opens the store at TRACKER_DB and listens on
  * TRACKER_PORT; both must be set, nothing is assumed. TRACKER_HOST is the
  * address it listens on: 127.0.0.1 (this machine only) unless set, and
@@ -84,7 +90,9 @@ const PRIORITIES = Object.freeze(Object.keys(loopStatuses.PRIORITY_RANK)
  * only ones served at all, by name. The page holds no data; everything it
  * shows comes through the API below with his token. `/`, `/t/<id>`, `/board`,
  * `/board/<project>`, `/list`, `/list/<project>`, `/new` (the New request
- * form) and `/settings` (the stage colours) all answer the page itself, so each address opens its own view;
+ * form), `/settings` (the stage colours) and `/set-password` (an emailed
+ * link's page, `?link=<token>`, which the page reads and never sends back
+ * in an address) all answer the page itself, so each address opens its own view;
  * `/projects` and `/projects/<project>` do too, for a browser opening them,
  * and `/projects/<project>/edit` (the Edit project form) always does.
  */
@@ -121,7 +129,7 @@ const PAGE_HEADERS = Object.freeze({
  */
 function pageFile(pathname, accept = '') {
   if (/^\/projects(?:\/[^/]+)?$/.test(pathname)) return /\btext\/html\b/.test(accept) ? 'index.html' : null;
-  if (pathname === '/' || /^\/(?:tasks|board|list|new|settings|reporting)$/.test(pathname) || /^\/(?:t|board|list)\/[^/]+$/.test(pathname)) return 'index.html';
+  if (pathname === '/' || /^\/(?:tasks|board|list|new|settings|set-password|reporting)$/.test(pathname) || /^\/(?:t|board|list)\/[^/]+$/.test(pathname)) return 'index.html';
   if (/^\/projects\/[^/]+\/edit$/.test(pathname)) return 'index.html';
   const m = /^\/web\/([^/]+)$/.exec(pathname);
   return m && Object.hasOwn(WEB_FILES, m[1]) ? m[1] : null;
@@ -185,6 +193,14 @@ function checkBody(body, me, allowed) {
     }
   }
   const unknown = Object.keys(body).filter((k) => !allowed.includes(k) && k !== 'author' && k !== 'actor');
+  if (unknown.length) {
+    throw new HttpError(400, 'bad-field', `unknown field(s): ${unknown.join(', ')}; allowed: ${allowed.join(', ')}.`);
+  }
+}
+
+/** Refuse any field not in `allowed`, for a call made without a token. */
+function onlyFields(body, allowed) {
+  const unknown = Object.keys(body).filter((k) => !allowed.includes(k));
   if (unknown.length) {
     throw new HttpError(400, 'bad-field', `unknown field(s): ${unknown.join(', ')}; allowed: ${allowed.join(', ')}.`);
   }
@@ -473,6 +489,27 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     throw new HttpError(404, 'no-such-call', `no call ${method} ${url.pathname}.`);
   }
 
+  /**
+   * The calls an emailed link makes, with no token: the link is the proof.
+   * Answers `[status, body]`, or null for an address that is not one of them.
+   */
+  async function accountRoute(req, url) {
+    if (req.method !== 'POST') return null;
+    if (url.pathname === '/account/link') {
+      const body = await readJson(req);
+      onlyFields(body, ['link']);
+      return [200, store.linkInfo(body.link)];
+    }
+    if (url.pathname === '/account/set-password') {
+      const body = await readJson(req);
+      onlyFields(body, ['link', 'password', 'name']);
+      const { purpose, actor } = store.useLink({ token: body.link, password: body.password, name: body.name });
+      log(`password set through a ${purpose} link actor=${actor.id}`);
+      return [200, { purpose, name: actor.name, email: store.emailOf(actor.id) }];
+    }
+    return null;
+  }
+
   return async function handle(req, res) {
     const url = new URL(req.url, 'http://tracker.invalid');
     let me = null;
@@ -484,6 +521,13 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
         status = 200;
         sendPage(res, page);
         log(`${req.method} ${url.pathname} ${status} page`);
+        return;
+      }
+      const account = await accountRoute(req, url);
+      if (account) {
+        [status] = account;
+        send(res, status, account[1]);
+        log(`${req.method} ${url.pathname} ${status} actor=-`);
         return;
       }
       me = store.actorForToken(bearerToken(req));

@@ -16,8 +16,12 @@
  * Signing in is the person's own tracker token, the same kind every loop
  * holds. It is kept in this browser's local storage so a pinned tab stays
  * signed in, and sent only to this server. "Sign out" forgets it.
+ *
+ * `/set-password?link=<token>` is the one view drawn without signing in:
+ * an emailed link's own page. The link's token is sent only in a JSON body,
+ * never in an address.
  */
-import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, renderCloseAction, renderMergeAction, renderQuickAction, renderTrail, stageLooks, tabTitle, bellColour } from './render.mjs';
+import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, renderCloseAction, renderMergeAction, renderQuickAction, renderTrail, stageLooks, tabTitle, bellColour, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword } from './render.mjs';
 
 const TOKEN_KEY = 'tracker-token';
 /** Board or list: the last one opened, so "Tasks" in the header opens it again. */
@@ -101,6 +105,67 @@ async function api(method, path, body) {
   if (!res.ok) throw new Refused(json?.message ?? `the tracker answered ${res.status}.`, res.status);
   if (!json) throw new Error('the tracker answered with something that is not JSON.');
   return json;
+}
+
+/**
+ * Call one of the tracker's two no-sign-in calls (an emailed link is the
+ * proof). Answers `{ ok, body }`: the parsed JSON, or the refusal's
+ * `{ error, message }`. Throws only when the tracker could not be reached.
+ */
+async function linkCall(path, body) {
+  const res = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  let json = null;
+  try { json = await res.json(); } catch { /* said below */ }
+  return { ok: res.ok, body: json ?? { message: `the tracker answered ${res.status}.` } };
+}
+
+/** An emailed link's page: show its email, take a password (and a name, for an invite), use the link once. */
+async function drawSetPassword() {
+  me = null;
+  who.textContent = '';
+  headerProject.hidden = true;
+  signOut.hidden = true;
+  bell.hidden = true;
+  setTitle('Set your password · Tracker');
+  const link = new URLSearchParams(location.search).get('link') ?? '';
+  const refused = (answer) => {
+    main.innerHTML = `<h1>Set your password</h1><p class="error">${escapeHtml(linkProblem(answer.error) ?? answer.message)}</p>`;
+  };
+  const info = await linkCall('/account/link', { link });
+  if (!info.ok) {
+    refused(info.body);
+    return;
+  }
+  const { purpose } = info.body;
+  main.innerHTML = renderSetPassword(info.body);
+  const form = main.querySelector('form.set-password');
+  const note = form.querySelector('.note');
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const value = (id) => form.querySelector(`#${id}`)?.value ?? '';
+    const typed = { purpose, name: value('name'), password: value('password'), confirm: value('confirm') };
+    const problem = passwordProblem(typed);
+    note.className = problem ? 'note error' : 'note quiet';
+    note.textContent = problem ?? 'Saving…';
+    if (problem) return;
+    const button = form.querySelector('button[type="submit"]');
+    button.disabled = true;
+    let answer;
+    try {
+      answer = await linkCall('/account/set-password', { link, password: typed.password, ...(purpose === 'invite' ? { name: typed.name.trim() } : {}) });
+    } catch {
+      answer = { ok: false, body: { message: 'The tracker did not answer. Nothing was saved; try again.' } };
+    }
+    if (answer.ok) {
+      main.innerHTML = renderPasswordSet(location.origin);
+    } else if (linkProblem(answer.body.error)) {
+      refused(answer.body);
+    } else {
+      button.disabled = false;
+      note.className = 'note error';
+      note.textContent = `Not saved: ${answer.body.message}`;
+    }
+  });
 }
 
 /** Put the trail at the top of the page just drawn: `steps` as renderTrail takes them. */
@@ -1124,6 +1189,10 @@ function markNav(which) {
 
 async function route() {
   try {
+    if (location.pathname === '/set-password') {
+      await drawSetPassword();
+      return;
+    }
     me = await api('GET', '/me');
     who.textContent = `Signed in as ${me.name}`;
     signOut.hidden = false;

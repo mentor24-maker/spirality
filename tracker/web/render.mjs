@@ -526,6 +526,58 @@ export function renderDeleteAction({ status }) {
       </form>`;
 }
 
+/** The shortest password the tracker takes (store.mjs MIN_PASSWORD); the server holds the rule. */
+export const MIN_PASSWORD = 12;
+
+/**
+ * Why an emailed link cannot be used, in plain words, from the store's code
+ * (`unknown-link`, `used-link`, `expired-link`), or null for any other.
+ */
+export function linkProblem(code) {
+  if (code === 'used-link') return 'This link has already been used. Nothing was changed. Ask for a new one if you still need to set your password.';
+  if (code === 'expired-link') return 'This link has expired. Nothing was changed. Ask for a new one.';
+  if (code === 'unknown-link') return 'This link is not one the tracker made. Nothing was changed. Check you opened the whole link from the email.';
+  return null;
+}
+
+/**
+ * What is wrong with a set-password form before it is sent, or null: the
+ * same checks the server makes, said before a round trip. `purpose` is the
+ * link's; only an invite asks for a name.
+ */
+export function passwordProblem({ purpose, name, password, confirm }) {
+  if (purpose === 'invite' && !String(name ?? '').trim()) return 'Type your name.';
+  if ([...String(password ?? '')].length < MIN_PASSWORD) return `A password must be at least ${MIN_PASSWORD} characters.`;
+  if (password !== confirm) return 'The two passwords are not the same.';
+  return null;
+}
+
+/** The set-password form for a link that can be used, as HTML. The email is shown, never changed here. */
+export function renderSetPassword({ purpose, email }) {
+  const nameBox = purpose === 'invite'
+    ? `<label for="name">Your name</label>
+      <input id="name" type="text" autocomplete="name" required>`
+    : '';
+  return `<h1>Set your password</h1>
+    <form class="sign-in set-password">
+      <label for="email">Email</label>
+      <input id="email" type="email" value="${escapeHtml(email)}" readonly autocomplete="username">
+      ${nameBox}
+      <label for="password">Password (at least ${MIN_PASSWORD} characters)</label>
+      <input id="password" type="password" autocomplete="new-password" minlength="${MIN_PASSWORD}" required>
+      <label for="confirm">The same password again</label>
+      <input id="confirm" type="password" autocomplete="new-password" minlength="${MIN_PASSWORD}" required>
+      <button type="submit">Save password</button>
+      <p class="note"></p>
+    </form>`;
+}
+
+/** What the page says once a password is set: where to sign in. */
+export function renderPasswordSet(trackerAddress) {
+  return `<h1>Password set</h1>
+    <p>Password set. Sign in at <a href="/">${escapeHtml(trackerAddress)}</a>.</p>`;
+}
+
 /** A status or priority as the page writes it: "in review" -> "In review". */
 const capital = (s) => String(s ?? '').replace(/^./, (c) => c.toUpperCase());
 
