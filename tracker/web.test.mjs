@@ -177,8 +177,8 @@ test('the Projects screen lists every project with its open count; an unknown pr
     const openIn = (slug) => f.store.listTickets(slug, { open: true }).length;
     assert.ok(openIn('alpha') > 0 && openIn('alpha') < f.store.listTickets('alpha').length, 'the demo data has open and Live tickets');
     assert.deepEqual((await f.call('GET', '/projects')).body.projects, [
-      { slug: 'alpha', name: 'Alpha', prefix: 'AL', url: null, logo: null, owner: null, open: openIn('alpha') },
-      { slug: 'beta', name: 'Beta', prefix: 'BE', url: null, logo: null, owner: null, open: openIn('beta') },
+      { slug: 'alpha', name: 'Alpha', prefix: 'AL', url: null, logo: null, owner: null, repo: null, open: openIn('alpha') },
+      { slug: 'beta', name: 'Beta', prefix: 'BE', url: null, logo: null, owner: null, repo: null, open: openIn('beta') },
     ]);
     assert.equal((await f.call('GET', '/projects/beta/board')).body.projectName, 'Beta');
     assert.equal((await f.call('GET', '/projects/nope/board')).status, 404);
@@ -201,6 +201,7 @@ test('a project\'s details name its prefix, operator, open count and a count per
       url: null,
       logo: null,
       owner: null,
+      repo: null,
       open: f.store.listTickets('alpha', { open: true }).length,
       statuses: loopStatuses.STAGE_ORDER.map((name) => ({
         status: name,
@@ -847,22 +848,31 @@ test('every page puts its trail at the top: ticket, board, list, Waiting on you,
 
 // ── Create Project ───────────────────────────────────────────────────────────
 
-test('a project added from the page shows on the Projects screen and its details page with its logo, web address and owner', async () => {
+test('a project added from the page shows on the Projects screen and its details page with its logo, web address, GitHub repository and owner', async () => {
   const f = await fixture();
   try {
     const people = await f.call('GET', '/people');
     assert.deepEqual(people.body.people.map((p) => p.name), ['Dane'], 'the owner picker offers the people, not the loop');
     const made = await f.call('POST', '/projects', {
-      body: { name: 'Try me', slug: 'try-me', prefix: 'TRY', url: 'https://try.example', logo: 'https://try.example/logo.png', owner: f.operator.id },
+      body: {
+        name: 'Try me', slug: 'try-me', prefix: 'TRY', url: 'https://try.example', logo: 'https://try.example/logo.png',
+        repo: 'https://github.com/my-org/try-me', owner: f.operator.id,
+      },
     });
     assert.equal(made.status, 201);
     const row = (await f.call('GET', '/projects')).body.projects.find((p) => p.slug === 'try-me');
     assert.deepEqual(row, {
       slug: 'try-me', name: 'Try me', prefix: 'TRY', url: 'https://try.example', logo: 'https://try.example/logo.png',
-      owner: { id: f.operator.id, name: 'Dane' }, open: 0,
+      owner: { id: f.operator.id, name: 'Dane' }, repo: 'my-org/try-me', open: 0,
     });
     const details = (await f.call('GET', '/projects/try-me')).body;
-    assert.deepEqual([details.url, details.logo, details.owner], [row.url, row.logo, row.owner]);
+    assert.deepEqual([details.url, details.logo, details.owner, details.repo], [row.url, row.logo, row.owner, row.repo]);
+    // A box that is not a repository is refused with the store's own words, and nothing is added.
+    const bad = await f.call('POST', '/projects', { body: { name: 'Bad', slug: 'bad', prefix: 'BAD', repo: 'https://gitlab.com/my-org/bad' } });
+    assert.equal(bad.status, 400);
+    assert.equal(bad.body.error, 'bad-repo');
+    assert.match(bad.body.message, /owner\/name/);
+    assert.ok(!(await f.call('GET', '/projects')).body.projects.some((p) => p.slug === 'bad'));
     // The loop's sign-in cannot, and leaves the projects as they were.
     const before = (await f.call('GET', '/projects')).body.projects;
     const loop = await f.call('POST', '/projects', { token: f.store.issueToken(f.loop.id), body: { name: 'L', slug: 'loop-made', prefix: 'LM' } });
@@ -889,7 +899,8 @@ test('the New project button and form are a person\'s only; a refused save keeps
   assert.match(app, /me\?\.kind === 'human' \? '<div class="toolbar"><a class="button" href="\/projects\/new">New project<\/a><\/div>' : ''/);
   const form = app.slice(app.indexOf('async function drawCreateProject'), app.indexOf('/**', app.indexOf('async function drawCreateProject')));
   assert.match(form, /if \(me\?\.kind !== 'human'\)[\s\S]{0,200}Only a person signed in to the tracker can add a project\./);
-  for (const id of ['name', 'slug', 'prefix', 'url', 'logo']) assert.match(form, new RegExp(`field\\('${id}',`), id);
+  for (const id of ['name', 'slug', 'prefix', 'url', 'logo', 'repo']) assert.match(form, new RegExp(`field\\('${id}',`), id);
+  assert.match(form, /url: value\('url'\), logo: value\('logo'\), repo: value\('repo'\), owner:/);
   assert.match(form, /<select id="owner"><option value="">Nobody<\/option>\$\{people\.map/);
   assert.match(form, /api\('GET', '\/people'\)/);
   assert.match(form, /api\('POST', '\/projects', \{/);
@@ -903,25 +914,33 @@ test('the New project button and form are a person\'s only; a refused save keeps
   assert.match(app, /<img class="\$\{cls\}" src="\$\{escapeHtml\(p\.logo\)\}"/);
   assert.match(app, /<td class="owner">\$\{p\.owner \? escapeHtml\(p\.owner\.name\)/);
   assert.match(app, /<dt>Owner<\/dt><dd>\$\{p\.owner \? escapeHtml\(p\.owner\.name\)/);
+  // A GitHub repository is drawn as a link to it on GitHub only when it is owner/name, escaped; otherwise "none".
+  assert.match(app, /const isRepo = \(v\) => typeof v === 'string' && \/\^\[A-Za-z0-9-\]\+\\\/\[A-Za-z0-9\._-\]\+\$\/\.test\(v\);/);
+  assert.match(app, /<a href="https:\/\/github\.com\/\$\{escapeHtml\(p\.repo\)\}" target="_blank" rel="noopener noreferrer">\$\{escapeHtml\(p\.repo\)\}<\/a>/);
+  assert.match(app, /<td class="repo">\$\{repoOf\(p\)\}<\/td>/);
+  assert.match(app, /<th class="repo">GitHub repository<\/th>/);
+  assert.match(app, /<dt>GitHub repository<\/dt><dd>\$\{repoOf\(p\)\}<\/dd>/);
 });
 
 // ── Editing and deleting a project ───────────────────────────────────────────
 
-test('a project edited from the page shows its new name, web address, logo and owner on the table and its details page', async () => {
+test('a project edited from the page shows its new name, web address, logo, GitHub repository and owner on the table and its details page', async () => {
   const f = await fixture();
   try {
     await f.call('POST', '/projects', { body: { name: 'Try me', slug: 'try-me', prefix: 'TRY' } });
     const saved = await f.call('PATCH', '/projects/try-me', {
-      body: { name: 'Tried', url: 'https://tried.example', logo: 'https://tried.example/l.png', owner: f.operator.id },
+      body: { name: 'Tried', url: 'https://tried.example', logo: 'https://tried.example/l.png', repo: 'my-org/tried', owner: f.operator.id },
     });
     assert.equal(saved.status, 200);
     const row = (await f.call('GET', '/projects')).body.projects.find((p) => p.slug === 'try-me');
     assert.deepEqual(row, {
       slug: 'try-me', name: 'Tried', prefix: 'TRY', url: 'https://tried.example', logo: 'https://tried.example/l.png',
-      owner: { id: f.operator.id, name: 'Dane' }, open: 0,
+      owner: { id: f.operator.id, name: 'Dane' }, repo: 'my-org/tried', open: 0,
     });
     const details = (await f.call('GET', '/projects/try-me')).body;
-    assert.deepEqual([details.name, details.url, details.logo, details.owner], [row.name, row.url, row.logo, row.owner]);
+    assert.deepEqual([details.name, details.url, details.logo, details.owner, details.repo], [row.name, row.url, row.logo, row.owner, row.repo]);
+    // An emptied box clears it.
+    assert.equal((await f.call('PATCH', '/projects/try-me', { body: { repo: '' } })).body.repo, null);
   } finally { await f.cleanup(); }
 });
 
@@ -975,11 +994,11 @@ test('the Edit project form is a person\'s only, filled in, with the slug and pr
   assert.match(form, /if \(me\?\.kind !== 'human'\)[\s\S]{0,200}Only a person signed in to the tracker can change a project\./);
   assert.match(form, /p = await api\('GET', `\/projects\/\$\{encodeURIComponent\(slug\)\}`\)/);
   assert.match(form, /const filled = \(v\) => ` value="\$\{escapeHtml\(v \?\? ''\)\}"`;/);
-  for (const id of ['name', 'url', 'logo']) assert.match(form, new RegExp(`field\\('${id}',[^\\n]*filled\\(p\\.${id}\\)`), id);
+  for (const id of ['name', 'url', 'logo', 'repo']) assert.match(form, new RegExp(`field\\('${id}',[^\\n]*filled\\(p\\.${id}\\)`), id);
   for (const id of ['slug', 'prefix']) assert.match(form, new RegExp(`field\\('${id}',[^\\n]* disabled\\$\\{filled\\(p\\.${id}\\)\\}`), id);
   assert.match(form, /o\.id === p\.owner\?\.id \? ' selected' : ''/);
   // The change names only what may change; never the slug or prefix.
-  assert.match(form, /api\('PATCH', `\/projects\/\$\{encodeURIComponent\(p\.slug\)\}`, \{\n\s+name: value\('name'\), url: value\('url'\), logo: value\('logo'\), owner: value\('owner'\) \? Number\(value\('owner'\)\) : null,\n\s+\}\)/);
+  assert.match(form, /api\('PATCH', `\/projects\/\$\{encodeURIComponent\(p\.slug\)\}`, \{\n\s+name: value\('name'\), url: value\('url'\), logo: value\('logo'\), repo: value\('repo'\), owner: value\('owner'\) \? Number\(value\('owner'\)\) : null,\n\s+\}\)/);
   assert.match(form, /note\.textContent = `Not saved: \$\{err\.message\}`;/);
   assert.ok(!/main\.innerHTML/.test(form.slice(form.indexOf("addEventListener('submit'"))), 'a refused save never redraws the form, so nothing typed is lost');
   // Saving opens the details page, which reads the project back from the server.

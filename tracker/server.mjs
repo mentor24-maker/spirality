@@ -90,10 +90,10 @@ const INVITE_REFUSALS = Object.freeze({ 'duplicate-email': 409, 'duplicate-invit
 const FILE_FIELDS = Object.freeze(['name', 'description', 'status', 'priority', 'tags', 'assignee', 'loopNote']);
 
 /** The fields a new project may carry. */
-const PROJECT_FIELDS = Object.freeze(['name', 'slug', 'prefix', 'url', 'logo', 'owner']);
+const PROJECT_FIELDS = Object.freeze(['name', 'slug', 'prefix', 'url', 'logo', 'owner', 'repo']);
 
 /** The fields a project change may carry. Its slug and prefix build every ticket's id, so they never change. */
-const PROJECT_CHANGE_FIELDS = Object.freeze(['name', 'url', 'logo', 'owner']);
+const PROJECT_CHANGE_FIELDS = Object.freeze(['name', 'url', 'logo', 'owner', 'repo']);
 const PROJECT_FIXED_FIELDS = Object.freeze(['slug', 'prefix']);
 
 /**
