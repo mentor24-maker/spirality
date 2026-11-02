@@ -20,6 +20,9 @@ Each item says:
 
 Spirality's own values are given as the worked example throughout.
 
+Worked example: Normie, [docs/onboarding/NORMIE.md](onboarding/NORMIE.md),
+every item below walked for one real product, with its tickets.
+
 ## The gaps, at a glance
 
 The items below marked **missing**, gathered here so they can become tickets:
