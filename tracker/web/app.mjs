@@ -26,7 +26,7 @@
  * an emailed link's own page. The link's token is sent only in a JSON body,
  * never in an address.
  */
-import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, renderCloseAction, renderMergeAction, renderQuickAction, renderTrail, stageLooks, tabTitle, bellColour, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot } from './render.mjs';
+import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderQuickAction, renderTrail, stageLooks, tabTitle, bellColour, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot } from './render.mjs';
 
 /** Where an earlier version of the page kept a pasted token; removed on load, never read. */
 const OLD_TOKEN_KEY = 'tracker-token';
@@ -774,6 +774,7 @@ async function drawTicket(id, said = null, kept = null) {
       ${renderCommands(t)}
       ${renderMergeAction(t)}
       ${renderCloseAction(t)}
+      ${renderGoAction(t)}
       <form class="reply">
         <label for="reply">Reply as ${escapeHtml(me?.name ?? 'you')}</label>
         <textarea id="reply" required></textarea>
@@ -838,8 +839,8 @@ async function drawTicket(id, said = null, kept = null) {
       button.disabled = false;
     }
   });
-  // Merge and Close: his word from the server (the project config's merge
-  // phrase, the relay's close word), posted as his own reply through the
+  // Merge, Close and Go: his word from the server (the project config's merge
+  // phrase, the relay's close word, the intake card's go word), posted as his own reply through the
   // same call the reply box uses. The relay acts on it; the page never moves
   // a status itself.
   const wordButton = (selector, question, word, signedOut) => {
@@ -867,6 +868,7 @@ async function drawTicket(id, said = null, kept = null) {
   };
   wordButton('form.merge-action', mergeQuestion(t), t.mergePhrase, 'You were signed out; the merge word was not posted.');
   wordButton('form.close-action', closeQuestion(t), t.closePhrase, 'You were signed out; the close word was not posted.');
+  wordButton('form.go-action', goQuestion(t), t.goPhrase, 'You were signed out; your go was not posted.');
   // Delete: ask first, naming the ticket; on success go to its project's list.
   const deleteForm = main.querySelector('form.delete-action');
   deleteForm?.addEventListener('submit', async (e) => {

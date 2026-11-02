@@ -369,7 +369,8 @@ export function renderTrail(steps) {
 /** The status the relay merges from, as the tracker stores it (lib/mergeOnComment.js). */
 const READY_TO_LAUNCH = 'ready to launch';
 /** The two statuses that are his, where a card can ask him to close (lib/loopStatuses.js). */
-const HIS_STATUSES = [READY_TO_LAUNCH, 'needs your input'];
+const NEEDS_YOUR_INPUT = 'needs your input';
+const HIS_STATUSES = [READY_TO_LAUNCH, NEEDS_YOUR_INPUT];
 
 /**
  * The move an operator card ends its ask with, `Your move: Merge`, `Close`
@@ -434,6 +435,30 @@ export function renderCloseAction({ status, closePhrase, comments = [] }) {
 /** The one question the Close button asks before it posts. Plain text, for confirm(). */
 export function closeQuestion({ name }) {
   return `Close ${name}?`;
+}
+
+/**
+ * The Go button, as HTML, or '': shown on a Needs your input ticket whose
+ * newest card's move is Reply and whose ask offers the go word in quotes
+ * (every card loop-intake posts), when the server named that word
+ * (GO_PHRASE in lib/busRelayPlan.js). Like Merge and Close, it only posts
+ * his word as a reply; any reply to an intake card queues it.
+ */
+export function renderGoAction({ status, goPhrase, comments = [] }) {
+  if (String(status ?? '').toLowerCase() !== NEEDS_YOUR_INPUT || !goPhrase) return '';
+  const card = newestCard(comments);
+  if (!card || cardMove(card.body) !== 'Reply') return '';
+  const word = goPhrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  if (!new RegExp(`["\u201c]${word}["\u201d]`, 'i').test(cardAsk(card.body) ?? '')) return '';
+  return `<form class="go-action">
+        <button type="submit">Go</button><span class="note"></span>
+        <p class="quiet">Posts &ldquo;${escapeHtml(goPhrase)}&rdquo; as your reply; the relay queues it on its next pass.</p>
+      </form>`;
+}
+
+/** The one question the Go button asks before it posts. Plain text, for confirm(). */
+export function goQuestion({ name }) {
+  return `Send ${name} to the build queue?`;
 }
 
 /** A stage colour the page will use: `#rrggbb` only, anything else is no colour. */

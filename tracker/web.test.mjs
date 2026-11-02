@@ -9,7 +9,7 @@ import { openStore } from './store.mjs';
 import { startServer } from './server.mjs';
 import { seedDemo, tickingClock } from './demoData.mjs';
 import { reportsOf, REPORT_RANGES } from './pageData.mjs';
-import { escapeHtml, renderComment, renderInline, renderMarkdown, renderQuickAction, renderCommands, cardCommands, cardAsk, renderMergeAction, mergeQuestion, renderCloseAction, closeQuestion, cardMove, renderTrail, cardContext, firstParagraph, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD } from './web/render.mjs';
+import { escapeHtml, renderComment, renderInline, renderMarkdown, renderQuickAction, renderCommands, cardCommands, cardAsk, renderMergeAction, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, cardContext, firstParagraph, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD } from './web/render.mjs';
 import { loadProjectConfig } from '../lib/projectConfig.mjs';
 import operatorCard from '../lib/operatorCard.js';
 import machineComment from '../lib/machineComment.js';
@@ -21,13 +21,13 @@ const DOOR = fileURLToPath(new URL('../scripts/clickup.mjs', import.meta.url));
 const WEB = (name) => fileURLToPath(new URL(`./web/${name}`, import.meta.url));
 
 /** The demo data in a fresh store, a server on a free port, and a caller signed in as the operator. */
-async function fixture({ mergePhrase, closePhrase } = {}) {
+async function fixture({ mergePhrase, closePhrase, goPhrase } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'tracker-web-'));
   const clock = tickingClock();
   const store = openStore(join(dir, 'tracker.db'), { now: clock });
   const seed = seedDemo(store, { operatorName: 'Dane', clock });
   const loopToken = store.issueToken(seed.loop.id);
-  const server = await startServer({ store, port: 0, mergePhrase, closePhrase });
+  const server = await startServer({ store, port: 0, mergePhrase, closePhrase, goPhrase });
   const url = `http://127.0.0.1:${server.address().port}`;
   async function call(method, path, { token = seed.token, body } = {}) {
     const headers = token ? { authorization: `Bearer ${token}` } : {};
@@ -1085,6 +1085,74 @@ test('the ticket page gets the close word from the relay\'s own close list, so C
   } finally { await none.cleanup(); }
 });
 
+// ── Quick Action's Go button (SP-86) ─────────────────────────────────────────
+
+/** An intake card as loop-intake posts it: reply "go", and its move is Reply. */
+function intakeCard({ needed = 'Reply "go" to queue it as written, or reply with what to change.', move = 'Reply' } = {}) {
+  const sixty = Array.from({ length: 60 }, (_, i) => `w${i}`).join(' ');
+  return machineComment.stripMachineMarker(machineComment.stampMachineComment(
+    operatorCard.buildCard(`@@ASKED\nx\n@@CONTEXT\n${sixty}\n@@NEEDED\n${needed}\nYour move: ${move} — a reason.`).rendered));
+}
+
+test('Go shows only on Needs your input, under an intake card, with a go word from the server', () => {
+  const comments = [{ body: intakeCard() }];
+  for (const name of loopStatuses.STAGE_ORDER) {
+    const status = loopStatuses.statusOf(name);
+    const html = renderGoAction({ status, goPhrase: 'go', comments });
+    if (status === loopStatuses.NEEDS_YOUR_INPUT) assert.match(html, /<form class="go-action">\s*<button type="submit">Go<\/button>/, name);
+    else assert.equal(html, '', name);
+  }
+  const nyi = { status: 'needs your input', goPhrase: 'go' };
+  assert.equal(renderGoAction({ ...nyi, goPhrase: null, comments }), '', 'no word, no button');
+  assert.equal(renderGoAction({ ...nyi, comments: [] }), '', 'no card, no Go');
+  for (const move of ['Merge', 'Close']) assert.equal(renderGoAction({ ...nyi, comments: [{ body: intakeCard({ move }) }] }), '', move);
+  assert.equal(renderGoAction({ ...nyi, comments: [{ body: moveCard('Reply') }] }), '', 'a Reply card that offers no "go"');
+  assert.equal(renderGoAction({ ...nyi, comments: [{ body: intakeCard({ needed: 'Reply A or B; then we go on.' }) }] }), '', 'the bare word, unquoted, is not an offer');
+  assert.match(renderGoAction({ ...nyi, comments: [{ body: intakeCard({ needed: 'Reply \u201cgo\u201d to queue it.' }) }] }), /go-action/, 'curly quotes count');
+  // The newest card decides: an older intake card under a newer question is spent.
+  assert.equal(renderGoAction({ ...nyi, comments: [...comments, { body: moveCard('Reply') }] }), '');
+  assert.doesNotMatch(renderGoAction({ ...nyi, goPhrase: '<b>', comments: [{ body: intakeCard({ needed: 'Reply "<b>".' }) }] }), /<b>/, 'the word is escaped');
+  assert.equal(goQuestion({ name: 'Fix it' }), 'Send Fix it to the build queue?');
+});
+
+test('the Go button posts the substrate\'s one go word, handed to the page by the server, and the demo shows it on its intake ticket only', async () => {
+  const { GO_PHRASE } = await import('./server.mjs');
+  assert.equal(GO_PHRASE, busRelayPlan.GO_PHRASE);
+  const f = await fixture({ goPhrase: GO_PHRASE });
+  try {
+    const threads = await Promise.all(f.store.listTickets('beta').map(async (t) => (await f.call('GET', `/tickets/${t.id}/thread`)).body));
+    for (const t of threads) assert.equal(t.goPhrase, GO_PHRASE, t.id);
+    const shown = threads.filter((t) => renderGoAction(t));
+    assert.deepEqual(shown.map((t) => t.name), ['A request written up as a spec, waiting for your go']);
+    assert.equal(renderGoAction(threads.find((t) => t.name === 'A question a loop asked under your token')), '');
+    const posted = await f.call('POST', `/tickets/${shown[0].id}/comments`, { body: { body: GO_PHRASE } });
+    assert.equal(posted.status, 201);
+    const stored = f.store.listComments(shown[0].id).at(-1);
+    assert.deepEqual([stored.body, stored.author], [GO_PHRASE, f.operator.id]);
+  } finally { await f.cleanup(); }
+  const none = await fixture();
+  try {
+    assert.equal((await none.call('GET', '/tickets/AL-1/thread')).body.goPhrase, null, 'no word: no button');
+  } finally { await none.cleanup(); }
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  assert.match(app, /wordButton\('form\.go-action', goQuestion\(t\), t\.goPhrase,/);
+  assert.match(app, /\$\{renderCloseAction\(t\)\}\s*\$\{renderGoAction\(t\)\}\s*<form class="reply">/, 'Go sits between Close and the reply box');
+});
+
+test('no go word is written into the page\'s code, and the Go button has the Merge look with 10px corners', () => {
+  const code = (name) => readFileSync(WEB(name), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+  for (const name of ['app.mjs', 'render.mjs', 'index.html']) {
+    assert.doesNotMatch(code(name), new RegExp(`['"\`]${busRelayPlan.GO_PHRASE}['"\`]`, 'i'), name);
+  }
+  const rules = code('app.css').split('}').map((r) => r.split('{')).filter((r) => r.length === 2)
+    .map(([sel, body]) => ({ sel: sel.split(',').map((x) => x.trim()), body }));
+  // One rule draws Merge's weight and padding, and Go is in it; the green comes from `.quick button`, which both share.
+  const shared = rules.filter((r) => r.sel.includes('.quick form.merge-action button'));
+  assert.ok(shared.length && shared.every((r) => r.sel.includes('.quick form.go-action button')), 'Go has every Merge button rule');
+  assert.ok(rules.some((r) => r.sel.includes('.quick button') && /background: #00AA00/i.test(r.body)), 'the Merge colour');
+  assert.ok(rules.some((r) => r.sel.length === 1 && r.sel[0] === '.quick form.go-action button' && /border-radius: 10px/.test(r.body)), '10px corners of its own');
+});
+
 test('the Merge button asks once, naming the PR number and the ticket', () => {
   assert.equal(mergeQuestion({ name: 'Fix it', pullRequest: 'https://github.com/o/r/pull/41' }), 'Merge PR #41 for Fix it?');
   assert.equal(mergeQuestion({ name: 'Fix it', pullRequest: null }), 'Merge the pull request for Fix it?');
@@ -1134,7 +1202,7 @@ test('clicking Merge and confirming posts exactly the merge phrase as Dane\'s ow
   const draw = /\nasync function drawTicket\(id(?:, said = null(?:, kept = null)?)?\) \{[\s\S]*?\n\}\n/.exec(app)?.[0] ?? '';
   assert.match(draw, /const wordButton = [\s\S]*wordButton\('form\.merge-action'[\s\S]*wordButton\('form\.close-action'/);
   assert.equal(app.match(/const wordButton = /g).length, 1);
-  assert.match(app, /<div class="act">\s*(?:\$\{renderCommands\(t\)\}\s*)?\$\{renderMergeAction\(t\)\}\s*\$\{renderCloseAction\(t\)\}\s*<form class="reply">/, 'Merge and Close sit above the reply box on the right');
+  assert.match(app, /<div class="act">\s*(?:\$\{renderCommands\(t\)\}\s*)?\$\{renderMergeAction\(t\)\}\s*\$\{renderCloseAction\(t\)\}\s*\$\{renderGoAction\(t\)\}\s*<form class="reply">/, 'Merge, Close and Go sit above the reply box on the right');
 });
 
 test('no merge phrase is written into the page\'s code', () => {
