@@ -337,6 +337,11 @@ work, confirm the value, then widen.
 
 ## First-time setup checklist
 
+This is Spirality's own first setup. For a new product (its repository,
+config, Doppler keys, tracker project and loop lanes), use
+[`docs/ONBOARDING_A_PRODUCT.md`](ONBOARDING_A_PRODUCT.md), which also lists
+what is still missing.
+
 1. ✅ The **Loop Queue** list exists in the Spirality space (2026-10-11).
 2. ⬜ Its statuses are the seven above, in order, with `Live` closed —
    `docs/CLICKUP_SETUP.md`, done by Dane in the ClickUp web app.

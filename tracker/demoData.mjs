@@ -110,6 +110,14 @@ export function seedDemo(store, { operatorName = substrateConfig.operatorName(),
     { assigned: true, description: 'The newest comment carries your id and the machine stamp.' }, 'waiting');
   say(underToken, op.id, stampMachineComment('Which name should the tab show?'));
 
+  // An intake card, as loop-intake posts it: reply "go" to queue it (SP-86).
+  const intake = file('beta', 'A request written up as a spec, waiting for your go', 'needs your input',
+    { assigned: true, description: '## Asked\n```\nmake the board easier to read\n```\n\n## Goal\nA clearer board.' }, 'waiting');
+  say(intake, loop.id, stampMachineComment(buildCard([
+    '@@ASKED', 'make the board easier to read', '@@CONTEXT', CONTEXT,
+    '@@NEEDED', 'Reply "go" to queue it as written, or reply with what to change.', 'Your move: Reply — "go", or what to change.',
+  ].join('\n')).rendered));
+
   file('beta', 'A question with no comments yet', 'needs your input', { assigned: true }, 'waiting');
 
   // Shaped like SP-64: a catch-up ticket with no PR of its own, whose work

@@ -19,9 +19,9 @@ import mergeOnComment from '../lib/mergeOnComment.js';
 import { compareWithinStatus } from '../scripts/lib/loopStatuses.mjs';
 import { searchPattern } from './web/render.mjs';
 
-const { OPERATOR_LANE, WAITING, CANNOT_TELL, waitingVerdict } = waitingOnOperator;
+const { OPERATOR_LANE, WAITING, CANNOT_TELL, waitingVerdict, operatorSpokeLast } = waitingOnOperator;
 const { isMachineComment, stripMachineMarker } = machineComment;
-const { STAGE_ORDER, LIVE, QUEUED, REWORK, OPERATOR_HELD_STATUSES, TERMINAL_STATUSES, DISPLAY, statusOf } = loopStatuses;
+const { STAGE_ORDER, LIVE, QUEUED, REWORK, OPERATOR_HELD_STATUSES, TERMINAL_STATUSES, DISPLAY, PRIORITY_RANK, statusOf } = loopStatuses;
 const { findPullRequest } = mergeOnComment;
 
 /**
@@ -41,6 +41,18 @@ function verdictInput(ticket, comments) {
       date: String(Date.parse(c.createdAt)),
     })),
   };
+}
+
+/**
+ * Is his answer in? The ticket sits in one of his two statuses and his own
+ * comment is the newest word on it, so the relay owes the next move (SP-93).
+ * The same rule the Waiting on you list drops a ticket by (operatorSpokeLast,
+ * rule 1 of waitingVerdict), so the page and that list cannot disagree.
+ * `operatorId` is the project's operator; with none, never.
+ */
+function answerIsIn(ticket, comments, operatorId) {
+  if (operatorId == null || !OPERATOR_LANE.includes(ticket.status)) return false;
+  return operatorSpokeLast(verdictInput(ticket, comments).comments, { operatorId });
 }
 
 /**
@@ -80,7 +92,7 @@ export function waitingFor(store, operatorId) {
  * and kind, and `machine`: true when a machine actor wrote it, or when it
  * carries the machine stamp (a loop posting under Dane's own token). The
  * stamp line itself is taken off the shown text; `machine` says it instead.
- * Null when there is no such ticket.
+ * `answerIn` says his answer is in (answerIsIn). Null when there is no such ticket.
  */
 export function threadOf(store, ticketId) {
   const ticket = store.getTicket(ticketId);
@@ -110,6 +122,7 @@ export function threadOf(store, ticketId) {
     // The one person the ticket may be assigned to, for the ticket page's picker.
     operator: namedActor(store, project?.operator),
     comments,
+    answerIn: answerIsIn(ticket, store.listComments(ticket.id), project?.operator),
     pullRequest: findPullRequest(store.listComments(ticket.id).map((c) => ({
       id: c.id, comment_text: c.body, date: String(Date.parse(c.createdAt)),
     })))?.url ?? null,
@@ -178,7 +191,8 @@ export function projectDetailsOf(store, slug) {
  * its assignee's name, its last change, and its pull request's address (or
  * null). The pull request is the merge step's own answer, findPullRequest
  * over the ticket's comments, so the list's link and the PR a "merge" would
- * act on cannot differ. Null when there is no such project.
+ * act on cannot differ. `answerIn` says his answer is in (answerIsIn, the
+ * same as the ticket page). Null when there is no such project.
  */
 export function boardOf(store, slug) {
   const project = store.getProject(slug);
@@ -212,6 +226,7 @@ export function boardOf(store, slug) {
         assignee: nameOf(t.assignee),
         updatedAt: t.updatedAt,
         pullRequest: pullRequestOf(t.id),
+        answerIn: answerIsIn(t, store.listComments(t.id), project.operator),
       })),
     })),
   };
@@ -411,6 +426,67 @@ function excerptOf(text, pattern) {
   return `${start > 0 ? '…' : ''}${flat.slice(start, end)}${end < flat.length ? '…' : ''}`;
 }
 
+/** The priorities the store keeps, most urgent first: the ticket page's picker and the search's filter. */
+export const PRIORITIES = Object.freeze(Object.keys(PRIORITY_RANK).sort((a, b) => PRIORITY_RANK[a] - PRIORITY_RANK[b]));
+
+/** A status or priority as the page writes it: "urgent" -> "Urgent". */
+const capital = (s) => String(s).replace(/^./, (c) => c.toUpperCase());
+
+/**
+ * The search's four filters, in the order the page shows them, each with
+ * the query parameter that carries it, its label, and its choices as
+ * `{ value, label }` (the value is what the address holds): the eight
+ * statuses in the contract's STAGE_ORDER, the store's priorities plus
+ * "none", and every actor, people and loops, by name ("Assigned to" also
+ * takes "nobody"). "Created by" is the actor on a ticket's `created` event.
+ */
+export function searchFilterChoices(store) {
+  const actors = store.listActors().map((a) => ({ value: String(a.id), label: a.name }));
+  return [
+    { key: 'status', label: 'Status', options: STAGE_ORDER.map((name) => ({ value: name, label: name })) },
+    { key: 'priority', label: 'Priority', options: [...PRIORITIES.map((p) => ({ value: p, label: capital(p) })), { value: 'none', label: 'None' }] },
+    { key: 'createdBy', label: 'Created by', options: actors },
+    { key: 'assignee', label: 'Assigned to', options: [{ value: 'nobody', label: 'Nobody' }, ...actors] },
+  ];
+}
+
+/** What a filter's value is called in a refusal. */
+const FILTER_NOUNS = Object.freeze({ status: 'status', priority: 'priority', createdBy: 'actor', assignee: 'actor' });
+
+/**
+ * Read the search's filters from `get(key)` (the address's query
+ * parameters): each one absent or empty is "Any". A status or priority is
+ * matched ignoring case. Answers `{ filters }`, each filter with the value
+ * chosen (as its choice writes it) or null, or `{ problem }`, a plain
+ * sentence naming the value that is not one of the choices.
+ */
+export function readSearchFilters(store, get) {
+  const filters = searchFilterChoices(store).map((f) => ({ ...f, value: null }));
+  for (const f of filters) {
+    const raw = String(get(f.key) ?? '').trim();
+    if (!raw) continue;
+    const hit = f.options.find((o) => (f.key === 'status' || f.key === 'priority' ? o.value.toLowerCase() === raw.toLowerCase() : o.value === raw));
+    if (!hit) {
+      const known = f.key === 'status' || f.key === 'priority' ? ` ${f.label} is one of: ${f.options.map((o) => o.label).join(', ')}.` : '';
+      return { problem: `There is no ${FILTER_NOUNS[f.key]} "${raw}" to filter ${f.label} by.${known}` };
+    }
+    f.value = hit.value;
+  }
+  return { filters };
+}
+
+/** Does `ticket` pass every chosen filter? Created by is read from its events only when that filter is on. */
+function passesFilters(store, ticket, chosen) {
+  if (chosen.status != null && ticket.status !== statusOf(chosen.status)) return false;
+  if (chosen.priority != null && (ticket.priority ?? 'none') !== chosen.priority) return false;
+  if (chosen.assignee != null && String(ticket.assignee ?? 'nobody') !== chosen.assignee) return false;
+  if (chosen.createdBy != null) {
+    const created = store.listEvents(ticket.id).find((e) => e.field === 'created');
+    if (String(created?.actor) !== chosen.createdBy) return false;
+  }
+  return true;
+}
+
 /**
  * Every ticket in every project, closed ones too, that matches `query` as
  * one phrase, ignoring case (render.mjs searchPattern, the same pattern the
@@ -420,12 +496,15 @@ function excerptOf(text, pattern) {
  * score, and one excerpt from the heaviest place it matched outside the
  * title, with that place named (both null for a title-only match). Whether
  * a comment is a loop's is the relay's own check, as on the ticket page
- * (threadOf). Reads only. An empty query finds nothing.
+ * (threadOf). `filters` (readSearchFilters) narrow the tickets before any
+ * are scored; the answer carries them back, with their choices, for the
+ * page to draw. Reads only. An empty query finds nothing.
  */
-export function searchTickets(store, query) {
+export function searchTickets(store, query, filters = searchFilterChoices(store).map((f) => ({ ...f, value: null }))) {
   const term = String(query ?? '').trim();
   const pattern = searchPattern(term);
-  if (!pattern) return { query: term, results: [] };
+  if (!pattern) return { query: term, filters, results: [] };
+  const chosen = Object.fromEntries(filters.map((f) => [f.key, f.value]));
   const kinds = new Map();
   const isMachine = (c) => {
     if (!kinds.has(c.author)) kinds.set(c.author, store.getActor(c.author)?.kind);
@@ -434,6 +513,7 @@ export function searchTickets(store, query) {
   const results = [];
   for (const project of store.listProjects()) {
     for (const ticket of store.listTickets(project.slug)) {
+      if (!passesFilters(store, ticket, chosen)) continue;
       const discussion = [];
       const development = [];
       for (const c of store.listComments(ticket.id)) {
@@ -473,5 +553,5 @@ export function searchTickets(store, query) {
     }
   }
   results.sort((a, b) => b.score - a.score || (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0));
-  return { query: term, results };
+  return { query: term, filters, results };
 }

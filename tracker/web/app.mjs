@@ -26,7 +26,7 @@
  * an emailed link's own page. The link's token is sent only in a JSON body,
  * never in an address.
  */
-import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, renderCloseAction, renderMergeAction, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchResults } from './render.mjs';
+import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderAnswerIn, statusLabel, ANSWER_IN_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults } from './render.mjs';
 
 /** Where an earlier version of the page kept a pasted token; removed on load, never read. */
 const OLD_TOKEN_KEY = 'tracker-token';
@@ -646,6 +646,7 @@ async function drawProject(slug, view, { adding = false, filed = null } = {}) {
     <a class="card" href="/t/${encodeURIComponent(t.id)}">
       <span class="name">${escapeHtml(t.name)}</span>
       <span class="quiet">${escapeHtml(t.id)}${t.priority ? ` · ${escapeHtml(t.priority)}` : ''}</span>
+      ${t.answerIn ? `<span class="answer-in">${escapeHtml(ANSWER_IN_NOTE)}</span>` : ''}
       ${t.tags.length ? `<span class="tags">${t.tags.map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join('')}</span>` : ''}
     </a>`;
   const column = (c) => block(c, 'column', c.tickets.map(card).join('') || '<p class="quiet">None.</p>');
@@ -661,7 +662,7 @@ async function drawProject(slug, view, { adding = false, filed = null } = {}) {
   };
   const row = (status) => (t) => `
     <tr>
-      <td class="name"><a href="/t/${encodeURIComponent(t.id)}">${escapeHtml(t.name)}</a> <span class="quiet">${escapeHtml(t.id)}</span></td>
+      <td class="name"><a href="/t/${encodeURIComponent(t.id)}">${escapeHtml(t.name)}</a> <span class="quiet">${escapeHtml(t.id)}</span>${t.answerIn ? ` <span class="answer-in">${escapeHtml(ANSWER_IN_NOTE)}</span>` : ''}</td>
       <td class="priority">${t.priority ? escapeHtml(statusName(t.priority)) : '<span class="quiet">–</span>'}</td>
       <td class="tags">${t.tags.map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join('')}</td>
       <td class="assignee">${t.assignee ? escapeHtml(t.assignee) : '<span class="quiet">nobody</span>'}</td>
@@ -741,32 +742,62 @@ const searchForm = (term) => `
     <input type="search" name="q" aria-label="Search every task" placeholder="Search every task" value="${escapeHtml(term)}">
   </form>`;
 
-/** Enter in the Search field opens the results page, `/search?q=<term>`. */
+/**
+ * The search results page's address: the term, then each filter chosen on
+ * the page's filter row (none on the Tasks page), so a reload or a pasted
+ * link shows the same results.
+ */
+function searchAddress(term) {
+  const params = new URLSearchParams({ q: term });
+  for (const select of main.querySelectorAll('.search-filters select')) {
+    if (select.value) params.set(select.name, select.value);
+  }
+  return `/search?${params}`;
+}
+
+/** Enter in the Search field, or a filter changed, opens the results page at searchAddress. */
 function wireSearch() {
   const form = main.querySelector('form.search');
+  const go = () => {
+    history.pushState(null, '', searchAddress(form.elements.q.value.trim()));
+    route();
+  };
   form.addEventListener('submit', (e) => {
     e.preventDefault();
-    const term = form.elements.q.value.trim();
-    history.pushState(null, '', `/search?q=${encodeURIComponent(term)}`);
-    route();
+    go();
   });
+  for (const select of main.querySelectorAll('.search-filters select')) select.addEventListener('change', go);
 }
 
 /**
- * The search results page: every ticket in every project matching `term`,
- * best matches first, as the server ranks them (pageData.mjs
- * searchTickets), drawn by render.mjs renderSearchResults, which escapes
- * each ticket's text before bolding the term. The Search field holds the
- * term, to change it and search again. Read-only.
+ * The search results page: every ticket in every project matching the
+ * address's term and filters, best matches first, as the server ranks and
+ * filters them (pageData.mjs searchTickets), drawn by render.mjs
+ * renderSearchResults, which escapes each ticket's text before bolding the
+ * term. The Search field holds the term and the filter row the filters,
+ * each choice from the server's answer; changing either searches again. A
+ * filter the server refuses shows its message in place of the results.
+ * Read-only.
  */
-async function drawSearch(term) {
-  const answer = term.trim() ? await api('GET', `/search?q=${encodeURIComponent(term)}`) : { query: '', results: [] };
+async function drawSearch(params) {
+  const term = (params.get('q') ?? '').trim();
+  let answer;
+  let refusal = null;
+  try {
+    answer = await api('GET', `/search?${params}`);
+  } catch (err) {
+    if (!(err instanceof Refused) || err.status !== 400) throw err;
+    refusal = err.message;
+    answer = await api('GET', `/search?${new URLSearchParams({ q: term })}`);
+  }
   setTitle(answer.query ? `Search: ${answer.query} · Tracker` : 'Search · Tracker');
   main.innerHTML = `
     <h1>Search</h1>
     <div class="toolbar">${searchForm(answer.query)}</div>
+    ${renderSearchFilters(answer.filters)}
+    ${refusal ? `<p class="error">${escapeHtml(refusal)}</p>` : `
     ${answer.results.length ? `<p class="quiet">${answer.results.length} ${answer.results.length === 1 ? 'ticket matches' : 'tickets match'}</p>` : ''}
-    ${renderSearchResults(answer)}`;
+    ${renderSearchResults(answer)}`}`;
   putTrail([{ label: 'Tasks', href: '/tasks' }, { label: 'Search' }]);
   wireSearch();
   if (!answer.query) main.querySelector('form.search input').focus();
@@ -832,8 +863,10 @@ async function drawTicket(id, said = null, kept = null) {
       <div class="ask">${renderQuickAction(t)}</div>
       <div class="act">
       ${renderCommands(t)}
+      ${renderAnswerIn(t)}
       ${renderMergeAction(t)}
       ${renderCloseAction(t)}
+      ${renderGoAction(t)}
       <form class="reply">
         <label for="reply">Reply as ${escapeHtml(me?.name ?? 'you')}</label>
         <textarea id="reply" required></textarea>
@@ -846,7 +879,7 @@ async function drawTicket(id, said = null, kept = null) {
       <summary>Details</summary>
       <p class="meta">
         <span>${escapeHtml(t.id)}</span><span>${escapeHtml(t.projectName)}</span>
-        <span>${escapeHtml(statusName(t.status))}</span>
+        <span>${escapeHtml(statusLabel(t))}</span>
         <span>${t.assignee ? `assigned to ${escapeHtml(t.assignee.name)}` : 'not assigned'}</span>
       </p>
       ${me?.kind === 'human' ? renderEditPanel(t) : ''}
@@ -898,8 +931,8 @@ async function drawTicket(id, said = null, kept = null) {
       button.disabled = false;
     }
   });
-  // Merge and Close: his word from the server (the project config's merge
-  // phrase, the relay's close word), posted as his own reply through the
+  // Merge, Close and Go: his word from the server (the project config's merge
+  // phrase, the relay's close word, the intake card's go word), posted as his own reply through the
   // same call the reply box uses. The relay acts on it; the page never moves
   // a status itself.
   const wordButton = (selector, question, word, signedOut) => {
@@ -927,6 +960,7 @@ async function drawTicket(id, said = null, kept = null) {
   };
   wordButton('form.merge-action', mergeQuestion(t), t.mergePhrase, 'You were signed out; the merge word was not posted.');
   wordButton('form.close-action', closeQuestion(t), t.closePhrase, 'You were signed out; the close word was not posted.');
+  wordButton('form.go-action', goQuestion(t), t.goPhrase, 'You were signed out; your go was not posted.');
   // Delete: ask first, naming the ticket; on success go to its project's list.
   const deleteForm = main.querySelector('form.delete-action');
   deleteForm?.addEventListener('submit', async (e) => {
@@ -1435,7 +1469,7 @@ async function route() {
     const search = location.pathname === '/search';
     markNav(reporting ? 'reporting' : settings ? 'settings' : peoplePage ? 'people' : projects || newProject || details || editProject ? 'projects' : ticket || project || tasks || isNew || search ? 'tasks' : 'waiting');
     if (search) {
-      await drawSearch(new URLSearchParams(location.search).get('q') ?? '');
+      await drawSearch(new URLSearchParams(location.search));
       await refreshCount();
     } else if (reporting) {
       await drawReporting();

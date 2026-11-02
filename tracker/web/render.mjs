@@ -380,7 +380,8 @@ export function renderProjectPicker(projects, current) {
 /** The status the relay merges from, as the tracker stores it (lib/mergeOnComment.js). */
 const READY_TO_LAUNCH = 'ready to launch';
 /** The two statuses that are his, where a card can ask him to close (lib/loopStatuses.js). */
-const HIS_STATUSES = [READY_TO_LAUNCH, 'needs your input'];
+const NEEDS_YOUR_INPUT = 'needs your input';
+const HIS_STATUSES = [READY_TO_LAUNCH, NEEDS_YOUR_INPUT];
 
 /**
  * The move an operator card ends its ask with, `Your move: Merge`, `Close`
@@ -394,6 +395,29 @@ export function cardMove(body) {
   return m ? m[1][0].toUpperCase() + m[1].slice(1).toLowerCase() : null;
 }
 
+/** The short note beside the status of a ticket whose answer is in (SP-93). */
+export const ANSWER_IN_NOTE = 'your answer is in';
+
+/**
+ * A ticket's status as the page writes it, with ANSWER_IN_NOTE after it
+ * when his answer is in: "Ready to launch · your answer is in". Plain text.
+ */
+export function statusLabel({ status, answerIn = false }) {
+  const name = String(status ?? '').replace(/^./, (c) => c.toUpperCase());
+  return answerIn ? `${name} · ${ANSWER_IN_NOTE}` : name;
+}
+
+/**
+ * The one line that stands in for the Merge, Close and Go buttons once his
+ * answer is in (the server's `answerIn`), as HTML, or ''. The buttons stay
+ * away until the relay answers: its comment becomes the newest, and the
+ * server stops saying so. No minutes are spelled out; the relay's interval
+ * lives in the installer.
+ */
+export function renderAnswerIn({ answerIn = false }) {
+  return answerIn ? '<p class="answer-in">Your answer is in. The relay acts on it at its next pass.</p>' : '';
+}
+
 /**
  * The Merge button for a ticket page's Quick Action section, as HTML, or ''.
  * Shown only on a Ready to launch ticket with a pull request of its own
@@ -401,9 +425,10 @@ export function cardMove(body) {
  * name another move, and only when the server named a merge phrase. The
  * phrase comes from the server (the project config's first mergePhrases
  * entry); the button posts it as his reply and the relay does the merge,
- * exactly as if he had typed it.
+ * exactly as if he had typed it. Never once his answer is in (renderAnswerIn).
  */
-export function renderMergeAction({ status, mergePhrase, pullRequest, comments = [] }) {
+export function renderMergeAction({ status, mergePhrase, pullRequest, comments = [], answerIn = false }) {
+  if (answerIn) return '';
   if (String(status ?? '').toLowerCase() !== READY_TO_LAUNCH || !mergePhrase || !pullRequest) return '';
   const card = newestCard(comments);
   const move = card ? cardMove(card.body) : null;
@@ -426,8 +451,10 @@ export function mergeQuestion({ name, pullRequest }) {
  * statuses whose newest card's move is Close, when the server named a close
  * word (the relay's own close list, lib/busRelayPlan.js). Like Merge, it
  * only posts his word as a reply; the relay decides and moves the ticket.
+ * Never once his answer is in (renderAnswerIn).
  */
-export function renderCloseAction({ status, closePhrase, comments = [] }) {
+export function renderCloseAction({ status, closePhrase, comments = [], answerIn = false }) {
+  if (answerIn) return '';
   if (!HIS_STATUSES.includes(String(status ?? '').toLowerCase()) || !closePhrase) return '';
   const card = newestCard(comments);
   if (!card || cardMove(card.body) !== 'Close') return '';
@@ -445,6 +472,32 @@ export function renderCloseAction({ status, closePhrase, comments = [] }) {
 /** The one question the Close button asks before it posts. Plain text, for confirm(). */
 export function closeQuestion({ name }) {
   return `Close ${name}?`;
+}
+
+/**
+ * The Go button, as HTML, or '': shown on a Needs your input ticket whose
+ * newest card's move is Reply and whose ask offers the go word in quotes
+ * (every card loop-intake posts), when the server named that word
+ * (GO_PHRASE in lib/busRelayPlan.js). Like Merge and Close, it only posts
+ * his word as a reply; any reply to an intake card queues it. Never once
+ * his answer is in (renderAnswerIn).
+ */
+export function renderGoAction({ status, goPhrase, comments = [], answerIn = false }) {
+  if (answerIn) return '';
+  if (String(status ?? '').toLowerCase() !== NEEDS_YOUR_INPUT || !goPhrase) return '';
+  const card = newestCard(comments);
+  if (!card || cardMove(card.body) !== 'Reply') return '';
+  const word = goPhrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  if (!new RegExp(`["\u201c]${word}["\u201d]`, 'i').test(cardAsk(card.body) ?? '')) return '';
+  return `<form class="go-action">
+        <button type="submit">Go</button><span class="note"></span>
+        <p class="quiet">Posts &ldquo;${escapeHtml(goPhrase)}&rdquo; as your reply; the relay queues it on its next pass.</p>
+      </form>`;
+}
+
+/** The one question the Go button asks before it posts. Plain text, for confirm(). */
+export function goQuestion({ name }) {
+  return `Send ${name} to the build queue?`;
 }
 
 /** A stage colour the page will use: `#rrggbb` only, anything else is no colour. */
@@ -723,17 +776,40 @@ const PLACE_WORDS = Object.freeze({
   development: 'in the development',
 });
 
+/** The filters chosen in the server's answer, as the page says them: "Status: Queued". */
+export function activeFilters(filters = []) {
+  return filters.filter((f) => f.value != null)
+    .map((f) => `${f.label}: ${f.options.find((o) => o.value === f.value)?.label ?? f.value}`);
+}
+
+/**
+ * The search results page's filter row, from the server's answer: one
+ * picker for each filter, its choices as the server lists them, "Any"
+ * first, the chosen value selected.
+ */
+export function renderSearchFilters(filters = []) {
+  const picker = (f) => `
+    <label>${escapeHtml(f.label)}
+      <select name="${escapeHtml(f.key)}">${option('', 'Any', f.value == null)}${f.options.map((o) => option(o.value, o.label, o.value === f.value)).join('')}</select>
+    </label>`;
+  return `<div class="search-filters">${filters.map(picker).join('')}</div>`;
+}
+
 /**
  * The search results page's list, from the server's answer
- * (`{ query, results }`): one plain line for an empty search or one with no
- * matches; otherwise each ticket with its id, its title as a link to its
- * page, its project and status, and its excerpt with the place it was
- * found, the term bold in title and excerpt.
+ * (`{ query, filters, results }`): one plain line for an empty search or
+ * one with no matches, naming the filters chosen; otherwise each ticket
+ * with its id, its title as a link to its page, its project and status,
+ * and its excerpt with the place it was found, the term bold in title and
+ * excerpt.
  */
-export function renderSearchResults({ query, results = [] }) {
+export function renderSearchResults({ query, filters = [], results = [] }) {
   const term = String(query ?? '').trim();
   if (!term) return '<p class="quiet search-note">Type a word to search every task.</p>';
-  if (!results.length) return `<p class="quiet search-note">No tickets match ${escapeHtml(term)}</p>`;
+  if (!results.length) {
+    const active = activeFilters(filters);
+    return `<p class="quiet search-note">No tickets match ${escapeHtml(term)}${active.length ? ` with ${escapeHtml(active.join(', '))}` : ''}</p>`;
+  }
   const item = (r) => `
     <li>
       <p class="result-head"><span class="quiet">${escapeHtml(r.id)}</span> <a href="/t/${encodeURIComponent(r.id)}">${boldMatches(r.name, term)}</a></p>

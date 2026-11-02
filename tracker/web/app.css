@@ -139,11 +139,13 @@ button.action:disabled { opacity: 0.4; cursor: default; }
 .quick .command { display: flex; gap: 0.5rem; align-items: flex-start; margin-bottom: 0.5rem; }
 .quick .command pre { flex: 1; min-width: 0; margin: 0; }
 .offscreen { position: fixed; left: -9999px; top: 0; }
-.quick form.merge-action, .quick form.close-action { margin-bottom: 1.25rem; }
+.quick form.merge-action, .quick form.close-action, .quick form.go-action { margin-bottom: 1.25rem; }
 /* Every button on a ticket's page is green, Delete included (SP-76); the tag chips' small × keeps its own look. */
 .quick button, details.details form.copy button, details.edit button:not(.remove-tag) { background: #00AA00; border: 1px solid #006600; border-radius: 10px; color: #fff; cursor: pointer; }
-.quick form.merge-action button, .quick form.close-action button { font-weight: 700; padding: 0.6rem 2rem; }
-.quick form.merge-action p, .quick form.close-action p { margin: 0.4rem 0 0; font-size: 0.9em; }
+.quick form.merge-action button, .quick form.close-action button, .quick form.go-action button { font-weight: 700; padding: 0.6rem 2rem; }
+/* Go is asked for in 10px corners (SP-86), whatever the shared rule above says. */
+.quick form.go-action button { border-radius: 10px; }
+.quick form.merge-action p, .quick form.close-action p, .quick form.go-action p { margin: 0.4rem 0 0; font-size: 0.9em; }
 details.details { border-top: var(--hairline); padding-top: 0.75rem; }
 details.details > summary { cursor: pointer; font-weight: 600; margin-bottom: 0.5rem; }
 nav.trail { font-size: 0.85rem; color: var(--quiet); margin: -0.5rem 0 1rem; }
@@ -181,6 +183,10 @@ details.add-task[open] { padding-bottom: 1rem; }
 details.add-task > summary { cursor: pointer; font-weight: 600; }
 details.add-task form.request textarea { min-height: 8rem; }
 p.filed-note { margin: 0 0 1rem; }
+/* His answer is in; the relay owes the next move (SP-93). */
+.answer-in { font-size: 0.85rem; font-style: italic; color: var(--quiet); }
+.card .answer-in { display: block; }
+p.answer-in { font-size: 1rem; margin: 0 0 1rem; }
 form.invite { max-width: 36rem; margin-bottom: 1.5rem; }
 form.invite label { display: block; font-weight: 600; }
 form.invite .row { display: flex; gap: 0.75rem; align-items: center; margin-top: 0.35rem; }
@@ -190,6 +196,9 @@ table.people, table.invites { max-width: 48rem; }
 /* The Search field (Tasks page toolbar, search results page) and its results. */
 form.search { flex: 1; max-width: 24rem; }
 form.search input { width: 100%; box-sizing: border-box; font: inherit; padding: 0.35rem 0.6rem; border: var(--hairline); border-radius: 6px; }
+.search-filters { display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; margin: 0 0 0.75rem; }
+.search-filters label { display: flex; align-items: center; gap: 0.35rem; font-size: 0.9rem; }
+.search-filters select { font: inherit; padding: 0.2rem 0.4rem; border: var(--hairline); border-radius: 6px; }
 ol.search-results { list-style: none; padding: 0; margin: 0; max-width: 48rem; }
 ol.search-results li { padding: 0.75rem 0; border-bottom: var(--hairline); }
 ol.search-results p { margin: 0.15rem 0; }
