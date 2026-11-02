@@ -177,8 +177,8 @@ test('the Projects screen lists every project with its open count; an unknown pr
     const openIn = (slug) => f.store.listTickets(slug, { open: true }).length;
     assert.ok(openIn('alpha') > 0 && openIn('alpha') < f.store.listTickets('alpha').length, 'the demo data has open and Live tickets');
     assert.deepEqual((await f.call('GET', '/projects')).body.projects, [
-      { slug: 'alpha', name: 'Alpha', prefix: 'AL', url: null, logo: null, owner: null, open: openIn('alpha') },
-      { slug: 'beta', name: 'Beta', prefix: 'BE', url: null, logo: null, owner: null, open: openIn('beta') },
+      { slug: 'alpha', name: 'Alpha', prefix: 'AL', url: null, logo: null, owner: null, repo: null, open: openIn('alpha') },
+      { slug: 'beta', name: 'Beta', prefix: 'BE', url: null, logo: null, owner: null, repo: null, open: openIn('beta') },
     ]);
     assert.equal((await f.call('GET', '/projects/beta/board')).body.projectName, 'Beta');
     assert.equal((await f.call('GET', '/projects/nope/board')).status, 404);
@@ -201,6 +201,7 @@ test('a project\'s details name its prefix, operator, open count and a count per
       url: null,
       logo: null,
       owner: null,
+      repo: null,
       open: f.store.listTickets('alpha', { open: true }).length,
       statuses: loopStatuses.STAGE_ORDER.map((name) => ({
         status: name,
@@ -847,22 +848,31 @@ test('every page puts its trail at the top: ticket, board, list, Waiting on you,
 
 // ── Create Project ───────────────────────────────────────────────────────────
 
-test('a project added from the page shows on the Projects screen and its details page with its logo, web address and owner', async () => {
+test('a project added from the page shows on the Projects screen and its details page with its logo, web address, GitHub repository and owner', async () => {
   const f = await fixture();
   try {
     const people = await f.call('GET', '/people');
     assert.deepEqual(people.body.people.map((p) => p.name), ['Dane'], 'the owner picker offers the people, not the loop');
     const made = await f.call('POST', '/projects', {
-      body: { name: 'Try me', slug: 'try-me', prefix: 'TRY', url: 'https://try.example', logo: 'https://try.example/logo.png', owner: f.operator.id },
+      body: {
+        name: 'Try me', slug: 'try-me', prefix: 'TRY', url: 'https://try.example', logo: 'https://try.example/logo.png',
+        repo: 'https://github.com/my-org/try-me', owner: f.operator.id,
+      },
     });
     assert.equal(made.status, 201);
     const row = (await f.call('GET', '/projects')).body.projects.find((p) => p.slug === 'try-me');
     assert.deepEqual(row, {
       slug: 'try-me', name: 'Try me', prefix: 'TRY', url: 'https://try.example', logo: 'https://try.example/logo.png',
-      owner: { id: f.operator.id, name: 'Dane' }, open: 0,
+      owner: { id: f.operator.id, name: 'Dane' }, repo: 'my-org/try-me', open: 0,
     });
     const details = (await f.call('GET', '/projects/try-me')).body;
-    assert.deepEqual([details.url, details.logo, details.owner], [row.url, row.logo, row.owner]);
+    assert.deepEqual([details.url, details.logo, details.owner, details.repo], [row.url, row.logo, row.owner, row.repo]);
+    // A box that is not a repository is refused with the store's own words, and nothing is added.
+    const bad = await f.call('POST', '/projects', { body: { name: 'Bad', slug: 'bad', prefix: 'BAD', repo: 'https://gitlab.com/my-org/bad' } });
+    assert.equal(bad.status, 400);
+    assert.equal(bad.body.error, 'bad-repo');
+    assert.match(bad.body.message, /owner\/name/);
+    assert.ok(!(await f.call('GET', '/projects')).body.projects.some((p) => p.slug === 'bad'));
     // The loop's sign-in cannot, and leaves the projects as they were.
     const before = (await f.call('GET', '/projects')).body.projects;
     const loop = await f.call('POST', '/projects', { token: f.store.issueToken(f.loop.id), body: { name: 'L', slug: 'loop-made', prefix: 'LM' } });
@@ -889,7 +899,8 @@ test('the New project button and form are a person\'s only; a refused save keeps
   assert.match(app, /me\?\.kind === 'human' \? '<div class="toolbar"><a class="button" href="\/projects\/new">New project<\/a><\/div>' : ''/);
   const form = app.slice(app.indexOf('async function drawCreateProject'), app.indexOf('/**', app.indexOf('async function drawCreateProject')));
   assert.match(form, /if \(me\?\.kind !== 'human'\)[\s\S]{0,200}Only a person signed in to the tracker can add a project\./);
-  for (const id of ['name', 'slug', 'prefix', 'url', 'logo']) assert.match(form, new RegExp(`field\\('${id}',`), id);
+  for (const id of ['name', 'slug', 'prefix', 'url', 'logo', 'repo']) assert.match(form, new RegExp(`field\\('${id}',`), id);
+  assert.match(form, /url: value\('url'\), logo: value\('logo'\), repo: value\('repo'\), owner:/);
   assert.match(form, /<select id="owner"><option value="">Nobody<\/option>\$\{people\.map/);
   assert.match(form, /api\('GET', '\/people'\)/);
   assert.match(form, /api\('POST', '\/projects', \{/);
@@ -903,25 +914,33 @@ test('the New project button and form are a person\'s only; a refused save keeps
   assert.match(app, /<img class="\$\{cls\}" src="\$\{escapeHtml\(p\.logo\)\}"/);
   assert.match(app, /<td class="owner">\$\{p\.owner \? escapeHtml\(p\.owner\.name\)/);
   assert.match(app, /<dt>Owner<\/dt><dd>\$\{p\.owner \? escapeHtml\(p\.owner\.name\)/);
+  // A GitHub repository is drawn as a link to it on GitHub only when it is owner/name, escaped; otherwise "none".
+  assert.match(app, /const isRepo = \(v\) => typeof v === 'string' && \/\^\[A-Za-z0-9-\]\+\\\/\[A-Za-z0-9\._-\]\+\$\/\.test\(v\);/);
+  assert.match(app, /<a href="https:\/\/github\.com\/\$\{escapeHtml\(p\.repo\)\}" target="_blank" rel="noopener noreferrer">\$\{escapeHtml\(p\.repo\)\}<\/a>/);
+  assert.match(app, /<td class="repo">\$\{repoOf\(p\)\}<\/td>/);
+  assert.match(app, /<th class="repo">GitHub repository<\/th>/);
+  assert.match(app, /<dt>GitHub repository<\/dt><dd>\$\{repoOf\(p\)\}<\/dd>/);
 });
 
 // ── Editing and deleting a project ───────────────────────────────────────────
 
-test('a project edited from the page shows its new name, web address, logo and owner on the table and its details page', async () => {
+test('a project edited from the page shows its new name, web address, logo, GitHub repository and owner on the table and its details page', async () => {
   const f = await fixture();
   try {
     await f.call('POST', '/projects', { body: { name: 'Try me', slug: 'try-me', prefix: 'TRY' } });
     const saved = await f.call('PATCH', '/projects/try-me', {
-      body: { name: 'Tried', url: 'https://tried.example', logo: 'https://tried.example/l.png', owner: f.operator.id },
+      body: { name: 'Tried', url: 'https://tried.example', logo: 'https://tried.example/l.png', repo: 'my-org/tried', owner: f.operator.id },
     });
     assert.equal(saved.status, 200);
     const row = (await f.call('GET', '/projects')).body.projects.find((p) => p.slug === 'try-me');
     assert.deepEqual(row, {
       slug: 'try-me', name: 'Tried', prefix: 'TRY', url: 'https://tried.example', logo: 'https://tried.example/l.png',
-      owner: { id: f.operator.id, name: 'Dane' }, open: 0,
+      owner: { id: f.operator.id, name: 'Dane' }, repo: 'my-org/tried', open: 0,
     });
     const details = (await f.call('GET', '/projects/try-me')).body;
-    assert.deepEqual([details.name, details.url, details.logo, details.owner], [row.name, row.url, row.logo, row.owner]);
+    assert.deepEqual([details.name, details.url, details.logo, details.owner, details.repo], [row.name, row.url, row.logo, row.owner, row.repo]);
+    // An emptied box clears it.
+    assert.equal((await f.call('PATCH', '/projects/try-me', { body: { repo: '' } })).body.repo, null);
   } finally { await f.cleanup(); }
 });
 
@@ -975,11 +994,11 @@ test('the Edit project form is a person\'s only, filled in, with the slug and pr
   assert.match(form, /if \(me\?\.kind !== 'human'\)[\s\S]{0,200}Only a person signed in to the tracker can change a project\./);
   assert.match(form, /p = await api\('GET', `\/projects\/\$\{encodeURIComponent\(slug\)\}`\)/);
   assert.match(form, /const filled = \(v\) => ` value="\$\{escapeHtml\(v \?\? ''\)\}"`;/);
-  for (const id of ['name', 'url', 'logo']) assert.match(form, new RegExp(`field\\('${id}',[^\\n]*filled\\(p\\.${id}\\)`), id);
+  for (const id of ['name', 'url', 'logo', 'repo']) assert.match(form, new RegExp(`field\\('${id}',[^\\n]*filled\\(p\\.${id}\\)`), id);
   for (const id of ['slug', 'prefix']) assert.match(form, new RegExp(`field\\('${id}',[^\\n]* disabled\\$\\{filled\\(p\\.${id}\\)\\}`), id);
   assert.match(form, /o\.id === p\.owner\?\.id \? ' selected' : ''/);
   // The change names only what may change; never the slug or prefix.
-  assert.match(form, /api\('PATCH', `\/projects\/\$\{encodeURIComponent\(p\.slug\)\}`, \{\n\s+name: value\('name'\), url: value\('url'\), logo: value\('logo'\), owner: value\('owner'\) \? Number\(value\('owner'\)\) : null,\n\s+\}\)/);
+  assert.match(form, /api\('PATCH', `\/projects\/\$\{encodeURIComponent\(p\.slug\)\}`, \{\n\s+name: value\('name'\), url: value\('url'\), logo: value\('logo'\), repo: value\('repo'\), owner: value\('owner'\) \? Number\(value\('owner'\)\) : null,\n\s+\}\)/);
   assert.match(form, /note\.textContent = `Not saved: \$\{err\.message\}`;/);
   assert.ok(!/main\.innerHTML/.test(form.slice(form.indexOf("addEventListener('submit'"))), 'a refused save never redraws the form, so nothing typed is lost');
   // Saving opens the details page, which reads the project back from the server.
@@ -1459,18 +1478,19 @@ function reportingStore() {
   store.createProject({ slug: 'alpha', name: 'Alpha', prefix: 'AL' });
   store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE' });
   const now = Date.parse('2026-10-27T15:00:00Z');
-  /** File a ticket `filedDaysAgo` before `now`; each later [days, status] moves it then. */
-  const ticket = (project, filedDaysAgo, ...moves) => {
+  /** File a ticket in `status` `filedDaysAgo` before `now`; each later [days, status] moves it then. */
+  const filedAs = (status, project, filedDaysAgo, ...moves) => {
     clock.moveTo(now - filedDaysAgo * DAY);
-    const { id } = store.fileTicket({ project, actor: loop.id, name: `filed ${filedDaysAgo} days ago`, status: 'queued' });
-    for (const [days, status] of moves) {
+    const { id } = store.fileTicket({ project, actor: loop.id, name: `filed ${filedDaysAgo} days ago`, status });
+    for (const [days, to] of moves) {
       clock.moveTo(now - days * DAY);
-      store.changeTicket(id, { actor: loop.id, status });
+      store.changeTicket(id, { actor: loop.id, status: to });
     }
     return id;
   };
+  const ticket = (...args) => filedAs('queued', ...args);
   const done = () => { store.close(); rmSync(dir, { recursive: true, force: true }); };
-  return { store, loop, ticket, now, done };
+  return { store, loop, ticket, filedAs, now, done };
 }
 
 test('Reporting: a task finished 3 days ago counts in all three ranges, 20 days ago in two, 60 days ago only in all time', () => {
@@ -1564,14 +1584,91 @@ test('Reporting is in the header after Tasks, served at /reporting, and its figu
   } finally { await f.cleanup(); }
 });
 
+/** True when `ms` is within ten minutes of `days` days: the test clock ticks a minute per reading. */
+const near = (ms, days) => ms != null && Math.abs(ms - days * DAY) < 10 * 60_000;
+
+test('Reporting flow: time to finish, sent back and waiting, from known status changes; a task sent back twice counts once; one never Queued is left out', () => {
+  const r = reportingStore();
+  try {
+    // Sent back twice; 9 days from Queued to Live; a day in Ready to launch.
+    r.ticket('alpha', 10, [9, 'building'], [8, 'in review'], [7, 'rework'], [6, 'building'], [5, 'in review'],
+      [4.5, 'rework'], [4, 'building'], [3, 'in review'], [2, 'ready to launch'], [1, 'live']);
+    // 3.5 days from Queued to Live; a day in Needs your input, half a day in Ready to launch.
+    r.ticket('beta', 5, [4, 'needs your input'], [3, 'building'], [2, 'ready to launch'], [1.5, 'live']);
+    // Filed straight into review, never Queued: left out of time to finish; half a day waiting.
+    r.filedAs('in review', 'alpha', 3, [2.5, 'ready to launch'], [2, 'live']);
+    // Finished 20 days ago, 5 days from Queued; never waited.
+    r.ticket('alpha', 25, [21, 'in review'], [20, 'live']);
+    // Still open: counts nowhere in flow; the two in the operator's stages are waiting now.
+    r.ticket('alpha', 3, [2, 'building']);
+    r.ticket('alpha', 3, [1, 'needs your input']);
+    r.ticket('beta', 3, [1, 'ready to launch']);
+    const { flow, waitingNow } = reportsOf(r.store, { now: r.now });
+    assert.equal(waitingNow, 2);
+
+    const week = flow.week;
+    assert.equal(week.finished, 3);
+    assert.equal(week.timeToFinish.counted, 2);
+    assert.equal(week.timeToFinish.leftOut, 1);
+    assert.ok(near(week.timeToFinish.median, (9 + 3.5) / 2), String(week.timeToFinish.median / DAY));
+    assert.ok(near(week.timeToFinish.longest, 9));
+    assert.deepEqual(week.sentBack, { count: 1, share: 1 / 3 });
+    assert.ok(near(week.waiting.total, 1 + 1.5 + 0.5), String(week.waiting.total / DAY));
+    assert.ok(near(week.waiting.median, 1));
+
+    const month = flow.month;
+    assert.equal(month.finished, 4);
+    assert.equal(month.timeToFinish.counted, 3);
+    assert.ok(near(month.timeToFinish.median, 5));
+    assert.ok(near(month.timeToFinish.longest, 9));
+    assert.deepEqual(month.sentBack, { count: 1, share: 1 / 4 });
+    assert.ok(near(month.waiting.total, 3));
+    assert.ok(near(month.waiting.median, (0.5 + 1) / 2));
+    assert.deepEqual(flow.all, month);
+
+    const beta = reportsOf(r.store, { project: 'beta', now: r.now });
+    assert.equal(beta.flow.all.finished, 1);
+    assert.equal(beta.flow.all.sentBack.count, 0);
+    assert.equal(beta.waitingNow, 1);
+  } finally { r.done(); }
+});
+
+test('Reporting flow: a range with no finished tasks has no times and no share, never a zero', () => {
+  const r = reportingStore();
+  try {
+    r.ticket('alpha', 70, [65, 'rework'], [60, 'live']);
+    const { flow } = reportsOf(r.store, { now: r.now });
+    assert.deepEqual(flow.week, {
+      finished: 0,
+      timeToFinish: { counted: 0, leftOut: 0, median: null, longest: null },
+      sentBack: { count: 0, share: null },
+      waiting: { total: null, median: null },
+    });
+    assert.deepEqual(flow.month, flow.week);
+    assert.equal(flow.all.finished, 1);
+    assert.deepEqual(flow.all.sentBack, { count: 1, share: 1 });
+    assert.ok(near(flow.all.timeToFinish.median, 10));
+  } finally { r.done(); }
+});
+
 test('the demo spreads its finished tasks over the last month, so every range has some', () => {
   const dir = mkdtempSync(join(tmpdir(), 'tracker-demo-reports-'));
   const clock = tickingClock();
   const store = openStore(join(dir, 'tracker.db'), { now: clock });
   try {
     seedDemo(store, { operatorName: 'Dane', clock });
-    const { finished } = reportsOf(store, { now: clock.time() });
+    const { finished, flow, waitingNow } = reportsOf(store, { now: clock.time() });
     assert.ok(finished.week > 0 && finished.month > finished.week && finished.all > finished.month, JSON.stringify(finished));
+    // Every flow report shows a figure in every range. All time leaves two out,
+    // never Queued: the oldest, filed into review, and one filed already Live.
+    for (const key of ['week', 'month', 'all']) {
+      const f = flow[key];
+      assert.ok(f.timeToFinish.median > 0 && f.timeToFinish.longest >= f.timeToFinish.median, `${key} ${JSON.stringify(f)}`);
+      assert.ok(f.sentBack.count > 0, `${key} sent back`);
+      assert.ok(f.waiting.total > 0 && f.waiting.median > 0, `${key} waiting`);
+    }
+    assert.equal(flow.all.timeToFinish.leftOut, 2);
+    assert.ok(waitingNow > 0);
   } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -1587,6 +1684,10 @@ test('the Reporting page draws only the server\'s figures: ranges and stages fro
   assert.doesNotMatch(draw, /'Queued'|'Requested'|'Building'|'Live'/, 'the stages come from the server, never typed out');
   assert.match(draw, /el\.style\.setProperty\('--stage-border', look\.border\);/);
   assert.match(draw, /escapeHtml\(s\.status\)/);
+  for (const title of ['Time to finish', 'Sent back', 'Waiting on you']) assert.match(draw, new RegExp(`flow\\('${title}',\\s*'[^']+'`), `${title} has its how-it-is-counted line`);
+  assert.match(draw, /r\.flow\[g\.key\]/, 'flow figures per range, from the server');
+  assert.match(draw, /f\.finished \? .* : '<span class="quiet">none finished in this range<\/span>'/);
+  assert.match(draw, /r\.waitingNow/);
   assert.match(app, /markNav\(reporting \? 'reporting' :/);
   assert.match(app, /if \(reporting\) \{\s*await drawReporting\(\);/);
 });

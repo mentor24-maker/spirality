@@ -304,6 +304,14 @@ const addressOf = (p) => (isWebAddress(p.url)
   ? `<a href="${escapeHtml(p.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(p.url)}</a>`
   : '<span class="quiet">none</span>');
 
+/** A GitHub repository's owner and name, the store's own shape; anything else is not drawn as a link. */
+const isRepo = (v) => typeof v === 'string' && /^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/.test(v);
+
+/** A project's GitHub repository as a link to it on GitHub that opens a new tab, or "none". */
+const repoOf = (p) => (isRepo(p.repo)
+  ? `<a href="https://github.com/${escapeHtml(p.repo)}" target="_blank" rel="noopener noreferrer">${escapeHtml(p.repo)}</a>`
+  : '<span class="quiet">none</span>');
+
 /** The remembered view; a browser that will not keep it answers "list". */
 function savedView() {
   try { return localStorage.getItem(VIEW_KEY) === 'board' ? 'board' : 'list'; } catch { return 'list'; }
@@ -324,7 +332,7 @@ function showProject() {
 
 /**
  * Every project, one row each: its logo, name, slug, ticket ids, web
- * address, owner, how many tickets are open, and an Actions column whose
+ * address, GitHub repository, owner, how many tickets are open, and an Actions column whose
  * View icon opens its details page. Choosing a name selects the project and
  * opens its tasks; the selected one is marked, and "Tasks" in the header
  * goes back to it. A person signed in gets a New project button and, on
@@ -352,6 +360,7 @@ async function drawProjects(done = '') {
       <td class="slug">${escapeHtml(p.slug)}</td>
       <td class="prefix">${escapeHtml(p.prefix)}</td>
       <td class="url">${addressOf(p)}</td>
+      <td class="repo">${repoOf(p)}</td>
       <td class="owner">${p.owner ? escapeHtml(p.owner.name) : '<span class="quiet">nobody</span>'}</td>
       <td class="open">${p.open}</td>
       <td class="actions">${action(`/projects/${encodeURIComponent(p.slug)}`, 'View project', ICONS.view)}${people
@@ -365,7 +374,7 @@ async function drawProjects(done = '') {
     <p class="note${done ? ' quiet' : ''}" role="status">${escapeHtml(done)}</p>
     ${projects.length
     ? `<p class="quiet">Choose a project's name to see its tasks.</p>
-      <table class="projects"><thead><tr><th class="logo"><span class="hidden">Logo</span></th><th class="name">Name</th><th class="slug">Slug</th><th class="prefix">Ticket prefix</th><th class="url">Web address</th><th class="owner">Owner</th><th class="open">Open tickets</th><th class="actions">Actions</th></tr></thead><tbody>${projects.map(row).join('')}</tbody></table>`
+      <table class="projects"><thead><tr><th class="logo"><span class="hidden">Logo</span></th><th class="name">Name</th><th class="slug">Slug</th><th class="prefix">Ticket prefix</th><th class="url">Web address</th><th class="repo">GitHub repository</th><th class="owner">Owner</th><th class="open">Open tickets</th><th class="actions">Actions</th></tr></thead><tbody>${projects.map(row).join('')}</tbody></table>`
     : '<p class="quiet">There are no projects yet.</p>'}`;
   putTrail([{ label: 'Projects' }]);
   const note = main.querySelector('p.note');
@@ -405,7 +414,7 @@ async function drawProjects(done = '') {
 
 /**
  * One project's details: its logo, name, slug, ticket prefix, web address,
- * owner, operator, how many
+ * GitHub repository, owner, operator, how many
  * tickets are open and how many sit in each status, with links to its board
  * and its list. Read-only. An unknown slug says so plainly.
  */
@@ -433,6 +442,7 @@ async function drawProjectDetails(slug) {
       <dt>Slug</dt><dd>${escapeHtml(p.slug)}</dd>
       <dt>Ticket prefix</dt><dd>${escapeHtml(p.prefix)}</dd>
       <dt>Web address</dt><dd>${addressOf(p)}</dd>
+      <dt>GitHub repository</dt><dd>${repoOf(p)}</dd>
       <dt>Owner</dt><dd>${p.owner ? escapeHtml(p.owner.name) : '<span class="quiet">nobody</span>'}</dd>
       <dt>Operator</dt><dd>${p.operator ? escapeHtml(p.operator.name) : '<span class="quiet">nobody</span>'}</dd>
       <dt>Open tickets</dt><dd>${p.open}</dd>
@@ -448,9 +458,12 @@ const field = (id, label, hint, attrs = '') => `
       ${hint ? `<span class="hint quiet">${hint}</span>` : ''}
       <input id="${id}" type="text"${attrs}>`;
 
+/** The GitHub repository box's hint, the same on both project forms. */
+const REPO_HINT = 'Optional. Where its pull requests live: owner/name, like my-org/my-app, or its https://github.com/ address.';
+
 /**
  * The Create Project form, for a person only: name, slug, ticket prefix, web
- * address, logo (an image's web address) and owner, picked from the
+ * address, logo (an image's web address), GitHub repository and owner, picked from the
  * tracker's people. Saving files the project and opens its details page,
  * which reads it back from the server. A refused save shows the server's own
  * message and leaves every field as typed: the form is not redrawn.
@@ -470,6 +483,7 @@ async function drawCreateProject() {
       ${field('prefix', 'Ticket prefix', 'The start of its ticket ids, like SP in SP-12: capital letters and digits.', ' required autocapitalize="characters" spellcheck="false"')}
       ${field('url', 'Web address', 'Optional. Starts http:// or https://.', ' inputmode="url" spellcheck="false"')}
       ${field('logo', 'Logo', "Optional. An image's web address, starting http:// or https://.", ' inputmode="url" spellcheck="false"')}
+      ${field('repo', 'GitHub repository', REPO_HINT, ' autocapitalize="off" spellcheck="false"')}
       <label for="owner">Owner</label>
       <select id="owner"><option value="">Nobody</option>${people.map((p) => `<option value="${escapeHtml(p.id)}"${p.id === me.id ? ' selected' : ''}>${escapeHtml(p.name)}</option>`).join('')}</select>
       <div class="row"><button type="submit">Add project</button><a href="/projects">Cancel</a><span class="note"></span></div>
@@ -486,7 +500,7 @@ async function drawCreateProject() {
     try {
       const made = await api('POST', '/projects', {
         name: value('name'), slug: value('slug'), prefix: value('prefix'),
-        url: value('url'), logo: value('logo'), owner: value('owner') ? Number(value('owner')) : null,
+        url: value('url'), logo: value('logo'), repo: value('repo'), owner: value('owner') ? Number(value('owner')) : null,
       });
       history.pushState(null, '', `/projects/${encodeURIComponent(made.slug)}`);
       await route();
@@ -502,7 +516,7 @@ async function drawCreateProject() {
 
 /**
  * The Edit project form, for a person only: the Create Project form filled
- * in with what the server holds. Name, web address, logo and owner change;
+ * in with what the server holds. Name, web address, logo, GitHub repository and owner change;
  * the slug and ticket prefix are shown but cannot, since every ticket's id
  * is built from them. Saving sends the change and opens the details page,
  * which reads it back from the server. A refused save shows the server's own
@@ -533,6 +547,7 @@ async function drawEditProject(slug) {
       ${field('prefix', 'Ticket prefix', fixed, ` disabled${filled(p.prefix)}`)}
       ${field('url', 'Web address', 'Optional. Starts http:// or https://.', ` inputmode="url" spellcheck="false"${filled(p.url)}`)}
       ${field('logo', 'Logo', "Optional. An image's web address, starting http:// or https://.", ` inputmode="url" spellcheck="false"${filled(p.logo)}`)}
+      ${field('repo', 'GitHub repository', REPO_HINT, ` autocapitalize="off" spellcheck="false"${filled(p.repo)}`)}
       <label for="owner">Owner</label>
       <select id="owner"><option value="">Nobody</option>${people.map((o) => `<option value="${escapeHtml(o.id)}"${o.id === p.owner?.id ? ' selected' : ''}>${escapeHtml(o.name)}</option>`).join('')}</select>
       <div class="row"><button type="submit">Save</button><a href="/projects">Cancel</a><span class="note"></span></div>
@@ -549,7 +564,7 @@ async function drawEditProject(slug) {
     note.textContent = 'Saving…';
     try {
       const saved = await api('PATCH', `/projects/${encodeURIComponent(p.slug)}`, {
-        name: value('name'), url: value('url'), logo: value('logo'), owner: value('owner') ? Number(value('owner')) : null,
+        name: value('name'), url: value('url'), logo: value('logo'), repo: value('repo'), owner: value('owner') ? Number(value('owner')) : null,
       });
       history.pushState(null, '', `/projects/${encodeURIComponent(saved.slug)}`);
       await route();
@@ -1119,9 +1134,22 @@ function wireAddTask(slug, view, adding) {
 }
 
 /**
+ * A duration in ms in plain words: under an hour, whole hours up to two
+ * days, then days to one decimal place.
+ */
+function spanOf(ms) {
+  const hours = ms / 3_600_000;
+  if (hours < 1) return 'under an hour';
+  if (hours < 48) return `${Math.round(hours)} hour${Math.round(hours) === 1 ? '' : 's'}`;
+  return `${(hours / 24).toFixed(1)} days`;
+}
+
+/**
  * The Reporting page: how many tasks were finished and started in each of
  * the server's time ranges, and how many are open in each stage now, for the
- * selected project or for all of them. Every figure is worked out by the
+ * selected project or for all of them, and how the finished ones flowed:
+ * time to finish, how many were sent back, and time waiting on the
+ * operator. Every figure is worked out by the
  * server (pageData.mjs reportsOf); the page only draws them, so the ranges
  * and the stages come from its answer, never typed out here. A stage wears
  * its Settings colour as properties, never as markup.
@@ -1133,6 +1161,16 @@ async function drawReporting(chosen) {
   setTitle('Reporting · Tracker');
   const head = `<tr><th>Report</th>${r.ranges.map((g) => `<th class="count">${escapeHtml(g.label)}</th>`).join('')}</tr>`;
   const line = (label, counts) => `<tr><td class="name">${label}</td>${r.ranges.map((g) => `<td class="count">${Number(counts[g.key])}</td>`).join('')}</tr>`;
+  // A flow row: one cell per range, "none finished in this range" where nothing finished.
+  const flowLine = (label, cell) => `<tr><td class="name">${label}</td>${r.ranges.map((g) => {
+    const f = r.flow[g.key];
+    return `<td class="count">${f.finished ? escapeHtml(cell(f)) : '<span class="quiet">none finished in this range</span>'}</td>`;
+  }).join('')}</tr>`;
+  const span = (ms) => (ms == null ? 'none counted' : spanOf(ms));
+  const flow = (title, how, rows) => `
+    <h2>${title}</h2>
+    <p class="quiet">${how}</p>
+    <table class="counts report flow"><thead>${head}</thead><tbody>${rows}</tbody></table>`;
   const open = r.open.map((s) => `<tr data-stage="${escapeHtml(s.status)}"><td class="status">${escapeHtml(s.status)}</td><td class="count">${Number(s.count)}</td></tr>`).join('');
   main.innerHTML = `
     <h1>Reporting</h1>
@@ -1143,6 +1181,18 @@ async function drawReporting(chosen) {
     <h2>Tasks finished and started</h2>
     <p class="quiet">Finished: moved to Live in that time and still Live. Started: filed in that time.</p>
     <table class="counts report"><thead>${head}</thead><tbody>${line('Tasks finished', r.finished)}${line('Tasks started', r.started)}</tbody></table>
+    ${flow('Time to finish',
+    'For tasks finished in that time: from first entering Queued to entering Live. Tasks that never entered Queued are left out, and counted here.',
+    flowLine('Middle (median)', (f) => span(f.timeToFinish.median))
+      + flowLine('Longest', (f) => span(f.timeToFinish.longest))
+      + flowLine('Left out, never Queued', (f) => String(Number(f.timeToFinish.leftOut))))}
+    ${flow('Sent back',
+    'Of the tasks finished in that time, how many review sent to Rework at least once (a task sent back twice counts once).',
+    flowLine('Sent back at least once', (f) => `${Number(f.sentBack.count)} of ${Number(f.finished)} (${Math.round(f.sentBack.share * 100)}%)`))}
+    ${flow('Waiting on you',
+    'For tasks finished in that time: time spent in Needs your input or Ready to launch before going Live, added up and the middle (median) task.',
+    flowLine('Total', (f) => span(f.waiting.total)) + flowLine('Middle (median)', (f) => span(f.waiting.median)))}
+    <p class="waiting-now">Waiting on you right now: <strong>${Number(r.waitingNow)}</strong> task${Number(r.waitingNow) === 1 ? '' : 's'} in Needs your input or Ready to launch.</p>
     <h2>Open now</h2>
     <p class="quiet">Tasks in each stage that is not Live.</p>
     <table class="counts stages"><thead><tr><th>Stage</th><th class="count">Tasks</th></tr></thead><tbody>${open}</tbody></table>`;

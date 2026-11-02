@@ -93,7 +93,7 @@ Five tables hold the work; two more hold people's sign-ins.
 
 ```
 projects  slug, name, prefix, operator actor,  -- replaces workspace + space + list
-          url, logo, owner (a person)
+          url, logo, owner (a person), repo (GitHub owner/name)
 actors    id, kind (human|machine), name, token hash,
           email, password hash                   -- people only
 tickets   id, project, name, description, status, priority, tags,
@@ -128,8 +128,11 @@ account_links  token hash, purpose (setup|invite|reset), email, actor,
   `<tracker>/t/SP-42`.
 - A project's **owner** is a person (a `human` actor), separate from its
   **operator**, who the loops hand tickets to. Its **url** (web address) and
-  **logo** (an image's web address) are http(s) addresses or empty. A
-  database made before these three existed gains them, empty, on start-up.
+  **logo** (an image's web address) are http(s) addresses or empty. Its
+  **repo** is its GitHub repository, `owner/name` or empty; a pasted
+  `https://github.com/owner/name` is saved as `owner/name`. No loop reads it
+  yet: the loops still take the repository from the project config. A
+  database made before these four existed gains them, empty, on start-up.
 - **People sign in with an email and a password** (invite only; Dane's
   decisions of 2026-11-01). The email is unique whatever its case and kept
   lower-case. A password is at least 12 characters and is stored only as a
@@ -172,13 +175,13 @@ answers are JSON (structured text programs read).
 | `GET /waiting` | for Dane's page: tickets in the operator's two statuses across every project, by the loop's own `waiting` verdict for the caller, newest first |
 | `GET /tickets/:id/thread` | for Dane's page: the ticket with each comment's author named and machine comments marked, its project's operator by id and name, and the Change panel's choices: the store's priorities and the four statuses a person may pick (Requested, Rework, Queued, Live) |
 | `GET /projects` | for Dane's page: every project with its slug, name, ticket prefix and open count, and the project the New request form starts on |
-| `POST /projects` | for Dane's page: add a project (`{ name, slug, prefix, url?, logo?, owner? }`), answered with its details read back; **a person's token only**: a machine's gets 403 and nothing is written. A duplicate slug or prefix, a slug that is not small letters, digits and hyphens (or is `new`), an owner who is not a person, or an address that is not http(s) gets 400 |
-| `PATCH /projects/:slug` | for Dane's page: change a project's name, web address, logo or owner (`{ name?, url?, logo?, owner? }`), answered with its details read back; **a person's token only**: a machine's gets 403 and nothing is written. The slug and ticket prefix never change (every ticket's id and its project link are built from them): naming either gets 400 `not-changeable`; an owner who is not a person or an address that is not http(s) gets 400; an unknown slug 404 |
+| `POST /projects` | for Dane's page: add a project (`{ name, slug, prefix, url?, logo?, owner?, repo? }`), answered with its details read back; **a person's token only**: a machine's gets 403 and nothing is written. A duplicate slug or prefix, a slug that is not small letters, digits and hyphens (or is `new`), an owner who is not a person, an address that is not http(s), or a repo that is not `owner/name` (or its github.com address) gets 400 |
+| `PATCH /projects/:slug` | for Dane's page: change a project's name, web address, logo, owner or GitHub repository (`{ name?, url?, logo?, owner?, repo? }`), answered with its details read back; **a person's token only**: a machine's gets 403 and nothing is written. The slug and ticket prefix never change (every ticket's id and its project link are built from them): naming either gets 400 `not-changeable`; an owner who is not a person, an address that is not http(s) or a repo that is not `owner/name` gets 400; an unknown slug 404 |
 | `DELETE /projects/:slug` | for Dane's page: delete a project that has no tickets; **a person's token only**: a machine's gets 403. One with tickets gets 409 `has-tickets` (`"SP has 48 tickets; a project with tickets cannot be deleted"`) and nothing is removed; the count and the delete are one transaction; the server log names the project and the actor |
 | `GET /people` | for Dane's page: the tracker's people (humans only), for the owner picker and the People page. A person's token gets `{ people: [{ id, name, email }], invites: [{ id, email, invitedBy: { id, name }, createdAt, expiresAt }] }`, the invites being the open ones (unused, unexpired); a machine's gets ids and names only. Never a token or a hash |
 | `POST /invites` | for the People page: invite someone (`{ email }`); **a person's token only**: a machine's gets 403 `people-only`. An email a person holds is 409 `duplicate-email`, one with an open invite 409 `duplicate-invite`, no mail sender 503 `no-mail`; otherwise a 7-day `invite` link is made and emailed through Resend, naming who invited them. A send Resend refuses withdraws the link and answers 502 `not-sent`, so no open invite is left. Answered 201 with `{ sent }` and the People page's lists read back; the log names the actor, never the email or the link |
 | `DELETE /invites/:id` | for the People page: cancel an open invite, so its link is refused as unknown; **a person's token only**. An id that is not an open invite is 404 `unknown-invite`; a used invite stays as the record |
-| `GET /projects/:slug` | for Dane's page: one project's details, its operator and owner by name, its web address and logo, its open count and a count per status; 404 for an unknown slug |
+| `GET /projects/:slug` | for Dane's page: one project's details, its operator and owner by name, its web address, logo and GitHub repository, its open count and a count per status; 404 for an unknown slug |
 | `GET /projects/:slug/board` | for Dane's page: one project's tickets in the eight statuses, each in `queue` order |
 | `POST /account/link` | **no token**: what an emailed link is for (`{ link }` → `{ purpose, email, expiresAt }`), for the set-password page; a used, expired or unknown link answers 400 `used-link`, `expired-link` or `unknown-link` |
 | `POST /account/set-password` | **no token**: use an emailed link (`{ link, password, name? }`, a name only for an invite) → `{ purpose, name, email }`; refused with the store's code (`used-link`, `expired-link`, `unknown-link`, `weak-password`, `missing`) and nothing written. The link and the password travel only in the body, never in an address, so neither reaches the log |
@@ -226,7 +229,7 @@ from `tracker/web/`. `/projects` is a table of every project: choosing a
 name selects it and opens its tasks, and the View icon in its Actions column
 opens `/projects/<slug>`, that project's details (prefix, operator, open
 count, a count per status) with links to its board and list. The table and
-the details page show each project's logo, web address and owner. A person
+the details page show each project's logo, web address, GitHub repository (a link to it on GitHub) and owner. A person
 signed in sees a **New project** button above the table: it opens
 `/projects/new`, the Create Project form, which files the project and opens
 its details page; a refused save shows the server's reason and keeps what
