@@ -79,6 +79,7 @@ test('no token and a wrong token both get 401, on reads and on writes, and nothi
     for (const token of [null, 'wrong-token', `${f.machineToken}x`]) {
       assert.equal((await f.call('GET', '/me', { token })).status, 401);
       assert.equal((await f.call('GET', '/projects/alpha/tickets', { token })).status, 401);
+      assert.equal((await f.call('GET', '/reports', { token })).status, 401);
       assert.equal((await f.call('PATCH', `/tickets/${t.id}`, { token, body: { status: 'building' } })).status, 401);
       assert.equal((await f.call('POST', `/tickets/${t.id}/comments`, { token, body: { body: 'hi' } })).status, 401);
       assert.equal((await f.call('POST', '/projects/alpha/tickets', { token, body: { name: 'y', status: 'queued' } })).status, 401);
@@ -719,5 +720,24 @@ test('the thread answer names the project\'s operator and the choices the ticket
     assert.deepEqual(body.choices.priorities, ['urgent', 'high', 'normal', 'low']);
     assert.deepEqual(body.choices.statuses.map((s) => s.label), ['Requested', 'Rework', 'Queued', 'Live']);
     assert.equal(body.version, 1);
+  } finally { await f.cleanup(); }
+});
+
+test('GET /reports answers the Reporting figures for every project or one, 404 for an unknown one, and writes nothing', async () => {
+  const f = await fixture();
+  try {
+    const t = f.store.fileTicket({ project: 'alpha', actor: f.machine.id, name: 'x', status: 'queued' });
+    f.store.changeTicket(t.id, { actor: f.machine.id, status: 'live' });
+    for (const path of ['/reports', '/reports?project=alpha', '/reports?project=']) {
+      const r = await f.call('GET', path);
+      assert.equal(r.status, 200, path);
+      assert.deepEqual(r.body.finished, { week: 1, month: 1, all: 1 }, path);
+      assert.deepEqual(r.body.started, { week: 1, month: 1, all: 1 }, path);
+    }
+    assert.equal((await f.call('GET', '/reports?project=alpha')).body.projectName, 'Alpha');
+    const unknown = await f.call('GET', '/reports?project=nope');
+    assert.equal(unknown.status, 404);
+    assert.equal(unknown.body.error, 'unknown-project');
+    assert.equal(f.store.getTicket(t.id).version, 2);
   } finally { await f.cleanup(); }
 });

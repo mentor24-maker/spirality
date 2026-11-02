@@ -4,7 +4,8 @@
  * status, name or description (a person only), pick a project, see that project's
  * whole queue as a board or as a list, see one project's details, add,
  * change or delete a project (a person only), file a new request, copy a ticket into another
- * project, and choose a colour for each stage on the Settings page. Plain browser
+ * project, choose a colour for each stage on the Settings page, and read the
+ * Reporting page's figures. Plain browser
  * JavaScript, no packages,
  * no build step; tracker/server.mjs serves it.
  *
@@ -1072,6 +1073,49 @@ async function drawNew() {
 }
 
 /**
+ * The Reporting page: how many tasks were finished and started in each of
+ * the server's time ranges, and how many are open in each stage now, for the
+ * selected project or for all of them. Every figure is worked out by the
+ * server (pageData.mjs reportsOf); the page only draws them, so the ranges
+ * and the stages come from its answer, never typed out here. A stage wears
+ * its Settings colour as properties, never as markup.
+ */
+async function drawReporting(chosen) {
+  const { projects } = await api('GET', '/projects');
+  const slug = chosen !== undefined ? chosen : (projects.some((p) => p.slug === savedProject()) ? savedProject() : '');
+  const r = await api('GET', `/reports${slug ? `?project=${encodeURIComponent(slug)}` : ''}`);
+  setTitle('Reporting · Tracker');
+  const head = `<tr><th>Report</th>${r.ranges.map((g) => `<th class="count">${escapeHtml(g.label)}</th>`).join('')}</tr>`;
+  const line = (label, counts) => `<tr><td class="name">${label}</td>${r.ranges.map((g) => `<td class="count">${Number(counts[g.key])}</td>`).join('')}</tr>`;
+  const open = r.open.map((s) => `<tr data-stage="${escapeHtml(s.status)}"><td class="status">${escapeHtml(s.status)}</td><td class="count">${Number(s.count)}</td></tr>`).join('');
+  main.innerHTML = `
+    <h1>Reporting</h1>
+    <form class="report-scope">
+      <label for="report-project">Project</label>
+      <select id="report-project"><option value="">All projects</option>${projects.map((p) => `<option value="${escapeHtml(p.slug)}"${p.slug === r.project ? ' selected' : ''}>${escapeHtml(p.name)}</option>`).join('')}</select>
+    </form>
+    <h2>Tasks finished and started</h2>
+    <p class="quiet">Finished: moved to Live in that time and still Live. Started: filed in that time.</p>
+    <table class="counts report"><thead>${head}</thead><tbody>${line('Tasks finished', r.finished)}${line('Tasks started', r.started)}</tbody></table>
+    <h2>Open now</h2>
+    <p class="quiet">Tasks in each stage that is not Live.</p>
+    <table class="counts stages"><thead><tr><th>Stage</th><th class="count">Tasks</th></tr></thead><tbody>${open}</tbody></table>`;
+  const looks = stageLooks({ stages: r.open });
+  for (const el of main.querySelectorAll('[data-stage]')) {
+    const look = looks[el.dataset.stage];
+    if (!look) continue;
+    el.classList.add('coloured');
+    el.style.setProperty('--stage-border', look.border);
+    el.style.setProperty('--stage-tint', look.tint);
+    el.style.setProperty('--stage-text', look.text);
+  }
+  main.querySelector('#report-project').addEventListener('change', (e) => {
+    drawReporting(e.target.value).catch((err) => (err instanceof SignedOut ? drawSignIn() : showError(err)));
+  });
+  putTrail([{ label: 'Reporting' }]);
+}
+
+/**
  * The Settings page: every stage in the contract's order, as the server lists
  * them, each with a colour picker and a Clear button. One Save stores them
  * all; the page then reads the colours back and says they were saved only
@@ -1164,8 +1208,12 @@ async function route() {
     const tasks = location.pathname === '/tasks';
     const isNew = location.pathname === '/new';
     const settings = location.pathname === '/settings';
-    markNav(settings ? 'settings' : isNew ? 'new' : projects || newProject || details || editProject ? 'projects' : ticket || project || tasks ? 'tasks' : 'waiting');
-    if (settings) {
+    const reporting = location.pathname === '/reporting';
+    markNav(reporting ? 'reporting' : settings ? 'settings' : isNew ? 'new' : projects || newProject || details || editProject ? 'projects' : ticket || project || tasks ? 'tasks' : 'waiting');
+    if (reporting) {
+      await drawReporting();
+      await refreshCount();
+    } else if (settings) {
       await drawSettings();
       await refreshCount();
     } else if (isNew) {

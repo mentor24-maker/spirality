@@ -39,7 +39,7 @@ import { hostname } from 'node:os';
 import { promisify } from 'node:util';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { openStore, StoreError } from './store.mjs';
-import { boardOf, projectDetailsOf, projectsList, stageColoursOf, threadOf, waitingFor } from './pageData.mjs';
+import { boardOf, projectDetailsOf, projectsList, reportsOf, stageColoursOf, threadOf, waitingFor } from './pageData.mjs';
 import { createNotifier, MAIL_KEY, mailEnvFromDoppler, mailSettingsFromEnv } from './notify.mjs';
 import { loadProjectConfig } from '../lib/projectConfig.mjs';
 import busRelayPlan from '../lib/busRelayPlan.js';
@@ -129,7 +129,7 @@ const PAGE_HEADERS = Object.freeze({
  */
 function pageFile(pathname, accept = '') {
   if (/^\/projects(?:\/[^/]+)?$/.test(pathname)) return /\btext\/html\b/.test(accept) ? 'index.html' : null;
-  if (pathname === '/' || /^\/(?:tasks|board|list|new|settings|set-password)$/.test(pathname) || /^\/(?:t|board|list)\/[^/]+$/.test(pathname)) return 'index.html';
+  if (pathname === '/' || /^\/(?:tasks|board|list|new|settings|set-password|reporting)$/.test(pathname) || /^\/(?:t|board|list)\/[^/]+$/.test(pathname)) return 'index.html';
   if (/^\/projects\/[^/]+\/edit$/.test(pathname)) return 'index.html';
   const m = /^\/web\/([^/]+)$/.exec(pathname);
   return m && Object.hasOwn(WEB_FILES, m[1]) ? m[1] : null;
@@ -327,6 +327,15 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
         store.setStageColours(body.colours);
         return [200, stageColoursOf(store)];
       }
+    }
+
+    // Dane's page: the Reporting page's figures, for one project
+    // (`?project=<slug>`) or, with none named, every project. Read-only.
+    if (parts.length === 1 && parts[0] === 'reports' && method === 'GET') {
+      const slug = url.searchParams.get('project');
+      const reports = reportsOf(store, { project: slug == null || slug === '' ? null : slug });
+      if (!reports) throw new HttpError(404, 'unknown-project', `no project "${slug}".`);
+      return [200, reports];
     }
 
     // Dane's page: one project's details page.
