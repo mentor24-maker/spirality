@@ -627,6 +627,70 @@ test('stage colours: anyone signed in reads all eight in STAGE_ORDER; a person s
   } finally { await f.cleanup(); }
 });
 
+test('an emailed link sets a password once, with no token; the same link again is refused and nothing changes', async () => {
+  const f = await fixture();
+  try {
+    const link = f.store.makeLink({ purpose: 'setup', email: 'Op@Example.com', actor: f.human.id, madeBy: f.human.id });
+    const info = await f.call('POST', '/account/link', { token: null, body: { link: link.token } });
+    assert.equal(info.status, 200);
+    assert.deepEqual(info.body, { purpose: 'setup', email: 'op@example.com', expiresAt: link.expiresAt });
+
+    const set = await f.call('POST', '/account/set-password', { token: null, body: { link: link.token, password: 'a good long password' } });
+    assert.equal(set.status, 200);
+    assert.deepEqual(set.body, { purpose: 'setup', name: 'Operator', email: 'op@example.com' });
+    assert.equal(f.store.checkPassword({ email: 'op@example.com', password: 'a good long password' })?.id, f.human.id);
+
+    const again = await f.call('POST', '/account/set-password', { token: null, body: { link: link.token, password: 'a different password' } });
+    assert.equal(again.status, 400);
+    assert.equal(again.body.error, 'used-link');
+    assert.equal(f.store.checkPassword({ email: 'op@example.com', password: 'a different password' }), null);
+    assert.equal(f.store.checkPassword({ email: 'op@example.com', password: 'a good long password' })?.id, f.human.id);
+    assert.equal((await f.call('POST', '/account/link', { token: null, body: { link: link.token } })).body.error, 'used-link');
+  } finally { await f.cleanup(); }
+});
+
+test('a bad link, a short password, a missing invite name or a stray field is refused with the store\'s code, and spends nothing', async () => {
+  const f = await fixture();
+  try {
+    const invite = f.store.makeLink({ purpose: 'invite', email: 'new@example.com', madeBy: f.human.id });
+    const post = (body) => f.call('POST', '/account/set-password', { token: null, body });
+    assert.equal((await post({ link: 'not-a-link', password: 'a good long password', name: 'X' })).body.error, 'unknown-link');
+    assert.equal((await post({ password: 'a good long password' })).body.error, 'unknown-link');
+    assert.equal((await post({ link: invite.token, password: 'short', name: 'New' })).body.error, 'weak-password');
+    assert.equal((await post({ link: invite.token, password: 'a good long password' })).body.error, 'missing');
+    const stray = await post({ link: invite.token, password: 'a good long password', name: 'New', actor: f.human.id });
+    assert.equal(stray.status, 400);
+    assert.equal(stray.body.error, 'bad-field');
+    assert.equal(f.store.actorForEmail('new@example.com'), null);
+    assert.equal(f.store.linkInfo(invite.token).purpose, 'invite', 'still usable');
+    const made = await post({ link: invite.token, password: 'a good long password', name: ' New Person ' });
+    assert.equal(made.status, 200);
+    assert.equal(made.body.name, 'New Person');
+    // Only POST: the address does not take a link in a GET.
+    assert.equal((await f.call('GET', '/account/link', { token: null })).status, 401);
+  } finally { await f.cleanup(); }
+});
+
+test('the set-password page is served without a token, and no link token or password reaches the server log', async () => {
+  const f = await fixture();
+  try {
+    const link = f.store.makeLink({ purpose: 'setup', email: 'op@example.com', actor: f.human.id, madeBy: f.human.id });
+    const base = await f.serve();
+    const page = await fetch(`${base}/set-password?link=${encodeURIComponent(link.token)}`);
+    assert.equal(page.status, 200);
+    assert.match(page.headers.get('content-type'), /^text\/html/);
+    await f.call('POST', '/account/link', { token: null, body: { link: link.token } });
+    await f.call('POST', '/account/set-password', { token: null, body: { link: link.token, password: 'a secret password' } });
+    await f.call('POST', '/account/set-password', { token: null, body: { link: link.token, password: 'another secret pw' } });
+    const log = f.lines.join('\n');
+    assert.match(log, /POST \/account\/set-password 200 actor=-/);
+    assert.match(log, new RegExp(`password set through a setup link actor=${f.human.id}`));
+    for (const secret of [link.token, encodeURIComponent(link.token), 'a secret password', 'another secret pw']) {
+      assert.ok(!log.includes(secret), `the log carries ${secret}`);
+    }
+  } finally { await f.cleanup(); }
+});
+
 test('a person may assign a ticket only to its project\'s operator or to nobody; anyone else is refused and nothing is written', async () => {
   const f = await fixture();
   try {

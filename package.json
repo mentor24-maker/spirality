@@ -20,6 +20,7 @@
   ],
   "scripts": {
     "clickup": "doppler run --project spirality --config dev --no-check-version -- node scripts/clickup.mjs",
+    "tracker:account": "doppler run --project spirality --config dev --no-check-version -- node --no-warnings tracker/account.mjs",
     "tracker:import": "doppler run --project spirality --config dev --no-check-version -- node tracker/import.mjs",
     "doctor": "node scripts/doctor.mjs",
     "tracker:signins": "doppler run --project spirality --config dev --no-check-version -- node --no-warnings tracker/signins.mjs",

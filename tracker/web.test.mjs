@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { startServer } from './server.mjs';
 import { seedDemo, tickingClock } from './demoData.mjs';
-import { escapeHtml, renderComment, renderInline, renderMarkdown, renderQuickAction, renderCommands, cardCommands, cardAsk, renderMergeAction, mergeQuestion, renderCloseAction, closeQuestion, cardMove, renderTrail, cardContext, firstParagraph, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, stageLook, stageLooks, contrast } from './web/render.mjs';
+import { escapeHtml, renderComment, renderInline, renderMarkdown, renderQuickAction, renderCommands, cardCommands, cardAsk, renderMergeAction, mergeQuestion, renderCloseAction, closeQuestion, cardMove, renderTrail, cardContext, firstParagraph, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, MIN_PASSWORD } from './web/render.mjs';
 import { loadProjectConfig } from '../lib/projectConfig.mjs';
 import operatorCard from '../lib/operatorCard.js';
 import machineComment from '../lib/machineComment.js';
@@ -1242,6 +1242,47 @@ test('both Deletes confirm before any request, show a refusal on the page, and k
     assert.ok(handler.indexOf('confirm(') < handler.indexOf("api('DELETE'"), 'asks before it sends');
   }
   assert.match(app, /\$\{renderDeleteAction\(t\)\}\s*<\/div>/, 'Delete sits at the foot of Quick Action\'s right side');
+});
+
+test('the set-password page is served without a token, drawn before any sign-in, and sends the link only in a body', async () => {
+  const f = await fixture();
+  try {
+    const r = await f.call('GET', '/set-password?link=anything', { token: null });
+    assert.equal(r.status, 200);
+    assert.equal(r.text, readFileSync(WEB('index.html'), 'utf8'));
+    assert.match(r.headers.get('content-security-policy'), /script-src 'self'/);
+  } finally { await f.cleanup(); }
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  // The emailed link's page comes before GET /me, so nobody has to be signed in.
+  assert.ok(app.indexOf("location.pathname === '/set-password'") < app.indexOf("me = await api('GET', '/me')"));
+  assert.match(app, /linkCall\('\/account\/link', \{ link \}\)/);
+  assert.match(app, /linkCall\('\/account\/set-password', \{ link, password: typed\.password/);
+  assert.doesNotMatch(app, /fetch\(`[^`]*\$\{link\}/, 'the link never goes into an address the page fetches');
+});
+
+test('the set-password form shows the email read-only, two password boxes, a name box only for an invite, and escapes the email', () => {
+  const setup = renderSetPassword({ purpose: 'setup', email: 'dane@example.com' });
+  assert.match(setup, /<input id="email" type="email" value="dane@example\.com" readonly/);
+  assert.equal((setup.match(/type="password"/g) ?? []).length, 2);
+  assert.doesNotMatch(setup, /id="name"/);
+  assert.match(renderSetPassword({ purpose: 'invite', email: 'new@example.com' }), /<input id="name" type="text"/);
+  assert.match(renderSetPassword({ purpose: 'setup', email: '"><script>x</script>' }), /value="&quot;&gt;&lt;script&gt;x&lt;\/script&gt;"/);
+  assert.match(renderPasswordSet('http://tracker.example:4180'), /Password set\. Sign in at <a href="\/">http:\/\/tracker\.example:4180<\/a>\./);
+});
+
+test('a used, expired or unknown link says which in plain words; a form with a short, unmatched or nameless password says why before sending', () => {
+  assert.match(linkProblem('used-link'), /already been used/);
+  assert.match(linkProblem('expired-link'), /expired/);
+  assert.match(linkProblem('unknown-link'), /not one the tracker made/);
+  for (const code of ['used-link', 'expired-link', 'unknown-link']) assert.match(linkProblem(code), /Nothing was changed\./);
+  assert.equal(linkProblem('weak-password'), null);
+  assert.equal(MIN_PASSWORD, 12);
+  const good = 'twelve chars';
+  assert.equal(passwordProblem({ purpose: 'setup', password: good, confirm: good }), null);
+  assert.match(passwordProblem({ purpose: 'setup', password: 'eleven char', confirm: 'eleven char' }), /at least 12/);
+  assert.match(passwordProblem({ purpose: 'setup', password: good, confirm: 'twelve charz' }), /not the same/);
+  assert.match(passwordProblem({ purpose: 'invite', name: '  ', password: good, confirm: good }), /your name/);
+  assert.equal(passwordProblem({ purpose: 'invite', name: 'New', password: good, confirm: good }), null);
 });
 
 test('the Change panel offers the server\'s priorities and person statuses, keeps the current status in view, and names the operator from the ticket', () => {
