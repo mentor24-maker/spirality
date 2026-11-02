@@ -721,3 +721,201 @@ test('the thread answer names the project\'s operator and the choices the ticket
     assert.equal(body.version, 1);
   } finally { await f.cleanup(); }
 });
+
+/**
+ * A server on the fixture's store with `options` (accountMail, now), the
+ * operator holding an email and a password, and a raw caller that sends
+ * exactly the headers given. Answers `{ base, ask, email, password }`.
+ */
+async function signInServer(f, options = {}) {
+  const email = 'operator@example.com';
+  const password = 'a good long password';
+  f.store.setEmail(f.human.id, email);
+  f.store.setPassword(f.human.id, password);
+  const server = await startServer({ store: f.store, port: 0, log: (line) => f.lines.push(line), ...options });
+  const base = `http://127.0.0.1:${server.address().port}`;
+  async function ask(method, path, { headers = {}, body } = {}) {
+    const res = await fetch(`${base}${path}`, { method, headers, body: body === undefined ? undefined : (typeof body === 'string' ? body : JSON.stringify(body)) });
+    const text = await res.text();
+    return { status: res.status, body: JSON.parse(text), text, cookie: res.headers.get('set-cookie') };
+  }
+  const json = { 'content-type': 'application/json' };
+  const signIn = (b) => ask('POST', '/signin', { headers: json, body: b });
+  return { base, ask, json, signIn, email, password, close: () => new Promise((r) => server.close(r)) };
+}
+
+/** The session cookie a Set-Cookie header carries, as a Cookie header sends it back. */
+const cookieOf = (setCookie) => setCookie.split(';')[0];
+
+test('signing in with an email and a password sets a 30-day HttpOnly, SameSite=Strict cookie that signs the page in; signing out ends it', async () => {
+  const f = await fixture();
+  const s = await signInServer(f);
+  try {
+    const r = await s.signIn({ email: '  Operator@Example.com ', password: s.password });
+    assert.equal(r.status, 200);
+    assert.deepEqual(r.body, f.human);
+    const flags = r.cookie.split(';').map((p) => p.trim());
+    assert.match(flags[0], /^tracker_session=[A-Za-z0-9_-]{20,}$/);
+    for (const flag of ['HttpOnly', 'SameSite=Strict', 'Path=/', 'Max-Age=2592000']) assert.ok(flags.includes(flag), flag);
+    assert.ok(!flags.some((p) => /^secure$/i.test(p)), 'no Secure flag yet: the tracker is plain http on the home network');
+    const cookie = cookieOf(r.cookie);
+
+    // "Reload": the cookie alone signs in, every time.
+    for (let i = 0; i < 2; i++) assert.deepEqual((await s.ask('GET', '/me', { headers: { cookie } })).body, f.human);
+    assert.equal((await s.ask('GET', '/waiting', { headers: { cookie: `other=1; ${cookie}` } })).status, 200);
+
+    const out = await s.ask('POST', '/signout', { headers: { ...s.json, cookie }, body: {} });
+    assert.equal(out.status, 200);
+    assert.deepEqual(out.body, { signedOut: true });
+    assert.match(out.cookie, /^tracker_session=;.*Max-Age=0/);
+    assert.equal((await s.ask('GET', '/me', { headers: { cookie } })).status, 401);
+  } finally { await s.close(); await f.cleanup(); }
+});
+
+test('a wrong password and an unknown email get the same answer; after 5 failures in 15 minutes even the right password is refused for 15 minutes', async () => {
+  const f = await fixture();
+  let clock = Date.parse('2026-11-01T18:00:00Z');
+  const s = await signInServer(f, { now: () => clock });
+  try {
+    const wrong = await s.signIn({ email: s.email, password: 'not the password' });
+    const unknown = await s.signIn({ email: 'nobody@example.com', password: 'not the password' });
+    assert.equal(wrong.status, 401);
+    assert.equal(wrong.text, unknown.text, 'the same answer, word for word');
+    assert.equal(wrong.body.message, 'That email and password do not match.');
+    assert.equal(wrong.cookie, null);
+
+    for (let i = 0; i < 4; i++) assert.equal((await s.signIn({ email: s.email, password: `wrong ${i}` })).status, 401);
+    const sixth = await s.signIn({ email: s.email, password: s.password });
+    assert.equal(sixth.status, 429);
+    assert.equal(sixth.body.error, 'locked');
+    assert.match(sixth.body.message, /Wait 15 minutes/);
+    assert.equal(sixth.cookie, null, 'no session is started while locked');
+    // Any case of the same email is the same email; another email is not locked.
+    assert.equal((await s.signIn({ email: s.email.toUpperCase(), password: s.password })).status, 429);
+    assert.equal((await s.signIn({ email: 'nobody@example.com', password: 'x' })).status, 401);
+
+    clock += 14 * 60_000;
+    assert.equal((await s.signIn({ email: s.email, password: s.password })).status, 429);
+    clock += 60_000;
+    assert.equal((await s.signIn({ email: s.email, password: s.password })).status, 200);
+
+    // Failures spread wider than 15 minutes never lock.
+    for (let i = 0; i < 8; i++) {
+      assert.equal((await s.signIn({ email: s.email, password: 'wrong' })).status, 401, `try ${i + 1}`);
+      clock += 4 * 60_000;
+    }
+  } finally { await s.close(); await f.cleanup(); }
+});
+
+test('a machine\'s token can never stand in for a session cookie, and every loop token keeps working unchanged', async () => {
+  const f = await fixture();
+  const s = await signInServer(f);
+  try {
+    for (const token of [f.machineToken, f.humanToken]) {
+      assert.equal((await s.ask('GET', '/me', { headers: { cookie: `tracker_session=${token}` } })).status, 401);
+    }
+    assert.throws(() => f.store.startSession(f.machine.id), { code: 'machine-account' });
+    // A bearer token still signs in, and a bearer write needs no content type, as before.
+    assert.deepEqual((await s.ask('GET', '/me', { headers: { authorization: `Bearer ${f.machineToken}` } })).body, f.machine);
+    const filed = await s.ask('POST', '/projects/alpha/tickets', { headers: { authorization: `Bearer ${f.machineToken}` }, body: { name: 'By a loop', status: 'queued' } });
+    assert.equal(filed.status, 201);
+    // A bearer token beats a cookie: the loop's actor, never the person's.
+    const r = await s.signIn({ email: s.email, password: s.password });
+    const both = await s.ask('GET', '/me', { headers: { authorization: `Bearer ${f.machineToken}`, cookie: cookieOf(r.cookie) } });
+    assert.deepEqual(both.body, f.machine);
+    assert.equal((await s.ask('GET', '/me', { headers: { authorization: 'Bearer wrong', cookie: cookieOf(r.cookie) } })).status, 401);
+  } finally { await s.close(); await f.cleanup(); }
+});
+
+test('a write made with the cookie must say content-type: application/json; a plain form post is refused and writes nothing', async () => {
+  const f = await fixture();
+  const s = await signInServer(f);
+  try {
+    const cookie = cookieOf((await s.signIn({ email: s.email, password: s.password })).cookie);
+    const before = f.store.listTickets('alpha').length;
+    const form = { 'content-type': 'application/x-www-form-urlencoded', cookie };
+    const refused = await s.ask('POST', '/projects/alpha/tickets', { headers: form, body: JSON.stringify({ name: 'From another site', status: 'requested' }) });
+    assert.equal(refused.status, 415);
+    assert.equal(refused.body.error, 'json-only');
+    assert.equal((await s.ask('POST', '/projects/alpha/tickets', { headers: { cookie }, body: JSON.stringify({ name: 'No type', status: 'requested' }) })).status, 415);
+    assert.equal(f.store.listTickets('alpha').length, before, 'nothing was written');
+    // The no-token calls take only JSON too: a form cannot sign anyone in or out.
+    assert.equal((await s.ask('POST', '/signin', { headers: { 'content-type': 'text/plain' }, body: JSON.stringify({ email: s.email, password: s.password }) })).status, 415);
+    assert.equal((await s.ask('POST', '/signout', { headers: { cookie } })).status, 415);
+    assert.equal((await s.ask('GET', '/me', { headers: { cookie } })).status, 200, 'still signed in');
+
+    const filed = await s.ask('POST', '/projects/alpha/tickets', { headers: { ...s.json, cookie }, body: { name: 'From the page', status: 'requested' } });
+    assert.equal(filed.status, 201);
+    assert.equal(f.store.listEvents(filed.body.id)[0].actor, f.human.id, 'written as the person signed in');
+  } finally { await s.close(); await f.cleanup(); }
+});
+
+test('Forgot password: an account\'s email gets a 1-hour reset link that works, an unknown email gets nothing, and the answer is the same', async () => {
+  const f = await fixture();
+  const sent = [];
+  const accountMail = { send: async (mail) => { sent.push(mail); }, pageUrl: 'http://tracker.test:4180', productName: 'Alpha' };
+  const s = await signInServer(f, { accountMail });
+  try {
+    const cookie = cookieOf((await s.signIn({ email: s.email, password: s.password })).cookie);
+    const known = await s.ask('POST', '/account/forgot', { headers: s.json, body: { email: 'OPERATOR@example.com' } });
+    const unknown = await s.ask('POST', '/account/forgot', { headers: s.json, body: { email: 'nobody@example.com' } });
+    assert.equal(known.status, 200);
+    assert.equal(known.text, unknown.text, 'the same answer, word for word');
+    assert.match(known.body.sent, /If that email has an account/);
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].to, s.email);
+    assert.equal(sent[0].subject, 'Reset your Alpha password');
+    const link = /http:\/\/tracker\.test:4180\/set-password\?link=([A-Za-z0-9_%-]+)/.exec(sent[0].text);
+    assert.ok(link, sent[0].text);
+    const token = decodeURIComponent(link[1]);
+    const info = await s.ask('POST', '/account/link', { headers: s.json, body: { link: token } });
+    assert.equal(info.body.purpose, 'reset');
+    assert.equal(Date.parse(info.body.expiresAt) - Date.now() <= 60 * 60_000, true, 'good for 1 hour');
+
+    for (let i = 0; i < 5; i++) await s.signIn({ email: s.email, password: `wrong ${i}` });
+    assert.equal((await s.signIn({ email: s.email, password: s.password })).status, 429);
+    const set = await s.ask('POST', '/account/set-password', { headers: s.json, body: { link: token, password: 'a brand new password' } });
+    assert.equal(set.status, 200);
+    assert.equal((await s.ask('GET', '/me', { headers: { cookie } })).status, 401, 'a reset signs out everywhere');
+    assert.equal((await s.signIn({ email: s.email, password: 'a brand new password' })).status, 200, 'a reset forgives the failed tries');
+    assert.ok(f.lines.includes(`reset link sent to actor ${f.human.id}, good for 1 hour`));
+    assert.ok(f.lines.includes('reset asked for an email with no account; nothing sent'));
+    assert.equal((await s.signIn({ email: s.email, password: s.password })).status, 401, 'the old password no longer signs in');
+  } finally { await s.close(); await f.cleanup(); }
+});
+
+test('Forgot password with no mail sender, or a sender that fails, answers the page the same and says why in the log, leaving no usable link', async () => {
+  const f = await fixture();
+  const s = await signInServer(f, { accountMail: { send: async () => { throw new Error('Resend answered 500'); }, pageUrl: 'http://tracker.test', productName: 'Alpha' } });
+  const off = await signInServer(f);
+  try {
+    const failed = await s.ask('POST', '/account/forgot', { headers: s.json, body: { email: s.email } });
+    const none = await off.ask('POST', '/account/forgot', { headers: off.json, body: { email: s.email } });
+    assert.equal(failed.status, 200);
+    assert.equal(failed.text, none.text);
+    assert.ok(f.lines.some((l) => /^reset NOT sent to actor \d+: Resend answered 500; the link was withdrawn$/.test(l)), f.lines.join('\n'));
+    assert.ok(f.lines.some((l) => /^reset NOT sent to actor \d+: RESEND_API_KEY is not in Doppler/.test(l)));
+    assert.equal((await s.ask('POST', '/account/forgot', { headers: s.json, body: {} })).status, 400);
+  } finally { await s.close(); await off.close(); await f.cleanup(); }
+});
+
+test('no password and no session token ever reaches the server log', async () => {
+  const f = await fixture();
+  const sent = [];
+  const s = await signInServer(f, { accountMail: { send: async (m) => { sent.push(m); }, pageUrl: 'http://tracker.test', productName: 'Alpha' } });
+  try {
+    const r = await s.signIn({ email: s.email, password: s.password });
+    const session = cookieOf(r.cookie).split('=')[1];
+    for (let i = 0; i < 6; i++) await s.signIn({ email: s.email, password: `a wrong secret ${i}` });
+    await s.ask('GET', '/me', { headers: { cookie: `tracker_session=${session}` } });
+    await s.ask('POST', '/account/forgot', { headers: s.json, body: { email: s.email } });
+    await s.ask('POST', '/signout', { headers: { ...s.json, cookie: `tracker_session=${session}` }, body: {} });
+    const resetToken = decodeURIComponent(/link=([^\s]+)/.exec(sent[0].text)[1]);
+    const log = f.lines.join('\n');
+    for (const secret of [s.password, session, resetToken, ...Array.from({ length: 6 }, (_, i) => `a wrong secret ${i}`)]) {
+      assert.ok(!log.includes(secret), `the log carries a secret: ${secret.slice(0, 6)}…`);
+    }
+    assert.ok(f.lines.includes(`signed in actor=${f.human.id}`));
+    assert.ok(f.lines.includes(`GET /me 200 actor=${f.human.id}`));
+  } finally { await s.close(); await f.cleanup(); }
+});

@@ -27,6 +27,15 @@
  * password travel only in the JSON body, never in an address, so neither
  * can reach the log; a refusal answers the store's own code.
  *
+ * A person signs in from the page with an email and a password
+ * (`POST /signin`), which starts a session held in a cookie the page's
+ * script cannot read; `POST /signout` ends it, and `POST /account/forgot`
+ * emails a reset link. A call is signed in by a bearer token (every loop,
+ * and a person's own token, as before) or by a person's session cookie; a
+ * cookie never stands for a machine. A write made with the cookie must say
+ * `content-type: application/json`, which a plain form on another site
+ * cannot send, so another site can never write as the person signed in.
+ *
  * Run directly, it opens the store at TRACKER_DB and listens on
  * TRACKER_PORT; both must be set, nothing is assumed. TRACKER_HOST is the
  * address it listens on: 127.0.0.1 (this machine only) unless set, and
@@ -40,10 +49,30 @@ import { promisify } from 'node:util';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { openStore, StoreError } from './store.mjs';
 import { boardOf, projectDetailsOf, projectsList, stageColoursOf, threadOf, waitingFor } from './pageData.mjs';
-import { createNotifier, MAIL_KEY, mailEnvFromDoppler, mailSettingsFromEnv } from './notify.mjs';
+import { createNotifier, DEFAULT_FROM, MAIL_FROM, MAIL_KEY, mailEnvFromDoppler, mailSettingsFromEnv, resendSender } from './notify.mjs';
+import { sendResetLink } from './account.mjs';
 import { loadProjectConfig } from '../lib/projectConfig.mjs';
 import busRelayPlan from '../lib/busRelayPlan.js';
 import loopStatuses from '../lib/loopStatuses.js';
+
+/**
+ * The session cookie's name and how long it lasts: 30 days, the store's own
+ * session lifetime. There is no `Secure` flag yet because the tracker is
+ * plain http on the home network, where a `Secure` cookie would never be
+ * sent back. The ticket that opens the tracker to the internet must add
+ * `Secure` (and serve https) before anything else.
+ */
+const SESSION_COOKIE = 'tracker_session';
+const SESSION_MAX_AGE = 30 * 24 * 60 * 60;
+const COOKIE_FLAGS = 'HttpOnly; SameSite=Strict; Path=/';
+
+/** Sign-in failures: this many for one email within the window refuse that email for LOCK_MS. */
+const MAX_FAILURES = 5;
+const FAILURE_WINDOW_MS = 15 * 60 * 1000;
+const LOCK_MS = 15 * 60 * 1000;
+
+/** The one answer to a wrong password and to an unknown email, so neither says which. */
+const NO_MATCH = 'That email and password do not match.';
 
 /** The largest request body accepted, in bytes. A ticket description fits easily. */
 const MAX_BODY = 1024 * 1024;
@@ -151,15 +180,60 @@ class HttpError extends Error {
   }
 }
 
-function send(res, status, body) {
+function send(res, status, body, headers = {}) {
   const text = JSON.stringify(body);
-  res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'content-length': Buffer.byteLength(text) });
+  res.writeHead(status, { ...headers, 'content-type': 'application/json; charset=utf-8', 'content-length': Buffer.byteLength(text) });
   res.end(text);
 }
 
 function bearerToken(req) {
   const m = /^Bearer\s+(\S+)\s*$/i.exec(req.headers.authorization ?? '');
   return m ? m[1] : null;
+}
+
+/** The session cookie's value, or null when the request carries none. */
+function sessionToken(req) {
+  for (const part of String(req.headers.cookie ?? '').split(';')) {
+    const at = part.indexOf('=');
+    if (at > 0 && part.slice(0, at).trim() === SESSION_COOKIE) return part.slice(at + 1).trim() || null;
+  }
+  return null;
+}
+
+/** Whether the request says its body is JSON. */
+function saysJson(req) {
+  return /^application\/json\s*(?:;|$)/i.test(req.headers['content-type'] ?? '');
+}
+
+/**
+ * Sign-in failures per email, kept in memory (a restart forgets them).
+ * `locked(email)` is whether that email is refused for now; `failed(email)`
+ * counts one more, and answers true when it is the one that locks it.
+ */
+function failureCounter(now) {
+  const byEmail = new Map();
+  return {
+    locked(email) {
+      const entry = byEmail.get(email);
+      return Boolean(entry && entry.lockedUntil > now());
+    },
+    failed(email) {
+      const t = now();
+      const entry = byEmail.get(email) ?? { times: [], lockedUntil: 0 };
+      entry.times = entry.times.filter((at) => t - at < FAILURE_WINDOW_MS);
+      entry.times.push(t);
+      const locks = entry.times.length >= MAX_FAILURES;
+      if (locks) {
+        entry.lockedUntil = t + LOCK_MS;
+        entry.times = [];
+      }
+      byEmail.set(email, entry);
+      return locks;
+    },
+    cleared(email) {
+      byEmail.delete(email);
+    },
+  };
 }
 
 /** The request body as a JSON object; an empty body is `{}`. */
@@ -233,6 +307,10 @@ function flag(value) {
  * Merge button; the reply box still takes the word typed by hand.
  * `closePhrase` is the word the Close button posts (CLOSE_PHRASE below,
  * the relay's own close list). Null means no Close button.
+ * `accountMail` sends the "Forgot password?" email: `{ send, pageUrl,
+ * productName }`, the reset link opening under `pageUrl`. Null (or no
+ * `send`) means no reset email goes out; the page's answer is the same,
+ * and the log says why. `now` is the clock the sign-in failure count reads.
  */
 /**
  * The word the ticket page's Close button posts: the first of the relay's
@@ -241,7 +319,9 @@ function flag(value) {
  */
 export const CLOSE_PHRASE = busRelayPlan.CLOSE_PHRASES[0];
 
-export function createHandler(store, { log = () => {}, notifier = null, defaultProject = null, mergePhrase = null, closePhrase = null } = {}) {
+export function createHandler(store, { log = () => {}, notifier = null, defaultProject = null, mergePhrase = null, closePhrase = null, accountMail = null, now = Date.now } = {}) {
+  const failures = failureCounter(now);
+
   function requireProject(slug) {
     const project = store.getProject(slug);
     if (!project) throw new HttpError(404, 'unknown-project', `no project "${slug}".`);
@@ -481,11 +561,57 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
   }
 
   /**
-   * The calls an emailed link makes, with no token: the link is the proof.
-   * Answers `[status, body]`, or null for an address that is not one of them.
+   * The calls made with no token: an emailed link's (the link is the
+   * proof), signing in and out, and "Forgot password?". Each takes only a
+   * JSON body, so a form on another site cannot make one. Answers
+   * `[status, body, headers, after]`, or null for an address that is not
+   * one of them; `after` runs once the answer has gone back.
    */
   async function accountRoute(req, url) {
     if (req.method !== 'POST') return null;
+    if (!['/account/link', '/account/set-password', '/account/forgot', '/signin', '/signout'].includes(url.pathname)) return null;
+    if (!saysJson(req)) throw new HttpError(415, 'json-only', 'this call takes a JSON body (content-type: application/json).');
+    if (url.pathname === '/signin') {
+      const body = await readJson(req);
+      onlyFields(body, ['email', 'password']);
+      const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : '';
+      if (!email || typeof body.password !== 'string' || !body.password) {
+        throw new HttpError(400, 'missing', 'type your email and your password.');
+      }
+      if (failures.locked(email)) {
+        log('sign-in refused: that email is locked for 15 minutes after 5 failures');
+        throw new HttpError(429, 'locked', 'Too many tries for that email. Wait 15 minutes, then try again.');
+      }
+      const person = store.checkPassword({ email, password: body.password });
+      if (!person) {
+        if (failures.failed(email)) log('sign-in failed 5 times for one email in 15 minutes; it is locked for 15 minutes');
+        throw new HttpError(401, 'no-match', NO_MATCH);
+      }
+      failures.cleared(email);
+      const session = store.startSession(person.id);
+      log(`signed in actor=${person.id}`);
+      return [200, person, { 'set-cookie': `${SESSION_COOKIE}=${session.token}; ${COOKIE_FLAGS}; Max-Age=${SESSION_MAX_AGE}` }];
+    }
+    if (url.pathname === '/signout') {
+      await readJson(req);
+      const ended = store.endSession(sessionToken(req));
+      return [200, { signedOut: ended }, { 'set-cookie': `${SESSION_COOKIE}=; ${COOKIE_FLAGS}; Max-Age=0` }];
+    }
+    if (url.pathname === '/account/forgot') {
+      const body = await readJson(req);
+      onlyFields(body, ['email']);
+      if (typeof body.email !== 'string' || !body.email.trim()) throw new HttpError(400, 'missing', 'type your email.');
+      // The email goes out after the answer, so the answer is the same,
+      // and as quick, whether or not the email has an account.
+      const after = async () => {
+        const { line } = await sendResetLink({
+          store, email: body.email, send: accountMail?.send ?? null,
+          trackerUrl: accountMail?.pageUrl ?? null, productName: accountMail?.productName ?? 'tracker',
+        });
+        log(line);
+      };
+      return [200, { sent: 'If that email has an account, a link to set a new password is on its way. It works for 1 hour.' }, {}, after];
+    }
     if (url.pathname === '/account/link') {
       const body = await readJson(req);
       onlyFields(body, ['link']);
@@ -496,7 +622,10 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
       onlyFields(body, ['link', 'password', 'name']);
       const { purpose, actor } = store.useLink({ token: body.link, password: body.password, name: body.name });
       log(`password set through a ${purpose} link actor=${actor.id}`);
-      return [200, { purpose, name: actor.name, email: store.emailOf(actor.id) }];
+      // The link proved the email is theirs, so its failed sign-ins are forgiven.
+      const email = store.emailOf(actor.id);
+      failures.cleared(email);
+      return [200, { purpose, name: actor.name, email }];
     }
     return null;
   }
@@ -516,13 +645,22 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
       }
       const account = await accountRoute(req, url);
       if (account) {
-        [status] = account;
-        send(res, status, account[1]);
+        const [code, body, headers, after] = account;
+        status = code;
+        send(res, status, body, headers);
         log(`${req.method} ${url.pathname} ${status} actor=-`);
+        if (after) await after().catch((err) => log(`error after ${req.method} ${url.pathname}: ${err?.message ?? err}`));
         return;
       }
-      me = store.actorForToken(bearerToken(req));
-      if (!me) throw new HttpError(401, 'unauthorized', 'a valid token is required.');
+      // A bearer token when one is sent (every loop); otherwise a person's
+      // session cookie, which never stands for a machine.
+      const viaCookie = req.headers.authorization == null;
+      me = viaCookie ? store.actorForSession(sessionToken(req)) : store.actorForToken(bearerToken(req));
+      if (me && viaCookie && me.kind !== 'human') me = null;
+      if (!me) throw new HttpError(401, 'unauthorized', 'sign in, or send a valid token.');
+      if (viaCookie && req.method !== 'GET' && req.method !== 'HEAD' && !saysJson(req)) {
+        throw new HttpError(415, 'json-only', 'a write from the page must say content-type: application/json; nothing was written.');
+      }
       const [code, body, write] = await route(req, me, url);
       status = code;
       send(res, code, body);
@@ -546,8 +684,8 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
 }
 
 /** Start a server on `port` (0 = any free port) against an open store. Resolves to the http.Server. */
-export function startServer({ store, port, host = '127.0.0.1', log, notifier, defaultProject, mergePhrase, closePhrase }) {
-  const server = createServer(createHandler(store, { log, notifier, defaultProject, mergePhrase, closePhrase }));
+export function startServer({ store, port, host = '127.0.0.1', log, notifier, defaultProject, mergePhrase, closePhrase, accountMail, now }) {
+  const server = createServer(createHandler(store, { log, notifier, defaultProject, mergePhrase, closePhrase, accountMail, now }));
   return new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(port, host, () => {
@@ -582,26 +720,46 @@ export function pageUrlOf({ trackerUrl, host, port }) {
 }
 
 /**
- * The hand-over email's settings. launchd starts the server without Doppler,
- * so the mail names are read from the project's Doppler config here; any
- * failure leaves the email off, said in the log, and never stops the server.
+ * The tracker's address everyone opens, for an emailed reset link: the
+ * project config FILE's trackerUrl, never Doppler's same-machine TRACKER_URL
+ * override (127.0.0.1 on the Mini), which would not open from anyone else's
+ * computer; or else this machine by name.
+ */
+function sharedPageUrl({ host, port }) {
+  let trackerUrl = null;
+  try { trackerUrl = loadProjectConfig({ env: { ...process.env, TRACKER_URL: '' } }).trackerUrl; } catch { /* by name below */ }
+  return pageUrlOf({ trackerUrl, host, port });
+}
+
+/** The reset email's sender: Resend with the key alone (it goes to the person who asked, not to TRACKER_NOTIFY_TO). */
+function accountMailOf(env, pageUrl) {
+  return { send: env[MAIL_KEY] ? resendSender({ apiKey: env[MAIL_KEY], from: env[MAIL_FROM] || DEFAULT_FROM }) : null, pageUrl };
+}
+
+/**
+ * The hand-over email's settings, and the reset email's as `account`.
+ * launchd starts the server without Doppler, so the mail names are read
+ * from the project's Doppler config here; any failure leaves the email
+ * off, said in the log, and never stops the server.
  */
 export async function loadMailSettings({ host, port, log = () => {} }) {
-  if (process.env[MAIL_KEY]) return mailSettingsFromEnv(process.env, { pageUrl: pageUrlOf({ host, port }) });
+  if (process.env[MAIL_KEY]) {
+    return { ...mailSettingsFromEnv(process.env, { pageUrl: pageUrlOf({ host, port }) }), account: accountMailOf(process.env, sharedPageUrl({ host, port })) };
+  }
   let config;
   try {
     config = loadProjectConfig();
   } catch (err) {
-    return { send: null, why: `the project config is not usable (${err.message}), so the hand-over email is off.` };
+    return { send: null, why: `the project config is not usable (${err.message}), so the hand-over email is off.`, account: null };
   }
   const { env, error } = await mailEnvFromDoppler({
     project: config.dopplerProject, config: config.dopplerConfig, run: promisify(execFile),
   });
-  if (error) return { send: null, why: `${error}, so the hand-over email is off.` };
+  if (error) return { send: null, why: `${error}, so the hand-over email is off.`, account: null };
   const pageUrl = pageUrlOf({ trackerUrl: config.trackerUrl, host, port });
   const mail = mailSettingsFromEnv(env, { pageUrl });
   if (mail.send) log(`hand-over email: on, through Resend, linking to ${pageUrl}.`);
-  return mail;
+  return { ...mail, account: accountMailOf(env, sharedPageUrl({ host, port })) };
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
@@ -610,8 +768,9 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     const store = openStore(db);
     const log = (line) => console.log(`${new Date().toISOString()} ${line}`);
     const mail = await loadMailSettings({ host, port, log });
-    const notifier = mail.send ? createNotifier({ store, ...mail, log }) : null;
+    const notifier = mail.send ? createNotifier({ store, send: mail.send, to: mail.to, pageUrl: mail.pageUrl, log }) : null;
     if (!notifier) log(`hand-over email: off. ${mail.why}`);
+    log(mail.account?.send ? `reset email: on, through Resend, linking to ${mail.account.pageUrl}.` : `reset email: off. ${MAIL_KEY} could not be read, so "Forgot password?" sends nothing.`);
     let defaultProject = null;
     let mergePhrase = null;
     try {
@@ -621,7 +780,8 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     } catch (err) {
       log(`the New request form starts on the first project and the ticket page has no Merge button: the project config is not usable (${err.message}).`);
     }
-    const server = await startServer({ store, port, host, log, notifier, defaultProject, mergePhrase, closePhrase: CLOSE_PHRASE });
+    const accountMail = mail.account && { ...mail.account, productName: store.getProject(defaultProject)?.name ?? 'tracker' };
+    const server = await startServer({ store, port, host, log, notifier, defaultProject, mergePhrase, closePhrase: CLOSE_PHRASE, accountMail });
     console.log(`tracker listening on http://${host}:${server.address().port}/`);
   } catch (err) {
     console.error(`tracker server did not start: ${err.message}`);
