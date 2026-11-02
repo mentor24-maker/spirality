@@ -12,17 +12,21 @@
  * escapes it. Anything else drawn here is either this file's own fixed
  * wording or passed through escapeHtml.
  *
- * Signing in is the person's own tracker token, the same kind every loop
- * holds. It is kept in this browser's local storage so a pinned tab stays
- * signed in, and sent only to this server. "Sign out" forgets it.
+ * Signing in is the person's email and password. The server answers with
+ * a 30-day session cookie this script cannot read, so a pinned tab stays
+ * signed in and nothing secret is kept in local storage. Every write says
+ * `content-type: application/json`, which the server requires of a cookie's
+ * writes. "Sign out" ends the session at the server. "Forgot password?"
+ * asks for a reset link by email.
  *
  * `/set-password?link=<token>` is the one view drawn without signing in:
  * an emailed link's own page. The link's token is sent only in a JSON body,
  * never in an address.
  */
-import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, renderCloseAction, renderMergeAction, renderQuickAction, renderTrail, stageLooks, tabTitle, bellColour, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword } from './render.mjs';
+import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, renderCloseAction, renderMergeAction, renderQuickAction, renderTrail, stageLooks, tabTitle, bellColour, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot } from './render.mjs';
 
-const TOKEN_KEY = 'tracker-token';
+/** Where an earlier version of the page kept a pasted token; removed on load, never read. */
+const OLD_TOKEN_KEY = 'tracker-token';
 /** Board or list: the last one opened, so "Tasks" in the header opens it again. */
 const VIEW_KEY = 'tracker-view';
 /** The selected project: the one "Tasks" in the header opens. */
@@ -88,17 +92,14 @@ class Refused extends Error {
 
 /** Call the tracker as the signed-in person. Answers the parsed JSON, or throws with the server's own message. */
 async function api(method, path, body) {
-  const token = localStorage.getItem(TOKEN_KEY);
-  if (!token) throw new SignedOut();
+  const write = method !== 'GET' && method !== 'HEAD';
   const res = await fetch(path, {
     method,
-    headers: { authorization: `Bearer ${token}`, ...(body === undefined ? {} : { 'content-type': 'application/json' }) },
-    body: body === undefined ? undefined : JSON.stringify(body),
+    credentials: 'same-origin',
+    headers: write ? { 'content-type': 'application/json' } : {},
+    body: write ? JSON.stringify(body ?? {}) : undefined,
   });
-  if (res.status === 401) {
-    localStorage.removeItem(TOKEN_KEY);
-    throw new SignedOut();
-  }
+  if (res.status === 401) throw new SignedOut();
   let json = null;
   try { json = await res.json(); } catch { /* reported below */ }
   if (!res.ok) throw new Refused(json?.message ?? `the tracker answered ${res.status}.`, res.status);
@@ -107,12 +108,12 @@ async function api(method, path, body) {
 }
 
 /**
- * Call one of the tracker's two no-sign-in calls (an emailed link is the
- * proof). Answers `{ ok, body }`: the parsed JSON, or the refusal's
+ * Call one of the tracker's no-sign-in calls: an emailed link's, signing
+ * in or out, or "Forgot password?". Answers `{ ok, body }`: the parsed JSON, or the refusal's
  * `{ error, message }`. Throws only when the tracker could not be reached.
  */
 async function linkCall(path, body) {
-  const res = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  const res = await fetch(path, { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
   let json = null;
   try { json = await res.json(); } catch { /* said below */ }
   return { ok: res.ok, body: json ?? { message: `the tracker answered ${res.status}.` } };
@@ -176,28 +177,67 @@ function showError(err) {
   main.innerHTML = `<p class="error">${escapeHtml(err.message)}</p><p><a href="/">Back to Waiting on you</a></p>`;
 }
 
-function drawSignIn(problem) {
+/** Clear the header for a view drawn signed out. */
+function signedOutHeader(title) {
   me = null;
   waitingCount = null;
   who.textContent = '';
   headerProject.hidden = true;
   signOut.hidden = true;
   bell.hidden = true;
-  setTitle('Sign in · Tracker');
-  main.innerHTML = `
-    <h1>Sign in</h1>
-    <form class="sign-in">
-      <label for="token">Your tracker token</label>
-      <input id="token" type="password" autocomplete="current-password" required>
-      <button type="submit">Sign in</button>
-      ${problem ? `<p class="error">${escapeHtml(problem)}</p>` : ''}
-    </form>`;
-  const form = main.querySelector('form');
+  setTitle(title);
+}
+
+function drawSignIn(problem) {
+  signedOutHeader('Sign in · Tracker');
+  main.innerHTML = renderSignIn(problem);
+  const form = main.querySelector('form.sign-in');
+  const note = form.querySelector('.note');
+  form.querySelector('button.forgot').addEventListener('click', () => {
+    drawForgot(form.querySelector('#email').value.trim());
+  });
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
-    localStorage.setItem(TOKEN_KEY, form.querySelector('#token').value.trim());
+    const button = form.querySelector('button[type="submit"]');
+    button.disabled = true;
+    note.className = 'note quiet';
+    note.textContent = 'Signing in…';
+    let answer;
+    try {
+      answer = await linkCall('/signin', { email: form.querySelector('#email').value.trim(), password: form.querySelector('#password').value });
+    } catch {
+      answer = { ok: false, body: { message: 'The tracker did not answer. Try again.' } };
+    }
+    if (!answer.ok) {
+      button.disabled = false;
+      note.className = 'note error';
+      note.textContent = answer.body.message;
+      return;
+    }
     await route();
-    if (!me) drawSignIn('That token was not accepted.');
+    if (!me) drawSignIn('Signed in, but the tracker did not keep the sign-in. Check this browser allows cookies for this address.');
+  });
+}
+
+/** "Forgot password?": ask for a reset link by email. The answer is the same whether or not the email has an account. */
+function drawForgot(email) {
+  signedOutHeader('Forgot password · Tracker');
+  main.innerHTML = renderForgot(email);
+  const form = main.querySelector('form.forgot');
+  const note = form.querySelector('.note');
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const button = form.querySelector('button[type="submit"]');
+    button.disabled = true;
+    let answer;
+    try {
+      answer = await linkCall('/account/forgot', { email: form.querySelector('#email').value.trim() });
+    } catch {
+      answer = { ok: false, body: { message: 'The tracker did not answer. Nothing was sent; try again.' } };
+    }
+    button.disabled = false;
+    note.className = answer.ok ? 'note' : 'note error';
+    note.textContent = answer.ok ? answer.body.sent : answer.body.message;
   });
 }
 
@@ -1211,11 +1251,18 @@ document.addEventListener('click', (e) => {
   route();
 });
 window.addEventListener('popstate', route);
-signOut.addEventListener('click', () => {
-  localStorage.removeItem(TOKEN_KEY);
+signOut.addEventListener('click', async () => {
+  let answer;
+  try {
+    answer = await linkCall('/signout', {});
+  } catch {
+    answer = { ok: false, body: { message: 'The tracker did not answer.' } };
+  }
   history.pushState(null, '', '/');
-  drawSignIn();
+  drawSignIn(answer.ok ? undefined : `Not signed out: ${answer.body.message} Try Sign out again.`);
 });
+
+try { localStorage.removeItem(OLD_TOKEN_KEY); } catch { /* nothing kept */ }
 
 // The count in the tab title stays current while the tab sits pinned.
 setInterval(refreshCount, COUNT_EVERY_MS);

@@ -643,3 +643,30 @@ export function renderEditPanel({ name, description, status, priority, tags = []
 
 /** What a save that found the ticket moved says: nothing was overwritten, and it is not tried again. */
 export const MOVED_MESSAGE = 'Not saved: this ticket changed while you were looking at it (a loop moved it, or another page saved first), so nothing was overwritten. The page now shows what is stored; make your change again if it still applies.';
+
+/** The sign-in form, as HTML: email, password, and "Forgot password?". `problem` is said under it. */
+export function renderSignIn(problem) {
+  return `<h1>Sign in</h1>
+    <form class="sign-in">
+      <label for="email">Email</label>
+      <input id="email" type="email" autocomplete="username" required>
+      <label for="password">Password</label>
+      <input id="password" type="password" autocomplete="current-password" required>
+      <button type="submit">Sign in</button>
+      <button type="button" class="link forgot">Forgot password?</button>
+      <p class="note${problem ? ' error' : ''}">${problem ? escapeHtml(problem) : ''}</p>
+    </form>`;
+}
+
+/** "Forgot password?", as HTML: one email box, and a way back to signing in. */
+export function renderForgot(email = '') {
+  return `<h1>Forgot password</h1>
+    <form class="sign-in forgot">
+      <p>Type your email. If it has an account, a link to set a new password is emailed to it. The link works for 1 hour.</p>
+      <label for="email">Email</label>
+      <input id="email" type="email" autocomplete="username" value="${escapeHtml(email)}" required>
+      <button type="submit">Email me a link</button>
+      <a href="/">Back to Sign in</a>
+      <p class="note"></p>
+    </form>`;
+}

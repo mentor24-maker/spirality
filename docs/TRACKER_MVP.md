@@ -149,9 +149,14 @@ account_links  token hash, purpose (setup|invite|reset), email, actor,
 
 ### The API
 
-Every call carries the caller's own token, except the two an emailed link
-makes (the link is their proof). The answers are JSON (structured text
-programs read).
+Every call carries the caller's own token (`Authorization: Bearer`, every
+loop) or a person's session cookie (the page, once signed in), except the
+calls that sign in and out, ask for a reset email, or use an emailed link
+(the link is their proof). A cookie never stands for a machine, and a
+write made with the cookie must say `content-type: application/json`,
+which a plain form on another site cannot send, so another site can never
+write as the person signed in (415 `json-only`, nothing written). The
+answers are JSON (structured text programs read).
 
 | Call | Does |
 |---|---|
@@ -175,6 +180,9 @@ programs read).
 | `GET /projects/:slug/board` | for Dane's page: one project's tickets in the eight statuses, each in `queue` order |
 | `POST /account/link` | **no token**: what an emailed link is for (`{ link }` → `{ purpose, email, expiresAt }`), for the set-password page; a used, expired or unknown link answers 400 `used-link`, `expired-link` or `unknown-link` |
 | `POST /account/set-password` | **no token**: use an emailed link (`{ link, password, name? }`, a name only for an invite) → `{ purpose, name, email }`; refused with the store's code (`used-link`, `expired-link`, `unknown-link`, `weak-password`, `missing`) and nothing written. The link and the password travel only in the body, never in an address, so neither reaches the log |
+| `POST /signin` | **no token**: `{ email, password }` → the person, and a session cookie (`tracker_session`, `HttpOnly`, `SameSite=Strict`, `Path=/`, 30 days). A wrong password and an unknown email get the same 401 `no-match`, "That email and password do not match." After 5 failures for one email in 15 minutes, that email is refused (429 `locked`) for 15 minutes, even with the right password; the count is kept in memory, so a restart forgets it, and setting a password through an emailed link clears it. **No `Secure` flag yet**: the tracker is plain http on the home network; the ticket that opens it to the internet must add it, with https |
+| `POST /signout` | **no token**: ends the cookie's session and clears the cookie |
+| `POST /account/forgot` | **no token**: `{ email }` → the same answer whether or not the email has an account; an account's email is sent a 1-hour `reset` link through Resend after the answer has gone back. The log says whether it went, never the link or the email |
 | `POST /tickets/:id/clone` | for Dane's page: copy a ticket into another project (`{ project }`), as a new ticket in `Requested` there with one comment naming where it came from; the original does not change |
 
 The store enforces only what keeps the data true: valid statuses, the
@@ -229,9 +237,12 @@ A browser opening `/projects` or `/projects/<slug>` gets the page; the page's ow
 call to the same address gets the data. `node tracker/demo.mjs` starts a throwaway tracker
 with test data to try it.
 
-Sign-in is a single password for Dane in the MVP. The page shows a count of
-tickets waiting on him in the browser tab's title, so a pinned tab tells him
-at a glance.
+A person signs in to the page with their email and password and stays
+signed in for 30 days, through a cookie the page's own script cannot read;
+no token is kept in the browser. "Forgot password?" asks for an email and
+sends a 1-hour reset link to it if it has an account, saying the same
+either way. The page shows a count of tickets waiting on him in the
+browser tab's title, so a pinned tab tells him at a glance.
 
 ### How the loops switch over without a rewrite
 
@@ -428,8 +439,8 @@ sign-in. It shows the email the link is for (read-only), asks for the
 password twice (and a name, for an invite), and once saved says "Password
 set. Sign in at <tracker address>." The same link a second time, or an
 expired or unknown one, says which in plain words and saves nothing.
-Signing in with the password comes in the next ticket; the token box stays
-until then.
+Once set, the password signs in on the page (`POST /signin` above); a
+forgotten one is reset from the page's "Forgot password?".
 
 Dane's first link comes from a command a session runs **on the Mini**, so
 his existing actor, and all his history, becomes his account:
@@ -455,8 +466,9 @@ same-machine `TRACKER_URL` override, which would not open from another
 computer. Neither the link's token nor a password is ever printed or logged.
 Resend's shared sender delivers only to the Resend account's own address
 until a domain is set up there, so for now this reaches Dane and nobody
-else. `node tracker/demo.mjs` prints a throwaway set-password link for the
-test operator, for trying the page.
+else. `node tracker/demo.mjs` prints a throwaway email and password to sign
+in with and a set-password link for the test operator, for trying the page;
+its "Forgot password?" prints the reset email instead of sending it.
 
 ### Checking it
 

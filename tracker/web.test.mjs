@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { startServer } from './server.mjs';
 import { seedDemo, tickingClock } from './demoData.mjs';
-import { escapeHtml, renderComment, renderInline, renderMarkdown, renderQuickAction, renderCommands, cardCommands, cardAsk, renderMergeAction, mergeQuestion, renderCloseAction, closeQuestion, cardMove, renderTrail, cardContext, firstParagraph, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, MIN_PASSWORD } from './web/render.mjs';
+import { escapeHtml, renderComment, renderInline, renderMarkdown, renderQuickAction, renderCommands, cardCommands, cardAsk, renderMergeAction, mergeQuestion, renderCloseAction, closeQuestion, cardMove, renderTrail, cardContext, firstParagraph, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD } from './web/render.mjs';
 import { loadProjectConfig } from '../lib/projectConfig.mjs';
 import operatorCard from '../lib/operatorCard.js';
 import machineComment from '../lib/machineComment.js';
@@ -551,7 +551,8 @@ test('Waiting on you is a bell on the right, just before "Signed in as", coloure
   assert.match(/async function drawWaiting\(\) \{[\s\S]*?\n\}/.exec(app)[0], /waitingCount = waiting\.length;\s*showBell\(\);/);
   assert.match(app, /setInterval\(refreshCount, COUNT_EVERY_MS\);/);
   // Hidden while signed out, shown once signed in, and marked current on its own page.
-  assert.match(/function drawSignIn[\s\S]*?\n\}/.exec(app)[0], /bell\.hidden = true;/);
+  assert.match(/function signedOutHeader[\s\S]*?\n\}/.exec(app)[0], /bell\.hidden = true;/);
+  assert.match(/function drawSignIn[\s\S]*?\n\}/.exec(app)[0], /signedOutHeader\(/);
   assert.match(/async function route\(\) \{[\s\S]*?\n\}/.exec(app)[0], /signOut\.hidden = false;\s*bell\.hidden = false;/);
   assert.match(app, /bell\.classList\.toggle\('current', which === 'waiting'\);/);
   const css = readFileSync(WEB('app.css'), 'utf8');
@@ -1399,4 +1400,35 @@ test('a save whose redraw fails says what happened instead of sitting on "Saving
   assert.match(redraw, /note\.textContent = `The page could not refresh \(\$\{err\.message\}\): \$\{outcome\}\. Reload to see the ticket as stored\.`/);
   assert.match(wire, /`the \$\{field\} was saved`/);
   assert.match(wire, /`the \$\{field\} was not saved`/);
+});
+
+test('the sign-in form is an email and a password with "Forgot password?"; the page keeps no token and signs in and out at the server', () => {
+  const form = renderSignIn();
+  assert.match(form, /<input id="email" type="email" autocomplete="username" required>/);
+  assert.match(form, /<input id="password" type="password" autocomplete="current-password" required>/);
+  assert.match(form, /<button type="button" class="link forgot">Forgot password\?<\/button>/);
+  assert.doesNotMatch(form, /token/i);
+  assert.match(renderSignIn('<b>no</b>'), /<p class="note error">&lt;b&gt;no&lt;\/b&gt;<\/p>/);
+  const forgot = renderForgot('a"b@example.com');
+  assert.match(forgot, /value="a&quot;b@example\.com"/);
+  assert.match(forgot, /works for 1 hour/);
+  assert.match(forgot, /<a href="\/">Back to Sign in<\/a>/);
+
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  assert.doesNotMatch(app, /authorization|Bearer/, 'the page never sends a token');
+  assert.doesNotMatch(app, /localStorage\.(?:setItem|getItem)\(OLD_TOKEN_KEY/, 'the old token is never kept or read');
+  assert.match(app, /localStorage\.removeItem\(OLD_TOKEN_KEY\)/, 'an old pasted token is cleared');
+  assert.match(app, /linkCall\('\/signin', \{ email: [^,]+, password: /);
+  assert.match(app, /linkCall\('\/signout', \{\}\)/);
+  assert.match(app, /linkCall\('\/account\/forgot', \{ email: /);
+  // Every write the page makes says it is JSON, which the server requires of a cookie's writes.
+  assert.match(app, /headers: write \? \{ 'content-type': 'application\/json' \} : \{\}/);
+});
+
+test('the demo tracker prints an email and a password to sign in with, never a token', () => {
+  const demo = readFileSync(fileURLToPath(new URL('./demo.mjs', import.meta.url)), 'utf8');
+  assert.match(demo, /store\.setEmail\(operator\.id, DEMO_EMAIL\)/);
+  assert.match(demo, /store\.setPassword\(operator\.id, password\)/);
+  assert.match(demo, /email: {4}\$\{DEMO_EMAIL\}\\n {2}password: \$\{password\}/);
+  assert.doesNotMatch(demo, /throwaway token/);
 });
