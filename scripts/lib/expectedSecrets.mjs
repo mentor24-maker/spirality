@@ -20,7 +20,10 @@ export const CONFIGS = ['dev'];
  * the operator's actor takes the project config's `operatorName`. The
  * `handRun` seat is the one a session started by hand signs in as, when no
  * runner names a seat (scripts/tracker/apiTracker.mjs, trackerTokenEnv).
- * `tracker/signins.mjs create` makes exactly these.
+ * `tracker/signins.mjs create` makes exactly these for the product that
+ * runs the tracker. Any other product signs in with the machine seats only,
+ * under the same secret names in its own Doppler project, its actors named
+ * for it (`normie loop-build`): seatsForConfig in tracker/signins.mjs.
  */
 export const TRACKER_SEATS = [
   { secret: 'TRACKER_TOKEN_OPERATOR', kind: 'human', name: null, what: "the operator's own tracker sign-in, for the page" },
