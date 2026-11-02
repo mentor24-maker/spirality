@@ -227,6 +227,23 @@ export function tabTitle(waitingCount, pageTitle) {
 }
 
 /**
+ * Why an open page must not be redrawn on this beat, or null when it may be.
+ * `hidden`: the tab is in the background, so nothing is read at all.
+ * `drawing`: a draw is already under way. `writing`: a save is in flight,
+ * and it redraws the page itself when it lands. `fields`: the page's text
+ * boxes and choosers as `{ focused, value, initial }`; one with focus, or
+ * holding text that is not what it was drawn with, is him typing, and a
+ * redraw would wipe it.
+ */
+export function redrawHold({ hidden = false, drawing = false, writing = false, fields = [] } = {}) {
+  if (hidden) return 'hidden';
+  if (drawing) return 'drawing';
+  if (writing) return 'writing';
+  if (fields.some((f) => f.focused || f.value !== f.initial)) return 'typing';
+  return null;
+}
+
+/**
  * The header bell's colour for the same count: grey while nothing waits (or
  * the count is missing), yellow for one to three, red for more than three.
  */

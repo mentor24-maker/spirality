@@ -9,7 +9,7 @@ import { openStore } from './store.mjs';
 import { startServer } from './server.mjs';
 import { seedDemo, tickingClock } from './demoData.mjs';
 import { reportsOf, REPORT_RANGES, searchTickets } from './pageData.mjs';
-import { escapeHtml, renderComment, renderInline, renderMarkdown, renderQuickAction, renderCommands, cardCommands, cardAsk, renderMergeAction, renderAnswerIn, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, cardContext, firstParagraph, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, activeFilters } from './web/render.mjs';
+import { escapeHtml, renderComment, renderInline, renderMarkdown, renderQuickAction, renderCommands, cardCommands, cardAsk, renderMergeAction, renderAnswerIn, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, cardContext, firstParagraph, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, activeFilters, redrawHold } from './web/render.mjs';
 import { loadProjectConfig } from '../lib/projectConfig.mjs';
 import operatorCard from '../lib/operatorCard.js';
 import machineComment from '../lib/machineComment.js';
@@ -499,7 +499,7 @@ test('the Add Task box on the Tasks page files into the project shown, in Reques
   assert.match(draw, /wireAddTask\(board\.project, view, adding\);/);
   assert.doesNotMatch(app, /drawNew/, 'the separate New request page is gone');
   // The old address opens the Tasks page with the box open.
-  assert.match(/async function route\(\) \{[\s\S]*?\n\}/.exec(app)[0], /\} else if \(isNew\) \{[\s\S]*?await drawTasks\(savedView\(\), \{ adding: true \}\);/);
+  assert.match(/async function route\(\{ place = null \} = \{\}\) \{[\s\S]*?\n\}/.exec(app)[0], /\} else if \(isNew\) \{[\s\S]*?await drawTasks\(savedView\(\), \{ adding: true \}\);/);
   assert.doesNotMatch(readFileSync(WEB('index.html'), 'utf8'), /New request|href="\/new"/);
   assert.match(readFileSync(WEB('app.css'), 'utf8'), /details\.add-task \{/);
 });
@@ -659,15 +659,56 @@ test('Waiting on you is a bell on the right, just before "Signed in as", coloure
   const refresh = /async function refreshCount\(\) \{[\s\S]*?\n\}/.exec(app)[0];
   assert.match(refresh, /catch \(err\) \{[\s\S]*?return;\s*\}\s*document\.title = tabTitle\(waitingCount, pageTitle\);\s*showBell\(\);/, 'a failed read leaves the colour alone');
   assert.match(/async function drawWaiting\(\) \{[\s\S]*?\n\}/.exec(app)[0], /waitingCount = waiting\.length;\s*showBell\(\);/);
-  assert.match(app, /setInterval\(refreshCount, COUNT_EVERY_MS\);/);
+  assert.match(app, /async function beat\(\) \{\s*await refreshCount\(\);/);
+  assert.match(app, /setInterval\(beat, REFRESH_EVERY_MS\);/);
   // Hidden while signed out, shown once signed in, and marked current on its own page.
   assert.match(/function signedOutHeader[\s\S]*?\n\}/.exec(app)[0], /bell\.hidden = true;/);
   assert.match(/function drawSignIn[\s\S]*?\n\}/.exec(app)[0], /signedOutHeader\(/);
-  assert.match(/async function route\(\) \{[\s\S]*?\n\}/.exec(app)[0], /signOut\.hidden = false;\s*bell\.hidden = false;/);
+  assert.match(/async function route\(\{ place = null \} = \{\}\) \{[\s\S]*?\n\}/.exec(app)[0], /signOut\.hidden = false;\s*bell\.hidden = false;/);
   assert.match(app, /bell\.classList\.toggle\('current', which === 'waiting'\);/);
   const css = readFileSync(WEB('app.css'), 'utf8');
   for (const colour of ['grey', 'yellow', 'red']) assert.match(css, new RegExp(`header #bell\\[data-colour="${colour}"\\] \\{ color: #`));
   assert.match(css, /header #bell\[hidden\] \{ display: none; \}/, 'display: flex must not undo hidden');
+});
+
+// ── Keeping an open page current (SP-94) ─────────────────────────────────────
+
+test('a beat leaves the page alone while the tab is hidden, a draw or a save is under way, or he is typing', () => {
+  const idle = { focused: false, value: '', initial: '' };
+  assert.equal(redrawHold(), null);
+  assert.equal(redrawHold({ fields: [idle, { focused: false, value: 'SP-94', initial: 'SP-94' }] }), null, 'a box as drawn is not typing');
+  assert.equal(redrawHold({ hidden: true }), 'hidden');
+  assert.equal(redrawHold({ hidden: true, fields: [idle] }), 'hidden', 'hidden wins: nothing is read at all');
+  assert.equal(redrawHold({ drawing: true }), 'drawing');
+  assert.equal(redrawHold({ writing: true }), 'writing');
+  assert.equal(redrawHold({ fields: [idle, { focused: true, value: '', initial: '' }] }), 'typing', 'a box with focus, even empty');
+  assert.equal(redrawHold({ fields: [idle, { focused: false, value: 'half a repl', initial: '' }] }), 'typing', 'unsent text, focus gone');
+  assert.equal(redrawHold({ fields: [{ focused: false, value: 'Old name, edited', initial: 'Old name' }] }), 'typing', 'an edited name');
+});
+
+test('an open page reads again once a minute and on coming back to the tab, never while hidden, and keeps his place', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  assert.match(app, /const REFRESH_EVERY_MS = 60_000;/);
+  assert.match(app, /document\.addEventListener\('visibilitychange', \(\) => \{\s*if \(!document\.hidden\) beat\(\);\s*\}\);/);
+  // The guard reads the tab's visibility, the draws and saves under way, and every text box on the page.
+  assert.match(app, /redrawHold\(\{ hidden: document\.hidden, drawing: drawing > 0, writing: writing > 0, fields: fieldsOf\(main\) \}\)/);
+  const refresh = /async function refreshPage\(\) \{[\s\S]*?\n\}/.exec(app)[0];
+  assert.match(refresh, /if \(checking \|\| !me \|\| !drawn \|\| drawn\.address !== here\(\) \|\| hold\(\)\) return;/, 'checked before any read');
+  assert.match(refresh, /if \(!changed \|\| lastDrawn !== drawn \|\| drawn\.address !== here\(\) \|\| hold\(\)\) return;/, 'and again before drawing');
+  assert.match(refresh, /await route\(\{ place: keepPlace\(\) \}\);/);
+  assert.match(refresh, /catch \(err\) \{\s*if \(err instanceof SignedOut\) drawSignIn\(\);\s*\}/, 'a failed read leaves the page as it is');
+  // Only Waiting on you, the board and list, and a ticket keep themselves current.
+  const route = /async function route\(\{ place = null \} = \{\}\) \{[\s\S]*?\n\}/.exec(app)[0];
+  assert.match(route, /lastDrawn = ticket \|\| project \|\| tasks \|\| isNew \|\| waiting \? \{ address: here\(\), reads \} : null;/);
+  assert.match(route, /place\?\.restore\(\);\s*\/\/[^\n]*\n\s*if \(!waiting\) await refreshCount\(\);/, 'his place is back before the page is shown');
+  assert.match(route, /if \(place && !\(err instanceof SignedOut\)\) return;/, "a beat's failed draw does not replace the page with an error");
+  assert.match(app, /if \(location\.hash === '#reply' && !refreshing\) \{/, 'a beat does not jump to the reply box again');
+  assert.match(/function keepPlace\(\) \{[\s\S]*?\n\}/.exec(app)[0], /main\.querySelectorAll\('details'\)[\s\S]*window\.scrollTo\(0, y\);/);
+  // Every GET of a draw is kept; a write counts as a save under way until it answers.
+  const api = /async function api\(method, path, body\) \{[\s\S]*?\n\}/.exec(app)[0];
+  assert.match(api, /if \(write\) writing \+= 1;/);
+  assert.match(api, /finally \{\s*if \(write\) writing -= 1;\s*\}/);
+  assert.match(api, /if \(!write\) reads\?\.set\(path, JSON\.stringify\(json\)\);/);
 });
 
 test('the page has no inline script or style, so its lock does not have to be loosened', () => {
