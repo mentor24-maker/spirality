@@ -1119,9 +1119,22 @@ function wireAddTask(slug, view, adding) {
 }
 
 /**
+ * A duration in ms in plain words: under an hour, whole hours up to two
+ * days, then days to one decimal place.
+ */
+function spanOf(ms) {
+  const hours = ms / 3_600_000;
+  if (hours < 1) return 'under an hour';
+  if (hours < 48) return `${Math.round(hours)} hour${Math.round(hours) === 1 ? '' : 's'}`;
+  return `${(hours / 24).toFixed(1)} days`;
+}
+
+/**
  * The Reporting page: how many tasks were finished and started in each of
  * the server's time ranges, and how many are open in each stage now, for the
- * selected project or for all of them. Every figure is worked out by the
+ * selected project or for all of them, and how the finished ones flowed:
+ * time to finish, how many were sent back, and time waiting on the
+ * operator. Every figure is worked out by the
  * server (pageData.mjs reportsOf); the page only draws them, so the ranges
  * and the stages come from its answer, never typed out here. A stage wears
  * its Settings colour as properties, never as markup.
@@ -1133,6 +1146,16 @@ async function drawReporting(chosen) {
   setTitle('Reporting · Tracker');
   const head = `<tr><th>Report</th>${r.ranges.map((g) => `<th class="count">${escapeHtml(g.label)}</th>`).join('')}</tr>`;
   const line = (label, counts) => `<tr><td class="name">${label}</td>${r.ranges.map((g) => `<td class="count">${Number(counts[g.key])}</td>`).join('')}</tr>`;
+  // A flow row: one cell per range, "none finished in this range" where nothing finished.
+  const flowLine = (label, cell) => `<tr><td class="name">${label}</td>${r.ranges.map((g) => {
+    const f = r.flow[g.key];
+    return `<td class="count">${f.finished ? escapeHtml(cell(f)) : '<span class="quiet">none finished in this range</span>'}</td>`;
+  }).join('')}</tr>`;
+  const span = (ms) => (ms == null ? 'none counted' : spanOf(ms));
+  const flow = (title, how, rows) => `
+    <h2>${title}</h2>
+    <p class="quiet">${how}</p>
+    <table class="counts report flow"><thead>${head}</thead><tbody>${rows}</tbody></table>`;
   const open = r.open.map((s) => `<tr data-stage="${escapeHtml(s.status)}"><td class="status">${escapeHtml(s.status)}</td><td class="count">${Number(s.count)}</td></tr>`).join('');
   main.innerHTML = `
     <h1>Reporting</h1>
@@ -1143,6 +1166,18 @@ async function drawReporting(chosen) {
     <h2>Tasks finished and started</h2>
     <p class="quiet">Finished: moved to Live in that time and still Live. Started: filed in that time.</p>
     <table class="counts report"><thead>${head}</thead><tbody>${line('Tasks finished', r.finished)}${line('Tasks started', r.started)}</tbody></table>
+    ${flow('Time to finish',
+    'For tasks finished in that time: from first entering Queued to entering Live. Tasks that never entered Queued are left out, and counted here.',
+    flowLine('Middle (median)', (f) => span(f.timeToFinish.median))
+      + flowLine('Longest', (f) => span(f.timeToFinish.longest))
+      + flowLine('Left out, never Queued', (f) => String(Number(f.timeToFinish.leftOut))))}
+    ${flow('Sent back',
+    'Of the tasks finished in that time, how many review sent to Rework at least once (a task sent back twice counts once).',
+    flowLine('Sent back at least once', (f) => `${Number(f.sentBack.count)} of ${Number(f.finished)} (${Math.round(f.sentBack.share * 100)}%)`))}
+    ${flow('Waiting on you',
+    'For tasks finished in that time: time spent in Needs your input or Ready to launch before going Live, added up and the middle (median) task.',
+    flowLine('Total', (f) => span(f.waiting.total)) + flowLine('Middle (median)', (f) => span(f.waiting.median)))}
+    <p class="waiting-now">Waiting on you right now: <strong>${Number(r.waitingNow)}</strong> task${Number(r.waitingNow) === 1 ? '' : 's'} in Needs your input or Ready to launch.</p>
     <h2>Open now</h2>
     <p class="quiet">Tasks in each stage that is not Live.</p>
     <table class="counts stages"><thead><tr><th>Stage</th><th class="count">Tasks</th></tr></thead><tbody>${open}</tbody></table>`;
