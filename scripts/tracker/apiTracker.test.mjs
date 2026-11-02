@@ -434,6 +434,31 @@ test('pr-opened records the PR and reads it back; then verdict --pass reads back
   } finally { await f.cleanup(); }
 });
 
+test('pr-opened --human-hours records the estimate and reads it back; a bad value writes nothing (SP-78)', async () => {
+  const f = await fixture();
+  try {
+    f.file({ name: 'one', status: 'building' });
+    f.prBody = 'Summary.\n\nTicket: ' + f.url + '/t/AL-1\n';
+    const pr = ['pr-opened', '--task', 'AL-1', '--pr', 'https://github.com/owner/repo/pull/7'];
+    for (const bad of ['0', '-2', '201', 'six']) {
+      const r = await f.door([...pr, '--human-hours', bad]);
+      assert.equal(r.code, 2, `${bad}: ${r.err}`);
+      assert.match(r.err, /Nothing was written/);
+    }
+    assert.equal((await f.door([...pr, '--human-hours'])).code, 2);
+    assert.equal(f.store.listComments('AL-1').length, 0);
+
+    const r = await f.door([...pr, '--human-hours', '6', '--body-file', '-'], { stdin: 'Why that estimate: one module and its tests.' });
+    assert.equal(r.code, 0, r.err);
+    assert.match(r.out, /human-hours estimate 6 recorded and read back/);
+    const [only] = f.store.listComments('AL-1');
+    const text = only.body ?? only.comment_text ?? '';
+    assert.match(text, /^PR opened: https:\/\/github\.com\/owner\/repo\/pull\/7\nHuman-hours estimate: 6\n\nWhy that estimate/);
+    const get = await f.door(['get', '--task', 'AL-1']);
+    assert.match(get.out, /\npr: {7}https:\/\/github\.com\/owner\/repo\/pull\/7\n/);
+  } finally { await f.cleanup(); }
+});
+
 test('comment, describe, priority and tag each write and read back', async () => {
   const f = await fixture();
   try {
