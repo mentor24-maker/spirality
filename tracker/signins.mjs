@@ -42,8 +42,17 @@
  *         this machine's database instead, which says nothing about the
  *         tracker everyone uses.
  *
+ * Each product signs in with its own seats (seatsForConfig): the product
+ * that runs the tracker (trackerPort set) keeps the bare lane names and the
+ * operator's seat; any other product's loops are named for it
+ * (`normie loop-build`) and it has no operator seat, so its create never
+ * re-issues, replaces or stops another product's token. Both commands
+ * refuse unless `doppler run` is for the config's own dopplerProject, the
+ * only one create writes into.
+ *
  * No token is ever printed: only names, ids and verdicts. The database is
- * the project config's trackerDataDir/tracker.db, or TRACKER_DB.
+ * the project config's trackerDataDir/tracker.db, or TRACKER_DB (which a
+ * product that does not run the tracker must give).
  */
 import { parseArgs } from 'node:util';
 import { spawnSync } from 'node:child_process';
@@ -60,6 +69,28 @@ import { operatorImportKey } from './import.mjs';
 /** The seats with the operator's name filled in from the project config. */
 export function seatsFor(operatorName, seats = TRACKER_SEATS) {
   return seats.map((s) => ({ ...s, name: s.name ?? operatorName }));
+}
+
+/**
+ * The seats one product signs in with, from its project config. Every
+ * product's loops share one tracker, so they must never share an actor:
+ * `create` gives a found actor a fresh token, which stops the old one.
+ *
+ * The product that runs the tracker service (`trackerPort` set) is its
+ * home: its loops sign in under their bare lane names (`loop-build`), as
+ * the first product's always have, and it holds the operator's own seat.
+ * Any other product is a guest: each machine seat is named for the product
+ * and the lane (`normie loop-build`), with its token in that product's own
+ * Doppler project, and it has no operator seat, because the operator's
+ * sign-in belongs to the home product and a guest never re-issues it
+ * (docs/ONBOARDING_A_PRODUCT.md, item 4). Returns `{ seats, guest }`.
+ */
+export function seatsForConfig(config, seats = TRACKER_SEATS) {
+  if (config.trackerPort != null) return { seats: seatsFor(config.operatorName, seats), guest: false };
+  return {
+    seats: seats.filter((s) => s.kind === 'machine').map((s) => ({ ...s, name: `${config.productSlug} ${s.name}` })),
+    guest: true,
+  };
 }
 
 /** A message with every occurrence of `secret` blanked, for anything that came back from Doppler. */
@@ -135,11 +166,15 @@ export function ownHostNames() {
  * for the messages. Returns `{ ok, lines }`: one line per seat and one for
  * the project.
  */
-export async function createSignins({ store, seats, env, project, operatorImport = null, setSecret, getSecret, proveToken, tracker }) {
+export async function createSignins({ store, seats, env, project, operatorImport = null, operatorName = null, setSecret, getSecret, proveToken, tracker }) {
   const lines = [];
   let ok = true;
   const ids = {};
   const operatorSeat = seats.find((s) => s.kind === 'human');
+  // Another product's project here, and not this one's: an actor found by
+  // name may be that product's, so giving it a new token would stop that
+  // product's loops. Only a seat made fresh is safe then.
+  const others = store.getProject(project.slug) ? [] : store.listProjects().map((p) => p.slug);
   const elsewhere = `this database is not the one the tracker at ${tracker.url} serves. Run this on the machine the tracker runs on${tracker.home ? ` (${tracker.home})` : ''}`;
   const down = (why) => `the tracker at ${tracker.url} ${why}, so no token can be proven. Run it again once the tracker is up`;
   // Once the tracker has turned one seat down, every other seat would be
@@ -183,6 +218,11 @@ export async function createSignins({ store, seats, env, project, operatorImport
     // that actor a fresh token, which also stops the old one signing in.
     // The operator an earlier import already made is the one to keep.
     const kept = (seat === operatorSeat && importedOperator(store, operatorImport, seat)) || store.actorsNamed({ kind: seat.kind, name: seat.name })[0];
+    if (kept && others.length) {
+      ok = false;
+      lines.push(`${seat.secret}: REFUSED. Actor ${kept.id} ("${seat.name}") already exists, and this tracker holds project${others.length > 1 ? 's' : ''} ${others.map((o) => `"${o}"`).join(', ')} but not "${project.slug}": that actor may be another product's, and a new token would stop its sign-in. Nothing changed. If this product does not run the tracker, its config must not set trackerPort, so its seats get names of their own.`);
+      continue;
+    }
     const actor = kept ?? store.createActor({ kind: seat.kind, name: seat.name });
     const token = store.issueToken(actor.id);
     const proof = await askTracker(proveToken, token, seat);
@@ -212,7 +252,15 @@ export async function createSignins({ store, seats, env, project, operatorImport
     lines.push(`${seat.secret}: actor ${actor.id} (${seat.kind}, "${seat.name}") ${kept ? 'kept, given a new token' : 'made'}; token stored in Doppler and read back.`);
   }
 
-  const operatorId = operatorSeat ? ids[operatorSeat.secret] : null;
+  // A guest product has no operator seat: its project's operator is the
+  // operator's existing actor, found by name, never given a token here.
+  let operatorId = operatorSeat ? ids[operatorSeat.secret] : null;
+  let noOperator = operatorSeat && operatorId == null ? 'because the operator has no working sign-in yet' : null;
+  if (!operatorSeat && operatorName) {
+    const named = store.actorsNamed({ kind: 'human', name: operatorName });
+    if (named.length === 1) operatorId = named[0].id;
+    else noOperator = named.length ? `because ${named.length} people are named "${operatorName}" and it cannot tell which is the operator` : `because nobody named "${operatorName}" signs in to this tracker yet: run create for the product that runs the tracker first`;
+  }
   if (operatorSeat && operatorId != null && operatorImport) {
     // The history import finds the operator by this key; without it, it
     // would make a second operator and file all of his history under that one.
@@ -237,9 +285,9 @@ export async function createSignins({ store, seats, env, project, operatorImport
   } else if (!project.name || !project.prefix) {
     ok = false;
     lines.push(`project "${project.slug}": NOT made. Give --name and a prefix (--prefix, or trackerPrefix in the project config) to make it.`);
-  } else if (operatorSeat && operatorId == null) {
+  } else if (noOperator) {
     ok = false;
-    lines.push(`project "${project.slug}": NOT made, because the operator has no working sign-in yet.`);
+    lines.push(`project "${project.slug}": NOT made, ${noOperator}.`);
   } else {
     try {
       const made = store.createProject({ slug: project.slug, name: project.name, prefix: project.prefix, operator: operatorId });
@@ -326,7 +374,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   const dataDir = config.trackerDataDir?.replace(/^~(?=\/|$)/, homedir());
   const db = process.env.TRACKER_DB || (dataDir && join(dataDir, 'tracker.db'));
   if (!db) {
-    console.error('The project config names no trackerDataDir, and TRACKER_DB is not set: there is no tracker database to use.');
+    console.error('The project config names no trackerDataDir, and TRACKER_DB is not set: there is no tracker database to use. A product that does not run the tracker sets TRACKER_DB to the tracker\'s own database, on the machine it runs on.');
     process.exit(1);
   }
   if (!process.env.DOPPLER_PROJECT) {
@@ -352,7 +400,15 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     console.error('The project config file names no trackerUrl, so there is no tracker to prove a token at. Nothing was made or written.');
     process.exit(1);
   }
-  const seats = seatsFor(config.operatorName);
+  if (process.env.DOPPLER_PROJECT !== config.dopplerProject) {
+    console.error(`This runs under Doppler project "${process.env.DOPPLER_PROJECT}", but the project config names "${config.dopplerProject}": the tokens seen and written would be another product's. Nothing was made or written. Run it under doppler run --project ${config.dopplerProject}.`);
+    process.exit(1);
+  }
+  const { seats, guest } = seatsForConfig(config);
+  if (guest && makeNew) {
+    console.error('This product does not run the tracker (its config sets no trackerPort), so it never makes the tracker\'s database. Nothing was made or written. Run create for the product that runs the tracker first.');
+    process.exit(1);
+  }
   if (makeNew && !process.env.TRACKER_DB) mkdirSync(dataDir, { recursive: true });
   const store = needsDb ? openStore(db) : null;
   let result;
@@ -368,7 +424,8 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
         result = await createSignins({
           store, seats, env: process.env,
           project: { slug: config.productSlug, name: values.name, prefix: values.prefix ?? config.trackerPrefix },
-          operatorImport: operatorImportKey(config),
+          operatorImport: guest ? null : operatorImportKey(config),
+          operatorName: guest ? config.operatorName : null,
           setSecret: (name, value) => { doppler(['secrets', 'set', name, ...where, '--silent'], value); },
           getSecret: (name) => doppler(['secrets', 'get', name, ...where, '--plain']).replace(/\n$/, ''),
           proveToken: (token) => whoIs(asked, token),
