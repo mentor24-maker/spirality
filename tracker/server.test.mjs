@@ -583,12 +583,18 @@ test('POST /projects refuses a missing field, a duplicate slug or prefix, a bad 
   } finally { await f.cleanup(); }
 });
 
-test('GET /people lists the tracker\'s people for the owner picker: humans only, never a token', async () => {
+test('GET /people lists the tracker\'s people: humans only, with emails and open invites for a person, names alone for a loop, never a token', async () => {
   const f = await fixture();
   try {
+    f.store.setEmail(f.human.id, 'op@example.com');
+    const link = f.store.makeLink({ purpose: 'invite', email: 'new@example.com', madeBy: f.human.id });
     const r = await f.call('GET', '/people', { token: f.humanToken });
     assert.equal(r.status, 200);
-    assert.deepEqual(r.body, { people: [{ id: f.human.id, name: 'Operator' }] });
+    assert.deepEqual(r.body.people, [{ id: f.human.id, name: 'Operator', email: 'op@example.com' }]);
+    assert.deepEqual(r.body.invites.map((i) => [i.email, i.invitedBy.name]), [['new@example.com', 'Operator']]);
+    assert.ok(!r.text.includes(link.token));
+    const loop = await f.call('GET', '/people');
+    assert.deepEqual(loop.body, { people: [{ id: f.human.id, name: 'Operator' }] });
     for (const token of f.tokens) assert.ok(!r.text.includes(token));
     assert.equal((await f.call('GET', '/people', { token: null })).status, 401);
   } finally { await f.cleanup(); }
@@ -938,4 +944,129 @@ test('GET /reports answers the Reporting figures for every project or one, 404 f
     assert.equal(unknown.body.error, 'unknown-project');
     assert.equal(f.store.getTicket(t.id).version, 2);
   } finally { await f.cleanup(); }
+});
+
+/** A people server whose sent emails are kept in `sent`; `fail` makes the next send refused. */
+async function inviteServer(f) {
+  const sent = [];
+  const mail = { fail: null };
+  const accountMail = {
+    send: async (m) => { if (mail.fail) throw new Error(mail.fail); sent.push(m); },
+    pageUrl: 'http://tracker.test:4180', productName: 'Alpha',
+  };
+  const s = await signInServer(f, { accountMail });
+  const cookie = cookieOf((await s.signIn({ email: s.email, password: s.password })).cookie);
+  const asPerson = (method, path, body) => s.ask(method, path, { headers: { ...s.json, cookie }, body });
+  return { ...s, sent, mail, cookie, asPerson };
+}
+
+test('an invite from start to finish: a person invites an email, the link makes the new person, and they sign in', async () => {
+  const f = await fixture();
+  const s = await inviteServer(f);
+  try {
+    const r = await s.asPerson('POST', '/invites', { email: ' Test@Example.com ' });
+    assert.equal(r.status, 201, r.text);
+    assert.match(r.body.sent, /^Invite sent to test@example\.com, good for 7 days\.$/);
+    assert.deepEqual(r.body.invites.map((i) => [i.email, i.invitedBy.name]), [['test@example.com', 'Operator']]);
+    assert.equal(s.sent.length, 1);
+    assert.equal(s.sent[0].to, 'test@example.com');
+    assert.equal(s.sent[0].subject, 'Operator invited you to the Alpha tracker');
+    assert.match(s.sent[0].text, /Operator invited you/);
+    const m = /http:\/\/tracker\.test:4180\/set-password\?link=([A-Za-z0-9_%-]+)/.exec(s.sent[0].text);
+    assert.ok(m, s.sent[0].text);
+    const token = decodeURIComponent(m[1]);
+    assert.ok(!r.text.includes(token), 'the answer never carries the link');
+    assert.ok(!f.lines.some((l) => l.includes(token) || l.includes('test@example.com')), 'the log carries neither the link nor the email');
+    assert.ok(f.lines.includes(`invite sent actor=${f.human.id}`));
+
+    const info = await s.ask('POST', '/account/link', { headers: s.json, body: { link: token } });
+    assert.deepEqual([info.body.purpose, info.body.email], ['invite', 'test@example.com']);
+    const set = await s.ask('POST', '/account/set-password', { headers: s.json, body: { link: token, password: 'the new person password', name: 'Tess' } });
+    assert.equal(set.status, 200);
+    const signedIn = await s.signIn({ email: 'test@example.com', password: 'the new person password' });
+    assert.equal(signedIn.status, 200);
+    assert.equal(signedIn.body.name, 'Tess');
+    const waiting = await s.ask('GET', '/waiting', { headers: { cookie: cookieOf(signedIn.cookie) } });
+    assert.equal(waiting.status, 200);
+
+    const after = await s.asPerson('GET', '/people');
+    assert.deepEqual(after.body.people.map((p) => [p.name, p.email]), [['Operator', 'operator@example.com'], ['Tess', 'test@example.com']]);
+    assert.deepEqual(after.body.invites, [], 'the used invite is gone from the open ones');
+  } finally { await s.close(); await f.cleanup(); }
+});
+
+test('an invite is refused for a taken email, a second invite, a machine and a bad body, each with its reason, and nothing is made or sent', async () => {
+  const f = await fixture();
+  const s = await inviteServer(f);
+  try {
+    const taken = await s.asPerson('POST', '/invites', { email: 'OPERATOR@example.com' });
+    assert.equal(taken.status, 409);
+    assert.equal(taken.body.error, 'duplicate-email');
+    assert.match(taken.body.message, /already belongs to a person/);
+
+    assert.equal((await s.asPerson('POST', '/invites', { email: 'new@example.com' })).status, 201);
+    const twice = await s.asPerson('POST', '/invites', { email: 'New@example.com' });
+    assert.equal(twice.status, 409);
+    assert.equal(twice.body.error, 'duplicate-invite');
+    assert.match(twice.body.message, /already has an open invite/);
+
+    const machine = await f.call('POST', '/invites', { at: s.base, body: { email: 'loop@example.com' } });
+    assert.equal(machine.status, 403);
+    assert.equal(machine.body.error, 'people-only');
+    const machineCancel = await f.call('DELETE', `/invites/${f.store.listInvites()[0].id}`, { at: s.base });
+    assert.equal(machineCancel.status, 403);
+    assert.equal(machineCancel.body.error, 'people-only');
+
+    assert.equal((await s.asPerson('POST', '/invites', { email: '' })).body.error, 'missing');
+    assert.equal((await s.asPerson('POST', '/invites', { email: 'not an email' })).body.error, 'bad-email');
+    assert.equal((await s.asPerson('POST', '/invites', { email: 'x@example.com', role: 'admin' })).body.error, 'bad-field');
+
+    assert.equal(s.sent.length, 1, 'only the one invite that was made went out');
+    assert.deepEqual(f.store.listInvites().map((i) => i.email), ['new@example.com']);
+  } finally { await s.close(); await f.cleanup(); }
+});
+
+test('a cancelled invite\'s link is refused; cancelling twice or an unknown id is 404', async () => {
+  const f = await fixture();
+  const s = await inviteServer(f);
+  try {
+    await s.asPerson('POST', '/invites', { email: 'gone@example.com' });
+    const token = decodeURIComponent(/link=([A-Za-z0-9_%-]+)/.exec(s.sent[0].text)[1]);
+    const [invite] = f.store.listInvites();
+    const r = await s.asPerson('DELETE', `/invites/${invite.id}`);
+    assert.equal(r.status, 200);
+    assert.deepEqual(r.body, { cancelled: invite.id });
+    assert.deepEqual((await s.asPerson('GET', '/people')).body.invites, []);
+    const use = await s.ask('POST', '/account/set-password', { headers: s.json, body: { link: token, password: 'a good long password', name: 'Gone' } });
+    assert.equal(use.status, 400);
+    assert.equal(use.body.error, 'unknown-link');
+    assert.equal(f.store.actorForEmail('gone@example.com'), null);
+    assert.equal((await s.asPerson('DELETE', `/invites/${invite.id}`)).status, 404);
+    assert.equal((await s.asPerson('DELETE', '/invites/999')).body.error, 'unknown-invite');
+    assert.equal((await s.asPerson('DELETE', '/invites/abc')).status, 404);
+  } finally { await s.close(); await f.cleanup(); }
+});
+
+test('an invite whose email does not go out, or with no mail sender, leaves no open invite and says so', async () => {
+  const f = await fixture();
+  const s = await inviteServer(f);
+  try {
+    s.mail.fail = 'Resend answered 403: you can only send testing emails to your own address';
+    const failed = await s.asPerson('POST', '/invites', { email: 'far@example.com' });
+    assert.equal(failed.status, 502);
+    assert.equal(failed.body.error, 'not-sent');
+    assert.match(failed.body.message, /^Not invited: the email to far@example\.com did not go out \(Resend answered 403: you can only send testing emails to your own address\)\. The invite was withdrawn/);
+    assert.deepEqual(f.store.listInvites(), []);
+    s.mail.fail = null;
+    assert.equal((await s.asPerson('POST', '/invites', { email: 'far@example.com' })).status, 201, 'a later try is not blocked');
+  } finally { await s.close(); }
+
+  const n = await signInServer(f);
+  try {
+    const cookie = cookieOf((await n.signIn({ email: n.email, password: n.password })).cookie);
+    const r = await n.ask('POST', '/invites', { headers: { ...n.json, cookie }, body: { email: 'none@example.com' } });
+    assert.equal(r.status, 503);
+    assert.equal(r.body.error, 'no-mail');
+    assert.ok(!f.store.listInvites().some((i) => i.email === 'none@example.com'));
+  } finally { await n.close(); await f.cleanup(); }
 });

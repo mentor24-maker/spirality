@@ -57,6 +57,9 @@
  *    startSession or makeLink. A session lasts 30 days; a setup or invite
  *    link 7 days, a reset link 1 hour. A link is used once: the check and
  *    the use are one transaction, so two uses racing cannot both pass.
+ *  - An email has at most one open invite (unused, unexpired), checked in
+ *    the same transaction that makes it. A cancelled invite is deleted, so
+ *    its link is refused as one the tracker never made.
  */
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
@@ -715,6 +718,8 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
         } else if (purpose === 'invite') {
           if (actor != null) throw new StoreError('bad-link', 'an invite is for a new person; it names no actor.');
           if (holder) throw new StoreError('duplicate-email', `${e} already belongs to a person.`);
+          const open = db.prepare("SELECT expires_at FROM account_links WHERE purpose = 'invite' AND email = ? AND used_at IS NULL").all(e);
+          if (open.some((row) => !passed(row.expires_at))) throw new StoreError('duplicate-invite', `${e} already has an open invite.`);
         } else {
           if (!holder) throw new StoreError('unknown-email', `no person has the email ${e}.`);
           if (actor != null && actor !== holder.id) throw new StoreError('bad-link', `${e} is not actor ${actor}'s email.`);
@@ -796,6 +801,40 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
         throw new StoreError('write-failed', 'the link was not withdrawn.');
       }
       return gone;
+    },
+
+    /**
+     * The invites nobody has used yet and that have not expired, oldest
+     * first: `{ id, email, invitedBy: { id, name }, createdAt, expiresAt }`.
+     * The id is the row's own number, for cancelInvite; never the token or
+     * its hash.
+     */
+    listInvites() {
+      return db.prepare(
+        "SELECT l.rowid AS id, l.email, l.made_by, a.name AS made_by_name, l.created_at, l.expires_at FROM account_links l JOIN actors a ON a.id = l.made_by WHERE l.purpose = 'invite' AND l.used_at IS NULL ORDER BY l.created_at, l.rowid",
+      ).all()
+        .filter((row) => !passed(row.expires_at))
+        .map((row) => ({
+          id: num(row.id), email: row.email, invitedBy: { id: num(row.made_by), name: row.made_by_name },
+          createdAt: row.created_at, expiresAt: row.expires_at,
+        }));
+    },
+
+    /**
+     * Cancel an invite nobody has used, so its link is refused from then on.
+     * `unknown-invite` for an id that is not an unused invite (a used one is
+     * kept as the record). Read back.
+     */
+    cancelInvite(id) {
+      if (!Number.isInteger(id)) throw new StoreError('unknown-invite', `there is no open invite ${id}.`);
+      return transaction(() => {
+        const r = db.prepare("DELETE FROM account_links WHERE rowid = ? AND purpose = 'invite' AND used_at IS NULL").run(id);
+        if (num(r.changes) !== 1) throw new StoreError('unknown-invite', `there is no open invite ${id}.`);
+        if (db.prepare('SELECT 1 FROM account_links WHERE rowid = ?').get(id)) {
+          throw new StoreError('write-failed', `invite ${id} was not cancelled.`);
+        }
+        return { cancelled: id };
+      });
     },
 
     /** Every person (never a machine), oldest first: the owner a project may name. Never a token. */

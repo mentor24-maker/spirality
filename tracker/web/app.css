@@ -173,3 +173,9 @@ details.edit button.remove-tag:hover { color: var(--red); }
 details.edit p.locked { margin: 0.3rem 0 0; }
 details.edit p.locked + p { margin: 0.2rem 0 0; font-size: 0.9em; }
 details.edit .edit-note:empty { display: none; }
+form.invite { max-width: 36rem; margin-bottom: 1.5rem; }
+form.invite label { display: block; font-weight: 600; }
+form.invite .row { display: flex; gap: 0.75rem; align-items: center; margin-top: 0.35rem; }
+form.invite input { flex: 1; font: inherit; padding: 0.5rem; box-sizing: border-box; }
+form.invite .hint { display: block; font-size: 0.85rem; margin-top: 0.25rem; }
+table.people, table.invites { max-width: 48rem; }
