@@ -26,7 +26,7 @@
  * an emailed link's own page. The link's token is sent only in a JSON body,
  * never in an address.
  */
-import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderQuickAction, renderTrail, stageLooks, tabTitle, bellColour, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults } from './render.mjs';
+import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderAnswerIn, statusLabel, ANSWER_IN_NOTE, renderQuickAction, renderTrail, stageLooks, tabTitle, bellColour, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults } from './render.mjs';
 
 /** Where an earlier version of the page kept a pasted token; removed on load, never read. */
 const OLD_TOKEN_KEY = 'tracker-token';
@@ -645,6 +645,7 @@ async function drawProject(slug, view, { adding = false, filed = null } = {}) {
     <a class="card" href="/t/${encodeURIComponent(t.id)}">
       <span class="name">${escapeHtml(t.name)}</span>
       <span class="quiet">${escapeHtml(t.id)}${t.priority ? ` · ${escapeHtml(t.priority)}` : ''}</span>
+      ${t.answerIn ? `<span class="answer-in">${escapeHtml(ANSWER_IN_NOTE)}</span>` : ''}
       ${t.tags.length ? `<span class="tags">${t.tags.map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join('')}</span>` : ''}
     </a>`;
   const column = (c) => block(c, 'column', c.tickets.map(card).join('') || '<p class="quiet">None.</p>');
@@ -660,7 +661,7 @@ async function drawProject(slug, view, { adding = false, filed = null } = {}) {
   };
   const row = (status) => (t) => `
     <tr>
-      <td class="name"><a href="/t/${encodeURIComponent(t.id)}">${escapeHtml(t.name)}</a> <span class="quiet">${escapeHtml(t.id)}</span></td>
+      <td class="name"><a href="/t/${encodeURIComponent(t.id)}">${escapeHtml(t.name)}</a> <span class="quiet">${escapeHtml(t.id)}</span>${t.answerIn ? ` <span class="answer-in">${escapeHtml(ANSWER_IN_NOTE)}</span>` : ''}</td>
       <td class="priority">${t.priority ? escapeHtml(statusName(t.priority)) : '<span class="quiet">–</span>'}</td>
       <td class="tags">${t.tags.map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join('')}</td>
       <td class="assignee">${t.assignee ? escapeHtml(t.assignee) : '<span class="quiet">nobody</span>'}</td>
@@ -856,6 +857,7 @@ async function drawTicket(id, said = null, kept = null) {
       <div class="ask">${renderQuickAction(t)}</div>
       <div class="act">
       ${renderCommands(t)}
+      ${renderAnswerIn(t)}
       ${renderMergeAction(t)}
       ${renderCloseAction(t)}
       ${renderGoAction(t)}
@@ -871,7 +873,7 @@ async function drawTicket(id, said = null, kept = null) {
       <summary>Details</summary>
       <p class="meta">
         <span>${escapeHtml(t.id)}</span><span>${escapeHtml(t.projectName)}</span>
-        <span>${escapeHtml(statusName(t.status))}</span>
+        <span>${escapeHtml(statusLabel(t))}</span>
         <span>${t.assignee ? `assigned to ${escapeHtml(t.assignee.name)}` : 'not assigned'}</span>
       </p>
       ${me?.kind === 'human' ? renderEditPanel(t) : ''}

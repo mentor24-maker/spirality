@@ -19,7 +19,7 @@ import mergeOnComment from '../lib/mergeOnComment.js';
 import { compareWithinStatus } from '../scripts/lib/loopStatuses.mjs';
 import { searchPattern } from './web/render.mjs';
 
-const { OPERATOR_LANE, WAITING, CANNOT_TELL, waitingVerdict } = waitingOnOperator;
+const { OPERATOR_LANE, WAITING, CANNOT_TELL, waitingVerdict, operatorSpokeLast } = waitingOnOperator;
 const { isMachineComment, stripMachineMarker } = machineComment;
 const { STAGE_ORDER, LIVE, QUEUED, REWORK, OPERATOR_HELD_STATUSES, TERMINAL_STATUSES, DISPLAY, PRIORITY_RANK, statusOf } = loopStatuses;
 const { findPullRequest } = mergeOnComment;
@@ -41,6 +41,18 @@ function verdictInput(ticket, comments) {
       date: String(Date.parse(c.createdAt)),
     })),
   };
+}
+
+/**
+ * Is his answer in? The ticket sits in one of his two statuses and his own
+ * comment is the newest word on it, so the relay owes the next move (SP-93).
+ * The same rule the Waiting on you list drops a ticket by (operatorSpokeLast,
+ * rule 1 of waitingVerdict), so the page and that list cannot disagree.
+ * `operatorId` is the project's operator; with none, never.
+ */
+function answerIsIn(ticket, comments, operatorId) {
+  if (operatorId == null || !OPERATOR_LANE.includes(ticket.status)) return false;
+  return operatorSpokeLast(verdictInput(ticket, comments).comments, { operatorId });
 }
 
 /**
@@ -80,7 +92,7 @@ export function waitingFor(store, operatorId) {
  * and kind, and `machine`: true when a machine actor wrote it, or when it
  * carries the machine stamp (a loop posting under Dane's own token). The
  * stamp line itself is taken off the shown text; `machine` says it instead.
- * Null when there is no such ticket.
+ * `answerIn` says his answer is in (answerIsIn). Null when there is no such ticket.
  */
 export function threadOf(store, ticketId) {
   const ticket = store.getTicket(ticketId);
@@ -110,6 +122,7 @@ export function threadOf(store, ticketId) {
     // The one person the ticket may be assigned to, for the ticket page's picker.
     operator: namedActor(store, project?.operator),
     comments,
+    answerIn: answerIsIn(ticket, store.listComments(ticket.id), project?.operator),
     pullRequest: findPullRequest(store.listComments(ticket.id).map((c) => ({
       id: c.id, comment_text: c.body, date: String(Date.parse(c.createdAt)),
     })))?.url ?? null,
@@ -178,7 +191,8 @@ export function projectDetailsOf(store, slug) {
  * its assignee's name, its last change, and its pull request's address (or
  * null). The pull request is the merge step's own answer, findPullRequest
  * over the ticket's comments, so the list's link and the PR a "merge" would
- * act on cannot differ. Null when there is no such project.
+ * act on cannot differ. `answerIn` says his answer is in (answerIsIn, the
+ * same as the ticket page). Null when there is no such project.
  */
 export function boardOf(store, slug) {
   const project = store.getProject(slug);
@@ -212,6 +226,7 @@ export function boardOf(store, slug) {
         assignee: nameOf(t.assignee),
         updatedAt: t.updatedAt,
         pullRequest: pullRequestOf(t.id),
+        answerIn: answerIsIn(t, store.listComments(t.id), project.operator),
       })),
     })),
   };
