@@ -371,7 +371,7 @@ test('a refused request writes nothing and says why', async () => {
   } finally { await f.cleanup(); }
 });
 
-test('the form starts on the project the server was given, and on none it does not hold', async () => {
+test('the projects list names the project the server was given as its default, and none it does not hold', async () => {
   const f = await fixture();
   try {
     assert.equal((await f.call('GET', '/projects')).body.default, null, 'no project config named: the page takes the first');
@@ -385,15 +385,27 @@ test('the form starts on the project the server was given, and on none it does n
   } finally { await f.cleanup(); }
 });
 
-test('the New request form files into Requested as typed, keeps the text when refused or signed out, and is in the header', () => {
+test('the Add Task box on the Tasks page files into the project shown, in Requested as typed, keeps the text when refused or signed out, and is gone from the header', () => {
   const app = readFileSync(WEB('app.mjs'), 'utf8');
-  assert.match(app, /api\('POST', `\/projects\/\$\{encodeURIComponent\(project\.value\)\}\/tickets`, \{\s*name: title\.value, description: description\.value, status: 'Requested',\s*\}\)/);
-  assert.ok(!/assignee/.test(app.slice(app.indexOf('async function drawNew'), app.indexOf('/** Underline'))), 'a request is filed unassigned');
-  assert.match(app, /note\.textContent = `Not filed: \$\{err\.message\}`;/);
-  assert.match(app, /localStorage\.setItem\(DRAFT_KEY,/);
-  assert.match(app, /title\.value = draft\.title;\s*description\.value = draft\.description;/);
-  assert.match(app, /history\.pushState\(null, '', `\/t\/\$\{encodeURIComponent\(ticket\.id\)\}`\)/);
-  assert.match(readFileSync(WEB('index.html'), 'utf8'), /<a href="\/new" data-nav="new">New request<\/a>/);
+  const wire = app.slice(app.indexOf('function wireAddTask'), app.indexOf('/**', app.indexOf('function wireAddTask')));
+  assert.match(wire, /api\('POST', `\/projects\/\$\{encodeURIComponent\(slug\)\}\/tickets`, \{\s*name: title\.value, description: description\.value, status: 'Requested',\s*\}\)/);
+  assert.ok(!/assignee/.test(wire), 'a request is filed unassigned');
+  assert.match(wire, /note\.textContent = `Not filed: \$\{err\.message\}`;/);
+  assert.match(wire, /localStorage\.setItem\(DRAFT_KEY,/);
+  assert.match(wire, /title\.value = draft\.title;\s*description\.value = draft\.description;/);
+  assert.match(wire, /if \(adding \|\| draft\.title \|\| draft\.description\) box\.open = true;/, 'kept text opens the box on its own');
+  assert.match(wire, /drawSignIn\('You were signed out; your request was not filed\. What you typed is kept/);
+  // Filed: the draft is forgotten and the page redraws, box closed, naming the new id.
+  assert.match(wire, /localStorage\.removeItem\(DRAFT_KEY\);[\s\S]*await drawProject\(slug, view, \{ filed: ticket\.id \}\);/);
+  const draw = app.slice(app.indexOf('async function drawProject'), app.indexOf('async function copyText'));
+  assert.match(draw, /<details class="add-task">\s*<summary>Add Task<\/summary>\s*<form class="request">/, 'drawn closed, on the board and the list alike');
+  assert.match(draw, /Filed <a href="\/t\/\$\{encodeURIComponent\(filed\)\}">\$\{escapeHtml\(filed\)\}<\/a>/);
+  assert.match(draw, /wireAddTask\(board\.project, view, adding\);/);
+  assert.doesNotMatch(app, /drawNew/, 'the separate New request page is gone');
+  // The old address opens the Tasks page with the box open.
+  assert.match(/async function route\(\) \{[\s\S]*?\n\}/.exec(app)[0], /\} else if \(isNew\) \{[\s\S]*?await drawTasks\(savedView\(\), \{ adding: true \}\);/);
+  assert.doesNotMatch(readFileSync(WEB('index.html'), 'utf8'), /New request|href="\/new"/);
+  assert.match(readFileSync(WEB('app.css'), 'utf8'), /details\.add-task \{/);
 });
 
 // ── Copy to another project ──────────────────────────────────────────────────
@@ -450,7 +462,7 @@ test('the ticket page offers every other project to copy into, opens the copy, a
 
 // ── The page itself ──────────────────────────────────────────────────────────
 
-test('the page is served at /, at a ticket\'s address, at Projects, at Tasks, at the board, at the list and at the New request form without a token, locked to its own scripts', async () => {
+test('the page is served at /, at a ticket\'s address, at Projects, at Tasks, at the board, at the list and at the old New request address without a token, locked to its own scripts', async () => {
   const f = await fixture();
   try {
     for (const path of ['/', '/t/AL-1', '/tasks', '/board', '/board/alpha', '/list', '/list/alpha', '/new']) {
@@ -498,9 +510,9 @@ test('the page is served at /, at a ticket\'s address, at Projects, at Tasks, at
   } finally { await f.cleanup(); }
 });
 
-test('the Settings page is in the header after New request, lists the stages the server gives, saves them all, reads them back, and shows a refusal', async () => {
+test('the Settings page is in the header after Reporting, lists the stages the server gives, saves them all, reads them back, and shows a refusal', async () => {
   const html = readFileSync(WEB('index.html'), 'utf8');
-  assert.match(html, /<a href="\/new" data-nav="new">New request<\/a>\s*<a href="\/settings" data-nav="settings">Settings<\/a>/);
+  assert.match(html, /<a href="\/reporting" data-nav="reporting">Reporting<\/a>\s*<a href="\/settings" data-nav="settings">Settings<\/a>/);
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   const draw = app.slice(app.indexOf('async function drawSettings'), app.indexOf('/** Underline'));
   assert.match(draw, /const \{ stages \} = await api\('GET', '\/stage-colours'\);/, 'the stages come from the server, never typed out');
@@ -541,7 +553,7 @@ test('bellColour: grey while nothing waits, yellow for 1 to 3, red for more than
 test('Waiting on you is a bell on the right, just before "Signed in as", coloured from the count wherever it is read', () => {
   const html = readFileSync(WEB('index.html'), 'utf8');
   const nav = /<nav class="site">([\s\S]*?)<\/nav>/.exec(html)[1];
-  assert.deepEqual([...nav.matchAll(/>([^<]+)<\/a>/g)].map((m) => m[1]), ['Projects', 'Tasks', 'Reporting', 'New request', 'Settings']);
+  assert.deepEqual([...nav.matchAll(/>([^<]+)<\/a>/g)].map((m) => m[1]), ['Projects', 'Tasks', 'Reporting', 'Settings']);
   assert.doesNotMatch(nav, /Waiting on you/);
   const me = /<span class="me">([\s\S]*?)<\/span>\s*<\/header>/.exec(html)[1];
   assert.match(me, /<a id="bell" href="\/" title="Waiting on you" aria-label="Waiting on you" data-colour="grey" hidden><svg [^>]*aria-hidden="true">[\s\S]*?<\/svg><\/a>\s*<span id="who"><\/span>/);
@@ -817,7 +829,7 @@ test('every name in the trail is escaped, in its text and in its address', () =>
   assert.match(html, /<span aria-current="page">Task &lt;script&gt;alert\(1\)&lt;\/script&gt;<\/span>/);
 });
 
-test('every page puts its trail at the top: ticket, board, list, Waiting on you, Projects, New request', () => {
+test('every page puts its trail at the top: ticket, board, list, Waiting on you, Projects', () => {
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   const body = (name) => new RegExp(`async function ${name}\\(([^)]*)\\) \\{([\\s\\S]*?)\\n\\}`).exec(app)[2];
   // The ticket: its project in the view last used, then the ticket, then this page of it.
@@ -826,7 +838,6 @@ test('every page puts its trail at the top: ticket, board, list, Waiting on you,
   assert.match(body('drawProject'), /putTrail\(\[\{ label: board\.projectName, href: '\/projects' \}, \{ label: view === 'board' \? 'Board' : 'List' \}\]\)/);
   assert.match(body('drawWaiting'), /putTrail\(\[\{ label: 'Waiting on you' \}\]\)/);
   assert.match(body('drawProjects'), /putTrail\(\[\{ label: 'Projects' \}\]\)/);
-  assert.match(body('drawNew'), /putTrail\(\[\{ label: 'New request' \}\]\)/);
   // Each trail goes in after its page is drawn, so it sits first in main.
   assert.match(app, /main\.insertAdjacentHTML\('afterbegin', renderTrail\(steps\)\)/);
   assert.doesNotMatch(/function drawSignIn[\s\S]*?\n\}/.exec(app)[0], /putTrail/, 'no trail on the sign-in screen');

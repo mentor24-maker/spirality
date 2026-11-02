@@ -3,7 +3,8 @@
  * on you, open a ticket, answer it, change its priority, tags, assignee,
  * status, name or description (a person only), pick a project, see that project's
  * whole queue as a board or as a list, see one project's details, add,
- * change or delete a project (a person only), file a new request, copy a ticket into another
+ * change or delete a project (a person only), file a new request from the
+ * Tasks page's Add Task box, copy a ticket into another
  * project, choose a colour for each stage on the Settings page, and read the
  * Reporting page's figures. Plain browser
  * JavaScript, no packages,
@@ -34,7 +35,7 @@ const VIEW_KEY = 'tracker-view';
 const PROJECT_KEY = 'tracker-project';
 /** The selected project's name, shown in the header beside the person signed in. */
 const PROJECT_NAME_KEY = 'tracker-project-name';
-/** The New request form's text while it is being typed, so a sign-out or a reload does not lose it. */
+/** The Add Task box's text while it is being typed, so a sign-out or a reload does not lose it. */
 const DRAFT_KEY = 'tracker-request-draft';
 const main = document.getElementById('main');
 const who = document.getElementById('who');
@@ -565,7 +566,7 @@ async function drawEditProject(slug) {
  * "Tasks" in the header: the selected project, in the view last used. With
  * none selected, or one that no longer exists, the first project.
  */
-async function drawTasks(view) {
+async function drawTasks(view, opts = {}) {
   const { projects } = await api('GET', '/projects');
   if (!projects.length) {
     setTitle('Tasks · Tracker');
@@ -575,7 +576,7 @@ async function drawTasks(view) {
   }
   const slug = projects.some((p) => p.slug === savedProject()) ? savedProject() : projects[0].slug;
   history.replaceState(null, '', `/${view}/${encodeURIComponent(slug)}`);
-  await drawProject(slug, view);
+  await drawProject(slug, view, opts);
 }
 
 /**
@@ -598,8 +599,12 @@ async function drawTasks(view) {
  * on as properties after drawing, never as markup (the page allows no inline
  * style), and a stage with none, or colours that cannot be read, looks as
  * it always did.
+ *
+ * Above the stages sits the Add Task box (wireAddTask), closed unless
+ * `adding` asks for it open or a kept draft has text in it. `filed` is the
+ * id of the ticket the box just filed, named in a note after the redraw.
  */
-async function drawProject(slug, view) {
+async function drawProject(slug, view, { adding = false, filed = null } = {}) {
   const [board, looks] = await Promise.all([
     api('GET', `/projects/${encodeURIComponent(slug)}/board`),
     api('GET', '/stage-colours').then(stageLooks, () => ({})),
@@ -657,6 +662,17 @@ async function drawProject(slug, view) {
       <a href="/projects">Change project</a>
       <nav class="views" aria-label="View">${toggle}</nav>
     </div>
+    ${filed ? `<p class="filed-note">Filed <a href="/t/${encodeURIComponent(filed)}">${escapeHtml(filed)}</a></p>` : ''}
+    <details class="add-task">
+      <summary>Add Task</summary>
+      <form class="request">
+        <label for="title">Title</label>
+        <input id="title" type="text" required>
+        <label for="description">Description</label>
+        <textarea id="description"></textarea>
+        <div class="row"><button type="submit">File request</button><span class="note"></span></div>
+      </form>
+    </details>
     <p class="error list-note" role="alert" hidden></p>
     ${view === 'board'
     ? `<div class="board">${board.columns.map(column).join('')}</div>`
@@ -670,6 +686,7 @@ async function drawProject(slug, view) {
     el.style.setProperty('--stage-text', look.text);
   }
   putTrail([{ label: board.projectName, href: '/projects' }, { label: view === 'board' ? 'Board' : 'List' }]);
+  wireAddTask(board.project, view, adding);
   // Delete: ask first, naming the ticket; then redraw from the server. A
   // refusal is said in words and nothing leaves the list until a redraw.
   const listNote = main.querySelector('.list-note');
@@ -1035,57 +1052,39 @@ function wireEditPanel(t) {
   };
 }
 
-/** The draft kept for the New request form, or empty fields. */
+/** The draft kept for the Add Task box, or empty fields. */
 function savedDraft() {
   try {
     const d = JSON.parse(localStorage.getItem(DRAFT_KEY) ?? '{}');
-    return { project: String(d.project ?? ''), title: String(d.title ?? ''), description: String(d.description ?? '') };
-  } catch { return { project: '', title: '', description: '' }; }
+    return { title: String(d.title ?? ''), description: String(d.description ?? '') };
+  } catch { return { title: '', description: '' }; }
 }
 
 /**
- * The New request form: a project, a title and a description, filed into
- * `Requested`, which no loop builds from, unassigned and under the signed-in
- * person. The projects come from the server, and it starts on the one the
- * server's project config names. What he types is kept in this browser as
- * he types it, so a refused submit, a sign-out or a reload never loses it;
- * it is forgotten once the ticket is filed.
+ * The Tasks page's Add Task box: a title and a description, filed into
+ * `slug`, the project the page is showing, in `Requested`, which no loop
+ * builds from, unassigned and under the signed-in person. What he types is
+ * kept in this browser as he types it, so a refused submit, a sign-out or a
+ * reload never loses it, and a kept draft with text in it opens the box on
+ * its own; it is forgotten once the ticket is filed, and the page redraws
+ * with the box closed and the new ticket in its stage.
  */
-async function drawNew() {
-  const { projects, default: start } = await api('GET', '/projects');
-  setTitle('New request · Tracker');
-  if (!projects.length) {
-    main.innerHTML = '<h1>New request</h1><p class="quiet">There are no projects to file into yet.</p>';
-    putTrail([{ label: 'New request' }]);
-    return;
-  }
-  const draft = savedDraft();
-  const chosen = projects.some((p) => p.slug === draft.project) ? draft.project : (start ?? projects[0].slug);
-  main.innerHTML = `
-    <h1>New request</h1>
-    <form class="request">
-      <label for="project">Project</label>
-      <select id="project">${projects.map((p) => `<option value="${escapeHtml(p.slug)}"${p.slug === chosen ? ' selected' : ''}>${escapeHtml(p.name)}</option>`).join('')}</select>
-      <label for="title">Title</label>
-      <input id="title" type="text" required>
-      <label for="description">Description</label>
-      <textarea id="description"></textarea>
-      <div class="row"><button type="submit">File request</button><span class="note"></span></div>
-    </form>`;
-  putTrail([{ label: 'New request' }]);
-  const form = main.querySelector('form.request');
-  const project = form.querySelector('#project');
+function wireAddTask(slug, view, adding) {
+  const box = main.querySelector('details.add-task');
+  const form = box.querySelector('form.request');
   const title = form.querySelector('#title');
   const description = form.querySelector('#description');
+  const draft = savedDraft();
   title.value = draft.title;
   description.value = draft.description;
+  box.addEventListener('toggle', () => { if (box.open) title.focus(); });
+  if (adding || draft.title || draft.description) box.open = true;
   const keep = () => {
     try {
-      localStorage.setItem(DRAFT_KEY, JSON.stringify({ project: project.value, title: title.value, description: description.value }));
+      localStorage.setItem(DRAFT_KEY, JSON.stringify({ title: title.value, description: description.value }));
     } catch { /* the form still works; a sign-out would lose the text */ }
   };
   form.addEventListener('input', keep);
-  form.addEventListener('change', keep);
   const note = form.querySelector('.note');
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -1094,22 +1093,28 @@ async function drawNew() {
     button.disabled = true;
     note.className = 'note quiet';
     note.textContent = 'Filing…';
+    let ticket;
     try {
       // Exactly as typed: no trimming, no formatting, the same rule as the reply box.
-      const ticket = await api('POST', `/projects/${encodeURIComponent(project.value)}/tickets`, {
+      ticket = await api('POST', `/projects/${encodeURIComponent(slug)}/tickets`, {
         name: title.value, description: description.value, status: 'Requested',
       });
-      try { localStorage.removeItem(DRAFT_KEY); } catch { /* nothing kept */ }
-      history.pushState(null, '', `/t/${encodeURIComponent(ticket.id)}`);
-      await route();
     } catch (err) {
       if (err instanceof SignedOut) return drawSignIn('You were signed out; your request was not filed. What you typed is kept: it will be back in the form once you sign in.');
       note.className = 'note error';
       note.textContent = `Not filed: ${err.message}`;
       button.disabled = false;
+      return;
+    }
+    try { localStorage.removeItem(DRAFT_KEY); } catch { /* nothing kept */ }
+    try {
+      await drawProject(slug, view, { filed: ticket.id });
+    } catch (err) {
+      if (err instanceof SignedOut) return drawSignIn(`You were signed out; ${ticket.id} was filed.`);
+      note.className = 'note error';
+      note.textContent = `Filed ${ticket.id}, but the page could not be drawn again: ${err.message}`;
     }
   });
-  title.focus();
 }
 
 /**
@@ -1249,7 +1254,7 @@ async function route() {
     const isNew = location.pathname === '/new';
     const settings = location.pathname === '/settings';
     const reporting = location.pathname === '/reporting';
-    markNav(reporting ? 'reporting' : settings ? 'settings' : isNew ? 'new' : projects || newProject || details || editProject ? 'projects' : ticket || project || tasks ? 'tasks' : 'waiting');
+    markNav(reporting ? 'reporting' : settings ? 'settings' : projects || newProject || details || editProject ? 'projects' : ticket || project || tasks || isNew ? 'tasks' : 'waiting');
     if (reporting) {
       await drawReporting();
       await refreshCount();
@@ -1257,7 +1262,8 @@ async function route() {
       await drawSettings();
       await refreshCount();
     } else if (isNew) {
-      await drawNew();
+      // The old New request address: the Tasks page with its Add Task box open.
+      await drawTasks(savedView(), { adding: true });
       await refreshCount();
     } else if (ticket) {
       await drawTicket(decodeURIComponent(ticket[1]));
