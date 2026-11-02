@@ -384,6 +384,29 @@ export function cardMove(body) {
   return m ? m[1][0].toUpperCase() + m[1].slice(1).toLowerCase() : null;
 }
 
+/** The short note beside the status of a ticket whose answer is in (SP-93). */
+export const ANSWER_IN_NOTE = 'your answer is in';
+
+/**
+ * A ticket's status as the page writes it, with ANSWER_IN_NOTE after it
+ * when his answer is in: "Ready to launch · your answer is in". Plain text.
+ */
+export function statusLabel({ status, answerIn = false }) {
+  const name = String(status ?? '').replace(/^./, (c) => c.toUpperCase());
+  return answerIn ? `${name} · ${ANSWER_IN_NOTE}` : name;
+}
+
+/**
+ * The one line that stands in for the Merge, Close and Go buttons once his
+ * answer is in (the server's `answerIn`), as HTML, or ''. The buttons stay
+ * away until the relay answers: its comment becomes the newest, and the
+ * server stops saying so. No minutes are spelled out; the relay's interval
+ * lives in the installer.
+ */
+export function renderAnswerIn({ answerIn = false }) {
+  return answerIn ? '<p class="answer-in">Your answer is in. The relay acts on it at its next pass.</p>' : '';
+}
+
 /**
  * The Merge button for a ticket page's Quick Action section, as HTML, or ''.
  * Shown only on a Ready to launch ticket with a pull request of its own
@@ -391,9 +414,10 @@ export function cardMove(body) {
  * name another move, and only when the server named a merge phrase. The
  * phrase comes from the server (the project config's first mergePhrases
  * entry); the button posts it as his reply and the relay does the merge,
- * exactly as if he had typed it.
+ * exactly as if he had typed it. Never once his answer is in (renderAnswerIn).
  */
-export function renderMergeAction({ status, mergePhrase, pullRequest, comments = [] }) {
+export function renderMergeAction({ status, mergePhrase, pullRequest, comments = [], answerIn = false }) {
+  if (answerIn) return '';
   if (String(status ?? '').toLowerCase() !== READY_TO_LAUNCH || !mergePhrase || !pullRequest) return '';
   const card = newestCard(comments);
   const move = card ? cardMove(card.body) : null;
@@ -416,8 +440,10 @@ export function mergeQuestion({ name, pullRequest }) {
  * statuses whose newest card's move is Close, when the server named a close
  * word (the relay's own close list, lib/busRelayPlan.js). Like Merge, it
  * only posts his word as a reply; the relay decides and moves the ticket.
+ * Never once his answer is in (renderAnswerIn).
  */
-export function renderCloseAction({ status, closePhrase, comments = [] }) {
+export function renderCloseAction({ status, closePhrase, comments = [], answerIn = false }) {
+  if (answerIn) return '';
   if (!HIS_STATUSES.includes(String(status ?? '').toLowerCase()) || !closePhrase) return '';
   const card = newestCard(comments);
   if (!card || cardMove(card.body) !== 'Close') return '';
@@ -442,9 +468,11 @@ export function closeQuestion({ name }) {
  * newest card's move is Reply and whose ask offers the go word in quotes
  * (every card loop-intake posts), when the server named that word
  * (GO_PHRASE in lib/busRelayPlan.js). Like Merge and Close, it only posts
- * his word as a reply; any reply to an intake card queues it.
+ * his word as a reply; any reply to an intake card queues it. Never once
+ * his answer is in (renderAnswerIn).
  */
-export function renderGoAction({ status, goPhrase, comments = [] }) {
+export function renderGoAction({ status, goPhrase, comments = [], answerIn = false }) {
+  if (answerIn) return '';
   if (String(status ?? '').toLowerCase() !== NEEDS_YOUR_INPUT || !goPhrase) return '';
   const card = newestCard(comments);
   if (!card || cardMove(card.body) !== 'Reply') return '';
