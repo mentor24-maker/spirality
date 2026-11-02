@@ -26,8 +26,9 @@ import { loadProjectConfig } from '../lib/projectConfig.mjs';
 const DEMO_EMAIL = 'operator@example.com';
 
 const dir = mkdtempSync(join(tmpdir(), 'tracker-demo-'));
-const store = openStore(join(dir, 'tracker.db'), { now: tickingClock(Date.now() - 60 * 60_000) });
-const { operator } = seedDemo(store);
+const clock = tickingClock(Date.now() - 60 * 60_000);
+const store = openStore(join(dir, 'tracker.db'), { now: clock });
+const { operator } = seedDemo(store, { clock });
 const password = randomBytes(9).toString('base64url');
 store.setEmail(operator.id, DEMO_EMAIL);
 store.setPassword(operator.id, password);

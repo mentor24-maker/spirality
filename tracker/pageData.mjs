@@ -1,7 +1,8 @@
 /**
  * The data behind Dane's page (docs/TRACKER_MVP.md, "Dane's page"): what
  * waits on him, one ticket's thread with each comment's author named, the
- * projects, one project's details, and one project's board.
+ * projects, one project's details, one project's board, and the Reporting
+ * page's figures.
  *
  * The page never decides anything itself. "Is this waiting on him?" is the
  * loop's own verdict, lib/waitingOnOperator.js, the same module `npm run
@@ -19,7 +20,7 @@ import { compareWithinStatus } from '../scripts/lib/loopStatuses.mjs';
 
 const { OPERATOR_LANE, WAITING, CANNOT_TELL, waitingVerdict } = waitingOnOperator;
 const { isMachineComment, stripMachineMarker } = machineComment;
-const { STAGE_ORDER, statusOf } = loopStatuses;
+const { STAGE_ORDER, LIVE, TERMINAL_STATUSES, statusOf } = loopStatuses;
 const { findPullRequest } = mergeOnComment;
 
 /**
@@ -221,4 +222,79 @@ export function boardOf(store, slug) {
 export function stageColoursOf(store) {
   const colours = store.stageColours();
   return { stages: STAGE_ORDER.map((name) => ({ status: name, colour: colours[statusOf(name)] ?? null })) };
+}
+
+/** The Reporting page's time ranges, newest first; `days: null` is all time. */
+export const REPORT_RANGES = Object.freeze([
+  Object.freeze({ key: 'week', label: 'Last 7 days', days: 7 }),
+  Object.freeze({ key: 'month', label: 'Last 30 days', days: 30 }),
+  Object.freeze({ key: 'all', label: 'All time', days: null }),
+]);
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * When a ticket last entered Live, from its history: the newest event that
+ * moved its status to Live (or filed it there). Null when it is not Live
+ * now, so a ticket moved to Live and back out counts nowhere, and one moved
+ * there twice counts once, at its latest move. A ticket that arrived already
+ * Live (an import from ClickUp) has only its filing event, at its original
+ * time, to go by.
+ */
+function finishedAt(store, ticket) {
+  if (ticket.status !== LIVE) return null;
+  let at = null;
+  for (const e of store.listEvents(ticket.id)) {
+    if ((e.field === 'status' || e.field === 'created') && e.to === LIVE) at = e.at;
+  }
+  return at;
+}
+
+/**
+ * The Reporting page's figures for one project (`project`, a slug) or, with
+ * none, every project:
+ *  - finished: how many tickets entered Live in each REPORT_RANGES range,
+ *    by their latest move there (finishedAt);
+ *  - started: how many tickets were filed in each range;
+ *  - open: a count for every stage that is not terminal (not Live), in the
+ *    contract's STAGE_ORDER, with the colour chosen for it in Settings (or
+ *    null).
+ * A range counts what happened in the last `days` days before `now`.
+ * Null when `project` names no project.
+ */
+export function reportsOf(store, { project = null, now = Date.now() } = {}) {
+  let projects = store.listProjects();
+  if (project != null) {
+    projects = projects.filter((p) => p.slug === project);
+    if (!projects.length) return null;
+  }
+  const zero = () => Object.fromEntries(REPORT_RANGES.map((r) => [r.key, 0]));
+  const finished = zero();
+  const started = zero();
+  const tally = (counts, at) => {
+    const when = Date.parse(at);
+    if (Number.isNaN(when)) return;
+    for (const r of REPORT_RANGES) {
+      if (r.days == null || (when > now - r.days * DAY_MS && when <= now)) counts[r.key] += 1;
+    }
+  };
+  const colours = store.stageColours();
+  const openStages = STAGE_ORDER.filter((name) => !TERMINAL_STATUSES.includes(statusOf(name)));
+  const open = new Map(openStages.map((name) => [statusOf(name), 0]));
+  for (const p of projects) {
+    for (const ticket of store.listTickets(p.slug)) {
+      tally(started, ticket.createdAt);
+      const done = finishedAt(store, ticket);
+      if (done) tally(finished, done);
+      if (open.has(ticket.status)) open.set(ticket.status, open.get(ticket.status) + 1);
+    }
+  }
+  return {
+    project: project == null ? null : projects[0].slug,
+    projectName: project == null ? null : projects[0].name,
+    ranges: REPORT_RANGES.map(({ key, label }) => ({ key, label })),
+    finished,
+    started,
+    open: openStages.map((name) => ({ status: name, count: open.get(statusOf(name)), colour: colours[statusOf(name)] ?? null })),
+  };
 }
