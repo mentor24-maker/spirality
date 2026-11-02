@@ -670,3 +670,64 @@ export function renderForgot(email = '') {
       <p class="note"></p>
     </form>`;
 }
+
+/** Characters with a meaning in a regular expression, so a search term is matched as typed. */
+const REGEXP_SPECIAL = /[.*+?^${}()|[\]\\]/g;
+
+/**
+ * A search term as a pattern: the whole term as one phrase, as typed,
+ * ignoring upper and lower case. Null for an empty term. The server's search
+ * (tracker/pageData.mjs searchTickets) and the bolding below both use it, so
+ * what is found and what is bolded cannot differ.
+ */
+export function searchPattern(term, flags = '') {
+  const text = String(term ?? '').trim();
+  if (!text) return null;
+  return new RegExp(text.replace(REGEXP_SPECIAL, '\\$&'), `iu${flags}`);
+}
+
+/**
+ * Text with every occurrence of `term` in bold, safe for the page. The raw
+ * text is split at each match first, each piece escaped, and only then the
+ * `<b>` added, so a ticket's own text can never inject markup, and a term
+ * that happens to spell part of an escape (`amp`) never breaks one.
+ */
+export function boldMatches(text, term) {
+  const raw = String(text ?? '');
+  const pattern = searchPattern(term, 'g');
+  if (!pattern) return escapeHtml(raw);
+  let out = '';
+  let at = 0;
+  for (const m of raw.matchAll(pattern)) {
+    out += `${escapeHtml(raw.slice(at, m.index))}<b>${escapeHtml(m[0])}</b>`;
+    at = m.index + m[0].length;
+  }
+  return out + escapeHtml(raw.slice(at));
+}
+
+/** Where an excerpt was found, in the words the results page says it. */
+const PLACE_WORDS = Object.freeze({
+  description: 'in the description',
+  discussion: 'in the discussion',
+  development: 'in the development',
+});
+
+/**
+ * The search results page's list, from the server's answer
+ * (`{ query, results }`): one plain line for an empty search or one with no
+ * matches; otherwise each ticket with its id, its title as a link to its
+ * page, its project and status, and its excerpt with the place it was
+ * found, the term bold in title and excerpt.
+ */
+export function renderSearchResults({ query, results = [] }) {
+  const term = String(query ?? '').trim();
+  if (!term) return '<p class="quiet search-note">Type a word to search every task.</p>';
+  if (!results.length) return `<p class="quiet search-note">No tickets match ${escapeHtml(term)}</p>`;
+  const item = (r) => `
+    <li>
+      <p class="result-head"><span class="quiet">${escapeHtml(r.id)}</span> <a href="/t/${encodeURIComponent(r.id)}">${boldMatches(r.name, term)}</a></p>
+      <p class="quiet">${escapeHtml(r.projectName)} · ${escapeHtml(r.status)}</p>
+      ${r.excerpt ? `<p class="excerpt">${boldMatches(r.excerpt, term)} <span class="quiet">${escapeHtml(PLACE_WORDS[r.place] ?? '')}</span></p>` : ''}
+    </li>`;
+  return `<ol class="search-results">${results.map(item).join('')}</ol>`;
+}
