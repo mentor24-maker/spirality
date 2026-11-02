@@ -15,7 +15,10 @@
  *   404  an unknown project, ticket or address
  *   409  a guarded move found the ticket moved: `{ error, status, version }`,
  *        or a delete found the ticket started: `{ error: 'not-deletable', status }`,
- *        or a project delete found it holds tickets: `{ error: 'has-tickets', tickets }`
+ *        or a project delete found it holds tickets: `{ error: 'has-tickets', tickets }`,
+ *        or an invite's email already has an account or an open invite
+ *   502  an invite whose email did not go out (no invite is left open)
+ *   503  an invite with no mail sender or no tracker address (nothing made)
  *   400  a bad field, or a body that names another author
  *   403  a write only a person may make, asked by a loop's token
  * A refused write writes nothing. A token never appears in an answer or a
@@ -50,7 +53,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { openStore, StoreError } from './store.mjs';
 import { boardOf, projectDetailsOf, projectsList, reportsOf, stageColoursOf, threadOf, waitingFor } from './pageData.mjs';
 import { createNotifier, DEFAULT_FROM, MAIL_FROM, MAIL_KEY, mailEnvFromDoppler, mailSettingsFromEnv, resendSender } from './notify.mjs';
-import { sendResetLink } from './account.mjs';
+import { sendInvite, sendResetLink } from './account.mjs';
 import { loadProjectConfig } from '../lib/projectConfig.mjs';
 import busRelayPlan from '../lib/busRelayPlan.js';
 import loopStatuses from '../lib/loopStatuses.js';
@@ -78,7 +81,10 @@ const NO_MATCH = 'That email and password do not match.';
 const MAX_BODY = 1024 * 1024;
 
 /** Store refusals that mean "no such thing", answered 404 rather than 400. */
-const NOT_FOUND_CODES = new Set(['unknown-ticket', 'unknown-project']);
+const NOT_FOUND_CODES = new Set(['unknown-ticket', 'unknown-project', 'unknown-invite']);
+
+/** The HTTP status each refused invite answers with (tracker/account.mjs sendInvite); any other is 400. */
+const INVITE_REFUSALS = Object.freeze({ 'duplicate-email': 409, 'duplicate-invite': 409, 'no-mail': 503, 'no-address': 503, 'not-sent': 502 });
 
 /** The fields a new ticket may carry. */
 const FILE_FIELDS = Object.freeze(['name', 'description', 'status', 'priority', 'tags', 'assignee', 'loopNote']);
@@ -122,7 +128,7 @@ const PRIORITIES = Object.freeze(Object.keys(loopStatuses.PRIORITY_RANK)
  * form), `/settings` (the stage colours) and `/set-password` (an emailed
  * link's page, `?link=<token>`, which the page reads and never sends back
  * in an address) all answer the page itself, so each address opens its own view;
- * `/projects` and `/projects/<project>` do too, for a browser opening them,
+ * `/projects`, `/projects/<project>` and `/people` do too, for a browser opening them,
  * and `/projects/<project>/edit` (the Edit project form) always does.
  */
 const WEB_DIR = new URL('./web/', import.meta.url);
@@ -157,7 +163,7 @@ const PAGE_HEADERS = Object.freeze({
  * gets the page; the page's own call asks for anything and gets the data.
  */
 function pageFile(pathname, accept = '') {
-  if (/^\/projects(?:\/[^/]+)?$/.test(pathname)) return /\btext\/html\b/.test(accept) ? 'index.html' : null;
+  if (/^\/(?:projects(?:\/[^/]+)?|people)$/.test(pathname)) return /\btext\/html\b/.test(accept) ? 'index.html' : null;
   if (pathname === '/' || /^\/(?:tasks|board|list|new|settings|set-password|reporting)$/.test(pathname) || /^\/(?:t|board|list)\/[^/]+$/.test(pathname)) return 'index.html';
   if (/^\/projects\/[^/]+\/edit$/.test(pathname)) return 'index.html';
   const m = /^\/web\/([^/]+)$/.exec(pathname);
@@ -307,8 +313,9 @@ function flag(value) {
  * Merge button; the reply box still takes the word typed by hand.
  * `closePhrase` is the word the Close button posts (CLOSE_PHRASE below,
  * the relay's own close list). Null means no Close button.
- * `accountMail` sends the "Forgot password?" email: `{ send, pageUrl,
- * productName }`, the reset link opening under `pageUrl`. Null (or no
+ * `accountMail` sends the "Forgot password?" and invite emails: `{ send,
+ * pageUrl, productName }`, each link opening under `pageUrl`. With no
+ * `send`, an invite is refused and nothing is made. Null (or no
  * `send`) means no reset email goes out; the page's answer is the same,
  * and the log says why. `now` is the clock the sign-in failure count reads.
  */
@@ -321,6 +328,14 @@ export const CLOSE_PHRASE = busRelayPlan.CLOSE_PHRASES[0];
 
 export function createHandler(store, { log = () => {}, notifier = null, defaultProject = null, mergePhrase = null, closePhrase = null, accountMail = null, now = Date.now } = {}) {
   const failures = failureCounter(now);
+
+  /** The People page's data: each person with their email, and the open invites. */
+  function peopleOf() {
+    return {
+      people: store.listPeople().map((p) => ({ ...p, email: store.emailOf(p.id) })),
+      invites: store.listInvites(),
+    };
+  }
 
   function requireProject(slug) {
     const project = store.getProject(slug);
@@ -389,9 +404,39 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     }
 
     // Dane's page: the people in the tracker, for the Create Project form's
-    // owner picker. Names and ids only; never a machine, never a token.
+    // owner picker, and the People page. A person also sees each one's email
+    // and the open invites; a loop sees names and ids only. Never a machine,
+    // never a token or a hash.
     if (parts.length === 1 && parts[0] === 'people' && method === 'GET') {
-      return [200, { people: store.listPeople() }];
+      return [200, me.kind === 'human' ? peopleOf() : { people: store.listPeople() }];
+    }
+
+    // Dane's page: the People page's "Invite someone". Only a person may
+    // invite; the invite is made only if its email goes out.
+    if (parts.length === 1 && parts[0] === 'invites' && method === 'POST') {
+      if (me.kind !== 'human') {
+        throw new HttpError(403, 'people-only', 'only a person signed in to the tracker may invite someone; a machine may not.');
+      }
+      const body = await readJson(req);
+      checkBody(body, me, ['email']);
+      if (typeof body.email !== 'string' || !body.email.trim()) throw new HttpError(400, 'missing', 'type the email to invite.');
+      const result = await sendInvite({
+        store, email: body.email, madeBy: me.id, send: accountMail?.send ?? null,
+        trackerUrl: accountMail?.pageUrl ?? null, productName: accountMail?.productName ?? 'tracker',
+      });
+      log(result.ok ? `invite sent actor=${me.id}` : `invite NOT sent (${result.code}) actor=${me.id}`);
+      if (!result.ok) throw new HttpError(INVITE_REFUSALS[result.code] ?? 400, result.code, result.line);
+      return [201, { sent: result.line, ...peopleOf() }];
+    }
+
+    // Dane's page: the People page's Cancel button on an open invite.
+    if (parts.length === 2 && parts[0] === 'invites' && method === 'DELETE') {
+      if (me.kind !== 'human') {
+        throw new HttpError(403, 'people-only', 'only a person signed in to the tracker may cancel an invite; a machine may not.');
+      }
+      const r = store.cancelInvite(/^[0-9]+$/.test(parts[1]) ? Number(parts[1]) : parts[1]);
+      log(`cancelled invite ${r.cancelled} actor=${me.id}`);
+      return [200, r];
     }
 
     // Dane's page: the Settings page's stage colours. Anyone signed in reads

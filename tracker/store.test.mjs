@@ -867,6 +867,49 @@ test('an invite link makes a new person with its email, the name given and the p
   } finally { cleanup(); }
 });
 
+test('open invites: one per email, listed with who invited and when it expires, cancelled for good; never a token or hash', () => {
+  const { store, person, advance, cleanup } = accountsFixture();
+  try {
+    assert.deepEqual(store.listInvites(), []);
+    const first = store.makeLink({ purpose: 'invite', email: 'New@Example.com', madeBy: person.id });
+    assert.throws(() => store.makeLink({ purpose: 'invite', email: 'new@example.com', madeBy: person.id }), { code: 'duplicate-invite' });
+    advance(HOUR);
+    const second = store.makeLink({ purpose: 'invite', email: 'other@example.com', madeBy: person.id });
+    const listed = store.listInvites();
+    assert.deepEqual(listed.map(({ id, ...rest }) => rest), [
+      { email: 'new@example.com', invitedBy: { id: person.id, name: 'Person' }, createdAt: '2026-11-01T12:00:00.000Z', expiresAt: '2026-11-08T12:00:00.000Z' },
+      { email: 'other@example.com', invitedBy: { id: person.id, name: 'Person' }, createdAt: '2026-11-01T13:00:00.000Z', expiresAt: '2026-11-08T13:00:00.000Z' },
+    ]);
+    const text = JSON.stringify(listed);
+    for (const secret of [first.token, second.token]) assert.ok(!text.includes(secret));
+    assert.ok(!/[0-9a-f]{64}/.test(text), 'no hash');
+
+    assert.deepEqual(store.cancelInvite(listed[0].id), { cancelled: listed[0].id });
+    assert.throws(() => store.useLink({ token: first.token, password: 'a long password', name: 'Late' }), { code: 'unknown-link' });
+    assert.throws(() => store.cancelInvite(listed[0].id), { code: 'unknown-invite' });
+    assert.throws(() => store.cancelInvite('1'), { code: 'unknown-invite' });
+    assert.deepEqual(store.listInvites().map((i) => i.email), ['other@example.com']);
+    // Cancelled, the email may be invited again.
+    store.makeLink({ purpose: 'invite', email: 'new@example.com', madeBy: person.id });
+
+    // A used invite is not open and cannot be cancelled; it stays as the record.
+    store.useLink({ token: second.token, password: 'a long password', name: 'Other' });
+    assert.deepEqual(store.listInvites().map((i) => i.email), ['new@example.com']);
+    assert.throws(() => store.cancelInvite(listed[1].id), { code: 'unknown-invite' });
+
+    // An expired invite is not open: it is not listed, and the email may be invited again.
+    advance(7 * DAY);
+    assert.deepEqual(store.listInvites(), []);
+    store.makeLink({ purpose: 'invite', email: 'new@example.com', madeBy: person.id });
+    assert.equal(store.listInvites().length, 1);
+    // Setup and reset links are never invites.
+    store.setEmail(person.id, 'p@example.com');
+    const reset = store.makeLink({ purpose: 'reset', email: 'p@example.com' });
+    assert.equal(store.listInvites().length, 1);
+    assert.ok(store.cancelLink(reset.token));
+  } finally { cleanup(); }
+});
+
 test('a reset link sets a new password, once, and ends every session that person had', () => {
   const { store, person, cleanup } = accountsFixture();
   try {

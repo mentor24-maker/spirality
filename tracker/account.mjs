@@ -98,6 +98,61 @@ export async function sendResetLink({ store, email, send, trackerUrl, productNam
   return { ok: true, line: `reset link sent to actor ${person.id}, good for 1 hour` };
 }
 
+/** The invite email: `{ subject, text }`. `link` is the whole set-password address. */
+export function inviteEmail({ inviter, productName, link, days }) {
+  return {
+    subject: `${inviter} invited you to the ${productName} tracker`,
+    text: [
+      'Hello,',
+      '',
+      `${inviter} invited you to the ${productName} tracker. Here is your link to choose your name and a password:`,
+      '',
+      link,
+      '',
+      `It works once, for the next ${days} days. If you did not expect this email, ignore it: no account is made until the link is used.`,
+      '',
+    ].join('\n'),
+  };
+}
+
+/**
+ * The People page's "Invite someone": make a 7-day `invite` link for
+ * `email`, made by the person `madeBy`, and send it. Refused, with nothing
+ * made or sent: an email a person holds (`duplicate-email`) or with an open
+ * invite (`duplicate-invite`), no mail sender (`no-mail`), no tracker
+ * address (`no-address`). A send the mail service refuses withdraws the
+ * link (`not-sent`), so no open invite is left. Answers `{ ok, code, line }`;
+ * the line never carries the link's token. The mail handed to `send` also
+ * carries `kind: 'invite'` and the `link`, for the demo to print; Resend
+ * reads only `to`, `subject` and `text`.
+ */
+export async function sendInvite({ store, email, madeBy, send, trackerUrl, productName, now = Date.now }) {
+  const refuse = (code, why) => ({ ok: false, code, line: `Not invited: ${why} Nothing was made or sent.` });
+  const inviter = Number.isInteger(madeBy) ? store.getActor(madeBy) : null;
+  if (!inviter || inviter.kind !== 'human') return refuse('people-only', 'only a person may invite someone.');
+  if (!send) return refuse('no-mail', `${MAIL_KEY} is not in Doppler, so no email can go out.`);
+  if (!trackerUrl) return refuse('no-address', "the tracker's own address is unknown, so the link would have no address.");
+  let link;
+  try {
+    link = store.makeLink({ purpose: 'invite', email, madeBy: inviter.id });
+  } catch (err) {
+    if (err instanceof StoreError) return refuse(err.code, err.message);
+    throw err;
+  }
+  const scrub = (text) => String(text ?? '').split(link.token).join('[link]');
+  const days = Math.round((Date.parse(link.expiresAt) - now()) / DAY);
+  const to = email.trim().toLowerCase();
+  const address = setPasswordUrl(trackerUrl, link.token);
+  try {
+    await send({ to, ...inviteEmail({ inviter: inviter.name, productName, link: address, days }), kind: 'invite', link: address });
+  } catch (err) {
+    let withdrawn = 'The invite was withdrawn, so nothing usable is left.';
+    try { store.cancelLink(link.token); } catch (e) { withdrawn = `The invite could NOT be withdrawn (${scrub(e.message)}); it was never sent, so nobody holds it.`; }
+    return { ok: false, code: 'not-sent', line: `Not invited: the email to ${to} did not go out (${scrub(err?.message ?? err)}). ${withdrawn}` };
+  }
+  return { ok: true, code: null, line: `Invite sent to ${to}, good for ${days} days.` };
+}
+
 /** The set-password page's address for a link token, under the tracker's address. */
 export function setPasswordUrl(trackerUrl, token) {
   return `${String(trackerUrl).replace(/\/+$/, '')}/set-password?link=${encodeURIComponent(token)}`;

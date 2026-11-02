@@ -175,7 +175,9 @@ answers are JSON (structured text programs read).
 | `POST /projects` | for Dane's page: add a project (`{ name, slug, prefix, url?, logo?, owner? }`), answered with its details read back; **a person's token only**: a machine's gets 403 and nothing is written. A duplicate slug or prefix, a slug that is not small letters, digits and hyphens (or is `new`), an owner who is not a person, or an address that is not http(s) gets 400 |
 | `PATCH /projects/:slug` | for Dane's page: change a project's name, web address, logo or owner (`{ name?, url?, logo?, owner? }`), answered with its details read back; **a person's token only**: a machine's gets 403 and nothing is written. The slug and ticket prefix never change (every ticket's id and its project link are built from them): naming either gets 400 `not-changeable`; an owner who is not a person or an address that is not http(s) gets 400; an unknown slug 404 |
 | `DELETE /projects/:slug` | for Dane's page: delete a project that has no tickets; **a person's token only**: a machine's gets 403. One with tickets gets 409 `has-tickets` (`"SP has 48 tickets; a project with tickets cannot be deleted"`) and nothing is removed; the count and the delete are one transaction; the server log names the project and the actor |
-| `GET /people` | for Dane's page: the tracker's people (humans only) by id and name, for the owner picker; never a token |
+| `GET /people` | for Dane's page: the tracker's people (humans only), for the owner picker and the People page. A person's token gets `{ people: [{ id, name, email }], invites: [{ id, email, invitedBy: { id, name }, createdAt, expiresAt }] }`, the invites being the open ones (unused, unexpired); a machine's gets ids and names only. Never a token or a hash |
+| `POST /invites` | for the People page: invite someone (`{ email }`); **a person's token only**: a machine's gets 403 `people-only`. An email a person holds is 409 `duplicate-email`, one with an open invite 409 `duplicate-invite`, no mail sender 503 `no-mail`; otherwise a 7-day `invite` link is made and emailed through Resend, naming who invited them. A send Resend refuses withdraws the link and answers 502 `not-sent`, so no open invite is left. Answered 201 with `{ sent }` and the People page's lists read back; the log names the actor, never the email or the link |
+| `DELETE /invites/:id` | for the People page: cancel an open invite, so its link is refused as unknown; **a person's token only**. An id that is not an open invite is 404 `unknown-invite`; a used invite stays as the record |
 | `GET /projects/:slug` | for Dane's page: one project's details, its operator and owner by name, its web address and logo, its open count and a count per status; 404 for an unknown slug |
 | `GET /projects/:slug/board` | for Dane's page: one project's tickets in the eight statuses, each in `queue` order |
 | `POST /account/link` | **no token**: what an emailed link is for (`{ link }` → `{ purpose, email, expiresAt }`), for the set-password page; a used, expired or unknown link answers 400 `used-link`, `expired-link` or `unknown-link` |
@@ -233,7 +235,15 @@ was typed. Each row also gives a person an **Edit** icon, opening
 prefix shown but locked), and a **Delete** icon, which asks "Delete
 <name>?" and then reads the table again; a project with tickets is refused
 with the server's reason and stays. A loop's sign-in sees neither icon.
-A browser opening `/projects` or `/projects/<slug>` gets the page; the page's own
+**People** in the header opens `/people`: everyone with an account (name
+and email), the open invites (email, who invited, when it expires) each
+with a **Cancel** button, and an **Invite someone** form that emails a
+7-day link. A refused invite (a taken email, a second invite, an email that
+did not go out) shows the server's reason and makes nothing; after an
+invite or a cancel the page reads the lists again and says it worked only
+when they agree. A loop's sign-in sees the names alone. There are no roles:
+every person signed in may invite (Dane's decision).
+A browser opening `/projects`, `/projects/<slug>` or `/people` gets the page; the page's own
 call to the same address gets the data. `node tracker/demo.mjs` starts a throwaway tracker
 with test data to try it.
 
@@ -468,7 +478,18 @@ Resend's shared sender delivers only to the Resend account's own address
 until a domain is set up there, so for now this reaches Dane and nobody
 else. `node tracker/demo.mjs` prints a throwaway email and password to sign
 in with and a set-password link for the test operator, for trying the page;
-its "Forgot password?" prints the reset email instead of sending it.
+its "Forgot password?" prints the reset email instead of sending it, and
+an invite from its People page prints the invite email and then
+`Invite link for <email>: <link>`.
+
+**Inviting someone new.** A person signed in invites them from the People
+page (`POST /invites` above). The email, titled "<inviter> invited you to
+the <project name> tracker", carries a 7-day `invite` link to the same
+set-password page, which asks for their name as well as a password; once
+saved they sign in like anyone else. Nobody can register without an
+invite. Until Resend has a domain set up, its shared sender delivers only
+to the Resend account's own address, so an invite to anyone else is refused
+by Resend: the page says the email did not go out, and no invite is left.
 
 ### Checking it
 

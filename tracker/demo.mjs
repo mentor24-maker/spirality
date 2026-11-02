@@ -8,8 +8,9 @@
  * it from tracker/demoData.mjs, starts the server on a free port and prints
  * the address, the test operator's email and a fresh password to sign in
  * with, and a set-password link for the operator, as the setup email would
- * carry. "Forgot password?" sends nothing: the reset email is printed here
- * instead. All of it is for this throwaway store only and dies with it.
+ * carry. "Forgot password?" and the People page's invites send nothing:
+ * each email is printed here instead, an invite with its link on a line of
+ * its own (`Invite link for <email>: <link>`). All of it is for this throwaway store only and dies with it.
  * Ctrl-C stops it and deletes the folder.
  */
 import { randomBytes } from 'node:crypto';
@@ -32,8 +33,15 @@ const { operator } = seedDemo(store, { clock });
 const password = randomBytes(9).toString('base64url');
 store.setEmail(operator.id, DEMO_EMAIL);
 store.setPassword(operator.id, password);
-/** The reset email, printed rather than sent: the demo's email address is an example one. */
-const printEmail = async ({ to, subject, text }) => console.log(`\n--- email to ${to} (printed, not sent) ---\nSubject: ${subject}\n\n${text}--- end of email ---\n`);
+/**
+ * The reset and invite emails, printed rather than sent: the demo's email
+ * addresses are example ones. An invite's link is also printed on a line
+ * of its own, to open in a private window.
+ */
+const printEmail = async ({ to, subject, text, kind, link }) => {
+  console.log(`\n--- email to ${to} (printed, not sent) ---\nSubject: ${subject}\n\n${text}--- end of email ---\n`);
+  if (kind === 'invite') console.log(`Invite link for ${to}: ${link}\n`);
+};
 const port = Number(process.env.TRACKER_PORT ?? 0);
 // The Merge button posts the project config's first merge phrase, as on the real server.
 let mergePhrase = null;
