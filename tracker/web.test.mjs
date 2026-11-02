@@ -9,7 +9,7 @@ import { openStore } from './store.mjs';
 import { startServer } from './server.mjs';
 import { seedDemo, tickingClock } from './demoData.mjs';
 import { reportsOf, REPORT_RANGES, searchTickets } from './pageData.mjs';
-import { escapeHtml, renderComment, renderInline, renderMarkdown, renderQuickAction, renderCommands, cardCommands, cardAsk, renderMergeAction, renderAnswerIn, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, cardContext, firstParagraph, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, activeFilters, redrawHold } from './web/render.mjs';
+import { escapeHtml, renderComment, renderInline, renderMarkdown, renderQuickAction, renderCommands, cardCommands, cardAsk, renderMergeAction, renderAnswerIn, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, activeFilters, redrawHold } from './web/render.mjs';
 import { loadProjectConfig } from '../lib/projectConfig.mjs';
 import operatorCard from '../lib/operatorCard.js';
 import machineComment from '../lib/machineComment.js';
@@ -1939,6 +1939,28 @@ test('the People page escapes every name and email, offers the form and Cancel t
   assert.match(draw, /putTrail\(\[\{ label: 'People' \}\]\)/);
 });
 
+test('the Tasks toolbar picks a project from a dropdown, "Project: ", the one in view selected', () => {
+  const projects = [{ slug: 'alpha', name: 'Alpha' }, { slug: 'beta', name: 'Beta' }];
+  assert.equal(renderProjectPicker(projects, 'beta'),
+    '<label class="project-picker">Project: <select name="project">'
+    + '<option value="alpha">Alpha</option><option value="beta" selected>Beta</option></select></label>');
+  // One project: still shown, selected.
+  assert.equal(renderProjectPicker([projects[0]], 'alpha'),
+    '<label class="project-picker">Project: <select name="project"><option value="alpha" selected>Alpha</option></select></label>');
+  // Names and slugs are typed by people: escaped.
+  const odd = renderProjectPicker([{ slug: 'a"b', name: 'R&D <b>' }], 'a"b');
+  assert.doesNotMatch(odd, /<b>|a"b/);
+  assert.match(odd, /<option value="a&quot;b" selected>R&amp;D &lt;b&gt;<\/option>/);
+  // The board and list draw it from GET /projects, in place of the old link, and a pick opens that project in the same view.
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const draw = app.slice(app.indexOf('async function drawProject'), app.indexOf('async function copyText'));
+  assert.match(draw, /api\('GET', '\/projects'\),\n  \]\);/);
+  assert.match(draw, /<div class="toolbar">\s*\$\{renderProjectPicker\(projects, board\.project\)\}\s*\$\{searchForm\(''\)\}\s*<nav class="views"/);
+  assert.doesNotMatch(app, /Change project/);
+  assert.match(draw, /querySelector\('\.project-picker select'\)\.addEventListener\('change', \(e\) => \{\s*history\.pushState\(null, '', at\(view, e\.target\.value\)\);\s*route\(\);/);
+  assert.match(readFileSync(WEB('app.css'), 'utf8'), /\.toolbar \.project-picker select \{/);
+});
+
 test('search bolds every occurrence of the term, any case, after escaping the ticket\'s own text', () => {
   assert.equal(boldMatches('Widget and widget and WIDGET', 'widget'), '<b>Widget</b> and <b>widget</b> and <b>WIDGET</b>');
   assert.equal(boldMatches('a <b>bold</b> claim', 'bold'), 'a &lt;b&gt;<b>bold</b>&lt;/b&gt; claim');
@@ -1990,7 +2012,7 @@ test('the search finds the demo\'s tickets in every project and names its status
 
 test('the Tasks page\'s toolbar holds the Search field, and Enter opens the results page', () => {
   const app = readFileSync(WEB('app.mjs'), 'utf8');
-  assert.match(app, /<a href="\/projects">Change project<\/a>\s*\$\{searchForm\(''\)\}/);
+  assert.match(app, /\$\{renderProjectPicker\(projects, board\.project\)\}\s*\$\{searchForm\(''\)\}/);
   assert.match(app, /history\.pushState\(null, '', searchAddress\(form\.elements\.q\.value\.trim\(\)\)\)/);
   assert.match(app, /renderSearchResults\(answer\)/);
 });
