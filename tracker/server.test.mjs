@@ -938,6 +938,7 @@ test('GET /reports answers the Reporting figures for every project or one, 404 f
       assert.equal(r.status, 200, path);
       assert.deepEqual(r.body.finished, { week: 1, month: 1, all: 1 }, path);
       assert.deepEqual(r.body.started, { week: 1, month: 1, all: 1 }, path);
+      assert.deepEqual(r.body.humanHours.week, { finished: 1, estimated: 0, notEstimated: 1, hours: null, days: 7, perDay: null }, path);
     }
     assert.equal((await f.call('GET', '/reports?project=alpha')).body.projectName, 'Alpha');
     const unknown = await f.call('GET', '/reports?project=nope');
