@@ -21,10 +21,10 @@ hands each one to Dane and nothing is built before he says "go".
 - **Spirality's project (`SP-`)**: work that changes Spirality itself (the
   sign-in script, the doctor, the runner) or sets up the Mini and the tracker.
   Filed now.
-- **Normie's project (`NO-`)**: work that changes Normie's repository. That
-  project does not exist yet, so these tickets are listed below by their
-  proposed names, marked **to be filed**. SP-98 creates the project and files
-  them, then writes their ids here.
+- **Normie's project (`NO-`)**: work that changes Normie's repository.
+  SP-98 made the project on 2026-11-02 (prefix `NO`, repository
+  `mentor24-maker/normie`, five loop sign-ins in Doppler project `normie`)
+  and filed these tickets as NO-1 to NO-6.
 
 ## The order
 
@@ -33,20 +33,20 @@ hands each one to Dane and nothing is built before he says "go".
    None waits on another.
 2. SP-98: the tracker project, the Doppler project and the loop sign-ins
    (waits on SP-95 and SP-96). It files the Normie tickets below.
-3. In Normie's repository: CI and `main`'s protection (N1, N2); the settings
-   file (N3); the ticket door (N4); the skills, hook and rules (N5).
-4. The loop lanes on the Mini (N6), last, because a lane runs the skills
-   from N5 and reads the settings from N3.
+3. In Normie's repository: CI and `main`'s protection (NO-1, NO-2); the
+   settings file (NO-3); the ticket door (NO-4); the skills, hook and rules
+   (NO-5).
+4. The loop lanes on the Mini (NO-6), last, because a lane runs the skills
+   from NO-5 and reads the settings from NO-3.
 
-**One question for Dane before N1 starts.** Nothing drains Normie's queue
-until its lanes run (N6), so N1 to N5 cannot be built by Normie's own loops.
-The plan assumes each is built by a session Dane starts by hand in
+**How NO-1 to NO-5 get built.** Nothing drains Normie's queue until its
+lanes run (NO-6), so NO-1 to NO-5 cannot be built by Normie's own loops. On
+SP-98 Dane chose (a): each is built by a session he starts by hand in
 `~/WebApps/normie` (it signs in as `hand-run`), following the loop-build
-steps, the way Spirality's seed loop was bootstrapped. The other option is to
-file N1 to N5 in Spirality's project and let Spirality's build loop open the
-pull requests in Normie's repository (`pr-opened --repo` exists), which mixes
-one product's work into another's queue, against `CLAUDE.md`. SP-98's
-hand-off card asks him which.
+steps, the way Spirality's seed loop was bootstrapped. The option not taken
+was to file them in Spirality's project and let Spirality's build loop open
+the pull requests in Normie's repository, which mixes one product's work into
+another's queue.
 
 ## 1. The GitHub repository
 
@@ -69,12 +69,12 @@ hand-off card asks him which.
   `gh api`). Which dependency bumps to take, if one changes how Normie
   behaves, is Dane's decision.
 - **Ticket.**
-  - N1, **to be filed** in Normie's project: "Every Normie pull request fails
+  - NO-1 in Normie's project: "Every Normie pull request fails
     CI at the dependency audit: clear the high-severity advisories". Waits on
     nothing in Normie.
-  - N2, **to be filed** in Normie's project: "Normie's main can change
+  - NO-2 in Normie's project: "Normie's main can change
     without a green check: name its CI check verify and protect main". Waits
-    on N1 (a required check that always fails would block every merge).
+    on NO-1 (a required check that always fails would block every merge).
 
 ## 2. The project config file
 
@@ -94,7 +94,7 @@ hand-off card asks him which.
 - **Who.** An agent session writes it. Dane's decisions: the merge phrases,
   and whether any lane may merge without him (`autoMergeLanes`, `[]` unless
   he says otherwise).
-- **Ticket.** N3, **to be filed** in Normie's project: "No loop knows
+- **Ticket.** NO-3 in Normie's project: "No loop knows
   Normie's tracker, Doppler or repository ids: add its
   spirality.project.json". Waits on SP-98 (the actor ids come from it).
 
@@ -166,8 +166,8 @@ hand-off card asks him which.
 - **Ticket.**
   - SP-97 "A second product's loop runners would write into Spirality's logs
     and share its locks: name them from the settings file".
-  - N6, **to be filed** in Normie's project: "Normie's loops do not run on
-    the Mini: install its loop lanes". Waits on N2, N5 and SP-97.
+  - NO-6 in Normie's project: "Normie's loops do not run on
+    the Mini: install its loop lanes". Waits on NO-2, NO-5 and SP-97.
 
 ## 6. The skills, hooks and rules in the product's repository
 
@@ -188,12 +188,12 @@ hand-off card asks him which.
   `CLAUDE.md` says Normie is and who its users are is **Dane's decision**;
   its current guide stays.
 - **Ticket.**
-  - N4, **to be filed** in Normie's project: "A session in Normie's
+  - NO-4 in Normie's project: "A session in Normie's
     repository cannot reach its tickets: copy in the ticket door and its npm
-    scripts". Waits on N3 and SP-96.
-  - N5, **to be filed** in Normie's project: "A session in Normie's
+    scripts". Waits on NO-3 and SP-96.
+  - NO-5 in Normie's project: "A session in Normie's
     repository can edit main and has no loop to follow: copy in the loop
-    skills, the main-branch hook and the loop rules". Waits on N4.
+    skills, the main-branch hook and the loop rules". Waits on NO-4.
   - The shared package (gap 1): **none needed for Normie.** Normie starts on
     copies, as WaveCenter did; the package is the substrate plan's own work
     (`docs/PLAN.md`, phases 1 to 5), and when it exists Normie moves to it
@@ -208,9 +208,9 @@ hand-off card asks him which.
 | SP-97 | Spirality | A second product's loop runners would write into Spirality's logs and share its locks: name them from the settings file | |
 | SP-99 | Spirality | The tracker's GitHub repository field can disagree with a product's settings file and nobody notices: check one against the other | |
 | SP-98 | Spirality | Normie has no tracker project, Doppler project or loop sign-ins, so no loop can take its work: set them up | SP-95, SP-96 |
-| N1 (to be filed) | Normie | Every Normie pull request fails CI at the dependency audit: clear the high-severity advisories | |
-| N2 (to be filed) | Normie | Normie's main can change without a green check: name its CI check verify and protect main | N1 |
-| N3 (to be filed) | Normie | No loop knows Normie's tracker, Doppler or repository ids: add its spirality.project.json | SP-98 |
-| N4 (to be filed) | Normie | A session in Normie's repository cannot reach its tickets: copy in the ticket door and its npm scripts | N3, SP-96 |
-| N5 (to be filed) | Normie | A session in Normie's repository can edit main and has no loop to follow: copy in the loop skills, the main-branch hook and the loop rules | N4 |
-| N6 (to be filed) | Normie | Normie's loops do not run on the Mini: install its loop lanes | N2, N5, SP-97 |
+| NO-1 | Normie | Every Normie pull request fails CI at the dependency audit: clear the high-severity advisories | |
+| NO-2 | Normie | Normie's main can change without a green check: name its CI check verify and protect main | NO-1 |
+| NO-3 | Normie | No loop knows Normie's tracker, Doppler or repository ids: add its spirality.project.json | SP-98 |
+| NO-4 | Normie | A session in Normie's repository cannot reach its tickets: copy in the ticket door and its npm scripts | NO-3, SP-96 |
+| NO-5 | Normie | A session in Normie's repository can edit main and has no loop to follow: copy in the loop skills, the main-branch hook and the loop rules | NO-4 |
+| NO-6 | Normie | Normie's loops do not run on the Mini: install its loop lanes | NO-2, NO-5, SP-97 |
