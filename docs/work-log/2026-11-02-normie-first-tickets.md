@@ -1,0 +1,5 @@
+## 2026-11-02 — Normie has no tracker project, Doppler project or loop sign-ins, so no loop can take its work: set them up (#76)
+
+Normie, the first product coming onto Spirality from scratch, now has a home in the tracker. Dane did the three steps only a person can do: he made Normie's Doppler project, ran the one command on the Mini that made the `NO` project and its five loop sign-ins, and set the project's GitHub repository. A session checked each step. Normie's sign-ins each answer as themselves, and Spirality's still answer as Spirality's, so Spirality's loops kept running.
+
+Then the session filed Normie's first six tickets, NO-1 to NO-6, in the order the plan gives: fix Normie's failing CI, protect its `main`, add its settings file, copy in the ticket door, copy in the loop skills, then install its loops on the Mini. Each one waits on the ticket before it. The plan now carries their ids and Dane's choice: until Normie's own loops run, he starts the build sessions for the first five by hand in Normie's folder, so Normie's work never mixes into Spirality's queue.
