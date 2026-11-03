@@ -14,10 +14,37 @@ draining the queue one clean PR at a time.
 ## Before anything: one claimant
 
 Claiming a ticket is check-then-act (a read, a comparison, a write), which is
-only sound with exactly one build loop running. Spirality has no scheduled
-runner yet, so the rule is simple: **do not start this loop if another session
-is already running it.** If `queue --claimable` shows a ticket in `Building`
-that is not yours, a pass is already in flight — stop and say so.
+only sound with exactly one build pass running. On the Mini the build lane's
+runner (`scripts/loop_runner.sh`) holds a lock, `$LOG_DIR/$SLUG-loop-build.lock`,
+so only one runner runs and its passes run one after another. A hand-run
+session holds no lock: **do not start this loop by hand while the runner's
+lane is running.**
+
+A ticket in `Building` is not proof that a pass is building it. A pass that
+dies (killed, out of time, out of session) leaves its ticket there, and
+nothing claims from `Building` (SP-101: SP-92 sat a day that way). So every
+pass begins with this, **once, before it claims, never later** (later, the
+marker is your own claim and it would hand back the ticket you are building):
+
+```bash
+npm run clickup -- pass-reconcile
+```
+
+A `claim` made by the build runner's pass writes a claim marker naming the
+ticket; the hand-off (`status` or `ask`) clears it. A hand-run session never
+writes one, so its ticket is never taken back. `pass-reconcile` reads the
+marker the last pass left: if that ticket is still in `Building`, its pass is
+gone, and it goes back to `Rework` (it has a PR) or `Queued` (it has none),
+guarded on `Building`, with one note read back naming the claim time and any
+unpushed worktree from around then. **Nothing is deleted.** Run by hand while
+the runner is running, it leaves the marker alone. Exit 0 nothing to do,
+3 handed one back (both normal: carry on and claim). Exit 1 (a write failed)
+or 2 (could not tell) keeps the marker for the next pass to retry: **stop the
+pass there and report it**. `claim` refuses, with exit 1, to write over a
+marker whose ticket is still in `Building` or cannot be read, because that
+marker is the only record of the stranded ticket. A claim refused at its guard
+(exit 3) clears the marker it wrote. Any other `Building` ticket is not yours:
+leave it.
 
 ## Ticket access: the direct script, not the connector
 
@@ -27,6 +54,7 @@ calls). Doppler supplies the token; you never see or handle it. The moves this
 loop makes:
 
 ```bash
+npm run clickup -- pass-reconcile                                      # FIRST: hand back the ticket a dead pass left in Building
 npm run clickup -- queue --claimable                                   # FIRST LINE is the task to claim (all Rework, then Queued)
 npm run clickup -- claim --task <id>                                   # safe claim; exit 3 = moved or still waits on a ticket, take the next
 npm run clickup -- get --task <id>                                     # header + body; also shows any recorded PR and send-back rounds
@@ -74,6 +102,7 @@ Exit **0** nothing of his / **3** something IS his / **1** could not tell.
 1. **Claim the next task.**
 
    ```bash
+   npm run clickup -- pass-reconcile
    npm run clickup -- queue --claimable
    npm run clickup -- claim --task <id>
    ```

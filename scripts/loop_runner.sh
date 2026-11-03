@@ -67,6 +67,10 @@ if ! mkdir "$LOCK" 2>/dev/null; then
   mkdir "$LOCK" 2>/dev/null || { echo "[loop-runner] the lock could not be retaken. Stopping."; exit 1; }
 fi
 echo "$$" > "$LOCK/pid"
+# The pass reads this to know it is the runner's pass, not a hand-run session:
+# only a claim made under the build runner writes the claim marker that lets
+# the next pass hand back a ticket a dead pass left in Building (SP-101).
+export LOOP_RUNNER_PID="$$"
 
 # The sync lock every lane takes around pull + npm ci (the only lock the lanes
 # share; each lane's own lock above is its alone). Wait up to 10 minutes

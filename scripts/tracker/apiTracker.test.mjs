@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, chmodSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { openStore } from '../../tracker/store.mjs';
 import { startServer } from '../../tracker/server.mjs';
@@ -658,6 +658,174 @@ test('assignees: one at most, since a ticket in the tracker carries one; more is
     assert.match(out.json.err, /one assignee per ticket/);
     assert.equal(f.store.getTicket('AL-1').version, 1);
   } finally { await f.cleanup(); }
+});
+
+// ── A ticket a dead build pass left in Building (SP-101) ─────────────────────
+/**
+ * The build runner, as far as the door can see it: a home folder holding the
+ * lane's lock with a live pid in it (a `sleep` standing in for the runner),
+ * and the product folder made a git checkout so the claim marker has a home.
+ * `ours` is the env of a pass the runner started; `hand` is a hand-run session.
+ */
+function buildRunner(f) {
+  const home = join(f.dir, 'home');
+  const lock = join(home, 'loop-logs', 'alpha-loop-build.lock');
+  mkdirSync(lock, { recursive: true });
+  const runner = spawn('sleep', ['60'], { stdio: 'ignore' });
+  writeFileSync(join(lock, 'pid'), `${runner.pid}\n`);
+  spawnSync('git', ['init', '-q'], { cwd: f.product });
+  return {
+    marker: join(f.product, '.git', 'loop-pass-claim.json'),
+    ours: { HOME: home, LOOP_RUNNER_PID: String(runner.pid) },
+    hand: { HOME: home },
+    async stop() {
+      if (runner.exitCode !== null || runner.signalCode !== null) return;
+      const exited = new Promise((r) => runner.once('exit', r));
+      runner.kill();
+      await exited;
+    },
+  };
+}
+
+test('pass-reconcile: the runner\'s next pass hands back a no-PR ticket its dead pass left in Building, to Queued, with a note read back', async () => {
+  const f = await fixture();
+  const lane = buildRunner(f);
+  try {
+    f.file({ name: 'one' });
+    const claim = await f.door(['claim', '--task', 'AL-1'], { env: lane.ours });
+    assert.equal(claim.code, 0, claim.err);
+    assert.match(claim.err, /pass marker written for AL-1/);
+    assert.ok(existsSync(lane.marker), 'the claim armed the marker before it moved the ticket');
+    // ...and the pass dies here. Its comments, or the lack of them, do not matter: there is no timer.
+
+    const r = await f.door(['pass-reconcile'], { env: lane.ours });
+    assert.equal(r.code, 3, r.err);
+    assert.match(r.out, /THE PREVIOUS PASS DROPPED ITS TICKET .*Handed back to Queued/);
+    assert.equal(f.store.getTicket('AL-1').status, 'queued');
+    const notes = f.store.listComments('AL-1');
+    assert.equal(notes.length, 1, 'one note');
+    assert.match(notes[0].body, /^Put back in Queued: the build pass that claimed this ticket at .* MT ended without handing it on/);
+    assert.match(notes[0].body, /Nothing was deleted/);
+    assert.match(r.err, /AL-1: note \d+ read back/);
+    assert.ok(!existsSync(lane.marker), 'a finished hand-back spends the marker');
+
+    const again = await f.door(['pass-reconcile'], { env: lane.ours });
+    assert.equal(again.code, 0, again.err);
+    assert.match(again.out, /No claim was left behind/);
+  } finally { await lane.stop(); await f.cleanup(); }
+});
+
+test('pass-reconcile: a hand-run claim arms nothing, and a hand-run reconcile leaves a live runner\'s ticket alone until the runner is gone', async () => {
+  const f = await fixture();
+  const lane = buildRunner(f);
+  try {
+    f.file({ name: 'hand' });
+    f.file({ name: 'loop' });
+    const hand = await f.door(['claim', '--task', 'AL-1'], { env: lane.hand });
+    assert.equal(hand.code, 0, hand.err);
+    assert.match(hand.err, /no pass marker: a build runner \(pid \d+\) is running and this session is not under it/);
+    assert.ok(!existsSync(lane.marker), 'a person\'s claim never arms the marker, so no pass can take it back');
+
+    const loop = await f.door(['claim', '--task', 'AL-2'], { env: lane.ours });
+    assert.equal(loop.code, 0, loop.err);
+    const held = await f.door(['pass-reconcile'], { env: lane.hand });
+    assert.equal(held.code, 0, held.err);
+    assert.match(held.out, /^LEFT ALONE — .*AL-2 may be the ticket it is building/);
+    assert.equal(f.store.getTicket('AL-2').status, 'building');
+    assert.equal(f.store.listComments('AL-2').length, 0);
+    assert.ok(existsSync(lane.marker), 'the live claim keeps its marker');
+
+    await lane.stop();
+    const gone = await f.door(['pass-reconcile'], { env: lane.hand });
+    assert.equal(gone.code, 3, gone.err);
+    assert.match(gone.err, /build lock .*: free/);
+    assert.equal(f.store.getTicket('AL-2').status, 'queued', 'no runner, so the pass that marked it is gone too');
+    assert.equal(f.store.getTicket('AL-1').status, 'building', 'the hand-run claim is never touched');
+  } finally { await lane.stop(); await f.cleanup(); }
+});
+
+test('pass-reconcile: a dead Rework pass, whose ticket already has a PR, goes back to Rework', async () => {
+  const f = await fixture();
+  const lane = buildRunner(f);
+  try {
+    f.file({ name: 'one', status: 'building' });
+    f.prBody = `Summary.\n\nTicket: ${f.url}/t/AL-1\n`;
+    assert.equal((await f.door(['pr-opened', '--task', 'AL-1', '--pr', 'https://github.com/owner/repo/pull/7'])).code, 0);
+    assert.equal((await f.door(['status', '--task', 'AL-1', '--status', 'Rework'])).code, 0);
+
+    assert.equal((await f.door(['claim', '--task', 'AL-1'], { env: lane.ours })).code, 0);
+    const r = await f.door(['pass-reconcile'], { env: lane.ours });
+    assert.equal(r.code, 3, r.err);
+    assert.equal(f.store.getTicket('AL-1').status, 'rework');
+    const note = f.store.listComments('AL-1').at(-1).body;
+    assert.match(note, /^Put back in Rework: .*\nWhy Rework: it already has a pull request, so the next pass finishes that one\./);
+  } finally { await lane.stop(); await f.cleanup(); }
+});
+
+test('pass-reconcile: a pass that handed its ticket on leaves nothing behind', async () => {
+  const f = await fixture();
+  const lane = buildRunner(f);
+  try {
+    f.file({ name: 'one' });
+    assert.equal((await f.door(['claim', '--task', 'AL-1'], { env: lane.ours })).code, 0);
+    const handoff = await f.door(['status', '--task', 'AL-1', '--status', 'In review'], { env: lane.ours });
+    assert.equal(handoff.code, 0, handoff.err);
+    assert.match(handoff.err, /pass marker cleared: AL-1 was handed on/);
+    assert.ok(!existsSync(lane.marker));
+    const r = await f.door(['pass-reconcile'], { env: lane.ours });
+    assert.equal(r.code, 0, r.err);
+    assert.equal(f.store.getTicket('AL-1').status, 'in review');
+  } finally { await lane.stop(); await f.cleanup(); }
+});
+
+test('pass-reconcile: a marker still owed a hand-back is never overwritten by the next claim, so a failed reconcile is retried', async () => {
+  const f = await fixture();
+  const lane = buildRunner(f);
+  try {
+    f.file({ name: 'stranded' });
+    f.file({ name: 'next' });
+    assert.equal((await f.door(['claim', '--task', 'AL-1'], { env: lane.ours })).code, 0);
+    // ...the pass dies, and the reconcile that should hand AL-1 back fails
+    // (exit 1 or 2), keeping the marker. The same pass then tries to claim.
+    const r = await f.door(['claim', '--task', 'AL-2'], { env: lane.ours });
+    assert.equal(r.code, 1, r.err);
+    assert.match(r.err, /NOT claimed: the claim marker names AL-1, still in Building/);
+    assert.match(r.err, /pass-reconcile/);
+    assert.equal(f.store.getTicket('AL-2').status, 'queued', 'nothing was claimed');
+    assert.match(readFileSync(lane.marker, 'utf8'), /"task": "AL-1"/, 'the marker still names the stranded ticket');
+
+    const fixed = await f.door(['pass-reconcile'], { env: lane.ours });
+    assert.equal(fixed.code, 3, fixed.err);
+    assert.equal(f.store.getTicket('AL-1').status, 'queued');
+    assert.equal((await f.door(['claim', '--task', 'AL-2'], { env: lane.ours })).code, 0, 'once handed back, the next claim goes ahead');
+  } finally { await lane.stop(); await f.cleanup(); }
+});
+
+test('pass-reconcile: a claim refused at its guard clears the marker it wrote, so a hand-run session that won the race keeps its ticket', async () => {
+  const f = await fixture();
+  const lane = buildRunner(f);
+  try {
+    f.file({ name: 'raced' });
+    // A hand-run session takes AL-1 between the loop's read and its guarded write.
+    const change = f.store.changeTicket.bind(f.store);
+    f.store.changeTicket = (id, fields) => {
+      if (fields.ifStatus !== undefined && fields.status === 'Building') {
+        f.store.changeTicket = change;
+        change(id, { actor: f.human.id, status: 'building' });
+      }
+      return change(id, fields);
+    };
+    const r = await f.door(['claim', '--task', 'AL-1'], { env: lane.ours });
+    assert.equal(r.code, 3, r.err);
+    assert.match(r.err, /NOT moved: expected status "queued" but the tracker refused the write/);
+    assert.match(r.err, /pass marker cleared: the claim of AL-1 was refused/);
+    assert.ok(!existsSync(lane.marker), 'no marker names a ticket this pass never took');
+
+    const next = await f.door(['pass-reconcile'], { env: lane.ours });
+    assert.equal(next.code, 0, next.err);
+    assert.equal(f.store.getTicket('AL-1').status, 'building', 'the hand session\'s ticket is never handed back');
+    assert.equal(f.store.listComments('AL-1').length, 0);
+  } finally { await lane.stop(); await f.cleanup(); }
 });
 
 test('an unreachable tracker answers HTTP 0, not a throw', async () => {
