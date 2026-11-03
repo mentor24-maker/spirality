@@ -31,16 +31,14 @@ The items below marked **missing**, gathered here so they can become tickets:
    substrate (`CLAUDE.md`, "What we are building", point 3): there is no
    tagged release and nothing published. Today a product must carry its own
    copy of `scripts/`, `lib/` and `.claude/` (item 6).
-2. **Some of the copied code still says "spirality".** The Doppler half is
-   fixed by SP-96: the npm scripts run `doppler run` through
-   `scripts/with_doppler.mjs`, and `npm run doctor` checks, all with the
-   `dopplerProject` and `dopplerConfig` the config names (item 3). Still
-   open: `scripts/loop_runner.sh` writes its log, lock and sync lock as
-   `~/loop-logs/spirality-...` and prints a `com.spirality.<skill>` restart
-   line, instead of reading `logDir`, `productSlug` and `launchdPrefix` from
-   the config the way `scripts/install_loop_runner.sh` and
-   `scripts/run_relay.sh` already do. That is a literal engineering rule 2
-   says is a bug.
+2. **Some of the copied code still said "spirality".** Both halves are
+   fixed. SP-96 fixed the Doppler half: the npm scripts run `doppler run`
+   through `scripts/with_doppler.mjs`, and `npm run doctor` checks, all with
+   the `dopplerProject` and `dopplerConfig` the config names (item 3). SP-97
+   fixed the runner: `scripts/loop_runner.sh` wrote `~/loop-logs/spirality-...`
+   and printed a `com.spirality.<skill>` restart line whatever the config
+   said; it now reads `logDir`, `productSlug` and `launchdPrefix` from the
+   config, like `scripts/install_loop_runner.sh` and `scripts/run_relay.sh`.
 3. **Loop sign-ins were per lane, not per product.** Fixed by SP-95: a
    product that does not run the tracker gets machine sign-ins named for
    itself (`normie loop-build`), so its `create` can no longer re-issue
@@ -247,12 +245,11 @@ changing the file: `CLICKUP_WORKSPACE_ID`, `CLICKUP_SPACE_ID`,
   not, is Dane's (**a browser login**).
 - **Check.** `./scripts/install_loop_runner.sh --status` shows every job
   `loaded: yes`, and after the first pass each log has a `START` line.
-- **Today.** **Automated** (the installer) for Spirality. For another
-  product it is **missing** a fix first: `scripts/loop_runner.sh` writes
-  `~/loop-logs/spirality-<skill>.log` and takes a `spirality-sync.lock`
-  whatever the config says, so a second product's runners would write into
-  Spirality's logs and share its locks (gap 2). Never rerun the full
-  installer from a loop session: it reloads the lane that session runs in.
+- **Today.** **Automated** (the installer). Since SP-97 the runners name
+  every log, lock and restart label from the config too, so a second
+  product's runners keep to their own files (`normie-loop-build.log`,
+  `normie-sync.lock`). Never rerun the full installer from a loop session:
+  it reloads the lane that session runs in.
 
 ## 6. The skills, hooks and rules in the product's repository
 
