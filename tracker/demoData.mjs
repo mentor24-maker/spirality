@@ -9,6 +9,7 @@
 import operatorCard from '../lib/operatorCard.js';
 import machineComment from '../lib/machineComment.js';
 import substrateConfig from '../lib/substrateConfig.js';
+import humanHours from '../lib/humanHours.js';
 
 const { buildCard } = operatorCard;
 const { stampMachineComment } = machineComment;
@@ -38,6 +39,9 @@ export function tickingClock(start = Date.parse('2026-10-27T15:00:00Z')) {
 
 /** How many days before the demo's start each of its earlier finished tasks moved to Live. */
 const FINISHED_DAYS_AGO = Object.freeze([1, 3, 6, 12, 20, 27, 45]);
+
+/** The human-hours estimate on each of those tasks' pull requests; null is a task with none. */
+const FINISHED_HUMAN_HOURS = Object.freeze([6, 2.5, null, 12, 4, 8, null]);
 
 /**
  * Fill an empty store. Answers the actors (with the operator's token, for
@@ -138,6 +142,7 @@ export function seedDemo(store, { operatorName = substrateConfig.operatorName(),
     // Each one queued, built, reviewed and waiting on the operator before it
     // went Live, so the flow reports have figures; every third was sent back
     // once, and the oldest was filed straight into review (never Queued).
+    // Most carry a human-hours estimate on their pull request; two do not.
     FINISHED_DAYS_AGO.forEach((days, i) => {
       const live = start - days * 24 * HOUR;
       const oldest = i === FINISHED_DAYS_AGO.length - 1;
@@ -153,6 +158,9 @@ export function seedDemo(store, { operatorName = substrateConfig.operatorName(),
         clock.moveTo(live - hoursBefore * HOUR);
         store.changeTicket(id, { actor: loop.id, status });
       }
+      const estimate = FINISHED_HUMAN_HOURS[i];
+      const pr = `PR opened: https://github.com/example/repo/pull/${100 + i}`;
+      say(id, loop.id, estimate == null ? pr : `${pr}\n${humanHours.humanHoursLine(estimate)}`);
     });
     clock.moveTo(start);
   }
