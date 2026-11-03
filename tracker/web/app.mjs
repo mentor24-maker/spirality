@@ -43,6 +43,7 @@ const who = document.getElementById('who');
 const headerProject = document.getElementById('project');
 const signOut = document.getElementById('sign-out');
 const bell = document.getElementById('bell');
+const posted = document.getElementById('posted');
 let me = null;
 
 /**
@@ -955,6 +956,14 @@ async function drawTicket(id, said = null, kept = null) {
       button.disabled = false;
     }
   });
+  // After any successful post from this page (the reply box, Merge, Close,
+  // Go): Details open so the new reply is there when he scrolls down, the
+  // page kept at the top, and a confirmation box he closes with OK or Escape.
+  const showPosted = () => {
+    main.querySelector('details.details').open = true;
+    window.scrollTo(0, 0);
+    if (!posted.open) posted.showModal();
+  };
   // Merge, Close and Go: his word from the server (the project config's merge
   // phrase, the relay's close word, the intake card's go word), posted as his own reply through the
   // same call the reply box uses. The relay acts on it; the page never moves
@@ -972,8 +981,7 @@ async function drawTicket(id, said = null, kept = null) {
       try {
         await api('POST', `/tickets/${encodeURIComponent(t.id)}/comments`, { body: word });
         await drawAgain(() => drawTicket(t.id));
-        main.querySelector('details.details').open = true;
-        main.querySelector('.comment:last-of-type')?.scrollIntoView({ block: 'center' });
+        showPosted();
       } catch (err) {
         if (err instanceof SignedOut) return drawSignIn(signedOut);
         note.className = 'note error';
@@ -1038,9 +1046,7 @@ async function drawTicket(id, said = null, kept = null) {
       // Exactly as typed: no trimming, no formatting. "merge" arrives as "merge".
       await api('POST', `/tickets/${encodeURIComponent(t.id)}/comments`, { body: box.value });
       await drawAgain(() => drawTicket(t.id));
-      // Show the reply he just posted: open Details at the end of the thread.
-      main.querySelector('details.details').open = true;
-      main.querySelector('.comment:last-of-type')?.scrollIntoView({ block: 'center' });
+      showPosted();
     } catch (err) {
       if (err instanceof SignedOut) return drawSignIn('You were signed out; your reply was not posted.');
       note.className = 'note error';

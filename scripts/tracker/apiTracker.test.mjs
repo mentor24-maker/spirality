@@ -52,7 +52,7 @@ async function fixture() {
   chmodSync(join(bin, 'gh'), 0o755);
 
   const f = {
-    dir, store, human, machine, humanToken, machineToken, url, product,
+    dir, store, human, machine, humanToken, machineToken, url, product, server, bin,
     set prBody(body) { writeFileSync(prFile, JSON.stringify({ body, url: 'https://github.com/owner/repo/pull/7' })); },
     /** What the fake `gh pr view` prints, as an object. */
     set prJson(json) { writeFileSync(prFile, JSON.stringify(json)); },
@@ -535,6 +535,40 @@ test('relay hands a ticket back on his answer: the move and the reply marker are
   } finally { await f.cleanup(); }
 });
 
+test('relay merges on his word and the merge marker lands as a reply, even after gh outlasts the keep-alive (SP-102)', async () => {
+  const f = await fixture();
+  try {
+    f.file({ name: 'one', status: 'building' });
+    f.prBody = `Summary.\n\nTicket: ${f.url}/t/AL-1\n`;
+    assert.equal((await f.door(['pr-opened', '--task', 'AL-1', '--pr', 'https://github.com/owner/repo/pull/7'])).code, 0);
+    await f.door(['status', '--task', 'AL-1', '--status', 'In review']);
+    const pass = await f.door(['verdict', '--task', 'AL-1', '--pass', '--if-status', 'In review', '--body-file', '-'], { stdin: 'All good.' });
+    assert.equal(pass.code, 0, pass.err);
+    f.store.changeTicket('AL-1', { actor: f.machine.id, status: 'ready to launch', assignee: f.human.id });
+    const word = f.store.postComment({ ticket: 'AL-1', author: f.human.id, body: 'merge' });
+
+    // On the Mini, `gh pr merge` took six seconds against the tracker's
+    // five-second keep-alive, and the marker POST after it went out on the
+    // closed connection. Here: a three-second keep-alive (fetch will not
+    // reuse a connection on a shorter one) and a fake merge of four and a half.
+    f.server.keepAliveTimeout = 3000;
+    const open = { number: 7, state: 'OPEN', isDraft: false, mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', url: 'https://github.com/owner/repo/pull/7', headRefName: 'one',
+      statusCheckRollup: [{ __typename: 'CheckRun', name: 'verify', status: 'COMPLETED', conclusion: 'SUCCESS' }] };
+    f.prJson = open;
+    const merged = join(f.dir, 'merged.json');
+    writeFileSync(merged, JSON.stringify({ ...open, state: 'MERGED', mergedAt: '2026-11-03T19:32:41Z' }));
+    writeFileSync(join(f.bin, 'gh'), `#!/bin/sh\ncase "$2" in merge) sleep 4.5; cp "${merged}" "${join(f.dir, 'pr.json')}" ;; *) cat "${join(f.dir, 'pr.json')}" ;; esac\n`);
+
+    const r = await f.door(['relay']);
+    assert.match(r.out, /AL-1.*merged.*PR #7/, `${r.out}\n${r.err}`);
+    assert.doesNotMatch(r.err, /could NOT write the dedup marker/, r.err);
+    const replies = f.store.listComments('AL-1').filter((c) => c.parent === word.id);
+    assert.equal(replies.length, 1, 'the marker is a reply on his word');
+    assert.match(replies[0].body, /merged PR #7/);
+    assert.equal(f.store.getTicket('AL-1').status, 'live');
+  } finally { await f.cleanup(); }
+});
+
 /** A Ready to launch catch-up ticket shaped like SP-64: no PR of its own, a Close card, and his close word. */
 async function closeOnReadyToLaunch(f) {
   f.file({ name: 'Find out why PR #7 (fix) will not merge', status: 'ready to launch', description: '## The branch\n\n- PR: https://github.com/owner/repo/pull/7\n- Branch: `fix`' });
@@ -749,5 +783,5 @@ test('an unreachable tracker answers HTTP 0, not a throw', async () => {
   const out = await t.getTask('AL-1');
   assert.equal(out.res.ok, false);
   assert.equal(out.res.status, 0);
-  assert.match(out.text, /never reached the tracker/);
+  assert.match(out.text, /never reached the tracker \(fetch failed — \S/, 'the reason is kept, not only "fetch failed"');
 });
