@@ -44,6 +44,8 @@ import { isMachineComment, stripMachineMarker } from './lib/machineComment.mjs';
 import { parseHumanHours, findHumanHours } from '../lib/humanHours.js';
 import { createClickupTracker } from './tracker/clickupTracker.mjs';
 import { createApiTracker, trackerTokenEnv } from './tracker/apiTracker.mjs';
+import { compareRepo, projectEditUrl } from './lib/repoCheck.mjs';
+import { filedTrackerUrl } from '../lib/substrateConfig.js';
 
 import { loadProjectConfig, ProjectConfigError } from '../lib/projectConfig.mjs';
 // The merge lane's decisions (task 86bchpkxz). `mergeDecision` says whether
@@ -179,6 +181,7 @@ function usage(code = 2) {
 npm run clickup -- <command> [flags]      (Loop Queue: list ${LOOP_QUEUE_LIST}, space ${SPACE})
 
   whoami                                          prove the token works and say who it acts as
+  repo-check                                      does the tracker project's GitHub repository agree with githubRepo? (exit 1 if not)
   lists [--space <id>]                            resolve list ids by name (default: the project's space)
   queue [--list <id>] [--claimable | --status S]  the tickets, one per line: id, status, priority, created, name
   get --task <id>                                 header + body
@@ -442,6 +445,26 @@ if (cmd === 'whoami') {
   console.log(`Token valid. Acting as: ${out.json.user.username} <${out.json.user.email}> (id ${out.json.user.id})`);
   if (Number(out.json.user.id) === OPERATOR_ID) console.error("  (This is Dane's own seat, as on StarCaster. Every comment this script posts carries the [machine] marker so readers can tell.)");
   reportLimits();
+
+} else if (cmd === 'repo-check') {
+  // Read-only: the tracker project's GitHub repository field (SP-80) against
+  // the githubRepo the loops use. Empty is reported, different fails.
+  if (project.tracker !== 'api') {
+    console.log(`repository: not checked; the "${project.tracker}" tracker has no GitHub repository field. The loops use githubRepo ${project.githubRepo}.`);
+  } else {
+    const out = await tracker.projectDetails();
+    if (!out.res.ok || !out.json) die(`read the tracker project "${project.productSlug}"`, out);
+    if (!Object.hasOwn(out.json, 'repo')) {
+      console.error(`repo-check: the tracker's answer for project "${project.productSlug}" has no repo field at all, so this check cannot tell. Is the tracker older than SP-80?`);
+      process.exit(1);
+    }
+    const { ok, line } = compareRepo({
+      configRepo: project.githubRepo, trackerRepo: out.json.repo, slug: project.productSlug, editUrl: projectEditUrl(filedTrackerUrl() || project.trackerUrl, project.productSlug),
+    });
+    console.log(line);
+    reportLimits();
+    if (!ok) process.exit(1);
+  }
 
 } else if (cmd === 'lists') {
   const space = arg('space') || SPACE;

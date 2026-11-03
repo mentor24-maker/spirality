@@ -246,6 +246,9 @@ export function createApiTracker({ token, baseUrl, project, listId, timeoutMs, l
       return withJson(out, { user: { id: out.json.id, username: out.json.name, email: `${out.json.kind} actor in the tracker` } });
     },
 
+    /** The configured project's details (name, prefix, GitHub repository, ...). Read-only. */
+    projectDetails: () => call('GET', `/projects/${encodeURIComponent(project)}`),
+
     /** The tracker has no spaces: its one "list" is the configured project. */
     listsInSpace: async () => ({ res: { ok: true, status: 200, headers: { get: () => null } }, json: { lists: [{ id: project, name: `${project} (tracker project)` }] }, text: '' }),
     foldersInSpace: async () => ({ res: { ok: true, status: 200, headers: { get: () => null } }, json: { folders: [] }, text: '' }),
