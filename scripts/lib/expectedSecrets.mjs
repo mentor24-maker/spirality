@@ -15,6 +15,12 @@
  * A key marked `trackerHome` is needed only by the product that runs the
  * tracker service (its config sets `trackerPort`): the operator's own
  * sign-in and the hand-over email. Any other product never needs them.
+ *
+ * A key marked `clickup` is needed only by a product that still talks to
+ * ClickUp (usesClickUp): its `tracker` is `"clickup"`, or its
+ * `loopQueueListId` names a real ClickUp list (not `"0"`), as Spirality's
+ * does, kept as the record to compare the tracker against. A product never
+ * on ClickUp (`tracker` `"api"`, ClickUp ids `"0"`) is never asked for it.
  */
 
 /**
@@ -38,23 +44,35 @@ export const TRACKER_SEATS = [
 ];
 
 export const EXPECTED_SECRETS = [
-  { name: 'CLICKUP_API_TOKEN', what: 'the ClickUp token, for scripts only' },
+  { name: 'CLICKUP_API_TOKEN', clickup: true, what: 'the ClickUp token, for scripts only' },
   ...TRACKER_SEATS.map(({ secret, kind, what }) => ({ name: secret, what, ...(kind === 'human' ? { trackerHome: true } : {}) })),
   { name: 'RESEND_API_KEY', trackerHome: true, what: 'the Resend key the tracker sends the hand-over email with' },
   { name: 'TRACKER_NOTIFY_TO', trackerHome: true, what: "the operator's address for the hand-over email" },
 ];
 
 /**
+ * Whether a product still talks to ClickUp, from its project config alone:
+ * its tracker is ClickUp (`tracker` left out means `"clickup"`), or its
+ * `loopQueueListId` is a real list rather than the `"0"` of a product that
+ * was never there.
+ */
+export function usesClickUp(config) {
+  return (config.tracker ?? 'clickup') === 'clickup' || !/^0+$/.test(String(config.loopQueueListId));
+}
+
+/**
  * What doctor checks for one product, from its project config: the Doppler
  * project and config to look in, and the keys that product needs there
- * (the `trackerHome` ones only when it runs the tracker, `trackerPort` set).
+ * (the `trackerHome` ones only when it runs the tracker, `trackerPort` set;
+ * the `clickup` ones only when usesClickUp).
  * Returns `{ project, configs, expected }` for doctorReport and formatReport.
  */
 export function doctorTarget(config, secrets = EXPECTED_SECRETS) {
   const home = config.trackerPort != null;
+  const clickup = usesClickUp(config);
   const configs = [config.dopplerConfig];
   const expected = secrets
-    .filter((s) => home || !s.trackerHome)
+    .filter((s) => (home || !s.trackerHome) && (clickup || !s.clickup))
     .map(({ name, what }) => ({ name, what, configs }));
   return { project: config.dopplerProject, configs, expected };
 }
