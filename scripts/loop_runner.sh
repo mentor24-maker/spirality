@@ -83,7 +83,8 @@ take_sync_lock() {
   echo "$$" > "$SYNC_LOCK/pid"
 }
 
-PASS_OUT="$(mktemp -t "$SLUG-pass")"
+# A template with X's, the one form macOS and GNU mktemp both accept.
+PASS_OUT="$(mktemp "${TMPDIR:-/tmp}/$SLUG-pass.XXXXXX")"
 trap 'rm -rf "$LOCK" "$PASS_OUT" 2>/dev/null; [ "$(cat "$SYNC_LOCK/pid" 2>/dev/null)" = "$$" ] && rm -rf "$SYNC_LOCK"' EXIT
 
 while true; do
