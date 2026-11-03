@@ -16,6 +16,7 @@ import machineComment from '../lib/machineComment.js';
 import loopStatuses from '../lib/loopStatuses.js';
 import mergeOnComment from '../lib/mergeOnComment.js';
 import busRelayPlan from '../lib/busRelayPlan.js';
+import { prOpenedComment } from '../scripts/lib/loopTrail.mjs';
 
 const DOOR = fileURLToPath(new URL('../scripts/clickup.mjs', import.meta.url));
 const WEB = (name) => fileURLToPath(new URL(`./web/${name}`, import.meta.url));
@@ -1873,6 +1874,47 @@ test('Reporting flow: a range with no finished tasks has no times and no share, 
   } finally { r.done(); }
 });
 
+test('Reporting human hours: the estimates of the tasks finished in each range added up, a task with none counted as not estimated, per day to one decimal', () => {
+  const r = reportingStore();
+  try {
+    let pr = 10;
+    const estimate = (id, hours) => r.store.postComment({
+      ticket: id, author: r.loop.id, body: prOpenedComment(`https://github.com/o/r/pull/${pr++}`, 'Why that estimate: a test.', { humanHours: hours }),
+    });
+    estimate(r.ticket('alpha', 5, [2, 'live']), 6);
+    estimate(r.ticket('alpha', 5, [3, 'live']), 2.5);
+    // Finished this week with a pull request but no estimate on it, and one with no pull request at all.
+    const bare = r.ticket('beta', 5, [4, 'live']);
+    r.store.postComment({ ticket: bare, author: r.loop.id, body: 'PR opened: https://github.com/o/r/pull/3' });
+    // Re-recorded on rework: only the newest PR opened line counts.
+    const reworked = r.ticket('alpha', 30, [20, 'live']);
+    estimate(reworked, 3);
+    estimate(reworked, 10);
+    estimate(r.ticket('alpha', 70, [60, 'live']), 4);
+    // Still open: counts nowhere, estimate or not.
+    estimate(r.ticket('alpha', 5, [1, 'building']), 50);
+
+    const { humanHours } = reportsOf(r.store, { now: r.now });
+    assert.deepEqual(humanHours.week, { finished: 3, estimated: 2, notEstimated: 1, hours: 8.5, days: 7, perDay: 1.2 });
+    assert.deepEqual(humanHours.month, { finished: 4, estimated: 3, notEstimated: 1, hours: 18.5, days: 30, perDay: 0.6 });
+    // All time runs from the first ticket filed, 70 days back.
+    assert.deepEqual(humanHours.all, { finished: 5, estimated: 4, notEstimated: 1, hours: 22.5, days: 70, perDay: 0.3 });
+
+    const beta = reportsOf(r.store, { project: 'beta', now: r.now }).humanHours;
+    assert.deepEqual(beta.week, { finished: 1, estimated: 0, notEstimated: 1, hours: null, days: 7, perDay: null });
+  } finally { r.done(); }
+});
+
+test('Reporting human hours: a range with no estimates has no total and no per-day figure, never 0 hours', () => {
+  const r = reportingStore();
+  try {
+    r.ticket('alpha', 70, [60, 'live']);
+    const { humanHours } = reportsOf(r.store, { now: r.now });
+    assert.deepEqual(humanHours.week, { finished: 0, estimated: 0, notEstimated: 0, hours: null, days: 7, perDay: null });
+    assert.deepEqual(humanHours.all, { finished: 1, estimated: 0, notEstimated: 1, hours: null, days: 70, perDay: null });
+  } finally { r.done(); }
+});
+
 test('the demo spreads its finished tasks over the last month, so every range has some', () => {
   const dir = mkdtempSync(join(tmpdir(), 'tracker-demo-reports-'));
   const clock = tickingClock();
@@ -1891,6 +1933,12 @@ test('the demo spreads its finished tasks over the last month, so every range ha
     }
     assert.equal(flow.all.timeToFinish.leftOut, 2);
     assert.ok(waitingNow > 0);
+    // Human hours show a total in every range, beside a task with none.
+    const { humanHours } = reportsOf(store, { now: clock.time() });
+    for (const key of ['week', 'month', 'all']) {
+      const h = humanHours[key];
+      assert.ok(h.hours > 0 && h.perDay > 0 && h.notEstimated > 0, `${key} ${JSON.stringify(h)}`);
+    }
   } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -1908,6 +1956,11 @@ test('the Reporting page draws only the server\'s figures: ranges and stages fro
   assert.match(draw, /escapeHtml\(s\.status\)/);
   for (const title of ['Time to finish', 'Sent back', 'Waiting on you']) assert.match(draw, new RegExp(`flow\\('${title}',\\s*'[^']+'`), `${title} has its how-it-is-counted line`);
   assert.match(draw, /r\.flow\[g\.key\]/, 'flow figures per range, from the server');
+  assert.match(draw, /<h2>Human hours of work done<\/h2>\s*<p class="quiet">[^<]*estimate, not a measurement/, 'the human-hours report says where its number comes from');
+  assert.match(draw, /r\.humanHours\[g\.key\]/, 'human-hours figures per range, from the server');
+  assert.match(draw, /h\.estimated \? escapeHtml\(cell\(h\)\) : '<span class="quiet">no estimates yet in this range<\/span>'/, 'no estimates is said in words, never 0 hours');
+  assert.match(draw, /of \$\{Number\(h\.finished\)\} estimated/);
+  assert.match(draw, /about \$\{Number\(h\.perDay\)\} human hour/);
   assert.match(draw, /f\.finished \? .* : '<span class="quiet">none finished in this range<\/span>'/);
   assert.match(draw, /r\.waitingNow/);
   assert.match(app, /markNav\(reporting \? 'reporting' :/);
