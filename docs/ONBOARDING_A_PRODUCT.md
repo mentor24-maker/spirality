@@ -31,15 +31,14 @@ The items below marked **missing**, gathered here so they can become tickets:
    substrate (`CLAUDE.md`, "What we are building", point 3): there is no
    tagged release and nothing published. Today a product must carry its own
    copy of `scripts/`, `lib/` and `.claude/` (item 6).
-2. **Some of the copied code still says "spirality".** `package.json`'s npm
-   scripts run `doppler run --project spirality --config dev`;
-   `scripts/lib/expectedSecrets.mjs` checks Doppler project `spirality`
-   only (`DOPPLER_PROJECT`), so `npm run doctor` cannot check another
-   product. Each is a literal that engineering rule 2 says is a bug.
-   (`scripts/loop_runner.sh` was one too, writing `~/loop-logs/spirality-...`
-   whatever the config said; SP-97 fixed it: it now reads `logDir`,
-   `productSlug` and `launchdPrefix` from the config, like the installer and
-   `scripts/run_relay.sh`.)
+2. **Some of the copied code still said "spirality".** Both halves are
+   fixed. SP-96 fixed the Doppler half: the npm scripts run `doppler run`
+   through `scripts/with_doppler.mjs`, and `npm run doctor` checks, all with
+   the `dopplerProject` and `dopplerConfig` the config names (item 3). SP-97
+   fixed the runner: `scripts/loop_runner.sh` wrote `~/loop-logs/spirality-...`
+   and printed a `com.spirality.<skill>` restart line whatever the config
+   said; it now reads `logDir`, `productSlug` and `launchdPrefix` from the
+   config, like `scripts/install_loop_runner.sh` and `scripts/run_relay.sh`.
 3. **Loop sign-ins were per lane, not per product.** Fixed by SP-95: a
    product that does not run the tracker gets machine sign-ins named for
    itself (`normie loop-build`), so its `create` can no longer re-issue
@@ -129,7 +128,7 @@ changing the file: `CLICKUP_WORKSPACE_ID`, `CLICKUP_SPACE_ID`,
 - **What.** Doppler holds every secret the loops use; the repository holds
   only their names (it is public). Each product has its own Doppler project,
   named in `dopplerProject`, with the config named in `dopplerConfig`.
-- **Where.** In Doppler. The list of names Spirality expects is
+- **Where.** In Doppler. The list of names a product expects is
   `EXPECTED_SECRETS` in `scripts/lib/expectedSecrets.mjs`:
 
   | Key | What it is for |
@@ -145,7 +144,8 @@ changing the file: `CLICKUP_WORKSPACE_ID`, `CLICKUP_SPACE_ID`,
   | `CLICKUP_API_TOKEN` | the ClickUp token; only needed while a product is still on ClickUp, or to import its ClickUp history (`tracker/import.mjs`) |
 
   The email keys and `TRACKER_TOKEN_OPERATOR` belong with the product that
-  runs the tracker server; a product using Spirality's tracker does not need
+  runs the tracker server (they are marked `trackerHome`); a product using
+  Spirality's tracker does not need them, and its doctor does not ask for
   them. The tracker also reads `TRACKER_NOTIFY_FROM` if it is there
   (optional, `tracker/notify.mjs`), and `TRACKER_URL` / `TRACKER_API_URL` can
   override the config (item 2). A runner never holds a token: it sets
@@ -156,13 +156,14 @@ changing the file: `CLICKUP_WORKSPACE_ID`, `CLICKUP_SPACE_ID`,
   secret value**): sessions are refused Doppler writes, so a session ships a
   script and Dane runs it. The tracker tokens are the exception: `npm run
   tracker:signins -- create` writes them itself, run by Dane on the Mini.
-- **Check.** `npm run doctor` prints every expected name as `present` or
-  `MISSING`, names only, never values.
-- **Today.** **Manual**, and the check is **missing** for any product but
-  Spirality: `npm run doctor` only looks in Doppler project `spirality`
-  (`DOPPLER_PROJECT` in `scripts/lib/expectedSecrets.mjs`), and the npm
-  scripts in `package.json` say `--project spirality` in so many words
-  (gap 2).
+- **Check.** `npm run doctor` says which Doppler project and config it
+  looked in (`Doppler project normie, config dev`), then prints every name
+  that product needs as `present` or `MISSING`, names only, never values.
+- **Today.** Making the project and putting values in: **manual**. The
+  check: **automated** for any product (SP-96). Every npm script that needs
+  keys runs through `scripts/with_doppler.mjs`, which reads `dopplerProject`
+  and `dopplerConfig` from the config, so a copy reads its own product's
+  keys with no edit.
 
 ## 4. The tracker project and its sign-ins
 
@@ -220,10 +221,10 @@ changing the file: `CLICKUP_WORKSPACE_ID`, `CLICKUP_SPACE_ID`,
 - **Today.** The project and every product's sign-ins: **automated**
   (`tracker:signins create`), each product with its own (above). The
   repository field: **manual**. **Missing**: anything that compares the
-  tracker's repository field with `githubRepo` (gap 4). Until SP-96 lands,
-  the `tracker:signins` npm script says `--project spirality`, so in
-  another product's checkout it refuses (the Doppler project does not
-  match its config) rather than touch Spirality's secrets.
+  tracker's repository field with `githubRepo` (gap 4). The
+  `tracker:signins` npm script runs under the config's own Doppler project
+  (SP-96), so in another product's checkout it reads and writes that
+  product's secrets, never Spirality's.
 
 ## 5. The loop lanes on the Mini
 
@@ -264,8 +265,8 @@ changing the file: `CLICKUP_WORKSPACE_ID`, `CLICKUP_SPACE_ID`,
     Dane" and where the product's tickets live) and
     `docs/LOOP_ENGINEERING.md`.
   - The door and the tools they call: `scripts/clickup.mjs`,
-    `scripts/tracker/`, `scripts/lib/`, `lib/`, and the `clickup`, `verify`
-    and `doctor` scripts in `package.json`.
+    `scripts/with_doppler.mjs`, `scripts/tracker/`, `scripts/lib/`, `lib/`,
+    and the `clickup`, `verify` and `doctor` scripts in `package.json`.
 - **Who.** An agent session copies them and adjusts the product's wording.
   What the rules say about the product (what it is, who its users are) is
   Dane's decision.
