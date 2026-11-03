@@ -16,6 +16,7 @@ import waitingOnOperator from '../lib/waitingOnOperator.js';
 import machineComment from '../lib/machineComment.js';
 import loopStatuses from '../lib/loopStatuses.js';
 import mergeOnComment from '../lib/mergeOnComment.js';
+import humanHours from '../lib/humanHours.js';
 import { compareWithinStatus } from '../scripts/lib/loopStatuses.mjs';
 import { searchPattern } from './web/render.mjs';
 
@@ -23,6 +24,14 @@ const { OPERATOR_LANE, WAITING, CANNOT_TELL, waitingVerdict, operatorSpokeLast }
 const { isMachineComment, stripMachineMarker } = machineComment;
 const { STAGE_ORDER, LIVE, QUEUED, REWORK, OPERATOR_HELD_STATUSES, TERMINAL_STATUSES, DISPLAY, PRIORITY_RANK, statusOf } = loopStatuses;
 const { findPullRequest } = mergeOnComment;
+const { findHumanHours } = humanHours;
+
+/** A ticket's comments in the shape the loop trail's readers take (findPullRequest, findHumanHours). */
+function trailComments(store, ticketId) {
+  return store.listComments(ticketId).map((c) => ({
+    id: c.id, comment_text: c.body, date: String(Date.parse(c.createdAt)),
+  }));
+}
 
 /**
  * A ticket and its comments in the shape waitingVerdict reads. Comments go
@@ -123,9 +132,7 @@ export function threadOf(store, ticketId) {
     operator: namedActor(store, project?.operator),
     comments,
     answerIn: answerIsIn(ticket, store.listComments(ticket.id), project?.operator),
-    pullRequest: findPullRequest(store.listComments(ticket.id).map((c) => ({
-      id: c.id, comment_text: c.body, date: String(Date.parse(c.createdAt)),
-    })))?.url ?? null,
+    pullRequest: findPullRequest(trailComments(store, ticket.id))?.url ?? null,
   };
 }
 
@@ -204,9 +211,7 @@ export function boardOf(store, slug) {
     date_created: String(Date.parse(t.createdAt)),
   });
   const inQueueOrder = (a, b) => compareWithinStatus(queueShape(a), queueShape(b));
-  const pullRequestOf = (id) => findPullRequest(store.listComments(id).map((c) => ({
-    id: c.id, comment_text: c.body, date: String(Date.parse(c.createdAt)),
-  })))?.url ?? null;
+  const pullRequestOf = (id) => findPullRequest(trailComments(store, id))?.url ?? null;
   const names = new Map();
   const nameOf = (id) => {
     if (id == null) return null;
@@ -337,6 +342,25 @@ function flowFigures(flows) {
 }
 
 /**
+ * One range's human-hours figures from the estimates (null where a finished
+ * ticket has none) of the tickets finished in it, over `days` days. With no
+ * estimate in the range the hours and the per-day figure are null, never 0:
+ * "no estimates yet" is not "no work". Per day is rounded to one decimal.
+ */
+function humanHoursFigures(estimates, days) {
+  const known = estimates.filter((h) => h != null);
+  const hours = known.length ? known.reduce((a, b) => a + b, 0) : null;
+  return {
+    finished: estimates.length,
+    estimated: known.length,
+    notEstimated: estimates.length - known.length,
+    hours,
+    days,
+    perDay: hours == null ? null : Math.round((hours / days) * 10) / 10,
+  };
+}
+
+/**
  * The Reporting page's figures for one project (`project`, a slug) or, with
  * none, every project:
  *  - finished: how many tickets entered Live in each REPORT_RANGES range,
@@ -349,6 +373,11 @@ function flowFigures(flows) {
  *    time from first Queued to Live (median and longest, leaving out and
  *    counting those never Queued), how many went to Rework at least once
  *    and their share, and total and median time in the operator's stages;
+ *  - humanHours: per range (humanHoursFigures), the build loop's
+ *    human-hours estimates (lib/humanHours.js, the newest `PR opened:`
+ *    comment's) of the tickets finished in it added up, how many had one
+ *    and how many did not, and the total per day of the range; all time
+ *    runs from the first ticket filed in scope, at least one day;
  *  - waitingNow: how many tickets sit in the operator's stages now.
  * A range counts what happened in the last `days` days before `now`.
  * Null when `project` names no project.
@@ -371,6 +400,8 @@ export function reportsOf(store, { project = null, now = Date.now() } = {}) {
     }
   };
   const flows = Object.fromEntries(REPORT_RANGES.map((r) => [r.key, []]));
+  const estimates = Object.fromEntries(REPORT_RANGES.map((r) => [r.key, []]));
+  let firstFiled = null;
   let waitingNow = 0;
   const colours = store.stageColours();
   const openStages = STAGE_ORDER.filter((name) => !TERMINAL_STATUSES.includes(statusOf(name)));
@@ -378,13 +409,20 @@ export function reportsOf(store, { project = null, now = Date.now() } = {}) {
   for (const p of projects) {
     for (const ticket of store.listTickets(p.slug)) {
       tally(started, ticket.createdAt);
+      const filed = Date.parse(ticket.createdAt);
+      if (!Number.isNaN(filed) && (firstFiled == null || filed < firstFiled)) firstFiled = filed;
       const done = finishedAt(store, ticket);
       if (done) {
         tally(finished, done);
         const doneAt = Date.parse(done);
         if (!Number.isNaN(doneAt)) {
           const flow = flowOf(statusSteps(store, ticket), doneAt);
-          for (const r of REPORT_RANGES) if (inRange(r, doneAt)) flows[r.key].push(flow);
+          const hours = findHumanHours(trailComments(store, ticket.id));
+          for (const r of REPORT_RANGES) {
+            if (!inRange(r, doneAt)) continue;
+            flows[r.key].push(flow);
+            estimates[r.key].push(hours);
+          }
         }
       }
       if (open.has(ticket.status)) open.set(ticket.status, open.get(ticket.status) + 1);
@@ -399,6 +437,10 @@ export function reportsOf(store, { project = null, now = Date.now() } = {}) {
     started,
     open: openStages.map((name) => ({ status: name, count: open.get(statusOf(name)), colour: colours[statusOf(name)] ?? null })),
     flow: Object.fromEntries(REPORT_RANGES.map((r) => [r.key, flowFigures(flows[r.key])])),
+    humanHours: Object.fromEntries(REPORT_RANGES.map((r) => {
+      const days = r.days ?? (firstFiled == null ? 1 : Math.max(1, Math.ceil((now - firstFiled) / DAY_MS)));
+      return [r.key, humanHoursFigures(estimates[r.key], days)];
+    })),
     waitingNow,
   };
 }

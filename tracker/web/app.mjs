@@ -1252,7 +1252,8 @@ function spanOf(ms) {
  * the server's time ranges, and how many are open in each stage now, for the
  * selected project or for all of them, and how the finished ones flowed:
  * time to finish, how many were sent back, and time waiting on the
- * operator. Every figure is worked out by the
+ * operator, and the human hours of work the finished ones add up to, by the
+ * build loop's estimates. Every figure is worked out by the
  * server (pageData.mjs reportsOf); the page only draws them, so the ranges
  * and the stages come from its answer, never typed out here. A stage wears
  * its Settings colour as properties, never as markup.
@@ -1274,6 +1275,16 @@ async function drawReporting(chosen) {
     <h2>${title}</h2>
     <p class="quiet">${how}</p>
     <table class="counts report flow"><thead>${head}</thead><tbody>${rows}</tbody></table>`;
+  // A human-hours row: "no estimates yet in this range" where none was recorded, never 0 hours.
+  const hoursLine = (label, cell) => `<tr><td class="name">${label}</td>${r.ranges.map((g) => {
+    const h = r.humanHours[g.key];
+    return `<td class="count">${h.estimated ? escapeHtml(cell(h)) : '<span class="quiet">no estimates yet in this range</span>'}</td>`;
+  }).join('')}</tr>`;
+  const estimatedLine = `<tr><td class="name">Tasks with an estimate</td>${r.ranges.map((g) => {
+    const h = r.humanHours[g.key];
+    return `<td class="count">${h.finished ? `${Number(h.estimated)} of ${Number(h.finished)} estimated` : '<span class="quiet">none finished in this range</span>'}</td>`;
+  }).join('')}</tr>`;
+  const hoursOf = (n) => `${Number(n)} hour${Number(n) === 1 ? '' : 's'}`;
   const open = r.open.map((s) => `<tr data-stage="${escapeHtml(s.status)}"><td class="status">${escapeHtml(s.status)}</td><td class="count">${Number(s.count)}</td></tr>`).join('');
   main.innerHTML = `
     <h1>Reporting</h1>
@@ -1284,6 +1295,9 @@ async function drawReporting(chosen) {
     <h2>Tasks finished and started</h2>
     <p class="quiet">Finished: moved to Live in that time and still Live. Started: filed in that time.</p>
     <table class="counts report"><thead>${head}</thead><tbody>${line('Tasks finished', r.finished)}${line('Tasks started', r.started)}</tbody></table>
+    <h2>Human hours of work done</h2>
+    <p class="quiet">For tasks finished in that time: the build loop's estimate, recorded on each pull request, of the hours an experienced programmer new to the code would take to do the same work. An estimate, not a measurement; tasks with none are left out of the total, and counted here.</p>
+    <table class="counts report human-hours"><thead>${head}</thead><tbody>${hoursLine('Total', (h) => hoursOf(h.hours))}${estimatedLine}${hoursLine('Per day', (h) => `about ${Number(h.perDay)} human hour${Number(h.perDay) === 1 ? '' : 's'} a day`)}</tbody></table>
     ${flow('Time to finish',
     'For tasks finished in that time: from first entering Queued to entering Live. Tasks that never entered Queued are left out, and counted here.',
     flowLine('Middle (median)', (f) => span(f.timeToFinish.median))
