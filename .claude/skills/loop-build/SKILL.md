@@ -24,22 +24,23 @@ A ticket in `Building` is not proof that a pass is building it. A pass that
 dies (killed, out of time, out of session) leaves its ticket there, and
 nothing claims from `Building` (SP-101: SP-92 sat a day that way). So every
 pass begins with this, **once, before it claims, never later** (later, the
-lock reads as this pass's own and it could take back the ticket you are
-building):
+marker is your own claim and it would hand back the ticket you are building):
 
 ```bash
-npm run clickup -- stale-building
+npm run clickup -- pass-reconcile
 ```
 
-It puts a `Building` ticket back in `Queued`, guarded on `Building`, with one
-note read back, only when all three hold: no other build pass is running (the
-lock is free, stale, or held by the runner this pass runs under), the ticket
-has no `PR opened:` line, and nothing has changed on it for 90 minutes. The
-note names the claim time and any unpushed worktree from around then;
-**nothing is deleted**. Exit 0 nothing moved, 3 moved some (both normal:
-carry on and claim); 1 a write failed, 2 could not tell (say so in your
-report, then carry on). A `Building` ticket it leaves alone is not yours:
-leave it too.
+A `claim` made by the build runner's pass writes a claim marker naming the
+ticket; the hand-off (`status` or `ask`) clears it. A hand-run session never
+writes one, so its ticket is never taken back. `pass-reconcile` reads the
+marker the last pass left: if that ticket is still in `Building`, its pass is
+gone, and it goes back to `Rework` (it has a PR) or `Queued` (it has none),
+guarded on `Building`, with one note read back naming the claim time and any
+unpushed worktree from around then. **Nothing is deleted.** Run by hand while
+the runner is running, it leaves the marker alone. Exit 0 nothing to do,
+3 handed one back (both normal: carry on and claim); 1 a write failed, 2 could
+not tell (say so in your report, then carry on). Any other `Building` ticket
+is not yours: leave it.
 
 ## Ticket access: the direct script, not the connector
 
@@ -49,7 +50,7 @@ calls). Doppler supplies the token; you never see or handle it. The moves this
 loop makes:
 
 ```bash
-npm run clickup -- stale-building                                      # FIRST: requeue Building tickets a dead pass left
+npm run clickup -- pass-reconcile                                      # FIRST: hand back the ticket a dead pass left in Building
 npm run clickup -- queue --claimable                                   # FIRST LINE is the task to claim (all Rework, then Queued)
 npm run clickup -- claim --task <id>                                   # safe claim; exit 3 = moved or still waits on a ticket, take the next
 npm run clickup -- get --task <id>                                     # header + body; also shows any recorded PR and send-back rounds
@@ -97,7 +98,7 @@ Exit **0** nothing of his / **3** something IS his / **1** could not tell.
 1. **Claim the next task.**
 
    ```bash
-   npm run clickup -- stale-building
+   npm run clickup -- pass-reconcile
    npm run clickup -- queue --claimable
    npm run clickup -- claim --task <id>
    ```

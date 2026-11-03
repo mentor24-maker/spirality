@@ -27,7 +27,7 @@
  * stderr, so piping stdout is always safe.
  */
 
-import { readFileSync, writeFileSync, existsSync, statSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, statSync, unlinkSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
@@ -78,10 +78,11 @@ import {
   checkBranch, branchContains, tellTickets, latestMainMoved,
 } from '../lib/mainMoved.js';
 import { parseRepoFromRemoteUrl } from '../lib/branchCatchUp.js';
-// A ticket left in Building by a pass that is gone (SP-101).
+// A ticket left in Building by a build pass that died (SP-101).
+import passClaim from '../lib/passClaim.js';
 import {
-  ABANDONED_AFTER_MS, buildLockPath, lockState, staleDecision, leftoverWorktrees, requeueNote,
-} from '../lib/staleBuilding.js';
+  BUILD_SKILL, buildLockPath, lockState, writesMarker, seatGate, handbackDestination, leftoverWorktrees, handbackNote,
+} from '../lib/passHandback.js';
 
 // ── The ids, written down once ───────────────────────────────────────────────
 // They live in spirality.project.json at the repository root (see
@@ -190,9 +191,9 @@ npm run clickup -- <command> [flags]      (Loop Queue: list ${LOOP_QUEUE_LIST}, 
   repo-check                                      does the tracker project's GitHub repository agree with githubRepo? (exit 1 if not)
   lists [--space <id>]                            resolve list ids by name (default: the project's space)
   queue [--list <id>] [--claimable | --status S]  the tickets, one per line: id, status, priority, created, name
-  stale-building [--limit-minutes N] [--dry-run]  put each Building ticket a dead pass left (no build pass running, no PR,
-                                                  untouched past the limit, 90 min unless given) back in Queued, with a
-                                                  note. Exit 0 nothing moved / 3 moved some / 1 a write failed / 2 could not tell
+  pass-reconcile                                  FIRST in every build pass: the ticket the last runner pass claimed and left
+                                                  in Building goes back (Rework if it has a PR, else Queued), with a note.
+                                                  Exit 0 nothing to do / 3 handed one back / 1 a write failed / 2 could not tell
   get --task <id>                                 header + body
   task-name --task <id>                           the name and nothing else (for a PR title)
   comments --task <id>                            the comments, oldest first
@@ -426,7 +427,13 @@ function readBuildLock(dir) {
   if (/^\d+$/.test(String(pid))) {
     try { process.kill(Number(pid), 0); alive = true; } catch (err) { alive = err?.code === 'EPERM'; }
   }
-  return { exists: true, pid, alive, ancestors: ancestorPids() };
+  return { exists: true, pid, alive, ancestors: ancestorPids(), runnerPid: process.env.LOOP_RUNNER_PID || null };
+}
+
+/** What the build lane's lock says about this process (lib/passHandback.js lockState). */
+function buildLock() {
+  const dir = buildLockPath({ logDir: project.logDir, productSlug: project.productSlug, home: homedir() });
+  return { dir, ...lockState(readBuildLock(dir)) };
 }
 
 /** This process's parent, its parent, and so on up to launchd. */
@@ -443,9 +450,9 @@ function ancestorPids() {
   return pids;
 }
 
-/** Every linked worktree of this checkout: path, branch, when it was made, pushed?, dirty? */
+/** Every linked worktree of the checkout the door runs in: path, branch, when it was made, pushed?, dirty? */
 function listWorktrees() {
-  const out = spawnSync('git', ['worktree', 'list', '--porcelain'], { cwd: REPO_ROOT, encoding: 'utf8' });
+  const out = spawnSync('git', ['worktree', 'list', '--porcelain'], { encoding: 'utf8' });
   if (out.status !== 0) return { problem: String(out.stderr || '').trim().slice(0, 200) || 'git worktree list failed', worktrees: [] };
   const entries = String(out.stdout).split(/\n\n+/).map((block) => {
     const e = {};
@@ -459,11 +466,50 @@ function listWorktrees() {
   const worktrees = entries.slice(1).map((e) => {
     let createdMs = NaN;
     try { const st = statSync(joinPath(e.path, '.git')); createdMs = st.birthtimeMs || st.mtimeMs; } catch { /* gone or unreadable */ }
-    const pushed = Boolean(e.branch) && spawnSync('git', ['rev-parse', '--verify', '--quiet', `refs/remotes/origin/${e.branch}`], { cwd: REPO_ROOT }).status === 0;
+    const pushed = Boolean(e.branch) && spawnSync('git', ['rev-parse', '--verify', '--quiet', `refs/remotes/origin/${e.branch}`]).status === 0;
     const st = spawnSync('git', ['-C', e.path, 'status', '--porcelain'], { encoding: 'utf8' });
     return { path: e.path, branch: e.branch || '', createdMs, pushed, dirty: st.status === 0 && String(st.stdout).trim() !== '' };
   });
   return { worktrees };
+}
+
+/**
+ * Where this checkout's claim marker lives (lib/passClaim.js): the checkout
+ * the door runs in, which `npm run` makes the product's own. Asked of git,
+ * because the claim happens in the main checkout and the hand-off inside the
+ * pass's worktree, where plain `.git` is a FILE pointing elsewhere.
+ */
+function passMarkerPath() {
+  const r = spawnSync('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], { encoding: 'utf8' });
+  const out = r.status === 0 ? String(r.stdout || '').trim() : '';
+  return passClaim.markerPath(out || '.git');
+}
+
+/** Written BEFORE the status write, never after: a pass that dies in between
+ *  must leave a marker naming the ticket it was about to take. A marker for a
+ *  claim that then failed is harmless: the reconcile finds the ticket is not
+ *  in Building and clears it. */
+function writePassMarker(task, skill) {
+  const file = passMarkerPath();
+  try {
+    writeFileSync(file, `${JSON.stringify(passClaim.newClaimRecord({ task, skill, pid: process.pid }), null, 2)}\n`);
+    console.error(`  (pass marker written for ${task}: the next ${skill} pass hands it back if this one does not finish)`);
+  } catch (err) {
+    // Not fatal, and said out loud: the claim is what matters.
+    console.error(`  (WARNING: the pass marker could not be written (${err?.message || err}). If this pass dies, its ticket strands in Building.)`);
+  }
+}
+
+/** Cleared whenever the marked ticket leaves Building by a verified write. */
+function clearPassMarkerFor(task, newStatus) {
+  if (statusOf(newStatus) === BUILDING) return;
+  const file = passMarkerPath();
+  const m = passClaim.readMarker(file);
+  if (!m.found || !m.record || String(m.record.task) !== String(task)) return;
+  try {
+    unlinkSync(file);
+    console.error(`  (pass marker cleared: ${task} was handed on)`);
+  } catch { /* the next reconcile sees the ticket has moved and clears it */ }
 }
 
 // ── Commands ─────────────────────────────────────────────────────────────────
@@ -493,6 +539,11 @@ if (cmd === 'claim') {
     console.error(`NOT claimed: "${task}" ${held.reasons.join('; ')}. Nothing was written.${held.unreadable ? '' : ' Take the next task.'}`);
     process.exit(held.unreadable ? 1 : 3);
   }
+  // Only a claim made under the build runner arms the marker (SP-101): a
+  // hand-run session never does, so no loop pass can take its ticket back.
+  const lock = buildLock();
+  if (writesMarker(lock)) writePassMarker(task, BUILD_SKILL);
+  else console.error(`  (no pass marker: ${lock.why}, so this is not a build runner's pass)`);
   process.argv = [...process.argv.slice(0, 2), 'status', ...process.argv.slice(3), '--status', DISPLAY[BUILDING], '--if-status', now];
   console.error(`claiming ${task} out of "${now}" (guarded on that exact status)`);
   cmd = 'status';
@@ -571,73 +622,75 @@ if (cmd === 'whoami') {
   if (claimable && wanted.length) console.error(`  claim it: npm run clickup -- claim --task ${wanted[0].id}`);
   reportLimits();
 
-} else if (cmd === 'stale-building') {
-  // Run by every build pass before it claims (.claude/skills/loop-build).
-  // Moves only a ticket all three facts call abandoned; see lib/staleBuilding.js.
-  const dryRun = flag('dry-run');
-  let limitMs = ABANDONED_AFTER_MS;
-  if (arg('limit-minutes') != null) {
-    const n = Number(arg('limit-minutes'));
-    if (!(Number.isFinite(n) && n > 0)) { console.error(`--limit-minutes needs a number of minutes above 0, got "${arg('limit-minutes')}". Nothing was moved.`); process.exit(2); }
-    limitMs = n * 60 * 1000;
+} else if (cmd === 'pass-reconcile') {
+  // THE FIRST THING A LOOP-BUILD PASS DOES (SP-101; StarCaster's command of
+  // the same name, task 86bbtmbpc). A build pass that dies leaves its ticket
+  // in Building, which no loop claims from. Nothing in a killed session runs
+  // again, so the repair is done by the next pass: the claim left a marker
+  // (lib/passClaim.js), and only a claim under the build runner writes one.
+  // Run once, BEFORE this pass claims: after, the marker is this pass's own.
+  const file = passMarkerPath();
+  const marker = passClaim.readMarker(file);
+  const lock = buildLock();
+  console.error(`build lock ${lock.dir}: ${lock.state} (${lock.why})`);
+
+  let status = '';
+  if (marker.found && marker.record) {
+    // An unreadable status is NOT a hand-back: moving a ticket on a reading
+    // not taken is how a live build gets yanked out from under its pass.
+    const seen = await readTaskOrNull(marker.record.task);
+    if (seen) status = statusOf(seen);
   }
-  const lockDir = buildLockPath({ logDir: project.logDir, productSlug: project.productSlug, home: homedir() });
-  const lock = lockState(readBuildLock(lockDir));
-  console.error(`build lock ${lockDir}: ${lock.state} — ${lock.why}`);
-  const building = (await fetchAllTasks(LOOP_QUEUE_LIST)).filter((t) => statusOf(t) === BUILDING);
-  let moved = 0, failed = 0, unsure = 0;
-  let worktrees = null;
-  const nowMs = Date.now();
-  for (const t of building) {
-    const read = await readCommentsOrProblem(t.id);
-    const hasPr = read.problem ? null : Boolean(findPullRequest(read.comments));
-    const d = staleDecision({ status: statusOf(t), lock, hasPr, updatedMs: Number(t.date_updated), nowMs, limitMs });
-    if (d.action === 'cannot-tell') {
-      unsure += 1;
-      console.log(`${t.id}\tcould not tell\t${d.reason}${read.problem ? ` (${read.problem})` : ''} — left in Building`);
-      continue;
-    }
-    if (d.action !== 'requeue') { console.log(`${t.id}\tleft alone\t${d.reason}`); continue; }
-    if (dryRun) { console.log(`${t.id}\twould requeue\t${d.reason}`); continue; }
-    // Read again right before the write: ClickUp ignores the guard below.
-    const fresh = await readTaskOrNull(t.id);
-    if (!fresh || statusOf(fresh) !== BUILDING || Number(fresh.date_updated) !== Number(t.date_updated)) {
-      console.log(`${t.id}\tleft alone\t${fresh ? 'it changed while this pass was looking' : 'it could not be read again'} — not moved`);
-      continue;
-    }
-    const out = await tracker.updateTask(t.id, {
-      status: DISPLAY[QUEUED],
-      assignees: { add: [], rem: (t.assignees || []).map((a) => a.id) },
+  // The pass seat's inference (a new pass means the old one ended) holds only
+  // under the runner, or with no runner at all; seatGate refuses it otherwise.
+  const decision = seatGate(lock, marker)
+    || passClaim.reconcileDecision({ marker, status, trigger: passClaim.TRIGGER_PASS });
+  let ok = true;
+  let destination = '';
+
+  if (decision.action === 'handback') {
+    const task = decision.task;
+    const read = await readCommentsOrProblem(task);
+    const dest = handbackDestination(read.problem ? null : Boolean(findPullRequest(read.comments)));
+    destination = dest.status;
+    // Guarded on Building: a ticket that moved since the read is not moved again.
+    const before = await readTaskOrNull(task);
+    const out = await tracker.updateTask(task, {
+      status: dest.status,
+      assignees: { add: [], rem: (before?.assignees || []).map((a) => a.id) },
     }, { ifStatus: DISPLAY[BUILDING] });
     const now = out.json?.status?.status ?? '';
-    if (out.moved || !out.res.ok || statusOf(now) !== QUEUED) {
-      failed += 1;
-      console.log(`${t.id}\tNOT moved\t${out.moved ? 'it moved underneath this pass' : `the write ${out.res.ok ? `came back "${now || '?'}"` : `failed, HTTP ${out.res.status}`}`} — left as it is`);
-      continue;
+    if (out.moved || !out.res.ok || now.toLowerCase() !== dest.status.toLowerCase()) {
+      ok = false;
+      console.error(`  ${task}: NOT moved (${out.moved ? 'it moved underneath this pass' : out.res.ok ? `the write came back "${now || '?'}"` : `HTTP ${out.res.status}`}). The marker stays, so the next pass tries again.`);
+    } else {
+      const worktrees = listWorktrees();
+      if (worktrees.problem) console.error(`  the worktrees could not be listed (${worktrees.problem}); the note says none were found`);
+      const claimedMs = Date.parse(marker.record.at);
+      const leftovers = Number.isFinite(claimedMs) ? leftoverWorktrees(worktrees.worktrees, { claimedMs }) : [];
+      const text = handbackNote({ when: Number.isFinite(claimedMs) ? clock(claimedMs) : '', destination: dest, leftovers });
+      const posted = await tracker.postComment(task, { comment_text: text });
+      const id = String(posted.json?.id ?? '');
+      const back = posted.res.ok ? await readCommentsOrProblem(task) : { problem: `HTTP ${posted.res.status}` };
+      if (back.problem || !back.comments.some((c) => String(c.id) === id && String(c.comment_text || '').trim())) {
+        // The move stuck, so the marker is spent; the missing note is the failure.
+        console.error(`  ${task}: moved to ${dest.status}, but its note did NOT save (${back.problem || `comment ${id || '(no id)'} not found on read-back`}).`);
+        try { unlinkSync(file); } catch { /* it reads as resolved next pass */ }
+        console.log(passClaim.reconcileMessage(decision, { destination }));
+        process.exit(1);
+      }
+      console.error(`  ${task}: note ${id} read back`);
     }
-    if (!worktrees) {
-      worktrees = listWorktrees();
-      if (worktrees.problem) console.error(`the worktrees could not be listed (${worktrees.problem}); the note says none were found`);
-    }
-    const leftovers = leftoverWorktrees(worktrees.worktrees, { updatedMs: Number(t.date_updated) });
-    const text = requeueNote({ when: clock(t.date_updated), reason: d.reason, leftovers });
-    const posted = await tracker.postComment(t.id, { comment_text: text });
-    const id = String(posted.json?.id ?? '');
-    const back = posted.res.ok ? await readCommentsOrProblem(t.id) : { problem: `HTTP ${posted.res.status}` };
-    const landed = !back.problem && back.comments.some((c) => String(c.id) === id && String(c.comment_text || '').trim());
-    if (!landed) {
-      failed += 1;
-      console.log(`${t.id}\tmoved to Queued, NOTE FAILED\tthe ticket is back in Queued but its note did not save (${back.problem || `comment ${id || '(no id)'} not found on read-back`})`);
-      continue;
-    }
-    moved += 1;
-    console.log(`${t.id}\trequeued\t${d.reason}; note ${id} read back`);
   }
-  console.error(`${building.length} ticket(s) in Building; ${dryRun ? 'dry run, nothing written' : `${moved} put back in Queued`}${failed ? `, ${failed} FAILED` : ''}${unsure ? `, ${unsure} could not tell` : ''}`);
+
+  // Removed for every outcome that RESOLVED it, kept for every one that did
+  // not: a failure is retried next pass, an unreadable marker stays for a person.
+  if (decision.action === 'resolved' || (decision.action === 'handback' && ok)) {
+    try { unlinkSync(file); } catch { /* it will read as resolved next pass */ }
+  }
+  console.log(passClaim.reconcileMessage(decision, { destination }));
   reportLimits();
-  if (failed) process.exit(1);
-  if (unsure) process.exit(2);
-  if (moved) process.exit(3);
+  process.exit(passClaim.reconcileExitCode({ action: decision.action, ok }));
 
 } else if (cmd === 'get') {
   const task = arg('task');
@@ -828,6 +881,7 @@ if (cmd === 'whoami') {
   for (const id of add) if (!finalIds.includes(id)) { console.error(`Assignee did NOT stick: asked to assign ${id}, the task carries [${finalIds.join(', ')}].`); process.exit(1); }
   if (clearing && finalIds.some((id) => !add.includes(id))) { console.error(`Assignees did NOT clear: [${finalIds.join(', ')}] still on the task.`); process.exit(1); }
   console.log(`Task ${task}: "${was}" -> "${now}", assigned: ${assigneeNames(t)} (verified from the write response).`);
+  clearPassMarkerFor(task, now);
   reportLimits();
 
 } else if (cmd === 'priority') {
@@ -970,6 +1024,7 @@ if (cmd === 'whoami') {
   if (now.toLowerCase() !== status.toLowerCase()) { console.error(`Card posted (comment ${cardId}), but the status did NOT stick: asked "${status}", got "${now}".`); process.exit(1); }
   if (!(moved.json.assignees || []).some((a) => a.id === OPERATOR_ID)) { console.error(`Card posted and status moved to "${now}", but Dane is NOT assigned — the handoff is incomplete.`); process.exit(1); }
   console.log(`Task ${task}: card ${cardId} posted, "${was}" -> "${now}", assigned: ${assigneeNames(moved.json)}.`);
+  clearPassMarkerFor(task, now);
   reportLimits();
 
 } else if (cmd === 'relay') {
