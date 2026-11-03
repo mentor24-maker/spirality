@@ -6,13 +6,15 @@ import { join } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { createServer } from 'node:http';
 import { fileURLToPath } from 'node:url';
-import { EXPECTED_SECRETS, doctorTarget, doctorReport, formatReport } from './expectedSecrets.mjs';
+import { EXPECTED_SECRETS, doctorTarget, usesClickUp, doctorReport, formatReport } from './expectedSecrets.mjs';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const SPIRALITY = JSON.parse(readFileSync(join(ROOT, 'spirality.project.json'), 'utf8'));
 // A second product that does not run the tracker (no trackerPort).
 const { trackerPort, trackerHost, trackerDataDir, ...rest } = SPIRALITY;
 const GUEST = { ...rest, productSlug: 'normie', dopplerProject: 'normie', dopplerConfig: 'prd', githubRepo: 'owner/normie', trackerPrefix: 'NO' };
+// The same product as it really is: on the tracker and never on ClickUp, its ClickUp ids "0".
+const NEVER_CLICKUP = { ...GUEST, workspaceId: '0', spaceId: '0', loopQueueListId: '0' };
 
 /**
  * A stand-in tracker answering GET /projects/<slug> with `repo` as the
@@ -57,6 +59,34 @@ test('another product checks its own Doppler project and config, without the key
   assert.ok(names.includes('TRACKER_TOKEN_LOOP_BUILD'));
   assert.ok(names.includes('TRACKER_TOKEN_HAND_RUN'));
   assert.ok(guest.expected.every((s) => s.configs[0] === 'prd'));
+});
+
+test('Spirality, on the tracker but still reading its ClickUp list, is asked for the ClickUp key', () => {
+  assert.equal(SPIRALITY.tracker, 'api');
+  assert.equal(usesClickUp(SPIRALITY), true);
+  assert.ok(home.expected.some((s) => s.name === 'CLICKUP_API_TOKEN'));
+});
+
+test('a product on the tracker with ClickUp ids "0" is not asked for the ClickUp key; one on ClickUp is', () => {
+  assert.equal(usesClickUp(NEVER_CLICKUP), false);
+  const names = doctorTarget(NEVER_CLICKUP).expected.map((s) => s.name);
+  assert.ok(!names.includes('CLICKUP_API_TOKEN'));
+  assert.ok(names.includes('TRACKER_TOKEN_LOOP_BUILD'));
+  for (const config of [{ ...NEVER_CLICKUP, tracker: 'clickup' }, (({ tracker, ...c }) => c)(NEVER_CLICKUP)]) {
+    assert.equal(usesClickUp(config), true);
+    assert.ok(doctorTarget(config).expected.some((s) => s.name === 'CLICKUP_API_TOKEN'));
+  }
+});
+
+test('doctor passes for a product never on ClickUp whose Doppler has no ClickUp key', async () => {
+  const t = await standInTracker(NEVER_CLICKUP, 'owner/normie');
+  const names = doctorTarget(NEVER_CLICKUP).expected.map((s) => s.name);
+  const f = productFolder(t.config, names);
+  try {
+    const r = await f.runAsync([join(ROOT, 'scripts/doctor.mjs')]);
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.doesNotMatch(r.stdout, /CLICKUP_API_TOKEN/);
+  } finally { f.cleanup(); await t.close(); }
 });
 
 test('all present: ok', () => {

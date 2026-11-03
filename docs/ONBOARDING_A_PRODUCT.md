@@ -146,7 +146,11 @@ changing the file: `CLICKUP_WORKSPACE_ID`, `CLICKUP_SPACE_ID`,
   The email keys and `TRACKER_TOKEN_OPERATOR` belong with the product that
   runs the tracker server (they are marked `trackerHome`); a product using
   Spirality's tracker does not need them, and its doctor does not ask for
-  them. The tracker also reads `TRACKER_NOTIFY_FROM` if it is there
+  them. `CLICKUP_API_TOKEN` is marked `clickup`: doctor asks for it only
+  from a product that still talks to ClickUp, its `tracker` `"clickup"` or
+  its `loopQueueListId` a real list (Spirality's is, the record kept to
+  compare against). A product never on ClickUp (`tracker` `"api"`, ClickUp
+  ids `"0"`, like Normie) needs no ClickUp key. The tracker also reads `TRACKER_NOTIFY_FROM` if it is there
   (optional, `tracker/notify.mjs`), and `TRACKER_URL` / `TRACKER_API_URL` can
   override the config (item 2). A runner never holds a token: it sets
   `TRACKER_TOKEN_NAME` to the secret's name, and the door reads the value
