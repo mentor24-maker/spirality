@@ -41,12 +41,10 @@ The items below marked **missing**, gathered here so they can become tickets:
    the config the way `scripts/install_loop_runner.sh` and
    `scripts/run_relay.sh` already do. Each is a literal that engineering rule
    2 says is a bug.
-3. **Loop sign-ins are per lane, not per product.** The tracker finds a
-   machine actor by its kind and name alone (`loop-build`, `relay`, ...), and
-   `npm run tracker:signins -- create` gives a found actor a **new** token,
-   which stops the old one. Run for a second product, it would re-issue the
-   tokens Spirality's own loops hold in Doppler project `spirality`, and
-   Spirality's loops would stop signing in (item 4).
+3. **Loop sign-ins were per lane, not per product.** Fixed by SP-95: a
+   product that does not run the tracker gets machine sign-ins named for
+   itself (`normie loop-build`), so its `create` can no longer re-issue
+   Spirality's (item 4).
 4. **The tracker project's GitHub repository field is a record only.** SP-80
    added it, but the loops read the repository from the project config's
    `githubRepo`, not from the tracker, so the two can disagree unnoticed
@@ -177,6 +175,31 @@ changing the file: `CLICKUP_WORKSPACE_ID`, `CLICKUP_SPACE_ID`,
   product that runs it, Spirality's `~/spirality-tracker`). The project's
   slug is the config's `productSlug`, its prefix `trackerPrefix`. The
   sign-ins are the seats in `TRACKER_SEATS` (`scripts/lib/expectedSecrets.mjs`).
+- **How a second product's loops sign in** (decided on SP-95: each product
+  its own). Every product's loops share the one tracker, but never an
+  actor, because `create` gives a found actor a new token and that stops
+  the old one.
+  - The product that runs the tracker (its config sets `trackerPort`;
+    Spirality) keeps the bare lane names (`loop-build`, `loop-review`,
+    `loop-intake`, `relay`, `hand-run`) and holds the operator's own
+    sign-in, `TRACKER_TOKEN_OPERATOR`.
+  - Any other product (no `trackerPort`; Normie) gets one machine actor per
+    lane named for itself and the lane (`normie loop-build`, ...), each
+    token kept under the same secret names (`TRACKER_TOKEN_LOOP_BUILD`, ...)
+    in **its own** Doppler project. It has no operator seat: its project's
+    operator is Dane's existing actor, found by name, and never given a new
+    token.
+  - `create` and `check` refuse unless `doppler run` is for the config's own
+    `dopplerProject`, so one product's run never reads or writes another's
+    secrets. And once the tracker holds another product's project,
+    `create` gives a new token to an actor under a bare lane name (or to
+    the operator) only when this run's Doppler project holds the
+    operator's own working sign-in, which only the product that runs the
+    tracker has. Otherwise it is a second product whose config wrongly sets
+    `trackerPort`, about to take over the first product's sign-ins, and it
+    is refused, whether or not that product's project already exists (made
+    by `create` or on the page). A guest's own seats, named for it, are
+    never refused: a rerun after a lost token just re-keys them.
 - **Who.**
   - The project: `npm run tracker:signins -- create --name <project name>`
     makes it if it does not exist, or Dane makes it with the tracker page's
@@ -185,7 +208,9 @@ changing the file: `CLICKUP_WORKSPACE_ID`, `CLICKUP_SPACE_ID`,
     (**a browser login**). The tracker lets only a person change a project.
   - The sign-ins: Dane runs `tracker:signins create` on the Mini, which
     makes each actor, gives it a token, proves it at the tracker and writes
-    it into Doppler.
+    it into Doppler. For a product that does not run the tracker, from its
+    own checkout, with `TRACKER_DB` set to the tracker's database
+    (Spirality's `~/spirality-tracker/tracker.db`), after Spirality's own.
 - **Check.**
   - `npm run tracker:signins -- check` asks the tracker who each seat's
     token is; every line must name its own seat.
@@ -193,13 +218,13 @@ changing the file: `CLICKUP_WORKSPACE_ID`, `CLICKUP_SPACE_ID`,
     prefix and repository.
   - `npm run clickup -- queue` from the product's repository lists its
     tickets (empty at first) with no error.
-- **Today.** The project and Spirality's own sign-ins: **automated**
-  (`tracker:signins create`). The repository field: **manual**. **Missing**:
-  sign-ins for a *second* product. Machine actors are found by name alone,
-  so running `create` for Normie would re-issue the tokens of Spirality's
-  `loop-build`, `loop-review`, `loop-intake`, `relay` and `hand-run` and stop
-  Spirality's loops (gap 3). Also missing: anything that compares the
-  tracker's repository field with `githubRepo` (gap 4).
+- **Today.** The project and every product's sign-ins: **automated**
+  (`tracker:signins create`), each product with its own (above). The
+  repository field: **manual**. **Missing**: anything that compares the
+  tracker's repository field with `githubRepo` (gap 4). Until SP-96 lands,
+  the `tracker:signins` npm script says `--project spirality`, so in
+  another product's checkout it refuses (the Doppler project does not
+  match its config) rather than touch Spirality's secrets.
 
 ## 5. The loop lanes on the Mini
 
