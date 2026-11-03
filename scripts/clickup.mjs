@@ -16,8 +16,9 @@
  * "clickup"), so the commands and their guards do not know which one it is.
  *
  * The token comes from the environment, never printed and never logged.
- * package.json wraps this in `doppler run --project spirality --config dev`,
- * so no agent or human handles the value:
+ * package.json wraps this in `doppler run` for the project config's
+ * dopplerProject and dopplerConfig (scripts/with_doppler.mjs), so no agent or
+ * human handles the value:
  *
  *   npm run clickup -- whoami
  *
