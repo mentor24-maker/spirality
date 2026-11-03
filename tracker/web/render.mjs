@@ -244,6 +244,16 @@ export function redrawHold({ hidden = false, drawing = false, writing = false, f
 }
 
 /**
+ * The choice a chooser was drawn with: the option marked selected in the
+ * page as drawn, else the first one ('' with none). `options` is the
+ * chooser's options, each `{ value, defaultSelected }`.
+ */
+export function drawnChoice(options) {
+  const all = [...options];
+  return (all.find((o) => o.defaultSelected) ?? all[0])?.value ?? '';
+}
+
+/**
  * The header bell's colour for the same count: grey while nothing waits (or
  * the count is missing), yellow for one to three, red for more than three.
  */

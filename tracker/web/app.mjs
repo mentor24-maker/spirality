@@ -26,7 +26,7 @@
  * an emailed link's own page. The link's token is sent only in a JSON body,
  * never in an address.
  */
-import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderAnswerIn, statusLabel, ANSWER_IN_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, redrawHold } from './render.mjs';
+import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderAnswerIn, statusLabel, ANSWER_IN_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, redrawHold, drawnChoice } from './render.mjs';
 
 /** Where an earlier version of the page kept a pasted token; removed on load, never read. */
 const OLD_TOKEN_KEY = 'tracker-token';
@@ -755,7 +755,7 @@ async function drawProject(slug, view, { adding = false, filed = null } = {}) {
         button.disabled = false;
         return;
       }
-      await drawProject(slug, view);
+      await drawAgain(() => drawProject(slug, view));
     });
   }
 }
@@ -971,7 +971,7 @@ async function drawTicket(id, said = null, kept = null) {
       note.textContent = 'Posting…';
       try {
         await api('POST', `/tickets/${encodeURIComponent(t.id)}/comments`, { body: word });
-        await drawTicket(t.id);
+        await drawAgain(() => drawTicket(t.id));
         main.querySelector('details.details').open = true;
         main.querySelector('.comment:last-of-type')?.scrollIntoView({ block: 'center' });
       } catch (err) {
@@ -1037,7 +1037,7 @@ async function drawTicket(id, said = null, kept = null) {
     try {
       // Exactly as typed: no trimming, no formatting. "merge" arrives as "merge".
       await api('POST', `/tickets/${encodeURIComponent(t.id)}/comments`, { body: box.value });
-      await drawTicket(t.id);
+      await drawAgain(() => drawTicket(t.id));
       // Show the reply he just posted: open Details at the end of the thread.
       main.querySelector('details.details').open = true;
       main.querySelector('.comment:last-of-type')?.scrollIntoView({ block: 'center' });
@@ -1081,7 +1081,7 @@ function wireEditPanel(t) {
   // refused), so say which, and leave the panel held: it shows an old version.
   const redraw = async (said, kept, note, outcome) => {
     try {
-      await drawTicket(t.id, said, kept);
+      await drawAgain(() => drawTicket(t.id, said, kept));
     } catch (err) {
       if (err instanceof SignedOut) return drawSignIn(`You were signed out; ${outcome}, but the page could not show it.`);
       note.className = 'note error';
@@ -1227,7 +1227,7 @@ function wireAddTask(slug, view, adding) {
     }
     try { localStorage.removeItem(DRAFT_KEY); } catch { /* nothing kept */ }
     try {
-      await drawProject(slug, view, { filed: ticket.id });
+      await drawAgain(() => drawProject(slug, view, { filed: ticket.id }));
     } catch (err) {
       if (err instanceof SignedOut) return drawSignIn(`You were signed out; ${ticket.id} was filed.`);
       note.className = 'note error';
@@ -1480,13 +1480,14 @@ const here = () => location.pathname + location.search;
 async function route({ place = null } = {}) {
   const reads = new Map();
   drawing += 1;
-  recording = reads;
   try {
     if (location.pathname === '/set-password') {
       await drawSetPassword();
       return;
     }
     me = await api('GET', '/me');
+    // Only the page's own reads are kept: who is signed in and the count are not what it shows.
+    recording = reads;
     who.textContent = `Signed in as ${me.name}`;
     signOut.hidden = false;
     bell.hidden = false;
@@ -1537,9 +1538,11 @@ async function route({ place = null } = {}) {
       await drawWaiting();
     }
     place?.restore();
+    const kept = recording === reads;
+    if (kept) recording = null;
     // Waiting on you read the count as it drew; every other page reads it now.
     if (!waiting) await refreshCount();
-    if (recording === reads) lastDrawn = ticket || project || tasks || isNew || waiting ? { address: here(), reads } : null;
+    if (kept) lastDrawn = ticket || project || tasks || isNew || waiting ? { address: here(), reads } : null;
   } catch (err) {
     if (place && !(err instanceof SignedOut)) return;
     lastDrawn = null;
@@ -1555,9 +1558,28 @@ async function route({ place = null } = {}) {
 const fieldsOf = (root) => [...root.querySelectorAll('input, textarea, select')].map((el) => ({
   focused: el === document.activeElement,
   value: el.value,
-  // A chooser counts only while it has focus: it saves the moment it changes.
-  initial: el.tagName === 'SELECT' ? el.value : el.defaultValue,
+  // A chooser is compared with the choice it was drawn with: "Copy to
+  // another project" holds his pick until Copy is pressed.
+  initial: el.tagName === 'SELECT' ? drawnChoice(el.options) : el.defaultValue,
 }));
+
+/**
+ * Draw the page again in place after a save, keeping what the beat compares
+ * against current, so the next beat does not find a "change" that was his
+ * own save and wipe its "Saved" note.
+ */
+async function drawAgain(draw) {
+  const reads = new Map();
+  drawing += 1;
+  recording = reads;
+  try {
+    await draw();
+    if (recording === reads && lastDrawn?.address === here()) lastDrawn = { address: here(), reads };
+  } finally {
+    if (recording === reads) recording = null;
+    drawing -= 1;
+  }
+}
 
 /** Why this beat must leave the page alone, or null. */
 const hold = () => redrawHold({ hidden: document.hidden, drawing: drawing > 0, writing: writing > 0, fields: fieldsOf(main) });

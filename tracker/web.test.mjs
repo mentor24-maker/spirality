@@ -9,7 +9,7 @@ import { openStore } from './store.mjs';
 import { startServer } from './server.mjs';
 import { seedDemo, tickingClock } from './demoData.mjs';
 import { reportsOf, REPORT_RANGES, searchTickets } from './pageData.mjs';
-import { escapeHtml, renderComment, renderInline, renderMarkdown, renderQuickAction, renderCommands, cardCommands, cardAsk, renderMergeAction, renderAnswerIn, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, activeFilters, redrawHold } from './web/render.mjs';
+import { escapeHtml, renderComment, renderInline, renderMarkdown, renderQuickAction, renderCommands, cardCommands, cardAsk, renderMergeAction, renderAnswerIn, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, activeFilters, redrawHold, drawnChoice } from './web/render.mjs';
 import { loadProjectConfig } from '../lib/projectConfig.mjs';
 import operatorCard from '../lib/operatorCard.js';
 import machineComment from '../lib/machineComment.js';
@@ -492,7 +492,7 @@ test('the Add Task box on the Tasks page files into the project shown, in Reques
   assert.match(wire, /if \(adding \|\| draft\.title \|\| draft\.description\) box\.open = true;/, 'kept text opens the box on its own');
   assert.match(wire, /drawSignIn\('You were signed out; your request was not filed\. What you typed is kept/);
   // Filed: the draft is forgotten and the page redraws, box closed, naming the new id.
-  assert.match(wire, /localStorage\.removeItem\(DRAFT_KEY\);[\s\S]*await drawProject\(slug, view, \{ filed: ticket\.id \}\);/);
+  assert.match(wire, /localStorage\.removeItem\(DRAFT_KEY\);[\s\S]*await drawAgain\(\(\) => drawProject\(slug, view, \{ filed: ticket\.id \}\)\);/);
   const draw = app.slice(app.indexOf('async function drawProject'), app.indexOf('async function copyText'));
   assert.match(draw, /<details class="add-task">\s*<summary>Add Task<\/summary>\s*<form class="request">/, 'drawn closed, on the board and the list alike');
   assert.match(draw, /Filed <a href="\/t\/\$\{encodeURIComponent\(filed\)\}">\$\{escapeHtml\(filed\)\}<\/a>/);
@@ -686,6 +686,19 @@ test('a beat leaves the page alone while the tab is hidden, a draw or a save is 
   assert.equal(redrawHold({ fields: [{ focused: false, value: 'Old name, edited', initial: 'Old name' }] }), 'typing', 'an edited name');
 });
 
+test('a chooser picked and left (Copy to another project) holds the beat; one as drawn does not', () => {
+  const opt = (value, defaultSelected = false) => ({ value, defaultSelected });
+  assert.equal(drawnChoice([opt('normie'), opt('wavecenter')]), 'normie', 'nothing marked: the first option');
+  assert.equal(drawnChoice([opt('low'), opt('high', true)]), 'high', 'the option drawn selected');
+  assert.equal(drawnChoice([]), '');
+  // Picked WaveCenter, then clicked somewhere blank: not his focus, but not as drawn.
+  const copyTo = [opt('normie'), opt('wavecenter')];
+  assert.equal(redrawHold({ fields: [{ focused: false, value: 'wavecenter', initial: drawnChoice(copyTo) }] }), 'typing');
+  assert.equal(redrawHold({ fields: [{ focused: false, value: 'normie', initial: drawnChoice(copyTo) }] }), null);
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  assert.match(/const fieldsOf = [\s\S]*?\n\}\)\);/.exec(app)[0], /initial: el\.tagName === 'SELECT' \? drawnChoice\(el\.options\) : el\.defaultValue,/);
+});
+
 test('an open page reads again once a minute and on coming back to the tab, never while hidden, and keeps his place', () => {
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   assert.match(app, /const REFRESH_EVERY_MS = 60_000;/);
@@ -700,7 +713,12 @@ test('an open page reads again once a minute and on coming back to the tab, neve
   // Only Waiting on you, the board and list, and a ticket keep themselves current.
   const route = /async function route\(\{ place = null \} = \{\}\) \{[\s\S]*?\n\}/.exec(app)[0];
   assert.match(route, /lastDrawn = ticket \|\| project \|\| tasks \|\| isNew \|\| waiting \? \{ address: here\(\), reads \} : null;/);
-  assert.match(route, /place\?\.restore\(\);\s*\/\/[^\n]*\n\s*if \(!waiting\) await refreshCount\(\);/, 'his place is back before the page is shown');
+  assert.match(route, /place\?\.restore\(\);\s*const kept = recording === reads;\s*if \(kept\) recording = null;\s*\/\/[^\n]*\n\s*if \(!waiting\) await refreshCount\(\);\s*if \(kept\) lastDrawn = /, 'his place is back before the page is shown, and the count is not part of what it was drawn from');
+  assert.match(route, /me = await api\('GET', '\/me'\);\s*\/\/[^\n]*\n\s*recording = reads;/, 'who is signed in is not part of it either');
+  // A save's own redraw keeps what the beat compares against, so the next beat does not undo its "Saved" note.
+  assert.match(/async function drawAgain\(draw\) \{[\s\S]*?\n\}/.exec(app)[0], /await draw\(\);\s*if \(recording === reads && lastDrawn\?\.address === here\(\)\) lastDrawn = \{ address: here\(\), reads \};/);
+  assert.equal(app.match(/await drawTicket\(t\.id/g), null, 'every in-page ticket redraw goes through drawAgain');
+  assert.equal((app.match(/await drawAgain\(\(\) => draw(Ticket|Project)\(/g) ?? []).length, 5);
   assert.match(route, /if \(place && !\(err instanceof SignedOut\)\) return;/, "a beat's failed draw does not replace the page with an error");
   assert.match(app, /if \(location\.hash === '#reply' && !refreshing\) \{/, 'a beat does not jump to the reply box again');
   assert.match(/function keepPlace\(\) \{[\s\S]*?\n\}/.exec(app)[0], /main\.querySelectorAll\('details'\)[\s\S]*window\.scrollTo\(0, y\);/);
@@ -1468,7 +1486,7 @@ test('both Deletes confirm before any request, show a refusal on the page, and k
   assert.ok(listHandler, 'the bin has a click handler');
   assert.match(listHandler, /^\s*if \(!confirm\(deleteQuestion\(\{ id, name: names\.get\(id\) \}\)\)\) return;/);
   assert.match(listHandler, /catch \(err\) \{[\s\S]*listNote\.textContent = deleteRefusal\(id, err\);\s*listNote\.hidden = false;\s*button\.disabled = false;\s*return;/);
-  assert.match(listHandler, /\}\s*await drawProject\(slug, view\);$/, 'only a delete that succeeded redraws the list');
+  assert.match(listHandler, /\}\s*await drawAgain\(\(\) => drawProject\(slug, view\)\);$/, 'only a delete that succeeded redraws the list');
   const pageHandler = /deleteForm\?\.addEventListener\('submit', async \(e\) => \{([\s\S]*?)\n  \}\);/.exec(app)?.[1];
   assert.ok(pageHandler, 'the Delete button has a submit handler');
   assert.match(pageHandler, /^\s*e\.preventDefault\(\);\s*if \(!confirm\(deleteQuestion\(t\)\)\) return;/);
@@ -1597,7 +1615,7 @@ test('the page sends each change with ifVersion, redraws from the server after a
   assert.match(wire, /err\.status === 409\) return redraw\(\{ text: MOVED_MESSAGE, error: true \}, typed\(\), note, /);
   assert.match(wire, /note\.textContent = `Not saved: \$\{err\.message\}`;\s*for \(const c of held\) c\.disabled = false;\s*saving = false;\s*return;/, 'a refusal shows the reason, redraws nothing and frees the panel');
   assert.match(wire, /await redraw\(\{ field, text: 'Saved' \}, typed\(field\), note, /);
-  assert.match(wire, /await drawTicket\(t\.id, said, kept\);/, 'the one redraw, carrying what was typed');
+  assert.match(wire, /await drawAgain\(\(\) => drawTicket\(t\.id, said, kept\)\);/, 'the one redraw, carrying what was typed');
   assert.match(app, /\$\{me\?\.kind === 'human' \? renderEditPanel\(t\) : ''\}\s*<section class="description">/, 'a person only, above the description');
   assert.match(MOVED_MESSAGE, /nothing was overwritten/);
   // Nothing project-specific: no operator name, priority or status list written into the page.
@@ -1631,7 +1649,7 @@ test('a save whose redraw fails says what happened instead of sitting on "Saving
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   const wire = /function wireEditPanel\(t\) \{([\s\S]*?)\n\}/.exec(app)?.[1];
   const redraw = wire.slice(wire.indexOf('const redraw ='), wire.indexOf('let saving'));
-  assert.match(redraw, /try \{\s*await drawTicket\(t\.id, said, kept\);\s*\} catch \(err\) \{/);
+  assert.match(redraw, /try \{\s*await drawAgain\(\(\) => drawTicket\(t\.id, said, kept\)\);\s*\} catch \(err\) \{/);
   assert.match(redraw, /if \(err instanceof SignedOut\) return drawSignIn\(/);
   assert.match(redraw, /note\.textContent = `The page could not refresh \(\$\{err\.message\}\): \$\{outcome\}\. Reload to see the ticket as stored\.`/);
   assert.match(wire, /`the \$\{field\} was saved`/);
