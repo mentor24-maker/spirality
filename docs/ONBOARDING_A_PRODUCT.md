@@ -45,10 +45,10 @@ The items below marked **missing**, gathered here so they can become tickets:
    product that does not run the tracker gets machine sign-ins named for
    itself (`normie loop-build`), so its `create` can no longer re-issue
    Spirality's (item 4).
-4. **The tracker project's GitHub repository field is a record only.** SP-80
-   added it, but the loops read the repository from the project config's
-   `githubRepo`, not from the tracker, so the two can disagree unnoticed
-   (item 4).
+4. **The tracker project's GitHub repository field could disagree
+   unnoticed.** Fixed by SP-99: SP-80 added the field, and the loops still
+   read the repository from the project config's `githubRepo`, but
+   `npm run doctor` now compares the two (item 4).
 
 ## 1. The GitHub repository
 
@@ -218,12 +218,17 @@ changing the file: `CLICKUP_WORKSPACE_ID`, `CLICKUP_SPACE_ID`,
     token is; every line must name its own seat.
   - The Projects screen at `trackerUrl/projects` lists the project with its
     prefix and repository.
+  - `npm run doctor` (or `npm run clickup -- repo-check` alone) reads the
+    project's repository field with the loop's own sign-in and compares it
+    with `githubRepo`: the same is fine, an empty field is reported with the
+    Edit form's address to fill it in, and a different one fails with both
+    named. It only reads; nothing writes the field.
   - `npm run clickup -- queue` from the product's repository lists its
     tickets (empty at first) with no error.
 - **Today.** The project and every product's sign-ins: **automated**
   (`tracker:signins create`), each product with its own (above). The
-  repository field: **manual**. **Missing**: anything that compares the
-  tracker's repository field with `githubRepo` (gap 4). The
+  repository field: **manual**; its agreement with `githubRepo`:
+  **automated** (`npm run doctor`, SP-99). The
   `tracker:signins` npm script runs under the config's own Doppler project
   (SP-96), so in another product's checkout it reads and writes that
   product's secrets, never Spirality's.

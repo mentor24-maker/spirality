@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, rmSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
+import { createServer } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { EXPECTED_SECRETS, doctorTarget, doctorReport, formatReport } from './expectedSecrets.mjs';
 
@@ -12,6 +13,23 @@ const SPIRALITY = JSON.parse(readFileSync(join(ROOT, 'spirality.project.json'), 
 // A second product that does not run the tracker (no trackerPort).
 const { trackerPort, trackerHost, trackerDataDir, ...rest } = SPIRALITY;
 const GUEST = { ...rest, productSlug: 'normie', dopplerProject: 'normie', dopplerConfig: 'prd', githubRepo: 'owner/normie', trackerPrefix: 'NO' };
+
+/**
+ * A stand-in tracker answering GET /projects/<slug> with `repo` as the
+ * project's GitHub repository, so doctor's repository check never reaches
+ * the real one. Returns the config pointed at it, and `close`.
+ */
+async function standInTracker(config, repo) {
+  const server = createServer((req, res) => {
+    const known = req.url === `/projects/${config.productSlug}` && req.headers.authorization === 'Bearer stand-in-token';
+    res.writeHead(known ? 200 : 404, { 'content-type': 'application/json' });
+    // `undefined` leaves the field out altogether, as a tracker older than SP-80 would.
+    res.end(JSON.stringify(known ? { slug: config.productSlug, repo } : { message: 'no' }));
+  });
+  await new Promise((done) => server.listen(0, '127.0.0.1', done));
+  const url = `http://127.0.0.1:${server.address().port}`;
+  return { config: { ...config, trackerUrl: url, trackerApiUrl: url }, close: () => new Promise((done) => server.close(done)) };
+}
 
 const home = doctorTarget(SPIRALITY);
 const { expected, configs: CONFIGS } = home;
@@ -93,32 +111,98 @@ function productFolder(config, names) {
   mkdirSync(join(dir, 'bin'));
   writeFileSync(join(dir, 'spirality.project.json'), JSON.stringify(config));
   const answer = JSON.stringify(Object.fromEntries(names.map((n) => [n, {}])));
-  writeFileSync(join(dir, 'bin', 'doppler'), `#!/bin/sh\necho "$*" >> "${join(dir, 'calls')}"\ncase "$1" in secrets) echo '${answer}' ;; run) shift; while [ "$1" != "--" ]; do shift; done; shift; exec "$@" ;; esac\n`);
+  writeFileSync(join(dir, 'bin', 'doppler'), `#!/bin/sh\necho "$*" >> "${join(dir, 'calls')}"\ncase "$1" in secrets) echo '${answer}' ;; run) export TRACKER_TOKEN_HAND_RUN=stand-in-token CLICKUP_API_TOKEN=stand-in-token; shift; while [ "$1" != "--" ]; do shift; done; shift; exec "$@" ;; esac\n`);
   chmodSync(join(dir, 'bin', 'doppler'), 0o755);
   const run = (args, input) => spawnSync(process.execPath, args, {
     cwd: dir, input, encoding: 'utf8', env: { PATH: `${join(dir, 'bin')}:${process.env.PATH}`, HOME: dir },
   });
-  return { dir, run, calls: () => readFileSync(join(dir, 'calls'), 'utf8'), cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+  // The same, without blocking, for a run that calls a stand-in tracker in this process.
+  const runAsync = (args) => new Promise((done) => {
+    const child = spawn(process.execPath, args, { cwd: dir, env: { PATH: `${join(dir, 'bin')}:${process.env.PATH}`, HOME: dir } });
+    let stdout = ''; let stderr = '';
+    child.stdout.on('data', (d) => { stdout += d; });
+    child.stderr.on('data', (d) => { stderr += d; });
+    child.on('close', (status) => done({ status, stdout, stderr }));
+  });
+  return { dir, run, runAsync, calls: () => readFileSync(join(dir, 'calls'), 'utf8'), cleanup: () => rmSync(dir, { recursive: true, force: true }) };
 }
 
-test('doctor checks the Doppler project and config the project config names, and says which', () => {
+test('doctor checks the Doppler project and config the project config names, and says which', async () => {
   const guest = doctorTarget(GUEST);
-  const f = productFolder(GUEST, guest.expected.map((s) => s.name));
+  const t = await standInTracker(GUEST, 'owner/normie');
+  const f = productFolder(t.config, guest.expected.map((s) => s.name));
   try {
-    const r = f.run([join(ROOT, 'scripts/doctor.mjs')]);
+    const r = await f.runAsync([join(ROOT, 'scripts/doctor.mjs')]);
     assert.equal(r.status, 0, r.stdout + r.stderr);
     assert.match(r.stdout, /^Doppler project normie, config prd /m);
     assert.doesNotMatch(r.stdout, /TRACKER_TOKEN_OPERATOR|RESEND_API_KEY/);
-    assert.equal(f.calls().trim(), 'secrets --project normie --config prd --only-names --json --no-check-version');
-  } finally { f.cleanup(); }
+    assert.equal(f.calls().split('\n')[0], 'secrets --project normie --config prd --only-names --json --no-check-version');
+    assert.match(r.stdout, /^repository: the tracker project "normie" and githubRepo agree: owner\/normie\.$/m);
+  } finally { f.cleanup(); await t.close(); }
 });
 
-test('doctor fails, never passes, on a key the product needs that is missing', () => {
-  const f = productFolder(GUEST, ['CLICKUP_API_TOKEN']);
+test('doctor fails, never passes, on a key the product needs that is missing', async () => {
+  const t = await standInTracker(GUEST, 'owner/normie');
+  const f = productFolder(t.config, ['CLICKUP_API_TOKEN']);
   try {
-    const r = f.run([join(ROOT, 'scripts/doctor.mjs')]);
+    const r = await f.runAsync([join(ROOT, 'scripts/doctor.mjs')]);
     assert.equal(r.status, 1);
     assert.match(r.stdout, /TRACKER_TOKEN_LOOP_BUILD\s+MISSING/);
+  } finally { f.cleanup(); await t.close(); }
+});
+
+test('doctor reports an empty repository field with where to fill it in, and still passes', async () => {
+  const guest = doctorTarget(GUEST);
+  const t = await standInTracker(GUEST, null);
+  const f = productFolder(t.config, guest.expected.map((s) => s.name));
+  try {
+    const r = await f.runAsync([join(ROOT, 'scripts/doctor.mjs')]);
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.match(r.stdout, /^repository: the tracker project "normie" has no GitHub repository recorded; the loops use githubRepo owner\/normie\. Fill it in on http:\/\/127\.0\.0\.1:\d+\/projects\/normie\/edit\.$/m);
+    assert.match(f.calls(), /^run --project normie --config prd --no-check-version -- .*clickup\.mjs repo-check$/m);
+  } finally { f.cleanup(); await t.close(); }
+});
+
+test('doctor fails on a repository field that differs from githubRepo, naming both', async () => {
+  const guest = doctorTarget(GUEST);
+  const t = await standInTracker(GUEST, 'someone-else/normie');
+  const f = productFolder(t.config, guest.expected.map((s) => s.name));
+  try {
+    const r = await f.runAsync([join(ROOT, 'scripts/doctor.mjs')]);
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assert.match(r.stdout, /repository: DIFFERENT\. The tracker project "normie" records someone-else\/normie, but githubRepo .* is owner\/normie/);
+    assert.match(r.stdout, /the repository check FAILED/);
+  } finally { f.cleanup(); await t.close(); }
+});
+
+test('doctor fails, never passes, when the tracker project cannot be read', async () => {
+  const guest = doctorTarget(GUEST);
+  const t = await standInTracker({ ...GUEST, productSlug: 'elsewhere' }, 'owner/normie');
+  const f = productFolder({ ...t.config, productSlug: 'normie' }, guest.expected.map((s) => s.name));
+  try {
+    const r = await f.runAsync([join(ROOT, 'scripts/doctor.mjs')]);
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assert.match(r.stderr, /read the tracker project "normie" FAILED — HTTP 404/);
+  } finally { f.cleanup(); await t.close(); }
+});
+
+test('doctor fails, never passes, when the tracker answers with no repository field at all', async () => {
+  const guest = doctorTarget(GUEST);
+  const t = await standInTracker(GUEST, undefined);
+  const f = productFolder(t.config, guest.expected.map((s) => s.name));
+  try {
+    const r = await f.runAsync([join(ROOT, 'scripts/doctor.mjs')]);
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assert.match(r.stderr, /has no repo field at all, so this check cannot tell/);
+  } finally { f.cleanup(); await t.close(); }
+});
+
+test('repo-check on a ClickUp product says it is not checked, and passes', () => {
+  const f = productFolder({ ...GUEST, tracker: 'clickup' }, []);
+  try {
+    const r = f.run([join(ROOT, 'scripts/with_doppler.mjs'), process.execPath, join(ROOT, 'scripts/clickup.mjs'), 'repo-check']);
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.match(r.stdout, /^repository: not checked; the "clickup" tracker has no GitHub repository field\. The loops use githubRepo owner\/normie\.$/m);
   } finally { f.cleanup(); }
 });
 
