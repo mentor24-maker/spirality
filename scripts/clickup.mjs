@@ -81,7 +81,7 @@ import { parseRepoFromRemoteUrl } from '../lib/branchCatchUp.js';
 // A ticket left in Building by a build pass that died (SP-101).
 import passClaim from '../lib/passClaim.js';
 import {
-  BUILD_SKILL, buildLockPath, lockState, writesMarker, seatGate, handbackDestination, leftoverWorktrees, handbackNote,
+  BUILD_SKILL, buildLockPath, lockState, writesMarker, seatGate, handbackDestination, leftoverWorktrees, markerBlocksClaim, handbackNote,
 } from '../lib/passHandback.js';
 
 // ── The ids, written down once ───────────────────────────────────────────────
@@ -486,9 +486,9 @@ function passMarkerPath() {
 }
 
 /** Written BEFORE the status write, never after: a pass that dies in between
- *  must leave a marker naming the ticket it was about to take. A marker for a
- *  claim that then failed is harmless: the reconcile finds the ticket is not
- *  in Building and clears it. */
+ *  must leave a marker naming the ticket it was about to take. A claim whose
+ *  guard is then refused clears it again (clearRefusedClaimMarker): the ticket
+ *  may have gone to a hand-run session, whose claim no pass may take back. */
 function writePassMarker(task, skill) {
   const file = passMarkerPath();
   try {
@@ -497,6 +497,24 @@ function writePassMarker(task, skill) {
   } catch (err) {
     // Not fatal, and said out loud: the claim is what matters.
     console.error(`  (WARNING: the pass marker could not be written (${err?.message || err}). If this pass dies, its ticket strands in Building.)`);
+  }
+}
+
+/** Set by a claim that wrote the marker: the task its status write is for. */
+let claimMarkerTask = '';
+
+/** A claim refused at its guard (someone else moved the ticket first) took
+ *  nothing, so the marker it wrote must not survive to name that ticket. */
+function clearRefusedClaimMarker() {
+  if (!claimMarkerTask) return;
+  const file = passMarkerPath();
+  const m = passClaim.readMarker(file);
+  if (!m.found || !m.record || String(m.record.task) !== String(claimMarkerTask)) return;
+  try {
+    unlinkSync(file);
+    console.error(`  (pass marker cleared: the claim of ${claimMarkerTask} was refused, so this pass holds nothing)`);
+  } catch (err) {
+    console.error(`  (WARNING: the pass marker for the refused claim of ${claimMarkerTask} could not be cleared (${err?.message || err}). The next pass may hand that ticket back while someone else builds it: remove ${file}.)`);
   }
 }
 
@@ -542,8 +560,25 @@ if (cmd === 'claim') {
   // Only a claim made under the build runner arms the marker (SP-101): a
   // hand-run session never does, so no loop pass can take its ticket back.
   const lock = buildLock();
-  if (writesMarker(lock)) writePassMarker(task, BUILD_SKILL);
-  else console.error(`  (no pass marker: ${lock.why}, so this is not a build runner's pass)`);
+  if (writesMarker(lock)) {
+    // Never over a marker still owed a hand-back: it is the only record of
+    // the ticket a dead pass stranded, and pass-reconcile keeps it after a
+    // failed or unsure try so the next pass tries again.
+    const existing = passClaim.readMarker(passMarkerPath());
+    let markedStatus = '';
+    if (existing.found && existing.record && String(existing.record.task) !== String(task)) {
+      const marked = await readTaskOrNull(existing.record.task);
+      if (marked) markedStatus = statusOf(marked);
+    }
+    const blocked = markerBlocksClaim({ marker: existing, task, status: markedStatus });
+    if (blocked) {
+      console.error(`NOT claimed: ${blocked}. Nothing was written.`);
+      console.error('Stop this pass: run `npm run clickup -- pass-reconcile` and fix what it reports first, or a person clears the marker. Claiming now would lose that ticket for good.');
+      process.exit(1);
+    }
+    writePassMarker(task, BUILD_SKILL);
+    claimMarkerTask = task;
+  } else console.error(`  (no pass marker: ${lock.why}, so this is not a build runner's pass)`);
   process.argv = [...process.argv.slice(0, 2), 'status', ...process.argv.slice(3), '--status', DISPLAY[BUILDING], '--if-status', now];
   console.error(`claiming ${task} out of "${now}" (guarded on that exact status)`);
   cmd = 'status';
@@ -635,10 +670,11 @@ if (cmd === 'whoami') {
   console.error(`build lock ${lock.dir}: ${lock.state} (${lock.why})`);
 
   let status = '';
+  let seen = null;
   if (marker.found && marker.record) {
     // An unreadable status is NOT a hand-back: moving a ticket on a reading
     // not taken is how a live build gets yanked out from under its pass.
-    const seen = await readTaskOrNull(marker.record.task);
+    seen = await readTaskOrNull(marker.record.task);
     if (seen) status = statusOf(seen);
   }
   // The pass seat's inference (a new pass means the old one ended) holds only
@@ -654,10 +690,9 @@ if (cmd === 'whoami') {
     const dest = handbackDestination(read.problem ? null : Boolean(findPullRequest(read.comments)));
     destination = dest.status;
     // Guarded on Building: a ticket that moved since the read is not moved again.
-    const before = await readTaskOrNull(task);
     const out = await tracker.updateTask(task, {
       status: dest.status,
-      assignees: { add: [], rem: (before?.assignees || []).map((a) => a.id) },
+      assignees: { add: [], rem: (seen.assignees || []).map((a) => a.id) },
     }, { ifStatus: DISPLAY[BUILDING] });
     const now = out.json?.status?.status ?? '';
     if (out.moved || !out.res.ok || now.toLowerCase() !== dest.status.toLowerCase()) {
@@ -665,10 +700,10 @@ if (cmd === 'whoami') {
       console.error(`  ${task}: NOT moved (${out.moved ? 'it moved underneath this pass' : out.res.ok ? `the write came back "${now || '?'}"` : `HTTP ${out.res.status}`}). The marker stays, so the next pass tries again.`);
     } else {
       const worktrees = listWorktrees();
-      if (worktrees.problem) console.error(`  the worktrees could not be listed (${worktrees.problem}); the note says none were found`);
+      if (worktrees.problem) console.error(`  the worktrees could not be listed (${worktrees.problem}); the note says so`);
       const claimedMs = Date.parse(marker.record.at);
       const leftovers = Number.isFinite(claimedMs) ? leftoverWorktrees(worktrees.worktrees, { claimedMs }) : [];
-      const text = handbackNote({ when: Number.isFinite(claimedMs) ? clock(claimedMs) : '', destination: dest, leftovers });
+      const text = handbackNote({ when: Number.isFinite(claimedMs) ? clock(claimedMs) : '', destination: dest, leftovers, unlisted: worktrees.problem || '' });
       const posted = await tracker.postComment(task, { comment_text: text });
       const id = String(posted.json?.id ?? '');
       const back = posted.res.ok ? await readCommentsOrProblem(task) : { problem: `HTTP ${posted.res.status}` };
@@ -850,6 +885,7 @@ if (cmd === 'whoami') {
   const ifStatus = arg('if-status');
   if (ifStatus && was.toLowerCase() !== ifStatus.toLowerCase()) {
     console.error(`NOT moved: expected status "${ifStatus}" but the task is "${was}" — another loop or Dane got there first. Take the next task.`);
+    clearRefusedClaimMarker();
     process.exit(3);
   }
   const toOperator = isOperatorStatus(status);
@@ -867,6 +903,7 @@ if (cmd === 'whoami') {
   const out = await tracker.updateTask(task, body, { ifStatus: ifStatus || undefined });
   if (out.moved) {
     console.error(`NOT moved: expected status "${ifStatus}" but the tracker refused the write — ${String(out.json?.err || 'the ticket moved').replace(/\.$/, '')}. Another loop or Dane got there first. Take the next task.`);
+    clearRefusedClaimMarker();
     process.exit(3);
   }
   if (!out.res.ok) die('set status', out);

@@ -38,9 +38,13 @@ gone, and it goes back to `Rework` (it has a PR) or `Queued` (it has none),
 guarded on `Building`, with one note read back naming the claim time and any
 unpushed worktree from around then. **Nothing is deleted.** Run by hand while
 the runner is running, it leaves the marker alone. Exit 0 nothing to do,
-3 handed one back (both normal: carry on and claim); 1 a write failed, 2 could
-not tell (say so in your report, then carry on). Any other `Building` ticket
-is not yours: leave it.
+3 handed one back (both normal: carry on and claim). Exit 1 (a write failed)
+or 2 (could not tell) keeps the marker for the next pass to retry: **stop the
+pass there and report it**. `claim` refuses, with exit 1, to write over a
+marker whose ticket is still in `Building` or cannot be read, because that
+marker is the only record of the stranded ticket. A claim refused at its guard
+(exit 3) clears the marker it wrote. Any other `Building` ticket is not yours:
+leave it.
 
 ## Ticket access: the direct script, not the connector
 
