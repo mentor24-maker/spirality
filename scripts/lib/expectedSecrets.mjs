@@ -1,8 +1,9 @@
 /**
- * The ONE list of secret names Spirality expects in Doppler, and the configs
- * each one must be in. A ticket that adds a key adds a line here, so
- * `npm run doctor` starts reporting it the moment the code depends on it.
- * Names only: no value ever appears in this repository (it is public).
+ * The ONE list of secret names a product expects in Doppler. A ticket that
+ * adds a key adds a line here, so `npm run doctor` starts reporting it the
+ * moment the code depends on it. Names only: no value ever appears in this
+ * repository (it is public). Which Doppler project and config to look in is
+ * the project config's `dopplerProject` and `dopplerConfig` (doctorTarget).
  *
  * The substrate holds no database and no deploy. The ClickUp token is a
  * reference to StarCaster's (one token to rotate for every project). The
@@ -10,9 +11,11 @@
  * it"), made by `tracker/admin.mjs create-actor` and piped straight into
  * Doppler. The tracker's hand-over email needs the Resend key and the
  * address it goes to (tracker/notify.mjs).
+ *
+ * A key marked `trackerHome` is needed only by the product that runs the
+ * tracker service (its config sets `trackerPort`): the operator's own
+ * sign-in and the hand-over email. Any other product never needs them.
  */
-export const DOPPLER_PROJECT = 'spirality';
-export const CONFIGS = ['dev'];
 
 /**
  * Who signs in to the tracker, and the Doppler secret holding each one's
@@ -35,18 +38,33 @@ export const TRACKER_SEATS = [
 ];
 
 export const EXPECTED_SECRETS = [
-  { name: 'CLICKUP_API_TOKEN', configs: ['dev'], what: 'the ClickUp token, for scripts only' },
-  ...TRACKER_SEATS.map(({ secret, what }) => ({ name: secret, configs: ['dev'], what })),
-  { name: 'RESEND_API_KEY', configs: ['dev'], what: 'the Resend key the tracker sends the hand-over email with' },
-  { name: 'TRACKER_NOTIFY_TO', configs: ['dev'], what: "the operator's address for the hand-over email" },
+  { name: 'CLICKUP_API_TOKEN', what: 'the ClickUp token, for scripts only' },
+  ...TRACKER_SEATS.map(({ secret, kind, what }) => ({ name: secret, what, ...(kind === 'human' ? { trackerHome: true } : {}) })),
+  { name: 'RESEND_API_KEY', trackerHome: true, what: 'the Resend key the tracker sends the hand-over email with' },
+  { name: 'TRACKER_NOTIFY_TO', trackerHome: true, what: "the operator's address for the hand-over email" },
 ];
+
+/**
+ * What doctor checks for one product, from its project config: the Doppler
+ * project and config to look in, and the keys that product needs there
+ * (the `trackerHome` ones only when it runs the tracker, `trackerPort` set).
+ * Returns `{ project, configs, expected }` for doctorReport and formatReport.
+ */
+export function doctorTarget(config, secrets = EXPECTED_SECRETS) {
+  const home = config.trackerPort != null;
+  const configs = [config.dopplerConfig];
+  const expected = secrets
+    .filter((s) => home || !s.trackerHome)
+    .map(({ name, what }) => ({ name, what, configs }));
+  return { project: config.dopplerProject, configs, expected };
+}
 
 /**
  * Compare what Doppler holds against the list. `present` maps a config name
  * to the set of names it holds, or to null when the config could not be read.
  * Returns one row per expected name and whether everything required is there.
  */
-export function doctorReport(present, expected = EXPECTED_SECRETS, configs = CONFIGS) {
+export function doctorReport(present, expected, configs) {
   const rows = expected.map(({ name, configs: needed }) => ({
     name,
     cells: Object.fromEntries(configs.map((config) => {
@@ -61,7 +79,7 @@ export function doctorReport(present, expected = EXPECTED_SECRETS, configs = CON
 }
 
 /** The report as a plain-text table, one line per name. */
-export function formatReport({ rows }, configs = CONFIGS) {
+export function formatReport({ rows }, configs) {
   const width = Math.max(4, ...rows.map((r) => r.name.length));
   const col = 12;
   const lines = [['NAME'.padEnd(width), ...configs.map((c) => c.padEnd(col))].join('  ').trimEnd()];
