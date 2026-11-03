@@ -16,8 +16,9 @@
  * "clickup"), so the commands and their guards do not know which one it is.
  *
  * The token comes from the environment, never printed and never logged.
- * package.json wraps this in `doppler run --project spirality --config dev`,
- * so no agent or human handles the value:
+ * package.json wraps this in `doppler run` for the project config's
+ * dopplerProject and dopplerConfig (scripts/with_doppler.mjs), so no agent or
+ * human handles the value:
  *
  *   npm run clickup -- whoami
  *
@@ -916,8 +917,8 @@ if (cmd === 'whoami') {
   /** Write the `CONFLICT TICKET FILED:` trail on the waiting ticket — the
    *  line the next pass reads so it never files twice — and read it back
    *  through the same parser. Returns true only when it reads back. */
-  const recordCatchUp = async (task, filed, prNumber) => {
-    const body = conflictTicketFiledComment({ id: filed.id, url: filed.url, prNumber, localVerdict: null });
+  const recordCatchUp = async (task, filed, prNumber, refiledFrom = null) => {
+    const body = conflictTicketFiledComment({ id: filed.id, url: filed.url, prNumber, localVerdict: null, refiledFrom });
     const noteId = await postNote(task, body, `catch-up ticket ${filed.id} filed for PR #${prNumber}`);
     if (!noteId) return false;
     const found = findConflictTicket(await readComments(task.id), prNumber);
@@ -1115,7 +1116,23 @@ if (cmd === 'whoami') {
       const prRef = { number: pr.number, url: pr.url };
       const branch = String(prJson.headRefName || '');
       const ticketName = conflictTicketName({ pr: prRef, branch, localVerdict });
-      const plan = conflictFilingPlan({ comments, prNumber: pr.number, queueTasks: tasks, ticketName, localVerdict });
+      // The catch-up ticket on file counts only while a loop still works it
+      // (SP-100), so read its status: from this pass's queue read, or by id
+      // when it is not there (a Live ticket is not in the open list).
+      const trail = findConflictTicket(comments, pr.number);
+      let filedStatus = null;
+      if (trail) {
+        const listed = tasks.find((t) => String(t.id).toLowerCase() === String(trail.id).toLowerCase());
+        const read = listed || await readTaskOrNull(trail.id);
+        filedStatus = read ? String(read.status?.status ?? '') : null;
+      }
+      const plan = conflictFilingPlan({ comments, prNumber: pr.number, queueTasks: tasks, ticketName, localVerdict, filedStatus });
+      if (plan.act === 'cannot-tell') {
+        unchecked.push(`${task.id}: PR #${pr.number} conflicts, and the catch-up ticket on file (${plan.filed.id}) could not be read — not counted as on file and nothing filed; a session must look`);
+        say(task, 'unchecked', `PR #${pr.number}: ${gate.reason} — catch-up ticket ${plan.filed.id} could not be read`);
+        return;
+      }
+      const again = plan.refiledFrom ? ` (the earlier catch-up ${plan.refiledFrom.id} is in ${plan.refiledFrom.status}; main moved again)` : '';
       const reason = conflictHandOffNotice({ commentId: decision.commentId, pr: prRef, localVerdict, filed: null }).marker.replace(/^refused:\s*/i, '');
       const alreadySaid = decision.priorRefusal === reason;
 
@@ -1123,8 +1140,8 @@ if (cmd === 'whoami') {
       // before this fix (or one whose filing failed) still gets its ticket
       // on the next pass, instead of staying quiet forever.
       if (dryRun) {
-        const filing = plan.act === 'file' ? `would file "${ticketName}" as Queued in list ${list}`
-          : plan.act === 'already-filed' ? `catch-up ticket ${plan.filed.id} already on file${plan.recorded ? '' : ' (would record it on this ticket)'}`
+        const filing = plan.act === 'file' ? `would file "${ticketName}" as Queued in list ${list}${again}`
+          : plan.act === 'already-filed' ? `catch-up ticket ${plan.filed.id} already on file${plan.recorded ? '' : ' (would record it on this ticket)'}${again}`
             : 'no catch-up ticket needed';
         say(task, plan.act === 'file' ? 'would-file-catch-up' : alreadySaid ? 'refused-quiet' : 'would-refuse', `PR #${pr.number}: ${gate.reason} — ${filing}${alreadySaid ? '; hand-off already said' : ''}`);
         return;
@@ -1132,11 +1149,11 @@ if (cmd === 'whoami') {
       let filed = plan.filed;
       if (plan.act === 'file') filed = await fileCatchUp(task, prRef, branch, ticketName, decision.commentId);
       let recordedNow = false;
-      if (filed && !plan.recorded) recordedNow = await recordCatchUp(task, filed, pr.number);
+      if (filed && !plan.recorded) recordedNow = await recordCatchUp(task, filed, pr.number, plan.refiledFrom);
 
       if (alreadySaid) {
         say(task, recordedNow ? 'filed' : 'refused-quiet', recordedNow
-          ? `PR #${pr.number}: ${gate.reason} — catch-up ticket ${filed.id} filed and recorded (hand-off already said)`
+          ? `PR #${pr.number}: ${gate.reason} — catch-up ticket ${filed.id} filed and recorded${again} (hand-off already said)`
           : `${gate.reason} (already said; nothing posted)${filed ? '' : ' — the catch-up ticket could NOT be filed, see below'}`);
         return;
       }
@@ -1144,7 +1161,7 @@ if (cmd === 'whoami') {
       const noteId = await postNote(task, notice.body, `merge refused (${gate.reason})`);
       if (!noteId) { say(task, 'unchecked', gate.reason); return; }
       const stuck = await markMergeHandled(decision.commentId, task, notice.marker);
-      say(task, 'refused', `PR #${pr.number}: ${gate.reason} — explained in comment ${noteId}, marker ${stuck ? 'verified' : 'UNVERIFIED'}${filed ? `, catch-up ticket ${filed.id}` : ', NO catch-up ticket'}`);
+      say(task, 'refused', `PR #${pr.number}: ${gate.reason} — explained in comment ${noteId}, marker ${stuck ? 'verified' : 'UNVERIFIED'}${filed ? `, catch-up ticket ${filed.id}${again}` : ', NO catch-up ticket'}`);
       return;
     }
 
