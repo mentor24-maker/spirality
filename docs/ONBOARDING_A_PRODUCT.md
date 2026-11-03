@@ -35,12 +35,11 @@ The items below marked **missing**, gathered here so they can become tickets:
    scripts run `doppler run --project spirality --config dev`;
    `scripts/lib/expectedSecrets.mjs` checks Doppler project `spirality`
    only (`DOPPLER_PROJECT`), so `npm run doctor` cannot check another
-   product; `scripts/loop_runner.sh` writes its log, lock and sync lock as
-   `~/loop-logs/spirality-...` and prints a `com.spirality.<skill>` restart
-   line, instead of reading `logDir`, `productSlug` and `launchdPrefix` from
-   the config the way `scripts/install_loop_runner.sh` and
-   `scripts/run_relay.sh` already do. Each is a literal that engineering rule
-   2 says is a bug.
+   product. Each is a literal that engineering rule 2 says is a bug.
+   (`scripts/loop_runner.sh` was one too, writing `~/loop-logs/spirality-...`
+   whatever the config said; SP-97 fixed it: it now reads `logDir`,
+   `productSlug` and `launchdPrefix` from the config, like the installer and
+   `scripts/run_relay.sh`.)
 3. **Loop sign-ins were per lane, not per product.** Fixed by SP-95: a
    product that does not run the tracker gets machine sign-ins named for
    itself (`normie loop-build`), so its `create` can no longer re-issue
@@ -245,12 +244,11 @@ changing the file: `CLICKUP_WORKSPACE_ID`, `CLICKUP_SPACE_ID`,
   not, is Dane's (**a browser login**).
 - **Check.** `./scripts/install_loop_runner.sh --status` shows every job
   `loaded: yes`, and after the first pass each log has a `START` line.
-- **Today.** **Automated** (the installer) for Spirality. For another
-  product it is **missing** a fix first: `scripts/loop_runner.sh` writes
-  `~/loop-logs/spirality-<skill>.log` and takes a `spirality-sync.lock`
-  whatever the config says, so a second product's runners would write into
-  Spirality's logs and share its locks (gap 2). Never rerun the full
-  installer from a loop session: it reloads the lane that session runs in.
+- **Today.** **Automated** (the installer). Since SP-97 the runners name
+  every log, lock and restart label from the config too, so a second
+  product's runners keep to their own files (`normie-loop-build.log`,
+  `normie-sync.lock`). Never rerun the full installer from a loop session:
+  it reloads the lane that session runs in.
 
 ## 6. The skills, hooks and rules in the product's repository
 

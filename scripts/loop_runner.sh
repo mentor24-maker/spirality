@@ -17,6 +17,11 @@
 # repo's PreToolUse hook (no edits on main) still applies. A headless run
 # cannot answer a permission prompt, so anything not listed is refused and
 # the run continues.
+#
+# Every product-specific name (the log folder, the short name each log and
+# lock starts with, the launchd label) comes from the project config through
+# scripts/project_config.mjs, the way the installer and run_relay.sh read
+# them; nothing here names a product.
 set -u
 
 # launchd hands the job almost no environment. Set the PATH once, here.
@@ -33,9 +38,14 @@ if [ -f "$REPO/.git" ] && grep -q '^gitdir:.*worktrees' "$REPO/.git" 2>/dev/null
   exit 1
 fi
 
-LOG="$HOME/loop-logs/spirality-$SKILL.log"
-LOCK="$HOME/loop-logs/spirality-$SKILL.lock"
-mkdir -p "$HOME/loop-logs"
+cd "$REPO" || exit 1
+
+SLUG="$(node "$REPO/scripts/project_config.mjs" productSlug)" || { echo "[loop-runner] could not read productSlug from the project config" >&2; exit 1; }
+LOG_DIR="$(node "$REPO/scripts/project_config.mjs" logDir)" || { echo "[loop-runner] could not read logDir from the project config" >&2; exit 1; }
+PREFIX="$(node "$REPO/scripts/project_config.mjs" launchdPrefix)" || { echo "[loop-runner] could not read launchdPrefix from the project config" >&2; exit 1; }
+LOG="$LOG_DIR/$SLUG-$SKILL.log"
+LOCK="$LOG_DIR/$SLUG-$SKILL.lock"
+mkdir -p "$LOG_DIR"
 CLAUDE_BIN="${CLAUDE_BIN:-$(command -v claude || echo "$HOME/.local/bin/claude")}"
 
 # This loop's own tracker sign-in (docs/TRACKER_MVP.md, "Running it"): the
@@ -61,7 +71,7 @@ echo "$$" > "$LOCK/pid"
 # The sync lock every lane takes around pull + npm ci (the only lock the lanes
 # share; each lane's own lock above is its alone). Wait up to 10 minutes
 # for another lane; a lock whose pid is gone is cleared, as above.
-SYNC_LOCK="$HOME/loop-logs/spirality-sync.lock"
+SYNC_LOCK="$LOG_DIR/$SLUG-sync.lock"
 take_sync_lock() {
   local waited=0 holder
   until mkdir "$SYNC_LOCK" 2>/dev/null; do
@@ -73,10 +83,8 @@ take_sync_lock() {
   echo "$$" > "$SYNC_LOCK/pid"
 }
 
-PASS_OUT="$(mktemp -t spirality-pass)"
+PASS_OUT="$(mktemp -t "$SLUG-pass")"
 trap 'rm -rf "$LOCK" "$PASS_OUT" 2>/dev/null; [ "$(cat "$SYNC_LOCK/pid" 2>/dev/null)" = "$$" ] && rm -rf "$SYNC_LOCK"' EXIT
-
-cd "$REPO" || exit 1
 
 while true; do
   # 1. A timid pull: only main, only a clean tree, only fast-forward. A refusal
@@ -103,7 +111,7 @@ while true; do
   # The time limit writes what the pass was running into this file when it has
   # to stop it; the pass's own report never arrives in that case. Cleared
   # first, so a stop never reports the previous stop's snapshot.
-  SNAPSHOT="$HOME/loop-logs/spirality-$SKILL.timeout-snapshot"
+  SNAPSHOT="$LOG_DIR/$SLUG-$SKILL.timeout-snapshot"
   rm -f "$SNAPSHOT"
   RUN_WITH_TIME_LIMIT_SNAPSHOT="$SNAPSHOT" \
   "$REPO/scripts/run_with_time_limit.sh" "${LOOP_PASS_LIMIT_SECONDS:-7200}" -- \
@@ -127,7 +135,7 @@ while true; do
   # Only Claude's own sign-in errors, and only in this pass's last lines: a
   # pass that merely mentions "not logged in" (gh, supabase) is not one.
   if tail -20 "$PASS_OUT" | grep -qiE "OAuth session expired|Failed to authenticate|Invalid API key|Please run /login"; then
-    echo "[loop-runner] $(date "+%H:%M:%S") THIS PASS COULD NOT SIGN IN TO CLAUDE. Nothing will change until a person signs in on this machine (claude login) and restarts this job: launchctl kickstart -k gui/$(id -u)/com.spirality.$SKILL" >> "$LOG"
+    echo "[loop-runner] $(date "+%H:%M:%S") THIS PASS COULD NOT SIGN IN TO CLAUDE. Nothing will change until a person signs in on this machine (claude login) and restarts this job: launchctl kickstart -k gui/$(id -u)/$PREFIX.$SKILL" >> "$LOG"
   fi
 
   echo "[loop-runner] $(date "+%H:%M:%S") sleeping ${INTERVAL}s before the next /$SKILL" >> "$LOG"
