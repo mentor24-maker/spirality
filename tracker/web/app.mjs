@@ -26,7 +26,7 @@
  * an emailed link's own page. The link's token is sent only in a JSON body,
  * never in an address.
  */
-import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderAnswerIn, statusLabel, ANSWER_IN_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults } from './render.mjs';
+import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderAnswerIn, statusLabel, ANSWER_IN_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, redrawHold, drawnChoice } from './render.mjs';
 
 /** Where an earlier version of the page kept a pasted token; removed on load, never read. */
 const OLD_TOKEN_KEY = 'tracker-token';
@@ -45,11 +45,25 @@ const signOut = document.getElementById('sign-out');
 const bell = document.getElementById('bell');
 let me = null;
 
-/** How often the waiting count in the tab title is read again. */
-const COUNT_EVERY_MS = 60_000;
+/**
+ * How often the page reads again: the waiting count in the tab title, and
+ * the open page itself (Waiting on you, a board or list, a ticket), which
+ * is drawn again when what it was drawn from has changed.
+ */
+const REFRESH_EVERY_MS = 60_000;
 /** The title the page itself asks for, and the last waiting count read (null: none yet). */
 let pageTitle = 'Tracker';
 let waitingCount = null;
+
+/** Every GET of the draw under way, as path -> its answer in JSON; null between draws. */
+let recording = null;
+/** The page showing, if it is one that keeps itself current: its address and what it was drawn from. */
+let lastDrawn = null;
+/** Draws and writes under way; a beat never redraws over either. */
+let drawing = 0;
+let writing = 0;
+/** True while a beat is redrawing the page, so the draw does not jump to the reply box again. */
+let refreshing = false;
 
 function setTitle(title) {
   pageTitle = title;
@@ -96,17 +110,25 @@ class Refused extends Error {
 /** Call the tracker as the signed-in person. Answers the parsed JSON, or throws with the server's own message. */
 async function api(method, path, body) {
   const write = method !== 'GET' && method !== 'HEAD';
-  const res = await fetch(path, {
-    method,
-    credentials: 'same-origin',
-    headers: write ? { 'content-type': 'application/json' } : {},
-    body: write ? JSON.stringify(body ?? {}) : undefined,
-  });
+  const reads = recording;
+  if (write) writing += 1;
+  let res;
+  try {
+    res = await fetch(path, {
+      method,
+      credentials: 'same-origin',
+      headers: write ? { 'content-type': 'application/json' } : {},
+      body: write ? JSON.stringify(body ?? {}) : undefined,
+    });
+  } finally {
+    if (write) writing -= 1;
+  }
   if (res.status === 401) throw new SignedOut();
   let json = null;
   try { json = await res.json(); } catch { /* reported below */ }
   if (!res.ok) throw new Refused(json?.message ?? `the tracker answered ${res.status}.`, res.status);
   if (!json) throw new Error('the tracker answered with something that is not JSON.');
+  if (!write) reads?.set(path, JSON.stringify(json));
   return json;
 }
 
@@ -125,6 +147,7 @@ async function linkCall(path, body) {
 /** An emailed link's page: show its email, take a password (and a name, for an invite), use the link once. */
 async function drawSetPassword() {
   me = null;
+  lastDrawn = null;
   who.textContent = '';
   headerProject.hidden = true;
   signOut.hidden = true;
@@ -183,6 +206,7 @@ function showError(err) {
 /** Clear the header for a view drawn signed out. */
 function signedOutHeader(title) {
   me = null;
+  lastDrawn = null;
   waitingCount = null;
   who.textContent = '';
   headerProject.hidden = true;
@@ -731,7 +755,7 @@ async function drawProject(slug, view, { adding = false, filed = null } = {}) {
         button.disabled = false;
         return;
       }
-      await drawProject(slug, view);
+      await drawAgain(() => drawProject(slug, view));
     });
   }
 }
@@ -947,7 +971,7 @@ async function drawTicket(id, said = null, kept = null) {
       note.textContent = 'Posting…';
       try {
         await api('POST', `/tickets/${encodeURIComponent(t.id)}/comments`, { body: word });
-        await drawTicket(t.id);
+        await drawAgain(() => drawTicket(t.id));
         main.querySelector('details.details').open = true;
         main.querySelector('.comment:last-of-type')?.scrollIntoView({ block: 'center' });
       } catch (err) {
@@ -999,7 +1023,7 @@ async function drawTicket(id, said = null, kept = null) {
   const form = main.querySelector('form.reply');
   const box = form.querySelector('textarea');
   // Arrived by a Reply icon: go straight to the box.
-  if (location.hash === '#reply') {
+  if (location.hash === '#reply' && !refreshing) {
     form.scrollIntoView({ block: 'center' });
     box.focus();
   }
@@ -1013,7 +1037,7 @@ async function drawTicket(id, said = null, kept = null) {
     try {
       // Exactly as typed: no trimming, no formatting. "merge" arrives as "merge".
       await api('POST', `/tickets/${encodeURIComponent(t.id)}/comments`, { body: box.value });
-      await drawTicket(t.id);
+      await drawAgain(() => drawTicket(t.id));
       // Show the reply he just posted: open Details at the end of the thread.
       main.querySelector('details.details').open = true;
       main.querySelector('.comment:last-of-type')?.scrollIntoView({ block: 'center' });
@@ -1057,7 +1081,7 @@ function wireEditPanel(t) {
   // refused), so say which, and leave the panel held: it shows an old version.
   const redraw = async (said, kept, note, outcome) => {
     try {
-      await drawTicket(t.id, said, kept);
+      await drawAgain(() => drawTicket(t.id, said, kept));
     } catch (err) {
       if (err instanceof SignedOut) return drawSignIn(`You were signed out; ${outcome}, but the page could not show it.`);
       note.className = 'note error';
@@ -1203,7 +1227,7 @@ function wireAddTask(slug, view, adding) {
     }
     try { localStorage.removeItem(DRAFT_KEY); } catch { /* nothing kept */ }
     try {
-      await drawProject(slug, view, { filed: ticket.id });
+      await drawAgain(() => drawProject(slug, view, { filed: ticket.id }));
     } catch (err) {
       if (err instanceof SignedOut) return drawSignIn(`You were signed out; ${ticket.id} was filed.`);
       note.className = 'note error';
@@ -1443,18 +1467,33 @@ function markNav(which) {
   else bell.removeAttribute('aria-current');
 }
 
-async function route() {
+/** The page's own address, as the beat compares it. */
+const here = () => location.pathname + location.search;
+
+/**
+ * Draw the page the address names. Waiting on you, a board or list and a
+ * ticket keep themselves current (refreshPage): every read of their draw is
+ * kept in `lastDrawn`. `place` is a beat's saved scroll and open sections
+ * (keepPlace), put back the moment the page is drawn, before it is shown. A
+ * beat's draw that fails leaves the page as it was, to try again next beat.
+ */
+async function route({ place = null } = {}) {
+  const reads = new Map();
+  drawing += 1;
   try {
     if (location.pathname === '/set-password') {
       await drawSetPassword();
       return;
     }
     me = await api('GET', '/me');
+    // Only the page's own reads are kept: who is signed in and the count are not what it shows.
+    recording = reads;
     who.textContent = `Signed in as ${me.name}`;
     signOut.hidden = false;
     bell.hidden = false;
     showProject();
-    main.classList.remove('wide');
+    // A beat redraws the same page, so its width stays as it is.
+    if (!place) main.classList.remove('wide');
     const ticket = /^\/t\/([^/]+)$/.exec(location.pathname);
     const project = /^\/(board|list)(?:\/([^/]+))?$/.exec(location.pathname);
     const projects = location.pathname === '/projects';
@@ -1467,52 +1506,132 @@ async function route() {
     const reporting = location.pathname === '/reporting';
     const peoplePage = location.pathname === '/people';
     const search = location.pathname === '/search';
+    const waiting = !(search || reporting || settings || peoplePage || isNew || ticket || projects || newProject || editProject || details || tasks || project);
     markNav(reporting ? 'reporting' : settings ? 'settings' : peoplePage ? 'people' : projects || newProject || details || editProject ? 'projects' : ticket || project || tasks || isNew || search ? 'tasks' : 'waiting');
     if (search) {
       await drawSearch(new URLSearchParams(location.search));
-      await refreshCount();
     } else if (reporting) {
       await drawReporting();
-      await refreshCount();
     } else if (settings) {
       await drawSettings();
-      await refreshCount();
     } else if (peoplePage) {
       await drawPeople();
-      await refreshCount();
     } else if (isNew) {
       // The old New request address: the Tasks page with its Add Task box open.
       await drawTasks(savedView(), { adding: true });
-      await refreshCount();
     } else if (ticket) {
       await drawTicket(decodeURIComponent(ticket[1]));
-      await refreshCount();
     } else if (projects) {
       await drawProjects();
-      await refreshCount();
     } else if (newProject) {
       await drawCreateProject();
-      await refreshCount();
     } else if (editProject) {
       await drawEditProject(decodeURIComponent(editProject[1]));
-      await refreshCount();
     } else if (details) {
       await drawProjectDetails(decodeURIComponent(details[1]));
-      await refreshCount();
     } else if (tasks || (project && project[2] == null)) {
       // "Tasks" in the header: the selected project, in the view last used.
       await drawTasks(tasks ? savedView() : project[1]);
-      await refreshCount();
     } else if (project) {
       await drawProject(decodeURIComponent(project[2]), project[1]);
-      await refreshCount();
     } else {
       await drawWaiting();
     }
+    place?.restore();
+    const kept = recording === reads;
+    if (kept) recording = null;
+    // Waiting on you read the count as it drew; every other page reads it now.
+    if (!waiting) await refreshCount();
+    if (kept) lastDrawn = ticket || project || tasks || isNew || waiting ? { address: here(), reads } : null;
   } catch (err) {
+    if (place && !(err instanceof SignedOut)) return;
+    lastDrawn = null;
     if (err instanceof SignedOut) drawSignIn();
     else showError(err);
+  } finally {
+    if (recording === reads) recording = null;
+    drawing -= 1;
   }
+}
+
+/** The page's text boxes and choosers as redrawHold reads them. */
+const fieldsOf = (root) => [...root.querySelectorAll('input, textarea, select')].map((el) => ({
+  focused: el === document.activeElement,
+  value: el.value,
+  // A chooser is compared with the choice it was drawn with: "Copy to
+  // another project" holds his pick until Copy is pressed.
+  initial: el.tagName === 'SELECT' ? drawnChoice(el.options) : el.defaultValue,
+}));
+
+/**
+ * Draw the page again in place after a save, keeping what the beat compares
+ * against current, so the next beat does not find a "change" that was his
+ * own save and wipe its "Saved" note.
+ */
+async function drawAgain(draw) {
+  const reads = new Map();
+  drawing += 1;
+  recording = reads;
+  try {
+    await draw();
+    if (recording === reads && lastDrawn?.address === here()) lastDrawn = { address: here(), reads };
+  } finally {
+    if (recording === reads) recording = null;
+    drawing -= 1;
+  }
+}
+
+/** Why this beat must leave the page alone, or null. */
+const hold = () => redrawHold({ hidden: document.hidden, drawing: drawing > 0, writing: writing > 0, fields: fieldsOf(main) });
+
+/**
+ * Where he is on the page: how far down, and which folding sections
+ * (Details, a Live column, the Add Task box, the Change panel) are open.
+ * `restore` puts them back on the page drawn again.
+ */
+function keepPlace() {
+  const key = (d) => `${d.className}|${d.dataset.stage ?? ''}`;
+  const open = new Map([...main.querySelectorAll('details')].map((d) => [key(d), d.open]));
+  const y = window.scrollY;
+  return {
+    restore() {
+      for (const d of main.querySelectorAll('details')) if (open.has(key(d))) d.open = open.get(key(d));
+      window.scrollTo(0, y);
+    },
+  };
+}
+
+/**
+ * Keep the open page current (SP-94): read again everything it was drawn
+ * from and, if any answer differs, draw it again where he left it. Never
+ * while the tab is hidden, a draw or a save is under way, or he is typing:
+ * that beat is skipped. A failed read leaves the page as it is; signed out
+ * goes to sign-in.
+ */
+let checking = false;
+async function refreshPage() {
+  const drawn = lastDrawn;
+  if (checking || !me || !drawn || drawn.address !== here() || hold()) return;
+  checking = true;
+  try {
+    const now = await Promise.all([...drawn.reads].map(([path]) => api('GET', path)));
+    const changed = [...drawn.reads].some(([, before], i) => JSON.stringify(now[i]) !== before);
+    // He may have moved on, or started typing, while it read.
+    if (!changed || lastDrawn !== drawn || drawn.address !== here() || hold()) return;
+    refreshing = true;
+    await route({ place: keepPlace() });
+  } catch (err) {
+    if (err instanceof SignedOut) drawSignIn();
+  } finally {
+    refreshing = false;
+    checking = false;
+  }
+}
+
+/** One beat: the count in the tab title, then the page itself while it is in view. */
+async function beat() {
+  await refreshCount();
+  await refreshPage();
 }
 
 // Links inside the page change the address without reloading it.
@@ -1537,7 +1656,12 @@ signOut.addEventListener('click', async () => {
 
 try { localStorage.removeItem(OLD_TOKEN_KEY); } catch { /* nothing kept */ }
 
-// The count in the tab title stays current while the tab sits pinned.
-setInterval(refreshCount, COUNT_EVERY_MS);
+// The count in the tab title stays current while the tab sits pinned in the
+// background; the page itself is read again only while it is in view.
+setInterval(beat, REFRESH_EVERY_MS);
+// Back to the tab: show what changed while it was hidden straight away.
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) beat();
+});
 
 route();
