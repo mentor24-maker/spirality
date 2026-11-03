@@ -877,7 +877,7 @@ if (cmd === 'whoami') {
     const wanted = parseMergeMarker(`${MERGE_MARKER} ${what}`);
     const out = await tracker.replyToComment(commentId, { comment_text: `${MERGE_MARKER} ${what} — ${new Date().toISOString()}` });
     if (!out.res.ok) {
-      unchecked.push(`${task.id} comment ${commentId}: acted on the merge command (${what}) but could NOT write the dedup marker (HTTP ${out.res.status}) — the NEXT pass will see this authorization as unhandled`);
+      unchecked.push(`${task.id} comment ${commentId}: acted on the merge command (${what}) but could NOT write the dedup marker (HTTP ${out.res.status}: ${String(out.json?.err || out.text || 'no reason given').slice(0, 300)}) — the NEXT pass will see this authorization as unhandled`);
       return false;
     }
     const verify = await tracker.listReplies(commentId);

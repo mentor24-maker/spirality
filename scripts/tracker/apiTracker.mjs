@@ -52,8 +52,11 @@ import { fenceFor } from '../lib/operatorCard.mjs';
 /** ClickUp's priority number -> the tracker's name. */
 const PRIORITY_NAME = Object.freeze(Object.fromEntries(Object.entries(PRIORITY_VALUE).map(([k, v]) => [v, k])));
 
+/** fetch says only "fetch failed"; the reason (ECONNRESET, ECONNREFUSED, ...) is on its cause. */
 function unreachable(err) {
-  return { res: { ok: false, status: 0, headers: { get: () => null } }, json: null, text: `the request never reached the tracker (${err?.message || err})` };
+  const cause = err?.cause ? [err.cause.code, err.cause.message].filter(Boolean).join(': ') : '';
+  const why = [err?.message || String(err), cause].filter(Boolean).join(' — ');
+  return { res: { ok: false, status: 0, headers: { get: () => null } }, json: null, text: `the request never reached the tracker (${why})` };
 }
 
 /** An answer made here, not by the server: a refusal the door reports like any failed write. */
@@ -141,9 +144,16 @@ export function createApiTracker({ token, baseUrl, project, listId, timeoutMs, l
     requests += 1;
     let res;
     try {
+      // One connection per request, never a kept-alive one (SP-102). The door
+      // runs `gh` and `git` synchronously, which freezes this process; after
+      // `gh pr merge` (six seconds) the server had already closed the idle
+      // connection (its keep-alive is five), the next POST went out on it and
+      // was reset, and fetch retries only a GET. On the relay that POST was
+      // the merge marker, after every merge. A fresh connection to the Mini
+      // costs a millisecond; retrying a write instead could post it twice.
       res = await fetch(`${BASE}${path}`, {
         method,
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Connection: 'close' },
         body: body ? JSON.stringify(body) : undefined,
         signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
       });
