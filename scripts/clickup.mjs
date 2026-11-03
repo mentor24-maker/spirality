@@ -27,9 +27,11 @@
  * stderr, so piping stdout is always safe.
  */
 
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, statSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { homedir } from 'node:os';
+import { join as joinPath } from 'node:path';
 import {
   DISPLAY, STAGE_ORDER, CLAIMABLE_BY_BUILD, OPERATOR_STATUSES, BUILDING, NEEDS_YOUR_INPUT, QUEUED, PRIORITY_VALUE,
   isClaimableByBuild, isOperatorStatus, isReadyToLaunch, claimOrder, compareWithinStatus, statusOf, TERMINAL_STATUSES,
@@ -76,6 +78,10 @@ import {
   checkBranch, branchContains, tellTickets, latestMainMoved,
 } from '../lib/mainMoved.js';
 import { parseRepoFromRemoteUrl } from '../lib/branchCatchUp.js';
+// A ticket left in Building by a pass that is gone (SP-101).
+import {
+  ABANDONED_AFTER_MS, buildLockPath, lockState, staleDecision, leftoverWorktrees, requeueNote,
+} from '../lib/staleBuilding.js';
 
 // ── The ids, written down once ───────────────────────────────────────────────
 // They live in spirality.project.json at the repository root (see
@@ -184,6 +190,9 @@ npm run clickup -- <command> [flags]      (Loop Queue: list ${LOOP_QUEUE_LIST}, 
   repo-check                                      does the tracker project's GitHub repository agree with githubRepo? (exit 1 if not)
   lists [--space <id>]                            resolve list ids by name (default: the project's space)
   queue [--list <id>] [--claimable | --status S]  the tickets, one per line: id, status, priority, created, name
+  stale-building [--limit-minutes N] [--dry-run]  put each Building ticket a dead pass left (no build pass running, no PR,
+                                                  untouched past the limit, 90 min unless given) back in Queued, with a
+                                                  note. Exit 0 nothing moved / 3 moved some / 1 a write failed / 2 could not tell
   get --task <id>                                 header + body
   task-name --task <id>                           the name and nothing else (for a PR title)
   comments --task <id>                            the comments, oldest first
@@ -407,6 +416,56 @@ async function tellMainMoved({ mergedNumber, list, dryRun, tasks = null }) {
   return tellTickets({ tasks: tasks || await fetchAllTasks(list), merge, base, repo, openPrs, dryRun, io });
 }
 
+// ── Building tickets a dead pass left behind (SP-101) ────────────────────────
+/** The build runner's lock as it is on disk now (scripts/loop_runner.sh writes it). */
+function readBuildLock(dir) {
+  if (!existsSync(dir)) return { exists: false };
+  let pid = null;
+  try { pid = readFileSync(joinPath(dir, 'pid'), 'utf8').trim(); } catch { pid = null; }
+  let alive = false;
+  if (/^\d+$/.test(String(pid))) {
+    try { process.kill(Number(pid), 0); alive = true; } catch (err) { alive = err?.code === 'EPERM'; }
+  }
+  return { exists: true, pid, alive, ancestors: ancestorPids() };
+}
+
+/** This process's parent, its parent, and so on up to launchd. */
+function ancestorPids() {
+  const pids = [];
+  let pid = process.pid;
+  for (let i = 0; i < 64 && pid > 1; i += 1) {
+    const out = spawnSync('ps', ['-o', 'ppid=', '-p', String(pid)], { encoding: 'utf8' });
+    const parent = Number(String(out.stdout || '').trim());
+    if (out.status !== 0 || !Number.isInteger(parent) || parent <= 0) break;
+    pids.push(parent);
+    pid = parent;
+  }
+  return pids;
+}
+
+/** Every linked worktree of this checkout: path, branch, when it was made, pushed?, dirty? */
+function listWorktrees() {
+  const out = spawnSync('git', ['worktree', 'list', '--porcelain'], { cwd: REPO_ROOT, encoding: 'utf8' });
+  if (out.status !== 0) return { problem: String(out.stderr || '').trim().slice(0, 200) || 'git worktree list failed', worktrees: [] };
+  const entries = String(out.stdout).split(/\n\n+/).map((block) => {
+    const e = {};
+    for (const line of block.split('\n')) {
+      if (line.startsWith('worktree ')) e.path = line.slice(9);
+      else if (line.startsWith('branch ')) e.branch = line.slice(7).replace(/^refs\/heads\//, '');
+    }
+    return e;
+  }).filter((e) => e.path);
+  // The first entry is the main checkout itself, never a pass's worktree.
+  const worktrees = entries.slice(1).map((e) => {
+    let createdMs = NaN;
+    try { const st = statSync(joinPath(e.path, '.git')); createdMs = st.birthtimeMs || st.mtimeMs; } catch { /* gone or unreadable */ }
+    const pushed = Boolean(e.branch) && spawnSync('git', ['rev-parse', '--verify', '--quiet', `refs/remotes/origin/${e.branch}`], { cwd: REPO_ROOT }).status === 0;
+    const st = spawnSync('git', ['-C', e.path, 'status', '--porcelain'], { encoding: 'utf8' });
+    return { path: e.path, branch: e.branch || '', createdMs, pushed, dirty: st.status === 0 && String(st.stdout).trim() !== '' };
+  });
+  return { worktrees };
+}
+
 // ── Commands ─────────────────────────────────────────────────────────────────
 if (!TOKEN) {
   console.error(`${TOKEN_ENV} is not set in this environment.\n`);
@@ -511,6 +570,74 @@ if (cmd === 'whoami') {
   console.error(`${wanted.length} task(s)${scope} in list ${list} (first line is the one to take)`);
   if (claimable && wanted.length) console.error(`  claim it: npm run clickup -- claim --task ${wanted[0].id}`);
   reportLimits();
+
+} else if (cmd === 'stale-building') {
+  // Run by every build pass before it claims (.claude/skills/loop-build).
+  // Moves only a ticket all three facts call abandoned; see lib/staleBuilding.js.
+  const dryRun = flag('dry-run');
+  let limitMs = ABANDONED_AFTER_MS;
+  if (arg('limit-minutes') != null) {
+    const n = Number(arg('limit-minutes'));
+    if (!(Number.isFinite(n) && n > 0)) { console.error(`--limit-minutes needs a number of minutes above 0, got "${arg('limit-minutes')}". Nothing was moved.`); process.exit(2); }
+    limitMs = n * 60 * 1000;
+  }
+  const lockDir = buildLockPath({ logDir: project.logDir, productSlug: project.productSlug, home: homedir() });
+  const lock = lockState(readBuildLock(lockDir));
+  console.error(`build lock ${lockDir}: ${lock.state} — ${lock.why}`);
+  const building = (await fetchAllTasks(LOOP_QUEUE_LIST)).filter((t) => statusOf(t) === BUILDING);
+  let moved = 0, failed = 0, unsure = 0;
+  let worktrees = null;
+  const nowMs = Date.now();
+  for (const t of building) {
+    const read = await readCommentsOrProblem(t.id);
+    const hasPr = read.problem ? null : Boolean(findPullRequest(read.comments));
+    const d = staleDecision({ status: statusOf(t), lock, hasPr, updatedMs: Number(t.date_updated), nowMs, limitMs });
+    if (d.action === 'cannot-tell') {
+      unsure += 1;
+      console.log(`${t.id}\tcould not tell\t${d.reason}${read.problem ? ` (${read.problem})` : ''} — left in Building`);
+      continue;
+    }
+    if (d.action !== 'requeue') { console.log(`${t.id}\tleft alone\t${d.reason}`); continue; }
+    if (dryRun) { console.log(`${t.id}\twould requeue\t${d.reason}`); continue; }
+    // Read again right before the write: ClickUp ignores the guard below.
+    const fresh = await readTaskOrNull(t.id);
+    if (!fresh || statusOf(fresh) !== BUILDING || Number(fresh.date_updated) !== Number(t.date_updated)) {
+      console.log(`${t.id}\tleft alone\t${fresh ? 'it changed while this pass was looking' : 'it could not be read again'} — not moved`);
+      continue;
+    }
+    const out = await tracker.updateTask(t.id, {
+      status: DISPLAY[QUEUED],
+      assignees: { add: [], rem: (t.assignees || []).map((a) => a.id) },
+    }, { ifStatus: DISPLAY[BUILDING] });
+    const now = out.json?.status?.status ?? '';
+    if (out.moved || !out.res.ok || statusOf(now) !== QUEUED) {
+      failed += 1;
+      console.log(`${t.id}\tNOT moved\t${out.moved ? 'it moved underneath this pass' : `the write ${out.res.ok ? `came back "${now || '?'}"` : `failed, HTTP ${out.res.status}`}`} — left as it is`);
+      continue;
+    }
+    if (!worktrees) {
+      worktrees = listWorktrees();
+      if (worktrees.problem) console.error(`the worktrees could not be listed (${worktrees.problem}); the note says none were found`);
+    }
+    const leftovers = leftoverWorktrees(worktrees.worktrees, { updatedMs: Number(t.date_updated) });
+    const text = requeueNote({ when: clock(t.date_updated), reason: d.reason, leftovers });
+    const posted = await tracker.postComment(t.id, { comment_text: text });
+    const id = String(posted.json?.id ?? '');
+    const back = posted.res.ok ? await readCommentsOrProblem(t.id) : { problem: `HTTP ${posted.res.status}` };
+    const landed = !back.problem && back.comments.some((c) => String(c.id) === id && String(c.comment_text || '').trim());
+    if (!landed) {
+      failed += 1;
+      console.log(`${t.id}\tmoved to Queued, NOTE FAILED\tthe ticket is back in Queued but its note did not save (${back.problem || `comment ${id || '(no id)'} not found on read-back`})`);
+      continue;
+    }
+    moved += 1;
+    console.log(`${t.id}\trequeued\t${d.reason}; note ${id} read back`);
+  }
+  console.error(`${building.length} ticket(s) in Building; ${dryRun ? 'dry run, nothing written' : `${moved} put back in Queued`}${failed ? `, ${failed} FAILED` : ''}${unsure ? `, ${unsure} could not tell` : ''}`);
+  reportLimits();
+  if (failed) process.exit(1);
+  if (unsure) process.exit(2);
+  if (moved) process.exit(3);
 
 } else if (cmd === 'get') {
   const task = arg('task');
