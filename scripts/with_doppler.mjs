@@ -15,12 +15,28 @@
  * body from stdin), and the command's exit code is this script's, so a
  * caller still tells exit 3 from exit 1. A broken project config fails here,
  * loudly, before Doppler is asked for anything.
+ *
+ * The project config is the one found from the current folder up, unless
+ * the wrapped command names another with `--config <path>` (or
+ * `--config=<path>`), as `tracker:signins` does: then that settings file,
+ * the same one the command reads, names the Doppler project, so a product's
+ * sign-ins run from Spirality's checkout land in that product's Doppler.
  */
 
 import { spawn } from 'node:child_process';
 import { constants } from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { loadProjectConfig, ProjectConfigError } from '../lib/projectConfig.mjs';
+
+/** The settings file a wrapped command names with `--config`, or undefined. */
+export function configFileArg(command) {
+  for (let i = 0; i < command.length; i += 1) {
+    if (command[i] === '--') return undefined;
+    if (command[i] === '--config') return command[i + 1];
+    if (command[i].startsWith('--config=')) return command[i].slice('--config='.length);
+  }
+  return undefined;
+}
 
 /** The doppler arguments that run `command` under `config`'s project. */
 export function dopplerArgs(config, command) {
@@ -34,7 +50,7 @@ async function main(command) {
   }
   let config;
   try {
-    config = loadProjectConfig();
+    config = loadProjectConfig({ file: configFileArg(command) });
   } catch (err) {
     if (!(err instanceof ProjectConfigError)) throw err;
     console.error(`with_doppler: the project config is not usable — ${err.message}`);
