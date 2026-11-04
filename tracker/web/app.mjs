@@ -486,9 +486,13 @@ const field = (id, label, hint, attrs = '') => `
 /** The GitHub repository box's hint, the same on both project forms. */
 const REPO_HINT = 'Optional. Where its pull requests live: owner/name, like my-org/my-app, or its https://github.com/ address.';
 
+/** The alert boxes' hints, the same on both project forms. */
+const ALERT_EMAIL_HINT = "Where hand-over alerts for this project go. Empty: the tracker's default address.";
+const ALERT_PHONE_HINT = 'For iMessage alerts, e.g. +1 801 555 0123. Empty: no texts.';
+
 /**
  * The Create Project form, for a person only: name, slug, ticket prefix, web
- * address, logo (an image's web address), GitHub repository and owner, picked from the
+ * address, logo (an image's web address), GitHub repository, alert email and phone, and owner, picked from the
  * tracker's people. Saving files the project and opens its details page,
  * which reads it back from the server. A refused save shows the server's own
  * message and leaves every field as typed: the form is not redrawn.
@@ -509,6 +513,8 @@ async function drawCreateProject() {
       ${field('url', 'Web address', 'Optional. Starts http:// or https://.', ' inputmode="url" spellcheck="false"')}
       ${field('logo', 'Logo', "Optional. An image's web address, starting http:// or https://.", ' inputmode="url" spellcheck="false"')}
       ${field('repo', 'GitHub repository', REPO_HINT, ' autocapitalize="off" spellcheck="false"')}
+      ${field('alertEmail', 'Alert email', ALERT_EMAIL_HINT, ' inputmode="email" autocapitalize="off" spellcheck="false"')}
+      ${field('alertPhone', 'Alert phone', ALERT_PHONE_HINT, ' inputmode="tel" autocomplete="tel" spellcheck="false"')}
       <label for="owner">Owner</label>
       <select id="owner"><option value="">Nobody</option>${people.map((p) => `<option value="${escapeHtml(p.id)}"${p.id === me.id ? ' selected' : ''}>${escapeHtml(p.name)}</option>`).join('')}</select>
       <div class="row"><button type="submit">Add project</button><a href="/projects">Cancel</a><span class="note"></span></div>
@@ -526,6 +532,7 @@ async function drawCreateProject() {
       const made = await api('POST', '/projects', {
         name: value('name'), slug: value('slug'), prefix: value('prefix'),
         url: value('url'), logo: value('logo'), repo: value('repo'), owner: value('owner') ? Number(value('owner')) : null,
+        alertEmail: value('alertEmail'), alertPhone: value('alertPhone'),
       });
       history.pushState(null, '', `/projects/${encodeURIComponent(made.slug)}`);
       await route();
@@ -541,7 +548,8 @@ async function drawCreateProject() {
 
 /**
  * The Edit project form, for a person only: the Create Project form filled
- * in with what the server holds. Name, web address, logo, GitHub repository and owner change;
+ * in with what the server holds. Name, web address, logo, GitHub repository, owner and the
+ * alert email and phone change;
  * the slug and ticket prefix are shown but cannot, since every ticket's id
  * is built from them. Saving sends the change and opens the details page,
  * which reads it back from the server. A refused save shows the server's own
@@ -573,6 +581,8 @@ async function drawEditProject(slug) {
       ${field('url', 'Web address', 'Optional. Starts http:// or https://.', ` inputmode="url" spellcheck="false"${filled(p.url)}`)}
       ${field('logo', 'Logo', "Optional. An image's web address, starting http:// or https://.", ` inputmode="url" spellcheck="false"${filled(p.logo)}`)}
       ${field('repo', 'GitHub repository', REPO_HINT, ` autocapitalize="off" spellcheck="false"${filled(p.repo)}`)}
+      ${field('alertEmail', 'Alert email', ALERT_EMAIL_HINT, ` inputmode="email" autocapitalize="off" spellcheck="false"${filled(p.alertEmail)}`)}
+      ${field('alertPhone', 'Alert phone', ALERT_PHONE_HINT, ` inputmode="tel" autocomplete="tel" spellcheck="false"${filled(p.alertPhone)}`)}
       <label for="owner">Owner</label>
       <select id="owner"><option value="">Nobody</option>${people.map((o) => `<option value="${escapeHtml(o.id)}"${o.id === p.owner?.id ? ' selected' : ''}>${escapeHtml(o.name)}</option>`).join('')}</select>
       <div class="row"><button type="submit">Save</button><a href="/projects">Cancel</a><span class="note"></span></div>
@@ -590,6 +600,7 @@ async function drawEditProject(slug) {
     try {
       const saved = await api('PATCH', `/projects/${encodeURIComponent(p.slug)}`, {
         name: value('name'), url: value('url'), logo: value('logo'), repo: value('repo'), owner: value('owner') ? Number(value('owner')) : null,
+        alertEmail: value('alertEmail'), alertPhone: value('alertPhone'),
       });
       history.pushState(null, '', `/projects/${encodeURIComponent(saved.slug)}`);
       await route();

@@ -550,7 +550,7 @@ test('deleting an imported ticket keeps its map rows, so the import cannot file 
 test('a project keeps its web address, logo and owner, and reads them back; none given is null', () => {
   const { store, human, cleanup } = fixture();
   try {
-    assert.deepEqual(store.getProject('alpha'), { slug: 'alpha', name: 'Alpha', prefix: 'AL', operator: human.id, url: null, logo: null, owner: null, repo: null });
+    assert.deepEqual(store.getProject('alpha'), { slug: 'alpha', name: 'Alpha', prefix: 'AL', operator: human.id, url: null, logo: null, owner: null, repo: null, alertEmail: null, alertPhone: null });
     const made = store.createProject({
       slug: 'beta', name: 'Beta', prefix: 'BE',
       url: 'https://beta.example', logo: 'https://beta.example/logo.png', owner: human.id,
@@ -558,6 +558,7 @@ test('a project keeps its web address, logo and owner, and reads them back; none
     assert.deepEqual(made, {
       slug: 'beta', name: 'Beta', prefix: 'BE', operator: null,
       url: 'https://beta.example', logo: 'https://beta.example/logo.png', owner: human.id, repo: null,
+      alertEmail: null, alertPhone: null,
     });
     assert.deepEqual(store.getProject('beta'), made);
     assert.deepEqual(store.listProjects().map((p) => p.slug), ['alpha', 'beta']);
@@ -591,6 +592,7 @@ test('updateProject changes only the name, web address, logo and owner it is giv
     assert.deepEqual(changed, {
       slug: 'alpha', name: 'Alpha Two', prefix: 'AL', operator: human.id,
       url: 'https://alpha.example', logo: null, owner: human.id, repo: null,
+      alertEmail: null, alertPhone: null,
     });
     assert.deepEqual(store.getProject('alpha'), changed);
     // Only what is given changes; an empty address and a null owner are none.
@@ -667,6 +669,40 @@ test('a project keeps its GitHub repository as owner/name: a github.com address 
   } finally { cleanup(); }
 });
 
+test("a project's alert email and phone are set, kept across a reopen and cleared; a phone is saved without a person's spaces, dashes and brackets", () => {
+  const { dir, path, store } = fixture();
+  try {
+    const made = store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE', alertEmail: 'beta@example.com', alertPhone: '+1 (801) 555-0123' });
+    assert.deepEqual([made.alertEmail, made.alertPhone], ['beta@example.com', '+18015550123']);
+    assert.equal(store.updateProject('beta', { alertPhone: '+44 20 7946 0000' }).alertPhone, '+442079460000');
+    assert.equal(store.updateProject('beta', { name: 'Beta Two' }).alertEmail, 'beta@example.com', 'only what is given changes');
+    store.close();
+    const reopened = openStore(path);
+    try {
+      assert.deepEqual([reopened.getProject('beta').alertEmail, reopened.getProject('beta').alertPhone], ['beta@example.com', '+442079460000']);
+      const cleared = reopened.updateProject('beta', { alertEmail: '', alertPhone: null });
+      assert.deepEqual([cleared.alertEmail, cleared.alertPhone], [null, null]);
+      assert.deepEqual([reopened.getProject('alpha').alertEmail, reopened.getProject('alpha').alertPhone], [null, null], 'none by default');
+      for (const [changes, code] of [
+        [{ alertEmail: 'name.example.com' }, 'bad-alert-email'],
+        [{ alertEmail: 'a@b@example.com' }, 'bad-alert-email'],
+        [{ alertEmail: 'name@example' }, 'bad-alert-email'],
+        [{ alertEmail: 'name@.com' }, 'bad-alert-email'],
+        [{ alertEmail: 42 }, 'bad-alert-email'],
+        [{ alertPhone: '8015550123' }, 'bad-alert-phone'],
+        [{ alertPhone: '+1234567' }, 'bad-alert-phone'],
+        [{ alertPhone: '+1234567890123456' }, 'bad-alert-phone'],
+        [{ alertPhone: '+1 555 abc 0100' }, 'bad-alert-phone'],
+      ]) {
+        assert.throws(() => reopened.updateProject('beta', changes), { code }, JSON.stringify(changes));
+        assert.throws(() => reopened.createProject({ slug: 'gamma', name: 'G', prefix: 'GA', ...changes }), { code }, JSON.stringify(changes));
+      }
+      assert.equal(reopened.getProject('gamma'), null, 'nothing was made');
+      assert.deepEqual([reopened.getProject('beta').alertEmail, reopened.getProject('beta').alertPhone], [null, null], 'nothing was written');
+    } finally { reopened.close(); }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test('a GitHub repository that is not owner/name or a github.com address is refused, and nothing is written', () => {
   const { store, cleanup } = fixture();
   try {
@@ -715,7 +751,7 @@ test('a database made before projects had a web address, logo and owner gains th
 
     const store = openStore(path);
     try {
-      assert.deepEqual(store.getProject('old'), { slug: 'old', name: 'Old', prefix: 'OL', operator: 1, url: null, logo: null, owner: null, repo: null });
+      assert.deepEqual(store.getProject('old'), { slug: 'old', name: 'Old', prefix: 'OL', operator: 1, url: null, logo: null, owner: null, repo: null, alertEmail: null, alertPhone: null });
       assert.deepEqual(store.listTickets('old').map((t) => [t.id, t.name, t.status, t.version]), [['OL-1', 'First', 'queued', 4], ['OL-2', 'Second', 'live', 1]]);
       // The next ticket still takes the old project's next number.
       assert.equal(store.fileTicket({ project: 'old', actor: 1, name: 'Third', status: 'queued' }).id, 'OL-3');
@@ -728,7 +764,7 @@ test('a database made before projects had a web address, logo and owner gains th
     const raw = new DatabaseSync(path);
     try {
       assert.deepEqual(raw.prepare('PRAGMA table_info(projects)').all().map((c) => c.name),
-        ['slug', 'name', 'prefix', 'operator', 'next_number', 'url', 'logo', 'owner', 'repo']);
+        ['slug', 'name', 'prefix', 'operator', 'next_number', 'url', 'logo', 'owner', 'repo', 'alert_email', 'alert_phone']);
       assert.deepEqual(raw.prepare("SELECT * FROM tickets WHERE id IN ('OL-1', 'OL-2') ORDER BY id").all(), ticketsBefore);
     } finally { raw.close(); }
   } finally { rmSync(dir, { recursive: true, force: true }); }

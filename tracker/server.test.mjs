@@ -321,9 +321,62 @@ test('PATCH /projects/:slug changes a project\'s name, web address, logo and own
     assert.deepEqual(f.store.getProject('alpha'), {
       slug: 'alpha', name: 'Alpha Two', prefix: 'AL', operator: f.human.id,
       url: 'https://alpha.example', logo: 'https://alpha.example/l.png', owner: f.human.id, repo: null,
+      alertEmail: null, alertPhone: null,
     });
     const listed = (await f.call('GET', '/projects')).body.projects.find((p) => p.slug === 'alpha');
     assert.equal(listed.name, 'Alpha Two');
+  } finally { await f.cleanup(); }
+});
+
+test("a project's alert email and phone save for a person, read back on GET, clear when empty; a loop never sees them", async () => {
+  const f = await fixture();
+  try {
+    const r = await f.call('PATCH', '/projects/alpha', {
+      token: f.humanToken, body: { alertEmail: 'alpha-alerts@example.com', alertPhone: '+1 (801) 555-0123' },
+    });
+    assert.equal(r.status, 200);
+    assert.deepEqual([r.body.alertEmail, r.body.alertPhone], ['alpha-alerts@example.com', '+18015550123']);
+    const again = await f.call('GET', '/projects/alpha', { token: f.humanToken });
+    assert.deepEqual([again.body.alertEmail, again.body.alertPhone], ['alpha-alerts@example.com', '+18015550123']);
+    const loop = await f.call('GET', '/projects/alpha');
+    assert.equal(loop.status, 200);
+    assert.ok(!('alertEmail' in loop.body) && !('alertPhone' in loop.body), 'a loop is not shown them');
+    const listed = (await f.call('GET', '/projects', { token: f.humanToken })).body.projects.find((p) => p.slug === 'alpha');
+    assert.ok(!('alertEmail' in listed) && !('alertPhone' in listed), 'not in the projects table');
+    const cleared = await f.call('PATCH', '/projects/alpha', { token: f.humanToken, body: { alertEmail: '', alertPhone: '' } });
+    assert.deepEqual([cleared.body.alertEmail, cleared.body.alertPhone], [null, null]);
+    const made = await f.call('POST', '/projects', {
+      token: f.humanToken, body: { name: 'Beta', slug: 'beta', prefix: 'BE', alertEmail: 'beta@example.com', alertPhone: '+44 20 7946 0000' },
+    });
+    assert.equal(made.status, 201);
+    assert.deepEqual([made.body.alertEmail, made.body.alertPhone], ['beta@example.com', '+442079460000']);
+  } finally { await f.cleanup(); }
+});
+
+test('a malformed alert email or phone is refused (400) with a message naming the field, and nothing is written', async () => {
+  const f = await fixture();
+  try {
+    f.store.updateProject('alpha', { alertEmail: 'kept@example.com', alertPhone: '+15555550100' });
+    const before = f.store.getProject('alpha');
+    for (const [body, error, named] of [
+      [{ alertEmail: 'no-at-sign.example.com' }, 'bad-alert-email', /alert email/],
+      [{ alertEmail: 'two@at@example.com' }, 'bad-alert-email', /alert email/],
+      [{ alertEmail: 'nodot@example' }, 'bad-alert-email', /alert email/],
+      [{ alertPhone: '801 555 0123' }, 'bad-alert-phone', /alert phone/],
+      [{ alertPhone: '+1 555' }, 'bad-alert-phone', /alert phone/],
+      [{ alertPhone: '+1 555 0100 0100 0100 01' }, 'bad-alert-phone', /alert phone/],
+      [{ alertPhone: '+1 555 CALL ME' }, 'bad-alert-phone', /alert phone/],
+      [{ name: 'Changed', alertPhone: 'nope' }, 'bad-alert-phone', /alert phone/],
+    ]) {
+      const r = await f.call('PATCH', '/projects/alpha', { token: f.humanToken, body });
+      assert.equal(r.status, 400, JSON.stringify(body));
+      assert.equal(r.body.error, error, JSON.stringify(body));
+      assert.match(r.body.message, named, JSON.stringify(body));
+    }
+    assert.deepEqual(f.store.getProject('alpha'), before);
+    const made = await f.call('POST', '/projects', { token: f.humanToken, body: { name: 'Beta', slug: 'beta', prefix: 'BE', alertEmail: 'bad' } });
+    assert.equal(made.status, 400);
+    assert.equal(f.store.getProject('beta'), null);
   } finally { await f.cleanup(); }
 });
 
@@ -510,7 +563,7 @@ test('admin: create-actor prints only the token on stdout, and that token signs 
     const store = openStore(db);
     try {
       assert.deepEqual(store.actorForToken(token), { id: 1, kind: 'machine', name: 'Build loop' });
-      assert.deepEqual(store.getProject('beta'), { slug: 'beta', name: 'Beta', prefix: 'BE', operator: 2, url: null, logo: null, owner: null, repo: null });
+      assert.deepEqual(store.getProject('beta'), { slug: 'beta', name: 'Beta', prefix: 'BE', operator: 2, url: null, logo: null, owner: null, repo: null, alertEmail: null, alertPhone: null });
       assert.equal(store.getProject('gamma'), null);
       const server = await startServer({ store, port: 0 });
       try {
@@ -551,7 +604,7 @@ test('POST /projects lets a person add a project, read back with its owner by na
     assert.equal(made.body.url, 'https://beta.example');
     assert.equal(made.body.logo, 'https://beta.example/l.png');
     assert.equal(made.body.operator, null, 'the operator is not set by the form');
-    assert.deepEqual((await f.call('GET', '/projects/beta')).body, made.body);
+    assert.deepEqual((await f.call('GET', '/projects/beta', { token: f.humanToken })).body, made.body);
     assert.ok(f.lines.some((l) => /POST \/projects 201 actor=1/.test(l)));
   } finally { await f.cleanup(); }
 });

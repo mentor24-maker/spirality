@@ -337,6 +337,19 @@ reads them again:
 `npm run tracker:test-email` sends one test hand-over through the same code,
 from a throwaway tracker in memory, without touching the real one.
 
+**Each project can have its own alert address** (SP-113). The Edit project
+page has an "Alert email" and an "Alert phone" box. A hand-over on a project
+with an alert email goes to that address; on one without, to
+`TRACKER_NOTIFY_TO` as before. The log line says which of the two it used,
+never the address itself. Only a person's sign-in sees the two boxes' values;
+a loop's never does, and the Projects table never shows them. The phone is
+kept in international form (`+18015550123`) for the iMessage alerts a later
+ticket adds; today nothing texts it. One catch: while the email still goes
+from Resend's shared sender (`TRACKER_NOTIFY_FROM` unset), Resend delivers
+only to the Resend account's own address, so a project's alert email that is
+any other address is refused by Resend (the log says `NOT sent`) until a
+sending domain of our own is set up there.
+
 **A backup is made by SQLite itself**, not by copying the file: copying a
 database while it is being written can catch it half-done. `VACUUM INTO`
 reads the whole database at one moment while writes carry on, the copy is
