@@ -39,9 +39,14 @@
  *    operator, who the loops hand tickets to. Its web address and logo are
  *    http(s) addresses, or nothing. Its GitHub repository is `owner/name`,
  *    or nothing; no loop reads it yet (they read the product's project config).
+ *  - A project's alert email (one `@` and a dot after it) and alert phone
+ *    (international form, `+` then 8 to 15 digits, saved without the spaces,
+ *    dashes and brackets a person types) are where its hand-over alerts go,
+ *    or nothing: the tracker's default address, and no texts.
  *  - A project's slug and ticket prefix never change once it is made: every
  *    ticket's id and its project link are built from them. updateProject
- *    changes its name, web address, logo, owner and repository, nothing else.
+ *    changes its name, web address, logo, owner, repository and alert
+ *    email and phone, nothing else.
  *  - A project is deleted only while it holds no tickets. deleteProject
  *    counts them inside the same transaction as the delete, so a ticket
  *    filed at that moment either lands first (the delete is refused) or
@@ -113,7 +118,9 @@ CREATE TABLE IF NOT EXISTS projects (
   url         TEXT,
   logo        TEXT,
   owner       INTEGER REFERENCES actors(id),
-  repo        TEXT
+  repo        TEXT,
+  alert_email TEXT,
+  alert_phone TEXT
 );
 CREATE TABLE IF NOT EXISTS tickets (
   id          TEXT PRIMARY KEY,
@@ -300,13 +307,13 @@ const NOBODY = hashPassword(randomBytes(32).toString('base64url'));
 const num = (v) => (v == null ? null : Number(v));
 
 /** The project fields updateProject may change; the slug and prefix never do. */
-const PROJECT_CHANGEABLE = Object.freeze(['name', 'url', 'logo', 'owner', 'repo']);
+const PROJECT_CHANGEABLE = Object.freeze(['name', 'url', 'logo', 'owner', 'repo', 'alertEmail', 'alertPhone']);
 
 /** The columns an actor gained after the first databases were made. */
 const LATER_ACTOR_COLUMNS = Object.freeze({ token_hash: 'TEXT', email: 'TEXT', password_hash: 'TEXT' });
 
 /** The columns a project gained after the first databases were made, and their types. */
-const LATER_PROJECT_COLUMNS = Object.freeze({ url: 'TEXT', logo: 'TEXT', owner: 'INTEGER REFERENCES actors(id)', repo: 'TEXT' });
+const LATER_PROJECT_COLUMNS = Object.freeze({ url: 'TEXT', logo: 'TEXT', owner: 'INTEGER REFERENCES actors(id)', repo: 'TEXT', alert_email: 'TEXT', alert_phone: 'TEXT' });
 
 /** An optional web address: null for none, an http(s) address, or a thrown refusal. */
 function optionalAddress(value, what) {
@@ -338,11 +345,37 @@ function optionalRepo(value) {
   throw new StoreError('bad-repo', `a project's GitHub repository is owner/name, like my-org/my-app, or its https://github.com/ address, not "${value}".`);
 }
 
+/** An email address as the alert box takes it: one `@`, something before it, and a dot after it. */
+const ALERT_EMAIL = /^[^\s@]+@[^\s@.][^\s@]*\.[^\s@]*[^\s@.]$/;
+
+/** An optional alert email: null for none, the address, or a thrown refusal naming the field. */
+function optionalAlertEmail(value) {
+  if (value == null || value === '') return null;
+  if (typeof value === 'string' && ALERT_EMAIL.test(value.trim())) return value.trim();
+  throw new StoreError('bad-alert-email', `the alert email must be an address like name@example.com: one @ and a dot after it, not "${value}".`);
+}
+
+/**
+ * An optional alert phone: null for none, the number in international form
+ * (`+` then 8 to 15 digits) with the spaces, dashes, dots and brackets a
+ * person types taken out, or a thrown refusal naming the field.
+ */
+function optionalAlertPhone(value) {
+  if (value == null || value === '') return null;
+  if (typeof value === 'string') {
+    const bare = value.replace(/[\s\-.()[\]]/g, '');
+    if (bare === '') return null;
+    if (/^\+\d{8,15}$/.test(bare)) return bare;
+  }
+  throw new StoreError('bad-alert-phone', `the alert phone must be in international form, a + then 8 to 15 digits, like +1 801 555 0123, not "${value}".`);
+}
+
 function projectFromRow(row) {
   if (!row) return null;
   return {
     slug: row.slug, name: row.name, prefix: row.prefix, operator: num(row.operator),
     url: row.url, logo: row.logo, owner: num(row.owner), repo: row.repo,
+    alertEmail: row.alert_email ?? null, alertPhone: row.alert_phone ?? null,
   };
 }
 
@@ -872,10 +905,11 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
     /**
      * A product: its slug, its name, its ticket-id prefix, its operator, and
      * optionally its web address, its logo (an image's web address), its
-     * owner (a person) and its GitHub repository (`owner/name`). Read back
+     * owner (a person), its GitHub repository (`owner/name`) and its alert
+     * email and phone. Read back
      * before it is answered.
      */
-    createProject({ slug, name, prefix, operator = null, url = null, logo = null, owner = null, repo = null }) {
+    createProject({ slug, name, prefix, operator = null, url = null, logo = null, owner = null, repo = null, alertEmail = null, alertPhone = null }) {
       requireText(slug, "a project's slug");
       requireText(name, "a project's name");
       if (typeof prefix !== 'string' || !/^[A-Z][A-Z0-9]*$/.test(prefix)) {
@@ -885,12 +919,14 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
       const address = optionalAddress(url, "a project's web address");
       const image = optionalAddress(logo, "a project's logo");
       const repository = optionalRepo(repo);
+      const email = optionalAlertEmail(alertEmail);
+      const phone = optionalAlertPhone(alertPhone);
       if (owner != null && this.getActor(requireActor(owner, 'the owner')).kind !== 'human') {
         throw new StoreError('bad-owner', `the owner must be a person; actor ${owner} is a machine.`);
       }
       try {
-        db.prepare('INSERT INTO projects (slug, name, prefix, operator, url, logo, owner, repo) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-          .run(slug, name, prefix, operator, address, image, owner, repository);
+        db.prepare('INSERT INTO projects (slug, name, prefix, operator, url, logo, owner, repo, alert_email, alert_phone) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+          .run(slug, name, prefix, operator, address, image, owner, repository, email, phone);
       } catch (err) {
         if (/UNIQUE/.test(err.message)) {
           throw new StoreError('duplicate-project', `a project with slug "${slug}" or prefix "${prefix}" already exists.`);
@@ -898,7 +934,7 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
         throw err;
       }
       const made = this.getProject(slug);
-      const wanted = { slug, name, prefix, operator, url: address, logo: image, owner, repo: repository };
+      const wanted = { slug, name, prefix, operator, url: address, logo: image, owner, repo: repository, alertEmail: email, alertPhone: phone };
       if (!made || Object.keys(wanted).some((k) => made[k] !== wanted[k])) {
         throw new StoreError('write-failed', `project "${slug}" did not read back as written.`);
       }
@@ -906,7 +942,8 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
     },
 
     /**
-     * Change a project's name, web address, logo, owner or GitHub repository: only the fields
+     * Change a project's name, web address, logo, owner, GitHub repository,
+     * alert email or alert phone: only the fields
      * given change. Its slug, prefix and operator are refused, never
      * changed. Read back before it is answered.
      */
@@ -927,6 +964,8 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
       if ('url' in changes) wanted.url = optionalAddress(changes.url, "a project's web address");
       if ('logo' in changes) wanted.logo = optionalAddress(changes.logo, "a project's logo");
       if ('repo' in changes) wanted.repo = optionalRepo(changes.repo);
+      if ('alertEmail' in changes) wanted.alertEmail = optionalAlertEmail(changes.alertEmail);
+      if ('alertPhone' in changes) wanted.alertPhone = optionalAlertPhone(changes.alertPhone);
       if ('owner' in changes) {
         const owner = changes.owner ?? null;
         if (owner != null && this.getActor(requireActor(owner, 'the owner')).kind !== 'human') {
@@ -934,8 +973,8 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
         }
         wanted.owner = owner;
       }
-      const r = db.prepare('UPDATE projects SET name = ?, url = ?, logo = ?, owner = ?, repo = ? WHERE slug = ?')
-        .run(wanted.name, wanted.url, wanted.logo, wanted.owner, wanted.repo, slug);
+      const r = db.prepare('UPDATE projects SET name = ?, url = ?, logo = ?, owner = ?, repo = ?, alert_email = ?, alert_phone = ? WHERE slug = ?')
+        .run(wanted.name, wanted.url, wanted.logo, wanted.owner, wanted.repo, wanted.alertEmail, wanted.alertPhone, slug);
       const saved = this.getProject(slug);
       if (num(r.changes) !== 1 || !saved || Object.keys(wanted).some((k) => saved[k] !== wanted[k])) {
         throw new StoreError('write-failed', `project "${slug}" did not read back as changed.`);

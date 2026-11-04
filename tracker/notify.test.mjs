@@ -90,7 +90,30 @@ test('one hand-over sends one email: ticket name, project, the card\'s ask, a li
     assert.match(email.text, /^Status: {2}Needs your input$/m);
     assert.match(email.text, /^Needed: {2}pick Resend or Postmark$/m);
     assert.match(email.text, /^Open it: http:\/\/tracker\.example:8787\/t\/AL-1$/m);
-    assert.ok(f.lines.some((l) => l === 'hand-over email sent: AL-1 (needs your input).'));
+    assert.ok(f.lines.some((l) => l === 'hand-over email sent: AL-1 (needs your input) to TRACKER_NOTIFY_TO.'), f.lines.join('\n'));
+  } finally { await f.cleanup(); }
+});
+
+test("a project with an alert email gets its hand-over there; the log names which address, never the address", async () => {
+  const f = await fixture();
+  try {
+    f.store.updateProject('alpha', { alertEmail: 'alpha-alerts@example.com' });
+    const moved = await f.ask(f.ticket.id);
+    assert.equal(moved.status, 200);
+    assert.equal(f.mail.length, 1);
+    assert.equal(f.mail[0].to, 'alpha-alerts@example.com');
+    assert.ok(f.lines.some((l) => l === "hand-over email sent: AL-1 (needs your input) to the project's alert email."), f.lines.join('\n'));
+    assert.ok(!f.lines.join('\n').includes('@example.com'), 'no address in the log');
+  } finally { await f.cleanup(); }
+});
+
+test('a project whose alert email is cleared goes back to TRACKER_NOTIFY_TO', async () => {
+  const f = await fixture();
+  try {
+    f.store.updateProject('alpha', { alertEmail: 'alpha-alerts@example.com' });
+    f.store.updateProject('alpha', { alertEmail: '' });
+    await f.ask(f.ticket.id);
+    assert.deepEqual(f.mail.map((m) => m.to), ['dane@example.com']);
   } finally { await f.cleanup(); }
 });
 
@@ -147,7 +170,7 @@ test('a failed send does not fail the move; it is logged, kept, and sent once on
     assert.equal(f.store.getTicket(f.ticket.id).status, 'needs your input');
     assert.equal(f.mail.length, 0);
     assert.deepEqual(f.notifier.pending(), [`AL-1@${moved.body.ticket.version}`]);
-    assert.ok(f.lines.some((l) => /^hand-over email NOT sent: AL-1 \(needs your input\), try 1: the mail service answered 503\./.test(l)));
+    assert.ok(f.lines.some((l) => /^hand-over email NOT sent: AL-1 \(needs your input\) to TRACKER_NOTIFY_TO, try 1: the mail service answered 503\./.test(l)));
 
     // Still failing: the next change tries again, and the write still succeeds.
     assert.equal((await f.call('POST', '/projects/alpha/tickets', { name: 'Other', status: 'queued' })).status, 201);
