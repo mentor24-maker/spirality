@@ -19,7 +19,10 @@ Where the times come from: every ticket's comments
 (`npm run clickup -- comments --task <id>`), the merged pull requests
 (`gh pr list --state merged`, in both repositories) and `docs/work-log/`.
 All times are Mountain time. A time that could not be found says
-"not found". Checked on 2026-11-03 at about 9 PM.
+"not found". Checked on 2026-11-03 at about 9 PM; brought up to date on
+2026-11-04 at about 1 PM, once NO-6 had installed Normie's loops and NO-7
+had fixed the first thing they tripped on (SP-106). The Mini's lane logs,
+`~/loop-logs/normie-*.log`, are the source for when each lane first ran.
 
 The plan this followed is [NORMIE.md](NORMIE.md); the general checklist is
 [ONBOARDING_A_PRODUCT.md](../ONBOARDING_A_PRODUCT.md).
@@ -27,14 +30,17 @@ The plan this followed is [NORMIE.md](NORMIE.md); the general checklist is
 ## In one paragraph
 
 From Dane's "A, B, and C https://github.com/mentor24-maker/normie" (Sun 11/1,
-5:42 PM) to the last Normie pull request merged (Tue 11/3, 7:35 PM) took
-**about 50 hours** and **15 tickets** (3 to plan, 7 in Spirality, 5 in
-Normie), and Normie's loops **still do not run**: NO-6, the ticket that
-installs them, has not started. Dane wrote 36 words ("go", "merge", "done a")
-on those tickets, 6 of them repeats, 4 because nothing was listening for the
-first. The build loops' own estimate of the work is 59.5 programmer hours. Most of the 50 hours was not work: it was waiting, overnight for
-Dane's "go", in line behind other tickets in Spirality's one build lane, and
-for a person to start Normie's sessions by hand.
+5:42 PM) to Normie's own loops running on the Mini (Wed 11/4, 9:39 AM) took
+**about 64 hours** and **16 tickets** (3 to plan, 7 in Spirality, 6 in
+Normie). The first pass of Normie's review lane then stood down on itself,
+and one more ticket, NO-7, fixed that (merged 11:01 AM): **about 65 hours
+and 17 tickets** in all. Dane wrote 39 words ("go", "merge", "done a") on
+those tickets, 6 of them repeats, 4 because nothing was listening for the
+first. The build loops' own estimate of the work is 63 programmer hours.
+Most of the 65 hours was not work: it was waiting, overnight for Dane's
+word, in line behind other tickets in Spirality's one build lane, and for a
+person to start Normie's sessions by hand. NO-7 was the first Normie ticket
+the lanes built, reviewed and merged with nobody starting a session.
 
 ## 1. What happened with Normie
 
@@ -44,8 +50,8 @@ agent session Dane started himself (signed in as `hand-run` or
 `normie hand-run`). Normie's sessions ran on Dane's MacBook, in
 `~/WebApps/normie/.claude/worktrees/` (NO-3 and NO-4 say so); Normie's
 review and relay steps were signed in as `normie loop-review` and
-`normie relay` but were started by hand too, since no Normie job runs on the
-Mini. **Dane** is Dane, and where a step was one of his four hand-offs it
+`normie relay` but were started by hand too, since no Normie job ran on the
+Mini until NO-6 installed them (11/4, 9:39 AM). **Dane** is Dane, and where a step was one of his four hand-offs it
 says which.
 
 "Card" is the card asking Dane for "go" (or for a step of his). "Wait" is the
@@ -89,25 +95,32 @@ when the ticket they wait on was done.
 | 13 | SP-103 "A product on the tracker fails doctor for a ClickUp key it never uses: ask for CLICKUP_API_TOKEN only from products on ClickUp" (Spirality PR #81), found by NO-4 | hand-run files it 11:44 AM; "go" 11:52 AM; PR 1:37 PM; review passed 1:56 PM; "merge" 2:18 PM; merged 2:48 PM | 30 min merge word to merged |
 | 14 | SP-104 "Four tests run git in a scratch repository but write to the real one when a commit hook runs them: clear git's repository settings in tests" (Spirality PR #82), found by NO-4 | filed by a hand-run session on Dane's "proceed on NO-5, then file the unsafe test ticket" (11/3; time not found); PR 6:35 PM; review passed 6:43 PM; "merge" 7:05 PM; merged 7:15 PM | not on Normie's critical path; NO-4's tests had written commits into Normie's real branch, undone by hand |
 | 15 | NO-5 "A session in Normie's repository can edit main and has no loop to follow: copy in the loop skills, the main-branch hook and the loop rules" (Normie PR #65) | card 6:01 PM; "go" 6:12 PM, **again 7:07 PM**; PR 7:22 PM; review passed 7:26 PM; "merge" 7:34 PM; merged 7:35 PM | **55 min before the "go" was acted on** |
-| 16 | NO-6 "Normie's loops do not run on the Mini: install its loop lanes" | **not started**: still `Requested`, no card, no comments. No `com.normie` job is installed on the Mini (checked: `launchctl list`, `~/loop-logs`). The Mini's checkout at `~/WebApps/normie` is still at `a94ee0d`, from before NO-1 to NO-5 merged, so it would have to be pulled before installing. Finish time: not found. | |
+| 16 | NO-6 "Normie's loops do not run on the Mini: install its loop lanes" (Normie PR #66) | card 11/3 9:56 PM (hand-run); "go" 9:57 PM; PR 10:04 PM; review passed 10:06 PM; "merge" 11:13 PM; merged 11/4 9:38 AM; the four lanes' first passes 9:39 AM (relay, build, review, intake, a few seconds apart, from their logs) | **10h25m overnight before the "merge" was acted on**: the install was the ticket, so nothing was installed to act on it (hold-up 5) |
+
+### Normie's own lanes (after NO-6)
+
+| # | Ticket | Times (Mountain) | Waits |
+|---|---|---|---|
+| 17 | NO-7 "Normie's review lane skips every review because it mistakes itself for a second reviewer: tell a lane's pass how to know it is the lane" (Normie PR #67) | review lane's first pass stood down 9:39 AM; filed after it (time not found); PR 10:16 AM (`normie loop-build`, the build lane); review passed 10:42 AM (`normie loop-review`, the review lane); "merge" 10:54 AM; merged 11:01 AM (`normie relay`, the relay lane); the next review pass, 11:13 AM, checked the queue | 7 min merge word to merged, with no session started by anyone |
 
 ### Adding it up
 
-- **Elapsed:** about 50 hours from Dane's answer to the last merge, and not
-  finished. The longest single waits were overnight: 8h36m, 8h54m and 8h21m
-  for Dane's word on SP-80, SP-88 and SP-89, and 9h22m for NO-1 and NO-3.
-- **Dane's words:** 36 on these tickets ("go", "merge", "A, B, and C",
+- **Elapsed:** about 64 hours from Dane's answer to Normie's lanes running,
+  65 to the NO-7 fix. The longest single waits were overnight: 8h36m,
+  8h54m and 8h21m for Dane's word on SP-80, SP-88 and SP-89, 9h22m for NO-1
+  and NO-3, and 10h25m for NO-6's "merge".
+- **Dane's words:** 39 on these tickets ("go", "merge", "A, B, and C",
   "done a"), 6 of them repeats. NO-1, NO-3, NO-4 and NO-5 were repeated
   because nothing acted on the first (hold-up 5); on SP-96 and SP-99 the
   second "go" came 3 and 6 minutes after the first, while Spirality's relay
   was running, and why is not found.
 - **Dane's own hands-on time:** the three SP-98 steps took 29 minutes from
-  the ask to "done a". Starting the hand-run sessions for NO-1 to NO-5:
+  the ask to "done a". Starting the hand-run sessions for NO-1 to NO-6:
   not measured.
 - **Work, by the loops' own estimates** (the newest `Human-hours estimate`
-  on each ticket's PR): 59.5 hours. Spirality 42.5 (SP-88 4, SP-89 6,
+  on each ticket's PR): 63 hours. Spirality 42.5 (SP-88 4, SP-89 6,
   SP-95 7, SP-96 6, SP-97 5, SP-98 2, SP-99 5, SP-103 2.5, SP-104 5); Normie
-  17 (NO-1 3, NO-2 1.5, NO-3 1.5, NO-4 6, NO-5 5). SP-80 has none (its PR
+  20.5 (NO-1 3, NO-2 1.5, NO-3 1.5, NO-4 6, NO-5 5, NO-6 2, NO-7 1.5). SP-80 has none (its PR
   came before estimates, SP-78).
 - **Review:** two send-backs (SP-95, a real hole; SP-97, a conflict with
   `main`). Every other review passed first time.
@@ -137,7 +150,7 @@ genuinely Dane's).
    asked once, up front, in one sitting. The time of day stays his.
 
 3. **One ticket per step, each with its own "go", review and "merge".**
-   15 tickets and 36 words from Dane. The Normie steps alone (NO-1 to NO-5)
+   17 tickets and 39 words from Dane. The Normie steps alone (NO-1 to NO-5)
    were five pull requests in Normie's repository, three of them copies of
    Spirality files (the settings file, 41 files of the ticket door, the
    skills and rules). Why: the plan made every step a ticket, so a person
@@ -155,14 +168,16 @@ genuinely Dane's).
 
 5. **Nothing listened for Dane's word in Normie's project.** His "go" on
    NO-1 and NO-3 sat 9h22m overnight; "merge" on NO-4 sat 1h23m; "go" on
-   NO-5 sat 55 min. He wrote each a second time. Why: the relay (the job
+   NO-5 sat 55 min. He wrote each a second time. "merge" on NO-6, the install
+itself, sat 10h25m overnight, and its card told him to tell a session he
+had merged. Why: the relay (the job
    that acts on "go" and "merge") runs only when it is installed, and
    Normie's install is the last ticket, NO-6, so until then a person had to
    start Normie's relay by hand. **Wizard: removes it.** It installs the
    product's lanes, the relay first, as soon as the product has a tracker
    project and its sign-ins, before any ticket is filed there.
 
-6. **Dane started every Normie build session by hand.** NO-1 to NO-5, his
+6. **Dane started every Normie build session by hand.** NO-1 to NO-6, his
    choice (a) on SP-98, because Normie's loops did not exist yet. Cost: not
    measured, but every gap between one Normie ticket's merge and the next
    one's card (NO-3 merged 10:51 AM, NO-4 card 10:58 AM; NO-4 merged
@@ -214,11 +229,13 @@ genuinely Dane's).
     (fixed), and the read-only first step runs the copied tests once in a
     scratch copy before anything is committed.
 
-12. **The install step was left for last and has not happened.** NO-6 waits
-    on NO-2, NO-5 and SP-97, all merged, but nothing has picked it up: it is
-    still `Requested`, and no loop works Normie's project. The Mini's Normie
-    checkout is still at `a94ee0d`, before NO-1 to NO-5. Cost: from NO-5's merge (11/3
-    7:35 PM) and counting. **Wizard: removes it**, by moving the install to
+12. **The install step was left for last.** NO-6 waited on NO-2, NO-5 and
+    SP-97, then sat in `Requested` with nothing to pick it up until a
+    hand-run session wrote its card (11/3 9:56 PM). Its "merge" then waited
+    overnight, because the relay that acts on "merge" was what it installed.
+    Cost: **14h04m** from NO-5's merge (11/3 7:35 PM) to the lanes' first
+    passes (11/4 9:39 AM), 10h25m of it the overnight "merge". **Wizard:
+    removes it**, by moving the install to
     the middle (hold-up 5) and pulling (or cloning) the product's checkout
     on the Mini as its own step.
 
@@ -227,6 +244,22 @@ genuinely Dane's).
     "open the page" was left for Dane. Cost: not measured. **Wizard: cannot
     touch it** (a Vercel sign-in is **a browser login**), but it can record
     the product's preview address pattern so the review card links it.
+
+14. **The copied skills had never run as a lane.** The first pass of
+    Normie's review lane (11/4 9:39 AM) stood down, taking its own lane for
+    a second reviewer: NO-5's copy of the review skill said "do not start
+    this loop by hand while that lane is loaded" but never how a pass knows
+    it is the lane. The runner already marks every pass it starts
+    (`LOOP_RUNNER_PID`); NO-7 made the review and build skills check that
+    mark first. Cost: 1h22m (9:39 AM to NO-7's merge at 11:01 AM) in which
+    every review pass would have skipped; the queue happened to be empty, so
+    no review was missed. Why: until NO-6 the skills had only been run by
+    hand in Normie, and Spirality's own review skill still reads "Spirality
+    has no scheduled runner yet", so the wording came across stale.
+    **Wizard: shortens it.** Step 7's read-back reads each lane's first
+    report, not only its `START` line: a review or build pass that stood
+    down on its own lane is a failed step. The wording fix in Spirality's
+    own skill is a separate Spirality ticket.
 
 ## 3. The wizard design
 
@@ -350,8 +383,9 @@ shows exactly that.
 
 **7. Install the lanes on the Mini** from the product's checkout, pulled to
 the new `main`: `scripts/install_loop_runner.sh`, relay first. Read back:
-`./scripts/install_loop_runner.sh --status` shows every job loaded, and
-each log has a `START` line after its first pass.
+`./scripts/install_loop_runner.sh --status` shows every job loaded, each
+log has a `START` line after its first pass, and that pass's report did its
+lane's work rather than stand down on its own lane (hold-up 14).
 
 **8. Hand over.** Files one ticket in the product's own project, assigned
 to nobody, for its first real piece of work if Dane named one (question
@@ -433,6 +467,7 @@ GitHub's rules rather than PressPlay's code:
 | 11. Tests reaching the real repository | fixed |
 | 12. Install left for last | gone with the wizard order |
 | 13. Previews no loop can open | the same: Vercel previews need a Vercel sign-in |
+| 14. Skills never run as a lane | fixed in Normie's copy (NO-7); comes across fixed once Spirality's own review skill is fixed too, and step 7's read-back catches it otherwise |
 | New: a private repository, a public Spirality | every page, card and pull request here that names PressPlay's files is public (question 2) |
 
 ## Questions for Dane
@@ -466,9 +501,9 @@ GitHub's rules rather than PressPlay's code:
 7. **How much should one setup pull request carry?** (a) Everything in step 4
    at once, every copied file checked by machine; (b) two: the settings file
    and CI first, then the door and skills.
-8. **Normie's install (NO-6) has not started.** (a) Leave it for the wizard
-   to do as its first real run; (b) have a hand-run session do it now, after
-   pulling the Mini's Normie checkout up to date.
+8. **Normie's install (NO-6): answered by events.** A hand-run session did
+   it (option b): merged 11/4 9:38 AM, with the Mini's Normie checkout
+   pulled to the new `main`; the four lanes have run since 9:39 AM.
 9. **Which order for the wizard tickets?** The table in part 3 lists six.
    Suggested, smallest and safest first: the sign-ins taking a settings file
    path; the read-only look; the settings file; the copy-and-compare; the
