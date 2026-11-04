@@ -1,0 +1,5 @@
+## 2026-11-03 — Four tests run git in a scratch repository but write to the real one when a commit hook runs them: clear git's repository settings in tests (#82)
+
+Some of our tests build a small throwaway git repository in a temporary folder to check how the loop handles branches and merges. When git runs a "commit hook" (a check that runs automatically every time you save a commit), it leaves notes in the environment saying "the repository is over there". The tests inherited those notes, so their throwaway commits and a fake author name ("T") went into the real project instead. That happened in Normie, which runs all the tests on every commit.
+
+Now the tests go through one small helper that wipes those notes before running git, and gives the fake author name only for that one command, never saved anywhere. A new test runs the four affected tests the way a commit hook would, pointed at a decoy repository, and checks the decoy is exactly as it was afterwards. Before the fix the decoy gained 14 commits; now it gains none. Spirality has no commit hook today, so this protects the products that copy these tests and any hook added later.

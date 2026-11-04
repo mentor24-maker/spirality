@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, chmodSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { openStore } from '../../tracker/store.mjs';
 import { startServer } from '../../tracker/server.mjs';
@@ -11,6 +11,7 @@ import { createApiTracker, trackerTokenEnv } from './apiTracker.mjs';
 import { conflictTicketFiledComment, findConflictTicket } from '../../lib/conflictWork.js';
 import { isMachineComment } from '../lib/machineComment.mjs';
 import { renderMarkdown } from '../../tracker/web/render.mjs';
+import scratchGit from '../../lib/scratchGit.js';
 
 const DOOR = fileURLToPath(new URL('../clickup.mjs', import.meta.url));
 const LIST = '333';
@@ -673,7 +674,7 @@ function buildRunner(f) {
   mkdirSync(lock, { recursive: true });
   const runner = spawn('sleep', ['60'], { stdio: 'ignore' });
   writeFileSync(join(lock, 'pid'), `${runner.pid}\n`);
-  spawnSync('git', ['init', '-q'], { cwd: f.product });
+  scratchGit.git(f.product, 'init', '-q');
   return {
     marker: join(f.product, '.git', 'loop-pass-claim.json'),
     ours: { HOME: home, LOOP_RUNNER_PID: String(runner.pid) },
