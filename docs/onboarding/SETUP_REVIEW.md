@@ -101,7 +101,7 @@ when the ticket they wait on was done.
 
 | # | Ticket | Times (Mountain) | Waits |
 |---|---|---|---|
-| 17 | NO-7 "Normie's review lane skips every review because it mistakes itself for a second reviewer: tell a lane's pass how to know it is the lane" (Normie PR #67) | review lane's first pass stood down 9:39 AM; filed after it (time not found); PR 10:16 AM (`normie loop-build`, the build lane); review passed 10:42 AM (`normie loop-review`, the review lane); "merge" 10:54 AM; merged 11:01 AM (`normie relay`, the relay lane); the next review pass, 11:13 AM, checked the queue | 7 min merge word to merged, with no session started by anyone |
+| 17 | NO-7 "Normie's review lane skips every review because it mistakes itself for a second reviewer: tell a lane's pass how to know it is the lane" (Normie PR #67) | review lane's first pass stood down 9:39 AM; filed after it (time not found); PR 10:16 AM (`normie loop-build`, the build lane); review passed 10:42 AM (`normie loop-review`, the review lane); "merge" 10:54 AM; merged 11:01 AM (`normie relay`, the relay lane); the first review pass after the merge, 11:13 AM, checked the queue | 7 min merge word to merged, with no session started by anyone |
 
 ### Adding it up
 
@@ -169,9 +169,8 @@ genuinely Dane's).
 5. **Nothing listened for Dane's word in Normie's project.** His "go" on
    NO-1 and NO-3 sat 9h22m overnight; "merge" on NO-4 sat 1h23m; "go" on
    NO-5 sat 55 min. He wrote each a second time. "merge" on NO-6, the install
-itself, sat 10h25m overnight, and its card told him to tell a session he
-had merged. Why: the relay (the job
-   that acts on "go" and "merge") runs only when it is installed, and
+   itself, sat 10h25m overnight, and its card told him to tell a session he
+   had merged. Why: the relay (the job that acts on "go" and "merge") runs only when it is installed, and
    Normie's install is the last ticket, NO-6, so until then a person had to
    start Normie's relay by hand. **Wizard: removes it.** It installs the
    product's lanes, the relay first, as soon as the product has a tracker
@@ -251,9 +250,12 @@ had merged. Why: the relay (the job
     this loop by hand while that lane is loaded" but never how a pass knows
     it is the lane. The runner already marks every pass it starts
     (`LOOP_RUNNER_PID`); NO-7 made the review and build skills check that
-    mark first. Cost: 1h22m (9:39 AM to NO-7's merge at 11:01 AM) in which
-    every review pass would have skipped; the queue happened to be empty, so
-    no review was missed. Why: until NO-6 the skills had only been run by
+    mark first. Cost: **one skipped pass, with an empty queue.** Of the three
+    review passes before NO-7 merged, only the first stood down; the next
+    two (10:09 AM, and 10:40 AM, which reviewed and passed NO-7 itself)
+    worked out from their own process that they were the lane and carried
+    on. So the stand-down was a judgment call that could go either way, and
+    NO-7 made it certain. Why: until NO-6 the skills had only been run by
     hand in Normie, and Spirality's own review skill still reads "Spirality
     has no scheduled runner yet", so the wording came across stale.
     **Wizard: shortens it.** Step 7's read-back reads each lane's first
