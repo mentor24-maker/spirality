@@ -247,6 +247,24 @@ test('with_doppler runs the command under the project config\'s Doppler project,
   } finally { f.cleanup(); }
 });
 
+test('with_doppler takes the Doppler project from the settings file a command names with --config', () => {
+  const f = productFolder(GUEST, []);
+  try {
+    mkdirSync(join(f.dir, 'far'));
+    writeFileSync(join(f.dir, 'far', 'spirality.project.json'), JSON.stringify({ ...GUEST, dopplerProject: 'far-product', dopplerConfig: 'dev' }));
+    const wrapper = join(ROOT, 'scripts/with_doppler.mjs');
+    for (const args of [['--config', 'far/spirality.project.json'], ['--config=far/spirality.project.json']]) {
+      writeFileSync(join(f.dir, 'calls'), '');
+      const r = f.run([wrapper, 'sh', '-c', 'exit 0', 'sh', ...args]);
+      assert.equal(r.status, 0, r.stderr);
+      assert.match(f.calls(), /^run --project far-product --config dev --no-check-version -- /);
+    }
+    const missing = f.run([wrapper, 'true', '--config', 'nowhere.json']);
+    assert.equal(missing.status, 1);
+    assert.match(missing.stderr, /nowhere\.json: could not be read/);
+  } finally { f.cleanup(); }
+});
+
 test('no npm script names a Doppler project of its own: every doppler run goes through with_doppler', () => {
   const { scripts } = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
   for (const [name, line] of Object.entries(scripts)) {

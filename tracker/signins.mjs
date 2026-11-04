@@ -4,11 +4,14 @@
  * (docs/TRACKER_MVP.md, "Running it"). Run it under `doppler run` (the npm
  * script does), so the tokens already stored are in the environment:
  *
- *   npm run tracker:signins -- create --name <project name> [--prefix <PREFIX>] [--new-database]
- *   npm run tracker:signins -- check [--local]
+ *   npm run tracker:signins -- create --name <project name> [--prefix <PREFIX>] [--new-database] [--config <path>]
+ *   npm run tracker:signins -- check [--local] [--config <path>]
  *
  * Run both on the machine the tracker runs on: Doppler is shared by every
- * machine, but the database is that machine's alone.
+ * machine, but the database is that machine's alone. --config names the
+ * product's settings file (spirality.project.json) wherever it is, so the
+ * command runs from any folder; without it, the file is found from the
+ * current folder up, as before.
  *
  * create  Refuses when the database file does not exist, unless
  *         --new-database is given (the first-ever setup, before the tracker
@@ -34,6 +37,13 @@
  *         finds him instead of making a second. Then the project (the
  *         config's productSlug, ticket prefix the config's trackerPrefix) is
  *         made, with the operator's actor as its operator, unless it exists.
+ *         Its GitHub repository is the config's githubRepo: a new project
+ *         is made with it, and an existing project whose repository is
+ *         empty has it filled in, so nobody types it on the project's Edit
+ *         page. An existing project that records a DIFFERENT repository is
+ *         left alone: both are printed and the run fails, because only a
+ *         person decides which is wrong. Either write is read back from
+ *         the database and compared with githubRepo.
  *         Running it again finishes what a failed run left, and records that
  *         mapping on a database made before it existed; it never replaces a
  *         working token.
@@ -65,6 +75,7 @@ import { startServer } from './server.mjs';
 import { loadProjectConfig } from '../lib/projectConfig.mjs';
 import { TRACKER_SEATS } from '../scripts/lib/expectedSecrets.mjs';
 import { operatorImportKey } from './import.mjs';
+import { compareRepo } from '../scripts/lib/repoCheck.mjs';
 
 /** The seats with the operator's name filled in from the project config. */
 export function seatsFor(operatorName, seats = TRACKER_SEATS) {
@@ -166,6 +177,17 @@ export function ownHostNames() {
  * for the messages. Returns `{ ok, lines }`: one line per seat and one for
  * the project.
  */
+/**
+ * The project's GitHub repository, read back from the store after a write
+ * and compared with `wanted` (GitHub ignores case). Returns a FAILED line
+ * when they disagree, else null.
+ */
+function repoReadBack(store, slug, wanted) {
+  const saved = store.getProject(slug)?.repo ?? null;
+  if (compareRepo({ configRepo: wanted, trackerRepo: saved }).verdict === 'same') return null;
+  return `project "${slug}": FAILED. Its GitHub repository was written as ${wanted}, but reads back as ${saved ?? '(none)'}.`;
+}
+
 export async function createSignins({ store, seats, env, project, guest = false, operatorImport = null, operatorName = null, setSecret, getSecret, proveToken, tracker }) {
   const lines = [];
   let ok = true;
@@ -283,11 +305,35 @@ export async function createSignins({ store, seats, env, project, guest = false,
   }
 
   const existing = store.getProject(project.slug);
+  const repo = project.repo || null;
   if (existing) {
     lines.push(`project "${existing.slug}": already exists (tickets ${existing.prefix}-…, operator ${existing.operator ?? '(none)'}), left alone.`);
     if (operatorId != null && existing.operator !== operatorId) {
       ok = false;
       lines.push(`project "${existing.slug}": WRONG. Its operator is actor ${existing.operator ?? '(none)'}, but the operator signs in as actor ${operatorId}.`);
+    }
+    if (repo) {
+      const { verdict } = compareRepo({ configRepo: repo, trackerRepo: existing.repo });
+      if (verdict === 'same') {
+        lines.push(`project "${existing.slug}": GitHub repository already ${existing.repo}, as githubRepo says.`);
+      } else if (verdict === 'different') {
+        ok = false;
+        lines.push(`project "${existing.slug}": REFUSED. It records the GitHub repository ${existing.repo}, but githubRepo in the settings file is ${repo}. Nothing was written; correct whichever is wrong.`);
+      } else {
+        let failed = null;
+        try {
+          store.updateProject(existing.slug, { repo });
+          failed = repoReadBack(store, existing.slug, repo);
+        } catch (err) {
+          failed = `project "${existing.slug}": FAILED. Its GitHub repository could not be filled in with ${repo}: ${err.message}`;
+        }
+        if (failed) {
+          ok = false;
+          lines.push(failed);
+        } else {
+          lines.push(`project "${existing.slug}": GitHub repository was empty, now ${repo} (read back).`);
+        }
+      }
     }
   } else if (!project.name || !project.prefix) {
     ok = false;
@@ -297,8 +343,13 @@ export async function createSignins({ store, seats, env, project, guest = false,
     lines.push(`project "${project.slug}": NOT made, ${noOperator}.`);
   } else {
     try {
-      const made = store.createProject({ slug: project.slug, name: project.name, prefix: project.prefix, operator: operatorId });
-      lines.push(`project "${made.slug}": made, "${made.name}", tickets ${made.prefix}-1 onwards, operator ${made.operator ?? '(none)'}.`);
+      const made = store.createProject({ slug: project.slug, name: project.name, prefix: project.prefix, operator: operatorId, repo });
+      lines.push(`project "${made.slug}": made, "${made.name}", tickets ${made.prefix}-1 onwards, operator ${made.operator ?? '(none)'}, GitHub repository ${made.repo ?? '(none)'}.`);
+      const failed = repo && repoReadBack(store, made.slug, repo);
+      if (failed) {
+        ok = false;
+        lines.push(failed);
+      }
     } catch (err) {
       ok = false;
       lines.push(`project "${project.slug}": NOT made: ${err.message}`);
@@ -345,8 +396,9 @@ function doppler(args, input) {
 }
 
 const USAGE = `usage (under doppler run, as the npm script does), on the machine the tracker runs on:
-  npm run tracker:signins -- create --name <project name> [--prefix <PREFIX>] [--new-database]
-  npm run tracker:signins -- check [--local]
+  npm run tracker:signins -- create --name <project name> [--prefix <PREFIX>] [--new-database] [--config <path>]
+  npm run tracker:signins -- check [--local] [--config <path>]
+--config names the product's settings file, from any folder (default: found from this folder up).
 --prefix defaults to trackerPrefix in the project config, and must match it.
 --new-database lets create make the database, for the first-ever setup only.
 --local makes check ask a private server on this machine's database, not the tracker.`;
@@ -363,7 +415,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   try {
     ({ values } = parseArgs({
       args: rest, strict: true,
-      options: { name: { type: 'string' }, prefix: { type: 'string' }, 'new-database': { type: 'boolean' }, local: { type: 'boolean' } },
+      options: { name: { type: 'string' }, prefix: { type: 'string' }, 'new-database': { type: 'boolean' }, local: { type: 'boolean' }, config: { type: 'string' } },
     }));
   } catch (err) {
     console.error(`${err.message}\n${USAGE}`);
@@ -373,7 +425,16 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     console.error(USAGE);
     process.exit(1);
   }
-  const config = loadProjectConfig();
+  // --config names the settings file wherever it is; without it, it is
+  // found from the current folder up.
+  const file = values.config;
+  let config;
+  try {
+    config = loadProjectConfig({ file });
+  } catch (err) {
+    console.error(`${err.message}. Nothing was made or written.${file ? '' : ' Give --config <path to spirality.project.json> to run from another folder.'}`);
+    process.exit(1);
+  }
   if (values.prefix && config.trackerPrefix && values.prefix !== config.trackerPrefix) {
     console.error(`--prefix ${values.prefix} does not match trackerPrefix "${config.trackerPrefix}" in the project config; the history import numbers tickets with that one. Leave --prefix off.`);
     process.exit(1);
@@ -390,7 +451,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   }
   // The tracker everyone uses, from the network address the config FILE
   // holds, not Doppler's same-machine TRACKER_URL override (trackerAddress).
-  const filed = loadProjectConfig({ env: { ...process.env, TRACKER_URL: '' } }).trackerUrl;
+  const filed = loadProjectConfig({ file, env: { ...process.env, TRACKER_URL: '' } }).trackerUrl;
   const tracker = filed ? trackerAddress(filed, ownHostNames()) : null;
   const home = tracker?.home ?? null;
   const runOn = `Run it on the machine the tracker runs on${home ? ` (${home})` : ''}.`;
@@ -430,7 +491,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
         const where = ['--project', config.dopplerProject, '--config', config.dopplerConfig];
         result = await createSignins({
           store, seats, env: process.env,
-          project: { slug: config.productSlug, name: values.name, prefix: values.prefix ?? config.trackerPrefix },
+          project: { slug: config.productSlug, name: values.name, prefix: values.prefix ?? config.trackerPrefix, repo: config.githubRepo },
           guest,
           operatorImport: guest ? null : operatorImportKey(config),
           operatorName: guest ? config.operatorName : null,
