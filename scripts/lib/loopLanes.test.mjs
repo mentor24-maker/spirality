@@ -7,7 +7,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync, spawn } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import {
   copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync,
 } from 'node:fs';
@@ -15,6 +15,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { TRACKER_SEATS } from './expectedSecrets.mjs';
+import scratchGit from '../../lib/scratchGit.js';
 
 const REPO = join(fileURLToPath(new URL('.', import.meta.url)), '..', '..');
 const installer = readFileSync(join(REPO, 'scripts/install_loop_runner.sh'), 'utf8');
@@ -71,7 +72,7 @@ test('loop_runner.sh names its log, lock, sync lock and restart label from the s
     }));
     const fakeClaude = join(scratch, 'fake-claude');
     writeFileSync(fakeClaude, `#!/bin/bash\nls "${logDir}"\necho "Please run /login"\n`, { mode: 0o755 });
-    const git = (...args) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd: scratch, stdio: 'ignore' });
+    const git = (...args) => scratchGit.git(scratch, ...args);
     git('init', '-q', '-b', 'main');
     git('add', '-A');
     git('commit', '-q', '-m', 'scratch');
@@ -81,7 +82,8 @@ test('loop_runner.sh names its log, lock, sync lock and restart label from the s
     writeFileSync(join(logDir, 'normie-sync.lock/pid'), '999999');
 
     const runner = spawn('bash', [join(scratch, 'scripts/loop_runner.sh'), 'loop-build', '3600'], {
-      cwd: scratch, detached: true, stdio: 'ignore', env: { ...process.env, CLAUDE_BIN: fakeClaude, RUN_WITH_TIME_LIMIT_POLL: '1' },
+      // The runner pulls main with git: never into a repository a commit hook named (SP-104).
+      cwd: scratch, detached: true, stdio: 'ignore', env: { ...scratchGit.scratchGitEnv(), CLAUDE_BIN: fakeClaude, RUN_WITH_TIME_LIMIT_POLL: '1' },
     });
     const log = join(logDir, 'normie-loop-build.log');
     try {
