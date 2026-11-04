@@ -90,10 +90,10 @@ const INVITE_REFUSALS = Object.freeze({ 'duplicate-email': 409, 'duplicate-invit
 const FILE_FIELDS = Object.freeze(['name', 'description', 'status', 'priority', 'tags', 'assignee', 'loopNote']);
 
 /** The fields a new project may carry. */
-const PROJECT_FIELDS = Object.freeze(['name', 'slug', 'prefix', 'url', 'logo', 'owner', 'repo']);
+const PROJECT_FIELDS = Object.freeze(['name', 'slug', 'prefix', 'url', 'logo', 'owner', 'repo', 'alertEmail', 'alertPhone']);
 
 /** The fields a project change may carry. Its slug and prefix build every ticket's id, so they never change. */
-const PROJECT_CHANGE_FIELDS = Object.freeze(['name', 'url', 'logo', 'owner', 'repo']);
+const PROJECT_CHANGE_FIELDS = Object.freeze(['name', 'url', 'logo', 'owner', 'repo', 'alertEmail', 'alertPhone']);
 const PROJECT_FIXED_FIELDS = Object.freeze(['slug', 'prefix']);
 
 /**
@@ -401,7 +401,7 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
         throw new HttpError(400, 'bad-owner', `owner must be a person's actor id, not "${body.owner}".`);
       }
       const made = store.createProject(pick(body, PROJECT_FIELDS));
-      return [201, projectDetailsOf(store, made.slug)];
+      return [201, projectDetailsOf(store, made.slug, { withAlerts: true })];
     }
 
     // Dane's page: the people in the tracker, for the Create Project form's
@@ -474,9 +474,10 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
       return [200, searchTickets(store, url.searchParams.get('q'), filters)];
     }
 
-    // Dane's page: one project's details page.
+    // Dane's page: one project's details page. A person also sees its alert
+    // email and phone (the Edit project form); a loop never does.
     if (parts.length === 2 && parts[0] === 'projects' && method === 'GET') {
-      const details = projectDetailsOf(store, parts[1]);
+      const details = projectDetailsOf(store, parts[1], { withAlerts: me.kind === 'human' });
       if (!details) throw new HttpError(404, 'unknown-project', `no project "${parts[1]}".`);
       return [200, details];
     }
@@ -500,7 +501,7 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
           throw new HttpError(400, 'bad-owner', `owner must be a person's actor id, not "${body.owner}".`);
         }
         store.updateProject(project.slug, pick(body, PROJECT_CHANGE_FIELDS));
-        return [200, projectDetailsOf(store, project.slug)];
+        return [200, projectDetailsOf(store, project.slug, { withAlerts: true })];
       }
       let gone;
       try {

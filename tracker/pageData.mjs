@@ -166,8 +166,11 @@ export function projectsList(store) {
  * by name and GitHub repository (each null when it has none), how many tickets are open, and
  * a count for each of the eight statuses in the contract's STAGE_ORDER, the
  * board's own column order. Null when there is no such project.
+ *
+ * `withAlerts` adds its alert email and phone (each null when it has none),
+ * for a person's Edit project form; a loop's answer never carries them.
  */
-export function projectDetailsOf(store, slug) {
+export function projectDetailsOf(store, slug, { withAlerts = false } = {}) {
   const project = store.getProject(slug);
   if (!project) return null;
   const counts = new Map(STAGE_ORDER.map((name) => [statusOf(name), 0]));
@@ -185,6 +188,7 @@ export function projectDetailsOf(store, slug) {
     repo: project.repo,
     open: store.listTickets(project.slug, { open: true }).length,
     statuses: STAGE_ORDER.map((name) => ({ status: name, count: counts.get(statusOf(name)) })),
+    ...(withAlerts ? { alertEmail: project.alertEmail, alertPhone: project.alertPhone } : {}),
   };
 }
 

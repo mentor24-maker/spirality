@@ -298,6 +298,8 @@ test('a project\'s details name its prefix, operator, open count and a count per
       logo: null,
       owner: null,
       repo: null,
+      alertEmail: null,
+      alertPhone: null,
       open: f.store.listTickets('alpha', { open: true }).length,
       statuses: loopStatuses.STAGE_ORDER.map((name) => ({
         status: name,
@@ -1096,7 +1098,27 @@ test('a project edited from the page shows its new name, web address, logo, GitH
     assert.deepEqual([details.name, details.url, details.logo, details.owner, details.repo], [row.name, row.url, row.logo, row.owner, row.repo]);
     // An emptied box clears it.
     assert.equal((await f.call('PATCH', '/projects/try-me', { body: { repo: '' } })).body.repo, null);
+    // The alert boxes save, read back on the Edit form's own GET, and never reach the projects table.
+    await f.call('PATCH', '/projects/try-me', { body: { alertEmail: 'tried@example.com', alertPhone: '+1 801 555 0123' } });
+    const edit = (await f.call('GET', '/projects/try-me')).body;
+    assert.deepEqual([edit.alertEmail, edit.alertPhone], ['tried@example.com', '+18015550123']);
+    const listed = (await f.call('GET', '/projects')).body.projects.find((p) => p.slug === 'try-me');
+    assert.ok(!('alertEmail' in listed) && !('alertPhone' in listed));
   } finally { await f.cleanup(); }
+});
+
+test('both project forms carry an Alert email and an Alert phone box with their hints, and send them', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  assert.match(app, /const ALERT_EMAIL_HINT = "Where hand-over alerts for this project go\. Empty: the tracker's default address\.";/);
+  assert.match(app, /const ALERT_PHONE_HINT = 'For iMessage alerts, e\.g\. \+1 801 555 0123\. Empty: no texts\.';/);
+  for (const fn of ['drawCreateProject', 'drawEditProject']) {
+    const form = app.slice(app.indexOf(`async function ${fn}`), app.indexOf('/**', app.indexOf(`async function ${fn}`)));
+    assert.match(form, /field\('alertEmail', 'Alert email', ALERT_EMAIL_HINT,/, fn);
+    assert.match(form, /field\('alertPhone', 'Alert phone', ALERT_PHONE_HINT,/, fn);
+    assert.match(form, /alertEmail: value\('alertEmail'\), alertPhone: value\('alertPhone'\),/, fn);
+  }
+  const table = app.slice(app.indexOf('async function drawProjects'), app.indexOf('/**', app.indexOf('async function drawProjects')));
+  assert.doesNotMatch(table, /alertEmail|alertPhone/, 'not in the projects table');
 });
 
 test('a project deleted from the page is gone; the demo\'s own project, which has tickets, is refused and stays', async () => {
@@ -1149,11 +1171,11 @@ test('the Edit project form is a person\'s only, filled in, with the slug and pr
   assert.match(form, /if \(me\?\.kind !== 'human'\)[\s\S]{0,200}Only a person signed in to the tracker can change a project\./);
   assert.match(form, /p = await api\('GET', `\/projects\/\$\{encodeURIComponent\(slug\)\}`\)/);
   assert.match(form, /const filled = \(v\) => ` value="\$\{escapeHtml\(v \?\? ''\)\}"`;/);
-  for (const id of ['name', 'url', 'logo', 'repo']) assert.match(form, new RegExp(`field\\('${id}',[^\\n]*filled\\(p\\.${id}\\)`), id);
+  for (const id of ['name', 'url', 'logo', 'repo', 'alertEmail', 'alertPhone']) assert.match(form, new RegExp(`field\\('${id}',[^\\n]*filled\\(p\\.${id}\\)`), id);
   for (const id of ['slug', 'prefix']) assert.match(form, new RegExp(`field\\('${id}',[^\\n]* disabled\\$\\{filled\\(p\\.${id}\\)\\}`), id);
   assert.match(form, /o\.id === p\.owner\?\.id \? ' selected' : ''/);
   // The change names only what may change; never the slug or prefix.
-  assert.match(form, /api\('PATCH', `\/projects\/\$\{encodeURIComponent\(p\.slug\)\}`, \{\n\s+name: value\('name'\), url: value\('url'\), logo: value\('logo'\), repo: value\('repo'\), owner: value\('owner'\) \? Number\(value\('owner'\)\) : null,\n\s+\}\)/);
+  assert.match(form, /api\('PATCH', `\/projects\/\$\{encodeURIComponent\(p\.slug\)\}`, \{\n\s+name: value\('name'\), url: value\('url'\), logo: value\('logo'\), repo: value\('repo'\), owner: value\('owner'\) \? Number\(value\('owner'\)\) : null,\n\s+alertEmail: value\('alertEmail'\), alertPhone: value\('alertPhone'\),\n\s+\}\)/);
   assert.match(form, /note\.textContent = `Not saved: \$\{err\.message\}`;/);
   assert.ok(!/main\.innerHTML/.test(form.slice(form.indexOf("addEventListener('submit'"))), 'a refused save never redraws the form, so nothing typed is lost');
   // Saving opens the details page, which reads the project back from the server.

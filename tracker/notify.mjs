@@ -21,6 +21,10 @@
  *  - **Sends happen one at a time**, so two writes arriving together cannot
  *    both retry the same kept email.
  *
+ * **Where it goes.** To the ticket's project's alert email when the project
+ * has one (its Edit project page), else to TRACKER_NOTIFY_TO, the tracker's
+ * default address. The log line says which of the two, never the address.
+ *
  * The mail service itself is a `send({ to, subject, text })` function handed
  * in, which resolves when the service accepted the message and throws when
  * it did not. Tests hand in a fake. The real one is Resend (Dane's choice,
@@ -79,7 +83,8 @@ export function handOverEmail({ ticket, projectName, ask, pageUrl }) {
 /**
  * The notifier the server calls after every write it has already answered.
  * `send` is the mail service (null: email off, every call is a no-op), `to`
- * is Dane's address, `pageUrl` the tracker's address for the link.
+ * is the default address (a project's alert email goes first), `pageUrl` the
+ * tracker's address for the link.
  */
 export function createNotifier({ store, send, to, pageUrl, log = () => {} }) {
   const sent = new Set();
@@ -102,16 +107,18 @@ export function createNotifier({ store, send, to, pageUrl, log = () => {} }) {
       ask: newestAsk(store.listComments(ticket.id)),
       pageUrl,
     });
+    const address = project?.alertEmail || to;
+    const where = project?.alertEmail ? "to the project's alert email" : `to ${MAIL_TO}`;
     wanted.attempts += 1;
     try {
-      await send({ to, ...email });
+      await send({ to: address, ...email });
     } catch (err) {
-      log(`hand-over email NOT sent: ${ticketId} (${ticket.status}), try ${wanted.attempts}: ${err?.message ?? err}. It is tried again on the next change.`);
+      log(`hand-over email NOT sent: ${ticketId} (${ticket.status}) ${where}, try ${wanted.attempts}: ${err?.message ?? err}. It is tried again on the next change.`);
       return;
     }
     sent.add(wanted.key);
     if (pending.get(ticketId) === wanted) pending.delete(ticketId);
-    log(`hand-over email sent: ${ticketId} (${ticket.status}).`);
+    log(`hand-over email sent: ${ticketId} (${ticket.status}) ${where}.`);
   }
 
   async function run(ticket, changed) {
