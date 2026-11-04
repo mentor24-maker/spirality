@@ -34,9 +34,16 @@
  * key stays inside the sender; a log line here carries only a ticket id, a
  * status and the service's error message, with the key cut out of it.
  *
+ * **The text** (SP-114) is a second channel beside the email, with the same
+ * rules and its own record of what it sent and kept, so one failing never
+ * stops or repeats the other. It goes to the project's alert phone through
+ * Messages on this Mac (`imessageSender` below); a project with no alert
+ * phone gets none.
+ *
  * What is kept between tries lives in memory: a restart of the server drops
- * an unsent email. The page's waiting count is the backstop for that.
+ * an unsent email or text. The page's waiting count is the backstop for that.
  */
+import { existsSync } from 'node:fs';
 import waitingOnOperator from '../lib/waitingOnOperator.js';
 import { cardAsk } from './web/render.mjs';
 
@@ -80,67 +87,167 @@ export function handOverEmail({ ticket, projectName, ask, pageUrl }) {
   };
 }
 
+/** The ask, cut for a text: one line, about 300 characters at most. */
+export const TEXT_ASK_LIMIT = 300;
+
 /**
- * The notifier the server calls after every write it has already answered.
- * `send` is the mail service (null: email off, every call is a no-op), `to`
- * is the default address (a project's alert email goes first), `pageUrl` the
- * tracker's address for the link.
+ * The text for one hand-over: the ticket id and name, its status, the
+ * card's ask cut to about TEXT_ASK_LIMIT characters, and the ticket's link.
  */
-export function createNotifier({ store, send, to, pageUrl, log = () => {} }) {
+export function handOverText({ ticket, ask, pageUrl }) {
+  const link = `${String(pageUrl).replace(/\/+$/, '')}/t/${encodeURIComponent(ticket.id)}`;
+  let needed = oneLine(ask ?? '(no question card on the ticket; open it to see why it is yours)');
+  if (needed.length > TEXT_ASK_LIMIT) needed = `${needed.slice(0, TEXT_ASK_LIMIT - 1).trimEnd()}…`;
+  return [
+    `Waiting on you: ${ticket.id} ${oneLine(ticket.name)}`,
+    `Status: ${statusName(ticket.status)}`,
+    `Needed: ${needed}`,
+    link,
+  ].join('\n');
+}
+
+/**
+ * One channel of the notifier (the email, or the text): its own record of
+ * what it sent and what it keeps, so one channel failing never stops or
+ * repeats the other. `deliver(ticket, project)` sends one hand-over and
+ * resolves to the words the log line ends with ("to TRACKER_NOTIFY_TO"),
+ * throws when the service refused, or resolves to null when this project
+ * cannot get one (a text to a project with no alert phone), and then the
+ * hand-over is dropped rather than kept.
+ */
+function createChannel({ kind, store, deliver, log }) {
   const sent = new Set();
   /** ticket id -> the one unsent hand-over it holds: `{ key, attempts }`. */
   const pending = new Map();
-  let queue = Promise.resolve();
 
   async function trySend(ticketId) {
     const wanted = pending.get(ticketId);
     const ticket = store.getTicket(ticketId);
     if (!ticket || !isHandOverStatus(ticket.status)) {
       pending.delete(ticketId);
-      log(`hand-over email dropped: ${ticketId} is no longer waiting on the operator (it is "${ticket?.status ?? 'gone'}").`);
+      log(`hand-over ${kind} dropped: ${ticketId} is no longer waiting on the operator (it is "${ticket?.status ?? 'gone'}").`);
       return;
     }
     const project = store.getProject(ticket.project);
-    const email = handOverEmail({
-      ticket,
-      projectName: project?.name ?? ticket.project,
-      ask: newestAsk(store.listComments(ticket.id)),
-      pageUrl,
-    });
-    const address = project?.alertEmail || to;
-    const where = project?.alertEmail ? "to the project's alert email" : `to ${MAIL_TO}`;
     wanted.attempts += 1;
+    let where;
     try {
-      await send({ to: address, ...email });
+      where = await deliver(ticket, project, wanted);
     } catch (err) {
-      log(`hand-over email NOT sent: ${ticketId} (${ticket.status}) ${where}, try ${wanted.attempts}: ${err?.message ?? err}. It is tried again on the next change.`);
+      log(`hand-over ${kind} NOT sent: ${ticketId} (${ticket.status}) ${err?.where ?? ''}${err?.where ? ', ' : ''}try ${wanted.attempts}: ${err?.message ?? err}. It is tried again on the next change.`);
       return;
     }
-    sent.add(wanted.key);
     if (pending.get(ticketId) === wanted) pending.delete(ticketId);
-    log(`hand-over email sent: ${ticketId} (${ticket.status}) ${where}.`);
-  }
-
-  async function run(ticket, changed) {
-    if (ticket && changed.includes('status') && isHandOverStatus(ticket.status)) {
-      const key = `${ticket.id}@${ticket.version}`;
-      if (!sent.has(key)) pending.set(ticket.id, { key, attempts: 0 });
-    }
-    for (const id of [...pending.keys()]) await trySend(id);
+    if (where == null) return;
+    sent.add(wanted.key);
+    log(`hand-over ${kind} sent: ${ticketId} (${ticket.status}) ${where}.`);
   }
 
   return {
-    enabled: Boolean(send),
+    note(ticket, changed) {
+      if (ticket && changed.includes('status') && isHandOverStatus(ticket.status)) {
+        const key = `${ticket.id}@${ticket.version}`;
+        if (!sent.has(key)) pending.set(ticket.id, { key, attempts: 0 });
+      }
+    },
+    async flush() {
+      for (const id of [...pending.keys()]) await trySend(id);
+    },
+    pending() {
+      return [...pending.values()].map((p) => p.key);
+    },
+  };
+}
+
+/** An error that carries the words naming where a send was going, for the log line. */
+function failedTo(where, err) {
+  const out = err instanceof Error ? err : new Error(String(err));
+  out.where = where;
+  return out;
+}
+
+/**
+ * The notifier the server calls after every write it has already answered.
+ * `send` is the mail service (null: email off), `to` is the default address
+ * (a project's alert email goes first), `pageUrl` the tracker's address for
+ * the link. `sendText({ to, text })` is the text service (null: texts off);
+ * a text goes to the ticket's project's alert phone, and a project with no
+ * alert phone gets none, said once in the log until it has one.
+ */
+export function createNotifier({ store, send = null, to = null, pageUrl, sendText = null, log = () => {} }) {
+  let queue = Promise.resolve();
+  const toldNoPhone = new Set();
+  const channels = [];
+
+  const email = send && createChannel({
+    kind: 'email', store, log,
+    async deliver(ticket, project) {
+      const message = handOverEmail({
+        ticket,
+        projectName: project?.name ?? ticket.project,
+        ask: newestAsk(store.listComments(ticket.id)),
+        pageUrl,
+      });
+      const where = project?.alertEmail ? "to the project's alert email" : `to ${MAIL_TO}`;
+      try {
+        await send({ to: project?.alertEmail || to, ...message });
+      } catch (err) {
+        throw failedTo(where, err);
+      }
+      return where;
+    },
+  });
+  if (email) channels.push(email);
+
+  const text = sendText && createChannel({
+    kind: 'text', store, log,
+    async deliver(ticket, project) {
+      const slug = project?.slug ?? ticket.project;
+      if (!project?.alertPhone) {
+        if (!toldNoPhone.has(slug)) {
+          toldNoPhone.add(slug);
+          log(`hand-over text: off for project "${slug}", which has no alert phone (its Edit project page sets one).`);
+        }
+        return null;
+      }
+      toldNoPhone.delete(slug);
+      const where = "to the project's alert phone";
+      const body = handOverText({ ticket, ask: newestAsk(store.listComments(ticket.id)), pageUrl });
+      try {
+        await sendText({ to: project.alertPhone, text: body });
+      } catch (err) {
+        throw failedTo(where, err);
+      }
+      return where;
+    },
+  });
+  if (text) channels.push(text);
+
+  async function run(ticket, changed) {
+    for (const channel of channels) channel.note(ticket, changed);
+    // Each channel on its own: one that throws unexpectedly never stops the other.
+    for (const channel of channels) {
+      try {
+        await channel.flush();
+      } catch (err) {
+        log(`hand-over ${channel === email ? 'email' : 'text'} failed unexpectedly: ${err?.message ?? err}`);
+      }
+    }
+  }
+
+  return {
+    enabled: channels.length > 0,
 
     /**
      * After a write: `ticket` as it now stands (null for a write that changed
      * no ticket's fields, such as a comment) and the fields it changed. Never
-     * throws; resolves once this write's emails, and any kept ones, are tried.
+     * throws; resolves once this write's emails and texts, and any kept
+     * ones, are tried.
      */
     afterWrite(ticket, changed = []) {
-      if (!send) return Promise.resolve();
+      if (!channels.length) return Promise.resolve();
       queue = queue.then(() => run(ticket, changed)).catch((err) => {
-        log(`hand-over email failed unexpectedly: ${err?.message ?? err}`);
+        log(`hand-over notice failed unexpectedly: ${err?.message ?? err}`);
       });
       return queue;
     },
@@ -150,9 +257,14 @@ export function createNotifier({ store, send, to, pageUrl, log = () => {} }) {
       return queue;
     },
 
-    /** The hand-overs not yet sent, by ticket id. For the tests and the log. */
+    /** The hand-over emails not yet sent, by ticket id. For the tests and the log. */
     pending() {
-      return [...pending.values()].map((p) => p.key);
+      return email ? email.pending() : [];
+    },
+
+    /** The hand-over texts not yet sent. */
+    pendingTexts() {
+      return text ? text.pending() : [];
     },
   };
 }
@@ -233,4 +345,61 @@ export async function mailEnvFromDoppler({ project, config, run }) {
   const env = {};
   for (const name of [MAIL_KEY, MAIL_TO, MAIL_FROM]) if (all[name]) env[name] = all[name];
   return { env };
+}
+
+/**
+ * The hand-over text (SP-114; Dane chose iMessage sent from the Mini, over
+ * an SMS service or a push app): Messages on this Mac sends it, driven by
+ * `osascript`.
+ *
+ * The AppleScript is fixed. The number and the text reach it only as
+ * arguments (`on run argv`), never pasted into its source, so nothing in a
+ * ticket name can become AppleScript. A send that errors or runs past
+ * `timeoutMs` is a failed send, thrown like the email's, and the number is
+ * cut out of the reason so a log line can never carry it.
+ */
+export const SEND_SCRIPT = Object.freeze([
+  'on run argv',
+  'set theNumber to item 1 of argv',
+  'set theText to item 2 of argv',
+  'tell application "Messages"',
+  'set theService to 1st account whose service type = iMessage',
+  'send theText to participant theNumber of theService',
+  'end tell',
+  'end run',
+]);
+
+/** The osascript arguments that send `text` to `to`: the fixed script, then the two values. */
+export function osascriptArgs({ to, text }, script = SEND_SCRIPT) {
+  return [...script.flatMap((line) => ['-e', line]), String(to), String(text)];
+}
+
+/**
+ * A `sendText({ to, text })` that has Messages send one iMessage. Resolves
+ * once Messages accepted it; throws with the reason when it did not, or when
+ * it took longer than `timeoutMs` (the first send can sit on macOS's "allow
+ * … to control Messages?" box). `run` is execFile, promised.
+ */
+export function imessageSender({ run, osascript = 'osascript', timeoutMs = 30_000 }) {
+  return async function sendText({ to, text }) {
+    const scrub = (line) => String(line ?? '').split(String(to)).join('[phone]').replace(/\s+/g, ' ').trim();
+    try {
+      await run(osascript, osascriptArgs({ to, text }), { timeout: timeoutMs, killSignal: 'SIGKILL', maxBuffer: 64 * 1024 });
+    } catch (err) {
+      if (err?.killed || err?.signal) throw new Error(`Messages did not answer within ${Math.round(timeoutMs / 1000)} seconds (is macOS asking to allow control of Messages on the Mini's screen?)`);
+      if (err?.code === 'ENOENT') throw new Error(`${osascript} is not on this machine`);
+      throw new Error(`Messages refused it: ${scrub(err?.stderr || err?.message || err) || `osascript exited ${err?.code}`}`);
+    }
+  };
+}
+
+/**
+ * The text settings: `{ sendText }`, or `{ sendText: null, why }` when this
+ * machine cannot send one (not a Mac, or no osascript). Whether a project
+ * gets texts is its own alert phone's business, decided per hand-over.
+ */
+export function textSettings({ platform = process.platform, exists = existsSync, run, osascript = '/usr/bin/osascript' } = {}) {
+  if (platform !== 'darwin') return { sendText: null, why: `this machine is not a Mac (${platform}), so there is no Messages to send from.` };
+  if (!exists(osascript)) return { sendText: null, why: `${osascript} is not on this machine.` };
+  return { sendText: imessageSender({ run, osascript }) };
 }

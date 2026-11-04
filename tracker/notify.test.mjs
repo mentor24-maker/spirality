@@ -6,8 +6,12 @@ import { join } from 'node:path';
 import { openStore } from './store.mjs';
 import { startServer } from './server.mjs';
 import {
-  createNotifier, DEFAULT_FROM, handOverEmail, mailEnvFromDoppler, mailSettingsFromEnv, newestAsk, resendSender,
+  createNotifier, DEFAULT_FROM, handOverEmail, handOverText, imessageSender, mailEnvFromDoppler, mailSettingsFromEnv,
+  newestAsk, osascriptArgs, resendSender, SEND_SCRIPT, TEXT_ASK_LIMIT, textSettings,
 } from './notify.mjs';
+import { execFile } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { promisify } from 'node:util';
 import { pageUrlOf } from './server.mjs';
 import { cardAsk, tabTitle } from './web/render.mjs';
 
@@ -356,4 +360,254 @@ test('pageUrlOf: the configured trackerUrl, else this machine by name on the por
   assert.equal(pageUrlOf({ host: '127.0.0.1', port: 4180 }), 'http://127.0.0.1:4180');
   assert.match(pageUrlOf({ host: '0.0.0.0', port: 4180 }), /^http:\/\/[^/]+:4180$/);
   assert.ok(!pageUrlOf({ host: '0.0.0.0', port: 4180 }).includes('0.0.0.0'));
+});
+
+// ---- The hand-over text (SP-114) ------------------------------------------
+
+/** A made-up number in international form. It must never reach a log line. */
+const PHONE = '+18015550123';
+
+/**
+ * A notifier with both channels, each through its own fake. `fake.mailFail`
+ * and `fake.textFail` make one of them throw while true.
+ */
+async function bothFixture({ phone = PHONE } = {}) {
+  const store = openStore(':memory:');
+  const dane = store.createActor({ kind: 'human', name: 'Dane' });
+  const loop = store.createActor({ kind: 'machine', name: 'Loop' });
+  store.createProject({ slug: 'alpha', name: 'Alpha', prefix: 'AL', operator: dane.id, alertPhone: phone });
+  const fake = { mailFail: false, textFail: false };
+  const mail = [];
+  const texts = [];
+  const lines = [];
+  const notifier = createNotifier({
+    store, to: 'dane@example.com', pageUrl: PAGE, log: (l) => lines.push(l),
+    send: async (m) => { if (fake.mailFail) throw new Error('the mail service answered 503'); mail.push(m); },
+    sendText: async (t) => { if (fake.textFail) throw new Error('Messages refused it: not signed in'); texts.push(t); },
+  });
+  const file = (name = 'Make the thing') => store.fileTicket({ project: 'alpha', actor: loop.id, name, status: 'building' });
+  async function move(id, status, extra = {}) {
+    const moved = store.changeTicket(id, { actor: loop.id, status, ...extra });
+    await notifier.afterWrite(moved.ticket, moved.changed);
+    return moved;
+  }
+  async function card(id, body = CARD) {
+    store.postComment({ ticket: id, author: loop.id, body });
+  }
+  return { store, dane, loop, fake, mail, texts, lines, notifier, file, move, card };
+}
+
+test('one hand-over sends one text to the project\'s alert phone: id, name, status, the ask, the link', async () => {
+  const f = await bothFixture();
+  const t = f.file();
+  await f.card(t.id);
+  await f.move(t.id, 'needs your input', { assignee: f.dane.id });
+  assert.equal(f.texts.length, 1);
+  assert.equal(f.texts[0].to, PHONE);
+  assert.equal(f.texts[0].text, [
+    'Waiting on you: AL-1 Make the thing',
+    'Status: Needs your input',
+    'Needed: pick Resend or Postmark',
+    'http://tracker.example:8787/t/AL-1',
+  ].join('\n'));
+  assert.equal(f.mail.length, 1, 'the email still goes too');
+  assert.ok(f.lines.includes("hand-over text sent: AL-1 (needs your input) to the project's alert phone."), f.lines.join('\n'));
+  f.store.close();
+});
+
+test('never two texts for one hand-over: the same status again, a comment, another change send nothing more', async () => {
+  const f = await bothFixture();
+  const t = f.file();
+  const moved = await f.move(t.id, 'ready to launch', { assignee: f.dane.id });
+  await f.notifier.afterWrite(moved.ticket, moved.changed); // the same write heard twice
+  await f.card(t.id);
+  await f.notifier.afterWrite(null, []);
+  await f.move(t.id, 'ready to launch', { priority: 'high' });
+  assert.equal(f.texts.length, 1);
+  await f.move(t.id, 'needs your input');
+  assert.equal(f.texts.length, 2, 'a new hand-over is its own');
+  f.store.close();
+});
+
+test('a move between machine statuses sends no text', async () => {
+  const f = await bothFixture();
+  const t = f.file();
+  await f.move(t.id, 'in review');
+  await f.move(t.id, 'rework');
+  assert.equal(f.texts.length, 0);
+  f.store.close();
+});
+
+test('a failed text never fails the move or the email; it is kept and sent once on the next change', async () => {
+  const f = await bothFixture();
+  const t = f.file();
+  f.fake.textFail = true;
+  const moved = await f.move(t.id, 'needs your input', { assignee: f.dane.id });
+  assert.equal(moved.ticket.status, 'needs your input');
+  assert.equal(f.mail.length, 1, 'the email went regardless');
+  assert.equal(f.texts.length, 0);
+  assert.deepEqual(f.notifier.pendingTexts(), [`AL-1@${moved.ticket.version}`]);
+  assert.deepEqual(f.notifier.pending(), [], 'the email is not kept: it went');
+  assert.ok(f.lines.some((l) => l === "hand-over text NOT sent: AL-1 (needs your input) to the project's alert phone, try 1: Messages refused it: not signed in. It is tried again on the next change."), f.lines.join('\n'));
+  f.fake.textFail = false;
+  await f.card(t.id);
+  await f.notifier.afterWrite(null, []);
+  assert.equal(f.texts.length, 1);
+  assert.equal(f.mail.length, 1, 'the retry of the text sends no second email');
+  await f.notifier.afterWrite(null, []);
+  assert.equal(f.texts.length, 1, 'never twice');
+  f.store.close();
+});
+
+test('a failed email never stops or repeats the text', async () => {
+  const f = await bothFixture();
+  const t = f.file();
+  f.fake.mailFail = true;
+  await f.move(t.id, 'needs your input', { assignee: f.dane.id });
+  assert.equal(f.texts.length, 1);
+  assert.equal(f.notifier.pending().length, 1);
+  f.fake.mailFail = false;
+  await f.notifier.afterWrite(null, []);
+  assert.equal(f.mail.length, 1);
+  assert.equal(f.texts.length, 1, 'the email retry sends no second text');
+  f.store.close();
+});
+
+test('an email that breaks before it is sent still lets the text go', async () => {
+  const store = openStore(':memory:');
+  const dane = store.createActor({ kind: 'human', name: 'Dane' });
+  const loop = store.createActor({ kind: 'machine', name: 'Loop' });
+  store.createProject({ slug: 'alpha', name: 'Alpha', prefix: 'AL', operator: dane.id, alertPhone: PHONE });
+  const texts = [];
+  const lines = [];
+  // The email reads the comments first; that read breaks once.
+  const brokenStore = Object.create(store);
+  let calls = 0;
+  brokenStore.listComments = (...a) => { calls += 1; if (calls === 1) throw new Error('disk gone'); return store.listComments(...a); };
+  const notifier = createNotifier({
+    store: brokenStore, to: 'x@example.com', pageUrl: PAGE, log: (l) => lines.push(l),
+    send: async () => {}, sendText: async (t) => { texts.push(t); },
+  });
+  const t = store.fileTicket({ project: 'alpha', actor: loop.id, name: 'X', status: 'building' });
+  const moved = store.changeTicket(t.id, { actor: loop.id, status: 'needs your input' });
+  await notifier.afterWrite(moved.ticket, moved.changed);
+  assert.equal(texts.length, 1, lines.join('\n'));
+  store.close();
+});
+
+test('a project with no alert phone gets no text, said once in the log until it has one', async () => {
+  const f = await bothFixture({ phone: null });
+  const a = f.file('One');
+  const b = f.file('Two');
+  await f.move(a.id, 'needs your input');
+  await f.move(b.id, 'needs your input');
+  assert.equal(f.texts.length, 0);
+  assert.equal(f.mail.length, 2, 'the email is unaffected');
+  assert.deepEqual(f.notifier.pendingTexts(), [], 'nothing kept to retry forever');
+  const off = f.lines.filter((l) => l.startsWith('hand-over text: off for project "alpha"'));
+  assert.equal(off.length, 1, f.lines.join('\n'));
+  f.store.updateProject('alpha', { alertPhone: PHONE });
+  const c = f.file('Three');
+  await f.move(c.id, 'ready to launch');
+  assert.equal(f.texts.length, 1);
+  assert.equal(f.texts[0].to, PHONE);
+  f.store.close();
+});
+
+test('no phone number reaches a log line, sent or failed', async () => {
+  const f = await bothFixture();
+  const t = f.file();
+  f.fake.textFail = true;
+  await f.move(t.id, 'needs your input');
+  f.fake.textFail = false;
+  await f.notifier.afterWrite(null, []);
+  assert.equal(f.texts.length, 1);
+  const log = f.lines.join('\n');
+  assert.ok(!log.includes(PHONE) && !log.includes('8015550123'), log);
+  f.store.close();
+});
+
+test('with texts on and the email off, the notifier still texts', async () => {
+  const store = openStore(':memory:');
+  const dane = store.createActor({ kind: 'human', name: 'Dane' });
+  const loop = store.createActor({ kind: 'machine', name: 'Loop' });
+  store.createProject({ slug: 'alpha', name: 'Alpha', prefix: 'AL', operator: dane.id, alertPhone: PHONE });
+  const texts = [];
+  const notifier = createNotifier({ store, send: null, pageUrl: PAGE, sendText: async (t) => { texts.push(t); } });
+  assert.equal(notifier.enabled, true);
+  const t = store.fileTicket({ project: 'alpha', actor: loop.id, name: 'X', status: 'building' });
+  const moved = store.changeTicket(t.id, { actor: loop.id, status: 'needs your input' });
+  await notifier.afterWrite(moved.ticket, moved.changed);
+  assert.equal(texts.length, 1);
+  assert.deepEqual(notifier.pending(), []);
+  store.close();
+});
+
+test('handOverText: the ask cut to about 300 characters, the name kept on one line, the link encoded', () => {
+  const long = 'word '.repeat(200);
+  const text = handOverText({ ticket: { id: 'AL 1', name: 'Two\nlines', status: 'ready to launch' }, ask: long, pageUrl: 'http://x:1/' });
+  const [first, status, needed, link] = text.split('\n');
+  assert.equal(first, 'Waiting on you: AL 1 Two lines');
+  assert.equal(status, 'Status: Ready to launch');
+  assert.ok(needed.length <= 'Needed: '.length + TEXT_ASK_LIMIT, needed.length);
+  assert.ok(needed.endsWith('…'));
+  assert.equal(link, 'http://x:1/t/AL%201');
+  assert.match(handOverText({ ticket: { id: 'A', name: 'n', status: 'needs your input' }, ask: null, pageUrl: 'http://x' }), /no question card/);
+});
+
+/** A ticket name built to break out of an AppleScript string, were it ever pasted into one. */
+const HOSTILE = 'Fix "quotes"; do shell script "touch /tmp/pwned"; "';
+
+test('osascriptArgs: the script is fixed, and the number and text come after it as plain arguments', () => {
+  const text = handOverText({ ticket: { id: 'AL-1', name: HOSTILE, status: 'needs your input' }, ask: HOSTILE, pageUrl: PAGE });
+  const args = osascriptArgs({ to: PHONE, text });
+  const script = SEND_SCRIPT.flatMap((line) => ['-e', line]);
+  assert.deepEqual(args.slice(0, script.length), script, 'the script is the same whatever the ticket says');
+  assert.deepEqual(args.slice(script.length), [PHONE, text]);
+  assert.ok(!SEND_SCRIPT.join('\n').includes('do shell script'));
+  assert.ok(SEND_SCRIPT[0] === 'on run argv');
+});
+
+test('imessageSender: runs osascript with the fixed script, the values as arguments, and a time limit', async () => {
+  const calls = [];
+  const sendText = imessageSender({ run: async (file, args, opts) => { calls.push({ file, args, opts }); return { stdout: '' }; }, timeoutMs: 5000 });
+  await sendText({ to: PHONE, text: HOSTILE });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].file, 'osascript');
+  assert.deepEqual(calls[0].args, osascriptArgs({ to: PHONE, text: HOSTILE }));
+  assert.equal(calls[0].opts.timeout, 5000);
+});
+
+test('imessageSender: a refusal, a timeout or no osascript throws a reason with no phone number in it', async () => {
+  const refuse = imessageSender({ run: async () => { const e = new Error('Command failed'); e.code = 1; e.stderr = `execution error: Messages got an error: Can't get participant "${PHONE}". (-1728)\n`; throw e; } });
+  await assert.rejects(refuse({ to: PHONE, text: 'x' }), (err) => {
+    assert.match(err.message, /^Messages refused it: execution error: .*\[phone\]/);
+    assert.ok(!err.message.includes(PHONE));
+    return true;
+  });
+  const slow = imessageSender({ run: async () => { const e = new Error('Command failed'); e.killed = true; e.signal = 'SIGKILL'; throw e; }, timeoutMs: 30_000 });
+  await assert.rejects(slow({ to: PHONE, text: 'x' }), /did not answer within 30 seconds .*allow control of Messages/);
+  const none = imessageSender({ run: async () => { const e = new Error('spawn osascript ENOENT'); e.code = 'ENOENT'; throw e; } });
+  await assert.rejects(none({ to: PHONE, text: 'x' }), /osascript is not on this machine/);
+});
+
+test('real osascript (Macs only): a hostile ticket name comes back as plain text, and nothing runs', { skip: !existsSync('/usr/bin/osascript') && 'no osascript on this machine' }, async () => {
+  // The same argv route as SEND_SCRIPT, with a script that hands the values back instead of sending.
+  const echo = ['on run argv', 'return (item 1 of argv) & "|" & (item 2 of argv)', 'end run'];
+  const marker = join(tmpdir(), `sp114-injected-${process.pid}`);
+  const hostile = `Fix "quotes"; do shell script "touch ${marker}"; "`;
+  const { stdout } = await promisify(execFile)('/usr/bin/osascript', osascriptArgs({ to: PHONE, text: hostile }, echo), { timeout: 20_000 });
+  assert.equal(stdout.replace(/\n$/, ''), `${PHONE}|${hostile}`);
+  assert.equal(existsSync(marker), false, 'the ticket name ran as AppleScript');
+});
+
+test('textSettings: off on a machine that is not a Mac or has no osascript; on otherwise', () => {
+  const linux = textSettings({ platform: 'linux', exists: () => true, run: async () => {} });
+  assert.equal(linux.sendText, null);
+  assert.match(linux.why, /not a Mac \(linux\)/);
+  const bare = textSettings({ platform: 'darwin', exists: () => false, run: async () => {} });
+  assert.equal(bare.sendText, null);
+  assert.match(bare.why, /osascript is not on this machine/);
+  const mac = textSettings({ platform: 'darwin', exists: () => true, run: async () => {} });
+  assert.equal(typeof mac.sendText, 'function');
 });
