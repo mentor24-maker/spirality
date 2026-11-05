@@ -289,6 +289,7 @@ function makeWorld(t) {
     appendText: (p, text) => { mkdirSync(dirname(p), { recursive: true }); appendFileSync(p, text); },
     mkdir: (d) => mkdirSync(d, { recursive: true }),
     rename: (from, to) => renameSync(from, to),
+    remove: (p) => rmSync(p, { force: true }),
     sleep: async (ms) => { clock += ms; },
     now: () => clock,
     ...over,
@@ -715,7 +716,8 @@ test('in a Terminal, a state file that cannot be written is a warning and the ru
     writeFileSync(p, text);
   };
   assert.equal(await go({ writeText }), 0, out(w));
-  assert.match(out(w), /\(could not write the state file .*ENOSPC\)/);
+  assert.match(out(w), /\(could not write the state file .*ENOSPC; the setup page will not see this run\)/);
+  assert.equal(w.printed.filter((l) => l.includes('could not write the state file')).length, 1, 'warned once, not on every step');
   assert.match(out(w), /Done: pressplay is set up/);
 });
 
@@ -725,4 +727,48 @@ test('in a Terminal with no one to answer, the stops still say what is next in t
   const state = readState(statePath);
   assert.equal(state.stop.kind, 'paste');
   assert.equal(state.stop.commands.length, 3);
+});
+
+test('--no-prompt: an error that is not a step\'s own stop marks the running step failed in the state file, exit 1', async (t) => {
+  const { w, homeOpts, seedAnswers, statePath, run: fakeRun } = makeWorld(t);
+  seedAnswers();
+  w.signinsMade = true;
+  w.dopplerProject = true;
+  const run = (cmd, args, o) => {
+    if (args.some((a) => String(a).includes('onboard:copy'))) throw new Error('spawn npm EACCES');
+    return fakeRun(cmd, args, o);
+  };
+  assert.equal(await noPromptRun(homeOpts, { run }), 1, out(w));
+  assert.match(out(w), /^FAILED: copy: unexpected error — spawn npm EACCES$/m);
+  const state = readState(statePath);
+  assert.equal(outcomes(state).copy, 'failed');
+  assert.equal(outcomes(state).lanes, 'pending');
+  assert.deepEqual(state.stop, { step: 'copy', kind: 'failed', why: 'unexpected error — spawn npm EACCES', commands: [], link: null });
+  assert.equal(state.finished, false);
+  assert.ok(!state.steps.some((s) => s.outcome === 'running'), 'no step left running over a run that died');
+});
+
+test('an answers file the wizard cannot read: FAILED at answers in the state file, not "running"', async (t) => {
+  const { w, homeOpts, answersFile, statePath } = makeWorld(t);
+  const readText = (p) => {
+    if (p === answersFile) { const e = new Error('EACCES: permission denied'); e.code = 'EACCES'; throw e; }
+    try { return readFileSync(p, 'utf8'); } catch { return null; }
+  };
+  assert.equal(await noPromptRun(homeOpts, { readText }), 1, out(w));
+  assert.match(out(w), /^FAILED: answers: unexpected error — EACCES: permission denied$/m);
+  const state = readState(statePath);
+  assert.equal(outcomes(state).answers, 'failed');
+  assert.equal(state.stop.kind, 'failed');
+});
+
+test('a state file whose rename fails leaves no half-written file beside it', async (t) => {
+  const { w, homeOpts, seedAnswers, statePath } = makeWorld(t);
+  seedAnswers();
+  const rename = (from, to) => {
+    if (to === statePath) { const e = new Error('cross-device'); e.code = 'EXDEV'; throw e; }
+    renameSync(from, to);
+  };
+  assert.equal(await noPromptRun(homeOpts, { rename }), 1, out(w));
+  assert.match(out(w), /^FAILED: state: .*EXDEV/m);
+  assert.deepEqual(readdirSync(dirname(statePath)).filter((f) => f.endsWith('.tmp')), []);
 });

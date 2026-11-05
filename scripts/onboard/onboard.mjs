@@ -75,7 +75,7 @@
  * Exit 0 set up, 1 FAILED, 2 usage, 3 stopped for Dane.
  */
 import { spawnSync } from 'node:child_process';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -311,7 +311,7 @@ const last = (text, n = 4) => String(text || '').split('\n').map((l) => l.trim()
  *   ask(question) -> string, or null when there is no Terminal to ask in
  *   pause(text) -> true once Dane says it is done, or null with no Terminal
  *   print(line), exists(path), readText(path) -> text|null, writeText(path, text),
- *   appendText(path, text), mkdir(dir), rename(from, to), sleep(ms), now() -> ms
+ *   appendText(path, text), mkdir(dir), rename(from, to), remove(path), sleep(ms), now() -> ms
  * Returns the exit code.
  */
 export async function onboard(opts, deps) {
@@ -331,6 +331,7 @@ export async function onboard(opts, deps) {
   const iso = () => new Date(deps.now()).toISOString();
   const state = initialState(slug, iso());
   let stateBroken = null;
+  let stateWarned = false;
   const saveState = () => {
     state.updatedAt = iso();
     const written = `${JSON.stringify(state, null, 2)}\n`;
@@ -341,9 +342,13 @@ export async function onboard(opts, deps) {
       deps.rename(temp, sFile);
       if (deps.readText(sFile) !== written) throw new Error('it did not read back as written');
     } catch (err) {
+      // Never leave a half-written file beside it.
+      try { deps.remove?.(temp); } catch { /* the warning below names the real failure */ }
       const why = `could not write the state file ${sFile}: ${err.code || err.message}`;
       if (opts.noPrompt) { stateBroken = why; return false; }
-      deps.print(`(${why})`);
+      // In a Terminal it is a warning, said once, not on every step.
+      if (!stateWarned) deps.print(`(${why}; the setup page will not see this run)`);
+      stateWarned = true;
     }
     return true;
   };
@@ -699,8 +704,15 @@ export async function onboard(opts, deps) {
       if (still.length) fail(step, `main's protection reads back without: ${still.join('; ')}`);
       done(step, `main protected (was: ${gaps.join('; ')}), read back`);
     }
-  } catch (err) {
-    if (!(err instanceof Stop)) throw err;
+  } catch (thrown) {
+    let err = thrown;
+    // Any other error is the running step failing (rule 6): the state file
+    // must not go on saying "running" over a run that died.
+    if (!(err instanceof Stop)) {
+      deps.print('');
+      deps.print(String(thrown?.stack || thrown));
+      err = new Stop('FAILED', step, `unexpected error — ${thrown?.message ?? String(thrown)}`);
+    }
     deps.print('');
     deps.print(`${err.kind}: ${err.step}: ${err.message}`);
     deps.print(`Nothing after this step ran. ${err.kind === 'FAILED' ? 'Fix it, then rerun' : 'Rerun when it is done'}; the steps already done are skipped:`);
@@ -756,10 +768,12 @@ export function parseOnboardArgs(argv) {
   return { opts };
 }
 
-function realRun(cmd, args, { cwd, input, show } = {}) {
+function realRun(cmd, args, { cwd, input, show, noPrompt } = {}) {
   const r = spawnSync(cmd, args, {
     cwd, input, encoding: 'utf8',
-    stdio: show ? ['inherit', 'inherit', 'inherit'] : ['pipe', 'pipe', 'pipe'],
+    // A shown step inherits the Terminal's output, never its input under
+    // --no-prompt (`input` is still piped when given).
+    stdio: show ? [input != null ? 'pipe' : (noPrompt ? 'ignore' : 'inherit'), 'inherit', 'inherit'] : ['pipe', 'pipe', 'pipe'],
   });
   return { code: r.status ?? 1, out: String(r.stdout || '').trim(), err: String(r.stderr || r.error?.message || '').trim() };
 }
@@ -785,7 +799,7 @@ async function main(argv) {
   const tty = !parsed.opts.noPrompt && Boolean(process.stdin.isTTY);
   return onboard(parsed.opts, {
     homeConfig, homeRoot, spiralityDir,
-    run: realRun,
+    run: (cmd, args, o = {}) => realRun(cmd, args, { ...o, noPrompt: parsed.opts.noPrompt }),
     ask: (q) => (tty ? askOnce(q) : null),
     // A stray Enter pressed while a step ran is held by the Terminal and
     // read here, so the wait takes a word, never a bare Enter.
@@ -801,6 +815,7 @@ async function main(argv) {
     appendText: (p, t) => { mkdirSync(dirname(p), { recursive: true }); appendFileSync(p, t); },
     mkdir: (d) => mkdirSync(d, { recursive: true }),
     rename: (from, to) => renameSync(from, to),
+    remove: (p) => rmSync(p, { force: true }),
     sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
     now: () => Date.now(),
   });
