@@ -1,12 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
-import { startServer, settingsFromEnv } from './server.mjs';
+import { startServer, settingsFromEnv, setupSettingsOf } from './server.mjs';
+import { DANE_FIELDS, STEPS } from '../scripts/onboard/onboard.mjs';
 import loopStatuses from '../lib/loopStatuses.js';
 
 /**
@@ -577,7 +578,7 @@ test('admin: create-actor prints only the token on stdout, and that token signs 
 });
 
 test('the server, admin and backup hard-code no product: no names, ids, prefixes or ports in their source', () => {
-  for (const file of ['./server.mjs', './admin.mjs', './backup.mjs']) {
+  for (const file of ['./server.mjs', './setup.mjs', './admin.mjs', './backup.mjs']) {
     const source = readFileSync(new URL(file, import.meta.url), 'utf8');
     for (const word of [/starcaster/i, /wavecenter/i, /spirality/i, /\bSP-/, /\bSC-/, /\bWC-/, /\b9014\d{8}\b/, /86b[a-z0-9]{6}/, /listen\(\s*\d/, /\bport\s*=\s*\d/i]) {
       assert.doesNotMatch(source, word, `${file} matches ${word}`);
@@ -1240,4 +1241,213 @@ test('an invite whose email does not go out, or with no mail sender, leaves no o
     assert.equal(r.body.error, 'no-mail');
     assert.ok(!f.store.listInvites().some((i) => i.email === 'none@example.com'));
   } finally { await n.close(); await f.cleanup(); }
+});
+
+/**
+ * A tracker home for the setup calls: a settings file copied from this
+ * repository's own, with its logDir moved into a scratch folder, and a
+ * server started with it. Answers `{ ...fixture, setup, onboard, at }`.
+ */
+async function setupFixture() {
+  const f = await fixture();
+  const home = join(f.dir, 'home');
+  const logDir = join(f.dir, 'logs');
+  mkdirSync(home);
+  const repoSettings = JSON.parse(readFileSync(new URL('../spirality.project.json', import.meta.url), 'utf8'));
+  writeFileSync(join(home, 'spirality.project.json'), JSON.stringify({ ...repoSettings, logDir }));
+  const { setup, why } = setupSettingsOf({ db: f.path, folder: home });
+  assert.ok(setup, why);
+  const server = await startServer({ store: f.store, port: 0, log: (line) => f.lines.push(line), setup });
+  const at = `http://127.0.0.1:${server.address().port}`;
+  const close = f.cleanup;
+  return {
+    ...f, setup, home, onboard: join(logDir, 'onboard'), at,
+    cleanup: async () => { await new Promise((r) => server.close(r)); await close(); },
+  };
+}
+
+const GOOD_ANSWERS = Object.freeze({
+  productName: 'Press Play',
+  githubRepo: 'example-owner/press-play',
+  trackerPrefix: '',
+  mergePhrases: '',
+  autoMergeLanes: 'none',
+  extraGovernancePaths: 'docs/RULES.md, ops/',
+  description: 'A test product. It plays things.',
+});
+
+/** A state file as the wizard leaves it: every step pending except those given. */
+function writeState(dir, slug, { outcomes = {}, stop = null, finished = false } = {}) {
+  mkdirSync(dir, { recursive: true });
+  const state = {
+    product: slug,
+    updatedAt: '2026-11-05T08:15:00.000Z',
+    steps: STEPS.map((step) => ({ step, outcome: outcomes[step] ?? 'pending', at: outcomes[step] ? '2026-11-05T07:20:00.000Z' : null, why: null })),
+    stop,
+    finished,
+  };
+  writeFileSync(join(dir, `${slug}.state.json`), JSON.stringify(state));
+  return state;
+}
+
+test('GET /setup/fields answers the wizard\'s own questions, with the tracker home\'s defaults, to a person', async () => {
+  const f = await setupFixture();
+  try {
+    const r = await f.call('GET', '/setup/fields', { token: f.humanToken, at: f.at });
+    assert.equal(r.status, 200);
+    assert.deepEqual(r.body.fields.map((x) => x.key), DANE_FIELDS.map((x) => x.key));
+    const byKey = Object.fromEntries(r.body.fields.map((x) => [x.key, x]));
+    assert.equal(byKey.productName.required, true);
+    assert.equal(byKey.productName.default, null);
+    assert.equal(byKey.productName.question, DANE_FIELDS[0].question);
+    assert.equal(byKey.mergePhrases.default, f.setup.homeConfig.mergePhrases.join(', '));
+    assert.equal(byKey.mergePhrases.list, true);
+    assert.equal(byKey.autoMergeLanes.default, 'none');
+    assert.equal(byKey.trackerPrefix.default, null, 'no product named: no slug to make a prefix from');
+    const named = await f.call('GET', '/setup/fields?product=press-play', { token: f.humanToken, at: f.at });
+    assert.equal(named.body.fields.find((x) => x.key === 'trackerPrefix').default, 'PR');
+  } finally { await f.cleanup(); }
+});
+
+test('every setup call is a person\'s only: a machine gets 403 and nothing is written', async () => {
+  const f = await setupFixture();
+  try {
+    for (const [method, path, body] of [['GET', '/setup'], ['GET', '/setup/fields'], ['GET', '/setup/press-play'], ['PUT', '/setup/press-play', GOOD_ANSWERS]]) {
+      const r = await f.call(method, path, { token: f.machineToken, at: f.at, body });
+      assert.equal(r.status, 403, `${method} ${path}`);
+      assert.equal(r.body.error, 'people-only');
+    }
+    assert.equal(existsSync(f.onboard), false, 'nothing written');
+    assert.equal((await f.call('GET', '/setup', { token: null, at: f.at })).status, 401);
+  } finally { await f.cleanup(); }
+});
+
+test('a server started without a usable tracker home answers the setup calls 503 and reads nothing', async () => {
+  const f = await fixture();
+  try {
+    const r = await f.call('GET', '/setup/fields', { token: f.humanToken });
+    assert.equal(r.status, 503);
+    assert.equal(r.body.error, 'no-setup');
+    const bad = join(f.dir, 'guest');
+    mkdirSync(bad);
+    const { trackerPort, ...guest } = JSON.parse(readFileSync(new URL('../spirality.project.json', import.meta.url), 'utf8'));
+    assert.ok(trackerPort);
+    writeFileSync(join(bad, 'spirality.project.json'), JSON.stringify(guest));
+    const off = setupSettingsOf({ db: f.path, folder: bad });
+    assert.equal(off.setup, null);
+    assert.match(off.why, /trackerPort/);
+  } finally { await f.cleanup(); }
+});
+
+test('PUT /setup/:slug writes the answers file, checked by the wizard\'s checker and read back; GET answers it with the command to paste', async () => {
+  const f = await setupFixture();
+  try {
+    const put = await f.call('PUT', '/setup/press-play', { token: f.humanToken, at: f.at, body: GOOD_ANSWERS });
+    assert.equal(put.status, 200, put.text);
+    const file = join(f.onboard, 'press-play.answers.json');
+    const onDisk = JSON.parse(readFileSync(file, 'utf8'));
+    assert.deepEqual(onDisk, {
+      productSlug: 'press-play',
+      productName: 'Press Play',
+      githubRepo: 'example-owner/press-play',
+      trackerPrefix: null,
+      mergePhrases: null,
+      autoMergeLanes: [],
+      extraGovernancePaths: ['docs/RULES.md', 'ops/'],
+      description: 'A test product. It plays things.',
+    });
+    assert.deepEqual(put.body.answers, onDisk, 'answered as read back');
+    assert.equal(put.body.resolved.trackerPrefix, 'PR');
+    assert.deepEqual(put.body.resolved.mergePhrases, f.setup.homeConfig.mergePhrases);
+    assert.equal(put.body.state, null);
+    assert.equal(put.body.locked, false);
+    const get = await f.call('GET', '/setup/press-play', { token: f.humanToken, at: f.at });
+    assert.equal(get.status, 200);
+    assert.deepEqual(get.body.answers, onDisk);
+    assert.equal(get.body.commands.start, `cd ${f.home} && TRACKER_DB=${f.path} npm run onboard -- --product press-play --no-prompt`);
+    assert.equal(get.body.commands.resume, get.body.commands.start);
+    // A second save changes one field and keeps the rest.
+    const again = await f.call('PUT', '/setup/press-play', { token: f.humanToken, at: f.at, body: { trackerPrefix: 'PP' } });
+    assert.equal(again.status, 200, again.text);
+    assert.equal(JSON.parse(readFileSync(file, 'utf8')).trackerPrefix, 'PP');
+    assert.equal(JSON.parse(readFileSync(file, 'utf8')).productName, 'Press Play');
+    assert.equal(existsSync(`${file}.${process.pid}.tmp`), false, 'no file left beside it');
+  } finally { await f.cleanup(); }
+});
+
+test('PUT /setup/:slug refuses a bad answer (400 naming it), an unknown field, a bad slug, and a setup past its sign-ins (409), writing nothing', async () => {
+  const f = await setupFixture();
+  try {
+    const file = join(f.onboard, 'press-play.answers.json');
+    const bad = await f.call('PUT', '/setup/press-play', { token: f.humanToken, at: f.at, body: { ...GOOD_ANSWERS, githubRepo: 'not a repo' } });
+    assert.equal(bad.status, 400);
+    assert.equal(bad.body.field, 'githubRepo');
+    assert.match(bad.body.message, /githubRepo/);
+    const missing = await f.call('PUT', '/setup/press-play', { token: f.humanToken, at: f.at, body: { productName: 'Press Play' } });
+    assert.equal(missing.status, 400);
+    assert.equal(missing.body.field, 'description');
+    const unknown = await f.call('PUT', '/setup/press-play', { token: f.humanToken, at: f.at, body: { ...GOOD_ANSWERS, checkoutDir: '/tmp/x' } });
+    assert.equal(unknown.status, 400);
+    assert.match(unknown.body.message, /checkoutDir/);
+    const wrongShape = await f.call('PUT', '/setup/press-play', { token: f.humanToken, at: f.at, body: { ...GOOD_ANSWERS, productName: 7 } });
+    assert.equal(wrongShape.status, 400);
+    assert.equal((await f.call('PUT', '/setup/Press%20Play', { token: f.humanToken, at: f.at, body: GOOD_ANSWERS })).status, 400);
+    const own = await f.call('PUT', `/setup/${f.setup.homeConfig.productSlug}`, { token: f.humanToken, at: f.at, body: GOOD_ANSWERS });
+    assert.equal(own.status, 400, 'the tracker home\'s own slug is not a new product');
+    assert.equal(existsSync(file), false, 'nothing written');
+
+    assert.equal((await f.call('PUT', '/setup/press-play', { token: f.humanToken, at: f.at, body: GOOD_ANSWERS })).status, 200);
+    const before = readFileSync(file, 'utf8');
+    writeState(f.onboard, 'press-play', { outcomes: { answers: 'done', look: 'done', clone: 'skip', settings: 'done', signins: 'done' } });
+    const late = await f.call('PUT', '/setup/press-play', { token: f.humanToken, at: f.at, body: { trackerPrefix: 'PP' } });
+    assert.equal(late.status, 409);
+    assert.equal(late.body.error, 'setup-under-way');
+    assert.equal(readFileSync(file, 'utf8'), before, 'nothing written');
+    writeState(f.onboard, 'press-play', { outcomes: { answers: 'done', signins: 'skip' } });
+    assert.equal((await f.call('PUT', '/setup/press-play', { token: f.humanToken, at: f.at, body: { trackerPrefix: 'PP' } })).status, 409, 'skip: the sign-ins were already there');
+    writeState(f.onboard, 'press-play', { outcomes: { answers: 'done', signins: 'stopped' } });
+    assert.equal((await f.call('PUT', '/setup/press-play', { token: f.humanToken, at: f.at, body: { trackerPrefix: 'PP' } })).status, 200, 'stopped at the sign-ins: not made yet');
+  } finally { await f.cleanup(); }
+});
+
+test('GET /setup/:slug and GET /setup read the state file: none yet, stopped at a paste, and finished', async () => {
+  const f = await setupFixture();
+  try {
+    const none = await f.call('GET', '/setup/press-play', { token: f.humanToken, at: f.at });
+    assert.equal(none.status, 200);
+    assert.equal(none.body.answers, null);
+    assert.equal(none.body.state, null);
+    assert.equal(none.body.step, null);
+    assert.equal(none.body.finished, false);
+    assert.deepEqual((await f.call('GET', '/setup', { token: f.humanToken, at: f.at })).body, { setups: [] });
+
+    assert.equal((await f.call('PUT', '/setup/press-play', { token: f.humanToken, at: f.at, body: GOOD_ANSWERS })).status, 200);
+    const listed = await f.call('GET', '/setup', { token: f.humanToken, at: f.at });
+    assert.deepEqual(listed.body.setups, [{ product: 'press-play', step: null, finished: false, started: false, stateError: null }]);
+
+    const stop = { step: 'signins', kind: 'paste', why: 'the sign-ins are not made yet', commands: ['cd /x', 'npm run tracker:signins -- create'], link: null };
+    writeState(f.onboard, 'press-play', { outcomes: { answers: 'done', look: 'done', clone: 'skip', settings: 'done', signins: 'stopped' }, stop });
+    const stopped = await f.call('GET', '/setup/press-play', { token: f.humanToken, at: f.at });
+    assert.equal(stopped.body.step, 'signins');
+    assert.deepEqual(stopped.body.state.stop, stop);
+    assert.equal(stopped.body.finished, false);
+    assert.equal(stopped.body.locked, false);
+    assert.deepEqual((await f.call('GET', '/setup', { token: f.humanToken, at: f.at })).body.setups,
+      [{ product: 'press-play', step: 'signins', finished: false, started: true, stateError: null }]);
+
+    writeState(f.onboard, 'press-play', { outcomes: Object.fromEntries(STEPS.map((s) => [s, 'done'])), finished: true });
+    const done = await f.call('GET', '/setup/press-play', { token: f.humanToken, at: f.at });
+    assert.equal(done.body.finished, true);
+    assert.equal(done.body.step, null);
+    assert.equal(done.body.locked, true);
+    assert.deepEqual((await f.call('GET', '/setup', { token: f.humanToken, at: f.at })).body.setups,
+      [{ product: 'press-play', step: null, finished: true, started: true, stateError: null }]);
+
+    writeFileSync(join(f.onboard, 'press-play.state.json'), '{ not json');
+    const broken = await f.call('GET', '/setup/press-play', { token: f.humanToken, at: f.at });
+    assert.equal(broken.status, 200);
+    assert.equal(broken.body.state, null);
+    assert.match(broken.body.stateError, /not valid JSON/);
+    assert.equal((await f.call('PUT', '/setup/press-play', { token: f.humanToken, at: f.at, body: GOOD_ANSWERS })).status, 409, 'cannot tell how far it is: nothing written');
+  } finally { await f.cleanup(); }
 });
