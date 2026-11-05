@@ -38,10 +38,11 @@
  */
 import { spawnSync } from 'node:child_process';
 import { existsSync, statSync, readFileSync, writeFileSync, mkdtempSync, rmSync, realpathSync } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createRequire } from 'node:module';
 import { loadProjectConfig, CONFIG_FILE } from '../../lib/projectConfig.mjs';
+import { expandHome } from '../../lib/onboardAnswers.mjs';
 import { LANES, parseStatus, readPasses, judgeFirstPass, rerunSince, ticketsNamed, waitMinutesFrom, setupTicketBody, withLine } from '../../lib/onboardLanes.mjs';
 
 const require = createRequire(import.meta.url);
@@ -50,7 +51,6 @@ const { findTicketId, ticketLine } = require('../../lib/clickupTicketLink.js');
 const argv = process.argv.slice(2);
 const arg = (name) => { const i = argv.indexOf(`--${name}`); return i >= 0 ? argv[i + 1] : undefined; };
 const flag = (name) => argv.includes(`--${name}`);
-const expandHome = (v) => (typeof v === 'string' && /^~(\/|$)/.test(v) ? v.replace(/^~/, homedir()) : v);
 
 const checkoutArg = arg('checkout'), branch = arg('branch'), prArg = arg('pr');
 if (!checkoutArg || !branch || !prArg) {
@@ -152,7 +152,10 @@ let ticket = findTicketId(prNow.body, linkOpts);
 // A rerun after the Ticket: line failed to reach the PR: the ticket is
 // already filed, under the PR's exact name. Find it rather than file a second.
 let existing = [];
-if (!ticket) {
+if (!ticket && dryRun && onBranch !== branch) {
+  // The checkout is still on the product's own main, which has no ticket door yet.
+  say('ticket', `would look in ${config.productSlug}'s project for a ticket already named "${prNow.title}" (the door is on ${branch}, not checked out in a dry run)`);
+} else if (!ticket) {
   const listed = door('queue');
   if (!listed.ok) fail('ticket', `could not list ${config.productSlug}'s tickets to look for one already filed: ${last(listed.err || listed.out)}`);
   existing = ticketsNamed(listed.out, prNow.title);
@@ -171,12 +174,18 @@ if (ticket) {
       ticket = existing[0];
       say('ticket', `${ticket} is already filed as "${prNow.title}"; not filing a second`);
     } else {
-      const asked = arg('asked-file') ? readFileSync(expandHome(arg('asked-file')), 'utf8') : '';
+      const askedFile = arg('asked-file') ? expandHome(arg('asked-file')) : null;
+      if (askedFile && !existsSync(askedFile)) fail('ticket', `--asked-file ${askedFile} does not exist`);
+      const asked = askedFile ? readFileSync(askedFile, 'utf8') : '';
       writeFileSync(join(scratch, 'body.md'), setupTicketBody({ productSlug: config.productSlug, githubRepo: config.githubRepo, prUrl, branch, asked }));
-      const made = door('task', '--name', prNow.title, '--body-file', join(scratch, 'body.md'), '--id-out', join(scratch, 'id'));
+      // Filed straight into In review: no lane is installed yet (that is the
+      // next step), so nothing can take it half-filed, and it is never moved
+      // again by this script. A rerun finds it in whatever status a lane has
+      // since put it: Dane's Ready to launch, or Rework with a send-back.
+      const made = door('task', '--name', prNow.title, '--body-file', join(scratch, 'body.md'), '--status', 'In review', '--id-out', join(scratch, 'id'));
       if (!made.ok || !existsSync(join(scratch, 'id'))) fail('ticket', `filing the setup ticket failed: ${last(made.err || made.out)}`);
       ticket = readFileSync(join(scratch, 'id'), 'utf8').trim();
-      say('ticket', `filed ${ticket}, "${prNow.title}", read back`);
+      say('ticket', `filed ${ticket}, "${prNow.title}", in In review, read back`);
     }
     writeFileSync(join(scratch, 'pr-body.md'), withLine(prNow.body, ticketLine(ticket, linkOpts)));
     const edited = run('gh', ['pr', 'edit', prNumber, '--repo', prRepo, '--body-file', join(scratch, 'pr-body.md')]);
@@ -191,15 +200,12 @@ if (!dryRun) {
   if (!recorded.ok) fail('ticket', `pr-opened on ${ticket}: ${last(recorded.err || recorded.out)}`);
   say('ticket', `${ticket} records PR #${prNumber} (pr-opened read it back)`);
   const got = door('get', '--task', ticket);
-  const status = (/^status:\s+(.+)$/m.exec(got.out) || [])[1] || '';
   if (!got.ok) fail('ticket', `could not read ${ticket} back: ${last(got.err)}`);
-  if (status.trim().toLowerCase() === 'in review') {
-    say('ticket', `${ticket} is already In review`);
-  } else {
-    const moved = door('status', '--task', ticket, '--status', 'In review');
-    if (!moved.ok) fail('ticket', `moving ${ticket} from "${status}" to In review: ${last(moved.err || moved.out)}`);
-    say('ticket', `${ticket} moved to In review (status read it back)`);
-  }
+  const status = ((/^status:\s+(.+)$/m.exec(got.out) || [])[1] || '').trim();
+  // Never moved here: a lane may already have reviewed it, and Ready to launch is Dane's.
+  say('ticket', status.toLowerCase() === 'in review'
+    ? `${ticket} is In review`
+    : `${ticket} is in "${status}", where a lane has put it since; left there`);
 }
 
 // ── 3. install ─────────────────────────────────────────────────────────────
