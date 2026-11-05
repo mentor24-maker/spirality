@@ -25,6 +25,7 @@
     "doctor": "node scripts/doctor.mjs",
     "tracker:signins": "node scripts/with_doppler.mjs node --no-warnings tracker/signins.mjs",
     "tracker:switch-check": "node scripts/with_doppler.mjs node --no-warnings tracker/switchCheck.mjs",
+    "onboard:lanes": "node scripts/onboard/lanes.mjs",
     "check:syntax": "node scripts/check_syntax.mjs",
     "check:secrets": "node scripts/check_secrets.mjs",
     "test": "node --test scripts/lib/*.test.mjs scripts/tracker/*.test.mjs lib/*.test.mjs lib/*.test.js tracker/*.test.mjs",
