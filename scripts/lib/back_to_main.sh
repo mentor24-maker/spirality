@@ -34,6 +34,11 @@ back_to_main_if_merged() {
     *) echo "could not tell whether $branch still exists on origin (git ls-remote exit $code) — staying on it"; return 1 ;;
   esac
   if git checkout -q main 2>/dev/null; then
+    # The local main may be from before the setup branch (no runner scripts
+    # yet). Bring it up to origin's now, so a failed pull after this step
+    # still leaves the scripts launchd runs next; a failure here changes
+    # nothing and the runner's own pull follows.
+    git fetch -q origin main 2>/dev/null && git merge -q --ff-only origin/main 2>/dev/null
     echo "$branch no longer exists on origin and the tree is clean — back to main"
     return 0
   fi

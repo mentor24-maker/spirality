@@ -20,3 +20,12 @@ and GitHub has deleted it, they put the checkout back on `main` by
 themselves, so the lanes never keep running the setup branch's old code. They
 only do it when nothing is uncommitted and GitHub has clearly said the branch
 is gone.
+
+After review sent it back, four gaps closed. Running the step again after a
+lane failed used to print "Done" without looking at the lanes; now it judges
+each lane's newest pass, so a lane that stood down still counts as failed. A
+second run after a half-finished one reuses the ticket it already filed
+instead of filing a twin. A relay pass that started and never finished no
+longer passes as "working". And a wait time that is not a number is refused
+up front instead of making the step wait forever. When the runners go back to
+`main`, they also bring it up to date straight away.

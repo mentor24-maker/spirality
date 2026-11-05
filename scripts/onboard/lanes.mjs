@@ -16,13 +16,15 @@
  *   1. checkout  the product's MAIN checkout (never a worktree: the runners
  *                refuse one) moves to the setup branch, clean and up to date.
  *   2. ticket    one ticket in the product's own tracker project, named as
- *                the pull request is; the PR body gets its `Ticket:` line;
+ *                the pull request is (one already filed under that name is
+ *                reused, never a second); the PR body gets its `Ticket:` line;
  *                `pr-opened` records the PR; the ticket goes to In review.
  *                All before any lane exists, so no lane sees it half-filed.
  *   3. install   the product's own scripts/install_loop_runner.sh.
  *   4. lanes     `--status` shows every lane loaded, and each lane's first
  *                pass did its lane's work rather than stand down
- *                (lib/onboardLanes.mjs, hold-up 14).
+ *                (lib/onboardLanes.mjs, hold-up 14). On a rerun with every
+ *                lane already loaded, each lane's newest pass is judged.
  *
  * The branch and pull request come from SP-110's copy step; SP-112's wizard
  * passes them in. When the pull request merges, the runners put the checkout
@@ -40,7 +42,7 @@ import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createRequire } from 'node:module';
 import { loadProjectConfig, CONFIG_FILE } from '../../lib/projectConfig.mjs';
-import { LANES, parseStatus, readPasses, judgeFirstPass, setupTicketBody, withLine } from '../../lib/onboardLanes.mjs';
+import { LANES, parseStatus, readPasses, judgeFirstPass, rerunSince, ticketsNamed, waitMinutesFrom, setupTicketBody, withLine } from '../../lib/onboardLanes.mjs';
 
 const require = createRequire(import.meta.url);
 const { findTicketId, ticketLine } = require('../../lib/clickupTicketLink.js');
@@ -56,7 +58,12 @@ if (!checkoutArg || !branch || !prArg) {
   process.exit(2);
 }
 const dryRun = flag('dry-run');
-const waitMinutes = Number(arg('wait-minutes') || 10);
+const waitArg = arg('wait-minutes');
+const waitMinutes = flag('wait-minutes') && (waitArg === undefined || waitArg.startsWith('--')) ? null : waitMinutesFrom(waitArg);
+if (waitMinutes === null) {
+  console.error(`--wait-minutes needs a number of minutes greater than 0 (got ${waitArg === undefined || waitArg.startsWith('--') ? 'no value' : `"${waitArg}"`})`);
+  process.exit(2);
+}
 const checkout = resolve(expandHome(checkoutArg));
 const rerun = `npm run onboard:lanes -- ${argv.join(' ')}`;
 
@@ -142,19 +149,35 @@ if (prNow.state !== 'OPEN') fail('ticket', `PR #${prNumber} is ${prNow.state}, n
 if (prNow.headRefName !== branch) fail('ticket', `PR #${prNumber} is from ${prNow.headRefName}, not ${branch}`);
 
 let ticket = findTicketId(prNow.body, linkOpts);
+// A rerun after the Ticket: line failed to reach the PR: the ticket is
+// already filed, under the PR's exact name. Find it rather than file a second.
+let existing = [];
+if (!ticket) {
+  const listed = door('queue');
+  if (!listed.ok) fail('ticket', `could not list ${config.productSlug}'s tickets to look for one already filed: ${last(listed.err || listed.out)}`);
+  existing = ticketsNamed(listed.out, prNow.title);
+  if (existing.length > 1) fail('ticket', `${config.productSlug}'s project already has ${existing.length} tickets named "${prNow.title}" (${existing.join(', ')}); close the extra ones, then rerun`);
+}
 if (ticket) {
   say('ticket', `${ticket} is already linked from PR #${prNumber}`);
 } else if (dryRun) {
-  say('ticket', `would file "${prNow.title}" in ${config.productSlug}'s project and add its Ticket: line to PR #${prNumber}`);
+  say('ticket', existing.length
+    ? `would add ${existing[0]}'s Ticket: line to PR #${prNumber} (already filed as "${prNow.title}")`
+    : `would file "${prNow.title}" in ${config.productSlug}'s project and add its Ticket: line to PR #${prNumber}`);
 } else {
   const scratch = mkdtempSync(join(tmpdir(), 'onboard-lanes-'));
   try {
-    const asked = arg('asked-file') ? readFileSync(expandHome(arg('asked-file')), 'utf8') : '';
-    writeFileSync(join(scratch, 'body.md'), setupTicketBody({ productSlug: config.productSlug, githubRepo: config.githubRepo, prUrl, branch, asked }));
-    const made = door('task', '--name', prNow.title, '--body-file', join(scratch, 'body.md'), '--id-out', join(scratch, 'id'));
-    if (!made.ok || !existsSync(join(scratch, 'id'))) fail('ticket', `filing the setup ticket failed: ${last(made.err || made.out)}`);
-    ticket = readFileSync(join(scratch, 'id'), 'utf8').trim();
-    say('ticket', `filed ${ticket}, "${prNow.title}", read back`);
+    if (existing.length) {
+      ticket = existing[0];
+      say('ticket', `${ticket} is already filed as "${prNow.title}"; not filing a second`);
+    } else {
+      const asked = arg('asked-file') ? readFileSync(expandHome(arg('asked-file')), 'utf8') : '';
+      writeFileSync(join(scratch, 'body.md'), setupTicketBody({ productSlug: config.productSlug, githubRepo: config.githubRepo, prUrl, branch, asked }));
+      const made = door('task', '--name', prNow.title, '--body-file', join(scratch, 'body.md'), '--id-out', join(scratch, 'id'));
+      if (!made.ok || !existsSync(join(scratch, 'id'))) fail('ticket', `filing the setup ticket failed: ${last(made.err || made.out)}`);
+      ticket = readFileSync(join(scratch, 'id'), 'utf8').trim();
+      say('ticket', `filed ${ticket}, "${prNow.title}", read back`);
+    }
     writeFileSync(join(scratch, 'pr-body.md'), withLine(prNow.body, ticketLine(ticket, linkOpts)));
     const edited = run('gh', ['pr', 'edit', prNumber, '--repo', prRepo, '--body-file', join(scratch, 'pr-body.md')]);
     if (!edited.ok) fail('ticket', `${ticket} is filed, but adding its Ticket: line to PR #${prNumber} failed: ${last(edited.err)}`);
@@ -194,7 +217,7 @@ const statusNow = () => {
   return { text: s.out, jobs: parseStatus(s.out) };
 };
 const notLoaded = (jobs) => LANES.filter((l) => !jobs[l]?.installed || !jobs[l]?.loaded);
-let since = new Date();
+const installedAt = new Date();
 const before = notLoaded(statusNow().jobs);
 if (dryRun) {
   say('install', before.length ? `would install the lanes (not loaded now: ${before.join(', ')})` : 'every lane is already loaded; would leave them');
@@ -202,8 +225,7 @@ if (dryRun) {
   process.exit(0);
 }
 if (!before.length) {
-  say('install', 'every lane is already installed and loaded; not reinstalling');
-  since = null;
+  say('install', 'every lane is already installed and loaded; not reinstalling (judging each lane\'s newest pass instead)');
 } else {
   const inst = run('bash', [installer]);
   if (!inst.ok) fail('install', `install_loop_runner.sh exit ${inst.code}: ${last(inst.err || inst.out)}`);
@@ -215,20 +237,20 @@ const after = statusNow();
 const missing = notLoaded(after.jobs);
 if (missing.length) fail('lanes', `--status shows these lanes not installed or not loaded: ${missing.join(', ')}`);
 say('lanes', `--status: ${LANES.join(', ')} all loaded`);
-if (!since) {
-  console.log(`\nDone: ${ticket} is In review in ${config.productSlug}'s project, and its lanes were already running.`);
-  process.exit(0);
-}
 
 const logDir = expandHome(config.logDir);
 const logOf = (lane) => join(logDir, `${config.productSlug}-${lane}.log`);
+const passesOf = (lane) => readPasses(existsSync(logOf(lane)) ? readFileSync(logOf(lane), 'utf8') : '', lane);
+// Fresh install: each lane's first pass after it. Rerun with every lane
+// already loaded: each lane's newest pass, so a lane that stood down before
+// is checked again rather than taken on trust (rule 6).
+const sinceOf = Object.fromEntries(LANES.map((l) => [l, before.length ? installedAt : rerunSince(passesOf(l))]));
 const deadline = Date.now() + waitMinutes * 60 * 1000;
 const verdicts = {};
 for (;;) {
   for (const lane of LANES) {
     if (verdicts[lane]?.verdict === 'ok' || verdicts[lane]?.verdict === 'failed') continue;
-    const text = existsSync(logOf(lane)) ? readFileSync(logOf(lane), 'utf8') : '';
-    verdicts[lane] = judgeFirstPass(readPasses(text, lane), lane, { since });
+    verdicts[lane] = judgeFirstPass(passesOf(lane), lane, { since: sinceOf[lane] });
     if (verdicts[lane].verdict !== 'waiting') say('lanes', `${lane}: ${verdicts[lane].verdict === 'ok' ? 'ok' : 'FAILED'}: ${verdicts[lane].why}`);
   }
   const failed = LANES.filter((l) => verdicts[l].verdict === 'failed');

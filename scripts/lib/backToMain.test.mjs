@@ -66,6 +66,21 @@ test('a branch gone from origin, with a clean tree, goes back to main and says s
   assert.match(r.out, /^setup no longer exists on origin and the tree is clean — back to main$/);
 });
 
+test('back on main, the checkout is at origin\'s main, not the stale one from before the setup branch', () => {
+  const { dir, origin, checkout } = scratch();
+  // The setup branch merges into main at origin, then is deleted.
+  const merger = join(dir, 'merger');
+  git(dir, 'clone', '-q', origin, merger);
+  git(merger, 'merge', '-q', '--ff-only', 'origin/setup');
+  git(merger, 'push', '-q', 'origin', 'main');
+  git(origin, 'branch', '-D', 'setup');
+  const r = run(checkout);
+  assert.equal(r.status, 0, r.err);
+  assert.equal(r.branch, 'main');
+  assert.equal(git(checkout, 'rev-parse', 'HEAD'), git(origin, 'rev-parse', 'main'));
+  assert.equal(readFileSync(join(checkout, 'b.txt'), 'utf8'), 'two\n');
+});
+
 test('a branch gone from origin with a dirty tree is left alone, and the change is kept', () => {
   const { origin, checkout } = scratch();
   git(origin, 'branch', '-D', 'setup');
