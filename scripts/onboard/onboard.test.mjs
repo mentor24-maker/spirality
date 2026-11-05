@@ -1,13 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { validateProjectConfig } from '../../lib/projectConfig.mjs';
 import { settingsDraft, resolveAnswers } from '../../lib/onboardAnswers.mjs';
 import {
   DANE_FIELDS, STEPS, answerValue, fieldNamed, loggedDone, mainVerifyVerdict, mountainStamp, onboard,
-  parseOnboardArgs, pasteBlock, protectionDropped, protectionGaps, protectionRequest, rerunCommand, shellQuote,
+  cloneAddress, parseOnboardArgs, pasteBlock, protectionDropped, protectionGaps, protectionRequest, rerunCommand, shellQuote,
   unanswered, worktreesOnBranch,
 } from './onboard.mjs';
 
@@ -114,6 +114,13 @@ test('worktreesOnBranch finds the worktrees holding a branch, never the checkout
   assert.deepEqual(worktreesOnBranch('', 'x'), []);
 });
 
+test('cloneAddress takes only the kind of address from the home\'s origin, never its sign-in', () => {
+  assert.equal(cloneAddress('https://x-access-token:SECRET@github.com/mentor24-maker/spirality.git', 'mentor24-maker/PressPlay'), 'https://github.com/mentor24-maker/pressplay.git');
+  assert.equal(cloneAddress('git@github.com:mentor24-maker/spirality.git', 'mentor24-maker/pressplay'), 'git@github.com:mentor24-maker/pressplay.git');
+  assert.equal(cloneAddress('ssh://git@github.com/mentor24-maker/spirality', 'mentor24-maker/pressplay'), 'git@github.com:mentor24-maker/pressplay.git');
+  assert.equal(cloneAddress(null, 'mentor24-maker/pressplay'), 'https://github.com/mentor24-maker/pressplay.git');
+});
+
 test('rerunCommand keeps every flag the run was started with', () => {
   assert.equal(rerunCommand({ product: 'pressplay', allowReplace: false, mergeWaitMinutes: 60 }), 'npm run onboard -- --product pressplay');
   assert.equal(rerunCommand({ product: 'pressplay', allowReplace: true, mergeWaitMinutes: 240 }), 'npm run onboard -- --product pressplay --allow-replace --merge-wait-minutes 240');
@@ -150,9 +157,12 @@ function makeWorld(t) {
     trackerUrl: 'http://mac-mini.local:4180', trackerApiUrl: 'http://127.0.0.1:4180',
   });
   const homeRoot = join(dir, 'WebApps', 'spirality');
+  // The product is not on this Mac yet: the clone step makes its checkout.
   const checkout = join(dir, 'WebApps', 'pressplay');
-  mkdirSync(join(checkout, '.git'), { recursive: true });
-  writeFileSync(join(checkout, '.git', 'HEAD'), 'ref: refs/heads/main\n');
+  const makeCheckout = () => {
+    mkdirSync(join(checkout, '.git'), { recursive: true });
+    writeFileSync(join(checkout, '.git', 'HEAD'), 'ref: refs/heads/main\n');
+  };
 
   // What the world is like; a test sets `fail` to the step that breaks.
   const w = {
@@ -162,6 +172,9 @@ function makeWorld(t) {
     calls: [], asked: [], paused: 0, printed: [],
     // onboard:copy's worktree, on the setup branch; true once copy has run (as the real one keeps it).
     setupWorktree: false, worktreeRemoveRefused: false,
+    // The tracker home's origin, with a sign-in token in it as a real one can carry.
+    homeOrigin: 'https://x-access-token:SECRET-TOKEN@github.com/mentor24-maker/spirality.git',
+    clonedFrom: null, cloneOrigin: 'https://github.com/mentor24-maker/pressplay.git', cloneBranch: 'main', cloneDirty: '',
   };
   const setupWorktreePath = join(homeConfig.logDir, 'onboard', 'pressplay-setup');
   const settingsFile = join(homeConfig.logDir, 'onboard', 'pressplay-settings', 'spirality.project.json');
@@ -174,10 +187,20 @@ function makeWorld(t) {
   const no = (err = 'no', code = 1) => ({ code, out: '', err });
   const breaks = (step) => w.fail === step;
 
-  const run = (cmd, args) => {
+  const run = (cmd, args, o = {}) => {
     const line = [cmd, ...args].join(' ');
     w.calls.push(line);
     if (cmd === 'git') {
+      if (args[0] === 'remote' && o.cwd === homeRoot) return w.homeOrigin == null ? no('error: No such remote', 2) : ok(w.homeOrigin);
+      if (args[0] === 'remote' && o.cwd === checkout) return ok(w.cloneOrigin);
+      if (args[0] === 'clone') {
+        if (breaks('clone')) return no('remote: Repository not found.\nfatal: repository not found', 128);
+        w.clonedFrom = args.at(-2);
+        makeCheckout();
+        return ok();
+      }
+      if (args[0] === 'rev-parse' && args[1] === '--abbrev-ref') return ok(w.cloneBranch);
+      if (args[0] === 'status') return ok(w.cloneDirty);
       if (args[0] === 'fetch') return ok();
       if (args[0] === 'show') return w.merged ? ok(JSON.stringify(settings('9'))) : no('fatal: path does not exist', 128);
       if (args[0] === 'merge-base') return w.merged ? ok() : no();
@@ -258,6 +281,7 @@ function makeWorld(t) {
     },
     pause: async () => { w.paused += 1; w.signinsMade = true; w.dopplerProject = true; return true; },
     print: (line) => w.printed.push(line),
+    exists: (p) => existsSync(p),
     readText: (p) => { try { return readFileSync(p, 'utf8'); } catch { return null; } },
     writeText: (p, text) => writeFileSync(p, text),
     appendText: (p, text) => { mkdirSync(dirname(p), { recursive: true }); appendFileSync(p, text); },
@@ -276,7 +300,7 @@ function makeWorld(t) {
     mkdirSync(dirname(answersPath), { recursive: true });
     writeFileSync(answersPath, JSON.stringify({ productSlug: 'pressplay', productName: 'PressPlay', githubRepo: 'mentor24-maker/pressplay', trackerPrefix: 'PP', mergePhrases: null, autoMergeLanes: [], extraGovernancePaths: null, description: 'PressPlay plays things.', checkoutDir: checkout }));
   };
-  return { w, go, homeOpts, run, reset, setupWorktreePath, answersFile, settingsFile, seedAnswers, logFile: join(homeConfig.logDir, 'pressplay-onboard.log') };
+  return { w, go, homeOpts, run, reset, checkout, makeCheckout, setupWorktreePath, answersFile, settingsFile, seedAnswers, logFile: join(homeConfig.logDir, 'pressplay-onboard.log') };
 }
 
 const out = (w) => w.printed.join('\n');
@@ -318,8 +342,9 @@ test('a rerun once everything is done says each step is already done and asks no
 });
 
 test('a product already set up (its settings on main, main protected) with an answers file: every step already done, nothing asked', async (t) => {
-  const { w, go, seedAnswers } = makeWorld(t);
+  const { w, go, seedAnswers, makeCheckout } = makeWorld(t);
   seedAnswers();
+  makeCheckout();
   w.merged = true;
   w.protection = GOOD_PROTECTION;
   assert.equal(await go(), 0, out(w));
@@ -328,8 +353,8 @@ test('a product already set up (its settings on main, main protected) with an an
 });
 
 // A failure at each step, then a rerun that resumes there.
-const LATER = { look: 'onboard:look', settings: 'onboard:settings write', copy: 'onboard:copy', lanes: 'onboard:lanes', protect: '-X PUT' };
-for (const failing of ['look', 'settings', 'copy', 'lanes', 'protect']) {
+const LATER = { look: 'onboard:look', clone: 'git clone', settings: 'onboard:settings -- write', copy: 'onboard:copy', lanes: 'onboard:lanes', protect: '-X PUT' };
+for (const failing of ['look', 'clone', 'settings', 'copy', 'lanes', 'protect']) {
   test(`a failure at ${failing}: FAILED, nothing after it runs, and the rerun resumes there asking nothing again`, async (t) => {
     const { w, go, reset } = makeWorld(t);
     w.fail = failing;
@@ -458,4 +483,58 @@ test('main\'s stricter protection is named before the PUT switches it off', asyn
   assert.equal(await go(), 0, out(w));
   const said = w.printed.findIndex((l) => /switches it off: linear history required/.test(l));
   assert.ok(said >= 0, out(w));
+});
+
+// --- The clone step (SP-119) ---------------------------------------------
+
+test('a product with no checkout: cloned from main over the home\'s kind of address, read back, and the run carries on', async (t) => {
+  const { w, go, checkout, logFile } = makeWorld(t);
+  assert.equal(await go(), 0, out(w));
+  assert.equal(w.clonedFrom, 'https://github.com/mentor24-maker/pressplay.git');
+  const clone = w.calls.findIndex((c) => c.startsWith('git clone'));
+  assert.equal(w.calls[clone], `git clone --quiet --branch main https://github.com/mentor24-maker/pressplay.git ${checkout}`);
+  assert.ok(clone > w.calls.findIndex((c) => c.includes('onboard:look')), 'after the look');
+  assert.ok(clone < w.calls.findIndex((c) => c.includes('onboard:settings -- write')), 'before the settings file');
+  const after = w.calls.slice(clone + 1);
+  for (const readBack of ['git remote get-url origin', 'git rev-parse --abbrev-ref HEAD', 'git status --porcelain']) assert.ok(after.includes(readBack), readBack);
+  assert.match(out(w), /^clone\s+.*cloned into .*read back: origin mentor24-maker\/pressplay, a clean main/m);
+  assert.match(readFileSync(logFile, 'utf8'), /\| clone \| done \|/);
+  assert.ok(!out(w).includes('SECRET-TOKEN') && !readFileSync(logFile, 'utf8').includes('SECRET-TOKEN'), 'the home origin\'s token is never printed or logged');
+});
+
+test('the home\'s origin over ssh: the clone is over ssh too', async (t) => {
+  const { w, go } = makeWorld(t);
+  w.homeOrigin = 'git@github.com:mentor24-maker/spirality.git';
+  assert.equal(await go(), 0, out(w));
+  assert.equal(w.clonedFrom, 'git@github.com:mentor24-maker/pressplay.git');
+});
+
+test('a checkout that is there: the clone step is skipped and nothing is cloned', async (t) => {
+  const { w, go, makeCheckout } = makeWorld(t);
+  makeCheckout();
+  assert.equal(await go(), 0, out(w));
+  assert.match(out(w), /^clone\s+already done \(.* is there\)/m);
+  assert.ok(!w.calls.some((c) => c.startsWith('git clone')));
+});
+
+for (const [what, set, seen] of [
+  ['an origin that is not the repository', (w) => { w.cloneOrigin = 'https://github.com/someone/else.git'; }, /does not read back with origin mentor24-maker\/pressplay/],
+  ['a branch that is not main', (w) => { w.cloneBranch = 'trunk'; }, /reads back on trunk, not main/],
+  ['changes in it', (w) => { w.cloneDirty = ' M x.js'; }, /does not read back as a clean main/],
+]) {
+  test(`a clone that reads back with ${what}: FAILED at clone, nothing after it runs`, async (t) => {
+    const { w, go } = makeWorld(t);
+    set(w);
+    assert.equal(await go(), 1, out(w));
+    assert.match(out(w), new RegExp(`^FAILED: clone: .*${seen.source}`, 'm'));
+    assert.ok(!w.calls.some((c) => c.includes('onboard:settings')), 'settings did not run');
+    assert.ok(!out(w).includes('Done:'));
+  });
+}
+
+test('a clone that fails: FAILED at clone saying what git said', async (t) => {
+  const { w, go } = makeWorld(t);
+  w.fail = 'clone';
+  assert.equal(await go(), 1, out(w));
+  assert.match(out(w), /^FAILED: clone: git clone of mentor24-maker\/pressplay into .* failed: .*repository not found/m);
 });
