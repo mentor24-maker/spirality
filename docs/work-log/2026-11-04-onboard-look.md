@@ -27,3 +27,10 @@ tell". The checkout line also refuses a folder that sits inside some other
 checkout, `--product normie` refuses a file written for another product, and
 the look and `npm run doctor` now share one way of deciding two GitHub
 addresses are the same repository.
+
+Second review round: when GitHub cannot say which branch is the main one, the
+checkout line now says "could not tell" instead of "ready" for whatever branch
+the folder happens to be on. An empty clone (a checkout with no commit yet) is
+now called that, not "not a git checkout". A Node range written with a space
+after its sign (`>= 22.12`, which npm accepts) is read instead of refused, and
+a GitHub address ending `.git/` is recognised as the same repository.

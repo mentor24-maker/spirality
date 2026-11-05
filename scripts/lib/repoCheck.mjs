@@ -17,7 +17,7 @@
 export function normalRepo(value) {
   return String(value ?? '').trim()
     .replace(/^git@github\.com:/i, '').replace(/^(?:https?|ssh):\/\/(?:[^@/]+@)?github\.com\//i, '')
-    .replace(/\.git$/i, '').replace(/\/+$/, '').toLowerCase();
+    .replace(/\/+$/, '').replace(/\.git$/i, '').replace(/\/+$/, '').toLowerCase();
 }
 
 /**

@@ -193,16 +193,26 @@ export function readCheckout({ dir, present, head, top, origin, porcelain }, { r
   if (!present) return row(item, WILL_DO, 'absent; the setup clones it');
   const broke = [head, top, origin, porcelain].find((r) => r.error);
   if (broke) return row(item, UNKNOWN, `could not run git (${broke.error.code})`);
-  if (head.status !== 0) return row(item, BLOCKED, 'the folder is there but is not a git checkout; move it aside or name another folder in checkoutDir');
-  if (top.status !== 0) return row(item, UNKNOWN, lastLines(top.stderr, 1)[0] || `git rev-parse --show-toplevel exited ${top.status}`);
+  // The top folder first: it answers in an empty clone too, where HEAD names
+  // no commit yet and `rev-parse --abbrev-ref HEAD` fails.
+  if (top.status !== 0) {
+    if (/not a git repository/i.test(top.stderr ?? '')) return row(item, BLOCKED, 'the folder is there but is not a git checkout; move it aside or name another folder in checkoutDir');
+    return row(item, UNKNOWN, lastLines(top.stderr, 1)[0] || `git rev-parse --show-toplevel exited ${top.status}`);
+  }
   const topDir = top.stdout.trim();
   if (!samePath(topDir, dir)) return row(item, BLOCKED, `the folder is inside the checkout at ${topDir}, not a checkout of its own; name a folder of its own in checkoutDir`);
   if (origin.status !== 0) return row(item, BLOCKED, 'the checkout has no "origin" remote, so it is not known to be this repository');
   const remote = origin.stdout.trim();
   if (normalRepo(remote) !== normalRepo(repo)) return row(item, BLOCKED, `it is a checkout of ${remote}, not ${repo}`);
   if (porcelain.status !== 0) return row(item, UNKNOWN, lastLines(porcelain.stderr, 1)[0] || `git status exited ${porcelain.status}`);
+  if (head.status !== 0) {
+    return row(item, BLOCKED, `it is a checkout of ${repo} with no commit on it yet (an empty clone), not a clean ${branch ?? 'main branch'}; move it aside and the setup clones it again`);
+  }
   const onBranch = head.stdout.trim();
-  if (branch && onBranch !== branch) return row(item, BLOCKED, `it is on branch ${onBranch}, not ${branch}`);
+  if (!branch) {
+    return row(item, UNKNOWN, `which branch is main is not known, because the GitHub row could not read it; the checkout is on ${onBranch}`);
+  }
+  if (onBranch !== branch) return row(item, BLOCKED, `it is on branch ${onBranch}, not ${branch}`);
   const changes = lastLines(porcelain.stdout, Infinity).length;
   if (changes) return row(item, BLOCKED, `it has ${changes} uncommitted change(s); a loop's checkout must be a clean ${onBranch}`);
   return row(item, READY, `a clean ${onBranch} of ${repo}`);

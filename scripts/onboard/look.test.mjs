@@ -115,7 +115,19 @@ test('the checkout: absent will do; a clean main of the repository is ready; any
   assert.match(readCheckout({ ...good, head: ok('feature\n') }, at).why, /on branch feature, not main/);
   assert.match(readCheckout({ ...good, porcelain: ok(' M a.js\n?? b.js\n') }, at).why, /2 uncommitted change/);
   assert.match(readCheckout({ ...good, origin: ok('https://github.com/someone/else.git') }, at).why, /checkout of .*someone\/else\.git, not mentor24-maker\/normie/);
-  assert.match(readCheckout({ ...good, head: failed(128, 'fatal: not a git repository') }, at).why, /not a git checkout/);
+  const notGit = failed(128, 'fatal: not a git repository (or any of the parent directories): .git');
+  assert.match(readCheckout({ ...good, head: notGit, top: notGit, origin: notGit, porcelain: notGit }, at).why, /not a git checkout/);
+  // An empty clone: the top folder answers, HEAD names no commit yet. It is a checkout, just not a clean main.
+  const unborn = readCheckout({ ...good, head: failed(128, "fatal: ambiguous argument 'HEAD': unknown revision") }, at);
+  assert.equal(unborn.verdict, BLOCKED);
+  assert.match(unborn.why, /no commit on it yet \(an empty clone\)/);
+  assert.doesNotMatch(unborn.why, /not a git checkout/);
+  // GitHub could not say which branch is main: the checkout's branch cannot be judged, so it is never "ready".
+  for (const head of [ok('feature-x\n'), ok('main\n')]) {
+    const unknown = readCheckout({ ...good, head }, { ...at, branch: null });
+    assert.equal(unknown.verdict, UNKNOWN);
+    assert.match(unknown.why, /which branch is main is not known.*the checkout is on (feature-x|main)/);
+  }
   assert.equal(readCheckout({ ...good, porcelain: failed(128, 'fatal: index broken') }, at).verdict, UNKNOWN);
   // A folder inside another checkout answers every git question for that checkout: not a checkout of its own.
   const inside = readCheckout({ ...good, top: ok('/x\n') }, at);
