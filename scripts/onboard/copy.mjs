@@ -162,7 +162,7 @@ for (const f of all) console.log(`  ${f.to.padEnd(width)}  ${f.kind.padEnd(7)}  
 console.log(`\n  ${all.filter((f) => f.status === 'identical').length} identical, ${all.filter((f) => f.status === 'new').length} new, ${all.filter((f) => f.status === 'replaces').length} replace what the product has`);
 if (haveVerify) console.log('  The product already has a CI job named verify; no workflow is added.');
 console.log(verify.add
-  ? `  package.json gets "verify": "${verify.add}", the same thing CI runs.`
+  ? `  package.json ${npm.added.includes('verify') ? 'gets' : 'already has'} "verify": "${verify.add}", the same thing CI runs.`
   : `  package.json already has its own verify ("${verify.own}"); it is kept as it is.`);
 if (settingsText == null) console.log('  No --config given, so the settings file is not compared.');
 
