@@ -7,11 +7,17 @@
  * tracker sign-in. Read-only: nothing here writes the field.
  */
 
-/** `owner/name`, from either that or its https://github.com/ address, lower case (GitHub ignores case). */
-function normalRepo(value) {
-  return String(value).trim()
-    .replace(/^https:\/\/github\.com\//i, '').replace(/\.git$/i, '').replace(/\/$/, '')
-    .toLowerCase();
+/**
+ * `owner/name`, lower case (GitHub ignores case), from any form a GitHub
+ * repository is written in: `owner/name`, its https:// address, or a git
+ * remote (`git@github.com:owner/name.git`, `ssh://git@github.com/...`).
+ * The one normaliser: `npm run doctor`'s repo-check and the setup look's
+ * checkout row both use it, so the two cannot disagree on what is the same.
+ */
+export function normalRepo(value) {
+  return String(value ?? '').trim()
+    .replace(/^git@github\.com:/i, '').replace(/^(?:https?|ssh):\/\/(?:[^@/]+@)?github\.com\//i, '')
+    .replace(/\/+$/, '').replace(/\.git$/i, '').replace(/\/+$/, '').toLowerCase();
 }
 
 /**
