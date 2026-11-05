@@ -171,7 +171,7 @@ function makeWorld(t) {
     dir, homeConfig, homeRoot, checkout, fail: null,
     signinsMade: false, prOpen: false, ticket: null, lanesLoaded: false, merged: false,
     protection: null, mergeAfterPolls: 1, polls: 0, dopplerProject: false,
-    calls: [], asked: [], paused: 0, printed: [],
+    calls: [], asked: [], paused: 0, printed: [], signinsEnv: [],
     // onboard:copy's worktree, on the setup branch; true once copy has run (as the real one keeps it).
     setupWorktree: false, worktreeRemoveRefused: false,
     // The tracker home's origin, with a sign-in token in it as a real one can carry.
@@ -231,7 +231,13 @@ function makeWorld(t) {
         writeFileSync(settingsFile, JSON.stringify(settings('9')));
         return ok();
       }
-      if (script === 'tracker:signins') return w.signinsMade ? ok('all answer as themselves') : no('Could not find requested project');
+      if (script === 'tracker:signins') {
+        // As the real check does: a guest product's settings name no
+        // trackerDataDir, so without TRACKER_DB there is no database to read.
+        w.signinsEnv.push(o.env?.TRACKER_DB ?? null);
+        if (o.env?.TRACKER_DB !== join(homeConfig.trackerDataDir, 'tracker.db')) return no('The project config names no trackerDataDir, and TRACKER_DB is not set: there is no tracker database to use.');
+        return w.signinsMade ? ok('all answer as themselves') : no('Could not find requested project');
+      }
       if (script === 'onboard:copy') {
         if (breaks('copy')) return no();
         w.prOpen = true;
@@ -409,6 +415,16 @@ test('a failure at signins: the block ran but the sign-ins still do not answer â
   assert.equal(w.paused, 1, 'the paste block is shown again');
   assert.equal(w.asked.length, 0);
   assert.match(out(w), /^settings\s+already done/m);
+});
+
+test('the sign-ins check is given the tracker home\'s database, so a run whose sign-ins exist passes without TRACKER_DB in the shell', async (t) => {
+  const { w, go } = makeWorld(t);
+  w.signinsMade = true;
+  assert.equal(await go(), 0, out(w));
+  assert.match(out(w), /^signins\s+already done/m);
+  assert.equal(w.paused, 0, 'no paste block: the sign-ins were already there');
+  assert.ok(w.signinsEnv.length > 0, 'the check ran');
+  for (const db of w.signinsEnv) assert.equal(db, join(w.homeConfig.trackerDataDir, 'tracker.db'));
 });
 
 test('no Terminal to wait in at the paste block: STOPPED at signins, the block still printed', async (t) => {

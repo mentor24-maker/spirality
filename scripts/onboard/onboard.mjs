@@ -523,7 +523,10 @@ export async function onboard(opts, deps) {
     begin(step);
     if (setup.on) skip(step, `the setup is merged: ${setup.why}`);
     else {
-      const check = () => npm('tracker:signins', ['check', '--config', settingsFile]);
+      // A product that does not host the tracker names no trackerDataDir, so
+      // the check is given the home's database, as the paste block's create is.
+      const trackerDb = join(expandHome(homeConfig.trackerDataDir), 'tracker.db');
+      const check = () => npm('tracker:signins', ['check', '--config', settingsFile], { env: { TRACKER_DB: trackerDb } });
       const fillMachine = () => {
         if (!machineUserPending(config)) return;
         const r = npm('onboard:settings', ['fill-machine-user', '--config', settingsFile]);
@@ -539,7 +542,6 @@ export async function onboard(opts, deps) {
         const exists = (args) => run('doppler', [...args, '--json', '--no-check-version']).code === 0;
         const projectExists = exists(['projects', 'get', answers.dopplerProject]);
         const configExists = projectExists && exists(['configs', 'get', answers.dopplerConfig, '--project', answers.dopplerProject]);
-        const trackerDb = join(expandHome(homeConfig.trackerDataDir), 'tracker.db');
         deps.print('');
         deps.print(`Your move, Dane (real secret values): paste this into a Terminal on the Mini. It ${projectExists ? '' : `makes the Doppler project "${answers.dopplerProject}", then `}makes ${answers.productName}'s tracker project and its sign-ins, and writes their keys into Doppler. No key is shown.`);
         deps.print('');
@@ -768,9 +770,10 @@ export function parseOnboardArgs(argv) {
   return { opts };
 }
 
-function realRun(cmd, args, { cwd, input, show, noPrompt } = {}) {
+function realRun(cmd, args, { cwd, input, show, env, noPrompt } = {}) {
   const r = spawnSync(cmd, args, {
     cwd, input, encoding: 'utf8',
+    env: env ? { ...process.env, ...env } : process.env,
     // A shown step inherits the Terminal's output, never its input under
     // --no-prompt (`input` is still piped when given).
     stdio: show ? [input != null ? 'pipe' : (noPrompt ? 'ignore' : 'inherit'), 'inherit', 'inherit'] : ['pipe', 'pipe', 'pipe'],
