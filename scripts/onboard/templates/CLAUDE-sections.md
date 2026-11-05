@@ -36,8 +36,8 @@ project; never mixed.
   never as Dane.
 - A pull request's title is the ticket's name, byte for byte, and its body
   carries the ticket link (`pr-opened` prints the exact line it accepts).
-  `{{checkCommand}}` is the definition of done; CI's `verify` check runs
-  it on every pull request.
+  `npm run verify` is the definition of done. {{verifyMeaning}} on every
+  pull request.
 - Two statuses are Dane's: `Needs your input` and `Ready to launch`. Only
   `ask` may set them, and no loop takes a ticket back out of them.
 
