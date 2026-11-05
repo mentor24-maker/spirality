@@ -95,7 +95,8 @@ test('the review and build skills tell a lane\'s pass it is the lane (hold-up 14
   for (const skill of ['loop-build', 'loop-review']) {
     const text = planned.find((f) => f.to === `.claude/skills/${skill}/SKILL.md`).content;
     assert.match(text, /LOOP_RUNNER_PID/, `${skill} checks the runner's mark`);
-    assert.match(text, new RegExp(`~/loop-logs/normie-${skill}\\.lock`), `${skill} names its own lock`);
+    assert.match(text, new RegExp(`\\$LOG_DIR/\\$SLUG-${skill}\\.lock`), `${skill} names its own lock`);
+    assert.match(text, /^- \*\*Whenever you stop for this reason\*\*, the first line of your report is\n {2}exactly `LANE STOOD DOWN: /m, `${skill} prints the fixed stand-down line`);
     assert.doesNotMatch(text, /Spirality (?:queue|development loop|has no scheduled runner)/, `${skill} still speaks as Spirality`);
   }
   const review = planned.find((f) => f.to === '.claude/skills/loop-review/SKILL.md').content;

@@ -37,6 +37,11 @@ echo "${LOOP_RUNNER_PID:-}"
   `loaded:   yes`, stop and report that the lane is running, unless Dane has
   asked for this pass by hand (then claim only through `claim`, which is
   guarded on the ticket's status). Otherwise carry on.
+- **Whenever you stop for this reason**, the first line of your report is
+  exactly `LANE STOOD DOWN: <why, in one line>`, and nothing else ever starts
+  with those words. The setup wizard reads a new product's first lane passes
+  for that line (`npm run onboard:lanes`), never for wording, because a pass
+  that is the lane says "I am the lane, not a second one" too.
 
 A ticket in `Building` is not proof that a pass is building it. A pass that
 dies (killed, out of time, out of session) leaves its ticket there, and
