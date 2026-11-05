@@ -194,6 +194,10 @@
       "to": "scripts/lib/launchd_reload.sh"
     },
     {
+      "from": "scripts/lib/claudeTrust.mjs",
+      "to": "scripts/lib/claudeTrust.mjs"
+    },
+    {
       "from": "scripts/loop_runner.sh",
       "to": "scripts/loop_runner.sh"
     },
