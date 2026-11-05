@@ -42,7 +42,7 @@ LAUNCHD_PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$HO
 config_value() { PATH="$LAUNCHD_PATH" node "$REPO/scripts/project_config.mjs" "$1"; }
 PREFIX="$(config_value launchdPrefix)"
 LOG_DIR="$(config_value logDir)"
-SLUG="$(config_value productSlug)"
+SLUG="$(config_value projectSlug)"
 # The tracker's settings. An empty port means this project runs no tracker
 # service here, and every tracker step below is skipped.
 TRACKER_PORT="$(config_value trackerPort)"

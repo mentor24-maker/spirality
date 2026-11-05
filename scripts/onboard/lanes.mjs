@@ -154,19 +154,19 @@ let ticket = findTicketId(prNow.body, linkOpts);
 let existing = [];
 if (!ticket && dryRun && onBranch !== branch) {
   // The checkout is still on the project's own main, which has no ticket door yet.
-  say('ticket', `would look in ${config.productSlug}'s project for a ticket already named "${prNow.title}" (the door is on ${branch}, not checked out in a dry run)`);
+  say('ticket', `would look in ${config.projectSlug}'s project for a ticket already named "${prNow.title}" (the door is on ${branch}, not checked out in a dry run)`);
 } else if (!ticket) {
   const listed = door('queue');
-  if (!listed.ok) fail('ticket', `could not list ${config.productSlug}'s tickets to look for one already filed: ${last(listed.err || listed.out)}`);
+  if (!listed.ok) fail('ticket', `could not list ${config.projectSlug}'s tickets to look for one already filed: ${last(listed.err || listed.out)}`);
   existing = ticketsNamed(listed.out, prNow.title);
-  if (existing.length > 1) fail('ticket', `${config.productSlug}'s project already has ${existing.length} tickets named "${prNow.title}" (${existing.join(', ')}); close the extra ones, then rerun`);
+  if (existing.length > 1) fail('ticket', `${config.projectSlug}'s project already has ${existing.length} tickets named "${prNow.title}" (${existing.join(', ')}); close the extra ones, then rerun`);
 }
 if (ticket) {
   say('ticket', `${ticket} is already linked from PR #${prNumber}`);
 } else if (dryRun) {
   say('ticket', existing.length
     ? `would add ${existing[0]}'s Ticket: line to PR #${prNumber} (already filed as "${prNow.title}")`
-    : `would file "${prNow.title}" in ${config.productSlug}'s project and add its Ticket: line to PR #${prNumber}`);
+    : `would file "${prNow.title}" in ${config.projectSlug}'s project and add its Ticket: line to PR #${prNumber}`);
 } else {
   const scratch = mkdtempSync(join(tmpdir(), 'onboard-lanes-'));
   try {
@@ -177,7 +177,7 @@ if (ticket) {
       const askedFile = arg('asked-file') ? expandHome(arg('asked-file')) : null;
       if (askedFile && !existsSync(askedFile)) fail('ticket', `--asked-file ${askedFile} does not exist`);
       const asked = askedFile ? readFileSync(askedFile, 'utf8') : '';
-      writeFileSync(join(scratch, 'body.md'), setupTicketBody({ productSlug: config.productSlug, githubRepo: config.githubRepo, prUrl, branch, asked }));
+      writeFileSync(join(scratch, 'body.md'), setupTicketBody({ projectSlug: config.projectSlug, githubRepo: config.githubRepo, prUrl, branch, asked }));
       // Filed straight into In review: no lane is installed yet (that is the
       // next step), so nothing can take it half-filed, and it is never moved
       // again by this script. A rerun finds it in whatever status a lane has
@@ -245,7 +245,7 @@ if (missing.length) fail('lanes', `--status shows these lanes not installed or n
 say('lanes', `--status: ${LANES.join(', ')} all loaded`);
 
 const logDir = expandHome(config.logDir);
-const logOf = (lane) => join(logDir, `${config.productSlug}-${lane}.log`);
+const logOf = (lane) => join(logDir, `${config.projectSlug}-${lane}.log`);
 const passesOf = (lane) => readPasses(existsSync(logOf(lane)) ? readFileSync(logOf(lane), 'utf8') : '', lane);
 // Fresh install: each lane's first pass after it. Rerun with every lane
 // already loaded: each lane's newest pass, so a lane that stood down before
@@ -269,5 +269,5 @@ for (;;) {
   await new Promise((r) => setTimeout(r, 15000));
 }
 
-console.log(`\nDone: ${config.productSlug}'s lanes are running from ${branch}, and ${ticket} is In review in its project.`);
+console.log(`\nDone: ${config.projectSlug}'s lanes are running from ${branch}, and ${ticket} is In review in its project.`);
 console.log(`Its review lane reviews PR #${prNumber} and asks Dane to merge it; its relay merges it on his merge phrase.`);

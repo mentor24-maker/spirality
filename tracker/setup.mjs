@@ -20,6 +20,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { AnswersError, answersFile, onboardDir, resolveAnswers, slugFromName } from '../lib/onboardAnswers.mjs';
+import { ProjectConfigError, withProjectNames } from '../lib/projectConfig.mjs';
 import { answerValue, DANE_FIELDS, fieldNamed, shellQuote, STEPS } from '../scripts/onboard/onboard.mjs';
 
 /** A setup refusal: the HTTP status it answers with, a code, and a message. */
@@ -151,9 +152,16 @@ export function setupOf(setup, slug) {
   }
   const { state, error: stateError } = readState(homeConfig, slug);
   const command = setupCommand(setup, slug);
+  // The page reads the answers by their new names, also from a file written
+  // before the rename (resolveAnswers has already refused one that gives a
+  // field under both names with different values).
+  let answers = read.value;
+  try { answers = withProjectNames(answers, { file: aPath }); } catch (err) {
+    if (!(err instanceof ProjectConfigError)) throw err;
+  }
   return {
     product: slug,
-    answers: read.value,
+    answers,
     resolved,
     answersError,
     state,
@@ -222,11 +230,16 @@ export function saveAnswers(setup, slug, body) {
   if (existing.error) throw new SetupError(409, 'answers-unreadable', `${existing.error}; fix or remove it. Nothing was written.`);
   const raw = existing.value ?? {};
   if (typeof raw !== 'object' || Array.isArray(raw)) throw new SetupError(409, 'answers-unreadable', `${aPath} does not hold one JSON object; fix or remove it. Nothing was written.`);
-  if (Object.hasOwn(raw, 'productSlug') && raw.productSlug !== slug) {
-    throw new SetupError(409, 'answers-other-product', `${aPath} is for "${raw.productSlug}", not ${slug}. Nothing was written.`);
+  let named;
+  try { named = withProjectNames(raw, { file: aPath }); } catch (err) {
+    if (!(err instanceof ProjectConfigError)) throw err;
+    throw new SetupError(409, 'answers-unreadable', `${err.message}. Nothing was written.`);
+  }
+  if (Object.hasOwn(named, 'projectSlug') && named.projectSlug !== slug) {
+    throw new SetupError(409, 'answers-other-product', `${aPath} is for "${named.projectSlug}", not ${slug}. Nothing was written.`);
   }
   const typed = Object.fromEntries(Object.entries(body).map(([k, v]) => [k, formValue(known.get(k), v)]));
-  const next = { ...raw, productSlug: slug, ...typed };
+  const next = { ...named, projectSlug: slug, ...typed };
   try {
     resolveAnswers(next, { homeConfig, homeRoot, file: 'the answers' });
   } catch (err) {

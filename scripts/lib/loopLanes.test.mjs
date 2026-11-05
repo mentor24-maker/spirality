@@ -68,7 +68,7 @@ test('loop_runner.sh names its log, lock, sync lock and restart label from the s
     for (const f of ['project_config.mjs', 'run_with_time_limit.sh']) symlinkSync(join(REPO, 'scripts', f), join(scratch, 'scripts', f));
     const spirality = JSON.parse(readFileSync(join(REPO, 'spirality.project.json'), 'utf8'));
     writeFileSync(join(scratch, 'spirality.project.json'), JSON.stringify({
-      ...spirality, productSlug: 'normie', launchdPrefix: 'com.normie', logDir,
+      ...spirality, projectSlug: 'normie', launchdPrefix: 'com.normie', logDir,
     }));
     const fakeClaude = join(scratch, 'fake-claude');
     writeFileSync(fakeClaude, `#!/bin/bash\nls "${logDir}"\necho "Please run /login"\n`, { mode: 0o755 });

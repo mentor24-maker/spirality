@@ -17,9 +17,12 @@
  */
 
 import { homedir } from 'node:os';
-import { loadProjectConfig, ProjectConfigError, SCHEMA } from '../lib/projectConfig.mjs';
+import { loadProjectConfig, ProjectConfigError, SCHEMA, OLD_NAMES } from '../lib/projectConfig.mjs';
 
-const key = process.argv[2];
+// An old field name (`productSlug`) still answers, as its new one, so a
+// project's own copy of an older runner keeps working (SP-130).
+const asked = process.argv[2];
+const key = Object.hasOwn(OLD_NAMES, asked ?? '') ? OLD_NAMES[asked] : asked;
 if (!key || key === '--help' || !Object.hasOwn(SCHEMA, key)) {
   console.error(`usage: node scripts/project_config.mjs <key>\n  keys: ${Object.keys(SCHEMA).join(', ')}`);
   process.exit(2);

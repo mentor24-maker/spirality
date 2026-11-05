@@ -51,8 +51,8 @@ async function fixture({ mergePhrase, closePhrase, goPhrase } = {}) {
       operatorUserId: seed.operator.id, machineUserId: seed.loop.id,
       githubRepo: 'owner/repo', dopplerProject: 'proj', dopplerConfig: 'dev',
       launchdPrefix: 'com.example', logDir: '~/loop-logs', mergePhrases: ['merge'],
-      governancePaths: [], autoMergeLanes: [], operatorName: 'Dane', productSlug: slug,
-      legacyMachinePrefixes: [], productScripts: {}, tracker: 'api', trackerUrl: url,
+      governancePaths: [], autoMergeLanes: [], operatorName: 'Dane', projectSlug: slug,
+      legacyMachinePrefixes: [], projectScripts: {}, tracker: 'api', trackerUrl: url,
     }));
     return new Promise((resolve) => {
       const env = { PATH: process.env.PATH, HOME: process.env.HOME, TRACKER_TOKEN_HAND_RUN: loopToken };
@@ -2237,7 +2237,7 @@ const copies = (html) => ({ codes: codes(html), buttons: (html.match(/<button ty
 test('the setup page\'s next-step box, for a state file of each kind: every command with a Copy button whose text is exactly it', () => {
   const h = setupHome();
   try {
-    saveAnswers(h.setup, 'press-play', { productName: 'Press Play', githubRepo: 'example-owner/press-play', description: 'A test product.', trackerPrefix: '', mergePhrases: '', autoMergeLanes: 'none', extraGovernancePaths: 'none' });
+    saveAnswers(h.setup, 'press-play', { projectName: 'Press Play', githubRepo: 'example-owner/press-play', description: 'A test product.', trackerPrefix: '', mergePhrases: '', autoMergeLanes: 'none', extraGovernancePaths: 'none' });
     const command = h.of('press-play').commands.resume;
     assert.match(command, /npm run onboard -- --product press-play --no-prompt$/);
     const kind = (html) => /data-next="([a-z]+)"/.exec(html)[1];
@@ -2328,23 +2328,23 @@ test('the setup form asks the wizard\'s own questions with their defaults, and s
     const fields = setupFields(h.setup, 'press-play');
     const html = renderSetupForm(fields);
     assert.deepEqual([...html.matchAll(/name="([A-Za-z]+)"/g)].map((m) => m[1]), SETUP_FIELDS.map((f) => f.key));
-    assert.match(html, /<label for="setup-productName">Project name, as the tracker shows it<\/label>/);
+    assert.match(html, /<label for="setup-projectName">Project name, as the tracker shows it<\/label>/);
     assert.match(html, /name="trackerPrefix" data-default="PR" autocapitalize="off" spellcheck="false" value="PR">/);
     assert.match(html, /<textarea id="setup-description"/);
     assert.match(html, /<span class="note field-note" data-for="githubRepo"><\/span>/);
     // Saved answers fill it in: a list with commas, an empty list as "none".
-    const again = renderSetupForm(fields, { productName: 'Press <Play>', autoMergeLanes: [], extraGovernancePaths: ['docs/A.md', 'ops/'] });
-    assert.match(again, /name="productName"[^>]*value="Press &lt;Play&gt;"/);
+    const again = renderSetupForm(fields, { projectName: 'Press <Play>', autoMergeLanes: [], extraGovernancePaths: ['docs/A.md', 'ops/'] });
+    assert.match(again, /name="projectName"[^>]*value="Press &lt;Play&gt;"/);
     assert.match(again, /name="autoMergeLanes"[^>]*value="none"/);
     assert.match(again, /name="extraGovernancePaths"[^>]*value="docs\/A\.md, ops\/"/);
     // The body: each answer as typed, a default as null; the server's checker accepts it.
     const values = Object.fromEntries(fields.map((f) => [f.key, f.default ?? '']));
-    Object.assign(values, { productName: 'Press Play', githubRepo: 'example-owner/press-play', description: 'A test product.', autoMergeLanes: 'relay' });
+    Object.assign(values, { projectName: 'Press Play', githubRepo: 'example-owner/press-play', description: 'A test product.', autoMergeLanes: 'relay' });
     const body = setupBody(fields, values);
     assert.equal(body.trackerPrefix, null);
     assert.equal(body.mergePhrases, null);
     assert.equal(body.autoMergeLanes, 'relay');
-    assert.equal(body.productName, 'Press Play');
+    assert.equal(body.projectName, 'Press Play');
     const saved = saveAnswers(h.setup, setupSlug('Press Play'), body);
     assert.equal(saved.product, 'press-play');
     assert.equal(saved.resolved.trackerPrefix, 'PR');

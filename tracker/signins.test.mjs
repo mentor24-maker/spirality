@@ -361,8 +361,8 @@ test('the tracker is asked at the filed network name, or at 127.0.0.1 on its own
   assert.equal(trackerAddress('https://tracker.example.com', ['laptop']).url, 'https://tracker.example.com');
 });
 
-const HOME = { operatorName: 'Dana', productSlug: 'alpha', trackerPort: 4180 };
-const GUEST = { operatorName: 'Dana', productSlug: 'beta', trackerPort: null };
+const HOME = { operatorName: 'Dana', projectSlug: 'alpha', trackerPort: 4180 };
+const GUEST = { operatorName: 'Dana', projectSlug: 'beta', trackerPort: null };
 
 test('the project that runs the tracker keeps the bare seats; another project gets machine seats named for it, and no operator seat', () => {
   const home = seatsForConfig(HOME);

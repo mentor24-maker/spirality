@@ -916,7 +916,7 @@ test('a write made with the cookie must say content-type: application/json; a pl
 test('Forgot password: an account\'s email gets a 1-hour reset link that works, an unknown email gets nothing, and the answer is the same', async () => {
   const f = await fixture();
   const sent = [];
-  const accountMail = { send: async (mail) => { sent.push(mail); }, pageUrl: 'http://tracker.test:4180', productName: 'Alpha' };
+  const accountMail = { send: async (mail) => { sent.push(mail); }, pageUrl: 'http://tracker.test:4180', projectName: 'Alpha' };
   const s = await signInServer(f, { accountMail });
   try {
     const cookie = cookieOf((await s.signIn({ email: s.email, password: s.password })).cookie);
@@ -949,7 +949,7 @@ test('Forgot password: an account\'s email gets a 1-hour reset link that works, 
 
 test('Forgot password with no mail sender, or a sender that fails, answers the page the same and says why in the log, leaving no usable link', async () => {
   const f = await fixture();
-  const s = await signInServer(f, { accountMail: { send: async () => { throw new Error('Resend answered 500'); }, pageUrl: 'http://tracker.test', productName: 'Alpha' } });
+  const s = await signInServer(f, { accountMail: { send: async () => { throw new Error('Resend answered 500'); }, pageUrl: 'http://tracker.test', projectName: 'Alpha' } });
   const off = await signInServer(f);
   try {
     const failed = await s.ask('POST', '/account/forgot', { headers: s.json, body: { email: s.email } });
@@ -965,7 +965,7 @@ test('Forgot password with no mail sender, or a sender that fails, answers the p
 test('no password and no session token ever reaches the server log', async () => {
   const f = await fixture();
   const sent = [];
-  const s = await signInServer(f, { accountMail: { send: async (m) => { sent.push(m); }, pageUrl: 'http://tracker.test', productName: 'Alpha' } });
+  const s = await signInServer(f, { accountMail: { send: async (m) => { sent.push(m); }, pageUrl: 'http://tracker.test', projectName: 'Alpha' } });
   try {
     const r = await s.signIn({ email: s.email, password: s.password });
     const session = cookieOf(r.cookie).split('=')[1];
@@ -1124,7 +1124,7 @@ async function inviteServer(f) {
   const mail = { fail: null };
   const accountMail = {
     send: async (m) => { if (mail.fail) throw new Error(mail.fail); sent.push(m); },
-    pageUrl: 'http://tracker.test:4180', productName: 'Alpha',
+    pageUrl: 'http://tracker.test:4180', projectName: 'Alpha',
   };
   const s = await signInServer(f, { accountMail });
   const cookie = cookieOf((await s.signIn({ email: s.email, password: s.password })).cookie);
@@ -1267,7 +1267,7 @@ async function setupFixture() {
 }
 
 const GOOD_ANSWERS = Object.freeze({
-  productName: 'Press Play',
+  projectName: 'Press Play',
   githubRepo: 'example-owner/press-play',
   trackerPrefix: '',
   mergePhrases: '',
@@ -1297,9 +1297,9 @@ test('GET /setup/fields answers the wizard\'s own questions, with the tracker ho
     assert.equal(r.status, 200);
     assert.deepEqual(r.body.fields.map((x) => x.key), DANE_FIELDS.map((x) => x.key));
     const byKey = Object.fromEntries(r.body.fields.map((x) => [x.key, x]));
-    assert.equal(byKey.productName.required, true);
-    assert.equal(byKey.productName.default, null);
-    assert.equal(byKey.productName.question, DANE_FIELDS[0].question);
+    assert.equal(byKey.projectName.required, true);
+    assert.equal(byKey.projectName.default, null);
+    assert.equal(byKey.projectName.question, DANE_FIELDS[0].question);
     assert.equal(byKey.mergePhrases.default, f.setup.homeConfig.mergePhrases.join(', '));
     assert.equal(byKey.mergePhrases.list, true);
     assert.equal(byKey.autoMergeLanes.default, 'none');
@@ -1347,8 +1347,8 @@ test('PUT /setup/:slug writes the answers file, checked by the wizard\'s checker
     const file = join(f.onboard, 'press-play.answers.json');
     const onDisk = JSON.parse(readFileSync(file, 'utf8'));
     assert.deepEqual(onDisk, {
-      productSlug: 'press-play',
-      productName: 'Press Play',
+      projectSlug: 'press-play',
+      projectName: 'Press Play',
       githubRepo: 'example-owner/press-play',
       trackerPrefix: null,
       mergePhrases: null,
@@ -1370,7 +1370,7 @@ test('PUT /setup/:slug writes the answers file, checked by the wizard\'s checker
     const again = await f.call('PUT', '/setup/press-play', { token: f.humanToken, at: f.at, body: { trackerPrefix: 'PP' } });
     assert.equal(again.status, 200, again.text);
     assert.equal(JSON.parse(readFileSync(file, 'utf8')).trackerPrefix, 'PP');
-    assert.equal(JSON.parse(readFileSync(file, 'utf8')).productName, 'Press Play');
+    assert.equal(JSON.parse(readFileSync(file, 'utf8')).projectName, 'Press Play');
     assert.equal(existsSync(`${file}.${process.pid}.tmp`), false, 'no file left beside it');
   } finally { await f.cleanup(); }
 });
@@ -1383,16 +1383,16 @@ test('PUT /setup/:slug refuses a bad answer (400 naming it), an unknown field, a
     assert.equal(bad.status, 400);
     assert.equal(bad.body.field, 'githubRepo');
     assert.match(bad.body.message, /githubRepo/);
-    const missing = await f.call('PUT', '/setup/press-play', { token: f.humanToken, at: f.at, body: { productName: 'Press Play' } });
+    const missing = await f.call('PUT', '/setup/press-play', { token: f.humanToken, at: f.at, body: { projectName: 'Press Play' } });
     assert.equal(missing.status, 400);
     assert.equal(missing.body.field, 'description');
     const unknown = await f.call('PUT', '/setup/press-play', { token: f.humanToken, at: f.at, body: { ...GOOD_ANSWERS, checkoutDir: '/tmp/x' } });
     assert.equal(unknown.status, 400);
     assert.match(unknown.body.message, /checkoutDir/);
-    const wrongShape = await f.call('PUT', '/setup/press-play', { token: f.humanToken, at: f.at, body: { ...GOOD_ANSWERS, productName: 7 } });
+    const wrongShape = await f.call('PUT', '/setup/press-play', { token: f.humanToken, at: f.at, body: { ...GOOD_ANSWERS, projectName: 7 } });
     assert.equal(wrongShape.status, 400);
     assert.equal((await f.call('PUT', '/setup/Press%20Play', { token: f.humanToken, at: f.at, body: GOOD_ANSWERS })).status, 400);
-    const own = await f.call('PUT', `/setup/${f.setup.homeConfig.productSlug}`, { token: f.humanToken, at: f.at, body: GOOD_ANSWERS });
+    const own = await f.call('PUT', `/setup/${f.setup.homeConfig.projectSlug}`, { token: f.humanToken, at: f.at, body: GOOD_ANSWERS });
     assert.equal(own.status, 400, 'the tracker home\'s own slug is not a new project');
     assert.equal(existsSync(file), false, 'nothing written');
 

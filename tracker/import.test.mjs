@@ -19,7 +19,7 @@ const CONFIG = Object.freeze({
   operatorUserId: OPERATOR,
   machineUserId: SERVICE,
   operatorName: 'Pat',
-  productSlug: 'widget',
+  projectSlug: 'widget',
   trackerPrefix: 'WG',
 });
 
@@ -252,7 +252,7 @@ async function signIn(store, env = {}) {
   const vault = {};
   const r = await createSignins({
     store, seats: seatsFor(CONFIG.operatorName), env,
-    project: { slug: CONFIG.productSlug, name: 'Widget', prefix: CONFIG.trackerPrefix },
+    project: { slug: CONFIG.projectSlug, name: 'Widget', prefix: CONFIG.trackerPrefix },
     operatorImport: operatorImportKey(CONFIG),
     setSecret: (name, value) => { vault[name] = value; }, getSecret: (name) => vault[name],
     proveToken: async (token) => { const me = store.actorForToken(token); return { status: me ? 200 : 401, me }; },
@@ -266,7 +266,7 @@ async function signIn(store, env = {}) {
 function oneOperator(store) {
   const humans = store.actorsNamed({ kind: 'human', name: CONFIG.operatorName });
   assert.equal(humans.length, 1, `humans named ${CONFIG.operatorName}: ${humans.map((a) => a.id)}`);
-  assert.equal(store.getProject(CONFIG.productSlug).operator, humans[0].id);
+  assert.equal(store.getProject(CONFIG.projectSlug).operator, humans[0].id);
   const closed = store.importedId({ source: SOURCE, kind: 'ticket', sourceId: 'cu-closed' });
   assert.deepEqual(store.listComments(closed).map((c) => c.author), [humans[0].id]);
   return humans[0];
@@ -298,7 +298,7 @@ test('a database whose sign-ins predate the mapping is refused by the import unt
     // As the first create left the live database: operator and project, no map row.
     const op = store.createActor({ kind: 'human', name: CONFIG.operatorName });
     const env = { TRACKER_TOKEN_OPERATOR: store.issueToken(op.id) };
-    store.createProject({ slug: CONFIG.productSlug, name: 'Widget', prefix: CONFIG.trackerPrefix, operator: op.id });
+    store.createProject({ slug: CONFIG.projectSlug, name: 'Widget', prefix: CONFIG.trackerPrefix, operator: op.id });
     const tracker = fakeTracker(queue());
     await assert.rejects(importLoopQueue({ tracker, store, config: CONFIG }),
       new RegExp(`names actor ${op.id} as its operator, but the operator's ClickUp seat maps to no actor yet`));

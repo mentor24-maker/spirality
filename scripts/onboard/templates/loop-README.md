@@ -1,13 +1,13 @@
 # loop/
 
-The ticket door for {{productName}}: the commands a session uses to read and move
-{{productName}}'s tickets (`npm run clickup -- <command>`) and to check its keys and
+The ticket door for {{projectName}}: the commands a session uses to read and move
+{{projectName}}'s tickets (`npm run clickup -- <command>`) and to check its keys and
 repository (`npm run doctor`).
 
 Every file here except this README is copied byte for byte from
 [Spirality](https://github.com/{{spiralityRepo}}) at commit
 `{{spiralityCommit}}`, keeping Spirality's layout (`scripts/` beside `lib/`) so no import
-changes. The project settings it reads are {{productName}}'s own
+changes. The project settings it reads are {{projectName}}'s own
 `spirality.project.json` at the repository root.
 
 Do not edit these files here. A change is made in Spirality first, then

@@ -338,7 +338,7 @@ export function readDoppler(projectsRun, configsRun, { project, config }) {
  */
 export async function trackerRows({ get, apiUrl, pageUrl, answers, operatorName, seatNames, hasToken }) {
   const reach = `Tracker: reachable at ${apiUrl}`;
-  const projectItem = `Tracker: project ${answers.productSlug}`;
+  const projectItem = `Tracker: project ${answers.projectSlug}`;
   const prefixItem = `Tracker: prefix ${answers.trackerPrefix} not another project's`;
   const seatsItem = `Tracker: loop sign-ins (${seatNames.join(', ')})`;
   const operatorItem = `Tracker: the operator ${operatorName}`;
@@ -364,7 +364,7 @@ export async function trackerRows({ get, apiUrl, pageUrl, answers, operatorName,
   if (!list) {
     rows.push(row(projectItem, UNKNOWN, failed(projects)), row(prefixItem, UNKNOWN, failed(projects)));
   } else {
-    const ours = list.find((p) => p.slug === answers.productSlug);
+    const ours = list.find((p) => p.slug === answers.projectSlug);
     if (!ours) rows.push(row(projectItem, WILL_DO, 'absent; made at the setup\'s sign-ins step'));
     else if (String(ours.prefix).toUpperCase() !== answers.trackerPrefix) {
       rows.push(row(projectItem, BLOCKED, `it exists with prefix ${ours.prefix}, but the answers say ${answers.trackerPrefix}`));
@@ -373,10 +373,10 @@ export async function trackerRows({ get, apiUrl, pageUrl, answers, operatorName,
       if (repo.verdict === 'different') rows.push(row(projectItem, BLOCKED, `it records the GitHub repository ${ours.repo}, but the answers say ${answers.githubRepo}; only a person decides which is wrong`));
       else rows.push(row(projectItem, READY, `already made, prefix ${ours.prefix}${repo.verdict === 'empty' ? ', its GitHub repository field still empty (the sign-ins step fills it)' : `, repository ${ours.repo}`}`));
     }
-    const taken = list.find((p) => p.slug !== answers.productSlug && String(p.prefix).toUpperCase() === answers.trackerPrefix);
+    const taken = list.find((p) => p.slug !== answers.projectSlug && String(p.prefix).toUpperCase() === answers.trackerPrefix);
     rows.push(taken
       ? row(prefixItem, BLOCKED, `${taken.prefix} is ${taken.name}'s (${taken.slug}); choose another trackerPrefix`)
-      : row(prefixItem, READY, `the prefixes taken are ${list.filter((p) => p.slug !== answers.productSlug).map((p) => p.prefix).join(', ') || 'none'}`));
+      : row(prefixItem, READY, `the prefixes taken are ${list.filter((p) => p.slug !== answers.projectSlug).map((p) => p.prefix).join(', ') || 'none'}`));
   }
 
   const search = await ask('/search');
@@ -525,7 +525,7 @@ export async function look({ answers, homeConfig, runCheck = true, deps }) {
       try { json = text ? JSON.parse(text) : null; } catch { json = null; }
       return { status: res.status, json };
     };
-    const seatNames = seatsForConfig({ trackerPort: null, productSlug: answers.productSlug, operatorName: homeConfig.operatorName }).seats.map((s) => s.name);
+    const seatNames = seatsForConfig({ trackerPort: null, projectSlug: answers.projectSlug, operatorName: homeConfig.operatorName }).seats.map((s) => s.name);
     rows.push(...await trackerRows({
       get, apiUrl, pageUrl: homeConfig.trackerUrl, answers, operatorName: homeConfig.operatorName, seatNames, hasToken: Boolean(deps.token),
     }));
@@ -568,9 +568,9 @@ export function mainCheckoutOf(dir, run = realRun) {
 }
 
 /** `--product <slug>` names a project; the file it finds must be that project's. Null when they agree (or no --product). */
-export function productMismatch(product, answers, path) {
-  if (!product || answers.productSlug === product) return null;
-  return `${path} is for the project "${answers.productSlug}", not "${product}"; rename the file or correct its productSlug.`;
+export function projectMismatch(product, answers, path) {
+  if (!product || answers.projectSlug === product) return null;
+  return `${path} is for the project "${answers.projectSlug}", not "${product}"; rename the file or correct its projectSlug.`;
 }
 
 const USAGE = 'usage: npm run onboard:look -- (--answers <path> | --product <slug>) [--no-check]';
@@ -611,7 +611,7 @@ async function main(argv) {
     console.error(`look: the answers file is not usable — ${err.message}`);
     return 1;
   }
-  const mismatch = productMismatch(args.product, answers, path);
+  const mismatch = projectMismatch(args.product, answers, path);
   if (mismatch) {
     console.error(`look: ${mismatch}`);
     return 1;
@@ -619,7 +619,7 @@ async function main(argv) {
   let token = null;
   try { token = process.env[trackerTokenEnv(process.env)] || null; } catch { token = null; }
 
-  console.log(`Setting up ${answers.productName} (${answers.githubRepo}): the read-only look. Nothing is written.\n`);
+  console.log(`Setting up ${answers.projectName} (${answers.githubRepo}): the read-only look. Nothing is written.\n`);
   const rows = await look({
     answers,
     homeConfig,
@@ -630,7 +630,7 @@ async function main(argv) {
       token,
       exists: existsSync,
       readText: (p) => { try { return readFileSync(p, 'utf8'); } catch { return null; } },
-      makeScratch: () => mkdtempSync(join(tmpdir(), `onboard-${answers.productSlug}-`)),
+      makeScratch: () => mkdtempSync(join(tmpdir(), `onboard-${answers.projectSlug}-`)),
       removeScratch: (dir) => rmSync(dir, { recursive: true, force: true }),
       nodeVersion: process.version,
       samePath: samePathOnDisk,

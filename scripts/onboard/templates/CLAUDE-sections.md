@@ -1,6 +1,6 @@
 ## How to work with Dane
 
-{{productName}} is built by the loop [Spirality](https://github.com/{{spiralityRepo}})
+{{projectName}} is built by the loop [Spirality](https://github.com/{{spiralityRepo}})
 defines (`docs/LOOP_ENGINEERING.md`), and these rules are Spirality's, learned
 the hard way:
 
@@ -21,7 +21,7 @@ the hard way:
 
 ## Where the work is tracked
 
-Every piece of work on this repository is a ticket in the **{{productName}}** project
+Every piece of work on this repository is a ticket in the **{{projectName}}** project
 of **the tracker**, the ticket system that runs on the Mini
 (`{{trackerUrl}}`, ids like `{{trackerPrefix}}-12`). Work for another project
 goes in that project's queue, and a change to the loop itself (the ticket door

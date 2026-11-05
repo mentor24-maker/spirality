@@ -32,7 +32,7 @@ if [ -f "$REPO/.git" ] && grep -q '^gitdir:.*worktrees' "$REPO/.git" 2>/dev/null
 fi
 cd "$REPO" || exit 1
 
-SLUG="$(node "$REPO/scripts/project_config.mjs" productSlug)" || { echo "[relay] could not read productSlug from the project config" >&2; exit 1; }
+SLUG="$(node "$REPO/scripts/project_config.mjs" projectSlug)" || { echo "[relay] could not read projectSlug from the project config" >&2; exit 1; }
 LOG_DIR="$(node "$REPO/scripts/project_config.mjs" logDir)" || { echo "[relay] could not read logDir from the project config" >&2; exit 1; }
 mkdir -p "$LOG_DIR"
 LOCK="$LOG_DIR/$SLUG-relay.lock"

@@ -35,7 +35,7 @@
  *         the operator's actor is recorded as the one the history import
  *         (tracker/import.mjs) stands for his ClickUp seat, so the import
  *         finds him instead of making a second. Then the project (the
- *         config's productSlug, ticket prefix the config's trackerPrefix) is
+ *         config's projectSlug, ticket prefix the config's trackerPrefix) is
  *         made, with the operator's actor as its operator, unless it exists.
  *         Its GitHub repository is the config's githubRepo: a new project
  *         is made with it, and an existing project whose repository is
@@ -99,7 +99,7 @@ export function seatsFor(operatorName, seats = TRACKER_SEATS) {
 export function seatsForConfig(config, seats = TRACKER_SEATS) {
   if (config.trackerPort != null) return { seats: seatsFor(config.operatorName, seats), guest: false };
   return {
-    seats: seats.filter((s) => s.kind === 'machine').map((s) => ({ ...s, name: `${config.productSlug} ${s.name}` })),
+    seats: seats.filter((s) => s.kind === 'machine').map((s) => ({ ...s, name: `${config.projectSlug} ${s.name}` })),
     guest: true,
   };
 }
@@ -491,7 +491,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
         const where = ['--project', config.dopplerProject, '--config', config.dopplerConfig];
         result = await createSignins({
           store, seats, env: process.env,
-          project: { slug: config.productSlug, name: values.name, prefix: values.prefix ?? config.trackerPrefix, repo: config.githubRepo },
+          project: { slug: config.projectSlug, name: values.name, prefix: values.prefix ?? config.trackerPrefix, repo: config.githubRepo },
           guest,
           operatorImport: guest ? null : operatorImportKey(config),
           operatorName: guest ? config.operatorName : null,

@@ -928,7 +928,7 @@ export function runningStep(state) {
 
 /** The product's name as its answers give it; its slug until they do. */
 export function setupName(setup) {
-  return setup?.resolved?.productName ?? setup?.answers?.productName ?? setup?.product ?? '';
+  return setup?.resolved?.projectName ?? setup?.answers?.projectName ?? setup?.product ?? '';
 }
 
 /** Whether the setup page reads again every few seconds: until the setup is finished, it is running or waiting on Dane. */

@@ -46,7 +46,7 @@ const port = Number(process.env.TRACKER_PORT ?? 0);
 // The Merge button posts the project config's first merge phrase, as on the real server.
 let mergePhrase = null;
 try { mergePhrase = loadProjectConfig().mergePhrases[0] ?? null; } catch (err) { console.log(`no Merge button: the project config is not usable (${err.message}).`); }
-const accountMail = { send: printEmail, pageUrl: null, productName: 'Demo' };
+const accountMail = { send: printEmail, pageUrl: null, projectName: 'Demo' };
 const server = await startServer({ store, port, log: (line) => console.log(line), mergePhrase, closePhrase: CLOSE_PHRASE, goPhrase: GO_PHRASE, accountMail });
 accountMail.pageUrl = `http://127.0.0.1:${server.address().port}`;
 

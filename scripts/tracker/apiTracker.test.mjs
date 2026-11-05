@@ -43,8 +43,8 @@ async function fixture() {
     operatorUserId: human.id, machineUserId: machine.id,
     githubRepo: 'owner/repo', dopplerProject: 'proj', dopplerConfig: 'dev',
     launchdPrefix: 'com.example', logDir: '~/loop-logs', mergePhrases: ['merge'],
-    governancePaths: [], autoMergeLanes: [], operatorName: 'Dane', productSlug: 'alpha',
-    legacyMachinePrefixes: [], productScripts: {}, tracker: 'api', trackerUrl: url, trackerPrefix: 'AL',
+    governancePaths: [], autoMergeLanes: [], operatorName: 'Dane', projectSlug: 'alpha',
+    legacyMachinePrefixes: [], projectScripts: {}, tracker: 'api', trackerUrl: url, trackerPrefix: 'AL',
   }));
   const bin = join(dir, 'bin');
   mkdirSync(bin);

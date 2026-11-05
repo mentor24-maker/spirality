@@ -54,7 +54,7 @@ test('mainVerifyVerdict reads verify on a commit: pass, pending, fail, or none a
 
 test('a typed answer: blank takes the default, lists split on commas, "none" is an empty list', () => {
   const list = DANE_FIELDS.find((f) => f.key === 'mergePhrases');
-  const name = DANE_FIELDS.find((f) => f.key === 'productName');
+  const name = DANE_FIELDS.find((f) => f.key === 'projectName');
   assert.equal(answerValue(name, '  PressPlay '), 'PressPlay');
   assert.equal(answerValue(name, ''), null);
   assert.deepEqual(answerValue(list, 'merge, ship it ,'), ['merge', 'ship it']);
@@ -63,13 +63,13 @@ test('a typed answer: blank takes the default, lists split on commas, "none" is 
 });
 
 test('only the fields that are Dane\'s decisions are asked, and one set to null counts as answered', () => {
-  assert.deepEqual(DANE_FIELDS.map((f) => f.key), ['productName', 'githubRepo', 'trackerPrefix', 'mergePhrases', 'autoMergeLanes', 'extraGovernancePaths', 'description']);
-  assert.deepEqual(unanswered({ productName: 'X', trackerPrefix: null }).map((f) => f.key), ['githubRepo', 'mergePhrases', 'autoMergeLanes', 'extraGovernancePaths', 'description']);
+  assert.deepEqual(DANE_FIELDS.map((f) => f.key), ['projectName', 'githubRepo', 'trackerPrefix', 'mergePhrases', 'autoMergeLanes', 'extraGovernancePaths', 'description']);
+  assert.deepEqual(unanswered({ projectName: 'X', trackerPrefix: null }).map((f) => f.key), ['githubRepo', 'mergePhrases', 'autoMergeLanes', 'extraGovernancePaths', 'description']);
   assert.equal(fieldNamed('/x.json: "githubRepo" must be owner/name'), 'githubRepo');
 });
 
 test('the paste block makes the Doppler project only when it is missing, and quotes what it must', () => {
-  const answers = { dopplerProject: 'pressplay', dopplerConfig: 'dev', productName: "Press Play's", trackerPrefix: 'PP' };
+  const answers = { dopplerProject: 'pressplay', dopplerConfig: 'dev', projectName: "Press Play's", trackerPrefix: 'PP' };
   const base = { spiralityDir: '/Users/d/WebApps/spirality', answers, settingsFile: '/Users/d/loop-logs/onboard/pressplay-settings/spirality.project.json', trackerDb: '/Users/d/spirality-tracker/tracker.db' };
   const fresh = pasteBlock({ ...base, projectExists: false, configExists: false });
   assert.deepEqual(fresh, [
@@ -164,7 +164,7 @@ function makeWorld(t) {
     workspaceId: '0', spaceId: '0', loopQueueListId: '0', operatorUserId: '1', machineUserId: '2',
     githubRepo: 'mentor24-maker/spirality', dopplerProject: 'spirality', dopplerConfig: 'dev', launchdPrefix: 'com.spirality',
     logDir: join(dir, 'logs'), mergePhrases: ['merge', 'ship it'], governancePaths: ['CLAUDE.md'], autoMergeLanes: [],
-    operatorName: 'Dane', productSlug: 'spirality', legacyMachinePrefixes: [], productScripts: {}, trackerPrefix: 'SP',
+    operatorName: 'Dane', projectSlug: 'spirality', legacyMachinePrefixes: [], projectScripts: {}, trackerPrefix: 'SP',
     trackerPort: 4180, trackerHost: '0.0.0.0', trackerDataDir: join(dir, 'tracker'), tracker: 'api',
     trackerUrl: 'http://mac-mini.local:4180', trackerApiUrl: 'http://127.0.0.1:4180',
   });
@@ -332,7 +332,7 @@ function makeWorld(t) {
   // The answers in place, written as the wizard would, with a checkout path in this scratch folder.
   const seedAnswers = () => {
     mkdirSync(dirname(answersPath), { recursive: true });
-    writeFileSync(answersPath, JSON.stringify({ productSlug: 'pressplay', productName: 'PressPlay', githubRepo: 'mentor24-maker/pressplay', trackerPrefix: 'PP', mergePhrases: null, autoMergeLanes: [], extraGovernancePaths: null, description: 'PressPlay plays things.', checkoutDir: checkout }));
+    writeFileSync(answersPath, JSON.stringify({ projectSlug: 'pressplay', projectName: 'PressPlay', githubRepo: 'mentor24-maker/pressplay', trackerPrefix: 'PP', mergePhrases: null, autoMergeLanes: [], extraGovernancePaths: null, description: 'PressPlay plays things.', checkoutDir: checkout }));
   };
   const statePath = join(homeConfig.logDir, 'onboard', 'pressplay.state.json');
   return { w, go, homeOpts, run, reset, checkout, makeCheckout, setupWorktreePath, answersFile, settingsFile, seedAnswers, statePath, logFile: join(homeConfig.logDir, 'pressplay-onboard.log') };
@@ -360,7 +360,7 @@ test('a first run asks Dane only his answers, stops for the paste block and the 
   assert.equal((out(w).match(/Your move, Dane/g) || []).length, 2, 'exactly two stops beyond the questions');
   assert.match(out(w), /Done: pressplay is set up\. Its tickets: http:\/\/mac-mini\.local:4180\/list\/pressplay/);
   const answers = JSON.parse(readFileSync(answersFile, 'utf8'));
-  assert.equal(answers.productSlug, 'pressplay');
+  assert.equal(answers.projectSlug, 'pressplay');
   assert.equal(answers.trackerPrefix, 'PP');
   assert.equal(answers.mergePhrases, null, 'a blank answer takes the default');
   assert.deepEqual(answers.autoMergeLanes, []);
@@ -433,7 +433,7 @@ test('a failure at answers: an answer that does not check out is taken back out,
 test('no Terminal to ask in: STOPPED at answers, naming what is still to answer', async (t) => {
   const { w, go } = makeWorld(t);
   assert.equal(await go({ ask: async () => null }), 3);
-  assert.match(out(w), /^STOPPED: answers: no Terminal to ask in; still to answer: productName, githubRepo/m);
+  assert.match(out(w), /^STOPPED: answers: no Terminal to ask in; still to answer: projectName, githubRepo/m);
 });
 
 test('a failure at signins: the block ran but the sign-ins still do not answer — FAILED, and the rerun asks and runs it again', async (t) => {
@@ -682,12 +682,12 @@ test('the state file follows every step: running when it starts, its outcome whe
 test('--no-prompt with answers missing: STOPPED at answers, exit 3, the stop says fill the form, nothing asked', async (t) => {
   const { w, homeOpts, statePath } = makeWorld(t);
   assert.equal(await noPromptRun(homeOpts), 3, out(w));
-  assert.match(out(w), /^STOPPED: answers: still to answer: productName, githubRepo/m);
+  assert.match(out(w), /^STOPPED: answers: still to answer: projectName, githubRepo/m);
   assert.match(out(w), /^  npm run onboard -- --product pressplay --no-prompt$/m);
   assert.ok(!w.calls.some((c) => c.startsWith('npm')), 'nothing after the answers ran');
   const state = readState(statePath);
   assert.deepEqual(state.stop, { step: 'answers', kind: 'answers', why: state.steps[0].why, commands: [], link: null });
-  assert.match(state.stop.why, /still to answer: productName/);
+  assert.match(state.stop.why, /still to answer: projectName/);
   assert.equal(outcomes(state).answers, 'stopped');
   assert.equal(outcomes(state).look, 'pending');
   assert.equal(state.finished, false);

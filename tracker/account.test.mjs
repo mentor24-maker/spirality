@@ -26,7 +26,7 @@ function fixture({ refuse = null } = {}) {
     if (refuse) throw new Error(refuse);
     sent.push(mail);
   };
-  const run = (args) => sendSetupLink({ store, send, trackerUrl: TRACKER, productName: 'Spirality', ...args });
+  const run = (args) => sendSetupLink({ store, send, trackerUrl: TRACKER, projectName: 'Spirality', ...args });
   const cleanup = () => { store.close(); rmSync(dir, { recursive: true, force: true }); };
   return { dir, path, store, person, machine, other, sent, send, run, cleanup };
 }
@@ -87,7 +87,7 @@ test('a send the mail service refuses says so and leaves no usable link behind',
         return typeof v === 'function' ? v.bind(target) : v;
       },
     });
-    const r = await sendSetupLink({ store, actor: f.person.id, email: 'dane@example.com', send: f.send, trackerUrl: TRACKER, productName: 'Spirality' });
+    const r = await sendSetupLink({ store, actor: f.person.id, email: 'dane@example.com', send: f.send, trackerUrl: TRACKER, projectName: 'Spirality' });
     assert.equal(r.ok, false);
     assert.equal(r.line, 'NOT sent to dane@example.com: Resend answered 403: only your own address. The link was withdrawn, so nothing usable is left.');
     assert.ok(made, 'a link was made before the send');
@@ -109,7 +109,7 @@ test('a mail error that echoes the link has the token cut out of the printed lin
 });
 
 test('the email names the person, the link and how long it lasts, and nothing else of theirs', () => {
-  const mail = setupEmail({ name: 'Dane', productName: 'Spirality', link: 'http://t.example/set-password?link=abc', days: 7 });
+  const mail = setupEmail({ name: 'Dane', projectName: 'Spirality', link: 'http://t.example/set-password?link=abc', days: 7 });
   assert.equal(mail.subject, 'Set your Spirality password');
   assert.match(mail.text, /^Hello Dane,/);
   assert.match(mail.text, /\nhttp:\/\/t\.example\/set-password\?link=abc\n/);
