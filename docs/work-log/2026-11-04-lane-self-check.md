@@ -1,4 +1,4 @@
-## 2026-11-04 — Spirality's build lane skips every pass because it mistakes its own runner for a second builder: tell a lane's pass how to know it is the lane (#PR)
+## 2026-11-04 — Spirality's build lane skips every pass because it mistakes its own runner for a second builder: tell a lane's pass how to know it is the lane (#94)
 
 Spirality's build skill told a pass not to build by hand while the build lane
 was running, but never told it how to know that it *was* the build lane. So
