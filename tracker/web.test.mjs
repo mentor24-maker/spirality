@@ -507,7 +507,12 @@ test('the Add Task box on the Tasks page files into the project shown, in Reques
   // The old address opens the Tasks page with the box open.
   assert.match(/async function route\(\{ place = null \} = \{\}\) \{[\s\S]*?\n\}/.exec(app)[0], /\} else if \(isNew\) \{[\s\S]*?await drawTasks\(savedView\(\), \{ adding: true \}\);/);
   assert.doesNotMatch(readFileSync(WEB('index.html'), 'utf8'), /New request|href="\/new"/);
-  assert.match(readFileSync(WEB('app.css'), 'utf8'), /details\.add-task \{/);
+  const css = readFileSync(WEB('app.css'), 'utf8');
+  const box = /details\.add-task \{([^}]*)\}/.exec(css);
+  assert.ok(box, 'the Add Task box has its own rule');
+  assert.match(box[1], /background: var\(--blue\);/, 'the box is the logo blue, closed and open');
+  assert.match(box[1], /color: var\(--ink\);/, 'dark text on the blue, not white');
+  assert.match(css, /details\.add-task form\.request input, details\.add-task form\.request textarea \{[^}]*background: #fff;/, 'the fields stay white');
 });
 
 // ── Copy to another project ──────────────────────────────────────────────────
