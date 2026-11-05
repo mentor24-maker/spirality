@@ -24,8 +24,9 @@
  *               checkout, which the lanes need clean): the files, the
  *               settings file, the npm scripts (with a `verify` that runs
  *               the check and the loop's tests, if it has no verify script),
- *               the CLAUDE.md sections and, if it has no verify check yet,
- *               the CI workflow (running `npm run verify` when that was added).
+ *               the CLAUDE.md sections, the .gitignore lines the lanes need
+ *               (SP-120) and, if it has no verify check yet, the CI workflow
+ *               (running `npm run verify` when that was added).
  *   3. check    every "copy as is" file compared with `cmp` against the
  *               Spirality commit; any difference stops it before commit.
  *   4. pr       commit, push and one pull request; its body names the
@@ -46,7 +47,7 @@ import { dirname, join } from 'node:path';
 import { loadProjectConfig, findConfigFile } from '../../lib/projectConfig.mjs';
 import { loadAnswers, onboardDir, expandHome } from '../../lib/onboardAnswers.mjs';
 import {
-  planCopies, compareWithProduct, templateVars, mergeNpmScripts, withClaudeSections,
+  planCopies, compareWithProduct, templateVars, mergeNpmScripts, withClaudeSections, withIgnoreLines,
   verifyWorkflow, hasVerifyJob, verifyScriptFor, render, ciVerdict, answersAsHandRun, SETUP_BRANCH,
 } from '../../lib/onboardCopy.mjs';
 
@@ -133,6 +134,8 @@ if (npm.conflicts.length) {
 }
 const sectionsTemplate = textOf('scripts/onboard/templates/CLAUDE-sections.md');
 const claude = withClaudeSections(readProduct('CLAUDE.md'), render(sectionsTemplate, vars, 'CLAUDE-sections.md'));
+const ignoreEntry = manifest.made.find((m) => m.to === '.gitignore');
+const ignore = withIgnoreLines(readProduct('.gitignore'), ignoreEntry?.ignoreLines || []);
 const workflows = pgit('ls-tree', '--name-only', 'origin/main', '.github/workflows/').out.split('\n').filter(Boolean);
 const haveVerify = hasVerifyJob(workflows.map((w) => readProduct(w) || ''));
 let settingsText = null;
@@ -147,7 +150,8 @@ if (arg('config')) {
 const extra = [
   ...(settingsText == null ? [] : [{ to: 'spirality.project.json', kind: 'made', from: arg('config'), content: settingsText }]),
   { to: 'package.json', kind: 'made', from: `the project's own, plus ${npm.added.length ? npm.added.join(', ') : 'nothing'}`, content: npm.text },
-  { to: 'CLAUDE.md', kind: 'made', from: claude.added ? 'the project\'s own, plus the loop\'s sections' : 'the project\'s own (the loop\'s sections are already there)', content: claude.text },
+  { to: '.gitignore', kind: 'made', from: ignore.added.length ? `the project's own, plus ${ignore.added.join(', ')}` : 'the product\'s own (it already ignores what the lanes need)', content: ignore.text },
+  { to: 'CLAUDE.md', kind: 'made', from: claude.added ? 'the product\'s own, plus the loop\'s sections' : 'the product\'s own (the loop\'s sections are already there)', content: claude.text },
   ...(haveVerify ? [] : [{
     to: '.github/workflows/verify.yml', kind: 'made',
     from: verify.add ? 'runs npm run verify, which the setup adds' : 'the answers\' check command, then the loop\'s tests',
@@ -168,7 +172,7 @@ if (settingsText == null) console.log('  No --config given, so the settings file
 
 // The project's own files are never replaced unasked. The door and the
 // loop's own files (made by an earlier setup) are the loop's to update.
-const theirs = all.filter((f) => f.status === 'replaces' && !['package.json', 'CLAUDE.md'].includes(f.to) && !f.to.startsWith('loop/'));
+const theirs = all.filter((f) => f.status === 'replaces' && !['package.json', 'CLAUDE.md', '.gitignore'].includes(f.to) && !f.to.startsWith('loop/'));
 if (dryRun) {
   if (theirs.length) console.log(`\nA real run would stop here unless --allow-replace: it would replace ${theirs.map((f) => f.to).join(', ')}.`);
   console.log('\nDry run done: nothing was written or opened.');

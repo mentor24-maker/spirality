@@ -38,8 +38,9 @@ npm run onboard -- --product <slug>
 It asks Dane only the answers that are his decisions, once (kept in
 `~/loop-logs/onboard/<slug>.answers.json`), then runs every item below in
 order: the read-only look, the clone (the project's `main` into its
-checkout folder, only when that folder does not exist yet), the settings file, the sign-ins (one paste block
-for Dane: **real secret values**), the copy into the project's repository as
+checkout folder, only when that folder does not exist yet), the settings file, the sign-ins (**real secret values**: it shows
+the commands and asks `Run these now? [y/N]`; on Dane's y it runs them in his
+Terminal, on anything else it prints them and stops), the copy into the project's repository as
 one pull request, the lanes and the setup ticket, the merge (Dane's merge
 phrase on that ticket: **a decision**) and protecting `main`. Each step
 checks first whether it is already done, so a rerun after a failed step

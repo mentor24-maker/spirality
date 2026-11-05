@@ -158,13 +158,16 @@ const PAGE_HEADERS = Object.freeze({
  * page address. `/projects` is both the Projects screen and the call that
  * lists them, and `/projects/<project>` both a project's details page and
  * the call that reads them (`/projects/new` is the Create Project form), and
- * `/search?q=<term>` both the search results page and the search itself: a browser opening the address asks for HTML and
+ * `/search?q=<term>` both the search results page and the search itself,
+ * and `/setup/<slug>` (`/setup/new` the Set up a product form) both a
+ * product's setup page and the call that reads it: a browser opening the address asks for HTML and
  * gets the page; the page's own call asks for anything and gets the data.
  */
 function pageFile(pathname, accept = '') {
-  if (/^\/(?:projects(?:\/[^/]+)?|people|search)$/.test(pathname)) return /\btext\/html\b/.test(accept) ? 'index.html' : null;
+  if (/^\/(?:projects(?:\/[^/]+)?|people|search|setup\/(?!fields$)[^/]+)$/.test(pathname)) return /\btext\/html\b/.test(accept) ? 'index.html' : null;
   if (pathname === '/' || /^\/(?:tasks|board|list|new|settings|set-password|reporting)$/.test(pathname) || /^\/(?:t|board|list)\/[^/]+$/.test(pathname)) return 'index.html';
   if (/^\/projects\/[^/]+\/edit$/.test(pathname)) return 'index.html';
+  if (/^\/setup\/[^/]+\/answers$/.test(pathname)) return 'index.html';
   const m = /^\/web\/([^/]+)$/.exec(pathname);
   return m && Object.hasOwn(WEB_FILES, m[1]) ? m[1] : null;
 }
