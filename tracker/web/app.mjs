@@ -26,7 +26,7 @@
  * an emailed link's own page. The link's token is sent only in a JSON body,
  * never in an address.
  */
-import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderAnswerIn, statusLabel, ANSWER_IN_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, redrawHold, drawnChoice } from './render.mjs';
+import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderAnswerIn, statusLabel, ANSWER_IN_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket } from './render.mjs';
 
 /** Where an earlier version of the page kept a pasted token; removed on load, never read. */
 const OLD_TOKEN_KEY = 'tracker-token';
@@ -52,6 +52,11 @@ let me = null;
  * is drawn again when what it was drawn from has changed.
  */
 const REFRESH_EVERY_MS = 60_000;
+/**
+ * A setup page reads again far sooner: a step can finish in seconds, and he
+ * is watching it. Only while the page says it follows (setupFollows).
+ */
+const SETUP_REFRESH_EVERY_MS = 4_000;
 /** The title the page itself asks for, and the last waiting count read (null: none yet). */
 let pageTitle = 'Tracker';
 let waitingCount = null;
@@ -102,9 +107,10 @@ class SignedOut extends Error {}
 
 /** A refused call, carrying the HTTP status the tracker answered with. */
 class Refused extends Error {
-  constructor(message, status) {
+  constructor(message, status, field = null) {
     super(message);
     this.status = status;
+    this.field = field;
   }
 }
 
@@ -127,7 +133,7 @@ async function api(method, path, body) {
   if (res.status === 401) throw new SignedOut();
   let json = null;
   try { json = await res.json(); } catch { /* reported below */ }
-  if (!res.ok) throw new Refused(json?.message ?? `the tracker answered ${res.status}.`, res.status);
+  if (!res.ok) throw new Refused(json?.message ?? `the tracker answered ${res.status}.`, res.status, json?.field ?? null);
   if (!json) throw new Error('the tracker answered with something that is not JSON.');
   if (!write) reads?.set(path, JSON.stringify(json));
   return json;
@@ -360,7 +366,8 @@ function showProject() {
  * address, GitHub repository, owner, how many tickets are open, and an Actions column whose
  * View icon opens its details page. Choosing a name selects the project and
  * opens its tasks; the selected one is marked, and "Tasks" in the header
- * goes back to it. A person signed in gets a New project button and, on
+ * goes back to it. A person signed in gets a Set up a product button (its
+ * page links the bare New project form), the products being set up, and, on
  * each row, Edit and Delete icons; a loop's sign-in gets none of them, and
  * the server refuses it anyway. Delete asks first, then draws the table
  * again from the server, so a deleted project is gone because the server
@@ -368,7 +375,11 @@ function showProject() {
  * and the table is left as it was. `done` is a line to show above the table.
  */
 async function drawProjects(done = '') {
-  const { projects } = await api('GET', '/projects');
+  const [{ projects }, setups] = await Promise.all([
+    api('GET', '/projects'),
+    // Products mid-setup; a tracker that cannot read setups (or a loop's sign-in) shows none.
+    me?.kind === 'human' ? api('GET', '/setup').catch((err) => { if (err instanceof SignedOut) throw err; return { setups: [] }; }) : { setups: [] },
+  ]);
   setTitle('Projects · Tracker');
   const selected = savedProject();
   const people = me?.kind === 'human';
@@ -395,8 +406,9 @@ async function drawProjects(done = '') {
     </tr>`;
   main.innerHTML = `
     <h1>Projects</h1>
-    ${me?.kind === 'human' ? '<div class="toolbar"><a class="button" href="/projects/new">New project</a></div>' : ''}
+    ${me?.kind === 'human' ? '<div class="toolbar"><a class="button" href="/setup/new">Set up a product</a></div>' : ''}
     <p class="note${done ? ' quiet' : ''}" role="status">${escapeHtml(done)}</p>
+    ${renderSetupList(setups)}
     ${projects.length
     ? `<p class="quiet">Choose a project's name to see its tasks.</p>
       <table class="projects"><thead><tr><th class="logo"><span class="hidden">Logo</span></th><th class="name">Name</th><th class="slug">Slug</th><th class="prefix">Ticket prefix</th><th class="url">Web address</th><th class="repo">GitHub repository</th><th class="owner">Owner</th><th class="open">Open tickets</th><th class="actions">Actions</th></tr></thead><tbody>${projects.map(row).join('')}</tbody></table>`
@@ -612,6 +624,137 @@ async function drawEditProject(slug) {
     }
   });
   form.querySelector('#name').focus();
+}
+
+/**
+ * Set up a product, its answers (SP-127): `/setup/new`, for a person only.
+ * The fields are the wizard's own (`GET /setup/fields`), each filled in with
+ * its default; Save writes them (`PUT /setup/<slug>`, checked by the
+ * wizard's checker) and opens the product's setup page. A refusal naming a
+ * field shows beside it, and every box keeps what was typed.
+ * `/setup/<slug>/answers` is the same form for a product already
+ * started, filled in from its saved answers, until its sign-ins are made.
+ * The bare New project form stays a link away, for a tracker project with
+ * no repository.
+ */
+async function drawSetupNew(product) {
+  setTitle('Set up a product · Tracker');
+  putTrail([{ label: 'Projects', href: '/projects' }, { label: 'Set up a product' }]);
+  if (me?.kind !== 'human') {
+    main.innerHTML = '<h1>Set up a product</h1><p>Only a person signed in to the tracker can set up a product.</p><p><a href="/projects">Back to Projects</a></p>';
+    return;
+  }
+  let saved = null;
+  if (product) {
+    saved = await api('GET', `/setup/${encodeURIComponent(product)}`);
+    if (saved.locked) {
+      main.innerHTML = `<h1>Set up ${escapeHtml(setupName(saved))}</h1><p>Its sign-ins are made from these answers, so they no longer change here.</p><p><a href="/setup/${encodeURIComponent(product)}">Back to its setup</a></p>`;
+      return;
+    }
+  }
+  let { fields } = await api('GET', `/setup/fields?product=${encodeURIComponent(product ?? '')}`);
+  main.innerHTML = `
+    <h1>${product ? `Set up ${escapeHtml(setupName(saved))}: its answers` : 'Set up a product'}</h1>
+    <p class="quiet">The setup runs on the Mini: after Save, its page shows the command to paste into a Terminal there, and follows every step. A tracker project with no GitHub repository? <a href="/projects/new">New project</a>.</p>
+    <form class="request setup">
+      ${renderSetupForm(fields, saved?.answers ?? null)}
+      <p class="quiet">Its slug, in every address and file name: <span class="slug">${escapeHtml(product ?? '')}</span></p>
+      <div class="row"><button type="submit">Save</button><a href="${product ? `/setup/${encodeURIComponent(product)}` : '/projects'}">Cancel</a><span class="note form-note"></span></div>
+    </form>`;
+  const form = main.querySelector('form.setup');
+  const note = form.querySelector('.form-note');
+  const nameBox = form.querySelector('[name="productName"]');
+  const slugOf = () => product ?? setupSlug(nameBox?.value);
+  const showSlug = () => { form.querySelector('.slug').textContent = slugOf() || '(none yet)'; };
+  showSlug();
+  if (!product && nameBox) {
+    nameBox.addEventListener('input', showSlug);
+    // Some defaults come from the slug (the ticket prefix): fill them again, where they are still the default.
+    nameBox.addEventListener('change', async () => {
+      let next;
+      try {
+        ({ fields: next } = await api('GET', `/setup/fields?product=${encodeURIComponent(slugOf())}`));
+      } catch { return; }
+      for (const f of next) {
+        const box = form.querySelector(`[name="${f.key}"]`);
+        if (!box) continue;
+        if (box.value === box.dataset.default) box.value = f.default ?? '';
+        box.dataset.default = f.default ?? '';
+      }
+      fields = next;
+    });
+  }
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    for (const n of form.querySelectorAll('.field-note')) { n.className = 'note field-note'; n.textContent = ''; }
+    const slug = slugOf();
+    const problem = setupSlugProblem(slug);
+    if (problem) {
+      note.className = 'note form-note error';
+      note.textContent = `Not saved: ${problem}`;
+      return;
+    }
+    const values = Object.fromEntries(fields.map((f) => [f.key, form.querySelector(`[name="${f.key}"]`)?.value ?? '']));
+    const button = form.querySelector('button');
+    button.disabled = true;
+    note.className = 'note form-note quiet';
+    note.textContent = 'Saving…';
+    try {
+      await api('PUT', `/setup/${encodeURIComponent(slug)}`, setupBody(fields, values));
+    } catch (err) {
+      if (err instanceof SignedOut) return drawSignIn('You were signed out; the answers were not saved.');
+      const beside = err.field ? form.querySelector(`.field-note[data-for="${err.field}"]`) : null;
+      if (beside) {
+        beside.className = 'note field-note error';
+        beside.textContent = err.message;
+      }
+      note.className = 'note form-note error';
+      note.textContent = beside ? 'Not saved: see the note beside the field.' : `Not saved: ${err.message}`;
+      button.disabled = false;
+      return;
+    }
+    history.pushState(null, '', `/setup/${encodeURIComponent(slug)}`);
+    await route();
+  });
+  nameBox?.focus();
+}
+
+/**
+ * One product's setup page (SP-127): its steps as the wizard's state file
+ * records them, and under them one box saying what is next, with a Copy
+ * button for every command to paste on the Mini. The page runs nothing.
+ * Answers whether it follows the setup (reads again every few seconds):
+ * until the setup is finished.
+ */
+async function drawSetup(slug) {
+  let setup;
+  try {
+    setup = await api('GET', `/setup/${encodeURIComponent(slug)}`);
+  } catch (err) {
+    if (!(err instanceof Refused) || err.status !== 400) throw err;
+    setTitle('No such setup · Tracker');
+    main.innerHTML = `<h1>Set up a product</h1><p>${escapeHtml(err.message)}</p><p><a href="/projects">Back to Projects</a></p>`;
+    putTrail([{ label: 'Projects', href: '/projects' }, { label: 'Set up a product' }]);
+    return false;
+  }
+  const name = setupName(setup);
+  // The finished box links its first ticket: the lowest-numbered on its board.
+  const firstTicketId = setup.finished
+    ? await api('GET', `/projects/${encodeURIComponent(setup.product)}/board`).then(firstTicket, (err) => { if (err instanceof SignedOut) throw err; return null; })
+    : null;
+  setTitle(`Set up ${name} · Tracker`);
+  main.innerHTML = `
+    <section class="setup">
+      <h1>Set up ${escapeHtml(name)}</h1>
+      <div class="toolbar"><a href="/projects">All projects</a>${setup.locked ? '' : `<a href="/setup/${encodeURIComponent(setup.product)}/answers">Change the answers</a>`}</div>
+      ${setup.answersError ? `<p class="note error">The answers do not check: ${escapeHtml(setup.answersError)}</p>` : ''}
+      <h2>Steps</h2>
+      ${renderSetupSteps(setup.state)}
+      ${renderSetupNext(setup, { firstTicketId })}
+    </section>`;
+  putTrail([{ label: 'Projects', href: '/projects' }, { label: `Set up ${name}` }]);
+  wireCopyButtons();
+  return setupFollows(setup);
 }
 
 /**
@@ -869,6 +1012,19 @@ async function copyText(text, button) {
   }
 }
 
+/** Copy: each command exactly as drawn, onto the clipboard. The page never runs it. */
+function wireCopyButtons() {
+  for (const button of main.querySelectorAll('button.copy-command')) {
+    let reset;
+    button.addEventListener('click', async () => {
+      const text = button.parentElement.querySelector('code').textContent;
+      button.textContent = (await copyText(text, button)) ? 'Copied' : 'Not copied';
+      clearTimeout(reset);
+      reset = setTimeout(() => { button.textContent = 'Copy'; }, 1500);
+    });
+  }
+}
+
 /**
  * One ticket. A person signed in also gets the Change panel above the
  * description: each change is sent on its own with the ticket's version as
@@ -932,16 +1088,7 @@ async function drawTicket(id, said = null, kept = null) {
         </div>
       </form>` : '<p class="quiet">There is no other project to copy into yet.</p>'}
     </details>`;
-  // Copy: the command exactly as drawn, onto the clipboard. The page never runs it.
-  for (const button of main.querySelectorAll('button.copy-command')) {
-    let reset;
-    button.addEventListener('click', async () => {
-      const text = button.parentElement.querySelector('code').textContent;
-      button.textContent = (await copyText(text, button)) ? 'Copied' : 'Not copied';
-      clearTimeout(reset);
-      reset = setTimeout(() => { button.textContent = 'Copy'; }, 1500);
-    });
-  }
+  wireCopyButtons();
   // The ticket's own project, in the view last used; then the ticket; then this page of it.
   putTrail([
     { label: t.projectName, href: `/${savedView()}/${encodeURIComponent(t.project)}` },
@@ -1537,9 +1684,20 @@ async function route({ place = null } = {}) {
     const reporting = location.pathname === '/reporting';
     const peoplePage = location.pathname === '/people';
     const search = location.pathname === '/search';
-    const waiting = !(search || reporting || settings || peoplePage || isNew || ticket || projects || newProject || editProject || details || tasks || project);
-    markNav(reporting ? 'reporting' : settings ? 'settings' : peoplePage ? 'people' : projects || newProject || details || editProject ? 'projects' : ticket || project || tasks || isNew || search ? 'tasks' : 'waiting');
-    if (search) {
+    const setupNew = location.pathname === '/setup/new';
+    const setupAnswers = /^\/setup\/([^/]+)\/answers$/.exec(location.pathname);
+    const setupPage = !setupNew && /^\/setup\/([^/]+)$/.exec(location.pathname);
+    const setupAny = setupNew || setupAnswers || setupPage;
+    let following = false;
+    const waiting = !(setupAny || search || reporting || settings || peoplePage || isNew || ticket || projects || newProject || editProject || details || tasks || project);
+    markNav(reporting ? 'reporting' : settings ? 'settings' : peoplePage ? 'people' : projects || newProject || details || editProject || setupAny ? 'projects' : ticket || project || tasks || isNew || search ? 'tasks' : 'waiting');
+    if (setupNew) {
+      await drawSetupNew(null);
+    } else if (setupAnswers) {
+      await drawSetupNew(decodeURIComponent(setupAnswers[1]));
+    } else if (setupPage) {
+      following = await drawSetup(decodeURIComponent(setupPage[1]));
+    } else if (search) {
       await drawSearch(new URLSearchParams(location.search));
     } else if (reporting) {
       await drawReporting();
@@ -1574,6 +1732,8 @@ async function route({ place = null } = {}) {
     // Waiting on you read the count as it drew; every other page reads it now.
     if (!waiting) await refreshCount();
     if (kept) lastDrawn = ticket || project || tasks || isNew || waiting ? { address: here(), reads } : null;
+    // A setup page under way follows it every few seconds (the fast beat below).
+    if (kept && following) lastDrawn = { address: here(), reads, fast: true };
   } catch (err) {
     if (place && !(err instanceof SignedOut)) return;
     lastDrawn = null;
@@ -1690,6 +1850,10 @@ try { localStorage.removeItem(OLD_TOKEN_KEY); } catch { /* nothing kept */ }
 // The count in the tab title stays current while the tab sits pinned in the
 // background; the page itself is read again only while it is in view.
 setInterval(beat, REFRESH_EVERY_MS);
+// A setup page under way reads again every few seconds; every other page waits for the beat.
+setInterval(() => {
+  if (lastDrawn?.fast) refreshPage();
+}, SETUP_REFRESH_EVERY_MS);
 // Back to the tab: show what changed while it was hidden straight away.
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) beat();
