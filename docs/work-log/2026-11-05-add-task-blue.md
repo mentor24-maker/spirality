@@ -12,3 +12,11 @@ The words on it stay dark, because dark text on this blue is easy to read
 text would be faint. The two typing fields stay white, so filing a request
 looks and feels exactly as before. A test now checks all three of those
 things so a later change cannot quietly undo them.
+
+Review caught one thing the first version missed: the small line beside the
+File request button, which says "Filing…" while a request goes in and
+"Not filed: …" in red when it fails, kept its old grey and red, and on the
+blue those were nearly invisible (about 2 to 1). A failed filing is the one
+message that must never be missed, so that line now sits on a small white
+patch inside the box, where the red and grey read just as they do everywhere
+else on the page. The test covers it too.

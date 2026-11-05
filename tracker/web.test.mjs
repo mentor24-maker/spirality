@@ -513,6 +513,8 @@ test('the Add Task box on the Tasks page files into the project shown, in Reques
   assert.match(box[1], /background: var\(--blue\);/, 'the box is the logo blue, closed and open');
   assert.match(box[1], /color: var\(--ink\);/, 'dark text on the blue, not white');
   assert.match(css, /details\.add-task form\.request input, details\.add-task form\.request textarea \{[^}]*background: #fff;/, 'the fields stay white');
+  // The status line (Filing…, Not filed: …) keeps its quiet grey and red, so it sits on white, readable on the blue.
+  assert.match(css, /details\.add-task \.note:not\(:empty\) \{[^}]*background: #fff;/, 'the note sits on a white pill inside the blue box');
 });
 
 // ── Copy to another project ──────────────────────────────────────────────────
