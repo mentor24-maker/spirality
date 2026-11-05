@@ -26,6 +26,30 @@ every item below walked for one real product, with its tickets.
 Looking back: how Normie's setup really went, its hold-ups, and a setup
 wizard for the next product, [docs/onboarding/SETUP_REVIEW.md](onboarding/SETUP_REVIEW.md).
 
+## The way in: one command
+
+On the Mini, from Spirality's own folder, in a Terminal that is not one of
+Spirality's lanes:
+
+```bash
+npm run onboard -- --product <slug>
+```
+
+It asks Dane only the answers that are his decisions, once (kept in
+`~/loop-logs/onboard/<slug>.answers.json`), then runs every item below in
+order: the read-only look, the settings file, the sign-ins (one paste block
+for Dane: **real secret values**), the copy into the product's repository as
+one pull request, the lanes and the setup ticket, the merge (Dane's merge
+phrase on that ticket: **a decision**) and protecting `main`. Each step
+checks first whether it is already done, so a rerun after a failed step
+picks up there and asks nothing twice. A failed step prints
+`FAILED: <step>: <what was seen>` and the rerun command; the step log is
+`~/loop-logs/<slug>-onboard.log`. The steps and what changed from the plan:
+[SETUP_REVIEW.md, part 3](onboarding/SETUP_REVIEW.md#3-the-wizard-design).
+
+The checklist below stays as what the wizard does, item by item, and how
+to check each one by hand.
+
 ## The gaps, at a glance
 
 The items below marked **missing**, gathered here so they can become tickets:

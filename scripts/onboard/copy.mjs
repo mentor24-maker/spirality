@@ -45,10 +45,10 @@ import { loadProjectConfig, findConfigFile } from '../../lib/projectConfig.mjs';
 import { loadAnswers, onboardDir, expandHome } from '../../lib/onboardAnswers.mjs';
 import {
   planCopies, compareWithProduct, templateVars, mergeNpmScripts, withClaudeSections,
-  verifyWorkflow, hasVerifyJob, render, ciVerdict, answersAsHandRun,
+  verifyWorkflow, hasVerifyJob, render, ciVerdict, answersAsHandRun, SETUP_BRANCH,
 } from '../../lib/onboardCopy.mjs';
 
-const BRANCH = 'spirality-setup';
+const BRANCH = SETUP_BRANCH;
 const argv = process.argv.slice(2);
 const arg = (name) => { const i = argv.indexOf(`--${name}`); return i >= 0 ? argv[i + 1] : undefined; };
 const flag = (name) => argv.includes(`--${name}`);

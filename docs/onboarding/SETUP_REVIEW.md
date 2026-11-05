@@ -281,7 +281,39 @@ nothing twice. It keeps a step log, `<logDir>/<slug>-onboard.log`, and every
 step is safe to rerun: each one first checks whether it is already done,
 and skips it if so. It never prints a secret.
 
-`npm run onboard` does not exist yet. Nothing below is built.
+**Built (SP-107 to SP-112).** `npm run onboard -- --product <slug>`
+([scripts/onboard/onboard.mjs](../../scripts/onboard/onboard.mjs)) runs the
+steps below in order, each from its own script:
+
+| Step | Script | npm script |
+|---|---|---|
+| Asking the answers | [onboard.mjs](../../scripts/onboard/onboard.mjs) itself; the file is read by [lib/onboardAnswers.mjs](../../lib/onboardAnswers.mjs) | `onboard` |
+| 0. The read-only look | [look.mjs](../../scripts/onboard/look.mjs) (SP-108) | `onboard:look` |
+| 1. The settings file | [settings.mjs](../../scripts/onboard/settings.mjs) (SP-109) | `onboard:settings` |
+| 2–3. The sign-ins and the repository field | [tracker/signins.mjs](../../tracker/signins.mjs) (SP-107 takes `--config` and fills the field, so step 3's page is not needed) | `tracker:signins` |
+| 4. The copy and its pull request | [copy.mjs](../../scripts/onboard/copy.mjs) (SP-110) | `onboard:copy` |
+| 7, before 5. The lanes and the setup ticket | [lanes.mjs](../../scripts/onboard/lanes.mjs) (SP-111) | `onboard:lanes` |
+| 5. The merge | the product's own relay, on Dane's merge phrase on the setup ticket; the wizard waits and reads it back | |
+| 6. Protecting `main` | [onboard.mjs](../../scripts/onboard/onboard.mjs) | |
+
+What changed from the plan below, as built: the lanes go in **before** the
+merge (SP-111), from the setup branch, so the product's own relay merges
+the setup pull request like any other ticket, and the wizard never merges.
+Dane's stops are exactly three: the answers that are his decisions (asked
+only when the answers file does not have them), the paste block (real
+secret values), and his merge phrase on the setup ticket. The ticket for
+first real work (step 8) is not filed by the wizard; it prints the page to
+watch instead. Before the lanes step, the wizard removes the worktree
+`onboard:copy` keeps on the setup branch (git checks a branch out in one
+place only, and the lanes check it out in the product's own folder), and
+reads back that nothing else holds it. At the paste block it waits for the
+word `done`, not a bare Enter, so an Enter pressed while a step ran is not
+taken as the answer. Protecting `main` names any stricter setting already
+there that it switches off (GitHub's protection write replaces them all). Each step checks first whether it is already done; once the
+product's `main` has its settings file with its own machine id, every step
+up to the merge is.
+
+The design as it was planned:
 
 ### What a person enters
 

@@ -25,6 +25,7 @@
     "doctor": "node scripts/doctor.mjs",
     "tracker:signins": "node scripts/with_doppler.mjs node --no-warnings tracker/signins.mjs",
     "tracker:switch-check": "node scripts/with_doppler.mjs node --no-warnings tracker/switchCheck.mjs",
+    "onboard": "node --disable-warning=ExperimentalWarning scripts/onboard/onboard.mjs",
     "onboard:lanes": "node scripts/onboard/lanes.mjs",
     "onboard:look": "node scripts/with_doppler.mjs node --disable-warning=ExperimentalWarning scripts/onboard/look.mjs",
     "onboard:settings": "node scripts/with_doppler.mjs node --disable-warning=ExperimentalWarning scripts/onboard/settings.mjs",
