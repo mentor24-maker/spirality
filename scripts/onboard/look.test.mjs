@@ -5,9 +5,13 @@ import { resolveAnswers } from '../../lib/onboardAnswers.mjs';
 import { seatsForConfig } from '../../tracker/signins.mjs';
 import {
   BLOCKED, READY, UNKNOWN, WILL_DO, checkEnv, exitCodeFor, formatRow, ghApiFailure, lastLines, look,
-  normalRepo, readCheck, readCheckout, readClaude, readDoppler, readDopplerMe, readNode, readProtection,
-  readRepo, nodeNeedOf, summaryLine, trackerRows,
+  readCheck, readCheckout, readClaude, readDoppler, readDopplerMe, readNode, readProtection,
+  productMismatch, readRepo, nodeNeedOf, samePathOnDisk, summaryLine, trackerRows,
 } from './look.mjs';
+import { normalRepo } from '../lib/repoCheck.mjs';
+import { mkdtempSync, mkdirSync, rmSync, symlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { parseNodeNeed } from '../../lib/onboardAnswers.mjs';
 
 const homeConfig = validateProjectConfig({
@@ -55,6 +59,25 @@ test('a git remote in any form is the same repository', () => {
   }
 });
 
+test('--product must name the product the answers file is for', () => {
+  assert.equal(productMismatch(null, { productSlug: 'normie' }, '/a.json'), null);
+  assert.equal(productMismatch('normie', { productSlug: 'normie' }, '/a.json'), null);
+  assert.match(productMismatch('pressplay', { productSlug: 'normie' }, '/a.json'), /\/a\.json is for the product "normie", not "pressplay"/);
+});
+
+test('the same folder through a symlink is the same folder; a folder beside it is not', () => {
+  const base = mkdtempSync(join(tmpdir(), 'sp108-'));
+  try {
+    mkdirSync(join(base, 'real'));
+    mkdirSync(join(base, 'other'));
+    symlinkSync(join(base, 'real'), join(base, 'link'));
+    assert.equal(samePathOnDisk(join(base, 'link'), `${join(base, 'real')}/`), true);
+    assert.equal(samePathOnDisk(join(base, 'other'), join(base, 'real')), false);
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
 test('the repository: exists and can push; missing is BLOCKED; gh not installed could not tell', () => {
   const view = readRepo(ok(JSON.stringify({ name: 'normie', visibility: 'PUBLIC', viewerPermission: 'ADMIN', defaultBranchRef: { name: 'main' } })), 'mentor24-maker/normie');
   assert.deepEqual(view.rows.map((r) => r.verdict), [READY, READY]);
@@ -87,13 +110,20 @@ test('the checkout: absent will do; a clean main of the repository is ready; any
   const at = { repo: 'mentor24-maker/normie', branch: 'main' };
   const dir = '/x/normie';
   assert.equal(readCheckout({ dir, present: false }, at).verdict, WILL_DO);
-  const good = { dir, present: true, head: ok('main\n'), origin: ok('https://github.com/mentor24-maker/normie.git\n'), porcelain: ok('') };
+  const good = { dir, present: true, head: ok('main\n'), top: ok('/x/normie\n'), origin: ok('https://github.com/mentor24-maker/normie.git\n'), porcelain: ok('') };
   assert.equal(readCheckout(good, at).verdict, READY);
   assert.match(readCheckout({ ...good, head: ok('feature\n') }, at).why, /on branch feature, not main/);
   assert.match(readCheckout({ ...good, porcelain: ok(' M a.js\n?? b.js\n') }, at).why, /2 uncommitted change/);
   assert.match(readCheckout({ ...good, origin: ok('https://github.com/someone/else.git') }, at).why, /checkout of .*someone\/else\.git, not mentor24-maker\/normie/);
   assert.match(readCheckout({ ...good, head: failed(128, 'fatal: not a git repository') }, at).why, /not a git checkout/);
   assert.equal(readCheckout({ ...good, porcelain: failed(128, 'fatal: index broken') }, at).verdict, UNKNOWN);
+  // A folder inside another checkout answers every git question for that checkout: not a checkout of its own.
+  const inside = readCheckout({ ...good, top: ok('/x\n') }, at);
+  assert.equal(inside.verdict, BLOCKED);
+  assert.match(inside.why, /inside the checkout at \/x,/);
+  assert.equal(readCheckout({ ...good, top: failed(128, 'fatal: broken') }, at).verdict, UNKNOWN);
+  // The same folder by another spelling (a symlink, /private/tmp) is the same folder.
+  assert.equal(readCheckout({ ...good, top: ok('/private/x/normie\n') }, { ...at, samePath: (a, b) => a.replace(/^\/private/, '') === b }).verdict, READY);
 });
 
 test("Node: the answers' version first, then .nvmrc, then engines; none written could not tell", () => {
@@ -107,6 +137,10 @@ test("Node: the answers' version first, then .nvmrc, then engines; none written 
   assert.equal(readNode('v22.23.3', nodeNeedOf({ nodeVersion: null }, readText, '/e'), { looked: true }).verdict, UNKNOWN);
   assert.equal(readNode('v22.23.3', nodeNeedOf({ nodeVersion: null }, readText, null), { looked: false }).verdict, UNKNOWN);
   assert.equal(readNode('v22.23.3', { need: parseNodeNeed('lts/*'), text: 'lts/*', source: 'its .nvmrc' }, { looked: true }).verdict, UNKNOWN);
+  // This Mac's own version unreadable (a prerelease): could not tell, not BLOCKED.
+  const pre = readNode('v23.0.0-rc.1', { need: parseNodeNeed('>=22'), text: '>=22', source: 'its .nvmrc' }, { looked: true });
+  assert.equal(pre.verdict, UNKNOWN);
+  assert.match(pre.why, /cannot be read as a version/);
 });
 
 test('claude and doppler: signed in is ready, signed out is BLOCKED, never an email printed', () => {
@@ -209,7 +243,7 @@ function readOnlyCall({ cmd, args, cwd }, scratch) {
   }
   if (cmd === 'gh' && args[0] === 'repo' && args[1] === 'clone') return inScratch(args[3]);
   if (cmd === 'git' && args[0] === '--no-optional-locks' && args[1] === '-C') {
-    return ['rev-parse --abbrev-ref HEAD', 'remote get-url origin', 'status --porcelain'].includes(args.slice(3).join(' '));
+    return ['rev-parse --abbrev-ref HEAD', 'rev-parse --show-toplevel', 'remote get-url origin', 'status --porcelain'].includes(args.slice(3).join(' '));
   }
   if (cmd === 'claude') return a === 'auth status --json';
   if (cmd === 'doppler') return ['me --json --no-check-version', 'projects --json --no-check-version'].includes(a) || /^configs --project \S+ --json --no-check-version$/.test(a);
@@ -228,6 +262,7 @@ function fakeWorld({ checkoutPresent = true, project = true } = {}) {
     if (cmd === 'gh' && args[0] === 'api') return ok(JSON.stringify({ required_status_checks: { contexts: ['verify'] } }));
     if (cmd === 'gh' && a.startsWith('repo clone')) return ok();
     if (cmd === 'git' && a.endsWith('rev-parse --abbrev-ref HEAD')) return ok('main\n');
+    if (cmd === 'git' && a.endsWith('rev-parse --show-toplevel')) return ok('/Users/dane/WebApps/normie\n');
     if (cmd === 'git' && a.endsWith('remote get-url origin')) return ok('https://github.com/mentor24-maker/normie.git\n');
     if (cmd === 'git' && a.endsWith('status --porcelain')) return ok('');
     if (cmd === 'claude') return ok(JSON.stringify({ loggedIn: true, authMethod: 'claude.ai' }));

@@ -42,13 +42,13 @@
  */
 import { parseArgs } from 'node:util';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { findConfigFile, loadProjectConfig, ProjectConfigError } from '../../lib/projectConfig.mjs';
 import { AnswersError, answersFile, expandHome, loadAnswers, nodeMeets, parseNodeNeed } from '../../lib/onboardAnswers.mjs';
-import { compareRepo, projectEditUrl } from '../lib/repoCheck.mjs';
+import { compareRepo, normalRepo, projectEditUrl } from '../lib/repoCheck.mjs';
 import { trackerTokenEnv } from '../tracker/apiTracker.mjs';
 import { seatsForConfig } from '../../tracker/signins.mjs';
 
@@ -93,13 +93,6 @@ const ANSI = /\u001b\[[0-9;?]*[ -\/]*[@-~]/g;
 /** The last `n` non-empty lines of a command's output, colour codes removed. */
 export function lastLines(text, n) {
   return String(text ?? '').replace(ANSI, '').split(/\r?\n/).map((l) => l.trimEnd()).filter(Boolean).slice(-n);
-}
-
-/** owner/name, lower case, from any form a git remote or GitHub address takes. */
-export function normalRepo(value) {
-  return String(value ?? '').trim()
-    .replace(/^git@github\.com:/i, '').replace(/^(?:https?|ssh):\/\/(?:[^@/]+@)?github\.com\//i, '')
-    .replace(/\.git$/i, '').replace(/\/+$/, '').toLowerCase();
 }
 
 /** A failed `gh api` call's HTTP status and message, from its JSON body or its "(HTTP 404)" line. */
@@ -178,12 +171,32 @@ export function readProtection(r, branch) {
 
 // --- The Mini -------------------------------------------------------------
 
-/** The checkout folder: absent (will do), or a clean `branch` of `repo`. */
-export function readCheckout({ dir, present, head, origin, porcelain }, { repo, branch }) {
+/** Two folder paths, written alike once trailing slashes go. */
+function sameSpelling(a, b) {
+  const trim = (p) => String(p).replace(/\/+$/, '') || '/';
+  return trim(a) === trim(b);
+}
+
+/** Two folder paths that are the same folder on this disk (symlinks such as /tmp -> /private/tmp resolved). */
+export function samePathOnDisk(a, b) {
+  const real = (p) => { try { return realpathSync(p); } catch { return p; } };
+  return sameSpelling(real(a), real(b));
+}
+
+/**
+ * The checkout folder: absent (will do), or a clean `branch` of `repo`
+ * whose top folder is the folder itself, so a folder inside some other
+ * checkout cannot pass on that checkout's answers.
+ */
+export function readCheckout({ dir, present, head, top, origin, porcelain }, { repo, branch, samePath = sameSpelling }) {
   const item = `Mini: checkout ${dir}`;
   if (!present) return row(item, WILL_DO, 'absent; the setup clones it');
-  if (head.error || origin.error || porcelain.error) return row(item, UNKNOWN, `could not run git (${(head.error || origin.error || porcelain.error).code})`);
+  const broke = [head, top, origin, porcelain].find((r) => r.error);
+  if (broke) return row(item, UNKNOWN, `could not run git (${broke.error.code})`);
   if (head.status !== 0) return row(item, BLOCKED, 'the folder is there but is not a git checkout; move it aside or name another folder in checkoutDir');
+  if (top.status !== 0) return row(item, UNKNOWN, lastLines(top.stderr, 1)[0] || `git rev-parse --show-toplevel exited ${top.status}`);
+  const topDir = top.stdout.trim();
+  if (!samePath(topDir, dir)) return row(item, BLOCKED, `the folder is inside the checkout at ${topDir}, not a checkout of its own; name a folder of its own in checkoutDir`);
   if (origin.status !== 0) return row(item, BLOCKED, 'the checkout has no "origin" remote, so it is not known to be this repository');
   const remote = origin.stdout.trim();
   if (normalRepo(remote) !== normalRepo(repo)) return row(item, BLOCKED, `it is a checkout of ${remote}, not ${repo}`);
@@ -223,7 +236,9 @@ export function readNode(version, found, { looked }) {
       : `nothing to read the product's Node version from (no checkout, no clone); write one in the answers' "nodeVersion" (this Mac runs ${version})`);
   }
   if (!found.need) return row(item, UNKNOWN, `${found.source} says "${found.text}", which this cannot read as a version`);
-  return nodeMeets(version, found.need)
+  const meets = nodeMeets(version, found.need);
+  if (meets == null) return row(item, UNKNOWN, `this Mac's Node version "${version}" cannot be read as a version, so whether it meets ${found.text} (from ${found.source}) is not known`);
+  return meets
     ? row(item, READY, `this Mac runs ${version}; the product needs ${found.text}, from ${found.source}`)
     : row(item, BLOCKED, `this Mac runs ${version}, but the product needs ${found.text}, from ${found.source}`);
 }
@@ -457,8 +472,8 @@ export async function look({ answers, homeConfig, runCheck = true, deps }) {
     const present = exists(dir);
     const git = (...args) => run('git', ['--no-optional-locks', '-C', dir, ...args]);
     rows.push(readCheckout(present
-      ? { dir, present, head: git('rev-parse', '--abbrev-ref', 'HEAD'), origin: git('remote', 'get-url', 'origin'), porcelain: git('status', '--porcelain') }
-      : { dir, present }, { repo, branch }));
+      ? { dir, present, head: git('rev-parse', '--abbrev-ref', 'HEAD'), top: git('rev-parse', '--show-toplevel'), origin: git('remote', 'get-url', 'origin'), porcelain: git('status', '--porcelain') }
+      : { dir, present }, { repo, branch, samePath: deps.samePath }));
     const root = cloneRoot ?? (present ? dir : null);
     rows.push(readNode(deps.nodeVersion, nodeNeedOf(answers, readText, root), { looked: root != null }));
     rows.push(readClaude(run('claude', ['auth', 'status', '--json'])));
@@ -519,6 +534,12 @@ export function mainCheckoutOf(dir, run = realRun) {
   return /\/\.git$/.test(common) ? dirname(common) : dir;
 }
 
+/** `--product <slug>` names a product; the file it finds must be that product's. Null when they agree (or no --product). */
+export function productMismatch(product, answers, path) {
+  if (!product || answers.productSlug === product) return null;
+  return `${path} is for the product "${answers.productSlug}", not "${product}"; rename the file or correct its productSlug.`;
+}
+
 const USAGE = 'usage: npm run onboard:look -- (--answers <path> | --product <slug>) [--no-check]';
 
 async function main(argv) {
@@ -557,6 +578,11 @@ async function main(argv) {
     console.error(`look: the answers file is not usable — ${err.message}`);
     return 1;
   }
+  const mismatch = productMismatch(args.product, answers, path);
+  if (mismatch) {
+    console.error(`look: ${mismatch}`);
+    return 1;
+  }
   let token = null;
   try { token = process.env[trackerTokenEnv(process.env)] || null; } catch { token = null; }
 
@@ -574,6 +600,7 @@ async function main(argv) {
       makeScratch: () => mkdtempSync(join(tmpdir(), `onboard-${answers.productSlug}-`)),
       removeScratch: (dir) => rmSync(dir, { recursive: true, force: true }),
       nodeVersion: process.version,
+      samePath: samePathOnDisk,
       env: process.env,
       progress: (line) => console.error(`  ... ${line}`),
     },

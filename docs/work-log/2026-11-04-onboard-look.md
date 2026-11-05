@@ -18,3 +18,12 @@ Run on the Mini, it already earned its keep: Normie's own check failed on a
 fresh copy there although it passes on GitHub, and PressPlay has no check to
 run yet. This is the second of the six tickets that make product setup one
 guided step.
+
+After review: the Node line read some ordinary version rules wrongly, so it
+could call a fitting Node BLOCKED or an unfitting one ready ("at most 22"
+now means anything in the 22s; "above 22" means 23 or later; "about 22.12"
+means 22.12 patches only). A Node version it cannot read now says "could not
+tell". The checkout line also refuses a folder that sits inside some other
+checkout, `--product normie` refuses a file written for another product, and
+the look and `npm run doctor` now share one way of deciding two GitHub
+addresses are the same repository.
