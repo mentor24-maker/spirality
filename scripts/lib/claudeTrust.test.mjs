@@ -135,6 +135,15 @@ test('the command line: ensure and check against a scratch HOME', () => {
   assert.equal(cli('nope').status, 2);
 });
 
+test('run through a linked path (/tmp on a Mac), the command still runs', () => {
+  const { dir, folder } = scratch({ projects: {} });
+  const link = join(dir, 'linked');
+  spawnSync('ln', ['-s', HERE, link]);
+  const r = spawnSync(process.execPath, [join(link, 'claudeTrust.mjs'), 'check', folder], { encoding: 'utf8', env: { ...process.env, HOME: dir } });
+  assert.equal(r.status, 3, 'not a silent exit 0');
+  assert.match(r.stdout, /^trust: {4}NO/);
+});
+
 test('the installer trusts the checkout before any lane, and --status shows it', () => {
   const text = readFileSync(join(HERE, '..', 'install_loop_runner.sh'), 'utf8');
   const install = text.slice(text.indexOf('install() {'));

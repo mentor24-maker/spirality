@@ -103,7 +103,11 @@ export function checkTrusted(folder, { file = join(homedir(), '.claude.json') } 
   }
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+// Run directly, not imported. Compared as real paths: on a Mac /tmp is a link
+// to /private/tmp, and a plain comparison there would skip the command and
+// exit 0 having done nothing.
+const realOrSelf = (p) => { try { return realpathSync(p); } catch { return p; } };
+if (process.argv[1] && realOrSelf(resolve(process.argv[1])) === realOrSelf(fileURLToPath(import.meta.url))) {
   const [cmd, folder] = process.argv.slice(2);
   if (!['ensure', 'check'].includes(cmd) || !folder) {
     console.error('usage: node scripts/lib/claudeTrust.mjs ensure|check <folder>');
