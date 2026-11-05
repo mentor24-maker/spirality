@@ -101,7 +101,7 @@ test('the review and build skills tell a lane\'s pass it is the lane (hold-up 14
   }
   const review = planned.find((f) => f.to === '.claude/skills/loop-review/SKILL.md').content;
   assert.match(review, /com\.normie\.loop-review/);
-  assert.match(review, /Re-run the gates: `npm run verify:full`\./);
+  assert.match(review, /Re-run the gates: `npm run verify`\./, 'every product has npm run verify after the setup (SP-121)');
   assert.match(review, /Normie is a website, so the surface is usually a page/);
 });
 
@@ -122,6 +122,16 @@ test('rendered for another product, no adapted or made file keeps Spirality\'s o
   const review = rendered.find((f) => f.to === '.claude/skills/loop-review/SKILL.md').content;
   assert.match(review, /`merge` or `ship it` \(the/);
   assert.match(review, /\(`com\.pressplay\.relay`, every 10 minutes\)/);
+});
+
+test('every copied skill and made file names npm run verify, which the setup makes true (SP-121)', () => {
+  assert.equal(render(manifest.verifyIfAbsent, vars), 'npm run verify:full && npm run test:loop');
+  const planned = planCopies(manifest, { readSpirality: read, vars });
+  const build = planned.find((f) => f.to === '.claude/skills/loop-build/SKILL.md').content;
+  assert.match(build, /```bash\n {3}npm run verify\n {3}```/);
+  const docs = planned.find((f) => f.to === 'docs/LOOP_ENGINEERING.md').content;
+  assert.match(docs, /`npm run verify` is the definition of done\. It runs `npm run verify:full`, then the copied loop tests/);
+  assert.match(render(read('scripts/onboard/templates/CLAUDE-sections.md'), vars), /`npm run verify` is the definition of done\./);
 });
 
 test('the templates type no repository address: it comes from the settings file', () => {

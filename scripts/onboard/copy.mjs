@@ -22,9 +22,11 @@
  *   2. write    a worktree on branch spirality-setup off origin's main, kept
  *               beside the answers file (never inside the product's
  *               checkout, which the lanes need clean): the files, the
- *               settings file, the npm scripts, the CLAUDE.md sections, the
- *               .gitignore lines the lanes need (SP-120) and,
- *               if it has no verify check yet, the CI workflow.
+ *               settings file, the npm scripts (with a `verify` that runs
+ *               the check and the loop's tests, if it has no verify script),
+ *               the CLAUDE.md sections, the .gitignore lines the lanes need
+ *               (SP-120) and, if it has no verify check yet, the CI workflow
+ *               (running `npm run verify` when that was added).
  *   3. check    every "copy as is" file compared with `cmp` against the
  *               Spirality commit; any difference stops it before commit.
  *   4. pr       commit, push and one pull request; its body names the
@@ -46,7 +48,7 @@ import { loadProjectConfig, findConfigFile } from '../../lib/projectConfig.mjs';
 import { loadAnswers, onboardDir, expandHome } from '../../lib/onboardAnswers.mjs';
 import {
   planCopies, compareWithProduct, templateVars, mergeNpmScripts, withClaudeSections, withIgnoreLines,
-  verifyWorkflow, hasVerifyJob, render, ciVerdict, answersAsHandRun, SETUP_BRANCH,
+  verifyWorkflow, hasVerifyJob, verifyScriptFor, render, ciVerdict, answersAsHandRun, SETUP_BRANCH,
 } from '../../lib/onboardCopy.mjs';
 
 const BRANCH = SETUP_BRANCH;
@@ -112,17 +114,21 @@ const repoView = run('gh', ['repo', 'view', answers.githubRepo, '--json', 'visib
 if (!repoView.ok) fail('look', `could not read ${answers.githubRepo} from GitHub: ${last(repoView.err)}`);
 
 const manifest = JSON.parse(readFileSync(new URL('./manifest.json', import.meta.url), 'utf8'));
-const vars = templateVars(answers, homeConfig, { spiralityCommit: commit.slice(0, 7), visibility: repoView.out });
+const pkgText = readProduct('package.json');
+if (pkgText == null) fail('look', `${answers.githubRepo} has no package.json on main`);
+const varsFor = (ownVerify) => templateVars(answers, homeConfig, { spiralityCommit: commit.slice(0, 7), visibility: repoView.out, ownVerify });
+// Its own verify is kept; with none, it gets the check plus the loop's tests (SP-121).
+let verify;
+try { verify = verifyScriptFor(pkgText, manifest.verifyIfAbsent, varsFor(null)); } catch (e) { fail('look', e.message); }
+const vars = varsFor(verify.own);
 let planned;
 try {
   planned = compareWithProduct(planCopies(manifest, { readSpirality: textOf, vars }), readProduct);
 } catch (e) { fail('look', e.message); }
 
 // The files made from the product's own.
-const pkgText = readProduct('package.json');
-if (pkgText == null) fail('look', `${answers.githubRepo} has no package.json on main`);
 let npm;
-try { npm = mergeNpmScripts(pkgText, manifest.npmScripts); } catch (e) { fail('look', e.message); }
+try { npm = mergeNpmScripts(pkgText, { ...manifest.npmScripts, ...(verify.add ? { verify: verify.add } : {}) }); } catch (e) { fail('look', e.message); }
 if (npm.conflicts.length) {
   fail('look', `package.json already has ${npm.conflicts.map((c) => `"${c.name}" as "${c.theirs}" (the loop needs "${c.ours}")`).join('; ')}`);
 }
@@ -146,7 +152,11 @@ const extra = [
   { to: 'package.json', kind: 'made', from: `the product's own, plus ${npm.added.length ? npm.added.join(', ') : 'nothing'}`, content: npm.text },
   { to: '.gitignore', kind: 'made', from: ignore.added.length ? `the product's own, plus ${ignore.added.join(', ')}` : 'the product\'s own (it already ignores what the lanes need)', content: ignore.text },
   { to: 'CLAUDE.md', kind: 'made', from: claude.added ? 'the product\'s own, plus the loop\'s sections' : 'the product\'s own (the loop\'s sections are already there)', content: claude.text },
-  ...(haveVerify ? [] : [{ to: '.github/workflows/verify.yml', kind: 'made', from: 'the answers\' check command', content: verifyWorkflow(answers) }]),
+  ...(haveVerify ? [] : [{
+    to: '.github/workflows/verify.yml', kind: 'made',
+    from: verify.add ? 'runs npm run verify, which the setup adds' : 'the answers\' check command, then the loop\'s tests',
+    content: verifyWorkflow(answers, { verifyAdded: Boolean(verify.add) }),
+  }]),
 ];
 const all = [...planned, ...compareWithProduct(extra, readProduct)];
 
@@ -155,6 +165,9 @@ console.log(`What ${answers.productName}'s setup pull request holds, from Spiral
 for (const f of all) console.log(`  ${f.to.padEnd(width)}  ${f.kind.padEnd(7)}  ${f.status}`);
 console.log(`\n  ${all.filter((f) => f.status === 'identical').length} identical, ${all.filter((f) => f.status === 'new').length} new, ${all.filter((f) => f.status === 'replaces').length} replace what the product has`);
 if (haveVerify) console.log('  The product already has a CI job named verify; no workflow is added.');
+console.log(verify.add
+  ? `  package.json ${npm.added.includes('verify') ? 'gets' : 'already has'} "verify": "${verify.add}", the same thing CI runs.`
+  : `  package.json already has its own verify ("${verify.own}"); it is kept as it is.`);
 if (settingsText == null) console.log('  No --config given, so the settings file is not compared.');
 
 // The product's own files are never replaced unasked. The door and the
