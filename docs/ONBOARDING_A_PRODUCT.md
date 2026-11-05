@@ -211,13 +211,23 @@ changing the file: `CLICKUP_WORKSPACE_ID`, `CLICKUP_SPACE_ID`,
   - The project: `npm run tracker:signins -- create --name <project name>`
     makes it if it does not exist, or Dane makes it with the tracker page's
     Create Project form (**a browser login**).
-  - The GitHub repository field (SP-80): Dane, on the project's Edit form
-    (**a browser login**). The tracker lets only a person change a project.
+  - The GitHub repository field (SP-80): `tracker:signins create` fills it
+    from the config's `githubRepo` (SP-107), so the project's Edit page is
+    no longer needed for it. A new project is made with it; an existing
+    project with the field empty has it filled in; one that records a
+    different repository is left alone, both are printed, and the command
+    fails, for Dane to say which is right. Each write is read back. The
+    tracker's website still lets only a person change a project.
   - The sign-ins: Dane runs `tracker:signins create` on the Mini, which
     makes each actor, gives it a token, proves it at the tracker and writes
-    it into Doppler. For a product that does not run the tracker, from its
-    own checkout, with `TRACKER_DB` set to the tracker's database
-    (Spirality's `~/spirality-tracker/tracker.db`), after Spirality's own.
+    it into Doppler. For a product that does not run the tracker, with
+    `TRACKER_DB` set to the tracker's database (Spirality's
+    `~/spirality-tracker/tracker.db`), after Spirality's own. It runs from
+    any folder given the product's settings file, `--config <path to
+    spirality.project.json>`: the command and its Doppler wrapper both read
+    that file, so its sign-ins land in that product's Doppler project, and
+    no copy of the file in the current folder (the `/tmp` workaround on
+    SP-98) is needed.
 - **Check.**
   - `npm run tracker:signins -- check` asks the tracker who each seat's
     token is; every line must name its own seat.
@@ -227,13 +237,13 @@ changing the file: `CLICKUP_WORKSPACE_ID`, `CLICKUP_SPACE_ID`,
     project's repository field with the loop's own sign-in and compares it
     with `githubRepo`: the same is fine, an empty field is reported with the
     Edit form's address to fill it in, and a different one fails with both
-    named. It only reads; nothing writes the field.
+    named. It only reads; `tracker:signins create` is what writes the field.
   - `npm run clickup -- queue` from the product's repository lists its
     tickets (empty at first) with no error.
 - **Today.** The project and every product's sign-ins: **automated**
   (`tracker:signins create`), each product with its own (above). The
-  repository field: **manual**; its agreement with `githubRepo`:
-  **automated** (`npm run doctor`, SP-99). The
+  repository field: **automated** (`tracker:signins create`, SP-107); its
+  agreement with `githubRepo`: **automated** (`npm run doctor`, SP-99). The
   `tracker:signins` npm script runs under the config's own Doppler project
   (SP-96), so in another product's checkout it reads and writes that
   product's secrets, never Spirality's.

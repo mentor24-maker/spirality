@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
@@ -534,5 +534,90 @@ test('the command: run under another product\'s Doppler project, it refuses and 
     });
     assert.notEqual(r.status, 0);
     assert.match(r.stderr, /runs under Doppler project "someone-else", but the project config names "spirality".*Nothing was made or written/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('a new project is made with githubRepo as its GitHub repository, read back', async () => {
+  const f = fixture();
+  try {
+    const r = await createSignins({ ...f, env: {}, project: { ...PROJECT, repo: 'my-org/alpha' } });
+    assert.equal(r.ok, true, r.lines.join('\n'));
+    assert.equal(f.store.getProject('alpha').repo, 'my-org/alpha');
+    assert.match(r.lines.join('\n'), /project "alpha": made, .*GitHub repository my-org\/alpha\./);
+  } finally { f.cleanup(); }
+});
+
+test('an existing project with no repository has it filled in; one that already agrees is left alone', async () => {
+  const f = fixture();
+  try {
+    await createSignins({ ...f, env: {}, project: PROJECT });
+    assert.equal(f.store.getProject('alpha').repo, null);
+    const filled = await createSignins({ ...f, env: { ...f.vault }, project: { ...PROJECT, repo: 'my-org/alpha' } });
+    assert.equal(filled.ok, true, filled.lines.join('\n'));
+    assert.equal(f.store.getProject('alpha').repo, 'my-org/alpha');
+    assert.match(filled.lines.join('\n'), /project "alpha": GitHub repository was empty, now my-org\/alpha \(read back\)\./);
+
+    // GitHub ignores case, so this is the same repository.
+    const again = await createSignins({ ...f, env: { ...f.vault }, project: { ...PROJECT, repo: 'My-Org/Alpha' } });
+    assert.equal(again.ok, true, again.lines.join('\n'));
+    assert.equal(f.store.getProject('alpha').repo, 'my-org/alpha');
+    assert.match(again.lines.join('\n'), /GitHub repository already my-org\/alpha/);
+  } finally { f.cleanup(); }
+});
+
+test('an existing project with a different repository is refused, both shown, nothing written', async () => {
+  const f = fixture();
+  try {
+    await createSignins({ ...f, env: {}, project: { ...PROJECT, repo: 'my-org/old' } });
+    const r = await createSignins({ ...f, env: { ...f.vault }, project: { ...PROJECT, repo: 'my-org/alpha' } });
+    assert.equal(r.ok, false);
+    assert.match(r.lines.join('\n'), /project "alpha": REFUSED\. It records the GitHub repository my-org\/old, but githubRepo in the settings file is my-org\/alpha\. Nothing was written/);
+    assert.equal(f.store.getProject('alpha').repo, 'my-org/old');
+  } finally { f.cleanup(); }
+});
+
+test('a repository fill that does not read back says FAILED, never a success line', async () => {
+  const f = fixture();
+  try {
+    await createSignins({ ...f, env: {}, project: PROJECT });
+    // A store whose write goes nowhere: the read-back must catch it.
+    const lost = Object.create(f.store);
+    lost.updateProject = () => {};
+    const r = await createSignins({ ...f, store: lost, env: { ...f.vault }, project: { ...PROJECT, repo: 'my-org/alpha' } });
+    assert.equal(r.ok, false);
+    assert.match(r.lines.join('\n'), /project "alpha": FAILED\. Its GitHub repository was written as my-org\/alpha, but reads back as \(none\)\./);
+    assert.doesNotMatch(r.lines.join('\n'), /now my-org\/alpha/);
+
+    const refused = Object.create(f.store);
+    refused.updateProject = () => { throw new Error('disk full'); };
+    const r2 = await createSignins({ ...f, store: refused, env: { ...f.vault }, project: { ...PROJECT, repo: 'my-org/alpha' } });
+    assert.equal(r2.ok, false);
+    assert.match(r2.lines.join('\n'), /FAILED\. Its GitHub repository could not be filled in with my-org\/alpha: disk full/);
+  } finally { f.cleanup(); }
+});
+
+test('the command: --config reads a settings file outside the current folder; without it, a folder with none is named', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'signins-cli-'));
+  try {
+    const here = join(dir, 'elsewhere');
+    const away = join(dir, 'product');
+    mkdirSync(here);
+    mkdirSync(away);
+    const config = JSON.parse(readFileSync(fileURLToPath(new URL('../spirality.project.json', import.meta.url)), 'utf8'));
+    writeFileSync(join(away, 'spirality.project.json'), JSON.stringify({ ...config, dopplerProject: 'far-away-product' }));
+    const db = join(dir, 'tracker.db');
+    openStore(db).close();
+    const script = fileURLToPath(new URL('./signins.mjs', import.meta.url));
+    const env = { PATH: process.env.PATH, HOME: dir, TRACKER_DB: db, DOPPLER_PROJECT: 'someone-else', TRACKER_URL: 'http://127.0.0.1:1' };
+    for (const command of ['create', 'check']) {
+      const r = spawnSync(process.execPath, ['--no-warnings', script, command, '--config', join('..', 'product', 'spirality.project.json')], { encoding: 'utf8', cwd: here, env });
+      assert.notEqual(r.status, 0);
+      // The guard names the far file's Doppler project, so that file was the one read.
+      assert.match(r.stderr, /but the project config names "far-away-product".*Nothing was made or written/, r.stderr);
+    }
+    const none = spawnSync(process.execPath, ['--no-warnings', script, 'create', '--name', 'Alpha'], { encoding: 'utf8', cwd: here, env });
+    assert.notEqual(none.status, 0);
+    assert.match(none.stderr, /no spirality\.project\.json found in .*Nothing was made or written\. Give --config/);
+    assert.doesNotMatch(none.stderr, /at .*\.mjs:\d+/);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
