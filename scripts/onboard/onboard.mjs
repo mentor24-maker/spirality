@@ -22,12 +22,14 @@
  *             makes the product's Doppler project if it is missing and runs
  *             `tracker:signins create` against the scratch settings file with
  *             TRACKER_DB set to the tracker home's database. The wizard waits
- *             for Enter, reads back with `tracker:signins check`, and fills in
+ *             for "done", reads back with `tracker:signins check`, and fills in
  *             machineUserId (`onboard:settings fill-machine-user`).
  *   copy      SP-110's one pull request in the product's repository
  *             (`onboard:copy`), CI's verify green on it.
  *   lanes     SP-111 installs the product's lanes from the setup branch and
- *             files its setup ticket (`onboard:lanes`).
+ *             files its setup ticket (`onboard:lanes`). First it removes
+ *             onboard:copy's worktree, which still holds the setup branch
+ *             (git checks a branch out in one place only), read back.
  *   merge     STOP FOR DANE (a decision): his merge phrase on the setup
  *             ticket; the product's own relay merges. The wizard waits for the
  *             merge and reads it back on the product's main.
@@ -64,6 +66,8 @@ import { LANES, parseStatus } from '../../lib/onboardLanes.mjs';
 
 const require = createRequire(import.meta.url);
 const { findTicketId, ticketLink } = require('../../lib/clickupTicketLink.js');
+
+export const DEFAULT_MERGE_WAIT_MINUTES = 60;
 
 export const STEPS = Object.freeze(['answers', 'look', 'settings', 'signins', 'copy', 'lanes', 'merge', 'protect']);
 
@@ -137,6 +141,50 @@ export function protectionRequest(existing) {
   };
 }
 
+/**
+ * The settings on main the PUT above switches off, read from the protection
+ * answer it replaces (GitHub's PUT sets every rule, so one not in the request
+ * is turned off). The wizard says them before it writes, so nobody loses a
+ * stricter setup without being told. A required review is not here: it is
+ * already a gap, named as one.
+ */
+export function protectionDropped(before) {
+  if (!before || typeof before !== 'object') return [];
+  const on = (k) => before[k]?.enabled === true;
+  const dropped = [];
+  if (on('required_linear_history')) dropped.push('linear history required');
+  if (on('required_signatures')) dropped.push('signed commits required');
+  if (on('required_conversation_resolution')) dropped.push('conversations must be resolved');
+  if (on('lock_branch')) dropped.push('main is locked');
+  if (on('block_creations')) dropped.push('branch creation blocked');
+  if (before.restrictions) dropped.push('only some people may push');
+  return dropped;
+}
+
+/**
+ * The worktrees of a checkout (`git worktree list --porcelain`) that hold
+ * `branch`, other than the checkout itself. Git lets a branch be checked out
+ * in one place only, so `onboard:lanes` cannot check out the setup branch in
+ * the product's own folder while onboard:copy's worktree still holds it.
+ * Git always lists the checkout itself first, and prints paths resolved
+ * (/private/var for /var), so the first entry is skipped, never compared.
+ */
+export function worktreesOnBranch(porcelain, branch) {
+  const found = [];
+  const blocks = String(porcelain || '').trim().split(/\n\s*\n/).slice(1);
+  for (const block of blocks) {
+    const lines = block.split('\n').map((l) => l.trim());
+    const path = lines.find((l) => l.startsWith('worktree '))?.slice('worktree '.length);
+    if (path && lines.includes(`branch refs/heads/${branch}`)) found.push(path);
+  }
+  return found;
+}
+
+/** The command that reruns this wizard as it was started (every flag that changes what it does). */
+export function rerunCommand(opts) {
+  return `npm run onboard -- --product ${opts.product}${opts.allowReplace ? ' --allow-replace' : ''}${opts.mergeWaitMinutes !== DEFAULT_MERGE_WAIT_MINUTES ? ` --merge-wait-minutes ${opts.mergeWaitMinutes}` : ''}`;
+}
+
 /** CI's verify on a commit, from `gh api repos/<repo>/commits/<sha>/check-runs`: pass, fail, pending or none. */
 export function mainVerifyVerdict(answer) {
   const runs = (answer?.check_runs ?? []).filter((r) => r && r.name === 'verify');
@@ -197,7 +245,7 @@ const last = (text, n = 4) => String(text || '').split('\n').map((l) => l.trim()
  *   run(cmd, args, { cwd, input, show }) -> { code, out, err }; `show` lets
  *                                         Dane watch a step script's own lines
  *   ask(question) -> string, or null when there is no Terminal to ask in
- *   pause(text) -> true once Enter is pressed, or null with no Terminal
+ *   pause(text) -> true once Dane says it is done, or null with no Terminal
  *   print(line), readText(path) -> text|null, writeText(path, text),
  *   appendText(path, text), mkdir(dir), sleep(ms), now() -> ms
  * Returns the exit code.
@@ -205,7 +253,7 @@ const last = (text, n = 4) => String(text || '').split('\n').map((l) => l.trim()
 export async function onboard(opts, deps) {
   const { homeConfig, spiralityDir } = deps;
   const slug = opts.product;
-  const rerun = `npm run onboard -- --product ${slug}${opts.allowReplace ? ' --allow-replace' : ''}`;
+  const rerun = rerunCommand(opts);
   const logFile = join(expandHome(homeConfig.logDir), `${slug}-onboard.log`);
   const say = (step, line) => deps.print(`${step.padEnd(9)} ${line}`);
   const record = (step, outcome, text) => {
@@ -278,7 +326,11 @@ export async function onboard(opts, deps) {
       const key = fieldNamed(err.message);
       if (key && missing.some((f) => f.key === key)) {
         const { [key]: _drop, ...rest } = raw;
-        try { deps.writeText(aFile, `${JSON.stringify(rest, null, 2)}\n`); } catch { /* the FAILED line below still says what to fix */ }
+        const kept = `${JSON.stringify(rest, null, 2)}\n`;
+        let why = null;
+        try { deps.writeText(aFile, kept); } catch (e) { why = e.code || e.message; }
+        if (why == null && deps.readText(aFile) !== kept) why = 'it did not read back as written';
+        if (why != null) fail(step, `${err.message}. Taking "${key}" out of ${aFile} failed too (${why}): fix it there by hand`);
         fail(step, `${err.message}. The rerun asks "${key}" again`);
       }
       fail(step, `${err.message}. Fix it in ${aFile}`);
@@ -367,7 +419,7 @@ export async function onboard(opts, deps) {
         deps.print('');
         for (const line of pasteBlock({ spiralityDir, answers, settingsFile, trackerDb, projectExists, configExists })) deps.print(`  ${line}`);
         deps.print('');
-        const went = await deps.pause('Press Enter here once it has finished. ');
+        const went = await deps.pause('Type done here and press Enter once it has finished: ');
         if (went == null) stop(step, 'waiting on you to run the block above (no Terminal here to wait in)');
         const after = check();
         if (after.code !== 0) fail(step, `tracker:signins check does not pass yet: ${last(after.err || after.out)}`);
@@ -424,6 +476,22 @@ export async function onboard(opts, deps) {
       const notLoaded = ticket ? lanesLoaded() : LANES;
       if (ticket && !notLoaded.length) skip(step, `${prUrl} links ${ticket}, and every lane is loaded`);
       else {
+        // onboard:copy keeps its worktree on the setup branch; git lets a
+        // branch be checked out in one place only, so it goes before lanes
+        // checks the branch out in the product's own folder. Its work is
+        // pushed and the branch stays; git refuses if anything is unsaved.
+        const holders = () => {
+          const l = run('git', ['worktree', 'list', '--porcelain'], { cwd: checkout });
+          if (l.code !== 0) fail(step, `git worktree list in ${checkout}: ${last(l.err || l.out)}`);
+          return worktreesOnBranch(l.out, SETUP_BRANCH);
+        };
+        for (const wt of holders()) {
+          const rm = run('git', ['worktree', 'remove', wt], { cwd: checkout });
+          if (rm.code !== 0) fail(step, `the setup worktree ${wt} holds ${SETUP_BRANCH}, and git would not remove it: ${last(rm.err || rm.out)}. Look at it, remove it, then rerun`);
+          say(step, `removed onboard:copy's worktree ${wt} (its work is pushed), so ${SETUP_BRANCH} can be checked out in ${checkout}`);
+        }
+        const left = holders();
+        if (left.length) fail(step, `${SETUP_BRANCH} is still held by the worktree at ${left.join(', ')} after removing it`);
         const r = npm('onboard:lanes', ['--checkout', checkout, '--branch', SETUP_BRANCH, '--pr', prUrl], { show: true });
         if (r.code !== 0) fail(step, `onboard:lanes exit ${r.code} (its FAILED line is above)`);
         ticket = linkedTicket();
@@ -490,6 +558,11 @@ export async function onboard(opts, deps) {
       if (verify.verdict === 'pending') fail(step, `verify on main (${sha.slice(0, 7)}) is still running after 30 minutes`);
       if (verify.verdict === 'fail') fail(step, `verify on main (${sha.slice(0, 7)}) did not pass: ${verify.why}`);
       say(step, verify.verdict === 'pass' ? `verify passed on main (${sha.slice(0, 7)})` : `main's newest commit ${sha.slice(0, 7)} has ${verify.why}; the setup pull request's verify passed`);
+      const dropped = protectionDropped(before);
+      if (dropped.length) {
+        say(step, `main's protection has more than the setup sets, and this switches it off: ${dropped.join('; ')}. Set it again on GitHub if you want it`);
+        record(step, 'note', `switched off: ${dropped.join('; ')}`);
+      }
       const put = run('gh', ['api', '-X', 'PUT', `repos/${answers.githubRepo}/branches/main/protection`, '--input', '-'], { input: JSON.stringify(protectionRequest(before)) });
       if (put.code !== 0) fail(step, `protecting main: ${last(put.err || put.out)}`);
       const still = protectionGaps(protection());
@@ -518,7 +591,7 @@ export const USAGE = 'usage: npm run onboard -- --product <slug> [--allow-replac
 
 /** Reads `--product`, `--allow-replace` and `--merge-wait-minutes`. Returns { opts } or { error }. */
 export function parseOnboardArgs(argv) {
-  const opts = { product: null, allowReplace: false, mergeWaitMinutes: 60 };
+  const opts = { product: null, allowReplace: false, mergeWaitMinutes: DEFAULT_MERGE_WAIT_MINUTES };
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
     if (a === '--product') opts.product = argv[++i];
@@ -559,23 +632,41 @@ async function main(argv) {
   const spiralityDir = dirname(file);
   const common = realRun('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], { cwd: spiralityDir }).out;
   const homeRoot = common ? common.replace(/\/\.git$/, '') : spiralityDir;
-  const tty = process.stdin.isTTY;
-  const rl = tty ? createInterface({ input: process.stdin, output: process.stdout }) : null;
-  try {
-    return await onboard(parsed.opts, {
-      homeConfig, homeRoot, spiralityDir,
-      run: realRun,
-      ask: async (q) => (rl ? rl.question(q) : null),
-      pause: async (q) => (rl ? (await rl.question(q), true) : null),
-      print: (line) => console.log(line),
-      readText: (p) => { try { return readFileSync(p, 'utf8'); } catch (err) { if (err.code === 'ENOENT' || err.code === 'ENOTDIR' || err.code === 'EISDIR') return null; throw err; } },
-      writeText: (p, t) => writeFileSync(p, t),
-      appendText: (p, t) => { mkdirSync(dirname(p), { recursive: true }); appendFileSync(p, t); },
-      mkdir: (d) => mkdirSync(d, { recursive: true }),
-      sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
-      now: () => Date.now(),
-    });
-  } finally { rl?.close(); }
+  const tty = Boolean(process.stdin.isTTY);
+  return onboard(parsed.opts, {
+    homeConfig, homeRoot, spiralityDir,
+    run: realRun,
+    ask: (q) => (tty ? askOnce(q) : null),
+    // A stray Enter pressed while a step ran is held by the Terminal and
+    // read here, so the wait takes a word, never a bare Enter.
+    pause: async (q) => {
+      if (!tty) return null;
+      while (!/^done$/i.test(String(await askOnce(q)).trim())) { /* ask again */ }
+      return true;
+    },
+    print: (line) => console.log(line),
+    readText: (p) => { try { return readFileSync(p, 'utf8'); } catch (err) { if (err.code === 'ENOENT' || err.code === 'ENOTDIR' || err.code === 'EISDIR') return null; throw err; } },
+    writeText: (p, t) => writeFileSync(p, t),
+    appendText: (p, t) => { mkdirSync(dirname(p), { recursive: true }); appendFileSync(p, t); },
+    mkdir: (d) => mkdirSync(d, { recursive: true }),
+    sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+    now: () => Date.now(),
+  });
+}
+
+/**
+ * One question in the Terminal. The prompt is opened for that question only
+ * and closed straight after, so between questions the Terminal is not held
+ * and Ctrl-C stops the wizard as it stops any command.
+ */
+async function askOnce(question) {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  rl.on('SIGINT', () => {
+    rl.close();
+    console.log('\nStopped (Ctrl-C). Rerun the same command to pick up where it stopped.');
+    process.exit(130);
+  });
+  try { return await rl.question(question); } finally { rl.close(); }
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {

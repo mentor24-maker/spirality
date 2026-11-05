@@ -303,7 +303,13 @@ Dane's stops are exactly three: the answers that are his decisions (asked
 only when the answers file does not have them), the paste block (real
 secret values), and his merge phrase on the setup ticket. The ticket for
 first real work (step 8) is not filed by the wizard; it prints the page to
-watch instead. Each step checks first whether it is already done; once the
+watch instead. Before the lanes step, the wizard removes the worktree
+`onboard:copy` keeps on the setup branch (git checks a branch out in one
+place only, and the lanes check it out in the product's own folder), and
+reads back that nothing else holds it. At the paste block it waits for the
+word `done`, not a bare Enter, so an Enter pressed while a step ran is not
+taken as the answer. Protecting `main` names any stricter setting already
+there that it switches off (GitHub's protection write replaces them all). Each step checks first whether it is already done; once the
 product's `main` has its settings file with its own machine id, every step
 up to the merge is.
 

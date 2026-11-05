@@ -7,7 +7,8 @@ import { validateProjectConfig } from '../../lib/projectConfig.mjs';
 import { settingsDraft, resolveAnswers } from '../../lib/onboardAnswers.mjs';
 import {
   DANE_FIELDS, STEPS, answerValue, fieldNamed, loggedDone, mainVerifyVerdict, mountainStamp, onboard,
-  parseOnboardArgs, pasteBlock, protectionGaps, protectionRequest, shellQuote, unanswered,
+  parseOnboardArgs, pasteBlock, protectionDropped, protectionGaps, protectionRequest, rerunCommand, shellQuote,
+  unanswered, worktreesOnBranch,
 } from './onboard.mjs';
 
 const GOOD_PROTECTION = {
@@ -101,6 +102,29 @@ test('the arguments: --product is a slug, the merge wait a positive number', () 
   assert.match(parseOnboardArgs(['--product', 'x', '--nope']).error, /unknown/);
 });
 
+test('worktreesOnBranch finds the worktrees holding a branch, never the checkout itself', () => {
+  const porcelain = [
+    'worktree /p/pressplay\nHEAD aaa\nbranch refs/heads/main',
+    'worktree /logs/onboard/pressplay-setup\nHEAD bbb\nbranch refs/heads/spirality-setup',
+    'worktree /tmp/other\nHEAD ccc\ndetached',
+  ].join('\n\n') + '\n';
+  assert.deepEqual(worktreesOnBranch(porcelain, 'spirality-setup'), ['/logs/onboard/pressplay-setup']);
+  assert.deepEqual(worktreesOnBranch(porcelain, 'spirality-setup-2'), []);
+  assert.deepEqual(worktreesOnBranch('worktree /p/pressplay\nHEAD a\nbranch refs/heads/spirality-setup\n', 'spirality-setup'), [], 'the checkout already on it is not in the way');
+  assert.deepEqual(worktreesOnBranch('', 'x'), []);
+});
+
+test('rerunCommand keeps every flag the run was started with', () => {
+  assert.equal(rerunCommand({ product: 'pressplay', allowReplace: false, mergeWaitMinutes: 60 }), 'npm run onboard -- --product pressplay');
+  assert.equal(rerunCommand({ product: 'pressplay', allowReplace: true, mergeWaitMinutes: 240 }), 'npm run onboard -- --product pressplay --allow-replace --merge-wait-minutes 240');
+});
+
+test('protectionDropped names the stricter settings the PUT switches off', () => {
+  assert.deepEqual(protectionDropped(GOOD_PROTECTION), []);
+  assert.deepEqual(protectionDropped(null), []);
+  assert.deepEqual(protectionDropped({ ...GOOD_PROTECTION, required_linear_history: { enabled: true }, restrictions: { users: [] } }), ['linear history required', 'only some people may push']);
+});
+
 // --- The wizard, against a fake world ------------------------------------
 
 const PR = 'https://github.com/mentor24-maker/pressplay/pull/1';
@@ -136,7 +160,10 @@ function makeWorld(t) {
     signinsMade: false, prOpen: false, ticket: null, lanesLoaded: false, merged: false,
     protection: null, mergeAfterPolls: 1, polls: 0, dopplerProject: false,
     calls: [], asked: [], paused: 0, printed: [],
+    // onboard:copy's worktree, on the setup branch; true once copy has run (as the real one keeps it).
+    setupWorktree: false, worktreeRemoveRefused: false,
   };
+  const setupWorktreePath = join(homeConfig.logDir, 'onboard', 'pressplay-setup');
   const settingsFile = join(homeConfig.logDir, 'onboard', 'pressplay-settings', 'spirality.project.json');
   const answersPath = join(homeConfig.logDir, 'onboard', 'pressplay.answers.json');
   const settings = (machineUserId) => {
@@ -155,6 +182,16 @@ function makeWorld(t) {
       if (args[0] === 'show') return w.merged ? ok(JSON.stringify(settings('9'))) : no('fatal: path does not exist', 128);
       if (args[0] === 'merge-base') return w.merged ? ok() : no();
       if (args[0] === 'rev-parse') return ok('abc1234def');
+      if (args[0] === 'worktree' && args[1] === 'list') {
+        const blocks = [`worktree ${checkout}\nHEAD abc\nbranch refs/heads/main`];
+        if (w.setupWorktree) blocks.push(`worktree ${setupWorktreePath}\nHEAD def\nbranch refs/heads/spirality-setup`);
+        return ok(blocks.join('\n\n'));
+      }
+      if (args[0] === 'worktree' && args[1] === 'remove' && args[2] === setupWorktreePath) {
+        if (w.worktreeRemoveRefused) return no(`fatal: '${setupWorktreePath}' contains modified or untracked files, use --force to delete it`, 128);
+        w.setupWorktree = false;
+        return ok();
+      }
     }
     if (cmd === 'npm') {
       const [, , script, , ...rest] = args;
@@ -173,10 +210,13 @@ function makeWorld(t) {
       if (script === 'onboard:copy') {
         if (breaks('copy')) return no();
         w.prOpen = true;
+        w.setupWorktree = true;
         return ok();
       }
       if (script === 'onboard:lanes') {
         if (breaks('lanes')) return no();
+        // As git does: the branch cannot be checked out here while a worktree holds it.
+        if (w.setupWorktree) return no(`fatal: 'spirality-setup' is already used by worktree at '${setupWorktreePath}'`, 128);
         w.ticket = 'PP-1';
         w.lanesLoaded = true;
         return ok();
@@ -228,6 +268,7 @@ function makeWorld(t) {
   });
   const opts = { product: 'pressplay', allowReplace: false, mergeWaitMinutes: 60 };
   const go = (over) => onboard(opts, deps(over));
+  const homeOpts = (more, over) => onboard({ ...opts, ...more }, deps(over));
   const reset = () => { w.calls = []; w.asked = []; w.paused = 0; w.printed = []; w.polls = 0; };
   const answersFile = answersPath;
   // The answers in place, written as the wizard would, with a checkout path in this scratch folder.
@@ -235,7 +276,7 @@ function makeWorld(t) {
     mkdirSync(dirname(answersPath), { recursive: true });
     writeFileSync(answersPath, JSON.stringify({ productSlug: 'pressplay', productName: 'PressPlay', githubRepo: 'mentor24-maker/pressplay', trackerPrefix: 'PP', mergePhrases: null, autoMergeLanes: [], extraGovernancePaths: null, description: 'PressPlay plays things.', checkoutDir: checkout }));
   };
-  return { w, go, run, reset, answersFile, settingsFile, seedAnswers, logFile: join(homeConfig.logDir, 'pressplay-onboard.log') };
+  return { w, go, homeOpts, run, reset, setupWorktreePath, answersFile, settingsFile, seedAnswers, logFile: join(homeConfig.logDir, 'pressplay-onboard.log') };
 }
 
 const out = (w) => w.printed.join('\n');
@@ -368,4 +409,53 @@ test('a setup pull request closed without merging: FAILED at merge, main left un
   assert.equal(await go({ run: closed }), 1, out(w));
   assert.match(out(w), /^FAILED: merge: .*is CLOSED, not merged/m);
   assert.ok(!w.calls.some((c) => c.includes('-X PUT')));
+});
+
+test('lanes runs only once copy\'s worktree no longer holds the setup branch, removed and read back', async (t) => {
+  const { w, go, setupWorktreePath } = makeWorld(t);
+  assert.equal(await go(), 0, out(w));
+  const removed = w.calls.findIndex((c) => c === `git worktree remove ${setupWorktreePath}`);
+  const lanes = w.calls.findIndex((c) => c.includes('onboard:lanes'));
+  assert.ok(removed >= 0, 'the worktree was removed');
+  assert.ok(removed < lanes, 'before lanes ran');
+  assert.ok(w.calls.slice(removed + 1, lanes).some((c) => c === 'git worktree list --porcelain'), 'read back before lanes');
+  assert.match(out(w), /^lanes\s+removed onboard:copy's worktree/m);
+});
+
+test('a setup worktree git will not remove: FAILED at lanes naming it, lanes not run, and the rerun resumes once it is gone', async (t) => {
+  const { w, go, reset, setupWorktreePath } = makeWorld(t);
+  w.worktreeRemoveRefused = true;
+  assert.equal(await go(), 1, out(w));
+  assert.match(out(w), new RegExp(`^FAILED: lanes: the setup worktree ${setupWorktreePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} holds spirality-setup.*modified or untracked`, 'm'));
+  assert.ok(!w.calls.some((c) => c.includes('onboard:lanes')), 'lanes did not run');
+  w.worktreeRemoveRefused = false;
+  reset();
+  assert.equal(await go(), 0, out(w));
+  assert.match(out(w), /^copy\s+already done/m);
+  assert.equal(w.asked.length, 0);
+});
+
+test('a stop after a run started with a longer merge wait: the rerun line keeps it', async (t) => {
+  const { w, homeOpts } = makeWorld(t);
+  w.fail = 'merge';
+  assert.equal(await homeOpts({ mergeWaitMinutes: 240 }), 3, out(w));
+  assert.match(out(w), /^  npm run onboard -- --product pressplay --merge-wait-minutes 240$/m);
+});
+
+test('an answer taken back out but the answers file cannot be written: FAILED says so, not that the rerun asks again', async (t) => {
+  const { w, go } = makeWorld(t);
+  let writes = 0;
+  const bad = async (q) => { w.asked.push(q); return q.startsWith('GitHub repository') ? 'not a repo' : (Object.entries(DANE_ANSWERS).find(([k]) => q.startsWith(k))?.[1] ?? ''); };
+  const writeText = (p, text) => { writes += 1; if (writes > 1) { const e = new Error('read-only'); e.code = 'EROFS'; throw e; } writeFileSync(p, text); };
+  assert.equal(await go({ ask: bad, writeText }), 1, out(w));
+  assert.match(out(w), /^FAILED: answers: .*Taking "githubRepo" out of .* failed too \(EROFS\): fix it there by hand/m);
+  assert.ok(!/asks "githubRepo" again/.test(out(w)));
+});
+
+test('main\'s stricter protection is named before the PUT switches it off', async (t) => {
+  const { w, go } = makeWorld(t);
+  w.protection = { required_linear_history: { enabled: true } };
+  assert.equal(await go(), 0, out(w));
+  const said = w.printed.findIndex((l) => /switches it off: linear history required/.test(l));
+  assert.ok(said >= 0, out(w));
 });
