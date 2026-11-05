@@ -18,8 +18,9 @@
  *    kept, and tried again on the next change the tracker writes. A kept one
  *    whose ticket has left the operator's lane by then is dropped: he has
  *    already answered it.
- *  - **Sends happen one at a time**, so two writes arriving together cannot
- *    both retry the same kept email.
+ *  - **Sends happen one at a time** on each channel, so two writes arriving
+ *    together cannot both retry the same kept email. The email and the text
+ *    each have their own queue, so a slow one never holds up the other.
  *
  * **Where it goes.** To the ticket's project's alert email when the project
  * has one (its Edit project page), else to TRACKER_NOTIFY_TO, the tracker's
@@ -108,20 +109,33 @@ export function handOverText({ ticket, ask, pageUrl }) {
 
 /**
  * One channel of the notifier (the email, or the text): its own record of
- * what it sent and what it keeps, so one channel failing never stops or
- * repeats the other. `deliver(ticket, project)` sends one hand-over and
- * resolves to the words the log line ends with ("to TRACKER_NOTIFY_TO"),
- * throws when the service refused, or resolves to null when this project
- * cannot get one (a text to a project with no alert phone), and then the
- * hand-over is dropped rather than kept.
+ * what it sent and what it keeps, and its own queue, so one channel failing
+ * or hanging never stops, delays or repeats the other. `deliver(ticket,
+ * project)` sends one hand-over and resolves to the words the log line ends
+ * with ("to TRACKER_NOTIFY_TO"), throws when the service refused, or
+ * resolves to null when this project cannot get one (a text to a project
+ * with no alert phone), and then the hand-over is dropped rather than kept.
+ *
+ * `retryMs` (0: the next change) is how long a kept hand-over waits before
+ * it is tried again, doubling with each failed try up to `maxRetryMs`. A
+ * write to the kept ticket itself tries it again at once.
  */
-function createChannel({ kind, store, deliver, log }) {
+function createChannel({ kind, store, deliver, log, retryMs = 0, maxRetryMs = retryMs, now = Date.now }) {
   const sent = new Set();
-  /** ticket id -> the one unsent hand-over it holds: `{ key, attempts }`. */
+  /** ticket id -> the one unsent hand-over it holds: `{ key, attempts, notBefore }`. */
   const pending = new Map();
+  let queue = Promise.resolve();
+  /** A flush queued and not yet started: a write arriving meanwhile joins it rather than queueing another. */
+  let waiting = null;
+
+  const waitFor = (attempts) => (retryMs > 0 ? Math.min(retryMs * 2 ** (attempts - 1), maxRetryMs) : 0);
+  const whenAgain = (ms) => (ms > 0
+    ? `It is tried again in ${ms >= 60_000 ? `${Math.round(ms / 60_000)} minute(s)` : `${Math.round(ms / 1000)} second(s)`}, or at once on that ticket's next change.`
+    : 'It is tried again on the next change.');
 
   async function trySend(ticketId) {
     const wanted = pending.get(ticketId);
+    if (!wanted || wanted.notBefore > now()) return;
     const ticket = store.getTicket(ticketId);
     if (!ticket || !isHandOverStatus(ticket.status)) {
       pending.delete(ticketId);
@@ -134,7 +148,9 @@ function createChannel({ kind, store, deliver, log }) {
     try {
       where = await deliver(ticket, project, wanted);
     } catch (err) {
-      log(`hand-over ${kind} NOT sent: ${ticketId} (${ticket.status}) ${err?.where ?? ''}${err?.where ? ', ' : ''}try ${wanted.attempts}: ${err?.message ?? err}. It is tried again on the next change.`);
+      const ms = waitFor(wanted.attempts);
+      wanted.notBefore = now() + ms;
+      log(`hand-over ${kind} NOT sent: ${ticketId} (${ticket.status}) ${err?.where ?? ''}${err?.where ? ', ' : ''}try ${wanted.attempts}: ${err?.message ?? err}. ${whenAgain(ms)}`);
       return;
     }
     if (pending.get(ticketId) === wanted) pending.delete(ticketId);
@@ -143,15 +159,37 @@ function createChannel({ kind, store, deliver, log }) {
     log(`hand-over ${kind} sent: ${ticketId} (${ticket.status}) ${where}.`);
   }
 
+  async function flush() {
+    for (const id of [...pending.keys()]) {
+      try {
+        await trySend(id);
+      } catch (err) {
+        log(`hand-over ${kind} failed unexpectedly: ${err?.message ?? err}`);
+      }
+    }
+  }
+
   return {
+    /** Hear one write: a new hand-over is kept to send; a write to a kept ticket makes it due now. */
     note(ticket, changed) {
-      if (ticket && changed.includes('status') && isHandOverStatus(ticket.status)) {
+      if (!ticket) return;
+      if (changed.includes('status') && isHandOverStatus(ticket.status)) {
         const key = `${ticket.id}@${ticket.version}`;
-        if (!sent.has(key)) pending.set(ticket.id, { key, attempts: 0 });
+        if (!sent.has(key)) pending.set(ticket.id, { key, attempts: 0, notBefore: 0 });
+      } else if (pending.has(ticket.id)) {
+        pending.get(ticket.id).notBefore = 0;
       }
     },
-    async flush() {
-      for (const id of [...pending.keys()]) await trySend(id);
+    /** Queue a try of everything kept and due, behind this channel's own earlier tries only. */
+    kick() {
+      if (waiting) return waiting;
+      const mine = queue.then(() => { waiting = null; return flush(); });
+      waiting = mine;
+      queue = mine.catch(() => {});
+      return queue;
+    },
+    settled() {
+      return queue;
     },
     pending() {
       return [...pending.values()].map((p) => p.key);
@@ -166,16 +204,26 @@ function failedTo(where, err) {
   return out;
 }
 
+/** How long a failed text waits before it is tried again: one minute, doubling, at most half an hour. */
+export const TEXT_RETRY_MS = 60_000;
+export const TEXT_RETRY_MAX_MS = 30 * 60_000;
+
 /**
  * The notifier the server calls after every write it has already answered.
  * `send` is the mail service (null: email off), `to` is the default address
  * (a project's alert email goes first), `pageUrl` the tracker's address for
- * the link. `sendText({ to, text })` is the text service (null: texts off);
- * a text goes to the ticket's project's alert phone, and a project with no
- * alert phone gets none, said once in the log until it has one.
+ * the email's link. `sendText({ to, text })` is the text service (null:
+ * texts off), and `textPageUrl` (default `pageUrl`) the address for its
+ * link, which must open on his phone; a text goes to the ticket's project's
+ * alert phone, and a project with no alert phone gets none, said once in the
+ * log until it has one. A failed text waits `textRetryMs`, doubling up to
+ * `textRetryMaxMs`, before it is tried again (a stuck Messages costs up to
+ * its time limit per try), or is tried at once on its own ticket's next change.
  */
-export function createNotifier({ store, send = null, to = null, pageUrl, sendText = null, log = () => {} }) {
-  let queue = Promise.resolve();
+export function createNotifier({
+  store, send = null, to = null, pageUrl, sendText = null, textPageUrl = pageUrl, log = () => {},
+  textRetryMs = TEXT_RETRY_MS, textRetryMaxMs = TEXT_RETRY_MAX_MS, now = Date.now,
+}) {
   const toldNoPhone = new Set();
   const channels = [];
 
@@ -200,7 +248,7 @@ export function createNotifier({ store, send = null, to = null, pageUrl, sendTex
   if (email) channels.push(email);
 
   const text = sendText && createChannel({
-    kind: 'text', store, log,
+    kind: 'text', store, log, retryMs: textRetryMs, maxRetryMs: Math.max(textRetryMs, textRetryMaxMs), now,
     async deliver(ticket, project) {
       const slug = project?.slug ?? ticket.project;
       if (!project?.alertPhone) {
@@ -212,7 +260,7 @@ export function createNotifier({ store, send = null, to = null, pageUrl, sendTex
       }
       toldNoPhone.delete(slug);
       const where = "to the project's alert phone";
-      const body = handOverText({ ticket, ask: newestAsk(store.listComments(ticket.id)), pageUrl });
+      const body = handOverText({ ticket, ask: newestAsk(store.listComments(ticket.id)), pageUrl: textPageUrl });
       try {
         await sendText({ to: project.alertPhone, text: body });
       } catch (err) {
@@ -223,17 +271,7 @@ export function createNotifier({ store, send = null, to = null, pageUrl, sendTex
   });
   if (text) channels.push(text);
 
-  async function run(ticket, changed) {
-    for (const channel of channels) channel.note(ticket, changed);
-    // Each channel on its own: one that throws unexpectedly never stops the other.
-    for (const channel of channels) {
-      try {
-        await channel.flush();
-      } catch (err) {
-        log(`hand-over ${channel === email ? 'email' : 'text'} failed unexpectedly: ${err?.message ?? err}`);
-      }
-    }
-  }
+  const all = () => Promise.all(channels.map((c) => c.settled())).then(() => {});
 
   return {
     enabled: channels.length > 0,
@@ -241,20 +279,24 @@ export function createNotifier({ store, send = null, to = null, pageUrl, sendTex
     /**
      * After a write: `ticket` as it now stands (null for a write that changed
      * no ticket's fields, such as a comment) and the fields it changed. Never
-     * throws; resolves once this write's emails and texts, and any kept
-     * ones, are tried.
+     * throws. Each channel tries this write's hand-over, and its kept ones
+     * that are due, in its own queue, so a hanging text never holds up an
+     * email. Resolves once both channels have.
      */
     afterWrite(ticket, changed = []) {
       if (!channels.length) return Promise.resolve();
-      queue = queue.then(() => run(ticket, changed)).catch((err) => {
-        log(`hand-over notice failed unexpectedly: ${err?.message ?? err}`);
-      });
-      return queue;
+      for (const channel of channels) channel.note(ticket, changed);
+      return Promise.all(channels.map((c) => c.kick())).then(() => {});
     },
 
-    /** Resolves once every write heard so far has been dealt with. */
+    /** Resolves once every write heard so far has been dealt with, on both channels. */
     settled() {
-      return queue;
+      return all();
+    },
+
+    /** Resolves once every write heard so far has been dealt with by the email alone. */
+    emailSettled() {
+      return email ? email.settled() : Promise.resolve();
     },
 
     /** The hand-over emails not yet sent, by ticket id. For the tests and the log. */
@@ -388,7 +430,9 @@ export function imessageSender({ run, osascript = 'osascript', timeoutMs = 30_00
     } catch (err) {
       if (err?.killed || err?.signal) throw new Error(`Messages did not answer within ${Math.round(timeoutMs / 1000)} seconds (is macOS asking to allow control of Messages on the Mini's screen?)`);
       if (err?.code === 'ENOENT') throw new Error(`${osascript} is not on this machine`);
-      throw new Error(`Messages refused it: ${scrub(err?.stderr || err?.message || err) || `osascript exited ${err?.code}`}`);
+      // Only osascript's own complaint is logged: execFile's message repeats the command line, text and number included.
+      const why = scrub(err?.stderr);
+      throw new Error(`Messages refused it: ${why || `osascript exited ${err?.code ?? 'with an error'}`}`);
     }
   };
 }

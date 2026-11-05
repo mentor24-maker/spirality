@@ -836,12 +836,13 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     const mail = await loadMailSettings({ host, port, log });
     if (!mail.send) log(`hand-over email: off. ${mail.why}`);
     const text = textSettings({ run: promisify(execFile) });
-    const textPageUrl = mail.pageUrl ?? sharedPageUrl({ host, port });
+    // The text's link opens on his phone: always the shared address, never this machine's own 127.0.0.1.
+    const textPageUrl = sharedPageUrl({ host, port });
     log(text.sendText
       ? `hand-over text: on, through Messages on this Mac, to each project's alert phone, linking to ${textPageUrl}.`
       : `hand-over text: off. ${text.why}`);
     const notifier = mail.send || text.sendText
-      ? createNotifier({ store, send: mail.send, to: mail.to, pageUrl: mail.pageUrl ?? textPageUrl, sendText: text.sendText, log })
+      ? createNotifier({ store, send: mail.send, to: mail.to, pageUrl: mail.pageUrl ?? textPageUrl, sendText: text.sendText, textPageUrl, log })
       : null;
     log(mail.account?.send ? `reset email: on, through Resend, linking to ${mail.account.pageUrl}.` : `reset email: off. ${MAIL_KEY} could not be read, so "Forgot password?" sends nothing.`);
     let defaultProject = null;

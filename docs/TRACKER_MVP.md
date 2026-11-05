@@ -358,9 +358,16 @@ on. No service, no key: Messages sends it as the Apple ID it is signed into.
 - **The same rules as the email.** One text per hand-over (the same
   `<ticket>@<version>` key), never two. The text keeps its own record, apart
   from the email's, so a failed text never stops or repeats the email and a
-  failed email never stops or repeats the text. A failed text never fails
-  the move; it is logged as `hand-over text NOT sent`, with the reason, and
-  tried again on the next change the tracker writes.
+  failed email never stops or repeats the text. Each also has its own queue,
+  so a text stuck waiting on Messages never holds up an email. A failed text
+  never fails the move; it is logged as `hand-over text NOT sent`, with the
+  reason, and tried again after a wait: one minute, then two, doubling up to
+  half an hour, or at once when its own ticket next changes. (A stuck
+  Messages costs up to 30 seconds a try, so it is not tried on every write.)
+- **Its link opens on a phone.** The text links to the settings file's
+  `trackerUrl` (`http://mac-mini.local:4180`), never the Mini's own
+  `127.0.0.1` address that Doppler gives the loops, which would not open
+  anywhere but the Mini.
 - **What it says:** `Waiting on you: <id> <name>`, the status, the card's
   ask cut to about 300 characters, and the ticket's link.
 - **How it is sent.** `osascript` runs a fixed AppleScript that takes the
@@ -394,7 +401,8 @@ on. No service, no key: Messages sends it as the Apple ID it is signed into.
      `node` (Homebrew's, `/opt/homebrew/bin/node`). Its first real hand-over
      asks **"“node” wants access to control “Messages”"**. Click **Allow**.
      Until then that send waits 30 seconds, is logged `NOT sent ... did not
-     answer within 30 seconds`, and is tried again on the next change.
+     answer within 30 seconds`, and is tried again a minute later (the
+     emails go on regardless).
    Homebrew's node is not signed by a developer, so macOS knows it by its
    exact build: after `brew upgrade node` the box can come back once.
    A click of **Don't Allow** is undone in System Settings → Privacy &

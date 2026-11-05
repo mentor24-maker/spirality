@@ -39,9 +39,16 @@ if (!slug || slug.startsWith('--')) {
 }
 
 const config = loadProjectConfig();
+// The link in the text opens on his phone, so it is the settings file's
+// trackerUrl, never Doppler's same-machine TRACKER_URL (127.0.0.1 on the Mini).
+let pageUrl = null;
+try { pageUrl = loadProjectConfig({ env: { ...process.env, TRACKER_URL: '' } }).trackerUrl; } catch { /* said below */ }
 const text = textSettings({ run: promisify(execFile) });
 if (!text.sendText) fail(text.why);
 if (!process.env[TOKEN]) fail(`${TOKEN} is not in Doppler ${config.dopplerProject}/${config.dopplerConfig}, so the project's alert phone cannot be read.`);
+
+if (!config.trackerApiUrl) fail('the settings file names no trackerUrl or trackerApiUrl, so there is no tracker to read the alert phone from.');
+if (!pageUrl) fail("the settings file names no trackerUrl, so the text would have no link that opens on a phone.");
 
 const api = String(config.trackerApiUrl).replace(/\/+$/, '');
 let project;
@@ -56,12 +63,12 @@ try {
 } catch (err) {
   fail(`the tracker at ${api} could not be reached (${err?.message ?? err}).`);
 }
-if (!project.alertPhone) fail(`project "${slug}" has no alert phone. Set one on its Edit project page: ${config.trackerUrl}/projects/${encodeURIComponent(slug)}/edit`);
+if (!project.alertPhone) fail(`project "${slug}" has no alert phone. Set one on its Edit project page: ${String(pageUrl).replace(/\/+$/, '')}/projects/${encodeURIComponent(slug)}/edit`);
 
 const body = handOverText({
   ticket: { id: 'TEST-1', name: 'Test hand-over: the tracker can text you', status: 'needs your input' },
   ask: 'Nothing. This is a test text; if you are reading it, hand-over texts work.',
-  pageUrl: config.trackerUrl,
+  pageUrl,
 });
 try {
   await text.sendText({ to: project.alertPhone, text: body });
