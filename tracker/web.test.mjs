@@ -820,6 +820,7 @@ test('Quick Action\'s left side: the title, the newest card\'s context and its a
   const html = renderQuickAction({
     name: 'Make the page',
     description: '## Goal\nThe description.',
+    status: 'needs your input',
     comments: [{ body: card('old', 'Old ask.') }, { body: card('new', 'Reply A or B.\nA is cheaper.') }, { body: 'go' }],
   });
   assert.match(html, /^<h1>Make the page<\/h1>/);
@@ -848,10 +849,39 @@ test('every word of ticket text in Quick Action is escaped', () => {
   const html = renderQuickAction({
     name: nasty,
     description: '',
+    status: 'needs your input',
     comments: [{ body: `@@ASKED\nx\n@@CONTEXT\n${nasty}\n@@NEEDED\n${nasty} <img src=x onerror="y">` }],
   });
   assert.doesNotMatch(html, /<script|<img/);
   assert.equal(html.match(/&lt;script&gt;alert\(1\)&lt;\/script&gt;/g).length, 3);
+});
+
+test('Quick Action asks for his move only while the ticket waits on him (SP-118)', () => {
+  const sixty = Array.from({ length: 60 }, (_, i) => `w${i}`).join(' ');
+  const goCard = machineComment.stripMachineMarker(machineComment.stampMachineComment(operatorCard.buildCard(
+    `@@ASKED\nbuild it\n@@CONTEXT\n${sixty}\n@@NEEDED\nReply "go" to queue it as written, or reply with what to change.\nYour move: Reply — "go", or what to change.`).rendered));
+  const ticket = { name: 'SP-112', description: '', comments: [{ body: goCard }], goPhrase: 'go' };
+  // SP-112: answered go, built, sent back. The old card is still the newest card.
+  const rework = renderQuickAction({ ...ticket, status: 'rework' });
+  assert.doesNotMatch(rework, /Your move|class="needed"/);
+  assert.match(rework, /<p class="where quiet">In Rework: the build loop is fixing what review found\. Nothing is needed from you\.<\/p>/);
+  assert.equal(renderGoAction({ ...ticket, status: 'rework' }), '', 'and no Go button');
+  // The same card on Needs your input: the ask and the Go button, and no quiet line.
+  const nyi = renderQuickAction({ ...ticket, status: 'needs your input' });
+  assert.match(nyi, /<p class="needed">[^<]*go[\s\S]*Your move: Reply/);
+  assert.doesNotMatch(nyi, /class="where/);
+  assert.match(renderGoAction({ ...ticket, status: 'needs your input' }), /go-action/);
+  // His answer is in: no ask, even in his status.
+  assert.doesNotMatch(renderQuickAction({ ...ticket, status: 'needs your input', answerIn: true }), /Your move|class="needed"/);
+  assert.doesNotMatch(renderQuickAction({ ...ticket, status: 'Ready to launch', answerIn: true }), /Your move|class="needed"/);
+  // Every machine status has its line and never an ask.
+  for (const status of ['requested', 'queued', 'building', 'in review', 'rework', 'live']) {
+    const html = renderQuickAction({ ...ticket, status });
+    assert.doesNotMatch(html, /Your move|class="needed"/, status);
+    assert.match(html, /class="where quiet">[^<]*Nothing is needed from you\.<\/p>/, status);
+  }
+  // The page hands the function the ticket's status and answerIn (the whole thread).
+  assert.match(readFileSync(WEB('app.mjs'), 'utf8'), /renderQuickAction\(t\)/);
 });
 
 // ── Quick Action: commands he is asked to run, click-to-copy ─────────────────

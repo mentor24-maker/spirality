@@ -361,20 +361,41 @@ export function renderCommands({ comments = [] }) {
 }
 
 /**
+ * Where a ticket sits, in one quiet line, for each status that is the
+ * machine's turn (SP-118): shown in place of a card's ask, which is only his
+ * move while the ticket is in one of his two statuses.
+ */
+export const STATUS_LINES = {
+  requested: 'In Requested: the intake loop is writing it up as a spec. Nothing is needed from you.',
+  queued: 'In Queued: it waits for the build loop to pick it up. Nothing is needed from you.',
+  building: 'In Building: the build loop is working on it. Nothing is needed from you.',
+  'in review': 'In review: the review loop is checking the pull request. Nothing is needed from you.',
+  rework: 'In Rework: the build loop is fixing what review found. Nothing is needed from you.',
+  live: 'Live: it is done. Nothing is needed from you.',
+};
+
+/**
  * The left side of a ticket page's Quick Action section, as HTML: the
  * ticket's title, a short description and, in bold red, what is needed. The
  * short description is the newest operator card's "WHAT'S GOING ON" text, or
- * the description's first paragraph when no comment carries a card; what is
- * needed is that newest card's ask, and there is no red line without one.
+ * the description's first paragraph when no comment carries a card. What is
+ * needed is that newest card's ask, drawn only while the ticket is in one of
+ * his two statuses and his answer is not in (renderAnswerIn); a card stays in
+ * the thread after he answers, and its ask is no longer his move (SP-118).
+ * On a machine status, one quiet line says where it is instead.
  */
-export function renderQuickAction({ name, description, comments = [] }) {
+export function renderQuickAction({ name, description, status, comments = [], answerIn = false }) {
   const card = newestCard(comments);
   const summary = card ? cardContext(card.body) ?? firstParagraph(description) : firstParagraph(description);
-  const ask = card ? cardAsk(card.body) : null;
+  const state = String(status ?? '').toLowerCase();
+  const his = HIS_STATUSES.includes(state);
+  const ask = card && his && !answerIn ? cardAsk(card.body) : null;
+  const where = his ? null : STATUS_LINES[state] ?? null;
   return [
     `<h1>${escapeHtml(name)}</h1>`,
     summary ? `<p class="summary">${renderInline(summary)}</p>` : '',
     ask ? `<p class="needed">${ask.split('\n').map(renderInline).join('<br>')}</p>` : '',
+    where ? `<p class="where quiet">${escapeHtml(where)}</p>` : '',
   ].filter(Boolean).join('\n');
 }
 
