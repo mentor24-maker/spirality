@@ -41,7 +41,8 @@
  *    or nothing; no loop reads it yet (they read the product's project config).
  *  - A project's alert email (one `@` and a dot after it) and alert phone
  *    (international form, `+` then 8 to 15 digits, saved without the spaces,
- *    dashes and brackets a person types) are where its hand-over alerts go,
+ *    dashes and brackets a person types; a 10-digit US number, or 11 digits
+ *    starting with 1, gets its `+1`) are where its hand-over alerts go,
  *    or nothing: the tracker's default address, and no texts.
  *  - A project's slug and ticket prefix never change once it is made: every
  *    ticket's id and its project link are built from them. updateProject
@@ -355,19 +356,31 @@ function optionalAlertEmail(value) {
   throw new StoreError('bad-alert-email', `the alert email must be an address like name@example.com: one @ and a dot after it, not "${value}".`);
 }
 
+/** The country code a phone number typed without one is given: the US and Canada's. */
+const HOME_COUNTRY_CODE = '1';
+
 /**
- * An optional alert phone: null for none, the number in international form
- * (`+` then 8 to 15 digits) with the spaces, dashes, dots and brackets a
- * person types taken out, or a thrown refusal naming the field.
+ * A phone number as a person types it, in international form (`+` then 8 to
+ * 15 digits), or null when it is not one. The spaces, dashes, dots and
+ * brackets are taken out first. A 10-digit number is a US one and gets
+ * `+1`; 11 digits starting with 1 is a US one typed with its 1 and gets the
+ * `+`. Any other number needs its own `+` and country code.
  */
+export function normalizePhone(value) {
+  if (typeof value !== 'string') return null;
+  const bare = value.replace(/[\s\-.()[\]]/g, '');
+  if (/^\+\d{8,15}$/.test(bare)) return bare;
+  if (/^\d{10}$/.test(bare)) return `+${HOME_COUNTRY_CODE}${bare}`;
+  if (new RegExp(`^${HOME_COUNTRY_CODE}\\d{10}$`).test(bare)) return `+${bare}`;
+  return null;
+}
+
+/** An optional alert phone: null for none, the number in international form, or a thrown refusal naming the field. */
 function optionalAlertPhone(value) {
-  if (value == null || value === '') return null;
-  if (typeof value === 'string') {
-    const bare = value.replace(/[\s\-.()[\]]/g, '');
-    if (bare === '') return null;
-    if (/^\+\d{8,15}$/.test(bare)) return bare;
-  }
-  throw new StoreError('bad-alert-phone', `the alert phone must be in international form, a + then 8 to 15 digits, like +1 801 555 0123, not "${value}".`);
+  if (value == null || (typeof value === 'string' && value.replace(/[\s\-.()[\]]/g, '') === '')) return null;
+  const phone = normalizePhone(value);
+  if (phone) return phone;
+  throw new StoreError('bad-alert-phone', `the alert phone must be a 10-digit US number, like 801 555 0123, or in international form, a + then 8 to 15 digits, like +44 20 7946 0000, not "${value}".`);
 }
 
 function projectFromRow(row) {
