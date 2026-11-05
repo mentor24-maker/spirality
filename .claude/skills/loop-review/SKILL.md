@@ -28,13 +28,13 @@ echo "${LOOP_RUNNER_PID:-}"
 - **Set** (a number): you ARE the review lane's own pass, and the runner's
   lock (`$LOG_DIR/$SLUG-loop-review.lock`) is yours: it is what makes you the only
   one. Carry on. A loaded lane, a held lock and a running `loop_runner.sh`
-  are you, not a second reviewer. (On 11/4 two build passes in a row stood down
-  here, each naming its own runner's process, and two tickets sat in Rework.)
+  are you, not a second reviewer.
 - **Empty**: you were started by hand. Run
   `scripts/install_loop_runner.sh --status`; if `loop-review` shows
   `loaded:   yes`, stop and report that the lane is running, unless Dane has
-  asked for this pass by hand (then claim only through `claim`, which is
-  guarded on the ticket's status). Otherwise carry on.
+  asked for this pass by hand (then every verdict and status write carries
+  `--if-status "In review"`, the review's guard on the ticket's status).
+  Otherwise carry on.
 - **Whenever you stop for this reason**, the first line of your report is
   exactly `LANE STOOD DOWN: <why, in one line>`, and nothing else ever starts
   with those words. The setup wizard reads a new product's first lane passes
