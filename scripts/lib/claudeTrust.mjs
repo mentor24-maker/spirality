@@ -71,13 +71,20 @@ export function ensureTrusted(folder, { file = join(homedir(), '.claude.json'), 
 
     const indent = /^\{\n(\s+)"/.exec(before.text)?.[1] || '  ';
     const temp = `${file}.spirality-${process.pid}.tmp`;
-    writeFileSync(temp, `${JSON.stringify(plan.next, null, indent)}\n`, { mode: 0o600 });
-    beforeMove(file); // tests stand in for a Claude session writing the file here
-    // A Claude session wrote the file while we were busy: start again from its copy.
-    if (statSync(file).mtimeMs !== before.mtimeMs) { rmSync(temp, { force: true }); continue; }
-    copyFileSync(file, `${file}.spirality-backup`);
-    chmodSync(`${file}.spirality-backup`, 0o600);
-    renameSync(temp, file);
+    try {
+      writeFileSync(temp, `${JSON.stringify(plan.next, null, indent)}\n`, { mode: 0o600 });
+      beforeMove(file); // tests stand in for a Claude session writing the file here
+      // A Claude session wrote the file while we were busy: start again from its copy.
+      if (statSync(file).mtimeMs !== before.mtimeMs) { rmSync(temp, { force: true }); continue; }
+      copyFileSync(file, `${file}.spirality-backup`);
+      chmodSync(`${file}.spirality-backup`, 0o600);
+      renameSync(temp, file);
+    } catch (e) {
+      // Disk full, permissions: the move is the last step, so the file is
+      // either untouched or wholly the new copy, never half-written.
+      rmSync(temp, { force: true });
+      return { ok: false, changed: false, why: `writing ${file} failed (${e.code || e.message}); it was not changed` };
+    }
 
     let after;
     try { after = readSettings(file); } catch (e) { return { ok: false, changed: true, why: `${file} does not read back after the write (${e.message}); the previous copy is ${file}.spirality-backup` }; }

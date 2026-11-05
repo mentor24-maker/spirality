@@ -108,6 +108,16 @@ test('a file that keeps changing under the write is a FAILED, never a lost write
   assert.deepEqual(JSON.parse(readFileSync(file, 'utf8')), { projects: {}, by: 'session' });
 });
 
+test('a write that fails (disk full, permissions) is a FAILED, the file unchanged, never a throw', () => {
+  const { folder, file } = scratch({ projects: {} });
+  const before = readFileSync(file, 'utf8');
+  const r = ensureTrusted(folder, { file, beforeMove: () => { throw Object.assign(new Error('no space left on device'), { code: 'ENOSPC' }); } });
+  assert.equal(r.ok, false);
+  assert.match(r.why, /writing .* failed \(ENOSPC\); it was not changed/);
+  assert.equal(readFileSync(file, 'utf8'), before);
+  assert.deepEqual(readdirSync(dirname(file)).filter((n) => n.endsWith('.tmp')), [], 'no temporary file is left behind');
+});
+
 test('check is read only and says yes, NO or could not tell', () => {
   const { folder, file } = scratch({ projects: {} });
   assert.equal(checkTrusted(folder, { file }).trusted, false);
