@@ -37,7 +37,7 @@ echo "${LOOP_RUNNER_PID:-}"
   Otherwise carry on.
 - **Whenever you stop for this reason**, the first line of your report is
   exactly `LANE STOOD DOWN: <why, in one line>`, and nothing else ever starts
-  with those words. The setup wizard reads a new product's first lane passes
+  with those words. The setup wizard reads a new project's first lane passes
   for that line (`npm run onboard:lanes`), never for wording, because a pass
   that is the lane says "I am the lane, not a second one" too.
 
@@ -176,7 +176,7 @@ look at; this is a check that runs in CI"*).
      rounds named one line each and `@@NEEDED` offering named options
      (respec / split / drop).
    - **Fail, and only a human can settle it** (ambiguous task, contradictory
-     acceptance criteria, a product decision) → `ask --status "Needs your
+     acceptance criteria, a project decision) → `ask --status "Needs your
      input"` with named options to choose between.
 
 5. **Report** the task and your verdict, then finish.

@@ -576,7 +576,7 @@ test('admin: create-actor prints only the token on stdout, and that token signs 
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('the server, admin and backup hard-code no product: no names, ids, prefixes or ports in their source', () => {
+test('the server, admin and backup hard-code no project: no names, ids, prefixes or ports in their source', () => {
   for (const file of ['./server.mjs', './admin.mjs', './backup.mjs']) {
     const source = readFileSync(new URL(file, import.meta.url), 'utf8');
     for (const word of [/starcaster/i, /wavecenter/i, /spirality/i, /\bSP-/, /\bSC-/, /\bWC-/, /\b9014\d{8}\b/, /86b[a-z0-9]{6}/, /listen\(\s*\d/, /\bport\s*=\s*\d/i]) {

@@ -2,8 +2,8 @@
 
 This is the one written statement of how a ticket moves through the
 development loop that builds StarCaster, WaveCenter and Spirality. Each
-product links here instead of restating it. If a product's own docs and this
-file disagree, this file is right and the product's docs are a bug.
+project links here instead of restating it. If a project's own docs and this
+file disagree, this file is right and the project's docs are a bug.
 
 Every rule below was checked against StarCaster's code as of 2026-10-11:
 `scripts/builder/loopStatuses.js`, `machineComment.js`, `operatorCard.js`,
@@ -30,7 +30,7 @@ by eye, never a loop's shortcut.
 
 ## The words used here
 
-- **Ticket**: one piece of work, a task in a product's **Loop Queue** list in
+- **Ticket**: one piece of work, a task in a project's **Loop Queue** list in
   ClickUp.
 - **Loop**: an agent session that runs one step of the work on a timer.
   There are three: `loop-spec` writes tickets (run by hand, with Dane),
@@ -105,7 +105,7 @@ form, and here the branch, PR and notes all survive.
 
 ## Who may move a ticket, and how
 
-Every move goes through the product's ClickUp script
+Every move goes through the project's ClickUp script
 (`npm run clickup -- <command>`), never the claude.ai ClickUp connector and
 never the ClickUp web page, because the script is the only door with the
 checks on it. Every write is read back before the command reports success.
@@ -113,7 +113,7 @@ checks on it. Every write is read back before the command reports success.
 | From | To | Who | How, and what has to be true |
 |---|---|---|---|
 | `Requested` | `Needs your input` | loop-intake | `ask`, one request per pass, the oldest first. Before the move the description is the spec in `loop-spec`'s shape with his words verbatim under a first `## Asked` heading, and the card's `@@ASKED` is those words; `@@NEEDED` says reply "go" to queue it, or what to change. A request too big for one pull request is sliced: each further slice is filed in `Requested` (so no build loop can claim it) and handed over the same way. A request too unclear to spec gets the question on the card and nothing else changes. *(Skill rule: the door checks the card, not the spec.)* |
-| `Rework` or `Queued` | `Building` | loop-build | `claim`. It reads the ticket's status itself and refuses (exit 3) if that status is not `Rework` or `Queued`; then it hands over to `status` guarded on the status it just read. `status` reads the ticket again, refuses if it has moved, and only then writes. That is still check-then-write, not an atomic swap: the guard narrows the window in which two passes can both claim, it does not close it, which is why only one build loop runs per product. The guard is on what `claim` read, not on what `queue --claimable` listed: a ticket listed as `Queued` that has since moved to `Rework` is still claimed. |
+| `Rework` or `Queued` | `Building` | loop-build | `claim`. It reads the ticket's status itself and refuses (exit 3) if that status is not `Rework` or `Queued`; then it hands over to `status` guarded on the status it just read. `status` reads the ticket again, refuses if it has moved, and only then writes. That is still check-then-write, not an atomic swap: the guard narrows the window in which two passes can both claim, it does not close it, which is why only one build loop runs per project. The guard is on what `claim` read, not on what `queue --claimable` listed: a ticket listed as `Queued` that has since moved to `Rework` is still claimed. |
 | `Building` | `In review` | loop-build | *(Skill rule.)* Only after the PR is open, its body links the ticket, and `pr-opened` has recorded it on the ticket (see "Markers"). `status` does not check for a PR. |
 | `Building` | `Needs your input` | loop-build | `ask`, with an operator card. Used when the gates fail and the fix is out of scope, the ticket is too vague, or the work is too big for one pass. |
 | `In review` | `Ready to launch` | loop-review | `verdict --pass --if-status "In review"`, then `ask --status "Ready to launch"`. `ask` refuses unless the newest review verdict on the ticket is a PASS. |
@@ -164,7 +164,7 @@ themselves and verify it stuck, from the write's own response rather than a
 second read. Written overrides on `status`: `--assign <id>` names the
 assignee instead, `--clear-assignees` clears them even on a move into
 Dane's status, and `--no-auto-assign` turns the rule off for that one move. Dane's one view is ClickUp's "Assigned to
-me", which works across every product's space; a ticket in his status but
+me", which works across every project's space; a ticket in his status but
 not assigned to him is invisible to him, and is treated as a defect, not a
 cosmetic slip.
 
@@ -669,19 +669,19 @@ stale memory of the list, and he acted on it both times. His words: "The
 issue is making assumptions and stating them with confidence. It has come up
 many times."
 
-## How a product adopts this contract
+## How a project adopts this contract
 
-1. In the product's own `docs/LOOP_ENGINEERING.md`, replace the sections that
+1. In the project's own `docs/LOOP_ENGINEERING.md`, replace the sections that
    restate statuses, owners, markers, the card, merge phrases and the
    `waiting` verdicts with one link to this file, pinned to the Spirality
-   release the product depends on.
-2. Keep in the product's docs only what is genuinely that product's: its ids,
-   its gates, its deploy story, and any product-only lane (StarCaster's
+   release the project depends on.
+2. Keep in the project's docs only what is genuinely that project's: its ids,
+   its gates, its deploy story, and any project-only lane (StarCaster's
    auto-merge lanes, for example), each saying which rule of this contract it
    extends.
-3. If the product's code does something this contract does not say, that is
+3. If the project's code does something this contract does not say, that is
    a ticket in Spirality's Loop Queue: either the contract grows, or the
-   product's behaviour changes. Never a silent local edit.
+   project's behaviour changes. Never a silent local edit.
 
 ## Known differences today (2026-10-11)
 
@@ -709,7 +709,7 @@ Written down so nobody mistakes them for the contract:
   ticket counts as delivered by being written there; and for the same
   reason it has no "first time relayed" marker, so a ticket with **no**
   machine-written card is reported and left where it is, where StarCaster's
-  bus-relay would move it on a fresh reply. On every product nothing merges
+  bus-relay would move it on a fresh reply. On every project nothing merges
   without Dane's word.
 - **Spirality's relay files the conflict ticket but checks nothing locally
   and announces no stall.** On a conflict it files the `Queued` catch-up

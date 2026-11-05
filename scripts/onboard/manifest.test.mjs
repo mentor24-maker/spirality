@@ -101,11 +101,11 @@ test('the review and build skills tell a lane\'s pass it is the lane (hold-up 14
   }
   const review = planned.find((f) => f.to === '.claude/skills/loop-review/SKILL.md').content;
   assert.match(review, /com\.normie\.loop-review/);
-  assert.match(review, /Re-run the gates: `npm run verify`\./, 'every product has npm run verify after the setup (SP-121)');
+  assert.match(review, /Re-run the gates: `npm run verify`\./, 'every project has npm run verify after the setup (SP-121)');
   assert.match(review, /Normie is a website, so the surface is usually a page/);
 });
 
-test('rendered for another product, no adapted or made file keeps Spirality\'s own names', () => {
+test('rendered for another project, no adapted or made file keeps Spirality\'s own names', () => {
   const pressplay = {
     ...NORMIE, productName: 'PressPlay', productSlug: 'pressplay', trackerPrefix: 'PP', dopplerProject: 'pressplay',
     launchdPrefix: 'com.pressplay', checkoutDir: '~/WebApps/pressplay', checkCommand: 'npm run build',

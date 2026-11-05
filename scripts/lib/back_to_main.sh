@@ -3,7 +3,7 @@
 # scripts/lib/backToMain.test.mjs can drive it against real scratch
 # repositories.
 #
-# A new product's lanes are installed from its setup branch (SP-111), so its
+# A new project's lanes are installed from its setup branch (SP-111), so its
 # own relay can merge that branch on Dane's word. The merge deletes the branch
 # at origin, and the runners only ever pull a clean main: left alone, the
 # checkout would stay on the merged branch and every pass after it would run

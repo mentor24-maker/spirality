@@ -28,7 +28,7 @@
  *    transaction as the delete, so a claim at that moment either wins (the
  *    delete is refused) or loses (it finds no ticket), never half of each.
  *  - Ticket ids are the project's own prefix plus a number (`<PREFIX>-1`). The
- *    prefix lives on the project row; nothing here knows any product.
+ *    prefix lives on the project row; nothing here knows any project.
  *  - Imports (tracker/import.mjs, and nothing else) file a ticket or post a
  *    comment with its ORIGINAL time, and record the old id beside the new one
  *    in `imported_ids` in the same transaction. A ticket can therefore never
@@ -38,7 +38,7 @@
  *  - A project's owner is a person (a `human` actor), apart from its
  *    operator, who the loops hand tickets to. Its web address and logo are
  *    http(s) addresses, or nothing. Its GitHub repository is `owner/name`,
- *    or nothing; no loop reads it yet (they read the product's project config).
+ *    or nothing; no loop reads it yet (they read each project's settings file).
  *  - A project's alert email (one `@` and a dot after it) and alert phone
  *    (international form, `+` then 8 to 15 digits, saved without the spaces,
  *    dashes and brackets a person types; a 10-digit US number, or 11 digits
@@ -916,7 +916,7 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
     },
 
     /**
-     * A product: its slug, its name, its ticket-id prefix, its operator, and
+     * A project: its slug, its name, its ticket-id prefix, its operator, and
      * optionally its web address, its logo (an image's web address), its
      * owner (a person), its GitHub repository (`owner/name`) and its alert
      * email and phone. Read back

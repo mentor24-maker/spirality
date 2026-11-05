@@ -11,7 +11,7 @@ import { startServer } from './server.mjs';
 import { importLoopQueue } from './import.mjs';
 import { compareQueues, databasePath, formatSwitchCheck, loopsAddress, runSwitchCheck, trackerAddress } from './switchCheck.mjs';
 
-/** A config with made-up values, so nothing can pass by matching a real product. */
+/** A config with made-up values, so nothing can pass by matching a real project. */
 const CONFIG = Object.freeze({
   loopQueueListId: '4242',
   operatorUserId: '700',

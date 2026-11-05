@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * The setup wizard's lanes step (SP-111): a new product's lanes run BEFORE
+ * The setup wizard's lanes step (SP-111): a new project's lanes run BEFORE
  * its setup pull request merges, so its own relay merges that pull request on
  * Dane's merge phrase like any other ticket, and nothing sits overnight
  * waiting for a relay that is not installed yet (SETUP_REVIEW.md hold-ups 5,
@@ -10,17 +10,17 @@
  *     [--asked-file <file>] [--wait-minutes <n>] [--dry-run]
  *
  * Run on the Mini, from Spirality's folder, in a session that is not one of
- * the product's lanes. In order, each step skipped when already done, so a
+ * the project's lanes. In order, each step skipped when already done, so a
  * rerun picks up where a failed one stopped:
  *
- *   1. checkout  the product's MAIN checkout (never a worktree: the runners
+ *   1. checkout  the project's MAIN checkout (never a worktree: the runners
  *                refuse one) moves to the setup branch, clean and up to date.
- *   2. ticket    one ticket in the product's own tracker project, named as
+ *   2. ticket    one ticket in the project's own tracker project, named as
  *                the pull request is (one already filed under that name is
  *                reused, never a second); the PR body gets its `Ticket:` line;
  *                `pr-opened` records the PR; the ticket goes to In review.
  *                All before any lane exists, so no lane sees it half-filed.
- *   3. install   the product's own scripts/install_loop_runner.sh.
+ *   3. install   the project's own scripts/install_loop_runner.sh.
  *   4. lanes     `--status` shows every lane loaded, and each lane's first
  *                pass did its lane's work rather than stand down
  *                (lib/onboardLanes.mjs, hold-up 14). On a rerun with every
@@ -30,10 +30,10 @@
  * passes them in. When the pull request merges, the runners put the checkout
  * back on main (scripts/lib/back_to_main.sh).
  *
- * Every product value comes from the product's settings file on the setup
+ * Every project value comes from the project's settings file on the setup
  * branch (rule 2). Every write is read back (rule 5). A failed step prints
  * `FAILED: <step>: <what was seen>` and the rerun command, and nothing after
- * it runs (rule 6). Ticket writes go through the product's own door, so
+ * it runs (rule 6). Ticket writes go through the project's own door, so
  * Doppler supplies its token and none is ever printed (rule 4).
  */
 import { spawnSync } from 'node:child_process';
@@ -79,7 +79,7 @@ function run(cmd, args, { cwd = checkout, input } = {}) {
   return { ok: r.status === 0, code: r.status, out: String(r.stdout || '').trim(), err: String(r.stderr || r.error || '').trim() };
 }
 const git = (...args) => run('git', args);
-// The product's own door, from its checkout: its config, its Doppler project, its hand-run seat.
+// The project's own door, from its checkout: its config, its Doppler project, its hand-run seat.
 const door = (...args) => run('npm', ['run', '--silent', 'clickup', '--', ...args]);
 const last = (text, n = 6) => String(text || '').split('\n').filter(Boolean).slice(-n).join(' | ');
 
@@ -90,7 +90,7 @@ const prUrl = `https://github.com/${prRepo}/pull/${prNumber}`;
 if (dryRun) console.log('Dry run: every check runs and nothing is changed (git fetch only refreshes what this checkout knows of origin).\n');
 
 // ── 1. checkout ────────────────────────────────────────────────────────────
-if (!existsSync(checkout)) fail('checkout', `${checkout} does not exist (clone the product there first)`);
+if (!existsSync(checkout)) fail('checkout', `${checkout} does not exist (clone the project there first)`);
 const top = git('rev-parse', '--show-toplevel');
 if (!top.ok) fail('checkout', `${checkout} is not a git checkout: ${top.err}`);
 if (realpathSync(top.out) !== realpathSync(checkout)) fail('checkout', `${checkout} is inside the checkout at ${top.out}, not the top of one`);
@@ -153,7 +153,7 @@ let ticket = findTicketId(prNow.body, linkOpts);
 // already filed, under the PR's exact name. Find it rather than file a second.
 let existing = [];
 if (!ticket && dryRun && onBranch !== branch) {
-  // The checkout is still on the product's own main, which has no ticket door yet.
+  // The checkout is still on the project's own main, which has no ticket door yet.
   say('ticket', `would look in ${config.productSlug}'s project for a ticket already named "${prNow.title}" (the door is on ${branch}, not checked out in a dry run)`);
 } else if (!ticket) {
   const listed = door('queue');

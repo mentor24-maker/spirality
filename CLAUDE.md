@@ -15,16 +15,16 @@ and lessons learned in one do not reach the other. Spirality ends that:
 
 1. **One contract.** The ClickUp statuses, who owns each, the comment markers,
    the operator card, the merge phrases and what "waiting on Dane" means,
-   written once, in `docs/LOOP_CONTRACT.md`, and linked from every product.
+   written once, in `docs/LOOP_CONTRACT.md`, and linked from every project.
 2. **One package.** The pure decision modules (statuses, trail, machine stamp,
    operator card, waiting verdict, merge-on-comment, conflict work, pacing),
    then the ClickUp door, the runners and the watchdogs, then the skills and
    hooks, each parameterised by a **project config** object: workspace, space,
    Loop Queue list, operator id, machine user id, GitHub repo, Doppler project,
    launchd label prefix, log folder, merge phrases, governance paths.
-3. **Products pin a version.** StarCaster and WaveCenter depend on a tagged
+3. **Projects pin a version.** StarCaster and WaveCenter depend on a tagged
    release; an upgrade is a pull request with CI. A substrate change can never
-   reach both products at once unchecked.
+   reach both projects at once unchecked.
 
 The full analysis and the five-phase plan are on the WaveCenter ticket that
 created this repository (86bcgm97x) and in `docs/PLAN.md`.
@@ -60,7 +60,7 @@ ClickUp's Loop Queue (list `901418065068`, space `90146476540`) in October
 2026; that list is kept untouched as the record to compare against during the
 week side by side, and nothing writes to it (`docs/TRACKER_MVP.md`).
 StarCaster's queue is still ClickUp list `901418546619` and WaveCenter's is
-`901422159126`; work for a product goes in that product's queue, substrate
+`901422159126`; work for a project goes in that project's queue, substrate
 work goes here, never mixed.
 
 - Every ticket touch goes through `npm run clickup -- <command>`. The name
@@ -78,7 +78,7 @@ work goes here, never mixed.
 1. **`main` never deploys unchecked.** Branches, pull requests, a green
    `verify` check, Dane's word.
 2. **Nothing project-specific is hard-coded in substrate code.** Every id,
-   name, path and phrase that differs between products comes from the project
+   name, path and phrase that differs between projects comes from the project
    config. A literal list id in a module is a bug.
 3. **Move, don't rewrite.** StarCaster's modules come across with their tests;
    behaviour changes are separate tickets.

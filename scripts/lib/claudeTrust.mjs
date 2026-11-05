@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * Marks a product's checkout as trusted in Claude's own settings file,
- * `~/.claude.json`, so its lanes use the product's `.claude/settings.json`
+ * Marks a project's checkout as trusted in Claude's own settings file,
+ * `~/.claude.json`, so its lanes use the project's `.claude/settings.json`
  * from their first pass (SP-116).
  *
  *   node scripts/lib/claudeTrust.mjs ensure <folder>   # trust it; exit 0 trusted, 1 FAILED

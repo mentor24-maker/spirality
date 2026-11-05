@@ -10,10 +10,10 @@ import { EXPECTED_SECRETS, doctorTarget, usesClickUp, doctorReport, formatReport
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const SPIRALITY = JSON.parse(readFileSync(join(ROOT, 'spirality.project.json'), 'utf8'));
-// A second product that does not run the tracker (no trackerPort).
+// A second project that does not run the tracker (no trackerPort).
 const { trackerPort, trackerHost, trackerDataDir, ...rest } = SPIRALITY;
 const GUEST = { ...rest, productSlug: 'normie', dopplerProject: 'normie', dopplerConfig: 'prd', githubRepo: 'owner/normie', trackerPrefix: 'NO' };
-// The same product as it really is: on the tracker and never on ClickUp, its ClickUp ids "0".
+// The same project as it really is: on the tracker and never on ClickUp, its ClickUp ids "0".
 const NEVER_CLICKUP = { ...GUEST, workspaceId: '0', spaceId: '0', loopQueueListId: '0' };
 
 /**
@@ -50,7 +50,7 @@ test('names are unique, and every one is expected in the config the project conf
   for (const s of expected) assert.deepEqual(s.configs, CONFIGS, s.name);
 });
 
-test('another product checks its own Doppler project and config, without the keys only the tracker home needs', () => {
+test('another project checks its own Doppler project and config, without the keys only the tracker home needs', () => {
   const guest = doctorTarget(GUEST);
   assert.equal(guest.project, 'normie');
   assert.deepEqual(guest.configs, ['prd']);
@@ -67,7 +67,7 @@ test('Spirality, on the tracker but still reading its ClickUp list, is asked for
   assert.ok(home.expected.some((s) => s.name === 'CLICKUP_API_TOKEN'));
 });
 
-test('a product on the tracker with ClickUp ids "0" is not asked for the ClickUp key; one on ClickUp is', () => {
+test('a project on the tracker with ClickUp ids "0" is not asked for the ClickUp key; one on ClickUp is', () => {
   assert.equal(usesClickUp(NEVER_CLICKUP), false);
   const names = doctorTarget(NEVER_CLICKUP).expected.map((s) => s.name);
   assert.ok(!names.includes('CLICKUP_API_TOKEN'));
@@ -78,7 +78,7 @@ test('a product on the tracker with ClickUp ids "0" is not asked for the ClickUp
   }
 });
 
-test('doctor passes for a product never on ClickUp whose Doppler has no ClickUp key', async () => {
+test('doctor passes for a project never on ClickUp whose Doppler has no ClickUp key', async () => {
   const t = await standInTracker(NEVER_CLICKUP, 'owner/normie');
   const names = doctorTarget(NEVER_CLICKUP).expected.map((s) => s.name);
   const f = productFolder(t.config, names);
@@ -171,7 +171,7 @@ test('doctor checks the Doppler project and config the project config names, and
   } finally { f.cleanup(); await t.close(); }
 });
 
-test('doctor fails, never passes, on a key the product needs that is missing', async () => {
+test('doctor fails, never passes, on a key the project needs that is missing', async () => {
   const t = await standInTracker(GUEST, 'owner/normie');
   const f = productFolder(t.config, ['CLICKUP_API_TOKEN']);
   try {
@@ -227,7 +227,7 @@ test('doctor fails, never passes, when the tracker answers with no repository fi
   } finally { f.cleanup(); await t.close(); }
 });
 
-test('repo-check on a ClickUp product says it is not checked, and passes', () => {
+test('repo-check on a ClickUp project says it is not checked, and passes', () => {
   const f = productFolder({ ...GUEST, tracker: 'clickup' }, []);
   try {
     const r = f.run([join(ROOT, 'scripts/with_doppler.mjs'), process.execPath, join(ROOT, 'scripts/clickup.mjs'), 'repo-check']);
@@ -251,13 +251,13 @@ test('with_doppler takes the Doppler project from the settings file a command na
   const f = productFolder(GUEST, []);
   try {
     mkdirSync(join(f.dir, 'far'));
-    writeFileSync(join(f.dir, 'far', 'spirality.project.json'), JSON.stringify({ ...GUEST, dopplerProject: 'far-product', dopplerConfig: 'dev' }));
+    writeFileSync(join(f.dir, 'far', 'spirality.project.json'), JSON.stringify({ ...GUEST, dopplerProject: 'far-project', dopplerConfig: 'dev' }));
     const wrapper = join(ROOT, 'scripts/with_doppler.mjs');
     for (const args of [['--config', 'far/spirality.project.json'], ['--config=far/spirality.project.json']]) {
       writeFileSync(join(f.dir, 'calls'), '');
       const r = f.run([wrapper, 'sh', '-c', 'exit 0', 'sh', ...args]);
       assert.equal(r.status, 0, r.stderr);
-      assert.match(f.calls(), /^run --project far-product --config dev --no-check-version -- /);
+      assert.match(f.calls(), /^run --project far-project --config dev --no-check-version -- /);
     }
     const missing = f.run([wrapper, 'true', '--config', 'nowhere.json']);
     assert.equal(missing.status, 1);

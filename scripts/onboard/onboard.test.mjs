@@ -136,13 +136,13 @@ test('protectionDropped names the stricter settings the PUT switches off', () =>
 
 const PR = 'https://github.com/mentor24-maker/pressplay/pull/1';
 const DANE_ANSWERS = {
-  'Product name': 'PressPlay',
+  'Project name': 'PressPlay',
   'GitHub repository': 'mentor24-maker/pressplay',
   'Ticket prefix': 'PP',
   'Merge phrases': '',
   'Lanes that may merge': 'none',
   'Extra protected files': '',
-  'What the product is': 'PressPlay plays things.',
+  'What the project is': 'PressPlay plays things.',
 };
 
 function makeWorld(t) {
@@ -157,7 +157,7 @@ function makeWorld(t) {
     trackerUrl: 'http://mac-mini.local:4180', trackerApiUrl: 'http://127.0.0.1:4180',
   });
   const homeRoot = join(dir, 'WebApps', 'spirality');
-  // The product is not on this Mac yet: the clone step makes its checkout.
+  // The project is not on this Mac yet: the clone step makes its checkout.
   const checkout = join(dir, 'WebApps', 'pressplay');
   const makeCheckout = () => {
     mkdirSync(join(checkout, '.git'), { recursive: true });
@@ -341,7 +341,7 @@ test('a rerun once everything is done says each step is already done and asks no
   assert.ok(!w.calls.some((c) => c.startsWith('npm') || c.includes('-X PUT')), 'no step script ran and nothing was written');
 });
 
-test('a product already set up (its settings on main, main protected) with an answers file: every step already done, nothing asked', async (t) => {
+test('a project already set up (its settings on main, main protected) with an answers file: every step already done, nothing asked', async (t) => {
   const { w, go, seedAnswers, makeCheckout } = makeWorld(t);
   seedAnswers();
   makeCheckout();
@@ -487,7 +487,7 @@ test('main\'s stricter protection is named before the PUT switches it off', asyn
 
 // --- The clone step (SP-119) ---------------------------------------------
 
-test('a product with no checkout: cloned from main over the home\'s kind of address, read back, and the run carries on', async (t) => {
+test('a project with no checkout: cloned from main over the home\'s kind of address, read back, and the run carries on', async (t) => {
   const { w, go, checkout, logFile } = makeWorld(t);
   assert.equal(await go(), 0, out(w));
   assert.equal(w.clonedFrom, 'https://github.com/mentor24-maker/pressplay.git');

@@ -13,7 +13,7 @@ const OPERATOR = '700';
 const SERVICE = '800';
 const OTHER = '900';
 
-/** A config with made-up values, so nothing can pass by matching a real product. */
+/** A config with made-up values, so nothing can pass by matching a real project. */
 const CONFIG = Object.freeze({
   loopQueueListId: '4242',
   operatorUserId: OPERATOR,
@@ -312,7 +312,7 @@ test('a database whose sign-ins predate the mapping is refused by the import unt
   } finally { cleanup(); }
 });
 
-test('the importer hard-codes no product: no ids, names, slugs or prefixes in its source', () => {
+test('the importer hard-codes no project: no ids, names, slugs or prefixes in its source', () => {
   const src = readFileSync(new URL('./import.mjs', import.meta.url), 'utf8');
   assert.doesNotMatch(src, /\b\d{6,}\b/, 'no ClickUp ids');
   assert.doesNotMatch(src, /spirality|starcaster|wavecenter|\bDane\b/i);

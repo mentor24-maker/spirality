@@ -52,8 +52,8 @@ test('every lane has its own interval, and labels come from the project config, 
 
 // The runner itself, run in a scratch copy of the repository (a git checkout
 // on a clean main, so it takes the sync lock) whose settings file names
-// another product. Spirality's sync lock is held by a live process: a runner
-// that still used it would wait ten minutes. The other product's own sync
+// another project. Spirality's sync lock is held by a live process: a runner
+// that still used it would wait ten minutes. The other project's own sync
 // lock is left stale, so taking it clears it. Claude is a stand-in that lists
 // the log folder mid-pass (the lane's lock is seen held) and then reports a
 // sign-in failure (the runner prints its restart line). The runner sleeps
@@ -107,6 +107,6 @@ test('loop_runner.sh names its log, lock, sync lock and restart label from the s
   }
 });
 
-test('loop_runner.sh names no product of its own', () => {
+test('loop_runner.sh names no project of its own', () => {
   assert.doesNotMatch(readFileSync(join(REPO, 'scripts/loop_runner.sh'), 'utf8'), /spirality/);
 });

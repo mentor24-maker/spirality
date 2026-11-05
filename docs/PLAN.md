@@ -29,28 +29,28 @@ The two pipelines are the same design and are NOT a substrate. WaveCenter's loop
 8. Docs. StarCaster's doc says the token belongs to a second account (Pulse); its code says the loops post under Dane's token, which is why the `[machine]` stamp exists. The doc is out of date. WaveCenter's doc links to StarCaster's for the incident history, so the lessons live in one repo and the rules in two.
 
 ## What a substrate is, here
-One shared package that owns everything in the list above that is NOT about a particular product, parameterised by one project config object: workspace, space, Loop Queue list, operator id, machine user id, GitHub repo, Doppler project and config, launchd label prefix, log folder, merge phrases, governance paths, lane allow-lists. Each product repo keeps only: its `verify` contents, its deploy and database specifics, its CLAUDE.md and doctrine, and a short "gates" section in each skill. StarCaster already has the seed of this in two places: `builder/taskRepo.js` (the `repo:<name>` tag that routes a ticket to another checkout) and `lib/nodeRoles.js` (which machine runs which lane). StarCaster's code is also already well shaped for extraction: every script is a thin I/O shell over small pure modules with tests, so the work is moving files behind existing tests, not rewriting.
+One shared package that owns everything in the list above that is NOT about a particular project, parameterised by one project config object: workspace, space, Loop Queue list, operator id, machine user id, GitHub repo, Doppler project and config, launchd label prefix, log folder, merge phrases, governance paths, lane allow-lists. Each project repo keeps only: its `verify` contents, its deploy and database specifics, its CLAUDE.md and doctrine, and a short "gates" section in each skill. StarCaster already has the seed of this in two places: `builder/taskRepo.js` (the `repo:<name>` tag that routes a ticket to another checkout) and `lib/nodeRoles.js` (which machine runs which lane). StarCaster's code is also already well shaped for extraction: every script is a thin I/O shell over small pure modules with tests, so the work is moving files behind existing tests, not rewriting.
 
 ## The plan, in phases (each phase is a few tickets; each ticket one PR)
-0. The contract, written once. A `LOOP_CONTRACT.md` in the substrate repo: statuses, owners, markers, card format, operator id rule, merge phrases, the `waiting` verdicts. Both product docs link to it instead of restating it. Fix the two-account text. (1 ticket)
+0. The contract, written once. A `LOOP_CONTRACT.md` in the substrate repo: statuses, owners, markers, card format, operator id rule, merge phrases, the `waiting` verdicts. Both project docs link to it instead of restating it. Fix the two-account text. (1 ticket)
 1. The pure decision modules, with their tests, moved into the package and imported back by StarCaster (no behaviour change, proven by its 42,000 test lines) and then by WaveCenter: loopStatuses, loopTrail, machineComment, operatorCard, waitingOnOperator, costlyAsk, sendBackRounds, mergeOnComment, refusalClass, conflictWork, branchCatchUp, busRelayPlan, autoMergeLane, wipCap, loopInterval, passClaim, passTimeout. The project config object is born here. (about 4 tickets: package skeleton and config; StarCaster imports; WaveCenter imports; delete the copies)
 2. The door. One `clickup` CLI in the package with StarCaster's command set including `bus-relay` (relay, merge-on-comment, hand-back, conflict tickets); each repo's `npm run clickup` becomes a one-line wrapper. WaveCenter's merge lane (86bcgkznw) is then "install the package's relay lane", not a third implementation. (about 3 tickets)
 3. Runners and health. `loop_runner.sh`, the installer (label prefix and log folder from config), heartbeat, stale-ready, stale-answer, throughput, report-failure, checkout-currency, in the package; WaveCenter gets all of them by installing. (about 3 tickets)
 4. Skills and hooks. The three SKILL.md files become package templates with a per-repo gates section; the hook set is shared. StarCaster adopts `npm run verify` as its one gate name. (about 3 tickets)
-5. Upgrades as PRs. A product pins a substrate version; a bump is a PR with CI, so rule 1 (nothing reaches main unchecked) covers substrate changes too, and a bad release can never reach both products at once.
+5. Upgrades as PRs. A project pins a substrate version; a bump is a PR with CI, so rule 1 (nothing reaches main unchecked) covers substrate changes too, and a bad release can never reach both projects at once.
 
-## What stays product-specific, on purpose
-StarCaster: asset pinning, Vercel bundle and UI doctrine checks, `check:shots`, site import, worker-watch, weekly report content, DOCTRINE.md. WaveCenter: core boundary check, secrets scan, browser-secrets check, Supabase RLS check, DATA_MODEL and EXTENSION_MODEL. Each product's CLAUDE.md.
+## What stays project-specific, on purpose
+StarCaster: asset pinning, Vercel bundle and UI doctrine checks, `check:shots`, site import, worker-watch, weekly report content, DOCTRINE.md. WaveCenter: core boundary check, secrets scan, browser-secrets check, Supabase RLS check, DATA_MODEL and EXTENSION_MODEL. Each project's CLAUDE.md.
 
 ## Risks and how the plan handles them
 - Size: 50,000 lines. Move module by module behind the existing tests; never rewrite. Phase 1 is the cheapest and highest-value step because those modules are already pure.
-- A shared bug reaches both products: pinned versions, one PR per product to upgrade, CI on each.
-- Infrastructure separation (CLAUDE.md, StarCaster's 2026-08-17 outage): the substrate is code only; it holds no keys, no database, no deploy. Each product keeps its own Doppler, Supabase and Vercel.
+- A shared bug reaches both projects: pinned versions, one PR per project to upgrade, CI on each.
+- Infrastructure separation (CLAUDE.md, StarCaster's 2026-08-17 outage): the substrate is code only; it holds no keys, no database, no deploy. Each project keeps its own Doppler, Supabase and Vercel.
 - Ordering with 86bcgkznw: building it as a WaveCenter copy now means a third mergeOnComment to keep in step. Recommendation: Phase 1 first (one or two days of loop time), then 86bcgkznw on top of it.
 
 ## Non-goals
 - No change to the ClickUp statuses or lists; they are already identical.
-- No monorepo; the products stay separate repos with separate infrastructure.
+- No monorepo; the projects stay separate repos with separate infrastructure.
 
 ## Affected files / artifacts
 - New repository for the substrate (name is Dane's; suggestion: deo-loop), its own Loop Queue list, and a third pair of lanes on the Mac Mini.

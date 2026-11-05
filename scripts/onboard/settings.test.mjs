@@ -91,7 +91,7 @@ test('write: rerun on the same folder says nothing changed', async (t) => {
   assert.match(r.lines[0], /already there, with the same settings/);
 });
 
-test('write: never writes over another product\'s settings file (so never the tracker home\'s)', async (t) => {
+test('write: never writes over another project\'s settings file (so never the tracker home\'s)', async (t) => {
   const { answersPath, dir } = scratch(t);
   const homeFile = join(dir, 'spirality.project.json');
   writeFileSync(homeFile, JSON.stringify({ productSlug: 'spirality' }));
