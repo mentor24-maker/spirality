@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Step 0 of setting up a product on Spirality: look before touching
+ * Step 0 of setting up a project on Spirality: look before touching
  * anything (docs/onboarding/SETUP_REVIEW.md, part 3). Read only.
  *
  *   npm run onboard:look -- --answers <path to answers file> [--no-check]
@@ -8,9 +8,9 @@
  *
  * `--product <slug>` reads `<logDir>/onboard/<slug>.answers.json`, the
  * tracker home's log folder (lib/onboardAnswers.mjs). Run it from the
- * tracker home's own folder (the product whose settings file sets
+ * tracker home's own folder (the project whose settings file sets
  * `trackerPort`, today Spirality), on the Mini; the npm script runs it
- * under that product's Doppler project, for its hand-run tracker sign-in.
+ * under that project's Doppler project, for its hand-run tracker sign-in.
  *
  * It prints one row per thing it checked, each naming what it checked and
  * ending `ready`, `will do` (the setup does it later), `BLOCKED: <why>` or
@@ -20,20 +20,20 @@
  *            GitHub will protect its main branch (`not protected` is fine,
  *            a "403 Upgrade" is BLOCKED).
  *   The Mini the checkout folder (absent, or on a clean main of the right
- *            repository); this Mac's Node against what the product needs;
+ *            repository); this Mac's Node against what the project needs;
  *            `claude` and `doppler` signed in.
  *   Tracker  reachable at the tracker home's trackerApiUrl; whether the
  *            project, its prefix and its `<slug> …` loop sign-ins exist;
  *            that the prefix is not another project's; the operator found
  *            by name.
- *   Doppler  whether the product's project and config exist.
- *   Check    the product's own check, run on a clean scratch clone of its
+ *   Doppler  whether the project's Doppler project and config exist.
+ *   Check    the project's own check, run on a clean scratch clone of its
  *            main branch (pass or fail, last lines shown). `--no-check`
  *            skips it, and says so as "could not tell".
  *
  * Writes nothing anywhere: every tracker call is a GET, every gh, git,
  * doppler and claude command only reads, and the scratch clone lives in a
- * temporary folder that is removed afterwards. The product's check runs
+ * temporary folder that is removed afterwards. The project's check runs
  * there with a short list of plain environment variables, never this
  * process's Doppler keys. No token or email is ever printed.
  *
@@ -242,7 +242,7 @@ export function readCheckout({ dir, present, head, top, origin, porcelain }, { r
 }
 
 /**
- * What the product says it needs of Node: the answers' nodeVersion, else
+ * What the project says it needs of Node: the answers' nodeVersion, else
  * its `.nvmrc`, else its package.json's `engines.node`, read from `root`
  * (the scratch clone, or the checkout). `{ need, source }`, need null when
  * none is written or it cannot be read.
@@ -265,15 +265,15 @@ export function readNode(version, found, { looked }) {
   const item = "Mini: Node";
   if (!found.text) {
     return row(item, UNKNOWN, looked
-      ? `the product names no Node version (no .nvmrc, no engines.node); write one in the answers' "nodeVersion" (this Mac runs ${version})`
-      : `nothing to read the product's Node version from (no checkout, no clone); write one in the answers' "nodeVersion" (this Mac runs ${version})`);
+      ? `the project names no Node version (no .nvmrc, no engines.node); write one in the answers' "nodeVersion" (this Mac runs ${version})`
+      : `nothing to read the project's Node version from (no checkout, no clone); write one in the answers' "nodeVersion" (this Mac runs ${version})`);
   }
   if (!found.need) return row(item, UNKNOWN, `${found.source} says "${found.text}", which this cannot read as a version`);
   const meets = nodeMeets(version, found.need);
   if (meets == null) return row(item, UNKNOWN, `this Mac's Node version "${version}" cannot be read as a version, so whether it meets ${found.text} (from ${found.source}) is not known`);
   return meets
-    ? row(item, READY, `this Mac runs ${version}; the product needs ${found.text}, from ${found.source}`)
-    : row(item, BLOCKED, `this Mac runs ${version}, but the product needs ${found.text}, from ${found.source}`);
+    ? row(item, READY, `this Mac runs ${version}; the project needs ${found.text}, from ${found.source}`)
+    : row(item, BLOCKED, `this Mac runs ${version}, but the project needs ${found.text}, from ${found.source}`);
 }
 
 /** `claude auth status` -> signed in or not. Never prints the account's email. */
@@ -334,7 +334,7 @@ export function readDoppler(projectsRun, configsRun, { project, config }) {
 /**
  * The tracker rows, from four GETs (`/me`, `/projects`, `/search`,
  * `/people`). `get(path)` answers `{ status, json }` or throws when the
- * tracker does not answer. `seatNames` are the product's loop sign-ins.
+ * tracker does not answer. `seatNames` are the project's loop sign-ins.
  */
 export async function trackerRows({ get, apiUrl, pageUrl, answers, operatorName, seatNames, hasToken }) {
   const reach = `Tracker: reachable at ${apiUrl}`;
@@ -405,9 +405,9 @@ export async function trackerRows({ get, apiUrl, pageUrl, answers, operatorName,
   return rows;
 }
 
-// --- The product's own check ---------------------------------------------
+// --- The project's own check ---------------------------------------------
 
-/** The plain environment the product's check runs with: never this process's Doppler keys. */
+/** The plain environment the project's check runs with: never this process's Doppler keys. */
 export const CHECK_ENV_KEYS = Object.freeze(['PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'LANG', 'LC_ALL', 'TMPDIR', 'TERM']);
 
 export function checkEnv(env) {
@@ -464,7 +464,7 @@ export async function look({ answers, homeConfig, runCheck = true, deps }) {
   else if (repoView.info.permission !== 'ADMIN') rows.push(row(`GitHub: protecting ${branch}`, BLOCKED, 'protecting a branch needs an admin of the repository, and this Mac\'s gh is not one'));
   else rows.push(readProtection(run('gh', ['api', `repos/${repo}/branches/${branch}/protection`]), branch));
 
-  // The scratch clone, made now so the Node row can read the product's own files.
+  // The scratch clone, made now so the Node row can read the project's own files.
   let scratch = null;
   let cloneRoot = null;
   let checkRow = null;
@@ -567,10 +567,10 @@ export function mainCheckoutOf(dir, run = realRun) {
   return /\/\.git$/.test(common) ? dirname(common) : dir;
 }
 
-/** `--product <slug>` names a product; the file it finds must be that product's. Null when they agree (or no --product). */
+/** `--product <slug>` names a project; the file it finds must be that project's. Null when they agree (or no --product). */
 export function productMismatch(product, answers, path) {
   if (!product || answers.productSlug === product) return null;
-  return `${path} is for the product "${answers.productSlug}", not "${product}"; rename the file or correct its productSlug.`;
+  return `${path} is for the project "${answers.productSlug}", not "${product}"; rename the file or correct its productSlug.`;
 }
 
 const USAGE = 'usage: npm run onboard:look -- (--answers <path> | --product <slug>) [--no-check]';
@@ -595,11 +595,11 @@ async function main(argv) {
     return 1;
   }
   if (homeConfig.trackerPort == null) {
-    console.error('look: run this from the folder of the product that runs the tracker (its settings file sets "trackerPort"), not a guest product\'s.');
+    console.error('look: run this from the folder of the project that runs the tracker (its settings file sets "trackerPort"), not a guest project\'s.');
     return 1;
   }
   if (Boolean(args.answers) === Boolean(args.product)) {
-    console.error(`look: name the answers file with --answers, or the product with --product, not both and not neither.\n${USAGE}`);
+    console.error(`look: name the answers file with --answers, or the project with --product, not both and not neither.\n${USAGE}`);
     return 1;
   }
   const path = args.answers ? expandHome(args.answers) : answersFile(homeConfig, args.product);

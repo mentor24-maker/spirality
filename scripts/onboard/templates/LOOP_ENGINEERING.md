@@ -2,13 +2,13 @@
 
 How {{productName}} is built: a **spec → build → review** loop, the one
 [Spirality](https://github.com/{{spiralityRepo}}) defines and runs for
-every product, pointed at {{productName}}'s own queue on the tracker. Dane specs work
+every project, pointed at {{productName}}'s own queue on the tracker. Dane specs work
 in plain language; agent sessions build it into pull requests and
 independently review them; Dane merges. Nothing reaches `main` without a
 passing CI check and his word.
 
 This file was written for {{productName}} by Spirality's setup wizard at
-Spirality commit `{{spiralityCommit}}`, from the product guide {{productName}}'s setup
+Spirality commit `{{spiralityCommit}}`, from the project guide {{productName}}'s setup
 produced. The rules are Spirality's; where one was learned the hard way,
 Spirality's copy and its contract,
 [`docs/LOOP_CONTRACT.md`](https://github.com/{{spiralityRepo}}/blob/main/docs/LOOP_CONTRACT.md),

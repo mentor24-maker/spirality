@@ -355,7 +355,7 @@ test('a failed write throws and leaves nothing behind', () => {
   } finally { cleanup(); }
 });
 
-test('the store hard-codes no product: no names, ids or ticket prefixes in its source', () => {
+test('the store hard-codes no project: no names, ids or ticket prefixes in its source', () => {
   const source = readFileSync(new URL('./store.mjs', import.meta.url), 'utf8');
   for (const word of [/starcaster/i, /wavecenter/i, /spirality/i, /\bSP-/, /\bSC-/, /\bWC-/, /\b9014\d{8}\b/, /86b[a-z0-9]{6}/]) {
     assert.doesNotMatch(source, word);

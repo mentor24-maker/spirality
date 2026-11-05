@@ -34,7 +34,7 @@ function fixture({ refuse = null } = {}) {
 /** The link token inside an email's text. */
 const tokenIn = (text) => new URL(/https?:\/\/\S+/.exec(text)[0]).searchParams.get('link');
 
-test('a setup link goes out once, to that address, titled for the product, and opens the set-password page at the config\'s address', async () => {
+test('a setup link goes out once, to that address, titled for the project, and opens the set-password page at the config\'s address', async () => {
   const f = fixture();
   try {
     const r = await f.run({ actor: f.person.id, email: ' Dane@Example.com ' });

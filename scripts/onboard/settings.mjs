@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Step 1 of setting up a product on Spirality: write the product's settings
+ * Step 1 of setting up a project on Spirality: write the project's settings
  * file (`spirality.project.json`) from its answers file
  * (docs/onboarding/SETUP_REVIEW.md, part 3). The settings come from
  * lib/onboardSettings.mjs; this is the part that reads the tracker and
@@ -9,20 +9,20 @@
  *   npm run onboard:settings -- write --answers <answers file> --out <folder>
  *   npm run onboard:settings -- fill-machine-user --config <settings file>
  *
- * `write` runs from the tracker home's own folder (the product whose
+ * `write` runs from the tracker home's own folder (the project whose
  * settings file sets `trackerPort`, today Spirality). It finds the
- * operator's tracker actor by the home's operatorName, and the product's
+ * operator's tracker actor by the home's operatorName, and the project's
  * build-loop sign-in (`<slug> loop-build`) if the sign-ins step has already
  * made it; if not, machineUserId is the placeholder "0" and the line says
  * so. It writes `<folder>/spirality.project.json`, making the folder if
- * need be. It never writes over a settings file of another product (so
+ * need be. It never writes over a settings file of another project (so
  * never the tracker home's own), and it is meant for a scratch folder: the
- * copy into the product's repository is a later step.
+ * copy into the project's repository is a later step.
  *
  * `fill-machine-user` runs after the sign-ins step. It reads the settings
  * file it is given, finds `<slug> loop-build` at the tracker that file
  * names, and writes its id in as machineUserId, changing nothing else.
- * The npm script runs it under the PRODUCT's Doppler project
+ * The npm script runs it under the PROJECT's Doppler project
  * (scripts/with_doppler.mjs reads `--config`), which the sign-ins step
  * makes; run before that step, Doppler stops it with "Could not find
  * requested project".
@@ -58,7 +58,7 @@ export const USAGE = [
 const WRITE = 'write the settings file';
 const FILL = 'fill in machineUserId';
 
-/** The product's build-loop sign-in's name: `<slug> loop-build` (seatsForConfig). */
+/** The project's build-loop sign-in's name: `<slug> loop-build` (seatsForConfig). */
 export function buildSeatName(productSlug, operatorName) {
   const buildSecret = TRACKER_SEATS.find((s) => s.kind === 'machine' && s.name === 'loop-build')?.secret;
   const seat = seatsForConfig({ trackerPort: null, productSlug, operatorName }).seats.find((s) => s.secret === buildSecret);
@@ -198,7 +198,7 @@ export async function runFill({ configPath }, deps) {
  * The tracker home's settings, as its FILE says, and its main checkout. No
  * environment override is applied (`env: {}`): Doppler sets TRACKER_URL to
  * the Mini's own address for the loops it runs, and that address must never
- * be copied into another product's settings file as its page address.
+ * be copied into another project's settings file as its page address.
  */
 export function loadHome(cwd = process.cwd(), checkoutOf = mainCheckoutOf) {
   const file = findConfigFile(cwd);
@@ -251,7 +251,7 @@ async function main(argv) {
       return 1;
     }
     if (homeConfig.trackerPort == null) {
-      console.error(`FAILED: ${WRITE}: run this from the folder of the product that runs the tracker (its settings file sets "trackerPort"), not a guest product's.`);
+      console.error(`FAILED: ${WRITE}: run this from the folder of the project that runs the tracker (its settings file sets "trackerPort"), not a guest project's.`);
       return 1;
     }
     if (!token) { console.error(`FAILED: ${WRITE}: ${noToken}`); return 1; }

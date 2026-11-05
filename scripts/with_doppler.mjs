@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * with_doppler.mjs — run a command under this product's Doppler project.
+ * with_doppler.mjs — run a command under this project's Doppler project.
  *
  *   node scripts/with_doppler.mjs node scripts/clickup.mjs queue
  *     → doppler run --project <dopplerProject> --config <dopplerConfig>
@@ -9,7 +9,7 @@
  * The npm scripts that need keys (`clickup`, `tracker:signins`, ...) go
  * through this, so the Doppler project and config come from the project
  * config, not from a literal in package.json (CLAUDE.md engineering rule 2):
- * a copy in another product reads that product's keys with no edit.
+ * a copy in another project reads that project's keys with no edit.
  *
  * stdin, stdout and stderr pass straight through (ticket commands read a
  * body from stdin), and the command's exit code is this script's, so a
@@ -19,8 +19,8 @@
  * The project config is the one found from the current folder up, unless
  * the wrapped command names another with `--config <path>` (or
  * `--config=<path>`), as `tracker:signins` does: then that settings file,
- * the same one the command reads, names the Doppler project, so a product's
- * sign-ins run from Spirality's checkout land in that product's Doppler.
+ * the same one the command reads, names the Doppler project, so a project's
+ * sign-ins run from Spirality's checkout land in that project's Doppler.
  */
 
 import { spawn } from 'node:child_process';

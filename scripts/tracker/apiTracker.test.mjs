@@ -20,7 +20,7 @@ const CARD = `@@ASKED\nbuild the to-do list\n@@CONTEXT\n${sixty}\n@@NEEDED\nPick
 
 /**
  * A real tracker server on a temporary database, an operator and a loop each
- * holding a token, one project, and a product folder whose config points the
+ * holding a token, one project, and a project folder whose config points the
  * door at that server. `door(...args)` runs the real door there, as a child
  * process, and answers `{ code, out, err }`. A fake `gh` on the PATH answers
  * `pr view` with whatever `f.prBody` holds.
@@ -665,7 +665,7 @@ test('assignees: one at most, since a ticket in the tracker carries one; more is
 /**
  * The build runner, as far as the door can see it: a home folder holding the
  * lane's lock with a live pid in it (a `sleep` standing in for the runner),
- * and the product folder made a git checkout so the claim marker has a home.
+ * and the project folder made a git checkout so the claim marker has a home.
  * `ours` is the env of a pass the runner started; `hand` is a hand-run session.
  */
 function buildRunner(f) {

@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 /**
- * The setup wizard (SP-112): set up a product on Spirality with one command,
+ * The setup wizard (SP-112): set up a project on Spirality with one command,
  * which asks its questions once and runs every step in order
  * (docs/onboarding/SETUP_REVIEW.md, part 3).
  *
  *   npm run onboard -- --product <slug> [--allow-replace] [--merge-wait-minutes <n>] [--no-prompt]
  *
- * Run on the Mini, from the tracker home's own folder (the product whose
+ * Run on the Mini, from the tracker home's own folder (the project whose
  * settings file sets `trackerPort`, today Spirality), in a Terminal that is
- * not one of that product's lanes. In order:
+ * not one of that project's lanes. In order:
  *
  *   answers   the answers file, `<logDir>/onboard/<slug>.answers.json`. Only
  *             the fields that are Dane's decisions are asked, and only when
@@ -17,7 +17,7 @@
  *   look      SP-108's read-only look (`onboard:look`). Anything BLOCKED stops
  *             here, before anything is written.
  *   clone     SP-119: when the checkout folder does not exist, `git clone` the
- *             product's `main` into it, from the same kind of address (https
+ *             project's `main` into it, from the same kind of address (https
  *             or ssh) the tracker home's own origin uses, and read back that
  *             its origin is githubRepo and it is a clean `main`. A folder that
  *             is there is never touched (the look blocks one that is not a
@@ -25,7 +25,7 @@
  *   settings  SP-109 writes the settings file into a scratch folder beside the
  *             answers file (`onboard:settings write`).
  *   signins   STOP FOR DANE (real secret values): the commands that make the
- *             product's Doppler project if it is missing and run
+ *             project's Doppler project if it is missing and run
  *             `tracker:signins create` against the scratch settings file with
  *             TRACKER_DB set to the tracker home's database. SP-124: the
  *             wizard shows them and asks "Run these now? [y/N]". On y it runs
@@ -34,29 +34,29 @@
  *             printed and stops, nothing run. Then it reads back with
  *             `tracker:signins check` and fills in machineUserId
  *             (`onboard:settings fill-machine-user`).
- *   copy      SP-110's one pull request in the product's repository
+ *   copy      SP-110's one pull request in the project's repository
  *             (`onboard:copy`), CI's verify green on it.
- *   lanes     SP-111 installs the product's lanes from the setup branch and
+ *   lanes     SP-111 installs the project's lanes from the setup branch and
  *             files its setup ticket (`onboard:lanes`). First it removes
  *             onboard:copy's worktree, which still holds the setup branch
  *             (git checks a branch out in one place only), read back.
  *   merge     STOP FOR DANE (a decision): his merge phrase on the setup
- *             ticket; the product's own relay merges. The wizard waits for the
- *             merge and reads it back on the product's main.
+ *             ticket; the project's own relay merges. The wizard waits for the
+ *             merge and reads it back on the project's main.
  *   protect   main protected: the required check `verify`, up to date,
  *             admins included, no force pushes or deletion, no review
  *             required. Read back with `gh api .../branches/main/protection`.
  *
  * Every step first checks whether it is already done and skips it if so, so
  * a rerun resumes where a failed one stopped and asks nothing twice. Once the
- * setup is on the product's main (its settings file is there, with its own
+ * setup is on the project's main (its settings file is there, with its own
  * machine id), every step up to the merge is done. Each step's outcome goes
  * to the step log, `<logDir>/<slug>-onboard.log`, in Mountain time.
  *
  * A failed step prints `FAILED: <step>: <what was seen>` and the rerun
  * command, and nothing after it runs (rule 6). A stop for Dane that is not
  * answered (no Terminal to wait in, or the merge not made in time) prints
- * `STOPPED: <step>: ...` and the same rerun command. Every product value comes
+ * `STOPPED: <step>: ...` and the same rerun command. Every project value comes
  * from the answers and settings files (rule 2); the wizard prints no secret
  * (rule 4): the paste block holds commands, never values.
  *
@@ -106,13 +106,13 @@ export const STEPS = Object.freeze(['answers', 'look', 'clone', 'settings', 'sig
  * still counts as answered, so it is not asked again.
  */
 export const DANE_FIELDS = Object.freeze([
-  { key: 'productName', question: 'Product name, as the tracker shows it', required: true },
+  { key: 'productName', question: 'Project name, as the tracker shows it', required: true },
   { key: 'githubRepo', question: 'GitHub repository, as owner/name', required: true },
   { key: 'trackerPrefix', question: 'Ticket prefix (the start of every ticket id)', fallback: ({ slug }) => slug.replace(/[^a-z]/g, '').slice(0, 2).toUpperCase() || null },
   { key: 'mergePhrases', question: 'Merge phrases, the words that mean "merge this" (comma between)', list: true, fallback: ({ homeConfig }) => homeConfig.mergePhrases.join(', ') },
   { key: 'autoMergeLanes', question: 'Lanes that may merge without you (comma between)', list: true, fallback: () => 'none' },
   { key: 'extraGovernancePaths', question: 'Extra protected files, beyond the usual list (comma between)', list: true, fallback: () => 'none' },
-  { key: 'description', question: 'What the product is, in two or three sentences, for its CLAUDE.md', required: true },
+  { key: 'description', question: 'What the project is, in two or three sentences, for its CLAUDE.md', required: true },
 ]);
 
 /** A typed answer as the answers file holds it: blank -> null (the default); a list split on commas; "none" -> []. */
@@ -192,7 +192,7 @@ export function protectionDropped(before) {
  * The worktrees of a checkout (`git worktree list --porcelain`) that hold
  * `branch`, other than the checkout itself. Git lets a branch be checked out
  * in one place only, so `onboard:lanes` cannot check out the setup branch in
- * the product's own folder while onboard:copy's worktree still holds it.
+ * the project's own folder while onboard:copy's worktree still holds it.
  * Git always lists the checkout itself first, and prints paths resolved
  * (/private/var for /var), so the first entry is skipped, never compared.
  */
@@ -212,7 +212,7 @@ export function rerunCommand(opts) {
   return `npm run onboard -- --product ${opts.product}${opts.allowReplace ? ' --allow-replace' : ''}${opts.mergeWaitMinutes !== DEFAULT_MERGE_WAIT_MINUTES ? ` --merge-wait-minutes ${opts.mergeWaitMinutes}` : ''}${opts.noPrompt ? ' --no-prompt' : ''}`;
 }
 
-/** Where the setup page reads a product's setup state: `<logDir>/onboard/<slug>.state.json`, beside its answers file. */
+/** Where the setup page reads a project's setup state: `<logDir>/onboard/<slug>.state.json`, beside its answers file. */
 export function stateFile(homeConfig, slug) {
   return join(onboardDir(homeConfig), `${slug}.state.json`);
 }
@@ -256,7 +256,7 @@ export function cloneAddress(homeOrigin, repo) {
   return `https://github.com/${name}.git`;
 }
 
-/** A word in single quotes for the shell, so a product name with a space or a quote pastes safely. */
+/** A word in single quotes for the shell, so a project name with a space or a quote pastes safely. */
 export function shellQuote(text) {
   const s = String(text);
   return /^[A-Za-z0-9_./:=@+-]+$/.test(s) ? s : `'${s.replace(/'/g, `'\\''`)}'`;
@@ -461,7 +461,7 @@ export async function onboard(opts, deps) {
 
     const checkout = expandHome(answers.checkoutDir);
     const sameRepo = (a, b) => String(a).toLowerCase() === String(b).toLowerCase();
-    // Once the product's main has its settings file, with its own machine id,
+    // Once the project's main has its settings file, with its own machine id,
     // the setup pull request has merged: every step up to the merge is done.
     const onMain = () => {
       if (deps.readText(join(checkout, '.git', 'HEAD')) == null && deps.readText(join(checkout, '.git')) == null) return { on: false, why: `${checkout} is not cloned yet` };
@@ -644,7 +644,7 @@ export async function onboard(opts, deps) {
       else {
         // onboard:copy keeps its worktree on the setup branch; git lets a
         // branch be checked out in one place only, so it goes before lanes
-        // checks the branch out in the product's own folder. Its work is
+        // checks the branch out in the project's own folder. Its work is
         // pushed and the branch stays; git refuses if anything is unsaved.
         const holders = () => {
           const l = run('git', ['worktree', 'list', '--porcelain'], { cwd: checkout });
@@ -799,7 +799,7 @@ export function parseOnboardArgs(argv) {
       opts.mergeWaitMinutes = n;
     } else return { error: `unknown argument ${JSON.stringify(a)}` };
   }
-  if (!opts.product) return { error: 'name the product with --product <slug>' };
+  if (!opts.product) return { error: 'name the project with --product <slug>' };
   if (slugFromName(opts.product) !== opts.product) return { error: `--product "${opts.product}" is not a slug (lower-case letters, digits and dashes)` };
   return { opts };
 }
@@ -826,7 +826,7 @@ async function main(argv) {
     return 1;
   }
   if (homeConfig.trackerPort == null) {
-    console.error('FAILED: start: run this from the folder of the product that runs the tracker (its settings file sets "trackerPort"), not a guest product\'s.');
+    console.error('FAILED: start: run this from the folder of the project that runs the tracker (its settings file sets "trackerPort"), not a guest project\'s.');
     return 1;
   }
   const spiralityDir = dirname(file);

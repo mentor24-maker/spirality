@@ -18,7 +18,7 @@ commit. `npm run test:loop` runs the copied tests.
 
 The loop jobs on the Mini are run by files copied from the same Spirality
 commit. They live in the repository's own `scripts/`, not here, because each
-one finds the product's folder from where it sits. All are byte for byte
+one finds the project's folder from where it sits. All are byte for byte
 except `scripts/project_config.mjs`, which imports
 `../loop/lib/projectConfig.mjs` instead of `../lib/projectConfig.mjs`.
 

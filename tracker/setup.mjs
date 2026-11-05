@@ -1,15 +1,15 @@
 /**
- * setup.mjs — what the tracker's server tells the "Set up a product" page,
+ * setup.mjs — what the tracker's server tells the "Set up a project" page,
  * and the one file it writes for it (the routes are in tracker/server.mjs).
  *
  * The page never runs the setup: Dane copies a command and pastes it on the
  * Mini, and the page reads where it stands. So this module only reads files
- * and writes one: a product's answers file, `<logDir>/onboard/<slug>.answers.json`.
+ * and writes one: a project's answers file, `<logDir>/onboard/<slug>.answers.json`.
  * The wizard (scripts/onboard/onboard.mjs) owns everything else, including
  * the state file it leaves beside the answers file,
  * `<logDir>/onboard/<slug>.state.json`, which this module only reads.
  *
- * Nothing about any one product is typed in here (CLAUDE.md engineering
+ * Nothing about any one project is typed in here (CLAUDE.md engineering
  * rule 2): the fields and their questions are the wizard's own list
  * (DANE_FIELDS), the defaults come from the tracker home's settings file,
  * the answers are checked by the wizard's own checker (resolveAnswers), and
@@ -42,15 +42,15 @@ const FINISHED_OUTCOMES = new Set(['done', 'skip']);
 /** The step after which the page may no longer change the answers: the sign-ins are made from them. */
 export const ANSWERS_LOCK_STEP = 'signins';
 
-/** Where a product's state file is kept: beside its answers file. */
+/** Where a project's state file is kept: beside its answers file. */
 export function stateFile(homeConfig, slug) {
   return join(onboardDir(homeConfig), `${slug}.state.json`);
 }
 
-/** Refuse a product name in an address that is not a slug. */
+/** Refuse a project name in an address that is not a slug. */
 export function checkSlug(slug) {
   if (typeof slug !== 'string' || !slug || slugFromName(slug) !== slug) {
-    throw new SetupError(400, 'bad-slug', `"${slug}" is not a product slug (small letters, digits and single dashes).`);
+    throw new SetupError(400, 'bad-slug', `"${slug}" is not a project slug (small letters, digits and single dashes).`);
   }
   return slug;
 }
@@ -75,7 +75,7 @@ function readJsonFile(path) {
 /**
  * The answer fields that are Dane's decisions, in the wizard's order, each
  * with its question and the default the wizard would show in brackets
- * (null: no default). `slug` fills the defaults made from a product's slug;
+ * (null: no default). `slug` fills the defaults made from a project's slug;
  * without one those are null.
  */
 export function setupFields({ homeConfig }, slug = '') {
@@ -125,7 +125,7 @@ export function answersLocked(state) {
 }
 
 /**
- * The command the page shows to start or resume a product's setup: from the
+ * The command the page shows to start or resume a project's setup: from the
  * server's own folder, against its own database. The wizard skips every
  * step already done, so starting and resuming are the same line.
  */
@@ -133,7 +133,7 @@ export function setupCommand({ folder, trackerDb }, slug) {
   return `cd ${shellQuote(folder)} && TRACKER_DB=${shellQuote(trackerDb)} npm run onboard -- --product ${shellQuote(slug)} --no-prompt`;
 }
 
-/** One product's setup: its answers as written, as checked, its state file, and the command. */
+/** One project's setup: its answers as written, as checked, its state file, and the command. */
 export function setupOf(setup, slug) {
   const { homeConfig, homeRoot } = setup;
   checkSlug(slug);
@@ -165,7 +165,7 @@ export function setupOf(setup, slug) {
   };
 }
 
-/** Every product with an answers file, by slug, each with its current step and whether it finished. */
+/** Every project with an answers file, by slug, each with its current step and whether it finished. */
 export function setupList(setup) {
   const dir = onboardDir(setup.homeConfig);
   let names = [];

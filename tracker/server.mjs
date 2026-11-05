@@ -322,7 +322,7 @@ function flag(value) {
  * `send`, an invite is refused and nothing is made. Null (or no
  * `send`) means no reset email goes out; the page's answer is the same,
  * and the log says why. `now` is the clock the sign-in failure count reads.
- * `setup` is what the "Set up a product" calls read (tracker/setup.mjs):
+ * `setup` is what the "Set up a project" calls read (tracker/setup.mjs):
  * `{ homeConfig, homeRoot, folder, trackerDb }`, the tracker home's checked
  * settings file, its main folder, the folder this server runs from and its
  * database. Null means those calls answer 503 and nothing is read or written.
@@ -372,12 +372,12 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
       return [200, me];
     }
 
-    // Dane's page: "Set up a product" (tracker/setup.mjs). A person's only;
+    // Dane's page: "Set up a project" (tracker/setup.mjs). A person's only;
     // the server reads the wizard's files and writes one, the answers file,
     // and never runs the setup itself: the page shows the command to paste.
     if (parts[0] === 'setup' && parts.length <= 2) {
       if (me.kind !== 'human') {
-        throw new HttpError(403, 'people-only', 'only a person signed in to the tracker may read or change a product\'s setup; a machine may not.');
+        throw new HttpError(403, 'people-only', 'only a person signed in to the tracker may read or change a project\'s setup; a machine may not.');
       }
       if (!setup) throw new HttpError(503, 'no-setup', 'this tracker cannot read setups: its settings file was not usable when it started (its log says why).');
       try {
@@ -862,7 +862,7 @@ export async function loadMailSettings({ host, port, log = () => {} }) {
 }
 
 /**
- * What the "Set up a product" calls read: the settings file in the folder
+ * What the "Set up a project" calls read: the settings file in the folder
  * this server runs from (it must be the tracker home's, the one that sets
  * trackerPort), that folder, and the database it opened. The answers file's
  * default checkout folder sits beside `homeRoot`, the tracker home's folder,
@@ -908,7 +908,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     }
     const accountMail = mail.account && { ...mail.account, productName: store.getProject(defaultProject)?.name ?? 'tracker' };
     const { setup, why: noSetup } = setupSettingsOf({ db: resolve(db) });
-    log(setup ? `set up a product: on, reading ${setup.homeConfig.logDir}/onboard.` : `set up a product: off. ${noSetup}.`);
+    log(setup ? `set up a project: on, reading ${setup.homeConfig.logDir}/onboard.` : `set up a project: off. ${noSetup}.`);
     const server = await startServer({ store, port, host, log, notifier, defaultProject, mergePhrase, closePhrase: CLOSE_PHRASE, goPhrase: GO_PHRASE, accountMail, setup });
     console.log(`tracker listening on http://${host}:${server.address().port}/`);
   } catch (err) {

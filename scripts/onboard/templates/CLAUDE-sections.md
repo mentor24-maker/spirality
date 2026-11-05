@@ -23,8 +23,8 @@ the hard way:
 
 Every piece of work on this repository is a ticket in the **{{productName}}** project
 of **the tracker**, the ticket system that runs on the Mini
-(`{{trackerUrl}}`, ids like `{{trackerPrefix}}-12`). Work for another product
-goes in that product's queue, and a change to the loop itself (the ticket door
+(`{{trackerUrl}}`, ids like `{{trackerPrefix}}-12`). Work for another project
+goes in that project's queue, and a change to the loop itself (the ticket door
 in `loop/`, the skills' shared steps) is Spirality work, filed in Spirality's
 project; never mixed.
 

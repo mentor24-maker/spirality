@@ -18,10 +18,10 @@
 # cannot answer a permission prompt, so anything not listed is refused and
 # the run continues.
 #
-# Every product-specific name (the log folder, the short name each log and
+# Every project-specific name (the log folder, the short name each log and
 # lock starts with, the launchd label) comes from the project config through
 # scripts/project_config.mjs, the way the installer and run_relay.sh read
-# them; nothing here names a product.
+# them; nothing here names a project.
 set -u
 
 # launchd hands the job almost no environment. Set the PATH once, here.
@@ -96,7 +96,7 @@ source "$REPO/scripts/lib/back_to_main.sh"
 
 while true; do
   # 0. A checkout left on a branch that has merged and gone from origin (a new
-  #    product's lanes run from its setup branch until it merges) goes
+  #    project's lanes run from its setup branch until it merges) goes
   #    back to main, under the sync lock, so the pull below can run.
   if [ "$(git rev-parse --abbrev-ref HEAD 2>/dev/null)" != "main" ] && [ -z "$(git status --porcelain)" ]; then
     if take_sync_lock; then

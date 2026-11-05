@@ -1,5 +1,5 @@
 {
-  "//": "What a product gets from Spirality in its one setup pull request (SP-110), taken from what Normie's PRs #62, #64, #65 and #66 received, plus every module the ticket door imports today. `files` are copied from Spirality: with no `edits`, byte for byte, checked with cmp; with `edits`, each `find` must appear exactly once in Spirality's file, or the copy stops naming it, so a change to Spirality's wording can never slip through unadapted. The ticket door goes under loop/, apart from the product's own lib/ and scripts/; the runners, hook, skills and settings keep Spirality's paths, because each finds the product's folder from where it sits. `made` are written from the answers.",
+  "//": "What a project gets from Spirality in its one setup pull request (SP-110), taken from what Normie's PRs #62, #64, #65 and #66 received, plus every module the ticket door imports today. `files` are copied from Spirality: with no `edits`, byte for byte, checked with cmp; with `edits`, each `find` must appear exactly once in Spirality's file, or the copy stops naming it, so a change to Spirality's wording can never slip through unadapted. The ticket door goes under loop/, apart from the project's own lib/ and scripts/; the runners, hook, skills and settings keep Spirality's paths, because each finds the project's folder from where it sits. `made` are written from the answers.",
   "files": [
     {
       "from": "lib/branchCatchUp.js",
@@ -250,7 +250,7 @@
     {
       "from": ".claude/skills/loop-build/SKILL.md",
       "to": ".claude/skills/loop-build/SKILL.md",
-      "why": "the product's name, ticket ids and CLAUDE.md section (Spirality's own skill already tells a lane's pass it is the lane, SP-117)",
+      "why": "the project's name, ticket ids and CLAUDE.md section (Spirality's own skill already tells a lane's pass it is the lane, SP-117)",
       "edits": [
         {
           "find": "from the Spirality queue",
@@ -289,7 +289,7 @@
     {
       "from": ".claude/skills/loop-review/SKILL.md",
       "to": ".claude/skills/loop-review/SKILL.md",
-      "why": "the product's name, kind of surface, relay and merge phrases, its review lane's label, and its CLAUDE.md section",
+      "why": "the project's name, kind of surface, relay and merge phrases, its review lane's label, and its CLAUDE.md section",
       "edits": [
         {
           "find": "from the Spirality queue",
@@ -328,7 +328,7 @@
     {
       "from": ".claude/skills/loop-spec/SKILL.md",
       "to": ".claude/skills/loop-spec/SKILL.md",
-      "why": "the product's name and queue, and its lanes on the Mini, its ticket ids, and Spirality's ClickUp setup page",
+      "why": "the project's name and queue, and its lanes on the Mini, its ticket ids, and Spirality's ClickUp setup page",
       "edits": [
         {
           "find": "in the Spirality queue",
@@ -344,7 +344,7 @@
         },
         {
           "find": "**Never file Spirality work in StarCaster's Loop Queue**\n  (`901418546619`) — that queue builds StarCaster.",
-          "replace": "**Never file another product's work here**, nor {{productName}}'s anywhere\n  else: each product's queue builds that product."
+          "replace": "**Never file another project's work here**, nor {{productName}}'s anywhere\n  else: each project's queue builds that project."
         },
         {
           "find": "Spirality's lanes run on the\n   Mini (`com.spirality.loop-build` and the rest:",
@@ -386,11 +386,11 @@
     {
       "to": "CLAUDE.md",
       "template": "scripts/onboard/templates/CLAUDE-sections.md",
-      "how": "appended, unless the product's CLAUDE.md already has a \"## Where the work is tracked\" heading; the product's own guide is kept"
+      "how": "appended, unless the project's CLAUDE.md already has a \"## Where the work is tracked\" heading; the project's own guide is kept"
     },
     {
       "to": "package.json",
-      "from": "the product's own, with the scripts below added, and verifyIfAbsent as its verify when it has none; none of its own is changed or removed"
+      "from": "the project's own, with the scripts below added, and verifyIfAbsent as its verify when it has none; none of its own is changed or removed"
     }
   ],
   "npmScripts": {

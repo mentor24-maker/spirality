@@ -2328,7 +2328,7 @@ test('the setup form asks the wizard\'s own questions with their defaults, and s
     const fields = setupFields(h.setup, 'press-play');
     const html = renderSetupForm(fields);
     assert.deepEqual([...html.matchAll(/name="([A-Za-z]+)"/g)].map((m) => m[1]), SETUP_FIELDS.map((f) => f.key));
-    assert.match(html, /<label for="setup-productName">Product name, as the tracker shows it<\/label>/);
+    assert.match(html, /<label for="setup-productName">Project name, as the tracker shows it<\/label>/);
     assert.match(html, /name="trackerPrefix" data-default="PR" autocapitalize="off" spellcheck="false" value="PR">/);
     assert.match(html, /<textarea id="setup-description"/);
     assert.match(html, /<span class="note field-note" data-for="githubRepo"><\/span>/);

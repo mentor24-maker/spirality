@@ -53,7 +53,7 @@ import { loadProjectConfig, ProjectConfigError } from '../lib/projectConfig.mjs'
 // The merge lane's decisions (task 86bchpkxz). `mergeDecision` says whether
 // Dane's word authorizes a merge, `githubGate` whether GitHub allows it; the
 // notices pair the words he reads with the marker the next pass reads. All
-// from the package, so every product's relay decides the same way.
+// from the package, so every project's relay decides the same way.
 import {
   mergeDecision, githubGate, isMergeCommand, MERGE_MARKER, parseMergeMarker,
   refusalNotice, conflictHandOffNotice, mergedNotice, REFUSAL_CODES,
@@ -98,7 +98,7 @@ try {
   process.exit(1);
 }
 export const WORKSPACE = project.workspaceId;
-export const SPACE = project.spaceId;                // the product's SPACE
+export const SPACE = project.spaceId;                // the project's SPACE
 export const LOOP_QUEUE_LIST = project.loopQueueListId; // the Loop Queue LIST
 /** Dane's seat. Every handoff assigns this id. The token ALSO acts as this
  *  seat (`whoami` says so), which is why every comment this script posts is
@@ -475,7 +475,7 @@ function listWorktrees() {
 
 /**
  * Where this checkout's claim marker lives (lib/passClaim.js): the checkout
- * the door runs in, which `npm run` makes the product's own. Asked of git,
+ * the door runs in, which `npm run` makes the project's own. Asked of git,
  * because the claim happens in the main checkout and the hand-off inside the
  * pass's worktree, where plain `.git` is a FILE pointing elsewhere.
  */

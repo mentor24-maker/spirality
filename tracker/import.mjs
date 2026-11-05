@@ -1,5 +1,5 @@
 /**
- * The importer: copies one product's Loop Queue, every ticket open and
+ * The importer: copies one project's Loop Queue, every ticket open and
  * closed, with its comments and threaded replies, from ClickUp into the
  * tracker's store (tracker/store.mjs). Design: docs/TRACKER_MVP.md, "How the
  * loops switch over", step 3.
@@ -9,7 +9,7 @@
  *
  * It READS ClickUp, only through the ClickUp tracker
  * (scripts/tracker/clickupTracker.mjs), and never writes to it. The list,
- * the operator, the product and the ticket prefix all come from the project
+ * the operator, the project and the ticket prefix all come from the project
  * config (lib/projectConfig.mjs).
  *
  * What it keeps:

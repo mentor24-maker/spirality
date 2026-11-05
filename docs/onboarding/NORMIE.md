@@ -1,8 +1,8 @@
 # Onboarding Normie onto Spirality: the plan
 
-Normie (https://github.com/mentor24-maker/normie) is the first product to
+Normie (https://github.com/mentor24-maker/normie) is the first project to
 come onto Spirality from scratch. This page walks every item of the
-checklist, [docs/ONBOARDING_A_PRODUCT.md](../ONBOARDING_A_PRODUCT.md), for
+checklist, [docs/ONBOARDING_A_PROJECT.md](../ONBOARDING_A_PROJECT.md), for
 Normie: where it stands, what is missing, who does it, and the ticket that
 does it. Planned in SP-89, "Normie is not set up on Spirality yet: plan its
 onboarding as tickets", from Dane's answer on SP-80 ("A, B, and C
@@ -28,7 +28,7 @@ hands each one to Dane and nothing is built before he says "go".
 
 ## The order
 
-1. SP-95, SP-96, SP-97, SP-99: Spirality's own fixes, so a second product
+1. SP-95, SP-96, SP-97, SP-99: Spirality's own fixes, so a second project
    can sit beside it without taking over its sign-ins, keys, logs or locks.
    None waits on another.
 2. SP-98: the tracker project, the Doppler project and the loop sign-ins
@@ -45,7 +45,7 @@ SP-98 Dane chose (a): each is built by a session he starts by hand in
 `~/WebApps/normie` (it signs in as `hand-run`), following the loop-build
 steps, the way Spirality's seed loop was bootstrapped. The option not taken
 was to file them in Spirality's project and let Spirality's build loop open
-the pull requests in Normie's repository, which mixes one product's work into
+the pull requests in Normie's repository, which mixes one project's work into
 another's queue.
 
 ## 1. The GitHub repository
@@ -110,7 +110,7 @@ another's queue.
   sign-ins (`TRACKER_TOKEN_LOOP_BUILD`, `TRACKER_TOKEN_LOOP_REVIEW`,
   `TRACKER_TOKEN_LOOP_INTAKE`, `TRACKER_TOKEN_RELAY`,
   `TRACKER_TOKEN_HAND_RUN`). Not the operator's sign-in, `RESEND_API_KEY` or
-  `TRACKER_NOTIFY_TO` (they go with the product that runs the tracker), and
+  `TRACKER_NOTIFY_TO` (they go with the project that runs the tracker), and
   not `CLICKUP_API_TOKEN` (Normie was never on ClickUp). Moving Normie's app
   keys into Doppler is **not** needed for the loops and is not planned here.
   And the fix so the tooling reads the Doppler project from the settings
@@ -119,7 +119,7 @@ another's queue.
   login** (the Doppler dashboard). The tokens: written by `tracker:signins
   create`, run by Dane on the Mini. The tooling fix: an agent session.
 - **Ticket.**
-  - SP-96 "A second product's ticket commands and doctor read Spirality's
+  - SP-96 "A second project's ticket commands and doctor read Spirality's
     Doppler keys: take the Doppler project from the settings file".
   - SP-98 "Normie has no tracker project, Doppler project or loop sign-ins,
     so no loop can take its work: set them up" (the Doppler project itself).
@@ -133,7 +133,7 @@ another's queue.
   would re-issue the tokens of Spirality's own loop seats and stop
   Spirality's loops (checklist gap 3). Nothing compares the tracker's
   repository field with `githubRepo` (gap 4).
-- **Missing.** A safe way to sign in a second product's loops; the project
+- **Missing.** A safe way to sign in a second project's loops; the project
   `normie` with prefix `NO` and repository `mentor24-maker/normie`; its five
   loop sign-ins; and the repository check.
 - **Who.** The sign-in fix and the check: an agent session. Running
@@ -141,11 +141,11 @@ another's queue.
   login** (only a person may change a project).
 - **Ticket.**
   - SP-95 "Normie's loops would take over Spirality's tracker sign-ins and
-    stop Spirality's loops: give each product its own".
+    stop Spirality's loops: give each project its own".
   - SP-98 "Normie has no tracker project, Doppler project or loop sign-ins,
     so no loop can take its work: set them up". Waits on SP-95 and SP-96.
   - SP-99 "The tracker's GitHub repository field can disagree with a
-    product's settings file and nobody notices: check one against the
+    project's settings file and nobody notices: check one against the
     other".
 
 ## 5. The loop lanes on the Mini
@@ -164,12 +164,12 @@ another's queue.
 - **Who.** An agent session, never one running in one of Spirality's own
   lanes (the installer reloads the lane it runs in).
 - **Ticket.**
-  - SP-97 "A second product's loop runners would write into Spirality's logs
+  - SP-97 "A second project's loop runners would write into Spirality's logs
     and share its locks: name them from the settings file".
   - NO-6 in Normie's project: "Normie's loops do not run on
     the Mini: install its loop lanes". Waits on NO-2, NO-5 and SP-97.
 
-## 6. The skills, hooks and rules in the product's repository
+## 6. The skills, hooks and rules in the project's repository
 
 - **Today.** Normie has a `CLAUDE.md` (a project guide: the stack, commands,
   the local Supabase stack), which pulls in `.cursorrules` for its coding
@@ -203,10 +203,10 @@ another's queue.
 
 | Id | Project | Name | Waits on |
 |---|---|---|---|
-| SP-95 | Spirality | Normie's loops would take over Spirality's tracker sign-ins and stop Spirality's loops: give each product its own | |
-| SP-96 | Spirality | A second product's ticket commands and doctor read Spirality's Doppler keys: take the Doppler project from the settings file | |
-| SP-97 | Spirality | A second product's loop runners would write into Spirality's logs and share its locks: name them from the settings file | |
-| SP-99 | Spirality | The tracker's GitHub repository field can disagree with a product's settings file and nobody notices: check one against the other | |
+| SP-95 | Spirality | Normie's loops would take over Spirality's tracker sign-ins and stop Spirality's loops: give each project its own | |
+| SP-96 | Spirality | A second project's ticket commands and doctor read Spirality's Doppler keys: take the Doppler project from the settings file | |
+| SP-97 | Spirality | A second project's loop runners would write into Spirality's logs and share its locks: name them from the settings file | |
+| SP-99 | Spirality | The tracker's GitHub repository field can disagree with a project's settings file and nobody notices: check one against the other | |
 | SP-98 | Spirality | Normie has no tracker project, Doppler project or loop sign-ins, so no loop can take its work: set them up | SP-95, SP-96 |
 | NO-1 | Normie | Every Normie pull request fails CI at the dependency audit: clear the high-severity advisories | |
 | NO-2 | Normie | Normie's main can change without a green check: name its CI check verify and protect main | NO-1 |

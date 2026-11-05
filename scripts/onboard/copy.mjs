@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * The setup wizard's copy step (SP-110): everything a product needs from
+ * The setup wizard's copy step (SP-110): everything a project needs from
  * Spirality arrives in ONE pull request in its repository, every copied file
  * checked byte for byte against the Spirality commit it came from
  * (SETUP_REVIEW.md part 3, step 4; Dane's answer to question 7).
@@ -15,12 +15,12 @@
  *
  * In order, each step skipped when already done, so a rerun picks up where a
  * failed one stopped:
- *   1. look     the product's checkout and repository; what every file would
+ *   1. look     the project's checkout and repository; what every file would
  *               do there (new / identical / replaces). A file of the
- *               product's own that would be replaced stops the run, unless
+ *               project's own that would be replaced stops the run, unless
  *               --allow-replace. --dry-run prints this and stops.
  *   2. write    a worktree on branch spirality-setup off origin's main, kept
- *               beside the answers file (never inside the product's
+ *               beside the answers file (never inside the project's
  *               checkout, which the lanes need clean): the files, the
  *               settings file, the npm scripts (with a `verify` that runs
  *               the check and the loop's tests, if it has no verify script),
@@ -32,11 +32,11 @@
  *   4. pr       commit, push and one pull request; its body names the
  *               Spirality commit and lists every file with its check.
  *   5. readback from the worktree: `npm run doctor`, `npm run clickup --
- *               whoami` (the product's hand-run seat) and `queue`; then CI's
+ *               whoami` (the project's hand-run seat) and `queue`; then CI's
  *               verify on the pull request.
  *
- * It never touches the product's main and never merges: SP-111's lanes step
- * installs the lanes from the branch, and the product's own relay merges it
+ * It never touches the project's main and never merges: SP-111's lanes step
+ * installs the lanes from the branch, and the project's own relay merges it
  * on Dane's word. A failed step prints `FAILED: <step>: <what was seen>` and
  * the rerun command (rule 6); no secret is ever printed (rule 4).
  */
@@ -102,7 +102,7 @@ const textOf = (path) => { const b = rawSpirality(path); return b == null ? null
 
 const checkout = expandHome(answers.checkoutDir);
 const pgit = (...a) => run('git', a, { cwd: checkout });
-if (!existsSync(checkout)) fail('look', `the product's checkout ${checkout} does not exist (the look, SP-108, says how to clone it)`);
+if (!existsSync(checkout)) fail('look', `the project's checkout ${checkout} does not exist (the look, SP-108, says how to clone it)`);
 if (!pgit('fetch', '-q', 'origin').ok) fail('look', `git fetch in ${checkout} failed`);
 const origin = pgit('remote', 'get-url', 'origin').out;
 if (!origin.toLowerCase().includes(answers.githubRepo.toLowerCase())) fail('look', `${checkout}'s origin is not ${answers.githubRepo}`);
@@ -126,7 +126,7 @@ try {
   planned = compareWithProduct(planCopies(manifest, { readSpirality: textOf, vars }), readProduct);
 } catch (e) { fail('look', e.message); }
 
-// The files made from the product's own.
+// The files made from the project's own.
 let npm;
 try { npm = mergeNpmScripts(pkgText, { ...manifest.npmScripts, ...(verify.add ? { verify: verify.add } : {}) }); } catch (e) { fail('look', e.message); }
 if (npm.conflicts.length) {
@@ -149,8 +149,8 @@ if (arg('config')) {
 }
 const extra = [
   ...(settingsText == null ? [] : [{ to: 'spirality.project.json', kind: 'made', from: arg('config'), content: settingsText }]),
-  { to: 'package.json', kind: 'made', from: `the product's own, plus ${npm.added.length ? npm.added.join(', ') : 'nothing'}`, content: npm.text },
-  { to: '.gitignore', kind: 'made', from: ignore.added.length ? `the product's own, plus ${ignore.added.join(', ')}` : 'the product\'s own (it already ignores what the lanes need)', content: ignore.text },
+  { to: 'package.json', kind: 'made', from: `the project's own, plus ${npm.added.length ? npm.added.join(', ') : 'nothing'}`, content: npm.text },
+  { to: '.gitignore', kind: 'made', from: ignore.added.length ? `the project's own, plus ${ignore.added.join(', ')}` : 'the product\'s own (it already ignores what the lanes need)', content: ignore.text },
   { to: 'CLAUDE.md', kind: 'made', from: claude.added ? 'the product\'s own, plus the loop\'s sections' : 'the product\'s own (the loop\'s sections are already there)', content: claude.text },
   ...(haveVerify ? [] : [{
     to: '.github/workflows/verify.yml', kind: 'made',
@@ -163,14 +163,14 @@ const all = [...planned, ...compareWithProduct(extra, readProduct)];
 const width = Math.max(...all.map((f) => f.to.length));
 console.log(`What ${answers.productName}'s setup pull request holds, from Spirality ${commit.slice(0, 7)}:\n`);
 for (const f of all) console.log(`  ${f.to.padEnd(width)}  ${f.kind.padEnd(7)}  ${f.status}`);
-console.log(`\n  ${all.filter((f) => f.status === 'identical').length} identical, ${all.filter((f) => f.status === 'new').length} new, ${all.filter((f) => f.status === 'replaces').length} replace what the product has`);
-if (haveVerify) console.log('  The product already has a CI job named verify; no workflow is added.');
+console.log(`\n  ${all.filter((f) => f.status === 'identical').length} identical, ${all.filter((f) => f.status === 'new').length} new, ${all.filter((f) => f.status === 'replaces').length} replace what the project has`);
+if (haveVerify) console.log('  The project already has a CI job named verify; no workflow is added.');
 console.log(verify.add
   ? `  package.json ${npm.added.includes('verify') ? 'gets' : 'already has'} "verify": "${verify.add}", the same thing CI runs.`
   : `  package.json already has its own verify ("${verify.own}"); it is kept as it is.`);
 if (settingsText == null) console.log('  No --config given, so the settings file is not compared.');
 
-// The product's own files are never replaced unasked. The door and the
+// The project's own files are never replaced unasked. The door and the
 // loop's own files (made by an earlier setup) are the loop's to update.
 const theirs = all.filter((f) => f.status === 'replaces' && !['package.json', 'CLAUDE.md', '.gitignore'].includes(f.to) && !f.to.startsWith('loop/'));
 if (dryRun) {
@@ -179,7 +179,7 @@ if (dryRun) {
   process.exit(0);
 }
 if (theirs.length && !flag('allow-replace')) {
-  fail('look', `it would replace files the product already has: ${theirs.map((f) => f.to).join(', ')}. Check them, then rerun with --allow-replace`);
+  fail('look', `it would replace files the project already has: ${theirs.map((f) => f.to).join(', ')}. Check them, then rerun with --allow-replace`);
 }
 
 // ── 2. write ───────────────────────────────────────────────────────────────
@@ -222,7 +222,7 @@ if (wgit('status', '--porcelain').out) {
   const c = wgit('commit', '-q', '-m', msg);
   if (!c.ok) fail('pr', `git commit: ${last(c.err)}`);
   say('pr', `committed ${wgit('rev-parse', '--short', 'HEAD').out}`);
-  // What git stored, not what was written: a product's .gitattributes (line
+  // What git stored, not what was written: a project's .gitattributes (line
   // endings, filters) could change the bytes on the way in.
   const stored = all.filter((f) => f.kind === 'copy').filter((f) => {
     const r = spawnSync('git', ['show', `HEAD:${f.to}`], { cwd: worktree });

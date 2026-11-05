@@ -577,7 +577,7 @@ test('admin: create-actor prints only the token on stdout, and that token signs 
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('the server, admin and backup hard-code no product: no names, ids, prefixes or ports in their source', () => {
+test('the server, admin and backup hard-code no project: no names, ids, prefixes or ports in their source', () => {
   for (const file of ['./server.mjs', './setup.mjs', './admin.mjs', './backup.mjs']) {
     const source = readFileSync(new URL(file, import.meta.url), 'utf8');
     for (const word of [/starcaster/i, /wavecenter/i, /spirality/i, /\bSP-/, /\bSC-/, /\bWC-/, /\b9014\d{8}\b/, /86b[a-z0-9]{6}/, /listen\(\s*\d/, /\bport\s*=\s*\d/i]) {
@@ -1273,7 +1273,7 @@ const GOOD_ANSWERS = Object.freeze({
   mergePhrases: '',
   autoMergeLanes: 'none',
   extraGovernancePaths: 'docs/RULES.md, ops/',
-  description: 'A test product. It plays things.',
+  description: 'A test project. It plays things.',
 });
 
 /** A state file as the wizard leaves it: every step pending except those given. */
@@ -1303,7 +1303,7 @@ test('GET /setup/fields answers the wizard\'s own questions, with the tracker ho
     assert.equal(byKey.mergePhrases.default, f.setup.homeConfig.mergePhrases.join(', '));
     assert.equal(byKey.mergePhrases.list, true);
     assert.equal(byKey.autoMergeLanes.default, 'none');
-    assert.equal(byKey.trackerPrefix.default, null, 'no product named: no slug to make a prefix from');
+    assert.equal(byKey.trackerPrefix.default, null, 'no project named: no slug to make a prefix from');
     const named = await f.call('GET', '/setup/fields?product=press-play', { token: f.humanToken, at: f.at });
     assert.equal(named.body.fields.find((x) => x.key === 'trackerPrefix').default, 'PR');
   } finally { await f.cleanup(); }
@@ -1354,7 +1354,7 @@ test('PUT /setup/:slug writes the answers file, checked by the wizard\'s checker
       mergePhrases: null,
       autoMergeLanes: [],
       extraGovernancePaths: ['docs/RULES.md', 'ops/'],
-      description: 'A test product. It plays things.',
+      description: 'A test project. It plays things.',
     });
     assert.deepEqual(put.body.answers, onDisk, 'answered as read back');
     assert.equal(put.body.resolved.trackerPrefix, 'PR');
@@ -1393,7 +1393,7 @@ test('PUT /setup/:slug refuses a bad answer (400 naming it), an unknown field, a
     assert.equal(wrongShape.status, 400);
     assert.equal((await f.call('PUT', '/setup/Press%20Play', { token: f.humanToken, at: f.at, body: GOOD_ANSWERS })).status, 400);
     const own = await f.call('PUT', `/setup/${f.setup.homeConfig.productSlug}`, { token: f.humanToken, at: f.at, body: GOOD_ANSWERS });
-    assert.equal(own.status, 400, 'the tracker home\'s own slug is not a new product');
+    assert.equal(own.status, 400, 'the tracker home\'s own slug is not a new project');
     assert.equal(existsSync(file), false, 'nothing written');
 
     assert.equal((await f.call('PUT', '/setup/press-play', { token: f.humanToken, at: f.at, body: GOOD_ANSWERS })).status, 200);
