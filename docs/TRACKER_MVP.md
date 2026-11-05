@@ -343,12 +343,70 @@ with an alert email goes to that address; on one without, to
 `TRACKER_NOTIFY_TO` as before. The log line says which of the two it used,
 never the address itself. Only a person's sign-in sees the two boxes' values;
 a loop's never does, and the Projects table never shows them. The phone is
-kept in international form (`+18015550123`) for the iMessage alerts a later
-ticket adds; today nothing texts it. One catch: while the email still goes
+kept in international form (`+18015550123`) for the hand-over text below.
+One catch: while the email still goes
 from Resend's shared sender (`TRACKER_NOTIFY_FROM` unset), Resend delivers
 only to the Resend account's own address, so a project's alert email that is
 any other address is refused by Resend (the log says `NOT sent`) until a
 sending domain of our own is set up there.
+
+**The hand-over text** (SP-114; Dane chose iMessage sent from the Mini, over
+an SMS service or a push app) goes beside the email, to the ticket's
+project's alert phone, through the Messages app on the Mac the tracker runs
+on. No service, no key: Messages sends it as the Apple ID it is signed into.
+
+- **The same rules as the email.** One text per hand-over (the same
+  `<ticket>@<version>` key), never two. The text keeps its own record, apart
+  from the email's, so a failed text never stops or repeats the email and a
+  failed email never stops or repeats the text. Each also has its own queue,
+  so a text stuck waiting on Messages never holds up an email. A failed text
+  never fails the move; it is logged as `hand-over text NOT sent`, with the
+  reason, and tried again after a wait: one minute, then two, doubling up to
+  half an hour, or at once when its own ticket next changes. (A stuck
+  Messages costs up to 30 seconds a try, so it is not tried on every write.)
+- **Its link opens on a phone.** The text links to the settings file's
+  `trackerUrl` (`http://mac-mini.local:4180`), never the Mini's own
+  `127.0.0.1` address that Doppler gives the loops, which would not open
+  anywhere but the Mini.
+- **What it says:** `Waiting on you: <id> <name>`, the status, the card's
+  ask cut to about 300 characters, and the ticket's link.
+- **How it is sent.** `osascript` runs a fixed AppleScript that takes the
+  number and the text as arguments (`on run argv`); neither is ever pasted
+  into the script, so nothing in a ticket name can become AppleScript. A send
+  that takes longer than 30 seconds is stopped and counts as failed.
+- **When it is off.** On a machine that is not a Mac or has no `osascript`,
+  texts are off, said once when the server starts (`hand-over text: off.`).
+  A project with no alert phone gets no text, said once in the log until it
+  has one. The log names the ticket, never the number.
+- **Proving it:** `npm run tracker:test-text -- --project <slug>` reads that
+  project's alert phone from the running tracker (as the operator, through
+  `TRACKER_TOKEN_OPERATOR` in Doppler: a loop's sign-in is never shown the
+  phone) and sends one test text through the same sender. Exit 0 once
+  Messages accepted it, 1 with the reason.
+
+**Setting up texts on the Mini, once (Dane's hand-offs).**
+
+1. **An Apple login:** open Messages on the Mini and sign into an Apple ID
+   that can send iMessages. If it is the same Apple ID as the phone being
+   texted, a text to your own number can arrive silently, as a note to
+   yourself, with no alert. A separate Apple ID for the Mini avoids that
+   (your decision).
+2. **Two clicks on the Mini's own screen** (not over SSH: a box shown there
+   cannot be answered remotely, which is why a read of Messages over SSH on
+   2026-11-04 timed out with `AppleEvent timed out (-1712)`). macOS asks each
+   program separately before it may drive Messages:
+   - Running `npm run tracker:test-text` in Terminal on the Mini asks
+     **"“Terminal” wants access to control “Messages”"**. Click **Allow**.
+   - The tracker server is a different program: launchd starts it as
+     `node` (Homebrew's, `/opt/homebrew/bin/node`). Its first real hand-over
+     asks **"“node” wants access to control “Messages”"**. Click **Allow**.
+     Until then that send waits 30 seconds, is logged `NOT sent ... did not
+     answer within 30 seconds`, and is tried again a minute later (the
+     emails go on regardless).
+   Homebrew's node is not signed by a developer, so macOS knows it by its
+   exact build: after `brew upgrade node` the box can come back once.
+   A click of **Don't Allow** is undone in System Settings → Privacy &
+   Security → Automation, under `node` (or Terminal), by turning Messages on.
 
 **A backup is made by SQLite itself**, not by copying the file: copying a
 database while it is being written can catch it half-done. `VACUUM INTO`
