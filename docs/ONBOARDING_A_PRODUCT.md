@@ -49,6 +49,16 @@ picks up there and asks nothing twice. A failed step prints
 `~/loop-logs/<slug>-onboard.log`. The steps and what changed from the plan:
 [SETUP_REVIEW.md, part 3](onboarding/SETUP_REVIEW.md#3-the-wizard-design).
 
+With `--no-prompt` (SP-125) it never reads the Terminal, so the tracker's
+setup page can drive it: answers still missing, the sign-ins block and a
+setup not merged yet each end the run with `STOPPED: <step>: ...` and exit 3
+instead of waiting, and the rerun after Dane's move goes on from there.
+Either way it keeps `~/loop-logs/onboard/<slug>.state.json` up to date: every
+step's outcome (`done`, `skip`, `failed`, `stopped`, `running`, `pending`),
+the stop (`kind` `answers`, `paste` with the block's lines in `commands`,
+`merge` with the setup ticket's `link`, or `failed`), and `finished`. It holds
+commands and links only, never a secret value.
+
 The checklist below stays as what the wizard does, item by item, and how
 to check each one by hand.
 

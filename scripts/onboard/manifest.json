@@ -223,7 +223,18 @@
     },
     {
       "from": ".claude/skills/loop-intake/SKILL.md",
-      "to": ".claude/skills/loop-intake/SKILL.md"
+      "to": ".claude/skills/loop-intake/SKILL.md",
+      "why": "Spirality's statuses contract lives in Spirality, not in the product",
+      "edits": [
+        {
+          "find": "whole system and `docs/LOOP_CONTRACT.md` for the statuses.",
+          "replace": "whole system and Spirality's [`docs/LOOP_CONTRACT.md`](https://github.com/{{spiralityRepo}}/blob/main/docs/LOOP_CONTRACT.md) for the statuses."
+        },
+        {
+          "find": "Known gap (`docs/LOOP_CONTRACT.md`):",
+          "replace": "Known gap (Spirality's [`docs/LOOP_CONTRACT.md`](https://github.com/{{spiralityRepo}}/blob/main/docs/LOOP_CONTRACT.md)):"
+        }
+      ]
     },
     {
       "from": "scripts/project_config.mjs",
@@ -239,7 +250,7 @@
     {
       "from": ".claude/skills/loop-build/SKILL.md",
       "to": ".claude/skills/loop-build/SKILL.md",
-      "why": "the product's name (Spirality's own skill already tells a lane's pass it is the lane, SP-117)",
+      "why": "the product's name, ticket ids and CLAUDE.md section (Spirality's own skill already tells a lane's pass it is the lane, SP-117)",
       "edits": [
         {
           "find": "from the Spirality queue",
@@ -248,13 +259,37 @@
         {
           "find": "Step 2 of 3 in the Spirality development loop (spec → build → review).",
           "replace": "Step 2 of 3 in {{productName}}'s development loop (spec → build → review), the loop Spirality defines."
+        },
+        {
+          "find": "nothing claims from `Building` (SP-101: SP-92 sat a day that way). So every",
+          "replace": "nothing claims from `Building` (Spirality's SP-101: Spirality's SP-92 sat a\nday that way). So every"
+        },
+        {
+          "find": "rule in `CLAUDE.md` → \"Engineering rules\": nothing project-specific\n   hard-coded in substrate code; move StarCaster's modules with their tests,\n   never rewrite; every ClickUp write read back; a failed step says so.",
+          "replace": "rule in `CLAUDE.md` → \"Loop rules\": `main` never changes unchecked;\n   secret keys never reach the repository or a log; every tracker write read\n   back; a failed step says so; one topic, one folder."
+        },
+        {
+          "find": "with the work. Never add entries directly on `main`. `docs/WORK-LOG.md` is\n   the older history, closed to new entries: never edit it.",
+          "replace": "with the work. Never add entries directly on `main`, and never edit\n   another pull request's entry."
+        },
+        {
+          "find": "`Ticket: <trackerUrl>/t/SP-12`",
+          "replace": "`Ticket: <trackerUrl>/t/{{trackerPrefix}}-12`"
+        },
+        {
+          "find": "(`Ticket: http://mac-mini.local:4180/t/SP-12`)",
+          "replace": "(`Ticket: {{trackerUrl}}/t/{{trackerPrefix}}-12`)"
+        },
+        {
+          "find": "how much human programmer work the loops did (SP-78).",
+          "replace": "how much human programmer work the loops did (Spirality's SP-78)."
         }
       ]
     },
     {
       "from": ".claude/skills/loop-review/SKILL.md",
       "to": ".claude/skills/loop-review/SKILL.md",
-      "why": "the product's name, kind of surface, relay and merge phrases, and its review lane's label",
+      "why": "the product's name, kind of surface, relay and merge phrases, its review lane's label, and its CLAUDE.md section",
       "edits": [
         {
           "find": "from the Spirality queue",
@@ -279,13 +314,21 @@
         {
           "find": "On the Mini the review lane (`com.spirality.loop-review`) runs this skill",
           "replace": "On the Mini the review lane (`{{launchdPrefix}}.loop-review`) runs this skill"
+        },
+        {
+          "find": "Every `CLAUDE.md` engineering rule kept (nothing\n     project-specific hard-coded, modules moved not rewritten, every ClickUp\n     write read back, a failed step says so)?",
+          "replace": "Every `CLAUDE.md` loop rule kept (`main` never\n     changed unchecked, no secret in the repository or a log, every tracker\n     write read back, a failed step says so)?"
+        },
+        {
+          "find": "as SP-64's did)",
+          "replace": "as Spirality's SP-64 did)"
         }
       ]
     },
     {
       "from": ".claude/skills/loop-spec/SKILL.md",
       "to": ".claude/skills/loop-spec/SKILL.md",
-      "why": "the product's name and queue, and its lanes on the Mini",
+      "why": "the product's name and queue, and its lanes on the Mini, its ticket ids, and Spirality's ClickUp setup page",
       "edits": [
         {
           "find": "in the Spirality queue",
@@ -306,11 +349,24 @@
         {
           "find": "Spirality's lanes run on the\n   Mini (`com.spirality.loop-build` and the rest:",
           "replace": "{{productName}}'s lanes run on the\n   Mini (`{{launchdPrefix}}.loop-build` and the rest:"
+        },
+        {
+          "find": "default; ids like `SP-12`)",
+          "replace": "default; ids like `{{trackerPrefix}}-12`)"
+        },
+        {
+          "find": "point Dane at `docs/CLICKUP_SETUP.md`",
+          "replace": "point Dane at Spirality's [`docs/CLICKUP_SETUP.md`](https://github.com/{{spiralityRepo}}/blob/main/docs/CLICKUP_SETUP.md)"
         }
       ]
     }
   ],
   "made": [
+    {
+      "to": ".gitignore",
+      "from": "the product's own (made if it has none), with these lines added where missing: the lanes' working copies live in .claude/worktrees/, and a main checkout that shows them as changed never pulls (SP-120)",
+      "ignoreLines": [".claude/worktrees/"]
+    },
     {
       "to": "spirality.project.json",
       "from": "the settings file given as --config (SP-109 writes it)"
