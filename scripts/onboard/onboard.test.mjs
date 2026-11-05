@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { validateProjectConfig } from '../../lib/projectConfig.mjs';
@@ -94,7 +94,8 @@ test('the step log: Mountain time, and a done step is found by name', () => {
 });
 
 test('the arguments: --product is a slug, the merge wait a positive number', () => {
-  assert.deepEqual(parseOnboardArgs(['--product', 'pressplay']).opts, { product: 'pressplay', allowReplace: false, mergeWaitMinutes: 60 });
+  assert.deepEqual(parseOnboardArgs(['--product', 'pressplay']).opts, { product: 'pressplay', allowReplace: false, mergeWaitMinutes: 60, noPrompt: false });
+  assert.equal(parseOnboardArgs(['--product', 'pressplay', '--no-prompt']).opts.noPrompt, true);
   assert.equal(parseOnboardArgs(['--product', 'pressplay', '--allow-replace', '--merge-wait-minutes', '5']).opts.mergeWaitMinutes, 5);
   assert.match(parseOnboardArgs([]).error, /--product/);
   assert.match(parseOnboardArgs(['--product', 'Press Play']).error, /not a slug/);
@@ -124,6 +125,7 @@ test('cloneAddress takes only the kind of address from the home\'s origin, never
 test('rerunCommand keeps every flag the run was started with', () => {
   assert.equal(rerunCommand({ product: 'pressplay', allowReplace: false, mergeWaitMinutes: 60 }), 'npm run onboard -- --product pressplay');
   assert.equal(rerunCommand({ product: 'pressplay', allowReplace: true, mergeWaitMinutes: 240 }), 'npm run onboard -- --product pressplay --allow-replace --merge-wait-minutes 240');
+  assert.equal(rerunCommand({ product: 'pressplay', allowReplace: false, mergeWaitMinutes: 60, noPrompt: true }), 'npm run onboard -- --product pressplay --no-prompt');
 });
 
 test('protectionDropped names the stricter settings the PUT switches off', () => {
@@ -286,6 +288,7 @@ function makeWorld(t) {
     writeText: (p, text) => writeFileSync(p, text),
     appendText: (p, text) => { mkdirSync(dirname(p), { recursive: true }); appendFileSync(p, text); },
     mkdir: (d) => mkdirSync(d, { recursive: true }),
+    rename: (from, to) => renameSync(from, to),
     sleep: async (ms) => { clock += ms; },
     now: () => clock,
     ...over,
@@ -300,7 +303,8 @@ function makeWorld(t) {
     mkdirSync(dirname(answersPath), { recursive: true });
     writeFileSync(answersPath, JSON.stringify({ productSlug: 'pressplay', productName: 'PressPlay', githubRepo: 'mentor24-maker/pressplay', trackerPrefix: 'PP', mergePhrases: null, autoMergeLanes: [], extraGovernancePaths: null, description: 'PressPlay plays things.', checkoutDir: checkout }));
   };
-  return { w, go, homeOpts, run, reset, checkout, makeCheckout, setupWorktreePath, answersFile, settingsFile, seedAnswers, logFile: join(homeConfig.logDir, 'pressplay-onboard.log') };
+  const statePath = join(homeConfig.logDir, 'onboard', 'pressplay.state.json');
+  return { w, go, homeOpts, run, reset, checkout, makeCheckout, setupWorktreePath, answersFile, settingsFile, seedAnswers, statePath, logFile: join(homeConfig.logDir, 'pressplay-onboard.log') };
 }
 
 const out = (w) => w.printed.join('\n');
@@ -468,10 +472,10 @@ test('a stop after a run started with a longer merge wait: the rerun line keeps 
 });
 
 test('an answer taken back out but the answers file cannot be written: FAILED says so, not that the rerun asks again', async (t) => {
-  const { w, go } = makeWorld(t);
+  const { w, go, answersFile } = makeWorld(t);
   let writes = 0;
   const bad = async (q) => { w.asked.push(q); return q.startsWith('GitHub repository') ? 'not a repo' : (Object.entries(DANE_ANSWERS).find(([k]) => q.startsWith(k))?.[1] ?? ''); };
-  const writeText = (p, text) => { writes += 1; if (writes > 1) { const e = new Error('read-only'); e.code = 'EROFS'; throw e; } writeFileSync(p, text); };
+  const writeText = (p, text) => { if (p === answersFile) writes += 1; if (writes > 1 && p === answersFile) { const e = new Error('read-only'); e.code = 'EROFS'; throw e; } writeFileSync(p, text); };
   assert.equal(await go({ ask: bad, writeText }), 1, out(w));
   assert.match(out(w), /^FAILED: answers: .*Taking "githubRepo" out of .* failed too \(EROFS\): fix it there by hand/m);
   assert.ok(!/asks "githubRepo" again/.test(out(w)));
@@ -537,4 +541,188 @@ test('a clone that fails: FAILED at clone saying what git said', async (t) => {
   w.fail = 'clone';
   assert.equal(await go(), 1, out(w));
   assert.match(out(w), /^FAILED: clone: git clone of mentor24-maker\/pressplay into .* failed: .*repository not found/m);
+});
+
+// --- --no-prompt and the state file (SP-125) -----------------------------
+
+const readState = (path) => JSON.parse(readFileSync(path, 'utf8'));
+const outcomes = (state) => Object.fromEntries(state.steps.map((s) => [s.step, s.outcome]));
+// Under --no-prompt the Terminal is never read: either read fails the test.
+const NO_TERMINAL = {
+  ask: async (q) => { throw new Error(`asked in the Terminal: ${q}`); },
+  pause: async () => { throw new Error('waited on the Terminal'); },
+};
+const noPromptRun = (homeOpts, over = {}) => homeOpts({ noPrompt: true }, { ...NO_TERMINAL, ...over });
+
+test('the state file has the shape the setup page reads, every step in STEPS order', async (t) => {
+  const { w, go, statePath } = makeWorld(t);
+  assert.equal(await go(), 0, out(w));
+  const state = readState(statePath);
+  assert.deepEqual(Object.keys(state), ['product', 'updatedAt', 'steps', 'stop', 'finished']);
+  assert.equal(state.product, 'pressplay');
+  assert.match(state.updatedAt, /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/);
+  assert.deepEqual(state.steps.map((s) => s.step), STEPS);
+  for (const s of state.steps) {
+    assert.deepEqual(Object.keys(s), ['step', 'outcome', 'at', 'why']);
+    assert.ok(['done', 'skip'].includes(s.outcome), `${s.step} is ${s.outcome}`);
+    assert.match(s.at, /Z$/);
+    assert.equal(typeof s.why, 'string');
+  }
+  assert.equal(state.stop, null);
+  assert.equal(state.finished, true);
+  assert.deepEqual(readdirSync(dirname(statePath)).filter((f) => f.endsWith('.tmp')), [], 'no half-written file left beside it');
+});
+
+test('the state file follows every step: running when it starts, its outcome when it ends, each write read back', async (t) => {
+  const { w, go, statePath } = makeWorld(t);
+  const seen = [];
+  const readText = (p) => {
+    let text = null;
+    try { text = readFileSync(p, 'utf8'); } catch { return null; }
+    if (p === statePath) seen.push(outcomes(JSON.parse(text)));
+    return text;
+  };
+  assert.equal(await go({ readText }), 0, out(w));
+  for (const step of STEPS) {
+    assert.ok(seen.some((o) => o[step] === 'running'), `${step} was shown running`);
+    const at = seen.findIndex((o) => o[step] === 'running');
+    assert.ok(seen.slice(at).some((o) => ['done', 'skip'].includes(o[step])), `${step} then shown done`);
+    assert.ok(seen.slice(0, at).every((o) => o[step] === 'pending'), `${step} pending before it ran`);
+  }
+});
+
+test('--no-prompt with answers missing: STOPPED at answers, exit 3, the stop says fill the form, nothing asked', async (t) => {
+  const { w, homeOpts, statePath } = makeWorld(t);
+  assert.equal(await noPromptRun(homeOpts), 3, out(w));
+  assert.match(out(w), /^STOPPED: answers: still to answer: productName, githubRepo/m);
+  assert.match(out(w), /^  npm run onboard -- --product pressplay --no-prompt$/m);
+  assert.ok(!w.calls.some((c) => c.startsWith('npm')), 'nothing after the answers ran');
+  const state = readState(statePath);
+  assert.deepEqual(state.stop, { step: 'answers', kind: 'answers', why: state.steps[0].why, commands: [], link: null });
+  assert.match(state.stop.why, /still to answer: productName/);
+  assert.equal(outcomes(state).answers, 'stopped');
+  assert.equal(outcomes(state).look, 'pending');
+  assert.equal(state.finished, false);
+});
+
+test('--no-prompt: answers filled in, the rerun stops for the paste block, then for the merge, then finishes', async (t) => {
+  const { w, homeOpts, reset, seedAnswers, statePath, logFile } = makeWorld(t);
+  assert.equal(await noPromptRun(homeOpts), 3, out(w));
+  seedAnswers();
+
+  // Stop 1: the sign-ins block, its lines in the stop.
+  reset();
+  assert.equal(await noPromptRun(homeOpts), 3, out(w));
+  assert.match(out(w), /^STOPPED: signins: waiting on you to run the block above/m);
+  assert.ok(!w.calls.some((c) => c.includes('onboard:copy')), 'copy did not run');
+  let state = readState(statePath);
+  assert.equal(state.stop.step, 'signins');
+  assert.equal(state.stop.kind, 'paste');
+  assert.equal(state.stop.link, null);
+  assert.equal(state.stop.commands.length, 3);
+  assert.match(state.stop.commands[0], /^cd /);
+  assert.equal(state.stop.commands[1], 'doppler projects create pressplay');
+  assert.match(state.stop.commands[2], /^TRACKER_DB=.* npm run tracker:signins -- create --name PressPlay --prefix PP --config /);
+  for (const line of state.stop.commands) assert.ok(out(w).includes(`  ${line}`), 'the same block is printed');
+  assert.deepEqual(outcomes(state), { answers: 'skip', look: 'done', clone: 'done', settings: 'done', signins: 'stopped', copy: 'pending', lanes: 'pending', merge: 'pending', protect: 'pending' });
+
+  // Dane pastes the block. Stop 2: the merge, the setup ticket's link in the stop.
+  w.signinsMade = true;
+  w.dopplerProject = true;
+  w.mergeAfterPolls = Infinity;
+  reset();
+  assert.equal(await noPromptRun(homeOpts), 3, out(w));
+  assert.match(out(w), /^signins\s+already done/m);
+  assert.match(out(w), /^STOPPED: merge: .*not merged yet; it waits on your merge phrase on PP-1/m);
+  assert.equal(w.polls, 1, 'one look at the pull request, no waiting');
+  assert.ok(!w.calls.some((c) => c.includes('-X PUT')), 'main not protected before the merge');
+  state = readState(statePath);
+  assert.deepEqual(state.stop, { step: 'merge', kind: 'merge', why: state.steps[7].why, commands: [], link: 'http://mac-mini.local:4180/t/PP-1' });
+  assert.equal(outcomes(state).lanes, 'done');
+  assert.equal(outcomes(state).protect, 'pending');
+
+  // Dane merges. The rerun goes on to protect, and finishes.
+  w.merged = true;
+  reset();
+  assert.equal(await noPromptRun(homeOpts), 0, out(w));
+  assert.match(out(w), /Done: pressplay is set up/);
+  state = readState(statePath);
+  assert.equal(state.stop, null);
+  assert.equal(state.finished, true);
+  assert.equal(outcomes(state).protect, 'done');
+  for (const s of state.steps) assert.ok(['done', 'skip'].includes(s.outcome), `${s.step} is ${s.outcome}`);
+
+  // Nothing secret anywhere in it, nor in the step log.
+  const text = readFileSync(statePath, 'utf8');
+  assert.ok(!text.includes('SECRET-TOKEN') && !readFileSync(logFile, 'utf8').includes('SECRET-TOKEN'));
+  assert.ok(!/dp\.(st|sa|ct|pt)\./.test(text), 'no Doppler token');
+});
+
+test('--no-prompt: a merge made before the run goes straight on, with no stop', async (t) => {
+  const { w, homeOpts, seedAnswers, statePath } = makeWorld(t);
+  seedAnswers();
+  w.signinsMade = true;
+  w.dopplerProject = true;
+  assert.equal(await noPromptRun(homeOpts), 0, out(w));
+  assert.equal(readState(statePath).finished, true);
+});
+
+test('--no-prompt: a failed step is a stop of kind failed, its FAILED text the why, exit 1; the rerun resumes', async (t) => {
+  const { w, homeOpts, reset, seedAnswers, statePath } = makeWorld(t);
+  seedAnswers();
+  w.signinsMade = true;
+  w.fail = 'copy';
+  assert.equal(await noPromptRun(homeOpts), 1, out(w));
+  const failed = /^FAILED: copy: (.*)$/m.exec(out(w));
+  assert.ok(failed, out(w));
+  let state = readState(statePath);
+  assert.deepEqual(state.stop, { step: 'copy', kind: 'failed', why: failed[1], commands: [], link: null });
+  assert.equal(outcomes(state).copy, 'failed');
+  assert.equal(outcomes(state).lanes, 'pending');
+  w.fail = null;
+  reset();
+  assert.equal(await noPromptRun(homeOpts), 0, out(w));
+  state = readState(statePath);
+  assert.equal(state.stop, null);
+  assert.equal(state.finished, true);
+});
+
+test('--no-prompt: a state file that cannot be written fails the run, and no step after it runs', async (t) => {
+  const { w, homeOpts, seedAnswers, statePath } = makeWorld(t);
+  seedAnswers();
+  const writeText = (p, text) => {
+    if (p.startsWith(`${statePath}.`)) { const e = new Error('no space'); e.code = 'ENOSPC'; throw e; }
+    writeFileSync(p, text);
+  };
+  assert.equal(await noPromptRun(homeOpts, { writeText }), 1, out(w));
+  assert.match(out(w), /^FAILED: state: could not write the state file .*pressplay\.state\.json: ENOSPC/m);
+  assert.ok(!w.calls.some((c) => c.startsWith('npm')), 'no step ran');
+  assert.ok(!out(w).includes('Done:'));
+});
+
+test('--no-prompt: a state file that does not read back as written fails the run', async (t) => {
+  const { w, homeOpts, seedAnswers, statePath } = makeWorld(t);
+  seedAnswers();
+  const readText = (p) => (p === statePath ? '{}' : (() => { try { return readFileSync(p, 'utf8'); } catch { return null; } })());
+  assert.equal(await noPromptRun(homeOpts, { readText }), 1, out(w));
+  assert.match(out(w), /^FAILED: state: .*did not read back as written/m);
+});
+
+test('in a Terminal, a state file that cannot be written is a warning and the run goes on as before', async (t) => {
+  const { w, go, statePath } = makeWorld(t);
+  const writeText = (p, text) => {
+    if (p.startsWith(`${statePath}.`)) { const e = new Error('no space'); e.code = 'ENOSPC'; throw e; }
+    writeFileSync(p, text);
+  };
+  assert.equal(await go({ writeText }), 0, out(w));
+  assert.match(out(w), /\(could not write the state file .*ENOSPC\)/);
+  assert.match(out(w), /Done: pressplay is set up/);
+});
+
+test('in a Terminal with no one to answer, the stops still say what is next in the state file', async (t) => {
+  const { w, go, statePath } = makeWorld(t);
+  assert.equal(await go({ pause: async () => null }), 3, out(w));
+  const state = readState(statePath);
+  assert.equal(state.stop.kind, 'paste');
+  assert.equal(state.stop.commands.length, 3);
 });

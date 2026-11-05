@@ -4,7 +4,7 @@
  * which asks its questions once and runs every step in order
  * (docs/onboarding/SETUP_REVIEW.md, part 3).
  *
- *   npm run onboard -- --product <slug> [--allow-replace] [--merge-wait-minutes <n>]
+ *   npm run onboard -- --product <slug> [--allow-replace] [--merge-wait-minutes <n>] [--no-prompt]
  *
  * Run on the Mini, from the tracker home's own folder (the product whose
  * settings file sets `trackerPort`, today Spirality), in a Terminal that is
@@ -56,10 +56,26 @@
  * from the answers and settings files (rule 2); the wizard prints no secret
  * (rule 4): the paste block holds commands, never values.
  *
+ * `--no-prompt` (SP-125): the wizard never reads the Terminal, so a page can
+ * drive it with nobody typing. Answers still missing stop it (`STOPPED`)
+ * instead of being asked; the sign-ins stop it with the paste block instead
+ * of waiting for "done" (the rerun after the paste finds them and goes on);
+ * a setup not merged yet stops it with the setup ticket's link instead of
+ * waiting for the merge (the rerun after the merge goes on to protect).
+ *
+ * The state file, `<logDir>/onboard/<slug>.state.json`, beside the answers
+ * file, is what the tracker's setup page reads: every step in STEPS order
+ * with its outcome, the stop (what Dane does next), and `finished`. It is
+ * written after every step starts and ends and at every stop, beside then
+ * renamed (so the page never reads half a file), and read back. Under
+ * `--no-prompt` it is the only way anyone sees where the setup stands, so a
+ * write that fails there fails the run; in a Terminal it is a warning, as the
+ * step log is. It holds no secret: the paste block is commands only.
+ *
  * Exit 0 set up, 1 FAILED, 2 usage, 3 stopped for Dane.
  */
 import { spawnSync } from 'node:child_process';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -189,7 +205,29 @@ export function worktreesOnBranch(porcelain, branch) {
 
 /** The command that reruns this wizard as it was started (every flag that changes what it does). */
 export function rerunCommand(opts) {
-  return `npm run onboard -- --product ${opts.product}${opts.allowReplace ? ' --allow-replace' : ''}${opts.mergeWaitMinutes !== DEFAULT_MERGE_WAIT_MINUTES ? ` --merge-wait-minutes ${opts.mergeWaitMinutes}` : ''}`;
+  return `npm run onboard -- --product ${opts.product}${opts.allowReplace ? ' --allow-replace' : ''}${opts.mergeWaitMinutes !== DEFAULT_MERGE_WAIT_MINUTES ? ` --merge-wait-minutes ${opts.mergeWaitMinutes}` : ''}${opts.noPrompt ? ' --no-prompt' : ''}`;
+}
+
+/** Where the setup page reads a product's setup state: `<logDir>/onboard/<slug>.state.json`, beside its answers file. */
+export function stateFile(homeConfig, slug) {
+  return join(onboardDir(homeConfig), `${slug}.state.json`);
+}
+
+/** The outcomes a step can have in the state file. */
+export const OUTCOMES = Object.freeze(['done', 'skip', 'failed', 'stopped', 'running', 'pending']);
+
+/** The kinds of stop: what Dane does next. */
+export const STOP_KINDS = Object.freeze(['answers', 'paste', 'merge', 'failed']);
+
+/** A fresh state: every step pending, no stop, not finished. */
+export function initialState(product, at) {
+  return {
+    product,
+    updatedAt: at,
+    steps: STEPS.map((step) => ({ step, outcome: 'pending', at: null, why: null })),
+    stop: null,
+    finished: false,
+  };
 }
 
 /** CI's verify on a commit, from `gh api repos/<repo>/commits/<sha>/check-runs`: pass, fail, pending or none. */
@@ -254,20 +292,26 @@ export function loggedDone(logText, step) {
 }
 
 class Stop extends Error {
-  constructor(kind, step, seen) { super(seen); this.kind = kind; this.step = step; }
+  /** `kind` FAILED or STOPPED; `next` the state file's stop: { kind, commands, link }. */
+  constructor(kind, step, seen, next = {}) {
+    super(seen);
+    this.kind = kind;
+    this.step = step;
+    this.next = { kind: kind === 'FAILED' ? 'failed' : next.kind, commands: next.commands ?? [], link: next.link ?? null };
+  }
 }
 
 const last = (text, n = 4) => String(text || '').split('\n').map((l) => l.trim()).filter(Boolean).slice(-n).join(' | ');
 
 /**
- * The wizard. `opts`: product, allowReplace, mergeWaitMinutes. `deps`:
+ * The wizard. `opts`: product, allowReplace, mergeWaitMinutes, noPrompt. `deps`:
  *   homeConfig, homeRoot, spiralityDir   the tracker home
  *   run(cmd, args, { cwd, input, show }) -> { code, out, err }; `show` lets
  *                                         Dane watch a step script's own lines
  *   ask(question) -> string, or null when there is no Terminal to ask in
  *   pause(text) -> true once Dane says it is done, or null with no Terminal
  *   print(line), exists(path), readText(path) -> text|null, writeText(path, text),
- *   appendText(path, text), mkdir(dir), sleep(ms), now() -> ms
+ *   appendText(path, text), mkdir(dir), rename(from, to), sleep(ms), now() -> ms
  * Returns the exit code.
  */
 export async function onboard(opts, deps) {
@@ -281,10 +325,38 @@ export async function onboard(opts, deps) {
       deps.print(`(could not write the step log ${logFile}: ${err.code || err.message})`);
     }
   };
-  const done = (step, line) => { say(step, line); record(step, 'done', line); };
-  const skip = (step, why) => { say(step, `already done (${why})`); record(step, 'skip', why); };
+  // The state file the setup page reads. Every write goes beside the file,
+  // is renamed over it, and is read back (rule 5).
+  const sFile = stateFile(homeConfig, slug);
+  const iso = () => new Date(deps.now()).toISOString();
+  const state = initialState(slug, iso());
+  let stateBroken = null;
+  const saveState = () => {
+    state.updatedAt = iso();
+    const written = `${JSON.stringify(state, null, 2)}\n`;
+    const temp = `${sFile}.${process.pid}.tmp`;
+    try {
+      deps.mkdir?.(dirname(sFile));
+      deps.writeText(temp, written);
+      deps.rename(temp, sFile);
+      if (deps.readText(sFile) !== written) throw new Error('it did not read back as written');
+    } catch (err) {
+      const why = `could not write the state file ${sFile}: ${err.code || err.message}`;
+      if (opts.noPrompt) { stateBroken = why; return false; }
+      deps.print(`(${why})`);
+    }
+    return true;
+  };
+  const mark = (step, outcome, why) => {
+    const entry = state.steps.find((s) => s.step === step);
+    if (entry) Object.assign(entry, { outcome, at: iso(), why: why ?? null });
+    if (!saveState()) throw new Stop('FAILED', 'state', stateBroken);
+  };
+  const begin = (step) => mark(step, 'running', null);
+  const done = (step, line) => { say(step, line); record(step, 'done', line); mark(step, 'done', line); };
+  const skip = (step, why) => { say(step, `already done (${why})`); record(step, 'skip', why); mark(step, 'skip', why); };
   const fail = (step, seen) => { throw new Stop('FAILED', step, seen); };
-  const stop = (step, seen) => { throw new Stop('STOPPED', step, seen); };
+  const stop = (step, seen, next) => { throw new Stop('STOPPED', step, seen, next); };
   const run = (cmd, args, o = {}) => deps.run(cmd, args, { cwd: spiralityDir, ...o });
   const npm = (script, args, o) => run('npm', ['run', '--silent', script, '--', ...args], o);
   const gh = (...args) => run('gh', args);
@@ -297,6 +369,7 @@ export async function onboard(opts, deps) {
   let step = 'answers';
   try {
     // ── answers ──────────────────────────────────────────────────────────
+    begin(step);
     const aFile = answersFile(homeConfig, slug);
     let raw = {};
     const text = deps.readText(aFile);
@@ -308,6 +381,8 @@ export async function onboard(opts, deps) {
     const missing = unanswered(raw);
     if (!missing.length) {
       skip(step, `every answer that is yours is in ${aFile}`);
+    } else if (opts.noPrompt) {
+      stop(step, `still to answer: ${missing.map((f) => f.key).join(', ')}. Fill them in on the setup page, or write them in ${aFile}`, { kind: 'answers' });
     } else {
       say(step, `${missing.length} question(s) for you, Dane (decisions only you can make). Press Enter to take the default in brackets.`);
       const typed = {};
@@ -317,7 +392,7 @@ export async function onboard(opts, deps) {
         for (let tries = 0; ; tries += 1) {
           const got = await deps.ask(`${field.question}${fallback ? ` [${fallback}]` : ''}: `);
           if (got == null) {
-            stop(step, `no Terminal to ask in; still to answer: ${missing.filter((f) => !Object.hasOwn(typed, f.key)).map((f) => f.key).join(', ')}. Write them in ${aFile}, or run this in a Terminal`);
+            stop(step, `no Terminal to ask in; still to answer: ${missing.filter((f) => !Object.hasOwn(typed, f.key)).map((f) => f.key).join(', ')}. Write them in ${aFile}, or run this in a Terminal`, { kind: 'answers' });
           }
           value = answerValue(field, got);
           if (value != null || !field.required) break;
@@ -355,7 +430,7 @@ export async function onboard(opts, deps) {
       }
       fail(step, `${err.message}. Fix it in ${aFile}`);
     }
-    if (missing.length) record(step, 'done', `answers in ${aFile}`);
+    if (missing.length) { record(step, 'done', `answers in ${aFile}`); mark(step, 'done', `answers in ${aFile}`); }
 
     const checkout = expandHome(answers.checkoutDir);
     const sameRepo = (a, b) => String(a).toLowerCase() === String(b).toLowerCase();
@@ -377,6 +452,7 @@ export async function onboard(opts, deps) {
 
     // ── look ─────────────────────────────────────────────────────────────
     step = 'look';
+    begin(step);
     if (setup.on) skip(step, `the setup is merged: ${setup.why}`);
     else if (loggedDone(deps.readText(logFile), step)) skip(step, `it passed before (${logFile})`);
     else {
@@ -389,6 +465,7 @@ export async function onboard(opts, deps) {
 
     // ── clone ────────────────────────────────────────────────────────────
     step = 'clone';
+    begin(step);
     if (deps.exists(checkout)) skip(step, `${checkout} is there`);
     else {
       const home = run('git', ['remote', 'get-url', 'origin']);
@@ -411,6 +488,7 @@ export async function onboard(opts, deps) {
 
     // ── settings ─────────────────────────────────────────────────────────
     step = 'settings';
+    begin(step);
     const scratch = join(onboardDir(homeConfig), `${slug}-settings`);
     const settingsFile = join(scratch, CONFIG_FILE);
     const readSettings = () => {
@@ -437,6 +515,7 @@ export async function onboard(opts, deps) {
 
     // ── signins ──────────────────────────────────────────────────────────
     step = 'signins';
+    begin(step);
     if (setup.on) skip(step, `the setup is merged: ${setup.why}`);
     else {
       const check = () => npm('tracker:signins', ['check', '--config', settingsFile]);
@@ -459,10 +538,12 @@ export async function onboard(opts, deps) {
         deps.print('');
         deps.print(`Your move, Dane (real secret values): paste this into a Terminal on the Mini. It ${projectExists ? '' : `makes the Doppler project "${answers.dopplerProject}", then `}makes ${answers.productName}'s tracker project and its sign-ins, and writes their keys into Doppler. No key is shown.`);
         deps.print('');
-        for (const line of pasteBlock({ spiralityDir, answers, settingsFile, trackerDb, projectExists, configExists })) deps.print(`  ${line}`);
+        const block = pasteBlock({ spiralityDir, answers, settingsFile, trackerDb, projectExists, configExists });
+        for (const line of block) deps.print(`  ${line}`);
         deps.print('');
+        if (opts.noPrompt) stop(step, 'waiting on you to run the block above; the rerun after it finds the sign-ins and goes on', { kind: 'paste', commands: block });
         const went = await deps.pause('Type done here and press Enter once it has finished: ');
-        if (went == null) stop(step, 'waiting on you to run the block above (no Terminal here to wait in)');
+        if (went == null) stop(step, 'waiting on you to run the block above (no Terminal here to wait in)', { kind: 'paste', commands: block });
         const after = check();
         if (after.code !== 0) fail(step, `tracker:signins check does not pass yet: ${last(after.err || after.out)}`);
         fillMachine();
@@ -472,6 +553,7 @@ export async function onboard(opts, deps) {
 
     // ── copy ─────────────────────────────────────────────────────────────
     step = 'copy';
+    begin(step);
     const openPr = () => {
       const l = ghJson('pr', 'list', '--repo', answers.githubRepo, '--head', SETUP_BRANCH, '--state', 'open', '--json', 'url');
       if (!l.ok) fail(step, `could not list ${answers.githubRepo}'s pull requests: ${last(l.r.err || l.r.out)}`);
@@ -500,6 +582,7 @@ export async function onboard(opts, deps) {
 
     // ── lanes ────────────────────────────────────────────────────────────
     step = 'lanes';
+    begin(step);
     const linkOpts = config ? { tracker: config.tracker, trackerPrefix: config.trackerPrefix, trackerUrl: config.trackerUrl } : null;
     const linkedTicket = () => {
       const v = ghJson('pr', 'view', prUrl, '--json', 'body');
@@ -546,14 +629,18 @@ export async function onboard(opts, deps) {
 
     // ── merge ────────────────────────────────────────────────────────────
     step = 'merge';
+    begin(step);
     if (setup.on) skip(step, setup.why);
     else {
       const link = ticketLink(ticket, linkOpts);
       deps.print('');
       deps.print(`Your move, Dane (a decision): if you are happy with ${prUrl}, write your merge phrase (${config.mergePhrases.map((p) => `"${p}"`).join(', ')}) as a comment on ${ticket}: ${link}`);
-      deps.print(`${slug}'s own relay merges it through the usual checks. This waits up to ${opts.mergeWaitMinutes} minutes for it.`);
+      deps.print(opts.noPrompt
+        ? `${slug}'s own relay merges it through the usual checks. Rerun once it has merged.`
+        : `${slug}'s own relay merges it through the usual checks. This waits up to ${opts.mergeWaitMinutes} minutes for it.`);
       deps.print('');
-      const deadline = deps.now() + opts.mergeWaitMinutes * 60 * 1000;
+      // With --no-prompt there is no wait: one look, and a stop if it is not merged.
+      const deadline = opts.noPrompt ? deps.now() : deps.now() + opts.mergeWaitMinutes * 60 * 1000;
       let pr;
       for (;;) {
         const v = ghJson('pr', 'view', prUrl, '--json', 'state,mergeCommit');
@@ -561,7 +648,7 @@ export async function onboard(opts, deps) {
         pr = v.json;
         if (pr.state === 'MERGED') break;
         if (pr.state !== 'OPEN') fail(step, `${prUrl} is ${pr.state}, not merged`);
-        if (deps.now() >= deadline) stop(step, `${prUrl} is not merged yet; it waits on your merge phrase on ${ticket} (${link})`);
+        if (deps.now() >= deadline) stop(step, `${prUrl} is not merged yet; it waits on your merge phrase on ${ticket} (${link})`, { kind: 'merge', link });
         await deps.sleep(30 * 1000);
       }
       setup = onMain();
@@ -575,6 +662,7 @@ export async function onboard(opts, deps) {
 
     // ── protect ──────────────────────────────────────────────────────────
     step = 'protect';
+    begin(step);
     const protection = () => {
       const r = gh('api', `repos/${answers.githubRepo}/branches/main/protection`);
       if (r.code === 0) {
@@ -618,7 +706,25 @@ export async function onboard(opts, deps) {
     deps.print(`Nothing after this step ran. ${err.kind === 'FAILED' ? 'Fix it, then rerun' : 'Rerun when it is done'}; the steps already done are skipped:`);
     deps.print(`  ${rerun}`);
     record(err.step, err.kind, err.message);
+    // The state file's own write failing is the one stop it cannot record.
+    if (err.step !== 'state') {
+      const entry = state.steps.find((s) => s.step === err.step);
+      if (entry) Object.assign(entry, { outcome: err.kind === 'FAILED' ? 'failed' : 'stopped', at: iso(), why: err.message });
+      state.stop = { step: err.step, kind: err.next.kind, why: err.message, commands: err.next.commands, link: err.next.link };
+      if (!saveState()) {
+        deps.print(`FAILED: state: ${stateBroken}`);
+        return 1;
+      }
+    }
     return err.kind === 'FAILED' ? 1 : 3;
+  }
+  state.finished = true;
+  if (!saveState()) {
+    deps.print('');
+    deps.print(`FAILED: state: ${stateBroken}`);
+    deps.print(`Every step is done, but the setup page cannot see it. Fix it, then rerun:`);
+    deps.print(`  ${rerun}`);
+    return 1;
   }
   const trackerUrl = String(homeConfig.trackerUrl).replace(/\/+$/, '');
   deps.print('');
@@ -629,15 +735,16 @@ export async function onboard(opts, deps) {
 
 // --- The command -----------------------------------------------------------
 
-export const USAGE = 'usage: npm run onboard -- --product <slug> [--allow-replace] [--merge-wait-minutes <n>]';
+export const USAGE = 'usage: npm run onboard -- --product <slug> [--allow-replace] [--merge-wait-minutes <n>] [--no-prompt]';
 
-/** Reads `--product`, `--allow-replace` and `--merge-wait-minutes`. Returns { opts } or { error }. */
+/** Reads `--product`, `--allow-replace`, `--merge-wait-minutes` and `--no-prompt`. Returns { opts } or { error }. */
 export function parseOnboardArgs(argv) {
-  const opts = { product: null, allowReplace: false, mergeWaitMinutes: DEFAULT_MERGE_WAIT_MINUTES };
+  const opts = { product: null, allowReplace: false, mergeWaitMinutes: DEFAULT_MERGE_WAIT_MINUTES, noPrompt: false };
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
     if (a === '--product') opts.product = argv[++i];
     else if (a === '--allow-replace') opts.allowReplace = true;
+    else if (a === '--no-prompt') opts.noPrompt = true;
     else if (a === '--merge-wait-minutes') {
       const n = Number(argv[++i]);
       if (!Number.isFinite(n) || n <= 0) return { error: `--merge-wait-minutes needs a number of minutes greater than 0 (got ${JSON.stringify(argv[i] ?? null)})` };
@@ -674,7 +781,8 @@ async function main(argv) {
   const spiralityDir = dirname(file);
   const common = realRun('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], { cwd: spiralityDir }).out;
   const homeRoot = common ? common.replace(/\/\.git$/, '') : spiralityDir;
-  const tty = Boolean(process.stdin.isTTY);
+  // --no-prompt never reads the Terminal, even when there is one.
+  const tty = !parsed.opts.noPrompt && Boolean(process.stdin.isTTY);
   return onboard(parsed.opts, {
     homeConfig, homeRoot, spiralityDir,
     run: realRun,
@@ -692,6 +800,7 @@ async function main(argv) {
     writeText: (p, t) => writeFileSync(p, t),
     appendText: (p, t) => { mkdirSync(dirname(p), { recursive: true }); appendFileSync(p, t); },
     mkdir: (d) => mkdirSync(d, { recursive: true }),
+    rename: (from, to) => renameSync(from, to),
     sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
     now: () => Date.now(),
   });
