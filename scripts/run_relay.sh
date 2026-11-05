@@ -72,6 +72,18 @@ take_sync_lock() {
   done
   echo "$$" > "$SYNC_LOCK/pid"
 }
+# A checkout left on a branch that has merged and gone from origin (a new
+# product's lanes run from its setup branch until it merges) goes back to main
+# first, under the same lock, so the pull below can run.
+# shellcheck source=lib/back_to_main.sh
+source "$REPO/scripts/lib/back_to_main.sh"
+if [ "$(git rev-parse --abbrev-ref HEAD 2>/dev/null)" != "main" ] && [ -z "$(git status --porcelain)" ]; then
+  if take_sync_lock; then
+    MOVED="$(back_to_main_if_merged)"
+    [ -n "$MOVED" ] && echo "[relay] $MOVED"
+    rm -rf "$SYNC_LOCK"
+  fi
+fi
 if [ "$(git rev-parse --abbrev-ref HEAD 2>/dev/null)" = "main" ] && [ -z "$(git status --porcelain)" ]; then
   if take_sync_lock; then
     git pull -q --ff-only origin main 2>&1 || echo "[relay] pull of main refused (see above) — running on the checkout as it is"

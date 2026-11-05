@@ -180,6 +180,7 @@ status_tracker() {
 status() {
   echo "product:  $SLUG (labels $PREFIX.*, logs in $LOG_DIR)"
   checkout_state
+  PATH="$LAUNCHD_PATH" node "$REPO/scripts/lib/claudeTrust.mjs" check "$REPO" || true
   for s in "${SKILLS[@]}"; do status_one "$s"; done
   status_one "$RELAY"
   status_tracker
@@ -314,6 +315,14 @@ install() {
   # the exit code at the end.
   not_loaded=()
 
+  # Trust this checkout in Claude's own settings before any lane starts, or
+  # every headless pass ignores the product's .claude/settings.json allow list
+  # until somebody opens Claude here by hand (SP-116). A failure is said and
+  # fails the run at the end, but the lanes still install: they run, only
+  # without that list.
+  trust_failed=""
+  PATH="$LAUNCHD_PATH" node "$REPO/scripts/lib/claudeTrust.mjs" ensure "$REPO" || trust_failed=yes
+
   # The kept-alive lanes: the runner script loops forever, launchd restarts it.
   for s in "${SKILLS[@]}"; do
     local_label="$(label_of "$s")"; local_plist="$(plist_of "$s")"
@@ -398,6 +407,12 @@ PLIST_BODY
     echo >&2
     echo "FAILED: ${#not_loaded[@]} job(s) are NOT loaded on this machine: ${not_loaded[*]}" >&2
     echo "        Run this installer again; if it fails the same way, check $0 --status." >&2
+    exit 1
+  fi
+  if [ -n "$trust_failed" ]; then
+    echo >&2
+    echo "FAILED: $REPO is not marked trusted in Claude's settings (the FAILED: trust line above says why)." >&2
+    echo "        The lanes are installed and run, but ignore .claude/settings.json's allow list until it is." >&2
     exit 1
   fi
 }

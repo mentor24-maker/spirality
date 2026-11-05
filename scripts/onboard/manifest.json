@@ -194,12 +194,20 @@
       "to": "scripts/lib/launchd_reload.sh"
     },
     {
+      "from": "scripts/lib/claudeTrust.mjs",
+      "to": "scripts/lib/claudeTrust.mjs"
+    },
+    {
       "from": "scripts/loop_runner.sh",
       "to": "scripts/loop_runner.sh"
     },
     {
       "from": "scripts/run_relay.sh",
       "to": "scripts/run_relay.sh"
+    },
+    {
+      "from": "scripts/lib/back_to_main.sh",
+      "to": "scripts/lib/back_to_main.sh"
     },
     {
       "from": "scripts/run_with_time_limit.sh",
