@@ -52,7 +52,7 @@ import { promisify } from 'node:util';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { openStore, StoreError } from './store.mjs';
 import { boardOf, PRIORITIES, projectDetailsOf, projectsList, readSearchFilters, reportsOf, searchTickets, stageColoursOf, threadOf, waitingFor } from './pageData.mjs';
-import { createNotifier, DEFAULT_FROM, MAIL_FROM, MAIL_KEY, mailEnvFromDoppler, mailSettingsFromEnv, resendSender } from './notify.mjs';
+import { createNotifier, DEFAULT_FROM, MAIL_FROM, MAIL_KEY, mailEnvFromDoppler, mailSettingsFromEnv, resendSender, textSettings } from './notify.mjs';
 import { sendInvite, sendResetLink } from './account.mjs';
 import { loadProjectConfig } from '../lib/projectConfig.mjs';
 import busRelayPlan from '../lib/busRelayPlan.js';
@@ -834,8 +834,16 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     const store = openStore(db);
     const log = (line) => console.log(`${new Date().toISOString()} ${line}`);
     const mail = await loadMailSettings({ host, port, log });
-    const notifier = mail.send ? createNotifier({ store, send: mail.send, to: mail.to, pageUrl: mail.pageUrl, log }) : null;
-    if (!notifier) log(`hand-over email: off. ${mail.why}`);
+    if (!mail.send) log(`hand-over email: off. ${mail.why}`);
+    const text = textSettings({ run: promisify(execFile) });
+    // The text's link opens on his phone: always the shared address, never this machine's own 127.0.0.1.
+    const textPageUrl = sharedPageUrl({ host, port });
+    log(text.sendText
+      ? `hand-over text: on, through Messages on this Mac, to each project's alert phone, linking to ${textPageUrl}.`
+      : `hand-over text: off. ${text.why}`);
+    const notifier = mail.send || text.sendText
+      ? createNotifier({ store, send: mail.send, to: mail.to, pageUrl: mail.pageUrl ?? textPageUrl, sendText: text.sendText, textPageUrl, log })
+      : null;
     log(mail.account?.send ? `reset email: on, through Resend, linking to ${mail.account.pageUrl}.` : `reset email: off. ${MAIL_KEY} could not be read, so "Forgot password?" sends nothing.`);
     let defaultProject = null;
     let mergePhrase = null;
