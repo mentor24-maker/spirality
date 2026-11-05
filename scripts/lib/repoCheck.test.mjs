@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { compareRepo, projectEditUrl } from './repoCheck.mjs';
+import { compareRepo, normalRepo, projectEditUrl } from './repoCheck.mjs';
 
 const editUrl = projectEditUrl('http://mini.local:4180/', 'normie');
 const base = { configRepo: 'mentor24-maker/normie', slug: 'normie', editUrl };
@@ -15,6 +15,14 @@ test('the same repository is ok, whatever its case or whether it is written as i
     assert.equal(r.verdict, 'same', trackerRepo);
     assert.equal(r.ok, true);
     assert.match(r.line, /agree: mentor24-maker\/normie/);
+  }
+});
+
+test('every way of writing the repository reads as owner/name, a trailing slash after .git included', () => {
+  for (const v of ['mentor24-maker/normie', 'mentor24-maker/normie/', 'https://github.com/mentor24-maker/normie.git',
+    'https://github.com/mentor24-maker/normie.git/', 'https://github.com/Mentor24-Maker/Normie/', 'git@github.com:mentor24-maker/normie.git',
+    'ssh://git@github.com/mentor24-maker/normie.git']) {
+    assert.equal(normalRepo(v), 'mentor24-maker/normie', v);
   }
 });
 
