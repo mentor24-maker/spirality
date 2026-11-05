@@ -103,10 +103,11 @@ NOT write any code here. You produce well-formed tasks.
 
 4. **Report back.** List the tasks you filed (name + risk + one-line goal) and
    the total. Then say what the build loop is actually doing — **never tell
-   Dane to start one without checking**. Today the Spirality loops have no
-   scheduled runner; a loop runs only when a session starts one by hand
-   (`/loop 30m loop-build`), and only one build loop and one review loop may
-   run at a time, because claiming a ticket is check-then-act.
+   Dane to start one without checking**. Spirality's lanes run on the
+   Mini (`com.spirality.loop-build` and the rest:
+   `scripts/install_loop_runner.sh --status`), so never tell him to start a
+   build or review loop by hand while they are loaded, because claiming a
+   ticket is check-then-act.
 
 ## Never say something is waiting on Dane without checking
 

@@ -14,8 +14,27 @@ passed an independent check.
 ## Before anything: one reviewer
 
 Two review passes verifying the same ticket overwrite each other's verdict.
-Spirality has no scheduled runner yet, so: **do not start this loop if
-another session is already running it.**
+On the Mini the review lane (`com.spirality.loop-review`) runs this skill
+every 30 minutes, so: **do not start this loop by hand while that lane is
+loaded**.
+
+**First tell which one you are.** The lane's runner, `scripts/loop_runner.sh`,
+exports `LOOP_RUNNER_PID` to every pass it starts:
+
+```bash
+echo "${LOOP_RUNNER_PID:-}"
+```
+
+- **Set** (a number): you ARE the review lane's own pass, and the runner's
+  lock (`$LOG_DIR/$SLUG-loop-review.lock`) is yours: it is what makes you the only
+  one. Carry on. A loaded lane, a held lock and a running `loop_runner.sh`
+  are you, not a second reviewer. (On 11/4 two build passes in a row stood down
+  here, each naming its own runner's process, and two tickets sat in Rework.)
+- **Empty**: you were started by hand. Run
+  `scripts/install_loop_runner.sh --status`; if `loop-review` shows
+  `loaded:   yes`, stop and report that the lane is running, unless Dane has
+  asked for this pass by hand (then claim only through `claim`, which is
+  guarded on the ticket's status). Otherwise carry on.
 
 ## Ticket access: the direct script, not the connector
 

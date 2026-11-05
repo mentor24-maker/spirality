@@ -16,9 +16,27 @@ draining the queue one clean PR at a time.
 Claiming a ticket is check-then-act (a read, a comparison, a write), which is
 only sound with exactly one build pass running. On the Mini the build lane's
 runner (`scripts/loop_runner.sh`) holds a lock, `$LOG_DIR/$SLUG-loop-build.lock`,
-so only one runner runs and its passes run one after another. A hand-run
-session holds no lock: **do not start this loop by hand while the runner's
-lane is running.**
+so only one runner runs and its passes run one after another. A session
+started by hand holds no lock, so **it does not build while the lane is
+loaded**.
+
+**First tell which one you are.** The lane's runner, `scripts/loop_runner.sh`,
+exports `LOOP_RUNNER_PID` to every pass it starts:
+
+```bash
+echo "${LOOP_RUNNER_PID:-}"
+```
+
+- **Set** (a number): you ARE the build lane's own pass, and the runner's
+  lock (`$LOG_DIR/$SLUG-loop-build.lock`) is yours: it is what makes you the only
+  one. Carry on. A loaded lane, a held lock and a running `loop_runner.sh`
+  are you, not a second builder. (On 11/4 two build passes in a row stood down
+  here, each naming its own runner's process, and two tickets sat in Rework.)
+- **Empty**: you were started by hand. Run
+  `scripts/install_loop_runner.sh --status`; if `loop-build` shows
+  `loaded:   yes`, stop and report that the lane is running, unless Dane has
+  asked for this pass by hand (then claim only through `claim`, which is
+  guarded on the ticket's status). Otherwise carry on.
 
 A ticket in `Building` is not proof that a pass is building it. A pass that
 dies (killed, out of time, out of session) leaves its ticket there, and
