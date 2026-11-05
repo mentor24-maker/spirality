@@ -177,11 +177,25 @@ function sameSpelling(a, b) {
   return trim(a) === trim(b);
 }
 
-/** Two folder paths that are the same folder on this disk (symlinks such as /tmp -> /private/tmp resolved). */
+/**
+ * Two folder paths that are the same folder on this disk: symlinks such as
+ * /tmp -> /private/tmp resolved, and the capitals the disk keeps rather than
+ * the ones typed (macOS's disk ignores case; git prints the disk's spelling,
+ * so `~/WebApps/Normie` and git's `.../normie` are one folder).
+ * `realpathSync.native` is the one that returns the disk's capitals.
+ */
 export function samePathOnDisk(a, b) {
-  const real = (p) => { try { return realpathSync(p); } catch { return p; } };
+  const real = (p) => { try { return realpathSync.native(p); } catch { return p; } };
   return sameSpelling(real(a), real(b));
 }
+
+/** An address with any `user:token@` sign-in part taken out, whatever the host. */
+export function withoutSignIn(address) {
+  return String(address ?? '').replace(/^([a-z][a-z0-9+.-]*:\/\/)[^@/]*@/i, '$1');
+}
+
+/** What git says when HEAD names no commit yet (an empty clone). */
+const UNBORN_HEAD = /ambiguous argument 'HEAD'|unknown revision|bad revision 'HEAD'/i;
 
 /**
  * The checkout folder: absent (will do), or a clean `branch` of `repo`
@@ -203,9 +217,18 @@ export function readCheckout({ dir, present, head, top, origin, porcelain }, { r
   if (!samePath(topDir, dir)) return row(item, BLOCKED, `the folder is inside the checkout at ${topDir}, not a checkout of its own; name a folder of its own in checkoutDir`);
   if (origin.status !== 0) return row(item, BLOCKED, 'the checkout has no "origin" remote, so it is not known to be this repository');
   const remote = origin.stdout.trim();
-  if (normalRepo(remote) !== normalRepo(repo)) return row(item, BLOCKED, `it is a checkout of ${remote}, not ${repo}`);
+  // The repository name only, never the raw address: an origin can carry a
+  // sign-in token (https://x-access-token:<token>@github.com/...), and a
+  // secret never reaches a log (CLAUDE.md rule 4).
+  if (normalRepo(remote) !== normalRepo(repo)) {
+    const shown = normalRepo(withoutSignIn(remote));
+    return row(item, BLOCKED, `it is a checkout of ${shown || 'a repository whose address could not be read'}, not ${repo}`);
+  }
   if (porcelain.status !== 0) return row(item, UNKNOWN, lastLines(porcelain.stderr, 1)[0] || `git status exited ${porcelain.status}`);
   if (head.status !== 0) {
+    // Only git's unborn-HEAD message means an empty clone; anything else is
+    // a git failure this look cannot read past.
+    if (!UNBORN_HEAD.test(head.stderr ?? '')) return row(item, UNKNOWN, lastLines(head.stderr, 1)[0] || `git rev-parse --abbrev-ref HEAD exited ${head.status}`);
     return row(item, BLOCKED, `it is a checkout of ${repo} with no commit on it yet (an empty clone), not a clean ${branch ?? 'main branch'}; move it aside and the setup clones it again`);
   }
   const onBranch = head.stdout.trim();

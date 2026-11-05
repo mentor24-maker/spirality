@@ -6,10 +6,10 @@ import { seatsForConfig } from '../../tracker/signins.mjs';
 import {
   BLOCKED, READY, UNKNOWN, WILL_DO, checkEnv, exitCodeFor, formatRow, ghApiFailure, lastLines, look,
   readCheck, readCheckout, readClaude, readDoppler, readDopplerMe, readNode, readProtection,
-  productMismatch, readRepo, nodeNeedOf, samePathOnDisk, summaryLine, trackerRows,
+  productMismatch, readRepo, withoutSignIn, nodeNeedOf, samePathOnDisk, summaryLine, trackerRows,
 } from './look.mjs';
 import { normalRepo } from '../lib/repoCheck.mjs';
-import { mkdtempSync, mkdirSync, rmSync, symlinkSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseNodeNeed } from '../../lib/onboardAnswers.mjs';
@@ -59,6 +59,13 @@ test('a git remote in any form is the same repository', () => {
   }
 });
 
+test('a sign-in part comes out of an address, whatever the host', () => {
+  assert.equal(withoutSignIn('https://x-access-token:ghp_FAKE@github.com/a/b'), 'https://github.com/a/b');
+  assert.equal(withoutSignIn('https://user:tok@gitlab.com/a/b.git'), 'https://gitlab.com/a/b.git');
+  assert.equal(withoutSignIn('git@github.com:a/b.git'), 'git@github.com:a/b.git');
+  assert.equal(withoutSignIn('https://github.com/a/b'), 'https://github.com/a/b');
+});
+
 test('--product must name the product the answers file is for', () => {
   assert.equal(productMismatch(null, { productSlug: 'normie' }, '/a.json'), null);
   assert.equal(productMismatch('normie', { productSlug: 'normie' }, '/a.json'), null);
@@ -73,6 +80,8 @@ test('the same folder through a symlink is the same folder; a folder beside it i
     symlinkSync(join(base, 'real'), join(base, 'link'));
     assert.equal(samePathOnDisk(join(base, 'link'), `${join(base, 'real')}/`), true);
     assert.equal(samePathOnDisk(join(base, 'other'), join(base, 'real')), false);
+    // On a disk that ignores case (macOS's), capitals typed differently are the same folder.
+    if (existsSync(join(base, 'REAL'))) assert.equal(samePathOnDisk(join(base, 'REAL'), join(base, 'real')), true);
   } finally {
     rmSync(base, { recursive: true, force: true });
   }
@@ -114,7 +123,14 @@ test('the checkout: absent will do; a clean main of the repository is ready; any
   assert.equal(readCheckout(good, at).verdict, READY);
   assert.match(readCheckout({ ...good, head: ok('feature\n') }, at).why, /on branch feature, not main/);
   assert.match(readCheckout({ ...good, porcelain: ok(' M a.js\n?? b.js\n') }, at).why, /2 uncommitted change/);
-  assert.match(readCheckout({ ...good, origin: ok('https://github.com/someone/else.git') }, at).why, /checkout of .*someone\/else\.git, not mentor24-maker\/normie/);
+  assert.match(readCheckout({ ...good, origin: ok('https://github.com/someone/else.git') }, at).why, /checkout of someone\/else, not mentor24-maker\/normie/);
+  // An origin can carry a sign-in token: the row names the repository, never the token (rule 4).
+  for (const origin of ['https://x-access-token:ghp_FAKE@github.com/other/repo', 'https://user:ghp_FAKE@gitlab.com/other/repo.git']) {
+    const tokened = readCheckout({ ...good, origin: ok(`${origin}\n`) }, at);
+    assert.equal(tokened.verdict, BLOCKED);
+    assert.doesNotMatch(tokened.why, /ghp_FAKE|x-access-token|user:/);
+    assert.match(tokened.why, /other\/repo/);
+  }
   const notGit = failed(128, 'fatal: not a git repository (or any of the parent directories): .git');
   assert.match(readCheckout({ ...good, head: notGit, top: notGit, origin: notGit, porcelain: notGit }, at).why, /not a git checkout/);
   // An empty clone: the top folder answers, HEAD names no commit yet. It is a checkout, just not a clean main.
@@ -122,6 +138,11 @@ test('the checkout: absent will do; a clean main of the repository is ready; any
   assert.equal(unborn.verdict, BLOCKED);
   assert.match(unborn.why, /no commit on it yet \(an empty clone\)/);
   assert.doesNotMatch(unborn.why, /not a git checkout/);
+  // Any other HEAD failure is not an empty clone: could not tell, with git's own last line.
+  const broken = readCheckout({ ...good, head: failed(128, 'fatal: unable to read tree 1234abcd') }, at);
+  assert.equal(broken.verdict, UNKNOWN);
+  assert.match(broken.why, /unable to read tree/);
+  assert.doesNotMatch(broken.why, /empty clone/);
   // GitHub could not say which branch is main: the checkout's branch cannot be judged, so it is never "ready".
   for (const head of [ok('feature-x\n'), ok('main\n')]) {
     const unknown = readCheckout({ ...good, head }, { ...at, branch: null });

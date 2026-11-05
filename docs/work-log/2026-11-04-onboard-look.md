@@ -34,3 +34,14 @@ the folder happens to be on. An empty clone (a checkout with no commit yet) is
 now called that, not "not a git checkout". A Node range written with a space
 after its sign (`>= 22.12`, which npm accepts) is read instead of refused, and
 a GitHub address ending `.git/` is recognised as the same repository.
+
+Third review round: when the folder turns out to be a copy of some other
+repository, the checkout line used to print that copy's address exactly as git
+stored it, and an address can have a sign-in token written into it. The line
+now names only the repository (`other/repo`), with any sign-in part taken out,
+whatever site it is on, so a token cannot reach the screen or a log. A folder
+typed with different capitals (`~/WebApps/Normie` for `.../normie`) is now
+recognised as the same folder, the way the Mac's disk treats it, instead of
+being called "inside another checkout". And the "empty clone" line now appears
+only when git actually says the checkout has no commit yet. Any other git
+failure says "could not tell", with git's own words.
