@@ -1,0 +1,345 @@
+{
+  "//": "What a product gets from Spirality in its one setup pull request (SP-110), taken from what Normie's PRs #62, #64, #65 and #66 received, plus every module the ticket door imports today. `files` are copied from Spirality: with no `edits`, byte for byte, checked with cmp; with `edits`, each `find` must appear exactly once in Spirality's file, or the copy stops naming it, so a change to Spirality's wording can never slip through unadapted. The ticket door goes under loop/, apart from the product's own lib/ and scripts/; the runners, hook, skills and settings keep Spirality's paths, because each finds the product's folder from where it sits. `made` are written from the answers.",
+  "files": [
+    {
+      "from": "lib/branchCatchUp.js",
+      "to": "loop/lib/branchCatchUp.js"
+    },
+    {
+      "from": "lib/busFallback.js",
+      "to": "loop/lib/busFallback.js"
+    },
+    {
+      "from": "lib/busRelayPlan.js",
+      "to": "loop/lib/busRelayPlan.js"
+    },
+    {
+      "from": "lib/clickupTicketLink.js",
+      "to": "loop/lib/clickupTicketLink.js"
+    },
+    {
+      "from": "lib/commentPages.js",
+      "to": "loop/lib/commentPages.js"
+    },
+    {
+      "from": "lib/commentPages.test.js",
+      "to": "loop/lib/commentPages.test.js"
+    },
+    {
+      "from": "lib/conflictWork.js",
+      "to": "loop/lib/conflictWork.js"
+    },
+    {
+      "from": "lib/costlyAsk.js",
+      "to": "loop/lib/costlyAsk.js"
+    },
+    {
+      "from": "lib/costlyAsk.test.js",
+      "to": "loop/lib/costlyAsk.test.js"
+    },
+    {
+      "from": "lib/humanHours.js",
+      "to": "loop/lib/humanHours.js"
+    },
+    {
+      "from": "lib/loopNote.js",
+      "to": "loop/lib/loopNote.js"
+    },
+    {
+      "from": "lib/loopStatuses.js",
+      "to": "loop/lib/loopStatuses.js"
+    },
+    {
+      "from": "lib/machineComment.js",
+      "to": "loop/lib/machineComment.js"
+    },
+    {
+      "from": "lib/mainMoved.js",
+      "to": "loop/lib/mainMoved.js"
+    },
+    {
+      "from": "lib/mergeOnComment.js",
+      "to": "loop/lib/mergeOnComment.js"
+    },
+    {
+      "from": "lib/nextSlice.js",
+      "to": "loop/lib/nextSlice.js"
+    },
+    {
+      "from": "lib/operatorCard.js",
+      "to": "loop/lib/operatorCard.js"
+    },
+    {
+      "from": "lib/package.json",
+      "to": "loop/lib/package.json"
+    },
+    {
+      "from": "lib/passClaim.js",
+      "to": "loop/lib/passClaim.js"
+    },
+    {
+      "from": "lib/passHandback.js",
+      "to": "loop/lib/passHandback.js"
+    },
+    {
+      "from": "lib/pipelinePause.js",
+      "to": "loop/lib/pipelinePause.js"
+    },
+    {
+      "from": "lib/projectConfig.mjs",
+      "to": "loop/lib/projectConfig.mjs"
+    },
+    {
+      "from": "lib/refusalClass.js",
+      "to": "loop/lib/refusalClass.js"
+    },
+    {
+      "from": "lib/relayLane.js",
+      "to": "loop/lib/relayLane.js"
+    },
+    {
+      "from": "lib/relayLane.test.js",
+      "to": "loop/lib/relayLane.test.js"
+    },
+    {
+      "from": "lib/sendBackRounds.js",
+      "to": "loop/lib/sendBackRounds.js"
+    },
+    {
+      "from": "lib/substrateConfig.js",
+      "to": "loop/lib/substrateConfig.js"
+    },
+    {
+      "from": "lib/waitsOn.js",
+      "to": "loop/lib/waitsOn.js"
+    },
+    {
+      "from": "lib/waitsOn.test.js",
+      "to": "loop/lib/waitsOn.test.js"
+    },
+    {
+      "from": "scripts/clickup.mjs",
+      "to": "loop/scripts/clickup.mjs"
+    },
+    {
+      "from": "scripts/doctor.mjs",
+      "to": "loop/scripts/doctor.mjs"
+    },
+    {
+      "from": "scripts/with_doppler.mjs",
+      "to": "loop/scripts/with_doppler.mjs"
+    },
+    {
+      "from": "scripts/lib/expectedSecrets.mjs",
+      "to": "loop/scripts/lib/expectedSecrets.mjs"
+    },
+    {
+      "from": "scripts/lib/loopStatuses.mjs",
+      "to": "loop/scripts/lib/loopStatuses.mjs"
+    },
+    {
+      "from": "scripts/lib/loopStatuses.test.mjs",
+      "to": "loop/scripts/lib/loopStatuses.test.mjs"
+    },
+    {
+      "from": "scripts/lib/loopTrail.mjs",
+      "to": "loop/scripts/lib/loopTrail.mjs"
+    },
+    {
+      "from": "scripts/lib/loopTrail.test.mjs",
+      "to": "loop/scripts/lib/loopTrail.test.mjs"
+    },
+    {
+      "from": "scripts/lib/machineComment.mjs",
+      "to": "loop/scripts/lib/machineComment.mjs"
+    },
+    {
+      "from": "scripts/lib/machineComment.test.mjs",
+      "to": "loop/scripts/lib/machineComment.test.mjs"
+    },
+    {
+      "from": "scripts/lib/operatorCard.mjs",
+      "to": "loop/scripts/lib/operatorCard.mjs"
+    },
+    {
+      "from": "scripts/lib/operatorCard.test.mjs",
+      "to": "loop/scripts/lib/operatorCard.test.mjs"
+    },
+    {
+      "from": "scripts/lib/repoCheck.mjs",
+      "to": "loop/scripts/lib/repoCheck.mjs"
+    },
+    {
+      "from": "scripts/lib/repoCheck.test.mjs",
+      "to": "loop/scripts/lib/repoCheck.test.mjs"
+    },
+    {
+      "from": "scripts/tracker/apiTracker.mjs",
+      "to": "loop/scripts/tracker/apiTracker.mjs"
+    },
+    {
+      "from": "scripts/tracker/clickupTracker.mjs",
+      "to": "loop/scripts/tracker/clickupTracker.mjs"
+    },
+    {
+      "from": "scripts/tracker/clickupTracker.test.mjs",
+      "to": "loop/scripts/tracker/clickupTracker.test.mjs"
+    },
+    {
+      "from": "scripts/install_loop_runner.sh",
+      "to": "scripts/install_loop_runner.sh"
+    },
+    {
+      "from": "scripts/lib/launchd_reload.sh",
+      "to": "scripts/lib/launchd_reload.sh"
+    },
+    {
+      "from": "scripts/loop_runner.sh",
+      "to": "scripts/loop_runner.sh"
+    },
+    {
+      "from": "scripts/run_relay.sh",
+      "to": "scripts/run_relay.sh"
+    },
+    {
+      "from": "scripts/run_with_time_limit.sh",
+      "to": "scripts/run_with_time_limit.sh"
+    },
+    {
+      "from": "scripts/hooks/block_edits_on_main.cjs",
+      "to": "scripts/hooks/block_edits_on_main.cjs"
+    },
+    {
+      "from": ".claude/settings.json",
+      "to": ".claude/settings.json"
+    },
+    {
+      "from": ".claude/skills/loop-intake/SKILL.md",
+      "to": ".claude/skills/loop-intake/SKILL.md"
+    },
+    {
+      "from": "scripts/project_config.mjs",
+      "to": "scripts/project_config.mjs",
+      "why": "the door sits under loop/, so the settings reader is one folder further away",
+      "edits": [
+        {
+          "find": "from '../lib/projectConfig.mjs'",
+          "replace": "from '../loop/lib/projectConfig.mjs'"
+        }
+      ]
+    },
+    {
+      "from": ".claude/skills/loop-build/SKILL.md",
+      "to": ".claude/skills/loop-build/SKILL.md",
+      "why": "the product's name and check command; and the lane's own pass learns it is the lane (Normie NO-7, SETUP_REVIEW.md hold-up 14)",
+      "edits": [
+        {
+          "find": "from the Spirality queue",
+          "replace": "from the {{productName}} queue"
+        },
+        {
+          "find": "Step 2 of 3 in the Spirality development loop (spec → build → review).",
+          "replace": "Step 2 of 3 in {{productName}}'s development loop (spec → build → review), the loop Spirality defines."
+        },
+        {
+          "find": "A hand-run\nsession holds no lock: **do not start this loop by hand while the runner's\nlane is running.**",
+          "replace": "A hand-run\nsession holds no lock: **do not start this loop by hand while the runner's\nlane is running.**\n\nFirst tell which one you are. The lane's runner, `scripts/loop_runner.sh`,\nexports `LOOP_RUNNER_PID` to every pass it starts:\n\n```bash\necho \"${LOOP_RUNNER_PID:-}\"\n```\n\n- **Set** (a number): you ARE the build lane's own pass, and the runner's\n  lock (`{{logDir}}/{{productSlug}}-loop-build.lock`) makes you the only one.\n  Carry on. A loaded lane is you, not a second builder.\n- **Empty**: you were started by hand. Run\n  `scripts/install_loop_runner.sh --status`; if `loop-build` shows\n  `loaded:   yes`, stop and report that the lane is running. Otherwise carry on."
+        },
+        {
+          "find": "```bash\n   npm run verify\n   ```",
+          "replace": "```bash\n   {{checkCommand}}\n   ```"
+        }
+      ]
+    },
+    {
+      "from": ".claude/skills/loop-review/SKILL.md",
+      "to": ".claude/skills/loop-review/SKILL.md",
+      "why": "the product's name, check command and kind of surface; and the lane's own pass learns it is the lane (Normie NO-7, SETUP_REVIEW.md hold-up 14)",
+      "edits": [
+        {
+          "find": "from the Spirality queue",
+          "replace": "from the {{productName}} queue"
+        },
+        {
+          "find": "(`npm run verify` + code review",
+          "replace": "(`{{checkCommand}}` + code review"
+        },
+        {
+          "find": "Step 3 of 3 in the Spirality development loop (spec → build → review).",
+          "replace": "Step 3 of 3 in {{productName}}'s development loop (spec → build → review), the loop Spirality defines."
+        },
+        {
+          "find": "Spirality has no scheduled runner yet, so: **do not start this loop if\nanother session is already running it.**",
+          "replace": "On the Mini the review lane (`{{launchdPrefix}}.loop-review`) runs this skill every\n30 minutes, so: **do not start this loop by hand while that lane is loaded**.\n\nFirst tell which one you are. The lane's runner, `scripts/loop_runner.sh`,\nexports `LOOP_RUNNER_PID` to every pass it starts:\n\n```bash\necho \"${LOOP_RUNNER_PID:-}\"\n```\n\n- **Set** (a number): you ARE the review lane's own pass, and the runner's\n  lock (`{{logDir}}/{{productSlug}}-loop-review.lock`) makes you the only one.\n  Carry on. A loaded lane is you, not a second reviewer.\n- **Empty**: you were started by hand. Run\n  `scripts/install_loop_runner.sh --status`; if `loop-review` shows\n  `loaded:   yes`, stop and report that the lane is running. Otherwise carry on."
+        },
+        {
+          "find": "Spirality is tooling, so the surface is\nusually a command: give the exact command to paste and the output it prints.\nIf there is a page, give its URL.",
+          "replace": "{{reviewSurface}}"
+        },
+        {
+          "find": "Re-run the gates: `npm run verify`.",
+          "replace": "Re-run the gates: `{{checkCommand}}`."
+        }
+      ]
+    },
+    {
+      "from": ".claude/skills/loop-spec/SKILL.md",
+      "to": ".claude/skills/loop-spec/SKILL.md",
+      "why": "the product's name and queue, and its lanes on the Mini",
+      "edits": [
+        {
+          "find": "in the Spirality queue",
+          "replace": "in the {{productName}} queue"
+        },
+        {
+          "find": "Step 1 of 3 in the Spirality development loop (spec → build → review).",
+          "replace": "Step 1 of 3 in {{productName}}'s development loop (spec → build → review), the loop Spirality defines."
+        },
+        {
+          "find": "The target is the Spirality queue",
+          "replace": "The target is the {{productName}} queue"
+        },
+        {
+          "find": "**Never file Spirality work in StarCaster's Loop Queue**\n  (`901418546619`) — that queue builds StarCaster.",
+          "replace": "**Never file another product's work here**, nor {{productName}}'s anywhere\n  else: each product's queue builds that product."
+        },
+        {
+          "find": "Today the Spirality loops have no\n   scheduled runner; a loop runs only when a session starts one by hand\n   (`/loop 30m loop-build`), and only one build loop and one review loop may\n   run at a time, because claiming a ticket is check-then-act.",
+          "replace": "{{productName}}'s lanes run on the\n   Mini (`{{launchdPrefix}}.loop-build` and the rest:\n   `scripts/install_loop_runner.sh --status`), so never start a build or\n   review loop by hand while they are loaded, because claiming a ticket is\n   check-then-act."
+        }
+      ]
+    }
+  ],
+  "made": [
+    {
+      "to": "spirality.project.json",
+      "from": "the settings file given as --config (SP-109 writes it)"
+    },
+    {
+      "to": ".github/workflows/verify.yml",
+      "from": "generated: one job named verify running the answers' checkCommand, then npm run test:loop"
+    },
+    {
+      "to": "loop/README.md",
+      "template": "scripts/onboard/templates/loop-README.md"
+    },
+    {
+      "to": "docs/LOOP_ENGINEERING.md",
+      "template": "scripts/onboard/templates/LOOP_ENGINEERING.md"
+    },
+    {
+      "to": "CLAUDE.md",
+      "template": "scripts/onboard/templates/CLAUDE-sections.md",
+      "how": "appended, unless the product's CLAUDE.md already has a \"## Where the work is tracked\" heading; the product's own guide is kept"
+    },
+    {
+      "to": "package.json",
+      "from": "the product's own, with the scripts below added; none of its own is changed or removed"
+    }
+  ],
+  "npmScripts": {
+    "clickup": "node loop/scripts/with_doppler.mjs node loop/scripts/clickup.mjs",
+    "doctor": "node loop/scripts/doctor.mjs",
+    "test:loop": "node --test \"loop/**/*.test.js\" \"loop/**/*.test.mjs\""
+  }
+}
