@@ -250,7 +250,7 @@
     {
       "from": ".claude/skills/loop-build/SKILL.md",
       "to": ".claude/skills/loop-build/SKILL.md",
-      "why": "the product's name, check command, ticket ids and CLAUDE.md section (Spirality's own skill already tells a lane's pass it is the lane, SP-117)",
+      "why": "the product's name, ticket ids and CLAUDE.md section (Spirality's own skill already tells a lane's pass it is the lane, SP-117)",
       "edits": [
         {
           "find": "from the Spirality queue",
@@ -259,10 +259,6 @@
         {
           "find": "Step 2 of 3 in the Spirality development loop (spec → build → review).",
           "replace": "Step 2 of 3 in {{productName}}'s development loop (spec → build → review), the loop Spirality defines."
-        },
-        {
-          "find": "```bash\n   npm run verify\n   ```",
-          "replace": "```bash\n   {{checkCommand}}\n   ```"
         },
         {
           "find": "nothing claims from `Building` (SP-101: SP-92 sat a day that way). So every",
@@ -293,15 +289,11 @@
     {
       "from": ".claude/skills/loop-review/SKILL.md",
       "to": ".claude/skills/loop-review/SKILL.md",
-      "why": "the product's name, check command, kind of surface, relay and merge phrases, and its review lane's label, and its CLAUDE.md section",
+      "why": "the product's name, kind of surface, relay and merge phrases, its review lane's label, and its CLAUDE.md section",
       "edits": [
         {
           "find": "from the Spirality queue",
           "replace": "from the {{productName}} queue"
-        },
-        {
-          "find": "(`npm run verify` + code review",
-          "replace": "(`{{checkCommand}}` + code review"
         },
         {
           "find": "Step 3 of 3 in the Spirality development loop (spec → build → review).",
@@ -310,10 +302,6 @@
         {
           "find": "Spirality is tooling, so the surface is\nusually a command: give the exact command to paste and the output it prints.\nIf there is a page, give its URL.",
           "replace": "{{reviewSurface}}"
-        },
-        {
-          "find": "Re-run the gates: `npm run verify`.",
-          "replace": "Re-run the gates: `{{checkCommand}}`."
         },
         {
           "find": "— `merge`, `merge it`, `ship it` or `approve` (the",
@@ -375,12 +363,17 @@
   ],
   "made": [
     {
+      "to": ".gitignore",
+      "from": "the product's own (made if it has none), with these lines added where missing: the lanes' working copies live in .claude/worktrees/, and a main checkout that shows them as changed never pulls (SP-120)",
+      "ignoreLines": [".claude/worktrees/"]
+    },
+    {
       "to": "spirality.project.json",
       "from": "the settings file given as --config (SP-109 writes it)"
     },
     {
       "to": ".github/workflows/verify.yml",
-      "from": "generated: one job named verify running the answers' checkCommand, then npm run test:loop"
+      "from": "generated: one job named verify; it runs npm run verify when the setup added that script, else the answers' checkCommand, then npm run test:loop"
     },
     {
       "to": "loop/README.md",
@@ -397,12 +390,13 @@
     },
     {
       "to": "package.json",
-      "from": "the product's own, with the scripts below added; none of its own is changed or removed"
+      "from": "the product's own, with the scripts below added, and verifyIfAbsent as its verify when it has none; none of its own is changed or removed"
     }
   ],
   "npmScripts": {
     "clickup": "node loop/scripts/with_doppler.mjs node loop/scripts/clickup.mjs",
     "doctor": "node loop/scripts/doctor.mjs",
     "test:loop": "node --test \"loop/**/*.test.js\" \"loop/**/*.test.mjs\""
-  }
+  },
+  "verifyIfAbsent": "{{checkCommand}} && npm run test:loop"
 }
