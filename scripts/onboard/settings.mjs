@@ -40,7 +40,7 @@ import { parseArgs } from 'node:util';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { CONFIG_FILE, findConfigFile, loadProjectConfig, ProjectConfigError, validateProjectConfig } from '../../lib/projectConfig.mjs';
+import { CONFIG_FILE, findConfigFile, loadProjectConfig, ProjectConfigError, validateProjectConfig, withProjectNames } from '../../lib/projectConfig.mjs';
 import { AnswersError, expandHome, loadAnswers } from '../../lib/onboardAnswers.mjs';
 import {
   SettingsError, actorNamed, fieldsThatDiffer, machineUserPending, settingsFromAnswers, settingsText, withMachineUser,
@@ -59,9 +59,9 @@ const WRITE = 'write the settings file';
 const FILL = 'fill in machineUserId';
 
 /** The project's build-loop sign-in's name: `<slug> loop-build` (seatsForConfig). */
-export function buildSeatName(productSlug, operatorName) {
+export function buildSeatName(projectSlug, operatorName) {
   const buildSecret = TRACKER_SEATS.find((s) => s.kind === 'machine' && s.name === 'loop-build')?.secret;
-  const seat = seatsForConfig({ trackerPort: null, productSlug, operatorName }).seats.find((s) => s.secret === buildSecret);
+  const seat = seatsForConfig({ trackerPort: null, projectSlug, operatorName }).seats.find((s) => s.secret === buildSecret);
   if (!seat) throw new SettingsError('the sign-ins list names no build-loop seat');
   return seat.name;
 }
@@ -106,7 +106,13 @@ export function writeAndReadBack(file, settings, { write = writeFileSync, mkdir 
 function existingSettings(file, readText) {
   const text = readText(file);
   if (text == null) return null;
-  try { return JSON.parse(text); } catch (err) { throw new SettingsError(`${file} is already there and is not valid JSON (${err.message}); move it away first`); }
+  let raw;
+  try { raw = JSON.parse(text); } catch (err) { throw new SettingsError(`${file} is already there and is not valid JSON (${err.message}); move it away first`); }
+  // It may still use the old field names (SP-130); read them as the new ones.
+  try { return withProjectNames(raw, { file }); } catch (err) {
+    if (err instanceof ProjectConfigError) throw new SettingsError(`${err.message}; move it away first`);
+    throw err;
+  }
 }
 
 /**
@@ -128,13 +134,13 @@ export async function runWrite({ answersPath, outDir }, deps) {
   const file = join(outDir, CONFIG_FILE);
   try {
     const before = existingSettings(file, deps.readText);
-    if (before && before.productSlug !== answers.productSlug) {
-      return failed(`${file} is ${before.productSlug ? `the settings file of "${before.productSlug}"` : 'another settings file'}, not ${answers.productSlug}'s; it is left alone. Name an empty scratch folder with --out.`);
+    if (before && before.projectSlug !== answers.projectSlug) {
+      return failed(`${file} is ${before.projectSlug ? `the settings file of "${before.projectSlug}"` : 'another settings file'}, not ${answers.projectSlug}'s; it is left alone. Name an empty scratch folder with --out.`);
     }
     const { people, actors } = await readActors(deps.get, homeConfig.trackerApiUrl);
     const operatorUserId = actorNamed(people, homeConfig.operatorName);
     if (!operatorUserId) return failed(`the tracker has no person named "${homeConfig.operatorName}" (the tracker home's operatorName) to hand tickets to`);
-    const seat = buildSeatName(answers.productSlug, homeConfig.operatorName);
+    const seat = buildSeatName(answers.projectSlug, homeConfig.operatorName);
     const machineUserId = actorNamed(actors, seat);
     const settings = settingsFromAnswers(answers, homeConfig, { operatorUserId, machineUserId });
     if (before) {
@@ -143,7 +149,7 @@ export async function runWrite({ answersPath, outDir }, deps) {
     }
     const off = writeAndReadBack(file, settings, deps);
     if (off.length) return failed(`${file} read back different from what was written, in ${off.join(', ')}`);
-    lines.push(`Wrote ${file} for ${answers.productName} (${answers.githubRepo}), checked by the settings reader every loop uses.`);
+    lines.push(`Wrote ${file} for ${answers.projectName} (${answers.githubRepo}), checked by the settings reader every loop uses.`);
     lines.push(`  operatorUserId ${operatorUserId}: the tracker's person "${homeConfig.operatorName}"`);
     lines.push(machineUserPending(settings)
       ? `  machineUserId ${settings.machineUserId}: a placeholder. "${seat}" is not in the tracker yet; after the sign-ins step, run: npm run onboard:settings -- fill-machine-user --config ${file}`
@@ -171,7 +177,7 @@ export async function runFill({ configPath }, deps) {
     if (config.tracker !== 'api') return failed(`${configPath} does not use the tracker ("tracker" is "${config.tracker}")`);
     const raw = existingSettings(configPath, deps.readText);
     if (!raw) return failed(`${configPath} could not be read`);
-    const seat = buildSeatName(config.productSlug, config.operatorName);
+    const seat = buildSeatName(config.projectSlug, config.operatorName);
     const { actors } = await readActors(deps.get, config.trackerApiUrl);
     const id = actorNamed(actors, seat);
     if (!id) {

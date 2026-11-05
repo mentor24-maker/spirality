@@ -308,7 +308,7 @@ function flag(value) {
  * `notifier` (tracker/notify.mjs) hears about every write once its answer
  * has gone back, so a hand-over email can never slow or fail the write.
  * `defaultProject` is the slug the New request form starts on: the project
- * config's productSlug, never a literal here. One the store does not hold
+ * config's projectSlug, never a literal here. One the store does not hold
  * is answered as null, and the page falls back to the first project.
  * `mergePhrase` is the word the ticket page's Merge button posts: the first
  * of the project config's mergePhrases, never a literal here. Null means no
@@ -318,7 +318,7 @@ function flag(value) {
  * `goPhrase` is the word the Go button posts on an intake card (GO_PHRASE
  * below). Null means no Go button.
  * `accountMail` sends the "Forgot password?" and invite emails: `{ send,
- * pageUrl, productName }`, each link opening under `pageUrl`. With no
+ * pageUrl, projectName }`, each link opening under `pageUrl`. With no
  * `send`, an invite is refused and nothing is made. Null (or no
  * `send`) means no reset email goes out; the page's answer is the same,
  * and the log says why. `now` is the clock the sign-in failure count reads.
@@ -456,7 +456,7 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
       if (typeof body.email !== 'string' || !body.email.trim()) throw new HttpError(400, 'missing', 'type the email to invite.');
       const result = await sendInvite({
         store, email: body.email, madeBy: me.id, send: accountMail?.send ?? null,
-        trackerUrl: accountMail?.pageUrl ?? null, productName: accountMail?.productName ?? 'tracker',
+        trackerUrl: accountMail?.pageUrl ?? null, projectName: accountMail?.projectName ?? 'tracker',
       });
       log(result.ok ? `invite sent actor=${me.id}` : `invite NOT sent (${result.code}) actor=${me.id}`);
       if (!result.ok) throw new HttpError(INVITE_REFUSALS[result.code] ?? 400, result.code, result.line);
@@ -705,7 +705,7 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
       const after = async () => {
         const { line } = await sendResetLink({
           store, email: body.email, send: accountMail?.send ?? null,
-          trackerUrl: accountMail?.pageUrl ?? null, productName: accountMail?.productName ?? 'tracker',
+          trackerUrl: accountMail?.pageUrl ?? null, projectName: accountMail?.projectName ?? 'tracker',
         });
         log(line);
       };
@@ -901,12 +901,12 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     let mergePhrase = null;
     try {
       const config = loadProjectConfig();
-      defaultProject = config.productSlug;
+      defaultProject = config.projectSlug;
       mergePhrase = config.mergePhrases[0] ?? null;
     } catch (err) {
       log(`the New request form starts on the first project and the ticket page has no Merge button: the project config is not usable (${err.message}).`);
     }
-    const accountMail = mail.account && { ...mail.account, productName: store.getProject(defaultProject)?.name ?? 'tracker' };
+    const accountMail = mail.account && { ...mail.account, projectName: store.getProject(defaultProject)?.name ?? 'tracker' };
     const { setup, why: noSetup } = setupSettingsOf({ db: resolve(db) });
     log(setup ? `set up a project: on, reading ${setup.homeConfig.logDir}/onboard.` : `set up a project: off. ${noSetup}.`);
     const server = await startServer({ store, port, host, log, notifier, defaultProject, mergePhrase, closePhrase: CLOSE_PHRASE, goPhrase: GO_PHRASE, accountMail, setup });

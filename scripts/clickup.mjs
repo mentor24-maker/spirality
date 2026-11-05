@@ -127,7 +127,7 @@ const TRACKERS = {
     make: (token) => createApiTracker({
       token,
       baseUrl: project.trackerApiUrl,
-      project: project.productSlug,
+      project: project.projectSlug,
       listId: LOOP_QUEUE_LIST,
       timeoutMs: process.env.TRACKER_HTTP_TIMEOUT_MS,
     }),
@@ -432,7 +432,7 @@ function readBuildLock(dir) {
 
 /** What the build lane's lock says about this process (lib/passHandback.js lockState). */
 function buildLock() {
-  const dir = buildLockPath({ logDir: project.logDir, productSlug: project.productSlug, home: homedir() });
+  const dir = buildLockPath({ logDir: project.logDir, projectSlug: project.projectSlug, home: homedir() });
   return { dir, ...lockState(readBuildLock(dir)) };
 }
 
@@ -598,13 +598,13 @@ if (cmd === 'whoami') {
     console.log(`repository: not checked; the "${project.tracker}" tracker has no GitHub repository field. The loops use githubRepo ${project.githubRepo}.`);
   } else {
     const out = await tracker.projectDetails();
-    if (!out.res.ok || !out.json) die(`read the tracker project "${project.productSlug}"`, out);
+    if (!out.res.ok || !out.json) die(`read the tracker project "${project.projectSlug}"`, out);
     if (!Object.hasOwn(out.json, 'repo')) {
-      console.error(`repo-check: the tracker's answer for project "${project.productSlug}" has no repo field at all, so this check cannot tell. Is the tracker older than SP-80?`);
+      console.error(`repo-check: the tracker's answer for project "${project.projectSlug}" has no repo field at all, so this check cannot tell. Is the tracker older than SP-80?`);
       process.exit(1);
     }
     const { ok, line } = compareRepo({
-      configRepo: project.githubRepo, trackerRepo: out.json.repo, slug: project.productSlug, editUrl: projectEditUrl(filedTrackerUrl() || project.trackerUrl, project.productSlug),
+      configRepo: project.githubRepo, trackerRepo: out.json.repo, slug: project.projectSlug, editUrl: projectEditUrl(filedTrackerUrl() || project.trackerUrl, project.projectSlug),
     });
     console.log(line);
     reportLimits();

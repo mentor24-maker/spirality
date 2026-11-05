@@ -40,7 +40,7 @@ fi
 
 cd "$REPO" || exit 1
 
-SLUG="$(node "$REPO/scripts/project_config.mjs" productSlug)" || { echo "[loop-runner] could not read productSlug from the project config" >&2; exit 1; }
+SLUG="$(node "$REPO/scripts/project_config.mjs" projectSlug)" || { echo "[loop-runner] could not read projectSlug from the project config" >&2; exit 1; }
 LOG_DIR="$(node "$REPO/scripts/project_config.mjs" logDir)" || { echo "[loop-runner] could not read logDir from the project config" >&2; exit 1; }
 PREFIX="$(node "$REPO/scripts/project_config.mjs" launchdPrefix)" || { echo "[loop-runner] could not read launchdPrefix from the project config" >&2; exit 1; }
 LOG="$LOG_DIR/$SLUG-$SKILL.log"

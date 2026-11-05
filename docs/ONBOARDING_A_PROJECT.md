@@ -76,7 +76,7 @@ The items below marked **missing**, gathered here so they can become tickets:
    the `dopplerProject` and `dopplerConfig` the config names (item 3). SP-97
    fixed the runner: `scripts/loop_runner.sh` wrote `~/loop-logs/spirality-...`
    and printed a `com.spirality.<skill>` restart line whatever the config
-   said; it now reads `logDir`, `productSlug` and `launchdPrefix` from the
+   said; it now reads `logDir`, `projectSlug` and `launchdPrefix` from the
    config, like `scripts/install_loop_runner.sh` and `scripts/run_relay.sh`.
 3. **Loop sign-ins were per lane, not per project.** Fixed by SP-95: a
    project that does not run the tracker gets machine sign-ins named for
@@ -146,9 +146,9 @@ is the example.
 | `governancePaths` | required | Files and folders a loop may not change unattended. | `["CLAUDE.md", "docs/LOOP_ENGINEERING.md", ".claude/skills/", ".claude/settings.json", ".github/workflows/"]` |
 | `autoMergeLanes` | required | Lanes allowed to merge without Dane; empty means none. | `[]` |
 | `operatorName` | required | What the loops call the operator in anything he reads. | `"Dane"` |
-| `productSlug` | required | The project's short name: log and lock file names, the machine's sender tag, and the tracker project's slug. | `"spirality"` |
+| `projectSlug` | required | The project's short name: log and lock file names, the machine's sender tag, and the tracker project's slug. | `"spirality"` |
 | `legacyMachinePrefixes` | required | Comment prefixes the project's loops used before the `[machine]` stamp. A new project: `[]`. | `[]` |
-| `productScripts` | required | Paths to the project's own scripts that substrate wiring tests read (`lib/productScripts.js`). May be `{}`. | `{}` |
+| `projectScripts` | required | Paths to the project's own scripts that substrate wiring tests read (`lib/projectScripts.js`). May be `{}`. | `{}` |
 | `tracker` | optional | `"clickup"` (the default) or `"api"`, the tracker on the Mini. A new project: `"api"`. | `"api"` |
 | `trackerPrefix` | optional | The start of every ticket id (`SP-12`). Capital letters and digits. Normie might use `NO`. | `"SP"` |
 | `trackerPort` | optional | The port the tracker service listens on. **Only the project that runs the tracker sets it**; a project that uses Spirality's tracker leaves it out, so the installer installs no second tracker. | `4180` |
@@ -156,6 +156,24 @@ is the example.
 | `trackerDataDir` | optional (required with `trackerPort`) | The folder holding the tracker database and its backups. | `"~/spirality-tracker"` |
 | `trackerUrl` | optional (required with `"api"`) | The tracker's address for Dane's browser and the hand-over email. | `"http://mac-mini.local:4180"` |
 | `trackerApiUrl` | optional | The address the loops themselves call; on the Mini, its own `127.0.0.1`. Defaults to `trackerUrl`. | `"http://127.0.0.1:4180"` |
+
+**The old names still work, for now (SP-130).** Until November 2026 two of
+these were called `productSlug` and `productScripts` (and the setup's answers
+file had `productName`). A settings file that still uses them loads exactly as
+before: the reader (`OLD_NAMES` in `lib/projectConfig.mjs`) reads each old
+name as its new one, and `node scripts/project_config.mjs productSlug` still
+answers. A file that gives one field under both names with **different**
+values is refused, naming both. To move a project over, its settings file
+changes in one pull request, two lines:
+
+```diff
+-  "productSlug": "normie",
++  "projectSlug": "normie",
+-  "productScripts": {},
++  "projectScripts": {},
+```
+
+The old names go away in a later ticket, once every project has moved over.
 
 Seven of these may be overridden from the environment (Doppler) without
 changing the file: `CLICKUP_WORKSPACE_ID`, `CLICKUP_SPACE_ID`,
@@ -216,7 +234,7 @@ changing the file: `CLICKUP_WORKSPACE_ID`, `CLICKUP_SPACE_ID`,
   sign-in per loop lane.
 - **Where.** In the tracker's database on the Mini (`trackerDataDir` of the
   project that runs it, Spirality's `~/spirality-tracker`). The project's
-  slug is the config's `productSlug`, its prefix `trackerPrefix`. The
+  slug is the config's `projectSlug`, its prefix `trackerPrefix`. The
   sign-ins are the seats in `TRACKER_SEATS` (`scripts/lib/expectedSecrets.mjs`).
 - **How a second project's loops sign in** (decided on SP-95: each project
   its own). Every project's loops share the one tracker, but never an
@@ -295,7 +313,7 @@ changing the file: `CLICKUP_WORKSPACE_ID`, `CLICKUP_SPACE_ID`,
 - **Where.** `~/Library/LaunchAgents/<launchdPrefix>.<job>.plist` on the
   Mini, made by `scripts/install_loop_runner.sh` from the project's own main
   checkout. The runners are `scripts/loop_runner.sh` and
-  `scripts/run_relay.sh`. Logs are `<logDir>/<productSlug>-<job>.log`. The
+  `scripts/run_relay.sh`. Logs are `<logDir>/<projectSlug>-<job>.log`. The
   labels and the log folder come from the config, so Normie's jobs
   (`com.normie.loop-build`, say) can sit beside Spirality's.
 - **Who.** An agent session on the Mini, from the project's main checkout on

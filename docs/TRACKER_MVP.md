@@ -321,9 +321,9 @@ The settings come from the project config (`spirality.project.json`):
     beside it while the server runs; they belong to it, never delete them).
   - `backups/tracker-YYYY-MM-DD.db`: one copy per night, the newest 14 kept.
 
-Logs are in the configured log folder: `<productSlug>-tracker.log` (one line
+Logs are in the configured log folder: `<projectSlug>-tracker.log` (one line
 per request: method, address, answer, actor id; never a token) and
-`<productSlug>-tracker-backup.log` (one `backup OK` or `backup FAILED` line
+`<projectSlug>-tracker-backup.log` (one `backup OK` or `backup FAILED` line
 per night).
 
 **The hand-over email** goes out through Resend (Dane's choice,
@@ -731,7 +731,7 @@ ClickUp seat ids the config holds until then.
    Good: `queue` lists the same open tickets ClickUp's Loop Queue showed at
    step 1, with tracker ids (`SP-12`); `waiting` lists the same tickets as
    the page's "Waiting on you" at `trackerUrl`. After the next relay pass
-   (ten minutes), its log (`<logDir>/<productSlug>-relay.log`) ends with a
+   (ten minutes), its log (`<logDir>/<projectSlug>-relay.log`) ends with a
    pass that read the tracker without errors.
 
 ### The week side by side

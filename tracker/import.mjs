@@ -211,7 +211,7 @@ function prepare(store, config) {
     throw new ProjectConfigError('"trackerPrefix" is not set in the project config; the importer needs it to number tickets (a prefix "AB" gives AB-1, AB-2, ...)');
   }
   const operatorKey = operatorImportKey(config);
-  let project = store.getProject(config.productSlug);
+  let project = store.getProject(config.projectSlug);
   if (project) {
     if (project.prefix !== config.trackerPrefix) {
       throw new ProjectConfigError(`the store already holds project "${project.slug}" with prefix "${project.prefix}", but the config says "${config.trackerPrefix}"; refusing to mix the two`);
@@ -223,11 +223,11 @@ function prepare(store, config) {
   }
   const operator = store.importActor({ ...operatorKey, kind: 'human', name: config.operatorName });
   const machine = store.importActor({
-    source: SOURCE, sourceId: 'machine', kind: 'machine', name: `${config.productSlug} loop (imported from ClickUp)`,
+    source: SOURCE, sourceId: 'machine', kind: 'machine', name: `${config.projectSlug} loop (imported from ClickUp)`,
   });
   if (!project) {
     project = store.createProject({
-      slug: config.productSlug, name: config.productSlug, prefix: config.trackerPrefix, operator: operator.id,
+      slug: config.projectSlug, name: config.projectSlug, prefix: config.trackerPrefix, operator: operator.id,
     });
   }
   return { operator, machine, project };
@@ -398,7 +398,7 @@ async function main(argv) {
   });
   const scratch = dryRun ? dryRunCopy(db) : null;
   const store = openStore(scratch ? scratch.path : db);
-  console.log(`${dryRun ? 'DRY RUN — nothing is written to ' : 'Importing into '}${db}, from Loop Queue list ${config.loopQueueListId} (${config.productSlug}, prefix ${config.trackerPrefix ?? '(unset)'})`);
+  console.log(`${dryRun ? 'DRY RUN — nothing is written to ' : 'Importing into '}${db}, from Loop Queue list ${config.loopQueueListId} (${config.projectSlug}, prefix ${config.trackerPrefix ?? '(unset)'})`);
   try {
     const result = await importLoopQueue({ tracker, store, config, log: (line) => console.log(`  ${line}`) });
     console.log('');

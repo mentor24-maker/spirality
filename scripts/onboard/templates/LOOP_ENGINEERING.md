@@ -1,14 +1,14 @@
-# Loop Engineering on {{productName}}
+# Loop Engineering on {{projectName}}
 
-How {{productName}} is built: a **spec → build → review** loop, the one
+How {{projectName}} is built: a **spec → build → review** loop, the one
 [Spirality](https://github.com/{{spiralityRepo}}) defines and runs for
-every project, pointed at {{productName}}'s own queue on the tracker. Dane specs work
+every project, pointed at {{projectName}}'s own queue on the tracker. Dane specs work
 in plain language; agent sessions build it into pull requests and
 independently review them; Dane merges. Nothing reaches `main` without a
 passing CI check and his word.
 
-This file was written for {{productName}} by Spirality's setup wizard at
-Spirality commit `{{spiralityCommit}}`, from the project guide {{productName}}'s setup
+This file was written for {{projectName}} by Spirality's setup wizard at
+Spirality commit `{{spiralityCommit}}`, from the project guide {{projectName}}'s setup
 produced. The rules are Spirality's; where one was learned the hard way,
 Spirality's copy and its contract,
 [`docs/LOOP_CONTRACT.md`](https://github.com/{{spiralityRepo}}/blob/main/docs/LOOP_CONTRACT.md),
@@ -25,9 +25,9 @@ have the history. A change to how the loop works is made in Spirality first.
 
 The skills live in `.claude/skills/`; Claude Code discovers them nowhere else.
 
-## Where {{productName}}'s tickets are
+## Where {{projectName}}'s tickets are
 
-{{productName}}'s tickets are the **{{productName}}** project on **the tracker**, the ticket
+{{projectName}}'s tickets are the **{{projectName}}** project on **the tracker**, the ticket
 system that runs on the Mac Mini (http://mac-mini.local:4180, ids like
 `{{trackerPrefix}}-12`). Every ticket touch goes through **`npm run clickup -- <command>`**
 (the name stayed from ClickUp days; it talks to whichever tracker
@@ -179,7 +179,7 @@ and their helpers), copied from Spirality (`loop/README.md`).
 ```
 
 The question is never "shall I start one", it is "what is it doing": each
-lane writes its log to `{{logDir}}/{{productSlug}}-<lane>.log` on the Mini, and
+lane writes its log to `{{logDir}}/{{projectSlug}}-<lane>.log` on the Mini, and
 nobody starts a loop by hand while they are loaded. Install from an agent
 session, never from inside one of the lanes: the installer reloads the job it
 would be running in.

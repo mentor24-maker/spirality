@@ -254,11 +254,11 @@
       "edits": [
         {
           "find": "from the Spirality queue",
-          "replace": "from the {{productName}} queue"
+          "replace": "from the {{projectName}} queue"
         },
         {
           "find": "Step 2 of 3 in the Spirality development loop (spec → build → review).",
-          "replace": "Step 2 of 3 in {{productName}}'s development loop (spec → build → review), the loop Spirality defines."
+          "replace": "Step 2 of 3 in {{projectName}}'s development loop (spec → build → review), the loop Spirality defines."
         },
         {
           "find": "nothing claims from `Building` (SP-101: SP-92 sat a day that way). So every",
@@ -293,11 +293,11 @@
       "edits": [
         {
           "find": "from the Spirality queue",
-          "replace": "from the {{productName}} queue"
+          "replace": "from the {{projectName}} queue"
         },
         {
           "find": "Step 3 of 3 in the Spirality development loop (spec → build → review).",
-          "replace": "Step 3 of 3 in {{productName}}'s development loop (spec → build → review), the loop Spirality defines."
+          "replace": "Step 3 of 3 in {{projectName}}'s development loop (spec → build → review), the loop Spirality defines."
         },
         {
           "find": "Spirality is tooling, so the surface is\nusually a command: give the exact command to paste and the output it prints.\nIf there is a page, give its URL.",
@@ -332,23 +332,23 @@
       "edits": [
         {
           "find": "in the Spirality queue",
-          "replace": "in the {{productName}} queue"
+          "replace": "in the {{projectName}} queue"
         },
         {
           "find": "Step 1 of 3 in the Spirality development loop (spec → build → review).",
-          "replace": "Step 1 of 3 in {{productName}}'s development loop (spec → build → review), the loop Spirality defines."
+          "replace": "Step 1 of 3 in {{projectName}}'s development loop (spec → build → review), the loop Spirality defines."
         },
         {
           "find": "The target is the Spirality queue",
-          "replace": "The target is the {{productName}} queue"
+          "replace": "The target is the {{projectName}} queue"
         },
         {
           "find": "**Never file Spirality work in StarCaster's Loop Queue**\n  (`901418546619`) — that queue builds StarCaster.",
-          "replace": "**Never file another project's work here**, nor {{productName}}'s anywhere\n  else: each project's queue builds that project."
+          "replace": "**Never file another project's work here**, nor {{projectName}}'s anywhere\n  else: each project's queue builds that project."
         },
         {
           "find": "Spirality's lanes run on the\n   Mini (`com.spirality.loop-build` and the rest:",
-          "replace": "{{productName}}'s lanes run on the\n   Mini (`{{launchdPrefix}}.loop-build` and the rest:"
+          "replace": "{{projectName}}'s lanes run on the\n   Mini (`{{launchdPrefix}}.loop-build` and the rest:"
         },
         {
           "find": "default; ids like `SP-12`)",

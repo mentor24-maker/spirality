@@ -47,7 +47,7 @@ import { dirname, join } from 'node:path';
 import { loadProjectConfig, findConfigFile } from '../../lib/projectConfig.mjs';
 import { loadAnswers, onboardDir, expandHome } from '../../lib/onboardAnswers.mjs';
 import {
-  planCopies, compareWithProduct, templateVars, mergeNpmScripts, withClaudeSections, withIgnoreLines,
+  planCopies, compareWithProject, templateVars, mergeNpmScripts, withClaudeSections, withIgnoreLines,
   verifyWorkflow, hasVerifyJob, verifyScriptFor, render, ciVerdict, answersAsHandRun, SETUP_BRANCH,
 } from '../../lib/onboardCopy.mjs';
 
@@ -106,7 +106,7 @@ if (!existsSync(checkout)) fail('look', `the project's checkout ${checkout} does
 if (!pgit('fetch', '-q', 'origin').ok) fail('look', `git fetch in ${checkout} failed`);
 const origin = pgit('remote', 'get-url', 'origin').out;
 if (!origin.toLowerCase().includes(answers.githubRepo.toLowerCase())) fail('look', `${checkout}'s origin is not ${answers.githubRepo}`);
-const readProduct = (path) => {
+const readProject = (path) => {
   const r = spawnSync('git', ['show', `origin/main:${path}`], { cwd: checkout });
   return r.status === 0 ? r.stdout.toString('utf8') : null;
 };
@@ -114,7 +114,7 @@ const repoView = run('gh', ['repo', 'view', answers.githubRepo, '--json', 'visib
 if (!repoView.ok) fail('look', `could not read ${answers.githubRepo} from GitHub: ${last(repoView.err)}`);
 
 const manifest = JSON.parse(readFileSync(new URL('./manifest.json', import.meta.url), 'utf8'));
-const pkgText = readProduct('package.json');
+const pkgText = readProject('package.json');
 if (pkgText == null) fail('look', `${answers.githubRepo} has no package.json on main`);
 const varsFor = (ownVerify) => templateVars(answers, homeConfig, { spiralityCommit: commit.slice(0, 7), visibility: repoView.out, ownVerify });
 // Its own verify is kept; with none, it gets the check plus the loop's tests (SP-121).
@@ -123,7 +123,7 @@ try { verify = verifyScriptFor(pkgText, manifest.verifyIfAbsent, varsFor(null));
 const vars = varsFor(verify.own);
 let planned;
 try {
-  planned = compareWithProduct(planCopies(manifest, { readSpirality: textOf, vars }), readProduct);
+  planned = compareWithProject(planCopies(manifest, { readSpirality: textOf, vars }), readProject);
 } catch (e) { fail('look', e.message); }
 
 // The files made from the project's own.
@@ -133,17 +133,17 @@ if (npm.conflicts.length) {
   fail('look', `package.json already has ${npm.conflicts.map((c) => `"${c.name}" as "${c.theirs}" (the loop needs "${c.ours}")`).join('; ')}`);
 }
 const sectionsTemplate = textOf('scripts/onboard/templates/CLAUDE-sections.md');
-const claude = withClaudeSections(readProduct('CLAUDE.md'), render(sectionsTemplate, vars, 'CLAUDE-sections.md'));
+const claude = withClaudeSections(readProject('CLAUDE.md'), render(sectionsTemplate, vars, 'CLAUDE-sections.md'));
 const ignoreEntry = manifest.made.find((m) => m.to === '.gitignore');
-const ignore = withIgnoreLines(readProduct('.gitignore'), ignoreEntry?.ignoreLines || []);
+const ignore = withIgnoreLines(readProject('.gitignore'), ignoreEntry?.ignoreLines || []);
 const workflows = pgit('ls-tree', '--name-only', 'origin/main', '.github/workflows/').out.split('\n').filter(Boolean);
-const haveVerify = hasVerifyJob(workflows.map((w) => readProduct(w) || ''));
+const haveVerify = hasVerifyJob(workflows.map((w) => readProject(w) || ''));
 let settingsText = null;
 if (arg('config')) {
   try {
     const c = loadProjectConfig({ file: arg('config'), env: {} });
     if (c.githubRepo.toLowerCase() !== answers.githubRepo.toLowerCase()) throw new Error(`it names ${c.githubRepo}, the answers ${answers.githubRepo}`);
-    if (c.productSlug !== answers.productSlug) throw new Error(`its productSlug is ${c.productSlug}, the answers' ${answers.productSlug}`);
+    if (c.projectSlug !== answers.projectSlug) throw new Error(`its projectSlug is ${c.projectSlug}, the answers' ${answers.projectSlug}`);
     settingsText = readFileSync(arg('config'), 'utf8');
   } catch (e) { fail('look', `the settings file ${arg('config')}: ${e.message}`); }
 }
@@ -158,10 +158,10 @@ const extra = [
     content: verifyWorkflow(answers, { verifyAdded: Boolean(verify.add) }),
   }]),
 ];
-const all = [...planned, ...compareWithProduct(extra, readProduct)];
+const all = [...planned, ...compareWithProject(extra, readProject)];
 
 const width = Math.max(...all.map((f) => f.to.length));
-console.log(`What ${answers.productName}'s setup pull request holds, from Spirality ${commit.slice(0, 7)}:\n`);
+console.log(`What ${answers.projectName}'s setup pull request holds, from Spirality ${commit.slice(0, 7)}:\n`);
 for (const f of all) console.log(`  ${f.to.padEnd(width)}  ${f.kind.padEnd(7)}  ${f.status}`);
 console.log(`\n  ${all.filter((f) => f.status === 'identical').length} identical, ${all.filter((f) => f.status === 'new').length} new, ${all.filter((f) => f.status === 'replaces').length} replace what the project has`);
 if (haveVerify) console.log('  The project already has a CI job named verify; no workflow is added.');
@@ -183,7 +183,7 @@ if (theirs.length && !flag('allow-replace')) {
 }
 
 // ── 2. write ───────────────────────────────────────────────────────────────
-const worktree = join(onboardDir(homeConfig), `${answers.productSlug}-setup`);
+const worktree = join(onboardDir(homeConfig), `${answers.projectSlug}-setup`);
 if (!existsSync(worktree)) {
   mkdirSync(dirname(worktree), { recursive: true });
   const onOrigin = pgit('rev-parse', '--verify', '-q', `refs/remotes/origin/${BRANCH}`).ok;
@@ -218,7 +218,7 @@ say('check', `${all.filter((f) => f.kind === 'copy').length} files identical to 
 // ── 4. pr ──────────────────────────────────────────────────────────────────
 wgit('add', '-A');
 if (wgit('status', '--porcelain').out) {
-  const msg = `${answers.productName} gets the loop from Spirality ${commit.slice(0, 7)}: settings, verify check, ticket door, skills and lanes\n\nWritten by Spirality's setup wizard (scripts/onboard/copy.mjs). Every\n"copy" file is byte for byte Spirality ${commit}.`;
+  const msg = `${answers.projectName} gets the loop from Spirality ${commit.slice(0, 7)}: settings, verify check, ticket door, skills and lanes\n\nWritten by Spirality's setup wizard (scripts/onboard/copy.mjs). Every\n"copy" file is byte for byte Spirality ${commit}.`;
   const c = wgit('commit', '-q', '-m', msg);
   if (!c.ok) fail('pr', `git commit: ${last(c.err)}`);
   say('pr', `committed ${wgit('rev-parse', '--short', 'HEAD').out}`);
@@ -237,10 +237,10 @@ const push = wgit('push', '-q', '-u', 'origin', BRANCH);
 if (!push.ok) fail('pr', `git push: ${last(push.err)}`);
 if (wgit('rev-parse', 'HEAD').out !== wgit('rev-parse', `origin/${BRANCH}`).out) fail('pr', `origin's ${BRANCH} does not read back as the commit just pushed`);
 
-const title = `${answers.productName} cannot run Spirality's loop yet: add its settings, verify check, ticket door, loop skills and lanes`;
+const title = `${answers.projectName} cannot run Spirality's loop yet: add its settings, verify check, ticket door, loop skills and lanes`;
 const rows = all.map((f) => `| \`${f.to}\` | ${f.kind === 'copy' ? `copy of \`${f.from}\`, cmp identical` : f.kind === 'adapted' ? `\`${f.from}\` with the manifest's edits: ${f.why}` : f.from} | ${f.status} |`);
 const body = [
-  `Everything ${answers.productName} needs to run Spirality's loop, in one pull request, written by Spirality's setup wizard.`,
+  `Everything ${answers.projectName} needs to run Spirality's loop, in one pull request, written by Spirality's setup wizard.`,
   '',
   `**Spirality commit:** [\`${commit.slice(0, 7)}\`](https://github.com/${homeConfig.githubRepo}/commit/${commit}). Every "copy" file below was compared with \`cmp\` against that commit and is byte for byte identical. "Adapted" files are that commit's file with the named edits from \`scripts/onboard/manifest.json\`, each of which had to match exactly once.`,
   '',
@@ -253,7 +253,7 @@ const body = [
   '🤖 Generated with [Claude Code](https://claude.com/claude-code)',
 ].join('\n');
 let prUrl = run('gh', ['pr', 'list', '--repo', answers.githubRepo, '--head', BRANCH, '--state', 'open', '--json', 'url', '-q', '.[0].url']).out;
-const bodyFile = join(dirname(worktree), `${answers.productSlug}-setup-pr.md`);
+const bodyFile = join(dirname(worktree), `${answers.projectSlug}-setup-pr.md`);
 writeFileSync(bodyFile, body);
 if (prUrl) {
   // A rerun: keep the PR, refresh its file list. A Ticket: line the lanes step added is kept.
@@ -278,7 +278,7 @@ const doctor = door('doctor');
 if (!doctor.ok) fail('readback', `npm run doctor in ${worktree}: ${last(doctor.out || doctor.err)}`);
 say('readback', 'npm run doctor passes');
 const who = door('clickup', '--', 'whoami');
-if (!who.ok || !answersAsHandRun(who.out, answers.productSlug)) fail('readback', `npm run clickup -- whoami did not answer as ${answers.productSlug}'s hand-run seat: ${last(who.out || who.err)}`);
+if (!who.ok || !answersAsHandRun(who.out, answers.projectSlug)) fail('readback', `npm run clickup -- whoami did not answer as ${answers.projectSlug}'s hand-run seat: ${last(who.out || who.err)}`);
 say('readback', `whoami: ${last(who.out, 1)}`);
 const queue = door('clickup', '--', 'queue');
 if (!queue.ok) fail('readback', `npm run clickup -- queue: ${last(queue.err || queue.out)}`);

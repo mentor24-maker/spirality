@@ -17,7 +17,7 @@ const to = new Set([...manifest.files.map((f) => f.to), ...manifest.made.map((m)
 
 // Normie's answers, as the look's own tests and the Mini's answers file have them.
 const NORMIE = {
-  productName: 'Normie', githubRepo: 'mentor24-maker/normie', productSlug: 'normie', trackerPrefix: 'NO',
+  projectName: 'Normie', githubRepo: 'mentor24-maker/normie', projectSlug: 'normie', trackerPrefix: 'NO',
   dopplerProject: 'normie', dopplerConfig: 'dev', launchdPrefix: 'com.normie', checkoutDir: '/Users/x/WebApps/normie',
   checkCommand: 'npm run verify:full', nodeVersion: '22', mergePhrases: ['merge', 'merge it', 'ship it', 'approve'],
   autoMergeLanes: [], extraGovernancePaths: ['.cursorrules'], hosting: 'Vercel', description: 'A website.',
@@ -107,7 +107,7 @@ test('the review and build skills tell a lane\'s pass it is the lane (hold-up 14
 
 test('rendered for another project, no adapted or made file keeps Spirality\'s own names', () => {
   const pressplay = {
-    ...NORMIE, productName: 'PressPlay', productSlug: 'pressplay', trackerPrefix: 'PP', dopplerProject: 'pressplay',
+    ...NORMIE, projectName: 'PressPlay', projectSlug: 'pressplay', trackerPrefix: 'PP', dopplerProject: 'pressplay',
     launchdPrefix: 'com.pressplay', checkoutDir: '~/WebApps/pressplay', checkCommand: 'npm run build',
     mergePhrases: ['merge', 'ship it'], hosting: null,
   };
@@ -160,7 +160,7 @@ function skillLeaks(text, { written, spiralityRepo, readSpirality }) {
 }
 
 test('rendered for another product, no copied skill cites Spirality\'s ids unmarked or a doc the product lacks', () => {
-  const v = templateVars({ ...NORMIE, productName: 'PressPlay', trackerPrefix: 'PP', launchdPrefix: 'com.pressplay' }, HOME,
+  const v = templateVars({ ...NORMIE, projectName: 'PressPlay', trackerPrefix: 'PP', launchdPrefix: 'com.pressplay' }, HOME,
     { spiralityCommit: 'abc1234', visibility: 'PRIVATE' });
   const skills = planCopies(manifest, { readSpirality: read, vars: v }).filter((f) => f.to.startsWith('.claude/skills/'));
   assert.equal(skills.length, 4, 'the four loop skills are copied');

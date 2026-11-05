@@ -17,7 +17,7 @@ const CONFIG = Object.freeze({
   operatorUserId: '700',
   machineUserId: '800',
   operatorName: 'Pat',
-  productSlug: 'widget',
+  projectSlug: 'widget',
   trackerPrefix: 'WG',
 });
 

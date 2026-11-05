@@ -6,7 +6,7 @@ import { seatsForConfig } from '../../tracker/signins.mjs';
 import {
   BLOCKED, READY, UNKNOWN, WILL_DO, checkEnv, exitCodeFor, formatRow, ghApiFailure, lastLines, look,
   readCheck, readCheckout, readClaude, readDoppler, readDopplerMe, readNode, readProtection,
-  productMismatch, readRepo, withoutSignIn, nodeNeedOf, samePathOnDisk, summaryLine, trackerRows,
+  projectMismatch, readRepo, withoutSignIn, nodeNeedOf, samePathOnDisk, summaryLine, trackerRows,
 } from './look.mjs';
 import { normalRepo } from '../lib/repoCheck.mjs';
 import { existsSync, mkdtempSync, mkdirSync, rmSync, symlinkSync } from 'node:fs';
@@ -18,18 +18,18 @@ const homeConfig = validateProjectConfig({
   workspaceId: '1', spaceId: '1', loopQueueListId: '1', operatorUserId: '1', machineUserId: '2',
   githubRepo: 'owner/home', dopplerProject: 'home', dopplerConfig: 'dev', launchdPrefix: 'com.home',
   logDir: '~/loop-logs', mergePhrases: ['merge'], governancePaths: ['CLAUDE.md'], autoMergeLanes: [],
-  operatorName: 'Dane', productSlug: 'home', legacyMachinePrefixes: [], productScripts: {},
+  operatorName: 'Dane', projectSlug: 'home', legacyMachinePrefixes: [], projectScripts: {},
   trackerPrefix: 'SP', trackerPort: 4180, trackerDataDir: '~/t', tracker: 'api',
   trackerUrl: 'http://mini.local:4180', trackerApiUrl: 'http://127.0.0.1:4180',
 });
 const answers = resolveAnswers({
-  productName: 'Normie', githubRepo: 'mentor24-maker/normie', trackerPrefix: 'NO',
+  projectName: 'Normie', githubRepo: 'mentor24-maker/normie', trackerPrefix: 'NO',
   checkoutDir: '/Users/dane/WebApps/normie', checkCommand: 'npm run verify:full', description: 'Polls.',
 }, { homeConfig, homeRoot: '/Users/dane/WebApps/home' });
 
 const ok = (stdout = '') => ({ status: 0, stdout, stderr: '', error: null, signal: null });
 const failed = (status, stderr = '', stdout = '') => ({ status, stdout, stderr, error: null, signal: null });
-const seatNames = seatsForConfig({ trackerPort: null, productSlug: 'normie', operatorName: 'Dane' }).seats.map((s) => s.name);
+const seatNames = seatsForConfig({ trackerPort: null, projectSlug: 'normie', operatorName: 'Dane' }).seats.map((s) => s.name);
 
 test('every row names what it checked, and its verdict reads as the ticket says', () => {
   assert.equal(formatRow({ item: 'GitHub: repository x/y', verdict: READY, why: 'exists', detail: [] }), 'GitHub: repository x/y: ready (exists)');
@@ -67,9 +67,9 @@ test('a sign-in part comes out of an address, whatever the host', () => {
 });
 
 test('--product must name the project the answers file is for', () => {
-  assert.equal(productMismatch(null, { productSlug: 'normie' }, '/a.json'), null);
-  assert.equal(productMismatch('normie', { productSlug: 'normie' }, '/a.json'), null);
-  assert.match(productMismatch('pressplay', { productSlug: 'normie' }, '/a.json'), /\/a\.json is for the project "normie", not "pressplay"/);
+  assert.equal(projectMismatch(null, { projectSlug: 'normie' }, '/a.json'), null);
+  assert.equal(projectMismatch('normie', { projectSlug: 'normie' }, '/a.json'), null);
+  assert.match(projectMismatch('pressplay', { projectSlug: 'normie' }, '/a.json'), /\/a\.json is for the project "normie", not "pressplay"/);
 });
 
 test('the same folder through a symlink is the same folder; a folder beside it is not', () => {

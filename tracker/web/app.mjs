@@ -663,7 +663,7 @@ async function drawSetupNew(product) {
     </form>`;
   const form = main.querySelector('form.setup');
   const note = form.querySelector('.form-note');
-  const nameBox = form.querySelector('[name="productName"]');
+  const nameBox = form.querySelector('[name="projectName"]');
   const slugOf = () => product ?? setupSlug(nameBox?.value);
   const showSlug = () => { form.querySelector('.slug').textContent = slugOf() || '(none yet)'; };
   showSlug();

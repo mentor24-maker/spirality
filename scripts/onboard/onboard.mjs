@@ -84,7 +84,7 @@ import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createInterface } from 'node:readline/promises';
-import { CONFIG_FILE, findConfigFile, loadProjectConfig, ProjectConfigError } from '../../lib/projectConfig.mjs';
+import { CONFIG_FILE, findConfigFile, loadProjectConfig, ProjectConfigError, withProjectNames } from '../../lib/projectConfig.mjs';
 import { AnswersError, answersFile, expandHome, loadAnswers, onboardDir, slugFromName } from '../../lib/onboardAnswers.mjs';
 import { machineUserPending } from '../../lib/onboardSettings.mjs';
 import { ciVerdict, SETUP_BRANCH } from '../../lib/onboardCopy.mjs';
@@ -106,7 +106,7 @@ export const STEPS = Object.freeze(['answers', 'look', 'clone', 'settings', 'sig
  * still counts as answered, so it is not asked again.
  */
 export const DANE_FIELDS = Object.freeze([
-  { key: 'productName', question: 'Project name, as the tracker shows it', required: true },
+  { key: 'projectName', question: 'Project name, as the tracker shows it', required: true },
   { key: 'githubRepo', question: 'GitHub repository, as owner/name', required: true },
   { key: 'trackerPrefix', question: 'Ticket prefix (the start of every ticket id)', fallback: ({ slug }) => slug.replace(/[^a-z]/g, '').slice(0, 2).toUpperCase() || null },
   { key: 'mergePhrases', question: 'Merge phrases, the words that mean "merge this" (comma between)', list: true, fallback: ({ homeConfig }) => homeConfig.mergePhrases.join(', ') },
@@ -280,7 +280,7 @@ export function signinCommands({ answers, settingsFile, trackerDb, projectExists
     const env = answers.dopplerConfig.split('_')[0];
     cmds.push({ cmd: 'doppler', args: ['configs', 'create', answers.dopplerConfig, '--project', answers.dopplerProject, '--environment', env] });
   }
-  cmds.push({ cmd: 'npm', args: ['run', 'tracker:signins', '--', 'create', '--name', answers.productName, '--prefix', answers.trackerPrefix, '--config', settingsFile], env: { TRACKER_DB: trackerDb } });
+  cmds.push({ cmd: 'npm', args: ['run', 'tracker:signins', '--', 'create', '--name', answers.projectName, '--prefix', answers.trackerPrefix, '--config', settingsFile], env: { TRACKER_DB: trackerDb } });
   return cmds;
 }
 
@@ -403,8 +403,13 @@ export async function onboard(opts, deps) {
     if (text != null) {
       try { raw = JSON.parse(text); } catch (err) { fail(step, `${aFile} is not valid JSON (${err.message}); fix or remove it`); }
       if (!raw || typeof raw !== 'object' || Array.isArray(raw)) fail(step, `${aFile} does not hold one JSON object`);
+      // An answers file from before SP-130 uses the old "product" names.
+      try { raw = withProjectNames(raw, { file: aFile }); } catch (err) {
+        if (!(err instanceof ProjectConfigError)) throw err;
+        fail(step, err.message);
+      }
     }
-    if (Object.hasOwn(raw, 'productSlug') && raw.productSlug !== slug) fail(step, `${aFile} is for "${raw.productSlug}", not ${slug}`);
+    if (Object.hasOwn(raw, 'projectSlug') && raw.projectSlug !== slug) fail(step, `${aFile} is for "${raw.projectSlug}", not ${slug}`);
     const missing = unanswered(raw);
     if (!missing.length) {
       skip(step, `every answer that is yours is in ${aFile}`);
@@ -428,7 +433,7 @@ export async function onboard(opts, deps) {
         }
         typed[field.key] = value;
       }
-      const next = { ...raw, productSlug: slug, ...typed };
+      const next = { ...raw, projectSlug: slug, ...typed };
       const written = `${JSON.stringify(next, null, 2)}\n`;
       try {
         deps.mkdir?.(dirname(aFile));
@@ -471,7 +476,12 @@ export async function onboard(opts, deps) {
       if (shown.code !== 0) return { on: false, why: `${answers.githubRepo}'s main has no ${CONFIG_FILE} yet` };
       let s;
       try { s = JSON.parse(shown.out); } catch { return { on: false, why: `${answers.githubRepo}'s main has a ${CONFIG_FILE} that is not JSON` }; }
-      if (s.productSlug !== slug || !sameRepo(s.githubRepo, answers.githubRepo)) return { on: false, why: `the ${CONFIG_FILE} on ${answers.githubRepo}'s main is not ${slug}'s` };
+      // A settings file on main may still use the old names (SP-130).
+      try { s = withProjectNames(s, { file: `${answers.githubRepo}'s main ${CONFIG_FILE}` }); } catch (err) {
+        if (!(err instanceof ProjectConfigError)) throw err;
+        return { on: false, why: err.message };
+      }
+      if (s.projectSlug !== slug || !sameRepo(s.githubRepo, answers.githubRepo)) return { on: false, why: `the ${CONFIG_FILE} on ${answers.githubRepo}'s main is not ${slug}'s` };
       if (machineUserPending(s)) return { on: false, why: `the ${CONFIG_FILE} on ${answers.githubRepo}'s main has no machine id yet` };
       return { on: true, why: `${answers.githubRepo}'s main has ${slug}'s settings file` };
     };
@@ -528,14 +538,14 @@ export async function onboard(opts, deps) {
     if (setup.on) skip(step, `the setup is merged: ${setup.why}`);
     else {
       const have = deps.readText(settingsFile) != null ? readSettings() : null;
-      if (have && have.productSlug === slug && sameRepo(have.githubRepo, answers.githubRepo)) {
+      if (have && have.projectSlug === slug && sameRepo(have.githubRepo, answers.githubRepo)) {
         config = have;
         skip(step, `${settingsFile} is ${slug}'s and reads`);
       } else {
         const r = npm('onboard:settings', ['write', '--answers', aFile, '--out', scratch], { show: true });
         if (r.code !== 0) fail(step, `onboard:settings write exit ${r.code} (its FAILED line is above)`);
         config = readSettings();
-        if (!config || config.productSlug !== slug) fail(step, `${settingsFile} does not read back as ${slug}'s settings file`);
+        if (!config || config.projectSlug !== slug) fail(step, `${settingsFile} does not read back as ${slug}'s settings file`);
         done(step, `${settingsFile} written and read back`);
       }
     }
@@ -567,7 +577,7 @@ export async function onboard(opts, deps) {
         const block = { answers, settingsFile, trackerDb, projectExists, configExists };
         const lines = pasteBlock({ spiralityDir, ...block });
         deps.print('');
-        deps.print(`Your move, Dane (real secret values): these commands ${projectExists ? '' : `make the Doppler project "${answers.dopplerProject}", then `}make ${answers.productName}'s tracker project and its sign-ins, and write their keys into Doppler. No key is shown.`);
+        deps.print(`Your move, Dane (real secret values): these commands ${projectExists ? '' : `make the Doppler project "${answers.dopplerProject}", then `}make ${answers.projectName}'s tracker project and its sign-ins, and write their keys into Doppler. No key is shown.`);
         deps.print('');
         for (const line of lines) deps.print(`  ${line}`);
         deps.print('');

@@ -218,7 +218,7 @@ export async function runSwitchCheck({ config, env, db, clickup, fetchImpl = fet
     // 3. Queues match, before the dry run adds anything to the copy.
     try {
       const clickupTasks = await readAllTasks(clickup, config.loopQueueListId);
-      const trackerTickets = store.getProject(config.productSlug) ? store.listTickets(config.productSlug) : [];
+      const trackerTickets = store.getProject(config.projectSlug) ? store.listTickets(config.projectSlug) : [];
       const importedFrom = new Map(store.listImportedIds(SOURCE).filter((r) => r.kind === 'ticket').map((r) => [r.newId, r.sourceId]));
       const r = compareQueues({ clickupTasks, trackerTickets, importedFrom });
       section('queues match', r.ok, r.lines);
@@ -275,7 +275,7 @@ async function main() {
     timeoutMs: process.env.CLICKUP_HTTP_TIMEOUT_MS,
   });
   const db = databasePath(config);
-  console.log(`Switch check for ${config.productSlug}: ClickUp list ${config.loopQueueListId}, tracker database ${db ?? '(none)'} (read-only: nothing is written anywhere)\n`);
+  console.log(`Switch check for ${config.projectSlug}: ClickUp list ${config.loopQueueListId}, tracker database ${db ?? '(none)'} (read-only: nothing is written anywhere)\n`);
   try {
     const result = await runSwitchCheck({ config, env: process.env, db, clickup });
     console.log(formatSwitchCheck(result));
