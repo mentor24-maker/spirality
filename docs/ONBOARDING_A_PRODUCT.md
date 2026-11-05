@@ -37,7 +37,8 @@ npm run onboard -- --product <slug>
 
 It asks Dane only the answers that are his decisions, once (kept in
 `~/loop-logs/onboard/<slug>.answers.json`), then runs every item below in
-order: the read-only look, the settings file, the sign-ins (one paste block
+order: the read-only look, the clone (the product's `main` into its
+checkout folder, only when that folder does not exist yet), the settings file, the sign-ins (one paste block
 for Dane: **real secret values**), the copy into the product's repository as
 one pull request, the lanes and the setup ticket, the merge (Dane's merge
 phrase on that ticket: **a decision**) and protecting `main`. Each step

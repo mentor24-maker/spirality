@@ -16,6 +16,12 @@
  *             (lib/onboardAnswers.mjs) and can be changed in the file.
  *   look      SP-108's read-only look (`onboard:look`). Anything BLOCKED stops
  *             here, before anything is written.
+ *   clone     SP-119: when the checkout folder does not exist, `git clone` the
+ *             product's `main` into it, from the same kind of address (https
+ *             or ssh) the tracker home's own origin uses, and read back that
+ *             its origin is githubRepo and it is a clean `main`. A folder that
+ *             is there is never touched (the look blocks one that is not a
+ *             clean checkout of the repository).
  *   settings  SP-109 writes the settings file into a scratch folder beside the
  *             answers file (`onboard:settings write`).
  *   signins   STOP FOR DANE (real secret values): one block to paste, which
@@ -53,7 +59,7 @@
  * Exit 0 set up, 1 FAILED, 2 usage, 3 stopped for Dane.
  */
 import { spawnSync } from 'node:child_process';
-import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -63,13 +69,14 @@ import { AnswersError, answersFile, expandHome, loadAnswers, onboardDir, slugFro
 import { machineUserPending } from '../../lib/onboardSettings.mjs';
 import { ciVerdict, SETUP_BRANCH } from '../../lib/onboardCopy.mjs';
 import { LANES, parseStatus } from '../../lib/onboardLanes.mjs';
+import { normalRepo } from '../lib/repoCheck.mjs';
 
 const require = createRequire(import.meta.url);
 const { findTicketId, ticketLink } = require('../../lib/clickupTicketLink.js');
 
 export const DEFAULT_MERGE_WAIT_MINUTES = 60;
 
-export const STEPS = Object.freeze(['answers', 'look', 'settings', 'signins', 'copy', 'lanes', 'merge', 'protect']);
+export const STEPS = Object.freeze(['answers', 'look', 'clone', 'settings', 'signins', 'copy', 'lanes', 'merge', 'protect']);
 
 /**
  * The answers that are Dane's decisions (SETUP_REVIEW.md part 3, "What a
@@ -194,6 +201,19 @@ export function mainVerifyVerdict(answer) {
   return { verdict: 'fail', why: `verify ended ${runs.map((r) => r.conclusion).join(', ')}` };
 }
 
+/**
+ * The address to clone `repo` (owner/name) from: ssh when the tracker home's
+ * own origin is an ssh address, https otherwise (and when it could not be
+ * read). Only the kind is taken from the home's origin, never any part of it,
+ * so a sign-in token in an https origin cannot reach the clone or a log.
+ */
+export function cloneAddress(homeOrigin, repo) {
+  const name = normalRepo(repo);
+  const origin = String(homeOrigin ?? '').trim();
+  if (/^git@github\.com:/i.test(origin) || /^ssh:\/\//i.test(origin)) return `git@github.com:${name}.git`;
+  return `https://github.com/${name}.git`;
+}
+
 /** A word in single quotes for the shell, so a product name with a space or a quote pastes safely. */
 export function shellQuote(text) {
   const s = String(text);
@@ -246,7 +266,7 @@ const last = (text, n = 4) => String(text || '').split('\n').map((l) => l.trim()
  *                                         Dane watch a step script's own lines
  *   ask(question) -> string, or null when there is no Terminal to ask in
  *   pause(text) -> true once Dane says it is done, or null with no Terminal
- *   print(line), readText(path) -> text|null, writeText(path, text),
+ *   print(line), exists(path), readText(path) -> text|null, writeText(path, text),
  *   appendText(path, text), mkdir(dir), sleep(ms), now() -> ms
  * Returns the exit code.
  */
@@ -365,6 +385,28 @@ export async function onboard(opts, deps) {
       if (r.code === 3) fail(step, 'something is BLOCKED (the look\'s lines above say what); nothing was written');
       if (r.code !== 0) fail(step, `the look could not tell everything (exit ${r.code}; its lines above say what)`);
       done(step, 'nothing is BLOCKED');
+    }
+
+    // ── clone ────────────────────────────────────────────────────────────
+    step = 'clone';
+    if (deps.exists(checkout)) skip(step, `${checkout} is there`);
+    else {
+      const home = run('git', ['remote', 'get-url', 'origin']);
+      const address = cloneAddress(home.code === 0 ? home.out : null, answers.githubRepo);
+      const kind = address.startsWith('git@') ? 'ssh' : 'https';
+      say(step, `${checkout} does not exist; cloning ${answers.githubRepo}'s main into it over ${kind}${home.code === 0 ? ' (as the tracker home\'s origin is)' : ' (the tracker home\'s origin could not be read)'}`);
+      try { deps.mkdir?.(dirname(checkout)); } catch (err) { fail(step, `could not make ${dirname(checkout)}: ${err.code || err.message}`); }
+      const c = run('git', ['clone', '--quiet', '--branch', 'main', address, checkout], { cwd: dirname(checkout) });
+      if (c.code !== 0) fail(step, `git clone of ${answers.githubRepo} into ${checkout} failed: ${last(c.err || c.out) || `exit ${c.code}`}`);
+      const inCheckout = (...args) => run('git', args, { cwd: checkout });
+      const origin = inCheckout('remote', 'get-url', 'origin');
+      if (origin.code !== 0 || normalRepo(origin.out) !== normalRepo(answers.githubRepo)) fail(step, `the clone at ${checkout} does not read back with origin ${answers.githubRepo}`);
+      const head = inCheckout('rev-parse', '--abbrev-ref', 'HEAD');
+      if (head.code !== 0 || head.out.trim() !== 'main') fail(step, `the clone at ${checkout} reads back on ${head.code === 0 ? head.out.trim() : 'no branch'}, not main`);
+      const status = inCheckout('status', '--porcelain');
+      if (status.code !== 0 || status.out.trim()) fail(step, `the clone at ${checkout} does not read back as a clean main`);
+      done(step, `${answers.githubRepo} cloned into ${checkout}, read back: origin ${answers.githubRepo}, a clean main`);
+      setup = onMain();
     }
 
     // ── settings ─────────────────────────────────────────────────────────
@@ -645,6 +687,7 @@ async function main(argv) {
       return true;
     },
     print: (line) => console.log(line),
+    exists: (p) => existsSync(p),
     readText: (p) => { try { return readFileSync(p, 'utf8'); } catch (err) { if (err.code === 'ENOENT' || err.code === 'ENOTDIR' || err.code === 'EISDIR') return null; throw err; } },
     writeText: (p, t) => writeFileSync(p, t),
     appendText: (p, t) => { mkdirSync(dirname(p), { recursive: true }); appendFileSync(p, t); },
