@@ -91,7 +91,21 @@ take_sync_lock() {
 PASS_OUT="$(mktemp "${TMPDIR:-/tmp}/$SLUG-pass.XXXXXX")"
 trap 'rm -rf "$LOCK" "$PASS_OUT" 2>/dev/null; [ "$(cat "$SYNC_LOCK/pid" 2>/dev/null)" = "$$" ] && rm -rf "$SYNC_LOCK"' EXIT
 
+# shellcheck source=lib/back_to_main.sh
+source "$REPO/scripts/lib/back_to_main.sh"
+
 while true; do
+  # 0. A checkout left on a branch that has merged and gone from origin (a new
+  #    product's lanes run from its setup branch until it merges) goes
+  #    back to main, under the sync lock, so the pull below can run.
+  if [ "$(git rev-parse --abbrev-ref HEAD 2>/dev/null)" != "main" ] && [ -z "$(git status --porcelain)" ]; then
+    if take_sync_lock; then
+      MOVED="$(back_to_main_if_merged)"
+      [ -n "$MOVED" ] && echo "[loop-runner] $(date "+%H:%M:%S") $MOVED" >> "$LOG"
+      rm -rf "$SYNC_LOCK"
+    fi
+  fi
+
   # 1. A timid pull: only main, only a clean tree, only fast-forward. A refusal
   #    is logged but never blocks the pass. Every lane shares this checkout, so
   #    the pull and `npm ci` happen under one shared lock: two at once collide
