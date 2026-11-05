@@ -194,6 +194,10 @@
       "to": "scripts/lib/launchd_reload.sh"
     },
     {
+      "from": "scripts/lib/claudeTrust.mjs",
+      "to": "scripts/lib/claudeTrust.mjs"
+    },
+    {
       "from": "scripts/loop_runner.sh",
       "to": "scripts/loop_runner.sh"
     },
@@ -235,7 +239,7 @@
     {
       "from": ".claude/skills/loop-build/SKILL.md",
       "to": ".claude/skills/loop-build/SKILL.md",
-      "why": "the product's name and check command; and the lane's own pass learns it is the lane (Normie NO-7, SETUP_REVIEW.md hold-up 14)",
+      "why": "the product's name and check command (Spirality's own skill already tells a lane's pass it is the lane, SP-117)",
       "edits": [
         {
           "find": "from the Spirality queue",
@@ -246,10 +250,6 @@
           "replace": "Step 2 of 3 in {{productName}}'s development loop (spec → build → review), the loop Spirality defines."
         },
         {
-          "find": "A hand-run\nsession holds no lock: **do not start this loop by hand while the runner's\nlane is running.**",
-          "replace": "A hand-run\nsession holds no lock: **do not start this loop by hand while the runner's\nlane is running.**\n\nFirst tell which one you are. The lane's runner, `scripts/loop_runner.sh`,\nexports `LOOP_RUNNER_PID` to every pass it starts:\n\n```bash\necho \"${LOOP_RUNNER_PID:-}\"\n```\n\n- **Set** (a number): you ARE the build lane's own pass, and the runner's\n  lock (`{{logDir}}/{{productSlug}}-loop-build.lock`) makes you the only one.\n  Carry on. A loaded lane is you, not a second builder.\n- **Empty**: you were started by hand. Run\n  `scripts/install_loop_runner.sh --status`; if `loop-build` shows\n  `loaded:   yes`, stop and report that the lane is running. Otherwise carry on."
-        },
-        {
           "find": "```bash\n   npm run verify\n   ```",
           "replace": "```bash\n   {{checkCommand}}\n   ```"
         }
@@ -258,7 +258,7 @@
     {
       "from": ".claude/skills/loop-review/SKILL.md",
       "to": ".claude/skills/loop-review/SKILL.md",
-      "why": "the product's name, check command, kind of surface, relay and merge phrases; and the lane's own pass learns it is the lane (Normie NO-7, SETUP_REVIEW.md hold-up 14)",
+      "why": "the product's name, check command, kind of surface, relay and merge phrases, and its review lane's label",
       "edits": [
         {
           "find": "from the Spirality queue",
@@ -271,10 +271,6 @@
         {
           "find": "Step 3 of 3 in the Spirality development loop (spec → build → review).",
           "replace": "Step 3 of 3 in {{productName}}'s development loop (spec → build → review), the loop Spirality defines."
-        },
-        {
-          "find": "Spirality has no scheduled runner yet, so: **do not start this loop if\nanother session is already running it.**",
-          "replace": "On the Mini the review lane (`{{launchdPrefix}}.loop-review`) runs this skill every\n30 minutes, so: **do not start this loop by hand while that lane is loaded**.\n\nFirst tell which one you are. The lane's runner, `scripts/loop_runner.sh`,\nexports `LOOP_RUNNER_PID` to every pass it starts:\n\n```bash\necho \"${LOOP_RUNNER_PID:-}\"\n```\n\n- **Set** (a number): you ARE the review lane's own pass, and the runner's\n  lock (`{{logDir}}/{{productSlug}}-loop-review.lock`) makes you the only one.\n  Carry on. A loaded lane is you, not a second reviewer.\n- **Empty**: you were started by hand. Run\n  `scripts/install_loop_runner.sh --status`; if `loop-review` shows\n  `loaded:   yes`, stop and report that the lane is running. Otherwise carry on."
         },
         {
           "find": "Spirality is tooling, so the surface is\nusually a command: give the exact command to paste and the output it prints.\nIf there is a page, give its URL.",
@@ -291,6 +287,10 @@
         {
           "find": "(`com.spirality.relay`, every 10 minutes)",
           "replace": "(`{{launchdPrefix}}.relay`, every 10 minutes)"
+        },
+        {
+          "find": "On the Mini the review lane (`com.spirality.loop-review`) runs this skill",
+          "replace": "On the Mini the review lane (`{{launchdPrefix}}.loop-review`) runs this skill"
         }
       ]
     },
@@ -316,8 +316,8 @@
           "replace": "**Never file another product's work here**, nor {{productName}}'s anywhere\n  else: each product's queue builds that product."
         },
         {
-          "find": "Today the Spirality loops have no\n   scheduled runner; a loop runs only when a session starts one by hand\n   (`/loop 30m loop-build`), and only one build loop and one review loop may\n   run at a time, because claiming a ticket is check-then-act.",
-          "replace": "{{productName}}'s lanes run on the\n   Mini (`{{launchdPrefix}}.loop-build` and the rest:\n   `scripts/install_loop_runner.sh --status`), so never start a build or\n   review loop by hand while they are loaded, because claiming a ticket is\n   check-then-act."
+          "find": "Spirality's lanes run on the\n   Mini (`com.spirality.loop-build` and the rest:",
+          "replace": "{{productName}}'s lanes run on the\n   Mini (`{{launchdPrefix}}.loop-build` and the rest:"
         }
       ]
     }
