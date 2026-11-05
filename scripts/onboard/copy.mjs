@@ -45,7 +45,7 @@ import { loadProjectConfig, findConfigFile } from '../../lib/projectConfig.mjs';
 import { loadAnswers, onboardDir, expandHome } from '../../lib/onboardAnswers.mjs';
 import {
   planCopies, compareWithProduct, templateVars, mergeNpmScripts, withClaudeSections,
-  verifyWorkflow, hasVerifyJob, render,
+  verifyWorkflow, hasVerifyJob, render, ciVerdict, answersAsHandRun,
 } from '../../lib/onboardCopy.mjs';
 
 const BRANCH = 'spirality-setup';
@@ -253,14 +253,24 @@ const doctor = door('doctor');
 if (!doctor.ok) fail('readback', `npm run doctor in ${worktree}: ${last(doctor.out || doctor.err)}`);
 say('readback', 'npm run doctor passes');
 const who = door('clickup', '--', 'whoami');
-if (!who.ok || !/hand-run/.test(who.out)) fail('readback', `npm run clickup -- whoami did not answer as ${answers.productSlug}'s hand-run seat: ${last(who.out || who.err)}`);
+if (!who.ok || !answersAsHandRun(who.out, answers.productSlug)) fail('readback', `npm run clickup -- whoami did not answer as ${answers.productSlug}'s hand-run seat: ${last(who.out || who.err)}`);
 say('readback', `whoami: ${last(who.out, 1)}`);
 const queue = door('clickup', '--', 'queue');
 if (!queue.ok) fail('readback', `npm run clickup -- queue: ${last(queue.err || queue.out)}`);
 say('readback', `queue: ${last(queue.out, 1)}`);
-const checks = run('gh', ['pr', 'checks', prUrl, '--watch', '--fail-fast']);
-const verifyLine = checks.out.split('\n').find((l) => /^verify\s/.test(l)) || '';
-if (!/\bpass\b/.test(verifyLine)) fail('readback', `CI's verify on ${prUrl} did not pass: ${verifyLine || last(checks.out || checks.err)}`);
+// CI's verify, read as JSON until it settles: up to 2 minutes for GitHub to
+// register the check on a pull request just opened, then up to 30 for it to finish.
+const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+const ci = () => {
+  const r = run('gh', ['pr', 'checks', prUrl, '--json', 'name,bucket,state']);
+  try { return ciVerdict(JSON.parse(r.out || '[]')); } catch { return { verdict: 'none', why: last(r.err || r.out) || 'gh gave no answer' }; }
+};
+const appearBy = Date.now() + 2 * 60 * 1000, finishBy = Date.now() + 30 * 60 * 1000;
+let verdict = ci();
+while (verdict.verdict === 'none' && Date.now() < appearBy) { sleep(10000); verdict = ci(); }
+if (verdict.verdict === 'none') fail('readback', `after 2 minutes, ${prUrl} still has no verify check: ${verdict.why}`);
+while (verdict.verdict === 'pending' && Date.now() < finishBy) { sleep(20000); verdict = ci(); }
+if (verdict.verdict !== 'pass') fail('readback', `CI's verify on ${prUrl} did not pass: ${verdict.why}${verdict.verdict === 'pending' ? ' after 30 minutes' : ''}`);
 say('readback', `CI's verify passed on ${prUrl}`);
 
 console.log(`\nDone: ${prUrl} on branch ${BRANCH}. Next, the lanes step installs from it:`);
