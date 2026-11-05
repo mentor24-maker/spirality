@@ -139,3 +139,10 @@ test('the templates type no repository address: it comes from the settings file'
     assert.doesNotMatch(read(`scripts/onboard/templates/${t}`), /github\.com\/[\w-]+\/[\w-]+/, `${t} types a repository address`);
   }
 });
+
+test('the setup makes the product ignore the lanes\' working copies (SP-120)', () => {
+  const entry = manifest.made.find((m) => m.to === '.gitignore');
+  assert.ok(entry, 'the manifest makes a .gitignore');
+  assert.ok(entry.ignoreLines.includes('.claude/worktrees/'));
+  assert.ok(read('.gitignore').split('\n').includes('.claude/worktrees/'), 'Spirality ignores it too');
+});
