@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { Worker } from 'node:worker_threads';
 import { createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
-import { openStore, StoreError, STATUSES } from './store.mjs';
+import { normalizePhone, openStore, StoreError, STATUSES } from './store.mjs';
 
 /** A fresh store on disk, with one operator, one machine and one project. */
 function fixture() {
@@ -689,7 +689,7 @@ test("a project's alert email and phone are set, kept across a reopen and cleare
         [{ alertEmail: 'name@example' }, 'bad-alert-email'],
         [{ alertEmail: 'name@.com' }, 'bad-alert-email'],
         [{ alertEmail: 42 }, 'bad-alert-email'],
-        [{ alertPhone: '8015550123' }, 'bad-alert-phone'],
+        [{ alertPhone: '801555012' }, 'bad-alert-phone'],
         [{ alertPhone: '+1234567' }, 'bad-alert-phone'],
         [{ alertPhone: '+1234567890123456' }, 'bad-alert-phone'],
         [{ alertPhone: '+1 555 abc 0100' }, 'bad-alert-phone'],
@@ -1152,4 +1152,14 @@ test('today\'s database gains emails, passwords, sessions and links, and every e
       assert.equal(again.getProject('old').owner, 1);
     } finally { again.close(); }
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('a US phone number typed any usual way comes out in international form; anything else is not a phone', () => {
+  for (const typed of ['(801) 555-0123', '801.555.0123', '801 555 0123', '8015550123', '18015550123', '1-801-555-0123', '1 (801) 555-0123', '+1 801 555 0123', '+18015550123']) {
+    assert.equal(normalizePhone(typed), '+18015550123', typed);
+  }
+  assert.equal(normalizePhone('+44 20 7946 0000'), '+442079460000', 'another country with its + is kept');
+  for (const typed of ['801 555 012', '28015550123', '440 2079 460000', '801 CALL NOW', '', null, 8015550123]) {
+    assert.equal(normalizePhone(typed), null, String(typed));
+  }
 });

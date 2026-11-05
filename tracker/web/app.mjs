@@ -488,7 +488,7 @@ const REPO_HINT = 'Optional. Where its pull requests live: owner/name, like my-o
 
 /** The alert boxes' hints, the same on both project forms. */
 const ALERT_EMAIL_HINT = "Where hand-over alerts for this project go. Empty: the tracker's default address.";
-const ALERT_PHONE_HINT = 'For iMessage alerts, e.g. +1 801 555 0123. Empty: no texts.';
+const ALERT_PHONE_HINT = 'For iMessage alerts, e.g. 801 555 0123, or +44 20 7946 0000 outside the US. Empty: no texts.';
 
 /**
  * The Create Project form, for a person only: name, slug, ticket prefix, web
