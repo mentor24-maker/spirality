@@ -324,6 +324,11 @@
   ],
   "made": [
     {
+      "to": ".gitignore",
+      "from": "the product's own (made if it has none), with these lines added where missing: the lanes' working copies live in .claude/worktrees/, and a main checkout that shows them as changed never pulls (SP-120)",
+      "ignoreLines": [".claude/worktrees/"]
+    },
+    {
       "to": "spirality.project.json",
       "from": "the settings file given as --config (SP-109 writes it)"
     },
