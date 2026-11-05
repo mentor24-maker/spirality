@@ -48,13 +48,15 @@ import { execFile } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { hostname } from 'node:os';
+import { resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { openStore, StoreError } from './store.mjs';
 import { boardOf, PRIORITIES, projectDetailsOf, projectsList, readSearchFilters, reportsOf, searchTickets, stageColoursOf, threadOf, waitingFor } from './pageData.mjs';
 import { createNotifier, DEFAULT_FROM, MAIL_FROM, MAIL_KEY, mailEnvFromDoppler, mailSettingsFromEnv, resendSender, textSettings } from './notify.mjs';
 import { sendInvite, sendResetLink } from './account.mjs';
-import { loadProjectConfig } from '../lib/projectConfig.mjs';
+import { findConfigFile, loadProjectConfig } from '../lib/projectConfig.mjs';
+import { saveAnswers, setupFields, setupList, setupOf, SetupError } from './setup.mjs';
 import busRelayPlan from '../lib/busRelayPlan.js';
 import loopStatuses from '../lib/loopStatuses.js';
 
@@ -317,6 +319,10 @@ function flag(value) {
  * `send`, an invite is refused and nothing is made. Null (or no
  * `send`) means no reset email goes out; the page's answer is the same,
  * and the log says why. `now` is the clock the sign-in failure count reads.
+ * `setup` is what the "Set up a product" calls read (tracker/setup.mjs):
+ * `{ homeConfig, homeRoot, folder, trackerDb }`, the tracker home's checked
+ * settings file, its main folder, the folder this server runs from and its
+ * database. Null means those calls answer 503 and nothing is read or written.
  */
 /**
  * The word the ticket page's Close button posts: the first of the relay's
@@ -327,7 +333,7 @@ export const CLOSE_PHRASE = busRelayPlan.CLOSE_PHRASES[0];
 /** The word the Go button posts: the one an intake card asks for (GO_PHRASE in lib/busRelayPlan.js). */
 export const GO_PHRASE = busRelayPlan.GO_PHRASE;
 
-export function createHandler(store, { log = () => {}, notifier = null, defaultProject = null, mergePhrase = null, closePhrase = null, goPhrase = null, accountMail = null, now = Date.now } = {}) {
+export function createHandler(store, { log = () => {}, notifier = null, defaultProject = null, mergePhrase = null, closePhrase = null, goPhrase = null, accountMail = null, setup = null, now = Date.now } = {}) {
   const failures = failureCounter(now);
 
   /** The People page's data: each person with their email, and the open invites. */
@@ -361,6 +367,30 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
 
     if (parts.length === 1 && parts[0] === 'me' && method === 'GET') {
       return [200, me];
+    }
+
+    // Dane's page: "Set up a product" (tracker/setup.mjs). A person's only;
+    // the server reads the wizard's files and writes one, the answers file,
+    // and never runs the setup itself: the page shows the command to paste.
+    if (parts[0] === 'setup' && parts.length <= 2) {
+      if (me.kind !== 'human') {
+        throw new HttpError(403, 'people-only', 'only a person signed in to the tracker may read or change a product\'s setup; a machine may not.');
+      }
+      if (!setup) throw new HttpError(503, 'no-setup', 'this tracker cannot read setups: its settings file was not usable when it started (its log says why).');
+      try {
+        if (parts.length === 1 && method === 'GET') return [200, setupList(setup)];
+        if (parts.length === 2 && parts[1] === 'fields' && method === 'GET') {
+          return [200, { fields: setupFields(setup, url.searchParams.get('product') ?? '') }];
+        }
+        if (parts.length === 2 && parts[1] !== 'fields' && method === 'GET') return [200, setupOf(setup, parts[1])];
+        if (parts.length === 2 && parts[1] !== 'fields' && method === 'PUT') {
+          const body = await readJson(req);
+          return [200, saveAnswers(setup, parts[1], body)];
+        }
+      } catch (err) {
+        if (err instanceof SetupError) throw new HttpError(err.status, err.code, err.message, err.field ? { field: err.field } : {});
+        throw err;
+      }
     }
 
     // An actor's name, for a reader showing who wrote a comment. Never its token.
@@ -750,8 +780,8 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
 }
 
 /** Start a server on `port` (0 = any free port) against an open store. Resolves to the http.Server. */
-export function startServer({ store, port, host = '127.0.0.1', log, notifier, defaultProject, mergePhrase, closePhrase, goPhrase, accountMail, now }) {
-  const server = createServer(createHandler(store, { log, notifier, defaultProject, mergePhrase, closePhrase, goPhrase, accountMail, now }));
+export function startServer({ store, port, host = '127.0.0.1', log, notifier, defaultProject, mergePhrase, closePhrase, goPhrase, accountMail, setup, now }) {
+  const server = createServer(createHandler(store, { log, notifier, defaultProject, mergePhrase, closePhrase, goPhrase, accountMail, setup, now }));
   return new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(port, host, () => {
@@ -828,6 +858,25 @@ export async function loadMailSettings({ host, port, log = () => {} }) {
   return { ...mail, account: accountMailOf(env, sharedPageUrl({ host, port })) };
 }
 
+/**
+ * What the "Set up a product" calls read: the settings file in the folder
+ * this server runs from (it must be the tracker home's, the one that sets
+ * trackerPort), that folder, and the database it opened. The answers file's
+ * default checkout folder sits beside `homeRoot`, the tracker home's folder,
+ * which is this one. Null, with why, when the settings file does not do.
+ */
+export function setupSettingsOf({ db, folder = fileURLToPath(new URL('..', import.meta.url)) }) {
+  const root = folder.replace(/\/+$/, '');
+  const file = findConfigFile(root);
+  if (!file) return { setup: null, why: `no settings file in ${root}` };
+  let homeConfig;
+  try { homeConfig = loadProjectConfig({ file, env: {} }); } catch (err) {
+    return { setup: null, why: err.message };
+  }
+  if (homeConfig.trackerPort == null) return { setup: null, why: `${file} does not set "trackerPort", so it is not the tracker home's` };
+  return { setup: { homeConfig, homeRoot: root, folder: root, trackerDb: db }, why: null };
+}
+
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   try {
     const { db, port, host } = settingsFromEnv();
@@ -855,7 +904,9 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
       log(`the New request form starts on the first project and the ticket page has no Merge button: the project config is not usable (${err.message}).`);
     }
     const accountMail = mail.account && { ...mail.account, productName: store.getProject(defaultProject)?.name ?? 'tracker' };
-    const server = await startServer({ store, port, host, log, notifier, defaultProject, mergePhrase, closePhrase: CLOSE_PHRASE, goPhrase: GO_PHRASE, accountMail });
+    const { setup, why: noSetup } = setupSettingsOf({ db: resolve(db) });
+    log(setup ? `set up a product: on, reading ${setup.homeConfig.logDir}/onboard.` : `set up a product: off. ${noSetup}.`);
+    const server = await startServer({ store, port, host, log, notifier, defaultProject, mergePhrase, closePhrase: CLOSE_PHRASE, goPhrase: GO_PHRASE, accountMail, setup });
     console.log(`tracker listening on http://${host}:${server.address().port}/`);
   } catch (err) {
     console.error(`tracker server did not start: ${err.message}`);
