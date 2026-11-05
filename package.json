@@ -26,6 +26,7 @@
     "tracker:signins": "node scripts/with_doppler.mjs node --no-warnings tracker/signins.mjs",
     "tracker:switch-check": "node scripts/with_doppler.mjs node --no-warnings tracker/switchCheck.mjs",
     "onboard:look": "node scripts/with_doppler.mjs node --disable-warning=ExperimentalWarning scripts/onboard/look.mjs",
+    "onboard:settings": "node scripts/with_doppler.mjs node --disable-warning=ExperimentalWarning scripts/onboard/settings.mjs",
     "onboard:copy": "node scripts/onboard/copy.mjs",
     "check:syntax": "node scripts/check_syntax.mjs",
     "check:secrets": "node scripts/check_secrets.mjs",

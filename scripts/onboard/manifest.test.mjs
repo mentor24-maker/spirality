@@ -22,7 +22,7 @@ const NORMIE = {
   checkCommand: 'npm run verify:full', nodeVersion: '22', mergePhrases: ['merge', 'merge it', 'ship it', 'approve'],
   autoMergeLanes: [], extraGovernancePaths: ['.cursorrules'], hosting: 'Vercel', description: 'A website.',
 };
-const HOME = { logDir: '~/loop-logs', trackerUrl: 'http://mac-mini.local:4180' };
+const HOME = { logDir: '~/loop-logs', trackerUrl: 'http://mac-mini.local:4180', githubRepo: 'mentor24-maker/spirality' };
 const vars = templateVars(NORMIE, HOME, { spiralityCommit: 'abc1234', visibility: 'PUBLIC' });
 
 test('every file the manifest copies is in Spirality', () => {
@@ -102,4 +102,29 @@ test('the review and build skills tell a lane\'s pass it is the lane (hold-up 14
   assert.match(review, /com\.normie\.loop-review/);
   assert.match(review, /Re-run the gates: `npm run verify:full`\./);
   assert.match(review, /Normie is a website, so the surface is usually a page/);
+});
+
+test('rendered for another product, no adapted or made file keeps Spirality\'s own names', () => {
+  const pressplay = {
+    ...NORMIE, productName: 'PressPlay', productSlug: 'pressplay', trackerPrefix: 'PP', dopplerProject: 'pressplay',
+    launchdPrefix: 'com.pressplay', checkoutDir: '~/WebApps/pressplay', checkCommand: 'npm run build',
+    mergePhrases: ['merge', 'ship it'], hosting: null,
+  };
+  const v = templateVars(pressplay, HOME, { spiralityCommit: 'abc1234', visibility: 'PRIVATE' });
+  const rendered = planCopies(manifest, { readSpirality: read, vars: v }).filter((f) => f.kind !== 'copy');
+  rendered.push({ to: 'CLAUDE.md', content: render(read('scripts/onboard/templates/CLAUDE-sections.md'), v) });
+  for (const f of rendered) {
+    assert.doesNotMatch(f.content, /com\.spirality\./, `${f.to} still names one of Spirality's own launchd jobs`);
+    assert.doesNotMatch(f.content, /`merge it`|`approve`/, `${f.to} still lists Spirality's merge phrases`);
+    assert.doesNotMatch(f.content, /spirality-loop-|~\/WebApps\/spirality\b/, `${f.to} still names Spirality's logs or folder`);
+  }
+  const review = rendered.find((f) => f.to === '.claude/skills/loop-review/SKILL.md').content;
+  assert.match(review, /`merge` or `ship it` \(the/);
+  assert.match(review, /\(`com\.pressplay\.relay`, every 10 minutes\)/);
+});
+
+test('the templates type no repository address: it comes from the settings file', () => {
+  for (const t of ['CLAUDE-sections.md', 'loop-README.md', 'LOOP_ENGINEERING.md']) {
+    assert.doesNotMatch(read(`scripts/onboard/templates/${t}`), /github\.com\/[\w-]+\/[\w-]+/, `${t} types a repository address`);
+  }
 });

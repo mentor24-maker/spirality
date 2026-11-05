@@ -1,6 +1,6 @@
 ## How to work with Dane
 
-{{productName}} is built by the loop [Spirality](https://github.com/mentor24-maker/spirality)
+{{productName}} is built by the loop [Spirality](https://github.com/{{spiralityRepo}})
 defines (`docs/LOOP_ENGINEERING.md`), and these rules are Spirality's, learned
 the hard way:
 

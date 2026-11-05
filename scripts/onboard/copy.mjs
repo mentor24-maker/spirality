@@ -205,6 +205,14 @@ if (wgit('status', '--porcelain').out) {
   const c = wgit('commit', '-q', '-m', msg);
   if (!c.ok) fail('pr', `git commit: ${last(c.err)}`);
   say('pr', `committed ${wgit('rev-parse', '--short', 'HEAD').out}`);
+  // What git stored, not what was written: a product's .gitattributes (line
+  // endings, filters) could change the bytes on the way in.
+  const stored = all.filter((f) => f.kind === 'copy').filter((f) => {
+    const r = spawnSync('git', ['show', `HEAD:${f.to}`], { cwd: worktree });
+    return r.status !== 0 || !Buffer.from(r.stdout).equals(Buffer.from(rawSpirality(f.from)));
+  }).map((f) => f.to);
+  if (stored.length) fail('check', `after the commit these differ from Spirality ${commit.slice(0, 7)} (a .gitattributes rule?): ${stored.join(', ')}`);
+  say('check', 'the commit holds every copied file byte for byte'); 
 } else {
   say('pr', 'nothing new to commit');
 }
