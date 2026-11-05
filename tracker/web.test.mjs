@@ -1110,7 +1110,7 @@ test('a project edited from the page shows its new name, web address, logo, GitH
 test('both project forms carry an Alert email and an Alert phone box with their hints, and send them', () => {
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   assert.match(app, /const ALERT_EMAIL_HINT = "Where hand-over alerts for this project go\. Empty: the tracker's default address\.";/);
-  assert.match(app, /const ALERT_PHONE_HINT = 'For iMessage alerts, e\.g\. \+1 801 555 0123\. Empty: no texts\.';/);
+  assert.match(app, /const ALERT_PHONE_HINT = 'For iMessage alerts, e\.g\. 801 555 0123, or \+44 20 7946 0000 outside the US\. Empty: no texts\.';/);
   for (const fn of ['drawCreateProject', 'drawEditProject']) {
     const form = app.slice(app.indexOf(`async function ${fn}`), app.indexOf('/**', app.indexOf(`async function ${fn}`)));
     assert.match(form, /field\('alertEmail', 'Alert email', ALERT_EMAIL_HINT,/, fn);
