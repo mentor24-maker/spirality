@@ -7,7 +7,7 @@ import { validateProjectConfig } from '../../lib/projectConfig.mjs';
 import { settingsDraft, resolveAnswers } from '../../lib/onboardAnswers.mjs';
 import {
   DANE_FIELDS, STEPS, answerValue, fieldNamed, loggedDone, mainVerifyVerdict, mountainStamp, onboard,
-  cloneAddress, parseOnboardArgs, pasteBlock, protectionDropped, protectionGaps, protectionRequest, rerunCommand, shellQuote,
+  cloneAddress, commandLine, parseOnboardArgs, pasteBlock, saidYes, signinCommands, protectionDropped, protectionGaps, protectionRequest, rerunCommand, shellQuote,
   unanswered, worktreesOnBranch,
 } from './onboard.mjs';
 
@@ -83,6 +83,16 @@ test('the paste block makes the Doppler project only when it is missing, and quo
   const branchConfig = pasteBlock({ ...base, answers: { ...answers, dopplerConfig: 'dev_loop' }, projectExists: true, configExists: false });
   assert.ok(branchConfig.includes('doppler configs create dev_loop --project pressplay --environment dev'));
   assert.equal(shellQuote('a b'), "'a b'");
+  // What is printed is what runs: the same commands, word for word.
+  const cmds = signinCommands({ ...base, projectExists: false, configExists: false });
+  assert.deepEqual(cmds.map(commandLine), fresh.slice(1));
+  assert.deepEqual(cmds.at(-1).env, { TRACKER_DB: '/Users/d/spirality-tracker/tracker.db' });
+  assert.equal(cmds.at(-1).args[cmds.at(-1).args.indexOf('--name') + 1], "Press Play's", 'run as one word, unquoted');
+});
+
+test('only y or yes runs the sign-ins', () => {
+  for (const yes of ['y', 'Y', ' yes ', 'YES']) assert.equal(saidYes(yes), true, yes);
+  for (const no of ['', 'n', 'no', 'done', 'yep', null, undefined]) assert.equal(saidYes(no), false, String(no));
 });
 
 test('the step log: Mountain time, and a done step is found by name', () => {
@@ -169,7 +179,10 @@ function makeWorld(t) {
     dir, homeConfig, homeRoot, checkout, fail: null,
     signinsMade: false, prOpen: false, ticket: null, lanesLoaded: false, merged: false,
     protection: null, mergeAfterPolls: 1, polls: 0, dopplerProject: false,
-    calls: [], asked: [], paused: 0, printed: [],
+    calls: [], asked: [], printed: [],
+    // "Run these now?" at the sign-ins: what Dane answers, how often it was asked,
+    // and the environment each command it ran was given.
+    runAnswer: 'y', runAsked: 0, envs: {}, signinsHollow: false, createFails: null,
     // onboard:copy's worktree, on the setup branch; true once copy has run (as the real one keeps it).
     setupWorktree: false, worktreeRemoveRefused: false,
     // The tracker home's origin, with a sign-in token in it as a real one can carry.
@@ -190,6 +203,7 @@ function makeWorld(t) {
   const run = (cmd, args, o = {}) => {
     const line = [cmd, ...args].join(' ');
     w.calls.push(line);
+    if (o.env) w.envs[line] = o.env;
     if (cmd === 'git') {
       if (args[0] === 'remote' && o.cwd === homeRoot) return w.homeOrigin == null ? no('error: No such remote', 2) : ok(w.homeOrigin);
       if (args[0] === 'remote' && o.cwd === checkout) return ok(w.cloneOrigin);
@@ -217,7 +231,7 @@ function makeWorld(t) {
       }
     }
     if (cmd === 'npm') {
-      const [, , script, , ...rest] = args;
+      const [, script, , ...rest] = args.filter((a) => a !== '--silent');
       if (script === 'onboard:look') return breaks('look') ? no('BLOCKED', 3) : ok();
       if (script === 'onboard:settings' && rest[0] === 'write') {
         if (breaks('settings')) return no();
@@ -227,6 +241,11 @@ function makeWorld(t) {
       }
       if (script === 'onboard:settings' && rest[0] === 'fill-machine-user') {
         writeFileSync(settingsFile, JSON.stringify(settings('9')));
+        return ok();
+      }
+      if (script === 'tracker:signins' && rest[0] === 'create') {
+        if (w.createFails === 'tracker') return no('could not make the project', 4);
+        if (!w.signinsHollow) w.signinsMade = true;
         return ok();
       }
       if (script === 'tracker:signins') return w.signinsMade ? ok('all answer as themselves') : no('Could not find requested project');
@@ -244,6 +263,11 @@ function makeWorld(t) {
         w.lanesLoaded = true;
         return ok();
       }
+    }
+    if (cmd === 'doppler' && args[1] === 'create') {
+      if (w.createFails === 'doppler') return no('Doppler Error: unauthorized', 2);
+      if (args[0] === 'projects') w.dopplerProject = true;
+      return ok();
     }
     if (cmd === 'doppler') return w.dopplerProject ? ok('{}') : no();
     if (cmd === 'bash') {
@@ -275,11 +299,11 @@ function makeWorld(t) {
   const deps = (over = {}) => ({
     homeConfig, homeRoot, spiralityDir: homeRoot, run,
     ask: async (q) => {
+      if (q.startsWith('Run these now')) { w.runAsked += 1; return w.runAnswer; }
       w.asked.push(q);
       const key = Object.keys(DANE_ANSWERS).find((k) => q.startsWith(k));
       return key ? DANE_ANSWERS[key] : '';
     },
-    pause: async () => { w.paused += 1; w.signinsMade = true; w.dopplerProject = true; return true; },
     print: (line) => w.printed.push(line),
     exists: (p) => existsSync(p),
     readText: (p) => { try { return readFileSync(p, 'utf8'); } catch { return null; } },
@@ -293,7 +317,7 @@ function makeWorld(t) {
   const opts = { product: 'pressplay', allowReplace: false, mergeWaitMinutes: 60 };
   const go = (over) => onboard(opts, deps(over));
   const homeOpts = (more, over) => onboard({ ...opts, ...more }, deps(over));
-  const reset = () => { w.calls = []; w.asked = []; w.paused = 0; w.printed = []; w.polls = 0; };
+  const reset = () => { w.calls = []; w.asked = []; w.runAsked = 0; w.envs = {}; w.printed = []; w.polls = 0; };
   const answersFile = answersPath;
   // The answers in place, written as the wizard would, with a checkout path in this scratch folder.
   const seedAnswers = () => {
@@ -311,9 +335,16 @@ test('a first run asks Dane only his answers, stops for the paste block and the 
   const code = await go();
   assert.equal(code, 0, out(w));
   assert.equal(w.asked.length, DANE_FIELDS.length, 'one question per Dane field');
-  assert.equal(w.paused, 1, 'one wait, for the paste block');
+  assert.equal(w.runAsked, 1, 'one question, Run these now?, for the sign-ins');
   assert.match(out(w), /Your move, Dane \(real secret values\)/);
   assert.match(out(w), /doppler projects create pressplay/);
+  // On his y the commands ran, in order, then the sign-ins were read back.
+  const made = w.calls.indexOf('doppler projects create pressplay');
+  const create = w.calls.findIndex((c) => c.startsWith('npm run tracker:signins -- create --name PressPlay --prefix PP'));
+  assert.ok(made >= 0 && create > made, 'the Doppler project, then the sign-ins');
+  assert.ok(w.calls.slice(create + 1).some((c) => c.includes('tracker:signins -- check')), 'read back after');
+  assert.equal(w.envs[w.calls[create]].TRACKER_DB, join(w.homeConfig.trackerDataDir, 'tracker.db'));
+  assert.ok(!/type done/i.test(out(w)), 'never asks him to type done');
   assert.match(out(w), /Your move, Dane \(a decision\).*"merge", "ship it".*PP-1: http:\/\/mac-mini\.local:4180\/t\/PP-1/);
   assert.equal((out(w).match(/Your move, Dane/g) || []).length, 2, 'exactly two stops beyond the questions');
   assert.match(out(w), /Done: pressplay is set up\. Its tickets: http:\/\/mac-mini\.local:4180\/list\/pressplay/);
@@ -336,7 +367,7 @@ test('a rerun once everything is done says each step is already done and asks no
   reset();
   assert.equal(await go(), 0, out(w));
   assert.equal(w.asked.length, 0);
-  assert.equal(w.paused, 0);
+  assert.equal(w.runAsked, 0);
   for (const step of STEPS) assert.match(out(w), new RegExp(`^${step}\\s+already done`, 'm'), step);
   assert.ok(!w.calls.some((c) => c.startsWith('npm') || c.includes('-X PUT')), 'no step script ran and nothing was written');
 });
@@ -394,23 +425,64 @@ test('no Terminal to ask in: STOPPED at answers, naming what is still to answer'
   assert.match(out(w), /^STOPPED: answers: no Terminal to ask in; still to answer: productName, githubRepo/m);
 });
 
-test('a failure at signins: the block ran but the sign-ins still do not answer — FAILED, and the rerun shows the block again', async (t) => {
+test('a failure at signins: the block ran but the sign-ins still do not answer — FAILED, and the rerun asks and runs it again', async (t) => {
   const { w, go, reset } = makeWorld(t);
-  assert.equal(await go({ pause: async () => { w.paused += 1; return true; } }), 1, out(w));
+  w.signinsHollow = true;
+  assert.equal(await go(), 1, out(w));
   assert.match(out(w), /^FAILED: signins: tracker:signins check does not pass yet/m);
   assert.ok(!w.calls.some((c) => c.includes('onboard:copy')), 'copy did not run');
+  w.signinsHollow = false;
   reset();
   assert.equal(await go(), 0, out(w));
-  assert.equal(w.paused, 1, 'the paste block is shown again');
+  assert.equal(w.runAsked, 1, 'Run these now? is asked again');
+  assert.ok(!w.calls.includes('doppler projects create pressplay'), 'the Doppler project made last time is not made again');
   assert.equal(w.asked.length, 0);
   assert.match(out(w), /^settings\s+already done/m);
 });
 
-test('no Terminal to wait in at the paste block: STOPPED at signins, the block still printed', async (t) => {
+const signinsRan = (w) => w.calls.some((c) => / create/.test(c) && (c.startsWith('doppler') || c.includes('tracker:signins')));
+
+for (const [why, answer] of [['no Terminal to ask in', null], ['n', 'n'], ['a bare Enter', ''], ['anything but y', 'done']]) {
+  test(`at the sign-ins, ${why}: nothing is run, the block is printed, STOPPED, and a rerun after he ran it resumes`, async (t) => {
+    const { w, go, reset } = makeWorld(t);
+    w.runAnswer = answer;
+    assert.equal(await go(), 3, out(w));
+    assert.equal(w.runAsked, 1);
+    assert.ok(!signinsRan(w), 'nothing was run without his y');
+    assert.match(out(w), /^ {2}doppler projects create pressplay$/m);
+    assert.match(out(w), /tracker:signins -- create --name PressPlay --prefix PP --config /);
+    assert.match(out(w), /^STOPPED: signins: the block above is not run/m);
+    assert.ok(!w.calls.some((c) => c.includes('onboard:copy')), 'copy did not run');
+    // He ran it himself; the rerun reads it back and goes on without asking.
+    w.signinsMade = true;
+    w.dopplerProject = true;
+    reset();
+    assert.equal(await go(), 0, out(w));
+    assert.equal(w.runAsked, 0);
+    assert.match(out(w), /^signins\s+already done/m);
+  });
+}
+
+for (const failing of ['doppler', 'tracker']) {
+  test(`at the sign-ins, a ${failing} command that fails: FAILED with its exit code, nothing after it runs`, async (t) => {
+    const { w, go } = makeWorld(t);
+    w.createFails = failing;
+    assert.equal(await go(), 1, out(w));
+    const code = failing === 'doppler' ? 2 : 4;
+    assert.match(out(w), new RegExp(`^FAILED: signins: ${failing === 'doppler' ? 'doppler projects create pressplay' : 'TRACKER_DB=\\S+ npm run tracker:signins -- create'}.* ended with exit ${code}`, 'm'));
+    if (failing === 'doppler') assert.ok(!w.calls.some((c) => c.includes('tracker:signins -- create')), 'the sign-ins were not made after it');
+    const failed = w.calls.findIndex((c) => (failing === 'doppler' ? c.startsWith('doppler projects create') : c.includes('tracker:signins -- create')));
+    assert.ok(failed >= 0 && !w.calls.slice(failed + 1).some((c) => c.includes('tracker:signins -- check')), 'no read back over a failed command');
+    assert.ok(!w.calls.some((c) => c.includes('onboard:copy')), 'copy did not run');
+  });
+}
+
+test('at the sign-ins, a Doppler project that is already there is not made again', async (t) => {
   const { w, go } = makeWorld(t);
-  assert.equal(await go({ pause: async () => null }), 3);
-  assert.match(out(w), /tracker:signins -- create --name PressPlay --prefix PP --config /);
-  assert.match(out(w), /^STOPPED: signins: waiting on you/m);
+  w.dopplerProject = true;
+  assert.equal(await go(), 0, out(w));
+  assert.ok(!w.calls.some((c) => c.startsWith('doppler projects create')));
+  assert.ok(w.calls.some((c) => c.includes('tracker:signins -- create')));
 });
 
 test('a merge not made in time: STOPPED at merge; the rerun waits again and finishes once it is merged', async (t) => {

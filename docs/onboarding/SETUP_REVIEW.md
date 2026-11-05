@@ -306,9 +306,13 @@ first real work (step 8) is not filed by the wizard; it prints the page to
 watch instead. Before the lanes step, the wizard removes the worktree
 `onboard:copy` keeps on the setup branch (git checks a branch out in one
 place only, and the lanes check it out in the product's own folder), and
-reads back that nothing else holds it. At the paste block it waits for the
-word `done`, not a bare Enter, so an Enter pressed while a step ran is not
-taken as the answer. Protecting `main` names any stricter setting already
+reads back that nothing else holds it. At the sign-ins (SP-124) it shows the
+commands and asks `Run these now? [y/N]`: on `y` it runs them itself, in
+Dane's own Terminal with their output shown, and stops with FAILED and the
+exit code if one fails; on anything else, a bare Enter included, nothing is
+run, the block stays printed and it stops (STOPPED; the rerun resumes). It
+used to wait for the word `done`, which was twice typed before the block had
+run anywhere. Protecting `main` names any stricter setting already
 there that it switches off (GitHub's protection write replaces them all). Each step checks first whether it is already done; once the
 product's `main` has its settings file with its own machine id, every step
 up to the merge is.
@@ -381,8 +385,9 @@ make the Doppler project and config if step 0 found none, then
 `tracker:signins create` against the scratch settings file with
 `TRACKER_DB` set to the tracker home's database. It makes the tracker
 project with its prefix, the five `<slug> …` actors and their tokens, and
-writes the tokens into the product's Doppler project. The wizard waits for
-Enter, then reads back: `tracker:signins check` (every seat answers as
+writes the tokens into the product's Doppler project. The wizard asks
+`Run these now? [y/N]` and runs them on Dane's y (as built, SP-124), then
+reads back: `tracker:signins check` (every seat answers as
 itself, and the tracker home's seats still answer as theirs), and the
 project's row in the tracker. It writes `machineUserId` into the settings
 file and checks the file again.

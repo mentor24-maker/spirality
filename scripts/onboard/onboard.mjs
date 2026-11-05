@@ -24,12 +24,16 @@
  *             clean checkout of the repository).
  *   settings  SP-109 writes the settings file into a scratch folder beside the
  *             answers file (`onboard:settings write`).
- *   signins   STOP FOR DANE (real secret values): one block to paste, which
- *             makes the product's Doppler project if it is missing and runs
+ *   signins   STOP FOR DANE (real secret values): the commands that make the
+ *             product's Doppler project if it is missing and run
  *             `tracker:signins create` against the scratch settings file with
- *             TRACKER_DB set to the tracker home's database. The wizard waits
- *             for "done", reads back with `tracker:signins check`, and fills in
- *             machineUserId (`onboard:settings fill-machine-user`).
+ *             TRACKER_DB set to the tracker home's database. SP-124: the
+ *             wizard shows them and asks "Run these now? [y/N]". On y it runs
+ *             them itself, in order, in Dane's own Terminal with their output
+ *             shown; on anything else (or no Terminal) it leaves the block
+ *             printed and stops, nothing run. Then it reads back with
+ *             `tracker:signins check` and fills in machineUserId
+ *             (`onboard:settings fill-machine-user`).
  *   copy      SP-110's one pull request in the product's repository
  *             (`onboard:copy`), CI's verify green on it.
  *   lanes     SP-111 installs the product's lanes from the setup branch and
@@ -224,20 +228,38 @@ export function shellQuote(text) {
 const DOPPLER_ROOTS = ['dev', 'stg', 'prd'];
 
 /**
- * The block Dane pastes for the sign-ins: the Doppler project (and config)
- * only if missing, then `tracker:signins create` against the scratch
- * settings file, with TRACKER_DB set to the tracker home's database.
+ * The sign-ins commands, in order, each as { cmd, args, env }: the Doppler
+ * project (and config) only if missing, then `tracker:signins create`
+ * against the scratch settings file, with TRACKER_DB set to the tracker
+ * home's database. Every one runs in the tracker home's folder. The wizard
+ * runs exactly these on Dane's y; pasteBlock prints the same ones.
  */
-export function pasteBlock({ spiralityDir, answers, settingsFile, trackerDb, projectExists, configExists }) {
-  const lines = [`cd ${shellQuote(spiralityDir)}`];
-  if (!projectExists) lines.push(`doppler projects create ${shellQuote(answers.dopplerProject)}`);
+export function signinCommands({ answers, settingsFile, trackerDb, projectExists, configExists }) {
+  const cmds = [];
+  if (!projectExists) cmds.push({ cmd: 'doppler', args: ['projects', 'create', answers.dopplerProject] });
   const madeWithProject = !projectExists && DOPPLER_ROOTS.includes(answers.dopplerConfig);
   if (!configExists && !madeWithProject) {
     const env = answers.dopplerConfig.split('_')[0];
-    lines.push(`doppler configs create ${shellQuote(answers.dopplerConfig)} --project ${shellQuote(answers.dopplerProject)} --environment ${shellQuote(env)}`);
+    cmds.push({ cmd: 'doppler', args: ['configs', 'create', answers.dopplerConfig, '--project', answers.dopplerProject, '--environment', env] });
   }
-  lines.push(`TRACKER_DB=${shellQuote(trackerDb)} npm run tracker:signins -- create --name ${shellQuote(answers.productName)} --prefix ${shellQuote(answers.trackerPrefix)} --config ${shellQuote(settingsFile)}`);
-  return lines;
+  cmds.push({ cmd: 'npm', args: ['run', 'tracker:signins', '--', 'create', '--name', answers.productName, '--prefix', answers.trackerPrefix, '--config', settingsFile], env: { TRACKER_DB: trackerDb } });
+  return cmds;
+}
+
+/** One command as a line to paste: its environment first, every word quoted for the shell. */
+export function commandLine({ cmd, args, env }) {
+  const pre = Object.entries(env ?? {}).map(([k, v]) => `${k}=${shellQuote(v)} `).join('');
+  return `${pre}${[cmd, ...args].map(shellQuote).join(' ')}`;
+}
+
+/** The block for the sign-ins as it is printed: `cd` to the tracker home, then each command. */
+export function pasteBlock({ spiralityDir, ...rest }) {
+  return [`cd ${shellQuote(spiralityDir)}`, ...signinCommands(rest).map(commandLine)];
+}
+
+/** Dane's answer to "Run these now? [y/N]": only y or yes runs anything. */
+export function saidYes(typed) {
+  return /^(y|yes)$/i.test(String(typed ?? '').trim());
 }
 
 /** "2026-11-04 22:51:03 MT": the step log's clock, Mountain time. */
@@ -262,10 +284,10 @@ const last = (text, n = 4) => String(text || '').split('\n').map((l) => l.trim()
 /**
  * The wizard. `opts`: product, allowReplace, mergeWaitMinutes. `deps`:
  *   homeConfig, homeRoot, spiralityDir   the tracker home
- *   run(cmd, args, { cwd, input, show }) -> { code, out, err }; `show` lets
- *                                         Dane watch a step script's own lines
+ *   run(cmd, args, { cwd, input, show, env }) -> { code, out, err }; `show`
+ *                                         lets Dane watch a step script's own
+ *                                         lines; `env` adds to the environment
  *   ask(question) -> string, or null when there is no Terminal to ask in
- *   pause(text) -> true once Dane says it is done, or null with no Terminal
  *   print(line), exists(path), readText(path) -> text|null, writeText(path, text),
  *   appendText(path, text), mkdir(dir), sleep(ms), now() -> ms
  * Returns the exit code.
@@ -456,13 +478,23 @@ export async function onboard(opts, deps) {
         const projectExists = exists(['projects', 'get', answers.dopplerProject]);
         const configExists = projectExists && exists(['configs', 'get', answers.dopplerConfig, '--project', answers.dopplerProject]);
         const trackerDb = join(expandHome(homeConfig.trackerDataDir), 'tracker.db');
+        const block = { answers, settingsFile, trackerDb, projectExists, configExists };
         deps.print('');
-        deps.print(`Your move, Dane (real secret values): paste this into a Terminal on the Mini. It ${projectExists ? '' : `makes the Doppler project "${answers.dopplerProject}", then `}makes ${answers.productName}'s tracker project and its sign-ins, and writes their keys into Doppler. No key is shown.`);
+        deps.print(`Your move, Dane (real secret values): these commands ${projectExists ? '' : `make the Doppler project "${answers.dopplerProject}", then `}make ${answers.productName}'s tracker project and its sign-ins, and write their keys into Doppler. No key is shown.`);
         deps.print('');
-        for (const line of pasteBlock({ spiralityDir, answers, settingsFile, trackerDb, projectExists, configExists })) deps.print(`  ${line}`);
+        for (const line of pasteBlock({ spiralityDir, ...block })) deps.print(`  ${line}`);
         deps.print('');
-        const went = await deps.pause('Type done here and press Enter once it has finished: ');
-        if (went == null) stop(step, 'waiting on you to run the block above (no Terminal here to wait in)');
+        // Only y runs them. A blank answer (an Enter pressed while a step ran
+        // and held by the Terminal) is a no: it stops, and nothing is run.
+        const typed = await deps.ask('Run these now, here, in this Terminal? [y/N] ');
+        if (typed == null) stop(step, 'the block above is not run (no Terminal here to ask in); paste it into a Terminal on the Mini, then rerun');
+        if (!saidYes(typed)) stop(step, 'the block above is not run (you did not answer y); run it, or rerun and answer y');
+        for (const c of signinCommands(block)) {
+          const line = commandLine(c);
+          say(step, `running: ${line}`);
+          const r = run(c.cmd, c.args, { show: true, env: c.env });
+          if (r.code !== 0) fail(step, `${line} ended with exit ${r.code} (its lines above say what); nothing after it ran`);
+        }
         const after = check();
         if (after.code !== 0) fail(step, `tracker:signins check does not pass yet: ${last(after.err || after.out)}`);
         fillMachine();
@@ -649,9 +681,10 @@ export function parseOnboardArgs(argv) {
   return { opts };
 }
 
-function realRun(cmd, args, { cwd, input, show } = {}) {
+function realRun(cmd, args, { cwd, input, show, env } = {}) {
   const r = spawnSync(cmd, args, {
     cwd, input, encoding: 'utf8',
+    env: env ? { ...process.env, ...env } : process.env,
     stdio: show ? ['inherit', 'inherit', 'inherit'] : ['pipe', 'pipe', 'pipe'],
   });
   return { code: r.status ?? 1, out: String(r.stdout || '').trim(), err: String(r.stderr || r.error?.message || '').trim() };
@@ -679,13 +712,6 @@ async function main(argv) {
     homeConfig, homeRoot, spiralityDir,
     run: realRun,
     ask: (q) => (tty ? askOnce(q) : null),
-    // A stray Enter pressed while a step ran is held by the Terminal and
-    // read here, so the wait takes a word, never a bare Enter.
-    pause: async (q) => {
-      if (!tty) return null;
-      while (!/^done$/i.test(String(await askOnce(q)).trim())) { /* ask again */ }
-      return true;
-    },
     print: (line) => console.log(line),
     exists: (p) => existsSync(p),
     readText: (p) => { try { return readFileSync(p, 'utf8'); } catch (err) { if (err.code === 'ENOENT' || err.code === 'ENOTDIR' || err.code === 'EISDIR') return null; throw err; } },
