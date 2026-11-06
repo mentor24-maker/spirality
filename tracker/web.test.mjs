@@ -2238,7 +2238,7 @@ test('a project\'s details page lists its members, gives an admin Add Member and
   assert.match(draw, /const back = await api\('GET', `\/projects\/\$\{encodeURIComponent\(slug\)\}`\)\.catch\(\(\) => null\);/);
   assert.match(draw, /const ok = back != null && listed === wanted\.listed;/);
   assert.match(draw, /note\.textContent = `Not \$\{verb === 'add' \? 'added' : 'removed'\}: \$\{err\.message\}`;/);
-  assert.match(draw, /recorded, not yet enforced/);
+  assert.match(draw, /Only its members \(and admins\) see this project/);
 });
 
 test('the Users page lists each user\'s projects, each a link to its details page', () => {
@@ -2567,4 +2567,27 @@ test('the setup pages are served to a browser at /setup/new, /setup/<slug> and i
     // /setup/fields is only ever the call.
     assert.notEqual((await fetch(`${f.url}/setup/fields`, { headers: html })).headers.get('content-type'), 'text/html; charset=utf-8');
   } finally { await f.cleanup(); }
+});
+
+test('a ticket or project on a project the person is not on draws a plain You Are Not on This Project page, never the ticket; a 404 to someone who sees everything still says there is none', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  // The flag comes only from the server's own answer.
+  assert.match(app, /json\?\.yourProjectsOnly === true\);/);
+  assert.match(app, /const notOnProject = \(err\) => err instanceof Refused && err\.status === 404 && err\.yourProjectsOnly === true;/);
+  const draw = app.slice(app.indexOf('function drawNotOnProject'), app.indexOf('/** Call the tracker as the signed-in person.'));
+  assert.match(draw, /<h1>You Are Not on This Project<\/h1>/);
+  assert.match(draw, /escapeHtml\(line\)/);
+  assert.match(draw, /`Ticket \$\{ticket\} is on a project you are not a member of, or there is no such ticket\.`/);
+  assert.match(draw, /`You are not a member of the project \$\{project\}, or there is no such project\.`/);
+  assert.match(draw, /<a href="\/projects">Back to Projects<\/a>/);
+  // The ticket page and a board or list fall to it from the page's one error path; the details and edit pages check first.
+  assert.match(app, /else if \(notOnProject\(err\) && ticketAt\(\)\) drawNotOnProject\(\{ ticket: ticketAt\(\) \}\);/);
+  assert.match(app, /else if \(notOnProject\(err\) && boardAt\(\)\) drawNotOnProject\(\{ project: boardAt\(\) \}\);/);
+  const details = app.slice(app.indexOf('async function drawProjectDetails'), app.indexOf('/** One labelled text box'));
+  assert.ok(details.indexOf('if (notOnProject(err))') < details.indexOf("setTitle('No Such Project"), 'details: not-on-project before no-such-project');
+  const edit = app.slice(app.indexOf('async function drawEditProject'), app.indexOf('const { people } = await api(\'GET\', \'/people\');', app.indexOf('async function drawEditProject')));
+  assert.match(edit, /if \(notOnProject\(err\)\) return drawNotOnProject/);
+  // The members note no longer says everyone sees every project.
+  assert.doesNotMatch(app, /everyone still sees every project/);
+  assert.match(app, /Only its members \(and admins\) see this project and its tickets\./);
 });

@@ -12,7 +12,10 @@
  * Answers are JSON:
  *   401  no token, or a token no actor holds
  *   403  a call only a person may make, from a machine's token
- *   404  an unknown project, ticket or address
+ *   404  an unknown project, ticket or address, or (to a person who is not
+ *        an admin) a project they are not a member of, or a ticket on one:
+ *        the same words either way, so it never says the thing exists,
+ *        with `yourProjectsOnly: true` (requireProject, requireTicket)
  *   409  a guarded move found the ticket moved: `{ error, status, version }`,
  *        or a delete found the ticket started: `{ error: 'not-deletable', status }`,
  *        or a project delete found it holds tickets: `{ error: 'has-tickets', tickets }`,
@@ -512,8 +515,11 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
    * change roles (an admin).
    */
   function peopleOf(me) {
+    // Each person's projects, narrowed to the ones the caller may see.
+    const scope = scopeOf(me);
+    const seen = (list) => (scope == null ? list : list.filter((x) => scope.has(x.slug)));
     return {
-      people: store.listPeople().map((p) => ({ ...p, email: store.emailOf(p.id), role: store.roleOf(p.id), projects: store.projectsOf(p.id) })),
+      people: store.listPeople().map((p) => ({ ...p, email: store.emailOf(p.id), role: store.roleOf(p.id), projects: seen(store.projectsOf(p.id)) })),
       invites: store.listInvites(),
       roles: store.listRoles(),
       permissions: store.listPermissions(),
@@ -521,15 +527,41 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     };
   }
 
-  function requireProject(slug) {
+  /**
+   * The projects the caller may see, as a Set of slugs, or null for every
+   * one: a loop (any machine) and an admin see them all; any other person
+   * only the ones they are a member of (store.projectsVisibleTo).
+   */
+  function scopeOf(me) {
+    return store.seesEveryProject(me.id) ? null : new Set(store.projectsVisibleTo(me.id));
+  }
+
+  /**
+   * The 404 for a project or ticket the caller cannot have. To a caller who
+   * sees only their own projects, one that does not exist and one on a
+   * project they are not on get the same answer, word for word, so the
+   * answer never says whether it exists; `yourProjectsOnly` tells the page
+   * to say "you are not on this project" rather than "there is none".
+   */
+  function notFound(code, what, scope) {
+    return scope == null
+      ? new HttpError(404, code, `no ${what}.`)
+      : new HttpError(404, code, `no ${what} that you can see: there is none, or you are not on its project.`, { yourProjectsOnly: true });
+  }
+
+  /** A project the caller may see, or 404 (notFound). */
+  function requireProject(slug, me) {
+    const scope = scopeOf(me);
     const project = store.getProject(slug);
-    if (!project) throw new HttpError(404, 'unknown-project', `no project "${slug}".`);
+    if (!project || (scope && !scope.has(project.slug))) throw notFound('unknown-project', `project "${slug}"`, scope);
     return project;
   }
 
-  function requireTicket(id) {
+  /** A ticket on a project the caller may see, or 404 (notFound). */
+  function requireTicket(id, me) {
+    const scope = scopeOf(me);
     const ticket = store.getTicket(id);
-    if (!ticket) throw new HttpError(404, 'unknown-ticket', `no ticket ${id}.`);
+    if (!ticket || (scope && !scope.has(ticket.project))) throw notFound('unknown-ticket', `ticket ${id}`, scope);
     return ticket;
   }
 
@@ -580,13 +612,13 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     // Dane's page: what waits on the caller, across every project, by the
     // loop's own verdict (tracker/pageData.mjs).
     if (parts.length === 1 && parts[0] === 'waiting' && method === 'GET') {
-      return [200, waitingFor(store, me.id)];
+      return [200, waitingFor(store, me.id, { only: scopeOf(me) })];
     }
 
     // Dane's page: the Projects screen, the project Tasks opens, and the New
     // request form's picker with the project it starts on.
     if (parts.length === 1 && parts[0] === 'projects' && method === 'GET') {
-      const projects = projectsList(store);
+      const projects = projectsList(store, { only: scopeOf(me) });
       const fallback = projects.some((p) => p.slug === defaultProject) ? defaultProject : null;
       return [200, { projects, default: fallback }];
     }
@@ -688,8 +720,9 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     // (`?project=<slug>`) or, with none named, every project. Read-only.
     if (parts.length === 1 && parts[0] === 'reports' && method === 'GET') {
       const slug = url.searchParams.get('project');
-      const reports = reportsOf(store, { project: slug == null || slug === '' ? null : slug });
-      if (!reports) throw new HttpError(404, 'unknown-project', `no project "${slug}".`);
+      const scope = scopeOf(me);
+      const reports = reportsOf(store, { project: slug == null || slug === '' ? null : slug, only: scope });
+      if (!reports) throw notFound('unknown-project', `project "${slug}"`, scope);
       return [200, reports];
     }
 
@@ -700,14 +733,13 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     if (parts.length === 1 && parts[0] === 'search' && method === 'GET') {
       const { filters, problem } = readSearchFilters(store, (key) => url.searchParams.get(key));
       if (problem) throw new HttpError(400, 'unknown-filter', problem);
-      return [200, searchTickets(store, url.searchParams.get('q'), filters)];
+      return [200, searchTickets(store, url.searchParams.get('q'), filters, { only: scopeOf(me) })];
     }
 
     // Dane's page: one project's details page. A person also sees its alert
     // email and phone (the Edit project form); a loop never does.
     if (parts.length === 2 && parts[0] === 'projects' && method === 'GET') {
-      const details = projectDetailsOf(store, parts[1], { withAlerts: me.kind === 'human' });
-      if (!details) throw new HttpError(404, 'unknown-project', `no project "${parts[1]}".`);
+      const details = projectDetailsOf(store, requireProject(parts[1], me).slug, { withAlerts: me.kind === 'human' });
       // Whether the caller may change its members: an admin, signed in as a person.
       return [200, { ...details, canEditMembers: me.kind === 'human' && store.roleOf(me.id) === 'admin' }];
     }
@@ -721,7 +753,7 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
       if (me.kind !== 'human') {
         throw new HttpError(403, 'people-only', `only a person signed in to the tracker may ${method === 'POST' ? 'add' : 'remove'} a project's members; a machine may not.`);
       }
-      const project = requireProject(parts[1]);
+      const project = requireProject(parts[1], me);
       let person;
       if (method === 'POST') {
         const body = await readJson(req);
@@ -750,7 +782,7 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
       if (me.kind !== 'human') {
         throw new HttpError(403, 'people-only', `only a person signed in to the tracker may ${method === 'PATCH' ? 'change' : 'delete'} a project; a machine may not.`);
       }
-      const project = requireProject(parts[1]);
+      const project = requireProject(parts[1], me);
       if (method === 'PATCH') {
         const body = await readJson(req);
         const fixed = PROJECT_FIXED_FIELDS.filter((k) => k in body);
@@ -780,8 +812,7 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     // Dane's page: one project's board, the eight statuses in the contract's
     // order, each column in `queue` order.
     if (parts.length === 3 && parts[0] === 'projects' && parts[2] === 'board' && method === 'GET') {
-      const board = boardOf(store, parts[1]);
-      if (!board) throw new HttpError(404, 'unknown-project', `no project "${parts[1]}".`);
+      const board = boardOf(store, requireProject(parts[1], me).slug);
       return [200, board];
     }
 
@@ -789,18 +820,21 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     // fit another project better (tracker/projectGuess.mjs). Plain
     // word matching on the tickets already here; it writes nothing.
     if (parts.length === 4 && parts[0] === 'projects' && parts[2] === 'tickets' && parts[3] === 'check' && method === 'POST') {
-      const project = requireProject(parts[1]);
+      const project = requireProject(parts[1], me);
       const body = await readJson(req);
       checkBody(body, me, CHECK_FIELDS);
       for (const key of CHECK_FIELDS) {
         if (body[key] != null && typeof body[key] !== 'string') throw new HttpError(400, 'bad-field', `${key} must be text.`);
       }
-      const projects = store.listProjects().map((p) => ({ slug: p.slug, name: p.name, tickets: store.listTickets(p.slug) }));
+      // Only the projects the caller may see: a guess never names one they are not on.
+      const scope = scopeOf(me);
+      const projects = store.listProjects().filter((p) => scope == null || scope.has(p.slug))
+        .map((p) => ({ slug: p.slug, name: p.name, tickets: store.listTickets(p.slug) }));
       return [200, { suggest: guessProject({ name: body.name ?? '', description: body.description ?? '' }, project.slug, projects) }];
     }
 
     if (parts.length === 3 && parts[0] === 'projects' && parts[2] === 'tickets') {
-      const project = requireProject(parts[1]);
+      const project = requireProject(parts[1], me);
       if (method === 'GET') {
         const status = url.searchParams.get('status');
         const tickets = store.listTickets(project.slug, {
@@ -819,13 +853,13 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
 
     if (parts.length === 2 && parts[0] === 'tickets') {
       if (method === 'GET') {
-        const ticket = requireTicket(parts[1]);
+        const ticket = requireTicket(parts[1], me);
         return [200, { ...ticket, comments: store.listComments(ticket.id) }];
       }
       if (method === 'PATCH') {
         const body = await readJson(req);
         checkBody(body, me, [...CHANGE_FIELDS, 'ifStatus', 'ifVersion']);
-        const ticket = requireTicket(parts[1]);
+        const ticket = requireTicket(parts[1], me);
         // The contract's hand-off signal: a ticket is assigned to its
         // project's operator or to nobody. A person's change is held to it
         // here; a loop's goes through the door, which already keeps it.
@@ -848,6 +882,7 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
       // Delete a ticket nobody has started; the store refuses any other.
       // The log line names the ticket and the actor, the deletion's record.
       if (method === 'DELETE') {
+        requireTicket(parts[1], me);
         let gone;
         try {
           gone = store.deleteTicket(parts[1], { actor: me.id });
@@ -866,7 +901,7 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     // upload (the raw file as the body), and one download, always saved.
     if (parts.length === 3 && parts[0] === 'tickets' && parts[2] === 'attachments') {
       if (method === 'GET') {
-        const ticket = requireTicket(parts[1]);
+        const ticket = requireTicket(parts[1], me);
         return [200, { ticket: ticket.id, attachments: store.listAttachments(ticket.id) }];
       }
       if (method === 'POST') {
@@ -881,14 +916,14 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
         }
         if (!name.trim()) throw new HttpError(400, 'bad-name', "say the file's name in x-file-name; nothing was saved.");
         const bytes = await readFile(req);
-        const ticket = requireTicket(parts[1]);
+        const ticket = requireTicket(parts[1], me);
         const made = store.addAttachment({ ticket: ticket.id, name, type: req.headers['x-file-type'], bytes, actor: me.id });
         log(`attached ${made.name} (${made.size} bytes) to ${ticket.id} actor=${me.id}`);
         return [201, made];
       }
     }
     if (parts.length === 4 && parts[0] === 'tickets' && parts[2] === 'attachments' && method === 'GET') {
-      const ticket = requireTicket(parts[1]);
+      const ticket = requireTicket(parts[1], me);
       const file = /^[0-9]+$/.test(parts[3]) ? store.getAttachment(ticket.id, Number(parts[3])) : null;
       if (!file) throw new HttpError(404, 'unknown-attachment', `ticket ${ticket.id} has no attachment ${parts[3]}.`);
       return [200, null, null, {
@@ -905,7 +940,7 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     if (parts.length === 3 && parts[0] === 'tickets' && parts[2] === 'comments' && method === 'POST') {
       const body = await readJson(req);
       checkBody(body, me, ['body', 'parent']);
-      const ticket = requireTicket(parts[1]);
+      const ticket = requireTicket(parts[1], me);
       if (body.parent != null && !Number.isInteger(body.parent)) {
         throw new HttpError(400, 'bad-parent', `parent must be a comment id, not "${body.parent}".`);
       }
@@ -917,10 +952,12 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     if (parts.length === 3 && parts[0] === 'tickets' && parts[2] === 'clone' && method === 'POST') {
       const body = await readJson(req);
       checkBody(body, me, ['project']);
-      const ticket = requireTicket(parts[1]);
+      const ticket = requireTicket(parts[1], me);
       if (typeof body.project !== 'string' || !body.project) {
         throw new HttpError(400, 'bad-field', 'project must name the project to copy into.');
       }
+      // A copy goes only into a project the caller may see.
+      requireProject(body.project, me);
       const copy = store.cloneTicket(ticket.id, { project: body.project, actor: me.id });
       return [201, copy, { ticket: copy, changed: ['status'] }];
     }
@@ -928,13 +965,12 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     // Dane's page: one ticket with each comment's author named and machine
     // comments marked.
     if (parts.length === 3 && parts[0] === 'tickets' && parts[2] === 'thread' && method === 'GET') {
-      const thread = threadOf(store, parts[1]);
-      if (!thread) throw new HttpError(404, 'unknown-ticket', `no ticket ${parts[1]}.`);
+      const thread = threadOf(store, requireTicket(parts[1], me).id);
       return [200, { ...thread, attachments: store.listAttachments(thread.id), mergePhrase, closePhrase, goPhrase, choices: { priorities: PRIORITIES, statuses: PERSON_STATUSES } }];
     }
 
     if (parts.length === 3 && parts[0] === 'tickets' && parts[2] === 'events' && method === 'GET') {
-      const ticket = requireTicket(parts[1]);
+      const ticket = requireTicket(parts[1], me);
       return [200, { ticket: ticket.id, events: store.listEvents(ticket.id) }];
     }
 
