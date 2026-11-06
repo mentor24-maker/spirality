@@ -389,6 +389,38 @@ The settings come from the project config (`spirality.project.json`):
     beside it while the server runs; they belong to it, never delete them).
   - `backups/tracker-YYYY-MM-DD.db`: one copy per night, the newest 14 kept.
 
+**After a merge, the server restarts itself onto the new code** (SP-150). A
+pull only replaces files on disk; a running server keeps the code it started
+with. So every lane's sync of main (`scripts/run_relay.sh` and
+`scripts/loop_runner.sh`, through `scripts/lib/tracker_restart.sh`) notes
+where main was before it synced, ahead of the step that puts a checkout back
+on main, since that step can move main too. When the sync moved main and the
+change touches **a file the server loads**, it restarts the job with
+`launchctl kickstart -k gui/$(id -u)/<launchdPrefix>.tracker`, waits up to 20
+seconds for the server to answer on `trackerPort`, and writes one line to that
+lane's log: `tracker restarted for <old>..<new>`, or a line in capitals
+beginning `TRACKER RESTART` / `TRACKER NOT RESTARTED` saying what went wrong
+(including when it could not tell where main was, or what the server loads).
+
+"A file the server loads" is the whole `tracker/` folder, every module
+`tracker/server.mjs` imports from outside it (in `lib/` and `scripts/`),
+followed import by import by `scripts/lib/trackerFiles.mjs` so the list cannot
+fall behind the code, plus `spirality.project.json` (read at startup),
+`package.json` and `package-lock.json`. `node scripts/lib/trackerFiles.mjs`
+prints the list. A test loads the real server and fails if it loads a file the
+list misses. Files only the command-line tools load (such as
+`scripts/tracker/clickupTracker.mjs`, behind `npm run clickup`) are not on it:
+each command starts fresh and already runs the new code.
+
+The loop lanes restart after `npm ci`, and the relay runs `npm ci` itself when
+the pull changed the package files, so a merge that adds a dependency
+restarts onto it. Only the lane whose sync brought the change in sees main
+move, so the restart happens once, and its line is in that lane's log:
+`grep -h "tracker restart" ~/loop-logs/<projectSlug>-*.log | tail -1`.
+A pull that changes nothing the server loads restarts nothing, and a project
+with no `trackerPort` (or a checkout with no `tracker/server.mjs`) never
+restarts anything. The server is down for a few seconds during the restart.
+
 Logs are in the configured log folder: `<projectSlug>-tracker.log` (one line
 per request: method, address, answer, actor id; never a token) and
 `<projectSlug>-tracker-backup.log` (one `backup OK` or `backup FAILED` line
