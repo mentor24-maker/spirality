@@ -117,7 +117,9 @@ status_of() { curl -s -o /dev/null -m 15 -w '%{http_code}' "$@" || true; }
 
 tailscaled_line() {
   local row
-  row="$("$LAUNCHCTL" list 2>/dev/null | grep -F "$TS_LABEL" || true)"
+  # The label column must be the label exactly: a longer label that starts
+  # the same (com.x.tailscaled.other) is a different job.
+  row="$("$LAUNCHCTL" list 2>/dev/null | awk -F '\t' -v label="$TS_LABEL" '$3 == label' || true)"
   if [ -n "$row" ]; then echo "tailscaled: loaded under $TS_LABEL — $row"; return 0; fi
   echo "tailscaled: NOT loaded under $TS_LABEL — Funnel cannot carry anything until it is"
   return 1
@@ -156,6 +158,23 @@ tracker_is_ready() {
   return 3
 }
 
+# On a port Funnel has not served before, Tailscale fetches its certificate
+# on the first call, which can take a minute: the route is written, but the
+# outside address does not answer yet. Try it for a while before the status
+# says it does not answer, and say why the wait.
+OUTSIDE_TRIES="${FUNNEL_OUTSIDE_TRIES:-12}"
+OUTSIDE_PAUSE="${FUNNEL_OUTSIDE_PAUSE:-5}"
+wait_for_outside() {
+  local i code
+  for ((i = 1; i <= OUTSIDE_TRIES; i++)); do
+    code="$(status_of "$PUBLIC_ME")"
+    [ "$code" = 401 ] && return 0
+    [ "$i" = 1 ] && echo "Waiting for $PUBLIC_ME to answer (a new Funnel port's certificate can take a minute)..."
+    [ "$i" -lt "$OUTSIDE_TRIES" ] && sleep "$OUTSIDE_PAUSE"
+  done
+  echo "The route is on, but $PUBLIC_ME has not answered 401 yet. Run $0 --status again in a minute." >&2
+}
+
 put_on() {
   local before after state rc
   tailscaled_line >/dev/null || { tailscaled_line >&2; exit 1; }
@@ -184,6 +203,7 @@ put_on() {
     exit 1
   fi
   echo "Read back: port $FUNNEL_PORT leads to the tracker, and every other route is as it was."
+  wait_for_outside
   echo
   show_status
 }

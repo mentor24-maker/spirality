@@ -425,8 +425,22 @@ apart from StarCaster's own Funnel routes on 443.
 
 Through the public address the tracker answers **only its API**: no page and
 no page redirect (a page address answers JSON, 401 or 404). Every call still
-needs a token or a session, and sign-in still locks an email after 5
-failures. The session cookie carries `Secure` and every answer carries
+needs a token or a session, except the two that start one, and both are
+limited:
+
+- **Sign-in** locks an email for 15 minutes after 5 failures in 15 minutes,
+  counted **per door**: five wrong passwords through the public address lock
+  only the public address, so tries from the internet can never lock Dane
+  out of the Mini's page (and the other way round). Old entries are dropped,
+  so emails tried at random do not pile up in memory.
+- **Forgot password** sends one account at most one reset email every 15
+  minutes and 4 a day, and each door sends at most 20 an hour in all. A
+  refused one answers the same "on its way" (the log says why), so a loop
+  against the public address can neither flood an inbox nor use up the
+  Resend account that also carries the hand-over emails. An email with no
+  account sends nothing and counts against nothing.
+
+The session cookie carries `Secure` and every answer carries
 `Strict-Transport-Security` there; on the home network (`trackerUrl`, plain
 http) neither, so the Mini's page keeps working. The tracker knows a request
 came through Funnel by what Funnel adds (`X-Forwarded-Proto: https`, a
@@ -444,6 +458,16 @@ the address:
 | `scripts/install_tracker_funnel.sh` | Puts the route on. Refuses (exit 3) if the running tracker is on code from before the public address (it would be published with no `Secure` cookie and with its page) or if the port already carries another route. Reads every route back: ours must be there and every other route (StarCaster's 443) exactly as it was, or it says FAILED. |
 | `scripts/install_tracker_funnel.sh --status` | Says whether Tailscale's job is loaded, whether the route is on, and what `/me` answers on the Mini and at the public address (401 = reached, not signed in). Exit 0 only when all of that is right. |
 | `scripts/install_tracker_funnel.sh --off` | Takes the route off and reads it back; the other routes are left as they were. |
+
+Putting the route on waits up to a minute for the public address to answer:
+on a port Funnel has not served before, Tailscale fetches its certificate on
+the first call. If it still has not answered, the script says so and exits 1
+with the route on; run `--status` again a minute later.
+
+`Strict-Transport-Security` covers the whole name, not one port: a browser
+that has opened the public address once keeps to https for every port of
+`mac-mini.tail7fc5c6.ts.net` for a year. That is harmless today, because
+StarCaster's routes there are https too.
 
 The route survives a reboot: `funnel --bg` is saved in Tailscale's own
 state, so it comes back whenever Tailscale does. To check from outside, on a

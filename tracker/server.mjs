@@ -114,6 +114,19 @@ const MAX_FAILURES = 5;
 const FAILURE_WINDOW_MS = 15 * 60 * 1000;
 const LOCK_MS = 15 * 60 * 1000;
 
+/**
+ * Reset emails (`POST /account/forgot`), which need no token or session: one
+ * account's email gets at most one every RESET_GAP_MS and RESET_PER_DAY a
+ * day, and each door (the public address, the home network) sends at most
+ * RESET_PER_HOUR in all. A refused one answers the same "on its way" and only
+ * says so in the log, so the limit tells a caller nothing about an account.
+ */
+const RESET_GAP_MS = 15 * 60 * 1000;
+const RESET_PER_DAY = 4;
+const RESET_PER_HOUR = 20;
+const HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * HOUR_MS;
+
 /** The one answer to a wrong password and to an unknown email, so neither says which. */
 const NO_MATCH = 'That email and password do not match.';
 
@@ -313,20 +326,35 @@ function saysJson(req) {
 }
 
 /**
- * Sign-in failures per email, kept in memory (a restart forgets them).
- * `locked(email)` is whether that email is refused for now; `failed(email)`
- * counts one more, and answers true when it is the one that locks it.
+ * Sign-in failures per door and email, kept in memory (a restart forgets
+ * them). The door is `public` (through the public address) or `home`, and
+ * each is counted apart, so five wrong passwords from the internet lock only
+ * the internet's door and the Mini's page keeps signing that person in.
+ * `locked(door, email)` is whether that email is refused there for now;
+ * `failed(door, email)` counts one more, and answers true when it is the one
+ * that locks it; `cleared(email)` forgives both doors. Entries whose window
+ * and lock have both passed are dropped (at most once a minute), so emails
+ * tried at random never pile up; `size()` is how many are kept.
  */
-function failureCounter(now) {
-  const byEmail = new Map();
+export function failureCounter(now) {
+  const byKey = new Map();
+  let sweptAt = -Infinity;
+  const key = (door, email) => `${door}\n${email}`;
+  const live = (entry, t) => entry.lockedUntil > t || entry.times.some((at) => t - at < FAILURE_WINDOW_MS);
+  function sweep(t) {
+    if (t - sweptAt < 60_000) return;
+    sweptAt = t;
+    for (const [k, entry] of byKey) if (!live(entry, t)) byKey.delete(k);
+  }
   return {
-    locked(email) {
-      const entry = byEmail.get(email);
+    locked(door, email) {
+      const entry = byKey.get(key(door, email));
       return Boolean(entry && entry.lockedUntil > now());
     },
-    failed(email) {
+    failed(door, email) {
       const t = now();
-      const entry = byEmail.get(email) ?? { times: [], lockedUntil: 0 };
+      sweep(t);
+      const entry = byKey.get(key(door, email)) ?? { times: [], lockedUntil: 0 };
       entry.times = entry.times.filter((at) => t - at < FAILURE_WINDOW_MS);
       entry.times.push(t);
       const locks = entry.times.length >= MAX_FAILURES;
@@ -334,11 +362,48 @@ function failureCounter(now) {
         entry.lockedUntil = t + LOCK_MS;
         entry.times = [];
       }
-      byEmail.set(email, entry);
+      byKey.set(key(door, email), entry);
       return locks;
     },
     cleared(email) {
-      byEmail.delete(email);
+      for (const door of DOORS) byKey.delete(key(door, email));
+    },
+    size() {
+      return byKey.size;
+    },
+  };
+}
+
+/** The two ways in, counted apart by the sign-in lock and the reset limit. */
+const DOORS = ['public', 'home'];
+
+/**
+ * The reset-email limit (RESET_GAP_MS, RESET_PER_DAY, RESET_PER_HOUR).
+ * `take(door, email, hasAccount)` answers null when an email may go (and
+ * counts it), or why not. An email with no account sends nothing and is never
+ * counted, so made-up emails neither grow the map nor use up the hour.
+ */
+export function resetLimiter(now) {
+  const byEmail = new Map();
+  const sentByDoor = new Map(DOORS.map((door) => [door, []]));
+  return {
+    take(door, email, hasAccount) {
+      if (!hasAccount) return null;
+      const t = now();
+      for (const [k, times] of byEmail) {
+        const kept = times.filter((at) => t - at < DAY_MS);
+        if (kept.length) byEmail.set(k, kept); else byEmail.delete(k);
+      }
+      const times = byEmail.get(email) ?? [];
+      if (times.length && t - times[times.length - 1] < RESET_GAP_MS) return 'one was sent to that account less than 15 minutes ago';
+      if (times.length >= RESET_PER_DAY) return `that account has had ${RESET_PER_DAY} in the last 24 hours`;
+      const sent = sentByDoor.get(door).filter((at) => t - at < HOUR_MS);
+      sentByDoor.set(door, sent);
+      if (sent.length >= RESET_PER_HOUR) return `${RESET_PER_HOUR} went out through this door in the last hour`;
+      times.push(t);
+      byEmail.set(email, times);
+      sent.push(t);
+      return null;
     },
   };
 }
@@ -437,6 +502,7 @@ export const GO_PHRASE = busRelayPlan.GO_PHRASE;
 
 export function createHandler(store, { log = () => {}, notifier = null, defaultProject = null, mergePhrase = null, closePhrase = null, goPhrase = null, accountMail = null, setup = null, now = Date.now, publicUrl = null } = {}) {
   const failures = failureCounter(now);
+  const resets = resetLimiter(now);
   // The public address's host as a Host header names it (`name:8443`; no port for 443).
   const publicHost = publicUrl ? new URL(publicUrl).host.toLowerCase() : null;
 
@@ -886,6 +952,7 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     if (req.method !== 'POST') return null;
     if (!['/account/link', '/account/set-password', '/account/forgot', '/signin', '/signout'].includes(url.pathname)) return null;
     if (!saysJson(req)) throw new HttpError(415, 'json-only', 'this call takes a JSON body (content-type: application/json).');
+    const door = isPublic ? 'public' : 'home';
     if (url.pathname === '/signin') {
       const body = await readJson(req);
       onlyFields(body, ['email', 'password']);
@@ -893,13 +960,13 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
       if (!email || typeof body.password !== 'string' || !body.password) {
         throw new HttpError(400, 'missing', 'type your email and your password.');
       }
-      if (failures.locked(email)) {
-        log('sign-in refused: that email is locked for 15 minutes after 5 failures');
+      if (failures.locked(door, email)) {
+        log(`sign-in refused: that email is locked for 15 minutes after 5 failures (${door} door)`);
         throw new HttpError(429, 'locked', 'Too many tries for that email. Wait 15 minutes, then try again.');
       }
       const person = store.checkPassword({ email, password: body.password });
       if (!person) {
-        if (failures.failed(email)) log('sign-in failed 5 times for one email in 15 minutes; it is locked for 15 minutes');
+        if (failures.failed(door, email)) log(`sign-in failed 5 times for one email in 15 minutes; it is locked for 15 minutes at the ${door} door`);
         throw new HttpError(401, 'no-match', NO_MATCH);
       }
       failures.cleared(email);
@@ -918,7 +985,14 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
       if (typeof body.email !== 'string' || !body.email.trim()) throw new HttpError(400, 'missing', 'type your email.');
       // The email goes out after the answer, so the answer is the same,
       // and as quick, whether or not the email has an account.
+      const email = body.email.trim().toLowerCase();
       const after = async () => {
+        const person = store.actorForEmail(email);
+        const refused = resets.take(door, email, Boolean(person));
+        if (refused) {
+          log(`reset NOT sent to actor ${person.id}: ${refused} (${door} door)`);
+          return;
+        }
         const { line } = await sendResetLink({
           store, email: body.email, send: accountMail?.send ?? null,
           trackerUrl: accountMail?.pageUrl ?? null, projectName: accountMail?.projectName ?? 'tracker',

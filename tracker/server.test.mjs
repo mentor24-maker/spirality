@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
-import { startServer, settingsFromEnv, setupSettingsOf, viaPublicAddress } from './server.mjs';
+import { startServer, settingsFromEnv, setupSettingsOf, viaPublicAddress, failureCounter } from './server.mjs';
 import { DANE_FIELDS, STEPS } from '../scripts/onboard/onboard.mjs';
 import loopStatuses from '../lib/loopStatuses.js';
 
@@ -1159,6 +1159,99 @@ test('Forgot password with no mail sender, or a sender that fails, answers the p
     assert.ok(f.lines.some((l) => /^reset NOT sent to actor \d+: RESEND_API_KEY is not in Doppler/.test(l)));
     assert.equal((await s.ask('POST', '/account/forgot', { headers: s.json, body: {} })).status, 400);
   } finally { await s.close(); await off.close(); await f.cleanup(); }
+});
+
+/** Wait until the log has `count` lines matching `re` (the reset email goes out after the answer). */
+async function logged(f, re, count = 1) {
+  for (let i = 0; i < 100 && f.lines.filter((l) => re.test(l)).length < count; i++) await new Promise((r) => setTimeout(r, 10));
+  return f.lines.filter((l) => re.test(l)).length;
+}
+
+test('five wrong passwords through the public address lock only the public door: the home network still signs that person in (SP-152)', async () => {
+  const f = await fixture();
+  let clock = Date.parse('2026-11-06T18:00:00Z');
+  const s = await signInServer(f, { now: () => clock, publicUrl: 'https://mini.example.ts.net:8443' });
+  const outside = (b) => s.ask('POST', '/signin', { headers: { ...s.json, ...FUNNEL }, body: b });
+  try {
+    for (let i = 0; i < 5; i++) assert.equal((await outside({ email: s.email, password: `wrong ${i}` })).status, 401);
+    assert.equal((await outside({ email: s.email, password: s.password })).status, 429, 'the public door is locked');
+    assert.ok(f.lines.includes('sign-in refused: that email is locked for 15 minutes after 5 failures (public door)'), f.lines.join('\n'));
+    const home = await s.signIn({ email: s.email, password: s.password });
+    assert.equal(home.status, 200, 'the Mini\'s page is not locked out by tries from the internet');
+
+    // And the other way round: the home door's lock does not close the public one.
+    clock += 16 * 60_000;
+    for (let i = 0; i < 5; i++) assert.equal((await s.signIn({ email: s.email, password: `wrong ${i}` })).status, 401);
+    assert.equal((await s.signIn({ email: s.email, password: s.password })).status, 429);
+    assert.equal((await outside({ email: s.email, password: s.password })).status, 200);
+  } finally { await s.close(); await f.cleanup(); }
+});
+
+test('the sign-in failure count drops emails whose window and lock have both passed, so random emails never pile up (SP-152)', () => {
+  let clock = 0;
+  const failures = failureCounter(() => clock);
+  for (let i = 0; i < 50; i++) failures.failed('public', `random${i}@example.com`);
+  clock += 10 * 60_000;
+  for (let i = 0; i < 5; i++) failures.failed('public', 'locked@example.com');
+  assert.equal(failures.size(), 51);
+  clock += 6 * 60_000;
+  failures.failed('public', 'one.more@example.com');
+  assert.equal(failures.size(), 2, 'only the newest try and the lock still running are kept');
+  assert.equal(failures.locked('public', 'locked@example.com'), true);
+  assert.equal(failures.locked('home', 'locked@example.com'), false);
+  clock += 15 * 60_000;
+  failures.failed('home', 'last@example.com');
+  assert.equal(failures.size(), 1, 'a lock that has run out is dropped too');
+});
+
+test('reset emails are limited: one per account every 15 minutes, 4 a day, 20 an hour per door, and the answer never changes (SP-152)', async () => {
+  const f = await fixture();
+  let clock = Date.parse('2026-11-06T18:00:00Z');
+  const sent = [];
+  const accountMail = { send: async (mail) => { sent.push(mail); }, pageUrl: 'http://tracker.test:4180', projectName: 'Alpha' };
+  const s = await signInServer(f, { now: () => clock, accountMail, publicUrl: 'https://mini.example.ts.net:8443' });
+  const forgot = (email, headers = {}) => s.ask('POST', '/account/forgot', { headers: { ...s.json, ...headers }, body: { email } });
+  try {
+    const first = await forgot(s.email, FUNNEL);
+    await logged(f, /^reset link sent/);
+    const again = await forgot(s.email.toUpperCase(), FUNNEL);
+    await logged(f, /^reset NOT sent/);
+    assert.equal(again.status, 200);
+    assert.equal(again.text, first.text, 'a refused reset answers word for word the same');
+    assert.equal(sent.length, 1, 'a second email within 15 minutes is not sent');
+    assert.ok(f.lines.includes(`reset NOT sent to actor ${f.human.id}: one was sent to that account less than 15 minutes ago (public door)`), f.lines.join('\n'));
+
+    // 4 a day: two more 15 minutes apart, then the fifth in the day is refused.
+    for (let i = 0; i < 3; i++) { clock += 16 * 60_000; await forgot(s.email); await logged(f, /^reset link sent/, 2 + i); }
+    assert.equal(sent.length, 4);
+    clock += 16 * 60_000;
+    await forgot(s.email);
+    assert.equal(await logged(f, /in the last 24 hours/), 1);
+    assert.equal(sent.length, 4);
+    clock += 24 * 60 * 60_000;
+    await forgot(s.email);
+    await logged(f, /^reset link sent/, 5);
+    assert.equal(sent.length, 5, 'a day later it sends again');
+
+    // Made-up emails send nothing and use up nothing.
+    for (let i = 0; i < 30; i++) await forgot(`nobody${i}@example.com`, FUNNEL);
+    await logged(f, /no account; nothing sent/, 30);
+
+    // 20 an hour through one door, across many accounts; the home door keeps its own 20.
+    const people = Array.from({ length: 21 }, (_, i) => {
+      const p = f.store.createActor({ kind: 'human', name: `Person ${i}` });
+      f.store.setEmail(p.id, `person${i}@example.com`);
+      return p;
+    });
+    clock += 2 * 60 * 60_000;
+    const before = sent.length;
+    for (const [i] of people.entries()) await forgot(`person${i}@example.com`, FUNNEL);
+    assert.equal(await logged(f, /20 went out through this door in the last hour \(public door\)$/), 1);
+    assert.equal(sent.length - before, 20);
+    await forgot('person20@example.com');
+    await logged(f, /^reset link sent/, 5 + 21);
+    assert.equal(sent.length - before, 21, 'the home door is not used up by the public one');
+  } finally { await s.close(); await f.cleanup(); }
 });
 
 test('no password and no session token ever reaches the server log', async () => {

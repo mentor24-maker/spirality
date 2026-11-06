@@ -74,7 +74,7 @@ function run(dir, args = [], extra = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn('bash', [SCRIPT, ...args], {
       cwd: dir,
-      env: { ...process.env, TAILSCALE_BIN: join(dir, 'tailscale'), LAUNCHCTL_BIN: join(dir, 'launchctl'), FAKE_TS_STATE: join(dir, 'state.json'), FAKE_TS_LOG: join(dir, 'calls.log'), ...extra },
+      env: { ...process.env, FUNNEL_OUTSIDE_TRIES: '2', FUNNEL_OUTSIDE_PAUSE: '0', TAILSCALE_BIN: join(dir, 'tailscale'), LAUNCHCTL_BIN: join(dir, 'launchctl'), FAKE_TS_STATE: join(dir, 'state.json'), FAKE_TS_LOG: join(dir, 'calls.log'), ...extra },
     });
     let out = '';
     let err = '';
@@ -113,6 +113,8 @@ test('putting the route on: port 8443 leads to the tracker, StarCaster\'s 443 ro
     assert.match(r.out, new RegExp(`tracker: +http://127.0.0.1:${t.port}/me answers 401`));
     // The outside address cannot be reached from a test (.invalid), and the run says so rather than passing.
     assert.match(r.out, /outside: +https:\/\/mini\.invalid:8443\/me answers 000/);
+    assert.match(r.out, /Waiting for https:\/\/mini\.invalid:8443\/me to answer \(a new Funnel port's certificate can take a minute\)/);
+    assert.match(r.err, /The route is on, but https:\/\/mini\.invalid:8443\/me has not answered 401 yet/);
     assert.equal(r.status, 1);
 
     // Run again: nothing is rewritten.
@@ -177,6 +179,14 @@ test('a failed write, a change to another route, or tailscaled not loaded each s
     assert.equal(down.status, 1);
     assert.match(down.err, /tailscaled: NOT loaded under com\.example\.tailscaled/);
     assert.doesNotMatch(down.calls, /funnel/);
+
+    // A job whose label only starts the same is not Tailscale's job.
+    const lookalike = scratch(t.port, { loaded: false });
+    writeFileSync(join(lookalike, 'launchctl'), '#!/bin/bash\nprintf "123\\t0\\tcom.example.tailscaled.helper\\n"\n');
+    const near = await run(lookalike);
+    assert.equal(near.status, 1);
+    assert.match(near.err, /tailscaled: NOT loaded under com\.example\.tailscaled/);
+    assert.doesNotMatch(near.calls, /funnel/);
   } finally { await t.close(); }
 });
 
