@@ -1809,7 +1809,9 @@ async function drawSettings() {
 /**
  * The Users page: everyone who has an account (name and email), the open
  * invites (email, who invited, when it expires) each with a Cancel button,
- * and an "Invite someone" form. Inviting emails a 7-day link; the server
+ * and an "Invite someone" form. When the tracker knows an outside site,
+ * the form also asks where the link opens ("Send the link to": the tracker
+ * page or that site's page). Inviting emails a 7-day link; the server
  * makes the invite only if the email went out, and says so if it did not.
  * After every invite or cancel the page reads the list again and says it
  * worked only when what it reads agrees. A loop's sign-in sees no form and
@@ -1821,7 +1823,7 @@ async function drawSettings() {
  * permission.
  */
 async function drawUsers(done = '', problem = '') {
-  const { people, invites = [], roles = [], permissions = [], canEditRoles = false } = await api('GET', '/people');
+  const { people, invites = [], sites = [], roles = [], permissions = [], canEditRoles = false } = await api('GET', '/people');
   setTitle('Users · Tracker');
   const person = me?.kind === 'human';
   const picker = person && canEditRoles;
@@ -1842,6 +1844,8 @@ async function drawUsers(done = '', problem = '') {
     ${person ? `<form class="invite">
       <label for="invite-email">Invite someone</label>
       <div class="row"><input id="invite-email" type="email" autocomplete="off" placeholder="their@email.com" required><button type="submit">Send Invite</button></div>
+      ${sites.length ? `<label for="invite-site">Send the link to</label>
+      <div class="row"><select id="invite-site"><option value="">the tracker page</option>${sites.map((x) => `<option value="${escapeHtml(x.id)}">${escapeHtml(x.name)}</option>`).join('')}</select></div>` : ''}
       <span class="hint quiet">They get an email with a link to choose their name and password. It works once, for 7 days.</span>
     </form>` : ''}
     <h2>Users with an Account</h2>
@@ -1862,12 +1866,14 @@ async function drawUsers(done = '', problem = '') {
   form?.addEventListener('submit', async (e) => {
     e.preventDefault();
     const email = form.querySelector('input').value.trim();
+    // "Send the link to": the tracker page (no site) or an outside site's page.
+    const site = form.querySelector('#invite-site')?.value ?? '';
     const button = form.querySelector('button');
     button.disabled = true;
     busy(`Sending an invite to ${email}…`);
     let sent;
     try {
-      sent = await api('POST', '/invites', { email });
+      sent = await api('POST', '/invites', site ? { email, site: Number(site) } : { email });
     } catch (err) {
       if (err instanceof SignedOut) return drawSignIn(`You were signed out; ${email} was not invited.`);
       note.className = 'note error';

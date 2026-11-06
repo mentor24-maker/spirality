@@ -2189,10 +2189,13 @@ test('the Users page escapes every name and email, offers the form and Cancel to
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   const draw = app.slice(app.indexOf('async function drawUsers'), app.indexOf('/** Underline the header link'));
   assert.ok(draw.length > 100);
-  for (const field of ['p.name', 'p.email', 'i.email', 'i.invitedBy.name']) assert.match(draw, new RegExp(`escapeHtml\\(${field.replace('.', '\\.')}\\)`), field);
+  for (const field of ['p.name', 'p.email', 'i.email', 'i.invitedBy.name', 'x.id', 'x.name']) assert.match(draw, new RegExp(`escapeHtml\\(${field.replace('.', '\\.')}\\)`), field);
   assert.match(draw, /\$\{person \? `<form class="invite">/);
   assert.match(draw, /\$\{person \? `<button type="button" data-cancel=/);
-  assert.match(draw, /api\('POST', '\/invites', \{ email \}\)/);
+  // "Send the link to": only when the tracker knows an outside site, the tracker page first and chosen by default.
+  assert.match(draw, /\$\{sites\.length \? `<label for="invite-site">Send the link to<\/label>/);
+  assert.match(draw, /<select id="invite-site"><option value="">the tracker page<\/option>\$\{sites\.map/);
+  assert.match(draw, /api\('POST', '\/invites', site \? \{ email, site: Number\(site\) \} : \{ email \}\)/);
   assert.match(draw, /api\('DELETE', `\/invites\/\$\{encodeURIComponent\(id\)\}`\)/);
   // Each write (invite, cancel, role change) is read back with GET /people before the page says it worked.
   assert.equal(draw.match(/await api\('GET', '\/people'\)\.catch/g).length, 3);

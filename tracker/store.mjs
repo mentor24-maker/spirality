@@ -134,7 +134,8 @@ CREATE TABLE IF NOT EXISTS actors (
   name        TEXT NOT NULL,
   token_hash  TEXT,
   email       TEXT,
-  password_hash TEXT
+  password_hash TEXT,
+  site_url    TEXT
 );
 CREATE TABLE IF NOT EXISTS projects (
   slug        TEXT PRIMARY KEY,
@@ -377,7 +378,23 @@ const num = (v) => (v == null ? null : Number(v));
 const PROJECT_CHANGEABLE = Object.freeze(['name', 'url', 'logo', 'owner', 'repo', 'alertEmail', 'alertPhone']);
 
 /** The columns an actor gained after the first databases were made. */
-const LATER_ACTOR_COLUMNS = Object.freeze({ token_hash: 'TEXT', email: 'TEXT', password_hash: 'TEXT' });
+const LATER_ACTOR_COLUMNS = Object.freeze({ token_hash: 'TEXT', email: 'TEXT', password_hash: 'TEXT', site_url: 'TEXT' });
+
+/**
+ * An outside site's page address, as a site actor holds it: https, or plain
+ * http only for a page on this same computer (`http://localhost…`, for
+ * trying a site out). Answers the address trimmed, or throws `bad-site-url`.
+ */
+export function checkSiteUrl(value) {
+  const text = typeof value === 'string' ? value.trim() : '';
+  let url = null;
+  try { url = new URL(text); } catch { url = null; }
+  const local = url && url.protocol === 'http:' && url.hostname === 'localhost';
+  if (!url || !(url.protocol === 'https:' || local) || url.username || url.password || url.hash) {
+    throw new StoreError('bad-site-url', `a site's page address is https:// (or http://localhost for trying it out), with no #part, not "${text}".`);
+  }
+  return text;
+}
 
 /** The columns a project gained after the first databases were made, and their types. */
 const LATER_PROJECT_COLUMNS = Object.freeze({ url: 'TEXT', logo: 'TEXT', owner: 'INTEGER REFERENCES actors(id)', repo: 'TEXT', alert_email: 'TEXT', alert_phone: 'TEXT' });
@@ -852,13 +869,38 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
 
   return {
     /** A person or a machine that acts on tickets. */
-    createActor({ kind, name }) {
+    /**
+     * A person or a machine that acts on tickets. `siteUrl` marks a machine
+     * as an outside site (docs/OUTSIDE_SITE_API.md): the page its invite and
+     * reset links open. Only a machine may be a site.
+     */
+    createActor({ kind, name, siteUrl = null }) {
       if (!ACTOR_KINDS.includes(kind)) {
         throw new StoreError('bad-actor', `an actor's kind is ${ACTOR_KINDS.join(' or ')}, not "${kind}".`);
       }
       requireText(name, "an actor's name");
-      const r = db.prepare('INSERT INTO actors (kind, name) VALUES (?, ?)').run(kind, name);
-      return { id: num(r.lastInsertRowid), kind, name };
+      if (siteUrl != null && kind !== 'machine') {
+        throw new StoreError('bad-actor', 'only a machine may be a site; a person never holds a site address.');
+      }
+      const site = siteUrl == null ? null : checkSiteUrl(siteUrl);
+      const r = db.prepare('INSERT INTO actors (kind, name, site_url) VALUES (?, ?, ?)').run(kind, name, site);
+      const id = num(r.lastInsertRowid);
+      if (db.prepare('SELECT site_url FROM actors WHERE id = ?').get(id)?.site_url !== site) {
+        throw new StoreError('write-failed', `actor ${id}'s site address did not save.`);
+      }
+      return { id, kind, name };
+    },
+
+    /** The page address of the site actor `actorId`, or null for any actor that is not a site. */
+    siteUrlOf(actorId) {
+      if (!Number.isInteger(actorId)) return null;
+      return db.prepare("SELECT site_url FROM actors WHERE id = ? AND kind = 'machine'").get(actorId)?.site_url ?? null;
+    },
+
+    /** Every outside site, oldest first: `{ id, name, url }`, for the Users page's "Send the link to". Never a token. */
+    listSites() {
+      return db.prepare("SELECT id, name, site_url FROM actors WHERE kind = 'machine' AND site_url IS NOT NULL ORDER BY id").all()
+        .map((row) => ({ id: num(row.id), name: row.name, url: row.site_url }));
     },
 
     getActor(id) {

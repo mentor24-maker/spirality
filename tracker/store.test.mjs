@@ -422,6 +422,57 @@ test('a database made before actors had tokens gains the column, and its rows su
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+test('a machine marked as a site keeps its https page address; a person, a plain-http address or a bad one is refused, and nothing is made', () => {
+  const { store, human, machine, cleanup } = fixture();
+  try {
+    const site = store.createActor({ kind: 'machine', name: 'StarCaster page', siteUrl: ' https://starcaster.example/spirality ' });
+    const local = store.createActor({ kind: 'machine', name: 'Local page', siteUrl: 'http://localhost:3000/spirality' });
+    assert.equal(store.siteUrlOf(site.id), 'https://starcaster.example/spirality');
+    assert.equal(store.siteUrlOf(local.id), 'http://localhost:3000/spirality');
+    assert.equal(store.siteUrlOf(machine.id), null, 'a loop is not a site');
+    assert.equal(store.siteUrlOf(human.id), null);
+    assert.equal(store.siteUrlOf(999), null);
+    assert.equal(store.siteUrlOf('1'), null);
+    assert.deepEqual(store.listSites(), [
+      { id: site.id, name: 'StarCaster page', url: 'https://starcaster.example/spirality' },
+      { id: local.id, name: 'Local page', url: 'http://localhost:3000/spirality' },
+    ]);
+    assert.deepEqual(store.getActor(site.id), { id: site.id, kind: 'machine', name: 'StarCaster page' }, 'an actor reads back as before');
+    const count = store.listActors().length;
+    for (const [kind, siteUrl, code] of [
+      ['human', 'https://starcaster.example/x', 'bad-actor'],
+      ['machine', 'http://starcaster.example/x', 'bad-site-url'],
+      ['machine', 'http://127.0.0.1:3000/x', 'bad-site-url'],
+      ['machine', 'ftp://starcaster.example/x', 'bad-site-url'],
+      ['machine', 'https://starcaster.example/x#top', 'bad-site-url'],
+      ['machine', 'https://user:pw@starcaster.example/x', 'bad-site-url'],
+      ['machine', 'not an address', 'bad-site-url'],
+      ['machine', '', 'bad-site-url'],
+    ]) {
+      assert.throws(() => store.createActor({ kind, name: 'x', siteUrl }), (err) => err instanceof StoreError && err.code === code, `${kind} ${siteUrl}`);
+    }
+    assert.equal(store.listActors().length, count, 'a refused site makes no actor');
+  } finally { cleanup(); }
+});
+
+test('a database made before sites gains the site column empty, and its actors survive', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tracker-store-'));
+  const path = join(dir, 'old.db');
+  try {
+    const old = new DatabaseSync(path);
+    old.exec("CREATE TABLE actors (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL CHECK (kind IN ('human', 'machine')), name TEXT NOT NULL, token_hash TEXT, email TEXT, password_hash TEXT)");
+    old.exec("INSERT INTO actors (kind, name) VALUES ('machine', 'Old loop')");
+    old.close();
+    const store = openStore(path);
+    try {
+      assert.equal(store.siteUrlOf(1), null);
+      assert.deepEqual(store.listSites(), []);
+      const site = store.createActor({ kind: 'machine', name: 'Site', siteUrl: 'https://site.example/p' });
+      assert.equal(store.siteUrlOf(site.id), 'https://site.example/p');
+    } finally { store.close(); }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test('a Requested or Queued ticket is deleted with its comments and events; nothing of it reads back', () => {
   const { store, human, machine, cleanup } = fixture();
   try {
@@ -1364,7 +1415,7 @@ test('today\'s database gains emails, passwords, sessions and links, and every e
 
     const raw = new DatabaseSync(path);
     try {
-      assert.deepEqual(raw.prepare('PRAGMA table_info(actors)').all().map((c) => c.name), ['id', 'kind', 'name', 'token_hash', 'email', 'password_hash']);
+      assert.deepEqual(raw.prepare('PRAGMA table_info(actors)').all().map((c) => c.name), ['id', 'kind', 'name', 'token_hash', 'email', 'password_hash', 'site_url']);
       assert.deepEqual(raw.prepare('SELECT id, kind, name, token_hash FROM actors ORDER BY id').all(), before.actors);
       assert.deepEqual(raw.prepare('SELECT slug, name, prefix, operator, next_number, url, logo, owner FROM projects ORDER BY rowid').all(), before.projects);
       for (const t of ['tickets', 'comments', 'stage_colours']) {
