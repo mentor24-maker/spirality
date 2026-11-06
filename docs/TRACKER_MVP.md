@@ -149,6 +149,13 @@ account_links  token hash, purpose (setup|invite|reset), email, actor,
   last 7 days, a reset link 1 hour. A used, expired or unknown link is
   refused, each with its own reason. A database made before these existed
   gains the columns and tables, empty, on start-up; no existing row changes.
+- **An attachment** is a file kept on a ticket (SP-140): its name, type,
+  size, the file's bytes themselves, who added it and when, in the
+  `attachments` table. Keeping the bytes inside the database means the
+  nightly backup already holds them, with no second folder to copy. Each is
+  1 byte to 10 MB. Like a comment it is never edited; it goes only with its
+  ticket, when an unstarted ticket is deleted. A database made before this
+  gains the table, empty, on start-up.
 
 ### The API
 
@@ -188,6 +195,9 @@ answers are JSON (structured text programs read).
 | `POST /signin` | **no token**: `{ email, password }` → the person, and a session cookie (`tracker_session`, `HttpOnly`, `SameSite=Strict`, `Path=/`, 30 days). A wrong password and an unknown email get the same 401 `no-match`, "That email and password do not match." After 5 failures for one email in 15 minutes, that email is refused (429 `locked`) for 15 minutes, even with the right password; the count is kept in memory, so a restart forgets it, and setting a password through an emailed link clears it. **No `Secure` flag yet**: the tracker is plain http on the home network; the ticket that opens it to the internet must add it, with https |
 | `POST /signout` | **no token**: ends the cookie's session and clears the cookie |
 | `POST /account/forgot` | **no token**: `{ email }` → the same answer whether or not the email has an account; an account's email is sent a 1-hour `reset` link through Resend after the answer has gone back. The log says whether it went, never the link or the email |
+| `POST /tickets/:id/attachments` | attach a file: the raw file as the body (`content-type: application/octet-stream`, which a form on another site cannot send, so the cookie may make this one write that is not JSON), its name percent-encoded in `x-file-name`, its type in `x-file-type`. Answers 201 with `{ id, ticket, name, type, size, addedBy, createdAt }`, read back byte for byte. Over 10 MB is 413 `too-large` ("That file is over 10 MB. Attach a smaller one; nothing was saved."); an empty file or no name is 400; nothing is stored. The JSON calls' 1 MB limit is unchanged |
+| `GET /tickets/:id/attachments` | a ticket's files, oldest first, without their bytes (the ticket page reads the same list in `thread`) |
+| `GET /tickets/:id/attachments/:n` | one file, byte for byte, always as a download (`Content-Disposition: attachment`, `X-Content-Type-Options: nosniff`, a sandboxing `Content-Security-Policy`), so an uploaded HTML file can never run as the tracker's page |
 | `POST /tickets/:id/clone` | for Dane's page: copy a ticket into another project (`{ project }`), as a new ticket in `Requested` there with one comment naming where it came from; the original does not change |
 
 The store enforces only what keeps the data true: valid statuses, the
@@ -292,7 +302,7 @@ into the package only to cut it open again.
 
 Built later, from this core, only when a real need appears: a phone layout
 and phone notifications, the bus (StarCaster's alarm list),
-search, attachments, more than one person, per-client environments, live
+search, more than one person, per-client environments, live
 updates instead of the relay's 10-minute poll, server-side contract rules.
 
 ## Running it
