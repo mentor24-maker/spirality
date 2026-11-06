@@ -149,6 +149,13 @@ account_links  token hash, purpose (setup|invite|reset), email, actor,
   last 7 days, a reset link 1 hour. A used, expired or unknown link is
   refused, each with its own reason. A database made before these existed
   gains the columns and tables, empty, on start-up; no existing row changes.
+- **An attachment** is a file kept on a ticket (SP-140): its name, type,
+  size, the file's bytes themselves, who added it and when, in the
+  `attachments` table. Keeping the bytes inside the database means the
+  nightly backup already holds them, with no second folder to copy. Each is
+  1 byte to 10 MB. Like a comment it is never edited; it goes only with its
+  ticket, when an unstarted ticket is deleted. A database made before this
+  gains the table, empty, on start-up.
 
 ### The API
 
@@ -178,9 +185,9 @@ answers are JSON (structured text programs read).
 | `POST /projects` | for Dane's page: add a project (`{ name, slug, prefix, url?, logo?, owner?, repo? }`), answered with its details read back; **a person's token only**: a machine's gets 403 and nothing is written. A duplicate slug or prefix, a slug that is not small letters, digits and hyphens (or is `new`), an owner who is not a person, an address that is not http(s), or a repo that is not `owner/name` (or its github.com address) gets 400 |
 | `PATCH /projects/:slug` | for Dane's page: change a project's name, web address, logo, owner or GitHub repository (`{ name?, url?, logo?, owner?, repo? }`), answered with its details read back; **a person's token only**: a machine's gets 403 and nothing is written. The slug and ticket prefix never change (every ticket's id and its project link are built from them): naming either gets 400 `not-changeable`; an owner who is not a person, an address that is not http(s) or a repo that is not `owner/name` gets 400; an unknown slug 404 |
 | `DELETE /projects/:slug` | for Dane's page: delete a project that has no tickets; **a person's token only**: a machine's gets 403. One with tickets gets 409 `has-tickets` (`"SP has 48 tickets; a project with tickets cannot be deleted"`) and nothing is removed; the count and the delete are one transaction; the server log names the project and the actor |
-| `GET /people` | for Dane's page: the tracker's people (humans only), for the owner picker and the People page. A person's token gets `{ people: [{ id, name, email }], invites: [{ id, email, invitedBy: { id, name }, createdAt, expiresAt }] }`, the invites being the open ones (unused, unexpired); a machine's gets ids and names only. Never a token or a hash |
-| `POST /invites` | for the People page: invite someone (`{ email }`); **a person's token only**: a machine's gets 403 `people-only`. An email a person holds is 409 `duplicate-email`, one with an open invite 409 `duplicate-invite`, no mail sender 503 `no-mail`; otherwise a 7-day `invite` link is made and emailed through Resend, naming who invited them. A send Resend refuses withdraws the link and answers 502 `not-sent`, so no open invite is left. Answered 201 with `{ sent }` and the People page's lists read back; the log names the actor, never the email or the link |
-| `DELETE /invites/:id` | for the People page: cancel an open invite, so its link is refused as unknown; **a person's token only**. An id that is not an open invite is 404 `unknown-invite`; a used invite stays as the record |
+| `GET /people` | for Dane's page: the tracker's people (humans only), for the owner picker and the Users page. A person's token gets `{ people: [{ id, name, email }], invites: [{ id, email, invitedBy: { id, name }, createdAt, expiresAt }] }`, the invites being the open ones (unused, unexpired); a machine's gets ids and names only. Never a token or a hash |
+| `POST /invites` | for the Users page: invite someone (`{ email }`); **a person's token only**: a machine's gets 403 `people-only`. An email a person holds is 409 `duplicate-email`, one with an open invite 409 `duplicate-invite`, no mail sender 503 `no-mail`; otherwise a 7-day `invite` link is made and emailed through Resend, naming who invited them. A send Resend refuses withdraws the link and answers 502 `not-sent`, so no open invite is left. Answered 201 with `{ sent }` and the Users page's lists read back; the log names the actor, never the email or the link |
+| `DELETE /invites/:id` | for the Users page: cancel an open invite, so its link is refused as unknown; **a person's token only**. An id that is not an open invite is 404 `unknown-invite`; a used invite stays as the record |
 | `GET /projects/:slug` | for Dane's page: one project's details, its operator and owner by name, its web address, logo and GitHub repository, its open count and a count per status; 404 for an unknown slug |
 | `GET /projects/:slug/board` | for Dane's page: one project's tickets in the eight statuses, each in `queue` order |
 | `POST /account/link` | **no token**: what an emailed link is for (`{ link }` → `{ purpose, email, expiresAt }`), for the set-password page; a used, expired or unknown link answers 400 `used-link`, `expired-link` or `unknown-link` |
@@ -188,6 +195,9 @@ answers are JSON (structured text programs read).
 | `POST /signin` | **no token**: `{ email, password }` → the person, and a session cookie (`tracker_session`, `HttpOnly`, `SameSite=Strict`, `Path=/`, 30 days). A wrong password and an unknown email get the same 401 `no-match`, "That email and password do not match." After 5 failures for one email in 15 minutes, that email is refused (429 `locked`) for 15 minutes, even with the right password; the count is kept in memory, so a restart forgets it, and setting a password through an emailed link clears it. **No `Secure` flag yet**: the tracker is plain http on the home network; the ticket that opens it to the internet must add it, with https |
 | `POST /signout` | **no token**: ends the cookie's session and clears the cookie |
 | `POST /account/forgot` | **no token**: `{ email }` → the same answer whether or not the email has an account; an account's email is sent a 1-hour `reset` link through Resend after the answer has gone back. The log says whether it went, never the link or the email |
+| `POST /tickets/:id/attachments` | attach a file: the raw file as the body (`content-type: application/octet-stream`, which a form on another site cannot send, so the cookie may make this one write that is not JSON), its name percent-encoded in `x-file-name`, its type in `x-file-type`. Answers 201 with `{ id, ticket, name, type, size, addedBy, createdAt }`, read back byte for byte. Over 10 MB is 413 `too-large` ("That file is over 10 MB. Attach a smaller one; nothing was saved."); an empty file or no name is 400; nothing is stored. The JSON calls' 1 MB limit is unchanged |
+| `GET /tickets/:id/attachments` | a ticket's files, oldest first, without their bytes (the ticket page reads the same list in `thread`) |
+| `GET /tickets/:id/attachments/:n` | one file, byte for byte, always as a download (`Content-Disposition: attachment`, `X-Content-Type-Options: nosniff`, a sandboxing `Content-Security-Policy`), so an uploaded HTML file can never run as the tracker's page |
 | `POST /tickets/:id/clone` | for Dane's page: copy a ticket into another project (`{ project }`), as a new ticket in `Requested` there with one comment naming where it came from; the original does not change |
 
 The store enforces only what keeps the data true: valid statuses, the
@@ -238,7 +248,7 @@ was typed. Each row also gives a person an **Edit** icon, opening
 prefix shown but locked), and a **Delete** icon, which asks "Delete
 <name>?" and then reads the table again; a project with tickets is refused
 with the server's reason and stays. A loop's sign-in sees neither icon.
-**People** in the header opens `/people`: everyone with an account (name
+**Users** in the header opens `/users`: everyone with an account (name
 and email), the open invites (email, who invited, when it expires) each
 with a **Cancel** button, and an **Invite someone** form that emails a
 7-day link. A refused invite (a taken email, a second invite, an email that
@@ -246,8 +256,10 @@ did not go out) shows the server's reason and makes nothing; after an
 invite or a cancel the page reads the lists again and says it worked only
 when they agree. A loop's sign-in sees the names alone. There are no roles:
 every person signed in may invite (Dane's decision).
-A browser opening `/projects`, `/projects/<slug>` or `/people` gets the page; the page's own
-call to the same address gets the data. `node tracker/demo.mjs` starts a throwaway tracker
+A browser opening `/projects` or `/projects/<slug>` gets the page; the page's own
+call to the same address gets the data. `/users` is the page alone; its data
+is still `GET /people` (the onboarding scripts read it), and a browser opening
+`/people`, the page's old address, is sent on to `/users`. `node tracker/demo.mjs` starts a throwaway tracker
 with test data to try it.
 
 A person signs in to the page with their email and password and stays
@@ -290,7 +302,7 @@ into the package only to cut it open again.
 
 Built later, from this core, only when a real need appears: a phone layout
 and phone notifications, the bus (StarCaster's alarm list),
-search, attachments, more than one person, per-client environments, live
+search, more than one person, per-client environments, live
 updates instead of the relay's 10-minute poll, server-side contract rules.
 
 ## Running it
@@ -553,10 +565,10 @@ until a domain is set up there, so for now this reaches Dane and nobody
 else. `node tracker/demo.mjs` prints a throwaway email and password to sign
 in with and a set-password link for the test operator, for trying the page;
 its "Forgot password?" prints the reset email instead of sending it, and
-an invite from its People page prints the invite email and then
+an invite from its Users page prints the invite email and then
 `Invite link for <email>: <link>`.
 
-**Inviting someone new.** A person signed in invites them from the People
+**Inviting someone new.** A person signed in invites them from the Users
 page (`POST /invites` above). The email, titled "<inviter> invited you to
 the <project name> tracker", carries a 7-day `invite` link to the same
 set-password page, which asks for their name as well as a password; once

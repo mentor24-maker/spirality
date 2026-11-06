@@ -333,7 +333,7 @@ test('the Projects screen is a table whose View icon opens the details page; a n
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   assert.match(app, /<table class="projects">/);
   assert.match(app, /<th class="actions">Actions<\/th><\/tr><\/thead><tbody>\$\{projects\.map\(row\)/);
-  assert.match(app, /action\(`\/projects\/\$\{encodeURIComponent\(p\.slug\)\}`, 'View project', ICONS\.view\)/);
+  assert.match(app, /action\(`\/projects\/\$\{encodeURIComponent\(p\.slug\)\}`, 'View Project', ICONS\.view\)/);
   // SP-42's behaviour: the name goes to the project's tasks in the last view, and opening it selects it.
   assert.match(app, /<td class="name"><a href="\/\$\{savedView\(\)\}\/\$\{encodeURIComponent\(p\.slug\)\}"/);
   assert.match(app, /localStorage\.setItem\(PROJECT_KEY, board\.project\)/);
@@ -367,7 +367,7 @@ test('a ticket\'s pull request on the list is the one the merge step would act o
 
 test('the list\'s actions only go where the page already goes: the ticket, its reply box, its pull request', () => {
   const app = readFileSync(WEB('app.mjs'), 'utf8');
-  assert.match(app, /action\(at, 'Open ticket', ICONS\.open\)/);
+  assert.match(app, /action\(at, 'Open Ticket', ICONS\.open\)/);
   assert.match(app, /action\(`\$\{at\}#reply`, 'Reply', ICONS\.reply\)/);
   // The PR icon shows only when there is one, and opens GitHub in its own tab.
   assert.match(app, /t\.pullRequest \? action\(t\.pullRequest, '[^']+', ICONS\.pullRequest, true\) : ''/);
@@ -498,7 +498,7 @@ test('the Add Task box on the Tasks page files into the project shown, in Reques
   assert.match(wire, /if \(adding \|\| draft\.title \|\| draft\.description\) box\.open = true;/, 'kept text opens the box on its own');
   assert.match(wire, /drawSignIn\('You were signed out; your request was not filed\. What you typed is kept/);
   // Filed: the draft is forgotten and the page redraws, box closed, naming the new id.
-  assert.match(wire, /localStorage\.removeItem\(DRAFT_KEY\);[\s\S]*await drawAgain\(\(\) => drawProject\(into, view, \{ filed: ticket\.id, unchecked \}\)\);/);
+  assert.match(wire, /localStorage\.removeItem\(DRAFT_KEY\);[\s\S]*await drawAgain\(\(\) => drawProject\(into, view, \{ filed: ticket\.id, unchecked, uploaded, notUploaded \}\)\);/);
   const draw = app.slice(app.indexOf('async function drawProject'), app.indexOf('async function copyText'));
   assert.match(draw, /<details class="add-task">\s*<summary>Add Task<\/summary>\s*<form class="request">/, 'drawn closed, on the board and the list alike');
   assert.match(draw, /<button type="submit">Submit Task<\/button>/, 'the button says Submit Task, in his words');
@@ -517,6 +517,46 @@ test('the Add Task box on the Tasks page files into the project shown, in Reques
   assert.match(css, /details\.add-task form\.request input, details\.add-task form\.request textarea \{[^}]*background: #fff;/, 'the fields stay white');
   // The status line (Filing…, Not filed: …) keeps its quiet grey and red, so it sits on white, readable on the blue.
   assert.match(css, /details\.add-task \.note:not\(:empty\) \{[^}]*background: #fff;/, 'the note sits on a white pill inside the blue box');
+});
+
+test('the Add Task box takes files: the ticket is filed first, then each file goes up as itself, and the note names any that did not (SP-140)', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const wire = app.slice(app.indexOf('function wireAddTask'), app.indexOf('/**', app.indexOf('function wireAddTask')));
+  const draw = app.slice(app.indexOf('async function drawProject'), app.indexOf('async function copyText'));
+  assert.match(draw, /<label for="files">Files<\/label>\s*<input id="files" type="file" multiple>/, 'several at once');
+  assert.match(draw, /Files are not kept in the saved draft: after a reload, pick them again\./);
+  // Filed first, then the files, one at a time; a failure is kept by name and the ticket stands.
+  const filed = wire.indexOf("api('POST', `/projects/${encodeURIComponent(into)}/tickets`");
+  const sent = wire.indexOf('await uploadFile(ticket.id, file);');
+  assert.ok(filed > 0 && sent > filed, 'the ticket is filed before any file is sent');
+  assert.match(wire, /notUploaded\.push\(\{ name: file\.name, why: err\.message \}\);/);
+  assert.match(wire, /notUploaded\.push\(\{ name: file\.name, why: 'over 10 MB' \}\);/);
+  assert.match(wire, /You were signed out; \$\{ticket\.id\} was filed, but \$\{file\.name\} and any files after it were not uploaded\./);
+  assert.doesNotMatch(/function savedDraft[\s\S]*?\n\}/.exec(app)[0], /files/, 'the draft keeps only the text');
+  // The upload is the file itself, with a type and headers only the page's own script can send.
+  const up = /async function uploadFile[\s\S]*?\n\}/.exec(app)[0];
+  assert.match(up, /'content-type': 'application\/octet-stream'/);
+  assert.match(up, /'x-file-name': encodeURIComponent\(file\.name\)/);
+  assert.match(up, /body: file,/);
+  // The note: uploaded names, then the ones that were not, each with why, escaped.
+  const note = /function filesNote[\s\S]*?\n\}/.exec(app)[0];
+  assert.match(note, /Uploaded \$\{names\(uploaded\)\}/);
+  assert.match(note, /Not uploaded: /);
+  assert.match(note, /The ticket is filed without/);
+  assert.match(note, /escapeHtml\(n\)/);
+  assert.match(note, /escapeHtml\(f\.name\)/);
+  assert.match(draw, /\$\{filesNote\(uploaded, notUploaded\)\}<\/p>/);
+});
+
+test('the ticket page lists its attachments by name and size, each a download, a plain picture also previewed, never an SVG (SP-140)', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const list = /function renderAttachments[\s\S]*?\n\}/.exec(app)[0];
+  assert.match(list, /href="\$\{href\}" download="\$\{escapeHtml\(a\.name\)\}">\$\{escapeHtml\(a\.name\)\}<\/a> <span class="quiet">\$\{escapeHtml\(sizeOf\(a\.size\)\)\}<\/span>/);
+  assert.match(list, /PREVIEW_TYPES\.includes\(a\.type\) \? `<a class="preview"[^`]*<img src="\$\{href\}"/);
+  assert.match(list, /<h2>Attachments<\/h2>/);
+  assert.match(app, /const PREVIEW_TYPES = Object\.freeze\(\['image\/png', 'image\/jpeg', 'image\/gif', 'image\/webp'\]\);/);
+  const ticket = app.slice(app.indexOf('async function drawTicket'), app.indexOf('wireCopyButtons();', app.indexOf('async function drawTicket')));
+  assert.match(ticket, /<section class="description">[^\n]*<\/section>\s*\$\{renderAttachments\(t\)\}/, 'right under the description');
 });
 
 test('the Add Task box checks the project before filing: asks "Did you mean ...?" when another fits, files where he says, never blocks on a failed check', () => {
@@ -654,11 +694,11 @@ test('the page is served at /, at a ticket\'s address, at Projects, at Tasks, at
   } finally { await f.cleanup(); }
 });
 
-test('the Settings page is in the header after Reporting and People, lists the stages the server gives, saves them all, reads them back, and shows a refusal', async () => {
+test('the Settings page is in the header after Reporting and Users, lists the stages the server gives, saves them all, reads them back, and shows a refusal', async () => {
   const html = readFileSync(WEB('index.html'), 'utf8');
-  assert.match(html, /<a href="\/reporting" data-nav="reporting">Reporting<\/a>\s*<a href="\/people" data-nav="people">People<\/a>\s*<a href="\/settings" data-nav="settings">Settings<\/a>/);
+  assert.match(html, /<a href="\/reporting" data-nav="reporting">Reporting<\/a>\s*<a href="\/users" data-nav="users">Users<\/a>\s*<a href="\/settings" data-nav="settings">Settings<\/a>/);
   const app = readFileSync(WEB('app.mjs'), 'utf8');
-  const draw = app.slice(app.indexOf('async function drawSettings'), app.indexOf('/**\n * The People page'));
+  const draw = app.slice(app.indexOf('async function drawSettings'), app.indexOf('/**\n * The Users page'));
   assert.match(draw, /const \{ stages \} = await api\('GET', '\/stage-colours'\);/, 'the stages come from the server, never typed out');
   assert.doesNotMatch(draw, /'Queued'|'Requested'|'Live'/);
   assert.match(draw, /type="color"/);
@@ -697,10 +737,10 @@ test('bellColour: grey while nothing waits, yellow for 1 to 3, red for more than
 test('Waiting on you is a bell on the right, just before "Signed in as", coloured from the count wherever it is read', () => {
   const html = readFileSync(WEB('index.html'), 'utf8');
   const nav = /<nav class="site">([\s\S]*?)<\/nav>/.exec(html)[1];
-  assert.deepEqual([...nav.matchAll(/>([^<]+)<\/a>/g)].map((m) => m[1]), ['Projects', 'Tasks', 'Reporting', 'People', 'Settings']);
+  assert.deepEqual([...nav.matchAll(/>([^<]+)<\/a>/g)].map((m) => m[1]), ['Projects', 'Tasks', 'Reporting', 'Users', 'Settings']);
   assert.doesNotMatch(nav, /Waiting on you/);
   const me = /<span class="me">([\s\S]*?)<\/span>\s*<\/header>/.exec(html)[1];
-  assert.match(me, /<a id="bell" href="\/" title="Waiting on you" aria-label="Waiting on you" data-colour="grey" hidden><svg [^>]*aria-hidden="true">[\s\S]*?<\/svg><\/a>\s*<span id="who"><\/span>/);
+  assert.match(me, /<a id="bell" href="\/" title="Waiting on You" aria-label="Waiting on You" data-colour="grey" hidden><svg [^>]*aria-hidden="true">[\s\S]*?<\/svg><\/a>\s*<span id="who"><\/span>/);
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   assert.match(app, /function showBell\(\) \{\s*bell\.dataset\.colour = bellColour\(waitingCount\);\s*\}/);
   // Every place the count is read colours the bell: the one-minute refresh and the Waiting on you page.
@@ -1069,7 +1109,7 @@ test('every page puts its trail at the top: ticket, board, list, Waiting on you,
   assert.match(body('drawTicket'), /putTrail\(\[\s*\{ label: t\.projectName, href: `\/\$\{savedView\(\)\}\/\$\{encodeURIComponent\(t\.project\)\}` \},\s*\{ label: `Task \$\{t\.id\}`, href: `\/t\/\$\{encodeURIComponent\(t\.id\)\}` \},\s*\{ label: 'Details' \},\s*\]\)/);
   // A project's board or list climbs to Projects.
   assert.match(body('drawProject'), /putTrail\(\[\{ label: board\.projectName, href: '\/projects' \}, \{ label: view === 'board' \? 'Board' : 'List' \}\]\)/);
-  assert.match(body('drawWaiting'), /putTrail\(\[\{ label: 'Waiting on you' \}\]\)/);
+  assert.match(body('drawWaiting'), /putTrail\(\[\{ label: 'Waiting on You' \}\]\)/);
   assert.match(body('drawProjects'), /putTrail\(\[\{ label: 'Projects' \}\]\)/);
   // Each trail goes in after its page is drawn, so it sits first in main.
   assert.match(app, /main\.insertAdjacentHTML\('afterbegin', renderTrail\(steps\)\)/);
@@ -1129,7 +1169,7 @@ test('/projects/new is the page to a browser, and its logo can be drawn: the loc
 test('the New project button and form are a person\'s only; a refused save keeps what was typed and says why; success opens the details page', () => {
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   // SP-127: the Projects page's button is Set up a product; the bare form is a link on its page.
-  assert.match(app, /me\?\.kind === 'human' \? '<div class="toolbar"><a class="button" href="\/setup\/new">Set up a product<\/a><\/div>' : ''/);
+  assert.match(app, /me\?\.kind === 'human' \? '<div class="toolbar"><a class="button" href="\/setup\/new">Set Up a Product<\/a><\/div>' : ''/);
   assert.match(app, /<a href="\/projects\/new">New project<\/a>/);
   const form = app.slice(app.indexOf('async function drawCreateProject'), app.indexOf('/**', app.indexOf('async function drawCreateProject')));
   assert.match(form, /if \(me\?\.kind !== 'human'\)[\s\S]{0,200}Only a person signed in to the tracker can add a project\./);
@@ -1152,7 +1192,7 @@ test('the New project button and form are a person\'s only; a refused save keeps
   assert.match(app, /const isRepo = \(v\) => typeof v === 'string' && \/\^\[A-Za-z0-9-\]\+\\\/\[A-Za-z0-9\._-\]\+\$\/\.test\(v\);/);
   assert.match(app, /<a href="https:\/\/github\.com\/\$\{escapeHtml\(p\.repo\)\}" target="_blank" rel="noopener noreferrer">\$\{escapeHtml\(p\.repo\)\}<\/a>/);
   assert.match(app, /<td class="repo">\$\{repoOf\(p\)\}<\/td>/);
-  assert.match(app, /<th class="repo">GitHub repository<\/th>/);
+  assert.match(app, /<th class="repo">GitHub Repository<\/th>/);
   assert.match(app, /<dt>GitHub repository<\/dt><dd>\$\{repoOf\(p\)\}<\/dd>/);
 });
 
@@ -1225,7 +1265,7 @@ test('the Projects table gives a person Edit and Delete on every row and a loop\
   const table = app.slice(app.indexOf('async function drawProjects'), app.indexOf('/**', app.indexOf('async function drawProjects')));
   // Both icons are drawn only for a person; otherwise the cell holds the View icon alone.
   assert.match(table, /const people = me\?\.kind === 'human';/);
-  assert.match(table, /\$\{people\n\s+\? action\(`\/projects\/\$\{encodeURIComponent\(p\.slug\)\}\/edit`, 'Edit project', ICONS\.edit\)\n\s+\+ actionButton\('Delete project', ICONS\.delete, \{ delete: p\.slug, name: p\.name \}\)\n\s+: ''\}/);
+  assert.match(table, /\$\{people\n\s+\? action\(`\/projects\/\$\{encodeURIComponent\(p\.slug\)\}\/edit`, 'Edit Project', ICONS\.edit\)\n\s+\+ actionButton\('Delete Project', ICONS\.delete, \{ delete: p\.slug, name: p\.name \}\)\n\s+: ''\}/);
   assert.equal((table.match(/ICONS\.edit/g) ?? []).length, 1, 'Edit is drawn in one place, behind the person check');
   assert.equal((table.match(/ICONS\.delete/g) ?? []).length, 1, 'Delete is drawn in one place, behind the person check');
   // Delete asks, by name, before anything is sent.
@@ -1596,7 +1636,7 @@ test('the list draws the bin on exactly the board\'s Requested and Queued rows, 
     assert.ok(f.store.getTicket(started.id));
   } finally { await f.cleanup(); }
   const app = readFileSync(WEB('app.mjs'), 'utf8');
-  assert.match(app, /canDelete\(status\) \? actionButton\('Delete ticket', ICONS\.delete, \{ delete: t\.id \}\) : ''/);
+  assert.match(app, /canDelete\(status\) \? actionButton\('Delete Ticket', ICONS\.delete, \{ delete: t\.id \}\) : ''/);
   assert.match(app, /c\.tickets\.map\(row\(c\.status\)\)/);
   // No bin on the board's cards.
   const card = /const card = \(t\) => `([\s\S]*?)`;/.exec(app)[1];
@@ -1783,13 +1823,13 @@ test('the sign-in form is an email and a password with "Forgot password?"; the p
   const form = renderSignIn();
   assert.match(form, /<input id="email" type="email" autocomplete="username" required>/);
   assert.match(form, /<input id="password" type="password" autocomplete="current-password" required>/);
-  assert.match(form, /<button type="button" class="link forgot">Forgot password\?<\/button>/);
+  assert.match(form, /<button type="button" class="link forgot">Forgot Password\?<\/button>/);
   assert.doesNotMatch(form, /token/i);
   assert.match(renderSignIn('<b>no</b>'), /<p class="note error">&lt;b&gt;no&lt;\/b&gt;<\/p>/);
   const forgot = renderForgot('a"b@example.com');
   assert.match(forgot, /value="a&quot;b@example\.com"/);
   assert.match(forgot, /works for 1 hour/);
-  assert.match(forgot, /<a href="\/">Back to Sign in<\/a>/);
+  assert.match(forgot, /<a href="\/">Back to Sign In<\/a>/);
 
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   assert.doesNotMatch(app, /authorization|Bearer/, 'the page never sends a token');
@@ -2076,9 +2116,9 @@ test('the Reporting page draws only the server\'s figures: ranges and stages fro
   assert.doesNotMatch(draw, /'Queued'|'Requested'|'Building'|'Live'/, 'the stages come from the server, never typed out');
   assert.match(draw, /el\.style\.setProperty\('--stage-border', look\.border\);/);
   assert.match(draw, /escapeHtml\(s\.status\)/);
-  for (const title of ['Time to finish', 'Sent back', 'Waiting on you']) assert.match(draw, new RegExp(`flow\\('${title}',\\s*'[^']+'`), `${title} has its how-it-is-counted line`);
+  for (const title of ['Time to Finish', 'Sent Back', 'Waiting on You']) assert.match(draw, new RegExp(`flow\\('${title}',\\s*'[^']+'`), `${title} has its how-it-is-counted line`);
   assert.match(draw, /r\.flow\[g\.key\]/, 'flow figures per range, from the server');
-  assert.match(draw, /<h2>Human hours of work done<\/h2>\s*<p class="quiet">[^<]*estimate, not a measurement/, 'the human-hours report says where its number comes from');
+  assert.match(draw, /<h2>Human Hours of Work Done<\/h2>\s*<p class="quiet">[^<]*estimate, not a measurement/, 'the human-hours report says where its number comes from');
   assert.match(draw, /r\.humanHours\[g\.key\]/, 'human-hours figures per range, from the server');
   assert.match(draw, /h\.estimated \? escapeHtml\(cell\(h\)\) : '<span class="quiet">no estimates yet in this range<\/span>'/, 'no estimates is said in words, never 0 hours');
   assert.match(draw, /of \$\{Number\(h\.finished\)\} estimated/);
@@ -2101,26 +2141,48 @@ test('every button on a ticket\'s page is green with a darker border and rounded
   assert.doesNotMatch(css, /^button \{[^}]*#00AA00/m);
 });
 
-// ── People ───────────────────────────────────────────────────────────────────
+// ── Users ────────────────────────────────────────────────────────────────────
 
-test('People is in the header before Settings, served at /people to a browser, and its data needs a sign-in', async () => {
+test('Users is in the header before Settings, served at /users to a browser, and its data needs a sign-in', async () => {
   const html = readFileSync(WEB('index.html'), 'utf8');
-  assert.match(html, /<a href="\/people" data-nav="people">People<\/a>\s*<a href="\/settings" data-nav="settings">Settings<\/a>/);
+  assert.match(html, /<a href="\/users" data-nav="users">Users<\/a>\s*<a href="\/settings" data-nav="settings">Settings<\/a>/);
+  assert.doesNotMatch(html, />People</);
   const f = await fixture();
   try {
-    const page = await fetch(`${f.url}/people`, { headers: { accept: 'text/html' } });
+    const page = await fetch(`${f.url}/users`, { headers: { accept: 'text/html' } });
     assert.equal(page.status, 200);
     assert.equal(await page.text(), html);
     assert.equal((await f.call('GET', '/people', { token: null })).status, 401);
   } finally { await f.cleanup(); }
   const app = readFileSync(WEB('app.mjs'), 'utf8');
-  assert.match(app, /peoplePage \? 'people' :/);
-  assert.match(app, /\} else if \(peoplePage\) \{\s*await drawPeople\(\);/);
+  assert.match(app, /usersPage \? 'users' :/);
+  assert.match(app, /\} else if \(usersPage\) \{\s*await drawUsers\(\);/);
 });
 
-test('the People page escapes every name and email, offers the form and Cancel to a person only, and reads back before saying it worked', () => {
+test('a browser opening /people (an old bookmark) is sent on to /users, never cached; the data call to /people still answers the data', async () => {
+  const f = await fixture();
+  try {
+    const old = await fetch(`${f.url}/people?x=1`, { headers: { accept: 'text/html' }, redirect: 'manual' });
+    assert.equal(old.status, 302);
+    assert.equal(old.headers.get('location'), '/users?x=1');
+    assert.equal(old.headers.get('cache-control'), 'no-store');
+    assert.match(old.headers.get('vary') ?? '', /accept/i);
+    const followed = await fetch(`${f.url}/people`, { headers: { accept: 'text/html' } });
+    assert.equal(followed.status, 200);
+    assert.equal(new URL(followed.url).pathname, '/users');
+    // The page's own call (and the onboarding scripts') asks for anything, not HTML: it gets the data.
+    const data = await f.call('GET', '/people');
+    assert.equal(data.status, 200);
+    assert.ok(Array.isArray(data.body.people));
+    // /users is a page only: it holds no data of its own.
+    const users = await fetch(`${f.url}/users`);
+    assert.match(users.headers.get('content-type'), /text\/html/);
+  } finally { await f.cleanup(); }
+});
+
+test('the Users page escapes every name and email, offers the form and Cancel to a person only, and reads back before saying it worked', () => {
   const app = readFileSync(WEB('app.mjs'), 'utf8');
-  const draw = app.slice(app.indexOf('async function drawPeople'), app.indexOf('/** Underline the header link'));
+  const draw = app.slice(app.indexOf('async function drawUsers'), app.indexOf('/** Underline the header link'));
   assert.ok(draw.length > 100);
   for (const field of ['p.name', 'p.email', 'i.email', 'i.invitedBy.name']) assert.match(draw, new RegExp(`escapeHtml\\(${field.replace('.', '\\.')}\\)`), field);
   assert.match(draw, /\$\{person \? `<form class="invite">/);
@@ -2129,7 +2191,10 @@ test('the People page escapes every name and email, offers the form and Cancel t
   assert.match(draw, /api\('DELETE', `\/invites\/\$\{encodeURIComponent\(id\)\}`\)/);
   // Each write is read back with GET /people before the page says it worked.
   assert.equal(draw.match(/await api\('GET', '\/people'\)\.catch/g).length, 2);
-  assert.match(draw, /putTrail\(\[\{ label: 'People' \}\]\)/);
+  assert.match(draw, /putTrail\(\[\{ label: 'Users' \}\]\)/);
+  assert.match(draw, /setTitle\('Users · Tracker'\)/);
+  assert.match(draw, /<h1>Users<\/h1>/);
+  assert.match(draw, /<h2>Users with an Account<\/h2>/);
 });
 
 test('the Tasks toolbar picks a project from a dropdown, "Project: ", the one in view selected', () => {
@@ -2299,12 +2364,12 @@ test('the setup page\'s next-step box, for a state file of each kind: every comm
     assert.match(html, /<a href="\/setup\/press-play\/answers">Fill in the answers<\/a>/);
     assert.deepEqual(copies(html), { codes: [command], buttons: 1 });
 
-    // Stopped at the paste: "Your move (real secret values)", one Copy for every line, then the resume command.
+    // Stopped at the paste: "Your Move (Real Secret Values)", one Copy for every line, then the resume command.
     const block = ["cd '/x/spirality'", "doppler projects create 'press-play'", "TRACKER_DB='/x/t.db' npm run tracker:signins -- create --name 'Press Play' --prefix 'PR' --config '/x/p.json'"];
     h.state('press-play', { outcomes: { answers: 'done', look: 'done', clone: 'skip', settings: 'done', signins: 'stopped' }, stop: { step: 'signins', kind: 'paste', why: 'waiting on you to run the block above', commands: block, link: null } });
     html = renderSetupNext(h.of('press-play'));
     assert.equal(kind(html), 'paste');
-    assert.match(html, /Your move \(real secret values\)/);
+    assert.match(html, /Your Move \(Real Secret Values\)/);
     assert.deepEqual(copies(html), { codes: [block.join('\n'), command], buttons: 2 });
     assert.ok(html.indexOf(escapeHtml(block[0])) < html.indexOf(escapeHtml(command)), 'the block first, then the resume command');
 
@@ -2337,7 +2402,7 @@ test('the setup page\'s next-step box, for a state file of each kind: every comm
     const done = h.of('press-play');
     html = renderSetupNext(done, { firstTicketId: 'PR-1' });
     assert.equal(kind(html), 'finished');
-    assert.match(html, /<h2>Press Play is set up<\/h2>/);
+    assert.match(html, /<h2>Press Play Is Set Up<\/h2>/);
     assert.match(html, /<a href="\/projects\/press-play">its project<\/a>/);
     assert.match(html, /<a href="\/t\/PR-1">its first ticket, PR-1<\/a>/);
     assert.deepEqual(copies(html), { codes: [], buttons: 0 });
@@ -2407,7 +2472,7 @@ test('the page makes a slug by the wizard\'s rule, and refuses the two that are 
 test('the Projects page has Set up a product, lists the products mid-setup, and keeps New project a link away', () => {
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   const projects = /async function drawProjects\(done = ''\) \{[\s\S]*?\n\}/.exec(app)[0];
-  assert.match(projects, /<a class="button" href="\/setup\/new">Set up a product<\/a>/);
+  assert.match(projects, /<a class="button" href="\/setup\/new">Set Up a Product<\/a>/);
   assert.doesNotMatch(projects, /href="\/projects\/new">New project/);
   assert.match(projects, /api\('GET', '\/setup'\)/);
   assert.match(projects, /\$\{renderSetupList\(setups\)\}/);
@@ -2428,7 +2493,7 @@ test('the Projects page has Set up a product, lists the products mid-setup, and 
     { product: 'done-one', step: null, finished: true, started: true, stateError: null },
     { product: 'fresh', step: null, finished: false, started: false, stateError: null },
   ] });
-  assert.match(list, /<h2>Being set up<\/h2>/);
+  assert.match(list, /<h2>Being Set Up<\/h2>/);
   assert.match(list, /<a href="\/setup\/press-play">press-play<\/a> <span class="quiet">at signins<\/span>/);
   assert.match(list, /<a href="\/setup\/fresh">fresh<\/a> <span class="quiet">not started yet<\/span>/);
   assert.doesNotMatch(list, /done-one/);

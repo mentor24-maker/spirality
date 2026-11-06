@@ -186,9 +186,14 @@ details.add-task { border: var(--hairline); border-radius: 8px; padding: 0.5rem 
 details.add-task form.request input, details.add-task form.request textarea { background: #fff; color: var(--ink); }
 details.add-task[open] { padding-bottom: 1rem; }
 details.add-task .note:not(:empty) { background: #fff; border-radius: 4px; padding: 0.15rem 0.5rem; }
+details.add-task .hint { color: var(--ink); }
 details.add-task > summary { cursor: pointer; font-weight: 600; }
 details.add-task form.request textarea { min-height: 8rem; }
 p.filed-note { margin: 0 0 1rem; }
+section.attachments ul { list-style: none; padding: 0; }
+section.attachments li { margin: 0.5rem 0; }
+section.attachments .preview { display: block; margin-top: 0.35rem; }
+section.attachments img { max-width: 16rem; max-height: 12rem; border: var(--hairline); border-radius: 4px; }
 /* The Add Task box's question: "Did you mean for that to be associated with project X?" */
 dialog.project-check { border: var(--hairline); border-radius: 8px; padding: 1rem 1.25rem; max-width: 28rem; color: var(--ink); }
 dialog.project-check::backdrop { background: rgba(0, 0, 0, 0.3); }

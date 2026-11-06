@@ -1,6 +1,8 @@
 # Spirality — rules for every agent session
 
 Read this file first, then [docs/LOOP_ENGINEERING.md](docs/LOOP_ENGINEERING.md).
+Any change to the words or look of the tracker page follows
+[docs/DOCTRINE.md](docs/DOCTRINE.md) (Title Case for buttons and headings).
 
 **This repository is public.** Never commit a key, password, token or `.env`
 file. Keys live in Doppler (project `spirality`).

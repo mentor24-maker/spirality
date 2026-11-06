@@ -151,3 +151,18 @@ test('run directly, it reads TRACKER_DB and TRACKER_BACKUP_DIR and exits non-zer
     assert.doesNotMatch(bad.stdout, /OK/);
   } finally { cleanup(); }
 });
+
+test('a backup made after an upload holds the file, byte for byte (SP-140)', () => {
+  const { path, backups, store, machine, cleanup } = fixture(1);
+  try {
+    const [t] = store.listTickets('alpha');
+    const bytes = Buffer.from(Array.from({ length: 5000 }, (_, i) => i % 256));
+    const a = store.addAttachment({ ticket: t.id, name: 'shot.png', type: 'image/png', bytes, actor: machine.id });
+    const r = backupDatabase({ db: path, dir: backups, now: new Date(2026, 10, 5, 3, 15) });
+    const copy = openStore(r.file);
+    try {
+      assert.deepEqual(copy.listAttachments(t.id).map((x) => [x.name, x.size]), [['shot.png', 5000]]);
+      assert.ok(copy.getAttachment(t.id, a.id).bytes.equals(bytes));
+    } finally { copy.close(); }
+  } finally { cleanup(); }
+});
