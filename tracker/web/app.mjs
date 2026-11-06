@@ -6,7 +6,7 @@
  * change or delete a project (a person only), file a new request from the
  * Tasks page's Add Task box, copy a ticket into another
  * project, choose a colour for each stage on the Settings page, read the
- * Reporting page's figures, see and invite people on the People page
+ * Reporting page's figures, see and invite people on the Users page
  * (a person only), and search every ticket from the Tasks page's Search field. Plain browser
  * JavaScript, no packages,
  * no build step; tracker/server.mjs serves it.
@@ -928,7 +928,7 @@ async function drawProject(slug, view, { adding = false, filed = null, unchecked
         <label for="files">Files</label>
         <input id="files" type="file" multiple>
         <span class="hint quiet">Screenshots, PDFs or notes, up to 10 MB each. Files are not kept in the saved draft: after a reload, pick them again.</span>
-        <div class="row"><button type="submit">File Request</button><span class="note"></span></div>
+        <div class="row"><button type="submit">Submit Task</button><span class="note"></span></div>
       </form>
     </details>
     <dialog class="project-check" aria-labelledby="project-check-question">
@@ -1715,7 +1715,7 @@ async function drawSettings() {
 }
 
 /**
- * The People page: everyone who has an account (name and email), the open
+ * The Users page: everyone who has an account (name and email), the open
  * invites (email, who invited, when it expires) each with a Cancel button,
  * and an "Invite someone" form. Inviting emails a 7-day link; the server
  * makes the invite only if the email went out, and says so if it did not.
@@ -1723,9 +1723,9 @@ async function drawSettings() {
  * worked only when what it reads agrees. A loop's sign-in sees no form and
  * no buttons, and the server refuses it anyway.
  */
-async function drawPeople(done = '', problem = '') {
+async function drawUsers(done = '', problem = '') {
   const { people, invites = [] } = await api('GET', '/people');
-  setTitle('People · Tracker');
+  setTitle('Users · Tracker');
   const person = me?.kind === 'human';
   const personRow = (p) => `
     <tr><td class="name">${escapeHtml(p.name)}</td><td class="email">${p.email ? escapeHtml(p.email) : '<span class="quiet">no email yet</span>'}</td></tr>`;
@@ -1733,23 +1733,23 @@ async function drawPeople(done = '', problem = '') {
     <tr><td class="email">${escapeHtml(i.email)}</td><td class="by">${escapeHtml(i.invitedBy.name)}</td><td class="expires">${escapeHtml(when(i.expiresAt))}</td>
       <td class="actions">${person ? `<button type="button" data-cancel="${escapeHtml(i.id)}" data-email="${escapeHtml(i.email)}">Cancel</button>` : ''}</td></tr>`;
   main.innerHTML = `
-    <h1>People</h1>
+    <h1>Users</h1>
     <p class="note${problem ? ' error' : ' quiet'}" role="status">${escapeHtml(problem || done)}</p>
     ${person ? `<form class="invite">
       <label for="invite-email">Invite someone</label>
       <div class="row"><input id="invite-email" type="email" autocomplete="off" placeholder="their@email.com" required><button type="submit">Send Invite</button></div>
       <span class="hint quiet">They get an email with a link to choose their name and password. It works once, for 7 days.</span>
     </form>` : ''}
-    <h2>People with an Account</h2>
+    <h2>Users with an Account</h2>
     <table class="projects people"><thead><tr><th class="name">Name</th><th class="email">Email</th></tr></thead><tbody>${people.map(personRow).join('')}</tbody></table>
     <h2>Open Invites</h2>
     ${invites.length
     ? `<table class="projects invites"><thead><tr><th class="email">Email</th><th class="by">Invited By</th><th class="expires">Expires</th><th class="actions"><span class="hidden">Actions</span></th></tr></thead><tbody>${invites.map(inviteRow).join('')}</tbody></table>`
     : '<p class="quiet">No open invites.</p>'}`;
-  putTrail([{ label: 'People' }]);
+  putTrail([{ label: 'Users' }]);
   const note = main.querySelector('p.note');
   const busy = (text) => { note.className = 'note quiet'; note.textContent = text; };
-  const again = (text, failed) => drawPeople(failed ? '' : text, failed ? text : '')
+  const again = (text, failed) => drawUsers(failed ? '' : text, failed ? text : '')
     .catch((err) => (err instanceof SignedOut ? drawSignIn() : showError(err)));
   const form = main.querySelector('form.invite');
   form?.addEventListener('submit', async (e) => {
@@ -1840,15 +1840,15 @@ async function route({ place = null } = {}) {
     const isNew = location.pathname === '/new';
     const settings = location.pathname === '/settings';
     const reporting = location.pathname === '/reporting';
-    const peoplePage = location.pathname === '/people';
+    const usersPage = location.pathname === '/users';
     const search = location.pathname === '/search';
     const setupNew = location.pathname === '/setup/new';
     const setupAnswers = /^\/setup\/([^/]+)\/answers$/.exec(location.pathname);
     const setupPage = !setupNew && /^\/setup\/([^/]+)$/.exec(location.pathname);
     const setupAny = setupNew || setupAnswers || setupPage;
     let following = false;
-    const waiting = !(setupAny || search || reporting || settings || peoplePage || isNew || ticket || projects || newProject || editProject || details || tasks || project);
-    markNav(reporting ? 'reporting' : settings ? 'settings' : peoplePage ? 'people' : projects || newProject || details || editProject || setupAny ? 'projects' : ticket || project || tasks || isNew || search ? 'tasks' : 'waiting');
+    const waiting = !(setupAny || search || reporting || settings || usersPage || isNew || ticket || projects || newProject || editProject || details || tasks || project);
+    markNav(reporting ? 'reporting' : settings ? 'settings' : usersPage ? 'users' : projects || newProject || details || editProject || setupAny ? 'projects' : ticket || project || tasks || isNew || search ? 'tasks' : 'waiting');
     if (setupNew) {
       await drawSetupNew(null);
     } else if (setupAnswers) {
@@ -1861,8 +1861,8 @@ async function route({ place = null } = {}) {
       await drawReporting();
     } else if (settings) {
       await drawSettings();
-    } else if (peoplePage) {
-      await drawPeople();
+    } else if (usersPage) {
+      await drawUsers();
     } else if (isNew) {
       // The old New request address: the Tasks page with its Add Task box open.
       await drawTasks(savedView(), { adding: true });
