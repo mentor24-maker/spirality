@@ -490,7 +490,7 @@ test('the projects list names the project the server was given as its default, a
 test('the Add Task box on the Tasks page files into the project shown, in Requested as typed, keeps the text when refused or signed out, and is gone from the header', () => {
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   const wire = app.slice(app.indexOf('function wireAddTask'), app.indexOf('/**', app.indexOf('function wireAddTask')));
-  assert.match(wire, /api\('POST', `\/projects\/\$\{encodeURIComponent\(slug\)\}\/tickets`, \{\s*name: title\.value, description: description\.value, status: 'Requested',\s*\}\)/);
+  assert.match(wire, /api\('POST', `\/projects\/\$\{encodeURIComponent\(into\)\}\/tickets`, \{\s*name: title\.value, description: description\.value, status: 'Requested',\s*\}\)/);
   assert.ok(!/assignee/.test(wire), 'a request is filed unassigned');
   assert.match(wire, /note\.textContent = `Not filed: \$\{err\.message\}`;/);
   assert.match(wire, /localStorage\.setItem\(DRAFT_KEY,/);
@@ -498,7 +498,7 @@ test('the Add Task box on the Tasks page files into the project shown, in Reques
   assert.match(wire, /if \(adding \|\| draft\.title \|\| draft\.description\) box\.open = true;/, 'kept text opens the box on its own');
   assert.match(wire, /drawSignIn\('You were signed out; your request was not filed\. What you typed is kept/);
   // Filed: the draft is forgotten and the page redraws, box closed, naming the new id.
-  assert.match(wire, /localStorage\.removeItem\(DRAFT_KEY\);[\s\S]*await drawAgain\(\(\) => drawProject\(slug, view, \{ filed: ticket\.id \}\)\);/);
+  assert.match(wire, /localStorage\.removeItem\(DRAFT_KEY\);[\s\S]*await drawAgain\(\(\) => drawProject\(into, view, \{ filed: ticket\.id, unchecked \}\)\);/);
   const draw = app.slice(app.indexOf('async function drawProject'), app.indexOf('async function copyText'));
   assert.match(draw, /<details class="add-task">\s*<summary>Add Task<\/summary>\s*<form class="request">/, 'drawn closed, on the board and the list alike');
   assert.match(draw, /Filed <a href="\/t\/\$\{encodeURIComponent\(filed\)\}">\$\{escapeHtml\(filed\)\}<\/a>/);
@@ -515,6 +515,39 @@ test('the Add Task box on the Tasks page files into the project shown, in Reques
   assert.match(css, /details\.add-task form\.request input, details\.add-task form\.request textarea \{[^}]*background: #fff;/, 'the fields stay white');
   // The status line (Filing…, Not filed: …) keeps its quiet grey and red, so it sits on white, readable on the blue.
   assert.match(css, /details\.add-task \.note:not\(:empty\) \{[^}]*background: #fff;/, 'the note sits on a white pill inside the blue box');
+});
+
+test('the Add Task box checks the project before filing: asks "Did you mean ...?" when another fits, files where he says, never blocks on a failed check', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const wire = app.slice(app.indexOf('function wireAddTask'), app.indexOf('/**', app.indexOf('function wireAddTask')));
+  // The check comes first, with the words as typed, and writes nothing (its server test reads the store).
+  const check = wire.indexOf("api('POST', `/projects/${encodeURIComponent(slug)}/tickets/check`, {");
+  const file = wire.indexOf("api('POST', `/projects/${encodeURIComponent(into)}/tickets`, {");
+  assert.ok(check > 0 && file > check, 'the check is asked before the ticket is filed');
+  assert.match(wire.slice(check), /^api\('POST', [^,]+, \{\s*name: title\.value, description: description\.value,\s*\}\)/);
+  // No suggestion: files into the project shown, as before.
+  assert.match(wire, /let into = slug;\s*if \(suggest\) \{/);
+  // A suggestion: File in X files there; Keep in files here; closing files nothing and keeps the text.
+  assert.match(wire, /const choice = await askProject\(question, suggest\);\s*if \(choice === 'move'\) into = suggest\.slug;\s*else if \(choice !== 'keep'\) \{[^}]*button\.disabled = false;[^}]*return;\s*\}/);
+  assert.doesNotMatch(wire.slice(wire.indexOf("else if (choice !== 'keep')"), wire.indexOf('return;', wire.indexOf("else if (choice !== 'keep')"))), /removeItem|title\.value =|description\.value =/, 'closing leaves the form and the draft as they were');
+  // A failed check (anything but a sign-out) files into the project shown, and the note says so.
+  assert.match(wire, /\} catch \(err\) \{\s*if \(err instanceof SignedOut\) return drawSignIn\([^)]*\);\s*unchecked = true;\s*\}/);
+  assert.match(app, /const UNCHECKED_NOTE = 'The project check could not run, so it went into the project shown\.';/);
+  const draw = app.slice(app.indexOf('async function drawProject'), app.indexOf('async function copyText'));
+  assert.match(draw, /\$\{unchecked \? `\. \$\{UNCHECKED_NOTE\}` : ''\}/);
+  // Filed elsewhere: X's board opens, naming X's new ticket id.
+  assert.match(wire, /if \(into !== slug\) history\.pushState\(null, '', `\/\$\{view\}\/\$\{encodeURIComponent\(into\)\}`\);/);
+  // The question box: the words of the ticket, File in X, Keep in the project shown, and a close.
+  assert.match(draw, /<dialog class="project-check"[^>]*>\s*<form method="dialog">/);
+  assert.match(draw, /Did you mean for that to be associated with project <strong class="project-name"><\/strong>\?/);
+  assert.match(draw, /<button type="submit" value="move">File in<\/button>/);
+  assert.match(draw, /<button type="submit" value="keep">Keep in \$\{escapeHtml\(board\.projectName\)\}<\/button>/);
+  assert.match(draw, /<button type="submit" class="close" value="" aria-label="Close: file nothing">/);
+  const ask = app.slice(app.indexOf('function askProject'), app.indexOf('/**', app.indexOf('function askProject')));
+  assert.match(ask, /\.project-name'\)\.textContent = suggest\.name;/, 'the name goes in as text, never markup');
+  assert.match(ask, /button\[value="move"\]'\)\.textContent = `File in \$\{suggest\.name\}`;/);
+  assert.match(ask, /question\.returnValue = '';[\s\S]*resolve\(question\.returnValue\)[\s\S]*question\.showModal\(\);/, 'Esc or the close button answers empty: file nothing');
+  assert.match(readFileSync(WEB('app.css'), 'utf8'), /dialog\.project-check \{/);
 });
 
 // ── Copy to another project ──────────────────────────────────────────────────

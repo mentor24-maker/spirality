@@ -120,6 +120,36 @@ test('POST /projects/:slug/tickets files a ticket under the caller, and GET list
   } finally { await f.cleanup(); }
 });
 
+test('POST /projects/:slug/tickets/check names the project the words fit better, or none, and writes nothing', async () => {
+  const f = await fixture();
+  try {
+    f.store.createProject({ slug: 'game', name: 'Starfield', prefix: 'GA', operator: f.human.id });
+    for (const name of ['Spaceship engine sound cuts out', 'Spaceship warp drive crashes', 'Warp drive trail looks flat']) {
+      f.store.fileTicket({ project: 'game', name, status: 'queued', actor: f.machine.id });
+    }
+    for (const name of ['Tasks page search box finds nothing', 'Add Task box loses its text', 'Tasks page columns too narrow']) {
+      f.store.fileTicket({ project: 'alpha', name, status: 'queued', actor: f.machine.id });
+    }
+    const before = JSON.stringify([f.store.listTickets('alpha'), f.store.listTickets('game'), f.store.listEvents('AL-1')]);
+
+    const elsewhere = await f.call('POST', '/projects/alpha/tickets/check', { token: f.humanToken, body: { name: 'Spaceship warp drive stutters', description: 'and the engine sound' } });
+    assert.equal(elsewhere.status, 200, elsewhere.text);
+    assert.deepEqual(elsewhere.body, { suggest: { slug: 'game', name: 'Starfield' } });
+    const here = await f.call('POST', '/projects/alpha/tickets/check', { token: f.humanToken, body: { name: 'Tasks page search box is slow', description: '' } });
+    assert.deepEqual(here.body, { suggest: null });
+    const nothing = await f.call('POST', '/projects/game/tickets/check', { token: f.humanToken, body: { name: 'Quarterly invoice' } });
+    assert.deepEqual(nothing.body, { suggest: null });
+
+    // Refused: an unknown project, a field it does not read, words that are not text, no token.
+    assert.equal((await f.call('POST', '/projects/nowhere/tickets/check', { body: { name: 'x' } })).status, 404);
+    assert.equal((await f.call('POST', '/projects/alpha/tickets/check', { body: { name: 'x', status: 'queued' } })).status, 400);
+    assert.equal((await f.call('POST', '/projects/alpha/tickets/check', { body: { name: 7 } })).status, 400);
+    assert.equal((await f.call('POST', '/projects/alpha/tickets/check', { token: null, body: { name: 'x' } })).status, 401);
+
+    assert.equal(JSON.stringify([f.store.listTickets('alpha'), f.store.listTickets('game'), f.store.listEvents('AL-1')]), before, 'the check wrote nothing');
+  } finally { await f.cleanup(); }
+});
+
 test('GET /tickets/:id answers the ticket with its comments, oldest first, replies linked', async () => {
   const f = await fixture();
   try {

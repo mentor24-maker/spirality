@@ -55,6 +55,7 @@ import { openStore, StoreError } from './store.mjs';
 import { boardOf, PRIORITIES, projectDetailsOf, projectsList, readSearchFilters, reportsOf, searchTickets, stageColoursOf, threadOf, waitingFor } from './pageData.mjs';
 import { createNotifier, DEFAULT_FROM, MAIL_FROM, MAIL_KEY, mailEnvFromDoppler, mailSettingsFromEnv, resendSender, textSettings } from './notify.mjs';
 import { sendInvite, sendResetLink } from './account.mjs';
+import { guessProject } from './projectGuess.mjs';
 import { findConfigFile, loadProjectConfig } from '../lib/projectConfig.mjs';
 import { saveAnswers, setupFields, setupList, setupOf, SetupError } from './setup.mjs';
 import busRelayPlan from '../lib/busRelayPlan.js';
@@ -90,6 +91,8 @@ const INVITE_REFUSALS = Object.freeze({ 'duplicate-email': 409, 'duplicate-invit
 
 /** The fields a new ticket may carry. */
 const FILE_FIELDS = Object.freeze(['name', 'description', 'status', 'priority', 'tags', 'assignee', 'loopNote']);
+/** What the Add Task box's project check reads: the words about to be filed. */
+const CHECK_FIELDS = Object.freeze(['name', 'description']);
 
 /** The fields a new project may carry. */
 const PROJECT_FIELDS = Object.freeze(['name', 'slug', 'prefix', 'url', 'logo', 'owner', 'repo', 'alertEmail', 'alertPhone']);
@@ -555,6 +558,20 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
       const board = boardOf(store, parts[1]);
       if (!board) throw new HttpError(404, 'unknown-project', `no project "${parts[1]}".`);
       return [200, board];
+    }
+
+    // Dane's page: the Add Task box asks, before it files, whether the words
+    // fit another project better (tracker/projectGuess.mjs). Plain
+    // word matching on the tickets already here; it writes nothing.
+    if (parts.length === 4 && parts[0] === 'projects' && parts[2] === 'tickets' && parts[3] === 'check' && method === 'POST') {
+      const project = requireProject(parts[1]);
+      const body = await readJson(req);
+      checkBody(body, me, CHECK_FIELDS);
+      for (const key of CHECK_FIELDS) {
+        if (body[key] != null && typeof body[key] !== 'string') throw new HttpError(400, 'bad-field', `${key} must be text.`);
+      }
+      const projects = store.listProjects().map((p) => ({ slug: p.slug, name: p.name, tickets: store.listTickets(p.slug) }));
+      return [200, { suggest: guessProject({ name: body.name ?? '', description: body.description ?? '' }, project.slug, projects) }];
     }
 
     if (parts.length === 3 && parts[0] === 'projects' && parts[2] === 'tickets') {

@@ -797,9 +797,11 @@ async function drawTasks(view, opts = {}) {
  *
  * Above the stages sits the Add Task box (wireAddTask), closed unless
  * `adding` asks for it open or a kept draft has text in it. `filed` is the
- * id of the ticket the box just filed, named in a note after the redraw.
+ * id of the ticket the box just filed, named in a note after the redraw;
+ * `unchecked` adds that the project check could not run. The question box
+ * (the Add Task box's "Did you mean ...?") is drawn here, closed.
  */
-async function drawProject(slug, view, { adding = false, filed = null } = {}) {
+async function drawProject(slug, view, { adding = false, filed = null, unchecked = false } = {}) {
   const [board, looks, { projects }] = await Promise.all([
     api('GET', `/projects/${encodeURIComponent(slug)}/board`),
     api('GET', '/stage-colours').then(stageLooks, () => ({})),
@@ -860,7 +862,7 @@ async function drawProject(slug, view, { adding = false, filed = null } = {}) {
       ${searchForm('')}
       <nav class="views" aria-label="View">${toggle}</nav>
     </div>
-    ${filed ? `<p class="filed-note">Filed <a href="/t/${encodeURIComponent(filed)}">${escapeHtml(filed)}</a></p>` : ''}
+    ${filed ? `<p class="filed-note">Filed <a href="/t/${encodeURIComponent(filed)}">${escapeHtml(filed)}</a>${unchecked ? `. ${UNCHECKED_NOTE}` : ''}</p>` : ''}
     <details class="add-task">
       <summary>Add Task</summary>
       <form class="request">
@@ -871,6 +873,16 @@ async function drawProject(slug, view, { adding = false, filed = null } = {}) {
         <div class="row"><button type="submit">File request</button><span class="note"></span></div>
       </form>
     </details>
+    <dialog class="project-check" aria-labelledby="project-check-question">
+      <form method="dialog">
+        <button type="submit" class="close" value="" aria-label="Close: file nothing">×</button>
+        <p id="project-check-question">Did you mean for that to be associated with project <strong class="project-name"></strong>?</p>
+        <div class="row">
+          <button type="submit" value="move">File in</button>
+          <button type="submit" value="keep">Keep in ${escapeHtml(board.projectName)}</button>
+        </div>
+      </form>
+    </dialog>
     <p class="error list-note" role="alert" hidden></p>
     ${view === 'board'
     ? `<div class="board">${board.columns.map(column).join('')}</div>`
@@ -1335,6 +1347,9 @@ function wireEditPanel(t) {
   };
 }
 
+/** The filed note's words when the Add Task box's project check could not run. */
+const UNCHECKED_NOTE = 'The project check could not run, so it went into the project shown.';
+
 /** The draft kept for the Add Task box, or empty fields. */
 function savedDraft() {
   try {
@@ -1351,6 +1366,14 @@ function savedDraft() {
  * reload never loses it, and a kept draft with text in it opens the box on
  * its own; it is forgotten once the ticket is filed, and the page redraws
  * with the box closed and the new ticket in its stage.
+ *
+ * Before filing, the box asks the server whether the words fit another
+ * project better (tracker/projectGuess.mjs). If one does, the
+ * question box asks "Did you mean for that to be associated with project
+ * X?": File in X files there and opens X's board; Keep in files here;
+ * closing it files nothing and leaves the text in the form. A check that
+ * fails never stops the filing: the task goes into the project shown and
+ * the note says the check could not run.
  */
 function wireAddTask(slug, view, adding) {
   const box = main.querySelector('details.add-task');
@@ -1369,17 +1392,44 @@ function wireAddTask(slug, view, adding) {
   };
   form.addEventListener('input', keep);
   const note = form.querySelector('.note');
+  const question = main.querySelector('dialog.project-check');
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     keep();
     const button = form.querySelector('button');
     button.disabled = true;
     note.className = 'note quiet';
+    note.textContent = 'Checking the project…';
+    // The check reads the words and writes nothing; a failed check files here as before.
+    let suggest = null;
+    let unchecked = false;
+    try {
+      ({ suggest } = await api('POST', `/projects/${encodeURIComponent(slug)}/tickets/check`, {
+        name: title.value, description: description.value,
+      }));
+    } catch (err) {
+      if (err instanceof SignedOut) return drawSignIn('You were signed out; your request was not filed. What you typed is kept: it will be back in the form once you sign in.');
+      unchecked = true;
+    }
+    let into = slug;
+    if (suggest) {
+      const choice = await askProject(question, suggest);
+      if (choice === 'move') into = suggest.slug;
+      else if (choice !== 'keep') {
+        // Closed: nothing filed, the text stays in the form.
+        note.className = 'note';
+        note.textContent = '';
+        button.disabled = false;
+        title.focus();
+        return;
+      }
+    }
+    note.className = 'note quiet';
     note.textContent = 'Filing…';
     let ticket;
     try {
       // Exactly as typed: no trimming, no formatting, the same rule as the reply box.
-      ticket = await api('POST', `/projects/${encodeURIComponent(slug)}/tickets`, {
+      ticket = await api('POST', `/projects/${encodeURIComponent(into)}/tickets`, {
         name: title.value, description: description.value, status: 'Requested',
       });
     } catch (err) {
@@ -1390,13 +1440,30 @@ function wireAddTask(slug, view, adding) {
       return;
     }
     try { localStorage.removeItem(DRAFT_KEY); } catch { /* nothing kept */ }
+    // Filed in another project: open its board, where the new ticket is.
+    if (into !== slug) history.pushState(null, '', `/${view}/${encodeURIComponent(into)}`);
     try {
-      await drawAgain(() => drawProject(slug, view, { filed: ticket.id }));
+      await drawAgain(() => drawProject(into, view, { filed: ticket.id, unchecked }));
     } catch (err) {
       if (err instanceof SignedOut) return drawSignIn(`You were signed out; ${ticket.id} was filed.`);
       note.className = 'note error';
       note.textContent = `Filed ${ticket.id}, but the page could not be drawn again: ${err.message}`;
     }
+  });
+}
+
+/**
+ * Ask in the Tasks page's question box whether the task belongs to
+ * `suggest`, the project its words fit better. Answers 'move' (File in X),
+ * 'keep' (Keep in the project shown) or '' (closed: file nothing).
+ */
+function askProject(question, suggest) {
+  question.querySelector('.project-name').textContent = suggest.name;
+  question.querySelector('button[value="move"]').textContent = `File in ${suggest.name}`;
+  question.returnValue = '';
+  return new Promise((resolve) => {
+    question.addEventListener('close', () => resolve(question.returnValue), { once: true });
+    question.showModal();
   });
 }
 
