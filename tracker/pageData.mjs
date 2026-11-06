@@ -26,6 +26,17 @@ const { STAGE_ORDER, LIVE, QUEUED, REWORK, OPERATOR_HELD_STATUSES, TERMINAL_STAT
 const { findPullRequest } = mergeOnComment;
 const { findHumanHours } = humanHours;
 
+/**
+ * The projects a reader may see: every one when `only` is null (a loop, an
+ * admin), else only those whose slug `only` (a Set) holds. Every page that
+ * reads across projects narrows through this, so a person who is not an
+ * admin never sees a project they are not on (store.projectsVisibleTo).
+ */
+function visibleProjects(store, only) {
+  const all = store.listProjects();
+  return only == null ? all : all.filter((p) => only.has(p.slug));
+}
+
 /** A ticket's comments in the shape the loop trail's readers take (findPullRequest, findHumanHours). */
 function trailComments(store, ticketId) {
   return store.listComments(ticketId).map((c) => ({
@@ -65,16 +76,16 @@ function answerIsIn(ticket, comments, operatorId) {
 }
 
 /**
- * Every ticket in the operator's two statuses, across every project, with
- * the loop's verdict for `operatorId`. `waiting` holds the WAITING ones;
+ * Every ticket in the operator's two statuses, across every project `only`
+ * lets through (visibleProjects), with the loop's verdict for `operatorId`. `waiting` holds the WAITING ones;
  * `unsure` holds the ones the verdict cannot decide (his status, but not
  * assigned to him), so a half-finished hand-off is shown, never dropped.
  * Both newest first, by the ticket's last change.
  */
-export function waitingFor(store, operatorId) {
+export function waitingFor(store, operatorId, { only = null } = {}) {
   const waiting = [];
   const unsure = [];
-  for (const project of store.listProjects()) {
+  for (const project of visibleProjects(store, only)) {
     for (const status of OPERATOR_LANE) {
       for (const ticket of store.listTickets(project.slug, { status })) {
         const result = waitingVerdict(verdictInput(ticket, store.listComments(ticket.id)), { operatorId });
@@ -146,9 +157,10 @@ function namedActor(store, id) {
  * Every project, for the Projects screen: slug, name, ticket-id prefix, web
  * address, logo, owner by name and GitHub repository (each null when it has none), and how many
  * of its tickets are open (any status but Live), in the store's order.
+ * `only` narrows it to the projects the reader may see (visibleProjects).
  */
-export function projectsList(store) {
-  return store.listProjects().map((p) => ({
+export function projectsList(store, { only = null } = {}) {
+  return visibleProjects(store, only).map((p) => ({
     slug: p.slug,
     name: p.name,
     prefix: p.prefix,
@@ -385,10 +397,12 @@ function humanHoursFigures(estimates, days) {
  *    runs from the first ticket filed in scope, at least one day;
  *  - waitingNow: how many tickets sit in the operator's stages now.
  * A range counts what happened in the last `days` days before `now`.
- * Null when `project` names no project.
+ * Null when `project` names no project. `only` narrows "every project" to
+ * the ones the reader may see (visibleProjects), and a `project` outside it
+ * is answered as no project, the same as one that does not exist.
  */
-export function reportsOf(store, { project = null, now = Date.now() } = {}) {
-  let projects = store.listProjects();
+export function reportsOf(store, { project = null, now = Date.now(), only = null } = {}) {
+  let projects = visibleProjects(store, only);
   if (project != null) {
     projects = projects.filter((p) => p.slug === project);
     if (!projects.length) return null;
@@ -545,9 +559,10 @@ function passesFilters(store, ticket, chosen) {
  * a comment is a loop's is the relay's own check, as on the ticket page
  * (threadOf). `filters` (readSearchFilters) narrow the tickets before any
  * are scored; the answer carries them back, with their choices, for the
- * page to draw. Reads only. An empty query finds nothing.
+ * page to draw. `only` narrows the projects searched to the ones the
+ * reader may see (visibleProjects). Reads only. An empty query finds nothing.
  */
-export function searchTickets(store, query, filters = searchFilterChoices(store).map((f) => ({ ...f, value: null }))) {
+export function searchTickets(store, query, filters = searchFilterChoices(store).map((f) => ({ ...f, value: null })), { only = null } = {}) {
   const term = String(query ?? '').trim();
   const pattern = searchPattern(term);
   if (!pattern) return { query: term, filters, results: [] };
@@ -558,7 +573,7 @@ export function searchTickets(store, query, filters = searchFilterChoices(store)
     return kinds.get(c.author) === 'machine' || isMachineComment(c.body);
   };
   const results = [];
-  for (const project of store.listProjects()) {
+  for (const project of visibleProjects(store, only)) {
     for (const ticket of store.listTickets(project.slug)) {
       if (!passesFilters(store, ticket, chosen)) continue;
       const discussion = [];

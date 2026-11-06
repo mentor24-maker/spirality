@@ -106,11 +106,33 @@ class SignedOut extends Error {}
 
 /** A refused call, carrying the HTTP status the tracker answered with. */
 class Refused extends Error {
-  constructor(message, status, field = null) {
+  constructor(message, status, field = null, yourProjectsOnly = false) {
     super(message);
     this.status = status;
     this.field = field;
+    // A 404 to someone who sees only their own projects: it may be there, on a project they are not on.
+    this.yourProjectsOnly = yourProjectsOnly;
   }
+}
+
+/** Whether a refusal is the server's "not on a project you are on" 404 (server.mjs notFound). */
+const notOnProject = (err) => err instanceof Refused && err.status === 404 && err.yourProjectsOnly === true;
+
+/**
+ * The plain page a person gets for a ticket or project on a project they are
+ * not a member of. The server answers a missing one and a hidden one with
+ * the same words, so this page says both, and never shows the ticket.
+ */
+function drawNotOnProject({ ticket = null, project = null }) {
+  setTitle('Not on This Project · Tracker');
+  const line = ticket != null
+    ? `Ticket ${ticket} is on a project you are not a member of, or there is no such ticket.`
+    : `You are not a member of the project ${project}, or there is no such project.`;
+  main.innerHTML = `<h1>You Are Not on This Project</h1>
+    <p>${escapeHtml(line)}</p>
+    <p class="quiet">An admin can add you to a project from its page.</p>
+    <p><a href="/projects">Back to Projects</a></p>`;
+  putTrail([{ label: 'Projects', href: '/projects' }, { label: 'Not on This Project' }]);
 }
 
 /** Call the tracker as the signed-in person. Answers the parsed JSON, or throws with the server's own message. */
@@ -132,7 +154,7 @@ async function api(method, path, body) {
   if (res.status === 401) throw new SignedOut();
   let json = null;
   try { json = await res.json(); } catch { /* reported below */ }
-  if (!res.ok) throw new Refused(json?.message ?? `the tracker answered ${res.status}.`, res.status, json?.field ?? null);
+  if (!res.ok) throw new Refused(json?.message ?? `the tracker answered ${res.status}.`, res.status, json?.field ?? null, json?.yourProjectsOnly === true);
   if (!json) throw new Error('the tracker answered with something that is not JSON.');
   if (!write) reads?.set(path, JSON.stringify(json));
   return json;
@@ -520,6 +542,7 @@ async function drawProjectDetails(slug, done = '', problem = '') {
   try {
     p = await api('GET', `/projects/${encodeURIComponent(slug)}`);
   } catch (err) {
+    if (notOnProject(err)) return drawNotOnProject({ project: slug });
     if (!(err instanceof Refused) || err.status !== 404) throw err;
     setTitle('No Such Project · Tracker');
     main.innerHTML = `<h1>Projects</h1><p>There is no project ${escapeHtml(slug)}.</p><p><a href="/projects">Back to Projects</a></p>`;
@@ -568,7 +591,7 @@ async function drawProjectDetails(slug, done = '', problem = '') {
       <div class="row"><select id="add-member">${addable.map((x) => `<option value="${escapeHtml(x.id)}">${escapeHtml(x.name)}</option>`).join('')}</select><button type="submit">Add Member</button></div>
     </form>`
     : '<p class="quiet">Everyone with an account is a member.</p>') : ''}
-    <p class="quiet">Membership is recorded, not yet enforced: everyone still sees every project.</p>`;
+    <p class="quiet">Only its members (and admins) see this project and its tickets.</p>`;
   putTrail([{ label: p.name, href: '/projects' }, { label: 'Details' }]);
   if (!editing) return;
   const note = main.querySelector('p.note');
@@ -700,6 +723,7 @@ async function drawEditProject(slug) {
   try {
     p = await api('GET', `/projects/${encodeURIComponent(slug)}`);
   } catch (err) {
+    if (notOnProject(err)) return drawNotOnProject({ project: slug });
     if (!(err instanceof Refused) || err.status !== 404) throw err;
     main.innerHTML = `<h1>Edit Project</h1><p>There is no project ${escapeHtml(slug)}.</p><p><a href="/projects">Back to Projects</a></p>`;
     return;
@@ -1911,6 +1935,10 @@ function markNav(which) {
 
 /** The page's own address, as the beat compares it. */
 const here = () => location.pathname + location.search;
+/** The ticket id a `/t/<id>` address opens, or null. */
+const ticketAt = () => { const m = /^\/t\/([^/]+)$/.exec(location.pathname); return m ? decodeURIComponent(m[1]) : null; };
+/** The project slug a `/board/<slug>` or `/list/<slug>` address opens, or null. */
+const boardAt = () => { const m = /^\/(?:board|list)\/([^/]+)$/.exec(location.pathname); return m ? decodeURIComponent(m[1]) : null; };
 
 /**
  * Draw the page the address names. Waiting on you, a board or list and a
@@ -2002,6 +2030,8 @@ async function route({ place = null } = {}) {
     if (place && !(err instanceof SignedOut)) return;
     lastDrawn = null;
     if (err instanceof SignedOut) drawSignIn();
+    else if (notOnProject(err) && ticketAt()) drawNotOnProject({ ticket: ticketAt() });
+    else if (notOnProject(err) && boardAt()) drawNotOnProject({ project: boardAt() });
     else showError(err);
   } finally {
     if (recording === reads) recording = null;

@@ -909,6 +909,31 @@ test('an admin adds and removes members, read back; the owner and operator stay;
   } finally { cleanup(); }
 });
 
+test('projectsVisibleTo: a machine and an admin see every project; any other person only the ones they are a member of, following each change', () => {
+  const { store, human, machine, cleanup } = fixture();
+  try {
+    store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE', operator: human.id });
+    const person = store.createActor({ kind: 'human', name: 'Person' });
+    assert.deepEqual(store.projectsVisibleTo(machine.id), ['alpha', 'beta']);
+    assert.deepEqual(store.projectsVisibleTo(human.id), ['alpha', 'beta']);
+    assert.equal(store.seesEveryProject(machine.id), true);
+    assert.equal(store.seesEveryProject(human.id), true);
+    assert.deepEqual(store.projectsVisibleTo(person.id), [], 'a person on no project sees none');
+    assert.equal(store.seesEveryProject(person.id), false);
+    store.addMember({ project: 'beta', actor: person.id, by: human.id });
+    assert.deepEqual(store.projectsVisibleTo(person.id), ['beta']);
+    // Made an admin, they see everything; back to a viewer, only their own again.
+    store.setRole({ actor: person.id, role: 'admin', by: human.id });
+    assert.deepEqual(store.projectsVisibleTo(person.id), ['alpha', 'beta']);
+    store.setRole({ actor: person.id, role: 'viewer', by: human.id });
+    assert.deepEqual(store.projectsVisibleTo(person.id), ['beta']);
+    store.removeMember({ project: 'beta', actor: person.id, by: human.id });
+    assert.deepEqual(store.projectsVisibleTo(person.id), []);
+    assert.deepEqual(store.projectsVisibleTo(9999), []);
+    assert.equal(store.seesEveryProject(9999), false);
+  } finally { cleanup(); }
+});
+
 test('roles are recorded, not enforced: a viewer still files, changes and comments on tickets as before', () => {
   const { store, human, cleanup } = fixture();
   try {

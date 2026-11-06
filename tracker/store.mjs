@@ -74,7 +74,9 @@
  *    no admin, checked in the same transaction as the write. While nobody is
  *    an admin, the project operators are made admins, so nobody is locked out.
  *  - A project's members are people (never a machine), one `project_members`
- *    row each, with who added them and when: recorded, not yet enforced.
+ *    row each, with who added them and when. A person who is not an admin
+ *    sees only the projects they are a member of (projectsVisibleTo); an
+ *    admin and every machine see them all.
  *    When the table is first made, every person becomes a member of every
  *    project, so nobody loses anything. A project's owner and operator (when
  *    a person) are always members: made so on every open, on createProject
@@ -1322,6 +1324,28 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
       return db.prepare(`SELECT p.slug, p.name FROM project_members m JOIN projects p ON p.slug = m.project
           JOIN actors a ON a.id = m.actor WHERE m.actor = ? AND a.kind = 'human' ORDER BY p.slug`).all(actorId)
         .map((r) => ({ slug: r.slug, name: r.name }));
+    },
+
+    /**
+     * The projects an actor may see and work on, by slug, in slug order: every
+     * project for a machine (a loop works its own project's queue, so a
+     * machine's reads are never narrowed) and for an admin (so nobody is ever
+     * shut out of a project); only the ones they are a member of for any
+     * other person. Empty for an unknown id.
+     */
+    projectsVisibleTo(actorId) {
+      const row = db.prepare('SELECT kind FROM actors WHERE id = ?').get(actorId);
+      if (!row) return [];
+      if (row.kind !== 'human' || roleOf(actorId) === 'admin') {
+        return db.prepare('SELECT slug FROM projects ORDER BY slug').all().map((r) => r.slug);
+      }
+      return db.prepare('SELECT project FROM project_members WHERE actor = ? ORDER BY project').all(actorId).map((r) => r.project);
+    },
+
+    /** Whether an actor sees every project (a machine, or an admin) rather than only their own. False for an unknown id. */
+    seesEveryProject(actorId) {
+      const row = db.prepare('SELECT kind FROM actors WHERE id = ?').get(actorId);
+      return Boolean(row) && (row.kind !== 'human' || roleOf(actorId) === 'admin');
     },
 
     /**

@@ -731,14 +731,15 @@ test('PUT /people/<id>/role: an admin changes a person\'s role, read back on GET
     assert.equal(f.store.roleOf(f.human.id), 'admin');
     assert.equal(f.store.roleOf(other.id), 'reviewer');
     assert.equal(f.store.roleOf(f.machine.id), null);
-    // The role is recorded, not enforced: the viewer-to-be still files a ticket.
+    // The role is recorded, not enforced: the viewer-to-be, on the project, still files a ticket.
+    f.store.addMember({ project: 'alpha', actor: other.id, by: f.human.id });
     f.store.setRole({ actor: other.id, role: 'viewer', by: f.human.id });
     const filed = await f.call('POST', '/projects/alpha/tickets', { token: otherToken, body: { name: 'A viewer files', status: 'Requested' } });
     assert.equal(filed.status, 201, filed.text);
   } finally { await f.cleanup(); }
 });
 
-test('project members: an admin adds and removes one, answered with the list read back; the owner and operator stay (409); a non-admin and a loop get 403; nothing else is hidden', async () => {
+test('project members: an admin adds and removes one, answered with the list read back; the owner and operator stay (409); a non-admin and a loop get 403; someone taken off no longer sees it', async () => {
   const f = await fixture();
   try {
     const other = f.store.createActor({ kind: 'human', name: 'Other' });
@@ -784,12 +785,87 @@ test('project members: an admin adds and removes one, answered with the list rea
     assert.equal(removed.status, 200, removed.text);
     assert.deepEqual(removed.body.members.map((m) => m.name), ['Operator']);
     assert.equal((await f.call('DELETE', `/projects/alpha/members/${other.id}`, { token: f.humanToken })).status, 404);
-    // Membership is recorded, not enforced: someone on no project still sees it and files a ticket in it.
-    assert.equal((await f.call('GET', '/projects', { token: otherToken })).body.projects.length, 1);
-    assert.equal((await f.call('GET', '/projects/alpha/board', { token: otherToken })).status, 200);
+    // Membership is enforced: someone on no project sees none, and cannot file in it.
+    assert.equal((await f.call('GET', '/projects', { token: otherToken })).body.projects.length, 0);
+    assert.equal((await f.call('GET', '/projects/alpha/board', { token: otherToken })).status, 404);
     const filed = await f.call('POST', '/projects/alpha/tickets', { token: otherToken, body: { name: 'Not a member files', status: 'Requested' } });
-    assert.equal(filed.status, 201, filed.text);
+    assert.equal(filed.status, 404, filed.text);
+    assert.equal(f.store.listTickets('alpha').length, 0, 'nothing was filed');
     assert.ok(f.lines.some((l) => /removed member \d+ from alpha actor=1/.test(l)));
+  } finally { await f.cleanup(); }
+});
+
+test('strict membership: a person who is not an admin sees only their own projects and tickets, everywhere; another project\'s ticket is 404, the same as one that does not exist; an admin and a loop see everything', async () => {
+  const f = await fixture();
+  try {
+    f.store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE', operator: f.human.id });
+    const viewer = f.store.createActor({ kind: 'human', name: 'Viewer' });
+    const vt = f.store.issueToken(viewer.id);
+    f.store.setRole({ actor: viewer.id, role: 'viewer', by: f.human.id });
+    f.store.addMember({ project: 'alpha', actor: viewer.id, by: f.human.id });
+    const mine = f.store.fileTicket({ project: 'alpha', actor: f.human.id, name: 'Shared comet', status: 'queued' });
+    const theirs = f.store.fileTicket({ project: 'beta', actor: f.human.id, name: 'Hidden comet', status: 'Needs your input', assignee: f.human.id });
+    f.store.postComment({ ticket: theirs.id, author: f.machine.id, body: 'comet notes', parent: null });
+    const as = (token) => (method, path, body) => f.call(method, path, { token, body });
+    const v = as(vt);
+
+    // Projects, search and reporting: only alpha and its ticket.
+    assert.deepEqual((await v('GET', '/projects')).body.projects.map((p) => p.slug), ['alpha']);
+    assert.deepEqual((await v('GET', '/search?q=comet')).body.results.map((r) => r.id), [mine.id]);
+    assert.equal((await v('GET', '/reports')).body.started.all, 1);
+    assert.deepEqual((await v('GET', '/people')).body.people.find((p) => p.id === f.human.id).projects.map((p) => p.slug), ['alpha']);
+    const w = (await v('GET', '/waiting')).body;
+    assert.equal(w.waiting.length + w.unsure.length, 0);
+    assert.equal((await v('GET', '/projects/alpha/board')).status, 200);
+    assert.equal((await v('GET', `/tickets/${mine.id}/thread`)).status, 200);
+
+    // Another project's ticket and the project itself: 404, word for word the same as one that does not exist.
+    const ghost = 'BE-999';
+    const reads = [
+      ['GET', '/projects/beta'], ['GET', '/projects/beta/board'], ['GET', '/projects/beta/tickets'],
+      ['POST', '/projects/beta/tickets', { name: 'Sneak in', status: 'Requested' }],
+      ['POST', '/projects/beta/tickets/check', { name: 'x' }], ['GET', '/reports?project=beta'],
+      ['GET', `/tickets/${theirs.id}`], ['GET', `/tickets/${theirs.id}/thread`], ['GET', `/tickets/${theirs.id}/events`],
+      ['GET', `/tickets/${theirs.id}/attachments`], ['GET', `/tickets/${theirs.id}/attachments/1`],
+      ['PATCH', `/tickets/${theirs.id}`, { name: 'Renamed' }], ['DELETE', `/tickets/${theirs.id}`],
+      ['POST', `/tickets/${theirs.id}/comments`, { body: 'hello' }], ['POST', `/tickets/${theirs.id}/clone`, { project: 'alpha' }],
+    ];
+    for (const [method, path, body] of reads) {
+      const r = await v(method, path, body);
+      assert.equal(r.status, 404, `${method} ${path}: ${r.text}`);
+      assert.equal(r.body.yourProjectsOnly, true, `${method} ${path}`);
+      assert.ok(!r.text.includes('Hidden comet') && !r.text.includes('Beta'), `${method} ${path} gives nothing of it away`);
+      const missing = await v(method, path.replace(theirs.id, ghost).replace('beta', 'nope'), body);
+      assert.equal(missing.status, 404, `${method} ${path} (missing)`);
+      assert.equal(missing.text.replace(ghost, theirs.id).replace('nope', 'beta'), r.text, `${method} ${path}: the same answer as one that does not exist`);
+    }
+    // Copying their own ticket into another project is refused the same way.
+    assert.equal((await v('POST', `/tickets/${mine.id}/clone`, { project: 'beta' })).status, 404);
+    // Nothing those refusals asked for happened.
+    assert.deepEqual(f.store.listTickets('beta').map((t) => [t.id, t.name]), [[theirs.id, 'Hidden comet']]);
+    assert.equal(f.store.listComments(theirs.id).length, 1);
+    assert.deepEqual(f.store.listTickets('alpha').map((t) => t.id), [mine.id]);
+
+    // An admin and a loop see everything, as before.
+    for (const call of [as(f.humanToken), as(f.machineToken)]) {
+      assert.deepEqual((await call('GET', '/projects')).body.projects.map((p) => p.slug), ['alpha', 'beta']);
+      assert.deepEqual((await call('GET', '/search?q=comet')).body.results.map((r) => r.id).sort(), [mine.id, theirs.id].sort());
+      const t = await call('GET', `/tickets/${theirs.id}`);
+      assert.equal(t.status, 200);
+      assert.equal(t.body.name, 'Hidden comet');
+      const none = await call('GET', `/tickets/${ghost}`);
+      assert.equal(none.status, 404);
+      assert.equal(none.body.yourProjectsOnly, undefined, 'a 404 to someone who sees everything means there is none');
+    }
+    const listed = (w) => [...w.waiting, ...w.unsure].map((x) => x.id);
+    assert.ok(listed((await as(f.humanToken)('GET', '/waiting')).body).includes(theirs.id), 'the admin\'s Waiting on you still lists it');
+
+    // Added to beta, the viewer sees it at once; taken off, it is gone again.
+    f.store.addMember({ project: 'beta', actor: viewer.id, by: f.human.id });
+    assert.deepEqual((await v('GET', '/projects')).body.projects.map((p) => p.slug), ['alpha', 'beta']);
+    assert.equal((await v('GET', `/tickets/${theirs.id}`)).status, 200);
+    f.store.removeMember({ project: 'beta', actor: viewer.id, by: f.human.id });
+    assert.equal((await v('GET', `/tickets/${theirs.id}`)).status, 404);
   } finally { await f.cleanup(); }
 });
 

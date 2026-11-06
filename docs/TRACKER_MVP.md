@@ -192,8 +192,19 @@ account_links  token hash, purpose (setup|invite|reset), email, actor,
   never a member. Only an admin adds or removes a member (`addMember`,
   `removeMember`), checked in the same transaction as the write. Someone
   invited after this is a member of nothing until an admin adds them.
-  **Membership is recorded, not yet enforced**: everyone still sees every
-  project and ticket; a later ticket (SP-145) makes it strict.
+  **Membership is strict** (SP-145), as StarCaster's is: a person who is not
+  an admin sees and works on only the projects they are a member of
+  (`projectsVisibleTo`). The Projects and Tasks pages, Waiting on you,
+  search, reporting, the Add Task box (and its "did you mean" guess), Copy
+  to another project and each person's projects on the Users page list only
+  those. Any other project, or a ticket on one, answers 404 with exactly the
+  words a project or ticket that does not exist gets, plus
+  `yourProjectsOnly: true`, so the answer never says it exists; the page
+  shows a plain "You Are Not on This Project" instead. An admin sees every
+  project, so Dane is never shut out of one, and every machine sign-in (each
+  loop, `hand-run`) reads and writes exactly as before: a loop is never
+  narrowed. Membership is the only permission enforced; roles are still
+  recorded only.
 
 ### The API
 
