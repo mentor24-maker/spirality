@@ -1518,17 +1518,20 @@ test('clicking Merge and confirming posts exactly the merge phrase as Dane\'s ow
   assert.match(app, /<div class="act">\s*(?:\$\{renderCommands\(t\)\}\s*)?\$\{renderAnswerIn\(t\)\}\s*\$\{renderMergeAction\(t\)\}\s*\$\{renderCloseAction\(t\)\}\s*\$\{renderGoAction\(t\)\}\s*<form class="reply">/, 'the answer-is-in line, then Merge, Close and Go, sit above the reply box on the right');
 });
 
-test('after a reply, Merge, Close or Go posts, the page stays at the top and a confirmation box opens; a failed post opens none', () => {
+test('after a reply, Merge, Close or Go posts, the page stays at the top with no confirmation box', () => {
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   const html = readFileSync(WEB('index.html'), 'utf8');
   const css = readFileSync(WEB('app.css'), 'utf8');
-  // The box: the browser's own <dialog>, closed by its OK button (Escape closes a modal dialog by itself).
-  assert.match(html, /<dialog id="posted"[^>]*>\s*<form method="dialog">\s*<p id="posted-text">Your reply was posted\.<\/p>\s*<button type="submit">OK<\/button>/);
-  assert.match(css, /^dialog#posted \{/m);
-  // One helper: Details open, the page at the top, the box shown as a modal.
-  const helper = /const showPosted = \(\) => \{([\s\S]*?)\n  \};/.exec(app)?.[1];
+  // No posted box: the redrawn page is the confirmation. (Other boxes, such
+  // as the Add Task "right project?" question, are separate and stay.)
+  assert.doesNotMatch(html, /id="posted"|posted-text/);
+  assert.doesNotMatch(css, /dialog#posted/);
+  assert.doesNotMatch(app, /getElementById\('posted'\)|posted\.showModal/);
+  // One helper: Details open, the page at the top.
+  const helper = /const afterPost = \(\) => \{([\s\S]*?)\n  \};/.exec(app)?.[1];
   assert.ok(helper, 'one shared helper');
-  assert.match(helper, /details\.details'\)\.open = true;\s*window\.scrollTo\(0, 0\);\s*if \(!posted\.open\) posted\.showModal\(\);/);
+  assert.match(helper, /details\.details'\)\.open = true;\s*window\.scrollTo\(0, 0\);\s*$/);
+  assert.doesNotMatch(helper, /showModal/, 'the helper opens no box');
   // Nothing scrolls to the last comment any more.
   assert.doesNotMatch(app, /\.comment:last-of-type/);
   // The reply box and the word buttons both call it after the redraw, inside the try, so a failure never does.
@@ -1536,8 +1539,8 @@ test('after a reply, Merge, Close or Go posts, the page stays at the top and a c
   const reply = /\{ body: box\.value \}\);([\s\S]*?)\n  \}\);\n\}/.exec(app)?.[1];
   for (const [name, body] of [['word buttons', word], ['reply box', reply]]) {
     assert.ok(body, name);
-    assert.match(body, /await drawAgain\(\(\) => drawTicket\(t\.id\)\);\s*showPosted\(\);\s*\} catch \(err\) \{/, name);
-    assert.doesNotMatch(body.split('catch (err)')[1], /showPosted/, `${name}: no box on failure`);
+    assert.match(body, /await drawAgain\(\(\) => drawTicket\(t\.id\)\);\s*afterPost\(\);\s*\} catch \(err\) \{/, name);
+    assert.doesNotMatch(body.split('catch (err)')[1], /afterPost/, `${name}: the page does not jump on failure`);
   }
 });
 
