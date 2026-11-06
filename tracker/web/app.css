@@ -40,10 +40,6 @@ pre { background: #f5f5f7; padding: 0.75rem; border-radius: 6px; overflow-x: aut
 code { font-family: ui-monospace, Menlo, monospace; font-size: 0.9em; }
 li.check { list-style: none; margin-left: -1.25rem; }
 form.reply textarea { width: 100%; min-height: 7rem; font: inherit; padding: 0.5rem; box-sizing: border-box; }
-dialog#posted { border: var(--hairline); border-radius: 8px; padding: 1rem 1.5rem; min-width: 16rem; text-align: center; }
-dialog#posted::backdrop { background: rgba(0, 0, 0, 0.3); }
-dialog#posted p { margin: 0 0 1rem; font-weight: 600; }
-dialog#posted button { background: #00AA00; border: 1px solid #006600; border-radius: 10px; color: #fff; cursor: pointer; }
 form.reply .row { display: flex; gap: 1rem; align-items: center; margin-top: 0.5rem; }
 form.request label { display: block; margin-top: 1rem; font-weight: 600; }
 form.request select, form.request input, form.request textarea { display: block; width: 100%; font: inherit; padding: 0.5rem; box-sizing: border-box; margin-top: 0.35rem; }
