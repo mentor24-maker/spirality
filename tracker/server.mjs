@@ -76,14 +76,38 @@ import loopStatuses from '../lib/loopStatuses.js';
 
 /**
  * The session cookie's name and how long it lasts: 30 days, the store's own
- * session lifetime. There is no `Secure` flag yet because the tracker is
- * plain http on the home network, where a `Secure` cookie would never be
- * sent back. The ticket that opens the tracker to the internet must add
- * `Secure` (and serve https) before anything else.
+ * session lifetime. On the home network the tracker is plain http, where a
+ * `Secure` cookie would never be sent back, so the cookie goes without it
+ * there; through the public address (`trackerPublicUrl`, Tailscale Funnel's
+ * https) it always carries `Secure` (`cookieFlags`).
  */
 const SESSION_COOKIE = 'tracker_session';
 const SESSION_MAX_AGE = 30 * 24 * 60 * 60;
 const COOKIE_FLAGS = 'HttpOnly; SameSite=Strict; Path=/';
+
+/** What every answer through the public address carries: browsers keep to https for that name for a year. */
+const HSTS = 'max-age=31536000';
+
+/**
+ * Whether a request came in through the public address (`trackerPublicUrl`). Tailscale
+ * Funnel ends the https itself and hands the request to the tracker on
+ * 127.0.0.1, saying so: `X-Forwarded-Proto: https`, a
+ * `Tailscale-Funnel-Request` header, and the public name in `Host`. Any one
+ * of them counts. Someone on the home network who sends one by hand only
+ * gets the stricter answer (a `Secure` cookie their http page never sends
+ * back, no page), so a false "public" never weakens anything.
+ */
+export function viaPublicAddress(req, publicHost = null) {
+  const proto = String(req.headers['x-forwarded-proto'] ?? '').split(',')[0].trim().toLowerCase();
+  if (proto === 'https') return true;
+  if (req.headers['tailscale-funnel-request'] != null) return true;
+  return publicHost != null && String(req.headers.host ?? '').trim().toLowerCase() === publicHost;
+}
+
+/** The session cookie's flags for this request: `Secure` added through the public address. */
+function cookieFlags(isPublic) {
+  return isPublic ? `${COOKIE_FLAGS}; Secure` : COOKIE_FLAGS;
+}
 
 /** Sign-in failures: this many for one email within the window refuse that email for LOCK_MS. */
 const MAX_FAILURES = 5;
@@ -411,8 +435,10 @@ export const CLOSE_PHRASE = busRelayPlan.CLOSE_PHRASES[0];
 /** The word the Go button posts: the one an intake card asks for (GO_PHRASE in lib/busRelayPlan.js). */
 export const GO_PHRASE = busRelayPlan.GO_PHRASE;
 
-export function createHandler(store, { log = () => {}, notifier = null, defaultProject = null, mergePhrase = null, closePhrase = null, goPhrase = null, accountMail = null, setup = null, now = Date.now } = {}) {
+export function createHandler(store, { log = () => {}, notifier = null, defaultProject = null, mergePhrase = null, closePhrase = null, goPhrase = null, accountMail = null, setup = null, now = Date.now, publicUrl = null } = {}) {
   const failures = failureCounter(now);
+  // The public address's host as a Host header names it (`name:8443`; no port for 443).
+  const publicHost = publicUrl ? new URL(publicUrl).host.toLowerCase() : null;
 
   /**
    * The Users page's data: each person with their email and role, the open
@@ -856,7 +882,7 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
    * `[status, body, headers, after]`, or null for an address that is not
    * one of them; `after` runs once the answer has gone back.
    */
-  async function accountRoute(req, url) {
+  async function accountRoute(req, url, isPublic) {
     if (req.method !== 'POST') return null;
     if (!['/account/link', '/account/set-password', '/account/forgot', '/signin', '/signout'].includes(url.pathname)) return null;
     if (!saysJson(req)) throw new HttpError(415, 'json-only', 'this call takes a JSON body (content-type: application/json).');
@@ -879,12 +905,12 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
       failures.cleared(email);
       const session = store.startSession(person.id);
       log(`signed in actor=${person.id}`);
-      return [200, person, { 'set-cookie': `${SESSION_COOKIE}=${session.token}; ${COOKIE_FLAGS}; Max-Age=${SESSION_MAX_AGE}` }];
+      return [200, person, { 'set-cookie': `${SESSION_COOKIE}=${session.token}; ${cookieFlags(isPublic)}; Max-Age=${SESSION_MAX_AGE}` }];
     }
     if (url.pathname === '/signout') {
       await readJson(req);
       const ended = store.endSession(sessionToken(req));
-      return [200, { signedOut: ended }, { 'set-cookie': `${SESSION_COOKIE}=; ${COOKIE_FLAGS}; Max-Age=0` }];
+      return [200, { signedOut: ended }, { 'set-cookie': `${SESSION_COOKIE}=; ${cookieFlags(isPublic)}; Max-Age=0` }];
     }
     if (url.pathname === '/account/forgot') {
       const body = await readJson(req);
@@ -924,8 +950,13 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     let me = null;
     let status;
     let wrote = null;
+    // Through the public address only the API answers: no page, no page
+    // redirect: an outside site's server is the one caller there.
+    const isPublic = viaPublicAddress(req, publicHost);
+    if (isPublic) res.setHeader('strict-transport-security', HSTS);
+    const asPage = !isPublic && (req.method === 'GET' || req.method === 'HEAD');
     try {
-      const onward = (req.method === 'GET' || req.method === 'HEAD') ? pageRedirect(url.pathname, req.headers.accept) : null;
+      const onward = asPage ? pageRedirect(url.pathname, req.headers.accept) : null;
       if (onward) {
         status = 302;
         res.writeHead(status, { location: onward + url.search, 'cache-control': 'no-store', vary: 'accept', 'content-length': 0 });
@@ -933,14 +964,14 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
         log(`${req.method} ${url.pathname} ${status} -> ${onward}`);
         return;
       }
-      const page = (req.method === 'GET' || req.method === 'HEAD') ? pageFile(url.pathname, req.headers.accept) : null;
+      const page = asPage ? pageFile(url.pathname, req.headers.accept) : null;
       if (page) {
         status = 200;
         sendPage(res, page);
         log(`${req.method} ${url.pathname} ${status} page`);
         return;
       }
-      const account = await accountRoute(req, url);
+      const account = await accountRoute(req, url, isPublic);
       if (account) {
         const [code, body, headers, after] = account;
         status = code;
@@ -987,8 +1018,8 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
 }
 
 /** Start a server on `port` (0 = any free port) against an open store. Resolves to the http.Server. */
-export function startServer({ store, port, host = '127.0.0.1', log, notifier, defaultProject, mergePhrase, closePhrase, goPhrase, accountMail, setup, now }) {
-  const server = createServer(createHandler(store, { log, notifier, defaultProject, mergePhrase, closePhrase, goPhrase, accountMail, setup, now }));
+export function startServer({ store, port, host = '127.0.0.1', log, notifier, defaultProject, mergePhrase, closePhrase, goPhrase, accountMail, setup, now, publicUrl }) {
+  const server = createServer(createHandler(store, { log, notifier, defaultProject, mergePhrase, closePhrase, goPhrase, accountMail, setup, now, publicUrl }));
   return new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(port, host, () => {
@@ -1103,17 +1134,20 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     log(mail.account?.send ? `reset email: on, through Resend, linking to ${mail.account.pageUrl}.` : `reset email: off. ${MAIL_KEY} could not be read, so "Forgot password?" sends nothing.`);
     let defaultProject = null;
     let mergePhrase = null;
+    let publicUrl = null;
     try {
       const config = loadProjectConfig();
       defaultProject = config.projectSlug;
       mergePhrase = config.mergePhrases[0] ?? null;
+      publicUrl = config.trackerPublicUrl;
     } catch (err) {
       log(`the New request form starts on the first project and the ticket page has no Merge button: the project config is not usable (${err.message}).`);
     }
     const accountMail = mail.account && { ...mail.account, projectName: store.getProject(defaultProject)?.name ?? 'tracker' };
     const { setup, why: noSetup } = setupSettingsOf({ db: resolve(db) });
     log(setup ? `set up a project: on, reading ${setup.homeConfig.logDir}/onboard.` : `set up a project: off. ${noSetup}.`);
-    const server = await startServer({ store, port, host, log, notifier, defaultProject, mergePhrase, closePhrase: CLOSE_PHRASE, goPhrase: GO_PHRASE, accountMail, setup });
+    log(publicUrl ? `public address: ${publicUrl} answers the API only, with a Secure cookie.` : 'public address: none set (trackerPublicUrl).');
+    const server = await startServer({ store, port, host, log, notifier, defaultProject, mergePhrase, closePhrase: CLOSE_PHRASE, goPhrase: GO_PHRASE, accountMail, setup, publicUrl });
     console.log(`tracker listening on http://${host}:${server.address().port}/`);
   } catch (err) {
     console.error(`tracker server did not start: ${err.message}`);

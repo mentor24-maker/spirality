@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
-import { startServer, settingsFromEnv, setupSettingsOf } from './server.mjs';
+import { startServer, settingsFromEnv, setupSettingsOf, viaPublicAddress } from './server.mjs';
 import { DANE_FIELDS, STEPS } from '../scripts/onboard/onboard.mjs';
 import loopStatuses from '../lib/loopStatuses.js';
 
@@ -957,7 +957,7 @@ test('signing in with an email and a password sets a 30-day HttpOnly, SameSite=S
     const flags = r.cookie.split(';').map((p) => p.trim());
     assert.match(flags[0], /^tracker_session=[A-Za-z0-9_-]{20,}$/);
     for (const flag of ['HttpOnly', 'SameSite=Strict', 'Path=/', 'Max-Age=2592000']) assert.ok(flags.includes(flag), flag);
-    assert.ok(!flags.some((p) => /^secure$/i.test(p)), 'no Secure flag yet: the tracker is plain http on the home network');
+    assert.ok(!flags.some((p) => /^secure$/i.test(p)), 'no Secure flag on the home network: the tracker is plain http there');
     const cookie = cookieOf(r.cookie);
 
     // "Reload": the cookie alone signs in, every time.
@@ -969,6 +969,68 @@ test('signing in with an email and a password sets a 30-day HttpOnly, SameSite=S
     assert.deepEqual(out.body, { signedOut: true });
     assert.match(out.cookie, /^tracker_session=;.*Max-Age=0/);
     assert.equal((await s.ask('GET', '/me', { headers: { cookie } })).status, 401);
+  } finally { await s.close(); await f.cleanup(); }
+});
+
+const PUBLIC_URL = 'https://mini.example.ts.net:8443';
+/** What Tailscale Funnel adds to every request it hands the tracker. */
+const FUNNEL = Object.freeze({ host: 'mini.example.ts.net:8443', 'x-forwarded-proto': 'https', 'x-forwarded-for': '203.0.113.9', 'tailscale-funnel-request': '?1' });
+
+test('through the public address the session cookie carries Secure and every answer carries Strict-Transport-Security; on the home network neither (SP-152)', async () => {
+  const f = await fixture();
+  const s = await signInServer(f, { publicUrl: PUBLIC_URL });
+  try {
+    const raw = (path, init = {}) => fetch(`${s.base}${path}`, init);
+    // Reached, not signed in: 401, with the header.
+    const me = await raw('/me', { headers: FUNNEL });
+    assert.equal(me.status, 401);
+    assert.equal(me.headers.get('strict-transport-security'), 'max-age=31536000');
+
+    const signin = await raw('/signin', { method: 'POST', headers: { ...FUNNEL, ...s.json }, body: JSON.stringify({ email: s.email, password: s.password }) });
+    assert.equal(signin.status, 200);
+    const flags = signin.headers.get('set-cookie').split(';').map((p) => p.trim());
+    for (const flag of ['HttpOnly', 'SameSite=Strict', 'Path=/', 'Secure']) assert.ok(flags.includes(flag), flag);
+    const cookie = flags[0];
+    assert.equal((await raw('/me', { headers: { ...FUNNEL, cookie } })).status, 200, 'the Secure cookie signs in through the public address');
+    const out = await raw('/signout', { method: 'POST', headers: { ...FUNNEL, ...s.json, cookie }, body: '{}' });
+    assert.ok(out.headers.get('set-cookie').split(';').map((p) => p.trim()).includes('Secure'), 'the sign-out cookie matches');
+
+    // The home network: plain http, no Secure, no header, so the Mini's page keeps working.
+    const home = await raw('/signin', { method: 'POST', headers: { host: 'mac-mini.local:4180', ...s.json }, body: JSON.stringify({ email: s.email, password: s.password }) });
+    assert.equal(home.status, 200);
+    assert.ok(!home.headers.get('set-cookie').split(';').some((p) => /^secure$/i.test(p.trim())));
+    assert.equal(home.headers.get('strict-transport-security'), null);
+    assert.equal((await raw('/me', { headers: { cookie: home.headers.get('set-cookie').split(';')[0] } })).status, 200);
+  } finally { await s.close(); await f.cleanup(); }
+});
+
+test('any one of Funnel\'s marks makes a request public: the https proto, the Funnel header, or the public name as Host (SP-152)', () => {
+  const host = 'mini.example.ts.net:8443';
+  const req = (headers) => ({ headers });
+  assert.equal(viaPublicAddress(req({ 'x-forwarded-proto': 'https' }), host), true);
+  assert.equal(viaPublicAddress(req({ 'x-forwarded-proto': 'HTTPS, http' }), host), true);
+  assert.equal(viaPublicAddress(req({ 'tailscale-funnel-request': '?1' }), host), true);
+  assert.equal(viaPublicAddress(req({ host: 'Mini.Example.ts.net:8443' }), host), true);
+  assert.equal(viaPublicAddress(req({ host: 'mac-mini.local:4180' }), host), false);
+  assert.equal(viaPublicAddress(req({ host: '127.0.0.1:4180', 'x-forwarded-proto': 'http' }), host), false);
+  assert.equal(viaPublicAddress(req({ host }), null), false, 'no public address set: the Host alone means nothing');
+});
+
+test('through the public address only the API answers: no page, no page redirect (SP-152)', async () => {
+  const f = await fixture();
+  const s = await signInServer(f, { publicUrl: PUBLIC_URL });
+  try {
+    const html = { accept: 'text/html' };
+    for (const path of ['/', '/board', '/t/SP-1', '/web/app.mjs', '/projects', '/people']) {
+      const r = await fetch(`${s.base}${path}`, { headers: { ...FUNNEL, ...html }, redirect: 'manual' });
+      assert.ok(r.status === 401 || r.status === 404, `${path} answered ${r.status}`);
+      assert.match(r.headers.get('content-type'), /application\/json/, `${path} is not the page`);
+    }
+    // The same addresses still open the page on the home network.
+    const home = await fetch(`${s.base}/board`, { headers: html });
+    assert.equal(home.status, 200);
+    assert.match(home.headers.get('content-type'), /text\/html/);
+    assert.equal((await fetch(`${s.base}/people`, { headers: html, redirect: 'manual' })).status, 302);
   } finally { await s.close(); await f.cleanup(); }
 });
 

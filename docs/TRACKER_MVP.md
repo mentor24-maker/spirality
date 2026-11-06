@@ -415,6 +415,43 @@ per request: method, address, answer, actor id; never a token) and
 `<projectSlug>-tracker-backup.log` (one `backup OK` or `backup FAILED` line
 per night).
 
+**The public address** (SP-152). StarCaster's server runs on Vercel, outside
+the home network, and calls the tracker at `trackerPublicUrl`
+(`https://mac-mini.tail7fc5c6.ts.net:8443`). That address is Tailscale
+Funnel: Tailscale, already running on the Mini for StarCaster, answers https
+there and hands each request to the tracker on `127.0.0.1:<trackerPort>`. No
+router port is opened and no other account is involved. Port 8443 keeps it
+apart from StarCaster's own Funnel routes on 443.
+
+Through the public address the tracker answers **only its API**: no page and
+no page redirect (a page address answers JSON, 401 or 404). Every call still
+needs a token or a session, and sign-in still locks an email after 5
+failures. The session cookie carries `Secure` and every answer carries
+`Strict-Transport-Security` there; on the home network (`trackerUrl`, plain
+http) neither, so the Mini's page keeps working. The tracker knows a request
+came through Funnel by what Funnel adds (`X-Forwarded-Proto: https`, a
+`Tailscale-Funnel-Request` header, the public name as `Host`); someone on
+the home network who sends those by hand only gets the stricter answer.
+
+`scripts/install_tracker_funnel.sh` puts the route on, checks it and takes it
+off. It reads the address, the tracker's port, the launchd job that keeps
+Tailscale running (`tailscaleLabel`) and Tailscale's socket
+(`tailscaleSocket`) from the project config, and writes only the one port in
+the address:
+
+| Command | What it does |
+|---|---|
+| `scripts/install_tracker_funnel.sh` | Puts the route on. Refuses (exit 3) if the running tracker is on code from before the public address (it would be published with no `Secure` cookie and with its page) or if the port already carries another route. Reads every route back: ours must be there and every other route (StarCaster's 443) exactly as it was, or it says FAILED. |
+| `scripts/install_tracker_funnel.sh --status` | Says whether Tailscale's job is loaded, whether the route is on, and what `/me` answers on the Mini and at the public address (401 = reached, not signed in). Exit 0 only when all of that is right. |
+| `scripts/install_tracker_funnel.sh --off` | Takes the route off and reads it back; the other routes are left as they were. |
+
+The route survives a reboot: `funnel --bg` is saved in Tailscale's own
+state, so it comes back whenever Tailscale does. To check from outside, on a
+phone on mobile data open `https://mac-mini.tail7fc5c6.ts.net:8443/me`; it
+shows `{"error":"unauthorized",...}`. From a computer on the tailnet, 8443
+is closed by the tailnet access rule (StarCaster's `docs/TAILSCALE_POLICY.md`),
+which Funnel traffic does not pass through; use mobile data.
+
 **The hand-over email** goes out through Resend (Dane's choice,
 2026-10-28) when a ticket enters one of his two statuses. The server reads
 two names from the project's Doppler config when it starts: `RESEND_API_KEY`
