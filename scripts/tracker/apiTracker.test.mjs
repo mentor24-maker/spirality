@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, chmodSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, chmodSync, rmSync, existsSync } from 'node:fs';
+import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
@@ -149,7 +150,7 @@ test('task files a ticket and reads it back; get and task-name print it as on Cl
     assert.equal(get.out, [
       'id:       AL-1', 'name:     Fix the thing', 'status:   queued', 'priority: high', 'assigned: (nobody)',
       'tags:     tracker, phase-2', 'list:     alpha (alpha)', 'pr:       (none recorded)', 'rounds:   0 send-back(s) so far',
-      'main:     (no MAIN MOVED note)', `url:      ${f.url}/tickets/AL-1`, '---', '## Goal\nDo it.\n', '',
+      'main:     (no MAIN MOVED note)', 'attachments: (none)', `url:      ${f.url}/tickets/AL-1`, '---', '## Goal\nDo it.\n', '',
     ].join('\n'));
 
     const name = await f.door(['task-name', '--task', 'AL-1']);
@@ -164,6 +165,109 @@ test('task files a ticket and reads it back; get and task-name print it as on Cl
     assert.equal(missing.code, 1);
     assert.match(missing.err, /read the task FAILED — HTTP 404\nno ticket AL-99\./);
   } finally { await f.cleanup(); }
+});
+
+test('get lists every attachment; attachments --to saves each byte for byte, numbering a clash (SP-142)', async () => {
+  const f = await fixture();
+  try {
+    const t = f.file({ name: 'With files', description: 'see the picture' });
+    // Every byte value, so a text decode anywhere on the way would show.
+    const picture = Buffer.from(Array.from({ length: 1024 }, (_, i) => i % 256));
+    const notes = Buffer.from('line one\nline two\n');
+    const a1 = f.store.addAttachment({ ticket: t.id, name: 'shot.png', type: 'image/png', bytes: picture, actor: f.human.id });
+    const a2 = f.store.addAttachment({ ticket: t.id, name: 'notes.txt', type: 'text/plain', bytes: notes, actor: f.human.id });
+
+    const get = await f.door(['get', '--task', t.id]);
+    assert.equal(get.code, 0, get.err);
+    assert.match(get.out, new RegExp(`\nattachments: shot\\.png \\(1024 bytes, attachment ${a1.id}\\)\nattachments: notes\\.txt \\(18 bytes, attachment ${a2.id}\\)\nurl: `));
+
+    const folder = join(f.dir, 'saved');
+    mkdirSync(folder);
+    writeFileSync(join(folder, 'notes.txt'), 'already here');
+    const saved = await f.door(['attachments', '--task', t.id, '--to', folder]);
+    assert.equal(saved.code, 0, saved.err);
+    assert.equal(saved.out, `saved ${join(folder, 'shot.png')} (1024 bytes)\nsaved ${join(folder, 'notes-2.txt')} (18 bytes)\n`);
+    assert.deepEqual(readFileSync(join(folder, 'shot.png')), picture);
+    assert.deepEqual(readFileSync(join(folder, 'notes-2.txt')), notes);
+    assert.equal(readFileSync(join(folder, 'notes.txt'), 'utf8'), 'already here', 'a file already there is never written over');
+
+    // A folder that does not exist yet is made.
+    const fresh = join(f.dir, 'a', 'b');
+    const again = await f.door(['attachments', '--task', t.id.toLowerCase(), '--to', fresh]);
+    assert.equal(again.code, 0, again.err);
+    assert.deepEqual(readdirSync(fresh).sort(), ['notes.txt', 'shot.png']);
+  } finally { await f.cleanup(); }
+});
+
+test('get says (none) on a ticket without files, and attachments saves nothing and says so (SP-142)', async () => {
+  const f = await fixture();
+  try {
+    const t = f.file({ name: 'No files', description: 'x' });
+    const get = await f.door(['get', '--task', t.id]);
+    assert.equal(get.code, 0, get.err);
+    assert.match(get.out, /\nattachments: \(none\)\nurl: /);
+    const folder = join(f.dir, 'none');
+    const saved = await f.door(['attachments', '--task', t.id, '--to', folder]);
+    assert.equal(saved.code, 0, saved.err);
+    assert.equal(saved.out, `no attachments on ${t.id}; nothing to save\n`);
+    assert.equal(existsSync(folder), false);
+  } finally { await f.cleanup(); }
+});
+
+test('attachments exits 1 naming the file whose size does not match, and still saves the rest (SP-142)', async () => {
+  const f = await fixture();
+  try {
+    const t = f.file({ name: 'Bad file', description: 'x' });
+    f.store.addAttachment({ ticket: t.id, name: 'good.txt', type: 'text/plain', bytes: Buffer.from('good'), actor: f.human.id });
+    const bad = f.store.addAttachment({ ticket: t.id, name: 'bad.txt', type: 'text/plain', bytes: Buffer.from('bad'), actor: f.human.id });
+    // The listed size and the bytes disagree: what a damaged row would look like.
+    const db = new DatabaseSync(join(f.dir, 'tracker.db'));
+    db.prepare('UPDATE attachments SET size = 99 WHERE id = ?').run(bad.id);
+    db.close();
+
+    const folder = join(f.dir, 'out');
+    const saved = await f.door(['attachments', '--task', t.id, '--to', folder]);
+    assert.equal(saved.code, 1);
+    assert.equal(saved.out, `saved ${join(folder, 'good.txt')} (4 bytes)\n`);
+    assert.match(saved.err, new RegExp(`NOT saved bad\\.txt \\(attachment ${bad.id}\\): 3 bytes arrived, the tracker lists 99`));
+    assert.match(saved.err, /1 of 2 attachment\(s\) on AL-\d+ did NOT save: bad\.txt/);
+    assert.equal(existsSync(join(folder, 'bad.txt')), false);
+
+    const missing = await f.door(['attachments', '--task', 'AL-99', '--to', folder]);
+    assert.equal(missing.code, 1);
+    assert.match(missing.err, /read the attachments FAILED — HTTP 404\nno ticket AL-99\./);
+  } finally { await f.cleanup(); }
+});
+
+test('get on a tracker too old to list files says the files are unknown, and still prints the ticket (SP-142)', async () => {
+  // The tracker the Mini runs may predate the attachment calls; its 404
+  // must not stop every pass's `get`, nor read as "(none)".
+  const { createServer } = await import('node:http');
+  const now = new Date().toISOString();
+  const ticket = { id: 'AL-1', name: 'Old', description: 'body', status: 'queued', priority: null, assignee: null, tags: [], project: 'alpha', createdAt: now, updatedAt: now, version: 1, comments: [] };
+  const server = createServer((req, res) => {
+    const [status, json] = req.url === '/tickets/AL-1' ? [200, ticket] : [404, { error: 'not-found', message: `no call ${req.method} ${req.url}.` }];
+    res.writeHead(status, { 'content-type': 'application/json' });
+    res.end(JSON.stringify(json));
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const f = await fixture();
+  try {
+    const config = JSON.parse(readFileSync(join(f.product, 'spirality.project.json'), 'utf8'));
+    writeFileSync(join(f.product, 'spirality.project.json'), JSON.stringify({ ...config, trackerUrl: `http://127.0.0.1:${server.address().port}` }));
+    const get = await f.door(['get', '--task', 'AL-1']);
+    assert.equal(get.code, 0, get.err);
+    assert.match(get.out, /\nattachments: COULD NOT BE READ \(HTTP 404: no call GET \/tickets\/AL-1\/attachments\.\); this ticket's files are unknown\nurl: [^\n]+\n---\nbody\n/);
+    assert.match(get.err, /read the attachments FAILED/);
+
+    const saved = await f.door(['attachments', '--task', 'AL-1', '--to', join(f.dir, 'x')]);
+    assert.equal(saved.code, 1);
+    assert.equal(saved.out, '');
+    assert.match(saved.err, /read the attachments FAILED — HTTP 404/);
+  } finally {
+    await f.cleanup();
+    await new Promise((r) => server.close(r));
+  }
 });
 
 test('queue --claimable lists every Rework ticket first (oldest first), then Queued by priority', async () => {

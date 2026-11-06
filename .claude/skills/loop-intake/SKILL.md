@@ -23,6 +23,7 @@ makes:
 ```bash
 npm run clickup -- queue --status Requested                     # the requests, first line = the one to take
 npm run clickup -- get --task <id>                              # his title and his words
+npm run clickup -- attachments --task <id> --to /tmp/<id>-attachments   # save the files he attached, to read
 npm run clickup -- comments --task <id>                         # anything he added since
 npm run clickup -- task --name "..." --status Requested --tags <tag> --body-file -   # a further slice
 npm run clickup -- describe --task <id> --body-file -           # REPLACE the description with the spec
@@ -80,7 +81,24 @@ stick. **A non-zero exit is a failure you report**, never one you talk past.
    Found any: do not file them again. Reuse them, file only the slices still
    missing, then carry on from step 4's `describe`.
 
-3. **Decide: clear, or a question.** Read the repository as far as you need
+3. **Decide: clear, or a question.** **Read his files first.** When `get`
+   prints `attachments:` lines (anything but `attachments: (none)`), they are
+   part of his request. Save them outside the repository and read every one
+   (pictures and text both; the Read tool opens a picture) before writing a
+   word of the spec:
+
+   ```bash
+   npm run clickup -- attachments --task <id> --to /tmp/<id>-attachments
+   ```
+
+   It prints `saved <path> (<size> bytes)` per file and exits non-zero naming
+   any file that did not save; a file that did not save is a failure you
+   report, never one you write past. Never copy a file into the repository or
+   a pull request. `attachments: COULD NOT BE READ` means the ticket's files
+   are unknown: say so on the ticket and in your report, and never treat it
+   as none.
+
+   Then read the repository as far as you need
    to (`CLAUDE.md`, `docs/`, the files the request touches) to know what it
    would take. A request is **too unclear to spec** when two reasonable
    builders would build different things from it, or when the outcome he
@@ -108,6 +126,7 @@ stick. **A non-zero exit is a failure you report**, never one you talk past.
 
    <his description, verbatim>
    ```
+   Attached: <each file's name as `get` lists it, comma-separated; only when there are files>
 
    ## Goal
    ## Scope
