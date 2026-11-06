@@ -67,6 +67,11 @@
  *  - An email has at most one open invite (unused, unexpired), checked in
  *    the same transaction that makes it. A cancelled invite is deleted, so
  *    its link is refused as one the tracker never made.
+ *  - An attachment is a file kept on a ticket: its name, type, size, bytes,
+ *    who added it and when, all in the `attachments` table, so the nightly
+ *    backup (tracker/backup.mjs) holds it with no second folder to copy. It
+ *    is at most MAX_ATTACHMENT bytes and is never empty. Like a comment, it
+ *    is never edited; it goes only with its ticket, in deleteTicket.
  */
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
@@ -86,6 +91,11 @@ const SESSION_LIFETIME = 30 * 24 * HOUR;
 const LINK_LIFETIME = Object.freeze({ setup: 7 * 24 * HOUR, invite: 7 * 24 * HOUR, reset: HOUR });
 const LINK_PURPOSES = Object.freeze(Object.keys(LINK_LIFETIME));
 const MIN_PASSWORD = 12;
+
+/** The largest file one attachment may be: 10 MB. The server refuses a bigger body before it reads it all. */
+export const MAX_ATTACHMENT = 10 * 1024 * 1024;
+/** The longest file name kept, in characters. */
+const MAX_FILE_NAME = 255;
 
 /** The statuses a ticket may be deleted from: nobody has started it yet. */
 const DELETABLE = Object.freeze(['requested', 'queued']);
@@ -183,6 +193,17 @@ CREATE TABLE IF NOT EXISTS account_links (
   expires_at  TEXT NOT NULL,
   used_at     TEXT
 );
+CREATE TABLE IF NOT EXISTS attachments (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  ticket      TEXT NOT NULL REFERENCES tickets(id),
+  name        TEXT NOT NULL,
+  type        TEXT NOT NULL,
+  size        INTEGER NOT NULL,
+  bytes       BLOB NOT NULL,
+  added_by    INTEGER NOT NULL REFERENCES actors(id),
+  created_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS attachments_by_ticket ON attachments (ticket, id);
 CREATE UNIQUE INDEX IF NOT EXISTS actors_by_token ON actors (token_hash);
 CREATE UNIQUE INDEX IF NOT EXISTS actors_by_email ON actors (email);
 CREATE INDEX IF NOT EXISTS sessions_by_actor ON sessions (actor);
@@ -420,6 +441,38 @@ function commentFromRow(row) {
     body: row.body,
     createdAt: row.created_at,
   };
+}
+
+/** An attachment as listed: everything but its bytes. */
+function attachmentFromRow(row) {
+  return {
+    id: num(row.id),
+    ticket: row.ticket,
+    name: row.name,
+    type: row.type,
+    size: num(row.size),
+    addedBy: num(row.added_by),
+    createdAt: row.created_at,
+  };
+}
+
+/**
+ * A file name fit to keep: the last part of any path a browser sent, with
+ * control characters and the quote a download header would trip on taken
+ * out, at most MAX_FILE_NAME characters. Refused when nothing is left.
+ */
+function canonicalFileName(name) {
+  if (typeof name !== 'string') throw new StoreError('bad-name', "an attachment's file name must be text.");
+  // eslint-disable-next-line no-control-regex
+  const clean = name.split(/[\\/]/).pop().replace(/[\u0000-\u001f\u007f"]/g, '').trim().slice(0, MAX_FILE_NAME);
+  if (!clean || clean === '.' || clean === '..') throw new StoreError('bad-name', 'an attachment needs a file name.');
+  return clean;
+}
+
+/** A content type fit to keep (`type/subtype`, lower-cased), or the generic one for anything else. */
+function canonicalFileType(type) {
+  const t = typeof type === 'string' ? type.split(';')[0].trim().toLowerCase() : '';
+  return /^[a-z0-9][a-z0-9.+-]*\/[a-z0-9][a-z0-9.+-]*$/.test(t) ? t : 'application/octet-stream';
 }
 
 function eventFromRow(row) {
@@ -1165,6 +1218,7 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
         }
         db.prepare('DELETE FROM events WHERE ticket = ?').run(row.id);
         db.prepare('DELETE FROM comments WHERE ticket = ?').run(row.id);
+        db.prepare('DELETE FROM attachments WHERE ticket = ?').run(row.id);
         const r = db.prepare('DELETE FROM tickets WHERE id = ? AND status = ?').run(row.id, row.status);
         if (num(r.changes) !== 1 || ticketRow(row.id)) {
           throw new StoreError('write-failed', `ticket ${row.id} was not deleted.`);
@@ -1305,6 +1359,46 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
     /** A ticket's comments, oldest first. */
     listComments(ticket) {
       return db.prepare('SELECT * FROM comments WHERE ticket = ? ORDER BY id').all(String(ticket)).map(commentFromRow);
+    },
+
+    /**
+     * Keep a file on a ticket: `bytes` (a Buffer or Uint8Array, 1 byte to
+     * MAX_ATTACHMENT), its `name` and `type`, added by `actor`. The row is
+     * read back, bytes and all, in the same transaction; a mismatch writes
+     * nothing. Answers the attachment as listed (no bytes).
+     */
+    addAttachment({ ticket, name, type, bytes, actor }) {
+      const fileName = canonicalFileName(name);
+      const fileType = canonicalFileType(type);
+      if (!(bytes instanceof Uint8Array)) throw new StoreError('bad-file', "an attachment's file must be bytes.");
+      if (bytes.length === 0) throw new StoreError('empty-file', `${fileName} is empty; there is nothing to attach.`);
+      if (bytes.length > MAX_ATTACHMENT) {
+        throw new StoreError('too-large', `${fileName} is over ${MAX_ATTACHMENT / (1024 * 1024)} MB; attach a smaller file.`);
+      }
+      return transaction(() => {
+        requireActor(actor, 'the actor');
+        const row = requireTicketRow(ticket);
+        const r = db.prepare('INSERT INTO attachments (ticket, name, type, size, bytes, added_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+          .run(row.id, fileName, fileType, bytes.length, bytes, actor, now());
+        const id = num(r.lastInsertRowid);
+        const back = db.prepare('SELECT * FROM attachments WHERE id = ?').get(id);
+        if (!back || !Buffer.from(back.bytes).equals(Buffer.from(bytes)) || back.name !== fileName) {
+          throw new StoreError('write-failed', `${fileName} did not read back from the database.`);
+        }
+        return attachmentFromRow(back);
+      });
+    },
+
+    /** A ticket's attachments, oldest first, without their bytes. */
+    listAttachments(ticket) {
+      return db.prepare('SELECT id, ticket, name, type, size, added_by, created_at FROM attachments WHERE ticket = ? ORDER BY id')
+        .all(String(ticket)).map(attachmentFromRow);
+    },
+
+    /** One attachment of a ticket with its `bytes` (a Buffer), or null when the ticket has none by that id. */
+    getAttachment(ticket, id) {
+      const row = db.prepare('SELECT * FROM attachments WHERE ticket = ? AND id = ?').get(String(ticket), Number(id));
+      return row ? { ...attachmentFromRow(row), bytes: Buffer.from(row.bytes) } : null;
     },
 
     /** A ticket's history, oldest first. */
