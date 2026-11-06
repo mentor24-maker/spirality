@@ -7,7 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { openStore } from './store.mjs';
-import { sendSetupLink, setPasswordUrl, setupEmail } from './account.mjs';
+import { linkAddress, sendInvite, sendResetLink, sendSetupLink, setPasswordUrl, setupEmail, siteLinkUrl } from './account.mjs';
 
 const COMMAND = fileURLToPath(new URL('./account.mjs', import.meta.url));
 const TRACKER = 'http://tracker.example:4180';
@@ -134,4 +134,36 @@ test('the command refuses a missing mail key with its reason, prints no token, a
     assert.equal(usage.status, 1);
     assert.match(usage.stderr, /usage/);
   } finally { rmSync(f.dir, { recursive: true, force: true }); }
+});
+
+test('a site\'s link is its page with the token as link=, keeping any query it has; without a site, the tracker\'s set-password page', () => {
+  assert.equal(siteLinkUrl('https://site.example/spirality', 'abc_-1'), 'https://site.example/spirality?link=abc_-1');
+  assert.equal(siteLinkUrl('https://site.example/p?tab=tasks', 'a+b'), 'https://site.example/p?tab=tasks&link=a%2Bb');
+  assert.equal(linkAddress({ trackerUrl: TRACKER, siteUrl: 'http://localhost:3000/spirality' }, 'tok'), 'http://localhost:3000/spirality?link=tok');
+  assert.equal(linkAddress({ trackerUrl: TRACKER }, 'tok'), setPasswordUrl(TRACKER, 'tok'));
+});
+
+test('an invite and a reset made for a site email a link to that site\'s page, and the link works; never the token in the line', async () => {
+  const f = fixture();
+  try {
+    f.store.setEmail(f.person.id, 'dane@example.com');
+    const siteUrl = 'https://site.example/spirality';
+    const invited = await sendInvite({ store: f.store, email: 'new@example.com', madeBy: f.person.id, send: f.send, trackerUrl: TRACKER, siteUrl, projectName: 'Spirality' });
+    assert.equal(invited.ok, true, invited.line);
+    const inviteLink = /https?:\/\/\S+/.exec(f.sent[0].text)[0];
+    assert.ok(inviteLink.startsWith(`${siteUrl}?link=`), inviteLink);
+    assert.equal(f.sent[0].link, inviteLink);
+    assert.equal(f.store.linkInfo(tokenIn(f.sent[0].text)).purpose, 'invite');
+
+    const reset = await sendResetLink({ store: f.store, email: 'dane@example.com', send: f.send, trackerUrl: null, siteUrl, projectName: 'Spirality' });
+    assert.equal(reset.ok, true, reset.line);
+    assert.equal(reset.line, `reset link sent to actor ${f.person.id} through a site, good for 1 hour`);
+    assert.ok(/https?:\/\/\S+/.exec(f.sent[1].text)[0].startsWith(`${siteUrl}?link=`));
+    assert.equal(f.store.linkInfo(tokenIn(f.sent[1].text)).purpose, 'reset');
+    for (const r of [invited, reset]) for (const m of f.sent) assert.ok(!r.line.includes(tokenIn(m.text)));
+
+    const plain = await sendResetLink({ store: f.store, email: 'dane@example.com', send: f.send, trackerUrl: TRACKER, projectName: 'Spirality' });
+    assert.equal(plain.ok, true);
+    assert.ok(/https?:\/\/\S+/.exec(f.sent[2].text)[0].startsWith(`${TRACKER}/set-password?link=`));
+  } finally { f.cleanup(); }
 });

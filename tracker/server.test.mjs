@@ -579,6 +579,15 @@ test('admin: create-actor prints only the token on stdout, and that token signs 
     assert.ok(!actor.stderr.includes(token));
     const human = run('create-actor', '--kind', 'human', '--name', 'Operator');
     assert.equal(human.status, 0, human.stderr);
+    const site = run('create-actor', '--kind', 'machine', '--name', 'Site page', '--site-url', 'https://site.example/spirality');
+    assert.equal(site.status, 0, site.stderr);
+    assert.match(site.stderr, /a site at https:\/\/site\.example\/spirality/);
+    assert.match(site.stdout, /^[A-Za-z0-9_-]{40,}\n$/);
+    for (const [kind, url] of [['machine', 'http://site.example/x'], ['human', 'https://site.example/x']]) {
+      const refused = run('create-actor', '--kind', kind, '--name', 'Nope', '--site-url', url);
+      assert.notEqual(refused.status, 0, `${kind} ${url}`);
+      assert.equal(refused.stdout, '', 'no token for a refused site');
+    }
 
     const project = run('create-project', '--slug', 'beta', '--name', 'Beta', '--prefix', 'BE', '--operator', '2');
     assert.equal(project.status, 0, project.stderr);
@@ -595,6 +604,8 @@ test('admin: create-actor prints only the token on stdout, and that token signs 
     const store = openStore(db);
     try {
       assert.deepEqual(store.actorForToken(token), { id: 1, kind: 'machine', name: 'Build loop' });
+      assert.deepEqual(store.listSites(), [{ id: 3, name: 'Site page', url: 'https://site.example/spirality' }]);
+      assert.deepEqual(store.listActors().map((a) => a.name), ['Build loop', 'Operator', 'Site page'], 'a refused site made no actor');
       assert.deepEqual(store.getProject('beta'), { slug: 'beta', name: 'Beta', prefix: 'BE', operator: 2, url: null, logo: null, owner: null, repo: null, alertEmail: null, alertPhone: null });
       assert.equal(store.getProject('gamma'), null);
       const server = await startServer({ store, port: 0 });
@@ -1454,6 +1465,182 @@ test('an invite whose email does not go out, or with no mail sender, leaves no o
     assert.equal(r.body.error, 'no-mail');
     assert.ok(!f.store.listInvites().some((i) => i.email === 'none@example.com'));
   } finally { await n.close(); await f.cleanup(); }
+});
+
+/**
+ * An outside site (docs/OUTSIDE_SITE_API.md): a machine actor with a page
+ * address and a token, on an invite server. Answers the invite server with
+ * `{ site, siteToken, siteUrl }` added.
+ */
+async function siteServer(f) {
+  const s = await inviteServer(f);
+  const siteUrl = 'https://site.example/spirality';
+  const site = f.store.createActor({ kind: 'machine', name: 'Site page', siteUrl });
+  const siteToken = f.store.issueToken(site.id);
+  return { ...s, site, siteToken, siteUrl };
+}
+
+/** The address an email carries, and its link token. */
+const linkIn = (text) => {
+  const address = /https?:\/\/\S+/.exec(text)[0];
+  return { address, token: new URL(address).searchParams.get('link') };
+};
+
+test('an invite made with a site emails a link to the site\'s page; without one, to the tracker page; a site that is not a site actor is 400 and nothing is sent', async () => {
+  const f = await fixture();
+  const s = await siteServer(f);
+  try {
+    const people = await s.asPerson('GET', '/people');
+    assert.deepEqual(people.body.sites, [{ id: s.site.id, name: 'Site page' }], 'the Users page lists the sites by id and name');
+    assert.equal((await f.call('GET', '/people', { at: s.base })).body.sites, undefined, 'a loop sees no sites');
+
+    const viaSite = await s.asPerson('POST', '/invites', { email: 'far@example.com', site: s.site.id });
+    assert.equal(viaSite.status, 201, viaSite.text);
+    const sent = linkIn(s.sent[0].text);
+    assert.equal(sent.address, `${s.siteUrl}?link=${encodeURIComponent(sent.token)}`);
+    assert.equal(f.store.linkInfo(sent.token).purpose, 'invite');
+    assert.ok(f.lines.includes(`invite sent through site ${s.site.id} actor=${f.human.id}`));
+
+    const plain = await s.asPerson('POST', '/invites', { email: 'near@example.com' });
+    assert.equal(plain.status, 201);
+    assert.ok(linkIn(s.sent[1].text).address.startsWith('http://tracker.test:4180/set-password?link='), 'no site: the tracker page, as before');
+
+    for (const site of [f.machine.id, f.human.id, 999, 'abc', String(s.site.id), true]) {
+      const r = await s.asPerson('POST', '/invites', { email: 'nope@example.com', site });
+      assert.equal(r.status, 400, `site ${JSON.stringify(site)}`);
+      assert.equal(r.body.error, 'not-a-site');
+    }
+    assert.equal(s.sent.length, 2, 'a refused site sends nothing');
+    assert.ok(!f.store.listInvites().some((i) => i.email === 'nope@example.com'), 'and makes no invite');
+
+    const bySite = await f.call('POST', '/invites', { at: s.base, token: s.siteToken, body: { email: 'self@example.com', site: s.site.id } });
+    assert.equal(bySite.status, 403, 'a site may not invite anyone: inviting stays people-only');
+    assert.equal(bySite.body.error, 'people-only');
+  } finally { await s.close(); await f.cleanup(); }
+});
+
+test('Forgot password with a site\'s token sends a link to the site\'s page; with a loop\'s token, a wrong one or none, to the tracker page; the answer is the same every time', async () => {
+  const f = await fixture();
+  const s = await siteServer(f);
+  try {
+    const forgot = (authorization) => s.ask('POST', '/account/forgot', { headers: { ...s.json, ...(authorization ? { authorization } : {}) }, body: { email: s.email } });
+    const answers = [
+      await forgot(`Bearer ${s.siteToken}`),
+      await forgot(`Bearer ${f.machineToken}`),
+      await forgot('Bearer not-a-real-token'),
+      await forgot(null),
+      await s.ask('POST', '/account/forgot', { headers: { ...s.json, authorization: `Bearer ${s.siteToken}` }, body: { email: 'nobody@example.com' } }),
+    ];
+    for (const a of answers) {
+      assert.equal(a.status, 200);
+      assert.equal(a.text, answers[0].text, 'word for word the same');
+    }
+    assert.equal(s.sent.length, 4, 'one reset per known email; the unknown one gets nothing');
+    const [site, ...rest] = s.sent.map((m) => linkIn(m.text));
+    assert.equal(site.address, `${s.siteUrl}?link=${encodeURIComponent(site.token)}`);
+    for (const r of rest) assert.ok(r.address.startsWith('http://tracker.test:4180/set-password?link='), r.address);
+    assert.ok(f.lines.includes(`reset link sent to actor ${f.human.id} through a site, good for 1 hour`));
+    const log = f.lines.join('\n');
+    for (const secret of [s.siteToken, f.machineToken, site.token, ...rest.map((r) => r.token)]) assert.ok(!log.includes(secret), 'no token or link in the log');
+  } finally { await s.close(); await f.cleanup(); }
+});
+
+test('an outside site\'s whole journey, server to server: invite through the site, set a password, sign in, list tickets, read the board, file a Requested ticket, comment, reset through the site, sign out', async () => {
+  const f = await fixture();
+  const s = await siteServer(f);
+  try {
+    // The site's server: it holds the person's session cookie itself, and
+    // sends exactly what a server would; never a browser.
+    const site = (method, path, { cookie, body, authorization } = {}) => s.ask(method, path, {
+      headers: { ...(body !== undefined ? s.json : {}), ...(cookie ? { cookie } : {}), ...(authorization ? { authorization } : {}) }, body,
+    });
+    f.store.fileTicket({ project: 'alpha', actor: f.machine.id, name: 'Already queued', status: 'queued' });
+
+    // 1. An admin invites through the site.
+    assert.equal((await s.asPerson('POST', '/invites', { email: 'tess@example.com', site: s.site.id })).status, 201);
+    const invite = linkIn(s.sent.at(-1).text);
+    assert.ok(invite.address.startsWith(`${s.siteUrl}?link=`));
+
+    // 2. The site's page read ?link= and its server finishes the link.
+    const info = await site('POST', '/account/link', { body: { link: invite.token } });
+    assert.deepEqual([info.status, info.body.purpose, info.body.email], [200, 'invite', 'tess@example.com']);
+    const set = await site('POST', '/account/set-password', { body: { link: invite.token, password: 'tess has a long password', name: 'Tess' } });
+    assert.equal(set.status, 200, set.text);
+    const tess = f.store.actorForEmail('tess@example.com');
+    // The admin gives Tess the project (SP-145's membership).
+    assert.equal((await s.asPerson('POST', '/projects/alpha/members', { person: tess.id })).status, 201);
+
+    // 3. Sign in: the tracker's cookie stays on the site's server.
+    const signedIn = await site('POST', '/signin', { body: { email: 'tess@example.com', password: 'tess has a long password' } });
+    assert.equal(signedIn.status, 200);
+    const cookie = cookieOf(signedIn.cookie);
+    assert.equal((await site('GET', '/me', { cookie })).body.name, 'Tess');
+    assert.deepEqual((await site('GET', '/projects', { cookie })).body.projects.map((p) => p.slug), ['alpha']);
+
+    // 4. List the project's tickets and its board.
+    const tickets = await site('GET', '/projects/alpha/tickets', { cookie });
+    assert.equal(tickets.status, 200);
+    assert.deepEqual(tickets.body.tickets.map((t) => t.name), ['Already queued']);
+    const board = await site('GET', '/projects/alpha/board', { cookie });
+    assert.equal(board.status, 200);
+    assert.deepEqual(board.body.columns.find((c) => c.status === 'Queued').tickets.map((t) => t.name), ['Already queued']);
+
+    // 5. File a Requested ticket and comment on it.
+    const filed = await site('POST', '/projects/alpha/tickets', { cookie, body: { name: 'Tess wants a thing', description: 'In her words.', status: 'requested' } });
+    assert.equal(filed.status, 201, filed.text);
+    assert.equal(filed.body.status, 'requested');
+    const comment = await site('POST', `/tickets/${filed.body.id}/comments`, { cookie, body: { body: 'One more detail.' } });
+    assert.equal(comment.status, 201);
+    const thread = await site('GET', `/tickets/${filed.body.id}/thread`, { cookie });
+    assert.equal(thread.status, 200);
+    assert.deepEqual(thread.body.comments.map((c) => [c.author.name, c.body]), [['Tess', 'One more detail.']]);
+
+    // 6. Forgot password through the site, and the reset link finishes there too.
+    const forgot = await site('POST', '/account/forgot', { authorization: `Bearer ${s.siteToken}`, body: { email: 'tess@example.com' } });
+    assert.equal(forgot.status, 200);
+    const reset = linkIn(s.sent.at(-1).text);
+    assert.ok(reset.address.startsWith(`${s.siteUrl}?link=`));
+    assert.equal((await site('POST', '/account/link', { body: { link: reset.token } })).body.purpose, 'reset');
+    assert.equal((await site('POST', '/account/set-password', { body: { link: reset.token, password: 'tess has a new password' } })).status, 200);
+    assert.equal((await site('GET', '/me', { cookie })).status, 401, 'a reset signs out everywhere');
+
+    // 7. Sign in again with the new password, then sign out.
+    const again = cookieOf((await site('POST', '/signin', { body: { email: 'tess@example.com', password: 'tess has a new password' } })).cookie);
+    const out = await site('POST', '/signout', { cookie: again, body: {} });
+    assert.equal(out.status, 200);
+    assert.equal((await site('GET', '/me', { cookie: again })).status, 401);
+
+    // No answer carried a token or link meant for something else, and the log carried none.
+    const log = f.lines.join('\n');
+    for (const secret of [invite.token, reset.token, s.siteToken, cookie.split('=')[1], again.split('=')[1]]) assert.ok(!log.includes(secret), 'a secret in the log');
+    for (const a of [info, set, signedIn, tickets, board, filed, comment, thread, forgot, out]) {
+      for (const secret of [invite.token, reset.token, s.siteToken]) assert.ok(!a.text.includes(secret), 'a token in an answer');
+    }
+  } finally { await s.close(); await f.cleanup(); }
+});
+
+test('GET /projects/:slug/board keeps the shape outside sites read: the eight columns in queue order, each a status name and its tickets with these fields', async () => {
+  const f = await fixture();
+  try {
+    f.store.fileTicket({ project: 'alpha', actor: f.machine.id, name: 'One', status: 'queued', priority: 'high', tags: ['x'] });
+    const r = await f.call('GET', '/projects/alpha/board', { token: f.humanToken });
+    assert.equal(r.status, 200);
+    assert.deepEqual(Object.keys(r.body), ['project', 'projectName', 'columns']);
+    assert.deepEqual([r.body.project, r.body.projectName], ['alpha', 'Alpha']);
+    assert.deepEqual(r.body.columns.map((c) => c.status), [...loopStatuses.STAGE_ORDER]);
+    assert.deepEqual(r.body.columns.map((c) => c.status), ['Requested', 'Rework', 'Queued', 'Building', 'In review', 'Needs your input', 'Ready to launch', 'Live']);
+    for (const c of r.body.columns) {
+      assert.deepEqual(Object.keys(c), ['status', 'tickets']);
+      assert.ok(Array.isArray(c.tickets));
+    }
+    const [ticket] = r.body.columns.find((c) => c.status === 'Queued').tickets;
+    assert.deepEqual(Object.keys(ticket), ['id', 'name', 'priority', 'tags', 'assignee', 'updatedAt', 'pullRequest', 'answerIn']);
+    assert.deepEqual([ticket.id, ticket.name, ticket.priority, ticket.tags, ticket.assignee, ticket.pullRequest], ['AL-1', 'One', 'high', ['x'], null, null]);
+    assert.equal(typeof ticket.updatedAt, 'string');
+    // docs/OUTSIDE_SITE_API.md lists it among the calls outside sites read.
+    const doc = readFileSync(new URL('../docs/OUTSIDE_SITE_API.md', import.meta.url), 'utf8');
+    assert.match(doc, /GET \/projects\/:slug\/board/);
+  } finally { await f.cleanup(); }
 });
 
 /**
