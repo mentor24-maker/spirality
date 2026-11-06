@@ -95,11 +95,16 @@ trap 'rm -rf "$LOCK" "$PASS_OUT" 2>/dev/null; [ "$(cat "$SYNC_LOCK/pid" 2>/dev/n
 
 # shellcheck source=lib/back_to_main.sh
 source "$REPO/scripts/lib/back_to_main.sh"
-# A pull that changes tracker/ restarts the tracker so it runs the new code (SP-150).
+# A pull that changes a file the tracker server loads restarts it, so it runs the new code (SP-150).
 # shellcheck source=lib/tracker_restart.sh
 source "$REPO/scripts/lib/tracker_restart.sh"
 
 while true; do
+  # Where main was before this pass synced: noted BEFORE step 0, because that
+  # step can fast-forward main itself, and a tracker change it brings in must
+  # count too (SP-150).
+  BEFORE="$(git rev-parse HEAD 2>/dev/null)"
+
   # 0. A checkout left on a branch that has merged and gone from origin (a new
   #    project's lanes run from its setup branch until it merges) goes
   #    back to main, under the sync lock, so the pull below can run.
@@ -117,12 +122,12 @@ while true; do
   #    on .git/index.lock and rebuild node_modules under each other.
   if [ "$(git rev-parse --abbrev-ref HEAD 2>/dev/null)" = "main" ] && [ -z "$(git status --porcelain)" ]; then
     if take_sync_lock; then
-      BEFORE="$(git rev-parse HEAD 2>/dev/null)"
       git pull -q --ff-only origin main >> "$LOG" 2>&1 || echo "[loop-runner] $(date "+%H:%M:%S") pull of main refused (see above) — running on the checkout as it is" >> "$LOG"
-      RESTARTED="$(restart_tracker_if_changed "$BEFORE" "$(git rev-parse HEAD 2>/dev/null)" "$PREFIX" "$TRACKER_PORT")"
-      [ -n "$RESTARTED" ] && echo "[loop-runner] $(date "+%H:%M:%S") $RESTARTED" >> "$LOG"
       # Dependencies follow the lockfile, so a merged change to package.json takes effect on the next pass.
       npm ci --silent >> "$LOG" 2>&1 || echo "[loop-runner] $(date "+%H:%M:%S") npm ci failed — running with the node_modules already present" >> "$LOG"
+      # After npm ci, so a merge that adds a dependency restarts onto it.
+      RESTARTED="$(restart_tracker_if_changed "$BEFORE" "$(git rev-parse HEAD 2>/dev/null)" "$PREFIX" "$TRACKER_PORT")"
+      [ -n "$RESTARTED" ] && echo "[loop-runner] $(date "+%H:%M:%S") $RESTARTED" >> "$LOG"
       rm -rf "$SYNC_LOCK"
     else
       echo "[loop-runner] $(date "+%H:%M:%S") another lane held the sync lock for 10 minutes — not pulling this pass" >> "$LOG"

@@ -214,6 +214,17 @@
       "to": "scripts/lib/tracker_restart.sh"
     },
     {
+      "from": "scripts/lib/trackerFiles.mjs",
+      "to": "scripts/lib/trackerFiles.mjs",
+      "why": "the settings reader sits under loop/ in a product",
+      "edits": [
+        {
+          "find": "from '../../lib/projectConfig.mjs'",
+          "replace": "from '../../loop/lib/projectConfig.mjs'"
+        }
+      ]
+    },
+    {
       "from": "scripts/run_with_time_limit.sh",
       "to": "scripts/run_with_time_limit.sh"
     },
