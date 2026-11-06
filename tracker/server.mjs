@@ -138,8 +138,11 @@ const PERSON_STATUSES = Object.freeze(['requested', 'rework', 'queued', 'live']
  * form), `/settings` (the stage colours) and `/set-password` (an emailed
  * link's page, `?link=<token>`, which the page reads and never sends back
  * in an address) all answer the page itself, so each address opens its own view;
- * `/projects`, `/projects/<project>`, `/people` and `/search` do too, for a browser opening them,
- * and `/projects/<project>/edit` (the Edit project form) always does.
+ * `/projects`, `/projects/<project>` and `/search` do too, for a browser opening them,
+ * and `/projects/<project>/edit` (the Edit project form) and `/users` (the
+ * Users page) always do. `/people`, the Users page's old address, sends a
+ * browser on to `/users` (see pageRedirect); the page's own call to
+ * `/people` still gets the data.
  */
 const WEB_DIR = new URL('./web/', import.meta.url);
 const WEB_FILES = Object.freeze({
@@ -176,12 +179,26 @@ const PAGE_HEADERS = Object.freeze({
  * gets the page; the page's own call asks for anything and gets the data.
  */
 function pageFile(pathname, accept = '') {
-  if (/^\/(?:projects(?:\/[^/]+)?|people|search|setup\/(?!fields$)[^/]+)$/.test(pathname)) return /\btext\/html\b/.test(accept) ? 'index.html' : null;
-  if (pathname === '/' || /^\/(?:tasks|board|list|new|settings|set-password|reporting)$/.test(pathname) || /^\/(?:t|board|list)\/[^/]+$/.test(pathname)) return 'index.html';
+  if (/^\/(?:projects(?:\/[^/]+)?|search|setup\/(?!fields$)[^/]+)$/.test(pathname)) return /\btext\/html\b/.test(accept) ? 'index.html' : null;
+  if (pathname === '/' || /^\/(?:tasks|board|list|new|settings|set-password|reporting|users)$/.test(pathname) || /^\/(?:t|board|list)\/[^/]+$/.test(pathname)) return 'index.html';
   if (/^\/projects\/[^/]+\/edit$/.test(pathname)) return 'index.html';
   if (/^\/setup\/[^/]+\/answers$/.test(pathname)) return 'index.html';
   const m = /^\/web\/([^/]+)$/.exec(pathname);
   return m && Object.hasOwn(WEB_FILES, m[1]) ? m[1] : null;
+}
+
+/**
+ * Where a GET of `pathname` sends a browser instead, or null. `/people` was
+ * the Users page's address: a browser opening it (an old bookmark) is sent
+ * on to `/users`, while the page's and the onboarding scripts' own call to
+ * `/people` (which does not ask for HTML) still gets the data. The send-on
+ * is temporary (302) and never cached, because a browser keys a cached
+ * redirect by address alone: a cached one would send the page's own data
+ * call to the page too.
+ */
+function pageRedirect(pathname, accept = '') {
+  if (pathname === '/people' && /\btext\/html\b/.test(accept)) return '/users';
+  return null;
 }
 
 function sendPage(res, name) {
@@ -389,7 +406,7 @@ export const GO_PHRASE = busRelayPlan.GO_PHRASE;
 export function createHandler(store, { log = () => {}, notifier = null, defaultProject = null, mergePhrase = null, closePhrase = null, goPhrase = null, accountMail = null, setup = null, now = Date.now } = {}) {
   const failures = failureCounter(now);
 
-  /** The People page's data: each person with their email, and the open invites. */
+  /** The Users page's data: each person with their email, and the open invites. */
   function peopleOf() {
     return {
       people: store.listPeople().map((p) => ({ ...p, email: store.emailOf(p.id) })),
@@ -488,14 +505,14 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     }
 
     // Dane's page: the people in the tracker, for the Create Project form's
-    // owner picker, and the People page. A person also sees each one's email
+    // owner picker, and the Users page. A person also sees each one's email
     // and the open invites; a loop sees names and ids only. Never a machine,
     // never a token or a hash.
     if (parts.length === 1 && parts[0] === 'people' && method === 'GET') {
       return [200, me.kind === 'human' ? peopleOf() : { people: store.listPeople() }];
     }
 
-    // Dane's page: the People page's "Invite someone". Only a person may
+    // Dane's page: the Users page's "Invite someone". Only a person may
     // invite; the invite is made only if its email goes out.
     if (parts.length === 1 && parts[0] === 'invites' && method === 'POST') {
       if (me.kind !== 'human') {
@@ -513,7 +530,7 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
       return [201, { sent: result.line, ...peopleOf() }];
     }
 
-    // Dane's page: the People page's Cancel button on an open invite.
+    // Dane's page: the Users page's Cancel button on an open invite.
     if (parts.length === 2 && parts[0] === 'invites' && method === 'DELETE') {
       if (me.kind !== 'human') {
         throw new HttpError(403, 'people-only', 'only a person signed in to the tracker may cancel an invite; a machine may not.');
@@ -839,6 +856,14 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     let status;
     let wrote = null;
     try {
+      const onward = (req.method === 'GET' || req.method === 'HEAD') ? pageRedirect(url.pathname, req.headers.accept) : null;
+      if (onward) {
+        status = 302;
+        res.writeHead(status, { location: onward + url.search, 'cache-control': 'no-store', vary: 'accept', 'content-length': 0 });
+        res.end();
+        log(`${req.method} ${url.pathname} ${status} -> ${onward}`);
+        return;
+      }
       const page = (req.method === 'GET' || req.method === 'HEAD') ? pageFile(url.pathname, req.headers.accept) : null;
       if (page) {
         status = 200;

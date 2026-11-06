@@ -692,11 +692,11 @@ test('the page is served at /, at a ticket\'s address, at Projects, at Tasks, at
   } finally { await f.cleanup(); }
 });
 
-test('the Settings page is in the header after Reporting and People, lists the stages the server gives, saves them all, reads them back, and shows a refusal', async () => {
+test('the Settings page is in the header after Reporting and Users, lists the stages the server gives, saves them all, reads them back, and shows a refusal', async () => {
   const html = readFileSync(WEB('index.html'), 'utf8');
-  assert.match(html, /<a href="\/reporting" data-nav="reporting">Reporting<\/a>\s*<a href="\/people" data-nav="people">People<\/a>\s*<a href="\/settings" data-nav="settings">Settings<\/a>/);
+  assert.match(html, /<a href="\/reporting" data-nav="reporting">Reporting<\/a>\s*<a href="\/users" data-nav="users">Users<\/a>\s*<a href="\/settings" data-nav="settings">Settings<\/a>/);
   const app = readFileSync(WEB('app.mjs'), 'utf8');
-  const draw = app.slice(app.indexOf('async function drawSettings'), app.indexOf('/**\n * The People page'));
+  const draw = app.slice(app.indexOf('async function drawSettings'), app.indexOf('/**\n * The Users page'));
   assert.match(draw, /const \{ stages \} = await api\('GET', '\/stage-colours'\);/, 'the stages come from the server, never typed out');
   assert.doesNotMatch(draw, /'Queued'|'Requested'|'Live'/);
   assert.match(draw, /type="color"/);
@@ -735,7 +735,7 @@ test('bellColour: grey while nothing waits, yellow for 1 to 3, red for more than
 test('Waiting on you is a bell on the right, just before "Signed in as", coloured from the count wherever it is read', () => {
   const html = readFileSync(WEB('index.html'), 'utf8');
   const nav = /<nav class="site">([\s\S]*?)<\/nav>/.exec(html)[1];
-  assert.deepEqual([...nav.matchAll(/>([^<]+)<\/a>/g)].map((m) => m[1]), ['Projects', 'Tasks', 'Reporting', 'People', 'Settings']);
+  assert.deepEqual([...nav.matchAll(/>([^<]+)<\/a>/g)].map((m) => m[1]), ['Projects', 'Tasks', 'Reporting', 'Users', 'Settings']);
   assert.doesNotMatch(nav, /Waiting on you/);
   const me = /<span class="me">([\s\S]*?)<\/span>\s*<\/header>/.exec(html)[1];
   assert.match(me, /<a id="bell" href="\/" title="Waiting on You" aria-label="Waiting on You" data-colour="grey" hidden><svg [^>]*aria-hidden="true">[\s\S]*?<\/svg><\/a>\s*<span id="who"><\/span>/);
@@ -2139,26 +2139,48 @@ test('every button on a ticket\'s page is green with a darker border and rounded
   assert.doesNotMatch(css, /^button \{[^}]*#00AA00/m);
 });
 
-// ── People ───────────────────────────────────────────────────────────────────
+// ── Users ────────────────────────────────────────────────────────────────────
 
-test('People is in the header before Settings, served at /people to a browser, and its data needs a sign-in', async () => {
+test('Users is in the header before Settings, served at /users to a browser, and its data needs a sign-in', async () => {
   const html = readFileSync(WEB('index.html'), 'utf8');
-  assert.match(html, /<a href="\/people" data-nav="people">People<\/a>\s*<a href="\/settings" data-nav="settings">Settings<\/a>/);
+  assert.match(html, /<a href="\/users" data-nav="users">Users<\/a>\s*<a href="\/settings" data-nav="settings">Settings<\/a>/);
+  assert.doesNotMatch(html, />People</);
   const f = await fixture();
   try {
-    const page = await fetch(`${f.url}/people`, { headers: { accept: 'text/html' } });
+    const page = await fetch(`${f.url}/users`, { headers: { accept: 'text/html' } });
     assert.equal(page.status, 200);
     assert.equal(await page.text(), html);
     assert.equal((await f.call('GET', '/people', { token: null })).status, 401);
   } finally { await f.cleanup(); }
   const app = readFileSync(WEB('app.mjs'), 'utf8');
-  assert.match(app, /peoplePage \? 'people' :/);
-  assert.match(app, /\} else if \(peoplePage\) \{\s*await drawPeople\(\);/);
+  assert.match(app, /usersPage \? 'users' :/);
+  assert.match(app, /\} else if \(usersPage\) \{\s*await drawUsers\(\);/);
 });
 
-test('the People page escapes every name and email, offers the form and Cancel to a person only, and reads back before saying it worked', () => {
+test('a browser opening /people (an old bookmark) is sent on to /users, never cached; the data call to /people still answers the data', async () => {
+  const f = await fixture();
+  try {
+    const old = await fetch(`${f.url}/people?x=1`, { headers: { accept: 'text/html' }, redirect: 'manual' });
+    assert.equal(old.status, 302);
+    assert.equal(old.headers.get('location'), '/users?x=1');
+    assert.equal(old.headers.get('cache-control'), 'no-store');
+    assert.match(old.headers.get('vary') ?? '', /accept/i);
+    const followed = await fetch(`${f.url}/people`, { headers: { accept: 'text/html' } });
+    assert.equal(followed.status, 200);
+    assert.equal(new URL(followed.url).pathname, '/users');
+    // The page's own call (and the onboarding scripts') asks for anything, not HTML: it gets the data.
+    const data = await f.call('GET', '/people');
+    assert.equal(data.status, 200);
+    assert.ok(Array.isArray(data.body.people));
+    // /users is a page only: it holds no data of its own.
+    const users = await fetch(`${f.url}/users`);
+    assert.match(users.headers.get('content-type'), /text\/html/);
+  } finally { await f.cleanup(); }
+});
+
+test('the Users page escapes every name and email, offers the form and Cancel to a person only, and reads back before saying it worked', () => {
   const app = readFileSync(WEB('app.mjs'), 'utf8');
-  const draw = app.slice(app.indexOf('async function drawPeople'), app.indexOf('/** Underline the header link'));
+  const draw = app.slice(app.indexOf('async function drawUsers'), app.indexOf('/** Underline the header link'));
   assert.ok(draw.length > 100);
   for (const field of ['p.name', 'p.email', 'i.email', 'i.invitedBy.name']) assert.match(draw, new RegExp(`escapeHtml\\(${field.replace('.', '\\.')}\\)`), field);
   assert.match(draw, /\$\{person \? `<form class="invite">/);
@@ -2167,7 +2189,10 @@ test('the People page escapes every name and email, offers the form and Cancel t
   assert.match(draw, /api\('DELETE', `\/invites\/\$\{encodeURIComponent\(id\)\}`\)/);
   // Each write is read back with GET /people before the page says it worked.
   assert.equal(draw.match(/await api\('GET', '\/people'\)\.catch/g).length, 2);
-  assert.match(draw, /putTrail\(\[\{ label: 'People' \}\]\)/);
+  assert.match(draw, /putTrail\(\[\{ label: 'Users' \}\]\)/);
+  assert.match(draw, /setTitle\('Users · Tracker'\)/);
+  assert.match(draw, /<h1>Users<\/h1>/);
+  assert.match(draw, /<h2>Users with an Account<\/h2>/);
 });
 
 test('the Tasks toolbar picks a project from a dropdown, "Project: ", the one in view selected', () => {

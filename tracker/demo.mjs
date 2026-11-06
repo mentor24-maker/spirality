@@ -8,7 +8,7 @@
  * it from tracker/demoData.mjs, starts the server on a free port and prints
  * the address, the test operator's email and a fresh password to sign in
  * with, and a set-password link for the operator, as the setup email would
- * carry. "Forgot password?" and the People page's invites send nothing:
+ * carry. "Forgot password?" and the Users page's invites send nothing:
  * each email is printed here instead, an invite with its link on a line of
  * its own (`Invite link for <email>: <link>`). All of it is for this throwaway store only and dies with it.
  * Ctrl-C stops it and deletes the folder.
