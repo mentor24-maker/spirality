@@ -1721,14 +1721,23 @@ async function drawSettings() {
  * makes the invite only if the email went out, and says so if it did not.
  * After every invite or cancel the page reads the list again and says it
  * worked only when what it reads agrees. A loop's sign-in sees no form and
- * no buttons, and the server refuses it anyway.
+ * no buttons, and the server refuses it anyway. Each user's role shows in
+ * the Role column; an admin gets a picker there instead, whose change is
+ * read back the same way, and a refusal (the last admin) shows the server's
+ * reason. Under it, which role has which permission.
  */
 async function drawUsers(done = '', problem = '') {
-  const { people, invites = [] } = await api('GET', '/people');
+  const { people, invites = [], roles = [], permissions = [], canEditRoles = false } = await api('GET', '/people');
   setTitle('Users · Tracker');
   const person = me?.kind === 'human';
+  const picker = person && canEditRoles;
+  const roleCell = (p) => (picker
+    ? `<select data-role-of="${escapeHtml(p.id)}" data-name="${escapeHtml(p.name)}" aria-label="Role of ${escapeHtml(p.name)}">${roles.map((r) => `<option value="${escapeHtml(r.name)}"${r.name === p.role ? ' selected' : ''}>${escapeHtml(r.name)}</option>`).join('')}</select>`
+    : escapeHtml(p.role ?? ''));
   const personRow = (p) => `
-    <tr><td class="name">${escapeHtml(p.name)}</td><td class="email">${p.email ? escapeHtml(p.email) : '<span class="quiet">no email yet</span>'}</td></tr>`;
+    <tr><td class="name">${escapeHtml(p.name)}</td><td class="email">${p.email ? escapeHtml(p.email) : '<span class="quiet">no email yet</span>'}</td><td class="role">${roleCell(p)}</td></tr>`;
+  const roleRow = (r) => `
+    <tr><td class="name"><b>${escapeHtml(r.name)}</b><span class="hint quiet">${escapeHtml(r.description)}</span></td>${permissions.map((x) => `<td class="has">${r.permissions.includes(x.name) ? '✓' : '<span class="hidden">no</span>'}</td>`).join('')}</tr>`;
   const inviteRow = (i) => `
     <tr><td class="email">${escapeHtml(i.email)}</td><td class="by">${escapeHtml(i.invitedBy.name)}</td><td class="expires">${escapeHtml(when(i.expiresAt))}</td>
       <td class="actions">${person ? `<button type="button" data-cancel="${escapeHtml(i.id)}" data-email="${escapeHtml(i.email)}">Cancel</button>` : ''}</td></tr>`;
@@ -1741,11 +1750,14 @@ async function drawUsers(done = '', problem = '') {
       <span class="hint quiet">They get an email with a link to choose their name and password. It works once, for 7 days.</span>
     </form>` : ''}
     <h2>Users with an Account</h2>
-    <table class="projects people"><thead><tr><th class="name">Name</th><th class="email">Email</th></tr></thead><tbody>${people.map(personRow).join('')}</tbody></table>
+    <table class="projects people"><thead><tr><th class="name">Name</th><th class="email">Email</th><th class="role">Role</th></tr></thead><tbody>${people.map(personRow).join('')}</tbody></table>
     <h2>Open Invites</h2>
     ${invites.length
     ? `<table class="projects invites"><thead><tr><th class="email">Email</th><th class="by">Invited By</th><th class="expires">Expires</th><th class="actions"><span class="hidden">Actions</span></th></tr></thead><tbody>${invites.map(inviteRow).join('')}</tbody></table>`
-    : '<p class="quiet">No open invites.</p>'}`;
+    : '<p class="quiet">No open invites.</p>'}
+    <h2>Roles and Permissions</h2>
+    <p class="quiet">Each role's permissions are recorded, not yet enforced: for now everyone may do what they could before.</p>
+    <table class="projects roles"><thead><tr><th class="name">Role</th>${permissions.map((x) => `<th class="has" title="${escapeHtml(x.name)}">${escapeHtml(x.description)}</th>`).join('')}</tr></thead><tbody>${roles.map(roleRow).join('')}</tbody></table>`;
   putTrail([{ label: 'Users' }]);
   const note = main.querySelector('p.note');
   const busy = (text) => { note.className = 'note quiet'; note.textContent = text; };
@@ -1773,6 +1785,29 @@ async function drawUsers(done = '', problem = '') {
     const listed = back?.invites?.some((i) => i.email === email.toLowerCase());
     again(listed ? sent.sent : `The tracker said the invite was sent, but it is not in the open invites when read back: ${sent.sent}`, !listed);
   });
+  for (const select of main.querySelectorAll('select[data-role-of]')) {
+    const was = select.value;
+    select.addEventListener('change', async () => {
+      const { roleOf: id, name } = select.dataset;
+      const role = select.value;
+      select.disabled = true;
+      busy(`Changing ${name}'s role to ${role}…`);
+      try {
+        await api('PUT', `/people/${encodeURIComponent(id)}/role`, { role });
+      } catch (err) {
+        if (err instanceof SignedOut) return drawSignIn(`You were signed out; ${name}'s role was not changed.`);
+        select.value = was;
+        select.disabled = false;
+        note.className = 'note error';
+        note.textContent = `Not changed: ${err.message}`;
+        return;
+      }
+      // Read back before saying it worked.
+      const back = await api('GET', '/people').catch(() => null);
+      const now = back?.people?.find((p) => String(p.id) === id)?.role;
+      again(now === role ? `${name} is now ${role}.` : `The tracker said ${name}'s role was changed to ${role}, but it reads back as ${now ?? 'unknown'}.`, now !== role);
+    });
+  }
   for (const button of main.querySelectorAll('button[data-cancel]')) {
     button.addEventListener('click', async () => {
       const { cancel: id, email } = button.dataset;

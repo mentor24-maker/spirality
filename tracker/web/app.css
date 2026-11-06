@@ -206,6 +206,10 @@ form.invite .row { display: flex; gap: 0.75rem; align-items: center; margin-top:
 form.invite input { flex: 1; font: inherit; padding: 0.5rem; box-sizing: border-box; }
 form.invite .hint { display: block; font-size: 0.85rem; margin-top: 0.25rem; }
 table.people, table.invites { max-width: 48rem; }
+table.people select { font: inherit; padding: 0.2rem; }
+/* The Users page's Roles and Permissions table: each role, its description under it, a tick per permission. */
+table.roles .hint { display: block; font-size: 0.85rem; }
+table.roles .has { text-align: center; }
 /* The Search field (Tasks page toolbar, search results page) and its results. */
 form.search { flex: 1; max-width: 24rem; }
 form.search input { width: 100%; box-sizing: border-box; font: inherit; padding: 0.35rem 0.6rem; border: var(--hairline); border-radius: 6px; }

@@ -676,13 +676,61 @@ test('GET /people lists the tracker\'s people: humans only, with emails and open
     const link = f.store.makeLink({ purpose: 'invite', email: 'new@example.com', madeBy: f.human.id });
     const r = await f.call('GET', '/people', { token: f.humanToken });
     assert.equal(r.status, 200);
-    assert.deepEqual(r.body.people, [{ id: f.human.id, name: 'Operator', email: 'op@example.com' }]);
+    assert.deepEqual(r.body.people, [{ id: f.human.id, name: 'Operator', email: 'op@example.com', role: 'admin' }]);
+    assert.equal(r.body.canEditRoles, true);
+    assert.deepEqual(r.body.roles.map((x) => x.name), ['admin', 'editor', 'contributor', 'reviewer', 'viewer']);
+    assert.deepEqual(r.body.permissions.map((x) => x.name), ['user.read', 'user.edit', 'ticket.read', 'ticket.create', 'ticket.edit', 'ticket.delete']);
     assert.deepEqual(r.body.invites.map((i) => [i.email, i.invitedBy.name]), [['new@example.com', 'Operator']]);
     assert.ok(!r.text.includes(link.token));
     const loop = await f.call('GET', '/people');
     assert.deepEqual(loop.body, { people: [{ id: f.human.id, name: 'Operator' }] });
     for (const token of f.tokens) assert.ok(!r.text.includes(token));
     assert.equal((await f.call('GET', '/people', { token: null })).status, 401);
+  } finally { await f.cleanup(); }
+});
+
+test('PUT /people/<id>/role: an admin changes a person\'s role, read back on GET /people; a non-admin and a loop get 403, the last admin 409, and nothing changes', async () => {
+  const f = await fixture();
+  try {
+    const other = f.store.createActor({ kind: 'human', name: 'Other' });
+    const otherToken = f.store.issueToken(other.id);
+    const roleIn = async (id) => (await f.call('GET', '/people', { token: f.humanToken })).body.people.find((p) => p.id === id).role;
+    assert.equal(await roleIn(other.id), 'contributor');
+
+    const ok = await f.call('PUT', `/people/${other.id}/role`, { token: f.humanToken, body: { role: 'reviewer' } });
+    assert.equal(ok.status, 200, ok.text);
+    assert.deepEqual(ok.body, { id: other.id, role: 'reviewer' });
+    assert.equal(await roleIn(other.id), 'reviewer');
+
+    // A non-admin is refused, and sees no picker.
+    const notAdmin = await f.call('PUT', `/people/${f.human.id}/role`, { token: otherToken, body: { role: 'viewer' } });
+    assert.equal(notAdmin.status, 403);
+    assert.equal(notAdmin.body.error, 'not-admin');
+    assert.equal((await f.call('GET', '/people', { token: otherToken })).body.canEditRoles, false);
+    // A loop's token is refused before anything is read.
+    const loop = await f.call('PUT', `/people/${other.id}/role`, { body: { role: 'admin' } });
+    assert.equal(loop.status, 403);
+    assert.equal(loop.body.error, 'people-only');
+    // The only admin cannot step down; the reason is plain words.
+    const last = await f.call('PUT', `/people/${f.human.id}/role`, { token: f.humanToken, body: { role: 'viewer' } });
+    assert.equal(last.status, 409);
+    assert.equal(last.body.error, 'last-admin');
+    assert.match(last.body.message, /only admin/);
+    // A bad role, an unknown person, a machine, a stray field: refused.
+    assert.equal((await f.call('PUT', `/people/${other.id}/role`, { token: f.humanToken, body: { role: 'boss' } })).body.error, 'bad-role');
+    assert.equal((await f.call('PUT', `/people/${other.id}/role`, { token: f.humanToken, body: {} })).status, 400);
+    assert.equal((await f.call('PUT', `/people/${other.id}/role`, { token: f.humanToken, body: { role: 'viewer', extra: 1 } })).body.error, 'bad-field');
+    assert.equal((await f.call('PUT', '/people/9999/role', { token: f.humanToken, body: { role: 'viewer' } })).status, 404);
+    assert.equal((await f.call('PUT', `/people/${f.machine.id}/role`, { token: f.humanToken, body: { role: 'viewer' } })).status, 404);
+    assert.equal((await f.call('PUT', `/people/${other.id}/role`, { token: null, body: { role: 'viewer' } })).status, 401);
+    // Nothing those refusals asked for happened.
+    assert.equal(f.store.roleOf(f.human.id), 'admin');
+    assert.equal(f.store.roleOf(other.id), 'reviewer');
+    assert.equal(f.store.roleOf(f.machine.id), null);
+    // The role is recorded, not enforced: the viewer-to-be still files a ticket.
+    f.store.setRole({ actor: other.id, role: 'viewer', by: f.human.id });
+    const filed = await f.call('POST', '/projects/alpha/tickets', { token: otherToken, body: { name: 'A viewer files', status: 'Requested' } });
+    assert.equal(filed.status, 201, filed.text);
   } finally { await f.cleanup(); }
 });
 

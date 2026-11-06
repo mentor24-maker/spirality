@@ -16,11 +16,13 @@
  *   409  a guarded move found the ticket moved: `{ error, status, version }`,
  *        or a delete found the ticket started: `{ error: 'not-deletable', status }`,
  *        or a project delete found it holds tickets: `{ error: 'has-tickets', tickets }`,
- *        or an invite's email already has an account or an open invite
+ *        or an invite's email already has an account or an open invite,
+ *        or a role change would leave the tracker with no admin
  *   502  an invite whose email did not go out (no invite is left open)
  *   503  an invite with no mail sender or no tracker address (nothing made)
  *   400  a bad field, or a body that names another author
- *   403  a write only a person may make, asked by a loop's token
+ *   403  a write only a person may make, asked by a loop's token, or a
+ *        role change asked by someone who is not an admin
  * A ticket's attachments are the one call whose body is not JSON: `POST
  * /tickets/<id>/attachments` takes the file's raw bytes
  * (`content-type: application/octet-stream`), its name in `x-file-name`
@@ -94,6 +96,8 @@ const MAX_BODY = 1024 * 1024;
 
 /** Store refusals that mean "no such thing", answered 404 rather than 400. */
 const NOT_FOUND_CODES = new Set(['unknown-ticket', 'unknown-project', 'unknown-invite']);
+/** setRole's refusals that are not a bad field: a non-admin is forbidden, and the last admin's change conflicts with the tracker's state. */
+const ROLE_REFUSALS = Object.freeze({ 'not-admin': 403, 'last-admin': 409 });
 
 /** The HTTP status each refused invite answers with (tracker/account.mjs sendInvite); any other is 400. */
 const INVITE_REFUSALS = Object.freeze({ 'duplicate-email': 409, 'duplicate-invite': 409, 'no-mail': 503, 'no-address': 503, 'not-sent': 502 });
@@ -406,11 +410,18 @@ export const GO_PHRASE = busRelayPlan.GO_PHRASE;
 export function createHandler(store, { log = () => {}, notifier = null, defaultProject = null, mergePhrase = null, closePhrase = null, goPhrase = null, accountMail = null, setup = null, now = Date.now } = {}) {
   const failures = failureCounter(now);
 
-  /** The Users page's data: each person with their email, and the open invites. */
-  function peopleOf() {
+  /**
+   * The Users page's data: each person with their email and role, the open
+   * invites, the roles with their permissions, and whether the caller may
+   * change roles (an admin).
+   */
+  function peopleOf(me) {
     return {
-      people: store.listPeople().map((p) => ({ ...p, email: store.emailOf(p.id) })),
+      people: store.listPeople().map((p) => ({ ...p, email: store.emailOf(p.id), role: store.roleOf(p.id) })),
       invites: store.listInvites(),
+      roles: store.listRoles(),
+      permissions: store.listPermissions(),
+      canEditRoles: store.roleOf(me.id) === 'admin',
     };
   }
 
@@ -509,7 +520,29 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     // and the open invites; a loop sees names and ids only. Never a machine,
     // never a token or a hash.
     if (parts.length === 1 && parts[0] === 'people' && method === 'GET') {
-      return [200, me.kind === 'human' ? peopleOf() : { people: store.listPeople() }];
+      return [200, me.kind === 'human' ? peopleOf(me) : { people: store.listPeople() }];
+    }
+
+    // Dane's page: the Users page's role picker. Only an admin, signed in as
+    // a person, may change a role; a loop's token is refused before the body
+    // is read, and the store refuses a non-admin and the last admin's change.
+    if (parts.length === 3 && parts[0] === 'people' && parts[2] === 'role' && method === 'PUT') {
+      if (me.kind !== 'human') {
+        throw new HttpError(403, 'people-only', 'only a person signed in to the tracker may change a role; a machine may not.');
+      }
+      const body = await readJson(req);
+      checkBody(body, me, ['role']);
+      const actor = /^[0-9]+$/.test(parts[1]) ? Number(parts[1]) : null;
+      if (actor == null || store.getActor(actor)?.kind !== 'human') throw new HttpError(404, 'unknown-person', `no person ${parts[1]}.`);
+      if (typeof body.role !== 'string') throw new HttpError(400, 'missing', 'say which role: role is one of the five role names.');
+      try {
+        const r = store.setRole({ actor, role: body.role, by: me.id });
+        log(`role of actor ${actor} set to ${r.role} actor=${me.id}`);
+        return [200, { id: actor, role: store.roleOf(actor) }];
+      } catch (err) {
+        if (err instanceof StoreError && ROLE_REFUSALS[err.code]) throw new HttpError(ROLE_REFUSALS[err.code], err.code, err.message);
+        throw err;
+      }
     }
 
     // Dane's page: the Users page's "Invite someone". Only a person may
@@ -527,7 +560,7 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
       });
       log(result.ok ? `invite sent actor=${me.id}` : `invite NOT sent (${result.code}) actor=${me.id}`);
       if (!result.ok) throw new HttpError(INVITE_REFUSALS[result.code] ?? 400, result.code, result.line);
-      return [201, { sent: result.line, ...peopleOf() }];
+      return [201, { sent: result.line, ...peopleOf(me) }];
     }
 
     // Dane's page: the Users page's Cancel button on an open invite.
