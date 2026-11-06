@@ -210,6 +210,10 @@
       "to": "scripts/lib/back_to_main.sh"
     },
     {
+      "from": "scripts/lib/tracker_restart.sh",
+      "to": "scripts/lib/tracker_restart.sh"
+    },
+    {
       "from": "scripts/run_with_time_limit.sh",
       "to": "scripts/run_with_time_limit.sh"
     },

@@ -43,6 +43,8 @@ cd "$REPO" || exit 1
 SLUG="$(node "$REPO/scripts/project_config.mjs" projectSlug)" || { echo "[loop-runner] could not read projectSlug from the project config" >&2; exit 1; }
 LOG_DIR="$(node "$REPO/scripts/project_config.mjs" logDir)" || { echo "[loop-runner] could not read logDir from the project config" >&2; exit 1; }
 PREFIX="$(node "$REPO/scripts/project_config.mjs" launchdPrefix)" || { echo "[loop-runner] could not read launchdPrefix from the project config" >&2; exit 1; }
+# Empty when the project runs no tracker: the restart step then does nothing.
+TRACKER_PORT="$(node "$REPO/scripts/project_config.mjs" trackerPort)" || { echo "[loop-runner] could not read trackerPort from the project config" >&2; exit 1; }
 LOG="$LOG_DIR/$SLUG-$SKILL.log"
 LOCK="$LOG_DIR/$SLUG-$SKILL.lock"
 mkdir -p "$LOG_DIR"
@@ -93,6 +95,9 @@ trap 'rm -rf "$LOCK" "$PASS_OUT" 2>/dev/null; [ "$(cat "$SYNC_LOCK/pid" 2>/dev/n
 
 # shellcheck source=lib/back_to_main.sh
 source "$REPO/scripts/lib/back_to_main.sh"
+# A pull that changes tracker/ restarts the tracker so it runs the new code (SP-150).
+# shellcheck source=lib/tracker_restart.sh
+source "$REPO/scripts/lib/tracker_restart.sh"
 
 while true; do
   # 0. A checkout left on a branch that has merged and gone from origin (a new
@@ -112,7 +117,10 @@ while true; do
   #    on .git/index.lock and rebuild node_modules under each other.
   if [ "$(git rev-parse --abbrev-ref HEAD 2>/dev/null)" = "main" ] && [ -z "$(git status --porcelain)" ]; then
     if take_sync_lock; then
+      BEFORE="$(git rev-parse HEAD 2>/dev/null)"
       git pull -q --ff-only origin main >> "$LOG" 2>&1 || echo "[loop-runner] $(date "+%H:%M:%S") pull of main refused (see above) — running on the checkout as it is" >> "$LOG"
+      RESTARTED="$(restart_tracker_if_changed "$BEFORE" "$(git rev-parse HEAD 2>/dev/null)" "$PREFIX" "$TRACKER_PORT")"
+      [ -n "$RESTARTED" ] && echo "[loop-runner] $(date "+%H:%M:%S") $RESTARTED" >> "$LOG"
       # Dependencies follow the lockfile, so a merged change to package.json takes effect on the next pass.
       npm ci --silent >> "$LOG" 2>&1 || echo "[loop-runner] $(date "+%H:%M:%S") npm ci failed — running with the node_modules already present" >> "$LOG"
       rm -rf "$SYNC_LOCK"

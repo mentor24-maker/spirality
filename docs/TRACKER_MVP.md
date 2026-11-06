@@ -378,6 +378,24 @@ The settings come from the project config (`spirality.project.json`):
     beside it while the server runs; they belong to it, never delete them).
   - `backups/tracker-YYYY-MM-DD.db`: one copy per night, the newest 14 kept.
 
+**After a merge, the server restarts itself onto the new code** (SP-150). A
+pull only replaces files on disk; a running server keeps the code it started
+with. So every lane's pull of main (`scripts/run_relay.sh` and
+`scripts/loop_runner.sh`, through `scripts/lib/tracker_restart.sh`) notes
+where main was before it pulled. When the pull moved main and the change
+touches `tracker/`, it restarts the job with
+`launchctl kickstart -k gui/$(id -u)/<launchdPrefix>.tracker`, waits up to 20
+seconds for the server to answer on `trackerPort`, and writes one line to that
+lane's log: `tracker restarted for <old>..<new>`, or a line in capitals
+beginning `TRACKER RESTART` / `TRACKER NOT RESTARTED` saying what went wrong.
+Only the lane whose pull brought the change in sees it move, so the restart
+happens once, and its line is in that lane's log (the relay's, or one of the
+loop lanes'):
+`grep -h "tracker restart" ~/loop-logs/<projectSlug>-*.log | tail -1`.
+A pull that changes nothing under `tracker/` restarts nothing, and a project
+with no `trackerPort` never restarts anything. The server is down for a few
+seconds during the restart.
+
 Logs are in the configured log folder: `<projectSlug>-tracker.log` (one line
 per request: method, address, answer, actor id; never a token) and
 `<projectSlug>-tracker-backup.log` (one `backup OK` or `backup FAILED` line
