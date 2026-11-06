@@ -17,12 +17,14 @@
  *        or a delete found the ticket started: `{ error: 'not-deletable', status }`,
  *        or a project delete found it holds tickets: `{ error: 'has-tickets', tickets }`,
  *        or an invite's email already has an account or an open invite,
- *        or a role change would leave the tracker with no admin
+ *        or a role change would leave the tracker with no admin,
+ *        or a member change names someone already a member, or a project's
+ *        owner or operator
  *   502  an invite whose email did not go out (no invite is left open)
  *   503  an invite with no mail sender or no tracker address (nothing made)
  *   400  a bad field, or a body that names another author
  *   403  a write only a person may make, asked by a loop's token, or a
- *        role change asked by someone who is not an admin
+ *        role or member change asked by someone who is not an admin
  * A ticket's attachments are the one call whose body is not JSON: `POST
  * /tickets/<id>/attachments` takes the file's raw bytes
  * (`content-type: application/octet-stream`), its name in `x-file-name`
@@ -98,6 +100,8 @@ const MAX_BODY = 1024 * 1024;
 const NOT_FOUND_CODES = new Set(['unknown-ticket', 'unknown-project', 'unknown-invite']);
 /** setRole's refusals that are not a bad field: a non-admin is forbidden, and the last admin's change conflicts with the tracker's state. */
 const ROLE_REFUSALS = Object.freeze({ 'not-admin': 403, 'last-admin': 409 });
+/** addMember's and removeMember's refusals that are not a bad field. */
+const MEMBER_REFUSALS = Object.freeze({ 'not-admin': 403, 'already-member': 409, 'required-member': 409, 'not-member': 404, 'unknown-project': 404 });
 
 /** The HTTP status each refused invite answers with (tracker/account.mjs sendInvite); any other is 400. */
 const INVITE_REFUSALS = Object.freeze({ 'duplicate-email': 409, 'duplicate-invite': 409, 'no-mail': 503, 'no-address': 503, 'not-sent': 502 });
@@ -417,7 +421,7 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
    */
   function peopleOf(me) {
     return {
-      people: store.listPeople().map((p) => ({ ...p, email: store.emailOf(p.id), role: store.roleOf(p.id) })),
+      people: store.listPeople().map((p) => ({ ...p, email: store.emailOf(p.id), role: store.roleOf(p.id), projects: store.projectsOf(p.id) })),
       invites: store.listInvites(),
       roles: store.listRoles(),
       permissions: store.listPermissions(),
@@ -511,7 +515,7 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
       if (body.owner != null && !Number.isInteger(body.owner)) {
         throw new HttpError(400, 'bad-owner', `owner must be a person's actor id, not "${body.owner}".`);
       }
-      const made = store.createProject(pick(body, PROJECT_FIELDS));
+      const made = store.createProject({ ...pick(body, PROJECT_FIELDS), createdBy: me.id });
       return [201, projectDetailsOf(store, made.slug, { withAlerts: true })];
     }
 
@@ -612,7 +616,39 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     if (parts.length === 2 && parts[0] === 'projects' && method === 'GET') {
       const details = projectDetailsOf(store, parts[1], { withAlerts: me.kind === 'human' });
       if (!details) throw new HttpError(404, 'unknown-project', `no project "${parts[1]}".`);
-      return [200, details];
+      // Whether the caller may change its members: an admin, signed in as a person.
+      return [200, { ...details, canEditMembers: me.kind === 'human' && store.roleOf(me.id) === 'admin' }];
+    }
+
+    // Dane's page: a project's Members list, its Add Member picker and each
+    // row's Remove. Only an admin, signed in as a person, changes members; a
+    // loop's token is refused before the body is read. The answer is the
+    // members as read back after the change.
+    if (parts[0] === 'projects' && parts[2] === 'members'
+      && ((parts.length === 3 && method === 'POST') || (parts.length === 4 && method === 'DELETE'))) {
+      if (me.kind !== 'human') {
+        throw new HttpError(403, 'people-only', `only a person signed in to the tracker may ${method === 'POST' ? 'add' : 'remove'} a project's members; a machine may not.`);
+      }
+      const project = requireProject(parts[1]);
+      let person;
+      if (method === 'POST') {
+        const body = await readJson(req);
+        checkBody(body, me, ['person']);
+        if (!Number.isInteger(body.person)) throw new HttpError(400, 'missing', 'say who to add: person is a person\'s actor id.');
+        person = body.person;
+      } else {
+        person = /^[0-9]+$/.test(parts[3]) ? Number(parts[3]) : null;
+      }
+      if (person == null || store.getActor(person)?.kind !== 'human') throw new HttpError(404, 'unknown-person', `no person ${parts[3] ?? person}.`);
+      try {
+        if (method === 'POST') store.addMember({ project: project.slug, actor: person, by: me.id });
+        else store.removeMember({ project: project.slug, actor: person, by: me.id });
+      } catch (err) {
+        if (err instanceof StoreError && MEMBER_REFUSALS[err.code]) throw new HttpError(MEMBER_REFUSALS[err.code], err.code, err.message);
+        throw err;
+      }
+      log(`${method === 'POST' ? 'added' : 'removed'} member ${person} ${method === 'POST' ? 'to' : 'from'} ${project.slug} actor=${me.id}`);
+      return [method === 'POST' ? 201 : 200, { project: project.slug, members: store.listMembers(project.slug) }];
     }
 
     // Dane's page: the Edit project form and the Delete icon. Only a person

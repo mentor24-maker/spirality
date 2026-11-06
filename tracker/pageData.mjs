@@ -188,6 +188,7 @@ export function projectDetailsOf(store, slug, { withAlerts = false } = {}) {
     repo: project.repo,
     open: store.listTickets(project.slug, { open: true }).length,
     statuses: STAGE_ORDER.map((name) => ({ status: name, count: counts.get(statusOf(name)) })),
+    members: store.listMembers(project.slug),
     ...(withAlerts ? { alertEmail: project.alertEmail, alertPhone: project.alertPhone } : {}),
   };
 }

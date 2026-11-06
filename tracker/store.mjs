@@ -73,6 +73,14 @@
  *    setRole, which refuses anyone but an admin and a change that would leave
  *    no admin, checked in the same transaction as the write. While nobody is
  *    an admin, the project operators are made admins, so nobody is locked out.
+ *  - A project's members are people (never a machine), one `project_members`
+ *    row each, with who added them and when: recorded, not yet enforced.
+ *    When the table is first made, every person becomes a member of every
+ *    project, so nobody loses anything. A project's owner and operator (when
+ *    a person) are always members: made so on every open, on createProject
+ *    (with its creator) and when updateProject names a new owner, and
+ *    removeMember refuses them. Only an admin adds or removes a member,
+ *    checked in the same transaction as the write.
  *  - An attachment is a file kept on a ticket: its name, type, size, bytes,
  *    who added it and when, all in the `attachments` table, so the nightly
  *    backup (tracker/backup.mjs) holds it with no second folder to copy. It
@@ -230,6 +238,14 @@ CREATE TABLE IF NOT EXISTS user_roles (
   set_by      INTEGER REFERENCES actors(id),
   set_at      TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS project_members (
+  project     TEXT NOT NULL REFERENCES projects(slug),
+  actor       INTEGER NOT NULL REFERENCES actors(id),
+  added_by    INTEGER REFERENCES actors(id),
+  added_at    TEXT NOT NULL,
+  PRIMARY KEY (project, actor)
+);
+CREATE INDEX IF NOT EXISTS project_members_by_actor ON project_members (actor, project);
 CREATE INDEX IF NOT EXISTS attachments_by_ticket ON attachments (ticket, id);
 CREATE UNIQUE INDEX IF NOT EXISTS actors_by_token ON actors (token_hash);
 CREATE UNIQUE INDEX IF NOT EXISTS actors_by_email ON actors (email);
@@ -577,6 +593,9 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
       if (!actorColumns.has(column)) db.exec(`ALTER TABLE actors ADD COLUMN ${column} ${type}`);
     }
   }
+  // Whether project membership is new to this database: if so, everyone
+  // already in it joins every project below, so nothing changes for anyone.
+  const hadMembers = Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'project_members'").get());
   db.exec(SCHEMA);
   // A database made before projects had a web address, a logo, an owner and a repository
   // gains the columns, empty; every existing row is otherwise untouched.
@@ -775,6 +794,58 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
       .run(source, kind, sourceId, String(newId));
   }
 
+  /** Whether a person is a member of a project. */
+  function isMember(slug, actorId) {
+    return Boolean(db.prepare('SELECT 1 FROM project_members WHERE project = ? AND actor = ?').get(slug, actorId));
+  }
+
+  /**
+   * Make a person a member of a project if they are not one yet; a machine,
+   * an unknown id or null does nothing (a machine is never a member). Read
+   * back. Answers whether a row was written.
+   */
+  function joinIfPerson(slug, actorId, by) {
+    if (actorId == null) return false;
+    const row = db.prepare('SELECT kind FROM actors WHERE id = ?').get(actorId);
+    if (!row || row.kind !== 'human' || isMember(slug, actorId)) return false;
+    db.prepare('INSERT INTO project_members (project, actor, added_by, added_at) VALUES (?, ?, ?, ?)').run(slug, actorId, by ?? null, now());
+    if (!isMember(slug, actorId)) throw new StoreError('write-failed', `actor ${actorId} was not made a member of "${slug}".`);
+    return true;
+  }
+
+  /** Every project's owner and operator, when a person, is one of its members. */
+  function ensureRequiredMembers() {
+    for (const p of db.prepare('SELECT slug, owner, operator FROM projects').all()) {
+      joinIfPerson(p.slug, p.owner == null ? null : num(p.owner), null);
+      joinIfPerson(p.slug, p.operator == null ? null : num(p.operator), null);
+    }
+  }
+
+  /** The person, project and admin checks addMember and removeMember share; answers the project. */
+  function checkMemberChange(project, actor, by, verb) {
+    requireActor(by, `the person ${verb} the member`);
+    if (roleOf(by) !== 'admin') {
+      throw new StoreError('not-admin', `only an admin may ${verb === 'adding' ? 'add' : 'remove'} a project's members.`);
+    }
+    const p = db.prepare('SELECT slug, name, owner, operator FROM projects WHERE slug = ?').get(project);
+    if (!p) throw new StoreError('unknown-project', `no project "${project}".`);
+    requireActor(actor, 'the member');
+    if (db.prepare('SELECT kind FROM actors WHERE id = ?').get(actor).kind !== 'human') {
+      throw new StoreError('machine-account', `actor ${actor} is a machine; a machine is never a project's member.`);
+    }
+    return p;
+  }
+
+  if (!hadMembers) {
+    // Membership is new here: every person joins every project, so nobody loses anything.
+    transaction(() => {
+      const people = db.prepare("SELECT id FROM actors WHERE kind = 'human' ORDER BY id").all();
+      for (const { slug } of db.prepare('SELECT slug FROM projects ORDER BY slug').all()) {
+        for (const { id } of people) joinIfPerson(slug, num(id), null);
+      }
+    });
+  }
+  ensureRequiredMembers();
   ensureAdmin();
 
   return {
@@ -1129,13 +1200,14 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
      * email and phone. Read back
      * before it is answered.
      */
-    createProject({ slug, name, prefix, operator = null, url = null, logo = null, owner = null, repo = null, alertEmail = null, alertPhone = null }) {
+    createProject({ slug, name, prefix, operator = null, url = null, logo = null, owner = null, repo = null, alertEmail = null, alertPhone = null, createdBy = null }) {
       requireText(slug, "a project's slug");
       requireText(name, "a project's name");
       if (typeof prefix !== 'string' || !/^[A-Z][A-Z0-9]*$/.test(prefix)) {
         throw new StoreError('bad-prefix', `a ticket prefix is capital letters and digits, starting with a letter, not "${prefix}".`);
       }
       if (operator != null) requireActor(operator, 'the operator');
+      if (createdBy != null) requireActor(createdBy, 'the creator');
       const address = optionalAddress(url, "a project's web address");
       const image = optionalAddress(logo, "a project's logo");
       const repository = optionalRepo(repo);
@@ -1158,6 +1230,8 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
       if (!made || Object.keys(wanted).some((k) => made[k] !== wanted[k])) {
         throw new StoreError('write-failed', `project "${slug}" did not read back as written.`);
       }
+      // Its creator, owner and operator (each when a person) are its first members.
+      for (const id of [createdBy, owner, operator]) joinIfPerson(slug, id, createdBy);
       ensureAdmin();
       return made;
     },
@@ -1200,6 +1274,8 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
       if (num(r.changes) !== 1 || !saved || Object.keys(wanted).some((k) => saved[k] !== wanted[k])) {
         throw new StoreError('write-failed', `project "${slug}" did not read back as changed.`);
       }
+      // A new owner is always a member.
+      joinIfPerson(slug, saved.owner, null);
       return saved;
     },
 
@@ -1219,11 +1295,70 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
           err.tickets = tickets;
           throw err;
         }
+        db.prepare('DELETE FROM project_members WHERE project = ?').run(slug);
         const r = db.prepare('DELETE FROM projects WHERE slug = ?').run(slug);
         if (num(r.changes) !== 1 || this.getProject(slug)) {
           throw new StoreError('write-failed', `project "${slug}" was not deleted.`);
         }
         return { slug: project.slug, prefix: project.prefix };
+      });
+    },
+
+    /**
+     * A project's members, by name: `{ id, name, addedAt, addedBy }`, addedBy
+     * `{ id, name }` or null (made a member by the tracker itself: the first
+     * fill, or as the project's owner or operator). Null for an unknown project.
+     */
+    listMembers(slug) {
+      if (!db.prepare('SELECT 1 FROM projects WHERE slug = ?').get(slug)) return null;
+      return db.prepare(`SELECT a.id, a.name, m.added_at, b.id AS by_id, b.name AS by_name
+          FROM project_members m JOIN actors a ON a.id = m.actor LEFT JOIN actors b ON b.id = m.added_by
+          WHERE m.project = ? AND a.kind = 'human' ORDER BY a.name COLLATE NOCASE, a.id`).all(slug)
+        .map((r) => ({ id: num(r.id), name: r.name, addedAt: r.added_at, addedBy: r.by_id == null ? null : { id: num(r.by_id), name: r.by_name } }));
+    },
+
+    /** The projects a person is a member of, by slug: `{ slug, name }`. Empty for a machine or an unknown id. */
+    projectsOf(actorId) {
+      return db.prepare(`SELECT p.slug, p.name FROM project_members m JOIN projects p ON p.slug = m.project
+          JOIN actors a ON a.id = m.actor WHERE m.actor = ? AND a.kind = 'human' ORDER BY p.slug`).all(actorId)
+        .map((r) => ({ slug: r.slug, name: r.name }));
+    },
+
+    /**
+     * Make a person a member of a project. `by` must be an admin
+     * (`not-admin`); the member a person (`machine-account`), not one already
+     * (`already-member`). The check and the write are one transaction. Read
+     * back. Answers `{ project, actor }`.
+     */
+    addMember({ project, actor, by }) {
+      return transaction(() => {
+        const p = checkMemberChange(project, actor, by, 'adding');
+        if (isMember(p.slug, actor)) {
+          throw new StoreError('already-member', `${this.getActor(actor).name} is already a member of ${p.name}.`);
+        }
+        joinIfPerson(p.slug, actor, by);
+        return { project: p.slug, actor };
+      });
+    },
+
+    /**
+     * Take a person off a project. `by` must be an admin (`not-admin`); the
+     * project's owner and operator are refused (`required-member`), and so is
+     * someone who is not a member (`not-member`). The check and the delete
+     * are one transaction. Read back. Answers `{ project, actor }`.
+     */
+    removeMember({ project, actor, by }) {
+      return transaction(() => {
+        const p = checkMemberChange(project, actor, by, 'removing');
+        const name = this.getActor(actor).name;
+        const roles = [p.owner != null && num(p.owner) === actor ? 'owner' : null, p.operator != null && num(p.operator) === actor ? 'operator' : null].filter(Boolean);
+        if (roles.length) {
+          throw new StoreError('required-member', `${name} is ${p.name}'s ${roles.join(' and ')}, who is always a member${roles.includes('operator') ? '' : '; name another owner first'}.`);
+        }
+        if (!isMember(p.slug, actor)) throw new StoreError('not-member', `${name} is not a member of ${p.name}.`);
+        db.prepare('DELETE FROM project_members WHERE project = ? AND actor = ?').run(p.slug, actor);
+        if (isMember(p.slug, actor)) throw new StoreError('write-failed', `${name} is still a member of ${p.name} when read back.`);
+        return { project: p.slug, actor };
       });
     },
 

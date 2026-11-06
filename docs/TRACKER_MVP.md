@@ -180,6 +180,20 @@ account_links  token hash, purpose (setup|invite|reset), email, actor,
   checked in the same transaction as the write. **The permissions are
   recorded, not yet enforced**: nobody is refused anything because of a role;
   a later ticket makes them count.
+- **Project members** (SP-144): `project_members` holds one row per project
+  and person, with who added them (`added_by`, empty when the tracker did it
+  itself) and when, the shape of StarCaster's `app_project_memberships`
+  (its `docs/SQL/projects_multitenancy_setup.sql`), without its per-project
+  role. When the table is first made, every person becomes a member of every
+  project, so nobody loses anything. A project's owner and operator, when a
+  person, are always members: made so on every start-up, when the project is
+  made (with whoever made it) and when a new owner is named, and
+  `removeMember` refuses to take them off (`required-member`). A machine is
+  never a member. Only an admin adds or removes a member (`addMember`,
+  `removeMember`), checked in the same transaction as the write. Someone
+  invited after this is a member of nothing until an admin adds them.
+  **Membership is recorded, not yet enforced**: everyone still sees every
+  project and ticket; a later ticket (SP-145) makes it strict.
 
 ### The API
 
@@ -209,11 +223,13 @@ answers are JSON (structured text programs read).
 | `POST /projects` | for Dane's page: add a project (`{ name, slug, prefix, url?, logo?, owner?, repo? }`), answered with its details read back; **a person's token only**: a machine's gets 403 and nothing is written. A duplicate slug or prefix, a slug that is not small letters, digits and hyphens (or is `new`), an owner who is not a person, an address that is not http(s), or a repo that is not `owner/name` (or its github.com address) gets 400 |
 | `PATCH /projects/:slug` | for Dane's page: change a project's name, web address, logo, owner or GitHub repository (`{ name?, url?, logo?, owner?, repo? }`), answered with its details read back; **a person's token only**: a machine's gets 403 and nothing is written. The slug and ticket prefix never change (every ticket's id and its project link are built from them): naming either gets 400 `not-changeable`; an owner who is not a person, an address that is not http(s) or a repo that is not `owner/name` gets 400; an unknown slug 404 |
 | `DELETE /projects/:slug` | for Dane's page: delete a project that has no tickets; **a person's token only**: a machine's gets 403. One with tickets gets 409 `has-tickets` (`"SP has 48 tickets; a project with tickets cannot be deleted"`) and nothing is removed; the count and the delete are one transaction; the server log names the project and the actor |
-| `GET /people` | for Dane's page: the tracker's people (humans only), for the owner picker and the Users page. A person's token gets `{ people: [{ id, name, email, role }], invites: [{ id, email, invitedBy: { id, name }, createdAt, expiresAt }], roles: [{ name, description, permissions }], permissions: [{ name, description }], canEditRoles }`, the invites being the open ones (unused, unexpired) and `canEditRoles` true for an admin; a machine's gets ids and names only. Never a token or a hash |
+| `GET /people` | for Dane's page: the tracker's people (humans only), for the owner picker and the Users page. A person's token gets `{ people: [{ id, name, email, role, projects: [{ slug, name }] }], invites: [{ id, email, invitedBy: { id, name }, createdAt, expiresAt }], roles: [{ name, description, permissions }], permissions: [{ name, description }], canEditRoles }`, the invites being the open ones (unused, unexpired) and `canEditRoles` true for an admin; a machine's gets ids and names only. Never a token or a hash |
 | `PUT /people/:id/role` | for the Users page's role picker: `{ role }`, one of the five. **An admin's token only**: a machine's gets 403 `people-only`, a person who is not an admin 403 `not-admin`. A change that would leave no admin is 409 `last-admin`; an unknown role 400 `bad-role`; an id that is not a person 404 `unknown-person`. Answers `{ id, role }` read back; a refusal changes nothing |
 | `POST /invites` | for the Users page: invite someone (`{ email }`); **a person's token only**: a machine's gets 403 `people-only`. An email a person holds is 409 `duplicate-email`, one with an open invite 409 `duplicate-invite`, no mail sender 503 `no-mail`; otherwise a 7-day `invite` link is made and emailed through Resend, naming who invited them. A send Resend refuses withdraws the link and answers 502 `not-sent`, so no open invite is left. Answered 201 with `{ sent }` and the Users page's lists read back; the log names the actor, never the email or the link |
 | `DELETE /invites/:id` | for the Users page: cancel an open invite, so its link is refused as unknown; **a person's token only**. An id that is not an open invite is 404 `unknown-invite`; a used invite stays as the record |
-| `GET /projects/:slug` | for Dane's page: one project's details, its operator and owner by name, its web address, logo and GitHub repository, its open count and a count per status; 404 for an unknown slug |
+| `GET /projects/:slug` | for Dane's page: one project's details, its operator and owner by name, its web address, logo and GitHub repository, its open count and a count per status, its `members: [{ id, name, addedAt, addedBy }]` (`addedBy` null when the tracker added them), and `canEditMembers`, true for an admin signed in as a person; 404 for an unknown slug |
+| `POST /projects/:slug/members` | for a project's Add Member picker: `{ person }`, a person's actor id. **An admin's token only**: a machine's gets 403 `people-only`, a person who is not an admin 403 `not-admin`. Someone already a member is 409 `already-member`; an id that is not a person 404 `unknown-person`. Answers 201 `{ project, members }`, read back |
+| `DELETE /projects/:slug/members/:id` | for a member's Remove button: the same 403s; the project's owner or operator is 409 `required-member`, with the reason; someone not a member 404 `not-member`. Answers `{ project, members }`, read back; a refusal changes nothing |
 | `GET /projects/:slug/board` | for Dane's page: one project's tickets in the eight statuses, each in `queue` order |
 | `POST /account/link` | **no token**: what an emailed link is for (`{ link }` → `{ purpose, email, expiresAt }`), for the set-password page; a used, expired or unknown link answers 400 `used-link`, `expired-link` or `unknown-link` |
 | `POST /account/set-password` | **no token**: use an emailed link (`{ link, password, name? }`, a name only for an invite) → `{ purpose, name, email }`; refused with the store's code (`used-link`, `expired-link`, `unknown-link`, `weak-password`, `missing`) and nothing written. The link and the password travel only in the body, never in an address, so neither reaches the log |

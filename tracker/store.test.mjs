@@ -823,6 +823,92 @@ test('an admin changes a person\'s role, read back; nobody else can, a machine h
   }
 });
 
+test('a database from before project membership makes every person a member of every project on open; machines never; reopening adds nobody back', () => {
+  const { dir, path, store, human, machine } = fixture();
+  try {
+    const other = store.createActor({ kind: 'human', name: 'Other' });
+    store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE', operator: human.id });
+    store.close();
+    // Take the database back to before membership existed.
+    const raw = new DatabaseSync(path);
+    raw.exec('DROP INDEX project_members_by_actor; DROP TABLE project_members;');
+    raw.close();
+    let again = openStore(path);
+    for (const slug of ['alpha', 'beta']) {
+      assert.deepEqual(again.listMembers(slug).map((m) => m.name), ['Operator', 'Other'], slug);
+      assert.ok(again.listMembers(slug).every((m) => m.addedBy === null && m.addedAt), 'filled by the tracker itself');
+    }
+    assert.deepEqual(again.projectsOf(other.id).map((p) => p.slug), ['alpha', 'beta']);
+    assert.deepEqual(again.projectsOf(machine.id), []);
+    // Once the table exists, a removed member stays removed across a reopen.
+    again.removeMember({ project: 'beta', actor: other.id, by: human.id });
+    again.close();
+    again = openStore(path);
+    assert.deepEqual(again.listMembers('beta').map((m) => m.name), ['Operator']);
+    assert.deepEqual(again.projectsOf(other.id).map((p) => p.slug), ['alpha']);
+    again.close();
+  } finally {
+    try { store.close(); } catch { /* already closed by the test */ }
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a new project makes its creator, owner and operator members, never a machine; a new owner joins too', () => {
+  const { store, human, machine, cleanup } = fixture();
+  try {
+    const maker = store.createActor({ kind: 'human', name: 'Maker' });
+    const owner = store.createActor({ kind: 'human', name: 'Owner' });
+    const bystander = store.createActor({ kind: 'human', name: 'Bystander' });
+    store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE', operator: human.id, owner: owner.id, createdBy: maker.id });
+    const members = store.listMembers('beta');
+    assert.deepEqual(members.map((m) => m.name), ['Maker', 'Operator', 'Owner']);
+    assert.ok(members.every((m) => m.addedBy?.id === maker.id), 'added by the creator');
+    assert.deepEqual(store.projectsOf(bystander.id), []);
+    // A machine operator is never a member.
+    store.createProject({ slug: 'gamma', name: 'Gamma', prefix: 'GA', operator: machine.id });
+    assert.deepEqual(store.listMembers('gamma'), []);
+    // Naming a new owner makes them a member.
+    store.updateProject('gamma', { owner: bystander.id });
+    assert.deepEqual(store.listMembers('gamma').map((m) => m.name), ['Bystander']);
+    assert.equal(store.listMembers('nope'), null);
+    // A project with members is still deleted cleanly when it holds no tickets.
+    assert.deepEqual(store.deleteProject('beta'), { slug: 'beta', prefix: 'BE' });
+    assert.deepEqual(store.projectsOf(maker.id), []);
+  } finally { cleanup(); }
+});
+
+test('an admin adds and removes members, read back; the owner and operator stay; a non-admin and a machine are refused', () => {
+  const { store, human, machine, cleanup } = fixture();
+  try {
+    const owner = store.createActor({ kind: 'human', name: 'Owner' });
+    const second = store.createActor({ kind: 'human', name: 'Second' });
+    store.updateProject('alpha', { owner: owner.id });
+    const names = () => store.listMembers('alpha').map((m) => m.name);
+    const refused = (fn, code) => assert.throws(fn, (err) => err instanceof StoreError && err.code === code && err.message.length > 0, code);
+    assert.deepEqual(names(), ['Operator', 'Owner']);
+    assert.deepEqual(store.addMember({ project: 'alpha', actor: second.id, by: human.id }), { project: 'alpha', actor: second.id });
+    assert.deepEqual(names(), ['Operator', 'Owner', 'Second']);
+    assert.equal(store.listMembers('alpha').find((m) => m.id === second.id).addedBy.name, 'Operator');
+    refused(() => store.addMember({ project: 'alpha', actor: second.id, by: human.id }), 'already-member');
+    // Only an admin changes members.
+    refused(() => store.removeMember({ project: 'alpha', actor: second.id, by: second.id }), 'not-admin');
+    refused(() => store.addMember({ project: 'alpha', actor: second.id, by: machine.id }), 'not-admin');
+    // A machine is never a member.
+    refused(() => store.addMember({ project: 'alpha', actor: machine.id, by: human.id }), 'machine-account');
+    refused(() => store.addMember({ project: 'nope', actor: second.id, by: human.id }), 'unknown-project');
+    refused(() => store.addMember({ project: 'alpha', actor: 9999, by: human.id }), 'unknown-actor');
+    // The owner and operator cannot be removed, with a plain reason.
+    assert.throws(() => store.removeMember({ project: 'alpha', actor: owner.id, by: human.id }),
+      (err) => err.code === 'required-member' && /Alpha's owner/.test(err.message));
+    assert.throws(() => store.removeMember({ project: 'alpha', actor: human.id, by: human.id }),
+      (err) => err.code === 'required-member' && /Alpha's operator/.test(err.message));
+    assert.deepEqual(names(), ['Operator', 'Owner', 'Second']);
+    assert.deepEqual(store.removeMember({ project: 'alpha', actor: second.id, by: human.id }), { project: 'alpha', actor: second.id });
+    assert.deepEqual(names(), ['Operator', 'Owner']);
+    refused(() => store.removeMember({ project: 'alpha', actor: second.id, by: human.id }), 'not-member');
+  } finally { cleanup(); }
+});
+
 test('roles are recorded, not enforced: a viewer still files, changes and comments on tickets as before', () => {
   const { store, human, cleanup } = fixture();
   try {

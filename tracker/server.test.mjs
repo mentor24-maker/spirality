@@ -636,7 +636,11 @@ test('POST /projects lets a person add a project, read back with its owner by na
     assert.equal(made.body.url, 'https://beta.example');
     assert.equal(made.body.logo, 'https://beta.example/l.png');
     assert.equal(made.body.operator, null, 'the operator is not set by the form');
-    assert.deepEqual((await f.call('GET', '/projects/beta', { token: f.humanToken })).body, made.body);
+    const { canEditMembers, ...read } = (await f.call('GET', '/projects/beta', { token: f.humanToken })).body;
+    assert.deepEqual(read, made.body);
+    assert.equal(canEditMembers, true);
+    // Its creator (who is also its owner here) is its first member.
+    assert.deepEqual(made.body.members.map((m) => [m.id, m.addedBy?.id]), [[f.human.id, f.human.id]]);
     assert.ok(f.lines.some((l) => /POST \/projects 201 actor=1/.test(l)));
   } finally { await f.cleanup(); }
 });
@@ -676,7 +680,7 @@ test('GET /people lists the tracker\'s people: humans only, with emails and open
     const link = f.store.makeLink({ purpose: 'invite', email: 'new@example.com', madeBy: f.human.id });
     const r = await f.call('GET', '/people', { token: f.humanToken });
     assert.equal(r.status, 200);
-    assert.deepEqual(r.body.people, [{ id: f.human.id, name: 'Operator', email: 'op@example.com', role: 'admin' }]);
+    assert.deepEqual(r.body.people, [{ id: f.human.id, name: 'Operator', email: 'op@example.com', role: 'admin', projects: [{ slug: 'alpha', name: 'Alpha' }] }]);
     assert.equal(r.body.canEditRoles, true);
     assert.deepEqual(r.body.roles.map((x) => x.name), ['admin', 'editor', 'contributor', 'reviewer', 'viewer']);
     assert.deepEqual(r.body.permissions.map((x) => x.name), ['user.read', 'user.edit', 'ticket.read', 'ticket.create', 'ticket.edit', 'ticket.delete']);
@@ -731,6 +735,61 @@ test('PUT /people/<id>/role: an admin changes a person\'s role, read back on GET
     f.store.setRole({ actor: other.id, role: 'viewer', by: f.human.id });
     const filed = await f.call('POST', '/projects/alpha/tickets', { token: otherToken, body: { name: 'A viewer files', status: 'Requested' } });
     assert.equal(filed.status, 201, filed.text);
+  } finally { await f.cleanup(); }
+});
+
+test('project members: an admin adds and removes one, answered with the list read back; the owner and operator stay (409); a non-admin and a loop get 403; nothing else is hidden', async () => {
+  const f = await fixture();
+  try {
+    const other = f.store.createActor({ kind: 'human', name: 'Other' });
+    const otherToken = f.store.issueToken(other.id);
+    const membersOf = async (token = f.humanToken) => (await f.call('GET', '/projects/alpha', { token })).body.members.map((m) => m.name);
+    assert.deepEqual(await membersOf(), ['Operator']);
+
+    const added = await f.call('POST', '/projects/alpha/members', { token: f.humanToken, body: { person: other.id } });
+    assert.equal(added.status, 201, added.text);
+    assert.deepEqual(added.body.members.map((m) => m.name), ['Operator', 'Other']);
+    assert.deepEqual(await membersOf(), ['Operator', 'Other']);
+    assert.deepEqual((await f.call('GET', '/people', { token: f.humanToken })).body.people.find((p) => p.id === other.id).projects, [{ slug: 'alpha', name: 'Alpha' }]);
+    assert.equal((await f.call('POST', '/projects/alpha/members', { token: f.humanToken, body: { person: other.id } })).status, 409);
+
+    // A non-admin is refused, and is told they may not.
+    assert.equal((await f.call('GET', '/projects/alpha', { token: otherToken })).body.canEditMembers, false);
+    const notAdmin = await f.call('DELETE', `/projects/alpha/members/${other.id}`, { token: otherToken });
+    assert.equal(notAdmin.status, 403);
+    assert.equal(notAdmin.body.error, 'not-admin');
+    // A loop's token is refused before anything is read.
+    for (const [method, path, body] of [['POST', '/projects/alpha/members', { person: other.id }], ['DELETE', `/projects/alpha/members/${other.id}`]]) {
+      const loop = await f.call(method, path, { body });
+      assert.equal(loop.status, 403, `${method} ${path}`);
+      assert.equal(loop.body.error, 'people-only');
+    }
+    assert.equal((await f.call('GET', '/projects/alpha')).body.canEditMembers, false);
+    // The operator cannot be removed, with a plain reason.
+    const operator = await f.call('DELETE', `/projects/alpha/members/${f.human.id}`, { token: f.humanToken });
+    assert.equal(operator.status, 409);
+    assert.equal(operator.body.error, 'required-member');
+    assert.match(operator.body.message, /operator/);
+    // A machine, an unknown person, an unknown project, a stray field: refused.
+    assert.equal((await f.call('POST', '/projects/alpha/members', { token: f.humanToken, body: { person: f.machine.id } })).status, 404);
+    assert.equal((await f.call('POST', '/projects/alpha/members', { token: f.humanToken, body: { person: 9999 } })).status, 404);
+    assert.equal((await f.call('POST', '/projects/alpha/members', { token: f.humanToken, body: {} })).status, 400);
+    assert.equal((await f.call('POST', '/projects/alpha/members', { token: f.humanToken, body: { person: other.id, extra: 1 } })).body.error, 'bad-field');
+    assert.equal((await f.call('POST', '/projects/nope/members', { token: f.humanToken, body: { person: other.id } })).status, 404);
+    assert.equal((await f.call('DELETE', '/projects/alpha/members/x', { token: f.humanToken })).status, 404);
+    assert.equal((await f.call('DELETE', `/projects/alpha/members/${other.id}`, { token: null })).status, 401);
+    assert.deepEqual(await membersOf(), ['Operator', 'Other'], 'no refusal changed anything');
+
+    const removed = await f.call('DELETE', `/projects/alpha/members/${other.id}`, { token: f.humanToken });
+    assert.equal(removed.status, 200, removed.text);
+    assert.deepEqual(removed.body.members.map((m) => m.name), ['Operator']);
+    assert.equal((await f.call('DELETE', `/projects/alpha/members/${other.id}`, { token: f.humanToken })).status, 404);
+    // Membership is recorded, not enforced: someone on no project still sees it and files a ticket in it.
+    assert.equal((await f.call('GET', '/projects', { token: otherToken })).body.projects.length, 1);
+    assert.equal((await f.call('GET', '/projects/alpha/board', { token: otherToken })).status, 200);
+    const filed = await f.call('POST', '/projects/alpha/tickets', { token: otherToken, body: { name: 'Not a member files', status: 'Requested' } });
+    assert.equal(filed.status, 201, filed.text);
+    assert.ok(f.lines.some((l) => /removed member \d+ from alpha actor=1/.test(l)));
   } finally { await f.cleanup(); }
 });
 
