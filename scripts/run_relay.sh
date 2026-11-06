@@ -34,6 +34,9 @@ cd "$REPO" || exit 1
 
 SLUG="$(node "$REPO/scripts/project_config.mjs" projectSlug)" || { echo "[relay] could not read projectSlug from the project config" >&2; exit 1; }
 LOG_DIR="$(node "$REPO/scripts/project_config.mjs" logDir)" || { echo "[relay] could not read logDir from the project config" >&2; exit 1; }
+PREFIX="$(node "$REPO/scripts/project_config.mjs" launchdPrefix)" || { echo "[relay] could not read launchdPrefix from the project config" >&2; exit 1; }
+# Empty when the project runs no tracker: the restart step then does nothing.
+TRACKER_PORT="$(node "$REPO/scripts/project_config.mjs" trackerPort)" || { echo "[relay] could not read trackerPort from the project config" >&2; exit 1; }
 mkdir -p "$LOG_DIR"
 LOCK="$LOG_DIR/$SLUG-relay.lock"
 SYNC_LOCK="$LOG_DIR/$SLUG-sync.lock"
@@ -77,6 +80,12 @@ take_sync_lock() {
 # first, under the same lock, so the pull below can run.
 # shellcheck source=lib/back_to_main.sh
 source "$REPO/scripts/lib/back_to_main.sh"
+# A pull that changes a file the tracker server loads restarts it, so it runs the new code (SP-150).
+# shellcheck source=lib/tracker_restart.sh
+source "$REPO/scripts/lib/tracker_restart.sh"
+# Where main was before this pass synced: noted before the back-to-main step,
+# which can fast-forward main itself (SP-150).
+BEFORE="$(git rev-parse HEAD 2>/dev/null)"
 if [ "$(git rev-parse --abbrev-ref HEAD 2>/dev/null)" != "main" ] && [ -z "$(git status --porcelain)" ]; then
   if take_sync_lock; then
     MOVED="$(back_to_main_if_merged)"
@@ -87,6 +96,14 @@ fi
 if [ "$(git rev-parse --abbrev-ref HEAD 2>/dev/null)" = "main" ] && [ -z "$(git status --porcelain)" ]; then
   if take_sync_lock; then
     git pull -q --ff-only origin main 2>&1 || echo "[relay] pull of main refused (see above) — running on the checkout as it is"
+    # The loop lanes run npm ci on every pull; the relay only when the pull
+    # changed the package files, so a restart below lands on the new
+    # dependencies, not the old node_modules (SP-150).
+    if [ -n "$BEFORE" ] && ! git diff --quiet "$BEFORE" HEAD -- package.json package-lock.json 2>/dev/null; then
+      npm ci --silent 2>&1 || echo "[relay] npm ci failed — the tracker restart below runs with the node_modules already present"
+    fi
+    RESTARTED="$(restart_tracker_if_changed "$BEFORE" "$(git rev-parse HEAD 2>/dev/null)" "$PREFIX" "$TRACKER_PORT")"
+    [ -n "$RESTARTED" ] && echo "[relay] $RESTARTED"
     rm -rf "$SYNC_LOCK"
   else
     echo "[relay] another lane held the sync lock for two minutes — not pulling this pass"
