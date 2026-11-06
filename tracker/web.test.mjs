@@ -501,6 +501,8 @@ test('the Add Task box on the Tasks page files into the project shown, in Reques
   assert.match(wire, /localStorage\.removeItem\(DRAFT_KEY\);[\s\S]*await drawAgain\(\(\) => drawProject\(into, view, \{ filed: ticket\.id, unchecked \}\)\);/);
   const draw = app.slice(app.indexOf('async function drawProject'), app.indexOf('async function copyText'));
   assert.match(draw, /<details class="add-task">\s*<summary>Add Task<\/summary>\s*<form class="request">/, 'drawn closed, on the board and the list alike');
+  assert.match(draw, /<button type="submit">Submit Task<\/button>/, 'the button says Submit Task, in his words');
+  assert.doesNotMatch(app, /File request/i, 'the old button words are gone');
   assert.match(draw, /Filed <a href="\/t\/\$\{encodeURIComponent\(filed\)\}">\$\{escapeHtml\(filed\)\}<\/a>/);
   assert.match(draw, /wireAddTask\(board\.project, view, adding\);/);
   assert.doesNotMatch(app, /drawNew/, 'the separate New request page is gone');

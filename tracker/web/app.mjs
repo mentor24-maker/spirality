@@ -870,7 +870,7 @@ async function drawProject(slug, view, { adding = false, filed = null, unchecked
         <input id="title" type="text" required>
         <label for="description">Description</label>
         <textarea id="description"></textarea>
-        <div class="row"><button type="submit">File request</button><span class="note"></span></div>
+        <div class="row"><button type="submit">Submit Task</button><span class="note"></span></div>
       </form>
     </details>
     <dialog class="project-check" aria-labelledby="project-check-question">
