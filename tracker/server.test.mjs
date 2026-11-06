@@ -1481,3 +1481,108 @@ test('GET /setup/:slug and GET /setup read the state file: none yet, stopped at 
     assert.equal((await f.call('PUT', '/setup/press-play', { token: f.humanToken, at: f.at, body: GOOD_ANSWERS })).status, 409, 'cannot tell how far it is: nothing written');
   } finally { await f.cleanup(); }
 });
+
+// ── Attachments (SP-140) ─────────────────────────────────────────────────────
+
+/** Upload `bytes` to a ticket as the page does; answers `{ status, body }`. */
+async function upload(at, ticket, bytes, { name = 'shot.png', type = 'image/png', headers = {} } = {}) {
+  const res = await fetch(`${at}/tickets/${ticket}/attachments`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/octet-stream', 'x-file-name': encodeURIComponent(name), 'x-file-type': type, ...headers },
+    body: bytes,
+  });
+  const text = await res.text();
+  return { status: res.status, body: JSON.parse(text) };
+}
+
+test('a file posted to a ticket comes back byte for byte, listed with its name and size, and always as a download', async () => {
+  const f = await fixture();
+  try {
+    const t = f.store.fileTicket({ project: 'alpha', actor: f.human.id, name: 'With a file', status: 'requested' });
+    const bytes = Buffer.from(Array.from({ length: 70_000 }, (_, i) => (i * 31) % 256));
+    const base = await f.serve();
+    const made = await upload(base, t.id, bytes, { name: 'Screen shot é.png', headers: { authorization: `Bearer ${f.humanToken}` } });
+    assert.equal(made.status, 201);
+    assert.equal(made.body.name, 'Screen shot é.png');
+    assert.equal(made.body.size, bytes.length);
+    assert.equal(made.body.type, 'image/png');
+    assert.equal(made.body.addedBy, f.human.id);
+    assert.equal('bytes' in made.body, false, 'the answer never carries the file');
+
+    const list = await f.call('GET', `/tickets/${t.id}/attachments`);
+    assert.equal(list.status, 200);
+    assert.deepEqual(list.body.attachments.map((a) => [a.name, a.size]), [['Screen shot é.png', bytes.length]]);
+    const thread = await f.call('GET', `/tickets/${t.id}/thread`);
+    assert.deepEqual(thread.body.attachments, list.body.attachments, 'the ticket page reads the same list');
+
+    const res = await fetch(`${base}/tickets/${t.id}/attachments/${made.body.id}`, { headers: { authorization: `Bearer ${f.machineToken}` } });
+    assert.equal(res.status, 200);
+    assert.ok(Buffer.from(await res.arrayBuffer()).equals(bytes), 'byte for byte');
+    assert.equal(res.headers.get('content-disposition'), "attachment; filename=\"Screen shot _.png\"; filename*=UTF-8''Screen%20shot%20%C3%A9.png");
+    assert.equal(res.headers.get('x-content-type-options'), 'nosniff');
+    assert.match(res.headers.get('content-security-policy'), /sandbox/);
+    assert.equal(res.headers.get('content-type'), 'image/png');
+
+    assert.equal((await f.call('GET', `/tickets/${t.id}/attachments/999`)).status, 404);
+    assert.equal((await f.call('GET', `/tickets/${t.id}/attachments/x`)).status, 404);
+    assert.equal((await f.call('GET', '/tickets/AL-99/attachments')).status, 404);
+  } finally { await f.cleanup(); }
+});
+
+test('an 11 MB file is refused with 413 and a plain sentence, and nothing is stored', async () => {
+  const f = await fixture();
+  try {
+    const t = f.store.fileTicket({ project: 'alpha', actor: f.human.id, name: 'Too big', status: 'requested' });
+    const base = await f.serve();
+    const auth = { authorization: `Bearer ${f.humanToken}` };
+    const r = await upload(base, t.id, Buffer.alloc(11 * 1024 * 1024, 7), { headers: auth });
+    assert.equal(r.status, 413);
+    assert.equal(r.body.error, 'too-large');
+    assert.equal(r.body.message, 'That file is over 10 MB. Attach a smaller one; nothing was saved.');
+    assert.deepEqual(f.store.listAttachments(t.id), []);
+    // A file of exactly 10 MB still goes in.
+    assert.equal((await upload(base, t.id, Buffer.alloc(10 * 1024 * 1024, 1), { headers: auth })).status, 201);
+  } finally { await f.cleanup(); }
+});
+
+test('signed out, every attachment route answers 401 and nothing is stored', async () => {
+  const f = await fixture();
+  try {
+    const t = f.store.fileTicket({ project: 'alpha', actor: f.human.id, name: 'Locked', status: 'requested' });
+    const a = f.store.addAttachment({ ticket: t.id, name: 'a.txt', type: 'text/plain', bytes: Buffer.from('hello'), actor: f.human.id });
+    const base = await f.serve();
+    for (const authorization of [undefined, 'Bearer wrong']) {
+      const headers = authorization ? { authorization } : {};
+      assert.equal((await upload(base, t.id, Buffer.from('x'), { headers })).status, 401);
+      assert.equal((await fetch(`${base}/tickets/${t.id}/attachments`, { headers })).status, 401);
+      const dl = await fetch(`${base}/tickets/${t.id}/attachments/${a.id}`, { headers });
+      assert.equal(dl.status, 401);
+      assert.doesNotMatch(await dl.text(), /hello/);
+    }
+    assert.equal(f.store.listAttachments(t.id).length, 1);
+  } finally { await f.cleanup(); }
+});
+
+test('the page uploads with its session cookie as the file itself; a cookie upload that is not octet-stream, or names no file, is refused', async () => {
+  const f = await fixture();
+  try {
+    const s = await signInServer(f);
+    try {
+      const cookie = cookieOf((await s.signIn({ email: s.email, password: s.password })).cookie);
+      const t = f.store.fileTicket({ project: 'alpha', actor: f.human.id, name: 'From the page', status: 'requested' });
+      const ok = await upload(s.base, t.id, Buffer.from('notes'), { name: 'notes.txt', type: 'text/plain', headers: { cookie } });
+      assert.equal(ok.status, 201);
+      assert.equal(ok.body.addedBy, f.human.id);
+      // A form on another site can send text/plain, multipart or urlencoded, never octet-stream.
+      for (const type of ['text/plain', 'multipart/form-data; boundary=x', 'application/x-www-form-urlencoded']) {
+        const r = await s.ask('POST', `/tickets/${t.id}/attachments`, { headers: { cookie, 'content-type': type, 'x-file-name': 'x.txt' }, body: 'x' });
+        assert.equal(r.status, 415);
+      }
+      assert.equal((await upload(s.base, t.id, Buffer.from('x'), { name: '', headers: { cookie } })).status, 400);
+      const empty = await upload(s.base, t.id, Buffer.alloc(0), { headers: { cookie } });
+      assert.equal(empty.status, 400);
+      assert.equal(empty.body.error, 'empty-file');
+      assert.deepEqual(f.store.listAttachments(t.id).map((a) => a.name), ['notes.txt']);
+    } finally { await s.close(); }
+  } finally { await f.cleanup(); }
+});
