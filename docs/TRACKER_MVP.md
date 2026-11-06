@@ -155,7 +155,10 @@ account_links  token hash, purpose (setup|invite|reset), email, actor,
   nightly backup already holds them, with no second folder to copy. Each is
   1 byte to 10 MB. Like a comment it is never edited; it goes only with its
   ticket, when an unstarted ticket is deleted. A database made before this
-  gains the table, empty, on start-up.
+  gains the table, empty, on start-up. The loops read them through the door
+  (SP-142): `npm run clickup -- get` prints one `attachments:` line per file,
+  and `npm run clickup -- attachments --task <id> --to <folder>` saves each
+  one, checked against its size.
 - **Roles and permissions** (SP-143): every person has one of five roles,
   **admin**, **editor**, **contributor**, **reviewer** and **viewer**, each
   with a plain-words description, and each role a set of permissions. The

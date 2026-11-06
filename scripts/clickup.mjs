@@ -27,11 +27,11 @@
  * stderr, so piping stdout is always safe.
  */
 
-import { readFileSync, writeFileSync, existsSync, statSync, unlinkSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, statSync, unlinkSync, mkdirSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
-import { join as joinPath } from 'node:path';
+import { join as joinPath, basename, extname, resolve as resolvePath } from 'node:path';
 import {
   DISPLAY, STAGE_ORDER, CLAIMABLE_BY_BUILD, OPERATOR_STATUSES, BUILDING, NEEDS_YOUR_INPUT, QUEUED, PRIORITY_VALUE,
   isClaimableByBuild, isOperatorStatus, isReadyToLaunch, claimOrder, compareWithinStatus, statusOf, TERMINAL_STATUSES,
@@ -194,7 +194,9 @@ npm run clickup -- <command> [flags]      (Loop Queue: list ${LOOP_QUEUE_LIST}, 
   pass-reconcile                                  FIRST in every build pass: the ticket the last runner pass claimed and left
                                                   in Building goes back (Rework if it has a PR, else Queued), with a note.
                                                   Exit 0 nothing to do / 3 handed one back / 1 a write failed / 2 could not tell
-  get --task <id>                                 header + body
+  get --task <id>                                 header + body, with one attachments: line per file on the ticket
+  attachments --task <id> --to <folder>           save every file on the ticket into the folder, each checked against its
+                                                  size; exit 1 if any did not save (or the tracker keeps no files)
   task-name --task <id>                           the name and nothing else (for a PR title)
   comments --task <id>                            the comments, oldest first
   waiting [--task <id>]                           read-only: is this ACTUALLY waiting on Dane? exit 0 no / 3 yes / 1 could not tell
@@ -292,6 +294,38 @@ async function readCommentsOrProblem(task) {
     return { comments: paged.comments };
   } catch (err) {
     return { problem: String(err?.message || err) };
+  }
+}
+
+/**
+ * The ticket's attachments: { files } or { problem, unsupported }, never an
+ * exit. `unsupported` means this tracker keeps no files at all (ClickUp).
+ */
+async function readAttachments(task) {
+  const out = await tracker.listAttachments(task);
+  if (out.unsupported) return { unsupported: true, problem: out.json?.err || 'this tracker keeps no attachments' };
+  if (!out.res.ok) return { problem: `HTTP ${out.res.status}: ${out.json?.err || String(out.text || '').slice(0, 300)}`, out };
+  return { files: out.json.attachments };
+}
+
+/** One attachment as `get` lists it. */
+function attachmentLine(a) {
+  return `${a.name} (${a.size} bytes, attachment ${a.id})`;
+}
+
+/**
+ * A name to save `name` under in `folder` that nothing else there has, nor
+ * any name in `taken`: the name itself, then `stem-2.ext`, `stem-3.ext`, ...
+ * Only the file name's last part is used, so a name can never leave the folder.
+ */
+function freeFileName(folder, name, taken) {
+  let base = basename(String(name).replace(/\\/g, '/'));
+  if (!base || base === '.' || base === '..') base = 'attachment';
+  const ext = extname(base);
+  const stem = ext ? base.slice(0, -ext.length) : base;
+  for (let n = 1; ; n += 1) {
+    const candidate = n === 1 ? base : `${stem}-${n}${ext}`;
+    if (!taken.has(candidate) && !existsSync(joinPath(folder, candidate))) return candidate;
   }
 }
 
@@ -744,10 +778,79 @@ if (cmd === 'whoami') {
   console.log(`rounds:   ${sendBackRounds(comments)} send-back(s) so far`);
   const moved = pr ? latestMainMoved(comments, pr.number) : null;
   console.log(`main:     ${moved ? `moved — newest note: PR #${moved.merged} merged, this branch ${moved.kind} (comment ${moved.commentId})` : '(no MAIN MOVED note)'}`);
+  // Dane's files shape the spec and the build, so a list that could not be
+  // read says so on its own line, never "(none)". It does not stop `get`:
+  // every pass reads the ticket through it, and a tracker still running from
+  // before attachments existed answers 404 for the list.
+  const files = await readAttachments(t.id ?? task);
+  if (files.unsupported) console.log('attachments: (not kept on ClickUp)');
+  else if (files.problem) {
+    console.log(`attachments: COULD NOT BE READ (${files.problem}); this ticket's files are unknown`);
+    console.error(`\nread the attachments FAILED — ${files.problem.replace(/\.$/, '')}. The ticket may have files this pass cannot see; say so before speccing or building from it.`);
+  } else if (!files.files.length) console.log('attachments: (none)');
+  else for (const a of files.files) console.log(`attachments: ${attachmentLine(a)}`);
   console.log(`url:      ${t.url}`);
   console.log('---');
   console.log(t.markdown_description || t.description || '(no body)');
   reportLimits();
+
+} else if (cmd === 'attachments') {
+  const task = arg('task');
+  const to = arg('to');
+  if (!task || !to) usage();
+  const listed = await readAttachments(task);
+  if (listed.unsupported) {
+    console.error(listed.problem);
+    process.exit(1);
+  }
+  if (listed.problem) die('read the attachments', listed.out);
+  if (!listed.files.length) {
+    console.log(`no attachments on ${task}; nothing to save`);
+    reportLimits();
+    process.exit(0);
+  }
+  const folder = resolvePath(to);
+  try {
+    mkdirSync(folder, { recursive: true });
+  } catch (err) {
+    console.error(`could not make the folder ${folder} (${err.message}); nothing was saved.`);
+    process.exit(1);
+  }
+  const taken = new Set();
+  const failed = [];
+  for (const a of listed.files) {
+    const got = await tracker.downloadAttachment(task, a.id);
+    if (!got.res.ok || !got.bytes) {
+      failed.push(a.name);
+      console.error(`NOT saved ${a.name} (attachment ${a.id}): HTTP ${got.res.status} ${got.json?.err || String(got.text || '').slice(0, 300)}`);
+      continue;
+    }
+    if (got.bytes.length !== Number(a.size)) {
+      failed.push(a.name);
+      console.error(`NOT saved ${a.name} (attachment ${a.id}): ${got.bytes.length} bytes arrived, the tracker lists ${a.size}`);
+      continue;
+    }
+    const name = freeFileName(folder, a.name, taken);
+    const path = joinPath(folder, name);
+    try {
+      // `wx`: never over a file already there, even one made since the name was chosen.
+      writeFileSync(path, got.bytes, { flag: 'wx' });
+      taken.add(name);
+      const onDisk = statSync(path).size;
+      if (onDisk !== Number(a.size)) throw new Error(`${onDisk} bytes on disk, the tracker lists ${a.size}`);
+    } catch (err) {
+      failed.push(a.name);
+      console.error(`NOT saved ${a.name} (attachment ${a.id}) to ${path}: ${err.message}`);
+      continue;
+    }
+    console.log(`saved ${path} (${a.size} bytes)`);
+  }
+  reportLimits();
+  if (failed.length) {
+    console.error(`\n${failed.length} of ${listed.files.length} attachment(s) on ${task} did NOT save: ${failed.join(', ')}`);
+    process.exit(1);
+  }
+  console.error(`${listed.files.length} attachment(s) on ${task} saved to ${folder}`);
 
 } else if (cmd === 'task-name') {
   const task = arg('task');

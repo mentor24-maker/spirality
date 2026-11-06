@@ -80,7 +80,8 @@ loop makes:
 npm run clickup -- pass-reconcile                                      # FIRST: hand back the ticket a dead pass left in Building
 npm run clickup -- queue --claimable                                   # FIRST LINE is the task to claim (all Rework, then Queued)
 npm run clickup -- claim --task <id>                                   # safe claim; exit 3 = moved or still waits on a ticket, take the next
-npm run clickup -- get --task <id>                                     # header + body; also shows any recorded PR and send-back rounds
+npm run clickup -- get --task <id>                                     # header + body; also shows any recorded PR, send-back rounds and attachments
+npm run clickup -- attachments --task <id> --to /tmp/<id>-attachments  # save the ticket's files, to read before building
 npm run clickup -- comments --task <id>                                # the review notes live here on a Rework ticket
 npm run clickup -- pr-opened --task <id> --pr <pr-url> --human-hours <N> --body-file -   # record the PR — REQUIRED, and it verifies itself
 npm run clickup -- status --task <id> --status "In review"             # hand off (assignees auto-cleared)
@@ -177,6 +178,22 @@ Exit **0** nothing of his / **3** something IS his / **1** could not tell.
    rule in `CLAUDE.md` → "Engineering rules": nothing project-specific
    hard-coded in substrate code; move StarCaster's modules with their tests,
    never rewrite; every ClickUp write read back; a failed step says so.
+
+   **Read the ticket's files first.** When `get` prints `attachments:` lines
+   (anything but `attachments: (none)`), they are part of the spec. Save them
+   outside the repository and read every one (pictures and text both; the
+   Read tool opens a picture) before writing any code:
+
+   ```bash
+   npm run clickup -- attachments --task <id> --to /tmp/<id>-attachments
+   ```
+
+   It prints `saved <path> (<size> bytes)` per file and exits non-zero naming
+   any file that did not save; a file that did not save is a failure you
+   report, never one you build past. Never copy a file into the repository or
+   a pull request. `attachments: COULD NOT BE READ` means the ticket's files
+   are unknown: say so on the ticket and in your report, and never treat it
+   as none.
 
    **Verify the premise before building it.** A defect ticket is a claim to
    check, not a spec to obey. If the premise is wrong, post the correction on

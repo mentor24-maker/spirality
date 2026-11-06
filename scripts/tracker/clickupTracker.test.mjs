@@ -1,8 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { readFileSync } from 'node:fs';
-import { createClickupTracker } from './clickupTracker.mjs';
+import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { createClickupTracker, NO_ATTACHMENTS_ON_CLICKUP } from './clickupTracker.mjs';
 import { isMachineComment } from '../lib/machineComment.mjs';
 
 /** A stand-in ClickUp: records every request, answers with `reply(req)`. */
@@ -117,4 +121,59 @@ test('a request that never arrives answers HTTP 0, not a throw', async () => {
 test('the door names no ClickUp address of its own', () => {
   const door = readFileSync(new URL('../clickup.mjs', import.meta.url), 'utf8');
   assert.equal((door.match(/\/api\/v2/g) || []).length, 0);
+});
+
+/** The real door on a ClickUp project config, against the stand-in ClickUp. */
+function clickupDoor(apiBase, args) {
+  const dir = mkdtempSync(join(tmpdir(), 'clickup-door-'));
+  writeFileSync(join(dir, 'spirality.project.json'), JSON.stringify({
+    workspaceId: '111', spaceId: '222', loopQueueListId: '333',
+    operatorUserId: 1, machineUserId: 2,
+    githubRepo: 'owner/repo', dopplerProject: 'proj', dopplerConfig: 'dev',
+    launchdPrefix: 'com.example', logDir: '~/loop-logs', mergePhrases: ['merge'],
+    governancePaths: [], autoMergeLanes: [], operatorName: 'Dane', projectSlug: 'alpha',
+    legacyMachinePrefixes: [], projectScripts: {}, tracker: 'clickup',
+  }));
+  const door = fileURLToPath(new URL('../clickup.mjs', import.meta.url));
+  return new Promise((resolve) => {
+    const env = { PATH: process.env.PATH, HOME: process.env.HOME, CLICKUP_API_TOKEN: 'tok', CLICKUP_API_BASE: apiBase };
+    const child = spawn(process.execPath, [door, ...args.map((a) => a.replace('<dir>', dir))], { cwd: dir, env });
+    let out = '';
+    let err = '';
+    child.stdout.on('data', (c) => { out += c; });
+    child.stderr.on('data', (c) => { err += c; });
+    child.on('close', (code) => { rmSync(dir, { recursive: true, force: true }); resolve({ code, out, err, dir }); });
+    child.stdin.end();
+  });
+}
+
+test('attachments on ClickUp: no request, and the command exits 1 with a plain sentence, never a success line (SP-142)', async () => {
+  const api = await fakeClickup();
+  const t = createClickupTracker({ token: 'tok', apiBase: api.apiBase, log: () => {} });
+  try {
+    for (const out of [await t.listAttachments('abc'), await t.downloadAttachment('abc', 1)]) {
+      assert.equal(out.res.ok, false);
+      assert.equal(out.unsupported, true);
+      assert.equal(out.json.err, NO_ATTACHMENTS_ON_CLICKUP);
+    }
+    assert.equal(api.seen.length, 0);
+
+    const r = await clickupDoor(api.apiBase, ['attachments', '--task', 'abc', '--to', '<dir>/saved']);
+    assert.equal(r.code, 1);
+    assert.equal(r.out, '');
+    assert.equal(r.err.trim(), NO_ATTACHMENTS_ON_CLICKUP);
+    assert.equal(existsSync(join(r.dir, 'saved')), false);
+  } finally { await api.close(); }
+});
+
+test('get on ClickUp says files are not kept there, rather than "(none)" (SP-142)', async () => {
+  const api = await fakeClickup((req) => (req.path.includes('/comment')
+    ? { json: { comments: [] } }
+    : { json: { id: 'abc', name: 'A ticket', status: { status: 'queued' }, list: { id: '333', name: 'Loop Queue' }, url: 'https://app.clickup.com/t/abc' } }));
+  try {
+    const r = await clickupDoor(api.apiBase, ['get', '--task', 'abc']);
+    assert.equal(r.code, 0, r.err);
+    assert.match(r.out, /\nattachments: \(not kept on ClickUp\)\nurl: /);
+    assert.ok(!api.seen.some((q) => /attach/.test(q.path)));
+  } finally { await api.close(); }
 });
