@@ -189,6 +189,12 @@ details.add-task .note:not(:empty) { background: #fff; border-radius: 4px; paddi
 details.add-task > summary { cursor: pointer; font-weight: 600; }
 details.add-task form.request textarea { min-height: 8rem; }
 p.filed-note { margin: 0 0 1rem; }
+/* The Add Task box's question: "Did you mean for that to be associated with project X?" */
+dialog.project-check { border: var(--hairline); border-radius: 8px; padding: 1rem 1.25rem; max-width: 28rem; color: var(--ink); }
+dialog.project-check::backdrop { background: rgba(0, 0, 0, 0.3); }
+dialog.project-check p { margin: 0 1.5rem 1rem 0; }
+dialog.project-check .row { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+dialog.project-check button.close { float: right; border: 0; background: transparent; cursor: pointer; padding: 0 0.25rem; font-size: 1.25rem; line-height: 1; color: var(--quiet); }
 /* His answer is in; the relay owes the next move (SP-93). */
 .answer-in { font-size: 0.85rem; font-style: italic; color: var(--quiet); }
 .card .answer-in { display: block; }
