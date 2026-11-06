@@ -14,7 +14,7 @@
 # Copied from StarCaster's installer. launchd starts a job at load, restarts a
 # kept-alive one if it dies, and survives a reboot; a screen session does none
 # of that. Labels are <launchdPrefix>.<job>, read from the project config, so
-# a product's jobs sit beside another product's on the same machine without
+# a project's jobs sit beside another project's on the same machine without
 # touching them.
 #
 # Every path is derived from where this script lives or read from the project
@@ -37,13 +37,13 @@ BACKUP_MINUTE=15
 # THIS, not its own shell's PATH, because launchd is what will run them.
 LAUNCHD_PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$HOME/.local/bin"
 
-# The product's values: the label prefix, the log folder and the short name
+# The project's values: the label prefix, the log folder and the short name
 # every log and lock file starts with (CLAUDE.md engineering rule 2).
 config_value() { PATH="$LAUNCHD_PATH" node "$REPO/scripts/project_config.mjs" "$1"; }
 PREFIX="$(config_value launchdPrefix)"
 LOG_DIR="$(config_value logDir)"
-SLUG="$(config_value productSlug)"
-# The tracker's settings. An empty port means this product runs no tracker
+SLUG="$(config_value projectSlug)"
+# The tracker's settings. An empty port means this project runs no tracker
 # service here, and every tracker step below is skipped.
 TRACKER_PORT="$(config_value trackerPort)"
 TRACKER_HOST="$(config_value trackerHost)"
@@ -145,7 +145,7 @@ status_tracker() {
   local log code newest
   if ! tracker_configured; then
     echo "── $TRACKER"
-    echo "tracker:  not run by this product (no trackerPort in the project config)"
+    echo "tracker:  not run by this project (no trackerPort in the project config)"
     return
   fi
   status_job_header "$TRACKER"
@@ -178,7 +178,7 @@ status_tracker() {
 }
 
 status() {
-  echo "product:  $SLUG (labels $PREFIX.*, logs in $LOG_DIR)"
+  echo "project:  $SLUG (labels $PREFIX.*, logs in $LOG_DIR)"
   checkout_state
   PATH="$LAUNCHD_PATH" node "$REPO/scripts/lib/claudeTrust.mjs" check "$REPO" || true
   for s in "${SKILLS[@]}"; do status_one "$s"; done
@@ -316,7 +316,7 @@ install() {
   not_loaded=()
 
   # Trust this checkout in Claude's own settings before any lane starts, or
-  # every headless pass ignores the product's .claude/settings.json allow list
+  # every headless pass ignores the project's .claude/settings.json allow list
   # until somebody opens Claude here by hand (SP-116). A failure is said and
   # fails the run at the end, but the lanes still install: they run, only
   # without that list.
@@ -397,7 +397,7 @@ PLIST_BODY
     not_loaded+=("$local_label")
   fi
 
-  if tracker_configured; then install_tracker; else echo "Skipped the tracker: this product's config names no trackerPort."; fi
+  if tracker_configured; then install_tracker; else echo "Skipped the tracker: this project's config names no trackerPort."; fi
   echo
   status
 

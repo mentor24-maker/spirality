@@ -52,8 +52,8 @@ test('every lane has its own interval, and labels come from the project config, 
 
 // The runner itself, run in a scratch copy of the repository (a git checkout
 // on a clean main, so it takes the sync lock) whose settings file names
-// another product. Spirality's sync lock is held by a live process: a runner
-// that still used it would wait ten minutes. The other product's own sync
+// another project. Spirality's sync lock is held by a live process: a runner
+// that still used it would wait ten minutes. The other project's own sync
 // lock is left stale, so taking it clears it. Claude is a stand-in that lists
 // the log folder mid-pass (the lane's lock is seen held) and then reports a
 // sign-in failure (the runner prints its restart line). The runner sleeps
@@ -68,7 +68,7 @@ test('loop_runner.sh names its log, lock, sync lock and restart label from the s
     for (const f of ['project_config.mjs', 'run_with_time_limit.sh']) symlinkSync(join(REPO, 'scripts', f), join(scratch, 'scripts', f));
     const spirality = JSON.parse(readFileSync(join(REPO, 'spirality.project.json'), 'utf8'));
     writeFileSync(join(scratch, 'spirality.project.json'), JSON.stringify({
-      ...spirality, productSlug: 'normie', launchdPrefix: 'com.normie', logDir,
+      ...spirality, projectSlug: 'normie', launchdPrefix: 'com.normie', logDir,
     }));
     const fakeClaude = join(scratch, 'fake-claude');
     writeFileSync(fakeClaude, `#!/bin/bash\nls "${logDir}"\necho "Please run /login"\n`, { mode: 0o755 });
@@ -107,6 +107,6 @@ test('loop_runner.sh names its log, lock, sync lock and restart label from the s
   }
 });
 
-test('loop_runner.sh names no product of its own', () => {
+test('loop_runner.sh names no project of its own', () => {
   assert.doesNotMatch(readFileSync(join(REPO, 'scripts/loop_runner.sh'), 'utf8'), /spirality/);
 });

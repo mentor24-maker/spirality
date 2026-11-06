@@ -30,9 +30,9 @@ if (!mail.send) {
 const store = openStore(':memory:');
 const operator = store.createActor({ kind: 'human', name: config.operatorName });
 const loop = store.createActor({ kind: 'machine', name: 'Test email' });
-store.createProject({ slug: config.productSlug, name: config.productSlug, prefix: 'TEST', operator: operator.id });
+store.createProject({ slug: config.projectSlug, name: config.projectSlug, prefix: 'TEST', operator: operator.id });
 const ticket = store.fileTicket({
-  project: config.productSlug, actor: loop.id, status: 'building',
+  project: config.projectSlug, actor: loop.id, status: 'building',
   name: 'Test hand-over: the tracker can email you',
 });
 store.postComment({

@@ -1,13 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { validateProjectConfig } from '../../lib/projectConfig.mjs';
 import { settingsDraft, resolveAnswers } from '../../lib/onboardAnswers.mjs';
 import {
   DANE_FIELDS, STEPS, answerValue, fieldNamed, loggedDone, mainVerifyVerdict, mountainStamp, onboard,
-  parseOnboardArgs, pasteBlock, protectionDropped, protectionGaps, protectionRequest, rerunCommand, shellQuote,
+  cloneAddress, commandLine, parseOnboardArgs, pasteBlock, saidYes, signinCommands, protectionDropped, protectionGaps, protectionRequest, rerunCommand, shellQuote,
   unanswered, worktreesOnBranch,
 } from './onboard.mjs';
 
@@ -54,7 +54,7 @@ test('mainVerifyVerdict reads verify on a commit: pass, pending, fail, or none a
 
 test('a typed answer: blank takes the default, lists split on commas, "none" is an empty list', () => {
   const list = DANE_FIELDS.find((f) => f.key === 'mergePhrases');
-  const name = DANE_FIELDS.find((f) => f.key === 'productName');
+  const name = DANE_FIELDS.find((f) => f.key === 'projectName');
   assert.equal(answerValue(name, '  PressPlay '), 'PressPlay');
   assert.equal(answerValue(name, ''), null);
   assert.deepEqual(answerValue(list, 'merge, ship it ,'), ['merge', 'ship it']);
@@ -63,13 +63,13 @@ test('a typed answer: blank takes the default, lists split on commas, "none" is 
 });
 
 test('only the fields that are Dane\'s decisions are asked, and one set to null counts as answered', () => {
-  assert.deepEqual(DANE_FIELDS.map((f) => f.key), ['productName', 'githubRepo', 'trackerPrefix', 'mergePhrases', 'autoMergeLanes', 'extraGovernancePaths', 'description']);
-  assert.deepEqual(unanswered({ productName: 'X', trackerPrefix: null }).map((f) => f.key), ['githubRepo', 'mergePhrases', 'autoMergeLanes', 'extraGovernancePaths', 'description']);
+  assert.deepEqual(DANE_FIELDS.map((f) => f.key), ['projectName', 'githubRepo', 'trackerPrefix', 'mergePhrases', 'autoMergeLanes', 'extraGovernancePaths', 'description']);
+  assert.deepEqual(unanswered({ projectName: 'X', trackerPrefix: null }).map((f) => f.key), ['githubRepo', 'mergePhrases', 'autoMergeLanes', 'extraGovernancePaths', 'description']);
   assert.equal(fieldNamed('/x.json: "githubRepo" must be owner/name'), 'githubRepo');
 });
 
 test('the paste block makes the Doppler project only when it is missing, and quotes what it must', () => {
-  const answers = { dopplerProject: 'pressplay', dopplerConfig: 'dev', productName: "Press Play's", trackerPrefix: 'PP' };
+  const answers = { dopplerProject: 'pressplay', dopplerConfig: 'dev', projectName: "Press Play's", trackerPrefix: 'PP' };
   const base = { spiralityDir: '/Users/d/WebApps/spirality', answers, settingsFile: '/Users/d/loop-logs/onboard/pressplay-settings/spirality.project.json', trackerDb: '/Users/d/spirality-tracker/tracker.db' };
   const fresh = pasteBlock({ ...base, projectExists: false, configExists: false });
   assert.deepEqual(fresh, [
@@ -83,6 +83,16 @@ test('the paste block makes the Doppler project only when it is missing, and quo
   const branchConfig = pasteBlock({ ...base, answers: { ...answers, dopplerConfig: 'dev_loop' }, projectExists: true, configExists: false });
   assert.ok(branchConfig.includes('doppler configs create dev_loop --project pressplay --environment dev'));
   assert.equal(shellQuote('a b'), "'a b'");
+  // What is printed is what runs: the same commands, word for word.
+  const cmds = signinCommands({ ...base, projectExists: false, configExists: false });
+  assert.deepEqual(cmds.map(commandLine), fresh.slice(1));
+  assert.deepEqual(cmds.at(-1).env, { TRACKER_DB: '/Users/d/spirality-tracker/tracker.db' });
+  assert.equal(cmds.at(-1).args[cmds.at(-1).args.indexOf('--name') + 1], "Press Play's", 'run as one word, unquoted');
+});
+
+test('only y or yes runs the sign-ins', () => {
+  for (const yes of ['y', 'Y', ' yes ', 'YES']) assert.equal(saidYes(yes), true, yes);
+  for (const no of ['', 'n', 'no', 'done', 'yep', null, undefined]) assert.equal(saidYes(no), false, String(no));
 });
 
 test('the step log: Mountain time, and a done step is found by name', () => {
@@ -94,7 +104,8 @@ test('the step log: Mountain time, and a done step is found by name', () => {
 });
 
 test('the arguments: --product is a slug, the merge wait a positive number', () => {
-  assert.deepEqual(parseOnboardArgs(['--product', 'pressplay']).opts, { product: 'pressplay', allowReplace: false, mergeWaitMinutes: 60 });
+  assert.deepEqual(parseOnboardArgs(['--product', 'pressplay']).opts, { product: 'pressplay', allowReplace: false, mergeWaitMinutes: 60, noPrompt: false });
+  assert.equal(parseOnboardArgs(['--product', 'pressplay', '--no-prompt']).opts.noPrompt, true);
   assert.equal(parseOnboardArgs(['--product', 'pressplay', '--allow-replace', '--merge-wait-minutes', '5']).opts.mergeWaitMinutes, 5);
   assert.match(parseOnboardArgs([]).error, /--product/);
   assert.match(parseOnboardArgs(['--product', 'Press Play']).error, /not a slug/);
@@ -114,9 +125,17 @@ test('worktreesOnBranch finds the worktrees holding a branch, never the checkout
   assert.deepEqual(worktreesOnBranch('', 'x'), []);
 });
 
+test('cloneAddress takes only the kind of address from the home\'s origin, never its sign-in', () => {
+  assert.equal(cloneAddress('https://x-access-token:SECRET@github.com/mentor24-maker/spirality.git', 'mentor24-maker/PressPlay'), 'https://github.com/mentor24-maker/pressplay.git');
+  assert.equal(cloneAddress('git@github.com:mentor24-maker/spirality.git', 'mentor24-maker/pressplay'), 'git@github.com:mentor24-maker/pressplay.git');
+  assert.equal(cloneAddress('ssh://git@github.com/mentor24-maker/spirality', 'mentor24-maker/pressplay'), 'git@github.com:mentor24-maker/pressplay.git');
+  assert.equal(cloneAddress(null, 'mentor24-maker/pressplay'), 'https://github.com/mentor24-maker/pressplay.git');
+});
+
 test('rerunCommand keeps every flag the run was started with', () => {
   assert.equal(rerunCommand({ product: 'pressplay', allowReplace: false, mergeWaitMinutes: 60 }), 'npm run onboard -- --product pressplay');
   assert.equal(rerunCommand({ product: 'pressplay', allowReplace: true, mergeWaitMinutes: 240 }), 'npm run onboard -- --product pressplay --allow-replace --merge-wait-minutes 240');
+  assert.equal(rerunCommand({ product: 'pressplay', allowReplace: false, mergeWaitMinutes: 60, noPrompt: true }), 'npm run onboard -- --product pressplay --no-prompt');
 });
 
 test('protectionDropped names the stricter settings the PUT switches off', () => {
@@ -129,13 +148,13 @@ test('protectionDropped names the stricter settings the PUT switches off', () =>
 
 const PR = 'https://github.com/mentor24-maker/pressplay/pull/1';
 const DANE_ANSWERS = {
-  'Product name': 'PressPlay',
+  'Project name': 'PressPlay',
   'GitHub repository': 'mentor24-maker/pressplay',
   'Ticket prefix': 'PP',
   'Merge phrases': '',
   'Lanes that may merge': 'none',
   'Extra protected files': '',
-  'What the product is': 'PressPlay plays things.',
+  'What the project is': 'PressPlay plays things.',
 };
 
 function makeWorld(t) {
@@ -145,23 +164,32 @@ function makeWorld(t) {
     workspaceId: '0', spaceId: '0', loopQueueListId: '0', operatorUserId: '1', machineUserId: '2',
     githubRepo: 'mentor24-maker/spirality', dopplerProject: 'spirality', dopplerConfig: 'dev', launchdPrefix: 'com.spirality',
     logDir: join(dir, 'logs'), mergePhrases: ['merge', 'ship it'], governancePaths: ['CLAUDE.md'], autoMergeLanes: [],
-    operatorName: 'Dane', productSlug: 'spirality', legacyMachinePrefixes: [], productScripts: {}, trackerPrefix: 'SP',
+    operatorName: 'Dane', projectSlug: 'spirality', legacyMachinePrefixes: [], projectScripts: {}, trackerPrefix: 'SP',
     trackerPort: 4180, trackerHost: '0.0.0.0', trackerDataDir: join(dir, 'tracker'), tracker: 'api',
     trackerUrl: 'http://mac-mini.local:4180', trackerApiUrl: 'http://127.0.0.1:4180',
   });
   const homeRoot = join(dir, 'WebApps', 'spirality');
+  // The project is not on this Mac yet: the clone step makes its checkout.
   const checkout = join(dir, 'WebApps', 'pressplay');
-  mkdirSync(join(checkout, '.git'), { recursive: true });
-  writeFileSync(join(checkout, '.git', 'HEAD'), 'ref: refs/heads/main\n');
+  const makeCheckout = () => {
+    mkdirSync(join(checkout, '.git'), { recursive: true });
+    writeFileSync(join(checkout, '.git', 'HEAD'), 'ref: refs/heads/main\n');
+  };
 
   // What the world is like; a test sets `fail` to the step that breaks.
   const w = {
     dir, homeConfig, homeRoot, checkout, fail: null,
     signinsMade: false, prOpen: false, ticket: null, lanesLoaded: false, merged: false,
     protection: null, mergeAfterPolls: 1, polls: 0, dopplerProject: false,
-    calls: [], asked: [], paused: 0, printed: [],
+    calls: [], asked: [], printed: [], signinsEnv: [],
+    // "Run these now?" at the sign-ins: what Dane answers, how often it was asked,
+    // and the environment each command it ran was given.
+    runAnswer: 'y', runAsked: 0, envs: {}, signinsHollow: false, createFails: null,
     // onboard:copy's worktree, on the setup branch; true once copy has run (as the real one keeps it).
     setupWorktree: false, worktreeRemoveRefused: false,
+    // The tracker home's origin, with a sign-in token in it as a real one can carry.
+    homeOrigin: 'https://x-access-token:SECRET-TOKEN@github.com/mentor24-maker/spirality.git',
+    clonedFrom: null, cloneOrigin: 'https://github.com/mentor24-maker/pressplay.git', cloneBranch: 'main', cloneDirty: '',
   };
   const setupWorktreePath = join(homeConfig.logDir, 'onboard', 'pressplay-setup');
   const settingsFile = join(homeConfig.logDir, 'onboard', 'pressplay-settings', 'spirality.project.json');
@@ -174,10 +202,21 @@ function makeWorld(t) {
   const no = (err = 'no', code = 1) => ({ code, out: '', err });
   const breaks = (step) => w.fail === step;
 
-  const run = (cmd, args) => {
+  const run = (cmd, args, o = {}) => {
     const line = [cmd, ...args].join(' ');
     w.calls.push(line);
+    if (o.env) w.envs[line] = o.env;
     if (cmd === 'git') {
+      if (args[0] === 'remote' && o.cwd === homeRoot) return w.homeOrigin == null ? no('error: No such remote', 2) : ok(w.homeOrigin);
+      if (args[0] === 'remote' && o.cwd === checkout) return ok(w.cloneOrigin);
+      if (args[0] === 'clone') {
+        if (breaks('clone')) return no('remote: Repository not found.\nfatal: repository not found', 128);
+        w.clonedFrom = args.at(-2);
+        makeCheckout();
+        return ok();
+      }
+      if (args[0] === 'rev-parse' && args[1] === '--abbrev-ref') return ok(w.cloneBranch);
+      if (args[0] === 'status') return ok(w.cloneDirty);
       if (args[0] === 'fetch') return ok();
       if (args[0] === 'show') return w.merged ? ok(JSON.stringify(settings('9'))) : no('fatal: path does not exist', 128);
       if (args[0] === 'merge-base') return w.merged ? ok() : no();
@@ -194,7 +233,7 @@ function makeWorld(t) {
       }
     }
     if (cmd === 'npm') {
-      const [, , script, , ...rest] = args;
+      const [, script, , ...rest] = args.filter((a) => a !== '--silent');
       if (script === 'onboard:look') return breaks('look') ? no('BLOCKED', 3) : ok();
       if (script === 'onboard:settings' && rest[0] === 'write') {
         if (breaks('settings')) return no();
@@ -206,7 +245,18 @@ function makeWorld(t) {
         writeFileSync(settingsFile, JSON.stringify(settings('9')));
         return ok();
       }
-      if (script === 'tracker:signins') return w.signinsMade ? ok('all answer as themselves') : no('Could not find requested project');
+      if (script === 'tracker:signins') {
+        // As the real one does: a guest product's settings name no
+        // trackerDataDir, so without TRACKER_DB there is no database to use.
+        w.signinsEnv.push(o.env?.TRACKER_DB ?? null);
+        if (o.env?.TRACKER_DB !== join(homeConfig.trackerDataDir, 'tracker.db')) return no('The project config names no trackerDataDir, and TRACKER_DB is not set: there is no tracker database to use.');
+        if (rest[0] === 'create') {
+          if (w.createFails === 'tracker') return no('could not make the project', 4);
+          if (!w.signinsHollow) w.signinsMade = true;
+          return ok();
+        }
+        return w.signinsMade ? ok('all answer as themselves') : no('Could not find requested project');
+      }
       if (script === 'onboard:copy') {
         if (breaks('copy')) return no();
         w.prOpen = true;
@@ -221,6 +271,11 @@ function makeWorld(t) {
         w.lanesLoaded = true;
         return ok();
       }
+    }
+    if (cmd === 'doppler' && args[1] === 'create') {
+      if (w.createFails === 'doppler') return no('Doppler Error: unauthorized', 2);
+      if (args[0] === 'projects') w.dopplerProject = true;
+      return ok();
     }
     if (cmd === 'doppler') return w.dopplerProject ? ok('{}') : no();
     if (cmd === 'bash') {
@@ -252,16 +307,19 @@ function makeWorld(t) {
   const deps = (over = {}) => ({
     homeConfig, homeRoot, spiralityDir: homeRoot, run,
     ask: async (q) => {
+      if (q.startsWith('Run these now')) { w.runAsked += 1; return w.runAnswer; }
       w.asked.push(q);
       const key = Object.keys(DANE_ANSWERS).find((k) => q.startsWith(k));
       return key ? DANE_ANSWERS[key] : '';
     },
-    pause: async () => { w.paused += 1; w.signinsMade = true; w.dopplerProject = true; return true; },
     print: (line) => w.printed.push(line),
+    exists: (p) => existsSync(p),
     readText: (p) => { try { return readFileSync(p, 'utf8'); } catch { return null; } },
     writeText: (p, text) => writeFileSync(p, text),
     appendText: (p, text) => { mkdirSync(dirname(p), { recursive: true }); appendFileSync(p, text); },
     mkdir: (d) => mkdirSync(d, { recursive: true }),
+    rename: (from, to) => renameSync(from, to),
+    remove: (p) => rmSync(p, { force: true }),
     sleep: async (ms) => { clock += ms; },
     now: () => clock,
     ...over,
@@ -269,14 +327,15 @@ function makeWorld(t) {
   const opts = { product: 'pressplay', allowReplace: false, mergeWaitMinutes: 60 };
   const go = (over) => onboard(opts, deps(over));
   const homeOpts = (more, over) => onboard({ ...opts, ...more }, deps(over));
-  const reset = () => { w.calls = []; w.asked = []; w.paused = 0; w.printed = []; w.polls = 0; };
+  const reset = () => { w.calls = []; w.asked = []; w.runAsked = 0; w.envs = {}; w.printed = []; w.polls = 0; };
   const answersFile = answersPath;
   // The answers in place, written as the wizard would, with a checkout path in this scratch folder.
   const seedAnswers = () => {
     mkdirSync(dirname(answersPath), { recursive: true });
-    writeFileSync(answersPath, JSON.stringify({ productSlug: 'pressplay', productName: 'PressPlay', githubRepo: 'mentor24-maker/pressplay', trackerPrefix: 'PP', mergePhrases: null, autoMergeLanes: [], extraGovernancePaths: null, description: 'PressPlay plays things.', checkoutDir: checkout }));
+    writeFileSync(answersPath, JSON.stringify({ projectSlug: 'pressplay', projectName: 'PressPlay', githubRepo: 'mentor24-maker/pressplay', trackerPrefix: 'PP', mergePhrases: null, autoMergeLanes: [], extraGovernancePaths: null, description: 'PressPlay plays things.', checkoutDir: checkout }));
   };
-  return { w, go, homeOpts, run, reset, setupWorktreePath, answersFile, settingsFile, seedAnswers, logFile: join(homeConfig.logDir, 'pressplay-onboard.log') };
+  const statePath = join(homeConfig.logDir, 'onboard', 'pressplay.state.json');
+  return { w, go, homeOpts, run, reset, checkout, makeCheckout, setupWorktreePath, answersFile, settingsFile, seedAnswers, statePath, logFile: join(homeConfig.logDir, 'pressplay-onboard.log') };
 }
 
 const out = (w) => w.printed.join('\n');
@@ -287,14 +346,21 @@ test('a first run asks Dane only his answers, stops for the paste block and the 
   const code = await go();
   assert.equal(code, 0, out(w));
   assert.equal(w.asked.length, DANE_FIELDS.length, 'one question per Dane field');
-  assert.equal(w.paused, 1, 'one wait, for the paste block');
+  assert.equal(w.runAsked, 1, 'one question, Run these now?, for the sign-ins');
   assert.match(out(w), /Your move, Dane \(real secret values\)/);
   assert.match(out(w), /doppler projects create pressplay/);
+  // On his y the commands ran, in order, then the sign-ins were read back.
+  const made = w.calls.indexOf('doppler projects create pressplay');
+  const create = w.calls.findIndex((c) => c.startsWith('npm run tracker:signins -- create --name PressPlay --prefix PP'));
+  assert.ok(made >= 0 && create > made, 'the Doppler project, then the sign-ins');
+  assert.ok(w.calls.slice(create + 1).some((c) => c.includes('tracker:signins -- check')), 'read back after');
+  assert.equal(w.envs[w.calls[create]].TRACKER_DB, join(w.homeConfig.trackerDataDir, 'tracker.db'));
+  assert.ok(!/type done/i.test(out(w)), 'never asks him to type done');
   assert.match(out(w), /Your move, Dane \(a decision\).*"merge", "ship it".*PP-1: http:\/\/mac-mini\.local:4180\/t\/PP-1/);
   assert.equal((out(w).match(/Your move, Dane/g) || []).length, 2, 'exactly two stops beyond the questions');
   assert.match(out(w), /Done: pressplay is set up\. Its tickets: http:\/\/mac-mini\.local:4180\/list\/pressplay/);
   const answers = JSON.parse(readFileSync(answersFile, 'utf8'));
-  assert.equal(answers.productSlug, 'pressplay');
+  assert.equal(answers.projectSlug, 'pressplay');
   assert.equal(answers.trackerPrefix, 'PP');
   assert.equal(answers.mergePhrases, null, 'a blank answer takes the default');
   assert.deepEqual(answers.autoMergeLanes, []);
@@ -312,14 +378,15 @@ test('a rerun once everything is done says each step is already done and asks no
   reset();
   assert.equal(await go(), 0, out(w));
   assert.equal(w.asked.length, 0);
-  assert.equal(w.paused, 0);
+  assert.equal(w.runAsked, 0);
   for (const step of STEPS) assert.match(out(w), new RegExp(`^${step}\\s+already done`, 'm'), step);
   assert.ok(!w.calls.some((c) => c.startsWith('npm') || c.includes('-X PUT')), 'no step script ran and nothing was written');
 });
 
-test('a product already set up (its settings on main, main protected) with an answers file: every step already done, nothing asked', async (t) => {
-  const { w, go, seedAnswers } = makeWorld(t);
+test('a project already set up (its settings on main, main protected) with an answers file: every step already done, nothing asked', async (t) => {
+  const { w, go, seedAnswers, makeCheckout } = makeWorld(t);
   seedAnswers();
+  makeCheckout();
   w.merged = true;
   w.protection = GOOD_PROTECTION;
   assert.equal(await go(), 0, out(w));
@@ -328,8 +395,8 @@ test('a product already set up (its settings on main, main protected) with an an
 });
 
 // A failure at each step, then a rerun that resumes there.
-const LATER = { look: 'onboard:look', settings: 'onboard:settings write', copy: 'onboard:copy', lanes: 'onboard:lanes', protect: '-X PUT' };
-for (const failing of ['look', 'settings', 'copy', 'lanes', 'protect']) {
+const LATER = { look: 'onboard:look', clone: 'git clone', settings: 'onboard:settings -- write', copy: 'onboard:copy', lanes: 'onboard:lanes', protect: '-X PUT' };
+for (const failing of ['look', 'clone', 'settings', 'copy', 'lanes', 'protect']) {
   test(`a failure at ${failing}: FAILED, nothing after it runs, and the rerun resumes there asking nothing again`, async (t) => {
     const { w, go, reset } = makeWorld(t);
     w.fail = failing;
@@ -366,26 +433,77 @@ test('a failure at answers: an answer that does not check out is taken back out,
 test('no Terminal to ask in: STOPPED at answers, naming what is still to answer', async (t) => {
   const { w, go } = makeWorld(t);
   assert.equal(await go({ ask: async () => null }), 3);
-  assert.match(out(w), /^STOPPED: answers: no Terminal to ask in; still to answer: productName, githubRepo/m);
+  assert.match(out(w), /^STOPPED: answers: no Terminal to ask in; still to answer: projectName, githubRepo/m);
 });
 
-test('a failure at signins: the block ran but the sign-ins still do not answer — FAILED, and the rerun shows the block again', async (t) => {
+test('a failure at signins: the block ran but the sign-ins still do not answer — FAILED, and the rerun asks and runs it again', async (t) => {
   const { w, go, reset } = makeWorld(t);
-  assert.equal(await go({ pause: async () => { w.paused += 1; return true; } }), 1, out(w));
+  w.signinsHollow = true;
+  assert.equal(await go(), 1, out(w));
   assert.match(out(w), /^FAILED: signins: tracker:signins check does not pass yet/m);
   assert.ok(!w.calls.some((c) => c.includes('onboard:copy')), 'copy did not run');
+  w.signinsHollow = false;
   reset();
   assert.equal(await go(), 0, out(w));
-  assert.equal(w.paused, 1, 'the paste block is shown again');
+  assert.equal(w.runAsked, 1, 'Run these now? is asked again');
+  assert.ok(!w.calls.includes('doppler projects create pressplay'), 'the Doppler project made last time is not made again');
   assert.equal(w.asked.length, 0);
   assert.match(out(w), /^settings\s+already done/m);
 });
 
-test('no Terminal to wait in at the paste block: STOPPED at signins, the block still printed', async (t) => {
+test('the sign-ins check is given the tracker home\'s database, so a run whose sign-ins exist passes without TRACKER_DB in the shell', async (t) => {
   const { w, go } = makeWorld(t);
-  assert.equal(await go({ pause: async () => null }), 3);
-  assert.match(out(w), /tracker:signins -- create --name PressPlay --prefix PP --config /);
-  assert.match(out(w), /^STOPPED: signins: waiting on you/m);
+  w.signinsMade = true;
+  assert.equal(await go(), 0, out(w));
+  assert.match(out(w), /^signins\s+already done/m);
+  assert.equal(w.runAsked, 0, 'no Run these now?: the sign-ins were already there');
+  assert.ok(w.signinsEnv.length > 0, 'the check ran');
+  for (const db of w.signinsEnv) assert.equal(db, join(w.homeConfig.trackerDataDir, 'tracker.db'));
+});
+
+const signinsRan = (w) => w.calls.some((c) => / create/.test(c) && (c.startsWith('doppler') || c.includes('tracker:signins')));
+
+for (const [why, answer] of [['no Terminal to ask in', null], ['n', 'n'], ['a bare Enter', ''], ['anything but y', 'done']]) {
+  test(`at the sign-ins, ${why}: nothing is run, the block is printed, STOPPED, and a rerun after he ran it resumes`, async (t) => {
+    const { w, go, reset } = makeWorld(t);
+    w.runAnswer = answer;
+    assert.equal(await go(), 3, out(w));
+    assert.equal(w.runAsked, 1);
+    assert.ok(!signinsRan(w), 'nothing was run without his y');
+    assert.match(out(w), /^ {2}doppler projects create pressplay$/m);
+    assert.match(out(w), /tracker:signins -- create --name PressPlay --prefix PP --config /);
+    assert.match(out(w), /^STOPPED: signins: the block above is not run/m);
+    assert.ok(!w.calls.some((c) => c.includes('onboard:copy')), 'copy did not run');
+    // He ran it himself; the rerun reads it back and goes on without asking.
+    w.signinsMade = true;
+    w.dopplerProject = true;
+    reset();
+    assert.equal(await go(), 0, out(w));
+    assert.equal(w.runAsked, 0);
+    assert.match(out(w), /^signins\s+already done/m);
+  });
+}
+
+for (const failing of ['doppler', 'tracker']) {
+  test(`at the sign-ins, a ${failing} command that fails: FAILED with its exit code, nothing after it runs`, async (t) => {
+    const { w, go } = makeWorld(t);
+    w.createFails = failing;
+    assert.equal(await go(), 1, out(w));
+    const code = failing === 'doppler' ? 2 : 4;
+    assert.match(out(w), new RegExp(`^FAILED: signins: ${failing === 'doppler' ? 'doppler projects create pressplay' : 'TRACKER_DB=\\S+ npm run tracker:signins -- create'}.* ended with exit ${code}`, 'm'));
+    if (failing === 'doppler') assert.ok(!w.calls.some((c) => c.includes('tracker:signins -- create')), 'the sign-ins were not made after it');
+    const failed = w.calls.findIndex((c) => (failing === 'doppler' ? c.startsWith('doppler projects create') : c.includes('tracker:signins -- create')));
+    assert.ok(failed >= 0 && !w.calls.slice(failed + 1).some((c) => c.includes('tracker:signins -- check')), 'no read back over a failed command');
+    assert.ok(!w.calls.some((c) => c.includes('onboard:copy')), 'copy did not run');
+  });
+}
+
+test('at the sign-ins, a Doppler project that is already there is not made again', async (t) => {
+  const { w, go } = makeWorld(t);
+  w.dopplerProject = true;
+  assert.equal(await go(), 0, out(w));
+  assert.ok(!w.calls.some((c) => c.startsWith('doppler projects create')));
+  assert.ok(w.calls.some((c) => c.includes('tracker:signins -- create')));
 });
 
 test('a merge not made in time: STOPPED at merge; the rerun waits again and finishes once it is merged', async (t) => {
@@ -443,10 +561,10 @@ test('a stop after a run started with a longer merge wait: the rerun line keeps 
 });
 
 test('an answer taken back out but the answers file cannot be written: FAILED says so, not that the rerun asks again', async (t) => {
-  const { w, go } = makeWorld(t);
+  const { w, go, answersFile } = makeWorld(t);
   let writes = 0;
   const bad = async (q) => { w.asked.push(q); return q.startsWith('GitHub repository') ? 'not a repo' : (Object.entries(DANE_ANSWERS).find(([k]) => q.startsWith(k))?.[1] ?? ''); };
-  const writeText = (p, text) => { writes += 1; if (writes > 1) { const e = new Error('read-only'); e.code = 'EROFS'; throw e; } writeFileSync(p, text); };
+  const writeText = (p, text) => { if (p === answersFile) writes += 1; if (writes > 1 && p === answersFile) { const e = new Error('read-only'); e.code = 'EROFS'; throw e; } writeFileSync(p, text); };
   assert.equal(await go({ ask: bad, writeText }), 1, out(w));
   assert.match(out(w), /^FAILED: answers: .*Taking "githubRepo" out of .* failed too \(EROFS\): fix it there by hand/m);
   assert.ok(!/asks "githubRepo" again/.test(out(w)));
@@ -458,4 +576,287 @@ test('main\'s stricter protection is named before the PUT switches it off', asyn
   assert.equal(await go(), 0, out(w));
   const said = w.printed.findIndex((l) => /switches it off: linear history required/.test(l));
   assert.ok(said >= 0, out(w));
+});
+
+// --- The clone step (SP-119) ---------------------------------------------
+
+test('a project with no checkout: cloned from main over the home\'s kind of address, read back, and the run carries on', async (t) => {
+  const { w, go, checkout, logFile } = makeWorld(t);
+  assert.equal(await go(), 0, out(w));
+  assert.equal(w.clonedFrom, 'https://github.com/mentor24-maker/pressplay.git');
+  const clone = w.calls.findIndex((c) => c.startsWith('git clone'));
+  assert.equal(w.calls[clone], `git clone --quiet --branch main https://github.com/mentor24-maker/pressplay.git ${checkout}`);
+  assert.ok(clone > w.calls.findIndex((c) => c.includes('onboard:look')), 'after the look');
+  assert.ok(clone < w.calls.findIndex((c) => c.includes('onboard:settings -- write')), 'before the settings file');
+  const after = w.calls.slice(clone + 1);
+  for (const readBack of ['git remote get-url origin', 'git rev-parse --abbrev-ref HEAD', 'git status --porcelain']) assert.ok(after.includes(readBack), readBack);
+  assert.match(out(w), /^clone\s+.*cloned into .*read back: origin mentor24-maker\/pressplay, a clean main/m);
+  assert.match(readFileSync(logFile, 'utf8'), /\| clone \| done \|/);
+  assert.ok(!out(w).includes('SECRET-TOKEN') && !readFileSync(logFile, 'utf8').includes('SECRET-TOKEN'), 'the home origin\'s token is never printed or logged');
+});
+
+test('the home\'s origin over ssh: the clone is over ssh too', async (t) => {
+  const { w, go } = makeWorld(t);
+  w.homeOrigin = 'git@github.com:mentor24-maker/spirality.git';
+  assert.equal(await go(), 0, out(w));
+  assert.equal(w.clonedFrom, 'git@github.com:mentor24-maker/pressplay.git');
+});
+
+test('a checkout that is there: the clone step is skipped and nothing is cloned', async (t) => {
+  const { w, go, makeCheckout } = makeWorld(t);
+  makeCheckout();
+  assert.equal(await go(), 0, out(w));
+  assert.match(out(w), /^clone\s+already done \(.* is there\)/m);
+  assert.ok(!w.calls.some((c) => c.startsWith('git clone')));
+});
+
+for (const [what, set, seen] of [
+  ['an origin that is not the repository', (w) => { w.cloneOrigin = 'https://github.com/someone/else.git'; }, /does not read back with origin mentor24-maker\/pressplay/],
+  ['a branch that is not main', (w) => { w.cloneBranch = 'trunk'; }, /reads back on trunk, not main/],
+  ['changes in it', (w) => { w.cloneDirty = ' M x.js'; }, /does not read back as a clean main/],
+]) {
+  test(`a clone that reads back with ${what}: FAILED at clone, nothing after it runs`, async (t) => {
+    const { w, go } = makeWorld(t);
+    set(w);
+    assert.equal(await go(), 1, out(w));
+    assert.match(out(w), new RegExp(`^FAILED: clone: .*${seen.source}`, 'm'));
+    assert.ok(!w.calls.some((c) => c.includes('onboard:settings')), 'settings did not run');
+    assert.ok(!out(w).includes('Done:'));
+  });
+}
+
+test('a clone that fails: FAILED at clone saying what git said', async (t) => {
+  const { w, go } = makeWorld(t);
+  w.fail = 'clone';
+  assert.equal(await go(), 1, out(w));
+  assert.match(out(w), /^FAILED: clone: git clone of mentor24-maker\/pressplay into .* failed: .*repository not found/m);
+});
+
+// --- --no-prompt and the state file (SP-125) -----------------------------
+
+const readState = (path) => JSON.parse(readFileSync(path, 'utf8'));
+const outcomes = (state) => Object.fromEntries(state.steps.map((s) => [s.step, s.outcome]));
+// Under --no-prompt the Terminal is never read: either read fails the test.
+const NO_TERMINAL = {
+  ask: async (q) => { throw new Error(`asked in the Terminal: ${q}`); },
+};
+const noPromptRun = (homeOpts, over = {}) => homeOpts({ noPrompt: true }, { ...NO_TERMINAL, ...over });
+
+test('the state file has the shape the setup page reads, every step in STEPS order', async (t) => {
+  const { w, go, statePath } = makeWorld(t);
+  assert.equal(await go(), 0, out(w));
+  const state = readState(statePath);
+  assert.deepEqual(Object.keys(state), ['product', 'updatedAt', 'steps', 'stop', 'finished']);
+  assert.equal(state.product, 'pressplay');
+  assert.match(state.updatedAt, /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/);
+  assert.deepEqual(state.steps.map((s) => s.step), STEPS);
+  for (const s of state.steps) {
+    assert.deepEqual(Object.keys(s), ['step', 'outcome', 'at', 'why']);
+    assert.ok(['done', 'skip'].includes(s.outcome), `${s.step} is ${s.outcome}`);
+    assert.match(s.at, /Z$/);
+    assert.equal(typeof s.why, 'string');
+  }
+  assert.equal(state.stop, null);
+  assert.equal(state.finished, true);
+  assert.deepEqual(readdirSync(dirname(statePath)).filter((f) => f.endsWith('.tmp')), [], 'no half-written file left beside it');
+});
+
+test('the state file follows every step: running when it starts, its outcome when it ends, each write read back', async (t) => {
+  const { w, go, statePath } = makeWorld(t);
+  const seen = [];
+  const readText = (p) => {
+    let text = null;
+    try { text = readFileSync(p, 'utf8'); } catch { return null; }
+    if (p === statePath) seen.push(outcomes(JSON.parse(text)));
+    return text;
+  };
+  assert.equal(await go({ readText }), 0, out(w));
+  for (const step of STEPS) {
+    assert.ok(seen.some((o) => o[step] === 'running'), `${step} was shown running`);
+    const at = seen.findIndex((o) => o[step] === 'running');
+    assert.ok(seen.slice(at).some((o) => ['done', 'skip'].includes(o[step])), `${step} then shown done`);
+    assert.ok(seen.slice(0, at).every((o) => o[step] === 'pending'), `${step} pending before it ran`);
+  }
+});
+
+test('--no-prompt with answers missing: STOPPED at answers, exit 3, the stop says fill the form, nothing asked', async (t) => {
+  const { w, homeOpts, statePath } = makeWorld(t);
+  assert.equal(await noPromptRun(homeOpts), 3, out(w));
+  assert.match(out(w), /^STOPPED: answers: still to answer: projectName, githubRepo/m);
+  assert.match(out(w), /^  npm run onboard -- --product pressplay --no-prompt$/m);
+  assert.ok(!w.calls.some((c) => c.startsWith('npm')), 'nothing after the answers ran');
+  const state = readState(statePath);
+  assert.deepEqual(state.stop, { step: 'answers', kind: 'answers', why: state.steps[0].why, commands: [], link: null });
+  assert.match(state.stop.why, /still to answer: projectName/);
+  assert.equal(outcomes(state).answers, 'stopped');
+  assert.equal(outcomes(state).look, 'pending');
+  assert.equal(state.finished, false);
+});
+
+test('--no-prompt: answers filled in, the rerun stops for the paste block, then for the merge, then finishes', async (t) => {
+  const { w, homeOpts, reset, seedAnswers, statePath, logFile } = makeWorld(t);
+  assert.equal(await noPromptRun(homeOpts), 3, out(w));
+  seedAnswers();
+
+  // Stop 1: the sign-ins block, its lines in the stop.
+  reset();
+  assert.equal(await noPromptRun(homeOpts), 3, out(w));
+  assert.match(out(w), /^STOPPED: signins: waiting on you to run the block above/m);
+  assert.ok(!w.calls.some((c) => c.includes('onboard:copy')), 'copy did not run');
+  let state = readState(statePath);
+  assert.equal(state.stop.step, 'signins');
+  assert.equal(state.stop.kind, 'paste');
+  assert.equal(state.stop.link, null);
+  assert.equal(state.stop.commands.length, 3);
+  assert.match(state.stop.commands[0], /^cd /);
+  assert.equal(state.stop.commands[1], 'doppler projects create pressplay');
+  assert.match(state.stop.commands[2], /^TRACKER_DB=.* npm run tracker:signins -- create --name PressPlay --prefix PP --config /);
+  for (const line of state.stop.commands) assert.ok(out(w).includes(`  ${line}`), 'the same block is printed');
+  assert.deepEqual(outcomes(state), { answers: 'skip', look: 'done', clone: 'done', settings: 'done', signins: 'stopped', copy: 'pending', lanes: 'pending', merge: 'pending', protect: 'pending' });
+
+  // Dane pastes the block. Stop 2: the merge, the setup ticket's link in the stop.
+  w.signinsMade = true;
+  w.dopplerProject = true;
+  w.mergeAfterPolls = Infinity;
+  reset();
+  assert.equal(await noPromptRun(homeOpts), 3, out(w));
+  assert.match(out(w), /^signins\s+already done/m);
+  assert.match(out(w), /^STOPPED: merge: .*not merged yet; it waits on your merge phrase on PP-1/m);
+  assert.equal(w.polls, 1, 'one look at the pull request, no waiting');
+  assert.ok(!w.calls.some((c) => c.includes('-X PUT')), 'main not protected before the merge');
+  state = readState(statePath);
+  assert.deepEqual(state.stop, { step: 'merge', kind: 'merge', why: state.steps[7].why, commands: [], link: 'http://mac-mini.local:4180/t/PP-1' });
+  assert.equal(outcomes(state).lanes, 'done');
+  assert.equal(outcomes(state).protect, 'pending');
+
+  // Dane merges. The rerun goes on to protect, and finishes.
+  w.merged = true;
+  reset();
+  assert.equal(await noPromptRun(homeOpts), 0, out(w));
+  assert.match(out(w), /Done: pressplay is set up/);
+  state = readState(statePath);
+  assert.equal(state.stop, null);
+  assert.equal(state.finished, true);
+  assert.equal(outcomes(state).protect, 'done');
+  for (const s of state.steps) assert.ok(['done', 'skip'].includes(s.outcome), `${s.step} is ${s.outcome}`);
+
+  // Nothing secret anywhere in it, nor in the step log.
+  const text = readFileSync(statePath, 'utf8');
+  assert.ok(!text.includes('SECRET-TOKEN') && !readFileSync(logFile, 'utf8').includes('SECRET-TOKEN'));
+  assert.ok(!/dp\.(st|sa|ct|pt)\./.test(text), 'no Doppler token');
+});
+
+test('--no-prompt: a merge made before the run goes straight on, with no stop', async (t) => {
+  const { w, homeOpts, seedAnswers, statePath } = makeWorld(t);
+  seedAnswers();
+  w.signinsMade = true;
+  w.dopplerProject = true;
+  assert.equal(await noPromptRun(homeOpts), 0, out(w));
+  assert.equal(readState(statePath).finished, true);
+});
+
+test('--no-prompt: a failed step is a stop of kind failed, its FAILED text the why, exit 1; the rerun resumes', async (t) => {
+  const { w, homeOpts, reset, seedAnswers, statePath } = makeWorld(t);
+  seedAnswers();
+  w.signinsMade = true;
+  w.fail = 'copy';
+  assert.equal(await noPromptRun(homeOpts), 1, out(w));
+  const failed = /^FAILED: copy: (.*)$/m.exec(out(w));
+  assert.ok(failed, out(w));
+  let state = readState(statePath);
+  assert.deepEqual(state.stop, { step: 'copy', kind: 'failed', why: failed[1], commands: [], link: null });
+  assert.equal(outcomes(state).copy, 'failed');
+  assert.equal(outcomes(state).lanes, 'pending');
+  w.fail = null;
+  reset();
+  assert.equal(await noPromptRun(homeOpts), 0, out(w));
+  state = readState(statePath);
+  assert.equal(state.stop, null);
+  assert.equal(state.finished, true);
+});
+
+test('--no-prompt: a state file that cannot be written fails the run, and no step after it runs', async (t) => {
+  const { w, homeOpts, seedAnswers, statePath } = makeWorld(t);
+  seedAnswers();
+  const writeText = (p, text) => {
+    if (p.startsWith(`${statePath}.`)) { const e = new Error('no space'); e.code = 'ENOSPC'; throw e; }
+    writeFileSync(p, text);
+  };
+  assert.equal(await noPromptRun(homeOpts, { writeText }), 1, out(w));
+  assert.match(out(w), /^FAILED: state: could not write the state file .*pressplay\.state\.json: ENOSPC/m);
+  assert.ok(!w.calls.some((c) => c.startsWith('npm')), 'no step ran');
+  assert.ok(!out(w).includes('Done:'));
+});
+
+test('--no-prompt: a state file that does not read back as written fails the run', async (t) => {
+  const { w, homeOpts, seedAnswers, statePath } = makeWorld(t);
+  seedAnswers();
+  const readText = (p) => (p === statePath ? '{}' : (() => { try { return readFileSync(p, 'utf8'); } catch { return null; } })());
+  assert.equal(await noPromptRun(homeOpts, { readText }), 1, out(w));
+  assert.match(out(w), /^FAILED: state: .*did not read back as written/m);
+});
+
+test('in a Terminal, a state file that cannot be written is a warning and the run goes on as before', async (t) => {
+  const { w, go, statePath } = makeWorld(t);
+  const writeText = (p, text) => {
+    if (p.startsWith(`${statePath}.`)) { const e = new Error('no space'); e.code = 'ENOSPC'; throw e; }
+    writeFileSync(p, text);
+  };
+  assert.equal(await go({ writeText }), 0, out(w));
+  assert.match(out(w), /\(could not write the state file .*ENOSPC; the setup page will not see this run\)/);
+  assert.equal(w.printed.filter((l) => l.includes('could not write the state file')).length, 1, 'warned once, not on every step');
+  assert.match(out(w), /Done: pressplay is set up/);
+});
+
+test('in a Terminal with no one to answer, the stops still say what is next in the state file', async (t) => {
+  const { w, go, statePath } = makeWorld(t);
+  w.runAnswer = null; // no one at the Terminal to answer Run these now?
+  assert.equal(await go(), 3, out(w));
+  const state = readState(statePath);
+  assert.equal(state.stop.kind, 'paste');
+  assert.equal(state.stop.commands.length, 3);
+});
+
+test('--no-prompt: an error that is not a step\'s own stop marks the running step failed in the state file, exit 1', async (t) => {
+  const { w, homeOpts, seedAnswers, statePath, run: fakeRun } = makeWorld(t);
+  seedAnswers();
+  w.signinsMade = true;
+  w.dopplerProject = true;
+  const run = (cmd, args, o) => {
+    if (args.some((a) => String(a).includes('onboard:copy'))) throw new Error('spawn npm EACCES');
+    return fakeRun(cmd, args, o);
+  };
+  assert.equal(await noPromptRun(homeOpts, { run }), 1, out(w));
+  assert.match(out(w), /^FAILED: copy: unexpected error — spawn npm EACCES$/m);
+  const state = readState(statePath);
+  assert.equal(outcomes(state).copy, 'failed');
+  assert.equal(outcomes(state).lanes, 'pending');
+  assert.deepEqual(state.stop, { step: 'copy', kind: 'failed', why: 'unexpected error — spawn npm EACCES', commands: [], link: null });
+  assert.equal(state.finished, false);
+  assert.ok(!state.steps.some((s) => s.outcome === 'running'), 'no step left running over a run that died');
+});
+
+test('an answers file the wizard cannot read: FAILED at answers in the state file, not "running"', async (t) => {
+  const { w, homeOpts, answersFile, statePath } = makeWorld(t);
+  const readText = (p) => {
+    if (p === answersFile) { const e = new Error('EACCES: permission denied'); e.code = 'EACCES'; throw e; }
+    try { return readFileSync(p, 'utf8'); } catch { return null; }
+  };
+  assert.equal(await noPromptRun(homeOpts, { readText }), 1, out(w));
+  assert.match(out(w), /^FAILED: answers: unexpected error — EACCES: permission denied$/m);
+  const state = readState(statePath);
+  assert.equal(outcomes(state).answers, 'failed');
+  assert.equal(state.stop.kind, 'failed');
+});
+
+test('a state file whose rename fails leaves no half-written file beside it', async (t) => {
+  const { w, homeOpts, seedAnswers, statePath } = makeWorld(t);
+  seedAnswers();
+  const rename = (from, to) => {
+    if (to === statePath) { const e = new Error('cross-device'); e.code = 'EXDEV'; throw e; }
+    renameSync(from, to);
+  };
+  assert.equal(await noPromptRun(homeOpts, { rename }), 1, out(w));
+  assert.match(out(w), /^FAILED: state: .*EXDEV/m);
+  assert.deepEqual(readdirSync(dirname(statePath)).filter((f) => f.endsWith('.tmp')), []);
 });

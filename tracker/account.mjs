@@ -35,13 +35,13 @@ import { loadProjectConfig } from '../lib/projectConfig.mjs';
 const DAY = 24 * 60 * 60 * 1000;
 
 /** The setup email: `{ subject, text }`. `link` is the whole set-password address. */
-export function setupEmail({ name, productName, link, days }) {
+export function setupEmail({ name, projectName, link, days }) {
   return {
-    subject: `Set your ${productName} password`,
+    subject: `Set your ${projectName} password`,
     text: [
       `Hello ${name},`,
       '',
-      `Here is your link to set a password for the ${productName} tracker:`,
+      `Here is your link to set a password for the ${projectName} tracker:`,
       '',
       link,
       '',
@@ -52,13 +52,13 @@ export function setupEmail({ name, productName, link, days }) {
 }
 
 /** The reset email: `{ subject, text }`. `link` is the whole set-password address. */
-export function resetEmail({ name, productName, link }) {
+export function resetEmail({ name, projectName, link }) {
   return {
-    subject: `Reset your ${productName} password`,
+    subject: `Reset your ${projectName} password`,
     text: [
       `Hello ${name},`,
       '',
-      `Someone asked to reset your password for the ${productName} tracker. Here is your link to set a new one:`,
+      `Someone asked to reset your password for the ${projectName} tracker. Here is your link to set a new one:`,
       '',
       link,
       '',
@@ -75,7 +75,7 @@ export function resetEmail({ name, productName, link }) {
  * for the server log; the line never carries the link's token or the email.
  * A send the mail service refuses withdraws the link.
  */
-export async function sendResetLink({ store, email, send, trackerUrl, productName }) {
+export async function sendResetLink({ store, email, send, trackerUrl, projectName }) {
   const person = store.actorForEmail(email);
   if (!person) return { ok: true, line: 'reset asked for an email with no account; nothing sent' };
   if (!send) return { ok: false, line: `reset NOT sent to actor ${person.id}: ${MAIL_KEY} is not in Doppler, so no email can go out` };
@@ -89,7 +89,7 @@ export async function sendResetLink({ store, email, send, trackerUrl, productNam
   }
   const scrub = (text) => String(text ?? '').split(link.token).join('[link]');
   try {
-    await send({ to: store.emailOf(person.id), ...resetEmail({ name: person.name, productName, link: setPasswordUrl(trackerUrl, link.token) }) });
+    await send({ to: store.emailOf(person.id), ...resetEmail({ name: person.name, projectName, link: setPasswordUrl(trackerUrl, link.token) }) });
   } catch (err) {
     let withdrawn = 'the link was withdrawn';
     try { store.cancelLink(link.token); } catch (e) { withdrawn = `the link could NOT be withdrawn (${scrub(e.message)}), but it was never sent`; }
@@ -99,13 +99,13 @@ export async function sendResetLink({ store, email, send, trackerUrl, productNam
 }
 
 /** The invite email: `{ subject, text }`. `link` is the whole set-password address. */
-export function inviteEmail({ inviter, productName, link, days }) {
+export function inviteEmail({ inviter, projectName, link, days }) {
   return {
-    subject: `${inviter} invited you to the ${productName} tracker`,
+    subject: `${inviter} invited you to the ${projectName} tracker`,
     text: [
       'Hello,',
       '',
-      `${inviter} invited you to the ${productName} tracker. Here is your link to choose your name and a password:`,
+      `${inviter} invited you to the ${projectName} tracker. Here is your link to choose your name and a password:`,
       '',
       link,
       '',
@@ -126,7 +126,7 @@ export function inviteEmail({ inviter, productName, link, days }) {
  * carries `kind: 'invite'` and the `link`, for the demo to print; Resend
  * reads only `to`, `subject` and `text`.
  */
-export async function sendInvite({ store, email, madeBy, send, trackerUrl, productName, now = Date.now }) {
+export async function sendInvite({ store, email, madeBy, send, trackerUrl, projectName, now = Date.now }) {
   const refuse = (code, why) => ({ ok: false, code, line: `Not invited: ${why} Nothing was made or sent.` });
   const inviter = Number.isInteger(madeBy) ? store.getActor(madeBy) : null;
   if (!inviter || inviter.kind !== 'human') return refuse('people-only', 'only a person may invite someone.');
@@ -144,7 +144,7 @@ export async function sendInvite({ store, email, madeBy, send, trackerUrl, produ
   const to = email.trim().toLowerCase();
   const address = setPasswordUrl(trackerUrl, link.token);
   try {
-    await send({ to, ...inviteEmail({ inviter: inviter.name, productName, link: address, days }), kind: 'invite', link: address });
+    await send({ to, ...inviteEmail({ inviter: inviter.name, projectName, link: address, days }), kind: 'invite', link: address });
   } catch (err) {
     let withdrawn = 'The invite was withdrawn, so nothing usable is left.';
     try { store.cancelLink(link.token); } catch (e) { withdrawn = `The invite could NOT be withdrawn (${scrub(e.message)}); it was never sent, so nobody holds it.`; }
@@ -163,7 +163,7 @@ export function setPasswordUrl(trackerUrl, token) {
  * service (null: no key, refused); `trackerUrl` the address the link opens.
  * Answers `{ ok, line }`; the line never carries the link's token.
  */
-export async function sendSetupLink({ store, actor, email, send, trackerUrl, productName, now = Date.now }) {
+export async function sendSetupLink({ store, actor, email, send, trackerUrl, projectName, now = Date.now }) {
   const refuse = (why) => ({ ok: false, line: `NOT sent: ${why} Nothing was made or sent.` });
   const person = Number.isInteger(actor) ? store.getActor(actor) : null;
   if (!person) return refuse(`there is no actor ${actor} in this tracker.`);
@@ -184,7 +184,7 @@ export async function sendSetupLink({ store, actor, email, send, trackerUrl, pro
   const days = Math.round((Date.parse(link.expiresAt) - now()) / DAY);
   const to = email.trim().toLowerCase();
   try {
-    await send({ to, ...setupEmail({ name: person.name, productName, link: setPasswordUrl(trackerUrl, link.token), days }) });
+    await send({ to, ...setupEmail({ name: person.name, projectName, link: setPasswordUrl(trackerUrl, link.token), days }) });
   } catch (err) {
     let withdrawn = 'The link was withdrawn, so nothing usable is left.';
     try { store.cancelLink(link.token); } catch (e) { withdrawn = `The link could NOT be withdrawn (${scrub(e.message)}); it was never sent, so nobody holds it.`; }
@@ -230,7 +230,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   try {
     result = await sendSetupLink({
       store, actor: Number(values.actor), email: values.email, send, trackerUrl,
-      productName: store.getProject(config.productSlug)?.name ?? 'tracker',
+      projectName: store.getProject(config.projectSlug)?.name ?? 'tracker',
     });
   } finally {
     store.close();

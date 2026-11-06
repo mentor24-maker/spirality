@@ -178,11 +178,19 @@ details.edit button.remove-tag:hover { color: var(--red); }
 details.edit p.locked { margin: 0.3rem 0 0; }
 details.edit p.locked + p { margin: 0.2rem 0 0; font-size: 0.9em; }
 details.edit .edit-note:empty { display: none; }
-details.add-task { border: var(--hairline); border-radius: 8px; padding: 0.5rem 1.25rem; margin-bottom: 1rem; }
+details.add-task { border: var(--hairline); border-radius: 8px; padding: 0.5rem 1.25rem; margin-bottom: 1rem; background: var(--blue); color: var(--ink); }
+details.add-task form.request input, details.add-task form.request textarea { background: #fff; color: var(--ink); }
 details.add-task[open] { padding-bottom: 1rem; }
+details.add-task .note:not(:empty) { background: #fff; border-radius: 4px; padding: 0.15rem 0.5rem; }
 details.add-task > summary { cursor: pointer; font-weight: 600; }
 details.add-task form.request textarea { min-height: 8rem; }
 p.filed-note { margin: 0 0 1rem; }
+/* The Add Task box's question: "Did you mean for that to be associated with project X?" */
+dialog.project-check { border: var(--hairline); border-radius: 8px; padding: 1rem 1.25rem; max-width: 28rem; color: var(--ink); }
+dialog.project-check::backdrop { background: rgba(0, 0, 0, 0.3); }
+dialog.project-check p { margin: 0 1.5rem 1rem 0; }
+dialog.project-check .row { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+dialog.project-check button.close { float: right; border: 0; background: transparent; cursor: pointer; padding: 0 0.25rem; font-size: 1.25rem; line-height: 1; color: var(--quiet); }
 /* His answer is in; the relay owes the next move (SP-93). */
 .answer-in { font-size: 0.85rem; font-style: italic; color: var(--quiet); }
 .card .answer-in { display: block; }
@@ -206,3 +214,21 @@ ol.search-results .result-head a { color: var(--ink); font-weight: 600; text-dec
 ol.search-results .result-head a:hover { text-decoration: underline; }
 ol.search-results .excerpt { font-size: 0.9rem; }
 ol.search-results b { font-weight: 800; background: #fff1a8; }
+
+/* Set up a product (SP-127): the steps and the box saying what is next. */
+.setup .toolbar { justify-content: flex-start; }
+ol.setup-steps { padding-left: 1.5rem; }
+ol.setup-steps li { margin-bottom: 0.35rem; }
+ol.setup-steps .step-name { font-weight: 600; }
+ol.setup-steps .outcome { margin-left: 0.4rem; font-size: 0.85rem; padding: 0 0.4rem; border-radius: 4px; border: 1px solid var(--quiet); }
+ol.setup-steps .done .outcome, ol.setup-steps .skip .outcome { border-color: #2e7d32; color: #2e7d32; }
+ol.setup-steps .failed .outcome { border-color: var(--red); color: var(--red); }
+ol.setup-steps .stopped .outcome, ol.setup-steps .running .outcome { border-color: #b26a00; color: #b26a00; }
+ol.setup-steps .why { display: block; font-size: 0.85rem; }
+.setup-next { margin-top: 1.5rem; padding: 1rem; border: 1px solid var(--line); border-radius: 6px; }
+.setup-next h2 { margin-top: 0; }
+.setup-next .command { display: flex; gap: 0.5rem; align-items: flex-start; margin-bottom: 0.5rem; }
+.setup-next .command pre { flex: 1; min-width: 0; margin: 0; overflow-x: auto; }
+.setup-next pre.failed { white-space: pre-wrap; }
+section.setups ul { padding-left: 1.5rem; }
+form.request .field-note { display: block; font-size: 0.85rem; }

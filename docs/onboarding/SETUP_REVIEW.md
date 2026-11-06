@@ -1,8 +1,8 @@
-# Setting up a product on Spirality: what Normie's setup taught us, and a wizard
+# Setting up a project on Spirality: what Normie's setup taught us, and a wizard
 
-Normie was the first product brought onto Spirality from scratch. This page
+Normie was the first project brought onto Spirality from scratch. This page
 looks back at how that really went, names every hold-up, and designs a setup
-wizard so the next product, PressPlay, can come on in minutes. Written for
+wizard so the next project, PressPlay, can come on in minutes. Written for
 SP-105, "Streamline project setup process", from Dane's words:
 
 > With the Normie project set up, let's analyze the process we just went
@@ -25,7 +25,7 @@ had fixed the first thing they tripped on (SP-106). The Mini's lane logs,
 `~/loop-logs/normie-*.log`, are the source for when each lane first ran.
 
 The plan this followed is [NORMIE.md](NORMIE.md); the general checklist is
-[ONBOARDING_A_PRODUCT.md](../ONBOARDING_A_PRODUCT.md).
+[ONBOARDING_A_PROJECT.md](../ONBOARDING_A_PROJECT.md).
 
 ## In one paragraph
 
@@ -62,10 +62,10 @@ gap from one step to the next.
 | # | Ticket | What | Who | Times (Mountain) | Waits |
 |---|---|---|---|---|---|
 | 1 | SP-80 "Github repository field for Projects?" | Dane's request; slice A adds the repository field to the tracker's projects (PR #62) | Dane asks; loops build | card 11/1 4:48 PM; Dane "A, B, and C …" 5:42 PM; PR 11:55 PM; review passed 11/2 12:17 AM; Dane "merge" 8:53 AM; merged 8:57 AM | 6h13m answer to build; 8h36m overnight for "merge" |
-| 2 | SP-88 "Nobody has written down what a new product needs to run on Spirality: a checklist" | `docs/ONBOARDING_A_PRODUCT.md` (PR #67) | loops | card 11/1 11:59 PM; Dane "go" 11/2 8:53 AM; PR 11:13 AM; review passed 11:43 AM; "merge" 12:20 PM; merged 12:23 PM | 8h54m overnight for "go"; 2h20m go to PR |
+| 2 | SP-88 "Nobody has written down what a new product needs to run on Spirality: a checklist" | `docs/ONBOARDING_A_PROJECT.md` (PR #67) | loops | card 11/1 11:59 PM; Dane "go" 11/2 8:53 AM; PR 11:13 AM; review passed 11:43 AM; "merge" 12:20 PM; merged 12:23 PM | 8h54m overnight for "go"; 2h20m go to PR |
 | 3 | SP-89 "Normie is not set up on Spirality yet: plan its onboarding as tickets" | `docs/onboarding/NORMIE.md`, files SP-95 to SP-99 (PR #68) | loops | card 11/2 12:31 AM; "go" 8:52 AM; PR 12:41 PM; review passed 1:05 PM; "merge" 1:23 PM; merged 1:25 PM | 8h21m overnight for "go"; 3h49m go to PR |
 
-### Spirality's own fixes, so a second product can sit beside it
+### Spirality's own fixes, so a second project can sit beside it
 
 | # | Ticket | Who | Times (Mountain) | Waits |
 |---|---|---|---|---|
@@ -132,14 +132,14 @@ about it: **remove** it, **shorten** it, or **cannot touch** it (a real
 secret value, a billing screen, a browser login, or a decision that is
 genuinely Dane's).
 
-1. **Spirality's code still assumed one product.** Sign-ins shared by name
+1. **Spirality's code still assumed one project.** Sign-ins shared by name
    (SP-95), Doppler project typed in (SP-96), log and lock names typed in
    (SP-97), the repository field unchecked (SP-99), a ClickUp key asked of
-   every product (SP-103), tests that write into a commit hook's repository
+   every project (SP-103), tests that write into a commit hook's repository
    (SP-104). Cost: SP-98 could not start until SP-95 and SP-96 merged,
    4h51m after Dane's "go"; NO-4 stopped 4h16m for SP-103. Why: Spirality
    had only ever served itself. **Wizard: removes it for PressPlay**, because
-   these six are fixed. A seventh would only show when a third product
+   these six are fixed. A seventh would only show when a third project
    meets it; the wizard's first step, a read-only check of everything, is
    where it would show.
 
@@ -173,7 +173,7 @@ genuinely Dane's).
    had merged. Why: the relay (the job that acts on "go" and "merge") runs only when it is installed, and
    Normie's install is the last ticket, NO-6, so until then a person had to
    start Normie's relay by hand. **Wizard: removes it.** It installs the
-   product's lanes, the relay first, as soon as the product has a tracker
+   project's lanes, the relay first, as soon as the project has a tracker
    project and its sign-ins, before any ticket is filed there.
 
 6. **Dane started every Normie build session by hand.** NO-1 to NO-6, his
@@ -182,10 +182,10 @@ genuinely Dane's).
    one's card (NO-3 merged 10:51 AM, NO-4 card 10:58 AM; NO-4 merged
    5:54 PM, NO-5 card 6:01 PM) is a session he was sitting at. **Wizard:
    removes it**, for the same reason as 5: with the lanes in early, the
-   product's first real tickets are built unattended.
+   project's first real tickets are built unattended.
 
 7. **The settings file came before the repository could hold it.** The
-   sign-in command reads the product's settings file from the folder it runs
+   sign-in command reads the project's settings file from the folder it runs
    in, but the settings file (NO-3) needs the build lane's actor id that the
    sign-in command makes. The build pass on SP-98 found the command as
    written would have made nothing for Normie, and worked round it with a
@@ -194,12 +194,12 @@ genuinely Dane's).
    once, from what was entered, uses it for the sign-ins, then fills in the
    actor id and reads the file back through `lib/projectConfig.mjs`.
 
-8. **The product's own CI was already failing.** Normie's dependency audit
+8. **The project's own CI was already failing.** Normie's dependency audit
    failed on every pull request (NO-1), and Normie's commit hook runs the
    same checks, so NO-3 could not even commit until NO-1 merged (38 min
-   paused). **Wizard: cannot touch the fix**, which is work in the product
+   paused). **Wizard: cannot touch the fix**, which is work in the project
    (and which updates to take is Dane's decision), **but shortens the
-   surprise**: its first, read-only step runs the product's checks on a
+   surprise**: its first, read-only step runs the project's checks on a
    clean copy of `main` and says before anything else whether they pass.
 
 9. **Protecting `main` has to wait for the check to exist.** NO-2 renamed
@@ -221,7 +221,7 @@ genuinely Dane's).
     (question 3). The Doppler project could be made by the Doppler command
     line in that same Terminal step (question 4).
 
-11. **The loops' tests reached into the product's real repository.**
+11. **The loops' tests reached into the project's real repository.**
     NO-4's copied tests, run by Normie's commit hook, put a scratch commit
     on the real branch and a fake author "T" into Normie's git settings,
     undone by hand. Fixed by SP-104. **Wizard: removes it for PressPlay**
@@ -235,14 +235,14 @@ genuinely Dane's).
     Cost: **14h04m** from NO-5's merge (11/3 7:35 PM) to the lanes' first
     passes (11/4 9:39 AM), 10h25m of it the overnight "merge". **Wizard:
     removes it**, by moving the install to
-    the middle (hold-up 5) and pulling (or cloning) the product's checkout
+    the middle (hold-up 5) and pulling (or cloning) the project's checkout
     on the Mini as its own step.
 
 13. **A preview no loop could open.** NO-1's review could not open
     Normie's Vercel preview: the session's connector was refused (403), so
     "open the page" was left for Dane. Cost: not measured. **Wizard: cannot
     touch it** (a Vercel sign-in is **a browser login**), but it can record
-    the product's preview address pattern so the review card links it.
+    the project's preview address pattern so the review card links it.
 
 14. **The copied skills had never run as a lane.** The first pass of
     Normie's review lane (11/4 9:39 AM) stood down, taking its own lane for
@@ -293,11 +293,11 @@ steps below in order, each from its own script:
 | 2–3. The sign-ins and the repository field | [tracker/signins.mjs](../../tracker/signins.mjs) (SP-107 takes `--config` and fills the field, so step 3's page is not needed) | `tracker:signins` |
 | 4. The copy and its pull request | [copy.mjs](../../scripts/onboard/copy.mjs) (SP-110) | `onboard:copy` |
 | 7, before 5. The lanes and the setup ticket | [lanes.mjs](../../scripts/onboard/lanes.mjs) (SP-111) | `onboard:lanes` |
-| 5. The merge | the product's own relay, on Dane's merge phrase on the setup ticket; the wizard waits and reads it back | |
+| 5. The merge | the project's own relay, on Dane's merge phrase on the setup ticket; the wizard waits and reads it back | |
 | 6. Protecting `main` | [onboard.mjs](../../scripts/onboard/onboard.mjs) | |
 
 What changed from the plan below, as built: the lanes go in **before** the
-merge (SP-111), from the setup branch, so the product's own relay merges
+merge (SP-111), from the setup branch, so the project's own relay merges
 the setup pull request like any other ticket, and the wizard never merges.
 Dane's stops are exactly three: the answers that are his decisions (asked
 only when the answers file does not have them), the paste block (real
@@ -305,39 +305,43 @@ secret values), and his merge phrase on the setup ticket. The ticket for
 first real work (step 8) is not filed by the wizard; it prints the page to
 watch instead. Before the lanes step, the wizard removes the worktree
 `onboard:copy` keeps on the setup branch (git checks a branch out in one
-place only, and the lanes check it out in the product's own folder), and
-reads back that nothing else holds it. At the paste block it waits for the
-word `done`, not a bare Enter, so an Enter pressed while a step ran is not
-taken as the answer. Protecting `main` names any stricter setting already
+place only, and the lanes check it out in the project's own folder), and
+reads back that nothing else holds it. At the sign-ins (SP-124) it shows the
+commands and asks `Run these now? [y/N]`: on `y` it runs them itself, in
+Dane's own Terminal with their output shown, and stops with FAILED and the
+exit code if one fails; on anything else, a bare Enter included, nothing is
+run, the block stays printed and it stops (STOPPED; the rerun resumes). It
+used to wait for the word `done`, which was twice typed before the block had
+run anywhere. Protecting `main` names any stricter setting already
 there that it switches off (GitHub's protection write replaces them all). Each step checks first whether it is already done; once the
-product's `main` has its settings file with its own machine id, every step
+project's `main` has its settings file with its own machine id, every step
 up to the merge is.
 
 The design as it was planned:
 
 ### What a person enters
 
-Every value the product needs, asked once. Defaults in brackets come from
-the slug or from the **tracker home's** own settings file (the product that
+Every value the project needs, asked once. Defaults in brackets come from
+the slug or from the **tracker home's** own settings file (the project that
 runs the tracker, today Spirality's `spirality.project.json`); none is
 typed into the wizard's code (rule 2).
 
 | Field | What it is | Normie's value | Default | Whose |
 |---|---|---|---|---|
-| Product name | What the tracker shows | `Normie` | | Dane (a decision) |
+| Project name | What the tracker shows | `Normie` | | Dane (a decision) |
 | GitHub repository | `owner/name` | `mentor24-maker/normie` | | Dane (a decision) |
-| Product slug | Short name: logs, locks, the tracker project | `normie` | name, lower case | |
+| Project slug | Short name: logs, locks, the tracker project | `normie` | name, lower case | |
 | Ticket prefix | The start of every ticket id | `NO` | first two letters, upper case | Dane (a decision) |
-| Doppler project / config | Where the product's loop keys live | `normie` / `dev` | slug / `dev` | |
+| Doppler project / config | Where the project's loop keys live | `normie` / `dev` | slug / `dev` | |
 | launchd prefix | The start of every job label on the Mini | `com.normie` | `com.<slug>` | |
-| Checkout on the Mini | Where the product's main copy lives | `~/WebApps/normie` | the folder beside the tracker home's | |
-| The product's check | The command CI and the loops run as `verify` | `npm run verify:full` | `npm run verify` | |
-| Node version | What the product needs | `22` (its `.nvmrc`) | read from `.nvmrc` or `package.json` `engines` | |
+| Checkout on the Mini | Where the project's main copy lives | `~/WebApps/normie` | the folder beside the tracker home's | |
+| The project's check | The command CI and the loops run as `verify` | `npm run verify:full` | `npm run verify` | |
+| Node version | What the project needs | `22` (its `.nvmrc`) | read from `.nvmrc` or `package.json` `engines` | |
 | Merge phrases | What Dane writes to mean "merge this" | `merge`, `merge it`, `ship it`, `approve` | the tracker home's `mergePhrases` | Dane (a decision) |
 | Lanes that may merge without Dane | `autoMergeLanes` | none | none | Dane (a decision) |
 | Extra protected files | Added to `governancePaths` | `.cursorrules` | the tracker home's list | Dane (a decision) |
 | Hosting | Where the app deploys, and its preview address, if any | Vercel (preview check on every pull request) | none | |
-| What the product is | Two or three sentences for its `CLAUDE.md` | (Normie's existing guide kept) | | Dane (a decision) |
+| What the project is | Two or three sentences for its `CLAUDE.md` | (Normie's existing guide kept) | | Dane (a decision) |
 
 Not asked, because they are found or follow from the above:
 `operatorUserId` (Dane's existing actor, found by name: `1`);
@@ -364,9 +368,9 @@ it runs.
 - The tracker: reachable at `trackerApiUrl`; whether the project, prefix
   and `<slug> …` actors already exist; that the prefix is not taken.
 - Doppler: whether the project and config exist.
-- The product's own check, on a clean copy of `main`: passes or not
+- The project's own check, on a clean copy of `main`: passes or not
   (hold-up 8). Spirality's tests that would be copied, run once in a scratch
-  copy of the product (hold-up 11).
+  copy of the project (hold-up 11).
 - Prints one table: each item `ready`, `will do`, or `BLOCKED: <why>`.
   Any `BLOCKED` stops here, before anything is written.
 
@@ -381,8 +385,9 @@ make the Doppler project and config if step 0 found none, then
 `tracker:signins create` against the scratch settings file with
 `TRACKER_DB` set to the tracker home's database. It makes the tracker
 project with its prefix, the five `<slug> …` actors and their tokens, and
-writes the tokens into the product's Doppler project. The wizard waits for
-Enter, then reads back: `tracker:signins check` (every seat answers as
+writes the tokens into the project's Doppler project. The wizard asks
+`Run these now? [y/N]` and runs them on Dane's y (as built, SP-124), then
+reads back: `tracker:signins check` (every seat answers as
 itself, and the tracker home's seats still answer as theirs), and the
 project's row in the tracker. It writes `machineUserId` into the settings
 file and checks the file again.
@@ -392,9 +397,9 @@ project's Edit page at `<trackerUrl>/projects/<slug>/edit`, unless
 question 3 lets step 2 set it. Read back: `npm run clickup -- repo-check`
 from the scratch folder says the field and `githubRepo` agree.
 
-**4. One pull request in the product's repository**, on a branch off
+**4. One pull request in the project's repository**, on a branch off
 `main`: the settings file; the CI workflow with one job named `verify`
-running the product's check; the ticket door and its npm scripts; the four
+running the project's check; the ticket door and its npm scripts; the four
 loop skills, the main-branch hook and `docs/LOOP_ENGINEERING.md`; the "How
 to work with Dane" and "Where the work is tracked" sections added to its
 `CLAUDE.md` (its own guide kept). Every copied file is compared byte for
@@ -404,7 +409,7 @@ commit. Read back: from a fresh worktree of the branch, `npm run doctor`,
 `npm run clickup -- queue` (empty) all pass, and CI's `verify` check is
 green on the pull request.
 
-**5. Stop for Dane: "merge"** (**a decision of his**). Until the product's
+**5. Stop for Dane: "merge"** (**a decision of his**). Until the project's
 relay runs, the wizard is what is waiting, so it merges on his word typed
 into the wizard, through the same gates the relay checks (green `verify`,
 up to date with `main`). Read back: the merge commit on `main`, and CI's
@@ -415,13 +420,13 @@ check `verify`, up to date, admins included, force pushes and deletion off,
 no review required. Read back: `gh api repos/<githubRepo>/branches/main/protection`
 shows exactly that.
 
-**7. Install the lanes on the Mini** from the product's checkout, pulled to
+**7. Install the lanes on the Mini** from the project's checkout, pulled to
 the new `main`: `scripts/install_loop_runner.sh`, relay first. Read back:
 `./scripts/install_loop_runner.sh --status` shows every job loaded, each
 log has a `START` line after its first pass, and that pass's report did its
 lane's work rather than stand down on its own lane (hold-up 14).
 
-**8. Hand over.** Files one ticket in the product's own project, assigned
+**8. Hand over.** Files one ticket in the project's own tracker project, assigned
 to nobody, for its first real piece of work if Dane named one (question
 5), and prints the page to watch: `<trackerUrl>/list/<slug>`. Read back:
 the ticket answers `npm run clickup -- get`.
@@ -437,11 +442,11 @@ decision** (make the repository public), and the wizard stops there.
 
 | Part | Today | Needs |
 |---|---|---|
-| Step 0, the read-only look | pieces exist (`npm run doctor`, `repo-check`, `tracker:signins check`) | a ticket: one script that runs them for a product not yet set up, plus the GitHub plan check |
+| Step 0, the read-only look | pieces exist (`npm run doctor`, `repo-check`, `tracker:signins check`) | a ticket: one script that runs them for a project not yet set up, plus the GitHub plan check |
 | Step 1, writing the settings file | by hand (NO-3) | a ticket: generate it from answers; the check is already `lib/projectConfig.mjs` |
 | Step 2, the sign-ins | one command (`tracker:signins create`), but it needs a settings file in the folder it runs from | a ticket: let it take the settings file's path, so no `/tmp` workaround (hold-up 7) |
 | Step 3, the repository field | only the page | a ticket, only if Dane says yes to question 3 |
-| Step 4, the copy into the product | by hand, three tickets (NO-3, NO-4, NO-5) | a ticket: copy a named list of files from a named commit, compare them, open one PR. Later, the shared package (`docs/PLAN.md`) replaces the copy |
+| Step 4, the copy into the project | by hand, three tickets (NO-3, NO-4, NO-5) | a ticket: copy a named list of files from a named commit, compare them, open one PR. Later, the shared package (`docs/PLAN.md`) replaces the copy |
 | Step 5, merging on his word | the relay, once installed | nothing new if the lanes go in at step 7 and step 5 waits for the relay; a ticket if the wizard merges itself |
 | Step 6, protecting `main` | one `gh api` command (NO-2) | folded into the wizard; no ticket of its own |
 | Step 7, the lanes | one command (`install_loop_runner.sh`) | nothing; the wizard runs it |
@@ -488,7 +493,7 @@ GitHub's rules rather than PressPlay's code:
 
 | Hold-up | PressPlay |
 |---|---|
-| 1. Spirality assumed one product | fixed; step 0 would show a new one |
+| 1. Spirality assumed one project | fixed; step 0 would show a new one |
 | 2. Overnight waits | asked once, up front, with the wizard |
 | 3. One ticket per step | one pull request with the wizard |
 | 4. In line in Spirality's build lane | gone with the wizard |

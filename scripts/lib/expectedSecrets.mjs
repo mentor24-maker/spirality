@@ -1,5 +1,5 @@
 /**
- * The ONE list of secret names a product expects in Doppler. A ticket that
+ * The ONE list of secret names a project expects in Doppler. A ticket that
  * adds a key adds a line here, so `npm run doctor` starts reporting it the
  * moment the code depends on it. Names only: no value ever appears in this
  * repository (it is public). Which Doppler project and config to look in is
@@ -12,14 +12,14 @@
  * Doppler. The tracker's hand-over email needs the Resend key and the
  * address it goes to (tracker/notify.mjs).
  *
- * A key marked `trackerHome` is needed only by the product that runs the
+ * A key marked `trackerHome` is needed only by the project that runs the
  * tracker service (its config sets `trackerPort`): the operator's own
- * sign-in and the hand-over email. Any other product never needs them.
+ * sign-in and the hand-over email. Any other project never needs them.
  *
- * A key marked `clickup` is needed only by a product that still talks to
+ * A key marked `clickup` is needed only by a project that still talks to
  * ClickUp (usesClickUp): its `tracker` is `"clickup"`, or its
  * `loopQueueListId` names a real ClickUp list (not `"0"`), as Spirality's
- * does, kept as the record to compare the tracker against. A product never
+ * does, kept as the record to compare the tracker against. A project never
  * on ClickUp (`tracker` `"api"`, ClickUp ids `"0"`) is never asked for it.
  */
 
@@ -29,8 +29,8 @@
  * the operator's actor takes the project config's `operatorName`. The
  * `handRun` seat is the one a session started by hand signs in as, when no
  * runner names a seat (scripts/tracker/apiTracker.mjs, trackerTokenEnv).
- * `tracker/signins.mjs create` makes exactly these for the product that
- * runs the tracker. Any other product signs in with the machine seats only,
+ * `tracker/signins.mjs create` makes exactly these for the project that
+ * runs the tracker. Any other project signs in with the machine seats only,
  * under the same secret names in its own Doppler project, its actors named
  * for it (`normie loop-build`): seatsForConfig in tracker/signins.mjs.
  */
@@ -51,9 +51,9 @@ export const EXPECTED_SECRETS = [
 ];
 
 /**
- * Whether a product still talks to ClickUp, from its project config alone:
+ * Whether a project still talks to ClickUp, from its project config alone:
  * its tracker is ClickUp (`tracker` left out means `"clickup"`), or its
- * `loopQueueListId` is a real list rather than the `"0"` of a product that
+ * `loopQueueListId` is a real list rather than the `"0"` of a project that
  * was never there.
  */
 export function usesClickUp(config) {
@@ -61,8 +61,8 @@ export function usesClickUp(config) {
 }
 
 /**
- * What doctor checks for one product, from its project config: the Doppler
- * project and config to look in, and the keys that product needs there
+ * What doctor checks for one project, from its project config: the Doppler
+ * project and config to look in, and the keys that project needs there
  * (the `trackerHome` ones only when it runs the tracker, `trackerPort` set;
  * the `clickup` ones only when usesClickUp).
  * Returns `{ project, configs, expected }` for doctorReport and formatReport.

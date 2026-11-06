@@ -39,7 +39,7 @@ echo "${LOOP_RUNNER_PID:-}"
   guarded on the ticket's status). Otherwise carry on.
 - **Whenever you stop for this reason**, the first line of your report is
   exactly `LANE STOOD DOWN: <why, in one line>`, and nothing else ever starts
-  with those words. The setup wizard reads a new product's first lane passes
+  with those words. The setup wizard reads a new project's first lane passes
   for that line (`npm run onboard:lanes`), never for wording, because a pass
   that is the lane says "I am the lane, not a second one" too.
 

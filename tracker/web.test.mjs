@@ -6,10 +6,13 @@ import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
-import { startServer } from './server.mjs';
 import { seedDemo, tickingClock } from './demoData.mjs';
 import { reportsOf, REPORT_RANGES, searchTickets } from './pageData.mjs';
-import { escapeHtml, renderComment, renderInline, renderMarkdown, renderQuickAction, renderCommands, cardCommands, cardAsk, renderMergeAction, renderAnswerIn, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, activeFilters, redrawHold, drawnChoice } from './web/render.mjs';
+import { escapeHtml, renderComment, renderInline, renderMarkdown, renderQuickAction, renderCommands, cardCommands, cardAsk, renderMergeAction, renderAnswerIn, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket } from './web/render.mjs';
+import { startServer, setupSettingsOf } from './server.mjs';
+import { saveAnswers, setupFields, setupOf } from './setup.mjs';
+import { DANE_FIELDS as SETUP_FIELDS, STEPS as SETUP_STEPS } from '../scripts/onboard/onboard.mjs';
+import { slugFromName } from '../lib/onboardAnswers.mjs';
 import { loadProjectConfig } from '../lib/projectConfig.mjs';
 import operatorCard from '../lib/operatorCard.js';
 import machineComment from '../lib/machineComment.js';
@@ -48,8 +51,8 @@ async function fixture({ mergePhrase, closePhrase, goPhrase } = {}) {
       operatorUserId: seed.operator.id, machineUserId: seed.loop.id,
       githubRepo: 'owner/repo', dopplerProject: 'proj', dopplerConfig: 'dev',
       launchdPrefix: 'com.example', logDir: '~/loop-logs', mergePhrases: ['merge'],
-      governancePaths: [], autoMergeLanes: [], operatorName: 'Dane', productSlug: slug,
-      legacyMachinePrefixes: [], productScripts: {}, tracker: 'api', trackerUrl: url,
+      governancePaths: [], autoMergeLanes: [], operatorName: 'Dane', projectSlug: slug,
+      legacyMachinePrefixes: [], projectScripts: {}, tracker: 'api', trackerUrl: url,
     }));
     return new Promise((resolve) => {
       const env = { PATH: process.env.PATH, HOME: process.env.HOME, TRACKER_TOKEN_HAND_RUN: loopToken };
@@ -330,7 +333,7 @@ test('the Projects screen is a table whose View icon opens the details page; a n
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   assert.match(app, /<table class="projects">/);
   assert.match(app, /<th class="actions">Actions<\/th><\/tr><\/thead><tbody>\$\{projects\.map\(row\)/);
-  assert.match(app, /action\(`\/projects\/\$\{encodeURIComponent\(p\.slug\)\}`, 'View project', ICONS\.view\)/);
+  assert.match(app, /action\(`\/projects\/\$\{encodeURIComponent\(p\.slug\)\}`, 'View Project', ICONS\.view\)/);
   // SP-42's behaviour: the name goes to the project's tasks in the last view, and opening it selects it.
   assert.match(app, /<td class="name"><a href="\/\$\{savedView\(\)\}\/\$\{encodeURIComponent\(p\.slug\)\}"/);
   assert.match(app, /localStorage\.setItem\(PROJECT_KEY, board\.project\)/);
@@ -364,7 +367,7 @@ test('a ticket\'s pull request on the list is the one the merge step would act o
 
 test('the list\'s actions only go where the page already goes: the ticket, its reply box, its pull request', () => {
   const app = readFileSync(WEB('app.mjs'), 'utf8');
-  assert.match(app, /action\(at, 'Open ticket', ICONS\.open\)/);
+  assert.match(app, /action\(at, 'Open Ticket', ICONS\.open\)/);
   assert.match(app, /action\(`\$\{at\}#reply`, 'Reply', ICONS\.reply\)/);
   // The PR icon shows only when there is one, and opens GitHub in its own tab.
   assert.match(app, /t\.pullRequest \? action\(t\.pullRequest, '[^']+', ICONS\.pullRequest, true\) : ''/);
@@ -487,7 +490,7 @@ test('the projects list names the project the server was given as its default, a
 test('the Add Task box on the Tasks page files into the project shown, in Requested as typed, keeps the text when refused or signed out, and is gone from the header', () => {
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   const wire = app.slice(app.indexOf('function wireAddTask'), app.indexOf('/**', app.indexOf('function wireAddTask')));
-  assert.match(wire, /api\('POST', `\/projects\/\$\{encodeURIComponent\(slug\)\}\/tickets`, \{\s*name: title\.value, description: description\.value, status: 'Requested',\s*\}\)/);
+  assert.match(wire, /api\('POST', `\/projects\/\$\{encodeURIComponent\(into\)\}\/tickets`, \{\s*name: title\.value, description: description\.value, status: 'Requested',\s*\}\)/);
   assert.ok(!/assignee/.test(wire), 'a request is filed unassigned');
   assert.match(wire, /note\.textContent = `Not filed: \$\{err\.message\}`;/);
   assert.match(wire, /localStorage\.setItem\(DRAFT_KEY,/);
@@ -495,7 +498,7 @@ test('the Add Task box on the Tasks page files into the project shown, in Reques
   assert.match(wire, /if \(adding \|\| draft\.title \|\| draft\.description\) box\.open = true;/, 'kept text opens the box on its own');
   assert.match(wire, /drawSignIn\('You were signed out; your request was not filed\. What you typed is kept/);
   // Filed: the draft is forgotten and the page redraws, box closed, naming the new id.
-  assert.match(wire, /localStorage\.removeItem\(DRAFT_KEY\);[\s\S]*await drawAgain\(\(\) => drawProject\(slug, view, \{ filed: ticket\.id \}\)\);/);
+  assert.match(wire, /localStorage\.removeItem\(DRAFT_KEY\);[\s\S]*await drawAgain\(\(\) => drawProject\(into, view, \{ filed: ticket\.id, unchecked \}\)\);/);
   const draw = app.slice(app.indexOf('async function drawProject'), app.indexOf('async function copyText'));
   assert.match(draw, /<details class="add-task">\s*<summary>Add Task<\/summary>\s*<form class="request">/, 'drawn closed, on the board and the list alike');
   assert.match(draw, /Filed <a href="\/t\/\$\{encodeURIComponent\(filed\)\}">\$\{escapeHtml\(filed\)\}<\/a>/);
@@ -504,7 +507,47 @@ test('the Add Task box on the Tasks page files into the project shown, in Reques
   // The old address opens the Tasks page with the box open.
   assert.match(/async function route\(\{ place = null \} = \{\}\) \{[\s\S]*?\n\}/.exec(app)[0], /\} else if \(isNew\) \{[\s\S]*?await drawTasks\(savedView\(\), \{ adding: true \}\);/);
   assert.doesNotMatch(readFileSync(WEB('index.html'), 'utf8'), /New request|href="\/new"/);
-  assert.match(readFileSync(WEB('app.css'), 'utf8'), /details\.add-task \{/);
+  const css = readFileSync(WEB('app.css'), 'utf8');
+  const box = /details\.add-task \{([^}]*)\}/.exec(css);
+  assert.ok(box, 'the Add Task box has its own rule');
+  assert.match(box[1], /background: var\(--blue\);/, 'the box is the logo blue, closed and open');
+  assert.match(box[1], /color: var\(--ink\);/, 'dark text on the blue, not white');
+  assert.match(css, /details\.add-task form\.request input, details\.add-task form\.request textarea \{[^}]*background: #fff;/, 'the fields stay white');
+  // The status line (Filing…, Not filed: …) keeps its quiet grey and red, so it sits on white, readable on the blue.
+  assert.match(css, /details\.add-task \.note:not\(:empty\) \{[^}]*background: #fff;/, 'the note sits on a white pill inside the blue box');
+});
+
+test('the Add Task box checks the project before filing: asks "Did you mean ...?" when another fits, files where he says, never blocks on a failed check', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const wire = app.slice(app.indexOf('function wireAddTask'), app.indexOf('/**', app.indexOf('function wireAddTask')));
+  // The check comes first, with the words as typed, and writes nothing (its server test reads the store).
+  const check = wire.indexOf("api('POST', `/projects/${encodeURIComponent(slug)}/tickets/check`, {");
+  const file = wire.indexOf("api('POST', `/projects/${encodeURIComponent(into)}/tickets`, {");
+  assert.ok(check > 0 && file > check, 'the check is asked before the ticket is filed');
+  assert.match(wire.slice(check), /^api\('POST', [^,]+, \{\s*name: title\.value, description: description\.value,\s*\}\)/);
+  // No suggestion: files into the project shown, as before.
+  assert.match(wire, /let into = slug;\s*if \(suggest\) \{/);
+  // A suggestion: File in X files there; Keep in files here; closing files nothing and keeps the text.
+  assert.match(wire, /const choice = await askProject\(question, suggest\);\s*if \(choice === 'move'\) into = suggest\.slug;\s*else if \(choice !== 'keep'\) \{[^}]*button\.disabled = false;[^}]*return;\s*\}/);
+  assert.doesNotMatch(wire.slice(wire.indexOf("else if (choice !== 'keep')"), wire.indexOf('return;', wire.indexOf("else if (choice !== 'keep')"))), /removeItem|title\.value =|description\.value =/, 'closing leaves the form and the draft as they were');
+  // A failed check (anything but a sign-out) files into the project shown, and the note says so.
+  assert.match(wire, /\} catch \(err\) \{\s*if \(err instanceof SignedOut\) return drawSignIn\([^)]*\);\s*unchecked = true;\s*\}/);
+  assert.match(app, /const UNCHECKED_NOTE = 'The project check could not run, so it went into the project shown\.';/);
+  const draw = app.slice(app.indexOf('async function drawProject'), app.indexOf('async function copyText'));
+  assert.match(draw, /\$\{unchecked \? `\. \$\{UNCHECKED_NOTE\}` : ''\}/);
+  // Filed elsewhere: X's board opens, naming X's new ticket id.
+  assert.match(wire, /if \(into !== slug\) history\.pushState\(null, '', `\/\$\{view\}\/\$\{encodeURIComponent\(into\)\}`\);/);
+  // The question box: the words of the ticket, File in X, Keep in the project shown, and a close.
+  assert.match(draw, /<dialog class="project-check"[^>]*>\s*<form method="dialog">/);
+  assert.match(draw, /Did you mean for that to be associated with project <strong class="project-name"><\/strong>\?/);
+  assert.match(draw, /<button type="submit" value="move">File in<\/button>/);
+  assert.match(draw, /<button type="submit" value="keep">Keep in \$\{escapeHtml\(board\.projectName\)\}<\/button>/);
+  assert.match(draw, /<button type="submit" class="close" value="" aria-label="Close: file nothing">/);
+  const ask = app.slice(app.indexOf('function askProject'), app.indexOf('/**', app.indexOf('function askProject')));
+  assert.match(ask, /\.project-name'\)\.textContent = suggest\.name;/, 'the name goes in as text, never markup');
+  assert.match(ask, /button\[value="move"\]'\)\.textContent = `File in \$\{suggest\.name\}`;/);
+  assert.match(ask, /question\.returnValue = '';[\s\S]*resolve\(question\.returnValue\)[\s\S]*question\.showModal\(\);/, 'Esc or the close button answers empty: file nothing');
+  assert.match(readFileSync(WEB('app.css'), 'utf8'), /dialog\.project-check \{/);
 });
 
 // ── Copy to another project ──────────────────────────────────────────────────
@@ -655,7 +698,7 @@ test('Waiting on you is a bell on the right, just before "Signed in as", coloure
   assert.deepEqual([...nav.matchAll(/>([^<]+)<\/a>/g)].map((m) => m[1]), ['Projects', 'Tasks', 'Reporting', 'People', 'Settings']);
   assert.doesNotMatch(nav, /Waiting on you/);
   const me = /<span class="me">([\s\S]*?)<\/span>\s*<\/header>/.exec(html)[1];
-  assert.match(me, /<a id="bell" href="\/" title="Waiting on you" aria-label="Waiting on you" data-colour="grey" hidden><svg [^>]*aria-hidden="true">[\s\S]*?<\/svg><\/a>\s*<span id="who"><\/span>/);
+  assert.match(me, /<a id="bell" href="\/" title="Waiting on You" aria-label="Waiting on You" data-colour="grey" hidden><svg [^>]*aria-hidden="true">[\s\S]*?<\/svg><\/a>\s*<span id="who"><\/span>/);
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   assert.match(app, /function showBell\(\) \{\s*bell\.dataset\.colour = bellColour\(waitingCount\);\s*\}/);
   // Every place the count is read colours the bell: the one-minute refresh and the Waiting on you page.
@@ -1024,7 +1067,7 @@ test('every page puts its trail at the top: ticket, board, list, Waiting on you,
   assert.match(body('drawTicket'), /putTrail\(\[\s*\{ label: t\.projectName, href: `\/\$\{savedView\(\)\}\/\$\{encodeURIComponent\(t\.project\)\}` \},\s*\{ label: `Task \$\{t\.id\}`, href: `\/t\/\$\{encodeURIComponent\(t\.id\)\}` \},\s*\{ label: 'Details' \},\s*\]\)/);
   // A project's board or list climbs to Projects.
   assert.match(body('drawProject'), /putTrail\(\[\{ label: board\.projectName, href: '\/projects' \}, \{ label: view === 'board' \? 'Board' : 'List' \}\]\)/);
-  assert.match(body('drawWaiting'), /putTrail\(\[\{ label: 'Waiting on you' \}\]\)/);
+  assert.match(body('drawWaiting'), /putTrail\(\[\{ label: 'Waiting on You' \}\]\)/);
   assert.match(body('drawProjects'), /putTrail\(\[\{ label: 'Projects' \}\]\)/);
   // Each trail goes in after its page is drawn, so it sits first in main.
   assert.match(app, /main\.insertAdjacentHTML\('afterbegin', renderTrail\(steps\)\)/);
@@ -1083,7 +1126,9 @@ test('/projects/new is the page to a browser, and its logo can be drawn: the loc
 
 test('the New project button and form are a person\'s only; a refused save keeps what was typed and says why; success opens the details page', () => {
   const app = readFileSync(WEB('app.mjs'), 'utf8');
-  assert.match(app, /me\?\.kind === 'human' \? '<div class="toolbar"><a class="button" href="\/projects\/new">New project<\/a><\/div>' : ''/);
+  // SP-127: the Projects page's button is Set up a product; the bare form is a link on its page.
+  assert.match(app, /me\?\.kind === 'human' \? '<div class="toolbar"><a class="button" href="\/setup\/new">Set Up a Product<\/a><\/div>' : ''/);
+  assert.match(app, /<a href="\/projects\/new">New project<\/a>/);
   const form = app.slice(app.indexOf('async function drawCreateProject'), app.indexOf('/**', app.indexOf('async function drawCreateProject')));
   assert.match(form, /if \(me\?\.kind !== 'human'\)[\s\S]{0,200}Only a person signed in to the tracker can add a project\./);
   for (const id of ['name', 'slug', 'prefix', 'url', 'logo', 'repo']) assert.match(form, new RegExp(`field\\('${id}',`), id);
@@ -1105,7 +1150,7 @@ test('the New project button and form are a person\'s only; a refused save keeps
   assert.match(app, /const isRepo = \(v\) => typeof v === 'string' && \/\^\[A-Za-z0-9-\]\+\\\/\[A-Za-z0-9\._-\]\+\$\/\.test\(v\);/);
   assert.match(app, /<a href="https:\/\/github\.com\/\$\{escapeHtml\(p\.repo\)\}" target="_blank" rel="noopener noreferrer">\$\{escapeHtml\(p\.repo\)\}<\/a>/);
   assert.match(app, /<td class="repo">\$\{repoOf\(p\)\}<\/td>/);
-  assert.match(app, /<th class="repo">GitHub repository<\/th>/);
+  assert.match(app, /<th class="repo">GitHub Repository<\/th>/);
   assert.match(app, /<dt>GitHub repository<\/dt><dd>\$\{repoOf\(p\)\}<\/dd>/);
 });
 
@@ -1178,7 +1223,7 @@ test('the Projects table gives a person Edit and Delete on every row and a loop\
   const table = app.slice(app.indexOf('async function drawProjects'), app.indexOf('/**', app.indexOf('async function drawProjects')));
   // Both icons are drawn only for a person; otherwise the cell holds the View icon alone.
   assert.match(table, /const people = me\?\.kind === 'human';/);
-  assert.match(table, /\$\{people\n\s+\? action\(`\/projects\/\$\{encodeURIComponent\(p\.slug\)\}\/edit`, 'Edit project', ICONS\.edit\)\n\s+\+ actionButton\('Delete project', ICONS\.delete, \{ delete: p\.slug, name: p\.name \}\)\n\s+: ''\}/);
+  assert.match(table, /\$\{people\n\s+\? action\(`\/projects\/\$\{encodeURIComponent\(p\.slug\)\}\/edit`, 'Edit Project', ICONS\.edit\)\n\s+\+ actionButton\('Delete Project', ICONS\.delete, \{ delete: p\.slug, name: p\.name \}\)\n\s+: ''\}/);
   assert.equal((table.match(/ICONS\.edit/g) ?? []).length, 1, 'Edit is drawn in one place, behind the person check');
   assert.equal((table.match(/ICONS\.delete/g) ?? []).length, 1, 'Delete is drawn in one place, behind the person check');
   // Delete asks, by name, before anything is sent.
@@ -1550,7 +1595,7 @@ test('the list draws the bin on exactly the board\'s Requested and Queued rows, 
     assert.ok(f.store.getTicket(started.id));
   } finally { await f.cleanup(); }
   const app = readFileSync(WEB('app.mjs'), 'utf8');
-  assert.match(app, /canDelete\(status\) \? actionButton\('Delete ticket', ICONS\.delete, \{ delete: t\.id \}\) : ''/);
+  assert.match(app, /canDelete\(status\) \? actionButton\('Delete Ticket', ICONS\.delete, \{ delete: t\.id \}\) : ''/);
   assert.match(app, /c\.tickets\.map\(row\(c\.status\)\)/);
   // No bin on the board's cards.
   const card = /const card = \(t\) => `([\s\S]*?)`;/.exec(app)[1];
@@ -1737,13 +1782,13 @@ test('the sign-in form is an email and a password with "Forgot password?"; the p
   const form = renderSignIn();
   assert.match(form, /<input id="email" type="email" autocomplete="username" required>/);
   assert.match(form, /<input id="password" type="password" autocomplete="current-password" required>/);
-  assert.match(form, /<button type="button" class="link forgot">Forgot password\?<\/button>/);
+  assert.match(form, /<button type="button" class="link forgot">Forgot Password\?<\/button>/);
   assert.doesNotMatch(form, /token/i);
   assert.match(renderSignIn('<b>no</b>'), /<p class="note error">&lt;b&gt;no&lt;\/b&gt;<\/p>/);
   const forgot = renderForgot('a"b@example.com');
   assert.match(forgot, /value="a&quot;b@example\.com"/);
   assert.match(forgot, /works for 1 hour/);
-  assert.match(forgot, /<a href="\/">Back to Sign in<\/a>/);
+  assert.match(forgot, /<a href="\/">Back to Sign In<\/a>/);
 
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   assert.doesNotMatch(app, /authorization|Bearer/, 'the page never sends a token');
@@ -2030,9 +2075,9 @@ test('the Reporting page draws only the server\'s figures: ranges and stages fro
   assert.doesNotMatch(draw, /'Queued'|'Requested'|'Building'|'Live'/, 'the stages come from the server, never typed out');
   assert.match(draw, /el\.style\.setProperty\('--stage-border', look\.border\);/);
   assert.match(draw, /escapeHtml\(s\.status\)/);
-  for (const title of ['Time to finish', 'Sent back', 'Waiting on you']) assert.match(draw, new RegExp(`flow\\('${title}',\\s*'[^']+'`), `${title} has its how-it-is-counted line`);
+  for (const title of ['Time to Finish', 'Sent Back', 'Waiting on You']) assert.match(draw, new RegExp(`flow\\('${title}',\\s*'[^']+'`), `${title} has its how-it-is-counted line`);
   assert.match(draw, /r\.flow\[g\.key\]/, 'flow figures per range, from the server');
-  assert.match(draw, /<h2>Human hours of work done<\/h2>\s*<p class="quiet">[^<]*estimate, not a measurement/, 'the human-hours report says where its number comes from');
+  assert.match(draw, /<h2>Human Hours of Work Done<\/h2>\s*<p class="quiet">[^<]*estimate, not a measurement/, 'the human-hours report says where its number comes from');
   assert.match(draw, /r\.humanHours\[g\.key\]/, 'human-hours figures per range, from the server');
   assert.match(draw, /h\.estimated \? escapeHtml\(cell\(h\)\) : '<span class="quiet">no estimates yet in this range<\/span>'/, 'no estimates is said in words, never 0 hours');
   assert.match(draw, /of \$\{Number\(h\.finished\)\} estimated/);
@@ -2199,4 +2244,210 @@ test('the search results page draws the filters from the server\'s answer, keeps
     assert.ok(!draw.includes(`'${word}'`), word);
   }
   assert.match(app, /await drawSearch\(new URLSearchParams\(location\.search\)\)/);
+});
+
+// ── Set up a product (SP-127) ────────────────────────────────────────────────
+
+/**
+ * A tracker home for the setup page, as tracker/server.test.mjs's: this
+ * repository's settings file with its own log folder, read the way the
+ * server reads it. `state(slug, ...)` writes a state file as the wizard
+ * leaves it; `of(slug)` is the server's answer for that product.
+ */
+function setupHome() {
+  const dir = mkdtempSync(join(tmpdir(), 'tracker-setup-page-'));
+  const home = join(dir, 'home');
+  const logDir = join(dir, 'logs');
+  mkdirSync(home);
+  const settings = JSON.parse(readFileSync(new URL('../spirality.project.json', import.meta.url), 'utf8'));
+  writeFileSync(join(home, 'spirality.project.json'), JSON.stringify({ ...settings, logDir }));
+  const { setup, why } = setupSettingsOf({ db: join(dir, 'tracker.db'), folder: home });
+  assert.ok(setup, why);
+  const onboard = join(logDir, 'onboard');
+  const state = (slug, { outcomes = {}, stop = null, finished = false } = {}) => {
+    mkdirSync(onboard, { recursive: true });
+    const steps = SETUP_STEPS.map((step) => ({ step, outcome: outcomes[step] ?? 'pending', at: null, why: outcomes[step] ? `${step} said so` : null }));
+    writeFileSync(join(onboard, `${slug}.state.json`), JSON.stringify({ product: slug, updatedAt: '2026-11-05T08:15:00.000Z', steps, stop, finished }));
+  };
+  return { dir, setup, state, of: (slug) => setupOf(setup, slug), cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+}
+
+/** The `<code>` texts in a box, and how many Copy buttons sit beside them. */
+const copies = (html) => ({ codes: codes(html), buttons: (html.match(/<button type="button" class="copy-command">Copy<\/button>/g) ?? []).length });
+
+test('the setup page\'s next-step box, for a state file of each kind: every command with a Copy button whose text is exactly it', () => {
+  const h = setupHome();
+  try {
+    saveAnswers(h.setup, 'press-play', { projectName: 'Press Play', githubRepo: 'example-owner/press-play', description: 'A test product.', trackerPrefix: '', mergePhrases: '', autoMergeLanes: 'none', extraGovernancePaths: 'none' });
+    const command = h.of('press-play').commands.resume;
+    assert.match(command, /npm run onboard -- --product press-play --no-prompt$/);
+    const kind = (html) => /data-next="([a-z]+)"/.exec(html)[1];
+
+    // Nothing run yet: the start command, to paste on the Mini.
+    let html = renderSetupNext(h.of('press-play'));
+    assert.equal(kind(html), 'start');
+    assert.match(html, /Paste this into a Terminal on the Mini/);
+    assert.deepEqual(copies(html), { codes: [command], buttons: 1 });
+    assert.match(renderSetupSteps(null), /Not started yet/);
+
+    // Stopped for answers: the start command, and the way back to the form.
+    h.state('press-play', { outcomes: { answers: 'stopped' }, stop: { step: 'answers', kind: 'answers', why: 'still to answer: description', commands: [], link: null } });
+    html = renderSetupNext(h.of('press-play'));
+    assert.equal(kind(html), 'answers');
+    assert.match(html, /still to answer: description/);
+    assert.match(html, /<a href="\/setup\/press-play\/answers">Fill in the answers<\/a>/);
+    assert.deepEqual(copies(html), { codes: [command], buttons: 1 });
+
+    // Stopped at the paste: "Your Move (Real Secret Values)", one Copy for every line, then the resume command.
+    const block = ["cd '/x/spirality'", "doppler projects create 'press-play'", "TRACKER_DB='/x/t.db' npm run tracker:signins -- create --name 'Press Play' --prefix 'PR' --config '/x/p.json'"];
+    h.state('press-play', { outcomes: { answers: 'done', look: 'done', clone: 'skip', settings: 'done', signins: 'stopped' }, stop: { step: 'signins', kind: 'paste', why: 'waiting on you to run the block above', commands: block, link: null } });
+    html = renderSetupNext(h.of('press-play'));
+    assert.equal(kind(html), 'paste');
+    assert.match(html, /Your Move \(Real Secret Values\)/);
+    assert.deepEqual(copies(html), { codes: [block.join('\n'), command], buttons: 2 });
+    assert.ok(html.indexOf(escapeHtml(block[0])) < html.indexOf(escapeHtml(command)), 'the block first, then the resume command');
+
+    // Stopped at the merge: the setup ticket's link (its Merge button is there), then the resume command.
+    h.state('press-play', { outcomes: { answers: 'done', signins: 'done', copy: 'done', lanes: 'done', merge: 'stopped' }, stop: { step: 'merge', kind: 'merge', why: 'not merged yet', commands: [], link: 'http://mac-mini.local:4180/t/PR-1' } });
+    html = renderSetupNext(h.of('press-play'));
+    assert.equal(kind(html), 'merge');
+    assert.match(html, /<a href="http:\/\/mac-mini\.local:4180\/t\/PR-1">Open the setup ticket<\/a>/);
+    assert.deepEqual(copies(html), { codes: [command], buttons: 1 });
+    // A link that is not a web address is not drawn as one.
+    h.state('press-play', { outcomes: { merge: 'stopped' }, stop: { step: 'merge', kind: 'merge', why: 'not merged yet', commands: [], link: 'javascript:alert(1)' } });
+    assert.doesNotMatch(renderSetupNext(h.of('press-play')), /javascript:/);
+
+    // Failed: the FAILED text, then the resume command.
+    h.state('press-play', { outcomes: { answers: 'done', look: 'failed' }, stop: { step: 'look', kind: 'failed', why: 'something is BLOCKED <here>', commands: [], link: null } });
+    html = renderSetupNext(h.of('press-play'));
+    assert.equal(kind(html), 'failed');
+    assert.deepEqual(copies(html), { codes: ['FAILED: look: something is BLOCKED <here>', command], buttons: 1 });
+    assert.match(renderSetupSteps(h.of('press-play').state), /<li class="step failed"><span class="step-name">look<\/span> <span class="outcome">failed<\/span>/);
+
+    // A step running: says which, and still offers the command should its run have ended.
+    h.state('press-play', { outcomes: { answers: 'done', look: 'running' } });
+    html = renderSetupNext(h.of('press-play'));
+    assert.equal(kind(html), 'running');
+    assert.match(html, /Running: look/);
+    assert.deepEqual(copies(html), { codes: [command], buttons: 1 });
+
+    // Finished: "<name> is set up", its project and its first ticket; nothing to copy.
+    h.state('press-play', { outcomes: Object.fromEntries(SETUP_STEPS.map((s) => [s, 'done'])), finished: true });
+    const done = h.of('press-play');
+    html = renderSetupNext(done, { firstTicketId: 'PR-1' });
+    assert.equal(kind(html), 'finished');
+    assert.match(html, /<h2>Press Play Is Set Up<\/h2>/);
+    assert.match(html, /<a href="\/projects\/press-play">its project<\/a>/);
+    assert.match(html, /<a href="\/t\/PR-1">its first ticket, PR-1<\/a>/);
+    assert.deepEqual(copies(html), { codes: [], buttons: 0 });
+    // Every step listed, in the wizard's order, with its outcome.
+    const steps = renderSetupSteps(done.state);
+    assert.deepEqual([...steps.matchAll(/<span class="step-name">([a-z]+)<\/span>/g)].map((m) => m[1]), SETUP_STEPS);
+    assert.equal(steps.match(/<span class="outcome">done<\/span>/g).length, SETUP_STEPS.length);
+
+    // The page follows the setup every few seconds until it is finished.
+    assert.equal(setupFollows(done), false);
+    assert.equal(setupFollows({ ...done, finished: false }), true);
+
+    // A state file that does not read says so, and offers the command.
+    writeFileSync(join(h.setup.homeConfig.logDir, 'onboard', 'press-play.state.json'), '{ not json');
+    html = renderSetupNext(h.of('press-play'));
+    assert.equal(kind(html), 'unreadable');
+    assert.deepEqual(copies(html), { codes: [command], buttons: 1 });
+  } finally { h.cleanup(); }
+});
+
+test('the first ticket is the lowest-numbered on its board; a board with none has none', () => {
+  assert.equal(firstTicket({ columns: [{ tickets: [{ id: 'PR-12' }, { id: 'PR-3' }] }, { tickets: [{ id: 'PR-10' }] }] }), 'PR-3');
+  assert.equal(firstTicket({ columns: [{ tickets: [] }] }), null);
+  assert.equal(firstTicket(null), null);
+});
+
+test('the setup form asks the wizard\'s own questions with their defaults, and sends a default as null so it stays the wizard\'s', () => {
+  const h = setupHome();
+  try {
+    const fields = setupFields(h.setup, 'press-play');
+    const html = renderSetupForm(fields);
+    assert.deepEqual([...html.matchAll(/name="([A-Za-z]+)"/g)].map((m) => m[1]), SETUP_FIELDS.map((f) => f.key));
+    assert.match(html, /<label for="setup-projectName">Project name, as the tracker shows it<\/label>/);
+    assert.match(html, /name="trackerPrefix" data-default="PR" autocapitalize="off" spellcheck="false" value="PR">/);
+    assert.match(html, /<textarea id="setup-description"/);
+    assert.match(html, /<span class="note field-note" data-for="githubRepo"><\/span>/);
+    // Saved answers fill it in: a list with commas, an empty list as "none".
+    const again = renderSetupForm(fields, { projectName: 'Press <Play>', autoMergeLanes: [], extraGovernancePaths: ['docs/A.md', 'ops/'] });
+    assert.match(again, /name="projectName"[^>]*value="Press &lt;Play&gt;"/);
+    assert.match(again, /name="autoMergeLanes"[^>]*value="none"/);
+    assert.match(again, /name="extraGovernancePaths"[^>]*value="docs\/A\.md, ops\/"/);
+    // The body: each answer as typed, a default as null; the server's checker accepts it.
+    const values = Object.fromEntries(fields.map((f) => [f.key, f.default ?? '']));
+    Object.assign(values, { projectName: 'Press Play', githubRepo: 'example-owner/press-play', description: 'A test product.', autoMergeLanes: 'relay' });
+    const body = setupBody(fields, values);
+    assert.equal(body.trackerPrefix, null);
+    assert.equal(body.mergePhrases, null);
+    assert.equal(body.autoMergeLanes, 'relay');
+    assert.equal(body.projectName, 'Press Play');
+    const saved = saveAnswers(h.setup, setupSlug('Press Play'), body);
+    assert.equal(saved.product, 'press-play');
+    assert.equal(saved.resolved.trackerPrefix, 'PR');
+    assert.deepEqual(saved.resolved.autoMergeLanes, ['relay']);
+  } finally { h.cleanup(); }
+});
+
+test('the page makes a slug by the wizard\'s rule, and refuses the two that are other pages\' addresses', () => {
+  for (const name of ['Press Play', '  PressPlay!! 2 ', 'a--b', 'Ünïcode name', '---']) {
+    assert.equal(setupSlug(name), slugFromName(name), name);
+  }
+  assert.equal(setupSlugProblem('press-play'), null);
+  assert.match(setupSlugProblem(''), /letter or a digit/);
+  assert.match(setupSlugProblem('new'), /another name/);
+  assert.match(setupSlugProblem('fields'), /another name/);
+});
+
+test('the Projects page has Set up a product, lists the products mid-setup, and keeps New project a link away', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const projects = /async function drawProjects\(done = ''\) \{[\s\S]*?\n\}/.exec(app)[0];
+  assert.match(projects, /<a class="button" href="\/setup\/new">Set Up a Product<\/a>/);
+  assert.doesNotMatch(projects, /href="\/projects\/new">New project/);
+  assert.match(projects, /api\('GET', '\/setup'\)/);
+  assert.match(projects, /\$\{renderSetupList\(setups\)\}/);
+  const setupNew = /async function drawSetupNew\(product\) \{[\s\S]*?\n\}/.exec(app)[0];
+  assert.match(setupNew, /<a href="\/projects\/new">New project<\/a>/);
+  assert.match(setupNew, /api\('PUT', `\/setup\/\$\{encodeURIComponent\(slug\)\}`, setupBody\(fields, values\)\)/);
+  assert.match(setupNew, /history\.pushState\(null, '', `\/setup\/\$\{encodeURIComponent\(slug\)\}`\)/, 'Save opens its setup page');
+  assert.match(setupNew, /err\.field \? form\.querySelector\(`\.field-note\[data-for="\$\{err\.field\}"\]`\)/, 'a refusal naming a field shows beside it');
+  // The setup page wires the same Copy buttons as a ticket's, and follows the setup every few seconds.
+  assert.match(/async function drawSetup\(slug\) \{[\s\S]*?\n\}/.exec(app)[0], /wireCopyButtons\(\);\s*return setupFollows\(setup\);/);
+  assert.match(app, /const SETUP_REFRESH_EVERY_MS = 4_000;/);
+  assert.match(app, /if \(lastDrawn\?\.fast\) refreshPage\(\);\s*\}, SETUP_REFRESH_EVERY_MS\);/);
+  assert.match(app, /if \(kept && following\) lastDrawn = \{ address: here\(\), reads, fast: true \};/);
+
+  // The list: each product not finished, linking its setup page; nothing when there are none.
+  const list = renderSetupList({ setups: [
+    { product: 'press-play', step: 'signins', finished: false, started: true, stateError: null },
+    { product: 'done-one', step: null, finished: true, started: true, stateError: null },
+    { product: 'fresh', step: null, finished: false, started: false, stateError: null },
+  ] });
+  assert.match(list, /<h2>Being Set Up<\/h2>/);
+  assert.match(list, /<a href="\/setup\/press-play">press-play<\/a> <span class="quiet">at signins<\/span>/);
+  assert.match(list, /<a href="\/setup\/fresh">fresh<\/a> <span class="quiet">not started yet<\/span>/);
+  assert.doesNotMatch(list, /done-one/);
+  assert.equal(renderSetupList({ setups: [] }), '');
+});
+
+test('the setup pages are served to a browser at /setup/new, /setup/<slug> and its answers form; the page\'s own call still gets the data', async () => {
+  const f = await fixture();
+  try {
+    const html = { accept: 'text/html,application/xhtml+xml,*/*;q=0.8' };
+    const page = readFileSync(WEB('index.html'), 'utf8');
+    for (const path of ['/setup/new', '/setup/press-play', '/setup/press-play/answers']) {
+      const r = await fetch(`${f.url}${path}`, { headers: html });
+      assert.equal(r.status, 200, path);
+      assert.equal(await r.text(), page, path);
+    }
+    // Without asking for HTML, /setup/<slug> is the call (this fixture's server has no tracker home: 503), and needs a sign-in.
+    assert.equal((await f.call('GET', '/setup/press-play')).status, 503);
+    assert.equal((await f.call('GET', '/setup/press-play', { token: null })).status, 401);
+    // /setup/fields is only ever the call.
+    assert.notEqual((await fetch(`${f.url}/setup/fields`, { headers: html })).headers.get('content-type'), 'text/html; charset=utf-8');
+  } finally { await f.cleanup(); }
 });

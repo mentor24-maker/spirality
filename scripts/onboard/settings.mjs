@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Step 1 of setting up a product on Spirality: write the product's settings
+ * Step 1 of setting up a project on Spirality: write the project's settings
  * file (`spirality.project.json`) from its answers file
  * (docs/onboarding/SETUP_REVIEW.md, part 3). The settings come from
  * lib/onboardSettings.mjs; this is the part that reads the tracker and
@@ -9,20 +9,20 @@
  *   npm run onboard:settings -- write --answers <answers file> --out <folder>
  *   npm run onboard:settings -- fill-machine-user --config <settings file>
  *
- * `write` runs from the tracker home's own folder (the product whose
+ * `write` runs from the tracker home's own folder (the project whose
  * settings file sets `trackerPort`, today Spirality). It finds the
- * operator's tracker actor by the home's operatorName, and the product's
+ * operator's tracker actor by the home's operatorName, and the project's
  * build-loop sign-in (`<slug> loop-build`) if the sign-ins step has already
  * made it; if not, machineUserId is the placeholder "0" and the line says
  * so. It writes `<folder>/spirality.project.json`, making the folder if
- * need be. It never writes over a settings file of another product (so
+ * need be. It never writes over a settings file of another project (so
  * never the tracker home's own), and it is meant for a scratch folder: the
- * copy into the product's repository is a later step.
+ * copy into the project's repository is a later step.
  *
  * `fill-machine-user` runs after the sign-ins step. It reads the settings
  * file it is given, finds `<slug> loop-build` at the tracker that file
  * names, and writes its id in as machineUserId, changing nothing else.
- * The npm script runs it under the PRODUCT's Doppler project
+ * The npm script runs it under the PROJECT's Doppler project
  * (scripts/with_doppler.mjs reads `--config`), which the sign-ins step
  * makes; run before that step, Doppler stops it with "Could not find
  * requested project".
@@ -40,7 +40,7 @@ import { parseArgs } from 'node:util';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { CONFIG_FILE, findConfigFile, loadProjectConfig, ProjectConfigError, validateProjectConfig } from '../../lib/projectConfig.mjs';
+import { CONFIG_FILE, findConfigFile, loadProjectConfig, ProjectConfigError, validateProjectConfig, withProjectNames } from '../../lib/projectConfig.mjs';
 import { AnswersError, expandHome, loadAnswers } from '../../lib/onboardAnswers.mjs';
 import {
   SettingsError, actorNamed, fieldsThatDiffer, machineUserPending, settingsFromAnswers, settingsText, withMachineUser,
@@ -58,10 +58,10 @@ export const USAGE = [
 const WRITE = 'write the settings file';
 const FILL = 'fill in machineUserId';
 
-/** The product's build-loop sign-in's name: `<slug> loop-build` (seatsForConfig). */
-export function buildSeatName(productSlug, operatorName) {
+/** The project's build-loop sign-in's name: `<slug> loop-build` (seatsForConfig). */
+export function buildSeatName(projectSlug, operatorName) {
   const buildSecret = TRACKER_SEATS.find((s) => s.kind === 'machine' && s.name === 'loop-build')?.secret;
-  const seat = seatsForConfig({ trackerPort: null, productSlug, operatorName }).seats.find((s) => s.secret === buildSecret);
+  const seat = seatsForConfig({ trackerPort: null, projectSlug, operatorName }).seats.find((s) => s.secret === buildSecret);
   if (!seat) throw new SettingsError('the sign-ins list names no build-loop seat');
   return seat.name;
 }
@@ -106,7 +106,13 @@ export function writeAndReadBack(file, settings, { write = writeFileSync, mkdir 
 function existingSettings(file, readText) {
   const text = readText(file);
   if (text == null) return null;
-  try { return JSON.parse(text); } catch (err) { throw new SettingsError(`${file} is already there and is not valid JSON (${err.message}); move it away first`); }
+  let raw;
+  try { raw = JSON.parse(text); } catch (err) { throw new SettingsError(`${file} is already there and is not valid JSON (${err.message}); move it away first`); }
+  // It may still use the old field names (SP-130); read them as the new ones.
+  try { return withProjectNames(raw, { file }); } catch (err) {
+    if (err instanceof ProjectConfigError) throw new SettingsError(`${err.message}; move it away first`);
+    throw err;
+  }
 }
 
 /**
@@ -128,13 +134,13 @@ export async function runWrite({ answersPath, outDir }, deps) {
   const file = join(outDir, CONFIG_FILE);
   try {
     const before = existingSettings(file, deps.readText);
-    if (before && before.productSlug !== answers.productSlug) {
-      return failed(`${file} is ${before.productSlug ? `the settings file of "${before.productSlug}"` : 'another settings file'}, not ${answers.productSlug}'s; it is left alone. Name an empty scratch folder with --out.`);
+    if (before && before.projectSlug !== answers.projectSlug) {
+      return failed(`${file} is ${before.projectSlug ? `the settings file of "${before.projectSlug}"` : 'another settings file'}, not ${answers.projectSlug}'s; it is left alone. Name an empty scratch folder with --out.`);
     }
     const { people, actors } = await readActors(deps.get, homeConfig.trackerApiUrl);
     const operatorUserId = actorNamed(people, homeConfig.operatorName);
     if (!operatorUserId) return failed(`the tracker has no person named "${homeConfig.operatorName}" (the tracker home's operatorName) to hand tickets to`);
-    const seat = buildSeatName(answers.productSlug, homeConfig.operatorName);
+    const seat = buildSeatName(answers.projectSlug, homeConfig.operatorName);
     const machineUserId = actorNamed(actors, seat);
     const settings = settingsFromAnswers(answers, homeConfig, { operatorUserId, machineUserId });
     if (before) {
@@ -143,7 +149,7 @@ export async function runWrite({ answersPath, outDir }, deps) {
     }
     const off = writeAndReadBack(file, settings, deps);
     if (off.length) return failed(`${file} read back different from what was written, in ${off.join(', ')}`);
-    lines.push(`Wrote ${file} for ${answers.productName} (${answers.githubRepo}), checked by the settings reader every loop uses.`);
+    lines.push(`Wrote ${file} for ${answers.projectName} (${answers.githubRepo}), checked by the settings reader every loop uses.`);
     lines.push(`  operatorUserId ${operatorUserId}: the tracker's person "${homeConfig.operatorName}"`);
     lines.push(machineUserPending(settings)
       ? `  machineUserId ${settings.machineUserId}: a placeholder. "${seat}" is not in the tracker yet; after the sign-ins step, run: npm run onboard:settings -- fill-machine-user --config ${file}`
@@ -171,7 +177,7 @@ export async function runFill({ configPath }, deps) {
     if (config.tracker !== 'api') return failed(`${configPath} does not use the tracker ("tracker" is "${config.tracker}")`);
     const raw = existingSettings(configPath, deps.readText);
     if (!raw) return failed(`${configPath} could not be read`);
-    const seat = buildSeatName(config.productSlug, config.operatorName);
+    const seat = buildSeatName(config.projectSlug, config.operatorName);
     const { actors } = await readActors(deps.get, config.trackerApiUrl);
     const id = actorNamed(actors, seat);
     if (!id) {
@@ -198,7 +204,7 @@ export async function runFill({ configPath }, deps) {
  * The tracker home's settings, as its FILE says, and its main checkout. No
  * environment override is applied (`env: {}`): Doppler sets TRACKER_URL to
  * the Mini's own address for the loops it runs, and that address must never
- * be copied into another product's settings file as its page address.
+ * be copied into another project's settings file as its page address.
  */
 export function loadHome(cwd = process.cwd(), checkoutOf = mainCheckoutOf) {
   const file = findConfigFile(cwd);
@@ -251,7 +257,7 @@ async function main(argv) {
       return 1;
     }
     if (homeConfig.trackerPort == null) {
-      console.error(`FAILED: ${WRITE}: run this from the folder of the product that runs the tracker (its settings file sets "trackerPort"), not a guest product's.`);
+      console.error(`FAILED: ${WRITE}: run this from the folder of the project that runs the tracker (its settings file sets "trackerPort"), not a guest project's.`);
       return 1;
     }
     if (!token) { console.error(`FAILED: ${WRITE}: ${noToken}`); return 1; }

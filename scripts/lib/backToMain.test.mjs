@@ -1,5 +1,5 @@
 // back_to_main_if_merged (scripts/lib/back_to_main.sh) against real scratch
-// repositories: a bare "origin" and a clone of it standing in for a product's
+// repositories: a bare "origin" and a clone of it standing in for a project's
 // main checkout on the Mini, left on its setup branch (SP-111).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';

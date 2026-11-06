@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
- * Is it safe to switch this product's loops from ClickUp to the tracker?
+ * Is it safe to switch this project's loops from ClickUp to the tracker?
  * One read-only command for the runbook in docs/TRACKER_MVP.md, "Switching
- * a product over":
+ * a project over":
  *
  *   npm run tracker:switch-check            (Doppler supplies the tokens)
  *
@@ -78,7 +78,7 @@ export function databasePath(config, env = process.env) {
 
 /**
  * Compare ClickUp's Loop Queue (`clickupTasks`, list-shaped) with the
- * tracker's tickets for the product (`trackerTickets`, store-shaped).
+ * tracker's tickets for the project (`trackerTickets`, store-shaped).
  * `importedFrom` maps a tracker ticket id to the ClickUp id it was imported
  * from. Answers `{ ok, lines, missing, extra, mismatched }`.
  */
@@ -180,7 +180,7 @@ export async function runSwitchCheck({ config, env, db, clickup, fetchImpl = fet
     `tracker is "${config.tracker ?? 'clickup'}"${config.trackerUrl ? `, trackerUrl ${config.trackerUrl}` : ', no trackerUrl yet'}${config.trackerApiUrl ? `, trackerApiUrl ${config.trackerApiUrl}` : ''}.`,
     `The switch sets tracker "api", trackerUrl to the Mini's network address, http://<\`scutil --get LocalHostName\`>.local:${config.trackerPort ?? '<trackerPort>'}`,
     '(Dane\'s browser and the hand-over email use it), and trackerApiUrl to the address the loops call',
-    `on the Mini itself, ${url ?? 'http://127.0.0.1:<trackerPort>'} (the runbook, "Switching a product over").`,
+    `on the Mini itself, ${url ?? 'http://127.0.0.1:<trackerPort>'} (the runbook, "Switching a project over").`,
   ]);
 
   const haveDb = Boolean(db) && existsSync(db);
@@ -218,7 +218,7 @@ export async function runSwitchCheck({ config, env, db, clickup, fetchImpl = fet
     // 3. Queues match, before the dry run adds anything to the copy.
     try {
       const clickupTasks = await readAllTasks(clickup, config.loopQueueListId);
-      const trackerTickets = store.getProject(config.productSlug) ? store.listTickets(config.productSlug) : [];
+      const trackerTickets = store.getProject(config.projectSlug) ? store.listTickets(config.projectSlug) : [];
       const importedFrom = new Map(store.listImportedIds(SOURCE).filter((r) => r.kind === 'ticket').map((r) => [r.newId, r.sourceId]));
       const r = compareQueues({ clickupTasks, trackerTickets, importedFrom });
       section('queues match', r.ok, r.lines);
@@ -275,7 +275,7 @@ async function main() {
     timeoutMs: process.env.CLICKUP_HTTP_TIMEOUT_MS,
   });
   const db = databasePath(config);
-  console.log(`Switch check for ${config.productSlug}: ClickUp list ${config.loopQueueListId}, tracker database ${db ?? '(none)'} (read-only: nothing is written anywhere)\n`);
+  console.log(`Switch check for ${config.projectSlug}: ClickUp list ${config.loopQueueListId}, tracker database ${db ?? '(none)'} (read-only: nothing is written anywhere)\n`);
   try {
     const result = await runSwitchCheck({ config, env: process.env, db, clickup });
     console.log(formatSwitchCheck(result));

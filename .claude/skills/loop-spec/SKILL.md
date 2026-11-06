@@ -168,7 +168,7 @@ says plainly "not measured".
 
 ## First-time setup
 
-(ClickUp products only; the tracker carries the statuses itself, eight of
+(ClickUp projects only; the tracker carries the statuses itself, eight of
 them, `Requested` first: a request Dane filed from the tracker page that
 nobody has specced yet. ClickUp lists never carry `Requested`.) If a
 ClickUp "Loop Queue" list does not carry the seven statuses yet,

@@ -17,7 +17,7 @@ const to = new Set([...manifest.files.map((f) => f.to), ...manifest.made.map((m)
 
 // Normie's answers, as the look's own tests and the Mini's answers file have them.
 const NORMIE = {
-  productName: 'Normie', githubRepo: 'mentor24-maker/normie', productSlug: 'normie', trackerPrefix: 'NO',
+  projectName: 'Normie', githubRepo: 'mentor24-maker/normie', projectSlug: 'normie', trackerPrefix: 'NO',
   dopplerProject: 'normie', dopplerConfig: 'dev', launchdPrefix: 'com.normie', checkoutDir: '/Users/x/WebApps/normie',
   checkCommand: 'npm run verify:full', nodeVersion: '22', mergePhrases: ['merge', 'merge it', 'ship it', 'approve'],
   autoMergeLanes: [], extraGovernancePaths: ['.cursorrules'], hosting: 'Vercel', description: 'A website.',
@@ -101,13 +101,13 @@ test('the review and build skills tell a lane\'s pass it is the lane (hold-up 14
   }
   const review = planned.find((f) => f.to === '.claude/skills/loop-review/SKILL.md').content;
   assert.match(review, /com\.normie\.loop-review/);
-  assert.match(review, /Re-run the gates: `npm run verify:full`\./);
+  assert.match(review, /Re-run the gates: `npm run verify`\./, 'every project has npm run verify after the setup (SP-121)');
   assert.match(review, /Normie is a website, so the surface is usually a page/);
 });
 
-test('rendered for another product, no adapted or made file keeps Spirality\'s own names', () => {
+test('rendered for another project, no adapted or made file keeps Spirality\'s own names', () => {
   const pressplay = {
-    ...NORMIE, productName: 'PressPlay', productSlug: 'pressplay', trackerPrefix: 'PP', dopplerProject: 'pressplay',
+    ...NORMIE, projectName: 'PressPlay', projectSlug: 'pressplay', trackerPrefix: 'PP', dopplerProject: 'pressplay',
     launchdPrefix: 'com.pressplay', checkoutDir: '~/WebApps/pressplay', checkCommand: 'npm run build',
     mergePhrases: ['merge', 'ship it'], hosting: null,
   };
@@ -124,8 +124,71 @@ test('rendered for another product, no adapted or made file keeps Spirality\'s o
   assert.match(review, /\(`com\.pressplay\.relay`, every 10 minutes\)/);
 });
 
+test('every copied skill and made file names npm run verify, which the setup makes true (SP-121)', () => {
+  assert.equal(render(manifest.verifyIfAbsent, vars), 'npm run verify:full && npm run test:loop');
+  const planned = planCopies(manifest, { readSpirality: read, vars });
+  const build = planned.find((f) => f.to === '.claude/skills/loop-build/SKILL.md').content;
+  assert.match(build, /```bash\n {3}npm run verify\n {3}```/);
+  const docs = planned.find((f) => f.to === 'docs/LOOP_ENGINEERING.md').content;
+  assert.match(docs, /`npm run verify` is the definition of done\. It runs `npm run verify:full`, then the copied loop tests/);
+  assert.match(render(read('scripts/onboard/templates/CLAUDE-sections.md'), vars), /`npm run verify` is the definition of done\./);
+});
+
 test('the templates type no repository address: it comes from the settings file', () => {
   for (const t of ['CLAUDE-sections.md', 'loop-README.md', 'LOOP_ENGINEERING.md']) {
     assert.doesNotMatch(read(`scripts/onboard/templates/${t}`), /github\.com\/[\w-]+\/[\w-]+/, `${t} types a repository address`);
   }
+});
+
+// What a copied skill may say about Spirality's own tickets and docs (SP-122):
+// an id of Spirality's is history, so it says whose it is; a doc the setup
+// does not write is linked in Spirality's repository, where it exists.
+function skillLeaks(text, { written, spiralityRepo, readSpirality }) {
+  const leaks = [];
+  const unmarked = text.replace(/Spirality's SP-\d+/g, '');
+  for (const m of unmarked.matchAll(/\bSP-\d+\b/g)) leaks.push(`an unmarked Spirality id ${m[0]}`);
+  const linkRe = /\[`(docs\/[\w./-]+\.md)`\]\(https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/blob\/main\/(docs\/[\w./-]+\.md)\)/g;
+  for (const m of text.matchAll(linkRe)) {
+    if (m[1] !== m[3]) leaks.push(`a link named ${m[1]} that opens ${m[3]}`);
+    if (m[2] !== spiralityRepo) leaks.push(`a link to ${m[1]} in ${m[2]}, not Spirality's ${spiralityRepo}`);
+    if (readSpirality(m[3]) == null) leaks.push(`a link to ${m[3]}, which Spirality does not have`);
+  }
+  for (const m of text.replace(linkRe, '').matchAll(/(?<![\w/.-])docs\/[\w./-]+\.md\b/g)) {
+    if (!written.has(m[0])) leaks.push(`${m[0]}, which the setup does not write`);
+  }
+  return leaks;
+}
+
+test('rendered for another product, no copied skill cites Spirality\'s ids unmarked or a doc the product lacks', () => {
+  const v = templateVars({ ...NORMIE, projectName: 'PressPlay', trackerPrefix: 'PP', launchdPrefix: 'com.pressplay' }, HOME,
+    { spiralityCommit: 'abc1234', visibility: 'PRIVATE' });
+  const skills = planCopies(manifest, { readSpirality: read, vars: v }).filter((f) => f.to.startsWith('.claude/skills/'));
+  assert.equal(skills.length, 4, 'the four loop skills are copied');
+  const opts = { written: to, spiralityRepo: HOME.githubRepo, readSpirality: read };
+  for (const f of skills) {
+    assert.deepEqual(skillLeaks(f.content, opts), [], `${f.to} leaks Spirality's own references`);
+    assert.doesNotMatch(f.content, /"Engineering rules"|engineering rule/, `${f.to} names a CLAUDE.md section the product's lacks`);
+  }
+  const claude = render(read('scripts/onboard/templates/CLAUDE-sections.md'), v);
+  assert.match(claude, /^## Loop rules$/m, 'the section the skills name is the one the setup writes');
+  const build = skills.find((f) => f.to === '.claude/skills/loop-build/SKILL.md').content;
+  assert.match(build, /`Ticket: http:\/\/mac-mini\.local:4180\/t\/PP-12`/);
+  assert.match(build, /"Loop rules"/);
+});
+
+test('the leak check catches an unmarked id, a missing doc and a link to nowhere', () => {
+  const opts = { written: new Set(['docs/LOOP_ENGINEERING.md']), spiralityRepo: 'o/spirality', readSpirality: read };
+  assert.deepEqual(skillLeaks('Spirality\'s SP-101 and `docs/LOOP_ENGINEERING.md`, `docs/work-log/<date>.md`', opts), []);
+  assert.deepEqual(skillLeaks('ids like `SP-12`', opts), ['an unmarked Spirality id SP-12']);
+  assert.deepEqual(skillLeaks('see `docs/LOOP_CONTRACT.md`', opts), ['docs/LOOP_CONTRACT.md, which the setup does not write']);
+  assert.deepEqual(skillLeaks('[`docs/NOPE.md`](https://github.com/o/spirality/blob/main/docs/NOPE.md)', opts),
+    ['a link to docs/NOPE.md, which Spirality does not have']);
+  assert.deepEqual(skillLeaks('[`docs/LOOP_CONTRACT.md`](https://github.com/o/spirality/blob/main/docs/LOOP_CONTRACT.md)', opts), []);
+});
+
+test('the setup makes the product ignore the lanes\' working copies (SP-120)', () => {
+  const entry = manifest.made.find((m) => m.to === '.gitignore');
+  assert.ok(entry, 'the manifest makes a .gitignore');
+  assert.ok(entry.ignoreLines.includes('.claude/worktrees/'));
+  assert.ok(read('.gitignore').split('\n').includes('.claude/worktrees/'), 'Spirality ignores it too');
 });

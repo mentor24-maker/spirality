@@ -6,7 +6,7 @@ import { seatsForConfig } from '../../tracker/signins.mjs';
 import {
   BLOCKED, READY, UNKNOWN, WILL_DO, checkEnv, exitCodeFor, formatRow, ghApiFailure, lastLines, look,
   readCheck, readCheckout, readClaude, readDoppler, readDopplerMe, readNode, readProtection,
-  productMismatch, readRepo, withoutSignIn, nodeNeedOf, samePathOnDisk, summaryLine, trackerRows,
+  projectMismatch, readRepo, withoutSignIn, nodeNeedOf, samePathOnDisk, summaryLine, trackerRows,
 } from './look.mjs';
 import { normalRepo } from '../lib/repoCheck.mjs';
 import { existsSync, mkdtempSync, mkdirSync, rmSync, symlinkSync } from 'node:fs';
@@ -18,18 +18,18 @@ const homeConfig = validateProjectConfig({
   workspaceId: '1', spaceId: '1', loopQueueListId: '1', operatorUserId: '1', machineUserId: '2',
   githubRepo: 'owner/home', dopplerProject: 'home', dopplerConfig: 'dev', launchdPrefix: 'com.home',
   logDir: '~/loop-logs', mergePhrases: ['merge'], governancePaths: ['CLAUDE.md'], autoMergeLanes: [],
-  operatorName: 'Dane', productSlug: 'home', legacyMachinePrefixes: [], productScripts: {},
+  operatorName: 'Dane', projectSlug: 'home', legacyMachinePrefixes: [], projectScripts: {},
   trackerPrefix: 'SP', trackerPort: 4180, trackerDataDir: '~/t', tracker: 'api',
   trackerUrl: 'http://mini.local:4180', trackerApiUrl: 'http://127.0.0.1:4180',
 });
 const answers = resolveAnswers({
-  productName: 'Normie', githubRepo: 'mentor24-maker/normie', trackerPrefix: 'NO',
+  projectName: 'Normie', githubRepo: 'mentor24-maker/normie', trackerPrefix: 'NO',
   checkoutDir: '/Users/dane/WebApps/normie', checkCommand: 'npm run verify:full', description: 'Polls.',
 }, { homeConfig, homeRoot: '/Users/dane/WebApps/home' });
 
 const ok = (stdout = '') => ({ status: 0, stdout, stderr: '', error: null, signal: null });
 const failed = (status, stderr = '', stdout = '') => ({ status, stdout, stderr, error: null, signal: null });
-const seatNames = seatsForConfig({ trackerPort: null, productSlug: 'normie', operatorName: 'Dane' }).seats.map((s) => s.name);
+const seatNames = seatsForConfig({ trackerPort: null, projectSlug: 'normie', operatorName: 'Dane' }).seats.map((s) => s.name);
 
 test('every row names what it checked, and its verdict reads as the ticket says', () => {
   assert.equal(formatRow({ item: 'GitHub: repository x/y', verdict: READY, why: 'exists', detail: [] }), 'GitHub: repository x/y: ready (exists)');
@@ -66,10 +66,10 @@ test('a sign-in part comes out of an address, whatever the host', () => {
   assert.equal(withoutSignIn('https://github.com/a/b'), 'https://github.com/a/b');
 });
 
-test('--product must name the product the answers file is for', () => {
-  assert.equal(productMismatch(null, { productSlug: 'normie' }, '/a.json'), null);
-  assert.equal(productMismatch('normie', { productSlug: 'normie' }, '/a.json'), null);
-  assert.match(productMismatch('pressplay', { productSlug: 'normie' }, '/a.json'), /\/a\.json is for the product "normie", not "pressplay"/);
+test('--product must name the project the answers file is for', () => {
+  assert.equal(projectMismatch(null, { projectSlug: 'normie' }, '/a.json'), null);
+  assert.equal(projectMismatch('normie', { projectSlug: 'normie' }, '/a.json'), null);
+  assert.match(projectMismatch('pressplay', { projectSlug: 'normie' }, '/a.json'), /\/a\.json is for the project "normie", not "pressplay"/);
 });
 
 test('the same folder through a symlink is the same folder; a folder beside it is not', () => {
@@ -210,7 +210,7 @@ function fakeTracker({ projects = [], actors = [], people = [{ id: 1, name: 'Dan
 }
 const trackerArgs = { apiUrl: 'http://127.0.0.1:4180', pageUrl: 'http://mini.local:4180', answers, operatorName: 'Dane', seatNames, hasToken: true };
 
-test('the tracker for a product already set up: every row ready', async () => {
+test('the tracker for a project already set up: every row ready', async () => {
   const rows = await trackerRows({
     ...trackerArgs,
     get: fakeTracker({ projects: [{ slug: 'spirality', name: 'Spirality', prefix: 'SP' }, { slug: 'normie', name: 'Normie', prefix: 'NO', repo: 'mentor24-maker/normie' }], actors: ['Dane', 'loop-build', ...seatNames] }),
@@ -218,7 +218,7 @@ test('the tracker for a product already set up: every row ready', async () => {
   assert.deepEqual(rows.map((r) => r.verdict), [READY, READY, READY, READY, READY]);
 });
 
-test('the tracker for a new product: project and sign-ins will do; a taken prefix is BLOCKED', async () => {
+test('the tracker for a new project: project and sign-ins will do; a taken prefix is BLOCKED', async () => {
   const fresh = await trackerRows({ ...trackerArgs, get: fakeTracker({ projects: [{ slug: 'spirality', name: 'Spirality', prefix: 'SP' }], actors: ['Dane', 'normie loop-build'] }) });
   assert.deepEqual(fresh.map((r) => r.verdict), [READY, WILL_DO, READY, WILL_DO, READY]);
   assert.match(fresh[3].why, /1 of 5 exist/);
@@ -244,7 +244,7 @@ test('the tracker down is BLOCKED and every row after it could not tell, never r
   assert.ok(noToken.every((r) => r.verdict === UNKNOWN));
 });
 
-test("the product's check: passes ready; fails BLOCKED with its last lines; a timeout could not tell", () => {
+test("the project's check: passes ready; fails BLOCKED with its last lines; a timeout could not tell", () => {
   const base = { command: 'npm run verify', branch: 'main', clone: ok() };
   assert.equal(readCheck({ ...base, install: null, check: ok('all good\n') }).verdict, READY);
   const fail = readCheck({ ...base, install: null, check: failed(1, 'error: 2 tests failed\n', 'running\n') });
@@ -255,7 +255,7 @@ test("the product's check: passes ready; fails BLOCKED with its last lines; a ti
   assert.equal(readCheck({ ...base, clone: failed(128, 'fatal: could not read') }).verdict, UNKNOWN);
 });
 
-test("the product's check never sees this process's keys", () => {
+test("the project's check never sees this process's keys", () => {
   const env = checkEnv({ PATH: '/bin', HOME: '/h', TRACKER_TOKEN_HAND_RUN: 'secret', DOPPLER_PROJECT: 'spirality', GITHUB_TOKEN: 'x' });
   assert.deepEqual(env, { CI: 'true', PATH: '/bin', HOME: '/h' });
 });
@@ -325,7 +325,7 @@ function fakeWorld({ checkoutPresent = true, project = true } = {}) {
   return { deps, calls, requests, removed, scratch };
 }
 
-test('a product already set up: every row ready, exit 0', async () => {
+test('a project already set up: every row ready, exit 0', async () => {
   const w = fakeWorld();
   const rows = await look({ answers, homeConfig, deps: w.deps });
   assert.deepEqual(rows.filter((r) => r.verdict !== READY).map(formatRow), []);
@@ -333,7 +333,7 @@ test('a product already set up: every row ready, exit 0', async () => {
   assert.equal(rows.length, 15);
 });
 
-test('a new product: the tracker, Doppler and checkout rows say will do, exit 0', async () => {
+test('a new project: the tracker, Doppler and checkout rows say will do, exit 0', async () => {
   const w = fakeWorld({ checkoutPresent: false, project: false });
   const rows = await look({ answers, homeConfig, deps: w.deps });
   const willDo = rows.filter((r) => r.verdict === WILL_DO).map((r) => r.item);

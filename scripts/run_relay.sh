@@ -13,9 +13,9 @@
 # runners take around their own pull, so two lanes never pull into one
 # checkout at once.
 #
-# Every product-specific value (the log folder, the product's short name)
+# Every project-specific value (the log folder, the project's short name)
 # comes from the project config through scripts/project_config.mjs; nothing
-# here names a product.
+# here names a project.
 
 set -u
 
@@ -32,7 +32,7 @@ if [ -f "$REPO/.git" ] && grep -q '^gitdir:.*worktrees' "$REPO/.git" 2>/dev/null
 fi
 cd "$REPO" || exit 1
 
-SLUG="$(node "$REPO/scripts/project_config.mjs" productSlug)" || { echo "[relay] could not read productSlug from the project config" >&2; exit 1; }
+SLUG="$(node "$REPO/scripts/project_config.mjs" projectSlug)" || { echo "[relay] could not read projectSlug from the project config" >&2; exit 1; }
 LOG_DIR="$(node "$REPO/scripts/project_config.mjs" logDir)" || { echo "[relay] could not read logDir from the project config" >&2; exit 1; }
 mkdir -p "$LOG_DIR"
 LOCK="$LOG_DIR/$SLUG-relay.lock"
@@ -73,7 +73,7 @@ take_sync_lock() {
   echo "$$" > "$SYNC_LOCK/pid"
 }
 # A checkout left on a branch that has merged and gone from origin (a new
-# product's lanes run from its setup branch until it merges) goes back to main
+# project's lanes run from its setup branch until it merges) goes back to main
 # first, under the same lock, so the pull below can run.
 # shellcheck source=lib/back_to_main.sh
 source "$REPO/scripts/lib/back_to_main.sh"

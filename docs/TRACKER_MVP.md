@@ -24,7 +24,7 @@ modules in `lib/`, the three skills and `docs/LOOP_CONTRACT.md`.
 
 | What | How we use it | Where |
 |---|---|---|
-| **Lists** | One Loop Queue per product. Workspace and space ids exist only to find the list. | `spirality.project.json`, `lists` |
+| **Lists** | One Loop Queue per project. Workspace and space ids exist only to find the list. | `spirality.project.json`, `lists` |
 | **Tickets** | Name, description (Markdown), created and updated dates, a link we put in PR bodies. | `queue`, `get`, `task`, `describe` |
 | **Status** | Exactly the seven in the contract. `Live` must be a "closed" status so finished work leaves the open view. | `claim`, `status`, `ask`, `relay` |
 | **Priority** | Four levels, used only to order `Queued` tickets. | `priority`, `claimOrder` |
@@ -38,7 +38,7 @@ modules in `lib/`, the three skills and `docs/LOOP_CONTRACT.md`.
 
 ### Things Dane uses as a person
 
-- **"Assigned to me"**, across every product: his one view of what waits on
+- **"Assigned to me"**, across every project: his one view of what waits on
   him.
 - **Notifications**, so he hears about a handed-over ticket without
   looking.
@@ -61,7 +61,7 @@ cause, not just the symptom.
 | Workaround today | Why it exists | In our own tracker |
 |---|---|---|
 | The `[machine]` stamp on every comment, and the rules for reading it | Every loop posts under Dane's token, so the user id cannot tell Dane from a machine (2026-09-01) | Each loop has its own identity. The author is a fact, not a guess. |
-| Check-then-write claims, `--if-status` on every move, one build loop per product | ClickUp cannot change a status only if it is still what we read (2026-08-22, two reviews racing) | A move names the status it expects and the store refuses atomically. Two passes can never both win. |
+| Check-then-write claims, `--if-status` on every move, one build loop per project | ClickUp cannot change a status only if it is still what we read (2026-08-22, two reviews racing) | A move names the status it expects and the store refuses atomically. Two passes can never both win. |
 | "No blockquotes" in cards, read-back of Dane's words | ClickUp silently deletes quoted lines on save | Text is stored as written. |
 | Stripping code fences and bold from merge phrases | ClickUp's editor reformats what Dane types (2026-09-01, 2026-09-06) | Our reply box sends plain text. The normaliser stays as a safety net. |
 | The Loop note refusing writes | The workspace ran out of "custom field usages" | A plain column. |
@@ -202,7 +202,7 @@ Part of the MVP, not an add-on: without it Dane cannot see or answer
 anything once ClickUp is gone. Desktop browser only. Three screens, nothing
 more:
 
-1. **Waiting on you**: tickets in his two statuses, across every product,
+1. **Waiting on you**: tickets in his two statuses, across every project,
    newest first. This is the one view he uses today.
 2. **A ticket**: the description, the comments (cards drawn with the red
    `NEEDED FROM DANE` banner, machine comments visibly marked as such), and a
@@ -222,7 +222,7 @@ more:
    the page says nothing was overwritten, shows the ticket as stored, and
    does not try again. Any other refusal shows the server's reason beside
    the field and keeps what was typed.
-3. **A board** per product: read-only columns of the seven statuses.
+3. **A board** per project: read-only columns of the seven statuses.
 
 The page is served by `tracker/server.mjs` at `/` (a ticket at `/t/<id>`)
 from `tracker/web/`. `/projects` is a table of every project: choosing a
@@ -264,13 +264,13 @@ The modules in `lib/` read ClickUp-shaped objects (`comment_text`,
 
 1. **The door talks to a "tracker", not to ClickUp.** Two implementations:
    the current ClickUp one, and ours, which hands back objects of the same
-   shape. The project config says which one a product uses. Every command,
+   shape. The project config says which one a project uses. Every command,
    guard and test stays as it is. (This is the same move-don't-rewrite rule
    as Phase 1.)
 2. **The machine stamp keeps being written** while both trackers exist, so
    the readers stay correct on either. It is retired in a later ticket, once
-   no product reads ClickUp.
-3. **An importer** copies a product's Loop Queue, tickets and comments, into
+   no project reads ClickUp.
+3. **An importer** copies a project's Loop Queue, tickets and comments, into
    the new store, and keeps a map from old ClickUp ids to new ones, so old
    PR links still resolve.
 
@@ -298,8 +298,8 @@ updates instead of the relay's 10-minute poll, server-side contract rules.
 The tracker runs on the Mini as two launchd jobs (launchd is the Mac's own
 service manager: it starts a job at login, restarts it if it stops, and
 survives a reboot). `scripts/install_loop_runner.sh` installs them beside the
-loop lanes, but only for a product whose project config names a
-`trackerPort`; a product without one gets no tracker jobs.
+loop lanes, but only for a project whose project config names a
+`trackerPort`; a project without one gets no tracker jobs.
 
 | Job | What it does |
 |---|---|
@@ -321,9 +321,9 @@ The settings come from the project config (`spirality.project.json`):
     beside it while the server runs; they belong to it, never delete them).
   - `backups/tracker-YYYY-MM-DD.db`: one copy per night, the newest 14 kept.
 
-Logs are in the configured log folder: `<productSlug>-tracker.log` (one line
+Logs are in the configured log folder: `<projectSlug>-tracker.log` (one line
 per request: method, address, answer, actor id; never a token) and
-`<productSlug>-tracker-backup.log` (one `backup OK` or `backup FAILED` line
+`<projectSlug>-tracker-backup.log` (one `backup OK` or `backup FAILED` line
 per night).
 
 **The hand-over email** goes out through Resend (Dane's choice,
@@ -597,14 +597,14 @@ launchctl kickstart gui/$(id -u)/com.spirality.tracker-backup
 Anything written after that backup was made is not in it; the set-aside file
 still has it.
 
-## Switching a product over
+## Switching a project over
 
-The same steps for every product; only the values come from its project
+The same steps for every project; only the values come from its project
 config (`spirality.project.json` for Spirality). Each step says what a good
 result looks like. Stop at the first one that does not look like that.
 
 **Who runs it.** A hand-run session (Claude in a terminal, or Dane) on the
-Mini, from the product's main checkout on `main`. **Never a loop session**:
+Mini, from the project's main checkout on `main`. **Never a loop session**:
 a loop pass runs inside the lanes step 1 stops, and would cut itself off
 mid-pass. The one step that is Dane's is the merge in step 6.
 
@@ -731,7 +731,7 @@ ClickUp seat ids the config holds until then.
    Good: `queue` lists the same open tickets ClickUp's Loop Queue showed at
    step 1, with tracker ids (`SP-12`); `waiting` lists the same tickets as
    the page's "Waiting on you" at `trackerUrl`. After the next relay pass
-   (ten minutes), its log (`<logDir>/<productSlug>-relay.log`) ends with a
+   (ten minutes), its log (`<logDir>/<projectSlug>-relay.log`) ends with a
    pass that read the tracker without errors.
 
 ### The week side by side
@@ -776,7 +776,7 @@ The options as they were put to him:
    statuses. A desktop notification from the page is the alternative.
 3. **Its name.** Working name: "the tracker".
 4. **Go or no-go on the order above**: Spirality first, a week side by side,
-   then the products.
+   then the projects.
 
 ## The tickets
 

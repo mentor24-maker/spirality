@@ -13,13 +13,13 @@ const homeConfig = validateProjectConfig({
   dopplerProject: 'spirality', dopplerConfig: 'dev', launchdPrefix: 'com.spirality', logDir: '~/loop-logs',
   mergePhrases: ['merge', 'merge it', 'ship it', 'approve'],
   governancePaths: ['CLAUDE.md', 'docs/LOOP_ENGINEERING.md', '.claude/skills/', '.claude/settings.json', '.github/workflows/'],
-  autoMergeLanes: [], operatorName: 'Dane', productSlug: 'spirality', legacyMachinePrefixes: [], productScripts: {},
+  autoMergeLanes: [], operatorName: 'Dane', projectSlug: 'spirality', legacyMachinePrefixes: [], projectScripts: {},
   trackerPrefix: 'SP', trackerPort: 4180, trackerHost: '0.0.0.0', trackerDataDir: '~/spirality-tracker',
   tracker: 'api', trackerUrl: 'http://mac-mini.local:4180', trackerApiUrl: 'http://127.0.0.1:4180',
 });
 
 const ANSWERS = {
-  productName: 'Normie', githubRepo: 'mentor24-maker/normie', productSlug: 'normie', trackerPrefix: 'NO',
+  projectName: 'Normie', githubRepo: 'mentor24-maker/normie', projectSlug: 'normie', trackerPrefix: 'NO',
   checkoutDir: '~/WebApps/normie', checkCommand: 'npm run verify:full', extraGovernancePaths: ['.cursorrules'],
   description: 'Normie is a Next.js app.',
 };
@@ -57,7 +57,7 @@ const deps = (get) => ({ homeConfig, homeRoot: '/Users/dane/WebApps/spirality', 
 test('the build-loop seat name is the sign-ins list\'s own', () => {
   const name = buildSeatName('normie', 'Dane');
   assert.equal(name, 'normie loop-build');
-  assert.ok(seatsForConfig({ trackerPort: null, productSlug: 'normie', operatorName: 'Dane' }).seats.some((s) => s.name === name));
+  assert.ok(seatsForConfig({ trackerPort: null, projectSlug: 'normie', operatorName: 'Dane' }).seats.some((s) => s.name === name));
 });
 
 test('write: Normie, sign-ins already made, writes a file the reader loads, with both ids found', async (t) => {
@@ -91,14 +91,14 @@ test('write: rerun on the same folder says nothing changed', async (t) => {
   assert.match(r.lines[0], /already there, with the same settings/);
 });
 
-test('write: never writes over another product\'s settings file (so never the tracker home\'s)', async (t) => {
+test('write: never writes over another project\'s settings file (so never the tracker home\'s)', async (t) => {
   const { answersPath, dir } = scratch(t);
   const homeFile = join(dir, 'spirality.project.json');
-  writeFileSync(homeFile, JSON.stringify({ productSlug: 'spirality' }));
+  writeFileSync(homeFile, JSON.stringify({ projectSlug: 'spirality' }));
   const r = await runWrite({ answersPath, outDir: dir }, deps(fakeTracker(ACTORS).get));
   assert.equal(r.code, 1);
   assert.match(r.lines.at(-1), /^FAILED: write the settings file: .*"spirality".*left alone/);
-  assert.equal(readFileSync(homeFile, 'utf8'), JSON.stringify({ productSlug: 'spirality' }));
+  assert.equal(readFileSync(homeFile, 'utf8'), JSON.stringify({ projectSlug: 'spirality' }));
 });
 
 test('write: no operator in the tracker, or the tracker refusing, says FAILED and writes nothing', async (t) => {

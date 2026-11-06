@@ -53,7 +53,7 @@ import { loadProjectConfig, ProjectConfigError } from '../lib/projectConfig.mjs'
 // The merge lane's decisions (task 86bchpkxz). `mergeDecision` says whether
 // Dane's word authorizes a merge, `githubGate` whether GitHub allows it; the
 // notices pair the words he reads with the marker the next pass reads. All
-// from the package, so every product's relay decides the same way.
+// from the package, so every project's relay decides the same way.
 import {
   mergeDecision, githubGate, isMergeCommand, MERGE_MARKER, parseMergeMarker,
   refusalNotice, conflictHandOffNotice, mergedNotice, REFUSAL_CODES,
@@ -98,7 +98,7 @@ try {
   process.exit(1);
 }
 export const WORKSPACE = project.workspaceId;
-export const SPACE = project.spaceId;                // the product's SPACE
+export const SPACE = project.spaceId;                // the project's SPACE
 export const LOOP_QUEUE_LIST = project.loopQueueListId; // the Loop Queue LIST
 /** Dane's seat. Every handoff assigns this id. The token ALSO acts as this
  *  seat (`whoami` says so), which is why every comment this script posts is
@@ -127,7 +127,7 @@ const TRACKERS = {
     make: (token) => createApiTracker({
       token,
       baseUrl: project.trackerApiUrl,
-      project: project.productSlug,
+      project: project.projectSlug,
       listId: LOOP_QUEUE_LIST,
       timeoutMs: process.env.TRACKER_HTTP_TIMEOUT_MS,
     }),
@@ -432,7 +432,7 @@ function readBuildLock(dir) {
 
 /** What the build lane's lock says about this process (lib/passHandback.js lockState). */
 function buildLock() {
-  const dir = buildLockPath({ logDir: project.logDir, productSlug: project.productSlug, home: homedir() });
+  const dir = buildLockPath({ logDir: project.logDir, projectSlug: project.projectSlug, home: homedir() });
   return { dir, ...lockState(readBuildLock(dir)) };
 }
 
@@ -475,7 +475,7 @@ function listWorktrees() {
 
 /**
  * Where this checkout's claim marker lives (lib/passClaim.js): the checkout
- * the door runs in, which `npm run` makes the product's own. Asked of git,
+ * the door runs in, which `npm run` makes the project's own. Asked of git,
  * because the claim happens in the main checkout and the hand-off inside the
  * pass's worktree, where plain `.git` is a FILE pointing elsewhere.
  */
@@ -598,13 +598,13 @@ if (cmd === 'whoami') {
     console.log(`repository: not checked; the "${project.tracker}" tracker has no GitHub repository field. The loops use githubRepo ${project.githubRepo}.`);
   } else {
     const out = await tracker.projectDetails();
-    if (!out.res.ok || !out.json) die(`read the tracker project "${project.productSlug}"`, out);
+    if (!out.res.ok || !out.json) die(`read the tracker project "${project.projectSlug}"`, out);
     if (!Object.hasOwn(out.json, 'repo')) {
-      console.error(`repo-check: the tracker's answer for project "${project.productSlug}" has no repo field at all, so this check cannot tell. Is the tracker older than SP-80?`);
+      console.error(`repo-check: the tracker's answer for project "${project.projectSlug}" has no repo field at all, so this check cannot tell. Is the tracker older than SP-80?`);
       process.exit(1);
     }
     const { ok, line } = compareRepo({
-      configRepo: project.githubRepo, trackerRepo: out.json.repo, slug: project.productSlug, editUrl: projectEditUrl(filedTrackerUrl() || project.trackerUrl, project.productSlug),
+      configRepo: project.githubRepo, trackerRepo: out.json.repo, slug: project.projectSlug, editUrl: projectEditUrl(filedTrackerUrl() || project.trackerUrl, project.projectSlug),
     });
     console.log(line);
     reportLimits();

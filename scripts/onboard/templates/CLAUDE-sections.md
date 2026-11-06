@@ -1,6 +1,6 @@
 ## How to work with Dane
 
-{{productName}} is built by the loop [Spirality](https://github.com/{{spiralityRepo}})
+{{projectName}} is built by the loop [Spirality](https://github.com/{{spiralityRepo}})
 defines (`docs/LOOP_ENGINEERING.md`), and these rules are Spirality's, learned
 the hard way:
 
@@ -21,10 +21,10 @@ the hard way:
 
 ## Where the work is tracked
 
-Every piece of work on this repository is a ticket in the **{{productName}}** project
+Every piece of work on this repository is a ticket in the **{{projectName}}** project
 of **the tracker**, the ticket system that runs on the Mini
-(`{{trackerUrl}}`, ids like `{{trackerPrefix}}-12`). Work for another product
-goes in that product's queue, and a change to the loop itself (the ticket door
+(`{{trackerUrl}}`, ids like `{{trackerPrefix}}-12`). Work for another project
+goes in that project's queue, and a change to the loop itself (the ticket door
 in `loop/`, the skills' shared steps) is Spirality work, filed in Spirality's
 project; never mixed.
 
@@ -36,8 +36,8 @@ project; never mixed.
   never as Dane.
 - A pull request's title is the ticket's name, byte for byte, and its body
   carries the ticket link (`pr-opened` prints the exact line it accepts).
-  `{{checkCommand}}` is the definition of done; CI's `verify` check runs
-  it on every pull request.
+  `npm run verify` is the definition of done. {{verifyMeaning}} on every
+  pull request.
 - Two statuses are Dane's: `Needs your input` and `Ready to launch`. Only
   `ask` may set them, and no loop takes a ticket back out of them.
 

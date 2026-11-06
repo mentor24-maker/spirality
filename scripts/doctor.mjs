@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * `npm run doctor`: is every key this product expects actually in Doppler?
+ * `npm run doctor`: is every key this project expects actually in Doppler?
  * Looks in the Doppler project and config the project config names
  * (`dopplerProject`, `dopplerConfig`), and says which one it checked.
  * Prints expected names × configs as present / MISSING. Exit 0 when all are

@@ -48,13 +48,16 @@ import { execFile } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { hostname } from 'node:os';
+import { resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { openStore, StoreError } from './store.mjs';
 import { boardOf, PRIORITIES, projectDetailsOf, projectsList, readSearchFilters, reportsOf, searchTickets, stageColoursOf, threadOf, waitingFor } from './pageData.mjs';
 import { createNotifier, DEFAULT_FROM, MAIL_FROM, MAIL_KEY, mailEnvFromDoppler, mailSettingsFromEnv, resendSender, textSettings } from './notify.mjs';
 import { sendInvite, sendResetLink } from './account.mjs';
-import { loadProjectConfig } from '../lib/projectConfig.mjs';
+import { guessProject } from './projectGuess.mjs';
+import { findConfigFile, loadProjectConfig } from '../lib/projectConfig.mjs';
+import { saveAnswers, setupFields, setupList, setupOf, SetupError } from './setup.mjs';
 import busRelayPlan from '../lib/busRelayPlan.js';
 import loopStatuses from '../lib/loopStatuses.js';
 
@@ -88,6 +91,8 @@ const INVITE_REFUSALS = Object.freeze({ 'duplicate-email': 409, 'duplicate-invit
 
 /** The fields a new ticket may carry. */
 const FILE_FIELDS = Object.freeze(['name', 'description', 'status', 'priority', 'tags', 'assignee', 'loopNote']);
+/** What the Add Task box's project check reads: the words about to be filed. */
+const CHECK_FIELDS = Object.freeze(['name', 'description']);
 
 /** The fields a new project may carry. */
 const PROJECT_FIELDS = Object.freeze(['name', 'slug', 'prefix', 'url', 'logo', 'owner', 'repo', 'alertEmail', 'alertPhone']);
@@ -156,13 +161,16 @@ const PAGE_HEADERS = Object.freeze({
  * page address. `/projects` is both the Projects screen and the call that
  * lists them, and `/projects/<project>` both a project's details page and
  * the call that reads them (`/projects/new` is the Create Project form), and
- * `/search?q=<term>` both the search results page and the search itself: a browser opening the address asks for HTML and
+ * `/search?q=<term>` both the search results page and the search itself,
+ * and `/setup/<slug>` (`/setup/new` the Set up a product form) both a
+ * product's setup page and the call that reads it: a browser opening the address asks for HTML and
  * gets the page; the page's own call asks for anything and gets the data.
  */
 function pageFile(pathname, accept = '') {
-  if (/^\/(?:projects(?:\/[^/]+)?|people|search)$/.test(pathname)) return /\btext\/html\b/.test(accept) ? 'index.html' : null;
+  if (/^\/(?:projects(?:\/[^/]+)?|people|search|setup\/(?!fields$)[^/]+)$/.test(pathname)) return /\btext\/html\b/.test(accept) ? 'index.html' : null;
   if (pathname === '/' || /^\/(?:tasks|board|list|new|settings|set-password|reporting)$/.test(pathname) || /^\/(?:t|board|list)\/[^/]+$/.test(pathname)) return 'index.html';
   if (/^\/projects\/[^/]+\/edit$/.test(pathname)) return 'index.html';
+  if (/^\/setup\/[^/]+\/answers$/.test(pathname)) return 'index.html';
   const m = /^\/web\/([^/]+)$/.exec(pathname);
   return m && Object.hasOwn(WEB_FILES, m[1]) ? m[1] : null;
 }
@@ -303,7 +311,7 @@ function flag(value) {
  * `notifier` (tracker/notify.mjs) hears about every write once its answer
  * has gone back, so a hand-over email can never slow or fail the write.
  * `defaultProject` is the slug the New request form starts on: the project
- * config's productSlug, never a literal here. One the store does not hold
+ * config's projectSlug, never a literal here. One the store does not hold
  * is answered as null, and the page falls back to the first project.
  * `mergePhrase` is the word the ticket page's Merge button posts: the first
  * of the project config's mergePhrases, never a literal here. Null means no
@@ -313,10 +321,14 @@ function flag(value) {
  * `goPhrase` is the word the Go button posts on an intake card (GO_PHRASE
  * below). Null means no Go button.
  * `accountMail` sends the "Forgot password?" and invite emails: `{ send,
- * pageUrl, productName }`, each link opening under `pageUrl`. With no
+ * pageUrl, projectName }`, each link opening under `pageUrl`. With no
  * `send`, an invite is refused and nothing is made. Null (or no
  * `send`) means no reset email goes out; the page's answer is the same,
  * and the log says why. `now` is the clock the sign-in failure count reads.
+ * `setup` is what the "Set up a project" calls read (tracker/setup.mjs):
+ * `{ homeConfig, homeRoot, folder, trackerDb }`, the tracker home's checked
+ * settings file, its main folder, the folder this server runs from and its
+ * database. Null means those calls answer 503 and nothing is read or written.
  */
 /**
  * The word the ticket page's Close button posts: the first of the relay's
@@ -327,7 +339,7 @@ export const CLOSE_PHRASE = busRelayPlan.CLOSE_PHRASES[0];
 /** The word the Go button posts: the one an intake card asks for (GO_PHRASE in lib/busRelayPlan.js). */
 export const GO_PHRASE = busRelayPlan.GO_PHRASE;
 
-export function createHandler(store, { log = () => {}, notifier = null, defaultProject = null, mergePhrase = null, closePhrase = null, goPhrase = null, accountMail = null, now = Date.now } = {}) {
+export function createHandler(store, { log = () => {}, notifier = null, defaultProject = null, mergePhrase = null, closePhrase = null, goPhrase = null, accountMail = null, setup = null, now = Date.now } = {}) {
   const failures = failureCounter(now);
 
   /** The People page's data: each person with their email, and the open invites. */
@@ -361,6 +373,30 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
 
     if (parts.length === 1 && parts[0] === 'me' && method === 'GET') {
       return [200, me];
+    }
+
+    // Dane's page: "Set up a project" (tracker/setup.mjs). A person's only;
+    // the server reads the wizard's files and writes one, the answers file,
+    // and never runs the setup itself: the page shows the command to paste.
+    if (parts[0] === 'setup' && parts.length <= 2) {
+      if (me.kind !== 'human') {
+        throw new HttpError(403, 'people-only', 'only a person signed in to the tracker may read or change a project\'s setup; a machine may not.');
+      }
+      if (!setup) throw new HttpError(503, 'no-setup', 'this tracker cannot read setups: its settings file was not usable when it started (its log says why).');
+      try {
+        if (parts.length === 1 && method === 'GET') return [200, setupList(setup)];
+        if (parts.length === 2 && parts[1] === 'fields' && method === 'GET') {
+          return [200, { fields: setupFields(setup, url.searchParams.get('product') ?? '') }];
+        }
+        if (parts.length === 2 && parts[1] !== 'fields' && method === 'GET') return [200, setupOf(setup, parts[1])];
+        if (parts.length === 2 && parts[1] !== 'fields' && method === 'PUT') {
+          const body = await readJson(req);
+          return [200, saveAnswers(setup, parts[1], body)];
+        }
+      } catch (err) {
+        if (err instanceof SetupError) throw new HttpError(err.status, err.code, err.message, err.field ? { field: err.field } : {});
+        throw err;
+      }
     }
 
     // An actor's name, for a reader showing who wrote a comment. Never its token.
@@ -423,7 +459,7 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
       if (typeof body.email !== 'string' || !body.email.trim()) throw new HttpError(400, 'missing', 'type the email to invite.');
       const result = await sendInvite({
         store, email: body.email, madeBy: me.id, send: accountMail?.send ?? null,
-        trackerUrl: accountMail?.pageUrl ?? null, productName: accountMail?.productName ?? 'tracker',
+        trackerUrl: accountMail?.pageUrl ?? null, projectName: accountMail?.projectName ?? 'tracker',
       });
       log(result.ok ? `invite sent actor=${me.id}` : `invite NOT sent (${result.code}) actor=${me.id}`);
       if (!result.ok) throw new HttpError(INVITE_REFUSALS[result.code] ?? 400, result.code, result.line);
@@ -522,6 +558,20 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
       const board = boardOf(store, parts[1]);
       if (!board) throw new HttpError(404, 'unknown-project', `no project "${parts[1]}".`);
       return [200, board];
+    }
+
+    // Dane's page: the Add Task box asks, before it files, whether the words
+    // fit another project better (tracker/projectGuess.mjs). Plain
+    // word matching on the tickets already here; it writes nothing.
+    if (parts.length === 4 && parts[0] === 'projects' && parts[2] === 'tickets' && parts[3] === 'check' && method === 'POST') {
+      const project = requireProject(parts[1]);
+      const body = await readJson(req);
+      checkBody(body, me, CHECK_FIELDS);
+      for (const key of CHECK_FIELDS) {
+        if (body[key] != null && typeof body[key] !== 'string') throw new HttpError(400, 'bad-field', `${key} must be text.`);
+      }
+      const projects = store.listProjects().map((p) => ({ slug: p.slug, name: p.name, tickets: store.listTickets(p.slug) }));
+      return [200, { suggest: guessProject({ name: body.name ?? '', description: body.description ?? '' }, project.slug, projects) }];
     }
 
     if (parts.length === 3 && parts[0] === 'projects' && parts[2] === 'tickets') {
@@ -672,7 +722,7 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
       const after = async () => {
         const { line } = await sendResetLink({
           store, email: body.email, send: accountMail?.send ?? null,
-          trackerUrl: accountMail?.pageUrl ?? null, productName: accountMail?.productName ?? 'tracker',
+          trackerUrl: accountMail?.pageUrl ?? null, projectName: accountMail?.projectName ?? 'tracker',
         });
         log(line);
       };
@@ -750,8 +800,8 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
 }
 
 /** Start a server on `port` (0 = any free port) against an open store. Resolves to the http.Server. */
-export function startServer({ store, port, host = '127.0.0.1', log, notifier, defaultProject, mergePhrase, closePhrase, goPhrase, accountMail, now }) {
-  const server = createServer(createHandler(store, { log, notifier, defaultProject, mergePhrase, closePhrase, goPhrase, accountMail, now }));
+export function startServer({ store, port, host = '127.0.0.1', log, notifier, defaultProject, mergePhrase, closePhrase, goPhrase, accountMail, setup, now }) {
+  const server = createServer(createHandler(store, { log, notifier, defaultProject, mergePhrase, closePhrase, goPhrase, accountMail, setup, now }));
   return new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(port, host, () => {
@@ -828,6 +878,25 @@ export async function loadMailSettings({ host, port, log = () => {} }) {
   return { ...mail, account: accountMailOf(env, sharedPageUrl({ host, port })) };
 }
 
+/**
+ * What the "Set up a project" calls read: the settings file in the folder
+ * this server runs from (it must be the tracker home's, the one that sets
+ * trackerPort), that folder, and the database it opened. The answers file's
+ * default checkout folder sits beside `homeRoot`, the tracker home's folder,
+ * which is this one. Null, with why, when the settings file does not do.
+ */
+export function setupSettingsOf({ db, folder = fileURLToPath(new URL('..', import.meta.url)) }) {
+  const root = folder.replace(/\/+$/, '');
+  const file = findConfigFile(root);
+  if (!file) return { setup: null, why: `no settings file in ${root}` };
+  let homeConfig;
+  try { homeConfig = loadProjectConfig({ file, env: {} }); } catch (err) {
+    return { setup: null, why: err.message };
+  }
+  if (homeConfig.trackerPort == null) return { setup: null, why: `${file} does not set "trackerPort", so it is not the tracker home's` };
+  return { setup: { homeConfig, homeRoot: root, folder: root, trackerDb: db }, why: null };
+}
+
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   try {
     const { db, port, host } = settingsFromEnv();
@@ -849,13 +918,15 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     let mergePhrase = null;
     try {
       const config = loadProjectConfig();
-      defaultProject = config.productSlug;
+      defaultProject = config.projectSlug;
       mergePhrase = config.mergePhrases[0] ?? null;
     } catch (err) {
       log(`the New request form starts on the first project and the ticket page has no Merge button: the project config is not usable (${err.message}).`);
     }
-    const accountMail = mail.account && { ...mail.account, productName: store.getProject(defaultProject)?.name ?? 'tracker' };
-    const server = await startServer({ store, port, host, log, notifier, defaultProject, mergePhrase, closePhrase: CLOSE_PHRASE, goPhrase: GO_PHRASE, accountMail });
+    const accountMail = mail.account && { ...mail.account, projectName: store.getProject(defaultProject)?.name ?? 'tracker' };
+    const { setup, why: noSetup } = setupSettingsOf({ db: resolve(db) });
+    log(setup ? `set up a project: on, reading ${setup.homeConfig.logDir}/onboard.` : `set up a project: off. ${noSetup}.`);
+    const server = await startServer({ store, port, host, log, notifier, defaultProject, mergePhrase, closePhrase: CLOSE_PHRASE, goPhrase: GO_PHRASE, accountMail, setup });
     console.log(`tracker listening on http://${host}:${server.address().port}/`);
   } catch (err) {
     console.error(`tracker server did not start: ${err.message}`);

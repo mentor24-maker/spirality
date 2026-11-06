@@ -361,10 +361,10 @@ test('the tracker is asked at the filed network name, or at 127.0.0.1 on its own
   assert.equal(trackerAddress('https://tracker.example.com', ['laptop']).url, 'https://tracker.example.com');
 });
 
-const HOME = { operatorName: 'Dana', productSlug: 'alpha', trackerPort: 4180 };
-const GUEST = { operatorName: 'Dana', productSlug: 'beta', trackerPort: null };
+const HOME = { operatorName: 'Dana', projectSlug: 'alpha', trackerPort: 4180 };
+const GUEST = { operatorName: 'Dana', projectSlug: 'beta', trackerPort: null };
 
-test('the product that runs the tracker keeps the bare seats; another product gets machine seats named for it, and no operator seat', () => {
+test('the project that runs the tracker keeps the bare seats; another project gets machine seats named for it, and no operator seat', () => {
   const home = seatsForConfig(HOME);
   assert.equal(home.guest, false);
   assert.deepEqual(home.seats, seatsFor('Dana'));
@@ -375,14 +375,14 @@ test('the product that runs the tracker keeps the bare seats; another product ge
   assert.deepEqual(guest.seats.filter((s) => s.handRun).map((s) => s.secret), ['TRACKER_TOKEN_HAND_RUN']);
 });
 
-test('a second product\'s create leaves every token of the first signing in, and check names every seat of both', async () => {
+test('a second project\'s create leaves every token of the first signing in, and check names every seat of both', async () => {
   const f = fixture();
   try {
     const first = await createSignins({ ...f, seats: seatsForConfig(HOME).seats, env: {}, project: PROJECT });
     assert.equal(first.ok, true, first.lines.join('\n'));
     const homeVault = { ...f.vault };
 
-    // The second product's own Doppler project: empty, a separate vault.
+    // The second project's own Doppler project: empty, a separate vault.
     const guestVault = {};
     const second = await createSignins({
       ...f, seats: seatsForConfig(GUEST).seats, guest: true, env: {}, operatorName: 'Dana',
@@ -391,7 +391,7 @@ test('a second product\'s create leaves every token of the first signing in, and
       getSecret: (name) => guestVault[name],
     });
     assert.equal(second.ok, true, second.lines.join('\n'));
-    assert.deepEqual(f.vault, homeVault, 'nothing written to the first product\'s Doppler');
+    assert.deepEqual(f.vault, homeVault, 'nothing written to the first project\'s Doppler');
     assert.deepEqual(Object.keys(guestVault).sort(), TRACKER_SEATS.filter((s) => s.kind === 'machine').map((s) => s.secret).sort());
     assert.match(second.lines.join('\n'), /TRACKER_TOKEN_LOOP_BUILD: actor \d+ \(machine, "beta loop-build"\) made/);
     for (const [name, token] of Object.entries(homeVault)) assert.ok(f.store.actorForToken(token), `${name} still signs in`);
@@ -409,7 +409,7 @@ test('a second product\'s create leaves every token of the first signing in, and
       const guest = await checkSignins({ url, seats: seatsForConfig(GUEST).seats, env: guestVault });
       assert.equal(guest.ok, true, guest.lines.join('\n'));
       assert.match(guest.lines.join('\n'), /TRACKER_TOKEN_LOOP_BUILD: GET \/me answers "beta loop-build"/);
-      // The first product's tokens are not the second's seats.
+      // The first project's tokens are not the second's seats.
       const crossed = await checkSignins({ url, seats: seatsForConfig(GUEST).seats, env: homeVault });
       assert.equal(crossed.ok, false);
     } finally {
@@ -428,7 +428,7 @@ test('a second product\'s create leaves every token of the first signing in, and
   } finally { f.cleanup(); }
 });
 
-test('a second product that wrongly keeps the bare seat names is refused before any token of the first is replaced', async () => {
+test('a second project that wrongly keeps the bare seat names is refused before any token of the first is replaced', async () => {
   const f = fixture();
   try {
     await createSignins({ ...f, env: {}, project: PROJECT });
@@ -447,7 +447,7 @@ test('a second product that wrongly keeps the bare seat names is refused before 
   } finally { f.cleanup(); }
 });
 
-test('the same wrong config is refused when the second product\'s project was made on the page first', async () => {
+test('the same wrong config is refused when the second project\'s project was made on the page first', async () => {
   const f = fixture();
   try {
     await createSignins({ ...f, env: {}, project: PROJECT });
@@ -467,7 +467,7 @@ test('the same wrong config is refused when the second product\'s project was ma
   } finally { f.cleanup(); }
 });
 
-test('the product that runs the tracker can still replace a lost token once another product is on it', async () => {
+test('the project that runs the tracker can still replace a lost token once another project is on it', async () => {
   const f = fixture();
   try {
     await createSignins({ ...f, env: {}, project: PROJECT });
@@ -486,7 +486,7 @@ test('the product that runs the tracker can still replace a lost token once anot
   } finally { f.cleanup(); }
 });
 
-test('a second product that lost one token before its project exists gets it back on the retry, never refused', async () => {
+test('a second project that lost one token before its project exists gets it back on the retry, never refused', async () => {
   const f = fixture();
   try {
     await createSignins({ ...f, env: {}, project: PROJECT });
@@ -512,17 +512,17 @@ test('a second product that lost one token before its project exists gets it bac
   } finally { f.cleanup(); }
 });
 
-test('a second product run before the operator exists makes its seats but not its project, and says why', async () => {
+test('a second project run before the operator exists makes its seats but not its project, and says why', async () => {
   const f = fixture();
   try {
     const r = await createSignins({ ...f, seats: seatsForConfig(GUEST).seats, guest: true, env: {}, operatorName: 'Dana', project: { slug: 'beta', name: 'Beta', prefix: 'BE' } });
     assert.equal(r.ok, false);
-    assert.match(r.lines.join('\n'), /project "beta": NOT made, because nobody named "Dana" signs in to this tracker yet: run create for the product that runs the tracker first\./);
+    assert.match(r.lines.join('\n'), /project "beta": NOT made, because nobody named "Dana" signs in to this tracker yet: run create for the project that runs the tracker first\./);
     assert.equal(f.store.getProject('beta'), null);
   } finally { f.cleanup(); }
 });
 
-test('the command: run under another product\'s Doppler project, it refuses and writes nothing', () => {
+test('the command: run under another project\'s Doppler project, it refuses and writes nothing', () => {
   const dir = mkdtempSync(join(tmpdir(), 'signins-cli-'));
   try {
     const db = join(dir, 'tracker.db');
@@ -600,20 +600,20 @@ test('the command: --config reads a settings file outside the current folder; wi
   const dir = mkdtempSync(join(tmpdir(), 'signins-cli-'));
   try {
     const here = join(dir, 'elsewhere');
-    const away = join(dir, 'product');
+    const away = join(dir, 'project');
     mkdirSync(here);
     mkdirSync(away);
     const config = JSON.parse(readFileSync(fileURLToPath(new URL('../spirality.project.json', import.meta.url)), 'utf8'));
-    writeFileSync(join(away, 'spirality.project.json'), JSON.stringify({ ...config, dopplerProject: 'far-away-product' }));
+    writeFileSync(join(away, 'spirality.project.json'), JSON.stringify({ ...config, dopplerProject: 'far-away-project' }));
     const db = join(dir, 'tracker.db');
     openStore(db).close();
     const script = fileURLToPath(new URL('./signins.mjs', import.meta.url));
     const env = { PATH: process.env.PATH, HOME: dir, TRACKER_DB: db, DOPPLER_PROJECT: 'someone-else', TRACKER_URL: 'http://127.0.0.1:1' };
     for (const command of ['create', 'check']) {
-      const r = spawnSync(process.execPath, ['--no-warnings', script, command, '--config', join('..', 'product', 'spirality.project.json')], { encoding: 'utf8', cwd: here, env });
+      const r = spawnSync(process.execPath, ['--no-warnings', script, command, '--config', join('..', 'project', 'spirality.project.json')], { encoding: 'utf8', cwd: here, env });
       assert.notEqual(r.status, 0);
       // The guard names the far file's Doppler project, so that file was the one read.
-      assert.match(r.stderr, /but the project config names "far-away-product".*Nothing was made or written/, r.stderr);
+      assert.match(r.stderr, /but the project config names "far-away-project".*Nothing was made or written/, r.stderr);
     }
     const none = spawnSync(process.execPath, ['--no-warnings', script, 'create', '--name', 'Alpha'], { encoding: 'utf8', cwd: here, env });
     assert.notEqual(none.status, 0);
