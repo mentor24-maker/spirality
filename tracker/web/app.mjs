@@ -929,7 +929,7 @@ async function drawProject(slug, view, { adding = false, filed = null, unchecked
         <label for="files">Files</label>
         <input id="files" type="file" multiple>
         <span class="hint quiet">Screenshots, PDFs or notes, up to 10 MB each. Files are not kept in the saved draft: after a reload, pick them again.</span>
-        <div class="row"><button type="submit">File Request</button><span class="note"></span></div>
+        <div class="row"><button type="submit">Submit Task</button><span class="note"></span></div>
       </form>
     </details>
     <dialog class="project-check" aria-labelledby="project-check-question">
