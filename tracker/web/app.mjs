@@ -508,9 +508,14 @@ async function drawProjects(done = '') {
  * One project's details: its logo, name, slug, ticket prefix, web address,
  * GitHub repository, owner, operator, how many
  * tickets are open and how many sit in each status, with links to its board
- * and its list. Read-only. An unknown slug says so plainly.
+ * and its list, and its members. An unknown slug says so plainly. An admin
+ * gets Add Member (a picker of the people not on it) and Remove on each
+ * member but the owner and operator; after each change the page reads the
+ * project again and says it worked only when the members it reads agree. A
+ * refusal shows the server's own reason. `done` and `problem` are lines to
+ * show above the members.
  */
-async function drawProjectDetails(slug) {
+async function drawProjectDetails(slug, done = '', problem = '') {
   let p;
   try {
     p = await api('GET', `/projects/${encodeURIComponent(slug)}`);
@@ -524,6 +529,17 @@ async function drawProjectDetails(slug) {
   setTitle(`${p.name} · Tracker`);
   const at = (v) => `/${v}/${encodeURIComponent(p.slug)}`;
   const counts = p.statuses.map((s) => `<tr><td class="status">${escapeHtml(s.status)}</td><td class="count">${s.count}</td></tr>`).join('');
+  const members = p.members ?? [];
+  const editing = me?.kind === 'human' && p.canEditMembers === true;
+  // The people an admin may add: everyone with an account who is not on it yet.
+  const people = editing ? (await api('GET', '/people')).people ?? [] : [];
+  const addable = people.filter((x) => !members.some((m) => m.id === x.id));
+  const fixedAs = (m) => [m.id === p.owner?.id ? 'Owner' : null, m.id === p.operator?.id ? 'Operator' : null].filter(Boolean);
+  const memberRow = (m) => `
+    <tr><td class="name">${escapeHtml(m.name)}${fixedAs(m).map((t) => `<span class="tag">${escapeHtml(t)}</span>`).join('')}</td>
+      <td class="by">${m.addedBy ? escapeHtml(m.addedBy.name) : '<span class="quiet">the tracker</span>'}</td>
+      <td class="added">${escapeHtml(when(m.addedAt))}</td>
+      ${editing ? `<td class="actions">${fixedAs(m).length ? '' : `<button type="button" data-remove="${escapeHtml(m.id)}" data-name="${escapeHtml(m.name)}">Remove</button>`}</td>` : ''}</tr>`;
   main.innerHTML = `
     <h1 class="project">${logoOf(p, 'logo big')}${escapeHtml(p.name)}</h1>
     <div class="toolbar">
@@ -540,8 +556,60 @@ async function drawProjectDetails(slug) {
       <dt>Open tickets</dt><dd>${p.open}</dd>
     </dl>
     <h2>Tickets by Status</h2>
-    <table class="counts"><thead><tr><th>Status</th><th class="count">Tickets</th></tr></thead><tbody>${counts}</tbody></table>`;
+    <table class="counts"><thead><tr><th>Status</th><th class="count">Tickets</th></tr></thead><tbody>${counts}</tbody></table>
+    <h2>Members</h2>
+    <p class="note${problem ? ' error' : ' quiet'}" role="status">${escapeHtml(problem || done)}</p>
+    ${members.length
+    ? `<table class="projects people members"><thead><tr><th class="name">Name</th><th class="by">Added By</th><th class="added">Added</th>${editing ? '<th class="actions"><span class="hidden">Actions</span></th>' : ''}</tr></thead><tbody>${members.map(memberRow).join('')}</tbody></table>`
+    : '<p class="quiet">Nobody is a member of this project yet.</p>'}
+    ${editing ? (addable.length
+    ? `<form class="invite members">
+      <label for="add-member">Add a member</label>
+      <div class="row"><select id="add-member">${addable.map((x) => `<option value="${escapeHtml(x.id)}">${escapeHtml(x.name)}</option>`).join('')}</select><button type="submit">Add Member</button></div>
+    </form>`
+    : '<p class="quiet">Everyone with an account is a member.</p>') : ''}
+    <p class="quiet">Membership is recorded, not yet enforced: everyone still sees every project.</p>`;
   putTrail([{ label: p.name, href: '/projects' }, { label: 'Details' }]);
+  if (!editing) return;
+  const note = main.querySelector('p.note');
+  const busy = (text) => { note.className = 'note quiet'; note.textContent = text; };
+  const again = (text, failed) => drawProjectDetails(slug, failed ? '' : text, failed ? text : '')
+    .catch((err) => (err instanceof SignedOut ? drawSignIn() : showError(err)));
+  // Send one change, then read the project back before saying it worked.
+  const change = async (control, name, send, wanted, said, verb) => {
+    control.disabled = true;
+    busy(`${verb === 'add' ? 'Adding' : 'Removing'} ${name}…`);
+    try {
+      await send();
+    } catch (err) {
+      if (err instanceof SignedOut) return drawSignIn(`You were signed out; ${name} was not ${verb === 'add' ? 'added' : 'removed'}.`);
+      control.disabled = false;
+      note.className = 'note error';
+      note.textContent = `Not ${verb === 'add' ? 'added' : 'removed'}: ${err.message}`;
+      return;
+    }
+    const back = await api('GET', `/projects/${encodeURIComponent(slug)}`).catch(() => null);
+    const listed = back?.members?.some((m) => String(m.id) === String(wanted.id));
+    const ok = back != null && listed === wanted.listed;
+    again(ok ? said : `The tracker said ${name} was ${verb === 'add' ? 'added' : 'removed'}, but the members read back ${back ? (listed ? 'still list them' : 'do not list them') : 'could not be read'}.`, !ok);
+  };
+  const form = main.querySelector('form.members');
+  form?.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const select = form.querySelector('select');
+    const id = Number(select.value);
+    const name = select.selectedOptions[0]?.textContent ?? 'them';
+    change(form.querySelector('button'), name, () => api('POST', `/projects/${encodeURIComponent(slug)}/members`, { person: id }),
+      { id, listed: true }, `Added ${name} to ${p.name}.`, 'add');
+  });
+  for (const button of main.querySelectorAll('button[data-remove]')) {
+    button.addEventListener('click', () => {
+      const { remove: id, name } = button.dataset;
+      if (!confirm(`Remove ${name} from ${p.name}?`)) return;
+      change(button, name, () => api('DELETE', `/projects/${encodeURIComponent(slug)}/members/${encodeURIComponent(id)}`),
+        { id, listed: false }, `Removed ${name} from ${p.name}.`, 'remove');
+    });
+  }
 }
 
 /** One labelled text box of the project forms. `attrs` is its own extra attributes, already safe. */
@@ -1724,7 +1792,9 @@ async function drawSettings() {
  * no buttons, and the server refuses it anyway. Each user's role shows in
  * the Role column; an admin gets a picker there instead, whose change is
  * read back the same way, and a refusal (the last admin) shows the server's
- * reason. Under it, which role has which permission.
+ * reason. The Projects column lists the projects each user is a member
+ * of, each linking to its details page. Under it, which role has which
+ * permission.
  */
 async function drawUsers(done = '', problem = '') {
   const { people, invites = [], roles = [], permissions = [], canEditRoles = false } = await api('GET', '/people');
@@ -1735,7 +1805,8 @@ async function drawUsers(done = '', problem = '') {
     ? `<select data-role-of="${escapeHtml(p.id)}" data-name="${escapeHtml(p.name)}" aria-label="Role of ${escapeHtml(p.name)}">${roles.map((r) => `<option value="${escapeHtml(r.name)}"${r.name === p.role ? ' selected' : ''}>${escapeHtml(r.name)}</option>`).join('')}</select>`
     : escapeHtml(p.role ?? ''));
   const personRow = (p) => `
-    <tr><td class="name">${escapeHtml(p.name)}</td><td class="email">${p.email ? escapeHtml(p.email) : '<span class="quiet">no email yet</span>'}</td><td class="role">${roleCell(p)}</td></tr>`;
+    <tr><td class="name">${escapeHtml(p.name)}</td><td class="email">${p.email ? escapeHtml(p.email) : '<span class="quiet">no email yet</span>'}</td><td class="role">${roleCell(p)}</td>
+      <td class="projects">${(p.projects ?? []).length ? p.projects.map((x) => `<a href="/projects/${encodeURIComponent(x.slug)}">${escapeHtml(x.name)}</a>`).join(', ') : '<span class="quiet">none</span>'}</td></tr>`;
   const roleRow = (r) => `
     <tr><td class="name"><b>${escapeHtml(r.name)}</b><span class="hint quiet">${escapeHtml(r.description)}</span></td>${permissions.map((x) => `<td class="has">${r.permissions.includes(x.name) ? '✓' : '<span class="hidden">no</span>'}</td>`).join('')}</tr>`;
   const inviteRow = (i) => `
@@ -1750,7 +1821,7 @@ async function drawUsers(done = '', problem = '') {
       <span class="hint quiet">They get an email with a link to choose their name and password. It works once, for 7 days.</span>
     </form>` : ''}
     <h2>Users with an Account</h2>
-    <table class="projects people"><thead><tr><th class="name">Name</th><th class="email">Email</th><th class="role">Role</th></tr></thead><tbody>${people.map(personRow).join('')}</tbody></table>
+    <table class="projects people"><thead><tr><th class="name">Name</th><th class="email">Email</th><th class="role">Role</th><th class="projects">Projects</th></tr></thead><tbody>${people.map(personRow).join('')}</tbody></table>
     <h2>Open Invites</h2>
     ${invites.length
     ? `<table class="projects invites"><thead><tr><th class="email">Email</th><th class="by">Invited By</th><th class="expires">Expires</th><th class="actions"><span class="hidden">Actions</span></th></tr></thead><tbody>${invites.map(inviteRow).join('')}</tbody></table>`

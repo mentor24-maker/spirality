@@ -308,6 +308,8 @@ test('a project\'s details name its prefix, operator, open count and a count per
         status: name,
         count: tickets.filter((t) => t.status === loopStatuses.statusOf(name)).length,
       })),
+      members: [{ id: f.operator.id, name: 'Dane', addedAt: r.body.members[0]?.addedAt, addedBy: null }],
+      canEditMembers: true,
     });
     assert.equal(r.body.statuses.reduce((n, s) => n + s.count, 0), tickets.length, 'every ticket is counted once');
     assert.equal((await f.call('GET', '/projects/beta')).body.name, 'Beta');
@@ -2216,6 +2218,34 @@ test('the Users page shows each role, gives an admin a picker that reads back, s
   assert.match(draw, /select\.value = was;[\s\S]*?note\.textContent = `Not changed: \$\{err\.message\}`;/);
   assert.match(draw, /<h2>Roles and Permissions<\/h2>/);
   assert.match(draw, /recorded, not yet enforced/);
+});
+
+test('a project\'s details page lists its members, gives an admin Add Member and Remove (never on the owner or operator), reads each change back, and shows a refusal\'s reason', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const draw = app.slice(app.indexOf('async function drawProjectDetails'), app.indexOf('/** One labelled text box'));
+  assert.match(draw, /<h2>Members<\/h2>/);
+  for (const field of ['m.name', 'm.addedBy.name', 'x.name', 'x.id', 'm.id', 't']) assert.match(draw, new RegExp(`escapeHtml\\(${field.replace('.', '\\.')}\\)`), field);
+  // Only an admin signed in as a person gets the controls; the owner and operator get a tag, no Remove.
+  assert.match(draw, /const editing = me\?\.kind === 'human' && p\.canEditMembers === true;/);
+  assert.match(draw, /fixedAs\(m\)\.length \? '' : `<button type="button" data-remove=/);
+  assert.match(draw, /<button type="submit">Add Member<\/button>/);
+  assert.match(draw, />Remove<\/button>/);
+  // The picker offers only people not on the project yet.
+  assert.match(draw, /const addable = people\.filter\(\(x\) => !members\.some\(\(m\) => m\.id === x\.id\)\);/);
+  assert.match(draw, /api\('POST', `\/projects\/\$\{encodeURIComponent\(slug\)\}\/members`, \{ person: id \}\)/);
+  assert.match(draw, /api\('DELETE', `\/projects\/\$\{encodeURIComponent\(slug\)\}\/members\/\$\{encodeURIComponent\(id\)\}`\)/);
+  // Each change is read back before the page says it worked; a refusal shows the server's reason.
+  assert.match(draw, /const back = await api\('GET', `\/projects\/\$\{encodeURIComponent\(slug\)\}`\)\.catch\(\(\) => null\);/);
+  assert.match(draw, /const ok = back != null && listed === wanted\.listed;/);
+  assert.match(draw, /note\.textContent = `Not \$\{verb === 'add' \? 'added' : 'removed'\}: \$\{err\.message\}`;/);
+  assert.match(draw, /recorded, not yet enforced/);
+});
+
+test('the Users page lists each user\'s projects, each a link to its details page', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const draw = app.slice(app.indexOf('async function drawUsers'), app.indexOf('/** Underline the header link'));
+  assert.match(draw, /<th class="projects">Projects<\/th>/);
+  assert.match(draw, /p\.projects\.map\(\(x\) => `<a href="\/projects\/\$\{encodeURIComponent\(x\.slug\)\}">\$\{escapeHtml\(x\.name\)\}<\/a>`\)/);
 });
 
 test('the Tasks toolbar picks a project from a dropdown, "Project: ", the one in view selected', () => {
