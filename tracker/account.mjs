@@ -116,7 +116,7 @@ export function inviteEmail({ inviter, projectName, link, days }) {
 }
 
 /**
- * The People page's "Invite someone": make a 7-day `invite` link for
+ * The Users page's "Invite someone": make a 7-day `invite` link for
  * `email`, made by the person `madeBy`, and send it. Refused, with nothing
  * made or sent: an email a person holds (`duplicate-email`) or with an open
  * invite (`duplicate-invite`), no mail sender (`no-mail`), no tracker
