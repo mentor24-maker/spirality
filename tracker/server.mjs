@@ -21,6 +21,15 @@
  *   503  an invite with no mail sender or no tracker address (nothing made)
  *   400  a bad field, or a body that names another author
  *   403  a write only a person may make, asked by a loop's token
+ * A ticket's attachments are the one call whose body is not JSON: `POST
+ * /tickets/<id>/attachments` takes the file's raw bytes
+ * (`content-type: application/octet-stream`), its name in `x-file-name`
+ * (percent-encoded) and its type in `x-file-type`, up to MAX_ATTACHMENT
+ * (10 MB; bigger answers 413 and stores nothing). That content type and
+ * those headers are ones only the page's own script can send, never a form
+ * on another site. A download (`GET /tickets/<id>/attachments/<n>`) is
+ * always sent as a file to save, never a page to open, so an uploaded HTML
+ * file cannot run as the tracker's own page.
  * A refused write writes nothing. A token never appears in an answer or a
  * log line: the log names the actor id, never the header.
  *
@@ -51,7 +60,7 @@ import { hostname } from 'node:os';
 import { resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { openStore, StoreError } from './store.mjs';
+import { MAX_ATTACHMENT, openStore, StoreError } from './store.mjs';
 import { boardOf, PRIORITIES, projectDetailsOf, projectsList, readSearchFilters, reportsOf, searchTickets, stageColoursOf, threadOf, waitingFor } from './pageData.mjs';
 import { createNotifier, DEFAULT_FROM, MAIL_FROM, MAIL_KEY, mailEnvFromDoppler, mailSettingsFromEnv, resendSender, textSettings } from './notify.mjs';
 import { sendInvite, sendResetLink } from './account.mjs';
@@ -209,6 +218,44 @@ function sessionToken(req) {
     if (at > 0 && part.slice(0, at).trim() === SESSION_COOKIE) return part.slice(at + 1).trim() || null;
   }
   return null;
+}
+
+/** Whether the request is an attachment's upload: the one write whose body is the file itself. */
+function isUpload(req, pathname) {
+  return req.method === 'POST' && /^\/tickets\/[^/]+\/attachments$/.test(pathname)
+    && /^application\/octet-stream\s*(?:;|$)/i.test(req.headers['content-type'] ?? '');
+}
+
+/**
+ * The upload's bytes. A body over MAX_ATTACHMENT is refused with 413: by
+ * its stated length before a byte is read, or else once it passes the cap;
+ * either way the rest is read and thrown away so the answer still reaches
+ * the sender, and nothing is kept.
+ */
+async function readFile(req) {
+  const tooLarge = () => new HttpError(413, 'too-large', `That file is over ${MAX_ATTACHMENT / (1024 * 1024)} MB. Attach a smaller one; nothing was saved.`);
+  const stated = Number(req.headers['content-length']);
+  let over = Number.isFinite(stated) && stated > MAX_ATTACHMENT;
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of req) {
+    if (over) continue;
+    size += chunk.length;
+    if (size > MAX_ATTACHMENT) {
+      over = true;
+      chunks.length = 0;
+      continue;
+    }
+    chunks.push(chunk);
+  }
+  if (over) throw tooLarge();
+  return Buffer.concat(chunks);
+}
+
+/** A `content-disposition` that always saves: a plain-letters fallback name, and the real one encoded. */
+function downloadDisposition(name) {
+  const fallback = name.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_') || 'file';
+  return `attachment; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(name)}`;
 }
 
 /** Whether the request says its body is JSON. */
@@ -637,6 +684,46 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
       }
     }
 
+    // A ticket's files (docs/TRACKER_MVP.md, "Attachments"): the list, one
+    // upload (the raw file as the body), and one download, always saved.
+    if (parts.length === 3 && parts[0] === 'tickets' && parts[2] === 'attachments') {
+      if (method === 'GET') {
+        const ticket = requireTicket(parts[1]);
+        return [200, { ticket: ticket.id, attachments: store.listAttachments(ticket.id) }];
+      }
+      if (method === 'POST') {
+        if (!isUpload(req, url.pathname)) {
+          throw new HttpError(415, 'file-only', 'an attachment is sent as the file itself (content-type: application/octet-stream); nothing was saved.');
+        }
+        let name;
+        try {
+          name = decodeURIComponent(String(req.headers['x-file-name'] ?? ''));
+        } catch {
+          throw new HttpError(400, 'bad-name', "the file's name (x-file-name) is not validly encoded; nothing was saved.");
+        }
+        if (!name.trim()) throw new HttpError(400, 'bad-name', "say the file's name in x-file-name; nothing was saved.");
+        const bytes = await readFile(req);
+        const ticket = requireTicket(parts[1]);
+        const made = store.addAttachment({ ticket: ticket.id, name, type: req.headers['x-file-type'], bytes, actor: me.id });
+        log(`attached ${made.name} (${made.size} bytes) to ${ticket.id} actor=${me.id}`);
+        return [201, made];
+      }
+    }
+    if (parts.length === 4 && parts[0] === 'tickets' && parts[2] === 'attachments' && method === 'GET') {
+      const ticket = requireTicket(parts[1]);
+      const file = /^[0-9]+$/.test(parts[3]) ? store.getAttachment(ticket.id, Number(parts[3])) : null;
+      if (!file) throw new HttpError(404, 'unknown-attachment', `ticket ${ticket.id} has no attachment ${parts[3]}.`);
+      return [200, null, null, {
+        'content-type': file.type,
+        'content-length': file.bytes.length,
+        'content-disposition': downloadDisposition(file.name),
+        'x-content-type-options': 'nosniff',
+        'content-security-policy': "default-src 'none'; sandbox",
+        'cache-control': 'private, no-cache',
+        body: file.bytes,
+      }];
+    }
+
     if (parts.length === 3 && parts[0] === 'tickets' && parts[2] === 'comments' && method === 'POST') {
       const body = await readJson(req);
       checkBody(body, me, ['body', 'parent']);
@@ -665,7 +752,7 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     if (parts.length === 3 && parts[0] === 'tickets' && parts[2] === 'thread' && method === 'GET') {
       const thread = threadOf(store, parts[1]);
       if (!thread) throw new HttpError(404, 'unknown-ticket', `no ticket ${parts[1]}.`);
-      return [200, { ...thread, mergePhrase, closePhrase, goPhrase, choices: { priorities: PRIORITIES, statuses: PERSON_STATUSES } }];
+      return [200, { ...thread, attachments: store.listAttachments(thread.id), mergePhrase, closePhrase, goPhrase, choices: { priorities: PRIORITIES, statuses: PERSON_STATUSES } }];
     }
 
     if (parts.length === 3 && parts[0] === 'tickets' && parts[2] === 'events' && method === 'GET') {
@@ -774,12 +861,18 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
       me = viaCookie ? store.actorForSession(sessionToken(req)) : store.actorForToken(bearerToken(req));
       if (me && viaCookie && me.kind !== 'human') me = null;
       if (!me) throw new HttpError(401, 'unauthorized', 'sign in, or send a valid token.');
-      if (viaCookie && req.method !== 'GET' && req.method !== 'HEAD' && !saysJson(req)) {
+      if (viaCookie && req.method !== 'GET' && req.method !== 'HEAD' && !saysJson(req) && !isUpload(req, url.pathname)) {
         throw new HttpError(415, 'json-only', 'a write from the page must say content-type: application/json; nothing was written.');
       }
-      const [code, body, write] = await route(req, me, url);
+      const [code, body, write, file] = await route(req, me, url);
       status = code;
-      send(res, code, body);
+      if (file) {
+        const { body: bytes, ...headers } = file;
+        res.writeHead(code, headers);
+        res.end(bytes);
+      } else {
+        send(res, code, body);
+      }
       wrote = write ?? null;
     } catch (err) {
       if (err instanceof HttpError) {

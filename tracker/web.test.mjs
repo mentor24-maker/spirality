@@ -498,7 +498,7 @@ test('the Add Task box on the Tasks page files into the project shown, in Reques
   assert.match(wire, /if \(adding \|\| draft\.title \|\| draft\.description\) box\.open = true;/, 'kept text opens the box on its own');
   assert.match(wire, /drawSignIn\('You were signed out; your request was not filed\. What you typed is kept/);
   // Filed: the draft is forgotten and the page redraws, box closed, naming the new id.
-  assert.match(wire, /localStorage\.removeItem\(DRAFT_KEY\);[\s\S]*await drawAgain\(\(\) => drawProject\(into, view, \{ filed: ticket\.id, unchecked \}\)\);/);
+  assert.match(wire, /localStorage\.removeItem\(DRAFT_KEY\);[\s\S]*await drawAgain\(\(\) => drawProject\(into, view, \{ filed: ticket\.id, unchecked, uploaded, notUploaded \}\)\);/);
   const draw = app.slice(app.indexOf('async function drawProject'), app.indexOf('async function copyText'));
   assert.match(draw, /<details class="add-task">\s*<summary>Add Task<\/summary>\s*<form class="request">/, 'drawn closed, on the board and the list alike');
   assert.match(draw, /Filed <a href="\/t\/\$\{encodeURIComponent\(filed\)\}">\$\{escapeHtml\(filed\)\}<\/a>/);
@@ -515,6 +515,46 @@ test('the Add Task box on the Tasks page files into the project shown, in Reques
   assert.match(css, /details\.add-task form\.request input, details\.add-task form\.request textarea \{[^}]*background: #fff;/, 'the fields stay white');
   // The status line (Filing…, Not filed: …) keeps its quiet grey and red, so it sits on white, readable on the blue.
   assert.match(css, /details\.add-task \.note:not\(:empty\) \{[^}]*background: #fff;/, 'the note sits on a white pill inside the blue box');
+});
+
+test('the Add Task box takes files: the ticket is filed first, then each file goes up as itself, and the note names any that did not (SP-140)', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const wire = app.slice(app.indexOf('function wireAddTask'), app.indexOf('/**', app.indexOf('function wireAddTask')));
+  const draw = app.slice(app.indexOf('async function drawProject'), app.indexOf('async function copyText'));
+  assert.match(draw, /<label for="files">Files<\/label>\s*<input id="files" type="file" multiple>/, 'several at once');
+  assert.match(draw, /Files are not kept in the saved draft: after a reload, pick them again\./);
+  // Filed first, then the files, one at a time; a failure is kept by name and the ticket stands.
+  const filed = wire.indexOf("api('POST', `/projects/${encodeURIComponent(into)}/tickets`");
+  const sent = wire.indexOf('await uploadFile(ticket.id, file);');
+  assert.ok(filed > 0 && sent > filed, 'the ticket is filed before any file is sent');
+  assert.match(wire, /notUploaded\.push\(\{ name: file\.name, why: err\.message \}\);/);
+  assert.match(wire, /notUploaded\.push\(\{ name: file\.name, why: 'over 10 MB' \}\);/);
+  assert.match(wire, /You were signed out; \$\{ticket\.id\} was filed, but \$\{file\.name\} and any files after it were not uploaded\./);
+  assert.doesNotMatch(/function savedDraft[\s\S]*?\n\}/.exec(app)[0], /files/, 'the draft keeps only the text');
+  // The upload is the file itself, with a type and headers only the page's own script can send.
+  const up = /async function uploadFile[\s\S]*?\n\}/.exec(app)[0];
+  assert.match(up, /'content-type': 'application\/octet-stream'/);
+  assert.match(up, /'x-file-name': encodeURIComponent\(file\.name\)/);
+  assert.match(up, /body: file,/);
+  // The note: uploaded names, then the ones that were not, each with why, escaped.
+  const note = /function filesNote[\s\S]*?\n\}/.exec(app)[0];
+  assert.match(note, /Uploaded \$\{names\(uploaded\)\}/);
+  assert.match(note, /Not uploaded: /);
+  assert.match(note, /The ticket is filed without/);
+  assert.match(note, /escapeHtml\(n\)/);
+  assert.match(note, /escapeHtml\(f\.name\)/);
+  assert.match(draw, /\$\{filesNote\(uploaded, notUploaded\)\}<\/p>/);
+});
+
+test('the ticket page lists its attachments by name and size, each a download, a plain picture also previewed, never an SVG (SP-140)', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const list = /function renderAttachments[\s\S]*?\n\}/.exec(app)[0];
+  assert.match(list, /href="\$\{href\}" download="\$\{escapeHtml\(a\.name\)\}">\$\{escapeHtml\(a\.name\)\}<\/a> <span class="quiet">\$\{escapeHtml\(sizeOf\(a\.size\)\)\}<\/span>/);
+  assert.match(list, /PREVIEW_TYPES\.includes\(a\.type\) \? `<a class="preview"[^`]*<img src="\$\{href\}"/);
+  assert.match(list, /<h2>Attachments<\/h2>/);
+  assert.match(app, /const PREVIEW_TYPES = Object\.freeze\(\['image\/png', 'image\/jpeg', 'image\/gif', 'image\/webp'\]\);/);
+  const ticket = app.slice(app.indexOf('async function drawTicket'), app.indexOf('wireCopyButtons();', app.indexOf('async function drawTicket')));
+  assert.match(ticket, /<section class="description">[^\n]*<\/section>\s*\$\{renderAttachments\(t\)\}/, 'right under the description');
 });
 
 test('the Add Task box checks the project before filing: asks "Did you mean ...?" when another fits, files where he says, never blocks on a failed check', () => {

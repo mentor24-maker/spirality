@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { Worker } from 'node:worker_threads';
 import { createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
-import { normalizePhone, openStore, StoreError, STATUSES } from './store.mjs';
+import { MAX_ATTACHMENT, normalizePhone, openStore, StoreError, STATUSES } from './store.mjs';
 
 /** A fresh store on disk, with one operator, one machine and one project. */
 function fixture() {
@@ -1162,4 +1162,54 @@ test('a US phone number typed any usual way comes out in international form; any
   for (const typed of ['801 555 012', '28015550123', '440 2079 460000', '801 CALL NOW', '', null, 8015550123]) {
     assert.equal(normalizePhone(typed), null, String(typed));
   }
+});
+
+// ── Attachments (SP-140) ─────────────────────────────────────────────────────
+
+test('an attachment is kept with its name, type, size and bytes, and comes back byte for byte', () => {
+  const { path, store, human, cleanup } = fixture();
+  try {
+    const t = store.fileTicket({ project: 'alpha', actor: human.id, name: 'x', status: 'requested' });
+    const bytes = Buffer.from([0, 1, 2, 255, 254, 10, 13]);
+    const a = store.addAttachment({ ticket: t.id, name: 'C:\\Users\\dane\\shot "1".png', type: 'image/PNG; charset=x', bytes, actor: human.id });
+    assert.deepEqual(a, { id: a.id, ticket: t.id, name: 'shot 1.png', type: 'image/png', size: 7, addedBy: human.id, createdAt: a.createdAt });
+    const b = store.addAttachment({ ticket: t.id, name: 'notes', type: '<script>', bytes: new Uint8Array([65]), actor: human.id });
+    assert.equal(b.type, 'application/octet-stream', 'a type that is not type/subtype is kept as the generic one');
+    assert.deepEqual(store.listAttachments(t.id).map((x) => x.name), ['shot 1.png', 'notes']);
+    assert.ok(store.getAttachment(t.id, a.id).bytes.equals(bytes));
+    assert.equal(store.getAttachment('AL-99', a.id), null, 'another ticket never reaches it');
+    // It is in the database file itself, so the backup copies it.
+    const db = new DatabaseSync(path, { readOnly: true });
+    try { assert.equal(db.prepare('SELECT count(*) AS n FROM attachments').get().n, 2); } finally { db.close(); }
+  } finally { cleanup(); }
+});
+
+test('an attachment that is empty, too large, nameless or on an unknown ticket is refused and nothing is kept', () => {
+  const { store, human, cleanup } = fixture();
+  try {
+    const t = store.fileTicket({ project: 'alpha', actor: human.id, name: 'x', status: 'requested' });
+    const add = (over) => () => store.addAttachment({ ticket: t.id, name: 'a.txt', type: 'text/plain', bytes: Buffer.from('a'), actor: human.id, ...over });
+    assert.throws(add({ bytes: Buffer.alloc(0) }), { code: 'empty-file' });
+    assert.throws(add({ bytes: Buffer.alloc(MAX_ATTACHMENT + 1) }), { code: 'too-large' });
+    assert.throws(add({ bytes: 'text' }), { code: 'bad-file' });
+    for (const name of ['', '   ', '/', '..', 42]) assert.throws(add({ name }), { code: 'bad-name' });
+    assert.throws(add({ ticket: 'AL-99' }), { code: 'unknown-ticket' });
+    assert.throws(add({ actor: 999 }), { code: 'unknown-actor' });
+    assert.deepEqual(store.listAttachments(t.id), []);
+    assert.equal(add({ bytes: Buffer.alloc(MAX_ATTACHMENT) })().size, MAX_ATTACHMENT);
+  } finally { cleanup(); }
+});
+
+test('deleting an unstarted ticket takes its attachments with it; a started one keeps them', () => {
+  const { store, human, machine, cleanup } = fixture();
+  try {
+    const t = store.fileTicket({ project: 'alpha', actor: human.id, name: 'x', status: 'requested' });
+    store.addAttachment({ ticket: t.id, name: 'a.txt', type: 'text/plain', bytes: Buffer.from('a'), actor: human.id });
+    store.deleteTicket(t.id, { actor: human.id });
+    assert.deepEqual(store.listAttachments(t.id), []);
+    const started = store.fileTicket({ project: 'alpha', actor: human.id, name: 'y', status: 'building' });
+    store.addAttachment({ ticket: started.id, name: 'b.txt', type: 'text/plain', bytes: Buffer.from('b'), actor: machine.id });
+    assert.throws(() => store.deleteTicket(started.id, { actor: human.id }), { code: 'not-deletable' });
+    assert.equal(store.listAttachments(started.id).length, 1);
+  } finally { cleanup(); }
 });

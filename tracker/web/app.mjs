@@ -140,6 +140,62 @@ async function api(method, path, body) {
 }
 
 /**
+ * Upload one file to a ticket: the file itself as the body, its name and
+ * type in headers (tracker/server.mjs, "attachments"). Answers the
+ * attachment as listed, or throws with the server's own message.
+ */
+async function uploadFile(ticketId, file) {
+  writing += 1;
+  let res;
+  try {
+    res = await fetch(`/tickets/${encodeURIComponent(ticketId)}/attachments`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {
+        'content-type': 'application/octet-stream',
+        'x-file-name': encodeURIComponent(file.name),
+        'x-file-type': file.type || 'application/octet-stream',
+      },
+      body: file,
+    });
+  } finally {
+    writing -= 1;
+  }
+  if (res.status === 401) throw new SignedOut();
+  let json = null;
+  try { json = await res.json(); } catch { /* reported below */ }
+  if (!res.ok) throw new Refused(json?.message ?? `the tracker answered ${res.status}.`, res.status);
+  return json;
+}
+
+/** The largest file the tracker keeps (MAX_ATTACHMENT in tracker/store.mjs), checked here only to say so before sending it. */
+const MAX_FILE = 10 * 1024 * 1024;
+
+/** A size in bytes in plain words: bytes, KB or MB. */
+function sizeOf(bytes) {
+  if (bytes < 1024) return `${bytes} bytes`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/** The pictures a ticket page previews: the plain image kinds, never SVG (a picture that can carry a script). */
+const PREVIEW_TYPES = Object.freeze(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
+
+/** A ticket's attachments on its page: each by name and size, a link that downloads it, a picture also previewed. */
+function renderAttachments(t) {
+  const files = t.attachments ?? [];
+  if (!files.length) return '';
+  const item = (a) => {
+    const href = `/tickets/${encodeURIComponent(t.id)}/attachments/${encodeURIComponent(a.id)}`;
+    return `<li>
+        <a href="${href}" download="${escapeHtml(a.name)}">${escapeHtml(a.name)}</a> <span class="quiet">${escapeHtml(sizeOf(a.size))}</span>
+        ${PREVIEW_TYPES.includes(a.type) ? `<a class="preview" href="${href}" download="${escapeHtml(a.name)}"><img src="${href}" alt="${escapeHtml(a.name)}"></a>` : ''}
+      </li>`;
+  };
+  return `<section class="attachments"><h2>Attachments</h2><ul>${files.map(item).join('')}</ul></section>`;
+}
+
+/**
  * Call one of the tracker's no-sign-in calls: an emailed link's, signing
  * in or out, or "Forgot password?". Answers `{ ok, body }`: the parsed JSON, or the refusal's
  * `{ error, message }`. Throws only when the tracker could not be reached.
@@ -801,7 +857,7 @@ async function drawTasks(view, opts = {}) {
  * `unchecked` adds that the project check could not run. The question box
  * (the Add Task box's "Did you mean ...?") is drawn here, closed.
  */
-async function drawProject(slug, view, { adding = false, filed = null, unchecked = false } = {}) {
+async function drawProject(slug, view, { adding = false, filed = null, unchecked = false, uploaded = [], notUploaded = [] } = {}) {
   const [board, looks, { projects }] = await Promise.all([
     api('GET', `/projects/${encodeURIComponent(slug)}/board`),
     api('GET', '/stage-colours').then(stageLooks, () => ({})),
@@ -862,7 +918,7 @@ async function drawProject(slug, view, { adding = false, filed = null, unchecked
       ${searchForm('')}
       <nav class="views" aria-label="View">${toggle}</nav>
     </div>
-    ${filed ? `<p class="filed-note">Filed <a href="/t/${encodeURIComponent(filed)}">${escapeHtml(filed)}</a>${unchecked ? `. ${UNCHECKED_NOTE}` : ''}</p>` : ''}
+    ${filed ? `<p class="filed-note">Filed <a href="/t/${encodeURIComponent(filed)}">${escapeHtml(filed)}</a>${unchecked ? `. ${UNCHECKED_NOTE}` : ''}${filesNote(uploaded, notUploaded)}</p>` : ''}
     <details class="add-task">
       <summary>Add Task</summary>
       <form class="request">
@@ -870,6 +926,9 @@ async function drawProject(slug, view, { adding = false, filed = null, unchecked
         <input id="title" type="text" required>
         <label for="description">Description</label>
         <textarea id="description"></textarea>
+        <label for="files">Files</label>
+        <input id="files" type="file" multiple>
+        <span class="hint quiet">Screenshots, PDFs or notes, up to 10 MB each. Files are not kept in the saved draft: after a reload, pick them again.</span>
         <div class="row"><button type="submit">File Request</button><span class="note"></span></div>
       </form>
     </details>
@@ -1088,6 +1147,7 @@ async function drawTicket(id, said = null, kept = null) {
       </p>
       ${me?.kind === 'human' ? renderEditPanel(t) : ''}
       <section class="description">${renderMarkdown(t.description) || '<p class="quiet">No description.</p>'}</section>
+      ${renderAttachments(t)}
       <h2>Comments</h2>
       ${comments || '<p class="quiet">No comments yet.</p>'}
       <h2>Copy to Another Project</h2>
@@ -1347,6 +1407,20 @@ function wireEditPanel(t) {
   };
 }
 
+/**
+ * The filed note's words about the files picked: which went up, and which
+ * did not, each by name with why. Nothing when no file was picked.
+ */
+function filesNote(uploaded, notUploaded) {
+  const names = (list) => list.map((n) => `<strong>${escapeHtml(n)}</strong>`).join(', ');
+  let words = '';
+  if (uploaded.length) words += `. Uploaded ${names(uploaded)}`;
+  if (notUploaded.length) {
+    words += `. <span class="error">Not uploaded: ${notUploaded.map((f) => `<strong>${escapeHtml(f.name)}</strong> (${escapeHtml(f.why)})`).join(', ')}. The ticket is filed without ${notUploaded.length === 1 ? 'it' : 'them'}.</span>`;
+  }
+  return words;
+}
+
 /** The filed note's words when the Add Task box's project check could not run. */
 const UNCHECKED_NOTE = 'The project check could not run, so it went into the project shown.';
 
@@ -1380,6 +1454,7 @@ function wireAddTask(slug, view, adding) {
   const form = box.querySelector('form.request');
   const title = form.querySelector('#title');
   const description = form.querySelector('#description');
+  const files = form.querySelector('#files');
   const draft = savedDraft();
   title.value = draft.title;
   description.value = draft.description;
@@ -1440,10 +1515,28 @@ function wireAddTask(slug, view, adding) {
       return;
     }
     try { localStorage.removeItem(DRAFT_KEY); } catch { /* nothing kept */ }
+    // The ticket is filed first; then each file goes up on its own, so one
+    // that fails is named and the rest, and the ticket, still stand.
+    const uploaded = [];
+    const notUploaded = [];
+    for (const file of [...(files?.files ?? [])]) {
+      if (file.size > MAX_FILE) {
+        notUploaded.push({ name: file.name, why: 'over 10 MB' });
+        continue;
+      }
+      note.textContent = `Filed ${ticket.id}. Uploading ${file.name}…`;
+      try {
+        await uploadFile(ticket.id, file);
+        uploaded.push(file.name);
+      } catch (err) {
+        if (err instanceof SignedOut) return drawSignIn(`You were signed out; ${ticket.id} was filed, but ${file.name} and any files after it were not uploaded.`);
+        notUploaded.push({ name: file.name, why: err.message });
+      }
+    }
     // Filed in another project: open its board, where the new ticket is.
     if (into !== slug) history.pushState(null, '', `/${view}/${encodeURIComponent(into)}`);
     try {
-      await drawAgain(() => drawProject(into, view, { filed: ticket.id, unchecked }));
+      await drawAgain(() => drawProject(into, view, { filed: ticket.id, unchecked, uploaded, notUploaded }));
     } catch (err) {
       if (err instanceof SignedOut) return drawSignIn(`You were signed out; ${ticket.id} was filed.`);
       note.className = 'note error';
