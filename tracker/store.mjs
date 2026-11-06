@@ -67,6 +67,12 @@
  *  - An email has at most one open invite (unused, unexpired), checked in
  *    the same transaction that makes it. A cancelled invite is deleted, so
  *    its link is refused as one the tracker never made.
+ *  - A person has one of five roles (ROLES), each with a set of permissions
+ *    (PERMISSIONS): recorded, not yet enforced. A person with no role row is
+ *    a contributor; a machine has no role. A role changes only through
+ *    setRole, which refuses anyone but an admin and a change that would leave
+ *    no admin, checked in the same transaction as the write. While nobody is
+ *    an admin, the project operators are made admins, so nobody is locked out.
  *  - An attachment is a file kept on a ticket: its name, type, size, bytes,
  *    who added it and when, all in the `attachments` table, so the nightly
  *    backup (tracker/backup.mjs) holds it with no second folder to copy. It
@@ -203,6 +209,27 @@ CREATE TABLE IF NOT EXISTS attachments (
   added_by    INTEGER NOT NULL REFERENCES actors(id),
   created_at  TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS roles (
+  name        TEXT PRIMARY KEY,
+  description TEXT NOT NULL,
+  position    INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS permissions (
+  name        TEXT PRIMARY KEY,
+  description TEXT NOT NULL,
+  position    INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS role_permissions (
+  role        TEXT NOT NULL REFERENCES roles(name),
+  permission  TEXT NOT NULL REFERENCES permissions(name),
+  PRIMARY KEY (role, permission)
+);
+CREATE TABLE IF NOT EXISTS user_roles (
+  actor       INTEGER PRIMARY KEY REFERENCES actors(id),
+  role        TEXT NOT NULL REFERENCES roles(name),
+  set_by      INTEGER REFERENCES actors(id),
+  set_at      TEXT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS attachments_by_ticket ON attachments (ticket, id);
 CREATE UNIQUE INDEX IF NOT EXISTS actors_by_token ON actors (token_hash);
 CREATE UNIQUE INDEX IF NOT EXISTS actors_by_email ON actors (email);
@@ -336,6 +363,42 @@ const LATER_ACTOR_COLUMNS = Object.freeze({ token_hash: 'TEXT', email: 'TEXT', p
 
 /** The columns a project gained after the first databases were made, and their types. */
 const LATER_PROJECT_COLUMNS = Object.freeze({ url: 'TEXT', logo: 'TEXT', owner: 'INTEGER REFERENCES actors(id)', repo: 'TEXT', alert_email: 'TEXT', alert_phone: 'TEXT' });
+
+/**
+ * The five roles, in the order the Users page lists them, each with its
+ * plain-words description: the model docs/TRACKER_MVP.md, "Roles and
+ * permissions", says where it was borrowed from (the model, not the code). A person with no role
+ * row is a contributor, what everyone was before roles existed.
+ */
+export const ROLES = Object.freeze([
+  Object.freeze({ name: 'admin', description: 'Runs the tracker: changes users\' roles, and may do everything on tickets.' }),
+  Object.freeze({ name: 'editor', description: 'Reads, adds, changes and deletes tickets.' }),
+  Object.freeze({ name: 'contributor', description: 'Reads every ticket, adds tickets and changes them.' }),
+  Object.freeze({ name: 'reviewer', description: 'Reads every ticket, to review the work.' }),
+  Object.freeze({ name: 'viewer', description: 'Reads every ticket.' }),
+]);
+const ROLE_NAMES = Object.freeze(ROLES.map((r) => r.name));
+/** The role a person with no row reads as. */
+export const DEFAULT_ROLE = 'contributor';
+
+/** What a role may be allowed to do, each with the words the Users page heads its column with. A new permission is a new row here. */
+export const PERMISSIONS = Object.freeze([
+  Object.freeze({ name: 'user.read', description: 'See Users' }),
+  Object.freeze({ name: 'user.edit', description: 'Change Roles' }),
+  Object.freeze({ name: 'ticket.read', description: 'Read Tickets' }),
+  Object.freeze({ name: 'ticket.create', description: 'Add Tickets' }),
+  Object.freeze({ name: 'ticket.edit', description: 'Change Tickets' }),
+  Object.freeze({ name: 'ticket.delete', description: 'Delete Tickets' }),
+]);
+
+/** Which role has which permission. Recorded, not yet enforced anywhere. */
+const ROLE_PERMISSIONS = Object.freeze({
+  admin: ['user.read', 'user.edit', 'ticket.read', 'ticket.create', 'ticket.edit', 'ticket.delete'],
+  editor: ['user.read', 'ticket.read', 'ticket.create', 'ticket.edit', 'ticket.delete'],
+  contributor: ['user.read', 'ticket.read', 'ticket.create', 'ticket.edit'],
+  reviewer: ['user.read', 'ticket.read'],
+  viewer: ['user.read', 'ticket.read'],
+});
 
 /** An optional web address: null for none, an http(s) address, or a thrown refusal. */
 function optionalAddress(value, what) {
@@ -521,6 +584,13 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
   for (const [column, type] of Object.entries(LATER_PROJECT_COLUMNS)) {
     if (!projectColumns.has(column)) db.exec(`ALTER TABLE projects ADD COLUMN ${column} ${type}`);
   }
+  // The roles and permissions are the lists above, written in on every open,
+  // so a new permission or role reaches an old database as a new row.
+  ROLES.forEach((r, i) => db.prepare('INSERT INTO roles (name, description, position) VALUES (?, ?, ?) ON CONFLICT (name) DO UPDATE SET description = excluded.description, position = excluded.position').run(r.name, r.description, i + 1));
+  PERMISSIONS.forEach((p, i) => db.prepare('INSERT INTO permissions (name, description, position) VALUES (?, ?, ?) ON CONFLICT (name) DO UPDATE SET description = excluded.description, position = excluded.position').run(p.name, p.description, i + 1));
+  for (const [role, perms] of Object.entries(ROLE_PERMISSIONS)) {
+    for (const perm of perms) db.prepare('INSERT OR IGNORE INTO role_permissions (role, permission) VALUES (?, ?)').run(role, perm);
+  }
 
   /**
    * Run `fn` inside one transaction. IMMEDIATE takes the write lock before
@@ -575,6 +645,33 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
   /** Whether an ISO time has passed by the store's clock. */
   function passed(at) {
     return new Date(at).getTime() <= new Date(now()).getTime();
+  }
+
+  /** A person's role: their row's, or contributor with none. Null for a machine or an unknown id. */
+  function roleOf(actorId) {
+    const row = db.prepare("SELECT a.kind, r.role FROM actors a LEFT JOIN user_roles r ON r.actor = a.id WHERE a.id = ?").get(actorId);
+    if (!row || row.kind !== 'human') return null;
+    return row.role ?? DEFAULT_ROLE;
+  }
+
+  function adminCount() {
+    return num(db.prepare("SELECT COUNT(*) AS n FROM user_roles r JOIN actors a ON a.id = r.actor WHERE r.role = 'admin' AND a.kind = 'human'").get().n);
+  }
+
+  /**
+   * So nobody is locked out: while no person is an admin (a database from
+   * before roles, or a new one whose first project has just been made), every
+   * person who is a project's operator is made one. Who that is comes from
+   * the projects' own rows, never a literal id. Once anyone is an admin this
+   * does nothing, and setRole never lets the last one go.
+   */
+  function ensureAdmin() {
+    if (adminCount() > 0) return;
+    const operators = db.prepare("SELECT DISTINCT p.operator AS id FROM projects p JOIN actors a ON a.id = p.operator WHERE a.kind = 'human' ORDER BY p.operator").all();
+    for (const { id } of operators) {
+      db.prepare("INSERT INTO user_roles (actor, role, set_by, set_at) VALUES (?, 'admin', NULL, ?) ON CONFLICT (actor) DO UPDATE SET role = 'admin', set_by = NULL, set_at = excluded.set_at").run(id, now());
+      if (roleOf(num(id)) !== 'admin') throw new StoreError('write-failed', `actor ${id} was not made admin.`);
+    }
   }
 
   /** Set a person's email; inside or outside a transaction. Refuses one another person holds. */
@@ -677,6 +774,8 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
     db.prepare('INSERT INTO imported_ids (source, kind, source_id, new_id) VALUES (?, ?, ?, ?)')
       .run(source, kind, sourceId, String(newId));
   }
+
+  ensureAdmin();
 
   return {
     /** A person or a machine that acts on tickets. */
@@ -969,6 +1068,61 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
     },
 
     /**
+     * The five roles, in order: `{ name, description, permissions }`, the
+     * permissions as their names in the permissions' own order.
+     */
+    listRoles() {
+      const order = db.prepare('SELECT name FROM permissions ORDER BY position').all().map((r) => r.name);
+      return db.prepare('SELECT name, description FROM roles ORDER BY position').all().map((r) => {
+        const has = new Set(db.prepare('SELECT permission FROM role_permissions WHERE role = ?').all(r.name).map((x) => x.permission));
+        return { name: r.name, description: r.description, permissions: order.filter((p) => has.has(p)) };
+      });
+    },
+
+    /** Every permission, in order: `{ name, description }`. */
+    listPermissions() {
+      return db.prepare('SELECT name, description FROM permissions ORDER BY position').all()
+        .map((r) => ({ name: r.name, description: r.description }));
+    },
+
+    /** A person's role (contributor if none was ever set); null for a machine or an unknown id. Machines have no role. */
+    roleOf(actorId) {
+      return roleOf(actorId);
+    },
+
+    /**
+     * Change a person's role: the one way a role changes. `by` must be a
+     * person who is an admin (`not-admin`); `actor` a person (a machine has
+     * no role: `machine-account`); `role` one of the five (`bad-role`). A
+     * change that would leave the tracker with no admin is refused
+     * (`last-admin`). The check and the write are one transaction, so two
+     * admins demoting each other at once cannot both pass. Read back.
+     * Answers `{ actor, role }`.
+     */
+    setRole({ actor, role, by }) {
+      if (!ROLE_NAMES.includes(role)) {
+        throw new StoreError('bad-role', `a role is ${ROLE_NAMES.join(', ')}, not "${role}".`);
+      }
+      return transaction(() => {
+        requireActor(by, 'the person changing the role');
+        if (roleOf(by) !== 'admin') {
+          throw new StoreError('not-admin', 'only an admin may change a user\'s role.');
+        }
+        requireActor(actor, 'the user');
+        if (this.getActor(actor).kind !== 'human') {
+          throw new StoreError('machine-account', `actor ${actor} is a machine; a machine has no role.`);
+        }
+        if (roleOf(actor) === 'admin' && role !== 'admin' && adminCount() <= 1) {
+          throw new StoreError('last-admin', `${this.getActor(actor).name} is the tracker's only admin; make someone else an admin first, so the tracker is never left with none.`);
+        }
+        db.prepare('INSERT INTO user_roles (actor, role, set_by, set_at) VALUES (?, ?, ?, ?) ON CONFLICT (actor) DO UPDATE SET role = excluded.role, set_by = excluded.set_by, set_at = excluded.set_at')
+          .run(actor, role, by, now());
+        if (roleOf(actor) !== role) throw new StoreError('write-failed', `actor ${actor}'s role did not read back as ${role}.`);
+        return { actor, role };
+      });
+    },
+
+    /**
      * A project: its slug, its name, its ticket-id prefix, its operator, and
      * optionally its web address, its logo (an image's web address), its
      * owner (a person), its GitHub repository (`owner/name`) and its alert
@@ -1004,6 +1158,7 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
       if (!made || Object.keys(wanted).some((k) => made[k] !== wanted[k])) {
         throw new StoreError('write-failed', `project "${slug}" did not read back as written.`);
       }
+      ensureAdmin();
       return made;
     },
 

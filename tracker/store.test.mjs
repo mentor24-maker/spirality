@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { Worker } from 'node:worker_threads';
 import { createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
-import { MAX_ATTACHMENT, normalizePhone, openStore, StoreError, STATUSES } from './store.mjs';
+import { DEFAULT_ROLE, MAX_ATTACHMENT, normalizePhone, openStore, PERMISSIONS, ROLES, StoreError, STATUSES } from './store.mjs';
 
 /** A fresh store on disk, with one operator, one machine and one project. */
 function fixture() {
@@ -715,6 +715,124 @@ test('a GitHub repository that is not owner/name or a github.com address is refu
       assert.throws(() => store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE', repo: bad }), { code: 'bad-repo' }, JSON.stringify(bad));
     }
     assert.deepEqual(store.listProjects().map((p) => p.slug), ['alpha']);
+  } finally { cleanup(); }
+});
+
+// ── Roles and permissions ────────────────────────────────────────────────────
+
+test('the five roles exist in order, each with a description and its permissions; the permissions are named rows', () => {
+  const { store, cleanup } = fixture();
+  try {
+    const roles = store.listRoles();
+    assert.deepEqual(roles.map((r) => r.name), ['admin', 'editor', 'contributor', 'reviewer', 'viewer']);
+    assert.ok(roles.every((r) => typeof r.description === 'string' && r.description.length > 10));
+    assert.deepEqual(roles.map((r) => r.description), ROLES.map((r) => r.description));
+    assert.deepEqual(store.listPermissions().map((p) => p.name),
+      ['user.read', 'user.edit', 'ticket.read', 'ticket.create', 'ticket.edit', 'ticket.delete']);
+    assert.deepEqual(store.listPermissions(), PERMISSIONS.map((p) => ({ name: p.name, description: p.description })));
+    const of = Object.fromEntries(roles.map((r) => [r.name, r.permissions]));
+    assert.deepEqual(of.admin, ['user.read', 'user.edit', 'ticket.read', 'ticket.create', 'ticket.edit', 'ticket.delete']);
+    assert.deepEqual(of.editor, ['user.read', 'ticket.read', 'ticket.create', 'ticket.edit', 'ticket.delete']);
+    assert.deepEqual(of.contributor, ['user.read', 'ticket.read', 'ticket.create', 'ticket.edit']);
+    assert.deepEqual(of.reviewer, ['user.read', 'ticket.read']);
+    assert.deepEqual(of.viewer, ['user.read', 'ticket.read']);
+    // Only an admin may change roles.
+    assert.deepEqual(roles.filter((r) => r.permissions.includes('user.edit')).map((r) => r.name), ['admin']);
+  } finally { cleanup(); }
+});
+
+test('a person with no role reads as contributor, the project operator as admin, and a machine has no role', () => {
+  const { store, human, machine, cleanup } = fixture();
+  try {
+    assert.equal(DEFAULT_ROLE, 'contributor');
+    assert.equal(store.roleOf(human.id), 'admin', 'the operator of the first project is made admin');
+    const second = store.createActor({ kind: 'human', name: 'Second' });
+    assert.equal(store.roleOf(second.id), 'contributor');
+    assert.equal(store.roleOf(machine.id), null);
+    assert.equal(store.roleOf(9999), null);
+    // A second project with another operator does not make a second admin: there is one already.
+    store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE', operator: second.id });
+    assert.equal(store.roleOf(second.id), 'contributor');
+  } finally { cleanup(); }
+});
+
+test('a database from before roles gains the tables on open, and its project operators become admins; reopening changes nothing', () => {
+  const { dir, path, store, human } = fixture();
+  try {
+    const other = store.createActor({ kind: 'human', name: 'Other' });
+    store.close();
+    // Take the database back to before roles existed.
+    const raw = new DatabaseSync(path);
+    raw.exec('DROP TABLE user_roles; DROP TABLE role_permissions; DROP TABLE roles; DROP TABLE permissions;');
+    raw.close();
+    let again = openStore(path);
+    assert.equal(again.roleOf(human.id), 'admin');
+    assert.equal(again.roleOf(other.id), 'contributor');
+    assert.equal(again.listRoles().length, 5);
+    // Once someone else is the admin, reopening never makes the operator one again.
+    again.setRole({ actor: other.id, role: 'admin', by: human.id });
+    again.setRole({ actor: human.id, role: 'viewer', by: other.id });
+    again.close();
+    again = openStore(path);
+    assert.equal(again.roleOf(human.id), 'viewer');
+    assert.equal(again.roleOf(other.id), 'admin');
+    assert.equal(again.listRoles().length, 5, 'the roles are not written twice');
+    again.close();
+  } finally {
+    try { store.close(); } catch { /* already closed by the test */ }
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('an admin changes a person\'s role, read back; nobody else can, a machine has none, and the last admin cannot go', () => {
+  const { dir, path, store, human, machine } = fixture();
+  try {
+    const second = store.createActor({ kind: 'human', name: 'Second' });
+    assert.deepEqual(store.setRole({ actor: second.id, role: 'reviewer', by: human.id }), { actor: second.id, role: 'reviewer' });
+    assert.equal(store.roleOf(second.id), 'reviewer');
+    const refused = (fn, code) => assert.throws(fn, (err) => err instanceof StoreError && err.code === code && err.message.length > 0, code);
+    // A non-admin may not change anyone's role, their own included.
+    refused(() => store.setRole({ actor: second.id, role: 'admin', by: second.id }), 'not-admin');
+    refused(() => store.setRole({ actor: human.id, role: 'viewer', by: second.id }), 'not-admin');
+    // A machine has no role to change, and cannot change one.
+    refused(() => store.setRole({ actor: machine.id, role: 'viewer', by: human.id }), 'machine-account');
+    refused(() => store.setRole({ actor: second.id, role: 'viewer', by: machine.id }), 'not-admin');
+    refused(() => store.setRole({ actor: second.id, role: 'boss', by: human.id }), 'bad-role');
+    refused(() => store.setRole({ actor: 9999, role: 'viewer', by: human.id }), 'unknown-actor');
+    // The only admin cannot make themselves anything else, and nothing changes.
+    refused(() => store.setRole({ actor: human.id, role: 'viewer', by: human.id }), 'last-admin');
+    assert.equal(store.roleOf(human.id), 'admin');
+    assert.equal(store.roleOf(second.id), 'reviewer');
+    assert.equal(store.roleOf(machine.id), null);
+    // With a second admin, the first may step down; then the second is the last.
+    store.setRole({ actor: second.id, role: 'admin', by: human.id });
+    store.setRole({ actor: human.id, role: 'editor', by: human.id });
+    assert.equal(store.roleOf(human.id), 'editor');
+    refused(() => store.setRole({ actor: second.id, role: 'contributor', by: second.id }), 'last-admin');
+    // Setting the role someone already has is fine, and the last admin stays admin.
+    assert.deepEqual(store.setRole({ actor: second.id, role: 'admin', by: second.id }), { actor: second.id, role: 'admin' });
+    // The role is kept: a reopened store reads the same.
+    store.close();
+    const again = openStore(path);
+    assert.equal(again.roleOf(human.id), 'editor');
+    assert.equal(again.roleOf(second.id), 'admin');
+    again.close();
+  } finally {
+    try { store.close(); } catch { /* already closed by the test */ }
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('roles are recorded, not enforced: a viewer still files, changes and comments on tickets as before', () => {
+  const { store, human, cleanup } = fixture();
+  try {
+    const viewer = store.createActor({ kind: 'human', name: 'Viewer' });
+    store.setRole({ actor: viewer.id, role: 'viewer', by: human.id });
+    const t = store.fileTicket({ project: 'alpha', actor: viewer.id, name: 'Still works', status: 'Requested' });
+    store.changeTicket(t.id, { actor: viewer.id, name: 'Still works, renamed' });
+    assert.equal(store.getTicket(t.id).name, 'Still works, renamed');
+    store.postComment({ ticket: t.id, author: viewer.id, body: 'and comments' });
+    assert.equal(store.deleteTicket(t.id, { actor: viewer.id }) != null, true);
   } finally { cleanup(); }
 });
 

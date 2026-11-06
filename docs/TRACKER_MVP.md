@@ -159,6 +159,27 @@ account_links  token hash, purpose (setup|invite|reset), email, actor,
   (SP-142): `npm run clickup -- get` prints one `attachments:` line per file,
   and `npm run clickup -- attachments --task <id> --to <folder>` saves each
   one, checked against its size.
+- **Roles and permissions** (SP-143): every person has one of five roles,
+  **admin**, **editor**, **contributor**, **reviewer** and **viewer**, each
+  with a plain-words description, and each role a set of permissions. The
+  model is WaveCenter's (its `docs/DATA_MODEL.md`, "Roles and permissions");
+  the tables are the tracker's own. `roles` holds the five; `permissions`
+  holds what a role may be allowed to do, starting with `user.read`,
+  `user.edit`, `ticket.read`, `ticket.create`, `ticket.edit` and
+  `ticket.delete`, so a new permission is a new row; `role_permissions` says
+  which role has which (admin all six; editor all but `user.edit`;
+  contributor reads users and reads, adds and changes tickets; reviewer and
+  viewer read); `user_roles` is each person's role, with the admin who set it
+  and when. The first three are written from `ROLES` and `PERMISSIONS` in
+  `tracker/store.mjs` on every start-up. A person with no `user_roles` row is
+  a **contributor**; a machine has no role. While nobody is an admin (a
+  database from before roles, or a new one whose first project has just been
+  made), every person who is a project's operator is made admin, so nobody is
+  locked out. A role changes only through `setRole`, which refuses anyone who
+  is not an admin and a change that would leave the tracker with no admin,
+  checked in the same transaction as the write. **The permissions are
+  recorded, not yet enforced**: nobody is refused anything because of a role;
+  a later ticket makes them count.
 
 ### The API
 
@@ -188,7 +209,8 @@ answers are JSON (structured text programs read).
 | `POST /projects` | for Dane's page: add a project (`{ name, slug, prefix, url?, logo?, owner?, repo? }`), answered with its details read back; **a person's token only**: a machine's gets 403 and nothing is written. A duplicate slug or prefix, a slug that is not small letters, digits and hyphens (or is `new`), an owner who is not a person, an address that is not http(s), or a repo that is not `owner/name` (or its github.com address) gets 400 |
 | `PATCH /projects/:slug` | for Dane's page: change a project's name, web address, logo, owner or GitHub repository (`{ name?, url?, logo?, owner?, repo? }`), answered with its details read back; **a person's token only**: a machine's gets 403 and nothing is written. The slug and ticket prefix never change (every ticket's id and its project link are built from them): naming either gets 400 `not-changeable`; an owner who is not a person, an address that is not http(s) or a repo that is not `owner/name` gets 400; an unknown slug 404 |
 | `DELETE /projects/:slug` | for Dane's page: delete a project that has no tickets; **a person's token only**: a machine's gets 403. One with tickets gets 409 `has-tickets` (`"SP has 48 tickets; a project with tickets cannot be deleted"`) and nothing is removed; the count and the delete are one transaction; the server log names the project and the actor |
-| `GET /people` | for Dane's page: the tracker's people (humans only), for the owner picker and the Users page. A person's token gets `{ people: [{ id, name, email }], invites: [{ id, email, invitedBy: { id, name }, createdAt, expiresAt }] }`, the invites being the open ones (unused, unexpired); a machine's gets ids and names only. Never a token or a hash |
+| `GET /people` | for Dane's page: the tracker's people (humans only), for the owner picker and the Users page. A person's token gets `{ people: [{ id, name, email, role }], invites: [{ id, email, invitedBy: { id, name }, createdAt, expiresAt }], roles: [{ name, description, permissions }], permissions: [{ name, description }], canEditRoles }`, the invites being the open ones (unused, unexpired) and `canEditRoles` true for an admin; a machine's gets ids and names only. Never a token or a hash |
+| `PUT /people/:id/role` | for the Users page's role picker: `{ role }`, one of the five. **An admin's token only**: a machine's gets 403 `people-only`, a person who is not an admin 403 `not-admin`. A change that would leave no admin is 409 `last-admin`; an unknown role 400 `bad-role`; an id that is not a person 404 `unknown-person`. Answers `{ id, role }` read back; a refusal changes nothing |
 | `POST /invites` | for the Users page: invite someone (`{ email }`); **a person's token only**: a machine's gets 403 `people-only`. An email a person holds is 409 `duplicate-email`, one with an open invite 409 `duplicate-invite`, no mail sender 503 `no-mail`; otherwise a 7-day `invite` link is made and emailed through Resend, naming who invited them. A send Resend refuses withdraws the link and answers 502 `not-sent`, so no open invite is left. Answered 201 with `{ sent }` and the Users page's lists read back; the log names the actor, never the email or the link |
 | `DELETE /invites/:id` | for the Users page: cancel an open invite, so its link is refused as unknown; **a person's token only**. An id that is not an open invite is 404 `unknown-invite`; a used invite stays as the record |
 | `GET /projects/:slug` | for Dane's page: one project's details, its operator and owner by name, its web address, logo and GitHub repository, its open count and a count per status; 404 for an unknown slug |
@@ -257,8 +279,12 @@ with a **Cancel** button, and an **Invite someone** form that emails a
 7-day link. A refused invite (a taken email, a second invite, an email that
 did not go out) shows the server's reason and makes nothing; after an
 invite or a cancel the page reads the lists again and says it worked only
-when they agree. A loop's sign-in sees the names alone. There are no roles:
-every person signed in may invite (Dane's decision).
+when they agree. A loop's sign-in sees the names alone. Each row shows the
+person's **Role**; an admin gets a picker there instead, whose change is read
+back before the page says it worked, and a refusal (the last admin stepping
+down) shows the server's reason. Under the invites, **Roles and Permissions**
+shows which role has which permission. The roles are recorded, not enforced:
+every person signed in may still invite (Dane's decision).
 A browser opening `/projects` or `/projects/<slug>` gets the page; the page's own
 call to the same address gets the data. `/users` is the page alone; its data
 is still `GET /people` (the onboarding scripts read it), and a browser opening

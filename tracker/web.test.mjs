@@ -2192,12 +2192,30 @@ test('the Users page escapes every name and email, offers the form and Cancel to
   assert.match(draw, /\$\{person \? `<button type="button" data-cancel=/);
   assert.match(draw, /api\('POST', '\/invites', \{ email \}\)/);
   assert.match(draw, /api\('DELETE', `\/invites\/\$\{encodeURIComponent\(id\)\}`\)/);
-  // Each write is read back with GET /people before the page says it worked.
-  assert.equal(draw.match(/await api\('GET', '\/people'\)\.catch/g).length, 2);
+  // Each write (invite, cancel, role change) is read back with GET /people before the page says it worked.
+  assert.equal(draw.match(/await api\('GET', '\/people'\)\.catch/g).length, 3);
   assert.match(draw, /putTrail\(\[\{ label: 'Users' \}\]\)/);
   assert.match(draw, /setTitle\('Users · Tracker'\)/);
   assert.match(draw, /<h1>Users<\/h1>/);
   assert.match(draw, /<h2>Users with an Account<\/h2>/);
+});
+
+test('the Users page shows each role, gives an admin a picker that reads back, shows a refusal\'s reason, and lists which role has which permission', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const draw = app.slice(app.indexOf('async function drawUsers'), app.indexOf('/** Underline the header link'));
+  assert.match(draw, /<th class="role">Role<\/th>/);
+  // The picker is an admin's only; everyone else sees the role as text.
+  assert.match(draw, /const picker = person && canEditRoles;/);
+  assert.match(draw, /: escapeHtml\(p\.role \?\? ''\)\)/);
+  for (const field of ['p.id', 'p.name', 'r.name', 'r.description', 'x.description']) assert.match(draw, new RegExp(`escapeHtml\\(${field.replace('.', '\\.')}\\)`), field);
+  // A change is sent, then read back with GET /people before the page says it worked.
+  assert.match(draw, /api\('PUT', `\/people\/\$\{encodeURIComponent\(id\)\}\/role`, \{ role \}\)/);
+  assert.match(draw, /const now = back\?\.people\?\.find\(\(p\) => String\(p\.id\) === id\)\?\.role;/);
+  assert.match(draw, /again\(now === role \? `\$\{name\} is now \$\{role\}\.` :/);
+  // A refusal puts the picker back and shows the server's own reason.
+  assert.match(draw, /select\.value = was;[\s\S]*?note\.textContent = `Not changed: \$\{err\.message\}`;/);
+  assert.match(draw, /<h2>Roles and Permissions<\/h2>/);
+  assert.match(draw, /recorded, not yet enforced/);
 });
 
 test('the Tasks toolbar picks a project from a dropdown, "Project: ", the one in view selected', () => {
