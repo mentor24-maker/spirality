@@ -670,7 +670,7 @@ export function renderSetPassword({ purpose, email }) {
     ? `<label for="name">Your name</label>
       <input id="name" type="text" autocomplete="name" required>`
     : '';
-  return `<h1>Set your password</h1>
+  return `<h1>Set Your Password</h1>
     <form class="sign-in set-password">
       <label for="email">Email</label>
       <input id="email" type="email" value="${escapeHtml(email)}" readonly autocomplete="username">
@@ -679,14 +679,14 @@ export function renderSetPassword({ purpose, email }) {
       <input id="password" type="password" autocomplete="new-password" minlength="${MIN_PASSWORD}" required>
       <label for="confirm">The same password again</label>
       <input id="confirm" type="password" autocomplete="new-password" minlength="${MIN_PASSWORD}" required>
-      <button type="submit">Save password</button>
+      <button type="submit">Save Password</button>
       <p class="note"></p>
     </form>`;
 }
 
 /** What the page says once a password is set: where to sign in. */
 export function renderPasswordSet(trackerAddress) {
-  return `<h1>Password set</h1>
+  return `<h1>Password Set</h1>
     <p>Password set. Sign in at <a href="/">${escapeHtml(trackerAddress)}</a>.</p>`;
 }
 
@@ -726,7 +726,7 @@ export function renderEditPanel({ name, description, status, priority, tags = []
           <p class="quiet">The name cannot change now: a pull request is recorded, and its title must match the name exactly.</p>`
     : `<div class="row"><input id="edit-name" type="text" value="${escapeHtml(name)}" required><button type="submit">Save</button></div>`;
   return `<details class="edit" open>
-      <summary>Change this ticket</summary>
+      <summary>Change This Ticket</summary>
       <p class="note edit-note" role="status"></p>
       <form class="edit-fields">
         <label for="edit-priority">Priority</label>
@@ -758,27 +758,27 @@ export const MOVED_MESSAGE = 'Not saved: this ticket changed while you were look
 
 /** The sign-in form, as HTML: email, password, and "Forgot password?". `problem` is said under it. */
 export function renderSignIn(problem) {
-  return `<h1>Sign in</h1>
+  return `<h1>Sign In</h1>
     <form class="sign-in">
       <label for="email">Email</label>
       <input id="email" type="email" autocomplete="username" required>
       <label for="password">Password</label>
       <input id="password" type="password" autocomplete="current-password" required>
-      <button type="submit">Sign in</button>
-      <button type="button" class="link forgot">Forgot password?</button>
+      <button type="submit">Sign In</button>
+      <button type="button" class="link forgot">Forgot Password?</button>
       <p class="note${problem ? ' error' : ''}">${problem ? escapeHtml(problem) : ''}</p>
     </form>`;
 }
 
 /** "Forgot password?", as HTML: one email box, and a way back to signing in. */
 export function renderForgot(email = '') {
-  return `<h1>Forgot password</h1>
+  return `<h1>Forgot Password</h1>
     <form class="sign-in forgot">
       <p>Type your email. If it has an account, a link to set a new password is emailed to it. The link works for 1 hour.</p>
       <label for="email">Email</label>
       <input id="email" type="email" autocomplete="username" value="${escapeHtml(email)}" required>
-      <button type="submit">Email me a link</button>
-      <a href="/">Back to Sign in</a>
+      <button type="submit">Email Me a Link</button>
+      <a href="/">Back to Sign In</a>
       <p class="note"></p>
     </form>`;
 }
@@ -960,34 +960,34 @@ export function renderSetupNext(setup, { firstTicketId = null } = {}) {
   if (finished) {
     const project = `<a href="/projects/${encodeURIComponent(product)}">its project</a>`;
     const ticket = firstTicketId ? ` and <a href="/t/${encodeURIComponent(firstTicketId)}">its first ticket, ${escapeHtml(firstTicketId)}</a>` : '';
-    return box('finished', `<h2>${escapeHtml(name)} is set up</h2><p>Every step is done. See ${project}${ticket}.</p>`);
+    return box('finished', `<h2>${escapeHtml(name)} Is Set Up</h2><p>Every step is done. See ${project}${ticket}.</p>`);
   }
   if (stateError) {
-    return box('unreadable', `<h2>The setup's state cannot be read</h2><p class="error">${escapeHtml(stateError)}</p>${resume('Running the setup again writes it afresh:')}`);
+    return box('unreadable', `<h2>The Setup's State Cannot Be Read</h2><p class="error">${escapeHtml(stateError)}</p>${resume('Running the setup again writes it afresh:')}`);
   }
   if (!state) {
-    return box('start', `<h2>Start the setup</h2>${PASTE_HERE}${renderCopyRow(commands.start)}<p class="quiet">This page follows it as it runs.</p>`);
+    return box('start', `<h2>Start the Setup</h2>${PASTE_HERE}${renderCopyRow(commands.start)}<p class="quiet">This page follows it as it runs.</p>`);
   }
   // What each kind of stop the wizard records (its STOP_KINDS) asks of him.
   const stop = state.stop;
   const STOPS = {
-    answers: () => `<h2>Some answers are missing</h2><p>${escapeHtml(stop.why)}</p><p><a href="/setup/${encodeURIComponent(product)}/answers">Fill in the answers</a>, then paste this into a Terminal on the Mini:</p>${renderCopyRow(commands.start)}`,
+    answers: () => `<h2>Some Answers Are Missing</h2><p>${escapeHtml(stop.why)}</p><p><a href="/setup/${encodeURIComponent(product)}/answers">Fill in the answers</a>, then paste this into a Terminal on the Mini:</p>${renderCopyRow(commands.start)}`,
     paste: () => {
       const lines = Array.isArray(stop.commands) ? stop.commands : [];
-      return `<h2>Your move (real secret values)</h2><p>${escapeHtml(stop.why)}</p>${PASTE_HERE}${renderCopyRow(lines.join('\n'))}<p class="quiet">It makes the sign-ins and writes their keys into Doppler. No key is shown.</p>${resume('Once it has finished, run the setup again:')}`;
+      return `<h2>Your Move (Real Secret Values)</h2><p>${escapeHtml(stop.why)}</p>${PASTE_HERE}${renderCopyRow(lines.join('\n'))}<p class="quiet">It makes the sign-ins and writes their keys into Doppler. No key is shown.</p>${resume('Once it has finished, run the setup again:')}`;
     },
     merge: () => {
       const link = isLink(stop.link) ? `<p><a href="${escapeHtml(stop.link)}">Open the setup ticket</a>: its Merge button is there.</p>` : '';
-      return `<h2>Your move (a decision): merge the setup</h2><p>${escapeHtml(stop.why)}</p>${link}${resume('Once it has merged, run the setup again:')}`;
+      return `<h2>Your Move (A Decision): Merge the Setup</h2><p>${escapeHtml(stop.why)}</p>${link}${resume('Once it has merged, run the setup again:')}`;
     },
-    failed: () => `<h2>A step failed</h2><pre class="failed"><code>${escapeHtml(`FAILED: ${stop.step}: ${stop.why}`)}</code></pre>${resume('Fix it, then run the setup again; it skips every step already done:')}`,
+    failed: () => `<h2>A Step Failed</h2><pre class="failed"><code>${escapeHtml(`FAILED: ${stop.step}: ${stop.why}`)}</code></pre>${resume('Fix it, then run the setup again; it skips every step already done:')}`,
   };
   if (stop && Object.hasOwn(STOPS, stop.kind)) return box(stop.kind, STOPS[stop.kind]());
   const running = runningStep(state);
   if (running) {
     return box('running', `<h2>Running: ${escapeHtml(running)}</h2><p class="quiet">This page follows it every few seconds.</p>${resume('If nothing changes for a long while, its run may have ended; run it again:')}`);
   }
-  return box('resume', `<h2>Carry on with the setup</h2>${resume('Paste this into a Terminal on the Mini; it skips every step already done:')}`);
+  return box('resume', `<h2>Carry On with the Setup</h2>${resume('Paste this into a Terminal on the Mini; it skips every step already done:')}`);
 }
 
 /** The Projects page's list of products mid-setup (`GET /setup`'s answer), each linking to its setup page; '' with none. */
@@ -995,7 +995,7 @@ export function renderSetupList({ setups = [] } = {}) {
   const open = setups.filter((s) => !s.finished);
   if (!open.length) return '';
   const item = (s) => `<li><a href="/setup/${encodeURIComponent(s.product)}">${escapeHtml(s.product)}</a> <span class="quiet">${s.stateError ? 'its state cannot be read' : !s.started ? 'not started yet' : `at ${escapeHtml(s.step ?? '')}`}</span></li>`;
-  return `<section class="setups"><h2>Being set up</h2><ul>${open.map(item).join('')}</ul></section>`;
+  return `<section class="setups"><h2>Being Set Up</h2><ul>${open.map(item).join('')}</ul></section>`;
 }
 
 /** An answer as the form's text box shows it: a list with commas, an empty list as "none", the default when there is none. */

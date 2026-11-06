@@ -333,7 +333,7 @@ test('the Projects screen is a table whose View icon opens the details page; a n
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   assert.match(app, /<table class="projects">/);
   assert.match(app, /<th class="actions">Actions<\/th><\/tr><\/thead><tbody>\$\{projects\.map\(row\)/);
-  assert.match(app, /action\(`\/projects\/\$\{encodeURIComponent\(p\.slug\)\}`, 'View project', ICONS\.view\)/);
+  assert.match(app, /action\(`\/projects\/\$\{encodeURIComponent\(p\.slug\)\}`, 'View Project', ICONS\.view\)/);
   // SP-42's behaviour: the name goes to the project's tasks in the last view, and opening it selects it.
   assert.match(app, /<td class="name"><a href="\/\$\{savedView\(\)\}\/\$\{encodeURIComponent\(p\.slug\)\}"/);
   assert.match(app, /localStorage\.setItem\(PROJECT_KEY, board\.project\)/);
@@ -367,7 +367,7 @@ test('a ticket\'s pull request on the list is the one the merge step would act o
 
 test('the list\'s actions only go where the page already goes: the ticket, its reply box, its pull request', () => {
   const app = readFileSync(WEB('app.mjs'), 'utf8');
-  assert.match(app, /action\(at, 'Open ticket', ICONS\.open\)/);
+  assert.match(app, /action\(at, 'Open Ticket', ICONS\.open\)/);
   assert.match(app, /action\(`\$\{at\}#reply`, 'Reply', ICONS\.reply\)/);
   // The PR icon shows only when there is one, and opens GitHub in its own tab.
   assert.match(app, /t\.pullRequest \? action\(t\.pullRequest, '[^']+', ICONS\.pullRequest, true\) : ''/);
@@ -698,7 +698,7 @@ test('Waiting on you is a bell on the right, just before "Signed in as", coloure
   assert.deepEqual([...nav.matchAll(/>([^<]+)<\/a>/g)].map((m) => m[1]), ['Projects', 'Tasks', 'Reporting', 'People', 'Settings']);
   assert.doesNotMatch(nav, /Waiting on you/);
   const me = /<span class="me">([\s\S]*?)<\/span>\s*<\/header>/.exec(html)[1];
-  assert.match(me, /<a id="bell" href="\/" title="Waiting on you" aria-label="Waiting on you" data-colour="grey" hidden><svg [^>]*aria-hidden="true">[\s\S]*?<\/svg><\/a>\s*<span id="who"><\/span>/);
+  assert.match(me, /<a id="bell" href="\/" title="Waiting on You" aria-label="Waiting on You" data-colour="grey" hidden><svg [^>]*aria-hidden="true">[\s\S]*?<\/svg><\/a>\s*<span id="who"><\/span>/);
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   assert.match(app, /function showBell\(\) \{\s*bell\.dataset\.colour = bellColour\(waitingCount\);\s*\}/);
   // Every place the count is read colours the bell: the one-minute refresh and the Waiting on you page.
@@ -1067,7 +1067,7 @@ test('every page puts its trail at the top: ticket, board, list, Waiting on you,
   assert.match(body('drawTicket'), /putTrail\(\[\s*\{ label: t\.projectName, href: `\/\$\{savedView\(\)\}\/\$\{encodeURIComponent\(t\.project\)\}` \},\s*\{ label: `Task \$\{t\.id\}`, href: `\/t\/\$\{encodeURIComponent\(t\.id\)\}` \},\s*\{ label: 'Details' \},\s*\]\)/);
   // A project's board or list climbs to Projects.
   assert.match(body('drawProject'), /putTrail\(\[\{ label: board\.projectName, href: '\/projects' \}, \{ label: view === 'board' \? 'Board' : 'List' \}\]\)/);
-  assert.match(body('drawWaiting'), /putTrail\(\[\{ label: 'Waiting on you' \}\]\)/);
+  assert.match(body('drawWaiting'), /putTrail\(\[\{ label: 'Waiting on You' \}\]\)/);
   assert.match(body('drawProjects'), /putTrail\(\[\{ label: 'Projects' \}\]\)/);
   // Each trail goes in after its page is drawn, so it sits first in main.
   assert.match(app, /main\.insertAdjacentHTML\('afterbegin', renderTrail\(steps\)\)/);
@@ -1127,7 +1127,7 @@ test('/projects/new is the page to a browser, and its logo can be drawn: the loc
 test('the New project button and form are a person\'s only; a refused save keeps what was typed and says why; success opens the details page', () => {
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   // SP-127: the Projects page's button is Set up a product; the bare form is a link on its page.
-  assert.match(app, /me\?\.kind === 'human' \? '<div class="toolbar"><a class="button" href="\/setup\/new">Set up a product<\/a><\/div>' : ''/);
+  assert.match(app, /me\?\.kind === 'human' \? '<div class="toolbar"><a class="button" href="\/setup\/new">Set Up a Product<\/a><\/div>' : ''/);
   assert.match(app, /<a href="\/projects\/new">New project<\/a>/);
   const form = app.slice(app.indexOf('async function drawCreateProject'), app.indexOf('/**', app.indexOf('async function drawCreateProject')));
   assert.match(form, /if \(me\?\.kind !== 'human'\)[\s\S]{0,200}Only a person signed in to the tracker can add a project\./);
@@ -1150,7 +1150,7 @@ test('the New project button and form are a person\'s only; a refused save keeps
   assert.match(app, /const isRepo = \(v\) => typeof v === 'string' && \/\^\[A-Za-z0-9-\]\+\\\/\[A-Za-z0-9\._-\]\+\$\/\.test\(v\);/);
   assert.match(app, /<a href="https:\/\/github\.com\/\$\{escapeHtml\(p\.repo\)\}" target="_blank" rel="noopener noreferrer">\$\{escapeHtml\(p\.repo\)\}<\/a>/);
   assert.match(app, /<td class="repo">\$\{repoOf\(p\)\}<\/td>/);
-  assert.match(app, /<th class="repo">GitHub repository<\/th>/);
+  assert.match(app, /<th class="repo">GitHub Repository<\/th>/);
   assert.match(app, /<dt>GitHub repository<\/dt><dd>\$\{repoOf\(p\)\}<\/dd>/);
 });
 
@@ -1223,7 +1223,7 @@ test('the Projects table gives a person Edit and Delete on every row and a loop\
   const table = app.slice(app.indexOf('async function drawProjects'), app.indexOf('/**', app.indexOf('async function drawProjects')));
   // Both icons are drawn only for a person; otherwise the cell holds the View icon alone.
   assert.match(table, /const people = me\?\.kind === 'human';/);
-  assert.match(table, /\$\{people\n\s+\? action\(`\/projects\/\$\{encodeURIComponent\(p\.slug\)\}\/edit`, 'Edit project', ICONS\.edit\)\n\s+\+ actionButton\('Delete project', ICONS\.delete, \{ delete: p\.slug, name: p\.name \}\)\n\s+: ''\}/);
+  assert.match(table, /\$\{people\n\s+\? action\(`\/projects\/\$\{encodeURIComponent\(p\.slug\)\}\/edit`, 'Edit Project', ICONS\.edit\)\n\s+\+ actionButton\('Delete Project', ICONS\.delete, \{ delete: p\.slug, name: p\.name \}\)\n\s+: ''\}/);
   assert.equal((table.match(/ICONS\.edit/g) ?? []).length, 1, 'Edit is drawn in one place, behind the person check');
   assert.equal((table.match(/ICONS\.delete/g) ?? []).length, 1, 'Delete is drawn in one place, behind the person check');
   // Delete asks, by name, before anything is sent.
@@ -1594,7 +1594,7 @@ test('the list draws the bin on exactly the board\'s Requested and Queued rows, 
     assert.ok(f.store.getTicket(started.id));
   } finally { await f.cleanup(); }
   const app = readFileSync(WEB('app.mjs'), 'utf8');
-  assert.match(app, /canDelete\(status\) \? actionButton\('Delete ticket', ICONS\.delete, \{ delete: t\.id \}\) : ''/);
+  assert.match(app, /canDelete\(status\) \? actionButton\('Delete Ticket', ICONS\.delete, \{ delete: t\.id \}\) : ''/);
   assert.match(app, /c\.tickets\.map\(row\(c\.status\)\)/);
   // No bin on the board's cards.
   const card = /const card = \(t\) => `([\s\S]*?)`;/.exec(app)[1];
@@ -1781,13 +1781,13 @@ test('the sign-in form is an email and a password with "Forgot password?"; the p
   const form = renderSignIn();
   assert.match(form, /<input id="email" type="email" autocomplete="username" required>/);
   assert.match(form, /<input id="password" type="password" autocomplete="current-password" required>/);
-  assert.match(form, /<button type="button" class="link forgot">Forgot password\?<\/button>/);
+  assert.match(form, /<button type="button" class="link forgot">Forgot Password\?<\/button>/);
   assert.doesNotMatch(form, /token/i);
   assert.match(renderSignIn('<b>no</b>'), /<p class="note error">&lt;b&gt;no&lt;\/b&gt;<\/p>/);
   const forgot = renderForgot('a"b@example.com');
   assert.match(forgot, /value="a&quot;b@example\.com"/);
   assert.match(forgot, /works for 1 hour/);
-  assert.match(forgot, /<a href="\/">Back to Sign in<\/a>/);
+  assert.match(forgot, /<a href="\/">Back to Sign In<\/a>/);
 
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   assert.doesNotMatch(app, /authorization|Bearer/, 'the page never sends a token');
@@ -2074,9 +2074,9 @@ test('the Reporting page draws only the server\'s figures: ranges and stages fro
   assert.doesNotMatch(draw, /'Queued'|'Requested'|'Building'|'Live'/, 'the stages come from the server, never typed out');
   assert.match(draw, /el\.style\.setProperty\('--stage-border', look\.border\);/);
   assert.match(draw, /escapeHtml\(s\.status\)/);
-  for (const title of ['Time to finish', 'Sent back', 'Waiting on you']) assert.match(draw, new RegExp(`flow\\('${title}',\\s*'[^']+'`), `${title} has its how-it-is-counted line`);
+  for (const title of ['Time to Finish', 'Sent Back', 'Waiting on You']) assert.match(draw, new RegExp(`flow\\('${title}',\\s*'[^']+'`), `${title} has its how-it-is-counted line`);
   assert.match(draw, /r\.flow\[g\.key\]/, 'flow figures per range, from the server');
-  assert.match(draw, /<h2>Human hours of work done<\/h2>\s*<p class="quiet">[^<]*estimate, not a measurement/, 'the human-hours report says where its number comes from');
+  assert.match(draw, /<h2>Human Hours of Work Done<\/h2>\s*<p class="quiet">[^<]*estimate, not a measurement/, 'the human-hours report says where its number comes from');
   assert.match(draw, /r\.humanHours\[g\.key\]/, 'human-hours figures per range, from the server');
   assert.match(draw, /h\.estimated \? escapeHtml\(cell\(h\)\) : '<span class="quiet">no estimates yet in this range<\/span>'/, 'no estimates is said in words, never 0 hours');
   assert.match(draw, /of \$\{Number\(h\.finished\)\} estimated/);
@@ -2297,12 +2297,12 @@ test('the setup page\'s next-step box, for a state file of each kind: every comm
     assert.match(html, /<a href="\/setup\/press-play\/answers">Fill in the answers<\/a>/);
     assert.deepEqual(copies(html), { codes: [command], buttons: 1 });
 
-    // Stopped at the paste: "Your move (real secret values)", one Copy for every line, then the resume command.
+    // Stopped at the paste: "Your Move (Real Secret Values)", one Copy for every line, then the resume command.
     const block = ["cd '/x/spirality'", "doppler projects create 'press-play'", "TRACKER_DB='/x/t.db' npm run tracker:signins -- create --name 'Press Play' --prefix 'PR' --config '/x/p.json'"];
     h.state('press-play', { outcomes: { answers: 'done', look: 'done', clone: 'skip', settings: 'done', signins: 'stopped' }, stop: { step: 'signins', kind: 'paste', why: 'waiting on you to run the block above', commands: block, link: null } });
     html = renderSetupNext(h.of('press-play'));
     assert.equal(kind(html), 'paste');
-    assert.match(html, /Your move \(real secret values\)/);
+    assert.match(html, /Your Move \(Real Secret Values\)/);
     assert.deepEqual(copies(html), { codes: [block.join('\n'), command], buttons: 2 });
     assert.ok(html.indexOf(escapeHtml(block[0])) < html.indexOf(escapeHtml(command)), 'the block first, then the resume command');
 
@@ -2335,7 +2335,7 @@ test('the setup page\'s next-step box, for a state file of each kind: every comm
     const done = h.of('press-play');
     html = renderSetupNext(done, { firstTicketId: 'PR-1' });
     assert.equal(kind(html), 'finished');
-    assert.match(html, /<h2>Press Play is set up<\/h2>/);
+    assert.match(html, /<h2>Press Play Is Set Up<\/h2>/);
     assert.match(html, /<a href="\/projects\/press-play">its project<\/a>/);
     assert.match(html, /<a href="\/t\/PR-1">its first ticket, PR-1<\/a>/);
     assert.deepEqual(copies(html), { codes: [], buttons: 0 });
@@ -2405,7 +2405,7 @@ test('the page makes a slug by the wizard\'s rule, and refuses the two that are 
 test('the Projects page has Set up a product, lists the products mid-setup, and keeps New project a link away', () => {
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   const projects = /async function drawProjects\(done = ''\) \{[\s\S]*?\n\}/.exec(app)[0];
-  assert.match(projects, /<a class="button" href="\/setup\/new">Set up a product<\/a>/);
+  assert.match(projects, /<a class="button" href="\/setup\/new">Set Up a Product<\/a>/);
   assert.doesNotMatch(projects, /href="\/projects\/new">New project/);
   assert.match(projects, /api\('GET', '\/setup'\)/);
   assert.match(projects, /\$\{renderSetupList\(setups\)\}/);
@@ -2426,7 +2426,7 @@ test('the Projects page has Set up a product, lists the products mid-setup, and 
     { product: 'done-one', step: null, finished: true, started: true, stateError: null },
     { product: 'fresh', step: null, finished: false, started: false, stateError: null },
   ] });
-  assert.match(list, /<h2>Being set up<\/h2>/);
+  assert.match(list, /<h2>Being Set Up<\/h2>/);
   assert.match(list, /<a href="\/setup\/press-play">press-play<\/a> <span class="quiet">at signins<\/span>/);
   assert.match(list, /<a href="\/setup\/fresh">fresh<\/a> <span class="quiet">not started yet<\/span>/);
   assert.doesNotMatch(list, /done-one/);

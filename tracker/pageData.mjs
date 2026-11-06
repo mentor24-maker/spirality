@@ -253,9 +253,9 @@ export function stageColoursOf(store) {
 
 /** The Reporting page's time ranges, newest first; `days: null` is all time. */
 export const REPORT_RANGES = Object.freeze([
-  Object.freeze({ key: 'week', label: 'Last 7 days', days: 7 }),
-  Object.freeze({ key: 'month', label: 'Last 30 days', days: 30 }),
-  Object.freeze({ key: 'all', label: 'All time', days: null }),
+  Object.freeze({ key: 'week', label: 'Last 7 Days', days: 7 }),
+  Object.freeze({ key: 'month', label: 'Last 30 Days', days: 30 }),
+  Object.freeze({ key: 'all', label: 'All Time', days: null }),
 ]);
 
 const DAY_MS = 24 * 60 * 60 * 1000;
