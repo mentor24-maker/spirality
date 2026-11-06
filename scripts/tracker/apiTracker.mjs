@@ -168,6 +168,36 @@ export function createApiTracker({ token, baseUrl, project, listId, timeoutMs, l
     return { res, json, text };
   }
 
+  /**
+   * A file's bytes, the one answer that is not JSON. `bytes` is a Buffer on
+   * success; a refusal's JSON message is read as `call` reads it.
+   */
+  async function download(path) {
+    requests += 1;
+    let res;
+    try {
+      res = await fetch(`${BASE}${path}`, {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${token}`, Connection: 'close' },
+        signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
+      });
+    } catch (err) {
+      return unreachable(err);
+    }
+    if (res.ok) {
+      try {
+        return { res, bytes: Buffer.from(await res.arrayBuffer()), json: null, text: '' };
+      } catch (err) {
+        return { ...unreachable(err), text: `the file did not arrive whole (${err?.message || err})` };
+      }
+    }
+    const text = await res.text();
+    let json = null;
+    try { json = text ? JSON.parse(text) : null; } catch { json = null; }
+    if (json && json.message && !json.err) json = { ...json, err: json.message };
+    return { res, json, text };
+  }
+
   // Tracker ids are a capital prefix and a number (tracker/store.mjs refuses
   // any other prefix), and the store looks them up exactly; lib/waitsOn.js
   // lowercases the ids it reads, as ClickUp's are. So any case is the same id.
@@ -367,6 +397,20 @@ export function createApiTracker({ token, baseUrl, project, listId, timeoutMs, l
       if (!ticket) return refused(404, `comment ${commentId} was not read in this run, so its ticket is unknown; read the ticket's comments first.`);
       return postOn(ticket, body, commentId);
     },
+
+    /**
+     * The ticket's attachments, oldest first, without their bytes:
+     * `json.attachments` is `[{ id, name, type, size, addedBy, createdAt }]`.
+     */
+    async listAttachments(task) {
+      const out = await call('GET', `${ticketPath(task)}/attachments`);
+      if (!out.res.ok) return out;
+      if (!Array.isArray(out.json?.attachments)) return refused(502, 'the tracker answered without an attachment list.');
+      return withJson(out, { attachments: out.json.attachments });
+    },
+
+    /** One attachment's bytes: `{ res, bytes }`, with `bytes` a Buffer when `res.ok`. */
+    downloadAttachment: (task, id) => download(`${ticketPath(task)}/attachments/${encodeURIComponent(String(id))}`),
 
     /** A comment's replies, oldest first, in ClickUp's `{ comments }` shape. */
     async listReplies(commentId) {

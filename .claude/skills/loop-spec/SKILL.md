@@ -31,6 +31,23 @@ NOT write any code here. You produce well-formed tasks.
   works if agents never set it. `task --priority urgent` refuses unless
   `--operator-asked` is also passed, which is your written claim that he asked.
 
+- **Files attached to a ticket.** When the idea arrives as a ticket and
+  `npm run clickup -- get --task <id>` prints `attachments:` lines (anything
+  but `attachments: (none)`), they are part of his idea. Save them outside
+  the repository and read every one (pictures and text both; the Read tool
+  opens a picture) before writing the tasks:
+
+  ```bash
+  npm run clickup -- attachments --task <id> --to /tmp/<id>-attachments
+  ```
+
+  It prints `saved <path> (<size> bytes)` per file and exits non-zero naming
+  any file that did not save; a file that did not save is a failure you
+  report, never one you write past. Never copy a file into the repository or
+  a pull request. `attachments: COULD NOT BE READ` means the ticket's files
+  are unknown: say so on the ticket and in your report, and never treat it
+  as none.
+
 ## Workflow
 
 1. **Interview until confident.** Ask Dane focused questions — a few at a

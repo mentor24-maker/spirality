@@ -21,6 +21,15 @@ import { pageComments } from '../../lib/commentPages.js';
 
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
+/** Files on a ticket are kept only by the tracker (docs/TRACKER_MVP.md, "Attachments"). */
+export const NO_ATTACHMENTS_ON_CLICKUP = 'Attachments are kept only in the tracker; this project\'s tickets are on ClickUp, where this door reads no files. Nothing was saved.';
+
+/** An answer made here, not by ClickUp: this door has no way to do what was asked. */
+function unsupported(message) {
+  const json = { err: message };
+  return { res: { ok: false, status: 501, headers: { get: () => null } }, json, text: JSON.stringify(json), unsupported: true };
+}
+
 function unreachable(err) {
   return { res: { ok: false, status: 0, headers: { get: () => null } }, json: null, text: `the request never reached ClickUp (${err?.message || err})` };
 }
@@ -118,5 +127,9 @@ export function createClickupTracker({ token, apiBase, timeoutMs, log = console.
     postComment: (task, body) => call('POST', `/api/v2/task/${task}/comment`, body),
     replyToComment: (commentId, body) => call('POST', `/api/v2/comment/${commentId}/reply`, body),
     listReplies: (commentId) => call('GET', `/api/v2/comment/${commentId}/reply`),
+
+    /** No request is made: the door says so, never "(none)". */
+    listAttachments: async () => unsupported(NO_ATTACHMENTS_ON_CLICKUP),
+    downloadAttachment: async () => unsupported(NO_ATTACHMENTS_ON_CLICKUP),
   };
 }
