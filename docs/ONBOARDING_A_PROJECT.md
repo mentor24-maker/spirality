@@ -156,6 +156,9 @@ is the example.
 | `trackerDataDir` | optional (required with `trackerPort`) | The folder holding the tracker database and its backups. | `"~/spirality-tracker"` |
 | `trackerUrl` | optional (required with `"api"`) | The tracker's address for Dane's browser and the hand-over email. | `"http://mac-mini.local:4180"` |
 | `trackerApiUrl` | optional | The address the loops themselves call; on the Mini, its own `127.0.0.1`. Defaults to `trackerUrl`. | `"http://127.0.0.1:4180"` |
+| `trackerPublicUrl` | optional | The tracker's https address on the internet, through Tailscale Funnel; only the API answers there. **Only the project that runs the tracker sets it.** Port 443, 8443 or 10000. | `"https://mac-mini.tail7fc5c6.ts.net:8443"` |
+| `tailscaleLabel` | optional (needed by the Funnel script) | The launchd job that keeps Tailscale running on that machine. | `"com.starcaster.tailscaled"` |
+| `tailscaleSocket` | optional (needed by the Funnel script) | Tailscale's socket on that machine (it runs without root). | `"~/.tailscale/tailscaled.sock"` |
 
 **The old names still work, for now (SP-130).** Until November 2026 two of
 these were called `productSlug` and `productScripts` (and the setup's answers
