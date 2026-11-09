@@ -39,3 +39,12 @@ a missing ClickUp key no longer leaves the project with no loop at all. A
 lane log in a folder with a space in its name is now read correctly, and
 the pull request's list of files the setup sits beside no longer suggests
 deleting them.
+
+Third round: that ClickUp read can take minutes on a big project, and a
+lane could start working during it, then be switched off halfway through.
+The wizard now does the slow read first, then looks again for a lane at
+work, and switches the lanes off straight after that look. A lane whose
+log shows an unfinished pass but whose lock says its runner is gone (it
+was killed) is no longer mistaken for one still working. And a project
+the wizard clones in the same run that turns out to have an old loop now
+stops right after the clone, so the ClickUp questions get asked.

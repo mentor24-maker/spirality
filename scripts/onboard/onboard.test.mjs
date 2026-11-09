@@ -642,6 +642,25 @@ test('a project with no checkout: cloned from main over the home\'s kind of addr
   assert.ok(!out(w).includes('SECRET-TOKEN') && !readFileSync(logFile, 'utf8').includes('SECRET-TOKEN'), 'the home origin\'s token is never printed or logged');
 });
 
+test('a clone that brings an old loop\'s installer: STOPPED at clone before the sign-ins, and the rerun asks the ClickUp question', async (t) => {
+  const { w, go, checkout, run } = makeWorld(t);
+  const withInstaller = (cmd, args, o) => {
+    const r = run(cmd, args, o);
+    if (cmd === 'git' && args[0] === 'clone' && r.code === 0) {
+      mkdirSync(join(checkout, 'scripts'), { recursive: true });
+      writeFileSync(join(checkout, 'scripts', 'install_loop_runner.sh'), '#!/bin/bash\n');
+    }
+    return r;
+  };
+  assert.notEqual(await go({ run: withInstaller }), 0, out(w));
+  assert.match(out(w), /^STOPPED: clone: the clone at .* already runs a loop of its own .*needs the ClickUp answers/m);
+  assert.ok(!w.calls.some((x) => x.includes('onboard:settings -- write')), 'nothing after the clone ran');
+  w.printed.length = 0;
+  w.asked.length = 0;
+  await go({ run: withInstaller });
+  assert.ok(w.asked.some((q) => q.startsWith('Does this project already run a loop on ClickUp')), 'the rerun asks it');
+});
+
 test('the home\'s origin over ssh: the clone is over ssh too', async (t) => {
   const { w, go } = makeWorld(t);
   w.homeOrigin = 'git@github.com:mentor24-maker/spirality.git';
@@ -1019,12 +1038,12 @@ test('GitHub cannot be asked whether the repository is empty: FAILED at start, n
 
 // --- SP-159: a project already running a loop on ClickUp ------------------
 
-const WC_STATUS = (loaded, logDir) => ['loop-build', 'loop-review', 'merge-on-comment'].map((l) => [
+const WC_STATUS = (loaded, logDir, lock = null) => ['loop-build', 'loop-review', 'merge-on-comment'].map((l) => [
   `── ${l}`,
   'schedule: INSTALLED at /Users/d/Library/LaunchAgents/com.pressplay.' + l + '.plist — every 15 minutes',
   loaded ? `loaded:   yes — 2168${l.length} 0 com.pressplay.${l}` : 'loaded:   no',
   '          (columns: PID, last exit code, label. A PID here means the runner is alive right now.)',
-  'lock:     none',
+  lock ?? (loaded ? `lock:     held by live pid 2168${l.length} — a runner is working` : 'lock:     none'),
   `log:      ${join(logDir, `pressplay-${l}.log`)} (last modified 2026-11-08 23:26)`,
 ].join('\n')).join('\n');
 
@@ -1055,7 +1074,7 @@ function clickupWorld(t) {
       const line = [cmd, ...args].join(' ');
       w.calls.push(line);
       if (args[1] === '--uninstall') { if (!c.uninstallLeaves) c.oldLoaded = false; return { code: c.code.uninstall ?? 0, out: '', err: '' }; }
-      const status = WC_STATUS(c.oldLoaded, logDir);
+      const status = WC_STATUS(c.oldLoaded, logDir, c.lock);
       // c.noLogFor: a lane whose --status names no log.
       return { code: 0, out: c.noLogFor ? status.replace(new RegExp(`^log: .*pressplay-${c.noLogFor}\\.log.*$\\n?`, 'm'), '') : status, err: '' };
     }
@@ -1064,6 +1083,8 @@ function clickupWorld(t) {
       const key = [script, ...args.slice(4)].join(' ');
       w.calls.push(`tracker ${key}`);
       c.calls.push({ key, cwd: o.cwd, env: o.env, show: o.show });
+      // c.duringDryRun: what happens in the world while the snapshot's dry run reads ClickUp.
+      if (key.startsWith('clickupSnapshot.mjs --dry-run')) c.duringDryRun?.();
       const code = c.code[key] ?? c.code[script] ?? 0;
       return { code, out: script === 'switchCheck.mjs' ? c.switchOut : '', err: '' };
     }
@@ -1097,6 +1118,11 @@ test('fromClickup: the installer\'s own --status gives each lane, its label and 
   // A log path with a space in it, and a log not written yet.
   const spaced = readInstallerStatus('── loop-build\nloaded:   yes — 1 0 com.x.loop-build\nlog:      /Users/d/loop logs/x-loop-build.log (last modified 2026-11-08 23:27)\n── loop-review\nloaded:   yes — 2 0 com.x.loop-review\nlog:      /Users/d/loop logs/x-loop-review.log (nothing written yet)');
   assert.deepEqual(spaced.map((j) => j.log), ['/Users/d/loop logs/x-loop-build.log', '/Users/d/loop logs/x-loop-review.log']);
+  // The lock line, in every installer's words; none at all leaves it unknown.
+  assert.deepEqual(jobs.map((j) => j.lock), ['held', 'held', 'held']);
+  assert.deepEqual(readInstallerStatus(WC_STATUS(false, '/l')).map((j) => j.lock), ['none', 'none', 'none']);
+  assert.equal(readInstallerStatus(WC_STATUS(true, '/l', 'lock:     STALE (pid 7 is gone) — the next start clears it; if nothing starts, that is the fault to chase'))[0].lock, 'stale');
+  assert.equal(spaced[0].lock, null);
 });
 
 test('fromClickup: a START with no END after it is a pass in flight', () => {
@@ -1105,6 +1131,12 @@ test('fromClickup: a START with no END after it is a pass in flight', () => {
   assert.deepEqual(passInFlight(`${ended}===== 2026-11-08 23:40:00 START /loop-build =====\nworking\n`), { running: true, started: '2026-11-08 23:40:00' });
   assert.equal(passInFlight('no passes here'), null);
   assert.equal(passInFlight(null), null);
+  // A runner killed mid-pass leaves a START with no END: its lock says it is gone.
+  const killed = `${ended}===== 2026-11-08 23:40:00 START /loop-build =====\nworking\n`;
+  assert.equal(passInFlight(killed, 'stale').running, false);
+  assert.equal(passInFlight(killed, 'none').running, false);
+  assert.equal(passInFlight(killed, 'held').running, true);
+  assert.equal(passInFlight(killed, null).running, true, 'no lock line: the log\'s word stands');
 });
 
 test('fromClickup: the ClickUp steps go before copy; only a checkout with its own installer and no settings file is an old loop', (t) => {
@@ -1249,7 +1281,30 @@ test('a project on ClickUp with a pass in flight: FAILED at stop, nothing is sto
   writeFileSync(join(logDir, 'pressplay-loop-review.log'), '===== 2026-11-08 23:40:00 START /loop-review =====\nworking\n');
   assert.equal(await go(), 1, out(w));
   assert.match(out(w), /^FAILED: stop: a loop-review pass is in flight \(started 2026-11-08 23:40:00/m);
-  assert.ok(!w.calls.some((x) => x.includes('--uninstall') || x.startsWith('tracker ')));
+  assert.ok(!w.calls.some((x) => x.includes('--uninstall')), 'nothing was stopped');
+  assert.deepEqual(w.calls.filter((x) => x.startsWith('tracker ')).map((x) => x.split(' --list')[0]), ['tracker clickupSnapshot.mjs --dry-run'], 'only the read-only dry run, before the check');
+});
+
+test('a pass that starts during the snapshot\'s dry run: FAILED at stop, nothing is stopped', async (t) => {
+  const { w, c, go, logDir } = clickupWorld(t);
+  // Idle when the step begins; a loop-build pass starts while the dry run reads ClickUp.
+  writeFileSync(join(logDir, 'pressplay-loop-build.log'), '===== 2026-11-08 23:26:17 START /loop-build =====\n===== 2026-11-08 23:26:32 END /loop-build (exit 0) =====\n');
+  c.duringDryRun = () => appendFileSync(join(logDir, 'pressplay-loop-build.log'), '===== 2026-11-08 23:41:00 START /loop-build =====\nworking\n');
+  assert.equal(await go(), 1, out(w));
+  assert.match(out(w), /^FAILED: stop: a loop-build pass is in flight \(started 2026-11-08 23:41:00/m);
+  assert.ok(!w.calls.some((x) => x.includes('--uninstall')), 'nothing was stopped');
+  assert.equal(c.oldLoaded, true);
+  const dry = w.calls.findIndex((x) => x.startsWith('tracker clickupSnapshot.mjs --dry-run'));
+  assert.ok(w.calls.slice(dry + 1).some((x) => x.endsWith('--status')), 'the lanes are read again after the dry run');
+});
+
+test('a START with no END but the lane\'s lock is STALE: the runner is gone, so the lanes are stopped', async (t) => {
+  const { w, c, go, logDir } = clickupWorld(t);
+  writeFileSync(join(logDir, 'pressplay-loop-review.log'), '===== 2026-11-08 23:40:00 START /loop-review =====\nkilled mid-way\n');
+  c.lock = 'lock:     STALE (pid 4242 is gone) — the next start clears it';
+  assert.equal(await go(), 0, out(w));
+  assert.ok(w.calls.some((x) => x.includes('--uninstall')));
+  assert.match(out(w), /^stop\s+.*no pass is in flight; stopping com\.pressplay\.loop-build/m);
 });
 
 test('a loaded lane whose --status names no log: FAILED at stop, it cannot be checked, nothing is stopped', async (t) => {
@@ -1258,7 +1313,7 @@ test('a loaded lane whose --status names no log: FAILED at stop, it cannot be ch
   assert.equal(await go(), 1, out(w));
   assert.match(out(w), /^FAILED: stop: loop-review is loaded, but .* --status names no log for it, so whether a pass is in flight cannot be checked\. Nothing was stopped/m);
   assert.ok(!/no pass is in flight/.test(out(w)));
-  assert.ok(!w.calls.some((x) => x.includes('--uninstall') || x.startsWith('tracker ')));
+  assert.ok(!w.calls.some((x) => x.includes('--uninstall')), 'nothing was stopped');
 });
 
 test('uninstall that leaves a lane loaded: FAILED at stop, naming it', async (t) => {

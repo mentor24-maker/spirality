@@ -656,6 +656,13 @@ export async function onboard(opts, deps) {
       const status = inCheckout('status', '--porcelain');
       if (status.code !== 0 || status.out.trim()) fail(step, `the clone at ${checkout} does not read back as a clean main`);
       done(step, `${answers.githubRepo} cloned into ${checkout}, read back: origin ${answers.githubRepo}, a clean main`);
+      // SP-159: the ClickUp question is asked only once the checkout is
+      // there. A clone that brings an old loop's installer with it stops
+      // here, before the sign-ins, so the rerun's answers step (or the
+      // setup page's form, which sees the same checkout) asks it.
+      if (!Object.hasOwn(raw, 'clickupListId') && runsOldLoop(checkout, deps.exists)) {
+        stop(step, `the clone at ${checkout} already runs a loop of its own (${installerPath(checkout)}), so it needs the ClickUp answers before anything else is set up: ${opts.noPrompt ? 'fill them in on its setup page\'s answers form' : 'rerun, and the answers step asks them'}`, { kind: 'answers' });
+      }
       setup = onMain();
     }
 
@@ -795,31 +802,41 @@ export async function onboard(opts, deps) {
         const loaded = status().filter((j) => j.loaded);
         if (!loaded.length) done(step, `none of ${slug}'s old lanes is loaded (${installer} --status)`);
         else {
-          // No pass may be cut off mid-way: a lane whose log ends on a START
-          // with no END is mid-pass. A lane with no pass in its log is idle.
-          // (A log not there yet has no pass: the runner writes START into
-          // it before a pass begins.) A loaded lane whose --status names no
-          // log cannot be checked at all, so nothing is stopped.
-          for (const job of loaded) {
-            if (!job.log) fail(step, `${job.name} is loaded, but ${installer} --status names no log for it, so whether a pass is in flight cannot be checked. Nothing was stopped`);
-            const seen = passInFlight(deps.readText(expandHome(job.log)));
-            if (seen?.running) fail(step, `a ${job.name} pass is in flight (started ${seen.started ?? 'at a time its log does not say'}, ${job.log}); wait for it to end, then rerun. Nothing was stopped`);
-          }
           // Before anything is stopped, the snapshot's dry run proves the
           // next step can read ClickUp under the project's own keys (its
           // CLICKUP_API_TOKEN in Doppler, the lists answering). If it
-          // cannot, the old loop keeps running until that is fixed.
-          say(step, 'no pass is in flight; before stopping anything, the snapshot\'s dry run checks ClickUp can be read under this project\'s keys (it only reads)');
+          // cannot, the old loop keeps running until that is fixed. It reads
+          // every ticket, so it can take minutes: it goes first, and the
+          // in-flight check comes after it, right before the unload.
+          say(step, 'before stopping anything, the snapshot\'s dry run checks ClickUp can be read under this project\'s keys (it only reads)');
           const pre = trackerScript('clickupSnapshot.mjs', snapshotArgs(answers, { dryRun: true }), { show: true });
           if (pre.code !== 0) fail(step, `the snapshot's dry run ended with exit ${pre.code} (its lines above say what), so the old lanes were left running: fix that, then rerun. Nothing was stopped`);
           snapshotDryRan = true;
-          const labels = loaded.map((j) => j.label ?? j.name);
-          say(step, `stopping ${labels.join(', ')} with ${installer} --uninstall`);
-          const u = run('bash', [installer, '--uninstall'], { cwd: checkout, show: true });
-          if (u.code !== 0) fail(step, `${installer} --uninstall ended with exit ${u.code} (its lines above say what)`);
-          const still = status().filter((j) => j.loaded);
-          if (still.length) fail(step, `after ${installer} --uninstall these are still loaded: ${still.map((j) => j.label ?? j.name).join(', ')}`);
-          done(step, `stopped ${labels.join(', ')}; ${installer} --status reads back every one not loaded`);
+          // No pass may be cut off mid-way, so the lanes are read again now,
+          // with nothing slow between this check and the unload. A lane
+          // whose log ends on a START with no END is mid-pass, unless its
+          // --status says its lock is none or STALE (the runner is gone, so
+          // that START is a pass killed mid-way, not one running). A lane
+          // with no pass in its log is idle. (A log not there yet has no
+          // pass: the runner writes START into it before a pass begins.) A
+          // loaded lane whose --status names no log cannot be checked at
+          // all, so nothing is stopped.
+          const now = status().filter((j) => j.loaded);
+          for (const job of now) {
+            if (!job.log) fail(step, `${job.name} is loaded, but ${installer} --status names no log for it, so whether a pass is in flight cannot be checked. Nothing was stopped`);
+            const seen = passInFlight(deps.readText(expandHome(job.log)), job.lock);
+            if (seen?.running) fail(step, `a ${job.name} pass is in flight (started ${seen.started ?? 'at a time its log does not say'}, ${job.log}); wait for it to end, then rerun. Nothing was stopped`);
+          }
+          if (!now.length) done(step, `none of ${slug}'s old lanes is loaded any more (${installer} --status)`);
+          else {
+            const labels = now.map((j) => j.label ?? j.name);
+            say(step, `no pass is in flight; stopping ${labels.join(', ')} with ${installer} --uninstall`);
+            const u = run('bash', [installer, '--uninstall'], { cwd: checkout, show: true });
+            if (u.code !== 0) fail(step, `${installer} --uninstall ended with exit ${u.code} (its lines above say what)`);
+            const still = status().filter((j) => j.loaded);
+            if (still.length) fail(step, `after ${installer} --uninstall these are still loaded: ${still.map((j) => j.label ?? j.name).join(', ')}`);
+            done(step, `stopped ${labels.join(', ')}; ${installer} --status reads back every one not loaded`);
+          }
         }
       }
 

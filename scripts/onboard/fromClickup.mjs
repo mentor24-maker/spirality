@@ -89,7 +89,8 @@ export function runsOldLoop(checkout, exists) {
  * The jobs an installer's `--status` names, in its own words: every section
  * `── <job>`, whether it is loaded, the launchd label launchd listed it
  * under (the last word of `loaded:   yes — <pid> <code> <label>`), and the
- * log it names (`log:      <path> (...)`). StarCaster's, WaveCenter's and
+ * log it names (`log:      <path> (...)`), and its lock (`lock:` held, stale
+ * or none; null when there is no lock line). StarCaster's, WaveCenter's and
  * Spirality's installers all print these lines.
  */
 export function readInstallerStatus(text) {
@@ -98,7 +99,7 @@ export function readInstallerStatus(text) {
   for (const raw of String(text || '').split('\n')) {
     const line = raw.replace(/\s+$/, '');
     const head = /^── (\S+)\s*$/.exec(line);
-    if (head) { job = { name: head[1], loaded: false, label: null, log: null }; jobs.push(job); continue; }
+    if (head) { job = { name: head[1], loaded: false, label: null, log: null, lock: null }; jobs.push(job); continue; }
     if (!job) continue;
     const loaded = /^loaded:\s+yes\b(.*)$/.exec(line);
     if (loaded) {
@@ -110,6 +111,10 @@ export function readInstallerStatus(text) {
     // the path may hold spaces, so it runs up to that last bracket.
     const log = /^log:\s+(.+?)(?:\s+\((?:last modified [^)]*|nothing written yet)\))?$/.exec(line);
     if (log) job.log = log[1];
+    // `lock:     held by live pid <n> ...`, `STALE (...)` or `none`; an
+    // installer that prints no lock line leaves it null (not known).
+    const lock = /^lock:\s+(\S+)/.exec(line);
+    if (lock) job.lock = lock[1] === 'held' ? 'held' : lock[1] === 'STALE' ? 'stale' : lock[1] === 'none' ? 'none' : null;
   }
   return jobs;
 }
@@ -118,10 +123,14 @@ export function readInstallerStatus(text) {
  * Is a pass in flight, by its lane's log? The runners write
  * `===== <time> START /<lane> ...` before a pass and `===== <time> END ...`
  * after it, so a START with no END after it is a pass still running.
+ * But a runner killed mid-pass leaves a START with no END too: when the
+ * lane's `--status` says its lock is `none` or `stale` (readInstallerStatus),
+ * no runner is alive, so that pass is not running. Any other lock (held, or
+ * not known) leaves the log's word standing.
  * Returns { running, started } (started: the START line's time), or null
  * when the log has no pass to read.
  */
-export function passInFlight(logText) {
+export function passInFlight(logText, lock = null) {
   const lines = String(logText || '').split('\n');
   let start = -1;
   let end = -1;
@@ -131,7 +140,8 @@ export function passInFlight(logText) {
   });
   if (start < 0) return null;
   const stamp = /^===== (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})/.exec(lines[start]);
-  return { running: start > end, started: stamp ? stamp[1] : null };
+  const runnerGone = lock === 'none' || lock === 'stale';
+  return { running: start > end && !runnerGone, started: stamp ? stamp[1] : null };
 }
 
 /** Where the switch settings file is kept: `<logDir>/onboard/<slug>-switch/`, beside the answers file. */
