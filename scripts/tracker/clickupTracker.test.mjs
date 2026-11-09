@@ -193,7 +193,7 @@ test('the snapshot reads: a list record, archived and subtask pages, time in sta
   } finally { await api.close(); }
 });
 
-test('a file is fetched as bytes; the token goes to ClickUp\'s hosts only, never to a link elsewhere', async () => {
+test('a file is fetched as bytes; the token never goes over plain http, even to ClickUp\'s own host', async () => {
   const seen = [];
   const server = createServer((req, res) => {
     seen.push({ path: req.url, auth: req.headers.authorization });
@@ -210,7 +210,7 @@ test('a file is fetched as bytes; the token goes to ClickUp\'s hosts only, never
     assert.deepEqual([...mine.bytes], [0, 1, 2, 255]);
     const elsewhere = await t.fetchFile(`http://localhost:${port}/b.png`);
     assert.equal(elsewhere.res.ok, true);
-    assert.deepEqual(seen.map((s) => s.auth), ['tok', undefined]);
+    assert.deepEqual(seen.map((s) => s.auth), [undefined, undefined]);
     const gone = await t.fetchFile(`http://127.0.0.1:${port}/missing`);
     assert.equal(gone.res.status, 404);
     assert.equal(gone.bytes, null);
@@ -218,6 +218,15 @@ test('a file is fetched as bytes; the token goes to ClickUp\'s hosts only, never
     assert.equal(bad.res.ok, false);
     assert.equal(bad.bytes, null);
   } finally { await new Promise((r) => server.close(r)); }
+});
+
+test('the token goes with a download only over https, and only to ClickUp\'s hosts', async () => {
+  const { sendsToken } = await import('./clickupTracker.mjs');
+  assert.equal(sendsToken(new URL('https://t1.p.clickup-attachments.com/a.png')), true);
+  assert.equal(sendsToken(new URL('http://t1.p.clickup-attachments.com/a.png')), false);
+  assert.equal(sendsToken(new URL('http://api.clickup.com/x')), false);
+  assert.equal(sendsToken(new URL('https://example.com/a.png')), false);
+  assert.equal(sendsToken(new URL('https://clickup.com.evil.example/a.png')), false);
 });
 
 test('ClickUp\'s own hosts are recognised by name, not by a look-alike', async () => {

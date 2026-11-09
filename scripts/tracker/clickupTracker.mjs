@@ -35,6 +35,14 @@ function unreachable(err) {
 }
 
 /** Is `target` (a URL) one of ClickUp's own hosts, or the API base's? */
+/**
+ * Whether a file download may carry the token: only to ClickUp's own hosts,
+ * and only over https, so the token never travels in the clear.
+ */
+export function sendsToken(target, apiBase = 'https://api.clickup.com') {
+  return target.protocol === 'https:' && clickupHost(target, apiBase);
+}
+
 export function clickupHost(target, apiBase = 'https://api.clickup.com') {
   const host = target.hostname.toLowerCase();
   let base = '';
@@ -158,7 +166,7 @@ export function createClickupTracker({ token, apiBase, timeoutMs, log = console.
         return { ...unreachable(new Error(`not a web address: ${target.protocol}`)), bytes: null };
       }
       requests += 1;
-      const headers = clickupHost(target, API) ? { Authorization: token } : {};
+      const headers = sendsToken(target, API) ? { Authorization: token } : {};
       let res;
       try {
         res = await fetch(target, { headers, signal: AbortSignal.timeout(HTTP_TIMEOUT_MS) });

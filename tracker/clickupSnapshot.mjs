@@ -29,7 +29,9 @@
  * the run and exits non-zero. The copy is built in `<folder>.partial` and
  * only named as the snapshot once every read and download is done, so a
  * failed run never looks like a finished one; the next run throws the
- * partial folder away and starts a fresh, complete copy.
+ * partial folder away and starts a fresh, complete copy. The copy is built in
+ * `clickup-archive/.partial/<name>/` and packed from there; it takes its real
+ * name only after the archive has been written and read back.
  *
  * Rule 4, secret keys never reach a file: every file is checked for the
  * token before it is written, and the run stops if one would carry it.
@@ -44,6 +46,7 @@ import { execFileSync } from 'node:child_process';
 import { basename, dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createClickupTracker } from '../scripts/tracker/clickupTracker.mjs';
+import { noClickUpList } from './import.mjs';
 import { loadProjectConfig, ProjectConfigError } from '../lib/projectConfig.mjs';
 import { expandHome } from '../lib/onboardAnswers.mjs';
 
@@ -95,6 +98,8 @@ export function snapshotPaths({ dataDir, slug, now = new Date() }) {
     name,
     root: join(dataDir, 'clickup-archive'),
     folder: join(dataDir, 'clickup-archive', name),
+    // Built here, under its final name, so it can be packed before it is moved into place.
+    work: join(dataDir, 'clickup-archive', '.partial', name),
     archive: join(dataDir, 'backups', `clickup-archive-${name}.tar.gz`),
   };
 }
@@ -177,6 +182,8 @@ export function attachmentsOf(full, thread) {
   const fromParts = (c, from) => {
     for (const part of Array.isArray(c?.comment) ? c.comment : []) {
       if (part?.type === 'attachment' && part.attachment) add(part.attachment, from);
+      // A picture pasted into a comment can come as its own part.
+      if (part?.type === 'image' && part.image) add(part.image, from);
     }
   };
   for (const c of thread) {
@@ -193,12 +200,12 @@ export function attachmentsOf(full, thread) {
  * downloaded. Answers the manifest; throws SnapshotError on any failure,
  * with the counts so far attached (`err.counts`).
  */
-export async function snapshotClickup({ tracker, lists, paths, token = '', dryRun = false, slug, now = new Date(), log = () => {} }) {
+export async function snapshotClickup({ tracker, lists, paths, token = '', dryRun = false, slug, now = new Date(), log = () => {}, tar = 'tar' }) {
   if (!Array.isArray(lists) || lists.length === 0) throw new SnapshotError('no list to save');
   const counts = { lists: 0, tickets: 0, open: 0, closed: 0, archived: 0, comments: 0, replies: 0, attachments: 0, bytes: 0 };
   const checks = [];
   const timeInStatus = { available: null, why: null };
-  const work = `${paths.folder}.partial`;
+  const work = paths.work;
   const secret = typeof token === 'string' && token.length >= 8 ? token : null;
 
   const write = (rel, content) => {
@@ -229,7 +236,7 @@ export async function snapshotClickup({ tracker, lists, paths, token = '', dryRu
 
       const tasks = await readAllTasks(tracker, list);
       log(`list ${list} "${rec.json.name ?? ''}": ${tasks.length} ticket(s)`);
-      const listCounts = { tickets: 0, open: 0, closed: 0, archived: 0, replies: 0, repliesClickup: 0 };
+      const listCounts = { tickets: 0, open: 0, closed: 0, archived: 0, replies: 0, repliesCounted: 0, repliesClickup: 0, uncounted: 0 };
 
       for (const { task, archived } of tasks) {
         const full = await tracker.getTask(task.id, { markdown: true });
@@ -273,7 +280,10 @@ export async function snapshotClickup({ tracker, lists, paths, token = '', dryRu
         }
 
         const replies = thread.reduce((n, c) => n + c.replies.length, 0);
-        const repliesClickup = thread.reduce((n, c) => n + (Number(c.reply_count) || 0), 0);
+        // Only comments ClickUp gave a reply_count for can be compared; the rest are named, not counted as 0.
+        const counted = thread.filter((c) => c.reply_count != null && Number.isFinite(Number(c.reply_count)));
+        const repliesCounted = counted.reduce((n, c) => n + c.replies.length, 0);
+        const repliesClickup = counted.reduce((n, c) => n + Number(c.reply_count), 0);
         const closed = full.json.status?.type === 'closed' || task.status?.type === 'closed';
         counts.tickets += 1;
         counts.comments += thread.length;
@@ -283,7 +293,9 @@ export async function snapshotClickup({ tracker, lists, paths, token = '', dryRu
         listCounts.tickets += 1;
         listCounts[archived ? 'archived' : (closed ? 'closed' : 'open')] += 1;
         listCounts.replies += replies;
+        listCounts.repliesCounted += repliesCounted;
         listCounts.repliesClickup += repliesClickup;
+        listCounts.uncounted += thread.length - counted.length;
 
         if (!dryRun) {
           write(join('lists', list, 'tasks', `${safeName(task.id)}.json`), {
@@ -293,7 +305,8 @@ export async function snapshotClickup({ tracker, lists, paths, token = '', dryRu
       }
 
       checks.push(...compareCounts(list, rec.json, listCounts));
-      listRecords.push({ id: list, name: rec.json.name ?? null, task_count_clickup: rec.json.task_count ?? null, ...listCounts });
+      const { repliesCounted: _rc, ...kept } = listCounts;
+      listRecords.push({ id: list, name: rec.json.name ?? null, task_count_clickup: rec.json.task_count ?? null, ...kept });
     }
 
     const manifest = {
@@ -308,9 +321,11 @@ export async function snapshotClickup({ tracker, lists, paths, token = '', dryRu
     if (dryRun) return manifest;
 
     write('manifest.json', manifest);
+    // Packed from the working folder first: if tar or its read-back fails, nothing carries the snapshot's name.
+    const packed = pack(paths, { tar });
     if (existsSync(paths.folder)) rmSync(paths.folder, { recursive: true, force: true });
     renameSync(work, paths.folder);
-    pack(paths);
+    renameSync(packed, paths.archive);
     return manifest;
   } catch (err) {
     err.counts = counts;
@@ -342,24 +357,34 @@ export function compareCounts(list, record, c) {
       ? { list, what: 'tickets', ok: true, line: `list ${list}: found ${c.tickets} ticket(s); ClickUp's count of ${reported} matches the ${without[1]} ones it counts (it leaves the rest out)` }
       : { list, what: 'tickets', ok: false, line: `list ${list}: found ${c.tickets} ticket(s), but ClickUp reports ${reported}: THEY DIFFER` });
   }
-  out.push(c.replies === c.repliesClickup
-    ? { list, what: 'replies', ok: true, line: `list ${list}: found ${c.replies} repl(ies), ClickUp's comments count ${c.repliesClickup}: they match` }
-    : { list, what: 'replies', ok: false, line: `list ${list}: found ${c.replies} repl(ies), but ClickUp's comments count ${c.repliesClickup}: THEY DIFFER` });
+  const found = c.repliesCounted ?? c.replies;
+  const uncounted = c.uncounted || 0;
+  const aside = uncounted ? ` (${uncounted} comment(s) without a reply count from ClickUp are not comparable, so their ${c.replies - found} repl(ies) are left out of this check)` : '';
+  out.push(found === c.repliesClickup
+    ? { list, what: 'replies', ok: true, line: `list ${list}: found ${found} repl(ies), ClickUp's comments count ${c.repliesClickup}: they match${aside}` }
+    : { list, what: 'replies', ok: false, line: `list ${list}: found ${found} repl(ies), but ClickUp's comments count ${c.repliesClickup}: THEY DIFFER${aside}` });
   return out;
 }
 
-/** Pack the snapshot folder into one .tar.gz beside the backups, and read it back. */
-function pack(paths) {
+/**
+ * Pack the working folder into `<archive>.partial` and read it back, asking
+ * tar for the manifest by name (a full listing of a big archive could overrun
+ * the output buffer). Answers the packed file; the caller names it.
+ */
+export function pack(paths, { tar = 'tar' } = {}) {
   mkdirSync(dirname(paths.archive), { recursive: true });
   const partial = `${paths.archive}.partial`;
   rmSync(partial, { force: true });
-  execFileSync('tar', ['-czf', partial, '-C', paths.root, paths.name], { stdio: ['ignore', 'ignore', 'pipe'] });
-  const listed = execFileSync('tar', ['-tzf', partial], { encoding: 'utf8' }).split('\n');
-  if (!listed.some((l) => l.replace(/^\.\//, '') === `${paths.name}/manifest.json`)) {
+  const manifest = `${paths.name}/manifest.json`;
+  try {
+    execFileSync(tar, ['-czf', partial, '-C', dirname(paths.work), paths.name], { stdio: ['ignore', 'ignore', 'pipe'] });
+    execFileSync(tar, ['-tzf', partial, manifest], { stdio: ['ignore', 'ignore', 'pipe'] });
+  } catch (err) {
     rmSync(partial, { force: true });
-    throw new SnapshotError(`the archive ${paths.archive} did not read back with its manifest in it`);
+    const said = String(err.stderr || err.message || '').trim().slice(0, 200);
+    throw new SnapshotError(`packing the archive ${paths.archive} failed, or it did not read back with ${manifest} in it${said ? ` (${said})` : ''}`);
   }
-  renameSync(partial, paths.archive);
+  return partial;
 }
 
 /** The end-of-run lines. */
@@ -376,11 +401,14 @@ export function formatSummary(m) {
   return lines.join('\n');
 }
 
-/** Every `--list <id>` given, in order. */
+/** Every `--list <id>` given, in order. Anything else that is not a known flag is refused, never ignored. */
 export function listArgs(argv) {
   const out = [];
   for (let i = 0; i < argv.length; i += 1) {
-    if (argv[i] !== '--list') continue;
+    if (argv[i] === '--dry-run') continue;
+    if (argv[i] !== '--list') {
+      throw new SnapshotError(`"${argv[i]}" is not understood; a list id goes after --list (--list ${argv[i]})`);
+    }
     const v = argv[i + 1];
     if (v === undefined || v.startsWith('--')) throw new SnapshotError('--list needs a list id after it');
     out.push(v);
@@ -389,21 +417,32 @@ export function listArgs(argv) {
   return out;
 }
 
+/**
+ * The lists to save: the config's Loop Queue list, unless it is all zeros
+ * (the project names no ClickUp list, tracker/import.mjs `noClickUpList`),
+ * then every `--list` given. None at all is refused with a plain reason.
+ */
+export function listsToSave(config, extra) {
+  const fromConfig = noClickUpList(config) ? [] : [String(config.loopQueueListId)];
+  const lists = [...new Set([...fromConfig, ...extra])];
+  if (lists.length === 0) {
+    throw new SnapshotError(`${config.projectSlug}'s config names no ClickUp list (loopQueueListId is "${config.loopQueueListId}"), and no --list was given, so there is nothing to save. Name the list: npm run tracker:snapshot -- --list <id>`);
+  }
+  return lists;
+}
+
 async function main(argv) {
   const dryRun = argv.includes('--dry-run');
-  const unknown = argv.filter((a, i) => a.startsWith('--') && a !== '--dry-run' && a !== '--list' && argv[i - 1] !== '--list');
-  if (unknown.length) {
-    console.error(`usage: npm run tracker:snapshot -- [--list <id> ...] [--dry-run]   (not understood: ${unknown.join(' ')})`);
-    return 1;
-  }
   let config;
-  let extra;
+  let lists;
   try {
+    const extra = listArgs(argv);
     config = loadProjectConfig();
-    extra = listArgs(argv);
+    lists = listsToSave(config, extra);
   } catch (err) {
     if (!(err instanceof ProjectConfigError) && !(err instanceof SnapshotError)) throw err;
     console.error(`tracker:snapshot: ${err instanceof ProjectConfigError ? 'the project config is not usable — ' : ''}${err.message}`);
+    console.error('usage: npm run tracker:snapshot -- [--list <id> ...] [--dry-run]');
     return 1;
   }
   if (!config.trackerDataDir) {
@@ -415,7 +454,6 @@ async function main(argv) {
     console.error(`tracker:snapshot: CLICKUP_API_TOKEN is not set. Run it as \`npm run tracker:snapshot -- ...\` so Doppler (${config.dopplerProject}/${config.dopplerConfig}) supplies it.`);
     return 1;
   }
-  const lists = [...new Set([config.loopQueueListId, ...extra])];
   const paths = snapshotPaths({ dataDir: expandHome(config.trackerDataDir), slug: config.projectSlug });
   const tracker = createClickupTracker({ token, apiBase: process.env.CLICKUP_API_BASE, timeoutMs: process.env.CLICKUP_HTTP_TIMEOUT_MS });
   console.log(`${dryRun ? 'DRY RUN — reading and counting ' : 'Saving '}ClickUp list(s) ${lists.join(', ')} (${config.projectSlug})${dryRun ? '' : ` into ${paths.folder}`}`);
@@ -438,7 +476,7 @@ async function main(argv) {
     return 0;
   } catch (err) {
     console.error(`\ntracker:snapshot FAILED — ${err.message}`);
-    if (!dryRun) console.error(`There is NO snapshot from this run. The unfinished copy in ${paths.folder}.partial is thrown away by the next run, which starts a fresh, complete one.`);
+    if (!dryRun) console.error(`There is NO snapshot from this run. The unfinished copy in ${paths.work} is thrown away by the next run, which starts a fresh, complete one.`);
     return 1;
   } finally {
     tracker.reportLimits();

@@ -848,7 +848,12 @@ ClickUp seat ids the config holds until then.
    ```
 
    It saves the config's Loop Queue list, plus any `--list <id>` given (one
-   per extra list worth keeping), into
+   per extra list worth keeping). A project whose config already names no
+   ClickUp list (`loopQueueListId` all zeros, as Spirality's has been since
+   its list became a read-only archive) saves only the `--list` ids, and
+   refuses with a plain reason when none is given:
+   `npm run tracker:snapshot -- --dry-run --list 901418065068`. The copy goes
+   into
    `<trackerDataDir>/clickup-archive/<projectSlug>-<date>/` and packs it into
    `<trackerDataDir>/backups/clickup-archive-<projectSlug>-<date>.tar.gz`,
    which the nightly backup never prunes. It only reads ClickUp. Good: every

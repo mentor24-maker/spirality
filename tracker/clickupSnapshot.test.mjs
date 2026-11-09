@@ -7,7 +7,7 @@ import { join, relative } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import {
   snapshotClickup, snapshotPaths, attachmentsOf, compareCounts, formatSummary, listArgs, safeName,
-  localStamp, SnapshotError,
+  localStamp, SnapshotError, listsToSave,
 } from './clickupSnapshot.mjs';
 import { backupDatabase, listBackups } from './backup.mjs';
 
@@ -237,8 +237,8 @@ for (const [what, fail, said] of [
       assert.ok(!existsSync(paths.folder), 'no folder carries the snapshot name');
       assert.ok(!existsSync(paths.archive), 'no archive was packed');
       // Something the failed run left in the working folder must not survive the rerun.
-      mkdirSync(`${paths.folder}.partial`, { recursive: true });
-      writeFileSync(`${paths.folder}.partial/stale.json`, '{}');
+      mkdirSync(paths.work, { recursive: true });
+      writeFileSync(join(paths.work, 'stale.json'), '{}');
       const m = await run(fakeTracker(), paths);
       assert.equal(m.counts.tickets, 3);
       assert.ok(!existsSync(join(paths.folder, 'stale.json')));
@@ -357,4 +357,80 @@ test('a list record without a count says so rather than calling it a match or a 
   const [k] = compareCounts('7', {}, { tickets: 3, open: 3, closed: 0, archived: 0, replies: 0, repliesClickup: 0 });
   assert.equal(k.ok, true);
   assert.match(k.line, /gives no count to compare/);
+});
+
+test('a config that names no ClickUp list (all zeros) saves only the --list ids, and refuses plainly when there are none', () => {
+  const archived = { projectSlug: SLUG, loopQueueListId: '0' };
+  assert.deepEqual(listsToSave(archived, [EXTRA]), [EXTRA]);
+  assert.deepEqual(listsToSave({ ...archived, loopQueueListId: '000' }, [EXTRA, LIST, EXTRA]), [EXTRA, LIST]);
+  assert.throws(() => listsToSave(archived, []), (err) => {
+    assert.ok(err instanceof SnapshotError);
+    assert.match(err.message, /names no ClickUp list .*"0".*no --list was given.*--list <id>/);
+    return true;
+  });
+  assert.deepEqual(listsToSave({ projectSlug: SLUG, loopQueueListId: LIST }, [EXTRA]), [LIST, EXTRA]);
+});
+
+test('a list id typed without --list is refused, never silently ignored', () => {
+  assert.throws(() => listArgs([EXTRA]), /"5353" is not understood.*--list 5353/);
+  assert.throws(() => listArgs(['--dry-run', '--force']), /"--force" is not understood/);
+  assert.deepEqual(listArgs(['--dry-run', '--list', EXTRA]), [EXTRA]);
+});
+
+test('a pack that fails leaves nothing named as the snapshot, and an earlier snapshot from the same day stays', async () => {
+  const { paths, cleanup } = scratch();
+  try {
+    await run(fakeTracker(), paths);
+    const before = filesUnder(paths.folder).length;
+    const archiveBefore = readFileSync(paths.archive);
+    await assert.rejects(run(fakeTracker(), paths, { tar: '/usr/bin/false' }), (err) => {
+      assert.ok(err instanceof SnapshotError);
+      assert.match(err.message, /packing the archive .* failed/);
+      return true;
+    });
+    assert.equal(filesUnder(paths.folder).length, before, 'the earlier snapshot is untouched');
+    assert.deepEqual(readFileSync(paths.archive), archiveBefore, 'the earlier archive is untouched');
+    assert.ok(!existsSync(`${paths.archive}.partial`));
+  } finally { cleanup(); }
+});
+
+test('a pack that fails on the first run leaves no folder and no archive under the snapshot name', async () => {
+  const { paths, cleanup } = scratch();
+  try {
+    await assert.rejects(run(fakeTracker(), paths, { tar: '/usr/bin/false' }), SnapshotError);
+    assert.ok(!existsSync(paths.folder));
+    assert.ok(!existsSync(paths.archive));
+  } finally { cleanup(); }
+});
+
+test('the archive holds the snapshot under its own name and reads back with its manifest', async () => {
+  const { paths, cleanup } = scratch();
+  try {
+    await run(fakeTracker(), paths);
+    const listed = execFileSync('tar', ['-tzf', paths.archive], { encoding: 'utf8' }).split('\n').map((l) => l.replace(/^\.\//, ''));
+    assert.ok(listed.includes(`${paths.name}/manifest.json`));
+    assert.ok(listed.every((l) => !l || l.startsWith(`${paths.name}/`)), 'nothing outside the snapshot folder, no .partial');
+    assert.ok(!existsSync(paths.work));
+  } finally { cleanup(); }
+});
+
+test('a comment with replies but no reply_count is not counted as a difference; it is named as not comparable', async () => {
+  const { paths, cleanup } = scratch();
+  try {
+    const comments = { t1: [{ id: 'c1', date: '1767225700000', comment_text: 'first' }] };
+    const m = await run(fakeTracker({ comments }), paths);
+    assert.equal(m.counts.replies, 2, 'the replies were still read and saved');
+    const replies = m.checks.find((k) => k.what === 'replies');
+    assert.equal(replies.ok, true);
+    assert.match(replies.line, /1 comment\(s\) without a reply count .* not comparable.* 2 repl\(ies\) are left out/);
+    assert.ok(!formatSummary(m).includes('DIFFERS'));
+  } finally { cleanup(); }
+});
+
+test('a picture pasted into a comment as an image part is found and saved', () => {
+  const thread = [{ id: 'c9', comment: [
+    { text: 'see this' },
+    { type: 'image', text: 'shot.png', image: { id: 'i1', name: 'shot.png', url: 'https://t1.p.clickup-attachments.com/i1/shot.png' } },
+  ], replies: [] }];
+  assert.deepEqual(attachmentsOf({ attachments: [] }, thread).map((a) => [a.id, a.title, a.from]), [['i1', 'shot.png', 'comment c9']]);
 });
