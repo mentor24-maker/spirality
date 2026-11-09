@@ -104,8 +104,11 @@ const ms = (iso) => String(Date.parse(iso));
  * process (through `doppler run`) and never the loop session's environment.
  * Without it (a session started by hand), the hand-run seat's
  * (`TRACKER_TOKEN_HAND_RUN`). Only a machine seat's secret is accepted
- * (TRACKER_SEATS): any other name is refused, above all the operator's own,
- * so a loop can never sign in as him or be pointed at another key.
+ * (TRACKER_SEATS, plus the project's own lanes when the door passes
+ * projectSeats(config)): any other name is refused, above all the
+ * operator's own, so a loop can never sign in as him or be pointed at
+ * another key. A lane's runner that is refused here is a lane the project
+ * config's `projectLanes` does not name, and the message says so.
  */
 export function trackerTokenEnv(env = process.env, seats = TRACKER_SEATS) {
   const name = env.TRACKER_TOKEN_NAME;
@@ -116,7 +119,7 @@ export function trackerTokenEnv(env = process.env, seats = TRACKER_SEATS) {
   }
   const machine = seats.filter((s) => s.kind === 'machine').map((s) => s.secret);
   if (!machine.includes(name)) {
-    throw new Error(`TRACKER_TOKEN_NAME must name a loop's own tracker secret (${machine.join(', ')}), not "${name}".`);
+    throw new Error(`TRACKER_TOKEN_NAME must name a loop's own tracker secret (${machine.join(', ')}), not "${name}". A lane of this project's own signs in only once its name is in the project config's "projectLanes".`);
   }
   return name;
 }

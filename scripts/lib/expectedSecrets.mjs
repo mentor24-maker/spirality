@@ -22,6 +22,7 @@
  * on ClickUp, or one whose list is now an archive (Spirality since SP-22),
  * has `tracker` `"api"` and ClickUp ids `"0"`, and is never asked for it.
  */
+import { ProjectConfigError } from '../../lib/projectConfig.mjs';
 
 /**
  * Who signs in to the tracker, and the Doppler secret holding each one's
@@ -33,6 +34,10 @@
  * runs the tracker. Any other project signs in with the machine seats only,
  * under the same secret names in its own Doppler project, its actors named
  * for it (`normie loop-build`): seatsForConfig in tracker/signins.mjs.
+ *
+ * These are the built-in seats every project has. A project that runs a lane
+ * of its own adds a machine seat for it by naming it in its project config's
+ * `projectLanes` (laneSeats below); no project's lane names live here.
  */
 export const TRACKER_SEATS = [
   { secret: 'TRACKER_TOKEN_OPERATOR', kind: 'human', name: null, what: "the operator's own tracker sign-in, for the page" },
@@ -42,6 +47,31 @@ export const TRACKER_SEATS = [
   { secret: 'TRACKER_TOKEN_RELAY', kind: 'machine', name: 'relay', what: "the relay's tracker sign-in" },
   { secret: 'TRACKER_TOKEN_HAND_RUN', kind: 'machine', name: 'hand-run', handRun: true, what: "a hand-run session's tracker sign-in" },
 ];
+
+/** The secret a lane's runner names (scripts/loop_runner.sh): loop-handoff -> TRACKER_TOKEN_LOOP_HANDOFF. */
+export const laneSecret = (lane) => `TRACKER_TOKEN_${String(lane).toUpperCase().replaceAll('-', '_')}`;
+
+/**
+ * The machine seats a project's own lanes sign in with, one per name in its
+ * config's `projectLanes` (lib/projectConfig.mjs checks each name's form).
+ * A lane whose name or secret is already a built-in seat's is refused: it
+ * would share that seat's token, so two lanes' writes would read as one.
+ */
+export function laneSeats(config, seats = TRACKER_SEATS) {
+  return (config?.projectLanes ?? []).map((lane) => {
+    const secret = laneSecret(lane);
+    const taken = seats.find((s) => s.secret === secret || s.name === lane);
+    if (taken) {
+      throw new ProjectConfigError(`"projectLanes" names "${lane}", which is already a built-in tracker seat (${taken.secret}); a project's own lane needs a name of its own`);
+    }
+    return { secret, kind: 'machine', name: lane, projectLane: true, what: `the ${lane} lane's tracker sign-in (named in projectLanes)` };
+  });
+}
+
+/** Every seat one project signs in with: the built-in ones, then its own lanes' (laneSeats). */
+export function projectSeats(config, seats = TRACKER_SEATS) {
+  return [...seats, ...laneSeats(config, seats)];
+}
 
 export const EXPECTED_SECRETS = [
   { name: 'CLICKUP_API_TOKEN', clickup: true, what: 'the ClickUp token, for scripts only' },
@@ -64,14 +94,16 @@ export function usesClickUp(config) {
  * What doctor checks for one project, from its project config: the Doppler
  * project and config to look in, and the keys that project needs there
  * (the `trackerHome` ones only when it runs the tracker, `trackerPort` set;
- * the `clickup` ones only when usesClickUp).
+ * the `clickup` ones only when usesClickUp), and one sign-in per lane its
+ * `projectLanes` names (laneSeats).
  * Returns `{ project, configs, expected }` for doctorReport and formatReport.
  */
 export function doctorTarget(config, secrets = EXPECTED_SECRETS) {
   const home = config.trackerPort != null;
   const clickup = usesClickUp(config);
   const configs = [config.dopplerConfig];
-  const expected = secrets
+  const lanes = laneSeats(config).map(({ secret, what }) => ({ name: secret, what }));
+  const expected = [...secrets, ...lanes]
     .filter((s) => (home || !s.trackerHome) && (clickup || !s.clickup))
     .map(({ name, what }) => ({ name, what, configs }));
   return { project: config.dopplerProject, configs, expected };

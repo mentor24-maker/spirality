@@ -10,6 +10,7 @@ import { openStore } from '../../tracker/store.mjs';
 import { startServer } from '../../tracker/server.mjs';
 import { SOURCE as IMPORT_SOURCE } from '../../tracker/import.mjs';
 import { createApiTracker, trackerTokenEnv } from './apiTracker.mjs';
+import { projectSeats } from '../lib/expectedSecrets.mjs';
 import { conflictTicketFiledComment, findConflictTicket } from '../../lib/conflictWork.js';
 import { isMachineComment } from '../lib/machineComment.mjs';
 import { renderMarkdown } from '../../tracker/web/render.mjs';
@@ -978,4 +979,31 @@ test('an unreachable tracker answers HTTP 0, not a throw', async () => {
   assert.equal(out.res.ok, false);
   assert.equal(out.res.status, 0);
   assert.match(out.text, /never reached the tracker \(fetch failed — \S/, 'the reason is kept, not only "fetch failed"');
+});
+
+test('trackerTokenEnv: a lane the project config names signs in with its own secret; one it does not name is refused, saying where to name it', () => {
+  const named = projectSeats({ projectLanes: ['loop-handoff'] });
+  assert.equal(trackerTokenEnv({ TRACKER_TOKEN_NAME: 'TRACKER_TOKEN_LOOP_HANDOFF' }, named), 'TRACKER_TOKEN_LOOP_HANDOFF');
+  for (const ok of ['TRACKER_TOKEN_LOOP_BUILD', 'TRACKER_TOKEN_RELAY']) assert.equal(trackerTokenEnv({ TRACKER_TOKEN_NAME: ok }, named), ok);
+  assert.equal(trackerTokenEnv({}, named), 'TRACKER_TOKEN_HAND_RUN');
+  assert.throws(() => trackerTokenEnv({ TRACKER_TOKEN_NAME: 'TRACKER_TOKEN_LOOP_HANDOFF' }), /must name a loop's own tracker secret.*"projectLanes"/);
+  assert.throws(() => trackerTokenEnv({ TRACKER_TOKEN_NAME: 'TRACKER_TOKEN_OPERATOR' }, named), /must name a loop's own tracker secret/);
+});
+
+test('the door signs a project lane in under its own seat once projectLanes names it, and refuses it plainly before', async () => {
+  const f = await fixture();
+  try {
+    const lane = f.store.createActor({ kind: 'machine', name: 'loop-handoff' });
+    const env = { TRACKER_TOKEN_NAME: 'TRACKER_TOKEN_LOOP_HANDOFF', TRACKER_TOKEN_LOOP_HANDOFF: f.store.issueToken(lane.id) };
+    const before = await f.door(['whoami'], { env });
+    assert.equal(before.code, 1);
+    assert.match(before.err, /must name a loop's own tracker secret.*not "TRACKER_TOKEN_LOOP_HANDOFF".*"projectLanes"/);
+    assert.doesNotMatch(before.out, /Acting as/);
+    const file = join(f.project, 'spirality.project.json');
+    writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, 'utf8')), projectLanes: ['loop-handoff'] }));
+    const after = await f.door(['whoami'], { env });
+    assert.equal(after.code, 0, after.err);
+    assert.match(after.out, new RegExp(`Acting as: loop-handoff .*\\(id ${lane.id}\\)`));
+    assert.doesNotMatch(after.out + after.err, new RegExp(env.TRACKER_TOKEN_LOOP_HANDOFF));
+  } finally { await f.cleanup(); }
 });

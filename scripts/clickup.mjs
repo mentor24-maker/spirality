@@ -46,6 +46,7 @@ import { isMachineComment, stripMachineMarker } from './lib/machineComment.mjs';
 import { parseHumanHours, findHumanHours } from '../lib/humanHours.js';
 import { createClickupTracker } from './tracker/clickupTracker.mjs';
 import { createApiTracker, trackerTokenEnv } from './tracker/apiTracker.mjs';
+import { projectSeats } from './lib/expectedSecrets.mjs';
 import { compareRepo, projectEditUrl } from './lib/repoCheck.mjs';
 import { filedTrackerUrl } from '../lib/substrateConfig.js';
 
@@ -126,7 +127,7 @@ const TRACKERS = {
     }),
   },
   api: {
-    tokenEnv: () => trackerTokenEnv(),
+    tokenEnv: () => trackerTokenEnv(process.env, projectSeats(project)),
     make: (token) => createApiTracker({
       token,
       baseUrl: project.trackerApiUrl,
