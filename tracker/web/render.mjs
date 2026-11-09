@@ -467,6 +467,22 @@ export function renderAnswerIn({ answerIn = false }) {
 }
 
 /**
+ * The ticket page's reply box, as HTML, or '' once his answer is in
+ * (SP-160). While it is in, his comment is the newest word and the relay
+ * acts on it at its next pass, so a second reply typed in that gap would
+ * quietly overrule the first. The box comes back with the relay's comment,
+ * exactly as Merge, Close and Go do. `name` is who the reply posts as.
+ */
+export function renderReplyForm({ answerIn = false }, name) {
+  if (answerIn) return '';
+  return `<form class="reply">
+        <label for="reply">Reply as ${escapeHtml(name ?? 'you')}</label>
+        <textarea id="reply" required></textarea>
+        <div class="row"><button type="submit">Post Reply</button><span class="note"></span></div>
+      </form>`;
+}
+
+/**
  * The Merge button for a ticket page's Quick Action section, as HTML, or ''.
  * Shown only on a Ready to launch ticket with a pull request of its own
  * (SP-64 showed Merge on a ticket that had none) whose newest card does not
