@@ -527,6 +527,39 @@ test('a card whose @@ASKED holds his own "> " and ``` lines posts, stores and re
   } finally { await f.cleanup(); }
 });
 
+test('comment, ask, describe and task refuse a GitHub branch link with exit 2 and write nothing (SP-178)', async () => {
+  const f = await fixture();
+  try {
+    f.file({ name: 'one', status: 'building', body: 'the spec' });
+    const branch = 'https://github.com/owner/repo/blob/some-branch/README.md';
+    const before = (await f.door(['get', '--task', 'AL-1'])).out;
+    const note = await f.door(['comment', '--task', 'AL-1', '--body-file', '-'], { stdin: `See ${branch}\n` });
+    assert.equal(note.code, 2, note.err);
+    assert.ok(note.err.includes(branch) && /Nothing was posted/.test(note.err), note.err);
+    const card = CARD.replace('Pick option A or B.', `Read ${branch} then pick A or B.`);
+    const ask = await f.door(['ask', '--task', 'AL-1', '--body-file', '-'], { stdin: card });
+    assert.equal(ask.code, 2, ask.err);
+    assert.ok(ask.err.includes(branch), ask.err);
+    const desc = await f.door(['describe', '--task', 'AL-1', '--body-file', '-'], { stdin: `## How to test\n- open ${branch}\n` });
+    assert.equal(desc.code, 2, desc.err);
+    const made = await f.door(['task', '--name', 'two', '--body-file', '-'], { stdin: `open ${branch}\n` });
+    assert.equal(made.code, 2, made.err);
+    assert.match(made.err, /Nothing was created/);
+    // Nothing reached the tracker: no comment, the same description and status, no second ticket.
+    assert.equal(f.store.listComments('AL-1').length, 0);
+    assert.equal((await f.door(['get', '--task', 'AL-1'])).out, before);
+    assert.match(before, /\nstatus: {3}building\n/);
+    assert.equal(f.store.listTickets('alpha').length, 1);
+
+    // A commit link, a main link and the files tab all post.
+    const ok = await f.door(['comment', '--task', 'AL-1', '--body-file', '-'], {
+      stdin: 'https://github.com/owner/repo/blob/a78628c/README.md https://github.com/owner/repo/blob/main/README.md https://github.com/owner/repo/pull/7/files\n',
+    });
+    assert.equal(ok.code, 0, ok.err);
+    assert.equal(f.store.listComments('AL-1').length, 1);
+  } finally { await f.cleanup(); }
+});
+
 test('pr-opened records the PR and reads it back; then verdict --pass reads back through the gate', async () => {
   const f = await fixture();
   try {

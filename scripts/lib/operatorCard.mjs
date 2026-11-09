@@ -86,6 +86,37 @@ export function findBlockquoteLines(text) {
   return found;
 }
 
+const GITHUB_FILE_LINK = /https:\/\/github\.com\/[^\s/]+\/[^\s/]+\/(?:blob|tree)\/([^\s/)\]>"'`<]+)[^\s)\]>"'`<]*/g;
+
+/**
+ * GitHub file links, outside fences, that name a branch: every
+ * `https://github.com/<owner>/<repo>/(blob|tree)/<ref>/...` whose `<ref>` is
+ * neither a commit id (7 to 40 hex characters) nor `main`. The relay merges
+ * with --delete-branch, so a branch link 404s the moment Dane merges (SP-178).
+ */
+export function findBranchLinks(text) {
+  const found = [];
+  for (const { line, role } of fenceLines(text)) {
+    if (role !== 'prose') continue;
+    for (const m of line.matchAll(GITHUB_FILE_LINK)) {
+      const ref = m[1];
+      if (ref === 'main' || /^[0-9a-f]{7,40}$/i.test(ref)) continue;
+      found.push(m[0]);
+    }
+  }
+  return found;
+}
+
+/** The refusal for a body holding branch links: each link, and what to use instead. */
+export function branchLinkRefusal(links, nothing) {
+  return [
+    `The body links GitHub files by branch, and the branch is deleted when Dane merges, so these go dead (a 404). ${nothing}`,
+    ...links.map((l) => `  ${l}`),
+    'Link by commit instead: https://github.com/<owner>/<repo>/blob/<commit>/<path>, where <commit> is `git rev-parse HEAD` on the pushed branch;',
+    'or `main` for a file already on main; or the pull request\'s files tab, https://github.com/<owner>/<repo>/pull/<n>/files.',
+  ].join('\n');
+}
+
 /**
  * A backtick fence that `text` cannot close: one longer than its longest
  * backtick run, and never shorter than three. Dane's words may carry their
