@@ -62,6 +62,17 @@ export const SOURCE = 'clickup';
  * The map key the operator's ClickUp seat is filed under. tracker/signins.mjs
  * records the operator's sign-in under the same key, so both find one actor.
  */
+/**
+ * Why this project has no ClickUp list to read, or null when it has one. A
+ * `loopQueueListId` of "0" means the project was never on ClickUp, or its
+ * list is now a read-only archive that no code path reads: the importer
+ * and the switch check refuse it rather than ask ClickUp for list 0.
+ */
+export function noClickUpList(config) {
+  if (!/^0+$/.test(String(config.loopQueueListId))) return null;
+  return `${config.projectSlug} names no ClickUp list (loopQueueListId is "${config.loopQueueListId}"): it was never on ClickUp, or its list is now a read-only archive. Nothing was read. An old ClickUp link resolves with \`npm run tracker:old-id -- <id>\`.`;
+}
+
 export const operatorImportKey = (config) => ({ source: SOURCE, sourceId: `user:${config.operatorUserId}` });
 
 /** The ClickUp custom field that holds the Loop note (lib/loopNote.js). */
@@ -385,6 +396,11 @@ async function main(argv) {
   } catch (err) {
     if (!(err instanceof ProjectConfigError)) throw err;
     console.error(`tracker:import: the project config is not usable — ${err.message}`);
+    return 1;
+  }
+  const noList = noClickUpList(config);
+  if (noList) {
+    console.error(`tracker:import: ${noList}`);
     return 1;
   }
   if (!process.env.CLICKUP_API_TOKEN) {

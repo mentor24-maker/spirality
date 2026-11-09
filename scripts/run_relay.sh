@@ -1,7 +1,8 @@
 #!/bin/bash
 #
 # What the relay schedule (every 10 minutes) actually runs: bring the main
-# checkout up to date, then one `relay` pass of the ClickUp door.
+# checkout up to date, then one `relay` pass of the door (`npm run clickup`,
+# which talks to the tracker the project config names).
 #
 #   ./scripts/run_relay.sh            # one pass, output to stdout
 #   ./scripts/run_relay.sh --dry-run  # one pass that prints and writes nothing
@@ -112,8 +113,8 @@ else
   echo "[relay] main checkout is not on a clean main — not pulling. Every pass runs stale code until it is put back on main."
 fi
 
-# The pass itself. Through npm, so Doppler supplies the ClickUp token the same
-# way every other write to ClickUp gets it. A dry run is passed straight through.
+# The pass itself. Through npm, so Doppler supplies the token the same way
+# every other write to the tracker gets it. A dry run is passed straight through.
 # On the tracker, the relay signs in as itself: TRACKER_TOKEN_NAME names its
 # own Doppler secret (never the value), which the door reads.
 export TRACKER_TOKEN_NAME=TRACKER_TOKEN_RELAY
