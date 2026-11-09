@@ -14,3 +14,9 @@ It pushes that to `main`, then asks GitHub whether it really landed. If it
 did not, the step fails and the setup goes no further. A repository that
 already has any commit is never touched, so a rerun never writes over real
 work. The setup page lists the new step with the others.
+
+A second round, after review: the look now also stops any project whose
+`main` has a `package.json` but no `package-lock.json`, and says how to make
+one. Without that file the setup's own pull request fails its checks on
+GitHub, which is what happened to Upwork Blaster; now the setup catches it
+before writing anything.

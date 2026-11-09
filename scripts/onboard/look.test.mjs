@@ -284,7 +284,7 @@ function readOnlyCall({ cmd, args, cwd }, scratch) {
   return false;
 }
 
-function fakeWorld({ checkoutPresent = true, project = true, empty = false } = {}) {
+function fakeWorld({ checkoutPresent = true, project = true, empty = false, noLock = false } = {}) {
   const calls = [];
   const requests = [];
   const removed = [];
@@ -315,7 +315,7 @@ function fakeWorld({ checkoutPresent = true, project = true, empty = false } = {
       return { status: r.status, text: async () => JSON.stringify(r.json) };
     },
     token: 'tok',
-    exists: (p) => (p === '/Users/dane/WebApps/normie' ? checkoutPresent : p.startsWith(scratch) && /package(-lock)?\.json$/.test(p)),
+    exists: (p) => (p === '/Users/dane/WebApps/normie' ? checkoutPresent : p.startsWith(scratch) && (noLock ? /package\.json$/ : /package(-lock)?\.json$/).test(p)),
     readText: (p) => (p === `${scratch}/repo/.nvmrc` ? '22\n' : null),
     makeScratch: () => scratch,
     removeScratch: (dir) => removed.push(dir),
@@ -390,6 +390,28 @@ test("the default checkout sits beside the tracker home's main checkout, even ru
   const run = (cmd, args) => (args[1] === '/W/spirality/.claude/worktrees/x' ? ok('/W/spirality/.git\n') : failed(128, 'fatal: not a git repository'));
   assert.equal(mainCheckoutOf('/W/spirality/.claude/worktrees/x', run), '/W/spirality');
   assert.equal(mainCheckoutOf('/elsewhere', run), '/elsewhere');
+});
+
+test('a main with a package.json but no package-lock.json is BLOCKED, with the fix named (SP-154)', async () => {
+  const w = fakeWorld({ noLock: true });
+  const rows = await look({ answers, homeConfig, deps: w.deps });
+  const lock = rows.find((r) => r.item === 'GitHub: package-lock.json on main');
+  assert.ok(lock, 'a lock row is there');
+  assert.equal(lock.verdict, BLOCKED);
+  assert.match(lock.why, /no package-lock\.json/);
+  assert.match(lock.why, /npm install --package-lock-only/);
+  assert.match(lock.why, /push it to main/);
+  assert.equal(exitCodeFor(rows), 3);
+  assert.deepEqual(rows.filter((r) => r.verdict === BLOCKED).map((r) => r.item), ['GitHub: package-lock.json on main']);
+  // The check still runs (with npm install), so its own row still says whether verify passes.
+  assert.ok(w.calls.some((c) => c.cmd === 'npm' && c.args[0] === 'install'));
+  assert.equal(rows.at(-1).item.startsWith('Check:'), true);
+  assert.equal(rows.at(-1).verdict, READY);
+});
+
+test('a main with a package-lock.json has no lock row', async () => {
+  const rows = await look({ answers, homeConfig, deps: fakeWorld().deps });
+  assert.equal(rows.some((r) => /package-lock/.test(r.item)), false);
 });
 
 // --- An empty repository (SP-154) ------------------------------------------

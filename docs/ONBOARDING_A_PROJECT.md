@@ -119,6 +119,14 @@ The items below marked **missing**, gathered here so they can become tickets:
   written to: the step says `already done (... already has a main branch)`.
   The starter answers to `npm run verify` only, so the look blocks an empty
   repository whose answers set another `checkCommand`.
+- **A `package.json` with no `package-lock.json`.** On any project, empty
+  or not, the look blocks a `main` that has a `package.json` but no
+  `package-lock.json`, on its own row (`GitHub: package-lock.json on
+  main`), because the `verify.yml` the setup copies runs `npm ci` with
+  `cache: npm`, and both refuse without one (Upwork Blaster's first setup
+  pull request failed CI that way). The fix it names: in a checkout of
+  `main`, run `npm install --package-lock-only`, commit the
+  `package-lock.json` it makes, push it, and run the setup again.
 - **Check.**
   - `gh api repos/<owner>/<name>/branches/main/protection` shows
     `"contexts":["verify"]` and `"allow_force_pushes":{"enabled":false}`.

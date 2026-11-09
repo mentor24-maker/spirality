@@ -467,6 +467,19 @@ export function readEmptyCheck(command) {
 // --- The whole look --------------------------------------------------------
 
 /**
+ * The row for a main that has a package.json but no package-lock.json
+ * (SP-154). The setup's verify.yml runs `npm ci` with `cache: npm`, and both
+ * refuse without a lock file, so the setup's own pull request would fail CI
+ * (mentor24-maker/upwork-blaster#1 did). The look catches it first and names
+ * the fix. The check below it still runs, with `npm install`, so its row
+ * says whether verify itself would pass.
+ */
+export function readMissingLock(branch) {
+  return row(`GitHub: package-lock.json on ${branch}`, BLOCKED,
+    `${branch} has a package.json but no package-lock.json, and the setup's CI runs \`npm ci\`, which needs one. Fix: in a checkout of ${branch}, run \`npm install --package-lock-only\`, commit the package-lock.json it makes, push it to ${branch}, then run the setup again`);
+}
+
+/**
  * Every row, in the order they print. Everything outside this process is
  * reached through `deps`, so tests can see each call:
  *
@@ -498,6 +511,7 @@ export async function look({ answers, homeConfig, runCheck = true, deps }) {
   let scratch = null;
   let cloneRoot = null;
   let checkRow = null;
+  let lockRow = null;
   try {
     if (!runCheck) {
       checkRow = row(`Check: \`${answers.checkCommand}\` on a clean copy of ${branch ?? 'main'}`, UNKNOWN, 'skipped (--no-check)');
@@ -518,6 +532,7 @@ export async function look({ answers, homeConfig, runCheck = true, deps }) {
         let install = null;
         if (exists(join(cloneRoot, 'package.json'))) {
           const ci = exists(join(cloneRoot, 'package-lock.json'));
+          if (!ci) lockRow = readMissingLock(branch);
           const args = ci ? ['ci', '--no-audit', '--no-fund'] : ['install', '--no-audit', '--no-fund'];
           progress(`installing its packages (npm ${args[0]}); this can take minutes...`);
           install = { ...run('npm', args, { cwd: cloneRoot, env, timeoutMs: 20 * 60 * 1000 }), label: `npm ${args[0]}` };
@@ -576,6 +591,7 @@ export async function look({ answers, homeConfig, runCheck = true, deps }) {
     if (scratch) deps.removeScratch(scratch);
   }
 
+  if (lockRow) rows.push(lockRow);
   rows.push(checkRow);
   return rows;
 }
