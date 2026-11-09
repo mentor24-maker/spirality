@@ -1,0 +1,13 @@
+{
+  "name": "{{projectSlug}}",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": "{{nodeEngine}}"
+  },
+  "scripts": {
+    "test": "node --test",
+    "verify": "node --test"
+  }
+}

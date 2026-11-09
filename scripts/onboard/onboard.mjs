@@ -16,6 +16,16 @@
  *             (lib/onboardAnswers.mjs) and can be changed in the file.
  *   look      SP-108's read-only look (`onboard:look`). Anything BLOCKED stops
  *             here, before anything is written.
+ *   start     SP-154: only when the GitHub repository is empty (made with no
+ *             files, so it has no main branch), push ONE first commit to main
+ *             from scripts/onboard/templates/starter/ (lib/onboardStarter.mjs):
+ *             package.json whose `verify` passes, package-lock.json, .nvmrc,
+ *             .gitignore, a README and one placeholder test. Made in a scratch
+ *             folder beside the answers file, pushed without force (so a
+ *             repository that gained history meanwhile refuses it), and read
+ *             back from GitHub: no longer empty, default branch main, its one
+ *             commit the one pushed. A repository with any commit is never
+ *             written to here (skipped: it already has a main branch).
  *   clone     SP-119: when the checkout folder does not exist, `git clone` the
  *             project's `main` into it, from the same kind of address (https
  *             or ssh) the tracker home's own origin uses, and read back that
@@ -90,13 +100,14 @@ import { machineUserPending } from '../../lib/onboardSettings.mjs';
 import { ciVerdict, SETUP_BRANCH } from '../../lib/onboardCopy.mjs';
 import { LANES, parseStatus } from '../../lib/onboardLanes.mjs';
 import { normalRepo } from '../lib/repoCheck.mjs';
+import { readEmptiness, starterFiles, starterMessage } from '../../lib/onboardStarter.mjs';
 
 const require = createRequire(import.meta.url);
 const { findTicketId, ticketLink } = require('../../lib/clickupTicketLink.js');
 
 export const DEFAULT_MERGE_WAIT_MINUTES = 60;
 
-export const STEPS = Object.freeze(['answers', 'look', 'clone', 'settings', 'signins', 'copy', 'lanes', 'merge', 'protect']);
+export const STEPS = Object.freeze(['answers', 'look', 'start', 'clone', 'settings', 'signins', 'copy', 'lanes', 'merge', 'protect']);
 
 /**
  * The answers that are Dane's decisions (SETUP_REVIEW.md part 3, "What a
@@ -333,7 +344,9 @@ const last = (text, n = 4) => String(text || '').split('\n').map((l) => l.trim()
  *                                         lines; `env` adds to the environment
  *   ask(question) -> string, or null when there is no Terminal to ask in
  *   print(line), exists(path), readText(path) -> text|null, writeText(path, text),
- *   appendText(path, text), mkdir(dir), rename(from, to), remove(path), sleep(ms), now() -> ms
+ *   appendText(path, text), mkdir(dir), rename(from, to), remove(path),
+ *   removeTree(dir), sleep(ms), now() -> ms
+ *   nodeVersion                          this Mac's Node ("v22.23.3"), for the start step
  * Returns the exit code.
  */
 export async function onboard(opts, deps) {
@@ -498,6 +511,64 @@ export async function onboard(opts, deps) {
       if (r.code === 3) fail(step, 'something is BLOCKED (the look\'s lines above say what); nothing was written');
       if (r.code !== 0) fail(step, `the look could not tell everything (exit ${r.code}; its lines above say what)`);
       done(step, 'nothing is BLOCKED');
+    }
+
+    // ── start ────────────────────────────────────────────────────────────
+    step = 'start';
+    begin(step);
+    const readRepo = () => {
+      const v = gh('repo', 'view', answers.githubRepo, '--json', 'isEmpty,defaultBranchRef');
+      if (v.code !== 0) return { error: `gh repo view ${answers.githubRepo} failed: ${last(v.err || v.out) || `exit ${v.code}`}` };
+      const seen = readEmptiness(v.out);
+      return seen ?? { error: `gh repo view ${answers.githubRepo} did not answer with whether it is empty` };
+    };
+    if (setup.on) skip(step, `the setup is merged: ${setup.why}`);
+    else {
+      const before = readRepo();
+      if (before.error) fail(step, before.error);
+      if (!before.empty) skip(step, `${answers.githubRepo} already has a main branch (${before.branch ?? 'its default branch could not be read'}); a repository with history is never written to here`);
+      else {
+        let files;
+        try { files = starterFiles(answers, deps.nodeVersion ?? process.version); } catch (err) { fail(step, err.message); }
+        const work = join(onboardDir(homeConfig), `${slug}-start`);
+        say(step, `${answers.githubRepo} is empty; making its first commit on main in ${work}`);
+        // A folder left by a failed run is made again from nothing.
+        try { deps.removeTree(work); deps.mkdir(work); } catch (err) { fail(step, `could not make ${work}: ${err.code || err.message}`); }
+        for (const f of files) {
+          const at = join(work, f.path);
+          try { deps.mkdir(dirname(at)); deps.writeText(at, f.text); } catch (err) { fail(step, `could not write ${at}: ${err.code || err.message}`); }
+          if (deps.readText(at) !== f.text) fail(step, `${at} did not read back as written`);
+        }
+        const g = (...args) => run('git', args, { cwd: work });
+        const must = (r, what) => { if (r.code !== 0) fail(step, `${what} in ${work} failed: ${last(r.err || r.out) || `exit ${r.code}`}`); return r; };
+        must(g('init', '--quiet', '--initial-branch=main'), 'git init');
+        must(g('add', '--all'), 'git add');
+        must(g('-c', 'commit.gpgsign=false', 'commit', '--quiet', '-m', starterMessage(answers)), 'git commit');
+        const sha = must(g('rev-parse', 'HEAD'), 'git rev-parse HEAD').out.trim();
+        const tracked = must(g('ls-files'), 'git ls-files').out.split('\n').map((l) => l.trim()).filter(Boolean).sort();
+        const meant = files.map((f) => f.path).sort();
+        if (tracked.join('\n') !== meant.join('\n')) fail(step, `the first commit in ${work} holds ${tracked.join(', ') || 'nothing'}, not ${meant.join(', ')}`);
+        const home = run('git', ['remote', 'get-url', 'origin']);
+        const address = cloneAddress(home.code === 0 ? home.out : null, answers.githubRepo);
+        // No --force, ever: a push onto history is refused by git itself.
+        must(g('push', '--quiet', address, 'main:main'), `git push to ${answers.githubRepo}`);
+        // GitHub can take a moment to stop calling a repository empty.
+        let after = null;
+        let commit = null;
+        for (let tries = 0; tries < 6; tries += 1) {
+          if (tries) await deps.sleep(5000);
+          after = readRepo();
+          const c = ghJson('api', `repos/${answers.githubRepo}/commits/main`);
+          commit = c.ok ? c.json : null;
+          if (!after.error && !after.empty && after.branch === 'main' && commit?.sha === sha) break;
+        }
+        if (after.error) fail(step, `pushed, but reading it back failed: ${after.error}`);
+        if (after.empty || after.branch !== 'main') fail(step, `pushed, but GitHub reads ${answers.githubRepo} back as ${after.empty ? 'still empty' : `on default branch ${after.branch ?? '(none)'}`}, not main`);
+        if (commit?.sha !== sha) fail(step, `pushed, but main on GitHub is ${commit?.sha ?? 'unreadable'}, not the commit made (${sha})`);
+        if ((commit.parents ?? []).length !== 0) fail(step, `pushed, but main's newest commit on GitHub has a parent: it is not the one first commit`);
+        try { deps.removeTree(work); } catch { /* the scratch folder is remade on the next run */ }
+        done(step, `${answers.githubRepo}'s first commit ${sha.slice(0, 7)} pushed to main, read back: not empty, default branch main (${meant.join(', ')})`);
+      }
     }
 
     // ── clone ────────────────────────────────────────────────────────────
@@ -856,6 +927,8 @@ async function main(argv) {
     mkdir: (d) => mkdirSync(d, { recursive: true }),
     rename: (from, to) => renameSync(from, to),
     remove: (p) => rmSync(p, { force: true }),
+    removeTree: (p) => rmSync(p, { recursive: true, force: true }),
+    nodeVersion: process.version,
     sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
     now: () => Date.now(),
   });

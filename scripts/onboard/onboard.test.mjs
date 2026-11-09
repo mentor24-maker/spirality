@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { spawnSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { validateProjectConfig } from '../../lib/projectConfig.mjs';
 import { settingsDraft, resolveAnswers } from '../../lib/onboardAnswers.mjs';
@@ -190,6 +191,23 @@ function makeWorld(t) {
     // The tracker home's origin, with a sign-in token in it as a real one can carry.
     homeOrigin: 'https://x-access-token:SECRET-TOKEN@github.com/mentor24-maker/spirality.git',
     clonedFrom: null, cloneOrigin: 'https://github.com/mentor24-maker/pressplay.git', cloneBranch: 'main', cloneDirty: '',
+    // SP-154: GitHub's repository, a real bare one here. Not empty unless a
+    // test says so; `pushFails` refuses the start step's push, `readBack`
+    // makes GitHub answer something else after it.
+    repoEmpty: false, bare: join(dir, 'github', 'pressplay.git'), pushedTo: null, pushFails: false, readBack: null, viewFails: false,
+  };
+  const startDir = join(homeConfig.logDir, 'onboard', 'pressplay-start');
+  const realGit = (args, cwd) => {
+    const r = spawnSync('git', args, {
+      cwd, encoding: 'utf8',
+      env: { ...process.env, GIT_AUTHOR_NAME: 'Test', GIT_AUTHOR_EMAIL: 'test@example.invalid', GIT_COMMITTER_NAME: 'Test', GIT_COMMITTER_EMAIL: 'test@example.invalid', GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' },
+    });
+    return { code: r.status ?? 1, out: String(r.stdout || '').trim(), err: String(r.stderr || '').trim() };
+  };
+  w.makeEmptyRepo = () => {
+    w.repoEmpty = true;
+    mkdirSync(w.bare, { recursive: true });
+    realGit(['init', '--quiet', '--bare', '--initial-branch=main', w.bare], dir);
   };
   const setupWorktreePath = join(homeConfig.logDir, 'onboard', 'pressplay-setup');
   const settingsFile = join(homeConfig.logDir, 'onboard', 'pressplay-settings', 'spirality.project.json');
@@ -206,6 +224,16 @@ function makeWorld(t) {
     const line = [cmd, ...args].join(' ');
     w.calls.push(line);
     if (o.env) w.envs[line] = o.env;
+    if (cmd === 'git' && o.cwd === startDir) {
+      if (args[0] === 'push') {
+        w.pushedTo = args.at(-2);
+        if (w.pushFails) return no('! [rejected]        main -> main (fetch first)\nerror: failed to push some refs', 1);
+        const r = realGit([...args.slice(0, -2), w.bare, args.at(-1)], o.cwd);
+        if (r.code === 0) w.repoEmpty = false;
+        return r;
+      }
+      return realGit(args, o.cwd);
+    }
     if (cmd === 'git') {
       if (args[0] === 'remote' && o.cwd === homeRoot) return w.homeOrigin == null ? no('error: No such remote', 2) : ok(w.homeOrigin);
       if (args[0] === 'remote' && o.cwd === checkout) return ok(w.cloneOrigin);
@@ -282,6 +310,18 @@ function makeWorld(t) {
       return ok(w.lanesLoaded ? ['relay', 'loop-build', 'loop-review', 'loop-intake'].map((l) => `── ${l}\nschedule: INSTALLED\nloaded:   yes`).join('\n') : '');
     }
     if (cmd === 'gh') {
+      if (args[0] === 'repo' && args[1] === 'view' && args[2] === 'mentor24-maker/pressplay') {
+        if (w.viewFails) return no('HTTP 502: Bad Gateway', 1);
+        // `readBack` is what GitHub answers once the push has landed.
+        const seen = w.readBack && !w.repoEmpty ? w.readBack : { isEmpty: w.repoEmpty, defaultBranchRef: w.repoEmpty ? null : { name: 'main' } };
+        return ok(JSON.stringify(seen));
+      }
+      if (args[0] === 'api' && args[1] === 'repos/mentor24-maker/pressplay/commits/main') {
+        const sha = realGit(['rev-parse', 'main'], w.bare);
+        if (sha.code !== 0) return no('gh: Git Repository is empty. (HTTP 409)');
+        const parents = realGit(['rev-list', '--parents', '-n', '1', 'main'], w.bare).out.split(' ').slice(1);
+        return ok(JSON.stringify({ sha: sha.out, parents: parents.map((p) => ({ sha: p })) }));
+      }
       if (args[0] === 'pr' && args[1] === 'list') return ok(JSON.stringify(w.prOpen && !w.merged ? [{ url: PR }] : []));
       if (args[0] === 'pr' && args[1] === 'checks') return ok(JSON.stringify([{ name: 'verify', bucket: 'pass', state: 'SUCCESS' }]));
       if (args[0] === 'pr' && args[1] === 'view' && args.includes('body')) {
@@ -320,6 +360,8 @@ function makeWorld(t) {
     mkdir: (d) => mkdirSync(d, { recursive: true }),
     rename: (from, to) => renameSync(from, to),
     remove: (p) => rmSync(p, { force: true }),
+    removeTree: (p) => rmSync(p, { recursive: true, force: true }),
+    nodeVersion: 'v22.23.3',
     sleep: async (ms) => { clock += ms; },
     now: () => clock,
     ...over,
@@ -335,7 +377,7 @@ function makeWorld(t) {
     writeFileSync(answersPath, JSON.stringify({ projectSlug: 'pressplay', projectName: 'PressPlay', githubRepo: 'mentor24-maker/pressplay', trackerPrefix: 'PP', mergePhrases: null, autoMergeLanes: [], extraGovernancePaths: null, description: 'PressPlay plays things.', checkoutDir: checkout }));
   };
   const statePath = join(homeConfig.logDir, 'onboard', 'pressplay.state.json');
-  return { w, go, homeOpts, run, reset, checkout, makeCheckout, setupWorktreePath, answersFile, settingsFile, seedAnswers, statePath, logFile: join(homeConfig.logDir, 'pressplay-onboard.log') };
+  return { startDir, realGit, w, go, homeOpts, run, reset, checkout, makeCheckout, setupWorktreePath, answersFile, settingsFile, seedAnswers, statePath, logFile: join(homeConfig.logDir, 'pressplay-onboard.log') };
 }
 
 const out = (w) => w.printed.join('\n');
@@ -365,7 +407,9 @@ test('a first run asks Dane only his answers, stops for the paste block and the 
   assert.equal(answers.mergePhrases, null, 'a blank answer takes the default');
   assert.deepEqual(answers.autoMergeLanes, []);
   const log = readFileSync(logFile, 'utf8');
-  for (const step of STEPS) assert.match(log, new RegExp(`\\| ${step} \\| done \\|`), step);
+  // The repository already has history, so the start step (SP-154) is skipped; every other step is done.
+  for (const step of STEPS.filter((x) => x !== 'start')) assert.match(log, new RegExp(`\\| ${step} \\| done \\|`), step);
+  assert.match(log, /\| start \| skip \| mentor24-maker\/pressplay already has a main branch \(main\)/);
   assert.match(log, /MT \|/);
   // Every write read back: the protection was read again after the PUT.
   const put = w.calls.findIndex((c) => c.includes('-X PUT'));
@@ -712,7 +756,7 @@ test('--no-prompt: answers filled in, the rerun stops for the paste block, then 
   assert.equal(state.stop.commands[1], 'doppler projects create pressplay');
   assert.match(state.stop.commands[2], /^TRACKER_DB=.* npm run tracker:signins -- create --name PressPlay --prefix PP --config /);
   for (const line of state.stop.commands) assert.ok(out(w).includes(`  ${line}`), 'the same block is printed');
-  assert.deepEqual(outcomes(state), { answers: 'skip', look: 'done', clone: 'done', settings: 'done', signins: 'stopped', copy: 'pending', lanes: 'pending', merge: 'pending', protect: 'pending' });
+  assert.deepEqual(outcomes(state), { answers: 'skip', look: 'done', start: 'skip', clone: 'done', settings: 'done', signins: 'stopped', copy: 'pending', lanes: 'pending', merge: 'pending', protect: 'pending' });
 
   // Dane pastes the block. Stop 2: the merge, the setup ticket's link in the stop.
   w.signinsMade = true;
@@ -725,7 +769,7 @@ test('--no-prompt: answers filled in, the rerun stops for the paste block, then 
   assert.equal(w.polls, 1, 'one look at the pull request, no waiting');
   assert.ok(!w.calls.some((c) => c.includes('-X PUT')), 'main not protected before the merge');
   state = readState(statePath);
-  assert.deepEqual(state.stop, { step: 'merge', kind: 'merge', why: state.steps[7].why, commands: [], link: 'http://mac-mini.local:4180/t/PP-1' });
+  assert.deepEqual(state.stop, { step: 'merge', kind: 'merge', why: state.steps.find((s) => s.step === 'merge').why, commands: [], link: 'http://mac-mini.local:4180/t/PP-1' });
   assert.equal(outcomes(state).lanes, 'done');
   assert.equal(outcomes(state).protect, 'pending');
 
@@ -859,4 +903,113 @@ test('a state file whose rename fails leaves no half-written file beside it', as
   assert.equal(await noPromptRun(homeOpts, { rename }), 1, out(w));
   assert.match(out(w), /^FAILED: state: .*EXDEV/m);
   assert.deepEqual(readdirSync(dirname(statePath)).filter((f) => f.endsWith('.tmp')), []);
+});
+
+// --- start: the first commit of an empty repository (SP-154) ---------------
+
+test('an empty repository: start pushes one first commit to main, read back, between the look and the clone; a fresh clone of it installs and passes verify', async (t) => {
+  const { w, go, realGit, logFile } = makeWorld(t);
+  w.makeEmptyRepo();
+  assert.equal(await go(), 0, out(w));
+  assert.match(out(w), /^start\s+mentor24-maker\/pressplay is empty; making its first commit on main/m);
+  assert.match(out(w), /^start\s+mentor24-maker\/pressplay's first commit [0-9a-f]{7} pushed to main, read back: not empty, default branch main/m);
+  assert.match(readFileSync(logFile, 'utf8'), /\| start \| done \|/);
+  const push = w.calls.findIndex((c) => c.startsWith('git push'));
+  assert.ok(push > w.calls.findIndex((c) => c.includes('onboard:look')), 'after the look');
+  assert.ok(push < w.calls.findIndex((c) => c.startsWith('git clone')), 'before the clone');
+  assert.ok(!w.calls[push].includes('--force') && !w.calls[push].includes(' -f '), 'never a forced push');
+  assert.equal(w.pushedTo, 'https://github.com/mentor24-maker/pressplay.git', 'over the home origin\'s kind of address, its token left out');
+  assert.ok(!out(w).includes('SECRET-TOKEN') && !readFileSync(logFile, 'utf8').includes('SECRET-TOKEN'));
+  // Read back after the push: GitHub's view of the repository and of main.
+  const after = w.calls.slice(push + 1);
+  assert.ok(after.includes('gh repo view mentor24-maker/pressplay --json isEmpty,defaultBranchRef'));
+  assert.ok(after.includes('gh api repos/mentor24-maker/pressplay/commits/main'));
+  // Exactly one commit on main, holding the starter and nothing else.
+  assert.equal(realGit(['rev-list', '--count', 'main'], w.bare).out, '1');
+  assert.deepEqual(realGit(['ls-tree', '-r', '--name-only', 'main'], w.bare).out.split('\n').sort(),
+    ['.gitignore', '.nvmrc', 'README.md', 'package-lock.json', 'package.json', 'test/smoke.test.mjs']);
+  const pkg = JSON.parse(realGit(['show', 'main:package.json'], w.bare).out);
+  assert.equal(pkg.name, 'pressplay');
+  assert.equal(pkg.engines.node, '>=22', 'this Mac\'s major Node, as the answers name none');
+  assert.equal(realGit(['show', 'main:.nvmrc'], w.bare).out, '22');
+  assert.match(realGit(['show', 'main:README.md'], w.bare).out, /^# PressPlay\n[\s\S]*mentor24-maker\/pressplay/);
+  assert.match(realGit(['show', 'main:.gitignore'], w.bare).out, /^node_modules\/$[\s\S]*^\.env$[\s\S]*^\.env\.\*$/m);
+  // The scratch folder is gone once it is pushed.
+  assert.ok(!existsSync(join(w.homeConfig.logDir, 'onboard', 'pressplay-start')));
+
+  // What CI and the look will do with it: a fresh clone, npm ci, npm run verify.
+  const fresh = join(w.dir, 'fresh');
+  assert.equal(realGit(['clone', '--quiet', '--branch', 'main', w.bare, fresh], w.dir).code, 0);
+  const npm = (...args) => spawnSync('npm', args, { cwd: fresh, encoding: 'utf8', env: { PATH: process.env.PATH, HOME: process.env.HOME, CI: 'true' } });
+  for (const args of [['ci', '--no-audit', '--no-fund', '--offline'], ['run', 'verify']]) {
+    const r = npm(...args);
+    assert.equal(r.status, 0, `npm ${args.join(' ')}:\n${r.stdout}\n${r.stderr}`);
+  }
+  assert.match(npm('run', 'verify').stdout, /# pass 1/);
+  rmSync(join(fresh, 'node_modules'), { recursive: true, force: true });
+  const install = npm('install', '--no-audit', '--no-fund', '--offline');
+  assert.equal(install.status, 0, install.stderr);
+});
+
+test('start takes the Node version from the answers when they name one', async (t) => {
+  const { w, go, realGit, seedAnswers, answersFile } = makeWorld(t);
+  w.makeEmptyRepo();
+  seedAnswers();
+  writeFileSync(answersFile, JSON.stringify({ ...JSON.parse(readFileSync(answersFile, 'utf8')), nodeVersion: '>=22.12' }));
+  assert.equal(await go(), 0, out(w));
+  assert.equal(JSON.parse(realGit(['show', 'main:package.json'], w.bare).out).engines.node, '>=22.12');
+  assert.equal(realGit(['show', 'main:.nvmrc'], w.bare).out, '22');
+});
+
+test('a repository with any commit: start is skipped and nothing is written to it', async (t) => {
+  const { w, go, startDir } = makeWorld(t);
+  assert.equal(await go(), 0, out(w));
+  assert.match(out(w), /^start\s+already done \(mentor24-maker\/pressplay already has a main branch \(main\)/m);
+  assert.ok(!w.calls.some((c) => c.startsWith('git push') || c.startsWith('git init') || c.startsWith('git commit')), 'no commit made, nothing pushed');
+  assert.ok(!existsSync(startDir));
+});
+
+test('a push GitHub refuses: FAILED at start saying so, nothing after it runs; the rerun makes the commit again and goes on', async (t) => {
+  const { w, go, reset, realGit } = makeWorld(t);
+  w.makeEmptyRepo();
+  w.pushFails = true;
+  assert.equal(await go(), 1, out(w));
+  assert.match(out(w), /^FAILED: start: git push to mentor24-maker\/pressplay in .* failed: .*\[rejected\]/m);
+  assert.ok(!w.calls.some((c) => c.startsWith('git clone')), 'clone did not run');
+  assert.ok(!out(w).includes('Done:'));
+  w.pushFails = false;
+  reset();
+  assert.equal(await go(), 0, out(w));
+  assert.match(out(w), /^start\s+mentor24-maker\/pressplay's first commit/m);
+  assert.equal(realGit(['rev-list', '--count', 'main'], w.bare).out, '1');
+});
+
+for (const [what, readBack, seen] of [
+  ['still empty', { isEmpty: true, defaultBranchRef: null }, /GitHub reads mentor24-maker\/pressplay back as still empty, not main/],
+  ['on another default branch', { isEmpty: false, defaultBranchRef: { name: 'master' } }, /GitHub reads mentor24-maker\/pressplay back as on default branch master, not main/],
+]) {
+  test(`a push GitHub reads back ${what}: FAILED at start, nothing after it runs; the rerun finds history and skips start`, async (t) => {
+    const { w, go, reset } = makeWorld(t);
+    w.makeEmptyRepo();
+    w.readBack = readBack;
+    assert.equal(await go(), 1, out(w));
+    assert.match(out(w), new RegExp(`^FAILED: start: pushed, but ${seen.source}`, 'm'));
+    assert.ok(!w.calls.some((c) => c.startsWith('git clone')), 'clone did not run');
+    // GitHub catches up; the rerun does not push again.
+    w.readBack = null;
+    reset();
+    assert.equal(await go(), 0, out(w));
+    assert.match(out(w), /^start\s+already done \(mentor24-maker\/pressplay already has a main branch \(main\)/m);
+    assert.ok(!w.calls.some((c) => c.startsWith('git push')));
+  });
+}
+
+test('GitHub cannot be asked whether the repository is empty: FAILED at start, nothing written, clone not run', async (t) => {
+  const { w, go, startDir } = makeWorld(t);
+  w.makeEmptyRepo();
+  w.viewFails = true;
+  assert.equal(await go(), 1, out(w));
+  assert.match(out(w), /^FAILED: start: gh repo view mentor24-maker\/pressplay failed: HTTP 502/m);
+  assert.ok(!w.calls.some((c) => c.startsWith('git push') || c.startsWith('git clone')));
+  assert.ok(!existsSync(startDir));
 });
