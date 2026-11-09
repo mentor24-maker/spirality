@@ -222,8 +222,8 @@ const PAGE_HEADERS = Object.freeze({
  * lists them, and `/projects/<project>` both a project's details page and
  * the call that reads them (`/projects/new` is the Create Project form), and
  * `/search?q=<term>` both the search results page and the search itself,
- * and `/setup/<slug>` (`/setup/new` the Set up a product form) both a
- * product's setup page and the call that reads it: a browser opening the address asks for HTML and
+ * and `/setup/<slug>` (`/setup/new` the Set up a project form) both a
+ * project's setup page and the call that reads it: a browser opening the address asks for HTML and
  * gets the page; the page's own call asks for anything and gets the data.
  */
 function pageFile(pathname, accept = '') {
@@ -590,7 +590,8 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
       try {
         if (parts.length === 1 && method === 'GET') return [200, setupList(setup)];
         if (parts.length === 2 && parts[1] === 'fields' && method === 'GET') {
-          return [200, { fields: setupFields(setup, url.searchParams.get('product') ?? '') }];
+          // ?product= is the parameter's old name, still answered so an open page keeps working.
+          return [200, { fields: setupFields(setup, url.searchParams.get('project') ?? url.searchParams.get('product') ?? '') }];
         }
         if (parts.length === 2 && parts[1] !== 'fields' && method === 'GET') return [200, setupOf(setup, parts[1])];
         if (parts.length === 2 && parts[1] !== 'fields' && method === 'PUT') {

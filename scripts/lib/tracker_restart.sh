@@ -33,7 +33,7 @@ restart_tracker_if_changed() {
   local range code waited=0 limit="${TRACKER_RESTART_WAIT:-20}" answer
   local watched
   [ -z "$port" ] && return 0
-  # A product's checkout carries the lanes but not the server (it is served
+  # A project's checkout carries the lanes but not the server (it is served
   # from Spirality's): there is nothing here for a pull to make stale.
   [ -f tracker/server.mjs ] || return 0
   # An empty side means git could not say where HEAD was: that is "could not

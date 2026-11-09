@@ -17,7 +17,7 @@ const SMALL_WORDS = new Set(['a', 'an', 'the', 'and', 'but', 'or', 'nor', 'for',
  * filled in at run time (a project's name, a status) and are not checked;
  * tags and entities are skipped. The first word, and the first after a colon
  * or an opening bracket, is always capitalised; a small word elsewhere may be
- * either ("Carry On with the Setup", "Set Up a Product").
+ * either ("Carry On with the Setup", "Set Up a Project").
  */
 function titleCaseProblem(text) {
   const words = fillIns(text).replace(/<[^>]*>/g, ' ').replace(/&[a-z#0-9]+;/gi, ' ').split(/\s+/).filter(Boolean);
@@ -93,7 +93,7 @@ test('every button, heading, column heading, tab title and trail step on the pag
 });
 
 test('the Title Case rule: big words capitalised, small words free inside, the first word and the word after a colon always capitalised', () => {
-  for (const ok of ['Add Task', 'Submit Task', 'Set Up a Product', 'Carry On with the Setup', 'Your Move (A Decision): Merge the Setup',
+  for (const ok of ['Add Task', 'Submit Task', 'Set Up a Project', 'Carry On with the Setup', 'Your Move (A Decision): Merge the Setup',
     'Waiting on You', 'Forgot Password?', '${escapeHtml(name)} Is Set Up', 'Running: ${escapeHtml(running)}', 'GitHub Repository', '×', 'Last 7 Days', 'OK', 'Sign In']) {
     assert.equal(titleCaseProblem(ok), null, ok);
   }
@@ -105,8 +105,8 @@ test('the Title Case rule: big words capitalised, small words free inside, the f
 
 test('the label finder sees buttons, headings, toggles, column headings, tab titles and trail steps, and skips labels filled in at run time', () => {
   const labels = labelsOf(`<button type="submit">Post reply</button><h2>${'${head(c)}'}</h2><summary>Add Task</summary>
-    <th class="x">Last change</th>setTitle('New project · Tracker'); putTrail([{ label: 'Set up a product' }]); actionButton('Delete ticket', ICONS.delete)`);
+    <th class="x">Last change</th>setTitle('New project · Tracker'); putTrail([{ label: 'Set up a project' }]); actionButton('Delete ticket', ICONS.delete)`);
   assert.deepEqual(labels.map((l) => `${l.kind}: ${l.text}`), [
-    'button: Post reply', 'toggle: Add Task', 'column heading: Last change', 'icon button: Delete ticket', 'tab title: New project', 'trail step: Set up a product',
+    'button: Post reply', 'toggle: Add Task', 'column heading: Last change', 'icon button: Delete ticket', 'tab title: New project', 'trail step: Set up a project',
   ]);
 });

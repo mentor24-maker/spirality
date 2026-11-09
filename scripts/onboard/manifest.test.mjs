@@ -159,7 +159,7 @@ function skillLeaks(text, { written, spiralityRepo, readSpirality }) {
   return leaks;
 }
 
-test('rendered for another product, no copied skill cites Spirality\'s ids unmarked or a doc the product lacks', () => {
+test('rendered for another project, no copied skill cites Spirality\'s ids unmarked or a doc the project lacks', () => {
   const v = templateVars({ ...NORMIE, projectName: 'PressPlay', trackerPrefix: 'PP', launchdPrefix: 'com.pressplay' }, HOME,
     { spiralityCommit: 'abc1234', visibility: 'PRIVATE' });
   const skills = planCopies(manifest, { readSpirality: read, vars: v }).filter((f) => f.to.startsWith('.claude/skills/'));
@@ -167,7 +167,7 @@ test('rendered for another product, no copied skill cites Spirality\'s ids unmar
   const opts = { written: to, spiralityRepo: HOME.githubRepo, readSpirality: read };
   for (const f of skills) {
     assert.deepEqual(skillLeaks(f.content, opts), [], `${f.to} leaks Spirality's own references`);
-    assert.doesNotMatch(f.content, /"Engineering rules"|engineering rule/, `${f.to} names a CLAUDE.md section the product's lacks`);
+    assert.doesNotMatch(f.content, /"Engineering rules"|engineering rule/, `${f.to} names a CLAUDE.md section the project's lacks`);
   }
   const claude = render(read('scripts/onboard/templates/CLAUDE-sections.md'), v);
   assert.match(claude, /^## Loop rules$/m, 'the section the skills name is the one the setup writes');
@@ -186,7 +186,7 @@ test('the leak check catches an unmarked id, a missing doc and a link to nowhere
   assert.deepEqual(skillLeaks('[`docs/LOOP_CONTRACT.md`](https://github.com/o/spirality/blob/main/docs/LOOP_CONTRACT.md)', opts), []);
 });
 
-test('the setup makes the product ignore the lanes\' working copies (SP-120)', () => {
+test('the setup makes the project ignore the lanes\' working copies (SP-120)', () => {
   const entry = manifest.made.find((m) => m.to === '.gitignore');
   assert.ok(entry, 'the manifest makes a .gitignore');
   assert.ok(entry.ignoreLines.includes('.claude/worktrees/'));

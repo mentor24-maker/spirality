@@ -131,7 +131,7 @@ export function answersLocked(state) {
  * step already done, so starting and resuming are the same line.
  */
 export function setupCommand({ folder, trackerDb }, slug) {
-  return `cd ${shellQuote(folder)} && TRACKER_DB=${shellQuote(trackerDb)} npm run onboard -- --product ${shellQuote(slug)} --no-prompt`;
+  return `cd ${shellQuote(folder)} && TRACKER_DB=${shellQuote(trackerDb)} npm run onboard -- --project ${shellQuote(slug)} --no-prompt`;
 }
 
 /** One project's setup: its answers as written, as checked, its state file, and the command. */
@@ -160,7 +160,7 @@ export function setupOf(setup, slug) {
     if (!(err instanceof ProjectConfigError)) throw err;
   }
   return {
-    product: slug,
+    project: slug,
     answers,
     resolved,
     answersError,
@@ -188,7 +188,7 @@ export function setupList(setup) {
       .sort()
       .map((slug) => {
         const { state, error } = readState(setup.homeConfig, slug);
-        return { product: slug, step: currentStep(state), finished: state?.finished === true, started: state != null, stateError: error };
+        return { project: slug, step: currentStep(state), finished: state?.finished === true, started: state != null, stateError: error };
       }),
   };
 }
@@ -236,7 +236,7 @@ export function saveAnswers(setup, slug, body) {
     throw new SetupError(409, 'answers-unreadable', `${err.message}. Nothing was written.`);
   }
   if (Object.hasOwn(named, 'projectSlug') && named.projectSlug !== slug) {
-    throw new SetupError(409, 'answers-other-product', `${aPath} is for "${named.projectSlug}", not ${slug}. Nothing was written.`);
+    throw new SetupError(409, 'answers-other-project', `${aPath} is for "${named.projectSlug}", not ${slug}. Nothing was written.`);
   }
   const typed = Object.fromEntries(Object.entries(body).map(([k, v]) => [k, formValue(known.get(k), v)]));
   const next = { ...named, projectSlug: slug, ...typed };

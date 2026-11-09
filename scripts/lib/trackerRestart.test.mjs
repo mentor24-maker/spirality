@@ -130,7 +130,7 @@ test('an empty BEFORE (git could not say where HEAD was) is "could not tell", ne
   assert.deepEqual(r.launchctl, []);
 });
 
-test('a checkout with no tracker server in it (a product\'s) restarts nothing', () => {
+test('a checkout with no tracker server in it (a project\'s) restarts nothing', () => {
   const s = scratch();
   const old = s.head();
   git(s.repo, 'rm', '-q', 'tracker/server.mjs');

@@ -11,7 +11,7 @@
  * else it says goes to stderr. Only the token's hash is kept.
  *
  * `--site-url` (a machine only) marks the actor as an outside site, such as
- * another product's page for this tracker (docs/OUTSIDE_SITE_API.md): invites sent to it
+ * another project's page for this tracker (docs/OUTSIDE_SITE_API.md): invites sent to it
  * and its "Forgot password?" calls email links that open on that page. The
  * address is https (http only for http://localhost); its token belongs in
  * the site's own Doppler project, never in a repository.

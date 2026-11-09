@@ -62,17 +62,17 @@ gap from one step to the next.
 | # | Ticket | What | Who | Times (Mountain) | Waits |
 |---|---|---|---|---|---|
 | 1 | SP-80 "Github repository field for Projects?" | Dane's request; slice A adds the repository field to the tracker's projects (PR #62) | Dane asks; loops build | card 11/1 4:48 PM; Dane "A, B, and C …" 5:42 PM; PR 11:55 PM; review passed 11/2 12:17 AM; Dane "merge" 8:53 AM; merged 8:57 AM | 6h13m answer to build; 8h36m overnight for "merge" |
-| 2 | SP-88 "Nobody has written down what a new product needs to run on Spirality: a checklist" | `docs/ONBOARDING_A_PROJECT.md` (PR #67) | loops | card 11/1 11:59 PM; Dane "go" 11/2 8:53 AM; PR 11:13 AM; review passed 11:43 AM; "merge" 12:20 PM; merged 12:23 PM | 8h54m overnight for "go"; 2h20m go to PR |
+| 2 | SP-88 "Nobody has written down what a new project needs to run on Spirality: a checklist" | `docs/ONBOARDING_A_PROJECT.md` (PR #67) | loops | card 11/1 11:59 PM; Dane "go" 11/2 8:53 AM; PR 11:13 AM; review passed 11:43 AM; "merge" 12:20 PM; merged 12:23 PM | 8h54m overnight for "go"; 2h20m go to PR |
 | 3 | SP-89 "Normie is not set up on Spirality yet: plan its onboarding as tickets" | `docs/onboarding/NORMIE.md`, files SP-95 to SP-99 (PR #68) | loops | card 11/2 12:31 AM; "go" 8:52 AM; PR 12:41 PM; review passed 1:05 PM; "merge" 1:23 PM; merged 1:25 PM | 8h21m overnight for "go"; 3h49m go to PR |
 
 ### Spirality's own fixes, so a second project can sit beside it
 
 | # | Ticket | Who | Times (Mountain) | Waits |
 |---|---|---|---|---|
-| 4 | SP-95 "Normie's loops would take over Spirality's tracker sign-ins and stop Spirality's loops: give each product its own" (PR #70) | loops | card 11/2 1:03 PM; "go" 1:23 PM; PR 1:57 PM; **sent back** 2:09 PM; PR again 2:33 PM; review passed 2:42 PM; "merge" 4:04 PM; merged 4:29 PM | one review round (24 min); 1h22m for "merge"; 25 min merge word to merged |
-| 5 | SP-96 "A second product's ticket commands and doctor read Spirality's Doppler keys: take the Doppler project from the settings file" (PR #73) | loops | card 1:34 PM; "go" 1:37 PM (twice); PR 5:50 PM; review passed 6:19 PM; "merge" 6:30 PM; merged 6:33 PM | **4h13m in line** go to PR |
-| 6 | SP-97 "A second product's loop runners would write into Spirality's logs and share its locks: name them from the settings file" (PR #74) | loops | card 2:04 PM; "go" 2:40 PM; PR 6:27 PM; `MAIN MOVED … conflict` 6:33 PM; **sent back** for the conflict 6:50 PM; rework done 6:59 PM; review passed 7:22 PM; "merge" 8:00 PM; merged 8:05 PM | **3h47m in line**; one conflict round (49 min from `MAIN MOVED` to passing review) |
-| 7 | SP-99 "The tracker's GitHub repository field can disagree with a product's settings file and nobody notices: check one against the other" (PR #75) | loops | card 3:06 PM; "go" 3:22 PM (again 3:28 PM); PR 8:08 PM; review passed 8:26 PM; "merge" 9:46 PM; merged 10:29 PM | **4h46m in line**; 43 min merge word to merged |
+| 4 | SP-95 "Normie's loops would take over Spirality's tracker sign-ins and stop Spirality's loops: give each project its own" (PR #70) | loops | card 11/2 1:03 PM; "go" 1:23 PM; PR 1:57 PM; **sent back** 2:09 PM; PR again 2:33 PM; review passed 2:42 PM; "merge" 4:04 PM; merged 4:29 PM | one review round (24 min); 1h22m for "merge"; 25 min merge word to merged |
+| 5 | SP-96 "A second project's ticket commands and doctor read Spirality's Doppler keys: take the Doppler project from the settings file" (PR #73) | loops | card 1:34 PM; "go" 1:37 PM (twice); PR 5:50 PM; review passed 6:19 PM; "merge" 6:30 PM; merged 6:33 PM | **4h13m in line** go to PR |
+| 6 | SP-97 "A second project's loop runners would write into Spirality's logs and share its locks: name them from the settings file" (PR #74) | loops | card 2:04 PM; "go" 2:40 PM; PR 6:27 PM; `MAIN MOVED … conflict` 6:33 PM; **sent back** for the conflict 6:50 PM; rework done 6:59 PM; review passed 7:22 PM; "merge" 8:00 PM; merged 8:05 PM | **3h47m in line**; one conflict round (49 min from `MAIN MOVED` to passing review) |
+| 7 | SP-99 "The tracker's GitHub repository field can disagree with a project's settings file and nobody notices: check one against the other" (PR #75) | loops | card 3:06 PM; "go" 3:22 PM (again 3:28 PM); PR 8:08 PM; review passed 8:26 PM; "merge" 9:46 PM; merged 10:29 PM | **4h46m in line**; 43 min merge word to merged |
 
 ### Normie's home in the tracker and Doppler
 
@@ -92,7 +92,7 @@ when the ticket they wait on was done.
 | 10 | NO-3 "No loop knows Normie's tracker, Doppler or repository ids: add its spirality.project.json" (Normie PR #62) | card 11/2 11:49 PM; "go" 11:51 PM, **again 9:14 AM**; paused 9:36 AM (Normie's commit hook runs its CI checks, which fail until NO-1 lands); PR 10:14 AM; review passed 10:16 AM; "merge" 10:49 AM; merged 10:51 AM | same overnight wait; 38 min paused behind NO-1 |
 | 11 | NO-2 "Normie's main can change without a green check: name its CI check verify and protect main" (Normie PR #63) | card 10:15 AM; "go" 10:50 AM; PR 10:56 AM; review passed 10:59 AM; "merge" 11:29 AM; merged 11:33 AM; `main` protected and read back 11:36 AM | protection had to wait for the renamed check to pass on `main` |
 | 12 | NO-4 "A session in Normie's repository cannot reach its tickets: copy in the ticket door and its npm scripts" (Normie PR #64) | card 10:58 AM; "go" 11:29 AM; **stopped** 11:41 AM: Spirality's doctor asked Normie for a ClickUp key it never uses; PR 3:57 PM (after SP-103 below); review passed 4:01 PM; "merge" 4:31 PM, **again 5:51 PM**; merged 5:54 PM | **4h16m stopped** on a Spirality bug; **1h23m before the "merge" was acted on** |
-| 13 | SP-103 "A product on the tracker fails doctor for a ClickUp key it never uses: ask for CLICKUP_API_TOKEN only from products on ClickUp" (Spirality PR #81), found by NO-4 | hand-run files it 11:44 AM; "go" 11:52 AM; PR 1:37 PM; review passed 1:56 PM; "merge" 2:18 PM; merged 2:48 PM | 30 min merge word to merged |
+| 13 | SP-103 "A project on the tracker fails doctor for a ClickUp key it never uses: ask for CLICKUP_API_TOKEN only from projects on ClickUp" (Spirality PR #81), found by NO-4 | hand-run files it 11:44 AM; "go" 11:52 AM; PR 1:37 PM; review passed 1:56 PM; "merge" 2:18 PM; merged 2:48 PM | 30 min merge word to merged |
 | 14 | SP-104 "Four tests run git in a scratch repository but write to the real one when a commit hook runs them: clear git's repository settings in tests" (Spirality PR #82), found by NO-4 | filed by a hand-run session on Dane's "proceed on NO-5, then file the unsafe test ticket" (11/3; time not found); PR 6:35 PM; review passed 6:43 PM; "merge" 7:05 PM; merged 7:15 PM | not on Normie's critical path; NO-4's tests had written commits into Normie's real branch, undone by hand |
 | 15 | NO-5 "A session in Normie's repository can edit main and has no loop to follow: copy in the loop skills, the main-branch hook and the loop rules" (Normie PR #65) | card 6:01 PM; "go" 6:12 PM, **again 7:07 PM**; PR 7:22 PM; review passed 7:26 PM; "merge" 7:34 PM; merged 7:35 PM | **55 min before the "go" was acted on** |
 | 16 | NO-6 "Normie's loops do not run on the Mini: install its loop lanes" (Normie PR #66) | card 11/3 9:56 PM (hand-run); "go" 9:57 PM; PR 10:04 PM; review passed 10:06 PM; "merge" 11:13 PM; merged 11/4 9:38 AM; the four lanes' first passes 9:39 AM (relay, build, review, intake, a few seconds apart, from their logs) | **10h25m overnight before the "merge" was acted on**: the install was the ticket, so nothing was installed to act on it (hold-up 5) |
@@ -272,7 +272,7 @@ is **not** one of Spirality's lanes (the installer reloads the lane it runs
 in):
 
 ```bash
-npm run onboard -- --product <slug>
+npm run onboard -- --project <slug>
 ```
 
 It is plain Node and bash (rule 8). It asks its questions in the Terminal,
@@ -281,7 +281,7 @@ nothing twice. It keeps a step log, `<logDir>/<slug>-onboard.log`, and every
 step is safe to rerun: each one first checks whether it is already done,
 and skips it if so. It never prints a secret.
 
-**Built (SP-107 to SP-112).** `npm run onboard -- --product <slug>`
+**Built (SP-107 to SP-112).** `npm run onboard -- --project <slug>`
 ([scripts/onboard/onboard.mjs](../../scripts/onboard/onboard.mjs)) runs the
 steps below in order, each from its own script:
 

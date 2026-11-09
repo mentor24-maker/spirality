@@ -32,8 +32,10 @@ On the Mini, from Spirality's own folder, in a Terminal that is not one of
 Spirality's lanes:
 
 ```bash
-npm run onboard -- --product <slug>
+npm run onboard -- --project <slug>
 ```
+
+(`--product <slug>`, the option's old name, still works.)
 
 It asks Dane only the answers that are his decisions, once (kept in
 `~/loop-logs/onboard/<slug>.answers.json`), then runs every item below in

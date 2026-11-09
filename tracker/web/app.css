@@ -226,7 +226,7 @@ ol.search-results .result-head a:hover { text-decoration: underline; }
 ol.search-results .excerpt { font-size: 0.9rem; }
 ol.search-results b { font-weight: 800; background: #fff1a8; }
 
-/* Set up a product (SP-127): the steps and the box saying what is next. */
+/* Set up a project (SP-127): the steps and the box saying what is next. */
 .setup .toolbar { justify-content: flex-start; }
 ol.setup-steps { padding-left: 1.5rem; }
 ol.setup-steps li { margin-bottom: 0.35rem; }

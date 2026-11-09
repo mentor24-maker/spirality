@@ -150,8 +150,8 @@ if (arg('config')) {
 const extra = [
   ...(settingsText == null ? [] : [{ to: 'spirality.project.json', kind: 'made', from: arg('config'), content: settingsText }]),
   { to: 'package.json', kind: 'made', from: `the project's own, plus ${npm.added.length ? npm.added.join(', ') : 'nothing'}`, content: npm.text },
-  { to: '.gitignore', kind: 'made', from: ignore.added.length ? `the project's own, plus ${ignore.added.join(', ')}` : 'the product\'s own (it already ignores what the lanes need)', content: ignore.text },
-  { to: 'CLAUDE.md', kind: 'made', from: claude.added ? 'the product\'s own, plus the loop\'s sections' : 'the product\'s own (the loop\'s sections are already there)', content: claude.text },
+  { to: '.gitignore', kind: 'made', from: ignore.added.length ? `the project's own, plus ${ignore.added.join(', ')}` : 'the project\'s own (it already ignores what the lanes need)', content: ignore.text },
+  { to: 'CLAUDE.md', kind: 'made', from: claude.added ? 'the project\'s own, plus the loop\'s sections' : 'the project\'s own (the loop\'s sections are already there)', content: claude.text },
   ...(haveVerify ? [] : [{
     to: '.github/workflows/verify.yml', kind: 'made',
     from: verify.add ? 'runs npm run verify, which the setup adds' : 'the answers\' check command, then the loop\'s tests',
