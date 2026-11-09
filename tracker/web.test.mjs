@@ -377,6 +377,17 @@ test('the board and the list both fold Live by default, and every card and row o
   assert.ok(!/<details[^>]*\bopen\b/.test(app), 'Live is never drawn open');
 });
 
+test('the board has no Live column: Live is a list section below the columns, newest change first, with its count (SP-165)', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const draw = /async function drawProject\(([^)]*)\) \{([\s\S]*?)\n\}/.exec(app)[2];
+  assert.match(draw, /const working = board\.columns\.filter\(\(c\) => c\.status !== 'Live'\);/);
+  assert.match(draw, /<div class="board">\$\{working\.map\(column\)\.join\(''\)\}<\/div>\$\{live \? `<div class="list board-live">\$\{group\(live\)\}<\/div>` : ''\}/);
+  assert.doesNotMatch(draw, /board\.columns\.map\(column\)/, 'no column is drawn for Live');
+  // Newest change first, without reordering the List view's Live.
+  assert.match(draw, /liveColumn\.tickets\.slice\(\)\.sort\(\(a, b\) => \(a\.updatedAt < b\.updatedAt \? 1 : a\.updatedAt > b\.updatedAt \? -1 : 0\)\)/);
+  assert.match(draw, /<div class="list">\$\{board\.columns\.map\(group\)\.join\(''\)\}<\/div>/, 'the List view is unchanged');
+});
+
 test('a ticket\'s pull request on the list is the one the merge step would act on, and null without one', async () => {
   const f = await fixture();
   try {
