@@ -10,7 +10,11 @@
  * with, and a set-password link for the operator, as the setup email would
  * carry. "Forgot password?" and the Users page's invites send nothing:
  * each email is printed here instead, an invite with its link on a line of
- * its own (`Invite link for <email>: <link>`). All of it is for this throwaway store only and dies with it.
+ * its own (`Invite link for <email>: <link>`). It also makes a demo outside
+ * site, `demo-site`, whose page is http://localhost:3000/spirality, and
+ * prints its token, so the Users page can send an invite's link there and
+ * "Forgot password?" can be tried through it (docs/OUTSIDE_SITE_API.md).
+ * All of it is for this throwaway store only and dies with it.
  * Ctrl-C stops it and deletes the folder.
  */
 import { randomBytes } from 'node:crypto';
@@ -33,6 +37,8 @@ const { operator } = seedDemo(store, { clock });
 const password = randomBytes(9).toString('base64url');
 store.setEmail(operator.id, DEMO_EMAIL);
 store.setPassword(operator.id, password);
+const site = store.createActor({ kind: 'machine', name: 'demo-site', siteUrl: 'http://localhost:3000/spirality' });
+const siteToken = store.issueToken(site.id);
 /**
  * The reset and invite emails, printed rather than sent: the demo's email
  * addresses are example ones. An invite's link is also printed on a line
@@ -54,6 +60,7 @@ console.log(`\nDemo tracker (test data only) at http://127.0.0.1:${server.addres
 console.log(`Sign in as ${operator.name} with this throwaway email and password:\n\n  email:    ${DEMO_EMAIL}\n  password: ${password}\n`);
 const link = store.makeLink({ purpose: 'setup', email: DEMO_EMAIL, actor: operator.id, madeBy: operator.id });
 console.log(`Set-password link for ${operator.name} (test data only): ${setPasswordUrl(`http://127.0.0.1:${server.address().port}`, link.token)}\n`);
+console.log(`Demo outside site "${site.name}" (actor ${site.id}), page ${store.siteUrlOf(site.id)}, token (test data only): ${siteToken}\n`);
 console.log('Ctrl-C stops it and deletes the test data.');
 
 function stop() {

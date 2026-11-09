@@ -3,18 +3,24 @@
  * Set up the tracker's store: make the actors (people and loops) that sign in,
  * and the projects their tickets belong to. The store is at TRACKER_DB.
  *
- *   node tracker/admin.mjs create-actor --kind human|machine --name <name>
+ *   node tracker/admin.mjs create-actor --kind human|machine --name <name> [--site-url <https page address>]
  *   node tracker/admin.mjs create-project --slug <slug> --name <name> --prefix <PREFIX> [--operator <actor id>]
  *
  * create-actor prints the new token ONCE, alone on stdout, so it can be piped
  * straight into a secret store without reaching a terminal log; everything
  * else it says goes to stderr. Only the token's hash is kept.
+ *
+ * `--site-url` (a machine only) marks the actor as an outside site, such as
+ * another product's page for this tracker (docs/OUTSIDE_SITE_API.md): invites sent to it
+ * and its "Forgot password?" calls email links that open on that page. The
+ * address is https (http only for http://localhost); its token belongs in
+ * the site's own Doppler project, never in a repository.
  */
 import { parseArgs } from 'node:util';
 import { openStore } from './store.mjs';
 
 const USAGE = `usage:
-  node tracker/admin.mjs create-actor --kind human|machine --name <name>
+  node tracker/admin.mjs create-actor --kind human|machine --name <name> [--site-url <https page address>]
   node tracker/admin.mjs create-project --slug <slug> --name <name> --prefix <PREFIX> [--operator <actor id>]
 The store is opened at TRACKER_DB.`;
 
@@ -34,6 +40,7 @@ try {
       slug: { type: 'string' },
       prefix: { type: 'string' },
       operator: { type: 'string' },
+      'site-url': { type: 'string' },
     },
     strict: true,
   }));
@@ -48,10 +55,11 @@ let made = null;
 try {
   store = openStore(process.env.TRACKER_DB);
   if (command === 'create-actor') {
-    const actor = store.createActor({ kind: values.kind, name: values.name });
+    const actor = store.createActor({ kind: values.kind, name: values.name, siteUrl: values['site-url'] ?? null });
     made = `actor ${actor.id} was created but has no token; run create-actor again and ignore that one`;
     const token = store.issueToken(actor.id);
-    console.error(`actor ${actor.id} (${actor.kind}, "${actor.name}") created; its token follows on stdout and is not kept.`);
+    const site = store.siteUrlOf(actor.id);
+    console.error(`actor ${actor.id} (${actor.kind}${site ? `, a site at ${site}` : ''}, "${actor.name}") created; its token follows on stdout and is not kept.`);
     process.stdout.write(`${token}\n`);
   } else if (command === 'create-project') {
     let operator = null;
