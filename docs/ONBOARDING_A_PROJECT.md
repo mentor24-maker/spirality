@@ -254,6 +254,7 @@ is the example.
 | `trackerUrl` | optional (required with `"api"`) | The tracker's address for Dane's browser and the hand-over email. | `"http://mac-mini.local:4180"` |
 | `trackerApiUrl` | optional | The address the loops themselves call; on the Mini, its own `127.0.0.1`. Defaults to `trackerUrl`. | `"http://127.0.0.1:4180"` |
 | `trackerPublicUrl` | optional | The tracker's https address on the internet, through Tailscale Funnel; the API and the page (behind sign-in) answer there. **Only the project that runs the tracker sets it.** Port 443, 8443 or 10000. | `"https://mac-mini.tail7fc5c6.ts.net:8443"` |
+| `trackerPageUrl` | optional | The https name people outside the home network open the tracker's page by, through a small forwarding site made from `trackerPublicUrl` (`docs/TRACKER_MVP.md`, "The page's own name"). Invite and reset emails link there when it is set. **Only the project that runs the tracker sets it**, and only once the name shows the sign-in screen. | `"https://spirality.alphire.agency"` |
 | `tailscaleLabel` | optional (needed by the Funnel script) | The launchd job that keeps Tailscale running on that machine. | `"com.starcaster.tailscaled"` |
 | `tailscaleSocket` | optional (needed by the Funnel script) | Tailscale's socket on that machine (it runs without root). | `"~/.tailscale/tailscaled.sock"` |
 

@@ -35,8 +35,9 @@
     "check:syntax": "node scripts/check_syntax.mjs",
     "check:secrets": "node scripts/check_secrets.mjs",
     "check:wording": "node scripts/check_wording.mjs",
+    "check:tracker-page": "node scripts/tracker_page_site.mjs --check",
     "test": "node --test scripts/lib/*.test.mjs scripts/tracker/*.test.mjs scripts/onboard/*.test.mjs lib/*.test.mjs lib/*.test.js tracker/*.test.mjs",
-    "verify": "npm run check:syntax && npm run check:secrets && npm run check:wording && npm test",
+    "verify": "npm run check:syntax && npm run check:secrets && npm run check:wording && npm run check:tracker-page && npm test",
     "tracker:test-email": "node --disable-warning=ExperimentalWarning tracker/testEmail.mjs",
     "tracker:test-text": "node scripts/with_doppler.mjs node --disable-warning=ExperimentalWarning tracker/testText.mjs"
   }

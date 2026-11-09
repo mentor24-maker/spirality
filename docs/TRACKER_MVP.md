@@ -493,6 +493,61 @@ shows `{"error":"unauthorized",...}`. From a computer on the tailnet, 8443
 is closed by the tailnet access rule (StarCaster's `docs/TAILSCALE_POLICY.md`),
 which Funnel traffic does not pass through; use mobile data.
 
+**The page's own name** (SP-164). People outside the home network open the
+tracker at an https name of our own, `spirality.alphire.agency`, rather than
+the Funnel address. A name cannot simply point at Funnel (its certificate is
+for the `ts.net` name), so a tiny Vercel project takes the requests under the
+new name and passes every one on, path and query as they are, to
+`trackerPublicUrl`. Its whole content is one file,
+`sites/tracker-page/vercel.json`, made from the project config by
+`node scripts/tracker_page_site.mjs`; `npm run check:tracker-page` (part of
+`verify`) fails when the file and `trackerPublicUrl` disagree, so it is never
+edited by hand. Nothing else goes in that folder: Vercel would serve a file
+there in place of the tracker's own answer at that path. The tracker does
+everything else: sign-in, roles and projects work exactly as on the Mini,
+and the cookie, which names no `Domain`, is kept by the browser for the name
+it opened. Requests arrive through Funnel, so they get the public address's
+`Secure` cookie, `Strict-Transport-Security` and per-door sign-in locks.
+
+When `trackerPageUrl` is set in `spirality.project.json`, the invite and
+reset emails link there instead of `trackerUrl` (the server reads it when it
+starts). It stays unset until the name below answers with the sign-in
+screen, so no email links to a name that does not yet lead here.
+
+Moving the name. Today `spirality.alphire.agency` belongs to **StarCaster's**
+Vercel project (its answers carry `x-site-handler: resolved`), whose
+Spirality Tasks block stays for StarCaster's other sites. The move is
+outward-facing, so it is done **after this merges, by a hand-run session,
+with Dane's word**, never by a loop. Signing in to Vercel is a browser
+login, so that step is Dane's.
+
+1. Check the route is on: `scripts/install_tracker_funnel.sh --status`
+   ends in exit 0.
+2. Make the forwarding project (once): from `sites/tracker-page`, run
+   `npx vercel link` and create a new project, `spirality-tracker-page`,
+   then `npx vercel deploy --prod`. Open the `*.vercel.app` address it
+   prints: it shows the tracker's sign-in screen.
+3. In StarCaster's Vercel project, Settings → Domains, **remove**
+   `spirality.alphire.agency`. The DNS record (`CNAME` to
+   `cname.vercel-dns.com`) stays as it is; only which project answers moves.
+4. In `spirality-tracker-page`, Settings → Domains, **add**
+   `spirality.alphire.agency`. Vercel issues its certificate in a minute or
+   two.
+5. Check: `https://spirality.alphire.agency/` shows the sign-in screen;
+   signed in, `https://spirality.alphire.agency/list/spirality` shows the
+   Board/List page, and opening another page (Projects, a ticket) stays
+   signed in. `curl -sI https://spirality.alphire.agency/me` answers 401 and
+   no longer carries `x-site-handler`.
+6. Open a pull request adding
+   `"trackerPageUrl": "https://spirality.alphire.agency"` to
+   `spirality.project.json`; once merged and the tracker restarted, invite
+   and reset emails link to the name.
+
+**Undo:** remove the name from `spirality-tracker-page` and add it back to
+StarCaster's project; nothing on the Mini changes. If the Funnel address
+ever changes, change `trackerPublicUrl`, run
+`node scripts/tracker_page_site.mjs`, and deploy the folder again.
+
 **The hand-over email** goes out through Resend (Dane's choice,
 2026-10-28) when a ticket enters one of his two statuses. The server reads
 two names from the project's Doppler config when it starts: `RESEND_API_KEY`

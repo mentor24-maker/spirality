@@ -7,7 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { SOURCE as IMPORT_SOURCE } from './import.mjs';
-import { startServer, settingsFromEnv, setupSettingsOf, viaPublicAddress, failureCounter } from './server.mjs';
+import { startServer, settingsFromEnv, setupSettingsOf, viaPublicAddress, failureCounter, outsidePageUrl } from './server.mjs';
 import { DANE_FIELDS, STEPS } from '../scripts/onboard/onboard.mjs';
 import loopStatuses from '../lib/loopStatuses.js';
 
@@ -1151,6 +1151,32 @@ test('through the public address the session cookie carries Secure and every ans
     assert.equal(home.headers.get('strict-transport-security'), null);
     assert.equal((await raw('/me', { headers: { cookie: home.headers.get('set-cookie').split(';')[0] } })).status, 200);
   } finally { await s.close(); await f.cleanup(); }
+});
+
+test('forwarded from another https name (spirality.alphire.agency), the sign-in cookie names no Domain, so the browser keeps it for that name, and it signs the page in (SP-164)', async () => {
+  const f = await fixture();
+  const s = await signInServer(f, { publicUrl: PUBLIC_URL });
+  try {
+    // A forwarding site passes the request on to the Funnel address; Funnel adds its marks.
+    const forwarded = { ...FUNNEL, 'x-forwarded-host': 'tracker.example.com' };
+    const signin = await fetch(`${s.base}/signin`, { method: 'POST', headers: { ...forwarded, ...s.json }, body: JSON.stringify({ email: s.email, password: s.password }) });
+    assert.equal(signin.status, 200);
+    const flags = signin.headers.get('set-cookie').split(';').map((p) => p.trim());
+    assert.ok(!flags.some((p) => /^domain=/i.test(p)), 'no Domain: the cookie belongs to whichever name the browser opened');
+    assert.ok(flags.includes('Path=/') && flags.includes('Secure'));
+    const cookie = flags[0];
+    for (const path of ['/me', '/projects']) {
+      assert.equal((await fetch(`${s.base}${path}`, { headers: { ...forwarded, cookie } })).status, 200, `${path} signed in through the forwarded name`);
+    }
+    const page = await fetch(`${s.base}/`, { headers: { ...forwarded, accept: 'text/html', cookie }, redirect: 'manual' });
+    assert.equal(page.status, 200);
+  } finally { await s.close(); await f.cleanup(); }
+});
+
+test('the invite and reset emails link to trackerPageUrl when it is set, else to the shared address (SP-164)', () => {
+  assert.equal(outsidePageUrl({ trackerPageUrl: 'https://tracker.example.com', shared: 'http://mini.local:4180' }), 'https://tracker.example.com');
+  assert.equal(outsidePageUrl({ trackerPageUrl: null, shared: 'http://mini.local:4180' }), 'http://mini.local:4180');
+  assert.equal(outsidePageUrl({ shared: 'http://mini.local:4180' }), 'http://mini.local:4180');
 });
 
 test('any one of Funnel\'s marks makes a request public: the https proto, the Funnel header, or the public name as Host (SP-152)', () => {
