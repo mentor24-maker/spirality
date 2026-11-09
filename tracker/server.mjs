@@ -521,6 +521,7 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     return {
       people: store.listPeople().map((p) => ({ ...p, email: store.emailOf(p.id), role: store.roleOf(p.id), projects: seen(store.projectsOf(p.id)) })),
       invites: store.listInvites(),
+      sites: store.listSites().map(({ id, name }) => ({ id, name })),
       roles: store.listRoles(),
       permissions: store.listPermissions(),
       canEditRoles: store.roleOf(me.id) === 'admin',
@@ -680,13 +681,21 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
         throw new HttpError(403, 'people-only', 'only a person signed in to the tracker may invite someone; a machine may not.');
       }
       const body = await readJson(req);
-      checkBody(body, me, ['email']);
+      checkBody(body, me, ['email', 'site']);
       if (typeof body.email !== 'string' || !body.email.trim()) throw new HttpError(400, 'missing', 'type the email to invite.');
+      // `site` sends the link to an outside site's page instead of the
+      // tracker's (docs/OUTSIDE_SITE_API.md); anything but a site actor's id is refused.
+      let siteUrl = null;
+      if (body.site != null) {
+        siteUrl = store.siteUrlOf(body.site);
+        if (!siteUrl) throw new HttpError(400, 'not-a-site', `site is the id of an outside site the tracker knows, not ${typeof body.site === 'number' || typeof body.site === 'string' ? `"${body.site}"` : 'that value'}. Nothing was made or sent.`);
+      }
       const result = await sendInvite({
         store, email: body.email, madeBy: me.id, send: accountMail?.send ?? null,
-        trackerUrl: accountMail?.pageUrl ?? null, projectName: accountMail?.projectName ?? 'tracker',
+        trackerUrl: accountMail?.pageUrl ?? null, siteUrl, projectName: accountMail?.projectName ?? 'tracker',
       });
-      log(result.ok ? `invite sent actor=${me.id}` : `invite NOT sent (${result.code}) actor=${me.id}`);
+      const through = siteUrl ? ` through site ${body.site}` : '';
+      log(result.ok ? `invite sent${through} actor=${me.id}` : `invite NOT sent (${result.code})${through} actor=${me.id}`);
       if (!result.ok) throw new HttpError(INVITE_REFUSALS[result.code] ?? 400, result.code, result.line);
       return [201, { sent: result.line, ...peopleOf(me) }];
     }
@@ -1019,6 +1028,11 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
       const body = await readJson(req);
       onlyFields(body, ['email']);
       if (typeof body.email !== 'string' || !body.email.trim()) throw new HttpError(400, 'missing', 'type your email.');
+      // Sent with an outside site's own token, the link opens on that
+      // site's page (docs/OUTSIDE_SITE_API.md); with any other token, or
+      // none, on the tracker's. The answer is the same either way.
+      const caller = req.headers.authorization == null ? null : store.actorForToken(bearerToken(req));
+      const siteUrl = caller ? store.siteUrlOf(caller.id) : null;
       // The email goes out after the answer, so the answer is the same,
       // and as quick, whether or not the email has an account.
       const email = body.email.trim().toLowerCase();
@@ -1031,7 +1045,7 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
         }
         const { line } = await sendResetLink({
           store, email: body.email, send: accountMail?.send ?? null,
-          trackerUrl: accountMail?.pageUrl ?? null, projectName: accountMail?.projectName ?? 'tracker',
+          trackerUrl: accountMail?.pageUrl ?? null, siteUrl, projectName: accountMail?.projectName ?? 'tracker',
         });
         log(line);
       };

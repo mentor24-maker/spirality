@@ -75,11 +75,11 @@ export function resetEmail({ name, projectName, link }) {
  * for the server log; the line never carries the link's token or the email.
  * A send the mail service refuses withdraws the link.
  */
-export async function sendResetLink({ store, email, send, trackerUrl, projectName }) {
+export async function sendResetLink({ store, email, send, trackerUrl, siteUrl = null, projectName }) {
   const person = store.actorForEmail(email);
   if (!person) return { ok: true, line: 'reset asked for an email with no account; nothing sent' };
   if (!send) return { ok: false, line: `reset NOT sent to actor ${person.id}: ${MAIL_KEY} is not in Doppler, so no email can go out` };
-  if (!trackerUrl) return { ok: false, line: `reset NOT sent to actor ${person.id}: the tracker's own address is unknown` };
+  if (!trackerUrl && !siteUrl) return { ok: false, line: `reset NOT sent to actor ${person.id}: the tracker's own address is unknown` };
   let link;
   try {
     link = store.makeLink({ purpose: 'reset', email, madeBy: person.id });
@@ -89,13 +89,13 @@ export async function sendResetLink({ store, email, send, trackerUrl, projectNam
   }
   const scrub = (text) => String(text ?? '').split(link.token).join('[link]');
   try {
-    await send({ to: store.emailOf(person.id), ...resetEmail({ name: person.name, projectName, link: setPasswordUrl(trackerUrl, link.token) }) });
+    await send({ to: store.emailOf(person.id), ...resetEmail({ name: person.name, projectName, link: linkAddress({ trackerUrl, siteUrl }, link.token) }) });
   } catch (err) {
     let withdrawn = 'the link was withdrawn';
     try { store.cancelLink(link.token); } catch (e) { withdrawn = `the link could NOT be withdrawn (${scrub(e.message)}), but it was never sent`; }
     return { ok: false, line: `reset NOT sent to actor ${person.id}: ${scrub(err?.message ?? err)}; ${withdrawn}` };
   }
-  return { ok: true, line: `reset link sent to actor ${person.id}, good for 1 hour` };
+  return { ok: true, line: `reset link sent to actor ${person.id}${siteUrl ? ' through a site' : ''}, good for 1 hour` };
 }
 
 /** The invite email: `{ subject, text }`. `link` is the whole set-password address. */
@@ -124,14 +124,16 @@ export function inviteEmail({ inviter, projectName, link, days }) {
  * link (`not-sent`), so no open invite is left. Answers `{ ok, code, line }`;
  * the line never carries the link's token. The mail handed to `send` also
  * carries `kind: 'invite'` and the `link`, for the demo to print; Resend
- * reads only `to`, `subject` and `text`.
+ * reads only `to`, `subject` and `text`. With `siteUrl` (an outside
+ * site's page, docs/OUTSIDE_SITE_API.md) the link opens there instead of
+ * on the tracker's own page.
  */
-export async function sendInvite({ store, email, madeBy, send, trackerUrl, projectName, now = Date.now }) {
+export async function sendInvite({ store, email, madeBy, send, trackerUrl, siteUrl = null, projectName, now = Date.now }) {
   const refuse = (code, why) => ({ ok: false, code, line: `Not invited: ${why} Nothing was made or sent.` });
   const inviter = Number.isInteger(madeBy) ? store.getActor(madeBy) : null;
   if (!inviter || inviter.kind !== 'human') return refuse('people-only', 'only a person may invite someone.');
   if (!send) return refuse('no-mail', `${MAIL_KEY} is not in Doppler, so no email can go out.`);
-  if (!trackerUrl) return refuse('no-address', "the tracker's own address is unknown, so the link would have no address.");
+  if (!trackerUrl && !siteUrl) return refuse('no-address', "the tracker's own address is unknown, so the link would have no address.");
   let link;
   try {
     link = store.makeLink({ purpose: 'invite', email, madeBy: inviter.id });
@@ -142,7 +144,7 @@ export async function sendInvite({ store, email, madeBy, send, trackerUrl, proje
   const scrub = (text) => String(text ?? '').split(link.token).join('[link]');
   const days = Math.round((Date.parse(link.expiresAt) - now()) / DAY);
   const to = email.trim().toLowerCase();
-  const address = setPasswordUrl(trackerUrl, link.token);
+  const address = linkAddress({ trackerUrl, siteUrl }, link.token);
   try {
     await send({ to, ...inviteEmail({ inviter: inviter.name, projectName, link: address, days }), kind: 'invite', link: address });
   } catch (err) {
@@ -151,6 +153,22 @@ export async function sendInvite({ store, email, madeBy, send, trackerUrl, proje
     return { ok: false, code: 'not-sent', line: `Not invited: the email to ${to} did not go out (${scrub(err?.message ?? err)}). ${withdrawn}` };
   }
   return { ok: true, code: null, line: `Invite sent to ${to}, good for ${days} days.` };
+}
+
+/**
+ * The address an emailed link opens: the outside site's page with the
+ * token as `?link=` when `siteUrl` is given, otherwise the tracker's own
+ * set-password page.
+ */
+export function linkAddress({ trackerUrl, siteUrl = null }, token) {
+  return siteUrl ? siteLinkUrl(siteUrl, token) : setPasswordUrl(trackerUrl, token);
+}
+
+/** An outside site's page address with the link's token added as `link=`, keeping any query it already has. */
+export function siteLinkUrl(siteUrl, token) {
+  const url = new URL(siteUrl);
+  url.searchParams.set('link', token);
+  return url.href;
 }
 
 /** The set-password page's address for a link token, under the tracker's address. */
