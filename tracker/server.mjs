@@ -99,7 +99,7 @@ const HSTS = 'max-age=31536000';
  * `Tailscale-Funnel-Request` header, and the public name in `Host`. Any one
  * of them counts. Someone on the home network who sends one by hand only
  * gets the stricter answer (a `Secure` cookie their http page never sends
- * back, no page), so a false "public" never weakens anything.
+ * back), so a false "public" never weakens anything.
  */
 export function viaPublicAddress(req, publicHost = null) {
   const proto = String(req.headers['x-forwarded-proto'] ?? '').split(',')[0].trim().toLowerCase();
@@ -1097,11 +1097,15 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     let me = null;
     let status;
     let wrote = null;
-    // Through the public address only the API answers: no page, no page
-    // redirect: an outside site's server is the one caller there.
+    // The page and its redirects answer through the public address too
+    // (Dane's choice of 2026-11-09): the team opens the whole page
+    // from the internet, behind the same sign-in. Every address in it is
+    // root-relative and the cookie names no Domain, so it also works under
+    // another https name that forwards here. What stays stricter there:
+    // the Secure cookie, Strict-Transport-Security and the per-door locks.
     const isPublic = viaPublicAddress(req, publicHost);
     if (isPublic) res.setHeader('strict-transport-security', HSTS);
-    const asPage = !isPublic && (req.method === 'GET' || req.method === 'HEAD');
+    const asPage = req.method === 'GET' || req.method === 'HEAD';
     try {
       const onward = asPage ? pageRedirect(url.pathname, req.headers.accept) : null;
       if (onward) {
@@ -1293,7 +1297,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     const accountMail = mail.account && { ...mail.account, projectName: store.getProject(defaultProject)?.name ?? 'tracker' };
     const { setup, why: noSetup } = setupSettingsOf({ db: resolve(db) });
     log(setup ? `set up a project: on, reading ${setup.homeConfig.logDir}/onboard.` : `set up a project: off. ${noSetup}.`);
-    log(publicUrl ? `public address: ${publicUrl} answers the API only, with a Secure cookie.` : 'public address: none set (trackerPublicUrl).');
+    log(publicUrl ? `public address: ${publicUrl} serves the page and the API, with a Secure cookie.` : 'public address: none set (trackerPublicUrl).');
     const server = await startServer({ store, port, host, log, notifier, defaultProject, mergePhrase, closePhrase: CLOSE_PHRASE, goPhrase: GO_PHRASE, accountMail, setup, publicUrl });
     console.log(`tracker listening on http://${host}:${server.address().port}/`);
   } catch (err) {

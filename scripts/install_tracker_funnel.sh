@@ -1,7 +1,8 @@
 #!/bin/bash
 #
-# Put the tracker's API on the internet over https, through Tailscale Funnel
-# (SP-152), so an outside site's server (StarCaster's, on Vercel) can call it.
+# Put the tracker on the internet over https, through Tailscale Funnel
+# (SP-152): its API, so an outside site's server (StarCaster's, on Vercel) can
+# call it, and its page behind sign-in (SP-162), so the team can open it.
 #
 #   ./scripts/install_tracker_funnel.sh            # put the route on (or check it is on)
 #   ./scripts/install_tracker_funnel.sh --status   # is it on? does it answer from outside?
@@ -27,8 +28,8 @@
 # IT REFUSES TO PUBLISH OLD CODE. Before the route goes on, the running
 # tracker must answer a request marked as coming through Funnel with the
 # Strict-Transport-Security header, which only a tracker that knows about
-# the public address sends (with the Secure cookie and no page). A tracker
-# still on older code would be published without either.
+# the public address sends (with the Secure cookie). A tracker still on
+# older code would be published without either.
 #
 # Exit: 0 on (or off, for --off) and checked; 1 a step failed or a check did
 # not pass; 2 bad usage or an unusable config; 3 refused (old tracker code, or
@@ -153,7 +154,7 @@ tracker_is_ready() {
   headers="$(curl -s -m 10 -o /dev/null -D - -H 'X-Forwarded-Proto: https' "$LOCAL_ME" 2>/dev/null || true)"
   [ -n "$headers" ] || { echo "The tracker does not answer at $LOCAL_ME; start it first (scripts/install_loop_runner.sh --status)." >&2; return 1; }
   printf '%s' "$headers" | grep -qi '^strict-transport-security:' && return 0
-  echo "The tracker at $LOCAL_ME is running code from before SP-152: it would be published with no Secure cookie and with its page." >&2
+  echo "The tracker at $LOCAL_ME is running code from before SP-152: it would be published with no Secure cookie and no Strict-Transport-Security." >&2
   echo "Restart it onto main first (launchctl kickstart -k gui/$(id -u)/$(cfg launchdPrefix).tracker), then run this again." >&2
   return 3
 }
