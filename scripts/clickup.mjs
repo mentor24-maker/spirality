@@ -219,7 +219,7 @@ npm run clickup -- <command> [flags]      (Loop Queue: list ${LOOP_QUEUE_LIST}, 
                                                   ticket moves it to Queued, Rework or Live by the contract's table.
                                                   One line per ticket he holds. --dry-run prints what it would do, writes nothing
   bus-post --body-file <f|-> [--from <name>]      post an alarm or report to the bus project's "Team chat" ticket, read back
-  bus-read [--operator] [--since <time>]          the bus's comments, oldest first: time, ticket, operator|machine, author, first line
+  bus-read [--operator] [--since <time>]          the bus's comments, oldest first: time (ISO, UTC: feeds --since), ticket, operator|machine, author, first line
   main-moved --pr <merged #> [--list <id>] [--dry-run]
                                                   tell every Building / In review / Rework ticket with an open PR whether
                                                   that merge moved main under it: no-overlap, same-files, conflict or
@@ -1724,7 +1724,7 @@ if (cmd === 'whoami') {
   if (cmd === 'bus-post') {
     const bodyFile = arg('body-file');
     if (!bodyFile) usage();
-    const post = trackerBus.renderBusPost({ text: readBody(bodyFile), node: arg('from') || hostname(), at: new Date().toISOString() });
+    const post = trackerBus.renderBusPost({ text: readBody(bodyFile), node: arg('from') || hostname(), at: trackerBus.mountainTime(Date.now()) });
     if (!post) { console.error('bus-post: the message is empty. Nothing was posted.'); process.exit(2); }
     let chat = trackerBus.pickTeamChat(listed.json.tasks);
     if (!chat) {
@@ -1737,7 +1737,12 @@ if (cmd === 'whoami') {
         console.error(`bus-post: created ${made.json.id}, but it read back named ${JSON.stringify(chat.name)}. Nothing was posted.`);
         process.exit(1);
       }
-      console.error(`bus-post: there was no "${FALLBACK_TASK_NAME}" ticket in ${bus}; created ${chat.id} (read back).`);
+      // Live is the only thing keeping a loop from claiming it (rule 5: read it back).
+      if (statusOf(chat) !== trackerBus.TEAM_CHAT_STATUS.toLowerCase()) {
+        console.error(`bus-post: created ${chat.id} "${chat.name}", but it read back in status ${JSON.stringify(statusOf(chat))}, not "${trackerBus.TEAM_CHAT_STATUS}", so a loop could claim it. Nothing was posted; move it to ${trackerBus.TEAM_CHAT_STATUS} on the page.`);
+        process.exit(1);
+      }
+      console.error(`bus-post: there was no "${FALLBACK_TASK_NAME}" ticket in ${bus}; created ${chat.id} in ${trackerBus.TEAM_CHAT_STATUS} (read back).`);
     }
     const { id } = await postComment(chat.id, { comment_text: post });
     console.log(`Posted to the bus: comment ${id} on ${chat.id} "${chat.name}" in ${bus} (verified by reading it back).`);
@@ -1745,11 +1750,23 @@ if (cmd === 'whoami') {
   } else {
     const since = trackerBus.parseSince(arg('since'));
     if (since && typeof since === 'object') { console.error(`bus-read: ${since.error}. Nothing was read.`); process.exit(2); }
+    // One unreadable ticket must not hide the rest (Dane's stop word on Team
+    // chat above all): name it, carry on, and fail at the end.
     const tickets = [];
-    for (const t of listed.json.tasks) tickets.push({ id: t.id, name: t.name, comments: await readComments(t.id) });
+    const unread = [];
+    for (const t of listed.json.tasks) {
+      const read = await readCommentsOrProblem(t.id);
+      if (read.problem) { unread.push(t); console.error(`bus-read: could NOT read the comments on ${t.id} "${t.name}" (${read.problem}); its messages are missing below.`); continue; }
+      tickets.push({ id: t.id, name: t.name, comments: read.comments });
+    }
     const messages = trackerBus.busMessages(tickets, { operatorId: OPERATOR_ID, operatorOnly: flag('operator'), since });
     for (const m of messages) console.log(trackerBus.busLine(m));
-    console.error(`${messages.length} message(s) on the bus (${bus}, ${tickets.length} ticket(s) read in full)${flag('operator') ? ', the operator\'s only' : ''}${since != null ? ` after ${new Date(since).toISOString()}` : ''}.`);
+    console.error(`${messages.length} message(s) on the bus (${bus}, ${tickets.length} ticket(s) read in full)${flag('operator') ? ', the operator\'s only' : ''}${since != null ? ` after ${trackerBus.mountainTime(since)}` : ''}.`);
+    if (unread.length) {
+      console.error(`bus-read FAILED on ${unread.length} ticket(s): ${unread.map((t) => t.id).join(', ')}. The list above is incomplete.`);
+      reportLimits();
+      process.exit(1);
+    }
   }
   reportLimits();
 

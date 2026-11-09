@@ -18,3 +18,14 @@ tracker equivalent, and a test keeps that list and the plan document in
 step. Moving StarCaster's scripts onto these commands is the next ticket.
 How loudly an alarm should reach Dane (the page only, or an email or text)
 is his decision and is asked on its own ticket.
+
+Review sent it back once, and it was right. The table said a steward's
+question needs one command to file it, but a question filed that way sits
+in Queued, where Dane never sees it: it reaches his Waiting on You list only
+after a second command, `ask`. The table now says both, so the StarCaster
+switch-over cannot copy a path that hides his questions. The time on each
+post is now Mountain time, the time Dane reads, not UTC. A new Team chat
+ticket's status is checked after it is made, because being in Live is the
+only thing that keeps a loop from trying to build it. And if one bus ticket
+cannot be read, `bus-read` names it, still reads the rest, then fails, so
+one bad ticket cannot hide Dane's "stop" on Team chat.

@@ -1014,8 +1014,22 @@ npm run clickup -- bus-read --operator --since 2026-11-09T16:00:00Z             
 
 `bus-post` creates the Team chat ticket the first time, and exits 1 saying
 so on any write it could not read back; there is no plan limit to fall back
-from. `bus-read` prints one tab-separated line per comment, oldest first:
-time, ticket, `operator` or `machine`, author, first line. Setting it up
+from. Each post opens with `**From <machine>** · <time>`, the time in
+Mountain time, because that header is what Dane reads on the page.
+`bus-read` prints one tab-separated line per comment, oldest first, for a
+script to read: time (ISO, in UTC, so it can go straight back in as
+`--since`), ticket, `operator` or `machine`, author, first line. A ticket
+whose comments cannot be read is named on its own line and the read carries
+on with the rest, then exits 1, so one bad ticket never hides Dane's stop
+word on Team chat. It reads top-level comments only: the tracker's comment
+list leaves threaded replies out, and the page cannot post a reply today, so
+nothing is missed yet; a reply feature on the page would need `bus-read`
+taught to follow it.
+
+A steward question is two commands: `task --list <busProject>` files it,
+and it lands in Queued, which is not on Dane's Waiting on You list; then
+`ask --task <id> --status "Needs your input"` with the operator card is
+what puts it in front of him. Setting it up
 for a project: create the bus project on the Projects page, put the
 project's loops on it, and write its slug as `busProject`.
 
@@ -1030,10 +1044,10 @@ together):
 | The relay's own notices (`postToBus` / `postOrSaveToBus`): merged, merge refused or deferred, stalled hand-off, auto-merge latched off, lane armed, "<operator> replied on ..." | `bus-post`; the "replied on" relay is no longer needed, because the steward reads the operator's replies with `bus-read --operator` |
 | The fallback when the party line refuses (`saveUndeliveredAlarm`): a comment on the "Team chat" ticket in the Loop Queue, created if missing, oldest wins | `bus-post` IS that ticket, in the bus project: there is no plan limit to fall back from, and a refused write exits 1 and says so |
 | A relay receipt on the ticket a message was about (`deliverToBus` with a hand-back target) | `npm run clickup -- comment --task <id>`, unchanged |
-| The steward filing a question for the operator as a ticket in the Agent Response list | `npm run clickup -- task --list <busProject>`, a ticket in the bus project |
+| The steward filing a question for the operator as a ticket in the Agent Response list | Two commands, both needed: `npm run clickup -- task --list <busProject>` files it (it lands in Queued, which is NOT on the operator's Waiting on You list), then `ask --task <id> --status "Needs your input"` with the operator card puts it there |
 | Reading the party line for the operator's stop and resume words (`readBusSwitchSignals`) | `bus-read --operator`: only comments whose author is the operator's own actor, no machine-stamp guess |
 | The relay watching Agent Response tickets ("pending response", "responding") for the operator's comments | `bus-read --operator --since <time>`, across every ticket in the bus project |
-| `waiting` sweeping the Agent Response list for "what actually needs me?" | The page's Waiting on You list, which already reads every project the operator is on, the bus project included |
+| `waiting` sweeping the Agent Response list for "what actually needs me?" | The page's Waiting on You list, which reads every project the operator is on, the bus project included, but shows only tickets in the operator's statuses: a steward question shows there once it has been through `ask`, never straight after `task` |
 | The operator seeing a new post: the "Team chat" ticket puts itself in their ClickUp "Assigned to me" list | The bus project's board on the tracker page, where "Team chat" sits in Live. No email or text per post (a follow-up ticket asks the operator how loud alarms should be) |
 
 Switching StarCaster's scripts over to these commands is the next ticket.
