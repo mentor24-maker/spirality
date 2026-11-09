@@ -7,7 +7,7 @@ import { openStore } from './store.mjs';
 import { importLoopQueue, formatReport, ImportReadError, SOURCE } from './import.mjs';
 import { MACHINE_MARKER_LINE } from '../scripts/lib/machineComment.mjs';
 import { createSignins, seatsFor } from './signins.mjs';
-import { operatorImportKey } from './import.mjs';
+import { noClickUpList, operatorImportKey } from './import.mjs';
 
 const OPERATOR = '700';
 const SERVICE = '800';
@@ -338,4 +338,14 @@ test('a deleted unstarted ticket is not filed again by a re-run, and its comment
     assert.deepEqual(store.listTickets('widget'), []);
     assert.equal(store.getTicket(t.id), null);
   } finally { cleanup(); }
+});
+
+test('a project whose ClickUp list is "0" (never on ClickUp, or archived) is refused before anything is read (SP-22)', () => {
+  assert.equal(noClickUpList({ projectSlug: 'alpha', loopQueueListId: '4242' }), null);
+  for (const id of ['0', '000']) {
+    const why = noClickUpList({ projectSlug: 'alpha', loopQueueListId: id });
+    assert.match(why, /alpha names no ClickUp list/);
+    assert.match(why, /read-only archive/);
+    assert.match(why, /npm run tracker:old-id/);
+  }
 });

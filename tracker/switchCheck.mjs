@@ -40,7 +40,7 @@ import { pathToFileURL } from 'node:url';
 import { openStore } from './store.mjs';
 import { startServer } from './server.mjs';
 import { checkSignins, seatsFor } from './signins.mjs';
-import { dryRunCopy, formatReport, importLoopQueue, readAllTasks, SOURCE } from './import.mjs';
+import { dryRunCopy, formatReport, importLoopQueue, noClickUpList, readAllTasks, SOURCE } from './import.mjs';
 import { createClickupTracker } from '../scripts/tracker/clickupTracker.mjs';
 import { loadProjectConfig, ProjectConfigError } from '../lib/projectConfig.mjs';
 import loopStatuses from '../lib/loopStatuses.js';
@@ -263,6 +263,11 @@ async function main() {
   } catch (err) {
     if (!(err instanceof ProjectConfigError)) throw err;
     console.error(`tracker:switch-check: the project config is not usable — ${err.message}`);
+    return 1;
+  }
+  const noList = noClickUpList(config);
+  if (noList) {
+    console.error(`tracker:switch-check: ${noList}`);
     return 1;
   }
   if (!process.env.CLICKUP_API_TOKEN || !process.env.DOPPLER_PROJECT) {

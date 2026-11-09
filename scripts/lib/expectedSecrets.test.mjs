@@ -46,7 +46,8 @@ test('names are unique, and every one is expected in the config the project conf
   assert.equal(new Set(names).size, names.length);
   assert.equal(home.project, SPIRALITY.dopplerProject);
   assert.deepEqual(CONFIGS, [SPIRALITY.dopplerConfig]);
-  assert.deepEqual(expected.map((s) => s.name), names);
+  // Spirality reads no ClickUp list any more (SP-22): every key but the ClickUp ones.
+  assert.deepEqual(expected.map((s) => s.name), EXPECTED_SECRETS.filter((s) => !s.clickup).map((s) => s.name));
   for (const s of expected) assert.deepEqual(s.configs, CONFIGS, s.name);
 });
 
@@ -61,10 +62,13 @@ test('another project checks its own Doppler project and config, without the key
   assert.ok(guest.expected.every((s) => s.configs[0] === 'prd'));
 });
 
-test('Spirality, on the tracker but still reading its ClickUp list, is asked for the ClickUp key', () => {
+test('Spirality, its ClickUp list an archive since SP-22, is not asked for the ClickUp key; still reading a list, it would be', () => {
   assert.equal(SPIRALITY.tracker, 'api');
-  assert.equal(usesClickUp(SPIRALITY), true);
-  assert.ok(home.expected.some((s) => s.name === 'CLICKUP_API_TOKEN'));
+  assert.equal(usesClickUp(SPIRALITY), false);
+  assert.ok(!home.expected.some((s) => s.name === 'CLICKUP_API_TOKEN'));
+  const reading = { ...SPIRALITY, loopQueueListId: '901418065068' };
+  assert.equal(usesClickUp(reading), true);
+  assert.ok(doctorTarget(reading).expected.some((s) => s.name === 'CLICKUP_API_TOKEN'));
 });
 
 test('a project on the tracker with ClickUp ids "0" is not asked for the ClickUp key; one on ClickUp is', () => {
@@ -92,7 +96,7 @@ test('doctor passes for a project never on ClickUp whose Doppler has no ClickUp 
 test('all present: ok', () => {
   const report = doctorReport({ dev: all('dev') }, expected, CONFIGS);
   assert.equal(report.ok, true);
-  assert.deepEqual(report.rows.find((r) => r.name === 'CLICKUP_API_TOKEN').cells, { dev: 'present' });
+  assert.deepEqual(report.rows.find((r) => r.name === 'TRACKER_TOKEN_LOOP_BUILD').cells, { dev: 'present' });
 });
 
 test('a name not needed in a config is not a failure; one missing name fails the whole report', () => {
@@ -115,7 +119,7 @@ test('the table has a header and one line per expected name', () => {
   const lines = text.split('\n');
   assert.equal(lines.length, expected.length + 1);
   assert.match(lines[0], /^NAME\s+dev$/);
-  assert.match(text, /CLICKUP_API_TOKEN\s+present/);
+  assert.match(text, /TRACKER_TOKEN_LOOP_BUILD\s+present/);
 });
 
 test('every tracker token a runner names is on the list, so doctor reports it', () => {

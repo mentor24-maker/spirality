@@ -18,9 +18,9 @@
  *
  * A key marked `clickup` is needed only by a project that still talks to
  * ClickUp (usesClickUp): its `tracker` is `"clickup"`, or its
- * `loopQueueListId` names a real ClickUp list (not `"0"`), as Spirality's
- * does, kept as the record to compare the tracker against. A project never
- * on ClickUp (`tracker` `"api"`, ClickUp ids `"0"`) is never asked for it.
+ * `loopQueueListId` names a real ClickUp list (not `"0"`). A project never
+ * on ClickUp, or one whose list is now an archive (Spirality since SP-22),
+ * has `tracker` `"api"` and ClickUp ids `"0"`, and is never asked for it.
  */
 
 /**

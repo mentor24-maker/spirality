@@ -921,13 +921,51 @@ ClickUp seat ids the config holds until then.
 ClickUp's Loop Queue is left exactly as it was at step 1 and is not written
 to: every loop, and Dane, works in the tracker. ClickUp is the record to
 compare against if anything looks wrong. Making the list read-only, and
-letting ClickUp go, is a later ticket.
+letting ClickUp go, comes after the week (below).
+
+### After the week
+
+When the operator says the week went well (Spirality: Dane's go on
+2026-11-08, on SP-22), the ClickUp list becomes a read-only archive. One
+pull request sets the project config's three ClickUp ids to `"0"`:
+
+```json
+"workspaceId": "0",
+"spaceId": "0",
+"loopQueueListId": "0",
+```
+
+With `tracker` `"api"` and no ClickUp list, nothing in the project reads
+ClickUp: the door talks only to the tracker, `npm run doctor` stops asking
+for `CLICKUP_API_TOKEN`, and `tracker:import` and `tracker:switch-check`
+refuse at once, saying the project names no ClickUp list. The list itself is
+not deleted and nothing writes to it. Spirality's archive is list
+`901418065068` in space `90146476540`, workspace `90141423066`; write the
+old ids down here for each project, because the config no longer holds them.
+
+**Old ClickUp links.** Pull requests, comments and `Waits on:` lines written
+before the switch name ClickUp ids (`86bctjbc3`, or
+`https://app.clickup.com/t/86bctjbc3`). The importer recorded every one it
+copied in its id map (`imported_ids` in the tracker database), and one
+read-only command reads it:
+
+```bash
+npm run tracker:old-id -- 86bctjbc3 https://app.clickup.com/t/86bcudhyj
+# 86bctjbc3	SP-21	http://mac-mini.local:4180/t/SP-21
+# 86bcudhyj	SP-31	http://mac-mini.local:4180/t/SP-31
+```
+
+It opens the database read-only (`TRACKER_DB`, else the config's
+`trackerDataDir`), never talks to ClickUp, and prints `not imported` for an
+id the importer never saw. Exit 0 every id found, 3 some were not, 1 the map
+could not be read.
 
 ### Switching back
 
 The switch is one config change, so going back is too, done the same way:
 stop the loops (step 1), a pull request that sets `tracker` back to
-`"clickup"` and the ids back to the ClickUp seats, Dane's merge, start the
+`"clickup"` and the ids back to the ClickUp seats (after the week, the
+ClickUp list ids too, from "After the week"), Dane's merge, start the
 loops (step 7). Anything done in the tracker during the week stays in the
 tracker and is not copied back to ClickUp; a ticket moved there is moved by
 hand in ClickUp.
