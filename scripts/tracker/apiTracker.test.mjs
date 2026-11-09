@@ -8,6 +8,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { openStore } from '../../tracker/store.mjs';
 import { startServer } from '../../tracker/server.mjs';
+import { SOURCE as IMPORT_SOURCE } from '../../tracker/import.mjs';
 import { createApiTracker, trackerTokenEnv } from './apiTracker.mjs';
 import { conflictTicketFiledComment, findConflictTicket } from '../../lib/conflictWork.js';
 import { isMachineComment } from '../lib/machineComment.mjs';
@@ -336,6 +337,44 @@ test('Waits on: a dependent is skipped while its prerequisite is open, and claim
     const claim = await f.door(['claim', '--task', 'AL-2']);
     assert.equal(claim.code, 0, claim.err);
     assert.equal(f.store.getTicket('AL-2').status, 'building');
+  } finally { await f.cleanup(); }
+});
+
+test('Waits on: an imported line naming old ClickUp ids is claimable once they are Live, held as still open otherwise, never "could not be read" (SP-157)', async () => {
+  const f = await fixture();
+  try {
+    const imported = (sourceId, name, status) => f.store.importTicket({
+      source: IMPORT_SOURCE, sourceId, createdAt: '2026-01-02T03:04:05.000Z',
+      project: 'alpha', actor: f.machine.id, name, status, priority: 'normal',
+    });
+    imported('86bcdone1', 'shipped', 'live');
+    const open = imported('86bcopen1', 'not yet', 'queued');
+    const ready = f.file({ name: 'after the shipped one', description: 'Waits on: 86bcdone1\n\n## Goal\nx' });
+    const held = f.file({ name: 'after the open one', description: 'Waits on: 86bcdone1, 86bcopen1\n\n## Goal\nx' });
+    const unknown = f.file({ name: 'after nothing known', description: 'Waits on: 86bcnone\n\n## Goal\nx' });
+
+    const q = await f.door(['queue', '--claimable']);
+    assert.equal(q.code, 0, q.err);
+    const ids = q.out.trim().split('\n').map((l) => l.split('\t')[0]);
+    assert.ok(ids.includes(ready.id), q.out + q.err);
+    assert.ok(!ids.includes(held.id), q.out);
+    assert.match(q.err, new RegExp(`skipped ${held.id}: waits on 86bcopen1 \\(still open\\)`));
+    assert.doesNotMatch(q.err, /86bcdone1|86bcopen1 \(could not be read\)/);
+    assert.match(q.err, new RegExp(`skipped ${unknown.id}: waits on 86bcnone \\(could not be read\\)`));
+
+    const early = await f.door(['claim', '--task', held.id]);
+    assert.equal(early.code, 3, early.err);
+    assert.match(early.err, /still open/);
+    assert.equal(f.store.getTicket(held.id).status, 'queued');
+
+    const claim = await f.door(['claim', '--task', ready.id]);
+    assert.equal(claim.code, 0, claim.err);
+    assert.equal(f.store.getTicket(ready.id).status, 'building');
+
+    f.store.changeTicket(open.id, { actor: f.human.id, status: 'live' });
+    const later = await f.door(['claim', '--task', held.id]);
+    assert.equal(later.code, 0, later.err);
+    assert.equal(f.store.getTicket(held.id).status, 'building');
   } finally { await f.cleanup(); }
 });
 

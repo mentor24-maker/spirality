@@ -68,6 +68,7 @@ import { resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { MAX_ATTACHMENT, openStore, StoreError } from './store.mjs';
+import { SOURCE as IMPORT_SOURCE } from './import.mjs';
 import { boardOf, PRIORITIES, projectDetailsOf, projectsList, readSearchFilters, reportsOf, searchTickets, stageColoursOf, threadOf, waitingFor } from './pageData.mjs';
 import { createNotifier, DEFAULT_FROM, MAIL_FROM, MAIL_KEY, mailEnvFromDoppler, mailSettingsFromEnv, resendSender, textSettings } from './notify.mjs';
 import { sendInvite, sendResetLink } from './account.mjs';
@@ -558,12 +559,32 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     return project;
   }
 
-  /** A ticket on a project the caller may see, or 404 (notFound). */
+  /**
+   * A ticket on a project the caller may see, or 404 (notFound). An id the
+   * tracker never gave out but the importer mapped (an old ClickUp id on an
+   * imported `Waits on:` line) answers the ticket it became; an id
+   * in neither place is still a 404.
+   */
   function requireTicket(id, me) {
     const scope = scopeOf(me);
-    const ticket = store.getTicket(id);
+    const ticket = store.getTicket(id) ?? importedTicket(id);
     if (!ticket || (scope && !scope.has(ticket.project))) throw notFound('unknown-ticket', `ticket ${id}`, scope);
     return ticket;
+  }
+
+  /**
+   * The ticket an old id became on import, or null (never a throw). The door
+   * upper-cases every id it sends (`/tickets/86ABC123`) and ClickUp's ids are
+   * lower case, so the id is tried as given and then in lower case.
+   */
+  function importedTicket(id) {
+    const given = String(id ?? '').trim();
+    if (!given) return null;
+    for (const sourceId of new Set([given, given.toLowerCase()])) {
+      const mapped = store.importedId({ source: IMPORT_SOURCE, kind: 'ticket', sourceId });
+      if (mapped != null) return store.getTicket(mapped);
+    }
+    return null;
   }
 
   async function route(req, me, url) {
@@ -891,13 +912,13 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
       // Delete a ticket nobody has started; the store refuses any other.
       // The log line names the ticket and the actor, the deletion's record.
       if (method === 'DELETE') {
-        requireTicket(parts[1], me);
+        const { id } = requireTicket(parts[1], me);
         let gone;
         try {
-          gone = store.deleteTicket(parts[1], { actor: me.id });
+          gone = store.deleteTicket(id, { actor: me.id });
         } catch (err) {
           if (err instanceof StoreError && err.code === 'not-deletable') {
-            throw new HttpError(409, 'not-deletable', err.message, { ticket: parts[1], status: err.status });
+            throw new HttpError(409, 'not-deletable', err.message, { ticket: id, status: err.status });
           }
           throw err;
         }
