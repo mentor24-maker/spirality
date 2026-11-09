@@ -30,7 +30,7 @@
 import { readFileSync, writeFileSync, existsSync, statSync, unlinkSync, mkdirSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { homedir } from 'node:os';
+import { homedir, hostname } from 'node:os';
 import { join as joinPath, basename, extname, resolve as resolvePath } from 'node:path';
 import {
   DISPLAY, STAGE_ORDER, CLAIMABLE_BY_BUILD, OPERATOR_STATUSES, BUILDING, NEEDS_YOUR_INPUT, QUEUED, PRIORITY_VALUE,
@@ -69,6 +69,9 @@ import {
   handbackDoneText, handbackFailureText, repliesShowHandbackDone, repliesShowHandbackFailure, HANDBACK_FAILURE_MARKER,
   isCloseCommand, closeRefusedText, latestCloseRefusal,
 } from '../lib/busRelayPlan.js';
+// The bus, in the tracker (SP-24): StarCaster's alarm channel.
+import trackerBus from '../lib/trackerBus.js';
+import { FALLBACK_TASK_NAME } from '../lib/busFallback.js';
 // A ticket's `Waits on:` line (task 86bctfun6): the claim leaves it alone
 // until every ticket it names is closed.
 import { waitsOn, waitsOnText, holdReasons } from '../lib/waitsOn.js';
@@ -215,6 +218,8 @@ npm run clickup -- <command> [flags]      (Loop Queue: list ${LOOP_QUEUE_LIST}, 
                                                   and the hand-back: his answer to the question card on a "Needs your input"
                                                   ticket moves it to Queued, Rework or Live by the contract's table.
                                                   One line per ticket he holds. --dry-run prints what it would do, writes nothing
+  bus-post --body-file <f|-> [--from <name>]      post an alarm or report to the bus project's "Team chat" ticket, read back
+  bus-read [--operator] [--since <time>]          the bus's comments, oldest first: time (ISO, UTC: feeds --since), ticket, operator|machine, author, first line
   main-moved --pr <merged #> [--list <id>] [--dry-run]
                                                   tell every Building / In review / Rework ticket with an open PR whether
                                                   that merge moved main under it: no-overlap, same-files, conflict or
@@ -1693,6 +1698,77 @@ if (cmd === 'whoami') {
   console.error(`relay done: ${ready.length + asked.length} ticket(s) looked at${dryRun ? ', nothing written (dry run)' : ''}.`);
   reportLimits();
   process.exit(unchecked.length ? 1 : 0);
+
+} else if (cmd === 'bus-post' || cmd === 'bus-read') {
+  // The bus (SP-24, lib/trackerBus.js): the project's alarm channel, a
+  // tracker project of its own named in the project config. ClickUp has its
+  // own bus in StarCaster's code; this door does not pretend to be it.
+  if (project.tracker !== 'api') {
+    console.error(`${cmd}: the bus is a tracker project, and this project's tracker is "${project.tracker}". Nothing was ${cmd === 'bus-post' ? 'posted' : 'read'}.`);
+    process.exit(2);
+  }
+  const bus = project.busProject;
+  if (!bus) {
+    console.error(`${cmd}: this project has no bus. Name its tracker project as "busProject" in the project config (docs/TRACKER_MVP.md, "The bus"). Nothing was ${cmd === 'bus-post' ? 'posted' : 'read'}.`);
+    process.exit(2);
+  }
+  const listed = await tracker.listTasksPage(bus, 0, { includeClosed: true });
+  if (!listed.res.ok || !Array.isArray(listed.json?.tasks)) {
+    if (listed.res.status === 404) {
+      console.error(`${cmd}: the tracker has no project "${bus}" that this loop can see. Create it on the tracker's Projects page (or put this loop on it). Nothing was ${cmd === 'bus-post' ? 'posted' : 'read'}.`);
+      process.exit(1);
+    }
+    die(`read the bus project ${bus}`, listed);
+  }
+
+  if (cmd === 'bus-post') {
+    const bodyFile = arg('body-file');
+    if (!bodyFile) usage();
+    const post = trackerBus.renderBusPost({ text: readBody(bodyFile), node: arg('from') || hostname(), at: trackerBus.mountainTime(Date.now()) });
+    if (!post) { console.error('bus-post: the message is empty. Nothing was posted.'); process.exit(2); }
+    let chat = trackerBus.pickTeamChat(listed.json.tasks);
+    if (!chat) {
+      const made = await tracker.createTask(bus, {
+        name: FALLBACK_TASK_NAME, markdown_description: trackerBus.renderTeamChatSeed(), status: trackerBus.TEAM_CHAT_STATUS,
+      });
+      if (!made.res.ok) die(`create the "${FALLBACK_TASK_NAME}" ticket in ${bus}`, made);
+      chat = await readTask(made.json.id);
+      if (String(chat.name) !== FALLBACK_TASK_NAME) {
+        console.error(`bus-post: created ${made.json.id}, but it read back named ${JSON.stringify(chat.name)}. Nothing was posted.`);
+        process.exit(1);
+      }
+      // Live is the only thing keeping a loop from claiming it (rule 5: read it back).
+      if (statusOf(chat) !== trackerBus.TEAM_CHAT_STATUS.toLowerCase()) {
+        console.error(`bus-post: created ${chat.id} "${chat.name}", but it read back in status ${JSON.stringify(statusOf(chat))}, not "${trackerBus.TEAM_CHAT_STATUS}", so a loop could claim it. Nothing was posted; move it to ${trackerBus.TEAM_CHAT_STATUS} on the page.`);
+        process.exit(1);
+      }
+      console.error(`bus-post: there was no "${FALLBACK_TASK_NAME}" ticket in ${bus}; created ${chat.id} in ${trackerBus.TEAM_CHAT_STATUS} (read back).`);
+    }
+    const { id } = await postComment(chat.id, { comment_text: post });
+    console.log(`Posted to the bus: comment ${id} on ${chat.id} "${chat.name}" in ${bus} (verified by reading it back).`);
+    console.log(`  ${filedTrackerUrl() || project.trackerUrl}/t/${chat.id}`);
+  } else {
+    const since = trackerBus.parseSince(arg('since'));
+    if (since && typeof since === 'object') { console.error(`bus-read: ${since.error}. Nothing was read.`); process.exit(2); }
+    // One unreadable ticket must not hide the rest (Dane's stop word on Team
+    // chat above all): name it, carry on, and fail at the end.
+    const tickets = [];
+    const unread = [];
+    for (const t of listed.json.tasks) {
+      const read = await readCommentsOrProblem(t.id);
+      if (read.problem) { unread.push(t); console.error(`bus-read: could NOT read the comments on ${t.id} "${t.name}" (${read.problem}); its messages are missing below.`); continue; }
+      tickets.push({ id: t.id, name: t.name, comments: read.comments });
+    }
+    const messages = trackerBus.busMessages(tickets, { operatorId: OPERATOR_ID, operatorOnly: flag('operator'), since });
+    for (const m of messages) console.log(trackerBus.busLine(m));
+    console.error(`${messages.length} message(s) on the bus (${bus}, ${tickets.length} ticket(s) read in full)${flag('operator') ? ', the operator\'s only' : ''}${since != null ? ` after ${trackerBus.mountainTime(since)}` : ''}.`);
+    if (unread.length) {
+      console.error(`bus-read FAILED on ${unread.length} ticket(s): ${unread.map((t) => t.id).join(', ')}. The list above is incomplete.`);
+      reportLimits();
+      process.exit(1);
+    }
+  }
+  reportLimits();
 
 } else if (cmd === 'main-moved') {
   // The relay runs this step after every merge it makes; a session that
