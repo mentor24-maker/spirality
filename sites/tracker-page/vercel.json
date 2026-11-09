@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    {
+      "source": "/:path*",
+      "destination": "https://mac-mini.tail7fc5c6.ts.net:8443/:path*"
+    }
+  ]
+}

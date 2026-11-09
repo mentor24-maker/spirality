@@ -1216,6 +1216,21 @@ function sharedPageUrl({ host, port }) {
   return pageUrlOf({ trackerUrl, host, port });
 }
 
+/**
+ * The address an invite or reset email links to: the page's https
+ * name for people outside the home network (`trackerPageUrl`) when the
+ * project config sets one, else the shared address (`sharedPageUrl`).
+ */
+export function outsidePageUrl({ trackerPageUrl = null, shared }) {
+  return trackerPageUrl || shared;
+}
+
+function accountPageUrl({ host, port }) {
+  let trackerPageUrl = null;
+  try { trackerPageUrl = loadProjectConfig({ env: process.env }).trackerPageUrl; } catch { /* the shared address below */ }
+  return outsidePageUrl({ trackerPageUrl, shared: sharedPageUrl({ host, port }) });
+}
+
 /** The reset email's sender: Resend with the key alone (it goes to the person who asked, not to TRACKER_NOTIFY_TO). */
 function accountMailOf(env, pageUrl) {
   return { send: env[MAIL_KEY] ? resendSender({ apiKey: env[MAIL_KEY], from: env[MAIL_FROM] || DEFAULT_FROM }) : null, pageUrl };
@@ -1229,7 +1244,7 @@ function accountMailOf(env, pageUrl) {
  */
 export async function loadMailSettings({ host, port, log = () => {} }) {
   if (process.env[MAIL_KEY]) {
-    return { ...mailSettingsFromEnv(process.env, { pageUrl: pageUrlOf({ host, port }) }), account: accountMailOf(process.env, sharedPageUrl({ host, port })) };
+    return { ...mailSettingsFromEnv(process.env, { pageUrl: pageUrlOf({ host, port }) }), account: accountMailOf(process.env, accountPageUrl({ host, port })) };
   }
   let config;
   try {
@@ -1244,7 +1259,7 @@ export async function loadMailSettings({ host, port, log = () => {} }) {
   const pageUrl = pageUrlOf({ trackerUrl: config.trackerUrl, host, port });
   const mail = mailSettingsFromEnv(env, { pageUrl });
   if (mail.send) log(`hand-over email: on, through Resend, linking to ${pageUrl}.`);
-  return { ...mail, account: accountMailOf(env, sharedPageUrl({ host, port })) };
+  return { ...mail, account: accountMailOf(env, accountPageUrl({ host, port })) };
 }
 
 /**
