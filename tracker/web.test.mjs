@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { seedDemo, tickingClock } from './demoData.mjs';
 import { reportsOf, REPORT_RANGES, searchTickets } from './pageData.mjs';
-import { escapeHtml, renderComment, renderInline, renderMarkdown, renderQuickAction, renderCommands, cardCommands, cardAsk, renderMergeAction, renderAnswerIn, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket } from './web/render.mjs';
+import { escapeHtml, renderComment, renderInline, renderMarkdown, renderQuickAction, renderCommands, cardCommands, cardAsk, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket } from './web/render.mjs';
 import { startServer, setupSettingsOf } from './server.mjs';
 import { saveAnswers, setupFields, setupOf } from './setup.mjs';
 import { DANE_FIELDS as SETUP_FIELDS, STEPS as SETUP_STEPS } from '../scripts/onboard/onboard.mjs';
@@ -154,6 +154,7 @@ test('pressing Merge puts "your answer is in" on the ticket page and the board, 
     assert.equal(thread.answerIn, false);
     assert.match(renderMergeAction(thread), /merge-action/);
     assert.equal(renderAnswerIn(thread), '');
+    assert.match(renderReplyForm(thread, 'Dane'), /<form class="reply">/);
     assert.equal((await boardTickets(f, 'beta')).get('BE-1').answerIn, false);
 
     // He presses Merge: the button posts his word, and the page redraws.
@@ -162,6 +163,7 @@ test('pressing Merge puts "your answer is in" on the ticket page and the board, 
     assert.equal(thread.answerIn, true);
     assert.equal(renderMergeAction(thread), '', 'no second Merge button');
     assert.match(renderAnswerIn(thread), /Your answer is in\. The relay acts on it at its next pass\./);
+    assert.equal(renderReplyForm(thread, 'Dane'), '', 'no reply box and no Post Reply button while his answer is in (SP-160)');
     assert.equal(statusLabel(thread), `Ready to launch · ${ANSWER_IN_NOTE}`);
     assert.equal((await boardTickets(f, 'beta')).get('BE-1').answerIn, true, 'the board and list say so too');
 
@@ -172,6 +174,7 @@ test('pressing Merge puts "your answer is in" on the ticket page and the board, 
     assert.equal(thread.answerIn, false);
     assert.match(renderMergeAction(thread), /merge-action/);
     assert.equal(statusLabel(thread), 'Ready to launch');
+    assert.match(renderReplyForm(thread, 'Dane'), /<form class="reply">[\s\S]*Post Reply/, "the reply box comes back with the relay's comment");
     assert.equal((await boardTickets(f, 'beta')).get('BE-1').answerIn, false);
   } finally { await f.cleanup(); }
 });
@@ -231,6 +234,24 @@ test('once his answer is in, Close and Go stand down too, and the ticket page, b
   assert.match(app, /\$\{renderAnswerIn\(t\)\}/, 'the ticket page draws the line');
   assert.match(app, /statusLabel\(t\)/, 'the ticket page writes the status with the note');
   assert.equal(app.match(/t\.answerIn \? /g)?.length, 2, 'the board card and the list row both draw the note');
+});
+
+test('with his answer in, the ticket page draws no reply box and copes with it missing, and the notice is boxed (SP-160)', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const draw = /\nasync function drawTicket\(id(?:, said = null(?:, kept = null)?)?\) \{[\s\S]*?\n\}\n/.exec(app)?.[0] ?? '';
+  assert.ok(draw, 'drawTicket found');
+  assert.doesNotMatch(draw, /<form class="reply">/, 'the box comes only from renderReplyForm');
+  // Every reach for the box survives its absence: the kept text, the #reply jump, the submit wiring.
+  assert.doesNotMatch(draw, /querySelector\('form\.reply textarea'\)\.value =/);
+  assert.match(draw, /const form = main\.querySelector\('form\.reply'\);\s*if \(!form\) return;\s*const box = form\.querySelector\('textarea'\);/);
+  assert.match(draw, /if \(!form\) return;[\s\S]*location\.hash === '#reply'[\s\S]*form\.addEventListener\('submit'/);
+  assert.match(app, /reply: main\.querySelector\('form\.reply textarea'\)\?\.value \?\? ''/);
+  // The ticket page's notice: tinted, a blue bar on the left, ink, upright. The board and list note unchanged.
+  const css = readFileSync(WEB('app.css'), 'utf8');
+  const notice = /\np\.answer-in \{([^}]*)\}/.exec(css)?.[1] ?? '';
+  for (const rule of [/font-style: normal/, /color: var\(--ink\)/, /background: #/, /border-left: \d+px solid var\(--blue\)/, /padding: /]) assert.match(notice, rule);
+  assert.match(css, /\n\.answer-in \{ font-size: 0\.85rem; font-style: italic; color: var\(--quiet\); \}/);
+  assert.equal(renderAnswerIn({ answerIn: true }), '<p class="answer-in">Your answer is in. The relay acts on it at its next pass.</p>');
 });
 
 // ── The board ────────────────────────────────────────────────────────────────
@@ -890,7 +911,8 @@ test('the ticket page opens on the Quick Action section, with everything it show
   assert.ok(page, 'Quick Action first, then Details');
   const [, quick, details] = page;
   assert.match(quick, /renderQuickAction\(t\)/);
-  assert.match(quick, /<form class="reply">[\s\S]*<textarea id="reply" required>/, 'the reply box is on the right of Quick Action');
+  assert.match(quick, /\$\{renderReplyForm\(t, me\?\.name\)\}/, 'the reply box is on the right of Quick Action');
+  assert.match(renderReplyForm({}, 'Dane'), /<form class="reply">[\s\S]*<label for="reply">Reply as Dane<\/label>[\s\S]*<textarea id="reply" required>/);
   assert.match(details, /^\s*<summary>Details<\/summary>/);
   // The status line, the description and the comments, all inside Details.
   for (const part of [/statusLabel\(t\)/, /renderMarkdown\(t\.description\)/, /\$\{comments \|\|/]) assert.match(details, part);
@@ -1016,7 +1038,7 @@ test('Copy copies exactly the block\'s text: no fence, no extra spaces or line b
   assert.match(app, /document\.execCommand\('copy'\)/);
   assert.match(app, /'Copied'/);
   const quick = /<section class="quick">([\s\S]*?)<\/section>/.exec(app)[1];
-  assert.match(quick, /\$\{renderCommands\(t\)\}[\s\S]*<form class="reply">/, 'the commands sit on the right, above the reply box');
+  assert.match(quick, /\$\{renderCommands\(t\)\}[\s\S]*\$\{renderReplyForm\(t, me\?\.name\)\}/, 'the commands sit on the right, above the reply box');
 });
 
 test('a card with no command block, or no card at all, shows no Copy buttons', () => {
@@ -1451,7 +1473,7 @@ test('the Go button posts the substrate\'s one go word, handed to the page by th
   } finally { await none.cleanup(); }
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   assert.match(app, /wordButton\('form\.go-action', goQuestion\(t\), t\.goPhrase,/);
-  assert.match(app, /\$\{renderCloseAction\(t\)\}\s*\$\{renderGoAction\(t\)\}\s*<form class="reply">/, 'Go sits between Close and the reply box');
+  assert.match(app, /\$\{renderCloseAction\(t\)\}\s*\$\{renderGoAction\(t\)\}\s*\$\{renderReplyForm\(t, me\?\.name\)\}/, 'Go sits between Close and the reply box');
 });
 
 test('no go word is written into the page\'s code, and the Go button has the Merge look with 10px corners', () => {
@@ -1517,7 +1539,7 @@ test('clicking Merge and confirming posts exactly the merge phrase as Dane\'s ow
   const draw = /\nasync function drawTicket\(id(?:, said = null(?:, kept = null)?)?\) \{[\s\S]*?\n\}\n/.exec(app)?.[0] ?? '';
   assert.match(draw, /const wordButton = [\s\S]*wordButton\('form\.merge-action'[\s\S]*wordButton\('form\.close-action'/);
   assert.equal(app.match(/const wordButton = /g).length, 1);
-  assert.match(app, /<div class="act">\s*(?:\$\{renderCommands\(t\)\}\s*)?\$\{renderAnswerIn\(t\)\}\s*\$\{renderMergeAction\(t\)\}\s*\$\{renderCloseAction\(t\)\}\s*\$\{renderGoAction\(t\)\}\s*<form class="reply">/, 'the answer-is-in line, then Merge, Close and Go, sit above the reply box on the right');
+  assert.match(app, /<div class="act">\s*(?:\$\{renderCommands\(t\)\}\s*)?\$\{renderAnswerIn\(t\)\}\s*\$\{renderMergeAction\(t\)\}\s*\$\{renderCloseAction\(t\)\}\s*\$\{renderGoAction\(t\)\}\s*\$\{renderReplyForm\(t, me\?\.name\)\}/, 'the answer-is-in line, then Merge, Close and Go, sit above the reply box on the right');
 });
 
 test('after a reply, Merge, Close or Go posts, the page stays at the top with no confirmation box', () => {
@@ -1809,7 +1831,7 @@ test('a save carries over what is typed elsewhere on the page: the reply box, an
   assert.match(typed, /name: field !== 'name' && nameBox && nameBox\.value !== t\.name \? nameBox\.value : null/);
   assert.match(typed, /tag: field === 'tags' \? '' : tagBox\.value/);
   const draw = /\nasync function drawTicket\(id, said = null, kept = null\) \{[\s\S]*?\n\}\n/.exec(app)?.[0] ?? '';
-  assert.match(draw, /const panel = wireEditPanel\(t\);\s*if \(kept\) \{\s*main\.querySelector\('form\.reply textarea'\)\.value = kept\.reply;\s*panel\?\.restore\(kept\);/);
+  assert.match(draw, /const panel = wireEditPanel\(t\);\s*if \(kept\) \{[^}]*const keptBox = main\.querySelector\('form\.reply textarea'\);\s*if \(keptBox\) keptBox\.value = kept\.reply;\s*panel\?\.restore\(kept\);/);
   assert.match(wire, /restore\(kept\) \{[\s\S]*area\.value = kept\.description;\s*openEditor\(\);/, 'the description edit opens again with its text');
 });
 

@@ -26,7 +26,7 @@
  * an emailed link's own page. The link's token is sent only in a JSON body,
  * never in an address.
  */
-import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderAnswerIn, statusLabel, ANSWER_IN_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket } from './render.mjs';
+import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket } from './render.mjs';
 
 /** Where an earlier version of the page kept a pasted token; removed on load, never read. */
 const OLD_TOKEN_KEY = 'tracker-token';
@@ -1221,11 +1221,7 @@ async function drawTicket(id, said = null, kept = null) {
       ${renderMergeAction(t)}
       ${renderCloseAction(t)}
       ${renderGoAction(t)}
-      <form class="reply">
-        <label for="reply">Reply as ${escapeHtml(me?.name ?? 'you')}</label>
-        <textarea id="reply" required></textarea>
-        <div class="row"><button type="submit">Post Reply</button><span class="note"></span></div>
-      </form>
+      ${renderReplyForm(t, me?.name)}
       ${renderDeleteAction(t)}
       </div>
     </section>
@@ -1337,7 +1333,9 @@ async function drawTicket(id, said = null, kept = null) {
   });
   const panel = wireEditPanel(t);
   if (kept) {
-    main.querySelector('form.reply textarea').value = kept.reply;
+    // No box while his answer is in: nothing typed there to put back.
+    const keptBox = main.querySelector('form.reply textarea');
+    if (keptBox) keptBox.value = kept.reply;
     panel?.restore(kept);
   }
   if (said) {
@@ -1348,7 +1346,10 @@ async function drawTicket(id, said = null, kept = null) {
       where.textContent = said.text;
     }
   }
+  // While his answer is in there is no reply box (renderReplyForm): the
+  // notice is all the page says, and a #reply address just shows it.
   const form = main.querySelector('form.reply');
+  if (!form) return;
   const box = form.querySelector('textarea');
   // Arrived by a Reply icon: go straight to the box.
   if (location.hash === '#reply' && !refreshing) {
