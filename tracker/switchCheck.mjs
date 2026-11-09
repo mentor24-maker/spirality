@@ -15,7 +15,9 @@
  *                       loops call (trackerApiUrl, else trackerUrl): Node
  *                       may not find a ".local" name that ping and curl do,
  *                       and then every loop pass fails with "fetch failed".
- *  2. sign-ins          each seat's token (TRACKER_SEATS) signs in as itself:
+ *  2. sign-ins          each of the project's own seats (seatsForConfig: a
+ *                       guest's lanes are named for it, with no operator
+ *                       seat) signs in as itself with its token:
  *                       against the running tracker when it answers, else
  *                       against a throwaway server on a copy of the database.
  *  3. queues match      every ticket in ClickUp's Loop Queue is in the
@@ -39,7 +41,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { openStore } from './store.mjs';
 import { startServer } from './server.mjs';
-import { checkSignins, seatsFor } from './signins.mjs';
+import { checkSignins, seatsForConfig } from './signins.mjs';
 import { dryRunCopy, formatReport, importLoopQueue, noClickUpList, readAllTasks, SOURCE } from './import.mjs';
 import { createClickupTracker } from '../scripts/tracker/clickupTracker.mjs';
 import { loadProjectConfig, ProjectConfigError } from '../lib/projectConfig.mjs';
@@ -198,8 +200,11 @@ export async function runSwitchCheck({ config, env, db, clickup, fetchImpl = fet
       return { ok: false, sections };
     }
 
-    // 2. Sign-ins.
-    const seats = seatsFor(config.operatorName);
+    // 2. Sign-ins: the project's own seats, as tracker:signins made them.
+    // The project that runs the tracker has the operator's seat and the bare
+    // lane names; a guest's lanes are named for it and it has no operator
+    // seat (seatsForConfig).
+    const { seats } = seatsForConfig(config);
     if (live) {
       const r = await checkSignins({ url, seats, env });
       section('sign-ins', r.ok, ['Checked against the running tracker.', ...r.lines]);
