@@ -34,6 +34,15 @@ function unreachable(err) {
   return { res: { ok: false, status: 0, headers: { get: () => null } }, json: null, text: `the request never reached ClickUp (${err?.message || err})` };
 }
 
+/** Is `target` (a URL) one of ClickUp's own hosts, or the API base's? */
+export function clickupHost(target, apiBase = 'https://api.clickup.com') {
+  const host = target.hostname.toLowerCase();
+  let base = '';
+  try { base = new URL(apiBase).hostname.toLowerCase(); } catch { base = ''; }
+  if (base && host === base) return true;
+  return ['clickup.com', 'clickup-attachments.com'].some((d) => host === d || host.endsWith(`.${d}`));
+}
+
 /**
  * `token` is the ClickUp API token. `apiBase` and `timeoutMs` default to
  * ClickUp itself and one minute (CLICKUP_API_BASE / CLICKUP_HTTP_TIMEOUT_MS
@@ -96,14 +105,22 @@ export function createClickupTracker({ token, apiBase, timeoutMs, log = console.
     listsInSpace: (space) => call('GET', `/api/v2/space/${space}/list?archived=false`),
     foldersInSpace: (space) => call('GET', `/api/v2/space/${space}/folder?archived=false`),
 
+    /** One list's own record (its name, its statuses, ClickUp's `task_count`). */
+    getList: (list) => call('GET', `/api/v2/list/${list}`),
+
     /** One page of a list's tasks; `json.last_page` says whether more follow.
-     *  `markdown: true` adds `markdown_description` to each ticket. */
-    listTasksPage: (list, page, { includeClosed = false, markdown = false } = {}) =>
-      call('GET', `/api/v2/list/${list}/task?archived=false${includeClosed ? '&include_closed=true' : ''}${markdown ? '&include_markdown_description=true' : ''}&page=${page}`),
+     *  `markdown: true` adds `markdown_description` to each ticket;
+     *  `archived: true` reads the archived tickets instead of the rest;
+     *  `subtasks: true` lists subtasks too. */
+    listTasksPage: (list, page, { includeClosed = false, markdown = false, archived = false, subtasks = false } = {}) =>
+      call('GET', `/api/v2/list/${list}/task?archived=${archived ? 'true' : 'false'}${includeClosed ? '&include_closed=true' : ''}${subtasks ? '&subtasks=true' : ''}${markdown ? '&include_markdown_description=true' : ''}&page=${page}`),
 
     /** `markdown: true` adds `markdown_description` to the ticket. */
     getTask: (task, { markdown = false } = {}) =>
       call('GET', `/api/v2/task/${task}${markdown ? '?include_markdown_description=true' : ''}`),
+    /** How long the ticket spent in each status (ClickUp's "Time in Status";
+     *  a workspace without that ClickApp answers an error). */
+    getTimeInStatus: (task) => call('GET', `/api/v2/task/${task}/time_in_status`),
     createTask: (list, fields) => call('POST', `/api/v2/list/${list}/task`, fields),
     updateTask: (task, fields) => call('PUT', `/api/v2/task/${task}`, fields),
     setTag: (task, name, on) => call(on ? 'POST' : 'DELETE', `/api/v2/task/${task}/tag/${encodeURIComponent(name)}`),
@@ -127,6 +144,34 @@ export function createClickupTracker({ token, apiBase, timeoutMs, log = console.
     postComment: (task, body) => call('POST', `/api/v2/task/${task}/comment`, body),
     replyToComment: (commentId, body) => call('POST', `/api/v2/comment/${commentId}/reply`, body),
     listReplies: (commentId) => call('GET', `/api/v2/comment/${commentId}/reply`),
+
+    /**
+     * The bytes of one file ClickUp gave a link to (a ticket's attachment).
+     * Answers `{ res, bytes }`, `bytes` a Buffer (null when it did not come
+     * back). The token goes only to ClickUp's own hosts and the API base,
+     * never to a link that points anywhere else.
+     */
+    async fetchFile(url) {
+      let target;
+      try { target = new URL(url); } catch { return { ...unreachable(new Error(`not a web address: ${String(url).slice(0, 80)}`)), bytes: null }; }
+      if (target.protocol !== 'https:' && target.protocol !== 'http:') {
+        return { ...unreachable(new Error(`not a web address: ${target.protocol}`)), bytes: null };
+      }
+      requests += 1;
+      const headers = clickupHost(target, API) ? { Authorization: token } : {};
+      let res;
+      try {
+        res = await fetch(target, { headers, signal: AbortSignal.timeout(HTTP_TIMEOUT_MS) });
+      } catch (err) {
+        return { ...unreachable(err), bytes: null };
+      }
+      if (!res.ok) return { res, json: null, text: '', bytes: null };
+      try {
+        return { res, json: null, text: '', bytes: Buffer.from(await res.arrayBuffer()) };
+      } catch (err) {
+        return { ...unreachable(err), bytes: null };
+      }
+    },
 
     /** No request is made: the door says so, never "(none)". */
     listAttachments: async () => unsupported(NO_ATTACHMENTS_ON_CLICKUP),
