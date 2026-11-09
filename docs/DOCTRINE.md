@@ -16,7 +16,7 @@ you click or a part of the page.
 - **Buttons**, including the words a button changes to for a moment
   ("Copied", "Not Copied"): "Add Project", "Post Reply", "Save Password",
   "Send Invite", "Sign Out".
-- **Links drawn as buttons** (`<a class="button">`): "Set Up a Product".
+- **Links drawn as buttons** (`<a class="button">`): "Set Up a Project".
 - **The tooltip of an icon button or icon link**, which is its name for
   screen readers too: "View Project", "Delete Ticket", "Open Pull Request on
   GitHub".
@@ -27,7 +27,7 @@ you click or a part of the page.
 - **Table column headings** (`<th>`), including the Reporting page's ranges:
   "Last Change", "Ticket Prefix", "Assigned To", "Last 7 Days".
 - **The tab title and the trail at the top of the page**, which repeat the
-  page's heading: "Set Up a Product · Tracker".
+  page's heading: "Set Up a Project · Tracker".
 
 ### 1.2 What stays as it is written
 
@@ -52,7 +52,7 @@ you click or a part of the page.
    so, yet; as, at, by, in, of, on, to, up, via, per, vs, with, from, into,
    onto.
 3. A small word that is part of the verb is capitalised: "Set **Up** a
-   Product", "Carry **On** with the Setup", "Sign **In**".
+   Project", "Carry **On** with the Setup", "Sign **In**".
 
 The check enforces 1 and 2 (it lets a small word be either, because only a
 person can tell 3 apart); 3 is yours to get right.

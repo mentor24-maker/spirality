@@ -443,8 +443,8 @@ function showProject() {
  * address, GitHub repository, owner, how many tickets are open, and an Actions column whose
  * View icon opens its details page. Choosing a name selects the project and
  * opens its tasks; the selected one is marked, and "Tasks" in the header
- * goes back to it. A person signed in gets a Set up a product button (its
- * page links the bare New project form), the products being set up, and, on
+ * goes back to it. A person signed in gets a Set up a project button (its
+ * page links the bare New project form), the projects being set up, and, on
  * each row, Edit and Delete icons; a loop's sign-in gets none of them, and
  * the server refuses it anyway. Delete asks first, then draws the table
  * again from the server, so a deleted project is gone because the server
@@ -454,7 +454,7 @@ function showProject() {
 async function drawProjects(done = '') {
   const [{ projects }, setups] = await Promise.all([
     api('GET', '/projects'),
-    // Products mid-setup; a tracker that cannot read setups (or a loop's sign-in) shows none.
+    // Projects mid-setup; a tracker that cannot read setups (or a loop's sign-in) shows none.
     me?.kind === 'human' ? api('GET', '/setup').catch((err) => { if (err instanceof SignedOut) throw err; return { setups: [] }; }) : { setups: [] },
   ]);
   setTitle('Projects · Tracker');
@@ -483,7 +483,7 @@ async function drawProjects(done = '') {
     </tr>`;
   main.innerHTML = `
     <h1>Projects</h1>
-    ${me?.kind === 'human' ? '<div class="toolbar"><a class="button" href="/setup/new">Set Up a Product</a></div>' : ''}
+    ${me?.kind === 'human' ? '<div class="toolbar"><a class="button" href="/setup/new">Set Up a Project</a></div>' : ''}
     <p class="note${done ? ' quiet' : ''}" role="status">${escapeHtml(done)}</p>
     ${renderSetupList(setups)}
     ${projects.length
@@ -774,53 +774,53 @@ async function drawEditProject(slug) {
 }
 
 /**
- * Set up a product, its answers (SP-127): `/setup/new`, for a person only.
+ * Set up a project, its answers (SP-127): `/setup/new`, for a person only.
  * The fields are the wizard's own (`GET /setup/fields`), each filled in with
  * its default; Save writes them (`PUT /setup/<slug>`, checked by the
- * wizard's checker) and opens the product's setup page. A refusal naming a
+ * wizard's checker) and opens the project's setup page. A refusal naming a
  * field shows beside it, and every box keeps what was typed.
- * `/setup/<slug>/answers` is the same form for a product already
+ * `/setup/<slug>/answers` is the same form for a project already
  * started, filled in from its saved answers, until its sign-ins are made.
  * The bare New project form stays a link away, for a tracker project with
  * no repository.
  */
-async function drawSetupNew(product) {
-  setTitle('Set Up a Product · Tracker');
-  putTrail([{ label: 'Projects', href: '/projects' }, { label: 'Set Up a Product' }]);
+async function drawSetupNew(project) {
+  setTitle('Set Up a Project · Tracker');
+  putTrail([{ label: 'Projects', href: '/projects' }, { label: 'Set Up a Project' }]);
   if (me?.kind !== 'human') {
-    main.innerHTML = '<h1>Set Up a Product</h1><p>Only a person signed in to the tracker can set up a product.</p><p><a href="/projects">Back to Projects</a></p>';
+    main.innerHTML = '<h1>Set Up a Project</h1><p>Only a person signed in to the tracker can set up a project.</p><p><a href="/projects">Back to Projects</a></p>';
     return;
   }
   let saved = null;
-  if (product) {
-    saved = await api('GET', `/setup/${encodeURIComponent(product)}`);
+  if (project) {
+    saved = await api('GET', `/setup/${encodeURIComponent(project)}`);
     if (saved.locked) {
-      main.innerHTML = `<h1>Set Up ${escapeHtml(setupName(saved))}</h1><p>Its sign-ins are made from these answers, so they no longer change here.</p><p><a href="/setup/${encodeURIComponent(product)}">Back to its setup</a></p>`;
+      main.innerHTML = `<h1>Set Up ${escapeHtml(setupName(saved))}</h1><p>Its sign-ins are made from these answers, so they no longer change here.</p><p><a href="/setup/${encodeURIComponent(project)}">Back to its setup</a></p>`;
       return;
     }
   }
-  let { fields } = await api('GET', `/setup/fields?product=${encodeURIComponent(product ?? '')}`);
+  let { fields } = await api('GET', `/setup/fields?project=${encodeURIComponent(project ?? '')}`);
   main.innerHTML = `
-    <h1>${product ? `Set Up ${escapeHtml(setupName(saved))}: Its Answers` : 'Set Up a Product'}</h1>
+    <h1>${project ? `Set Up ${escapeHtml(setupName(saved))}: Its Answers` : 'Set Up a Project'}</h1>
     <p class="quiet">The setup runs on the Mini: after Save, its page shows the command to paste into a Terminal there, and follows every step. A tracker project with no GitHub repository? <a href="/projects/new">New project</a>.</p>
     <form class="request setup">
       ${renderSetupForm(fields, saved?.answers ?? null)}
-      <p class="quiet">Its slug, in every address and file name: <span class="slug">${escapeHtml(product ?? '')}</span></p>
-      <div class="row"><button type="submit">Save</button><a href="${product ? `/setup/${encodeURIComponent(product)}` : '/projects'}">Cancel</a><span class="note form-note"></span></div>
+      <p class="quiet">Its slug, in every address and file name: <span class="slug">${escapeHtml(project ?? '')}</span></p>
+      <div class="row"><button type="submit">Save</button><a href="${project ? `/setup/${encodeURIComponent(project)}` : '/projects'}">Cancel</a><span class="note form-note"></span></div>
     </form>`;
   const form = main.querySelector('form.setup');
   const note = form.querySelector('.form-note');
   const nameBox = form.querySelector('[name="projectName"]');
-  const slugOf = () => product ?? setupSlug(nameBox?.value);
+  const slugOf = () => project ?? setupSlug(nameBox?.value);
   const showSlug = () => { form.querySelector('.slug').textContent = slugOf() || '(none yet)'; };
   showSlug();
-  if (!product && nameBox) {
+  if (!project && nameBox) {
     nameBox.addEventListener('input', showSlug);
     // Some defaults come from the slug (the ticket prefix): fill them again, where they are still the default.
     nameBox.addEventListener('change', async () => {
       let next;
       try {
-        ({ fields: next } = await api('GET', `/setup/fields?product=${encodeURIComponent(slugOf())}`));
+        ({ fields: next } = await api('GET', `/setup/fields?project=${encodeURIComponent(slugOf())}`));
       } catch { return; }
       for (const f of next) {
         const box = form.querySelector(`[name="${f.key}"]`);
@@ -867,7 +867,7 @@ async function drawSetupNew(product) {
 }
 
 /**
- * One product's setup page (SP-127): its steps as the wizard's state file
+ * One project's setup page (SP-127): its steps as the wizard's state file
  * records them, and under them one box saying what is next, with a Copy
  * button for every command to paste on the Mini. The page runs nothing.
  * Answers whether it follows the setup (reads again every few seconds):
@@ -880,20 +880,20 @@ async function drawSetup(slug) {
   } catch (err) {
     if (!(err instanceof Refused) || err.status !== 400) throw err;
     setTitle('No Such Setup · Tracker');
-    main.innerHTML = `<h1>Set Up a Product</h1><p>${escapeHtml(err.message)}</p><p><a href="/projects">Back to Projects</a></p>`;
-    putTrail([{ label: 'Projects', href: '/projects' }, { label: 'Set Up a Product' }]);
+    main.innerHTML = `<h1>Set Up a Project</h1><p>${escapeHtml(err.message)}</p><p><a href="/projects">Back to Projects</a></p>`;
+    putTrail([{ label: 'Projects', href: '/projects' }, { label: 'Set Up a Project' }]);
     return false;
   }
   const name = setupName(setup);
   // The finished box links its first ticket: the lowest-numbered on its board.
   const firstTicketId = setup.finished
-    ? await api('GET', `/projects/${encodeURIComponent(setup.product)}/board`).then(firstTicket, (err) => { if (err instanceof SignedOut) throw err; return null; })
+    ? await api('GET', `/projects/${encodeURIComponent(setup.project)}/board`).then(firstTicket, (err) => { if (err instanceof SignedOut) throw err; return null; })
     : null;
   setTitle(`Set Up ${name} · Tracker`);
   main.innerHTML = `
     <section class="setup">
       <h1>Set Up ${escapeHtml(name)}</h1>
-      <div class="toolbar"><a href="/projects">All projects</a>${setup.locked ? '' : `<a href="/setup/${encodeURIComponent(setup.product)}/answers">Change the answers</a>`}</div>
+      <div class="toolbar"><a href="/projects">All projects</a>${setup.locked ? '' : `<a href="/setup/${encodeURIComponent(setup.project)}/answers">Change the answers</a>`}</div>
       ${setup.answersError ? `<p class="note error">The answers do not check: ${escapeHtml(setup.answersError)}</p>` : ''}
       <h2>Steps</h2>
       ${renderSetupSteps(setup.state)}

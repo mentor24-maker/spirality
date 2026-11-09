@@ -1886,7 +1886,7 @@ const GOOD_ANSWERS = Object.freeze({
 function writeState(dir, slug, { outcomes = {}, stop = null, finished = false } = {}) {
   mkdirSync(dir, { recursive: true });
   const state = {
-    product: slug,
+    project: slug,
     updatedAt: '2026-11-05T08:15:00.000Z',
     steps: STEPS.map((step) => ({ step, outcome: outcomes[step] ?? 'pending', at: outcomes[step] ? '2026-11-05T07:20:00.000Z' : null, why: null })),
     stop,
@@ -1910,8 +1910,11 @@ test('GET /setup/fields answers the wizard\'s own questions, with the tracker ho
     assert.equal(byKey.mergePhrases.list, true);
     assert.equal(byKey.autoMergeLanes.default, 'none');
     assert.equal(byKey.trackerPrefix.default, null, 'no project named: no slug to make a prefix from');
-    const named = await f.call('GET', '/setup/fields?product=press-play', { token: f.humanToken, at: f.at });
+    const named = await f.call('GET', '/setup/fields?project=press-play', { token: f.humanToken, at: f.at });
     assert.equal(named.body.fields.find((x) => x.key === 'trackerPrefix').default, 'PR');
+    // ?product= is the address's old name (SP-156): a page opened before the rename still gets its defaults.
+    const old = await f.call('GET', '/setup/fields?product=press-play', { token: f.humanToken, at: f.at });
+    assert.equal(old.body.fields.find((x) => x.key === 'trackerPrefix').default, 'PR');
   } finally { await f.cleanup(); }
 });
 
@@ -1970,7 +1973,7 @@ test('PUT /setup/:slug writes the answers file, checked by the wizard\'s checker
     const get = await f.call('GET', '/setup/press-play', { token: f.humanToken, at: f.at });
     assert.equal(get.status, 200);
     assert.deepEqual(get.body.answers, onDisk);
-    assert.equal(get.body.commands.start, `cd ${f.home} && TRACKER_DB=${f.path} npm run onboard -- --product press-play --no-prompt`);
+    assert.equal(get.body.commands.start, `cd ${f.home} && TRACKER_DB=${f.path} npm run onboard -- --project press-play --no-prompt`);
     assert.equal(get.body.commands.resume, get.body.commands.start);
     // A second save changes one field and keeps the rest.
     const again = await f.call('PUT', '/setup/press-play', { token: f.humanToken, at: f.at, body: { trackerPrefix: 'PP' } });
@@ -2029,7 +2032,7 @@ test('GET /setup/:slug and GET /setup read the state file: none yet, stopped at 
 
     assert.equal((await f.call('PUT', '/setup/press-play', { token: f.humanToken, at: f.at, body: GOOD_ANSWERS })).status, 200);
     const listed = await f.call('GET', '/setup', { token: f.humanToken, at: f.at });
-    assert.deepEqual(listed.body.setups, [{ product: 'press-play', step: null, finished: false, started: false, stateError: null }]);
+    assert.deepEqual(listed.body.setups, [{ project: 'press-play', step: null, finished: false, started: false, stateError: null }]);
 
     const stop = { step: 'signins', kind: 'paste', why: 'the sign-ins are not made yet', commands: ['cd /x', 'npm run tracker:signins -- create'], link: null };
     writeState(f.onboard, 'press-play', { outcomes: { answers: 'done', look: 'done', clone: 'skip', settings: 'done', signins: 'stopped' }, stop });
@@ -2039,7 +2042,7 @@ test('GET /setup/:slug and GET /setup read the state file: none yet, stopped at 
     assert.equal(stopped.body.finished, false);
     assert.equal(stopped.body.locked, false);
     assert.deepEqual((await f.call('GET', '/setup', { token: f.humanToken, at: f.at })).body.setups,
-      [{ product: 'press-play', step: 'signins', finished: false, started: true, stateError: null }]);
+      [{ project: 'press-play', step: 'signins', finished: false, started: true, stateError: null }]);
 
     writeState(f.onboard, 'press-play', { outcomes: Object.fromEntries(STEPS.map((s) => [s, 'done'])), finished: true });
     const done = await f.call('GET', '/setup/press-play', { token: f.humanToken, at: f.at });
@@ -2047,7 +2050,7 @@ test('GET /setup/:slug and GET /setup read the state file: none yet, stopped at 
     assert.equal(done.body.step, null);
     assert.equal(done.body.locked, true);
     assert.deepEqual((await f.call('GET', '/setup', { token: f.humanToken, at: f.at })).body.setups,
-      [{ product: 'press-play', step: null, finished: true, started: true, stateError: null }]);
+      [{ project: 'press-play', step: null, finished: true, started: true, stateError: null }]);
 
     writeFileSync(join(f.onboard, 'press-play.state.json'), '{ not json');
     const broken = await f.call('GET', '/setup/press-play', { token: f.humanToken, at: f.at });

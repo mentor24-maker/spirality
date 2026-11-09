@@ -66,7 +66,7 @@ test('a sign-in part comes out of an address, whatever the host', () => {
   assert.equal(withoutSignIn('https://github.com/a/b'), 'https://github.com/a/b');
 });
 
-test('--product must name the project the answers file is for', () => {
+test('--project must name the project the answers file is for', () => {
   assert.equal(projectMismatch(null, { projectSlug: 'normie' }, '/a.json'), null);
   assert.equal(projectMismatch('normie', { projectSlug: 'normie' }, '/a.json'), null);
   assert.match(projectMismatch('pressplay', { projectSlug: 'normie' }, '/a.json'), /\/a\.json is for the project "normie", not "pressplay"/);

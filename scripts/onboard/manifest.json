@@ -216,7 +216,7 @@
     {
       "from": "scripts/lib/trackerFiles.mjs",
       "to": "scripts/lib/trackerFiles.mjs",
-      "why": "the settings reader sits under loop/ in a product",
+      "why": "the settings reader sits under loop/ in a project",
       "edits": [
         {
           "find": "from '../../lib/projectConfig.mjs'",
@@ -239,7 +239,7 @@
     {
       "from": ".claude/skills/loop-intake/SKILL.md",
       "to": ".claude/skills/loop-intake/SKILL.md",
-      "why": "Spirality's statuses contract lives in Spirality, not in the product",
+      "why": "Spirality's statuses contract lives in Spirality, not in the project",
       "edits": [
         {
           "find": "whole system and `docs/LOOP_CONTRACT.md` for the statuses.",
@@ -379,7 +379,7 @@
   "made": [
     {
       "to": ".gitignore",
-      "from": "the product's own (made if it has none), with these lines added where missing: the lanes' working copies live in .claude/worktrees/, and a main checkout that shows them as changed never pulls (SP-120)",
+      "from": "the project's own (made if it has none), with these lines added where missing: the lanes' working copies live in .claude/worktrees/, and a main checkout that shows them as changed never pulls (SP-120)",
       "ignoreLines": [".claude/worktrees/"]
     },
     {
