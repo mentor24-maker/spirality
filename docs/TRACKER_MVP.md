@@ -769,6 +769,20 @@ Mini, from the project's main checkout on `main`. **Never a loop session**:
 a loop pass runs inside the lanes step 1 stops, and would cut itself off
 mid-pass. The one step that is Dane's is the merge in step 6.
 
+**With the setup wizard.** A project that runs its own older copy of the
+loop (WaveCenter, StarCaster) is moved by `npm run onboard -- --project
+<slug>` instead of by hand (SP-159): its answers name its Loop Queue list,
+and the wizard runs steps 1, 4 and 5 below itself, as its `stop`,
+`snapshot`, `import` and `switch-check` steps, after the sign-ins (step 3)
+and before its setup pull request opens. That pull request is the switch
+PR, and Dane's merge phrase on its setup ticket is step 6. Step 7 comes
+before the merge there, as for every project the wizard sets up: its lanes
+step installs the new lanes from the setup branch, already on the tracker,
+once the import and the check are done. Step 2 is not needed: the tracker
+already runs as a service on the Mini. How it finds the lanes and which settings the
+scripts read: [ONBOARDING_A_PROJECT.md, "A project already on
+ClickUp"](ONBOARDING_A_PROJECT.md#a-project-already-on-clickup-wavecenter-starcaster).
+
 **Before the day.** A small pull request (the "switch PR") is open and green,
 not merged. It changes the project config, and only that, plus the
 "where tickets live" wording in `CLAUDE.md` and the skills:

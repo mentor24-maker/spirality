@@ -44,6 +44,13 @@
  *             printed and stops, nothing run. Then it reads back with
  *             `tracker:signins check` and fills in machineUserId
  *             (`onboard:settings fill-machine-user`).
+ *   stop, snapshot, import, switch-check
+ *             SP-159: only for a project that already runs a loop on ClickUp
+ *             (its answers name a `clickupListId`): its old lanes stopped,
+ *             its ClickUp list saved and imported into the tracker, and the
+ *             switch checked safe, all before the copy step's pull request
+ *             can merge (scripts/onboard/fromClickup.mjs). A new project's
+ *             run never has these steps.
  *   copy      SP-110's one pull request in the project's repository
  *             (`onboard:copy`), CI's verify green on it.
  *   lanes     SP-111 installs the project's lanes from the setup branch and
@@ -95,12 +102,16 @@ import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createInterface } from 'node:readline/promises';
 import { CONFIG_FILE, findConfigFile, loadProjectConfig, ProjectConfigError, withProjectNames } from '../../lib/projectConfig.mjs';
-import { AnswersError, answersFile, expandHome, loadAnswers, onboardDir, slugFromName } from '../../lib/onboardAnswers.mjs';
+import { AnswersError, answersFile, expandHome, loadAnswers, onboardDir, resolveAnswers, slugFromName } from '../../lib/onboardAnswers.mjs';
 import { machineUserPending } from '../../lib/onboardSettings.mjs';
 import { ciVerdict, SETUP_BRANCH } from '../../lib/onboardCopy.mjs';
 import { LANES, parseStatus } from '../../lib/onboardLanes.mjs';
 import { normalRepo } from '../lib/repoCheck.mjs';
 import { readEmptiness, starterFiles, starterMessage } from '../../lib/onboardStarter.mjs';
+import {
+  CLICKUP_FIELDS, CLICKUP_STEPS, installerPath, passInFlight, readInstallerStatus, runsOldLoop, safeToSwitch,
+  snapshotArgs, switchDir, switchSettings, withClickupSteps,
+} from './fromClickup.mjs';
 
 const require = createRequire(import.meta.url);
 const { findTicketId, ticketLink } = require('../../lib/clickupTicketLink.js');
@@ -108,6 +119,12 @@ const { findTicketId, ticketLink } = require('../../lib/clickupTicketLink.js');
 export const DEFAULT_MERGE_WAIT_MINUTES = 60;
 
 export const STEPS = Object.freeze(['answers', 'look', 'start', 'clone', 'settings', 'signins', 'copy', 'lanes', 'merge', 'protect']);
+
+/** The steps of a project already on ClickUp (SP-159): STEPS with stop, snapshot, import and switch-check before copy. */
+export const CLICKUP_RUN_STEPS = Object.freeze(withClickupSteps(STEPS));
+
+/** Every step a state file may name. */
+export const ALL_STEPS = CLICKUP_RUN_STEPS;
 
 /**
  * The answers that are Dane's decisions (SETUP_REVIEW.md part 3, "What a
@@ -456,6 +473,7 @@ export async function onboard(opts, deps) {
       raw = next;
       say(step, `wrote ${aFile}, read back`);
     }
+    const loadAnswersFrom = (obj) => resolveAnswers(obj, { homeConfig, homeRoot: deps.homeRoot, file: aFile });
     let answers;
     try {
       answers = loadAnswers(aFile, { homeConfig, homeRoot: deps.homeRoot });
@@ -475,9 +493,54 @@ export async function onboard(opts, deps) {
       }
       fail(step, `${err.message}. Fix it in ${aFile}`);
     }
-    if (missing.length) { record(step, 'done', `answers in ${aFile}`); mark(step, 'done', `answers in ${aFile}`); }
-
     const checkout = expandHome(answers.checkoutDir);
+    // SP-159: a checkout here with a loop installer of its own and no
+    // Spirality settings file is a project already running a loop, maybe on
+    // ClickUp. Asked once: the answer, even "no", is kept in the answers file.
+    let askedClickup = false;
+    if (!Object.hasOwn(raw, 'clickupListId') && runsOldLoop(checkout, deps.exists)) {
+      if (opts.noPrompt) {
+        stop(step, `${checkout} already runs a loop of its own (${installerPath(checkout)}). Write "clickupListId" in ${aFile}: its ClickUp Loop Queue list id, with "clickupOperatorId" (your ClickUp user id), or null if it is not on ClickUp`, { kind: 'answers' });
+      }
+      say(step, `${checkout} already runs a loop of its own (${installerPath(checkout)}), so one more question.`);
+      const typed = {};
+      for (const field of CLICKUP_FIELDS) {
+        if (field.key !== 'clickupListId' && typed.clickupListId == null) break;
+        const fallback = field.fallback ? field.fallback() : null;
+        let value = null;
+        for (let tries = 0; ; tries += 1) {
+          const got = await deps.ask(`${field.question}${fallback ? ` [${fallback}]` : ''}: `);
+          if (got == null) stop(step, `no Terminal to ask in; write "clickupListId" in ${aFile} (null if it is not on ClickUp), or run this in a Terminal`, { kind: 'answers' });
+          value = answerValue(field, got);
+          if (value != null || !field.required) break;
+          if (tries >= 2) fail(step, `"${field.key}" has no default and was left blank three times`);
+          deps.print('  That one has no default; it needs an answer.');
+        }
+        typed[field.key] = value;
+      }
+      const next = { ...raw, projectSlug: slug, ...typed };
+      try {
+        answers = loadAnswersFrom(next);
+      } catch (err) {
+        if (!(err instanceof AnswersError)) throw err;
+        // Nothing is written, so the rerun asks the ClickUp question again.
+        fail(step, `${err.message}. The rerun asks it again`);
+      }
+      const written = `${JSON.stringify(next, null, 2)}\n`;
+      try { deps.writeText(aFile, written); } catch (err) { fail(step, `could not write ${aFile}: ${err.code || err.message}`); }
+      if (deps.readText(aFile) !== written) fail(step, `${aFile} did not read back as written`);
+      raw = next;
+      askedClickup = true;
+      say(step, answers.clickupListId ? `on ClickUp, list ${answers.clickupListId}: the stop, snapshot, import and switch-check steps run before the copy` : 'not on ClickUp: set up as a new project');
+    }
+    if (missing.length || askedClickup) { record(step, 'done', `answers in ${aFile}`); mark(step, 'done', `answers in ${aFile}`); }
+    const onClickup = answers.clickupListId != null;
+    if (onClickup) {
+      // The state file shows this run's own steps, the ClickUp ones included.
+      const had = new Map(state.steps.map((s) => [s.step, s]));
+      state.steps = CLICKUP_RUN_STEPS.map((s) => had.get(s) ?? { step: s, outcome: 'pending', at: null, why: null });
+      if (!saveState()) throw new Stop('FAILED', 'state', stateBroken);
+    }
     const sameRepo = (a, b) => String(a).toLowerCase() === String(b).toLowerCase();
     // Once the project's main has its settings file, with its own machine id,
     // the setup pull request has merged: every step up to the merge is done.
@@ -673,6 +736,126 @@ export async function onboard(opts, deps) {
       }
     }
 
+    // ── stop, snapshot, import, switch-check (SP-159) ────────────────────
+    // Only for a project already on ClickUp; a new project's run has none
+    // of these steps. Each is skipped once the step log has it done (its
+    // lanes are loaded again by the lanes step, from the setup branch, so
+    // "nothing loaded" cannot tell on a rerun), or once the setup is merged.
+    if (onClickup) {
+      const doneBefore = (s) => setup.on ? `the setup is merged: ${setup.why}` : loggedDone(deps.readText(logFile), s) ? `it was done before (${logFile})` : null;
+      const trackerDb = join(expandHome(homeConfig.trackerDataDir), 'tracker.db');
+      // The switch settings file, written (and read back) the first time a
+      // tracker script needs it, from the scratch settings file.
+      let switchFolder = null;
+      const switchConfig = () => {
+        if (switchFolder) return switchFolder;
+        const folder = switchDir(onboardDir(homeConfig), slug);
+        const file = join(folder, CONFIG_FILE);
+        let settings;
+        try { settings = JSON.parse(deps.readText(settingsFile) ?? 'null'); } catch { settings = null; }
+        if (!settings || typeof settings !== 'object') fail(step, `${settingsFile} does not read, so the switch settings file cannot be made from it`);
+        let next;
+        try { next = switchSettings(settings, answers, homeConfig); } catch (err) {
+          if (!(err instanceof ProjectConfigError)) throw err;
+          fail(step, `the switch settings file would not be usable: ${err.message}`);
+        }
+        const written = `${JSON.stringify(next, null, 2)}\n`;
+        try { deps.mkdir(folder); deps.writeText(file, written); } catch (err) { fail(step, `could not write ${file}: ${err.code || err.message}`); }
+        if (deps.readText(file) !== written) fail(step, `${file} did not read back as written`);
+        say(step, `the tracker scripts read ${file}: ${slug}'s settings with ClickUp list ${answers.clickupListId} and your ClickUp seat ${answers.clickupOperatorId}`);
+        switchFolder = folder;
+        return folder;
+      };
+      // A tracker script, run from Spirality's folder under the project's
+      // own Doppler keys, in the switch settings file's folder (it reads its
+      // project config from the folder it runs in).
+      const trackerScript = (script, args, o = {}) => {
+        const cwd = switchConfig();
+        return run('node', [join(spiralityDir, 'scripts', 'with_doppler.mjs'), 'node', '--no-warnings', join(spiralityDir, 'tracker', script), ...args], { cwd, ...o });
+      };
+
+      // ── stop ─────────────────────────────────────────────────────────
+      step = 'stop';
+      begin(step);
+      const installer = installerPath(checkout);
+      const status = () => {
+        const r = run('bash', [installer, '--status'], { cwd: checkout });
+        if (r.code !== 0) fail(step, `${installer} --status ended with exit ${r.code}: ${last(r.err || r.out)}`);
+        const jobs = readInstallerStatus(r.out);
+        if (!jobs.length) fail(step, `${installer} --status names no lanes, so they cannot be read from it`);
+        return jobs;
+      };
+      const skipStop = doneBefore(step);
+      if (skipStop) skip(step, skipStop);
+      else if (!deps.exists(installer)) fail(step, `${installer} is not there, so its lanes cannot be read from it`);
+      else {
+        const loaded = status().filter((j) => j.loaded);
+        if (!loaded.length) done(step, `none of ${slug}'s old lanes is loaded (${installer} --status)`);
+        else {
+          // No pass may be cut off mid-way: a lane whose log ends on a START
+          // with no END is mid-pass. A lane with no pass in its log is idle.
+          for (const job of loaded) {
+            if (!job.log) continue;
+            const seen = passInFlight(deps.readText(expandHome(job.log)));
+            if (seen?.running) fail(step, `a ${job.name} pass is in flight (started ${seen.started ?? 'at a time its log does not say'}, ${job.log}); wait for it to end, then rerun. Nothing was stopped`);
+          }
+          const labels = loaded.map((j) => j.label ?? j.name);
+          say(step, `no pass is in flight; stopping ${labels.join(', ')} with ${installer} --uninstall`);
+          const u = run('bash', [installer, '--uninstall'], { cwd: checkout, show: true });
+          if (u.code !== 0) fail(step, `${installer} --uninstall ended with exit ${u.code} (its lines above say what)`);
+          const still = status().filter((j) => j.loaded);
+          if (still.length) fail(step, `after ${installer} --uninstall these are still loaded: ${still.map((j) => j.label ?? j.name).join(', ')}`);
+          done(step, `stopped ${labels.join(', ')}; ${installer} --status reads back every one not loaded`);
+        }
+      }
+
+      // ── snapshot ─────────────────────────────────────────────────────
+      step = 'snapshot';
+      begin(step);
+      const skipSnap = doneBefore(step);
+      if (skipSnap) skip(step, skipSnap);
+      else {
+        const lists = [answers.clickupListId, ...answers.clickupExtraLists].join(', ');
+        say(step, `saving a full copy of ClickUp list(s) ${lists} on this Mac (tracker:snapshot), a dry run first; it only reads ClickUp`);
+        const dry = trackerScript('clickupSnapshot.mjs', snapshotArgs(answers, { dryRun: true }), { show: true });
+        if (dry.code !== 0) fail(step, `the snapshot's dry run ended with exit ${dry.code} (its lines above say what); nothing was saved`);
+        const real = trackerScript('clickupSnapshot.mjs', snapshotArgs(answers, { dryRun: false }), { show: true });
+        if (real.code === 3) fail(step, 'the snapshot was saved, but a count DIFFERS from what ClickUp reports (its lines above name it)');
+        if (real.code !== 0) fail(step, `the snapshot ended with exit ${real.code} (its lines above say what); there is no snapshot`);
+        done(step, `ClickUp list(s) ${lists} saved and packed under ${homeConfig.trackerDataDir}, every count OK`);
+      }
+
+      // ── import ───────────────────────────────────────────────────────
+      step = 'import';
+      begin(step);
+      const skipImport = doneBefore(step);
+      if (skipImport) skip(step, skipImport);
+      else {
+        say(step, `importing ClickUp list ${answers.clickupListId} into ${trackerDb} (tracker:import), a dry run first`);
+        const dry = trackerScript('import.mjs', ['--db', trackerDb, '--dry-run'], { show: true });
+        if (dry.code === 3) fail(step, 'the import\'s dry run refused something (its lines above name it); nothing was written');
+        if (dry.code !== 0) fail(step, `the import's dry run ended with exit ${dry.code} (its lines above say what); nothing was written`);
+        const real = trackerScript('import.mjs', ['--db', trackerDb], { show: true });
+        if (real.code === 3) fail(step, 'the import finished, but refused something (its lines above name it)');
+        if (real.code !== 0) fail(step, `the import ended with exit ${real.code} (its lines above say what); it is safe to rerun, and carries on`);
+        done(step, `ClickUp list ${answers.clickupListId} imported into ${trackerDb}, nothing refused`);
+      }
+
+      // ── switch-check ─────────────────────────────────────────────────
+      step = 'switch-check';
+      begin(step);
+      const skipCheck = doneBefore(step);
+      if (skipCheck) skip(step, skipCheck);
+      else {
+        // Read, not shown: its last line is what decides.
+        const r = trackerScript('switchCheck.mjs', [], { env: { TRACKER_DB: trackerDb } });
+        for (const line of String(r.out || '').split('\n')) deps.print(`  ${line}`);
+        if (r.err) for (const line of String(r.err).split('\n')) deps.print(`  ${line}`);
+        if (!safeToSwitch(r)) fail(step, `tracker:switch-check did not say "Safe to switch." (exit ${r.code}; its NOT OK lines above say what)`);
+        done(step, 'tracker:switch-check: Safe to switch.');
+      }
+    }
+
     // ── copy ─────────────────────────────────────────────────────────────
     step = 'copy';
     begin(step);
@@ -692,7 +875,9 @@ export async function onboard(opts, deps) {
       const ci = prUrl ? ciOn(prUrl) : null;
       if (prUrl && ci.verdict === 'pass') skip(step, `${prUrl} is open and its verify passed`);
       else {
-        const r = npm('onboard:copy', ['--answers', aFile, '--config', settingsFile, ...(opts.allowReplace ? ['--allow-replace'] : [])], { show: true });
+        // A project on ClickUp has an old copy of the loop that the setup
+        // replaces, so it always runs with --allow-replace (SP-159).
+        const r = npm('onboard:copy', ['--answers', aFile, '--config', settingsFile, ...(opts.allowReplace || onClickup ? ['--allow-replace'] : [])], { show: true });
         if (r.code !== 0) fail(step, `onboard:copy exit ${r.code} (its FAILED line is above)`);
         prUrl = openPr();
         if (!prUrl) fail(step, `onboard:copy finished, but ${answers.githubRepo} has no open pull request from ${SETUP_BRANCH}`);

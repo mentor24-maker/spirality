@@ -21,7 +21,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, w
 import { join } from 'node:path';
 import { AnswersError, answersFile, onboardDir, resolveAnswers, slugFromName } from '../lib/onboardAnswers.mjs';
 import { ProjectConfigError, withProjectNames } from '../lib/projectConfig.mjs';
-import { answerValue, DANE_FIELDS, fieldNamed, shellQuote, STEPS } from '../scripts/onboard/onboard.mjs';
+import { ALL_STEPS, answerValue, DANE_FIELDS, fieldNamed, shellQuote } from '../scripts/onboard/onboard.mjs';
 
 /** A setup refusal: the HTTP status it answers with, a code, and a message. */
 export class SetupError extends Error {
@@ -104,7 +104,7 @@ export function readState(homeConfig, slug) {
   if (typeof value !== 'object' || Array.isArray(value)) return bad('does not hold one JSON object');
   if (!Array.isArray(value.steps)) return bad('has no "steps" list');
   for (const s of value.steps) {
-    if (!s || !STEPS.includes(s.step)) return bad(`names a step the wizard does not have: ${JSON.stringify(s?.step ?? s)}`);
+    if (!s || !ALL_STEPS.includes(s.step)) return bad(`names a step the wizard does not have: ${JSON.stringify(s?.step ?? s)}`);
     if (!OUTCOMES.includes(s.outcome)) return bad(`gives step "${s.step}" an outcome the contract does not have: ${JSON.stringify(s.outcome)}`);
   }
   return { state: value, error: null };

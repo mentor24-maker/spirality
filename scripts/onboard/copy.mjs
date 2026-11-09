@@ -30,7 +30,10 @@
  *   3. check    every "copy as is" file compared with `cmp` against the
  *               Spirality commit; any difference stops it before commit.
  *   4. pr       commit, push and one pull request; its body names the
- *               Spirality commit and lists every file with its check.
+ *               Spirality commit and lists every file with its check. For a
+ *               project already on ClickUp (SP-159: its answers name a
+ *               clickupListId) it also lists every file of the old copy it
+ *               replaces and every old file beside them it leaves in place.
  *   5. readback from the worktree: `npm run doctor`, `npm run clickup --
  *               whoami` (the project's hand-run seat) and `queue`; then CI's
  *               verify on the pull request.
@@ -48,7 +51,7 @@ import { loadProjectConfig, findConfigFile } from '../../lib/projectConfig.mjs';
 import { loadAnswers, onboardDir, expandHome } from '../../lib/onboardAnswers.mjs';
 import {
   planCopies, compareWithProject, templateVars, mergeNpmScripts, withClaudeSections, withIgnoreLines,
-  verifyWorkflow, hasVerifyJob, verifyScriptFor, render, ciVerdict, answersAsHandRun, SETUP_BRANCH,
+  verifyWorkflow, hasVerifyJob, verifyScriptFor, render, ciVerdict, answersAsHandRun, SETUP_BRANCH, oldCopyLists,
 } from '../../lib/onboardCopy.mjs';
 
 const BRANCH = SETUP_BRANCH;
@@ -238,6 +241,25 @@ if (!push.ok) fail('pr', `git push: ${last(push.err)}`);
 if (wgit('rev-parse', 'HEAD').out !== wgit('rev-parse', `origin/${BRANCH}`).out) fail('pr', `origin's ${BRANCH} does not read back as the commit just pushed`);
 
 const title = `${answers.projectName} cannot run Spirality's loop yet: add its settings, verify check, ticket door, loop skills and lanes`;
+// A project that ran its own copy of the loop (SP-159): what of it this
+// replaces, and what it leaves in place, said in the pull request.
+let oldCopy = [];
+if (answers.clickupListId) {
+  const tree = pgit('ls-tree', '-r', '--name-only', 'origin/main');
+  if (!tree.ok) fail('pr', `git ls-tree origin/main in ${checkout}: ${last(tree.err)}`);
+  const { replaced, leftInPlace } = oldCopyLists(all, tree.out.split('\n'));
+  const list = (paths) => (paths.length ? paths.map((p) => `- \`${p}\``) : ['- (none)']);
+  oldCopy = [
+    `**The old copy of the loop.** ${answers.projectName} ran its own copy of the loop, on ClickUp list ${answers.clickupListId}. This replaces these of its files (each is "replaces" in the table above):`,
+    '',
+    ...list(replaced),
+    '',
+    'And leaves these in place, beside the files it writes (nothing is deleted; an old loop file among them can be removed in a later pull request):',
+    '',
+    ...list(leftInPlace),
+    '',
+  ];
+}
 const rows = all.map((f) => `| \`${f.to}\` | ${f.kind === 'copy' ? `copy of \`${f.from}\`, cmp identical` : f.kind === 'adapted' ? `\`${f.from}\` with the manifest's edits: ${f.why}` : f.from} | ${f.status} |`);
 const body = [
   `Everything ${answers.projectName} needs to run Spirality's loop, in one pull request, written by Spirality's setup wizard.`,
@@ -248,6 +270,7 @@ const body = [
   '|---|---|---|',
   ...rows,
   '',
+  ...oldCopy,
   'After this merges, `loop/` is never edited here: a change is made in Spirality first and copied in.',
   '',
   '🤖 Generated with [Claude Code](https://claude.com/claude-code)',

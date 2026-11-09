@@ -9,8 +9,9 @@ import { settingsDraft, resolveAnswers } from '../../lib/onboardAnswers.mjs';
 import {
   DANE_FIELDS, STEPS, answerValue, fieldNamed, loggedDone, mainVerifyVerdict, mountainStamp, onboard,
   cloneAddress, commandLine, parseOnboardArgs, pasteBlock, saidYes, signinCommands, protectionDropped, protectionGaps, protectionRequest, rerunCommand, shellQuote,
-  unanswered, worktreesOnBranch,
+  unanswered, worktreesOnBranch, CLICKUP_RUN_STEPS,
 } from './onboard.mjs';
+import { passInFlight, readInstallerStatus, runsOldLoop, safeToSwitch, snapshotArgs, withClickupSteps } from './fromClickup.mjs';
 
 const GOOD_PROTECTION = {
   required_status_checks: { strict: true, contexts: ['verify'], checks: [{ context: 'verify' }] },
@@ -1014,4 +1015,248 @@ test('GitHub cannot be asked whether the repository is empty: FAILED at start, n
   assert.match(out(w), /^FAILED: start: gh repo view mentor24-maker\/pressplay failed: HTTP 502/m);
   assert.ok(!w.calls.some((c) => c.startsWith('git push') || c.startsWith('git clone')));
   assert.ok(!existsSync(startDir));
+});
+
+// --- SP-159: a project already running a loop on ClickUp ------------------
+
+const WC_STATUS = (loaded, logDir) => ['loop-build', 'loop-review', 'merge-on-comment'].map((l) => [
+  `── ${l}`,
+  'schedule: INSTALLED at /Users/d/Library/LaunchAgents/com.pressplay.' + l + '.plist — every 15 minutes',
+  loaded ? `loaded:   yes — 2168${l.length} 0 com.pressplay.${l}` : 'loaded:   no',
+  '          (columns: PID, last exit code, label. A PID here means the runner is alive right now.)',
+  'lock:     none',
+  `log:      ${join(logDir, `pressplay-${l}.log`)} (last modified 2026-11-08 23:26)`,
+].join('\n')).join('\n');
+
+const CLICKUP_ANSWERS = {
+  'Does this project already run a loop on ClickUp': '901422159126',
+  'Your own ClickUp user id': '48012725',
+  'Other ClickUp lists to keep': '901400000001',
+};
+
+/**
+ * The fake world with the project's old loop in its checkout: its own
+ * installer, its lanes loaded, and the tracker scripts as doubles. `c.code`
+ * sets what a tracker script ends with ({ 'import.mjs --dry-run': 3 }).
+ */
+function clickupWorld(t) {
+  const world = makeWorld(t);
+  const { w, checkout, makeCheckout, run } = world;
+  makeCheckout();
+  mkdirSync(join(checkout, 'scripts'), { recursive: true });
+  const installer = join(checkout, 'scripts', 'install_loop_runner.sh');
+  writeFileSync(installer, '#!/bin/bash\n# the old loop\'s installer\n');
+  const logDir = join(w.dir, 'logs');
+  mkdirSync(logDir, { recursive: true });
+  const c = { oldLoaded: true, code: {}, uninstallLeaves: false, switchOut: 'switch-check: every check passed. Safe to switch.', calls: [] };
+  const fakeRun = (cmd, args, o = {}) => {
+    if (cmd === 'bash' && args[0] === installer && !w.lanesLoaded) {
+      const line = [cmd, ...args].join(' ');
+      w.calls.push(line);
+      if (args[1] === '--uninstall') { if (!c.uninstallLeaves) c.oldLoaded = false; return { code: c.code.uninstall ?? 0, out: '', err: '' }; }
+      return { code: 0, out: WC_STATUS(c.oldLoaded, logDir), err: '' };
+    }
+    if (cmd === 'node' && args[0].endsWith('/scripts/with_doppler.mjs')) {
+      const script = args[3].split('/').pop();
+      const key = [script, ...args.slice(4)].join(' ');
+      w.calls.push(`tracker ${key}`);
+      c.calls.push({ key, cwd: o.cwd, env: o.env, show: o.show });
+      const code = c.code[key] ?? c.code[script] ?? 0;
+      return { code, out: script === 'switchCheck.mjs' ? c.switchOut : '', err: '' };
+    }
+    return run(cmd, args, o);
+  };
+  const ask = async (q) => {
+    if (q.startsWith('Run these now')) { w.runAsked += 1; return w.runAnswer; }
+    w.asked.push(q);
+    const key = [...Object.keys(DANE_ANSWERS), ...Object.keys(CLICKUP_ANSWERS)].find((k) => q.startsWith(k));
+    return key ? (DANE_ANSWERS[key] ?? CLICKUP_ANSWERS[key]) : '';
+  };
+  const go = (over) => world.go({ run: fakeRun, ask, ...over });
+  const homeOpts = (more, over) => world.homeOpts(more, { run: fakeRun, ask, ...over });
+  return { ...world, c, go, homeOpts, installer, logDir };
+}
+
+const callIndex = (w, text) => w.calls.findIndex((x) => x.includes(text));
+
+test('fromClickup: the installer\'s own --status gives each lane, its label and its log', () => {
+  const jobs = readInstallerStatus(WC_STATUS(true, '/l'));
+  assert.deepEqual(jobs.map((j) => [j.name, j.loaded, j.label, j.log]), [
+    ['loop-build', true, 'com.pressplay.loop-build', '/l/pressplay-loop-build.log'],
+    ['loop-review', true, 'com.pressplay.loop-review', '/l/pressplay-loop-review.log'],
+    ['merge-on-comment', true, 'com.pressplay.merge-on-comment', '/l/pressplay-merge-on-comment.log'],
+  ]);
+  assert.ok(readInstallerStatus(WC_STATUS(false, '/l')).every((j) => !j.loaded && j.label === null));
+  // Spirality's own wording, where a lane between passes shows no PID.
+  const relay = readInstallerStatus('── relay\nloaded:   yes — -\t0\tcom.spirality.relay\nlog:      /x/relay.log (last modified 2026-11-08 23:27)');
+  assert.deepEqual([relay[0].label, relay[0].log], ['com.spirality.relay', '/x/relay.log']);
+  assert.deepEqual(readInstallerStatus(''), []);
+});
+
+test('fromClickup: a START with no END after it is a pass in flight', () => {
+  const ended = '===== 2026-11-08 23:26:17 START /loop-build (time limit 7200s) =====\nwork\n===== 2026-11-08 23:26:32 END /loop-build (exit 0) =====\n';
+  assert.deepEqual(passInFlight(ended), { running: false, started: '2026-11-08 23:26:17' });
+  assert.deepEqual(passInFlight(`${ended}===== 2026-11-08 23:40:00 START /loop-build =====\nworking\n`), { running: true, started: '2026-11-08 23:40:00' });
+  assert.equal(passInFlight('no passes here'), null);
+  assert.equal(passInFlight(null), null);
+});
+
+test('fromClickup: the ClickUp steps go before copy; only a checkout with its own installer and no settings file is an old loop', (t) => {
+  assert.deepEqual(withClickupSteps(STEPS), ['answers', 'look', 'start', 'clone', 'settings', 'signins', 'stop', 'snapshot', 'import', 'switch-check', 'copy', 'lanes', 'merge', 'protect']);
+  assert.deepEqual(CLICKUP_RUN_STEPS, withClickupSteps(STEPS));
+  const have = new Set(['/p/scripts/install_loop_runner.sh']);
+  assert.equal(runsOldLoop('/p', (p) => have.has(p)), true);
+  have.add('/p/spirality.project.json');
+  assert.equal(runsOldLoop('/p', (p) => have.has(p)), false, 'already on Spirality');
+  assert.equal(runsOldLoop('/q', (p) => have.has(p)), false, 'no checkout, or no installer');
+  assert.deepEqual(snapshotArgs({ clickupExtraLists: ['7', '8'] }, { dryRun: true }), ['--dry-run', '--list', '7', '--list', '8']);
+  assert.deepEqual(snapshotArgs({ clickupExtraLists: [] }, { dryRun: false }), []);
+  assert.equal(safeToSwitch({ code: 0, out: 'x\nswitch-check: every check passed. Safe to switch.' }), true);
+  assert.equal(safeToSwitch({ code: 0, out: 'switch-check: NOT SAFE TO SWITCH yet' }), false);
+  assert.equal(safeToSwitch({ code: 1, out: 'Safe to switch.' }), false);
+});
+
+test('a project already on ClickUp: one more question, then stop, snapshot, import and switch-check before the copy, and the copy replaces the old one', async (t) => {
+  const { w, c, go, answersFile, logFile, statePath, installer } = clickupWorld(t);
+  const code = await go();
+  // The run as Dane sees it, for the pull request.
+  if (process.env.SHOW_WIZARD_RUN) console.log(out(w));
+  assert.equal(code, 0, out(w));
+  assert.equal(w.asked.length, DANE_FIELDS.length + 3, 'his answers, then the three ClickUp ones');
+  const answers = JSON.parse(readFileSync(answersFile, 'utf8'));
+  assert.equal(answers.clickupListId, '901422159126');
+  assert.equal(answers.clickupOperatorId, '48012725');
+  assert.deepEqual(answers.clickupExtraLists, ['901400000001']);
+  // The order the runbook needs, all before the copy's pull request exists.
+  const order = [
+    `${installer} --status`, `${installer} --uninstall`,
+    'tracker clickupSnapshot.mjs --dry-run --list 901400000001', 'tracker clickupSnapshot.mjs --list 901400000001',
+    'tracker import.mjs --db', 'tracker switchCheck.mjs', 'onboard:copy', 'onboard:lanes',
+  ].map((x) => callIndex(w, x));
+  assert.ok(order.every((i) => i >= 0), `every step ran: ${order}`);
+  assert.deepEqual([...order].sort((a, b) => a - b), order, 'in order');
+  const db = join(w.homeConfig.trackerDataDir, 'tracker.db');
+  const imports = w.calls.filter((x) => x.startsWith('tracker import.mjs'));
+  assert.deepEqual(imports, [`tracker import.mjs --db ${db} --dry-run`, `tracker import.mjs --db ${db}`], 'a dry run, then the real one');
+  assert.match(w.calls[callIndex(w, 'onboard:copy')], /--allow-replace/);
+  // The tracker scripts read the switch settings file, in its own folder.
+  const switchFolder = join(w.homeConfig.logDir, 'onboard', 'pressplay-switch');
+  assert.ok(c.calls.every((x) => x.cwd === switchFolder));
+  const sw = JSON.parse(readFileSync(join(switchFolder, 'spirality.project.json'), 'utf8'));
+  assert.equal(sw.loopQueueListId, '901422159126');
+  assert.equal(sw.operatorUserId, '48012725');
+  assert.equal(sw.trackerDataDir, w.homeConfig.trackerDataDir);
+  assert.equal(sw.projectSlug, 'pressplay');
+  assert.equal(c.calls.find((x) => x.key.startsWith('switchCheck')).env.TRACKER_DB, db);
+  assert.match(out(w), /^stop\s+stopped com\.pressplay\.loop-build, com\.pressplay\.loop-review, com\.pressplay\.merge-on-comment/m);
+  assert.match(out(w), /^switch-check tracker:switch-check: Safe to switch\./m);
+  const log = readFileSync(logFile, 'utf8');
+  for (const step of ['stop', 'snapshot', 'import', 'switch-check']) assert.match(log, new RegExp(`\\| ${step} \\| done \\|`), step);
+  const state = JSON.parse(readFileSync(statePath, 'utf8'));
+  assert.deepEqual(state.steps.map((s) => s.step), CLICKUP_RUN_STEPS);
+  assert.equal(state.finished, true);
+});
+
+test('a project on ClickUp, rerun once done: every step already done, nothing stopped, saved or imported again', async (t) => {
+  const { w, go, reset } = clickupWorld(t);
+  assert.equal(await go(), 0, out(w));
+  reset();
+  assert.equal(await go(), 0, out(w));
+  assert.equal(w.asked.length, 0);
+  for (const step of CLICKUP_RUN_STEPS) assert.match(out(w), new RegExp(`^${step}\\s+already done`, 'm'), step);
+  assert.ok(!w.calls.some((x) => x.startsWith('tracker ') || x.includes('--uninstall')));
+});
+
+// A failure at each ClickUp step, then a rerun that resumes there.
+const CLICKUP_FAILS = {
+  stop: (c) => { c.code.uninstall = 1; },
+  snapshot: (c) => { c.code['clickupSnapshot.mjs --list 901400000001'] = 3; },
+  import: (c) => { c.code['import.mjs'] = 1; },
+  'switch-check': (c) => { c.switchOut = 'queues match: NOT OK\nswitch-check: NOT SAFE TO SWITCH yet (see NOT OK above).'; c.code['switchCheck.mjs'] = 1; },
+};
+const CLICKUP_LATER = { snapshot: 'tracker clickupSnapshot.mjs', import: 'tracker import.mjs', 'switch-check': 'tracker switchCheck.mjs', copy: 'onboard:copy', lanes: 'onboard:lanes' };
+for (const failing of Object.keys(CLICKUP_FAILS)) {
+  test(`a project on ClickUp, failure at ${failing}: FAILED, nothing after it runs, and the rerun resumes there`, async (t) => {
+    const { w, c, go, reset } = clickupWorld(t);
+    CLICKUP_FAILS[failing](c);
+    assert.equal(await go(), 1, out(w));
+    assert.match(out(w), new RegExp(`^FAILED: ${failing}: `, 'm'));
+    assert.match(out(w), /^ {2}npm run onboard -- --project pressplay$/m);
+    for (const step of CLICKUP_RUN_STEPS.slice(CLICKUP_RUN_STEPS.indexOf(failing) + 1)) {
+      if (CLICKUP_LATER[step]) assert.ok(!w.calls.some((x) => x.includes(CLICKUP_LATER[step])), `${step} did not run`);
+    }
+    assert.ok(!out(w).includes('Done:'));
+    c.code = {};
+    c.switchOut = 'switch-check: every check passed. Safe to switch.';
+    reset();
+    assert.equal(await go(), 0, out(w));
+    assert.equal(w.asked.length, 0, 'nothing asked twice');
+    for (const step of CLICKUP_RUN_STEPS.slice(0, CLICKUP_RUN_STEPS.indexOf(failing))) assert.match(out(w), new RegExp(`^${step}\\s+already done`, 'm'), step);
+    assert.ok(!new RegExp(`^${failing}\\s+already done`, 'm').test(out(w)), `${failing} runs again`);
+  });
+}
+
+test('a project on ClickUp with a pass in flight: FAILED at stop, nothing is stopped', async (t) => {
+  const { w, go, logDir } = clickupWorld(t);
+  writeFileSync(join(logDir, 'pressplay-loop-review.log'), '===== 2026-11-08 23:40:00 START /loop-review =====\nworking\n');
+  assert.equal(await go(), 1, out(w));
+  assert.match(out(w), /^FAILED: stop: a loop-review pass is in flight \(started 2026-11-08 23:40:00/m);
+  assert.ok(!w.calls.some((x) => x.includes('--uninstall') || x.startsWith('tracker ')));
+});
+
+test('uninstall that leaves a lane loaded: FAILED at stop, naming it', async (t) => {
+  const { w, c, go } = clickupWorld(t);
+  c.uninstallLeaves = true;
+  assert.equal(await go(), 1, out(w));
+  assert.match(out(w), /^FAILED: stop: after .* --uninstall these are still loaded: com\.pressplay\.loop-build/m);
+});
+
+test('an old loop that is not on ClickUp: "no" is kept, asked once, and the run is a new project\'s', async (t) => {
+  const { w, go, reset, answersFile, statePath } = clickupWorld(t);
+  const no = async (q) => { w.asked.push(q); if (q.startsWith('Run these now')) return 'y'; if (q.startsWith('Does this project')) return ''; const k = Object.keys(DANE_ANSWERS).find((x) => q.startsWith(x)); return k ? DANE_ANSWERS[k] : ''; };
+  assert.equal(await go({ ask: no }), 0, out(w));
+  assert.equal(JSON.parse(readFileSync(answersFile, 'utf8')).clickupListId, null);
+  assert.equal(w.asked.filter((q) => q.startsWith('Your own ClickUp')).length, 0, 'no seat asked without a list');
+  assert.deepEqual(JSON.parse(readFileSync(statePath, 'utf8')).steps.map((s) => s.step), STEPS);
+  assert.ok(!w.calls.some((x) => x.includes('--uninstall') || x.startsWith('tracker ')));
+  assert.ok(!/--allow-replace/.test(w.calls[callIndex(w, 'onboard:copy')]));
+  reset();
+  assert.equal(await go({ ask: no }), 0, out(w));
+  assert.equal(w.asked.length, 0, 'not asked again');
+});
+
+test('an old loop under --no-prompt with no ClickUp answer: STOPPED at answers, naming the field', async (t) => {
+  const { w, homeOpts, seedAnswers } = clickupWorld(t);
+  seedAnswers();
+  assert.equal(await homeOpts({ noPrompt: true }), 3, out(w));
+  assert.match(out(w), /^STOPPED: answers: .*already runs a loop of its own.*Write "clickupListId"/m);
+});
+
+test('the ClickUp answers: digits, the seat required with a list, and none without one', () => {
+  const homeConfig = validateProjectConfig({
+    workspaceId: '0', spaceId: '0', loopQueueListId: '0', operatorUserId: '1', machineUserId: '2',
+    githubRepo: 'mentor24-maker/spirality', dopplerProject: 'spirality', dopplerConfig: 'dev', launchdPrefix: 'com.spirality',
+    logDir: '/tmp/logs', mergePhrases: ['merge'], governancePaths: ['CLAUDE.md'], autoMergeLanes: [],
+    operatorName: 'Dane', projectSlug: 'spirality', legacyMachinePrefixes: [], projectScripts: {}, trackerPrefix: 'SP',
+    trackerPort: 4180, trackerHost: '0.0.0.0', trackerDataDir: '/tmp/tracker', tracker: 'api', trackerUrl: 'http://mac-mini.local:4180',
+  });
+  const base = { projectName: 'WaveCenter', githubRepo: 'mentor24-maker/wavecenter', description: 'x.' };
+  const r = (more) => resolveAnswers({ ...base, ...more }, { homeConfig, homeRoot: '/w/spirality' });
+  assert.deepEqual([r({}).clickupListId, r({}).clickupOperatorId, r({}).clickupExtraLists], [null, null, []]);
+  const on = r({ clickupListId: '901422159126', clickupOperatorId: '48012725', clickupExtraLists: ['901400000001'] });
+  assert.deepEqual([on.clickupListId, on.clickupOperatorId, [...on.clickupExtraLists]], ['901422159126', '48012725', ['901400000001']]);
+  assert.throws(() => r({ clickupListId: '901422159126' }), /"clickupOperatorId" is missing/);
+  assert.throws(() => r({ clickupListId: 'abc', clickupOperatorId: '1' }), /"clickupListId" must be a ClickUp id/);
+  assert.throws(() => r({ clickupListId: '0', clickupOperatorId: '1' }), /not all zeros/);
+  assert.throws(() => r({ clickupOperatorId: '1' }), /"clickupListId" is missing/);
+  assert.throws(() => r({ clickupListId: '5', clickupOperatorId: '1', clickupExtraLists: ['5'] }), /names the Loop Queue list 5 itself/);
+});
+
+test('the setup page reads a ClickUp project\'s state file, its four extra steps included', async (t) => {
+  const { readState } = await import('../../tracker/setup.mjs');
+  const { w, go } = clickupWorld(t);
+  assert.equal(await go(), 0, out(w));
+  const { state, error } = readState(w.homeConfig, 'pressplay');
+  assert.equal(error, null);
+  assert.deepEqual(state.steps.map((s) => s.step), CLICKUP_RUN_STEPS);
 });
