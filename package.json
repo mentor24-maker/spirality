@@ -22,6 +22,7 @@
     "clickup": "node scripts/with_doppler.mjs node scripts/clickup.mjs",
     "tracker:account": "node scripts/with_doppler.mjs node --no-warnings tracker/account.mjs",
     "tracker:import": "node scripts/with_doppler.mjs node tracker/import.mjs",
+    "tracker:snapshot": "node scripts/with_doppler.mjs node tracker/clickupSnapshot.mjs",
     "doctor": "node scripts/doctor.mjs",
     "tracker:old-id": "node --disable-warning=ExperimentalWarning tracker/oldId.mjs",
     "tracker:signins": "node scripts/with_doppler.mjs node --no-warnings tracker/signins.mjs",

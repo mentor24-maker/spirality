@@ -177,3 +177,62 @@ test('get on ClickUp says files are not kept there, rather than "(none)" (SP-142
     assert.ok(!api.seen.some((q) => /attach/.test(q.path)));
   } finally { await api.close(); }
 });
+
+test('the snapshot reads: a list record, archived and subtask pages, time in status', async () => {
+  const api = await fakeClickup(() => ({ json: {} }));
+  const t = createClickupTracker({ token: 'tok', apiBase: api.apiBase, log: () => {} });
+  try {
+    await t.getList('5');
+    await t.listTasksPage('5', 0, { includeClosed: true, archived: true, subtasks: true, markdown: true });
+    await t.getTimeInStatus('abc');
+    assert.deepEqual(api.seen.map((r) => `${r.method} ${r.path}`), [
+      'GET /api/v2/list/5',
+      'GET /api/v2/list/5/task?archived=true&include_closed=true&subtasks=true&include_markdown_description=true&page=0',
+      'GET /api/v2/task/abc/time_in_status',
+    ]);
+  } finally { await api.close(); }
+});
+
+test('a file is fetched as bytes; the token never goes over plain http, even to ClickUp\'s own host', async () => {
+  const seen = [];
+  const server = createServer((req, res) => {
+    seen.push({ path: req.url, auth: req.headers.authorization });
+    if (req.url === '/missing') { res.writeHead(404); res.end('no'); return; }
+    res.writeHead(200, { 'content-type': 'image/png' });
+    res.end(Buffer.from([0, 1, 2, 255]));
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const port = server.address().port;
+  const t = createClickupTracker({ token: 'tok', apiBase: `http://127.0.0.1:${port}`, log: () => {} });
+  try {
+    const mine = await t.fetchFile(`http://127.0.0.1:${port}/a.png`);
+    assert.equal(mine.res.ok, true);
+    assert.deepEqual([...mine.bytes], [0, 1, 2, 255]);
+    const elsewhere = await t.fetchFile(`http://localhost:${port}/b.png`);
+    assert.equal(elsewhere.res.ok, true);
+    assert.deepEqual(seen.map((s) => s.auth), [undefined, undefined]);
+    const gone = await t.fetchFile(`http://127.0.0.1:${port}/missing`);
+    assert.equal(gone.res.status, 404);
+    assert.equal(gone.bytes, null);
+    const bad = await t.fetchFile('file:///etc/passwd');
+    assert.equal(bad.res.ok, false);
+    assert.equal(bad.bytes, null);
+  } finally { await new Promise((r) => server.close(r)); }
+});
+
+test('the token goes with a download only over https, and only to ClickUp\'s hosts', async () => {
+  const { sendsToken } = await import('./clickupTracker.mjs');
+  assert.equal(sendsToken(new URL('https://t1.p.clickup-attachments.com/a.png')), true);
+  assert.equal(sendsToken(new URL('http://t1.p.clickup-attachments.com/a.png')), false);
+  assert.equal(sendsToken(new URL('http://api.clickup.com/x')), false);
+  assert.equal(sendsToken(new URL('https://example.com/a.png')), false);
+  assert.equal(sendsToken(new URL('https://clickup.com.evil.example/a.png')), false);
+});
+
+test('ClickUp\'s own hosts are recognised by name, not by a look-alike', async () => {
+  const { clickupHost } = await import('./clickupTracker.mjs');
+  assert.equal(clickupHost(new URL('https://t123.p.clickup-attachments.com/x.png')), true);
+  assert.equal(clickupHost(new URL('https://attachments.clickup.com/x')), true);
+  assert.equal(clickupHost(new URL('https://clickup.com.evil.test/x')), false);
+  assert.equal(clickupHost(new URL('https://notclickup.com/x')), false);
+});

@@ -837,7 +837,33 @@ ClickUp seat ids the config holds until then.
    import refuses to run rather than file his history under a second
    operator.
 
-4. **Import the queue.** A dry run first, then the real one:
+4. **Save a full copy of ClickUp, then import the queue.** The importer
+   carries tickets, comments and replies across, not attachments (Dane's
+   screenshots), time in each status, custom fields or the raw records. So
+   first save everything, once, on the Mini, a dry run first:
+
+   ```bash
+   npm run tracker:snapshot -- --dry-run
+   npm run tracker:snapshot
+   ```
+
+   It saves the config's Loop Queue list, plus any `--list <id>` given (one
+   per extra list worth keeping). A project whose config already names no
+   ClickUp list (`loopQueueListId` all zeros, as Spirality's has been since
+   its list became a read-only archive) saves only the `--list` ids, and
+   refuses with a plain reason when none is given:
+   `npm run tracker:snapshot -- --dry-run --list 901418065068`. The copy goes
+   into
+   `<trackerDataDir>/clickup-archive/<projectSlug>-<date>/` and packs it into
+   `<trackerDataDir>/backups/clickup-archive-<projectSlug>-<date>.tar.gz`,
+   which the nightly backup never prunes. It only reads ClickUp. Good: every
+   line under `Compared with ClickUp:` says `OK`, and `Snapshot saved:`.
+   A `DIFFERS` line (exit 3) names a count that does not match what ClickUp
+   reports; a failed read or download stops it with exit 1 and leaves no
+   snapshot, and running it again starts a fresh, complete copy. It takes a
+   while (several requests a ticket, within ClickUp's per-minute limit).
+
+   Then the import, a dry run first, then the real one:
 
    ```bash
    npm run tracker:import -- --db <trackerDataDir>/tracker.db --dry-run
