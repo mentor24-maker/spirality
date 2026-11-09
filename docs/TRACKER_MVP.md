@@ -434,10 +434,13 @@ there and hands each request to the tracker on `127.0.0.1:<trackerPort>`. No
 router port is opened and no other account is involved. Port 8443 keeps it
 apart from StarCaster's own Funnel routes on 443.
 
-Through the public address the tracker answers **only its API**: no page and
-no page redirect (a page address answers JSON, 401 or 404). Every call still
-needs a token or a session, except the two that start one, and both are
-limited:
+Through the public address the tracker serves **its whole page as well as
+its API** (SP-162): Dane chose on 2026-11-09 to give his team the same page
+from the internet as on the Mini, limited by each person's role and
+projects, so it is built only once. That puts the admin screens on the
+internet too, behind the same sign-in. Signed out, the page shows only its
+sign-in screen; every data call needs a token or a session, except the two
+that start one, and both are limited:
 
 - **Sign-in** locks an email for 15 minutes after 5 failures in 15 minutes,
   counted **per door**: five wrong passwords through the public address lock
@@ -457,6 +460,9 @@ http) neither, so the Mini's page keeps working. The tracker knows a request
 came through Funnel by what Funnel adds (`X-Forwarded-Proto: https`, a
 `Tailscale-Funnel-Request` header, the public name as `Host`); someone on
 the home network who sends those by hand only gets the stricter answer.
+Every address in the page is relative to the name it was served under, and
+the session cookie names no `Domain`, so the page also works under another
+https name that forwards to the public address.
 
 `scripts/install_tracker_funnel.sh` puts the route on, checks it and takes it
 off. It reads the address, the tracker's port, the launchd job that keeps
@@ -466,7 +472,7 @@ the address:
 
 | Command | What it does |
 |---|---|
-| `scripts/install_tracker_funnel.sh` | Puts the route on. Refuses (exit 3) if the running tracker is on code from before the public address (it would be published with no `Secure` cookie and with its page) or if the port already carries another route. Reads every route back: ours must be there and every other route (StarCaster's 443) exactly as it was, or it says FAILED. |
+| `scripts/install_tracker_funnel.sh` | Puts the route on. Refuses (exit 3) if the running tracker is on code from before the public address (it would be published with no `Secure` cookie and no `Strict-Transport-Security`) or if the port already carries another route. Reads every route back: ours must be there and every other route (StarCaster's 443) exactly as it was, or it says FAILED. |
 | `scripts/install_tracker_funnel.sh --status` | Says whether Tailscale's job is loaded, whether the route is on, and what `/me` answers on the Mini and at the public address (401 = reached, not signed in). Exit 0 only when all of that is right. |
 | `scripts/install_tracker_funnel.sh --off` | Takes the route off and reads it back; the other routes are left as they were. |
 

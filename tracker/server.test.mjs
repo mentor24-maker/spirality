@@ -1165,21 +1165,46 @@ test('any one of Funnel\'s marks makes a request public: the https proto, the Fu
   assert.equal(viaPublicAddress(req({ host }), null), false, 'no public address set: the Host alone means nothing');
 });
 
-test('through the public address only the API answers: no page, no page redirect (SP-152)', async () => {
+test('through the public address the page and its redirects answer as at home, with Strict-Transport-Security, and the API is unchanged (SP-162)', async () => {
   const f = await fixture();
   const s = await signInServer(f, { publicUrl: PUBLIC_URL });
   try {
     const html = { accept: 'text/html' };
-    for (const path of ['/', '/board', '/t/SP-1', '/web/app.mjs', '/projects', '/people']) {
+    for (const path of ['/', '/board', '/list/alpha', '/t/SP-1', '/projects', '/users', '/settings']) {
       const r = await fetch(`${s.base}${path}`, { headers: { ...FUNNEL, ...html }, redirect: 'manual' });
-      assert.ok(r.status === 401 || r.status === 404, `${path} answered ${r.status}`);
-      assert.match(r.headers.get('content-type'), /application\/json/, `${path} is not the page`);
+      assert.equal(r.status, 200, `${path} answered ${r.status}`);
+      assert.match(r.headers.get('content-type'), /^text\/html/, `${path} is the page`);
+      assert.equal(r.headers.get('strict-transport-security'), 'max-age=31536000', `${path} carries HSTS`);
+      const text = await r.text();
+      assert.ok(!/(src|href)="https?:/i.test(text.replace(/<a [^>]*target="_blank"[^>]*>/g, '')), `${path}: every address in the page is relative to the name it was served under`);
     }
-    // The same addresses still open the page on the home network.
+    const script = await fetch(`${s.base}/web/app.mjs`, { headers: FUNNEL });
+    assert.equal(script.status, 200);
+    assert.match(script.headers.get('content-type'), /javascript/);
+    const old = await fetch(`${s.base}/people`, { headers: { ...FUNNEL, ...html }, redirect: 'manual' });
+    assert.equal(old.status, 302);
+    assert.equal(old.headers.get('location'), '/users', 'the redirect is relative, so it stays on whichever name forwarded it');
+
+    // Signed out, the page is only the page: every data call still needs a session.
+    for (const path of ['/me', '/projects/alpha/tickets', '/people', '/waiting']) {
+      const r = await fetch(`${s.base}${path}`, { headers: FUNNEL });
+      assert.equal(r.status, 401, `${path} answered ${r.status} signed out`);
+      assert.match(r.headers.get('content-type'), /application\/json/);
+    }
+    // A data call that does not ask for HTML still gets the data, not the page.
+    const signin = await fetch(`${s.base}/signin`, { method: 'POST', headers: { ...FUNNEL, ...s.json }, body: JSON.stringify({ email: s.email, password: s.password }) });
+    const flags = signin.headers.get('set-cookie').split(';').map((p) => p.trim());
+    assert.ok(flags.includes('Secure'));
+    assert.ok(!flags.some((p) => /^domain=/i.test(p)), 'no Domain: the browser keeps the cookie for whichever name served the page');
+    const people = await fetch(`${s.base}/people`, { headers: { ...FUNNEL, cookie: flags[0] } });
+    assert.equal(people.status, 200);
+    assert.match(people.headers.get('content-type'), /application\/json/);
+
+    // The home network: the page, and no HSTS.
     const home = await fetch(`${s.base}/board`, { headers: html });
     assert.equal(home.status, 200);
     assert.match(home.headers.get('content-type'), /text\/html/);
-    assert.equal((await fetch(`${s.base}/people`, { headers: html, redirect: 'manual' })).status, 302);
+    assert.equal(home.headers.get('strict-transport-security'), null);
   } finally { await s.close(); await f.cleanup(); }
 });
 
