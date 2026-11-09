@@ -15,3 +15,11 @@ phone and his desk, because the tracker remembers what he has seen.
 
 To get texts, the bus project needs his phone number on its Edit project
 page, once StarCaster's bus project exists.
+
+Review sent it back once: the real alarm texts ended with the line
+"[machine] posted by a loop under Dane's token — not his word", which every
+loop comment carries so the loops can tell their words from his. The text now
+leaves that line off. And a text that fails to send (Messages not signed in,
+say) is now tried again on its own timer, a minute later and then longer, instead
+of waiting for the next thing to happen on the tracker, which at night can be
+hours away.

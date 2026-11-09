@@ -223,22 +223,35 @@ function failedTo(where, err) {
  * Its own record and queue, beside the hand-over text's, with the same
  * rules: one text per alarm (the comment's id names it, and a sent one is
  * never sent again), a failed send never fails the post, and a kept one is
- * tried again after `retryMs`, doubling up to `maxRetryMs`, on the next
- * write the tracker hears. A bus project with no alert phone gets none,
- * said once in the log until it has one.
+ * tried again after `retryMs`, doubling up to `maxRetryMs`: on a timer set
+ * for when it falls due, or on the next write the tracker hears if that
+ * comes first. The timer matters because alarms fire just when the loops are
+ * quiet, so the next write can be hours away. A bus project with no alert
+ * phone gets none, said once in the log until it has one.
+ *
+ * `setTimer(fn, ms)` returns a handle `clearTimer` takes (default: an
+ * unref'd setTimeout, so a waiting retry never holds the process open).
  */
-function createAlarmChannel({ store, sendText, pageUrl, log, retryMs = 0, maxRetryMs = retryMs, now = Date.now }) {
+function createAlarmChannel({
+  store, sendText, pageUrl, log, retryMs = 0, maxRetryMs = retryMs, now = Date.now,
+  setTimer = defaultSetTimer, clearTimer = clearTimeout,
+}) {
   const sent = new Set();
   /** comment id -> `{ ticketId, text, attempts, notBefore }`. */
   const pending = new Map();
   const toldNoPhone = new Set();
   let queue = Promise.resolve();
   let waiting = null;
+  /** The one retry timer: `{ handle, at }`, or null. */
+  let timer = null;
   const waitFor = (attempts) => (retryMs > 0 ? Math.min(retryMs * 2 ** (attempts - 1), maxRetryMs) : 0);
 
   async function trySend(commentId) {
     const wanted = pending.get(commentId);
-    if (!wanted || wanted.notBefore > now()) return;
+    if (!wanted) return;
+    // Not due yet: make sure a timer still wakes for it (one that fired a
+    // moment early must not leave it waiting on a write).
+    if (wanted.notBefore > now()) { wakeAt(wanted.notBefore); return; }
     const ticket = store.getTicket(wanted.ticketId);
     const project = ticket && store.getProject(ticket.project);
     const slug = project?.slug ?? ticket?.project ?? '?';
@@ -257,12 +270,33 @@ function createAlarmChannel({ store, sendText, pageUrl, log, retryMs = 0, maxRet
     } catch (err) {
       const ms = waitFor(wanted.attempts);
       wanted.notBefore = now() + ms;
-      log(`bus alarm text NOT sent: comment ${commentId} on ${ticket.id} to the project's alert phone, try ${wanted.attempts}: ${err?.message ?? err}. It is tried again on the next write${ms > 0 ? ` after ${Math.round(ms / 1000)} second(s)` : ''}.`);
+      if (ms > 0) wakeAt(wanted.notBefore);
+      log(`bus alarm text NOT sent: comment ${commentId} on ${ticket.id} to the project's alert phone, try ${wanted.attempts}: ${err?.message ?? err}. It is tried again ${ms > 0 ? `in ${Math.round(ms / 1000)} second(s), or on the next write after that` : 'on the next write'}.`);
       return;
     }
     pending.delete(commentId);
     sent.add(commentId);
     log(`bus alarm text sent: comment ${commentId} on ${ticket.id} to the project's alert phone.`);
+  }
+
+  /** Wake at `at` to try the kept alarms again, unless a timer already wakes sooner. */
+  function wakeAt(at) {
+    if (timer && timer.at <= at) return;
+    if (timer) clearTimer(timer.handle);
+    const mine = { at, handle: null };
+    mine.handle = setTimer(() => {
+      if (timer === mine) timer = null;
+      kick();
+    }, Math.max(0, at - now()));
+    timer = mine;
+  }
+
+  function kick() {
+    if (waiting) return waiting;
+    const mine = queue.then(() => { waiting = null; return flush(); });
+    waiting = mine;
+    queue = mine.catch(() => {});
+    return queue;
   }
 
   async function flush() {
@@ -282,20 +316,25 @@ function createAlarmChannel({ store, sendText, pageUrl, log, retryMs = 0, maxRet
       const id = String(comment.id);
       if (!sent.has(id) && !pending.has(id)) pending.set(id, { ticketId: on.id, text: comment.body, attempts: 0, notBefore: 0 });
     },
-    kick() {
-      if (waiting) return waiting;
-      const mine = queue.then(() => { waiting = null; return flush(); });
-      waiting = mine;
-      queue = mine.catch(() => {});
-      return queue;
-    },
+    kick,
     settled() {
       return queue;
     },
     pending() {
       return [...pending.keys()];
     },
+    /** Drop the retry timer (the server is closing). */
+    stop() {
+      if (timer) clearTimer(timer.handle);
+      timer = null;
+    },
   };
+}
+
+function defaultSetTimer(fn, ms) {
+  const handle = setTimeout(fn, ms);
+  handle.unref?.();
+  return handle;
 }
 
 /** How long a failed text waits before it is tried again: one minute, doubling, at most half an hour. */
@@ -317,6 +356,7 @@ export const TEXT_RETRY_MAX_MS = 30 * 60_000;
 export function createNotifier({
   store, send = null, to = null, pageUrl, sendText = null, textPageUrl = pageUrl, log = () => {},
   textRetryMs = TEXT_RETRY_MS, textRetryMaxMs = TEXT_RETRY_MAX_MS, now = Date.now,
+  setTimer = defaultSetTimer, clearTimer = clearTimeout,
 }) {
   const toldNoPhone = new Set();
   const channels = [];
@@ -367,6 +407,7 @@ export function createNotifier({
 
   const alarms = sendText && createAlarmChannel({
     store, sendText, pageUrl: textPageUrl, log, retryMs: textRetryMs, maxRetryMs: Math.max(textRetryMs, textRetryMaxMs), now,
+    setTimer, clearTimer,
   });
 
   const all = () => Promise.all([...channels, ...(alarms ? [alarms] : [])].map((c) => c.settled())).then(() => {});
@@ -414,6 +455,11 @@ export function createNotifier({
     /** The bus alarm texts not yet sent, by comment id. */
     pendingAlarms() {
       return alarms ? alarms.pending() : [];
+    },
+
+    /** Drop any waiting retry timer (the server is closing). */
+    stop() {
+      if (alarms) alarms.stop();
     },
   };
 }

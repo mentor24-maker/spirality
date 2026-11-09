@@ -1061,8 +1061,11 @@ alarms only, plus the page count for everything else"):
 
 - **An alarm is texted.** A post whose message (below the `**From …**`
   line) starts with `ALARM:` is sent as an iMessage from the Mini to the
-  bus project's **alert phone**, the same channel and the same retry rules as
-  the hand-over text. A bus project with no alert phone gets no text, said
+  bus project's **alert phone**, the same channel as the hand-over text,
+  without the `[machine]` stamp line the door adds to every loop comment. A
+  failed text is tried again after a minute, doubling up to half an hour, on
+  a timer of its own: alarms fire when the loops are quiet, so it never waits
+  for the next write. A bus project with no alert phone gets no text, said
   once in the tracker's log; set one on its Edit project page. No email: Dane
   did not choose one.
 - **Every post is counted.** The page's header shows how many posts on
