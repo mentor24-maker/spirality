@@ -48,13 +48,27 @@ export function withClickupSteps(steps) {
 
 /**
  * The questions for a project already on ClickUp, in the order they are
- * asked. The first is asked once; the other two only when it names a list.
+ * asked, by the wizard in a Terminal and by the setup page's answers form
+ * (tracker/setup.mjs). The first is asked once; the others only when it
+ * names a list, and then the two ids are needed (`requiredWith`).
  */
 export const CLICKUP_FIELDS = Object.freeze([
-  { key: 'clickupListId', question: 'Does this project already run a loop on ClickUp? Its Loop Queue list id (digits), or Enter for no' },
-  { key: 'clickupOperatorId', question: 'Your own ClickUp user id, so your old comments are filed under you (the old loop\'s scripts/clickup.mjs names it)', required: true },
+  { key: 'clickupListId', question: 'Does this project already run a loop on ClickUp? Its Loop Queue list id (digits), or blank for no' },
+  { key: 'clickupOperatorId', question: 'Your own ClickUp user id, so your old comments are filed under you (the old loop\'s scripts/clickup.mjs names it)', requiredWith: 'clickupListId' },
+  { key: 'clickupMachineUserId', question: 'The old loop\'s ClickUp machine user id, so its comments are filed under the loops (the old loop\'s scripts/clickup.mjs names it)', requiredWith: 'clickupListId' },
   { key: 'clickupExtraLists', question: 'Other ClickUp lists to keep a copy of, as list ids (comma between)', list: true, fallback: () => 'none' },
 ]);
+
+/**
+ * Should the ClickUp questions be asked for this project? Once they have
+ * been answered (the answers file has `clickupListId`, even null), or when
+ * its checkout runs a loop of its own (runsOldLoop). `raw` is the answers
+ * file as written, `checkout` its checkout folder (null when not known).
+ */
+export function asksClickup(raw, checkout, exists) {
+  if (raw && Object.hasOwn(raw, 'clickupListId')) return true;
+  return Boolean(checkout) && runsOldLoop(checkout, exists);
+}
 
 /** The project's own lane installer, in its checkout. */
 export function installerPath(checkout) {
@@ -126,8 +140,8 @@ export function switchDir(onboardFolder, slug) {
 /**
  * The switch settings file: the project's new settings file (`settings`, as
  * read from the scratch settings file) with its ClickUp list and the
- * operator's ClickUp seat put back, which the importer files his comments
- * under, and the tracker home's data folder, where the snapshot is kept and
+ * operator's and the old loop's ClickUp seats put back, which the importer
+ * files their comments under, and the tracker home's data folder, where the snapshot is kept and
  * the database is. Checked by the same rules every settings file is.
  */
 export function switchSettings(settings, answers, homeConfig) {
@@ -135,6 +149,10 @@ export function switchSettings(settings, answers, homeConfig) {
     ...settings,
     loopQueueListId: answers.clickupListId,
     operatorUserId: answers.clickupOperatorId,
+    // The importer files a comment by the old loop's ClickUp seat under the
+    // loops (tracker/import.mjs authorOf); the tracker's own machine actor
+    // id would never match a ClickUp user.
+    machineUserId: answers.clickupMachineUserId,
     trackerDataDir: homeConfig.trackerDataDir,
   };
   validateProjectConfig(next, { file: 'the switch settings file', env: {} });

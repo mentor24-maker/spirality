@@ -17,3 +17,14 @@ and which it leaves alone.
 
 A brand-new project's run is exactly as before. This does not move
 WaveCenter or StarCaster yet; those are their own tickets (SP-23, SP-25).
+
+**After review (2026-11-09).** Four fixes. The switch check was checking the
+wrong sign-ins for a project other than Spirality: it looked for Dane's own
+seat and Spirality's lane names, so it could never say "safe" for WaveCenter
+or StarCaster; it now checks the project's own seats. The setup page could
+not answer the ClickUp question, so a run started from the page stopped
+there for ever; the page's answers form now shows the ClickUp boxes for such
+a project. The stop step now refuses, rather than carrying on, when a lane's
+log cannot be found to check it is idle. And the wizard asks for the old
+loop's ClickUp machine user too, so the old loop's comments are filed under
+the loops instead of under a stranger.

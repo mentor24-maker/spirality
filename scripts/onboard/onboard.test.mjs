@@ -1031,6 +1031,7 @@ const WC_STATUS = (loaded, logDir) => ['loop-build', 'loop-review', 'merge-on-co
 const CLICKUP_ANSWERS = {
   'Does this project already run a loop on ClickUp': '901422159126',
   'Your own ClickUp user id': '48012725',
+  'The old loop\'s ClickUp machine user id': '48099999',
   'Other ClickUp lists to keep': '901400000001',
 };
 
@@ -1054,7 +1055,9 @@ function clickupWorld(t) {
       const line = [cmd, ...args].join(' ');
       w.calls.push(line);
       if (args[1] === '--uninstall') { if (!c.uninstallLeaves) c.oldLoaded = false; return { code: c.code.uninstall ?? 0, out: '', err: '' }; }
-      return { code: 0, out: WC_STATUS(c.oldLoaded, logDir), err: '' };
+      const status = WC_STATUS(c.oldLoaded, logDir);
+      // c.noLogFor: a lane whose --status names no log.
+      return { code: 0, out: c.noLogFor ? status.replace(new RegExp(`^log: .*pressplay-${c.noLogFor}\\.log.*$\\n?`, 'm'), '') : status, err: '' };
     }
     if (cmd === 'node' && args[0].endsWith('/scripts/with_doppler.mjs')) {
       const script = args[3].split('/').pop();
@@ -1122,10 +1125,11 @@ test('a project already on ClickUp: one more question, then stop, snapshot, impo
   // The run as Dane sees it, for the pull request.
   if (process.env.SHOW_WIZARD_RUN) console.log(out(w));
   assert.equal(code, 0, out(w));
-  assert.equal(w.asked.length, DANE_FIELDS.length + 3, 'his answers, then the three ClickUp ones');
+  assert.equal(w.asked.length, DANE_FIELDS.length + 4, 'his answers, then the four ClickUp ones');
   const answers = JSON.parse(readFileSync(answersFile, 'utf8'));
   assert.equal(answers.clickupListId, '901422159126');
   assert.equal(answers.clickupOperatorId, '48012725');
+  assert.equal(answers.clickupMachineUserId, '48099999');
   assert.deepEqual(answers.clickupExtraLists, ['901400000001']);
   // The order the runbook needs, all before the copy's pull request exists.
   const order = [
@@ -1145,6 +1149,7 @@ test('a project already on ClickUp: one more question, then stop, snapshot, impo
   const sw = JSON.parse(readFileSync(join(switchFolder, 'spirality.project.json'), 'utf8'));
   assert.equal(sw.loopQueueListId, '901422159126');
   assert.equal(sw.operatorUserId, '48012725');
+  assert.equal(sw.machineUserId, '48099999', 'the old loop\'s ClickUp seat, which the importer files its comments under');
   assert.equal(sw.trackerDataDir, w.homeConfig.trackerDataDir);
   assert.equal(sw.projectSlug, 'pressplay');
   assert.equal(c.calls.find((x) => x.key.startsWith('switchCheck')).env.TRACKER_DB, db);
@@ -1204,6 +1209,15 @@ test('a project on ClickUp with a pass in flight: FAILED at stop, nothing is sto
   assert.ok(!w.calls.some((x) => x.includes('--uninstall') || x.startsWith('tracker ')));
 });
 
+test('a loaded lane whose --status names no log: FAILED at stop, it cannot be checked, nothing is stopped', async (t) => {
+  const { w, c, go } = clickupWorld(t);
+  c.noLogFor = 'loop-review';
+  assert.equal(await go(), 1, out(w));
+  assert.match(out(w), /^FAILED: stop: loop-review is loaded, but .* --status names no log for it, so whether a pass is in flight cannot be checked\. Nothing was stopped/m);
+  assert.ok(!/no pass is in flight/.test(out(w)));
+  assert.ok(!w.calls.some((x) => x.includes('--uninstall') || x.startsWith('tracker ')));
+});
+
 test('uninstall that leaves a lane loaded: FAILED at stop, naming it', async (t) => {
   const { w, c, go } = clickupWorld(t);
   c.uninstallLeaves = true;
@@ -1229,7 +1243,8 @@ test('an old loop under --no-prompt with no ClickUp answer: STOPPED at answers, 
   const { w, homeOpts, seedAnswers } = clickupWorld(t);
   seedAnswers();
   assert.equal(await homeOpts({ noPrompt: true }), 3, out(w));
-  assert.match(out(w), /^STOPPED: answers: .*already runs a loop of its own.*Write "clickupListId"/m);
+  assert.match(out(w), /^STOPPED: answers: .*already runs a loop of its own.*Fill them in on its setup page's answers form/m);
+  assert.doesNotMatch(out(w), /Write "clickupListId"/, 'nobody is told to edit a JSON file');
 });
 
 test('the ClickUp answers: digits, the seat required with a list, and none without one', () => {
@@ -1243,13 +1258,18 @@ test('the ClickUp answers: digits, the seat required with a list, and none witho
   const base = { projectName: 'WaveCenter', githubRepo: 'mentor24-maker/wavecenter', description: 'x.' };
   const r = (more) => resolveAnswers({ ...base, ...more }, { homeConfig, homeRoot: '/w/spirality' });
   assert.deepEqual([r({}).clickupListId, r({}).clickupOperatorId, r({}).clickupExtraLists], [null, null, []]);
-  const on = r({ clickupListId: '901422159126', clickupOperatorId: '48012725', clickupExtraLists: ['901400000001'] });
-  assert.deepEqual([on.clickupListId, on.clickupOperatorId, [...on.clickupExtraLists]], ['901422159126', '48012725', ['901400000001']]);
-  assert.throws(() => r({ clickupListId: '901422159126' }), /"clickupOperatorId" is missing/);
-  assert.throws(() => r({ clickupListId: 'abc', clickupOperatorId: '1' }), /"clickupListId" must be a ClickUp id/);
-  assert.throws(() => r({ clickupListId: '0', clickupOperatorId: '1' }), /not all zeros/);
+  const on = r({ clickupListId: '901422159126', clickupOperatorId: '48012725', clickupMachineUserId: '48099999', clickupExtraLists: ['901400000001'] });
+  assert.deepEqual([on.clickupListId, on.clickupOperatorId, on.clickupMachineUserId, [...on.clickupExtraLists]], ['901422159126', '48012725', '48099999', ['901400000001']]);
+  assert.equal(r({}).clickupMachineUserId, null);
+  assert.throws(() => r({ clickupListId: '901422159126', clickupMachineUserId: '9' }), /"clickupOperatorId" is missing/);
+  assert.throws(() => r({ clickupListId: '901422159126', clickupOperatorId: '1' }), /"clickupMachineUserId" is missing/);
+  assert.throws(() => r({ clickupListId: '7', clickupOperatorId: '1', clickupMachineUserId: '1' }), /"clickupMachineUserId" is the same as "clickupOperatorId"/);
+  assert.throws(() => r({ clickupListId: '7', clickupOperatorId: '1', clickupMachineUserId: 'x' }), /"clickupMachineUserId" must be a ClickUp id/);
+  assert.throws(() => r({ clickupListId: 'abc', clickupOperatorId: '1', clickupMachineUserId: '9' }), /"clickupListId" must be a ClickUp id/);
+  assert.throws(() => r({ clickupListId: '0', clickupOperatorId: '1', clickupMachineUserId: '9' }), /not all zeros/);
   assert.throws(() => r({ clickupOperatorId: '1' }), /"clickupListId" is missing/);
-  assert.throws(() => r({ clickupListId: '5', clickupOperatorId: '1', clickupExtraLists: ['5'] }), /names the Loop Queue list 5 itself/);
+  assert.throws(() => r({ clickupMachineUserId: '9' }), /"clickupListId" is missing/);
+  assert.throws(() => r({ clickupListId: '5', clickupOperatorId: '1', clickupMachineUserId: '9', clickupExtraLists: ['5'] }), /names the Loop Queue list 5 itself/);
 });
 
 test('the setup page reads a ClickUp project\'s state file, its four extra steps included', async (t) => {

@@ -457,7 +457,7 @@ export async function onboard(opts, deps) {
             stop(step, `no Terminal to ask in; still to answer: ${missing.filter((f) => !Object.hasOwn(typed, f.key)).map((f) => f.key).join(', ')}. Write them in ${aFile}, or run this in a Terminal`, { kind: 'answers' });
           }
           value = answerValue(field, got);
-          if (value != null || !field.required) break;
+          if (value != null || !(field.required || field.requiredWith)) break;
           if (tries >= 2) fail(step, `"${field.key}" has no default and was left blank three times`);
           deps.print('  That one has no default; it needs an answer.');
         }
@@ -500,7 +500,9 @@ export async function onboard(opts, deps) {
     let askedClickup = false;
     if (!Object.hasOwn(raw, 'clickupListId') && runsOldLoop(checkout, deps.exists)) {
       if (opts.noPrompt) {
-        stop(step, `${checkout} already runs a loop of its own (${installerPath(checkout)}). Write "clickupListId" in ${aFile}: its ClickUp Loop Queue list id, with "clickupOperatorId" (your ClickUp user id), or null if it is not on ClickUp`, { kind: 'answers' });
+        // The setup page's answers form asks these once it sees the same
+        // old loop (tracker/setup.mjs, asksClickup), so this stop is answered there.
+        stop(step, `${checkout} already runs a loop of its own (${installerPath(checkout)}), so it needs the ClickUp answers: its Loop Queue list id (blank if it is not on ClickUp), your ClickUp user id and the old loop's ClickUp machine user id. Fill them in on its setup page's answers form`, { kind: 'answers' });
       }
       say(step, `${checkout} already runs a loop of its own (${installerPath(checkout)}), so one more question.`);
       const typed = {};
@@ -512,7 +514,7 @@ export async function onboard(opts, deps) {
           const got = await deps.ask(`${field.question}${fallback ? ` [${fallback}]` : ''}: `);
           if (got == null) stop(step, `no Terminal to ask in; write "clickupListId" in ${aFile} (null if it is not on ClickUp), or run this in a Terminal`, { kind: 'answers' });
           value = answerValue(field, got);
-          if (value != null || !field.required) break;
+          if (value != null || !(field.required || field.requiredWith)) break;
           if (tries >= 2) fail(step, `"${field.key}" has no default and was left blank three times`);
           deps.print('  That one has no default; it needs an answer.');
         }
@@ -762,7 +764,7 @@ export async function onboard(opts, deps) {
         const written = `${JSON.stringify(next, null, 2)}\n`;
         try { deps.mkdir(folder); deps.writeText(file, written); } catch (err) { fail(step, `could not write ${file}: ${err.code || err.message}`); }
         if (deps.readText(file) !== written) fail(step, `${file} did not read back as written`);
-        say(step, `the tracker scripts read ${file}: ${slug}'s settings with ClickUp list ${answers.clickupListId} and your ClickUp seat ${answers.clickupOperatorId}`);
+        say(step, `the tracker scripts read ${file}: ${slug}'s settings with ClickUp list ${answers.clickupListId}, your ClickUp seat ${answers.clickupOperatorId} and the old loop's ${answers.clickupMachineUserId}`);
         switchFolder = folder;
         return folder;
       };
@@ -794,8 +796,11 @@ export async function onboard(opts, deps) {
         else {
           // No pass may be cut off mid-way: a lane whose log ends on a START
           // with no END is mid-pass. A lane with no pass in its log is idle.
+          // (A log not there yet has no pass: the runner writes START into
+          // it before a pass begins.) A loaded lane whose --status names no
+          // log cannot be checked at all, so nothing is stopped.
           for (const job of loaded) {
-            if (!job.log) continue;
+            if (!job.log) fail(step, `${job.name} is loaded, but ${installer} --status names no log for it, so whether a pass is in flight cannot be checked. Nothing was stopped`);
             const seen = passInFlight(deps.readText(expandHome(job.log)));
             if (seen?.running) fail(step, `a ${job.name} pass is in flight (started ${seen.started ?? 'at a time its log does not say'}, ${job.log}); wait for it to end, then rerun. Nothing was stopped`);
           }

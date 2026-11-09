@@ -19,9 +19,10 @@
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { AnswersError, answersFile, onboardDir, resolveAnswers, slugFromName } from '../lib/onboardAnswers.mjs';
+import { AnswersError, answersFile, expandHome, onboardDir, resolveAnswers, slugFromName } from '../lib/onboardAnswers.mjs';
 import { ProjectConfigError, withProjectNames } from '../lib/projectConfig.mjs';
 import { ALL_STEPS, answerValue, DANE_FIELDS, fieldNamed, shellQuote } from '../scripts/onboard/onboard.mjs';
+import { asksClickup, CLICKUP_FIELDS } from '../scripts/onboard/fromClickup.mjs';
 
 /** A setup refusal: the HTTP status it answers with, a code, and a message. */
 export class SetupError extends Error {
@@ -74,13 +75,40 @@ function readJsonFile(path) {
 }
 
 /**
- * The answer fields that are Dane's decisions, in the wizard's order, each
+ * The fields the answers form asks for `slug`: Dane's own (DANE_FIELDS),
+ * then, for a project already running a loop of its own, the
+ * ClickUp questions the wizard stops for under --no-prompt (CLICKUP_FIELDS),
+ * by the wizard's own rule (asksClickup): once the answers file has
+ * `clickupListId`, or when the checkout the saved answers name holds an
+ * old loop's installer and no settings file of ours. A new project's
+ * form is unchanged.
+ */
+export function formFields(setup, slug = '') {
+  if (!slug || slugFromName(slug) !== slug) return DANE_FIELDS;
+  const { homeConfig, homeRoot } = setup;
+  const read = readJsonFile(answersFile(homeConfig, slug));
+  const raw = read.value && typeof read.value === 'object' && !Array.isArray(read.value) ? read.value : null;
+  if (!raw) return DANE_FIELDS;
+  let checkout = null;
+  try {
+    checkout = expandHome(resolveAnswers({ ...raw, projectSlug: slug }, { homeConfig, homeRoot, file: 'the answers' }).checkoutDir);
+  } catch (err) {
+    if (!(err instanceof AnswersError) && !(err instanceof ProjectConfigError)) throw err;
+  }
+  return asksClickup(raw, checkout, existsSync) ? [...DANE_FIELDS, ...CLICKUP_FIELDS] : DANE_FIELDS;
+}
+
+/**
+ * The answer fields the form asks (formFields), in the wizard's order, each
  * with its question and the default the wizard would show in brackets
  * (null: no default). `slug` fills the defaults made from a project's slug;
- * without one those are null.
+ * without one those are null. A ClickUp id needed once the list is named
+ * (`requiredWith`) is not required by the form itself: the wizard's checker
+ * says so, by name, when it is missing.
  */
-export function setupFields({ homeConfig }, slug = '') {
-  return DANE_FIELDS.map((f) => ({
+export function setupFields(setup, slug = '') {
+  const { homeConfig } = setup;
+  return formFields(setup, slug).map((f) => ({
     key: f.key,
     question: f.question,
     required: Boolean(f.required),
@@ -207,7 +235,8 @@ function formValue(field, value) {
 
 /**
  * Save the answers form for `slug`: every field the body names must be one
- * of Dane's (DANE_FIELDS), the result is checked by the wizard's own checker
+ * the form asks for it (formFields: Dane's, and the ClickUp ones for a
+ * project already running a loop), the result is checked by the wizard's own checker
  * (a bad field is a 400 naming it), written beside and renamed into place,
  * and read back. Refused (409) once the state file shows the sign-ins step
  * done: after that the answers change only in the file.
@@ -215,7 +244,7 @@ function formValue(field, value) {
 export function saveAnswers(setup, slug, body) {
   const { homeConfig, homeRoot } = setup;
   checkSlug(slug);
-  const known = new Map(DANE_FIELDS.map((f) => [f.key, f]));
+  const known = new Map(formFields(setup, slug).map((f) => [f.key, f]));
   const unknown = Object.keys(body).filter((k) => !known.has(k));
   if (unknown.length) {
     throw new SetupError(400, 'bad-field', `unknown field(s): ${unknown.join(', ')}; the form's fields are: ${[...known.keys()].join(', ')}.`);

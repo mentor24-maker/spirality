@@ -771,7 +771,8 @@ mid-pass. The one step that is Dane's is the merge in step 6.
 
 **With the setup wizard.** A project that runs its own older copy of the
 loop (WaveCenter, StarCaster) is moved by `npm run onboard -- --project
-<slug>` instead of by hand (SP-159): its answers name its Loop Queue list,
+<slug>` instead of by hand (SP-159): its answers name its Loop Queue list
+(asked in the Terminal, or on the setup page's answers form),
 and the wizard runs steps 1, 4 and 5 below itself, as its `stop`,
 `snapshot`, `import` and `switch-check` steps, after the sign-ins (step 3)
 and before its setup pull request opens. That pull request is the switch

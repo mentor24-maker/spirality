@@ -2513,6 +2513,51 @@ test('the setup form asks the wizard\'s own questions with their defaults, and s
   } finally { h.cleanup(); }
 });
 
+test('the setup form asks the ClickUp questions only for a project whose checkout runs a loop of its own, and saves them through the wizard\'s checker', () => {
+  const h = setupHome();
+  try {
+    const dane = { projectName: 'Wave Thing', githubRepo: 'example-owner/wave-thing', description: 'A test project.' };
+    const keys = (slug) => setupFields(h.setup, slug).map((f) => f.key);
+    const clickupKeys = ['clickupListId', 'clickupOperatorId', 'clickupMachineUserId', 'clickupExtraLists'];
+    // A new project: Dane's questions only, and a ClickUp answer is refused.
+    saveAnswers(h.setup, 'wave-thing', dane);
+    assert.deepEqual(keys('wave-thing'), SETUP_FIELDS.map((f) => f.key));
+    assert.throws(() => saveAnswers(h.setup, 'wave-thing', { clickupListId: '7' }), /unknown field\(s\): clickupListId/);
+
+    // Its checkout (the default, beside the tracker home) has an old loop's installer: the four ClickUp questions follow.
+    const checkout = join(h.dir, 'wave-thing');
+    mkdirSync(join(checkout, 'scripts'), { recursive: true });
+    writeFileSync(join(checkout, 'scripts', 'install_loop_runner.sh'), '#!/bin/bash\n');
+    assert.deepEqual(keys('wave-thing'), [...SETUP_FIELDS.map((f) => f.key), ...clickupKeys]);
+    const fields = setupFields(h.setup, 'wave-thing');
+    const html = renderSetupForm(fields);
+    assert.match(html, /<label for="setup-clickupListId">Does this project already run a loop on ClickUp\?/);
+    assert.ok(!/name="clickupOperatorId"[^>]*required/.test(html), 'needed only with a list, which the checker says by name');
+
+    // A list without the seats: refused, naming the field, nothing written.
+    assert.throws(() => saveAnswers(h.setup, 'wave-thing', { clickupListId: '4242' }), (err) => err.status === 400 && err.field === 'clickupOperatorId');
+    assert.equal(h.of('wave-thing').answers.clickupListId, undefined);
+
+    // All of them: saved, and the wizard's checker reads them back.
+    const values = { ...Object.fromEntries(fields.map((f) => [f.key, f.default ?? ''])), ...dane, clickupListId: '4242', clickupOperatorId: '700', clickupMachineUserId: '800', clickupExtraLists: '4343' };
+    const saved = saveAnswers(h.setup, 'wave-thing', setupBody(fields, values));
+    assert.deepEqual([saved.resolved.clickupListId, saved.resolved.clickupOperatorId, saved.resolved.clickupMachineUserId, [...saved.resolved.clickupExtraLists]], ['4242', '700', '800', ['4343']]);
+    assert.match(renderSetupForm(setupFields(h.setup, 'wave-thing'), saved.answers), /name="clickupListId"[^>]*value="4242"/);
+
+    // Blank is "not on ClickUp": kept, so the questions stay on the form and the wizard does not stop for them again.
+    const no = saveAnswers(h.setup, 'wave-thing', { clickupListId: null, clickupOperatorId: null, clickupMachineUserId: null, clickupExtraLists: null });
+    assert.equal(no.answers.clickupListId, null);
+    assert.equal(no.resolved.clickupListId, null);
+    assert.deepEqual(keys('wave-thing'), [...SETUP_FIELDS.map((f) => f.key), ...clickupKeys]);
+
+    // Already on Spirality (its settings file is there): a new project's form again.
+    rmSync(join(h.dir, 'logs', 'onboard', 'wave-thing.answers.json'));
+    saveAnswers(h.setup, 'wave-thing', dane);
+    writeFileSync(join(checkout, 'spirality.project.json'), '{}');
+    assert.deepEqual(keys('wave-thing'), SETUP_FIELDS.map((f) => f.key));
+  } finally { h.cleanup(); }
+});
+
 test('the page makes a slug by the wizard\'s rule, and refuses the two that are other pages\' addresses', () => {
   for (const name of ['Press Play', '  PressPlay!! 2 ', 'a--b', 'Ünïcode name', '---']) {
     assert.equal(setupSlug(name), slugFromName(name), name);
