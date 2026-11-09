@@ -18,7 +18,10 @@
  *
  *   GitHub   the repository exists; this Mac's gh can push to it; whether
  *            GitHub will protect its main branch (`not protected` is fine,
- *            a "403 Upgrade" is BLOCKED).
+ *            a "403 Upgrade" is BLOCKED). An empty repository (no commit,
+ *            no branch) is `will do`: the setup's start step makes its first
+ *            commit (SP-154), and the protect, Node and check rows say they
+ *            wait for it.
  *   The Mini the checkout folder (absent, or on a clean main of the right
  *            repository); this Mac's Node against what the project needs;
  *            `claude` and `doppler` signed in.
@@ -51,6 +54,7 @@ import { AnswersError, answersFile, expandHome, loadAnswers, nodeMeets, parseNod
 import { compareRepo, normalRepo, projectEditUrl } from '../lib/repoCheck.mjs';
 import { trackerTokenEnv } from '../tracker/apiTracker.mjs';
 import { seatsForConfig } from '../../tracker/signins.mjs';
+import { STARTER_CHECK, starterNode } from '../../lib/onboardStarter.mjs';
 
 export const READY = 'ready';
 export const WILL_DO = 'will do';
@@ -276,6 +280,18 @@ export function readNode(version, found, { looked }) {
     : row(item, BLOCKED, `this Mac runs ${version}, but the project needs ${found.text}, from ${found.source}`);
 }
 
+/**
+ * The Node row for an empty repository whose answers name no nodeVersion:
+ * the start step writes this Mac's major version into the first commit
+ * (lib/onboardStarter.mjs), which this Mac meets by its making.
+ */
+export function readStarterNode(version) {
+  const item = 'Mini: Node';
+  const node = starterNode(null, version);
+  if (!node) return row(item, UNKNOWN, `the repository is empty and the answers name no "nodeVersion", and this Mac's Node version "${version}" cannot be read to write one; write one in the answers' "nodeVersion"`);
+  return row(item, WILL_DO, `the repository is empty; the start step's first commit names Node ${node.engine} (.nvmrc ${node.major}), from this Mac's ${version}`);
+}
+
 /** `claude auth status` -> signed in or not. Never prints the account's email. */
 export function readClaude(r) {
   const item = 'Mini: claude signed in';
@@ -435,6 +451,19 @@ export function readCheck({ command, branch, clone, install, check }) {
   return row(item, READY, 'it passes', lastLines(`${check.stdout ?? ''}\n${check.stderr ?? ''}`, 3));
 }
 
+/**
+ * The check row for an empty repository: nothing to copy yet, and the start
+ * step's first commit answers to `npm run verify` and nothing else, so a
+ * different checkCommand would fail on it.
+ */
+export function readEmptyCheck(command) {
+  const item = `Check: \`${command}\` on a clean copy of main`;
+  if (command !== STARTER_CHECK) {
+    return row(item, BLOCKED, `the repository is empty, and the first commit the start step makes answers to \`${STARTER_CHECK}\` only, not \`${command}\`; take "checkCommand" out of the answers (it defaults to \`${STARTER_CHECK}\`)`);
+  }
+  return row(item, WILL_DO, `the repository is empty, so there is no main to copy yet; it waits for the first commit the start step makes, whose \`${STARTER_CHECK}\` runs one placeholder test`);
+}
+
 // --- The whole look --------------------------------------------------------
 
 /**
@@ -460,7 +489,8 @@ export async function look({ answers, homeConfig, runCheck = true, deps }) {
   rows.push(...repoView.rows);
   const branch = repoView.info?.branch ?? null;
   if (!repoView.info) rows.push(row('GitHub: protecting the main branch', UNKNOWN, 'the repository could not be read'));
-  else if (!branch) rows.push(row('GitHub: protecting the main branch', BLOCKED, 'the repository has no branch at all yet'));
+  else if (!branch && repoView.info.permission !== 'ADMIN') rows.push(row('GitHub: protecting main', BLOCKED, 'protecting a branch needs an admin of the repository, and this Mac\'s gh is not one'));
+  else if (!branch) rows.push(row('GitHub: protecting main', WILL_DO, `the repository is empty, so there is no main yet; it waits for the first commit the setup's start step makes, then the protect step protects main once verify passes on it`));
   else if (repoView.info.permission !== 'ADMIN') rows.push(row(`GitHub: protecting ${branch}`, BLOCKED, 'protecting a branch needs an admin of the repository, and this Mac\'s gh is not one'));
   else rows.push(readProtection(run('gh', ['api', `repos/${repo}/branches/${branch}/protection`]), branch));
 
@@ -471,6 +501,8 @@ export async function look({ answers, homeConfig, runCheck = true, deps }) {
   try {
     if (!runCheck) {
       checkRow = row(`Check: \`${answers.checkCommand}\` on a clean copy of ${branch ?? 'main'}`, UNKNOWN, 'skipped (--no-check)');
+    } else if (!branch && repoView.info) {
+      checkRow = readEmptyCheck(answers.checkCommand);
     } else if (!branch) {
       checkRow = row(`Check: \`${answers.checkCommand}\` on a clean copy of main`, UNKNOWN, 'there is no main branch to copy');
     } else {
@@ -508,7 +540,10 @@ export async function look({ answers, homeConfig, runCheck = true, deps }) {
       ? { dir, present, head: git('rev-parse', '--abbrev-ref', 'HEAD'), top: git('rev-parse', '--show-toplevel'), origin: git('remote', 'get-url', 'origin'), porcelain: git('status', '--porcelain') }
       : { dir, present }, { repo, branch, samePath: deps.samePath }));
     const root = cloneRoot ?? (present ? dir : null);
-    rows.push(readNode(deps.nodeVersion, nodeNeedOf(answers, readText, root), { looked: root != null }));
+    const emptyRepo = Boolean(repoView.info) && !branch;
+    rows.push(emptyRepo && !answers.nodeVersion
+      ? readStarterNode(deps.nodeVersion)
+      : readNode(deps.nodeVersion, nodeNeedOf(answers, readText, root), { looked: root != null }));
     rows.push(readClaude(run('claude', ['auth', 'status', '--json'])));
     rows.push(readDopplerMe(run('doppler', ['me', '--json', '--no-check-version'])));
 

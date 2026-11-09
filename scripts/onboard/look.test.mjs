@@ -284,14 +284,14 @@ function readOnlyCall({ cmd, args, cwd }, scratch) {
   return false;
 }
 
-function fakeWorld({ checkoutPresent = true, project = true } = {}) {
+function fakeWorld({ checkoutPresent = true, project = true, empty = false } = {}) {
   const calls = [];
   const requests = [];
   const removed = [];
   const scratch = '/tmp/onboard-normie-abc';
   const answer = (cmd, args) => {
     const a = args.join(' ');
-    if (cmd === 'gh' && a.startsWith('repo view')) return ok(JSON.stringify({ name: 'normie', visibility: 'PUBLIC', viewerPermission: 'ADMIN', defaultBranchRef: { name: 'main' } }));
+    if (cmd === 'gh' && a.startsWith('repo view')) return ok(JSON.stringify({ name: 'normie', visibility: 'PUBLIC', viewerPermission: empty === 'write' ? 'WRITE' : 'ADMIN', defaultBranchRef: empty ? null : { name: 'main' } }));
     if (cmd === 'gh' && args[0] === 'api') return ok(JSON.stringify({ required_status_checks: { contexts: ['verify'] } }));
     if (cmd === 'gh' && a.startsWith('repo clone')) return ok();
     if (cmd === 'git' && a.endsWith('rev-parse --abbrev-ref HEAD')) return ok('main\n');
@@ -390,4 +390,52 @@ test("the default checkout sits beside the tracker home's main checkout, even ru
   const run = (cmd, args) => (args[1] === '/W/spirality/.claude/worktrees/x' ? ok('/W/spirality/.git\n') : failed(128, 'fatal: not a git repository'));
   assert.equal(mainCheckoutOf('/W/spirality/.claude/worktrees/x', run), '/W/spirality');
   assert.equal(mainCheckoutOf('/elsewhere', run), '/elsewhere');
+});
+
+// --- An empty repository (SP-154) ------------------------------------------
+
+const freshAnswers = (more = {}) => resolveAnswers({
+  projectName: 'Upwork Blaster', githubRepo: 'mentor24-maker/upwork-blaster', trackerPrefix: 'UB',
+  checkoutDir: '/Users/dane/WebApps/normie', description: 'Blasts.', ...more,
+}, { homeConfig, homeRoot: '/Users/dane/WebApps/home' });
+
+test('an empty repository: nothing BLOCKED, exit 0; the protect, Node and check rows say they wait for the start step', async () => {
+  const w = fakeWorld({ checkoutPresent: false, project: false, empty: true });
+  const rows = await look({ answers: freshAnswers(), homeConfig, deps: w.deps });
+  assert.deepEqual(rows.filter((r) => r.verdict === BLOCKED || r.verdict === UNKNOWN).map(formatRow), []);
+  assert.equal(exitCodeFor(rows), 0);
+  const by = (start) => rows.find((r) => r.item.startsWith(start));
+  assert.match(formatRow(by('GitHub: repository')), /ready \(exists, public, main branch \(none: the repository is empty\)\)/);
+  assert.equal(by('GitHub: protecting').verdict, WILL_DO);
+  assert.match(by('GitHub: protecting').why, /waits for the first commit the setup's start step makes/);
+  assert.equal(by('Mini: Node').verdict, WILL_DO);
+  assert.match(by('Mini: Node').why, /names Node >=22 \(\.nvmrc 22\), from this Mac's v22\.23\.3/);
+  assert.equal(by('Check:').verdict, WILL_DO);
+  assert.match(by('Check:').why, /waits for the first commit the start step makes/);
+  // Nothing to copy, so nothing is cloned and nothing installed or run.
+  assert.ok(!w.calls.some((c) => c.cmd === 'npm' || c.cmd === 'sh' || (c.cmd === 'gh' && c.args[1] === 'clone')));
+});
+
+test('an empty repository whose answers name a Node version: that version is checked against this Mac, as for any project', async () => {
+  const w = fakeWorld({ checkoutPresent: false, project: false, empty: true });
+  const meets = await look({ answers: freshAnswers({ nodeVersion: '>=22' }), homeConfig, deps: w.deps });
+  assert.equal(meets.find((r) => r.item === 'Mini: Node').verdict, READY);
+  const fails = await look({ answers: freshAnswers({ nodeVersion: '>=24' }), homeConfig, deps: w.deps });
+  assert.equal(fails.find((r) => r.item === 'Mini: Node').verdict, BLOCKED);
+});
+
+test('an empty repository with a checkCommand the starter does not answer to: BLOCKED, saying to take it out', async () => {
+  const w = fakeWorld({ checkoutPresent: false, project: false, empty: true });
+  const rows = await look({ answers: freshAnswers({ checkCommand: 'npm run verify:full' }), homeConfig, deps: w.deps });
+  const check = rows.find((r) => r.item.startsWith('Check:'));
+  assert.equal(check.verdict, BLOCKED);
+  assert.match(check.why, /answers to `npm run verify` only, not `npm run verify:full`; take "checkCommand" out of the answers/);
+});
+
+test('an empty repository this Mac\'s gh may push to but not administer: protecting main is still BLOCKED', async () => {
+  const w = fakeWorld({ checkoutPresent: false, project: false, empty: 'write' });
+  const rows = await look({ answers: freshAnswers(), homeConfig, deps: w.deps });
+  const protect = rows.find((r) => r.item.startsWith('GitHub: protecting'));
+  assert.equal(protect.verdict, BLOCKED);
+  assert.match(protect.why, /needs an admin/);
 });
