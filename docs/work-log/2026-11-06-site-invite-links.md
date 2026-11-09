@@ -18,3 +18,13 @@ server makes, in order, with an example of each, so the StarCaster side
 can be built against it. The task list StarCaster will draw comes from the
 tracker's board call, and a test now pins its shape, so a later change here
 fails the checks instead of quietly breaking StarCaster's page.
+
+**After review (2026-11-08).** An invite or reset link carries a one-use
+key in the page address, so the document now tells the site how to keep it
+safe: its page must not pass the address on to other servers (the
+`Referrer-Policy: no-referrer` header), must load nothing from anyone else
+until the link is used, and must wipe the key from the address bar at once.
+Two small tidy-ups came with it: a leftover duplicate comment is gone, and
+a refusal no longer prints "[object Object]" when sent something odd. The
+branch also took in the newest `main`, whose limit of one reset email per
+person every 15 minutes needed one test to step its clock forward.

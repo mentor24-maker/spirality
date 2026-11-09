@@ -688,7 +688,7 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
       let siteUrl = null;
       if (body.site != null) {
         siteUrl = store.siteUrlOf(body.site);
-        if (!siteUrl) throw new HttpError(400, 'not-a-site', `site is the id of an outside site the tracker knows, not "${body.site}". Nothing was made or sent.`);
+        if (!siteUrl) throw new HttpError(400, 'not-a-site', `site is the id of an outside site the tracker knows, not ${typeof body.site === 'number' || typeof body.site === 'string' ? `"${body.site}"` : 'that value'}. Nothing was made or sent.`);
       }
       const result = await sendInvite({
         store, email: body.email, madeBy: me.id, send: accountMail?.send ?? null,

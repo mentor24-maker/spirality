@@ -868,7 +868,6 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
   ensureAdmin();
 
   return {
-    /** A person or a machine that acts on tickets. */
     /**
      * A person or a machine that acts on tickets. `siteUrl` marks a machine
      * as an outside site (docs/OUTSIDE_SITE_API.md): the page its invite and

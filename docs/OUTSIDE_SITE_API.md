@@ -35,6 +35,24 @@ CORS and its session token never reaches the browser's script.
    "Forgot password?" call (below); everything a person does goes with
    **that person's** session, so the tracker records them as the author.
 
+## The rule for the link
+
+An invite or reset link carries its token in the address
+(`?link=<link token>`), and that token alone sets the account's password
+for 7 days (invite) or 1 hour (reset). The tracker's own page guards it by
+answering `Referrer-Policy: no-referrer`; the page at the site's address
+must do the same, or the token leaks to every other server the page talks to
+in their `Referer` logs:
+
+- That page answers with the header `Referrer-Policy: no-referrer`.
+- It loads **no** third-party script, font, image or analytics before the
+  link is used (calls 2 and 3 below are done).
+- Its script reads `?link=`, hands it to the site's own server, and at once
+  removes it from the address bar with
+  `history.replaceState(null, '', location.pathname)`, so it is not kept in
+  history, bookmarks or a shared screenshot.
+- The site's server never writes the link token to a log.
+
 ## The rule for the session
 
 `POST /signin` answers a `Set-Cookie: tracker_session=<token>; HttpOnly;
@@ -68,7 +86,9 @@ A site's token may not invite anyone: 403 `people-only`.)
 
 ### 2. What is this link for? `POST /account/link` (no token)
 
-The site's page reads `?link=` and its server asks what it is for.
+The site's page reads `?link=`, takes it out of the address bar
+(`history.replaceState`, see "The rule for the link"), and its server asks
+what it is for.
 
 ```
 POST /account/link
@@ -216,7 +236,8 @@ Authorization: Bearer <the site's token>
 
 Sent with the site's token, the reset email's link opens
 `https://<the site's address>/spirality?link=<link token>`, and the site
-finishes it with calls 2 and 3. Without it (or with any other token) the
+finishes it with calls 2 and 3, under the same rule for the link
+(`Referrer-Policy: no-referrer`, no third-party loads, `replaceState`). Without it (or with any other token) the
 link opens the tracker's own page. The answer is the same either way, and
 the same whether or not the email has an account: show it as it comes.
 
@@ -238,3 +259,6 @@ Then drop the session the site kept.
 - Never sends the tracker's session token or its own site token to the
   browser, puts either in an address, or writes either to a log.
 - Never calls the tracker from the browser.
+- Never lets a link token leave the page at the site's address: no
+  `Referer` (the page sends `Referrer-Policy: no-referrer`), no third-party
+  loads before the link is used, and the token taken out of the address bar.

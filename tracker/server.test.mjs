@@ -1498,14 +1498,14 @@ test('GET /search narrows by Status, Priority, Created by and Assigned to, alone
 });
 
 /** A people server whose sent emails are kept in `sent`; `fail` makes the next send refused. */
-async function inviteServer(f) {
+async function inviteServer(f, options = {}) {
   const sent = [];
   const mail = { fail: null };
   const accountMail = {
     send: async (m) => { if (mail.fail) throw new Error(mail.fail); sent.push(m); },
     pageUrl: 'http://tracker.test:4180', projectName: 'Alpha',
   };
-  const s = await signInServer(f, { accountMail });
+  const s = await signInServer(f, { accountMail, ...options });
   const cookie = cookieOf((await s.signIn({ email: s.email, password: s.password })).cookie);
   const asPerson = (method, path, body) => s.ask(method, path, { headers: { ...s.json, cookie }, body });
   return { ...s, sent, mail, cookie, asPerson };
@@ -1627,8 +1627,8 @@ test('an invite whose email does not go out, or with no mail sender, leaves no o
  * address and a token, on an invite server. Answers the invite server with
  * `{ site, siteToken, siteUrl }` added.
  */
-async function siteServer(f) {
-  const s = await inviteServer(f);
+async function siteServer(f, options = {}) {
+  const s = await inviteServer(f, options);
   const siteUrl = 'https://site.example/spirality';
   const site = f.store.createActor({ kind: 'machine', name: 'Site page', siteUrl });
   const siteToken = f.store.issueToken(site.id);
@@ -1665,6 +1665,12 @@ test('an invite made with a site emails a link to the site\'s page; without one,
       assert.equal(r.status, 400, `site ${JSON.stringify(site)}`);
       assert.equal(r.body.error, 'not-a-site');
     }
+    const odd = await s.asPerson('POST', '/invites', { email: 'nope@example.com', site: { x: 1 } });
+    assert.equal(odd.status, 400);
+    assert.match(odd.body.message, /not that value\./, 'an object is never printed as "[object Object]"');
+    assert.ok(!odd.body.message.includes('[object Object]'));
+    const named = await s.asPerson('POST', '/invites', { email: 'nope@example.com', site: 999 });
+    assert.match(named.body.message, /not "999"\./, 'a number is quoted as sent');
     assert.equal(s.sent.length, 2, 'a refused site sends nothing');
     assert.ok(!f.store.listInvites().some((i) => i.email === 'nope@example.com'), 'and makes no invite');
 
@@ -1676,9 +1682,12 @@ test('an invite made with a site emails a link to the site\'s page; without one,
 
 test('Forgot password with a site\'s token sends a link to the site\'s page; with a loop\'s token, a wrong one or none, to the tracker page; the answer is the same every time', async () => {
   const f = await fixture();
-  const s = await siteServer(f);
+  // One email gets one reset per 15 minutes (PR #120), so the clock steps
+  // past that gap before each ask: every one here is meant to send.
+  let clock = Date.parse('2026-11-08T18:00:00Z');
+  const s = await siteServer(f, { now: () => clock });
   try {
-    const forgot = (authorization) => s.ask('POST', '/account/forgot', { headers: { ...s.json, ...(authorization ? { authorization } : {}) }, body: { email: s.email } });
+    const forgot = (authorization) => { clock += 16 * 60_000; return s.ask('POST', '/account/forgot', { headers: { ...s.json, ...(authorization ? { authorization } : {}) }, body: { email: s.email } }); };
     const answers = [
       await forgot(`Bearer ${s.siteToken}`),
       await forgot(`Bearer ${f.machineToken}`),
