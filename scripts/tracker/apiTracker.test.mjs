@@ -1021,6 +1021,10 @@ test('trackerTokenEnv: a lane the project config names signs in with its own sec
   assert.equal(trackerTokenEnv({}, named), 'TRACKER_TOKEN_HAND_RUN');
   assert.throws(() => trackerTokenEnv({ TRACKER_TOKEN_NAME: 'TRACKER_TOKEN_LOOP_HANDOFF' }), /must name a loop's own tracker secret.*"projectLanes"/);
   assert.throws(() => trackerTokenEnv({ TRACKER_TOKEN_NAME: 'TRACKER_TOKEN_OPERATOR' }, named), /must name a loop's own tracker secret/);
+  // The projectLanes hint is for a lane's name only, never the operator's seat or junk.
+  for (const notLane of ['TRACKER_TOKEN_OPERATOR', 'CLICKUP_API_TOKEN', 'TRACKER_TOKEN_NAME', 'tracker_token_x']) {
+    assert.throws(() => trackerTokenEnv({ TRACKER_TOKEN_NAME: notLane }, named), (err) => /must name a loop's own tracker secret/.test(err.message) && !/projectLanes/.test(err.message), notLane);
+  }
 });
 
 test('the door signs a project lane in under its own seat once projectLanes names it, and refuses it plainly before', async () => {

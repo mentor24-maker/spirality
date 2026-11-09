@@ -119,7 +119,11 @@ export function trackerTokenEnv(env = process.env, seats = TRACKER_SEATS) {
   }
   const machine = seats.filter((s) => s.kind === 'machine').map((s) => s.secret);
   if (!machine.includes(name)) {
-    throw new Error(`TRACKER_TOKEN_NAME must name a loop's own tracker secret (${machine.join(', ')}), not "${name}". A lane of this project's own signs in only once its name is in the project config's "projectLanes".`);
+    // The projectLanes hint only for a name a lane's runner would export
+    // (TRACKER_TOKEN_<LANE>), never for a listed seat such as the operator's.
+    const laneLike = /^TRACKER_TOKEN_[A-Z][A-Z0-9]*(_[A-Z0-9]+)*$/.test(name) && name !== 'TRACKER_TOKEN_NAME' && !seats.some((s) => s.secret === name);
+    const hint = laneLike ? ` A lane of this project's own signs in only once its name is in the project config's "projectLanes".` : '';
+    throw new Error(`TRACKER_TOKEN_NAME must name a loop's own tracker secret (${machine.join(', ')}), not "${name}".${hint}`);
   }
   return name;
 }

@@ -13,5 +13,8 @@ made and checked by the same sign-in command as the others, reported by
 `npm run doctor`, and accepted when the lane works on the tracker. A lane
 that is not listed is still turned away, and the message now says where to
 list it. A lane cannot borrow a built-in lane's name, so two lanes never
-share one key. No WaveCenter names went into Spirality: each project says
+share one key; such a name is refused the moment the settings file is read,
+so one bad entry can never stop the built-in lanes from signing in (the
+first review caught that it was refused too late, inside every lane's
+sign-in). No WaveCenter names went into Spirality: each project says
 its own. Next is WaveCenter's own ticket to install the hand-off lane.

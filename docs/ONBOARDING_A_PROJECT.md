@@ -390,8 +390,11 @@ changing the file: `CLICKUP_WORKSPACE_ID`, `CLICKUP_SPACE_ID`,
      only once its name is in the project config's "projectLanes".`
 
   A lane name is lower-case words joined by single dashes, listed once, and
-  never a built-in seat's name (`loop-build`, `relay`, `hand-run`, ...);
-  anything else stops the config from loading, naming the entry.
+  never a built-in seat's name (`operator`, `loop-build`, `loop-review`,
+  `loop-intake`, `relay`, `hand-run`) nor `name`, whose secret would be
+  `TRACKER_TOKEN_NAME`, the variable every runner sets to say which secret
+  to read. Anything else stops the config from loading, naming the entry,
+  so a bad entry never reaches the built-in lanes' sign-ins.
 - **Who.**
   - The project: `npm run tracker:signins -- create --name <project name>`
     makes it if it does not exist, or Dane makes it with the tracker page's

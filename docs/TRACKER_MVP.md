@@ -664,8 +664,12 @@ makes its actor and stores its token, `check` proves it, `npm run doctor`
 lists it, and the door accepts it. A lane the config does not name has no
 seat, and the door refuses its passes, saying to name it in
 `projectLanes`. A name that is already a built-in seat (`loop-build`,
-`relay`, `hand-run`, ...) is refused, so two lanes never share a token. No
-project's lane names are written in Spirality's code.
+`relay`, `hand-run`, ...), or `name` (its secret would be
+`TRACKER_TOKEN_NAME`, the runner's own variable), stops the config from
+loading, naming the entry, so two lanes never share a token and one bad
+entry never locks the built-in lanes out (`RESERVED_LANE_NAMES` in
+`lib/projectConfig.mjs`). No project's lane names are written in
+Spirality's code.
 
 A runner never handles the token itself. It sets `TRACKER_TOKEN_NAME` to
 the secret's **name** (`loop_runner.sh` derives it from the skill: `loop-build`

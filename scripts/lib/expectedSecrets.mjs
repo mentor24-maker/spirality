@@ -60,9 +60,11 @@ export const laneSecret = (lane) => `TRACKER_TOKEN_${String(lane).toUpperCase().
 export function laneSeats(config, seats = TRACKER_SEATS) {
   return (config?.projectLanes ?? []).map((lane) => {
     const secret = laneSecret(lane);
+    // lib/projectConfig.mjs already refuses these when the config loads
+    // (RESERVED_LANE_NAMES); this is the backstop for a config built by hand.
     const taken = seats.find((s) => s.secret === secret || s.name === lane);
-    if (taken) {
-      throw new ProjectConfigError(`"projectLanes" names "${lane}", which is already a built-in tracker seat (${taken.secret}); a project's own lane needs a name of its own`);
+    if (taken || secret === 'TRACKER_TOKEN_NAME') {
+      throw new ProjectConfigError(`"projectLanes" names "${lane}", whose secret ${secret} is already ${taken ? 'a built-in tracker seat\'s' : 'the variable every runner sets to say which secret to read'}; a project's own lane needs a name of its own`);
     }
     return { secret, kind: 'machine', name: lane, projectLane: true, what: `the ${lane} lane's tracker sign-in (named in projectLanes)` };
   });

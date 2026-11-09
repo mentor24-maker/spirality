@@ -7,7 +7,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { createServer } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { EXPECTED_SECRETS, TRACKER_SEATS, doctorTarget, usesClickUp, doctorReport, formatReport, laneSeats, laneSecret, projectSeats } from './expectedSecrets.mjs';
-import { ProjectConfigError } from '../../lib/projectConfig.mjs';
+import { ProjectConfigError, RESERVED_LANE_NAMES, validateProjectConfig } from '../../lib/projectConfig.mjs';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const SPIRALITY = JSON.parse(readFileSync(join(ROOT, 'spirality.project.json'), 'utf8'));
@@ -307,4 +307,15 @@ test('projectSeats: the built-in seats untouched, then one machine seat per proj
 test('nothing in the substrate names a project\'s own lane: the built-in seats are the same for every project', () => {
   const builtIn = TRACKER_SEATS.map((s) => s.name).filter(Boolean);
   assert.deepEqual(builtIn, ['loop-build', 'loop-review', 'loop-intake', 'relay', 'hand-run']);
+});
+
+test('the config refuses every built-in seat as a lane: RESERVED_LANE_NAMES covers TRACKER_SEATS and TRACKER_TOKEN_NAME, so the door never sees one', () => {
+  const reservedSecrets = RESERVED_LANE_NAMES.map(laneSecret);
+  for (const seat of TRACKER_SEATS) assert.ok(reservedSecrets.includes(seat.secret), `${seat.secret} is not reserved`);
+  assert.ok(reservedSecrets.includes('TRACKER_TOKEN_NAME'));
+  for (const taken of RESERVED_LANE_NAMES) {
+    assert.throws(() => validateProjectConfig({ ...SPIRALITY, projectLanes: [taken] }), ProjectConfigError, taken);
+    // The backstop, for a config built by hand without loading.
+    assert.throws(() => laneSeats({ projectLanes: [taken] }), ProjectConfigError, taken);
+  }
 });
