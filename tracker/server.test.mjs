@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
+import { SOURCE as IMPORT_SOURCE } from './import.mjs';
 import { startServer, settingsFromEnv, setupSettingsOf, viaPublicAddress, failureCounter } from './server.mjs';
 import { DANE_FIELDS, STEPS } from '../scripts/onboard/onboard.mjs';
 import loopStatuses from '../lib/loopStatuses.js';
@@ -269,6 +270,47 @@ test('DELETE /tickets/:id removes an unstarted ticket with its comments; a start
     const unknown = await f.call('DELETE', '/tickets/AL-999', { token: f.humanToken });
     assert.equal(unknown.status, 404);
     assert.equal(unknown.body.error, 'unknown-ticket');
+  } finally { await f.cleanup(); }
+});
+
+test('an old ClickUp id the importer mapped reads, changes and deletes the ticket it became; an unmapped id is still a 404 (SP-157)', async () => {
+  const f = await fixture();
+  try {
+    const t = f.store.importTicket({
+      source: IMPORT_SOURCE, sourceId: '86bcold1', createdAt: '2026-01-02T03:04:05.000Z',
+      project: 'alpha', actor: f.machine.id, name: 'Imported', status: 'queued', priority: 'normal',
+    });
+    const byOld = await f.call('GET', '/tickets/86bcold1');
+    assert.equal(byOld.status, 200, byOld.text);
+    const byNew = await f.call('GET', `/tickets/${t.id}`);
+    assert.deepEqual(byOld.body, byNew.body);
+    assert.equal(byOld.body.id, t.id);
+    // The door sends every id upper-cased; ClickUp's are lower case.
+    const shouted = await f.call('GET', '/tickets/86BCOLD1');
+    assert.equal(shouted.status, 200, shouted.text);
+    assert.equal(shouted.body.id, t.id);
+
+    const comment = await f.call('POST', '/tickets/86bcold1/comments', { body: { body: 'by the old id' } });
+    assert.equal(comment.status, 201, comment.text);
+    assert.equal(comment.body.ticket, t.id);
+
+    for (const id of ['86bcnone', 'AL-999', '%20']) {
+      const unknown = await f.call('GET', `/tickets/${id}`);
+      assert.equal(unknown.status, 404, id);
+      assert.equal(unknown.body.error, 'unknown-ticket');
+    }
+    // A map row from another source is not a ClickUp id.
+    const other = f.store.importTicket({
+      source: 'elsewhere', sourceId: '86bcother', createdAt: '2026-01-02T03:04:05.000Z',
+      project: 'alpha', actor: f.machine.id, name: 'Other', status: 'queued', priority: 'normal',
+    });
+    assert.equal((await f.call('GET', '/tickets/86bcother')).status, 404);
+
+    const gone = await f.call('DELETE', '/tickets/86bcold1', { token: f.humanToken });
+    assert.equal(gone.status, 200, gone.text);
+    assert.equal(gone.body.deleted, t.id);
+    assert.equal(f.store.getTicket(t.id), null);
+    assert.ok(f.store.getTicket(other.id));
   } finally { await f.cleanup(); }
 });
 
