@@ -357,7 +357,7 @@ into the package only to cut it open again.
 ### Not in the MVP
 
 Built later, from this core, only when a real need appears: a phone layout
-and phone notifications, the bus (StarCaster's alarm list),
+and phone notifications (the bus, StarCaster's alarm list, came later: see "The bus" below),
 search, more than one person, per-client environments, live
 updates instead of the relay's 10-minute poll, server-side contract rules.
 
@@ -974,6 +974,54 @@ ClickUp list ids too, from "After the week"), Dane's merge, start the
 loops (step 7). Anything done in the tracker during the week stays in the
 tracker and is not copied back to ClickUp; a ticket moved there is moved by
 hand in ClickUp.
+
+## The bus (StarCaster's alarms)
+
+StarCaster raises its alarms on **the bus**: a ClickUp chat channel (the
+"party line"), which ClickUp refuses on the free plan, so every post lands on
+a standing **Team chat** ticket instead, plus a second ClickUp list, **Agent
+Response**, where the steward asks Dane things and the relay watches for his
+replies. Spirality has no bus; StarCaster cannot move to the tracker without
+one (SP-24).
+
+The tracker's bus is **a project of its own**, named in the project config
+as `busProject` (for example `starcaster-bus`). It holds the same
+standing "Team chat" ticket, found by its name (the oldest wins, so two
+machines that both created one still agree), in Live, and any ticket the
+steward files for Dane. No loop claims from it: the build and review lanes
+read `projectSlug` only. Each comment carries its author's own actor, so
+"only Dane's words" is read off the comment, not guessed from a stamp.
+
+```bash
+echo "the heartbeat stopped at 09:10" | npm run clickup -- bus-post --body-file -   # one comment, read back
+npm run clickup -- bus-read --operator --since 2026-11-09T16:00:00Z                  # Dane's words since then
+```
+
+`bus-post` creates the Team chat ticket the first time, and exits 1 saying
+so on any write it could not read back; there is no plan limit to fall back
+from. `bus-read` prints one tab-separated line per comment, oldest first:
+time, ticket, `operator` or `machine`, author, first line. Setting it up
+for a project: create the bus project on the Projects page, put the
+project's loops on it, and write its slug as `busProject`.
+
+Every way StarCaster uses the bus today, and its tracker equivalent (the same
+table is `BUS_USES` in `lib/trackerBus.js`, and a test holds the two
+together):
+
+| StarCaster today | In the tracker |
+|---|---|
+| Alarms and reports posted to the party line (`postBusMessage`, the `chat` command): heartbeat, throughput, report_job_failure, reconcile, stale_answer, stale_ready, checkout_currency, ai_keys_check, site_import_watch, unapplied_sql_watch, pulse_publish, weekly_report, repair | `npm run clickup -- bus-post --body-file -`: one comment on the bus project's "Team chat" ticket, read back |
+| Direct chat posts that skip `postBusMessage`: the pause switch's `announce` (pipeline.mjs), the review gate's `announceWaiver`, the reconciler's `postBus` | `bus-post`, the same one command |
+| The relay's own notices (`postToBus` / `postOrSaveToBus`): merged, merge refused or deferred, stalled hand-off, auto-merge latched off, lane armed, "<operator> replied on ..." | `bus-post`; the "replied on" relay is no longer needed, because the steward reads the operator's replies with `bus-read --operator` |
+| The fallback when the party line refuses (`saveUndeliveredAlarm`): a comment on the "Team chat" ticket in the Loop Queue, created if missing, oldest wins | `bus-post` IS that ticket, in the bus project: there is no plan limit to fall back from, and a refused write exits 1 and says so |
+| A relay receipt on the ticket a message was about (`deliverToBus` with a hand-back target) | `npm run clickup -- comment --task <id>`, unchanged |
+| The steward filing a question for the operator as a ticket in the Agent Response list | `npm run clickup -- task --list <busProject>`, a ticket in the bus project |
+| Reading the party line for the operator's stop and resume words (`readBusSwitchSignals`) | `bus-read --operator`: only comments whose author is the operator's own actor, no machine-stamp guess |
+| The relay watching Agent Response tickets ("pending response", "responding") for the operator's comments | `bus-read --operator --since <time>`, across every ticket in the bus project |
+| `waiting` sweeping the Agent Response list for "what actually needs me?" | The page's Waiting on You list, which already reads every project the operator is on, the bus project included |
+| The operator seeing a new post: the "Team chat" ticket puts itself in their ClickUp "Assigned to me" list | The bus project's board on the tracker page, where "Team chat" sits in Live. No email or text per post (a follow-up ticket asks the operator how loud alarms should be) |
+
+Switching StarCaster's scripts over to these commands is the next ticket.
 
 ## Decisions (Dane, 2026-10-26)
 

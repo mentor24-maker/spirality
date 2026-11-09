@@ -110,6 +110,10 @@
       "to": "loop/lib/substrateConfig.js"
     },
     {
+      "from": "lib/trackerBus.js",
+      "to": "loop/lib/trackerBus.js"
+    },
+    {
       "from": "lib/waitsOn.js",
       "to": "loop/lib/waitsOn.js"
     },
