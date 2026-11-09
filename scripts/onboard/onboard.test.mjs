@@ -1094,6 +1094,9 @@ test('fromClickup: the installer\'s own --status gives each lane, its label and 
   const relay = readInstallerStatus('── relay\nloaded:   yes — -\t0\tcom.spirality.relay\nlog:      /x/relay.log (last modified 2026-11-08 23:27)');
   assert.deepEqual([relay[0].label, relay[0].log], ['com.spirality.relay', '/x/relay.log']);
   assert.deepEqual(readInstallerStatus(''), []);
+  // A log path with a space in it, and a log not written yet.
+  const spaced = readInstallerStatus('── loop-build\nloaded:   yes — 1 0 com.x.loop-build\nlog:      /Users/d/loop logs/x-loop-build.log (last modified 2026-11-08 23:27)\n── loop-review\nloaded:   yes — 2 0 com.x.loop-review\nlog:      /Users/d/loop logs/x-loop-review.log (nothing written yet)');
+  assert.deepEqual(spaced.map((j) => j.log), ['/Users/d/loop logs/x-loop-build.log', '/Users/d/loop logs/x-loop-review.log']);
 });
 
 test('fromClickup: a START with no END after it is a pass in flight', () => {
@@ -1133,13 +1136,14 @@ test('a project already on ClickUp: one more question, then stop, snapshot, impo
   assert.deepEqual(answers.clickupExtraLists, ['901400000001']);
   // The order the runbook needs, all before the copy's pull request exists.
   const order = [
-    `${installer} --status`, `${installer} --uninstall`,
-    'tracker clickupSnapshot.mjs --dry-run --list 901400000001', 'tracker clickupSnapshot.mjs --list 901400000001',
+    `${installer} --status`, 'tracker clickupSnapshot.mjs --dry-run --list 901400000001', `${installer} --uninstall`,
+    'tracker clickupSnapshot.mjs --list 901400000001',
     'tracker import.mjs --db', 'tracker switchCheck.mjs', 'onboard:copy', 'onboard:lanes',
   ].map((x) => callIndex(w, x));
   assert.ok(order.every((i) => i >= 0), `every step ran: ${order}`);
   assert.deepEqual([...order].sort((a, b) => a - b), order, 'in order');
   const db = join(w.homeConfig.trackerDataDir, 'tracker.db');
+  assert.equal(w.calls.filter((x) => x.startsWith('tracker clickupSnapshot.mjs --dry-run')).length, 1, 'the snapshot\'s dry run once, before the stop');
   const imports = w.calls.filter((x) => x.startsWith('tracker import.mjs'));
   assert.deepEqual(imports, [`tracker import.mjs --db ${db} --dry-run`, `tracker import.mjs --db ${db}`], 'a dry run, then the real one');
   assert.match(w.calls[callIndex(w, 'onboard:copy')], /--allow-replace/);
@@ -1179,7 +1183,8 @@ const CLICKUP_FAILS = {
   import: (c) => { c.code['import.mjs'] = 1; },
   'switch-check': (c) => { c.switchOut = 'queues match: NOT OK\nswitch-check: NOT SAFE TO SWITCH yet (see NOT OK above).'; c.code['switchCheck.mjs'] = 1; },
 };
-const CLICKUP_LATER = { snapshot: 'tracker clickupSnapshot.mjs', import: 'tracker import.mjs', 'switch-check': 'tracker switchCheck.mjs', copy: 'onboard:copy', lanes: 'onboard:lanes' };
+const CLICKUP_LATER = { snapshot: 'tracker clickupSnapshot.mjs --list', // the real one; its dry run goes before the stop
+  import: 'tracker import.mjs', 'switch-check': 'tracker switchCheck.mjs', copy: 'onboard:copy', lanes: 'onboard:lanes' };
 for (const failing of Object.keys(CLICKUP_FAILS)) {
   test(`a project on ClickUp, failure at ${failing}: FAILED, nothing after it runs, and the rerun resumes there`, async (t) => {
     const { w, c, go, reset } = clickupWorld(t);
@@ -1196,10 +1201,48 @@ for (const failing of Object.keys(CLICKUP_FAILS)) {
     reset();
     assert.equal(await go(), 0, out(w));
     assert.equal(w.asked.length, 0, 'nothing asked twice');
-    for (const step of CLICKUP_RUN_STEPS.slice(0, CLICKUP_RUN_STEPS.indexOf(failing))) assert.match(out(w), new RegExp(`^${step}\\s+already done`, 'm'), step);
-    assert.ok(!new RegExp(`^${failing}\\s+already done`, 'm').test(out(w)), `${failing} runs again`);
+    // The import, once done, still runs again until switch-check has said
+    // Safe to switch (its NOT OK lines mean "import again").
+    const again = failing === 'switch-check' ? ['import', failing] : [failing];
+    for (const step of CLICKUP_RUN_STEPS.slice(0, CLICKUP_RUN_STEPS.indexOf(failing))) {
+      if (!again.includes(step)) assert.match(out(w), new RegExp(`^${step}\\s+already done`, 'm'), step);
+    }
+    for (const step of again) assert.ok(!new RegExp(`^${step}\\s+already done`, 'm').test(out(w)), `${step} runs again`);
   });
 }
+
+test('a project on ClickUp, switch-check says NOT YET IMPORTED once: the rerun imports again, then it is Safe to switch', async (t) => {
+  const { w, c, go, reset, logFile } = clickupWorld(t);
+  c.switchOut = 'NOT YET IMPORTED: 901422159126 abc123 changed after the import. Run the real import again.\nswitch-check: NOT SAFE TO SWITCH yet (see NOT OK above).';
+  c.code['switchCheck.mjs'] = 1;
+  assert.equal(await go(), 1, out(w));
+  assert.match(out(w), /^FAILED: switch-check: /m);
+  assert.match(readFileSync(logFile, 'utf8'), /\| import \| done \|/, 'the import was logged done');
+  c.code = {};
+  c.switchOut = 'switch-check: every check passed. Safe to switch.';
+  reset();
+  assert.equal(await go(), 0, out(w));
+  assert.match(out(w), /^import\s+imported before, but switch-check has not said Safe to switch yet, so the import runs again/m);
+  const db = join(w.homeConfig.trackerDataDir, 'tracker.db');
+  const order = [`tracker import.mjs --db ${db} --dry-run`, `tracker import.mjs --db ${db}`, 'tracker switchCheck.mjs', 'onboard:copy'].map((x) => w.calls.indexOf(w.calls.find((y) => y === x || (x.endsWith('.mjs') || x.startsWith('onboard')) && y.includes(x))));
+  assert.ok(order.every((i) => i >= 0), `each ran on the rerun: ${order}`);
+  assert.deepEqual([...order].sort((a, b) => a - b), order, 'import, then switch-check, then the copy');
+  assert.match(out(w), /^snapshot\s+already done/m, 'the snapshot is not taken again');
+  // Once Safe to switch, a third run skips the import too.
+  reset();
+  assert.equal(await go(), 0, out(w));
+  assert.match(out(w), /^import\s+already done/m);
+  assert.ok(!w.calls.some((x) => x.startsWith('tracker ')));
+});
+
+test('a project on ClickUp whose snapshot dry run fails: FAILED at stop before anything is stopped, the old lanes keep running', async (t) => {
+  const { w, c, go } = clickupWorld(t);
+  c.code['clickupSnapshot.mjs --dry-run --list 901400000001'] = 1;
+  assert.equal(await go(), 1, out(w));
+  assert.match(out(w), /^FAILED: stop: the snapshot's dry run ended with exit 1 .*so the old lanes were left running/m);
+  assert.ok(!w.calls.some((x) => x.includes('--uninstall')), 'nothing was stopped');
+  assert.equal(c.oldLoaded, true);
+});
 
 test('a project on ClickUp with a pass in flight: FAILED at stop, nothing is stopped', async (t) => {
   const { w, go, logDir } = clickupWorld(t);

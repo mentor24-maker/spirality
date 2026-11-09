@@ -28,3 +28,14 @@ a project. The stop step now refuses, rather than carrying on, when a lane's
 log cannot be found to check it is idle. And the wizard asks for the old
 loop's ClickUp machine user too, so the old loop's comments are filed under
 the loops instead of under a stranger.
+
+**After the second review (2026-11-09).** If the switch check found tickets
+that changed in ClickUp after the import, it asked for the import to run
+again, but the wizard skipped the import on every rerun because it was
+already logged done, so the run could never finish. The import now runs
+again on each rerun until the switch check has said it is safe. The wizard
+also now checks that it can read ClickUp before it stops the old lanes, so
+a missing ClickUp key no longer leaves the project with no loop at all. A
+lane log in a folder with a space in its name is now read correctly, and
+the pull request's list of files the setup sits beside no longer suggests
+deleting them.

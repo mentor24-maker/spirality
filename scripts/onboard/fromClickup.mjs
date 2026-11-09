@@ -106,7 +106,9 @@ export function readInstallerStatus(text) {
       const words = loaded[1].replace(/^\s*—\s*/, '').trim().split(/\s+/).filter(Boolean);
       job.label = words.length >= 3 ? words.at(-1) : null;
     }
-    const log = /^log:\s+(\S+)/.exec(line);
+    // `log:      <path> (last modified ...)` or `(nothing written yet)`;
+    // the path may hold spaces, so it runs up to that last bracket.
+    const log = /^log:\s+(.+?)(?:\s+\((?:last modified [^)]*|nothing written yet)\))?$/.exec(line);
     if (log) job.log = log[1];
   }
   return jobs;

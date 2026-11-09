@@ -33,7 +33,7 @@
  *               Spirality commit and lists every file with its check. For a
  *               project already on ClickUp (SP-159: its answers name a
  *               clickupListId) it also lists every file of the old copy it
- *               replaces and every old file beside them it leaves in place.
+ *               replaces and every file beside them it does not touch.
  *   5. readback from the worktree: `npm run doctor`, `npm run clickup --
  *               whoami` (the project's hand-run seat) and `queue`; then CI's
  *               verify on the pull request.
@@ -254,7 +254,7 @@ if (answers.clickupListId) {
     '',
     ...list(replaced),
     '',
-    'And leaves these in place, beside the files it writes (nothing is deleted; an old loop file among them can be removed in a later pull request):',
+    'These files of the project sit in the same folders as the files it writes. It does not touch them, and nothing is deleted; they are listed so a reviewer can see what the setup sits beside:',
     '',
     ...list(leftInPlace),
     '',

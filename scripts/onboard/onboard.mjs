@@ -787,6 +787,7 @@ export async function onboard(opts, deps) {
         if (!jobs.length) fail(step, `${installer} --status names no lanes, so they cannot be read from it`);
         return jobs;
       };
+      let snapshotDryRan = false;
       const skipStop = doneBefore(step);
       if (skipStop) skip(step, skipStop);
       else if (!deps.exists(installer)) fail(step, `${installer} is not there, so its lanes cannot be read from it`);
@@ -804,8 +805,16 @@ export async function onboard(opts, deps) {
             const seen = passInFlight(deps.readText(expandHome(job.log)));
             if (seen?.running) fail(step, `a ${job.name} pass is in flight (started ${seen.started ?? 'at a time its log does not say'}, ${job.log}); wait for it to end, then rerun. Nothing was stopped`);
           }
+          // Before anything is stopped, the snapshot's dry run proves the
+          // next step can read ClickUp under the project's own keys (its
+          // CLICKUP_API_TOKEN in Doppler, the lists answering). If it
+          // cannot, the old loop keeps running until that is fixed.
+          say(step, 'no pass is in flight; before stopping anything, the snapshot\'s dry run checks ClickUp can be read under this project\'s keys (it only reads)');
+          const pre = trackerScript('clickupSnapshot.mjs', snapshotArgs(answers, { dryRun: true }), { show: true });
+          if (pre.code !== 0) fail(step, `the snapshot's dry run ended with exit ${pre.code} (its lines above say what), so the old lanes were left running: fix that, then rerun. Nothing was stopped`);
+          snapshotDryRan = true;
           const labels = loaded.map((j) => j.label ?? j.name);
-          say(step, `no pass is in flight; stopping ${labels.join(', ')} with ${installer} --uninstall`);
+          say(step, `stopping ${labels.join(', ')} with ${installer} --uninstall`);
           const u = run('bash', [installer, '--uninstall'], { cwd: checkout, show: true });
           if (u.code !== 0) fail(step, `${installer} --uninstall ended with exit ${u.code} (its lines above say what)`);
           const still = status().filter((j) => j.loaded);
@@ -821,9 +830,12 @@ export async function onboard(opts, deps) {
       if (skipSnap) skip(step, skipSnap);
       else {
         const lists = [answers.clickupListId, ...answers.clickupExtraLists].join(', ');
-        say(step, `saving a full copy of ClickUp list(s) ${lists} on this Mac (tracker:snapshot), a dry run first; it only reads ClickUp`);
-        const dry = trackerScript('clickupSnapshot.mjs', snapshotArgs(answers, { dryRun: true }), { show: true });
-        if (dry.code !== 0) fail(step, `the snapshot's dry run ended with exit ${dry.code} (its lines above say what); nothing was saved`);
+        if (snapshotDryRan) say(step, `saving a full copy of ClickUp list(s) ${lists} on this Mac (tracker:snapshot); its dry run passed before the stop`);
+        else {
+          say(step, `saving a full copy of ClickUp list(s) ${lists} on this Mac (tracker:snapshot), a dry run first; it only reads ClickUp`);
+          const dry = trackerScript('clickupSnapshot.mjs', snapshotArgs(answers, { dryRun: true }), { show: true });
+          if (dry.code !== 0) fail(step, `the snapshot's dry run ended with exit ${dry.code} (its lines above say what); nothing was saved`);
+        }
         const real = trackerScript('clickupSnapshot.mjs', snapshotArgs(answers, { dryRun: false }), { show: true });
         if (real.code === 3) fail(step, 'the snapshot was saved, but a count DIFFERS from what ClickUp reports (its lines above name it)');
         if (real.code !== 0) fail(step, `the snapshot ended with exit ${real.code} (its lines above say what); there is no snapshot`);
@@ -833,9 +845,15 @@ export async function onboard(opts, deps) {
       // ── import ───────────────────────────────────────────────────────
       step = 'import';
       begin(step);
-      const skipImport = doneBefore(step);
+      // The import is skipped only once switch-check has said Safe to
+      // switch. Until then a rerun imports again: switch-check's NOT YET
+      // IMPORTED and STATUS DIFFERS both mean "run the real import again",
+      // and the import is safe to rerun (it carries on where it was).
+      const skipImport = setup.on ? `the setup is merged: ${setup.why}`
+        : loggedDone(deps.readText(logFile), 'switch-check') ? `switch-check said Safe to switch before (${logFile})` : null;
       if (skipImport) skip(step, skipImport);
       else {
+        if (loggedDone(deps.readText(logFile), step)) say(step, 'imported before, but switch-check has not said Safe to switch yet, so the import runs again (it is safe to rerun)');
         say(step, `importing ClickUp list ${answers.clickupListId} into ${trackerDb} (tracker:import), a dry run first`);
         const dry = trackerScript('import.mjs', ['--db', trackerDb, '--dry-run'], { show: true });
         if (dry.code === 3) fail(step, 'the import\'s dry run refused something (its lines above name it); nothing was written');

@@ -94,14 +94,22 @@ each skipped on a rerun once the step log has it done:
 
 | Step | What it does | Good |
 |---|---|---|
-| `stop` | Reads the old lanes from the project's own installer (`--status`: each lane, its launchd label, its log), checks no pass is in flight (a log ending on a `START` with no `END`; a loaded lane whose `--status` names no log cannot be checked, and fails the step), then runs that installer's `--uninstall` and reads `--status` back. | `stop  stopped com.wavecenter.loop-build, ...` |
-| `snapshot` | `tracker:snapshot`, a dry run then the real one: the Loop Queue list plus every extra list, saved and packed on the Mini. | every count OK |
-| `import` | `tracker:import` into the tracker's database, a dry run then the real one. | nothing refused |
+| `stop` | Reads the old lanes from the project's own installer (`--status`: each lane, its launchd label, its log), checks no pass is in flight (a log ending on a `START` with no `END`; a loaded lane whose `--status` names no log cannot be checked, and fails the step), then runs the snapshot's dry run (below) so a missing ClickUp token or list stops the run while the old loop still runs, and only then that installer's `--uninstall`, reading `--status` back. | `stop  stopped com.wavecenter.loop-build, ...` |
+| `snapshot` | `tracker:snapshot`, a dry run (unless the stop step just ran it) then the real one: the Loop Queue list plus every extra list, saved and packed on the Mini. | every count OK |
+| `import` | `tracker:import` into the tracker's database, a dry run then the real one. Unlike the others, it runs again on every rerun until `switch-check` has said Safe to switch, because the check's `NOT YET IMPORTED` and `STATUS DIFFERS` both mean "import again" (the import is safe to rerun). | nothing refused |
 | `switch-check` | `tracker:switch-check`. | `Safe to switch.` |
 
 Any of them failing prints `FAILED: <step>: ...` and the rerun command, and
 nothing after it runs. A pass in flight is a failure too: nothing is
 stopped, and the rerun after the pass ends goes on.
+
+The stop step stops only the lanes the project's own installer names. A
+project can have other launchd jobs that read its Loop Queue list
+(StarCaster's `pipeline-pulse` and `weekly-report`); they keep running,
+and anything they write to ClickUp after the import shows up in
+`switch-check` as `NOT YET IMPORTED`, so the rerun imports it. What to do
+with such jobs for good is part of that project's own switch (SP-25 for
+StarCaster).
 
 The three tracker scripts read their settings from the folder they run in,
 and the project's checkout still holds its old loop. So the wizard writes a
@@ -117,8 +125,9 @@ Dane's sign-in belongs to Spirality.
 
 The copy step then always runs with `--allow-replace`, since the setup
 replaces the old copy's files, and its pull request lists every file of
-the old copy it replaces and every old file beside them it leaves in place
-(nothing is deleted). The lanes step installs the new lanes, under the same
+the old copy it replaces, and every other file in the folders it writes
+into, which it does not touch (nothing is deleted; the list is for the
+reviewer, not a to-do list). The lanes step installs the new lanes, under the same
 launchd labels the old ones had.
 
 The checklist below stays as what the wizard does, item by item, and how
