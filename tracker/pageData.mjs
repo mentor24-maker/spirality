@@ -17,6 +17,7 @@ import machineComment from '../lib/machineComment.js';
 import loopStatuses from '../lib/loopStatuses.js';
 import mergeOnComment from '../lib/mergeOnComment.js';
 import humanHours from '../lib/humanHours.js';
+import busFallback from '../lib/busFallback.js';
 import { compareWithinStatus } from '../scripts/lib/loopStatuses.mjs';
 import { searchPattern } from './web/render.mjs';
 
@@ -25,6 +26,7 @@ const { isMachineComment, stripMachineMarker } = machineComment;
 const { STAGE_ORDER, LIVE, QUEUED, REWORK, OPERATOR_HELD_STATUSES, TERMINAL_STATUSES, DISPLAY, PRIORITY_RANK, statusOf } = loopStatuses;
 const { findPullRequest } = mergeOnComment;
 const { findHumanHours } = humanHours;
+const { isTeamChatTask } = busFallback;
 
 /**
  * The projects a reader may see: every one when `only` is null (a loop, an
@@ -73,6 +75,27 @@ function verdictInput(ticket, comments) {
 function answerIsIn(ticket, comments, operatorId) {
   if (operatorId == null || !OPERATOR_LANE.includes(ticket.status)) return false;
   return operatorSpokeLast(verdictInput(ticket, comments).comments, { operatorId });
+}
+
+/**
+ * The bus count in the page's header (Dane's choice D on the bus ticket): every
+ * "Team chat" ticket (lib/busFallback.js, by its name) on a project `only`
+ * lets through, with how many of its comments `actorId` has not seen
+ * (store.unseenCount: newer than their seen mark, never their own). Only
+ * tickets with something unseen are listed, most unseen first; `total` adds
+ * them up.
+ */
+export function busUnseen(store, actorId, { only = null } = {}) {
+  const unseen = [];
+  for (const project of visibleProjects(store, only)) {
+    for (const ticket of store.listTickets(project.slug)) {
+      if (!isTeamChatTask(ticket)) continue;
+      const count = store.unseenCount({ actor: actorId, ticket: ticket.id });
+      if (count > 0) unseen.push({ id: ticket.id, name: ticket.name, project: project.slug, projectName: project.name, count });
+    }
+  }
+  unseen.sort((a, b) => b.count - a.count || a.id.localeCompare(b.id));
+  return { total: unseen.reduce((n, t) => n + t.count, 0), unseen };
 }
 
 /**

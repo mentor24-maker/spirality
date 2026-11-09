@@ -41,12 +41,21 @@
  * Messages on this Mac (`imessageSender` below); a project with no alert
  * phone gets none.
  *
+ * **The bus alarm** (Dane's choice D on the bus ticket) rides the text: a comment starting `ALARM:` on
+ * a "Team chat" ticket goes to that ticket's project's alert phone, with its
+ * own record (createAlarmChannel below). There is no alarm email.
+ *
  * What is kept between tries lives in memory: a restart of the server drops
  * an unsent email or text. The page's waiting count is the backstop for that.
  */
 import { existsSync } from 'node:fs';
 import waitingOnOperator from '../lib/waitingOnOperator.js';
 import { cardAsk } from './web/render.mjs';
+import busFallback from '../lib/busFallback.js';
+import trackerBus from '../lib/trackerBus.js';
+
+const { isTeamChatTask } = busFallback;
+const { isAlarmPost, alarmText } = trackerBus;
 
 const { OPERATOR_LANE } = waitingOnOperator;
 
@@ -204,6 +213,91 @@ function failedTo(where, err) {
   return out;
 }
 
+/**
+ * THE BUS ALARM TEXT (Dane's choice D on the bus ticket, 2026-11-09: "a text for
+ * alarms only, plus the page count for everything else"). A comment on a
+ * "Team chat" ticket whose message starts with `ALARM:` (lib/trackerBus.js,
+ * isAlarmPost) is texted to that ticket's project's alert phone: the bus
+ * project's. Any other post sends nothing; the page's header counts it.
+ *
+ * Its own record and queue, beside the hand-over text's, with the same
+ * rules: one text per alarm (the comment's id names it, and a sent one is
+ * never sent again), a failed send never fails the post, and a kept one is
+ * tried again after `retryMs`, doubling up to `maxRetryMs`, on the next
+ * write the tracker hears. A bus project with no alert phone gets none,
+ * said once in the log until it has one.
+ */
+function createAlarmChannel({ store, sendText, pageUrl, log, retryMs = 0, maxRetryMs = retryMs, now = Date.now }) {
+  const sent = new Set();
+  /** comment id -> `{ ticketId, text, attempts, notBefore }`. */
+  const pending = new Map();
+  const toldNoPhone = new Set();
+  let queue = Promise.resolve();
+  let waiting = null;
+  const waitFor = (attempts) => (retryMs > 0 ? Math.min(retryMs * 2 ** (attempts - 1), maxRetryMs) : 0);
+
+  async function trySend(commentId) {
+    const wanted = pending.get(commentId);
+    if (!wanted || wanted.notBefore > now()) return;
+    const ticket = store.getTicket(wanted.ticketId);
+    const project = ticket && store.getProject(ticket.project);
+    const slug = project?.slug ?? ticket?.project ?? '?';
+    if (!project?.alertPhone) {
+      pending.delete(commentId);
+      if (!toldNoPhone.has(slug)) {
+        toldNoPhone.add(slug);
+        log(`bus alarm text: off for project "${slug}", which has no alert phone (its Edit project page sets one). Comment ${commentId} on ${wanted.ticketId} was not texted.`);
+      }
+      return;
+    }
+    toldNoPhone.delete(slug);
+    wanted.attempts += 1;
+    try {
+      await sendText({ to: project.alertPhone, text: alarmText({ ticketId: ticket.id, projectName: project.name, text: wanted.text, pageUrl }) });
+    } catch (err) {
+      const ms = waitFor(wanted.attempts);
+      wanted.notBefore = now() + ms;
+      log(`bus alarm text NOT sent: comment ${commentId} on ${ticket.id} to the project's alert phone, try ${wanted.attempts}: ${err?.message ?? err}. It is tried again on the next write${ms > 0 ? ` after ${Math.round(ms / 1000)} second(s)` : ''}.`);
+      return;
+    }
+    pending.delete(commentId);
+    sent.add(commentId);
+    log(`bus alarm text sent: comment ${commentId} on ${ticket.id} to the project's alert phone.`);
+  }
+
+  async function flush() {
+    for (const id of [...pending.keys()]) {
+      try {
+        await trySend(id);
+      } catch (err) {
+        log(`bus alarm text failed unexpectedly: ${err?.message ?? err}`);
+      }
+    }
+  }
+
+  return {
+    /** Hear one new comment: an alarm on a Team chat ticket is kept to send. */
+    note(comment, on) {
+      if (!comment || !on || !isTeamChatTask(on) || !isAlarmPost(comment.body)) return;
+      const id = String(comment.id);
+      if (!sent.has(id) && !pending.has(id)) pending.set(id, { ticketId: on.id, text: comment.body, attempts: 0, notBefore: 0 });
+    },
+    kick() {
+      if (waiting) return waiting;
+      const mine = queue.then(() => { waiting = null; return flush(); });
+      waiting = mine;
+      queue = mine.catch(() => {});
+      return queue;
+    },
+    settled() {
+      return queue;
+    },
+    pending() {
+      return [...pending.keys()];
+    },
+  };
+}
+
 /** How long a failed text waits before it is tried again: one minute, doubling, at most half an hour. */
 export const TEXT_RETRY_MS = 60_000;
 export const TEXT_RETRY_MAX_MS = 30 * 60_000;
@@ -271,7 +365,11 @@ export function createNotifier({
   });
   if (text) channels.push(text);
 
-  const all = () => Promise.all(channels.map((c) => c.settled())).then(() => {});
+  const alarms = sendText && createAlarmChannel({
+    store, sendText, pageUrl: textPageUrl, log, retryMs: textRetryMs, maxRetryMs: Math.max(textRetryMs, textRetryMaxMs), now,
+  });
+
+  const all = () => Promise.all([...channels, ...(alarms ? [alarms] : [])].map((c) => c.settled())).then(() => {});
 
   return {
     enabled: channels.length > 0,
@@ -282,11 +380,15 @@ export function createNotifier({
      * throws. Each channel tries this write's hand-over, and its kept ones
      * that are due, in its own queue, so a hanging text never holds up an
      * email. Resolves once both channels have.
+     *
+     * A new comment comes as `{ comment, on }` (the comment as stored, and
+     * the ticket it is on): the bus alarm text hears it (Dane's choice D on the bus ticket).
      */
-    afterWrite(ticket, changed = []) {
+    afterWrite(ticket, changed = [], { comment = null, on = null } = {}) {
       if (!channels.length) return Promise.resolve();
       for (const channel of channels) channel.note(ticket, changed);
-      return Promise.all(channels.map((c) => c.kick())).then(() => {});
+      if (alarms) alarms.note(comment, on);
+      return Promise.all([...channels, ...(alarms ? [alarms] : [])].map((c) => c.kick())).then(() => {});
     },
 
     /** Resolves once every write heard so far has been dealt with, on both channels. */
@@ -307,6 +409,11 @@ export function createNotifier({
     /** The hand-over texts not yet sent. */
     pendingTexts() {
       return text ? text.pending() : [];
+    },
+
+    /** The bus alarm texts not yet sent, by comment id. */
+    pendingAlarms() {
+      return alarms ? alarms.pending() : [];
     },
   };
 }

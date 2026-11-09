@@ -1048,7 +1048,27 @@ together):
 | Reading the party line for the operator's stop and resume words (`readBusSwitchSignals`) | `bus-read --operator`: only comments whose author is the operator's own actor, no machine-stamp guess |
 | The relay watching Agent Response tickets ("pending response", "responding") for the operator's comments | `bus-read --operator --since <time>`, across every ticket in the bus project |
 | `waiting` sweeping the Agent Response list for "what actually needs me?" | The page's Waiting on You list, which reads every project the operator is on, the bus project included, but shows only tickets in the operator's statuses: a steward question shows there once it has been through `ask`, never straight after `task` |
-| The operator seeing a new post: the "Team chat" ticket puts itself in their ClickUp "Assigned to me" list | The bus project's board on the tracker page, where "Team chat" sits in Live. No email or text per post (a follow-up ticket asks the operator how loud alarms should be) |
+| The operator seeing a new post: the "Team chat" ticket puts itself in their ClickUp "Assigned to me" list | An alarm (a post whose message starts with `ALARM:`) is texted to the bus project's alert phone; every post, alarm or not, counts in the "New on the Bus" number in the page's header until the operator opens "Team chat" (SP-163, the operator's choice D) |
+
+**How loud a post is** (SP-163; Dane chose D on 2026-11-09: "a text for
+alarms only, plus the page count for everything else"):
+
+- **An alarm is texted.** A post whose message (below the `**From …**`
+  line) starts with `ALARM:` is sent as an iMessage from the Mini to the
+  bus project's **alert phone**, the same channel and the same retry rules as
+  the hand-over text. A bus project with no alert phone gets no text, said
+  once in the tracker's log; set one on its Edit project page. No email: Dane
+  did not choose one.
+- **Every post is counted.** The page's header shows how many posts on
+  Team chat tickets Dane has not seen ("3 New on the Bus"), linking to the
+  ticket. Opening the ticket marks them seen, for him only: a seen mark is
+  per person, kept by the tracker, so it is the same on his phone and his
+  desk. His own comments never count.
+
+```bash
+echo "ALARM: the heartbeat stopped at 09:10" | npm run clickup -- bus-post --body-file -   # texted
+echo "weekly report: 12 merged" | npm run clickup -- bus-post --body-file -               # counted only
+```
 
 Switching StarCaster's scripts over to these commands is the next ticket.
 

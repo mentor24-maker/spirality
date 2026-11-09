@@ -2185,3 +2185,31 @@ test('the page uploads with its session cookie as the file itself; a cookie uplo
     } finally { await s.close(); }
   } finally { await f.cleanup(); }
 });
+
+test('GET /bus counts the posts on each Team chat ticket the caller has not seen; POST /tickets/:id/seen marks them (SP-163)', async () => {
+  const f = await fixture();
+  try {
+    f.store.createProject({ slug: 'sc-bus', name: 'StarCaster Bus', prefix: 'SB', operator: f.human.id });
+    const chat = f.store.fileTicket({ project: 'sc-bus', actor: f.machine.id, name: 'Team chat', status: 'live' });
+    const other = f.store.fileTicket({ project: 'sc-bus', actor: f.machine.id, name: 'A steward question', status: 'queued' });
+    const as = { token: f.humanToken };
+    assert.deepEqual((await f.call('GET', '/bus', as)).body, { total: 0, unseen: [] }, 'nothing posted, nothing counted');
+    for (const body of ['ALARM: one', 'weekly report']) {
+      assert.equal((await f.call('POST', `/tickets/${chat.id}/comments`, { body: { body } })).status, 201);
+    }
+    await f.call('POST', `/tickets/${other.id}/comments`, { body: { body: 'not the bus' } });
+    await f.call('POST', `/tickets/${chat.id}/comments`, { ...as, body: { body: 'stop' } });
+    assert.deepEqual((await f.call('GET', '/bus', as)).body, {
+      total: 2, unseen: [{ id: chat.id, name: 'Team chat', project: 'sc-bus', projectName: 'StarCaster Bus', count: 2 }],
+    }, 'only Team chat counts, and never his own comment');
+    const seen = await f.call('POST', `/tickets/${chat.id}/seen`, as);
+    assert.equal(seen.status, 200);
+    assert.equal(seen.body.ticket, chat.id);
+    assert.deepEqual((await f.call('GET', '/bus', as)).body, { total: 0, unseen: [] });
+    assert.equal((await f.call('GET', '/bus')).body.total, 1, 'the mark is his only: the loop has its own count, his "stop"');
+    await f.call('POST', `/tickets/${chat.id}/comments`, { body: { body: 'a new one' } });
+    assert.equal((await f.call('GET', '/bus', as)).body.total, 1);
+    assert.equal((await f.call('POST', '/tickets/SB-99/seen', as)).status, 404);
+    assert.equal((await f.call('GET', '/bus', { token: null })).status, 401);
+  } finally { await f.cleanup(); }
+});

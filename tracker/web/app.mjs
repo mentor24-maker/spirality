@@ -26,7 +26,7 @@
  * an emailed link's own page. The link's token is sent only in a JSON body,
  * never in an address.
  */
-import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket } from './render.mjs';
+import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket } from './render.mjs';
 
 /** Where an earlier version of the page kept a pasted token; removed on load, never read. */
 const OLD_TOKEN_KEY = 'tracker-token';
@@ -43,6 +43,7 @@ const who = document.getElementById('who');
 const headerProject = document.getElementById('project');
 const signOut = document.getElementById('sign-out');
 const bell = document.getElementById('bell');
+const busCount = document.getElementById('bus');
 let me = null;
 
 /**
@@ -92,6 +93,43 @@ async function refreshCount() {
   }
   document.title = tabTitle(waitingCount, pageTitle);
   showBell();
+  await refreshBus();
+}
+
+/** The last bus answer read (GET /bus), or null before any. */
+let busState = null;
+
+/** Show the bus count in the header from the last answer read; nothing unseen, nothing shown. */
+function showBus() {
+  const link = me ? busLink(busState) : null;
+  busCount.hidden = !link;
+  if (!link) return;
+  busCount.textContent = link.text;
+  busCount.href = link.href;
+  busCount.title = link.title;
+  busCount.setAttribute('aria-label', link.title);
+}
+
+/**
+ * Read the bus count again (Dane's choice D on the bus ticket). When the ticket open on the page is a
+ * Team chat ticket with posts he has not seen, and the tab is in view, he is looking at them: mark
+ * them seen, then read the count again. A failed read leaves the count alone.
+ */
+async function refreshBus() {
+  if (!me) return;
+  try {
+    busState = await api('GET', '/bus');
+    const open = ticketAt();
+    // A tab in the background is not him looking: its posts stay counted.
+    if (open && !document.hidden && busState.unseen.some((u) => u.id === open)) {
+      await api('POST', `/tickets/${encodeURIComponent(open)}/seen`);
+      busState = await api('GET', '/bus');
+    }
+  } catch (err) {
+    if (err instanceof SignedOut) drawSignIn();
+    return;
+  }
+  showBus();
 }
 
 /** A status as the contract writes it: "needs your input" -> "Needs your input". */
@@ -236,6 +274,7 @@ async function drawSetPassword() {
   headerProject.hidden = true;
   signOut.hidden = true;
   bell.hidden = true;
+  busCount.hidden = true;
   setTitle('Set Your Password · Tracker');
   const link = new URLSearchParams(location.search).get('link') ?? '';
   const refused = (answer) => {
@@ -296,6 +335,7 @@ function signedOutHeader(title) {
   headerProject.hidden = true;
   signOut.hidden = true;
   bell.hidden = true;
+  busCount.hidden = true;
   setTitle(title);
 }
 
@@ -1324,7 +1364,7 @@ async function drawTicket(id, said = null, kept = null) {
       ${me?.kind === 'human' ? renderEditPanel(t) : ''}
       <section class="description">${renderMarkdown(t.description) || '<p class="quiet">No description.</p>'}</section>
       ${renderAttachments(t)}
-      <h2>Comments</h2>
+      <h2 id="comments">Comments</h2>
       ${comments || '<p class="quiet">No comments yet.</p>'}
       <h2>Copy to Another Project</h2>
       ${others.length ? `
@@ -1337,6 +1377,11 @@ async function drawTicket(id, said = null, kept = null) {
       </form>` : '<p class="quiet">There is no other project to copy into yet.</p>'}
     </details>`;
   wireCopyButtons();
+  // Arrived by the bus count in the header: open the fold at the comments, where the posts are.
+  if (location.hash === '#comments' && !refreshing) {
+    main.querySelector('details.details').open = true;
+    document.getElementById('comments').scrollIntoView({ block: 'start' });
+  }
   // The ticket's own project, in the view last used; then the ticket; then this page of it.
   putTrail([
     { label: t.projectName, href: `/${savedView()}/${encodeURIComponent(t.project)}` },
@@ -2161,6 +2206,8 @@ async function route({ place = null } = {}) {
     // Waiting on you read the count as it drew; every other page reads it now.
     if (!waiting) await refreshCount();
     if (kept) lastDrawn = ticket || project || tasks || isNew || waiting ? { address: here(), reads } : null;
+    // Waiting on you skipped refreshCount, so the bus count in the header is read here.
+    if (waiting) await refreshBus();
     // A setup page under way follows it every few seconds (the fast beat below).
     if (kept && following) lastDrawn = { address: here(), reads, fast: true };
   } catch (err) {
