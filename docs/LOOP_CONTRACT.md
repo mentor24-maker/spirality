@@ -485,6 +485,18 @@ Only four kinds of thing: a **real secret value**, a **billing screen**, a
 **browser login**, or a **decision that is genuinely his**. The card says
 which. Everything else, a loop does itself.
 
+### A file link names a commit, never a branch (2026-11-09)
+
+Every GitHub file link a loop writes on a ticket (a card, a test step, a
+comment, a description) names a commit (`.../blob/<commit>/<path>`), `main`
+for a file already on `main`, or the pull request's files tab
+(`.../pull/<n>/files`). Never a branch: the relay merges with
+`--delete-branch`, so a branch link goes dead the moment Dane merges. On
+2026-11-04 he clicked "Read the page" on SP-105, a link to
+`blob/setup-review/...`, and got GitHub's 404 (SP-178). `comment`, `ask`,
+`describe`, `task`, `verdict` and `pr-opened` refuse a branch link outside a
+fence, exit 2, nothing written.
+
 ## Merge phrases
 
 On a ticket in `Ready to launch`, a comment from Dane that is **exactly** one
