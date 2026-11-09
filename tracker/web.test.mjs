@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { seedDemo, tickingClock } from './demoData.mjs';
 import { reportsOf, REPORT_RANGES, searchTickets } from './pageData.mjs';
-import { escapeHtml, renderComment, renderInline, renderMarkdown, renderQuickAction, renderCommands, cardCommands, cardAsk, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket } from './web/render.mjs';
+import { escapeHtml, renderComment, renderInline, renderMarkdown, renderQuickAction, renderCommands, cardCommands, cardAsk, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket } from './web/render.mjs';
 import { startServer, setupSettingsOf } from './server.mjs';
 import { saveAnswers, setupFields, setupOf } from './setup.mjs';
 import { DANE_FIELDS as SETUP_FIELDS, STEPS as SETUP_STEPS } from '../scripts/onboard/onboard.mjs';
@@ -2724,4 +2724,16 @@ test('a ticket or project on a project the person is not on draws a plain You Ar
   // The members note no longer says everyone sees every project.
   assert.doesNotMatch(app, /everyone still sees every project/);
   assert.match(app, /Only its members \(and admins\) see this project and its tickets\./);
+});
+
+test('busLink: the header count of unseen bus posts, opening the Team chat with the most; nothing unseen, no link (SP-163)', () => {
+  assert.equal(busLink(null), null);
+  assert.equal(busLink({ total: 0, unseen: [] }), null);
+  const link = busLink({ total: 4, unseen: [
+    { id: 'SB-1', name: 'Team chat', projectName: 'StarCaster Bus', count: 3 },
+    { id: 'WB-2', name: 'Team chat', projectName: 'WaveCenter Bus', count: 1 },
+  ] });
+  assert.equal(link.text, '4 New on the Bus');
+  assert.equal(link.href, '/t/SB-1#comments', 'the posts are in the Details fold: #comments opens it');
+  assert.equal(link.title, 'StarCaster Bus: 3 new posts on Team chat; WaveCenter Bus: 1 new post on Team chat');
 });

@@ -1493,3 +1493,27 @@ test('deleting an unstarted ticket takes its attachments with it; a started one 
     assert.equal(store.listAttachments(started.id).length, 1);
   } finally { cleanup(); }
 });
+
+test('markSeen and unseenCount: per person, never their own comments, a mark never moves back, a deleted ticket takes its marks (SP-163)', () => {
+  const store = openStore(':memory:');
+  const dane = store.createActor({ kind: 'human', name: 'Dane' });
+  const loop = store.createActor({ kind: 'machine', name: 'Loop' });
+  store.createProject({ slug: 'bus', name: 'Bus', prefix: 'B' });
+  const t = store.fileTicket({ project: 'bus', actor: loop.id, name: 'Team chat', status: 'queued' });
+  assert.equal(store.unseenCount({ actor: dane.id, ticket: t.id }), 0);
+  store.postComment({ ticket: t.id, author: loop.id, body: 'one' });
+  store.postComment({ ticket: t.id, author: dane.id, body: 'mine' });
+  store.postComment({ ticket: t.id, author: loop.id, body: 'two' });
+  assert.equal(store.unseenCount({ actor: dane.id, ticket: t.id }), 2, 'his own comment never counts');
+  const mark = store.markSeen({ actor: dane.id, ticket: t.id });
+  assert.equal(mark.ticket, t.id);
+  assert.equal(store.unseenCount({ actor: dane.id, ticket: t.id }), 0);
+  assert.equal(store.unseenCount({ actor: loop.id, ticket: t.id }), 1, "another person's mark is theirs");
+  store.postComment({ ticket: t.id, author: loop.id, body: 'three' });
+  assert.equal(store.unseenCount({ actor: dane.id, ticket: t.id }), 1);
+  assert.ok(store.markSeen({ actor: dane.id, ticket: t.id }).comment > mark.comment);
+  assert.throws(() => store.markSeen({ actor: dane.id, ticket: 'B-99' }), /B-99/);
+  store.deleteTicket(t.id, { actor: dane.id });
+  assert.equal(store.unseenCount({ actor: dane.id, ticket: t.id }), 0);
+  store.close();
+});

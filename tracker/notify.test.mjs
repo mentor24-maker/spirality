@@ -694,3 +694,187 @@ test('textSettings: off on a machine that is not a Mac or has no osascript; on o
   const mac = textSettings({ platform: 'darwin', exists: () => true, run: async () => {} });
   assert.equal(typeof mac.sendText, 'function');
 });
+
+// ── The bus alarm text (SP-163, Dane's choice D: a text for alarms only) ──
+
+/**
+ * A bus project with a "Team chat" ticket, as bus-post leaves it, and a
+ * server whose notifier texts through a fake. `post(text)` is what the door
+ * sends: the "**From <machine>** · <time>" header, then the message.
+ */
+async function busFixture({ phone = PHONE, stamp = false } = {}) {
+  const { stampMachineComment } = await import('../scripts/lib/machineComment.mjs');
+  const store = openStore(':memory:');
+  const dane = store.createActor({ kind: 'human', name: 'Dane' });
+  const loop = store.createActor({ kind: 'machine', name: 'Loop' });
+  const loopToken = store.issueToken(loop.id);
+  store.createProject({ slug: 'sc-bus', name: 'StarCaster Bus', prefix: 'SB', operator: dane.id, alertPhone: phone });
+  const chat = store.fileTicket({ project: 'sc-bus', actor: loop.id, name: 'Team chat', status: 'live' });
+  const other = store.fileTicket({ project: 'sc-bus', actor: loop.id, name: 'A steward question', status: 'queued' });
+  const fake = { textFail: false };
+  const texts = [];
+  const lines = [];
+  const clock = { t: 1_000_000 };
+  /** The retry timers the alarm channel set, fired by hand: `{ fn, ms, cleared }`. */
+  const timers = [];
+  const notifier = createNotifier({
+    store, pageUrl: PAGE, log: (l) => lines.push(l), now: () => clock.t,
+    setTimer: (fn, ms) => { const t = { fn, ms, cleared: false }; timers.push(t); return t; },
+    clearTimer: (t) => { t.cleared = true; },
+    sendText: async (t) => { if (fake.textFail) throw new Error('Messages refused it: not signed in'); texts.push(t); },
+  });
+  const server = await startServer({ store, port: 0, log: () => {}, notifier });
+  const base = `http://127.0.0.1:${server.address().port}`;
+  async function post(text, { on = chat.id, from = 'mini' } = {}) {
+    const res = await fetch(`${base}/tickets/${on}/comments`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${loopToken}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ body: (stamp ? stampMachineComment : String)(`**From ${from}** · 11/9/2026, 10:15 AM MT\n\n${text}`) }),
+    });
+    await notifier.settled();
+    return { status: res.status, body: await res.json() };
+  }
+  async function cleanup() {
+    await new Promise((r) => server.close(r));
+    store.close();
+  }
+  return { store, chat, other, fake, texts, lines, clock, timers, notifier, post, cleanup };
+}
+
+test('an ALARM: post on Team chat sends one text to the bus project\'s alert phone: the bus, the machine, the alarm, the link', async () => {
+  const f = await busFixture();
+  const r = await f.post('ALARM: the heartbeat stopped at 09:10');
+  assert.equal(r.status, 201);
+  assert.equal(f.texts.length, 1);
+  assert.equal(f.texts[0].to, PHONE);
+  assert.equal(f.texts[0].text, [
+    'Alarm on StarCaster Bus from mini',
+    'ALARM: the heartbeat stopped at 09:10',
+    'http://tracker.example:8787/t/SB-1',
+  ].join('\n'));
+  assert.ok(f.lines.includes(`bus alarm text sent: comment ${r.body.id} on SB-1 to the project's alert phone.`), f.lines.join('\n'));
+  await f.cleanup();
+});
+
+test('a routine post, an alarm on another ticket, and a post that only mentions ALARM: send no text', async () => {
+  const f = await busFixture();
+  await f.post('weekly report: 12 merged');
+  await f.post('the job said ALARM: earlier, now fine');
+  await f.post('ALARM: on a steward question, not the bus', { on: f.other.id });
+  assert.equal(f.texts.length, 0);
+  assert.deepEqual(f.notifier.pendingAlarms(), []);
+  await f.post('alarm: lower case still counts');
+  assert.equal(f.texts.length, 1);
+  await f.cleanup();
+});
+
+test('a failed alarm text never fails the post; it is kept, waits a minute, and is sent once', async () => {
+  const f = await busFixture();
+  f.fake.textFail = true;
+  const r = await f.post('ALARM: queue STALLED');
+  assert.equal(r.status, 201, 'the post stands');
+  assert.equal(f.texts.length, 0);
+  assert.deepEqual(f.notifier.pendingAlarms(), [String(r.body.id)]);
+  assert.ok(f.lines.some((l) => l.startsWith(`bus alarm text NOT sent: comment ${r.body.id} on SB-1`) && l.includes('Messages refused it')), f.lines.join('\n'));
+  f.fake.textFail = false;
+  await f.notifier.afterWrite(null, []);
+  assert.equal(f.texts.length, 0, 'not inside the minute');
+  f.clock.t += 60_000;
+  await f.notifier.afterWrite(null, []);
+  assert.equal(f.texts.length, 1);
+  await f.notifier.afterWrite(null, []);
+  assert.equal(f.texts.length, 1, 'never twice');
+  assert.ok(!f.lines.join('\n').includes(PHONE), 'no phone number in the log');
+  await f.cleanup();
+});
+
+test('a bus project with no alert phone gets no alarm text, said once in the log, nothing kept', async () => {
+  const f = await busFixture({ phone: null });
+  await f.post('ALARM: one');
+  await f.post('ALARM: two');
+  assert.equal(f.texts.length, 0);
+  assert.deepEqual(f.notifier.pendingAlarms(), []);
+  assert.equal(f.lines.filter((l) => l.startsWith('bus alarm text: off for project "sc-bus"')).length, 1, f.lines.join('\n'));
+  f.store.updateProject('sc-bus', { alertPhone: PHONE });
+  await f.post('ALARM: three');
+  assert.equal(f.texts.length, 1);
+  await f.cleanup();
+});
+
+test('with texts off, an alarm post sends nothing and the post still stands', async () => {
+  const store = openStore(':memory:');
+  const loop = store.createActor({ kind: 'machine', name: 'Loop' });
+  store.createProject({ slug: 'sc-bus', name: 'Bus', prefix: 'SB', alertPhone: PHONE });
+  const chat = store.fileTicket({ project: 'sc-bus', actor: loop.id, name: 'Team chat', status: 'live' });
+  const mail = [];
+  const notifier = createNotifier({ store, send: async (m) => { mail.push(m); }, to: 'd@example.com', pageUrl: PAGE });
+  const c = store.postComment({ ticket: chat.id, author: loop.id, body: 'ALARM: x' });
+  await notifier.afterWrite(null, [], { comment: c, on: chat });
+  assert.equal(mail.length, 0, 'Dane chose no alarm email');
+  assert.deepEqual(notifier.pendingAlarms(), []);
+  store.close();
+});
+
+test('a stamped alarm post (as bus-post really sends it) is texted without the "[machine]" line', async () => {
+  const f = await busFixture({ stamp: true });
+  const r = await f.post('ALARM: heartbeat stopped', { from: 'mac-mini' });
+  assert.match(f.store.listComments(f.chat.id).at(-1).body, /\[machine\]/, 'the stored post carries the stamp');
+  assert.equal(r.status, 201);
+  assert.equal(f.texts.length, 1);
+  assert.equal(f.texts[0].text, 'Alarm on StarCaster Bus from mac-mini\nALARM: heartbeat stopped\nhttp://tracker.example:8787/t/SB-1');
+  assert.doesNotMatch(f.texts[0].text, /\[machine\]/);
+  await f.cleanup();
+});
+
+test('a failed alarm text is tried again on a timer when it falls due, with no other write needed', async () => {
+  const f = await busFixture();
+  f.fake.textFail = true;
+  await f.post('ALARM: queue STALLED');
+  assert.equal(f.timers.length, 1, 'one retry timer');
+  assert.equal(f.timers[0].ms, 60_000, 'set for the one-minute wait');
+  assert.ok(f.lines.some((l) => l.includes('tried again in 60 second(s)')), f.lines.join('\n'));
+  f.fake.textFail = false;
+  f.clock.t += 60_000;
+  f.timers[0].fn();
+  await f.notifier.settled();
+  assert.equal(f.texts.length, 1, 'sent by the timer alone');
+  assert.deepEqual(f.notifier.pendingAlarms(), []);
+  await f.cleanup();
+});
+
+test('a retry that fails again sets the next, doubled timer; a sooner write sends it and the late timer sends nothing twice', async () => {
+  const f = await busFixture();
+  f.fake.textFail = true;
+  await f.post('ALARM: one');
+  f.clock.t += 60_000;
+  f.timers[0].fn();
+  await f.notifier.settled();
+  assert.equal(f.timers.length, 2);
+  assert.equal(f.timers[1].ms, 120_000, 'doubled');
+  f.fake.textFail = false;
+  f.clock.t += 120_000;
+  await f.notifier.afterWrite(null, []);
+  assert.equal(f.texts.length, 1, 'the write got there first');
+  f.timers[1].fn();
+  await f.notifier.settled();
+  assert.equal(f.texts.length, 1, 'never twice');
+  await f.cleanup();
+});
+
+test('a retry timer that fires a moment early sets itself again rather than leaving the alarm for the next write', async () => {
+  const f = await busFixture();
+  f.fake.textFail = true;
+  await f.post('ALARM: early');
+  f.fake.textFail = false;
+  f.clock.t += 59_000;
+  f.timers[0].fn();
+  await f.notifier.settled();
+  assert.equal(f.texts.length, 0, 'not due yet');
+  assert.equal(f.timers.length, 2, 'a new timer for the rest of the minute');
+  assert.equal(f.timers[1].ms, 1_000);
+  f.clock.t += 1_000;
+  f.timers[1].fn();
+  await f.notifier.settled();
+  assert.equal(f.texts.length, 1);
+  await f.cleanup();
+});

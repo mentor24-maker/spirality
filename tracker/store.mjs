@@ -248,6 +248,13 @@ CREATE TABLE IF NOT EXISTS project_members (
   added_at    TEXT NOT NULL,
   PRIMARY KEY (project, actor)
 );
+CREATE TABLE IF NOT EXISTS seen_marks (
+  actor       INTEGER NOT NULL REFERENCES actors(id),
+  ticket      TEXT NOT NULL REFERENCES tickets(id),
+  comment     INTEGER NOT NULL,
+  at          TEXT NOT NULL,
+  PRIMARY KEY (actor, ticket)
+);
 CREATE INDEX IF NOT EXISTS project_members_by_actor ON project_members (actor, project);
 CREATE INDEX IF NOT EXISTS attachments_by_ticket ON attachments (ticket, id);
 CREATE UNIQUE INDEX IF NOT EXISTS actors_by_token ON actors (token_hash);
@@ -1574,6 +1581,7 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
         db.prepare('DELETE FROM events WHERE ticket = ?').run(row.id);
         db.prepare('DELETE FROM comments WHERE ticket = ?').run(row.id);
         db.prepare('DELETE FROM attachments WHERE ticket = ?').run(row.id);
+        db.prepare('DELETE FROM seen_marks WHERE ticket = ?').run(row.id);
         const r = db.prepare('DELETE FROM tickets WHERE id = ? AND status = ?').run(row.id, row.status);
         if (num(r.changes) !== 1 || ticketRow(row.id)) {
           throw new StoreError('write-failed', `ticket ${row.id} was not deleted.`);
@@ -1709,6 +1717,36 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
         }
         return after;
       });
+    },
+
+    /**
+     * Mark every comment on `ticket` so far as seen by `actor` (the
+     * bus count in the page's header). The mark is the newest comment's id,
+     * read back in the same transaction; a mark never moves backwards.
+     * Answers `{ ticket, comment }`.
+     */
+    markSeen({ actor, ticket }) {
+      return transaction(() => {
+        requireActor(actor, 'the actor');
+        const row = requireTicketRow(ticket);
+        const newest = num(db.prepare('SELECT COALESCE(MAX(id), 0) AS n FROM comments WHERE ticket = ?').get(row.id).n);
+        db.prepare(`INSERT INTO seen_marks (actor, ticket, comment, at) VALUES (?, ?, ?, ?)
+          ON CONFLICT (actor, ticket) DO UPDATE SET comment = MAX(comment, excluded.comment), at = excluded.at`)
+          .run(actor, row.id, newest, now());
+        const back = db.prepare('SELECT comment FROM seen_marks WHERE actor = ? AND ticket = ?').get(actor, row.id);
+        if (!back || num(back.comment) < newest) throw new StoreError('write-failed', `the seen mark on ${row.id} did not read back.`);
+        return { ticket: row.id, comment: num(back.comment) };
+      });
+    },
+
+    /**
+     * How many comments on `ticket` `actor` has not seen: those newer than
+     * their mark (all of them when they have none), never their own.
+     */
+    unseenCount({ actor, ticket }) {
+      const mark = db.prepare('SELECT comment FROM seen_marks WHERE actor = ? AND ticket = ?').get(actor, String(ticket));
+      return num(db.prepare('SELECT COUNT(*) AS n FROM comments WHERE ticket = ? AND id > ? AND author != ?')
+        .get(String(ticket), mark ? num(mark.comment) : 0, actor).n);
     },
 
     /** A ticket's comments, oldest first. */
