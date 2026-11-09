@@ -11,6 +11,8 @@ header nav.site a.current { color: #fff; border-bottom-color: var(--blue); }
 header .me { margin-left: auto; display: flex; gap: 1rem; align-items: center; }
 header #project { color: #fff; font-weight: 600; }
 header #who { color: #b8b8be; font-size: 0.9rem; }
+header #bus { align-self: center; padding: 2px 8px; border-radius: 10px; background: #ff9f0a; color: #1c1c1e; font-weight: 600; font-size: 13px; text-decoration: none; white-space: nowrap; }
+header #bus[hidden] { display: none; }
 header #bell { display: flex; align-self: stretch; align-items: center; border-bottom: 2px solid transparent; }
 header #bell[hidden] { display: none; }
 header #bell.current { border-bottom-color: var(--blue); }

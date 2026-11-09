@@ -218,7 +218,7 @@ npm run clickup -- <command> [flags]      (Loop Queue: list ${LOOP_QUEUE_LIST}, 
                                                   and the hand-back: his answer to the question card on a "Needs your input"
                                                   ticket moves it to Queued, Rework or Live by the contract's table.
                                                   One line per ticket he holds. --dry-run prints what it would do, writes nothing
-  bus-post --body-file <f|-> [--from <name>]      post an alarm or report to the bus project's "Team chat" ticket, read back
+  bus-post --body-file <f|-> [--from <name>]      post an alarm or report to the bus project's "Team chat" ticket, read back; a message starting ALARM: is texted
   bus-read [--operator] [--since <time>]          the bus's comments, oldest first: time (ISO, UTC: feeds --since), ticket, operator|machine, author, first line
   main-moved --pr <merged #> [--list <id>] [--dry-run]
                                                   tell every Building / In review / Rework ticket with an open PR whether
@@ -1747,6 +1747,10 @@ if (cmd === 'whoami') {
     const { id } = await postComment(chat.id, { comment_text: post });
     console.log(`Posted to the bus: comment ${id} on ${chat.id} "${chat.name}" in ${bus} (verified by reading it back).`);
     console.log(`  ${filedTrackerUrl() || project.trackerUrl}/t/${chat.id}`);
+    // How loud it is (SP-163): the tracker sends the text, so this says what it will do, not that it did.
+    console.log(trackerBus.isAlarmPost(post)
+      ? `  It starts with ${trackerBus.ALARM_PREFIX}, so the tracker texts it to ${bus}'s alert phone (none set: no text; the tracker's log says which).`
+      : `  Not an alarm (no ${trackerBus.ALARM_PREFIX} at the start), so no text: it counts in the page's "New on the Bus" number.`);
   } else {
     const since = trackerBus.parseSince(arg('since'));
     if (since && typeof since === 'object') { console.error(`bus-read: ${since.error}. Nothing was read.`); process.exit(2); }

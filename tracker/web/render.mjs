@@ -262,6 +262,24 @@ export function bellColour(waitingCount) {
   return waitingCount <= 3 ? 'yellow' : 'red';
 }
 
+/**
+ * The bus count in the header (Dane's choice D on the bus ticket: "the page count for
+ * everything else"), from GET /bus: `{ text, href, title }`, or null when
+ * nothing on the bus is unseen (or the answer is missing). It opens the
+ * Team chat ticket with the most unseen posts at its comments (the ticket
+ * page opens its Details fold for `#comments`); the title names each one.
+ */
+export function busLink(answer) {
+  const unseen = Array.isArray(answer?.unseen) ? answer.unseen.filter((u) => Number(u.count) > 0) : [];
+  const total = unseen.reduce((n, u) => n + Number(u.count), 0);
+  if (!total) return null;
+  return {
+    text: `${total} New on the Bus`,
+    href: `/t/${encodeURIComponent(unseen[0].id)}#comments`,
+    title: unseen.map((u) => `${u.projectName}: ${u.count} new post${Number(u.count) === 1 ? '' : 's'} on ${u.name}`).join('; '),
+  };
+}
+
 const CONTEXT_HEADING = "WHAT'S GOING ON";
 
 /**

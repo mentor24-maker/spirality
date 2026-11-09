@@ -69,7 +69,7 @@ import { promisify } from 'node:util';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { MAX_ATTACHMENT, openStore, StoreError } from './store.mjs';
 import { SOURCE as IMPORT_SOURCE } from './import.mjs';
-import { boardOf, PRIORITIES, projectDetailsOf, projectsList, readSearchFilters, reportsOf, searchTickets, stageColoursOf, threadOf, waitingFor } from './pageData.mjs';
+import { boardOf, PRIORITIES, projectDetailsOf, projectsList, readSearchFilters, reportsOf, searchTickets, stageColoursOf, threadOf, waitingFor, busUnseen } from './pageData.mjs';
 import { createNotifier, DEFAULT_FROM, MAIL_FROM, MAIL_KEY, mailEnvFromDoppler, mailSettingsFromEnv, resendSender, textSettings } from './notify.mjs';
 import { sendInvite, sendResetLink } from './account.mjs';
 import { guessProject } from './projectGuess.mjs';
@@ -638,6 +638,12 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
       return [200, waitingFor(store, me.id, { only: scopeOf(me) })];
     }
 
+    // Dane's page: the bus count in the header (Dane's choice D on the bus ticket), the posts on each
+    // Team chat ticket the caller has not seen.
+    if (parts.length === 1 && parts[0] === 'bus' && method === 'GET') {
+      return [200, busUnseen(store, me.id, { only: scopeOf(me) })];
+    }
+
     // Dane's page: the Projects screen, the project Tasks opens, and the New
     // request form's picker with the project it starts on.
     if (parts.length === 1 && parts[0] === 'projects' && method === 'GET') {
@@ -976,7 +982,16 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
       if (body.parent != null && !Number.isInteger(body.parent)) {
         throw new HttpError(400, 'bad-parent', `parent must be a comment id, not "${body.parent}".`);
       }
-      return [201, store.postComment({ ticket: ticket.id, author: me.id, body: body.body, parent: body.parent ?? null }), { ticket: null, changed: [] }];
+      const posted = store.postComment({ ticket: ticket.id, author: me.id, body: body.body, parent: body.parent ?? null });
+      // The notifier hears the comment too: an ALARM: post on a Team chat ticket is texted (Dane's choice D on the bus ticket).
+      return [201, posted, { ticket: null, changed: [], comment: posted, on: ticket }];
+    }
+
+    // Dane's page: opening a ticket marks its comments seen, for the caller
+    // only (the bus count in the header). Read back by the store.
+    if (parts.length === 3 && parts[0] === 'tickets' && parts[2] === 'seen' && method === 'POST') {
+      const ticket = requireTicket(parts[1], me);
+      return [200, store.markSeen({ actor: me.id, ticket: ticket.id })];
     }
 
     // Dane's page: copy a ticket into another project, filed under the
@@ -1164,7 +1179,7 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
       }
     }
     log(`${req.method} ${url.pathname} ${status} actor=${me ? me.id : '-'}`);
-    if (wrote && notifier) await notifier.afterWrite(wrote.ticket, wrote.changed);
+    if (wrote && notifier) await notifier.afterWrite(wrote.ticket, wrote.changed, wrote.comment ? { comment: wrote.comment, on: wrote.on } : {});
   };
 }
 
@@ -1292,8 +1307,8 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     // The text's link opens on his phone: always the shared address, never this machine's own 127.0.0.1.
     const textPageUrl = sharedPageUrl({ host, port });
     log(text.sendText
-      ? `hand-over text: on, through Messages on this Mac, to each project's alert phone, linking to ${textPageUrl}.`
-      : `hand-over text: off. ${text.why}`);
+      ? `hand-over text: on, through Messages on this Mac, to each project's alert phone, linking to ${textPageUrl}; an ALARM: post on a Team chat ticket is texted the same way.`
+      : `hand-over text: off, and so is the bus alarm text. ${text.why}`);
     const notifier = mail.send || text.sendText
       ? createNotifier({ store, send: mail.send, to: mail.to, pageUrl: mail.pageUrl ?? textPageUrl, sendText: text.sendText, textPageUrl, log })
       : null;
