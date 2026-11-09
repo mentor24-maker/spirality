@@ -643,7 +643,8 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     if (parts.length === 1 && parts[0] === 'projects' && method === 'GET') {
       const projects = projectsList(store, { only: scopeOf(me) });
       const fallback = projects.some((p) => p.slug === defaultProject) ? defaultProject : null;
-      return [200, { projects, default: fallback }];
+      // Whether the caller may change members (the Projects and Users pages): an admin, signed in as a person.
+      return [200, { projects, default: fallback, canEditMembers: me.kind === 'human' && store.roleOf(me.id) === 'admin' }];
     }
 
     // Dane's page: the Create Project form. Only a person may add a project:

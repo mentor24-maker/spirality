@@ -156,7 +156,8 @@ function namedActor(store, id) {
 /**
  * Every project, for the Projects screen: slug, name, ticket-id prefix, web
  * address, logo, owner by name and GitHub repository (each null when it has none), and how many
- * of its tickets are open (any status but Live), in the store's order.
+ * of its tickets are open (any status but Live), its operator by name
+ * (null when it has none) and its members `{ id, name }`, in the store's order.
  * `only` narrows it to the projects the reader may see (visibleProjects).
  */
 export function projectsList(store, { only = null } = {}) {
@@ -169,6 +170,9 @@ export function projectsList(store, { only = null } = {}) {
     owner: namedActor(store, p.owner),
     repo: p.repo,
     open: store.listTickets(p.slug, { open: true }).length,
+    // The Projects page's Members column: who is on it, and who may not be taken off.
+    operator: namedActor(store, p.operator),
+    members: (store.listMembers(p.slug) ?? []).map(({ id, name }) => ({ id, name })),
   }));
 }
 

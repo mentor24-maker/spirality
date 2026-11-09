@@ -792,6 +792,26 @@ test('PUT /people/<id>/role: an admin changes a person\'s role, read back on GET
   } finally { await f.cleanup(); }
 });
 
+test('GET /projects carries each project\'s operator and members, and says only an admin signed in as a person may change members (the Users and Projects pages)', async () => {
+  const f = await fixture();
+  try {
+    const other = f.store.createActor({ kind: 'human', name: 'Other' });
+    const otherToken = f.store.issueToken(other.id);
+    const admin = (await f.call('GET', '/projects', { token: f.humanToken })).body;
+    assert.equal(admin.canEditMembers, true);
+    const alpha = admin.projects.find((p) => p.slug === 'alpha');
+    assert.deepEqual(alpha.operator, { id: f.human.id, name: 'Operator' });
+    assert.deepEqual(alpha.members, [{ id: f.human.id, name: 'Operator' }], 'just id and name: no added-by or dates in the list');
+    // A loop's token sees every project, but may not change members.
+    assert.equal((await f.call('GET', '/projects')).body.canEditMembers, false);
+    // A non-admin sees only their own projects, so only those projects' members, and no controls.
+    f.store.addMember({ project: 'alpha', actor: other.id, by: f.human.id });
+    const theirs = (await f.call('GET', '/projects', { token: otherToken })).body;
+    assert.equal(theirs.canEditMembers, false);
+    assert.deepEqual(theirs.projects.map((p) => [p.slug, p.members.map((m) => m.name)]), [['alpha', ['Operator', 'Other']]]);
+  } finally { await f.cleanup(); }
+});
+
 test('project members: an admin adds and removes one, answered with the list read back; the owner and operator stay (409); a non-admin and a loop get 403; someone taken off no longer sees it', async () => {
   const f = await fixture();
   try {
