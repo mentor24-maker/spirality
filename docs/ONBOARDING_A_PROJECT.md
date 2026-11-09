@@ -37,7 +37,8 @@ npm run onboard -- --product <slug>
 
 It asks Dane only the answers that are his decisions, once (kept in
 `~/loop-logs/onboard/<slug>.answers.json`), then runs every item below in
-order: the read-only look, the clone (the project's `main` into its
+order: the read-only look, the start (only for an empty repository: its
+first commit, see section 1), the clone (the project's `main` into its
 checkout folder, only when that folder does not exist yet), the settings file, the sign-ins (**real secret values**: it shows
 the commands and asks `Run these now? [y/N]`; on Dane's y it runs them in his
 Terminal, on anything else it prints them and stops), the copy into the project's repository as
@@ -100,6 +101,32 @@ The items below marked **missing**, gathered here so they can become tickets:
   protecting `main` with `gh api` (the required check is `verify`; force
   pushes and deletions off). Making the repository itself, if it does not
   exist, is Dane's decision.
+- **An empty repository** (SP-154). A repository made on GitHub with no
+  files has no `main` branch yet. The look says so as `will do`, not
+  BLOCKED: protecting `main`, the Node version and the check all wait for
+  the first commit. The wizard's `start` step, right after the look, makes
+  that commit and pushes it to `main`: the minimum the setup runs on, from
+  `scripts/onboard/templates/starter/` (a `package.json` whose
+  `npm run verify` runs the tests, with `engines.node` from the answers'
+  `nodeVersion`, or this Mac's major Node version when that is empty; its
+  `package-lock.json` for CI's `npm ci`; `.nvmrc`; a `.gitignore` covering
+  `node_modules/`, `.env` and `.env.*`; a README naming the project; and one
+  placeholder test). It chooses no framework or stack. It pushes without
+  force and reads the result back from GitHub (`gh repo view --json
+  isEmpty,defaultBranchRef` shows `main`, not empty, and `main` is the one
+  commit pushed); a refused push or a read-back that does not match fails
+  the step and nothing after it runs. A repository with any commit is never
+  written to: the step says `already done (... already has a main branch)`.
+  The starter answers to `npm run verify` only, so the look blocks an empty
+  repository whose answers set another `checkCommand`.
+- **A `package.json` with no `package-lock.json`.** On any project, empty
+  or not, the look blocks a `main` that has a `package.json` but no
+  `package-lock.json`, on its own row (`GitHub: package-lock.json on
+  main`), because the `verify.yml` the setup copies runs `npm ci` with
+  `cache: npm`, and both refuse without one (Upwork Blaster's first setup
+  pull request failed CI that way). The fix it names: in a checkout of
+  `main`, run `npm install --package-lock-only`, commit the
+  `package-lock.json` it makes, push it, and run the setup again.
 - **Check.**
   - `gh api repos/<owner>/<name>/branches/main/protection` shows
     `"contexts":["verify"]` and `"allow_force_pushes":{"enabled":false}`.
