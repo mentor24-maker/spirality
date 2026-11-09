@@ -62,6 +62,74 @@ the stop (`kind` `answers`, `paste` with the block's lines in `commands`,
 `merge` with the setup ticket's `link`, or `failed`), and `finished`. It holds
 commands and links only, never a secret value.
 
+### A project already on ClickUp (WaveCenter, StarCaster)
+
+A project that already runs its own copy of the loop, with its tickets in a
+ClickUp Loop Queue, is moved by the same command (SP-159). The wizard tells
+it apart by its checkout: the folder is on this Mac, holds its own
+`scripts/install_loop_runner.sh`, and has no `spirality.project.json` yet.
+Only then does the answers step ask one more question, once:
+
+- **Its Loop Queue list id** (blank: it is not on ClickUp, and the run is
+  a new project's). Then **Dane's own ClickUp user id**, so the import files
+  his old comments under him, **the old loop's ClickUp machine user id**, so
+  the import files the old loop's own comments under the loops rather than
+  under a stranger named "ClickUp user <id>" (the old loop's
+  `scripts/clickup.mjs` names both), and **any other list to keep a copy
+  of** (StarCaster's alarm list).
+
+They go into the answers file as `clickupListId`, `clickupOperatorId`,
+`clickupMachineUserId` and `clickupExtraLists`. Under `--no-prompt` (the
+setup page's command) the wizard stops at the answers step instead, and the
+setup page's answers form asks the same questions: the page sees the same
+old loop in the checkout the answers name, and shows the four ClickUp boxes
+under Dane's own. Leaving the list id blank there is "not on ClickUp", and
+is kept, so the wizard does not stop for it again. Nobody edits the answers
+file by hand.
+
+With a list id, four more steps run after the sign-ins and before the copy,
+in the order the switch runbook gives
+([TRACKER_MVP.md, "Switching a project over"](TRACKER_MVP.md#switching-a-project-over)),
+each skipped on a rerun once the step log has it done:
+
+| Step | What it does | Good |
+|---|---|---|
+| `stop` | Reads the old lanes from the project's own installer (`--status`: each lane, its launchd label, its log), runs the snapshot's dry run (below) first, so a missing ClickUp token or list stops the run while the old loop still runs, then reads `--status` again and checks no pass is in flight (a log ending on a `START` with no `END`, unless the lane's `lock:` line says `none` or `STALE`, meaning its runner was killed mid-pass; a loaded lane whose `--status` names no log cannot be checked, and fails the step), and straight after that check runs that installer's `--uninstall`, reading `--status` back. Nothing slow sits between the check and the unload, so a pass that starts during the dry run is seen, not cut off. A project cloned in the same run that turns out to have an old loop stops at `clone`, before the sign-ins, so the rerun (or the setup page's form) asks the ClickUp questions. | `stop  stopped com.wavecenter.loop-build, ...` |
+| `snapshot` | `tracker:snapshot`, a dry run (unless the stop step just ran it) then the real one: the Loop Queue list plus every extra list, saved and packed on the Mini. | every count OK |
+| `import` | `tracker:import` into the tracker's database, a dry run then the real one. Unlike the others, it runs again on every rerun until `switch-check` has said Safe to switch, because the check's `NOT YET IMPORTED` and `STATUS DIFFERS` both mean "import again" (the import is safe to rerun). | nothing refused |
+| `switch-check` | `tracker:switch-check`. | `Safe to switch.` |
+
+Any of them failing prints `FAILED: <step>: ...` and the rerun command, and
+nothing after it runs. A pass in flight is a failure too: nothing is
+stopped, and the rerun after the pass ends goes on.
+
+The stop step stops only the lanes the project's own installer names. A
+project can have other launchd jobs that read its Loop Queue list
+(StarCaster's `pipeline-pulse` and `weekly-report`); they keep running,
+and anything they write to ClickUp after the import shows up in
+`switch-check` as `NOT YET IMPORTED`, so the rerun imports it. What to do
+with such jobs for good is part of that project's own switch (SP-25 for
+StarCaster).
+
+The three tracker scripts read their settings from the folder they run in,
+and the project's checkout still holds its old loop. So the wizard writes a
+**switch settings file**, `~/loop-logs/onboard/<slug>-switch/spirality.project.json`:
+the project's new settings file with its ClickUp list, Dane's ClickUp
+seat and the old loop's ClickUp machine seat put back, and the tracker home's data folder, and runs the scripts
+from Spirality's folder in that folder. Doppler supplies the project's own
+keys: its ClickUp token (`CLICKUP_API_TOKEN` must be in the project's
+Doppler config) and, after the sign-ins, its tracker seats. The switch
+check proves the seats the sign-ins step made for the project: a guest's
+lanes named for it (`wavecenter loop-build`) and no operator seat, since
+Dane's sign-in belongs to Spirality.
+
+The copy step then always runs with `--allow-replace`, since the setup
+replaces the old copy's files, and its pull request lists every file of
+the old copy it replaces, and every other file in the folders it writes
+into, which it does not touch (nothing is deleted; the list is for the
+reviewer, not a to-do list). The lanes step installs the new lanes, under the same
+launchd labels the old ones had.
+
 The checklist below stays as what the wizard does, item by item, and how
 to check each one by hand.
 

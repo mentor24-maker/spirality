@@ -166,12 +166,66 @@ test('runSwitchCheck: with the tracker running and everything imported, it is sa
   const { dir, db, store, env } = await preparedDatabase(tasks);
   const server = await startServer({ store, port: 0 });
   try {
-    const url = `http://127.0.0.1:${server.address().port}`;
-    const r = await runSwitchCheck({ config: { ...CONFIG, tracker: 'api', trackerUrl: url }, env, db, clickup: fakeClickup(tasks) });
+    const { port } = server.address();
+    const url = `http://127.0.0.1:${port}`;
+    // The project that runs the tracker (trackerPort set): its seats are the operator's and the bare lane names.
+    const r = await runSwitchCheck({ config: { ...CONFIG, tracker: 'api', trackerPort: port, trackerUrl: url }, env, db, clickup: fakeClickup(tasks) });
     assert.equal(r.ok, true, formatSwitchCheck(r));
     const signins = r.sections.find((s) => s.name === 'sign-ins');
     assert.match(signins.lines[0], /the running tracker/);
     assert.match(formatSwitchCheck(r), /Safe to switch\.$/);
+  } finally {
+    await new Promise((res) => server.close(res));
+    store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/** A database with a guest project's sign-ins only (tracker/signins.mjs seatsForConfig): its lanes named for it, no operator seat. */
+async function guestDatabase(tasks, slug) {
+  const dir = mkdtempSync(join(tmpdir(), 'switch-check-guest-'));
+  const db = join(dir, 'tracker.db');
+  const store = openStore(db);
+  const env = {};
+  for (const [secret, name] of [
+    ['TRACKER_TOKEN_LOOP_BUILD', 'loop-build'], ['TRACKER_TOKEN_LOOP_REVIEW', 'loop-review'], ['TRACKER_TOKEN_RELAY', 'relay'],
+    ['TRACKER_TOKEN_HAND_RUN', 'hand-run'], ['TRACKER_TOKEN_LOOP_INTAKE', 'loop-intake'],
+  ]) {
+    env[secret] = store.issueToken(store.createActor({ kind: 'machine', name: `${slug} ${name}` }).id);
+  }
+  await importLoopQueue({ tracker: fakeClickup(tasks), store, config: { ...CONFIG, projectSlug: slug } });
+  return { dir, db, store, env };
+}
+
+test('runSwitchCheck: a guest project (no trackerPort) is checked against its own seats, and is safe to switch with no operator seat', async () => {
+  const tasks = [task('a'), task('b', 'in review')];
+  const { dir, db, store, env } = await guestDatabase(tasks, 'widget');
+  const server = await startServer({ store, port: 0 });
+  try {
+    const url = `http://127.0.0.1:${server.address().port}`;
+    // As the wizard's switch settings file is for WaveCenter or StarCaster: a trackerUrl, no trackerPort.
+    const config = { ...CONFIG, tracker: 'api', trackerUrl: url };
+    const r = await runSwitchCheck({ config, env, db, clickup: fakeClickup(tasks) });
+    const signins = r.sections.find((s) => s.name === 'sign-ins');
+    assert.equal(signins.ok, true, signins.lines.join('\n'));
+    const text = signins.lines.join('\n');
+    assert.match(text, /TRACKER_TOKEN_LOOP_BUILD: GET \/me answers "widget loop-build" \(machine/);
+    assert.match(text, /TRACKER_TOKEN_RELAY: GET \/me answers "widget relay"/);
+    assert.doesNotMatch(text, /TRACKER_TOKEN_OPERATOR/, 'a guest has no operator seat to check');
+    assert.equal(r.ok, true, formatSwitchCheck(r));
+    assert.match(formatSwitchCheck(r), /Safe to switch\.$/);
+
+    // Tokens this tracker never issued (another database's): WRONG, by name.
+    const bare = await guestDatabase([], 'other');
+    try {
+      const wrong = await runSwitchCheck({ config, env: bare.env, db, clickup: fakeClickup(tasks) });
+      const s = wrong.sections.find((x) => x.name === 'sign-ins');
+      assert.equal(s.ok, false);
+      assert.match(s.lines.join('\n'), /TRACKER_TOKEN_LOOP_BUILD: WRONG/);
+    } finally {
+      bare.store.close();
+      rmSync(bare.dir, { recursive: true, force: true });
+    }
   } finally {
     await new Promise((res) => server.close(res));
     store.close();
