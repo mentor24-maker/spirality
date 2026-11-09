@@ -140,7 +140,12 @@ The items below marked **missing**, gathered here so they can become tickets:
 1. **No shared package yet.** A project cannot "pin a version" of the
    substrate (`CLAUDE.md`, "What we are building", point 3): there is no
    tagged release and nothing published. Today a project must carry its own
-   copy of `scripts/`, `lib/` and `.claude/` (item 6).
+   copy of `scripts/`, `lib/` and `.claude/` (item 6). **That is the plan
+   for now, not only a gap:** WaveCenter and StarCaster leave ClickUp as a
+   wizard copy, like Normie, not by pinning a release. Dane chose this on
+   2026-11-08, planning SP-23 and SP-25: *"a wizard copy now is fine for
+   now."* The package (`docs/PLAN.md`, phases 1 to 5) is deferred, not
+   dropped.
 2. **Some of the copied code still said "spirality".** Both halves are
    fixed. SP-96 fixed the Doppler half: the npm scripts run `doppler run`
    through `scripts/with_doppler.mjs`, and `npm run doctor` checks, all with
