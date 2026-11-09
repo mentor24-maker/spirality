@@ -248,3 +248,4 @@ ol.setup-steps .why { display: block; font-size: 0.85rem; }
 .setup-next pre.failed { white-space: pre-wrap; }
 section.setups ul { padding-left: 1.5rem; }
 form.request .field-note { display: block; font-size: 0.85rem; }
+.board-live { margin-top: 1rem; }

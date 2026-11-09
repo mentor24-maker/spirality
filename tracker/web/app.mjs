@@ -1011,7 +1011,8 @@ async function drawTasks(view, opts = {}) {
  * door and the loops. `Live` starts folded in both, its count showing,
  * because it only grows.
  *
- * The board is the statuses as columns of cards; the list is the same
+ * The board is the working statuses as columns of cards, with Live under
+ * them as a list section, newest change first (SP-165); the list is the same
  * statuses as groups of rows, with a ticket's priority, tags, assignee and
  * last change in their own columns, like ClickUp's List, and an Actions
  * column of icons. Each icon goes somewhere that already exists: the ticket,
@@ -1083,6 +1084,12 @@ async function drawProject(slug, view, { adding = false, filed = null, unchecked
     ? `<table><thead><tr><th class="name">Ticket</th><th class="priority">Priority</th><th class="tags">Tags</th><th class="assignee">Assigned To</th><th class="when">Last Change</th><th class="actions">Actions</th></tr></thead><tbody>${c.tickets.map(row(c.status)).join('')}</tbody></table>`
     : '');
 
+  // The board's columns are the working stages; Live, which only grows, is a
+  // list section under them (SP-165), newest change first.
+  const working = board.columns.filter((c) => c.status !== 'Live');
+  const liveColumn = board.columns.find((c) => c.status === 'Live');
+  const live = liveColumn && { ...liveColumn, tickets: liveColumn.tickets.slice().sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0)) };
+
   main.classList.add('wide');
   main.innerHTML = `
     <h1>Tasks</h1>
@@ -1117,7 +1124,7 @@ async function drawProject(slug, view, { adding = false, filed = null, unchecked
     </dialog>
     <p class="error list-note" role="alert" hidden></p>
     ${view === 'board'
-    ? `<div class="board">${board.columns.map(column).join('')}</div>`
+    ? `<div class="board">${working.map(column).join('')}</div>${live ? `<div class="list board-live">${group(live)}</div>` : ''}`
     : `<div class="list">${board.columns.map(group).join('')}</div>`}`;
   for (const el of main.querySelectorAll('[data-stage]')) {
     const look = looks[el.dataset.stage];
