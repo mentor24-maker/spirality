@@ -815,8 +815,10 @@ export async function onboard(opts, deps) {
           // No pass may be cut off mid-way, so the lanes are read again now,
           // with nothing slow between this check and the unload. A lane
           // whose log ends on a START with no END is mid-pass, unless its
-          // --status says its lock is none or STALE (the runner is gone, so
-          // that START is a pass killed mid-way, not one running). A lane
+          // --status proves the runner is gone: a STALE lock, or no lock
+          // AND launchd showing no process (so that START is a pass killed
+          // mid-way). A lock of none alone is not proof: a job that takes
+          // no lock always says none (passInFlight). A lane
           // with no pass in its log is idle. (A log not there yet has no
           // pass: the runner writes START into it before a pass begins.) A
           // loaded lane whose --status names no log cannot be checked at
@@ -824,7 +826,7 @@ export async function onboard(opts, deps) {
           const now = status().filter((j) => j.loaded);
           for (const job of now) {
             if (!job.log) fail(step, `${job.name} is loaded, but ${installer} --status names no log for it, so whether a pass is in flight cannot be checked. Nothing was stopped`);
-            const seen = passInFlight(deps.readText(expandHome(job.log)), job.lock);
+            const seen = passInFlight(deps.readText(expandHome(job.log)), job);
             if (seen?.running) fail(step, `a ${job.name} pass is in flight (started ${seen.started ?? 'at a time its log does not say'}, ${job.log}); wait for it to end, then rerun. Nothing was stopped`);
           }
           if (!now.length) done(step, `none of ${slug}'s old lanes is loaded any more (${installer} --status)`);

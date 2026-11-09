@@ -1074,7 +1074,8 @@ function clickupWorld(t) {
       const line = [cmd, ...args].join(' ');
       w.calls.push(line);
       if (args[1] === '--uninstall') { if (!c.uninstallLeaves) c.oldLoaded = false; return { code: c.code.uninstall ?? 0, out: '', err: '' }; }
-      const status = WC_STATUS(c.oldLoaded, logDir, c.lock);
+      // c.edit: rewrite the --status text (one lane's own wording).
+      const status = (c.edit ?? ((x) => x))(WC_STATUS(c.oldLoaded, logDir, c.lock));
       // c.noLogFor: a lane whose --status names no log.
       return { code: 0, out: c.noLogFor ? status.replace(new RegExp(`^log: .*pressplay-${c.noLogFor}\\.log.*$\\n?`, 'm'), '') : status, err: '' };
     }
@@ -1133,10 +1134,37 @@ test('fromClickup: a START with no END after it is a pass in flight', () => {
   assert.equal(passInFlight(null), null);
   // A runner killed mid-pass leaves a START with no END: its lock says it is gone.
   const killed = `${ended}===== 2026-11-08 23:40:00 START /loop-build =====\nworking\n`;
-  assert.equal(passInFlight(killed, 'stale').running, false);
-  assert.equal(passInFlight(killed, 'none').running, false);
-  assert.equal(passInFlight(killed, 'held').running, true);
-  assert.equal(passInFlight(killed, null).running, true, 'no lock line: the log\'s word stands');
+  assert.equal(passInFlight(killed, { lock: 'stale' }).running, false);
+  assert.equal(passInFlight(killed, { lock: 'stale', pid: 4242 }).running, false);
+  assert.equal(passInFlight(killed, { lock: 'none', pid: 'none' }).running, false, 'no lock and no launchd process: the runner is gone');
+  assert.equal(passInFlight(killed, { lock: 'none', pid: 21690 }).running, true, 'no lock but a live launchd process: a lockless job mid-pass');
+  assert.equal(passInFlight(killed, { lock: 'none' }).running, true, 'no lock and launchd not known: the log\'s word stands');
+  assert.equal(passInFlight(killed, { lock: 'held', pid: 'none' }).running, true);
+  assert.equal(passInFlight(killed, {}).running, true, 'no lock line: the log\'s word stands');
+  assert.equal(passInFlight(killed).running, true);
+});
+
+// WaveCenter's own --status for its lockless merge job, mid-merge and between
+// passes (the wording of 2026-11-09): its lock always says none.
+const WC_MERGE = (pid) => [
+  '── merge-on-comment',
+  'schedule: INSTALLED at /Users/d/Library/LaunchAgents/com.wavecenter.merge-on-comment.plist — every 10 minutes',
+  `loaded:   yes — ${pid}\t0\tcom.wavecenter.merge-on-comment`,
+  '          (columns: PID, last exit code, label. A PID here means the runner is alive right now.)',
+  'lock:     none',
+  'log:      /Users/d/loop-logs/wavecenter-merge-on-comment.log (last modified 2026-11-09 08:44)',
+  'last pass: 2026-11-09 08:43:31 START /merge-on-comment',
+].join('\n');
+
+test('fromClickup: a lockless job (lock none) is in flight while launchd shows its process, idle when it shows none', () => {
+  const mid = readInstallerStatus(WC_MERGE('31337'))[0];
+  assert.deepEqual([mid.lock, mid.pid, mid.label], ['none', 31337, 'com.wavecenter.merge-on-comment']);
+  const between = readInstallerStatus(WC_MERGE('-'))[0];
+  assert.deepEqual([between.lock, between.pid], ['none', 'none']);
+  const log = '===== 2026-11-09 08:43:31 START /merge-on-comment =====\nmerging PR #412\n';
+  assert.equal(passInFlight(log, mid).running, true, 'mid-merge: never taken for idle');
+  assert.equal(passInFlight(log, between).running, false, 'launchd has no process: that START was cut off');
+  assert.equal(readInstallerStatus('── x\nloaded:   yes').at(0).pid, null, 'no columns: not known');
 });
 
 test('fromClickup: the ClickUp steps go before copy; only a checkout with its own installer and no settings file is an old loop', (t) => {
@@ -1305,6 +1333,26 @@ test('a START with no END but the lane\'s lock is STALE: the runner is gone, so 
   assert.equal(await go(), 0, out(w));
   assert.ok(w.calls.some((x) => x.includes('--uninstall')));
   assert.match(out(w), /^stop\s+.*no pass is in flight; stopping com\.pressplay\.loop-build/m);
+});
+
+test('a lockless job mid-pass (lock none, launchd shows its process): FAILED at stop, nothing is stopped', async (t) => {
+  const { w, c, go, logDir } = clickupWorld(t);
+  // merge-on-comment takes no lock, so its lock says none even mid-merge.
+  c.edit = (x) => x.replace(/(── merge-on-comment[\s\S]*?)lock: .*/, '$1lock:     none');
+  writeFileSync(join(logDir, 'pressplay-merge-on-comment.log'), '===== 2026-11-09 08:43:31 START /merge-on-comment =====\nmerging\n');
+  assert.equal(await go(), 1, out(w));
+  assert.match(out(w), /^FAILED: stop: a merge-on-comment pass is in flight \(started 2026-11-09 08:43:31/m);
+  assert.ok(!w.calls.some((x) => x.includes('--uninstall')), 'nothing was stopped');
+  assert.equal(c.oldLoaded, true);
+});
+
+test('a START with no END, no lock and no launchd process: the runner is gone, so the lanes are stopped', async (t) => {
+  const { w, c, go, logDir } = clickupWorld(t);
+  c.edit = (x) => x.replace(/(── merge-on-comment[\s\S]*?loaded:   yes — )\d+/, '$1-').replace(/(── merge-on-comment[\s\S]*?)lock: .*/, '$1lock:     none');
+  writeFileSync(join(logDir, 'pressplay-merge-on-comment.log'), '===== 2026-11-09 08:43:31 START /merge-on-comment =====\nkilled mid-way\n');
+  assert.equal(await go(), 0, out(w));
+  assert.ok(w.calls.some((x) => x.includes('--uninstall')));
+  assert.match(out(w), /^stop\s+.*no pass is in flight; stopping .*com\.pressplay\.merge-on-comment/m);
 });
 
 test('a loaded lane whose --status names no log: FAILED at stop, it cannot be checked, nothing is stopped', async (t) => {

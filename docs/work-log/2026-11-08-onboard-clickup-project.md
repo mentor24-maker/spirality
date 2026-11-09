@@ -48,3 +48,13 @@ log shows an unfinished pass but whose lock says its runner is gone (it
 was killed) is no longer mistaken for one still working. And a project
 the wizard clones in the same run that turns out to have an old loop now
 stops right after the clone, so the ClickUp questions get asked.
+
+Fourth round (Dane chose "one more round"): that last fix trusted a lock
+that says "none" as proof no runner was alive. But some jobs never take a
+lock at all; WaveCenter's merge job is one, so its lock always says "none",
+even halfway through a merge. The wizard could have taken a merge in
+progress for an idle job and switched it off mid-way. Now "none" counts only
+when the Mac's own job list (launchd) also shows no process running for that
+job; a lock its runner left behind when it died still counts on its own.
+Tests use WaveCenter's real wording for that job, both mid-merge and between
+merges.

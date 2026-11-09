@@ -99,13 +99,17 @@ export function readInstallerStatus(text) {
   for (const raw of String(text || '').split('\n')) {
     const line = raw.replace(/\s+$/, '');
     const head = /^── (\S+)\s*$/.exec(line);
-    if (head) { job = { name: head[1], loaded: false, label: null, log: null, lock: null }; jobs.push(job); continue; }
+    if (head) { job = { name: head[1], loaded: false, label: null, pid: null, log: null, lock: null }; jobs.push(job); continue; }
     if (!job) continue;
     const loaded = /^loaded:\s+yes\b(.*)$/.exec(line);
     if (loaded) {
       job.loaded = true;
       const words = loaded[1].replace(/^\s*—\s*/, '').trim().split(/\s+/).filter(Boolean);
       job.label = words.length >= 3 ? words.at(-1) : null;
+      // launchd's PID column: a number while the job's process is alive,
+      // `-` when it is not running at all; anything else is not known.
+      const pid = words.length >= 3 ? words[0] : null;
+      job.pid = pid === '-' ? 'none' : /^\d+$/.test(pid ?? '') ? Number(pid) : null;
     }
     // `log:      <path> (last modified ...)` or `(nothing written yet)`;
     // the path may hold spaces, so it runs up to that last bracket.
@@ -123,14 +127,19 @@ export function readInstallerStatus(text) {
  * Is a pass in flight, by its lane's log? The runners write
  * `===== <time> START /<lane> ...` before a pass and `===== <time> END ...`
  * after it, so a START with no END after it is a pass still running.
- * But a runner killed mid-pass leaves a START with no END too: when the
- * lane's `--status` says its lock is `none` or `stale` (readInstallerStatus),
- * no runner is alive, so that pass is not running. Any other lock (held, or
- * not known) leaves the log's word standing.
+ * But a runner killed mid-pass leaves a START with no END too. It counts as
+ * gone (not running) only on proof that no runner is alive:
+ * - its `--status` lock is `stale` (a lock whose runner is dead), or
+ * - its lock is `none` AND launchd shows no process for the job (`pid`
+ *   `none`, from `loaded: yes — -  0  <label>`).
+ * A lock of `none` alone proves nothing: a job whose runner takes no lock
+ * (WaveCenter's merge-on-comment) always says `none`, mid-merge included.
+ * Anything else (held, a live launchd PID, or not known) leaves the log's
+ * word standing.
  * Returns { running, started } (started: the START line's time), or null
  * when the log has no pass to read.
  */
-export function passInFlight(logText, lock = null) {
+export function passInFlight(logText, { lock = null, pid = null } = {}) {
   const lines = String(logText || '').split('\n');
   let start = -1;
   let end = -1;
@@ -140,7 +149,7 @@ export function passInFlight(logText, lock = null) {
   });
   if (start < 0) return null;
   const stamp = /^===== (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})/.exec(lines[start]);
-  const runnerGone = lock === 'none' || lock === 'stale';
+  const runnerGone = lock === 'stale' || (lock === 'none' && pid === 'none');
   return { running: start > end && !runnerGone, started: stamp ? stamp[1] : null };
 }
 
