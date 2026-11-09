@@ -439,6 +439,43 @@ function showProject() {
 }
 
 /**
+ * One change to a project's members from the Users or Projects page: add
+ * (`verb` 'add') or remove `person` (`name`) on project `slug`
+ * (`projectName`), through the same calls the project's own page uses.
+ * `control` (the Remove button or the add picker) is disabled while it runs.
+ * Then `listedNow()` reads the page's list again (true: they are on it,
+ * false: they are not, null: cannot tell) and `again(text, failed)` redraws
+ * the page saying it worked only when that read agrees. A refusal shows the
+ * server's own reason (the owner or operator, who cannot be taken off) and
+ * leaves the page as it was.
+ */
+async function changeMember({ control, note, slug, person, name, projectName, verb, listedNow, again }) {
+  const adding = verb === 'add';
+  const done = adding ? 'added' : 'removed';
+  const where = `${adding ? 'to' : 'from'} ${projectName}`;
+  control.disabled = true;
+  note.className = 'note quiet';
+  note.textContent = `${adding ? 'Adding' : 'Removing'} ${name} ${where}…`;
+  try {
+    if (adding) await api('POST', `/projects/${encodeURIComponent(slug)}/members`, { person: Number(person) });
+    else await api('DELETE', `/projects/${encodeURIComponent(slug)}/members/${encodeURIComponent(person)}`);
+  } catch (err) {
+    if (err instanceof SignedOut) return drawSignIn(`You were signed out; ${name} was not ${done} ${where}.`);
+    if (control.tagName === 'SELECT') control.value = '';
+    control.disabled = false;
+    note.className = 'note error';
+    note.textContent = `Not ${done}: ${err.message}`;
+    return;
+  }
+  // Read back before saying it worked.
+  const listed = await listedNow().catch(() => null);
+  const ok = listed === adding;
+  return again(ok
+    ? `${adding ? 'Added' : 'Removed'} ${name} ${where}.`
+    : `The tracker said ${name} was ${done} ${where}, but the list read back ${listed == null ? 'could not be read' : (listed ? 'still lists them' : 'does not list them')}.`, !ok);
+}
+
+/**
  * Every project, one row each: its logo, name, slug, ticket ids, web
  * address, GitHub repository, owner, how many tickets are open, and an Actions column whose
  * View icon opens its details page. Choosing a name selects the project and
@@ -449,10 +486,14 @@ function showProject() {
  * the server refuses it anyway. Delete asks first, then draws the table
  * again from the server, so a deleted project is gone because the server
  * says so; a refusal (a project with tickets) shows the server's own words
- * and the table is left as it was. `done` is a line to show above the table.
+ * and the table is left as it was. The Members column names each project's
+ * members; an admin also gets Remove on each (never on its owner or
+ * operator) and an Add Member picker of the people not on it, each change
+ * read back (changeMember). `done` and `problem` are lines to show above
+ * the table.
  */
-async function drawProjects(done = '') {
-  const [{ projects }, setups] = await Promise.all([
+async function drawProjects(done = '', problem = '') {
+  const [{ projects, canEditMembers = false }, setups] = await Promise.all([
     api('GET', '/projects'),
     // Projects mid-setup; a tracker that cannot read setups (or a loop's sign-in) shows none.
     me?.kind === 'human' ? api('GET', '/setup').catch((err) => { if (err instanceof SignedOut) throw err; return { setups: [] }; }) : { setups: [] },
@@ -460,6 +501,22 @@ async function drawProjects(done = '') {
   setTitle('Projects · Tracker');
   const selected = savedProject();
   const people = me?.kind === 'human';
+  // Only an admin, signed in as a person, changes members here (as on a project's own page).
+  const editing = people && canEditMembers === true;
+  // The people an admin may add: everyone with an account.
+  const everyone = editing ? (await api('GET', '/people')).people ?? [] : [];
+  // The owner and operator are never taken off: a tag, no Remove.
+  const fixedAs = (p, m) => [m.id === p.owner?.id ? 'Owner' : null, m.id === p.operator?.id ? 'Operator' : null].filter(Boolean);
+  const memberOf = (p, m) => `<span class="member">${escapeHtml(m.name)}${fixedAs(p, m).map((t) => `<span class="tag">${escapeHtml(t)}</span>`).join('')}${editing && !fixedAs(p, m).length
+    ? `<button type="button" class="remove-member" data-remove="${escapeHtml(m.id)}" data-name="${escapeHtml(m.name)}" data-slug="${escapeHtml(p.slug)}" data-project="${escapeHtml(p.name)}" aria-label="Remove ${escapeHtml(m.name)} from ${escapeHtml(p.name)}">Remove</button>`
+    : ''}</span>`;
+  const membersCell = (p) => {
+    const members = p.members ?? [];
+    const addable = everyone.filter((x) => !members.some((m) => m.id === x.id));
+    return `${members.length ? members.map((m) => memberOf(p, m)).join('') : '<span class="quiet">nobody</span>'}${editing && addable.length
+      ? `<select class="add-member" data-slug="${escapeHtml(p.slug)}" data-project="${escapeHtml(p.name)}" aria-label="Add a member to ${escapeHtml(p.name)}"><option value="">Add Member…</option>${addable.map((x) => `<option value="${escapeHtml(x.id)}">${escapeHtml(x.name)}</option>`).join('')}</select>`
+      : ''}`;
+  };
   // A renamed project shows its new name in the header from here on.
   const chosen = projects.find((p) => p.slug === selected);
   if (chosen) {
@@ -475,6 +532,7 @@ async function drawProjects(done = '') {
       <td class="url">${addressOf(p)}</td>
       <td class="repo">${repoOf(p)}</td>
       <td class="owner">${p.owner ? escapeHtml(p.owner.name) : '<span class="quiet">nobody</span>'}</td>
+      <td class="members">${membersCell(p)}</td>
       <td class="open">${p.open}</td>
       <td class="actions">${action(`/projects/${encodeURIComponent(p.slug)}`, 'View Project', ICONS.view)}${people
     ? action(`/projects/${encodeURIComponent(p.slug)}/edit`, 'Edit Project', ICONS.edit)
@@ -484,14 +542,38 @@ async function drawProjects(done = '') {
   main.innerHTML = `
     <h1>Projects</h1>
     ${me?.kind === 'human' ? '<div class="toolbar"><a class="button" href="/setup/new">Set Up a Project</a></div>' : ''}
-    <p class="note${done ? ' quiet' : ''}" role="status">${escapeHtml(done)}</p>
+    <p class="note${problem ? ' error' : (done ? ' quiet' : '')}" role="status">${escapeHtml(problem || done)}</p>
     ${renderSetupList(setups)}
     ${projects.length
     ? `<p class="quiet">Choose a project's name to see its tasks.</p>
-      <table class="projects"><thead><tr><th class="logo"><span class="hidden">Logo</span></th><th class="name">Name</th><th class="slug">Slug</th><th class="prefix">Ticket Prefix</th><th class="url">Web Address</th><th class="repo">GitHub Repository</th><th class="owner">Owner</th><th class="open">Open Tickets</th><th class="actions">Actions</th></tr></thead><tbody>${projects.map(row).join('')}</tbody></table>`
+      <table class="projects"><thead><tr><th class="logo"><span class="hidden">Logo</span></th><th class="name">Name</th><th class="slug">Slug</th><th class="prefix">Ticket Prefix</th><th class="url">Web Address</th><th class="repo">GitHub Repository</th><th class="owner">Owner</th><th class="members">Members</th><th class="open">Open Tickets</th><th class="actions">Actions</th></tr></thead><tbody>${projects.map(row).join('')}</tbody></table>`
     : '<p class="quiet">There are no projects yet.</p>'}`;
   putTrail([{ label: 'Projects' }]);
   const note = main.querySelector('p.note');
+  if (editing) {
+    const again = (text, failed) => drawProjects(failed ? '' : text, failed ? text : '')
+      .catch((err) => (err instanceof SignedOut ? drawSignIn() : showError(err)));
+    // Read the project's members back from GET /projects: on it (true), off it (false), gone (null).
+    const listedNow = (slug, person) => async () => {
+      const back = (await api('GET', '/projects')).projects?.find((x) => x.slug === slug);
+      return back ? (back.members ?? []).some((m) => String(m.id) === String(person)) : null;
+    };
+    for (const select of main.querySelectorAll('select.add-member')) {
+      select.addEventListener('change', () => {
+        if (!select.value) return;
+        const { slug, project } = select.dataset;
+        const name = select.selectedOptions[0]?.textContent ?? 'them';
+        changeMember({ control: select, note, slug, person: select.value, name, projectName: project, verb: 'add', listedNow: listedNow(slug, select.value), again });
+      });
+    }
+    for (const button of main.querySelectorAll('button.remove-member')) {
+      button.addEventListener('click', () => {
+        const { remove: id, name, slug, project } = button.dataset;
+        if (!confirm(`Remove ${name} from ${project}?`)) return;
+        changeMember({ control: button, note, slug, person: id, name, projectName: project, verb: 'remove', listedNow: listedNow(slug, id), again });
+      });
+    }
+  }
   for (const button of main.querySelectorAll('button[data-delete]')) {
     button.addEventListener('click', async () => {
       const { delete: slug, name } = button.dataset;
@@ -1820,20 +1902,38 @@ async function drawSettings() {
  * the Role column; an admin gets a picker there instead, whose change is
  * read back the same way, and a refusal (the last admin) shows the server's
  * reason. The Projects column lists the projects each user is a member
- * of, each linking to its details page. Under it, which role has which
- * permission.
+ * of, each linking to its details page; an admin also gets Remove on each
+ * (never where they are its owner or operator) and an Add to Project picker
+ * of the projects they are not on, each change read back (changeMember).
+ * Under it, which role has which permission.
  */
 async function drawUsers(done = '', problem = '') {
   const { people, invites = [], sites = [], roles = [], permissions = [], canEditRoles = false } = await api('GET', '/people');
   setTitle('Users · Tracker');
   const person = me?.kind === 'human';
   const picker = person && canEditRoles;
+  // An admin, signed in as a person, also puts people on projects and takes them off here.
+  const { projects: all = [], canEditMembers = false } = person ? await api('GET', '/projects') : {};
+  const editing = person && canEditMembers === true;
+  const bySlug = new Map(all.map((x) => [x.slug, x]));
+  // A project's owner and operator are never taken off: a tag, no Remove.
+  const fixedAs = (p, x) => { const pr = bySlug.get(x.slug); return [pr?.owner?.id === p.id ? 'Owner' : null, pr?.operator?.id === p.id ? 'Operator' : null].filter(Boolean); };
+  const projectsCell = (p) => {
+    const mine = p.projects ?? [];
+    if (!editing) return mine.length ? mine.map((x) => `<a href="/projects/${encodeURIComponent(x.slug)}">${escapeHtml(x.name)}</a>`).join(', ') : '<span class="quiet">none</span>';
+    const addable = all.filter((x) => !mine.some((m) => m.slug === x.slug));
+    return `${mine.length ? mine.map((x) => `<span class="member"><a href="/projects/${encodeURIComponent(x.slug)}">${escapeHtml(x.name)}</a>${fixedAs(p, x).map((t) => `<span class="tag">${escapeHtml(t)}</span>`).join('')}${fixedAs(p, x).length
+      ? ''
+      : `<button type="button" class="remove-member" data-remove-from="${escapeHtml(x.slug)}" data-project="${escapeHtml(x.name)}" data-person="${escapeHtml(p.id)}" data-name="${escapeHtml(p.name)}" aria-label="Remove ${escapeHtml(p.name)} from ${escapeHtml(x.name)}">Remove</button>`}</span>`).join('') : '<span class="quiet">none</span>'}${addable.length
+      ? `<select class="add-member" data-person="${escapeHtml(p.id)}" data-name="${escapeHtml(p.name)}" aria-label="Add ${escapeHtml(p.name)} to a project"><option value="">Add to Project…</option>${addable.map((x) => `<option value="${escapeHtml(x.slug)}">${escapeHtml(x.name)}</option>`).join('')}</select>`
+      : ''}`;
+  };
   const roleCell = (p) => (picker
     ? `<select data-role-of="${escapeHtml(p.id)}" data-name="${escapeHtml(p.name)}" aria-label="Role of ${escapeHtml(p.name)}">${roles.map((r) => `<option value="${escapeHtml(r.name)}"${r.name === p.role ? ' selected' : ''}>${escapeHtml(r.name)}</option>`).join('')}</select>`
     : escapeHtml(p.role ?? ''));
   const personRow = (p) => `
     <tr><td class="name">${escapeHtml(p.name)}</td><td class="email">${p.email ? escapeHtml(p.email) : '<span class="quiet">no email yet</span>'}</td><td class="role">${roleCell(p)}</td>
-      <td class="projects">${(p.projects ?? []).length ? p.projects.map((x) => `<a href="/projects/${encodeURIComponent(x.slug)}">${escapeHtml(x.name)}</a>`).join(', ') : '<span class="quiet">none</span>'}</td></tr>`;
+      <td class="projects">${projectsCell(p)}</td></tr>`;
   const roleRow = (r) => `
     <tr><td class="name"><b>${escapeHtml(r.name)}</b><span class="hint quiet">${escapeHtml(r.description)}</span></td>${permissions.map((x) => `<td class="has">${r.permissions.includes(x.name) ? '✓' : '<span class="hidden">no</span>'}</td>`).join('')}</tr>`;
   const inviteRow = (i) => `
@@ -1909,6 +2009,29 @@ async function drawUsers(done = '', problem = '') {
       const now = back?.people?.find((p) => String(p.id) === id)?.role;
       again(now === role ? `${name} is now ${role}.` : `The tracker said ${name}'s role was changed to ${role}, but it reads back as ${now ?? 'unknown'}.`, now !== role);
     });
+  }
+  if (editing) {
+    // Read the person's projects back from GET /people: on it (true), off it (false), unknown person (null).
+    const listedNow = (slug, id) => async () => {
+      const back = (await api('GET', '/people')).people?.find((x) => String(x.id) === String(id));
+      return back ? (back.projects ?? []).some((x) => x.slug === slug) : null;
+    };
+    for (const select of main.querySelectorAll('select.add-member')) {
+      select.addEventListener('change', () => {
+        if (!select.value) return;
+        const { person: id, name } = select.dataset;
+        const slug = select.value;
+        const projectName = select.selectedOptions[0]?.textContent ?? slug;
+        changeMember({ control: select, note, slug, person: id, name, projectName, verb: 'add', listedNow: listedNow(slug, id), again });
+      });
+    }
+    for (const button of main.querySelectorAll('button.remove-member')) {
+      button.addEventListener('click', () => {
+        const { removeFrom: slug, project, person: id, name } = button.dataset;
+        if (!confirm(`Remove ${name} from ${project}?`)) return;
+        changeMember({ control: button, note, slug, person: id, name, projectName: project, verb: 'remove', listedNow: listedNow(slug, id), again });
+      });
+    }
   }
   for (const button of main.querySelectorAll('button[data-cancel]')) {
     button.addEventListener('click', async () => {

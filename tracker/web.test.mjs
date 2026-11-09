@@ -296,9 +296,11 @@ test('the Projects screen lists every project with its open count; an unknown pr
   try {
     const openIn = (slug) => f.store.listTickets(slug, { open: true }).length;
     assert.ok(openIn('alpha') > 0 && openIn('alpha') < f.store.listTickets('alpha').length, 'the demo data has open and Live tickets');
+    // Each project's operator and members (the Projects page's Members column) ride with it.
+    const dane = { id: f.operator.id, name: 'Dane' };
     assert.deepEqual((await f.call('GET', '/projects')).body.projects, [
-      { slug: 'alpha', name: 'Alpha', prefix: 'AL', url: null, logo: null, owner: null, repo: null, open: openIn('alpha') },
-      { slug: 'beta', name: 'Beta', prefix: 'BE', url: null, logo: null, owner: null, repo: null, open: openIn('beta') },
+      { slug: 'alpha', name: 'Alpha', prefix: 'AL', url: null, logo: null, owner: null, repo: null, open: openIn('alpha'), operator: dane, members: [dane] },
+      { slug: 'beta', name: 'Beta', prefix: 'BE', url: null, logo: null, owner: null, repo: null, open: openIn('beta'), operator: dane, members: [dane] },
     ]);
     assert.equal((await f.call('GET', '/projects/beta/board')).body.projectName, 'Beta');
     assert.equal((await f.call('GET', '/projects/nope/board')).status, 404);
@@ -1160,6 +1162,7 @@ test('a project added from the page shows on the Projects screen and its details
     assert.deepEqual(row, {
       slug: 'try-me', name: 'Try me', prefix: 'TRY', url: 'https://try.example', logo: 'https://try.example/logo.png',
       owner: { id: f.operator.id, name: 'Dane' }, repo: 'my-org/try-me', open: 0,
+      operator: null, members: [{ id: f.operator.id, name: 'Dane' }],
     });
     const details = (await f.call('GET', '/projects/try-me')).body;
     assert.deepEqual([details.url, details.logo, details.owner, details.repo], [row.url, row.logo, row.owner, row.repo]);
@@ -1234,6 +1237,7 @@ test('a project edited from the page shows its new name, web address, logo, GitH
     assert.deepEqual(row, {
       slug: 'try-me', name: 'Tried', prefix: 'TRY', url: 'https://tried.example', logo: 'https://tried.example/l.png',
       owner: { id: f.operator.id, name: 'Dane' }, repo: 'my-org/tried', open: 0,
+      operator: null, members: [{ id: f.operator.id, name: 'Dane' }],
     });
     const details = (await f.call('GET', '/projects/try-me')).body;
     assert.deepEqual([details.name, details.url, details.logo, details.owner, details.repo], [row.name, row.url, row.logo, row.owner, row.repo]);
@@ -2270,7 +2274,56 @@ test('the Users page lists each user\'s projects, each a link to its details pag
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   const draw = app.slice(app.indexOf('async function drawUsers'), app.indexOf('/** Underline the header link'));
   assert.match(draw, /<th class="projects">Projects<\/th>/);
-  assert.match(draw, /p\.projects\.map\(\(x\) => `<a href="\/projects\/\$\{encodeURIComponent\(x\.slug\)\}">\$\{escapeHtml\(x\.name\)\}<\/a>`\)/);
+  // Anyone but an admin sees the cell as before: links, or "none".
+  assert.match(draw, /if \(!editing\) return mine\.length \? mine\.map\(\(x\) => `<a href="\/projects\/\$\{encodeURIComponent\(x\.slug\)\}">\$\{escapeHtml\(x\.name\)\}<\/a>`\)\.join\(', '\) : '<span class="quiet">none<\/span>';/);
+});
+
+test('the Users page gives an admin Remove on each of a user\'s projects (never where they are its owner or operator) and an Add to Project picker, each change read back', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const draw = app.slice(app.indexOf('async function drawUsers'), app.indexOf('/** Underline the header link'));
+  // Only an admin signed in as a person: the flag comes from GET /projects, which a loop's sign-in never asks for here.
+  assert.match(draw, /const \{ projects: all = \[\], canEditMembers = false \} = person \? await api\('GET', '\/projects'\) : \{\};/);
+  assert.match(draw, /const editing = person && canEditMembers === true;/);
+  // The owner and operator get a tag and no Remove.
+  assert.match(draw, /pr\?\.owner\?\.id === p\.id \? 'Owner' : null, pr\?\.operator\?\.id === p\.id \? 'Operator' : null/);
+  assert.match(draw, /\$\{fixedAs\(p, x\)\.length\s*\? ''\s*: `<button type="button" class="remove-member"/);
+  // The picker offers only the projects they are not on yet.
+  assert.match(draw, /const addable = all\.filter\(\(x\) => !mine\.some\(\(m\) => m\.slug === x\.slug\)\);/);
+  assert.match(draw, /<option value="">Add to Project…<\/option>/);
+  for (const field of ['x.slug', 'x.name', 'p.id', 'p.name', 't']) assert.match(draw, new RegExp(`escapeHtml\\(${field.replace('.', '\\.')}\\)`), field);
+  // Each change goes through changeMember and is read back from GET /people.
+  assert.equal(draw.match(/changeMember\(\{ control: /g).length, 2);
+  assert.match(draw, /const back = \(await api\('GET', '\/people'\)\)\.people\?\.find\(\(x\) => String\(x\.id\) === String\(id\)\);/);
+  assert.match(draw, /return back \? \(back\.projects \?\? \[\]\)\.some\(\(x\) => x\.slug === slug\) : null;/);
+});
+
+test('the Projects page has a Members column; an admin gets Remove on each member (never the owner or operator) and an Add Member picker, each change read back', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const draw = /async function drawProjects\(done = '', problem = ''\) \{[\s\S]*?\n\}/.exec(app)[0];
+  assert.match(draw, /<th class="members">Members<\/th>/);
+  assert.match(draw, /<td class="members">\$\{membersCell\(p\)\}<\/td>/);
+  assert.match(draw, /const editing = people && canEditMembers === true;/);
+  assert.match(draw, /const everyone = editing \? \(await api\('GET', '\/people'\)\)\.people \?\? \[\] : \[\];/);
+  assert.match(draw, /m\.id === p\.owner\?\.id \? 'Owner' : null, m\.id === p\.operator\?\.id \? 'Operator' : null/);
+  assert.match(draw, /\$\{editing && !fixedAs\(p, m\)\.length\s*\? `<button type="button" class="remove-member"/);
+  assert.match(draw, /const addable = everyone\.filter\(\(x\) => !members\.some\(\(m\) => m\.id === x\.id\)\);/);
+  assert.match(draw, /<option value="">Add Member…<\/option>/);
+  for (const field of ['m.name', 'm.id', 'p.slug', 'p.name', 'x.id', 'x.name', 't']) assert.match(draw, new RegExp(`escapeHtml\\(${field.replace('.', '\\.')}\\)`), field);
+  assert.equal(draw.match(/changeMember\(\{ control: /g).length, 2);
+  assert.match(draw, /const back = \(await api\('GET', '\/projects'\)\)\.projects\?\.find\(\(x\) => x\.slug === slug\);/);
+  // A refusal shows above the table, as an error.
+  assert.match(draw, /<p class="note\$\{problem \? ' error' : \(done \? ' quiet' : ''\)\}" role="status">\$\{escapeHtml\(problem \|\| done\)\}<\/p>/);
+});
+
+test('changeMember sends the project page\'s own calls, shows a refusal\'s reason, and says it worked only when the list read back agrees', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const fn = /async function changeMember\(\{[\s\S]*?\n\}/.exec(app)[0];
+  assert.match(fn, /api\('POST', `\/projects\/\$\{encodeURIComponent\(slug\)\}\/members`, \{ person: Number\(person\) \}\)/);
+  assert.match(fn, /api\('DELETE', `\/projects\/\$\{encodeURIComponent\(slug\)\}\/members\/\$\{encodeURIComponent\(person\)\}`\)/);
+  assert.match(fn, /note\.textContent = `Not \$\{done\}: \$\{err\.message\}`;/);
+  assert.match(fn, /const listed = await listedNow\(\)\.catch\(\(\) => null\);/);
+  assert.match(fn, /const ok = listed === adding;/);
+  assert.match(fn, /again\(ok\s*\? `\$\{adding \? 'Added' : 'Removed'\} \$\{name\} \$\{where\}\.`/);
 });
 
 test('the Tasks toolbar picks a project from a dropdown, "Project: ", the one in view selected', () => {
@@ -2592,7 +2645,7 @@ test('the page makes a slug by the wizard\'s rule, and refuses the two that are 
 
 test('the Projects page has Set up a project, lists the projects mid-setup, and keeps New project a link away', () => {
   const app = readFileSync(WEB('app.mjs'), 'utf8');
-  const projects = /async function drawProjects\(done = ''\) \{[\s\S]*?\n\}/.exec(app)[0];
+  const projects = /async function drawProjects\(done = '', problem = ''\) \{[\s\S]*?\n\}/.exec(app)[0];
   assert.match(projects, /<a class="button" href="\/setup\/new">Set Up a Project<\/a>/);
   assert.doesNotMatch(projects, /href="\/projects\/new">New project/);
   assert.match(projects, /api\('GET', '\/setup'\)/);
