@@ -4,7 +4,7 @@
  * which asks its questions once and runs every step in order
  * (docs/onboarding/SETUP_REVIEW.md, part 3).
  *
- *   npm run onboard -- --product <slug> [--allow-replace] [--merge-wait-minutes <n>] [--no-prompt]
+ *   npm run onboard -- --project <slug> [--allow-replace] [--merge-wait-minutes <n>] [--no-prompt]
  *
  * Run on the Mini, from the tracker home's own folder (the project whose
  * settings file sets `trackerPort`, today Spirality), in a Terminal that is
@@ -220,7 +220,7 @@ export function worktreesOnBranch(porcelain, branch) {
 
 /** The command that reruns this wizard as it was started (every flag that changes what it does). */
 export function rerunCommand(opts) {
-  return `npm run onboard -- --product ${opts.product}${opts.allowReplace ? ' --allow-replace' : ''}${opts.mergeWaitMinutes !== DEFAULT_MERGE_WAIT_MINUTES ? ` --merge-wait-minutes ${opts.mergeWaitMinutes}` : ''}${opts.noPrompt ? ' --no-prompt' : ''}`;
+  return `npm run onboard -- --project ${opts.project}${opts.allowReplace ? ' --allow-replace' : ''}${opts.mergeWaitMinutes !== DEFAULT_MERGE_WAIT_MINUTES ? ` --merge-wait-minutes ${opts.mergeWaitMinutes}` : ''}${opts.noPrompt ? ' --no-prompt' : ''}`;
 }
 
 /** Where the setup page reads a project's setup state: `<logDir>/onboard/<slug>.state.json`, beside its answers file. */
@@ -235,9 +235,9 @@ export const OUTCOMES = Object.freeze(['done', 'skip', 'failed', 'stopped', 'run
 export const STOP_KINDS = Object.freeze(['answers', 'paste', 'merge', 'failed']);
 
 /** A fresh state: every step pending, no stop, not finished. */
-export function initialState(product, at) {
+export function initialState(project, at) {
   return {
-    product,
+    project,
     updatedAt: at,
     steps: STEPS.map((step) => ({ step, outcome: 'pending', at: null, why: null })),
     stop: null,
@@ -337,7 +337,7 @@ class Stop extends Error {
 const last = (text, n = 4) => String(text || '').split('\n').map((l) => l.trim()).filter(Boolean).slice(-n).join(' | ');
 
 /**
- * The wizard. `opts`: product, allowReplace, mergeWaitMinutes, noPrompt. `deps`:
+ * The wizard. `opts`: project, allowReplace, mergeWaitMinutes, noPrompt. `deps`:
  *   homeConfig, homeRoot, spiralityDir   the tracker home
  *   run(cmd, args, { cwd, input, show, env }) -> { code, out, err }; `show`
  *                                         lets Dane watch a step script's own
@@ -351,7 +351,7 @@ const last = (text, n = 4) => String(text || '').split('\n').map((l) => l.trim()
  */
 export async function onboard(opts, deps) {
   const { homeConfig, spiralityDir } = deps;
-  const slug = opts.product;
+  const slug = opts.project;
   const rerun = rerunCommand(opts);
   const logFile = join(expandHome(homeConfig.logDir), `${slug}-onboard.log`);
   const say = (step, line) => deps.print(`${step.padEnd(9)} ${line}`);
@@ -416,7 +416,7 @@ export async function onboard(opts, deps) {
     if (text != null) {
       try { raw = JSON.parse(text); } catch (err) { fail(step, `${aFile} is not valid JSON (${err.message}); fix or remove it`); }
       if (!raw || typeof raw !== 'object' || Array.isArray(raw)) fail(step, `${aFile} does not hold one JSON object`);
-      // An answers file from before SP-130 uses the old "product" names.
+      // An answers file from before SP-130 uses the old names (productSlug and the others).
       try { raw = withProjectNames(raw, { file: aFile }); } catch (err) {
         if (!(err instanceof ProjectConfigError)) throw err;
         fail(step, err.message);
@@ -626,7 +626,7 @@ export async function onboard(opts, deps) {
     begin(step);
     if (setup.on) skip(step, `the setup is merged: ${setup.why}`);
     else {
-      // A product that does not host the tracker names no trackerDataDir, so
+      // A project that does not host the tracker names no trackerDataDir, so
       // the check is given the home's database, as the paste block's create is.
       const trackerDb = join(expandHome(homeConfig.trackerDataDir), 'tracker.db');
       const check = () => npm('tracker:signins', ['check', '--config', settingsFile], { env: { TRACKER_DB: trackerDb } });
@@ -864,14 +864,15 @@ export async function onboard(opts, deps) {
 
 // --- The command -----------------------------------------------------------
 
-export const USAGE = 'usage: npm run onboard -- --product <slug> [--allow-replace] [--merge-wait-minutes <n>] [--no-prompt]';
+export const USAGE = 'usage: npm run onboard -- --project <slug> [--allow-replace] [--merge-wait-minutes <n>] [--no-prompt]';
 
-/** Reads `--product`, `--allow-replace`, `--merge-wait-minutes` and `--no-prompt`. Returns { opts } or { error }. */
+/** Reads `--project` (`--product`, its old name, still works), `--allow-replace`, `--merge-wait-minutes` and `--no-prompt`. Returns { opts } or { error }. */
 export function parseOnboardArgs(argv) {
-  const opts = { product: null, allowReplace: false, mergeWaitMinutes: DEFAULT_MERGE_WAIT_MINUTES, noPrompt: false };
+  const opts = { project: null, allowReplace: false, mergeWaitMinutes: DEFAULT_MERGE_WAIT_MINUTES, noPrompt: false };
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
-    if (a === '--product') opts.product = argv[++i];
+    // --product is the option's old name, kept so a saved command still runs (SP-156).
+    if (a === '--project' || a === '--product') opts.project = argv[++i];
     else if (a === '--allow-replace') opts.allowReplace = true;
     else if (a === '--no-prompt') opts.noPrompt = true;
     else if (a === '--merge-wait-minutes') {
@@ -880,8 +881,8 @@ export function parseOnboardArgs(argv) {
       opts.mergeWaitMinutes = n;
     } else return { error: `unknown argument ${JSON.stringify(a)}` };
   }
-  if (!opts.product) return { error: 'name the project with --product <slug>' };
-  if (slugFromName(opts.product) !== opts.product) return { error: `--product "${opts.product}" is not a slug (lower-case letters, digits and dashes)` };
+  if (!opts.project) return { error: 'name the project with --project <slug>' };
+  if (slugFromName(opts.project) !== opts.project) return { error: `--project "${opts.project}" is not a slug (lower-case letters, digits and dashes)` };
   return { opts };
 }
 

@@ -37,9 +37,9 @@ async function fixture() {
   const server = await startServer({ store, port: 0 });
   const url = `http://127.0.0.1:${server.address().port}`;
 
-  const product = join(dir, 'product');
-  mkdirSync(product);
-  writeFileSync(join(product, 'spirality.project.json'), JSON.stringify({
+  const project = join(dir, 'project');
+  mkdirSync(project);
+  writeFileSync(join(project, 'spirality.project.json'), JSON.stringify({
     workspaceId: '111', spaceId: '222', loopQueueListId: LIST,
     operatorUserId: human.id, machineUserId: machine.id,
     githubRepo: 'owner/repo', dopplerProject: 'proj', dopplerConfig: 'dev',
@@ -54,14 +54,14 @@ async function fixture() {
   chmodSync(join(bin, 'gh'), 0o755);
 
   const f = {
-    dir, store, human, machine, humanToken, machineToken, url, product, server, bin,
+    dir, store, human, machine, humanToken, machineToken, url, project, server, bin,
     set prBody(body) { writeFileSync(prFile, JSON.stringify({ body, url: 'https://github.com/owner/repo/pull/7' })); },
     /** What the fake `gh pr view` prints, as an object. */
     set prJson(json) { writeFileSync(prFile, JSON.stringify(json)); },
     door(args, { stdin = '', token = machineToken, env: extra = {} } = {}) {
       return new Promise((resolve) => {
         const env = { PATH: `${bin}:${process.env.PATH}`, HOME: process.env.HOME, TRACKER_TOKEN_HAND_RUN: token, ...extra };
-        const child = spawn(process.execPath, [DOOR, ...args], { cwd: product, env });
+        const child = spawn(process.execPath, [DOOR, ...args], { cwd: project, env });
         let out = '';
         let err = '';
         child.stdout.on('data', (c) => { out += c; });
@@ -253,8 +253,8 @@ test('get on a tracker too old to list files says the files are unknown, and sti
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   const f = await fixture();
   try {
-    const config = JSON.parse(readFileSync(join(f.product, 'spirality.project.json'), 'utf8'));
-    writeFileSync(join(f.product, 'spirality.project.json'), JSON.stringify({ ...config, trackerUrl: `http://127.0.0.1:${server.address().port}` }));
+    const config = JSON.parse(readFileSync(join(f.project, 'spirality.project.json'), 'utf8'));
+    writeFileSync(join(f.project, 'spirality.project.json'), JSON.stringify({ ...config, trackerUrl: `http://127.0.0.1:${server.address().port}` }));
     const get = await f.door(['get', '--task', 'AL-1']);
     assert.equal(get.code, 0, get.err);
     assert.match(get.out, /\nattachments: COULD NOT BE READ \(HTTP 404: no call GET \/tickets\/AL-1\/attachments\.\); this ticket's files are unknown\nurl: [^\n]+\n---\nbody\n/);
@@ -778,9 +778,9 @@ function buildRunner(f) {
   mkdirSync(lock, { recursive: true });
   const runner = spawn('sleep', ['60'], { stdio: 'ignore' });
   writeFileSync(join(lock, 'pid'), `${runner.pid}\n`);
-  scratchGit.git(f.product, 'init', '-q');
+  scratchGit.git(f.project, 'init', '-q');
   return {
-    marker: join(f.product, '.git', 'loop-pass-claim.json'),
+    marker: join(f.project, '.git', 'loop-pass-claim.json'),
     ours: { HOME: home, LOOP_RUNNER_PID: String(runner.pid) },
     hand: { HOME: home },
     async stop() {

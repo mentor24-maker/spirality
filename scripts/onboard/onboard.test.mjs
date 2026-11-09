@@ -104,14 +104,16 @@ test('the step log: Mountain time, and a done step is found by name', () => {
   assert.equal(loggedDone(null, 'look'), false);
 });
 
-test('the arguments: --product is a slug, the merge wait a positive number', () => {
-  assert.deepEqual(parseOnboardArgs(['--product', 'pressplay']).opts, { product: 'pressplay', allowReplace: false, mergeWaitMinutes: 60, noPrompt: false });
-  assert.equal(parseOnboardArgs(['--product', 'pressplay', '--no-prompt']).opts.noPrompt, true);
-  assert.equal(parseOnboardArgs(['--product', 'pressplay', '--allow-replace', '--merge-wait-minutes', '5']).opts.mergeWaitMinutes, 5);
-  assert.match(parseOnboardArgs([]).error, /--product/);
-  assert.match(parseOnboardArgs(['--product', 'Press Play']).error, /not a slug/);
-  assert.match(parseOnboardArgs(['--product', 'x', '--merge-wait-minutes', '0']).error, /greater than 0/);
-  assert.match(parseOnboardArgs(['--product', 'x', '--nope']).error, /unknown/);
+test('the arguments: --project is a slug, the merge wait a positive number', () => {
+  assert.deepEqual(parseOnboardArgs(['--project', 'pressplay']).opts, { project: 'pressplay', allowReplace: false, mergeWaitMinutes: 60, noPrompt: false });
+  assert.equal(parseOnboardArgs(['--project', 'pressplay', '--no-prompt']).opts.noPrompt, true);
+  assert.equal(parseOnboardArgs(['--project', 'pressplay', '--allow-replace', '--merge-wait-minutes', '5']).opts.mergeWaitMinutes, 5);
+  assert.match(parseOnboardArgs([]).error, /--project/);
+  // --product is the option's old name (SP-156): a command saved before the rename still runs.
+  assert.deepEqual(parseOnboardArgs(['--product', 'pressplay']).opts, parseOnboardArgs(['--project', 'pressplay']).opts);
+  assert.match(parseOnboardArgs(['--project', 'Press Play']).error, /not a slug/);
+  assert.match(parseOnboardArgs(['--project', 'x', '--merge-wait-minutes', '0']).error, /greater than 0/);
+  assert.match(parseOnboardArgs(['--project', 'x', '--nope']).error, /unknown/);
 });
 
 test('worktreesOnBranch finds the worktrees holding a branch, never the checkout itself', () => {
@@ -134,9 +136,9 @@ test('cloneAddress takes only the kind of address from the home\'s origin, never
 });
 
 test('rerunCommand keeps every flag the run was started with', () => {
-  assert.equal(rerunCommand({ product: 'pressplay', allowReplace: false, mergeWaitMinutes: 60 }), 'npm run onboard -- --product pressplay');
-  assert.equal(rerunCommand({ product: 'pressplay', allowReplace: true, mergeWaitMinutes: 240 }), 'npm run onboard -- --product pressplay --allow-replace --merge-wait-minutes 240');
-  assert.equal(rerunCommand({ product: 'pressplay', allowReplace: false, mergeWaitMinutes: 60, noPrompt: true }), 'npm run onboard -- --product pressplay --no-prompt');
+  assert.equal(rerunCommand({ project: 'pressplay', allowReplace: false, mergeWaitMinutes: 60 }), 'npm run onboard -- --project pressplay');
+  assert.equal(rerunCommand({ project: 'pressplay', allowReplace: true, mergeWaitMinutes: 240 }), 'npm run onboard -- --project pressplay --allow-replace --merge-wait-minutes 240');
+  assert.equal(rerunCommand({ project: 'pressplay', allowReplace: false, mergeWaitMinutes: 60, noPrompt: true }), 'npm run onboard -- --project pressplay --no-prompt');
 });
 
 test('protectionDropped names the stricter settings the PUT switches off', () => {
@@ -274,7 +276,7 @@ function makeWorld(t) {
         return ok();
       }
       if (script === 'tracker:signins') {
-        // As the real one does: a guest product's settings name no
+        // As the real one does: a guest project's settings name no
         // trackerDataDir, so without TRACKER_DB there is no database to use.
         w.signinsEnv.push(o.env?.TRACKER_DB ?? null);
         if (o.env?.TRACKER_DB !== join(homeConfig.trackerDataDir, 'tracker.db')) return no('The project config names no trackerDataDir, and TRACKER_DB is not set: there is no tracker database to use.');
@@ -366,7 +368,7 @@ function makeWorld(t) {
     now: () => clock,
     ...over,
   });
-  const opts = { product: 'pressplay', allowReplace: false, mergeWaitMinutes: 60 };
+  const opts = { project: 'pressplay', allowReplace: false, mergeWaitMinutes: 60 };
   const go = (over) => onboard(opts, deps(over));
   const homeOpts = (more, over) => onboard({ ...opts, ...more }, deps(over));
   const reset = () => { w.calls = []; w.asked = []; w.runAsked = 0; w.envs = {}; w.printed = []; w.polls = 0; };
@@ -446,7 +448,7 @@ for (const failing of ['look', 'clone', 'settings', 'copy', 'lanes', 'protect'])
     w.fail = failing;
     assert.equal(await go(), 1, out(w));
     assert.match(out(w), new RegExp(`^FAILED: ${failing}: `, 'm'));
-    assert.match(out(w), /npm run onboard -- --product pressplay/);
+    assert.match(out(w), /npm run onboard -- --project pressplay/);
     const after = STEPS.slice(STEPS.indexOf(failing) + 1);
     for (const step of after) {
       if (LATER[step]) assert.ok(!w.calls.some((c) => c.includes(LATER[step])), `${step} did not run`);
@@ -601,7 +603,7 @@ test('a stop after a run started with a longer merge wait: the rerun line keeps 
   const { w, homeOpts } = makeWorld(t);
   w.fail = 'merge';
   assert.equal(await homeOpts({ mergeWaitMinutes: 240 }), 3, out(w));
-  assert.match(out(w), /^  npm run onboard -- --product pressplay --merge-wait-minutes 240$/m);
+  assert.match(out(w), /^  npm run onboard -- --project pressplay --merge-wait-minutes 240$/m);
 });
 
 test('an answer taken back out but the answers file cannot be written: FAILED says so, not that the rerun asks again', async (t) => {
@@ -690,8 +692,8 @@ test('the state file has the shape the setup page reads, every step in STEPS ord
   const { w, go, statePath } = makeWorld(t);
   assert.equal(await go(), 0, out(w));
   const state = readState(statePath);
-  assert.deepEqual(Object.keys(state), ['product', 'updatedAt', 'steps', 'stop', 'finished']);
-  assert.equal(state.product, 'pressplay');
+  assert.deepEqual(Object.keys(state), ['project', 'updatedAt', 'steps', 'stop', 'finished']);
+  assert.equal(state.project, 'pressplay');
   assert.match(state.updatedAt, /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/);
   assert.deepEqual(state.steps.map((s) => s.step), STEPS);
   for (const s of state.steps) {
@@ -727,7 +729,7 @@ test('--no-prompt with answers missing: STOPPED at answers, exit 3, the stop say
   const { w, homeOpts, statePath } = makeWorld(t);
   assert.equal(await noPromptRun(homeOpts), 3, out(w));
   assert.match(out(w), /^STOPPED: answers: still to answer: projectName, githubRepo/m);
-  assert.match(out(w), /^  npm run onboard -- --product pressplay --no-prompt$/m);
+  assert.match(out(w), /^  npm run onboard -- --project pressplay --no-prompt$/m);
   assert.ok(!w.calls.some((c) => c.startsWith('npm')), 'nothing after the answers ran');
   const state = readState(statePath);
   assert.deepEqual(state.stop, { step: 'answers', kind: 'answers', why: state.steps[0].why, commands: [], link: null });

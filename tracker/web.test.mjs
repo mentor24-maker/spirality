@@ -44,9 +44,9 @@ async function fixture({ mergePhrase, closePhrase, goPhrase } = {}) {
   }
   /** Run the real door against this tracker, for one project, as the loop. */
   function door(slug, ...args) {
-    const product = join(dir, slug);
-    mkdirSync(product, { recursive: true });
-    writeFileSync(join(product, 'spirality.project.json'), JSON.stringify({
+    const project = join(dir, slug);
+    mkdirSync(project, { recursive: true });
+    writeFileSync(join(project, 'spirality.project.json'), JSON.stringify({
       workspaceId: '111', spaceId: '222', loopQueueListId: '333',
       operatorUserId: seed.operator.id, machineUserId: seed.loop.id,
       githubRepo: 'owner/repo', dopplerProject: 'proj', dopplerConfig: 'dev',
@@ -56,7 +56,7 @@ async function fixture({ mergePhrase, closePhrase, goPhrase } = {}) {
     }));
     return new Promise((resolve) => {
       const env = { PATH: process.env.PATH, HOME: process.env.HOME, TRACKER_TOKEN_HAND_RUN: loopToken };
-      const child = spawn(process.execPath, [DOOR, ...args], { cwd: product, env });
+      const child = spawn(process.execPath, [DOOR, ...args], { cwd: project, env });
       let out = '';
       let err = '';
       child.stdout.on('data', (c) => { out += c; });
@@ -1170,8 +1170,8 @@ test('/projects/new is the page to a browser, and its logo can be drawn: the loc
 
 test('the New project button and form are a person\'s only; a refused save keeps what was typed and says why; success opens the details page', () => {
   const app = readFileSync(WEB('app.mjs'), 'utf8');
-  // SP-127: the Projects page's button is Set up a product; the bare form is a link on its page.
-  assert.match(app, /me\?\.kind === 'human' \? '<div class="toolbar"><a class="button" href="\/setup\/new">Set Up a Product<\/a><\/div>' : ''/);
+  // SP-127: the Projects page's button is Set up a project; the bare form is a link on its page.
+  assert.match(app, /me\?\.kind === 'human' \? '<div class="toolbar"><a class="button" href="\/setup\/new">Set Up a Project<\/a><\/div>' : ''/);
   assert.match(app, /<a href="\/projects\/new">New project<\/a>/);
   const form = app.slice(app.indexOf('async function drawCreateProject'), app.indexOf('/**', app.indexOf('async function drawCreateProject')));
   assert.match(form, /if \(me\?\.kind !== 'human'\)[\s\S]{0,200}Only a person signed in to the tracker can add a project\./);
@@ -2366,13 +2366,13 @@ test('the search results page draws the filters from the server\'s answer, keeps
   assert.match(app, /await drawSearch\(new URLSearchParams\(location\.search\)\)/);
 });
 
-// ── Set up a product (SP-127) ────────────────────────────────────────────────
+// ── Set up a project (SP-127) ────────────────────────────────────────────────
 
 /**
  * A tracker home for the setup page, as tracker/server.test.mjs's: this
  * repository's settings file with its own log folder, read the way the
  * server reads it. `state(slug, ...)` writes a state file as the wizard
- * leaves it; `of(slug)` is the server's answer for that product.
+ * leaves it; `of(slug)` is the server's answer for that project.
  */
 function setupHome() {
   const dir = mkdtempSync(join(tmpdir(), 'tracker-setup-page-'));
@@ -2387,7 +2387,7 @@ function setupHome() {
   const state = (slug, { outcomes = {}, stop = null, finished = false } = {}) => {
     mkdirSync(onboard, { recursive: true });
     const steps = SETUP_STEPS.map((step) => ({ step, outcome: outcomes[step] ?? 'pending', at: null, why: outcomes[step] ? `${step} said so` : null }));
-    writeFileSync(join(onboard, `${slug}.state.json`), JSON.stringify({ product: slug, updatedAt: '2026-11-05T08:15:00.000Z', steps, stop, finished }));
+    writeFileSync(join(onboard, `${slug}.state.json`), JSON.stringify({ project: slug, updatedAt: '2026-11-05T08:15:00.000Z', steps, stop, finished }));
   };
   return { dir, setup, state, of: (slug) => setupOf(setup, slug), cleanup: () => rmSync(dir, { recursive: true, force: true }) };
 }
@@ -2398,9 +2398,9 @@ const copies = (html) => ({ codes: codes(html), buttons: (html.match(/<button ty
 test('the setup page\'s next-step box, for a state file of each kind: every command with a Copy button whose text is exactly it', () => {
   const h = setupHome();
   try {
-    saveAnswers(h.setup, 'press-play', { projectName: 'Press Play', githubRepo: 'example-owner/press-play', description: 'A test product.', trackerPrefix: '', mergePhrases: '', autoMergeLanes: 'none', extraGovernancePaths: 'none' });
+    saveAnswers(h.setup, 'press-play', { projectName: 'Press Play', githubRepo: 'example-owner/press-play', description: 'A test project.', trackerPrefix: '', mergePhrases: '', autoMergeLanes: 'none', extraGovernancePaths: 'none' });
     const command = h.of('press-play').commands.resume;
-    assert.match(command, /npm run onboard -- --product press-play --no-prompt$/);
+    assert.match(command, /npm run onboard -- --project press-play --no-prompt$/);
     const kind = (html) => /data-next="([a-z]+)"/.exec(html)[1];
 
     // Nothing run yet: the start command, to paste on the Mini.
@@ -2500,14 +2500,14 @@ test('the setup form asks the wizard\'s own questions with their defaults, and s
     assert.match(again, /name="extraGovernancePaths"[^>]*value="docs\/A\.md, ops\/"/);
     // The body: each answer as typed, a default as null; the server's checker accepts it.
     const values = Object.fromEntries(fields.map((f) => [f.key, f.default ?? '']));
-    Object.assign(values, { projectName: 'Press Play', githubRepo: 'example-owner/press-play', description: 'A test product.', autoMergeLanes: 'relay' });
+    Object.assign(values, { projectName: 'Press Play', githubRepo: 'example-owner/press-play', description: 'A test project.', autoMergeLanes: 'relay' });
     const body = setupBody(fields, values);
     assert.equal(body.trackerPrefix, null);
     assert.equal(body.mergePhrases, null);
     assert.equal(body.autoMergeLanes, 'relay');
     assert.equal(body.projectName, 'Press Play');
     const saved = saveAnswers(h.setup, setupSlug('Press Play'), body);
-    assert.equal(saved.product, 'press-play');
+    assert.equal(saved.project, 'press-play');
     assert.equal(saved.resolved.trackerPrefix, 'PR');
     assert.deepEqual(saved.resolved.autoMergeLanes, ['relay']);
   } finally { h.cleanup(); }
@@ -2523,14 +2523,14 @@ test('the page makes a slug by the wizard\'s rule, and refuses the two that are 
   assert.match(setupSlugProblem('fields'), /another name/);
 });
 
-test('the Projects page has Set up a product, lists the products mid-setup, and keeps New project a link away', () => {
+test('the Projects page has Set up a project, lists the projects mid-setup, and keeps New project a link away', () => {
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   const projects = /async function drawProjects\(done = ''\) \{[\s\S]*?\n\}/.exec(app)[0];
-  assert.match(projects, /<a class="button" href="\/setup\/new">Set Up a Product<\/a>/);
+  assert.match(projects, /<a class="button" href="\/setup\/new">Set Up a Project<\/a>/);
   assert.doesNotMatch(projects, /href="\/projects\/new">New project/);
   assert.match(projects, /api\('GET', '\/setup'\)/);
   assert.match(projects, /\$\{renderSetupList\(setups\)\}/);
-  const setupNew = /async function drawSetupNew\(product\) \{[\s\S]*?\n\}/.exec(app)[0];
+  const setupNew = /async function drawSetupNew\(project\) \{[\s\S]*?\n\}/.exec(app)[0];
   assert.match(setupNew, /<a href="\/projects\/new">New project<\/a>/);
   assert.match(setupNew, /api\('PUT', `\/setup\/\$\{encodeURIComponent\(slug\)\}`, setupBody\(fields, values\)\)/);
   assert.match(setupNew, /history\.pushState\(null, '', `\/setup\/\$\{encodeURIComponent\(slug\)\}`\)/, 'Save opens its setup page');
@@ -2541,11 +2541,11 @@ test('the Projects page has Set up a product, lists the products mid-setup, and 
   assert.match(app, /if \(lastDrawn\?\.fast\) refreshPage\(\);\s*\}, SETUP_REFRESH_EVERY_MS\);/);
   assert.match(app, /if \(kept && following\) lastDrawn = \{ address: here\(\), reads, fast: true \};/);
 
-  // The list: each product not finished, linking its setup page; nothing when there are none.
+  // The list: each project not finished, linking its setup page; nothing when there are none.
   const list = renderSetupList({ setups: [
-    { product: 'press-play', step: 'signins', finished: false, started: true, stateError: null },
-    { product: 'done-one', step: null, finished: true, started: true, stateError: null },
-    { product: 'fresh', step: null, finished: false, started: false, stateError: null },
+    { project: 'press-play', step: 'signins', finished: false, started: true, stateError: null },
+    { project: 'done-one', step: null, finished: true, started: true, stateError: null },
+    { project: 'fresh', step: null, finished: false, started: false, stateError: null },
   ] });
   assert.match(list, /<h2>Being Set Up<\/h2>/);
   assert.match(list, /<a href="\/setup\/press-play">press-play<\/a> <span class="quiet">at signins<\/span>/);

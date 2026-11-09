@@ -867,14 +867,14 @@ export function renderSearchResults({ query, filters = [], results = [] }) {
   return `<ol class="search-results">${results.map(item).join('')}</ol>`;
 }
 
-// ── Set up a product (SP-127) ────────────────────────────────────────────────
+// ── Set up a project (SP-127) ────────────────────────────────────────────────
 //
-// The page that walks a product's setup: the answers form, the steps the
+// The page that walks a project's setup: the answers form, the steps the
 // wizard (scripts/onboard/onboard.mjs) recorded in its state file, and at
 // every stop the exact command for Dane to paste into a Terminal on the
 // Mini. The page never runs anything; the server only reads the wizard's
 // files and writes the answers file (tracker/setup.mjs). Nothing about any
-// one product is written here: every name, step, command and default comes
+// one project is written here: every name, step, command and default comes
 // from the server's answer.
 
 /**
@@ -886,7 +886,7 @@ export function renderCopyRow(text) {
   return `<div class="command"><pre><code>${escapeHtml(text)}</code></pre><button type="button" class="copy-command">Copy</button></div>`;
 }
 
-/** A product's slug from its name, the wizard's own rule (lib/onboardAnswers.mjs slugFromName). */
+/** A project's slug from its name, the wizard's own rule (lib/onboardAnswers.mjs slugFromName). */
 export function setupSlug(name) {
   return String(name ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 }
@@ -896,8 +896,8 @@ export const SETUP_RESERVED_SLUGS = Object.freeze(['new', 'fields']);
 
 /** Why a slug cannot be set up from the page, or null when it can. */
 export function setupSlugProblem(slug) {
-  if (!slug) return 'The product name needs a letter or a digit to make its slug from.';
-  if (SETUP_RESERVED_SLUGS.includes(slug)) return `"${slug}" is the address of a page here; give the product another name.`;
+  if (!slug) return 'The project name needs a letter or a digit to make its slug from.';
+  if (SETUP_RESERVED_SLUGS.includes(slug)) return `"${slug}" is the address of a page here; give the project another name.`;
   return null;
 }
 
@@ -926,9 +926,9 @@ export function runningStep(state) {
   return state?.steps?.find((s) => s.outcome === 'running')?.step ?? null;
 }
 
-/** The product's name as its answers give it; its slug until they do. */
+/** The project's name as its answers give it; its slug until they do. */
 export function setupName(setup) {
-  return setup?.resolved?.projectName ?? setup?.answers?.projectName ?? setup?.product ?? '';
+  return setup?.resolved?.projectName ?? setup?.answers?.projectName ?? setup?.project ?? '';
 }
 
 /** Whether the setup page reads again every few seconds: until the setup is finished, it is running or waiting on Dane. */
@@ -948,19 +948,19 @@ const isLink = (v) => typeof v === 'string' && /^https?:\/\//i.test(v);
 
 /**
  * The box under the steps: what is next, from the server's answer for one
- * product (tracker/setup.mjs setupOf). `firstTicketId` is the product's
+ * project (tracker/setup.mjs setupOf). `firstTicketId` is the project's
  * first ticket, for the finished box (null: not known). Every command shown
  * comes with a Copy button whose text is that command exactly.
  */
 export function renderSetupNext(setup, { firstTicketId = null } = {}) {
-  const { product, state, stateError, finished, commands } = setup;
+  const { project, state, stateError, finished, commands } = setup;
   const name = setupName(setup);
   const resume = (lead = 'Then run the setup again; it skips every step already done.') => `<p>${lead}</p>${renderCopyRow(commands.resume)}`;
   const box = (kind, body) => `<section class="setup-next ${kind}" data-next="${kind}">${body}</section>`;
   if (finished) {
-    const project = `<a href="/projects/${encodeURIComponent(product)}">its project</a>`;
+    const projectLink = `<a href="/projects/${encodeURIComponent(project)}">its project</a>`;
     const ticket = firstTicketId ? ` and <a href="/t/${encodeURIComponent(firstTicketId)}">its first ticket, ${escapeHtml(firstTicketId)}</a>` : '';
-    return box('finished', `<h2>${escapeHtml(name)} Is Set Up</h2><p>Every step is done. See ${project}${ticket}.</p>`);
+    return box('finished', `<h2>${escapeHtml(name)} Is Set Up</h2><p>Every step is done. See ${projectLink}${ticket}.</p>`);
   }
   if (stateError) {
     return box('unreadable', `<h2>The Setup's State Cannot Be Read</h2><p class="error">${escapeHtml(stateError)}</p>${resume('Running the setup again writes it afresh:')}`);
@@ -971,7 +971,7 @@ export function renderSetupNext(setup, { firstTicketId = null } = {}) {
   // What each kind of stop the wizard records (its STOP_KINDS) asks of him.
   const stop = state.stop;
   const STOPS = {
-    answers: () => `<h2>Some Answers Are Missing</h2><p>${escapeHtml(stop.why)}</p><p><a href="/setup/${encodeURIComponent(product)}/answers">Fill in the answers</a>, then paste this into a Terminal on the Mini:</p>${renderCopyRow(commands.start)}`,
+    answers: () => `<h2>Some Answers Are Missing</h2><p>${escapeHtml(stop.why)}</p><p><a href="/setup/${encodeURIComponent(project)}/answers">Fill in the answers</a>, then paste this into a Terminal on the Mini:</p>${renderCopyRow(commands.start)}`,
     paste: () => {
       const lines = Array.isArray(stop.commands) ? stop.commands : [];
       return `<h2>Your Move (Real Secret Values)</h2><p>${escapeHtml(stop.why)}</p>${PASTE_HERE}${renderCopyRow(lines.join('\n'))}<p class="quiet">It makes the sign-ins and writes their keys into Doppler. No key is shown.</p>${resume('Once it has finished, run the setup again:')}`;
@@ -990,11 +990,11 @@ export function renderSetupNext(setup, { firstTicketId = null } = {}) {
   return box('resume', `<h2>Carry On with the Setup</h2>${resume('Paste this into a Terminal on the Mini; it skips every step already done:')}`);
 }
 
-/** The Projects page's list of products mid-setup (`GET /setup`'s answer), each linking to its setup page; '' with none. */
+/** The Projects page's list of projects mid-setup (`GET /setup`'s answer), each linking to its setup page; '' with none. */
 export function renderSetupList({ setups = [] } = {}) {
   const open = setups.filter((s) => !s.finished);
   if (!open.length) return '';
-  const item = (s) => `<li><a href="/setup/${encodeURIComponent(s.product)}">${escapeHtml(s.product)}</a> <span class="quiet">${s.stateError ? 'its state cannot be read' : !s.started ? 'not started yet' : `at ${escapeHtml(s.step ?? '')}`}</span></li>`;
+  const item = (s) => `<li><a href="/setup/${encodeURIComponent(s.project)}">${escapeHtml(s.project)}</a> <span class="quiet">${s.stateError ? 'its state cannot be read' : !s.started ? 'not started yet' : `at ${escapeHtml(s.step ?? '')}`}</span></li>`;
   return `<section class="setups"><h2>Being Set Up</h2><ul>${open.map(item).join('')}</ul></section>`;
 }
 

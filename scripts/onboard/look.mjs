@@ -4,9 +4,10 @@
  * anything (docs/onboarding/SETUP_REVIEW.md, part 3). Read only.
  *
  *   npm run onboard:look -- --answers <path to answers file> [--no-check]
- *   npm run onboard:look -- --product <slug> [--no-check]
+ *   npm run onboard:look -- --project <slug> [--no-check]
  *
- * `--product <slug>` reads `<logDir>/onboard/<slug>.answers.json`, the
+ * `--project <slug>` (`--product`, its old name, still works) reads
+ * `<logDir>/onboard/<slug>.answers.json`, the
  * tracker home's log folder (lib/onboardAnswers.mjs). Run it from the
  * tracker home's own folder (the project whose settings file sets
  * `trackerPort`, today Spirality), on the Mini; the npm script runs it
@@ -618,18 +619,18 @@ export function mainCheckoutOf(dir, run = realRun) {
   return /\/\.git$/.test(common) ? dirname(common) : dir;
 }
 
-/** `--product <slug>` names a project; the file it finds must be that project's. Null when they agree (or no --product). */
-export function projectMismatch(product, answers, path) {
-  if (!product || answers.projectSlug === product) return null;
-  return `${path} is for the project "${answers.projectSlug}", not "${product}"; rename the file or correct its projectSlug.`;
+/** `--project <slug>` names a project; the file it finds must be that project's. Null when they agree (or no --project). */
+export function projectMismatch(project, answers, path) {
+  if (!project || answers.projectSlug === project) return null;
+  return `${path} is for the project "${answers.projectSlug}", not "${project}"; rename the file or correct its projectSlug.`;
 }
 
-const USAGE = 'usage: npm run onboard:look -- (--answers <path> | --product <slug>) [--no-check]';
+const USAGE = 'usage: npm run onboard:look -- (--answers <path> | --project <slug>) [--no-check]';
 
 async function main(argv) {
   let args;
   try {
-    args = parseArgs({ args: argv, options: { answers: { type: 'string' }, product: { type: 'string' }, 'no-check': { type: 'boolean' } } }).values;
+    args = parseArgs({ args: argv, options: { answers: { type: 'string' }, project: { type: 'string' }, product: { type: 'string' }, 'no-check': { type: 'boolean' } } }).values;
   } catch (err) {
     console.error(`${err.message}\n${USAGE}`);
     return 1;
@@ -649,11 +650,17 @@ async function main(argv) {
     console.error('look: run this from the folder of the project that runs the tracker (its settings file sets "trackerPort"), not a guest project\'s.');
     return 1;
   }
-  if (Boolean(args.answers) === Boolean(args.product)) {
-    console.error(`look: name the answers file with --answers, or the project with --product, not both and not neither.\n${USAGE}`);
+  // --product is the option's old name, kept so a saved command still runs (SP-156).
+  if (args.project && args.product && args.project !== args.product) {
+    console.error(`look: --project and its old name --product name different projects; give one.\n${USAGE}`);
     return 1;
   }
-  const path = args.answers ? expandHome(args.answers) : answersFile(homeConfig, args.product);
+  args.project ??= args.product;
+  if (Boolean(args.answers) === Boolean(args.project)) {
+    console.error(`look: name the answers file with --answers, or the project with --project, not both and not neither.\n${USAGE}`);
+    return 1;
+  }
+  const path = args.answers ? expandHome(args.answers) : answersFile(homeConfig, args.project);
   let answers;
   try {
     answers = loadAnswers(path, { homeConfig, homeRoot });
@@ -662,7 +669,7 @@ async function main(argv) {
     console.error(`look: the answers file is not usable — ${err.message}`);
     return 1;
   }
-  const mismatch = projectMismatch(args.product, answers, path);
+  const mismatch = projectMismatch(args.project, answers, path);
   if (mismatch) {
     console.error(`look: ${mismatch}`);
     return 1;

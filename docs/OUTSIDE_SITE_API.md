@@ -1,6 +1,6 @@
 # Outside sites: the calls a site's server makes
 
-An **outside site** is another product's web page that lets Dane's team use
+An **outside site** is another project's web page that lets Dane's team use
 the tracker without opening the tracker's own page: today, StarCaster's
 Spirality page (its Spirality Tasks module, built in StarCaster's own queue).
 A teammate Dane invites can finish joining, sign in, see a project's tasks,
