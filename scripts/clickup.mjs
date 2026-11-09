@@ -41,7 +41,7 @@ import {
   readyToLaunchGate, nextRound, wouldEscalate, roundSummaryLines, sendBackRounds, operatorSpokeLast,
   findPullRequest, newestFirst, ESCALATE_AT_ROUND,
 } from './lib/loopTrail.mjs';
-import { buildCard, cardSurvived, findBlockquoteLines, CONTEXT_MIN_WORDS, CONTEXT_MAX_WORDS } from './lib/operatorCard.mjs';
+import { buildCard, cardSurvived, findBlockquoteLines, findBranchLinks, branchLinkRefusal, CONTEXT_MIN_WORDS, CONTEXT_MAX_WORDS } from './lib/operatorCard.mjs';
 import { isMachineComment, stripMachineMarker } from './lib/machineComment.mjs';
 import { parseHumanHours, findHumanHours } from '../lib/humanHours.js';
 import { createClickupTracker } from './tracker/clickupTracker.mjs';
@@ -383,7 +383,21 @@ async function alreadyAnsweredRefused(task, status) {
   return null;
 }
 
+/** Exit 2, before any write, when `text` links a GitHub file by branch (SP-178). */
+function refuseBranchLinks(text, nothing) {
+  const links = findBranchLinks(text);
+  if (!links.length) return;
+  console.error(`\n${branchLinkRefusal(links, nothing)}\n`);
+  process.exit(2);
+}
+
 async function postComment(task, body) {
+  // Every loop comment (comment, ask, verdict, pr-opened, bus-post) comes through here.
+  // A card arrives as rich-text pieces; its code blocks (his own words) are quoted, not links.
+  const text = Array.isArray(body.comment)
+    ? body.comment.filter((p) => !p.attributes?.['code-block']).map((p) => p.text ?? '').join('')
+    : String(body.comment_text ?? body.comment ?? '');
+  refuseBranchLinks(text, 'Nothing was posted.');
   const out = await tracker.postComment(task, body);
   if (!out.res.ok) die('post comment', out);
   const id = String(out.json?.id ?? '');
@@ -914,6 +928,7 @@ if (cmd === 'whoami') {
     console.error(`The body has "> " blockquote lines (${quoted.join(', ')}). ClickUp DELETES them silently. Use a fenced block. Nothing was created.`);
     process.exit(2);
   }
+  refuseBranchLinks(body, 'Nothing was created.');
   const tags = arg('tags') ? arg('tags').split(',').map((s) => s.trim()).filter(Boolean) : undefined;
   const out = await tracker.createTask(list, {
     name,
@@ -954,6 +969,7 @@ if (cmd === 'whoami') {
   if (!body.trim()) { console.error('Refusing to replace the description with an empty body.'); process.exit(2); }
   const quoted = findBlockquoteLines(body);
   if (quoted.length) { console.error(`The body has "> " blockquote lines (${quoted.join(', ')}). ClickUp DELETES them. Nothing was written.`); process.exit(2); }
+  refuseBranchLinks(body, 'Nothing was written.');
   const out = await tracker.updateTask(task, { markdown_description: body });
   if (!out.res.ok) die('replace description', out);
   const t = await readTask(task);
@@ -968,6 +984,7 @@ if (cmd === 'whoami') {
   const sent = readBody(bodyFile);
   const quoted = findBlockquoteLines(sent);
   if (quoted.length) { console.error(`The comment has "> " blockquote lines (${quoted.join(', ')}). ClickUp DELETES them. Nothing was posted.`); process.exit(2); }
+  refuseBranchLinks(sent, 'Nothing was posted.');
   const { id, stored } = await postComment(task, { comment_text: sent });
   console.log(`Comment ${id} added to task ${task} (${stored.comment_text.length} characters, verified by reading it back).`);
   reportLimits();
@@ -1158,6 +1175,8 @@ if (cmd === 'whoami') {
   if (!noMove && await readyToLaunchRefused(task, status)) process.exit(2);
   let card, commentBody;
   try { ({ card, comment: commentBody } = buildCard(readBody(bodyFile))); } catch (err) { console.error(`\n${err.message}\n`); process.exit(2); }
+  // @@ASKED is exempt: it is his own words, fenced on the card.
+  refuseBranchLinks([card.context, card.needed, card.evidence].join('\n'), 'Nothing was posted and the status has NOT moved.');
   if (!noMove) { const stop = await alreadyAnsweredRefused(task, status); if (stop !== null) process.exit(stop); }
   const { id: cardId, stored } = await postComment(task, { comment: commentBody });
   const lost = cardSurvived(card, stored.comment_text);
