@@ -18,7 +18,11 @@
  *   1. look     the project's checkout and repository; what every file would
  *               do there (new / identical / replaces). A file of the
  *               project's own that would be replaced stops the run, unless
- *               --allow-replace. --dry-run prints this and stops.
+ *               --allow-replace. So does an npm command of its own
+ *               the loop needs under the same name (its old loop's
+ *               `clickup`, `doctor`): --allow-replace writes the loop's
+ *               and the pull request lists what each was (SP-172); its
+ *               own `verify` is always kept. --dry-run prints this and stops.
  *   2. write    a worktree on branch spirality-setup off origin's main, kept
  *               beside the answers file (never inside the project's
  *               checkout, which the lanes need clean): the files, the
@@ -52,6 +56,7 @@ import { loadAnswers, onboardDir, expandHome } from '../../lib/onboardAnswers.mj
 import {
   planCopies, compareWithProject, templateVars, mergeNpmScripts, withClaudeSections, withIgnoreLines,
   verifyWorkflow, hasVerifyJob, verifyScriptFor, render, ciVerdict, answersAsHandRun, SETUP_BRANCH, oldCopyLists,
+  npmConflictMessage, replacedScriptLines,
 } from '../../lib/onboardCopy.mjs';
 
 const BRANCH = SETUP_BRANCH;
@@ -59,6 +64,7 @@ const argv = process.argv.slice(2);
 const arg = (name) => { const i = argv.indexOf(`--${name}`); return i >= 0 ? argv[i + 1] : undefined; };
 const flag = (name) => argv.includes(`--${name}`);
 const dryRun = flag('dry-run');
+const allowReplace = flag('allow-replace');
 const rerun = `npm run onboard:copy -- ${argv.join(' ')}`;
 
 function fail(step, seen) {
@@ -129,12 +135,14 @@ try {
   planned = compareWithProject(planCopies(manifest, { readSpirality: textOf, vars }), readProject);
 } catch (e) { fail('look', e.message); }
 
-// The files made from the project's own.
+// The files made from the project's own. With --allow-replace the loop's
+// npm commands replace the project's own (SP-172: a project that ran its own
+// copy of the loop has `clickup` and `doctor`); its verify is always kept.
 let npm;
-try { npm = mergeNpmScripts(pkgText, { ...manifest.npmScripts, ...(verify.add ? { verify: verify.add } : {}) }); } catch (e) { fail('look', e.message); }
-if (npm.conflicts.length) {
-  fail('look', `package.json already has ${npm.conflicts.map((c) => `"${c.name}" as "${c.theirs}" (the loop needs "${c.ours}")`).join('; ')}`);
-}
+try {
+  npm = mergeNpmScripts(pkgText, { ...manifest.npmScripts, ...(verify.add ? { verify: verify.add } : {}) }, { replace: allowReplace });
+} catch (e) { fail('look', e.message); }
+if (npm.conflicts.length && !dryRun) fail('look', npmConflictMessage(npm.conflicts));
 const sectionsTemplate = textOf('scripts/onboard/templates/CLAUDE-sections.md');
 const claude = withClaudeSections(readProject('CLAUDE.md'), render(sectionsTemplate, vars, 'CLAUDE-sections.md'));
 const ignoreEntry = manifest.made.find((m) => m.to === '.gitignore');
@@ -152,7 +160,7 @@ if (arg('config')) {
 }
 const extra = [
   ...(settingsText == null ? [] : [{ to: 'spirality.project.json', kind: 'made', from: arg('config'), content: settingsText }]),
-  { to: 'package.json', kind: 'made', from: `the project's own, plus ${npm.added.length ? npm.added.join(', ') : 'nothing'}`, content: npm.text },
+  { to: 'package.json', kind: 'made', from: `the project's own, plus ${npm.added.length ? npm.added.join(', ') : 'nothing'}${npm.replaced.length ? `; ${npm.replaced.map((r) => r.name).join(', ')} replaced (--allow-replace)` : ''}`, content: npm.text },
   { to: '.gitignore', kind: 'made', from: ignore.added.length ? `the project's own, plus ${ignore.added.join(', ')}` : 'the project\'s own (it already ignores what the lanes need)', content: ignore.text },
   { to: 'CLAUDE.md', kind: 'made', from: claude.added ? 'the project\'s own, plus the loop\'s sections' : 'the project\'s own (the loop\'s sections are already there)', content: claude.text },
   ...(haveVerify ? [] : [{
@@ -172,16 +180,21 @@ console.log(verify.add
   ? `  package.json ${npm.added.includes('verify') ? 'gets' : 'already has'} "verify": "${verify.add}", the same thing CI runs.`
   : `  package.json already has its own verify ("${verify.own}"); it is kept as it is.`);
 if (settingsText == null) console.log('  No --config given, so the settings file is not compared.');
+if (npm.replaced.length) {
+  console.log('  --allow-replace: these npm commands of the project\'s are replaced with the loop\'s:');
+  for (const line of replacedScriptLines(npm.replaced)) console.log(`    ${line}`);
+}
 
 // The project's own files are never replaced unasked. The door and the
 // loop's own files (made by an earlier setup) are the loop's to update.
 const theirs = all.filter((f) => f.status === 'replaces' && !['package.json', 'CLAUDE.md', '.gitignore'].includes(f.to) && !f.to.startsWith('loop/'));
 if (dryRun) {
-  if (theirs.length) console.log(`\nA real run would stop here unless --allow-replace: it would replace ${theirs.map((f) => f.to).join(', ')}.`);
+  if (theirs.length && !allowReplace) console.log(`\nA real run would stop here unless --allow-replace: it would replace ${theirs.map((f) => f.to).join(', ')}.`);
+  if (npm.conflicts.length) console.log(`\nA real run would stop here: ${npmConflictMessage(npm.conflicts)}.`);
   console.log('\nDry run done: nothing was written or opened.');
   process.exit(0);
 }
-if (theirs.length && !flag('allow-replace')) {
+if (theirs.length && !allowReplace) {
   fail('look', `it would replace files the project already has: ${theirs.map((f) => f.to).join(', ')}. Check them, then rerun with --allow-replace`);
 }
 
@@ -260,6 +273,14 @@ if (answers.clickupListId) {
     '',
   ];
 }
+// What --allow-replace replaced in package.json, with what each command was,
+// so a reviewer can put a still-wanted one back under another name.
+const replacedNpm = npm.replaced.length ? [
+  `**npm commands replaced.** \`--allow-replace\` replaced these of ${answers.projectName}'s own npm commands in \`package.json\` with the loop's:`,
+  '',
+  ...replacedScriptLines(npm.replaced).map((l) => `- ${l}`),
+  '',
+] : [];
 const rows = all.map((f) => `| \`${f.to}\` | ${f.kind === 'copy' ? `copy of \`${f.from}\`, cmp identical` : f.kind === 'adapted' ? `\`${f.from}\` with the manifest's edits: ${f.why}` : f.from} | ${f.status} |`);
 const body = [
   `Everything ${answers.projectName} needs to run Spirality's loop, in one pull request, written by Spirality's setup wizard.`,
@@ -271,6 +292,7 @@ const body = [
   ...rows,
   '',
   ...oldCopy,
+  ...replacedNpm,
   'After this merges, `loop/` is never edited here: a change is made in Spirality first and copied in.',
   '',
   '🤖 Generated with [Claude Code](https://claude.com/claude-code)',
