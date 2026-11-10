@@ -2298,7 +2298,7 @@ test('Docs is in the header between Users and Settings, served at /docs to a bro
     assert.equal((await f.call('GET', '/projects/alpha/attachments', { token: null })).status, 401);
   } finally { await f.cleanup(); }
   const app = readFileSync(WEB('app.mjs'), 'utf8');
-  assert.match(app, /docsPage(?: \|\| docPath)? \? 'docs' :/);
+  assert.match(app, /docsPage(?: \|\| docAny)? \? 'docs' :/);
   assert.match(app, /\} else if \(docsPage\) \{\s*await drawDocs\(\);/);
   const draw = app.slice(app.indexOf('async function drawDocs'), app.indexOf('/** Underline the header link'));
   assert.match(draw, /projects\.find\(\(p\) => p\.slug === savedProject\(\)\) \?\? projects\[0\]/, 'the project picked in the header, else the first');
@@ -2331,13 +2331,17 @@ test('the Docs page lists Spirality\'s documentation by title above Task Files, 
   for (const heading of ['Title', 'Path']) assert.match(draw, new RegExp(`<th>${heading}</th>`), heading);
   assert.match(draw, /<a href="\$\{docAddress\(d\.path\)\}">\$\{escapeHtml\(d\.title\)\}<\/a>/, 'each file by its title, escaped, linking to its page');
   assert.match(app, /const docAddress = \(path\) => `\/docs\/spirality\/\$\{String\(path\)\.split\('\/'\)\.map\(encodeURIComponent\)\.join\('\/'\)\}`/);
-  assert.match(app, /\} else if \(docPath\) \{\s*await drawDoc\(docPath\);/);
-  assert.match(app, /docsPage \|\| docPath \? 'docs' :/, 'a documentation file keeps Docs underlined in the header');
+  assert.match(app, /\} else if \(docAny\) \{\s*await drawDoc\(docPath\);/, 'any /docs/<name>/<path> draws through drawDoc');
+  assert.match(app, /const underDocs = \(\) => \/\^\\\/docs\\\/\[\^\/\]\+\\\/\.\+\$\/\.test\(location\.pathname\);/, 'the same addresses the server serves as the page');
+  assert.match(app, /docsPage \|\| docAny \? 'docs' :/, 'a documentation file keeps Docs underlined in the header');
+  assert.match(draw, /api\('GET', '\/documentation'\)\.then\(\(r\) => r\.files, \(\) => null\)/, 'a failed documentation call is caught on its own, so Task Files still draws');
+  assert.match(draw, /Spirality\\'s documentation could not be read\./);
   const one = app.slice(app.indexOf('async function drawDoc('), app.indexOf('/** Underline the header link'));
   assert.match(one, /renderMarkdown\(unwrapDoc\(body\)\)/, 'drawn with the ticket page\'s Markdown drawing, never as raw text');
   assert.match(one, /<a href="\/docs">Back to Docs<\/a>/);
   assert.match(one, /<h1>\$\{escapeHtml\(doc\.title\)\}<\/h1>/);
   assert.match(one, /There is no documentation file at/, 'a missing file says so');
+  assert.match(one, /if \(!path\) return missing\(location\.pathname\);/, 'an address under /docs the page does not know says the same, never another page');
   // What a contract-like file looks like once drawn: headings, lists and code, not raw text.
   const drawn = renderMarkdown('## Statuses\n\n- Queued\n- Building\n\n```\nnpm run verify\n```\n');
   assert.match(drawn, /<h4>Statuses<\/h4>/);
@@ -2351,6 +2355,14 @@ test('unwrapDoc joins a documentation file\'s hard-wrapped lines, keeps list ite
   const drawn = renderMarkdown(unwrapDoc('- **Code rules**: the script\n  does it.\n'));
   assert.equal(drawn, '<ul><li><strong>Code rules</strong>: the script does it.</li></ul>');
   assert.equal(unwrapDoc(''), '');
+});
+
+test('unwrapDoc joins a quote\'s lines with their ">" taken off, and never joins a quote onto the text around it (SP-175)', () => {
+  const text = 'still the rule:\n> StarCaster still describes a two-account\n> model, where the machine posts. The\n> code does not do that.\nSo every comment\nends here.\n>\n> - a quoted item\n> second para';
+  assert.equal(unwrapDoc(text), 'still the rule:\n> StarCaster still describes a two-account model, where the machine posts. The code does not do that.\nSo every comment ends here.\n>\n> - a quoted item second para');
+  // The real file: no ">" left in the middle of a sentence once drawn.
+  const contract = readFileSync(new URL('../docs/LOOP_CONTRACT.md', import.meta.url), 'utf8');
+  for (const line of unwrapDoc(contract).split('\n')) assert.doesNotMatch(line, /\S\s+>\s/, line);
 });
 
 test('a browser opening /people (an old bookmark) is sent on to /users, never cached; the data call to /people still answers the data', async () => {

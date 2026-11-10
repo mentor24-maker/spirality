@@ -26,6 +26,10 @@ test('safeDocPath takes plain pieces ending in .md, never a dot piece, an absolu
 test('docTitle is the first "# " heading, else the file name', () => {
   assert.equal(docTitle('intro\n# Loop Contract #\n# Later\n', 'LOOP_CONTRACT.md'), 'Loop Contract');
   assert.equal(docTitle('## Only a second level\n', 'work-log/2026-11-10-x.md'), '2026-11-10-x');
+  // A "# comment" inside fenced code is never the title, in either fence style.
+  assert.equal(docTitle('```bash\n# install it\nnpm ci\n```\n# Setup\n', 'SETUP.md'), 'Setup');
+  assert.equal(docTitle('~~~\n# not this\n~~~\n', 'NOTES.md'), 'NOTES');
+  assert.equal(docTitle('````\n```\n# still code\n````\n# Real\n', 'X.md'), 'Real', 'a shorter run does not close a longer fence');
 });
 
 test('listDocs lists the folder\'s own files first, then each subfolder\'s, and never a link', () => {

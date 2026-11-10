@@ -24,10 +24,23 @@ export function safeDocPath(rel) {
   return text.split('/').every((piece) => PIECE.test(piece));
 }
 
-/** The file's title: its first `# ` heading, else its file name without `.md`. */
+/**
+ * The file's title: its first `# ` heading outside fenced code (a `# comment`
+ * in a bash block is not a heading), else its file name without `.md`.
+ */
 export function docTitle(text, rel) {
-  const m = /^#[ \t]+(.+?)[ \t#]*$/m.exec(String(text ?? ''));
-  return m ? m[1].trim() : String(rel).split('/').pop().replace(/\.md$/, '');
+  let fence = null;
+  for (const line of String(text ?? '').split(/\r?\n/)) {
+    const run = /^\s*(`{3,}|~{3,})/.exec(line);
+    if (fence) {
+      if (run && run[1][0] === fence[0] && run[1].length >= fence.length && !line.trim().slice(run[1].length).trim()) fence = null;
+      continue;
+    }
+    if (run) { fence = run[1]; continue; }
+    const m = /^#[ \t]+(.+?)[ \t#]*$/.exec(line);
+    if (m) return m[1].trim();
+  }
+  return String(rel).split('/').pop().replace(/\.md$/, '');
 }
 
 /** Whether `path` is `dir` itself or sits inside it. */

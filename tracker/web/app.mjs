@@ -2187,14 +2187,17 @@ async function drawUsers(done = '', problem = '') {
  * SP-177's.
  */
 async function drawDocs() {
-  const [{ projects }, { files }] = await Promise.all([api('GET', '/projects'), api('GET', '/documentation')]);
+  // The documentation call is caught on its own: a tracker not yet restarted onto it answers 404, and Task Files still draws.
+  const [{ projects }, files] = await Promise.all([api('GET', '/projects'), api('GET', '/documentation').then((r) => r.files, () => null)]);
   setTitle('Docs · Tracker');
   const docRow = (d) => `<tr data-doc="${escapeHtml(d.path)}">
       <td class="title"><a href="${docAddress(d.path)}">${escapeHtml(d.title)}</a></td>
       <td class="path"><code>docs/${escapeHtml(d.path)}</code></td></tr>`;
   const documentation = `
     <h2>Spirality Documentation</h2>
-    ${files.length
+    ${!files
+    ? '<p class="quiet">Spirality\'s documentation could not be read.</p>'
+    : files.length
     ? `<table class="projects spirality-docs"><thead><tr><th>Title</th><th>Path</th></tr></thead>
       <tbody>${files.map(docRow).join('')}</tbody></table>`
     : '<p class="quiet">The docs folder holds no Markdown files.</p>'}`;
@@ -2229,6 +2232,8 @@ async function drawDocs() {
 
 /** The page address of a documentation file, `path` relative to docs/: each piece encoded. */
 const docAddress = (path) => `/docs/spirality/${String(path).split('/').map(encodeURIComponent).join('/')}`;
+/** Whether the address is a page under the Docs page, `/docs/<name>/<path>`: Spirality's own files or not. */
+const underDocs = () => /^\/docs\/[^/]+\/.+$/.test(location.pathname);
 /** The documentation file a `/docs/spirality/<path>` address opens, or null. */
 const docAt = () => {
   const m = /^\/docs\/spirality\/(.+)$/.exec(location.pathname);
@@ -2245,14 +2250,18 @@ const docAt = () => {
 async function drawDoc(path) {
   setTitle('Docs · Tracker');
   const back = '<p><a href="/docs">Back to Docs</a></p>';
+  const missing = (where) => {
+    main.innerHTML = `<h1>Docs</h1><p>There is no documentation file at <code>${escapeHtml(where)}</code>.</p>${back}`;
+    putTrail([{ label: 'Docs', href: '/docs' }, { label: 'Not Found' }]);
+  };
+  // Any /docs/<name>/... the page does not know (another project's name, a typo): the same message, never a different page.
+  if (!path) return missing(location.pathname);
   let doc;
   try {
     doc = await api('GET', `/documentation/${String(path).split('/').map(encodeURIComponent).join('/')}`);
   } catch (err) {
     if (!(err instanceof Refused) || err.status !== 404) throw err;
-    main.innerHTML = `<h1>Docs</h1><p>There is no documentation file at <code>docs/${escapeHtml(path)}</code>.</p>${back}`;
-    putTrail([{ label: 'Docs', href: '/docs' }, { label: 'Not Found' }]);
-    return;
+    return missing(`docs/${path}`);
   }
   setTitle(`${doc.title} · Docs · Tracker`);
   const body = doc.text.replace(/^(?:[ \t]*\n)*#[ \t]+.*\n?/, '');
@@ -2317,14 +2326,15 @@ async function route({ place = null } = {}) {
     const usersPage = location.pathname === '/users';
     const docsPage = location.pathname === '/docs';
     const docPath = docAt();
+    const docAny = underDocs();
     const search = location.pathname === '/search';
     const setupNew = location.pathname === '/setup/new';
     const setupAnswers = /^\/setup\/([^/]+)\/answers$/.exec(location.pathname);
     const setupPage = !setupNew && /^\/setup\/([^/]+)$/.exec(location.pathname);
     const setupAny = setupNew || setupAnswers || setupPage;
     let following = false;
-    const waiting = !(setupAny || search || reporting || settings || usersPage || docsPage || docPath || isNew || ticket || projects || newProject || editProject || details || tasks || project);
-    markNav(reporting ? 'reporting' : settings ? 'settings' : usersPage ? 'users' : docsPage || docPath ? 'docs' : projects || newProject || details || editProject || setupAny ? 'projects' : ticket || project || tasks || isNew || search ? 'tasks' : 'waiting');
+    const waiting = !(setupAny || search || reporting || settings || usersPage || docsPage || docAny || isNew || ticket || projects || newProject || editProject || details || tasks || project);
+    markNav(reporting ? 'reporting' : settings ? 'settings' : usersPage ? 'users' : docsPage || docAny ? 'docs' : projects || newProject || details || editProject || setupAny ? 'projects' : ticket || project || tasks || isNew || search ? 'tasks' : 'waiting');
     if (setupNew) {
       await drawSetupNew(null);
     } else if (setupAnswers) {
@@ -2341,7 +2351,7 @@ async function route({ place = null } = {}) {
       await drawUsers();
     } else if (docsPage) {
       await drawDocs();
-    } else if (docPath) {
+    } else if (docAny) {
       await drawDoc(docPath);
     } else if (isNew) {
       // The old New request address: the Tasks page with its Add Task box open.

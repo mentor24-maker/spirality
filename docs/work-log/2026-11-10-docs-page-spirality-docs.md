@@ -16,3 +16,13 @@ The docs are written with a line break every 75 characters or so, which the
 ticket page's drawing keeps; on a long document that read badly, so the Docs
 page joins those lines back into paragraphs first. Tickets look the same as
 before.
+
+After review: a quoted passage (lines starting with `>`) was being joined
+into the paragraph above it, so stray `>` marks showed mid-sentence in the
+Loop Contract; quotes now stay their own paragraph. If the tracker cannot
+read the documentation list (the Mini's tracker answers "not found" for it
+until it is restarted after this merges), the Docs page now says so in that
+one section and still shows Task Files, instead of going blank. An address
+like `/docs/starcaster/PLAN.md` now says "no documentation file" instead of
+showing the Waiting on You page, and a `# comment` inside a code block can no
+longer become a file's title.
