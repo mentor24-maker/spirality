@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -2302,6 +2302,143 @@ test('the page uploads with its session cookie as the file itself; a cookie uplo
   } finally { await f.cleanup(); }
 });
 
+// ── Context documents (SP-176) ──────────────────────────────────────────────
+
+/** Upload `bytes` to a project's context documents as the page does; answers `{ status, body }`. */
+async function uploadDoc(at, project, bytes, { name = 'brief.pdf', type = 'application/pdf', headers = {} } = {}) {
+  const res = await fetch(`${at}/projects/${project}/docs`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/octet-stream', 'x-file-name': encodeURIComponent(name), 'x-file-type': type, ...headers },
+    body: bytes,
+  });
+  const text = await res.text();
+  return { status: res.status, body: JSON.parse(text) };
+}
+
+test('a project\'s context document is uploaded as the file itself, listed for that project only, downloaded byte for byte as a file to save, and removed', async () => {
+  const f = await fixture();
+  try {
+    f.store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE', operator: f.human.id });
+    const base = await f.serve();
+    const auth = { authorization: `Bearer ${f.humanToken}` };
+    assert.deepEqual((await f.call('GET', '/projects/alpha/docs')).body, { project: 'alpha', docs: [] });
+    const bytes = Buffer.from(Array.from({ length: 70_000 }, (_, i) => (i * 17) % 256));
+    const made = await uploadDoc(base, 'alpha', bytes, { name: 'Brief é.pdf', headers: auth });
+    assert.equal(made.status, 201, JSON.stringify(made.body));
+    assert.equal(made.body.name, 'Brief é.pdf');
+    assert.equal(made.body.size, bytes.length);
+    assert.equal(made.body.project, 'alpha');
+    assert.equal(made.body.addedBy, f.human.id);
+    assert.equal(made.body.addedByName, 'Operator');
+    assert.equal('bytes' in made.body, false, 'the answer never carries the file');
+
+    const list = await f.call('GET', '/projects/alpha/docs');
+    assert.deepEqual(list.body.docs.map((d) => [d.id, d.name, d.size, d.type, d.addedByName]), [[made.body.id, 'Brief é.pdf', bytes.length, 'application/pdf', 'Operator']]);
+    assert.deepEqual((await f.call('GET', '/projects/beta/docs')).body.docs, [], 'another project has its own list');
+
+    const res = await fetch(`${base}/projects/alpha/docs/${made.body.id}`, { headers: auth });
+    assert.equal(res.status, 200);
+    assert.ok(Buffer.from(await res.arrayBuffer()).equals(bytes), 'byte for byte');
+    assert.equal(res.headers.get('content-disposition'), "attachment; filename=\"Brief _.pdf\"; filename*=UTF-8''Brief%20%C3%A9.pdf");
+    assert.equal(res.headers.get('x-content-type-options'), 'nosniff');
+    assert.match(res.headers.get('content-security-policy'), /sandbox/);
+    assert.equal((await f.call('GET', `/projects/beta/docs/${made.body.id}`)).status, 404, 'another project never reaches it');
+    assert.equal((await f.call('GET', '/projects/alpha/docs/999')).status, 404);
+    assert.equal((await f.call('GET', '/projects/alpha/docs/x')).status, 404);
+
+    // A project holding a document is not deleted.
+    const beta = await uploadDoc(base, 'beta', Buffer.from('b'), { name: 'b.txt', headers: auth });
+    const del = await f.call('DELETE', '/projects/beta', { token: f.humanToken });
+    assert.equal(del.status, 409, del.text);
+    assert.equal(del.body.error, 'has-docs');
+    assert.equal(del.body.docs, 1);
+
+    assert.equal((await f.call('DELETE', `/projects/beta/docs/${made.body.id}`, { token: f.humanToken })).status, 404, 'removing through another project is refused');
+    assert.equal((await f.call('DELETE', '/projects/alpha/docs/x', { token: f.humanToken })).status, 404);
+    const removed = await f.call('DELETE', `/projects/alpha/docs/${made.body.id}`, { token: f.humanToken });
+    assert.equal(removed.status, 200, removed.text);
+    assert.deepEqual(removed.body, { removed: made.body.id, name: 'Brief é.pdf', project: 'alpha' });
+    assert.deepEqual(f.store.listProjectDocs('alpha'), []);
+    assert.equal((await f.call('DELETE', `/projects/alpha/docs/${made.body.id}`, { token: f.humanToken })).status, 404, 'a second removal finds nothing');
+    assert.equal(f.store.listProjectDocs('beta')[0].id, beta.body.id, 'the other project keeps its own');
+    assert.ok(f.lines.some((l) => /added context document Brief é\.pdf \(70000 bytes\) to alpha actor=1/.test(l)));
+    assert.ok(f.lines.some((l) => new RegExp(`removed context document ${made.body.id} \\(Brief é\\.pdf\\) from alpha actor=1`).test(l)));
+  } finally { await f.cleanup(); }
+});
+
+test('a context document over 10 MB is refused with 413 and a plain sentence; an empty or nameless one with 400; nothing is stored', async () => {
+  const f = await fixture();
+  try {
+    const base = await f.serve();
+    const auth = { authorization: `Bearer ${f.humanToken}` };
+    const big = await uploadDoc(base, 'alpha', Buffer.alloc(11 * 1024 * 1024, 7), { headers: auth });
+    assert.equal(big.status, 413);
+    assert.equal(big.body.error, 'too-large');
+    assert.equal(big.body.message, 'That file is over 10 MB. Attach a smaller one; nothing was saved.');
+    const empty = await uploadDoc(base, 'alpha', Buffer.alloc(0), { headers: auth });
+    assert.equal(empty.status, 400);
+    assert.equal(empty.body.error, 'empty-file');
+    assert.equal((await uploadDoc(base, 'alpha', Buffer.from('x'), { name: '', headers: auth })).status, 400);
+    assert.deepEqual(f.store.listProjectDocs('alpha'), []);
+    assert.equal((await uploadDoc(base, 'alpha', Buffer.alloc(10 * 1024 * 1024, 1), { headers: auth })).status, 201, 'exactly 10 MB still goes in');
+  } finally { await f.cleanup(); }
+});
+
+test('someone who is not on the project gets 404 from every context document call, the same as a project that does not exist; signed out is 401; nothing changes', async () => {
+  const f = await fixture();
+  try {
+    const base = await f.serve();
+    const d = f.store.addProjectDoc({ project: 'alpha', name: 'secret.txt', type: 'text/plain', bytes: Buffer.from('hidden words'), actor: f.human.id });
+    const viewer = f.store.createActor({ kind: 'human', name: 'Viewer' });
+    const vt = f.store.issueToken(viewer.id);
+    f.store.setRole({ actor: viewer.id, role: 'viewer', by: f.human.id });
+    const calls = [
+      (p, h) => fetch(`${base}/projects/${p}/docs`, { headers: h }),
+      (p, h) => fetch(`${base}/projects/${p}/docs/${d.id}`, { headers: h }),
+      (p, h) => fetch(`${base}/projects/${p}/docs/${d.id}`, { method: 'DELETE', headers: h }),
+      (p, h) => fetch(`${base}/projects/${p}/docs`, { method: 'POST', headers: { ...h, 'content-type': 'application/octet-stream', 'x-file-name': 'x.txt' }, body: 'x' }),
+    ];
+    for (const [i, call] of calls.entries()) {
+      const r = await call('alpha', { authorization: `Bearer ${vt}` });
+      const text = await r.text();
+      assert.equal(r.status, 404, `call ${i}: ${text}`);
+      assert.equal(JSON.parse(text).yourProjectsOnly, true);
+      assert.ok(!text.includes('secret') && !text.includes('hidden'), `call ${i} gives nothing away`);
+      const missing = await call('nope', { authorization: `Bearer ${vt}` });
+      assert.equal(missing.status, 404);
+      assert.equal((await missing.text()).replace('nope', 'alpha'), text, `call ${i}: the same answer as a project that does not exist`);
+      assert.equal((await call('alpha', {})).status, 401, `call ${i} signed out`);
+    }
+    assert.deepEqual(f.store.listProjectDocs('alpha').map((x) => x.name), ['secret.txt'], 'nothing was added or removed');
+    // Made a member, the same person reaches them.
+    f.store.addMember({ project: 'alpha', actor: viewer.id, by: f.human.id });
+    assert.equal((await fetch(`${base}/projects/alpha/docs`, { headers: { authorization: `Bearer ${vt}` } })).status, 200);
+  } finally { await f.cleanup(); }
+});
+
+test('the page uploads and removes context documents with its session cookie; a cookie upload that is not octet-stream, or a removal that is not JSON, is refused', async () => {
+  const f = await fixture();
+  try {
+    const s = await signInServer(f);
+    try {
+      const cookie = cookieOf((await s.signIn({ email: s.email, password: s.password })).cookie);
+      const ok = await uploadDoc(s.base, 'alpha', Buffer.from('notes'), { name: 'notes.txt', type: 'text/plain', headers: { cookie } });
+      assert.equal(ok.status, 201);
+      assert.equal(ok.body.addedBy, f.human.id);
+      for (const type of ['text/plain', 'multipart/form-data; boundary=x', 'application/x-www-form-urlencoded']) {
+        const r = await s.ask('POST', '/projects/alpha/docs', { headers: { cookie, 'content-type': type, 'x-file-name': 'x.txt' }, body: 'x' });
+        assert.equal(r.status, 415, type);
+      }
+      const bare = await s.ask('DELETE', `/projects/alpha/docs/${ok.body.id}`, { headers: { cookie } });
+      assert.equal(bare.status, 415, 'a cookie removal must say it is JSON, which another site\'s form cannot');
+      assert.equal(f.store.listProjectDocs('alpha').length, 1);
+      const gone = await s.ask('DELETE', `/projects/alpha/docs/${ok.body.id}`, { headers: { cookie, ...s.json }, body: {} });
+      assert.equal(gone.status, 200, gone.text);
+      assert.deepEqual(f.store.listProjectDocs('alpha'), []);
+    } finally { await s.close(); }
+  } finally { await f.cleanup(); }
+});
+
 test('GET /bus counts the posts on each Team chat ticket the caller has not seen; POST /tickets/:id/seen marks them (SP-163)', async () => {
   const f = await fixture();
   try {
@@ -2358,5 +2495,62 @@ test('GET /pipeline answers each loop stage from the logs the project config nam
     const none = await f.call('GET', '/pipeline');
     assert.equal(none.status, 503);
     assert.equal(none.body.error, 'no-pipeline');
+  } finally { await f.cleanup(); }
+});
+
+test('GET /documentation lists the docs folder\'s Markdown by title and reads one; a path outside it is 404 and reads nothing (SP-175)', async () => {
+  const f = await fixture();
+  try {
+    const docs = join(f.dir, 'docs');
+    mkdirSync(join(docs, 'onboarding'), { recursive: true });
+    writeFileSync(join(docs, 'LOOP_CONTRACT.md'), '# Loop Contract\n\n## Statuses\n\n- Queued\n');
+    writeFileSync(join(docs, 'onboarding', 'WIZARD.md'), 'No heading here.\n');
+    writeFileSync(join(docs, 'notes.txt'), 'not Markdown');
+    // A file beside the folder, and one a link inside the folder points at: neither may ever be read.
+    writeFileSync(join(f.dir, 'secret.md'), '# Secret\nSECRET-WORDS\n');
+    symlinkSync(join(f.dir, 'secret.md'), join(docs, 'linked.md'));
+    const server = await startServer({ store: f.store, port: 0, docsDir: docs });
+    try {
+      const at = `http://127.0.0.1:${server.address().port}`;
+      for (const token of [f.humanToken, f.machineToken]) {
+        const list = await f.call('GET', '/documentation', { token, at });
+        assert.equal(list.status, 200);
+        assert.deepEqual(list.body.files, [
+          { path: 'LOOP_CONTRACT.md', title: 'Loop Contract' },
+          { path: 'onboarding/WIZARD.md', title: 'WIZARD' },
+        ]);
+      }
+      const one = await f.call('GET', '/documentation/LOOP_CONTRACT.md', { at });
+      assert.equal(one.status, 200);
+      assert.deepEqual(one.body, { path: 'LOOP_CONTRACT.md', title: 'Loop Contract', text: '# Loop Contract\n\n## Statuses\n\n- Queued\n' });
+      assert.equal((await f.call('GET', '/documentation/onboarding/WIZARD.md', { at })).body.title, 'WIZARD');
+      for (const path of [
+        '/documentation/..%2Fsecret.md', '/documentation/%2E%2E/secret.md', '/documentation/onboarding/..%2F..%2Fsecret.md',
+        `/documentation/${encodeURIComponent(join(f.dir, 'secret.md'))}`, '/documentation/%2Fetc%2Fpasswd',
+        '/documentation/linked.md', '/documentation/notes.txt', '/documentation/missing.md', '/documentation/onboarding',
+      ]) {
+        const answer = await f.call('GET', path, { at });
+        assert.equal(answer.status, 404, path);
+        assert.doesNotMatch(answer.text, /SECRET-WORDS/, path);
+      }
+      assert.equal((await f.call('GET', '/documentation', { token: null, at })).status, 401);
+      assert.equal((await f.call('GET', '/documentation/LOOP_CONTRACT.md', { token: null, at })).status, 401);
+    } finally { await new Promise((r) => server.close(r)); }
+    // With no folder named, the tracker reads this repository's own docs/.
+    const own = await f.call('GET', '/documentation');
+    assert.ok(own.body.files.some((d) => d.path === 'LOOP_CONTRACT.md'));
+    assert.ok(own.body.files.some((d) => d.path.startsWith('work-log/')));
+  } finally { await f.cleanup(); }
+});
+
+test('a /docs/spirality/<path> address is the page, whatever the browser asks for (SP-175)', async () => {
+  const f = await fixture();
+  try {
+    const base = await f.serve();
+    for (const path of ['/docs/spirality/LOOP_CONTRACT.md', '/docs/spirality/onboarding/WIZARD.md']) {
+      const res = await fetch(`${base}${path}`);
+      assert.equal(res.status, 200, path);
+      assert.match(res.headers.get('content-type'), /text\/html/);
+    }
   } finally { await f.cleanup(); }
 });

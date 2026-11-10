@@ -1568,6 +1568,79 @@ test('removing an attachment deletes it and its bytes, and its ticket\'s history
   } finally { cleanup(); }
 });
 
+// ── Context documents (SP-176) ──────────────────────────────────────────────
+
+test('a context document is kept on its project with its name, type, size and adder, comes back byte for byte, and never shows on another project', () => {
+  const { path, store, human, machine, cleanup } = fixture();
+  try {
+    store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE' });
+    assert.deepEqual(store.listProjectDocs('alpha'), [], 'none yet');
+    const bytes = Buffer.from([0, 1, 2, 255, 254, 10, 13]);
+    const a = store.addProjectDoc({ project: 'alpha', name: 'C:\\Users\\dane\\brief "1".pdf', type: 'application/PDF; x=1', bytes, actor: human.id });
+    assert.deepEqual(a, { id: a.id, project: 'alpha', name: 'brief 1.pdf', type: 'application/pdf', size: 7, addedBy: human.id, createdAt: a.createdAt, addedByName: 'Operator' });
+    const b = store.addProjectDoc({ project: 'alpha', name: 'notes.txt', type: 'text/plain', bytes: Buffer.from('hi'), actor: machine.id });
+    store.addProjectDoc({ project: 'beta', name: 'theirs.txt', type: 'text/plain', bytes: Buffer.from('x'), actor: human.id });
+    const list = store.listProjectDocs('alpha');
+    assert.deepEqual(list.map((d) => [d.name, d.addedByName]), [['notes.txt', 'Loop'], ['brief 1.pdf', 'Operator']], 'newest first, adder named');
+    assert.deepEqual(list[1], a);
+    assert.equal(list.some((d) => 'bytes' in d), false, 'never the bytes');
+    assert.deepEqual(store.listProjectDocs('beta').map((d) => d.name), ['theirs.txt']);
+    assert.ok(store.getProjectDoc('alpha', a.id).bytes.equals(bytes));
+    assert.equal(store.getProjectDoc('beta', a.id), null, 'another project never reaches it');
+    assert.equal(store.getProjectDoc('alpha', 999), null);
+    assert.equal(b.size, 2);
+    // It is in the database file itself, so the backup copies it.
+    const db = new DatabaseSync(path, { readOnly: true });
+    try { assert.equal(db.prepare('SELECT count(*) AS n FROM project_docs').get().n, 3); } finally { db.close(); }
+  } finally { cleanup(); }
+});
+
+test('a context document that is empty, too large, nameless, on an unknown project or by an unknown actor is refused and nothing is kept', () => {
+  const { store, human, cleanup } = fixture();
+  try {
+    const add = (over) => () => store.addProjectDoc({ project: 'alpha', name: 'a.txt', type: 'text/plain', bytes: Buffer.from('a'), actor: human.id, ...over });
+    assert.throws(add({ bytes: Buffer.alloc(0) }), { code: 'empty-file', message: 'a.txt is empty; there is nothing to upload.' });
+    assert.throws(add({ bytes: Buffer.alloc(MAX_ATTACHMENT + 1) }), { code: 'too-large', message: 'a.txt is over 10 MB; upload a smaller file.' });
+    assert.throws(add({ bytes: 'text' }), { code: 'bad-file' });
+    for (const name of ['', '   ', '/', '..', 42]) assert.throws(add({ name }), { code: 'bad-name' });
+    assert.throws(add({ project: 'nope' }), { code: 'unknown-project' });
+    assert.throws(add({ actor: 999 }), { code: 'unknown-actor' });
+    assert.deepEqual(store.listProjectDocs('alpha'), []);
+    assert.equal(add({ bytes: Buffer.alloc(MAX_ATTACHMENT) })().size, MAX_ATTACHMENT, 'exactly 10 MB still goes in');
+  } finally { cleanup(); }
+});
+
+test('removing a context document takes it off its project only; an unknown one, or one on another project, is refused and nothing changes', () => {
+  const { store, human, cleanup } = fixture();
+  try {
+    store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE' });
+    const a = store.addProjectDoc({ project: 'alpha', name: 'a.txt', type: 'text/plain', bytes: Buffer.from('a'), actor: human.id });
+    const keep = store.addProjectDoc({ project: 'alpha', name: 'b.txt', type: 'text/plain', bytes: Buffer.from('b'), actor: human.id });
+    const theirs = store.addProjectDoc({ project: 'beta', name: 'c.txt', type: 'text/plain', bytes: Buffer.from('c'), actor: human.id });
+    assert.throws(() => store.removeProjectDoc({ project: 'alpha', id: theirs.id, actor: human.id }), { code: 'unknown-doc' });
+    assert.throws(() => store.removeProjectDoc({ project: 'alpha', id: 999, actor: human.id }), { code: 'unknown-doc' });
+    assert.throws(() => store.removeProjectDoc({ project: 'alpha', id: a.id, actor: 999 }), { code: 'unknown-actor' });
+    assert.equal(store.listProjectDocs('alpha').length, 2, 'no refusal removed anything');
+    const gone = store.removeProjectDoc({ project: 'alpha', id: a.id, actor: human.id });
+    assert.equal(gone.name, 'a.txt');
+    assert.deepEqual(store.listProjectDocs('alpha').map((d) => d.id), [keep.id]);
+    assert.equal(store.getProjectDoc('alpha', a.id), null);
+    assert.equal(store.listProjectDocs('beta').length, 1);
+  } finally { cleanup(); }
+});
+
+test('a project that still holds context documents is not deleted (has-docs); once they are removed, it is', () => {
+  const { store, human, cleanup } = fixture();
+  try {
+    store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE' });
+    const d = store.addProjectDoc({ project: 'beta', name: 'a.txt', type: 'text/plain', bytes: Buffer.from('a'), actor: human.id });
+    assert.throws(() => store.deleteProject('beta'), { code: 'has-docs', docs: 1, message: /BE has 1 context document; remove it on the Docs page/ });
+    assert.ok(store.getProject('beta'), 'still there');
+    store.removeProjectDoc({ project: 'beta', id: d.id, actor: human.id });
+    assert.deepEqual(store.deleteProject('beta'), { slug: 'beta', prefix: 'BE' });
+  } finally { cleanup(); }
+});
+
 test('markSeen and unseenCount: per person, never their own comments, a mark never moves back, a deleted ticket takes its marks (SP-163)', () => {
   const store = openStore(':memory:');
   const dane = store.createActor({ kind: 'human', name: 'Dane' });

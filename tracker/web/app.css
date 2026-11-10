@@ -21,7 +21,8 @@ header #bell[data-colour="yellow"] { color: #ffcc00; }
 header #bell[data-colour="red"] { color: #ff453a; }
 header button { background: transparent; color: #fff; border: 1px solid #555; border-radius: 6px; cursor: pointer; }
 header button:hover { border-color: #fff; }
-main { max-width: 60rem; margin: 0 auto; padding: 1.5rem 2rem 4rem; }
+/* One body width on every page (SP-184): 1440px to the column's outer edge, padding included, centred. */
+main { box-sizing: border-box; max-width: 1440px; margin: 0 auto; padding: 1.5rem 2rem 4rem; }
 a { color: #0066cc; }
 .quiet { color: var(--quiet); }
 .error { color: var(--red); font-weight: 600; }
@@ -71,7 +72,6 @@ form.sign-in button.link { background: none; border: none; padding: 0; margin-le
 /* The set-password page's email: shown, never changed there. */
 form.sign-in input[readonly] { background: var(--machine); color: var(--quiet); border: 1px solid var(--line); }
 button { font: inherit; padding: 0.4rem 1rem; }
-main.wide { max-width: none; }
 .toolbar { display: flex; gap: 2rem; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
 .toolbar .project-picker { font-weight: 600; }
 .toolbar .project-picker select { font: inherit; font-weight: normal; padding: 0.35rem; margin-left: 0.25rem; }
@@ -281,3 +281,7 @@ ol.setup-steps .why { display: block; font-size: 0.85rem; }
 section.setups ul { padding-left: 1.5rem; }
 form.request .field-note { display: block; font-size: 0.85rem; }
 .board-live { margin-top: 1rem; }
+/* The Docs page's Context Documents (SP-176): Download and Remove side by side. */
+table.doc-list td.actions a { margin-right: 0.6rem; }
+table.doc-list td button.remove-doc { font: inherit; font-size: 0.8rem; padding: 0 0.4rem; cursor: pointer; }
+section.context-docs { margin-bottom: 1.5rem; }

@@ -38,7 +38,11 @@
  * always sent as a file to save, never a page to open, so an uploaded HTML
  * file cannot run as the tracker's own page. Renaming one (`PATCH
  * /tickets/<id>/attachments/<n>`, `{ name }`) and removing one (`DELETE`)
- * are ordinary JSON calls.
+ * are ordinary JSON calls. A project's context documents
+ * (`/projects/<slug>/docs`) are uploaded and downloaded the same
+ * way, listed by `GET /projects/<slug>/docs` and removed one at a time by
+ * `DELETE /projects/<slug>/docs/<n>`; only someone who can see the project
+ * reaches any of them.
  * A refused write writes nothing. A token never appears in an answer or a
  * log line: the log names the actor id, never the header.
  *
@@ -79,6 +83,7 @@ import { findConfigFile, loadProjectConfig } from '../lib/projectConfig.mjs';
 import { saveAnswers, setupFields, setupList, setupOf, SetupError } from './setup.mjs';
 import busRelayPlan from '../lib/busRelayPlan.js';
 import { pipelineOf } from './pipeline.mjs';
+import { listDocs, readDoc } from './docsFolder.mjs';
 import loopStatuses from '../lib/loopStatuses.js';
 
 /**
@@ -197,6 +202,8 @@ const PERSON_STATUSES = Object.freeze(['requested', 'rework', 'queued', 'live']
  * `/people` still gets the data.
  */
 const WEB_DIR = new URL('./web/', import.meta.url);
+/** This repository's own documentation folder, which the Docs page lists. */
+const DOCS_DIR = fileURLToPath(new URL('../docs/', import.meta.url));
 const WEB_FILES = Object.freeze({
   'index.html': 'text/html; charset=utf-8',
   'app.css': 'text/css; charset=utf-8',
@@ -234,6 +241,9 @@ function pageFile(pathname, accept = '') {
   if (/^\/(?:projects(?:\/[^/]+)?|search|setup\/(?!fields$)[^/]+)$/.test(pathname)) return /\btext\/html\b/.test(accept) ? 'index.html' : null;
   if (pathname === '/' || /^\/(?:tasks|board|list|new|settings|set-password|reporting|users|docs)$/.test(pathname) || /^\/(?:t|board|list)\/[^/]+$/.test(pathname)) return 'index.html';
   if (/^\/projects\/[^/]+\/edit$/.test(pathname)) return 'index.html';
+  // A page under the Docs page, such as one of the substrate's own
+  // documentation files: the page itself draws what the rest names.
+  if (/^\/docs\/[^/]+\/.+$/.test(pathname)) return 'index.html';
   if (/^\/setup\/[^/]+\/answers$/.test(pathname)) return 'index.html';
   const m = /^\/web\/([^/]+)$/.exec(pathname);
   return m && Object.hasOwn(WEB_FILES, m[1]) ? m[1] : null;
@@ -289,9 +299,9 @@ function sessionToken(req) {
   return null;
 }
 
-/** Whether the request is an attachment's upload: the one write whose body is the file itself. */
+/** Whether the request is a file's upload (a ticket's attachment or a project's context document): the writes whose body is the file itself. */
 function isUpload(req, pathname) {
-  return req.method === 'POST' && /^\/tickets\/[^/]+\/attachments$/.test(pathname)
+  return req.method === 'POST' && /^\/(?:tickets\/[^/]+\/attachments|projects\/[^/]+\/docs)$/.test(pathname)
     && /^application\/octet-stream\s*(?:;|$)/i.test(req.headers['content-type'] ?? '');
 }
 
@@ -497,6 +507,9 @@ function flag(value) {
  * `{ homeConfig, homeRoot, folder, trackerDb }`, the tracker home's checked
  * settings file, its main folder, the folder this server runs from and its
  * database. Null means those calls answer 503 and nothing is read or written.
+ * `docsDir` is the folder the Docs page's documentation section
+ * reads (tracker/docsFolder.mjs): this repository's own `docs/`, unless a
+ * test names another. Only `.md` files inside it are ever read.
  */
 /**
  * The word the ticket page's Close button posts: the first of the relay's
@@ -507,7 +520,7 @@ export const CLOSE_PHRASE = busRelayPlan.CLOSE_PHRASES[0];
 /** The word the Go button posts: the one an intake card asks for (GO_PHRASE in lib/busRelayPlan.js). */
 export const GO_PHRASE = busRelayPlan.GO_PHRASE;
 
-export function createHandler(store, { log = () => {}, notifier = null, defaultProject = null, mergePhrase = null, closePhrase = null, goPhrase = null, accountMail = null, setup = null, now = Date.now, publicUrl = null, pipeline = null } = {}) {
+export function createHandler(store, { log = () => {}, notifier = null, defaultProject = null, mergePhrase = null, closePhrase = null, goPhrase = null, accountMail = null, setup = null, now = Date.now, publicUrl = null, pipeline = null, docsDir = DOCS_DIR } = {}) {
   const failures = failureCounter(now);
   const resets = resetLimiter(now);
   // The public address's host as a Host header names it (`name:8443`; no port for 443).
@@ -852,6 +865,9 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
         if (err instanceof StoreError && err.code === 'has-tickets') {
           throw new HttpError(409, 'has-tickets', err.message, { project: project.slug, tickets: err.tickets });
         }
+        if (err instanceof StoreError && err.code === 'has-docs') {
+          throw new HttpError(409, 'has-docs', err.message, { project: project.slug, docs: err.docs });
+        }
         throw err;
       }
       log(`deleted project ${gone.slug} (prefix ${gone.prefix}) actor=${me.id}`);
@@ -871,6 +887,70 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     if (parts.length === 3 && parts[0] === 'projects' && parts[2] === 'attachments' && method === 'GET') {
       const project = requireProject(parts[1], me);
       return [200, { project: project.slug, attachments: store.listProjectAttachments(project.slug) }];
+    }
+
+    // A project's context documents: files kept on the project,
+    // not on one ticket. The list (no bytes), one upload (the raw file as
+    // the body, as a ticket's attachment), one download (always saved) and
+    // one removal, read back gone.
+    if (parts.length === 3 && parts[0] === 'projects' && parts[2] === 'docs') {
+      const project = requireProject(parts[1], me);
+      if (method === 'GET') return [200, { project: project.slug, docs: store.listProjectDocs(project.slug) }];
+      if (method === 'POST') {
+        if (!isUpload(req, url.pathname)) {
+          throw new HttpError(415, 'file-only', 'a document is sent as the file itself (content-type: application/octet-stream); nothing was saved.');
+        }
+        let name;
+        try {
+          name = decodeURIComponent(String(req.headers['x-file-name'] ?? ''));
+        } catch {
+          throw new HttpError(400, 'bad-name', "the file's name (x-file-name) is not validly encoded; nothing was saved.");
+        }
+        if (!name.trim()) throw new HttpError(400, 'bad-name', "say the file's name in x-file-name; nothing was saved.");
+        const bytes = await readFile(req);
+        const made = store.addProjectDoc({ project: project.slug, name, type: req.headers['x-file-type'], bytes, actor: me.id });
+        log(`added context document ${made.name} (${made.size} bytes) to ${project.slug} actor=${me.id}`);
+        return [201, made];
+      }
+    }
+    if (parts.length === 4 && parts[0] === 'projects' && parts[2] === 'docs' && (method === 'GET' || method === 'DELETE')) {
+      const project = requireProject(parts[1], me);
+      const id = /^[0-9]+$/.test(parts[3]) ? Number(parts[3]) : null;
+      const unknown = () => new HttpError(404, 'unknown-doc', `${project.name} has no context document ${parts[3]}.`);
+      if (method === 'GET') {
+        const file = id == null ? null : store.getProjectDoc(project.slug, id);
+        if (!file) throw unknown();
+        return [200, null, null, {
+          'content-type': file.type,
+          'content-length': file.bytes.length,
+          'content-disposition': downloadDisposition(file.name),
+          'x-content-type-options': 'nosniff',
+          'content-security-policy': "default-src 'none'; sandbox",
+          'cache-control': 'private, no-cache',
+          body: file.bytes,
+        }];
+      }
+      if (id == null) throw unknown();
+      let gone;
+      try {
+        gone = store.removeProjectDoc({ project: project.slug, id, actor: me.id });
+      } catch (err) {
+        if (err instanceof StoreError && err.code === 'unknown-doc') throw unknown();
+        throw err;
+      }
+      log(`removed context document ${gone.id} (${gone.name}) from ${project.slug} actor=${me.id}`);
+      return [200, { removed: gone.id, name: gone.name, project: project.slug }];
+    }
+
+    // The Docs page's documentation section: every
+    // Markdown file in this repository's docs/ folder by title, and one by
+    // its path. Read only; a path outside the folder is "no such file" and
+    // reads nothing (tracker/docsFolder.mjs).
+    if (parts[0] === 'documentation' && method === 'GET') {
+      if (parts.length === 1) return [200, { files: listDocs(docsDir) }];
+      const doc = readDoc(docsDir, parts.slice(1).join('/'));
+      if (!doc) throw new HttpError(404, 'unknown-doc', 'no documentation file at that path.');
+      return [200, doc];
     }
 
     // Dane's page: the Add Task box asks, before it files, whether the words
@@ -1226,8 +1306,8 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
 }
 
 /** Start a server on `port` (0 = any free port) against an open store. Resolves to the http.Server. */
-export function startServer({ store, port, host = '127.0.0.1', log, notifier, defaultProject, mergePhrase, closePhrase, goPhrase, accountMail, setup, now, publicUrl, pipeline }) {
-  const server = createServer(createHandler(store, { log, notifier, defaultProject, mergePhrase, closePhrase, goPhrase, accountMail, setup, now, publicUrl, pipeline }));
+export function startServer({ store, port, host = '127.0.0.1', log, notifier, defaultProject, mergePhrase, closePhrase, goPhrase, accountMail, setup, now, publicUrl, pipeline, docsDir }) {
+  const server = createServer(createHandler(store, { log, notifier, defaultProject, mergePhrase, closePhrase, goPhrase, accountMail, setup, now, publicUrl, pipeline, docsDir }));
   return new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(port, host, () => {

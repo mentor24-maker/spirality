@@ -119,6 +119,50 @@ export function renderMarkdown(text) {
   return out.join('\n');
 }
 
+/** A Markdown quote line's opening `>` (and the one space after it). */
+const QUOTE = /^\s*>\s?/;
+
+/**
+ * A documentation file's text with its hard-wrapped lines joined back up
+ * (SP-175), for renderMarkdown, which keeps every line break a ticket's
+ * text has. A line is joined to the one before when both are text: not
+ * blank, not a heading, rule, fence or table row, and the line itself not
+ * the start of a list item (an indented one following a list item is that
+ * item's next line). A quote's lines (`> ...`) join each other, the
+ * later ones' `>` taken off, but never the text before or after the quote.
+ * Fenced code is left exactly as written.
+ */
+export function unwrapDoc(text) {
+  const out = [];
+  let fence = null;
+  const stands = (line) => !line.trim() || HEADING.test(line) || RULE.test(line) || FENCE.test(line) || /^\s*\|/.test(line) || QUOTE.test(line);
+  for (const line of String(text ?? '').replace(/\r\n?/g, '\n').split('\n')) {
+    if (fence) {
+      out.push(line);
+      if (closesFence(line, fence)) fence = null;
+      continue;
+    }
+    if (FENCE.test(line)) {
+      fence = FENCE.exec(line)[1];
+      out.push(line);
+      continue;
+    }
+    const before = out.length ? out[out.length - 1] : '';
+    if (QUOTE.test(line)) {
+      // A quote's next line joins the quote, its ">" taken off; a quote never joins the text around it.
+      const rest = line.replace(QUOTE, '').trim();
+      const joins = out.length && QUOTE.test(before) && before.replace(QUOTE, '').trim() && rest && !BULLET.test(rest) && !NUMBERED.test(rest);
+      if (joins) out[out.length - 1] = `${before.replace(/\s+$/, '')} ${rest}`;
+      else out.push(line);
+      continue;
+    }
+    const startsItem = BULLET.test(line) || NUMBERED.test(line);
+    if (out.length && !stands(before) && !stands(line) && !startsItem) out[out.length - 1] = `${before.replace(/\s+$/, '')} ${line.trim()}`;
+    else out.push(line);
+  }
+  return out.join('\n');
+}
+
 /** A line with any `**…**` wrapping taken off: the tracker stores a card's bold runs that way. */
 const unbold = (line) => line.trim().replace(/^\*\*([\s\S]*)\*\*$/, '$1').trim();
 const BANNER_RULE = /^#{20,}$/;
@@ -1354,4 +1398,33 @@ export function setupBody(fields, values) {
     const typed = String(values[f.key] ?? '').trim();
     return [f.key, typed === String(f.default ?? '').trim() ? null : typed];
   }));
+}
+
+/**
+ * The Docs page's Context Documents section (SP-176): the files kept on the
+ * project itself, newest first, each with its type, size, adder and time, a
+ * Download link (always saved, never opened in the page) and a Remove
+ * button, and one Upload Document button over a hidden file picker. `size`
+ * and `timeOf` put a byte count and a time in words. Every name is escaped.
+ */
+export function renderContextDocs({ project, docs = [] }, { size, timeOf }) {
+  const base = `/projects/${encodeURIComponent(project.slug)}/docs`;
+  const row = (d) => `<tr data-doc="${escapeHtml(d.id)}">
+      <td class="name">${escapeHtml(d.name)}</td>
+      <td class="type">${escapeHtml(d.type)}</td>
+      <td class="size">${escapeHtml(size(d.size))}</td>
+      <td class="by">${d.addedByName ? escapeHtml(d.addedByName) : '<span class="quiet">unknown</span>'}</td>
+      <td class="when">${escapeHtml(timeOf(d.createdAt))}</td>
+      <td class="actions"><a href="${base}/${encodeURIComponent(d.id)}" download="${escapeHtml(d.name)}">Download</a>
+        <button type="button" class="remove-doc" data-remove-doc="${escapeHtml(d.id)}" data-name="${escapeHtml(d.name)}" aria-label="Remove ${escapeHtml(d.name)}">Remove</button></td></tr>`;
+  return `<section class="context-docs">
+    <h2>Context Documents</h2>
+    <p class="quiet">Briefs, notes and reference files that belong to ${escapeHtml(project.name)} as a whole, not to one task. One file at a time, up to 10 MB.</p>
+    <div class="row"><button type="button" class="upload-doc">Upload Document</button><input type="file" class="doc-file" hidden></div>
+    <p class="note quiet doc-note" role="status"></p>
+    ${docs.length
+    ? `<table class="projects doc-list"><thead><tr><th>File</th><th>Type</th><th>Size</th><th>Added By</th><th>Added On</th><th></th></tr></thead>
+      <tbody>${docs.map(row).join('')}</tbody></table>`
+    : `<p class="quiet">${escapeHtml(project.name)} has no context documents yet.</p>`}
+  </section>`;
 }
