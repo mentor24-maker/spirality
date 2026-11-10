@@ -153,12 +153,25 @@ account_links  token hash, purpose (setup|invite|reset), email, actor,
   size, the file's bytes themselves, who added it and when, in the
   `attachments` table. Keeping the bytes inside the database means the
   nightly backup already holds them, with no second folder to copy. Each is
-  1 byte to 10 MB. Like a comment it is never edited; it goes only with its
-  ticket, when an unstarted ticket is deleted. A database made before this
+  1 byte to 10 MB. Its bytes are never edited. Its name can be changed and
+  it can be removed on its own, from the Docs page (SP-177); each writes an
+  `attachment` event in the ticket's history naming who did it (from the old
+  name to the new one, or to nothing for a removal), so a removed file is
+  still on record by name. A removal cannot be undone except from the
+  nightly backup. It also goes with its ticket, when an unstarted ticket is
+  deleted. A database made before this
   gains the table, empty, on start-up. The loops read them through the door
   (SP-142): `npm run clickup -- get` prints one `attachments:` line per file,
   and `npm run clickup -- attachments --task <id> --to <folder>` saves each
   one, checked against its size.
+- **A context document** is a file kept on a project, not on one ticket
+  (SP-176): a brief, notes, a reference file that belongs to the project as
+  a whole. The same name, type, size, bytes, adder and time, the same 10 MB
+  limit and refusals as an attachment, in the `project_docs` table, so the
+  nightly backup (a copy of the whole database) holds them with no change to
+  `tracker/backup.mjs`. It is never edited; it is removed one at a time, and
+  a project that still holds any is not deleted (409 `has-docs`). The build
+  loop does not read them automatically.
 - **Roles and permissions** (SP-143): every person has one of five roles,
   **admin**, **editor**, **contributor**, **reviewer** and **viewer**, each
   with a plain-words description, and each role a set of permissions. The
@@ -251,8 +264,14 @@ answers are JSON (structured text programs read).
 | `GET /documentation` | for the Docs page: every `.md` file in this repository's `docs/` folder and its subfolders, `{ files: [{ path, title }] }`, the folder's own files first. `GET /documentation/<path>` answers one, `{ path, title, text }`; a path outside `docs/` (`..`, absolute, a link out) or not a `.md` file is 404 and reads nothing |
 | `GET /projects/:slug/attachments` | for the Docs page: every file on the project's tickets, newest first, `{ project, attachments: [{ id, ticket, ticketName, name, type, size, addedBy, addedByName, createdAt }] }`, never the bytes. A project the caller is not on is 404, the same as one that does not exist |
 | `GET /commands` | for the Docs page's Commands section: `{ commands: [{ name, source, description, steps }] }`, Your commands (`commands/`) then Loop skills (`.claude/skills/`), each by name; `steps` is the `SKILL.md` text below its front matter. No other file is read |
+| `GET /projects/:slug/docs` | the project's context documents, newest first, `{ project, docs: [{ id, project, name, type, size, addedBy, addedByName, createdAt }] }`, never the bytes |
+| `POST /projects/:slug/docs` | upload one context document, sent exactly as a ticket's attachment (the raw file, `x-file-name`, `x-file-type`), with the same 10 MB limit and refusals. Answers 201 with the document as listed, read back byte for byte |
+| `GET /projects/:slug/docs/:n` | one context document, byte for byte, always as a download (the same headers as an attachment's) |
+| `DELETE /projects/:slug/docs/:n` | remove one context document, read back gone: `{ removed, name, project }`. One the project does not have is 404. Every `/docs` call to a project the caller is not on is 404, the same as one that does not exist |
 | `POST /tickets/:id/attachments` | attach a file: the raw file as the body (`content-type: application/octet-stream`, which a form on another site cannot send, so the cookie may make this one write that is not JSON), its name percent-encoded in `x-file-name`, its type in `x-file-type`. Answers 201 with `{ id, ticket, name, type, size, addedBy, createdAt }`, read back byte for byte. Over 10 MB is 413 `too-large` ("That file is over 10 MB. Attach a smaller one; nothing was saved."); an empty file or no name is 400; nothing is stored. The JSON calls' 1 MB limit is unchanged |
 | `GET /tickets/:id/attachments` | a ticket's files, oldest first, without their bytes (the ticket page reads the same list in `thread`) |
+| `PATCH /tickets/:id/attachments/:n` | rename one file: `{ name }`, its name only, with the upload's name rules (an empty name, `.` or `..` is 400 and nothing changes). Answers the file as listed with `changed` (false when the name was already that). Writes an `attachment` event, read back |
+| `DELETE /tickets/:id/attachments/:n` | remove one file, bytes and all: answers `{ removed, ticket, name }`, checked gone, with an `attachment` event (from its name to nothing). A file not on that ticket is 404 |
 | `GET /tickets/:id/attachments/:n` | one file, byte for byte, always as a download (`Content-Disposition: attachment`, `X-Content-Type-Options: nosniff`, a sandboxing `Content-Security-Policy`), so an uploaded HTML file can never run as the tracker's page |
 | `POST /tickets/:id/clone` | for Dane's page: copy a ticket into another project (`{ project }`), as a new ticket in `Requested` there with one comment naming where it came from; the original does not change |
 
@@ -316,15 +335,29 @@ back before the page says it worked, and a refusal (the last admin stepping
 down) shows the server's reason. Under the invites, **Roles and Permissions**
 shows which role has which permission. The roles are recorded, not enforced:
 every person signed in may still invite (Dane's decision).
-**Docs** in the header, between Users and Settings, opens `/docs`: a
+**Docs** in the header, between Users and Settings, opens `/docs`. Under Spirality's own documentation (below),
+**Context documents** (SP-176): the selected project's own files, newest
+first, with name, type, size, who added it and when, a **Download** link
+(always saved, never opened in the page) and a **Remove** button that asks
+first, naming the file, and reads the list back to check it is gone. An
+**Upload Document** button sends one file at a time (over 10 MB is refused
+before it is sent); a failed upload or removal says so in a line. Then a
 **Task Files** table of every file on the selected project's tasks (the
 project picked on the Projects page, else the first), newest first, with
 the file's name (which downloads it), the task's id and exact name (which
 opens it), its type, size, who added it and when. A project with no files
 says so in a line. It reads `GET /projects/:slug/attachments`, which answers
 the list without the bytes, to members of the project only; downloads stay
-with `GET /tickets/:id/attachments/:n`. Look-only for now.
-Above the task files, **Spirality Documentation** lists every Markdown file
+with `GET /tickets/:id/attachments/:n`. Above the table, **Add File** puts a
+file on any of the project's tasks (pick the task, pick the file, up to
+10 MB) through the same upload call the New Task form uses. Each row has
+**Rename**, which asks for the new name and changes the name only, and
+**Remove**, which first asks "Remove <file> from <task id> <task name>?"
+and, confirmed, deletes it (SP-177). Each change is read back from the
+table's own list before the page says it worked; a refusal is said in a
+line, with the tracker's own words. Someone not on the task's project gets
+the same 404 as for a task that does not exist, and nothing changes.
+At the top, above both, **Spirality Documentation** lists every Markdown file
 in this repository's `docs/` folder and its subfolders by title (its first
 `# ` heading, else its file name) with its path; one opens at
 `/docs/spirality/<path>`, drawn the way a ticket's description is, with a

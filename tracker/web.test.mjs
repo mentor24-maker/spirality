@@ -7,8 +7,8 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { seedDemo, tickingClock } from './demoData.mjs';
-import { reportsOf, REPORT_RANGES, searchTickets } from './pageData.mjs';
-import { escapeHtml, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, commandHref } from './web/render.mjs';
+import { reportsOf, REPORT_RANGES, searchTickets, PRIORITIES } from './pageData.mjs';
+import { escapeHtml, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, commandHref, renderContextDocs, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings } from './web/render.mjs';
 import { startServer, setupSettingsOf } from './server.mjs';
 import { saveAnswers, setupFields, setupOf } from './setup.mjs';
 import { DANE_FIELDS as SETUP_FIELDS, STEPS as SETUP_STEPS } from '../scripts/onboard/onboard.mjs';
@@ -2302,7 +2302,8 @@ test('Docs is in the header between Users and Settings, served at /docs to a bro
   assert.match(app, /\} else if \(docsPage\) \{\s*await drawDocs\(\);/);
   const draw = app.slice(app.indexOf('async function drawDocs'), app.indexOf('/** Underline the header link'));
   assert.match(draw, /projects\.find\(\(p\) => p\.slug === savedProject\(\)\) \?\? projects\[0\]/, 'the project picked in the header, else the first');
-  assert.match(draw, /await api\('GET', `\/projects\/\$\{encodeURIComponent\(project\.slug\)\}\/attachments`\)/);
+  assert.match(draw, /const listPath = `\/projects\/\$\{encodeURIComponent\(project\.slug\)\}\/attachments`;/);
+  assert.match(draw, /api\('GET', listPath\)/);
   assert.match(draw, /`\/tickets\/\$\{encodeURIComponent\(a\.ticket\)\}\/attachments\/\$\{encodeURIComponent\(a\.id\)\}`/, 'downloads use the task\'s own download address');
   assert.match(draw, /download="\$\{escapeHtml\(a\.name\)\}"/);
   assert.match(draw, /<a href="\/t\/\$\{encodeURIComponent\(a\.ticket\)\}">/);
@@ -2310,6 +2311,87 @@ test('Docs is in the header between Users and Settings, served at /docs to a bro
   for (const heading of ['File', 'Task', 'Type', 'Size', 'Added By', 'Added On']) assert.match(draw, new RegExp(`<th>${heading}</th>`), heading);
   assert.match(draw, /No task in .* has a file yet\./, 'an empty project says so in a line');
   assert.doesNotMatch(draw, /\$\{a\.(name|ticketName|addedByName|type)\}/, 'every name is escaped');
+});
+
+test('the Docs table adds, renames and removes task files, each read back, a removal confirmed by file and task (SP-177)', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const draw = app.slice(app.indexOf('async function drawDocs'), app.indexOf('/** Underline the header link'));
+  // Add File: pick one of the project's tasks and a file; the same upload the New Task form uses.
+  assert.match(draw, /\{ tickets \}\] = await Promise\.all\(\[[\s\S]*?api\('GET', `\/projects\/\$\{encodeURIComponent\(project\.slug\)\}\/tickets`\),\s*\]\);/);
+  assert.match(draw, /<button type="submit">Add File<\/button>/);
+  assert.match(draw, /made = await uploadFile\(ticket, file\)/);
+  assert.match(draw, /file\.size > MAX_FILE/, 'too large is said before sending');
+  // Rename: the file's name only, an empty one refused on the page before any call.
+  assert.match(draw, />Rename<\/button>/);
+  assert.match(draw, /if \(!typed\.trim\(\)\) return refused\(null, `Not renamed: a file needs a name/);
+  assert.match(draw, /api\('PATCH', `\/tickets\/\$\{encodeURIComponent\(ticket\)\}\/attachments\/\$\{encodeURIComponent\(file\)\}`, \{ name: typed \}\)/);
+  // Remove: a confirmation naming the file and its task; cancelled, no call.
+  assert.match(draw, />Remove<\/button>/);
+  assert.match(draw, /if \(!confirm\(`Remove \$\{name\} from \$\{ticket\} \$\{taskName\}\?[^`]*`\)\) return;\s*button\.disabled = true;/);
+  assert.match(draw, /api\('DELETE', `\/tickets\/\$\{encodeURIComponent\(ticket\)\}\/attachments\/\$\{encodeURIComponent\(file\)\}`\)/);
+  // Every change is read back from the table's own list before the page says it worked, and a failure is said.
+  assert.equal((draw.match(/await listedNow\(\)/g) ?? []).length, 3);
+  for (const word of ['Not added', 'Not renamed', 'Not removed']) assert.match(draw, new RegExp(`${word}: \\$\\{err\\.message\\}`), word);
+  assert.match(draw, /but it is not in the table when read back/);
+  assert.match(draw, /but it reads back as/);
+  assert.match(draw, /but it is still listed when read back/);
+  assert.doesNotMatch(draw, /\$\{(a|t)\.(name|ticketName|id)\}/, 'every name is escaped');
+  // Task Files and Context Documents each have their own line; a change's outcome shows only in the section it came from.
+  assert.match(draw, /async function drawDocs\(done = '', problem = '', section = 'files'\)/);
+  assert.match(draw, /const fileLine = section === 'files' \? \{ done, problem \} : \{ done: '', problem: '' \};/);
+  assert.match(draw, /<p class="note file-note\$\{fileLine\.problem \? ' error' : ' quiet'\}" role="status">\$\{escapeHtml\(fileLine\.problem \|\| fileLine\.done\)\}<\/p>/);
+  assert.match(draw, /const note = main\.querySelector\('\.file-note'\);/, 'never the Context Documents line above it');
+  assert.match(draw, /drawAgain\(\(\) => drawDocs\(failed \? '' : text, failed \? text : '', 'files'\)\)/);
+  assert.match(draw, /wireContextDocs\(project, docsPath, section === 'docs' \? done : '', section === 'docs' \? problem : ''\);/);
+  assert.match(draw, /const again = \(text, failed\) => drawDocs\(failed \? '' : text, failed \? text : '', 'docs'\)/);
+});
+
+test('the Docs page\'s Context Documents list the project\'s own files, each a download and a Remove button, every name escaped; an empty one says so (SP-176)', () => {
+  const words = { size: (n) => `${n} B`, timeOf: (iso) => `at ${iso}` };
+  const project = { slug: 'al pha', name: 'Alpha <One>' };
+  const html = renderContextDocs({ project, docs: [
+    { id: 7, project: 'al pha', name: 'brief "<b>".pdf', type: 'application/pdf', size: 1234, addedByName: 'Dane <D>', createdAt: '2026-11-10T12:00:00Z' },
+    { id: 8, project: 'al pha', name: 'notes.txt', type: 'text/plain', size: 2, addedByName: null, createdAt: '2026-11-09T12:00:00Z' },
+  ] }, words);
+  assert.match(html, /<h2>Context Documents<\/h2>/);
+  assert.match(html, /<button type="button" class="upload-doc">Upload Document<\/button><input type="file" class="doc-file" hidden>/, 'one file at a time');
+  for (const heading of ['File', 'Type', 'Size', 'Added By', 'Added On']) assert.match(html, new RegExp(`<th>${heading}</th>`), heading);
+  assert.match(html, /<a href="\/projects\/al%20pha\/docs\/7" download="brief &quot;&lt;b&gt;&quot;\.pdf">Download<\/a>/, 'always saved, through the project\'s own address');
+  assert.match(html, /data-remove-doc="7" data-name="brief &quot;&lt;b&gt;&quot;\.pdf" aria-label="Remove brief &quot;&lt;b&gt;&quot;\.pdf">Remove<\/button>/);
+  assert.match(html, /<td class="size">1234 B<\/td>/);
+  assert.match(html, /<td class="by">Dane &lt;D&gt;<\/td>/);
+  assert.match(html, /<td class="by"><span class="quiet">unknown<\/span><\/td>/);
+  assert.match(html, /<td class="when">at 2026-11-10T12:00:00Z<\/td>/);
+  assert.ok(html.indexOf('data-doc="7"') < html.indexOf('data-doc="8"'), 'in the order the server lists them (newest first)');
+  assert.doesNotMatch(html, /<b>|<One>|<D>/, 'nothing unescaped');
+  const empty = renderContextDocs({ project, docs: [] }, words);
+  assert.match(empty, /Alpha &lt;One&gt; has no context documents yet\./);
+  assert.doesNotMatch(empty, /<table/);
+  assert.match(empty, /Upload Document/, 'an empty project can still upload');
+});
+
+test('the Docs page uploads one context document as the file itself, asks before removing one, reads the list back, and says when either did not happen (SP-176)', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const draw = app.slice(app.indexOf('async function drawDocs'), app.indexOf('/** Underline the header link'));
+  assert.match(draw, /const docsPath = `\/projects\/\$\{encodeURIComponent\(project\.slug\)\}\/docs`;/);
+  assert.match(draw, /api\('GET', docsPath\)/);
+  assert.ok(draw.indexOf('${documentation}\n    ${renderContextDocs({ project, docs }') > 0 && draw.indexOf('renderContextDocs({ project, docs }') < draw.lastIndexOf('<h2>Task Files</h2>'), 'Context Documents come after Spirality Documentation and before Task Files');
+  const wire = draw.slice(draw.indexOf('function wireContextDocs'));
+  assert.match(wire, /picker\.files\?\.\[0\]/, 'one file at a time');
+  assert.match(wire, /file\.size > MAX_FILE/, 'an 11 MB file is refused before it is sent');
+  assert.match(wire, /is over 10 MB\. Upload a smaller file; nothing was saved\./);
+  assert.match(wire, /await uploadFile\(null, file, docsPath\);/, 'the same raw-file upload a ticket\'s attachment uses');
+  assert.match(wire, /Not uploaded: \$\{err\.message\}/);
+  assert.match(wire, /if \(!confirm\(`Remove \$\{name\} from \$\{project\.name\}\? It cannot be brought back\.`\)\) return;/, 'asks first, naming the file; cancelled, nothing is sent');
+  assert.ok(wire.indexOf('confirm(') < wire.indexOf("api('DELETE'"), 'asks before it removes');
+  assert.match(wire, /await api\('DELETE', `\$\{docsPath\}\/\$\{encodeURIComponent\(id\)\}`\);/);
+  assert.match(wire, /Not removed: \$\{err\.message\}/);
+  assert.match(wire, /const back = await api\('GET', docsPath\)\.catch\(\(\) => null\);/, 'the removal is read back');
+  assert.match(wire, /but \$\{back \? 'it is still listed when read back' : 'the list could not be read back'\}/);
+  assert.match(wire, /note\.textContent = text;/, 'the note is text, never HTML');
+  const up = /async function uploadFile[\s\S]*?\n\}/.exec(app)[0];
+  assert.match(up, /to = `\/tickets\/\$\{encodeURIComponent\(ticketId\)\}\/attachments`/, 'a ticket\'s upload still goes to its own address');
+  assert.match(up, /res = await fetch\(to, \{/);
 });
 
 test('the Docs page lists Spirality\'s documentation by title above Task Files, and a file opens at /docs/spirality/<path> drawn as Markdown (SP-175)', async () => {
@@ -3190,4 +3272,104 @@ test.describe('Files Made: the files a ticket made, from its newest merge note',
     assert.match(app, /<\/section>\s*\$\{renderFilesMade\(t\)\}\s*<details class="details">/);
     assert.match(readFileSync(WEB('app.css'), 'utf8'), /\.files-made \{[^}]*background:[^}]*border:/);
   });
+});
+
+// SP-174: the Tasks tables' headings sort each stage's rows.
+{
+  const T = (id, name, priority, tags, assignee, updatedAt) => ({ id, name, priority, tags, assignee, updatedAt });
+  const tickets = [
+    T('A-1', 'banana', 'low', ['web'], 'Dane', '2026-11-03T10:00:00.000Z'),
+    T('A-2', 'Apple', null, [], null, '2026-11-01T10:00:00.000Z'),
+    T('A-3', 'cherry', 'urgent', ['api', 'web'], 'hand-run', '2026-11-09T10:00:00.000Z'),
+    T('A-4', 'apple', 'high', ['Docs'], 'Dane', '2026-11-02T10:00:00.000Z'),
+    T('A-5', 'date', 'normal', [], null, '2026-11-02T09:00:00.000Z'),
+  ];
+  const ids = (list) => list.map((t) => t.id);
+  const sorted = (column, direction = 'ascending') => ids(sortTickets(tickets, { column, direction }));
+
+  test('the page\'s priority order is the one lib/loopStatuses.js PRIORITY_RANK gives', () => {
+    assert.deepEqual([...PRIORITY_ORDER], [...PRIORITIES]);
+  });
+
+  test('a stage sorts by each column, ties keeping the order the page had, and descending is the reverse', () => {
+    assert.deepEqual(sorted('name'), ['A-2', 'A-4', 'A-1', 'A-3', 'A-5'], 'A to Z, case ignored, ties in page order');
+    assert.deepEqual(sorted('priority'), ['A-3', 'A-4', 'A-5', 'A-1', 'A-2'], 'Urgent, High, Normal, Low, none');
+    assert.deepEqual(sorted('priority', 'descending'), ['A-2', 'A-1', 'A-5', 'A-4', 'A-3']);
+    assert.deepEqual(sorted('tags'), ['A-3', 'A-4', 'A-1', 'A-2', 'A-5'], 'by first tag, case ignored, no tags last');
+    assert.deepEqual(sorted('assignee'), ['A-1', 'A-4', 'A-3', 'A-2', 'A-5'], 'A to Z, nobody last');
+    assert.deepEqual(sorted('when'), ['A-2', 'A-5', 'A-4', 'A-1', 'A-3'], 'oldest first, by the real time');
+    assert.deepEqual(sorted('when', 'descending'), ['A-3', 'A-1', 'A-4', 'A-5', 'A-2'], 'newest first');
+  });
+
+  test('no sort, or a column it does not know, keeps the page\'s order, and the tickets are never changed', () => {
+    const before = ids(tickets);
+    assert.deepEqual(ids(sortTickets(tickets, null)), before);
+    assert.deepEqual(ids(sortTickets(tickets, { column: 'actions', direction: 'ascending' })), before);
+    sortTickets(tickets, { column: 'name', direction: 'descending' });
+    assert.deepEqual(ids(tickets), before);
+  });
+
+  test('a first click sorts ascending, a second flips it, another heading starts ascending again', () => {
+    const one = nextSort(null, 'priority');
+    assert.deepEqual(one, { column: 'priority', direction: 'ascending' });
+    const two = nextSort(one, 'priority');
+    assert.deepEqual(two, { column: 'priority', direction: 'descending' });
+    assert.deepEqual(nextSort(two, 'priority'), { column: 'priority', direction: 'ascending' });
+    assert.deepEqual(nextSort(two, 'when'), { column: 'when', direction: 'ascending' });
+  });
+
+  test('the headings are buttons; only the sorted one has an arrow and aria-sort; Actions is plain', () => {
+    const none = renderSortHeadings(null);
+    assert.equal((none.match(/<button type="button" class="sort"/g) || []).length, SORT_COLUMNS.length);
+    assert.deepEqual(SORT_COLUMNS.map((c) => c.label), ['Ticket', 'Priority', 'Tags', 'Assigned To', 'Last Change']);
+    assert.doesNotMatch(none, /aria-sort|▲|▼/);
+    assert.match(none, /<th class="actions">Actions<\/th>/);
+    const up = renderSortHeadings({ column: 'priority', direction: 'ascending' });
+    assert.match(up, /<th class="priority" aria-sort="ascending"><button[^>]*data-sort="priority">Priority <span class="arrow" aria-hidden="true">▲<\/span><\/button><\/th>/);
+    assert.equal((up.match(/aria-sort/g) || []).length, 1);
+    assert.equal((up.match(/[▲▼]/g) || []).length, 1);
+    const down = renderSortHeadings({ column: 'when', direction: 'descending' });
+    assert.match(down, /<th class="when" aria-sort="descending">.*Last Change <span class="arrow" aria-hidden="true">▼/);
+  });
+
+  test('the minute\'s redraw keeps each stage\'s sort; a reload does not', () => {
+    const app = readFileSync(WEB('app.mjs'), 'utf8');
+    const place = /function keepPlace\(\) \{[\s\S]*?\n\}/.exec(app)[0];
+    // Read by stage before the redraw, put back on that stage's new table after it.
+    assert.match(place, /const sorts = new Map\(sortableTables\(\)\.filter\(\(\{ table \}\) => sorted\.get\(table\)\?\.sort\)\.map\(\(\{ table, stage \}\) => \[stage, sorted\.get\(table\)\.sort\]\)\);/);
+    assert.match(place, /restore\(\) \{[\s\S]*for \(const \{ table, stage \} of sortableTables\(\)\) if \(sorts\.has\(stage\)\) sorted\.get\(table\)\?\.apply\(sorts\.get\(stage\)\);[\s\S]*window\.scrollTo/);
+    assert.match(app, /const sortableTables = \(\) => \[\.\.\.main\.querySelectorAll\('\[data-stage\] table\.sortable'\)\]\s*\.map\(\(table\) => \(\{ table, stage: table\.closest\('\[data-stage\]'\)\.dataset\.stage \}\)\);/);
+    const wire = /function wireSortHeadings\(stages\) \{[\s\S]*?\n\}/.exec(app)[0];
+    // Every new table can take a sort back before he clicks it, and a click starts from what it shows.
+    assert.match(wire, /sorted\.set\(table, \{ sort: null, apply \}\);/);
+    assert.match(wire, /sorted\.set\(table, \{ sort, apply \}\);/);
+    assert.match(wire, /nextSort\(sorted\.get\(table\)\?\.sort \?\? null, button\.dataset\.sort\)/);
+    // Only a beat's redraw passes a place; a fresh visit or reload draws with none, so no sort.
+    assert.match(app, /const sorted = new WeakMap\(\);/);
+    assert.equal((app.match(/keepPlace\(\)/g) ?? []).length, 2, 'defined once, called only by refreshPage');
+  });
+
+  test('the List view\'s tables use the sortable headings, and only they are bold and black', () => {
+    const app = readFileSync(WEB('app.mjs'), 'utf8');
+    assert.match(app, /<table class="sortable"><thead>\$\{renderSortHeadings\(null\)\}<\/thead>/);
+    assert.match(app, /<tr data-id="\$\{escapeHtml\(t\.id\)\}">/);
+    const css = readFileSync(WEB('app.css'), 'utf8');
+    assert.match(css, /\.group table\.sortable th \{ color: #000; font-weight: 700; \}/);
+    assert.match(css, /^th \{ color: var\(--quiet\); font-weight: 500;/m, 'every other table keeps the grey heading');
+  });
+}
+
+test('every page has one body width: main is capped at 1440px, padding included, and no page widens it (SP-184)', () => {
+  const css = readFileSync(WEB('app.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  const rules = css.split('}').map((r) => r.split('{')).filter((r) => r.length === 2)
+    .map(([sel, body]) => ({ sel: sel.split(',').map((x) => x.trim()), body }));
+  const plain = rules.filter((r) => r.sel.includes('main'));
+  assert.equal(plain.length, 1, 'one rule for the page body');
+  assert.match(plain[0].body, /max-width: 1440px/);
+  assert.match(plain[0].body, /box-sizing: border-box/, 'the 1440px includes the side padding');
+  assert.match(plain[0].body, /margin: 0 auto/, 'centred');
+  const perPage = rules.filter((r) => r.sel.some((s) => /^main[.#:\[]/.test(s) && !/\s/.test(s) && /(?:max-|min-)?width/.test(r.body)));
+  assert.deepEqual(perPage.map((r) => r.sel.join(', ')), [], 'no page gives the body a width of its own');
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  assert.doesNotMatch(app, /main\.classList\.(?:add|remove|toggle)\(\s*['"]wide['"]/, 'no wide class on the page body');
 });

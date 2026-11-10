@@ -86,8 +86,17 @@
  *  - An attachment is a file kept on a ticket: its name, type, size, bytes,
  *    who added it and when, all in the `attachments` table, so the nightly
  *    backup (tracker/backup.mjs) holds it with no second folder to copy. It
- *    is at most MAX_ATTACHMENT bytes and is never empty. Like a comment, it
- *    is never edited; it goes only with its ticket, in deleteTicket.
+ *    is at most MAX_ATTACHMENT bytes and is never empty. Its bytes are never
+ *    edited. Its name may be changed (renameAttachment) and it may be
+ *    removed on its own (removeAttachment); each writes an
+ *    `attachment` event naming who did it (from the old name to the new, or
+ *    to null for a removal). It also goes with its ticket, in deleteTicket.
+ *  - A context document is a file kept on a project, not on one ticket (a
+ *    brief, notes, a reference file): the same name, type, size, bytes,
+ *    adder and time, the same limits and refusals, in the `project_docs`
+ *    table, so the nightly backup holds it too. It is never edited; it is
+ *    removed one at a time (removeProjectDoc), and a project that still
+ *    holds any is not deleted (`has-docs`).
  */
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
@@ -220,6 +229,16 @@ CREATE TABLE IF NOT EXISTS attachments (
   added_by    INTEGER NOT NULL REFERENCES actors(id),
   created_at  TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS project_docs (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  project     TEXT NOT NULL REFERENCES projects(slug),
+  name        TEXT NOT NULL,
+  type        TEXT NOT NULL,
+  size        INTEGER NOT NULL,
+  bytes       BLOB NOT NULL,
+  added_by    INTEGER NOT NULL REFERENCES actors(id),
+  created_at  TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS roles (
   name        TEXT PRIMARY KEY,
   description TEXT NOT NULL,
@@ -257,6 +276,7 @@ CREATE TABLE IF NOT EXISTS seen_marks (
 );
 CREATE INDEX IF NOT EXISTS project_members_by_actor ON project_members (actor, project);
 CREATE INDEX IF NOT EXISTS attachments_by_ticket ON attachments (ticket, id);
+CREATE INDEX IF NOT EXISTS project_docs_by_project ON project_docs (project, id);
 CREATE UNIQUE INDEX IF NOT EXISTS actors_by_token ON actors (token_hash);
 CREATE UNIQUE INDEX IF NOT EXISTS actors_by_email ON actors (email);
 CREATE INDEX IF NOT EXISTS sessions_by_actor ON sessions (actor);
@@ -574,6 +594,35 @@ function canonicalFileName(name) {
   return clean;
 }
 
+/** A project's context document as listed: everything but its bytes. */
+function projectDocFromRow(row) {
+  return {
+    id: num(row.id),
+    project: row.project,
+    name: row.name,
+    type: row.type,
+    size: num(row.size),
+    addedBy: num(row.added_by),
+    createdAt: row.created_at,
+  };
+}
+
+/**
+ * A file fit to keep, as a ticket's attachment or a project's document:
+ * its name and type made canonical, its bytes 1 to MAX_ATTACHMENT long.
+ * `verb` is the word the refusals use ("attach", "upload").
+ */
+function checkedFile({ name, type, bytes }, verb) {
+  const fileName = canonicalFileName(name);
+  const fileType = canonicalFileType(type);
+  if (!(bytes instanceof Uint8Array)) throw new StoreError('bad-file', "an attachment's file must be bytes.");
+  if (bytes.length === 0) throw new StoreError('empty-file', `${fileName} is empty; there is nothing to ${verb}.`);
+  if (bytes.length > MAX_ATTACHMENT) {
+    throw new StoreError('too-large', `${fileName} is over ${MAX_ATTACHMENT / (1024 * 1024)} MB; ${verb} a smaller file.`);
+  }
+  return { fileName, fileType };
+}
+
 /** A content type fit to keep (`type/subtype`, lower-cased), or the generic one for anything else. */
 function canonicalFileType(type) {
   const t = typeof type === 'string' ? type.split(';')[0].trim().toLowerCase() : '';
@@ -751,6 +800,16 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
   function requireTicketRow(id) {
     const row = ticketRow(id);
     if (!row) throw new StoreError('unknown-ticket', `no ticket ${id}.`);
+    return row;
+  }
+
+  /** Attachment `id` on ticket `ticket` (its row, without the bytes), or a StoreError 'unknown-attachment'. */
+  function attachmentRow(ticket, id) {
+    const n = Number(id);
+    const row = Number.isInteger(n) && n > 0
+      ? db.prepare('SELECT id, ticket, name, type, size, added_by, created_at FROM attachments WHERE ticket = ? AND id = ?').get(String(ticket), n)
+      : null;
+    if (!row) throw new StoreError('unknown-attachment', `ticket ${ticket} has no attachment ${id}.`);
     return row;
   }
 
@@ -1330,9 +1389,10 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
     },
 
     /**
-     * Delete a project that holds no tickets. One with tickets is refused
-     * (`has-tickets`, with their count) and nothing is removed. The count and
-     * the delete are one transaction. Answers `{ slug, prefix }`.
+     * Delete a project that holds no tickets and no context documents. One
+     * with tickets is refused (`has-tickets`, with their count), one with
+     * documents likewise (`has-docs`, with theirs), and nothing is removed.
+     * The counts and the delete are one transaction. Answers `{ slug, prefix }`.
      */
     deleteProject(slug) {
       return transaction(() => {
@@ -1343,6 +1403,13 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
           const err = new StoreError('has-tickets',
             `${project.prefix} has ${tickets} ticket${tickets === 1 ? '' : 's'}; a project with tickets cannot be deleted.`);
           err.tickets = tickets;
+          throw err;
+        }
+        const docs = num(db.prepare('SELECT COUNT(*) AS n FROM project_docs WHERE project = ?').get(slug).n);
+        if (docs > 0) {
+          const err = new StoreError('has-docs',
+            `${project.prefix} has ${docs} context document${docs === 1 ? '' : 's'}; remove ${docs === 1 ? 'it' : 'them'} on the Docs page before deleting the project.`);
+          err.docs = docs;
           throw err;
         }
         db.prepare('DELETE FROM project_members WHERE project = ?').run(slug);
@@ -1761,13 +1828,7 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
      * nothing. Answers the attachment as listed (no bytes).
      */
     addAttachment({ ticket, name, type, bytes, actor }) {
-      const fileName = canonicalFileName(name);
-      const fileType = canonicalFileType(type);
-      if (!(bytes instanceof Uint8Array)) throw new StoreError('bad-file', "an attachment's file must be bytes.");
-      if (bytes.length === 0) throw new StoreError('empty-file', `${fileName} is empty; there is nothing to attach.`);
-      if (bytes.length > MAX_ATTACHMENT) {
-        throw new StoreError('too-large', `${fileName} is over ${MAX_ATTACHMENT / (1024 * 1024)} MB; attach a smaller file.`);
-      }
+      const { fileName, fileType } = checkedFile({ name, type, bytes }, 'attach');
       return transaction(() => {
         requireActor(actor, 'the actor');
         const row = requireTicketRow(ticket);
@@ -1802,10 +1863,111 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
         .map((row) => ({ ...attachmentFromRow(row), ticketName: row.ticket_name, addedByName: row.added_by_name ?? null }));
     },
 
+    /**
+     * Change the name of attachment `id` on `ticket` to `name`, by `actor`,
+     * under the same name rules as addAttachment. The bytes are untouched.
+     * Writes an `attachment` event (from the old name to the new) and reads
+     * the row back in the same transaction; a mismatch writes nothing. The
+     * same name again changes nothing and writes no event. Answers the
+     * attachment as listed with `changed` (true or false).
+     */
+    renameAttachment({ ticket, id, name, actor }) {
+      const fileName = canonicalFileName(name);
+      return transaction(() => {
+        requireActor(actor, 'the actor');
+        const row = requireTicketRow(ticket);
+        const was = attachmentRow(row.id, id);
+        if (was.name === fileName) return { ...attachmentFromRow(was), changed: false };
+        db.prepare('UPDATE attachments SET name = ? WHERE id = ? AND ticket = ?').run(fileName, num(was.id), row.id);
+        const back = db.prepare('SELECT id, ticket, name, type, size, added_by, created_at FROM attachments WHERE id = ?').get(num(was.id));
+        if (!back || back.name !== fileName) throw new StoreError('write-failed', `${was.name} did not read back as ${fileName}.`);
+        writeEvent(row.id, actor, 'attachment', was.name, fileName, now());
+        return { ...attachmentFromRow(back), changed: true };
+      });
+    },
+
+    /**
+     * Remove attachment `id` from `ticket`, by `actor`: the row and its
+     * bytes go, and an `attachment` event (from its name to null) records
+     * who removed it. Checked gone in the same transaction; anything left
+     * writes nothing. Answers the attachment as it was listed.
+     */
+    removeAttachment({ ticket, id, actor }) {
+      return transaction(() => {
+        requireActor(actor, 'the actor');
+        const row = requireTicketRow(ticket);
+        const was = attachmentRow(row.id, id);
+        db.prepare('DELETE FROM attachments WHERE id = ? AND ticket = ?').run(num(was.id), row.id);
+        if (db.prepare('SELECT 1 FROM attachments WHERE id = ?').get(num(was.id))) {
+          throw new StoreError('write-failed', `${was.name} is still on ${row.id} after removing it.`);
+        }
+        writeEvent(row.id, actor, 'attachment', was.name, null, now());
+        return attachmentFromRow(was);
+      });
+    },
+
     /** One attachment of a ticket with its `bytes` (a Buffer), or null when the ticket has none by that id. */
     getAttachment(ticket, id) {
       const row = db.prepare('SELECT * FROM attachments WHERE ticket = ? AND id = ?').get(String(ticket), Number(id));
       return row ? { ...attachmentFromRow(row), bytes: Buffer.from(row.bytes) } : null;
+    },
+
+    /**
+     * Keep a context document on a project: `bytes` (1 byte to
+     * MAX_ATTACHMENT), its `name` and `type`, added by `actor`. Read back,
+     * bytes and all, in the same transaction; a mismatch writes nothing.
+     * Answers the document as listed (no bytes), with its adder's name.
+     */
+    addProjectDoc({ project, name, type, bytes, actor }) {
+      const { fileName, fileType } = checkedFile({ name, type, bytes }, 'upload');
+      return transaction(() => {
+        requireActor(actor, 'the actor');
+        const p = this.getProject(project);
+        if (!p) throw new StoreError('unknown-project', `no project "${project}".`);
+        const r = db.prepare('INSERT INTO project_docs (project, name, type, size, bytes, added_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+          .run(p.slug, fileName, fileType, bytes.length, bytes, actor, now());
+        const back = db.prepare('SELECT * FROM project_docs WHERE id = ?').get(num(r.lastInsertRowid));
+        if (!back || back.project !== p.slug || !Buffer.from(back.bytes).equals(Buffer.from(bytes)) || back.name !== fileName) {
+          throw new StoreError('write-failed', `${fileName} did not read back from the database.`);
+        }
+        const adder = db.prepare('SELECT name FROM actors WHERE id = ?').get(actor);
+        return { ...projectDocFromRow(back), addedByName: adder?.name ?? null };
+      });
+    },
+
+    /** A project's context documents, newest first, without their bytes, each with its adder's name. */
+    listProjectDocs(project) {
+      return db.prepare(`SELECT d.id, d.project, d.name, d.type, d.size, d.added_by, d.created_at, ac.name AS added_by_name
+        FROM project_docs d LEFT JOIN actors ac ON ac.id = d.added_by
+        WHERE d.project = ? ORDER BY d.created_at DESC, d.id DESC`)
+        .all(String(project))
+        .map((row) => ({ ...projectDocFromRow(row), addedByName: row.added_by_name ?? null }));
+    },
+
+    /** One context document of a project with its `bytes` (a Buffer), or null when the project has none by that id. */
+    getProjectDoc(project, id) {
+      const row = db.prepare('SELECT * FROM project_docs WHERE project = ? AND id = ?').get(String(project), Number(id));
+      return row ? { ...projectDocFromRow(row), bytes: Buffer.from(row.bytes) } : null;
+    },
+
+    /**
+     * Remove one context document from a project, by `actor`. Refused
+     * (`unknown-doc`) when the project has none by that id; read back gone
+     * in the same transaction, else nothing is removed (`write-failed`).
+     * Answers the document as it was listed.
+     */
+    removeProjectDoc({ project, id, actor }) {
+      return transaction(() => {
+        requireActor(actor, 'the actor');
+        const row = db.prepare('SELECT id, project, name, type, size, added_by, created_at FROM project_docs WHERE project = ? AND id = ?')
+          .get(String(project), Number(id));
+        if (!row) throw new StoreError('unknown-doc', `project "${project}" has no context document ${id}.`);
+        const r = db.prepare('DELETE FROM project_docs WHERE id = ?').run(row.id);
+        if (num(r.changes) !== 1 || db.prepare('SELECT 1 FROM project_docs WHERE id = ?').get(row.id)) {
+          throw new StoreError('write-failed', `${row.name} was not removed.`);
+        }
+        return projectDocFromRow(row);
+      });
     },
 
     /** A ticket's history, oldest first. */
