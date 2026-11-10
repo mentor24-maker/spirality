@@ -339,14 +339,68 @@ export function firstParagraph(markdown) {
 const newestCard = (comments = []) => [...comments].reverse().find((c) => cardAsk(c.body) !== null);
 
 /**
- * The commands an operator card's ask gives him to run: the text of each
+ * The words an inline `code` span must start with to read as a command he
+ * could run, rather than a file name, a status or a quoted phrase (SP-169).
+ * `scripts/` matches any path under the scripts folder. A span is a command
+ * when its first word is one of these and something follows it (`git` alone
+ * is a word in a sentence, `git status` is a command); a `scripts/…` path is
+ * a command on its own. Add a word here to offer its commands for copying.
+ */
+export const COMMAND_WORDS = Object.freeze([
+  'npm', 'node', 'npx', 'git', 'gh', 'bash', 'sh', 'cd', 'doppler', 'launchctl', 'sqlite3', 'curl', 'open', 'scripts/',
+]);
+
+/** Does an inline code span's text read as a command (COMMAND_WORDS)? */
+export function isCommand(text) {
+  const words = String(text ?? '').trim().split(/\s+/);
+  const first = words[0] ?? '';
+  if (COMMAND_WORDS.includes(first)) return words.length > 1;
+  return COMMAND_WORDS.some((w) => w.endsWith('/') && first.startsWith(w) && first.length > w.length);
+}
+
+/** The lines of `lines` outside fenced blocks: a fence and what it holds are left out. */
+function outsideFences(lines) {
+  const out = [];
+  let run = null;
+  for (const line of lines) {
+    if (run) { if (closesFence(line, run)) run = null; continue; }
+    const fence = FENCE.exec(line);
+    if (fence) { run = fence[1]; continue; }
+    out.push(line);
+  }
+  return out;
+}
+
+const CODE_SPAN = /`([^`\n]+)`/g;
+
+/** The inline code spans in `text` that read as commands, trimmed, in order. */
+function inlineCommands(text) {
+  return [...String(text ?? '').matchAll(CODE_SPAN)].map((m) => m[1].trim()).filter(isCommand);
+}
+
+/**
+ * The commands an operator card gives him to run. First the text of each
  * fenced block in its banner, without the fence, blank lines at either end,
- * trailing spaces or an indent every line shares. [] when the comment
- * carries no card or the ask has no fenced block.
+ * trailing spaces or an indent every line shares. Then each inline `code`
+ * span in its "WHAT'S GOING ON" text and its ask that reads as a command
+ * (isCommand), so a command written mid-sentence gets a Copy box too
+ * (SP-169). Each command once, at its first place. [] when the comment
+ * carries no card or the card names no command.
  */
 export function cardCommands(body) {
   const lines = String(body ?? '').replace(/\r\n?/g, '\n').split('\n');
-  const ask = findBanner(lines, '')?.ask ?? [];
+  const banner = findBanner(lines, '');
+  if (!banner) return [];
+  const commands = [];
+  const askText = outsideFences(banner.ask).join('\n');
+  for (const command of [...fencedCommands(banner.ask), ...inlineCommands(cardContext(body)), ...inlineCommands(askText)]) {
+    if (!commands.includes(command)) commands.push(command);
+  }
+  return commands;
+}
+
+/** The text of each closed fenced block in an ask's lines, tidied (cardCommands). */
+function fencedCommands(ask) {
   const commands = [];
   for (let i = 0; i < ask.length; i += 1) {
     const fence = FENCE.exec(ask[i]);
@@ -448,6 +502,70 @@ export const STATUS_LINES = {
   live: 'Live: it is done. Nothing is needed from you.',
 };
 
+/** Where `line`'s inline code spans sit, as [start, end) pairs: nothing inside one is ever split. */
+const codeRanges = (line) => [...line.matchAll(CODE_SPAN)].map((m) => [m.index, m.index + m[0].length]);
+const inCode = (ranges, at) => ranges.some(([from, to]) => at >= from && at < to);
+
+/** `line` cut at each index in `cuts` (ascending), every piece trimmed, empty pieces dropped. */
+function cutAt(line, cuts) {
+  const pieces = [];
+  let last = 0;
+  for (const at of [...cuts, line.length]) {
+    pieces.push(line.slice(last, at).trim());
+    last = at;
+  }
+  return pieces.filter(Boolean);
+}
+
+/**
+ * Where an option begins in `line` (`A) …`, `B) …`): the indexes of a run of
+ * markers lettered A, B, C… in order, each at the line's start or after a
+ * space, none inside inline code. Only a run counts, so "plan B) later" in a
+ * sentence is not an option list.
+ */
+function optionStarts(line, ranges) {
+  const marks = [...line.matchAll(/(^|\s)([A-Z])\)\s/g)]
+    .map((m) => ({ at: m.index + m[1].length, letter: m[2] }))
+    .filter((m) => !inCode(ranges, m.at));
+  const run = [];
+  for (const m of marks) {
+    const want = String.fromCharCode('A'.charCodeAt(0) + run.length);
+    if (m.letter === want) run.push(m.at);
+    else if (m.letter === 'A') { run.length = 0; run.push(m.at); }
+  }
+  return run;
+}
+
+/**
+ * The red ask of a card laid out as paragraphs of lines, so it reads as
+ * steps rather than one block (SP-169): `Options:` starts a new paragraph,
+ * each option (`A) …`, `B) …`) and the `Your move:` line start a line of
+ * their own, whether the card wrote them on separate lines or ran them
+ * together. Lines already split stay as written, and nothing inside inline
+ * code or a fenced block is ever cut. Text only: the words are not changed.
+ */
+export function askParagraphs(ask) {
+  const paragraphs = [[]];
+  let run = null;
+  for (const raw of String(ask ?? '').split('\n')) {
+    if (run) { if (closesFence(raw, run)) run = null; paragraphs.at(-1).push(raw); continue; }
+    const fence = FENCE.exec(raw);
+    if (fence) { run = fence[1]; paragraphs.at(-1).push(raw); continue; }
+    const ranges = codeRanges(raw);
+    const cuts = new Set();
+    for (const m of raw.matchAll(/\s(?=Options:|Your move:)/g)) if (!inCode(ranges, m.index)) cuts.add(m.index);
+    const options = optionStarts(raw, ranges);
+    const listed = /^\s*Options:/.test(raw) || /\sOptions:/.test(raw);
+    if (options.length > 1 || (options.length && listed)) options.forEach((at) => cuts.add(at));
+    const pieces = raw.trim() ? cutAt(raw, [...cuts].sort((a, b) => a - b)) : [raw];
+    for (const piece of pieces) {
+      if (/^Options:/.test(piece) && paragraphs.at(-1).length) paragraphs.push([]);
+      paragraphs.at(-1).push(piece);
+    }
+  }
+  return paragraphs.filter((p) => p.length);
+}
+
 /**
  * The left side of a ticket page's Quick Action section, as HTML: the
  * ticket's title, a short description and, in bold red, what is needed. The
@@ -468,7 +586,7 @@ export function renderQuickAction({ name, description, status, comments = [], an
   return [
     `<h1>${escapeHtml(name)}</h1>`,
     summary ? `<p class="summary">${renderInline(summary)}</p>` : '',
-    ask ? `<p class="needed">${ask.split('\n').map(renderInline).join('<br>')}</p>` : '',
+    ask ? askParagraphs(ask).map((p) => `<p class="needed">${p.map(renderInline).join('<br>')}</p>`).join('\n') : '',
     where ? `<p class="where quiet">${escapeHtml(where)}</p>` : '',
   ].filter(Boolean).join('\n');
 }

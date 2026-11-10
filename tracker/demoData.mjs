@@ -138,6 +138,21 @@ export function seedDemo(store, { operatorName = substrateConfig.operatorName(),
     '@@NEEDED', 'Reply "go" to queue it as written, or reply with what to change.', 'Your move: Reply — "go", or what to change.',
   ].join('\n')).rendered));
 
+  // A card that names its command mid-sentence and runs its options together
+  // on one line, like SP-23's (SP-169): the command gets a Copy box, and the
+  // red ask reads Options:, each option and Your move on lines of their own.
+  const command = file('beta', 'Move WaveCenter to the tracker: pick when', 'needs your input',
+    { assigned: true, description: '## Goal\nMove WaveCenter off ClickUp.' }, 'waiting');
+  say(command, loop.id, stampMachineComment(buildCard([
+    '@@ASKED', 'a wizard copy now is fine for now',
+    '@@CONTEXT', 'Everything this move waits on is finished, so WaveCenter can now leave ClickUp for the tracker. '
+      + 'A loop must not do it: the setup wizard stops the lanes first, so an unattended pass would cut itself off halfway. '
+      + 'It needs a session started by hand on the Mini, which runs `npm run onboard -- --product wavecenter` and answers '
+      + 'that WaveCenter is already on ClickUp. Nothing has changed yet.',
+    '@@NEEDED', 'A decision that is yours: when to switch (switching back is in docs/TRACKER_MVP.md). Options: A) "go now": start a session by hand on the Mini and ask it to run the move. B) "later": name a time and it waits here.',
+    'Your move: Reply "go now" or a time.',
+  ].join('\n')).rendered));
+
   file('beta', 'A question with no comments yet', 'needs your input', { assigned: true }, 'waiting');
 
   // Shaped like SP-64: a catch-up ticket with no PR of its own, whose work
