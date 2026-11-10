@@ -229,6 +229,7 @@ answers are JSON (structured text programs read).
 | `POST /tickets/:id/comments` | a comment, or a reply when `parent` is given |
 | `GET /tickets/:id/events` | the history |
 | `GET /waiting` | for Dane's page: tickets in the operator's two statuses across every project, by the loop's own `waiting` verdict for the caller, newest first |
+| `GET /pipeline` | for Dane's page: the Pipeline Status pod (SP-168). `{ stages: [{ name, job, logged, running, lastStart, nextDue }] }` for Relay, Build, Review and Intake, read from the ends of this machine's loop logs (`<logDir>/<projectSlug>-<job>.log`, from the project config); times as ISO strings, never a line of log text. A stage with no log or no pass yet answers `logged: false`; 503 `no-pipeline` when the project config was not usable at start |
 | `GET /tickets/:id/thread` | for Dane's page: the ticket with each comment's author named and machine comments marked, its project's operator by id and name, and the Change panel's choices: the store's priorities and the four statuses a person may pick (Requested, Rework, Queued, Live) |
 | `GET /projects` | for Dane's page: every project with its slug, name, ticket prefix and open count, and the project the New request form starts on |
 | `POST /projects` | for Dane's page: add a project (`{ name, slug, prefix, url?, logo?, owner?, repo? }`), answered with its details read back; **a person's token only**: a machine's gets 403 and nothing is written. A duplicate slug or prefix, a slug that is not small letters, digits and hyphens (or is `new`), an owner who is not a person, an address that is not http(s), or a repo that is not `owner/name` (or its github.com address) gets 400 |
@@ -655,6 +656,22 @@ made each move. The tokens live only in Doppler (project `spirality`, config
 The list is `TRACKER_SEATS` in `scripts/lib/expectedSecrets.mjs`, so
 `npm run doctor` reports each one as present or MISSING.
 
+**A project's own lane.** A project that runs a lane of its own beside
+these (WaveCenter's hand-off lane, say) names it in its project config's
+`projectLanes` (`"projectLanes": ["loop-handoff"]`). Each name there is one
+more machine seat, its secret built the same way the runner builds it
+(`loop-handoff` → `TRACKER_TOKEN_LOOP_HANDOFF`): `tracker:signins create`
+makes its actor and stores its token, `check` proves it, `npm run doctor`
+lists it, and the door accepts it. A lane the config does not name has no
+seat, and the door refuses its passes, saying to name it in
+`projectLanes`. A name that is already a built-in seat (`loop-build`,
+`relay`, `hand-run`, ...), or `name` (its secret would be
+`TRACKER_TOKEN_NAME`, the runner's own variable), stops the config from
+loading, naming the entry, so two lanes never share a token and one bad
+entry never locks the built-in lanes out (`RESERVED_LANE_NAMES` in
+`lib/projectConfig.mjs`). No project's lane names are written in
+Spirality's code.
+
 A runner never handles the token itself. It sets `TRACKER_TOKEN_NAME` to
 the secret's **name** (`loop_runner.sh` derives it from the skill: `loop-build`
 → `TRACKER_TOKEN_LOOP_BUILD`), and the door reads that secret inside its own
@@ -924,7 +941,12 @@ ClickUp seat ids the config holds until then.
    ```
 
    It saves the config's Loop Queue list, plus any `--list <id>` given (one
-   per extra list worth keeping). A project whose config already names no
+   per extra list worth keeping). The only extra list worth keeping is
+   StarCaster's alarm list (the bus, SP-24). StarCaster's Dev Backlog and
+   its client lists (Marinoff & Associates, Delray Beach Tennis Center) are
+   neither saved nor imported: Dane, 2026-11-08, *"StarCaster's other lists
+   can all go away."* Nothing in ClickUp is deleted; ClickUp stays as the
+   archive. A project whose config already names no
    ClickUp list (`loopQueueListId` all zeros, as Spirality's has been since
    its list became a read-only archive) saves only the `--list` ids, and
    refuses with a plain reason when none is given:

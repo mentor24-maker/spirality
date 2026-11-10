@@ -106,11 +106,12 @@ NOT write any code here. You produce well-formed tasks.
    low | medium | high — and one line on the blast radius.
    ````
 
-   **The task NAME says in plain words what breaks and who feels it**, or what
-   Dane will be able to do once it ships. He scans a list; the clever
-   diagnostic sentence goes in the description. Good: *"Dane cannot sign in
-   yet: add sign-in and per-user data protection"*. Not: *"Auth: wire Supabase
-   session middleware"*.
+   **The task NAME is a short, plain statement of what the ticket does.**
+   Start with a verb (Move, Add, Show, Remove, Fix), name the thing, and keep
+   it short: no colon, no sentence about who is stuck. He scans a list; the
+   why goes in the description.
+   Good: *"Move WaveCenter from ClickUp to Spirality tracker"*.
+   Not: *"WaveCenter still runs on ClickUp: move it to the tracker"*.
 
    Tag each task with the epic name so the queue stays legible.
 
@@ -179,6 +180,7 @@ says plainly "not measured".
 - Never file a task whose acceptance criteria you couldn't verify yourself.
 - **Read your own "How to test" back as Dane.** A step he cannot act on
   without asking a follow-up question is not a test step.
+- **Link files by commit, never by branch.** In test steps and cards, a GitHub file link names a commit (`.../blob/<commit>/<path>`, the commit from `git rev-parse HEAD` on the pushed branch), `main` for a file already on `main`, or the pull request's files tab (`.../pull/<n>/files`), never a branch: the branch is deleted when Dane merges and the link 404s. `comment`, `ask`, `describe` and `task` refuse a branch link (exit 2).
 - **A pipeline ticket needs a COST, not a gap.** File a ticket about the loop
   machinery itself only when a failure actually cost something observable.
   Otherwise it is one plain line in your report, not a ticket.

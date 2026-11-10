@@ -6,7 +6,8 @@ import { join } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { createServer } from 'node:http';
 import { fileURLToPath } from 'node:url';
-import { EXPECTED_SECRETS, doctorTarget, usesClickUp, doctorReport, formatReport } from './expectedSecrets.mjs';
+import { EXPECTED_SECRETS, TRACKER_SEATS, doctorTarget, usesClickUp, doctorReport, formatReport, laneSeats, laneSecret, projectSeats } from './expectedSecrets.mjs';
+import { ProjectConfigError, RESERVED_LANE_NAMES, validateProjectConfig } from '../../lib/projectConfig.mjs';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const SPIRALITY = JSON.parse(readFileSync(join(ROOT, 'spirality.project.json'), 'utf8'));
@@ -275,4 +276,46 @@ test('no npm script names a Doppler project of its own: every doppler run goes t
     assert.doesNotMatch(line, /doppler run|--project/, name);
   }
   assert.match(scripts.clickup, /^node scripts\/with_doppler\.mjs node scripts\/clickup\.mjs$/);
+});
+
+test('a lane the project config names in projectLanes is an expected secret; one it does not name is not', () => {
+  assert.equal(laneSecret('loop-handoff'), 'TRACKER_TOKEN_LOOP_HANDOFF');
+  const names = (config) => doctorTarget(config).expected.map((s) => s.name);
+  for (const config of [SPIRALITY, GUEST]) {
+    assert.ok(!names(config).includes('TRACKER_TOKEN_LOOP_HANDOFF'), 'no lane named, no seat');
+    const withLane = names({ ...config, projectLanes: ['loop-handoff'] });
+    assert.ok(withLane.includes('TRACKER_TOKEN_LOOP_HANDOFF'));
+    // The built-in seats are all still there, in the same order.
+    assert.deepEqual(withLane.filter((n) => n !== 'TRACKER_TOKEN_LOOP_HANDOFF'), names(config));
+  }
+  const row = doctorTarget({ ...GUEST, projectLanes: ['loop-handoff'] }).expected.find((s) => s.name === 'TRACKER_TOKEN_LOOP_HANDOFF');
+  assert.deepEqual(row.configs, [GUEST.dopplerConfig]);
+  assert.match(row.what, /loop-handoff lane/);
+});
+
+test('projectSeats: the built-in seats untouched, then one machine seat per project lane; a lane that is a built-in seat is refused', () => {
+  assert.deepEqual(projectSeats(SPIRALITY), TRACKER_SEATS);
+  assert.deepEqual(projectSeats({}), TRACKER_SEATS);
+  const seats = projectSeats({ projectLanes: ['loop-handoff'] });
+  assert.deepEqual(seats.slice(0, TRACKER_SEATS.length), TRACKER_SEATS);
+  assert.deepEqual(seats.slice(TRACKER_SEATS.length).map((s) => [s.secret, s.kind, s.name, Boolean(s.handRun)]), [['TRACKER_TOKEN_LOOP_HANDOFF', 'machine', 'loop-handoff', false]]);
+  for (const taken of ['loop-build', 'relay', 'hand-run', 'operator']) {
+    assert.throws(() => laneSeats({ projectLanes: [taken] }), (err) => err instanceof ProjectConfigError && err.message.includes(`"${taken}"`) && /built-in tracker seat/.test(err.message), taken);
+  }
+});
+
+test('nothing in the substrate names a project\'s own lane: the built-in seats are the same for every project', () => {
+  const builtIn = TRACKER_SEATS.map((s) => s.name).filter(Boolean);
+  assert.deepEqual(builtIn, ['loop-build', 'loop-review', 'loop-intake', 'relay', 'hand-run']);
+});
+
+test('the config refuses every built-in seat as a lane: RESERVED_LANE_NAMES covers TRACKER_SEATS and TRACKER_TOKEN_NAME, so the door never sees one', () => {
+  const reservedSecrets = RESERVED_LANE_NAMES.map(laneSecret);
+  for (const seat of TRACKER_SEATS) assert.ok(reservedSecrets.includes(seat.secret), `${seat.secret} is not reserved`);
+  assert.ok(reservedSecrets.includes('TRACKER_TOKEN_NAME'));
+  for (const taken of RESERVED_LANE_NAMES) {
+    assert.throws(() => validateProjectConfig({ ...SPIRALITY, projectLanes: [taken] }), ProjectConfigError, taken);
+    // The backstop, for a config built by hand without loading.
+    assert.throws(() => laneSeats({ projectLanes: [taken] }), ProjectConfigError, taken);
+  }
 });

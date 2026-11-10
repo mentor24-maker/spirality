@@ -52,19 +52,17 @@ TRACKER_DB="$TRACKER_DATA_DIR/tracker.db"
 TRACKER_BACKUP_DIR="$TRACKER_DATA_DIR/backups"
 tracker_configured() { [ -n "$TRACKER_PORT" ]; }
 
-interval_of() {
-  case "$1" in
-    loop-build)  echo 1800 ;;
-    loop-review) echo 1800 ;;
-    loop-intake) echo 1800 ;;
-    relay)       echo 600 ;;
-    *)           echo 3600 ;;
-  esac
-}
+# How often each job wakes, in seconds. The numbers live in one place,
+# scripts/lib/loopSchedule.mjs, which the tracker's Pipeline Status pod reads
+# too (SP-168), so the page never says a different time than the plist.
+interval_of() { PATH="$LAUNCHD_PATH" node "$REPO/scripts/lib/loopSchedule.mjs" interval "$1"; }
 # loaded_line and reload_job: read launchd's list safely, and replace a job
 # only once the old one is really gone.
 # shellcheck source=lib/launchd_reload.sh
 source "$REPO/scripts/lib/launchd_reload.sh"
+# gh_signed_in_as and gh_state: is the GitHub command-line tool signed in?
+# shellcheck source=lib/gh_auth.sh
+source "$REPO/scripts/lib/gh_auth.sh"
 
 label_of() { echo "$PREFIX.$1"; }
 plist_of() { echo "$HOME/Library/LaunchAgents/$(label_of "$1").plist"; }
@@ -181,6 +179,7 @@ status() {
   echo "project:  $SLUG (labels $PREFIX.*, logs in $LOG_DIR)"
   checkout_state
   PATH="$LAUNCHD_PATH" node "$REPO/scripts/lib/claudeTrust.mjs" check "$REPO" || true
+  gh_state
   for s in "${SKILLS[@]}"; do status_one "$s"; done
   status_one "$RELAY"
   status_tracker
@@ -289,6 +288,9 @@ plist_env() {
 }
 
 install() {
+  # Before anything is written: a signed-out gh would install a relay that
+  # fails the first merge Dane asks for (SP-181).
+  gh_require_signed_in || exit 1
   if [ -f "$REPO/.git" ] && grep -q '^gitdir:.*worktrees' "$REPO/.git" 2>/dev/null; then
     echo "Refusing to install: $REPO is a worktree, and worktrees get deleted when their work ships. Run this from the main checkout." >&2
     exit 1

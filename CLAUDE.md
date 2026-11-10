@@ -1,10 +1,10 @@
 # Spirality — rules for every agent session
 
 Read this file first, then [docs/LOOP_ENGINEERING.md](docs/LOOP_ENGINEERING.md).
+Every prompt Dane gives a hand-run thread is logged, word for word, in
+[docs/OPERATOR_PROMPTS.md](docs/OPERATOR_PROMPTS.md).
 Any change to the words or look of the tracker page follows
 [docs/DOCTRINE.md](docs/DOCTRINE.md) (Title Case for buttons and headings).
-Dane's prompts, word for word with what each led to, are in
-[docs/OPERATOR_PROMPTS.md](docs/OPERATOR_PROMPTS.md).
 
 **This repository is public.** Never commit a key, password, token or `.env`
 file. Keys live in Doppler (project `spirality`).
@@ -28,7 +28,8 @@ and lessons learned in one do not reach the other. Spirality ends that:
    launchd label prefix, log folder, merge phrases, governance paths.
 3. **Projects pin a version.** StarCaster and WaveCenter depend on a tagged
    release; an upgrade is a pull request with CI. A substrate change can never
-   reach both projects at once unchecked.
+   reach both projects at once unchecked. (Deferred for now: projects get the
+   loop as a wizard copy; see `docs/ONBOARDING_A_PROJECT.md`, gap 1.)
 
 The full analysis and the five-phase plan are on the WaveCenter ticket that
 created this repository (86bcgm97x) and in `docs/PLAN.md`.

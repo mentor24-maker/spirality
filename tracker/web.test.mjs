@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { seedDemo, tickingClock } from './demoData.mjs';
 import { reportsOf, REPORT_RANGES, searchTickets } from './pageData.mjs';
-import { escapeHtml, renderComment, renderInline, renderMarkdown, renderQuickAction, renderCommands, cardCommands, cardAsk, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket } from './web/render.mjs';
+import { escapeHtml, renderComment, renderInline, renderMarkdown, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, PIPELINE_UNAVAILABLE } from './web/render.mjs';
 import { startServer, setupSettingsOf } from './server.mjs';
 import { saveAnswers, setupFields, setupOf } from './setup.mjs';
 import { DANE_FIELDS as SETUP_FIELDS, STEPS as SETUP_STEPS } from '../scripts/onboard/onboard.mjs';
@@ -847,7 +847,7 @@ test('an open page reads again once a minute and on coming back to the tab, neve
   assert.match(app, /if \(location\.hash === '#reply' && !refreshing\) \{/, 'a beat does not jump to the reply box again');
   assert.match(/function keepPlace\(\) \{[\s\S]*?\n\}/.exec(app)[0], /main\.querySelectorAll\('details'\)[\s\S]*window\.scrollTo\(0, y\);/);
   // Every GET of a draw is kept; a write counts as a save under way until it answers.
-  const api = /async function api\(method, path, body\) \{[\s\S]*?\n\}/.exec(app)[0];
+  const api = /async function api\(method, path, body, \{ unrecorded = false \} = \{\}\) \{[\s\S]*?\n\}/.exec(app)[0];
   assert.match(api, /if \(write\) writing \+= 1;/);
   assert.match(api, /finally \{\s*if \(write\) writing -= 1;\s*\}/);
   assert.match(api, /if \(!write\) reads\?\.set\(path, JSON\.stringify\(json\)\);/);
@@ -920,7 +920,7 @@ test('an operator card draws its NEEDED FROM DANE banner in the red box, as `ask
 
 test('the ticket page opens on the Quick Action section, with everything it showed before in a closed Details box', () => {
   const app = readFileSync(WEB('app.mjs'), 'utf8');
-  const page = /main\.innerHTML = `\s*<section class="quick">([\s\S]*?)<\/section>\s*<details class="details">([\s\S]*?)<\/details>`;/.exec(app);
+  const page = /main\.innerHTML = `\s*<section class="quick">([\s\S]*?)<\/section>\s*(?:\$\{renderFilesMade\(t\)\}\s*)?<details class="details">([\s\S]*?)<\/details>`;/.exec(app);
   assert.ok(page, 'Quick Action first, then Details');
   const [, quick, details] = page;
   assert.match(quick, /renderQuickAction\(t\)/);
@@ -1100,6 +1100,90 @@ test('a command block that is never closed is not offered to copy', () => {
   }
   // Its red ask still ends at the closing rule, as before.
   assert.match(cardAsk(commandCards(needed).plain), /Reply done\.\nYour move: Reply — done\.$/);
+});
+
+// ── SP-169: commands written mid-sentence, and an ask laid out in steps ──────
+
+/** SP-23's card as the tracker holds it (comment 1716), word for word. */
+const SP23_CARD = [
+  "**DANE'S WORDS — the instruction behind this ticket**",
+  '',
+  '```',
+  'a wizard copy now is fine for now',
+  '```',
+  "*(2026-11-08, quoted in this ticket's Goal)*",
+  '',
+  "**WHAT'S GOING ON**",
+  '',
+  'Everything this move waits on is finished, so WaveCenter can now leave ClickUp for the tracker. The ticket itself says a loop must not do it: the setup wizard\'s first step stops WaveCenter\'s lanes and the move runs on the Mini, so an unattended pass would cut itself off halfway. It needs a session started by hand on the Mini, which runs `npm run onboard -- --product wavecenter` and answers that WaveCenter is already on ClickUp. Nothing was built and nothing in ClickUp changed.',
+  '',
+  '**#############################**',
+  '**NEEDED FROM DANE: A decision that is genuinely yours: when to switch WaveCenter\'s pipeline over (the risk is high; switching back is documented in docs/TRACKER_MVP.md). Options:**',
+  '**A) "go now": you start a Claude session by hand on the Mini, in Spirality\'s folder, and ask it to run SP-23. The session runs every command; you merge the wizard\'s pull request in WaveCenter afterwards, as always.**',
+  '**B) "later": name a time and it waits here.**',
+  '**Your move: Reply "go now" or a time, because only a session you start by hand can make this move.**',
+  '**#############################**',
+].join('\n');
+
+test('SP-23\'s card: the command in its WHAT\'S GOING ON gets a Copy box, and stays in the sentence', () => {
+  assert.deepEqual(cardCommands(SP23_CARD), ['npm run onboard -- --product wavecenter']);
+  const html = renderCommands({ comments: [{ body: SP23_CARD }] });
+  assert.deepEqual(codes(html), ['npm run onboard -- --product wavecenter'], 'Copy copies exactly that text');
+  assert.equal(html.match(/class="copy-command">Copy</g).length, 1);
+  const quick = renderQuickAction({ name: 'SP-23', description: '', status: 'needs your input', comments: [{ body: SP23_CARD }] });
+  assert.match(quick, /<p class="summary">[^]*which runs <code>npm run onboard -- --product wavecenter<\/code> and answers/);
+});
+
+test('SP-23\'s red ask: Options: starts a new paragraph, each option and Your move on a line of its own', () => {
+  const quick = renderQuickAction({ name: 'SP-23', description: '', status: 'needs your input', comments: [{ body: SP23_CARD }] });
+  const needed = [...quick.matchAll(/<p class="needed">([\s\S]*?)<\/p>/g)].map((m) => m[1].split('<br>'));
+  assert.equal(needed.length, 2);
+  assert.deepEqual(needed[0], ['A decision that is genuinely yours: when to switch WaveCenter&#39;s pipeline over (the risk is high; switching back is documented in docs/TRACKER_MVP.md).']);
+  assert.equal(needed[1].length, 4);
+  assert.equal(needed[1][0], 'Options:');
+  assert.match(needed[1][1], /^A\) &quot;go now&quot;/);
+  assert.match(needed[1][2], /^B\) &quot;later&quot;/);
+  assert.match(needed[1][3], /^Your move: Reply/);
+});
+
+test('an ask with its options run together on one line reads one option per line', () => {
+  assert.deepEqual(askParagraphs('Pick where it runs. Options: A) the Mini. B) a hosted server. C) wait. Your move: Reply — A, B or C.'), [
+    ['Pick where it runs.'],
+    ['Options:', 'A) the Mini.', 'B) a hosted server.', 'C) wait.', 'Your move: Reply — A, B or C.'],
+  ]);
+  // Without the word Options:, a run of two or more still splits.
+  assert.deepEqual(askParagraphs('Reply A) yes or B) no.'), [['Reply', 'A) yes or', 'B) no.']]);
+  // Lines already split stay as written; a lone "plan B)" in a sentence is no list.
+  assert.deepEqual(askParagraphs('Reply A or B.\nA is cheaper.\nYour move: Reply — new.'), [['Reply A or B.', 'A is cheaper.', 'Your move: Reply — new.']]);
+  assert.deepEqual(askParagraphs('Keep plan B) in mind.\nYour move: Reply — ok.'), [['Keep plan B) in mind.', 'Your move: Reply — ok.']]);
+  // Nothing inside inline code or a fenced block is cut.
+  assert.deepEqual(askParagraphs('Run `echo "Options: A) x B) y"` now. Your move: Reply — done.'), [['Run `echo "Options: A) x B) y"` now.', 'Your move: Reply — done.']]);
+  assert.deepEqual(askParagraphs('Run:\n```\necho A) x B) y Options: z\n```\nYour move: Reply — done.'), [['Run:', '```', 'echo A) x B) y Options: z', '```', 'Your move: Reply — done.']]);
+});
+
+test('inline code that is not a command gets no Copy box; a command fenced and inline gets one', () => {
+  for (const text of ['docs/TRACKER_MVP.md', 'Waits on:', 'git', 'npm', 'Building', 'scripts/']) assert.equal(isCommand(text), false, text);
+  for (const text of ['npm run verify', 'git status', 'gh pr view 7', 'scripts/install_loop_runner.sh --status', 'scripts/foo.sh', 'launchctl list']) assert.equal(isCommand(text), true, text);
+  const needed = 'See `docs/TRACKER_MVP.md` and the `Waits on:` line, then run `npm run verify`:\n```\nnpm run verify\n```\nthen `git status`.';
+  for (const body of Object.values(commandCards(needed))) {
+    assert.deepEqual(cardCommands(body), ['npm run verify', 'git status'], 'the fenced one first, each once');
+    assert.equal(renderCommands({ comments: [{ body }] }).match(/class="copy-command"/g).length, 2);
+  }
+  // A context command and the same command in the ask: one box.
+  const sixty = Array.from({ length: 58 }, (_, i) => `w${i}`).join(' ');
+  const body = machineComment.stripMachineMarker(operatorCard.buildCard(
+    `@@ASKED\nbuild it\n@@CONTEXT\n${sixty} run \`npm run doctor\`\n@@NEEDED\nRun \`npm run doctor\` then reply.\nYour move: Reply — done.`).rendered);
+  assert.deepEqual(cardCommands(body), ['npm run doctor']);
+});
+
+test('an inline command reaches the Copy box escaped', () => {
+  const nasty = 'npm run x -- "<script>alert(1)</script>" & <img src=x onerror=y>';
+  const body = commandCards(`Run \`${nasty}\` then reply.`).plain;
+  const html = renderCommands({ comments: [{ body }] });
+  assert.doesNotMatch(html, /<script|<img/);
+  assert.deepEqual(codes(html), [nasty]);
+  const quick = renderQuickAction({ name: 'x', description: '', status: 'needs your input', comments: [{ body }] });
+  assert.doesNotMatch(quick, /<script|<img/);
 });
 
 test('Copy works on the Mini\'s plain http page and a second click restarts the "Copied" timer', () => {
@@ -2353,7 +2437,7 @@ test('the Tasks toolbar picks a project from a dropdown, "Project: ", the one in
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   const draw = app.slice(app.indexOf('async function drawProject'), app.indexOf('async function copyText'));
   assert.match(draw, /api\('GET', '\/projects'\),\n  \]\);/);
-  assert.match(draw, /<div class="toolbar">\s*\$\{renderProjectPicker\(projects, board\.project\)\}\s*\$\{searchForm\(''\)\}\s*<nav class="views"/);
+  assert.match(draw, /<div class="toolbar">\s*\$\{renderProjectPicker\(projects, board\.project\)\}\s*\$\{searchForm\(''\)\}\s*<div class="pipeline-pod"[^>]*><\/div>\s*<nav class="views"/);
   assert.doesNotMatch(app, /Change project/);
   assert.match(draw, /querySelector\('\.project-picker select'\)\.addEventListener\('change', \(e\) => \{\s*history\.pushState\(null, '', at\(view, e\.target\.value\)\);\s*route\(\);/);
   assert.match(readFileSync(WEB('app.css'), 'utf8'), /\.toolbar \.project-picker select \{/);
@@ -2736,4 +2820,137 @@ test('busLink: the header count of unseen bus posts, opening the Team chat with 
   assert.equal(link.text, '4 New on the Bus');
   assert.equal(link.href, '/t/SB-1#comments', 'the posts are in the Details fold: #comments opens it');
   assert.equal(link.title, 'StarCaster Bus: 3 new posts on Team chat; WaveCenter Bus: 1 new post on Team chat');
+});
+
+test('the Pipeline Status pod: each stage\'s next time or "running", a dash for none yet, and "Pipeline Status unavailable" when the read failed (SP-168)', () => {
+  const timeOf = (iso) => `[${iso.slice(11, 16)}]`;
+  const html = renderPipelinePod({ stages: [
+    { name: 'Relay', logged: true, running: false, nextDue: '2026-11-09T17:45:00.000Z' },
+    { name: 'Build', logged: true, running: true, nextDue: null },
+    { name: 'Review', logged: true, running: false, nextDue: null },
+    { name: 'Intake', logged: false, running: false, nextDue: null },
+  ] }, timeOf);
+  const text = html.replace(/<[^>]*>/g, '');
+  assert.equal(text, 'Relay [17:45] · Build running · Review – · Intake –');
+  assert.match(html, /title="Intake: no passes logged yet"/);
+  assert.match(html, /title="Review: the next pass&#39;s time is not known yet"/);
+  assert.match(html, /class="stage running"/);
+  for (const failed of [null, undefined, {}, { stages: [] }, { error: 'no-pipeline' }]) {
+    assert.equal(renderPipelinePod(failed, timeOf).replace(/<[^>]*>/g, ''), PIPELINE_UNAVAILABLE);
+  }
+  assert.equal(PIPELINE_UNAVAILABLE, 'Pipeline Status unavailable');
+  // A stage's name is escaped like every other text the page draws.
+  assert.doesNotMatch(renderPipelinePod({ stages: [{ name: '<b>x', logged: false }] }, timeOf), /<b>x/);
+});
+
+test('the Tasks page puts the pod between the search field and Board/List, fills it on draw and once a minute, and a failed read touches only the pod (SP-168)', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const tasks = app.indexOf('<h1>Tasks</h1>');
+  const toolbar = app.slice(app.indexOf('<div class="toolbar">', tasks), app.indexOf('</nav>', tasks));
+  const search = toolbar.indexOf("${searchForm('')}");
+  const pod = toolbar.indexOf('class="pipeline-pod"');
+  const views = toolbar.indexOf('<nav class="views"');
+  assert.ok(search !== -1 && search < pod && pod < views, 'search field, then the pod, then the Board/List toggle');
+  const draw = app.slice(app.indexOf('async function drawProject('), app.indexOf('async function drawProject(') + 12000);
+  assert.match(draw, /refreshPipeline\(\);/);
+  assert.match(app, /const PIPELINE_REFRESH_EVERY_MS = 60_000;/);
+  assert.match(app, /setInterval\(refreshPipeline, PIPELINE_REFRESH_EVERY_MS\);/);
+  const refresh = app.slice(app.indexOf('async function refreshPipeline'), app.indexOf('/** Draw the pod from the last answer'));
+  // A failure is caught inside: it empties the answer (so the pod says unavailable) and throws nothing to the page.
+  assert.match(refresh, /catch \(err\) \{\n\s+if \(err instanceof SignedOut\) return;\n\s+pipelineState = null;\n\s+\}/);
+  // The pod is not part of the page's own reads, so a new time never redraws the page under him.
+  assert.match(refresh, /api\('GET', '\/pipeline', undefined, \{ unrecorded: true \}\)/);
+  assert.match(app, /const reads = unrecorded \? null : recording;/);
+  assert.doesNotMatch(draw.slice(0, draw.indexOf(']);')), /\/pipeline/);
+});
+
+// ── SP-170: the Files Made box, drawn from the relay's merge note (SP-166) ───
+test.describe('Files Made: the files a ticket made, from its newest merge note', () => {
+  const { filesMadeLines } = mergeOnComment;
+  const { stampMachineComment } = machineComment;
+  const REPO = 'some-owner/some-repo';
+  // The note exactly as the relay writes it: its own list builder, then the stamp.
+  const note = (paths, { number = 7, limit } = {}) => stampMachineComment([
+    `Merged: PR #${number} (https://github.com/${REPO}/pull/${number}) squash-merged into main at 2026-11-09T12:00:00Z, on your comment 1.`,
+    'Checks were green and the branch was up to date at merge time; the branch has been deleted.',
+    '',
+    'This ticket is now Live (its PR merged).',
+    '',
+    ...filesMadeLines({ repo: REPO, branch: 'main', files: paths.map((filename) => ({ filename, status: 'added' })), limit }).lines,
+    '',
+    '(Automatic — relay merge step.)',
+  ].join('\n'));
+  const loop = (body) => ({ body, machine: true });
+  const hrefs = (html) => [...html.matchAll(/href="([^"]*)"/g)].map((m) => m[1]);
+
+  test('a merge note that lists files gives one link per file, to the address in the note', () => {
+    const comments = [loop('PR opened: https://github.com/x/y/pull/7'), loop(note(['docs/OVERVIEW.md', 'lib/new.js']))];
+    assert.deepEqual(filesMade(comments), [
+      { path: 'docs/OVERVIEW.md', href: `https://github.com/${REPO}/blob/main/docs/OVERVIEW.md` },
+      { path: 'lib/new.js', href: `https://github.com/${REPO}/blob/main/lib/new.js` },
+    ]);
+    const html = renderFilesMade({ comments });
+    assert.match(html, /<h2>Files Made<\/h2>/);
+    assert.deepEqual(hrefs(html), filesMade(comments).map((f) => f.href));
+    assert.match(html, />docs\/OVERVIEW\.md<\/a>/, 'the path is the link text');
+    assert.equal((html.match(/target="_blank"/g) || []).length, 2, 'each opens in a new tab');
+  });
+
+  test('no merge note, or one with no list, draws nothing: no box, no empty heading', () => {
+    assert.deepEqual(filesMade([]), []);
+    assert.equal(renderFilesMade({ comments: [] }), '');
+    const noFiles = loop(note([]));
+    assert.equal(renderFilesMade({ comments: [loop('PR opened: https://github.com/x/y/pull/7'), noFiles] }), '');
+    const unreadable = loop(`Merged: PR #7 (https://x) squash-merged.\n\n${mergeOnComment.FILES_MADE_UNREADABLE}`);
+    assert.equal(renderFilesMade({ comments: [unreadable] }), '');
+  });
+
+  test('with two merge notes (a ticket built in slices), the newest list is shown', () => {
+    const comments = [loop(note(['old/first.md'], { number: 7 })), loop('later talk'), loop(note(['new/second.md'], { number: 9 }))];
+    assert.deepEqual(filesMade(comments).map((f) => f.path), ['new/second.md']);
+    // A newer merge with no new files does not hide the list an older one made.
+    const thenNone = [...comments, loop(note([], { number: 11 }))];
+    assert.deepEqual(filesMade(thenNone).map((f) => f.path), ['new/second.md']);
+  });
+
+  test('a line whose link is not http(s) is left out, never drawn as a link', () => {
+    const body = [
+      'Merged: PR #7 (https://github.com/x/y/pull/7) squash-merged into main.',
+      '',
+      'Files made by this ticket:',
+      '- good.md: https://github.com/x/y/blob/main/good.md',
+      '- bad.md: javascript:alert(1)',
+      '- worse.md: data:text/html,<script>alert(1)</script>',
+      '- nolink.md',
+    ].join('\n');
+    const html = renderFilesMade({ comments: [loop(body)] });
+    assert.deepEqual(filesMade([loop(body)]).map((f) => f.path), ['good.md']);
+    assert.deepEqual(hrefs(html), ['https://github.com/x/y/blob/main/good.md']);
+    assert.doesNotMatch(html, /javascript:|data:|bad\.md|worse\.md/);
+  });
+
+  test('paths and links are escaped: < and " show as text, never as markup', () => {
+    const body = 'Merged: PR #7 (https://x) squash-merged.\n\nFiles made by this ticket:\n'
+      + '- docs/<img src=x onerror=alert(1)>"q".md: https://github.com/x/y/blob/main/a"onmouseover="alert(1)';
+    const html = renderFilesMade({ comments: [loop(body)] });
+    assert.doesNotMatch(html, /<img|"q"|"onmouseover/);
+    assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;&quot;q&quot;\.md/);
+    assert.match(html, /href="https:\/\/github\.com\/x\/y\/blob\/main\/a&quot;onmouseover=&quot;alert\(1\)"/);
+  });
+
+  test('only a loop\'s merge note counts: a person quoting one draws nothing', () => {
+    assert.deepEqual(filesMade([{ body: note(['docs/a.md']), machine: false }]), []);
+  });
+
+  test('a list cut short says how many more, without inventing links for them', () => {
+    const html = renderFilesMade({ comments: [loop(note(['a.md', 'b.md', 'c.md'], { limit: 2 }))] });
+    assert.equal(hrefs(html).length, 2);
+    assert.match(html, /And 1 more: see the pull request's Files changed tab\./);
+  });
+
+  test('the ticket page draws the box between the Quick Action section and the Details fold', () => {
+    const app = readFileSync(WEB('app.mjs'), 'utf8');
+    assert.match(app, /<\/section>\s*\$\{renderFilesMade\(t\)\}\s*<details class="details">/);
+    assert.match(readFileSync(WEB('app.css'), 'utf8'), /\.files-made \{[^}]*background:[^}]*border:/);
+  });
 });

@@ -87,6 +87,8 @@ usually a command: give the exact command to paste and the output it prints.
 If there is a page, give its URL. Then two or three lines of **what to look
 for**, in his words.
 
+**Link files by commit, never by branch:** a GitHub file link names a commit (`.../blob/<commit>/<path>`, the commit from `git rev-parse HEAD` on the pushed branch), `main` for a file already on `main`, or the pull request's files tab (`.../pull/<n>/files`), never a branch: the branch is deleted when Dane merges and the link 404s. `comment`, `ask`, `describe` and `task` refuse a branch link (exit 2).
+
 **No link, on work with a visible surface, is a review FAILURE** — send it
 back. Work with genuinely no visible surface says so in one line (*"nothing to
 look at; this is a check that runs in CI"*).

@@ -6,8 +6,11 @@
  *
  * `expect` names, per ticket, what the loop's `waiting` rule says about it.
  */
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import operatorCard from '../lib/operatorCard.js';
 import machineComment from '../lib/machineComment.js';
+import mergeOnComment from '../lib/mergeOnComment.js';
 import substrateConfig from '../lib/substrateConfig.js';
 import humanHours from '../lib/humanHours.js';
 
@@ -95,7 +98,22 @@ export function seedDemo(store, { operatorName = substrateConfig.operatorName(),
   file('alpha', 'A send-back with review notes', 'rework', { priority: 'normal' }, 'machine');
   file('alpha', 'A ticket a build loop is on', 'building', { priority: 'high' }, 'machine');
   file('alpha', 'A pull request waiting for review', 'in review', { tags: ['tracker'] }, 'machine');
-  file('alpha', 'Finished and merged', 'live', { priority: 'normal' }, 'machine');
+  const merged = file('alpha', 'Finished and merged', 'live', { priority: 'normal' }, 'machine');
+  // The relay's merge note, with the files the pull request made: its page shows the Files Made box (SP-170).
+  say(merged, loop.id, 'PR opened: https://github.com/example/repo/pull/9');
+  say(merged, loop.id, stampMachineComment([
+    'Merged: PR #9 (https://github.com/example/repo/pull/9) squash-merged into main at 2026-11-09T12:00:00Z, on your comment 1.',
+    'Checks were green and the branch was up to date at merge time; the branch has been deleted.',
+    '',
+    'This ticket is now Live (its pull request merged).',
+    '',
+    ...mergeOnComment.filesMadeLines({
+      repo: 'example/repo', branch: 'main',
+      files: [{ filename: 'docs/OVERVIEW.md', status: 'added' }, { filename: 'lib/newModule.js', status: 'added' }],
+    }).lines,
+    '',
+    '(Automatic — relay merge step.)',
+  ].join('\n')));
   file('alpha', 'A request filed from the page', 'requested', { description: 'Nobody has specced it yet.' }, 'machine');
 
   const review = file('beta', 'Descriptions with HTML break the page: show them as text', 'ready to launch', {
@@ -120,6 +138,21 @@ export function seedDemo(store, { operatorName = substrateConfig.operatorName(),
   say(intake, loop.id, stampMachineComment(buildCard([
     '@@ASKED', 'make the board easier to read', '@@CONTEXT', CONTEXT,
     '@@NEEDED', 'Reply "go" to queue it as written, or reply with what to change.', 'Your move: Reply — "go", or what to change.',
+  ].join('\n')).rendered));
+
+  // A card that names its command mid-sentence and runs its options together
+  // on one line, like SP-23's (SP-169): the command gets a Copy box, and the
+  // red ask reads Options:, each option and Your move on lines of their own.
+  const command = file('beta', 'Move WaveCenter to the tracker: pick when', 'needs your input',
+    { assigned: true, description: '## Goal\nMove WaveCenter off ClickUp.' }, 'waiting');
+  say(command, loop.id, stampMachineComment(buildCard([
+    '@@ASKED', 'a wizard copy now is fine for now',
+    '@@CONTEXT', 'Everything this move waits on is finished, so WaveCenter can now leave ClickUp for the tracker. '
+      + 'A loop must not do it: the setup wizard stops the lanes first, so an unattended pass would cut itself off halfway. '
+      + 'It needs a session started by hand on the Mini, which runs `npm run onboard -- --product wavecenter` and answers '
+      + 'that WaveCenter is already on ClickUp. Nothing has changed yet.',
+    '@@NEEDED', 'A decision that is yours: when to switch (switching back is in docs/TRACKER_MVP.md). Options: A) "go now": start a session by hand on the Mini and ask it to run the move. B) "later": name a time and it waits here.',
+    'Your move: Reply "go now" or a time.',
   ].join('\n')).rendered));
 
   file('beta', 'A question with no comments yet', 'needs your input', { assigned: true }, 'waiting');
@@ -166,4 +199,31 @@ export function seedDemo(store, { operatorName = substrateConfig.operatorName(),
   }
 
   return { operator: op, loop, token, expect };
+}
+
+/** A local time as the runners write it: `2026-11-09 18:22:34` (date) or `18:22:34` (clock). */
+const pad = (n) => String(n).padStart(2, '0');
+export const logDate = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${logClock(d)}`;
+export const logClock = (d) => `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+
+/**
+ * Scratch loop logs for the demo's Pipeline Status pod (SP-168), in the
+ * runners' own line shapes: the relay ran four minutes ago, Build is running
+ * now, Review and Intake are sleeping until later. Written to `folder` as
+ * `<slug>-<job>.log`, the names tracker/pipeline.mjs reads. Test data only.
+ */
+export function writeDemoLogs(folder, slug, now = new Date()) {
+  const ago = (min) => new Date(now.getTime() - min * 60_000);
+  const lane = (job, start, end, seconds) => [
+    `===== ${logDate(start)} START /${job} =====`,
+    'A pass report, which the pod never shows.',
+    ...(end ? [`===== ${logDate(end)} END /${job} (exit 0 — not a verdict; the pass's report above is) =====`, `[loop-runner] ${logClock(end)} sleeping ${seconds}s before the next /${job}`] : []),
+  ].join('\n');
+  const files = {
+    relay: [`===== ${logDate(ago(4))} START relay — demo =====`, `===== ${logDate(ago(3.9))} END relay — pass complete (exit 0) =====`].join('\n'),
+    'loop-build': lane('loop-build', ago(2), null, 1800),
+    'loop-review': lane('loop-review', ago(20), ago(17), 1800),
+    'loop-intake': lane('loop-intake', ago(9), ago(8), 1800),
+  };
+  for (const [job, text] of Object.entries(files)) writeFileSync(join(folder, `${slug}-${job}.log`), `${text}\n`);
 }

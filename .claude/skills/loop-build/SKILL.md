@@ -256,6 +256,8 @@ Exit **0** nothing of his / **3** something IS his / **1** could not tell.
      without it and prints the exact line, a plain-language
      summary, and the task's "How to test" steps. End with the Generated-with
      trailer.
+   - **Link files by commit, never by branch**, in the PR body and on the
+     ticket: a GitHub file link names a commit (`.../blob/<commit>/<path>`, the commit from `git rev-parse HEAD` on the pushed branch), `main` for a file already on `main`, or the pull request's files tab (`.../pull/<n>/files`), never a branch: the branch is deleted when Dane merges and the link 404s. `comment`, `ask`, `describe` and `task` refuse a branch link (exit 2).
    - Wait for the `verify` check: `gh pr checks <pr> --watch`. If no check
      appears after a couple of minutes, `gh pr view <pr> --json
      mergeable,mergeStateStatus`: `CONFLICTING` means merge `origin/main` in
@@ -318,6 +320,8 @@ Exit **0** nothing of his / **3** something IS his / **1** could not tell.
   `ask` before building and offer named slices, smallest-and-safest first.
   Then build only the slice he names, narrowing the description with
   `describe` first.
-- **Ticket titles say in plain words what breaks and who feels it.** Fix a
-  cryptic name on the ticket first, then copy it to the PR.
+- **A ticket title is a short, plain statement of what the ticket does**,
+  starting with a verb:
+  *"Move WaveCenter from ClickUp to Spirality tracker"*, not
+  *"WaveCenter still runs on ClickUp: move it to the tracker"*. Fix a cryptic name on the ticket first, then copy it to the PR.
 - Leave the worktree in place until the PR merges; `loop-review` may reuse it.

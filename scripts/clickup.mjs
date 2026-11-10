@@ -41,11 +41,12 @@ import {
   readyToLaunchGate, nextRound, wouldEscalate, roundSummaryLines, sendBackRounds, operatorSpokeLast,
   findPullRequest, newestFirst, ESCALATE_AT_ROUND,
 } from './lib/loopTrail.mjs';
-import { buildCard, cardSurvived, findBlockquoteLines, CONTEXT_MIN_WORDS, CONTEXT_MAX_WORDS } from './lib/operatorCard.mjs';
+import { buildCard, cardSurvived, findBlockquoteLines, findBranchLinks, branchLinkRefusal, CONTEXT_MIN_WORDS, CONTEXT_MAX_WORDS } from './lib/operatorCard.mjs';
 import { isMachineComment, stripMachineMarker } from './lib/machineComment.mjs';
 import { parseHumanHours, findHumanHours } from '../lib/humanHours.js';
 import { createClickupTracker } from './tracker/clickupTracker.mjs';
 import { createApiTracker, trackerTokenEnv } from './tracker/apiTracker.mjs';
+import { projectSeats } from './lib/expectedSecrets.mjs';
 import { compareRepo, projectEditUrl } from './lib/repoCheck.mjs';
 import { filedTrackerUrl } from '../lib/substrateConfig.js';
 
@@ -56,11 +57,12 @@ import { loadProjectConfig, ProjectConfigError } from '../lib/projectConfig.mjs'
 // from the package, so every project's relay decides the same way.
 import {
   mergeDecision, githubGate, isMergeCommand, MERGE_MARKER, parseMergeMarker,
-  refusalNotice, conflictHandOffNotice, mergedNotice, REFUSAL_CODES,
+  refusalNotice, conflictHandOffNotice, mergedNotice, filesMadeLines, REFUSAL_CODES,
 } from '../lib/mergeOnComment.js';
 import {
   PR_VIEW_FIELDS, markerBookkeeping, recordBookkeeping, emptyBooks, mergeDestination, relayLine,
   handbackAnswer, handbackPlan, closePlan, conflictFilingPlan,
+  mergeWithPreMergeStep, commandLine,
 } from '../lib/relayLane.js';
 import {
   conflictTicketName, conflictTicketBody, conflictTicketFiledComment, findConflictTicket, unstuckPullRequest,
@@ -126,7 +128,7 @@ const TRACKERS = {
     }),
   },
   api: {
-    tokenEnv: () => trackerTokenEnv(),
+    tokenEnv: () => trackerTokenEnv(process.env, projectSeats(project)),
     make: (token) => createApiTracker({
       token,
       baseUrl: project.trackerApiUrl,
@@ -347,6 +349,25 @@ function gh(args) {
   return { ok: out.status === 0, stdout: String(out.stdout || ''), stderr: String(out.stderr || '') };
 }
 
+/**
+ * Every file a pull request changed, as GitHub lists them (SP-166), all pages.
+ * GitHub answers 100 a page and stops at 3000 files. Any page that fails or is
+ * not a list makes the whole answer null: half a list is never passed on.
+ */
+function readPrFiles(repo, number) {
+  const all = [];
+  for (let page = 1; page <= 30; page++) {
+    const out = gh(['api', `repos/${repo}/pulls/${number}/files?per_page=100&page=${page}`]);
+    if (!out.ok) return null;
+    let got;
+    try { got = JSON.parse(out.stdout); } catch { return null; }
+    if (!Array.isArray(got)) return null;
+    all.push(...got);
+    if (got.length < 100) return all;
+  }
+  return all;
+}
+
 // ── Guards shared by `status` and `ask` ──────────────────────────────────────
 /** A ticket may not reach Ready to launch without a passing review on it. */
 async function readyToLaunchRefused(task, status) {
@@ -382,7 +403,21 @@ async function alreadyAnsweredRefused(task, status) {
   return null;
 }
 
+/** Exit 2, before any write, when `text` links a GitHub file by branch (SP-178). */
+function refuseBranchLinks(text, nothing) {
+  const links = findBranchLinks(text);
+  if (!links.length) return;
+  console.error(`\n${branchLinkRefusal(links, nothing)}\n`);
+  process.exit(2);
+}
+
 async function postComment(task, body) {
+  // Every loop comment (comment, ask, verdict, pr-opened, bus-post) comes through here.
+  // A card arrives as rich-text pieces; its code blocks (his own words) are quoted, not links.
+  const text = Array.isArray(body.comment)
+    ? body.comment.filter((p) => !p.attributes?.['code-block']).map((p) => p.text ?? '').join('')
+    : String(body.comment_text ?? body.comment ?? '');
+  refuseBranchLinks(text, 'Nothing was posted.');
   const out = await tracker.postComment(task, body);
   if (!out.res.ok) die('post comment', out);
   const id = String(out.json?.id ?? '');
@@ -913,6 +948,7 @@ if (cmd === 'whoami') {
     console.error(`The body has "> " blockquote lines (${quoted.join(', ')}). ClickUp DELETES them silently. Use a fenced block. Nothing was created.`);
     process.exit(2);
   }
+  refuseBranchLinks(body, 'Nothing was created.');
   const tags = arg('tags') ? arg('tags').split(',').map((s) => s.trim()).filter(Boolean) : undefined;
   const out = await tracker.createTask(list, {
     name,
@@ -953,6 +989,7 @@ if (cmd === 'whoami') {
   if (!body.trim()) { console.error('Refusing to replace the description with an empty body.'); process.exit(2); }
   const quoted = findBlockquoteLines(body);
   if (quoted.length) { console.error(`The body has "> " blockquote lines (${quoted.join(', ')}). ClickUp DELETES them. Nothing was written.`); process.exit(2); }
+  refuseBranchLinks(body, 'Nothing was written.');
   const out = await tracker.updateTask(task, { markdown_description: body });
   if (!out.res.ok) die('replace description', out);
   const t = await readTask(task);
@@ -967,6 +1004,7 @@ if (cmd === 'whoami') {
   const sent = readBody(bodyFile);
   const quoted = findBlockquoteLines(sent);
   if (quoted.length) { console.error(`The comment has "> " blockquote lines (${quoted.join(', ')}). ClickUp DELETES them. Nothing was posted.`); process.exit(2); }
+  refuseBranchLinks(sent, 'Nothing was posted.');
   const { id, stored } = await postComment(task, { comment_text: sent });
   console.log(`Comment ${id} added to task ${task} (${stored.comment_text.length} characters, verified by reading it back).`);
   reportLimits();
@@ -1157,6 +1195,8 @@ if (cmd === 'whoami') {
   if (!noMove && await readyToLaunchRefused(task, status)) process.exit(2);
   let card, commentBody;
   try { ({ card, comment: commentBody } = buildCard(readBody(bodyFile))); } catch (err) { console.error(`\n${err.message}\n`); process.exit(2); }
+  // @@ASKED is exempt: it is his own words, fenced on the card.
+  refuseBranchLinks([card.context, card.needed, card.evidence].join('\n'), 'Nothing was posted and the status has NOT moved.');
   if (!noMove) { const stop = await alreadyAnsweredRefused(task, status); if (stop !== null) process.exit(stop); }
   const { id: cardId, stored } = await postComment(task, { comment: commentBody });
   const lost = cardSurvived(card, stored.comment_text);
@@ -1521,15 +1561,38 @@ if (cmd === 'whoami') {
     // from the description BEFORE merging, so the dry run can say it too.
     const fresh = await readTask(task.id);
     const dest = mergeDestination(fresh.markdown_description || fresh.description);
-    if (dryRun) { say(task, 'would-merge', `PR #${pr.number} (${gate.reason}); then "${dest.status}" because ${dest.why}`); return; }
+    const preMerge = project.preMergeCommand;
+    if (dryRun) {
+      const step = preMerge ? `would first run the pre-merge step \`${commandLine(preMerge)}\` for ${String(prJson.headRefOid || '').slice(0, 12) || 'an unknown commit'} (not run in a dry run), then merge ` : '';
+      say(task, 'would-merge', `${step}PR #${pr.number} (${gate.reason}); then "${dest.status}" because ${dest.why}`);
+      return;
+    }
 
     // --squash, never --admin, never any force: a convenience command does not
-    // get to route around a standing decision.
-    const merged = gh(['pr', 'merge', String(pr.number), '--repo', repo, '--squash', '--delete-branch']);
+    // get to route around a standing decision. With a project pre-merge step
+    // (SP-185), the step runs first and the merge is pinned to the commit it
+    // saw; a step that fails merges nothing and is refused like any gate.
+    const outcome = mergeWithPreMergeStep({
+      command: preMerge,
+      pr,
+      repo,
+      headSha: String(prJson.headRefOid || ''),
+      baseBranch: String(prJson.baseRefName || ''),
+      ticketId: task.id,
+      runStep: (command, env, timeoutMs) => spawnSync(command[0], command.slice(1), {
+        cwd: REPO_ROOT, env: { ...process.env, ...env }, encoding: 'utf8', timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024,
+      }),
+      runGh: gh,
+    });
+    if (outcome.stage === 'pre-merge') {
+      await refuse(outcome.refusal.why, outcome.refusal.plainEnglish, outcome.refusal.refusalCode);
+      return;
+    }
+    const merged = outcome.merged;
     if (!merged.ok) { await refuse(`the merge command itself failed (${merged.stderr.trim().slice(0, 300)})`, `PR #${pr.number} could not be merged.`, REFUSAL_CODES.mergeCommandFailed); return; }
 
     // `gh` exiting 0 is not a merge. Read the PR back; only MERGED earns the record.
-    const after = gh(['pr', 'view', String(pr.number), '--repo', repo, '--json', 'state,mergedAt']);
+    const after = gh(['pr', 'view', String(pr.number), '--repo', repo, '--json', 'state,mergedAt,baseRefName']);
     let afterJson = null;
     try { afterJson = after.ok ? JSON.parse(after.stdout) : null; } catch { afterJson = null; }
     const state = String(afterJson?.state || '').toUpperCase();
@@ -1545,6 +1608,12 @@ if (cmd === 'whoami') {
     const record = mergedNotice({ commentId: decision.commentId, pr: { number: pr.number, url: pr.url }, mergedAt });
     await markMergeHandled(decision.commentId, task, record.marker);
 
+    // The files the pull request made, linked on the branch it merged into
+    // (SP-166). Read AFTER the merge is confirmed, so it can never stop or
+    // change one; a list that cannot be read says so instead of guessing.
+    const made = filesMadeLines({ repo, branch: afterJson.baseRefName, files: readPrFiles(repo, pr.number) });
+    if (made.problem) unchecked.push(`${task.id}: PR #${pr.number} merged, but ${made.problem} — the merge note says so`);
+
     const body = [
       `Merged: PR #${pr.number} (${pr.url}) squash-merged into main at ${mergedAt}, on your comment ${decision.commentId}.`,
       'Checks were green and the branch was up to date at merge time; the branch has been deleted.',
@@ -1553,6 +1622,8 @@ if (cmd === 'whoami') {
         ? `This ticket is now Live (${dest.why}).`
         : `This ticket goes back to ${dest.status} for the next build pass, because ${dest.why}.`,
       '',
+      ...(outcome.step ? [`The project's pre-merge step (\`${commandLine(preMerge)}\`) passed first.${outcome.step.tail ? ' Its last lines of output:' : ' It printed nothing.'}`, ...(outcome.step.tail ? ['', '```', outcome.step.tail, '```'] : []), ''] : []),
+      ...(made.lines.length ? [...made.lines, ''] : []),
       '(Automatic — relay merge step.)',
     ].join('\n');
     await postNote(task, body, `PR #${pr.number} MERGED`);

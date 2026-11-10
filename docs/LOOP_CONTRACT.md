@@ -485,6 +485,18 @@ Only four kinds of thing: a **real secret value**, a **billing screen**, a
 **browser login**, or a **decision that is genuinely his**. The card says
 which. Everything else, a loop does itself.
 
+### A file link names a commit, never a branch (2026-11-09)
+
+Every GitHub file link a loop writes on a ticket (a card, a test step, a
+comment, a description) names a commit (`.../blob/<commit>/<path>`), `main`
+for a file already on `main`, or the pull request's files tab
+(`.../pull/<n>/files`). Never a branch: the relay merges with
+`--delete-branch`, so a branch link goes dead the moment Dane merges. On
+2026-11-04 he clicked "Read the page" on SP-105, a link to
+`blob/setup-review/...`, and got GitHub's 404 (SP-178). `comment`, `ask`,
+`describe`, `task`, `verdict` and `pr-opened` refuse a branch link outside a
+fence, exit 2, nothing written.
+
 ## Merge phrases
 
 On a ticket in `Ready to launch`, a comment from Dane that is **exactly** one
@@ -603,6 +615,50 @@ replies under his word once, saying why (`[bus-relay-close-refused]`), and
 leaves the ticket where it is; the same word closes it on the first pass
 after the merge. The ticket page's **Close** button, shown when the newest
 card's move is `Close`, posts the first close phrase as his reply.
+
+### A project's own pre-merge step (2026-11-09)
+
+A project can add one step of its own to the merge: `preMergeCommand` in its
+`spirality.project.json`, a command written as a list (the program, then each
+argument as its own string; no shell reads it), for example
+`["node", "scripts/apply_migrations.mjs"]`. With no key there is no step, and
+the merge is exactly as above.
+
+When it is set, the relay runs it from the repository root once every check
+above says merge, and before `gh pr merge`. Its environment carries:
+
+| Variable           | What it holds                              |
+|--------------------|--------------------------------------------|
+| `LOOP_PR_NUMBER`   | the pull request's number                  |
+| `LOOP_PR_URL`      | its address on GitHub                      |
+| `LOOP_HEAD_SHA`    | the commit its branch is at, about to merge |
+| `LOOP_BASE_BRANCH` | the branch it merges into                  |
+| `LOOP_TICKET_ID`   | the ticket Dane said "merge" on            |
+
+- **Exit 0**: the relay merges, with `--match-head-commit <LOOP_HEAD_SHA>`, so
+  a push that lands after the step ran makes GitHub refuse the merge rather
+  than merge work the step never saw. The step's last lines of output go in
+  the `Merged:` note.
+- **Any other exit, a stop by signal, a step that cannot start, or one still
+  running after 10 minutes**: nothing is merged. The relay refuses through the
+  ordinary refusal above (`pre-merge-step-failed`), naming the step and its
+  last lines of output, and Dane's word stays unspent: each later pass runs
+  the step again and merges once it passes, saying nothing new while it fails
+  the same way. "The same way" means the same command failing the same way
+  (the same exit code, signal, time-out or start failure); the output is
+  quoted in the note but never compared, so a timestamp in it does not make
+  a fresh refusal every pass. A step that ran and failed may have made changes
+  of its own, and the note says so. Because it can run again, a step must be
+  safe to run twice.
+- A dry run (`relay --dry-run`) says it would run the step, and runs nothing.
+
+Nothing runs after the merge, and nothing in Spirality knows what a project's
+step does.
+
+**Why (2026-11-09, SP-185):** before WaveCenter moved onto this loop, its own
+merge lane applied a pull request's database change to the live database from
+the exact commit about to merge, and merged nothing if that failed. The relay
+had no place for it (WaveCenter's WC-164 waits on this).
 
 ### StarCaster's auto-merge lanes (a StarCaster extension)
 
