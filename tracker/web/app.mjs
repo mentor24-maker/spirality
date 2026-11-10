@@ -2143,6 +2143,43 @@ async function drawUsers(done = '', problem = '') {
   }
 }
 
+/**
+ * The Docs page (SP-171): every file on the selected project's tasks in one
+ * Task Files table, newest first. The project is the one picked on the
+ * Projects page (shown in the header), else the first. A file's name
+ * downloads it through the task's own download address; the task links to
+ * its page. Look-only: adding, renaming and removing are SP-177's.
+ */
+async function drawDocs() {
+  const { projects } = await api('GET', '/projects');
+  setTitle('Docs · Tracker');
+  putTrail([{ label: 'Docs' }]);
+  if (!projects.length) {
+    main.innerHTML = '<h1>Docs</h1><p class="quiet">There are no projects yet.</p>';
+    return;
+  }
+  const project = projects.find((p) => p.slug === savedProject()) ?? projects[0];
+  const { attachments } = await api('GET', `/projects/${encodeURIComponent(project.slug)}/attachments`);
+  const row = (a) => {
+    const href = `/tickets/${encodeURIComponent(a.ticket)}/attachments/${encodeURIComponent(a.id)}`;
+    return `<tr data-file="${escapeHtml(a.id)}">
+      <td class="name"><a href="${href}" download="${escapeHtml(a.name)}">${escapeHtml(a.name)}</a></td>
+      <td class="task"><a href="/t/${encodeURIComponent(a.ticket)}">${escapeHtml(a.ticket)}</a> ${escapeHtml(a.ticketName)}</td>
+      <td class="type">${escapeHtml(a.type)}</td>
+      <td class="size">${escapeHtml(sizeOf(a.size))}</td>
+      <td class="by">${a.addedByName ? escapeHtml(a.addedByName) : '<span class="quiet">unknown</span>'}</td>
+      <td class="when">${escapeHtml(when(a.createdAt))}</td></tr>`;
+  };
+  main.innerHTML = `
+    <h1>Docs</h1>
+    <p class="quiet">Files kept on the tasks of ${escapeHtml(project.name)}. Pick another project on the <a href="/projects">Projects</a> page.</p>
+    <h2>Task Files</h2>
+    ${attachments.length
+    ? `<table class="projects task-files"><thead><tr><th>File</th><th>Task</th><th>Type</th><th>Size</th><th>Added By</th><th>Added On</th></tr></thead>
+      <tbody>${attachments.map(row).join('')}</tbody></table>`
+    : `<p class="quiet">No task in ${escapeHtml(project.name)} has a file yet.</p>`}`;
+}
+
 /** Underline the header link (or the bell, for Waiting on you) for the screen showing. */
 function markNav(which) {
   for (const a of document.querySelectorAll('nav.site a')) a.classList.toggle('current', a.dataset.nav === which);
@@ -2193,14 +2230,15 @@ async function route({ place = null } = {}) {
     const settings = location.pathname === '/settings';
     const reporting = location.pathname === '/reporting';
     const usersPage = location.pathname === '/users';
+    const docsPage = location.pathname === '/docs';
     const search = location.pathname === '/search';
     const setupNew = location.pathname === '/setup/new';
     const setupAnswers = /^\/setup\/([^/]+)\/answers$/.exec(location.pathname);
     const setupPage = !setupNew && /^\/setup\/([^/]+)$/.exec(location.pathname);
     const setupAny = setupNew || setupAnswers || setupPage;
     let following = false;
-    const waiting = !(setupAny || search || reporting || settings || usersPage || isNew || ticket || projects || newProject || editProject || details || tasks || project);
-    markNav(reporting ? 'reporting' : settings ? 'settings' : usersPage ? 'users' : projects || newProject || details || editProject || setupAny ? 'projects' : ticket || project || tasks || isNew || search ? 'tasks' : 'waiting');
+    const waiting = !(setupAny || search || reporting || settings || usersPage || docsPage || isNew || ticket || projects || newProject || editProject || details || tasks || project);
+    markNav(reporting ? 'reporting' : settings ? 'settings' : usersPage ? 'users' : docsPage ? 'docs' : projects || newProject || details || editProject || setupAny ? 'projects' : ticket || project || tasks || isNew || search ? 'tasks' : 'waiting');
     if (setupNew) {
       await drawSetupNew(null);
     } else if (setupAnswers) {
@@ -2215,6 +2253,8 @@ async function route({ place = null } = {}) {
       await drawSettings();
     } else if (usersPage) {
       await drawUsers();
+    } else if (docsPage) {
+      await drawDocs();
     } else if (isNew) {
       // The old New request address: the Tasks page with its Add Task box open.
       await drawTasks(savedView(), { adding: true });
