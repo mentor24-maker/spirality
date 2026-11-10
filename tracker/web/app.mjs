@@ -1081,26 +1081,36 @@ async function drawTasks(view, opts = {}) {
  * column, ascending first, the other way on a second click; each stage
  * sorts on its own. The rows already drawn are moved, not redrawn, so their
  * buttons keep working. `stages` are the drawn stages, each with its tickets
- * in the order the page drew them (the order a sort's ties keep). Nothing is
- * remembered: a redraw shows the usual order.
+ * in the order the page drew them (the order a sort's ties keep). The sort
+ * each table shows (null before any click) is kept in `sorted`, so the
+ * minute's redraw puts it back (keepPlace); a reload or a fresh visit
+ * shows the usual order.
  */
+const sorted = new WeakMap();
+/** Each sortable table on the page, with its stage: what keepPlace reads and restores. */
+const sortableTables = () => [...main.querySelectorAll('[data-stage] table.sortable')]
+  .map((table) => ({ table, stage: table.closest('[data-stage]').dataset.stage }));
 function wireSortHeadings(stages) {
   const ticketsOf = new Map(stages.map((c) => [c.status, c.tickets]));
-  for (const table of main.querySelectorAll('[data-stage] table.sortable')) {
-    const tickets = ticketsOf.get(table.closest('[data-stage]').dataset.stage);
+  for (const { table, stage } of sortableTables()) {
+    const tickets = ticketsOf.get(stage);
     if (!tickets) continue;
-    let sort = null;
-    table.tHead.addEventListener('click', (e) => {
-      const button = e.target.closest('button[data-sort]');
-      if (!button) return;
-      sort = nextSort(sort, button.dataset.sort);
+    const apply = (sort) => {
       table.tHead.innerHTML = renderSortHeadings(sort);
-      table.tHead.querySelector(`button[data-sort="${sort.column}"]`).focus();
       const rows = new Map([...table.tBodies[0].rows].map((tr) => [tr.dataset.id, tr]));
       for (const t of sortTickets(tickets, sort)) {
         const tr = rows.get(t.id);
         if (tr) table.tBodies[0].append(tr);
       }
+      sorted.set(table, { sort, apply });
+    };
+    sorted.set(table, { sort: null, apply });
+    table.tHead.addEventListener('click', (e) => {
+      const button = e.target.closest('button[data-sort]');
+      if (!button) return;
+      const sort = nextSort(sorted.get(table)?.sort ?? null, button.dataset.sort);
+      apply(sort);
+      table.tHead.querySelector(`button[data-sort="${sort.column}"]`).focus();
     });
   }
 }
@@ -2320,17 +2330,21 @@ async function drawAgain(draw) {
 const hold = () => redrawHold({ hidden: document.hidden, drawing: drawing > 0, writing: writing > 0, fields: fieldsOf(main) });
 
 /**
- * Where he is on the page: how far down, and which folding sections
- * (Details, a Live column, the Add Task box, the Change panel) are open.
+ * Where he is on the page: how far down, which folding sections
+ * (Details, a Live column, the Add Task box, the Change panel) are open,
+ * and how each Tasks table is sorted.
  * `restore` puts them back on the page drawn again.
  */
 function keepPlace() {
   const key = (d) => `${d.className}|${d.dataset.stage ?? ''}`;
   const open = new Map([...main.querySelectorAll('details')].map((d) => [key(d), d.open]));
   const y = window.scrollY;
+  // Each stage's sort (SP-174), by stage, put back on the stage's new table.
+  const sorts = new Map(sortableTables().filter(({ table }) => sorted.get(table)?.sort).map(({ table, stage }) => [stage, sorted.get(table).sort]));
   return {
     restore() {
       for (const d of main.querySelectorAll('details')) if (open.has(key(d))) d.open = open.get(key(d));
+      for (const { table, stage } of sortableTables()) if (sorts.has(stage)) sorted.get(table)?.apply(sorts.get(stage));
       window.scrollTo(0, y);
     },
   };

@@ -13,3 +13,10 @@ pages' tables, like Projects, keep their grey headings. The headings are real
 buttons, so they work from the keyboard (Tab, then Enter or Space) and screen
 readers announce which way a column is sorted. A reload goes back to the usual
 order, because nothing is remembered.
+
+Review caught one thing on the first try: the page refreshes itself about
+once a minute when a ticket changes, and that refresh threw the sort away, so
+on a busy board his sort would snap back by itself. Now each stage's sort is
+carried through that refresh the same way the page already keeps his scroll
+position and open sections. A real reload or a fresh visit still starts from
+the usual order.

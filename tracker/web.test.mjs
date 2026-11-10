@@ -3013,6 +3013,23 @@ test.describe('Files Made: the files a ticket made, from its newest merge note',
     assert.match(down, /<th class="when" aria-sort="descending">.*Last Change <span class="arrow" aria-hidden="true">▼/);
   });
 
+  test('the minute\'s redraw keeps each stage\'s sort; a reload does not', () => {
+    const app = readFileSync(WEB('app.mjs'), 'utf8');
+    const place = /function keepPlace\(\) \{[\s\S]*?\n\}/.exec(app)[0];
+    // Read by stage before the redraw, put back on that stage's new table after it.
+    assert.match(place, /const sorts = new Map\(sortableTables\(\)\.filter\(\(\{ table \}\) => sorted\.get\(table\)\?\.sort\)\.map\(\(\{ table, stage \}\) => \[stage, sorted\.get\(table\)\.sort\]\)\);/);
+    assert.match(place, /restore\(\) \{[\s\S]*for \(const \{ table, stage \} of sortableTables\(\)\) if \(sorts\.has\(stage\)\) sorted\.get\(table\)\?\.apply\(sorts\.get\(stage\)\);[\s\S]*window\.scrollTo/);
+    assert.match(app, /const sortableTables = \(\) => \[\.\.\.main\.querySelectorAll\('\[data-stage\] table\.sortable'\)\]\s*\.map\(\(table\) => \(\{ table, stage: table\.closest\('\[data-stage\]'\)\.dataset\.stage \}\)\);/);
+    const wire = /function wireSortHeadings\(stages\) \{[\s\S]*?\n\}/.exec(app)[0];
+    // Every new table can take a sort back before he clicks it, and a click starts from what it shows.
+    assert.match(wire, /sorted\.set\(table, \{ sort: null, apply \}\);/);
+    assert.match(wire, /sorted\.set\(table, \{ sort, apply \}\);/);
+    assert.match(wire, /nextSort\(sorted\.get\(table\)\?\.sort \?\? null, button\.dataset\.sort\)/);
+    // Only a beat's redraw passes a place; a fresh visit or reload draws with none, so no sort.
+    assert.match(app, /const sorted = new WeakMap\(\);/);
+    assert.equal((app.match(/keepPlace\(\)/g) ?? []).length, 2, 'defined once, called only by refreshPage');
+  });
+
   test('the List view\'s tables use the sortable headings, and only they are bold and black', () => {
     const app = readFileSync(WEB('app.mjs'), 'utf8');
     assert.match(app, /<table class="sortable"><thead>\$\{renderSortHeadings\(null\)\}<\/thead>/);
