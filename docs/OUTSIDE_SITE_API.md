@@ -196,7 +196,7 @@ theirs: the same words either way).
 
 ```
 POST /projects/spirality/tickets
-{ "name": "What breaks and who feels it", "description": "In their own words.", "status": "requested" }
+{ "name": "Move WaveCenter from ClickUp to Spirality tracker", "description": "In their own words.", "status": "requested" }
 
 201 { "id": "SP-160", "project": "spirality", "number": 160, "name": "…", "description": "…", "status": "requested", "priority": null, "tags": [], "assignee": null, "loopNote": "", "createdAt": "…", "updatedAt": "…", "version": 1 }
 ```

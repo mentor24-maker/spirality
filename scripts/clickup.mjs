@@ -62,6 +62,7 @@ import {
 import {
   PR_VIEW_FIELDS, markerBookkeeping, recordBookkeeping, emptyBooks, mergeDestination, relayLine,
   handbackAnswer, handbackPlan, closePlan, conflictFilingPlan,
+  mergeWithPreMergeStep, commandLine,
 } from '../lib/relayLane.js';
 import {
   conflictTicketName, conflictTicketBody, conflictTicketFiledComment, findConflictTicket, unstuckPullRequest,
@@ -1560,11 +1561,34 @@ if (cmd === 'whoami') {
     // from the description BEFORE merging, so the dry run can say it too.
     const fresh = await readTask(task.id);
     const dest = mergeDestination(fresh.markdown_description || fresh.description);
-    if (dryRun) { say(task, 'would-merge', `PR #${pr.number} (${gate.reason}); then "${dest.status}" because ${dest.why}`); return; }
+    const preMerge = project.preMergeCommand;
+    if (dryRun) {
+      const step = preMerge ? `would first run the pre-merge step \`${commandLine(preMerge)}\` for ${String(prJson.headRefOid || '').slice(0, 12) || 'an unknown commit'} (not run in a dry run), then merge ` : '';
+      say(task, 'would-merge', `${step}PR #${pr.number} (${gate.reason}); then "${dest.status}" because ${dest.why}`);
+      return;
+    }
 
     // --squash, never --admin, never any force: a convenience command does not
-    // get to route around a standing decision.
-    const merged = gh(['pr', 'merge', String(pr.number), '--repo', repo, '--squash', '--delete-branch']);
+    // get to route around a standing decision. With a project pre-merge step
+    // (SP-185), the step runs first and the merge is pinned to the commit it
+    // saw; a step that fails merges nothing and is refused like any gate.
+    const outcome = mergeWithPreMergeStep({
+      command: preMerge,
+      pr,
+      repo,
+      headSha: String(prJson.headRefOid || ''),
+      baseBranch: String(prJson.baseRefName || ''),
+      ticketId: task.id,
+      runStep: (command, env, timeoutMs) => spawnSync(command[0], command.slice(1), {
+        cwd: REPO_ROOT, env: { ...process.env, ...env }, encoding: 'utf8', timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024,
+      }),
+      runGh: gh,
+    });
+    if (outcome.stage === 'pre-merge') {
+      await refuse(outcome.refusal.why, outcome.refusal.plainEnglish, outcome.refusal.refusalCode);
+      return;
+    }
+    const merged = outcome.merged;
     if (!merged.ok) { await refuse(`the merge command itself failed (${merged.stderr.trim().slice(0, 300)})`, `PR #${pr.number} could not be merged.`, REFUSAL_CODES.mergeCommandFailed); return; }
 
     // `gh` exiting 0 is not a merge. Read the PR back; only MERGED earns the record.
@@ -1598,6 +1622,7 @@ if (cmd === 'whoami') {
         ? `This ticket is now Live (${dest.why}).`
         : `This ticket goes back to ${dest.status} for the next build pass, because ${dest.why}.`,
       '',
+      ...(outcome.step ? [`The project's pre-merge step (\`${commandLine(preMerge)}\`) passed first.${outcome.step.tail ? ' Its last lines of output:' : ' It printed nothing.'}`, ...(outcome.step.tail ? ['', '```', outcome.step.tail, '```'] : []), ''] : []),
       ...(made.lines.length ? [...made.lines, ''] : []),
       '(Automatic — relay merge step.)',
     ].join('\n');
