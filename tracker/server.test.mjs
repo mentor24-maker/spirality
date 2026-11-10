@@ -1573,11 +1573,11 @@ test('GET /search narrows by Status, Priority, Created by and Assigned to, alone
 
     const all = (await f.call('GET', '/search?q=widget')).body;
     assert.deepEqual(all.filters.map((x) => [x.key, x.label, x.value]),
-      [['status', 'Status', null], ['priority', 'Priority', null], ['createdBy', 'Created by', null], ['assignee', 'Assigned to', null]]);
-    assert.deepEqual(all.filters[0].options.map((o) => o.value), loopStatuses.STAGE_ORDER);
-    assert.deepEqual(all.filters[1].options.map((o) => o.value), ['urgent', 'high', 'normal', 'low', 'none']);
-    assert.deepEqual(all.filters[2].options, [f.human, f.machine, other].map((x) => ({ value: String(x.id), label: x.name })));
-    assert.deepEqual(all.filters[3].options[0], { value: 'nobody', label: 'Nobody' });
+      [['project', 'Project', null], ['status', 'Status', null], ['priority', 'Priority', null], ['createdBy', 'Created by', null], ['assignee', 'Assigned to', null]]);
+    assert.deepEqual(all.filters[1].options.map((o) => o.value), loopStatuses.STAGE_ORDER);
+    assert.deepEqual(all.filters[2].options.map((o) => o.value), ['urgent', 'high', 'normal', 'low', 'none']);
+    assert.deepEqual(all.filters[3].options, [f.human, f.machine, other].map((x) => ({ value: String(x.id), label: x.name })));
+    assert.deepEqual(all.filters[4].options[0], { value: 'nobody', label: 'Nobody' });
 
     assert.deepEqual(await ids('&status=Queued'), [a.id, b.id, d.id, e.id].sort());
     assert.deepEqual(await ids('&status=rework'), [c.id]);
@@ -1593,7 +1593,7 @@ test('GET /search narrows by Status, Priority, Created by and Assigned to, alone
     // The weighted order holds: a title match before a comment match, whatever the filter.
     const ranked = (await f.call('GET', `/search?q=widget&status=Queued&createdBy=${f.machine.id}`)).body;
     assert.deepEqual(ranked.results.map((x) => x.id), [a.id, e.id]);
-    assert.deepEqual(ranked.filters.map((x) => x.value), ['Queued', null, String(f.machine.id), null]);
+    assert.deepEqual(ranked.filters.map((x) => x.value), [null, 'Queued', null, String(f.machine.id), null]);
 
     // Created by is the actor on the `created` event, not whoever changed the ticket last.
     f.store.changeTicket(b.id, { actor: f.machine.id, status: 'rework' });
@@ -1610,6 +1610,51 @@ test('GET /search narrows by Status, Priority, Created by and Assigned to, alone
       assert.equal(r.body.error, 'unknown-filter');
       assert.match(r.body.message, words);
     }
+  } finally { await f.cleanup(); }
+});
+
+test('GET /search narrows to one project with Project, offers and answers only the projects the reader may see, and refuses one that is not a choice', async () => {
+  const f = await fixture();
+  try {
+    f.store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE', operator: f.human.id });
+    f.store.createProject({ slug: 'gamma', name: 'Gamma', prefix: 'GA', operator: f.human.id });
+    const a = f.store.fileTicket({ project: 'alpha', actor: f.human.id, name: 'Comet in alpha', status: 'queued' });
+    const b = f.store.fileTicket({ project: 'beta', actor: f.human.id, name: 'Comet in beta', status: 'queued' });
+    const g = f.store.fileTicket({ project: 'gamma', actor: f.human.id, name: 'Comet in gamma', status: 'live' });
+    const ids = async (query, token = f.humanToken) => (await f.call('GET', `/search?q=comet${query}`, { token })).body.results.map((x) => x.id).sort();
+
+    // Project comes first, "Any" (no value) plus every project by name.
+    const all = (await f.call('GET', '/search?q=comet')).body;
+    assert.equal(all.filters[0].key, 'project');
+    assert.deepEqual(all.filters[0].options, [{ value: 'alpha', label: 'Alpha' }, { value: 'beta', label: 'Beta' }, { value: 'gamma', label: 'Gamma' }]);
+    assert.deepEqual(await ids(''), [a.id, b.id, g.id].sort());
+    assert.deepEqual(await ids('&project='), [a.id, b.id, g.id].sort());
+    assert.deepEqual(await ids('&project=beta'), [b.id]);
+    assert.deepEqual(await ids('&project=gamma'), [g.id], 'closed tickets too');
+    assert.deepEqual(await ids('&project=beta&status=Live'), []);
+    const chosen = (await f.call('GET', '/search?q=comet&project=alpha')).body;
+    assert.equal(chosen.filters[0].value, 'alpha');
+
+    const nosuch = await f.call('GET', '/search?q=comet&project=nosuch');
+    assert.equal(nosuch.status, 400);
+    assert.equal(nosuch.body.error, 'unknown-filter');
+    assert.match(nosuch.body.message, /no project "nosuch"/);
+
+    // A viewer on alpha and beta only: gamma is neither offered nor answered.
+    const viewer = f.store.createActor({ kind: 'human', name: 'Viewer' });
+    const vt = f.store.issueToken(viewer.id);
+    f.store.setRole({ actor: viewer.id, role: 'viewer', by: f.human.id });
+    f.store.addMember({ project: 'alpha', actor: viewer.id, by: f.human.id });
+    f.store.addMember({ project: 'beta', actor: viewer.id, by: f.human.id });
+    const seen = (await f.call('GET', '/search?q=comet', { token: vt })).body;
+    assert.deepEqual(seen.filters[0].options.map((o) => o.value), ['alpha', 'beta']);
+    assert.ok(!JSON.stringify(seen).includes('Gamma'));
+    assert.deepEqual(await ids('&project=beta', vt), [b.id]);
+    const hidden = await f.call('GET', '/search?q=comet&project=gamma', { token: vt });
+    const missing = await f.call('GET', '/search?q=comet&project=nosuch', { token: vt });
+    assert.equal(hidden.status, 400);
+    assert.ok(!hidden.text.includes('Comet in gamma'));
+    assert.equal(hidden.text.replace('gamma', 'nosuch'), missing.text, 'the same answer as a project that does not exist');
   } finally { await f.cleanup(); }
 });
 

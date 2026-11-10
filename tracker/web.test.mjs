@@ -2773,6 +2773,19 @@ test('the search results page draws the filters from the server\'s answer, keeps
   assert.match(app, /await drawSearch\(new URLSearchParams\(location\.search\)\)/);
 });
 
+test('searching from the Tasks page carries the project chosen in its picker into the address as the Project filter (SP-191)', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const address = app.slice(app.indexOf('function searchAddress('), app.indexOf('/** Enter in the Search field'));
+  assert.match(address, /main\.querySelectorAll\('\.project-picker select, \.search-filters select'\)/);
+  assert.match(address, /params\.set\(select\.name, select\.value\)/);
+  // The picker's field is named what the server's Project filter reads, and the results page's row draws it.
+  assert.match(renderProjectPicker([{ slug: 'alpha', name: 'Alpha' }, { slug: 'beta', name: 'Beta' }], 'beta'),
+    /<select name="project"><option value="alpha">Alpha<\/option><option value="beta" selected>Beta<\/option><\/select>/);
+  assert.match(renderSearchFilters([{ key: 'project', label: 'Project', value: 'beta', options: [{ value: 'alpha', label: 'Alpha' }, { value: 'beta', label: 'Beta' }] }]),
+    /<label>Project\s*<select name="project"><option value="">Any<\/option><option value="alpha">Alpha<\/option><option value="beta" selected>Beta<\/option><\/select>/);
+  assert.deepEqual(activeFilters([{ key: 'project', label: 'Project', value: 'beta', options: [{ value: 'beta', label: 'Beta' }] }]), ['Project: Beta']);
+});
+
 // ── Set up a project (SP-127) ────────────────────────────────────────────────
 
 /**
@@ -3067,8 +3080,9 @@ test('the Pipeline Status pod: each stage\'s next time or "running", a dash for 
     { name: 'Review', logged: true, running: false, nextDue: null },
     { name: 'Intake', logged: false, running: false, nextDue: null },
   ] }, timeOf);
-  const text = html.replace(/<[^>]*>/g, '');
-  assert.equal(text, 'Relay [17:45] · Build running · Review – · Intake –');
+  // Cells joined with a bar, so the order and the name/time pairing both show.
+  const cells = [...html.matchAll(/<span class="([^"]*)"[^>]*>([^<]*)<\/span>/g)].map((m) => m[2]);
+  assert.equal(cells.join('|'), 'Pipeline Stages|Relay|[17:45]|Build|running|Review|–|Intake|–');
   assert.match(html, /title="Intake: no passes logged yet"/);
   assert.match(html, /title="Review: the next pass&#39;s time is not known yet"/);
   assert.match(html, /class="stage running"/);
@@ -3078,6 +3092,50 @@ test('the Pipeline Status pod: each stage\'s next time or "running", a dash for 
   assert.equal(PIPELINE_UNAVAILABLE, 'Pipeline Status unavailable');
   // A stage's name is escaped like every other text the page draws.
   assert.doesNotMatch(renderPipelinePod({ stages: [{ name: '<b>x', logged: false }] }, timeOf), /<b>x/);
+});
+
+test('the pod reads as a small table (SP-194): a "Pipeline Stages" heading, one stage per row in two columns, bold names, a running stage green, on light blue', () => {
+  const timeOf = (iso) => `[${iso.slice(11, 16)}]`;
+  const html = renderPipelinePod({ stages: [
+    { name: 'Relay', logged: true, running: false, nextDue: '2026-11-09T17:45:00.000Z' },
+    { name: 'Build', logged: true, running: true, nextDue: null },
+    { name: 'Review', logged: true, running: false, nextDue: '2026-11-09T18:10:00.000Z' },
+    { name: 'Intake', logged: true, running: false, nextDue: '2026-11-09T18:04:00.000Z' },
+  ] }, timeOf);
+  // The heading comes first, then the grid holding every cell.
+  assert.match(html, /^<span class="heading">Pipeline Stages<\/span><span class="stages">/);
+  // No table inside the button: HTML does not allow one there.
+  assert.doesNotMatch(html, /<(table|tr|td|th|div|h[1-6]|p)\b/);
+  // Two cells per stage, name then time, in Relay, Build, Review, Intake order.
+  const grid = html.slice(html.indexOf('<span class="stages">') + '<span class="stages">'.length, -'</span>'.length);
+  const cells = [...grid.matchAll(/<span class="([^"]*)"[^>]*>([^<]*)<\/span>/g)].map((m) => [m[1], m[2]]);
+  assert.deepEqual(cells, [
+    ['stage', 'Relay'], ['time', '[17:45]'],
+    ['stage running', 'Build'], ['time running', 'running'],
+    ['stage', 'Review'], ['time', '[18:10]'],
+    ['stage', 'Intake'], ['time', '[18:04]'],
+  ]);
+  // Only the running stage carries `running`.
+  assert.equal((html.match(/ running"/g) || []).length, 2);
+  const css = readFileSync(WEB('app.css'), 'utf8');
+  const rule = (selector) => {
+    const at = css.indexOf(`${selector} {`);
+    assert.notEqual(at, -1, `app.css has a ${selector} rule`);
+    return css.slice(at, css.indexOf('}', at));
+  };
+  const pod = rule('.toolbar .pipeline-pod');
+  assert.match(pod, /background: #eaf5fe;/, 'the page\'s light blue, as on the Files Made box');
+  assert.match(pod, /flex-direction: column;/, 'the heading sits above the stages');
+  assert.match(rule('.toolbar .pipeline-pod .stages'), /display: grid; grid-template-columns: auto auto;/, 'two lined-up columns');
+  assert.match(rule('.toolbar .pipeline-pod .stage'), /font-weight: 700;/, 'stage names are bold');
+  const green = rule('.toolbar .pipeline-pod .running').match(/color: (#[0-9a-fA-F]{6});/);
+  assert.ok(green, 'a running stage has its own colour');
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(green[1].slice(i, i + 2), 16));
+  assert.ok(g > r * 2 && g > b * 2, `${green[1]} is a green`);
+  assert.ok(contrast(green[1], '#eaf5fe') >= 4.5, 'the green reads on the light blue (WCAG AA for small text)');
+  // The button is unchanged: same class, still opens the dialog.
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  assert.match(app, /<button type="button" class="pipeline-pod" aria-haspopup="dialog" title="Open Pipeline Status"><\/button>/);
 });
 
 test('the Tasks page puts the pod between the search field and Board/List, fills it on draw and once a minute, and a failed read touches only the pod (SP-168)', () => {
@@ -3301,6 +3359,18 @@ test.describe('Files Made: the files a ticket made, from its newest merge note',
     assert.deepEqual(sorted('when', 'descending'), ['A-3', 'A-1', 'A-4', 'A-5', 'A-2'], 'newest first');
   });
 
+  test('Ticket # sorts by the ticket\'s number, not as text: SP-9 before SP-10 (SP-193)', () => {
+    const list = [T('SP-10'), T('SP-9'), T('SP-193'), T('SP-2'), T('SP-9')];
+    list[4].name = 'second SP-9';
+    const by = (direction) => sortTickets(list, { column: 'id', direction });
+    assert.deepEqual(ids(by('ascending')), ['SP-2', 'SP-9', 'SP-9', 'SP-10', 'SP-193']);
+    assert.equal(by('ascending')[2].name, 'second SP-9', 'ties keep the page\'s order');
+    assert.deepEqual(ids(by('descending')), ['SP-193', 'SP-10', 'SP-9', 'SP-9', 'SP-2']);
+    assert.deepEqual(nextSort(nextSort(null, 'id'), 'id'), { column: 'id', direction: 'descending' });
+    const up = renderSortHeadings({ column: 'id', direction: 'ascending' });
+    assert.match(up, /<th class="id" aria-sort="ascending"><button[^>]*data-sort="id">Ticket # <span class="arrow" aria-hidden="true">▲/);
+  });
+
   test('no sort, or a column it does not know, keeps the page\'s order, and the tickets are never changed', () => {
     const before = ids(tickets);
     assert.deepEqual(ids(sortTickets(tickets, null)), before);
@@ -3321,7 +3391,8 @@ test.describe('Files Made: the files a ticket made, from its newest merge note',
   test('the headings are buttons; only the sorted one has an arrow and aria-sort; Actions is plain', () => {
     const none = renderSortHeadings(null);
     assert.equal((none.match(/<button type="button" class="sort"/g) || []).length, SORT_COLUMNS.length);
-    assert.deepEqual(SORT_COLUMNS.map((c) => c.label), ['Ticket', 'Priority', 'Tags', 'Assigned To', 'Last Change']);
+    assert.deepEqual(SORT_COLUMNS.map((c) => c.label), ['Ticket #', 'Ticket', 'Priority', 'Tags', 'Assigned To', 'Last Change']);
+    assert.match(none, /^<tr><th class="id"><button type="button" class="sort" data-sort="id">Ticket #<\/button><\/th><th class="name">/, 'Ticket # is the left-most heading (SP-193)');
     assert.doesNotMatch(none, /aria-sort|▲|▼/);
     assert.match(none, /<th class="actions">Actions<\/th>/);
     const up = renderSortHeadings({ column: 'priority', direction: 'ascending' });
@@ -3353,8 +3424,20 @@ test.describe('Files Made: the files a ticket made, from its newest merge note',
     const app = readFileSync(WEB('app.mjs'), 'utf8');
     assert.match(app, /<table class="sortable"><thead>\$\{renderSortHeadings\(null\)\}<\/thead>/);
     assert.match(app, /<tr data-id="\$\{escapeHtml\(t\.id\)\}">/);
+    // SP-193: the id is the first cell, a link to the ticket, and the name cell no longer repeats it.
+    const row = /const row = \(status\) => \(t\) => `[\s\S]*?<\/tr>`;/.exec(app)[0];
+    assert.match(row, /<tr data-id="[^\n]*">\s*<td class="id"><a href="\/t\/\$\{encodeURIComponent\(t\.id\)\}">\$\{escapeHtml\(t\.id\)\}<\/a><\/td>\s*<td class="name">/);
+    const nameCell = /<td class="name">.*<\/td>/.exec(row)[0];
+    assert.doesNotMatch(nameCell, /escapeHtml\(t\.id\)/, 'the name cell shows only the name');
+    assert.match(nameCell, /ANSWER_IN_NOTE/, 'the answer-in note stays in the name cell');
+    assert.equal((row.match(/<td class="/g) || []).length, SORT_COLUMNS.length + 1, 'one cell per heading, plus Actions');
     const css = readFileSync(WEB('app.css'), 'utf8');
     assert.match(css, /\.group table\.sortable th \{ color: #000; font-weight: 700; \}/);
+    // SP-193: Ticket # is narrow; the name keeps most of the width, and the set widths leave Last Change room.
+    const width = (key) => Number(new RegExp(`\\.group th\\.${key} \\{ width: (\\d+)%; \\}`).exec(css)?.[1]);
+    assert.ok(width('id') > 0 && width('id') < width('name'), 'Ticket # narrower than Ticket');
+    const set = ['id', 'name', 'priority', 'tags', 'assignee', 'actions'].reduce((sum, k) => sum + width(k), 0);
+    assert.ok(set <= 76, `the set widths (${set}%) leave Last Change room for its date`);
     assert.match(css, /^th \{ color: var\(--quiet\); font-weight: 500;/m, 'every other table keeps the grey heading');
   });
 }

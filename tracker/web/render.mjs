@@ -332,10 +332,14 @@ export const PIPELINE_UNAVAILABLE = 'Pipeline Status unavailable';
 
 /**
  * The Pipeline Status pod's contents on the Tasks page (SP-168), from GET
- * /pipeline: one short item per stage, "Relay 10:45 · Build running ·
- * Review 11:10 · Intake 11:04", as HTML. `timeOf` turns an ISO time into the
- * page's own clock time. A stage with no pass logged yet, or no next time
- * known, shows a dash, its title saying which. A missing or malformed answer
+ * /pipeline, as HTML: the heading "Pipeline Stages", then one row per stage
+ * (SP-194), its name on the left and its next time (or "running") on the
+ * right, "Relay 10:45 / Build running / Review 11:10 / Intake 11:04". The pod
+ * is a button, and a table is not allowed inside one, so the two columns are
+ * a CSS grid of spans (`.stages` in app.css). `timeOf` turns an ISO time into
+ * the page's own clock time. A stage with no pass logged yet, or no next time
+ * known, shows a dash, its title saying which. A running stage's two cells
+ * carry `running`, which app.css draws green. A missing or malformed answer
  * says PIPELINE_UNAVAILABLE.
  */
 export function renderPipelinePod(answer, timeOf) {
@@ -357,9 +361,11 @@ export function renderPipelinePod(answer, timeOf) {
       shown = timeOf(s.nextDue);
       title = `${s.name}: next pass due ${shown}`;
     }
-    return `<span class="stage${s.running ? ' running' : ''}" title="${escapeHtml(title)}">${escapeHtml(s.name)} ${escapeHtml(shown)}</span>`;
+    const cls = s.running ? ' running' : '';
+    const tip = escapeHtml(title);
+    return `<span class="stage${cls}" title="${tip}">${escapeHtml(s.name)}</span><span class="time${cls}" title="${tip}">${escapeHtml(shown)}</span>`;
   };
-  return stages.map(item).join('<span class="sep" aria-hidden="true"> · </span>');
+  return `<span class="heading">Pipeline Stages</span><span class="stages">${stages.map(item).join('')}</span>`;
 }
 
 /**
@@ -1454,6 +1460,7 @@ export const PRIORITY_ORDER = Object.freeze(['urgent', 'high', 'normal', 'low'])
 
 /** The columns a stage's table sorts on, in the order they are drawn, with the class each cell wears. */
 export const SORT_COLUMNS = Object.freeze([
+  { key: 'id', label: 'Ticket #' },
   { key: 'name', label: 'Ticket' },
   { key: 'priority', label: 'Priority' },
   { key: 'tags', label: 'Tags' },
@@ -1468,7 +1475,13 @@ const rankOf = (p) => {
   const i = PRIORITY_ORDER.indexOf(String(p ?? '').toLowerCase());
   return i === -1 ? null : i;
 };
+/** SP-193: the number after a ticket id's prefix (`SP-12` gives 12), or null when it has none. */
+const numberOf = (id) => {
+  const m = /(\d+)\s*$/.exec(String(id ?? ''));
+  return m ? Number(m[1]) : null;
+};
 const COMPARE = {
+  id: (a, b) => lastIfMissing((x, y) => x - y)(numberOf(a.id), numberOf(b.id)) || byText(String(a.id ?? ''), String(b.id ?? '')),
   name: (a, b) => byText(String(a.name ?? ''), String(b.name ?? '')),
   priority: (a, b) => lastIfMissing((x, y) => x - y)(rankOf(a.priority), rankOf(b.priority)),
   tags: (a, b) => lastIfMissing(byText)(a.tags?.[0] ?? null, b.tags?.[0] ?? null),

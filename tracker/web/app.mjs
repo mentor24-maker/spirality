@@ -1211,7 +1211,8 @@ async function drawProject(slug, view, { adding = false, filed = null, unchecked
   };
   const row = (status) => (t) => `
     <tr data-id="${escapeHtml(t.id)}">
-      <td class="name"><a href="/t/${encodeURIComponent(t.id)}">${escapeHtml(t.name)}</a> <span class="quiet">${escapeHtml(t.id)}</span>${t.answerIn ? ` <span class="answer-in">${escapeHtml(ANSWER_IN_NOTE)}</span>` : ''}</td>
+      <td class="id"><a href="/t/${encodeURIComponent(t.id)}">${escapeHtml(t.id)}</a></td>
+      <td class="name"><a href="/t/${encodeURIComponent(t.id)}">${escapeHtml(t.name)}</a>${t.answerIn ? ` <span class="answer-in">${escapeHtml(ANSWER_IN_NOTE)}</span>` : ''}</td>
       <td class="priority">${t.priority ? escapeHtml(statusName(t.priority)) : '<span class="quiet">–</span>'}</td>
       <td class="tags">${t.tags.map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join('')}</td>
       <td class="assignee">${t.assignee ? escapeHtml(t.assignee) : '<span class="quiet">nobody</span>'}</td>
@@ -1323,12 +1324,13 @@ const searchForm = (term) => `
 
 /**
  * The search results page's address: the term, then each filter chosen on
- * the page's filter row (none on the Tasks page), so a reload or a pasted
- * link shows the same results.
+ * the page's filter row, so a reload or a pasted link shows the same
+ * results. On the Tasks page, which has no filter row, the project chosen
+ * in its project picker goes in as the Project filter (SP-191).
  */
 function searchAddress(term) {
   const params = new URLSearchParams({ q: term });
-  for (const select of main.querySelectorAll('.search-filters select')) {
+  for (const select of main.querySelectorAll('.project-picker select, .search-filters select')) {
     if (select.value) params.set(select.name, select.value);
   }
   return `/search?${params}`;
