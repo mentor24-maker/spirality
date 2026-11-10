@@ -940,7 +940,12 @@ ClickUp seat ids the config holds until then.
    ```
 
    It saves the config's Loop Queue list, plus any `--list <id>` given (one
-   per extra list worth keeping). A project whose config already names no
+   per extra list worth keeping). The only extra list worth keeping is
+   StarCaster's alarm list (the bus, SP-24). StarCaster's Dev Backlog and
+   its client lists (Marinoff & Associates, Delray Beach Tennis Center) are
+   neither saved nor imported: Dane, 2026-11-08, *"StarCaster's other lists
+   can all go away."* Nothing in ClickUp is deleted; ClickUp stays as the
+   archive. A project whose config already names no
    ClickUp list (`loopQueueListId` all zeros, as Spirality's has been since
    its list became a read-only archive) saves only the `--list` ids, and
    refuses with a plain reason when none is given:
