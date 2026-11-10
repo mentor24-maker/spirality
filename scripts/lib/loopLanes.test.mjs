@@ -15,6 +15,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { TRACKER_SEATS } from './expectedSecrets.mjs';
+import { INTERVALS } from './loopSchedule.mjs';
 import scratchGit from '../../lib/scratchGit.js';
 
 const REPO = join(fileURLToPath(new URL('.', import.meta.url)), '..', '..');
@@ -45,7 +46,9 @@ test('every lane has a skill and its own machine sign-in seat', () => {
 });
 
 test('every lane has its own interval, and labels come from the project config, never typed in', () => {
-  for (const lane of lanes()) assert.match(installer, new RegExp(`^\\s+${lane}\\)\\s+echo \\d+ ;;$`, 'm'), `${lane}: no interval_of entry`);
+  // The numbers live in scripts/lib/loopSchedule.mjs, shared with the tracker's Pipeline Status pod (SP-168).
+  assert.match(installer, /^interval_of\(\) \{ PATH="\$LAUNCHD_PATH" node "\$REPO\/scripts\/lib\/loopSchedule\.mjs" interval "\$1"; \}$/m);
+  for (const job of [...lanes(), 'relay']) assert.ok(Object.hasOwn(INTERVALS, job), `${job}: no interval in scripts/lib/loopSchedule.mjs`);
   assert.match(installer, /^PREFIX="\$\(config_value launchdPrefix\)"$/m);
   assert.doesNotMatch(installer, /com\.spirality/);
 });

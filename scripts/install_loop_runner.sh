@@ -52,15 +52,10 @@ TRACKER_DB="$TRACKER_DATA_DIR/tracker.db"
 TRACKER_BACKUP_DIR="$TRACKER_DATA_DIR/backups"
 tracker_configured() { [ -n "$TRACKER_PORT" ]; }
 
-interval_of() {
-  case "$1" in
-    loop-build)  echo 1800 ;;
-    loop-review) echo 1800 ;;
-    loop-intake) echo 1800 ;;
-    relay)       echo 600 ;;
-    *)           echo 3600 ;;
-  esac
-}
+# How often each job wakes, in seconds. The numbers live in one place,
+# scripts/lib/loopSchedule.mjs, which the tracker's Pipeline Status pod reads
+# too (SP-168), so the page never says a different time than the plist.
+interval_of() { PATH="$LAUNCHD_PATH" node "$REPO/scripts/lib/loopSchedule.mjs" interval "$1"; }
 # loaded_line and reload_job: read launchd's list safely, and replace a job
 # only once the old one is really gone.
 # shellcheck source=lib/launchd_reload.sh

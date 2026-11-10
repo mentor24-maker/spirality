@@ -2264,3 +2264,32 @@ test('GET /bus counts the posts on each Team chat ticket the caller has not seen
     assert.equal((await f.call('GET', '/bus', { token: null })).status, 401);
   } finally { await f.cleanup(); }
 });
+
+test('GET /pipeline answers each loop stage from the logs the project config names, to any signed-in caller; times and flags only (SP-168)', async () => {
+  const f = await fixture();
+  try {
+    const logs = join(f.dir, 'logs');
+    mkdirSync(logs);
+    const stamp = (d) => d.toLocaleString('sv-SE').replace('T', ' '); // 2026-11-09 18:22:34, local time
+    const began = new Date('2026-11-09T18:22:34');
+    writeFileSync(join(logs, 'alpha-loop-review.log'), `===== ${stamp(began)} START /loop-review =====\nreport text\n`);
+    const server = await startServer({ store: f.store, port: 0, pipeline: { logDir: logs, slug: 'alpha' } });
+    try {
+      const at = `http://127.0.0.1:${server.address().port}`;
+      for (const token of [f.humanToken, f.machineToken]) {
+        const answer = await f.call('GET', '/pipeline', { token, at });
+        assert.equal(answer.status, 200);
+        assert.deepEqual(answer.body.stages.map((s) => [s.name, s.logged, s.running]), [
+          ['Relay', false, false], ['Build', false, false], ['Review', true, true], ['Intake', false, false],
+        ]);
+        assert.equal(answer.body.stages[2].lastStart, began.toISOString());
+        assert.doesNotMatch(answer.text, /report text/);
+      }
+      assert.equal((await f.call('GET', '/pipeline', { token: null, at })).status, 401);
+    } finally { await new Promise((r) => server.close(r)); }
+    // A tracker started without a usable project config says why, and nothing else changes.
+    const none = await f.call('GET', '/pipeline');
+    assert.equal(none.status, 503);
+    assert.equal(none.body.error, 'no-pipeline');
+  } finally { await f.cleanup(); }
+});

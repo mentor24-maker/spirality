@@ -6,6 +6,8 @@
  *
  * `expect` names, per ticket, what the loop's `waiting` rule says about it.
  */
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import operatorCard from '../lib/operatorCard.js';
 import machineComment from '../lib/machineComment.js';
 import mergeOnComment from '../lib/mergeOnComment.js';
@@ -197,4 +199,31 @@ export function seedDemo(store, { operatorName = substrateConfig.operatorName(),
   }
 
   return { operator: op, loop, token, expect };
+}
+
+/** A local time as the runners write it: `2026-11-09 18:22:34` (date) or `18:22:34` (clock). */
+const pad = (n) => String(n).padStart(2, '0');
+export const logDate = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${logClock(d)}`;
+export const logClock = (d) => `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+
+/**
+ * Scratch loop logs for the demo's Pipeline Status pod (SP-168), in the
+ * runners' own line shapes: the relay ran four minutes ago, Build is running
+ * now, Review and Intake are sleeping until later. Written to `folder` as
+ * `<slug>-<job>.log`, the names tracker/pipeline.mjs reads. Test data only.
+ */
+export function writeDemoLogs(folder, slug, now = new Date()) {
+  const ago = (min) => new Date(now.getTime() - min * 60_000);
+  const lane = (job, start, end, seconds) => [
+    `===== ${logDate(start)} START /${job} =====`,
+    'A pass report, which the pod never shows.',
+    ...(end ? [`===== ${logDate(end)} END /${job} (exit 0 — not a verdict; the pass's report above is) =====`, `[loop-runner] ${logClock(end)} sleeping ${seconds}s before the next /${job}`] : []),
+  ].join('\n');
+  const files = {
+    relay: [`===== ${logDate(ago(4))} START relay — demo =====`, `===== ${logDate(ago(3.9))} END relay — pass complete (exit 0) =====`].join('\n'),
+    'loop-build': lane('loop-build', ago(2), null, 1800),
+    'loop-review': lane('loop-review', ago(20), ago(17), 1800),
+    'loop-intake': lane('loop-intake', ago(9), ago(8), 1800),
+  };
+  for (const [job, text] of Object.entries(files)) writeFileSync(join(folder, `${slug}-${job}.log`), `${text}\n`);
 }

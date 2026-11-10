@@ -280,6 +280,41 @@ export function busLink(answer) {
   };
 }
 
+/** What the Pipeline Status pod says when GET /pipeline could not be read. */
+export const PIPELINE_UNAVAILABLE = 'Pipeline Status unavailable';
+
+/**
+ * The Pipeline Status pod's contents on the Tasks page (SP-168), from GET
+ * /pipeline: one short item per stage, "Relay 10:45 · Build running ·
+ * Review 11:10 · Intake 11:04", as HTML. `timeOf` turns an ISO time into the
+ * page's own clock time. A stage with no pass logged yet, or no next time
+ * known, shows a dash, its title saying which. A missing or malformed answer
+ * says PIPELINE_UNAVAILABLE.
+ */
+export function renderPipelinePod(answer, timeOf) {
+  const stages = Array.isArray(answer?.stages) ? answer.stages : null;
+  if (!stages || !stages.length) return `<span class="unavailable">${escapeHtml(PIPELINE_UNAVAILABLE)}</span>`;
+  const item = (s) => {
+    let shown;
+    let title;
+    if (s.running) {
+      shown = 'running';
+      title = `${s.name}: a pass is running now`;
+    } else if (!s.logged) {
+      shown = '–';
+      title = `${s.name}: no passes logged yet`;
+    } else if (!s.nextDue) {
+      shown = '–';
+      title = `${s.name}: the next pass's time is not known yet`;
+    } else {
+      shown = timeOf(s.nextDue);
+      title = `${s.name}: next pass due ${shown}`;
+    }
+    return `<span class="stage${s.running ? ' running' : ''}" title="${escapeHtml(title)}">${escapeHtml(s.name)} ${escapeHtml(shown)}</span>`;
+  };
+  return stages.map(item).join('<span class="sep" aria-hidden="true"> · </span>');
+}
+
 const CONTEXT_HEADING = "WHAT'S GOING ON";
 
 /**
