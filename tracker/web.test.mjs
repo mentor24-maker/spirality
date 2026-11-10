@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { seedDemo, tickingClock } from './demoData.mjs';
 import { reportsOf, REPORT_RANGES, searchTickets } from './pageData.mjs';
-import { escapeHtml, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel } from './web/render.mjs';
+import { escapeHtml, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, renderContextDocs } from './web/render.mjs';
 import { startServer, setupSettingsOf } from './server.mjs';
 import { saveAnswers, setupFields, setupOf } from './setup.mjs';
 import { DANE_FIELDS as SETUP_FIELDS, STEPS as SETUP_STEPS } from '../scripts/onboard/onboard.mjs';
@@ -2302,7 +2302,7 @@ test('Docs is in the header between Users and Settings, served at /docs to a bro
   assert.match(app, /\} else if \(docsPage\) \{\s*await drawDocs\(\);/);
   const draw = app.slice(app.indexOf('async function drawDocs'), app.indexOf('/** Underline the header link'));
   assert.match(draw, /projects\.find\(\(p\) => p\.slug === savedProject\(\)\) \?\? projects\[0\]/, 'the project picked in the header, else the first');
-  assert.match(draw, /await api\('GET', `\/projects\/\$\{encodeURIComponent\(project\.slug\)\}\/attachments`\)/);
+  assert.match(draw, /api\('GET', `\/projects\/\$\{encodeURIComponent\(project\.slug\)\}\/attachments`\)/);
   assert.match(draw, /`\/tickets\/\$\{encodeURIComponent\(a\.ticket\)\}\/attachments\/\$\{encodeURIComponent\(a\.id\)\}`/, 'downloads use the task\'s own download address');
   assert.match(draw, /download="\$\{escapeHtml\(a\.name\)\}"/);
   assert.match(draw, /<a href="\/t\/\$\{encodeURIComponent\(a\.ticket\)\}">/);
@@ -2310,6 +2310,54 @@ test('Docs is in the header between Users and Settings, served at /docs to a bro
   for (const heading of ['File', 'Task', 'Type', 'Size', 'Added By', 'Added On']) assert.match(draw, new RegExp(`<th>${heading}</th>`), heading);
   assert.match(draw, /No task in .* has a file yet\./, 'an empty project says so in a line');
   assert.doesNotMatch(draw, /\$\{a\.(name|ticketName|addedByName|type)\}/, 'every name is escaped');
+});
+
+test('the Docs page\'s Context Documents list the project\'s own files, each a download and a Remove button, every name escaped; an empty one says so (SP-176)', () => {
+  const words = { size: (n) => `${n} B`, timeOf: (iso) => `at ${iso}` };
+  const project = { slug: 'al pha', name: 'Alpha <One>' };
+  const html = renderContextDocs({ project, docs: [
+    { id: 7, project: 'al pha', name: 'brief "<b>".pdf', type: 'application/pdf', size: 1234, addedByName: 'Dane <D>', createdAt: '2026-11-10T12:00:00Z' },
+    { id: 8, project: 'al pha', name: 'notes.txt', type: 'text/plain', size: 2, addedByName: null, createdAt: '2026-11-09T12:00:00Z' },
+  ] }, words);
+  assert.match(html, /<h2>Context Documents<\/h2>/);
+  assert.match(html, /<button type="button" class="upload-doc">Upload Document<\/button><input type="file" class="doc-file" hidden>/, 'one file at a time');
+  for (const heading of ['File', 'Type', 'Size', 'Added By', 'Added On']) assert.match(html, new RegExp(`<th>${heading}</th>`), heading);
+  assert.match(html, /<a href="\/projects\/al%20pha\/docs\/7" download="brief &quot;&lt;b&gt;&quot;\.pdf">Download<\/a>/, 'always saved, through the project\'s own address');
+  assert.match(html, /data-remove-doc="7" data-name="brief &quot;&lt;b&gt;&quot;\.pdf" aria-label="Remove brief &quot;&lt;b&gt;&quot;\.pdf">Remove<\/button>/);
+  assert.match(html, /<td class="size">1234 B<\/td>/);
+  assert.match(html, /<td class="by">Dane &lt;D&gt;<\/td>/);
+  assert.match(html, /<td class="by"><span class="quiet">unknown<\/span><\/td>/);
+  assert.match(html, /<td class="when">at 2026-11-10T12:00:00Z<\/td>/);
+  assert.ok(html.indexOf('data-doc="7"') < html.indexOf('data-doc="8"'), 'in the order the server lists them (newest first)');
+  assert.doesNotMatch(html, /<b>|<One>|<D>/, 'nothing unescaped');
+  const empty = renderContextDocs({ project, docs: [] }, words);
+  assert.match(empty, /Alpha &lt;One&gt; has no context documents yet\./);
+  assert.doesNotMatch(empty, /<table/);
+  assert.match(empty, /Upload Document/, 'an empty project can still upload');
+});
+
+test('the Docs page uploads one context document as the file itself, asks before removing one, reads the list back, and says when either did not happen (SP-176)', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const draw = app.slice(app.indexOf('async function drawDocs'), app.indexOf('/** Underline the header link'));
+  assert.match(draw, /const docsPath = `\/projects\/\$\{encodeURIComponent\(project\.slug\)\}\/docs`;/);
+  assert.match(draw, /api\('GET', docsPath\)/);
+  assert.ok(draw.indexOf('${documentation}\n    ${renderContextDocs({ project, docs }') > 0 && draw.indexOf('renderContextDocs({ project, docs }') < draw.lastIndexOf('<h2>Task Files</h2>'), 'Context Documents come after Spirality Documentation and before Task Files');
+  const wire = draw.slice(draw.indexOf('function wireContextDocs'));
+  assert.match(wire, /picker\.files\?\.\[0\]/, 'one file at a time');
+  assert.match(wire, /file\.size > MAX_FILE/, 'an 11 MB file is refused before it is sent');
+  assert.match(wire, /is over 10 MB\. Upload a smaller file; nothing was saved\./);
+  assert.match(wire, /await uploadFile\(null, file, docsPath\);/, 'the same raw-file upload a ticket\'s attachment uses');
+  assert.match(wire, /Not uploaded: \$\{err\.message\}/);
+  assert.match(wire, /if \(!confirm\(`Remove \$\{name\} from \$\{project\.name\}\? It cannot be brought back\.`\)\) return;/, 'asks first, naming the file; cancelled, nothing is sent');
+  assert.ok(wire.indexOf('confirm(') < wire.indexOf("api('DELETE'"), 'asks before it removes');
+  assert.match(wire, /await api\('DELETE', `\$\{docsPath\}\/\$\{encodeURIComponent\(id\)\}`\);/);
+  assert.match(wire, /Not removed: \$\{err\.message\}/);
+  assert.match(wire, /const back = await api\('GET', docsPath\)\.catch\(\(\) => null\);/, 'the removal is read back');
+  assert.match(wire, /but \$\{back \? 'it is still listed when read back' : 'the list could not be read back'\}/);
+  assert.match(wire, /note\.textContent = text;/, 'the note is text, never HTML');
+  const up = /async function uploadFile[\s\S]*?\n\}/.exec(app)[0];
+  assert.match(up, /to = `\/tickets\/\$\{encodeURIComponent\(ticketId\)\}\/attachments`/, 'a ticket\'s upload still goes to its own address');
+  assert.match(up, /res = await fetch\(to, \{/);
 });
 
 test('the Docs page lists Spirality\'s documentation by title above Task Files, and a file opens at /docs/spirality/<path> drawn as Markdown (SP-175)', async () => {

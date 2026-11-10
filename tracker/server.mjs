@@ -36,7 +36,11 @@
  * those headers are ones only the page's own script can send, never a form
  * on another site. A download (`GET /tickets/<id>/attachments/<n>`) is
  * always sent as a file to save, never a page to open, so an uploaded HTML
- * file cannot run as the tracker's own page.
+ * file cannot run as the tracker's own page. A project's context documents
+ * (`/projects/<slug>/docs`) are uploaded and downloaded the same
+ * way, listed by `GET /projects/<slug>/docs` and removed one at a time by
+ * `DELETE /projects/<slug>/docs/<n>`; only someone who can see the project
+ * reaches any of them.
  * A refused write writes nothing. A token never appears in an answer or a
  * log line: the log names the actor id, never the header.
  *
@@ -293,9 +297,9 @@ function sessionToken(req) {
   return null;
 }
 
-/** Whether the request is an attachment's upload: the one write whose body is the file itself. */
+/** Whether the request is a file's upload (a ticket's attachment or a project's context document): the writes whose body is the file itself. */
 function isUpload(req, pathname) {
-  return req.method === 'POST' && /^\/tickets\/[^/]+\/attachments$/.test(pathname)
+  return req.method === 'POST' && /^\/(?:tickets\/[^/]+\/attachments|projects\/[^/]+\/docs)$/.test(pathname)
     && /^application\/octet-stream\s*(?:;|$)/i.test(req.headers['content-type'] ?? '');
 }
 
@@ -859,6 +863,9 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
         if (err instanceof StoreError && err.code === 'has-tickets') {
           throw new HttpError(409, 'has-tickets', err.message, { project: project.slug, tickets: err.tickets });
         }
+        if (err instanceof StoreError && err.code === 'has-docs') {
+          throw new HttpError(409, 'has-docs', err.message, { project: project.slug, docs: err.docs });
+        }
         throw err;
       }
       log(`deleted project ${gone.slug} (prefix ${gone.prefix}) actor=${me.id}`);
@@ -878,6 +885,59 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     if (parts.length === 3 && parts[0] === 'projects' && parts[2] === 'attachments' && method === 'GET') {
       const project = requireProject(parts[1], me);
       return [200, { project: project.slug, attachments: store.listProjectAttachments(project.slug) }];
+    }
+
+    // A project's context documents: files kept on the project,
+    // not on one ticket. The list (no bytes), one upload (the raw file as
+    // the body, as a ticket's attachment), one download (always saved) and
+    // one removal, read back gone.
+    if (parts.length === 3 && parts[0] === 'projects' && parts[2] === 'docs') {
+      const project = requireProject(parts[1], me);
+      if (method === 'GET') return [200, { project: project.slug, docs: store.listProjectDocs(project.slug) }];
+      if (method === 'POST') {
+        if (!isUpload(req, url.pathname)) {
+          throw new HttpError(415, 'file-only', 'a document is sent as the file itself (content-type: application/octet-stream); nothing was saved.');
+        }
+        let name;
+        try {
+          name = decodeURIComponent(String(req.headers['x-file-name'] ?? ''));
+        } catch {
+          throw new HttpError(400, 'bad-name', "the file's name (x-file-name) is not validly encoded; nothing was saved.");
+        }
+        if (!name.trim()) throw new HttpError(400, 'bad-name', "say the file's name in x-file-name; nothing was saved.");
+        const bytes = await readFile(req);
+        const made = store.addProjectDoc({ project: project.slug, name, type: req.headers['x-file-type'], bytes, actor: me.id });
+        log(`added context document ${made.name} (${made.size} bytes) to ${project.slug} actor=${me.id}`);
+        return [201, made];
+      }
+    }
+    if (parts.length === 4 && parts[0] === 'projects' && parts[2] === 'docs' && (method === 'GET' || method === 'DELETE')) {
+      const project = requireProject(parts[1], me);
+      const id = /^[0-9]+$/.test(parts[3]) ? Number(parts[3]) : null;
+      const unknown = () => new HttpError(404, 'unknown-doc', `${project.name} has no context document ${parts[3]}.`);
+      if (method === 'GET') {
+        const file = id == null ? null : store.getProjectDoc(project.slug, id);
+        if (!file) throw unknown();
+        return [200, null, null, {
+          'content-type': file.type,
+          'content-length': file.bytes.length,
+          'content-disposition': downloadDisposition(file.name),
+          'x-content-type-options': 'nosniff',
+          'content-security-policy': "default-src 'none'; sandbox",
+          'cache-control': 'private, no-cache',
+          body: file.bytes,
+        }];
+      }
+      if (id == null) throw unknown();
+      let gone;
+      try {
+        gone = store.removeProjectDoc({ project: project.slug, id, actor: me.id });
+      } catch (err) {
+        if (err instanceof StoreError && err.code === 'unknown-doc') throw unknown();
+        throw err;
+      }
+      log(`removed context document ${gone.id} (${gone.name}) from ${project.slug} actor=${me.id}`);
+      return [200, { removed: gone.id, name: gone.name, project: project.slug }];
     }
 
     // The Docs page's documentation section: every
