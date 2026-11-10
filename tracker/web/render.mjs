@@ -378,6 +378,62 @@ export function renderCommands({ comments = [] }) {
   return `<div class="commands">${rows.join('')}</div>`;
 }
 
+const FILES_MADE_HEAD = 'Files made by this ticket:';
+const MERGE_NOTE = /^Merged: PR #\d+/m;
+const FILE_LINE = /^- (.+): (\S+)$/;
+const FILES_MORE = /^- and (\d+) more:/;
+
+/**
+ * The newest merge note's file list (SP-166 writes it, SP-170 draws it):
+ * `{ files: [{ path, href }], more }`, `more` the count the note left
+ * unnamed. Only a loop's comment counts (a person quoting one is not a
+ * merge), and only an http(s) link is kept: any other line under the
+ * heading is left out, never drawn as a link.
+ */
+function newestFilesNote(comments = []) {
+  for (const c of [...comments].reverse()) {
+    if (!c?.machine) continue;
+    const body = String(c.body ?? '').replace(/\r\n?/g, '\n');
+    if (!MERGE_NOTE.test(body)) continue;
+    const lines = body.split('\n');
+    const start = lines.findIndex((l) => l.trim() === FILES_MADE_HEAD);
+    if (start === -1) continue;
+    const files = [];
+    let more = 0;
+    for (const raw of lines.slice(start + 1)) {
+      const line = raw.trim();
+      if (!line.startsWith('- ')) break;
+      const extra = FILES_MORE.exec(line);
+      if (extra) { more = Number(extra[1]); continue; }
+      const m = FILE_LINE.exec(line);
+      if (m && /^https?:\/\//i.test(m[2])) files.push({ path: m[1], href: m[2] });
+    }
+    return { files, more };
+  }
+  return { files: [], more: 0 };
+}
+
+/**
+ * The files a ticket made, from the newest merge note that lists them:
+ * `[{ path, href }]`, [] when no merge note has a list.
+ */
+export function filesMade(comments = []) {
+  return newestFilesNote(comments).files;
+}
+
+/**
+ * The Files Made box for a ticket's page, as HTML: each file's path, escaped,
+ * linking to the file in a new tab. '' when the ticket made no file, so
+ * nothing is drawn, not even the heading.
+ */
+export function renderFilesMade({ comments = [] }) {
+  const { files, more } = newestFilesNote(comments);
+  if (!files.length) return '';
+  const rows = files.map((f) => `<li>${link(f.href, escapeHtml(f.path))}</li>`);
+  const rest = more ? `<p class="quiet">And ${escapeHtml(more)} more: see the pull request's Files changed tab.</p>` : '';
+  return `<section class="files-made"><h2>Files Made</h2><ul>${rows.join('')}</ul>${rest}</section>`;
+}
+
 /**
  * Where a ticket sits, in one quiet line, for each status that is the
  * machine's turn (SP-118): shown in place of a card's ask, which is only his
