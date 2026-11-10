@@ -2181,9 +2181,13 @@ async function drawUsers(done = '', problem = '') {
  * Task Files table, newest first. The project is the one picked on the
  * Projects page (shown in the header), else the first. A file's name
  * downloads it through the task's own download address; the task links to
- * its page. Look-only: adding, renaming and removing are SP-177's.
+ * its page. SP-177 makes the table changeable: Add File puts a file on one
+ * of the project's tasks (the same upload the New Task form uses), Rename
+ * changes a file's name only, and Remove, once confirmed by name and task,
+ * deletes it. Each is read back from the table's own list before the page
+ * says it worked.
  */
-async function drawDocs() {
+async function drawDocs(done = '', problem = '') {
   const { projects } = await api('GET', '/projects');
   setTitle('Docs · Tracker');
   putTrail([{ label: 'Docs' }]);
@@ -2192,25 +2196,103 @@ async function drawDocs() {
     return;
   }
   const project = projects.find((p) => p.slug === savedProject()) ?? projects[0];
-  const { attachments } = await api('GET', `/projects/${encodeURIComponent(project.slug)}/attachments`);
+  const listPath = `/projects/${encodeURIComponent(project.slug)}/attachments`;
+  const { attachments } = await api('GET', listPath);
+  const { tickets } = await api('GET', `/projects/${encodeURIComponent(project.slug)}/tickets`);
   const row = (a) => {
     const href = `/tickets/${encodeURIComponent(a.ticket)}/attachments/${encodeURIComponent(a.id)}`;
+    const data = `data-ticket="${escapeHtml(a.ticket)}" data-file="${escapeHtml(a.id)}" data-name="${escapeHtml(a.name)}" data-task-name="${escapeHtml(a.ticketName)}"`;
     return `<tr data-file="${escapeHtml(a.id)}">
       <td class="name"><a href="${href}" download="${escapeHtml(a.name)}">${escapeHtml(a.name)}</a></td>
       <td class="task"><a href="/t/${encodeURIComponent(a.ticket)}">${escapeHtml(a.ticket)}</a> ${escapeHtml(a.ticketName)}</td>
       <td class="type">${escapeHtml(a.type)}</td>
       <td class="size">${escapeHtml(sizeOf(a.size))}</td>
       <td class="by">${a.addedByName ? escapeHtml(a.addedByName) : '<span class="quiet">unknown</span>'}</td>
-      <td class="when">${escapeHtml(when(a.createdAt))}</td></tr>`;
+      <td class="when">${escapeHtml(when(a.createdAt))}</td>
+      <td class="actions"><button type="button" class="rename-file" ${data} aria-label="Rename ${escapeHtml(a.name)}">Rename</button>
+        <button type="button" class="remove-file" ${data} aria-label="Remove ${escapeHtml(a.name)} from ${escapeHtml(a.ticket)}">Remove</button></td></tr>`;
   };
   main.innerHTML = `
     <h1>Docs</h1>
     <p class="quiet">Files kept on the tasks of ${escapeHtml(project.name)}. Pick another project on the <a href="/projects">Projects</a> page.</p>
+    <p class="note${problem ? ' error' : ' quiet'}" role="status">${escapeHtml(problem || done)}</p>
     <h2>Task Files</h2>
+    ${tickets.length ? `<form class="add-file">
+      <label for="add-file-task">Add a file to a task</label>
+      <div class="row"><select id="add-file-task" required><option value="">Pick a task…</option>${tickets.map((t) => `<option value="${escapeHtml(t.id)}">${escapeHtml(t.id)} ${escapeHtml(t.name)}</option>`).join('')}</select>
+        <input id="add-file-file" type="file" required aria-label="The file to add"><button type="submit">Add File</button></div>
+      <span class="hint quiet">Up to 10 MB. It shows here and on the task's own page.</span>
+    </form>` : ''}
     ${attachments.length
-    ? `<table class="projects task-files"><thead><tr><th>File</th><th>Task</th><th>Type</th><th>Size</th><th>Added By</th><th>Added On</th></tr></thead>
+    ? `<table class="projects task-files"><thead><tr><th>File</th><th>Task</th><th>Type</th><th>Size</th><th>Added By</th><th>Added On</th><th><span class="hidden">Actions</span></th></tr></thead>
       <tbody>${attachments.map(row).join('')}</tbody></table>`
     : `<p class="quiet">No task in ${escapeHtml(project.name)} has a file yet.</p>`}`;
+  const note = main.querySelector('.note');
+  const busy = (text) => { note.className = 'note quiet'; note.textContent = text; };
+  const refused = (control, text) => { note.className = 'note error'; note.textContent = text; if (control) control.disabled = false; };
+  const again = (text, failed) => drawAgain(() => drawDocs(failed ? '' : text, failed ? text : ''))
+    .catch((err) => (err instanceof SignedOut ? drawSignIn() : showError(err)));
+  // The table's own list, read again: what each change is checked against.
+  const listedNow = async () => (await api('GET', listPath, undefined, { unrecorded: true })).attachments;
+  const form = main.querySelector('form.add-file');
+  form?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const ticket = form.querySelector('#add-file-task').value;
+    const file = form.querySelector('#add-file-file').files?.[0];
+    const button = form.querySelector('button');
+    if (!ticket || !file) return refused(null, 'Pick a task and a file first; nothing was added.');
+    if (file.size > MAX_FILE) return refused(null, `${file.name} is over 10 MB. Add a smaller one; nothing was added.`);
+    button.disabled = true;
+    busy(`Adding ${file.name} to ${ticket}…`);
+    let made;
+    try {
+      made = await uploadFile(ticket, file);
+    } catch (err) {
+      if (err instanceof SignedOut) return drawSignIn(`You were signed out; ${file.name} was not added.`);
+      return refused(button, `Not added: ${err.message}`);
+    }
+    const back = await listedNow().catch(() => null);
+    const listed = back?.some((a) => a.id === made.id && a.ticket === ticket);
+    again(listed ? `Added ${made.name} to ${ticket}.` : `The tracker said ${made.name} was added to ${ticket}, but it is not in the table when read back.`, !listed);
+  });
+  for (const button of main.querySelectorAll('button.rename-file')) {
+    button.addEventListener('click', async () => {
+      const { ticket, file, name } = button.dataset;
+      const typed = prompt(`New name for ${name} (on ${ticket}):`, name);
+      if (typed == null) return;
+      if (!typed.trim()) return refused(null, `Not renamed: a file needs a name. ${name} is unchanged.`);
+      button.disabled = true;
+      busy(`Renaming ${name}…`);
+      let renamed;
+      try {
+        renamed = await api('PATCH', `/tickets/${encodeURIComponent(ticket)}/attachments/${encodeURIComponent(file)}`, { name: typed });
+      } catch (err) {
+        if (err instanceof SignedOut) return drawSignIn(`You were signed out; ${name} was not renamed.`);
+        return refused(button, `Not renamed: ${err.message}`);
+      }
+      const back = await listedNow().catch(() => null);
+      const now = back?.find((a) => String(a.id) === file)?.name;
+      if (!renamed.changed && now === name) return again(`${name} already has that name; nothing changed.`, false);
+      again(now === renamed.name ? `Renamed ${name} to ${now}.` : `The tracker said ${name} was renamed to ${renamed.name}, but it reads back as ${now ?? 'missing'}.`, now !== renamed.name);
+    });
+  }
+  for (const button of main.querySelectorAll('button.remove-file')) {
+    button.addEventListener('click', async () => {
+      const { ticket, file, name, taskName } = button.dataset;
+      if (!confirm(`Remove ${name} from ${ticket} ${taskName}? This cannot be undone from the page.`)) return;
+      button.disabled = true;
+      busy(`Removing ${name} from ${ticket}…`);
+      try {
+        await api('DELETE', `/tickets/${encodeURIComponent(ticket)}/attachments/${encodeURIComponent(file)}`);
+      } catch (err) {
+        if (err instanceof SignedOut) return drawSignIn(`You were signed out; ${name} was not removed.`);
+        return refused(button, `Not removed: ${err.message}`);
+      }
+      const back = await listedNow().catch(() => null);
+      const gone = back != null && !back.some((a) => String(a.id) === file);
+      again(gone ? `Removed ${name} from ${ticket}.` : `The tracker said ${name} was removed from ${ticket}, but it is still listed when read back.`, !gone);
+    });
+  }
 }
 
 /** Underline the header link (or the bell, for Waiting on you) for the screen showing. */

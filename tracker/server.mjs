@@ -36,7 +36,9 @@
  * those headers are ones only the page's own script can send, never a form
  * on another site. A download (`GET /tickets/<id>/attachments/<n>`) is
  * always sent as a file to save, never a page to open, so an uploaded HTML
- * file cannot run as the tracker's own page.
+ * file cannot run as the tracker's own page. Renaming one (`PATCH
+ * /tickets/<id>/attachments/<n>`, `{ name }`) and removing one (`DELETE`)
+ * are ordinary JSON calls.
  * A refused write writes nothing. A token never appears in an answer or a
  * log line: the log names the actor id, never the header.
  *
@@ -139,7 +141,7 @@ const NO_MATCH = 'That email and password do not match.';
 const MAX_BODY = 1024 * 1024;
 
 /** Store refusals that mean "no such thing", answered 404 rather than 400. */
-const NOT_FOUND_CODES = new Set(['unknown-ticket', 'unknown-project', 'unknown-invite']);
+const NOT_FOUND_CODES = new Set(['unknown-ticket', 'unknown-project', 'unknown-invite', 'unknown-attachment']);
 /** setRole's refusals that are not a bad field: a non-admin is forbidden, and the last admin's change conflicts with the tracker's state. */
 const ROLE_REFUSALS = Object.freeze({ 'not-admin': 403, 'last-admin': 409 });
 /** addMember's and removeMember's refusals that are not a bad field. */
@@ -976,6 +978,29 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
         log(`attached ${made.name} (${made.size} bytes) to ${ticket.id} actor=${me.id}`);
         return [201, made];
       }
+    }
+    // Rename one file (its name only, the upload's name rules) or remove it
+    // (the Docs page). Each writes an `attachment` event naming the
+    // caller, and the store reads it back before answering.
+    if (parts.length === 4 && parts[0] === 'tickets' && parts[2] === 'attachments' && (method === 'PATCH' || method === 'DELETE')) {
+      const body = method === 'PATCH' ? await readJson(req) : null;
+      if (body) {
+        checkBody(body, me, ['name']);
+        if (typeof body.name !== 'string' || !body.name.trim()) {
+          throw new HttpError(400, 'bad-name', "say the file's new name; nothing was changed.");
+        }
+      }
+      const ticket = requireTicket(parts[1], me);
+      if (!/^[0-9]+$/.test(parts[3])) throw new HttpError(404, 'unknown-attachment', `ticket ${ticket.id} has no attachment ${parts[3]}.`);
+      const id = Number(parts[3]);
+      if (body) {
+        const renamed = store.renameAttachment({ ticket: ticket.id, id, name: body.name, actor: me.id });
+        if (renamed.changed) log(`renamed attachment ${id} on ${ticket.id} to ${renamed.name} actor=${me.id}`);
+        return [200, renamed];
+      }
+      const gone = store.removeAttachment({ ticket: ticket.id, id, actor: me.id });
+      log(`removed attachment ${id} (${gone.name}) from ${ticket.id} actor=${me.id}`);
+      return [200, { removed: gone.id, ticket: ticket.id, name: gone.name }];
     }
     if (parts.length === 4 && parts[0] === 'tickets' && parts[2] === 'attachments' && method === 'GET') {
       const ticket = requireTicket(parts[1], me);

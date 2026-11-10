@@ -233,6 +233,13 @@ form.invite input { flex: 1; font: inherit; padding: 0.5rem; box-sizing: border-
 form.invite select { font: inherit; padding: 0.45rem; }
 form.invite .row + label { margin-top: 0.75rem; }
 form.invite .hint { display: block; font-size: 0.85rem; margin-top: 0.25rem; }
+form.add-file { max-width: 48rem; margin-bottom: 1.5rem; }
+form.add-file label { display: block; font-weight: 600; }
+form.add-file .row { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; margin-top: 0.35rem; }
+form.add-file select { font: inherit; padding: 0.45rem; flex: 1; min-width: 16rem; }
+form.add-file input[type=file] { font: inherit; }
+form.add-file .hint { display: block; font-size: 0.85rem; margin-top: 0.25rem; }
+table.task-files td.actions { white-space: nowrap; }
 table.people, table.invites { max-width: 48rem; }
 table.people select { font: inherit; padding: 0.2rem; }
 /* A project's members (Projects page) or a user's projects (Users page): one per line, an admin's Remove beside each, the Add picker under them. */

@@ -2302,7 +2302,7 @@ test('Docs is in the header between Users and Settings, served at /docs to a bro
   assert.match(app, /\} else if \(docsPage\) \{\s*await drawDocs\(\);/);
   const draw = app.slice(app.indexOf('async function drawDocs'), app.indexOf('/** Underline the header link'));
   assert.match(draw, /projects\.find\(\(p\) => p\.slug === savedProject\(\)\) \?\? projects\[0\]/, 'the project picked in the header, else the first');
-  assert.match(draw, /await api\('GET', `\/projects\/\$\{encodeURIComponent\(project\.slug\)\}\/attachments`\)/);
+  assert.match(draw, /const listPath = `\/projects\/\$\{encodeURIComponent\(project\.slug\)\}\/attachments`;\s*const \{ attachments \} = await api\('GET', listPath\);/);
   assert.match(draw, /`\/tickets\/\$\{encodeURIComponent\(a\.ticket\)\}\/attachments\/\$\{encodeURIComponent\(a\.id\)\}`/, 'downloads use the task\'s own download address');
   assert.match(draw, /download="\$\{escapeHtml\(a\.name\)\}"/);
   assert.match(draw, /<a href="\/t\/\$\{encodeURIComponent\(a\.ticket\)\}">/);
@@ -2310,6 +2310,31 @@ test('Docs is in the header between Users and Settings, served at /docs to a bro
   for (const heading of ['File', 'Task', 'Type', 'Size', 'Added By', 'Added On']) assert.match(draw, new RegExp(`<th>${heading}</th>`), heading);
   assert.match(draw, /No task in .* has a file yet\./, 'an empty project says so in a line');
   assert.doesNotMatch(draw, /\$\{a\.(name|ticketName|addedByName|type)\}/, 'every name is escaped');
+});
+
+test('the Docs table adds, renames and removes task files, each read back, a removal confirmed by file and task (SP-177)', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const draw = app.slice(app.indexOf('async function drawDocs'), app.indexOf('/** Underline the header link'));
+  // Add File: pick one of the project's tasks and a file; the same upload the New Task form uses.
+  assert.match(draw, /await api\('GET', `\/projects\/\$\{encodeURIComponent\(project\.slug\)\}\/tickets`\)/);
+  assert.match(draw, /<button type="submit">Add File<\/button>/);
+  assert.match(draw, /made = await uploadFile\(ticket, file\)/);
+  assert.match(draw, /file\.size > MAX_FILE/, 'too large is said before sending');
+  // Rename: the file's name only, an empty one refused on the page before any call.
+  assert.match(draw, />Rename<\/button>/);
+  assert.match(draw, /if \(!typed\.trim\(\)\) return refused\(null, `Not renamed: a file needs a name/);
+  assert.match(draw, /api\('PATCH', `\/tickets\/\$\{encodeURIComponent\(ticket\)\}\/attachments\/\$\{encodeURIComponent\(file\)\}`, \{ name: typed \}\)/);
+  // Remove: a confirmation naming the file and its task; cancelled, no call.
+  assert.match(draw, />Remove<\/button>/);
+  assert.match(draw, /if \(!confirm\(`Remove \$\{name\} from \$\{ticket\} \$\{taskName\}\?[^`]*`\)\) return;\s*button\.disabled = true;/);
+  assert.match(draw, /api\('DELETE', `\/tickets\/\$\{encodeURIComponent\(ticket\)\}\/attachments\/\$\{encodeURIComponent\(file\)\}`\)/);
+  // Every change is read back from the table's own list before the page says it worked, and a failure is said.
+  assert.equal((draw.match(/await listedNow\(\)/g) ?? []).length, 3);
+  for (const word of ['Not added', 'Not renamed', 'Not removed']) assert.match(draw, new RegExp(`${word}: \\$\\{err\\.message\\}`), word);
+  assert.match(draw, /but it is not in the table when read back/);
+  assert.match(draw, /but it reads back as/);
+  assert.match(draw, /but it is still listed when read back/);
+  assert.doesNotMatch(draw, /\$\{(a|t)\.(name|ticketName|id)\}/, 'every name is escaped');
 });
 
 test('a browser opening /people (an old bookmark) is sent on to /users, never cached; the data call to /people still answers the data', async () => {
