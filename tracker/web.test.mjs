@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { seedDemo, tickingClock } from './demoData.mjs';
 import { reportsOf, REPORT_RANGES, searchTickets } from './pageData.mjs';
-import { escapeHtml, renderComment, renderInline, renderMarkdown, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, PIPELINE_UNAVAILABLE } from './web/render.mjs';
+import { escapeHtml, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, PIPELINE_UNAVAILABLE } from './web/render.mjs';
 import { startServer, setupSettingsOf } from './server.mjs';
 import { saveAnswers, setupFields, setupOf } from './setup.mjs';
 import { DANE_FIELDS as SETUP_FIELDS, STEPS as SETUP_STEPS } from '../scripts/onboard/onboard.mjs';
@@ -2298,7 +2298,7 @@ test('Docs is in the header between Users and Settings, served at /docs to a bro
     assert.equal((await f.call('GET', '/projects/alpha/attachments', { token: null })).status, 401);
   } finally { await f.cleanup(); }
   const app = readFileSync(WEB('app.mjs'), 'utf8');
-  assert.match(app, /docsPage \? 'docs' :/);
+  assert.match(app, /docsPage(?: \|\| docPath)? \? 'docs' :/);
   assert.match(app, /\} else if \(docsPage\) \{\s*await drawDocs\(\);/);
   const draw = app.slice(app.indexOf('async function drawDocs'), app.indexOf('/** Underline the header link'));
   assert.match(draw, /projects\.find\(\(p\) => p\.slug === savedProject\(\)\) \?\? projects\[0\]/, 'the project picked in the header, else the first');
@@ -2310,6 +2310,47 @@ test('Docs is in the header between Users and Settings, served at /docs to a bro
   for (const heading of ['File', 'Task', 'Type', 'Size', 'Added By', 'Added On']) assert.match(draw, new RegExp(`<th>${heading}</th>`), heading);
   assert.match(draw, /No task in .* has a file yet\./, 'an empty project says so in a line');
   assert.doesNotMatch(draw, /\$\{a\.(name|ticketName|addedByName|type)\}/, 'every name is escaped');
+});
+
+test('the Docs page lists Spirality\'s documentation by title above Task Files, and a file opens at /docs/spirality/<path> drawn as Markdown (SP-175)', async () => {
+  const f = await fixture();
+  try {
+    const html = readFileSync(WEB('index.html'), 'utf8');
+    const page = await fetch(`${f.url}/docs/spirality/LOOP_CONTRACT.md`, { headers: { accept: 'text/html' } });
+    assert.equal(page.status, 200);
+    assert.equal(await page.text(), html, 'opening a documentation file directly shows the page');
+    const list = await f.call('GET', '/documentation');
+    assert.equal(list.status, 200);
+    assert.deepEqual(list.body.files.find((d) => d.path === 'LOOP_CONTRACT.md'), { path: 'LOOP_CONTRACT.md', title: 'The loop contract' }, 'its first heading, as written');
+    assert.equal((await f.call('GET', '/documentation', { token: null })).status, 401);
+  } finally { await f.cleanup(); }
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const draw = app.slice(app.indexOf('async function drawDocs'), app.indexOf('/** The page address of a documentation file'));
+  assert.match(draw, /api\('GET', '\/documentation'\)/);
+  assert.ok(draw.indexOf('<h2>Spirality Documentation</h2>') < draw.indexOf('<h2>Task Files</h2>'), 'the documentation comes first');
+  for (const heading of ['Title', 'Path']) assert.match(draw, new RegExp(`<th>${heading}</th>`), heading);
+  assert.match(draw, /<a href="\$\{docAddress\(d\.path\)\}">\$\{escapeHtml\(d\.title\)\}<\/a>/, 'each file by its title, escaped, linking to its page');
+  assert.match(app, /const docAddress = \(path\) => `\/docs\/spirality\/\$\{String\(path\)\.split\('\/'\)\.map\(encodeURIComponent\)\.join\('\/'\)\}`/);
+  assert.match(app, /\} else if \(docPath\) \{\s*await drawDoc\(docPath\);/);
+  assert.match(app, /docsPage \|\| docPath \? 'docs' :/, 'a documentation file keeps Docs underlined in the header');
+  const one = app.slice(app.indexOf('async function drawDoc('), app.indexOf('/** Underline the header link'));
+  assert.match(one, /renderMarkdown\(unwrapDoc\(body\)\)/, 'drawn with the ticket page\'s Markdown drawing, never as raw text');
+  assert.match(one, /<a href="\/docs">Back to Docs<\/a>/);
+  assert.match(one, /<h1>\$\{escapeHtml\(doc\.title\)\}<\/h1>/);
+  assert.match(one, /There is no documentation file at/, 'a missing file says so');
+  // What a contract-like file looks like once drawn: headings, lists and code, not raw text.
+  const drawn = renderMarkdown('## Statuses\n\n- Queued\n- Building\n\n```\nnpm run verify\n```\n');
+  assert.match(drawn, /<h4>Statuses<\/h4>/);
+  assert.match(drawn, /<ul><li>Queued<\/li><li>Building<\/li><\/ul>/);
+  assert.match(drawn, /<pre><code>npm run verify<\/code><\/pre>/);
+});
+
+test('unwrapDoc joins a documentation file\'s hard-wrapped lines, keeps list items, headings, tables and code as written (SP-175)', () => {
+  const text = '# Title\nintro line one\nline two\n\n- **Code rules**: the script\n  does it.\n- Next item\n1. first\n   still first\n\n| a | b |\n| - | - |\n\n```\nkeep\nthese apart\n```\nafter\n---\nend';
+  assert.equal(unwrapDoc(text), '# Title\nintro line one line two\n\n- **Code rules**: the script does it.\n- Next item\n1. first still first\n\n| a | b |\n| - | - |\n\n```\nkeep\nthese apart\n```\nafter\n---\nend');
+  const drawn = renderMarkdown(unwrapDoc('- **Code rules**: the script\n  does it.\n'));
+  assert.equal(drawn, '<ul><li><strong>Code rules</strong>: the script does it.</li></ul>');
+  assert.equal(unwrapDoc(''), '');
 });
 
 test('a browser opening /people (an old bookmark) is sent on to /users, never cached; the data call to /people still answers the data', async () => {

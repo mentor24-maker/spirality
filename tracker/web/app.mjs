@@ -26,7 +26,7 @@
  * an emailed link's own page. The link's token is sent only in a JSON body,
  * never in an address.
  */
-import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod } from './render.mjs';
+import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, unwrapDoc, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod } from './render.mjs';
 
 /** Where an earlier version of the page kept a pasted token; removed on load, never read. */
 const OLD_TOKEN_KEY = 'tracker-token';
@@ -2144,18 +2144,30 @@ async function drawUsers(done = '', problem = '') {
 }
 
 /**
- * The Docs page (SP-171): every file on the selected project's tasks in one
- * Task Files table, newest first. The project is the one picked on the
- * Projects page (shown in the header), else the first. A file's name
- * downloads it through the task's own download address; the task links to
- * its page. Look-only: adding, renaming and removing are SP-177's.
+ * The Docs page (SP-171): Spirality's own documentation first (SP-175),
+ * every Markdown file in the repository's docs/ folder by title, each
+ * opening at /docs/spirality/<path>; then every file on the selected
+ * project's tasks in one Task Files table, newest first. The project is the
+ * one picked on the Projects page (shown in the header), else the first. A
+ * file's name downloads it through the task's own download address; the
+ * task links to its page. Look-only: adding, renaming and removing are
+ * SP-177's.
  */
 async function drawDocs() {
-  const { projects } = await api('GET', '/projects');
+  const [{ projects }, { files }] = await Promise.all([api('GET', '/projects'), api('GET', '/documentation')]);
   setTitle('Docs · Tracker');
-  putTrail([{ label: 'Docs' }]);
+  const docRow = (d) => `<tr data-doc="${escapeHtml(d.path)}">
+      <td class="title"><a href="${docAddress(d.path)}">${escapeHtml(d.title)}</a></td>
+      <td class="path"><code>docs/${escapeHtml(d.path)}</code></td></tr>`;
+  const documentation = `
+    <h2>Spirality Documentation</h2>
+    ${files.length
+    ? `<table class="projects spirality-docs"><thead><tr><th>Title</th><th>Path</th></tr></thead>
+      <tbody>${files.map(docRow).join('')}</tbody></table>`
+    : '<p class="quiet">The docs folder holds no Markdown files.</p>'}`;
   if (!projects.length) {
-    main.innerHTML = '<h1>Docs</h1><p class="quiet">There are no projects yet.</p>';
+    main.innerHTML = `<h1>Docs</h1>${documentation}<h2>Task Files</h2><p class="quiet">There are no projects yet.</p>`;
+    putTrail([{ label: 'Docs' }]);
     return;
   }
   const project = projects.find((p) => p.slug === savedProject()) ?? projects[0];
@@ -2172,12 +2184,52 @@ async function drawDocs() {
   };
   main.innerHTML = `
     <h1>Docs</h1>
-    <p class="quiet">Files kept on the tasks of ${escapeHtml(project.name)}. Pick another project on the <a href="/projects">Projects</a> page.</p>
+    ${documentation}
     <h2>Task Files</h2>
+    <p class="quiet">Files kept on the tasks of ${escapeHtml(project.name)}. Pick another project on the <a href="/projects">Projects</a> page.</p>
     ${attachments.length
     ? `<table class="projects task-files"><thead><tr><th>File</th><th>Task</th><th>Type</th><th>Size</th><th>Added By</th><th>Added On</th></tr></thead>
       <tbody>${attachments.map(row).join('')}</tbody></table>`
     : `<p class="quiet">No task in ${escapeHtml(project.name)} has a file yet.</p>`}`;
+  putTrail([{ label: 'Docs' }]);
+}
+
+/** The page address of a documentation file, `path` relative to docs/: each piece encoded. */
+const docAddress = (path) => `/docs/spirality/${String(path).split('/').map(encodeURIComponent).join('/')}`;
+/** The documentation file a `/docs/spirality/<path>` address opens, or null. */
+const docAt = () => {
+  const m = /^\/docs\/spirality\/(.+)$/.exec(location.pathname);
+  if (!m) return null;
+  try { return m[1].split('/').map(decodeURIComponent).join('/'); } catch { return null; }
+};
+
+/**
+ * One of Spirality's documentation files (SP-175), drawn with the same
+ * Markdown drawing as a ticket's description, its hard-wrapped lines joined
+ * back up first (unwrapDoc). Its first "# " heading is the page's own
+ * heading, so it is not drawn twice. Read only.
+ */
+async function drawDoc(path) {
+  setTitle('Docs · Tracker');
+  const back = '<p><a href="/docs">Back to Docs</a></p>';
+  let doc;
+  try {
+    doc = await api('GET', `/documentation/${String(path).split('/').map(encodeURIComponent).join('/')}`);
+  } catch (err) {
+    if (!(err instanceof Refused) || err.status !== 404) throw err;
+    main.innerHTML = `<h1>Docs</h1><p>There is no documentation file at <code>docs/${escapeHtml(path)}</code>.</p>${back}`;
+    putTrail([{ label: 'Docs', href: '/docs' }, { label: 'Not Found' }]);
+    return;
+  }
+  setTitle(`${doc.title} · Docs · Tracker`);
+  const body = doc.text.replace(/^(?:[ \t]*\n)*#[ \t]+.*\n?/, '');
+  main.innerHTML = `
+    ${back}
+    <h1>${escapeHtml(doc.title)}</h1>
+    <p class="quiet"><code>docs/${escapeHtml(doc.path)}</code></p>
+    <section class="description doc">${renderMarkdown(unwrapDoc(body)) || '<p class="quiet">This file is empty.</p>'}</section>
+    ${back}`;
+  putTrail([{ label: 'Docs', href: '/docs' }, { label: doc.title }]);
 }
 
 /** Underline the header link (or the bell, for Waiting on you) for the screen showing. */
@@ -2231,14 +2283,15 @@ async function route({ place = null } = {}) {
     const reporting = location.pathname === '/reporting';
     const usersPage = location.pathname === '/users';
     const docsPage = location.pathname === '/docs';
+    const docPath = docAt();
     const search = location.pathname === '/search';
     const setupNew = location.pathname === '/setup/new';
     const setupAnswers = /^\/setup\/([^/]+)\/answers$/.exec(location.pathname);
     const setupPage = !setupNew && /^\/setup\/([^/]+)$/.exec(location.pathname);
     const setupAny = setupNew || setupAnswers || setupPage;
     let following = false;
-    const waiting = !(setupAny || search || reporting || settings || usersPage || docsPage || isNew || ticket || projects || newProject || editProject || details || tasks || project);
-    markNav(reporting ? 'reporting' : settings ? 'settings' : usersPage ? 'users' : docsPage ? 'docs' : projects || newProject || details || editProject || setupAny ? 'projects' : ticket || project || tasks || isNew || search ? 'tasks' : 'waiting');
+    const waiting = !(setupAny || search || reporting || settings || usersPage || docsPage || docPath || isNew || ticket || projects || newProject || editProject || details || tasks || project);
+    markNav(reporting ? 'reporting' : settings ? 'settings' : usersPage ? 'users' : docsPage || docPath ? 'docs' : projects || newProject || details || editProject || setupAny ? 'projects' : ticket || project || tasks || isNew || search ? 'tasks' : 'waiting');
     if (setupNew) {
       await drawSetupNew(null);
     } else if (setupAnswers) {
@@ -2255,6 +2308,8 @@ async function route({ place = null } = {}) {
       await drawUsers();
     } else if (docsPage) {
       await drawDocs();
+    } else if (docPath) {
+      await drawDoc(docPath);
     } else if (isNew) {
       // The old New request address: the Tasks page with its Add Task box open.
       await drawTasks(savedView(), { adding: true });
