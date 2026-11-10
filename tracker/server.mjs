@@ -78,6 +78,7 @@ import { saveAnswers, setupFields, setupList, setupOf, SetupError } from './setu
 import busRelayPlan from '../lib/busRelayPlan.js';
 import { pipelineOf } from './pipeline.mjs';
 import { listCommands, REPO_ROOT } from './commands.mjs';
+import { listDocs, readDoc } from './docsFolder.mjs';
 import loopStatuses from '../lib/loopStatuses.js';
 
 /**
@@ -196,6 +197,8 @@ const PERSON_STATUSES = Object.freeze(['requested', 'rework', 'queued', 'live']
  * `/people` still gets the data.
  */
 const WEB_DIR = new URL('./web/', import.meta.url);
+/** This repository's own documentation folder, which the Docs page lists. */
+const DOCS_DIR = fileURLToPath(new URL('../docs/', import.meta.url));
 const WEB_FILES = Object.freeze({
   'index.html': 'text/html; charset=utf-8',
   'app.css': 'text/css; charset=utf-8',
@@ -231,8 +234,11 @@ const PAGE_HEADERS = Object.freeze({
  */
 function pageFile(pathname, accept = '') {
   if (/^\/(?:projects(?:\/[^/]+)?|search|setup\/(?!fields$)[^/]+)$/.test(pathname)) return /\btext\/html\b/.test(accept) ? 'index.html' : null;
-  if (pathname === '/' || /^\/(?:tasks|board|list|new|settings|set-password|reporting|users|docs)$/.test(pathname) || /^\/(?:t|board|list|docs\/commands)\/[^/]+$/.test(pathname)) return 'index.html';
+  if (pathname === '/' || /^\/(?:tasks|board|list|new|settings|set-password|reporting|users|docs)$/.test(pathname) || /^\/(?:t|board|list)\/[^/]+$/.test(pathname)) return 'index.html';
   if (/^\/projects\/[^/]+\/edit$/.test(pathname)) return 'index.html';
+  // A page under the Docs page, such as one of the substrate's own
+  // documentation files: the page itself draws what the rest names.
+  if (/^\/docs\/[^/]+\/.+$/.test(pathname)) return 'index.html';
   if (/^\/setup\/[^/]+\/answers$/.test(pathname)) return 'index.html';
   const m = /^\/web\/([^/]+)$/.exec(pathname);
   return m && Object.hasOwn(WEB_FILES, m[1]) ? m[1] : null;
@@ -496,6 +502,12 @@ function flag(value) {
  * `{ homeConfig, homeRoot, folder, trackerDb }`, the tracker home's checked
  * settings file, its main folder, the folder this server runs from and its
  * database. Null means those calls answer 503 and nothing is read or written.
+ * `docsDir` is the folder the Docs page's documentation section
+ * reads (tracker/docsFolder.mjs): this repository's own `docs/`, unless a
+ * test names another. Only `.md` files inside it are ever read.
+ * `commandsRoot` is the checkout the Commands section's list reads
+ * (tracker/commands.mjs): this one, unless a test names another. Only a
+ * `SKILL.md` inside its `commands/` and `.claude/skills/` folders is read.
  */
 /**
  * The word the ticket page's Close button posts: the first of the relay's
@@ -506,7 +518,7 @@ export const CLOSE_PHRASE = busRelayPlan.CLOSE_PHRASES[0];
 /** The word the Go button posts: the one an intake card asks for (GO_PHRASE in lib/busRelayPlan.js). */
 export const GO_PHRASE = busRelayPlan.GO_PHRASE;
 
-export function createHandler(store, { log = () => {}, notifier = null, defaultProject = null, mergePhrase = null, closePhrase = null, goPhrase = null, accountMail = null, setup = null, now = Date.now, publicUrl = null, pipeline = null, commandsRoot = REPO_ROOT } = {}) {
+export function createHandler(store, { log = () => {}, notifier = null, defaultProject = null, mergePhrase = null, closePhrase = null, goPhrase = null, accountMail = null, setup = null, now = Date.now, publicUrl = null, pipeline = null, docsDir = DOCS_DIR, commandsRoot = REPO_ROOT } = {}) {
   const failures = failureCounter(now);
   const resets = resetLimiter(now);
   // The public address's host as a Host header names it (`name:8443`; no port for 443).
@@ -879,6 +891,17 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
       return [200, { project: project.slug, attachments: store.listProjectAttachments(project.slug) }];
     }
 
+    // The Docs page's documentation section: every
+    // Markdown file in this repository's docs/ folder by title, and one by
+    // its path. Read only; a path outside the folder is "no such file" and
+    // reads nothing (tracker/docsFolder.mjs).
+    if (parts[0] === 'documentation' && method === 'GET') {
+      if (parts.length === 1) return [200, { files: listDocs(docsDir) }];
+      const doc = readDoc(docsDir, parts.slice(1).join('/'));
+      if (!doc) throw new HttpError(404, 'unknown-doc', 'no documentation file at that path.');
+      return [200, doc];
+    }
+
     // Dane's page: the Add Task box asks, before it files, whether the words
     // fit another project better (tracker/projectGuess.mjs). Plain
     // word matching on the tickets already here; it writes nothing.
@@ -1209,8 +1232,8 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
 }
 
 /** Start a server on `port` (0 = any free port) against an open store. Resolves to the http.Server. */
-export function startServer({ store, port, host = '127.0.0.1', log, notifier, defaultProject, mergePhrase, closePhrase, goPhrase, accountMail, setup, now, publicUrl, pipeline, commandsRoot }) {
-  const server = createServer(createHandler(store, { log, notifier, defaultProject, mergePhrase, closePhrase, goPhrase, accountMail, setup, now, publicUrl, pipeline, commandsRoot }));
+export function startServer({ store, port, host = '127.0.0.1', log, notifier, defaultProject, mergePhrase, closePhrase, goPhrase, accountMail, setup, now, publicUrl, pipeline, docsDir, commandsRoot }) {
+  const server = createServer(createHandler(store, { log, notifier, defaultProject, mergePhrase, closePhrase, goPhrase, accountMail, setup, now, publicUrl, pipeline, docsDir, commandsRoot }));
   return new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(port, host, () => {

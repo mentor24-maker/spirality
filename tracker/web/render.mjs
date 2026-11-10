@@ -119,6 +119,50 @@ export function renderMarkdown(text) {
   return out.join('\n');
 }
 
+/** A Markdown quote line's opening `>` (and the one space after it). */
+const QUOTE = /^\s*>\s?/;
+
+/**
+ * A documentation file's text with its hard-wrapped lines joined back up
+ * (SP-175), for renderMarkdown, which keeps every line break a ticket's
+ * text has. A line is joined to the one before when both are text: not
+ * blank, not a heading, rule, fence or table row, and the line itself not
+ * the start of a list item (an indented one following a list item is that
+ * item's next line). A quote's lines (`> ...`) join each other, the
+ * later ones' `>` taken off, but never the text before or after the quote.
+ * Fenced code is left exactly as written.
+ */
+export function unwrapDoc(text) {
+  const out = [];
+  let fence = null;
+  const stands = (line) => !line.trim() || HEADING.test(line) || RULE.test(line) || FENCE.test(line) || /^\s*\|/.test(line) || QUOTE.test(line);
+  for (const line of String(text ?? '').replace(/\r\n?/g, '\n').split('\n')) {
+    if (fence) {
+      out.push(line);
+      if (closesFence(line, fence)) fence = null;
+      continue;
+    }
+    if (FENCE.test(line)) {
+      fence = FENCE.exec(line)[1];
+      out.push(line);
+      continue;
+    }
+    const before = out.length ? out[out.length - 1] : '';
+    if (QUOTE.test(line)) {
+      // A quote's next line joins the quote, its ">" taken off; a quote never joins the text around it.
+      const rest = line.replace(QUOTE, '').trim();
+      const joins = out.length && QUOTE.test(before) && before.replace(QUOTE, '').trim() && rest && !BULLET.test(rest) && !NUMBERED.test(rest);
+      if (joins) out[out.length - 1] = `${before.replace(/\s+$/, '')} ${rest}`;
+      else out.push(line);
+      continue;
+    }
+    const startsItem = BULLET.test(line) || NUMBERED.test(line);
+    if (out.length && !stands(before) && !stands(line) && !startsItem) out[out.length - 1] = `${before.replace(/\s+$/, '')} ${line.trim()}`;
+    else out.push(line);
+  }
+  return out.join('\n');
+}
+
 /** A line with any `**…**` wrapping taken off: the tracker stores a card's bold runs that way. */
 const unbold = (line) => line.trim().replace(/^\*\*([\s\S]*)\*\*$/, '$1').trim();
 const BANNER_RULE = /^#{20,}$/;
