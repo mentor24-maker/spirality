@@ -2773,6 +2773,19 @@ test('the search results page draws the filters from the server\'s answer, keeps
   assert.match(app, /await drawSearch\(new URLSearchParams\(location\.search\)\)/);
 });
 
+test('searching from the Tasks page carries the project chosen in its picker into the address as the Project filter (SP-191)', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const address = app.slice(app.indexOf('function searchAddress('), app.indexOf('/** Enter in the Search field'));
+  assert.match(address, /main\.querySelectorAll\('\.project-picker select, \.search-filters select'\)/);
+  assert.match(address, /params\.set\(select\.name, select\.value\)/);
+  // The picker's field is named what the server's Project filter reads, and the results page's row draws it.
+  assert.match(renderProjectPicker([{ slug: 'alpha', name: 'Alpha' }, { slug: 'beta', name: 'Beta' }], 'beta'),
+    /<select name="project"><option value="alpha">Alpha<\/option><option value="beta" selected>Beta<\/option><\/select>/);
+  assert.match(renderSearchFilters([{ key: 'project', label: 'Project', value: 'beta', options: [{ value: 'alpha', label: 'Alpha' }, { value: 'beta', label: 'Beta' }] }]),
+    /<label>Project\s*<select name="project"><option value="">Any<\/option><option value="alpha">Alpha<\/option><option value="beta" selected>Beta<\/option><\/select>/);
+  assert.deepEqual(activeFilters([{ key: 'project', label: 'Project', value: 'beta', options: [{ value: 'beta', label: 'Beta' }] }]), ['Project: Beta']);
+});
+
 // ── Set up a project (SP-127) ────────────────────────────────────────────────
 
 /**
@@ -3346,6 +3359,18 @@ test.describe('Files Made: the files a ticket made, from its newest merge note',
     assert.deepEqual(sorted('when', 'descending'), ['A-3', 'A-1', 'A-4', 'A-5', 'A-2'], 'newest first');
   });
 
+  test('Ticket # sorts by the ticket\'s number, not as text: SP-9 before SP-10 (SP-193)', () => {
+    const list = [T('SP-10'), T('SP-9'), T('SP-193'), T('SP-2'), T('SP-9')];
+    list[4].name = 'second SP-9';
+    const by = (direction) => sortTickets(list, { column: 'id', direction });
+    assert.deepEqual(ids(by('ascending')), ['SP-2', 'SP-9', 'SP-9', 'SP-10', 'SP-193']);
+    assert.equal(by('ascending')[2].name, 'second SP-9', 'ties keep the page\'s order');
+    assert.deepEqual(ids(by('descending')), ['SP-193', 'SP-10', 'SP-9', 'SP-9', 'SP-2']);
+    assert.deepEqual(nextSort(nextSort(null, 'id'), 'id'), { column: 'id', direction: 'descending' });
+    const up = renderSortHeadings({ column: 'id', direction: 'ascending' });
+    assert.match(up, /<th class="id" aria-sort="ascending"><button[^>]*data-sort="id">Ticket # <span class="arrow" aria-hidden="true">▲/);
+  });
+
   test('no sort, or a column it does not know, keeps the page\'s order, and the tickets are never changed', () => {
     const before = ids(tickets);
     assert.deepEqual(ids(sortTickets(tickets, null)), before);
@@ -3366,7 +3391,8 @@ test.describe('Files Made: the files a ticket made, from its newest merge note',
   test('the headings are buttons; only the sorted one has an arrow and aria-sort; Actions is plain', () => {
     const none = renderSortHeadings(null);
     assert.equal((none.match(/<button type="button" class="sort"/g) || []).length, SORT_COLUMNS.length);
-    assert.deepEqual(SORT_COLUMNS.map((c) => c.label), ['Ticket', 'Priority', 'Tags', 'Assigned To', 'Last Change']);
+    assert.deepEqual(SORT_COLUMNS.map((c) => c.label), ['Ticket #', 'Ticket', 'Priority', 'Tags', 'Assigned To', 'Last Change']);
+    assert.match(none, /^<tr><th class="id"><button type="button" class="sort" data-sort="id">Ticket #<\/button><\/th><th class="name">/, 'Ticket # is the left-most heading (SP-193)');
     assert.doesNotMatch(none, /aria-sort|▲|▼/);
     assert.match(none, /<th class="actions">Actions<\/th>/);
     const up = renderSortHeadings({ column: 'priority', direction: 'ascending' });
@@ -3398,8 +3424,20 @@ test.describe('Files Made: the files a ticket made, from its newest merge note',
     const app = readFileSync(WEB('app.mjs'), 'utf8');
     assert.match(app, /<table class="sortable"><thead>\$\{renderSortHeadings\(null\)\}<\/thead>/);
     assert.match(app, /<tr data-id="\$\{escapeHtml\(t\.id\)\}">/);
+    // SP-193: the id is the first cell, a link to the ticket, and the name cell no longer repeats it.
+    const row = /const row = \(status\) => \(t\) => `[\s\S]*?<\/tr>`;/.exec(app)[0];
+    assert.match(row, /<tr data-id="[^\n]*">\s*<td class="id"><a href="\/t\/\$\{encodeURIComponent\(t\.id\)\}">\$\{escapeHtml\(t\.id\)\}<\/a><\/td>\s*<td class="name">/);
+    const nameCell = /<td class="name">.*<\/td>/.exec(row)[0];
+    assert.doesNotMatch(nameCell, /escapeHtml\(t\.id\)/, 'the name cell shows only the name');
+    assert.match(nameCell, /ANSWER_IN_NOTE/, 'the answer-in note stays in the name cell');
+    assert.equal((row.match(/<td class="/g) || []).length, SORT_COLUMNS.length + 1, 'one cell per heading, plus Actions');
     const css = readFileSync(WEB('app.css'), 'utf8');
     assert.match(css, /\.group table\.sortable th \{ color: #000; font-weight: 700; \}/);
+    // SP-193: Ticket # is narrow; the name keeps most of the width, and the set widths leave Last Change room.
+    const width = (key) => Number(new RegExp(`\\.group th\\.${key} \\{ width: (\\d+)%; \\}`).exec(css)?.[1]);
+    assert.ok(width('id') > 0 && width('id') < width('name'), 'Ticket # narrower than Ticket');
+    const set = ['id', 'name', 'priority', 'tags', 'assignee', 'actions'].reduce((sum, k) => sum + width(k), 0);
+    assert.ok(set <= 76, `the set widths (${set}%) leave Last Change room for its date`);
     assert.match(css, /^th \{ color: var\(--quiet\); font-weight: 500;/m, 'every other table keeps the grey heading');
   });
 }

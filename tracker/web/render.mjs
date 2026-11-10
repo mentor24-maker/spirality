@@ -1460,6 +1460,7 @@ export const PRIORITY_ORDER = Object.freeze(['urgent', 'high', 'normal', 'low'])
 
 /** The columns a stage's table sorts on, in the order they are drawn, with the class each cell wears. */
 export const SORT_COLUMNS = Object.freeze([
+  { key: 'id', label: 'Ticket #' },
   { key: 'name', label: 'Ticket' },
   { key: 'priority', label: 'Priority' },
   { key: 'tags', label: 'Tags' },
@@ -1474,7 +1475,13 @@ const rankOf = (p) => {
   const i = PRIORITY_ORDER.indexOf(String(p ?? '').toLowerCase());
   return i === -1 ? null : i;
 };
+/** SP-193: the number after a ticket id's prefix (`SP-12` gives 12), or null when it has none. */
+const numberOf = (id) => {
+  const m = /(\d+)\s*$/.exec(String(id ?? ''));
+  return m ? Number(m[1]) : null;
+};
 const COMPARE = {
+  id: (a, b) => lastIfMissing((x, y) => x - y)(numberOf(a.id), numberOf(b.id)) || byText(String(a.id ?? ''), String(b.id ?? '')),
   name: (a, b) => byText(String(a.name ?? ''), String(b.name ?? '')),
   priority: (a, b) => lastIfMissing((x, y) => x - y)(rankOf(a.priority), rankOf(b.priority)),
   tags: (a, b) => lastIfMissing(byText)(a.tags?.[0] ?? null, b.tags?.[0] ?? null),

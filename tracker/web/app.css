@@ -138,7 +138,11 @@ table.tickets, details.group, section.group { border: var(--hairline); border-ra
 .group td.name a:hover { text-decoration: underline; }
 .group .tag { margin-left: 0; margin-right: 0.3rem; }
 .group table { table-layout: fixed; }
-.group th.name { width: 38%; }
+.group th.id { width: 5%; }
+.group td.id { white-space: nowrap; }
+.group td.id a { color: var(--quiet); text-decoration: none; }
+.group td.id a:hover { text-decoration: underline; }
+.group th.name { width: 30%; }
 .group th.priority { width: 8%; }
 .group th.tags { width: 13%; }
 .group th.actions { width: 8%; }
