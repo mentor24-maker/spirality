@@ -1355,3 +1355,32 @@ export function setupBody(fields, values) {
     return [f.key, typed === String(f.default ?? '').trim() ? null : typed];
   }));
 }
+
+/**
+ * The Docs page's Context Documents section (SP-176): the files kept on the
+ * project itself, newest first, each with its type, size, adder and time, a
+ * Download link (always saved, never opened in the page) and a Remove
+ * button, and one Upload Document button over a hidden file picker. `size`
+ * and `timeOf` put a byte count and a time in words. Every name is escaped.
+ */
+export function renderContextDocs({ project, docs = [] }, { size, timeOf }) {
+  const base = `/projects/${encodeURIComponent(project.slug)}/docs`;
+  const row = (d) => `<tr data-doc="${escapeHtml(d.id)}">
+      <td class="name">${escapeHtml(d.name)}</td>
+      <td class="type">${escapeHtml(d.type)}</td>
+      <td class="size">${escapeHtml(size(d.size))}</td>
+      <td class="by">${d.addedByName ? escapeHtml(d.addedByName) : '<span class="quiet">unknown</span>'}</td>
+      <td class="when">${escapeHtml(timeOf(d.createdAt))}</td>
+      <td class="actions"><a href="${base}/${encodeURIComponent(d.id)}" download="${escapeHtml(d.name)}">Download</a>
+        <button type="button" class="remove-doc" data-remove-doc="${escapeHtml(d.id)}" data-name="${escapeHtml(d.name)}" aria-label="Remove ${escapeHtml(d.name)}">Remove</button></td></tr>`;
+  return `<section class="context-docs">
+    <h2>Context Documents</h2>
+    <p class="quiet">Briefs, notes and reference files that belong to ${escapeHtml(project.name)} as a whole, not to one task. One file at a time, up to 10 MB.</p>
+    <div class="row"><button type="button" class="upload-doc">Upload Document</button><input type="file" class="doc-file" hidden></div>
+    <p class="note quiet doc-note" role="status"></p>
+    ${docs.length
+    ? `<table class="projects doc-list"><thead><tr><th>File</th><th>Type</th><th>Size</th><th>Added By</th><th>Added On</th><th></th></tr></thead>
+      <tbody>${docs.map(row).join('')}</tbody></table>`
+    : `<p class="quiet">${escapeHtml(project.name)} has no context documents yet.</p>`}
+  </section>`;
+}

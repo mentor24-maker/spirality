@@ -26,7 +26,7 @@
  * an emailed link's own page. The link's token is sent only in a JSON body,
  * never in an address.
  */
-import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, pipelinePodLabel } from './render.mjs';
+import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, pipelinePodLabel, renderContextDocs } from './render.mjs';
 
 /** Where an earlier version of the page kept a pasted token; removed on load, never read. */
 const OLD_TOKEN_KEY = 'tracker-token';
@@ -258,13 +258,15 @@ async function api(method, path, body, { unrecorded = false } = {}) {
 /**
  * Upload one file to a ticket: the file itself as the body, its name and
  * type in headers (tracker/server.mjs, "attachments"). Answers the
- * attachment as listed, or throws with the server's own message.
+ * attachment as listed, or throws with the server's own message. `to` is
+ * another upload address taking the same body (a project's context
+ * documents, `/projects/<slug>/docs`).
  */
-async function uploadFile(ticketId, file) {
+async function uploadFile(ticketId, file, to = `/tickets/${encodeURIComponent(ticketId)}/attachments`) {
   writing += 1;
   let res;
   try {
-    res = await fetch(`/tickets/${encodeURIComponent(ticketId)}/attachments`, {
+    res = await fetch(to, {
       method: 'POST',
       credentials: 'same-origin',
       headers: {
@@ -2177,13 +2179,16 @@ async function drawUsers(done = '', problem = '') {
 }
 
 /**
- * The Docs page (SP-171): every file on the selected project's tasks in one
- * Task Files table, newest first. The project is the one picked on the
- * Projects page (shown in the header), else the first. A file's name
- * downloads it through the task's own download address; the task links to
- * its page. Look-only: adding, renaming and removing are SP-177's.
+ * The Docs page (SP-171): the selected project's Context Documents (SP-176,
+ * files kept on the project itself, uploaded, downloaded and removed here),
+ * then every file on its tasks in one Task Files table, newest first. The
+ * project is the one picked on the Projects page (shown in the header),
+ * else the first. A task file's name downloads it through the task's own
+ * download address; the task links to its page. Task files are look-only
+ * here: adding, renaming and removing them are SP-177's. `done` and
+ * `problem` are the line the last upload or removal left.
  */
-async function drawDocs() {
+async function drawDocs(done = '', problem = '') {
   const { projects } = await api('GET', '/projects');
   setTitle('Docs · Tracker');
   putTrail([{ label: 'Docs' }]);
@@ -2192,7 +2197,11 @@ async function drawDocs() {
     return;
   }
   const project = projects.find((p) => p.slug === savedProject()) ?? projects[0];
-  const { attachments } = await api('GET', `/projects/${encodeURIComponent(project.slug)}/attachments`);
+  const docsPath = `/projects/${encodeURIComponent(project.slug)}/docs`;
+  const [{ attachments }, { docs }] = await Promise.all([
+    api('GET', `/projects/${encodeURIComponent(project.slug)}/attachments`),
+    api('GET', docsPath),
+  ]);
   const row = (a) => {
     const href = `/tickets/${encodeURIComponent(a.ticket)}/attachments/${encodeURIComponent(a.id)}`;
     return `<tr data-file="${escapeHtml(a.id)}">
@@ -2205,12 +2214,73 @@ async function drawDocs() {
   };
   main.innerHTML = `
     <h1>Docs</h1>
-    <p class="quiet">Files kept on the tasks of ${escapeHtml(project.name)}. Pick another project on the <a href="/projects">Projects</a> page.</p>
+    <p class="quiet">Files kept on ${escapeHtml(project.name)} and on its tasks. Pick another project on the <a href="/projects">Projects</a> page.</p>
+    ${renderContextDocs({ project, docs }, { size: sizeOf, timeOf: when })}
     <h2>Task Files</h2>
     ${attachments.length
     ? `<table class="projects task-files"><thead><tr><th>File</th><th>Task</th><th>Type</th><th>Size</th><th>Added By</th><th>Added On</th></tr></thead>
       <tbody>${attachments.map(row).join('')}</tbody></table>`
     : `<p class="quiet">No task in ${escapeHtml(project.name)} has a file yet.</p>`}`;
+  wireContextDocs(project, docsPath, done, problem);
+}
+
+/**
+ * The Context Documents section's buttons (SP-176). Upload Document opens
+ * the file picker and sends the one file picked (one over 10 MB is refused
+ * here before it is sent); the server reads it back before it answers, and
+ * the list is read again. Remove asks first, naming the file, then reads
+ * the list back to check it is gone. A failure says so in the note and
+ * changes nothing on the page.
+ */
+function wireContextDocs(project, docsPath, done, problem) {
+  const note = main.querySelector('.doc-note');
+  if (problem || done) {
+    note.className = `note doc-note ${problem ? 'error' : 'quiet'}`;
+    note.textContent = problem || done;
+  }
+  const say = (text, failed = false) => {
+    note.className = `note doc-note ${failed ? 'error' : 'quiet'}`;
+    note.textContent = text;
+  };
+  const again = (text, failed) => drawDocs(failed ? '' : text, failed ? text : '')
+    .catch((err) => (err instanceof SignedOut ? drawSignIn() : showError(err)));
+  const picker = main.querySelector('input.doc-file');
+  const upload = main.querySelector('button.upload-doc');
+  upload.addEventListener('click', () => picker.click());
+  picker.addEventListener('change', async () => {
+    const file = picker.files?.[0];
+    picker.value = '';
+    if (!file) return;
+    if (file.size > MAX_FILE) return say(`Not uploaded: ${file.name} is over 10 MB. Upload a smaller file; nothing was saved.`, true);
+    upload.disabled = true;
+    say(`Uploading ${file.name}…`);
+    try {
+      await uploadFile(null, file, docsPath);
+    } catch (err) {
+      if (err instanceof SignedOut) return drawSignIn(`You were signed out; ${file.name} was not uploaded.`);
+      upload.disabled = false;
+      return say(`Not uploaded: ${err.message}`, true);
+    }
+    again(`Uploaded ${file.name} to ${project.name}.`, false);
+  });
+  for (const button of main.querySelectorAll('button[data-remove-doc]')) {
+    button.addEventListener('click', async () => {
+      const { removeDoc: id, name } = button.dataset;
+      if (!confirm(`Remove ${name} from ${project.name}? It cannot be brought back.`)) return;
+      button.disabled = true;
+      say(`Removing ${name}…`);
+      try {
+        await api('DELETE', `${docsPath}/${encodeURIComponent(id)}`);
+      } catch (err) {
+        if (err instanceof SignedOut) return drawSignIn(`You were signed out; ${name} was not removed.`);
+        button.disabled = false;
+        return say(`Not removed: ${err.message}`, true);
+      }
+      const back = await api('GET', docsPath).catch(() => null);
+      const gone = back != null && !back.docs.some((d) => String(d.id) === String(id));
+      again(gone ? `Removed ${name} from ${project.name}.` : `The tracker said ${name} was removed, but ${back ? 'it is still listed when read back' : 'the list could not be read back'}.`, !gone);
+    });
+  }
 }
 
 /** Underline the header link (or the bell, for Waiting on you) for the screen showing. */

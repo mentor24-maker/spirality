@@ -159,6 +159,14 @@ account_links  token hash, purpose (setup|invite|reset), email, actor,
   (SP-142): `npm run clickup -- get` prints one `attachments:` line per file,
   and `npm run clickup -- attachments --task <id> --to <folder>` saves each
   one, checked against its size.
+- **A context document** is a file kept on a project, not on one ticket
+  (SP-176): a brief, notes, a reference file that belongs to the project as
+  a whole. The same name, type, size, bytes, adder and time, the same 10 MB
+  limit and refusals as an attachment, in the `project_docs` table, so the
+  nightly backup (a copy of the whole database) holds them with no change to
+  `tracker/backup.mjs`. It is never edited; it is removed one at a time, and
+  a project that still holds any is not deleted (409 `has-docs`). The build
+  loop does not read them automatically.
 - **Roles and permissions** (SP-143): every person has one of five roles,
   **admin**, **editor**, **contributor**, **reviewer** and **viewer**, each
   with a plain-words description, and each role a set of permissions. The
@@ -249,6 +257,10 @@ answers are JSON (structured text programs read).
 | `POST /signout` | **no token**: ends the cookie's session and clears the cookie |
 | `POST /account/forgot` | **no token**: `{ email }` → the same answer whether or not the email has an account; an account's email is sent a 1-hour `reset` link through Resend after the answer has gone back. Sent with an outside site's own token (`authorization: Bearer <site token>`), the link opens `<site's page>?link=<token>`; with any other token or none, the tracker's set-password page; the answer is the same either way. The log says whether it went, never the link or the email |
 | `GET /projects/:slug/attachments` | for the Docs page: every file on the project's tickets, newest first, `{ project, attachments: [{ id, ticket, ticketName, name, type, size, addedBy, addedByName, createdAt }] }`, never the bytes. A project the caller is not on is 404, the same as one that does not exist |
+| `GET /projects/:slug/docs` | the project's context documents, newest first, `{ project, docs: [{ id, project, name, type, size, addedBy, addedByName, createdAt }] }`, never the bytes |
+| `POST /projects/:slug/docs` | upload one context document, sent exactly as a ticket's attachment (the raw file, `x-file-name`, `x-file-type`), with the same 10 MB limit and refusals. Answers 201 with the document as listed, read back byte for byte |
+| `GET /projects/:slug/docs/:n` | one context document, byte for byte, always as a download (the same headers as an attachment's) |
+| `DELETE /projects/:slug/docs/:n` | remove one context document, read back gone: `{ removed, name, project }`. One the project does not have is 404. Every `/docs` call to a project the caller is not on is 404, the same as one that does not exist |
 | `POST /tickets/:id/attachments` | attach a file: the raw file as the body (`content-type: application/octet-stream`, which a form on another site cannot send, so the cookie may make this one write that is not JSON), its name percent-encoded in `x-file-name`, its type in `x-file-type`. Answers 201 with `{ id, ticket, name, type, size, addedBy, createdAt }`, read back byte for byte. Over 10 MB is 413 `too-large` ("That file is over 10 MB. Attach a smaller one; nothing was saved."); an empty file or no name is 400; nothing is stored. The JSON calls' 1 MB limit is unchanged |
 | `GET /tickets/:id/attachments` | a ticket's files, oldest first, without their bytes (the ticket page reads the same list in `thread`) |
 | `GET /tickets/:id/attachments/:n` | one file, byte for byte, always as a download (`Content-Disposition: attachment`, `X-Content-Type-Options: nosniff`, a sandboxing `Content-Security-Policy`), so an uploaded HTML file can never run as the tracker's page |
@@ -314,14 +326,20 @@ back before the page says it worked, and a refusal (the last admin stepping
 down) shows the server's reason. Under the invites, **Roles and Permissions**
 shows which role has which permission. The roles are recorded, not enforced:
 every person signed in may still invite (Dane's decision).
-**Docs** in the header, between Users and Settings, opens `/docs`: a
+**Docs** in the header, between Users and Settings, opens `/docs`. First,
+**Context documents** (SP-176): the selected project's own files, newest
+first, with name, type, size, who added it and when, a **Download** link
+(always saved, never opened in the page) and a **Remove** button that asks
+first, naming the file, and reads the list back to check it is gone. An
+**Upload Document** button sends one file at a time (over 10 MB is refused
+before it is sent); a failed upload or removal says so in a line. Then a
 **Task Files** table of every file on the selected project's tasks (the
 project picked on the Projects page, else the first), newest first, with
 the file's name (which downloads it), the task's id and exact name (which
 opens it), its type, size, who added it and when. A project with no files
 says so in a line. It reads `GET /projects/:slug/attachments`, which answers
 the list without the bytes, to members of the project only; downloads stay
-with `GET /tickets/:id/attachments/:n`. Look-only for now.
+with `GET /tickets/:id/attachments/:n`. Task files are look-only for now.
 A browser opening `/projects` or `/projects/<slug>` gets the page; the page's own
 call to the same address gets the data. `/users` is the page alone; its data
 is still `GET /people` (the onboarding scripts read it), and a browser opening
