@@ -17,3 +17,11 @@ quoting the output. Dane's "merge" still counts, so the merge goes through on
 its own once the problem is fixed.
 
 A project that sets nothing sees no change at all.
+
+After review: a failing command now posts its note once, not every ten
+minutes. The relay used to tell "same failure as last time" partly by the
+command's last line of output, and database tools often print a time there,
+so every pass looked new. It now goes by the command and how it failed only.
+A command that printed too much output is no longer mistaken for one that
+never started, and the note says plainly that a command which ran may have
+changed something before it failed.

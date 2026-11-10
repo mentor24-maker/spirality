@@ -644,7 +644,12 @@ above says merge, and before `gh pr merge`. Its environment carries:
   ordinary refusal above (`pre-merge-step-failed`), naming the step and its
   last lines of output, and Dane's word stays unspent: each later pass runs
   the step again and merges once it passes, saying nothing new while it fails
-  the same way. Because it can run again, a step must be safe to run twice.
+  the same way. "The same way" means the same command failing the same way
+  (the same exit code, signal, time-out or start failure); the output is
+  quoted in the note but never compared, so a timestamp in it does not make
+  a fresh refusal every pass. A step that ran and failed may have made changes
+  of its own, and the note says so. Because it can run again, a step must be
+  safe to run twice.
 - A dry run (`relay --dry-run`) says it would run the step, and runs nothing.
 
 Nothing runs after the merge, and nothing in Spirality knows what a project's
