@@ -18,6 +18,7 @@
   "governancePaths": [
     "CLAUDE.md",
     "docs/LOOP_ENGINEERING.md",
+    "docs/DOCTRINE.md",
     ".claude/skills/",
     ".claude/settings.json",
     ".github/workflows/"

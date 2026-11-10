@@ -253,7 +253,7 @@ is the example.
 | `launchdPrefix` | required | The start of every launchd label the installer makes. | `"com.spirality"` |
 | `logDir` | required | The folder the runners write logs and locks to. | `"~/loop-logs"` |
 | `mergePhrases` | required | What Dane writes on a ticket to mean "merge this" (at least one). | `["merge", "merge it", "ship it", "approve"]` |
-| `governancePaths` | required | Files and folders a loop may not change unattended. | `["CLAUDE.md", "docs/LOOP_ENGINEERING.md", ".claude/skills/", ".claude/settings.json", ".github/workflows/"]` |
+| `governancePaths` | required | Files and folders a loop may not change unattended, and no auto-merge lane may carry, on top of the floor every project shares (`lib/autoMergeLane.js`). An entry ending `/` is a folder; a bare name is that file, or that module and its test, in any folder; any other path is one file. StarCaster's own entries are `lib/fixtures/starcasterGovernancePaths.json`. | `["CLAUDE.md", "docs/LOOP_ENGINEERING.md", "docs/DOCTRINE.md", ".claude/skills/", ".claude/settings.json", ".github/workflows/"]` |
 | `autoMergeLanes` | required | Lanes allowed to merge without Dane; empty means none. | `[]` |
 | `operatorName` | required | What the loops call the operator in anything he reads. | `"Dane"` |
 | `projectSlug` | required | The project's short name: log and lock file names, the machine's sender tag, and the tracker project's slug. | `"spirality"` |
