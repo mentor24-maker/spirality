@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { seedDemo, tickingClock } from './demoData.mjs';
 import { reportsOf, REPORT_RANGES, searchTickets } from './pageData.mjs';
-import { escapeHtml, renderComment, renderInline, renderMarkdown, renderQuickAction, renderCommands, cardCommands, cardAsk, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket } from './web/render.mjs';
+import { escapeHtml, renderComment, renderInline, renderMarkdown, renderQuickAction, renderCommands, cardCommands, cardAsk, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, PIPELINE_UNAVAILABLE } from './web/render.mjs';
 import { startServer, setupSettingsOf } from './server.mjs';
 import { saveAnswers, setupFields, setupOf } from './setup.mjs';
 import { DANE_FIELDS as SETUP_FIELDS, STEPS as SETUP_STEPS } from '../scripts/onboard/onboard.mjs';
@@ -847,7 +847,7 @@ test('an open page reads again once a minute and on coming back to the tab, neve
   assert.match(app, /if \(location\.hash === '#reply' && !refreshing\) \{/, 'a beat does not jump to the reply box again');
   assert.match(/function keepPlace\(\) \{[\s\S]*?\n\}/.exec(app)[0], /main\.querySelectorAll\('details'\)[\s\S]*window\.scrollTo\(0, y\);/);
   // Every GET of a draw is kept; a write counts as a save under way until it answers.
-  const api = /async function api\(method, path, body\) \{[\s\S]*?\n\}/.exec(app)[0];
+  const api = /async function api\(method, path, body, \{ unrecorded = false \} = \{\}\) \{[\s\S]*?\n\}/.exec(app)[0];
   assert.match(api, /if \(write\) writing \+= 1;/);
   assert.match(api, /finally \{\s*if \(write\) writing -= 1;\s*\}/);
   assert.match(api, /if \(!write\) reads\?\.set\(path, JSON\.stringify\(json\)\);/);
@@ -2353,7 +2353,7 @@ test('the Tasks toolbar picks a project from a dropdown, "Project: ", the one in
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   const draw = app.slice(app.indexOf('async function drawProject'), app.indexOf('async function copyText'));
   assert.match(draw, /api\('GET', '\/projects'\),\n  \]\);/);
-  assert.match(draw, /<div class="toolbar">\s*\$\{renderProjectPicker\(projects, board\.project\)\}\s*\$\{searchForm\(''\)\}\s*<nav class="views"/);
+  assert.match(draw, /<div class="toolbar">\s*\$\{renderProjectPicker\(projects, board\.project\)\}\s*\$\{searchForm\(''\)\}\s*<div class="pipeline-pod"[^>]*><\/div>\s*<nav class="views"/);
   assert.doesNotMatch(app, /Change project/);
   assert.match(draw, /querySelector\('\.project-picker select'\)\.addEventListener\('change', \(e\) => \{\s*history\.pushState\(null, '', at\(view, e\.target\.value\)\);\s*route\(\);/);
   assert.match(readFileSync(WEB('app.css'), 'utf8'), /\.toolbar \.project-picker select \{/);
@@ -2736,4 +2736,46 @@ test('busLink: the header count of unseen bus posts, opening the Team chat with 
   assert.equal(link.text, '4 New on the Bus');
   assert.equal(link.href, '/t/SB-1#comments', 'the posts are in the Details fold: #comments opens it');
   assert.equal(link.title, 'StarCaster Bus: 3 new posts on Team chat; WaveCenter Bus: 1 new post on Team chat');
+});
+
+test('the Pipeline Status pod: each stage\'s next time or "running", a dash for none yet, and "Pipeline Status unavailable" when the read failed (SP-168)', () => {
+  const timeOf = (iso) => `[${iso.slice(11, 16)}]`;
+  const html = renderPipelinePod({ stages: [
+    { name: 'Relay', logged: true, running: false, nextDue: '2026-11-09T17:45:00.000Z' },
+    { name: 'Build', logged: true, running: true, nextDue: null },
+    { name: 'Review', logged: true, running: false, nextDue: null },
+    { name: 'Intake', logged: false, running: false, nextDue: null },
+  ] }, timeOf);
+  const text = html.replace(/<[^>]*>/g, '');
+  assert.equal(text, 'Relay [17:45] · Build running · Review – · Intake –');
+  assert.match(html, /title="Intake: no passes logged yet"/);
+  assert.match(html, /title="Review: the next pass&#39;s time is not known yet"/);
+  assert.match(html, /class="stage running"/);
+  for (const failed of [null, undefined, {}, { stages: [] }, { error: 'no-pipeline' }]) {
+    assert.equal(renderPipelinePod(failed, timeOf).replace(/<[^>]*>/g, ''), PIPELINE_UNAVAILABLE);
+  }
+  assert.equal(PIPELINE_UNAVAILABLE, 'Pipeline Status unavailable');
+  // A stage's name is escaped like every other text the page draws.
+  assert.doesNotMatch(renderPipelinePod({ stages: [{ name: '<b>x', logged: false }] }, timeOf), /<b>x/);
+});
+
+test('the Tasks page puts the pod between the search field and Board/List, fills it on draw and once a minute, and a failed read touches only the pod (SP-168)', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const tasks = app.indexOf('<h1>Tasks</h1>');
+  const toolbar = app.slice(app.indexOf('<div class="toolbar">', tasks), app.indexOf('</nav>', tasks));
+  const search = toolbar.indexOf("${searchForm('')}");
+  const pod = toolbar.indexOf('class="pipeline-pod"');
+  const views = toolbar.indexOf('<nav class="views"');
+  assert.ok(search !== -1 && search < pod && pod < views, 'search field, then the pod, then the Board/List toggle');
+  const draw = app.slice(app.indexOf('async function drawProject('), app.indexOf('async function drawProject(') + 12000);
+  assert.match(draw, /refreshPipeline\(\);/);
+  assert.match(app, /const PIPELINE_REFRESH_EVERY_MS = 60_000;/);
+  assert.match(app, /setInterval\(refreshPipeline, PIPELINE_REFRESH_EVERY_MS\);/);
+  const refresh = app.slice(app.indexOf('async function refreshPipeline'), app.indexOf('/** Draw the pod from the last answer'));
+  // A failure is caught inside: it empties the answer (so the pod says unavailable) and throws nothing to the page.
+  assert.match(refresh, /catch \(err\) \{\n\s+if \(err instanceof SignedOut\) return;\n\s+pipelineState = null;\n\s+\}/);
+  // The pod is not part of the page's own reads, so a new time never redraws the page under him.
+  assert.match(refresh, /api\('GET', '\/pipeline', undefined, \{ unrecorded: true \}\)/);
+  assert.match(app, /const reads = unrecorded \? null : recording;/);
+  assert.doesNotMatch(draw.slice(0, draw.indexOf(']);')), /\/pipeline/);
 });

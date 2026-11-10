@@ -76,6 +76,7 @@ import { guessProject } from './projectGuess.mjs';
 import { findConfigFile, loadProjectConfig } from '../lib/projectConfig.mjs';
 import { saveAnswers, setupFields, setupList, setupOf, SetupError } from './setup.mjs';
 import busRelayPlan from '../lib/busRelayPlan.js';
+import { pipelineOf } from './pipeline.mjs';
 import loopStatuses from '../lib/loopStatuses.js';
 
 /**
@@ -504,7 +505,7 @@ export const CLOSE_PHRASE = busRelayPlan.CLOSE_PHRASES[0];
 /** The word the Go button posts: the one an intake card asks for (GO_PHRASE in lib/busRelayPlan.js). */
 export const GO_PHRASE = busRelayPlan.GO_PHRASE;
 
-export function createHandler(store, { log = () => {}, notifier = null, defaultProject = null, mergePhrase = null, closePhrase = null, goPhrase = null, accountMail = null, setup = null, now = Date.now, publicUrl = null } = {}) {
+export function createHandler(store, { log = () => {}, notifier = null, defaultProject = null, mergePhrase = null, closePhrase = null, goPhrase = null, accountMail = null, setup = null, now = Date.now, publicUrl = null, pipeline = null } = {}) {
   const failures = failureCounter(now);
   const resets = resetLimiter(now);
   // The public address's host as a Host header names it (`name:8443`; no port for 443).
@@ -642,6 +643,14 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     // Team chat ticket the caller has not seen.
     if (parts.length === 1 && parts[0] === 'bus' && method === 'GET') {
       return [200, busUnseen(store, me.id, { only: scopeOf(me) })];
+    }
+
+    // Dane's page: the Pipeline Status pod on the Tasks page, when
+    // each loop stage on this machine runs next, read from the ends of the
+    // runners' logs (tracker/pipeline.mjs). Times and flags only, never log text.
+    if (parts.length === 1 && parts[0] === 'pipeline' && method === 'GET') {
+      if (!pipeline) throw new HttpError(503, 'no-pipeline', 'this tracker cannot read the loop logs: the project config was not usable when it started (its log says why).');
+      return [200, pipelineOf(pipeline)];
     }
 
     // Dane's page: the Projects screen, the project Tasks opens, and the New
@@ -1184,8 +1193,8 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
 }
 
 /** Start a server on `port` (0 = any free port) against an open store. Resolves to the http.Server. */
-export function startServer({ store, port, host = '127.0.0.1', log, notifier, defaultProject, mergePhrase, closePhrase, goPhrase, accountMail, setup, now, publicUrl }) {
-  const server = createServer(createHandler(store, { log, notifier, defaultProject, mergePhrase, closePhrase, goPhrase, accountMail, setup, now, publicUrl }));
+export function startServer({ store, port, host = '127.0.0.1', log, notifier, defaultProject, mergePhrase, closePhrase, goPhrase, accountMail, setup, now, publicUrl, pipeline }) {
+  const server = createServer(createHandler(store, { log, notifier, defaultProject, mergePhrase, closePhrase, goPhrase, accountMail, setup, now, publicUrl, pipeline }));
   return new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(port, host, () => {
@@ -1316,11 +1325,14 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     let defaultProject = null;
     let mergePhrase = null;
     let publicUrl = null;
+    let pipeline = null;
     try {
       const config = loadProjectConfig();
       defaultProject = config.projectSlug;
       mergePhrase = config.mergePhrases[0] ?? null;
       publicUrl = config.trackerPublicUrl;
+      // The Pipeline Status pod reads this project's loop logs, named as the installer names them.
+      pipeline = { logDir: config.logDir, slug: config.projectSlug };
     } catch (err) {
       log(`the New request form starts on the first project and the ticket page has no Merge button: the project config is not usable (${err.message}).`);
     }
@@ -1328,7 +1340,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     const { setup, why: noSetup } = setupSettingsOf({ db: resolve(db) });
     log(setup ? `set up a project: on, reading ${setup.homeConfig.logDir}/onboard.` : `set up a project: off. ${noSetup}.`);
     log(publicUrl ? `public address: ${publicUrl} serves the page and the API, with a Secure cookie.` : 'public address: none set (trackerPublicUrl).');
-    const server = await startServer({ store, port, host, log, notifier, defaultProject, mergePhrase, closePhrase: CLOSE_PHRASE, goPhrase: GO_PHRASE, accountMail, setup, publicUrl });
+    const server = await startServer({ store, port, host, log, notifier, defaultProject, mergePhrase, closePhrase: CLOSE_PHRASE, goPhrase: GO_PHRASE, accountMail, setup, publicUrl, pipeline });
     console.log(`tracker listening on http://${host}:${server.address().port}/`);
   } catch (err) {
     console.error(`tracker server did not start: ${err.message}`);

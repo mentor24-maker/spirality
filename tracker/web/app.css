@@ -70,6 +70,12 @@ main.wide { max-width: none; }
 .toolbar { display: flex; gap: 2rem; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
 .toolbar .project-picker { font-weight: 600; }
 .toolbar .project-picker select { font: inherit; font-weight: normal; padding: 0.35rem; margin-left: 0.25rem; }
+/* The Pipeline Status pod (SP-168): when each loop stage runs next, between the search field and Board/List. */
+.toolbar .pipeline-pod { display: flex; align-items: center; padding: 0.3rem 0.75rem; border: var(--hairline); border-radius: 6px; font-size: 0.85rem; color: var(--quiet); white-space: nowrap; }
+.toolbar .pipeline-pod:empty { display: none; }
+.toolbar .pipeline-pod .stage { color: var(--ink); }
+.toolbar .pipeline-pod .stage.running { font-weight: 600; }
+.toolbar .pipeline-pod .sep { padding: 0 0.15rem; }
 table.projects, table.counts { border: var(--hairline); border-radius: 8px; border-collapse: separate; border-spacing: 0; overflow: hidden; }
 table.projects tbody tr:last-child td, table.counts tbody tr:last-child td { border-bottom: 0; }
 table.projects tbody tr:hover { background: #f5f5f7; }

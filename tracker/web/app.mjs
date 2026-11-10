@@ -26,7 +26,7 @@
  * an emailed link's own page. The link's token is sent only in a JSON body,
  * never in an address.
  */
-import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket } from './render.mjs';
+import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod } from './render.mjs';
 
 /** Where an earlier version of the page kept a pasted token; removed on load, never read. */
 const OLD_TOKEN_KEY = 'tracker-token';
@@ -57,6 +57,8 @@ const REFRESH_EVERY_MS = 60_000;
  * is watching it. Only while the page says it follows (setupFollows).
  */
 const SETUP_REFRESH_EVERY_MS = 4_000;
+/** How often the Tasks page's Pipeline Status pod reads GET /pipeline again (SP-168). */
+const PIPELINE_REFRESH_EVERY_MS = 60_000;
 /** The title the page itself asks for, and the last waiting count read (null: none yet). */
 let pageTitle = 'Tracker';
 let waitingCount = null;
@@ -140,6 +142,36 @@ const when = (iso) => new Date(iso).toLocaleString(undefined, {
   month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short',
 });
 
+/** A time of day in this computer's own time zone, for the Pipeline Status pod: "10:45 AM". */
+const clockTime = (iso) => new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+
+/** The last Pipeline Status answer read (GET /pipeline), or null before any or after a failed read. */
+let pipelineState = null;
+
+/**
+ * Fill the Tasks page's Pipeline Status pod, when it is on the page (SP-168):
+ * at once from the last answer, so a redraw never blanks it, then from a
+ * fresh read. A failed read says so in the pod and touches nothing else.
+ */
+async function refreshPipeline() {
+  if (!me || !main.querySelector('.pipeline-pod')) return;
+  showPipeline();
+  try {
+    pipelineState = await api('GET', '/pipeline', undefined, { unrecorded: true });
+  } catch (err) {
+    if (err instanceof SignedOut) return;
+    pipelineState = null;
+  }
+  showPipeline(true);
+}
+
+/** Draw the pod from the last answer; before the first read, it waits quietly. */
+function showPipeline(read = false) {
+  const pod = main.querySelector('.pipeline-pod');
+  if (!pod || (!pipelineState && !read)) return;
+  pod.innerHTML = renderPipelinePod(pipelineState, clockTime);
+}
+
 class SignedOut extends Error {}
 
 /** A refused call, carrying the HTTP status the tracker answered with. */
@@ -174,9 +206,10 @@ function drawNotOnProject({ ticket = null, project = null }) {
 }
 
 /** Call the tracker as the signed-in person. Answers the parsed JSON, or throws with the server's own message. */
-async function api(method, path, body) {
+async function api(method, path, body, { unrecorded = false } = {}) {
   const write = method !== 'GET' && method !== 'HEAD';
-  const reads = recording;
+  // `unrecorded`: a read that is not what the page shows (the Pipeline Status pod), so a change in it never redraws the page.
+  const reads = unrecorded ? null : recording;
   if (write) writing += 1;
   let res;
   try {
@@ -1136,6 +1169,7 @@ async function drawProject(slug, view, { adding = false, filed = null, unchecked
     <div class="toolbar">
       ${renderProjectPicker(projects, board.project)}
       ${searchForm('')}
+      <div class="pipeline-pod" role="status" aria-label="Pipeline Status"></div>
       <nav class="views" aria-label="View">${toggle}</nav>
     </div>
     ${filed ? `<p class="filed-note">Filed <a href="/t/${encodeURIComponent(filed)}">${escapeHtml(filed)}</a>${unchecked ? `. ${UNCHECKED_NOTE}` : ''}${filesNote(uploaded, notUploaded)}</p>` : ''}
@@ -1177,6 +1211,7 @@ async function drawProject(slug, view, { adding = false, filed = null, unchecked
   putTrail([{ label: board.projectName, href: '/projects' }, { label: view === 'board' ? 'Board' : 'List' }]);
   wireSearch();
   wireAddTask(board.project, view, adding);
+  refreshPipeline();
   // Picking a project opens it in this same view, as a link would: Back returns here.
   main.querySelector('.project-picker select').addEventListener('change', (e) => {
     history.pushState(null, '', at(view, e.target.value));
@@ -2328,6 +2363,8 @@ try { localStorage.removeItem(OLD_TOKEN_KEY); } catch { /* nothing kept */ }
 // The count in the tab title stays current while the tab sits pinned in the
 // background; the page itself is read again only while it is in view.
 setInterval(beat, REFRESH_EVERY_MS);
+// The Pipeline Status pod on the Tasks page reads again once a minute (SP-168).
+setInterval(refreshPipeline, PIPELINE_REFRESH_EVERY_MS);
 // A setup page under way reads again every few seconds; every other page waits for the beat.
 setInterval(() => {
   if (lastDrawn?.fast) refreshPage();
