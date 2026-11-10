@@ -47,19 +47,32 @@ test('four stages from scratch logs: a sleeping lane, a running lane, the relay,
     assert.deepEqual(answer.stages.map((s) => s.name), ['Relay', 'Build', 'Review', 'Intake']);
     assert.deepEqual(by.Review, {
       name: 'Review', job: 'loop-review', logged: true, running: false,
-      lastStart: at('2026-11-09T18:22:34').toISOString(), nextDue: at('2026-11-09T18:55:36').toISOString(),
+      lastStart: at('2026-11-09T18:22:34').toISOString(), lastEnd: at('2026-11-09T18:25:36').toISOString(), lastExit: 0,
+      interval: 1800, nextDue: at('2026-11-09T18:55:36').toISOString(),
     });
     assert.equal(by.Build.running, true);
     assert.equal(by.Build.nextDue, null);
     assert.equal(by.Build.lastStart, at('2026-11-09T18:46:58').toISOString());
+    // While a pass runs, its last end is the pass before it.
+    assert.equal(by.Build.lastEnd, at('2026-11-09T18:16:57').toISOString());
     // The relay: its last start plus the interval the installer writes into its plist.
     assert.equal(by.Relay.running, false);
     assert.equal(by.Relay.nextDue, new Date(at('2026-11-09T18:37:36').getTime() + INTERVALS.relay * 1000).toISOString());
-    assert.deepEqual(by.Intake, { name: 'Intake', job: 'loop-intake', logged: false, running: false, lastStart: null, nextDue: null });
+    assert.equal(by.Relay.interval, INTERVALS.relay);
+    assert.equal(by.Relay.lastEnd, at('2026-11-09T18:37:52').toISOString());
+    assert.equal(by.Relay.lastExit, 0);
+    // No log: nothing logged, and it wakes as the installer sets it to.
+    assert.deepEqual(by.Intake, { name: 'Intake', job: 'loop-intake', logged: false, running: false, lastStart: null, lastEnd: null, lastExit: null, interval: INTERVALS['loop-intake'], nextDue: null });
     // Times and flags only: no log text anywhere in the answer.
     const text = JSON.stringify(answer);
     assert.doesNotMatch(text, /SECRET|REPORT|working|under way|WebApps|=====/);
-    for (const s of answer.stages) assert.deepEqual(Object.keys(s).sort(), ['job', 'lastStart', 'logged', 'name', 'nextDue', 'running']);
+    for (const s of answer.stages) {
+      assert.deepEqual(Object.keys(s).sort(), ['interval', 'job', 'lastEnd', 'lastExit', 'lastStart', 'logged', 'name', 'nextDue', 'running']);
+      // Times, codes and intervals only: every value a flag, a name, an ISO time, a number or null.
+      for (const t of [s.lastStart, s.lastEnd, s.nextDue]) assert.ok(t === null || /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(t), t);
+      assert.ok(s.lastExit === null || Number.isInteger(s.lastExit));
+      assert.ok(Number.isInteger(s.interval));
+    }
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -134,4 +147,35 @@ test('nothing project-specific typed in: the stages are the installer\'s lanes p
   assert.equal(logFolderOf('/var/logs', '/home/someone'), '/var/logs');
   const source = readFileSync(join(REPO, 'tracker/pipeline.mjs'), 'utf8');
   assert.doesNotMatch(source, /loop-logs|spirality|com\.[a-z]/);
+});
+
+test('each exit code the runners write on an END line is read back as its number (SP-173)', () => {
+  // The relay's four END lines (scripts/run_relay.sh) and the lanes' one shape (scripts/loop_runner.sh).
+  const relayLine = {
+    0: 'pass complete (exit 0)',
+    1: 'A STEP FAILED AND SAID SO ABOVE (exit 1)',
+    124: 'hit the 900s time limit and was stopped (exit 124); its tickets are untouched or marked, never half-moved silently',
+    127: 'the pass could not run (exit 127)',
+  };
+  for (const [code, words] of Object.entries(relayLine)) {
+    const text = [relayStart(at('2026-11-09T18:37:36')), `===== ${logDate(at('2026-11-09T18:38:00'))} END relay — ${words} =====`].join('\n');
+    const relay = readStage(text, 'relay', { interval: 600 });
+    assert.equal(relay.lastExit, Number(code), words);
+    assert.equal(relay.lastEnd.toISOString(), at('2026-11-09T18:38:00').toISOString());
+    assert.equal(relay.interval, 600);
+  }
+  for (const code of [0, 1, 124, 2]) {
+    const text = [
+      start('loop-build', at('2026-11-09T10:00:00')),
+      `===== ${logDate(at('2026-11-09T10:05:00'))} END /loop-build (exit ${code} — not a verdict; the pass's report above is) =====`,
+      sleeping('loop-build', at('2026-11-09T10:05:00'), 900),
+    ].join('\n');
+    const build = readStage(text, 'loop-build');
+    assert.equal(build.lastExit, code);
+    assert.equal(build.interval, 900, 'a lane wakes as its own sleeping line says');
+  }
+  // An END line with no code in it: ended, code unknown.
+  const bare = readStage([start('loop-build', at('2026-11-09T10:00:00')), `===== ${logDate(at('2026-11-09T10:01:00'))} END /loop-build =====`].join('\n'), 'loop-build');
+  assert.equal(bare.lastExit, null);
+  assert.equal(bare.running, false);
 });

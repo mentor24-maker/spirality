@@ -2303,6 +2303,8 @@ test('GET /pipeline answers each loop stage from the logs the project config nam
           ['Relay', false, false], ['Build', false, false], ['Review', true, true], ['Intake', false, false],
         ]);
         assert.equal(answer.body.stages[2].lastStart, began.toISOString());
+        // SP-173's extra fields for the dialog: the last end and its exit code, and how often it wakes.
+        assert.deepEqual([answer.body.stages[2].lastEnd, answer.body.stages[2].lastExit, answer.body.stages[2].interval], [null, null, 1800]);
         assert.doesNotMatch(answer.text, /report text/);
       }
       assert.equal((await f.call('GET', '/pipeline', { token: null, at })).status, 401);
