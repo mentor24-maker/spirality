@@ -332,10 +332,14 @@ export const PIPELINE_UNAVAILABLE = 'Pipeline Status unavailable';
 
 /**
  * The Pipeline Status pod's contents on the Tasks page (SP-168), from GET
- * /pipeline: one short item per stage, "Relay 10:45 · Build running ·
- * Review 11:10 · Intake 11:04", as HTML. `timeOf` turns an ISO time into the
- * page's own clock time. A stage with no pass logged yet, or no next time
- * known, shows a dash, its title saying which. A missing or malformed answer
+ * /pipeline, as HTML: the heading "Pipeline Stages", then one row per stage
+ * (SP-194), its name on the left and its next time (or "running") on the
+ * right, "Relay 10:45 / Build running / Review 11:10 / Intake 11:04". The pod
+ * is a button, and a table is not allowed inside one, so the two columns are
+ * a CSS grid of spans (`.stages` in app.css). `timeOf` turns an ISO time into
+ * the page's own clock time. A stage with no pass logged yet, or no next time
+ * known, shows a dash, its title saying which. A running stage's two cells
+ * carry `running`, which app.css draws green. A missing or malformed answer
  * says PIPELINE_UNAVAILABLE.
  */
 export function renderPipelinePod(answer, timeOf) {
@@ -357,9 +361,11 @@ export function renderPipelinePod(answer, timeOf) {
       shown = timeOf(s.nextDue);
       title = `${s.name}: next pass due ${shown}`;
     }
-    return `<span class="stage${s.running ? ' running' : ''}" title="${escapeHtml(title)}">${escapeHtml(s.name)} ${escapeHtml(shown)}</span>`;
+    const cls = s.running ? ' running' : '';
+    const tip = escapeHtml(title);
+    return `<span class="stage${cls}" title="${tip}">${escapeHtml(s.name)}</span><span class="time${cls}" title="${tip}">${escapeHtml(shown)}</span>`;
   };
-  return stages.map(item).join('<span class="sep" aria-hidden="true"> · </span>');
+  return `<span class="heading">Pipeline Stages</span><span class="stages">${stages.map(item).join('')}</span>`;
 }
 
 /**
