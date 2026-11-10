@@ -8,15 +8,19 @@ import { loadProjectConfig } from '../../lib/projectConfig.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
-test('the forwarding site sends every path to trackerPublicUrl, and nothing else is in it (SP-164)', () => {
+test('the forwarding site sends the front page and every path to trackerPublicUrl, and nothing else is in it (SP-164, SP-198)', () => {
   const site = JSON.parse(trackerPageSite({ trackerPublicUrl: 'https://mini.example.ts.net:8443' }));
-  assert.deepEqual(site, { rewrites: [{ source: '/:path*', destination: 'https://mini.example.ts.net:8443/:path*' }] });
+  assert.deepEqual(site, { rewrites: [
+    { source: '/', destination: 'https://mini.example.ts.net:8443/' },
+    { source: '/:path*', destination: 'https://mini.example.ts.net:8443/:path*' },
+  ] });
 });
 
 test('the destination is whatever the config says, never a written-in address (SP-164)', () => {
   for (const url of ['https://a.example.ts.net', 'https://b.example.ts.net:10000']) {
-    const [rule] = JSON.parse(trackerPageSite({ trackerPublicUrl: url })).rewrites;
-    assert.equal(rule.destination, `${url}/:path*`);
+    const [front, rest] = JSON.parse(trackerPageSite({ trackerPublicUrl: url })).rewrites;
+    assert.equal(front.destination, `${url}/`);
+    assert.equal(rest.destination, `${url}/:path*`);
   }
   assert.throws(() => trackerPageSite({ trackerPublicUrl: null }), /trackerPublicUrl/);
 });

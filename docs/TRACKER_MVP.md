@@ -594,7 +594,11 @@ login, so that step is Dane's.
 2. Make the forwarding project (once): from `sites/tracker-page`, run
    `npx vercel link` and create a new project, `spirality-tracker-page`,
    then `npx vercel deploy --prod`. Open the `*.vercel.app` address it
-   prints: it shows the tracker's sign-in screen.
+   prints: it shows the tracker's sign-in screen. (Done 2026-11-10: the
+   project is `spirality-tracker-page`, at
+   `https://spirality-tracker-page.vercel.app`. `link` also writes `.vercel/`
+   and a short-lived token in `.env.local` into the folder; git ignores both,
+   the CLI does not upload them, and `.env.local` can be deleted.)
 3. In StarCaster's Vercel project, Settings → Domains, **remove**
    `spirality.alphire.agency`. The DNS record (`CNAME` to
    `cname.vercel-dns.com`) stays as it is; only which project answers moves.
