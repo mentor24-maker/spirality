@@ -93,3 +93,5 @@ halfway.
 - After any merge that adds a lane, run the installer again; a merge alone
   does not load it.
 - Switching back is in `docs/TRACKER_MVP.md`, "Switching back".
+- Its jobs outside the lanes that touch ClickUp, and the plan for each, are
+  in [STARCASTER.md](STARCASTER.md).

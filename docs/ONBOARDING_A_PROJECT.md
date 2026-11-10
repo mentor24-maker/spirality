@@ -28,6 +28,8 @@ wizard for the next project, [docs/onboarding/SETUP_REVIEW.md](onboarding/SETUP_
 
 A project already on ClickUp: how WaveCenter's move went, where the wizard
 stopped and what was left over, [docs/onboarding/WAVECENTER.md](onboarding/WAVECENTER.md).
+StarCaster's jobs outside its lanes that touch ClickUp, and the plan for
+each before it moves, [docs/onboarding/STARCASTER.md](onboarding/STARCASTER.md).
 
 ## The way in: one command
 

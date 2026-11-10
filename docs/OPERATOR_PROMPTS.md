@@ -119,3 +119,9 @@ this log only points there.
 6. > /doc-it
 
    Led to: [PP-6](http://mac-mini.local:4180/t/PP-6), "The overview says a run that is cut off keeps its full copy, but it does not: correct it and list the fixes needed before an outlet is switched on" (PressPlay pull request [#7](https://github.com/mentor24-maker/pressplay/pull/7)), and [SP-182](http://mac-mini.local:4180/t/SP-182), "Dane's prompts are not recorded anywhere: start docs/OPERATOR_PROMPTS.md and link it from CLAUDE.md", which added this section.
+
+## 2026-11-10: StarCaster's move to the tracker, held back
+
+1. > Run SP-25, StarCaster still runs on ClickUp: move it to the tracker, as a hand-run session.
+
+   Led to: no switch. Before the wizard's stop step, the session found that the move would turn off StarCaster's auto-merge Lanes A and B (Spirality's relay never reads `autoMergeLanes`) and leave its `bus-relay`, `pipeline-pulse` and `weekly-report` jobs and its `review-gate` workflow reading ClickUp. Dane chose to wait for the gaps (his answer in the session: "Wait for the gaps"). Filed [SP-199](http://mac-mini.local:4180/t/SP-199), "StarCaster's auto-merge lanes stop when it moves to the tracker: make the relay merge Lanes A and B", and [SP-200](http://mac-mini.local:4180/t/SP-200), "StarCaster's bus-relay, pulse and weekly report read ClickUp: list what each needs on the tracker and file the work", and added both to the `Waits on:` line of [SP-25](http://mac-mini.local:4180/t/SP-25), "StarCaster still runs on ClickUp: move it to the tracker", which went back to Queued. StarCaster's tracker project got its operator, Dane (actor 1).
