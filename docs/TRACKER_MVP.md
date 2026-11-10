@@ -579,15 +579,18 @@ it opened. Requests arrive through Funnel, so they get the public address's
 
 When `trackerPageUrl` is set in `spirality.project.json`, the invite and
 reset emails link there instead of `trackerUrl` (the server reads it when it
-starts). It stays unset until the name below answers with the sign-in
-screen, so no email links to a name that does not yet lead here.
+starts). It is set to `https://spirality.alphire.agency` (SP-209), after the
+name below answered with the tracker's page.
 
-Moving the name. Today `spirality.alphire.agency` belongs to **StarCaster's**
-Vercel project (its answers carry `x-site-handler: resolved`), whose
-Spirality Tasks block stays for StarCaster's other sites. The move is
-outward-facing, so it is done **after this merges, by a hand-run session,
-with Dane's word**, never by a loop. Signing in to Vercel is a browser
-login, so that step is Dane's.
+Moving the name. **Done 2026-11-10**: `spirality.alphire.agency` moved from
+**StarCaster's** Vercel project (whose answers carried
+`x-site-handler: resolved`) to `spirality-tracker-page`, with Dane's word, by
+Vercel's move call
+(`npx vercel api /v1/projects/starcaster/domains/spirality.alphire.agency/move -X POST -F projectId=<spirality-tracker-page's id>`),
+which takes the name off one project and puts it on the other in one step.
+StarCaster's other names stayed. The steps below are kept for doing it again
+(for another project's page) and for the undo. The move is outward-facing,
+so it is done **by a hand-run session, with Dane's word**, never by a loop.
 
 1. Check the route is on: `scripts/install_tracker_funnel.sh --status`
    ends in exit 0.
