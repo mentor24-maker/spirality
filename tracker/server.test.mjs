@@ -899,7 +899,7 @@ test('strict membership: a person who is not an admin sees only their own projec
       ['POST', '/projects/beta/tickets', { name: 'Sneak in', status: 'Requested' }],
       ['POST', '/projects/beta/tickets/check', { name: 'x' }], ['GET', '/reports?project=beta'],
       ['GET', `/tickets/${theirs.id}`], ['GET', `/tickets/${theirs.id}/thread`], ['GET', `/tickets/${theirs.id}/events`],
-      ['GET', `/tickets/${theirs.id}/attachments`], ['GET', `/tickets/${theirs.id}/attachments/1`],
+      ['GET', `/tickets/${theirs.id}/attachments`], ['GET', `/tickets/${theirs.id}/attachments/1`], ['GET', '/projects/beta/attachments'],
       ['PATCH', `/tickets/${theirs.id}`, { name: 'Renamed' }], ['DELETE', `/tickets/${theirs.id}`],
       ['POST', `/tickets/${theirs.id}/comments`, { body: 'hello' }], ['POST', `/tickets/${theirs.id}/clone`, { project: 'alpha' }],
     ];
@@ -2144,6 +2144,26 @@ async function upload(at, ticket, bytes, { name = 'shot.png', type = 'image/png'
   const text = await res.text();
   return { status: res.status, body: JSON.parse(text) };
 }
+
+test('a project\'s files are listed in one call, newest first, with each task\'s name, and never the bytes (SP-171)', async () => {
+  const f = await fixture();
+  try {
+    const t = f.store.fileTicket({ project: 'alpha', actor: f.human.id, name: 'With a file', status: 'requested' });
+    const empty = await f.call('GET', '/projects/alpha/attachments');
+    assert.equal(empty.status, 200, empty.text);
+    assert.deepEqual(empty.body, { project: 'alpha', attachments: [] });
+    const base = await f.serve();
+    const made = await upload(base, t.id, Buffer.from('hello'), { name: 'notes.txt', type: 'text/plain', headers: { authorization: `Bearer ${f.humanToken}` } });
+    assert.equal(made.status, 201);
+    const list = await f.call('GET', '/projects/alpha/attachments');
+    assert.equal(list.status, 200);
+    assert.deepEqual(list.body.attachments.map((a) => [a.id, a.name, a.ticket, a.ticketName, a.size]), [[made.body.id, 'notes.txt', t.id, 'With a file', 5]]);
+    assert.equal(list.body.attachments[0].addedByName, f.human.name);
+    assert.equal(list.text.includes('hello'), false, 'never the bytes');
+    assert.equal((await f.call('GET', '/projects/nope/attachments')).status, 404);
+    assert.equal((await f.call('GET', '/projects/alpha/attachments', { token: null })).status, 401);
+  } finally { await f.cleanup(); }
+});
 
 test('a file posted to a ticket comes back byte for byte, listed with its name and size, and always as a download', async () => {
   const f = await fixture();

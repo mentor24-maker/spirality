@@ -732,7 +732,7 @@ test('the page is served at /, at a ticket\'s address, at Projects, at Tasks, at
 
 test('the Settings page is in the header after Reporting and Users, lists the stages the server gives, saves them all, reads them back, and shows a refusal', async () => {
   const html = readFileSync(WEB('index.html'), 'utf8');
-  assert.match(html, /<a href="\/reporting" data-nav="reporting">Reporting<\/a>\s*<a href="\/users" data-nav="users">Users<\/a>\s*<a href="\/settings" data-nav="settings">Settings<\/a>/);
+  assert.match(html, /<a href="\/reporting" data-nav="reporting">Reporting<\/a>\s*<a href="\/users" data-nav="users">Users<\/a>\s*<a href="\/docs" data-nav="docs">Docs<\/a>\s*<a href="\/settings" data-nav="settings">Settings<\/a>/);
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   const draw = app.slice(app.indexOf('async function drawSettings'), app.indexOf('/**\n * The Users page'));
   assert.match(draw, /const \{ stages \} = await api\('GET', '\/stage-colours'\);/, 'the stages come from the server, never typed out');
@@ -773,7 +773,7 @@ test('bellColour: grey while nothing waits, yellow for 1 to 3, red for more than
 test('Waiting on you is a bell on the right, just before "Signed in as", coloured from the count wherever it is read', () => {
   const html = readFileSync(WEB('index.html'), 'utf8');
   const nav = /<nav class="site">([\s\S]*?)<\/nav>/.exec(html)[1];
-  assert.deepEqual([...nav.matchAll(/>([^<]+)<\/a>/g)].map((m) => m[1]), ['Projects', 'Tasks', 'Reporting', 'Users', 'Settings']);
+  assert.deepEqual([...nav.matchAll(/>([^<]+)<\/a>/g)].map((m) => m[1]), ['Projects', 'Tasks', 'Reporting', 'Users', 'Docs', 'Settings']);
   assert.doesNotMatch(nav, /Waiting on you/);
   const me = /<span class="me">([\s\S]*?)<\/span>\s*<\/header>/.exec(html)[1];
   assert.match(me, /<a id="bell" href="\/" title="Waiting on You" aria-label="Waiting on You" data-colour="grey" hidden><svg [^>]*aria-hidden="true">[\s\S]*?<\/svg><\/a>\s*<span id="who"><\/span>/);
@@ -2269,9 +2269,9 @@ test('every button on a ticket\'s page is green with a darker border and rounded
 
 // ── Users ────────────────────────────────────────────────────────────────────
 
-test('Users is in the header before Settings, served at /users to a browser, and its data needs a sign-in', async () => {
+test('Users is in the header before Docs, served at /users to a browser, and its data needs a sign-in', async () => {
   const html = readFileSync(WEB('index.html'), 'utf8');
-  assert.match(html, /<a href="\/users" data-nav="users">Users<\/a>\s*<a href="\/settings" data-nav="settings">Settings<\/a>/);
+  assert.match(html, /<a href="\/users" data-nav="users">Users<\/a>\s*<a href="\/docs" data-nav="docs">Docs<\/a>/);
   assert.doesNotMatch(html, />People</);
   const f = await fixture();
   try {
@@ -2283,6 +2283,33 @@ test('Users is in the header before Settings, served at /users to a browser, and
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   assert.match(app, /usersPage \? 'users' :/);
   assert.match(app, /\} else if \(usersPage\) \{\s*await drawUsers\(\);/);
+});
+
+// ── Docs (SP-171) ───────────────────────────────────────────────────────────
+
+test('Docs is in the header between Users and Settings, served at /docs to a browser, and lists the picked project\'s task files', async () => {
+  const html = readFileSync(WEB('index.html'), 'utf8');
+  assert.match(html, /<a href="\/users" data-nav="users">Users<\/a>\s*<a href="\/docs" data-nav="docs">Docs<\/a>\s*<a href="\/settings" data-nav="settings">Settings<\/a>/);
+  const f = await fixture();
+  try {
+    const page = await fetch(`${f.url}/docs`, { headers: { accept: 'text/html' } });
+    assert.equal(page.status, 200);
+    assert.equal(await page.text(), html, 'opening /docs directly shows the page, never data or a 404');
+    assert.equal((await f.call('GET', '/projects/alpha/attachments', { token: null })).status, 401);
+  } finally { await f.cleanup(); }
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  assert.match(app, /docsPage \? 'docs' :/);
+  assert.match(app, /\} else if \(docsPage\) \{\s*await drawDocs\(\);/);
+  const draw = app.slice(app.indexOf('async function drawDocs'), app.indexOf('/** Underline the header link'));
+  assert.match(draw, /projects\.find\(\(p\) => p\.slug === savedProject\(\)\) \?\? projects\[0\]/, 'the project picked in the header, else the first');
+  assert.match(draw, /await api\('GET', `\/projects\/\$\{encodeURIComponent\(project\.slug\)\}\/attachments`\)/);
+  assert.match(draw, /`\/tickets\/\$\{encodeURIComponent\(a\.ticket\)\}\/attachments\/\$\{encodeURIComponent\(a\.id\)\}`/, 'downloads use the task\'s own download address');
+  assert.match(draw, /download="\$\{escapeHtml\(a\.name\)\}"/);
+  assert.match(draw, /<a href="\/t\/\$\{encodeURIComponent\(a\.ticket\)\}">/);
+  assert.match(draw, /<h2>Task Files<\/h2>/);
+  for (const heading of ['File', 'Task', 'Type', 'Size', 'Added By', 'Added On']) assert.match(draw, new RegExp(`<th>${heading}</th>`), heading);
+  assert.match(draw, /No task in .* has a file yet\./, 'an empty project says so in a line');
+  assert.doesNotMatch(draw, /\$\{a\.(name|ticketName|addedByName|type)\}/, 'every name is escaped');
 });
 
 test('a browser opening /people (an old bookmark) is sent on to /users, never cached; the data call to /people still answers the data', async () => {
