@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { seedDemo, tickingClock } from './demoData.mjs';
 import { reportsOf, REPORT_RANGES, searchTickets } from './pageData.mjs';
-import { escapeHtml, renderComment, renderInline, renderMarkdown, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, renderContextDocs } from './web/render.mjs';
+import { escapeHtml, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, renderContextDocs } from './web/render.mjs';
 import { startServer, setupSettingsOf } from './server.mjs';
 import { saveAnswers, setupFields, setupOf } from './setup.mjs';
 import { DANE_FIELDS as SETUP_FIELDS, STEPS as SETUP_STEPS } from '../scripts/onboard/onboard.mjs';
@@ -2298,7 +2298,7 @@ test('Docs is in the header between Users and Settings, served at /docs to a bro
     assert.equal((await f.call('GET', '/projects/alpha/attachments', { token: null })).status, 401);
   } finally { await f.cleanup(); }
   const app = readFileSync(WEB('app.mjs'), 'utf8');
-  assert.match(app, /docsPage \? 'docs' :/);
+  assert.match(app, /docsPage(?: \|\| docAny)? \? 'docs' :/);
   assert.match(app, /\} else if \(docsPage\) \{\s*await drawDocs\(\);/);
   const draw = app.slice(app.indexOf('async function drawDocs'), app.indexOf('/** Underline the header link'));
   assert.match(draw, /projects\.find\(\(p\) => p\.slug === savedProject\(\)\) \?\? projects\[0\]/, 'the project picked in the header, else the first');
@@ -2341,7 +2341,7 @@ test('the Docs page uploads one context document as the file itself, asks before
   const draw = app.slice(app.indexOf('async function drawDocs'), app.indexOf('/** Underline the header link'));
   assert.match(draw, /const docsPath = `\/projects\/\$\{encodeURIComponent\(project\.slug\)\}\/docs`;/);
   assert.match(draw, /api\('GET', docsPath\)/);
-  assert.ok(draw.indexOf('renderContextDocs({ project, docs }') < draw.indexOf('<h2>Task Files</h2>'), 'Context Documents come before Task Files');
+  assert.ok(draw.indexOf('${documentation}\n    ${renderContextDocs({ project, docs }') > 0 && draw.indexOf('renderContextDocs({ project, docs }') < draw.lastIndexOf('<h2>Task Files</h2>'), 'Context Documents come after Spirality Documentation and before Task Files');
   const wire = draw.slice(draw.indexOf('function wireContextDocs'));
   assert.match(wire, /picker\.files\?\.\[0\]/, 'one file at a time');
   assert.match(wire, /file\.size > MAX_FILE/, 'an 11 MB file is refused before it is sent');
@@ -2358,6 +2358,59 @@ test('the Docs page uploads one context document as the file itself, asks before
   const up = /async function uploadFile[\s\S]*?\n\}/.exec(app)[0];
   assert.match(up, /to = `\/tickets\/\$\{encodeURIComponent\(ticketId\)\}\/attachments`/, 'a ticket\'s upload still goes to its own address');
   assert.match(up, /res = await fetch\(to, \{/);
+});
+
+test('the Docs page lists Spirality\'s documentation by title above Task Files, and a file opens at /docs/spirality/<path> drawn as Markdown (SP-175)', async () => {
+  const f = await fixture();
+  try {
+    const html = readFileSync(WEB('index.html'), 'utf8');
+    const page = await fetch(`${f.url}/docs/spirality/LOOP_CONTRACT.md`, { headers: { accept: 'text/html' } });
+    assert.equal(page.status, 200);
+    assert.equal(await page.text(), html, 'opening a documentation file directly shows the page');
+    const list = await f.call('GET', '/documentation');
+    assert.equal(list.status, 200);
+    assert.deepEqual(list.body.files.find((d) => d.path === 'LOOP_CONTRACT.md'), { path: 'LOOP_CONTRACT.md', title: 'The loop contract' }, 'its first heading, as written');
+    assert.equal((await f.call('GET', '/documentation', { token: null })).status, 401);
+  } finally { await f.cleanup(); }
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const draw = app.slice(app.indexOf('async function drawDocs'), app.indexOf('/** The page address of a documentation file'));
+  assert.match(draw, /api\('GET', '\/documentation'\)/);
+  assert.ok(draw.indexOf('<h2>Spirality Documentation</h2>') < draw.indexOf('<h2>Task Files</h2>'), 'the documentation comes first');
+  for (const heading of ['Title', 'Path']) assert.match(draw, new RegExp(`<th>${heading}</th>`), heading);
+  assert.match(draw, /<a href="\$\{docAddress\(d\.path\)\}">\$\{escapeHtml\(d\.title\)\}<\/a>/, 'each file by its title, escaped, linking to its page');
+  assert.match(app, /const docAddress = \(path\) => `\/docs\/spirality\/\$\{String\(path\)\.split\('\/'\)\.map\(encodeURIComponent\)\.join\('\/'\)\}`/);
+  assert.match(app, /\} else if \(docAny\) \{\s*await drawDoc\(docPath\);/, 'any /docs/<name>/<path> draws through drawDoc');
+  assert.match(app, /const underDocs = \(\) => \/\^\\\/docs\\\/\[\^\/\]\+\\\/\.\+\$\/\.test\(location\.pathname\);/, 'the same addresses the server serves as the page');
+  assert.match(app, /docsPage \|\| docAny \? 'docs' :/, 'a documentation file keeps Docs underlined in the header');
+  assert.match(draw, /api\('GET', '\/documentation'\)\.then\(\(r\) => r\.files, \(\) => null\)/, 'a failed documentation call is caught on its own, so Task Files still draws');
+  assert.match(draw, /Spirality\\'s documentation could not be read\./);
+  const one = app.slice(app.indexOf('async function drawDoc('), app.indexOf('/** Underline the header link'));
+  assert.match(one, /renderMarkdown\(unwrapDoc\(body\)\)/, 'drawn with the ticket page\'s Markdown drawing, never as raw text');
+  assert.match(one, /<a href="\/docs">Back to Docs<\/a>/);
+  assert.match(one, /<h1>\$\{escapeHtml\(doc\.title\)\}<\/h1>/);
+  assert.match(one, /There is no documentation file at/, 'a missing file says so');
+  assert.match(one, /if \(!path\) return missing\(location\.pathname\);/, 'an address under /docs the page does not know says the same, never another page');
+  // What a contract-like file looks like once drawn: headings, lists and code, not raw text.
+  const drawn = renderMarkdown('## Statuses\n\n- Queued\n- Building\n\n```\nnpm run verify\n```\n');
+  assert.match(drawn, /<h4>Statuses<\/h4>/);
+  assert.match(drawn, /<ul><li>Queued<\/li><li>Building<\/li><\/ul>/);
+  assert.match(drawn, /<pre><code>npm run verify<\/code><\/pre>/);
+});
+
+test('unwrapDoc joins a documentation file\'s hard-wrapped lines, keeps list items, headings, tables and code as written (SP-175)', () => {
+  const text = '# Title\nintro line one\nline two\n\n- **Code rules**: the script\n  does it.\n- Next item\n1. first\n   still first\n\n| a | b |\n| - | - |\n\n```\nkeep\nthese apart\n```\nafter\n---\nend';
+  assert.equal(unwrapDoc(text), '# Title\nintro line one line two\n\n- **Code rules**: the script does it.\n- Next item\n1. first still first\n\n| a | b |\n| - | - |\n\n```\nkeep\nthese apart\n```\nafter\n---\nend');
+  const drawn = renderMarkdown(unwrapDoc('- **Code rules**: the script\n  does it.\n'));
+  assert.equal(drawn, '<ul><li><strong>Code rules</strong>: the script does it.</li></ul>');
+  assert.equal(unwrapDoc(''), '');
+});
+
+test('unwrapDoc joins a quote\'s lines with their ">" taken off, and never joins a quote onto the text around it (SP-175)', () => {
+  const text = 'still the rule:\n> StarCaster still describes a two-account\n> model, where the machine posts. The\n> code does not do that.\nSo every comment\nends here.\n>\n> - a quoted item\n> second para';
+  assert.equal(unwrapDoc(text), 'still the rule:\n> StarCaster still describes a two-account model, where the machine posts. The code does not do that.\nSo every comment ends here.\n>\n> - a quoted item second para');
+  // The real file: no ">" left in the middle of a sentence once drawn.
+  const contract = readFileSync(new URL('../docs/LOOP_CONTRACT.md', import.meta.url), 'utf8');
+  for (const line of unwrapDoc(contract).split('\n')) assert.doesNotMatch(line, /\S\s+>\s/, line);
 });
 
 test('a browser opening /people (an old bookmark) is sent on to /users, never cached; the data call to /people still answers the data', async () => {
@@ -3110,4 +3163,19 @@ test.describe('Files Made: the files a ticket made, from its newest merge note',
     assert.match(app, /<\/section>\s*\$\{renderFilesMade\(t\)\}\s*<details class="details">/);
     assert.match(readFileSync(WEB('app.css'), 'utf8'), /\.files-made \{[^}]*background:[^}]*border:/);
   });
+});
+
+test('every page has one body width: main is capped at 1440px, padding included, and no page widens it (SP-184)', () => {
+  const css = readFileSync(WEB('app.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  const rules = css.split('}').map((r) => r.split('{')).filter((r) => r.length === 2)
+    .map(([sel, body]) => ({ sel: sel.split(',').map((x) => x.trim()), body }));
+  const plain = rules.filter((r) => r.sel.includes('main'));
+  assert.equal(plain.length, 1, 'one rule for the page body');
+  assert.match(plain[0].body, /max-width: 1440px/);
+  assert.match(plain[0].body, /box-sizing: border-box/, 'the 1440px includes the side padding');
+  assert.match(plain[0].body, /margin: 0 auto/, 'centred');
+  const perPage = rules.filter((r) => r.sel.some((s) => /^main[.#:\[]/.test(s) && !/\s/.test(s) && /(?:max-|min-)?width/.test(r.body)));
+  assert.deepEqual(perPage.map((r) => r.sel.join(', ')), [], 'no page gives the body a width of its own');
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  assert.doesNotMatch(app, /main\.classList\.(?:add|remove|toggle)\(\s*['"]wide['"]/, 'no wide class on the page body');
 });

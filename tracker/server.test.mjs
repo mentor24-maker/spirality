@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -2450,5 +2450,62 @@ test('GET /pipeline answers each loop stage from the logs the project config nam
     const none = await f.call('GET', '/pipeline');
     assert.equal(none.status, 503);
     assert.equal(none.body.error, 'no-pipeline');
+  } finally { await f.cleanup(); }
+});
+
+test('GET /documentation lists the docs folder\'s Markdown by title and reads one; a path outside it is 404 and reads nothing (SP-175)', async () => {
+  const f = await fixture();
+  try {
+    const docs = join(f.dir, 'docs');
+    mkdirSync(join(docs, 'onboarding'), { recursive: true });
+    writeFileSync(join(docs, 'LOOP_CONTRACT.md'), '# Loop Contract\n\n## Statuses\n\n- Queued\n');
+    writeFileSync(join(docs, 'onboarding', 'WIZARD.md'), 'No heading here.\n');
+    writeFileSync(join(docs, 'notes.txt'), 'not Markdown');
+    // A file beside the folder, and one a link inside the folder points at: neither may ever be read.
+    writeFileSync(join(f.dir, 'secret.md'), '# Secret\nSECRET-WORDS\n');
+    symlinkSync(join(f.dir, 'secret.md'), join(docs, 'linked.md'));
+    const server = await startServer({ store: f.store, port: 0, docsDir: docs });
+    try {
+      const at = `http://127.0.0.1:${server.address().port}`;
+      for (const token of [f.humanToken, f.machineToken]) {
+        const list = await f.call('GET', '/documentation', { token, at });
+        assert.equal(list.status, 200);
+        assert.deepEqual(list.body.files, [
+          { path: 'LOOP_CONTRACT.md', title: 'Loop Contract' },
+          { path: 'onboarding/WIZARD.md', title: 'WIZARD' },
+        ]);
+      }
+      const one = await f.call('GET', '/documentation/LOOP_CONTRACT.md', { at });
+      assert.equal(one.status, 200);
+      assert.deepEqual(one.body, { path: 'LOOP_CONTRACT.md', title: 'Loop Contract', text: '# Loop Contract\n\n## Statuses\n\n- Queued\n' });
+      assert.equal((await f.call('GET', '/documentation/onboarding/WIZARD.md', { at })).body.title, 'WIZARD');
+      for (const path of [
+        '/documentation/..%2Fsecret.md', '/documentation/%2E%2E/secret.md', '/documentation/onboarding/..%2F..%2Fsecret.md',
+        `/documentation/${encodeURIComponent(join(f.dir, 'secret.md'))}`, '/documentation/%2Fetc%2Fpasswd',
+        '/documentation/linked.md', '/documentation/notes.txt', '/documentation/missing.md', '/documentation/onboarding',
+      ]) {
+        const answer = await f.call('GET', path, { at });
+        assert.equal(answer.status, 404, path);
+        assert.doesNotMatch(answer.text, /SECRET-WORDS/, path);
+      }
+      assert.equal((await f.call('GET', '/documentation', { token: null, at })).status, 401);
+      assert.equal((await f.call('GET', '/documentation/LOOP_CONTRACT.md', { token: null, at })).status, 401);
+    } finally { await new Promise((r) => server.close(r)); }
+    // With no folder named, the tracker reads this repository's own docs/.
+    const own = await f.call('GET', '/documentation');
+    assert.ok(own.body.files.some((d) => d.path === 'LOOP_CONTRACT.md'));
+    assert.ok(own.body.files.some((d) => d.path.startsWith('work-log/')));
+  } finally { await f.cleanup(); }
+});
+
+test('a /docs/spirality/<path> address is the page, whatever the browser asks for (SP-175)', async () => {
+  const f = await fixture();
+  try {
+    const base = await f.serve();
+    for (const path of ['/docs/spirality/LOOP_CONTRACT.md', '/docs/spirality/onboarding/WIZARD.md']) {
+      const res = await fetch(`${base}${path}`);
+      assert.equal(res.status, 200, path);
+      assert.match(res.headers.get('content-type'), /text\/html/);
+    }
   } finally { await f.cleanup(); }
 });

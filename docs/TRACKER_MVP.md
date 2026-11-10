@@ -256,6 +256,7 @@ answers are JSON (structured text programs read).
 | `POST /signin` | **no token**: `{ email, password }` → the person, and a session cookie (`tracker_session`, `HttpOnly`, `SameSite=Strict`, `Path=/`, 30 days). A wrong password and an unknown email get the same 401 `no-match`, "That email and password do not match." After 5 failures for one email in 15 minutes, that email is refused (429 `locked`) for 15 minutes, even with the right password; the count is kept in memory, so a restart forgets it, and setting a password through an emailed link clears it. **No `Secure` flag yet**: the tracker is plain http on the home network; the ticket that opens it to the internet must add it, with https |
 | `POST /signout` | **no token**: ends the cookie's session and clears the cookie |
 | `POST /account/forgot` | **no token**: `{ email }` → the same answer whether or not the email has an account; an account's email is sent a 1-hour `reset` link through Resend after the answer has gone back. Sent with an outside site's own token (`authorization: Bearer <site token>`), the link opens `<site's page>?link=<token>`; with any other token or none, the tracker's set-password page; the answer is the same either way. The log says whether it went, never the link or the email |
+| `GET /documentation` | for the Docs page: every `.md` file in this repository's `docs/` folder and its subfolders, `{ files: [{ path, title }] }`, the folder's own files first. `GET /documentation/<path>` answers one, `{ path, title, text }`; a path outside `docs/` (`..`, absolute, a link out) or not a `.md` file is 404 and reads nothing |
 | `GET /projects/:slug/attachments` | for the Docs page: every file on the project's tickets, newest first, `{ project, attachments: [{ id, ticket, ticketName, name, type, size, addedBy, addedByName, createdAt }] }`, never the bytes. A project the caller is not on is 404, the same as one that does not exist |
 | `GET /projects/:slug/docs` | the project's context documents, newest first, `{ project, docs: [{ id, project, name, type, size, addedBy, addedByName, createdAt }] }`, never the bytes |
 | `POST /projects/:slug/docs` | upload one context document, sent exactly as a ticket's attachment (the raw file, `x-file-name`, `x-file-type`), with the same 10 MB limit and refusals. Answers 201 with the document as listed, read back byte for byte |
@@ -326,7 +327,7 @@ back before the page says it worked, and a refusal (the last admin stepping
 down) shows the server's reason. Under the invites, **Roles and Permissions**
 shows which role has which permission. The roles are recorded, not enforced:
 every person signed in may still invite (Dane's decision).
-**Docs** in the header, between Users and Settings, opens `/docs`. First,
+**Docs** in the header, between Users and Settings, opens `/docs`. Under Spirality's own documentation (below),
 **Context documents** (SP-176): the selected project's own files, newest
 first, with name, type, size, who added it and when, a **Download** link
 (always saved, never opened in the page) and a **Remove** button that asks
@@ -340,6 +341,15 @@ opens it), its type, size, who added it and when. A project with no files
 says so in a line. It reads `GET /projects/:slug/attachments`, which answers
 the list without the bytes, to members of the project only; downloads stay
 with `GET /tickets/:id/attachments/:n`. Task files are look-only for now.
+At the top, above both, **Spirality Documentation** lists every Markdown file
+in this repository's `docs/` folder and its subfolders by title (its first
+`# ` heading, else its file name) with its path; one opens at
+`/docs/spirality/<path>`, drawn the way a ticket's description is, with a
+**Back to Docs** link. It reads `GET /documentation` (the list) and
+`GET /documentation/<path>` (one file's text), which read only `.md` files
+inside `docs/`: a path with `..`, an absolute path, a link out of the folder
+or anything else is 404 and nothing is read. Read only; the files change
+through pull requests.
 A browser opening `/projects` or `/projects/<slug>` gets the page; the page's own
 call to the same address gets the data. `/users` is the page alone; its data
 is still `GET /people` (the onboarding scripts read it), and a browser opening
