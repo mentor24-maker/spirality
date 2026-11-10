@@ -26,7 +26,7 @@
  * an emailed link's own page. The link's token is sent only in a JSON body,
  * never in an address.
  */
-import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod } from './render.mjs';
+import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails } from './render.mjs';
 
 /** Where an earlier version of the page kept a pasted token; removed on load, never read. */
 const OLD_TOKEN_KEY = 'tracker-token';
@@ -165,11 +165,29 @@ async function refreshPipeline() {
   showPipeline(true);
 }
 
-/** Draw the pod from the last answer; before the first read, it waits quietly. */
+/** Draw the pod from the last answer; before the first read, it waits quietly. The dialog, when open, redraws with it. */
 function showPipeline(read = false) {
   const pod = main.querySelector('.pipeline-pod');
   if (!pod || (!pipelineState && !read)) return;
   pod.innerHTML = renderPipelinePod(pipelineState, clockTime);
+  const dialog = main.querySelector('dialog.pipeline-status');
+  if (dialog?.open) dialog.querySelector('.pipeline-details').innerHTML = renderPipelineDetails(pipelineState, when);
+}
+
+/**
+ * The pod is a button (SP-173): clicking it, or Enter or Space on it, opens
+ * the Pipeline Status dialog from the last answer read. Escape or Close
+ * shuts it, and focus goes back to the pod.
+ */
+function wirePipeline() {
+  const pod = main.querySelector('.pipeline-pod');
+  const dialog = main.querySelector('dialog.pipeline-status');
+  if (!pod || !dialog) return;
+  pod.addEventListener('click', () => {
+    dialog.querySelector('.pipeline-details').innerHTML = renderPipelineDetails(pipelineState, when);
+    dialog.showModal();
+  });
+  dialog.addEventListener('close', () => pod.focus());
 }
 
 class SignedOut extends Error {}
@@ -1169,7 +1187,7 @@ async function drawProject(slug, view, { adding = false, filed = null, unchecked
     <div class="toolbar">
       ${renderProjectPicker(projects, board.project)}
       ${searchForm('')}
-      <div class="pipeline-pod" role="status" aria-label="Pipeline Status"></div>
+      <button type="button" class="pipeline-pod" aria-haspopup="dialog" title="Open Pipeline Status"></button>
       <nav class="views" aria-label="View">${toggle}</nav>
     </div>
     ${filed ? `<p class="filed-note">Filed <a href="/t/${encodeURIComponent(filed)}">${escapeHtml(filed)}</a>${unchecked ? `. ${UNCHECKED_NOTE}` : ''}${filesNote(uploaded, notUploaded)}</p>` : ''}
@@ -1196,6 +1214,14 @@ async function drawProject(slug, view, { adding = false, filed = null, unchecked
         </div>
       </form>
     </dialog>
+    <dialog class="pipeline-status" aria-labelledby="pipeline-status-title">
+      <form method="dialog">
+        <button type="submit" class="close" aria-label="Close">×</button>
+        <h2 id="pipeline-status-title">Pipeline Status</h2>
+        <div class="pipeline-details"></div>
+        <div class="row"><button type="submit">Close</button></div>
+      </form>
+    </dialog>
     <p class="error list-note" role="alert" hidden></p>
     ${view === 'board'
     ? `<div class="board">${working.map(column).join('')}</div>${live ? `<div class="list board-live">${group(live)}</div>` : ''}`
@@ -1211,6 +1237,7 @@ async function drawProject(slug, view, { adding = false, filed = null, unchecked
   putTrail([{ label: board.projectName, href: '/projects' }, { label: view === 'board' ? 'Board' : 'List' }]);
   wireSearch();
   wireAddTask(board.project, view, adding);
+  wirePipeline();
   refreshPipeline();
   // Picking a project opens it in this same view, as a link would: Back returns here.
   main.querySelector('.project-picker select').addEventListener('change', (e) => {

@@ -315,6 +315,58 @@ export function renderPipelinePod(answer, timeOf) {
   return stages.map(item).join('<span class="sep" aria-hidden="true"> · </span>');
 }
 
+/**
+ * How a pass ended, in plain words, from the exit code on its END line
+ * (SP-173). The runners write these codes (scripts/run_relay.sh,
+ * scripts/loop_runner.sh, scripts/run_with_time_limit.sh): 0 finished, 1 a
+ * step failed and said so, 124 the time limit stopped it, anything else it
+ * could not run. An END line with no code says only that it ended.
+ */
+export function passOutcome(code) {
+  if (code === 0) return 'Finished';
+  if (code === 1) return 'A step failed and said so';
+  if (code === 124) return 'Hit its time limit and was stopped';
+  if (Number.isInteger(code)) return `Could not run (exit ${code})`;
+  return 'Ended';
+}
+
+/** How often a stage wakes, from its interval in seconds: "Every 30 minutes". */
+export function wakesEvery(seconds) {
+  if (!Number.isFinite(seconds) || seconds <= 0) return '–';
+  if (seconds % 3600 === 0) return seconds === 3600 ? 'Every hour' : `Every ${seconds / 3600} hours`;
+  if (seconds % 60 === 0) return seconds === 60 ? 'Every minute' : `Every ${seconds / 60} minutes`;
+  return `Every ${seconds} seconds`;
+}
+
+/**
+ * The Pipeline Status dialog's rows (SP-173), from GET /pipeline: per stage,
+ * its next pass (or "Running now, since …"), when its last pass started and
+ * ended and how it ended, and how often it wakes, as an HTML table. `timeOf`
+ * turns an ISO time into the page's own time format. A stage with no pass
+ * logged yet says "No passes logged yet". A missing or malformed answer says
+ * PIPELINE_UNAVAILABLE.
+ */
+export function renderPipelineDetails(answer, timeOf) {
+  const stages = Array.isArray(answer?.stages) ? answer.stages : null;
+  if (!stages || !stages.length) return `<p class="unavailable">${escapeHtml(PIPELINE_UNAVAILABLE)}.</p>`;
+  const row = (s) => {
+    const name = `<th scope="row">${escapeHtml(s.name)}</th>`;
+    const wakes = `<td>${escapeHtml(wakesEvery(s.interval))}</td>`;
+    if (!s.logged) return `<tr>${name}<td colspan="3" class="quiet">No passes logged yet</td>${wakes}</tr>`;
+    let next;
+    if (s.running) next = s.lastStart ? `Running now, since ${timeOf(s.lastStart)}` : 'Running now';
+    else next = s.nextDue ? timeOf(s.nextDue) : 'Not known yet';
+    const started = s.lastStart ? timeOf(s.lastStart) : '–';
+    const ended = s.lastEnd ? `${timeOf(s.lastEnd)}: ${passOutcome(s.lastExit)}` : '–';
+    const failed = s.lastEnd && s.lastExit !== 0 && s.lastExit != null;
+    return `<tr${s.running ? ' class="running"' : ''}>${name}<td>${escapeHtml(next)}</td><td>${escapeHtml(started)}</td><td${failed ? ' class="failed"' : ''}>${escapeHtml(ended)}</td>${wakes}</tr>`;
+  };
+  return `<table class="pipeline-stages">
+    <thead><tr><th scope="col">Stage</th><th scope="col">Next Pass</th><th scope="col">Last Started</th><th scope="col">Last Ended</th><th scope="col">Wakes</th></tr></thead>
+    <tbody>${stages.map(row).join('')}</tbody>
+  </table>`;
+}
+
 const CONTEXT_HEADING = "WHAT'S GOING ON";
 
 /**
