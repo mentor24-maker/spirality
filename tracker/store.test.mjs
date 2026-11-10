@@ -1446,6 +1446,26 @@ test('a US phone number typed any usual way comes out in international form; any
 
 // ── Attachments (SP-140) ─────────────────────────────────────────────────────
 
+test('a project\'s attachments list every file on its tickets, newest first, with the ticket and adder named, and never another project\'s', () => {
+  const { store, human, cleanup } = fixture();
+  try {
+    store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE' });
+    const t1 = store.fileTicket({ project: 'alpha', actor: human.id, name: 'First task', status: 'requested' });
+    const t2 = store.fileTicket({ project: 'alpha', actor: human.id, name: 'Second task', status: 'requested' });
+    const other = store.fileTicket({ project: 'beta', actor: human.id, name: 'Elsewhere', status: 'requested' });
+    assert.deepEqual(store.listProjectAttachments('alpha'), [], 'none yet');
+    const a = store.addAttachment({ ticket: t1.id, name: 'a.txt', type: 'text/plain', bytes: new Uint8Array([65]), actor: human.id });
+    const b = store.addAttachment({ ticket: t2.id, name: 'b.png', type: 'image/png', bytes: new Uint8Array([1, 2]), actor: human.id });
+    store.addAttachment({ ticket: other.id, name: 'c.txt', type: 'text/plain', bytes: new Uint8Array([67]), actor: human.id });
+    const list = store.listProjectAttachments('alpha');
+    assert.deepEqual(list.map((x) => [x.name, x.ticket, x.ticketName]), [['b.png', t2.id, 'Second task'], ['a.txt', t1.id, 'First task']]);
+    assert.deepEqual(list[1], { ...a, ticketName: 'First task', addedByName: human.name });
+    assert.equal(list[0].size, b.size);
+    assert.equal(list.some((x) => 'bytes' in x), false, 'never the bytes');
+    assert.deepEqual(store.listProjectAttachments('nope'), []);
+  } finally { cleanup(); }
+});
+
 test('an attachment is kept with its name, type, size and bytes, and comes back byte for byte', () => {
   const { path, store, human, cleanup } = fixture();
   try {

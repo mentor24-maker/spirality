@@ -230,7 +230,7 @@ const PAGE_HEADERS = Object.freeze({
  */
 function pageFile(pathname, accept = '') {
   if (/^\/(?:projects(?:\/[^/]+)?|search|setup\/(?!fields$)[^/]+)$/.test(pathname)) return /\btext\/html\b/.test(accept) ? 'index.html' : null;
-  if (pathname === '/' || /^\/(?:tasks|board|list|new|settings|set-password|reporting|users)$/.test(pathname) || /^\/(?:t|board|list)\/[^/]+$/.test(pathname)) return 'index.html';
+  if (pathname === '/' || /^\/(?:tasks|board|list|new|settings|set-password|reporting|users|docs)$/.test(pathname) || /^\/(?:t|board|list)\/[^/]+$/.test(pathname)) return 'index.html';
   if (/^\/projects\/[^/]+\/edit$/.test(pathname)) return 'index.html';
   if (/^\/setup\/[^/]+\/answers$/.test(pathname)) return 'index.html';
   const m = /^\/web\/([^/]+)$/.exec(pathname);
@@ -861,6 +861,14 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     if (parts.length === 3 && parts[0] === 'projects' && parts[2] === 'board' && method === 'GET') {
       const board = boardOf(store, requireProject(parts[1], me).slug);
       return [200, board];
+    }
+
+    // The Docs page's Task Files table: every file on the project's
+    // tickets, newest first, without the bytes. Downloads stay with
+    // `GET /tickets/<id>/attachments/<n>`.
+    if (parts.length === 3 && parts[0] === 'projects' && parts[2] === 'attachments' && method === 'GET') {
+      const project = requireProject(parts[1], me);
+      return [200, { project: project.slug, attachments: store.listProjectAttachments(project.slug) }];
     }
 
     // Dane's page: the Add Task box asks, before it files, whether the words
