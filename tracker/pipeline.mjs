@@ -71,6 +71,7 @@ export function readTail(file, bytes = TAIL_BYTES) {
 }
 
 const DATED = /^===== (\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2}) (START|END) (\S+)/;
+const EXIT = /\(exit (\d+)/;
 const SLEEPING = /^\[loop-runner\] (\d{2}):(\d{2}):(\d{2}) sleeping (\d+)s before the next \/(\S+)$/;
 
 /** The job a START or END line names: `/loop-build` or `relay`. */
@@ -78,8 +79,12 @@ const jobOf = (word) => word.replace(/^\//, '');
 
 /**
  * What a log's last lines say about `job`: `{ logged, running, lastStart,
- * nextDue }`, times as Date objects or null. `interval` (seconds) is used
- * when the log has no sleeping line for the job (the relay).
+ * lastEnd, lastExit, interval, nextDue }`, times as Date objects or null.
+ * `lastEnd` and `lastExit` are the newest END line's time and exit code
+ * (while a pass runs, the one before it); the code is the number in its
+ * "(exit N)", null when it has none. `interval` (seconds) is how often the
+ * job wakes: the newest sleeping line's own seconds (a lane), else the one
+ * given (the relay, which has no such line).
  */
 export function readStage(text, job, { interval = null } = {}) {
   let lastStart = null;
@@ -96,7 +101,10 @@ export function readStage(text, job, { interval = null } = {}) {
       lastDated = at;
       if (jobOf(word) !== job) continue;
       if (kind === 'START') lastStart = { at, index };
-      else lastEnd = { at, index };
+      else {
+        const code = EXIT.exec(line);
+        lastEnd = { at, index, exit: code ? Number(code[1]) : null };
+      }
       continue;
     }
     const sleeping = SLEEPING.exec(line);
@@ -108,21 +116,23 @@ export function readStage(text, job, { interval = null } = {}) {
       sleep = { at, seconds: Number(seconds), index };
     }
   }
-  if (!lastStart && !sleep) return { logged: false, running: false, lastStart: null, nextDue: null };
+  const every = sleep ? sleep.seconds : interval;
+  if (!lastStart && !sleep && !lastEnd) return { logged: false, running: false, lastStart: null, lastEnd: null, lastExit: null, interval: every, nextDue: null };
   const running = Boolean(lastStart && (!lastEnd || lastStart.index > lastEnd.index));
   let nextDue = null;
   if (!running) {
     if (sleep && sleep.index > (lastStart?.index ?? 0)) nextDue = new Date(sleep.at.getTime() + sleep.seconds * 1000);
     else if (interval != null && lastStart) nextDue = new Date(lastStart.at.getTime() + interval * 1000);
   }
-  return { logged: true, running, lastStart: lastStart?.at ?? null, nextDue };
+  return { logged: true, running, lastStart: lastStart?.at ?? null, lastEnd: lastEnd?.at ?? null, lastExit: lastEnd?.exit ?? null, interval: every, nextDue };
 }
 
 const iso = (d) => (d ? d.toISOString() : null);
 
 /**
  * GET /pipeline's answer: `{ stages: [{ name, job, logged, running,
- * lastStart, nextDue }] }`, times as ISO strings. A stage whose log is
+ * lastStart, lastEnd, lastExit, interval, nextDue }] }`, times as ISO
+ * strings, the exit code and interval (seconds) as numbers or null. A stage whose log is
  * missing, or has no pass in it yet, answers `logged: false`; one whose log
  * cannot be read answers that too, with `unreadable: true`. One stage never
  * fails the others.
@@ -131,16 +141,22 @@ export function pipelineOf({ logDir, slug }, { tailBytes = TAIL_BYTES } = {}) {
   const folder = logFolderOf(logDir);
   return {
     stages: STAGES.map(({ name, job }) => {
-      // Only the relay's next start comes from its interval: the lanes write theirs as a sleeping line.
+      // The relay's next start comes from its interval; the lanes write theirs as a sleeping line.
       const interval = job === 'relay' ? intervalOf(job) : null;
       let text;
       try {
         text = readTail(join(folder, `${slug}-${job}.log`), tailBytes);
       } catch {
-        return { name, job, logged: false, running: false, lastStart: null, nextDue: null, unreadable: true };
+        return { name, job, logged: false, running: false, lastStart: null, lastEnd: null, lastExit: null, interval: intervalOf(job), nextDue: null, unreadable: true };
       }
       const stage = readStage(text, job, { interval });
-      return { name, job, logged: stage.logged, running: stage.running, lastStart: iso(stage.lastStart), nextDue: iso(stage.nextDue) };
+      return {
+        name, job, logged: stage.logged, running: stage.running,
+        lastStart: iso(stage.lastStart), lastEnd: iso(stage.lastEnd), lastExit: stage.lastExit,
+        // A lane with no sleeping line in view yet wakes as the installer set it to.
+        interval: stage.interval ?? intervalOf(job),
+        nextDue: iso(stage.nextDue),
+      };
     }),
   };
 }
