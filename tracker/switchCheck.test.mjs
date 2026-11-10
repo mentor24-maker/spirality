@@ -363,3 +363,21 @@ test('runSwitchCheck: something else answering on the port is not the tracker', 
     await new Promise((r) => other.close(r));
   }
 });
+
+test('runSwitchCheck: a config whose projectLanes names a built-in seat fails the sign-ins section plainly instead of crashing (SP-180)', async () => {
+  const tasks = [task('a')];
+  const { dir, db, store, env } = await preparedDatabase(tasks);
+  store.close();
+  try {
+    const port = await closedPort();
+    // Built by hand, never loaded: loading would have refused it already.
+    const r = await runSwitchCheck({ config: { ...CONFIG, trackerPort: port, projectLanes: ['relay'] }, env, db, clickup: fakeClickup(tasks) });
+    const by = Object.fromEntries(r.sections.map((s) => [s.name, s]));
+    assert.equal(r.ok, false);
+    assert.equal(by['sign-ins'].ok, false);
+    assert.match(by['sign-ins'].lines[0], /Could not list the project's sign-ins: .*"relay"/);
+    assert.equal(by['queues match'].ok, true, 'the rest of the check still runs');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

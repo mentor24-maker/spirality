@@ -73,7 +73,7 @@ import { pathToFileURL } from 'node:url';
 import { openStore } from './store.mjs';
 import { startServer } from './server.mjs';
 import { loadProjectConfig } from '../lib/projectConfig.mjs';
-import { TRACKER_SEATS } from '../scripts/lib/expectedSecrets.mjs';
+import { TRACKER_SEATS, projectSeats } from '../scripts/lib/expectedSecrets.mjs';
 import { operatorImportKey } from './import.mjs';
 import { compareRepo } from '../scripts/lib/repoCheck.mjs';
 
@@ -94,9 +94,13 @@ export function seatsFor(operatorName, seats = TRACKER_SEATS) {
  * and the lane (`normie loop-build`), with its token in that project's own
  * Doppler project, and it has no operator seat, because the operator's
  * sign-in belongs to the home project and a guest never re-issues it
- * (docs/ONBOARDING_A_PROJECT.md, item 4). Returns `{ seats, guest }`.
+ * (docs/ONBOARDING_A_PROJECT.md, item 4). A lane the config's
+ * `projectLanes` names is one more machine seat, named the same way
+ * (`loop-handoff` at home, `normie loop-handoff` for a guest); a lane it
+ * does not name has none (projectSeats). Returns `{ seats, guest }`.
  */
-export function seatsForConfig(config, seats = TRACKER_SEATS) {
+export function seatsForConfig(config, builtIn = TRACKER_SEATS) {
+  const seats = projectSeats(config, builtIn);
   if (config.trackerPort != null) return { seats: seatsFor(config.operatorName, seats), guest: false };
   return {
     seats: seats.filter((s) => s.kind === 'machine').map((s) => ({ ...s, name: `${config.projectSlug} ${s.name}` })),
@@ -472,7 +476,13 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     console.error(`This runs under Doppler project "${process.env.DOPPLER_PROJECT}", but the project config names "${config.dopplerProject}": the tokens seen and written would be another project's. Nothing was made or written. Run it under doppler run --project ${config.dopplerProject}.`);
     process.exit(1);
   }
-  const { seats, guest } = seatsForConfig(config);
+  let seats; let guest;
+  try {
+    ({ seats, guest } = seatsForConfig(config));
+  } catch (err) {
+    console.error(`${err.message}. Nothing was made or written.`);
+    process.exit(1);
+  }
   if (guest && makeNew) {
     console.error('This project does not run the tracker (its config sets no trackerPort), so it never makes the tracker\'s database. Nothing was made or written. Run create for the project that runs the tracker first.');
     process.exit(1);

@@ -301,6 +301,9 @@ changing the file: `CLICKUP_WORKSPACE_ID`, `CLICKUP_SPACE_ID`,
   | `TRACKER_NOTIFY_TO` | Dane's address for that email |
   | `CLICKUP_API_TOKEN` | the ClickUp token; only needed while a project is still on ClickUp, or to import its ClickUp history (`tracker/import.mjs`) |
 
+  A project that runs a lane of its own adds one more key per lane: see
+  item 4, "A lane of the project's own".
+
   The email keys and `TRACKER_TOKEN_OPERATOR` belong with the project that
   runs the tracker server (they are marked `trackerHome`); a project using
   Spirality's tracker does not need them, and its doctor does not ask for
@@ -362,6 +365,36 @@ changing the file: `CLICKUP_WORKSPACE_ID`, `CLICKUP_SPACE_ID`,
     is refused, whether or not that project's tracker project already exists (made
     by `create` or on the page). A guest's own seats, named for it, are
     never refused: a rerun after a lost token just re-keys them.
+- **A lane of the project's own** (SP-180). A project that runs a lane
+  beside the built-in ones (WaveCenter's `loop-handoff`) names it in its
+  `spirality.project.json`:
+
+  ```json
+  "projectLanes": ["loop-handoff"]
+  ```
+
+  That one line gives the lane a machine seat, like the built-in ones
+  (`loop-handoff` for the project that runs the tracker,
+  `wavecenter loop-handoff` for any other), its token kept as
+  `TRACKER_TOKEN_LOOP_HANDOFF` in the project's own Doppler project. Then:
+  1. `npm run doctor` lists `TRACKER_TOKEN_LOOP_HANDOFF` as `MISSING`.
+  2. Dane runs `npm run tracker:signins -- create` on the Mini again (as
+     below): it makes the new actor, proves its token at the tracker and
+     writes it into Doppler, read back, and leaves every other seat alone.
+  3. `npm run doctor` shows it `present`; `tracker:signins -- check` names
+     it.
+  4. Only then install the lane (`scripts/loop_runner.sh loop-handoff`).
+     Until the config names it, the door refuses every pass of that lane:
+     `TRACKER_TOKEN_NAME must name a loop's own tracker secret (...), not
+     "TRACKER_TOKEN_LOOP_HANDOFF". A lane of this project's own signs in
+     only once its name is in the project config's "projectLanes".`
+
+  A lane name is lower-case words joined by single dashes, listed once, and
+  never a built-in seat's name (`operator`, `loop-build`, `loop-review`,
+  `loop-intake`, `relay`, `hand-run`) nor `name`, whose secret would be
+  `TRACKER_TOKEN_NAME`, the variable every runner sets to say which secret
+  to read. Anything else stops the config from loading, naming the entry,
+  so a bad entry never reaches the built-in lanes' sign-ins.
 - **Who.**
   - The project: `npm run tracker:signins -- create --name <project name>`
     makes it if it does not exist, or Dane makes it with the tracker page's
