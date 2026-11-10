@@ -1514,6 +1514,60 @@ test('deleting an unstarted ticket takes its attachments with it; a started one 
   } finally { cleanup(); }
 });
 
+/** An event's who, what and change, without its id and time. */
+const eventOf = (e) => ({ actor: e.actor, field: e.field, from: e.from, to: e.to });
+
+test('renaming an attachment changes its name only, under the upload\'s rules, and its ticket\'s history names who did it (SP-177)', () => {
+  const { store, human, machine, cleanup } = fixture();
+  try {
+    const t = store.fileTicket({ project: 'alpha', actor: human.id, name: 'x', status: 'requested' });
+    const a = store.addAttachment({ ticket: t.id, name: 'a.txt', type: 'text/plain', bytes: Buffer.from('abc'), actor: machine.id });
+    const before = store.listEvents(t.id).length;
+    const r = store.renameAttachment({ ticket: t.id, id: a.id, name: 'C:\\docs\\Plan "v2".txt', actor: human.id });
+    assert.deepEqual(r, { ...a, name: 'Plan v2.txt', changed: true }, 'the same cleaning as an upload; nothing else moves');
+    assert.deepEqual(store.listAttachments(t.id).map((x) => x.name), ['Plan v2.txt']);
+    assert.ok(store.getAttachment(t.id, a.id).bytes.equals(Buffer.from('abc')), 'the bytes are untouched');
+    const events = store.listEvents(t.id);
+    assert.equal(events.length, before + 1);
+    assert.deepEqual(eventOf(events.at(-1)), { actor: human.id, field: 'attachment', from: 'a.txt', to: 'Plan v2.txt' });
+    // The same name again changes nothing and records nothing.
+    assert.equal(store.renameAttachment({ ticket: t.id, id: a.id, name: 'Plan v2.txt', actor: human.id }).changed, false);
+    assert.equal(store.listEvents(t.id).length, before + 1);
+    // Refusals change nothing.
+    for (const name of ['', '   ', '/', '..', 42]) {
+      assert.throws(() => store.renameAttachment({ ticket: t.id, id: a.id, name, actor: human.id }), { code: 'bad-name' }, String(name));
+    }
+    const other = store.fileTicket({ project: 'alpha', actor: human.id, name: 'y', status: 'requested' });
+    assert.throws(() => store.renameAttachment({ ticket: other.id, id: a.id, name: 'b.txt', actor: human.id }), { code: 'unknown-attachment' }, 'another ticket never reaches it');
+    assert.throws(() => store.renameAttachment({ ticket: t.id, id: 999, name: 'b.txt', actor: human.id }), { code: 'unknown-attachment' });
+    assert.throws(() => store.renameAttachment({ ticket: 'AL-99', id: a.id, name: 'b.txt', actor: human.id }), { code: 'unknown-ticket' });
+    assert.throws(() => store.renameAttachment({ ticket: t.id, id: a.id, name: 'b.txt', actor: 999 }), { code: 'unknown-actor' });
+    assert.deepEqual(store.listAttachments(t.id).map((x) => x.name), ['Plan v2.txt']);
+    assert.equal(store.listEvents(t.id).length, before + 1);
+  } finally { cleanup(); }
+});
+
+test('removing an attachment deletes it and its bytes, and its ticket\'s history names the file and who removed it (SP-177)', () => {
+  const { path, store, human, cleanup } = fixture();
+  try {
+    const t = store.fileTicket({ project: 'alpha', actor: human.id, name: 'x', status: 'building' });
+    const a = store.addAttachment({ ticket: t.id, name: 'a.txt', type: 'text/plain', bytes: Buffer.from('a'), actor: human.id });
+    const b = store.addAttachment({ ticket: t.id, name: 'b.txt', type: 'text/plain', bytes: Buffer.from('b'), actor: human.id });
+    const other = store.fileTicket({ project: 'alpha', actor: human.id, name: 'y', status: 'requested' });
+    assert.throws(() => store.removeAttachment({ ticket: other.id, id: a.id, actor: human.id }), { code: 'unknown-attachment' }, 'another ticket never reaches it');
+    assert.throws(() => store.removeAttachment({ ticket: t.id, id: a.id, actor: 999 }), { code: 'unknown-actor' });
+    assert.equal(store.listAttachments(t.id).length, 2, 'refusals remove nothing');
+    assert.deepEqual(store.removeAttachment({ ticket: t.id, id: a.id, actor: human.id }), a);
+    assert.deepEqual(store.listAttachments(t.id).map((x) => x.id), [b.id], 'only that one goes, from a started ticket too');
+    assert.equal(store.getAttachment(t.id, a.id), null);
+    assert.deepEqual(eventOf(store.listEvents(t.id).at(-1)), { actor: human.id, field: 'attachment', from: 'a.txt', to: null });
+    assert.throws(() => store.removeAttachment({ ticket: t.id, id: a.id, actor: human.id }), { code: 'unknown-attachment' }, 'twice is refused');
+    assert.deepEqual(store.listProjectAttachments('alpha').map((x) => x.id), [b.id]);
+    const db = new DatabaseSync(path, { readOnly: true });
+    try { assert.equal(db.prepare('SELECT count(*) AS n FROM attachments').get().n, 1, 'the bytes are gone from the file'); } finally { db.close(); }
+  } finally { cleanup(); }
+});
+
 // ── Context documents (SP-176) ──────────────────────────────────────────────
 
 test('a context document is kept on its project with its name, type, size and adder, comes back byte for byte, and never shows on another project', () => {
