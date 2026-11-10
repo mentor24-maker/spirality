@@ -262,3 +262,9 @@ ol.setup-steps .why { display: block; font-size: 0.85rem; }
 section.setups ul { padding-left: 1.5rem; }
 form.request .field-note { display: block; font-size: 0.85rem; }
 .board-live { margin-top: 1rem; }
+/* SP-174: the Tasks tables' headings, bold and black, each a button that sorts its stage. Other tables keep the grey headings. */
+.group table.sortable th { color: #000; font-weight: 700; }
+.group table.sortable th button.sort { background: none; border: 0; padding: 0; margin: 0; font: inherit; color: inherit; cursor: pointer; text-align: left; }
+.group table.sortable th button.sort:hover { text-decoration: underline; }
+.group table.sortable th button.sort:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+.group table.sortable th .arrow { font-size: 0.75em; }

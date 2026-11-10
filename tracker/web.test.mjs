@@ -7,8 +7,8 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { seedDemo, tickingClock } from './demoData.mjs';
-import { reportsOf, REPORT_RANGES, searchTickets } from './pageData.mjs';
-import { escapeHtml, renderComment, renderInline, renderMarkdown, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, PIPELINE_UNAVAILABLE } from './web/render.mjs';
+import { reportsOf, REPORT_RANGES, searchTickets, PRIORITIES } from './pageData.mjs';
+import { escapeHtml, renderComment, renderInline, renderMarkdown, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, PIPELINE_UNAVAILABLE, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings } from './web/render.mjs';
 import { startServer, setupSettingsOf } from './server.mjs';
 import { saveAnswers, setupFields, setupOf } from './setup.mjs';
 import { DANE_FIELDS as SETUP_FIELDS, STEPS as SETUP_STEPS } from '../scripts/onboard/onboard.mjs';
@@ -2954,3 +2954,71 @@ test.describe('Files Made: the files a ticket made, from its newest merge note',
     assert.match(readFileSync(WEB('app.css'), 'utf8'), /\.files-made \{[^}]*background:[^}]*border:/);
   });
 });
+
+// SP-174: the Tasks tables' headings sort each stage's rows.
+{
+  const T = (id, name, priority, tags, assignee, updatedAt) => ({ id, name, priority, tags, assignee, updatedAt });
+  const tickets = [
+    T('A-1', 'banana', 'low', ['web'], 'Dane', '2026-11-03T10:00:00.000Z'),
+    T('A-2', 'Apple', null, [], null, '2026-11-01T10:00:00.000Z'),
+    T('A-3', 'cherry', 'urgent', ['api', 'web'], 'hand-run', '2026-11-09T10:00:00.000Z'),
+    T('A-4', 'apple', 'high', ['Docs'], 'Dane', '2026-11-02T10:00:00.000Z'),
+    T('A-5', 'date', 'normal', [], null, '2026-11-02T09:00:00.000Z'),
+  ];
+  const ids = (list) => list.map((t) => t.id);
+  const sorted = (column, direction = 'ascending') => ids(sortTickets(tickets, { column, direction }));
+
+  test('the page\'s priority order is the one lib/loopStatuses.js PRIORITY_RANK gives', () => {
+    assert.deepEqual([...PRIORITY_ORDER], [...PRIORITIES]);
+  });
+
+  test('a stage sorts by each column, ties keeping the order the page had, and descending is the reverse', () => {
+    assert.deepEqual(sorted('name'), ['A-2', 'A-4', 'A-1', 'A-3', 'A-5'], 'A to Z, case ignored, ties in page order');
+    assert.deepEqual(sorted('priority'), ['A-3', 'A-4', 'A-5', 'A-1', 'A-2'], 'Urgent, High, Normal, Low, none');
+    assert.deepEqual(sorted('priority', 'descending'), ['A-2', 'A-1', 'A-5', 'A-4', 'A-3']);
+    assert.deepEqual(sorted('tags'), ['A-3', 'A-4', 'A-1', 'A-2', 'A-5'], 'by first tag, case ignored, no tags last');
+    assert.deepEqual(sorted('assignee'), ['A-1', 'A-4', 'A-3', 'A-2', 'A-5'], 'A to Z, nobody last');
+    assert.deepEqual(sorted('when'), ['A-2', 'A-5', 'A-4', 'A-1', 'A-3'], 'oldest first, by the real time');
+    assert.deepEqual(sorted('when', 'descending'), ['A-3', 'A-1', 'A-4', 'A-5', 'A-2'], 'newest first');
+  });
+
+  test('no sort, or a column it does not know, keeps the page\'s order, and the tickets are never changed', () => {
+    const before = ids(tickets);
+    assert.deepEqual(ids(sortTickets(tickets, null)), before);
+    assert.deepEqual(ids(sortTickets(tickets, { column: 'actions', direction: 'ascending' })), before);
+    sortTickets(tickets, { column: 'name', direction: 'descending' });
+    assert.deepEqual(ids(tickets), before);
+  });
+
+  test('a first click sorts ascending, a second flips it, another heading starts ascending again', () => {
+    const one = nextSort(null, 'priority');
+    assert.deepEqual(one, { column: 'priority', direction: 'ascending' });
+    const two = nextSort(one, 'priority');
+    assert.deepEqual(two, { column: 'priority', direction: 'descending' });
+    assert.deepEqual(nextSort(two, 'priority'), { column: 'priority', direction: 'ascending' });
+    assert.deepEqual(nextSort(two, 'when'), { column: 'when', direction: 'ascending' });
+  });
+
+  test('the headings are buttons; only the sorted one has an arrow and aria-sort; Actions is plain', () => {
+    const none = renderSortHeadings(null);
+    assert.equal((none.match(/<button type="button" class="sort"/g) || []).length, SORT_COLUMNS.length);
+    assert.deepEqual(SORT_COLUMNS.map((c) => c.label), ['Ticket', 'Priority', 'Tags', 'Assigned To', 'Last Change']);
+    assert.doesNotMatch(none, /aria-sort|▲|▼/);
+    assert.match(none, /<th class="actions">Actions<\/th>/);
+    const up = renderSortHeadings({ column: 'priority', direction: 'ascending' });
+    assert.match(up, /<th class="priority" aria-sort="ascending"><button[^>]*data-sort="priority">Priority <span class="arrow" aria-hidden="true">▲<\/span><\/button><\/th>/);
+    assert.equal((up.match(/aria-sort/g) || []).length, 1);
+    assert.equal((up.match(/[▲▼]/g) || []).length, 1);
+    const down = renderSortHeadings({ column: 'when', direction: 'descending' });
+    assert.match(down, /<th class="when" aria-sort="descending">.*Last Change <span class="arrow" aria-hidden="true">▼/);
+  });
+
+  test('the List view\'s tables use the sortable headings, and only they are bold and black', () => {
+    const app = readFileSync(WEB('app.mjs'), 'utf8');
+    assert.match(app, /<table class="sortable"><thead>\$\{renderSortHeadings\(null\)\}<\/thead>/);
+    assert.match(app, /<tr data-id="\$\{escapeHtml\(t\.id\)\}">/);
+    const css = readFileSync(WEB('app.css'), 'utf8');
+    assert.match(css, /\.group table\.sortable th \{ color: #000; font-weight: 700; \}/);
+    assert.match(css, /^th \{ color: var\(--quiet\); font-weight: 500;/m, 'every other table keeps the grey heading');
+  });
+}
