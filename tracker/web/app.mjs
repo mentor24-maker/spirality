@@ -1187,7 +1187,6 @@ async function drawProject(slug, view, { adding = false, filed = null, unchecked
   const liveColumn = board.columns.find((c) => c.status === 'Live');
   const live = liveColumn && { ...liveColumn, tickets: liveColumn.tickets.slice().sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0)) };
 
-  main.classList.add('wide');
   main.innerHTML = `
     <h1>Tasks</h1>
     <div class="toolbar">
@@ -2311,8 +2310,6 @@ async function route({ place = null } = {}) {
     signOut.hidden = false;
     bell.hidden = false;
     showProject();
-    // A beat redraws the same page, so its width stays as it is.
-    if (!place) main.classList.remove('wide');
     const ticket = /^\/t\/([^/]+)$/.exec(location.pathname);
     const project = /^\/(board|list)(?:\/([^/]+))?$/.exec(location.pathname);
     const projects = location.pathname === '/projects';

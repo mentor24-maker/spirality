@@ -3116,3 +3116,18 @@ test.describe('Files Made: the files a ticket made, from its newest merge note',
     assert.match(readFileSync(WEB('app.css'), 'utf8'), /\.files-made \{[^}]*background:[^}]*border:/);
   });
 });
+
+test('every page has one body width: main is capped at 1440px, padding included, and no page widens it (SP-184)', () => {
+  const css = readFileSync(WEB('app.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  const rules = css.split('}').map((r) => r.split('{')).filter((r) => r.length === 2)
+    .map(([sel, body]) => ({ sel: sel.split(',').map((x) => x.trim()), body }));
+  const plain = rules.filter((r) => r.sel.includes('main'));
+  assert.equal(plain.length, 1, 'one rule for the page body');
+  assert.match(plain[0].body, /max-width: 1440px/);
+  assert.match(plain[0].body, /box-sizing: border-box/, 'the 1440px includes the side padding');
+  assert.match(plain[0].body, /margin: 0 auto/, 'centred');
+  const perPage = rules.filter((r) => r.sel.some((s) => /^main[.#:\[]/.test(s) && !/\s/.test(s) && /(?:max-|min-)?width/.test(r.body)));
+  assert.deepEqual(perPage.map((r) => r.sel.join(', ')), [], 'no page gives the body a width of its own');
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  assert.doesNotMatch(app, /main\.classList\.(?:add|remove|toggle)\(\s*['"]wide['"]/, 'no wide class on the page body');
+});
