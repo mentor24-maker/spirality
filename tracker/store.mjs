@@ -1788,6 +1788,20 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
         .all(String(ticket)).map(attachmentFromRow);
     },
 
+    /**
+     * Every file on a project's tickets, newest first, without their bytes:
+     * each as listed (attachmentFromRow) with its ticket's name and the name
+     * of whoever added it (the Docs page's Task Files table).
+     */
+    listProjectAttachments(project) {
+      return db.prepare(`SELECT a.id, a.ticket, a.name, a.type, a.size, a.added_by, a.created_at,
+          t.name AS ticket_name, ac.name AS added_by_name
+        FROM attachments a JOIN tickets t ON t.id = a.ticket LEFT JOIN actors ac ON ac.id = a.added_by
+        WHERE t.project = ? ORDER BY a.created_at DESC, a.id DESC`)
+        .all(String(project))
+        .map((row) => ({ ...attachmentFromRow(row), ticketName: row.ticket_name, addedByName: row.added_by_name ?? null }));
+    },
+
     /** One attachment of a ticket with its `bytes` (a Buffer), or null when the ticket has none by that id. */
     getAttachment(ticket, id) {
       const row = db.prepare('SELECT * FROM attachments WHERE ticket = ? AND id = ?').get(String(ticket), Number(id));
