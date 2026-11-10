@@ -233,12 +233,15 @@ export function tabTitle(waitingCount, pageTitle) {
  * and it redraws the page itself when it lands. `fields`: the page's text
  * boxes and choosers as `{ focused, value, initial }`; one with focus, or
  * holding text that is not what it was drawn with, is him typing, and a
- * redraw would wipe it.
+ * redraw would wipe it. `dialog`: a dialog on the page is open (the Pipeline
+ * Status dialog has only buttons, so no field holds it, SP-173); a redraw
+ * would drop it from under him, with focus lost, and it waits until it closes.
  */
-export function redrawHold({ hidden = false, drawing = false, writing = false, fields = [] } = {}) {
+export function redrawHold({ hidden = false, drawing = false, writing = false, dialog = false, fields = [] } = {}) {
   if (hidden) return 'hidden';
   if (drawing) return 'drawing';
   if (writing) return 'writing';
+  if (dialog) return 'dialog';
   if (fields.some((f) => f.focused || f.value !== f.initial)) return 'typing';
   return null;
 }
@@ -316,6 +319,19 @@ export function renderPipelinePod(answer, timeOf) {
 }
 
 /**
+ * The pod button's accessible name (SP-173): "Pipeline Status: Relay 10:45,
+ * Build running, Review –, Intake 11:04", so a screen reader names the button
+ * for what it opens and still reads each stage. A missing or malformed answer
+ * gives PIPELINE_UNAVAILABLE, which already names it.
+ */
+export function pipelinePodLabel(answer, timeOf) {
+  const stages = Array.isArray(answer?.stages) ? answer.stages : null;
+  if (!stages || !stages.length) return PIPELINE_UNAVAILABLE;
+  const shown = (s) => (s.running ? 'running' : s.logged && s.nextDue ? timeOf(s.nextDue) : '–');
+  return `Pipeline Status: ${stages.map((s) => `${s.name} ${shown(s)}`).join(', ')}`;
+}
+
+/**
  * How a pass ended, in plain words, from the exit code on its END line
  * (SP-173). The runners write these codes (scripts/run_relay.sh,
  * scripts/loop_runner.sh, scripts/run_with_time_limit.sh): 0 finished, 1 a
@@ -343,7 +359,8 @@ export function wakesEvery(seconds) {
  * its next pass (or "Running now, since …"), when its last pass started and
  * ended and how it ended, and how often it wakes, as an HTML table. `timeOf`
  * turns an ISO time into the page's own time format. A stage with no pass
- * logged yet says "No passes logged yet". A missing or malformed answer says
+ * logged yet says "No passes logged yet". While a stage runs, its Last Ended
+ * cell is the previous pass's and says "Previous pass: …". A missing or malformed answer says
  * PIPELINE_UNAVAILABLE.
  */
 export function renderPipelineDetails(answer, timeOf) {
@@ -357,7 +374,9 @@ export function renderPipelineDetails(answer, timeOf) {
     if (s.running) next = s.lastStart ? `Running now, since ${timeOf(s.lastStart)}` : 'Running now';
     else next = s.nextDue ? timeOf(s.nextDue) : 'Not known yet';
     const started = s.lastStart ? timeOf(s.lastStart) : '–';
-    const ended = s.lastEnd ? `${timeOf(s.lastEnd)}: ${passOutcome(s.lastExit)}` : '–';
+    // While a pass runs, the last END belongs to the pass before it: say so, so
+    // a red outcome there does not read as the running pass failing.
+    const ended = s.lastEnd ? `${s.running ? 'Previous pass: ' : ''}${timeOf(s.lastEnd)}: ${passOutcome(s.lastExit)}` : '–';
     const failed = s.lastEnd && s.lastExit !== 0 && s.lastExit != null;
     return `<tr${s.running ? ' class="running"' : ''}>${name}<td>${escapeHtml(next)}</td><td>${escapeHtml(started)}</td><td${failed ? ' class="failed"' : ''}>${escapeHtml(ended)}</td>${wakes}</tr>`;
   };

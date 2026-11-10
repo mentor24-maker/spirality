@@ -26,7 +26,7 @@
  * an emailed link's own page. The link's token is sent only in a JSON body,
  * never in an address.
  */
-import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails } from './render.mjs';
+import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, pipelinePodLabel } from './render.mjs';
 
 /** Where an earlier version of the page kept a pasted token; removed on load, never read. */
 const OLD_TOKEN_KEY = 'tracker-token';
@@ -170,8 +170,14 @@ function showPipeline(read = false) {
   const pod = main.querySelector('.pipeline-pod');
   if (!pod || (!pipelineState && !read)) return;
   pod.innerHTML = renderPipelinePod(pipelineState, clockTime);
+  pod.setAttribute('aria-label', pipelinePodLabel(pipelineState, clockTime));
   const dialog = main.querySelector('dialog.pipeline-status');
-  if (dialog?.open) dialog.querySelector('.pipeline-details').innerHTML = renderPipelineDetails(pipelineState, when);
+  if (dialog?.open) fillPipelineDialog(dialog);
+}
+
+/** Fill the Pipeline Status dialog's rows from the last answer read. */
+function fillPipelineDialog(dialog) {
+  dialog.querySelector('.pipeline-details').innerHTML = renderPipelineDetails(pipelineState, when);
 }
 
 /**
@@ -184,7 +190,7 @@ function wirePipeline() {
   const dialog = main.querySelector('dialog.pipeline-status');
   if (!pod || !dialog) return;
   pod.addEventListener('click', () => {
-    dialog.querySelector('.pipeline-details').innerHTML = renderPipelineDetails(pipelineState, when);
+    fillPipelineDialog(dialog);
     dialog.showModal();
   });
   dialog.addEventListener('close', () => pod.focus());
@@ -2314,7 +2320,7 @@ async function drawAgain(draw) {
 }
 
 /** Why this beat must leave the page alone, or null. */
-const hold = () => redrawHold({ hidden: document.hidden, drawing: drawing > 0, writing: writing > 0, fields: fieldsOf(main) });
+const hold = () => redrawHold({ hidden: document.hidden, drawing: drawing > 0, writing: writing > 0, dialog: Boolean(main.querySelector('dialog[open]')), fields: fieldsOf(main) });
 
 /**
  * Where he is on the page: how far down, and which folding sections

@@ -11,3 +11,12 @@ run"), and how often it wakes. Escape or Close shuts it.
 Why it matters: Dane no longer has to ask a session "what did the loops last
 do?"; the answer is one click away on the page. The window still shows only
 times and outcomes, never the text of the loops' logs.
+
+Fixed after review: the page redraws itself once a minute when tickets
+change, and that redraw used to close the window from under Dane (on the
+Mini, where loops move tickets all the time, often). Now an open window holds
+the redraw until it is closed, and the board catches up then. The button also
+tells a screen reader its name ("Pipeline Status: Relay 1:08 AM, Build
+running, …"), and while a loop is running, its "Last Ended" cell says
+"Previous pass:", so an earlier failure no longer reads as if the running
+pass had failed.
