@@ -65,6 +65,9 @@ interval_of() {
 # only once the old one is really gone.
 # shellcheck source=lib/launchd_reload.sh
 source "$REPO/scripts/lib/launchd_reload.sh"
+# gh_signed_in_as and gh_state: is the GitHub command-line tool signed in?
+# shellcheck source=lib/gh_auth.sh
+source "$REPO/scripts/lib/gh_auth.sh"
 
 label_of() { echo "$PREFIX.$1"; }
 plist_of() { echo "$HOME/Library/LaunchAgents/$(label_of "$1").plist"; }
@@ -181,6 +184,7 @@ status() {
   echo "project:  $SLUG (labels $PREFIX.*, logs in $LOG_DIR)"
   checkout_state
   PATH="$LAUNCHD_PATH" node "$REPO/scripts/lib/claudeTrust.mjs" check "$REPO" || true
+  gh_state
   for s in "${SKILLS[@]}"; do status_one "$s"; done
   status_one "$RELAY"
   status_tracker
@@ -289,6 +293,9 @@ plist_env() {
 }
 
 install() {
+  # Before anything is written: a signed-out gh would install a relay that
+  # fails the first merge Dane asks for (SP-181).
+  gh_require_signed_in || exit 1
   if [ -f "$REPO/.git" ] && grep -q '^gitdir:.*worktrees' "$REPO/.git" 2>/dev/null; then
     echo "Refusing to install: $REPO is a worktree, and worktrees get deleted when their work ships. Run this from the main checkout." >&2
     exit 1
