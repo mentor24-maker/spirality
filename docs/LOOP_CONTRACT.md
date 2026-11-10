@@ -673,8 +673,17 @@ which Lane A did not cover, went seven hours with no merge while he slept:
   skills, any `CLAUDE.md`, `docs/DOCTRINE.md`, `docs/LOOP_ENGINEERING.md`,
   `scripts/check_*`, `scripts/install_*`, `scripts/git-hooks/`, and the
   merge machinery itself with its tests. A machine may never auto-merge a
-  change to the rules that govern machines. `autoMergeLane.js` holds the
-  full list.
+  change to the rules that govern machines. Since SP-199 the list has two
+  halves: the floor every project shares, in `lib/autoMergeLane.js`
+  (instruction files, CI and agent configuration, the check, install, hook
+  and shell families, and this package's own merge, claim, review and
+  tracker-door modules), and the project's own `governancePaths`. StarCaster's
+  own entries (`server.js`, `docs/DOCTRINE.md`, its ClickUp client, its ship
+  step and the rest) are `lib/fixtures/starcasterGovernancePaths.json`, which
+  SP-25 writes into its settings; a test proves the two halves together block
+  everything StarCaster's code blocked. `lib/mergeMachineryGovernance.test.js`
+  fails the build if a file that can merge, or that the merge step imports, is
+  one a lane would carry.
 - **Lane A:** every file the PR changes is a test, a file under `docs/`, or a
   Markdown document.
 - **Lane B:** every file is either Lane A material or a script under
@@ -693,7 +702,9 @@ is always read as his objection. Nothing else is loosened: the PASS
 verdict and every PR check in the list above are still required. It is
 capped per hour and per day, turns itself off on trouble, and can be stopped
 with a switch phrase on any ticket or the bus. Spirality and WaveCenter have
-no lanes.
+no lanes. Spirality's relay does not run lanes yet: SP-202 brings the lane up
+to a "would merge" note and SP-203 the real merge, and until both are Live
+StarCaster stays on its own relay (SP-25).
 
 ## "Is this waiting on Dane?" — the three verdicts
 

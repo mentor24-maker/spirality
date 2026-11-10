@@ -119,3 +119,17 @@ this log only points there.
 6. > /doc-it
 
    Led to: [PP-6](http://mac-mini.local:4180/t/PP-6), "The overview says a run that is cut off keeps its full copy, but it does not: correct it and list the fixes needed before an outlet is switched on" (PressPlay pull request [#7](https://github.com/mentor24-maker/pressplay/pull/7)), and [SP-182](http://mac-mini.local:4180/t/SP-182), "Dane's prompts are not recorded anywhere: start docs/OPERATOR_PROMPTS.md and link it from CLAUDE.md", which added this section.
+
+## 2026-11-10: SP-199, StarCaster's auto-merge lanes
+
+1. > I need a more clear and complete explanation of the situation and my options on SP-199
+
+   Led to: a plain explanation of SP-199, "StarCaster's auto-merge lanes stop when it moves to the tracker: make the relay merge Lanes A and B": what the lanes are, why they block SP-25, and the three slices on its card.
+
+2. > I'm inclined to fast-track this one here with you. Any reason we shouldn't do that?
+
+   Led to: Nothing yet (an answer: no reason not to, if it stays three pull requests, each reviewed by the review lane and merged on his word).
+
+3. > go
+
+   Led to: SP-199 built in the hand-run session as slice 1 of 3 (this pull request). Filed [SP-202](http://mac-mini.local:4180/t/SP-202), "Make the relay run StarCaster's auto-merge lanes up to a would-merge note, without merging", and [SP-203](http://mac-mini.local:4180/t/SP-203), "Let the relay merge a lane's pull request when its hour ends with no objection", each waiting on the one before; SP-25 now waits on both.
