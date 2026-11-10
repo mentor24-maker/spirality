@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { seedDemo, tickingClock } from './demoData.mjs';
 import { reportsOf, REPORT_RANGES, searchTickets } from './pageData.mjs';
-import { escapeHtml, renderComment, renderInline, renderMarkdown, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, PIPELINE_UNAVAILABLE } from './web/render.mjs';
+import { escapeHtml, renderComment, renderInline, renderMarkdown, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel } from './web/render.mjs';
 import { startServer, setupSettingsOf } from './server.mjs';
 import { saveAnswers, setupFields, setupOf } from './setup.mjs';
 import { DANE_FIELDS as SETUP_FIELDS, STEPS as SETUP_STEPS } from '../scripts/onboard/onboard.mjs';
@@ -828,7 +828,7 @@ test('an open page reads again once a minute and on coming back to the tab, neve
   assert.match(app, /const REFRESH_EVERY_MS = 60_000;/);
   assert.match(app, /document\.addEventListener\('visibilitychange', \(\) => \{\s*if \(!document\.hidden\) beat\(\);\s*\}\);/);
   // The guard reads the tab's visibility, the draws and saves under way, and every text box on the page.
-  assert.match(app, /redrawHold\(\{ hidden: document\.hidden, drawing: drawing > 0, writing: writing > 0, fields: fieldsOf\(main\) \}\)/);
+  assert.match(app, /redrawHold\(\{ hidden: document\.hidden, drawing: drawing > 0, writing: writing > 0, dialog: Boolean\(main\.querySelector\('dialog\[open\]'\)\), fields: fieldsOf\(main\) \}\)/);
   const refresh = /async function refreshPage\(\) \{[\s\S]*?\n\}/.exec(app)[0];
   assert.match(refresh, /if \(checking \|\| !me \|\| !drawn \|\| drawn\.address !== here\(\) \|\| hold\(\)\) return;/, 'checked before any read');
   assert.match(refresh, /if \(!changed \|\| lastDrawn !== drawn \|\| drawn\.address !== here\(\) \|\| hold\(\)\) return;/, 'and again before drawing');
@@ -2464,7 +2464,7 @@ test('the Tasks toolbar picks a project from a dropdown, "Project: ", the one in
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   const draw = app.slice(app.indexOf('async function drawProject'), app.indexOf('async function copyText'));
   assert.match(draw, /api\('GET', '\/projects'\),\n  \]\);/);
-  assert.match(draw, /<div class="toolbar">\s*\$\{renderProjectPicker\(projects, board\.project\)\}\s*\$\{searchForm\(''\)\}\s*<div class="pipeline-pod"[^>]*><\/div>\s*<nav class="views"/);
+  assert.match(draw, /<div class="toolbar">\s*\$\{renderProjectPicker\(projects, board\.project\)\}\s*\$\{searchForm\(''\)\}\s*<button type="button" class="pipeline-pod"[^>]*><\/button>\s*<nav class="views"/);
   assert.doesNotMatch(app, /Change project/);
   assert.match(draw, /querySelector\('\.project-picker select'\)\.addEventListener\('change', \(e\) => \{\s*history\.pushState\(null, '', at\(view, e\.target\.value\)\);\s*route\(\);/);
   assert.match(readFileSync(WEB('app.css'), 'utf8'), /\.toolbar \.project-picker select \{/);
@@ -2889,6 +2889,88 @@ test('the Tasks page puts the pod between the search field and Board/List, fills
   assert.match(refresh, /api\('GET', '\/pipeline', undefined, \{ unrecorded: true \}\)/);
   assert.match(app, /const reads = unrecorded \? null : recording;/);
   assert.doesNotMatch(draw.slice(0, draw.indexOf(']);')), /\/pipeline/);
+});
+
+test('each END exit code the runners write reads as its plain-words outcome (SP-173)', () => {
+  assert.equal(passOutcome(0), 'Finished');
+  assert.equal(passOutcome(1), 'A step failed and said so');
+  assert.equal(passOutcome(124), 'Hit its time limit and was stopped');
+  assert.equal(passOutcome(127), 'Could not run (exit 127)');
+  assert.equal(passOutcome(2), 'Could not run (exit 2)');
+  assert.equal(passOutcome(null), 'Ended');
+  assert.equal(wakesEvery(1800), 'Every 30 minutes');
+  assert.equal(wakesEvery(600), 'Every 10 minutes');
+  assert.equal(wakesEvery(3600), 'Every hour');
+  assert.equal(wakesEvery(7200), 'Every 2 hours');
+  assert.equal(wakesEvery(90), 'Every 90 seconds');
+  assert.equal(wakesEvery(null), '–');
+});
+
+test('the Pipeline Status dialog: one row per stage with next time or running, last start, last end and outcome, how often it wakes (SP-173)', () => {
+  const timeOf = (iso) => `[${iso.slice(11, 16)}]`;
+  const html = renderPipelineDetails({ stages: [
+    { name: 'Relay', logged: true, running: false, lastStart: '2026-11-09T17:35:00.000Z', lastEnd: '2026-11-09T17:35:20.000Z', lastExit: 0, interval: 600, nextDue: '2026-11-09T17:45:00.000Z' },
+    { name: 'Build', logged: true, running: true, lastStart: '2026-11-09T17:40:00.000Z', lastEnd: '2026-11-09T17:10:00.000Z', lastExit: 124, interval: 1800, nextDue: null },
+    { name: 'Review', logged: true, running: false, lastStart: '2026-11-09T17:00:00.000Z', lastEnd: '2026-11-09T17:05:00.000Z', lastExit: 1, interval: 1800, nextDue: null },
+    { name: 'Intake', logged: false, running: false, lastStart: null, lastEnd: null, lastExit: null, interval: 1800, nextDue: null },
+  ] }, timeOf);
+  const rows = [...html.matchAll(/<tr[^>]*>(.*?)<\/tr>/gs)].map((m) => [...m[1].matchAll(/<t[hd][^>]*>(.*?)<\/t[hd]>/g)].map((c) => c[1]));
+  assert.deepEqual(rows, [
+    ['Stage', 'Next Pass', 'Last Started', 'Last Ended', 'Wakes'],
+    ['Relay', '[17:45]', '[17:35]', '[17:35]: Finished', 'Every 10 minutes'],
+    ['Build', 'Running now, since [17:40]', '[17:40]', 'Previous pass: [17:10]: Hit its time limit and was stopped', 'Every 30 minutes'],
+    ['Review', 'Not known yet', '[17:00]', '[17:05]: A step failed and said so', 'Every 30 minutes'],
+    ['Intake', 'No passes logged yet', 'Every 30 minutes'],
+  ]);
+  assert.match(html, /<td class="failed">\[17:05\]: A step failed/);
+  for (const failed of [null, undefined, {}, { stages: [] }]) {
+    assert.match(renderPipelineDetails(failed, timeOf), new RegExp(PIPELINE_UNAVAILABLE));
+  }
+  assert.doesNotMatch(renderPipelineDetails({ stages: [{ name: '<b>x', logged: false }] }, timeOf), /<b>x/);
+});
+
+test('the pod is a button that opens the Pipeline Status dialog; Escape or Close shut it and focus goes back to the pod (SP-173)', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const draw = app.slice(app.indexOf('async function drawProject('), app.indexOf('async function drawProject(') + 14000);
+  assert.match(draw, /<button type="button" class="pipeline-pod" aria-haspopup="dialog"/);
+  // A <dialog> with a form of method="dialog": Escape and both close buttons shut it natively.
+  assert.match(draw, /<dialog class="pipeline-status" aria-labelledby="pipeline-status-title">\s*<form method="dialog">/);
+  assert.match(draw, /<h2 id="pipeline-status-title">Pipeline Status<\/h2>/);
+  assert.match(draw, /<button type="submit">Close<\/button>/);
+  assert.match(draw, /wirePipeline\(\);/);
+  const wire = app.slice(app.indexOf('function wirePipeline'), app.indexOf('function wirePipeline') + 800);
+  assert.match(wire, /pod\.addEventListener\('click'/);
+  assert.match(wire, /fillPipelineDialog\(dialog\);\n\s+dialog\.showModal\(\)/);
+  assert.match(wire, /dialog\.showModal\(\)/);
+  assert.match(wire, /dialog\.addEventListener\('close', \(\) => pod\.focus\(\)\)/);
+  // An open dialog redraws with each fresh read, from the same answer, and reads no log of its own.
+  assert.match(app, /if \(dialog\?\.open\) fillPipelineDialog\(dialog\);/);
+  assert.match(app, /function fillPipelineDialog\(dialog\) \{\n\s+dialog\.querySelector\('\.pipeline-details'\)\.innerHTML = renderPipelineDetails\(pipelineState, when\);/);
+});
+
+test('an open dialog holds the once-a-minute redraw, so a board change never drops the Pipeline Status dialog from under him (SP-173 rework)', () => {
+  assert.equal(redrawHold({ dialog: true }), 'dialog', 'a dialog of buttons only still holds the redraw');
+  assert.equal(redrawHold({ dialog: false }), null);
+  assert.equal(redrawHold({ hidden: true, dialog: true }), 'hidden', 'hidden still wins: nothing is read');
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  // The page's hold asks whether any dialog in main is open, and both refresh checks use it.
+  assert.match(app, /const hold = \(\) => redrawHold\(\{[^}]*dialog: Boolean\(main\.querySelector\('dialog\[open\]'\)\)/);
+  const refresh = app.slice(app.indexOf('async function refreshPage'), app.indexOf('async function refreshPage') + 900);
+  assert.equal(refresh.match(/hold\(\)/g).length, 2, 'checked before the read and again before the redraw');
+});
+
+test('the pod button is named for what it opens and still reads each stage (SP-173 rework)', () => {
+  const timeOf = (iso) => `[${iso.slice(11, 16)}]`;
+  assert.equal(pipelinePodLabel({ stages: [
+    { name: 'Relay', logged: true, running: false, nextDue: '2026-11-09T17:45:00.000Z' },
+    { name: 'Build', logged: true, running: true, nextDue: null },
+    { name: 'Review', logged: true, running: false, nextDue: null },
+    { name: 'Intake', logged: false, running: false, nextDue: null },
+  ] }, timeOf), 'Pipeline Status: Relay [17:45], Build running, Review –, Intake –');
+  for (const failed of [null, undefined, {}, { stages: [] }]) assert.equal(pipelinePodLabel(failed, timeOf), PIPELINE_UNAVAILABLE);
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const show = app.slice(app.indexOf('function showPipeline'), app.indexOf('function showPipeline') + 600);
+  assert.match(show, /pod\.setAttribute\('aria-label', pipelinePodLabel\(pipelineState, clockTime\)\);/);
 });
 
 // ── SP-170: the Files Made box, drawn from the relay's merge note (SP-166) ───
