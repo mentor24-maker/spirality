@@ -36,7 +36,9 @@
  * those headers are ones only the page's own script can send, never a form
  * on another site. A download (`GET /tickets/<id>/attachments/<n>`) is
  * always sent as a file to save, never a page to open, so an uploaded HTML
- * file cannot run as the tracker's own page. A project's context documents
+ * file cannot run as the tracker's own page. Renaming one (`PATCH
+ * /tickets/<id>/attachments/<n>`, `{ name }`) and removing one (`DELETE`)
+ * are ordinary JSON calls. A project's context documents
  * (`/projects/<slug>/docs`) are uploaded and downloaded the same
  * way, listed by `GET /projects/<slug>/docs` and removed one at a time by
  * `DELETE /projects/<slug>/docs/<n>`; only someone who can see the project
@@ -81,6 +83,7 @@ import { findConfigFile, loadProjectConfig } from '../lib/projectConfig.mjs';
 import { saveAnswers, setupFields, setupList, setupOf, SetupError } from './setup.mjs';
 import busRelayPlan from '../lib/busRelayPlan.js';
 import { pipelineOf } from './pipeline.mjs';
+import { listCommands, REPO_ROOT } from './commands.mjs';
 import { listDocs, readDoc } from './docsFolder.mjs';
 import loopStatuses from '../lib/loopStatuses.js';
 
@@ -144,7 +147,7 @@ const NO_MATCH = 'That email and password do not match.';
 const MAX_BODY = 1024 * 1024;
 
 /** Store refusals that mean "no such thing", answered 404 rather than 400. */
-const NOT_FOUND_CODES = new Set(['unknown-ticket', 'unknown-project', 'unknown-invite']);
+const NOT_FOUND_CODES = new Set(['unknown-ticket', 'unknown-project', 'unknown-invite', 'unknown-attachment']);
 /** setRole's refusals that are not a bad field: a non-admin is forbidden, and the last admin's change conflicts with the tracker's state. */
 const ROLE_REFUSALS = Object.freeze({ 'not-admin': 403, 'last-admin': 409 });
 /** addMember's and removeMember's refusals that are not a bad field. */
@@ -508,6 +511,9 @@ function flag(value) {
  * `docsDir` is the folder the Docs page's documentation section
  * reads (tracker/docsFolder.mjs): this repository's own `docs/`, unless a
  * test names another. Only `.md` files inside it are ever read.
+ * `commandsRoot` is the checkout the Commands section's list reads
+ * (tracker/commands.mjs): this one, unless a test names another. Only a
+ * `SKILL.md` inside its `commands/` and `.claude/skills/` folders is read.
  */
 /**
  * The word the ticket page's Close button posts: the first of the relay's
@@ -518,7 +524,7 @@ export const CLOSE_PHRASE = busRelayPlan.CLOSE_PHRASES[0];
 /** The word the Go button posts: the one an intake card asks for (GO_PHRASE in lib/busRelayPlan.js). */
 export const GO_PHRASE = busRelayPlan.GO_PHRASE;
 
-export function createHandler(store, { log = () => {}, notifier = null, defaultProject = null, mergePhrase = null, closePhrase = null, goPhrase = null, accountMail = null, setup = null, now = Date.now, publicUrl = null, pipeline = null, docsDir = DOCS_DIR } = {}) {
+export function createHandler(store, { log = () => {}, notifier = null, defaultProject = null, mergePhrase = null, closePhrase = null, goPhrase = null, accountMail = null, setup = null, now = Date.now, publicUrl = null, pipeline = null, docsDir = DOCS_DIR, commandsRoot = REPO_ROOT } = {}) {
   const failures = failureCounter(now);
   const resets = resetLimiter(now);
   // The public address's host as a Host header names it (`name:8443`; no port for 443).
@@ -656,6 +662,13 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     // Team chat ticket the caller has not seen.
     if (parts.length === 1 && parts[0] === 'bus' && method === 'GET') {
       return [200, busUnseen(store, me.id, { only: scopeOf(me) })];
+    }
+
+    // Dane's page: the Docs page's Commands section, every slash
+    // command in this checkout's commands/ and .claude/skills/ folders with
+    // its description and steps (tracker/commands.mjs). No other file is read.
+    if (parts.length === 1 && parts[0] === 'commands' && method === 'GET') {
+      return [200, { commands: listCommands({ root: commandsRoot }) }];
     }
 
     // Dane's page: the Pipeline Status pod on the Tasks page, when
@@ -1057,6 +1070,29 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
         return [201, made];
       }
     }
+    // Rename one file (its name only, the upload's name rules) or remove it
+    // (the Docs page). Each writes an `attachment` event naming the
+    // caller, and the store reads it back before answering.
+    if (parts.length === 4 && parts[0] === 'tickets' && parts[2] === 'attachments' && (method === 'PATCH' || method === 'DELETE')) {
+      const body = method === 'PATCH' ? await readJson(req) : null;
+      if (body) {
+        checkBody(body, me, ['name']);
+        if (typeof body.name !== 'string' || !body.name.trim()) {
+          throw new HttpError(400, 'bad-name', "say the file's new name; nothing was changed.");
+        }
+      }
+      const ticket = requireTicket(parts[1], me);
+      if (!/^[0-9]+$/.test(parts[3])) throw new HttpError(404, 'unknown-attachment', `ticket ${ticket.id} has no attachment ${parts[3]}.`);
+      const id = Number(parts[3]);
+      if (body) {
+        const renamed = store.renameAttachment({ ticket: ticket.id, id, name: body.name, actor: me.id });
+        if (renamed.changed) log(`renamed attachment ${id} on ${ticket.id} to ${renamed.name} actor=${me.id}`);
+        return [200, renamed];
+      }
+      const gone = store.removeAttachment({ ticket: ticket.id, id, actor: me.id });
+      log(`removed attachment ${id} (${gone.name}) from ${ticket.id} actor=${me.id}`);
+      return [200, { removed: gone.id, ticket: ticket.id, name: gone.name }];
+    }
     if (parts.length === 4 && parts[0] === 'tickets' && parts[2] === 'attachments' && method === 'GET') {
       const ticket = requireTicket(parts[1], me);
       const file = /^[0-9]+$/.test(parts[3]) ? store.getAttachment(ticket.id, Number(parts[3])) : null;
@@ -1281,8 +1317,8 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
 }
 
 /** Start a server on `port` (0 = any free port) against an open store. Resolves to the http.Server. */
-export function startServer({ store, port, host = '127.0.0.1', log, notifier, defaultProject, mergePhrase, closePhrase, goPhrase, accountMail, setup, now, publicUrl, pipeline, docsDir }) {
-  const server = createServer(createHandler(store, { log, notifier, defaultProject, mergePhrase, closePhrase, goPhrase, accountMail, setup, now, publicUrl, pipeline, docsDir }));
+export function startServer({ store, port, host = '127.0.0.1', log, notifier, defaultProject, mergePhrase, closePhrase, goPhrase, accountMail, setup, now, publicUrl, pipeline, docsDir, commandsRoot }) {
+  const server = createServer(createHandler(store, { log, notifier, defaultProject, mergePhrase, closePhrase, goPhrase, accountMail, setup, now, publicUrl, pipeline, docsDir, commandsRoot }));
   return new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(port, host, () => {

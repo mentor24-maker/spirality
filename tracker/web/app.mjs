@@ -26,7 +26,7 @@
  * an emailed link's own page. The link's token is sent only in a JSON body,
  * never in an address.
  */
-import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, unwrapDoc, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, pipelinePodLabel, renderContextDocs } from './render.mjs';
+import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, unwrapDoc, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, pipelinePodLabel, renderCommandList, renderCommandView, renderContextDocs, renderSortHeadings, sortTickets, nextSort } from './render.mjs';
 
 /** Where an earlier version of the page kept a pasted token; removed on load, never read. */
 const OLD_TOKEN_KEY = 'tracker-token';
@@ -1103,6 +1103,45 @@ async function drawTasks(view, opts = {}) {
 }
 
 /**
+ * SP-174: a click on a stage's table heading sorts that stage's rows by that
+ * column, ascending first, the other way on a second click; each stage
+ * sorts on its own. The rows already drawn are moved, not redrawn, so their
+ * buttons keep working. `stages` are the drawn stages, each with its tickets
+ * in the order the page drew them (the order a sort's ties keep). The sort
+ * each table shows (null before any click) is kept in `sorted`, so the
+ * minute's redraw puts it back (keepPlace); a reload or a fresh visit
+ * shows the usual order.
+ */
+const sorted = new WeakMap();
+/** Each sortable table on the page, with its stage: what keepPlace reads and restores. */
+const sortableTables = () => [...main.querySelectorAll('[data-stage] table.sortable')]
+  .map((table) => ({ table, stage: table.closest('[data-stage]').dataset.stage }));
+function wireSortHeadings(stages) {
+  const ticketsOf = new Map(stages.map((c) => [c.status, c.tickets]));
+  for (const { table, stage } of sortableTables()) {
+    const tickets = ticketsOf.get(stage);
+    if (!tickets) continue;
+    const apply = (sort) => {
+      table.tHead.innerHTML = renderSortHeadings(sort);
+      const rows = new Map([...table.tBodies[0].rows].map((tr) => [tr.dataset.id, tr]));
+      for (const t of sortTickets(tickets, sort)) {
+        const tr = rows.get(t.id);
+        if (tr) table.tBodies[0].append(tr);
+      }
+      sorted.set(table, { sort, apply });
+    };
+    sorted.set(table, { sort: null, apply });
+    table.tHead.addEventListener('click', (e) => {
+      const button = e.target.closest('button[data-sort]');
+      if (!button) return;
+      const sort = nextSort(sorted.get(table)?.sort ?? null, button.dataset.sort);
+      apply(sort);
+      table.tHead.querySelector(`button[data-sort="${sort.column}"]`).focus();
+    });
+  }
+}
+
+/**
  * One project, as a board or as a list. Both draw the same object, the
  * server's board (pageData.mjs boardOf): the eight statuses in the
  * contract's order, each holding its tickets in `queue` order, so the two
@@ -1171,7 +1210,7 @@ async function drawProject(slug, view, { adding = false, filed = null, unchecked
     ].join('');
   };
   const row = (status) => (t) => `
-    <tr>
+    <tr data-id="${escapeHtml(t.id)}">
       <td class="name"><a href="/t/${encodeURIComponent(t.id)}">${escapeHtml(t.name)}</a> <span class="quiet">${escapeHtml(t.id)}</span>${t.answerIn ? ` <span class="answer-in">${escapeHtml(ANSWER_IN_NOTE)}</span>` : ''}</td>
       <td class="priority">${t.priority ? escapeHtml(statusName(t.priority)) : '<span class="quiet">–</span>'}</td>
       <td class="tags">${t.tags.map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join('')}</td>
@@ -1180,7 +1219,7 @@ async function drawProject(slug, view, { adding = false, filed = null, unchecked
       <td class="actions">${actions(t, status)}</td>
     </tr>`;
   const group = (c) => block(c, 'group', c.tickets.length
-    ? `<table><thead><tr><th class="name">Ticket</th><th class="priority">Priority</th><th class="tags">Tags</th><th class="assignee">Assigned To</th><th class="when">Last Change</th><th class="actions">Actions</th></tr></thead><tbody>${c.tickets.map(row(c.status)).join('')}</tbody></table>`
+    ? `<table class="sortable"><thead>${renderSortHeadings(null)}</thead><tbody>${c.tickets.map(row(c.status)).join('')}</tbody></table>`
     : '');
 
   // The board's columns are the working stages; Live, which only grows, is a
@@ -1242,6 +1281,7 @@ async function drawProject(slug, view, { adding = false, filed = null, unchecked
     el.style.setProperty('--stage-text', look.text);
   }
   putTrail([{ label: board.projectName, href: '/projects' }, { label: view === 'board' ? 'Board' : 'List' }]);
+  wireSortHeadings(view === 'board' ? (live ? [live] : []) : board.columns);
   wireSearch();
   wireAddTask(board.project, view, adding);
   wirePipeline();
@@ -2185,13 +2225,24 @@ async function drawUsers(done = '', problem = '') {
  * and removed here); then every file on its tasks in one Task Files table,
  * newest first. The project is the one picked on the Projects page (shown
  * in the header), else the first. A task file's name downloads it through
- * the task's own download address; the task links to its page. Task files
- * are look-only here: adding, renaming and removing them are SP-177's.
- * `done` and `problem` are the line the last upload or removal left.
+ * the task's own download address; the task links to its page. SP-177 makes
+ * the Task Files table changeable: Add File puts a file on one of the
+ * project's tasks (the same upload the New Task form uses), Rename changes a
+ * file's name only, and Remove, once confirmed by name and task, deletes it.
+ * Each is read back from the table's own list before the page says it
+ * worked. `done` and `problem` are the line the last change left, and
+ * `section` says whose it is: 'docs' (Context Documents) or 'files' (Task
+ * Files), so it shows in that section only. Then the Commands section
+ * (SP-179): every slash command, searchable, each opening its own page.
  */
-async function drawDocs(done = '', problem = '') {
+async function drawDocs(done = '', problem = '', section = 'files') {
   // The documentation call is caught on its own: a tracker not yet restarted onto it answers 404, and Task Files still draws.
-  const [{ projects }, files] = await Promise.all([api('GET', '/projects'), api('GET', '/documentation').then((r) => r.files, () => null)]);
+  const [{ projects }, files, commands] = await Promise.all([
+    api('GET', '/projects'),
+    api('GET', '/documentation').then((r) => r.files, () => null),
+    // The same for the Commands list (SP-179).
+    api('GET', '/commands').then((r) => r.commands, () => null),
+  ]);
   setTitle('Docs · Tracker');
   const docRow = (d) => `<tr data-doc="${escapeHtml(d.path)}">
       <td class="title"><a href="${docAddress(d.path)}">${escapeHtml(d.title)}</a></td>
@@ -2205,25 +2256,32 @@ async function drawDocs(done = '', problem = '') {
       <tbody>${files.map(docRow).join('')}</tbody></table>`
     : '<p class="quiet">The docs folder holds no Markdown files.</p>'}`;
   if (!projects.length) {
-    main.innerHTML = `<h1>Docs</h1>${documentation}<h2>Task Files</h2><p class="quiet">There are no projects yet.</p>`;
+    main.innerHTML = `<h1>Docs</h1>${documentation}<h2>Task Files</h2><p class="quiet">There are no projects yet.</p>${commandsSection()}`;
+    showCommands(commands);
     putTrail([{ label: 'Docs' }]);
     return;
   }
   const project = projects.find((p) => p.slug === savedProject()) ?? projects[0];
+  const listPath = `/projects/${encodeURIComponent(project.slug)}/attachments`;
   const docsPath = `/projects/${encodeURIComponent(project.slug)}/docs`;
-  const [{ attachments }, { docs }] = await Promise.all([
-    api('GET', `/projects/${encodeURIComponent(project.slug)}/attachments`),
+  const [{ attachments }, { docs }, { tickets }] = await Promise.all([
+    api('GET', listPath),
     api('GET', docsPath),
+    api('GET', `/projects/${encodeURIComponent(project.slug)}/tickets`),
   ]);
+  const fileLine = section === 'files' ? { done, problem } : { done: '', problem: '' };
   const row = (a) => {
     const href = `/tickets/${encodeURIComponent(a.ticket)}/attachments/${encodeURIComponent(a.id)}`;
+    const data = `data-ticket="${escapeHtml(a.ticket)}" data-file="${escapeHtml(a.id)}" data-name="${escapeHtml(a.name)}" data-task-name="${escapeHtml(a.ticketName)}"`;
     return `<tr data-file="${escapeHtml(a.id)}">
       <td class="name"><a href="${href}" download="${escapeHtml(a.name)}">${escapeHtml(a.name)}</a></td>
       <td class="task"><a href="/t/${encodeURIComponent(a.ticket)}">${escapeHtml(a.ticket)}</a> ${escapeHtml(a.ticketName)}</td>
       <td class="type">${escapeHtml(a.type)}</td>
       <td class="size">${escapeHtml(sizeOf(a.size))}</td>
       <td class="by">${a.addedByName ? escapeHtml(a.addedByName) : '<span class="quiet">unknown</span>'}</td>
-      <td class="when">${escapeHtml(when(a.createdAt))}</td></tr>`;
+      <td class="when">${escapeHtml(when(a.createdAt))}</td>
+      <td class="actions"><button type="button" class="rename-file" ${data} aria-label="Rename ${escapeHtml(a.name)}">Rename</button>
+        <button type="button" class="remove-file" ${data} aria-label="Remove ${escapeHtml(a.name)} from ${escapeHtml(a.ticket)}">Remove</button></td></tr>`;
   };
   main.innerHTML = `
     <h1>Docs</h1>
@@ -2231,12 +2289,136 @@ async function drawDocs(done = '', problem = '') {
     ${renderContextDocs({ project, docs }, { size: sizeOf, timeOf: when })}
     <h2>Task Files</h2>
     <p class="quiet">Files kept on the tasks of ${escapeHtml(project.name)}. Pick another project on the <a href="/projects">Projects</a> page.</p>
+    <p class="note file-note${fileLine.problem ? ' error' : ' quiet'}" role="status">${escapeHtml(fileLine.problem || fileLine.done)}</p>
+    ${tickets.length ? `<form class="add-file">
+      <label for="add-file-task">Add a file to a task</label>
+      <div class="row"><select id="add-file-task" required><option value="">Pick a task…</option>${tickets.map((t) => `<option value="${escapeHtml(t.id)}">${escapeHtml(t.id)} ${escapeHtml(t.name)}</option>`).join('')}</select>
+        <input id="add-file-file" type="file" required aria-label="The file to add"><button type="submit">Add File</button></div>
+      <span class="hint quiet">Up to 10 MB. It shows here and on the task's own page.</span>
+    </form>` : ''}
     ${attachments.length
-    ? `<table class="projects task-files"><thead><tr><th>File</th><th>Task</th><th>Type</th><th>Size</th><th>Added By</th><th>Added On</th></tr></thead>
+    ? `<table class="projects task-files"><thead><tr><th>File</th><th>Task</th><th>Type</th><th>Size</th><th>Added By</th><th>Added On</th><th><span class="hidden">Actions</span></th></tr></thead>
       <tbody>${attachments.map(row).join('')}</tbody></table>`
-    : `<p class="quiet">No task in ${escapeHtml(project.name)} has a file yet.</p>`}`;
-  wireContextDocs(project, docsPath, done, problem);
+    : `<p class="quiet">No task in ${escapeHtml(project.name)} has a file yet.</p>`}
+    ${commandsSection()}`;
+  const note = main.querySelector('.file-note');
+  const busy = (text) => { note.className = 'note file-note quiet'; note.textContent = text; };
+  const refused = (control, text) => { note.className = 'note file-note error'; note.textContent = text; if (control) control.disabled = false; };
+  const again = (text, failed) => drawAgain(() => drawDocs(failed ? '' : text, failed ? text : '', 'files'))
+    .catch((err) => (err instanceof SignedOut ? drawSignIn() : showError(err)));
+  // The table's own list, read again: what each change is checked against.
+  const listedNow = async () => (await api('GET', listPath, undefined, { unrecorded: true })).attachments;
+  const form = main.querySelector('form.add-file');
+  form?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const ticket = form.querySelector('#add-file-task').value;
+    const file = form.querySelector('#add-file-file').files?.[0];
+    const button = form.querySelector('button');
+    if (!ticket || !file) return refused(null, 'Pick a task and a file first; nothing was added.');
+    if (file.size > MAX_FILE) return refused(null, `${file.name} is over 10 MB. Add a smaller one; nothing was added.`);
+    button.disabled = true;
+    busy(`Adding ${file.name} to ${ticket}…`);
+    let made;
+    try {
+      made = await uploadFile(ticket, file);
+    } catch (err) {
+      if (err instanceof SignedOut) return drawSignIn(`You were signed out; ${file.name} was not added.`);
+      return refused(button, `Not added: ${err.message}`);
+    }
+    const back = await listedNow().catch(() => null);
+    const listed = back?.some((a) => a.id === made.id && a.ticket === ticket);
+    again(listed ? `Added ${made.name} to ${ticket}.` : `The tracker said ${made.name} was added to ${ticket}, but it is not in the table when read back.`, !listed);
+  });
+  for (const button of main.querySelectorAll('button.rename-file')) {
+    button.addEventListener('click', async () => {
+      const { ticket, file, name } = button.dataset;
+      const typed = prompt(`New name for ${name} (on ${ticket}):`, name);
+      if (typed == null) return;
+      if (!typed.trim()) return refused(null, `Not renamed: a file needs a name. ${name} is unchanged.`);
+      button.disabled = true;
+      busy(`Renaming ${name}…`);
+      let renamed;
+      try {
+        renamed = await api('PATCH', `/tickets/${encodeURIComponent(ticket)}/attachments/${encodeURIComponent(file)}`, { name: typed });
+      } catch (err) {
+        if (err instanceof SignedOut) return drawSignIn(`You were signed out; ${name} was not renamed.`);
+        return refused(button, `Not renamed: ${err.message}`);
+      }
+      const back = await listedNow().catch(() => null);
+      const now = back?.find((a) => String(a.id) === file)?.name;
+      if (!renamed.changed && now === name) return again(`${name} already has that name; nothing changed.`, false);
+      again(now === renamed.name ? `Renamed ${name} to ${now}.` : `The tracker said ${name} was renamed to ${renamed.name}, but it reads back as ${now ?? 'missing'}.`, now !== renamed.name);
+    });
+  }
+  for (const button of main.querySelectorAll('button.remove-file')) {
+    button.addEventListener('click', async () => {
+      const { ticket, file, name, taskName } = button.dataset;
+      if (!confirm(`Remove ${name} from ${ticket} ${taskName}? This cannot be undone from the page.`)) return;
+      button.disabled = true;
+      busy(`Removing ${name} from ${ticket}…`);
+      try {
+        await api('DELETE', `/tickets/${encodeURIComponent(ticket)}/attachments/${encodeURIComponent(file)}`);
+      } catch (err) {
+        if (err instanceof SignedOut) return drawSignIn(`You were signed out; ${name} was not removed.`);
+        return refused(button, `Not removed: ${err.message}`);
+      }
+      const back = await listedNow().catch(() => null);
+      const gone = back != null && !back.some((a) => String(a.id) === file);
+      again(gone ? `Removed ${name} from ${ticket}.` : `The tracker said ${name} was removed from ${ticket}, but it is still listed when read back.`, !gone);
+    });
+  }
+  wireContextDocs(project, docsPath, section === 'docs' ? done : '', section === 'docs' ? problem : '');
+  showCommands(commands);
   putTrail([{ label: 'Docs' }]);
+}
+
+/**
+ * The Docs page's Commands section (SP-179): a search box over every slash
+ * command (GET /commands), each opening its own page. Typing filters the
+ * list by name or description as it is typed; nothing is read again.
+ */
+function commandsSection() {
+  return `
+    <h2>Commands</h2>
+    <p class="quiet">Every slash command you can give a session: your own and the loop skills. Type part of a name or what you want to do.</p>
+    <input type="search" id="command-search" aria-label="Find a command" placeholder="Find a command" autocomplete="off">
+    <div id="command-list"></div>`;
+}
+
+/** Fill the Commands list and keep it filtered as the search box is typed in; null (the list could not be read) says so. */
+function showCommands(commands) {
+  const box = document.getElementById('command-search');
+  const list = document.getElementById('command-list');
+  if (!commands) {
+    box.hidden = true;
+    list.innerHTML = '<p class="quiet">The commands could not be read.</p>';
+    return;
+  }
+  const show = () => { list.innerHTML = renderCommandList(commands, box.value); };
+  box.addEventListener('input', show);
+  show();
+}
+
+/** The command a `/docs/commands/<name>` address opens, or null. */
+const commandAt = () => {
+  const m = /^\/docs\/commands\/([^/]+)$/.exec(location.pathname);
+  if (!m) return null;
+  try { return decodeURIComponent(m[1]); } catch { return null; }
+};
+
+/**
+ * One command's own page, `/docs/commands/<name>`: its steps drawn as
+ * formatted text (hard-wrapped lines joined back up first, as a
+ * documentation file's are), and a way back.
+ */
+async function drawCommand(name) {
+  const { commands } = await api('GET', '/commands');
+  const command = commands.find((c) => c.name === name);
+  setTitle(command ? `/${name} · Docs · Tracker` : 'Docs · Tracker');
+  main.innerHTML = command
+    ? renderCommandView({ ...command, steps: unwrapDoc(command.steps) })
+    : `<h1>No Such Command</h1><p class="quiet">There is no command named /${escapeHtml(name)}.</p><p><a href="/docs">Back to Docs</a></p>`;
+  putTrail([{ label: 'Docs', href: '/docs' }, { label: command ? `/${command.name}` : 'Not Found' }]);
 }
 
 /**
@@ -2257,7 +2439,7 @@ function wireContextDocs(project, docsPath, done, problem) {
     note.className = `note doc-note ${failed ? 'error' : 'quiet'}`;
     note.textContent = text;
   };
-  const again = (text, failed) => drawDocs(failed ? '' : text, failed ? text : '')
+  const again = (text, failed) => drawDocs(failed ? '' : text, failed ? text : '', 'docs')
     .catch((err) => (err instanceof SignedOut ? drawSignIn() : showError(err)));
   const picker = main.querySelector('input.doc-file');
   const upload = main.querySelector('button.upload-doc');
@@ -2392,6 +2574,7 @@ async function route({ place = null } = {}) {
     const usersPage = location.pathname === '/users';
     const docsPage = location.pathname === '/docs';
     const docPath = docAt();
+    const docsCommand = commandAt();
     const docAny = underDocs();
     const search = location.pathname === '/search';
     const setupNew = location.pathname === '/setup/new';
@@ -2417,6 +2600,8 @@ async function route({ place = null } = {}) {
       await drawUsers();
     } else if (docsPage) {
       await drawDocs();
+    } else if (docsCommand != null) {
+      await drawCommand(docsCommand);
     } else if (docAny) {
       await drawDoc(docPath);
     } else if (isNew) {
@@ -2494,17 +2679,21 @@ async function drawAgain(draw) {
 const hold = () => redrawHold({ hidden: document.hidden, drawing: drawing > 0, writing: writing > 0, dialog: Boolean(main.querySelector('dialog[open]')), fields: fieldsOf(main) });
 
 /**
- * Where he is on the page: how far down, and which folding sections
- * (Details, a Live column, the Add Task box, the Change panel) are open.
+ * Where he is on the page: how far down, which folding sections
+ * (Details, a Live column, the Add Task box, the Change panel) are open,
+ * and how each Tasks table is sorted.
  * `restore` puts them back on the page drawn again.
  */
 function keepPlace() {
   const key = (d) => `${d.className}|${d.dataset.stage ?? ''}`;
   const open = new Map([...main.querySelectorAll('details')].map((d) => [key(d), d.open]));
   const y = window.scrollY;
+  // Each stage's sort (SP-174), by stage, put back on the stage's new table.
+  const sorts = new Map(sortableTables().filter(({ table }) => sorted.get(table)?.sort).map(({ table, stage }) => [stage, sorted.get(table).sort]));
   return {
     restore() {
       for (const d of main.querySelectorAll('details')) if (open.has(key(d))) d.open = open.get(key(d));
+      for (const { table, stage } of sortableTables()) if (sorts.has(stage)) sorted.get(table)?.apply(sorts.get(stage));
       window.scrollTo(0, y);
     },
   };

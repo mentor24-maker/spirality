@@ -86,8 +86,11 @@
  *  - An attachment is a file kept on a ticket: its name, type, size, bytes,
  *    who added it and when, all in the `attachments` table, so the nightly
  *    backup (tracker/backup.mjs) holds it with no second folder to copy. It
- *    is at most MAX_ATTACHMENT bytes and is never empty. Like a comment, it
- *    is never edited; it goes only with its ticket, in deleteTicket.
+ *    is at most MAX_ATTACHMENT bytes and is never empty. Its bytes are never
+ *    edited. Its name may be changed (renameAttachment) and it may be
+ *    removed on its own (removeAttachment); each writes an
+ *    `attachment` event naming who did it (from the old name to the new, or
+ *    to null for a removal). It also goes with its ticket, in deleteTicket.
  *  - A context document is a file kept on a project, not on one ticket (a
  *    brief, notes, a reference file): the same name, type, size, bytes,
  *    adder and time, the same limits and refusals, in the `project_docs`
@@ -797,6 +800,16 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
   function requireTicketRow(id) {
     const row = ticketRow(id);
     if (!row) throw new StoreError('unknown-ticket', `no ticket ${id}.`);
+    return row;
+  }
+
+  /** Attachment `id` on ticket `ticket` (its row, without the bytes), or a StoreError 'unknown-attachment'. */
+  function attachmentRow(ticket, id) {
+    const n = Number(id);
+    const row = Number.isInteger(n) && n > 0
+      ? db.prepare('SELECT id, ticket, name, type, size, added_by, created_at FROM attachments WHERE ticket = ? AND id = ?').get(String(ticket), n)
+      : null;
+    if (!row) throw new StoreError('unknown-attachment', `ticket ${ticket} has no attachment ${id}.`);
     return row;
   }
 
@@ -1848,6 +1861,49 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
         WHERE t.project = ? ORDER BY a.created_at DESC, a.id DESC`)
         .all(String(project))
         .map((row) => ({ ...attachmentFromRow(row), ticketName: row.ticket_name, addedByName: row.added_by_name ?? null }));
+    },
+
+    /**
+     * Change the name of attachment `id` on `ticket` to `name`, by `actor`,
+     * under the same name rules as addAttachment. The bytes are untouched.
+     * Writes an `attachment` event (from the old name to the new) and reads
+     * the row back in the same transaction; a mismatch writes nothing. The
+     * same name again changes nothing and writes no event. Answers the
+     * attachment as listed with `changed` (true or false).
+     */
+    renameAttachment({ ticket, id, name, actor }) {
+      const fileName = canonicalFileName(name);
+      return transaction(() => {
+        requireActor(actor, 'the actor');
+        const row = requireTicketRow(ticket);
+        const was = attachmentRow(row.id, id);
+        if (was.name === fileName) return { ...attachmentFromRow(was), changed: false };
+        db.prepare('UPDATE attachments SET name = ? WHERE id = ? AND ticket = ?').run(fileName, num(was.id), row.id);
+        const back = db.prepare('SELECT id, ticket, name, type, size, added_by, created_at FROM attachments WHERE id = ?').get(num(was.id));
+        if (!back || back.name !== fileName) throw new StoreError('write-failed', `${was.name} did not read back as ${fileName}.`);
+        writeEvent(row.id, actor, 'attachment', was.name, fileName, now());
+        return { ...attachmentFromRow(back), changed: true };
+      });
+    },
+
+    /**
+     * Remove attachment `id` from `ticket`, by `actor`: the row and its
+     * bytes go, and an `attachment` event (from its name to null) records
+     * who removed it. Checked gone in the same transaction; anything left
+     * writes nothing. Answers the attachment as it was listed.
+     */
+    removeAttachment({ ticket, id, actor }) {
+      return transaction(() => {
+        requireActor(actor, 'the actor');
+        const row = requireTicketRow(ticket);
+        const was = attachmentRow(row.id, id);
+        db.prepare('DELETE FROM attachments WHERE id = ? AND ticket = ?').run(num(was.id), row.id);
+        if (db.prepare('SELECT 1 FROM attachments WHERE id = ?').get(num(was.id))) {
+          throw new StoreError('write-failed', `${was.name} is still on ${row.id} after removing it.`);
+        }
+        writeEvent(row.id, actor, 'attachment', was.name, null, now());
+        return attachmentFromRow(was);
+      });
     },
 
     /** One attachment of a ticket with its `bytes` (a Buffer), or null when the ticket has none by that id. */

@@ -879,6 +879,7 @@ test('strict membership: a person who is not an admin sees only their own projec
     const mine = f.store.fileTicket({ project: 'alpha', actor: f.human.id, name: 'Shared comet', status: 'queued' });
     const theirs = f.store.fileTicket({ project: 'beta', actor: f.human.id, name: 'Hidden comet', status: 'Needs your input', assignee: f.human.id });
     f.store.postComment({ ticket: theirs.id, author: f.machine.id, body: 'comet notes', parent: null });
+    const theirFile = f.store.addAttachment({ ticket: theirs.id, name: 'comet.txt', type: 'text/plain', bytes: Buffer.from('c'), actor: f.human.id });
     const as = (token) => (method, path, body) => f.call(method, path, { token, body });
     const v = as(vt);
 
@@ -900,6 +901,7 @@ test('strict membership: a person who is not an admin sees only their own projec
       ['POST', '/projects/beta/tickets/check', { name: 'x' }], ['GET', '/reports?project=beta'],
       ['GET', `/tickets/${theirs.id}`], ['GET', `/tickets/${theirs.id}/thread`], ['GET', `/tickets/${theirs.id}/events`],
       ['GET', `/tickets/${theirs.id}/attachments`], ['GET', `/tickets/${theirs.id}/attachments/1`], ['GET', '/projects/beta/attachments'],
+      ['PATCH', `/tickets/${theirs.id}/attachments/${theirFile.id}`, { name: 'renamed.txt' }], ['DELETE', `/tickets/${theirs.id}/attachments/${theirFile.id}`],
       ['PATCH', `/tickets/${theirs.id}`, { name: 'Renamed' }], ['DELETE', `/tickets/${theirs.id}`],
       ['POST', `/tickets/${theirs.id}/comments`, { body: 'hello' }], ['POST', `/tickets/${theirs.id}/clone`, { project: 'alpha' }],
     ];
@@ -917,6 +919,7 @@ test('strict membership: a person who is not an admin sees only their own projec
     // Nothing those refusals asked for happened.
     assert.deepEqual(f.store.listTickets('beta').map((t) => [t.id, t.name]), [[theirs.id, 'Hidden comet']]);
     assert.equal(f.store.listComments(theirs.id).length, 1);
+    assert.deepEqual(f.store.listAttachments(theirs.id).map((a) => a.name), ['comet.txt'], 'their file is neither renamed nor removed');
     assert.deepEqual(f.store.listTickets('alpha').map((t) => t.id), [mine.id]);
 
     // An admin and a loop see everything, as before.
@@ -2162,6 +2165,80 @@ test('a project\'s files are listed in one call, newest first, with each task\'s
     assert.equal(list.text.includes('hello'), false, 'never the bytes');
     assert.equal((await f.call('GET', '/projects/nope/attachments')).status, 404);
     assert.equal((await f.call('GET', '/projects/alpha/attachments', { token: null })).status, 401);
+  } finally { await f.cleanup(); }
+});
+
+test('GET /commands lists the checkout\'s commands and loop skills, signed in only, reading nothing outside the two folders (SP-179)', async () => {
+  const f = await fixture();
+  const root = join(f.dir, 'checkout');
+  const put = (folder, name, text) => {
+    mkdirSync(join(root, folder, name), { recursive: true });
+    writeFileSync(join(root, folder, name, 'SKILL.md'), text);
+  };
+  put('commands', 'why-stuck', '---\nname: why-stuck\ndescription: Find out why a ticket is stuck.\n---\n\n# Why stuck\n');
+  put('.claude/skills', 'loop-review', '---\nname: loop-review\ndescription: Review the next pull request.\n---\n\n# Loop: Review\n');
+  writeFileSync(join(f.dir, 'outside.md'), '---\nname: outside\ndescription: OUTSIDE-TEXT\n---\n');
+  mkdirSync(join(root, 'commands', 'linked'));
+  symlinkSync(join(f.dir, 'outside.md'), join(root, 'commands', 'linked', 'SKILL.md'));
+  try {
+    const server = await startServer({ store: f.store, port: 0, log: () => {}, commandsRoot: root });
+    const at = `http://127.0.0.1:${server.address().port}`;
+    try {
+      const r = await f.call('GET', '/commands', { token: f.humanToken, at });
+      assert.equal(r.status, 200, r.text);
+      assert.deepEqual(r.body.commands.map((c) => [c.name, c.source, c.description]), [
+        ['why-stuck', 'Your command', 'Find out why a ticket is stuck.'],
+        ['loop-review', 'Loop skill', 'Review the next pull request.'],
+      ]);
+      assert.equal(r.body.commands[1].steps, '# Loop: Review\n');
+      assert.equal(r.text.includes('OUTSIDE-TEXT'), false, 'a linked file is never read');
+      assert.equal((await f.call('GET', '/commands', { token: null, at })).status, 401);
+    } finally { await new Promise((done) => server.close(done)); }
+    // With no root given, the tracker lists its own checkout's loop skills.
+    const own = await f.call('GET', '/commands', { token: f.humanToken });
+    assert.ok(['loop-build', 'loop-intake', 'loop-review', 'loop-spec'].every((n) => own.body.commands.some((c) => c.name === n && c.source === 'Loop skill')));
+  } finally { await f.cleanup(); }
+});
+
+test('a file on a ticket is renamed and removed by its own calls, each in the ticket\'s history with who did it (SP-177)', async () => {
+  const f = await fixture();
+  try {
+    const t = f.store.fileTicket({ project: 'alpha', actor: f.human.id, name: 'With a file', status: 'requested' });
+    const base = await f.serve();
+    const made = (await upload(base, t.id, Buffer.from('hello'), { name: 'notes.txt', type: 'text/plain', headers: { authorization: `Bearer ${f.humanToken}` } })).body;
+    const path = `/tickets/${t.id}/attachments/${made.id}`;
+    const h = (method, at, opts = {}) => f.call(method, at, { token: f.humanToken, ...opts });
+
+    const renamed = await h('PATCH', path, { body: { name: 'Plan.txt' } });
+    assert.equal(renamed.status, 200, renamed.text);
+    assert.equal(renamed.body.name, 'Plan.txt');
+    assert.equal(renamed.body.changed, true);
+    assert.deepEqual((await h('GET', `/tickets/${t.id}/thread`)).body.attachments.map((a) => a.name), ['Plan.txt'], 'the ticket page shows the new name');
+    assert.deepEqual((await h('GET', '/projects/alpha/attachments')).body.attachments.map((a) => a.name), ['Plan.txt'], 'and so does the Docs table');
+
+    // An empty name, a missing one or another field is refused and nothing changes.
+    for (const body of [{ name: '' }, { name: '   ' }, {}, { name: 7 }, { name: 'x.txt', size: 1 }]) {
+      const r = await h('PATCH', path, { body });
+      assert.equal(r.status, 400, JSON.stringify(body));
+    }
+    assert.equal((await h('PATCH', path, { body: { name: '..' } })).status, 400, 'the upload\'s name rules');
+    assert.equal((await h('PATCH', `/tickets/${t.id}/attachments/999`, { body: { name: 'x.txt' } })).status, 404);
+    assert.equal((await h('PATCH', `/tickets/${t.id}/attachments/x`, { body: { name: 'x.txt' } })).status, 404);
+    assert.equal((await h('PATCH', path, { token: null, body: { name: 'x.txt' } })).status, 401);
+    assert.deepEqual(f.store.listAttachments(t.id).map((a) => a.name), ['Plan.txt']);
+
+    assert.equal((await h('DELETE', path, { token: null })).status, 401);
+    assert.equal(f.store.listAttachments(t.id).length, 1);
+    const gone = await h('DELETE', path);
+    assert.equal(gone.status, 200, gone.text);
+    assert.deepEqual(gone.body, { removed: made.id, ticket: t.id, name: 'Plan.txt' });
+    assert.deepEqual((await h('GET', `/tickets/${t.id}/thread`)).body.attachments, []);
+    assert.deepEqual((await h('GET', '/projects/alpha/attachments')).body.attachments, []);
+    assert.equal((await h('GET', path)).status, 404, 'the download is gone too');
+    assert.equal((await h('DELETE', path)).status, 404, 'removing it twice is a 404');
+
+    const history = (await h('GET', `/tickets/${t.id}/events`)).body.events.filter((e) => e.field === 'attachment');
+    assert.deepEqual(history.map((e) => [e.actor, e.from, e.to]), [[f.human.id, 'notes.txt', 'Plan.txt'], [f.human.id, 'Plan.txt', null]]);
   } finally { await f.cleanup(); }
 });
 

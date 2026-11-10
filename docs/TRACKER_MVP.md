@@ -153,8 +153,13 @@ account_links  token hash, purpose (setup|invite|reset), email, actor,
   size, the file's bytes themselves, who added it and when, in the
   `attachments` table. Keeping the bytes inside the database means the
   nightly backup already holds them, with no second folder to copy. Each is
-  1 byte to 10 MB. Like a comment it is never edited; it goes only with its
-  ticket, when an unstarted ticket is deleted. A database made before this
+  1 byte to 10 MB. Its bytes are never edited. Its name can be changed and
+  it can be removed on its own, from the Docs page (SP-177); each writes an
+  `attachment` event in the ticket's history naming who did it (from the old
+  name to the new one, or to nothing for a removal), so a removed file is
+  still on record by name. A removal cannot be undone except from the
+  nightly backup. It also goes with its ticket, when an unstarted ticket is
+  deleted. A database made before this
   gains the table, empty, on start-up. The loops read them through the door
   (SP-142): `npm run clickup -- get` prints one `attachments:` line per file,
   and `npm run clickup -- attachments --task <id> --to <folder>` saves each
@@ -258,12 +263,15 @@ answers are JSON (structured text programs read).
 | `POST /account/forgot` | **no token**: `{ email }` → the same answer whether or not the email has an account; an account's email is sent a 1-hour `reset` link through Resend after the answer has gone back. Sent with an outside site's own token (`authorization: Bearer <site token>`), the link opens `<site's page>?link=<token>`; with any other token or none, the tracker's set-password page; the answer is the same either way. The log says whether it went, never the link or the email |
 | `GET /documentation` | for the Docs page: every `.md` file in this repository's `docs/` folder and its subfolders, `{ files: [{ path, title }] }`, the folder's own files first. `GET /documentation/<path>` answers one, `{ path, title, text }`; a path outside `docs/` (`..`, absolute, a link out) or not a `.md` file is 404 and reads nothing |
 | `GET /projects/:slug/attachments` | for the Docs page: every file on the project's tickets, newest first, `{ project, attachments: [{ id, ticket, ticketName, name, type, size, addedBy, addedByName, createdAt }] }`, never the bytes. A project the caller is not on is 404, the same as one that does not exist |
+| `GET /commands` | for the Docs page's Commands section: `{ commands: [{ name, source, description, steps }] }`, Your commands (`commands/`) then Loop skills (`.claude/skills/`), each by name; `steps` is the `SKILL.md` text below its front matter. No other file is read |
 | `GET /projects/:slug/docs` | the project's context documents, newest first, `{ project, docs: [{ id, project, name, type, size, addedBy, addedByName, createdAt }] }`, never the bytes |
 | `POST /projects/:slug/docs` | upload one context document, sent exactly as a ticket's attachment (the raw file, `x-file-name`, `x-file-type`), with the same 10 MB limit and refusals. Answers 201 with the document as listed, read back byte for byte |
 | `GET /projects/:slug/docs/:n` | one context document, byte for byte, always as a download (the same headers as an attachment's) |
 | `DELETE /projects/:slug/docs/:n` | remove one context document, read back gone: `{ removed, name, project }`. One the project does not have is 404. Every `/docs` call to a project the caller is not on is 404, the same as one that does not exist |
 | `POST /tickets/:id/attachments` | attach a file: the raw file as the body (`content-type: application/octet-stream`, which a form on another site cannot send, so the cookie may make this one write that is not JSON), its name percent-encoded in `x-file-name`, its type in `x-file-type`. Answers 201 with `{ id, ticket, name, type, size, addedBy, createdAt }`, read back byte for byte. Over 10 MB is 413 `too-large` ("That file is over 10 MB. Attach a smaller one; nothing was saved."); an empty file or no name is 400; nothing is stored. The JSON calls' 1 MB limit is unchanged |
 | `GET /tickets/:id/attachments` | a ticket's files, oldest first, without their bytes (the ticket page reads the same list in `thread`) |
+| `PATCH /tickets/:id/attachments/:n` | rename one file: `{ name }`, its name only, with the upload's name rules (an empty name, `.` or `..` is 400 and nothing changes). Answers the file as listed with `changed` (false when the name was already that). Writes an `attachment` event, read back |
+| `DELETE /tickets/:id/attachments/:n` | remove one file, bytes and all: answers `{ removed, ticket, name }`, checked gone, with an `attachment` event (from its name to nothing). A file not on that ticket is 404 |
 | `GET /tickets/:id/attachments/:n` | one file, byte for byte, always as a download (`Content-Disposition: attachment`, `X-Content-Type-Options: nosniff`, a sandboxing `Content-Security-Policy`), so an uploaded HTML file can never run as the tracker's page |
 | `POST /tickets/:id/clone` | for Dane's page: copy a ticket into another project (`{ project }`), as a new ticket in `Requested` there with one comment naming where it came from; the original does not change |
 
@@ -340,7 +348,15 @@ the file's name (which downloads it), the task's id and exact name (which
 opens it), its type, size, who added it and when. A project with no files
 says so in a line. It reads `GET /projects/:slug/attachments`, which answers
 the list without the bytes, to members of the project only; downloads stay
-with `GET /tickets/:id/attachments/:n`. Task files are look-only for now.
+with `GET /tickets/:id/attachments/:n`. Above the table, **Add File** puts a
+file on any of the project's tasks (pick the task, pick the file, up to
+10 MB) through the same upload call the New Task form uses. Each row has
+**Rename**, which asks for the new name and changes the name only, and
+**Remove**, which first asks "Remove <file> from <task id> <task name>?"
+and, confirmed, deletes it (SP-177). Each change is read back from the
+table's own list before the page says it worked; a refusal is said in a
+line, with the tracker's own words. Someone not on the task's project gets
+the same 404 as for a task that does not exist, and nothing changes.
 At the top, above both, **Spirality Documentation** lists every Markdown file
 in this repository's `docs/` folder and its subfolders by title (its first
 `# ` heading, else its file name) with its path; one opens at
@@ -350,6 +366,20 @@ in this repository's `docs/` folder and its subfolders by title (its first
 inside `docs/`: a path with `..`, an absolute path, a link out of the folder
 or anything else is 404 and nothing is read. Read only; the files change
 through pull requests.
+Below the task files, **Commands** lists every slash command a session can be given
+(SP-179): Dane's own, from `commands/<name>/SKILL.md` (marked Your command),
+and the loop skills, from `.claude/skills/<name>/SKILL.md` (marked Loop
+skill), each as `/<name>` with its description. A search box filters the list
+as it is typed, by name or by what the command does, name matches first.
+Clicking one opens `/docs/commands/<name>`: its steps formatted, and Back to
+Docs. It reads `GET /commands`, signed in only, which reads nothing but a
+`SKILL.md` directly inside a folder directly inside those two (no links, no
+deeper files; `tracker/commands.mjs`). `commands/` is a copy: the originals
+live in `~/.claude/skills/` on the MacBook, and `npm run commands:copy` run
+there refreshes it (it copies only each `SKILL.md`, removes a copy whose
+original is gone, and writes nothing when a file looks like it holds a key,
+when a name is not plain, or when it finds no commands at all); the refreshed
+copy goes in through a pull request.
 A browser opening `/projects` or `/projects/<slug>` gets the page; the page's own
 call to the same address gets the data. `/users` is the page alone; its data
 is still `GET /people` (the onboarding scripts read it), and a browser opening

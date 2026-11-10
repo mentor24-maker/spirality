@@ -7,8 +7,8 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { seedDemo, tickingClock } from './demoData.mjs';
-import { reportsOf, REPORT_RANGES, searchTickets } from './pageData.mjs';
-import { escapeHtml, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, renderContextDocs } from './web/render.mjs';
+import { reportsOf, REPORT_RANGES, searchTickets, PRIORITIES } from './pageData.mjs';
+import { escapeHtml, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, commandHref, renderContextDocs, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings } from './web/render.mjs';
 import { startServer, setupSettingsOf } from './server.mjs';
 import { saveAnswers, setupFields, setupOf } from './setup.mjs';
 import { DANE_FIELDS as SETUP_FIELDS, STEPS as SETUP_STEPS } from '../scripts/onboard/onboard.mjs';
@@ -2302,7 +2302,8 @@ test('Docs is in the header between Users and Settings, served at /docs to a bro
   assert.match(app, /\} else if \(docsPage\) \{\s*await drawDocs\(\);/);
   const draw = app.slice(app.indexOf('async function drawDocs'), app.indexOf('/** Underline the header link'));
   assert.match(draw, /projects\.find\(\(p\) => p\.slug === savedProject\(\)\) \?\? projects\[0\]/, 'the project picked in the header, else the first');
-  assert.match(draw, /api\('GET', `\/projects\/\$\{encodeURIComponent\(project\.slug\)\}\/attachments`\)/);
+  assert.match(draw, /const listPath = `\/projects\/\$\{encodeURIComponent\(project\.slug\)\}\/attachments`;/);
+  assert.match(draw, /api\('GET', listPath\)/);
   assert.match(draw, /`\/tickets\/\$\{encodeURIComponent\(a\.ticket\)\}\/attachments\/\$\{encodeURIComponent\(a\.id\)\}`/, 'downloads use the task\'s own download address');
   assert.match(draw, /download="\$\{escapeHtml\(a\.name\)\}"/);
   assert.match(draw, /<a href="\/t\/\$\{encodeURIComponent\(a\.ticket\)\}">/);
@@ -2310,6 +2311,39 @@ test('Docs is in the header between Users and Settings, served at /docs to a bro
   for (const heading of ['File', 'Task', 'Type', 'Size', 'Added By', 'Added On']) assert.match(draw, new RegExp(`<th>${heading}</th>`), heading);
   assert.match(draw, /No task in .* has a file yet\./, 'an empty project says so in a line');
   assert.doesNotMatch(draw, /\$\{a\.(name|ticketName|addedByName|type)\}/, 'every name is escaped');
+});
+
+test('the Docs table adds, renames and removes task files, each read back, a removal confirmed by file and task (SP-177)', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const draw = app.slice(app.indexOf('async function drawDocs'), app.indexOf('/** Underline the header link'));
+  // Add File: pick one of the project's tasks and a file; the same upload the New Task form uses.
+  assert.match(draw, /\{ tickets \}\] = await Promise\.all\(\[[\s\S]*?api\('GET', `\/projects\/\$\{encodeURIComponent\(project\.slug\)\}\/tickets`\),\s*\]\);/);
+  assert.match(draw, /<button type="submit">Add File<\/button>/);
+  assert.match(draw, /made = await uploadFile\(ticket, file\)/);
+  assert.match(draw, /file\.size > MAX_FILE/, 'too large is said before sending');
+  // Rename: the file's name only, an empty one refused on the page before any call.
+  assert.match(draw, />Rename<\/button>/);
+  assert.match(draw, /if \(!typed\.trim\(\)\) return refused\(null, `Not renamed: a file needs a name/);
+  assert.match(draw, /api\('PATCH', `\/tickets\/\$\{encodeURIComponent\(ticket\)\}\/attachments\/\$\{encodeURIComponent\(file\)\}`, \{ name: typed \}\)/);
+  // Remove: a confirmation naming the file and its task; cancelled, no call.
+  assert.match(draw, />Remove<\/button>/);
+  assert.match(draw, /if \(!confirm\(`Remove \$\{name\} from \$\{ticket\} \$\{taskName\}\?[^`]*`\)\) return;\s*button\.disabled = true;/);
+  assert.match(draw, /api\('DELETE', `\/tickets\/\$\{encodeURIComponent\(ticket\)\}\/attachments\/\$\{encodeURIComponent\(file\)\}`\)/);
+  // Every change is read back from the table's own list before the page says it worked, and a failure is said.
+  assert.equal((draw.match(/await listedNow\(\)/g) ?? []).length, 3);
+  for (const word of ['Not added', 'Not renamed', 'Not removed']) assert.match(draw, new RegExp(`${word}: \\$\\{err\\.message\\}`), word);
+  assert.match(draw, /but it is not in the table when read back/);
+  assert.match(draw, /but it reads back as/);
+  assert.match(draw, /but it is still listed when read back/);
+  assert.doesNotMatch(draw, /\$\{(a|t)\.(name|ticketName|id)\}/, 'every name is escaped');
+  // Task Files and Context Documents each have their own line; a change's outcome shows only in the section it came from.
+  assert.match(draw, /async function drawDocs\(done = '', problem = '', section = 'files'\)/);
+  assert.match(draw, /const fileLine = section === 'files' \? \{ done, problem \} : \{ done: '', problem: '' \};/);
+  assert.match(draw, /<p class="note file-note\$\{fileLine\.problem \? ' error' : ' quiet'\}" role="status">\$\{escapeHtml\(fileLine\.problem \|\| fileLine\.done\)\}<\/p>/);
+  assert.match(draw, /const note = main\.querySelector\('\.file-note'\);/, 'never the Context Documents line above it');
+  assert.match(draw, /drawAgain\(\(\) => drawDocs\(failed \? '' : text, failed \? text : '', 'files'\)\)/);
+  assert.match(draw, /wireContextDocs\(project, docsPath, section === 'docs' \? done : '', section === 'docs' \? problem : ''\);/);
+  assert.match(draw, /const again = \(text, failed\) => drawDocs\(failed \? '' : text, failed \? text : '', 'docs'\)/);
 });
 
 test('the Docs page\'s Context Documents list the project\'s own files, each a download and a Remove button, every name escaped; an empty one says so (SP-176)', () => {
@@ -2411,6 +2445,81 @@ test('unwrapDoc joins a quote\'s lines with their ">" taken off, and never joins
   // The real file: no ">" left in the middle of a sentence once drawn.
   const contract = readFileSync(new URL('../docs/LOOP_CONTRACT.md', import.meta.url), 'utf8');
   for (const line of unwrapDoc(contract).split('\n')) assert.doesNotMatch(line, /\S\s+>\s/, line);
+});
+
+// ── Docs: Commands (SP-179) ─────────────────────────────────────────────────
+
+const COMMANDS = [
+  { name: 'why-stuck', source: 'Your command', description: 'Find out why a ticket is stuck.', steps: '# Why Stuck\n\n1. Read the ticket.\n2. Say why.\n\n```\nnpm run clickup -- waiting\n```\n' },
+  { name: 'loop-review', source: 'Loop skill', description: 'Review the next pull request.', steps: '# Loop: Review\n\n- one\n' },
+  { name: 'loop-spec', source: 'Loop skill', description: 'Turn an idea into tickets.', steps: 'x' },
+];
+
+test('the Commands search keeps a command whose name or description holds the words typed, case set aside', () => {
+  assert.deepEqual(matchCommands(COMMANDS, 'stuck').map((c) => c.name), ['why-stuck']);
+  assert.deepEqual(matchCommands(COMMANDS, 'REVIEW').map((c) => c.name), ['loop-review']);
+  assert.deepEqual(matchCommands(COMMANDS, 'tickets').map((c) => c.name), ['loop-spec'], 'by what it does, too');
+  assert.deepEqual(matchCommands(COMMANDS, '  ').map((c) => c.name), ['why-stuck', 'loop-review', 'loop-spec']);
+  const mentions = [{ name: 'loop-build', description: 'then move it to In review' }, { name: 'loop-review', description: 'Check a pull request.' }];
+  assert.deepEqual(matchCommands(mentions, 'review').map((c) => c.name), ['loop-review', 'loop-build'], 'a name match comes before a description match');
+});
+
+test('the Commands list shows /<name>, its source and description, linking to its own page; no match and nothing copied yet each say so', () => {
+  const html = renderCommandList(COMMANDS, 'review');
+  assert.match(html, /<a href="\/docs\/commands\/loop-review"><code>\/loop-review<\/code><\/a> <span class="quiet">Loop skill<\/span><br>Review the next pull request\./);
+  assert.doesNotMatch(html, /why-stuck|loop-spec/);
+  assert.doesNotMatch(html, /not been copied/, 'a copied command is listed, so no such line');
+  assert.match(renderCommandList(COMMANDS, 'zebra'), /No command matches “zebra”\./);
+  const skillsOnly = renderCommandList(COMMANDS.filter((c) => c.source === 'Loop skill'));
+  assert.match(skillsOnly, /\/loop-review[\s\S]*\/loop-spec/);
+  assert.match(skillsOnly, /Your own commands have not been copied here yet: run <code>npm run commands:copy<\/code>/);
+  const evil = renderCommandList([{ name: 'x', source: 'Your command', description: '<img src=x onerror=alert(1)>', steps: '' }], '<b>');
+  assert.doesNotMatch(evil, /<img|<b>/);
+  assert.equal(commandHref('a b'), '/docs/commands/a%20b');
+  assert.match(renderCommandList([{ name: 'x', source: 'Loop skill', description: 'Runs `npm run verify` first.', steps: '' }]), /Runs <code>npm run verify<\/code> first\./, 'code in a description is drawn as code');
+});
+
+test('a command\'s own page draws its steps formatted (headings, lists, code) with a Back to Docs link, and escapes its words', () => {
+  const html = renderCommandView(COMMANDS[0]);
+  assert.match(html, /<h1><code>\/why-stuck<\/code><\/h1>/);
+  assert.match(html, /Your command/);
+  assert.match(html, /<h\d[^>]*>Why Stuck<\/h\d>/, 'a heading, not "# Why Stuck"');
+  assert.match(html, /<ol>[\s\S]*<li>Read the ticket\.<\/li>/);
+  assert.match(html, /<pre[^>]*>[\s\S]*npm run clickup -- waiting/);
+  assert.doesNotMatch(html, /# Why Stuck/);
+  assert.match(html, /<a href="\/docs">Back to Docs<\/a>/);
+  assert.doesNotMatch(renderCommandView({ ...COMMANDS[0], name: '<x>', description: '<y>' }), /<x>|<y>/);
+});
+
+test('the Docs page carries the Commands section; /docs/commands/<name> opens one command, served as the page to a browser', async () => {
+  const html = readFileSync(WEB('index.html'), 'utf8');
+  const f = await fixture();
+  try {
+    const page = await fetch(`${f.url}/docs/commands/loop-review`, { headers: { accept: 'text/html' } });
+    assert.equal(page.status, 200);
+    assert.equal(await page.text(), html);
+    const list = await f.call('GET', '/commands');
+    assert.equal(list.status, 200);
+    for (const name of ['loop-build', 'loop-intake', 'loop-review', 'loop-spec']) {
+      assert.ok(list.body.commands.some((c) => c.name === name && c.source === 'Loop skill'), name);
+    }
+    // Other loop skills mention review in their descriptions; the one named for it comes first.
+    assert.equal(matchCommands(list.body.commands, 'review')[0].name, 'loop-review');
+  } finally { await f.cleanup(); }
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const draw = app.slice(app.indexOf('async function drawDocs'), app.indexOf('/** Underline the header link'));
+  assert.match(draw, /await api\('GET', '\/commands'\)/);
+  assert.match(draw, /<h2>Commands<\/h2>/);
+  assert.match(draw, /<input type="search" id="command-search"/);
+  assert.match(draw, /box\.addEventListener\('input', show\)/);
+  assert.match(draw, /renderCommandList\(commands, box\.value\)/);
+  assert.match(draw, /api\('GET', '\/commands'\)\.then\(\(r\) => r\.commands, \(\) => null\)/, 'a failed commands call is caught on its own, so the rest still draws');
+  assert.match(draw, /The commands could not be read\./);
+  assert.match(draw, /renderCommandView\(\{ \.\.\.command, steps: unwrapDoc\(command\.steps\) \}\)/, 'wrapped lines joined, as a documentation file\'s are');
+  assert.match(app, /const m = \/\^\\\/docs\\\/commands\\\/\(\[\^\/\]\+\)\$\/\.exec\(location\.pathname\);/);
+  // Before the documentation pages' catch-all, which would otherwise say "no documentation file" for a command.
+  assert.match(app, /\} else if \(docsCommand != null\) \{\s*await drawCommand\(docsCommand\);\s*\} else if \(docAny\) \{/);
+  assert.match(app, /docsPage \|\| docAny \? 'docs' :/, 'Docs stays underlined in the header (docAny covers /docs/commands/<name>)');
 });
 
 test('a browser opening /people (an old bookmark) is sent on to /users, never cached; the data call to /people still answers the data', async () => {
@@ -3164,6 +3273,91 @@ test.describe('Files Made: the files a ticket made, from its newest merge note',
     assert.match(readFileSync(WEB('app.css'), 'utf8'), /\.files-made \{[^}]*background:[^}]*border:/);
   });
 });
+
+// SP-174: the Tasks tables' headings sort each stage's rows.
+{
+  const T = (id, name, priority, tags, assignee, updatedAt) => ({ id, name, priority, tags, assignee, updatedAt });
+  const tickets = [
+    T('A-1', 'banana', 'low', ['web'], 'Dane', '2026-11-03T10:00:00.000Z'),
+    T('A-2', 'Apple', null, [], null, '2026-11-01T10:00:00.000Z'),
+    T('A-3', 'cherry', 'urgent', ['api', 'web'], 'hand-run', '2026-11-09T10:00:00.000Z'),
+    T('A-4', 'apple', 'high', ['Docs'], 'Dane', '2026-11-02T10:00:00.000Z'),
+    T('A-5', 'date', 'normal', [], null, '2026-11-02T09:00:00.000Z'),
+  ];
+  const ids = (list) => list.map((t) => t.id);
+  const sorted = (column, direction = 'ascending') => ids(sortTickets(tickets, { column, direction }));
+
+  test('the page\'s priority order is the one lib/loopStatuses.js PRIORITY_RANK gives', () => {
+    assert.deepEqual([...PRIORITY_ORDER], [...PRIORITIES]);
+  });
+
+  test('a stage sorts by each column, ties keeping the order the page had, and descending is the reverse', () => {
+    assert.deepEqual(sorted('name'), ['A-2', 'A-4', 'A-1', 'A-3', 'A-5'], 'A to Z, case ignored, ties in page order');
+    assert.deepEqual(sorted('priority'), ['A-3', 'A-4', 'A-5', 'A-1', 'A-2'], 'Urgent, High, Normal, Low, none');
+    assert.deepEqual(sorted('priority', 'descending'), ['A-2', 'A-1', 'A-5', 'A-4', 'A-3']);
+    assert.deepEqual(sorted('tags'), ['A-3', 'A-4', 'A-1', 'A-2', 'A-5'], 'by first tag, case ignored, no tags last');
+    assert.deepEqual(sorted('assignee'), ['A-1', 'A-4', 'A-3', 'A-2', 'A-5'], 'A to Z, nobody last');
+    assert.deepEqual(sorted('when'), ['A-2', 'A-5', 'A-4', 'A-1', 'A-3'], 'oldest first, by the real time');
+    assert.deepEqual(sorted('when', 'descending'), ['A-3', 'A-1', 'A-4', 'A-5', 'A-2'], 'newest first');
+  });
+
+  test('no sort, or a column it does not know, keeps the page\'s order, and the tickets are never changed', () => {
+    const before = ids(tickets);
+    assert.deepEqual(ids(sortTickets(tickets, null)), before);
+    assert.deepEqual(ids(sortTickets(tickets, { column: 'actions', direction: 'ascending' })), before);
+    sortTickets(tickets, { column: 'name', direction: 'descending' });
+    assert.deepEqual(ids(tickets), before);
+  });
+
+  test('a first click sorts ascending, a second flips it, another heading starts ascending again', () => {
+    const one = nextSort(null, 'priority');
+    assert.deepEqual(one, { column: 'priority', direction: 'ascending' });
+    const two = nextSort(one, 'priority');
+    assert.deepEqual(two, { column: 'priority', direction: 'descending' });
+    assert.deepEqual(nextSort(two, 'priority'), { column: 'priority', direction: 'ascending' });
+    assert.deepEqual(nextSort(two, 'when'), { column: 'when', direction: 'ascending' });
+  });
+
+  test('the headings are buttons; only the sorted one has an arrow and aria-sort; Actions is plain', () => {
+    const none = renderSortHeadings(null);
+    assert.equal((none.match(/<button type="button" class="sort"/g) || []).length, SORT_COLUMNS.length);
+    assert.deepEqual(SORT_COLUMNS.map((c) => c.label), ['Ticket', 'Priority', 'Tags', 'Assigned To', 'Last Change']);
+    assert.doesNotMatch(none, /aria-sort|▲|▼/);
+    assert.match(none, /<th class="actions">Actions<\/th>/);
+    const up = renderSortHeadings({ column: 'priority', direction: 'ascending' });
+    assert.match(up, /<th class="priority" aria-sort="ascending"><button[^>]*data-sort="priority">Priority <span class="arrow" aria-hidden="true">▲<\/span><\/button><\/th>/);
+    assert.equal((up.match(/aria-sort/g) || []).length, 1);
+    assert.equal((up.match(/[▲▼]/g) || []).length, 1);
+    const down = renderSortHeadings({ column: 'when', direction: 'descending' });
+    assert.match(down, /<th class="when" aria-sort="descending">.*Last Change <span class="arrow" aria-hidden="true">▼/);
+  });
+
+  test('the minute\'s redraw keeps each stage\'s sort; a reload does not', () => {
+    const app = readFileSync(WEB('app.mjs'), 'utf8');
+    const place = /function keepPlace\(\) \{[\s\S]*?\n\}/.exec(app)[0];
+    // Read by stage before the redraw, put back on that stage's new table after it.
+    assert.match(place, /const sorts = new Map\(sortableTables\(\)\.filter\(\(\{ table \}\) => sorted\.get\(table\)\?\.sort\)\.map\(\(\{ table, stage \}\) => \[stage, sorted\.get\(table\)\.sort\]\)\);/);
+    assert.match(place, /restore\(\) \{[\s\S]*for \(const \{ table, stage \} of sortableTables\(\)\) if \(sorts\.has\(stage\)\) sorted\.get\(table\)\?\.apply\(sorts\.get\(stage\)\);[\s\S]*window\.scrollTo/);
+    assert.match(app, /const sortableTables = \(\) => \[\.\.\.main\.querySelectorAll\('\[data-stage\] table\.sortable'\)\]\s*\.map\(\(table\) => \(\{ table, stage: table\.closest\('\[data-stage\]'\)\.dataset\.stage \}\)\);/);
+    const wire = /function wireSortHeadings\(stages\) \{[\s\S]*?\n\}/.exec(app)[0];
+    // Every new table can take a sort back before he clicks it, and a click starts from what it shows.
+    assert.match(wire, /sorted\.set\(table, \{ sort: null, apply \}\);/);
+    assert.match(wire, /sorted\.set\(table, \{ sort, apply \}\);/);
+    assert.match(wire, /nextSort\(sorted\.get\(table\)\?\.sort \?\? null, button\.dataset\.sort\)/);
+    // Only a beat's redraw passes a place; a fresh visit or reload draws with none, so no sort.
+    assert.match(app, /const sorted = new WeakMap\(\);/);
+    assert.equal((app.match(/keepPlace\(\)/g) ?? []).length, 2, 'defined once, called only by refreshPage');
+  });
+
+  test('the List view\'s tables use the sortable headings, and only they are bold and black', () => {
+    const app = readFileSync(WEB('app.mjs'), 'utf8');
+    assert.match(app, /<table class="sortable"><thead>\$\{renderSortHeadings\(null\)\}<\/thead>/);
+    assert.match(app, /<tr data-id="\$\{escapeHtml\(t\.id\)\}">/);
+    const css = readFileSync(WEB('app.css'), 'utf8');
+    assert.match(css, /\.group table\.sortable th \{ color: #000; font-weight: 700; \}/);
+    assert.match(css, /^th \{ color: var\(--quiet\); font-weight: 500;/m, 'every other table keeps the grey heading');
+  });
+}
 
 test('every page has one body width: main is capped at 1440px, padding included, and no page widens it (SP-184)', () => {
   const css = readFileSync(WEB('app.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
