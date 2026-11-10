@@ -1184,8 +1184,11 @@ A steward question is two commands: `task --list <busProject>` files it,
 and it lands in Queued, which is not on Dane's Waiting on You list; then
 `ask --task <id> --status "Needs your input"` with the operator card is
 what puts it in front of him. Setting it up
-for a project: create the bus project on the Projects page, put the
-project's loops on it, and write its slug as `busProject`.
+for a project: the setup wizard does it when its answers say the project
+has a bus (SP-204, `hasBus`): its `bus` step makes the tracker project
+`<slug>-bus` (`npm run tracker:bus`), checks every loop of the project sees
+it, and the settings file it writes names it as `busProject`
+([ONBOARDING_A_PROJECT.md](ONBOARDING_A_PROJECT.md#a-project-with-a-bus-starcaster)).
 
 Every way StarCaster uses the bus today, and its tracker equivalent (the same
 table is `BUS_USES` in `lib/trackerBus.js`, and a test holds the two
