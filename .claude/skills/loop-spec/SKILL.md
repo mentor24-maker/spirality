@@ -106,11 +106,12 @@ NOT write any code here. You produce well-formed tasks.
    low | medium | high — and one line on the blast radius.
    ````
 
-   **The task NAME says in plain words what breaks and who feels it**, or what
-   Dane will be able to do once it ships. He scans a list; the clever
-   diagnostic sentence goes in the description. Good: *"Dane cannot sign in
-   yet: add sign-in and per-user data protection"*. Not: *"Auth: wire Supabase
-   session middleware"*.
+   **The task NAME is a short, plain statement of what the ticket does.**
+   Start with a verb (Move, Add, Show, Remove, Fix), name the thing, and keep
+   it short: no colon, no sentence about who is stuck. He scans a list; the
+   why goes in the description.
+   Good: *"Move WaveCenter from ClickUp to Spirality tracker"*.
+   Not: *"WaveCenter still runs on ClickUp: move it to the tracker"*.
 
    Tag each task with the epic name so the queue stays legible.
 
