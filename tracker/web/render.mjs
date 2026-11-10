@@ -119,6 +119,50 @@ export function renderMarkdown(text) {
   return out.join('\n');
 }
 
+/** A Markdown quote line's opening `>` (and the one space after it). */
+const QUOTE = /^\s*>\s?/;
+
+/**
+ * A documentation file's text with its hard-wrapped lines joined back up
+ * (SP-175), for renderMarkdown, which keeps every line break a ticket's
+ * text has. A line is joined to the one before when both are text: not
+ * blank, not a heading, rule, fence or table row, and the line itself not
+ * the start of a list item (an indented one following a list item is that
+ * item's next line). A quote's lines (`> ...`) join each other, the
+ * later ones' `>` taken off, but never the text before or after the quote.
+ * Fenced code is left exactly as written.
+ */
+export function unwrapDoc(text) {
+  const out = [];
+  let fence = null;
+  const stands = (line) => !line.trim() || HEADING.test(line) || RULE.test(line) || FENCE.test(line) || /^\s*\|/.test(line) || QUOTE.test(line);
+  for (const line of String(text ?? '').replace(/\r\n?/g, '\n').split('\n')) {
+    if (fence) {
+      out.push(line);
+      if (closesFence(line, fence)) fence = null;
+      continue;
+    }
+    if (FENCE.test(line)) {
+      fence = FENCE.exec(line)[1];
+      out.push(line);
+      continue;
+    }
+    const before = out.length ? out[out.length - 1] : '';
+    if (QUOTE.test(line)) {
+      // A quote's next line joins the quote, its ">" taken off; a quote never joins the text around it.
+      const rest = line.replace(QUOTE, '').trim();
+      const joins = out.length && QUOTE.test(before) && before.replace(QUOTE, '').trim() && rest && !BULLET.test(rest) && !NUMBERED.test(rest);
+      if (joins) out[out.length - 1] = `${before.replace(/\s+$/, '')} ${rest}`;
+      else out.push(line);
+      continue;
+    }
+    const startsItem = BULLET.test(line) || NUMBERED.test(line);
+    if (out.length && !stands(before) && !stands(line) && !startsItem) out[out.length - 1] = `${before.replace(/\s+$/, '')} ${line.trim()}`;
+    else out.push(line);
+  }
+  return out.join('\n');
+}
+
 /** A line with any `**…**` wrapping taken off: the tracker stores a card's bold runs that way. */
 const unbold = (line) => line.trim().replace(/^\*\*([\s\S]*)\*\*$/, '$1').trim();
 const BANNER_RULE = /^#{20,}$/;
@@ -233,12 +277,15 @@ export function tabTitle(waitingCount, pageTitle) {
  * and it redraws the page itself when it lands. `fields`: the page's text
  * boxes and choosers as `{ focused, value, initial }`; one with focus, or
  * holding text that is not what it was drawn with, is him typing, and a
- * redraw would wipe it.
+ * redraw would wipe it. `dialog`: a dialog on the page is open (the Pipeline
+ * Status dialog has only buttons, so no field holds it, SP-173); a redraw
+ * would drop it from under him, with focus lost, and it waits until it closes.
  */
-export function redrawHold({ hidden = false, drawing = false, writing = false, fields = [] } = {}) {
+export function redrawHold({ hidden = false, drawing = false, writing = false, dialog = false, fields = [] } = {}) {
   if (hidden) return 'hidden';
   if (drawing) return 'drawing';
   if (writing) return 'writing';
+  if (dialog) return 'dialog';
   if (fields.some((f) => f.focused || f.value !== f.initial)) return 'typing';
   return null;
 }
@@ -313,6 +360,74 @@ export function renderPipelinePod(answer, timeOf) {
     return `<span class="stage${s.running ? ' running' : ''}" title="${escapeHtml(title)}">${escapeHtml(s.name)} ${escapeHtml(shown)}</span>`;
   };
   return stages.map(item).join('<span class="sep" aria-hidden="true"> · </span>');
+}
+
+/**
+ * The pod button's accessible name (SP-173): "Pipeline Status: Relay 10:45,
+ * Build running, Review –, Intake 11:04", so a screen reader names the button
+ * for what it opens and still reads each stage. A missing or malformed answer
+ * gives PIPELINE_UNAVAILABLE, which already names it.
+ */
+export function pipelinePodLabel(answer, timeOf) {
+  const stages = Array.isArray(answer?.stages) ? answer.stages : null;
+  if (!stages || !stages.length) return PIPELINE_UNAVAILABLE;
+  const shown = (s) => (s.running ? 'running' : s.logged && s.nextDue ? timeOf(s.nextDue) : '–');
+  return `Pipeline Status: ${stages.map((s) => `${s.name} ${shown(s)}`).join(', ')}`;
+}
+
+/**
+ * How a pass ended, in plain words, from the exit code on its END line
+ * (SP-173). The runners write these codes (scripts/run_relay.sh,
+ * scripts/loop_runner.sh, scripts/run_with_time_limit.sh): 0 finished, 1 a
+ * step failed and said so, 124 the time limit stopped it, anything else it
+ * could not run. An END line with no code says only that it ended.
+ */
+export function passOutcome(code) {
+  if (code === 0) return 'Finished';
+  if (code === 1) return 'A step failed and said so';
+  if (code === 124) return 'Hit its time limit and was stopped';
+  if (Number.isInteger(code)) return `Could not run (exit ${code})`;
+  return 'Ended';
+}
+
+/** How often a stage wakes, from its interval in seconds: "Every 30 minutes". */
+export function wakesEvery(seconds) {
+  if (!Number.isFinite(seconds) || seconds <= 0) return '–';
+  if (seconds % 3600 === 0) return seconds === 3600 ? 'Every hour' : `Every ${seconds / 3600} hours`;
+  if (seconds % 60 === 0) return seconds === 60 ? 'Every minute' : `Every ${seconds / 60} minutes`;
+  return `Every ${seconds} seconds`;
+}
+
+/**
+ * The Pipeline Status dialog's rows (SP-173), from GET /pipeline: per stage,
+ * its next pass (or "Running now, since …"), when its last pass started and
+ * ended and how it ended, and how often it wakes, as an HTML table. `timeOf`
+ * turns an ISO time into the page's own time format. A stage with no pass
+ * logged yet says "No passes logged yet". While a stage runs, its Last Ended
+ * cell is the previous pass's and says "Previous pass: …". A missing or malformed answer says
+ * PIPELINE_UNAVAILABLE.
+ */
+export function renderPipelineDetails(answer, timeOf) {
+  const stages = Array.isArray(answer?.stages) ? answer.stages : null;
+  if (!stages || !stages.length) return `<p class="unavailable">${escapeHtml(PIPELINE_UNAVAILABLE)}.</p>`;
+  const row = (s) => {
+    const name = `<th scope="row">${escapeHtml(s.name)}</th>`;
+    const wakes = `<td>${escapeHtml(wakesEvery(s.interval))}</td>`;
+    if (!s.logged) return `<tr>${name}<td colspan="3" class="quiet">No passes logged yet</td>${wakes}</tr>`;
+    let next;
+    if (s.running) next = s.lastStart ? `Running now, since ${timeOf(s.lastStart)}` : 'Running now';
+    else next = s.nextDue ? timeOf(s.nextDue) : 'Not known yet';
+    const started = s.lastStart ? timeOf(s.lastStart) : '–';
+    // While a pass runs, the last END belongs to the pass before it: say so, so
+    // a red outcome there does not read as the running pass failing.
+    const ended = s.lastEnd ? `${s.running ? 'Previous pass: ' : ''}${timeOf(s.lastEnd)}: ${passOutcome(s.lastExit)}` : '–';
+    const failed = s.lastEnd && s.lastExit !== 0 && s.lastExit != null;
+    return `<tr${s.running ? ' class="running"' : ''}>${name}<td>${escapeHtml(next)}</td><td>${escapeHtml(started)}</td><td${failed ? ' class="failed"' : ''}>${escapeHtml(ended)}</td>${wakes}</tr>`;
+  };
+  return `<table class="pipeline-stages">
+    <thead><tr><th scope="col">Stage</th><th scope="col">Next Pass</th><th scope="col">Last Started</th><th scope="col">Last Ended</th><th scope="col">Wakes</th></tr></thead>
+    <tbody>${stages.map(row).join('')}</tbody>
+  </table>`;
 }
 
 const CONTEXT_HEADING = "WHAT'S GOING ON";
@@ -1356,4 +1471,33 @@ export function renderSortHeadings(sort) {
     return `<th class="${key}"${on ? ` aria-sort="${sort.direction}"` : ''}><button type="button" class="sort" data-sort="${key}">${escapeHtml(label)}${arrow}</button></th>`;
   };
   return `<tr>${SORT_COLUMNS.map(heading).join('')}<th class="actions">Actions</th></tr>`;
+}
+
+/**
+ * The Docs page's Context Documents section (SP-176): the files kept on the
+ * project itself, newest first, each with its type, size, adder and time, a
+ * Download link (always saved, never opened in the page) and a Remove
+ * button, and one Upload Document button over a hidden file picker. `size`
+ * and `timeOf` put a byte count and a time in words. Every name is escaped.
+ */
+export function renderContextDocs({ project, docs = [] }, { size, timeOf }) {
+  const base = `/projects/${encodeURIComponent(project.slug)}/docs`;
+  const row = (d) => `<tr data-doc="${escapeHtml(d.id)}">
+      <td class="name">${escapeHtml(d.name)}</td>
+      <td class="type">${escapeHtml(d.type)}</td>
+      <td class="size">${escapeHtml(size(d.size))}</td>
+      <td class="by">${d.addedByName ? escapeHtml(d.addedByName) : '<span class="quiet">unknown</span>'}</td>
+      <td class="when">${escapeHtml(timeOf(d.createdAt))}</td>
+      <td class="actions"><a href="${base}/${encodeURIComponent(d.id)}" download="${escapeHtml(d.name)}">Download</a>
+        <button type="button" class="remove-doc" data-remove-doc="${escapeHtml(d.id)}" data-name="${escapeHtml(d.name)}" aria-label="Remove ${escapeHtml(d.name)}">Remove</button></td></tr>`;
+  return `<section class="context-docs">
+    <h2>Context Documents</h2>
+    <p class="quiet">Briefs, notes and reference files that belong to ${escapeHtml(project.name)} as a whole, not to one task. One file at a time, up to 10 MB.</p>
+    <div class="row"><button type="button" class="upload-doc">Upload Document</button><input type="file" class="doc-file" hidden></div>
+    <p class="note quiet doc-note" role="status"></p>
+    ${docs.length
+    ? `<table class="projects doc-list"><thead><tr><th>File</th><th>Type</th><th>Size</th><th>Added By</th><th>Added On</th><th></th></tr></thead>
+      <tbody>${docs.map(row).join('')}</tbody></table>`
+    : `<p class="quiet">${escapeHtml(project.name)} has no context documents yet.</p>`}
+  </section>`;
 }

@@ -26,7 +26,7 @@
  * an emailed link's own page. The link's token is sent only in a JSON body,
  * never in an address.
  */
-import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderSortHeadings, sortTickets, nextSort } from './render.mjs';
+import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, unwrapDoc, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, pipelinePodLabel, renderContextDocs, renderSortHeadings, sortTickets, nextSort } from './render.mjs';
 
 /** Where an earlier version of the page kept a pasted token; removed on load, never read. */
 const OLD_TOKEN_KEY = 'tracker-token';
@@ -165,11 +165,35 @@ async function refreshPipeline() {
   showPipeline(true);
 }
 
-/** Draw the pod from the last answer; before the first read, it waits quietly. */
+/** Draw the pod from the last answer; before the first read, it waits quietly. The dialog, when open, redraws with it. */
 function showPipeline(read = false) {
   const pod = main.querySelector('.pipeline-pod');
   if (!pod || (!pipelineState && !read)) return;
   pod.innerHTML = renderPipelinePod(pipelineState, clockTime);
+  pod.setAttribute('aria-label', pipelinePodLabel(pipelineState, clockTime));
+  const dialog = main.querySelector('dialog.pipeline-status');
+  if (dialog?.open) fillPipelineDialog(dialog);
+}
+
+/** Fill the Pipeline Status dialog's rows from the last answer read. */
+function fillPipelineDialog(dialog) {
+  dialog.querySelector('.pipeline-details').innerHTML = renderPipelineDetails(pipelineState, when);
+}
+
+/**
+ * The pod is a button (SP-173): clicking it, or Enter or Space on it, opens
+ * the Pipeline Status dialog from the last answer read. Escape or Close
+ * shuts it, and focus goes back to the pod.
+ */
+function wirePipeline() {
+  const pod = main.querySelector('.pipeline-pod');
+  const dialog = main.querySelector('dialog.pipeline-status');
+  if (!pod || !dialog) return;
+  pod.addEventListener('click', () => {
+    fillPipelineDialog(dialog);
+    dialog.showModal();
+  });
+  dialog.addEventListener('close', () => pod.focus());
 }
 
 class SignedOut extends Error {}
@@ -234,13 +258,15 @@ async function api(method, path, body, { unrecorded = false } = {}) {
 /**
  * Upload one file to a ticket: the file itself as the body, its name and
  * type in headers (tracker/server.mjs, "attachments"). Answers the
- * attachment as listed, or throws with the server's own message.
+ * attachment as listed, or throws with the server's own message. `to` is
+ * another upload address taking the same body (a project's context
+ * documents, `/projects/<slug>/docs`).
  */
-async function uploadFile(ticketId, file) {
+async function uploadFile(ticketId, file, to = `/tickets/${encodeURIComponent(ticketId)}/attachments`) {
   writing += 1;
   let res;
   try {
-    res = await fetch(`/tickets/${encodeURIComponent(ticketId)}/attachments`, {
+    res = await fetch(to, {
       method: 'POST',
       credentials: 'same-origin',
       headers: {
@@ -1202,13 +1228,12 @@ async function drawProject(slug, view, { adding = false, filed = null, unchecked
   const liveColumn = board.columns.find((c) => c.status === 'Live');
   const live = liveColumn && { ...liveColumn, tickets: liveColumn.tickets.slice().sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0)) };
 
-  main.classList.add('wide');
   main.innerHTML = `
     <h1>Tasks</h1>
     <div class="toolbar">
       ${renderProjectPicker(projects, board.project)}
       ${searchForm('')}
-      <div class="pipeline-pod" role="status" aria-label="Pipeline Status"></div>
+      <button type="button" class="pipeline-pod" aria-haspopup="dialog" title="Open Pipeline Status"></button>
       <nav class="views" aria-label="View">${toggle}</nav>
     </div>
     ${filed ? `<p class="filed-note">Filed <a href="/t/${encodeURIComponent(filed)}">${escapeHtml(filed)}</a>${unchecked ? `. ${UNCHECKED_NOTE}` : ''}${filesNote(uploaded, notUploaded)}</p>` : ''}
@@ -1235,6 +1260,14 @@ async function drawProject(slug, view, { adding = false, filed = null, unchecked
         </div>
       </form>
     </dialog>
+    <dialog class="pipeline-status" aria-labelledby="pipeline-status-title">
+      <form method="dialog">
+        <button type="submit" class="close" aria-label="Close">×</button>
+        <h2 id="pipeline-status-title">Pipeline Status</h2>
+        <div class="pipeline-details"></div>
+        <div class="row"><button type="submit">Close</button></div>
+      </form>
+    </dialog>
     <p class="error list-note" role="alert" hidden></p>
     ${view === 'board'
     ? `<div class="board">${working.map(column).join('')}</div>${live ? `<div class="list board-live">${group(live)}</div>` : ''}`
@@ -1251,6 +1284,7 @@ async function drawProject(slug, view, { adding = false, filed = null, unchecked
   wireSortHeadings(view === 'board' ? (live ? [live] : []) : board.columns);
   wireSearch();
   wireAddTask(board.project, view, adding);
+  wirePipeline();
   refreshPipeline();
   // Picking a project opens it in this same view, as a link would: Back returns here.
   main.querySelector('.project-picker select').addEventListener('change', (e) => {
@@ -2183,6 +2217,255 @@ async function drawUsers(done = '', problem = '') {
   }
 }
 
+/**
+ * The Docs page (SP-171): Spirality's own documentation first (SP-175),
+ * every Markdown file in the repository's docs/ folder by title, each
+ * opening at /docs/spirality/<path>; then the selected project's Context
+ * Documents (SP-176, files kept on the project itself, uploaded, downloaded
+ * and removed here); then every file on its tasks in one Task Files table,
+ * newest first. The project is the one picked on the Projects page (shown
+ * in the header), else the first. A task file's name downloads it through
+ * the task's own download address; the task links to its page. SP-177 makes
+ * the Task Files table changeable: Add File puts a file on one of the
+ * project's tasks (the same upload the New Task form uses), Rename changes a
+ * file's name only, and Remove, once confirmed by name and task, deletes it.
+ * Each is read back from the table's own list before the page says it
+ * worked. `done` and `problem` are the line the last change left, and
+ * `section` says whose it is: 'docs' (Context Documents) or 'files' (Task
+ * Files), so it shows in that section only.
+ */
+async function drawDocs(done = '', problem = '', section = 'files') {
+  // The documentation call is caught on its own: a tracker not yet restarted onto it answers 404, and Task Files still draws.
+  const [{ projects }, files] = await Promise.all([api('GET', '/projects'), api('GET', '/documentation').then((r) => r.files, () => null)]);
+  setTitle('Docs · Tracker');
+  const docRow = (d) => `<tr data-doc="${escapeHtml(d.path)}">
+      <td class="title"><a href="${docAddress(d.path)}">${escapeHtml(d.title)}</a></td>
+      <td class="path"><code>docs/${escapeHtml(d.path)}</code></td></tr>`;
+  const documentation = `
+    <h2>Spirality Documentation</h2>
+    ${!files
+    ? '<p class="quiet">Spirality\'s documentation could not be read.</p>'
+    : files.length
+    ? `<table class="projects spirality-docs"><thead><tr><th>Title</th><th>Path</th></tr></thead>
+      <tbody>${files.map(docRow).join('')}</tbody></table>`
+    : '<p class="quiet">The docs folder holds no Markdown files.</p>'}`;
+  if (!projects.length) {
+    main.innerHTML = `<h1>Docs</h1>${documentation}<h2>Task Files</h2><p class="quiet">There are no projects yet.</p>`;
+    putTrail([{ label: 'Docs' }]);
+    return;
+  }
+  const project = projects.find((p) => p.slug === savedProject()) ?? projects[0];
+  const listPath = `/projects/${encodeURIComponent(project.slug)}/attachments`;
+  const docsPath = `/projects/${encodeURIComponent(project.slug)}/docs`;
+  const [{ attachments }, { docs }, { tickets }] = await Promise.all([
+    api('GET', listPath),
+    api('GET', docsPath),
+    api('GET', `/projects/${encodeURIComponent(project.slug)}/tickets`),
+  ]);
+  const fileLine = section === 'files' ? { done, problem } : { done: '', problem: '' };
+  const row = (a) => {
+    const href = `/tickets/${encodeURIComponent(a.ticket)}/attachments/${encodeURIComponent(a.id)}`;
+    const data = `data-ticket="${escapeHtml(a.ticket)}" data-file="${escapeHtml(a.id)}" data-name="${escapeHtml(a.name)}" data-task-name="${escapeHtml(a.ticketName)}"`;
+    return `<tr data-file="${escapeHtml(a.id)}">
+      <td class="name"><a href="${href}" download="${escapeHtml(a.name)}">${escapeHtml(a.name)}</a></td>
+      <td class="task"><a href="/t/${encodeURIComponent(a.ticket)}">${escapeHtml(a.ticket)}</a> ${escapeHtml(a.ticketName)}</td>
+      <td class="type">${escapeHtml(a.type)}</td>
+      <td class="size">${escapeHtml(sizeOf(a.size))}</td>
+      <td class="by">${a.addedByName ? escapeHtml(a.addedByName) : '<span class="quiet">unknown</span>'}</td>
+      <td class="when">${escapeHtml(when(a.createdAt))}</td>
+      <td class="actions"><button type="button" class="rename-file" ${data} aria-label="Rename ${escapeHtml(a.name)}">Rename</button>
+        <button type="button" class="remove-file" ${data} aria-label="Remove ${escapeHtml(a.name)} from ${escapeHtml(a.ticket)}">Remove</button></td></tr>`;
+  };
+  main.innerHTML = `
+    <h1>Docs</h1>
+    ${documentation}
+    ${renderContextDocs({ project, docs }, { size: sizeOf, timeOf: when })}
+    <h2>Task Files</h2>
+    <p class="quiet">Files kept on the tasks of ${escapeHtml(project.name)}. Pick another project on the <a href="/projects">Projects</a> page.</p>
+    <p class="note file-note${fileLine.problem ? ' error' : ' quiet'}" role="status">${escapeHtml(fileLine.problem || fileLine.done)}</p>
+    ${tickets.length ? `<form class="add-file">
+      <label for="add-file-task">Add a file to a task</label>
+      <div class="row"><select id="add-file-task" required><option value="">Pick a task…</option>${tickets.map((t) => `<option value="${escapeHtml(t.id)}">${escapeHtml(t.id)} ${escapeHtml(t.name)}</option>`).join('')}</select>
+        <input id="add-file-file" type="file" required aria-label="The file to add"><button type="submit">Add File</button></div>
+      <span class="hint quiet">Up to 10 MB. It shows here and on the task's own page.</span>
+    </form>` : ''}
+    ${attachments.length
+    ? `<table class="projects task-files"><thead><tr><th>File</th><th>Task</th><th>Type</th><th>Size</th><th>Added By</th><th>Added On</th><th><span class="hidden">Actions</span></th></tr></thead>
+      <tbody>${attachments.map(row).join('')}</tbody></table>`
+    : `<p class="quiet">No task in ${escapeHtml(project.name)} has a file yet.</p>`}`;
+  const note = main.querySelector('.file-note');
+  const busy = (text) => { note.className = 'note file-note quiet'; note.textContent = text; };
+  const refused = (control, text) => { note.className = 'note file-note error'; note.textContent = text; if (control) control.disabled = false; };
+  const again = (text, failed) => drawAgain(() => drawDocs(failed ? '' : text, failed ? text : '', 'files'))
+    .catch((err) => (err instanceof SignedOut ? drawSignIn() : showError(err)));
+  // The table's own list, read again: what each change is checked against.
+  const listedNow = async () => (await api('GET', listPath, undefined, { unrecorded: true })).attachments;
+  const form = main.querySelector('form.add-file');
+  form?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const ticket = form.querySelector('#add-file-task').value;
+    const file = form.querySelector('#add-file-file').files?.[0];
+    const button = form.querySelector('button');
+    if (!ticket || !file) return refused(null, 'Pick a task and a file first; nothing was added.');
+    if (file.size > MAX_FILE) return refused(null, `${file.name} is over 10 MB. Add a smaller one; nothing was added.`);
+    button.disabled = true;
+    busy(`Adding ${file.name} to ${ticket}…`);
+    let made;
+    try {
+      made = await uploadFile(ticket, file);
+    } catch (err) {
+      if (err instanceof SignedOut) return drawSignIn(`You were signed out; ${file.name} was not added.`);
+      return refused(button, `Not added: ${err.message}`);
+    }
+    const back = await listedNow().catch(() => null);
+    const listed = back?.some((a) => a.id === made.id && a.ticket === ticket);
+    again(listed ? `Added ${made.name} to ${ticket}.` : `The tracker said ${made.name} was added to ${ticket}, but it is not in the table when read back.`, !listed);
+  });
+  for (const button of main.querySelectorAll('button.rename-file')) {
+    button.addEventListener('click', async () => {
+      const { ticket, file, name } = button.dataset;
+      const typed = prompt(`New name for ${name} (on ${ticket}):`, name);
+      if (typed == null) return;
+      if (!typed.trim()) return refused(null, `Not renamed: a file needs a name. ${name} is unchanged.`);
+      button.disabled = true;
+      busy(`Renaming ${name}…`);
+      let renamed;
+      try {
+        renamed = await api('PATCH', `/tickets/${encodeURIComponent(ticket)}/attachments/${encodeURIComponent(file)}`, { name: typed });
+      } catch (err) {
+        if (err instanceof SignedOut) return drawSignIn(`You were signed out; ${name} was not renamed.`);
+        return refused(button, `Not renamed: ${err.message}`);
+      }
+      const back = await listedNow().catch(() => null);
+      const now = back?.find((a) => String(a.id) === file)?.name;
+      if (!renamed.changed && now === name) return again(`${name} already has that name; nothing changed.`, false);
+      again(now === renamed.name ? `Renamed ${name} to ${now}.` : `The tracker said ${name} was renamed to ${renamed.name}, but it reads back as ${now ?? 'missing'}.`, now !== renamed.name);
+    });
+  }
+  for (const button of main.querySelectorAll('button.remove-file')) {
+    button.addEventListener('click', async () => {
+      const { ticket, file, name, taskName } = button.dataset;
+      if (!confirm(`Remove ${name} from ${ticket} ${taskName}? This cannot be undone from the page.`)) return;
+      button.disabled = true;
+      busy(`Removing ${name} from ${ticket}…`);
+      try {
+        await api('DELETE', `/tickets/${encodeURIComponent(ticket)}/attachments/${encodeURIComponent(file)}`);
+      } catch (err) {
+        if (err instanceof SignedOut) return drawSignIn(`You were signed out; ${name} was not removed.`);
+        return refused(button, `Not removed: ${err.message}`);
+      }
+      const back = await listedNow().catch(() => null);
+      const gone = back != null && !back.some((a) => String(a.id) === file);
+      again(gone ? `Removed ${name} from ${ticket}.` : `The tracker said ${name} was removed from ${ticket}, but it is still listed when read back.`, !gone);
+    });
+  }
+  wireContextDocs(project, docsPath, section === 'docs' ? done : '', section === 'docs' ? problem : '');
+  putTrail([{ label: 'Docs' }]);
+}
+
+/**
+ * The Context Documents section's buttons (SP-176). Upload Document opens
+ * the file picker and sends the one file picked (one over 10 MB is refused
+ * here before it is sent); the server reads it back before it answers, and
+ * the list is read again. Remove asks first, naming the file, then reads
+ * the list back to check it is gone. A failure says so in the note and
+ * changes nothing on the page.
+ */
+function wireContextDocs(project, docsPath, done, problem) {
+  const note = main.querySelector('.doc-note');
+  if (problem || done) {
+    note.className = `note doc-note ${problem ? 'error' : 'quiet'}`;
+    note.textContent = problem || done;
+  }
+  const say = (text, failed = false) => {
+    note.className = `note doc-note ${failed ? 'error' : 'quiet'}`;
+    note.textContent = text;
+  };
+  const again = (text, failed) => drawDocs(failed ? '' : text, failed ? text : '', 'docs')
+    .catch((err) => (err instanceof SignedOut ? drawSignIn() : showError(err)));
+  const picker = main.querySelector('input.doc-file');
+  const upload = main.querySelector('button.upload-doc');
+  upload.addEventListener('click', () => picker.click());
+  picker.addEventListener('change', async () => {
+    const file = picker.files?.[0];
+    picker.value = '';
+    if (!file) return;
+    if (file.size > MAX_FILE) return say(`Not uploaded: ${file.name} is over 10 MB. Upload a smaller file; nothing was saved.`, true);
+    upload.disabled = true;
+    say(`Uploading ${file.name}…`);
+    try {
+      await uploadFile(null, file, docsPath);
+    } catch (err) {
+      if (err instanceof SignedOut) return drawSignIn(`You were signed out; ${file.name} was not uploaded.`);
+      upload.disabled = false;
+      return say(`Not uploaded: ${err.message}`, true);
+    }
+    again(`Uploaded ${file.name} to ${project.name}.`, false);
+  });
+  for (const button of main.querySelectorAll('button[data-remove-doc]')) {
+    button.addEventListener('click', async () => {
+      const { removeDoc: id, name } = button.dataset;
+      if (!confirm(`Remove ${name} from ${project.name}? It cannot be brought back.`)) return;
+      button.disabled = true;
+      say(`Removing ${name}…`);
+      try {
+        await api('DELETE', `${docsPath}/${encodeURIComponent(id)}`);
+      } catch (err) {
+        if (err instanceof SignedOut) return drawSignIn(`You were signed out; ${name} was not removed.`);
+        button.disabled = false;
+        return say(`Not removed: ${err.message}`, true);
+      }
+      const back = await api('GET', docsPath).catch(() => null);
+      const gone = back != null && !back.docs.some((d) => String(d.id) === String(id));
+      again(gone ? `Removed ${name} from ${project.name}.` : `The tracker said ${name} was removed, but ${back ? 'it is still listed when read back' : 'the list could not be read back'}.`, !gone);
+    });
+  }
+}
+
+/** The page address of a documentation file, `path` relative to docs/: each piece encoded. */
+const docAddress = (path) => `/docs/spirality/${String(path).split('/').map(encodeURIComponent).join('/')}`;
+/** Whether the address is a page under the Docs page, `/docs/<name>/<path>`: Spirality's own files or not. */
+const underDocs = () => /^\/docs\/[^/]+\/.+$/.test(location.pathname);
+/** The documentation file a `/docs/spirality/<path>` address opens, or null. */
+const docAt = () => {
+  const m = /^\/docs\/spirality\/(.+)$/.exec(location.pathname);
+  if (!m) return null;
+  try { return m[1].split('/').map(decodeURIComponent).join('/'); } catch { return null; }
+};
+
+/**
+ * One of Spirality's documentation files (SP-175), drawn with the same
+ * Markdown drawing as a ticket's description, its hard-wrapped lines joined
+ * back up first (unwrapDoc). Its first "# " heading is the page's own
+ * heading, so it is not drawn twice. Read only.
+ */
+async function drawDoc(path) {
+  setTitle('Docs · Tracker');
+  const back = '<p><a href="/docs">Back to Docs</a></p>';
+  const missing = (where) => {
+    main.innerHTML = `<h1>Docs</h1><p>There is no documentation file at <code>${escapeHtml(where)}</code>.</p>${back}`;
+    putTrail([{ label: 'Docs', href: '/docs' }, { label: 'Not Found' }]);
+  };
+  // Any /docs/<name>/... the page does not know (another project's name, a typo): the same message, never a different page.
+  if (!path) return missing(location.pathname);
+  let doc;
+  try {
+    doc = await api('GET', `/documentation/${String(path).split('/').map(encodeURIComponent).join('/')}`);
+  } catch (err) {
+    if (!(err instanceof Refused) || err.status !== 404) throw err;
+    return missing(`docs/${path}`);
+  }
+  setTitle(`${doc.title} · Docs · Tracker`);
+  const body = doc.text.replace(/^(?:[ \t]*\n)*#[ \t]+.*\n?/, '');
+  main.innerHTML = `
+    ${back}
+    <h1>${escapeHtml(doc.title)}</h1>
+    <p class="quiet"><code>docs/${escapeHtml(doc.path)}</code></p>
+    <section class="description doc">${renderMarkdown(unwrapDoc(body)) || '<p class="quiet">This file is empty.</p>'}</section>
+    ${back}`;
+  putTrail([{ label: 'Docs', href: '/docs' }, { label: doc.title }]);
+}
+
 /** Underline the header link (or the bell, for Waiting on you) for the screen showing. */
 function markNav(which) {
   for (const a of document.querySelectorAll('nav.site a')) a.classList.toggle('current', a.dataset.nav === which);
@@ -2220,8 +2503,6 @@ async function route({ place = null } = {}) {
     signOut.hidden = false;
     bell.hidden = false;
     showProject();
-    // A beat redraws the same page, so its width stays as it is.
-    if (!place) main.classList.remove('wide');
     const ticket = /^\/t\/([^/]+)$/.exec(location.pathname);
     const project = /^\/(board|list)(?:\/([^/]+))?$/.exec(location.pathname);
     const projects = location.pathname === '/projects';
@@ -2233,14 +2514,17 @@ async function route({ place = null } = {}) {
     const settings = location.pathname === '/settings';
     const reporting = location.pathname === '/reporting';
     const usersPage = location.pathname === '/users';
+    const docsPage = location.pathname === '/docs';
+    const docPath = docAt();
+    const docAny = underDocs();
     const search = location.pathname === '/search';
     const setupNew = location.pathname === '/setup/new';
     const setupAnswers = /^\/setup\/([^/]+)\/answers$/.exec(location.pathname);
     const setupPage = !setupNew && /^\/setup\/([^/]+)$/.exec(location.pathname);
     const setupAny = setupNew || setupAnswers || setupPage;
     let following = false;
-    const waiting = !(setupAny || search || reporting || settings || usersPage || isNew || ticket || projects || newProject || editProject || details || tasks || project);
-    markNav(reporting ? 'reporting' : settings ? 'settings' : usersPage ? 'users' : projects || newProject || details || editProject || setupAny ? 'projects' : ticket || project || tasks || isNew || search ? 'tasks' : 'waiting');
+    const waiting = !(setupAny || search || reporting || settings || usersPage || docsPage || docAny || isNew || ticket || projects || newProject || editProject || details || tasks || project);
+    markNav(reporting ? 'reporting' : settings ? 'settings' : usersPage ? 'users' : docsPage || docAny ? 'docs' : projects || newProject || details || editProject || setupAny ? 'projects' : ticket || project || tasks || isNew || search ? 'tasks' : 'waiting');
     if (setupNew) {
       await drawSetupNew(null);
     } else if (setupAnswers) {
@@ -2255,6 +2539,10 @@ async function route({ place = null } = {}) {
       await drawSettings();
     } else if (usersPage) {
       await drawUsers();
+    } else if (docsPage) {
+      await drawDocs();
+    } else if (docAny) {
+      await drawDoc(docPath);
     } else if (isNew) {
       // The old New request address: the Tasks page with its Add Task box open.
       await drawTasks(savedView(), { adding: true });
@@ -2327,7 +2615,7 @@ async function drawAgain(draw) {
 }
 
 /** Why this beat must leave the page alone, or null. */
-const hold = () => redrawHold({ hidden: document.hidden, drawing: drawing > 0, writing: writing > 0, fields: fieldsOf(main) });
+const hold = () => redrawHold({ hidden: document.hidden, drawing: drawing > 0, writing: writing > 0, dialog: Boolean(main.querySelector('dialog[open]')), fields: fieldsOf(main) });
 
 /**
  * Where he is on the page: how far down, which folding sections

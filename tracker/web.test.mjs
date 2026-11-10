@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { seedDemo, tickingClock } from './demoData.mjs';
 import { reportsOf, REPORT_RANGES, searchTickets, PRIORITIES } from './pageData.mjs';
-import { escapeHtml, renderComment, renderInline, renderMarkdown, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, PIPELINE_UNAVAILABLE, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings } from './web/render.mjs';
+import { escapeHtml, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, renderContextDocs, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings } from './web/render.mjs';
 import { startServer, setupSettingsOf } from './server.mjs';
 import { saveAnswers, setupFields, setupOf } from './setup.mjs';
 import { DANE_FIELDS as SETUP_FIELDS, STEPS as SETUP_STEPS } from '../scripts/onboard/onboard.mjs';
@@ -732,7 +732,7 @@ test('the page is served at /, at a ticket\'s address, at Projects, at Tasks, at
 
 test('the Settings page is in the header after Reporting and Users, lists the stages the server gives, saves them all, reads them back, and shows a refusal', async () => {
   const html = readFileSync(WEB('index.html'), 'utf8');
-  assert.match(html, /<a href="\/reporting" data-nav="reporting">Reporting<\/a>\s*<a href="\/users" data-nav="users">Users<\/a>\s*<a href="\/settings" data-nav="settings">Settings<\/a>/);
+  assert.match(html, /<a href="\/reporting" data-nav="reporting">Reporting<\/a>\s*<a href="\/users" data-nav="users">Users<\/a>\s*<a href="\/docs" data-nav="docs">Docs<\/a>\s*<a href="\/settings" data-nav="settings">Settings<\/a>/);
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   const draw = app.slice(app.indexOf('async function drawSettings'), app.indexOf('/**\n * The Users page'));
   assert.match(draw, /const \{ stages \} = await api\('GET', '\/stage-colours'\);/, 'the stages come from the server, never typed out');
@@ -773,7 +773,7 @@ test('bellColour: grey while nothing waits, yellow for 1 to 3, red for more than
 test('Waiting on you is a bell on the right, just before "Signed in as", coloured from the count wherever it is read', () => {
   const html = readFileSync(WEB('index.html'), 'utf8');
   const nav = /<nav class="site">([\s\S]*?)<\/nav>/.exec(html)[1];
-  assert.deepEqual([...nav.matchAll(/>([^<]+)<\/a>/g)].map((m) => m[1]), ['Projects', 'Tasks', 'Reporting', 'Users', 'Settings']);
+  assert.deepEqual([...nav.matchAll(/>([^<]+)<\/a>/g)].map((m) => m[1]), ['Projects', 'Tasks', 'Reporting', 'Users', 'Docs', 'Settings']);
   assert.doesNotMatch(nav, /Waiting on you/);
   const me = /<span class="me">([\s\S]*?)<\/span>\s*<\/header>/.exec(html)[1];
   assert.match(me, /<a id="bell" href="\/" title="Waiting on You" aria-label="Waiting on You" data-colour="grey" hidden><svg [^>]*aria-hidden="true">[\s\S]*?<\/svg><\/a>\s*<span id="who"><\/span>/);
@@ -828,7 +828,7 @@ test('an open page reads again once a minute and on coming back to the tab, neve
   assert.match(app, /const REFRESH_EVERY_MS = 60_000;/);
   assert.match(app, /document\.addEventListener\('visibilitychange', \(\) => \{\s*if \(!document\.hidden\) beat\(\);\s*\}\);/);
   // The guard reads the tab's visibility, the draws and saves under way, and every text box on the page.
-  assert.match(app, /redrawHold\(\{ hidden: document\.hidden, drawing: drawing > 0, writing: writing > 0, fields: fieldsOf\(main\) \}\)/);
+  assert.match(app, /redrawHold\(\{ hidden: document\.hidden, drawing: drawing > 0, writing: writing > 0, dialog: Boolean\(main\.querySelector\('dialog\[open\]'\)\), fields: fieldsOf\(main\) \}\)/);
   const refresh = /async function refreshPage\(\) \{[\s\S]*?\n\}/.exec(app)[0];
   assert.match(refresh, /if \(checking \|\| !me \|\| !drawn \|\| drawn\.address !== here\(\) \|\| hold\(\)\) return;/, 'checked before any read');
   assert.match(refresh, /if \(!changed \|\| lastDrawn !== drawn \|\| drawn\.address !== here\(\) \|\| hold\(\)\) return;/, 'and again before drawing');
@@ -2269,9 +2269,9 @@ test('every button on a ticket\'s page is green with a darker border and rounded
 
 // ── Users ────────────────────────────────────────────────────────────────────
 
-test('Users is in the header before Settings, served at /users to a browser, and its data needs a sign-in', async () => {
+test('Users is in the header before Docs, served at /users to a browser, and its data needs a sign-in', async () => {
   const html = readFileSync(WEB('index.html'), 'utf8');
-  assert.match(html, /<a href="\/users" data-nav="users">Users<\/a>\s*<a href="\/settings" data-nav="settings">Settings<\/a>/);
+  assert.match(html, /<a href="\/users" data-nav="users">Users<\/a>\s*<a href="\/docs" data-nav="docs">Docs<\/a>/);
   assert.doesNotMatch(html, />People</);
   const f = await fixture();
   try {
@@ -2283,6 +2283,168 @@ test('Users is in the header before Settings, served at /users to a browser, and
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   assert.match(app, /usersPage \? 'users' :/);
   assert.match(app, /\} else if \(usersPage\) \{\s*await drawUsers\(\);/);
+});
+
+// ── Docs (SP-171) ───────────────────────────────────────────────────────────
+
+test('Docs is in the header between Users and Settings, served at /docs to a browser, and lists the picked project\'s task files', async () => {
+  const html = readFileSync(WEB('index.html'), 'utf8');
+  assert.match(html, /<a href="\/users" data-nav="users">Users<\/a>\s*<a href="\/docs" data-nav="docs">Docs<\/a>\s*<a href="\/settings" data-nav="settings">Settings<\/a>/);
+  const f = await fixture();
+  try {
+    const page = await fetch(`${f.url}/docs`, { headers: { accept: 'text/html' } });
+    assert.equal(page.status, 200);
+    assert.equal(await page.text(), html, 'opening /docs directly shows the page, never data or a 404');
+    assert.equal((await f.call('GET', '/projects/alpha/attachments', { token: null })).status, 401);
+  } finally { await f.cleanup(); }
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  assert.match(app, /docsPage(?: \|\| docAny)? \? 'docs' :/);
+  assert.match(app, /\} else if \(docsPage\) \{\s*await drawDocs\(\);/);
+  const draw = app.slice(app.indexOf('async function drawDocs'), app.indexOf('/** Underline the header link'));
+  assert.match(draw, /projects\.find\(\(p\) => p\.slug === savedProject\(\)\) \?\? projects\[0\]/, 'the project picked in the header, else the first');
+  assert.match(draw, /const listPath = `\/projects\/\$\{encodeURIComponent\(project\.slug\)\}\/attachments`;/);
+  assert.match(draw, /api\('GET', listPath\)/);
+  assert.match(draw, /`\/tickets\/\$\{encodeURIComponent\(a\.ticket\)\}\/attachments\/\$\{encodeURIComponent\(a\.id\)\}`/, 'downloads use the task\'s own download address');
+  assert.match(draw, /download="\$\{escapeHtml\(a\.name\)\}"/);
+  assert.match(draw, /<a href="\/t\/\$\{encodeURIComponent\(a\.ticket\)\}">/);
+  assert.match(draw, /<h2>Task Files<\/h2>/);
+  for (const heading of ['File', 'Task', 'Type', 'Size', 'Added By', 'Added On']) assert.match(draw, new RegExp(`<th>${heading}</th>`), heading);
+  assert.match(draw, /No task in .* has a file yet\./, 'an empty project says so in a line');
+  assert.doesNotMatch(draw, /\$\{a\.(name|ticketName|addedByName|type)\}/, 'every name is escaped');
+});
+
+test('the Docs table adds, renames and removes task files, each read back, a removal confirmed by file and task (SP-177)', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const draw = app.slice(app.indexOf('async function drawDocs'), app.indexOf('/** Underline the header link'));
+  // Add File: pick one of the project's tasks and a file; the same upload the New Task form uses.
+  assert.match(draw, /\{ tickets \}\] = await Promise\.all\(\[[\s\S]*?api\('GET', `\/projects\/\$\{encodeURIComponent\(project\.slug\)\}\/tickets`\),\s*\]\);/);
+  assert.match(draw, /<button type="submit">Add File<\/button>/);
+  assert.match(draw, /made = await uploadFile\(ticket, file\)/);
+  assert.match(draw, /file\.size > MAX_FILE/, 'too large is said before sending');
+  // Rename: the file's name only, an empty one refused on the page before any call.
+  assert.match(draw, />Rename<\/button>/);
+  assert.match(draw, /if \(!typed\.trim\(\)\) return refused\(null, `Not renamed: a file needs a name/);
+  assert.match(draw, /api\('PATCH', `\/tickets\/\$\{encodeURIComponent\(ticket\)\}\/attachments\/\$\{encodeURIComponent\(file\)\}`, \{ name: typed \}\)/);
+  // Remove: a confirmation naming the file and its task; cancelled, no call.
+  assert.match(draw, />Remove<\/button>/);
+  assert.match(draw, /if \(!confirm\(`Remove \$\{name\} from \$\{ticket\} \$\{taskName\}\?[^`]*`\)\) return;\s*button\.disabled = true;/);
+  assert.match(draw, /api\('DELETE', `\/tickets\/\$\{encodeURIComponent\(ticket\)\}\/attachments\/\$\{encodeURIComponent\(file\)\}`\)/);
+  // Every change is read back from the table's own list before the page says it worked, and a failure is said.
+  assert.equal((draw.match(/await listedNow\(\)/g) ?? []).length, 3);
+  for (const word of ['Not added', 'Not renamed', 'Not removed']) assert.match(draw, new RegExp(`${word}: \\$\\{err\\.message\\}`), word);
+  assert.match(draw, /but it is not in the table when read back/);
+  assert.match(draw, /but it reads back as/);
+  assert.match(draw, /but it is still listed when read back/);
+  assert.doesNotMatch(draw, /\$\{(a|t)\.(name|ticketName|id)\}/, 'every name is escaped');
+  // Task Files and Context Documents each have their own line; a change's outcome shows only in the section it came from.
+  assert.match(draw, /async function drawDocs\(done = '', problem = '', section = 'files'\)/);
+  assert.match(draw, /const fileLine = section === 'files' \? \{ done, problem \} : \{ done: '', problem: '' \};/);
+  assert.match(draw, /<p class="note file-note\$\{fileLine\.problem \? ' error' : ' quiet'\}" role="status">\$\{escapeHtml\(fileLine\.problem \|\| fileLine\.done\)\}<\/p>/);
+  assert.match(draw, /const note = main\.querySelector\('\.file-note'\);/, 'never the Context Documents line above it');
+  assert.match(draw, /drawAgain\(\(\) => drawDocs\(failed \? '' : text, failed \? text : '', 'files'\)\)/);
+  assert.match(draw, /wireContextDocs\(project, docsPath, section === 'docs' \? done : '', section === 'docs' \? problem : ''\);/);
+  assert.match(draw, /const again = \(text, failed\) => drawDocs\(failed \? '' : text, failed \? text : '', 'docs'\)/);
+});
+
+test('the Docs page\'s Context Documents list the project\'s own files, each a download and a Remove button, every name escaped; an empty one says so (SP-176)', () => {
+  const words = { size: (n) => `${n} B`, timeOf: (iso) => `at ${iso}` };
+  const project = { slug: 'al pha', name: 'Alpha <One>' };
+  const html = renderContextDocs({ project, docs: [
+    { id: 7, project: 'al pha', name: 'brief "<b>".pdf', type: 'application/pdf', size: 1234, addedByName: 'Dane <D>', createdAt: '2026-11-10T12:00:00Z' },
+    { id: 8, project: 'al pha', name: 'notes.txt', type: 'text/plain', size: 2, addedByName: null, createdAt: '2026-11-09T12:00:00Z' },
+  ] }, words);
+  assert.match(html, /<h2>Context Documents<\/h2>/);
+  assert.match(html, /<button type="button" class="upload-doc">Upload Document<\/button><input type="file" class="doc-file" hidden>/, 'one file at a time');
+  for (const heading of ['File', 'Type', 'Size', 'Added By', 'Added On']) assert.match(html, new RegExp(`<th>${heading}</th>`), heading);
+  assert.match(html, /<a href="\/projects\/al%20pha\/docs\/7" download="brief &quot;&lt;b&gt;&quot;\.pdf">Download<\/a>/, 'always saved, through the project\'s own address');
+  assert.match(html, /data-remove-doc="7" data-name="brief &quot;&lt;b&gt;&quot;\.pdf" aria-label="Remove brief &quot;&lt;b&gt;&quot;\.pdf">Remove<\/button>/);
+  assert.match(html, /<td class="size">1234 B<\/td>/);
+  assert.match(html, /<td class="by">Dane &lt;D&gt;<\/td>/);
+  assert.match(html, /<td class="by"><span class="quiet">unknown<\/span><\/td>/);
+  assert.match(html, /<td class="when">at 2026-11-10T12:00:00Z<\/td>/);
+  assert.ok(html.indexOf('data-doc="7"') < html.indexOf('data-doc="8"'), 'in the order the server lists them (newest first)');
+  assert.doesNotMatch(html, /<b>|<One>|<D>/, 'nothing unescaped');
+  const empty = renderContextDocs({ project, docs: [] }, words);
+  assert.match(empty, /Alpha &lt;One&gt; has no context documents yet\./);
+  assert.doesNotMatch(empty, /<table/);
+  assert.match(empty, /Upload Document/, 'an empty project can still upload');
+});
+
+test('the Docs page uploads one context document as the file itself, asks before removing one, reads the list back, and says when either did not happen (SP-176)', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const draw = app.slice(app.indexOf('async function drawDocs'), app.indexOf('/** Underline the header link'));
+  assert.match(draw, /const docsPath = `\/projects\/\$\{encodeURIComponent\(project\.slug\)\}\/docs`;/);
+  assert.match(draw, /api\('GET', docsPath\)/);
+  assert.ok(draw.indexOf('${documentation}\n    ${renderContextDocs({ project, docs }') > 0 && draw.indexOf('renderContextDocs({ project, docs }') < draw.lastIndexOf('<h2>Task Files</h2>'), 'Context Documents come after Spirality Documentation and before Task Files');
+  const wire = draw.slice(draw.indexOf('function wireContextDocs'));
+  assert.match(wire, /picker\.files\?\.\[0\]/, 'one file at a time');
+  assert.match(wire, /file\.size > MAX_FILE/, 'an 11 MB file is refused before it is sent');
+  assert.match(wire, /is over 10 MB\. Upload a smaller file; nothing was saved\./);
+  assert.match(wire, /await uploadFile\(null, file, docsPath\);/, 'the same raw-file upload a ticket\'s attachment uses');
+  assert.match(wire, /Not uploaded: \$\{err\.message\}/);
+  assert.match(wire, /if \(!confirm\(`Remove \$\{name\} from \$\{project\.name\}\? It cannot be brought back\.`\)\) return;/, 'asks first, naming the file; cancelled, nothing is sent');
+  assert.ok(wire.indexOf('confirm(') < wire.indexOf("api('DELETE'"), 'asks before it removes');
+  assert.match(wire, /await api\('DELETE', `\$\{docsPath\}\/\$\{encodeURIComponent\(id\)\}`\);/);
+  assert.match(wire, /Not removed: \$\{err\.message\}/);
+  assert.match(wire, /const back = await api\('GET', docsPath\)\.catch\(\(\) => null\);/, 'the removal is read back');
+  assert.match(wire, /but \$\{back \? 'it is still listed when read back' : 'the list could not be read back'\}/);
+  assert.match(wire, /note\.textContent = text;/, 'the note is text, never HTML');
+  const up = /async function uploadFile[\s\S]*?\n\}/.exec(app)[0];
+  assert.match(up, /to = `\/tickets\/\$\{encodeURIComponent\(ticketId\)\}\/attachments`/, 'a ticket\'s upload still goes to its own address');
+  assert.match(up, /res = await fetch\(to, \{/);
+});
+
+test('the Docs page lists Spirality\'s documentation by title above Task Files, and a file opens at /docs/spirality/<path> drawn as Markdown (SP-175)', async () => {
+  const f = await fixture();
+  try {
+    const html = readFileSync(WEB('index.html'), 'utf8');
+    const page = await fetch(`${f.url}/docs/spirality/LOOP_CONTRACT.md`, { headers: { accept: 'text/html' } });
+    assert.equal(page.status, 200);
+    assert.equal(await page.text(), html, 'opening a documentation file directly shows the page');
+    const list = await f.call('GET', '/documentation');
+    assert.equal(list.status, 200);
+    assert.deepEqual(list.body.files.find((d) => d.path === 'LOOP_CONTRACT.md'), { path: 'LOOP_CONTRACT.md', title: 'The loop contract' }, 'its first heading, as written');
+    assert.equal((await f.call('GET', '/documentation', { token: null })).status, 401);
+  } finally { await f.cleanup(); }
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const draw = app.slice(app.indexOf('async function drawDocs'), app.indexOf('/** The page address of a documentation file'));
+  assert.match(draw, /api\('GET', '\/documentation'\)/);
+  assert.ok(draw.indexOf('<h2>Spirality Documentation</h2>') < draw.indexOf('<h2>Task Files</h2>'), 'the documentation comes first');
+  for (const heading of ['Title', 'Path']) assert.match(draw, new RegExp(`<th>${heading}</th>`), heading);
+  assert.match(draw, /<a href="\$\{docAddress\(d\.path\)\}">\$\{escapeHtml\(d\.title\)\}<\/a>/, 'each file by its title, escaped, linking to its page');
+  assert.match(app, /const docAddress = \(path\) => `\/docs\/spirality\/\$\{String\(path\)\.split\('\/'\)\.map\(encodeURIComponent\)\.join\('\/'\)\}`/);
+  assert.match(app, /\} else if \(docAny\) \{\s*await drawDoc\(docPath\);/, 'any /docs/<name>/<path> draws through drawDoc');
+  assert.match(app, /const underDocs = \(\) => \/\^\\\/docs\\\/\[\^\/\]\+\\\/\.\+\$\/\.test\(location\.pathname\);/, 'the same addresses the server serves as the page');
+  assert.match(app, /docsPage \|\| docAny \? 'docs' :/, 'a documentation file keeps Docs underlined in the header');
+  assert.match(draw, /api\('GET', '\/documentation'\)\.then\(\(r\) => r\.files, \(\) => null\)/, 'a failed documentation call is caught on its own, so Task Files still draws');
+  assert.match(draw, /Spirality\\'s documentation could not be read\./);
+  const one = app.slice(app.indexOf('async function drawDoc('), app.indexOf('/** Underline the header link'));
+  assert.match(one, /renderMarkdown\(unwrapDoc\(body\)\)/, 'drawn with the ticket page\'s Markdown drawing, never as raw text');
+  assert.match(one, /<a href="\/docs">Back to Docs<\/a>/);
+  assert.match(one, /<h1>\$\{escapeHtml\(doc\.title\)\}<\/h1>/);
+  assert.match(one, /There is no documentation file at/, 'a missing file says so');
+  assert.match(one, /if \(!path\) return missing\(location\.pathname\);/, 'an address under /docs the page does not know says the same, never another page');
+  // What a contract-like file looks like once drawn: headings, lists and code, not raw text.
+  const drawn = renderMarkdown('## Statuses\n\n- Queued\n- Building\n\n```\nnpm run verify\n```\n');
+  assert.match(drawn, /<h4>Statuses<\/h4>/);
+  assert.match(drawn, /<ul><li>Queued<\/li><li>Building<\/li><\/ul>/);
+  assert.match(drawn, /<pre><code>npm run verify<\/code><\/pre>/);
+});
+
+test('unwrapDoc joins a documentation file\'s hard-wrapped lines, keeps list items, headings, tables and code as written (SP-175)', () => {
+  const text = '# Title\nintro line one\nline two\n\n- **Code rules**: the script\n  does it.\n- Next item\n1. first\n   still first\n\n| a | b |\n| - | - |\n\n```\nkeep\nthese apart\n```\nafter\n---\nend';
+  assert.equal(unwrapDoc(text), '# Title\nintro line one line two\n\n- **Code rules**: the script does it.\n- Next item\n1. first still first\n\n| a | b |\n| - | - |\n\n```\nkeep\nthese apart\n```\nafter\n---\nend');
+  const drawn = renderMarkdown(unwrapDoc('- **Code rules**: the script\n  does it.\n'));
+  assert.equal(drawn, '<ul><li><strong>Code rules</strong>: the script does it.</li></ul>');
+  assert.equal(unwrapDoc(''), '');
+});
+
+test('unwrapDoc joins a quote\'s lines with their ">" taken off, and never joins a quote onto the text around it (SP-175)', () => {
+  const text = 'still the rule:\n> StarCaster still describes a two-account\n> model, where the machine posts. The\n> code does not do that.\nSo every comment\nends here.\n>\n> - a quoted item\n> second para';
+  assert.equal(unwrapDoc(text), 'still the rule:\n> StarCaster still describes a two-account model, where the machine posts. The code does not do that.\nSo every comment ends here.\n>\n> - a quoted item second para');
+  // The real file: no ">" left in the middle of a sentence once drawn.
+  const contract = readFileSync(new URL('../docs/LOOP_CONTRACT.md', import.meta.url), 'utf8');
+  for (const line of unwrapDoc(contract).split('\n')) assert.doesNotMatch(line, /\S\s+>\s/, line);
 });
 
 test('a browser opening /people (an old bookmark) is sent on to /users, never cached; the data call to /people still answers the data', async () => {
@@ -2437,7 +2599,7 @@ test('the Tasks toolbar picks a project from a dropdown, "Project: ", the one in
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   const draw = app.slice(app.indexOf('async function drawProject'), app.indexOf('async function copyText'));
   assert.match(draw, /api\('GET', '\/projects'\),\n  \]\);/);
-  assert.match(draw, /<div class="toolbar">\s*\$\{renderProjectPicker\(projects, board\.project\)\}\s*\$\{searchForm\(''\)\}\s*<div class="pipeline-pod"[^>]*><\/div>\s*<nav class="views"/);
+  assert.match(draw, /<div class="toolbar">\s*\$\{renderProjectPicker\(projects, board\.project\)\}\s*\$\{searchForm\(''\)\}\s*<button type="button" class="pipeline-pod"[^>]*><\/button>\s*<nav class="views"/);
   assert.doesNotMatch(app, /Change project/);
   assert.match(draw, /querySelector\('\.project-picker select'\)\.addEventListener\('change', \(e\) => \{\s*history\.pushState\(null, '', at\(view, e\.target\.value\)\);\s*route\(\);/);
   assert.match(readFileSync(WEB('app.css'), 'utf8'), /\.toolbar \.project-picker select \{/);
@@ -2864,6 +3026,88 @@ test('the Tasks page puts the pod between the search field and Board/List, fills
   assert.doesNotMatch(draw.slice(0, draw.indexOf(']);')), /\/pipeline/);
 });
 
+test('each END exit code the runners write reads as its plain-words outcome (SP-173)', () => {
+  assert.equal(passOutcome(0), 'Finished');
+  assert.equal(passOutcome(1), 'A step failed and said so');
+  assert.equal(passOutcome(124), 'Hit its time limit and was stopped');
+  assert.equal(passOutcome(127), 'Could not run (exit 127)');
+  assert.equal(passOutcome(2), 'Could not run (exit 2)');
+  assert.equal(passOutcome(null), 'Ended');
+  assert.equal(wakesEvery(1800), 'Every 30 minutes');
+  assert.equal(wakesEvery(600), 'Every 10 minutes');
+  assert.equal(wakesEvery(3600), 'Every hour');
+  assert.equal(wakesEvery(7200), 'Every 2 hours');
+  assert.equal(wakesEvery(90), 'Every 90 seconds');
+  assert.equal(wakesEvery(null), '–');
+});
+
+test('the Pipeline Status dialog: one row per stage with next time or running, last start, last end and outcome, how often it wakes (SP-173)', () => {
+  const timeOf = (iso) => `[${iso.slice(11, 16)}]`;
+  const html = renderPipelineDetails({ stages: [
+    { name: 'Relay', logged: true, running: false, lastStart: '2026-11-09T17:35:00.000Z', lastEnd: '2026-11-09T17:35:20.000Z', lastExit: 0, interval: 600, nextDue: '2026-11-09T17:45:00.000Z' },
+    { name: 'Build', logged: true, running: true, lastStart: '2026-11-09T17:40:00.000Z', lastEnd: '2026-11-09T17:10:00.000Z', lastExit: 124, interval: 1800, nextDue: null },
+    { name: 'Review', logged: true, running: false, lastStart: '2026-11-09T17:00:00.000Z', lastEnd: '2026-11-09T17:05:00.000Z', lastExit: 1, interval: 1800, nextDue: null },
+    { name: 'Intake', logged: false, running: false, lastStart: null, lastEnd: null, lastExit: null, interval: 1800, nextDue: null },
+  ] }, timeOf);
+  const rows = [...html.matchAll(/<tr[^>]*>(.*?)<\/tr>/gs)].map((m) => [...m[1].matchAll(/<t[hd][^>]*>(.*?)<\/t[hd]>/g)].map((c) => c[1]));
+  assert.deepEqual(rows, [
+    ['Stage', 'Next Pass', 'Last Started', 'Last Ended', 'Wakes'],
+    ['Relay', '[17:45]', '[17:35]', '[17:35]: Finished', 'Every 10 minutes'],
+    ['Build', 'Running now, since [17:40]', '[17:40]', 'Previous pass: [17:10]: Hit its time limit and was stopped', 'Every 30 minutes'],
+    ['Review', 'Not known yet', '[17:00]', '[17:05]: A step failed and said so', 'Every 30 minutes'],
+    ['Intake', 'No passes logged yet', 'Every 30 minutes'],
+  ]);
+  assert.match(html, /<td class="failed">\[17:05\]: A step failed/);
+  for (const failed of [null, undefined, {}, { stages: [] }]) {
+    assert.match(renderPipelineDetails(failed, timeOf), new RegExp(PIPELINE_UNAVAILABLE));
+  }
+  assert.doesNotMatch(renderPipelineDetails({ stages: [{ name: '<b>x', logged: false }] }, timeOf), /<b>x/);
+});
+
+test('the pod is a button that opens the Pipeline Status dialog; Escape or Close shut it and focus goes back to the pod (SP-173)', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const draw = app.slice(app.indexOf('async function drawProject('), app.indexOf('async function drawProject(') + 14000);
+  assert.match(draw, /<button type="button" class="pipeline-pod" aria-haspopup="dialog"/);
+  // A <dialog> with a form of method="dialog": Escape and both close buttons shut it natively.
+  assert.match(draw, /<dialog class="pipeline-status" aria-labelledby="pipeline-status-title">\s*<form method="dialog">/);
+  assert.match(draw, /<h2 id="pipeline-status-title">Pipeline Status<\/h2>/);
+  assert.match(draw, /<button type="submit">Close<\/button>/);
+  assert.match(draw, /wirePipeline\(\);/);
+  const wire = app.slice(app.indexOf('function wirePipeline'), app.indexOf('function wirePipeline') + 800);
+  assert.match(wire, /pod\.addEventListener\('click'/);
+  assert.match(wire, /fillPipelineDialog\(dialog\);\n\s+dialog\.showModal\(\)/);
+  assert.match(wire, /dialog\.showModal\(\)/);
+  assert.match(wire, /dialog\.addEventListener\('close', \(\) => pod\.focus\(\)\)/);
+  // An open dialog redraws with each fresh read, from the same answer, and reads no log of its own.
+  assert.match(app, /if \(dialog\?\.open\) fillPipelineDialog\(dialog\);/);
+  assert.match(app, /function fillPipelineDialog\(dialog\) \{\n\s+dialog\.querySelector\('\.pipeline-details'\)\.innerHTML = renderPipelineDetails\(pipelineState, when\);/);
+});
+
+test('an open dialog holds the once-a-minute redraw, so a board change never drops the Pipeline Status dialog from under him (SP-173 rework)', () => {
+  assert.equal(redrawHold({ dialog: true }), 'dialog', 'a dialog of buttons only still holds the redraw');
+  assert.equal(redrawHold({ dialog: false }), null);
+  assert.equal(redrawHold({ hidden: true, dialog: true }), 'hidden', 'hidden still wins: nothing is read');
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  // The page's hold asks whether any dialog in main is open, and both refresh checks use it.
+  assert.match(app, /const hold = \(\) => redrawHold\(\{[^}]*dialog: Boolean\(main\.querySelector\('dialog\[open\]'\)\)/);
+  const refresh = app.slice(app.indexOf('async function refreshPage'), app.indexOf('async function refreshPage') + 900);
+  assert.equal(refresh.match(/hold\(\)/g).length, 2, 'checked before the read and again before the redraw');
+});
+
+test('the pod button is named for what it opens and still reads each stage (SP-173 rework)', () => {
+  const timeOf = (iso) => `[${iso.slice(11, 16)}]`;
+  assert.equal(pipelinePodLabel({ stages: [
+    { name: 'Relay', logged: true, running: false, nextDue: '2026-11-09T17:45:00.000Z' },
+    { name: 'Build', logged: true, running: true, nextDue: null },
+    { name: 'Review', logged: true, running: false, nextDue: null },
+    { name: 'Intake', logged: false, running: false, nextDue: null },
+  ] }, timeOf), 'Pipeline Status: Relay [17:45], Build running, Review –, Intake –');
+  for (const failed of [null, undefined, {}, { stages: [] }]) assert.equal(pipelinePodLabel(failed, timeOf), PIPELINE_UNAVAILABLE);
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const show = app.slice(app.indexOf('function showPipeline'), app.indexOf('function showPipeline') + 600);
+  assert.match(show, /pod\.setAttribute\('aria-label', pipelinePodLabel\(pipelineState, clockTime\)\);/);
+});
+
 // ── SP-170: the Files Made box, drawn from the relay's merge note (SP-166) ───
 test.describe('Files Made: the files a ticket made, from its newest merge note', () => {
   const { filesMadeLines } = mergeOnComment;
@@ -3039,3 +3283,18 @@ test.describe('Files Made: the files a ticket made, from its newest merge note',
     assert.match(css, /^th \{ color: var\(--quiet\); font-weight: 500;/m, 'every other table keeps the grey heading');
   });
 }
+
+test('every page has one body width: main is capped at 1440px, padding included, and no page widens it (SP-184)', () => {
+  const css = readFileSync(WEB('app.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  const rules = css.split('}').map((r) => r.split('{')).filter((r) => r.length === 2)
+    .map(([sel, body]) => ({ sel: sel.split(',').map((x) => x.trim()), body }));
+  const plain = rules.filter((r) => r.sel.includes('main'));
+  assert.equal(plain.length, 1, 'one rule for the page body');
+  assert.match(plain[0].body, /max-width: 1440px/);
+  assert.match(plain[0].body, /box-sizing: border-box/, 'the 1440px includes the side padding');
+  assert.match(plain[0].body, /margin: 0 auto/, 'centred');
+  const perPage = rules.filter((r) => r.sel.some((s) => /^main[.#:\[]/.test(s) && !/\s/.test(s) && /(?:max-|min-)?width/.test(r.body)));
+  assert.deepEqual(perPage.map((r) => r.sel.join(', ')), [], 'no page gives the body a width of its own');
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  assert.doesNotMatch(app, /main\.classList\.(?:add|remove|toggle)\(\s*['"]wide['"]/, 'no wide class on the page body');
+});
