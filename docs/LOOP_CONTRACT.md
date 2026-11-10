@@ -616,6 +616,45 @@ leaves the ticket where it is; the same word closes it on the first pass
 after the merge. The ticket page's **Close** button, shown when the newest
 card's move is `Close`, posts the first close phrase as his reply.
 
+### A project's own pre-merge step (2026-11-09)
+
+A project can add one step of its own to the merge: `preMergeCommand` in its
+`spirality.project.json`, a command written as a list (the program, then each
+argument as its own string; no shell reads it), for example
+`["node", "scripts/apply_migrations.mjs"]`. With no key there is no step, and
+the merge is exactly as above.
+
+When it is set, the relay runs it from the repository root once every check
+above says merge, and before `gh pr merge`. Its environment carries:
+
+| Variable           | What it holds                              |
+|--------------------|--------------------------------------------|
+| `LOOP_PR_NUMBER`   | the pull request's number                  |
+| `LOOP_PR_URL`      | its address on GitHub                      |
+| `LOOP_HEAD_SHA`    | the commit its branch is at, about to merge |
+| `LOOP_BASE_BRANCH` | the branch it merges into                  |
+| `LOOP_TICKET_ID`   | the ticket Dane said "merge" on            |
+
+- **Exit 0**: the relay merges, with `--match-head-commit <LOOP_HEAD_SHA>`, so
+  a push that lands after the step ran makes GitHub refuse the merge rather
+  than merge work the step never saw. The step's last lines of output go in
+  the `Merged:` note.
+- **Any other exit, a stop by signal, a step that cannot start, or one still
+  running after 10 minutes**: nothing is merged. The relay refuses through the
+  ordinary refusal above (`pre-merge-step-failed`), naming the step and its
+  last lines of output, and Dane's word stays unspent: each later pass runs
+  the step again and merges once it passes, saying nothing new while it fails
+  the same way. Because it can run again, a step must be safe to run twice.
+- A dry run (`relay --dry-run`) says it would run the step, and runs nothing.
+
+Nothing runs after the merge, and nothing in Spirality knows what a project's
+step does.
+
+**Why (2026-11-09, SP-185):** before WaveCenter moved onto this loop, its own
+merge lane applied a pull request's database change to the live database from
+the exact commit about to merge, and merged nothing if that failed. The relay
+had no place for it (WaveCenter's WC-164 waits on this).
+
 ### StarCaster's auto-merge lanes (a StarCaster extension)
 
 StarCaster's relay merges some `Ready to launch` tickets **with no word from
