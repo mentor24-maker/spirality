@@ -127,7 +127,10 @@ The copy step then always runs with `--allow-replace`, since the setup
 replaces the old copy's files, and its pull request lists every file of
 the old copy it replaces, and every other file in the folders it writes
 into, which it does not touch (nothing is deleted; the list is for the
-reviewer, not a to-do list). The lanes step installs the new lanes, under the same
+reviewer, not a to-do list). The old copy's own `clickup` and `doctor` npm
+commands are replaced with the loop's too, and the pull request names what
+each one was, so one still wanted can be put back under another name before
+merging (SP-172; the project's own `verify` is always kept). The lanes step installs the new lanes, under the same
 launchd labels the old ones had.
 
 The checklist below stays as what the wizard does, item by item, and how
