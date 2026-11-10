@@ -57,7 +57,7 @@ import { loadProjectConfig, ProjectConfigError } from '../lib/projectConfig.mjs'
 // from the package, so every project's relay decides the same way.
 import {
   mergeDecision, githubGate, isMergeCommand, MERGE_MARKER, parseMergeMarker,
-  refusalNotice, conflictHandOffNotice, mergedNotice, REFUSAL_CODES,
+  refusalNotice, conflictHandOffNotice, mergedNotice, filesMadeLines, REFUSAL_CODES,
 } from '../lib/mergeOnComment.js';
 import {
   PR_VIEW_FIELDS, markerBookkeeping, recordBookkeeping, emptyBooks, mergeDestination, relayLine,
@@ -346,6 +346,25 @@ function clock(ms) {
 function gh(args) {
   const out = spawnSync('gh', args, { encoding: 'utf8' });
   return { ok: out.status === 0, stdout: String(out.stdout || ''), stderr: String(out.stderr || '') };
+}
+
+/**
+ * Every file a pull request changed, as GitHub lists them (SP-166), all pages.
+ * GitHub answers 100 a page and stops at 3000 files. Any page that fails or is
+ * not a list makes the whole answer null: half a list is never passed on.
+ */
+function readPrFiles(repo, number) {
+  const all = [];
+  for (let page = 1; page <= 30; page++) {
+    const out = gh(['api', `repos/${repo}/pulls/${number}/files?per_page=100&page=${page}`]);
+    if (!out.ok) return null;
+    let got;
+    try { got = JSON.parse(out.stdout); } catch { return null; }
+    if (!Array.isArray(got)) return null;
+    all.push(...got);
+    if (got.length < 100) return all;
+  }
+  return all;
 }
 
 // ── Guards shared by `status` and `ask` ──────────────────────────────────────
@@ -1549,7 +1568,7 @@ if (cmd === 'whoami') {
     if (!merged.ok) { await refuse(`the merge command itself failed (${merged.stderr.trim().slice(0, 300)})`, `PR #${pr.number} could not be merged.`, REFUSAL_CODES.mergeCommandFailed); return; }
 
     // `gh` exiting 0 is not a merge. Read the PR back; only MERGED earns the record.
-    const after = gh(['pr', 'view', String(pr.number), '--repo', repo, '--json', 'state,mergedAt']);
+    const after = gh(['pr', 'view', String(pr.number), '--repo', repo, '--json', 'state,mergedAt,baseRefName']);
     let afterJson = null;
     try { afterJson = after.ok ? JSON.parse(after.stdout) : null; } catch { afterJson = null; }
     const state = String(afterJson?.state || '').toUpperCase();
@@ -1565,6 +1584,12 @@ if (cmd === 'whoami') {
     const record = mergedNotice({ commentId: decision.commentId, pr: { number: pr.number, url: pr.url }, mergedAt });
     await markMergeHandled(decision.commentId, task, record.marker);
 
+    // The files the pull request made, linked on the branch it merged into
+    // (SP-166). Read AFTER the merge is confirmed, so it can never stop or
+    // change one; a list that cannot be read says so instead of guessing.
+    const made = filesMadeLines({ repo, branch: afterJson.baseRefName, files: readPrFiles(repo, pr.number) });
+    if (made.problem) unchecked.push(`${task.id}: PR #${pr.number} merged, but ${made.problem} — the merge note says so`);
+
     const body = [
       `Merged: PR #${pr.number} (${pr.url}) squash-merged into main at ${mergedAt}, on your comment ${decision.commentId}.`,
       'Checks were green and the branch was up to date at merge time; the branch has been deleted.',
@@ -1573,6 +1598,7 @@ if (cmd === 'whoami') {
         ? `This ticket is now Live (${dest.why}).`
         : `This ticket goes back to ${dest.status} for the next build pass, because ${dest.why}.`,
       '',
+      ...(made.lines.length ? [...made.lines, ''] : []),
       '(Automatic — relay merge step.)',
     ].join('\n');
     await postNote(task, body, `PR #${pr.number} MERGED`);
