@@ -75,11 +75,13 @@ halfway.
   `Acting as: wavecenter hand-run` (id 29) and talks to the tracker.
 - `com.wavecenter.loop-build`, `loop-review`, `loop-intake` and `relay` are
   loaded. WC-162 to WC-165 were built, reviewed and merged through them.
-- **Not done:** the hand-off lane is not installed. PR #159 merged on 11/09
-  at 8:40 PM MT, but the two steps after it (make the lane's sign-in, rerun
-  `./scripts/install_loop_runner.sh` in WaveCenter's folder) have not run:
-  there is no `com.wavecenter.loop-handoff` in launchd. Until they run,
-  tasks members tick for the AI agents wait unfiled.
+- The hand-off lane came last. PR #159 merged on 11/09 at 8:40 PM MT, but
+  the two steps after it waited until 11/10: its sign-in (`TRACKER_DB=~/spirality-tracker/tracker.db
+  npm run tracker:signins -- create --name wavecenter --config
+  ~/WebApps/wavecenter/spirality.project.json`, from Spirality's folder,
+  actor 30) and `./scripts/install_loop_runner.sh` in WaveCenter's folder.
+  Its first pass, 9:30 AM MT, signed in and marked WC-163 to WC-165's tasks
+  done. The installer also loaded `ai-rating` and `evolution`.
 
 ## For StarCaster (SP-25)
 
