@@ -320,6 +320,8 @@ Exit **0** nothing of his / **3** something IS his / **1** could not tell.
   `ask` before building and offer named slices, smallest-and-safest first.
   Then build only the slice he names, narrowing the description with
   `describe` first.
-- **Ticket titles say in plain words what breaks and who feels it.** Fix a
-  cryptic name on the ticket first, then copy it to the PR.
+- **A ticket title is a short, plain statement of what the ticket does**,
+  starting with a verb:
+  *"Move WaveCenter from ClickUp to Spirality tracker"*, not
+  *"WaveCenter still runs on ClickUp: move it to the tracker"*. Fix a cryptic name on the ticket first, then copy it to the PR.
 - Leave the worktree in place until the PR merges; `loop-review` may reuse it.

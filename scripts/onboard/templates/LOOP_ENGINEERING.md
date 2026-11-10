@@ -138,9 +138,14 @@ setting the status back to `Queued`.
 
 ### Titles
 
-A ticket's name says in plain words **what breaks and who feels it**, or what
-you will be able to do once it ships. The diagnostic sentence goes in the
-description.
+A ticket's name is **a short, plain statement of what the ticket does**. Start
+with a verb (Move, Add, Show, Remove, Fix), name the thing, and keep it short:
+no colon, no sentence about who is stuck. The why goes in the description.
+
+- Good: "Move WaveCenter from ClickUp to Spirality tracker"
+- Not: "WaveCenter still runs on ClickUp: move it to the tracker"
+
+A pull request's title is still the ticket's name, byte for byte.
 
 ## The two traces a ticket must carry
 
