@@ -1323,12 +1323,13 @@ const searchForm = (term) => `
 
 /**
  * The search results page's address: the term, then each filter chosen on
- * the page's filter row (none on the Tasks page), so a reload or a pasted
- * link shows the same results.
+ * the page's filter row, so a reload or a pasted link shows the same
+ * results. On the Tasks page, which has no filter row, the project chosen
+ * in its project picker goes in as the Project filter (SP-191).
  */
 function searchAddress(term) {
   const params = new URLSearchParams({ q: term });
-  for (const select of main.querySelectorAll('.search-filters select')) {
+  for (const select of main.querySelectorAll('.project-picker select, .search-filters select')) {
     if (select.value) params.set(select.name, select.value);
   }
   return `/search?${params}`;

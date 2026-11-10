@@ -801,12 +801,16 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
 
     // Dane's page: the search results page's tickets, across every project,
     // best matches first (tracker/pageData.mjs searchTickets), narrowed by
-    // its filters (`status`, `priority`, `createdBy`, `assignee`); a value
-    // that is none of the choices is refused, never an empty list. Read-only.
+    // its filters (`project`, `status`, `priority`, `createdBy`,
+    // `assignee`); a value that is none of the choices is refused, never an
+    // empty list. `project` offers only the projects the reader may see, so
+    // one they may not is refused the same as one that does not exist.
+    // Read-only.
     if (parts.length === 1 && parts[0] === 'search' && method === 'GET') {
-      const { filters, problem } = readSearchFilters(store, (key) => url.searchParams.get(key));
+      const only = scopeOf(me);
+      const { filters, problem } = readSearchFilters(store, (key) => url.searchParams.get(key), { only });
       if (problem) throw new HttpError(400, 'unknown-filter', problem);
-      return [200, searchTickets(store, url.searchParams.get('q'), filters, { only: scopeOf(me) })];
+      return [200, searchTickets(store, url.searchParams.get('q'), filters, { only })];
     }
 
     // Dane's page: one project's details page. A person also sees its alert
