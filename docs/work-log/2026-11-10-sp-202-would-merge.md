@@ -19,3 +19,10 @@ It only runs for a project whose settings list lanes. Spirality and
 WaveCenter list none, so for them nothing changed. That lets the whole
 routine be watched on StarCaster's real tickets before anything merges
 without Dane; the third step makes the end of the hour a real merge.
+
+Review sent it back once: after the "would merge" comment, the relay kept
+watching the ticket as if the hour were still open. A question from Dane
+afterwards, or the ticket simply sitting a day, made it post a wrong
+"Auto-merge stopped" message. Now the "would merge" comment closes the
+matter: after it, the relay says nothing more on that ticket and leaves it
+waiting on Dane's word. Two new tests show both cases stay quiet.

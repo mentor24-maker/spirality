@@ -720,7 +720,8 @@ reads and writes nothing more than before. With lanes listed it runs
   real merge would. Otherwise it posts **one** "would merge" comment
   (`[auto-merge-rehearsal]` marker, said once per announcement) and nothing
   else: no merge, no status change. The ticket waits on his merge phrase as
-  before.
+  before. That note ends the announcement: a comment of his after it, or
+  the announcement growing a day old, posts no cancel card.
 - The stop and resume phrases are read from the bus (`busProject`) and from
   every ticket the relay read that pass (`Ready to launch` and `Needs your
   input`); a stop is kept in the ledger. An unreadable bus or ledger, or a
