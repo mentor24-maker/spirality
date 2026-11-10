@@ -3067,8 +3067,9 @@ test('the Pipeline Status pod: each stage\'s next time or "running", a dash for 
     { name: 'Review', logged: true, running: false, nextDue: null },
     { name: 'Intake', logged: false, running: false, nextDue: null },
   ] }, timeOf);
-  const text = html.replace(/<[^>]*>/g, '');
-  assert.equal(text, 'Relay [17:45] · Build running · Review – · Intake –');
+  // Cells joined with a bar, so the order and the name/time pairing both show.
+  const cells = [...html.matchAll(/<span class="([^"]*)"[^>]*>([^<]*)<\/span>/g)].map((m) => m[2]);
+  assert.equal(cells.join('|'), 'Pipeline Stages|Relay|[17:45]|Build|running|Review|–|Intake|–');
   assert.match(html, /title="Intake: no passes logged yet"/);
   assert.match(html, /title="Review: the next pass&#39;s time is not known yet"/);
   assert.match(html, /class="stage running"/);
@@ -3078,6 +3079,50 @@ test('the Pipeline Status pod: each stage\'s next time or "running", a dash for 
   assert.equal(PIPELINE_UNAVAILABLE, 'Pipeline Status unavailable');
   // A stage's name is escaped like every other text the page draws.
   assert.doesNotMatch(renderPipelinePod({ stages: [{ name: '<b>x', logged: false }] }, timeOf), /<b>x/);
+});
+
+test('the pod reads as a small table (SP-194): a "Pipeline Stages" heading, one stage per row in two columns, bold names, a running stage green, on light blue', () => {
+  const timeOf = (iso) => `[${iso.slice(11, 16)}]`;
+  const html = renderPipelinePod({ stages: [
+    { name: 'Relay', logged: true, running: false, nextDue: '2026-11-09T17:45:00.000Z' },
+    { name: 'Build', logged: true, running: true, nextDue: null },
+    { name: 'Review', logged: true, running: false, nextDue: '2026-11-09T18:10:00.000Z' },
+    { name: 'Intake', logged: true, running: false, nextDue: '2026-11-09T18:04:00.000Z' },
+  ] }, timeOf);
+  // The heading comes first, then the grid holding every cell.
+  assert.match(html, /^<span class="heading">Pipeline Stages<\/span><span class="stages">/);
+  // No table inside the button: HTML does not allow one there.
+  assert.doesNotMatch(html, /<(table|tr|td|th|div|h[1-6]|p)\b/);
+  // Two cells per stage, name then time, in Relay, Build, Review, Intake order.
+  const grid = html.slice(html.indexOf('<span class="stages">') + '<span class="stages">'.length, -'</span>'.length);
+  const cells = [...grid.matchAll(/<span class="([^"]*)"[^>]*>([^<]*)<\/span>/g)].map((m) => [m[1], m[2]]);
+  assert.deepEqual(cells, [
+    ['stage', 'Relay'], ['time', '[17:45]'],
+    ['stage running', 'Build'], ['time running', 'running'],
+    ['stage', 'Review'], ['time', '[18:10]'],
+    ['stage', 'Intake'], ['time', '[18:04]'],
+  ]);
+  // Only the running stage carries `running`.
+  assert.equal((html.match(/ running"/g) || []).length, 2);
+  const css = readFileSync(WEB('app.css'), 'utf8');
+  const rule = (selector) => {
+    const at = css.indexOf(`${selector} {`);
+    assert.notEqual(at, -1, `app.css has a ${selector} rule`);
+    return css.slice(at, css.indexOf('}', at));
+  };
+  const pod = rule('.toolbar .pipeline-pod');
+  assert.match(pod, /background: #eaf5fe;/, 'the page\'s light blue, as on the Files Made box');
+  assert.match(pod, /flex-direction: column;/, 'the heading sits above the stages');
+  assert.match(rule('.toolbar .pipeline-pod .stages'), /display: grid; grid-template-columns: auto auto;/, 'two lined-up columns');
+  assert.match(rule('.toolbar .pipeline-pod .stage'), /font-weight: 700;/, 'stage names are bold');
+  const green = rule('.toolbar .pipeline-pod .running').match(/color: (#[0-9a-fA-F]{6});/);
+  assert.ok(green, 'a running stage has its own colour');
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(green[1].slice(i, i + 2), 16));
+  assert.ok(g > r * 2 && g > b * 2, `${green[1]} is a green`);
+  assert.ok(contrast(green[1], '#eaf5fe') >= 4.5, 'the green reads on the light blue (WCAG AA for small text)');
+  // The button is unchanged: same class, still opens the dialog.
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  assert.match(app, /<button type="button" class="pipeline-pod" aria-haspopup="dialog" title="Open Pipeline Status"><\/button>/);
 });
 
 test('the Tasks page puts the pod between the search field and Board/List, fills it on draw and once a minute, and a failed read touches only the pod (SP-168)', () => {

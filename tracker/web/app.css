@@ -76,12 +76,15 @@ button { font: inherit; padding: 0.4rem 1rem; }
 .toolbar .project-picker { font-weight: 600; }
 .toolbar .project-picker select { font: inherit; font-weight: normal; padding: 0.35rem; margin-left: 0.25rem; }
 /* The Pipeline Status pod (SP-168): when each loop stage runs next, between the search field and Board/List. */
-.toolbar .pipeline-pod { display: flex; align-items: center; padding: 0.3rem 0.75rem; border: var(--hairline); border-radius: 6px; background: transparent; font-size: 0.85rem; color: var(--quiet); white-space: nowrap; cursor: pointer; }
-.toolbar .pipeline-pod:hover { background: #f5f5f7; }
+.toolbar .pipeline-pod { display: flex; flex-direction: column; align-items: flex-start; padding: 0.3rem 0.75rem; border: var(--hairline); border-radius: 6px; background: #eaf5fe; font-size: 0.85rem; color: var(--ink); white-space: nowrap; cursor: pointer; text-align: left; font-family: inherit; }
+.toolbar .pipeline-pod:hover { background: #d6ecfd; }
 .toolbar .pipeline-pod:empty { display: none; }
-.toolbar .pipeline-pod .stage { color: var(--ink); }
-.toolbar .pipeline-pod .stage.running { font-weight: 600; }
-.toolbar .pipeline-pod .sep { padding: 0 0.15rem; }
+.toolbar .pipeline-pod .heading { font-weight: 600; margin-bottom: 0.15rem; }
+.toolbar .pipeline-pod .stages { display: grid; grid-template-columns: auto auto; column-gap: 0.75rem; row-gap: 0.05rem; }
+.toolbar .pipeline-pod .stage { font-weight: 700; color: var(--ink); }
+.toolbar .pipeline-pod .time { color: var(--ink); }
+.toolbar .pipeline-pod .running { color: #006600; }
+.toolbar .pipeline-pod .unavailable { color: var(--quiet); }
 /* The Pipeline Status dialog (SP-173): the detail behind each stage's next time, opened from the pod. */
 dialog.pipeline-status { border: var(--hairline); border-radius: 8px; padding: 1rem 1.25rem; max-width: 95vw; color: var(--ink); }
 dialog.pipeline-status::backdrop { background: rgba(0, 0, 0, 0.3); }
