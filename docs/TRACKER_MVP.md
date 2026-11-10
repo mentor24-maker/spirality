@@ -655,6 +655,22 @@ made each move. The tokens live only in Doppler (project `spirality`, config
 The list is `TRACKER_SEATS` in `scripts/lib/expectedSecrets.mjs`, so
 `npm run doctor` reports each one as present or MISSING.
 
+**A project's own lane.** A project that runs a lane of its own beside
+these (WaveCenter's hand-off lane, say) names it in its project config's
+`projectLanes` (`"projectLanes": ["loop-handoff"]`). Each name there is one
+more machine seat, its secret built the same way the runner builds it
+(`loop-handoff` → `TRACKER_TOKEN_LOOP_HANDOFF`): `tracker:signins create`
+makes its actor and stores its token, `check` proves it, `npm run doctor`
+lists it, and the door accepts it. A lane the config does not name has no
+seat, and the door refuses its passes, saying to name it in
+`projectLanes`. A name that is already a built-in seat (`loop-build`,
+`relay`, `hand-run`, ...), or `name` (its secret would be
+`TRACKER_TOKEN_NAME`, the runner's own variable), stops the config from
+loading, naming the entry, so two lanes never share a token and one bad
+entry never locks the built-in lanes out (`RESERVED_LANE_NAMES` in
+`lib/projectConfig.mjs`). No project's lane names are written in
+Spirality's code.
+
 A runner never handles the token itself. It sets `TRACKER_TOKEN_NAME` to
 the secret's **name** (`loop_runner.sh` derives it from the skill: `loop-build`
 → `TRACKER_TOKEN_LOOP_BUILD`), and the door reads that secret inside its own
@@ -924,7 +940,12 @@ ClickUp seat ids the config holds until then.
    ```
 
    It saves the config's Loop Queue list, plus any `--list <id>` given (one
-   per extra list worth keeping). A project whose config already names no
+   per extra list worth keeping). The only extra list worth keeping is
+   StarCaster's alarm list (the bus, SP-24). StarCaster's Dev Backlog and
+   its client lists (Marinoff & Associates, Delray Beach Tennis Center) are
+   neither saved nor imported: Dane, 2026-11-08, *"StarCaster's other lists
+   can all go away."* Nothing in ClickUp is deleted; ClickUp stays as the
+   archive. A project whose config already names no
    ClickUp list (`loopQueueListId` all zeros, as Spirality's has been since
    its list became a read-only archive) saves only the `--list` ids, and
    refuses with a plain reason when none is given:
