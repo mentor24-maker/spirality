@@ -26,7 +26,7 @@
  * an emailed link's own page. The link's token is sent only in a JSON body,
  * never in an address.
  */
-import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, unwrapDoc, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, pipelinePodLabel, renderContextDocs } from './render.mjs';
+import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, unwrapDoc, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, pipelinePodLabel, renderContextDocs, renderSortHeadings, sortTickets, nextSort } from './render.mjs';
 
 /** Where an earlier version of the page kept a pasted token; removed on load, never read. */
 const OLD_TOKEN_KEY = 'tracker-token';
@@ -1103,6 +1103,45 @@ async function drawTasks(view, opts = {}) {
 }
 
 /**
+ * SP-174: a click on a stage's table heading sorts that stage's rows by that
+ * column, ascending first, the other way on a second click; each stage
+ * sorts on its own. The rows already drawn are moved, not redrawn, so their
+ * buttons keep working. `stages` are the drawn stages, each with its tickets
+ * in the order the page drew them (the order a sort's ties keep). The sort
+ * each table shows (null before any click) is kept in `sorted`, so the
+ * minute's redraw puts it back (keepPlace); a reload or a fresh visit
+ * shows the usual order.
+ */
+const sorted = new WeakMap();
+/** Each sortable table on the page, with its stage: what keepPlace reads and restores. */
+const sortableTables = () => [...main.querySelectorAll('[data-stage] table.sortable')]
+  .map((table) => ({ table, stage: table.closest('[data-stage]').dataset.stage }));
+function wireSortHeadings(stages) {
+  const ticketsOf = new Map(stages.map((c) => [c.status, c.tickets]));
+  for (const { table, stage } of sortableTables()) {
+    const tickets = ticketsOf.get(stage);
+    if (!tickets) continue;
+    const apply = (sort) => {
+      table.tHead.innerHTML = renderSortHeadings(sort);
+      const rows = new Map([...table.tBodies[0].rows].map((tr) => [tr.dataset.id, tr]));
+      for (const t of sortTickets(tickets, sort)) {
+        const tr = rows.get(t.id);
+        if (tr) table.tBodies[0].append(tr);
+      }
+      sorted.set(table, { sort, apply });
+    };
+    sorted.set(table, { sort: null, apply });
+    table.tHead.addEventListener('click', (e) => {
+      const button = e.target.closest('button[data-sort]');
+      if (!button) return;
+      const sort = nextSort(sorted.get(table)?.sort ?? null, button.dataset.sort);
+      apply(sort);
+      table.tHead.querySelector(`button[data-sort="${sort.column}"]`).focus();
+    });
+  }
+}
+
+/**
  * One project, as a board or as a list. Both draw the same object, the
  * server's board (pageData.mjs boardOf): the eight statuses in the
  * contract's order, each holding its tickets in `queue` order, so the two
@@ -1171,7 +1210,7 @@ async function drawProject(slug, view, { adding = false, filed = null, unchecked
     ].join('');
   };
   const row = (status) => (t) => `
-    <tr>
+    <tr data-id="${escapeHtml(t.id)}">
       <td class="name"><a href="/t/${encodeURIComponent(t.id)}">${escapeHtml(t.name)}</a> <span class="quiet">${escapeHtml(t.id)}</span>${t.answerIn ? ` <span class="answer-in">${escapeHtml(ANSWER_IN_NOTE)}</span>` : ''}</td>
       <td class="priority">${t.priority ? escapeHtml(statusName(t.priority)) : '<span class="quiet">–</span>'}</td>
       <td class="tags">${t.tags.map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join('')}</td>
@@ -1180,7 +1219,7 @@ async function drawProject(slug, view, { adding = false, filed = null, unchecked
       <td class="actions">${actions(t, status)}</td>
     </tr>`;
   const group = (c) => block(c, 'group', c.tickets.length
-    ? `<table><thead><tr><th class="name">Ticket</th><th class="priority">Priority</th><th class="tags">Tags</th><th class="assignee">Assigned To</th><th class="when">Last Change</th><th class="actions">Actions</th></tr></thead><tbody>${c.tickets.map(row(c.status)).join('')}</tbody></table>`
+    ? `<table class="sortable"><thead>${renderSortHeadings(null)}</thead><tbody>${c.tickets.map(row(c.status)).join('')}</tbody></table>`
     : '');
 
   // The board's columns are the working stages; Live, which only grows, is a
@@ -1242,6 +1281,7 @@ async function drawProject(slug, view, { adding = false, filed = null, unchecked
     el.style.setProperty('--stage-text', look.text);
   }
   putTrail([{ label: board.projectName, href: '/projects' }, { label: view === 'board' ? 'Board' : 'List' }]);
+  wireSortHeadings(view === 'board' ? (live ? [live] : []) : board.columns);
   wireSearch();
   wireAddTask(board.project, view, adding);
   wirePipeline();
@@ -2578,17 +2618,21 @@ async function drawAgain(draw) {
 const hold = () => redrawHold({ hidden: document.hidden, drawing: drawing > 0, writing: writing > 0, dialog: Boolean(main.querySelector('dialog[open]')), fields: fieldsOf(main) });
 
 /**
- * Where he is on the page: how far down, and which folding sections
- * (Details, a Live column, the Add Task box, the Change panel) are open.
+ * Where he is on the page: how far down, which folding sections
+ * (Details, a Live column, the Add Task box, the Change panel) are open,
+ * and how each Tasks table is sorted.
  * `restore` puts them back on the page drawn again.
  */
 function keepPlace() {
   const key = (d) => `${d.className}|${d.dataset.stage ?? ''}`;
   const open = new Map([...main.querySelectorAll('details')].map((d) => [key(d), d.open]));
   const y = window.scrollY;
+  // Each stage's sort (SP-174), by stage, put back on the stage's new table.
+  const sorts = new Map(sortableTables().filter(({ table }) => sorted.get(table)?.sort).map(({ table, stage }) => [stage, sorted.get(table).sort]));
   return {
     restore() {
       for (const d of main.querySelectorAll('details')) if (open.has(key(d))) d.open = open.get(key(d));
+      for (const { table, stage } of sortableTables()) if (sorts.has(stage)) sorted.get(table)?.apply(sorts.get(stage));
       window.scrollTo(0, y);
     },
   };

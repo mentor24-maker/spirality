@@ -1401,6 +1401,79 @@ export function setupBody(fields, values) {
 }
 
 /**
+ * SP-174: the Tasks tables' sortable headings. The priorities in order of
+ * importance, the same order `PRIORITY_RANK` in lib/loopStatuses.js gives
+ * (a test holds the two together; the page cannot load that file).
+ */
+export const PRIORITY_ORDER = Object.freeze(['urgent', 'high', 'normal', 'low']);
+
+/** The columns a stage's table sorts on, in the order they are drawn, with the class each cell wears. */
+export const SORT_COLUMNS = Object.freeze([
+  { key: 'name', label: 'Ticket' },
+  { key: 'priority', label: 'Priority' },
+  { key: 'tags', label: 'Tags' },
+  { key: 'assignee', label: 'Assigned To' },
+  { key: 'when', label: 'Last Change' },
+]);
+
+const byText = (a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' });
+/** Missing values (null) go after every present one; present ones compare with `cmp`. */
+const lastIfMissing = (cmp) => (a, b) => (a == null ? (b == null ? 0 : 1) : b == null ? -1 : cmp(a, b));
+const rankOf = (p) => {
+  const i = PRIORITY_ORDER.indexOf(String(p ?? '').toLowerCase());
+  return i === -1 ? null : i;
+};
+const COMPARE = {
+  name: (a, b) => byText(String(a.name ?? ''), String(b.name ?? '')),
+  priority: (a, b) => lastIfMissing((x, y) => x - y)(rankOf(a.priority), rankOf(b.priority)),
+  tags: (a, b) => lastIfMissing(byText)(a.tags?.[0] ?? null, b.tags?.[0] ?? null),
+  assignee: (a, b) => lastIfMissing(byText)(a.assignee || null, b.assignee || null),
+  when: (a, b) => {
+    const x = Date.parse(a.updatedAt);
+    const y = Date.parse(b.updatedAt);
+    return lastIfMissing((p, q) => p - q)(Number.isNaN(x) ? null : x, Number.isNaN(y) ? null : y);
+  },
+};
+
+/**
+ * A stage's tickets sorted by `column` (a SORT_COLUMNS key), `ascending` or
+ * `descending`; descending is ascending turned round, so "none" comes first
+ * there. Ties keep the order `tickets` came in. No sort, or a column it does
+ * not know, gives the tickets back in the order they came. Never changes
+ * `tickets`.
+ */
+export function sortTickets(tickets, sort) {
+  const compare = sort && COMPARE[sort.column];
+  if (!compare) return tickets.slice();
+  const flip = sort.direction === 'descending' ? -1 : 1;
+  return tickets
+    .map((t, i) => [t, i])
+    .sort(([a, i], [b, j]) => flip * compare(a, b) || i - j)
+    .map(([t]) => t);
+}
+
+/** The sort a click on `column`'s heading gives: ascending first, the other way on a second click. */
+export function nextSort(sort, column) {
+  return sort?.column === column && sort.direction === 'ascending'
+    ? { column, direction: 'descending' }
+    : { column, direction: 'ascending' };
+}
+
+/**
+ * A stage's table heading row: each sortable heading a button (Tab reaches
+ * it, Enter or Space sorts), the sorted one marked with `aria-sort` and an
+ * arrow, ▲ ascending, ▼ descending; Actions a plain heading.
+ */
+export function renderSortHeadings(sort) {
+  const heading = ({ key, label }) => {
+    const on = sort?.column === key && (sort.direction === 'ascending' || sort.direction === 'descending');
+    const arrow = on ? ` <span class="arrow" aria-hidden="true">${sort.direction === 'ascending' ? '▲' : '▼'}</span>` : '';
+    return `<th class="${key}"${on ? ` aria-sort="${sort.direction}"` : ''}><button type="button" class="sort" data-sort="${key}">${escapeHtml(label)}${arrow}</button></th>`;
+  };
+  return `<tr>${SORT_COLUMNS.map(heading).join('')}<th class="actions">Actions</th></tr>`;
+}
+
+/**
  * The Docs page's Context Documents section (SP-176): the files kept on the
  * project itself, newest first, each with its type, size, adder and time, a
  * Download link (always saved, never opened in the page) and a Remove
