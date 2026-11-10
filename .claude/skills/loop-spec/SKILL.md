@@ -179,6 +179,7 @@ says plainly "not measured".
 - Never file a task whose acceptance criteria you couldn't verify yourself.
 - **Read your own "How to test" back as Dane.** A step he cannot act on
   without asking a follow-up question is not a test step.
+- **Link files by commit, never by branch.** In test steps and cards, a GitHub file link names a commit (`.../blob/<commit>/<path>`, the commit from `git rev-parse HEAD` on the pushed branch), `main` for a file already on `main`, or the pull request's files tab (`.../pull/<n>/files`), never a branch: the branch is deleted when Dane merges and the link 404s. `comment`, `ask`, `describe` and `task` refuse a branch link (exit 2).
 - **A pipeline ticket needs a COST, not a gap.** File a ticket about the loop
   machinery itself only when a failure actually cost something observable.
   Otherwise it is one plain line in your report, not a ticket.

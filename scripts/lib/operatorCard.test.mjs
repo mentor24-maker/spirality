@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseCard, validateCard, buildCard, renderCard, cardSurvived, findBlockquoteLines, countWords, fenceFor, fenceLines, splitFences, renderCardComment } from './operatorCard.mjs';
+import { parseCard, validateCard, buildCard, renderCard, cardSurvived, findBlockquoteLines, findBranchLinks, branchLinkRefusal, countWords, fenceFor, fenceLines, splitFences, renderCardComment } from './operatorCard.mjs';
 
 const sixty = Array.from({ length: 60 }, (_, i) => `word${i}`).join(' ');
 
@@ -97,4 +97,25 @@ test('the card `ask` posts needs the same one-line move as the shared module (SP
   assert.ok(mjs.validateCard(without).some((p) => /must END with one line naming his move/.test(p)));
   assert.equal(mjs.readYourMove, shared.readYourMove, 'one rule, not a copy');
   assert.throws(() => mjs.buildCard(`@@ASKED\nx\n@@CONTEXT\n${sixty}\n@@NEEDED\nmove this ticket to Live yourself\nYour move: Reply — ok`), /move the ticket himself/);
+});
+
+test('findBranchLinks flags branch links and passes main and commit links (SP-178)', () => {
+  const gh = 'https://github.com/mentor24-maker/spirality';
+  assert.deepEqual(findBranchLinks(`Read ${gh}/blob/setup-review/docs/onboarding/SETUP_REVIEW.md now`),
+    [`${gh}/blob/setup-review/docs/onboarding/SETUP_REVIEW.md`]);
+  assert.deepEqual(findBranchLinks(`See [the folder](${gh}/tree/some-branch/docs).`), [`${gh}/tree/some-branch/docs`]);
+  assert.deepEqual(findBranchLinks(`${gh}/tree/some-branch`), [`${gh}/tree/some-branch`]);
+  assert.deepEqual(findBranchLinks(`${gh}/blob/main/README.md`), []);
+  assert.deepEqual(findBranchLinks(`${gh}/blob/a78628c/docs/x.md`), []);
+  assert.deepEqual(findBranchLinks(`${gh}/blob/a78628c07fef41862bbfe69c77f4e10f2a64e107/docs/onboarding/SETUP_REVIEW.md`), []);
+  assert.deepEqual(findBranchLinks(`${gh}/pull/83/files and ${gh}/pull/83`), []);
+  // Six hex characters is too short to be a commit id; it reads as a branch name.
+  assert.equal(findBranchLinks(`${gh}/blob/abc123/x.md`).length, 1);
+  // Inside a fence it is quoted text, not a link offered to Dane.
+  assert.deepEqual(findBranchLinks(`his words:\n\`\`\`\n${gh}/blob/setup-review/x.md\n\`\`\`\n`), []);
+  const two = findBranchLinks(`${gh}/blob/a/x.md\nand ${gh}/blob/main/y.md and ${gh}/tree/b/z`);
+  assert.deepEqual(two, [`${gh}/blob/a/x.md`, `${gh}/tree/b/z`]);
+  const msg = branchLinkRefusal(two, 'Nothing was posted.');
+  assert.match(msg, /Nothing was posted\./);
+  assert.ok(msg.includes(`  ${gh}/blob/a/x.md`) && msg.includes('git rev-parse HEAD') && msg.includes('/files'), msg);
 });

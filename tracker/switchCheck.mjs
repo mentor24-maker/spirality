@@ -204,8 +204,15 @@ export async function runSwitchCheck({ config, env, db, clickup, fetchImpl = fet
     // The project that runs the tracker has the operator's seat and the bare
     // lane names; a guest's lanes are named for it and it has no operator
     // seat (seatsForConfig).
-    const { seats } = seatsForConfig(config);
-    if (live) {
+    let seats = null;
+    try {
+      ({ seats } = seatsForConfig(config));
+    } catch (err) {
+      section('sign-ins', false, [`Could not list the project's sign-ins: ${err.message}.`]);
+    }
+    if (!seats) {
+      // Reported above; the rest of the check still runs.
+    } else if (live) {
       const r = await checkSignins({ url, seats, env });
       section('sign-ins', r.ok, ['Checked against the running tracker.', ...r.lines]);
     } else if (haveDb) {

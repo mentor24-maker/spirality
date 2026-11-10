@@ -10,6 +10,7 @@ import { openStore } from '../../tracker/store.mjs';
 import { startServer } from '../../tracker/server.mjs';
 import { SOURCE as IMPORT_SOURCE } from '../../tracker/import.mjs';
 import { createApiTracker, trackerTokenEnv } from './apiTracker.mjs';
+import { projectSeats } from '../lib/expectedSecrets.mjs';
 import { conflictTicketFiledComment, findConflictTicket } from '../../lib/conflictWork.js';
 import { isMachineComment } from '../lib/machineComment.mjs';
 import { renderMarkdown } from '../../tracker/web/render.mjs';
@@ -527,6 +528,39 @@ test('a card whose @@ASKED holds his own "> " and ``` lines posts, stores and re
   } finally { await f.cleanup(); }
 });
 
+test('comment, ask, describe and task refuse a GitHub branch link with exit 2 and write nothing (SP-178)', async () => {
+  const f = await fixture();
+  try {
+    f.file({ name: 'one', status: 'building', body: 'the spec' });
+    const branch = 'https://github.com/owner/repo/blob/some-branch/README.md';
+    const before = (await f.door(['get', '--task', 'AL-1'])).out;
+    const note = await f.door(['comment', '--task', 'AL-1', '--body-file', '-'], { stdin: `See ${branch}\n` });
+    assert.equal(note.code, 2, note.err);
+    assert.ok(note.err.includes(branch) && /Nothing was posted/.test(note.err), note.err);
+    const card = CARD.replace('Pick option A or B.', `Read ${branch} then pick A or B.`);
+    const ask = await f.door(['ask', '--task', 'AL-1', '--body-file', '-'], { stdin: card });
+    assert.equal(ask.code, 2, ask.err);
+    assert.ok(ask.err.includes(branch), ask.err);
+    const desc = await f.door(['describe', '--task', 'AL-1', '--body-file', '-'], { stdin: `## How to test\n- open ${branch}\n` });
+    assert.equal(desc.code, 2, desc.err);
+    const made = await f.door(['task', '--name', 'two', '--body-file', '-'], { stdin: `open ${branch}\n` });
+    assert.equal(made.code, 2, made.err);
+    assert.match(made.err, /Nothing was created/);
+    // Nothing reached the tracker: no comment, the same description and status, no second ticket.
+    assert.equal(f.store.listComments('AL-1').length, 0);
+    assert.equal((await f.door(['get', '--task', 'AL-1'])).out, before);
+    assert.match(before, /\nstatus: {3}building\n/);
+    assert.equal(f.store.listTickets('alpha').length, 1);
+
+    // A commit link, a main link and the files tab all post.
+    const ok = await f.door(['comment', '--task', 'AL-1', '--body-file', '-'], {
+      stdin: 'https://github.com/owner/repo/blob/a78628c/README.md https://github.com/owner/repo/blob/main/README.md https://github.com/owner/repo/pull/7/files\n',
+    });
+    assert.equal(ok.code, 0, ok.err);
+    assert.equal(f.store.listComments('AL-1').length, 1);
+  } finally { await f.cleanup(); }
+});
+
 test('pr-opened records the PR and reads it back; then verdict --pass reads back through the gate', async () => {
   const f = await fixture();
   try {
@@ -978,4 +1012,35 @@ test('an unreachable tracker answers HTTP 0, not a throw', async () => {
   assert.equal(out.res.ok, false);
   assert.equal(out.res.status, 0);
   assert.match(out.text, /never reached the tracker \(fetch failed — \S/, 'the reason is kept, not only "fetch failed"');
+});
+
+test('trackerTokenEnv: a lane the project config names signs in with its own secret; one it does not name is refused, saying where to name it', () => {
+  const named = projectSeats({ projectLanes: ['loop-handoff'] });
+  assert.equal(trackerTokenEnv({ TRACKER_TOKEN_NAME: 'TRACKER_TOKEN_LOOP_HANDOFF' }, named), 'TRACKER_TOKEN_LOOP_HANDOFF');
+  for (const ok of ['TRACKER_TOKEN_LOOP_BUILD', 'TRACKER_TOKEN_RELAY']) assert.equal(trackerTokenEnv({ TRACKER_TOKEN_NAME: ok }, named), ok);
+  assert.equal(trackerTokenEnv({}, named), 'TRACKER_TOKEN_HAND_RUN');
+  assert.throws(() => trackerTokenEnv({ TRACKER_TOKEN_NAME: 'TRACKER_TOKEN_LOOP_HANDOFF' }), /must name a loop's own tracker secret.*"projectLanes"/);
+  assert.throws(() => trackerTokenEnv({ TRACKER_TOKEN_NAME: 'TRACKER_TOKEN_OPERATOR' }, named), /must name a loop's own tracker secret/);
+  // The projectLanes hint is for a lane's name only, never the operator's seat or junk.
+  for (const notLane of ['TRACKER_TOKEN_OPERATOR', 'CLICKUP_API_TOKEN', 'TRACKER_TOKEN_NAME', 'tracker_token_x']) {
+    assert.throws(() => trackerTokenEnv({ TRACKER_TOKEN_NAME: notLane }, named), (err) => /must name a loop's own tracker secret/.test(err.message) && !/projectLanes/.test(err.message), notLane);
+  }
+});
+
+test('the door signs a project lane in under its own seat once projectLanes names it, and refuses it plainly before', async () => {
+  const f = await fixture();
+  try {
+    const lane = f.store.createActor({ kind: 'machine', name: 'loop-handoff' });
+    const env = { TRACKER_TOKEN_NAME: 'TRACKER_TOKEN_LOOP_HANDOFF', TRACKER_TOKEN_LOOP_HANDOFF: f.store.issueToken(lane.id) };
+    const before = await f.door(['whoami'], { env });
+    assert.equal(before.code, 1);
+    assert.match(before.err, /must name a loop's own tracker secret.*not "TRACKER_TOKEN_LOOP_HANDOFF".*"projectLanes"/);
+    assert.doesNotMatch(before.out, /Acting as/);
+    const file = join(f.project, 'spirality.project.json');
+    writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, 'utf8')), projectLanes: ['loop-handoff'] }));
+    const after = await f.door(['whoami'], { env });
+    assert.equal(after.code, 0, after.err);
+    assert.match(after.out, new RegExp(`Acting as: loop-handoff .*\\(id ${lane.id}\\)`));
+    assert.doesNotMatch(after.out + after.err, new RegExp(env.TRACKER_TOKEN_LOOP_HANDOFF));
+  } finally { await f.cleanup(); }
 });

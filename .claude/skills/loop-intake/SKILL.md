@@ -147,7 +147,8 @@ stick. **A non-zero exit is a failure you report**, never one you talk past.
 
    **Affected files are real paths, checked**, and the "How to test" steps
    follow `loop-spec`'s rule: a link he can click, or an exact command with
-   the output it should print.
+   the output it should print. Link files by commit, never by branch:
+   a GitHub file link names a commit (`.../blob/<commit>/<path>`, the commit from `git rev-parse HEAD` on the pushed branch), `main` for a file already on `main`, or the pull request's files tab (`.../pull/<n>/files`), never a branch: the branch is deleted when Dane merges and the link 404s. `comment`, `ask`, `describe` and `task` refuse a branch link (exit 2).
 
    **One pull request's worth:** `describe` the request's own ticket with the
    spec. Keep its name unless it fails `loop-spec`'s naming rule (what breaks

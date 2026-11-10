@@ -375,6 +375,35 @@ test('the project that runs the tracker keeps the bare seats; another project ge
   assert.deepEqual(guest.seats.filter((s) => s.handRun).map((s) => s.secret), ['TRACKER_TOKEN_HAND_RUN']);
 });
 
+test('a lane the project config names in projectLanes gets one more machine seat, named like the others; the built-in seats do not change', () => {
+  const lanes = { projectLanes: ['loop-handoff'] };
+  const home = seatsForConfig({ ...HOME, ...lanes });
+  assert.deepEqual(home.seats.slice(0, -1), seatsForConfig(HOME).seats);
+  assert.deepEqual(home.seats.at(-1).secret, 'TRACKER_TOKEN_LOOP_HANDOFF');
+  assert.deepEqual([home.seats.at(-1).kind, home.seats.at(-1).name], ['machine', 'loop-handoff']);
+  const guest = seatsForConfig({ ...GUEST, ...lanes });
+  assert.deepEqual(guest.seats.slice(0, -1), seatsForConfig(GUEST).seats);
+  assert.deepEqual([guest.seats.at(-1).secret, guest.seats.at(-1).name], ['TRACKER_TOKEN_LOOP_HANDOFF', 'beta loop-handoff']);
+  assert.ok(!seatsForConfig(GUEST).seats.some((s) => s.secret === 'TRACKER_TOKEN_LOOP_HANDOFF'), 'a lane not named has no seat');
+});
+
+test('create makes a named lane its sign-in and stores it in Doppler, read back; check then proves it', async () => {
+  const f = fixture();
+  try {
+    const seats = seatsForConfig({ ...HOME, projectLanes: ['loop-handoff'] }).seats;
+    const r = await createSignins({ ...f, seats, env: {}, project: PROJECT });
+    assert.ok(r.ok, r.lines.join('\n'));
+    assert.match(r.lines.join('\n'), /TRACKER_TOKEN_LOOP_HANDOFF: actor \d+ \(machine, "loop-handoff"\) made/);
+    assert.equal(f.store.actorForToken(f.vault.TRACKER_TOKEN_LOOP_HANDOFF).name, 'loop-handoff');
+    const server = await startServer({ store: f.store, port: 0 });
+    try {
+      const ok = await checkSignins({ url: `http://127.0.0.1:${server.address().port}`, seats, env: f.vault });
+      assert.ok(ok.ok, ok.lines.join('\n'));
+      assert.match(ok.lines.join('\n'), /TRACKER_TOKEN_LOOP_HANDOFF: GET \/me answers "loop-handoff" \(machine/);
+    } finally { await new Promise((res) => server.close(res)); }
+  } finally { f.cleanup(); }
+});
+
 test('a second project\'s create leaves every token of the first signing in, and check names every seat of both', async () => {
   const f = fixture();
   try {
