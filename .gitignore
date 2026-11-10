@@ -5,3 +5,4 @@ node_modules/
 *.log
 .claude/worktrees/
 .claude/settings.local.json
+sites/tracker-page/.vercel/
