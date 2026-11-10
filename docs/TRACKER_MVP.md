@@ -248,6 +248,7 @@ answers are JSON (structured text programs read).
 | `POST /signin` | **no token**: `{ email, password }` → the person, and a session cookie (`tracker_session`, `HttpOnly`, `SameSite=Strict`, `Path=/`, 30 days). A wrong password and an unknown email get the same 401 `no-match`, "That email and password do not match." After 5 failures for one email in 15 minutes, that email is refused (429 `locked`) for 15 minutes, even with the right password; the count is kept in memory, so a restart forgets it, and setting a password through an emailed link clears it. **No `Secure` flag yet**: the tracker is plain http on the home network; the ticket that opens it to the internet must add it, with https |
 | `POST /signout` | **no token**: ends the cookie's session and clears the cookie |
 | `POST /account/forgot` | **no token**: `{ email }` → the same answer whether or not the email has an account; an account's email is sent a 1-hour `reset` link through Resend after the answer has gone back. Sent with an outside site's own token (`authorization: Bearer <site token>`), the link opens `<site's page>?link=<token>`; with any other token or none, the tracker's set-password page; the answer is the same either way. The log says whether it went, never the link or the email |
+| `GET /projects/:slug/attachments` | for the Docs page: every file on the project's tickets, newest first, `{ project, attachments: [{ id, ticket, ticketName, name, type, size, addedBy, addedByName, createdAt }] }`, never the bytes. A project the caller is not on is 404, the same as one that does not exist |
 | `POST /tickets/:id/attachments` | attach a file: the raw file as the body (`content-type: application/octet-stream`, which a form on another site cannot send, so the cookie may make this one write that is not JSON), its name percent-encoded in `x-file-name`, its type in `x-file-type`. Answers 201 with `{ id, ticket, name, type, size, addedBy, createdAt }`, read back byte for byte. Over 10 MB is 413 `too-large` ("That file is over 10 MB. Attach a smaller one; nothing was saved."); an empty file or no name is 400; nothing is stored. The JSON calls' 1 MB limit is unchanged |
 | `GET /tickets/:id/attachments` | a ticket's files, oldest first, without their bytes (the ticket page reads the same list in `thread`) |
 | `GET /tickets/:id/attachments/:n` | one file, byte for byte, always as a download (`Content-Disposition: attachment`, `X-Content-Type-Options: nosniff`, a sandboxing `Content-Security-Policy`), so an uploaded HTML file can never run as the tracker's page |
@@ -313,6 +314,14 @@ back before the page says it worked, and a refusal (the last admin stepping
 down) shows the server's reason. Under the invites, **Roles and Permissions**
 shows which role has which permission. The roles are recorded, not enforced:
 every person signed in may still invite (Dane's decision).
+**Docs** in the header, between Users and Settings, opens `/docs`: a
+**Task Files** table of every file on the selected project's tasks (the
+project picked on the Projects page, else the first), newest first, with
+the file's name (which downloads it), the task's id and exact name (which
+opens it), its type, size, who added it and when. A project with no files
+says so in a line. It reads `GET /projects/:slug/attachments`, which answers
+the list without the bytes, to members of the project only; downloads stay
+with `GET /tickets/:id/attachments/:n`. Look-only for now.
 A browser opening `/projects` or `/projects/<slug>` gets the page; the page's own
 call to the same address gets the data. `/users` is the page alone; its data
 is still `GET /people` (the onboarding scripts read it), and a browser opening
