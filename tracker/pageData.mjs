@@ -521,16 +521,18 @@ export const PRIORITIES = Object.freeze(Object.keys(PRIORITY_RANK).sort((a, b) =
 const capital = (s) => String(s).replace(/^./, (c) => c.toUpperCase());
 
 /**
- * The search's four filters, in the order the page shows them, each with
+ * The search's five filters, in the order the page shows them, each with
  * the query parameter that carries it, its label, and its choices as
- * `{ value, label }` (the value is what the address holds): the eight
+ * `{ value, label }` (the value is what the address holds): the projects
+ * the reader may see (visibleProjects, `only`) by name, the eight
  * statuses in the contract's STAGE_ORDER, the store's priorities plus
  * "none", and every actor, people and loops, by name ("Assigned to" also
  * takes "nobody"). "Created by" is the actor on a ticket's `created` event.
  */
-export function searchFilterChoices(store) {
+export function searchFilterChoices(store, { only = null } = {}) {
   const actors = store.listActors().map((a) => ({ value: String(a.id), label: a.name }));
   return [
+    { key: 'project', label: 'Project', options: visibleProjects(store, only).map((p) => ({ value: p.slug, label: p.name })) },
     { key: 'status', label: 'Status', options: STAGE_ORDER.map((name) => ({ value: name, label: name })) },
     { key: 'priority', label: 'Priority', options: [...PRIORITIES.map((p) => ({ value: p, label: capital(p) })), { value: 'none', label: 'None' }] },
     { key: 'createdBy', label: 'Created by', options: actors },
@@ -539,17 +541,19 @@ export function searchFilterChoices(store) {
 }
 
 /** What a filter's value is called in a refusal. */
-const FILTER_NOUNS = Object.freeze({ status: 'status', priority: 'priority', createdBy: 'actor', assignee: 'actor' });
+const FILTER_NOUNS = Object.freeze({ project: 'project', status: 'status', priority: 'priority', createdBy: 'actor', assignee: 'actor' });
 
 /**
  * Read the search's filters from `get(key)` (the address's query
  * parameters): each one absent or empty is "Any". A status or priority is
  * matched ignoring case. Answers `{ filters }`, each filter with the value
  * chosen (as its choice writes it) or null, or `{ problem }`, a plain
- * sentence naming the value that is not one of the choices.
+ * sentence naming the value that is not one of the choices. A project the
+ * reader may not see (`only`) is not one of them: it is refused word for
+ * word as one that does not exist, never answered.
  */
-export function readSearchFilters(store, get) {
-  const filters = searchFilterChoices(store).map((f) => ({ ...f, value: null }));
+export function readSearchFilters(store, get, { only = null } = {}) {
+  const filters = searchFilterChoices(store, { only }).map((f) => ({ ...f, value: null }));
   for (const f of filters) {
     const raw = String(get(f.key) ?? '').trim();
     if (!raw) continue;
@@ -576,7 +580,7 @@ function passesFilters(store, ticket, chosen) {
 }
 
 /**
- * Every ticket in every project, closed ones too, that matches `query` as
+ * Every ticket in every project (or the one the Project filter names), closed ones too, that matches `query` as
  * one phrase, ignoring case (render.mjs searchPattern, the same pattern the
  * page bolds with). A ticket scores the SEARCH_WEIGHTS of each place it
  * matched in; results go highest score first, then most recently changed.
@@ -589,7 +593,8 @@ function passesFilters(store, ticket, chosen) {
  * page to draw. `only` narrows the projects searched to the ones the
  * reader may see (visibleProjects). Reads only. An empty query finds nothing.
  */
-export function searchTickets(store, query, filters = searchFilterChoices(store).map((f) => ({ ...f, value: null })), { only = null } = {}) {
+export function searchTickets(store, query, filters = null, { only = null } = {}) {
+  filters ??= searchFilterChoices(store, { only }).map((f) => ({ ...f, value: null }));
   const term = String(query ?? '').trim();
   const pattern = searchPattern(term);
   if (!pattern) return { query: term, filters, results: [] };
@@ -601,6 +606,7 @@ export function searchTickets(store, query, filters = searchFilterChoices(store)
   };
   const results = [];
   for (const project of visibleProjects(store, only)) {
+    if (chosen.project != null && project.slug !== chosen.project) continue;
     for (const ticket of store.listTickets(project.slug)) {
       if (!passesFilters(store, ticket, chosen)) continue;
       const discussion = [];

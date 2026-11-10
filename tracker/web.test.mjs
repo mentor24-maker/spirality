@@ -2773,6 +2773,19 @@ test('the search results page draws the filters from the server\'s answer, keeps
   assert.match(app, /await drawSearch\(new URLSearchParams\(location\.search\)\)/);
 });
 
+test('searching from the Tasks page carries the project chosen in its picker into the address as the Project filter (SP-191)', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const address = app.slice(app.indexOf('function searchAddress('), app.indexOf('/** Enter in the Search field'));
+  assert.match(address, /main\.querySelectorAll\('\.project-picker select, \.search-filters select'\)/);
+  assert.match(address, /params\.set\(select\.name, select\.value\)/);
+  // The picker's field is named what the server's Project filter reads, and the results page's row draws it.
+  assert.match(renderProjectPicker([{ slug: 'alpha', name: 'Alpha' }, { slug: 'beta', name: 'Beta' }], 'beta'),
+    /<select name="project"><option value="alpha">Alpha<\/option><option value="beta" selected>Beta<\/option><\/select>/);
+  assert.match(renderSearchFilters([{ key: 'project', label: 'Project', value: 'beta', options: [{ value: 'alpha', label: 'Alpha' }, { value: 'beta', label: 'Beta' }] }]),
+    /<label>Project\s*<select name="project"><option value="">Any<\/option><option value="alpha">Alpha<\/option><option value="beta" selected>Beta<\/option><\/select>/);
+  assert.deepEqual(activeFilters([{ key: 'project', label: 'Project', value: 'beta', options: [{ value: 'beta', label: 'Beta' }] }]), ['Project: Beta']);
+});
+
 // ── Set up a project (SP-127) ────────────────────────────────────────────────
 
 /**
