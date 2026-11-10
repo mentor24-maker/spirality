@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { seedDemo, tickingClock } from './demoData.mjs';
 import { reportsOf, REPORT_RANGES, searchTickets } from './pageData.mjs';
-import { escapeHtml, renderComment, renderInline, renderMarkdown, renderQuickAction, renderCommands, cardCommands, cardAsk, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket } from './web/render.mjs';
+import { escapeHtml, renderComment, renderInline, renderMarkdown, renderQuickAction, renderCommands, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket } from './web/render.mjs';
 import { startServer, setupSettingsOf } from './server.mjs';
 import { saveAnswers, setupFields, setupOf } from './setup.mjs';
 import { DANE_FIELDS as SETUP_FIELDS, STEPS as SETUP_STEPS } from '../scripts/onboard/onboard.mjs';
@@ -1100,6 +1100,90 @@ test('a command block that is never closed is not offered to copy', () => {
   }
   // Its red ask still ends at the closing rule, as before.
   assert.match(cardAsk(commandCards(needed).plain), /Reply done\.\nYour move: Reply — done\.$/);
+});
+
+// ── SP-169: commands written mid-sentence, and an ask laid out in steps ──────
+
+/** SP-23's card as the tracker holds it (comment 1716), word for word. */
+const SP23_CARD = [
+  "**DANE'S WORDS — the instruction behind this ticket**",
+  '',
+  '```',
+  'a wizard copy now is fine for now',
+  '```',
+  "*(2026-11-08, quoted in this ticket's Goal)*",
+  '',
+  "**WHAT'S GOING ON**",
+  '',
+  'Everything this move waits on is finished, so WaveCenter can now leave ClickUp for the tracker. The ticket itself says a loop must not do it: the setup wizard\'s first step stops WaveCenter\'s lanes and the move runs on the Mini, so an unattended pass would cut itself off halfway. It needs a session started by hand on the Mini, which runs `npm run onboard -- --product wavecenter` and answers that WaveCenter is already on ClickUp. Nothing was built and nothing in ClickUp changed.',
+  '',
+  '**#############################**',
+  '**NEEDED FROM DANE: A decision that is genuinely yours: when to switch WaveCenter\'s pipeline over (the risk is high; switching back is documented in docs/TRACKER_MVP.md). Options:**',
+  '**A) "go now": you start a Claude session by hand on the Mini, in Spirality\'s folder, and ask it to run SP-23. The session runs every command; you merge the wizard\'s pull request in WaveCenter afterwards, as always.**',
+  '**B) "later": name a time and it waits here.**',
+  '**Your move: Reply "go now" or a time, because only a session you start by hand can make this move.**',
+  '**#############################**',
+].join('\n');
+
+test('SP-23\'s card: the command in its WHAT\'S GOING ON gets a Copy box, and stays in the sentence', () => {
+  assert.deepEqual(cardCommands(SP23_CARD), ['npm run onboard -- --product wavecenter']);
+  const html = renderCommands({ comments: [{ body: SP23_CARD }] });
+  assert.deepEqual(codes(html), ['npm run onboard -- --product wavecenter'], 'Copy copies exactly that text');
+  assert.equal(html.match(/class="copy-command">Copy</g).length, 1);
+  const quick = renderQuickAction({ name: 'SP-23', description: '', status: 'needs your input', comments: [{ body: SP23_CARD }] });
+  assert.match(quick, /<p class="summary">[^]*which runs <code>npm run onboard -- --product wavecenter<\/code> and answers/);
+});
+
+test('SP-23\'s red ask: Options: starts a new paragraph, each option and Your move on a line of its own', () => {
+  const quick = renderQuickAction({ name: 'SP-23', description: '', status: 'needs your input', comments: [{ body: SP23_CARD }] });
+  const needed = [...quick.matchAll(/<p class="needed">([\s\S]*?)<\/p>/g)].map((m) => m[1].split('<br>'));
+  assert.equal(needed.length, 2);
+  assert.deepEqual(needed[0], ['A decision that is genuinely yours: when to switch WaveCenter&#39;s pipeline over (the risk is high; switching back is documented in docs/TRACKER_MVP.md).']);
+  assert.equal(needed[1].length, 4);
+  assert.equal(needed[1][0], 'Options:');
+  assert.match(needed[1][1], /^A\) &quot;go now&quot;/);
+  assert.match(needed[1][2], /^B\) &quot;later&quot;/);
+  assert.match(needed[1][3], /^Your move: Reply/);
+});
+
+test('an ask with its options run together on one line reads one option per line', () => {
+  assert.deepEqual(askParagraphs('Pick where it runs. Options: A) the Mini. B) a hosted server. C) wait. Your move: Reply — A, B or C.'), [
+    ['Pick where it runs.'],
+    ['Options:', 'A) the Mini.', 'B) a hosted server.', 'C) wait.', 'Your move: Reply — A, B or C.'],
+  ]);
+  // Without the word Options:, a run of two or more still splits.
+  assert.deepEqual(askParagraphs('Reply A) yes or B) no.'), [['Reply', 'A) yes or', 'B) no.']]);
+  // Lines already split stay as written; a lone "plan B)" in a sentence is no list.
+  assert.deepEqual(askParagraphs('Reply A or B.\nA is cheaper.\nYour move: Reply — new.'), [['Reply A or B.', 'A is cheaper.', 'Your move: Reply — new.']]);
+  assert.deepEqual(askParagraphs('Keep plan B) in mind.\nYour move: Reply — ok.'), [['Keep plan B) in mind.', 'Your move: Reply — ok.']]);
+  // Nothing inside inline code or a fenced block is cut.
+  assert.deepEqual(askParagraphs('Run `echo "Options: A) x B) y"` now. Your move: Reply — done.'), [['Run `echo "Options: A) x B) y"` now.', 'Your move: Reply — done.']]);
+  assert.deepEqual(askParagraphs('Run:\n```\necho A) x B) y Options: z\n```\nYour move: Reply — done.'), [['Run:', '```', 'echo A) x B) y Options: z', '```', 'Your move: Reply — done.']]);
+});
+
+test('inline code that is not a command gets no Copy box; a command fenced and inline gets one', () => {
+  for (const text of ['docs/TRACKER_MVP.md', 'Waits on:', 'git', 'npm', 'Building', 'scripts/']) assert.equal(isCommand(text), false, text);
+  for (const text of ['npm run verify', 'git status', 'gh pr view 7', 'scripts/install_loop_runner.sh --status', 'scripts/foo.sh', 'launchctl list']) assert.equal(isCommand(text), true, text);
+  const needed = 'See `docs/TRACKER_MVP.md` and the `Waits on:` line, then run `npm run verify`:\n```\nnpm run verify\n```\nthen `git status`.';
+  for (const body of Object.values(commandCards(needed))) {
+    assert.deepEqual(cardCommands(body), ['npm run verify', 'git status'], 'the fenced one first, each once');
+    assert.equal(renderCommands({ comments: [{ body }] }).match(/class="copy-command"/g).length, 2);
+  }
+  // A context command and the same command in the ask: one box.
+  const sixty = Array.from({ length: 58 }, (_, i) => `w${i}`).join(' ');
+  const body = machineComment.stripMachineMarker(operatorCard.buildCard(
+    `@@ASKED\nbuild it\n@@CONTEXT\n${sixty} run \`npm run doctor\`\n@@NEEDED\nRun \`npm run doctor\` then reply.\nYour move: Reply — done.`).rendered);
+  assert.deepEqual(cardCommands(body), ['npm run doctor']);
+});
+
+test('an inline command reaches the Copy box escaped', () => {
+  const nasty = 'npm run x -- "<script>alert(1)</script>" & <img src=x onerror=y>';
+  const body = commandCards(`Run \`${nasty}\` then reply.`).plain;
+  const html = renderCommands({ comments: [{ body }] });
+  assert.doesNotMatch(html, /<script|<img/);
+  assert.deepEqual(codes(html), [nasty]);
+  const quick = renderQuickAction({ name: 'x', description: '', status: 'needs your input', comments: [{ body }] });
+  assert.doesNotMatch(quick, /<script|<img/);
 });
 
 test('Copy works on the Mini\'s plain http page and a second click restarts the "Copied" timer', () => {
