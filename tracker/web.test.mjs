@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { seedDemo, tickingClock } from './demoData.mjs';
 import { reportsOf, REPORT_RANGES, searchTickets } from './pageData.mjs';
-import { escapeHtml, renderComment, renderInline, renderMarkdown, renderQuickAction, renderCommands, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket } from './web/render.mjs';
+import { escapeHtml, renderComment, renderInline, renderMarkdown, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket } from './web/render.mjs';
 import { startServer, setupSettingsOf } from './server.mjs';
 import { saveAnswers, setupFields, setupOf } from './setup.mjs';
 import { DANE_FIELDS as SETUP_FIELDS, STEPS as SETUP_STEPS } from '../scripts/onboard/onboard.mjs';
@@ -920,7 +920,7 @@ test('an operator card draws its NEEDED FROM DANE banner in the red box, as `ask
 
 test('the ticket page opens on the Quick Action section, with everything it showed before in a closed Details box', () => {
   const app = readFileSync(WEB('app.mjs'), 'utf8');
-  const page = /main\.innerHTML = `\s*<section class="quick">([\s\S]*?)<\/section>\s*<details class="details">([\s\S]*?)<\/details>`;/.exec(app);
+  const page = /main\.innerHTML = `\s*<section class="quick">([\s\S]*?)<\/section>\s*(?:\$\{renderFilesMade\(t\)\}\s*)?<details class="details">([\s\S]*?)<\/details>`;/.exec(app);
   assert.ok(page, 'Quick Action first, then Details');
   const [, quick, details] = page;
   assert.match(quick, /renderQuickAction\(t\)/);
@@ -2820,4 +2820,95 @@ test('busLink: the header count of unseen bus posts, opening the Team chat with 
   assert.equal(link.text, '4 New on the Bus');
   assert.equal(link.href, '/t/SB-1#comments', 'the posts are in the Details fold: #comments opens it');
   assert.equal(link.title, 'StarCaster Bus: 3 new posts on Team chat; WaveCenter Bus: 1 new post on Team chat');
+});
+
+// ── SP-170: the Files Made box, drawn from the relay's merge note (SP-166) ───
+test.describe('Files Made: the files a ticket made, from its newest merge note', () => {
+  const { filesMadeLines } = mergeOnComment;
+  const { stampMachineComment } = machineComment;
+  const REPO = 'some-owner/some-repo';
+  // The note exactly as the relay writes it: its own list builder, then the stamp.
+  const note = (paths, { number = 7, limit } = {}) => stampMachineComment([
+    `Merged: PR #${number} (https://github.com/${REPO}/pull/${number}) squash-merged into main at 2026-11-09T12:00:00Z, on your comment 1.`,
+    'Checks were green and the branch was up to date at merge time; the branch has been deleted.',
+    '',
+    'This ticket is now Live (its PR merged).',
+    '',
+    ...filesMadeLines({ repo: REPO, branch: 'main', files: paths.map((filename) => ({ filename, status: 'added' })), limit }).lines,
+    '',
+    '(Automatic — relay merge step.)',
+  ].join('\n'));
+  const loop = (body) => ({ body, machine: true });
+  const hrefs = (html) => [...html.matchAll(/href="([^"]*)"/g)].map((m) => m[1]);
+
+  test('a merge note that lists files gives one link per file, to the address in the note', () => {
+    const comments = [loop('PR opened: https://github.com/x/y/pull/7'), loop(note(['docs/OVERVIEW.md', 'lib/new.js']))];
+    assert.deepEqual(filesMade(comments), [
+      { path: 'docs/OVERVIEW.md', href: `https://github.com/${REPO}/blob/main/docs/OVERVIEW.md` },
+      { path: 'lib/new.js', href: `https://github.com/${REPO}/blob/main/lib/new.js` },
+    ]);
+    const html = renderFilesMade({ comments });
+    assert.match(html, /<h2>Files Made<\/h2>/);
+    assert.deepEqual(hrefs(html), filesMade(comments).map((f) => f.href));
+    assert.match(html, />docs\/OVERVIEW\.md<\/a>/, 'the path is the link text');
+    assert.equal((html.match(/target="_blank"/g) || []).length, 2, 'each opens in a new tab');
+  });
+
+  test('no merge note, or one with no list, draws nothing: no box, no empty heading', () => {
+    assert.deepEqual(filesMade([]), []);
+    assert.equal(renderFilesMade({ comments: [] }), '');
+    const noFiles = loop(note([]));
+    assert.equal(renderFilesMade({ comments: [loop('PR opened: https://github.com/x/y/pull/7'), noFiles] }), '');
+    const unreadable = loop(`Merged: PR #7 (https://x) squash-merged.\n\n${mergeOnComment.FILES_MADE_UNREADABLE}`);
+    assert.equal(renderFilesMade({ comments: [unreadable] }), '');
+  });
+
+  test('with two merge notes (a ticket built in slices), the newest list is shown', () => {
+    const comments = [loop(note(['old/first.md'], { number: 7 })), loop('later talk'), loop(note(['new/second.md'], { number: 9 }))];
+    assert.deepEqual(filesMade(comments).map((f) => f.path), ['new/second.md']);
+    // A newer merge with no new files does not hide the list an older one made.
+    const thenNone = [...comments, loop(note([], { number: 11 }))];
+    assert.deepEqual(filesMade(thenNone).map((f) => f.path), ['new/second.md']);
+  });
+
+  test('a line whose link is not http(s) is left out, never drawn as a link', () => {
+    const body = [
+      'Merged: PR #7 (https://github.com/x/y/pull/7) squash-merged into main.',
+      '',
+      'Files made by this ticket:',
+      '- good.md: https://github.com/x/y/blob/main/good.md',
+      '- bad.md: javascript:alert(1)',
+      '- worse.md: data:text/html,<script>alert(1)</script>',
+      '- nolink.md',
+    ].join('\n');
+    const html = renderFilesMade({ comments: [loop(body)] });
+    assert.deepEqual(filesMade([loop(body)]).map((f) => f.path), ['good.md']);
+    assert.deepEqual(hrefs(html), ['https://github.com/x/y/blob/main/good.md']);
+    assert.doesNotMatch(html, /javascript:|data:|bad\.md|worse\.md/);
+  });
+
+  test('paths and links are escaped: < and " show as text, never as markup', () => {
+    const body = 'Merged: PR #7 (https://x) squash-merged.\n\nFiles made by this ticket:\n'
+      + '- docs/<img src=x onerror=alert(1)>"q".md: https://github.com/x/y/blob/main/a"onmouseover="alert(1)';
+    const html = renderFilesMade({ comments: [loop(body)] });
+    assert.doesNotMatch(html, /<img|"q"|"onmouseover/);
+    assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;&quot;q&quot;\.md/);
+    assert.match(html, /href="https:\/\/github\.com\/x\/y\/blob\/main\/a&quot;onmouseover=&quot;alert\(1\)"/);
+  });
+
+  test('only a loop\'s merge note counts: a person quoting one draws nothing', () => {
+    assert.deepEqual(filesMade([{ body: note(['docs/a.md']), machine: false }]), []);
+  });
+
+  test('a list cut short says how many more, without inventing links for them', () => {
+    const html = renderFilesMade({ comments: [loop(note(['a.md', 'b.md', 'c.md'], { limit: 2 }))] });
+    assert.equal(hrefs(html).length, 2);
+    assert.match(html, /And 1 more: see the pull request's Files changed tab\./);
+  });
+
+  test('the ticket page draws the box between the Quick Action section and the Details fold', () => {
+    const app = readFileSync(WEB('app.mjs'), 'utf8');
+    assert.match(app, /<\/section>\s*\$\{renderFilesMade\(t\)\}\s*<details class="details">/);
+    assert.match(readFileSync(WEB('app.css'), 'utf8'), /\.files-made \{[^}]*background:[^}]*border:/);
+  });
 });

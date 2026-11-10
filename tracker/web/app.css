@@ -32,6 +32,11 @@ td.when, td.status, td.project { white-space: nowrap; }
 .meta { color: var(--quiet); margin: 0.25rem 0 1.5rem; }
 .meta span + span::before { content: " · "; }
 .description { border: var(--hairline); border-radius: 8px; padding: 0.5rem 1.25rem; margin-bottom: 2rem; }
+/* SP-170: the files a ticket made, tinted so they stand out; ink set here so it reads on the tint. */
+.files-made { background: #eaf5fe; color: var(--ink); border: 2px solid var(--blue); border-radius: 8px; padding: 0.5rem 1.25rem; margin-bottom: 2rem; }
+.files-made h2 { margin: 0.5rem 0; font-size: 1.1rem; }
+.files-made ul { margin: 0.25rem 0 0.5rem; padding-left: 1.25rem; }
+.files-made a { color: #0b5ea8; font-weight: 600; word-break: break-all; }
 .comment { border: var(--hairline); border-radius: 8px; padding: 0.75rem 1.25rem; margin: 0 0 1rem; }
 .comment.machine { background: var(--machine); }
 .comment .by { font-size: 0.85rem; color: var(--quiet); margin-bottom: 0.25rem; }
