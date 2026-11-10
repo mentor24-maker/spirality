@@ -34,15 +34,16 @@ function run(fn, mode) {
     writeFileSync(join(dir, 'out'), out);
     writeFileSync(join(bin, 'gh'), `#!/bin/bash
 echo "$*" >> "${dir}/calls"
-cat "${dir}/out"
+/bin/cat "${dir}/out"
 exit ${mode === 'out' ? 1 : 0}
 `);
     chmodSync(join(bin, 'gh'), 0o755);
   }
-  // bash itself is found by absolute path; the functions only see LAUNCHD_PATH.
+  // LAUNCHD_PATH is the fake folder alone, so a real gh elsewhere (CI has one
+  // in /usr/bin) is never found; the shell's own PATH keeps sed and head.
   const r = spawnSync('/bin/bash', ['-c', `set -euo pipefail; source "$1"; ${fn}`, 'x', LIB], {
     encoding: 'utf8',
-    env: { LAUNCHD_PATH: `${bin}:/usr/bin:/bin`, PATH: '/usr/bin:/bin', HOME: dir },
+    env: { LAUNCHD_PATH: bin, PATH: '/usr/bin:/bin', HOME: dir },
   });
   let calls = '';
   try { calls = readFileSync(join(dir, 'calls'), 'utf8'); } catch { /* gh never ran */ }
