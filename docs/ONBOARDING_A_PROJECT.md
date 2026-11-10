@@ -26,6 +26,9 @@ every item below walked for one real project, with its tickets.
 Looking back: how Normie's setup really went, its hold-ups, and a setup
 wizard for the next project, [docs/onboarding/SETUP_REVIEW.md](onboarding/SETUP_REVIEW.md).
 
+A project already on ClickUp: how WaveCenter's move went, where the wizard
+stopped and what was left over, [docs/onboarding/WAVECENTER.md](onboarding/WAVECENTER.md).
+
 ## The way in: one command
 
 On the Mini, from Spirality's own folder, in a Terminal that is not one of
