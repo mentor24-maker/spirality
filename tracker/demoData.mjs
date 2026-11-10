@@ -8,6 +8,7 @@
  */
 import operatorCard from '../lib/operatorCard.js';
 import machineComment from '../lib/machineComment.js';
+import mergeOnComment from '../lib/mergeOnComment.js';
 import substrateConfig from '../lib/substrateConfig.js';
 import humanHours from '../lib/humanHours.js';
 
@@ -95,7 +96,22 @@ export function seedDemo(store, { operatorName = substrateConfig.operatorName(),
   file('alpha', 'A send-back with review notes', 'rework', { priority: 'normal' }, 'machine');
   file('alpha', 'A ticket a build loop is on', 'building', { priority: 'high' }, 'machine');
   file('alpha', 'A pull request waiting for review', 'in review', { tags: ['tracker'] }, 'machine');
-  file('alpha', 'Finished and merged', 'live', { priority: 'normal' }, 'machine');
+  const merged = file('alpha', 'Finished and merged', 'live', { priority: 'normal' }, 'machine');
+  // The relay's merge note, with the files the pull request made: its page shows the Files Made box (SP-170).
+  say(merged, loop.id, 'PR opened: https://github.com/example/repo/pull/9');
+  say(merged, loop.id, stampMachineComment([
+    'Merged: PR #9 (https://github.com/example/repo/pull/9) squash-merged into main at 2026-11-09T12:00:00Z, on your comment 1.',
+    'Checks were green and the branch was up to date at merge time; the branch has been deleted.',
+    '',
+    'This ticket is now Live (its pull request merged).',
+    '',
+    ...mergeOnComment.filesMadeLines({
+      repo: 'example/repo', branch: 'main',
+      files: [{ filename: 'docs/OVERVIEW.md', status: 'added' }, { filename: 'lib/newModule.js', status: 'added' }],
+    }).lines,
+    '',
+    '(Automatic — relay merge step.)',
+  ].join('\n')));
   file('alpha', 'A request filed from the page', 'requested', { description: 'Nobody has specced it yet.' }, 'machine');
 
   const review = file('beta', 'Descriptions with HTML break the page: show them as text', 'ready to launch', {
