@@ -1355,3 +1355,48 @@ export function setupBody(fields, values) {
     return [f.key, typed === String(f.default ?? '').trim() ? null : typed];
   }));
 }
+
+/**
+ * The Docs page's Commands section (SP-179): the commands whose name or
+ * description holds `term`, case set aside; every one when `term` is blank.
+ * Those whose name holds it come first, so typing "review" puts
+ * /loop-review above the skills that only mention review.
+ */
+export function matchCommands(commands, term) {
+  const t = String(term ?? '').trim().toLowerCase();
+  if (!t) return commands;
+  const byName = commands.filter((c) => c.name.toLowerCase().includes(t));
+  const byWords = commands.filter((c) => !byName.includes(c) && String(c.description).toLowerCase().includes(t));
+  return [...byName, ...byWords];
+}
+
+/** Where one command's own page is: `/docs/commands/<name>`. */
+export const commandHref = (name) => `/docs/commands/${encodeURIComponent(name)}`;
+
+/**
+ * The Commands list under the search box: each command as `/<name>`, where
+ * it comes from and its description, its name linking to its steps. A
+ * search that leaves nothing says so; with no copied commands yet, one line
+ * says that too.
+ */
+export function renderCommandList(commands, term = '') {
+  const shown = matchCommands(commands, term);
+  const none = commands.some((c) => c.source === 'Your command')
+    ? ''
+    : '<p class="quiet commands-none">Your own commands have not been copied here yet: run <code>npm run commands:copy</code> on the computer they live on.</p>';
+  const rows = shown.map((c) => `<li data-command="${escapeHtml(c.name)}"><a href="${commandHref(c.name)}"><code>/${escapeHtml(c.name)}</code></a> <span class="quiet">${escapeHtml(c.source)}</span><br>${renderInline(c.description)}</li>`);
+  const list = shown.length
+    ? `<ul class="command-list">${rows.join('')}</ul>`
+    : `<p class="quiet">No command matches “${escapeHtml(String(term).trim())}”.</p>`;
+  return `${list}${none}`;
+}
+
+/** One command's page: its name, where it comes from, its description and its steps, formatted. */
+export function renderCommandView(command) {
+  return `
+    <h1><code>/${escapeHtml(command.name)}</code></h1>
+    <p class="quiet">${escapeHtml(command.source)}</p>
+    <p>${renderInline(command.description)}</p>
+    <div class="command-steps">${renderMarkdown(command.steps)}</div>
+    <p><a href="/docs">Back to Docs</a></p>`;
+}

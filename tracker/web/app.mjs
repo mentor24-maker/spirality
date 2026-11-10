@@ -26,7 +26,7 @@
  * an emailed link's own page. The link's token is sent only in a JSON body,
  * never in an address.
  */
-import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, pipelinePodLabel } from './render.mjs';
+import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, pipelinePodLabel, renderCommandList, renderCommandView } from './render.mjs';
 
 /** Where an earlier version of the page kept a pasted token; removed on load, never read. */
 const OLD_TOKEN_KEY = 'tracker-token';
@@ -2178,7 +2178,7 @@ async function drawUsers(done = '', problem = '') {
 
 /**
  * The Docs page (SP-171): every file on the selected project's tasks in one
- * Task Files table, newest first. The project is the one picked on the
+ * Task Files table, newest first, then the Commands section (SP-179). The project is the one picked on the
  * Projects page (shown in the header), else the first. A file's name
  * downloads it through the task's own download address; the task links to
  * its page. Look-only: adding, renaming and removing are SP-177's.
@@ -2188,11 +2188,14 @@ async function drawDocs() {
   setTitle('Docs · Tracker');
   putTrail([{ label: 'Docs' }]);
   if (!projects.length) {
-    main.innerHTML = '<h1>Docs</h1><p class="quiet">There are no projects yet.</p>';
+    const { commands } = await api('GET', '/commands');
+    main.innerHTML = `<h1>Docs</h1><p class="quiet">There are no projects yet.</p>${commandsSection()}`;
+    showCommands(commands);
     return;
   }
   const project = projects.find((p) => p.slug === savedProject()) ?? projects[0];
   const { attachments } = await api('GET', `/projects/${encodeURIComponent(project.slug)}/attachments`);
+  const { commands } = await api('GET', '/commands');
   const row = (a) => {
     const href = `/tickets/${encodeURIComponent(a.ticket)}/attachments/${encodeURIComponent(a.id)}`;
     return `<tr data-file="${escapeHtml(a.id)}">
@@ -2210,7 +2213,41 @@ async function drawDocs() {
     ${attachments.length
     ? `<table class="projects task-files"><thead><tr><th>File</th><th>Task</th><th>Type</th><th>Size</th><th>Added By</th><th>Added On</th></tr></thead>
       <tbody>${attachments.map(row).join('')}</tbody></table>`
-    : `<p class="quiet">No task in ${escapeHtml(project.name)} has a file yet.</p>`}`;
+    : `<p class="quiet">No task in ${escapeHtml(project.name)} has a file yet.</p>`}
+    ${commandsSection()}`;
+  showCommands(commands);
+}
+
+/**
+ * The Docs page's Commands section (SP-179): a search box over every slash
+ * command (GET /commands), each opening its own page. Typing filters the
+ * list by name or description as it is typed; nothing is read again.
+ */
+function commandsSection() {
+  return `
+    <h2>Commands</h2>
+    <p class="quiet">Every slash command you can give a session: your own and the loop skills. Type part of a name or what you want to do.</p>
+    <input type="search" id="command-search" aria-label="Find a command" placeholder="Find a command" autocomplete="off">
+    <div id="command-list"></div>`;
+}
+
+function showCommands(commands) {
+  const box = document.getElementById('command-search');
+  const list = document.getElementById('command-list');
+  const show = () => { list.innerHTML = renderCommandList(commands, box.value); };
+  box.addEventListener('input', show);
+  show();
+}
+
+/** One command's own page, `/docs/commands/<name>`: its steps drawn as formatted text, and a way back. */
+async function drawCommand(name) {
+  const { commands } = await api('GET', '/commands');
+  const command = commands.find((c) => c.name === name);
+  setTitle(command ? `/${name} · Docs · Tracker` : 'Docs · Tracker');
+  main.innerHTML = command
+    ? renderCommandView(command)
+    : `<h1>No Such Command</h1><p class="quiet">There is no command named /${escapeHtml(name)}.</p><p><a href="/docs">Back to Docs</a></p>`;
+  putTrail([{ label: 'Docs', href: '/docs' }, { label: command ? `/${command.name}` : name }]);
 }
 
 /** Underline the header link (or the bell, for Waiting on you) for the screen showing. */
@@ -2264,14 +2301,15 @@ async function route({ place = null } = {}) {
     const reporting = location.pathname === '/reporting';
     const usersPage = location.pathname === '/users';
     const docsPage = location.pathname === '/docs';
+    const docsCommand = /^\/docs\/commands\/([^/]+)$/.exec(location.pathname);
     const search = location.pathname === '/search';
     const setupNew = location.pathname === '/setup/new';
     const setupAnswers = /^\/setup\/([^/]+)\/answers$/.exec(location.pathname);
     const setupPage = !setupNew && /^\/setup\/([^/]+)$/.exec(location.pathname);
     const setupAny = setupNew || setupAnswers || setupPage;
     let following = false;
-    const waiting = !(setupAny || search || reporting || settings || usersPage || docsPage || isNew || ticket || projects || newProject || editProject || details || tasks || project);
-    markNav(reporting ? 'reporting' : settings ? 'settings' : usersPage ? 'users' : docsPage ? 'docs' : projects || newProject || details || editProject || setupAny ? 'projects' : ticket || project || tasks || isNew || search ? 'tasks' : 'waiting');
+    const waiting = !(setupAny || search || reporting || settings || usersPage || docsPage || docsCommand || isNew || ticket || projects || newProject || editProject || details || tasks || project);
+    markNav(reporting ? 'reporting' : settings ? 'settings' : usersPage ? 'users' : docsPage || docsCommand ? 'docs' : projects || newProject || details || editProject || setupAny ? 'projects' : ticket || project || tasks || isNew || search ? 'tasks' : 'waiting');
     if (setupNew) {
       await drawSetupNew(null);
     } else if (setupAnswers) {
@@ -2288,6 +2326,8 @@ async function route({ place = null } = {}) {
       await drawUsers();
     } else if (docsPage) {
       await drawDocs();
+    } else if (docsCommand) {
+      await drawCommand(decodeURIComponent(docsCommand[1]));
     } else if (isNew) {
       // The old New request address: the Tasks page with its Add Task box open.
       await drawTasks(savedView(), { adding: true });

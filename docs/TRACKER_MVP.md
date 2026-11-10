@@ -249,6 +249,7 @@ answers are JSON (structured text programs read).
 | `POST /signout` | **no token**: ends the cookie's session and clears the cookie |
 | `POST /account/forgot` | **no token**: `{ email }` → the same answer whether or not the email has an account; an account's email is sent a 1-hour `reset` link through Resend after the answer has gone back. Sent with an outside site's own token (`authorization: Bearer <site token>`), the link opens `<site's page>?link=<token>`; with any other token or none, the tracker's set-password page; the answer is the same either way. The log says whether it went, never the link or the email |
 | `GET /projects/:slug/attachments` | for the Docs page: every file on the project's tickets, newest first, `{ project, attachments: [{ id, ticket, ticketName, name, type, size, addedBy, addedByName, createdAt }] }`, never the bytes. A project the caller is not on is 404, the same as one that does not exist |
+| `GET /commands` | for the Docs page's Commands section: `{ commands: [{ name, source, description, steps }] }`, Your commands (`commands/`) then Loop skills (`.claude/skills/`), each by name; `steps` is the `SKILL.md` text below its front matter. No other file is read |
 | `POST /tickets/:id/attachments` | attach a file: the raw file as the body (`content-type: application/octet-stream`, which a form on another site cannot send, so the cookie may make this one write that is not JSON), its name percent-encoded in `x-file-name`, its type in `x-file-type`. Answers 201 with `{ id, ticket, name, type, size, addedBy, createdAt }`, read back byte for byte. Over 10 MB is 413 `too-large` ("That file is over 10 MB. Attach a smaller one; nothing was saved."); an empty file or no name is 400; nothing is stored. The JSON calls' 1 MB limit is unchanged |
 | `GET /tickets/:id/attachments` | a ticket's files, oldest first, without their bytes (the ticket page reads the same list in `thread`) |
 | `GET /tickets/:id/attachments/:n` | one file, byte for byte, always as a download (`Content-Disposition: attachment`, `X-Content-Type-Options: nosniff`, a sandboxing `Content-Security-Policy`), so an uploaded HTML file can never run as the tracker's page |
@@ -322,6 +323,20 @@ opens it), its type, size, who added it and when. A project with no files
 says so in a line. It reads `GET /projects/:slug/attachments`, which answers
 the list without the bytes, to members of the project only; downloads stay
 with `GET /tickets/:id/attachments/:n`. Look-only for now.
+Below it, **Commands** lists every slash command a session can be given
+(SP-179): Dane's own, from `commands/<name>/SKILL.md` (marked Your command),
+and the loop skills, from `.claude/skills/<name>/SKILL.md` (marked Loop
+skill), each as `/<name>` with its description. A search box filters the list
+as it is typed, by name or by what the command does, name matches first.
+Clicking one opens `/docs/commands/<name>`: its steps formatted, and Back to
+Docs. It reads `GET /commands`, signed in only, which reads nothing but a
+`SKILL.md` directly inside a folder directly inside those two (no links, no
+deeper files; `tracker/commands.mjs`). `commands/` is a copy: the originals
+live in `~/.claude/skills/` on the MacBook, and `npm run commands:copy` run
+there refreshes it (it copies only each `SKILL.md`, removes a copy whose
+original is gone, and writes nothing when a file looks like it holds a key,
+when a name is not plain, or when it finds no commands at all); the refreshed
+copy goes in through a pull request.
 A browser opening `/projects` or `/projects/<slug>` gets the page; the page's own
 call to the same address gets the data. `/users` is the page alone; its data
 is still `GET /people` (the onboarding scripts read it), and a browser opening

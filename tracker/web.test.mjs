@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { seedDemo, tickingClock } from './demoData.mjs';
 import { reportsOf, REPORT_RANGES, searchTickets } from './pageData.mjs';
-import { escapeHtml, renderComment, renderInline, renderMarkdown, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel } from './web/render.mjs';
+import { escapeHtml, renderComment, renderInline, renderMarkdown, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, commandHref } from './web/render.mjs';
 import { startServer, setupSettingsOf } from './server.mjs';
 import { saveAnswers, setupFields, setupOf } from './setup.mjs';
 import { DANE_FIELDS as SETUP_FIELDS, STEPS as SETUP_STEPS } from '../scripts/onboard/onboard.mjs';
@@ -2298,7 +2298,7 @@ test('Docs is in the header between Users and Settings, served at /docs to a bro
     assert.equal((await f.call('GET', '/projects/alpha/attachments', { token: null })).status, 401);
   } finally { await f.cleanup(); }
   const app = readFileSync(WEB('app.mjs'), 'utf8');
-  assert.match(app, /docsPage \? 'docs' :/);
+  assert.match(app, /docsPage \|\| docsCommand \? 'docs' :/);
   assert.match(app, /\} else if \(docsPage\) \{\s*await drawDocs\(\);/);
   const draw = app.slice(app.indexOf('async function drawDocs'), app.indexOf('/** Underline the header link'));
   assert.match(draw, /projects\.find\(\(p\) => p\.slug === savedProject\(\)\) \?\? projects\[0\]/, 'the project picked in the header, else the first');
@@ -2310,6 +2310,78 @@ test('Docs is in the header between Users and Settings, served at /docs to a bro
   for (const heading of ['File', 'Task', 'Type', 'Size', 'Added By', 'Added On']) assert.match(draw, new RegExp(`<th>${heading}</th>`), heading);
   assert.match(draw, /No task in .* has a file yet\./, 'an empty project says so in a line');
   assert.doesNotMatch(draw, /\$\{a\.(name|ticketName|addedByName|type)\}/, 'every name is escaped');
+});
+
+// ── Docs: Commands (SP-179) ─────────────────────────────────────────────────
+
+const COMMANDS = [
+  { name: 'why-stuck', source: 'Your command', description: 'Find out why a ticket is stuck.', steps: '# Why Stuck\n\n1. Read the ticket.\n2. Say why.\n\n```\nnpm run clickup -- waiting\n```\n' },
+  { name: 'loop-review', source: 'Loop skill', description: 'Review the next pull request.', steps: '# Loop: Review\n\n- one\n' },
+  { name: 'loop-spec', source: 'Loop skill', description: 'Turn an idea into tickets.', steps: 'x' },
+];
+
+test('the Commands search keeps a command whose name or description holds the words typed, case set aside', () => {
+  assert.deepEqual(matchCommands(COMMANDS, 'stuck').map((c) => c.name), ['why-stuck']);
+  assert.deepEqual(matchCommands(COMMANDS, 'REVIEW').map((c) => c.name), ['loop-review']);
+  assert.deepEqual(matchCommands(COMMANDS, 'tickets').map((c) => c.name), ['loop-spec'], 'by what it does, too');
+  assert.deepEqual(matchCommands(COMMANDS, '  ').map((c) => c.name), ['why-stuck', 'loop-review', 'loop-spec']);
+  const mentions = [{ name: 'loop-build', description: 'then move it to In review' }, { name: 'loop-review', description: 'Check a pull request.' }];
+  assert.deepEqual(matchCommands(mentions, 'review').map((c) => c.name), ['loop-review', 'loop-build'], 'a name match comes before a description match');
+});
+
+test('the Commands list shows /<name>, its source and description, linking to its own page; no match and nothing copied yet each say so', () => {
+  const html = renderCommandList(COMMANDS, 'review');
+  assert.match(html, /<a href="\/docs\/commands\/loop-review"><code>\/loop-review<\/code><\/a> <span class="quiet">Loop skill<\/span><br>Review the next pull request\./);
+  assert.doesNotMatch(html, /why-stuck|loop-spec/);
+  assert.doesNotMatch(html, /not been copied/, 'a copied command is listed, so no such line');
+  assert.match(renderCommandList(COMMANDS, 'zebra'), /No command matches “zebra”\./);
+  const skillsOnly = renderCommandList(COMMANDS.filter((c) => c.source === 'Loop skill'));
+  assert.match(skillsOnly, /\/loop-review[\s\S]*\/loop-spec/);
+  assert.match(skillsOnly, /Your own commands have not been copied here yet: run <code>npm run commands:copy<\/code>/);
+  const evil = renderCommandList([{ name: 'x', source: 'Your command', description: '<img src=x onerror=alert(1)>', steps: '' }], '<b>');
+  assert.doesNotMatch(evil, /<img|<b>/);
+  assert.equal(commandHref('a b'), '/docs/commands/a%20b');
+  assert.match(renderCommandList([{ name: 'x', source: 'Loop skill', description: 'Runs `npm run verify` first.', steps: '' }]), /Runs <code>npm run verify<\/code> first\./, 'code in a description is drawn as code');
+});
+
+test('a command\'s own page draws its steps formatted (headings, lists, code) with a Back to Docs link, and escapes its words', () => {
+  const html = renderCommandView(COMMANDS[0]);
+  assert.match(html, /<h1><code>\/why-stuck<\/code><\/h1>/);
+  assert.match(html, /Your command/);
+  assert.match(html, /<h\d[^>]*>Why Stuck<\/h\d>/, 'a heading, not "# Why Stuck"');
+  assert.match(html, /<ol>[\s\S]*<li>Read the ticket\.<\/li>/);
+  assert.match(html, /<pre[^>]*>[\s\S]*npm run clickup -- waiting/);
+  assert.doesNotMatch(html, /# Why Stuck/);
+  assert.match(html, /<a href="\/docs">Back to Docs<\/a>/);
+  assert.doesNotMatch(renderCommandView({ ...COMMANDS[0], name: '<x>', description: '<y>' }), /<x>|<y>/);
+});
+
+test('the Docs page carries the Commands section; /docs/commands/<name> opens one command, served as the page to a browser', async () => {
+  const html = readFileSync(WEB('index.html'), 'utf8');
+  const f = await fixture();
+  try {
+    const page = await fetch(`${f.url}/docs/commands/loop-review`, { headers: { accept: 'text/html' } });
+    assert.equal(page.status, 200);
+    assert.equal(await page.text(), html);
+    const list = await f.call('GET', '/commands');
+    assert.equal(list.status, 200);
+    for (const name of ['loop-build', 'loop-intake', 'loop-review', 'loop-spec']) {
+      assert.ok(list.body.commands.some((c) => c.name === name && c.source === 'Loop skill'), name);
+    }
+    // Other loop skills mention review in their descriptions; the one named for it comes first.
+    assert.equal(matchCommands(list.body.commands, 'review')[0].name, 'loop-review');
+  } finally { await f.cleanup(); }
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const draw = app.slice(app.indexOf('async function drawDocs'), app.indexOf('/** Underline the header link'));
+  assert.match(draw, /await api\('GET', '\/commands'\)/);
+  assert.match(draw, /<h2>Commands<\/h2>/);
+  assert.match(draw, /<input type="search" id="command-search"/);
+  assert.match(draw, /box\.addEventListener\('input', show\)/);
+  assert.match(draw, /renderCommandList\(commands, box\.value\)/);
+  assert.match(draw, /renderCommandView\(command\)/);
+  assert.match(app, /const docsCommand = \/\^\\\/docs\\\/commands\\\/\(\[\^\/\]\+\)\$\/\.exec\(location\.pathname\)/);
+  assert.match(app, /\} else if \(docsCommand\) \{\s*await drawCommand\(decodeURIComponent\(docsCommand\[1\]\)\);/);
+  assert.match(app, /docsPage \|\| docsCommand \? 'docs' :/, 'Docs stays underlined in the header');
 });
 
 test('a browser opening /people (an old bookmark) is sent on to /users, never cached; the data call to /people still answers the data', async () => {

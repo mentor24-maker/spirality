@@ -274,3 +274,9 @@ ol.setup-steps .why { display: block; font-size: 0.85rem; }
 section.setups ul { padding-left: 1.5rem; }
 form.request .field-note { display: block; font-size: 0.85rem; }
 .board-live { margin-top: 1rem; }
+
+/* The Docs page's Commands section (SP-179): a search box and the list of slash commands. */
+#command-search { width: 100%; max-width: 24rem; box-sizing: border-box; font: inherit; padding: 0.35rem 0.6rem; border: var(--hairline); border-radius: 6px; margin: 0 0 0.5rem; }
+ul.command-list { list-style: none; padding: 0; margin: 0; max-width: 48rem; }
+ul.command-list li { padding: 0.6rem 0; border-bottom: var(--hairline); }
+.command-steps { max-width: 48rem; }

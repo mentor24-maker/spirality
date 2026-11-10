@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -2162,6 +2162,38 @@ test('a project\'s files are listed in one call, newest first, with each task\'s
     assert.equal(list.text.includes('hello'), false, 'never the bytes');
     assert.equal((await f.call('GET', '/projects/nope/attachments')).status, 404);
     assert.equal((await f.call('GET', '/projects/alpha/attachments', { token: null })).status, 401);
+  } finally { await f.cleanup(); }
+});
+
+test('GET /commands lists the checkout\'s commands and loop skills, signed in only, reading nothing outside the two folders (SP-179)', async () => {
+  const f = await fixture();
+  const root = join(f.dir, 'checkout');
+  const put = (folder, name, text) => {
+    mkdirSync(join(root, folder, name), { recursive: true });
+    writeFileSync(join(root, folder, name, 'SKILL.md'), text);
+  };
+  put('commands', 'why-stuck', '---\nname: why-stuck\ndescription: Find out why a ticket is stuck.\n---\n\n# Why stuck\n');
+  put('.claude/skills', 'loop-review', '---\nname: loop-review\ndescription: Review the next pull request.\n---\n\n# Loop: Review\n');
+  writeFileSync(join(f.dir, 'outside.md'), '---\nname: outside\ndescription: OUTSIDE-TEXT\n---\n');
+  mkdirSync(join(root, 'commands', 'linked'));
+  symlinkSync(join(f.dir, 'outside.md'), join(root, 'commands', 'linked', 'SKILL.md'));
+  try {
+    const server = await startServer({ store: f.store, port: 0, log: () => {}, commandsRoot: root });
+    const at = `http://127.0.0.1:${server.address().port}`;
+    try {
+      const r = await f.call('GET', '/commands', { token: f.humanToken, at });
+      assert.equal(r.status, 200, r.text);
+      assert.deepEqual(r.body.commands.map((c) => [c.name, c.source, c.description]), [
+        ['why-stuck', 'Your command', 'Find out why a ticket is stuck.'],
+        ['loop-review', 'Loop skill', 'Review the next pull request.'],
+      ]);
+      assert.equal(r.body.commands[1].steps, '# Loop: Review\n');
+      assert.equal(r.text.includes('OUTSIDE-TEXT'), false, 'a linked file is never read');
+      assert.equal((await f.call('GET', '/commands', { token: null, at })).status, 401);
+    } finally { await new Promise((done) => server.close(done)); }
+    // With no root given, the tracker lists its own checkout's loop skills.
+    const own = await f.call('GET', '/commands', { token: f.humanToken });
+    assert.ok(['loop-build', 'loop-intake', 'loop-review', 'loop-spec'].every((n) => own.body.commands.some((c) => c.name === n && c.source === 'Loop skill')));
   } finally { await f.cleanup(); }
 });
 
