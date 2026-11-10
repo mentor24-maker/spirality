@@ -263,6 +263,7 @@ answers are JSON (structured text programs read).
 | `POST /account/forgot` | **no token**: `{ email }` → the same answer whether or not the email has an account; an account's email is sent a 1-hour `reset` link through Resend after the answer has gone back. Sent with an outside site's own token (`authorization: Bearer <site token>`), the link opens `<site's page>?link=<token>`; with any other token or none, the tracker's set-password page; the answer is the same either way. The log says whether it went, never the link or the email |
 | `GET /documentation` | for the Docs page: every `.md` file in this repository's `docs/` folder and its subfolders, `{ files: [{ path, title }] }`, the folder's own files first. `GET /documentation/<path>` answers one, `{ path, title, text }`; a path outside `docs/` (`..`, absolute, a link out) or not a `.md` file is 404 and reads nothing |
 | `GET /projects/:slug/attachments` | for the Docs page: every file on the project's tickets, newest first, `{ project, attachments: [{ id, ticket, ticketName, name, type, size, addedBy, addedByName, createdAt }] }`, never the bytes. A project the caller is not on is 404, the same as one that does not exist |
+| `GET /commands` | for the Docs page's Commands section: `{ commands: [{ name, source, description, steps }] }`, Your commands (`commands/`) then Loop skills (`.claude/skills/`), each by name; `steps` is the `SKILL.md` text below its front matter. No other file is read |
 | `GET /projects/:slug/docs` | the project's context documents, newest first, `{ project, docs: [{ id, project, name, type, size, addedBy, addedByName, createdAt }] }`, never the bytes |
 | `POST /projects/:slug/docs` | upload one context document, sent exactly as a ticket's attachment (the raw file, `x-file-name`, `x-file-type`), with the same 10 MB limit and refusals. Answers 201 with the document as listed, read back byte for byte |
 | `GET /projects/:slug/docs/:n` | one context document, byte for byte, always as a download (the same headers as an attachment's) |
@@ -365,6 +366,20 @@ in this repository's `docs/` folder and its subfolders by title (its first
 inside `docs/`: a path with `..`, an absolute path, a link out of the folder
 or anything else is 404 and nothing is read. Read only; the files change
 through pull requests.
+Below the task files, **Commands** lists every slash command a session can be given
+(SP-179): Dane's own, from `commands/<name>/SKILL.md` (marked Your command),
+and the loop skills, from `.claude/skills/<name>/SKILL.md` (marked Loop
+skill), each as `/<name>` with its description. A search box filters the list
+as it is typed, by name or by what the command does, name matches first.
+Clicking one opens `/docs/commands/<name>`: its steps formatted, and Back to
+Docs. It reads `GET /commands`, signed in only, which reads nothing but a
+`SKILL.md` directly inside a folder directly inside those two (no links, no
+deeper files; `tracker/commands.mjs`). `commands/` is a copy: the originals
+live in `~/.claude/skills/` on the MacBook, and `npm run commands:copy` run
+there refreshes it (it copies only each `SKILL.md`, removes a copy whose
+original is gone, and writes nothing when a file looks like it holds a key,
+when a name is not plain, or when it finds no commands at all); the refreshed
+copy goes in through a pull request.
 A browser opening `/projects` or `/projects/<slug>` gets the page; the page's own
 call to the same address gets the data. `/users` is the page alone; its data
 is still `GET /people` (the onboarding scripts read it), and a browser opening

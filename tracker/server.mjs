@@ -83,6 +83,7 @@ import { findConfigFile, loadProjectConfig } from '../lib/projectConfig.mjs';
 import { saveAnswers, setupFields, setupList, setupOf, SetupError } from './setup.mjs';
 import busRelayPlan from '../lib/busRelayPlan.js';
 import { pipelineOf } from './pipeline.mjs';
+import { listCommands, REPO_ROOT } from './commands.mjs';
 import { listDocs, readDoc } from './docsFolder.mjs';
 import loopStatuses from '../lib/loopStatuses.js';
 
@@ -510,6 +511,9 @@ function flag(value) {
  * `docsDir` is the folder the Docs page's documentation section
  * reads (tracker/docsFolder.mjs): this repository's own `docs/`, unless a
  * test names another. Only `.md` files inside it are ever read.
+ * `commandsRoot` is the checkout the Commands section's list reads
+ * (tracker/commands.mjs): this one, unless a test names another. Only a
+ * `SKILL.md` inside its `commands/` and `.claude/skills/` folders is read.
  */
 /**
  * The word the ticket page's Close button posts: the first of the relay's
@@ -520,7 +524,7 @@ export const CLOSE_PHRASE = busRelayPlan.CLOSE_PHRASES[0];
 /** The word the Go button posts: the one an intake card asks for (GO_PHRASE in lib/busRelayPlan.js). */
 export const GO_PHRASE = busRelayPlan.GO_PHRASE;
 
-export function createHandler(store, { log = () => {}, notifier = null, defaultProject = null, mergePhrase = null, closePhrase = null, goPhrase = null, accountMail = null, setup = null, now = Date.now, publicUrl = null, pipeline = null, docsDir = DOCS_DIR } = {}) {
+export function createHandler(store, { log = () => {}, notifier = null, defaultProject = null, mergePhrase = null, closePhrase = null, goPhrase = null, accountMail = null, setup = null, now = Date.now, publicUrl = null, pipeline = null, docsDir = DOCS_DIR, commandsRoot = REPO_ROOT } = {}) {
   const failures = failureCounter(now);
   const resets = resetLimiter(now);
   // The public address's host as a Host header names it (`name:8443`; no port for 443).
@@ -658,6 +662,13 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     // Team chat ticket the caller has not seen.
     if (parts.length === 1 && parts[0] === 'bus' && method === 'GET') {
       return [200, busUnseen(store, me.id, { only: scopeOf(me) })];
+    }
+
+    // Dane's page: the Docs page's Commands section, every slash
+    // command in this checkout's commands/ and .claude/skills/ folders with
+    // its description and steps (tracker/commands.mjs). No other file is read.
+    if (parts.length === 1 && parts[0] === 'commands' && method === 'GET') {
+      return [200, { commands: listCommands({ root: commandsRoot }) }];
     }
 
     // Dane's page: the Pipeline Status pod on the Tasks page, when
@@ -1306,8 +1317,8 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
 }
 
 /** Start a server on `port` (0 = any free port) against an open store. Resolves to the http.Server. */
-export function startServer({ store, port, host = '127.0.0.1', log, notifier, defaultProject, mergePhrase, closePhrase, goPhrase, accountMail, setup, now, publicUrl, pipeline, docsDir }) {
-  const server = createServer(createHandler(store, { log, notifier, defaultProject, mergePhrase, closePhrase, goPhrase, accountMail, setup, now, publicUrl, pipeline, docsDir }));
+export function startServer({ store, port, host = '127.0.0.1', log, notifier, defaultProject, mergePhrase, closePhrase, goPhrase, accountMail, setup, now, publicUrl, pipeline, docsDir, commandsRoot }) {
+  const server = createServer(createHandler(store, { log, notifier, defaultProject, mergePhrase, closePhrase, goPhrase, accountMail, setup, now, publicUrl, pipeline, docsDir, commandsRoot }));
   return new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(port, host, () => {

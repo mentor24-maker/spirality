@@ -26,7 +26,7 @@
  * an emailed link's own page. The link's token is sent only in a JSON body,
  * never in an address.
  */
-import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, unwrapDoc, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, pipelinePodLabel, renderContextDocs, renderSortHeadings, sortTickets, nextSort } from './render.mjs';
+import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, unwrapDoc, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, pipelinePodLabel, renderCommandList, renderCommandView, renderContextDocs, renderSortHeadings, sortTickets, nextSort } from './render.mjs';
 
 /** Where an earlier version of the page kept a pasted token; removed on load, never read. */
 const OLD_TOKEN_KEY = 'tracker-token';
@@ -2232,11 +2232,17 @@ async function drawUsers(done = '', problem = '') {
  * Each is read back from the table's own list before the page says it
  * worked. `done` and `problem` are the line the last change left, and
  * `section` says whose it is: 'docs' (Context Documents) or 'files' (Task
- * Files), so it shows in that section only.
+ * Files), so it shows in that section only. Then the Commands section
+ * (SP-179): every slash command, searchable, each opening its own page.
  */
 async function drawDocs(done = '', problem = '', section = 'files') {
   // The documentation call is caught on its own: a tracker not yet restarted onto it answers 404, and Task Files still draws.
-  const [{ projects }, files] = await Promise.all([api('GET', '/projects'), api('GET', '/documentation').then((r) => r.files, () => null)]);
+  const [{ projects }, files, commands] = await Promise.all([
+    api('GET', '/projects'),
+    api('GET', '/documentation').then((r) => r.files, () => null),
+    // The same for the Commands list (SP-179).
+    api('GET', '/commands').then((r) => r.commands, () => null),
+  ]);
   setTitle('Docs · Tracker');
   const docRow = (d) => `<tr data-doc="${escapeHtml(d.path)}">
       <td class="title"><a href="${docAddress(d.path)}">${escapeHtml(d.title)}</a></td>
@@ -2250,7 +2256,8 @@ async function drawDocs(done = '', problem = '', section = 'files') {
       <tbody>${files.map(docRow).join('')}</tbody></table>`
     : '<p class="quiet">The docs folder holds no Markdown files.</p>'}`;
   if (!projects.length) {
-    main.innerHTML = `<h1>Docs</h1>${documentation}<h2>Task Files</h2><p class="quiet">There are no projects yet.</p>`;
+    main.innerHTML = `<h1>Docs</h1>${documentation}<h2>Task Files</h2><p class="quiet">There are no projects yet.</p>${commandsSection()}`;
+    showCommands(commands);
     putTrail([{ label: 'Docs' }]);
     return;
   }
@@ -2292,7 +2299,8 @@ async function drawDocs(done = '', problem = '', section = 'files') {
     ${attachments.length
     ? `<table class="projects task-files"><thead><tr><th>File</th><th>Task</th><th>Type</th><th>Size</th><th>Added By</th><th>Added On</th><th><span class="hidden">Actions</span></th></tr></thead>
       <tbody>${attachments.map(row).join('')}</tbody></table>`
-    : `<p class="quiet">No task in ${escapeHtml(project.name)} has a file yet.</p>`}`;
+    : `<p class="quiet">No task in ${escapeHtml(project.name)} has a file yet.</p>`}
+    ${commandsSection()}`;
   const note = main.querySelector('.file-note');
   const busy = (text) => { note.className = 'note file-note quiet'; note.textContent = text; };
   const refused = (control, text) => { note.className = 'note file-note error'; note.textContent = text; if (control) control.disabled = false; };
@@ -2360,7 +2368,57 @@ async function drawDocs(done = '', problem = '', section = 'files') {
     });
   }
   wireContextDocs(project, docsPath, section === 'docs' ? done : '', section === 'docs' ? problem : '');
+  showCommands(commands);
   putTrail([{ label: 'Docs' }]);
+}
+
+/**
+ * The Docs page's Commands section (SP-179): a search box over every slash
+ * command (GET /commands), each opening its own page. Typing filters the
+ * list by name or description as it is typed; nothing is read again.
+ */
+function commandsSection() {
+  return `
+    <h2>Commands</h2>
+    <p class="quiet">Every slash command you can give a session: your own and the loop skills. Type part of a name or what you want to do.</p>
+    <input type="search" id="command-search" aria-label="Find a command" placeholder="Find a command" autocomplete="off">
+    <div id="command-list"></div>`;
+}
+
+/** Fill the Commands list and keep it filtered as the search box is typed in; null (the list could not be read) says so. */
+function showCommands(commands) {
+  const box = document.getElementById('command-search');
+  const list = document.getElementById('command-list');
+  if (!commands) {
+    box.hidden = true;
+    list.innerHTML = '<p class="quiet">The commands could not be read.</p>';
+    return;
+  }
+  const show = () => { list.innerHTML = renderCommandList(commands, box.value); };
+  box.addEventListener('input', show);
+  show();
+}
+
+/** The command a `/docs/commands/<name>` address opens, or null. */
+const commandAt = () => {
+  const m = /^\/docs\/commands\/([^/]+)$/.exec(location.pathname);
+  if (!m) return null;
+  try { return decodeURIComponent(m[1]); } catch { return null; }
+};
+
+/**
+ * One command's own page, `/docs/commands/<name>`: its steps drawn as
+ * formatted text (hard-wrapped lines joined back up first, as a
+ * documentation file's are), and a way back.
+ */
+async function drawCommand(name) {
+  const { commands } = await api('GET', '/commands');
+  const command = commands.find((c) => c.name === name);
+  setTitle(command ? `/${name} · Docs · Tracker` : 'Docs · Tracker');
+  main.innerHTML = command
+    ? renderCommandView({ ...command, steps: unwrapDoc(command.steps) })
+    : `<h1>No Such Command</h1><p class="quiet">There is no command named /${escapeHtml(name)}.</p><p><a href="/docs">Back to Docs</a></p>`;
+  putTrail([{ label: 'Docs', href: '/docs' }, { label: command ? `/${command.name}` : 'Not Found' }]);
 }
 
 /**
@@ -2516,6 +2574,7 @@ async function route({ place = null } = {}) {
     const usersPage = location.pathname === '/users';
     const docsPage = location.pathname === '/docs';
     const docPath = docAt();
+    const docsCommand = commandAt();
     const docAny = underDocs();
     const search = location.pathname === '/search';
     const setupNew = location.pathname === '/setup/new';
@@ -2541,6 +2600,8 @@ async function route({ place = null } = {}) {
       await drawUsers();
     } else if (docsPage) {
       await drawDocs();
+    } else if (docsCommand != null) {
+      await drawCommand(docsCommand);
     } else if (docAny) {
       await drawDoc(docPath);
     } else if (isNew) {
