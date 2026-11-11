@@ -2,6 +2,14 @@
   "//": "What a project gets from Spirality in its one setup pull request (SP-110), taken from what Normie's PRs #62, #64, #65 and #66 received, plus every module the ticket door imports today. `files` are copied from Spirality: with no `edits`, byte for byte, checked with cmp; with `edits`, each `find` must appear exactly once in Spirality's file, or the copy stops naming it, so a change to Spirality's wording can never slip through unadapted. The ticket door goes under loop/, apart from the project's own lib/ and scripts/; the runners, hook, skills and settings keep Spirality's paths, because each finds the project's folder from where it sits. `made` are written from the answers.",
   "files": [
     {
+      "from": "lib/autoMergeLane.js",
+      "to": "loop/lib/autoMergeLane.js"
+    },
+    {
+      "from": "lib/autoMergeLedgerFile.js",
+      "to": "loop/lib/autoMergeLedgerFile.js"
+    },
+    {
       "from": "lib/branchCatchUp.js",
       "to": "loop/lib/branchCatchUp.js"
     },
@@ -92,6 +100,14 @@
     {
       "from": "lib/refusalClass.js",
       "to": "loop/lib/refusalClass.js"
+    },
+    {
+      "from": "lib/relayAutoMerge.js",
+      "to": "loop/lib/relayAutoMerge.js"
+    },
+    {
+      "from": "lib/relayAutoMerge.test.js",
+      "to": "loop/lib/relayAutoMerge.test.js"
     },
     {
       "from": "lib/relayLane.js",
