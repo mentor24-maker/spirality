@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { seedDemo, tickingClock } from './demoData.mjs';
 import { reportsOf, REPORT_RANGES, searchTickets, PRIORITIES } from './pageData.mjs';
-import { escapeHtml, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, commandHref, renderContextDocs, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS } from './web/render.mjs';
+import { escapeHtml, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, commandHref, renderContextDocs, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS } from './web/render.mjs';
 import { startServer, setupSettingsOf } from './server.mjs';
 import { saveAnswers, setupFields, setupOf } from './setup.mjs';
 import { DANE_FIELDS as SETUP_FIELDS, STEPS as SETUP_STEPS } from '../scripts/onboard/onboard.mjs';
@@ -2757,10 +2757,35 @@ test('the search filters are one picker each, "Any" first, the server\'s choices
     /<p class="quiet search-note">No tickets match widget<\/p>/);
 });
 
+test('the Ticket number field sits beside the Project filter and offers each ticket as "SP-12 · <title>", escaped', () => {
+  const project = { key: 'project', label: 'Project', value: null, options: [{ value: 'spirality', label: 'Spirality' }] };
+  const html = renderSearchFilters([project, ...FILTERS], { tickets: [{ id: 'SP-12', name: 'Fix <b>it</b> & more' }, { id: 'SP-13', name: 'Next' }] });
+  assert.ok(html.indexOf('name="project"') < html.indexOf('Ticket number') && html.indexOf('Ticket number') < html.indexOf('name="status"'), 'right after Project');
+  assert.match(html, /<form class="ticket-lookup">\s*<label>Ticket number\s*<input type="text" name="ticket" list="ticket-numbers"/);
+  assert.match(html, /<option value="SP-12">SP-12 · Fix &lt;b&gt;it&lt;\/b&gt; &amp; more<\/option><option value="SP-13">SP-13 · Next<\/option>/);
+  assert.ok(!renderSearchFilters([project, ...FILTERS]).includes('Ticket number'), 'only where the page asks for it');
+  assert.match(html, /placeholder="SP-13"/, 'an example from the tickets offered, never a typed-out prefix');
+  assert.match(renderTicketLookup([]), /<datalist id="ticket-numbers"><\/datalist>/);
+  assert.ok(!renderTicketLookup([]).includes('placeholder'));
+});
+
+test('a ticket number opens its page in any case, and one that is not offered says so in one plain line', () => {
+  const tickets = [{ id: 'SP-12', name: 'A' }, { id: 'WC-3', name: 'B' }];
+  assert.deepEqual(lookupTicket('sp-12', tickets, 'Spirality'), { href: '/t/SP-12' });
+  assert.deepEqual(lookupTicket('  SP-12 ', tickets), { href: '/t/SP-12' });
+  assert.deepEqual(lookupTicket('sp-999', tickets, 'Spirality'), { note: 'No ticket SP-999 in Spirality' });
+  assert.deepEqual(lookupTicket('zz-999', tickets), { note: 'No ticket ZZ-999 in any project' });
+  assert.equal(lookupTicket('  ', tickets), null);
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  assert.match(app, /renderSearchFilters\(answer\.filters, \{ tickets: answer\.tickets \?\? \[\] \}\)/);
+  assert.match(app, /wireTicketLookup\(/);
+  assert.match(app, /main\.querySelector\('\.search-answer'\)\.innerHTML = `<p class="quiet search-note">\$\{escapeHtml\(found\.note\)\}<\/p>`/);
+});
+
 test('the search results page draws the filters from the server\'s answer, keeps them in the address, and shows a refusal', () => {
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   const draw = app.slice(app.indexOf('function searchAddress('), app.indexOf('/**\n * Put `text` on the clipboard'));
-  assert.match(draw, /renderSearchFilters\(answer\.filters\)/);
+  assert.match(draw, /renderSearchFilters\(answer\.filters, /);
   assert.match(draw, /api\('GET', `\/search\?\$\{params\}`\)/);
   assert.match(draw, /for \(const select of main\.querySelectorAll\('\.search-filters select'\)\) select\.addEventListener\('change', go\)/);
   assert.match(draw, /<p class="error">\$\{escapeHtml\(refusal\)\}<\/p>/);

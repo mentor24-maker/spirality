@@ -1658,6 +1658,38 @@ test('GET /search narrows to one project with Project, offers and answers only t
   } finally { await f.cleanup(); }
 });
 
+test('GET /search offers the Ticket number field every ticket of the chosen project, closed ones too, or of every project the reader may see, with or without a word', async () => {
+  const f = await fixture();
+  try {
+    f.store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE', operator: f.human.id });
+    f.store.createProject({ slug: 'gamma', name: 'Gamma', prefix: 'GA', operator: f.human.id });
+    const a = f.store.fileTicket({ project: 'alpha', actor: f.human.id, name: 'First in alpha', status: 'queued' });
+    const a2 = f.store.fileTicket({ project: 'alpha', actor: f.human.id, name: 'Done in alpha', status: 'live' });
+    const b = f.store.fileTicket({ project: 'beta', actor: f.human.id, name: 'In beta', status: 'queued' });
+    const g = f.store.fileTicket({ project: 'gamma', actor: f.human.id, name: 'In gamma', status: 'live' });
+    const before = f.store.listEvents(a.id).length;
+    const offered = async (query, token = f.humanToken) => (await f.call('GET', `/search${query}`, { token })).body.tickets;
+    const ids = (tickets) => tickets.map((t) => t.id);
+
+    assert.deepEqual(await offered('?project=alpha'), [{ id: a.id, name: 'First in alpha' }, { id: a2.id, name: 'Done in alpha' }], 'Live ones too, with no search word');
+    assert.deepEqual(ids(await offered('?q=zzqq&project=beta')), [b.id], 'a word that matches nothing still offers them');
+    const any = ids(await offered('?q='));
+    for (const t of [a, a2, b, g]) assert.ok(any.includes(t.id), t.id);
+    assert.deepEqual(ids(await offered('')), any);
+
+    // A viewer on alpha only: neither beta's nor gamma's tickets are offered.
+    const viewer = f.store.createActor({ kind: 'human', name: 'Viewer' });
+    const vt = f.store.issueToken(viewer.id);
+    f.store.setRole({ actor: viewer.id, role: 'viewer', by: f.human.id });
+    f.store.addMember({ project: 'alpha', actor: viewer.id, by: f.human.id });
+    const seen = await f.call('GET', '/search', { token: vt });
+    assert.deepEqual(ids(seen.body.tickets), [a.id, a2.id]);
+    assert.ok(!seen.text.includes('In beta') && !seen.text.includes('In gamma'));
+    assert.equal((await f.call('GET', '/search?project=gamma', { token: vt })).status, 400, 'a hidden project is refused, never offered');
+    assert.equal(f.store.listEvents(a.id).length, before, 'reads only');
+  } finally { await f.cleanup(); }
+});
+
 /** A people server whose sent emails are kept in `sent`; `fail` makes the next send refused. */
 async function inviteServer(f, options = {}) {
   const sent = [];
