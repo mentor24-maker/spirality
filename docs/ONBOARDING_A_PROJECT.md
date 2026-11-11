@@ -421,12 +421,23 @@ changing the file: `CLICKUP_WORKSPACE_ID`, `CLICKUP_SPACE_ID`,
   `wavecenter loop-handoff` for any other), its token kept as
   `TRACKER_TOKEN_LOOP_HANDOFF` in the project's own Doppler project. Then:
   1. `npm run doctor` lists `TRACKER_TOKEN_LOOP_HANDOFF` as `MISSING`.
-  2. Dane runs `npm run tracker:signins -- create` on the Mini again (as
-     below): it makes the new actor, proves its token at the tracker and
-     writes it into Doppler, read back, and leaves every other seat alone.
-  3. `npm run doctor` shows it `present`; `tracker:signins -- check` names
-     it.
-  4. Only then install the lane (`scripts/loop_runner.sh loop-handoff`).
+  2. A session runs `tracker:signins -- create` on the Mini again, from
+     Spirality's folder (it needs no secret typed, so it is not Dane's to
+     run). For a project other than Spirality, name its database and its
+     settings file:
+     `TRACKER_DB=~/spirality-tracker/tracker.db npm run tracker:signins -- create --name <slug> --config ~/WebApps/<slug>/spirality.project.json`.
+     It makes the new actor, proves its token at the tracker and writes it
+     into Doppler, read back, and leaves every other seat alone.
+  3. `npm run doctor` shows it `present`; `tracker:signins -- check` (same
+     `TRACKER_DB` and `--config`) names it.
+  4. Only then install the lane: the project's own
+     `./scripts/install_loop_runner.sh`, run in its main checkout on the
+     Mini once the pull request that lists the lane has merged, then
+     `--status` shows the lane `loaded:   yes`. A merge alone loads
+     nothing: WaveCenter's WC-163, "Install the hand-off lane so
+     member-ticked tasks reach the queue again", went Live on 2026-11-09
+     with steps 2 and 4 undone, and its lane stayed off until 9:30 AM MT
+     the next day.
      Until the config names it, the door refuses every pass of that lane:
      `TRACKER_TOKEN_NAME must name a loop's own tracker secret (...), not
      "TRACKER_TOKEN_LOOP_HANDOFF". A lane of this project's own signs in
