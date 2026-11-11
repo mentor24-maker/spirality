@@ -161,6 +161,10 @@ a.action, button.action { display: inline-flex; padding: 0.2rem; margin-right: 0
 a.action:hover, button.action:hover { color: #000; background: #e8e8ed; }
 button.action { border: 0; background: transparent; cursor: pointer; vertical-align: middle; }
 button.action:disabled { opacity: 0.4; cursor: default; }
+/* The list row's status icon (SP-201): the check is green; an empty slot keeps the icons after it lined up. */
+span.action.status-icon { display: inline-flex; padding: 0.2rem; margin-right: 0.15rem; }
+span.action.status-icon.empty { width: 18px; height: 18px; }
+span.action.answer-in-icon { color: #2e7d32; }
 .group th.assignee { width: 12%; }
 .group td { overflow-wrap: anywhere; }
 /* A stage's colour from the Settings page (app.mjs drawProject sets the three properties). */
