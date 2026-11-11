@@ -481,6 +481,16 @@ export function readMissingLock(branch) {
 }
 
 /**
+ * The folder the clean copy is cloned into, inside the scratch folder: the
+ * repository's own name ("starcaster" for "mentor24-maker/starcaster"), as
+ * `git clone` would name it (SP-229).
+ */
+export function cloneFolder(githubRepo) {
+  const name = String(githubRepo).replace(/\.git$/, '').split('/').pop();
+  return name && name !== '.' && name !== '..' ? name : 'repo';
+}
+
+/**
  * Every row, in the order they print. Everything outside this process is
  * reached through `deps`, so tests can see each call:
  *
@@ -522,7 +532,10 @@ export async function look({ answers, homeConfig, runCheck = true, deps }) {
       checkRow = row(`Check: \`${answers.checkCommand}\` on a clean copy of main`, UNKNOWN, 'there is no main branch to copy');
     } else {
       scratch = deps.makeScratch();
-      cloneRoot = join(scratch, 'repo');
+      // Named for the repository, as `git clone` and GitHub's own runner name
+      // it: a project's tests may check their checkout's folder name
+      // (StarCaster's taskRepo test does, SP-229).
+      cloneRoot = join(scratch, cloneFolder(repo));
       progress(`cloning ${repo} (${branch}) into a scratch folder...`);
       const clone = run('gh', ['repo', 'clone', repo, cloneRoot, '--', '--depth', '1', '--branch', branch, '--quiet'], { timeoutMs: 10 * 60 * 1000 });
       if (clone.error || clone.status !== 0) {

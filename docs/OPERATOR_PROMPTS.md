@@ -160,6 +160,12 @@ this log only points there.
 
    Led to: no switch. Before the wizard's stop step, the session found that the move would turn off StarCaster's auto-merge Lanes A and B (Spirality's relay never reads `autoMergeLanes`) and leave its `bus-relay`, `pipeline-pulse` and `weekly-report` jobs and its `review-gate` workflow reading ClickUp. Dane chose to wait for the gaps (his answer in the session: "Wait for the gaps"). Filed [SP-199](http://mac-mini.local:4180/t/SP-199), "StarCaster's auto-merge lanes stop when it moves to the tracker: make the relay merge Lanes A and B", and [SP-200](http://mac-mini.local:4180/t/SP-200), "StarCaster's bus-relay, pulse and weekly report read ClickUp: list what each needs on the tracker and file the work", and added both to the `Waits on:` line of [SP-25](http://mac-mini.local:4180/t/SP-25), "StarCaster still runs on ClickUp: move it to the tracker", which went back to Queued. StarCaster's tracker project got its operator, Dane (actor 1).
 
+## 2026-11-11: SP-25, StarCaster's move to the tracker
+
+1. > Run SP-25, StarCaster still runs on ClickUp: move it to the tracker, as a hand-run session.
+
+   Led to: the wizard's answers for StarCaster, saved through the setup page's own writer once Dane chose "Use these" in the session (and "Switch now, then watchdogs" for the order). The wizard's look then stopped before writing anything: its clean copy of StarCaster sits in a folder named `repo`, and one StarCaster test checks its folder is named `starcaster`. Filed and built [SP-229](http://mac-mini.local:4180/t/SP-229), "Make the setup's clean-copy check run in a folder named for the project" (this pull request); SP-25 goes on once it merges.
+
 ## 2026-11-10: spirality.alphire.agency opens the tracker
 
 1. > I thought one of the tickets we handled set up the web-based access to Spirality to show the actually task list instead of the stripped down one that only shows the Board, with no toggle for the List view. What is the status of that change?

@@ -214,7 +214,9 @@ account_links  token hash, purpose (setup|invite|reset), email, actor,
   words a project or ticket that does not exist gets, plus
   `yourProjectsOnly: true`, so the answer never says it exists; the page
   shows a plain "You Are Not on This Project" instead. An admin sees every
-  project, so Dane is never shut out of one, and every machine sign-in (each
+  project, so Dane is never shut out of one (kept on purpose, SP-197; the
+  Users page says "All projects (admin)" first in an admin's Projects cell,
+  from `seesEveryProject` on `GET /people`), and every machine sign-in (each
   loop, `hand-run`) reads and writes exactly as before: a loop is never
   narrowed. Membership is the only permission enforced; roles are still
   recorded only.

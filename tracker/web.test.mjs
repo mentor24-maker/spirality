@@ -2642,8 +2642,20 @@ test('the Users page lists each user\'s projects, each a link to its details pag
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   const draw = app.slice(app.indexOf('async function drawUsers'), app.indexOf('/** Underline the header link'));
   assert.match(draw, /<th class="projects">Projects<\/th>/);
-  // Anyone but an admin sees the cell as before: links, or "none".
-  assert.match(draw, /if \(!editing\) return mine\.length \? mine\.map\(\(x\) => `<a href="\/projects\/\$\{encodeURIComponent\(x\.slug\)\}">\$\{escapeHtml\(x\.name\)\}<\/a>`\)\.join\(', '\) : '<span class="quiet">none<\/span>';/);
+  // Anyone but an admin sees the cell as before: links, or "none" (left out under an admin's "All projects (admin)").
+  assert.match(draw, /if \(!editing\) return mine\.length \? mine\.map\(\(x\) => `<a href="\/projects\/\$\{encodeURIComponent\(x\.slug\)\}">\$\{escapeHtml\(x\.name\)\}<\/a>`\)\.join\(', '\) : none;/);
+});
+
+test('the Users page says "All projects (admin)" first in an admin\'s Projects cell, from the server\'s seesEveryProject, and leaves out "none" under it (SP-197)', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const draw = app.slice(app.indexOf('async function drawUsers'), app.indexOf('/** Underline the header link'));
+  assert.match(draw, /const every = p\.seesEveryProject === true;/);
+  assert.match(draw, /<span class="every"[^>]*>All projects \(admin\)<\/span>/);
+  assert.match(draw, /return `\$\{label\}\$\{memberCell\(p, every \? '' : '<span class="quiet">none<\/span>'\)\}`;/);
+  // Both forms of the cell (a viewer's links, an admin's editing list) use the same "none".
+  assert.match(draw, /\.join\(', '\) : none;/);
+  assert.match(draw, /<\/span>`\)\.join\(''\) : none\}/);
+  assert.match(readFileSync(WEB('app.css'), 'utf8'), /table\.people td span\.every \{/);
 });
 
 test('the Users page gives an admin Remove on each of a user\'s projects (never where they are its owner or operator) and an Add to Project picker, each change read back', () => {
