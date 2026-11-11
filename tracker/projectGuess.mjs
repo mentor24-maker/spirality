@@ -17,17 +17,33 @@
  *      words, so a project with one or two tickets cannot win on a couple of
  *      shared words. A word in the project's own name (or slug) scores
  *      NAME_WORD instead: saying "Normie" is the strongest sign of Normie.
- *   3. A project's score is the sum over the request's words.
- *   4. Another project is named only when it beats the project being filed
+ *   3. A word the project being filed into already uses is at home there
+ *      and scores for no project: more than HOME_SHARE of its tickets
+ *      (counted with the PRIOR_TICKETS as in rule 2) use it. Only words
+ *      that are strange here can say the task belongs somewhere else.
+ *      Without this, everyday words two projects share (WaveCenter is
+ *      itself about scoring tasks, so "task" is in most of its tickets)
+ *      add up over a long request and name the other project on no real
+ *      sign at all (SP-225). A word of a project's own name is never at
+ *      home: it scores NAME_WORD as in rule 2.
+ *   4. A project's score is the sum over the request's words.
+ *   5. Another project is named only when it beats the project being filed
  *      into by at least MARGIN, and every other project by MARGIN too; anything
  *      closer is a close call, and a close call names none.
- *   5. A request that names two or more projects by name (a task about
+ *   6. A request that names two or more projects by name (a task about
  *      Normie and PressPlay both, say) is a close call too: it is about
  *      several projects, so none is "the" right one.
  */
 
 /** How much more another project must score than the one being filed into. */
 export const MARGIN = 0.5;
+
+/**
+ * The share of the filed-into project's tickets above which a word is at
+ * home there (rule 3). One ticket in fifty: a project with forty tickets or
+ * fewer has every word it has ever used at home.
+ */
+export const HOME_SHARE = 0.02;
 
 /** What a word in a project's own name is worth: more than any ticket share (at most 1). */
 export const NAME_WORD = 3;
@@ -61,20 +77,37 @@ export function wordsOf(text) {
   return words;
 }
 
+/** Each ticket's words (rule 1). */
+const ticketWords = (p) => (p?.tickets ?? []).map((t) => wordsOf(`${t.name ?? ''}\n${t.description ?? ''}`));
+
 /**
- * Each project's score for the request's words (rules 2 and 3), highest
+ * Each project's score for the request's words (rules 2 to 4), highest
  * first; ties keep the order the projects were given. `named` says whether
- * the request uses a word of the project's own name.
+ * the request uses a word of the project's own name. With `current`, the
+ * slug of the project being filed into, its at-home words are left out
+ * (rule 3); without it, every word counts.
  *
  * @param {{ name?: string, description?: string }} request
  * @param {Array<{ slug: string, name: string, tickets: Array<{ name?: string, description?: string }> }>} projects
+ * @param {string} [current]
  * @returns {Array<{ slug: string, name: string, score: number, named: boolean }>}
  */
-export function scoreProjects(request, projects) {
+export function scoreProjects(request, projects, current) {
   const words = wordsOf(`${request?.name ?? ''}\n${request?.description ?? ''}`);
+  const home = projects.find((p) => p.slug === current);
+  if (home) {
+    const names = new Set(projects.flatMap((p) => [...wordsOf(`${p.name ?? ''} ${p.slug ?? ''}`)]));
+    const docs = ticketWords(home);
+    for (const w of [...words]) {
+      if (names.has(w)) continue;
+      let using = 0;
+      for (const d of docs) if (d.has(w)) using += 1;
+      if (using / (docs.length + PRIOR_TICKETS) > HOME_SHARE) words.delete(w);
+    }
+  }
   const scored = projects.map((p, order) => {
     const named = wordsOf(`${p.name ?? ''} ${p.slug ?? ''}`);
-    const docs = (p.tickets ?? []).map((t) => wordsOf(`${t.name ?? ''}\n${t.description ?? ''}`));
+    const docs = ticketWords(p);
     let score = 0;
     let isNamed = false;
     for (const w of words) {
@@ -91,13 +124,13 @@ export function scoreProjects(request, projects) {
 
 /**
  * The project the request should go to instead of `current`, or null
- * (rules 4 and 5). Null when `current` is the best fit, when nothing clearly beats
+ * (rules 5 and 6). Null when `current` is the best fit, when nothing clearly beats
  * it, or when `current` is not among `projects`.
  *
  * @returns {{ slug: string, name: string } | null}
  */
 export function guessProject(request, current, projects) {
-  const scored = scoreProjects(request, projects);
+  const scored = scoreProjects(request, projects, current);
   const here = scored.find((p) => p.slug === current);
   if (!here) return null;
   const [best, runnerUp] = scored.filter((p) => p.slug !== current);
