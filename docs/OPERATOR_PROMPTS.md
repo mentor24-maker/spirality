@@ -134,6 +134,18 @@ this log only points there.
 
    Led to: SP-199 built in the hand-run session as slice 1 of 3 (this pull request). Filed [SP-202](http://mac-mini.local:4180/t/SP-202), "Make the relay run StarCaster's auto-merge lanes up to a would-merge note, without merging", and [SP-203](http://mac-mini.local:4180/t/SP-203), "Let the relay merge a lane's pull request when its hour ends with no objection", each waiting on the one before; SP-25 now waits on both.
 
+4. > SP-200 is in review. Is there anything to do now to expedite?
+
+   Led to: Nothing yet (an answer: SP-200, "StarCaster's bus-relay, pulse and weekly report read ClickUp: list what each needs on the tracker and file the work", had just passed review and was his to merge).
+
+5. > How are we looking in terms of wrapping up the
+
+   Led to: Nothing yet (a status answer on the tickets left before StarCaster's move, with an offer to build SP-207 here).
+
+6. > I just meant to say wrapping up the clickup era, but you get it. Yes, proceed with 207 (or whichever makes sense to proceed with)
+
+   Led to: [SP-207](http://mac-mini.local:4180/t/SP-207), "Make the relay post its merge notices to the project's bus", built in the hand-run session (its pull request).
+
 ## 2026-11-10: StarCaster's move to the tracker, held back
 
 1. > Run SP-25, StarCaster still runs on ClickUp: move it to the tracker, as a hand-run session.

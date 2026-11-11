@@ -60,12 +60,12 @@ import { loadProjectConfig, ProjectConfigError } from '../lib/projectConfig.mjs'
 // from the package, so every project's relay decides the same way.
 import {
   mergeDecision, githubGate, isMergeCommand, MERGE_MARKER, parseMergeMarker,
-  refusalNotice, conflictHandOffNotice, mergedNotice, filesMadeLines, REFUSAL_CODES,
+  refusalNotice, refusalBusLine, conflictHandOffNotice, mergedNotice, filesMadeLines, REFUSAL_CODES,
 } from '../lib/mergeOnComment.js';
 import {
   PR_VIEW_FIELDS, markerBookkeeping, recordBookkeeping, emptyBooks, mergeDestination, relayLine,
   handbackAnswer, handbackPlan, closePlan, conflictFilingPlan,
-  mergeWithPreMergeStep, commandLine,
+  mergeWithPreMergeStep, commandLine, mergedBusLine, conflictBusLine, tellBus,
 } from '../lib/relayLane.js';
 import {
   conflictTicketName, conflictTicketBody, conflictTicketFiledComment, findConflictTicket, unstuckPullRequest,
@@ -1358,6 +1358,17 @@ if (cmd === 'whoami') {
   const seen = new Map();
   const settled = new Set();
 
+  // The project's bus hears each merge and each refusal the first time it is
+  // written on the ticket (SP-207). No `busProject`, nothing new is written.
+  const busTag = machineSenderTag('bus-relay');
+  const ticketUrl = (task) => task.url || `${filedTrackerUrl() || project.trackerUrl}/t/${task.id}`;
+  const announce = async (task, text, about) => {
+    const told = await tellBus({ busProject: project.busProject, text, about: `${task.id}: ${about}`, dryRun, postBus: postBusMessage });
+    if (told.act === 'none') return;
+    say(task, told.act === 'failed' ? 'unchecked' : told.act === 'posted' ? 'bus' : 'would-post-bus', told.line);
+    if (told.unchecked) unchecked.push(told.unchecked);
+  };
+
   /** Write the dedup marker as a threaded reply on his comment, and read it back.
    *  An unverified marker means the next pass may act on the same word again,
    *  which is reported, never assumed away. Returns true only when it stuck. */
@@ -1583,6 +1594,7 @@ if (cmd === 'whoami') {
       if (!noteId) { say(task, 'unchecked', why); return; }
       const stuck = await markMergeHandled(decision.commentId, task, notice.marker);
       say(task, 'refused', `${why} — explained in comment ${noteId}, marker ${stuck ? 'verified' : 'UNVERIFIED'}`);
+      await announce(task, refusalBusLine({ label: `"${task.name}" (${task.id})`, url: ticketUrl(task), why, kind: notice.kind }), `merge refused (${why})`);
     };
 
     if (decision.act === 'refuse') { await refuse(decision.reason, 'This ticket is not in a state a script may merge from.', decision.refusalCode); return; }
@@ -1674,6 +1686,7 @@ if (cmd === 'whoami') {
       if (!noteId) { say(task, 'unchecked', gate.reason); return; }
       const stuck = await markMergeHandled(decision.commentId, task, notice.marker);
       say(task, 'refused', `PR #${pr.number}: ${gate.reason} — explained in comment ${noteId}, marker ${stuck ? 'verified' : 'UNVERIFIED'}${filed ? `, catch-up ticket ${filed.id}${again}` : ', NO catch-up ticket'}`);
+      await announce(task, conflictBusLine({ tag: busTag, task, url: ticketUrl(task), pr: prRef, filed, branch, operatorName: who }), `PR #${pr.number} conflict handed off`);
       return;
     }
 
@@ -1752,6 +1765,7 @@ if (cmd === 'whoami') {
     const moved = await moveMergedTicket(task, pr.number, dest);
     settled.add(task.id);
     say(task, 'merged', `PR #${pr.number} at ${mergedAt}; ticket -> ${dest.status}${moved ? '' : ' (MOVE FAILED, see below)'} (${dest.why})`);
+    await announce(task, mergedBusLine({ tag: busTag, task, url: ticketUrl(task), pr, dest }), `PR #${pr.number} merged`);
 
     // main just moved: tell every ticket still in flight, so its next pass
     // catches up before review instead of after (task 86bctjffu).
