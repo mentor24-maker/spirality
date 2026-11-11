@@ -1199,12 +1199,47 @@ export function activeFilters(filters = []) {
  * picker for each filter, its choices as the server lists them, "Any"
  * first, the chosen value selected.
  */
-export function renderSearchFilters(filters = []) {
+export function renderSearchFilters(filters = [], { tickets = null } = {}) {
   const picker = (f) => `
     <label>${escapeHtml(f.label)}
       <select name="${escapeHtml(f.key)}">${option('', 'Any', f.value == null)}${f.options.map((o) => option(o.value, o.label, o.value === f.value)).join('')}</select>
-    </label>`;
+    </label>${f.key === 'project' && tickets ? renderTicketLookup(tickets) : ''}`;
   return `<div class="search-filters">${filters.map(picker).join('')}</div>`;
+}
+
+/**
+ * The Search page's "Ticket number" field (SP-192), drawn beside the
+ * Project filter: a plain text box whose browser list offers each of
+ * `tickets` (the server's `{ id, name }`, already narrowed to the chosen
+ * project and to the projects the reader may see) as "<id> · <title>",
+ * the last of them shown greyed in the empty box as an example.
+ * Its own small form, so Enter in it is a lookup, never a search.
+ */
+export function renderTicketLookup(tickets = []) {
+  const example = tickets.length ? ` placeholder="${escapeHtml(tickets[tickets.length - 1].id)}"` : '';
+  const offered = tickets.map((t) => `<option value="${escapeHtml(t.id)}">${escapeHtml(`${t.id} · ${t.name}`)}</option>`).join('');
+  return `
+    <form class="ticket-lookup">
+      <label>Ticket number
+        <input type="text" name="ticket" list="ticket-numbers" autocomplete="off" spellcheck="false"${example} size="9">
+      </label>
+      <datalist id="ticket-numbers">${offered}</datalist>
+    </form>`;
+}
+
+/**
+ * What the "Ticket number" field does with `typed` (SP-192): the ticket
+ * page's address when it names one of `tickets` (ignoring case and spaces,
+ * so "sp-12" finds SP-12), otherwise one plain line saying there is no such
+ * ticket in `projectName`, or in any project when none is chosen. Nothing
+ * typed is neither. Answers `{ href }`, `{ note }` or null.
+ */
+export function lookupTicket(typed, tickets = [], projectName = null) {
+  const wanted = String(typed ?? '').replace(/\s+/g, '').toUpperCase();
+  if (!wanted) return null;
+  const hit = tickets.find((t) => String(t.id).toUpperCase() === wanted);
+  if (hit) return { href: `/t/${encodeURIComponent(hit.id)}` };
+  return { note: `No ticket ${wanted} in ${projectName ?? 'any project'}` };
 }
 
 /**

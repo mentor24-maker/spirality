@@ -26,7 +26,7 @@
  * an emailed link's own page. The link's token is sent only in a JSON body,
  * never in an address.
  */
-import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, unwrapDoc, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, pipelinePodLabel, renderCommandList, renderCommandView, renderContextDocs, renderSortHeadings, sortTickets, nextSort } from './render.mjs';
+import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, unwrapDoc, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, lookupTicket, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, pipelinePodLabel, renderCommandList, renderCommandView, renderContextDocs, renderSortHeadings, sortTickets, nextSort } from './render.mjs';
 
 /** Where an earlier version of the page kept a pasted token; removed on load, never read. */
 const OLD_TOKEN_KEY = 'tracker-token';
@@ -1351,6 +1351,39 @@ function wireSearch() {
 }
 
 /**
+ * The Search page's "Ticket number" field (SP-192): Enter, or picking one
+ * of the tickets its list offers, opens that ticket's page; a number that
+ * is not one of them (render.mjs lookupTicket) shows its plain line in
+ * place of the results. `answer` is the server's: the tickets offered and
+ * the Project filter, whose chosen name the line uses.
+ */
+function wireTicketLookup(answer) {
+  const form = main.querySelector('form.ticket-lookup');
+  if (!form) return;
+  const box = form.elements.ticket;
+  const project = answer.filters.find((f) => f.key === 'project');
+  const projectName = project?.value == null ? null : project.options.find((o) => o.value === project.value)?.label ?? project.value;
+  const look = (typed, { quiet = false } = {}) => {
+    const found = lookupTicket(typed, answer.tickets, projectName);
+    if (!found) return;
+    if (found.href) {
+      history.pushState(null, '', found.href);
+      route();
+    } else if (!quiet) {
+      main.querySelector('.search-answer').innerHTML = `<p class="quiet search-note">${escapeHtml(found.note)}</p>`;
+    }
+  };
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    look(box.value);
+  });
+  // A pick from the list arrives as an input with no typing behind it.
+  box.addEventListener('input', (e) => {
+    if (e.inputType == null || e.inputType === 'insertReplacementText') look(box.value, { quiet: true });
+  });
+}
+
+/**
  * The search results page: every ticket in every project matching the
  * address's term and filters, best matches first, as the server ranks and
  * filters them (pageData.mjs searchTickets), drawn by render.mjs
@@ -1375,12 +1408,13 @@ async function drawSearch(params) {
   main.innerHTML = `
     <h1>Search</h1>
     <div class="toolbar">${searchForm(answer.query)}</div>
-    ${renderSearchFilters(answer.filters)}
-    ${refusal ? `<p class="error">${escapeHtml(refusal)}</p>` : `
+    ${renderSearchFilters(answer.filters, { tickets: answer.tickets ?? [] })}
+    <div class="search-answer">${refusal ? `<p class="error">${escapeHtml(refusal)}</p>` : `
     ${answer.results.length ? `<p class="quiet">${answer.results.length} ${answer.results.length === 1 ? 'ticket matches' : 'tickets match'}</p>` : ''}
-    ${renderSearchResults(answer)}`}`;
+    ${renderSearchResults(answer)}`}</div>`;
   putTrail([{ label: 'Tasks', href: '/tasks' }, { label: 'Search' }]);
   wireSearch();
+  wireTicketLookup({ ...answer, tickets: answer.tickets ?? [] });
   if (!answer.query) main.querySelector('form.search input').focus();
 }
 
