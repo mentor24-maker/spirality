@@ -1995,7 +1995,8 @@ test('GET /projects/:slug/board keeps the shape outside sites read: the eight co
       assert.ok(Array.isArray(c.tickets));
     }
     const [ticket] = r.body.columns.find((c) => c.status === 'Queued').tickets;
-    assert.deepEqual(Object.keys(ticket), ['id', 'name', 'priority', 'tags', 'assignee', 'updatedAt', 'pullRequest', 'answerIn']);
+    assert.deepEqual(Object.keys(ticket), ['id', 'name', 'priority', 'tags', 'assignee', 'updatedAt', 'pullRequest', 'answerIn', 'version']);
+    assert.equal(ticket.version, f.store.getTicket('AL-1').version, 'the version the list saves with is the stored one');
     assert.deepEqual([ticket.id, ticket.name, ticket.priority, ticket.tags, ticket.assignee, ticket.pullRequest], ['AL-1', 'One', 'high', ['x'], null, null]);
     assert.equal(typeof ticket.updatedAt, 'string');
     // docs/OUTSIDE_SITE_API.md lists it among the calls outside sites read.
