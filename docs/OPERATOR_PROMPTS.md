@@ -146,6 +146,14 @@ this log only points there.
 
    Led to: [SP-207](http://mac-mini.local:4180/t/SP-207), "Make the relay post its merge notices to the project's bus", built in the hand-run session (its pull request).
 
+7. > build SP-206
+
+   Led to: Nothing built here: the build lane had claimed SP-206, "Add a stage-counts command to the door for the weekly report", minutes before, so this session left it there rather than race it.
+
+8. > carry over the stuck merge conflict
+
+   Led to: StarCaster's daily "still not cleared" reminder for a stuck conflict hand-off, added to SP-207's pull request (it changes the same relay step), with SP-207 taken back out of review while it changed.
+
 ## 2026-11-10: StarCaster's move to the tracker, held back
 
 1. > Run SP-25, StarCaster still runs on ClickUp: move it to the tracker, as a hand-run session.

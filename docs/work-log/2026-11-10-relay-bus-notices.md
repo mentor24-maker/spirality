@@ -14,5 +14,11 @@ have gone quiet about merges.
 - **A project with no bus is unchanged**: Spirality, WaveCenter and every
   project without `busProject` write nothing new.
 
-Not carried over: StarCaster's daily nag about a stalled conflict hand-off,
-because Spirality's relay keeps no clock for stalls.
+- **A stuck merge conflict is said again** (Dane: "carry over the stuck merge
+  conflict"). Once a conflict hand-off has been said, the relay stays quiet
+  while the catch-up ticket is less than a day old. After that, or straight
+  away if nothing was filed to fix it, it posts "still blocked" to the bus, at
+  most once a day. Every pass also lists the stuck ones at the end of its log,
+  bus or no bus. StarCaster's "failed 3 times" alarm stays behind: there it
+  counts merge tries, but here it would count reminders and fire every 10
+  minutes from the third day.

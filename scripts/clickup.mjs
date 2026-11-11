@@ -65,10 +65,11 @@ import {
 import {
   PR_VIEW_FIELDS, markerBookkeeping, recordBookkeeping, emptyBooks, mergeDestination, relayLine,
   handbackAnswer, handbackPlan, closePlan, conflictFilingPlan,
-  mergeWithPreMergeStep, commandLine, mergedBusLine, conflictBusLine, tellBus,
+  mergeWithPreMergeStep, commandLine, mergedBusLine, conflictBusLine, tellBus, stalledHandOffPlan,
 } from '../lib/relayLane.js';
 import {
   conflictTicketName, conflictTicketBody, conflictTicketFiledComment, findConflictTicket, unstuckPullRequest,
+  stalledSummaryHeadline,
 } from '../lib/conflictWork.js';
 import {
   handbackDoneText, handbackFailureText, repliesShowHandbackDone, repliesShowHandbackFailure, HANDBACK_FAILURE_MARKER,
@@ -1367,7 +1368,12 @@ if (cmd === 'whoami') {
     if (told.act === 'none') return;
     say(task, told.act === 'failed' ? 'unchecked' : told.act === 'posted' ? 'bus' : 'would-post-bus', told.line);
     if (told.unchecked) unchecked.push(told.unchecked);
+    return told;
   };
+  // Conflict hand-offs a day old with nothing cleared (stalledHandOffPlan),
+  // listed at the end of the pass. A stuck ticket is not a failed step, so
+  // they do not change the exit code.
+  const stalledHandOffs = [];
 
   /** Write the dedup marker as a threaded reply on his comment, and read it back.
    *  An unverified marker means the next pass may act on the same word again,
@@ -1659,6 +1665,12 @@ if (cmd === 'whoami') {
       const again = plan.refiledFrom ? ` (the earlier catch-up ${plan.refiledFrom.id} is in ${plan.refiledFrom.status}; main moved again)` : '';
       const reason = conflictHandOffNotice({ commentId: decision.commentId, pr: prRef, localVerdict, filed: null }).marker.replace(/^refused:\s*/i, '');
       const alreadySaid = decision.priorRefusal === reason;
+      // Said before and nothing new filed: quiet, unless it is a day old (or
+      // nothing was ever filed), and then it is news again.
+      const stall = alreadySaid && plan.act !== 'file'
+        ? stalledHandOffPlan({ priorRefusalAt: decision.priorRefusalAt, now: Date.now(), filed: plan.filed || null, localVerdict, tag: busTag, task, pr: prRef })
+        : { act: 'quiet' };
+      if (stall.act === 'stalled') stalledHandOffs.push({ line: stall.line, kind: stall.kind });
 
       // Filing comes BEFORE the "already said" check: a hand-off written
       // before this fix (or one whose filing failed) still gets its ticket
@@ -1667,7 +1679,8 @@ if (cmd === 'whoami') {
         const filing = plan.act === 'file' ? `would file "${ticketName}" as Queued in list ${list}${again}`
           : plan.act === 'already-filed' ? `catch-up ticket ${plan.filed.id} already on file${plan.recorded ? '' : ' (would record it on this ticket)'}${again}`
             : 'no catch-up ticket needed';
-        say(task, plan.act === 'file' ? 'would-file-catch-up' : alreadySaid ? 'refused-quiet' : 'would-refuse', `PR #${pr.number}: ${gate.reason} — ${filing}${alreadySaid ? '; hand-off already said' : ''}`);
+        const stuck = stall.act === 'stalled' ? `; STUCK: ${stall.why}${project.busProject ? ' — would post it to the bus' : ''}` : '';
+        say(task, plan.act === 'file' ? 'would-file-catch-up' : stall.act === 'stalled' ? 'would-report-stalled' : alreadySaid ? 'refused-quiet' : 'would-refuse', `PR #${pr.number}: ${gate.reason} — ${filing}${alreadySaid ? '; hand-off already said' : ''}${stuck}`);
         return;
       }
       let filed = plan.filed;
@@ -1675,6 +1688,16 @@ if (cmd === 'whoami') {
       let recordedNow = false;
       if (filed && !plan.recorded) recordedNow = await recordCatchUp(task, filed, pr.number, plan.refiledFrom);
 
+      if (alreadySaid && !recordedNow && stall.act === 'stalled') {
+        say(task, 'stalled', `PR #${pr.number}: ${stall.why}`);
+        // The bus is told, and only a reminder that landed restamps the
+        // marker: that stamp is the clock, so a post nobody saw must not buy
+        // a quiet day. No bus: the end-of-pass list below is the only place
+        // it is said, as before.
+        const told = await announce(task, stall.busText, `PR #${pr.number} conflict hand-off still stuck`);
+        if (told.act === 'posted') await markMergeHandled(decision.commentId, task, conflictHandOffNotice({ commentId: decision.commentId, pr: prRef, localVerdict, filed }).marker);
+        return;
+      }
       if (alreadySaid) {
         say(task, recordedNow ? 'filed' : 'refused-quiet', recordedNow
           ? `PR #${pr.number}: ${gate.reason} — catch-up ticket ${filed.id} filed and recorded${again} (hand-off already said)`
@@ -1941,6 +1964,10 @@ if (cmd === 'whoami') {
     }
   }
 
+  if (stalledHandOffs.length) {
+    console.error(`\n${stalledSummaryHeadline(stalledHandOffs.map((h) => h.kind))} — ${stalledHandOffs.length} approved merge(s) are not moving:`);
+    for (const h of stalledHandOffs) console.error(`  - ${h.line}`);
+  }
   if (unchecked.length) {
     console.error(`\nUNCHECKED — ${unchecked.length} step(s) failed and say so:`);
     for (const line of unchecked) console.error(`  - ${line}`);
