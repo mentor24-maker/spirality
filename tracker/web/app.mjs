@@ -2106,7 +2106,8 @@ async function drawSettings() {
  * the Role column; an admin gets a picker there instead, whose change is
  * read back the same way, and a refusal (the last admin) shows the server's
  * reason. The Projects column lists the projects each user is a member
- * of, each linking to its details page; an admin also gets Remove on each
+ * of, each linking to its details page, under "All projects (admin)" for
+ * an admin, who sees every project whatever they are a member of; an admin also gets Remove on each
  * (never where they are its owner or operator) and an Add to Project picker
  * of the projects they are not on, each change read back (changeMember).
  * Under it, which role has which permission.
@@ -2122,13 +2123,20 @@ async function drawUsers(done = '', problem = '') {
   const bySlug = new Map(all.map((x) => [x.slug, x]));
   // A project's owner and operator are never taken off: a tag, no Remove.
   const fixedAs = (p, x) => { const pr = bySlug.get(x.slug); return [pr?.owner?.id === p.id ? 'Owner' : null, pr?.operator?.id === p.id ? 'Operator' : null].filter(Boolean); };
+  // An admin sees every project, so their cell says so first; their
+  // own memberships follow, and "none" is left out under that line.
   const projectsCell = (p) => {
+    const every = p.seesEveryProject === true;
+    const label = every ? '<span class="every" title="An admin sees every project, so they are never shut out of one.">All projects (admin)</span>' : '';
+    return `${label}${memberCell(p, every ? '' : '<span class="quiet">none</span>')}`;
+  };
+  const memberCell = (p, none) => {
     const mine = p.projects ?? [];
-    if (!editing) return mine.length ? mine.map((x) => `<a href="/projects/${encodeURIComponent(x.slug)}">${escapeHtml(x.name)}</a>`).join(', ') : '<span class="quiet">none</span>';
+    if (!editing) return mine.length ? mine.map((x) => `<a href="/projects/${encodeURIComponent(x.slug)}">${escapeHtml(x.name)}</a>`).join(', ') : none;
     const addable = all.filter((x) => !mine.some((m) => m.slug === x.slug));
     return `${mine.length ? mine.map((x) => `<span class="member"><a href="/projects/${encodeURIComponent(x.slug)}">${escapeHtml(x.name)}</a>${fixedAs(p, x).map((t) => `<span class="tag">${escapeHtml(t)}</span>`).join('')}${fixedAs(p, x).length
       ? ''
-      : `<button type="button" class="remove-member" data-remove-from="${escapeHtml(x.slug)}" data-project="${escapeHtml(x.name)}" data-person="${escapeHtml(p.id)}" data-name="${escapeHtml(p.name)}" aria-label="Remove ${escapeHtml(p.name)} from ${escapeHtml(x.name)}">Remove</button>`}</span>`).join('') : '<span class="quiet">none</span>'}${addable.length
+      : `<button type="button" class="remove-member" data-remove-from="${escapeHtml(x.slug)}" data-project="${escapeHtml(x.name)}" data-person="${escapeHtml(p.id)}" data-name="${escapeHtml(p.name)}" aria-label="Remove ${escapeHtml(p.name)} from ${escapeHtml(x.name)}">Remove</button>`}</span>`).join('') : none}${addable.length
       ? `<select class="add-member" data-person="${escapeHtml(p.id)}" data-name="${escapeHtml(p.name)}" aria-label="Add ${escapeHtml(p.name)} to a project"><option value="">Add to Project…</option>${addable.map((x) => `<option value="${escapeHtml(x.slug)}">${escapeHtml(x.name)}</option>`).join('')}</select>`
       : ''}`;
   };

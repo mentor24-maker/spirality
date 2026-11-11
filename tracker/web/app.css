@@ -258,6 +258,8 @@ table.people, table.invites { max-width: 48rem; }
 table.people select { font: inherit; padding: 0.2rem; }
 /* A project's members (Projects page) or a user's projects (Users page): one per line, an admin's Remove beside each, the Add picker under them. */
 table.projects td .member { display: block; white-space: nowrap; }
+/* An admin's Projects cell says first that they see every project. */
+table.people td span.every { display: block; font-weight: 600; margin-bottom: 0.2rem; }
 table.projects td button.remove-member { margin-left: 0.4rem; font: inherit; font-size: 0.8rem; padding: 0 0.4rem; cursor: pointer; }
 table.projects td select.add-member { display: block; margin-top: 0.3rem; font: inherit; font-size: 0.85rem; padding: 0.15rem; }
 /* The Users page's Roles and Permissions table: each role, its description under it, a tick per permission. */
