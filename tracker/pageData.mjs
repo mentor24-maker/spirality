@@ -580,6 +580,23 @@ function passesFilters(store, ticket, chosen) {
 }
 
 /**
+ * The tickets the Search page's "Ticket number" field offers (SP-192):
+ * every ticket of `project` (a slug, or null for every project), `Live`
+ * ones too, each as `{ id, name }`, project by project in the order the
+ * store lists them, then by number. Only the projects the reader may see
+ * (visibleProjects, `only`) are read, so a project they may not see offers
+ * nothing even when named. Reads only.
+ */
+export function lookupTickets(store, project = null, { only = null } = {}) {
+  const tickets = [];
+  for (const p of visibleProjects(store, only)) {
+    if (project != null && p.slug !== project) continue;
+    for (const t of store.listTickets(p.slug)) tickets.push({ id: t.id, name: t.name });
+  }
+  return tickets;
+}
+
+/**
  * Every ticket in every project (or the one the Project filter names), closed ones too, that matches `query` as
  * one phrase, ignoring case (render.mjs searchPattern, the same pattern the
  * page bolds with). A ticket scores the SEARCH_WEIGHTS of each place it

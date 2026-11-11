@@ -65,8 +65,13 @@ test('a typed answer: blank takes the default, lists split on commas, "none" is 
 });
 
 test('only the fields that are Dane\'s decisions are asked, and one set to null counts as answered', () => {
-  assert.deepEqual(DANE_FIELDS.map((f) => f.key), ['projectName', 'githubRepo', 'trackerPrefix', 'mergePhrases', 'autoMergeLanes', 'extraGovernancePaths', 'description']);
-  assert.deepEqual(unanswered({ projectName: 'X', trackerPrefix: null }).map((f) => f.key), ['githubRepo', 'mergePhrases', 'autoMergeLanes', 'extraGovernancePaths', 'description']);
+  assert.deepEqual(DANE_FIELDS.map((f) => f.key), ['projectName', 'githubRepo', 'trackerPrefix', 'mergePhrases', 'autoMergeLanes', 'extraGovernancePaths', 'hasBus', 'description']);
+  assert.deepEqual(unanswered({ projectName: 'X', trackerPrefix: null }).map((f) => f.key), ['githubRepo', 'mergePhrases', 'autoMergeLanes', 'extraGovernancePaths', 'hasBus', 'description']);
+  // SP-204: an answers file from before the bus question has every other
+  // answer, so it is not stopped for that one alone: no bus stands.
+  const before = { projectName: 'X', githubRepo: 'o/x', trackerPrefix: null, mergePhrases: null, autoMergeLanes: null, extraGovernancePaths: null, description: 'd' };
+  assert.deepEqual(unanswered(before), []);
+  assert.deepEqual(unanswered({ ...before, hasBus: true }), []);
   assert.equal(fieldNamed('/x.json: "githubRepo" must be owner/name'), 'githubRepo');
 });
 
@@ -186,6 +191,8 @@ function makeWorld(t) {
     signinsMade: false, prOpen: false, ticket: null, lanesLoaded: false, merged: false,
     protection: null, mergeAfterPolls: 1, polls: 0, dopplerProject: false,
     calls: [], asked: [], printed: [], signinsEnv: [],
+    // SP-204: the bus project on the tracker, and each tracker:bus run.
+    busMade: false, busFails: false, busRuns: [],
     // "Run these now?" at the sign-ins: what Dane answers, how often it was asked,
     // and the environment each command it ran was given.
     runAnswer: 'y', runAsked: 0, envs: {}, signinsHollow: false, createFails: null,
@@ -287,6 +294,14 @@ function makeWorld(t) {
           return ok();
         }
         return w.signinsMade ? ok('all answer as themselves') : no('Could not find requested project');
+      }
+      if (script === 'tracker:bus') {
+        // As the real one does (tracker/busProject.mjs): made once, then left alone.
+        w.busRuns.push({ args: rest, db: o.env?.TRACKER_DB ?? null });
+        if (w.busFails) return no('bus project "pressplay-bus": NOT made: a project with slug "pressplay-bus" or prefix "PPBUS" already exists.\nbus: SOMETHING ABOVE FAILED.');
+        if (w.busMade) return ok('bus project "pressplay-bus": already there ("PressPlay bus", tickets PPBUS-…, operator Dana), left alone.\nbus: in order.');
+        w.busMade = true;
+        return ok('bus project "pressplay-bus": made, "PressPlay bus", tickets PPBUS-1 onwards, operator Dana (read back).\nbus: in order.');
       }
       if (script === 'onboard:copy') {
         if (breaks('copy')) return no();
@@ -411,8 +426,10 @@ test('a first run asks Dane only his answers, stops for the paste block and the 
   assert.deepEqual(answers.autoMergeLanes, []);
   const log = readFileSync(logFile, 'utf8');
   // The repository already has history, so the start step (SP-154) is skipped; every other step is done.
-  for (const step of STEPS.filter((x) => x !== 'start')) assert.match(log, new RegExp(`\\| ${step} \\| done \\|`), step);
+  for (const step of STEPS.filter((x) => x !== 'start' && x !== 'bus')) assert.match(log, new RegExp(`\\| ${step} \\| done \\|`), step);
   assert.match(log, /\| start \| skip \| mentor24-maker\/pressplay already has a main branch \(main\)/);
+  // The bus question was answered with Enter: no bus, so the step is skipped (SP-204).
+  assert.match(log, /\| bus \| skip \| pressplay has no bus/);
   assert.match(log, /MT \|/);
   // Every write read back: the protection was read again after the PUT.
   const put = w.calls.findIndex((c) => c.includes('-X PUT'));
@@ -745,6 +762,53 @@ test('the state file follows every step: running when it starts, its outcome whe
   }
 });
 
+test('a project with a bus: the bus step makes its tracker project once, the settings name it, and a rerun makes nothing new (SP-204)', async (t) => {
+  const { w, go, reset, seedAnswers, answersFile, settingsFile, logFile } = makeWorld(t);
+  seedAnswers();
+  const raw = JSON.parse(readFileSync(answersFile, 'utf8'));
+  writeFileSync(answersFile, JSON.stringify({ ...raw, hasBus: true }));
+  w.mergeAfterPolls = Infinity;
+  w.fail = 'copy';
+  assert.equal(await go(), 1, out(w));
+  // The settings file the copy step puts in the project's repository names the bus.
+  assert.equal(JSON.parse(readFileSync(settingsFile, 'utf8')).busProject, 'pressplay-bus');
+  assert.equal(w.busRuns.length, 1);
+  assert.deepEqual(w.busRuns[0].args, ['--config', settingsFile, '--name', 'PressPlay']);
+  assert.equal(w.busRuns[0].db, join(w.homeConfig.trackerDataDir, 'tracker.db'), 'the tracker home\'s own database');
+  assert.match(out(w), /^bus\s+bus project "pressplay-bus": made, "PressPlay bus"/m);
+  assert.match(readFileSync(logFile, 'utf8'), /\| bus \| done \| bus project "pressplay-bus" made on the tracker, read back/);
+  // The bus is made after the sign-ins (its loops must exist to be checked) and before the copy.
+  const at = (re) => w.calls.findIndex((c) => re.test(c));
+  assert.ok(at(/tracker:signins -- check/) < at(/tracker:bus/));
+  assert.ok(at(/tracker:bus/) < at(/onboard:copy/));
+
+  // A second run: the bus is there, so nothing new is made.
+  reset();
+  w.fail = null;
+  w.mergeAfterPolls = 1;
+  assert.equal(await go(), 0, out(w));
+  assert.equal(w.busRuns.length, 2);
+  assert.match(out(w), /^bus\s+already done \(bus project "pressplay-bus" is on the tracker/m);
+});
+
+test('a bus the tracker refuses fails the bus step, and nothing after it runs (SP-204)', async (t) => {
+  const { w, go, seedAnswers, answersFile } = makeWorld(t);
+  seedAnswers();
+  writeFileSync(answersFile, JSON.stringify({ ...JSON.parse(readFileSync(answersFile, 'utf8')), hasBus: true }));
+  w.busFails = true;
+  assert.equal(await go(), 1, out(w));
+  assert.match(out(w), /^FAILED: bus: tracker:bus exit 1: .*already exists/m);
+  assert.ok(!w.calls.some((c) => c.includes('onboard:copy')), 'the copy never ran');
+});
+
+test('a bus answer typed yes or no is kept as true or false; anything else is refused by name', () => {
+  const field = DANE_FIELDS.find((f) => f.key === 'hasBus');
+  assert.equal(answerValue(field, 'Yes'), true);
+  assert.equal(answerValue(field, ' n '), false);
+  assert.equal(answerValue(field, ''), null, 'blank: the default, no bus');
+  assert.equal(answerValue(field, 'maybe'), 'maybe', 'kept, so the answers check names it');
+});
+
 test('--no-prompt with answers missing: STOPPED at answers, exit 3, the stop says fill the form, nothing asked', async (t) => {
   const { w, homeOpts, statePath } = makeWorld(t);
   assert.equal(await noPromptRun(homeOpts), 3, out(w));
@@ -778,7 +842,7 @@ test('--no-prompt: answers filled in, the rerun stops for the paste block, then 
   assert.equal(state.stop.commands[1], 'doppler projects create pressplay');
   assert.match(state.stop.commands[2], /^TRACKER_DB=.* npm run tracker:signins -- create --name PressPlay --prefix PP --config /);
   for (const line of state.stop.commands) assert.ok(out(w).includes(`  ${line}`), 'the same block is printed');
-  assert.deepEqual(outcomes(state), { answers: 'skip', look: 'done', start: 'skip', clone: 'done', settings: 'done', signins: 'stopped', copy: 'pending', lanes: 'pending', merge: 'pending', protect: 'pending' });
+  assert.deepEqual(outcomes(state), { answers: 'skip', look: 'done', start: 'skip', clone: 'done', settings: 'done', signins: 'stopped', bus: 'pending', copy: 'pending', lanes: 'pending', merge: 'pending', protect: 'pending' });
 
   // Dane pastes the block. Stop 2: the merge, the setup ticket's link in the stop.
   w.signinsMade = true;
@@ -1168,7 +1232,7 @@ test('fromClickup: a lockless job (lock none) is in flight while launchd shows i
 });
 
 test('fromClickup: the ClickUp steps go before copy; only a checkout with its own installer and no settings file is an old loop', (t) => {
-  assert.deepEqual(withClickupSteps(STEPS), ['answers', 'look', 'start', 'clone', 'settings', 'signins', 'stop', 'snapshot', 'import', 'switch-check', 'copy', 'lanes', 'merge', 'protect']);
+  assert.deepEqual(withClickupSteps(STEPS), ['answers', 'look', 'start', 'clone', 'settings', 'signins', 'bus', 'stop', 'snapshot', 'import', 'switch-check', 'copy', 'lanes', 'merge', 'protect']);
   assert.deepEqual(CLICKUP_RUN_STEPS, withClickupSteps(STEPS));
   const have = new Set(['/p/scripts/install_loop_runner.sh']);
   assert.equal(runsOldLoop('/p', (p) => have.has(p)), true);

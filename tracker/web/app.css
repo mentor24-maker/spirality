@@ -120,17 +120,27 @@ dl.details dd { margin: 0; }
 .views a.current { background: #000; color: #fff; }
 .board { display: flex; gap: 0.75rem; align-items: flex-start; overflow-x: auto; padding-bottom: 1rem; }
 .column { flex: 0 0 15rem; background: #f5f5f7; border: var(--hairline); border-radius: 8px; padding: 0.5rem; }
-.column h2 { font-size: 0.95rem; margin: 0.25rem 0.25rem 0.5rem; display: inline-block; }
-details.column > summary { cursor: pointer; }
-details.column:not([open]) { flex-basis: auto; }
+.column h2 { font-size: 0.95rem; margin: 0; }
+.column > summary { padding: 0.25rem; margin-bottom: 0.5rem; }
+.column:not([open]) > summary { margin-bottom: 0; }
 .card { display: flex; flex-direction: column; gap: 0.25rem; background: #fff; border: var(--hairline); border-radius: 6px; padding: 0.5rem 0.6rem; margin-bottom: 0.5rem; color: var(--ink); text-decoration: none; font-size: 0.9rem; }
 .card:hover { box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18); }
 .card .quiet { font-size: 0.8rem; }
 .card .tag { margin-left: 0; margin-right: 0.3rem; }
-table.tickets, details.group, section.group { border: var(--hairline); border-radius: 8px; }
+table.tickets, details.group { border: var(--hairline); border-radius: 8px; }
 .group { margin-bottom: 1rem; overflow: hidden; }
-.group h2 { font-size: 0.95rem; margin: 0; padding: 0.5rem 0.75rem; display: inline-block; }
-.group > summary { cursor: pointer; padding-left: 0.5rem; }
+.group h2 { font-size: 0.95rem; margin: 0; }
+.group > summary { padding: 0.5rem 0.75rem; }
+/* SP-196: every stage folds. Its heading reads name, then the count right-aligned,
+   then one arrow (down open, right folded); the browser's own marker is hidden. */
+.column > summary, .group > summary { display: flex; align-items: center; gap: 0.5rem; cursor: pointer; list-style: none; }
+.column > summary::-webkit-details-marker, .group > summary::-webkit-details-marker { display: none; }
+.column > summary h2, .group > summary h2 { flex: 1; display: flex; align-items: baseline; gap: 0.5rem; min-width: 0; }
+.column > summary .count, .group > summary .count { margin-left: auto; }
+.column > summary .fold, .group > summary .fold { font-size: 1.1rem; line-height: 1; }
+.column > summary .fold::before, .group > summary .fold::before { content: '▸'; }
+.column[open] > summary .fold::before, .group[open] > summary .fold::before { content: '▾'; }
+.column > summary:focus-visible, .group > summary:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }
 .group table { border-top: var(--hairline); }
 .group tbody tr:last-child td { border-bottom: 0; }
 .group tbody tr:hover { background: #f5f5f7; }
@@ -155,13 +165,10 @@ button.action:disabled { opacity: 0.4; cursor: default; }
 .group td { overflow-wrap: anywhere; }
 /* A stage's colour from the Settings page (app.mjs drawProject sets the three properties). */
 .column.coloured, .group.coloured { border-color: var(--stage-border); }
-.coloured > h2, .coloured > summary { background: var(--stage-tint); }
-.coloured h2, .coloured h2 .quiet { color: var(--stage-text); }
-.column.coloured > h2 { display: block; margin: -0.5rem -0.5rem 0.5rem; padding: 0.5rem 0.75rem; border-radius: 7px 7px 0 0; }
-.column.coloured > summary { margin: -0.5rem -0.5rem 0.5rem; padding: 0.5rem 0.75rem 0.25rem 0.5rem; border-radius: 7px 7px 0 0; }
+.coloured > summary { background: var(--stage-tint); }
+.coloured h2, .coloured h2 .quiet, .coloured > summary .fold { color: var(--stage-text); }
+.column.coloured > summary { margin: -0.5rem -0.5rem 0.5rem; padding: 0.5rem 0.75rem; border-radius: 7px 7px 0 0; }
 .column.coloured:not([open]) > summary { margin-bottom: -0.5rem; border-radius: 7px; }
-.column.coloured > summary h2 { margin: 0; }
-.group.coloured > h2 { display: block; }
 .coloured > table { border-top-color: var(--stage-border); }
 .quick { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; align-items: start; margin-bottom: 2rem; }
 .quick h1 { margin-top: 0; }
@@ -262,6 +269,8 @@ form.search input { width: 100%; box-sizing: border-box; font: inherit; padding:
 .search-filters { display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; margin: 0 0 0.75rem; }
 .search-filters label { display: flex; align-items: center; gap: 0.35rem; font-size: 0.9rem; }
 .search-filters select { font: inherit; padding: 0.2rem 0.4rem; border: var(--hairline); border-radius: 6px; }
+.search-filters form.ticket-lookup { margin: 0; }
+.search-filters input[name="ticket"] { font: inherit; padding: 0.2rem 0.4rem; border: var(--hairline); border-radius: 6px; }
 ol.search-results { list-style: none; padding: 0; margin: 0; max-width: 48rem; }
 ol.search-results li { padding: 0.75rem 0; border-bottom: var(--hairline); }
 ol.search-results p { margin: 0.15rem 0; }
@@ -305,3 +314,16 @@ ul.command-list li { padding: 0.6rem 0; border-bottom: var(--hairline); }
 table.doc-list td.actions a { margin-right: 0.6rem; }
 table.doc-list td button.remove-doc { font: inherit; font-size: 0.8rem; padding: 0 0.4rem; cursor: pointer; }
 section.context-docs { margin-bottom: 1.5rem; }
+/* SP-195: Reference Docs and Work Log, folded at the bottom of the Docs page, with a filter row and sortable headings. */
+details.spirality-docs { margin-top: 1.5rem; }
+details.spirality-docs > summary { cursor: pointer; }
+details.spirality-docs > summary h2 { display: inline; }
+.doc-filters { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin: 0 0 0.5rem; }
+.doc-filters select, #doc-search { font: inherit; padding: 0.35rem 0.6rem; border: var(--hairline); border-radius: 6px; }
+#doc-search { width: 100%; max-width: 24rem; box-sizing: border-box; }
+table.spirality-docs th { color: #000; font-weight: 700; }
+table.spirality-docs th button.sort { background: none; border: 0; padding: 0; margin: 0; font: inherit; color: inherit; cursor: pointer; text-align: left; }
+table.spirality-docs th button.sort:hover { text-decoration: underline; }
+table.spirality-docs th button.sort:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+table.spirality-docs th .arrow { font-size: 0.75em; }
+table.spirality-docs td.date { white-space: nowrap; }

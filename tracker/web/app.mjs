@@ -26,7 +26,7 @@
  * an emailed link's own page. The link's token is sent only in a JSON body,
  * never in an address.
  */
-import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, unwrapDoc, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, pipelinePodLabel, renderCommandList, renderCommandView, renderContextDocs, renderSortHeadings, sortTickets, nextSort } from './render.mjs';
+import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, unwrapDoc, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, lookupTicket, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, pipelinePodLabel, renderCommandList, renderCommandView, renderContextDocs, renderSortHeadings, sortTickets, nextSort, renderDocumentation, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine } from './render.mjs';
 
 /** Where an earlier version of the page kept a pasted token; removed on load, never read. */
 const OLD_TOKEN_KEY = 'tracker-token';
@@ -1146,8 +1146,9 @@ function wireSortHeadings(stages) {
  * server's board (pageData.mjs boardOf): the eight statuses in the
  * contract's order, each holding its tickets in `queue` order, so the two
  * views cannot disagree about what is where. Read-only: moves stay with the
- * door and the loops. `Live` starts folded in both, its count showing,
- * because it only grows.
+ * door and the loops. Every stage folds by a click on its heading, or Enter
+ * or Space on it (SP-196); `Live` starts folded in both, its count showing,
+ * because it only grows, and every other stage starts open.
  *
  * The board is the working statuses as columns of cards, with Live under
  * them as a list section, newest change first (SP-165); the list is the same
@@ -1185,11 +1186,16 @@ async function drawProject(slug, view, { adding = false, filed = null, unchecked
   setTitle(`${board.projectName} ${view} · Tracker`);
   const at = (v, s) => `/${v}/${encodeURIComponent(s)}`;
   const toggle = ['board', 'list'].map((v) => `<a href="${at(v, board.project)}"${v === view ? ' class="current" aria-current="page"' : ''}>${v === 'board' ? 'Board' : 'List'}</a>`).join('');
-  const head = (c) => `${escapeHtml(c.status)} <span class="quiet">${c.tickets.length}</span>`;
-  /** A status's block: folded when it is Live, open otherwise. */
-  const block = (c, cls, body) => (c.status === 'Live'
-    ? `<details class="${cls}" data-stage="${escapeHtml(c.status)}"><summary><h2>${head(c)}</h2></summary>${body}</details>`
-    : `<section class="${cls}" data-stage="${escapeHtml(c.status)}"><h2>${head(c)}</h2>${body}</section>`);
+  /**
+   * A stage's heading (SP-196): its name on the left, its count right-aligned,
+   * then the fold arrow, which the stylesheet draws from the block's open
+   * state (down when open, right when folded).
+   */
+  const head = (c) => `<h2><span class="stage-name">${escapeHtml(c.status)}</span><span class="count quiet">${c.tickets.length}</span></h2><span class="fold" aria-hidden="true"></span>`;
+  /** Whether a stage starts open: every one but Live, which only grows. */
+  const startsOpen = (c) => c.status !== 'Live';
+  /** A status's block: every stage folds; its heading is the summary that folds it. */
+  const block = (c, cls, body) => `<details class="${cls}" data-stage="${escapeHtml(c.status)}"${startsOpen(c) ? ' open' : ''}><summary>${head(c)}</summary>${body}</details>`;
 
   const card = (t) => `
     <a class="card" href="/t/${encodeURIComponent(t.id)}">
@@ -1351,6 +1357,39 @@ function wireSearch() {
 }
 
 /**
+ * The Search page's "Ticket number" field (SP-192): Enter, or picking one
+ * of the tickets its list offers, opens that ticket's page; a number that
+ * is not one of them (render.mjs lookupTicket) shows its plain line in
+ * place of the results. `answer` is the server's: the tickets offered and
+ * the Project filter, whose chosen name the line uses.
+ */
+function wireTicketLookup(answer) {
+  const form = main.querySelector('form.ticket-lookup');
+  if (!form) return;
+  const box = form.elements.ticket;
+  const project = answer.filters.find((f) => f.key === 'project');
+  const projectName = project?.value == null ? null : project.options.find((o) => o.value === project.value)?.label ?? project.value;
+  const look = (typed, { quiet = false } = {}) => {
+    const found = lookupTicket(typed, answer.tickets, projectName);
+    if (!found) return;
+    if (found.href) {
+      history.pushState(null, '', found.href);
+      route();
+    } else if (!quiet) {
+      main.querySelector('.search-answer').innerHTML = `<p class="quiet search-note">${escapeHtml(found.note)}</p>`;
+    }
+  };
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    look(box.value);
+  });
+  // A pick from the list arrives as an input with no typing behind it.
+  box.addEventListener('input', (e) => {
+    if (e.inputType == null || e.inputType === 'insertReplacementText') look(box.value, { quiet: true });
+  });
+}
+
+/**
  * The search results page: every ticket in every project matching the
  * address's term and filters, best matches first, as the server ranks and
  * filters them (pageData.mjs searchTickets), drawn by render.mjs
@@ -1375,12 +1414,13 @@ async function drawSearch(params) {
   main.innerHTML = `
     <h1>Search</h1>
     <div class="toolbar">${searchForm(answer.query)}</div>
-    ${renderSearchFilters(answer.filters)}
-    ${refusal ? `<p class="error">${escapeHtml(refusal)}</p>` : `
+    ${renderSearchFilters(answer.filters, { tickets: answer.tickets ?? [] })}
+    <div class="search-answer">${refusal ? `<p class="error">${escapeHtml(refusal)}</p>` : `
     ${answer.results.length ? `<p class="quiet">${answer.results.length} ${answer.results.length === 1 ? 'ticket matches' : 'tickets match'}</p>` : ''}
-    ${renderSearchResults(answer)}`}`;
+    ${renderSearchResults(answer)}`}</div>`;
   putTrail([{ label: 'Tasks', href: '/tasks' }, { label: 'Search' }]);
   wireSearch();
+  wireTicketLookup({ ...answer, tickets: answer.tickets ?? [] });
   if (!answer.query) main.querySelector('form.search input').focus();
 }
 
@@ -2220,9 +2260,7 @@ async function drawUsers(done = '', problem = '') {
 }
 
 /**
- * The Docs page (SP-171): Spirality's own documentation first (SP-175),
- * every Markdown file in the repository's docs/ folder by title, each
- * opening at /docs/spirality/<path>; then the selected project's Context
+ * The Docs page (SP-171): the selected project's Context
  * Documents (SP-176, files kept on the project itself, uploaded, downloaded
  * and removed here); then every file on its tasks in one Task Files table,
  * newest first. The project is the one picked on the Projects page (shown
@@ -2236,6 +2274,9 @@ async function drawUsers(done = '', problem = '') {
  * `section` says whose it is: 'docs' (Context Documents) or 'files' (Task
  * Files), so it shows in that section only. Then the Commands section
  * (SP-179): every slash command, searchable, each opening its own page.
+ * Last, folded away, Reference Docs and Work Log (SP-175, SP-195): every
+ * Markdown file in the repository's docs/ folder, each opening at
+ * /docs/spirality/<path>, sortable and filtered on the page.
  */
 async function drawDocs(done = '', problem = '', section = 'files') {
   // The documentation call is caught on its own: a tracker not yet restarted onto it answers 404, and Task Files still draws.
@@ -2246,20 +2287,11 @@ async function drawDocs(done = '', problem = '', section = 'files') {
     api('GET', '/commands').then((r) => r.commands, () => null),
   ]);
   setTitle('Docs · Tracker');
-  const docRow = (d) => `<tr data-doc="${escapeHtml(d.path)}">
-      <td class="title"><a href="${docAddress(d.path)}">${escapeHtml(d.title)}</a></td>
-      <td class="path"><code>docs/${escapeHtml(d.path)}</code></td></tr>`;
-  const documentation = `
-    <h2>Spirality Documentation</h2>
-    ${!files
-    ? '<p class="quiet">Spirality\'s documentation could not be read.</p>'
-    : files.length
-    ? `<table class="projects spirality-docs"><thead><tr><th>Title</th><th>Path</th></tr></thead>
-      <tbody>${files.map(docRow).join('')}</tbody></table>`
-    : '<p class="quiet">The docs folder holds no Markdown files.</p>'}`;
+  const documentation = renderDocumentation(files, docAddress);
   if (!projects.length) {
-    main.innerHTML = `<h1>Docs</h1>${documentation}<h2>Task Files</h2><p class="quiet">There are no projects yet.</p>${commandsSection()}`;
+    main.innerHTML = `<h1>Docs</h1><h2>Task Files</h2><p class="quiet">There are no projects yet.</p>${commandsSection()}${documentation}`;
     showCommands(commands);
+    wireDocumentation(files);
     putTrail([{ label: 'Docs' }]);
     return;
   }
@@ -2287,7 +2319,6 @@ async function drawDocs(done = '', problem = '', section = 'files') {
   };
   main.innerHTML = `
     <h1>Docs</h1>
-    ${documentation}
     ${renderContextDocs({ project, docs }, { size: sizeOf, timeOf: when })}
     <h2>Task Files</h2>
     <p class="quiet">Files kept on the tasks of ${escapeHtml(project.name)}. Pick another project on the <a href="/projects">Projects</a> page.</p>
@@ -2302,7 +2333,8 @@ async function drawDocs(done = '', problem = '', section = 'files') {
     ? `<table class="projects task-files"><thead><tr><th>File</th><th>Task</th><th>Type</th><th>Size</th><th>Added By</th><th>Added On</th><th><span class="hidden">Actions</span></th></tr></thead>
       <tbody>${attachments.map(row).join('')}</tbody></table>`
     : `<p class="quiet">No task in ${escapeHtml(project.name)} has a file yet.</p>`}
-    ${commandsSection()}`;
+    ${commandsSection()}
+    ${documentation}`;
   const note = main.querySelector('.file-note');
   const busy = (text) => { note.className = 'note file-note quiet'; note.textContent = text; };
   const refused = (control, text) => { note.className = 'note file-note error'; note.textContent = text; if (control) control.disabled = false; };
@@ -2371,6 +2403,7 @@ async function drawDocs(done = '', problem = '', section = 'files') {
   }
   wireContextDocs(project, docsPath, section === 'docs' ? done : '', section === 'docs' ? problem : '');
   showCommands(commands);
+  wireDocumentation(files);
   putTrail([{ label: 'Docs' }]);
 }
 
@@ -2399,6 +2432,40 @@ function showCommands(commands) {
   const show = () => { list.innerHTML = renderCommandList(commands, box.value); };
   box.addEventListener('input', show);
   show();
+}
+
+/**
+ * The Reference Docs and Work Log section's controls (SP-195): the Kind
+ * drop-down and the search box narrow the rows together as they change, and
+ * a click on Title, Kind or Date sorts by it, the other way on a second
+ * click. Only the table body and the count line are drawn again; nothing is
+ * read again, and no choice is kept between visits. null (the list could
+ * not be read) or an empty list has no controls.
+ */
+function wireDocumentation(files) {
+  const table = main.querySelector('table.spirality-docs');
+  if (!files?.length || !table) return;
+  const rows = docRows(files);
+  const kind = main.querySelector('#doc-kind');
+  const search = main.querySelector('#doc-search');
+  const count = main.querySelector('.doc-count');
+  let sort = null;
+  const show = () => {
+    const shown = sortDocs(filterDocs(rows, { kind: kind.value, text: search.value }), sort);
+    table.tBodies[0].innerHTML = renderDocBody(shown, docAddress);
+    table.hidden = !shown.length;
+    count.textContent = docCountLine(shown.length, rows.length);
+  };
+  kind.addEventListener('change', show);
+  search.addEventListener('input', show);
+  table.tHead.addEventListener('click', (e) => {
+    const button = e.target.closest('button[data-sort]');
+    if (!button) return;
+    sort = nextSort(sort, button.dataset.sort);
+    table.tHead.innerHTML = renderDocHeadings(sort);
+    show();
+    table.tHead.querySelector(`button[data-sort="${sort.column}"]`).focus();
+  });
 }
 
 /** The command a `/docs/commands/<name>` address opens, or null. */
@@ -2682,12 +2749,14 @@ const hold = () => redrawHold({ hidden: document.hidden, drawing: drawing > 0, w
 
 /**
  * Where he is on the page: how far down, which folding sections
- * (Details, a Live column, the Add Task box, the Change panel) are open,
+ * (Details, each Tasks stage, the Add Task box, the Change panel) are open,
  * and how each Tasks table is sorted.
  * `restore` puts them back on the page drawn again.
  */
 function keepPlace() {
-  const key = (d) => `${d.className}|${d.dataset.stage ?? ''}`;
+  // A stage is known by its name alone, so a colour added on Settings between
+  // two redraws (which changes its classes) does not lose its fold (SP-196).
+  const key = (d) => (d.dataset.stage ? `stage|${d.dataset.stage}` : d.className);
   const open = new Map([...main.querySelectorAll('details')].map((d) => [key(d), d.open]));
   const y = window.scrollY;
   // Each stage's sort (SP-174), by stage, put back on the stage's new table.

@@ -28,6 +28,8 @@ wizard for the next project, [docs/onboarding/SETUP_REVIEW.md](onboarding/SETUP_
 
 A project already on ClickUp: how WaveCenter's move went, where the wizard
 stopped and what was left over, [docs/onboarding/WAVECENTER.md](onboarding/WAVECENTER.md).
+StarCaster's jobs outside its lanes that touch ClickUp, and the plan for
+each before it moves, [docs/onboarding/STARCASTER.md](onboarding/STARCASTER.md).
 
 ## The way in: one command
 
@@ -46,7 +48,7 @@ order: the read-only look, the start (only for an empty repository: its
 first commit, see section 1), the clone (the project's `main` into its
 checkout folder, only when that folder does not exist yet), the settings file, the sign-ins (**real secret values**: it shows
 the commands and asks `Run these now? [y/N]`; on Dane's y it runs them in his
-Terminal, on anything else it prints them and stops), the copy into the project's repository as
+Terminal, on anything else it prints them and stops), the bus (below), the copy into the project's repository as
 one pull request, the lanes and the setup ticket, the merge (Dane's merge
 phrase on that ticket: **a decision**) and protecting `main`. Each step
 checks first whether it is already done, so a rerun after a failed step
@@ -64,6 +66,36 @@ step's outcome (`done`, `skip`, `failed`, `stopped`, `running`, `pending`),
 the stop (`kind` `answers`, `paste` with the block's lines in `commands`,
 `merge` with the setup ticket's `link`, or `failed`), and `finished`. It holds
 commands and links only, never a secret value.
+
+### A project with a bus (StarCaster)
+
+One of the questions is whether the project raises its alarms on a bus
+(SP-204; what the bus is: [TRACKER_MVP.md, "The bus"](TRACKER_MVP.md#the-bus-starcasters-alarms)).
+StarCaster does; WaveCenter and Normie do not, and the default is no. The
+answer is `hasBus` in the answers file. On yes:
+
+- the settings file names `"busProject": "<slug>-bus"`, so the copy puts it
+  in the project's repository;
+- the `bus` step, after the sign-ins, runs `npm run tracker:bus` with
+  `TRACKER_DB` set to the tracker's own database. It makes the tracker
+  project `<slug>-bus` ("<project name> bus", tickets `<PREFIX>BUS-1`
+  onwards, the operator as its operator), reads it back, and checks that
+  every loop sign-in of the project sees it. A loop sees every project, so
+  there is nothing to grant, only that check;
+- a bus project that is there already is left alone, so a rerun makes
+  nothing new; one there under another operator is refused, because it may
+  be another project's.
+
+With no bus the step is skipped, and the settings file has no `busProject`.
+An answers file written before the question was asked, with every other
+answer in it, is not stopped for it: no bus stands. To give a project that
+is already set up a bus, put `"busProject"` in its settings file in its own
+pull request, and run `npm run tracker:bus -- --config <that file> --name
+<project name>` on the Mini with `TRACKER_DB` set.
+
+```bash
+echo "the heartbeat stopped at 09:10" | npm run clickup -- bus-post --body-file -   # from the project's folder: posts, read back
+```
 
 ### A project already on ClickUp (WaveCenter, StarCaster)
 

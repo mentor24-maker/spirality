@@ -584,15 +584,18 @@ it opened. Requests arrive through Funnel, so they get the public address's
 
 When `trackerPageUrl` is set in `spirality.project.json`, the invite and
 reset emails link there instead of `trackerUrl` (the server reads it when it
-starts). It stays unset until the name below answers with the sign-in
-screen, so no email links to a name that does not yet lead here.
+starts). It is set to `https://spirality.alphire.agency` (SP-209), after the
+name below answered with the tracker's page.
 
-Moving the name. Today `spirality.alphire.agency` belongs to **StarCaster's**
-Vercel project (its answers carry `x-site-handler: resolved`), whose
-Spirality Tasks block stays for StarCaster's other sites. The move is
-outward-facing, so it is done **after this merges, by a hand-run session,
-with Dane's word**, never by a loop. Signing in to Vercel is a browser
-login, so that step is Dane's.
+Moving the name. **Done 2026-11-10**: `spirality.alphire.agency` moved from
+**StarCaster's** Vercel project (whose answers carried
+`x-site-handler: resolved`) to `spirality-tracker-page`, with Dane's word, by
+Vercel's move call
+(`npx vercel api /v1/projects/starcaster/domains/spirality.alphire.agency/move -X POST -F projectId=<spirality-tracker-page's id>`),
+which takes the name off one project and puts it on the other in one step.
+StarCaster's other names stayed. The steps below are kept for doing it again
+(for another project's page) and for the undo. The move is outward-facing,
+so it is done **by a hand-run session, with Dane's word**, never by a loop.
 
 1. Check the route is on: `scripts/install_tracker_funnel.sh --status`
    ends in exit 0.
@@ -1149,6 +1152,74 @@ loops (step 7). Anything done in the tracker during the week stays in the
 tracker and is not copied back to ClickUp; a ticket moved there is moved by
 hand in ClickUp.
 
+## Tickets as data (StarCaster's scheduled checks)
+
+Seven of StarCaster's scheduled checks (throughput, stale-ready,
+stale-answer, pipeline-pulse, sql:unapplied, broken-links and the
+heartbeat's roll call) and its review-gate workflow read the Loop Queue
+straight from ClickUp's API. After the switch nothing writes that list, so
+they would report on nothing. Their one way in is the door (SP-205):
+
+```bash
+npm run clickup -- tickets --json                          # every open ticket, as JSON
+npm run clickup -- tickets --json --include-closed         # Live tickets too
+npm run clickup -- tickets --json --comments               # each ticket's top-level comments too
+npm run clickup -- tickets --json --project starcaster-bus --include-closed   # another project the sign-in can see
+```
+
+It prints one JSON list, one object per ticket, in filing order:
+
+| Field | What it holds |
+|---|---|
+| `id`, `name` | `SP-12`, the ticket's name |
+| `status` | as `queue` prints it: `queued`, `in review`, `needs your input`, ... |
+| `priority` | `urgent`, `high`, `normal`, `low`, or `null` |
+| `tags` | a list of tag names |
+| `created`, `updated` | ISO times, in UTC |
+| `statusSince` | when it entered its current status (ISO, UTC): its newest status move in the ticket's history, or its filing when it never moved |
+| `comments` | with `--comments` only: `{ id, author: { id, name }, by, at, text }` per top-level comment, oldest first; `by` is `operator` when the author is the project's operator seat, else `machine`; `text` exactly as stored, machine stamp included |
+
+It writes nothing. Every read has to come back: when the list, any ticket's
+history or any ticket's comments cannot be read, it prints nothing on
+standard output and exits 1 naming each read that failed, so a check never
+counts half the queue as the whole of it. The shape lives in
+`lib/ticketsJson.js`, with its tests. Moving StarCaster's checks onto it is
+StarCaster's own pull request.
+
+## Stage counts (StarCaster's weekly report)
+
+StarCaster's Monday report (`scripts/weekly_report.mjs`) draws the pipeline
+from one command, which the door answers in the same shape StarCaster's own
+door printed, so the report reads it unchanged (SP-206):
+
+```bash
+npm run clickup -- stage-counts --since 2026-11-03 --until 2026-11-09     # this project
+npm run clickup -- stage-counts --list <id> --since <date> --until <date>  # StarCaster's spelling: --list is --project
+```
+
+It prints one JSON object:
+
+| Field | What it holds |
+|---|---|
+| `list` | the project (or list) it read, as given |
+| `total` | every ticket, Live included |
+| `byStatus` | tickets in each status now, keyed in lower case (`in review`); all eight are there, zero or not |
+| `since`, `until` | the window as given, or `null` |
+| `closedInWindow` | tickets that shipped in the window: Live now, and last moved to Live inside it; `null` without `--since` |
+| `startedInWindow` | tickets filed in the window (only with `--since`) |
+| `enteredInWindow` | for each of the eight statuses, how many tickets moved into it (or were filed in it) inside the window, from each ticket's history; a ticket that entered one twice counts once (only with `--since`) |
+
+The window is whole days in UTC, `--since` from midnight to the end of
+`--until`, as StarCaster's command read it. Shipped and filed are counted the
+way the Reporting page counts Finished and Started, so the figures match it
+for the same days (its "Last 7 Days" is the seven days up to the moment it is
+opened, so a window of whole days can differ by what moved at the edges). It
+writes nothing. A bad date exits 2 before anything is read; when the list or
+any ticket's history cannot be read it prints nothing and exits 1 naming each
+one. On a ClickUp project there is no move-by-move history to read, so a
+window exits 1 saying so. The counting lives in `lib/stageCounts.js`, with
+its tests, one of which runs StarCaster's own reading code on the output.
+
 ## The bus (StarCaster's alarms)
 
 StarCaster raises its alarms on **the bus**: a ClickUp chat channel (the
@@ -1189,8 +1260,11 @@ A steward question is two commands: `task --list <busProject>` files it,
 and it lands in Queued, which is not on Dane's Waiting on You list; then
 `ask --task <id> --status "Needs your input"` with the operator card is
 what puts it in front of him. Setting it up
-for a project: create the bus project on the Projects page, put the
-project's loops on it, and write its slug as `busProject`.
+for a project: the setup wizard does it when its answers say the project
+has a bus (SP-204, `hasBus`): its `bus` step makes the tracker project
+`<slug>-bus` (`npm run tracker:bus`), checks every loop of the project sees
+it, and the settings file it writes names it as `busProject`
+([ONBOARDING_A_PROJECT.md](ONBOARDING_A_PROJECT.md#a-project-with-a-bus-starcaster)).
 
 Every way StarCaster uses the bus today, and its tracker equivalent (the same
 table is `BUS_USES` in `lib/trackerBus.js`, and a test holds the two
@@ -1200,7 +1274,7 @@ together):
 |---|---|
 | Alarms and reports posted to the party line (`postBusMessage`, the `chat` command): heartbeat, throughput, report_job_failure, reconcile, stale_answer, stale_ready, checkout_currency, ai_keys_check, site_import_watch, unapplied_sql_watch, pulse_publish, weekly_report, repair | `npm run clickup -- bus-post --body-file -`: one comment on the bus project's "Team chat" ticket, read back |
 | Direct chat posts that skip `postBusMessage`: the pause switch's `announce` (pipeline.mjs), the review gate's `announceWaiver`, the reconciler's `postBus` | `bus-post`, the same one command |
-| The relay's own notices (`postToBus` / `postOrSaveToBus`): merged, merge refused or deferred, stalled hand-off, auto-merge latched off, lane armed, "<operator> replied on ..." | `bus-post`; the "replied on" relay is no longer needed, because the steward reads the operator's replies with `bus-read --operator` |
+| The relay's own notices (`postToBus` / `postOrSaveToBus`): merged, merge refused or deferred, stalled hand-off, auto-merge latched off, lane armed, "<operator> replied on ..." | The relay posts them itself, through the same read-back post as `bus-post`, when the project names a `busProject` (SP-207): one line for each merge it makes, each refusal and each conflict hand-off the first time it is written on the ticket (a quiet pass posts nothing), and the lanes' own notices (SP-202). A post that does not land is an UNCHECKED line and the pass exits 1; the merge is never undone or retried for it. A conflict hand-off still stuck a day later (or at once, with nothing filed to fix it) is said again, at most once a day: StarCaster's stall rule, without its "failed N times" alarm, because this relay's markers count reminders, not tries. Not carried over: the "replied on" relay, because the steward reads the operator's replies with `bus-read --operator` |
 | The fallback when the party line refuses (`saveUndeliveredAlarm`): a comment on the "Team chat" ticket in the Loop Queue, created if missing, oldest wins | `bus-post` IS that ticket, in the bus project: there is no plan limit to fall back from, and a refused write exits 1 and says so |
 | A relay receipt on the ticket a message was about (`deliverToBus` with a hand-back target) | `npm run clickup -- comment --task <id>`, unchanged |
 | The steward filing a question for the operator as a ticket in the Agent Response list | Two commands, both needed: `npm run clickup -- task --list <busProject>` files it (it lands in Queued, which is NOT on the operator's Waiting on You list), then `ask --task <id> --status "Needs your input"` with the operator card puts it there |

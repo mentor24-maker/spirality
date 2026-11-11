@@ -129,6 +129,9 @@ export function createClickupTracker({ token, apiBase, timeoutMs, log = console.
     /** How long the ticket spent in each status (ClickUp's "Time in Status";
      *  a workspace without that ClickApp answers an error). */
     getTimeInStatus: (task) => call('GET', `/api/v2/task/${task}/time_in_status`),
+    // ClickUp keeps per-status totals, not each move, so `stage-counts` has no
+    // window to count on a ClickUp project (SP-206).
+    getStatusHistory: async () => unsupported('ClickUp keeps no move-by-move status history this door reads; stage-counts counts a window only on the tracker.'),
     createTask: (list, fields) => call('POST', `/api/v2/list/${list}/task`, fields),
     updateTask: (task, fields) => call('PUT', `/api/v2/task/${task}`, fields),
     setTag: (task, name, on) => call(on ? 'POST' : 'DELETE', `/api/v2/task/${task}/tag/${encodeURIComponent(name)}`),

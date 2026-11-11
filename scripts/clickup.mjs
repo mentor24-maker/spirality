@@ -48,7 +48,11 @@ import { createClickupTracker } from './tracker/clickupTracker.mjs';
 import { createApiTracker, trackerTokenEnv } from './tracker/apiTracker.mjs';
 import { projectSeats } from './lib/expectedSecrets.mjs';
 import { compareRepo, projectEditUrl } from './lib/repoCheck.mjs';
-import { filedTrackerUrl } from '../lib/substrateConfig.js';
+import { filedTrackerUrl, machineSenderTag } from '../lib/substrateConfig.js';
+// The auto-merge lanes (SP-202): the pass, and the ledger's file IO.
+import { runLanePass } from '../lib/relayAutoMerge.js';
+import { readLedgerFile, saveLedgerIfReadable } from '../lib/autoMergeLedgerFile.js';
+import { readLeaseFile, saveLeaseIfReadable } from '../lib/mergeWindowLeaseFile.js';
 
 import { loadProjectConfig, ProjectConfigError } from '../lib/projectConfig.mjs';
 // The merge lane's decisions (task 86bchpkxz). `mergeDecision` says whether
@@ -57,15 +61,16 @@ import { loadProjectConfig, ProjectConfigError } from '../lib/projectConfig.mjs'
 // from the package, so every project's relay decides the same way.
 import {
   mergeDecision, githubGate, isMergeCommand, MERGE_MARKER, parseMergeMarker,
-  refusalNotice, conflictHandOffNotice, mergedNotice, filesMadeLines, REFUSAL_CODES,
+  refusalNotice, refusalBusLine, conflictHandOffNotice, mergedNotice, filesMadeLines, REFUSAL_CODES,
 } from '../lib/mergeOnComment.js';
 import {
   PR_VIEW_FIELDS, markerBookkeeping, recordBookkeeping, emptyBooks, mergeDestination, relayLine,
   handbackAnswer, handbackPlan, closePlan, conflictFilingPlan,
-  mergeWithPreMergeStep, commandLine,
+  mergeWithPreMergeStep, commandLine, mergedBusLine, conflictBusLine, busAnnouncer, stalledHandOffPlan, remindStalledHandOff,
 } from '../lib/relayLane.js';
 import {
   conflictTicketName, conflictTicketBody, conflictTicketFiledComment, findConflictTicket, unstuckPullRequest,
+  stalledSummaryHeadline,
 } from '../lib/conflictWork.js';
 import {
   handbackDoneText, handbackFailureText, repliesShowHandbackDone, repliesShowHandbackFailure, HANDBACK_FAILURE_MARKER,
@@ -74,6 +79,10 @@ import {
 // The bus, in the tracker (SP-24): StarCaster's alarm channel.
 import trackerBus from '../lib/trackerBus.js';
 import { FALLBACK_TASK_NAME } from '../lib/busFallback.js';
+// Tickets as data for scheduled checks (SP-205).
+import ticketsJson from '../lib/ticketsJson.js';
+// Stage counts for StarCaster's weekly report (SP-206).
+import stageCounts from '../lib/stageCounts.js';
 // A ticket's `Waits on:` line (task 86bctfun6): the claim leaves it alone
 // until every ticket it names is closed.
 import { waitsOn, waitsOnText, holdReasons } from '../lib/waitsOn.js';
@@ -219,7 +228,18 @@ npm run clickup -- <command> [flags]      (Loop Queue: list ${LOOP_QUEUE_LIST}, 
                                                   ticket (re-check every gate, merge, move the ticket, write the record),
                                                   and the hand-back: his answer to the question card on a "Needs your input"
                                                   ticket moves it to Queued, Rework or Live by the contract's table.
+                                                  With "autoMergeLanes" in the project config, the auto-merge lanes run too, up to
+                                                  a "would merge" note: nothing merges without his word yet (SP-202).
                                                   One line per ticket he holds. --dry-run prints what it would do, writes nothing
+  tickets --json [--include-closed] [--project <slug>] [--comments]
+                                                  read-only: the tickets as JSON for a scheduled check, one object each (id,
+                                                  name, status, priority, tags, created, updated, statusSince; --comments adds
+                                                  the top-level comments). Exit 1 naming what failed, printing nothing, on any failed read
+  stage-counts [--project <slug> | --list <id>] [--since YYYY-MM-DD [--until YYYY-MM-DD]]
+                                                  read-only: one JSON object for the weekly report: tickets per status now
+                                                  (byStatus, total) and, in the window (whole UTC days), how many shipped
+                                                  (closedInWindow), were filed (startedInWindow) and entered each status
+                                                  (enteredInWindow). Exit 2 on a bad date; 1, printing nothing, on any failed read
   bus-post --body-file <f|-> [--from <name>]      post an alarm or report to the bus project's "Team chat" ticket, read back; a message starting ALARM: is texted
   bus-read [--operator] [--since <time>]          the bus's comments, oldest first: time (ISO, UTC: feeds --since), ticket, operator|machine, author, first line
   main-moved --pr <merged #> [--list <id>] [--dry-run]
@@ -234,7 +254,7 @@ Two are Dane's and only \`ask\` may set them: ${OPERATOR_STATUSES.map((s) => DIS
 }
 
 // ── Readers ──────────────────────────────────────────────────────────────────
-async function fetchAllTasks(list, { includeClosed = false, markdown = false } = {}) {
+async function fetchAllTasks(list, { includeClosed = false, markdown = false, strict = false } = {}) {
   const tasks = [];
   for (let page = 0; page < 50; page += 1) {
     const out = await tracker.listTasksPage(list, page, { includeClosed, markdown });
@@ -244,6 +264,8 @@ async function fetchAllTasks(list, { includeClosed = false, markdown = false } =
     if (out.json.last_page !== false || out.json.tasks.length === 0) return tasks;
   }
   console.error('Stopped after 50 pages — treat this output as INCOMPLETE.');
+  // A caller that prints the list as whole cannot carry on with half of it.
+  if (strict) process.exit(1);
   return tasks;
 }
 
@@ -427,6 +449,123 @@ async function postComment(task, body) {
     process.exit(1);
   }
   return { id, stored };
+}
+
+// ── The auto-merge lanes' reads and writes (SP-202) ──────────────────────────
+// lib/relayAutoMerge.js decides; these are its hands, each returning
+// { ok, ... } or { ok: false, why }, never an exit, because the relay has
+// other tickets to get through.
+
+/** h:mm am/pm, Mountain time, the clock Dane reads. */
+function clockAt(ms) {
+  const d = new Date(Number(ms));
+  const time = d.toLocaleTimeString('en-US', { timeZone: 'America/Denver', hour: 'numeric', minute: '2-digit' }).toLowerCase().replace(/\s/g, '');
+  return `${time} MT`;
+}
+
+/**
+ * The ledger lives beside the repository's git data, so every checkout of
+ * one project shares one, and nothing in it is committed. Absolute, so a
+ * relay started from a subfolder finds the same file (review note 4, SP-199).
+ */
+function autoMergeLedgerPath() {
+  const out = spawnSync('git', ['-C', REPO_ROOT, 'rev-parse', '--path-format=absolute', '--git-common-dir'], { encoding: 'utf8' });
+  const dir = out.status === 0 ? String(out.stdout || '').trim() : '';
+  return dir ? joinPath(dir, 'auto-merge-ledger.json') : null;
+}
+
+/** Every message on the bus project, or why it could not be read. One unread ticket is unreadable. */
+async function readBusMessages() {
+  if (project.tracker !== 'api') return { ok: false, why: `the bus is a tracker project, and this project's tracker is "${project.tracker}"` };
+  const bus = project.busProject;
+  if (!bus) return { ok: false, why: 'this project has no bus ("busProject" in the project config)' };
+  const listed = await tracker.listTasksPage(bus, 0, { includeClosed: true });
+  if (!listed.res.ok || !Array.isArray(listed.json?.tasks)) return { ok: false, why: `the bus project ${bus} could not be listed (HTTP ${listed.res.status})` };
+  const messages = [];
+  for (const t of listed.json.tasks) {
+    const read = await readCommentsOrProblem(t.id);
+    if (read.problem) return { ok: false, why: `the comments on ${t.id} "${t.name}" could not be read (${read.problem})` };
+    for (const c of read.comments) {
+      messages.push({ id: String(c.id), at: Number(c.date) || 0, authorId: c.user?.id == null ? null : Number(c.user.id), ticket: String(t.id), text: String(c.comment_text ?? '') });
+    }
+  }
+  return { ok: true, messages };
+}
+
+/** Post to the bus's Team chat ticket and read it back. Never creates it: `bus-post` does that. */
+async function postBusMessage(text) {
+  if (project.tracker !== 'api' || !project.busProject) return { ok: false, why: 'this project has no bus' };
+  const bus = project.busProject;
+  const listed = await tracker.listTasksPage(bus, 0, { includeClosed: true });
+  if (!listed.res.ok || !Array.isArray(listed.json?.tasks)) return { ok: false, why: `the bus project ${bus} could not be listed (HTTP ${listed.res.status})` };
+  const chat = trackerBus.pickTeamChat(listed.json.tasks);
+  if (!chat) return { ok: false, why: `there is no "${FALLBACK_TASK_NAME}" ticket in ${bus} (npm run clickup -- bus-post makes one)` };
+  const post = trackerBus.renderBusPost({ text, node: hostname(), at: trackerBus.mountainTime(Date.now()) });
+  if (!post) return { ok: false, why: 'the message was empty' };
+  const out = await tracker.postComment(chat.id, { comment_text: post });
+  if (!out.res.ok) return { ok: false, why: `HTTP ${out.res.status}` };
+  const id = String(out.json?.id ?? '');
+  const back = await readCommentsOrProblem(chat.id);
+  if (back.problem || !back.comments.some((c) => String(c.id) === id)) return { ok: false, why: `comment ${id || '(no id)'} did not read back` };
+  return { ok: true, id };
+}
+
+/** Post a lane notice on a ticket and read it back, returning the tracker's own time for it. */
+async function postLaneNotice(taskId, body) {
+  const out = await tracker.postComment(taskId, { comment_text: body });
+  if (!out.res.ok) return { ok: false, why: `the notice did not post (HTTP ${out.res.status})` };
+  const id = String(out.json?.id ?? '');
+  const back = await readCommentsOrProblem(taskId);
+  if (back.problem) return { ok: false, why: `the notice posted but could not be read back (${back.problem})` };
+  const found = back.comments.find((c) => String(c.id) === id);
+  if (!found || !Number(found.date)) return { ok: false, why: 'the notice did not read back' };
+  return { ok: true, at: Number(found.date), commentId: String(found.id) };
+}
+
+/** The merge window's file, beside the ledger in the repository's git folder (absolute, as the ledger's is). */
+function mergeWindowPath() {
+  const ledger = autoMergeLedgerPath();
+  return ledger ? joinPath(ledger, '..', 'merge-window-lease.json') : null;
+}
+
+function laneIo(repo) {
+  return {
+    readLedger: () => readLedgerFile(autoMergeLedgerPath()),
+    saveLedger: (read, ledger) => saveLedgerIfReadable(read, ledger),
+    readWindow: () => readLeaseFile(mergeWindowPath()),
+    saveWindow: (read, lease) => saveLeaseIfReadable(read, lease),
+    // GitHub's own catch-up of a branch that is behind main: never a force push.
+    updateBranch: (number) => {
+      const out = gh(['pr', 'update-branch', String(number), '--repo', repo]);
+      return out.ok ? { ok: true } : { ok: false, why: out.stderr.trim().slice(0, 200) || 'gh failed' };
+    },
+    readBus: readBusMessages,
+    postBus: postBusMessage,
+    prFiles: (number) => {
+      const files = readPrFiles(repo, number);
+      return files ? { ok: true, files: files.map((f) => f.filename) } : { ok: false, why: 'GitHub did not list them all' };
+    },
+    prView: (number) => {
+      const view = gh(['pr', 'view', String(number), '--repo', repo, '--json', PR_VIEW_FIELDS.join(',')]);
+      if (!view.ok) return { ok: false, why: view.stderr.trim().slice(0, 200) || 'gh failed' };
+      try { return { ok: true, pr: JSON.parse(view.stdout) }; } catch { return { ok: false, why: 'gh returned non-JSON' }; }
+    },
+    postNotice: postLaneNotice,
+    mainBuildIsRed: (onRepo) => {
+      const out = gh(['run', 'list', '--repo', onRepo, '--branch', 'main', '--limit', '1', '--json', 'conclusion,status,createdAt']);
+      if (!out.ok) return { known: false, red: false, why: 'could not read the build history for main' };
+      try {
+        const last = JSON.parse(out.stdout)[0];
+        if (!last) return { known: true, red: false };
+        // A run still going is not a red run.
+        if (String(last.status || '').toUpperCase() !== 'COMPLETED') return { known: true, red: false };
+        const c = String(last.conclusion || '').toUpperCase();
+        return { known: true, red: !['SUCCESS', 'NEUTRAL', 'SKIPPED'].includes(c), at: Number(new Date(last.createdAt)) || 0 };
+      } catch {
+        return { known: false, red: false, why: 'the build history for main was unparseable' };
+      }
+    },
+  };
 }
 
 // ── Main moved: tell every ticket still in flight (task 86bctjffu) ───────────
@@ -1236,6 +1375,20 @@ if (cmd === 'whoami') {
   const who = project.operatorName;
   const unchecked = [];
   const say = (task, outcome, detail) => console.log(relayLine({ task, status: task.status?.status, outcome, detail }));
+  // Every ticket read this pass, for the auto-merge lanes' stop switch, and
+  // the Ready to launch ones this pass merged or closed, which no lane judges.
+  const seen = new Map();
+  const settled = new Set();
+
+  // The project's bus hears each merge and each refusal the first time it is
+  // written on the ticket (SP-207). No `busProject`, nothing new is written.
+  const busTag = machineSenderTag('bus-relay');
+  const ticketUrl = (task) => task.url || `${filedTrackerUrl() || project.trackerUrl}/t/${task.id}`;
+  const announce = busAnnouncer({ busProject: project.busProject, dryRun, postBus: postBusMessage, say, unchecked });
+  // Conflict hand-offs a day old with nothing cleared (stalledHandOffPlan),
+  // listed at the end of the pass. A stuck ticket is not a failed step, so
+  // they do not change the exit code.
+  const stalledHandOffs = [];
 
   /** Write the dedup marker as a threaded reply on his comment, and read it back.
    *  An unverified marker means the next pass may act on the same word again,
@@ -1425,7 +1578,8 @@ if (cmd === 'whoami') {
 
   const relayReadyToLaunch = async (task) => {
     const comments = await readComments(task.id);
-    if (await relayCloseReadyToLaunch(task, comments)) return;
+    seen.set(task.id, { task, comments });
+    if (await relayCloseReadyToLaunch(task, comments)) { settled.add(task.id); return; }
     // Only his merge phrases need their reply threads read — that is where an
     // earlier pass left its marker. Everything else costs a request and says nothing.
     const books = emptyBooks();
@@ -1461,6 +1615,7 @@ if (cmd === 'whoami') {
       if (!noteId) { say(task, 'unchecked', why); return; }
       const stuck = await markMergeHandled(decision.commentId, task, notice.marker);
       say(task, 'refused', `${why} — explained in comment ${noteId}, marker ${stuck ? 'verified' : 'UNVERIFIED'}`);
+      await announce(task, refusalBusLine({ label: `"${task.name}" (${task.id})`, url: ticketUrl(task), why, kind: notice.kind }), `merge refused (${why})`);
     };
 
     if (decision.act === 'refuse') { await refuse(decision.reason, 'This ticket is not in a state a script may merge from.', decision.refusalCode); return; }
@@ -1525,6 +1680,12 @@ if (cmd === 'whoami') {
       const again = plan.refiledFrom ? ` (the earlier catch-up ${plan.refiledFrom.id} is in ${plan.refiledFrom.status}; main moved again)` : '';
       const reason = conflictHandOffNotice({ commentId: decision.commentId, pr: prRef, localVerdict, filed: null }).marker.replace(/^refused:\s*/i, '');
       const alreadySaid = decision.priorRefusal === reason;
+      // Said before and nothing new filed: quiet, unless it is a day old (or
+      // nothing was ever filed), and then it is news again.
+      const stall = alreadySaid && plan.act !== 'file'
+        ? stalledHandOffPlan({ priorRefusalAt: decision.priorRefusalAt, now: Date.now(), filed: plan.filed || null, localVerdict, tag: busTag, task, pr: prRef })
+        : { act: 'quiet' };
+      if (stall.act === 'stalled') stalledHandOffs.push({ line: stall.line, kind: stall.kind });
 
       // Filing comes BEFORE the "already said" check: a hand-off written
       // before this fix (or one whose filing failed) still gets its ticket
@@ -1533,7 +1694,8 @@ if (cmd === 'whoami') {
         const filing = plan.act === 'file' ? `would file "${ticketName}" as Queued in list ${list}${again}`
           : plan.act === 'already-filed' ? `catch-up ticket ${plan.filed.id} already on file${plan.recorded ? '' : ' (would record it on this ticket)'}${again}`
             : 'no catch-up ticket needed';
-        say(task, plan.act === 'file' ? 'would-file-catch-up' : alreadySaid ? 'refused-quiet' : 'would-refuse', `PR #${pr.number}: ${gate.reason} — ${filing}${alreadySaid ? '; hand-off already said' : ''}`);
+        const stuck = stall.act === 'stalled' ? `; STUCK: ${stall.why}${project.busProject ? ' — would post it to the bus' : ''}` : '';
+        say(task, plan.act === 'file' ? 'would-file-catch-up' : stall.act === 'stalled' ? 'would-report-stalled' : alreadySaid ? 'refused-quiet' : 'would-refuse', `PR #${pr.number}: ${gate.reason} — ${filing}${alreadySaid ? '; hand-off already said' : ''}${stuck}`);
         return;
       }
       let filed = plan.filed;
@@ -1541,6 +1703,16 @@ if (cmd === 'whoami') {
       let recordedNow = false;
       if (filed && !plan.recorded) recordedNow = await recordCatchUp(task, filed, pr.number, plan.refiledFrom);
 
+      if (alreadySaid && !recordedNow && stall.act === 'stalled') {
+        say(task, 'stalled', `PR #${pr.number}: ${stall.why}`);
+        // The bus is told, and only a reminder that landed restamps the
+        // marker: that stamp is the clock, so a post nobody saw must not buy
+        // a quiet day. No bus: the end-of-pass list below is the only place
+        // it is said, as before.
+        await remindStalledHandOff({ announce, task, stall, prNumber: pr.number,
+          restamp: () => markMergeHandled(decision.commentId, task, conflictHandOffNotice({ commentId: decision.commentId, pr: prRef, localVerdict, filed }).marker) });
+        return;
+      }
       if (alreadySaid) {
         say(task, recordedNow ? 'filed' : 'refused-quiet', recordedNow
           ? `PR #${pr.number}: ${gate.reason} — catch-up ticket ${filed.id} filed and recorded${again} (hand-off already said)`
@@ -1552,6 +1724,7 @@ if (cmd === 'whoami') {
       if (!noteId) { say(task, 'unchecked', gate.reason); return; }
       const stuck = await markMergeHandled(decision.commentId, task, notice.marker);
       say(task, 'refused', `PR #${pr.number}: ${gate.reason} — explained in comment ${noteId}, marker ${stuck ? 'verified' : 'UNVERIFIED'}${filed ? `, catch-up ticket ${filed.id}${again}` : ', NO catch-up ticket'}`);
+      await announce(task, conflictBusLine({ tag: busTag, task, url: ticketUrl(task), pr: prRef, filed, branch, operatorName: who }), `PR #${pr.number} conflict handed off`);
       return;
     }
 
@@ -1628,7 +1801,9 @@ if (cmd === 'whoami') {
     ].join('\n');
     await postNote(task, body, `PR #${pr.number} MERGED`);
     const moved = await moveMergedTicket(task, pr.number, dest);
+    settled.add(task.id);
     say(task, 'merged', `PR #${pr.number} at ${mergedAt}; ticket -> ${dest.status}${moved ? '' : ' (MOVE FAILED, see below)'} (${dest.why})`);
+    await announce(task, mergedBusLine({ tag: busTag, task, url: ticketUrl(task), pr, dest }), `PR #${pr.number} merged`);
 
     // main just moved: tell every ticket still in flight, so its next pass
     // catches up before review instead of after (task 86bctjffu).
@@ -1652,6 +1827,7 @@ if (cmd === 'whoami') {
   }
   const relayNeedsYourInput = async (task) => {
     const comments = await readComments(task.id);
+    seen.set(task.id, { task, comments });
     const verdict = handbackAnswer({ comments, operatorId: OPERATOR_ID, isMachine: isMachineComment });
     let replies = [];
     if (verdict.state === 'answered') {
@@ -1762,6 +1938,114 @@ if (cmd === 'whoami') {
     }
   }
 
+  // ── The auto-merge lanes: announce, wait the hour, merge (SP-202, SP-203) ─
+  // StarCaster's Lanes A and B (docs/LOOP_CONTRACT.md, "StarCaster's
+  // auto-merge lanes"), run only for the lanes the project config lists; with
+  // none listed nothing below reads or writes anything. They run AFTER both
+  // loops above, so the self-disable judges the whole pass's account of what
+  // it could not check. At the end of an unopposed hour they merge
+  // (SP-203), through laneMerge and recordLaneMerge above.
+  // SP-203: the lane's merge and its bookkeeping are the phrase merge's own
+  // steps above (the pre-merge step, `gh pr merge --squash` pinned to the
+  // commit, the MERGED read-back, the Live move, MAIN MOVED), so the two
+  // paths cannot drift. Only the authorization differs: the hour, not his word.
+  const laneMerge = async ({ task, pr, view }) => {
+    const outcome = mergeWithPreMergeStep({
+      command: project.preMergeCommand,
+      pr,
+      repo,
+      headSha: String(view.headRefOid || ''),
+      baseBranch: String(view.baseRefName || ''),
+      ticketId: task.id,
+      runStep: (command, env, timeoutMs) => spawnSync(command[0], command.slice(1), {
+        cwd: REPO_ROOT, env: { ...process.env, ...env }, encoding: 'utf8', timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024,
+      }),
+      runGh: gh,
+    });
+    if (outcome.stage === 'pre-merge') return { outcome: 'refused', why: outcome.refusal.why };
+    if (!outcome.merged.ok) return { outcome: 'refused', why: `the merge command itself failed (${outcome.merged.stderr.trim().slice(0, 300)})` };
+    // `gh` exiting 0 is not a merge. Only MERGED, read back, is one.
+    const after = gh(['pr', 'view', String(pr.number), '--repo', repo, '--json', 'state,mergedAt']);
+    let afterJson = null;
+    try { afterJson = after.ok ? JSON.parse(after.stdout) : null; } catch { afterJson = null; }
+    const state = String(afterJson?.state || '').toUpperCase();
+    if (state !== 'MERGED') return { outcome: 'not-observed', why: `\`gh pr merge\` exited 0 but PR #${pr.number} reads back as "${state || 'unreadable'}", not MERGED` };
+    return { outcome: 'merged', mergedAt: afterJson.mergedAt || new Date().toISOString(), base: String(view.baseRefName || '') };
+  };
+
+  /** After a lane merge: the note, the Live (or Queued) move, MAIN MOVED. Problems are returned, never thrown. */
+  const recordLaneMerge = async ({ task, pr, laneName, mergedAt, base = '', alreadyMerged = false }) => {
+    const fresh = await readTaskOrNull(task.id);
+    if (!fresh) return { ok: false, dest: null, problems: [`${task.id}: PR #${pr.number} is merged, but the ticket could not be read to move it on — move it by hand`] };
+    const dest = mergeDestination(fresh.markdown_description || fresh.description);
+    const made = alreadyMerged ? { lines: [], problem: '' } : filesMadeLines({ repo, branch: base || 'main', files: readPrFiles(repo, pr.number) });
+    if (made.problem) unchecked.push(`${task.id}: PR #${pr.number} merged, but ${made.problem} — the merge note says so`);
+    const body = [
+      alreadyMerged
+        ? `PR #${pr.number} (${pr.url}) is already merged${mergedAt ? ` (at ${mergedAt})` : ''}, so Lane ${laneName} has nothing left to merge.`
+        : `Merged by Lane ${laneName}: PR #${pr.number} (${pr.url}) squash-merged into ${base || 'main'} at ${mergedAt}. The hour announced on this ticket ended with no comment from ${who}.`,
+      ...(alreadyMerged ? [] : ['A review PASS was on file, checks were green and the branch was up to date at merge time.']),
+      '',
+      dest.status.toLowerCase() === 'live'
+        ? `This ticket is now Live (${dest.why}).`
+        : `This ticket goes back to ${dest.status} for the next build pass, because ${dest.why}.`,
+      '',
+      ...(made.lines.length ? [...made.lines, ''] : []),
+      `(Automatic — Lane ${laneName}, relay auto-merge.)`,
+    ].join('\n');
+    await postNote(task, body, `PR #${pr.number} MERGED by Lane ${laneName}`);
+    const moved = await moveMergedTicket(task, pr.number, dest);
+    settled.add(task.id);
+    say(task, alreadyMerged ? 'already-merged' : 'merged', `Lane ${laneName}: PR #${pr.number}; ticket -> ${dest.status}${moved ? '' : ' (MOVE FAILED, see below)'} (${dest.why})`);
+    if (!alreadyMerged) {
+      const news = await tellMainMoved({ mergedNumber: pr.number, list, dryRun: false, tasks });
+      for (const l of news.lines) console.log(`  main-moved\t${l}`);
+      unchecked.push(...news.problems.map((p) => `main-moved after PR #${pr.number}: ${p}`));
+      say(task, 'main-moved', `${news.told} in-flight ticket(s) told that PR #${pr.number} moved main`);
+    }
+    // postNote, moveMergedTicket and tellMainMoved report into `unchecked` themselves.
+    return { ok: moved, dest, problems: [] };
+  };
+
+  const lanes = Array.isArray(project.autoMergeLanes) ? project.autoMergeLanes : [];
+  if (lanes.length) {
+    const candidates = ready
+      .filter((t) => !settled.has(t.id) && seen.has(t.id))
+      .map((t) => seen.get(t.id));
+    let laneOut;
+    try {
+      laneOut = await runLanePass({
+        lanes,
+        governancePaths: Array.isArray(project.governancePaths) ? project.governancePaths : null,
+        candidates,
+        switchTickets: [...seen.values()],
+        operatorId: OPERATOR_ID,
+        operatorName: who,
+        mergePhrase: (project.mergePhrases || [])[0] || 'merge',
+        repo,
+        unchecked,
+        dryRun,
+        clock: clockAt,
+        tag: machineSenderTag('relay'),
+        io: { ...laneIo(repo), merge: laneMerge, recordMerge: recordLaneMerge },
+        log: (line) => console.error(line),
+      });
+    } catch (err) {
+      unchecked.push(`the auto-merge lanes stopped (${err.message}) — nothing more was written for them this pass`);
+    }
+    if (laneOut?.ran) {
+      console.log(laneOut.line);
+      if (laneOut.busSkipped.length) {
+        console.error(`\nBUS — ${laneOut.busSkipped.length} post(s) or read(s) did not land:`);
+        for (const line of laneOut.busSkipped) console.error(`  - ${line}`);
+      }
+    }
+  }
+
+  if (stalledHandOffs.length) {
+    console.error(`\n${stalledSummaryHeadline(stalledHandOffs.map((h) => h.kind))} — ${stalledHandOffs.length} approved merge(s) are not moving:`);
+    for (const h of stalledHandOffs) console.error(`  - ${h.line}`);
+  }
   if (unchecked.length) {
     console.error(`\nUNCHECKED — ${unchecked.length} step(s) failed and say so:`);
     for (const line of unchecked) console.error(`  - ${line}`);
@@ -1843,6 +2127,91 @@ if (cmd === 'whoami') {
       process.exit(1);
     }
   }
+  reportLimits();
+
+} else if (cmd === 'tickets') {
+  // Tickets as data (SP-205, lib/ticketsJson.js): what StarCaster's scheduled
+  // checks read instead of ClickUp's API. Read-only. Every read must come
+  // back, or nothing is printed: a check that counts half a list as the whole
+  // reports a quiet queue that is not quiet.
+  if (!flag('json')) {
+    console.error('tickets: say --json (the one format it prints). Nothing was read.');
+    usage();
+  }
+  const slug = arg('project');
+  if (process.argv.includes('--project') && !slug) usage();
+  const list = slug || LOOP_QUEUE_LIST;
+  const withComments = flag('comments');
+  const listed = await fetchAllTasks(list, { includeClosed: flag('include-closed'), strict: true });
+  const out = [];
+  const problems = [];
+  for (const t of listed) {
+    const since = await tracker.getTimeInStatus(t.id);
+    const statusSince = since.res.ok ? ticketsJson.statusSinceFrom(since.json) : null;
+    if (!since.res.ok || !statusSince) {
+      problems.push({ id: t.id, what: 'status history', problem: since.res.ok ? 'no time it entered its status' : `HTTP ${since.res.status}${since.json?.err ? `: ${since.json.err}` : ''}` });
+    }
+    let comments;
+    if (withComments) {
+      const read = await readCommentsOrProblem(t.id);
+      if (read.problem) problems.push({ id: t.id, what: 'comments', problem: read.problem });
+      else comments = read.comments;
+    }
+    out.push(ticketsJson.ticketJson(t, { statusSince, comments, operatorId: OPERATOR_ID }));
+  }
+  const failed = ticketsJson.failedReadsLine(problems);
+  if (failed) {
+    console.error(failed);
+    reportLimits();
+    process.exit(1);
+  }
+  console.log(JSON.stringify(out, null, 2));
+  console.error(`${out.length} ticket(s) in ${slug || (project.tracker === 'api' ? project.projectSlug : `list ${LOOP_QUEUE_LIST}`)}${flag('include-closed') ? ', Live included' : ', open only'}${withComments ? ', with their comments' : ''}.`);
+  reportLimits();
+
+} else if (cmd === 'stage-counts') {
+  // Every stage counted, as JSON, for StarCaster's weekly report
+  // (lib/stageCounts.js holds the shape and the counting). Read-only. `--list`
+  // is StarCaster's spelling and means the same as `--project`.
+  for (const name of ['project', 'list', 'since', 'until']) {
+    if (process.argv.includes(`--${name}`) && !arg(name)) usage();
+  }
+  if (arg('project') && arg('list') && arg('project') !== arg('list')) {
+    console.error(`stage-counts: --project "${arg('project')}" and --list "${arg('list')}" name two different places; give one. Nothing was read.`);
+    process.exit(2);
+  }
+  const since = arg('since');
+  const until = arg('until');
+  // The dates are checked before anything is read: a typo is found for free.
+  const window = stageCounts.parseWindow(since, until);
+  if (window.error) {
+    console.error(`stage-counts: ${window.error} Nothing was read.`);
+    process.exit(2);
+  }
+  const list = arg('project') || arg('list') || LOOP_QUEUE_LIST;
+  // On the tracker the configured list id stands for this project: say its name.
+  const where = String(list) === String(LOOP_QUEUE_LIST) && project.tracker === 'api' ? project.projectSlug : list;
+  const tickets = await fetchAllTasks(list, { includeClosed: true, strict: true });
+  // Each ticket's history only when there is a window to count in it. Every
+  // one must come back, or nothing is printed: a report that counts half the
+  // history as the whole of it prints a quiet week that was not quiet.
+  const histories = new Map();
+  const problems = [];
+  if (window.cutoff != null) {
+    for (const t of tickets) {
+      const read = await tracker.getStatusHistory(t.id);
+      if (read.res.ok && Array.isArray(read.json?.moves)) histories.set(String(t.id), read.json.moves);
+      else problems.push({ id: t.id, problem: read.res.ok ? 'no status moves in the answer' : `HTTP ${read.res.status}${read.json?.err ? `: ${read.json.err}` : ''}` });
+    }
+  }
+  const failed = stageCounts.failedHistoryLine(problems);
+  if (failed) {
+    console.error(failed);
+    reportLimits();
+    process.exit(1);
+  }
+  console.log(JSON.stringify(stageCounts.countStages(tickets, { list: where, since, until, window, histories }), null, 2));
+  console.error(`stage-counts: ${tickets.length} ticket(s) in ${where}${window.cutoff == null ? ', no window' : `, window ${since} to ${until || 'now'} (UTC days)`}.`);
   reportLimits();
 
 } else if (cmd === 'main-moved') {

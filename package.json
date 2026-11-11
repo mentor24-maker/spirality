@@ -25,6 +25,7 @@
     "tracker:snapshot": "node scripts/with_doppler.mjs node tracker/clickupSnapshot.mjs",
     "doctor": "node scripts/doctor.mjs",
     "tracker:old-id": "node --disable-warning=ExperimentalWarning tracker/oldId.mjs",
+    "tracker:bus": "node --no-warnings tracker/busProject.mjs",
     "tracker:signins": "node scripts/with_doppler.mjs node --no-warnings tracker/signins.mjs",
     "tracker:switch-check": "node scripts/with_doppler.mjs node --no-warnings tracker/switchCheck.mjs",
     "onboard": "node --disable-warning=ExperimentalWarning scripts/onboard/onboard.mjs",
