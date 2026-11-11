@@ -61,15 +61,16 @@ import { loadProjectConfig, ProjectConfigError } from '../lib/projectConfig.mjs'
 // from the package, so every project's relay decides the same way.
 import {
   mergeDecision, githubGate, isMergeCommand, MERGE_MARKER, parseMergeMarker,
-  refusalNotice, conflictHandOffNotice, mergedNotice, filesMadeLines, REFUSAL_CODES,
+  refusalNotice, refusalBusLine, conflictHandOffNotice, mergedNotice, filesMadeLines, REFUSAL_CODES,
 } from '../lib/mergeOnComment.js';
 import {
   PR_VIEW_FIELDS, markerBookkeeping, recordBookkeeping, emptyBooks, mergeDestination, relayLine,
   handbackAnswer, handbackPlan, closePlan, conflictFilingPlan,
-  mergeWithPreMergeStep, commandLine,
+  mergeWithPreMergeStep, commandLine, mergedBusLine, conflictBusLine, busAnnouncer, stalledHandOffPlan, remindStalledHandOff,
 } from '../lib/relayLane.js';
 import {
   conflictTicketName, conflictTicketBody, conflictTicketFiledComment, findConflictTicket, unstuckPullRequest,
+  stalledSummaryHeadline,
 } from '../lib/conflictWork.js';
 import {
   handbackDoneText, handbackFailureText, repliesShowHandbackDone, repliesShowHandbackFailure, HANDBACK_FAILURE_MARKER,
@@ -80,6 +81,8 @@ import trackerBus from '../lib/trackerBus.js';
 import { FALLBACK_TASK_NAME } from '../lib/busFallback.js';
 // Tickets as data for scheduled checks (SP-205).
 import ticketsJson from '../lib/ticketsJson.js';
+// Stage counts for StarCaster's weekly report (SP-206).
+import stageCounts from '../lib/stageCounts.js';
 // A ticket's `Waits on:` line (task 86bctfun6): the claim leaves it alone
 // until every ticket it names is closed.
 import { waitsOn, waitsOnText, holdReasons } from '../lib/waitsOn.js';
@@ -232,6 +235,11 @@ npm run clickup -- <command> [flags]      (Loop Queue: list ${LOOP_QUEUE_LIST}, 
                                                   read-only: the tickets as JSON for a scheduled check, one object each (id,
                                                   name, status, priority, tags, created, updated, statusSince; --comments adds
                                                   the top-level comments). Exit 1 naming what failed, printing nothing, on any failed read
+  stage-counts [--project <slug> | --list <id>] [--since YYYY-MM-DD [--until YYYY-MM-DD]]
+                                                  read-only: one JSON object for the weekly report: tickets per status now
+                                                  (byStatus, total) and, in the window (whole UTC days), how many shipped
+                                                  (closedInWindow), were filed (startedInWindow) and entered each status
+                                                  (enteredInWindow). Exit 2 on a bad date; 1, printing nothing, on any failed read
   bus-post --body-file <f|-> [--from <name>]      post an alarm or report to the bus project's "Team chat" ticket, read back; a message starting ALARM: is texted
   bus-read [--operator] [--since <time>]          the bus's comments, oldest first: time (ISO, UTC: feeds --since), ticket, operator|machine, author, first line
   main-moved --pr <merged #> [--list <id>] [--dry-run]
@@ -1372,6 +1380,16 @@ if (cmd === 'whoami') {
   const seen = new Map();
   const settled = new Set();
 
+  // The project's bus hears each merge and each refusal the first time it is
+  // written on the ticket (SP-207). No `busProject`, nothing new is written.
+  const busTag = machineSenderTag('bus-relay');
+  const ticketUrl = (task) => task.url || `${filedTrackerUrl() || project.trackerUrl}/t/${task.id}`;
+  const announce = busAnnouncer({ busProject: project.busProject, dryRun, postBus: postBusMessage, say, unchecked });
+  // Conflict hand-offs a day old with nothing cleared (stalledHandOffPlan),
+  // listed at the end of the pass. A stuck ticket is not a failed step, so
+  // they do not change the exit code.
+  const stalledHandOffs = [];
+
   /** Write the dedup marker as a threaded reply on his comment, and read it back.
    *  An unverified marker means the next pass may act on the same word again,
    *  which is reported, never assumed away. Returns true only when it stuck. */
@@ -1597,6 +1615,7 @@ if (cmd === 'whoami') {
       if (!noteId) { say(task, 'unchecked', why); return; }
       const stuck = await markMergeHandled(decision.commentId, task, notice.marker);
       say(task, 'refused', `${why} — explained in comment ${noteId}, marker ${stuck ? 'verified' : 'UNVERIFIED'}`);
+      await announce(task, refusalBusLine({ label: `"${task.name}" (${task.id})`, url: ticketUrl(task), why, kind: notice.kind }), `merge refused (${why})`);
     };
 
     if (decision.act === 'refuse') { await refuse(decision.reason, 'This ticket is not in a state a script may merge from.', decision.refusalCode); return; }
@@ -1661,6 +1680,12 @@ if (cmd === 'whoami') {
       const again = plan.refiledFrom ? ` (the earlier catch-up ${plan.refiledFrom.id} is in ${plan.refiledFrom.status}; main moved again)` : '';
       const reason = conflictHandOffNotice({ commentId: decision.commentId, pr: prRef, localVerdict, filed: null }).marker.replace(/^refused:\s*/i, '');
       const alreadySaid = decision.priorRefusal === reason;
+      // Said before and nothing new filed: quiet, unless it is a day old (or
+      // nothing was ever filed), and then it is news again.
+      const stall = alreadySaid && plan.act !== 'file'
+        ? stalledHandOffPlan({ priorRefusalAt: decision.priorRefusalAt, now: Date.now(), filed: plan.filed || null, localVerdict, tag: busTag, task, pr: prRef })
+        : { act: 'quiet' };
+      if (stall.act === 'stalled') stalledHandOffs.push({ line: stall.line, kind: stall.kind });
 
       // Filing comes BEFORE the "already said" check: a hand-off written
       // before this fix (or one whose filing failed) still gets its ticket
@@ -1669,7 +1694,8 @@ if (cmd === 'whoami') {
         const filing = plan.act === 'file' ? `would file "${ticketName}" as Queued in list ${list}${again}`
           : plan.act === 'already-filed' ? `catch-up ticket ${plan.filed.id} already on file${plan.recorded ? '' : ' (would record it on this ticket)'}${again}`
             : 'no catch-up ticket needed';
-        say(task, plan.act === 'file' ? 'would-file-catch-up' : alreadySaid ? 'refused-quiet' : 'would-refuse', `PR #${pr.number}: ${gate.reason} — ${filing}${alreadySaid ? '; hand-off already said' : ''}`);
+        const stuck = stall.act === 'stalled' ? `; STUCK: ${stall.why}${project.busProject ? ' — would post it to the bus' : ''}` : '';
+        say(task, plan.act === 'file' ? 'would-file-catch-up' : stall.act === 'stalled' ? 'would-report-stalled' : alreadySaid ? 'refused-quiet' : 'would-refuse', `PR #${pr.number}: ${gate.reason} — ${filing}${alreadySaid ? '; hand-off already said' : ''}${stuck}`);
         return;
       }
       let filed = plan.filed;
@@ -1677,6 +1703,16 @@ if (cmd === 'whoami') {
       let recordedNow = false;
       if (filed && !plan.recorded) recordedNow = await recordCatchUp(task, filed, pr.number, plan.refiledFrom);
 
+      if (alreadySaid && !recordedNow && stall.act === 'stalled') {
+        say(task, 'stalled', `PR #${pr.number}: ${stall.why}`);
+        // The bus is told, and only a reminder that landed restamps the
+        // marker: that stamp is the clock, so a post nobody saw must not buy
+        // a quiet day. No bus: the end-of-pass list below is the only place
+        // it is said, as before.
+        await remindStalledHandOff({ announce, task, stall, prNumber: pr.number,
+          restamp: () => markMergeHandled(decision.commentId, task, conflictHandOffNotice({ commentId: decision.commentId, pr: prRef, localVerdict, filed }).marker) });
+        return;
+      }
       if (alreadySaid) {
         say(task, recordedNow ? 'filed' : 'refused-quiet', recordedNow
           ? `PR #${pr.number}: ${gate.reason} — catch-up ticket ${filed.id} filed and recorded${again} (hand-off already said)`
@@ -1688,6 +1724,7 @@ if (cmd === 'whoami') {
       if (!noteId) { say(task, 'unchecked', gate.reason); return; }
       const stuck = await markMergeHandled(decision.commentId, task, notice.marker);
       say(task, 'refused', `PR #${pr.number}: ${gate.reason} — explained in comment ${noteId}, marker ${stuck ? 'verified' : 'UNVERIFIED'}${filed ? `, catch-up ticket ${filed.id}${again}` : ', NO catch-up ticket'}`);
+      await announce(task, conflictBusLine({ tag: busTag, task, url: ticketUrl(task), pr: prRef, filed, branch, operatorName: who }), `PR #${pr.number} conflict handed off`);
       return;
     }
 
@@ -1766,6 +1803,7 @@ if (cmd === 'whoami') {
     const moved = await moveMergedTicket(task, pr.number, dest);
     settled.add(task.id);
     say(task, 'merged', `PR #${pr.number} at ${mergedAt}; ticket -> ${dest.status}${moved ? '' : ' (MOVE FAILED, see below)'} (${dest.why})`);
+    await announce(task, mergedBusLine({ tag: busTag, task, url: ticketUrl(task), pr, dest }), `PR #${pr.number} merged`);
 
     // main just moved: tell every ticket still in flight, so its next pass
     // catches up before review instead of after (task 86bctjffu).
@@ -2004,6 +2042,10 @@ if (cmd === 'whoami') {
     }
   }
 
+  if (stalledHandOffs.length) {
+    console.error(`\n${stalledSummaryHeadline(stalledHandOffs.map((h) => h.kind))} — ${stalledHandOffs.length} approved merge(s) are not moving:`);
+    for (const h of stalledHandOffs) console.error(`  - ${h.line}`);
+  }
   if (unchecked.length) {
     console.error(`\nUNCHECKED — ${unchecked.length} step(s) failed and say so:`);
     for (const line of unchecked) console.error(`  - ${line}`);
@@ -2125,6 +2167,51 @@ if (cmd === 'whoami') {
   }
   console.log(JSON.stringify(out, null, 2));
   console.error(`${out.length} ticket(s) in ${slug || (project.tracker === 'api' ? project.projectSlug : `list ${LOOP_QUEUE_LIST}`)}${flag('include-closed') ? ', Live included' : ', open only'}${withComments ? ', with their comments' : ''}.`);
+  reportLimits();
+
+} else if (cmd === 'stage-counts') {
+  // Every stage counted, as JSON, for StarCaster's weekly report
+  // (lib/stageCounts.js holds the shape and the counting). Read-only. `--list`
+  // is StarCaster's spelling and means the same as `--project`.
+  for (const name of ['project', 'list', 'since', 'until']) {
+    if (process.argv.includes(`--${name}`) && !arg(name)) usage();
+  }
+  if (arg('project') && arg('list') && arg('project') !== arg('list')) {
+    console.error(`stage-counts: --project "${arg('project')}" and --list "${arg('list')}" name two different places; give one. Nothing was read.`);
+    process.exit(2);
+  }
+  const since = arg('since');
+  const until = arg('until');
+  // The dates are checked before anything is read: a typo is found for free.
+  const window = stageCounts.parseWindow(since, until);
+  if (window.error) {
+    console.error(`stage-counts: ${window.error} Nothing was read.`);
+    process.exit(2);
+  }
+  const list = arg('project') || arg('list') || LOOP_QUEUE_LIST;
+  // On the tracker the configured list id stands for this project: say its name.
+  const where = String(list) === String(LOOP_QUEUE_LIST) && project.tracker === 'api' ? project.projectSlug : list;
+  const tickets = await fetchAllTasks(list, { includeClosed: true, strict: true });
+  // Each ticket's history only when there is a window to count in it. Every
+  // one must come back, or nothing is printed: a report that counts half the
+  // history as the whole of it prints a quiet week that was not quiet.
+  const histories = new Map();
+  const problems = [];
+  if (window.cutoff != null) {
+    for (const t of tickets) {
+      const read = await tracker.getStatusHistory(t.id);
+      if (read.res.ok && Array.isArray(read.json?.moves)) histories.set(String(t.id), read.json.moves);
+      else problems.push({ id: t.id, problem: read.res.ok ? 'no status moves in the answer' : `HTTP ${read.res.status}${read.json?.err ? `: ${read.json.err}` : ''}` });
+    }
+  }
+  const failed = stageCounts.failedHistoryLine(problems);
+  if (failed) {
+    console.error(failed);
+    reportLimits();
+    process.exit(1);
+  }
+  console.log(JSON.stringify(stageCounts.countStages(tickets, { list: where, since, until, window, histories }), null, 2));
+  console.error(`stage-counts: ${tickets.length} ticket(s) in ${where}${window.cutoff == null ? ', no window' : `, window ${since} to ${until || 'now'} (UTC days)`}.`);
   reportLimits();
 
 } else if (cmd === 'main-moved') {
