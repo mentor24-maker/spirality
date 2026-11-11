@@ -10,6 +10,7 @@ import {
   localStamp, SnapshotError, listsToSave,
 } from './clickupSnapshot.mjs';
 import { backupDatabase, listBackups } from './backup.mjs';
+import { ARCHIVE_MAX_PAGES } from '../lib/commentPages.js';
 
 /** Made-up values, so nothing can pass by matching a real project. */
 const LIST = '4242';
@@ -82,8 +83,8 @@ function fakeTracker({ fail = {}, timeInStatus = 'yes', files = {}, lists, ...ov
       const base = Object.values(data.lists).flatMap((l) => [...l.live, ...l.archived]).find((x) => x.id === id);
       return ok({ ...base, markdown_description: `## Goal\nbody of ${id}`, ...(data.tasks[id] || {}) });
     },
-    async listComments(id) {
-      calls.push(['listComments', id]);
+    async listComments(id, opts) {
+      calls.push(['listComments', id, opts]);
       if (fail.listComments === id) return { paged: { complete: false, comments: [] }, bad: failed(503) };
       return { paged: { complete: true, comments: data.comments[id] || [] }, bad: null };
     },
@@ -282,6 +283,17 @@ test('the token is in no file the snapshot writes, and a record that would carry
       await assert.rejects(run(leaky, again.paths), /would carry the ClickUp token, so it was not written/);
       for (const f of filesUnder(again.dataDir)) assert.ok(!readFileSync(f).includes(TOKEN));
     } finally { again.cleanup(); }
+  } finally { cleanup(); }
+});
+
+test('comments are read with the archive page limit, so a trail over 1,000 comments is taken whole (SP-235)', async () => {
+  const { paths, cleanup } = scratch();
+  try {
+    const tracker = fakeTracker();
+    await run(tracker, paths, { dryRun: true });
+    const reads = tracker.calls.filter((c) => c[0] === 'listComments');
+    assert.ok(reads.length > 0);
+    for (const c of reads) assert.deepEqual(c[2], { maxPages: ARCHIVE_MAX_PAGES });
   } finally { cleanup(); }
 });
 
