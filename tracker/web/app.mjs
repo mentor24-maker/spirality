@@ -481,6 +481,8 @@ const ICONS = Object.freeze({
   view: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
   edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>',
   delete: '<path d="M4 7h16"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M6 7l1 13h10l1-13"/><path d="M9 7V4h6v3"/>',
+  answerIn: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+  waiting: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
   pullRequest: '<circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M6 8.5v7"/><path d="M18 15.5V9a3 3 0 0 0-3-3h-4"/><path d="M13 3.5L10.5 6 13 8.5"/>',
 });
 
@@ -496,6 +498,23 @@ function actionButton(label, icon, data) {
   const attrs = Object.entries(data).map(([k, v]) => ` data-${k}="${escapeHtml(v)}"`).join('');
   return `<button type="button" class="action" title="${label}" aria-label="${label}"${attrs}>`
     + `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icon}</svg></button>`;
+}
+
+/**
+ * A list row's status icon, first in its Actions cell (SP-201): a green
+ * check when his answer is in, a clock (a link to the reply box) when the
+ * ticket waits on the person signed in, else an empty slot the same width,
+ * so the icons after it line up down the column. Never both: an answered
+ * ticket is not on Waiting on You.
+ */
+function statusIcon(t) {
+  const at = `/t/${encodeURIComponent(t.id)}`;
+  if (t.answerIn) {
+    return `<span class="action status-icon answer-in-icon" role="img" title="Your Answer Is In" aria-label="Your Answer Is In">`
+      + `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS.answerIn}</svg></span>`;
+  }
+  if (t.waiting) return action(`${at}#reply`, 'Waiting on Your Response', ICONS.waiting);
+  return '<span class="action status-icon empty" aria-hidden="true"></span>';
 }
 
 /** Only an http(s) address is ever drawn as a link or an image; anything else is not drawn. */
@@ -1213,6 +1232,7 @@ async function drawProject(slug, view, { adding = false, filed = null, unchecked
   const actions = (t, status) => {
     const at = `/t/${encodeURIComponent(t.id)}`;
     return [
+      statusIcon(t),
       action(at, 'Open Ticket', ICONS.open),
       action(`${at}#reply`, 'Reply', ICONS.reply),
       t.pullRequest ? action(t.pullRequest, 'Open Pull Request on GitHub', ICONS.pullRequest, true) : '',
@@ -1222,7 +1242,7 @@ async function drawProject(slug, view, { adding = false, filed = null, unchecked
   const row = (status) => (t) => `
     <tr data-id="${escapeHtml(t.id)}">
       <td class="id"><a href="/t/${encodeURIComponent(t.id)}">${escapeHtml(t.id)}</a></td>
-      <td class="name"><a href="/t/${encodeURIComponent(t.id)}">${escapeHtml(t.name)}</a>${t.answerIn ? ` <span class="answer-in">${escapeHtml(ANSWER_IN_NOTE)}</span>` : ''}</td>
+      <td class="name"><a href="/t/${encodeURIComponent(t.id)}">${escapeHtml(t.name)}</a></td>
       <td class="priority">${view === 'list' ? renderListPriority(t) : t.priority ? escapeHtml(statusName(t.priority)) : '<span class="quiet">–</span>'}</td>
       <td class="tags">${t.tags.map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join('')}</td>
       <td class="assignee">${t.assignee ? escapeHtml(t.assignee) : '<span class="quiet">nobody</span>'}</td>

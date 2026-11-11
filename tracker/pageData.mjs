@@ -78,6 +78,16 @@ function answerIsIn(ticket, comments, operatorId) {
 }
 
 /**
+ * Does the ticket wait on `viewerId`? Exactly the test waitingFor lists a
+ * ticket by: one of the operator's two statuses and a WAITING verdict for
+ * that person. With no viewer, never.
+ */
+function waitsOn(ticket, comments, viewerId) {
+  if (viewerId == null || !OPERATOR_LANE.includes(ticket.status)) return false;
+  return waitingVerdict(verdictInput(ticket, comments), { operatorId: viewerId }).verdict === WAITING;
+}
+
+/**
  * The bus count in the page's header (Dane's choice D on the bus ticket): every
  * "Team chat" ticket (lib/busFallback.js, by its name) on a project `only`
  * lets through, with how many of its comments `actorId` has not seen
@@ -243,9 +253,13 @@ export function projectDetailsOf(store, slug, { withAlerts = false } = {}) {
  * null). The pull request is the merge step's own answer, findPullRequest
  * over the ticket's comments, so the list's link and the PR a "merge" would
  * act on cannot differ. `answerIn` says his answer is in (answerIsIn, the
- * same as the ticket page). Null when there is no such project.
+ * same as the ticket page). `waiting` says the ticket waits on `viewerId`,
+ * the person signed in: the same verdict, for the same person, that puts it
+ * on their Waiting on You page (waitingFor), so the list's clock and that
+ * page cannot disagree (SP-201). With no `viewerId`, never. Null when there
+ * is no such project.
  */
-export function boardOf(store, slug) {
+export function boardOf(store, slug, { viewerId = null } = {}) {
   const project = store.getProject(slug);
   if (!project) return null;
   const byStatus = new Map(STAGE_ORDER.map((name) => [statusOf(name), []]));
@@ -276,6 +290,7 @@ export function boardOf(store, slug) {
         updatedAt: t.updatedAt,
         pullRequest: pullRequestOf(t.id),
         answerIn: answerIsIn(t, store.listComments(t.id), project.operator),
+        waiting: waitsOn(t, store.listComments(t.id), viewerId),
         // SP-208: the List view's priority dropdown saves with it (ifVersion).
         version: t.version,
       })),
