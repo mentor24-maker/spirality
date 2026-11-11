@@ -230,7 +230,8 @@ function formValue(field, value) {
   if (value === null) return null;
   if (typeof value === 'string') return answerValue(field, value);
   if (field.list && Array.isArray(value)) return value;
-  throw new SetupError(400, 'bad-field', `"${field.key}" must be ${field.list ? 'text or a list of text' : 'text'}, not ${JSON.stringify(value)}.`);
+  if (field.yesNo && typeof value === 'boolean') return value;
+  throw new SetupError(400, 'bad-field', `"${field.key}" must be ${field.list ? 'text or a list of text' : field.yesNo ? 'yes or no' : 'text'}, not ${JSON.stringify(value)}.`);
 }
 
 /**

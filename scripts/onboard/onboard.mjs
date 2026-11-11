@@ -44,6 +44,15 @@
  *             printed and stops, nothing run. Then it reads back with
  *             `tracker:signins check` and fills in machineUserId
  *             (`onboard:settings fill-machine-user`).
+ *   bus       SP-204: only for a project whose answers say it has a bus
+ *             (`hasBus`, so its settings file names `busProject`,
+ *             "<slug>-bus"): make that tracker project if it is missing
+ *             (`tracker:bus`, with TRACKER_DB set to the tracker home's
+ *             database), read back, and check each of the project's loop
+ *             sign-ins sees it. A bus project that is there already is
+ *             left alone; a project with no bus skips this step, and so
+ *             does a merged setup (a bus added later comes with the
+ *             project's own pull request and `tracker:bus` by hand).
  *   stop, snapshot, import, switch-check
  *             SP-159: only for a project that already runs a loop on ClickUp
  *             (its answers name a `clickupListId`): its old lanes stopped,
@@ -118,7 +127,7 @@ const { findTicketId, ticketLink } = require('../../lib/clickupTicketLink.js');
 
 export const DEFAULT_MERGE_WAIT_MINUTES = 60;
 
-export const STEPS = Object.freeze(['answers', 'look', 'start', 'clone', 'settings', 'signins', 'copy', 'lanes', 'merge', 'protect']);
+export const STEPS = Object.freeze(['answers', 'look', 'start', 'clone', 'settings', 'signins', 'bus', 'copy', 'lanes', 'merge', 'protect']);
 
 /** The steps of a project already on ClickUp (SP-159): STEPS with stop, snapshot, import and switch-check before copy. */
 export const CLICKUP_RUN_STEPS = Object.freeze(withClickupSteps(STEPS));
@@ -140,21 +149,40 @@ export const DANE_FIELDS = Object.freeze([
   { key: 'mergePhrases', question: 'Merge phrases, the words that mean "merge this" (comma between)', list: true, fallback: ({ homeConfig }) => homeConfig.mergePhrases.join(', ') },
   { key: 'autoMergeLanes', question: 'Lanes that may merge without you (comma between)', list: true, fallback: () => 'none' },
   { key: 'extraGovernancePaths', question: 'Extra protected files, beyond the usual list (comma between)', list: true, fallback: () => 'none' },
+  // SP-204. `added`: a question added after setups were already under way,
+  // so an answers file that has every other answer is not stopped for it
+  // (its default, no bus, stands); it is asked whenever anything else is.
+  { key: 'hasBus', question: 'Does it raise its alarms on a bus, a tracker project of its own? (yes or no)', yesNo: true, added: true, fallback: () => 'no' },
   { key: 'description', question: 'What the project is, in two or three sentences, for its CLAUDE.md', required: true },
 ]);
 
-/** A typed answer as the answers file holds it: blank -> null (the default); a list split on commas; "none" -> []. */
+/**
+ * A typed answer as the answers file holds it: blank -> null (the default);
+ * a list split on commas; "none" -> []; a yes-or-no answer true or false
+ * (anything else is kept as typed, so the answers check refuses it by name).
+ */
 export function answerValue(field, typed) {
   const text = String(typed ?? '').trim();
   if (!text) return null;
+  if (field.yesNo) {
+    if (/^(y|yes|true)$/i.test(text)) return true;
+    if (/^(n|no|false)$/i.test(text)) return false;
+    return text;
+  }
   if (!field.list) return text;
   if (/^none$/i.test(text)) return [];
   return text.split(',').map((s) => s.trim()).filter(Boolean);
 }
 
-/** The Dane fields an answers object has not answered yet (a field set to null is answered: it takes the default). */
+/**
+ * The Dane fields an answers object has not answered yet (a field set to
+ * null is answered: it takes the default). A field marked `added` is only
+ * missing alongside another one, so a setup begun before it was asked is
+ * never stopped for it alone.
+ */
 export function unanswered(raw) {
-  return DANE_FIELDS.filter((f) => !Object.hasOwn(raw, f.key));
+  const missing = DANE_FIELDS.filter((f) => !Object.hasOwn(raw, f.key));
+  return missing.some((f) => !f.added) ? missing : [];
 }
 
 /** The field an AnswersError message names (`"key" must ...`), or null. */
@@ -681,7 +709,7 @@ export async function onboard(opts, deps) {
     if (setup.on) skip(step, `the setup is merged: ${setup.why}`);
     else {
       const have = deps.readText(settingsFile) != null ? readSettings() : null;
-      if (have && have.projectSlug === slug && sameRepo(have.githubRepo, answers.githubRepo)) {
+      if (have && have.projectSlug === slug && sameRepo(have.githubRepo, answers.githubRepo) && (have.busProject ?? null) === answers.busProject) {
         config = have;
         skip(step, `${settingsFile} is ${slug}'s and reads`);
       } else {
@@ -743,6 +771,24 @@ export async function onboard(opts, deps) {
         fillMachine();
         done(step, `every ${slug} sign-in answers as itself (tracker:signins check), machineUserId ${config.machineUserId}`);
       }
+    }
+
+    // ── bus (SP-204) ─────────────────────────────────────────────────────
+    step = 'bus';
+    begin(step);
+    if (setup.on) skip(step, `the setup is merged: ${setup.why}`);
+    else if (!answers.busProject) skip(step, `${slug} has no bus (hasBus is not true in ${aFile})`);
+    else {
+      const busFile = settingsFile;
+      const busConfig = config ?? readSettings();
+      if (!busConfig) fail(step, `${busFile} does not read, so the bus cannot be checked against it`);
+      if (busConfig.busProject !== answers.busProject) fail(step, `${busFile} names busProject ${JSON.stringify(busConfig.busProject)}, not "${answers.busProject}"`);
+      const trackerDb = join(expandHome(homeConfig.trackerDataDir), 'tracker.db');
+      const r = npm('tracker:bus', ['--config', busFile, '--name', answers.projectName], { env: { TRACKER_DB: trackerDb } });
+      for (const line of `${r.out}\n${r.err}`.split('\n').map((l) => l.trim()).filter(Boolean)) say(step, line);
+      if (r.code !== 0) fail(step, `tracker:bus exit ${r.code}: ${last(r.err || r.out)}`);
+      if (/: made, /.test(r.out)) done(step, `bus project "${answers.busProject}" made on the tracker, read back, and every ${slug} loop sees it`);
+      else skip(step, `bus project "${answers.busProject}" is on the tracker and every ${slug} loop sees it`);
     }
 
     // ── stop, snapshot, import, switch-check (SP-159) ────────────────────

@@ -1368,6 +1368,7 @@ export function setupFieldText(field, answers) {
   if (!has) return field.default ?? '';
   const v = answers[field.key];
   if (Array.isArray(v)) return v.length ? v.join(', ') : 'none';
+  if (typeof v === 'boolean') return v ? 'yes' : 'no';
   return String(v);
 }
 

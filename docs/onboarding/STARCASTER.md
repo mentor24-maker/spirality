@@ -50,8 +50,10 @@ lands on a standing "Team chat" ticket in the Loop Queue instead
 (`lib/busFallback.js`). The tracker's bus is already built (SP-24,
 [TRACKER_MVP.md, "The bus"](../TRACKER_MVP.md#the-bus-starcasters-alarms)):
 `npm run clickup -- bus-post` writes one comment on the bus project's Team
-chat ticket. What is missing is a bus project for StarCaster and
-`busProject` in its config: the wizard does not set one up (SP-204).
+chat ticket. The wizard gives StarCaster its bus when its answers say
+`hasBus` (SP-204): the tracker project `starcaster-bus`, and `busProject` in
+the config it writes
+([ONBOARDING_A_PROJECT.md](../ONBOARDING_A_PROJECT.md#a-project-with-a-bus-starcaster)).
 
 ## The list
 
