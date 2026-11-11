@@ -122,6 +122,14 @@
       "to": "loop/lib/sendBackRounds.js"
     },
     {
+      "from": "lib/stageCounts.js",
+      "to": "loop/lib/stageCounts.js"
+    },
+    {
+      "from": "lib/stageCounts.test.js",
+      "to": "loop/lib/stageCounts.test.js"
+    },
+    {
       "from": "lib/substrateConfig.js",
       "to": "loop/lib/substrateConfig.js"
     },
