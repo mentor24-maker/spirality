@@ -66,7 +66,7 @@ import {
 import {
   PR_VIEW_FIELDS, markerBookkeeping, recordBookkeeping, emptyBooks, mergeDestination, relayLine,
   handbackAnswer, handbackPlan, closePlan, conflictFilingPlan,
-  mergeWithPreMergeStep, commandLine, mergedBusLine, conflictBusLine, tellBus, stalledHandOffPlan,
+  mergeWithPreMergeStep, commandLine, mergedBusLine, conflictBusLine, busAnnouncer, stalledHandOffPlan, remindStalledHandOff,
 } from '../lib/relayLane.js';
 import {
   conflictTicketName, conflictTicketBody, conflictTicketFiledComment, findConflictTicket, unstuckPullRequest,
@@ -1384,13 +1384,7 @@ if (cmd === 'whoami') {
   // written on the ticket (SP-207). No `busProject`, nothing new is written.
   const busTag = machineSenderTag('bus-relay');
   const ticketUrl = (task) => task.url || `${filedTrackerUrl() || project.trackerUrl}/t/${task.id}`;
-  const announce = async (task, text, about) => {
-    const told = await tellBus({ busProject: project.busProject, text, about: `${task.id}: ${about}`, dryRun, postBus: postBusMessage });
-    if (told.act === 'none') return;
-    say(task, told.act === 'failed' ? 'unchecked' : told.act === 'posted' ? 'bus' : 'would-post-bus', told.line);
-    if (told.unchecked) unchecked.push(told.unchecked);
-    return told;
-  };
+  const announce = busAnnouncer({ busProject: project.busProject, dryRun, postBus: postBusMessage, say, unchecked });
   // Conflict hand-offs a day old with nothing cleared (stalledHandOffPlan),
   // listed at the end of the pass. A stuck ticket is not a failed step, so
   // they do not change the exit code.
@@ -1715,8 +1709,8 @@ if (cmd === 'whoami') {
         // marker: that stamp is the clock, so a post nobody saw must not buy
         // a quiet day. No bus: the end-of-pass list below is the only place
         // it is said, as before.
-        const told = await announce(task, stall.busText, `PR #${pr.number} conflict hand-off still stuck`);
-        if (told.act === 'posted') await markMergeHandled(decision.commentId, task, conflictHandOffNotice({ commentId: decision.commentId, pr: prRef, localVerdict, filed }).marker);
+        await remindStalledHandOff({ announce, task, stall, prNumber: pr.number,
+          restamp: () => markMergeHandled(decision.commentId, task, conflictHandOffNotice({ commentId: decision.commentId, pr: prRef, localVerdict, filed }).marker) });
         return;
       }
       if (alreadySaid) {

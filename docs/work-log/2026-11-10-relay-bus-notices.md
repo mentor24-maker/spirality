@@ -22,3 +22,11 @@ have gone quiet about merges.
   bus or no bus. StarCaster's "failed 3 times" alarm stays behind: there it
   counts merge tries, but here it would count reminders and fire every 10
   minutes from the third day.
+
+**Fixed after review.** Review found that on a project with no bus
+(Spirality and WaveCenter today), a merge hand-off that had been stuck for a
+day crashed the relay on that ticket: the step that reminds the bus read an
+answer that was never given. The relay then failed every ten minutes, where
+before it passed quietly. The bus step now always answers, "no bus" included,
+and new tests run the stuck-reminder step with no bus, with a bus, with a
+failed post and on a dry run.
