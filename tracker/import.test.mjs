@@ -8,6 +8,7 @@ import { importLoopQueue, formatReport, ImportReadError, SOURCE } from './import
 import { MACHINE_MARKER_LINE } from '../scripts/lib/machineComment.mjs';
 import { createSignins, seatsFor } from './signins.mjs';
 import { noClickUpList, operatorImportKey } from './import.mjs';
+import { ARCHIVE_MAX_PAGES } from '../lib/commentPages.js';
 
 const OPERATOR = '700';
 const SERVICE = '800';
@@ -62,8 +63,8 @@ function fakeTracker({ tasks, bodies = {}, comments = {}, replies = {}, fail = {
       const base = tasks.find((x) => x.id === id);
       return ok({ ...base, markdown_description: bodies[id] ?? '' });
     },
-    async listComments(id) {
-      calls.push(['listComments', id]);
+    async listComments(id, opts) {
+      calls.push(['listComments', id, opts]);
       if (fail.listComments === id) return { paged: { complete: false, comments: [] }, bad: failed(503) };
       const list = (comments[id] || []).slice().sort((a, b) => Number(b.date) - Number(a.date));
       return { paged: { complete: true, comments: list }, bad: null };
@@ -137,6 +138,17 @@ test('an open and a closed ticket are copied with their times, bodies, statuses 
     assert.deepEqual(tracker.writes, []);
     // Closed tickets were asked for, from the configured list.
     assert.deepEqual(tracker.calls[0], ['listTasksPage', '4242', 0, { includeClosed: true }]);
+  } finally { cleanup(); }
+});
+
+test('comments are read with the archive page limit, so a trail over 1,000 comments is taken whole (SP-235)', async () => {
+  const { store, cleanup } = freshStore();
+  try {
+    const tracker = fakeTracker(queue());
+    await importLoopQueue({ tracker, store, config: CONFIG });
+    const reads = tracker.calls.filter((c) => c[0] === 'listComments');
+    assert.ok(reads.length > 0);
+    for (const c of reads) assert.deepEqual(c[2], { maxPages: ARCHIVE_MAX_PAGES });
   } finally { cleanup(); }
 });
 

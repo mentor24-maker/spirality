@@ -551,6 +551,11 @@ on a port Funnel has not served before, Tailscale fetches its certificate on
 the first call. If it still has not answered, the script says so and exits 1
 with the route on; run `--status` again a minute later.
 
+Over ssh from the MacBook, put Homebrew's folder on the path first: an ssh
+session's path has no `node`, and the script stops with
+`node: command not found` (exit 2).
+`ssh mac-mini 'export PATH=/opt/homebrew/bin:$PATH; cd ~/WebApps/spirality && ./scripts/install_tracker_funnel.sh --status'`
+
 `Strict-Transport-Security` covers the whole name, not one port: a browser
 that has opened the public address once keeps to https for every port of
 `mac-mini.tail7fc5c6.ts.net` for a year. That is harmless today, because

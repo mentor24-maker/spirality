@@ -574,6 +574,20 @@ narrows a description to one slice writes the line
 ticket, and the session that finally merged it by hand also had to drag the
 ticket back to `Queued` for slice 2 by hand.
 
+**Work that is left after the merge gets its own ticket.** When a pull
+request leaves steps that can only be done after it merges, by a hand-run
+session (moving a web address, a deploy that needs Dane's word), the session
+or loop that opens the pull request files those steps as a ticket of their
+own, waiting on this one, before the hand-over. `Live` takes a ticket out of
+the open view, so steps written only in a doc or on a closed ticket are
+forgotten.
+
+**Why (2026-11-10, Spirality):** SP-164, "spirality.alphire.agency shows
+StarCaster's small Tasks page: point it at the tracker's own page", went
+`Live` when PR #135 merged on 2026-11-09. The move it was for was written in
+docs/TRACKER_MVP.md as steps for later, and no ticket held them. The next
+day Dane asked why the page had not changed.
+
 On a `Needs your input` ticket, a reply that is exactly a **close phrase**,
 matched the same whole-comment way, closes the ticket as `Live`, but only
 when it is his answer to a machine-written question card on that ticket.

@@ -50,6 +50,7 @@ import { pathToFileURL } from 'node:url';
 import { openStore, StoreError, STATUSES } from './store.mjs';
 import { isMachineComment } from '../scripts/lib/machineComment.mjs';
 import { createClickupTracker } from '../scripts/tracker/clickupTracker.mjs';
+import { ARCHIVE_MAX_PAGES } from '../lib/commentPages.js';
 import { loadProjectConfig, ProjectConfigError } from '../lib/projectConfig.mjs';
 import loopStatuses from '../lib/loopStatuses.js';
 
@@ -269,7 +270,7 @@ async function readTask(tracker, id) {
 
 /** Every comment on the ticket, OLDEST first. */
 async function readComments(tracker, id) {
-  const { paged, bad } = await tracker.listComments(id);
+  const { paged, bad } = await tracker.listComments(id, { maxPages: ARCHIVE_MAX_PAGES });
   if (!paged?.complete) {
     const why = bad ? httpWhy(bad) : (paged?.capped ? 'it ran past the page limit' : 'the read did not finish');
     throw new ImportReadError(`reading the comments on ticket ${id} failed: ${why}`);
