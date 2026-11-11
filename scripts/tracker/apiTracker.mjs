@@ -323,6 +323,23 @@ export function createApiTracker({ token, baseUrl, project, listId, timeoutMs, l
       return withJson(out, await taskFromTicket(out.json));
     },
 
+    /**
+     * When the ticket entered its current status, in ClickUp's "Time in
+     * Status" shape (`current_status.total_time.since`, milliseconds), from
+     * the ticket's history: the newest status move, or its filing when it
+     * never moved. Only `since` is filled; the tracker keeps no per-minute
+     * totals.
+     */
+    async getTimeInStatus(task) {
+      const out = await call('GET', `${ticketPath(task)}/events`);
+      if (!out.res.ok) return out;
+      if (!Array.isArray(out.json?.events)) return refused(502, 'the tracker answered without a ticket history.');
+      const moves = out.json.events.filter((e) => e.field === 'status' || e.field === 'created');
+      const last = moves[moves.length - 1];
+      if (!last) return refused(502, `the tracker's history of ${task} has no filing or status move.`);
+      return withJson(out, { current_status: { status: last.to, total_time: { since: ms(last.at) } } });
+    },
+
     async createTask(list, fields) {
       const body = {
         name: fields.name,

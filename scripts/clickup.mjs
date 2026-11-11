@@ -77,6 +77,8 @@ import {
 // The bus, in the tracker (SP-24): StarCaster's alarm channel.
 import trackerBus from '../lib/trackerBus.js';
 import { FALLBACK_TASK_NAME } from '../lib/busFallback.js';
+// Tickets as data for scheduled checks (SP-205).
+import ticketsJson from '../lib/ticketsJson.js';
 // A ticket's `Waits on:` line (task 86bctfun6): the claim leaves it alone
 // until every ticket it names is closed.
 import { waitsOn, waitsOnText, holdReasons } from '../lib/waitsOn.js';
@@ -225,6 +227,10 @@ npm run clickup -- <command> [flags]      (Loop Queue: list ${LOOP_QUEUE_LIST}, 
                                                   With "autoMergeLanes" in the project config, the auto-merge lanes run too, up to
                                                   a "would merge" note: nothing merges without his word yet (SP-202).
                                                   One line per ticket he holds. --dry-run prints what it would do, writes nothing
+  tickets --json [--include-closed] [--project <slug>] [--comments]
+                                                  read-only: the tickets as JSON for a scheduled check, one object each (id,
+                                                  name, status, priority, tags, created, updated, statusSince; --comments adds
+                                                  the top-level comments). Exit 1 naming what failed, printing nothing, on any failed read
   bus-post --body-file <f|-> [--from <name>]      post an alarm or report to the bus project's "Team chat" ticket, read back; a message starting ALARM: is texted
   bus-read [--operator] [--since <time>]          the bus's comments, oldest first: time (ISO, UTC: feeds --since), ticket, operator|machine, author, first line
   main-moved --pr <merged #> [--list <id>] [--dry-run]
@@ -239,7 +245,7 @@ Two are Dane's and only \`ask\` may set them: ${OPERATOR_STATUSES.map((s) => DIS
 }
 
 // ── Readers ──────────────────────────────────────────────────────────────────
-async function fetchAllTasks(list, { includeClosed = false, markdown = false } = {}) {
+async function fetchAllTasks(list, { includeClosed = false, markdown = false, strict = false } = {}) {
   const tasks = [];
   for (let page = 0; page < 50; page += 1) {
     const out = await tracker.listTasksPage(list, page, { includeClosed, markdown });
@@ -249,6 +255,8 @@ async function fetchAllTasks(list, { includeClosed = false, markdown = false } =
     if (out.json.last_page !== false || out.json.tasks.length === 0) return tasks;
   }
   console.error('Stopped after 50 pages — treat this output as INCOMPLETE.');
+  // A caller that prints the list as whole cannot carry on with half of it.
+  if (strict) process.exit(1);
   return tasks;
 }
 
@@ -2000,6 +2008,46 @@ if (cmd === 'whoami') {
       process.exit(1);
     }
   }
+  reportLimits();
+
+} else if (cmd === 'tickets') {
+  // Tickets as data (SP-205, lib/ticketsJson.js): what StarCaster's scheduled
+  // checks read instead of ClickUp's API. Read-only. Every read must come
+  // back, or nothing is printed: a check that counts half a list as the whole
+  // reports a quiet queue that is not quiet.
+  if (!flag('json')) {
+    console.error('tickets: say --json (the one format it prints). Nothing was read.');
+    usage();
+  }
+  const slug = arg('project');
+  if (process.argv.includes('--project') && !slug) usage();
+  const list = slug || LOOP_QUEUE_LIST;
+  const withComments = flag('comments');
+  const listed = await fetchAllTasks(list, { includeClosed: flag('include-closed'), strict: true });
+  const out = [];
+  const problems = [];
+  for (const t of listed) {
+    const since = await tracker.getTimeInStatus(t.id);
+    const statusSince = since.res.ok ? ticketsJson.statusSinceFrom(since.json) : null;
+    if (!since.res.ok || !statusSince) {
+      problems.push({ id: t.id, what: 'status history', problem: since.res.ok ? 'no time it entered its status' : `HTTP ${since.res.status}${since.json?.err ? `: ${since.json.err}` : ''}` });
+    }
+    let comments;
+    if (withComments) {
+      const read = await readCommentsOrProblem(t.id);
+      if (read.problem) problems.push({ id: t.id, what: 'comments', problem: read.problem });
+      else comments = read.comments;
+    }
+    out.push(ticketsJson.ticketJson(t, { statusSince, comments, operatorId: OPERATOR_ID }));
+  }
+  const failed = ticketsJson.failedReadsLine(problems);
+  if (failed) {
+    console.error(failed);
+    reportLimits();
+    process.exit(1);
+  }
+  console.log(JSON.stringify(out, null, 2));
+  console.error(`${out.length} ticket(s) in ${slug || (project.tracker === 'api' ? project.projectSlug : `list ${LOOP_QUEUE_LIST}`)}${flag('include-closed') ? ', Live included' : ', open only'}${withComments ? ', with their comments' : ''}.`);
   reportLimits();
 
 } else if (cmd === 'main-moved') {
