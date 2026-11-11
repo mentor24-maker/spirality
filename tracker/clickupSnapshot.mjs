@@ -46,6 +46,7 @@ import { execFileSync } from 'node:child_process';
 import { basename, dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createClickupTracker } from '../scripts/tracker/clickupTracker.mjs';
+import { ARCHIVE_MAX_PAGES } from '../lib/commentPages.js';
 import { noClickUpList } from './import.mjs';
 import { loadProjectConfig, ProjectConfigError } from '../lib/projectConfig.mjs';
 import { expandHome } from '../lib/onboardAnswers.mjs';
@@ -138,7 +139,7 @@ function byDateThenId(a, b) {
 
 /** Every comment on the ticket, oldest first, each with its replies. */
 async function readThread(tracker, taskId) {
-  const { paged, bad } = await tracker.listComments(taskId);
+  const { paged, bad } = await tracker.listComments(taskId, { maxPages: ARCHIVE_MAX_PAGES });
   if (!paged?.complete) {
     const why = bad ? httpWhy(bad) : (paged?.capped ? 'it ran past the page limit' : 'the read did not finish');
     throw new SnapshotError(`reading the comments on ticket ${taskId} failed: ${why}`);

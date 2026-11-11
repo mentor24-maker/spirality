@@ -139,9 +139,11 @@ export function createClickupTracker({ token, apiBase, timeoutMs, log = console.
     /**
      * Every comment on the ticket, newest first, across all pages
      * (lib/commentPages.js). Answers `{ paged, bad }`: `bad` is the first
-     * response that was not a readable comment list, or null.
+     * response that was not a readable comment list, or null. `maxPages`
+     * overrides the everyday page limit (an archive read passes
+     * ARCHIVE_MAX_PAGES, SP-235).
      */
-    async listComments(task) {
+    async listComments(task, { maxPages } = {}) {
       let bad = null;
       const get = async (path) => {
         const out = await call('GET', path);
@@ -149,7 +151,7 @@ export function createClickupTracker({ token, apiBase, timeoutMs, log = console.
         if (!ok) bad = out;
         return { ok, json: out.json };
       };
-      const paged = await pageComments({ get, taskId: task });
+      const paged = await pageComments({ get, taskId: task, ...(maxPages ? { maxPages } : {}) });
       return { paged, bad };
     },
     postComment: (task, body) => call('POST', `/api/v2/task/${task}/comment`, body),

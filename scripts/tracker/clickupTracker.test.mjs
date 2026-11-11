@@ -8,6 +8,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createClickupTracker, NO_ATTACHMENTS_ON_CLICKUP } from './clickupTracker.mjs';
 import { isMachineComment } from '../lib/machineComment.mjs';
+import { ARCHIVE_MAX_PAGES } from '../../lib/commentPages.js';
 
 /** A stand-in ClickUp: records every request, answers with `reply(req)`. */
 async function fakeClickup(reply = () => ({ status: 200, json: {} })) {
@@ -93,6 +94,27 @@ test('a failed comment read comes back as `bad`, for the door to report', async 
     assert.equal(paged.complete, false);
     assert.equal(bad.res.status, 500);
     assert.equal(bad.json.err, 'boom');
+  } finally { await api.close(); }
+});
+
+test('comment reads stop at 40 pages by default, and an archive read takes the whole trail (SP-235)', async () => {
+  // 41 full pages of 25, then 3: 1,028 comments, more than the everyday limit.
+  let page = 0;
+  const api = await fakeClickup((req) => {
+    page = req.path.includes('?') ? page + 1 : 0; // a read with no cursor starts the trail again
+    const size = page === 41 ? 3 : 25;
+    const comments = Array.from({ length: size }, (_, i) => ({ id: `${page}-${i}`, date: String(1e12 - page * 100 - i), comment_text: 'x' }));
+    return { json: { comments } };
+  });
+  const t = createClickupTracker({ token: 'tok', apiBase: api.apiBase, log: () => {} });
+  try {
+    const everyday = await t.listComments('abc');
+    assert.equal(everyday.paged.complete, false);
+    assert.equal(everyday.paged.capped, true);
+    assert.equal(api.seen.length, 40);
+    const archive = await t.listComments('abc', { maxPages: ARCHIVE_MAX_PAGES });
+    assert.equal(archive.paged.complete, true);
+    assert.equal(archive.paged.comments.length, 41 * 25 + 3);
   } finally { await api.close(); }
 });
 
