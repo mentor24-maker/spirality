@@ -1147,6 +1147,40 @@ loops (step 7). Anything done in the tracker during the week stays in the
 tracker and is not copied back to ClickUp; a ticket moved there is moved by
 hand in ClickUp.
 
+## Tickets as data (StarCaster's scheduled checks)
+
+Seven of StarCaster's scheduled checks (throughput, stale-ready,
+stale-answer, pipeline-pulse, sql:unapplied, broken-links and the
+heartbeat's roll call) and its review-gate workflow read the Loop Queue
+straight from ClickUp's API. After the switch nothing writes that list, so
+they would report on nothing. Their one way in is the door (SP-205):
+
+```bash
+npm run clickup -- tickets --json                          # every open ticket, as JSON
+npm run clickup -- tickets --json --include-closed         # Live tickets too
+npm run clickup -- tickets --json --comments               # each ticket's top-level comments too
+npm run clickup -- tickets --json --project starcaster-bus --include-closed   # another project the sign-in can see
+```
+
+It prints one JSON list, one object per ticket, in filing order:
+
+| Field | What it holds |
+|---|---|
+| `id`, `name` | `SP-12`, the ticket's name |
+| `status` | as `queue` prints it: `queued`, `in review`, `needs your input`, ... |
+| `priority` | `urgent`, `high`, `normal`, `low`, or `null` |
+| `tags` | a list of tag names |
+| `created`, `updated` | ISO times, in UTC |
+| `statusSince` | when it entered its current status (ISO, UTC): its newest status move in the ticket's history, or its filing when it never moved |
+| `comments` | with `--comments` only: `{ id, author: { id, name }, by, at, text }` per top-level comment, oldest first; `by` is `operator` when the author is the project's operator seat, else `machine`; `text` exactly as stored, machine stamp included |
+
+It writes nothing. Every read has to come back: when the list, any ticket's
+history or any ticket's comments cannot be read, it prints nothing on
+standard output and exits 1 naming each read that failed, so a check never
+counts half the queue as the whole of it. The shape lives in
+`lib/ticketsJson.js`, with its tests. Moving StarCaster's checks onto it is
+StarCaster's own pull request.
+
 ## The bus (StarCaster's alarms)
 
 StarCaster raises its alarms on **the bus**: a ClickUp chat channel (the
@@ -1187,8 +1221,11 @@ A steward question is two commands: `task --list <busProject>` files it,
 and it lands in Queued, which is not on Dane's Waiting on You list; then
 `ask --task <id> --status "Needs your input"` with the operator card is
 what puts it in front of him. Setting it up
-for a project: create the bus project on the Projects page, put the
-project's loops on it, and write its slug as `busProject`.
+for a project: the setup wizard does it when its answers say the project
+has a bus (SP-204, `hasBus`): its `bus` step makes the tracker project
+`<slug>-bus` (`npm run tracker:bus`), checks every loop of the project sees
+it, and the settings file it writes names it as `busProject`
+([ONBOARDING_A_PROJECT.md](ONBOARDING_A_PROJECT.md#a-project-with-a-bus-starcaster)).
 
 Every way StarCaster uses the bus today, and its tracker equivalent (the same
 table is `BUS_USES` in `lib/trackerBus.js`, and a test holds the two

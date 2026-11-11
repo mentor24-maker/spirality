@@ -1044,3 +1044,88 @@ test('the door signs a project lane in under its own seat once projectLanes name
     assert.doesNotMatch(after.out + after.err, new RegExp(env.TRACKER_TOKEN_LOOP_HANDOFF));
   } finally { await f.cleanup(); }
 });
+
+test('tickets --json prints every open ticket as data, with the time it entered its status (SP-205)', async () => {
+  const f = await fixture();
+  try {
+    f.file({ name: 'one', priority: 'high', tags: ['tracker'] });
+    f.file({ name: 'two' });
+    f.file({ name: 'gone' });
+    f.store.changeTicket('AL-2', { actor: f.machine.id, status: 'building' });
+    f.store.changeTicket('AL-3', { actor: f.machine.id, status: 'live' });
+    const r = await f.door(['tickets', '--json']);
+    assert.equal(r.code, 0, r.err);
+    const tickets = JSON.parse(r.out);
+    assert.deepEqual(tickets.map((t) => [t.id, t.name, t.status]), [['AL-1', 'one', 'queued'], ['AL-2', 'two', 'building']]);
+    assert.deepEqual(Object.keys(tickets[0]), ['id', 'name', 'status', 'priority', 'tags', 'created', 'updated', 'statusSince']);
+    assert.equal(tickets[0].priority, 'high');
+    assert.deepEqual(tickets[0].tags, ['tracker']);
+    assert.equal(tickets[1].priority, null);
+    const one = f.store.getTicket('AL-1');
+    assert.equal(tickets[0].created, new Date(one.createdAt).toISOString());
+    assert.equal(tickets[0].statusSince, tickets[0].created, 'never moved: in its status since it was filed');
+    const move = f.store.listEvents('AL-2').filter((e) => e.field === 'status').pop();
+    assert.equal(tickets[1].statusSince, new Date(move.at).toISOString());
+    assert.match(r.err, /2 ticket\(s\) in alpha, open only\./);
+
+    const all = await f.door(['tickets', '--json', '--include-closed']);
+    assert.equal(all.code, 0, all.err);
+    assert.deepEqual(JSON.parse(all.out).map((t) => [t.id, t.status]), [['AL-1', 'queued'], ['AL-2', 'building'], ['AL-3', 'live']]);
+
+    const bare = await f.door(['tickets']);
+    assert.equal(bare.code, 2);
+    assert.equal(bare.out, '');
+    assert.match(bare.err, /say --json/);
+  } finally { await f.cleanup(); }
+});
+
+test('tickets --json --comments adds each ticket\'s top-level comments, oldest first, operator or machine (SP-205)', async () => {
+  const f = await fixture();
+  try {
+    f.file({ name: 'one' });
+    f.store.postComment({ ticket: 'AL-1', author: f.human.id, body: 'go' });
+    const first = f.store.listComments('AL-1')[0];
+    f.store.postComment({ ticket: 'AL-1', author: f.human.id, body: 'a reply', parent: first.id });
+    f.store.postComment({ ticket: 'AL-1', author: f.machine.id, body: 'VERDICT: pass' });
+    const r = await f.door(['tickets', '--json', '--comments']);
+    assert.equal(r.code, 0, r.err);
+    const [t] = JSON.parse(r.out);
+    assert.deepEqual(t.comments.map((c) => [c.author.name, c.by, c.text]), [['Dana', 'operator', 'go'], ['Loop', 'machine', 'VERDICT: pass']]);
+    assert.deepEqual(Object.keys(t.comments[0]), ['id', 'author', 'by', 'at', 'text']);
+    assert.equal(t.comments[0].author.id, f.human.id);
+    assert.match(r.err, /with their comments/);
+  } finally { await f.cleanup(); }
+});
+
+test('tickets --json --project reads another project the sign-in can see, and an unknown one exits 1 printing nothing (SP-205)', async () => {
+  const f = await fixture();
+  try {
+    f.store.createProject({ slug: 'bus', name: 'Bus', prefix: 'BU', operator: f.human.id });
+    f.store.fileTicket({ project: 'bus', actor: f.machine.id, status: 'live', name: 'Team chat' });
+    f.file({ name: 'not on the bus' });
+    const r = await f.door(['tickets', '--json', '--project', 'bus', '--include-closed']);
+    assert.equal(r.code, 0, r.err);
+    assert.deepEqual(JSON.parse(r.out).map((t) => [t.id, t.name]), [['BU-1', 'Team chat']]);
+    assert.match(r.err, /1 ticket\(s\) in bus, Live included/);
+
+    const none = await f.door(['tickets', '--json', '--project', 'nowhere']);
+    assert.equal(none.code, 1);
+    assert.equal(none.out, '');
+    assert.match(none.err, /list tasks FAILED — HTTP 404/);
+  } finally { await f.cleanup(); }
+});
+
+test('tickets --json: one ticket whose status history cannot be read fails the whole read, naming it, printing nothing (SP-205)', async () => {
+  const f = await fixture();
+  try {
+    f.file({ name: 'one' });
+    f.file({ name: 'two' });
+    const db = new DatabaseSync(join(f.dir, 'tracker.db'));
+    db.prepare("DELETE FROM events WHERE ticket = 'AL-2'").run();
+    db.close();
+    const r = await f.door(['tickets', '--json']);
+    assert.equal(r.code, 1);
+    assert.equal(r.out, '');
+    assert.match(r.err, /tickets FAILED: 1 read\(s\) did not come back, so nothing was printed: AL-2 status history \(HTTP 502: the tracker's history of AL-2 has no filing or status move\.\)/);
+  } finally { await f.cleanup(); }
+});

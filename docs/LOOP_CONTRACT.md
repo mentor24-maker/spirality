@@ -702,9 +702,39 @@ is always read as his objection. Nothing else is loosened: the PASS
 verdict and every PR check in the list above are still required. It is
 capped per hour and per day, turns itself off on trouble, and can be stopped
 with a switch phrase on any ticket or the bus. Spirality and WaveCenter have
-no lanes. Spirality's relay does not run lanes yet: SP-202 brings the lane up
-to a "would merge" note and SP-203 the real merge, and until both are Live
-StarCaster stays on its own relay (SP-25).
+no lanes.
+
+**Spirality's relay runs the lanes as a rehearsal (SP-202).** `npm run
+clickup -- relay` reads the project config's `autoMergeLanes`; with `[]` it
+reads and writes nothing more than before. With lanes listed it runs
+`lib/relayAutoMerge.js` after the merge-phrase and hand-back steps, on every
+`Ready to launch` ticket that pass did not merge or close:
+
+- It announces an eligible ticket (the notice says, inside it, that the lane
+  does not merge on its own yet), and the hour runs from the tracker's own
+  time for that comment.
+- An unstamped comment from Dane in the hour cancels it; a comment with the
+  machine stamp does not.
+- At the end of the hour it reads the PR from GitHub. Checks still running:
+  it waits and says nothing. Red, conflicting or closed: it cancels, as a
+  real merge would. Otherwise it posts **one** "would merge" comment
+  (`[auto-merge-rehearsal]` marker, said once per announcement) and nothing
+  else: no merge, no status change. The ticket waits on his merge phrase as
+  before. That note ends the announcement: a comment of his after it, or
+  the announcement growing a day old, posts no cancel card.
+- The stop and resume phrases are read from the bus (`busProject`) and from
+  every ticket the relay read that pass (`Ready to launch` and `Needs your
+  input`); a stop is kept in the ledger. An unreadable bus or ledger, or a
+  project with no bus, counts as stopped.
+- The caps count each "would merge" as a merge, so they hold now exactly as
+  they will. The ledger is `auto-merge-ledger.json` in the repository's git
+  folder, never committed. The digest posts to the bus once a day, listing
+  rehearsals apart from real merges. An unverified pass disables the lanes
+  and says so on the bus.
+- A config with lanes but no `governancePaths` list runs no lane.
+
+SP-203 makes the end of the hour a real merge; until it is Live StarCaster
+stays on its own relay (SP-25).
 
 ## "Is this waiting on Dane?" — the three verdicts
 
