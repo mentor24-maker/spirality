@@ -102,6 +102,14 @@
       "to": "loop/lib/refusalClass.js"
     },
     {
+      "from": "lib/mergeWindowLease.js",
+      "to": "loop/lib/mergeWindowLease.js"
+    },
+    {
+      "from": "lib/mergeWindowLeaseFile.js",
+      "to": "loop/lib/mergeWindowLeaseFile.js"
+    },
+    {
       "from": "lib/relayAutoMerge.js",
       "to": "loop/lib/relayAutoMerge.js"
     },
@@ -120,6 +128,14 @@
     {
       "from": "lib/sendBackRounds.js",
       "to": "loop/lib/sendBackRounds.js"
+    },
+    {
+      "from": "lib/stageCounts.js",
+      "to": "loop/lib/stageCounts.js"
+    },
+    {
+      "from": "lib/stageCounts.test.js",
+      "to": "loop/lib/stageCounts.test.js"
     },
     {
       "from": "lib/substrateConfig.js",

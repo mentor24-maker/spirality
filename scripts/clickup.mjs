@@ -52,6 +52,7 @@ import { filedTrackerUrl, machineSenderTag } from '../lib/substrateConfig.js';
 // The auto-merge lanes (SP-202): the pass, and the ledger's file IO.
 import { runLanePass } from '../lib/relayAutoMerge.js';
 import { readLedgerFile, saveLedgerIfReadable } from '../lib/autoMergeLedgerFile.js';
+import { readLeaseFile, saveLeaseIfReadable } from '../lib/mergeWindowLeaseFile.js';
 
 import { loadProjectConfig, ProjectConfigError } from '../lib/projectConfig.mjs';
 // The merge lane's decisions (task 86bchpkxz). `mergeDecision` says whether
@@ -80,6 +81,8 @@ import trackerBus from '../lib/trackerBus.js';
 import { FALLBACK_TASK_NAME } from '../lib/busFallback.js';
 // Tickets as data for scheduled checks (SP-205).
 import ticketsJson from '../lib/ticketsJson.js';
+// Stage counts for StarCaster's weekly report (SP-206).
+import stageCounts from '../lib/stageCounts.js';
 // A ticket's `Waits on:` line (task 86bctfun6): the claim leaves it alone
 // until every ticket it names is closed.
 import { waitsOn, waitsOnText, holdReasons } from '../lib/waitsOn.js';
@@ -232,6 +235,11 @@ npm run clickup -- <command> [flags]      (Loop Queue: list ${LOOP_QUEUE_LIST}, 
                                                   read-only: the tickets as JSON for a scheduled check, one object each (id,
                                                   name, status, priority, tags, created, updated, statusSince; --comments adds
                                                   the top-level comments). Exit 1 naming what failed, printing nothing, on any failed read
+  stage-counts [--project <slug> | --list <id>] [--since YYYY-MM-DD [--until YYYY-MM-DD]]
+                                                  read-only: one JSON object for the weekly report: tickets per status now
+                                                  (byStatus, total) and, in the window (whole UTC days), how many shipped
+                                                  (closedInWindow), were filed (startedInWindow) and entered each status
+                                                  (enteredInWindow). Exit 2 on a bad date; 1, printing nothing, on any failed read
   bus-post --body-file <f|-> [--from <name>]      post an alarm or report to the bus project's "Team chat" ticket, read back; a message starting ALARM: is texted
   bus-read [--operator] [--since <time>]          the bus's comments, oldest first: time (ISO, UTC: feeds --since), ticket, operator|machine, author, first line
   main-moved --pr <merged #> [--list <id>] [--dry-run]
@@ -514,10 +522,23 @@ async function postLaneNotice(taskId, body) {
   return { ok: true, at: Number(found.date), commentId: String(found.id) };
 }
 
+/** The merge window's file, beside the ledger in the repository's git folder (absolute, as the ledger's is). */
+function mergeWindowPath() {
+  const ledger = autoMergeLedgerPath();
+  return ledger ? joinPath(ledger, '..', 'merge-window-lease.json') : null;
+}
+
 function laneIo(repo) {
   return {
     readLedger: () => readLedgerFile(autoMergeLedgerPath()),
     saveLedger: (read, ledger) => saveLedgerIfReadable(read, ledger),
+    readWindow: () => readLeaseFile(mergeWindowPath()),
+    saveWindow: (read, lease) => saveLeaseIfReadable(read, lease),
+    // GitHub's own catch-up of a branch that is behind main: never a force push.
+    updateBranch: (number) => {
+      const out = gh(['pr', 'update-branch', String(number), '--repo', repo]);
+      return out.ok ? { ok: true } : { ok: false, why: out.stderr.trim().slice(0, 200) || 'gh failed' };
+    },
     readBus: readBusMessages,
     postBus: postBusMessage,
     prFiles: (number) => {
@@ -1923,12 +1944,75 @@ if (cmd === 'whoami') {
     }
   }
 
-  // ── The auto-merge lanes, up to a "would merge" note (SP-202) ────────────
+  // ── The auto-merge lanes: announce, wait the hour, merge (SP-202, SP-203) ─
   // StarCaster's Lanes A and B (docs/LOOP_CONTRACT.md, "StarCaster's
   // auto-merge lanes"), run only for the lanes the project config lists; with
   // none listed nothing below reads or writes anything. They run AFTER both
   // loops above, so the self-disable judges the whole pass's account of what
-  // it could not check. This slice never merges: lib/relayAutoMerge.js.
+  // it could not check. At the end of an unopposed hour they merge
+  // (SP-203), through laneMerge and recordLaneMerge above.
+  // SP-203: the lane's merge and its bookkeeping are the phrase merge's own
+  // steps above (the pre-merge step, `gh pr merge --squash` pinned to the
+  // commit, the MERGED read-back, the Live move, MAIN MOVED), so the two
+  // paths cannot drift. Only the authorization differs: the hour, not his word.
+  const laneMerge = async ({ task, pr, view }) => {
+    const outcome = mergeWithPreMergeStep({
+      command: project.preMergeCommand,
+      pr,
+      repo,
+      headSha: String(view.headRefOid || ''),
+      baseBranch: String(view.baseRefName || ''),
+      ticketId: task.id,
+      runStep: (command, env, timeoutMs) => spawnSync(command[0], command.slice(1), {
+        cwd: REPO_ROOT, env: { ...process.env, ...env }, encoding: 'utf8', timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024,
+      }),
+      runGh: gh,
+    });
+    if (outcome.stage === 'pre-merge') return { outcome: 'refused', why: outcome.refusal.why };
+    if (!outcome.merged.ok) return { outcome: 'refused', why: `the merge command itself failed (${outcome.merged.stderr.trim().slice(0, 300)})` };
+    // `gh` exiting 0 is not a merge. Only MERGED, read back, is one.
+    const after = gh(['pr', 'view', String(pr.number), '--repo', repo, '--json', 'state,mergedAt']);
+    let afterJson = null;
+    try { afterJson = after.ok ? JSON.parse(after.stdout) : null; } catch { afterJson = null; }
+    const state = String(afterJson?.state || '').toUpperCase();
+    if (state !== 'MERGED') return { outcome: 'not-observed', why: `\`gh pr merge\` exited 0 but PR #${pr.number} reads back as "${state || 'unreadable'}", not MERGED` };
+    return { outcome: 'merged', mergedAt: afterJson.mergedAt || new Date().toISOString(), base: String(view.baseRefName || '') };
+  };
+
+  /** After a lane merge: the note, the Live (or Queued) move, MAIN MOVED. Problems are returned, never thrown. */
+  const recordLaneMerge = async ({ task, pr, laneName, mergedAt, base = '', alreadyMerged = false }) => {
+    const fresh = await readTaskOrNull(task.id);
+    if (!fresh) return { ok: false, dest: null, problems: [`${task.id}: PR #${pr.number} is merged, but the ticket could not be read to move it on — move it by hand`] };
+    const dest = mergeDestination(fresh.markdown_description || fresh.description);
+    const made = alreadyMerged ? { lines: [], problem: '' } : filesMadeLines({ repo, branch: base || 'main', files: readPrFiles(repo, pr.number) });
+    if (made.problem) unchecked.push(`${task.id}: PR #${pr.number} merged, but ${made.problem} — the merge note says so`);
+    const body = [
+      alreadyMerged
+        ? `PR #${pr.number} (${pr.url}) is already merged${mergedAt ? ` (at ${mergedAt})` : ''}, so Lane ${laneName} has nothing left to merge.`
+        : `Merged by Lane ${laneName}: PR #${pr.number} (${pr.url}) squash-merged into ${base || 'main'} at ${mergedAt}. The hour announced on this ticket ended with no comment from ${who}.`,
+      ...(alreadyMerged ? [] : ['A review PASS was on file, checks were green and the branch was up to date at merge time.']),
+      '',
+      dest.status.toLowerCase() === 'live'
+        ? `This ticket is now Live (${dest.why}).`
+        : `This ticket goes back to ${dest.status} for the next build pass, because ${dest.why}.`,
+      '',
+      ...(made.lines.length ? [...made.lines, ''] : []),
+      `(Automatic — Lane ${laneName}, relay auto-merge.)`,
+    ].join('\n');
+    await postNote(task, body, `PR #${pr.number} MERGED by Lane ${laneName}`);
+    const moved = await moveMergedTicket(task, pr.number, dest);
+    settled.add(task.id);
+    say(task, alreadyMerged ? 'already-merged' : 'merged', `Lane ${laneName}: PR #${pr.number}; ticket -> ${dest.status}${moved ? '' : ' (MOVE FAILED, see below)'} (${dest.why})`);
+    if (!alreadyMerged) {
+      const news = await tellMainMoved({ mergedNumber: pr.number, list, dryRun: false, tasks });
+      for (const l of news.lines) console.log(`  main-moved\t${l}`);
+      unchecked.push(...news.problems.map((p) => `main-moved after PR #${pr.number}: ${p}`));
+      say(task, 'main-moved', `${news.told} in-flight ticket(s) told that PR #${pr.number} moved main`);
+    }
+    // postNote, moveMergedTicket and tellMainMoved report into `unchecked` themselves.
+    return { ok: moved, dest, problems: [] };
+  };
+
   const lanes = Array.isArray(project.autoMergeLanes) ? project.autoMergeLanes : [];
   if (lanes.length) {
     const candidates = ready
@@ -1949,7 +2033,7 @@ if (cmd === 'whoami') {
         dryRun,
         clock: clockAt,
         tag: machineSenderTag('relay'),
-        io: laneIo(repo),
+        io: { ...laneIo(repo), merge: laneMerge, recordMerge: recordLaneMerge },
         log: (line) => console.error(line),
       });
     } catch (err) {
@@ -2089,6 +2173,51 @@ if (cmd === 'whoami') {
   }
   console.log(JSON.stringify(out, null, 2));
   console.error(`${out.length} ticket(s) in ${slug || (project.tracker === 'api' ? project.projectSlug : `list ${LOOP_QUEUE_LIST}`)}${flag('include-closed') ? ', Live included' : ', open only'}${withComments ? ', with their comments' : ''}.`);
+  reportLimits();
+
+} else if (cmd === 'stage-counts') {
+  // Every stage counted, as JSON, for StarCaster's weekly report
+  // (lib/stageCounts.js holds the shape and the counting). Read-only. `--list`
+  // is StarCaster's spelling and means the same as `--project`.
+  for (const name of ['project', 'list', 'since', 'until']) {
+    if (process.argv.includes(`--${name}`) && !arg(name)) usage();
+  }
+  if (arg('project') && arg('list') && arg('project') !== arg('list')) {
+    console.error(`stage-counts: --project "${arg('project')}" and --list "${arg('list')}" name two different places; give one. Nothing was read.`);
+    process.exit(2);
+  }
+  const since = arg('since');
+  const until = arg('until');
+  // The dates are checked before anything is read: a typo is found for free.
+  const window = stageCounts.parseWindow(since, until);
+  if (window.error) {
+    console.error(`stage-counts: ${window.error} Nothing was read.`);
+    process.exit(2);
+  }
+  const list = arg('project') || arg('list') || LOOP_QUEUE_LIST;
+  // On the tracker the configured list id stands for this project: say its name.
+  const where = String(list) === String(LOOP_QUEUE_LIST) && project.tracker === 'api' ? project.projectSlug : list;
+  const tickets = await fetchAllTasks(list, { includeClosed: true, strict: true });
+  // Each ticket's history only when there is a window to count in it. Every
+  // one must come back, or nothing is printed: a report that counts half the
+  // history as the whole of it prints a quiet week that was not quiet.
+  const histories = new Map();
+  const problems = [];
+  if (window.cutoff != null) {
+    for (const t of tickets) {
+      const read = await tracker.getStatusHistory(t.id);
+      if (read.res.ok && Array.isArray(read.json?.moves)) histories.set(String(t.id), read.json.moves);
+      else problems.push({ id: t.id, problem: read.res.ok ? 'no status moves in the answer' : `HTTP ${read.res.status}${read.json?.err ? `: ${read.json.err}` : ''}` });
+    }
+  }
+  const failed = stageCounts.failedHistoryLine(problems);
+  if (failed) {
+    console.error(failed);
+    reportLimits();
+    process.exit(1);
+  }
+  console.log(JSON.stringify(stageCounts.countStages(tickets, { list: where, since, until, window, histories }), null, 2));
+  console.error(`stage-counts: ${tickets.length} ticket(s) in ${where}${window.cutoff == null ? ', no window' : `, window ${since} to ${until || 'now'} (UTC days)`}.`);
   reportLimits();
 
 } else if (cmd === 'main-moved') {

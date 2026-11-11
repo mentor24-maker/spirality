@@ -579,15 +579,18 @@ it opened. Requests arrive through Funnel, so they get the public address's
 
 When `trackerPageUrl` is set in `spirality.project.json`, the invite and
 reset emails link there instead of `trackerUrl` (the server reads it when it
-starts). It stays unset until the name below answers with the sign-in
-screen, so no email links to a name that does not yet lead here.
+starts). It is set to `https://spirality.alphire.agency` (SP-209), after the
+name below answered with the tracker's page.
 
-Moving the name. Today `spirality.alphire.agency` belongs to **StarCaster's**
-Vercel project (its answers carry `x-site-handler: resolved`), whose
-Spirality Tasks block stays for StarCaster's other sites. The move is
-outward-facing, so it is done **after this merges, by a hand-run session,
-with Dane's word**, never by a loop. Signing in to Vercel is a browser
-login, so that step is Dane's.
+Moving the name. **Done 2026-11-10**: `spirality.alphire.agency` moved from
+**StarCaster's** Vercel project (whose answers carried
+`x-site-handler: resolved`) to `spirality-tracker-page`, with Dane's word, by
+Vercel's move call
+(`npx vercel api /v1/projects/starcaster/domains/spirality.alphire.agency/move -X POST -F projectId=<spirality-tracker-page's id>`),
+which takes the name off one project and puts it on the other in one step.
+StarCaster's other names stayed. The steps below are kept for doing it again
+(for another project's page) and for the undo. The move is outward-facing,
+so it is done **by a hand-run session, with Dane's word**, never by a loop.
 
 1. Check the route is on: `scripts/install_tracker_funnel.sh --status`
    ends in exit 0.
@@ -1177,6 +1180,40 @@ standard output and exits 1 naming each read that failed, so a check never
 counts half the queue as the whole of it. The shape lives in
 `lib/ticketsJson.js`, with its tests. Moving StarCaster's checks onto it is
 StarCaster's own pull request.
+
+## Stage counts (StarCaster's weekly report)
+
+StarCaster's Monday report (`scripts/weekly_report.mjs`) draws the pipeline
+from one command, which the door answers in the same shape StarCaster's own
+door printed, so the report reads it unchanged (SP-206):
+
+```bash
+npm run clickup -- stage-counts --since 2026-11-03 --until 2026-11-09     # this project
+npm run clickup -- stage-counts --list <id> --since <date> --until <date>  # StarCaster's spelling: --list is --project
+```
+
+It prints one JSON object:
+
+| Field | What it holds |
+|---|---|
+| `list` | the project (or list) it read, as given |
+| `total` | every ticket, Live included |
+| `byStatus` | tickets in each status now, keyed in lower case (`in review`); all eight are there, zero or not |
+| `since`, `until` | the window as given, or `null` |
+| `closedInWindow` | tickets that shipped in the window: Live now, and last moved to Live inside it; `null` without `--since` |
+| `startedInWindow` | tickets filed in the window (only with `--since`) |
+| `enteredInWindow` | for each of the eight statuses, how many tickets moved into it (or were filed in it) inside the window, from each ticket's history; a ticket that entered one twice counts once (only with `--since`) |
+
+The window is whole days in UTC, `--since` from midnight to the end of
+`--until`, as StarCaster's command read it. Shipped and filed are counted the
+way the Reporting page counts Finished and Started, so the figures match it
+for the same days (its "Last 7 Days" is the seven days up to the moment it is
+opened, so a window of whole days can differ by what moved at the edges). It
+writes nothing. A bad date exits 2 before anything is read; when the list or
+any ticket's history cannot be read it prints nothing and exits 1 naming each
+one. On a ClickUp project there is no move-by-move history to read, so a
+window exits 1 saying so. The counting lives in `lib/stageCounts.js`, with
+its tests, one of which runs StarCaster's own reading code on the output.
 
 ## The bus (StarCaster's alarms)
 
