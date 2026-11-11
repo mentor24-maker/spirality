@@ -1129,3 +1129,81 @@ test('tickets --json: one ticket whose status history cannot be read fails the w
     assert.match(r.err, /tickets FAILED: 1 read\(s\) did not come back, so nothing was printed: AL-2 status history \(HTTP 502: the tracker's history of AL-2 has no filing or status move\.\)/);
   } finally { await f.cleanup(); }
 });
+
+test('stage-counts prints StarCaster\'s weekly-report shape, and its figures are the Reporting page\'s for the same week (SP-206)', async () => {
+  const f = await fixture();
+  try {
+    f.file({ name: 'waiting' });
+    f.file({ name: 'being built' });
+    f.file({ name: 'shipped' });
+    f.file({ name: 'shipped long ago' });
+    f.store.changeTicket('AL-2', { actor: f.machine.id, status: 'building' });
+    f.store.changeTicket('AL-3', { actor: f.machine.id, status: 'live' });
+    f.store.changeTicket('AL-4', { actor: f.machine.id, status: 'live' });
+    // AL-4 was filed and shipped in September: outside the week on both sides.
+    const db = new DatabaseSync(join(f.dir, 'tracker.db'));
+    db.prepare("UPDATE events SET at = '2026-09-01T12:00:00.000Z' WHERE ticket = 'AL-4'").run();
+    db.prepare("UPDATE tickets SET created_at = '2026-09-01T12:00:00.000Z' WHERE id = 'AL-4'").run();
+    db.close();
+
+    const day = (ms) => new Date(ms).toISOString().slice(0, 10);
+    const now = Date.now();
+    const since = day(now - 6 * 24 * 60 * 60 * 1000);
+    const until = day(now);
+    const r = await f.door(['stage-counts', '--since', since, '--until', until]);
+    assert.equal(r.code, 0, r.err);
+    const out = JSON.parse(r.out);
+    assert.deepEqual(Object.keys(out), ['list', 'total', 'byStatus', 'since', 'until', 'closedInWindow', 'startedInWindow', 'enteredInWindow']);
+    assert.equal(out.list, 'alpha', 'the project by name, not the list id that stands for it');
+    assert.equal(out.total, 4);
+    assert.equal(out.byStatus.queued, 1);
+    assert.equal(out.byStatus.building, 1);
+    assert.equal(out.byStatus.live, 2);
+    assert.equal(out.closedInWindow, 1, 'AL-3 only');
+    assert.equal(out.startedInWindow, 3);
+    assert.equal(out.enteredInWindow.building, 1);
+    assert.equal(out.enteredInWindow.queued, 3);
+    assert.equal([since, until].join(), [out.since, out.until].join());
+    assert.match(r.err, /stage-counts: 4 ticket\(s\) in alpha, window /);
+
+    // The Reporting page, read from the same database.
+    const { reportsOf } = await import('../../tracker/pageData.mjs');
+    const page = reportsOf(f.store, { project: 'alpha' });
+    assert.equal(out.closedInWindow, page.finished.week);
+    assert.equal(out.startedInWindow, page.started.week);
+    for (const { status, count } of page.open) assert.equal(out.byStatus[status.toLowerCase()], count, status);
+
+    // StarCaster's spelling: --list with the configured list id is this project.
+    const listed = await f.door(['stage-counts', '--list', LIST, '--since', since, '--until', until]);
+    assert.equal(listed.code, 0, listed.err);
+    assert.deepEqual(JSON.parse(listed.out), out);
+
+    // No window: StarCaster's null, and no history is read.
+    const bare = await f.door(['stage-counts']);
+    assert.equal(bare.code, 0, bare.err);
+    assert.equal(JSON.parse(bare.out).closedInWindow, null);
+  } finally { await f.cleanup(); }
+});
+
+test('stage-counts: a bad date exits 2 reading nothing; one unreadable history exits 1 naming it, printing nothing (SP-206)', async () => {
+  const f = await fixture();
+  try {
+    f.file({ name: 'one' });
+    f.file({ name: 'two' });
+    const bad = await f.door(['stage-counts', '--since', '2026-11-3']);
+    assert.equal(bad.code, 2);
+    assert.equal(bad.out, '');
+    assert.match(bad.err, /--since "2026-11-3" is not a YYYY-MM-DD date\. Nothing was read\./);
+    const two = await f.door(['stage-counts', '--project', 'alpha', '--list', 'beta']);
+    assert.equal(two.code, 2);
+    assert.match(two.err, /name two different places/);
+
+    const db = new DatabaseSync(join(f.dir, 'tracker.db'));
+    db.prepare("DELETE FROM events WHERE ticket = 'AL-2'").run();
+    db.close();
+    const r = await f.door(['stage-counts', '--since', '2026-11-03', '--until', '2026-11-09']);
+    assert.equal(r.code, 1);
+    assert.equal(r.out, '');
+    assert.match(r.err, /stage-counts FAILED: 1 ticket history read\(s\) did not come back, so nothing was printed: AL-2 \(HTTP 502: the tracker's history of AL-2 has no filing or status move\.\)/);
+  } finally { await f.cleanup(); }
+});

@@ -1181,6 +1181,40 @@ counts half the queue as the whole of it. The shape lives in
 `lib/ticketsJson.js`, with its tests. Moving StarCaster's checks onto it is
 StarCaster's own pull request.
 
+## Stage counts (StarCaster's weekly report)
+
+StarCaster's Monday report (`scripts/weekly_report.mjs`) draws the pipeline
+from one command, which the door answers in the same shape StarCaster's own
+door printed, so the report reads it unchanged (SP-206):
+
+```bash
+npm run clickup -- stage-counts --since 2026-11-03 --until 2026-11-09     # this project
+npm run clickup -- stage-counts --list <id> --since <date> --until <date>  # StarCaster's spelling: --list is --project
+```
+
+It prints one JSON object:
+
+| Field | What it holds |
+|---|---|
+| `list` | the project (or list) it read, as given |
+| `total` | every ticket, Live included |
+| `byStatus` | tickets in each status now, keyed in lower case (`in review`); all eight are there, zero or not |
+| `since`, `until` | the window as given, or `null` |
+| `closedInWindow` | tickets that shipped in the window: Live now, and last moved to Live inside it; `null` without `--since` |
+| `startedInWindow` | tickets filed in the window (only with `--since`) |
+| `enteredInWindow` | for each of the eight statuses, how many tickets moved into it (or were filed in it) inside the window, from each ticket's history; a ticket that entered one twice counts once (only with `--since`) |
+
+The window is whole days in UTC, `--since` from midnight to the end of
+`--until`, as StarCaster's command read it. Shipped and filed are counted the
+way the Reporting page counts Finished and Started, so the figures match it
+for the same days (its "Last 7 Days" is the seven days up to the moment it is
+opened, so a window of whole days can differ by what moved at the edges). It
+writes nothing. A bad date exits 2 before anything is read; when the list or
+any ticket's history cannot be read it prints nothing and exits 1 naming each
+one. On a ClickUp project there is no move-by-move history to read, so a
+window exits 1 saying so. The counting lives in `lib/stageCounts.js`, with
+its tests, one of which runs StarCaster's own reading code on the output.
+
 ## The bus (StarCaster's alarms)
 
 StarCaster raises its alarms on **the bus**: a ClickUp chat channel (the

@@ -340,6 +340,22 @@ export function createApiTracker({ token, baseUrl, project, listId, timeoutMs, l
       return withJson(out, { current_status: { status: last.to, total_time: { since: ms(last.at) } } });
     },
 
+    /**
+     * A ticket's status moves, oldest first, as `{ moves: [{ at, to }] }`
+     * (`at` in milliseconds): its filing, into the status it was filed in,
+     * then every status change. For `stage-counts` (SP-206).
+     */
+    async getStatusHistory(task) {
+      const out = await call('GET', `${ticketPath(task)}/events`);
+      if (!out.res.ok) return out;
+      if (!Array.isArray(out.json?.events)) return refused(502, 'the tracker answered without a ticket history.');
+      const moves = out.json.events
+        .filter((e) => e.field === 'status' || e.field === 'created')
+        .map((e) => ({ at: ms(e.at), to: e.to }));
+      if (!moves.length) return refused(502, `the tracker's history of ${task} has no filing or status move.`);
+      return withJson(out, { moves });
+    },
+
     async createTask(list, fields) {
       const body = {
         name: fields.name,

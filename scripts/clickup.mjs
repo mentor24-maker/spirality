@@ -80,6 +80,8 @@ import trackerBus from '../lib/trackerBus.js';
 import { FALLBACK_TASK_NAME } from '../lib/busFallback.js';
 // Tickets as data for scheduled checks (SP-205).
 import ticketsJson from '../lib/ticketsJson.js';
+// Stage counts for StarCaster's weekly report (SP-206).
+import stageCounts from '../lib/stageCounts.js';
 // A ticket's `Waits on:` line (task 86bctfun6): the claim leaves it alone
 // until every ticket it names is closed.
 import { waitsOn, waitsOnText, holdReasons } from '../lib/waitsOn.js';
@@ -232,6 +234,11 @@ npm run clickup -- <command> [flags]      (Loop Queue: list ${LOOP_QUEUE_LIST}, 
                                                   read-only: the tickets as JSON for a scheduled check, one object each (id,
                                                   name, status, priority, tags, created, updated, statusSince; --comments adds
                                                   the top-level comments). Exit 1 naming what failed, printing nothing, on any failed read
+  stage-counts [--project <slug> | --list <id>] [--since YYYY-MM-DD [--until YYYY-MM-DD]]
+                                                  read-only: one JSON object for the weekly report: tickets per status now
+                                                  (byStatus, total) and, in the window (whole UTC days), how many shipped
+                                                  (closedInWindow), were filed (startedInWindow) and entered each status
+                                                  (enteredInWindow). Exit 2 on a bad date; 1, printing nothing, on any failed read
   bus-post --body-file <f|-> [--from <name>]      post an alarm or report to the bus project's "Team chat" ticket, read back; a message starting ALARM: is texted
   bus-read [--operator] [--since <time>]          the bus's comments, oldest first: time (ISO, UTC: feeds --since), ticket, operator|machine, author, first line
   main-moved --pr <merged #> [--list <id>] [--dry-run]
@@ -2125,6 +2132,51 @@ if (cmd === 'whoami') {
   }
   console.log(JSON.stringify(out, null, 2));
   console.error(`${out.length} ticket(s) in ${slug || (project.tracker === 'api' ? project.projectSlug : `list ${LOOP_QUEUE_LIST}`)}${flag('include-closed') ? ', Live included' : ', open only'}${withComments ? ', with their comments' : ''}.`);
+  reportLimits();
+
+} else if (cmd === 'stage-counts') {
+  // Every stage counted, as JSON, for StarCaster's weekly report
+  // (lib/stageCounts.js holds the shape and the counting). Read-only. `--list`
+  // is StarCaster's spelling and means the same as `--project`.
+  for (const name of ['project', 'list', 'since', 'until']) {
+    if (process.argv.includes(`--${name}`) && !arg(name)) usage();
+  }
+  if (arg('project') && arg('list') && arg('project') !== arg('list')) {
+    console.error(`stage-counts: --project "${arg('project')}" and --list "${arg('list')}" name two different places; give one. Nothing was read.`);
+    process.exit(2);
+  }
+  const since = arg('since');
+  const until = arg('until');
+  // The dates are checked before anything is read: a typo is found for free.
+  const window = stageCounts.parseWindow(since, until);
+  if (window.error) {
+    console.error(`stage-counts: ${window.error} Nothing was read.`);
+    process.exit(2);
+  }
+  const list = arg('project') || arg('list') || LOOP_QUEUE_LIST;
+  // On the tracker the configured list id stands for this project: say its name.
+  const where = String(list) === String(LOOP_QUEUE_LIST) && project.tracker === 'api' ? project.projectSlug : list;
+  const tickets = await fetchAllTasks(list, { includeClosed: true, strict: true });
+  // Each ticket's history only when there is a window to count in it. Every
+  // one must come back, or nothing is printed: a report that counts half the
+  // history as the whole of it prints a quiet week that was not quiet.
+  const histories = new Map();
+  const problems = [];
+  if (window.cutoff != null) {
+    for (const t of tickets) {
+      const read = await tracker.getStatusHistory(t.id);
+      if (read.res.ok && Array.isArray(read.json?.moves)) histories.set(String(t.id), read.json.moves);
+      else problems.push({ id: t.id, problem: read.res.ok ? 'no status moves in the answer' : `HTTP ${read.res.status}${read.json?.err ? `: ${read.json.err}` : ''}` });
+    }
+  }
+  const failed = stageCounts.failedHistoryLine(problems);
+  if (failed) {
+    console.error(failed);
+    reportLimits();
+    process.exit(1);
+  }
+  console.log(JSON.stringify(stageCounts.countStages(tickets, { list: where, since, until, window, histories }), null, 2));
+  console.error(`stage-counts: ${tickets.length} ticket(s) in ${where}${window.cutoff == null ? ', no window' : `, window ${since} to ${until || 'now'} (UTC days)`}.`);
   reportLimits();
 
 } else if (cmd === 'main-moved') {
