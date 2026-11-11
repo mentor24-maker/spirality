@@ -48,7 +48,10 @@ import { createClickupTracker } from './tracker/clickupTracker.mjs';
 import { createApiTracker, trackerTokenEnv } from './tracker/apiTracker.mjs';
 import { projectSeats } from './lib/expectedSecrets.mjs';
 import { compareRepo, projectEditUrl } from './lib/repoCheck.mjs';
-import { filedTrackerUrl } from '../lib/substrateConfig.js';
+import { filedTrackerUrl, machineSenderTag } from '../lib/substrateConfig.js';
+// The auto-merge lanes (SP-202): the pass, and the ledger's file IO.
+import { runLanePass } from '../lib/relayAutoMerge.js';
+import { readLedgerFile, saveLedgerIfReadable } from '../lib/autoMergeLedgerFile.js';
 
 import { loadProjectConfig, ProjectConfigError } from '../lib/projectConfig.mjs';
 // The merge lane's decisions (task 86bchpkxz). `mergeDecision` says whether
@@ -219,6 +222,8 @@ npm run clickup -- <command> [flags]      (Loop Queue: list ${LOOP_QUEUE_LIST}, 
                                                   ticket (re-check every gate, merge, move the ticket, write the record),
                                                   and the hand-back: his answer to the question card on a "Needs your input"
                                                   ticket moves it to Queued, Rework or Live by the contract's table.
+                                                  With "autoMergeLanes" in the project config, the auto-merge lanes run too, up to
+                                                  a "would merge" note: nothing merges without his word yet (SP-202).
                                                   One line per ticket he holds. --dry-run prints what it would do, writes nothing
   bus-post --body-file <f|-> [--from <name>]      post an alarm or report to the bus project's "Team chat" ticket, read back; a message starting ALARM: is texted
   bus-read [--operator] [--since <time>]          the bus's comments, oldest first: time (ISO, UTC: feeds --since), ticket, operator|machine, author, first line
@@ -427,6 +432,110 @@ async function postComment(task, body) {
     process.exit(1);
   }
   return { id, stored };
+}
+
+// ── The auto-merge lanes' reads and writes (SP-202) ──────────────────────────
+// lib/relayAutoMerge.js decides; these are its hands, each returning
+// { ok, ... } or { ok: false, why }, never an exit, because the relay has
+// other tickets to get through.
+
+/** h:mm am/pm, Mountain time, the clock Dane reads. */
+function clockAt(ms) {
+  const d = new Date(Number(ms));
+  const time = d.toLocaleTimeString('en-US', { timeZone: 'America/Denver', hour: 'numeric', minute: '2-digit' }).toLowerCase().replace(/\s/g, '');
+  return `${time} MT`;
+}
+
+/**
+ * The ledger lives beside the repository's git data, so every checkout of
+ * one project shares one, and nothing in it is committed. Absolute, so a
+ * relay started from a subfolder finds the same file (review note 4, SP-199).
+ */
+function autoMergeLedgerPath() {
+  const out = spawnSync('git', ['-C', REPO_ROOT, 'rev-parse', '--path-format=absolute', '--git-common-dir'], { encoding: 'utf8' });
+  const dir = out.status === 0 ? String(out.stdout || '').trim() : '';
+  return dir ? joinPath(dir, 'auto-merge-ledger.json') : null;
+}
+
+/** Every message on the bus project, or why it could not be read. One unread ticket is unreadable. */
+async function readBusMessages() {
+  if (project.tracker !== 'api') return { ok: false, why: `the bus is a tracker project, and this project's tracker is "${project.tracker}"` };
+  const bus = project.busProject;
+  if (!bus) return { ok: false, why: 'this project has no bus ("busProject" in the project config)' };
+  const listed = await tracker.listTasksPage(bus, 0, { includeClosed: true });
+  if (!listed.res.ok || !Array.isArray(listed.json?.tasks)) return { ok: false, why: `the bus project ${bus} could not be listed (HTTP ${listed.res.status})` };
+  const messages = [];
+  for (const t of listed.json.tasks) {
+    const read = await readCommentsOrProblem(t.id);
+    if (read.problem) return { ok: false, why: `the comments on ${t.id} "${t.name}" could not be read (${read.problem})` };
+    for (const c of read.comments) {
+      messages.push({ id: String(c.id), at: Number(c.date) || 0, authorId: c.user?.id == null ? null : Number(c.user.id), ticket: String(t.id), text: String(c.comment_text ?? '') });
+    }
+  }
+  return { ok: true, messages };
+}
+
+/** Post to the bus's Team chat ticket and read it back. Never creates it: `bus-post` does that. */
+async function postBusMessage(text) {
+  if (project.tracker !== 'api' || !project.busProject) return { ok: false, why: 'this project has no bus' };
+  const bus = project.busProject;
+  const listed = await tracker.listTasksPage(bus, 0, { includeClosed: true });
+  if (!listed.res.ok || !Array.isArray(listed.json?.tasks)) return { ok: false, why: `the bus project ${bus} could not be listed (HTTP ${listed.res.status})` };
+  const chat = trackerBus.pickTeamChat(listed.json.tasks);
+  if (!chat) return { ok: false, why: `there is no "${FALLBACK_TASK_NAME}" ticket in ${bus} (npm run clickup -- bus-post makes one)` };
+  const post = trackerBus.renderBusPost({ text, node: hostname(), at: trackerBus.mountainTime(Date.now()) });
+  if (!post) return { ok: false, why: 'the message was empty' };
+  const out = await tracker.postComment(chat.id, { comment_text: post });
+  if (!out.res.ok) return { ok: false, why: `HTTP ${out.res.status}` };
+  const id = String(out.json?.id ?? '');
+  const back = await readCommentsOrProblem(chat.id);
+  if (back.problem || !back.comments.some((c) => String(c.id) === id)) return { ok: false, why: `comment ${id || '(no id)'} did not read back` };
+  return { ok: true, id };
+}
+
+/** Post a lane notice on a ticket and read it back, returning the tracker's own time for it. */
+async function postLaneNotice(taskId, body) {
+  const out = await tracker.postComment(taskId, { comment_text: body });
+  if (!out.res.ok) return { ok: false, why: `the notice did not post (HTTP ${out.res.status})` };
+  const id = String(out.json?.id ?? '');
+  const back = await readCommentsOrProblem(taskId);
+  if (back.problem) return { ok: false, why: `the notice posted but could not be read back (${back.problem})` };
+  const found = back.comments.find((c) => String(c.id) === id);
+  if (!found || !Number(found.date)) return { ok: false, why: 'the notice did not read back' };
+  return { ok: true, at: Number(found.date), commentId: String(found.id) };
+}
+
+function laneIo(repo) {
+  return {
+    readLedger: () => readLedgerFile(autoMergeLedgerPath()),
+    saveLedger: (read, ledger) => saveLedgerIfReadable(read, ledger),
+    readBus: readBusMessages,
+    postBus: postBusMessage,
+    prFiles: (number) => {
+      const files = readPrFiles(repo, number);
+      return files ? { ok: true, files: files.map((f) => f.filename) } : { ok: false, why: 'GitHub did not list them all' };
+    },
+    prView: (number) => {
+      const view = gh(['pr', 'view', String(number), '--repo', repo, '--json', PR_VIEW_FIELDS.join(',')]);
+      if (!view.ok) return { ok: false, why: view.stderr.trim().slice(0, 200) || 'gh failed' };
+      try { return { ok: true, pr: JSON.parse(view.stdout) }; } catch { return { ok: false, why: 'gh returned non-JSON' }; }
+    },
+    postNotice: postLaneNotice,
+    mainBuildIsRed: (onRepo) => {
+      const out = gh(['run', 'list', '--repo', onRepo, '--branch', 'main', '--limit', '1', '--json', 'conclusion,status,createdAt']);
+      if (!out.ok) return { known: false, red: false, why: 'could not read the build history for main' };
+      try {
+        const last = JSON.parse(out.stdout)[0];
+        if (!last) return { known: true, red: false };
+        // A run still going is not a red run.
+        if (String(last.status || '').toUpperCase() !== 'COMPLETED') return { known: true, red: false };
+        const c = String(last.conclusion || '').toUpperCase();
+        return { known: true, red: !['SUCCESS', 'NEUTRAL', 'SKIPPED'].includes(c), at: Number(new Date(last.createdAt)) || 0 };
+      } catch {
+        return { known: false, red: false, why: 'the build history for main was unparseable' };
+      }
+    },
+  };
 }
 
 // ── Main moved: tell every ticket still in flight (task 86bctjffu) ───────────
@@ -1236,6 +1345,10 @@ if (cmd === 'whoami') {
   const who = project.operatorName;
   const unchecked = [];
   const say = (task, outcome, detail) => console.log(relayLine({ task, status: task.status?.status, outcome, detail }));
+  // Every ticket read this pass, for the auto-merge lanes' stop switch, and
+  // the Ready to launch ones this pass merged or closed, which no lane judges.
+  const seen = new Map();
+  const settled = new Set();
 
   /** Write the dedup marker as a threaded reply on his comment, and read it back.
    *  An unverified marker means the next pass may act on the same word again,
@@ -1425,7 +1538,8 @@ if (cmd === 'whoami') {
 
   const relayReadyToLaunch = async (task) => {
     const comments = await readComments(task.id);
-    if (await relayCloseReadyToLaunch(task, comments)) return;
+    seen.set(task.id, { task, comments });
+    if (await relayCloseReadyToLaunch(task, comments)) { settled.add(task.id); return; }
     // Only his merge phrases need their reply threads read — that is where an
     // earlier pass left its marker. Everything else costs a request and says nothing.
     const books = emptyBooks();
@@ -1628,6 +1742,7 @@ if (cmd === 'whoami') {
     ].join('\n');
     await postNote(task, body, `PR #${pr.number} MERGED`);
     const moved = await moveMergedTicket(task, pr.number, dest);
+    settled.add(task.id);
     say(task, 'merged', `PR #${pr.number} at ${mergedAt}; ticket -> ${dest.status}${moved ? '' : ' (MOVE FAILED, see below)'} (${dest.why})`);
 
     // main just moved: tell every ticket still in flight, so its next pass
@@ -1652,6 +1767,7 @@ if (cmd === 'whoami') {
   }
   const relayNeedsYourInput = async (task) => {
     const comments = await readComments(task.id);
+    seen.set(task.id, { task, comments });
     const verdict = handbackAnswer({ comments, operatorId: OPERATOR_ID, isMachine: isMachineComment });
     let replies = [];
     if (verdict.state === 'answered') {
@@ -1759,6 +1875,47 @@ if (cmd === 'whoami') {
     try { await relayNeedsYourInput(t); } catch (err) {
       unchecked.push(`${t.id}: the relay stopped on this ticket (${err.message}) — nothing more was written for it`);
       say(t, 'unchecked', `the relay stopped on this ticket: ${err.message}`);
+    }
+  }
+
+  // ── The auto-merge lanes, up to a "would merge" note (SP-202) ────────────
+  // StarCaster's Lanes A and B (docs/LOOP_CONTRACT.md, "StarCaster's
+  // auto-merge lanes"), run only for the lanes the project config lists; with
+  // none listed nothing below reads or writes anything. They run AFTER both
+  // loops above, so the self-disable judges the whole pass's account of what
+  // it could not check. This slice never merges: lib/relayAutoMerge.js.
+  const lanes = Array.isArray(project.autoMergeLanes) ? project.autoMergeLanes : [];
+  if (lanes.length) {
+    const candidates = ready
+      .filter((t) => !settled.has(t.id) && seen.has(t.id))
+      .map((t) => seen.get(t.id));
+    let laneOut;
+    try {
+      laneOut = await runLanePass({
+        lanes,
+        governancePaths: Array.isArray(project.governancePaths) ? project.governancePaths : null,
+        candidates,
+        switchTickets: [...seen.values()],
+        operatorId: OPERATOR_ID,
+        operatorName: who,
+        mergePhrase: (project.mergePhrases || [])[0] || 'merge',
+        repo,
+        unchecked,
+        dryRun,
+        clock: clockAt,
+        tag: machineSenderTag('relay'),
+        io: laneIo(repo),
+        log: (line) => console.error(line),
+      });
+    } catch (err) {
+      unchecked.push(`the auto-merge lanes stopped (${err.message}) — nothing more was written for them this pass`);
+    }
+    if (laneOut?.ran) {
+      console.log(laneOut.line);
+      if (laneOut.busSkipped.length) {
+        console.error(`\nBUS — ${laneOut.busSkipped.length} post(s) or read(s) did not land:`);
+        for (const line of laneOut.busSkipped) console.error(`  - ${line}`);
+      }
     }
   }
 
