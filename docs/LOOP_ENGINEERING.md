@@ -237,6 +237,15 @@ slice:` line). A refused gate is written on the ticket once, naming the gate,
 and your word stays good: the next pass merges on it when the reason clears.
 "merge PR #N" is not a phrase and does nothing.
 
+A project whose config lists `autoMergeLanes` (StarCaster's Lanes A and B;
+Spirality and WaveCenter list none) also gets the auto-merge lanes from the
+same pass: an eligible ticket is announced, and when its hour ends with no
+comment from you the relay merges it through those same gates, one pull
+request at a time (the merge window), and moves it on exactly as above.
+"stop auto-merging" on any ticket or the bus stops them until "resume
+auto-merging". The rules are in `docs/LOOP_CONTRACT.md`, "StarCaster's
+auto-merge lanes".
+
 ```bash
 ssh mac-mini 'tail -40 ~/loop-logs/spirality-relay.log'                                # what the last relay pass said
 ssh mac-mini 'cd ~/WebApps/spirality && npm run clickup -- relay --dry-run'           # what it WOULD do now, writing nothing

@@ -52,6 +52,7 @@ import { filedTrackerUrl, machineSenderTag } from '../lib/substrateConfig.js';
 // The auto-merge lanes (SP-202): the pass, and the ledger's file IO.
 import { runLanePass } from '../lib/relayAutoMerge.js';
 import { readLedgerFile, saveLedgerIfReadable } from '../lib/autoMergeLedgerFile.js';
+import { readLeaseFile, saveLeaseIfReadable } from '../lib/mergeWindowLeaseFile.js';
 
 import { loadProjectConfig, ProjectConfigError } from '../lib/projectConfig.mjs';
 // The merge lane's decisions (task 86bchpkxz). `mergeDecision` says whether
@@ -505,10 +506,23 @@ async function postLaneNotice(taskId, body) {
   return { ok: true, at: Number(found.date), commentId: String(found.id) };
 }
 
+/** The merge window's file, beside the ledger in the repository's git folder (absolute, as the ledger's is). */
+function mergeWindowPath() {
+  const ledger = autoMergeLedgerPath();
+  return ledger ? joinPath(ledger, '..', 'merge-window-lease.json') : null;
+}
+
 function laneIo(repo) {
   return {
     readLedger: () => readLedgerFile(autoMergeLedgerPath()),
     saveLedger: (read, ledger) => saveLedgerIfReadable(read, ledger),
+    readWindow: () => readLeaseFile(mergeWindowPath()),
+    saveWindow: (read, lease) => saveLeaseIfReadable(read, lease),
+    // GitHub's own catch-up of a branch that is behind main: never a force push.
+    updateBranch: (number) => {
+      const out = gh(['pr', 'update-branch', String(number), '--repo', repo]);
+      return out.ok ? { ok: true } : { ok: false, why: out.stderr.trim().slice(0, 200) || 'gh failed' };
+    },
     readBus: readBusMessages,
     postBus: postBusMessage,
     prFiles: (number) => {
@@ -1878,12 +1892,75 @@ if (cmd === 'whoami') {
     }
   }
 
-  // ── The auto-merge lanes, up to a "would merge" note (SP-202) ────────────
+  // ── The auto-merge lanes: announce, wait the hour, merge (SP-202, SP-203) ─
   // StarCaster's Lanes A and B (docs/LOOP_CONTRACT.md, "StarCaster's
   // auto-merge lanes"), run only for the lanes the project config lists; with
   // none listed nothing below reads or writes anything. They run AFTER both
   // loops above, so the self-disable judges the whole pass's account of what
-  // it could not check. This slice never merges: lib/relayAutoMerge.js.
+  // it could not check. At the end of an unopposed hour they merge
+  // (SP-203), through laneMerge and recordLaneMerge above.
+  // SP-203: the lane's merge and its bookkeeping are the phrase merge's own
+  // steps above (the pre-merge step, `gh pr merge --squash` pinned to the
+  // commit, the MERGED read-back, the Live move, MAIN MOVED), so the two
+  // paths cannot drift. Only the authorization differs: the hour, not his word.
+  const laneMerge = async ({ task, pr, view }) => {
+    const outcome = mergeWithPreMergeStep({
+      command: project.preMergeCommand,
+      pr,
+      repo,
+      headSha: String(view.headRefOid || ''),
+      baseBranch: String(view.baseRefName || ''),
+      ticketId: task.id,
+      runStep: (command, env, timeoutMs) => spawnSync(command[0], command.slice(1), {
+        cwd: REPO_ROOT, env: { ...process.env, ...env }, encoding: 'utf8', timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024,
+      }),
+      runGh: gh,
+    });
+    if (outcome.stage === 'pre-merge') return { outcome: 'refused', why: outcome.refusal.why };
+    if (!outcome.merged.ok) return { outcome: 'refused', why: `the merge command itself failed (${outcome.merged.stderr.trim().slice(0, 300)})` };
+    // `gh` exiting 0 is not a merge. Only MERGED, read back, is one.
+    const after = gh(['pr', 'view', String(pr.number), '--repo', repo, '--json', 'state,mergedAt']);
+    let afterJson = null;
+    try { afterJson = after.ok ? JSON.parse(after.stdout) : null; } catch { afterJson = null; }
+    const state = String(afterJson?.state || '').toUpperCase();
+    if (state !== 'MERGED') return { outcome: 'not-observed', why: `\`gh pr merge\` exited 0 but PR #${pr.number} reads back as "${state || 'unreadable'}", not MERGED` };
+    return { outcome: 'merged', mergedAt: afterJson.mergedAt || new Date().toISOString(), base: String(view.baseRefName || '') };
+  };
+
+  /** After a lane merge: the note, the Live (or Queued) move, MAIN MOVED. Problems are returned, never thrown. */
+  const recordLaneMerge = async ({ task, pr, laneName, mergedAt, base = '', alreadyMerged = false }) => {
+    const fresh = await readTaskOrNull(task.id);
+    if (!fresh) return { ok: false, dest: null, problems: [`${task.id}: PR #${pr.number} is merged, but the ticket could not be read to move it on — move it by hand`] };
+    const dest = mergeDestination(fresh.markdown_description || fresh.description);
+    const made = alreadyMerged ? { lines: [], problem: '' } : filesMadeLines({ repo, branch: base || 'main', files: readPrFiles(repo, pr.number) });
+    if (made.problem) unchecked.push(`${task.id}: PR #${pr.number} merged, but ${made.problem} — the merge note says so`);
+    const body = [
+      alreadyMerged
+        ? `PR #${pr.number} (${pr.url}) is already merged${mergedAt ? ` (at ${mergedAt})` : ''}, so Lane ${laneName} has nothing left to merge.`
+        : `Merged by Lane ${laneName}: PR #${pr.number} (${pr.url}) squash-merged into ${base || 'main'} at ${mergedAt}. The hour announced on this ticket ended with no comment from ${who}.`,
+      ...(alreadyMerged ? [] : ['A review PASS was on file, checks were green and the branch was up to date at merge time.']),
+      '',
+      dest.status.toLowerCase() === 'live'
+        ? `This ticket is now Live (${dest.why}).`
+        : `This ticket goes back to ${dest.status} for the next build pass, because ${dest.why}.`,
+      '',
+      ...(made.lines.length ? [...made.lines, ''] : []),
+      `(Automatic — Lane ${laneName}, relay auto-merge.)`,
+    ].join('\n');
+    await postNote(task, body, `PR #${pr.number} MERGED by Lane ${laneName}`);
+    const moved = await moveMergedTicket(task, pr.number, dest);
+    settled.add(task.id);
+    say(task, alreadyMerged ? 'already-merged' : 'merged', `Lane ${laneName}: PR #${pr.number}; ticket -> ${dest.status}${moved ? '' : ' (MOVE FAILED, see below)'} (${dest.why})`);
+    if (!alreadyMerged) {
+      const news = await tellMainMoved({ mergedNumber: pr.number, list, dryRun: false, tasks });
+      for (const l of news.lines) console.log(`  main-moved\t${l}`);
+      unchecked.push(...news.problems.map((p) => `main-moved after PR #${pr.number}: ${p}`));
+      say(task, 'main-moved', `${news.told} in-flight ticket(s) told that PR #${pr.number} moved main`);
+    }
+    // postNote, moveMergedTicket and tellMainMoved report into `unchecked` themselves.
+    return { ok: moved, dest, problems: [] };
+  };
+
   const lanes = Array.isArray(project.autoMergeLanes) ? project.autoMergeLanes : [];
   if (lanes.length) {
     const candidates = ready
@@ -1904,7 +1981,7 @@ if (cmd === 'whoami') {
         dryRun,
         clock: clockAt,
         tag: machineSenderTag('relay'),
-        io: laneIo(repo),
+        io: { ...laneIo(repo), merge: laneMerge, recordMerge: recordLaneMerge },
         log: (line) => console.error(line),
       });
     } catch (err) {
