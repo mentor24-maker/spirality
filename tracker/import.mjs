@@ -280,12 +280,13 @@ async function readComments(tracker, id) {
 
 /** Every reply to one comment, oldest first. */
 async function readReplies(tracker, commentId) {
-  const out = await tracker.listReplies(commentId);
-  const list = out?.json?.comments ?? out?.json?.replies;
-  if (!out?.res?.ok || !Array.isArray(list)) {
-    throw new ImportReadError(`reading the replies to comment ${commentId} failed: ${httpWhy(out)}`);
+  // Every page of them: ClickUp pages replies 25 at a time, as it pages comments.
+  const { paged, bad } = await tracker.listAllReplies(commentId, { maxPages: ARCHIVE_MAX_PAGES });
+  if (!paged?.complete) {
+    const why = bad ? httpWhy(bad) : (paged?.capped ? 'it ran past the page limit' : 'the read did not finish');
+    throw new ImportReadError(`reading the replies to comment ${commentId} failed: ${why}`);
   }
-  return list.slice().sort(byDateThenId('date'));
+  return paged.comments.slice().sort(byDateThenId('date'));
 }
 
 function writeTicket(store, { task, full, project, authorOf, machine }) {

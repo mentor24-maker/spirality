@@ -69,10 +69,10 @@ function fakeTracker({ tasks, bodies = {}, comments = {}, replies = {}, fail = {
       const list = (comments[id] || []).slice().sort((a, b) => Number(b.date) - Number(a.date));
       return { paged: { complete: true, comments: list }, bad: null };
     },
-    async listReplies(id) {
-      calls.push(['listReplies', id]);
-      if (fail.listReplies === id) return failed(500);
-      return ok({ comments: replies[id] || [] });
+    async listAllReplies(id, opts) {
+      calls.push(['listAllReplies', id, opts]);
+      if (fail.listReplies === id) return { paged: { complete: false, comments: [] }, bad: failed(500) };
+      return { paged: { complete: true, comments: replies[id] || [] }, bad: null };
     },
   };
   for (const w of ['createTask', 'updateTask', 'setTag', 'postComment', 'replyToComment']) {
@@ -141,13 +141,14 @@ test('an open and a closed ticket are copied with their times, bodies, statuses 
   } finally { cleanup(); }
 });
 
-test('comments are read with the archive page limit, so a trail over 1,000 comments is taken whole (SP-235)', async () => {
+test('comments and replies are read with the archive page limit, so a long trail is taken whole (SP-235, SP-242)', async () => {
   const { store, cleanup } = freshStore();
   try {
     const tracker = fakeTracker(queue());
     await importLoopQueue({ tracker, store, config: CONFIG });
-    const reads = tracker.calls.filter((c) => c[0] === 'listComments');
-    assert.ok(reads.length > 0);
+    const reads = tracker.calls.filter((c) => c[0] === 'listComments' || c[0] === 'listAllReplies');
+    assert.ok(reads.some((c) => c[0] === 'listComments'));
+    assert.ok(reads.some((c) => c[0] === 'listAllReplies'), 'replies are paged too (SP-242)');
     for (const c of reads) assert.deepEqual(c[2], { maxPages: ARCHIVE_MAX_PAGES });
   } finally { cleanup(); }
 });

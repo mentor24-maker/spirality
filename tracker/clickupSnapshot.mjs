@@ -150,12 +150,13 @@ async function readThread(tracker, taskId) {
     let replies = [];
     // Unknown means ask: a missing reply_count is not proof of none.
     if (c.reply_count == null || Number(c.reply_count) > 0) {
-      const out = await tracker.listReplies(c.id);
-      const list = out?.json?.comments ?? out?.json?.replies;
-      if (!out?.res?.ok || !Array.isArray(list)) {
-        throw new SnapshotError(`reading the replies to comment ${c.id} on ticket ${taskId} failed: ${httpWhy(out)}`);
+      // Every page of them: ClickUp pages replies 25 at a time (SP-242).
+      const { paged: pagedReplies, bad: badReply } = await tracker.listAllReplies(c.id, { maxPages: ARCHIVE_MAX_PAGES });
+      if (!pagedReplies?.complete) {
+        const why = badReply ? httpWhy(badReply) : (pagedReplies?.capped ? 'it ran past the page limit' : 'the read did not finish');
+        throw new SnapshotError(`reading the replies to comment ${c.id} on ticket ${taskId} failed: ${why}`);
       }
-      replies = list.slice().sort(byDateThenId);
+      replies = pagedReplies.comments.slice().sort(byDateThenId);
     }
     thread.push({ ...c, replies });
   }
