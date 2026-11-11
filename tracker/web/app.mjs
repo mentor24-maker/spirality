@@ -26,7 +26,7 @@
  * an emailed link's own page. The link's token is sent only in a JSON body,
  * never in an address.
  */
-import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, unwrapDoc, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, lookupTicket, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, pipelinePodLabel, renderCommandList, renderCommandView, renderContextDocs, renderSortHeadings, sortTickets, nextSort } from './render.mjs';
+import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, unwrapDoc, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, lookupTicket, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, pipelinePodLabel, renderCommandList, renderCommandView, renderContextDocs, renderSortHeadings, sortTickets, nextSort, renderDocumentation, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine } from './render.mjs';
 
 /** Where an earlier version of the page kept a pasted token; removed on load, never read. */
 const OLD_TOKEN_KEY = 'tracker-token';
@@ -2254,9 +2254,7 @@ async function drawUsers(done = '', problem = '') {
 }
 
 /**
- * The Docs page (SP-171): Spirality's own documentation first (SP-175),
- * every Markdown file in the repository's docs/ folder by title, each
- * opening at /docs/spirality/<path>; then the selected project's Context
+ * The Docs page (SP-171): the selected project's Context
  * Documents (SP-176, files kept on the project itself, uploaded, downloaded
  * and removed here); then every file on its tasks in one Task Files table,
  * newest first. The project is the one picked on the Projects page (shown
@@ -2270,6 +2268,9 @@ async function drawUsers(done = '', problem = '') {
  * `section` says whose it is: 'docs' (Context Documents) or 'files' (Task
  * Files), so it shows in that section only. Then the Commands section
  * (SP-179): every slash command, searchable, each opening its own page.
+ * Last, folded away, Reference Docs and Work Log (SP-175, SP-195): every
+ * Markdown file in the repository's docs/ folder, each opening at
+ * /docs/spirality/<path>, sortable and filtered on the page.
  */
 async function drawDocs(done = '', problem = '', section = 'files') {
   // The documentation call is caught on its own: a tracker not yet restarted onto it answers 404, and Task Files still draws.
@@ -2280,20 +2281,11 @@ async function drawDocs(done = '', problem = '', section = 'files') {
     api('GET', '/commands').then((r) => r.commands, () => null),
   ]);
   setTitle('Docs · Tracker');
-  const docRow = (d) => `<tr data-doc="${escapeHtml(d.path)}">
-      <td class="title"><a href="${docAddress(d.path)}">${escapeHtml(d.title)}</a></td>
-      <td class="path"><code>docs/${escapeHtml(d.path)}</code></td></tr>`;
-  const documentation = `
-    <h2>Spirality Documentation</h2>
-    ${!files
-    ? '<p class="quiet">Spirality\'s documentation could not be read.</p>'
-    : files.length
-    ? `<table class="projects spirality-docs"><thead><tr><th>Title</th><th>Path</th></tr></thead>
-      <tbody>${files.map(docRow).join('')}</tbody></table>`
-    : '<p class="quiet">The docs folder holds no Markdown files.</p>'}`;
+  const documentation = renderDocumentation(files, docAddress);
   if (!projects.length) {
-    main.innerHTML = `<h1>Docs</h1>${documentation}<h2>Task Files</h2><p class="quiet">There are no projects yet.</p>${commandsSection()}`;
+    main.innerHTML = `<h1>Docs</h1><h2>Task Files</h2><p class="quiet">There are no projects yet.</p>${commandsSection()}${documentation}`;
     showCommands(commands);
+    wireDocumentation(files);
     putTrail([{ label: 'Docs' }]);
     return;
   }
@@ -2321,7 +2313,6 @@ async function drawDocs(done = '', problem = '', section = 'files') {
   };
   main.innerHTML = `
     <h1>Docs</h1>
-    ${documentation}
     ${renderContextDocs({ project, docs }, { size: sizeOf, timeOf: when })}
     <h2>Task Files</h2>
     <p class="quiet">Files kept on the tasks of ${escapeHtml(project.name)}. Pick another project on the <a href="/projects">Projects</a> page.</p>
@@ -2336,7 +2327,8 @@ async function drawDocs(done = '', problem = '', section = 'files') {
     ? `<table class="projects task-files"><thead><tr><th>File</th><th>Task</th><th>Type</th><th>Size</th><th>Added By</th><th>Added On</th><th><span class="hidden">Actions</span></th></tr></thead>
       <tbody>${attachments.map(row).join('')}</tbody></table>`
     : `<p class="quiet">No task in ${escapeHtml(project.name)} has a file yet.</p>`}
-    ${commandsSection()}`;
+    ${commandsSection()}
+    ${documentation}`;
   const note = main.querySelector('.file-note');
   const busy = (text) => { note.className = 'note file-note quiet'; note.textContent = text; };
   const refused = (control, text) => { note.className = 'note file-note error'; note.textContent = text; if (control) control.disabled = false; };
@@ -2405,6 +2397,7 @@ async function drawDocs(done = '', problem = '', section = 'files') {
   }
   wireContextDocs(project, docsPath, section === 'docs' ? done : '', section === 'docs' ? problem : '');
   showCommands(commands);
+  wireDocumentation(files);
   putTrail([{ label: 'Docs' }]);
 }
 
@@ -2433,6 +2426,40 @@ function showCommands(commands) {
   const show = () => { list.innerHTML = renderCommandList(commands, box.value); };
   box.addEventListener('input', show);
   show();
+}
+
+/**
+ * The Reference Docs and Work Log section's controls (SP-195): the Kind
+ * drop-down and the search box narrow the rows together as they change, and
+ * a click on Title, Kind or Date sorts by it, the other way on a second
+ * click. Only the table body and the count line are drawn again; nothing is
+ * read again, and no choice is kept between visits. null (the list could
+ * not be read) or an empty list has no controls.
+ */
+function wireDocumentation(files) {
+  const table = main.querySelector('table.spirality-docs');
+  if (!files?.length || !table) return;
+  const rows = docRows(files);
+  const kind = main.querySelector('#doc-kind');
+  const search = main.querySelector('#doc-search');
+  const count = main.querySelector('.doc-count');
+  let sort = null;
+  const show = () => {
+    const shown = sortDocs(filterDocs(rows, { kind: kind.value, text: search.value }), sort);
+    table.tBodies[0].innerHTML = renderDocBody(shown, docAddress);
+    table.hidden = !shown.length;
+    count.textContent = docCountLine(shown.length, rows.length);
+  };
+  kind.addEventListener('change', show);
+  search.addEventListener('input', show);
+  table.tHead.addEventListener('click', (e) => {
+    const button = e.target.closest('button[data-sort]');
+    if (!button) return;
+    sort = nextSort(sort, button.dataset.sort);
+    table.tHead.innerHTML = renderDocHeadings(sort);
+    show();
+    table.tHead.querySelector(`button[data-sort="${sort.column}"]`).focus();
+  });
 }
 
 /** The command a `/docs/commands/<name>` address opens, or null. */

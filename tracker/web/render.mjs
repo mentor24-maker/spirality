@@ -1595,3 +1595,123 @@ export function renderContextDocs({ project, docs = [] }, { size, timeOf }) {
     : `<p class="quiet">${escapeHtml(project.name)} has no context documents yet.</p>`}
   </section>`;
 }
+
+/**
+ * SP-195: the Docs page's Reference Docs and Work Log section. Every file
+ * there is one of the repository's docs/ Markdown files; its kind comes
+ * from its folder and its date from the `YYYY-MM-DD` a file name starts
+ * with (every work-log entry has one). Worked out here from the path, so
+ * the server's /documentation answer stays as it is.
+ */
+export const DOC_KINDS = ['Reference', 'Onboarding', 'Work Log'];
+const DOC_FOLDERS = { onboarding: 'Onboarding', 'work-log': 'Work Log' };
+
+/** A docs/ file's kind and date from its path (relative to docs/): `{ kind, date }`, date 'YYYY-MM-DD' or null. */
+export function docInfo(path) {
+  const parts = String(path ?? '').split('/');
+  const name = parts[parts.length - 1];
+  const folder = parts.length > 1 ? parts[0] : '';
+  const kind = !folder ? 'Reference' : DOC_FOLDERS[folder] ?? folder;
+  const m = /^(\d{4})-(\d{2})-(\d{2})(?!\d)/.exec(name);
+  const ok = m && !Number.isNaN(Date.parse(`${m[1]}-${m[2]}-${m[3]}T00:00:00Z`)) && Number(m[2]) >= 1 && Number(m[2]) <= 12;
+  return { kind, date: ok ? `${m[1]}-${m[2]}-${m[3]}` : null };
+}
+
+/** A 'YYYY-MM-DD' in words, the way the page writes a day: "Nov 10, 2026". Read as a calendar day, never moved by time zone. */
+export function docDay(date) {
+  if (!date) return '';
+  return new Date(`${date}T00:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+}
+
+const kindRank = (kind) => {
+  const i = DOC_KINDS.indexOf(kind);
+  return i === -1 ? DOC_KINDS.length : i;
+};
+const DOC_COMPARE = {
+  title: (a, b) => byText(String(a.title ?? ''), String(b.title ?? '')),
+  kind: (a, b) => kindRank(a.kind) - kindRank(b.kind) || byText(a.kind, b.kind),
+  date: (a, b) => lastIfMissing(byText)(a.date, b.date),
+};
+/** The order the section opens in: Reference, then Onboarding, then Work Log newest first, then any other folder; title within a kind. */
+const docStart = (a, b) => DOC_COMPARE.kind(a, b)
+  || (a.kind === 'Work Log' ? lastIfMissing(byText)(b.date, a.date) : 0)
+  || DOC_COMPARE.title(a, b) || byText(a.path, b.path);
+
+/** The /documentation files as the section's rows: `{ path, title, kind, date }`, in the order it opens in. Never changes `files`. */
+export function docRows(files = []) {
+  return files.map((f) => ({ path: f.path, title: f.title, ...docInfo(f.path) })).sort(docStart);
+}
+
+/**
+ * `rows` sorted by Title, Kind or Date (`sort.column` 'title', 'kind' or
+ * 'date'), ascending or descending; a file with no date goes last going up.
+ * Ties keep the opening order. No sort gives the rows back as they came.
+ */
+export function sortDocs(rows, sort) {
+  const compare = sort && DOC_COMPARE[sort.column];
+  if (!compare) return rows.slice();
+  const flip = sort.direction === 'descending' ? -1 : 1;
+  return rows.map((r, i) => [r, i]).sort(([a, i], [b, j]) => flip * compare(a, b) || i - j).map(([r]) => r);
+}
+
+/**
+ * The rows of `kind` ('' for all) whose title or path holds `text`, any
+ * case. The path is read below docs/, the part that differs, so typing
+ * "docs" finds the files about docs, not every file.
+ */
+export function filterDocs(rows, { kind = '', text = '' } = {}) {
+  const needle = String(text).trim().toLowerCase();
+  return rows.filter((r) => (!kind || r.kind === kind)
+    && (!needle || String(r.title ?? '').toLowerCase().includes(needle) || String(r.path ?? '').toLowerCase().includes(needle)));
+}
+
+const DOC_COLUMNS = [{ key: 'title', label: 'Title' }, { key: 'kind', label: 'Kind' }, { key: 'date', label: 'Date' }];
+
+/** The section's heading row: Title, Kind and Date each a button that sorts, the sorted one with `aria-sort` and an arrow; Path plain. */
+export function renderDocHeadings(sort) {
+  const heading = ({ key, label }) => {
+    const on = sort?.column === key && (sort.direction === 'ascending' || sort.direction === 'descending');
+    const arrow = on ? ` <span class="arrow" aria-hidden="true">${sort.direction === 'ascending' ? '▲' : '▼'}</span>` : '';
+    return `<th class="${key}"${on ? ` aria-sort="${sort.direction}"` : ''}><button type="button" class="sort" data-sort="${key}">${escapeHtml(label)}${arrow}</button></th>`;
+  };
+  return `<tr>${DOC_COLUMNS.map(heading).join('')}<th class="path">Path</th></tr>`;
+}
+
+/** The table body for `rows`, each title opening its file page at `address(path)`; every word escaped. */
+export function renderDocBody(rows, address) {
+  return rows.map((d) => `<tr data-doc="${escapeHtml(d.path)}">
+      <td class="title"><a href="${escapeHtml(address(d.path))}">${escapeHtml(d.title)}</a></td>
+      <td class="kind">${escapeHtml(d.kind)}</td>
+      <td class="date">${escapeHtml(docDay(d.date))}</td>
+      <td class="path"><code>docs/${escapeHtml(d.path)}</code></td></tr>`).join('');
+}
+
+/** The count line: "Showing 12 of 134", or that none match. */
+export function docCountLine(shown, total) {
+  return shown ? `Showing ${shown} of ${total}` : 'No document matches.';
+}
+
+/**
+ * The whole section, folded (closed) when the page opens: its heading with
+ * the count, a Kind drop-down and a search box, the count line and the
+ * table. `files` is the /documentation list, or null when it could not be
+ * read; `address` is a file's page address.
+ */
+export function renderDocumentation(files, address) {
+  const heading = (n) => `<summary><h2>Reference Docs and Work Log${n == null ? '' : ` (${n})`}</h2></summary>`;
+  if (!files) return `<details class="spirality-docs">${heading(null)}<p class="quiet">The reference docs and work log could not be read.</p></details>`;
+  if (!files.length) return `<details class="spirality-docs">${heading(0)}<p class="quiet">The docs folder holds no Markdown files, so there are no reference docs or work log entries.</p></details>`;
+  const rows = docRows(files);
+  const kinds = [...DOC_KINDS, ...[...new Set(rows.map((r) => r.kind))].filter((k) => !DOC_KINDS.includes(k)).sort(byText)];
+  return `<details class="spirality-docs">${heading(rows.length)}
+    <p class="quiet">The repository's docs folder: the reference documents, the onboarding guides and the work log, one plain-English entry per merged pull request.</p>
+    <div class="row doc-filters">
+      <label for="doc-kind">Kind</label>
+      <select id="doc-kind"><option value="">All</option>${kinds.map((k) => `<option value="${escapeHtml(k)}">${escapeHtml(k)}</option>`).join('')}</select>
+      <input type="search" id="doc-search" aria-label="Find a document by title or path" placeholder="Find by title or path" autocomplete="off">
+    </div>
+    <p class="quiet doc-count" role="status">${docCountLine(rows.length, rows.length)}</p>
+    <table class="projects spirality-docs sortable"><thead>${renderDocHeadings(null)}</thead>
+      <tbody>${renderDocBody(rows, address)}</tbody></table>
+  </details>`;
+}
