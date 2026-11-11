@@ -233,7 +233,7 @@ test('once his answer is in, Close and Go stand down too, and the ticket page, b
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   assert.match(app, /\$\{renderAnswerIn\(t\)\}/, 'the ticket page draws the line');
   assert.match(app, /statusLabel\(t\)/, 'the ticket page writes the status with the note');
-  assert.equal(app.match(/t\.answerIn \? /g)?.length, 2, 'the board card and the list row both draw the note');
+  assert.equal(app.match(/t\.answerIn \? /g)?.length, 1, 'the board card draws the note; the list row draws a check instead (SP-201)');
 });
 
 test('with his answer in, the ticket page draws no reply box and copes with it missing, and the notice is boxed (SP-160)', () => {
@@ -252,6 +252,69 @@ test('with his answer in, the ticket page draws no reply box and copes with it m
   for (const rule of [/font-style: normal/, /color: var\(--ink\)/, /background: #/, /border-left: \d+px solid var\(--blue\)/, /padding: /]) assert.match(notice, rule);
   assert.match(css, /\n\.answer-in \{ font-size: 0\.85rem; font-style: italic; color: var\(--quiet\); \}/);
   assert.equal(renderAnswerIn({ answerIn: true }), '<p class="answer-in">Your answer is in. The relay acts on it at its next pass.</p>');
+});
+
+// ── The list's status icons (SP-201) ─────────────────────────────────────────
+
+test('the board\'s `waiting` flag is exactly the Waiting on You list, for whoever is signed in (SP-201)', async () => {
+  const f = await fixture();
+  try {
+    const listed = async (token) => new Set((await f.call('GET', '/waiting', { token })).body.waiting.map((t) => t.id));
+    const flagged = async (token) => {
+      const ids = new Set();
+      for (const slug of ['alpha', 'beta']) {
+        const board = (await f.call('GET', `/projects/${slug}/board`, { token })).body;
+        for (const t of board.columns.flatMap((c) => c.tickets)) {
+          assert.equal(typeof t.waiting, 'boolean', t.id);
+          assert.ok(!(t.waiting && t.answerIn), `${t.id}: a clock and a check together`);
+          if (t.waiting) ids.add(t.id);
+        }
+      }
+      return ids;
+    };
+    const dane = await listed(f.token);
+    assert.ok(dane.size >= 1, 'the demo data holds a ticket waiting on Dane');
+    assert.deepEqual([...await flagged(f.token)].sort(), [...dane].sort());
+
+    // Someone else signed in: their own Waiting on You, never Dane's.
+    const other = f.store.createActor({ kind: 'human', name: 'Someone Else' });
+    for (const project of ['alpha', 'beta']) f.store.addMember({ project, actor: other.id, by: f.operator.id });
+    const otherToken = f.store.issueToken(other.id);
+    const theirs = await listed(otherToken);
+    assert.deepEqual([...await flagged(otherToken)].sort(), [...theirs].sort());
+    for (const id of dane) assert.ok(!theirs.has(id), `${id} waits on Dane, not on them`);
+
+    // His reply takes the clock away: the ticket's answer is in instead.
+    const [id] = dane;
+    assert.equal((await f.call('POST', `/tickets/${id}/comments`, { body: { body: 'looks good' } })).status, 201);
+    const after = new Map((await Promise.all(['alpha', 'beta'].map((s) => boardTickets(f, s)))).flatMap((m) => [...m]));
+    assert.equal(after.get(id).waiting, false);
+    assert.equal(after.get(id).answerIn, true);
+  } finally { await f.cleanup(); }
+});
+
+test('the list row starts its Actions cell with a check, a clock or an empty slot, drawn as line icons with the colour in the stylesheet (SP-201)', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const icon = /\nfunction statusIcon\(t\) \{[\s\S]*?\n\}\n/.exec(app)?.[0] ?? '';
+  assert.ok(icon, 'statusIcon found');
+  assert.match(icon, /if \(t\.answerIn\)[\s\S]*title="Your Answer Is In" aria-label="Your Answer Is In"[\s\S]*ICONS\.answerIn/);
+  assert.match(icon, /if \(t\.waiting\) return action\(`\$\{at\}#reply`, 'Waiting on Your Response', ICONS\.waiting\);/);
+  assert.match(icon, /<span class="action status-icon empty" aria-hidden="true"><\/span>/);
+  assert.doesNotMatch(icon, /style=/, 'no inline style');
+  const actions = /const actions = \(t, status\) => \{[\s\S]*?\n {2}\};/.exec(app)?.[0] ?? '';
+  assert.match(actions, /return \[\s*statusIcon\(t\),\s*action\(at, 'Open Ticket'/, 'the status icon comes first');
+  for (const key of ['answerIn', 'waiting']) assert.match(app, new RegExp(`\\n  ${key}: '<(path|circle) `), `ICONS.${key} is a line drawing`);
+  // The card keeps its words; the ticket page keeps its notice.
+  assert.match(app, /\$\{t\.answerIn \? `<span class="answer-in">\$\{escapeHtml\(ANSWER_IN_NOTE\)\}<\/span>` : ''\}/);
+  const css = readFileSync(WEB('app.css'), 'utf8');
+  const green = /\nspan\.action\.answer-in-icon \{ color: (#[0-9a-fA-F]{6}); \}/.exec(css)?.[1];
+  assert.ok(green, 'the check has its own colour');
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(green.slice(i, i + 2), 16));
+  assert.ok(g > r * 1.5 && g > b * 1.5, `${green} is a green`);
+  assert.match(css, /\nspan\.action\.status-icon\.empty \{ width: 18px; height: 18px; \}/, 'the empty slot is an icon wide');
+  const box = (sel) => new RegExp(`\\n${sel} \\{ display: inline-flex; padding: 0\\.2rem; margin-right: 0\\.15rem;`);
+  assert.match(css, box('a\\.action, button\\.action'));
+  assert.match(css, box('span\\.action\\.status-icon'), 'the status slot has the same padding and gap as the icons after it');
 });
 
 // ── The board ────────────────────────────────────────────────────────────────
@@ -3502,7 +3565,7 @@ test.describe('Files Made: the files a ticket made, from its newest merge note',
     assert.match(row, /<tr data-id="[^\n]*">\s*<td class="id"><a href="\/t\/\$\{encodeURIComponent\(t\.id\)\}">\$\{escapeHtml\(t\.id\)\}<\/a><\/td>\s*<td class="name">/);
     const nameCell = /<td class="name">.*<\/td>/.exec(row)[0];
     assert.doesNotMatch(nameCell, /escapeHtml\(t\.id\)/, 'the name cell shows only the name');
-    assert.match(nameCell, /ANSWER_IN_NOTE/, 'the answer-in note stays in the name cell');
+    assert.doesNotMatch(nameCell, /ANSWER_IN_NOTE|answer-in/, 'the answer-in words are gone from the name cell (SP-201)');
     assert.equal((row.match(/<td class="/g) || []).length, SORT_COLUMNS.length + 1, 'one cell per heading, plus Actions');
     const css = readFileSync(WEB('app.css'), 'utf8');
     assert.match(css, /\.group table\.sortable th \{ color: #000; font-weight: 700; \}/);

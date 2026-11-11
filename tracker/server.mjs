@@ -897,7 +897,7 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     // Dane's page: one project's board, the eight statuses in the contract's
     // order, each column in `queue` order.
     if (parts.length === 3 && parts[0] === 'projects' && parts[2] === 'board' && method === 'GET') {
-      const board = boardOf(store, requireProject(parts[1], me).slug);
+      const board = boardOf(store, requireProject(parts[1], me).slug, { viewerId: me.id });
       return [200, board];
     }
 
