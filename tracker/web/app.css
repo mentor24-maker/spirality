@@ -5,6 +5,7 @@ header { display: flex; gap: 2rem; align-items: center; padding: 0 2rem; height:
 header .brand { display: flex; }
 header .brand img { height: 2.25rem; width: auto; }
 header nav.site { display: flex; gap: 1.5rem; align-self: stretch; }
+header nav.site[hidden] { display: none; }
 header nav.site a { display: flex; align-items: center; color: #b8b8be; font-weight: 600; text-decoration: none; border-bottom: 2px solid transparent; }
 header nav.site a:hover { color: #fff; }
 header nav.site a.current { color: #fff; border-bottom-color: var(--blue); }
