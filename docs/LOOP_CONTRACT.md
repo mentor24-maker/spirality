@@ -704,37 +704,51 @@ capped per hour and per day, turns itself off on trouble, and can be stopped
 with a switch phrase on any ticket or the bus. Spirality and WaveCenter have
 no lanes.
 
-**Spirality's relay runs the lanes as a rehearsal (SP-202).** `npm run
-clickup -- relay` reads the project config's `autoMergeLanes`; with `[]` it
-reads and writes nothing more than before. With lanes listed it runs
+**Spirality's relay runs the lanes (SP-202, SP-203).** `npm run clickup --
+relay` reads the project config's `autoMergeLanes`; with `[]` it reads and
+writes nothing more than before. With lanes listed it runs
 `lib/relayAutoMerge.js` after the merge-phrase and hand-back steps, on every
 `Ready to launch` ticket that pass did not merge or close:
 
-- It announces an eligible ticket (the notice says, inside it, that the lane
-  does not merge on its own yet), and the hour runs from the tracker's own
+- It announces an eligible ticket, and the hour runs from the tracker's own
   time for that comment.
 - An unstamped comment from Dane in the hour cancels it; a comment with the
   machine stamp does not.
-- At the end of the hour it reads the PR from GitHub. Checks still running:
-  it waits and says nothing. Red, conflicting or closed: it cancels, as a
-  real merge would. Otherwise it posts **one** "would merge" comment
-  (`[auto-merge-rehearsal]` marker, said once per announcement) and nothing
-  else: no merge, no status change. The ticket waits on his merge phrase as
-  before. That note ends the announcement: a comment of his after it, or
-  the announcement growing a day old, posts no cancel card.
+- At the end of the hour it reads the PR from GitHub and asks the same gate
+  a merge phrase does (`githubGate`): a PASS verdict on file and no newer
+  send-back, an open PR, green checks, current with main, no conflict.
+  Checks still running: it waits and says nothing. Red, conflicting, closed
+  or a draft: it cancels, and the ticket waits on his merge phrase as
+  before. Behind main: it catches the branch up through GitHub and a later
+  pass merges it once the checks re-run green.
+- Anything that moves main (the catch-up or the merge) first takes the
+  **merge window** (`lib/mergeWindowLease.js`, kept in
+  `merge-window-lease.json` in the repository's git folder): one PR at a
+  time per repository, so two lane merges cannot reset each other's checks.
+  Another PR in the window means wait; an unreadable window means no merge.
+  The window is freed when its PR merges, closes, is refused or is
+  cancelled, and after 45 minutes at most.
+- The merge is the phrase merge's own steps in the door: the project's
+  pre-merge step if it has one, `gh pr merge --squash` pinned to the commit,
+  and only a PR GitHub reads back as `MERGED` counts. Then one merge note on
+  the ticket, the move to `Live` (or `Queued` for a `Next slice:` line), read
+  back, the `MAIN MOVED:` notes, and one line on the bus.
+- **A merge that ran and cannot be confirmed turns every lane off** there
+  and then, says so on the bus, and stays off until "resume auto-merging".
 - The stop and resume phrases are read from the bus (`busProject`) and from
   every ticket the relay read that pass (`Ready to launch` and `Needs your
   input`); a stop is kept in the ledger. An unreadable bus or ledger, or a
   project with no bus, counts as stopped.
-- The caps count each "would merge" as a merge, so they hold now exactly as
-  they will. The ledger is `auto-merge-ledger.json` in the repository's git
-  folder, never committed. The digest posts to the bus once a day, listing
-  rehearsals apart from real merges. An unverified pass disables the lanes
-  and says so on the bus.
+- The ledger (`auto-merge-ledger.json` in the repository's git folder,
+  never committed) records each merge the moment it lands, for the hourly
+  and daily caps and the daily digest on the bus. An unverified pass or a red
+  main after a lane merge disables the lanes and says so on the bus.
 - A config with lanes but no `governancePaths` list runs no lane.
+- An announcement posted while the lane only rehearsed (SP-202) said nothing
+  would merge, so it still ends in one "would merge" note
+  (`[auto-merge-rehearsal]`), never a merge.
 
-SP-203 makes the end of the hour a real merge; until it is Live StarCaster
-stays on its own relay (SP-25).
+StarCaster stays on its own relay until SP-25 switches it over.
 
 ## "Is this waiting on Dane?" — the three verdicts
 

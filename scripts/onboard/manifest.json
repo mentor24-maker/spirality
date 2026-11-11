@@ -102,6 +102,14 @@
       "to": "loop/lib/refusalClass.js"
     },
     {
+      "from": "lib/mergeWindowLease.js",
+      "to": "loop/lib/mergeWindowLease.js"
+    },
+    {
+      "from": "lib/mergeWindowLeaseFile.js",
+      "to": "loop/lib/mergeWindowLeaseFile.js"
+    },
+    {
       "from": "lib/relayAutoMerge.js",
       "to": "loop/lib/relayAutoMerge.js"
     },
