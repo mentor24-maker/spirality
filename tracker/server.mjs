@@ -75,7 +75,7 @@ import { promisify } from 'node:util';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { MAX_ATTACHMENT, openStore, StoreError } from './store.mjs';
 import { SOURCE as IMPORT_SOURCE } from './import.mjs';
-import { boardOf, PRIORITIES, projectDetailsOf, projectsList, readSearchFilters, reportsOf, searchTickets, stageColoursOf, threadOf, waitingFor, busUnseen } from './pageData.mjs';
+import { boardOf, lookupTickets, PRIORITIES, projectDetailsOf, projectsList, readSearchFilters, reportsOf, searchTickets, stageColoursOf, threadOf, waitingFor, busUnseen } from './pageData.mjs';
 import { createNotifier, DEFAULT_FROM, MAIL_FROM, MAIL_KEY, mailEnvFromDoppler, mailSettingsFromEnv, resendSender, textSettings } from './notify.mjs';
 import { sendInvite, sendResetLink } from './account.mjs';
 import { guessProject } from './projectGuess.mjs';
@@ -805,12 +805,16 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     // `assignee`); a value that is none of the choices is refused, never an
     // empty list. `project` offers only the projects the reader may see, so
     // one they may not is refused the same as one that does not exist.
+    // `tickets` are the ones the page's "Ticket number" field offers:
+    // every ticket of the chosen project, or of every project the
+    // reader may see, closed ones too, with or without a search word.
     // Read-only.
     if (parts.length === 1 && parts[0] === 'search' && method === 'GET') {
       const only = scopeOf(me);
       const { filters, problem } = readSearchFilters(store, (key) => url.searchParams.get(key), { only });
       if (problem) throw new HttpError(400, 'unknown-filter', problem);
-      return [200, searchTickets(store, url.searchParams.get('q'), filters, { only })];
+      const project = filters.find((f) => f.key === 'project')?.value ?? null;
+      return [200, { ...searchTickets(store, url.searchParams.get('q'), filters, { only }), tickets: lookupTickets(store, project, { only }) }];
     }
 
     // Dane's page: one project's details page. A person also sees its alert

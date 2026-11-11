@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { seedDemo, tickingClock } from './demoData.mjs';
 import { reportsOf, REPORT_RANGES, searchTickets, PRIORITIES } from './pageData.mjs';
-import { escapeHtml, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, commandHref, renderContextDocs, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings } from './web/render.mjs';
+import { escapeHtml, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, commandHref, renderContextDocs, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS } from './web/render.mjs';
 import { startServer, setupSettingsOf } from './server.mjs';
 import { saveAnswers, setupFields, setupOf } from './setup.mjs';
 import { DANE_FIELDS as SETUP_FIELDS, STEPS as SETUP_STEPS } from '../scripts/onboard/onboard.mjs';
@@ -2413,7 +2413,7 @@ test('the Docs page uploads one context document as the file itself, asks before
   const draw = app.slice(app.indexOf('async function drawDocs'), app.indexOf('/** Underline the header link'));
   assert.match(draw, /const docsPath = `\/projects\/\$\{encodeURIComponent\(project\.slug\)\}\/docs`;/);
   assert.match(draw, /api\('GET', docsPath\)/);
-  assert.ok(draw.indexOf('${documentation}\n    ${renderContextDocs({ project, docs }') > 0 && draw.indexOf('renderContextDocs({ project, docs }') < draw.lastIndexOf('<h2>Task Files</h2>'), 'Context Documents come after Spirality Documentation and before Task Files');
+  assert.ok(draw.indexOf('<h1>Docs</h1>\n    ${renderContextDocs({ project, docs }') > 0 && draw.indexOf('renderContextDocs({ project, docs }') < draw.lastIndexOf('<h2>Task Files</h2>'), 'Context Documents come first, before Task Files (SP-195 moved the docs folder\'s list to the bottom)');
   const wire = draw.slice(draw.indexOf('function wireContextDocs'));
   assert.match(wire, /picker\.files\?\.\[0\]/, 'one file at a time');
   assert.match(wire, /file\.size > MAX_FILE/, 'an 11 MB file is refused before it is sent');
@@ -2447,15 +2447,13 @@ test('the Docs page lists Spirality\'s documentation by title above Task Files, 
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   const draw = app.slice(app.indexOf('async function drawDocs'), app.indexOf('/** The page address of a documentation file'));
   assert.match(draw, /api\('GET', '\/documentation'\)/);
-  assert.ok(draw.indexOf('<h2>Spirality Documentation</h2>') < draw.indexOf('<h2>Task Files</h2>'), 'the documentation comes first');
-  for (const heading of ['Title', 'Path']) assert.match(draw, new RegExp(`<th>${heading}</th>`), heading);
-  assert.match(draw, /<a href="\$\{docAddress\(d\.path\)\}">\$\{escapeHtml\(d\.title\)\}<\/a>/, 'each file by its title, escaped, linking to its page');
+  assert.match(draw, /const documentation = renderDocumentation\(files, docAddress\);/, 'each file by its title, linking to its page (SP-195 draws the list in render.mjs)');
   assert.match(app, /const docAddress = \(path\) => `\/docs\/spirality\/\$\{String\(path\)\.split\('\/'\)\.map\(encodeURIComponent\)\.join\('\/'\)\}`/);
   assert.match(app, /\} else if \(docAny\) \{\s*await drawDoc\(docPath\);/, 'any /docs/<name>/<path> draws through drawDoc');
   assert.match(app, /const underDocs = \(\) => \/\^\\\/docs\\\/\[\^\/\]\+\\\/\.\+\$\/\.test\(location\.pathname\);/, 'the same addresses the server serves as the page');
   assert.match(app, /docsPage \|\| docAny \? 'docs' :/, 'a documentation file keeps Docs underlined in the header');
   assert.match(draw, /api\('GET', '\/documentation'\)\.then\(\(r\) => r\.files, \(\) => null\)/, 'a failed documentation call is caught on its own, so Task Files still draws');
-  assert.match(draw, /Spirality\\'s documentation could not be read\./);
+  assert.match(renderDocumentation(null, (p) => p), /The reference docs and work log could not be read\./);
   const one = app.slice(app.indexOf('async function drawDoc('), app.indexOf('/** Underline the header link'));
   assert.match(one, /renderMarkdown\(unwrapDoc\(body\)\)/, 'drawn with the ticket page\'s Markdown drawing, never as raw text');
   assert.match(one, /<a href="\/docs">Back to Docs<\/a>/);
@@ -2797,10 +2795,35 @@ test('the search filters are one picker each, "Any" first, the server\'s choices
     /<p class="quiet search-note">No tickets match widget<\/p>/);
 });
 
+test('the Ticket number field sits beside the Project filter and offers each ticket as "SP-12 · <title>", escaped', () => {
+  const project = { key: 'project', label: 'Project', value: null, options: [{ value: 'spirality', label: 'Spirality' }] };
+  const html = renderSearchFilters([project, ...FILTERS], { tickets: [{ id: 'SP-12', name: 'Fix <b>it</b> & more' }, { id: 'SP-13', name: 'Next' }] });
+  assert.ok(html.indexOf('name="project"') < html.indexOf('Ticket number') && html.indexOf('Ticket number') < html.indexOf('name="status"'), 'right after Project');
+  assert.match(html, /<form class="ticket-lookup">\s*<label>Ticket number\s*<input type="text" name="ticket" list="ticket-numbers"/);
+  assert.match(html, /<option value="SP-12">SP-12 · Fix &lt;b&gt;it&lt;\/b&gt; &amp; more<\/option><option value="SP-13">SP-13 · Next<\/option>/);
+  assert.ok(!renderSearchFilters([project, ...FILTERS]).includes('Ticket number'), 'only where the page asks for it');
+  assert.match(html, /placeholder="SP-13"/, 'an example from the tickets offered, never a typed-out prefix');
+  assert.match(renderTicketLookup([]), /<datalist id="ticket-numbers"><\/datalist>/);
+  assert.ok(!renderTicketLookup([]).includes('placeholder'));
+});
+
+test('a ticket number opens its page in any case, and one that is not offered says so in one plain line', () => {
+  const tickets = [{ id: 'SP-12', name: 'A' }, { id: 'WC-3', name: 'B' }];
+  assert.deepEqual(lookupTicket('sp-12', tickets, 'Spirality'), { href: '/t/SP-12' });
+  assert.deepEqual(lookupTicket('  SP-12 ', tickets), { href: '/t/SP-12' });
+  assert.deepEqual(lookupTicket('sp-999', tickets, 'Spirality'), { note: 'No ticket SP-999 in Spirality' });
+  assert.deepEqual(lookupTicket('zz-999', tickets), { note: 'No ticket ZZ-999 in any project' });
+  assert.equal(lookupTicket('  ', tickets), null);
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  assert.match(app, /renderSearchFilters\(answer\.filters, \{ tickets: answer\.tickets \?\? \[\] \}\)/);
+  assert.match(app, /wireTicketLookup\(/);
+  assert.match(app, /main\.querySelector\('\.search-answer'\)\.innerHTML = `<p class="quiet search-note">\$\{escapeHtml\(found\.note\)\}<\/p>`/);
+});
+
 test('the search results page draws the filters from the server\'s answer, keeps them in the address, and shows a refusal', () => {
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   const draw = app.slice(app.indexOf('function searchAddress('), app.indexOf('/**\n * Put `text` on the clipboard'));
-  assert.match(draw, /renderSearchFilters\(answer\.filters\)/);
+  assert.match(draw, /renderSearchFilters\(answer\.filters, /);
   assert.match(draw, /api\('GET', `\/search\?\$\{params\}`\)/);
   assert.match(draw, /for \(const select of main\.querySelectorAll\('\.search-filters select'\)\) select\.addEventListener\('change', go\)/);
   assert.match(draw, /<p class="error">\$\{escapeHtml\(refusal\)\}<\/p>/);
@@ -3493,4 +3516,89 @@ test('every page has one body width: main is capped at 1440px, padding included,
   assert.deepEqual(perPage.map((r) => r.sel.join(', ')), [], 'no page gives the body a width of its own');
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   assert.doesNotMatch(app, /main\.classList\.(?:add|remove|toggle)\(\s*['"]wide['"]/, 'no wide class on the page body');
+});
+
+test('Reference Docs and Work Log: each docs/ file\'s kind comes from its folder and its date from its name (SP-195)', () => {
+  assert.deepEqual(docInfo('work-log/2026-11-10-docs-page-spirality-docs.md'), { kind: 'Work Log', date: '2026-11-10' });
+  assert.deepEqual(docInfo('PLAN.md'), { kind: 'Reference', date: null });
+  assert.deepEqual(docInfo('onboarding/WIZARD.md'), { kind: 'Onboarding', date: null });
+  assert.deepEqual(docInfo('drafts/2026-01-02-idea.md'), { kind: 'drafts', date: '2026-01-02' }, 'any other folder is its own kind');
+  assert.deepEqual(docInfo('work-log/2026-13-01-x.md'), { kind: 'Work Log', date: null }, 'not a real month, no date');
+  assert.deepEqual(docInfo('work-log/20261110-x.md'), { kind: 'Work Log', date: null });
+  assert.equal(docDay('2026-11-10'), 'Nov 10, 2026', 'a calendar day, never shifted by time zone');
+  assert.equal(docDay(null), '');
+  assert.deepEqual(DOC_KINDS, ['Reference', 'Onboarding', 'Work Log']);
+});
+
+const DOCS = [
+  { path: 'work-log/2026-10-12-first.md', title: 'First entry' },
+  { path: 'PLAN.md', title: 'The plan' },
+  { path: 'work-log/2026-11-10-docs-page-spirality-docs.md', title: 'Docs page' },
+  { path: 'onboarding/WIZARD.md', title: 'WIZARD' },
+  { path: 'LOOP_CONTRACT.md', title: 'The loop contract' },
+  { path: 'work-log/2026-11-01-middle.md', title: 'Middle entry' },
+];
+
+test('Reference Docs and Work Log opens Reference, then Onboarding, then Work Log newest first; Title, Kind and Date sort both ways (SP-195)', () => {
+  const rows = docRows(DOCS);
+  assert.deepEqual(rows.map((r) => r.path), ['LOOP_CONTRACT.md', 'PLAN.md', 'onboarding/WIZARD.md',
+    'work-log/2026-11-10-docs-page-spirality-docs.md', 'work-log/2026-11-01-middle.md', 'work-log/2026-10-12-first.md']);
+  const up = sortDocs(rows, { column: 'date', direction: 'ascending' }).map((r) => r.path);
+  assert.deepEqual(up.slice(0, 3), ['work-log/2026-10-12-first.md', 'work-log/2026-11-01-middle.md', 'work-log/2026-11-10-docs-page-spirality-docs.md'], 'oldest first');
+  assert.deepEqual(up.slice(3), ['LOOP_CONTRACT.md', 'PLAN.md', 'onboarding/WIZARD.md'], 'no date goes last, in the opening order');
+  const down = sortDocs(rows, { column: 'date', direction: 'descending' }).map((r) => r.path);
+  assert.equal(down[3], 'work-log/2026-11-10-docs-page-spirality-docs.md', 'newest first after the undated ones');
+  assert.deepEqual(sortDocs(rows, { column: 'title', direction: 'ascending' }).map((r) => r.title), ['Docs page', 'First entry', 'Middle entry', 'The loop contract', 'The plan', 'WIZARD']);
+  assert.deepEqual(sortDocs(rows, { column: 'title', direction: 'descending' }).map((r) => r.title)[0], 'WIZARD');
+  assert.deepEqual(sortDocs(rows, { column: 'kind', direction: 'descending' }).map((r) => r.kind), ['Work Log', 'Work Log', 'Work Log', 'Onboarding', 'Reference', 'Reference']);
+  assert.deepEqual(sortDocs(rows, null), rows, 'no sort, the opening order');
+  assert.equal(rows.length, DOCS.length);
+  assert.equal(DOCS[0].path, 'work-log/2026-10-12-first.md', 'the list is never changed');
+});
+
+test('Reference Docs and Work Log: the Kind drop-down and the search box narrow the rows together, and the count line agrees (SP-195)', () => {
+  const rows = docRows(DOCS);
+  assert.equal(filterDocs(rows, {}).length, 6);
+  assert.deepEqual(filterDocs(rows, { kind: 'Work Log' }).map((r) => r.title), ['Docs page', 'Middle entry', 'First entry']);
+  assert.deepEqual(filterDocs(rows, { kind: 'Work Log', text: 'DOCS' }).map((r) => r.title), ['Docs page'], 'title or path, any case');
+  assert.deepEqual(filterDocs(rows, { text: 'plan.md' }).map((r) => r.path), ['PLAN.md'], 'the path');
+  assert.deepEqual(filterDocs(rows, { text: 'spirality-docs' }).map((r) => r.title), ['Docs page'], 'a path word not in the title');
+  assert.deepEqual(filterDocs(rows, { text: '  ' }).length, 6, 'blank matches all');
+  assert.deepEqual(filterDocs(rows, { kind: 'Onboarding', text: 'plan' }), []);
+  assert.equal(docCountLine(1, 6), 'Showing 1 of 6');
+  assert.equal(docCountLine(0, 6), 'No document matches.');
+});
+
+test('Reference Docs and Work Log is folded, counted, sortable by Title, Kind and Date, every word escaped (SP-195)', () => {
+  const html = renderDocumentation([...DOCS, { path: 'x/<b>.md', title: 'Bad <i>' }], (p) => `/docs/spirality/${p}`);
+  assert.match(html, /^<details class="spirality-docs"><summary><h2>Reference Docs and Work Log \(7\)<\/h2><\/summary>/, 'closed when the page opens: no open attribute');
+  assert.doesNotMatch(html, /<details[^>]*\sopen/);
+  for (const k of ['All', 'Reference', 'Onboarding', 'Work Log', 'x']) assert.match(html, new RegExp(`<option value="${k === 'All' ? '' : k}">${k}</option>`), k);
+  assert.match(html, /<input type="search" id="doc-search"/);
+  assert.match(html, /Showing 7 of 7/);
+  assert.match(html, /<th class="title"><button type="button" class="sort" data-sort="title">Title<\/button><\/th><th class="kind">.*data-sort="kind">Kind<\/button><\/th><th class="date">.*data-sort="date">Date<\/button><\/th><th class="path">Path<\/th>/);
+  assert.match(html, /<a href="\/docs\/spirality\/work-log\/2026-11-10-docs-page-spirality-docs\.md">Docs page<\/a><\/td>\s*<td class="kind">Work Log<\/td>\s*<td class="date">Nov 10, 2026<\/td>/);
+  assert.match(html, /<a href="\/docs\/spirality\/PLAN\.md">The plan<\/a><\/td>\s*<td class="kind">Reference<\/td>\s*<td class="date"><\/td>/);
+  assert.doesNotMatch(html, /<b>|<i>/, 'nothing unescaped');
+  assert.match(renderDocHeadings({ column: 'date', direction: 'descending' }), /<th class="date" aria-sort="descending"><button type="button" class="sort" data-sort="date">Date <span class="arrow" aria-hidden="true">▼<\/span>/);
+  assert.match(renderDocHeadings({ column: 'title', direction: 'ascending' }), /<th class="title" aria-sort="ascending">.*▲/);
+  assert.doesNotMatch(renderDocHeadings(null), /aria-sort/);
+  assert.match(renderDocBody([{ path: 'a b.md', title: 'T', kind: 'Reference', date: null }], (p) => `/x/${encodeURIComponent(p)}`), /href="\/x\/a%20b\.md"/);
+  assert.match(renderDocumentation(null, String), /Reference Docs and Work Log<\/h2>.*could not be read/s);
+  assert.match(renderDocumentation([], String), /Reference Docs and Work Log \(0\)<\/h2>.*no Markdown files/s);
+});
+
+test('the Docs page puts Reference Docs and Work Log last, below Commands, with or without projects, and wires its controls (SP-195)', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const draw = app.slice(app.indexOf('async function drawDocs'), app.indexOf('/** The command a `/docs/commands/<name>` address opens'));
+  assert.match(draw, /<h2>Task Files<\/h2><p class="quiet">There are no projects yet\.<\/p>\$\{commandsSection\(\)\}\$\{documentation\}`;\s*showCommands\(commands\);\s*wireDocumentation\(files\);/, 'no projects: last too');
+  assert.match(draw, /\$\{commandsSection\(\)\}\n    \$\{documentation\}`;/, 'below Commands');
+  assert.equal((draw.match(/\$\{documentation\}/g) ?? []).length, 2, 'drawn once in each case, never above');
+  assert.equal((draw.match(/wireDocumentation\(files\);/g) ?? []).length, 2);
+  const wire = draw.slice(draw.indexOf('function wireDocumentation'));
+  assert.match(wire, /kind\.addEventListener\('change', show\);/);
+  assert.match(wire, /search\.addEventListener\('input', show\);/);
+  assert.match(wire, /sortDocs\(filterDocs\(rows, \{ kind: kind\.value, text: search\.value \}\), sort\)/, 'both filters together, then the sort');
+  assert.match(wire, /sort = nextSort\(sort, button\.dataset\.sort\);/, 'a second click reverses it');
+  assert.match(wire, /count\.textContent = docCountLine\(shown\.length, rows\.length\);/, 'the count line is text, matching the rows shown');
 });

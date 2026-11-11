@@ -269,6 +269,8 @@ form.search input { width: 100%; box-sizing: border-box; font: inherit; padding:
 .search-filters { display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; margin: 0 0 0.75rem; }
 .search-filters label { display: flex; align-items: center; gap: 0.35rem; font-size: 0.9rem; }
 .search-filters select { font: inherit; padding: 0.2rem 0.4rem; border: var(--hairline); border-radius: 6px; }
+.search-filters form.ticket-lookup { margin: 0; }
+.search-filters input[name="ticket"] { font: inherit; padding: 0.2rem 0.4rem; border: var(--hairline); border-radius: 6px; }
 ol.search-results { list-style: none; padding: 0; margin: 0; max-width: 48rem; }
 ol.search-results li { padding: 0.75rem 0; border-bottom: var(--hairline); }
 ol.search-results p { margin: 0.15rem 0; }
@@ -312,3 +314,16 @@ ul.command-list li { padding: 0.6rem 0; border-bottom: var(--hairline); }
 table.doc-list td.actions a { margin-right: 0.6rem; }
 table.doc-list td button.remove-doc { font: inherit; font-size: 0.8rem; padding: 0 0.4rem; cursor: pointer; }
 section.context-docs { margin-bottom: 1.5rem; }
+/* SP-195: Reference Docs and Work Log, folded at the bottom of the Docs page, with a filter row and sortable headings. */
+details.spirality-docs { margin-top: 1.5rem; }
+details.spirality-docs > summary { cursor: pointer; }
+details.spirality-docs > summary h2 { display: inline; }
+.doc-filters { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin: 0 0 0.5rem; }
+.doc-filters select, #doc-search { font: inherit; padding: 0.35rem 0.6rem; border: var(--hairline); border-radius: 6px; }
+#doc-search { width: 100%; max-width: 24rem; box-sizing: border-box; }
+table.spirality-docs th { color: #000; font-weight: 700; }
+table.spirality-docs th button.sort { background: none; border: 0; padding: 0; margin: 0; font: inherit; color: inherit; cursor: pointer; text-align: left; }
+table.spirality-docs th button.sort:hover { text-decoration: underline; }
+table.spirality-docs th button.sort:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+table.spirality-docs th .arrow { font-size: 0.75em; }
+table.spirality-docs td.date { white-space: nowrap; }
