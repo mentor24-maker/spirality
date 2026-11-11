@@ -110,6 +110,14 @@
       "to": "loop/lib/substrateConfig.js"
     },
     {
+      "from": "lib/ticketsJson.js",
+      "to": "loop/lib/ticketsJson.js"
+    },
+    {
+      "from": "lib/ticketsJson.test.js",
+      "to": "loop/lib/ticketsJson.test.js"
+    },
+    {
       "from": "lib/trackerBus.js",
       "to": "loop/lib/trackerBus.js"
     },
