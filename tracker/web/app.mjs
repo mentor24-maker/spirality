@@ -1146,8 +1146,9 @@ function wireSortHeadings(stages) {
  * server's board (pageData.mjs boardOf): the eight statuses in the
  * contract's order, each holding its tickets in `queue` order, so the two
  * views cannot disagree about what is where. Read-only: moves stay with the
- * door and the loops. `Live` starts folded in both, its count showing,
- * because it only grows.
+ * door and the loops. Every stage folds by a click on its heading, or Enter
+ * or Space on it (SP-196); `Live` starts folded in both, its count showing,
+ * because it only grows, and every other stage starts open.
  *
  * The board is the working statuses as columns of cards, with Live under
  * them as a list section, newest change first (SP-165); the list is the same
@@ -1185,11 +1186,16 @@ async function drawProject(slug, view, { adding = false, filed = null, unchecked
   setTitle(`${board.projectName} ${view} · Tracker`);
   const at = (v, s) => `/${v}/${encodeURIComponent(s)}`;
   const toggle = ['board', 'list'].map((v) => `<a href="${at(v, board.project)}"${v === view ? ' class="current" aria-current="page"' : ''}>${v === 'board' ? 'Board' : 'List'}</a>`).join('');
-  const head = (c) => `${escapeHtml(c.status)} <span class="quiet">${c.tickets.length}</span>`;
-  /** A status's block: folded when it is Live, open otherwise. */
-  const block = (c, cls, body) => (c.status === 'Live'
-    ? `<details class="${cls}" data-stage="${escapeHtml(c.status)}"><summary><h2>${head(c)}</h2></summary>${body}</details>`
-    : `<section class="${cls}" data-stage="${escapeHtml(c.status)}"><h2>${head(c)}</h2>${body}</section>`);
+  /**
+   * A stage's heading (SP-196): its name on the left, its count right-aligned,
+   * then the fold arrow, which the stylesheet draws from the block's open
+   * state (down when open, right when folded).
+   */
+  const head = (c) => `<h2><span class="stage-name">${escapeHtml(c.status)}</span><span class="count quiet">${c.tickets.length}</span></h2><span class="fold" aria-hidden="true"></span>`;
+  /** Whether a stage starts open: every one but Live, which only grows. */
+  const startsOpen = (c) => c.status !== 'Live';
+  /** A status's block: every stage folds; its heading is the summary that folds it. */
+  const block = (c, cls, body) => `<details class="${cls}" data-stage="${escapeHtml(c.status)}"${startsOpen(c) ? ' open' : ''}><summary>${head(c)}</summary>${body}</details>`;
 
   const card = (t) => `
     <a class="card" href="/t/${encodeURIComponent(t.id)}">
@@ -2743,12 +2749,14 @@ const hold = () => redrawHold({ hidden: document.hidden, drawing: drawing > 0, w
 
 /**
  * Where he is on the page: how far down, which folding sections
- * (Details, a Live column, the Add Task box, the Change panel) are open,
+ * (Details, each Tasks stage, the Add Task box, the Change panel) are open,
  * and how each Tasks table is sorted.
  * `restore` puts them back on the page drawn again.
  */
 function keepPlace() {
-  const key = (d) => `${d.className}|${d.dataset.stage ?? ''}`;
+  // A stage is known by its name alone, so a colour added on Settings between
+  // two redraws (which changes its classes) does not lose its fold (SP-196).
+  const key = (d) => (d.dataset.stage ? `stage|${d.dataset.stage}` : d.className);
   const open = new Map([...main.querySelectorAll('details')].map((d) => [key(d), d.open]));
   const y = window.scrollY;
   // Each stage's sort (SP-174), by stage, put back on the stage's new table.

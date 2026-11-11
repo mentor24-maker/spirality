@@ -367,14 +367,52 @@ test('the Projects screen is a table whose View icon opens the details page; a n
   assert.match(app, /err\.status !== 404[\s\S]{0,200}There is no project \$\{escapeHtml\(slug\)\}\./);
 });
 
-test('the board and the list both fold Live by default, and every card and row opens its ticket page', () => {
+test('every stage on the board and the list folds, Live starts folded and the rest open, and every card and row opens its ticket page (SP-196)', () => {
   const app = readFileSync(WEB('app.mjs'), 'utf8');
-  assert.match(app, /c\.status === 'Live'\s*\?\s*`<details class="\$\{cls\}"[^>]*>/);
-  assert.match(app, /block\(c, 'column',/);
-  assert.match(app, /block\(c, 'group',/);
+  const draw = /async function drawProject\(([^)]*)\) \{([\s\S]*?)\n\}/.exec(app)[2];
+  // One block for every stage: a folding section whose summary is its heading. No stage is drawn unfoldable.
+  assert.match(draw, /const block = \(c, cls, body\) => `<details class="\$\{cls\}" data-stage="\$\{escapeHtml\(c\.status\)\}"\$\{startsOpen\(c\) \? ' open' : ''\}><summary>\$\{head\(c\)\}<\/summary>\$\{body\}<\/details>`;/);
+  assert.match(draw, /const startsOpen = \(c\) => c\.status !== 'Live';/, 'every stage but Live starts open');
+  assert.doesNotMatch(draw, /<section class="\$\{cls\}"/, 'no stage is a plain section any more');
+  assert.match(draw, /block\(c, 'column',/);
+  assert.match(draw, /block\(c, 'group',/);
   assert.match(app, /<a class="card" href="\/t\/\$\{encodeURIComponent\(t\.id\)\}">/);
   assert.match(app, /<td class="name"><a href="\/t\/\$\{encodeURIComponent\(t\.id\)\}">/);
-  assert.ok(!/<details[^>]*\bopen\b/.test(app), 'Live is never drawn open');
+  // Only a stage's block may be drawn open: no other folding section starts open.
+  assert.deepEqual(app.match(/<details[^>]*\bopen\b[^>]*>/g), ['<details class="${cls}" data-stage="${escapeHtml(c.status)}"${startsOpen(c) ? \' open\' : \'\'}>']);
+});
+
+test('a stage heading reads its name, then the count right-aligned, then one arrow that shows open or folded (SP-196)', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const draw = /async function drawProject\(([^)]*)\) \{([\s\S]*?)\n\}/.exec(app)[2];
+  assert.match(draw, /const head = \(c\) => `<h2><span class="stage-name">\$\{escapeHtml\(c\.status\)\}<\/span><span class="count quiet">\$\{c\.tickets\.length\}<\/span><\/h2><span class="fold" aria-hidden="true"><\/span>`;/,
+    'name, then count, then the arrow, in that order');
+  const css = readFileSync(WEB('app.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  const rules = css.split('}').map((r) => r.split('{')).filter((r) => r.length === 2)
+    .map(([sel, body]) => ({ sel: sel.split(',').map((x) => x.trim()), body }));
+  const ruleFor = (sel, body) => rules.some((r) => r.sel.includes(sel) && body.test(r.body));
+  for (const stage of ['.column', '.group']) {
+    assert.ok(ruleFor(`${stage} > summary`, /display: flex;/) && ruleFor(`${stage} > summary`, /list-style: none;/), `${stage}: one row, no list marker`);
+    assert.ok(ruleFor(`${stage} > summary::-webkit-details-marker`, /display: none;/), `${stage}: the browser's own arrow is hidden`);
+    assert.ok(ruleFor(`${stage} > summary h2`, /flex: 1;/), `${stage}: the heading fills the row, so the arrow sits at its right`);
+    assert.ok(ruleFor(`${stage} > summary .count`, /margin-left: auto;/), `${stage}: the count is right-aligned`);
+    assert.ok(ruleFor(`${stage} > summary .fold::before`, /content: '▸';/), `${stage}: folded points right`);
+    assert.ok(ruleFor(`${stage}[open] > summary .fold::before`, /content: '▾';/), `${stage}: open points down`);
+    assert.ok(ruleFor(`${stage} > summary`, /cursor: pointer;/), `${stage}: the heading is clickable`);
+  }
+  // A stage's colour tints its whole heading bar, the arrow included, open or folded.
+  assert.ok(ruleFor('.coloured > summary', /background: var\(--stage-tint\);/));
+  assert.ok(ruleFor('.coloured > summary .fold', /color: var\(--stage-text\);/));
+  // A folded Board column keeps its width: nothing shrinks it.
+  assert.doesNotMatch(css, /details\.column:not\(\[open\]\)\s*\{[^}]*flex-basis/);
+});
+
+test('a stage folded or opened by hand stays that way through the page\'s own redraw, even if its colour changed (SP-196)', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const place = /function keepPlace\(\) \{[\s\S]*?\n\}/.exec(app)[0];
+  assert.match(place, /const key = \(d\) => \(d\.dataset\.stage \? `stage\|\$\{d\.dataset\.stage\}` : d\.className\);/, 'a stage is known by its name, not its classes');
+  assert.match(place, /const open = new Map\(\[\.\.\.main\.querySelectorAll\('details'\)\]\.map\(\(d\) => \[key\(d\), d\.open\]\)\);/, 'every stage is a details, so every stage is kept');
+  assert.match(place, /for \(const d of main\.querySelectorAll\('details'\)\) if \(open\.has\(key\(d\)\)\) d\.open = open\.get\(key\(d\)\);/);
 });
 
 test('the board has no Live column: Live is a list section below the columns, newest change first, with its count (SP-165)', () => {
@@ -929,7 +967,7 @@ test('the ticket page opens on the Quick Action section, with everything it show
   assert.match(details, /^\s*<summary>Details<\/summary>/);
   // The status line, the description and the comments, all inside Details.
   for (const part of [/statusLabel\(t\)/, /renderMarkdown\(t\.description\)/, /\$\{comments \|\|/]) assert.match(details, part);
-  assert.ok(!/<details[^>]*\bopen\b/.test(app), 'Details is never drawn open');
+  assert.ok(!/<details class="details"[^>]*\bopen\b/.test(app), 'Details is never drawn open');
   // The reply posts exactly as typed, and #reply still lands in the box (it is outside Details, so focusable).
   assert.match(app, /\/comments`, \{ body: box\.value \}\)/);
   assert.match(app, /location\.hash === '#reply'[\s\S]{0,120}box\.focus\(\)/);
