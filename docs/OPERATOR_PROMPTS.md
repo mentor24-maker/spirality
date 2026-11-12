@@ -160,6 +160,47 @@ this log only points there.
 
    Led to: no switch. Before the wizard's stop step, the session found that the move would turn off StarCaster's auto-merge Lanes A and B (Spirality's relay never reads `autoMergeLanes`) and leave its `bus-relay`, `pipeline-pulse` and `weekly-report` jobs and its `review-gate` workflow reading ClickUp. Dane chose to wait for the gaps (his answer in the session: "Wait for the gaps"). Filed [SP-199](http://mac-mini.local:4180/t/SP-199), "StarCaster's auto-merge lanes stop when it moves to the tracker: make the relay merge Lanes A and B", and [SP-200](http://mac-mini.local:4180/t/SP-200), "StarCaster's bus-relay, pulse and weekly report read ClickUp: list what each needs on the tracker and file the work", and added both to the `Waits on:` line of [SP-25](http://mac-mini.local:4180/t/SP-25), "StarCaster still runs on ClickUp: move it to the tracker", which went back to Queued. StarCaster's tracker project got its operator, Dane (actor 1).
 
+## 2026-11-11: SP-25, StarCaster's move to the tracker
+
+1. > Run SP-25, StarCaster still runs on ClickUp: move it to the tracker, as a hand-run session.
+
+   Led to: the wizard's answers for StarCaster, saved through the setup page's own writer once Dane chose "Use these" in the session (and "Switch now, then watchdogs" for the order). The wizard's look then stopped before writing anything: its clean copy of StarCaster sits in a folder named `repo`, and one StarCaster test checks its folder is named `starcaster`. Filed and built [SP-229](http://mac-mini.local:4180/t/SP-229), "Make the setup's clean-copy check run in a folder named for the project" (this pull request); SP-25 goes on once it merges.
+
+## 2026-11-10: spirality.alphire.agency opens the tracker
+
+1. > I thought one of the tickets we handled set up the web-based access to Spirality to show the actually task list instead of the stripped down one that only shows the Board, with no toggle for the List view. What is the status of that change?
+
+   Led to: the finding that [SP-164](http://mac-mini.local:4180/t/SP-164), "spirality.alphire.agency shows StarCaster's small Tasks page: point it at the tracker's own page" ([#135](https://github.com/mentor24-maker/spirality/pull/135)), was Live but its hand-run move had never been done, so the name still opened StarCaster's page.
+
+2. > yes
+
+   Led to: the Funnel route checked from the Mini, then [SP-198](http://mac-mini.local:4180/t/SP-198), "The tracker page's forwarding site answers 404 at its front page: forward / to the tracker too" ([#160](https://github.com/mentor24-maker/spirality/pull/160)), after the project deploy below showed Vercel's 404 at `/`.
+
+3. > [pasted: his Terminal output from `vercel link` and `vercel deploy --prod` in sites/tracker-page, creating the Vercel project spirality-tracker-page]
+
+   Led to: the `spirality-tracker-page` project (https://spirality-tracker-page.vercel.app); the token file the CLI left in the folder checked as not served, and deleted.
+
+4. > I see SP-200 was sent back to Rework. Let's change it's priority to Urgent so it skips ahead as much as possible.
+
+   Led to: [SP-200](http://mac-mini.local:4180/t/SP-200), "StarCaster's bus-relay, pulse and weekly report read ClickUp: list what each needs on the tracker and file the work", set to Urgent, first in the claim order.
+
+5. > redeployed
+
+   Led to: the forwarding site checked: `/` shows the tracker's page, `/me` answers 401.
+
+6. > move it
+
+   Led to: `spirality.alphire.agency` moved from StarCaster's Vercel project to `spirality-tracker-page` and checked live; [SP-209](http://mac-mini.local:4180/t/SP-209), "Invite and reset emails still link to the Mini's address: point them at spirality.alphire.agency" ([#164](https://github.com/mentor24-maker/spirality/pull/164)).
+
+7. > Confirmed.
+   > /close-check
+
+   Led to: the tracker restart owed after #164 merges written on SP-209 (comment 3772); the SP-198 worktree removed.
+
+8. > /doc-it
+
+   Led to: [SP-210](http://mac-mini.local:4180/t/SP-210), "A ticket goes Live while its hand-run steps are still undone: file them as their own ticket, and write this thread's prompts down" (this section, the rule under "Where the ticket goes after the merge" in docs/LOOP_CONTRACT.md, and the ssh note in docs/TRACKER_MVP.md), and the memory "Vercel from the MacBook".
+
 ## 2026-11-11: The Add Task box's project check keeps asking about WaveCenter
 
 1. > I have been getting the check about whether I want a submitted task to be associated with Wavecenter or Spirality every time, even though I haven't submitted a task for Wavecenter in quite a while. Take a look at that feature and ensure it is functioning as intended.

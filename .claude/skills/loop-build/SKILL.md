@@ -1,6 +1,14 @@
 ---
 name: loop-build
 description: Pick the next claimable task (all "Rework" first, then "Queued") from the Spirality queue in the tracker and build it end-to-end into a pull request — in its own git worktree, passing `npm run verify` — then move the task to "In review". Designed to be run on a timer with `/loop 30m loop-build`. Never edits main, never merges.
+summary: Builds the next ticket into code
+about: >
+  This is the builder. It takes the next ticket that is ready to build (one
+  sent back for fixes first, then the oldest queued one), writes the change in
+  its own separate copy of the code, runs every check, and opens a pull
+  request: a proposed change waiting for approval. Then it hands the ticket to
+  review. It runs by itself on a timer, one ticket at a time. It never changes
+  the main code directly and never merges anything; only Dane does that.
 ---
 
 # Loop: Build

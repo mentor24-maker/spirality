@@ -46,6 +46,7 @@ import { execFileSync } from 'node:child_process';
 import { basename, dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createClickupTracker } from '../scripts/tracker/clickupTracker.mjs';
+import { ARCHIVE_MAX_PAGES } from '../lib/commentPages.js';
 import { noClickUpList } from './import.mjs';
 import { loadProjectConfig, ProjectConfigError } from '../lib/projectConfig.mjs';
 import { expandHome } from '../lib/onboardAnswers.mjs';
@@ -138,7 +139,7 @@ function byDateThenId(a, b) {
 
 /** Every comment on the ticket, oldest first, each with its replies. */
 async function readThread(tracker, taskId) {
-  const { paged, bad } = await tracker.listComments(taskId);
+  const { paged, bad } = await tracker.listComments(taskId, { maxPages: ARCHIVE_MAX_PAGES });
   if (!paged?.complete) {
     const why = bad ? httpWhy(bad) : (paged?.capped ? 'it ran past the page limit' : 'the read did not finish');
     throw new SnapshotError(`reading the comments on ticket ${taskId} failed: ${why}`);
@@ -149,12 +150,13 @@ async function readThread(tracker, taskId) {
     let replies = [];
     // Unknown means ask: a missing reply_count is not proof of none.
     if (c.reply_count == null || Number(c.reply_count) > 0) {
-      const out = await tracker.listReplies(c.id);
-      const list = out?.json?.comments ?? out?.json?.replies;
-      if (!out?.res?.ok || !Array.isArray(list)) {
-        throw new SnapshotError(`reading the replies to comment ${c.id} on ticket ${taskId} failed: ${httpWhy(out)}`);
+      // Every page of them: ClickUp pages replies 25 at a time (SP-242).
+      const { paged: pagedReplies, bad: badReply } = await tracker.listAllReplies(c.id, { maxPages: ARCHIVE_MAX_PAGES });
+      if (!pagedReplies?.complete) {
+        const why = badReply ? httpWhy(badReply) : (pagedReplies?.capped ? 'it ran past the page limit' : 'the read did not finish');
+        throw new SnapshotError(`reading the replies to comment ${c.id} on ticket ${taskId} failed: ${why}`);
       }
-      replies = list.slice().sort(byDateThenId);
+      replies = pagedReplies.comments.slice().sort(byDateThenId);
     }
     thread.push({ ...c, replies });
   }

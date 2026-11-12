@@ -214,7 +214,9 @@ account_links  token hash, purpose (setup|invite|reset), email, actor,
   words a project or ticket that does not exist gets, plus
   `yourProjectsOnly: true`, so the answer never says it exists; the page
   shows a plain "You Are Not on This Project" instead. An admin sees every
-  project, so Dane is never shut out of one, and every machine sign-in (each
+  project, so Dane is never shut out of one (kept on purpose, SP-197; the
+  Users page says "All projects (admin)" first in an admin's Projects cell,
+  from `seesEveryProject` on `GET /people`), and every machine sign-in (each
   loop, `hand-run`) reads and writes exactly as before: a loop is never
   narrowed. Membership is the only permission enforced; roles are still
   recorded only.
@@ -589,6 +591,11 @@ Putting the route on waits up to a minute for the public address to answer:
 on a port Funnel has not served before, Tailscale fetches its certificate on
 the first call. If it still has not answered, the script says so and exits 1
 with the route on; run `--status` again a minute later.
+
+Over ssh from the MacBook, put Homebrew's folder on the path first: an ssh
+session's path has no `node`, and the script stops with
+`node: command not found` (exit 2).
+`ssh mac-mini 'export PATH=/opt/homebrew/bin:$PATH; cd ~/WebApps/spirality && ./scripts/install_tracker_funnel.sh --status'`
 
 `Strict-Transport-Security` covers the whole name, not one port: a browser
 that has opened the public address once keeps to https for every port of
@@ -1084,7 +1091,9 @@ ClickUp seat ids the config holds until then.
    ```
 
    Good: `Import finished.`, nothing refused. A run that stops part way is
-   safe to run again; it carries on.
+   safe to run again; it carries on. A run again also brings an imported
+   ticket up to date when ClickUp changed it since (counted `updated`),
+   unless it was changed in the tracker too: that one is refused by name.
 
 5. **Check it is safe to switch:**
 

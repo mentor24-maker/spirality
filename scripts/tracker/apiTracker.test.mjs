@@ -309,11 +309,11 @@ test('a Requested ticket is never claimable and never waiting on Dane, even assi
     const all = await f.door(['waiting']);
     assert.equal(all.code, 0, all.err);
     assert.ok(!all.out.includes('AL-1'), all.out);
-    assert.match(all.err, /0 ticket\(s\) actually waiting on Dane/);
+    assert.match(all.err, /^Nothing is waiting on Dane — checked /);
 
     const one = await f.door(['waiting', '--task', 'AL-1']);
     assert.equal(one.code, 0, one.err);
-    assert.match(one.out, /^AL-1\trequested\t.*NOT HIS — status "requested" is a machine status/);
+    assert.match(one.out, /^AL-1\trequested\t.*NOT waiting on Dane — "requested" is a machine status/);
   } finally { await f.cleanup(); }
 });
 
@@ -494,12 +494,12 @@ test('ask posts the card, moves to Needs your input and assigns the operator; wa
 
     const waiting = await f.door(['waiting', '--task', 'AL-1']);
     assert.equal(waiting.code, 3);
-    assert.match(waiting.out, /^AL-1\tneeds your input\tassigned: Dane\tlast word: a loop .* MT\tWAITING ON DANE — "needs your input"\tone\n$/);
+    assert.match(waiting.out, /^AL-1\tneeds your input\tassigned: Dane\tlast word: a loop .* MT\tno PR\tWAITING ON DANE — "needs your input" is his lane[^\t]*\tone\n$/);
 
     f.store.postComment({ ticket: 'AL-1', author: f.human.id, body: 'A please' });
     const answered = await f.door(['waiting', '--task', 'AL-1']);
     assert.equal(answered.code, 0);
-    assert.match(answered.out, /last word: Dana .* MT\tANSWERED/);
+    assert.match(answered.out, /last word: Dana .* MT\tno PR\tNOT waiting on Dane — his own comment is the newest word/);
 
     const again = await f.door(['ask', '--task', 'AL-1', '--body-file', '-'], { stdin: CARD });
     assert.equal(again.code, 2);

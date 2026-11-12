@@ -5,6 +5,7 @@ header { display: flex; gap: 2rem; align-items: center; padding: 0 2rem; height:
 header .brand { display: flex; }
 header .brand img { height: 2.25rem; width: auto; }
 header nav.site { display: flex; gap: 1.5rem; align-self: stretch; }
+header nav.site[hidden] { display: none; }
 header nav.site a { display: flex; align-items: center; color: #b8b8be; font-weight: 600; text-decoration: none; border-bottom: 2px solid transparent; }
 header nav.site a:hover { color: #fff; }
 header nav.site a.current { color: #fff; border-bottom-color: var(--blue); }
@@ -119,18 +120,32 @@ dl.details dd { margin: 0; }
 .views a + a { border-left: var(--hairline); }
 .views a.current { background: #000; color: #fff; }
 .board { display: flex; gap: 0.75rem; align-items: flex-start; overflow-x: auto; padding-bottom: 1rem; }
-.column { flex: 0 0 15rem; background: #f5f5f7; border: var(--hairline); border-radius: 8px; padding: 0.5rem; }
-.column h2 { font-size: 0.95rem; margin: 0.25rem 0.25rem 0.5rem; display: inline-block; }
-details.column > summary { cursor: pointer; }
-details.column:not([open]) { flex-basis: auto; }
+/* SP-214: the seven working stages share the page's width equally (each grows and shrinks from zero),
+   so all seven fit across the 1440px body; below a 10rem floor per column the board scrolls sideways. */
+.column { flex: 1 1 0; min-width: 10rem; background: #f5f5f7; border: var(--hairline); border-radius: 8px; padding: 0.5rem; }
+.column h2 { font-size: 0.95rem; margin: 0; }
+.column > summary { padding: 0.25rem; margin-bottom: 0.5rem; }
+.column:not([open]) > summary { margin-bottom: 0; }
 .card { display: flex; flex-direction: column; gap: 0.25rem; background: #fff; border: var(--hairline); border-radius: 6px; padding: 0.5rem 0.6rem; margin-bottom: 0.5rem; color: var(--ink); text-decoration: none; font-size: 0.9rem; }
 .card:hover { box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18); }
 .card .quiet { font-size: 0.8rem; }
 .card .tag { margin-left: 0; margin-right: 0.3rem; }
-table.tickets, details.group, section.group { border: var(--hairline); border-radius: 8px; }
+/* A long ticket name or tag wraps inside its card rather than widening the column. */
+.card .name, .card .tags { overflow-wrap: anywhere; min-width: 0; }
+table.tickets, details.group { border: var(--hairline); border-radius: 8px; }
 .group { margin-bottom: 1rem; overflow: hidden; }
-.group h2 { font-size: 0.95rem; margin: 0; padding: 0.5rem 0.75rem; display: inline-block; }
-.group > summary { cursor: pointer; padding-left: 0.5rem; }
+.group h2 { font-size: 0.95rem; margin: 0; }
+.group > summary { padding: 0.5rem 0.75rem; }
+/* SP-196: every stage folds. Its heading reads name, then the count right-aligned,
+   then one arrow (down open, right folded); the browser's own marker is hidden. */
+.column > summary, .group > summary { display: flex; align-items: center; gap: 0.5rem; cursor: pointer; list-style: none; }
+.column > summary::-webkit-details-marker, .group > summary::-webkit-details-marker { display: none; }
+.column > summary h2, .group > summary h2 { flex: 1; display: flex; align-items: baseline; gap: 0.5rem; min-width: 0; }
+.column > summary .count, .group > summary .count { margin-left: auto; }
+.column > summary .fold, .group > summary .fold { font-size: 1.1rem; line-height: 1; }
+.column > summary .fold::before, .group > summary .fold::before { content: '▸'; }
+.column[open] > summary .fold::before, .group[open] > summary .fold::before { content: '▾'; }
+.column > summary:focus-visible, .group > summary:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }
 .group table { border-top: var(--hairline); }
 .group tbody tr:last-child td { border-bottom: 0; }
 .group tbody tr:hover { background: #f5f5f7; }
@@ -142,8 +157,10 @@ table.tickets, details.group, section.group { border: var(--hairline); border-ra
 .group td.id { white-space: nowrap; }
 .group td.id a { color: var(--quiet); text-decoration: none; }
 .group td.id a:hover { text-decoration: underline; }
-.group th.name { width: 30%; }
-.group th.priority { width: 8%; }
+.group th.name { width: 27%; }
+.group th.priority { width: 11%; }
+.group td.priority select { width: 100%; max-width: 7.5rem; }
+.group td.priority .note { display: block; font-size: 0.8rem; }
 .group th.tags { width: 13%; }
 .group th.actions { width: 8%; }
 .group td.actions { white-space: nowrap; }
@@ -151,21 +168,26 @@ a.action, button.action { display: inline-flex; padding: 0.2rem; margin-right: 0
 a.action:hover, button.action:hover { color: #000; background: #e8e8ed; }
 button.action { border: 0; background: transparent; cursor: pointer; vertical-align: middle; }
 button.action:disabled { opacity: 0.4; cursor: default; }
+/* The list row's status icon (SP-201): the check is green; an empty slot keeps the icons after it lined up. */
+span.action.status-icon { display: inline-flex; padding: 0.2rem; margin-right: 0.15rem; }
+span.action.status-icon.empty { width: 18px; height: 18px; }
+span.action.answer-in-icon { color: #2e7d32; }
 .group th.assignee { width: 12%; }
 .group td { overflow-wrap: anywhere; }
 /* A stage's colour from the Settings page (app.mjs drawProject sets the three properties). */
 .column.coloured, .group.coloured { border-color: var(--stage-border); }
-.coloured > h2, .coloured > summary { background: var(--stage-tint); }
-.coloured h2, .coloured h2 .quiet { color: var(--stage-text); }
-.column.coloured > h2 { display: block; margin: -0.5rem -0.5rem 0.5rem; padding: 0.5rem 0.75rem; border-radius: 7px 7px 0 0; }
-.column.coloured > summary { margin: -0.5rem -0.5rem 0.5rem; padding: 0.5rem 0.75rem 0.25rem 0.5rem; border-radius: 7px 7px 0 0; }
+.coloured > summary { background: var(--stage-tint); }
+.coloured h2, .coloured h2 .quiet, .coloured > summary .fold { color: var(--stage-text); }
+.column.coloured > summary { margin: -0.5rem -0.5rem 0.5rem; padding: 0.5rem 0.75rem; border-radius: 7px 7px 0 0; }
 .column.coloured:not([open]) > summary { margin-bottom: -0.5rem; border-radius: 7px; }
-.column.coloured > summary h2 { margin: 0; }
-.group.coloured > h2 { display: block; }
 .coloured > table { border-top-color: var(--stage-border); }
 .quick { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; align-items: start; margin-bottom: 2rem; }
 .quick h1 { margin-top: 0; }
 .quick .needed { color: var(--red); font-weight: 700; white-space: pre-wrap; }
+.quick .ticket-name { margin: -0.5rem 0 1rem; font-size: 0.9em; }
+.quick .request-heading { font-size: 0.95rem; color: var(--quiet); font-weight: 600; margin: 1.25rem 0 0.35rem; }
+.quick .original-request { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; padding: 0.6rem 0.8rem; border-left: 3px solid var(--blue); background: var(--machine); }
+.quick .sliced-from { margin: 0.5rem 0 0; font-size: 0.9em; }
 .quick .act { min-width: 0; }
 .quick .commands { margin-bottom: 1.25rem; }
 .quick .command { display: flex; gap: 0.5rem; align-items: flex-start; margin-bottom: 0.5rem; }
@@ -251,6 +273,8 @@ table.people, table.invites { max-width: 48rem; }
 table.people select { font: inherit; padding: 0.2rem; }
 /* A project's members (Projects page) or a user's projects (Users page): one per line, an admin's Remove beside each, the Add picker under them. */
 table.projects td .member { display: block; white-space: nowrap; }
+/* An admin's Projects cell says first that they see every project. */
+table.people td span.every { display: block; font-weight: 600; margin-bottom: 0.2rem; }
 table.projects td button.remove-member { margin-left: 0.4rem; font: inherit; font-size: 0.8rem; padding: 0 0.4rem; cursor: pointer; }
 table.projects td select.add-member { display: block; margin-top: 0.3rem; font: inherit; font-size: 0.85rem; padding: 0.15rem; }
 /* The Users page's Roles and Permissions table: each role, its description under it, a tick per permission. */
@@ -291,10 +315,27 @@ section.setups ul { padding-left: 1.5rem; }
 form.request .field-note { display: block; font-size: 0.85rem; }
 .board-live { margin-top: 1rem; }
 
-/* The Docs page's Commands section (SP-179): a search box and the list of slash commands. */
-#command-search { width: 100%; max-width: 24rem; box-sizing: border-box; font: inherit; padding: 0.35rem 0.6rem; border: var(--hairline); border-radius: 6px; margin: 0 0 0.5rem; }
-ul.command-list { list-style: none; padding: 0; margin: 0; max-width: 48rem; }
-ul.command-list li { padding: 0.6rem 0; border-bottom: var(--hairline); }
+/* The Docs page in two columns (SP-212): the Quick Claude Commands pod down the left third, the rest to its right; stacked on a narrow screen. */
+.docs-columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 2rem; align-items: start; }
+.docs-main { min-width: 0; }
+.docs-main > h2:first-child { margin-top: 0; }
+@media (max-width: 800px) { .docs-columns { grid-template-columns: minmax(0, 1fr); } }
+/* The Quick Claude Commands pod (SP-179, SP-212): a search box and the slash commands, each a name and a few words. */
+section.commands-pod { background: #cceeff; border: 1px solid #003377; border-radius: 20px; padding: 1rem 1.25rem; box-sizing: border-box; }
+section.commands-pod h2 { margin-top: 0; }
+#command-search { width: 100%; box-sizing: border-box; font: inherit; padding: 0.35rem 0.6rem; border: var(--hairline); border-radius: 6px; margin: 0 0 0.5rem; background: #fff; }
+ul.command-list { list-style: none; padding: 0; margin: 0; }
+ul.command-list li { border-bottom: 1px solid rgba(0, 51, 119, 0.2); }
+ul.command-list li:last-child { border-bottom: 0; }
+ul.command-list a.command-open { display: block; padding: 0.5rem 0; color: inherit; text-decoration: none; }
+ul.command-list a.command-open:hover .command-summary, ul.command-list a.command-open:focus .command-summary { text-decoration: underline; }
+ul.command-list a.command-open code { color: #003377; font-weight: 600; }
+/* A command's pop-up (SP-212), the same look as the Pipeline Status dialog. */
+dialog.command-details { border: var(--hairline); border-radius: 8px; padding: 1rem 1.25rem; max-width: min(36rem, 95vw); color: var(--ink); }
+dialog.command-details::backdrop { background: rgba(0, 0, 0, 0.3); }
+dialog.command-details h2 { margin: 0 2rem 0.25rem 0; font-size: 1.1rem; }
+dialog.command-details button.close { float: right; border: 0; background: transparent; cursor: pointer; padding: 0 0.25rem; font-size: 1.25rem; line-height: 1; color: var(--quiet); }
+dialog.command-details .row { display: flex; justify-content: flex-end; }
 .command-steps { max-width: 48rem; }
 
 /* SP-174: the Tasks tables' headings, bold and black, each a button that sorts its stage. Other tables keep the grey headings. */

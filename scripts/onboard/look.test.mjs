@@ -4,7 +4,7 @@ import { validateProjectConfig } from '../../lib/projectConfig.mjs';
 import { resolveAnswers } from '../../lib/onboardAnswers.mjs';
 import { seatsForConfig } from '../../tracker/signins.mjs';
 import {
-  BLOCKED, READY, UNKNOWN, WILL_DO, checkEnv, exitCodeFor, formatRow, ghApiFailure, lastLines, look,
+  BLOCKED, READY, UNKNOWN, WILL_DO, checkEnv, cloneFolder, exitCodeFor, formatRow, ghApiFailure, lastLines, look,
   readCheck, readCheckout, readClaude, readDoppler, readDopplerMe, readNode, readProtection,
   projectMismatch, readRepo, withoutSignIn, nodeNeedOf, samePathOnDisk, summaryLine, trackerRows,
 } from './look.mjs';
@@ -280,7 +280,7 @@ function readOnlyCall({ cmd, args, cwd }, scratch) {
   }
   if (cmd === 'claude') return a === 'auth status --json';
   if (cmd === 'doppler') return ['me --json --no-check-version', 'projects --json --no-check-version'].includes(a) || /^configs --project \S+ --json --no-check-version$/.test(a);
-  if (cmd === 'npm' || cmd === 'sh') return inScratch(`${cwd}/`) || cwd === `${scratch}/repo`;
+  if (cmd === 'npm' || cmd === 'sh') return inScratch(`${cwd}/`) || cwd === `${scratch}/normie`;
   return false;
 }
 
@@ -316,7 +316,7 @@ function fakeWorld({ checkoutPresent = true, project = true, empty = false, noLo
     },
     token: 'tok',
     exists: (p) => (p === '/Users/dane/WebApps/normie' ? checkoutPresent : p.startsWith(scratch) && (noLock ? /package\.json$/ : /package(-lock)?\.json$/).test(p)),
-    readText: (p) => (p === `${scratch}/repo/.nvmrc` ? '22\n' : null),
+    readText: (p) => (p === `${scratch}/normie/.nvmrc` ? '22\n' : null),
     makeScratch: () => scratch,
     removeScratch: (dir) => removed.push(dir),
     nodeVersion: 'v22.23.3',
@@ -460,4 +460,18 @@ test('an empty repository this Mac\'s gh may push to but not administer: protect
   const protect = rows.find((r) => r.item.startsWith('GitHub: protecting'));
   assert.equal(protect.verdict, BLOCKED);
   assert.match(protect.why, /needs an admin/);
+});
+
+// SP-25's hand-run session (SP-229): StarCaster's taskRepo test checks its
+// checkout's folder name, so the clean copy must not land in a folder named "repo".
+test('the clean copy is cloned into a folder named for the repository, and the check runs there', async () => {
+  assert.equal(cloneFolder('mentor24-maker/starcaster'), 'starcaster');
+  assert.equal(cloneFolder('mentor24-maker/upwork-blaster.git'), 'upwork-blaster');
+  assert.equal(cloneFolder(''), 'repo');
+  const w = fakeWorld();
+  await look({ answers, homeConfig, deps: w.deps });
+  const clone = w.calls.find((c) => c.cmd === 'gh' && c.args[1] === 'clone');
+  assert.equal(clone.args[3], `${w.scratch}/normie`);
+  const check = w.calls.find((c) => c.cmd === 'sh');
+  assert.equal(check.cwd, `${w.scratch}/normie`);
 });
