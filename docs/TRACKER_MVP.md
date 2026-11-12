@@ -396,6 +396,47 @@ sends a 1-hour reset link to it if it has an account, saying the same
 either way. The page shows a count of tickets waiting on him in the
 browser tab's title, so a pinned tab tells him at a glance.
 
+### The Add Task Box's Project Check
+
+Before the Tasks page's Add Task box files a request, it asks the server
+whether the words fit another project better, and if one clearly does, asks
+"Did you mean for that to be associated with project X?". It is plain word
+matching on the tickets already in the tracker, no AI; the rules are written
+out at the top of `tracker/projectGuess.mjs`.
+
+**The bar is a better hit rate, not a perfect one.** Dane, on SP-225, "The
+Add Task box keeps asking whether a Spirality task belongs to WaveCenter"
+(2026-11-11): "It doesn't have to be perfect. Just a better hit rate is a
+win." Before SP-225 everyday words two projects share added up over a long
+request (WaveCenter is itself about scoring tasks, so "task" is in most of
+its tickets), and nearly every request about the Tasks page asked about
+WaveCenter. SP-225 made a word the project being filed into already uses
+count for no project.
+
+**How to measure it: the replay.** Every ticket whose description has a
+`## Asked` block holds Dane's own words, verbatim (the fenced block's first
+line is his title). Take those words as a fresh request, with the ticket
+left out of its own project's tickets, and run `guessProject`:
+
+- filed into its own project, any suggestion is a **false alarm**;
+- typed into each other project that has tickets, naming the ticket's real
+  project is a **catch**.
+
+The tickets come from `GET /projects` and `GET /projects/<slug>/tickets`.
+Fetch them one project at a time; `tickets --json --include-closed` reads
+every ticket's history and is slow over the home network. On 2026-11-11, 149
+requests:
+
+| | Before SP-225 | After |
+|---|---|---|
+| False alarms | 35 of 149 | 5 of 149 |
+| Catches | 128 of 596 | 117 of 596 |
+
+A change to the check should be run against the replay and say both numbers
+in its pull request. Ideas for when there is more data are parked on
+SP-227, "Improve the Add Task box's project check hit rate as the tickets
+grow" (`deferred`).
+
 ### How the loops switch over without a rewrite
 
 The modules in `lib/` read ClickUp-shaped objects (`comment_text`,
