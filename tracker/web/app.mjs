@@ -26,7 +26,7 @@
  * an emailed link's own page. The link's token is sent only in a JSON body,
  * never in an address.
  */
-import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, unwrapDoc, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, lookupTicket, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, pipelinePodLabel, renderCommandList, renderCommandView, renderCommandDetails, renderContextDocs, renderSortHeadings, renderListPriority, sortTickets, nextSort, renderDocumentation, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine } from './render.mjs';
+import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, unwrapDoc, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, lookupTicket, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, lowerMeridiem, pipelinePodLabel, renderCommandList, renderCommandView, renderCommandDetails, renderContextDocs, renderSortHeadings, renderListPriority, sortTickets, nextSort, renderDocumentation, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine } from './render.mjs';
 
 /** Where an earlier version of the page kept a pasted token; removed on load, never read. */
 const OLD_TOKEN_KEY = 'tracker-token';
@@ -143,8 +143,8 @@ const when = (iso) => new Date(iso).toLocaleString(undefined, {
   month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short',
 });
 
-/** A time of day in this computer's own time zone, for the Pipeline Status pod: "10:45 AM". */
-const clockTime = (iso) => new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+/** A time of day in this computer's own time zone, for the Pipeline Status pod, am/pm in lowercase (SP-222): "10:45 am". */
+const clockTime = (iso) => lowerMeridiem(new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }));
 
 /** The last Pipeline Status answer read (GET /pipeline), or null before any or after a failed read. */
 let pipelineState = null;
@@ -170,7 +170,7 @@ async function refreshPipeline() {
 function showPipeline(read = false) {
   const pod = main.querySelector('.pipeline-pod');
   if (!pod || (!pipelineState && !read)) return;
-  pod.innerHTML = renderPipelinePod(pipelineState, clockTime);
+  pod.innerHTML = renderPipelinePod(pipelineState, clockTime, Date.now());
   pod.setAttribute('aria-label', pipelinePodLabel(pipelineState, clockTime));
   const dialog = main.querySelector('dialog.pipeline-status');
   if (dialog?.open) fillPipelineDialog(dialog);
