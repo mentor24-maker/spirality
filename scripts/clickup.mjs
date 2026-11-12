@@ -61,7 +61,7 @@ import { loadProjectConfig, ProjectConfigError } from '../lib/projectConfig.mjs'
 // from the package, so every project's relay decides the same way.
 import {
   mergeDecision, githubGate, isMergeCommand, MERGE_MARKER, parseMergeMarker,
-  refusalNotice, refusalBusLine, conflictHandOffNotice, mergedNotice, filesMadeLines, REFUSAL_CODES,
+  refusalNotice, refusalBusLine, conflictHandOffNotice, mergedNotice, alreadyMergedPlan, filesMadeLines, REFUSAL_CODES,
 } from '../lib/mergeOnComment.js';
 import {
   PR_VIEW_FIELDS, markerBookkeeping, recordBookkeeping, emptyBooks, mergeDestination, relayLine,
@@ -1636,6 +1636,47 @@ if (cmd === 'whoami') {
     try { prJson = JSON.parse(view.stdout); } catch { unchecked.push(`${task.id}: gh returned non-JSON for PR #${pr.number} — merge authorization still pending`); say(task, 'unchecked', `PR #${pr.number} unreadable`); return; }
 
     let gate = githubGate(prJson);
+
+    // Already merged (SP-216): an earlier pass merged it and could not read
+    // the result back, or it was merged by hand on GitHub. Nothing is left to
+    // merge, so this is not a refusal: write the record the merge path below
+    // writes after its own merge, move the ticket on, and tell the in-flight
+    // tickets main moved (an earlier merge that never read back never did).
+    // A ticket that already got the old "the PR is already merged" refusal
+    // carries a re-decidable marker, so it lands here on its next pass too.
+    {
+      let dest = null;
+      if (gate.refusalCode === REFUSAL_CODES.prAlreadyMerged) {
+        // Where it goes hangs on the description's "Next slice:" line; never guess it.
+        const out = await tracker.getTask(task.id, { markdown: true });
+        if (!out.res.ok || !out.json) {
+          unchecked.push(`${task.id}: PR #${pr.number} is already merged, but the description could not be read (HTTP ${out.res.status}) to see whether a next slice remains — nothing recorded this pass; the next pass tries again`);
+          say(task, 'unchecked', `could not read the description (HTTP ${out.res.status})`);
+          return;
+        }
+        dest = mergeDestination(out.json.markdown_description || out.json.description);
+      }
+      const plan = alreadyMergedPlan({ gate, prJson, pr, commentId: decision.commentId, priorRefusal: decision.priorRefusal, dest });
+      if (plan.act === 'finish') {
+        if (dryRun) {
+          say(task, 'would-finish-merged', `PR #${pr.number} is already merged${plan.mergedAt ? ` (at ${plan.mergedAt})` : ''}; would record it, move the ticket to "${dest.status}" because ${dest.why}, and tell in-flight tickets main moved`);
+          return;
+        }
+        // Spent forever, FIRST, as after the relay's own merge.
+        const stuck = await markMergeHandled(decision.commentId, task, plan.marker);
+        const noteId = await postNote(task, plan.body, `PR #${pr.number} already merged`);
+        const moved = await moveMergedTicket(task, pr.number, dest);
+        settled.add(task.id);
+        const failed = [!stuck && 'marker UNVERIFIED', !noteId && 'note FAILED', !moved && 'MOVE FAILED'].filter(Boolean);
+        say(task, 'already-merged', `PR #${pr.number}${plan.mergedAt ? ` merged at ${plan.mergedAt}` : ''}; recorded on ${who}'s comment ${decision.commentId}; ticket -> ${dest.status}${failed.length ? ` (${failed.join(', ')}, see below)` : ''} (${dest.why})${plan.healed ? '; replaces the old "already merged" refusal' : ''}`);
+        await announce(task, mergedBusLine({ tag: busTag, task, url: ticketUrl(task), pr, dest, already: true }), `PR #${pr.number} already merged`);
+        const news = await tellMainMoved({ mergedNumber: pr.number, list, dryRun: false, tasks });
+        for (const l of news.lines) console.log(`  main-moved\t${l}`);
+        unchecked.push(...news.problems.map((p) => `main-moved after PR #${pr.number}: ${p}`));
+        say(task, 'main-moved', `${news.told} in-flight ticket(s) told that PR #${pr.number} moved main`);
+        return;
+      }
+    }
 
     // Behind main: the machine's own job. Catch it up through GitHub, let the
     // checks re-run, and decide on a later pass against the new run — never
