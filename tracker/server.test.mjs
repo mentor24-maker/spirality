@@ -1502,6 +1502,24 @@ test('GET /reports answers the Reporting figures for every project or one, 404 f
   } finally { await f.cleanup(); }
 });
 
+test('GET /reports answers Where the Time Goes: the four buckets per range and the open ticket by its exact name (SP-220)', async () => {
+  const f = await fixture();
+  try {
+    const t = f.store.fileTicket({ project: 'alpha', actor: f.machine.id, name: 'An open one', status: 'queued' });
+    await new Promise((resolve) => setTimeout(resolve, 20)); // so it has been open a while when the figures are read
+    const r = await f.call('GET', '/reports?project=alpha');
+    assert.equal(r.status, 200);
+    for (const key of ['week', 'month', 'all']) {
+      const split = r.body.timeSplit[key];
+      assert.deepEqual(Object.keys(split.buckets), ['working', 'lane', 'operator', 'broken'], key);
+      assert.ok(split.total > 0, key);
+      assert.equal(split.buckets.lane.share, 1, `${key}: its time in Queued, waiting for a lane`);
+      assert.deepEqual(split.tickets.map((x) => [x.id, x.name]), [[t.id, 'An open one']], key);
+    }
+    assert.equal(f.store.getTicket(t.id).version, 1, 'reading the figures writes nothing');
+  } finally { await f.cleanup(); }
+});
+
 test('GET /search ranks title over description over people\'s comments over loop comments, across every project, and writes nothing', async () => {
   const f = await fixture();
   try {

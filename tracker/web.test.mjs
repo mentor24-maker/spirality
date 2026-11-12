@@ -7,7 +7,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { seedDemo, tickingClock } from './demoData.mjs';
-import { reportsOf, REPORT_RANGES, searchTickets, PRIORITIES } from './pageData.mjs';
+import { reportsOf, REPORT_RANGES, searchTickets, PRIORITIES, timeSplitOf, isFailureNote, TIME_BUCKETS } from './pageData.mjs';
 import { escapeHtml, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS } from './web/render.mjs';
 import { startServer, setupSettingsOf } from './server.mjs';
 import { saveAnswers, setupFields, setupOf } from './setup.mjs';
@@ -2476,6 +2476,113 @@ test('the demo spreads its finished tasks over the last month, so every range ha
       assert.ok(h.hours > 0 && h.perDay > 0 && h.notEstimated > 0, `${key} ${JSON.stringify(h)}`);
     }
   } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+// ── Where the Time Goes (SP-220) ────────────────────────────────────────────
+
+const HOUR = 60 * 60_000;
+/** Each bucket's total ms in some stretches. */
+const sumBuckets = (stretches) => Object.fromEntries(TIME_BUCKETS.map((b) => [b, stretches.filter((s) => s.bucket === b).reduce((n, s) => n + s.to - s.from, 0)]));
+
+test('Time split: Queued, 1h Building, 2h In review, 3h Ready to launch, his "merge", 30 minutes, Live', () => {
+  const t0 = Date.parse('2026-11-01T15:00:00Z');
+  const at = (h) => t0 + h * HOUR;
+  const steps = [[at(0), 'queued'], [at(5), 'building'], [at(6), 'in review'], [at(8), 'ready to launch'], [at(11.5), 'live']];
+  const comments = [
+    { at: at(8), byMachine: true, byOperator: false, failure: false }, // the card
+    { at: at(11), byMachine: false, byOperator: true, failure: false }, // "merge"
+  ];
+  const stretches = timeSplitOf(steps, comments, { now: at(30) });
+  assert.deepEqual(sumBuckets(stretches), { working: 1 * HOUR, lane: 5 * HOUR + 2 * HOUR + 0.5 * HOUR, operator: 3 * HOUR, broken: 0 });
+  // Every second of its life before Live is in exactly one bucket, end to end.
+  for (let i = 1; i < stretches.length; i += 1) assert.equal(stretches[i].from, stretches[i - 1].to);
+  assert.equal(stretches[0].from, at(0));
+  assert.equal(stretches[stretches.length - 1].to, at(11.5), 'Live time is not counted');
+});
+
+test('Time split: a loop\'s failure note with no move for 4 hours is broken, until the next move or his next comment', () => {
+  const t0 = Date.parse('2026-11-01T15:00:00Z');
+  const at = (h) => t0 + h * HOUR;
+  const failed = (h) => ({ at: at(h), byMachine: true, byOperator: false, failure: true });
+  // Building for an hour, then loop-build FAILED: and nothing moves for 4 hours, then back to Queued.
+  const a = timeSplitOf([[at(0), 'building'], [at(5), 'queued']], [failed(1)], { now: at(6) });
+  assert.deepEqual(sumBuckets(a), { working: HOUR, lane: HOUR, operator: 0, broken: 4 * HOUR });
+  // In Ready to launch: a failure note, then his reply 2 hours later ends it; his reply is the newest word, so a lane owes the move.
+  const b = timeSplitOf([[at(0), 'ready to launch']], [failed(1), { at: at(3), byMachine: false, byOperator: true }], { now: at(4) });
+  assert.deepEqual(sumBuckets(b), { working: 0, lane: HOUR, operator: HOUR, broken: 2 * HOUR });
+  // A machine's ordinary note does not end it; an open ticket counts up to now.
+  const c = timeSplitOf([[at(0), 'in review']], [failed(0), { at: at(1), byMachine: true, byOperator: false }], { now: at(2) });
+  assert.deepEqual(sumBuckets(c), { working: 0, lane: 0, operator: 0, broken: 2 * HOUR });
+  // A person who is not the operator saying something does not clear his stage's wait.
+  const d = timeSplitOf([[at(0), 'needs your input']], [{ at: at(1), byMachine: false, byOperator: false }], { now: at(2) });
+  assert.deepEqual(sumBuckets(d), { working: 0, lane: 0, operator: 2 * HOUR, broken: 0 });
+});
+
+test('Time split: what counts as a failure note is a line that starts with one', () => {
+  for (const text of ['loop-build FAILED: verify exited 1', 'FAILED: step 3', 'relay GAVE UP: after 3 tries', 'Round 2\n**loop-review FAILED:** gh down']) {
+    assert.ok(isFailureNote(text), text);
+  }
+  for (const text of ['The relay logged FAILED: twice', 'nothing failed', '', null, 'GAVE UP: no lane named']) {
+    assert.ok(!isFailureNote(text), String(text));
+  }
+});
+
+test('Reporting time split: every ticket\'s open time in exactly one bucket, a stretch over the range start cut at it, the most time first', () => {
+  const r = reportingStore();
+  try {
+    const dane = r.store.createActor({ kind: 'human', name: 'Dane' });
+    r.store.createProject({ slug: 'gamma', name: 'Gamma', prefix: 'GA', operator: dane.id });
+    // Queued 10 days ago, Building from 9 to 1 day ago (crosses the 7-day start), Live 1 day ago.
+    const long = r.ticket('gamma', 10, [9, 'building'], [1, 'live']);
+    // Filed 2 days ago, Ready to launch since 1 day ago, open now: waiting on him.
+    const open = r.ticket('gamma', 2, [1, 'ready to launch']);
+    // Filed into review 3 days ago, a loop's failure note on it a minute later, still there: broken since.
+    const failing = r.filedAs('in review', 'gamma', 3);
+    r.store.postComment({ ticket: failing, author: r.loop.id, body: 'loop-review FAILED: gh could not be reached' });
+    const { timeSplit } = reportsOf(r.store, { project: 'gamma', now: r.now });
+    const week = timeSplit.week;
+    const row = (id) => week.tickets.find((t) => t.id === id);
+    assert.ok(near(row(long).working, 6), `working cut at the range start: ${row(long).working / DAY}`);
+    assert.ok(near(row(long).lane, 0));
+    assert.ok(near(timeSplit.all.tickets.find((t) => t.id === long).working, 8));
+    assert.ok(near(timeSplit.all.tickets.find((t) => t.id === long).lane, 1), 'its day in Queued');
+    assert.ok(near(row(open).operator, 1) && near(row(open).lane, 1));
+    assert.ok(row(failing).broken > 0 && near(row(failing).broken + row(failing).lane, 3));
+    for (const key of ['week', 'month', 'all']) {
+      const t = timeSplit[key];
+      for (const x of t.tickets) assert.equal(TIME_BUCKETS.reduce((n, b) => n + x[b], 0), x.total, `${key} ${x.id} adds up`);
+      assert.equal(TIME_BUCKETS.reduce((n, b) => n + t.buckets[b].ms, 0), t.total, key);
+      assert.ok(Math.abs(TIME_BUCKETS.reduce((n, b) => n + t.buckets[b].share, 0) - 1) < 1e-9, `${key} shares`);
+      assert.deepEqual(t.tickets.map((x) => x.total), t.tickets.map((x) => x.total).sort((a, b) => b - a), 'most time first');
+    }
+    assert.equal(row(long).name, r.store.getTicket(long).name, 'its exact name');
+  } finally { r.done(); }
+});
+
+test('Reporting time split: a range with nothing open has a zero total and no shares, and lists no tasks', () => {
+  const r = reportingStore();
+  try {
+    r.ticket('alpha', 70, [65, 'live']);
+    const { timeSplit } = reportsOf(r.store, { now: r.now });
+    assert.equal(timeSplit.week.total, 0);
+    assert.deepEqual(timeSplit.week.tickets, []);
+    for (const b of TIME_BUCKETS) assert.deepEqual(timeSplit.week.buckets[b], { ms: 0, share: null });
+    assert.ok(near(timeSplit.all.buckets.lane.ms, 5));
+  } finally { r.done(); }
+});
+
+test('the Reporting page draws Where the Time Goes from the server: four buckets by range, its note, a range picker, task links', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const draw = app.slice(app.indexOf('async function drawReporting'), app.indexOf('/**\n * The Settings page'));
+  assert.match(draw, /<h2>Where the Time Goes<\/h2>\s*<p class="quiet">[^<]*Working: in Building\.[^<]*Waiting on You:[^<]*Broken:[^<]*Waiting for a Lane:[^<]*In review[^<]*waiting, not broken\.<\/p>/);
+  for (const label of ['Working', 'Waiting for a Lane', 'Waiting on You', 'Broken']) assert.match(draw, new RegExp(`'${label}'\\]`), label);
+  assert.match(draw, /r\.timeSplit\[g\.key\]/, 'figures per range, from the server');
+  assert.match(draw, /<span class="quiet">none in this range<\/span>/, 'nothing open is said in words, never 0 hours');
+  assert.match(draw, /<label for="time-split-range">Tasks With the Most Time In<\/label>/);
+  assert.match(draw, /<a href="\/t\/\$\{encodeURIComponent\(x\.id\)\}">/, 'each task id links to its page');
+  assert.match(draw, /escapeHtml\(x\.name\)/);
+  assert.match(draw, /spanOf\(Number\(ms\)\)/, 'durations in the page\'s own wording');
+  for (const heading of ['Task', 'Name', 'Total']) assert.match(draw, new RegExp(`<th(?: class="count")?>${heading}</th>`), heading);
 });
 
 test('the Reporting page draws only the server\'s figures: ranges and stages from its answer, colours as properties, the selected project first', () => {
