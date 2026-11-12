@@ -110,6 +110,9 @@ table.projects td.name a:hover { text-decoration: underline; }
 table.projects td.actions { white-space: nowrap; width: 1%; }
 table.counts { max-width: 24rem; }
 table.counts.report { max-width: 40rem; }
+/* Where the Time Goes' task list (SP-220): wide enough for a name, the id and the durations on one line each. */
+table.counts.report.time-split-tickets { max-width: 64rem; }
+table.time-split-tickets td:first-child, table.time-split-tickets td.count { white-space: nowrap; }
 form.report-scope { display: flex; gap: 0.75rem; align-items: center; margin: 0.5rem 0 1rem; }
 form.report-scope select { font: inherit; padding: 0.35rem; }
 /* A stage's colour from the Settings page (app.mjs drawReporting sets the properties). */
