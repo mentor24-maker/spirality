@@ -60,7 +60,7 @@
  *             switch checked safe, all before the copy step's pull request
  *             can merge (scripts/onboard/fromClickup.mjs). A new project's
  *             run never has these steps. SP-253: a rerun before the lanes
- *             step that finds the old lanes loaded again runs all four
+ *             step has begun that finds the old lanes loaded again runs all four
  *             again, and the step log says why (`stop | again`).
  *   copy      SP-110's one pull request in the project's repository
  *             (`onboard:copy`), CI's verify green on it.
@@ -120,7 +120,7 @@ import { LANES, parseStatus } from '../../lib/onboardLanes.mjs';
 import { normalRepo } from '../lib/repoCheck.mjs';
 import { readEmptiness, starterFiles, starterMessage } from '../../lib/onboardStarter.mjs';
 import {
-  CLICKUP_FIELDS, CLICKUP_STEPS, installerPath, logSinceOldLanesBack, OLD_LANES_BACK, oldLanesBack, passInFlight,
+  CLICKUP_FIELDS, CLICKUP_STEPS, installerPath, lanesStepBegun, logSinceOldLanesBack, OLD_LANES_BACK, oldLanesBack, passInFlight,
   readInstallerStatus, runsOldLoop, safeToSwitch, snapshotArgs, switchDir, switchSettings, withClickupSteps,
 } from './fromClickup.mjs';
 
@@ -798,7 +798,7 @@ export async function onboard(opts, deps) {
     // of these steps. Each is skipped once the step log has it done (its
     // lanes are loaded again by the lanes step, from the setup branch, so
     // "nothing loaded" cannot tell on a rerun), or once the setup is merged.
-    // Before the lanes step, though, a loaded lane can only be an old one:
+    // Before the lanes step has begun, though, a loaded lane is an old one:
     // a rerun that finds them back runs all four again (SP-253).
     if (onClickup) {
       // Read from the last time the old lanes were found back on (SP-253):
@@ -854,14 +854,13 @@ export async function onboard(opts, deps) {
       // switch-check all run again, and the step log says why.
       if (!setup.on && deps.exists(installer)) {
         const stopDone = loggedDone(clickupLog(), step);
-        const lanesDone = loggedDone(deps.readText(logFile), 'lanes');
-        if (stopDone && !lanesDone) {
-          const back = status().filter((j) => j.loaded);
-          if (oldLanesBack({ stopDone, lanesDone, jobs: back })) {
-            const why = `${slug}'s old lanes are loaded again (${back.map((j) => j.label ?? j.name).join(', ')}, ${installer} --status) since the stop was done, so they may have written to ClickUp since the import: stop, snapshot, import and switch-check run again`;
-            say(step, why);
-            record(step, OLD_LANES_BACK, why);
-          }
+        const lanesBegun = lanesStepBegun(deps.readText(logFile));
+        const jobs = stopDone && !lanesBegun ? status() : [];
+        if (oldLanesBack({ stopDone, lanesBegun, jobs })) {
+          const back = jobs.filter((j) => j.loaded);
+          const why = `${slug}'s old lanes are loaded again (${back.map((j) => j.label ?? j.name).join(', ')}, ${installer} --status) since the stop was done, so they may have written to ClickUp since the import: stop, snapshot, import and switch-check run again`;
+          say(step, why);
+          record(step, OLD_LANES_BACK, why);
         }
       }
       const skipStop = doneBefore(step);

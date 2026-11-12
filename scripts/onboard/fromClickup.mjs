@@ -161,14 +161,24 @@ export function passInFlight(logText, { lock = null, pid = null } = {}) {
 export const OLD_LANES_BACK = 'again';
 
 /**
+ * Has the lanes step begun? Any `lanes` line in the step log, whatever its
+ * outcome. onboard:lanes loads Spirality's own lanes under the same labels
+ * and can then fail, leaving no `lanes | done` line; from the first `lanes`
+ * line on, a loaded lane may be the new one, so it cannot tell (SP-253).
+ */
+export function lanesStepBegun(logText) {
+  return String(logText || '').split('\n').some((line) => line.split(' | ')[1] === 'lanes');
+}
+
+/**
  * Are the old lanes back? A rerun finds them loaded again after the stop
- * step was done, before the lanes step has loaded Spirality's own (after
- * that, a loaded lane may be the new one, so it cannot tell). `jobs` is
+ * step was done, before the lanes step has begun (from then on, a loaded
+ * lane may be Spirality's own, so it cannot tell). `jobs` is
  * readInstallerStatus of the old installer's `--status`. Dane switching a
  * project back to its old loop mid-setup (2026-11-11, StarCaster) is how.
  */
-export function oldLanesBack({ stopDone, lanesDone, jobs }) {
-  return Boolean(stopDone) && !lanesDone && jobs.some((j) => j.loaded);
+export function oldLanesBack({ stopDone, lanesBegun, jobs }) {
+  return Boolean(stopDone) && !lanesBegun && jobs.some((j) => j.loaded);
 }
 
 /**

@@ -134,7 +134,7 @@ test('an open and a closed ticket are copied with their times, bodies, statuses 
     assert.equal(store.importedId({ source: SOURCE, kind: 'ticket', sourceId: 'cu-open' }), 'WG-1');
     assert.equal(store.importedId({ source: SOURCE, kind: 'ticket', sourceId: 'cu-closed' }), 'WG-2');
     assert.equal(store.getProject('widget').prefix, 'WG');
-    assert.deepEqual(counts.tickets, { read: 3, written: 2, skipped: 0, refused: 1 });
+    assert.deepEqual(counts.tickets, { read: 3, written: 2, updated: 0, skipped: 0, refused: 1 });
     assert.deepEqual(tracker.writes, []);
     // Closed tickets were asked for, from the configured list.
     assert.deepEqual(tracker.calls[0], ['listTasksPage', '4242', 0, { includeClosed: true }]);
@@ -215,7 +215,7 @@ test('a second run writes nothing new and skips everything; a new reply on an ol
 
     const second = await importLoopQueue({ tracker: fakeTracker(data), store, config: CONFIG });
     for (const k of ['tickets', 'comments', 'replies']) assert.equal(second.counts[k].written, 0, k);
-    assert.deepEqual(second.counts.tickets, { read: 3, written: 0, skipped: 2, refused: 1 });
+    assert.deepEqual(second.counts.tickets, { read: 3, written: 0, updated: 0, skipped: 2, refused: 1 });
     assert.deepEqual(second.counts.comments, { read: 4, written: 0, skipped: 4, refused: 0 });
     assert.deepEqual(second.counts.replies, { read: 2, written: 0, skipped: 2, refused: 0 });
     assert.equal(store.listTickets('widget').length, 2);
@@ -346,7 +346,7 @@ test('a deleted unstarted ticket is not filed again by a re-run, and its comment
     assert.equal(store.importedId({ source: SOURCE, kind: 'ticket', sourceId: 'cu-q' }), t.id);
 
     const again = await importLoopQueue({ tracker: fakeTracker(data), store, config: CONFIG });
-    assert.deepEqual(again.counts.tickets, { read: 1, written: 0, skipped: 1, refused: 0 });
+    assert.deepEqual(again.counts.tickets, { read: 1, written: 0, updated: 0, skipped: 1, refused: 0 });
     assert.equal(again.counts.comments.written, 0);
     assert.deepEqual(store.listTickets('widget'), []);
     assert.equal(store.getTicket(t.id), null);
@@ -361,4 +361,59 @@ test('a project whose ClickUp list is "0" (never on ClickUp, or archived) is ref
     assert.match(why, /read-only archive/);
     assert.match(why, /npm run tracker:old-id/);
   }
+});
+
+// SP-253: the old loops kept writing to ClickUp after the first import.
+test('a ticket ClickUp changed since its import is brought up to date, read back, and a run after that reads nothing more for it', async () => {
+  const { store, cleanup } = freshStore();
+  try {
+    const data = {
+      tasks: [
+        task('cu-a', { status: 'Queued', created: '2026-03-01T00:00:00Z', name: 'Moves on' }),
+        task('cu-b', { status: 'Queued', created: '2026-03-02T00:00:00Z', name: 'Stays put' }),
+      ],
+      bodies: { 'cu-a': 'First body', 'cu-b': 'B body' },
+    };
+    await importLoopQueue({ tracker: fakeTracker(data), store, config: CONFIG });
+    const [a0] = store.listTickets('widget');
+    assert.equal(a0.status, 'queued');
+
+    // The old loops take it to In review and edit it; ClickUp's update time moves on.
+    data.tasks[0] = { ...data.tasks[0], status: { status: 'In review', type: 'custom' }, name: 'Moved on',
+      priority: { priority: 'high' }, tags: [{ name: 'tracker' }, { name: 'later' }], date_updated: ms('2026-03-05T00:00:00Z') };
+    data.bodies['cu-a'] = 'Second body';
+    const tracker = fakeTracker(data);
+    const again = await importLoopQueue({ tracker, store, config: CONFIG });
+    assert.deepEqual(again.counts.tickets, { read: 2, written: 0, updated: 1, skipped: 1, refused: 0 });
+    const a = store.getTicket(a0.id);
+    assert.deepEqual([a.status, a.name, a.description, a.priority, a.tags], ['in review', 'Moved on', 'Second body', 'high', ['tracker', 'later']]);
+    assert.equal(a.createdAt, a0.createdAt, 'the filing time is kept');
+    const machine = store.importedId({ source: SOURCE, kind: 'actor', sourceId: 'machine' });
+    assert.ok(store.listEvents(a.id).filter((e) => e.field !== 'created').every((e) => e.actor === machine), 'written as the import');
+    assert.deepEqual(tracker.calls.filter((c) => c[0] === 'getTask').map((c) => c[1]), ['cu-a'], 'the unchanged ticket costs no full read');
+    assert.deepEqual(tracker.writes, []);
+    assert.match(formatReport(again), /tickets\s+2\s+0\s+1\s+1\s+0/);
+
+    const third = fakeTracker(data);
+    const steady = await importLoopQueue({ tracker: third, store, config: CONFIG });
+    assert.deepEqual(steady.counts.tickets, { read: 2, written: 0, updated: 0, skipped: 2, refused: 0 });
+    assert.ok(!third.calls.some((c) => c[0] === 'getTask'), 'up to date: no full reads');
+  } finally { cleanup(); }
+});
+
+test('a ticket changed in the tracker since its import is never written over by ClickUp\'s fields: it is refused by name', async () => {
+  const { store, cleanup } = freshStore();
+  try {
+    const data = { tasks: [task('cu-a', { status: 'Queued', created: '2026-03-01T00:00:00Z', name: 'Mine now' })] };
+    await importLoopQueue({ tracker: fakeTracker(data), store, config: CONFIG });
+    const [t0] = store.listTickets('widget');
+    const someone = store.createActor({ kind: 'human', name: 'Someone' }).id;
+    store.changeTicket(t0.id, { actor: someone, name: 'Renamed in the tracker' });
+    data.tasks[0] = { ...data.tasks[0], status: { status: 'Building', type: 'custom' } };
+    const again = await importLoopQueue({ tracker: fakeTracker(data), store, config: CONFIG });
+    assert.equal(again.counts.tickets.refused, 1);
+    assert.match(again.refusals[0], /cu-a "Mine now".*changed in the tracker too \(1 change\(s\), the first name/);
+    const t = store.getTicket(t0.id);
+    assert.deepEqual([t.status, t.name], ['queued', 'Renamed in the tracker']);
+  } finally { cleanup(); }
 });

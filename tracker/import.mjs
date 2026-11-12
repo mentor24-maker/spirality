@@ -28,9 +28,14 @@
  * account is the machine too. Anyone else gets a human actor of their own,
  * created once and found again on every later run.
  *
- * Safe to run again: anything already in the map is skipped, so a second run
- * adds only what is new (a ticket's fields are not refreshed; only new
- * tickets, comments and replies are added).
+ * Safe to run again: anything already in the map is not filed twice, so a
+ * second run adds only the new tickets, comments and replies. A ticket
+ * already imported has its ClickUp-owned fields (name, description, status,
+ * priority, tags, assignee, Loop note) brought up to date from ClickUp
+ * when ClickUp changed it since (the old loops moved its status
+ * after the first import), counted as `updated`, read back. Only while
+ * nobody has changed it in the tracker: a ticket with a change of its own in
+ * the tracker (any event but the import's filing and refreshes) is refused, never written over.
  *
  * Refusals, never guesses: a status that is not one of the eight
  * (lib/loopStatuses.js) stops that ticket, and the end-of-run report names
@@ -93,7 +98,9 @@ export class ImportReadError extends Error {
 }
 
 function emptyCounts() {
-  return Object.fromEntries(KINDS.map((k) => [k, { read: 0, written: 0, skipped: 0, refused: 0 }]));
+  const counts = Object.fromEntries(KINDS.map((k) => [k, { read: 0, written: 0, skipped: 0, refused: 0 }]));
+  counts.tickets.updated = 0; // an imported ticket refreshed from ClickUp
+  return counts;
 }
 
 function httpWhy(out) {
@@ -163,8 +170,15 @@ export async function importLoopQueue({ tracker, store, config, log = () => {} }
         continue;
       }
 
+      // An imported ticket ClickUp has changed since is refreshed.
+      const existing = ticketId == null ? null : store.getTicket(ticketId);
+      const refresh = existing != null && clickupChanged(task, existing);
+      if (refresh && !STATUSES.includes(statusOf(task))) {
+        refuse('tickets', label, `status "${task.status?.status ?? ''}" is not one of the eight, so ${ticketId} was not brought up to date (its new comments still are)`);
+      }
+
       // Everything this ticket needs is read before anything of it is written.
-      const full = ticketId == null ? await readTask(tracker, task.id) : null;
+      const full = ticketId == null || (refresh && STATUSES.includes(statusOf(task))) ? await readTask(tracker, task.id) : null;
       const comments = await readComments(tracker, task.id);
       const replies = new Map();
       for (const c of comments) {
@@ -184,7 +198,9 @@ export async function importLoopQueue({ tracker, store, config, log = () => {} }
           for (const list of replies.values()) counts.replies.refused += list.length;
           continue;
         }
-      } else {
+      } else if (full) {
+        refreshTicket(store, { task, full, ticket: existing, label, counts, refuse, authorOf, machine });
+      } else if (!refresh) {
         counts.tickets.skipped += 1;
       }
 
@@ -290,11 +306,7 @@ async function readReplies(tracker, commentId) {
 }
 
 function writeTicket(store, { task, full, project, authorOf, machine }) {
-  const loopNote = (full.custom_fields || task.custom_fields || []).find((f) => f?.name === LOOP_NOTE_FIELD)?.value;
   const filer = authorOf(full.creator || task.creator, '') ?? machine.id;
-  const firstAssignee = (full.assignees || task.assignees || [])[0];
-  let assignee = firstAssignee ? authorOf(firstAssignee, '') : null;
-  if (assignee === machine.id) assignee = null; // the machine is never assigned a ticket
   return store.importTicket({
     source: SOURCE,
     sourceId: task.id,
@@ -302,6 +314,29 @@ function writeTicket(store, { task, full, project, authorOf, machine }) {
     updatedAt: clickupTime(task.date_updated) ?? undefined,
     project: project.slug,
     actor: filer,
+    ...clickupFields({ task, full, authorOf, machine }),
+  });
+}
+
+/**
+ * Has ClickUp changed this ticket since the tracker's copy was written? Its
+ * status differs, or ClickUp's own update time is later than the copy's
+ * (the copy's is ClickUp's at import, and the refresh's own time after).
+ * Answers false without another read when neither: most tickets.
+ */
+function clickupChanged(task, ticket) {
+  if (statusOf(task) !== ticket.status) return true;
+  const at = clickupTime(task.date_updated);
+  return at != null && at > ticket.updatedAt;
+}
+
+/** The fields ClickUp owns, from the list row and the full read, as the store takes them. */
+function clickupFields({ task, full, authorOf, machine }) {
+  const loopNote = (full.custom_fields || task.custom_fields || []).find((f) => f?.name === LOOP_NOTE_FIELD)?.value;
+  const firstAssignee = (full.assignees || task.assignees || [])[0];
+  let assignee = firstAssignee ? authorOf(firstAssignee, '') : null;
+  if (assignee === machine.id) assignee = null; // the machine is never assigned a ticket
+  return {
     name: task.name,
     description: full.markdown_description || full.description || '',
     status: statusOf(task),
@@ -309,7 +344,45 @@ function writeTicket(store, { task, full, project, authorOf, machine }) {
     tags: (task.tags || []).map((t) => t?.name).filter((n) => typeof n === 'string'),
     assignee,
     loopNote: typeof loopNote === 'string' ? loopNote : '',
-  });
+  };
+}
+
+/**
+ * Bring an imported ticket's ClickUp-owned fields up to date. Never
+ * over a change made in the tracker: any event on it by an actor other than
+ * the import's machine (its filing apart) is refused. The write is guarded on the version read
+ * and read back.
+ */
+function refreshTicket(store, { task, full, ticket, label, counts, refuse, authorOf, machine }) {
+  // The filing event is the import's own (filed under the ClickUp creator).
+  const own = store.listEvents(ticket.id).filter((e) => e.field !== 'created' && e.actor !== machine.id);
+  if (own.length) {
+    refuse('tickets', label, `ClickUp changed it since the import, but ${ticket.id} has been changed in the tracker too (${own.length} change(s), the first ${own[0].field} at ${own[0].at}), so ClickUp's fields were not written over it`);
+    return;
+  }
+  const fields = clickupFields({ task, full, authorOf, machine });
+  let r;
+  try {
+    r = store.changeTicket(ticket.id, { actor: machine.id, ifVersion: ticket.version, ...fields });
+  } catch (err) {
+    if (!(err instanceof StoreError)) throw err;
+    refuse('tickets', label, `${ticket.id} could not be brought up to date: ${err.message}`);
+    return;
+  }
+  if (!r.ok) {
+    refuse('tickets', label, `${ticket.id} changed while it was being brought up to date (now ${r.status}, version ${r.version}); nothing was written`);
+    return;
+  }
+  if (!r.changed.length) {
+    counts.tickets.skipped += 1;
+    return;
+  }
+  // Read back (rule 5): the stored ticket holds what ClickUp says.
+  const after = store.getTicket(ticket.id);
+  if (after?.status !== fields.status || after?.name !== fields.name) {
+    throw new StoreError('write-failed', `${ticket.id} read back as "${after?.status}" "${after?.name}" after it was brought up to date to "${fields.status}" "${fields.name}"`);
+  }
+  counts.tickets.updated += 1;
 }
 
 /** Copy one comment or reply; answers its new id (also when it was already there), or null. */
@@ -346,10 +419,11 @@ function copyComment(store, { kind, item, ticketId, parent, label, counts, refus
 export function formatReport({ counts, refusals }, { dryRun = false } = {}) {
   const written = dryRun ? 'would write' : 'written';
   const pad = (s, n) => String(s).padStart(n);
-  const lines = [`${''.padEnd(9)}${pad('read', 6)}${pad(written, 13)}${pad('skipped', 9)}${pad('refused', 9)}`];
+  const updated = dryRun ? 'would update' : 'updated';
+  const lines = [`${''.padEnd(9)}${pad('read', 6)}${pad(written, 13)}${pad(updated, 14)}${pad('skipped', 9)}${pad('refused', 9)}`];
   for (const k of KINDS) {
     const c = counts[k];
-    lines.push(`${k.padEnd(9)}${pad(c.read, 6)}${pad(c.written, 13)}${pad(c.skipped, 9)}${pad(c.refused, 9)}`);
+    lines.push(`${k.padEnd(9)}${pad(c.read, 6)}${pad(c.written, 13)}${pad(c.updated ?? '-', 14)}${pad(c.skipped, 9)}${pad(c.refused, 9)}`);
   }
   if (refusals.length) {
     lines.push('', `Refused (${refusals.length}):`);

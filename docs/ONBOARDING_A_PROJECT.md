@@ -131,7 +131,7 @@ each skipped on a rerun once the step log has it done:
 |---|---|---|
 | `stop` | Reads the old lanes from the project's own installer (`--status`: each lane, its launchd label, its log), runs the snapshot's dry run (below) first, so a missing ClickUp token or list stops the run while the old loop still runs, then reads `--status` again and checks no pass is in flight (a log ending on a `START` with no `END`, unless the lane's `lock:` line says `none` or `STALE`, meaning its runner was killed mid-pass; a loaded lane whose `--status` names no log cannot be checked, and fails the step), and straight after that check runs that installer's `--uninstall`, reading `--status` back. Nothing slow sits between the check and the unload, so a pass that starts during the dry run is seen, not cut off. A project cloned in the same run that turns out to have an old loop stops at `clone`, before the sign-ins, so the rerun (or the setup page's form) asks the ClickUp questions. | `stop  stopped com.wavecenter.loop-build, ...` |
 | `snapshot` | `tracker:snapshot`, a dry run (unless the stop step just ran it) then the real one: the Loop Queue list plus every extra list, saved and packed on the Mini. | every count OK |
-| `import` | `tracker:import` into the tracker's database, a dry run then the real one. Unlike the others, it runs again on every rerun until `switch-check` has said Safe to switch, because the check's `NOT YET IMPORTED` and `STATUS DIFFERS` both mean "import again" (the import is safe to rerun). | nothing refused |
+| `import` | `tracker:import` into the tracker's database, a dry run then the real one. Unlike the others, it runs again on every rerun until `switch-check` has said Safe to switch, because the check's `NOT YET IMPORTED` and `STATUS DIFFERS` both mean "import again" (the import is safe to rerun, and brings an imported ticket ClickUp has changed since up to date). | nothing refused |
 | `switch-check` | `tracker:switch-check`. | `Safe to switch.` |
 
 Any of them failing prints `FAILED: <step>: ...` and the rerun command, and
@@ -142,14 +142,32 @@ stopped, and the rerun after the pass ends goes on.
 four steps (at `copy`, say) and the project's old lanes are put back
 (`./scripts/install_loop_runner.sh --install` in its checkout), they write
 to ClickUp again, and the import no longer has everything. So a rerun
-before the `lanes` step reads the old installer's `--status`, and if any
-lane is loaded again it says so (`stop  <slug>'s old lanes are loaded
+before the `lanes` step has begun reads the old installer's `--status`, and
+if any lane is loaded again it says so (`stop  <slug>'s old lanes are loaded
 again ...`, logged as `stop | again`) and runs all four again, in order:
 the dry run, the stop, a fresh snapshot, the import and the switch check.
 Only what the step log says after that `again` line counts as done, so a
 rerun that fails part-way picks up from there. A rerun whose old lanes
-stayed stopped skips the four, as before. (After the `lanes` step a loaded
-lane may be Spirality's own, so it is not read as the old ones coming back.)
+stayed stopped skips the four, as before.
+
+The import run again brings in what the old lanes wrote: new tickets,
+comments and replies, and, on a ticket already imported, its status, name,
+description, priority, tags, assignee and Loop note, wherever ClickUp
+changed it since (its report counts these as `updated`). It never writes
+over a ticket someone changed in the tracker; that one is refused by name.
+So the switch check after it can say Safe to switch.
+
+Two limits. Once the `lanes` step has begun (any `lanes` line in the step
+log, a failed one too), a loaded lane may be Spirality's own:
+`onboard:lanes` loads them under the same labels and can fail after that.
+So it is no longer read as the old ones coming back; if you put the old
+lanes back after that point, stop them yourself before the rerun
+(`./scripts/install_loop_runner.sh --uninstall` in the project's checkout)
+and run the import and the switch check by hand (`docs/TRACKER_MVP.md`,
+"How the loops switch over without a rewrite", steps 4 and 5). And old
+lanes turned back on and off again before the rerun are not seen at all,
+though they may have written to ClickUp: if that happened, run those two
+steps by hand before you go on.
 
 The stop step stops only the lanes the project's own installer names. A
 project can have other launchd jobs that read its Loop Queue list
