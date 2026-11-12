@@ -491,6 +491,52 @@ export function firstParagraph(markdown) {
   return '';
 }
 
+/**
+ * His own request, read off a description's `## Asked` section (SP-213):
+ * the fenced block under that heading, as the intake loop writes it. Its
+ * first line is his title; the text after the first blank line is his
+ * prompt, and a one-line request is both. `slicedFrom` is the ticket id an
+ * `## Order` section names in `Sliced from SP-<n>`, or null. Returns
+ * `{ title, words, slicedFrom }`, or null when there is no `## Asked`
+ * heading, no fence right under it, or the fence never closes. Headings
+ * inside a fence are never read as sections. Text only: nothing is escaped
+ * or reformatted here.
+ */
+export function originalRequest(description) {
+  const lines = String(description ?? '').replace(/\r\n?/g, '\n').split('\n');
+  const sections = new Map();
+  let run = null;
+  lines.forEach((line, i) => {
+    if (run) { if (closesFence(line, run)) run = null; return; }
+    const fence = FENCE.exec(line);
+    if (fence) { run = fence[1]; return; }
+    const h = /^##\s+(Asked|Order)\s*$/i.exec(line);
+    if (h && !sections.has(h[1].toLowerCase())) sections.set(h[1].toLowerCase(), i);
+  });
+  if (!sections.has('asked')) return null;
+  let i = sections.get('asked') + 1;
+  while (i < lines.length && !lines[i].trim()) i += 1;
+  const open = FENCE.exec(lines[i] ?? '');
+  if (!open) return null;
+  const body = [];
+  for (i += 1; i < lines.length && !closesFence(lines[i], open[1]); i += 1) body.push(lines[i]);
+  if (i >= lines.length) return null;
+  while (body.length && !body[0].trim()) body.shift();
+  while (body.length && !body.at(-1).trim()) body.pop();
+  if (!body.length) return null;
+  const title = body[0].trim();
+  const blank = body.findIndex((l) => !l.trim());
+  const words = blank === -1 ? body.join('\n') : body.slice(blank + 1).join('\n').replace(/^\n+/, '');
+  let slicedFrom = null;
+  if (sections.has('order')) {
+    for (let j = sections.get('order') + 1; j < lines.length && !HEADING.test(lines[j]); j += 1) {
+      const m = /^\s*Sliced from\s+([A-Za-z][A-Za-z0-9]*-\d+)\b/.exec(lines[j]);
+      if (m) { slicedFrom = m[1].toUpperCase(); break; }
+    }
+  }
+  return { title, words, slicedFrom };
+}
+
 /** The newest comment that carries an operator card, or undefined. */
 const newestCard = (comments = []) => [...comments].reverse().find((c) => cardAsk(c.body) !== null);
 
@@ -731,6 +777,12 @@ export function askParagraphs(ask) {
  * his two statuses and his answer is not in (renderAnswerIn); a card stays in
  * the thread after he answers, and its ask is no longer his move (SP-118).
  * On a machine status, one quiet line says where it is instead.
+ *
+ * When the description carries his `## Asked` request (SP-213), his own
+ * words come first: his title is the heading (the ticket's current name on a
+ * quiet line under it when a loop renamed it), then his words exactly as he
+ * typed them under "Original Request", a link to the ticket a slice was cut
+ * from, and only then the summary, under "How the Loop Understood It".
  */
 export function renderQuickAction({ name, description, status, comments = [], answerIn = false }) {
   const card = newestCard(comments);
@@ -739,8 +791,17 @@ export function renderQuickAction({ name, description, status, comments = [], an
   const his = HIS_STATUSES.includes(state);
   const ask = card && his && !answerIn ? cardAsk(card.body) : null;
   const where = his ? null : STATUS_LINES[state] ?? null;
+  const asked = originalRequest(description);
+  const top = asked ? [
+    `<h1>${escapeHtml(asked.title)}</h1>`,
+    String(name ?? '').trim() !== asked.title ? `<p class="ticket-name quiet">Ticket name: ${escapeHtml(name)}</p>` : '',
+    '<h2 class="request-heading">Original Request</h2>',
+    `<p class="original-request">${escapeHtml(asked.words)}</p>`,
+    asked.slicedFrom ? `<p class="sliced-from">Sliced from <a href="/t/${escapeHtml(asked.slicedFrom)}">${escapeHtml(asked.slicedFrom)}</a></p>` : '',
+    summary ? '<h2 class="request-heading">How the Loop Understood It</h2>' : '',
+  ] : [`<h1>${escapeHtml(name)}</h1>`];
   return [
-    `<h1>${escapeHtml(name)}</h1>`,
+    ...top,
     summary ? `<p class="summary">${renderInline(summary)}</p>` : '',
     ask ? askParagraphs(ask).map((p) => `<p class="needed">${p.map(renderInline).join('<br>')}</p>`).join('\n') : '',
     where ? `<p class="where quiet">${escapeHtml(where)}</p>` : '',

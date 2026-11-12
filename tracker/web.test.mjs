@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { seedDemo, tickingClock } from './demoData.mjs';
 import { reportsOf, REPORT_RANGES, searchTickets, PRIORITIES } from './pageData.mjs';
-import { escapeHtml, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, commandHref, renderContextDocs, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS } from './web/render.mjs';
+import { escapeHtml, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, commandHref, renderContextDocs, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS } from './web/render.mjs';
 import { startServer, setupSettingsOf } from './server.mjs';
 import { saveAnswers, setupFields, setupOf } from './setup.mjs';
 import { DANE_FIELDS as SETUP_FIELDS, STEPS as SETUP_STEPS } from '../scripts/onboard/onboard.mjs';
@@ -1062,9 +1062,75 @@ test('Quick Action with no card: the title and the description\'s first paragrap
     description: '## Asked\n~~~\nhis words\n~~~\n\n## Goal\nOpen a ticket and\nsee it.\n\nMore.',
     comments: [{ body: 'An ordinary comment.' }],
   });
-  assert.equal(html, '<h1>Fix it</h1>\n<p class="summary">Open a ticket and see it.</p>');
+  assert.equal(html, [
+    '<h1>his words</h1>',
+    '<p class="ticket-name quiet">Ticket name: Fix it</p>',
+    '<h2 class="request-heading">Original Request</h2>',
+    '<p class="original-request">his words</p>',
+    '<h2 class="request-heading">How the Loop Understood It</h2>',
+    '<p class="summary">Open a ticket and see it.</p>',
+  ].join('\n'));
+  // A ticket with no ## Asked block is drawn as it always was.
+  assert.equal(renderQuickAction({ name: 'Fix it', description: '## Goal\nOpen a ticket and\nsee it.\n\nMore.' }),
+    '<h1>Fix it</h1>\n<p class="summary">Open a ticket and see it.</p>');
   assert.equal(renderQuickAction({ name: 'Empty', description: '' }), '<h1>Empty</h1>');
   assert.equal(firstParagraph('- a list\n\nProse.'), 'Prose.');
+});
+
+// ── Quick Action: his original request first (SP-213) ────────────────────────
+
+test('originalRequest reads his title and words off the ## Asked fence, whatever the fence', () => {
+  const words = 'In the attached screenshot there is no reference.\n\n> a quoted line\n`code` and *stars*';
+  for (const fence of ['```', '~~~', '````', '~~~~~']) {
+    const description = `## Asked\n${fence}\nShow the prompt\n\n${words}\n${fence}\nAttached: shot.png\n\n## Goal\nThe goal.`;
+    assert.deepEqual(originalRequest(description), { title: 'Show the prompt', words, slicedFrom: null }, fence);
+  }
+  // A shorter or different run inside his words does not close a four-backtick fence.
+  assert.equal(originalRequest('## Asked\n````\nTitle\n\nsee ```this```\n```\nstill his\n````\n').words, 'see ```this```\n```\nstill his');
+  // A one-line request is both the title and the words.
+  assert.deepEqual(originalRequest('## Asked\n```\nmake the board easier to read\n```\n'), { title: 'make the board easier to read', words: 'make the board easier to read', slicedFrom: null });
+  // Windows line ends read the same.
+  assert.equal(originalRequest('## Asked\r\n```\r\nT\r\n\r\nw\r\n```\r\n').words, 'w');
+  // No block, an unclosed fence, no fence, an empty fence, or "## Asked" inside another fence: null.
+  for (const d of ['', '## Goal\nx', '## Asked\n```\nTitle\n\nnever closed', '## Asked\nplain text\n', '## Asked\n```\n```\n', '```\n## Asked\n~~~\nx\n~~~\n```\n', null, undefined]) {
+    assert.equal(originalRequest(d), null, JSON.stringify(d));
+  }
+  // A slice names the ticket it was cut from.
+  const slice = '## Asked\n```\nT\n\nw\n```\n\n## Order\nSliced from SP-217 ("The bell"), slice 2 of 2.\nWaits on: SP-217\n\n## Goal\ng';
+  assert.equal(originalRequest(slice).slicedFrom, 'SP-217');
+  // "Sliced from" in another section is not a slice.
+  assert.equal(originalRequest('## Asked\n```\nT\n```\n\n## Goal\nSliced from SP-9').slicedFrom, null);
+});
+
+test('Quick Action puts his title and words first, the loop\'s reading after, and a slice links back (SP-213)', () => {
+  const sixty = Array.from({ length: 60 }, (_, i) => `w${i}`).join(' ');
+  const card = machineComment.stripMachineMarker(machineComment.stampMachineComment(operatorCard.buildCard(
+    `@@ASKED\nx\n@@CONTEXT\n${sixty}\n@@NEEDED\nReply "go".\nYour move: Reply — "go".`).rendered));
+  const description = '## Asked\n```\nTask Details needs the prompt\n\nLine one <b>\n> quoted\n`tick` *star*\n```\n\n## Order\nSliced from SP-196 ("x"), slice 1 of 2.\n\n## Goal\nThe goal.';
+  const html = renderQuickAction({ name: 'Show the original request on Task Details', description, status: 'needs your input', comments: [{ body: card }] });
+  const order = ['<h1>Task Details needs the prompt</h1>', 'Ticket name: Show the original request on Task Details',
+    'Original Request', 'class="original-request"', 'Sliced from <a href="/t/SP-196">SP-196</a>', 'How the Loop Understood It',
+    'class="summary">w0', 'class="needed"'];
+  let at = -1;
+  for (const part of order) { const next = html.indexOf(part); assert.ok(next > at, `${part} comes next`); at = next; }
+  // His words drawn as typed: escaped, never Markdown.
+  assert.match(html, /<p class="original-request">Line one &lt;b&gt;\n&gt; quoted\n`tick` \*star\*<\/p>/);
+  assert.doesNotMatch(html, /<code>|<em>|<blockquote>|<b>/);
+  // The same name as his title: no Ticket name line, and no slice line without ## Order.
+  const same = renderQuickAction({ name: 'Fix it', description: '## Asked\n```\nFix it\n\nplease\n```\n', status: 'queued' });
+  assert.doesNotMatch(same, /Ticket name:|Sliced from|How the Loop/);
+  assert.match(same, /^<h1>Fix it<\/h1>\n<h2 class="request-heading">Original Request<\/h2>\n<p class="original-request">please<\/p>\n<p class="where quiet">/);
+  // His words keep their line breaks on the page.
+  assert.match(readFileSync(WEB('app.css'), 'utf8'), /\.quick \.original-request \{[^}]*white-space: pre-wrap/);
+  // The tab title is still the ticket's current name.
+  assert.match(readFileSync(WEB('app.mjs'), 'utf8'), /tabTitle\(/);
+});
+
+test('every word of his original request in Quick Action is escaped', () => {
+  const nasty = '<script>alert(1)</script>';
+  const html = renderQuickAction({ name: nasty, description: `## Asked\n\`\`\`\n${nasty}\n\n${nasty}\n\`\`\`\n\n## Order\nSliced from SP-1\n` });
+  assert.doesNotMatch(html, /<script/);
+  assert.equal(html.match(/&lt;script&gt;alert\(1\)&lt;\/script&gt;/g).length, 2, 'title and words; the name matches the title so is not repeated');
 });
 
 test('every word of ticket text in Quick Action is escaped', () => {
