@@ -1523,6 +1523,21 @@ export function renderCommandView(command) {
  */
 export const PRIORITY_ORDER = Object.freeze(['urgent', 'high', 'normal', 'low']);
 
+/**
+ * SP-208: a List view row's Priority cell, a dropdown that saves on change
+ * (app.mjs wireListPriorities). The same choices and rule as the Change
+ * panel's picker: Urgent, High, Normal, Low, the ticket's own selected; a
+ * ticket with none shows "None", and once one is picked "None" is no longer
+ * offered. Beside it, the note that says "Saving…", "Saved" or a refusal.
+ */
+export function renderListPriority({ id, priority }) {
+  const options = [
+    ...(priority == null ? [option('', 'None', true)] : []),
+    ...PRIORITY_ORDER.map((p) => option(p, capital(p), p === priority)),
+  ].join('');
+  return `<select class="list-priority" data-priority-of="${escapeHtml(id)}" aria-label="Priority of ${escapeHtml(id)}">${options}</select><span class="note" data-priority-note="${escapeHtml(id)}" role="status"></span>`;
+}
+
 /** The columns a stage's table sorts on, in the order they are drawn, with the class each cell wears. */
 export const SORT_COLUMNS = Object.freeze([
   { key: 'id', label: 'Ticket #' },
