@@ -5,7 +5,7 @@
  * checked byte for byte against the Spirality commit it came from
  * (SETUP_REVIEW.md part 3, step 4; Dane's answer to question 7).
  *
- *   npm run onboard:copy -- --answers <file> --config <settings file> [--allow-replace]
+ *   npm run onboard:copy -- --answers <file> --config <settings file> [--allow-replace] [--check-only]
  *   npm run onboard:copy -- --answers <file> [--config <file>] --dry-run
  *
  * Run from Spirality's own folder, on a clean checkout of a commit that is on
@@ -33,12 +33,28 @@
  *               (running `npm run verify` when that was added).
  *   3. check    every "copy as is" file compared with `cmp` against the
  *               Spirality commit; any difference stops it before commit.
- *   4. pr       commit, push and one pull request; its body names the
+ *   4. commit   SP-252: the project's packages installed in the worktree
+ *               first (`npm ci`, when it has a package-lock.json), so its own
+ *               git hooks can run on the commit; never `--no-verify`.
+ *   5. verify   SP-252: the project's own `npm run verify`, run on the setup
+ *               branch in the worktree. For a project already on ClickUp, a
+ *               red verify first retires the old loop's tests that check
+ *               the files the setup writes, by lib/onboardRetire.mjs's rule
+ *               (fails alone here, passes alone where the branch started,
+ *               names a file the setup writes), in a commit of its own; then
+ *               verify runs again, the rule applied again to what fails next
+ *               (up to three rounds). Still red stops the run. Skipped when it
+ *               passed before on the same commit, and for a new project
+ *               (CI runs its verify on the pull request, as before).
+ *               `--check-only` stops here: nothing pushed, no pull request.
+ *               The wizard runs it so before it stops a project's old loops.
+ *   6. pr       push and one pull request; its body names the
  *               Spirality commit and lists every file with its check. For a
  *               project already on ClickUp (SP-159: its answers name a
  *               clickupListId) it also lists every file of the old copy it
- *               replaces and every file beside them it does not touch.
- *   5. readback from the worktree: `npm run doctor`, `npm run clickup --
+ *               replaces, every file beside them it does not touch, and
+ *               every test it retired, with why.
+ *   7. readback from the worktree: `npm run doctor`, `npm run clickup --
  *               whoami` (the project's hand-run seat) and `queue`; then CI's
  *               verify on the pull request.
  *
@@ -54,6 +70,9 @@ import { dirname, join } from 'node:path';
 import { loadProjectConfig, findConfigFile } from '../../lib/projectConfig.mjs';
 import { loadAnswers, onboardDir, expandHome } from '../../lib/onboardAnswers.mjs';
 import {
+  RUN_ONE_TEST, RUN_ONE_TEST_ENV, TEST_FILE, parseRetired, pickRetired, retireCandidates, retiredLine, retiredSection,
+} from '../../lib/onboardRetire.mjs';
+import {
   planCopies, compareWithProject, templateVars, mergeNpmScripts, withClaudeSections, withIgnoreLines,
   verifyWorkflow, hasVerifyJob, verifyScriptFor, render, ciVerdict, answersAsHandRun, SETUP_BRANCH, oldCopyLists,
   npmConflictMessage, replacedScriptLines,
@@ -65,6 +84,7 @@ const arg = (name) => { const i = argv.indexOf(`--${name}`); return i >= 0 ? arg
 const flag = (name) => argv.includes(`--${name}`);
 const dryRun = flag('dry-run');
 const allowReplace = flag('allow-replace');
+const checkOnly = flag('check-only');
 const rerun = `npm run onboard:copy -- ${argv.join(' ')}`;
 
 function fail(step, seen) {
@@ -74,13 +94,17 @@ function fail(step, seen) {
 }
 const say = (step, line) => console.log(`${step.padEnd(8)} ${line}`);
 const last = (text, n = 6) => String(text || '').split('\n').filter(Boolean).slice(-n).join(' | ');
-function run(cmd, args, { cwd, input, env } = {}) {
-  const r = spawnSync(cmd, args, { cwd, input, encoding: 'utf8', env: env ? { ...process.env, ...env } : process.env });
+// A project's verify can print a lot; spawnSync's 1 MB default would kill it.
+function run(cmd, args, { cwd, input, env, timeout } = {}) {
+  const r = spawnSync(cmd, args, { cwd, input, encoding: 'utf8', env: env ? { ...process.env, ...env } : process.env, timeout, maxBuffer: 256 * 1024 * 1024 });
   return { ok: r.status === 0, code: r.status, out: String(r.stdout || '').trim(), err: String(r.stderr || r.error || '').trim() };
 }
+const MINUTE = 60 * 1000;
+// How many times the retire rule is applied before a red verify stops the run.
+const RETIRE_ROUNDS = 3;
 
 if (!arg('answers') || (!dryRun && !arg('config'))) {
-  console.error('usage: npm run onboard:copy -- --answers <file> --config <settings file> [--allow-replace] [--dry-run]');
+  console.error('usage: npm run onboard:copy -- --answers <file> --config <settings file> [--allow-replace] [--check-only] [--dry-run]');
   process.exit(2);
 }
 if (dryRun) console.log('Dry run: every check runs and nothing is written or opened (git fetch only refreshes what the checkout knows of origin).\n');
@@ -231,13 +255,26 @@ try {
 if (differ.length) fail('check', `these differ from Spirality ${commit.slice(0, 7)} after the copy: ${differ.join(', ')}`);
 say('check', `${all.filter((f) => f.kind === 'copy').length} files identical to Spirality ${commit.slice(0, 7)} (cmp)`);
 
-// ── 4. pr ──────────────────────────────────────────────────────────────────
-wgit('add', '-A');
-if (wgit('status', '--porcelain').out) {
+// ── 4. commit ──────────────────────────────────────────────────────────────
+// The project's own git hooks run on this commit (StarCaster's pre-commit
+// needs esbuild), so its packages go in first. Never --no-verify.
+const installPackages = (dir, step) => {
+  if (!existsSync(join(dir, 'package-lock.json')) || existsSync(join(dir, 'node_modules', '.package-lock.json'))) return;
+  say(step, `installing ${answers.projectName}'s packages in ${dir} (npm ci), so its own hooks and checks can run there`);
+  const i = run('npm', ['ci', '--no-audit', '--no-fund'], { cwd: dir, timeout: 30 * MINUTE });
+  if (!i.ok) fail(step, `npm ci in ${dir}: ${last(i.err || i.out)}`);
+};
+const commitStep = (message, step) => {
+  const c = wgit('commit', '-q', '-m', message);
+  if (!c.ok) fail(step, `git commit in ${worktree} (the project's own hooks run on it): ${last(c.err || c.out)}`);
+  say(step, `committed ${wgit('rev-parse', '--short', 'HEAD').out}`);
+};
+// node_modules is never part of it, even in a project that does not ignore it.
+wgit('add', '-A', '--', '.', ':(exclude)node_modules');
+installPackages(worktree, 'commit');
+if (!wgit('diff', '--cached', '--quiet').ok) {
   const msg = `${answers.projectName} gets the loop from Spirality ${commit.slice(0, 7)}: settings, verify check, ticket door, skills and lanes\n\nWritten by Spirality's setup wizard (scripts/onboard/copy.mjs). Every\n"copy" file is byte for byte Spirality ${commit}.`;
-  const c = wgit('commit', '-q', '-m', msg);
-  if (!c.ok) fail('pr', `git commit: ${last(c.err)}`);
-  say('pr', `committed ${wgit('rev-parse', '--short', 'HEAD').out}`);
+  commitStep(msg, 'commit');
   // What git stored, not what was written: a project's .gitattributes (line
   // endings, filters) could change the bytes on the way in.
   const stored = all.filter((f) => f.kind === 'copy').filter((f) => {
@@ -245,10 +282,114 @@ if (wgit('status', '--porcelain').out) {
     return r.status !== 0 || !Buffer.from(r.stdout).equals(Buffer.from(rawSpirality(f.from)));
   }).map((f) => f.to);
   if (stored.length) fail('check', `after the commit these differ from Spirality ${commit.slice(0, 7)} (a .gitattributes rule?): ${stored.join(', ')}`);
-  say('check', 'the commit holds every copied file byte for byte'); 
+  say('check', 'the commit holds every copied file byte for byte');
 } else {
-  say('pr', 'nothing new to commit');
+  say('commit', 'nothing new to commit');
 }
+
+// ── 5. verify (SP-252) ─────────────────────────────────────────────────────
+const retiredFile = join(dirname(worktree), `${answers.projectSlug}-setup-retired.json`);
+const verifiedFile = join(dirname(worktree), `${answers.projectSlug}-setup-verified`);
+const readRetired = () => {
+  const list = parseRetired(existsSync(retiredFile) ? readFileSync(retiredFile, 'utf8') : null);
+  if (list == null) fail('verify', `${retiredFile} does not read as the list of retired tests; look at it, remove it, then rerun`);
+  return list;
+};
+let retired = readRetired();
+const head = () => wgit('rev-parse', 'HEAD').out;
+// Where the setup branch started: the commit the old loop's tests must pass on.
+const baseCommit = () => {
+  const b = wgit('merge-base', 'HEAD', 'origin/main');
+  if (!b.ok || !b.out) fail('verify', `git merge-base HEAD origin/main in ${worktree}: ${last(b.err) || 'no answer'}`);
+  return b.out;
+};
+const projectVerify = () => run('npm', ['run', 'verify'], { cwd: worktree, timeout: 60 * MINUTE });
+const showTail = (r, n = 25) => {
+  for (const line of `${r.out}\n${r.err}`.split('\n').filter((l) => l.trim()).slice(-n)) console.log(`         | ${line}`);
+};
+const runOne = (dir, file) => run(RUN_ONE_TEST[0], [...RUN_ONE_TEST.slice(1), file], { cwd: dir, env: RUN_ONE_TEST_ENV, timeout: 5 * MINUTE }).code;
+// The old loop's tests, by lib/onboardRetire.mjs's rule, each part run here.
+const findRetirable = () => {
+  const base = baseCommit();
+  const tree = wgit('ls-tree', '-r', '--name-only', base);
+  if (!tree.ok) fail('verify', `git ls-tree ${base.slice(0, 7)} in ${worktree}: ${last(tree.err)}`);
+  const repoFiles = tree.out.split('\n').filter(Boolean);
+  const read = (p) => { try { return readFileSync(join(worktree, p), 'utf8'); } catch { return null; } };
+  const candidates = retireCandidates({ testFiles: repoFiles.filter((p) => TEST_FILE.test(p)), repoFiles, written: all.map((f) => f.to), read });
+  say('verify', `${candidates.length} test file(s) of ${answers.projectName}'s own name a file this setup writes; running each alone on the setup branch (${RUN_ONE_TEST.join(' ')} <file>)`);
+  const baseDir = join(dirname(worktree), `${answers.projectSlug}-setup-base`);
+  const dropBase = () => { if (existsSync(baseDir)) pgit('worktree', 'remove', '--force', baseDir); };
+  try {
+    const { retired: found, kept } = pickRetired({
+      candidates,
+      runOnSetup: (file) => runOne(worktree, file),
+      beforeBase: (n) => {
+        say('verify', `${n} of them fail here; running those alone on ${base.slice(0, 7)}, where the setup branch started`);
+        dropBase();
+        const add = pgit('worktree', 'add', '-q', '--detach', baseDir, base);
+        if (!add.ok) fail('verify', `git worktree add ${baseDir} ${base.slice(0, 7)}: ${last(add.err)}`);
+        installPackages(baseDir, 'verify');
+      },
+      runOnBase: (file) => runOne(baseDir, file),
+    });
+    for (const k of kept) say('verify', `not retired: ${k.file} ${k.why}`);
+    return found.map((c) => ({ ...c, base }));
+  } finally {
+    dropBase();
+    if (existsSync(baseDir)) say('verify', `(could not remove the scratch worktree ${baseDir}; remove it by hand)`);
+  }
+};
+if (!answers.clickupListId && !checkOnly) {
+  say('verify', `${answers.projectName} is a new project, so its verify runs in CI on the pull request`);
+} else if (existsSync(verifiedFile) && readFileSync(verifiedFile, 'utf8').trim() === head()) {
+  say('verify', `${answers.projectName}'s npm run verify passed before on this commit (${head().slice(0, 7)})`);
+} else {
+  say('verify', `running ${answers.projectName}'s own npm run verify on the setup branch in ${worktree} (it can take minutes)`);
+  let v = projectVerify();
+  // Retiring a test can break a guard that checks the tests themselves
+  // (StarCaster's clickupReserveDoor test looks for the tests it retires),
+  // so the rule is applied again to what fails next, a few rounds at most.
+  for (let round = 1; !v.ok && answers.clickupListId && round <= RETIRE_ROUNDS; round += 1) {
+    showTail(v, 8);
+    say('verify', `it fails; looking for the old loop's tests that only check the files this setup writes${round > 1 ? ` (round ${round}: a test can fail once the ones it checks are retired)` : ''}`);
+    const found = findRetirable();
+    if (!found.length) break;
+    for (const r of found) say('verify', `retiring ${retiredLine(r)}`);
+    const rm = wgit('rm', '-q', '--', ...found.map((r) => r.file));
+    if (!rm.ok) fail('verify', `git rm in ${worktree}: ${last(rm.err)}`);
+    commitStep([
+      `Retire ${found.length} of ${answers.projectName}'s old-loop tests that check files this setup replaces`,
+      '',
+      'Each one fails alone on this branch, passes alone where it started, and',
+      'names a file the setup writes (lib/onboardRetire.mjs, SP-252):',
+      '',
+      ...found.map((r) => `- ${retiredLine(r).replace(/`/g, '')}`),
+    ].join('\n'), 'verify');
+    const next = [...retired.filter((r) => !found.some((f) => f.file === r.file)), ...found];
+    const text = `${JSON.stringify(next, null, 2)}\n`;
+    writeFileSync(retiredFile, text);
+    if (readFileSync(retiredFile, 'utf8') !== text) fail('verify', `${retiredFile} did not read back as written`);
+    retired = next;
+    say('verify', `running npm run verify again, with ${retired.length} test file(s) retired`);
+    v = projectVerify();
+  }
+  if (!v.ok) {
+    showTail(v);
+    fail('verify', `${answers.projectName}'s own npm run verify fails on the setup branch (exit ${v.code}; its last lines are above)${retired.length ? `, with ${retired.length} old-loop test file(s) retired` : ''}. Nothing was pushed`);
+  }
+  writeFileSync(verifiedFile, `${head()}\n`);
+  say('verify', `${answers.projectName}'s npm run verify passes on the setup branch (${head().slice(0, 7)})`);
+}
+// Every retired file is gone from the branch, and nothing else the project had is.
+const gone = wgit('diff', '--name-only', '--diff-filter=D', `${baseCommit()}..HEAD`).out.split('\n').filter(Boolean).sort();
+const listed = retired.map((r) => r.file).sort();
+if (gone.join('\n') !== listed.join('\n')) fail('verify', `the setup branch deletes ${gone.length ? gone.join(', ') : 'nothing'}, but ${retiredFile} lists ${listed.length ? listed.join(', ') : 'nothing'}`);
+if (checkOnly) {
+  console.log(`\nDone (check only): ${answers.projectName}'s verify passes on ${BRANCH} in ${worktree}${retired.length ? `, with ${retired.length} old-loop test file(s) retired` : ''}. Nothing was pushed.`);
+  process.exit(0);
+}
+
+// ── 6. pr ──────────────────────────────────────────────────────────────────
 const push = wgit('push', '-q', '-u', 'origin', BRANCH);
 if (!push.ok) fail('pr', `git push: ${last(push.err)}`);
 if (wgit('rev-parse', 'HEAD').out !== wgit('rev-parse', `origin/${BRANCH}`).out) fail('pr', `origin's ${BRANCH} does not read back as the commit just pushed`);
@@ -260,7 +401,8 @@ let oldCopy = [];
 if (answers.clickupListId) {
   const tree = pgit('ls-tree', '-r', '--name-only', 'origin/main');
   if (!tree.ok) fail('pr', `git ls-tree origin/main in ${checkout}: ${last(tree.err)}`);
-  const { replaced, leftInPlace } = oldCopyLists(all, tree.out.split('\n'));
+  const retiredSet = new Set(retired.map((r) => r.file));
+  const { replaced, leftInPlace } = oldCopyLists(all, tree.out.split('\n').filter((p) => !retiredSet.has(p)));
   const list = (paths) => (paths.length ? paths.map((p) => `- \`${p}\``) : ['- (none)']);
   oldCopy = [
     `**The old copy of the loop.** ${answers.projectName} ran its own copy of the loop, on ClickUp list ${answers.clickupListId}. This replaces these of its files (each is "replaces" in the table above):`,
@@ -292,6 +434,7 @@ const body = [
   ...rows,
   '',
   ...oldCopy,
+  ...retiredSection(retired, { projectName: answers.projectName, base: retired[0]?.base }),
   ...replacedNpm,
   'After this merges, `loop/` is never edited here: a change is made in Spirality first and copied in.',
   '',
@@ -317,7 +460,7 @@ if (prUrl) {
 const readBack = run('gh', ['pr', 'view', prUrl, '--json', 'headRefName,body', '-q', '.headRefName + " " + (.body | contains("' + commit.slice(0, 7) + '") | tostring)']).out;
 if (readBack !== `${BRANCH} true`) fail('pr', `${prUrl} does not read back as ${BRANCH} naming ${commit.slice(0, 7)} (got "${readBack}")`);
 
-// ── 5. readback ────────────────────────────────────────────────────────────
+// ── 7. readback ────────────────────────────────────────────────────────────
 const door = (...a) => run('npm', ['run', '--silent', ...a], { cwd: worktree });
 const doctor = door('doctor');
 if (!doctor.ok) fail('readback', `npm run doctor in ${worktree}: ${last(doctor.out || doctor.err)}`);

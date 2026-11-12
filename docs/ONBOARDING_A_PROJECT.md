@@ -122,13 +122,14 @@ under Dane's own. Leaving the list id blank there is "not on ClickUp", and
 is kept, so the wizard does not stop for it again. Nobody edits the answers
 file by hand.
 
-With a list id, four more steps run after the sign-ins and before the copy,
+With a list id, five more steps run after the sign-ins and before the copy,
 in the order the switch runbook gives
 ([TRACKER_MVP.md, "Switching a project over"](TRACKER_MVP.md#switching-a-project-over)),
 each skipped on a rerun once the step log has it done:
 
 | Step | What it does | Good |
 |---|---|---|
+| `setup-check` | SP-252: writes the setup branch in the setup folder (`onboard:copy --check-only`: nothing pushed, no pull request), installs the project's packages there (`npm ci`) so its own git hooks run on the commit, and runs the project's own `npm run verify` on it. A red verify first retires the old loop's tests that check the files the setup writes (below), then runs again; still red fails the step **while the old lanes still run**. | `pressplay's own verify passes on spirality-setup, before anything is stopped` |
 | `stop` | Reads the old lanes from the project's own installer (`--status`: each lane, its launchd label, its log), runs the snapshot's dry run (below) first, so a missing ClickUp token or list stops the run while the old loop still runs, then reads `--status` again and checks no pass is in flight (a log ending on a `START` with no `END`, unless the lane's `lock:` line says `none` or `STALE`, meaning its runner was killed mid-pass; a loaded lane whose `--status` names no log cannot be checked, and fails the step), and straight after that check runs that installer's `--uninstall`, reading `--status` back. Nothing slow sits between the check and the unload, so a pass that starts during the dry run is seen, not cut off. A project cloned in the same run that turns out to have an old loop stops at `clone`, before the sign-ins, so the rerun (or the setup page's form) asks the ClickUp questions. | `stop  stopped com.wavecenter.loop-build, ...` |
 | `snapshot` | `tracker:snapshot`, a dry run (unless the stop step just ran it) then the real one: the Loop Queue list plus every extra list, saved and packed on the Mini. | every count OK |
 | `import` | `tracker:import` into the tracker's database, a dry run then the real one. Unlike the others, it runs again on every rerun until `switch-check` has said Safe to switch, because the check's `NOT YET IMPORTED` and `STATUS DIFFERS` both mean "import again" (the import is safe to rerun). | nothing refused |
@@ -157,6 +158,25 @@ Doppler config) and, after the sign-ins, its tracker seats. The switch
 check proves the seats the sign-ins step made for the project: a guest's
 lanes named for it (`wavecenter loop-build`) and no operator seat, since
 Dane's sign-in belongs to Spirality.
+
+**The old loop's tests (SP-252).** A project that ran its own copy of the
+loop has tests of that copy: StarCaster's `scripts/builder/` read its old
+loop skills, `docs/LOOP_ENGINEERING.md` and `scripts/loop_runner.sh`, and
+fail once the setup replaces them. One rule decides which are retired, never
+a hand (`lib/onboardRetire.mjs`): the test file fails when run alone on the
+setup branch (`node --test <file>`), passes when run alone on the commit the
+branch started from (a scratch worktree beside the setup folder, removed
+after), and names a file the setup writes, by path or by file name, itself
+or through one file of the repository it names. Each one is deleted in a
+commit of its own on the setup branch, and verify runs again. Retiring a
+test can break a guard that checks the tests themselves (StarCaster's
+`clickupReserveDoor` test looks for tests it then cannot find), so the rule
+is applied again to whatever fails next, up to three rounds. The pull request lists every
+retired file with the files it names, for review before merging. A test that
+fails on main too, or names none of the setup's files, is never retired, so
+the verify stays red and the wizard stops before the stop step. The list is
+kept beside the setup folder (`<slug>-setup-retired.json`), and a verify that
+passed is not run again on the same commit (`<slug>-setup-verified`).
 
 The copy step then always runs with `--allow-replace`, since the setup
 replaces the old copy's files, and its pull request lists every file of
