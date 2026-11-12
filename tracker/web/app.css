@@ -120,7 +120,9 @@ dl.details dd { margin: 0; }
 .views a + a { border-left: var(--hairline); }
 .views a.current { background: #000; color: #fff; }
 .board { display: flex; gap: 0.75rem; align-items: flex-start; overflow-x: auto; padding-bottom: 1rem; }
-.column { flex: 0 0 15rem; background: #f5f5f7; border: var(--hairline); border-radius: 8px; padding: 0.5rem; }
+/* SP-214: the seven working stages share the page's width equally (each grows and shrinks from zero),
+   so all seven fit across the 1440px body; below a 10rem floor per column the board scrolls sideways. */
+.column { flex: 1 1 0; min-width: 10rem; background: #f5f5f7; border: var(--hairline); border-radius: 8px; padding: 0.5rem; }
 .column h2 { font-size: 0.95rem; margin: 0; }
 .column > summary { padding: 0.25rem; margin-bottom: 0.5rem; }
 .column:not([open]) > summary { margin-bottom: 0; }
@@ -128,6 +130,8 @@ dl.details dd { margin: 0; }
 .card:hover { box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18); }
 .card .quiet { font-size: 0.8rem; }
 .card .tag { margin-left: 0; margin-right: 0.3rem; }
+/* A long ticket name or tag wraps inside its card rather than widening the column. */
+.card .name, .card .tags { overflow-wrap: anywhere; min-width: 0; }
 table.tickets, details.group { border: var(--hairline); border-radius: 8px; }
 .group { margin-bottom: 1rem; overflow: hidden; }
 .group h2 { font-size: 0.95rem; margin: 0; }
