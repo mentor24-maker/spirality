@@ -9,6 +9,10 @@ header nav.site[hidden] { display: none; }
 header nav.site a { display: flex; align-items: center; color: #b8b8be; font-weight: 600; text-decoration: none; border-bottom: 2px solid transparent; }
 header nav.site a:hover { color: #fff; }
 header nav.site a.current { color: #fff; border-bottom-color: var(--blue); }
+header .health { margin-left: auto; display: flex; flex-direction: column; gap: 0.1rem; color: #ffcc00; font-size: 0.85rem; font-weight: 600; line-height: 1.2; }
+header .health[hidden] { display: none; }
+header .health + .me { margin-left: 0; }
+header .health[hidden] + .me { margin-left: auto; }
 header .me { margin-left: auto; display: flex; gap: 1rem; align-items: center; }
 header #project { color: #fff; font-weight: 600; }
 header #who { color: #b8b8be; font-size: 0.9rem; }

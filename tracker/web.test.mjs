@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { seedDemo, tickingClock } from './demoData.mjs';
 import { reportsOf, REPORT_RANGES, searchTickets, PRIORITIES } from './pageData.mjs';
-import { escapeHtml, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS } from './web/render.mjs';
+import { escapeHtml, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS } from './web/render.mjs';
 import { startServer, setupSettingsOf } from './server.mjs';
 import { saveAnswers, setupFields, setupOf } from './setup.mjs';
 import { DANE_FIELDS as SETUP_FIELDS, STEPS as SETUP_STEPS } from '../scripts/onboard/onboard.mjs';
@@ -3564,6 +3564,59 @@ test('the pod button is named for what it opens and still reads each stage (SP-1
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   const show = app.slice(app.indexOf('function showPipeline'), app.indexOf('function showPipeline') + 600);
   assert.match(show, /pod\.setAttribute\('aria-label', pipelinePodLabel\(pipelineState, clockTime\)\);/);
+});
+
+// ── SP-218: the header's health line when a lane keeps failing ───────────────
+test('the header says each failing stage in one plain line with when it began, and nothing when every stage passes (SP-218)', () => {
+  const timeOf = (iso) => `[${iso.slice(11, 16)}]`;
+  const stage = (name, extra = {}) => ({ name, logged: true, running: false, failing: false, failedPasses: 0, failingSince: null, failingReason: null, ...extra });
+  const answer = { stages: [
+    stage('Relay', { failing: true, failedPasses: 3, failingSince: '2026-11-11T04:00:00.000Z', failingReason: "can't reach the internet" }),
+    stage('Build', { failedPasses: 2 }),
+    stage('Review', { failing: true, failedPasses: 5, failingSince: '2026-11-10T21:30:00.000Z', failingReason: 'keeps failing' }),
+    stage('Intake'),
+  ] };
+  assert.deepEqual(healthLines(answer, timeOf), [
+    "Relay can't reach the internet since [04:00]",
+    'Review keeps failing since [21:30]',
+  ]);
+  assert.equal(renderHealth(answer, timeOf), "<span>Relay can&#39;t reach the internet since [04:00]</span><span>Review keeps failing since [21:30]</span>");
+  // Two failures in a row, or the first passing pass after them: no line.
+  assert.deepEqual(healthLines({ stages: [stage('Relay', { failedPasses: 2 }), stage('Build')] }, timeOf), []);
+  assert.equal(renderHealth({ stages: [stage('Relay')] }, timeOf), '');
+  for (const failed of [null, undefined, {}, { stages: [] }, { error: 'no-pipeline' }]) assert.deepEqual(healthLines(failed, timeOf), []);
+  // A reason missing from the answer says "keeps failing"; names are escaped like every other text.
+  assert.deepEqual(healthLines({ stages: [stage('Relay', { failing: true, failingSince: null })] }, timeOf), ['Relay keeps failing']);
+  assert.doesNotMatch(renderHealth({ stages: [stage('<b>x', { failing: true })] }, timeOf), /<b>x/);
+});
+
+test('every page carries the health line in its header, in the bell\'s warning yellow on the black header, hidden until a stage is failing (SP-218)', () => {
+  const html = readFileSync(WEB('index.html'), 'utf8');
+  const header = html.slice(html.indexOf('<header>'), html.indexOf('</header>'));
+  assert.match(header, /<span id="health" class="health" role="status" hidden><\/span>\s*<span class="me">/);
+  const css = readFileSync(WEB('app.css'), 'utf8');
+  const rule = (selector) => {
+    const at = css.indexOf(`${selector} {`);
+    assert.notEqual(at, -1, `app.css has a ${selector} rule`);
+    return css.slice(at, css.indexOf('}', at));
+  };
+  const yellow = rule('header .health').match(/color: (#[0-9a-fA-F]{6});/)[1];
+  assert.equal(yellow, css.match(/header #bell\[data-colour="yellow"\] \{ color: (#[0-9a-fA-F]{6}); \}/)[1], 'the same warning colour as the bell');
+  assert.ok(contrast(yellow, '#000000') >= 4.5, 'it reads on the black header');
+  assert.match(rule('header .health[hidden]'), /display: none;/);
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  // Read on every page while signed in, not only where the pod is, on the pod's own timer.
+  const refresh = app.slice(app.indexOf('async function refreshPipeline'), app.indexOf('/** The header\'s health lines from the last answer'));
+  assert.match(refresh, /if \(!me\) return;/);
+  assert.doesNotMatch(refresh, /querySelector\('\.pipeline-pod'\)/);
+  assert.match(app, /setInterval\(refreshPipeline, PIPELINE_REFRESH_EVERY_MS\);/);
+  const show = app.slice(app.indexOf('function showPipeline'), app.indexOf('function showPipeline') + 300);
+  assert.match(show, /^function showPipeline\(read = false\) \{\n\s+showHealth\(\);/);
+  assert.match(app, /function showHealth\(\) \{\n\s+const lines = me \? healthLines\(pipelineState, sinceTime\) : \[\];\n\s+health\.hidden = !lines\.length;/);
+  const route = app.slice(app.indexOf('async function route('), app.indexOf('async function route(') + 1500);
+  assert.match(route, /if \(pipelineState\) showHealth\(\);\n\s+else refreshPipeline\(\);/);
+  // Signed out, it goes with the bell.
+  assert.equal((app.match(/bell\.hidden = true;\n\s+busCount\.hidden = true;\n\s+health\.hidden = true;/g) || []).length, 2);
 });
 
 // ── SP-170: the Files Made box, drawn from the relay's merge note (SP-166) ───
