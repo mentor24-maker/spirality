@@ -2069,7 +2069,9 @@ function spanOf(ms) {
  * selected project or for all of them, and how the finished ones flowed:
  * time to finish, how many were sent back, and time waiting on the
  * operator, and the human hours of work the finished ones add up to, by the
- * build loop's estimates. Every figure is worked out by the
+ * build loop's estimates, and where every task's time went (Where the Time
+ * Goes: working, waiting for a lane, waiting on the operator, broken), with
+ * the tasks that took the most time in the range picked. Every figure is worked out by the
  * server (pageData.mjs reportsOf); the page only draws them, so the ranges
  * and the stages come from its answer, never typed out here. A stage wears
  * its Settings colour as properties, never as markup.
@@ -2101,6 +2103,22 @@ async function drawReporting(chosen) {
     return `<td class="count">${h.finished ? `${Number(h.estimated)} of ${Number(h.finished)} estimated` : '<span class="quiet">none finished in this range</span>'}</td>`;
   }).join('')}</tr>`;
   const hoursOf = (n) => `${Number(n)} hour${Number(n) === 1 ? '' : 's'}`;
+  // Where the Time Goes (SP-220): the four buckets by range, then the tickets with the most time in one range.
+  const BUCKET_LABELS = [['working', 'Working'], ['lane', 'Waiting for a Lane'], ['operator', 'Waiting on You'], ['broken', 'Broken']];
+  const bucketSpan = (ms) => (Number(ms) > 0 ? spanOf(Number(ms)) : 'none');
+  const splitLine = (key, label) => `<tr><td class="name">${label}</td>${r.ranges.map((g) => {
+    const t = r.timeSplit[g.key];
+    if (!t.total) return '<td class="count"><span class="quiet">none in this range</span></td>';
+    const b = t.buckets[key];
+    return `<td class="count">${escapeHtml(bucketSpan(b.ms))} (${Math.round(Number(b.share) * 100)}%)</td>`;
+  }).join('')}</tr>`;
+  const splitTable = BUCKET_LABELS.map(([key, label]) => splitLine(key, label)).join('');
+  const splitTickets = (rangeKey) => {
+    const t = r.timeSplit[rangeKey];
+    if (!t || !t.tickets.length) return '<p class="quiet">No task was open in this range.</p>';
+    const rows = t.tickets.map((x) => `<tr><td><a href="/t/${encodeURIComponent(x.id)}">${escapeHtml(x.id)}</a></td><td class="name">${escapeHtml(x.name)}</td><td class="count">${escapeHtml(bucketSpan(x.total))}</td>${BUCKET_LABELS.map(([key]) => `<td class="count">${escapeHtml(bucketSpan(x[key]))}</td>`).join('')}</tr>`).join('');
+    return `<table class="counts report time-split-tickets"><thead><tr><th>Task</th><th>Name</th><th class="count">Total</th>${BUCKET_LABELS.map(([, label]) => `<th class="count">${label}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table>`;
+  };
   const open = r.open.map((s) => `<tr data-stage="${escapeHtml(s.status)}"><td class="status">${escapeHtml(s.status)}</td><td class="count">${Number(s.count)}</td></tr>`).join('');
   main.innerHTML = `
     <h1>Reporting</h1>
@@ -2126,6 +2144,14 @@ async function drawReporting(chosen) {
     'For tasks finished in that time: time spent in Needs your input or Ready to launch before going Live, added up and the middle (median) task.',
     flowLine('Total', (f) => span(f.waiting.total)) + flowLine('Middle (median)', (f) => span(f.waiting.median)))}
     <p class="waiting-now">Waiting on you right now: <strong>${Number(r.waitingNow)}</strong> task${Number(r.waitingNow) === 1 ? '' : 's'} in Needs your input or Ready to launch.</p>
+    <h2>Where the Time Goes</h2>
+    <p class="quiet">Every task's time in that range, open ones too, Live left out. Working: in Building. Waiting on You: in Needs your input or Ready to launch with your reply not yet the newest comment. Broken: from a loop's failure note on the task until its next move or your next comment. Waiting for a Lane: everything else, including all of In review, since nothing marks when a review starts. A loop that failed without writing on the task shows as waiting, not broken.</p>
+    <table class="counts report time-split"><thead>${head}</thead><tbody>${splitTable}</tbody></table>
+    <form class="report-scope time-split-range">
+      <label for="time-split-range">Tasks with the Most Time In</label>
+      <select id="time-split-range">${r.ranges.map((g, i) => `<option value="${escapeHtml(g.key)}"${i === 0 ? ' selected' : ''}>${escapeHtml(g.label)}</option>`).join('')}</select>
+    </form>
+    <div class="time-split-list">${splitTickets(r.ranges[0]?.key)}</div>
     <h2>Open Now</h2>
     <p class="quiet">Tasks in each stage that is not Live.</p>
     <table class="counts stages"><thead><tr><th>Stage</th><th class="count">Tasks</th></tr></thead><tbody>${open}</tbody></table>`;
@@ -2138,6 +2164,9 @@ async function drawReporting(chosen) {
     el.style.setProperty('--stage-tint', look.tint);
     el.style.setProperty('--stage-text', look.text);
   }
+  main.querySelector('#time-split-range').addEventListener('change', (e) => {
+    main.querySelector('.time-split-list').innerHTML = splitTickets(e.target.value);
+  });
   main.querySelector('#report-project').addEventListener('change', (e) => {
     drawReporting(e.target.value).catch((err) => (err instanceof SignedOut ? drawSignIn() : showError(err)));
   });
