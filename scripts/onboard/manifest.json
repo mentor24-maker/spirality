@@ -154,6 +154,14 @@
       "to": "loop/lib/trackerBus.js"
     },
     {
+      "from": "lib/waitingOnOperator.js",
+      "to": "loop/lib/waitingOnOperator.js"
+    },
+    {
+      "from": "lib/waitingOnOperator.test.js",
+      "to": "loop/lib/waitingOnOperator.test.js"
+    },
+    {
       "from": "lib/waitsOn.js",
       "to": "loop/lib/waitsOn.js"
     },

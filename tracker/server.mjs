@@ -531,7 +531,8 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
   const publicHost = publicUrl ? new URL(publicUrl).host.toLowerCase() : null;
 
   /**
-   * The Users page's data: each person with their email and role, the open
+   * The Users page's data: each person with their email, role, projects and
+   * whether they see every project (an admin), the open
    * invites, the roles with their permissions, and whether the caller may
    * change roles (an admin).
    */
@@ -540,7 +541,7 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     const scope = scopeOf(me);
     const seen = (list) => (scope == null ? list : list.filter((x) => scope.has(x.slug)));
     return {
-      people: store.listPeople().map((p) => ({ ...p, email: store.emailOf(p.id), role: store.roleOf(p.id), projects: seen(store.projectsOf(p.id)) })),
+      people: store.listPeople().map((p) => ({ ...p, email: store.emailOf(p.id), role: store.roleOf(p.id), seesEveryProject: store.seesEveryProject(p.id), projects: seen(store.projectsOf(p.id)) })),
       invites: store.listInvites(),
       sites: store.listSites().map(({ id, name }) => ({ id, name })),
       roles: store.listRoles(),
@@ -896,7 +897,7 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     // Dane's page: one project's board, the eight statuses in the contract's
     // order, each column in `queue` order.
     if (parts.length === 3 && parts[0] === 'projects' && parts[2] === 'board' && method === 'GET') {
-      const board = boardOf(store, requireProject(parts[1], me).slug);
+      const board = boardOf(store, requireProject(parts[1], me).slug, { viewerId: me.id });
       return [200, board];
     }
 

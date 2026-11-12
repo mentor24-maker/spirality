@@ -733,7 +733,7 @@ test('GET /people lists the tracker\'s people: humans only, with emails and open
     const link = f.store.makeLink({ purpose: 'invite', email: 'new@example.com', madeBy: f.human.id });
     const r = await f.call('GET', '/people', { token: f.humanToken });
     assert.equal(r.status, 200);
-    assert.deepEqual(r.body.people, [{ id: f.human.id, name: 'Operator', email: 'op@example.com', role: 'admin', projects: [{ slug: 'alpha', name: 'Alpha' }] }]);
+    assert.deepEqual(r.body.people, [{ id: f.human.id, name: 'Operator', email: 'op@example.com', role: 'admin', seesEveryProject: true, projects: [{ slug: 'alpha', name: 'Alpha' }] }]);
     assert.equal(r.body.canEditRoles, true);
     assert.deepEqual(r.body.roles.map((x) => x.name), ['admin', 'editor', 'contributor', 'reviewer', 'viewer']);
     assert.deepEqual(r.body.permissions.map((x) => x.name), ['user.read', 'user.edit', 'ticket.read', 'ticket.create', 'ticket.edit', 'ticket.delete']);
@@ -753,6 +753,10 @@ test('PUT /people/<id>/role: an admin changes a person\'s role, read back on GET
     const otherToken = f.store.issueToken(other.id);
     const roleIn = async (id) => (await f.call('GET', '/people', { token: f.humanToken })).body.people.find((p) => p.id === id).role;
     assert.equal(await roleIn(other.id), 'contributor');
+    // Only an admin sees every project; the Users page says so from this flag (SP-197).
+    const everyIn = async (id) => (await f.call('GET', '/people', { token: f.humanToken })).body.people.find((p) => p.id === id).seesEveryProject;
+    assert.equal(await everyIn(other.id), false);
+    assert.equal(await everyIn(f.human.id), true);
 
     const ok = await f.call('PUT', `/people/${other.id}/role`, { token: f.humanToken, body: { role: 'reviewer' } });
     assert.equal(ok.status, 200, ok.text);
@@ -1991,7 +1995,8 @@ test('GET /projects/:slug/board keeps the shape outside sites read: the eight co
       assert.ok(Array.isArray(c.tickets));
     }
     const [ticket] = r.body.columns.find((c) => c.status === 'Queued').tickets;
-    assert.deepEqual(Object.keys(ticket), ['id', 'name', 'priority', 'tags', 'assignee', 'updatedAt', 'pullRequest', 'answerIn']);
+    assert.deepEqual(Object.keys(ticket), ['id', 'name', 'priority', 'tags', 'assignee', 'updatedAt', 'pullRequest', 'answerIn', 'waiting', 'version']);
+    assert.equal(ticket.version, f.store.getTicket('AL-1').version, 'the version the list saves with is the stored one');
     assert.deepEqual([ticket.id, ticket.name, ticket.priority, ticket.tags, ticket.assignee, ticket.pullRequest], ['AL-1', 'One', 'high', ['x'], null, null]);
     assert.equal(typeof ticket.updatedAt, 'string');
     // docs/OUTSIDE_SITE_API.md lists it among the calls outside sites read.

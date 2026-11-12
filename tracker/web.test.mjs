@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { seedDemo, tickingClock } from './demoData.mjs';
 import { reportsOf, REPORT_RANGES, searchTickets, PRIORITIES } from './pageData.mjs';
-import { escapeHtml, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, commandHref, renderContextDocs, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS } from './web/render.mjs';
+import { escapeHtml, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS } from './web/render.mjs';
 import { startServer, setupSettingsOf } from './server.mjs';
 import { saveAnswers, setupFields, setupOf } from './setup.mjs';
 import { DANE_FIELDS as SETUP_FIELDS, STEPS as SETUP_STEPS } from '../scripts/onboard/onboard.mjs';
@@ -87,16 +87,19 @@ test('"Waiting on you" lists exactly what the `waiting` command says is waiting 
     const said = { assigned: [], unassigned: [] };
     for (const slug of ['alpha', 'beta']) {
       const r = await f.waitingCommand(slug);
-      assert.equal(r.code, 3, r.err);
+      // 1 when any ticket is undecided (it outranks 3), else 3: both projects have waits.
+      assert.ok([1, 3].includes(r.code), r.err);
       for (const line of r.out.trim().split('\n')) {
-        const [id, , assigned, , verdict] = line.split('\t');
-        if (!verdict.startsWith('WAITING ON DANE')) continue;
-        said[assigned === 'assigned: Dane' ? 'assigned' : 'unassigned'].push(id);
+        // The command and the page share one verdict (SP-217): WAITING is his,
+        // CANNOT TELL is his status with nobody assigned.
+        const [id, , , , , verdict] = line.split('\t');
+        if (verdict.startsWith('WAITING ON DANE')) said.assigned.push(id);
+        else if (verdict.startsWith('CANNOT TELL')) said.unassigned.push(id);
       }
     }
 
     assert.deepEqual(page.body.waiting.map((t) => t.id).sort(), said.assigned.sort());
-    // The command also counts his status with nobody assigned, flagged; the page shows those apart, never drops them.
+    // The command calls his status with nobody assigned CANNOT TELL; the page shows those apart, never drops them.
     assert.deepEqual(page.body.unsure.map((t) => t.id).sort(), said.unassigned.sort());
     // And both agree with what the test data was built to be.
     assert.deepEqual(said.assigned.sort(), idsWhere(f.expect, 'waiting'));
@@ -233,7 +236,7 @@ test('once his answer is in, Close and Go stand down too, and the ticket page, b
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   assert.match(app, /\$\{renderAnswerIn\(t\)\}/, 'the ticket page draws the line');
   assert.match(app, /statusLabel\(t\)/, 'the ticket page writes the status with the note');
-  assert.equal(app.match(/t\.answerIn \? /g)?.length, 2, 'the board card and the list row both draw the note');
+  assert.equal(app.match(/t\.answerIn \? /g)?.length, 1, 'the board card draws the note; the list row draws a check instead (SP-201)');
 });
 
 test('with his answer in, the ticket page draws no reply box and copes with it missing, and the notice is boxed (SP-160)', () => {
@@ -252,6 +255,69 @@ test('with his answer in, the ticket page draws no reply box and copes with it m
   for (const rule of [/font-style: normal/, /color: var\(--ink\)/, /background: #/, /border-left: \d+px solid var\(--blue\)/, /padding: /]) assert.match(notice, rule);
   assert.match(css, /\n\.answer-in \{ font-size: 0\.85rem; font-style: italic; color: var\(--quiet\); \}/);
   assert.equal(renderAnswerIn({ answerIn: true }), '<p class="answer-in">Your answer is in. The relay acts on it at its next pass.</p>');
+});
+
+// ── The list's status icons (SP-201) ─────────────────────────────────────────
+
+test('the board\'s `waiting` flag is exactly the Waiting on You list, for whoever is signed in (SP-201)', async () => {
+  const f = await fixture();
+  try {
+    const listed = async (token) => new Set((await f.call('GET', '/waiting', { token })).body.waiting.map((t) => t.id));
+    const flagged = async (token) => {
+      const ids = new Set();
+      for (const slug of ['alpha', 'beta']) {
+        const board = (await f.call('GET', `/projects/${slug}/board`, { token })).body;
+        for (const t of board.columns.flatMap((c) => c.tickets)) {
+          assert.equal(typeof t.waiting, 'boolean', t.id);
+          assert.ok(!(t.waiting && t.answerIn), `${t.id}: a clock and a check together`);
+          if (t.waiting) ids.add(t.id);
+        }
+      }
+      return ids;
+    };
+    const dane = await listed(f.token);
+    assert.ok(dane.size >= 1, 'the demo data holds a ticket waiting on Dane');
+    assert.deepEqual([...await flagged(f.token)].sort(), [...dane].sort());
+
+    // Someone else signed in: their own Waiting on You, never Dane's.
+    const other = f.store.createActor({ kind: 'human', name: 'Someone Else' });
+    for (const project of ['alpha', 'beta']) f.store.addMember({ project, actor: other.id, by: f.operator.id });
+    const otherToken = f.store.issueToken(other.id);
+    const theirs = await listed(otherToken);
+    assert.deepEqual([...await flagged(otherToken)].sort(), [...theirs].sort());
+    for (const id of dane) assert.ok(!theirs.has(id), `${id} waits on Dane, not on them`);
+
+    // His reply takes the clock away: the ticket's answer is in instead.
+    const [id] = dane;
+    assert.equal((await f.call('POST', `/tickets/${id}/comments`, { body: { body: 'looks good' } })).status, 201);
+    const after = new Map((await Promise.all(['alpha', 'beta'].map((s) => boardTickets(f, s)))).flatMap((m) => [...m]));
+    assert.equal(after.get(id).waiting, false);
+    assert.equal(after.get(id).answerIn, true);
+  } finally { await f.cleanup(); }
+});
+
+test('the list row starts its Actions cell with a check, a clock or an empty slot, drawn as line icons with the colour in the stylesheet (SP-201)', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const icon = /\nfunction statusIcon\(t\) \{[\s\S]*?\n\}\n/.exec(app)?.[0] ?? '';
+  assert.ok(icon, 'statusIcon found');
+  assert.match(icon, /if \(t\.answerIn\)[\s\S]*title="Your Answer Is In" aria-label="Your Answer Is In"[\s\S]*ICONS\.answerIn/);
+  assert.match(icon, /if \(t\.waiting\) return action\(`\$\{at\}#reply`, 'Waiting on Your Response', ICONS\.waiting\);/);
+  assert.match(icon, /<span class="action status-icon empty" aria-hidden="true"><\/span>/);
+  assert.doesNotMatch(icon, /style=/, 'no inline style');
+  const actions = /const actions = \(t, status\) => \{[\s\S]*?\n {2}\};/.exec(app)?.[0] ?? '';
+  assert.match(actions, /return \[\s*statusIcon\(t\),\s*action\(at, 'Open Ticket'/, 'the status icon comes first');
+  for (const key of ['answerIn', 'waiting']) assert.match(app, new RegExp(`\\n  ${key}: '<(path|circle) `), `ICONS.${key} is a line drawing`);
+  // The card keeps its words; the ticket page keeps its notice.
+  assert.match(app, /\$\{t\.answerIn \? `<span class="answer-in">\$\{escapeHtml\(ANSWER_IN_NOTE\)\}<\/span>` : ''\}/);
+  const css = readFileSync(WEB('app.css'), 'utf8');
+  const green = /\nspan\.action\.answer-in-icon \{ color: (#[0-9a-fA-F]{6}); \}/.exec(css)?.[1];
+  assert.ok(green, 'the check has its own colour');
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(green.slice(i, i + 2), 16));
+  assert.ok(g > r * 1.5 && g > b * 1.5, `${green} is a green`);
+  assert.match(css, /\nspan\.action\.status-icon\.empty \{ width: 18px; height: 18px; \}/, 'the empty slot is an icon wide');
+  const box = (sel) => new RegExp(`\\n${sel} \\{ display: inline-flex; padding: 0\\.2rem; margin-right: 0\\.15rem;`);
+  assert.match(css, box('a\\.action, button\\.action'));
+  assert.match(css, box('span\\.action\\.status-icon'), 'the status slot has the same padding and gap as the icons after it');
 });
 
 // ── The board ────────────────────────────────────────────────────────────────
@@ -810,7 +876,7 @@ test('bellColour: grey while nothing waits, yellow for 1 to 3, red for more than
 
 test('Waiting on you is a bell on the right, just before "Signed in as", coloured from the count wherever it is read', () => {
   const html = readFileSync(WEB('index.html'), 'utf8');
-  const nav = /<nav class="site">([\s\S]*?)<\/nav>/.exec(html)[1];
+  const nav = /<nav class="site" hidden>([\s\S]*?)<\/nav>/.exec(html)[1];
   assert.deepEqual([...nav.matchAll(/>([^<]+)<\/a>/g)].map((m) => m[1]), ['Projects', 'Tasks', 'Reporting', 'Users', 'Docs', 'Settings']);
   assert.doesNotMatch(nav, /Waiting on you/);
   const me = /<span class="me">([\s\S]*?)<\/span>\s*<\/header>/.exec(html)[1];
@@ -831,6 +897,30 @@ test('Waiting on you is a bell on the right, just before "Signed in as", coloure
   const css = readFileSync(WEB('app.css'), 'utf8');
   for (const colour of ['grey', 'yellow', 'red']) assert.match(css, new RegExp(`header #bell\\[data-colour="${colour}"\\] \\{ color: #`));
   assert.match(css, /header #bell\[hidden\] \{ display: none; \}/, 'display: flex must not undo hidden');
+});
+
+test('the main menu shows only to someone signed in: hidden in the page, shown with "Signed in as", hidden on every signed-out view (SP-211)', () => {
+  const html = readFileSync(WEB('index.html'), 'utf8');
+  // Starts hidden, so it never shows during "Loading…" before the sign-in check answers.
+  assert.match(html, /<nav class="site" hidden>/);
+  assert.doesNotMatch(html, /<nav class="site">/);
+  // The wordmark stays visible to everyone.
+  assert.match(html, /<a class="brand" href="\/"><img src="\/web\/wordmark\.png"/);
+  assert.doesNotMatch(/<a class="brand"[^>]*>/.exec(html)[0], /hidden/);
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  assert.match(app, /const siteNav = document\.querySelector\('header nav\.site'\);/);
+  // Shown in the same place as "Signed in as", once /me has answered.
+  const route = /async function route\(\{ place = null \} = \{\}\) \{[\s\S]*?\n\}/.exec(app)[0];
+  assert.match(route, /me = await api\('GET', '\/me'\);[\s\S]*?who\.textContent = `Signed in as \$\{me\.name\}`;\s*signOut\.hidden = false;\s*bell\.hidden = false;\s*siteNav\.hidden = false;/);
+  assert.equal((app.match(/siteNav\.hidden = false;/g) ?? []).length, 1, 'shown in one place only');
+  // Hidden on the sign-in screen, Forgot password, after Sign Out or an expired sign-in (all through signedOutHeader), and on Set Your Password.
+  assert.match(/function signedOutHeader[\s\S]*?\n\}/.exec(app)[0], /siteNav\.hidden = true;/);
+  assert.match(/async function drawSetPassword\(\) \{[\s\S]*?\n\}/.exec(app)[0], /siteNav\.hidden = true;/);
+  assert.match(/function drawSignIn[\s\S]*?\n\}/.exec(app)[0], /signedOutHeader\(/);
+  assert.match(/function drawForgot[\s\S]*?\n\}/.exec(app)[0], /signedOutHeader\(/);
+  assert.match(app, /signOut\.addEventListener\('click', async \(\) => \{[\s\S]*?drawSignIn\(/);
+  const css = readFileSync(WEB('app.css'), 'utf8');
+  assert.match(css, /header nav\.site\[hidden\] \{ display: none; \}/, 'display: flex must not undo hidden');
 });
 
 // ── Keeping an open page current (SP-94) ─────────────────────────────────────
@@ -880,7 +970,7 @@ test('an open page reads again once a minute and on coming back to the tab, neve
   // A save's own redraw keeps what the beat compares against, so the next beat does not undo its "Saved" note.
   assert.match(/async function drawAgain\(draw\) \{[\s\S]*?\n\}/.exec(app)[0], /await draw\(\);\s*if \(recording === reads && lastDrawn\?\.address === here\(\)\) lastDrawn = \{ address: here\(\), reads \};/);
   assert.equal(app.match(/await drawTicket\(t\.id/g), null, 'every in-page ticket redraw goes through drawAgain');
-  assert.equal((app.match(/await drawAgain\(\(\) => draw(Ticket|Project)\(/g) ?? []).length, 5);
+  assert.equal((app.match(/await drawAgain\(\(\) => draw(Ticket|Project)\(/g) ?? []).length, 6, "SP-208 added the List view priority save");
   assert.match(route, /if \(place && !\(err instanceof SignedOut\)\) return;/, "a beat's failed draw does not replace the page with an error");
   assert.match(app, /if \(location\.hash === '#reply' && !refreshing\) \{/, 'a beat does not jump to the reply box again');
   assert.match(/function keepPlace\(\) \{[\s\S]*?\n\}/.exec(app)[0], /main\.querySelectorAll\('details'\)[\s\S]*window\.scrollTo\(0, y\);/);
@@ -999,9 +1089,75 @@ test('Quick Action with no card: the title and the description\'s first paragrap
     description: '## Asked\n~~~\nhis words\n~~~\n\n## Goal\nOpen a ticket and\nsee it.\n\nMore.',
     comments: [{ body: 'An ordinary comment.' }],
   });
-  assert.equal(html, '<h1>Fix it</h1>\n<p class="summary">Open a ticket and see it.</p>');
+  assert.equal(html, [
+    '<h1>his words</h1>',
+    '<p class="ticket-name quiet">Ticket name: Fix it</p>',
+    '<h2 class="request-heading">Original Request</h2>',
+    '<p class="original-request">his words</p>',
+    '<h2 class="request-heading">How the Loop Understood It</h2>',
+    '<p class="summary">Open a ticket and see it.</p>',
+  ].join('\n'));
+  // A ticket with no ## Asked block is drawn as it always was.
+  assert.equal(renderQuickAction({ name: 'Fix it', description: '## Goal\nOpen a ticket and\nsee it.\n\nMore.' }),
+    '<h1>Fix it</h1>\n<p class="summary">Open a ticket and see it.</p>');
   assert.equal(renderQuickAction({ name: 'Empty', description: '' }), '<h1>Empty</h1>');
   assert.equal(firstParagraph('- a list\n\nProse.'), 'Prose.');
+});
+
+// ── Quick Action: his original request first (SP-213) ────────────────────────
+
+test('originalRequest reads his title and words off the ## Asked fence, whatever the fence', () => {
+  const words = 'In the attached screenshot there is no reference.\n\n> a quoted line\n`code` and *stars*';
+  for (const fence of ['```', '~~~', '````', '~~~~~']) {
+    const description = `## Asked\n${fence}\nShow the prompt\n\n${words}\n${fence}\nAttached: shot.png\n\n## Goal\nThe goal.`;
+    assert.deepEqual(originalRequest(description), { title: 'Show the prompt', words, slicedFrom: null }, fence);
+  }
+  // A shorter or different run inside his words does not close a four-backtick fence.
+  assert.equal(originalRequest('## Asked\n````\nTitle\n\nsee ```this```\n```\nstill his\n````\n').words, 'see ```this```\n```\nstill his');
+  // A one-line request is both the title and the words.
+  assert.deepEqual(originalRequest('## Asked\n```\nmake the board easier to read\n```\n'), { title: 'make the board easier to read', words: 'make the board easier to read', slicedFrom: null });
+  // Windows line ends read the same.
+  assert.equal(originalRequest('## Asked\r\n```\r\nT\r\n\r\nw\r\n```\r\n').words, 'w');
+  // No block, an unclosed fence, no fence, an empty fence, or "## Asked" inside another fence: null.
+  for (const d of ['', '## Goal\nx', '## Asked\n```\nTitle\n\nnever closed', '## Asked\nplain text\n', '## Asked\n```\n```\n', '```\n## Asked\n~~~\nx\n~~~\n```\n', null, undefined]) {
+    assert.equal(originalRequest(d), null, JSON.stringify(d));
+  }
+  // A slice names the ticket it was cut from.
+  const slice = '## Asked\n```\nT\n\nw\n```\n\n## Order\nSliced from SP-217 ("The bell"), slice 2 of 2.\nWaits on: SP-217\n\n## Goal\ng';
+  assert.equal(originalRequest(slice).slicedFrom, 'SP-217');
+  // "Sliced from" in another section is not a slice.
+  assert.equal(originalRequest('## Asked\n```\nT\n```\n\n## Goal\nSliced from SP-9').slicedFrom, null);
+});
+
+test('Quick Action puts his title and words first, the loop\'s reading after, and a slice links back (SP-213)', () => {
+  const sixty = Array.from({ length: 60 }, (_, i) => `w${i}`).join(' ');
+  const card = machineComment.stripMachineMarker(machineComment.stampMachineComment(operatorCard.buildCard(
+    `@@ASKED\nx\n@@CONTEXT\n${sixty}\n@@NEEDED\nReply "go".\nYour move: Reply — "go".`).rendered));
+  const description = '## Asked\n```\nTask Details needs the prompt\n\nLine one <b>\n> quoted\n`tick` *star*\n```\n\n## Order\nSliced from SP-196 ("x"), slice 1 of 2.\n\n## Goal\nThe goal.';
+  const html = renderQuickAction({ name: 'Show the original request on Task Details', description, status: 'needs your input', comments: [{ body: card }] });
+  const order = ['<h1>Task Details needs the prompt</h1>', 'Ticket name: Show the original request on Task Details',
+    'Original Request', 'class="original-request"', 'Sliced from <a href="/t/SP-196">SP-196</a>', 'How the Loop Understood It',
+    'class="summary">w0', 'class="needed"'];
+  let at = -1;
+  for (const part of order) { const next = html.indexOf(part); assert.ok(next > at, `${part} comes next`); at = next; }
+  // His words drawn as typed: escaped, never Markdown.
+  assert.match(html, /<p class="original-request">Line one &lt;b&gt;\n&gt; quoted\n`tick` \*star\*<\/p>/);
+  assert.doesNotMatch(html, /<code>|<em>|<blockquote>|<b>/);
+  // The same name as his title: no Ticket name line, and no slice line without ## Order.
+  const same = renderQuickAction({ name: 'Fix it', description: '## Asked\n```\nFix it\n\nplease\n```\n', status: 'queued' });
+  assert.doesNotMatch(same, /Ticket name:|Sliced from|How the Loop/);
+  assert.match(same, /^<h1>Fix it<\/h1>\n<h2 class="request-heading">Original Request<\/h2>\n<p class="original-request">please<\/p>\n<p class="where quiet">/);
+  // His words keep their line breaks on the page.
+  assert.match(readFileSync(WEB('app.css'), 'utf8'), /\.quick \.original-request \{[^}]*white-space: pre-wrap/);
+  // The tab title is still the ticket's current name.
+  assert.match(readFileSync(WEB('app.mjs'), 'utf8'), /tabTitle\(/);
+});
+
+test('every word of his original request in Quick Action is escaped', () => {
+  const nasty = '<script>alert(1)</script>';
+  const html = renderQuickAction({ name: nasty, description: `## Asked\n\`\`\`\n${nasty}\n\n${nasty}\n\`\`\`\n\n## Order\nSliced from SP-1\n` });
+  assert.doesNotMatch(html, /<script/);
+  assert.equal(html.match(/&lt;script&gt;alert\(1\)&lt;\/script&gt;/g).length, 2, 'title and words; the name matches the title so is not repeated');
 });
 
 test('every word of ticket text in Quick Action is escaped', () => {
@@ -1760,6 +1916,60 @@ test('the Tasks page reads the stage colours with the board, puts them on as pro
   for (const prop of ['--stage-border', '--stage-tint', '--stage-text']) assert.match(css, new RegExp(`var\\(${prop}\\)`), prop);
 });
 
+// ── Changing a ticket's priority from the List view (SP-208) ───────────────
+
+test('a List row\'s priority is a dropdown of Urgent, High, Normal, Low with the ticket\'s own selected; "None" only while it has none', () => {
+  const set = renderListPriority({ id: 'SP-12', priority: 'normal' });
+  assert.match(set, /^<select class="list-priority" data-priority-of="SP-12" aria-label="Priority of SP-12">/);
+  const options = [...set.matchAll(/<option value="([^"]*)"( selected)?>([^<]*)<\/option>/g)].map((m) => [m[1], m[3], Boolean(m[2])]);
+  assert.deepEqual(options, [['urgent', 'Urgent', false], ['high', 'High', false], ['normal', 'Normal', true], ['low', 'Low', false]]);
+  assert.match(set, /<span class="note" data-priority-note="SP-12" role="status"><\/span>$/, 'a note beside it for Saving…, Saved or a refusal');
+  const none = renderListPriority({ id: 'SP-13', priority: null });
+  assert.match(none, /<select[^>]*><option value="" selected>None<\/option><option value="urgent">Urgent<\/option>/);
+  assert.equal((none.match(/selected/g) || []).length, 1);
+  assert.deepEqual(PRIORITY_ORDER, [...PRIORITIES], 'the same choices the Change panel offers');
+  assert.match(renderListPriority({ id: '<b>', priority: 'low' }), /data-priority-of="&lt;b&gt;"/);
+});
+
+test('the List view draws the dropdown in every row; the Board view\'s Live rows and cards stay as text', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const draw = app.slice(app.indexOf('async function drawProject('), app.indexOf('async function copyText'));
+  assert.match(draw, /<td class="priority">\$\{view === 'list' \? renderListPriority\(t\) : t\.priority \? escapeHtml\(statusName\(t\.priority\)\)/);
+  const card = /const card = \(t\) => `([\s\S]*?)`;/.exec(app)[1];
+  assert.doesNotMatch(card, /select|renderListPriority/);
+  assert.match(draw, /wireListPriorities\(slug, view, board, said\);/);
+});
+
+test('picking a priority sends only it with the board\'s version, holds the dropdowns, and says Saved, moved or the server\'s words', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const wire = /function wireListPriorities\(slug, view, board, said\) \{([\s\S]*?)\n\}/.exec(app)?.[1];
+  assert.ok(wire, 'the dropdowns are wired');
+  assert.match(wire, /api\('PATCH', `\/tickets\/\$\{encodeURIComponent\(id\)\}`, \{ priority: select\.value, ifVersion: t\.version \}\)/);
+  assert.match(wire, /for \(const c of held\) c\.disabled = true;\s*note\.className = 'note quiet';\s*note\.textContent = 'Saving…';/);
+  assert.match(wire, /after = \{ id, text: 'Saved' \};/);
+  assert.match(wire, /err instanceof Refused && err\.status === 409\) \{\s*after = \{ id, text: MOVED_MESSAGE, error: true \};/, 'a 409 redraws as stored, with the moved message');
+  assert.match(wire, /note\.textContent = `Not saved: \$\{err\.message\}`;\s*select\.value = before;\s*for \(const c of held\) c\.disabled = false;/, 'any other refusal puts the old value back');
+  assert.match(wire, /await drawAgain\(\(\) => drawProject\(slug, view, \{ said: after \}\)\);/);
+});
+
+test('a priority picked through the page\'s save shows on the board and on the ticket; an old version is refused and changes nothing', async () => {
+  const f = await fixture();
+  try {
+    const rows = () => f.call('GET', '/projects/alpha/board').then((r) => r.body.columns.flatMap((c) => c.tickets));
+    const t = (await rows()).find((r) => r.priority !== 'high');
+    assert.ok(t, 'the test data has a ticket that is not High');
+    const saved = await f.call('PATCH', `/tickets/${t.id}`, { body: { priority: 'high', ifVersion: t.version } });
+    assert.equal(saved.status, 200);
+    const after = (await rows()).find((r) => r.id === t.id);
+    assert.equal(after.priority, 'high');
+    assert.ok(after.version > t.version, 'the redrawn row carries the new version');
+    assert.equal(f.store.getTicket(t.id).priority, 'high', 'the ticket page reads the same priority');
+    const stale = await f.call('PATCH', `/tickets/${t.id}`, { body: { priority: 'low', ifVersion: t.version } });
+    assert.equal(stale.status, 409);
+    assert.equal(f.store.getTicket(t.id).priority, 'high');
+  } finally { await f.cleanup(); }
+});
+
 // ── Deleting a ticket nobody has started ─────────────────────────────────────
 
 test('Delete is offered only for Requested and Queued, in either spelling of the status', () => {
@@ -2413,7 +2623,7 @@ test('the Docs page uploads one context document as the file itself, asks before
   const draw = app.slice(app.indexOf('async function drawDocs'), app.indexOf('/** Underline the header link'));
   assert.match(draw, /const docsPath = `\/projects\/\$\{encodeURIComponent\(project\.slug\)\}\/docs`;/);
   assert.match(draw, /api\('GET', docsPath\)/);
-  assert.ok(draw.indexOf('<h1>Docs</h1>\n    ${renderContextDocs({ project, docs }') > 0 && draw.indexOf('renderContextDocs({ project, docs }') < draw.lastIndexOf('<h2>Task Files</h2>'), 'Context Documents come first, before Task Files (SP-195 moved the docs folder\'s list to the bottom)');
+  assert.ok(draw.indexOf('<h1>Docs</h1>\n    ${docsColumns(`\n    ${renderContextDocs({ project, docs }') > 0 && draw.indexOf('renderContextDocs({ project, docs }') < draw.lastIndexOf('<h2>Task Files</h2>'), 'Context Documents come first, before Task Files (SP-195 moved the docs folder\'s list to the bottom)');
   const wire = draw.slice(draw.indexOf('function wireContextDocs'));
   assert.match(wire, /picker\.files\?\.\[0\]/, 'one file at a time');
   assert.match(wire, /file\.size > MAX_FILE/, 'an 11 MB file is refused before it is sent');
@@ -2500,11 +2710,32 @@ test('the Commands search keeps a command whose name or description holds the wo
   assert.deepEqual(matchCommands(mentions, 'review').map((c) => c.name), ['loop-review', 'loop-build'], 'a name match comes before a description match');
 });
 
-test('the Commands list shows /<name>, its source and description, linking to its own page; no match and nothing copied yet each say so', () => {
+test('the search also matches a command\'s summary and plain explanation (SP-212)', () => {
+  const withWords = [
+    { name: 'loop-build', source: 'Loop skill', description: 'For Claude Code.', summary: 'Builds the next ticket', about: 'Opens a pull request for approval.' },
+    { name: 'loop-spec', source: 'Loop skill', description: 'For Claude Code.', summary: null, about: null },
+  ];
+  assert.deepEqual(matchCommands(withWords, 'NEXT TICKET').map((c) => c.name), ['loop-build'], 'by the summary');
+  assert.deepEqual(matchCommands(withWords, 'approval').map((c) => c.name), ['loop-build'], 'by the explanation');
+});
+
+test('a command shows its summary, or the first seven words of its description and "…"; its pop-up its about, or its description (SP-212)', () => {
+  assert.equal(commandSummary({ summary: 'Builds the next ticket', description: 'x' }), 'Builds the next ticket');
+  assert.equal(commandSummary({ description: 'one two three four five six seven eight nine' }), 'one two three four five six seven…');
+  assert.equal(commandSummary({ description: 'Find out why a ticket is stuck.' }), 'Find out why a ticket is stuck.', 'seven words or fewer: as written, no "…"');
+  assert.equal(commandAbout({ about: 'Plain words.', description: 'x' }), 'Plain words.');
+  assert.equal(commandAbout({ about: null, description: 'The description.' }), 'The description.');
+});
+
+test('the Quick Claude Commands list shows only /<name> and its short line, each opening its pop-up; no match and nothing copied yet each say so', () => {
   const html = renderCommandList(COMMANDS, 'review');
-  assert.match(html, /<a href="\/docs\/commands\/loop-review"><code>\/loop-review<\/code><\/a> <span class="quiet">Loop skill<\/span><br>Review the next pull request\./);
+  assert.match(html, /<li><a class="command-open" href="\/docs\/commands\/loop-review" data-command="loop-review"><code>\/loop-review<\/code> <span class="command-summary">Review the next pull request\.<\/span><\/a><\/li>/);
+  assert.doesNotMatch(html, /Loop skill|Your command/, 'where it comes from waits for the pop-up');
   assert.doesNotMatch(html, /why-stuck|loop-spec/);
   assert.doesNotMatch(html, /not been copied/, 'a copied command is listed, so no such line');
+  const long = renderCommandList([{ name: 'x', source: 'Loop skill', description: 'Pick the next claimable task from the queue and build it.', steps: '' }]);
+  assert.match(long, /<span class="command-summary">Pick the next claimable task from the…<\/span>/);
+  assert.doesNotMatch(long, /and build it/, 'the long description leaves the row');
   assert.match(renderCommandList(COMMANDS, 'zebra'), /No command matches “zebra”\./);
   const skillsOnly = renderCommandList(COMMANDS.filter((c) => c.source === 'Loop skill'));
   assert.match(skillsOnly, /\/loop-review[\s\S]*\/loop-spec/);
@@ -2512,7 +2743,18 @@ test('the Commands list shows /<name>, its source and description, linking to it
   const evil = renderCommandList([{ name: 'x', source: 'Your command', description: '<img src=x onerror=alert(1)>', steps: '' }], '<b>');
   assert.doesNotMatch(evil, /<img|<b>/);
   assert.equal(commandHref('a b'), '/docs/commands/a%20b');
-  assert.match(renderCommandList([{ name: 'x', source: 'Loop skill', description: 'Runs `npm run verify` first.', steps: '' }]), /Runs <code>npm run verify<\/code> first\./, 'code in a description is drawn as code');
+  assert.match(renderCommandList([{ name: 'x', source: 'Loop skill', description: 'Runs `npm run verify` first.', steps: '' }]), /Runs <code>npm run verify<\/code> first\./, 'code in a summary is drawn as code');
+});
+
+test('a command\'s pop-up shows its name, source, plain explanation and a link to its steps, escaped (SP-212)', () => {
+  const html = renderCommandDetails({ name: 'loop-review', source: 'Loop skill', description: 'For Claude Code.', about: 'Checks the work again.' });
+  assert.match(html, /<h2 id="command-details-title"><code>\/loop-review<\/code><\/h2>/);
+  assert.match(html, /<p class="quiet">Loop skill<\/p>/);
+  assert.match(html, /<p>Checks the work again\.<\/p>/);
+  assert.doesNotMatch(html, /For Claude Code/, 'the about line, not the description');
+  assert.match(html, /<a href="\/docs\/commands\/loop-review">See All the Steps<\/a>/);
+  assert.match(renderCommandDetails({ name: 'mine', source: 'Your command', description: 'My own words.' }), /<p>My own words\.<\/p>/, 'no about line: the description');
+  assert.doesNotMatch(renderCommandDetails({ name: '<x>', source: '<s>', description: '<y>' }), /<x>|<s>|<y>/);
 });
 
 test('a command\'s own page draws its steps formatted (headings, lists, code) with a Back to Docs link, and escapes its words', () => {
@@ -2545,7 +2787,17 @@ test('the Docs page carries the Commands section; /docs/commands/<name> opens on
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   const draw = app.slice(app.indexOf('async function drawDocs'), app.indexOf('/** Underline the header link'));
   assert.match(draw, /await api\('GET', '\/commands'\)/);
-  assert.match(draw, /<h2>Commands<\/h2>/);
+  assert.match(draw, /<h2 id="commands-pod-title">Quick Claude Commands<\/h2>/);
+  assert.match(draw, /<div class="docs-columns">\$\{commandsSection\(\)\}<div class="docs-main">\$\{rest\}<\/div><\/div>/, 'the pod on the left, the rest on the right');
+  assert.equal((draw.match(/\$\{docsColumns\(`/g) ?? []).length, 2, 'with projects and without, the page is drawn in the two columns');
+  assert.doesNotMatch(draw, /\$\{commandsSection\(\)\}\s*\$\{documentation\}/, 'the pod is no longer a section between the others');
+  assert.match(draw, /<dialog class="command-details" aria-labelledby="command-details-title">[\s\S]*<button type="submit">Close<\/button>[\s\S]*<\/dialog>/);
+  assert.match(draw, /renderCommandDetails\(command\);\s*dialog\.showModal\(\);/);
+  assert.match(draw, /e\.preventDefault\(\);\s*e\.stopPropagation\(\);/, 'a click opens the pop-up, not the steps page');
+  const css = readFileSync(WEB('app.css'), 'utf8');
+  assert.match(css, /section\.commands-pod \{ background: #cceeff; border: 1px solid #003377; border-radius: 20px;/);
+  assert.match(css, /\.docs-columns \{ display: grid; grid-template-columns: minmax\(0, 1fr\) minmax\(0, 2fr\);/, 'the pod takes a third');
+  assert.match(css, /@media \(max-width: 800px\) \{ \.docs-columns \{ grid-template-columns: minmax\(0, 1fr\); \} \}/, 'stacked on a narrow screen');
   assert.match(draw, /<input type="search" id="command-search"/);
   assert.match(draw, /box\.addEventListener\('input', show\)/);
   assert.match(draw, /renderCommandList\(commands, box\.value\)/);
@@ -2642,8 +2894,20 @@ test('the Users page lists each user\'s projects, each a link to its details pag
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   const draw = app.slice(app.indexOf('async function drawUsers'), app.indexOf('/** Underline the header link'));
   assert.match(draw, /<th class="projects">Projects<\/th>/);
-  // Anyone but an admin sees the cell as before: links, or "none".
-  assert.match(draw, /if \(!editing\) return mine\.length \? mine\.map\(\(x\) => `<a href="\/projects\/\$\{encodeURIComponent\(x\.slug\)\}">\$\{escapeHtml\(x\.name\)\}<\/a>`\)\.join\(', '\) : '<span class="quiet">none<\/span>';/);
+  // Anyone but an admin sees the cell as before: links, or "none" (left out under an admin's "All projects (admin)").
+  assert.match(draw, /if \(!editing\) return mine\.length \? mine\.map\(\(x\) => `<a href="\/projects\/\$\{encodeURIComponent\(x\.slug\)\}">\$\{escapeHtml\(x\.name\)\}<\/a>`\)\.join\(', '\) : none;/);
+});
+
+test('the Users page says "All projects (admin)" first in an admin\'s Projects cell, from the server\'s seesEveryProject, and leaves out "none" under it (SP-197)', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const draw = app.slice(app.indexOf('async function drawUsers'), app.indexOf('/** Underline the header link'));
+  assert.match(draw, /const every = p\.seesEveryProject === true;/);
+  assert.match(draw, /<span class="every"[^>]*>All projects \(admin\)<\/span>/);
+  assert.match(draw, /return `\$\{label\}\$\{memberCell\(p, every \? '' : '<span class="quiet">none<\/span>'\)\}`;/);
+  // Both forms of the cell (a viewer's links, an admin's editing list) use the same "none".
+  assert.match(draw, /\.join\(', '\) : none;/);
+  assert.match(draw, /<\/span>`\)\.join\(''\) : none\}/);
+  assert.match(readFileSync(WEB('app.css'), 'utf8'), /table\.people td span\.every \{/);
 });
 
 test('the Users page gives an admin Remove on each of a user\'s projects (never where they are its owner or operator) and an Add to Project picker, each change read back', () => {
@@ -3490,7 +3754,7 @@ test.describe('Files Made: the files a ticket made, from its newest merge note',
     assert.match(row, /<tr data-id="[^\n]*">\s*<td class="id"><a href="\/t\/\$\{encodeURIComponent\(t\.id\)\}">\$\{escapeHtml\(t\.id\)\}<\/a><\/td>\s*<td class="name">/);
     const nameCell = /<td class="name">.*<\/td>/.exec(row)[0];
     assert.doesNotMatch(nameCell, /escapeHtml\(t\.id\)/, 'the name cell shows only the name');
-    assert.match(nameCell, /ANSWER_IN_NOTE/, 'the answer-in note stays in the name cell');
+    assert.doesNotMatch(nameCell, /ANSWER_IN_NOTE|answer-in/, 'the answer-in words are gone from the name cell (SP-201)');
     assert.equal((row.match(/<td class="/g) || []).length, SORT_COLUMNS.length + 1, 'one cell per heading, plus Actions');
     const css = readFileSync(WEB('app.css'), 'utf8');
     assert.match(css, /\.group table\.sortable th \{ color: #000; font-weight: 700; \}/);
@@ -3588,11 +3852,11 @@ test('Reference Docs and Work Log is folded, counted, sortable by Title, Kind an
   assert.match(renderDocumentation([], String), /Reference Docs and Work Log \(0\)<\/h2>.*no Markdown files/s);
 });
 
-test('the Docs page puts Reference Docs and Work Log last, below Commands, with or without projects, and wires its controls (SP-195)', () => {
+test('the Docs page puts Reference Docs and Work Log last in the right column, with or without projects, and wires its controls (SP-195, SP-212)', () => {
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   const draw = app.slice(app.indexOf('async function drawDocs'), app.indexOf('/** The command a `/docs/commands/<name>` address opens'));
-  assert.match(draw, /<h2>Task Files<\/h2><p class="quiet">There are no projects yet\.<\/p>\$\{commandsSection\(\)\}\$\{documentation\}`;\s*showCommands\(commands\);\s*wireDocumentation\(files\);/, 'no projects: last too');
-  assert.match(draw, /\$\{commandsSection\(\)\}\n    \$\{documentation\}`;/, 'below Commands');
+  assert.match(draw, /\$\{docsColumns\(`<h2>Task Files<\/h2><p class="quiet">There are no projects yet\.<\/p>\$\{documentation\}`\)\}`;\s*showCommands\(commands\);\s*wireDocumentation\(files\);/, 'no projects: last too');
+  assert.match(draw, /has a file yet\.<\/p>`\}\n    \$\{documentation\}`\)\}`;/, 'below Task Files, last on the right');
   assert.equal((draw.match(/\$\{documentation\}/g) ?? []).length, 2, 'drawn once in each case, never above');
   assert.equal((draw.match(/wireDocumentation\(files\);/g) ?? []).length, 2);
   const wire = draw.slice(draw.indexOf('function wireDocumentation'));

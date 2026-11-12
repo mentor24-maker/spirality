@@ -1,6 +1,14 @@
 ---
 name: loop-spec
 description: Turn a rough idea from Dane into a set of small, well-scoped, independently-shippable work items filed as tickets in the Spirality queue in the tracker, each with acceptance criteria and test steps. This is the ONLY manual step of the loop — run it at the start of a work session to feed the build/review loops.
+summary: Plans an idea into small tickets
+about: >
+  This is the planning conversation. You start it by hand, at the start of a
+  work session, and describe an idea in your own words. It asks questions
+  until the idea is clear, then splits it into small tickets that can each be
+  built and checked on their own, every one with what will change and how to
+  test it. Those tickets feed the builder and the reviewer, which then run by
+  themselves. It never writes code itself.
 ---
 
 # Loop: Spec

@@ -381,3 +381,31 @@ test('runSwitchCheck: a config whose projectLanes names a built-in seat fails th
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('runSwitchCheck: the old loops moved a ticket after the import; the import run again brings it up to date and it is safe to switch (SP-253)', async () => {
+  const before = [task('a'), task('b', 'queued')];
+  const { dir, db, store, env } = await preparedDatabase(before);
+  const server = await startServer({ store, port: 0 });
+  try {
+    const { port } = server.address();
+    const config = { ...CONFIG, tracker: 'api', trackerPort: port, trackerUrl: `http://127.0.0.1:${port}` };
+    // The old lanes, back on, take b through Building to In review.
+    const after = [task('a'), task('b', 'in review')];
+    const stale = await runSwitchCheck({ config, env, db, clickup: fakeClickup(after) });
+    assert.equal(stale.ok, false);
+    const dry = stale.sections.find((s) => s.name === 'dry-run import');
+    assert.equal(dry.ok, false);
+    assert.match(dry.lines.join('\n'), /NOT YET IMPORTED: 1 ticket\(s\) to bring up to date/);
+
+    const again = await importLoopQueue({ tracker: fakeClickup(after), store, config: CONFIG });
+    assert.equal(again.counts.tickets.updated, 1);
+    assert.deepEqual(again.refusals, []);
+    const r = await runSwitchCheck({ config, env, db, clickup: fakeClickup(after) });
+    assert.equal(r.ok, true, formatSwitchCheck(r));
+    assert.match(formatSwitchCheck(r), /Safe to switch\.$/);
+  } finally {
+    await new Promise((res) => server.close(res));
+    store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

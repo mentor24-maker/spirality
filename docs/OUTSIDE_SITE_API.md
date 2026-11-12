@@ -171,7 +171,7 @@ GET /projects/spirality/board
     { "status": "Queued", "tickets": [
       { "id": "SP-153", "name": "…", "priority": "urgent", "tags": ["starcaster-integration"],
         "assignee": null, "updatedAt": "2026-11-06T22:00:00.000Z",
-        "pullRequest": null, "answerIn": false }
+        "pullRequest": null, "answerIn": false, "version": 4 }
     ] },
     { "status": "Building", "tickets": [] },
     { "status": "In review", "tickets": [] },
@@ -183,7 +183,10 @@ GET /projects/spirality/board
 ```
 
 Always the eight columns, in that order; each column's tickets in queue
-order. `assignee` is a name or null; `pullRequest` a URL or null.
+order. `assignee` is a name or null; `pullRequest` a URL or null;
+`version` the ticket's version number, which goes up by one on every change
+(the tracker's own List view sends it back with a priority change, so a
+change never overwrites a loop's move).
 
 `GET /projects/:slug/tickets` answers the same tickets as one flat list,
 `{ project, tickets: [{ id, name, description, status, priority, tags, … }] }`,
