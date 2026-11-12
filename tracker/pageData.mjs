@@ -311,7 +311,6 @@ const NEXT_LANE = new Map([
   [statusOf('Rework'), 'Build'],
   [statusOf('In review'), 'Review'],
 ]);
-const BUILDING = statusOf('Building');
 const BUILDING_LANE = 'Build';
 
 /** A lane by its name in STAGES: `{ lane, job }`. */
