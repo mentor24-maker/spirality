@@ -20,6 +20,7 @@ import humanHours from '../lib/humanHours.js';
 import busFallback from '../lib/busFallback.js';
 import { compareWithinStatus } from '../scripts/lib/loopStatuses.mjs';
 import { searchPattern } from './web/render.mjs';
+import { STAGES } from './pipeline.mjs';
 
 const { OPERATOR_LANE, WAITING, CANNOT_TELL, waitingVerdict, operatorSpokeLast } = waitingOnOperator;
 const { isMachineComment, stripMachineMarker } = machineComment;
@@ -295,6 +296,131 @@ export function boardOf(store, slug, { viewerId = null } = {}) {
         version: t.version,
       })),
     })),
+  };
+}
+
+/**
+ * Which loop lane acts next on a ticket in each in-flight status, by its
+ * name in tracker/pipeline.mjs's STAGES. A status not named
+ * here is either Building (a build pass has it now) or one of the
+ * operator's two (OPERATOR_LANE: it waits on him, no lane is due).
+ */
+const NEXT_LANE = new Map([
+  [statusOf('Requested'), 'Intake'],
+  [statusOf('Queued'), 'Build'],
+  [statusOf('Rework'), 'Build'],
+  [statusOf('In review'), 'Review'],
+]);
+const BUILDING_LANE = 'Build';
+
+/** A lane by its name in STAGES: `{ lane, job }`. */
+function laneOf(name) {
+  const stage = STAGES.find((s) => s.name === name);
+  return { lane: stage.name, job: stage.job };
+}
+
+/**
+ * When a ticket entered its present status: the newest event in its
+ * history that set its status (or filed it) to that status. Its last change
+ * (`updatedAt`) when the history records no such step.
+ */
+function stageSinceOf(store, ticket) {
+  let at = null;
+  for (const e of store.listEvents(ticket.id)) {
+    if ((e.field === 'status' || e.field === 'created') && e.to === ticket.status) at = e.at;
+  }
+  return at ?? ticket.updatedAt;
+}
+
+/**
+ * A ticket's next change, from the Pipeline Status answer for the project
+ * whose loop logs this tracker reads (`lanes`, keyed by job, or null for
+ * any other project or when the logs cannot be read):
+ *  - Building: `{ kind: 'running', lane, job }`, a build pass has it now;
+ *  - the operator's two statuses: `{ kind: 'operator' }`, no lane is due;
+ *  - Requested, Queued, Rework, In review: `{ kind: 'lane', lane, job,
+ *    running, due }`, the lane that acts on it, whether a pass of it runs
+ *    now, and when its next pass is due (ISO, null while one runs);
+ *  - null when that lane's time cannot be read (no logs for this project,
+ *    a lane with no pass logged, or one idle with no next time), never a guess.
+ */
+function nextChangeOf(status, lanes) {
+  if (OPERATOR_LANE.includes(status)) return { kind: 'operator' };
+  if (status === BUILDING) return { kind: 'running', ...laneOf(BUILDING_LANE) };
+  if (!NEXT_LANE.has(status) || !lanes) return null;
+  const { lane, job } = laneOf(NEXT_LANE.get(status));
+  const stage = lanes.get(job);
+  if (!stage || !stage.logged) return null;
+  if (stage.running) return { kind: 'lane', lane, job, running: true, due: null };
+  if (!stage.nextDue) return null;
+  return { kind: 'lane', lane, job, running: false, due: stage.nextDue };
+}
+
+/**
+ * The Console view's answer (SP-221): every ticket in flight (any status but
+ * Live) on every project `only` lets through (visibleProjects), with the
+ * facts a Console tile shows, so the page works nothing out itself.
+ *
+ * `{ projects: [{ slug, name, prefix, logo }], tickets: [{ id, project,
+ * name, status, tags, priority, assignee, updatedAt, stageSince,
+ * waitingOnOperator, answerIn, pullRequest, nextChange }] }`. Tickets go
+ * in the contract's STAGE_ORDER, then `queue` order within a status (as
+ * boardOf). `status` is the contract's own spelling; `assignee` is by name;
+ * `waitingOnOperator` is the loop's own verdict (waitingVerdict) for the
+ * ticket's project operator, the same rule his Waiting on You page lists by;
+ * `answerIn` says his answer is in (answerIsIn); `pullRequest` is the merge
+ * step's own answer (findPullRequest), or null.
+ *
+ * `pipeline` is `{ slug, stages }`: GET /pipeline's answer (pipelineOf) and
+ * the project whose logs it read. Only that project's tickets get a lane's
+ * time (nextChangeOf); null, or another project, gets none.
+ */
+export function consoleOf(store, { only = null, pipeline = null } = {}) {
+  const projects = visibleProjects(store, only);
+  const lanes = pipeline?.stages ? new Map(pipeline.stages.map((s) => [s.job, s])) : null;
+  const rank = new Map(STAGE_ORDER.map((name, i) => [statusOf(name), i]));
+  const spelled = new Map(STAGE_ORDER.map((name) => [statusOf(name), name]));
+  const queueShape = (t) => ({
+    priority: t.priority ? { priority: t.priority } : null,
+    date_created: String(Date.parse(t.createdAt)),
+  });
+  const names = new Map();
+  const nameOf = (id) => {
+    if (id == null) return null;
+    if (!names.has(id)) names.set(id, store.getActor(id)?.name ?? `actor ${id}`);
+    return names.get(id);
+  };
+  const rows = [];
+  for (const project of projects) {
+    const projectLanes = pipeline && project.slug === pipeline.slug ? lanes : null;
+    for (const t of store.listTickets(project.slug)) {
+      if (TERMINAL_STATUSES.includes(t.status) || !rank.has(t.status)) continue;
+      const comments = store.listComments(t.id);
+      rows.push({
+        ticket: t,
+        out: {
+          id: t.id,
+          project: project.slug,
+          name: t.name,
+          status: spelled.get(t.status),
+          tags: t.tags,
+          priority: t.priority,
+          assignee: nameOf(t.assignee),
+          updatedAt: t.updatedAt,
+          stageSince: stageSinceOf(store, t),
+          waitingOnOperator: waitsOn(t, comments, project.operator),
+          answerIn: answerIsIn(t, comments, project.operator),
+          pullRequest: findPullRequest(trailComments(store, t.id))?.url ?? null,
+          nextChange: nextChangeOf(t.status, projectLanes),
+        },
+      });
+    }
+  }
+  rows.sort((a, b) => (rank.get(a.ticket.status) - rank.get(b.ticket.status))
+    || compareWithinStatus(queueShape(a.ticket), queueShape(b.ticket)));
+  return {
+    projects: projects.map((p) => ({ slug: p.slug, name: p.name, prefix: p.prefix, logo: p.logo ?? null })),
+    tickets: rows.map((r) => r.out),
   };
 }
 

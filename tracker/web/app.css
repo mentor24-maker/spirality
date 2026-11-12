@@ -247,6 +247,9 @@ details.add-task .hint { color: var(--ink); }
 details.add-task > summary { cursor: pointer; font-weight: 600; }
 details.add-task form.request textarea { min-height: 8rem; }
 p.filed-note { margin: 0 0 1rem; }
+.tasks-head { position: relative; }
+.filed-pod { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 10; max-width: 90%; padding: 0.5rem 1.25rem; border: 2px solid var(--blue); border-radius: 10px; background: #eaf5fe; color: var(--ink); font-size: 1.25rem; font-weight: 600; text-align: center; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15); animation: filed-pod-fade 4s linear forwards; }
+@keyframes filed-pod-fade { 0%, 75% { opacity: 1; } 100% { opacity: 0; } }
 section.attachments ul { list-style: none; padding: 0; }
 section.attachments li { margin: 0.5rem 0; }
 section.attachments .preview { display: block; margin-top: 0.35rem; }

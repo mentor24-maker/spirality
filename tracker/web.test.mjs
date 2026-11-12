@@ -643,7 +643,7 @@ test('the Add Task box on the Tasks page files into the project shown, in Reques
   assert.match(draw, /<details class="add-task">\s*<summary>Add Task<\/summary>\s*<form class="request">/, 'drawn closed, on the board and the list alike');
   assert.match(draw, /<button type="submit">Submit Task<\/button>/, 'the button says Submit Task, in his words');
   assert.doesNotMatch(app, /File request/i, 'the old button words are gone');
-  assert.match(draw, /Filed <a href="\/t\/\$\{encodeURIComponent\(filed\)\}">\$\{escapeHtml\(filed\)\}<\/a>/);
+  assert.match(app, /Filed <a href="\/t\/\$\{encodeURIComponent\(filed\)\}">\$\{escapeHtml\(filed\)\}<\/a>/);
   assert.match(draw, /wireAddTask\(board\.project, view, adding\);/);
   assert.doesNotMatch(app, /drawNew/, 'the separate New request page is gone');
   // The old address opens the Tasks page with the box open.
@@ -678,14 +678,40 @@ test('the Add Task box takes files: the ticket is filed first, then each file go
   assert.match(up, /'content-type': 'application\/octet-stream'/);
   assert.match(up, /'x-file-name': encodeURIComponent\(file\.name\)/);
   assert.match(up, /body: file,/);
-  // The note: uploaded names, then the ones that were not, each with why, escaped.
-  const note = /function filesNote[\s\S]*?\n\}/.exec(app)[0];
-  assert.match(note, /Uploaded \$\{names\(uploaded\)\}/);
+  // Uploaded names ride in the filed pod; the ones that were not stay in the lasting line, each with why, escaped (SP-223).
+  const pod = /function filedPod[\s\S]*?\n\}/.exec(app)[0];
+  assert.match(pod, /Uploaded \$\{names\}/);
+  assert.match(pod, /escapeHtml\(n\)/);
+  const note = /function notUploadedNote[\s\S]*?\n\}/.exec(app)[0];
   assert.match(note, /Not uploaded: /);
   assert.match(note, /The ticket is filed without/);
-  assert.match(note, /escapeHtml\(n\)/);
   assert.match(note, /escapeHtml\(f\.name\)/);
-  assert.match(draw, /\$\{filesNote\(uploaded, notUploaded\)\}<\/p>/);
+  assert.match(draw, /\$\{notUploadedNote\(notUploaded\)\}<\/p>/);
+});
+
+test('a filed task shows a larger pod centred on the Tasks heading row, above the page and out of its flow, for 3 seconds then a 1-second fade, then gone; warnings stay as a lasting line (SP-223)', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const draw = app.slice(app.indexOf('async function drawProject'), app.indexOf('async function copyText'));
+  // The pod sits in the heading's own row, drawn only after a filing.
+  assert.match(draw, /<div class="tasks-head"><h1>Tasks<\/h1>\$\{filed \? filedPod\(filed, uploaded\) : ''\}<\/div>/);
+  const pod = /function filedPod[\s\S]*?\n\}/.exec(app)[0];
+  assert.match(pod, /<output class="filed-pod">Filed <a href="\/t\/\$\{encodeURIComponent\(filed\)\}">\$\{escapeHtml\(filed\)\}<\/a>/, 'the id is still a link');
+  // The old line under the toolbar is drawn only for a warning, and never says Filed.
+  assert.match(draw, /\$\{filed && \(unchecked \|\| notUploaded\.length\) \? `<p class="filed-note">/);
+  assert.doesNotMatch(draw, /<p class="filed-note">Filed/, 'a plain success is the pod alone');
+  // Off the page once faded, so it catches no clicks.
+  assert.match(app, /const FILED_POD_MS = 4000;/);
+  assert.match(/function wireFiledPod[\s\S]*?\n\}/.exec(app)[0], /setTimeout\(\(\) => pod\.remove\(\), FILED_POD_MS\);/);
+  assert.match(draw, /wireFiledPod\(\);/);
+  const css = readFileSync(WEB('app.css'), 'utf8');
+  assert.match(css, /\.tasks-head \{ position: relative; \}/, 'the row the pod is centred on; adds no height of its own');
+  const rule = /\.filed-pod \{([^}]*)\}/.exec(css)[1];
+  assert.match(rule, /position: absolute;/, 'out of the page flow: nothing moves');
+  assert.match(rule, /top: 50%; left: 50%; transform: translate\(-50%, -50%\);/, 'centred on the heading row');
+  assert.match(rule, /z-index: 10;/, 'drawn above the heading, toolbar and tables');
+  assert.match(rule, /font-size: 1\.25rem;/, 'larger than the body text');
+  assert.match(rule, /animation: filed-pod-fade 4s linear forwards;/);
+  assert.match(css, /@keyframes filed-pod-fade \{ 0%, 75% \{ opacity: 1; \} 100% \{ opacity: 0; \} \}/, '3 seconds full, then 1 second to nothing');
 });
 
 test('the ticket page lists its attachments by name and size, each a download, a plain picture also previewed, never an SVG (SP-140)', () => {
@@ -716,7 +742,7 @@ test('the Add Task box checks the project before filing: asks "Did you mean ...?
   assert.match(wire, /\} catch \(err\) \{\s*if \(err instanceof SignedOut\) return drawSignIn\([^)]*\);\s*unchecked = true;\s*\}/);
   assert.match(app, /const UNCHECKED_NOTE = 'The project check could not run, so it went into the project shown\.';/);
   const draw = app.slice(app.indexOf('async function drawProject'), app.indexOf('async function copyText'));
-  assert.match(draw, /\$\{unchecked \? `\. \$\{UNCHECKED_NOTE\}` : ''\}/);
+  assert.match(draw, /\$\{unchecked \? UNCHECKED_NOTE : ''\}/);
   // Filed elsewhere: X's board opens, naming X's new ticket id.
   assert.match(wire, /if \(into !== slug\) history\.pushState\(null, '', `\/\$\{view\}\/\$\{encodeURIComponent\(into\)\}`\);/);
   // The question box: the words of the ticket, File in X, Keep in the project shown, and a close.
