@@ -44,6 +44,7 @@ const headerProject = document.getElementById('project');
 const signOut = document.getElementById('sign-out');
 const bell = document.getElementById('bell');
 const busCount = document.getElementById('bus');
+const siteNav = document.querySelector('header nav.site');
 let me = null;
 
 /**
@@ -334,6 +335,7 @@ async function drawSetPassword() {
   signOut.hidden = true;
   bell.hidden = true;
   busCount.hidden = true;
+  siteNav.hidden = true;
   setTitle('Set Your Password · Tracker');
   const link = new URLSearchParams(location.search).get('link') ?? '';
   const refused = (answer) => {
@@ -395,6 +397,7 @@ function signedOutHeader(title) {
   signOut.hidden = true;
   bell.hidden = true;
   busCount.hidden = true;
+  siteNav.hidden = true;
   setTitle(title);
 }
 
@@ -2766,6 +2769,7 @@ async function route({ place = null } = {}) {
     who.textContent = `Signed in as ${me.name}`;
     signOut.hidden = false;
     bell.hidden = false;
+    siteNav.hidden = false;
     showProject();
     const ticket = /^\/t\/([^/]+)$/.exec(location.pathname);
     const project = /^\/(board|list)(?:\/([^/]+))?$/.exec(location.pathname);
