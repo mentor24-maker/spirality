@@ -1421,13 +1421,16 @@ if (cmd === 'whoami') {
   };
 
   /** Move a merged ticket to its destination and read the move back. */
-  const moveMergedTicket = async (task, prNumber, dest) => {
+  // `nextPassRetries` (SP-216): the caller left his word open, so the next
+  // pass makes the move again; nobody has to make it by hand.
+  const moveMergedTicket = async (task, prNumber, dest, { nextPassRetries = false } = {}) => {
+    const then = nextPassRetries ? 'the next pass tries again' : 'move it by hand';
     const rem = (task.assignees || []).map((a) => a.id);
     const out = await tracker.updateTask(task.id, { status: dest.status, assignees: { add: [], rem } });
-    if (!out.res.ok) { unchecked.push(`${task.id}: PR #${prNumber} MERGED but the ticket did NOT move to ${dest.status} (HTTP ${out.res.status}) — move it by hand`); return false; }
-    const back = await readTask(task.id);
-    const now = back.status?.status ?? '?';
-    if (now.toLowerCase() !== dest.status.toLowerCase()) { unchecked.push(`${task.id}: PR #${prNumber} MERGED but the move to ${dest.status} did not stick (reads back "${now}") — move it by hand`); return false; }
+    if (!out.res.ok) { unchecked.push(`${task.id}: PR #${prNumber} MERGED but the ticket did NOT move to ${dest.status} (HTTP ${out.res.status}) — ${then}`); return false; }
+    const back = await readTaskOrNull(task.id);
+    const now = back?.status?.status ?? '?';
+    if (!back || now.toLowerCase() !== dest.status.toLowerCase()) { unchecked.push(`${task.id}: PR #${prNumber} MERGED but the move to ${dest.status} did not stick (${back ? `reads back "${now}"` : 'could not be read back'}) — ${then}`); return false; }
     const leftover = (back.assignees || []).map((a) => a.id);
     if (leftover.length) unchecked.push(`${task.id}: moved to ${dest.status} but assignees did not clear ([${leftover.join(', ')}])`);
     return true;
@@ -1656,19 +1659,27 @@ if (cmd === 'whoami') {
         }
         dest = mergeDestination(out.json.markdown_description || out.json.description);
       }
-      const plan = alreadyMergedPlan({ gate, prJson, pr, commentId: decision.commentId, priorRefusal: decision.priorRefusal, dest });
+      const plan = alreadyMergedPlan({ gate, prJson, pr, commentId: decision.commentId, priorRefusal: decision.priorRefusal, dest, verdictDate: decision.verdictDate });
+      if (plan.act === 'stale') say(task, 'stale-merged', `${plan.reason} — refused as before`);
       if (plan.act === 'finish') {
         if (dryRun) {
-          say(task, 'would-finish-merged', `PR #${pr.number} is already merged${plan.mergedAt ? ` (at ${plan.mergedAt})` : ''}; would record it, move the ticket to "${dest.status}" because ${dest.why}, and tell in-flight tickets main moved`);
+          say(task, 'would-finish-merged', `PR #${pr.number} is already merged${plan.mergedAt ? ` (at ${plan.mergedAt})` : ''}; would move the ticket to "${dest.status}" because ${dest.why}, then record it and tell in-flight tickets main moved`);
           return;
         }
-        // Spent forever, FIRST, as after the relay's own merge.
-        const stuck = await markMergeHandled(decision.commentId, task, plan.marker);
-        const noteId = await postNote(task, plan.body, `PR #${pr.number} already merged`);
-        const moved = await moveMergedTicket(task, pr.number, dest);
+        // MOVE FIRST. The merge is already done, so nothing irreversible waits
+        // on his word: it is spent only once the move has read back. A move
+        // that fails writes nothing else, leaves his word open, and the next
+        // pass finishes the job instead of leaving the ticket on the bell.
         settled.add(task.id);
-        const failed = [!stuck && 'marker UNVERIFIED', !noteId && 'note FAILED', !moved && 'MOVE FAILED'].filter(Boolean);
-        say(task, 'already-merged', `PR #${pr.number}${plan.mergedAt ? ` merged at ${plan.mergedAt}` : ''}; recorded on ${who}'s comment ${decision.commentId}; ticket -> ${dest.status}${failed.length ? ` (${failed.join(', ')}, see below)` : ''} (${dest.why})${plan.healed ? '; replaces the old "already merged" refusal' : ''}`);
+        const moved = await moveMergedTicket(task, pr.number, dest, { nextPassRetries: true });
+        if (!moved) {
+          say(task, 'unchecked', `PR #${pr.number} is already merged, but the move to "${dest.status}" FAILED — nothing recorded, ${who}'s comment ${decision.commentId} left open; the next pass tries again`);
+          return;
+        }
+        const noteId = await postNote(task, plan.body, `PR #${pr.number} already merged and the ticket moved to ${dest.status}`);
+        const stuck = await markMergeHandled(decision.commentId, task, plan.marker);
+        const failed = [!noteId && 'note FAILED', !stuck && 'marker UNVERIFIED'].filter(Boolean);
+        say(task, 'already-merged', `PR #${pr.number}${plan.mergedAt ? ` merged at ${plan.mergedAt}` : ''}; ticket -> ${dest.status} (verified); recorded on ${who}'s comment ${decision.commentId}${failed.length ? ` (${failed.join(', ')}, see below)` : ''} (${dest.why})${plan.healed ? '; replaces the old "already merged" refusal' : ''}`);
         await announce(task, mergedBusLine({ tag: busTag, task, url: ticketUrl(task), pr, dest, already: true }), `PR #${pr.number} already merged`);
         const news = await tellMainMoved({ mergedNumber: pr.number, list, dryRun: false, tasks });
         for (const l of news.lines) console.log(`  main-moved\t${l}`);

@@ -13,3 +13,13 @@ Live (or back to Queued when the ticket says another slice is coming), and
 tells the other tickets in flight that main moved. Tickets that already got
 the old refusal are finished the same way on the next pass. Every other reason
 the relay will not merge works exactly as before.
+
+Review sent the first version back for one real hole: it wrote "this ticket
+is now Live" and used up Dane's word *before* moving the ticket. If the move
+failed, the note was wrong and no later pass would ever try again, which is
+the very problem this ticket exists to end. Now the relay moves the ticket
+first. Only when the move reads back does it write the note, use up his word,
+and announce it. A failed move writes nothing else and says so, and the next
+pass (ten minutes later) finishes the job. It also now refuses, as before, a
+pull request that was merged before the newest review pass: that one belongs
+to an earlier slice, and finishing it would mark unbuilt work Live.
