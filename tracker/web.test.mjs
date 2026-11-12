@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { seedDemo, tickingClock } from './demoData.mjs';
 import { reportsOf, REPORT_RANGES, searchTickets, PRIORITIES } from './pageData.mjs';
-import { escapeHtml, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, commandHref, renderContextDocs, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS } from './web/render.mjs';
+import { escapeHtml, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS } from './web/render.mjs';
 import { startServer, setupSettingsOf } from './server.mjs';
 import { saveAnswers, setupFields, setupOf } from './setup.mjs';
 import { DANE_FIELDS as SETUP_FIELDS, STEPS as SETUP_STEPS } from '../scripts/onboard/onboard.mjs';
@@ -967,7 +967,7 @@ test('an open page reads again once a minute and on coming back to the tab, neve
   // A save's own redraw keeps what the beat compares against, so the next beat does not undo its "Saved" note.
   assert.match(/async function drawAgain\(draw\) \{[\s\S]*?\n\}/.exec(app)[0], /await draw\(\);\s*if \(recording === reads && lastDrawn\?\.address === here\(\)\) lastDrawn = \{ address: here\(\), reads \};/);
   assert.equal(app.match(/await drawTicket\(t\.id/g), null, 'every in-page ticket redraw goes through drawAgain');
-  assert.equal((app.match(/await drawAgain\(\(\) => draw(Ticket|Project)\(/g) ?? []).length, 5);
+  assert.equal((app.match(/await drawAgain\(\(\) => draw(Ticket|Project)\(/g) ?? []).length, 6, "SP-208 added the List view priority save");
   assert.match(route, /if \(place && !\(err instanceof SignedOut\)\) return;/, "a beat's failed draw does not replace the page with an error");
   assert.match(app, /if \(location\.hash === '#reply' && !refreshing\) \{/, 'a beat does not jump to the reply box again');
   assert.match(/function keepPlace\(\) \{[\s\S]*?\n\}/.exec(app)[0], /main\.querySelectorAll\('details'\)[\s\S]*window\.scrollTo\(0, y\);/);
@@ -1847,6 +1847,60 @@ test('the Tasks page reads the stage colours with the board, puts them on as pro
   for (const prop of ['--stage-border', '--stage-tint', '--stage-text']) assert.match(css, new RegExp(`var\\(${prop}\\)`), prop);
 });
 
+// ── Changing a ticket's priority from the List view (SP-208) ───────────────
+
+test('a List row\'s priority is a dropdown of Urgent, High, Normal, Low with the ticket\'s own selected; "None" only while it has none', () => {
+  const set = renderListPriority({ id: 'SP-12', priority: 'normal' });
+  assert.match(set, /^<select class="list-priority" data-priority-of="SP-12" aria-label="Priority of SP-12">/);
+  const options = [...set.matchAll(/<option value="([^"]*)"( selected)?>([^<]*)<\/option>/g)].map((m) => [m[1], m[3], Boolean(m[2])]);
+  assert.deepEqual(options, [['urgent', 'Urgent', false], ['high', 'High', false], ['normal', 'Normal', true], ['low', 'Low', false]]);
+  assert.match(set, /<span class="note" data-priority-note="SP-12" role="status"><\/span>$/, 'a note beside it for Saving…, Saved or a refusal');
+  const none = renderListPriority({ id: 'SP-13', priority: null });
+  assert.match(none, /<select[^>]*><option value="" selected>None<\/option><option value="urgent">Urgent<\/option>/);
+  assert.equal((none.match(/selected/g) || []).length, 1);
+  assert.deepEqual(PRIORITY_ORDER, [...PRIORITIES], 'the same choices the Change panel offers');
+  assert.match(renderListPriority({ id: '<b>', priority: 'low' }), /data-priority-of="&lt;b&gt;"/);
+});
+
+test('the List view draws the dropdown in every row; the Board view\'s Live rows and cards stay as text', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const draw = app.slice(app.indexOf('async function drawProject('), app.indexOf('async function copyText'));
+  assert.match(draw, /<td class="priority">\$\{view === 'list' \? renderListPriority\(t\) : t\.priority \? escapeHtml\(statusName\(t\.priority\)\)/);
+  const card = /const card = \(t\) => `([\s\S]*?)`;/.exec(app)[1];
+  assert.doesNotMatch(card, /select|renderListPriority/);
+  assert.match(draw, /wireListPriorities\(slug, view, board, said\);/);
+});
+
+test('picking a priority sends only it with the board\'s version, holds the dropdowns, and says Saved, moved or the server\'s words', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const wire = /function wireListPriorities\(slug, view, board, said\) \{([\s\S]*?)\n\}/.exec(app)?.[1];
+  assert.ok(wire, 'the dropdowns are wired');
+  assert.match(wire, /api\('PATCH', `\/tickets\/\$\{encodeURIComponent\(id\)\}`, \{ priority: select\.value, ifVersion: t\.version \}\)/);
+  assert.match(wire, /for \(const c of held\) c\.disabled = true;\s*note\.className = 'note quiet';\s*note\.textContent = 'Saving…';/);
+  assert.match(wire, /after = \{ id, text: 'Saved' \};/);
+  assert.match(wire, /err instanceof Refused && err\.status === 409\) \{\s*after = \{ id, text: MOVED_MESSAGE, error: true \};/, 'a 409 redraws as stored, with the moved message');
+  assert.match(wire, /note\.textContent = `Not saved: \$\{err\.message\}`;\s*select\.value = before;\s*for \(const c of held\) c\.disabled = false;/, 'any other refusal puts the old value back');
+  assert.match(wire, /await drawAgain\(\(\) => drawProject\(slug, view, \{ said: after \}\)\);/);
+});
+
+test('a priority picked through the page\'s save shows on the board and on the ticket; an old version is refused and changes nothing', async () => {
+  const f = await fixture();
+  try {
+    const rows = () => f.call('GET', '/projects/alpha/board').then((r) => r.body.columns.flatMap((c) => c.tickets));
+    const t = (await rows()).find((r) => r.priority !== 'high');
+    assert.ok(t, 'the test data has a ticket that is not High');
+    const saved = await f.call('PATCH', `/tickets/${t.id}`, { body: { priority: 'high', ifVersion: t.version } });
+    assert.equal(saved.status, 200);
+    const after = (await rows()).find((r) => r.id === t.id);
+    assert.equal(after.priority, 'high');
+    assert.ok(after.version > t.version, 'the redrawn row carries the new version');
+    assert.equal(f.store.getTicket(t.id).priority, 'high', 'the ticket page reads the same priority');
+    const stale = await f.call('PATCH', `/tickets/${t.id}`, { body: { priority: 'low', ifVersion: t.version } });
+    assert.equal(stale.status, 409);
+    assert.equal(f.store.getTicket(t.id).priority, 'high');
+  } finally { await f.cleanup(); }
+});
+
 // ── Deleting a ticket nobody has started ─────────────────────────────────────
 
 test('Delete is offered only for Requested and Queued, in either spelling of the status', () => {
@@ -2500,7 +2554,7 @@ test('the Docs page uploads one context document as the file itself, asks before
   const draw = app.slice(app.indexOf('async function drawDocs'), app.indexOf('/** Underline the header link'));
   assert.match(draw, /const docsPath = `\/projects\/\$\{encodeURIComponent\(project\.slug\)\}\/docs`;/);
   assert.match(draw, /api\('GET', docsPath\)/);
-  assert.ok(draw.indexOf('<h1>Docs</h1>\n    ${renderContextDocs({ project, docs }') > 0 && draw.indexOf('renderContextDocs({ project, docs }') < draw.lastIndexOf('<h2>Task Files</h2>'), 'Context Documents come first, before Task Files (SP-195 moved the docs folder\'s list to the bottom)');
+  assert.ok(draw.indexOf('<h1>Docs</h1>\n    ${docsColumns(`\n    ${renderContextDocs({ project, docs }') > 0 && draw.indexOf('renderContextDocs({ project, docs }') < draw.lastIndexOf('<h2>Task Files</h2>'), 'Context Documents come first, before Task Files (SP-195 moved the docs folder\'s list to the bottom)');
   const wire = draw.slice(draw.indexOf('function wireContextDocs'));
   assert.match(wire, /picker\.files\?\.\[0\]/, 'one file at a time');
   assert.match(wire, /file\.size > MAX_FILE/, 'an 11 MB file is refused before it is sent');
@@ -2587,11 +2641,32 @@ test('the Commands search keeps a command whose name or description holds the wo
   assert.deepEqual(matchCommands(mentions, 'review').map((c) => c.name), ['loop-review', 'loop-build'], 'a name match comes before a description match');
 });
 
-test('the Commands list shows /<name>, its source and description, linking to its own page; no match and nothing copied yet each say so', () => {
+test('the search also matches a command\'s summary and plain explanation (SP-212)', () => {
+  const withWords = [
+    { name: 'loop-build', source: 'Loop skill', description: 'For Claude Code.', summary: 'Builds the next ticket', about: 'Opens a pull request for approval.' },
+    { name: 'loop-spec', source: 'Loop skill', description: 'For Claude Code.', summary: null, about: null },
+  ];
+  assert.deepEqual(matchCommands(withWords, 'NEXT TICKET').map((c) => c.name), ['loop-build'], 'by the summary');
+  assert.deepEqual(matchCommands(withWords, 'approval').map((c) => c.name), ['loop-build'], 'by the explanation');
+});
+
+test('a command shows its summary, or the first seven words of its description and "…"; its pop-up its about, or its description (SP-212)', () => {
+  assert.equal(commandSummary({ summary: 'Builds the next ticket', description: 'x' }), 'Builds the next ticket');
+  assert.equal(commandSummary({ description: 'one two three four five six seven eight nine' }), 'one two three four five six seven…');
+  assert.equal(commandSummary({ description: 'Find out why a ticket is stuck.' }), 'Find out why a ticket is stuck.', 'seven words or fewer: as written, no "…"');
+  assert.equal(commandAbout({ about: 'Plain words.', description: 'x' }), 'Plain words.');
+  assert.equal(commandAbout({ about: null, description: 'The description.' }), 'The description.');
+});
+
+test('the Quick Claude Commands list shows only /<name> and its short line, each opening its pop-up; no match and nothing copied yet each say so', () => {
   const html = renderCommandList(COMMANDS, 'review');
-  assert.match(html, /<a href="\/docs\/commands\/loop-review"><code>\/loop-review<\/code><\/a> <span class="quiet">Loop skill<\/span><br>Review the next pull request\./);
+  assert.match(html, /<li><a class="command-open" href="\/docs\/commands\/loop-review" data-command="loop-review"><code>\/loop-review<\/code> <span class="command-summary">Review the next pull request\.<\/span><\/a><\/li>/);
+  assert.doesNotMatch(html, /Loop skill|Your command/, 'where it comes from waits for the pop-up');
   assert.doesNotMatch(html, /why-stuck|loop-spec/);
   assert.doesNotMatch(html, /not been copied/, 'a copied command is listed, so no such line');
+  const long = renderCommandList([{ name: 'x', source: 'Loop skill', description: 'Pick the next claimable task from the queue and build it.', steps: '' }]);
+  assert.match(long, /<span class="command-summary">Pick the next claimable task from the…<\/span>/);
+  assert.doesNotMatch(long, /and build it/, 'the long description leaves the row');
   assert.match(renderCommandList(COMMANDS, 'zebra'), /No command matches “zebra”\./);
   const skillsOnly = renderCommandList(COMMANDS.filter((c) => c.source === 'Loop skill'));
   assert.match(skillsOnly, /\/loop-review[\s\S]*\/loop-spec/);
@@ -2599,7 +2674,18 @@ test('the Commands list shows /<name>, its source and description, linking to it
   const evil = renderCommandList([{ name: 'x', source: 'Your command', description: '<img src=x onerror=alert(1)>', steps: '' }], '<b>');
   assert.doesNotMatch(evil, /<img|<b>/);
   assert.equal(commandHref('a b'), '/docs/commands/a%20b');
-  assert.match(renderCommandList([{ name: 'x', source: 'Loop skill', description: 'Runs `npm run verify` first.', steps: '' }]), /Runs <code>npm run verify<\/code> first\./, 'code in a description is drawn as code');
+  assert.match(renderCommandList([{ name: 'x', source: 'Loop skill', description: 'Runs `npm run verify` first.', steps: '' }]), /Runs <code>npm run verify<\/code> first\./, 'code in a summary is drawn as code');
+});
+
+test('a command\'s pop-up shows its name, source, plain explanation and a link to its steps, escaped (SP-212)', () => {
+  const html = renderCommandDetails({ name: 'loop-review', source: 'Loop skill', description: 'For Claude Code.', about: 'Checks the work again.' });
+  assert.match(html, /<h2 id="command-details-title"><code>\/loop-review<\/code><\/h2>/);
+  assert.match(html, /<p class="quiet">Loop skill<\/p>/);
+  assert.match(html, /<p>Checks the work again\.<\/p>/);
+  assert.doesNotMatch(html, /For Claude Code/, 'the about line, not the description');
+  assert.match(html, /<a href="\/docs\/commands\/loop-review">See All the Steps<\/a>/);
+  assert.match(renderCommandDetails({ name: 'mine', source: 'Your command', description: 'My own words.' }), /<p>My own words\.<\/p>/, 'no about line: the description');
+  assert.doesNotMatch(renderCommandDetails({ name: '<x>', source: '<s>', description: '<y>' }), /<x>|<s>|<y>/);
 });
 
 test('a command\'s own page draws its steps formatted (headings, lists, code) with a Back to Docs link, and escapes its words', () => {
@@ -2632,7 +2718,17 @@ test('the Docs page carries the Commands section; /docs/commands/<name> opens on
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   const draw = app.slice(app.indexOf('async function drawDocs'), app.indexOf('/** Underline the header link'));
   assert.match(draw, /await api\('GET', '\/commands'\)/);
-  assert.match(draw, /<h2>Commands<\/h2>/);
+  assert.match(draw, /<h2 id="commands-pod-title">Quick Claude Commands<\/h2>/);
+  assert.match(draw, /<div class="docs-columns">\$\{commandsSection\(\)\}<div class="docs-main">\$\{rest\}<\/div><\/div>/, 'the pod on the left, the rest on the right');
+  assert.equal((draw.match(/\$\{docsColumns\(`/g) ?? []).length, 2, 'with projects and without, the page is drawn in the two columns');
+  assert.doesNotMatch(draw, /\$\{commandsSection\(\)\}\s*\$\{documentation\}/, 'the pod is no longer a section between the others');
+  assert.match(draw, /<dialog class="command-details" aria-labelledby="command-details-title">[\s\S]*<button type="submit">Close<\/button>[\s\S]*<\/dialog>/);
+  assert.match(draw, /renderCommandDetails\(command\);\s*dialog\.showModal\(\);/);
+  assert.match(draw, /e\.preventDefault\(\);\s*e\.stopPropagation\(\);/, 'a click opens the pop-up, not the steps page');
+  const css = readFileSync(WEB('app.css'), 'utf8');
+  assert.match(css, /section\.commands-pod \{ background: #cceeff; border: 1px solid #003377; border-radius: 20px;/);
+  assert.match(css, /\.docs-columns \{ display: grid; grid-template-columns: minmax\(0, 1fr\) minmax\(0, 2fr\);/, 'the pod takes a third');
+  assert.match(css, /@media \(max-width: 800px\) \{ \.docs-columns \{ grid-template-columns: minmax\(0, 1fr\); \} \}/, 'stacked on a narrow screen');
   assert.match(draw, /<input type="search" id="command-search"/);
   assert.match(draw, /box\.addEventListener\('input', show\)/);
   assert.match(draw, /renderCommandList\(commands, box\.value\)/);
@@ -3687,11 +3783,11 @@ test('Reference Docs and Work Log is folded, counted, sortable by Title, Kind an
   assert.match(renderDocumentation([], String), /Reference Docs and Work Log \(0\)<\/h2>.*no Markdown files/s);
 });
 
-test('the Docs page puts Reference Docs and Work Log last, below Commands, with or without projects, and wires its controls (SP-195)', () => {
+test('the Docs page puts Reference Docs and Work Log last in the right column, with or without projects, and wires its controls (SP-195, SP-212)', () => {
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   const draw = app.slice(app.indexOf('async function drawDocs'), app.indexOf('/** The command a `/docs/commands/<name>` address opens'));
-  assert.match(draw, /<h2>Task Files<\/h2><p class="quiet">There are no projects yet\.<\/p>\$\{commandsSection\(\)\}\$\{documentation\}`;\s*showCommands\(commands\);\s*wireDocumentation\(files\);/, 'no projects: last too');
-  assert.match(draw, /\$\{commandsSection\(\)\}\n    \$\{documentation\}`;/, 'below Commands');
+  assert.match(draw, /\$\{docsColumns\(`<h2>Task Files<\/h2><p class="quiet">There are no projects yet\.<\/p>\$\{documentation\}`\)\}`;\s*showCommands\(commands\);\s*wireDocumentation\(files\);/, 'no projects: last too');
+  assert.match(draw, /has a file yet\.<\/p>`\}\n    \$\{documentation\}`\)\}`;/, 'below Task Files, last on the right');
   assert.equal((draw.match(/\$\{documentation\}/g) ?? []).length, 2, 'drawn once in each case, never above');
   assert.equal((draw.match(/wireDocumentation\(files\);/g) ?? []).length, 2);
   const wire = draw.slice(draw.indexOf('function wireDocumentation'));

@@ -1443,16 +1443,31 @@ export function setupBody(fields, values) {
 }
 
 /**
- * The Docs page's Commands section (SP-179): the commands whose name or
- * description holds `term`, case set aside; every one when `term` is blank.
- * Those whose name holds it come first, so typing "review" puts
- * /loop-review above the skills that only mention review.
+ * A command's short line in the Quick Claude Commands pod (SP-212): its own
+ * `summary:`, or else the first seven words of its description and "…".
+ */
+export function commandSummary(command) {
+  if (command.summary) return String(command.summary);
+  const words = String(command.description ?? '').trim().split(/\s+/).filter(Boolean);
+  return words.length > 7 ? `${words.slice(0, 7).join(' ')}…` : words.join(' ');
+}
+
+/** A command's plain explanation in its pop-up (SP-212): its own `about:`, or else its description. */
+export const commandAbout = (command) => String(command.about || command.description || '');
+
+/**
+ * The Docs page's Quick Claude Commands search (SP-179, SP-212): the
+ * commands whose name, description, summary or plain explanation holds
+ * `term`, case set aside; every one when `term` is blank. Those whose name
+ * holds it come first, so typing "review" puts /loop-review above the
+ * skills that only mention review.
  */
 export function matchCommands(commands, term) {
   const t = String(term ?? '').trim().toLowerCase();
   if (!t) return commands;
   const byName = commands.filter((c) => c.name.toLowerCase().includes(t));
-  const byWords = commands.filter((c) => !byName.includes(c) && String(c.description).toLowerCase().includes(t));
+  const words = (c) => [c.description, c.summary, c.about].filter(Boolean).join('\n').toLowerCase();
+  const byWords = commands.filter((c) => !byName.includes(c) && words(c).includes(t));
   return [...byName, ...byWords];
 }
 
@@ -1460,21 +1475,35 @@ export function matchCommands(commands, term) {
 export const commandHref = (name) => `/docs/commands/${encodeURIComponent(name)}`;
 
 /**
- * The Commands list under the search box: each command as `/<name>`, where
- * it comes from and its description, its name linking to its steps. A
- * search that leaves nothing says so; with no copied commands yet, one line
- * says that too.
+ * The Quick Claude Commands list under the search box (SP-212): each
+ * command as `/<name>` and its short line, nothing else. Each is a link to
+ * its own page that the page opens as a pop-up instead (`data-command`
+ * names which). A search that leaves nothing says so; with no copied
+ * commands yet, one line says that too.
  */
 export function renderCommandList(commands, term = '') {
   const shown = matchCommands(commands, term);
   const none = commands.some((c) => c.source === 'Your command')
     ? ''
     : '<p class="quiet commands-none">Your own commands have not been copied here yet: run <code>npm run commands:copy</code> on the computer they live on.</p>';
-  const rows = shown.map((c) => `<li data-command="${escapeHtml(c.name)}"><a href="${commandHref(c.name)}"><code>/${escapeHtml(c.name)}</code></a> <span class="quiet">${escapeHtml(c.source)}</span><br>${renderInline(c.description)}</li>`);
+  const rows = shown.map((c) => `<li><a class="command-open" href="${commandHref(c.name)}" data-command="${escapeHtml(c.name)}"><code>/${escapeHtml(c.name)}</code> <span class="command-summary">${renderInline(commandSummary(c))}</span></a></li>`);
   const list = shown.length
     ? `<ul class="command-list">${rows.join('')}</ul>`
     : `<p class="quiet">No command matches “${escapeHtml(String(term).trim())}”.</p>`;
   return `${list}${none}`;
+}
+
+/**
+ * What a command's pop-up holds (SP-212): its name, where it comes from, its
+ * plain explanation and a link to the page with all its steps.
+ */
+export function renderCommandDetails(command) {
+  const paragraphs = commandAbout(command).split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
+  return `
+    <h2 id="command-details-title"><code>/${escapeHtml(command.name)}</code></h2>
+    <p class="quiet">${escapeHtml(command.source)}</p>
+    ${paragraphs.map((p) => `<p>${renderInline(p)}</p>`).join('')}
+    <p><a href="${commandHref(command.name)}">See All the Steps</a></p>`;
 }
 
 /** One command's page: its name, where it comes from, its description and its steps, formatted. */
@@ -1493,6 +1522,21 @@ export function renderCommandView(command) {
  * (a test holds the two together; the page cannot load that file).
  */
 export const PRIORITY_ORDER = Object.freeze(['urgent', 'high', 'normal', 'low']);
+
+/**
+ * SP-208: a List view row's Priority cell, a dropdown that saves on change
+ * (app.mjs wireListPriorities). The same choices and rule as the Change
+ * panel's picker: Urgent, High, Normal, Low, the ticket's own selected; a
+ * ticket with none shows "None", and once one is picked "None" is no longer
+ * offered. Beside it, the note that says "Saving…", "Saved" or a refusal.
+ */
+export function renderListPriority({ id, priority }) {
+  const options = [
+    ...(priority == null ? [option('', 'None', true)] : []),
+    ...PRIORITY_ORDER.map((p) => option(p, capital(p), p === priority)),
+  ].join('');
+  return `<select class="list-priority" data-priority-of="${escapeHtml(id)}" aria-label="Priority of ${escapeHtml(id)}">${options}</select><span class="note" data-priority-note="${escapeHtml(id)}" role="status"></span>`;
+}
 
 /** The columns a stage's table sorts on, in the order they are drawn, with the class each cell wears. */
 export const SORT_COLUMNS = Object.freeze([

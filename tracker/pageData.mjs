@@ -291,6 +291,8 @@ export function boardOf(store, slug, { viewerId = null } = {}) {
         pullRequest: pullRequestOf(t.id),
         answerIn: answerIsIn(t, store.listComments(t.id), project.operator),
         waiting: waitsOn(t, store.listComments(t.id), viewerId),
+        // SP-208: the List view's priority dropdown saves with it (ifVersion).
+        version: t.version,
       })),
     })),
   };

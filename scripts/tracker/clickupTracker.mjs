@@ -100,6 +100,24 @@ export function createClickupTracker({ token, apiBase, timeoutMs, log = console.
     }
   }
 
+  /**
+   * One trail read across every page (lib/commentPages.js): a ticket's
+   * comments by default, or whatever `path` names (a comment's replies).
+   * Answers `{ paged, bad }`: `bad` is the first response that was not a
+   * readable comment list, or null.
+   */
+  async function pagedRead({ taskId, path, maxPages }) {
+    let bad = null;
+    const get = async (p) => {
+      const out = await call('GET', p);
+      const ok = out.res.ok && commentsReadable(out.json);
+      if (!ok) bad = out;
+      return { ok, json: out.json };
+    };
+    const paged = await pageComments({ get, taskId, ...(path ? { path } : {}), ...(maxPages ? { maxPages } : {}) });
+    return { paged, bad };
+  }
+
   return {
     name: 'clickup',
 
@@ -144,19 +162,17 @@ export function createClickupTracker({ token, apiBase, timeoutMs, log = console.
      * ARCHIVE_MAX_PAGES, SP-235).
      */
     async listComments(task, { maxPages } = {}) {
-      let bad = null;
-      const get = async (path) => {
-        const out = await call('GET', path);
-        const ok = out.res.ok && commentsReadable(out.json);
-        if (!ok) bad = out;
-        return { ok, json: out.json };
-      };
-      const paged = await pageComments({ get, taskId: task, ...(maxPages ? { maxPages } : {}) });
-      return { paged, bad };
+      return pagedRead({ taskId: task, maxPages });
     },
     postComment: (task, body) => call('POST', `/api/v2/task/${task}/comment`, body),
     replyToComment: (commentId, body) => call('POST', `/api/v2/comment/${commentId}/reply`, body),
     listReplies: (commentId) => call('GET', `/api/v2/comment/${commentId}/reply`),
+    /**
+     * Every reply to one comment, newest first, across all pages: ClickUp
+     * pages replies 25 at a time, as it pages comments (SP-242). Answers
+     * `{ paged, bad }`, as listComments does.
+     */
+    listAllReplies: (commentId, { maxPages } = {}) => pagedRead({ path: `/api/v2/comment/${commentId}/reply`, maxPages }),
 
     /**
      * The bytes of one file ClickUp gave a link to (a ticket's attachment).

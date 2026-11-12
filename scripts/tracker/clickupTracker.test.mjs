@@ -118,6 +118,25 @@ test('comment reads stop at 40 pages by default, and an archive read takes the w
   } finally { await api.close(); }
 });
 
+test('every reply to a comment is read, across pages, from the reply address (SP-242)', async () => {
+  // ClickUp pages replies 25 at a time, newest first: 26 replies take two pages.
+  const api = await fakeClickup((req) => {
+    const page = req.path.includes('?') ? 1 : 0;
+    const size = page === 0 ? 25 : 1;
+    const comments = Array.from({ length: size }, (_, i) => ({ id: `r${page}-${i}`, date: String(1e12 - page * 100 - i), comment_text: 'x' }));
+    return { json: { comments } };
+  });
+  const t = createClickupTracker({ token: 'tok', apiBase: api.apiBase, log: () => {} });
+  try {
+    const { paged, bad } = await t.listAllReplies('77', { maxPages: ARCHIVE_MAX_PAGES });
+    assert.equal(bad, null);
+    assert.equal(paged.complete, true);
+    assert.equal(paged.comments.length, 26);
+    assert.equal(api.seen[0].path, '/api/v2/comment/77/reply');
+    assert.match(api.seen[1].path, /^\/api\/v2\/comment\/77\/reply\?start=\d+&start_id=r0-24$/);
+  } finally { await api.close(); }
+});
+
 test('a 429 is repeated after the reset, then answered', async () => {
   const api = await fakeClickup((_, n) => (n === 1
     ? { status: 429, headers: { 'x-ratelimit-reset': String(Math.floor(Date.now() / 1000)) } }

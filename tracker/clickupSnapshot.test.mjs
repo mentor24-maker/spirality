@@ -88,10 +88,10 @@ function fakeTracker({ fail = {}, timeInStatus = 'yes', files = {}, lists, ...ov
       if (fail.listComments === id) return { paged: { complete: false, comments: [] }, bad: failed(503) };
       return { paged: { complete: true, comments: data.comments[id] || [] }, bad: null };
     },
-    async listReplies(id) {
-      calls.push(['listReplies', id]);
-      if (fail.listReplies === id) return failed(500);
-      return ok({ comments: data.replies[id] || [] });
+    async listAllReplies(id, opts) {
+      calls.push(['listAllReplies', id, opts]);
+      if (fail.listReplies === id) return { paged: { complete: false, comments: [] }, bad: failed(500) };
+      return { paged: { complete: true, comments: data.replies[id] || [] }, bad: null };
     },
     async getTimeInStatus(id) {
       calls.push(['getTimeInStatus', id]);
@@ -286,13 +286,14 @@ test('the token is in no file the snapshot writes, and a record that would carry
   } finally { cleanup(); }
 });
 
-test('comments are read with the archive page limit, so a trail over 1,000 comments is taken whole (SP-235)', async () => {
+test('comments and replies are read with the archive page limit, so a long trail is taken whole (SP-235, SP-242)', async () => {
   const { paths, cleanup } = scratch();
   try {
     const tracker = fakeTracker();
     await run(tracker, paths, { dryRun: true });
-    const reads = tracker.calls.filter((c) => c[0] === 'listComments');
-    assert.ok(reads.length > 0);
+    const reads = tracker.calls.filter((c) => c[0] === 'listComments' || c[0] === 'listAllReplies');
+    assert.ok(reads.some((c) => c[0] === 'listComments'));
+    assert.ok(reads.some((c) => c[0] === 'listAllReplies'), 'replies are paged too (SP-242)');
     for (const c of reads) assert.deepEqual(c[2], { maxPages: ARCHIVE_MAX_PAGES });
   } finally { cleanup(); }
 });
