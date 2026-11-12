@@ -152,8 +152,10 @@ table.tickets, details.group { border: var(--hairline); border-radius: 8px; }
 .group td.id { white-space: nowrap; }
 .group td.id a { color: var(--quiet); text-decoration: none; }
 .group td.id a:hover { text-decoration: underline; }
-.group th.name { width: 30%; }
-.group th.priority { width: 8%; }
+.group th.name { width: 27%; }
+.group th.priority { width: 11%; }
+.group td.priority select { width: 100%; max-width: 7.5rem; }
+.group td.priority .note { display: block; font-size: 0.8rem; }
 .group th.tags { width: 13%; }
 .group th.actions { width: 8%; }
 .group td.actions { white-space: nowrap; }
