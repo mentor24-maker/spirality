@@ -2127,7 +2127,7 @@ async function drawReporting(chosen) {
     <p class="quiet">Every task's time in that range, open ones too, Live left out. Working: in Building. Waiting on You: in Needs your input or Ready to launch with your reply not yet the newest comment. Broken: from a loop's failure note on the task until its next move or your next comment. Waiting for a Lane: everything else, including all of In review, since nothing marks when a review starts. A loop that failed without writing on the task shows as waiting, not broken.</p>
     <table class="counts report time-split"><thead>${head}</thead><tbody>${splitTable}</tbody></table>
     <form class="report-scope time-split-range">
-      <label for="time-split-range">Tasks With the Most Time In</label>
+      <label for="time-split-range">Tasks with the Most Time In</label>
       <select id="time-split-range">${r.ranges.map((g, i) => `<option value="${escapeHtml(g.key)}"${i === 0 ? ' selected' : ''}>${escapeHtml(g.label)}</option>`).join('')}</select>
     </form>
     <div class="time-split-list">${splitTickets(r.ranges[0]?.key)}</div>

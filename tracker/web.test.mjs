@@ -2578,7 +2578,7 @@ test('the Reporting page draws Where the Time Goes from the server: four buckets
   for (const label of ['Working', 'Waiting for a Lane', 'Waiting on You', 'Broken']) assert.match(draw, new RegExp(`'${label}'\\]`), label);
   assert.match(draw, /r\.timeSplit\[g\.key\]/, 'figures per range, from the server');
   assert.match(draw, /<span class="quiet">none in this range<\/span>/, 'nothing open is said in words, never 0 hours');
-  assert.match(draw, /<label for="time-split-range">Tasks With the Most Time In<\/label>/);
+  assert.match(draw, /<label for="time-split-range">Tasks with the Most Time In<\/label>/);
   assert.match(draw, /<a href="\/t\/\$\{encodeURIComponent\(x\.id\)\}">/, 'each task id links to its page');
   assert.match(draw, /escapeHtml\(x\.name\)/);
   assert.match(draw, /spanOf\(Number\(ms\)\)/, 'durations in the page\'s own wording');
