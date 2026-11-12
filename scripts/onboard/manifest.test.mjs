@@ -203,3 +203,10 @@ test('the setup makes the project ignore the lanes\' working copies (SP-120)', (
   assert.ok(entry.ignoreLines.includes('.claude/worktrees/'));
   assert.ok(read('.gitignore').split('\n').includes('.claude/worktrees/'), 'Spirality ignores it too');
 });
+
+test('.claude/settings.json is merged into the project\'s own, never copied over it (SP-254)', () => {
+  assert.ok(!manifest.files.some((f) => f.to === '.claude/settings.json'), 'a plain copy would drop the project\'s own hooks');
+  const entry = manifest.made.find((m) => m.to === '.claude/settings.json');
+  assert.equal(entry?.mergeFrom, '.claude/settings.json');
+  assert.equal(manifest.made.filter((m) => m.mergeFrom).length, 1, 'the copy step merges one settings file');
+});
