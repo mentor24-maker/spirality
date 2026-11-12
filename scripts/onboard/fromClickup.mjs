@@ -158,6 +158,50 @@ export function passInFlight(logText, { lock = null, pid = null } = {}) {
   return { running: start > end && !runnerGone, started: stamp ? stamp[1] : null };
 }
 
+/**
+ * The step log's outcome word for "the old lanes are loaded again" (SP-253):
+ * `<time> | stop | again | <why>`. Never `done`, so it is never read as a
+ * step done.
+ */
+export const OLD_LANES_BACK = 'again';
+
+/**
+ * Has the lanes step begun? Any `lanes` line in the step log, whatever its
+ * outcome. onboard:lanes loads Spirality's own lanes under the same labels
+ * and can then fail, leaving no `lanes | done` line; from the first `lanes`
+ * line on, a loaded lane may be the new one, so it cannot tell (SP-253).
+ */
+export function lanesStepBegun(logText) {
+  return String(logText || '').split('\n').some((line) => line.split(' | ')[1] === 'lanes');
+}
+
+/**
+ * Are the old lanes back? A rerun finds them loaded again after the stop
+ * step was done, before the lanes step has begun (from then on, a loaded
+ * lane may be Spirality's own, so it cannot tell). `jobs` is
+ * readInstallerStatus of the old installer's `--status`. Dane switching a
+ * project back to its old loop mid-setup (2026-11-11, StarCaster) is how.
+ */
+export function oldLanesBack({ stopDone, lanesBegun, jobs }) {
+  return Boolean(stopDone) && !lanesBegun && jobs.some((j) => j.loaded);
+}
+
+/**
+ * The step log from the last time the old lanes were found back (its
+ * `stop | again` line) on, or all of it when they never were. A ClickUp step
+ * done before that line is done for loops that have since written more to
+ * ClickUp, so it counts as not done.
+ */
+export function logSinceOldLanesBack(logText) {
+  const lines = String(logText || '').split('\n');
+  let at = -1;
+  lines.forEach((line, i) => {
+    const parts = line.split(' | ');
+    if (parts[1] === 'stop' && parts[2] === OLD_LANES_BACK) at = i;
+  });
+  return at < 0 ? lines.join('\n') : lines.slice(at + 1).join('\n');
+}
+
 /** Where the switch settings file is kept: `<logDir>/onboard/<slug>-switch/`, beside the answers file. */
 export function switchDir(onboardFolder, slug) {
   return join(onboardFolder, `${slug}-switch`);

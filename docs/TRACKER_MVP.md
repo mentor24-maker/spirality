@@ -1050,7 +1050,9 @@ ClickUp seat ids the config holds until then.
    ```
 
    Good: `Import finished.`, nothing refused. A run that stops part way is
-   safe to run again; it carries on.
+   safe to run again; it carries on. A run again also brings an imported
+   ticket up to date when ClickUp changed it since (counted `updated`),
+   unless it was changed in the tracker too: that one is refused by name.
 
 5. **Check it is safe to switch:**
 

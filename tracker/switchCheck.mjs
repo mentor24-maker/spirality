@@ -242,6 +242,8 @@ export async function runSwitchCheck({ config, env, db, clickup, fetchImpl = fet
     try {
       const r = await importLoopQueue({ tracker: clickup, store, config });
       const left = Object.entries(r.counts).filter(([, c]) => c.written > 0).map(([kind, c]) => `${c.written} ${kind}`);
+      // A ticket ClickUp changed since its import is not up to date either.
+      if (r.counts.tickets.updated > 0) left.push(`${r.counts.tickets.updated} ticket(s) to bring up to date`);
       const lines = formatReport(r, { dryRun: true }).split('\n');
       if (r.refusals.length) lines.push('The real import would refuse the items above.');
       if (left.length) lines.push(`NOT YET IMPORTED: ${left.join(', ')}. Run the real import again (the runbook, step 4).`);
