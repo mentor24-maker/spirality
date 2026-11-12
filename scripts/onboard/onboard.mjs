@@ -59,7 +59,9 @@
  *             its ClickUp list saved and imported into the tracker, and the
  *             switch checked safe, all before the copy step's pull request
  *             can merge (scripts/onboard/fromClickup.mjs). A new project's
- *             run never has these steps.
+ *             run never has these steps. SP-253: a rerun before the lanes
+ *             step that finds the old lanes loaded again runs all four
+ *             again, and the step log says why (`stop | again`).
  *   copy      SP-110's one pull request in the project's repository
  *             (`onboard:copy`), CI's verify green on it.
  *   lanes     SP-111 installs the project's lanes from the setup branch and
@@ -118,8 +120,8 @@ import { LANES, parseStatus } from '../../lib/onboardLanes.mjs';
 import { normalRepo } from '../lib/repoCheck.mjs';
 import { readEmptiness, starterFiles, starterMessage } from '../../lib/onboardStarter.mjs';
 import {
-  CLICKUP_FIELDS, CLICKUP_STEPS, installerPath, passInFlight, readInstallerStatus, runsOldLoop, safeToSwitch,
-  snapshotArgs, switchDir, switchSettings, withClickupSteps,
+  CLICKUP_FIELDS, CLICKUP_STEPS, installerPath, logSinceOldLanesBack, OLD_LANES_BACK, oldLanesBack, passInFlight,
+  readInstallerStatus, runsOldLoop, safeToSwitch, snapshotArgs, switchDir, switchSettings, withClickupSteps,
 } from './fromClickup.mjs';
 
 const require = createRequire(import.meta.url);
@@ -796,8 +798,13 @@ export async function onboard(opts, deps) {
     // of these steps. Each is skipped once the step log has it done (its
     // lanes are loaded again by the lanes step, from the setup branch, so
     // "nothing loaded" cannot tell on a rerun), or once the setup is merged.
+    // Before the lanes step, though, a loaded lane can only be an old one:
+    // a rerun that finds them back runs all four again (SP-253).
     if (onClickup) {
-      const doneBefore = (s) => setup.on ? `the setup is merged: ${setup.why}` : loggedDone(deps.readText(logFile), s) ? `it was done before (${logFile})` : null;
+      // Read from the last time the old lanes were found back on (SP-253):
+      // a step done before then is done for loops that have written since.
+      const clickupLog = () => logSinceOldLanesBack(deps.readText(logFile));
+      const doneBefore = (s) => setup.on ? `the setup is merged: ${setup.why}` : loggedDone(clickupLog(), s) ? `it was done before (${logFile})` : null;
       const trackerDb = join(expandHome(homeConfig.trackerDataDir), 'tracker.db');
       // The switch settings file, written (and read back) the first time a
       // tracker script needs it, from the scratch settings file.
@@ -841,6 +848,22 @@ export async function onboard(opts, deps) {
         return jobs;
       };
       let snapshotDryRan = false;
+      // SP-253: the old lanes loaded again after the stop was done (Dane
+      // switched the project back to its old loop mid-setup). They may have
+      // written to ClickUp since the import, so stop, snapshot, import and
+      // switch-check all run again, and the step log says why.
+      if (!setup.on && deps.exists(installer)) {
+        const stopDone = loggedDone(clickupLog(), step);
+        const lanesDone = loggedDone(deps.readText(logFile), 'lanes');
+        if (stopDone && !lanesDone) {
+          const back = status().filter((j) => j.loaded);
+          if (oldLanesBack({ stopDone, lanesDone, jobs: back })) {
+            const why = `${slug}'s old lanes are loaded again (${back.map((j) => j.label ?? j.name).join(', ')}, ${installer} --status) since the stop was done, so they may have written to ClickUp since the import: stop, snapshot, import and switch-check run again`;
+            say(step, why);
+            record(step, OLD_LANES_BACK, why);
+          }
+        }
+      }
       const skipStop = doneBefore(step);
       if (skipStop) skip(step, skipStop);
       else if (!deps.exists(installer)) fail(step, `${installer} is not there, so its lanes cannot be read from it`);
@@ -915,10 +938,10 @@ export async function onboard(opts, deps) {
       // IMPORTED and STATUS DIFFERS both mean "run the real import again",
       // and the import is safe to rerun (it carries on where it was).
       const skipImport = setup.on ? `the setup is merged: ${setup.why}`
-        : loggedDone(deps.readText(logFile), 'switch-check') ? `switch-check said Safe to switch before (${logFile})` : null;
+        : loggedDone(clickupLog(), 'switch-check') ? `switch-check said Safe to switch before (${logFile})` : null;
       if (skipImport) skip(step, skipImport);
       else {
-        if (loggedDone(deps.readText(logFile), step)) say(step, 'imported before, but switch-check has not said Safe to switch yet, so the import runs again (it is safe to rerun)');
+        if (loggedDone(clickupLog(), step)) say(step, 'imported before, but switch-check has not said Safe to switch yet, so the import runs again (it is safe to rerun)');
         say(step, `importing ClickUp list ${answers.clickupListId} into ${trackerDb} (tracker:import), a dry run first`);
         const dry = trackerScript('import.mjs', ['--db', trackerDb, '--dry-run'], { show: true });
         if (dry.code === 3) fail(step, 'the import\'s dry run refused something (its lines above name it); nothing was written');

@@ -138,6 +138,19 @@ Any of them failing prints `FAILED: <step>: ...` and the rerun command, and
 nothing after it runs. A pass in flight is a failure too: nothing is
 stopped, and the rerun after the pass ends goes on.
 
+**Switched back to the old loop mid-setup.** If the setup stops after these
+four steps (at `copy`, say) and the project's old lanes are put back
+(`./scripts/install_loop_runner.sh --install` in its checkout), they write
+to ClickUp again, and the import no longer has everything. So a rerun
+before the `lanes` step reads the old installer's `--status`, and if any
+lane is loaded again it says so (`stop  <slug>'s old lanes are loaded
+again ...`, logged as `stop | again`) and runs all four again, in order:
+the dry run, the stop, a fresh snapshot, the import and the switch check.
+Only what the step log says after that `again` line counts as done, so a
+rerun that fails part-way picks up from there. A rerun whose old lanes
+stayed stopped skips the four, as before. (After the `lanes` step a loaded
+lane may be Spirality's own, so it is not read as the old ones coming back.)
+
 The stop step stops only the lanes the project's own installer names. A
 project can have other launchd jobs that read its Loop Queue list
 (StarCaster's `pipeline-pulse` and `weekly-report`); they keep running,
