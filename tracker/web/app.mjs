@@ -26,7 +26,7 @@
  * an emailed link's own page. The link's token is sent only in a JSON body,
  * never in an address.
  */
-import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, unwrapDoc, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, lookupTicket, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, pipelinePodLabel, renderCommandList, renderCommandView, renderCommandDetails, renderContextDocs, renderSortHeadings, renderListPriority, sortTickets, nextSort, renderDocumentation, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine } from './render.mjs';
+import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, unwrapDoc, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, lookupTicket, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, pipelinePodLabel, renderHealth, healthLines, renderCommandList, renderCommandView, renderCommandDetails, renderContextDocs, renderSortHeadings, renderListPriority, sortTickets, nextSort, renderDocumentation, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine } from './render.mjs';
 
 /** Where an earlier version of the page kept a pasted token; removed on load, never read. */
 const OLD_TOKEN_KEY = 'tracker-token';
@@ -44,6 +44,7 @@ const headerProject = document.getElementById('project');
 const signOut = document.getElementById('sign-out');
 const bell = document.getElementById('bell');
 const busCount = document.getElementById('bus');
+const health = document.getElementById('health');
 const siteNav = document.querySelector('header nav.site');
 let me = null;
 
@@ -58,7 +59,7 @@ const REFRESH_EVERY_MS = 60_000;
  * is watching it. Only while the page says it follows (setupFollows).
  */
 const SETUP_REFRESH_EVERY_MS = 4_000;
-/** How often the Tasks page's Pipeline Status pod reads GET /pipeline again (SP-168). */
+/** How often GET /pipeline is read again: the Tasks page's pod (SP-168) and, on every page, the header's health lines (SP-218). */
 const PIPELINE_REFRESH_EVERY_MS = 60_000;
 /** The title the page itself asks for, and the last waiting count read (null: none yet). */
 let pageTitle = 'Tracker';
@@ -149,13 +150,23 @@ const clockTime = (iso) => new Date(iso).toLocaleTimeString(undefined, { hour: '
 /** The last Pipeline Status answer read (GET /pipeline), or null before any or after a failed read. */
 let pipelineState = null;
 
+/** When a failing stage's failures began, in the page's own time: "9:00 PM" today, "Nov 10, 9:00 PM" before. */
+const sinceTime = (iso) => {
+  const d = new Date(iso);
+  return d.toDateString() === new Date().toDateString()
+    ? clockTime(iso)
+    : d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+};
+
 /**
- * Fill the Tasks page's Pipeline Status pod, when it is on the page (SP-168):
- * at once from the last answer, so a redraw never blanks it, then from a
- * fresh read. A failed read says so in the pod and touches nothing else.
+ * Read GET /pipeline again, on every page while signed in: it fills the
+ * header's health lines (SP-218) and, when it is on the page, the Tasks
+ * page's Pipeline Status pod (SP-168), at once from the last answer, so a
+ * redraw never blanks it, then from a fresh read. A failed read says so in
+ * the pod, shows no health line, and touches nothing else.
  */
 async function refreshPipeline() {
-  if (!me || !main.querySelector('.pipeline-pod')) return;
+  if (!me) return;
   showPipeline();
   try {
     pipelineState = await api('GET', '/pipeline', undefined, { unrecorded: true });
@@ -166,8 +177,16 @@ async function refreshPipeline() {
   showPipeline(true);
 }
 
+/** The header's health lines from the last answer: one per failing stage, hidden when none is (or signed out). */
+function showHealth() {
+  const lines = me ? healthLines(pipelineState, sinceTime) : [];
+  health.hidden = !lines.length;
+  health.innerHTML = lines.length ? renderHealth(pipelineState, sinceTime) : '';
+}
+
 /** Draw the pod from the last answer; before the first read, it waits quietly. The dialog, when open, redraws with it. */
 function showPipeline(read = false) {
+  showHealth();
   const pod = main.querySelector('.pipeline-pod');
   if (!pod || (!pipelineState && !read)) return;
   pod.innerHTML = renderPipelinePod(pipelineState, clockTime);
@@ -335,6 +354,7 @@ async function drawSetPassword() {
   signOut.hidden = true;
   bell.hidden = true;
   busCount.hidden = true;
+  health.hidden = true;
   siteNav.hidden = true;
   setTitle('Set Your Password · Tracker');
   const link = new URLSearchParams(location.search).get('link') ?? '';
@@ -397,6 +417,7 @@ function signedOutHeader(title) {
   signOut.hidden = true;
   bell.hidden = true;
   busCount.hidden = true;
+  health.hidden = true;
   siteNav.hidden = true;
   setTitle(title);
 }
@@ -2800,6 +2821,9 @@ async function route({ place = null } = {}) {
     bell.hidden = false;
     siteNav.hidden = false;
     showProject();
+    // The health lines are on every page (SP-218): drawn from the last answer, read at once when there is none yet.
+    if (pipelineState) showHealth();
+    else refreshPipeline();
     const ticket = /^\/t\/([^/]+)$/.exec(location.pathname);
     const project = /^\/(board|list)(?:\/([^/]+))?$/.exec(location.pathname);
     const projects = location.pathname === '/projects';
@@ -2998,7 +3022,7 @@ try { localStorage.removeItem(OLD_TOKEN_KEY); } catch { /* nothing kept */ }
 // The count in the tab title stays current while the tab sits pinned in the
 // background; the page itself is read again only while it is in view.
 setInterval(beat, REFRESH_EVERY_MS);
-// The Pipeline Status pod on the Tasks page reads again once a minute (SP-168).
+// The header's health lines (SP-218) and the Tasks page's Pipeline Status pod (SP-168) read again once a minute.
 setInterval(refreshPipeline, PIPELINE_REFRESH_EVERY_MS);
 // A setup page under way reads again every few seconds; every other page waits for the beat.
 setInterval(() => {
