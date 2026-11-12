@@ -53,9 +53,11 @@
  *             left alone; a project with no bus skips this step, and so
  *             does a merged setup (a bus added later comes with the
  *             project's own pull request and `tracker:bus` by hand).
- *   stop, snapshot, import, switch-check
+ *   setup-check, stop, snapshot, import, switch-check
  *             SP-159: only for a project that already runs a loop on ClickUp
- *             (its answers name a `clickupListId`): its old lanes stopped,
+ *             (its answers name a `clickupListId`): first (SP-252) the setup
+ *             branch written and the project's own verify passing on it
+ *             (`onboard:copy --check-only`), then its old lanes stopped,
  *             its ClickUp list saved and imported into the tracker, and the
  *             switch checked safe, all before the copy step's pull request
  *             can merge (scripts/onboard/fromClickup.mjs). A new project's
@@ -129,7 +131,7 @@ export const DEFAULT_MERGE_WAIT_MINUTES = 60;
 
 export const STEPS = Object.freeze(['answers', 'look', 'start', 'clone', 'settings', 'signins', 'bus', 'copy', 'lanes', 'merge', 'protect']);
 
-/** The steps of a project already on ClickUp (SP-159): STEPS with stop, snapshot, import and switch-check before copy. */
+/** The steps of a project already on ClickUp (SP-159): STEPS with setup-check, stop, snapshot, import and switch-check before copy. */
 export const CLICKUP_RUN_STEPS = Object.freeze(withClickupSteps(STEPS));
 
 /** Every step a state file may name. */
@@ -561,7 +563,7 @@ export async function onboard(opts, deps) {
       if (deps.readText(aFile) !== written) fail(step, `${aFile} did not read back as written`);
       raw = next;
       askedClickup = true;
-      say(step, answers.clickupListId ? `on ClickUp, list ${answers.clickupListId}: the stop, snapshot, import and switch-check steps run before the copy` : 'not on ClickUp: set up as a new project');
+      say(step, answers.clickupListId ? `on ClickUp, list ${answers.clickupListId}: the setup-check, stop, snapshot, import and switch-check steps run before the copy` : 'not on ClickUp: set up as a new project');
     }
     if (missing.length || askedClickup) { record(step, 'done', `answers in ${aFile}`); mark(step, 'done', `answers in ${aFile}`); }
     const onClickup = answers.clickupListId != null;
@@ -791,7 +793,7 @@ export async function onboard(opts, deps) {
       else skip(step, `bus project "${answers.busProject}" is on the tracker and every ${slug} loop sees it`);
     }
 
-    // ── stop, snapshot, import, switch-check (SP-159) ────────────────────
+    // ── setup-check, stop, snapshot, import, switch-check (SP-159) ───────
     // Only for a project already on ClickUp; a new project's run has none
     // of these steps. Each is skipped once the step log has it done (its
     // lanes are loaded again by the lanes step, from the setup branch, so
@@ -828,6 +830,22 @@ export async function onboard(opts, deps) {
         const cwd = switchConfig();
         return run('node', [join(spiralityDir, 'scripts', 'with_doppler.mjs'), 'node', '--no-warnings', join(spiralityDir, 'tracker', script), ...args], { cwd, ...o });
       };
+
+      // ── setup-check (SP-252) ─────────────────────────────────────────
+      // The setup branch is written and the project's own verify run on it
+      // before anything is stopped: a setup that would not pass is found
+      // while the old loop still runs. Nothing is pushed here; the copy
+      // step, after the switch-check, pushes the same branch.
+      step = 'setup-check';
+      begin(step);
+      const skipSetupCheck = doneBefore(step);
+      if (skipSetupCheck) skip(step, skipSetupCheck);
+      else {
+        say(step, `writing the setup branch and running ${slug}'s own verify on it (onboard:copy --check-only), before any old lane is stopped; nothing is pushed`);
+        const r = npm('onboard:copy', ['--answers', aFile, '--config', settingsFile, '--allow-replace', '--check-only'], { show: true });
+        if (r.code !== 0) fail(step, `onboard:copy --check-only exit ${r.code} (its FAILED line is above), so ${slug}'s old lanes were left running. Nothing was stopped`);
+        done(step, `${slug}'s own verify passes on ${SETUP_BRANCH}, before anything is stopped`);
+      }
 
       // ── stop ─────────────────────────────────────────────────────────
       step = 'stop';

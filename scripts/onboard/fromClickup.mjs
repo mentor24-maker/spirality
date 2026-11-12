@@ -5,6 +5,11 @@
  * Queue. One wizard run moves such a project, in the order the runbook
  * gives (docs/TRACKER_MVP.md, "Switching a project over"):
  *
+ *   setup-check   SP-252: the setup branch written (`onboard:copy
+ *                 --check-only`, nothing pushed) and the project's own
+ *                 `verify` run on it, the old loop's tests that check the
+ *                 files it replaces retired by rule. A red verify stops the
+ *                 run here, while the old lanes still run.
  *   stop          its old lanes unloaded, after checking no pass is in
  *                 flight. The lanes, their labels and their logs are read
  *                 from the project's own installer (`--status`), never
@@ -33,8 +38,8 @@
 import { join } from 'node:path';
 import { CONFIG_FILE, validateProjectConfig } from '../../lib/projectConfig.mjs';
 
-/** The four steps, in the order they run, all before the copy step. */
-export const CLICKUP_STEPS = Object.freeze(['stop', 'snapshot', 'import', 'switch-check']);
+/** The five steps, in the order they run, all before the copy step. */
+export const CLICKUP_STEPS = Object.freeze(['setup-check', 'stop', 'snapshot', 'import', 'switch-check']);
 
 /** The step the ClickUp steps run before. */
 export const CLICKUP_STEPS_BEFORE = 'copy';

@@ -3,7 +3,7 @@
  * project_config.mjs — one project-config value, for shell scripts.
  *
  *   node scripts/project_config.mjs launchdPrefix     → com.spirality
- *   node scripts/project_config.mjs logDir            → /Users/me/loop-logs
+ *   node scripts/project_config.mjs logDir            → the log folder, ~ expanded
  *   node scripts/project_config.mjs mergePhrases      → one phrase per line
  *
  * The installer and the relay runner are bash, and CLAUDE.md engineering
