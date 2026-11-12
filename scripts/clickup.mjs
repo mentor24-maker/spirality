@@ -61,7 +61,7 @@ import { loadProjectConfig, ProjectConfigError } from '../lib/projectConfig.mjs'
 // from the package, so every project's relay decides the same way.
 import {
   mergeDecision, githubGate, isMergeCommand, MERGE_MARKER, parseMergeMarker,
-  refusalNotice, refusalBusLine, conflictHandOffNotice, mergedNotice, filesMadeLines, REFUSAL_CODES,
+  refusalNotice, refusalBusLine, conflictHandOffNotice, mergedNotice, alreadyMergedPlan, filesMadeLines, REFUSAL_CODES,
 } from '../lib/mergeOnComment.js';
 import {
   PR_VIEW_FIELDS, markerBookkeeping, recordBookkeeping, emptyBooks, mergeDestination, relayLine,
@@ -1421,13 +1421,16 @@ if (cmd === 'whoami') {
   };
 
   /** Move a merged ticket to its destination and read the move back. */
-  const moveMergedTicket = async (task, prNumber, dest) => {
+  // `nextPassRetries` (SP-216): the caller left his word open, so the next
+  // pass makes the move again; nobody has to make it by hand.
+  const moveMergedTicket = async (task, prNumber, dest, { nextPassRetries = false } = {}) => {
+    const then = nextPassRetries ? 'the next pass tries again' : 'move it by hand';
     const rem = (task.assignees || []).map((a) => a.id);
     const out = await tracker.updateTask(task.id, { status: dest.status, assignees: { add: [], rem } });
-    if (!out.res.ok) { unchecked.push(`${task.id}: PR #${prNumber} MERGED but the ticket did NOT move to ${dest.status} (HTTP ${out.res.status}) — move it by hand`); return false; }
-    const back = await readTask(task.id);
-    const now = back.status?.status ?? '?';
-    if (now.toLowerCase() !== dest.status.toLowerCase()) { unchecked.push(`${task.id}: PR #${prNumber} MERGED but the move to ${dest.status} did not stick (reads back "${now}") — move it by hand`); return false; }
+    if (!out.res.ok) { unchecked.push(`${task.id}: PR #${prNumber} MERGED but the ticket did NOT move to ${dest.status} (HTTP ${out.res.status}) — ${then}`); return false; }
+    const back = await readTaskOrNull(task.id);
+    const now = back?.status?.status ?? '?';
+    if (!back || now.toLowerCase() !== dest.status.toLowerCase()) { unchecked.push(`${task.id}: PR #${prNumber} MERGED but the move to ${dest.status} did not stick (${back ? `reads back "${now}"` : 'could not be read back'}) — ${then}`); return false; }
     const leftover = (back.assignees || []).map((a) => a.id);
     if (leftover.length) unchecked.push(`${task.id}: moved to ${dest.status} but assignees did not clear ([${leftover.join(', ')}])`);
     return true;
@@ -1636,6 +1639,55 @@ if (cmd === 'whoami') {
     try { prJson = JSON.parse(view.stdout); } catch { unchecked.push(`${task.id}: gh returned non-JSON for PR #${pr.number} — merge authorization still pending`); say(task, 'unchecked', `PR #${pr.number} unreadable`); return; }
 
     let gate = githubGate(prJson);
+
+    // Already merged (SP-216): an earlier pass merged it and could not read
+    // the result back, or it was merged by hand on GitHub. Nothing is left to
+    // merge, so this is not a refusal: write the record the merge path below
+    // writes after its own merge, move the ticket on, and tell the in-flight
+    // tickets main moved (an earlier merge that never read back never did).
+    // A ticket that already got the old "the PR is already merged" refusal
+    // carries a re-decidable marker, so it lands here on its next pass too.
+    {
+      let dest = null;
+      if (gate.refusalCode === REFUSAL_CODES.prAlreadyMerged) {
+        // Where it goes hangs on the description's "Next slice:" line; never guess it.
+        const out = await tracker.getTask(task.id, { markdown: true });
+        if (!out.res.ok || !out.json) {
+          unchecked.push(`${task.id}: PR #${pr.number} is already merged, but the description could not be read (HTTP ${out.res.status}) to see whether a next slice remains — nothing recorded this pass; the next pass tries again`);
+          say(task, 'unchecked', `could not read the description (HTTP ${out.res.status})`);
+          return;
+        }
+        dest = mergeDestination(out.json.markdown_description || out.json.description);
+      }
+      const plan = alreadyMergedPlan({ gate, prJson, pr, commentId: decision.commentId, priorRefusal: decision.priorRefusal, dest, verdictDate: decision.verdictDate });
+      if (plan.act === 'stale') say(task, 'stale-merged', `${plan.reason} — refused as before`);
+      if (plan.act === 'finish') {
+        if (dryRun) {
+          say(task, 'would-finish-merged', `PR #${pr.number} is already merged${plan.mergedAt ? ` (at ${plan.mergedAt})` : ''}; would move the ticket to "${dest.status}" because ${dest.why}, then record it and tell in-flight tickets main moved`);
+          return;
+        }
+        // MOVE FIRST. The merge is already done, so nothing irreversible waits
+        // on his word: it is spent only once the move has read back. A move
+        // that fails writes nothing else, leaves his word open, and the next
+        // pass finishes the job instead of leaving the ticket on the bell.
+        settled.add(task.id);
+        const moved = await moveMergedTicket(task, pr.number, dest, { nextPassRetries: true });
+        if (!moved) {
+          say(task, 'unchecked', `PR #${pr.number} is already merged, but the move to "${dest.status}" FAILED — nothing recorded, ${who}'s comment ${decision.commentId} left open; the next pass tries again`);
+          return;
+        }
+        const noteId = await postNote(task, plan.body, `PR #${pr.number} already merged and the ticket moved to ${dest.status}`);
+        const stuck = await markMergeHandled(decision.commentId, task, plan.marker);
+        const failed = [!noteId && 'note FAILED', !stuck && 'marker UNVERIFIED'].filter(Boolean);
+        say(task, 'already-merged', `PR #${pr.number}${plan.mergedAt ? ` merged at ${plan.mergedAt}` : ''}; ticket -> ${dest.status} (verified); recorded on ${who}'s comment ${decision.commentId}${failed.length ? ` (${failed.join(', ')}, see below)` : ''} (${dest.why})${plan.healed ? '; replaces the old "already merged" refusal' : ''}`);
+        await announce(task, mergedBusLine({ tag: busTag, task, url: ticketUrl(task), pr, dest, already: true }), `PR #${pr.number} already merged`);
+        const news = await tellMainMoved({ mergedNumber: pr.number, list, dryRun: false, tasks });
+        for (const l of news.lines) console.log(`  main-moved\t${l}`);
+        unchecked.push(...news.problems.map((p) => `main-moved after PR #${pr.number}: ${p}`));
+        say(task, 'main-moved', `${news.told} in-flight ticket(s) told that PR #${pr.number} moved main`);
+        return;
+      }
+    }
 
     // Behind main: the machine's own job. Catch it up through GitHub, let the
     // checks re-run, and decide on a later pass against the new run — never
