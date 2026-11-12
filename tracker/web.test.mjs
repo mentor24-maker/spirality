@@ -873,7 +873,7 @@ test('bellColour: grey while nothing waits, yellow for 1 to 3, red for more than
 
 test('Waiting on you is a bell on the right, just before "Signed in as", coloured from the count wherever it is read', () => {
   const html = readFileSync(WEB('index.html'), 'utf8');
-  const nav = /<nav class="site">([\s\S]*?)<\/nav>/.exec(html)[1];
+  const nav = /<nav class="site" hidden>([\s\S]*?)<\/nav>/.exec(html)[1];
   assert.deepEqual([...nav.matchAll(/>([^<]+)<\/a>/g)].map((m) => m[1]), ['Projects', 'Tasks', 'Reporting', 'Users', 'Docs', 'Settings']);
   assert.doesNotMatch(nav, /Waiting on you/);
   const me = /<span class="me">([\s\S]*?)<\/span>\s*<\/header>/.exec(html)[1];
@@ -894,6 +894,30 @@ test('Waiting on you is a bell on the right, just before "Signed in as", coloure
   const css = readFileSync(WEB('app.css'), 'utf8');
   for (const colour of ['grey', 'yellow', 'red']) assert.match(css, new RegExp(`header #bell\\[data-colour="${colour}"\\] \\{ color: #`));
   assert.match(css, /header #bell\[hidden\] \{ display: none; \}/, 'display: flex must not undo hidden');
+});
+
+test('the main menu shows only to someone signed in: hidden in the page, shown with "Signed in as", hidden on every signed-out view (SP-211)', () => {
+  const html = readFileSync(WEB('index.html'), 'utf8');
+  // Starts hidden, so it never shows during "Loading…" before the sign-in check answers.
+  assert.match(html, /<nav class="site" hidden>/);
+  assert.doesNotMatch(html, /<nav class="site">/);
+  // The wordmark stays visible to everyone.
+  assert.match(html, /<a class="brand" href="\/"><img src="\/web\/wordmark\.png"/);
+  assert.doesNotMatch(/<a class="brand"[^>]*>/.exec(html)[0], /hidden/);
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  assert.match(app, /const siteNav = document\.querySelector\('header nav\.site'\);/);
+  // Shown in the same place as "Signed in as", once /me has answered.
+  const route = /async function route\(\{ place = null \} = \{\}\) \{[\s\S]*?\n\}/.exec(app)[0];
+  assert.match(route, /me = await api\('GET', '\/me'\);[\s\S]*?who\.textContent = `Signed in as \$\{me\.name\}`;\s*signOut\.hidden = false;\s*bell\.hidden = false;\s*siteNav\.hidden = false;/);
+  assert.equal((app.match(/siteNav\.hidden = false;/g) ?? []).length, 1, 'shown in one place only');
+  // Hidden on the sign-in screen, Forgot password, after Sign Out or an expired sign-in (all through signedOutHeader), and on Set Your Password.
+  assert.match(/function signedOutHeader[\s\S]*?\n\}/.exec(app)[0], /siteNav\.hidden = true;/);
+  assert.match(/async function drawSetPassword\(\) \{[\s\S]*?\n\}/.exec(app)[0], /siteNav\.hidden = true;/);
+  assert.match(/function drawSignIn[\s\S]*?\n\}/.exec(app)[0], /signedOutHeader\(/);
+  assert.match(/function drawForgot[\s\S]*?\n\}/.exec(app)[0], /signedOutHeader\(/);
+  assert.match(app, /signOut\.addEventListener\('click', async \(\) => \{[\s\S]*?drawSignIn\(/);
+  const css = readFileSync(WEB('app.css'), 'utf8');
+  assert.match(css, /header nav\.site\[hidden\] \{ display: none; \}/, 'display: flex must not undo hidden');
 });
 
 // ── Keeping an open page current (SP-94) ─────────────────────────────────────
