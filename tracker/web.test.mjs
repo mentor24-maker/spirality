@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { seedDemo, tickingClock } from './demoData.mjs';
 import { reportsOf, REPORT_RANGES, searchTickets, PRIORITIES, timeSplitOf, isFailureNote, TIME_BUCKETS } from './pageData.mjs';
-import { escapeHtml, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS } from './web/render.mjs';
+import { escapeHtml, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem } from './web/render.mjs';
 import { startServer, setupSettingsOf } from './server.mjs';
 import { saveAnswers, setupFields, setupOf } from './setup.mjs';
 import { DANE_FIELDS as SETUP_FIELDS, STEPS as SETUP_STEPS } from '../scripts/onboard/onboard.mjs';
@@ -3537,7 +3537,7 @@ test('the Pipeline Status pod: each stage\'s next time or "running", a dash for 
     { name: 'Build', logged: true, running: true, nextDue: null },
     { name: 'Review', logged: true, running: false, nextDue: null },
     { name: 'Intake', logged: false, running: false, nextDue: null },
-  ] }, timeOf);
+  ] }, timeOf, Date.parse('2026-11-09T17:00:00.000Z'));
   // Cells joined with a bar, so the order and the name/time pairing both show.
   const cells = [...html.matchAll(/<span class="([^"]*)"[^>]*>([^<]*)<\/span>/g)].map((m) => m[2]);
   assert.equal(cells.join('|'), 'Pipeline Stages|Relay|[17:45]|Build|running|Review|–|Intake|–');
@@ -3559,7 +3559,7 @@ test('the pod reads as a small table (SP-194): a "Pipeline Stages" heading, one 
     { name: 'Build', logged: true, running: true, nextDue: null },
     { name: 'Review', logged: true, running: false, nextDue: '2026-11-09T18:10:00.000Z' },
     { name: 'Intake', logged: true, running: false, nextDue: '2026-11-09T18:04:00.000Z' },
-  ] }, timeOf);
+  ] }, timeOf, Date.parse('2026-11-09T17:00:00.000Z'));
   // The heading comes first, then the grid holding every cell.
   assert.match(html, /^<span class="heading">Pipeline Stages<\/span><span class="stages">/);
   // No table inside the button: HTML does not allow one there.
@@ -3582,7 +3582,7 @@ test('the pod reads as a small table (SP-194): a "Pipeline Stages" heading, one 
     return css.slice(at, css.indexOf('}', at));
   };
   const pod = rule('.toolbar .pipeline-pod');
-  assert.match(pod, /background: #eaf5fe;/, 'the page\'s light blue, as on the Files Made box');
+  assert.match(pod, /background: #cceeff;/, 'Dane\'s light blue (SP-222)');
   assert.match(pod, /flex-direction: column;/, 'the heading sits above the stages');
   assert.match(rule('.toolbar .pipeline-pod .stages'), /display: grid; grid-template-columns: auto auto;/, 'two lined-up columns');
   assert.match(rule('.toolbar .pipeline-pod .stage'), /font-weight: 700;/, 'stage names are bold');
@@ -3590,10 +3590,59 @@ test('the pod reads as a small table (SP-194): a "Pipeline Stages" heading, one 
   assert.ok(green, 'a running stage has its own colour');
   const [r, g, b] = [1, 3, 5].map((i) => parseInt(green[1].slice(i, i + 2), 16));
   assert.ok(g > r * 2 && g > b * 2, `${green[1]} is a green`);
-  assert.ok(contrast(green[1], '#eaf5fe') >= 4.5, 'the green reads on the light blue (WCAG AA for small text)');
+  // SP-222: Dane chose #00AA00. It is fainter on #cceeff than the 4.5:1
+  // small-text bar, so the test checks his colour, not its contrast.
+  assert.equal(green[1], '#00AA00', 'the brighter green Dane chose (SP-222)');
   // The button is unchanged: same class, still opens the dialog.
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   assert.match(app, /<button type="button" class="pipeline-pod" aria-haspopup="dialog" title="Open Pipeline Status"><\/button>/);
+});
+
+test('the pod restyled (SP-222): a larger heading, #cceeff with a #000077 border, 10px/20px margins, a stage due within 3 minutes gold, am/pm lowercase', () => {
+  const timeOf = (iso) => `[${iso.slice(11, 16)}]`;
+  const now = Date.parse('2026-11-09T18:00:00.000Z');
+  const html = renderPipelinePod({ stages: [
+    { name: 'Relay', logged: true, running: false, nextDue: '2026-11-09T18:02:59.000Z' }, // under 3 minutes
+    { name: 'Build', logged: true, running: true, nextDue: '2026-11-09T18:01:00.000Z' }, // running wins
+    { name: 'Review', logged: true, running: false, nextDue: '2026-11-09T18:03:00.000Z' }, // exactly 3 minutes: not soon
+    { name: 'Intake', logged: true, running: false, nextDue: '2026-11-09T17:55:00.000Z' }, // already past: due
+  ] }, timeOf, now);
+  const grid = html.slice(html.indexOf('<span class="stages">') + '<span class="stages">'.length, -'</span>'.length);
+  const cells = [...grid.matchAll(/<span class="([^"]*)"[^>]*>([^<]*)<\/span>/g)].map((m) => [m[1], m[2]]);
+  assert.deepEqual(cells, [
+    ['stage soon', 'Relay'], ['time soon', '[18:02]'],
+    ['stage running', 'Build'], ['time running', 'running'],
+    ['stage', 'Review'], ['time', '[18:03]'],
+    ['stage soon', 'Intake'], ['time soon', '[17:55]'],
+  ]);
+  assert.match(html, /title="Relay: next pass due \[18:02\] \(due within 3 minutes\)"/);
+  assert.match(html, /title="Review: next pass due \[18:03\]"/);
+  assert.match(html, /title="Intake: next pass due \[17:55\] \(due now\)"/);
+  assert.equal(PIPELINE_SOON_MS, 3 * 60 * 1000);
+  const css = readFileSync(WEB('app.css'), 'utf8');
+  const rule = (selector) => {
+    const at = css.indexOf(`${selector} {`);
+    assert.notEqual(at, -1, `app.css has a ${selector} rule`);
+    return css.slice(at, css.indexOf('}', at));
+  };
+  const pod = rule('.toolbar .pipeline-pod');
+  assert.match(pod, /margin: 10px 20px;/, '10px top and bottom, 20px left and right');
+  assert.match(pod, /border: 1px solid #000077;/);
+  assert.match(pod, /background: #cceeff;/);
+  assert.match(rule('.toolbar .pipeline-pod:hover'), /background: #b8e4ff;/, 'hover still shows on the new blue');
+  assert.match(rule('.toolbar .pipeline-pod .heading'), /font-size: 1\.5em;/, 'the heading 50% larger');
+  assert.match(rule('.toolbar .pipeline-pod .soon'), /color: #B8860B;/, 'gold that reads on light blue');
+  // The Files Made box keeps its light blue (non-goal).
+  assert.match(rule('.files-made'), /background: #eaf5fe;/);
+  // Lowercase am/pm, for the pod's times only.
+  assert.equal(lowerMeridiem('10:45 AM'), '10:45 am');
+  assert.equal(lowerMeridiem('2:05\u202fPM'), '2:05\u202fpm');
+  assert.equal(lowerMeridiem('14:05'), '14:05');
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  assert.match(app, /const clockTime = \(iso\) => lowerMeridiem\(/);
+  assert.match(app, /renderPipelinePod\(pipelineState, clockTime, Date\.now\(\)\)/);
+  // The dialog keeps its own times.
+  assert.match(app, /renderPipelineDetails\(pipelineState, when\)/);
 });
 
 test('the Tasks page puts the pod between the search field and Board/List, fills it on draw and once a minute, and a failed read touches only the pod (SP-168)', () => {
