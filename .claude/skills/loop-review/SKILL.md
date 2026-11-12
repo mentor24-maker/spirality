@@ -1,6 +1,14 @@
 ---
 name: loop-review
 description: Pick the next "In review" task from the Spirality queue in the tracker, independently verify its pull request (`npm run verify` + code review + a real test pass), then either mark it "Ready to launch" and ping Dane to merge, or send it back to "Rework" with notes. Designed to be run on a timer with `/loop 30m loop-review`. Never merges on its own.
+summary: Checks a finished pull request independently
+about: >
+  This is the second pair of eyes. It takes a ticket the builder has finished,
+  runs every check again on its own, reads the change and tries it out the way
+  a person would. If it all holds up, it marks the ticket ready and tells Dane
+  it is ready to merge. If not, it sends the ticket back to the builder with
+  notes on what to fix. It runs by itself on a timer. It never merges
+  anything; only Dane does that.
 ---
 
 # Loop: Review

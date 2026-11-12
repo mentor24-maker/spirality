@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { seedDemo, tickingClock } from './demoData.mjs';
 import { reportsOf, REPORT_RANGES, searchTickets, PRIORITIES } from './pageData.mjs';
-import { escapeHtml, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, commandHref, renderContextDocs, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS } from './web/render.mjs';
+import { escapeHtml, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS } from './web/render.mjs';
 import { startServer, setupSettingsOf } from './server.mjs';
 import { saveAnswers, setupFields, setupOf } from './setup.mjs';
 import { DANE_FIELDS as SETUP_FIELDS, STEPS as SETUP_STEPS } from '../scripts/onboard/onboard.mjs';
@@ -2530,7 +2530,7 @@ test('the Docs page uploads one context document as the file itself, asks before
   const draw = app.slice(app.indexOf('async function drawDocs'), app.indexOf('/** Underline the header link'));
   assert.match(draw, /const docsPath = `\/projects\/\$\{encodeURIComponent\(project\.slug\)\}\/docs`;/);
   assert.match(draw, /api\('GET', docsPath\)/);
-  assert.ok(draw.indexOf('<h1>Docs</h1>\n    ${renderContextDocs({ project, docs }') > 0 && draw.indexOf('renderContextDocs({ project, docs }') < draw.lastIndexOf('<h2>Task Files</h2>'), 'Context Documents come first, before Task Files (SP-195 moved the docs folder\'s list to the bottom)');
+  assert.ok(draw.indexOf('<h1>Docs</h1>\n    ${docsColumns(`\n    ${renderContextDocs({ project, docs }') > 0 && draw.indexOf('renderContextDocs({ project, docs }') < draw.lastIndexOf('<h2>Task Files</h2>'), 'Context Documents come first, before Task Files (SP-195 moved the docs folder\'s list to the bottom)');
   const wire = draw.slice(draw.indexOf('function wireContextDocs'));
   assert.match(wire, /picker\.files\?\.\[0\]/, 'one file at a time');
   assert.match(wire, /file\.size > MAX_FILE/, 'an 11 MB file is refused before it is sent');
@@ -2617,11 +2617,32 @@ test('the Commands search keeps a command whose name or description holds the wo
   assert.deepEqual(matchCommands(mentions, 'review').map((c) => c.name), ['loop-review', 'loop-build'], 'a name match comes before a description match');
 });
 
-test('the Commands list shows /<name>, its source and description, linking to its own page; no match and nothing copied yet each say so', () => {
+test('the search also matches a command\'s summary and plain explanation (SP-212)', () => {
+  const withWords = [
+    { name: 'loop-build', source: 'Loop skill', description: 'For Claude Code.', summary: 'Builds the next ticket', about: 'Opens a pull request for approval.' },
+    { name: 'loop-spec', source: 'Loop skill', description: 'For Claude Code.', summary: null, about: null },
+  ];
+  assert.deepEqual(matchCommands(withWords, 'NEXT TICKET').map((c) => c.name), ['loop-build'], 'by the summary');
+  assert.deepEqual(matchCommands(withWords, 'approval').map((c) => c.name), ['loop-build'], 'by the explanation');
+});
+
+test('a command shows its summary, or the first seven words of its description and "…"; its pop-up its about, or its description (SP-212)', () => {
+  assert.equal(commandSummary({ summary: 'Builds the next ticket', description: 'x' }), 'Builds the next ticket');
+  assert.equal(commandSummary({ description: 'one two three four five six seven eight nine' }), 'one two three four five six seven…');
+  assert.equal(commandSummary({ description: 'Find out why a ticket is stuck.' }), 'Find out why a ticket is stuck.', 'seven words or fewer: as written, no "…"');
+  assert.equal(commandAbout({ about: 'Plain words.', description: 'x' }), 'Plain words.');
+  assert.equal(commandAbout({ about: null, description: 'The description.' }), 'The description.');
+});
+
+test('the Quick Claude Commands list shows only /<name> and its short line, each opening its pop-up; no match and nothing copied yet each say so', () => {
   const html = renderCommandList(COMMANDS, 'review');
-  assert.match(html, /<a href="\/docs\/commands\/loop-review"><code>\/loop-review<\/code><\/a> <span class="quiet">Loop skill<\/span><br>Review the next pull request\./);
+  assert.match(html, /<li><a class="command-open" href="\/docs\/commands\/loop-review" data-command="loop-review"><code>\/loop-review<\/code> <span class="command-summary">Review the next pull request\.<\/span><\/a><\/li>/);
+  assert.doesNotMatch(html, /Loop skill|Your command/, 'where it comes from waits for the pop-up');
   assert.doesNotMatch(html, /why-stuck|loop-spec/);
   assert.doesNotMatch(html, /not been copied/, 'a copied command is listed, so no such line');
+  const long = renderCommandList([{ name: 'x', source: 'Loop skill', description: 'Pick the next claimable task from the queue and build it.', steps: '' }]);
+  assert.match(long, /<span class="command-summary">Pick the next claimable task from the…<\/span>/);
+  assert.doesNotMatch(long, /and build it/, 'the long description leaves the row');
   assert.match(renderCommandList(COMMANDS, 'zebra'), /No command matches “zebra”\./);
   const skillsOnly = renderCommandList(COMMANDS.filter((c) => c.source === 'Loop skill'));
   assert.match(skillsOnly, /\/loop-review[\s\S]*\/loop-spec/);
@@ -2629,7 +2650,18 @@ test('the Commands list shows /<name>, its source and description, linking to it
   const evil = renderCommandList([{ name: 'x', source: 'Your command', description: '<img src=x onerror=alert(1)>', steps: '' }], '<b>');
   assert.doesNotMatch(evil, /<img|<b>/);
   assert.equal(commandHref('a b'), '/docs/commands/a%20b');
-  assert.match(renderCommandList([{ name: 'x', source: 'Loop skill', description: 'Runs `npm run verify` first.', steps: '' }]), /Runs <code>npm run verify<\/code> first\./, 'code in a description is drawn as code');
+  assert.match(renderCommandList([{ name: 'x', source: 'Loop skill', description: 'Runs `npm run verify` first.', steps: '' }]), /Runs <code>npm run verify<\/code> first\./, 'code in a summary is drawn as code');
+});
+
+test('a command\'s pop-up shows its name, source, plain explanation and a link to its steps, escaped (SP-212)', () => {
+  const html = renderCommandDetails({ name: 'loop-review', source: 'Loop skill', description: 'For Claude Code.', about: 'Checks the work again.' });
+  assert.match(html, /<h2 id="command-details-title"><code>\/loop-review<\/code><\/h2>/);
+  assert.match(html, /<p class="quiet">Loop skill<\/p>/);
+  assert.match(html, /<p>Checks the work again\.<\/p>/);
+  assert.doesNotMatch(html, /For Claude Code/, 'the about line, not the description');
+  assert.match(html, /<a href="\/docs\/commands\/loop-review">See All the Steps<\/a>/);
+  assert.match(renderCommandDetails({ name: 'mine', source: 'Your command', description: 'My own words.' }), /<p>My own words\.<\/p>/, 'no about line: the description');
+  assert.doesNotMatch(renderCommandDetails({ name: '<x>', source: '<s>', description: '<y>' }), /<x>|<s>|<y>/);
 });
 
 test('a command\'s own page draws its steps formatted (headings, lists, code) with a Back to Docs link, and escapes its words', () => {
@@ -2662,7 +2694,17 @@ test('the Docs page carries the Commands section; /docs/commands/<name> opens on
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   const draw = app.slice(app.indexOf('async function drawDocs'), app.indexOf('/** Underline the header link'));
   assert.match(draw, /await api\('GET', '\/commands'\)/);
-  assert.match(draw, /<h2>Commands<\/h2>/);
+  assert.match(draw, /<h2 id="commands-pod-title">Quick Claude Commands<\/h2>/);
+  assert.match(draw, /<div class="docs-columns">\$\{commandsSection\(\)\}<div class="docs-main">\$\{rest\}<\/div><\/div>/, 'the pod on the left, the rest on the right');
+  assert.equal((draw.match(/\$\{docsColumns\(`/g) ?? []).length, 2, 'with projects and without, the page is drawn in the two columns');
+  assert.doesNotMatch(draw, /\$\{commandsSection\(\)\}\s*\$\{documentation\}/, 'the pod is no longer a section between the others');
+  assert.match(draw, /<dialog class="command-details" aria-labelledby="command-details-title">[\s\S]*<button type="submit">Close<\/button>[\s\S]*<\/dialog>/);
+  assert.match(draw, /renderCommandDetails\(command\);\s*dialog\.showModal\(\);/);
+  assert.match(draw, /e\.preventDefault\(\);\s*e\.stopPropagation\(\);/, 'a click opens the pop-up, not the steps page');
+  const css = readFileSync(WEB('app.css'), 'utf8');
+  assert.match(css, /section\.commands-pod \{ background: #cceeff; border: 1px solid #003377; border-radius: 20px;/);
+  assert.match(css, /\.docs-columns \{ display: grid; grid-template-columns: minmax\(0, 1fr\) minmax\(0, 2fr\);/, 'the pod takes a third');
+  assert.match(css, /@media \(max-width: 800px\) \{ \.docs-columns \{ grid-template-columns: minmax\(0, 1fr\); \} \}/, 'stacked on a narrow screen');
   assert.match(draw, /<input type="search" id="command-search"/);
   assert.match(draw, /box\.addEventListener\('input', show\)/);
   assert.match(draw, /renderCommandList\(commands, box\.value\)/);
@@ -3717,11 +3759,11 @@ test('Reference Docs and Work Log is folded, counted, sortable by Title, Kind an
   assert.match(renderDocumentation([], String), /Reference Docs and Work Log \(0\)<\/h2>.*no Markdown files/s);
 });
 
-test('the Docs page puts Reference Docs and Work Log last, below Commands, with or without projects, and wires its controls (SP-195)', () => {
+test('the Docs page puts Reference Docs and Work Log last in the right column, with or without projects, and wires its controls (SP-195, SP-212)', () => {
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   const draw = app.slice(app.indexOf('async function drawDocs'), app.indexOf('/** The command a `/docs/commands/<name>` address opens'));
-  assert.match(draw, /<h2>Task Files<\/h2><p class="quiet">There are no projects yet\.<\/p>\$\{commandsSection\(\)\}\$\{documentation\}`;\s*showCommands\(commands\);\s*wireDocumentation\(files\);/, 'no projects: last too');
-  assert.match(draw, /\$\{commandsSection\(\)\}\n    \$\{documentation\}`;/, 'below Commands');
+  assert.match(draw, /\$\{docsColumns\(`<h2>Task Files<\/h2><p class="quiet">There are no projects yet\.<\/p>\$\{documentation\}`\)\}`;\s*showCommands\(commands\);\s*wireDocumentation\(files\);/, 'no projects: last too');
+  assert.match(draw, /has a file yet\.<\/p>`\}\n    \$\{documentation\}`\)\}`;/, 'below Task Files, last on the right');
   assert.equal((draw.match(/\$\{documentation\}/g) ?? []).length, 2, 'drawn once in each case, never above');
   assert.equal((draw.match(/wireDocumentation\(files\);/g) ?? []).length, 2);
   const wire = draw.slice(draw.indexOf('function wireDocumentation'));
