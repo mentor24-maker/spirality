@@ -1209,8 +1209,9 @@ function wireSortHeadings(stages) {
  *
  * Above the stages sits the Add Task box (wireAddTask), closed unless
  * `adding` asks for it open or a kept draft has text in it. `filed` is the
- * id of the ticket the box just filed, named in a note after the redraw;
- * `unchecked` adds that the project check could not run. The question box
+ * id of the ticket the box just filed, named after the redraw in a pod
+ * that fades (filedPod); `unchecked` and `notUploaded` are warnings, kept
+ * as a lasting line under the toolbar. The question box
  * (the Add Task box's "Did you mean ...?") is drawn here, closed.
  *
  * In the List view each row's priority is a dropdown that saves on change
@@ -1284,14 +1285,14 @@ async function drawProject(slug, view, { adding = false, filed = null, unchecked
   const live = liveColumn && { ...liveColumn, tickets: liveColumn.tickets.slice().sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0)) };
 
   main.innerHTML = `
-    <h1>Tasks</h1>
+    <div class="tasks-head"><h1>Tasks</h1>${filed ? filedPod(filed, uploaded) : ''}</div>
     <div class="toolbar">
       ${renderProjectPicker(projects, board.project)}
       ${searchForm('')}
       <button type="button" class="pipeline-pod" aria-haspopup="dialog" title="Open Pipeline Status"></button>
       <nav class="views" aria-label="View">${toggle}</nav>
     </div>
-    ${filed ? `<p class="filed-note">Filed <a href="/t/${encodeURIComponent(filed)}">${escapeHtml(filed)}</a>${unchecked ? `. ${UNCHECKED_NOTE}` : ''}${filesNote(uploaded, notUploaded)}</p>` : ''}
+    ${filed && (unchecked || notUploaded.length) ? `<p class="filed-note">${unchecked ? UNCHECKED_NOTE : ''}${notUploadedNote(notUploaded)}</p>` : ''}
     <details class="add-task">
       <summary>Add Task</summary>
       <form class="request">
@@ -1339,6 +1340,7 @@ async function drawProject(slug, view, { adding = false, filed = null, unchecked
   wireSortHeadings(view === 'board' ? (live ? [live] : []) : board.columns);
   wireSearch();
   wireAddTask(board.project, view, adding);
+  wireFiledPod();
   wirePipeline();
   refreshPipeline();
   // Picking a project opens it in this same view, as a link would: Back returns here.
@@ -1900,20 +1902,37 @@ function wireEditPanel(t) {
 }
 
 /**
- * The filed note's words about the files picked: which went up, and which
- * did not, each by name with why. Nothing when no file was picked.
+ * The "Filed SP-n" pod (SP-223): the new ticket's id, linked, and the names
+ * of any files that went up with it. It floats centred on the Tasks
+ * heading's row, out of the page flow, so nothing moves; the stylesheet
+ * holds it 3 seconds and fades it over the next 1, and wireFiledPod takes
+ * it off the page once it has faded.
  */
-function filesNote(uploaded, notUploaded) {
-  const names = (list) => list.map((n) => `<strong>${escapeHtml(n)}</strong>`).join(', ');
-  let words = '';
-  if (uploaded.length) words += `. Uploaded ${names(uploaded)}`;
-  if (notUploaded.length) {
-    words += `. <span class="error">Not uploaded: ${notUploaded.map((f) => `<strong>${escapeHtml(f.name)}</strong> (${escapeHtml(f.why)})`).join(', ')}. The ticket is filed without ${notUploaded.length === 1 ? 'it' : 'them'}.</span>`;
-  }
-  return words;
+function filedPod(filed, uploaded) {
+  const names = uploaded.map((n) => `<strong>${escapeHtml(n)}</strong>`).join(', ');
+  return `<output class="filed-pod">Filed <a href="/t/${encodeURIComponent(filed)}">${escapeHtml(filed)}</a>${uploaded.length ? `. Uploaded ${names}` : ''}</output>`;
 }
 
-/** The filed note's words when the Add Task box's project check could not run. */
+/** How long the filed pod stays on the page: 3 seconds shown, 1 fading. */
+const FILED_POD_MS = 4000;
+
+/** Take the filed pod off the page once it has faded, so it catches no clicks. */
+function wireFiledPod() {
+  const pod = main.querySelector('.filed-pod');
+  if (pod) setTimeout(() => pod.remove(), FILED_POD_MS);
+}
+
+/**
+ * The lasting line's words about files that did not go up, each by name with
+ * why. A warning stays under the toolbar rather than in the fading pod, so it
+ * cannot vanish before it is read. Nothing when every file went up.
+ */
+function notUploadedNote(notUploaded) {
+  if (!notUploaded.length) return '';
+  return ` <span class="error">Not uploaded: ${notUploaded.map((f) => `<strong>${escapeHtml(f.name)}</strong> (${escapeHtml(f.why)})`).join(', ')}. The ticket is filed without ${notUploaded.length === 1 ? 'it' : 'them'}.</span>`;
+}
+
+/** The lasting line's words when the Add Task box's project check could not run. */
 const UNCHECKED_NOTE = 'The project check could not run, so it went into the project shown.';
 
 /** The draft kept for the Add Task box, or empty fields. */
