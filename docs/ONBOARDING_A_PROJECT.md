@@ -140,16 +140,19 @@ nothing after it runs. A pass in flight is a failure too: nothing is
 stopped, and the rerun after the pass ends goes on.
 
 **Switched back to the old loop mid-setup.** If the setup stops after these
-four steps (at `copy`, say) and the project's old lanes are put back
+five steps (at `copy`, say) and the project's old lanes are put back
 (`./scripts/install_loop_runner.sh --install` in its checkout), they write
-to ClickUp again, and the import no longer has everything. So a rerun
-before the `lanes` step has begun reads the old installer's `--status`, and
-if any lane is loaded again it says so (`stop  <slug>'s old lanes are loaded
-again ...`, logged as `stop | again`) and runs all four again, in order:
-the dry run, the stop, a fresh snapshot, the import and the switch check.
-Only what the step log says after that `again` line counts as done, so a
-rerun that fails part-way picks up from there. A rerun whose old lanes
-stayed stopped skips the four, as before.
+to ClickUp again, and the import no longer has everything; while they run,
+the project's `main` can move too, so the setup branch's verify may no
+longer hold. So a rerun before the `lanes` step has begun reads the old
+installer's `--status`, and if any lane is loaded again it says so
+(`setup-check  <slug>'s old lanes are loaded again ...`, logged as
+`stop | again`) and runs all five again, in order: the setup check (its
+verify, while the old lanes still run), the snapshot's dry run, the stop, a
+fresh snapshot, the import and the switch check. Only what the step log says
+after that `again` line counts as done, so a rerun that fails part-way picks
+up from there. A rerun whose old lanes stayed stopped skips the five, as
+before.
 
 The import run again brings in what the old lanes wrote: new tickets,
 comments and replies, and, on a ticket already imported, its status, name,

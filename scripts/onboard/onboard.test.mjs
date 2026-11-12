@@ -1539,7 +1539,7 @@ test('fromClickup: the old lanes are back only when the stop was done, the lanes
   assert.equal(logSinceOldLanesBack(null), '');
 });
 
-test('a project on ClickUp whose old lanes are loaded again after a stop at copy: the rerun runs stop, snapshot, import and switch-check again', async (t) => {
+test('a project on ClickUp whose old lanes are loaded again after a stop at copy: the rerun runs setup-check, stop, snapshot, import and switch-check again', async (t) => {
   const { w, c, go, reset, logFile, installer } = clickupWorld(t);
   w.fail = 'copy';
   assert.equal(await go(), 1, out(w));
@@ -1549,21 +1549,27 @@ test('a project on ClickUp whose old lanes are loaded again after a stop at copy
   w.fail = null;
   reset();
   assert.equal(await go(), 0, out(w));
-  assert.match(out(w), /^stop\s+pressplay's old lanes are loaded again \(com\.pressplay\.loop-build, .*stop, snapshot, import and switch-check run again/m);
+  assert.match(out(w), /^setup-check pressplay's old lanes are loaded again \(com\.pressplay\.loop-build, .*: setup-check, stop, snapshot, import and switch-check run again/m);
   for (const step of CLICKUP_STEPS) assert.ok(!new RegExp(`^${step}\\s+already done`, 'm').test(out(w)), `${step} runs again`);
+  // The setup-check's verify first, while the old lanes still run: the
+  // project's main may have moved under the setup branch since.
   const order = [
-    'tracker clickupSnapshot.mjs --dry-run', `${installer} --uninstall`, 'tracker clickupSnapshot.mjs --list',
-    'tracker import.mjs --db', 'tracker switchCheck.mjs', 'onboard:copy',
-  ].map((x) => callIndex(w, x));
+    w.calls.findIndex(checkOnly),
+    ...['tracker clickupSnapshot.mjs --dry-run', `${installer} --uninstall`, 'tracker clickupSnapshot.mjs --list',
+      'tracker import.mjs --db', 'tracker switchCheck.mjs'].map((x) => callIndex(w, x)),
+    w.calls.findIndex(realCopy),
+  ];
   assert.ok(order.every((i) => i >= 0), `each ran on the rerun: ${order}`);
   assert.deepEqual([...order].sort((a, b) => a - b), order, 'in order, before the copy');
   assert.equal(c.oldLoaded, false, 'the old lanes are stopped again');
   const log = readFileSync(logFile, 'utf8');
   assert.match(log, /\| stop \| again \| pressplay's old lanes are loaded again/, 'the step log says why');
+  assert.ok(log.indexOf('| stop | again |') < log.lastIndexOf('| setup-check | done |'), 'the setup-check is done again after it');
+  assert.equal(log.match(/\| setup-check \| done \|/g).length, 2);
   assert.equal(log.match(/\| import \| done \|/g).length, 2);
 });
 
-test('a project on ClickUp whose old lanes stay stopped after a stop at copy: the rerun skips the four, as before', async (t) => {
+test('a project on ClickUp whose old lanes stay stopped after a stop at copy: the rerun skips the five, as before', async (t) => {
   const { w, c, go, reset, logFile } = clickupWorld(t);
   w.fail = 'copy';
   assert.equal(await go(), 1, out(w));
@@ -1591,6 +1597,27 @@ test('old lanes back, then the rerun fails at the snapshot: the next rerun takes
   assert.equal(await go(), 0, out(w));
   assert.match(out(w), /^stop\s+already done/m, 'the stop made on the last rerun counts');
   for (const step of ['snapshot', 'import', 'switch-check']) assert.ok(!new RegExp(`^${step}\\s+already done`, 'm').test(out(w)), `${step} runs again`);
+});
+
+test('old lanes back, then the setup branch\'s verify fails: FAILED at setup-check, the old lanes keep running, and the next rerun checks again (SP-253)', async (t) => {
+  const { w, c, go, reset } = clickupWorld(t);
+  w.fail = 'copy';
+  assert.equal(await go(), 1, out(w));
+  c.oldLoaded = true;
+  w.fail = null;
+  c.code['check-only'] = 1;
+  reset();
+  assert.equal(await go(), 1, out(w));
+  assert.match(out(w), /^setup-check pressplay's old lanes are loaded again /m);
+  assert.match(out(w), /^FAILED: setup-check: onboard:copy --check-only exit 1 .*Nothing was stopped$/m);
+  assert.equal(c.oldLoaded, true, 'the old lanes are still loaded');
+  assert.ok(!w.calls.some((x) => x.includes('--uninstall') || x.startsWith('tracker ') || realCopy(x)), 'nothing stopped, saved, imported or pushed');
+  c.code = {};
+  reset();
+  assert.equal(await go(), 0, out(w));
+  assert.ok(w.calls.some(checkOnly), 'the setup-check runs again');
+  for (const step of CLICKUP_STEPS) assert.ok(!new RegExp(`^${step}\\s+already done`, 'm').test(out(w)), `${step} runs again`);
+  assert.equal(c.oldLoaded, false, 'then the old lanes are stopped');
 });
 
 test('the lanes step loads the new lanes, then fails: the rerun does not read them as the old lanes back, and stops nothing (SP-253)', async (t) => {

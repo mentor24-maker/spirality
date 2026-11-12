@@ -62,8 +62,9 @@
  *             switch checked safe, all before the copy step's pull request
  *             can merge (scripts/onboard/fromClickup.mjs). A new project's
  *             run never has these steps. SP-253: a rerun before the lanes
- *             step has begun that finds the old lanes loaded again runs all four
- *             again, and the step log says why (`stop | again`).
+ *             step has begun that finds the old lanes loaded again runs all
+ *             five again, setup-check first, and the step log says why
+ *             (`stop | again`).
  *   copy      SP-110's one pull request in the project's repository
  *             (`onboard:copy`), CI's verify green on it.
  *   lanes     SP-111 installs the project's lanes from the setup branch and
@@ -801,7 +802,7 @@ export async function onboard(opts, deps) {
     // lanes are loaded again by the lanes step, from the setup branch, so
     // "nothing loaded" cannot tell on a rerun), or once the setup is merged.
     // Before the lanes step has begun, though, a loaded lane is an old one:
-    // a rerun that finds them back runs all four again (SP-253).
+    // a rerun that finds them back runs all five again (SP-253).
     if (onClickup) {
       // Read from the last time the old lanes were found back on (SP-253):
       // a step done before then is done for loops that have written since.
@@ -838,6 +839,17 @@ export async function onboard(opts, deps) {
         return run('node', [join(spiralityDir, 'scripts', 'with_doppler.mjs'), 'node', '--no-warnings', join(spiralityDir, 'tracker', script), ...args], { cwd, ...o });
       };
 
+      // The old lanes, read from the project's own installer (--status),
+      // by the setup-check (SP-253, below) and the stop step.
+      const installer = installerPath(checkout);
+      const status = () => {
+        const r = run('bash', [installer, '--status'], { cwd: checkout });
+        if (r.code !== 0) fail(step, `${installer} --status ended with exit ${r.code}: ${last(r.err || r.out)}`);
+        const jobs = readInstallerStatus(r.out);
+        if (!jobs.length) fail(step, `${installer} --status names no lanes, so they cannot be read from it`);
+        return jobs;
+      };
+
       // ── setup-check (SP-252) ─────────────────────────────────────────
       // The setup branch is written and the project's own verify run on it
       // before anything is stopped: a setup that would not pass is found
@@ -845,6 +857,23 @@ export async function onboard(opts, deps) {
       // step, after the switch-check, pushes the same branch.
       step = 'setup-check';
       begin(step);
+      // SP-253: the old lanes loaded again after the stop was done (Dane
+      // switched the project back to its old loop mid-setup). They may have
+      // written to ClickUp since the import, and the project's main may have
+      // moved under the setup branch, so all five ClickUp steps run again,
+      // the setup-check first (still before anything is stopped), and the
+      // step log says why (its `stop | again` line).
+      if (!setup.on && deps.exists(installer)) {
+        const stopDone = loggedDone(clickupLog(), 'stop');
+        const lanesBegun = lanesStepBegun(deps.readText(logFile));
+        const jobs = stopDone && !lanesBegun ? status() : [];
+        if (oldLanesBack({ stopDone, lanesBegun, jobs })) {
+          const back = jobs.filter((j) => j.loaded);
+          const why = `${slug}'s old lanes are loaded again (${back.map((j) => j.label ?? j.name).join(', ')}, ${installer} --status) since the stop was done, so they may have written to ClickUp since the import and ${slug}'s main may have moved: setup-check, stop, snapshot, import and switch-check run again`;
+          say(step, why);
+          record('stop', OLD_LANES_BACK, why);
+        }
+      }
       const skipSetupCheck = doneBefore(step);
       if (skipSetupCheck) skip(step, skipSetupCheck);
       else {
@@ -857,30 +886,7 @@ export async function onboard(opts, deps) {
       // ── stop ─────────────────────────────────────────────────────────
       step = 'stop';
       begin(step);
-      const installer = installerPath(checkout);
-      const status = () => {
-        const r = run('bash', [installer, '--status'], { cwd: checkout });
-        if (r.code !== 0) fail(step, `${installer} --status ended with exit ${r.code}: ${last(r.err || r.out)}`);
-        const jobs = readInstallerStatus(r.out);
-        if (!jobs.length) fail(step, `${installer} --status names no lanes, so they cannot be read from it`);
-        return jobs;
-      };
       let snapshotDryRan = false;
-      // SP-253: the old lanes loaded again after the stop was done (Dane
-      // switched the project back to its old loop mid-setup). They may have
-      // written to ClickUp since the import, so stop, snapshot, import and
-      // switch-check all run again, and the step log says why.
-      if (!setup.on && deps.exists(installer)) {
-        const stopDone = loggedDone(clickupLog(), step);
-        const lanesBegun = lanesStepBegun(deps.readText(logFile));
-        const jobs = stopDone && !lanesBegun ? status() : [];
-        if (oldLanesBack({ stopDone, lanesBegun, jobs })) {
-          const back = jobs.filter((j) => j.loaded);
-          const why = `${slug}'s old lanes are loaded again (${back.map((j) => j.label ?? j.name).join(', ')}, ${installer} --status) since the stop was done, so they may have written to ClickUp since the import: stop, snapshot, import and switch-check run again`;
-          say(step, why);
-          record(step, OLD_LANES_BACK, why);
-        }
-      }
       const skipStop = doneBefore(step);
       if (skipStop) skip(step, skipStop);
       else if (!deps.exists(installer)) fail(step, `${installer} is not there, so its lanes cannot be read from it`);

@@ -23,3 +23,11 @@ Spirality's own loops uses the same names as the old ones, and can fail after
 turning them on; the wizard would then have mistaken Spirality's loops for
 the old ones and stopped them. Now it only checks for the old loops before
 that step has started.
+
+A third round came after another change landed first: the wizard now runs
+the project's own tests on its setup changes before it stops anything (the
+"setup check"). When the old loops come back, that check now runs again
+too, first, while the old loops are still running. While they ran, the
+project's code may have moved on, so the earlier pass no longer proved the
+setup changes still pass. If the check fails on the rerun, nothing is
+stopped and the old loops keep working.
