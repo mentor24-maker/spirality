@@ -1502,6 +1502,24 @@ test('GET /reports answers the Reporting figures for every project or one, 404 f
   } finally { await f.cleanup(); }
 });
 
+test('GET /reports answers Where the Time Goes: the four buckets per range and the open ticket by its exact name (SP-220)', async () => {
+  const f = await fixture();
+  try {
+    const t = f.store.fileTicket({ project: 'alpha', actor: f.machine.id, name: 'An open one', status: 'queued' });
+    await new Promise((resolve) => setTimeout(resolve, 20)); // so it has been open a while when the figures are read
+    const r = await f.call('GET', '/reports?project=alpha');
+    assert.equal(r.status, 200);
+    for (const key of ['week', 'month', 'all']) {
+      const split = r.body.timeSplit[key];
+      assert.deepEqual(Object.keys(split.buckets), ['working', 'lane', 'operator', 'broken'], key);
+      assert.ok(split.total > 0, key);
+      assert.equal(split.buckets.lane.share, 1, `${key}: its time in Queued, waiting for a lane`);
+      assert.deepEqual(split.tickets.map((x) => [x.id, x.name]), [[t.id, 'An open one']], key);
+    }
+    assert.equal(f.store.getTicket(t.id).version, 1, 'reading the figures writes nothing');
+  } finally { await f.cleanup(); }
+});
+
 test('GET /search ranks title over description over people\'s comments over loop comments, across every project, and writes nothing', async () => {
   const f = await fixture();
   try {
@@ -2601,6 +2619,8 @@ test('GET /pipeline answers each loop stage from the logs the project config nam
         assert.equal(answer.body.stages[2].lastStart, began.toISOString());
         // SP-173's extra fields for the dialog: the last end and its exit code, and how often it wakes.
         assert.deepEqual([answer.body.stages[2].lastEnd, answer.body.stages[2].lastExit, answer.body.stages[2].interval], [null, null, 1800]);
+        // SP-218's health fields: nothing has failed, so nothing is failing.
+        for (const s of answer.body.stages) assert.deepEqual([s.failing, s.failedPasses, s.failingSince, s.failingReason], [false, 0, null, null]);
         assert.doesNotMatch(answer.text, /report text/);
       }
       assert.equal((await f.call('GET', '/pipeline', { token: null, at })).status, 401);

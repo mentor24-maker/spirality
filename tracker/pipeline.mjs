@@ -26,6 +26,16 @@
  *
  * Log times are this machine's own clock, the one the runners wrote them
  * with; the tracker runs on the same machine, so they are read as local time.
+ *
+ * A stage is **failing** (SP-218) when its newest FAILING_AFTER finished
+ * passes all failed, so the page can say so in its header even when the
+ * outage is this machine's own network: the logs are read here, locally. A
+ * relay pass failed when its END line's exit is not 0 (scripts/run_relay.sh
+ * writes an honest code). A lane's exit is "not a verdict"
+ * (scripts/loop_runner.sh), so a lane pass failed when its exit is not 0 or
+ * its report, between START and END, has a line starting `FAILED:`. The
+ * reason is one of FAILING_REASONS, matched in the newest failed pass's text
+ * and never copied from it.
  */
 import { closeSync, fstatSync, openSync, readSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -70,6 +80,20 @@ export function readTail(file, bytes = TAIL_BYTES) {
   }
 }
 
+/** Failed passes in a row that make a stage failing: 30 minutes of the relay, 90 of a lane. */
+export const FAILING_AFTER = 3;
+
+/** The words the page may say about a failing stage: the only text from a pass that leaves here. */
+export const FAILING_REASONS = Object.freeze({
+  offline: "can't reach the internet",
+  failing: 'keeps failing',
+});
+
+/** A name lookup that failed: the machine has lost its connection (or its DNS). */
+const NO_INTERNET = /Could not resolve host|ENOTFOUND|getaddrinfo/;
+/** A lane's report line that says a step failed (the skills print it). */
+const REPORT_FAILED = /^FAILED:/;
+
 const DATED = /^===== (\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2}) (START|END) (\S+)/;
 const EXIT = /\(exit (\d+)/;
 const SLEEPING = /^\[loop-runner\] (\d{2}):(\d{2}):(\d{2}) sleeping (\d+)s before the next \/(\S+)$/;
@@ -79,12 +103,19 @@ const jobOf = (word) => word.replace(/^\//, '');
 
 /**
  * What a log's last lines say about `job`: `{ logged, running, lastStart,
- * lastEnd, lastExit, interval, nextDue }`, times as Date objects or null.
+ * lastEnd, lastExit, interval, nextDue, failing, failedPasses, failingSince,
+ * failingReason }`, times as Date objects or null.
  * `lastEnd` and `lastExit` are the newest END line's time and exit code
  * (while a pass runs, the one before it); the code is the number in its
  * "(exit N)", null when it has none. `interval` (seconds) is how often the
  * job wakes: the newest sleeping line's own seconds (a lane), else the one
  * given (the relay, which has no such line).
+ *
+ * `failedPasses` counts the newest finished passes that failed, one after
+ * another (a pass under way neither adds to it nor breaks it), and
+ * `failingSince` is when the first of them started (its END, when its START
+ * is out of view). `failing` is that count reaching FAILING_AFTER, and only
+ * then is `failingReason` one of FAILING_REASONS rather than null.
  */
 export function readStage(text, job, { interval = null } = {}) {
   let lastStart = null;
@@ -92,6 +123,9 @@ export function readStage(text, job, { interval = null } = {}) {
   let sleep = null;
   let lastDated = null;
   let index = 0;
+  // The passes in view, oldest first: when each started, and whether it failed and why.
+  const passes = [];
+  let open = null; // the pass between its START and its END
   for (const line of String(text ?? '').split('\n')) {
     index += 1;
     const dated = DATED.exec(line);
@@ -100,12 +134,22 @@ export function readStage(text, job, { interval = null } = {}) {
       const at = new Date(Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi), Number(s));
       lastDated = at;
       if (jobOf(word) !== job) continue;
-      if (kind === 'START') lastStart = { at, index };
-      else {
+      if (kind === 'START') {
+        lastStart = { at, index };
+        open = { start: at, reportFailed: false, offline: false };
+      } else {
         const code = EXIT.exec(line);
         lastEnd = { at, index, exit: code ? Number(code[1]) : null };
+        const pass = open ?? { start: null, reportFailed: false, offline: false };
+        const badExit = lastEnd.exit != null && lastEnd.exit !== 0;
+        passes.push({ start: pass.start ?? at, failed: badExit || (job !== 'relay' && pass.reportFailed), offline: pass.offline });
+        open = null;
       }
       continue;
+    }
+    if (open) {
+      if (REPORT_FAILED.test(line)) open.reportFailed = true;
+      if (NO_INTERNET.test(line)) open.offline = true;
     }
     const sleeping = SLEEPING.exec(line);
     if (sleeping && sleeping[5] === job && lastDated) {
@@ -117,22 +161,36 @@ export function readStage(text, job, { interval = null } = {}) {
     }
   }
   const every = sleep ? sleep.seconds : interval;
-  if (!lastStart && !sleep && !lastEnd) return { logged: false, running: false, lastStart: null, lastEnd: null, lastExit: null, interval: every, nextDue: null };
+  let failedPasses = 0;
+  while (failedPasses < passes.length && passes[passes.length - 1 - failedPasses].failed) failedPasses += 1;
+  const failing = failedPasses >= FAILING_AFTER;
+  const health = {
+    failing,
+    failedPasses,
+    failingSince: failedPasses ? passes[passes.length - failedPasses].start : null,
+    failingReason: failing ? (passes[passes.length - 1].offline ? FAILING_REASONS.offline : FAILING_REASONS.failing) : null,
+  };
+  if (!lastStart && !sleep && !lastEnd) return { logged: false, running: false, lastStart: null, lastEnd: null, lastExit: null, interval: every, nextDue: null, ...NOT_FAILING };
   const running = Boolean(lastStart && (!lastEnd || lastStart.index > lastEnd.index));
   let nextDue = null;
   if (!running) {
     if (sleep && sleep.index > (lastStart?.index ?? 0)) nextDue = new Date(sleep.at.getTime() + sleep.seconds * 1000);
     else if (interval != null && lastStart) nextDue = new Date(lastStart.at.getTime() + interval * 1000);
   }
-  return { logged: true, running, lastStart: lastStart?.at ?? null, lastEnd: lastEnd?.at ?? null, lastExit: lastEnd?.exit ?? null, interval: every, nextDue };
+  return { logged: true, running, lastStart: lastStart?.at ?? null, lastEnd: lastEnd?.at ?? null, lastExit: lastEnd?.exit ?? null, interval: every, nextDue, ...health };
 }
+
+/** A stage with nothing failing, or nothing known: the health fields' quiet values. */
+const NOT_FAILING = Object.freeze({ failing: false, failedPasses: 0, failingSince: null, failingReason: null });
 
 const iso = (d) => (d ? d.toISOString() : null);
 
 /**
  * GET /pipeline's answer: `{ stages: [{ name, job, logged, running,
- * lastStart, lastEnd, lastExit, interval, nextDue }] }`, times as ISO
- * strings, the exit code and interval (seconds) as numbers or null. A stage whose log is
+ * lastStart, lastEnd, lastExit, interval, nextDue, failing, failedPasses,
+ * failingSince, failingReason }] }`, times as ISO strings, the exit code and
+ * interval (seconds) as numbers or null, the reason one of FAILING_REASONS
+ * or null. A stage whose log is
  * missing, or has no pass in it yet, answers `logged: false`; one whose log
  * cannot be read answers that too, with `unreadable: true`. One stage never
  * fails the others.
@@ -147,7 +205,7 @@ export function pipelineOf({ logDir, slug }, { tailBytes = TAIL_BYTES } = {}) {
       try {
         text = readTail(join(folder, `${slug}-${job}.log`), tailBytes);
       } catch {
-        return { name, job, logged: false, running: false, lastStart: null, lastEnd: null, lastExit: null, interval: intervalOf(job), nextDue: null, unreadable: true };
+        return { name, job, logged: false, running: false, lastStart: null, lastEnd: null, lastExit: null, interval: intervalOf(job), nextDue: null, ...NOT_FAILING, unreadable: true };
       }
       const stage = readStage(text, job, { interval });
       return {
@@ -156,6 +214,8 @@ export function pipelineOf({ logDir, slug }, { tailBytes = TAIL_BYTES } = {}) {
         // A lane with no sleeping line in view yet wakes as the installer set it to.
         interval: stage.interval ?? intervalOf(job),
         nextDue: iso(stage.nextDue),
+        failing: stage.failing, failedPasses: stage.failedPasses,
+        failingSince: iso(stage.failingSince), failingReason: stage.failingReason,
       };
     }),
   };
