@@ -26,7 +26,9 @@
  *   2. write    a worktree on branch spirality-setup off origin's main, kept
  *               beside the answers file (never inside the project's
  *               checkout, which the lanes need clean): the files, the
- *               settings file, the npm scripts (with a `verify` that runs
+ *               settings file, .claude/settings.json merged with the
+ *               project's own (SP-254: every hook and permission of either,
+ *               read back), the npm scripts (with a `verify` that runs
  *               the check and the loop's tests, if it has no verify script),
  *               the CLAUDE.md sections, the .gitignore lines the lanes need
  *               (SP-120) and, if it has no verify check yet, the CI workflow
@@ -41,7 +43,10 @@
  *               red verify first retires the old loop's tests that check
  *               the files the setup writes, by lib/onboardRetire.mjs's rule
  *               (fails alone here, passes alone where the branch started,
- *               names a file the setup writes), in a commit of its own; then
+ *               names a file the setup writes), in a commit of its own; a
+ *               test that also points at code the project still runs is
+ *               kept instead, on a `not retired:` line naming the tests in
+ *               it that fail, for a hand fix on the branch (SP-254); then
  *               verify runs again, the rule applied again to what fails next
  *               (up to three rounds). Still red stops the run. Skipped when it
  *               passed before on the same commit, and for a new project
@@ -53,7 +58,8 @@
  *               project already on ClickUp (SP-159: its answers name a
  *               clickupListId) it also lists every file of the old copy it
  *               replaces, every file beside them it does not touch, and
- *               every test it retired, with why.
+ *               every test it retired, with why, and every test kept for a
+ *               hand fix.
  *   7. readback from the worktree: `npm run doctor`, `npm run clickup --
  *               whoami` (the project's hand-run seat) and `queue`; then CI's
  *               verify on the pull request.
@@ -71,11 +77,12 @@ import { loadProjectConfig, findConfigFile } from '../../lib/projectConfig.mjs';
 import { loadAnswers, onboardDir, expandHome } from '../../lib/onboardAnswers.mjs';
 import {
   RUN_ONE_TEST, RUN_ONE_TEST_ENV, TEST_FILE, parseRetired, pickRetired, retireCandidates, retiredLine, retiredSection,
+  liveCode, parseHandFix, handFixLine, handFixSection,
 } from '../../lib/onboardRetire.mjs';
 import {
   planCopies, compareWithProject, templateVars, mergeNpmScripts, withClaudeSections, withIgnoreLines,
   verifyWorkflow, hasVerifyJob, verifyScriptFor, render, ciVerdict, answersAsHandRun, SETUP_BRANCH, oldCopyLists,
-  npmConflictMessage, replacedScriptLines,
+  npmConflictMessage, replacedScriptLines, mergeClaudeSettings, settingsMissing,
 } from '../../lib/onboardCopy.mjs';
 
 const BRANCH = SETUP_BRANCH;
@@ -169,6 +176,15 @@ try {
 if (npm.conflicts.length && !dryRun) fail('look', npmConflictMessage(npm.conflicts));
 const sectionsTemplate = textOf('scripts/onboard/templates/CLAUDE-sections.md');
 const claude = withClaudeSections(readProject('CLAUDE.md'), render(sectionsTemplate, vars, 'CLAUDE-sections.md'));
+// SP-254: the project's own hooks and permissions are kept; the loop's are added.
+const settingsEntry = manifest.made.find((m) => m.mergeFrom);
+const projectSettings = settingsEntry ? readProject(settingsEntry.to) : null;
+const loopSettings = settingsEntry ? textOf(settingsEntry.mergeFrom) : null;
+if (settingsEntry && loopSettings == null) fail('look', `${settingsEntry.mergeFrom} is in scripts/onboard/manifest.json but not in Spirality`);
+let claudeSettings = null;
+if (settingsEntry) {
+  try { claudeSettings = mergeClaudeSettings(projectSettings, loopSettings); } catch (e) { fail('look', e.message); }
+}
 const ignoreEntry = manifest.made.find((m) => m.to === '.gitignore');
 const ignore = withIgnoreLines(readProject('.gitignore'), ignoreEntry?.ignoreLines || []);
 const workflows = pgit('ls-tree', '--name-only', 'origin/main', '.github/workflows/').out.split('\n').filter(Boolean);
@@ -185,6 +201,13 @@ if (arg('config')) {
 const extra = [
   ...(settingsText == null ? [] : [{ to: 'spirality.project.json', kind: 'made', from: arg('config'), content: settingsText }]),
   { to: 'package.json', kind: 'made', from: `the project's own, plus ${npm.added.length ? npm.added.join(', ') : 'nothing'}${npm.replaced.length ? `; ${npm.replaced.map((r) => r.name).join(', ')} replaced (--allow-replace)` : ''}`, content: npm.text },
+  ...(claudeSettings ? [{
+    to: settingsEntry.to, kind: 'made',
+    from: projectSettings == null
+      ? `Spirality's \`${settingsEntry.mergeFrom}\` (the project had none)`
+      : `the project's own, plus Spirality's ${claudeSettings.added.length ? claudeSettings.added.map((a) => `\`${a}\``).join(', ') : 'nothing (it already has all of them)'}${claudeSettings.kept.length ? `; the project's own ${claudeSettings.kept.join(', ')} kept` : ''}`,
+    content: claudeSettings.text,
+  }] : []),
   { to: '.gitignore', kind: 'made', from: ignore.added.length ? `the project's own, plus ${ignore.added.join(', ')}` : 'the project\'s own (it already ignores what the lanes need)', content: ignore.text },
   { to: 'CLAUDE.md', kind: 'made', from: claude.added ? 'the project\'s own, plus the loop\'s sections' : 'the project\'s own (the loop\'s sections are already there)', content: claude.text },
   ...(haveVerify ? [] : [{
@@ -211,7 +234,7 @@ if (npm.replaced.length) {
 
 // The project's own files are never replaced unasked. The door and the
 // loop's own files (made by an earlier setup) are the loop's to update.
-const theirs = all.filter((f) => f.status === 'replaces' && !['package.json', 'CLAUDE.md', '.gitignore'].includes(f.to) && !f.to.startsWith('loop/'));
+const theirs = all.filter((f) => f.status === 'replaces' && !['package.json', 'CLAUDE.md', '.gitignore', settingsEntry?.to].includes(f.to) && !f.to.startsWith('loop/'));
 if (dryRun) {
   if (theirs.length && !allowReplace) console.log(`\nA real run would stop here unless --allow-replace: it would replace ${theirs.map((f) => f.to).join(', ')}.`);
   if (npm.conflicts.length) console.log(`\nA real run would stop here: ${npmConflictMessage(npm.conflicts)}.`);
@@ -241,6 +264,20 @@ for (const f of all) {
   if (f.kind !== 'made') chmodSync(target, modeOf(f.from) === '100755' ? 0o755 : 0o644);
 }
 say('write', `${all.length} files written in ${worktree}`);
+// Rule 5: the merged settings read back from the worktree carry every hook
+// and permission of the project's and of the loop's.
+if (claudeSettings) {
+  let lost;
+  try {
+    const written = readFileSync(join(worktree, settingsEntry.to), 'utf8');
+    lost = [
+      ...(projectSettings == null ? [] : settingsMissing(written, projectSettings, { ownValues: true }).map((m) => `the project's ${m}`)),
+      ...settingsMissing(written, loopSettings).map((m) => `Spirality's ${m}`),
+    ];
+  } catch (e) { fail('write', `${settingsEntry.to} in ${worktree} does not read back: ${e.message}`); }
+  if (lost.length) fail('write', `${settingsEntry.to} in ${worktree} reads back without ${lost.join('; ')}`);
+  say('write', `${settingsEntry.to} read back: ${projectSettings == null ? 'Spirality\'s, as the project had none' : 'every hook and permission of the project\'s own and of Spirality\'s, each once'}`);
+}
 
 // ── 3. check ───────────────────────────────────────────────────────────────
 const scratch = mkdtempSync(join(tmpdir(), 'onboard-copy-'));
@@ -296,6 +333,14 @@ const readRetired = () => {
   return list;
 };
 let retired = readRetired();
+// SP-254: tests the rule would retire but that also test live code; kept, for a hand fix.
+const handFixFile = join(dirname(worktree), `${answers.projectSlug}-setup-hand-fix.json`);
+const readHandFix = () => {
+  const list = parseHandFix(existsSync(handFixFile) ? readFileSync(handFixFile, 'utf8') : null);
+  if (list == null) fail('verify', `${handFixFile} does not read as the list of tests kept for a hand fix; look at it, remove it, then rerun`);
+  return list;
+};
+let handFix = readHandFix();
 const head = () => wgit('rev-parse', 'HEAD').out;
 // Where the setup branch started: the commit the old loop's tests must pass on.
 const baseCommit = () => {
@@ -307,7 +352,10 @@ const projectVerify = () => run('npm', ['run', 'verify'], { cwd: worktree, timeo
 const showTail = (r, n = 25) => {
   for (const line of `${r.out}\n${r.err}`.split('\n').filter((l) => l.trim()).slice(-n)) console.log(`         | ${line}`);
 };
-const runOne = (dir, file) => run(RUN_ONE_TEST[0], [...RUN_ONE_TEST.slice(1), file], { cwd: dir, env: RUN_ONE_TEST_ENV, timeout: 5 * MINUTE }).code;
+const runOne = (dir, file) => {
+  const r = run(RUN_ONE_TEST[0], [...RUN_ONE_TEST.slice(1), file], { cwd: dir, env: RUN_ONE_TEST_ENV, timeout: 5 * MINUTE });
+  return { code: r.code, out: r.out };
+};
 // The old loop's tests, by lib/onboardRetire.mjs's rule, each part run here.
 const findRetirable = () => {
   const base = baseCommit();
@@ -315,12 +363,17 @@ const findRetirable = () => {
   if (!tree.ok) fail('verify', `git ls-tree ${base.slice(0, 7)} in ${worktree}: ${last(tree.err)}`);
   const repoFiles = tree.out.split('\n').filter(Boolean);
   const read = (p) => { try { return readFileSync(join(worktree, p), 'utf8'); } catch { return null; } };
-  const candidates = retireCandidates({ testFiles: repoFiles.filter((p) => TEST_FILE.test(p)), repoFiles, written: all.map((f) => f.to), read });
+  const written = all.map((f) => f.to);
+  let scripts;
+  try { scripts = JSON.parse(read('package.json')).scripts; } catch (e) { fail('verify', `package.json in ${worktree} does not parse: ${e.message}`); }
+  const live = liveCode({ scripts, repoFiles, written, read });
+  const candidates = retireCandidates({ testFiles: repoFiles.filter((p) => TEST_FILE.test(p)), repoFiles, written, read, live });
+  say('verify', `${live.length} code file(s) of ${answers.projectName}'s own are still live (its npm commands run them, or what they load); a test that points at one is never retired`);
   say('verify', `${candidates.length} test file(s) of ${answers.projectName}'s own name a file this setup writes; running each alone on the setup branch (${RUN_ONE_TEST.join(' ')} <file>)`);
   const baseDir = join(dirname(worktree), `${answers.projectSlug}-setup-base`);
   const dropBase = () => { if (existsSync(baseDir)) pgit('worktree', 'remove', '--force', baseDir); };
   try {
-    const { retired: found, kept } = pickRetired({
+    const { retired: found, kept, handFix: fix } = pickRetired({
       candidates,
       runOnSetup: (file) => runOne(worktree, file),
       beforeBase: (n) => {
@@ -333,7 +386,14 @@ const findRetirable = () => {
       runOnBase: (file) => runOne(baseDir, file),
     });
     for (const k of kept) say('verify', `not retired: ${k.file} ${k.why}`);
-    return found.map((c) => ({ ...c, base }));
+    if (fix.length) {
+      const next = [...handFix.filter((h) => !fix.some((f) => f.file === h.file)), ...fix];
+      const text = `${JSON.stringify(next, null, 2)}\n`;
+      writeFileSync(handFixFile, text);
+      if (readFileSync(handFixFile, 'utf8') !== text) fail('verify', `${handFixFile} did not read back as written`);
+      handFix = next;
+    }
+    return found.map(({ live: _live, ...c }) => ({ ...c, base }));
   } finally {
     dropBase();
     if (existsSync(baseDir)) say('verify', `(could not remove the scratch worktree ${baseDir}; remove it by hand)`);
@@ -361,7 +421,8 @@ if (!answers.clickupListId && !checkOnly) {
       `Retire ${found.length} of ${answers.projectName}'s old-loop tests that check files this setup replaces`,
       '',
       'Each one fails alone on this branch, passes alone where it started, and',
-      'names a file the setup writes (lib/onboardRetire.mjs, SP-252):',
+      'names a file the setup writes, and points at no code the project still',
+      'runs (lib/onboardRetire.mjs, SP-252, SP-254):',
       '',
       ...found.map((r) => `- ${retiredLine(r).replace(/`/g, '')}`),
     ].join('\n'), 'verify');
@@ -375,6 +436,11 @@ if (!answers.clickupListId && !checkOnly) {
   }
   if (!v.ok) {
     showTail(v);
+    const stillFailing = handFix.filter((h) => existsSync(join(worktree, h.file)));
+    if (stillFailing.length) {
+      say('verify', `${stillFailing.length} test file(s) are kept for a hand fix: each tests a file this setup writes and code ${answers.projectName} still runs. Fix the failing tests in ${worktree} (branch ${BRANCH}), commit there, then rerun; the pull request lists them:`);
+      for (const h of stillFailing) say('verify', `  ${handFixLine(h).replace(/`/g, '')}`);
+    }
     fail('verify', `${answers.projectName}'s own npm run verify fails on the setup branch (exit ${v.code}; its last lines are above)${retired.length ? `, with ${retired.length} old-loop test file(s) retired` : ''}. Nothing was pushed`);
   }
   writeFileSync(verifiedFile, `${head()}\n`);
@@ -435,6 +501,7 @@ const body = [
   '',
   ...oldCopy,
   ...retiredSection(retired, { projectName: answers.projectName, base: retired[0]?.base }),
+  ...handFixSection(handFix.filter((h) => existsSync(join(worktree, h.file))), { projectName: answers.projectName }),
   ...replacedNpm,
   'After this merges, `loop/` is never edited here: a change is made in Spirality first and copied in.',
   '',
