@@ -87,16 +87,19 @@ test('"Waiting on you" lists exactly what the `waiting` command says is waiting 
     const said = { assigned: [], unassigned: [] };
     for (const slug of ['alpha', 'beta']) {
       const r = await f.waitingCommand(slug);
-      assert.equal(r.code, 3, r.err);
+      // 1 when any ticket is undecided (it outranks 3), else 3: both projects have waits.
+      assert.ok([1, 3].includes(r.code), r.err);
       for (const line of r.out.trim().split('\n')) {
-        const [id, , assigned, , verdict] = line.split('\t');
-        if (!verdict.startsWith('WAITING ON DANE')) continue;
-        said[assigned === 'assigned: Dane' ? 'assigned' : 'unassigned'].push(id);
+        // The command and the page share one verdict (SP-217): WAITING is his,
+        // CANNOT TELL is his status with nobody assigned.
+        const [id, , , , , verdict] = line.split('\t');
+        if (verdict.startsWith('WAITING ON DANE')) said.assigned.push(id);
+        else if (verdict.startsWith('CANNOT TELL')) said.unassigned.push(id);
       }
     }
 
     assert.deepEqual(page.body.waiting.map((t) => t.id).sort(), said.assigned.sort());
-    // The command also counts his status with nobody assigned, flagged; the page shows those apart, never drops them.
+    // The command calls his status with nobody assigned CANNOT TELL; the page shows those apart, never drops them.
     assert.deepEqual(page.body.unsure.map((t) => t.id).sort(), said.unassigned.sort());
     // And both agree with what the test data was built to be.
     assert.deepEqual(said.assigned.sort(), idsWhere(f.expect, 'waiting'));

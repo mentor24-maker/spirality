@@ -37,6 +37,17 @@ test('every edit still matches its Spirality file exactly once, and every templa
   render(read('scripts/onboard/templates/CLAUDE-sections.md'), vars);
 });
 
+test('no file the setup writes, docs aside, carries a machine path (SP-252: StarCaster\'s own conventions check refused one)', () => {
+  const found = [];
+  for (const f of planCopies(manifest, { readSpirality: read, vars })) {
+    if (/\.md$/.test(f.to)) continue;
+    String(f.content ?? read(f.from) ?? '').split('\n').forEach((line, i) => {
+      if (/\/Users\/[A-Za-z]|\/home\/[a-z]/.test(line)) found.push(`${f.to}:${i + 1}: ${line.trim()}`);
+    });
+  }
+  assert.deepEqual(found, []);
+});
+
 test('nothing the ticket door, the runners or the copied tests need is left out', () => {
   const roots = manifest.files.filter((f) => /\.(?:m|c)?js$|\.sh$/.test(f.from)).map((f) => f.from);
   const { files, missing } = needs(roots, read);
