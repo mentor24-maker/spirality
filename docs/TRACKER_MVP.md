@@ -382,6 +382,21 @@ there refreshes it (it copies only each `SKILL.md`, removes a copy whose
 original is gone, and writes nothing when a file looks like it holds a key,
 when a name is not plain, or when it finds no commands at all); the refreshed
 copy goes in through a pull request.
+**Settings** (`/settings`) holds the stage colours and, under them,
+**Pipeline Controls** (SP-224): for each project the reader may see, how
+often each lane wakes, whether the whole pipeline or one lane is paused, the
+work-in-progress cap and the model each lane runs on, every one marked
+"default" while it has today's value, then the change log, newest first (who,
+when in Mountain time, which setting, old value, new value). They live in the
+tracker's own data, one set per project (`tracker/pipelineControls.mjs` lists
+them, their ranges and their defaults), so changing one is not a code change.
+Everyone signed in may read them; only the project's operator, signed in as a
+person, may change one: another person and any loop's token are refused
+(403), and nothing is logged. A value out of range is refused with a plain
+message. The page says "Saved" only when the value the tracker reads back is
+the one sent. A lane reads its project's with `npm run clickup -- settings`
+(`name=value` lines). Nothing on the Mini acts on them yet: SP-236 (wake
+times), SP-237 (pause), SP-238 (the cap) and SP-239 (the model) each wire one in.
 A browser opening `/projects` or `/projects/<slug>` gets the page; the page's own
 call to the same address gets the data. `/users` is the page alone; its data
 is still `GET /people` (the onboarding scripts read it), and a browser opening

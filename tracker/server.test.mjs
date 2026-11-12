@@ -2668,3 +2668,46 @@ test('a /docs/spirality/<path> address is the page, whatever the browser asks fo
     }
   } finally { await f.cleanup(); }
 });
+
+test('pipeline controls: anyone signed in reads them, defaults marked; the operator changes one and the change is logged; anyone else or a loop is refused 403; a bad value is 400; neither writes (SP-224)', async () => {
+  const f = await fixture();
+  try {
+    const other = f.store.createActor({ kind: 'human', name: 'Someone Else' });
+    f.store.addMember({ project: 'alpha', actor: other.id, by: f.human.id });
+    const otherToken = f.store.issueToken(other.id);
+    const control = (view, key) => view.controls.find((c) => c.key === key);
+
+    const all = await f.call('GET', '/pipeline-controls');
+    assert.equal(all.status, 200, all.text);
+    assert.deepEqual(all.body.projects.map((p) => p.project.slug), ['alpha']);
+    const read = await f.call('GET', '/pipeline-controls/alpha');
+    assert.equal(read.status, 200);
+    assert.deepEqual(control(read.body, 'wake.loop-build'), { ...control(read.body, 'wake.loop-build'), value: '1800', isDefault: true });
+    assert.equal(read.body.canChange, false, 'a loop may never change its own controls');
+    assert.deepEqual(read.body.groups.map((g) => g.wiredBy), ['SP-236', 'SP-237', 'SP-238', 'SP-239']);
+    assert.equal((await f.call('GET', '/pipeline-controls/alpha', { token: f.humanToken })).body.canChange, true);
+    assert.equal((await f.call('GET', '/pipeline-controls/alpha', { token: otherToken })).body.canChange, false);
+    assert.equal((await f.call('GET', '/pipeline-controls/nope')).status, 404);
+    assert.equal((await f.call('GET', '/pipeline-controls', { token: null })).status, 401);
+
+    const saved = await f.call('PUT', '/pipeline-controls/alpha', { token: f.humanToken, body: { setting: 'wake.loop-build', value: '900' } });
+    assert.equal(saved.status, 200, saved.text);
+    assert.deepEqual(saved.body.saved, { setting: 'wake.loop-build', from: '1800', to: '900', changed: true });
+    assert.equal(control(saved.body, 'wake.loop-build').value, '900');
+    assert.deepEqual(saved.body.changes.map((c) => [c.actorName, c.label, c.from, c.to]), [['Operator', 'loop-build wake time', '1800', '900']]);
+    assert.equal(control((await f.call('GET', '/pipeline-controls/alpha')).body, 'wake.loop-build').value, '900', 'read back by another sign-in');
+
+    for (const [token, why] of [[f.machineToken, /a loop sign-in may not/], [otherToken, /you are not its operator/]]) {
+      const refused = await f.call('PUT', '/pipeline-controls/alpha', { token, body: { setting: 'wake.loop-build', value: '600' } });
+      assert.equal(refused.status, 403, refused.text);
+      assert.match(refused.body.message, why);
+    }
+    for (const body of [{ setting: 'wake.loop-build', value: '30' }, { setting: 'wip-cap', value: 0 }, { setting: 'model.loop-build', value: 'gpt-9' }, { setting: 'nope', value: '1' }, { setting: 'wip-cap', value: 3, extra: 1 }]) {
+      const bad = await f.call('PUT', '/pipeline-controls/alpha', { token: f.humanToken, body });
+      assert.equal(bad.status, 400, JSON.stringify(body));
+      assert.ok(bad.body.message);
+    }
+    assert.equal(f.store.pipelineSettingChanges('alpha').length, 1, 'a refused change logs nothing');
+    assert.equal(control(f.store.pipelineSettings('alpha').reduce((v, c) => ({ controls: [...v.controls, c] }), { controls: [] }), 'wake.loop-build').value, '900');
+  } finally { await f.cleanup(); }
+});

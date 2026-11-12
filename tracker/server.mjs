@@ -75,7 +75,7 @@ import { promisify } from 'node:util';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { MAX_ATTACHMENT, openStore, StoreError } from './store.mjs';
 import { SOURCE as IMPORT_SOURCE } from './import.mjs';
-import { boardOf, lookupTickets, PRIORITIES, projectDetailsOf, projectsList, readSearchFilters, reportsOf, searchTickets, stageColoursOf, threadOf, waitingFor, busUnseen } from './pageData.mjs';
+import { boardOf, lookupTickets, PRIORITIES, pipelineControlsOf, projectDetailsOf, projectsList, readSearchFilters, reportsOf, searchTickets, stageColoursOf, threadOf, waitingFor, busUnseen } from './pageData.mjs';
 import { createNotifier, DEFAULT_FROM, MAIL_FROM, MAIL_KEY, mailEnvFromDoppler, mailSettingsFromEnv, resendSender, textSettings } from './notify.mjs';
 import { sendInvite, sendResetLink } from './account.mjs';
 import { guessProject } from './projectGuess.mjs';
@@ -787,6 +787,41 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
         checkBody(body, me, ['colours']);
         store.setStageColours(body.colours);
         return [200, stageColoursOf(store)];
+      }
+    }
+
+    // Dane's page: the Settings page's Pipeline Controls. Anyone
+    // signed in reads them for the projects they may see, and a lane reads
+    // its own project's (`npm run clickup -- settings`); only the project's
+    // operator, signed in as a person, changes one, never a loop. The answer
+    // to a change is the control as stored, read back, with the whole view.
+    if (parts[0] === 'pipeline-controls' && parts.length === 1 && method === 'GET') {
+      const scope = scopeOf(me);
+      const projects = store.listProjects().filter((p) => scope == null || scope.has(p.slug))
+        .map((p) => pipelineControlsOf(store, p.slug, { reader: me.id }));
+      return [200, { projects }];
+    }
+    if (parts[0] === 'pipeline-controls' && parts.length === 2) {
+      const project = requireProject(parts[1], me);
+      if (method === 'GET') return [200, pipelineControlsOf(store, project.slug, { reader: me.id })];
+      if (method === 'PUT') {
+        if (me.kind !== 'human' || project.operator !== me.id) {
+          throw new HttpError(403, 'not-operator', `only ${project.name}'s operator, signed in as a person, may change its pipeline controls; ${me.kind === 'human' ? 'you are not its operator' : 'a loop sign-in may not'}.`);
+        }
+        const body = await readJson(req);
+        checkBody(body, me, ['setting', 'value']);
+        let saved;
+        try {
+          saved = store.setPipelineSetting({ project: project.slug, setting: body.setting, value: body.value, actor: me.id });
+        } catch (err) {
+          if (err instanceof StoreError && err.code === 'not-operator') throw new HttpError(403, err.code, err.message);
+          throw err;
+        }
+        const view = pipelineControlsOf(store, project.slug, { reader: me.id });
+        const stored = view.controls.find((c) => c.key === saved.setting)?.value;
+        if (stored !== saved.to) throw new HttpError(500, 'write-failed', `the ${saved.setting} setting read back as ${stored}, not ${saved.to}; treat it as not saved.`);
+        log(`pipeline control ${project.slug} ${saved.setting} ${saved.changed ? `${saved.from} -> ${saved.to}` : `unchanged (${saved.to})`} actor=${me.id}`);
+        return [200, { saved, ...view }];
       }
     }
 

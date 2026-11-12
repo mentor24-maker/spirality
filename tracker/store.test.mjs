@@ -1664,3 +1664,78 @@ test('markSeen and unseenCount: per person, never their own comments, a mark nev
   assert.equal(store.unseenCount({ actor: dane.id, ticket: t.id }), 0);
   store.close();
 });
+
+test('pipeline controls: every one reads as its default until the operator changes it, each change logged, read back and kept per project (SP-224)', () => {
+  const { store, human, path, cleanup } = fixture();
+  try {
+    store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE', operator: human.id });
+    const read = (p, key) => store.pipelineSettings(p).find((c) => c.key === key);
+    assert.deepEqual(read('alpha', 'wake.loop-build'), { ...read('alpha', 'wake.loop-build'), value: '1800', isDefault: true });
+    assert.equal(read('alpha', 'wake.relay').value, '600');
+    assert.equal(read('alpha', 'wip-cap').value, '5');
+    assert.equal(read('alpha', 'paused').value, 'off');
+    assert.equal(read('alpha', 'model.loop-build').value, 'default');
+    assert.deepEqual(store.pipelineSettingChanges('alpha'), []);
+
+    const r = store.setPipelineSetting({ project: 'alpha', setting: 'wake.loop-build', value: 900, actor: human.id });
+    assert.deepEqual(r, { setting: 'wake.loop-build', from: '1800', to: '900', changed: true });
+    assert.equal(read('alpha', 'wake.loop-build').value, '900');
+    assert.equal(read('alpha', 'wake.loop-build').isDefault, false);
+    assert.equal(read('beta', 'wake.loop-build').value, '1800', 'another project keeps its own');
+    const [row] = store.pipelineSettingChanges('alpha');
+    assert.deepEqual({ ...row, id: 0 }, { id: 0, setting: 'wake.loop-build', label: 'loop-build wake time', from: '1800', to: '900', actor: human.id, at: row.at });
+    assert.match(row.at, /^2026-10-26T12:00:/);
+
+    // The same value again writes and logs nothing.
+    assert.equal(store.setPipelineSetting({ project: 'alpha', setting: 'wake.loop-build', value: '900', actor: human.id }).changed, false);
+    assert.equal(store.pipelineSettingChanges('alpha').length, 1);
+
+    // Back to the default: no row stored, the change still logged, newest first.
+    store.setPipelineSetting({ project: 'alpha', setting: 'wake.loop-build', value: '1800', actor: human.id });
+    assert.equal(read('alpha', 'wake.loop-build').isDefault, true);
+    const db = new DatabaseSync(path);
+    try { assert.equal(db.prepare('SELECT COUNT(*) AS n FROM pipeline_settings').get().n, 0); } finally { db.close(); }
+    assert.deepEqual(store.pipelineSettingChanges('alpha').map((c) => [c.from, c.to]), [['900', '1800'], ['1800', '900']]);
+
+    store.setPipelineSetting({ project: 'alpha', setting: 'paused.loop-review', value: true, actor: human.id });
+    store.setPipelineSetting({ project: 'alpha', setting: 'model.loop-intake', value: 'claude-sonnet-5-5', actor: human.id });
+    store.setPipelineSetting({ project: 'alpha', setting: 'wip-cap', value: '3', actor: human.id });
+    assert.equal(read('alpha', 'paused.loop-review').value, 'on');
+    assert.equal(read('alpha', 'model.loop-intake').value, 'claude-sonnet-5-5');
+    assert.equal(read('alpha', 'wip-cap').value, '3');
+  } finally { cleanup(); }
+});
+
+test('pipeline controls: only the project\'s operator, as a person, may change one; a bad value is refused in plain words; nothing is written or logged (SP-224)', () => {
+  const { store, human, machine, cleanup } = fixture();
+  try {
+    const other = store.createActor({ kind: 'human', name: 'Someone Else' });
+    const set = (setting, value, actor = human.id) => store.setPipelineSetting({ project: 'alpha', setting, value, actor });
+    assert.throws(() => set('wake.loop-build', 900, other.id), { code: 'not-operator', message: /only Alpha's operator/ });
+    assert.throws(() => set('wake.loop-build', 900, machine.id), { code: 'not-operator' });
+    assert.throws(() => set('wake.loop-build', 30), { code: 'bad-setting', message: /loop-build wake time must be a whole number from 60 to 86,400 seconds; "30" is not/ });
+    assert.throws(() => set('wake.relay', 86401), { code: 'bad-setting' });
+    assert.throws(() => set('wake.relay', '90.5'), { code: 'bad-setting' });
+    assert.throws(() => set('wip-cap', 0), { code: 'bad-setting', message: /work-in-progress cap must be a whole number from 1 to 50/ });
+    assert.throws(() => set('wip-cap', 51), { code: 'bad-setting' });
+    assert.throws(() => set('model.loop-build', 'gpt-9'), { code: 'bad-setting', message: /not on the list/ });
+    assert.throws(() => set('model.relay', 'default'), { code: 'unknown-setting' }, 'the relay runs no model');
+    assert.throws(() => set('paused', 'maybe'), { code: 'bad-setting', message: /on or off/ });
+    assert.throws(() => set('wake.nowhere', 900), { code: 'unknown-setting' });
+    assert.throws(() => store.setPipelineSetting({ project: 'nope', setting: 'wip-cap', value: 3, actor: human.id }), { code: 'unknown-project' });
+    assert.ok(store.pipelineSettings('alpha').every((c) => c.isDefault));
+    assert.deepEqual(store.pipelineSettingChanges('alpha'), []);
+  } finally { cleanup(); }
+});
+
+test('deleting a project takes its pipeline controls and their log with it (SP-224)', () => {
+  const { store, human, cleanup } = fixture();
+  try {
+    store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE', operator: human.id });
+    store.setPipelineSetting({ project: 'beta', setting: 'wip-cap', value: 3, actor: human.id });
+    store.deleteProject('beta');
+    store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE', operator: human.id });
+    assert.equal(store.pipelineSettings('beta').find((c) => c.key === 'wip-cap').value, '5');
+    assert.deepEqual(store.pipelineSettingChanges('beta'), []);
+  } finally { cleanup(); }
+});

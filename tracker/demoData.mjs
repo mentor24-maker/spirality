@@ -169,6 +169,12 @@ export function seedDemo(store, { operatorName = substrateConfig.operatorName(),
     '@@NEEDED', 'Nothing to merge: PR #7 has already landed.', 'Your move: Close — its work is live.',
   ].join('\n')).rendered));
 
+  // Two Pipeline Controls changes on Alpha (SP-224), so the Settings page's
+  // change log shows rows: the cap tried at 3 and put back, which leaves every
+  // control on its default.
+  store.setPipelineSetting({ project: 'alpha', setting: 'wip-cap', value: '3', actor: op.id });
+  store.setPipelineSetting({ project: 'alpha', setting: 'wip-cap', value: '5', actor: op.id });
+
   if (clock) {
     const start = clock.time();
     const HOUR = 60 * 60_000;

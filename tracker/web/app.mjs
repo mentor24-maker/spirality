@@ -26,7 +26,7 @@
  * an emailed link's own page. The link's token is sent only in a JSON body,
  * never in an address.
  */
-import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, unwrapDoc, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, lookupTicket, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, pipelinePodLabel, renderCommandList, renderCommandView, renderCommandDetails, renderContextDocs, renderSortHeadings, renderListPriority, sortTickets, nextSort, renderDocumentation, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine } from './render.mjs';
+import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, unwrapDoc, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, lookupTicket, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, renderPipelineControls, pipelinePodLabel, renderCommandList, renderCommandView, renderCommandDetails, renderContextDocs, renderSortHeadings, renderListPriority, sortTickets, nextSort, renderDocumentation, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine } from './render.mjs';
 
 /** Where an earlier version of the page kept a pasted token; removed on load, never read. */
 const OLD_TOKEN_KEY = 'tracker-token';
@@ -2132,6 +2132,7 @@ async function drawReporting(chosen) {
  */
 async function drawSettings() {
   const { stages } = await api('GET', '/stage-colours');
+  const { projects: controls = [] } = await api('GET', '/pipeline-controls');
   setTitle('Settings · Tracker');
   /** What each stage will be saved as: `#rrggbb`, or null for no colour. */
   const chosen = Object.fromEntries(stages.map((s) => [s.status, s.colour]));
@@ -2149,7 +2150,11 @@ async function drawSettings() {
     <form class="colours">
       <table class="colours"><thead><tr><th>Stage</th><th>Colour</th><th></th><th></th></tr></thead><tbody>${stages.map(row).join('')}</tbody></table>
       <div class="row"><button type="submit">Save</button><span class="note"></span></div>
-    </form>`;
+    </form>
+    <h2>Pipeline Controls</h2>
+    <p class="quiet">How each project's loop runs, for experimenting with the pipeline. Everyone can see them; only a project's operator can change them. Every change is logged below its project.</p>
+    <div class="pipeline-controls">${controls.length ? '' : '<p class="quiet">No projects to show.</p>'}</div>`;
+  drawPipelineControls(main.querySelector('div.pipeline-controls'), controls);
   const form = main.querySelector('form.colours');
   const rows = [...form.querySelectorAll('tbody tr')];
   const show = (tr) => {
@@ -2185,6 +2190,53 @@ async function drawSettings() {
     }
     button.disabled = false;
   });
+}
+
+/**
+ * The Settings page's Pipeline Controls (SP-224): one section per project
+ * (renderPipelineControls), each control with its own Save. A Save sends the
+ * one control and says "Saved" only when the value the tracker answers, read
+ * back from its store, is the one sent; anything else, a refusal included,
+ * says plainly that it did not save and why. The section is then drawn again
+ * from that answer, so the change log shows the new row.
+ */
+function drawPipelineControls(box, views) {
+  const notes = new Map();
+  const draw = () => {
+    box.innerHTML = views.map((v) => renderPipelineControls(v, notes.get(v.project.slug) ?? {})).join('');
+    for (const section of box.querySelectorAll('section.pipeline-controls')) {
+      const slug = section.dataset.project;
+      for (const tr of section.querySelectorAll('tr[data-control]')) {
+        const button = tr.querySelector('button');
+        if (button) button.addEventListener('click', () => save(slug, tr, button));
+      }
+    }
+  };
+  const save = async (slug, tr, button) => {
+    const key = tr.dataset.control;
+    const raw = tr.querySelector('input, select').value.trim();
+    const numeric = tr.dataset.kind === 'seconds' || tr.dataset.kind === 'count';
+    const sent = numeric && /^-?[0-9]+$/.test(raw) ? String(Number(raw)) : raw;
+    const mine = notes.get(slug) ?? {};
+    notes.set(slug, mine);
+    button.disabled = true;
+    const note = tr.querySelector('.note');
+    note.className = 'note quiet';
+    note.textContent = 'Saving…';
+    try {
+      const answer = await api('PUT', `/pipeline-controls/${encodeURIComponent(slug)}`, { setting: key, value: sent });
+      // Read back before saying it worked: the stored value must be the one sent.
+      const stored = answer.controls?.find((c) => c.key === key)?.value;
+      if (stored !== sent || answer.saved?.to !== sent) throw new Error(`the tracker read it back as ${stored ?? 'nothing'}, not ${sent}.`);
+      mine[key] = { ok: true, text: answer.saved.changed ? 'Saved' : 'Saved (it already had that value)' };
+      views = views.map((v) => (v.project.slug === slug ? answer : v));
+    } catch (err) {
+      if (err instanceof SignedOut) return drawSignIn('You were signed out; the setting was not saved.');
+      mine[key] = { ok: false, text: `Not saved: ${err.message}` };
+    }
+    draw();
+  };
+  draw();
 }
 
 /**
