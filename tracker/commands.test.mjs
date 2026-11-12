@@ -24,10 +24,30 @@ function checkout() {
 }
 
 test('parseSkill reads name and description (plain, quoted, or folded) and keeps the steps below the front matter', () => {
-  assert.deepEqual(parseSkill(skill('plain', 'Say it plainly.')), { name: 'plain', description: 'Say it plainly.', steps: '# plain\n\n1. A step.\n' });
+  assert.deepEqual(parseSkill(skill('plain', 'Say it plainly.')), { name: 'plain', description: 'Say it plainly.', summary: null, about: null, steps: '# plain\n\n1. A step.\n' });
   assert.equal(parseSkill('---\nname: "q"\ndescription: \'quoted words\'\n---\nx').description, 'quoted words');
   assert.equal(parseSkill('---\nname: f\ndescription: >\n  folded over\n  two lines\n---\nx').description, 'folded over two lines');
   assert.equal(parseSkill('# no front matter'), null);
+});
+
+test('parseSkill reads the optional summary and about lines (SP-212), folded about too', () => {
+  const text = '---\nname: s\ndescription: For Claude Code.\nsummary: Builds the next ticket\nabout: >\n  A plain sentence\n  over two lines.\n---\nsteps';
+  const parsed = parseSkill(text);
+  assert.equal(parsed.description, 'For Claude Code.');
+  assert.equal(parsed.summary, 'Builds the next ticket');
+  assert.equal(parsed.about, 'A plain sentence over two lines.');
+  assert.equal(parsed.steps, 'steps');
+});
+
+test('every loop skill in this checkout has a summary of 4 to 7 words and a plain explanation (SP-212)', () => {
+  const skills = listCommands({ root: REPO_ROOT }).filter((x) => x.source === 'Loop skill');
+  assert.ok(skills.length >= 4);
+  for (const s of skills) {
+    const words = String(s.summary ?? '').trim().split(/\s+/).filter(Boolean).length;
+    assert.ok(words >= 4 && words <= 7, `${s.name}: summary "${s.summary}" has ${words} words`);
+    assert.ok(s.about && s.about.length > s.summary.length, `${s.name} has an about line`);
+    assert.ok(s.description, `${s.name} keeps its description`);
+  }
 });
 
 test('lists Your commands, then Loop skills, each by name, with description and steps; files without a name or description are left out', () => {
@@ -43,6 +63,8 @@ test('lists Your commands, then Loop skills, each by name, with description and 
     assert.deepEqual(list.map((x) => [x.name, x.source]), [['close-check', 'Your command'], ['why-stuck', 'Your command'], ['loop-review', 'Loop skill']]);
     assert.equal(list[1].description, 'Find out why a ticket is stuck.');
     assert.equal(list[1].steps, '# why-stuck\n\n1. A step.\n');
+    assert.equal(list[1].summary, null, 'no summary line: null, and the page falls back');
+    assert.equal(list[1].about, null);
   } finally { c.cleanup(); }
 });
 
