@@ -47,6 +47,13 @@ PREFIX="$(node "$REPO/scripts/project_config.mjs" launchdPrefix)" || { echo "[lo
 TRACKER_PORT="$(node "$REPO/scripts/project_config.mjs" trackerPort)" || { echo "[loop-runner] could not read trackerPort from the project config" >&2; exit 1; }
 LOG="$LOG_DIR/$SLUG-$SKILL.log"
 LOCK="$LOG_DIR/$SLUG-$SKILL.lock"
+# A file here ends the sleep between passes early (SP-219); `node
+# scripts/lib/wakeLane.mjs <lane>` writes it. Named like the lock, from the
+# project config.
+WAKE="$LOG_DIR/$SLUG-$SKILL.wake"
+# How often the sleep looks for the wake file, in seconds.
+WAKE_POLL="${LOOP_WAKE_POLL_SECONDS:-5}"
+case "$WAKE_POLL" in ""|*[!0-9]*|0) WAKE_POLL=5 ;; esac
 mkdir -p "$LOG_DIR"
 CLAUDE_BIN="${CLAUDE_BIN:-$(command -v claude || echo "$HOME/.local/bin/claude")}"
 
@@ -87,6 +94,26 @@ take_sync_lock() {
     sleep 5; waited=$((waited + 5))
   done
   echo "$$" > "$SYNC_LOCK/pid"
+}
+
+# The sleep between passes, in steps of WAKE_POLL seconds, so a wake file
+# ends it early. It never cuts a pass short: it only runs between passes. A
+# wake that arrived during the pass is still there, so the next pass starts at
+# once, and any number of wakes sent during one pass start exactly one more
+# (they are all the same file). The file is cleared as a pass starts, never
+# here, so a wake that lands just as the timer runs out is not left over to
+# start a second pass behind it.
+sleep_until_woken() {
+  local slept=0 step
+  while [ "$slept" -lt "$INTERVAL" ]; do
+    if [ -e "$WAKE" ]; then
+      echo "[loop-runner] $(date "+%H:%M:%S") woken early after ${slept}s of ${INTERVAL}s (wake file $WAKE) — starting the next /$SKILL now" >> "$LOG"
+      return 0
+    fi
+    step=$WAKE_POLL
+    [ $((INTERVAL - slept)) -lt "$step" ] && step=$((INTERVAL - slept))
+    sleep "$step"; slept=$((slept + step))
+  done
 }
 
 # A template with X's, the one form macOS and GNU mktemp both accept.
@@ -136,6 +163,9 @@ while true; do
     echo "[loop-runner] $(date "+%H:%M:%S") main checkout is not on a clean main — not pulling. Every pass runs stale code until it is put back on main." >> "$LOG"
   fi
 
+  # This pass reads the queue afresh, so every wake sent before now is answered
+  # by it. A wake sent from here on is kept for the next one.
+  rm -f "$WAKE"
   echo "" >> "$LOG"
   echo "===== $(date "+%Y-%m-%d %H:%M:%S") START /$SKILL =====" >> "$LOG"
   # The pass's output goes to the log as it happens AND to its own file, so
@@ -170,6 +200,6 @@ while true; do
     echo "[loop-runner] $(date "+%H:%M:%S") THIS PASS COULD NOT SIGN IN TO CLAUDE. Nothing will change until a person signs in on this machine (claude login) and restarts this job: launchctl kickstart -k gui/$(id -u)/$PREFIX.$SKILL" >> "$LOG"
   fi
 
-  echo "[loop-runner] $(date "+%H:%M:%S") sleeping ${INTERVAL}s before the next /$SKILL" >> "$LOG"
-  sleep "$INTERVAL"
+  echo "[loop-runner] $(date "+%H:%M:%S") sleeping ${INTERVAL}s before the next /$SKILL (a wake ends it early)" >> "$LOG"
+  sleep_until_woken
 done
