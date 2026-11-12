@@ -2612,6 +2612,60 @@ test('GET /pipeline answers each loop stage from the logs the project config nam
   } finally { await f.cleanup(); }
 });
 
+test('GET /in-flight lists every ticket but Live on the projects the caller may see, with next change from the loop logs; a member of one project sees only it; signed out is 401 (SP-221)', async () => {
+  const f = await fixture();
+  try {
+    f.store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE', operator: f.human.id });
+    const viewer = f.store.createActor({ kind: 'human', name: 'Viewer' });
+    const vt = f.store.issueToken(viewer.id);
+    f.store.setRole({ actor: viewer.id, role: 'viewer', by: f.human.id });
+    f.store.addMember({ project: 'alpha', actor: viewer.id, by: f.human.id });
+    const statuses = loopStatuses.STAGE_ORDER;
+    for (const status of statuses) f.store.fileTicket({ project: 'alpha', actor: f.machine.id, name: `Alpha ${status}`, status });
+    const hidden = f.store.fileTicket({ project: 'beta', actor: f.machine.id, name: 'Hidden comet', status: 'Queued' });
+
+    const logs = join(f.dir, 'logs');
+    mkdirSync(logs);
+    const stamp = (d) => d.toLocaleString('sv-SE').replace('T', ' ');
+    const ended = new Date('2026-11-09T18:25:36');
+    writeFileSync(join(logs, 'alpha-loop-build.log'), [
+      `===== ${stamp(new Date('2026-11-09T18:22:34'))} START /loop-build =====`,
+      `===== ${stamp(ended)} END /loop-build (exit 0) =====`,
+      `[loop-runner] ${stamp(ended).slice(11)} sleeping 1800s before the next /loop-build`, '',
+    ].join('\n'));
+    const server = await startServer({ store: f.store, port: 0, pipeline: { logDir: logs, slug: 'alpha' } });
+    try {
+      const at = `http://127.0.0.1:${server.address().port}`;
+      const admin = await f.call('GET', '/in-flight', { token: f.humanToken, at });
+      assert.equal(admin.status, 200, admin.text);
+      assert.deepEqual(admin.body.projects.map((p) => [p.slug, p.logo]), [['alpha', null], ['beta', null]]);
+      assert.deepEqual(admin.body.tickets.filter((t) => t.project === 'alpha').map((t) => t.status), statuses.filter((s) => s !== 'Live'));
+      assert.ok(admin.body.tickets.some((t) => t.id === hidden.id), 'an admin sees every project');
+      const byStatus = Object.fromEntries(admin.body.tickets.filter((t) => t.project === 'alpha').map((t) => [t.status, t.nextChange]));
+      const due = new Date(ended.getTime() + 1800 * 1000).toISOString();
+      assert.deepEqual(byStatus.Queued, { kind: 'lane', lane: 'Build', job: 'loop-build', running: false, due });
+      assert.deepEqual(byStatus.Rework, byStatus.Queued);
+      assert.equal(byStatus['In review'], null, 'no review log: null, never a guess');
+      assert.equal(byStatus.Requested, null, 'no intake log');
+      assert.deepEqual(byStatus.Building, { kind: 'running', lane: 'Build', job: 'loop-build' });
+      assert.deepEqual(byStatus['Needs your input'], { kind: 'operator' });
+      assert.equal(admin.body.tickets.find((t) => t.id === hidden.id).nextChange, null, 'beta is not the project whose logs this tracker reads');
+
+      const member = await f.call('GET', '/in-flight', { token: vt, at });
+      assert.equal(member.status, 200);
+      assert.deepEqual(member.body.projects.map((p) => p.slug), ['alpha']);
+      assert.ok(member.body.tickets.every((t) => t.project === 'alpha'));
+      assert.ok(!member.text.includes('Hidden comet') && !member.text.includes('Beta'), 'nothing of beta is given away');
+
+      assert.equal((await f.call('GET', '/in-flight', { token: null, at })).status, 401);
+    } finally { await new Promise((r) => server.close(r)); }
+    // A tracker that cannot read the loop logs still answers, with no lane times.
+    const blind = await f.call('GET', '/in-flight');
+    assert.equal(blind.status, 200);
+    assert.equal(blind.body.tickets.find((t) => t.status === 'Queued').nextChange, null);
+  } finally { await f.cleanup(); }
+});
+
 test('GET /documentation lists the docs folder\'s Markdown by title and reads one; a path outside it is 404 and reads nothing (SP-175)', async () => {
   const f = await fixture();
   try {
