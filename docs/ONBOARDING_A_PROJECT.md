@@ -212,6 +212,19 @@ the verify stays red and the wizard stops before the stop step. The list is
 kept beside the setup folder (`<slug>-setup-retired.json`), and a verify that
 passed is not run again on the same commit (`<slug>-setup-verified`).
 
+**A test of live code is never retired (SP-254).** A test file is retired
+only when everything it tests is the setup's. One that also points at code
+the project still runs (a file its npm commands run, or one those load, by
+its whole path or a path relative to the test, and that the setup does not
+write) is kept, even when the rule above holds: StarCaster's `shipThread`
+test read a rewritten `CLAUDE.md` and also tested `npm run ship`'s script.
+The run says so on a `not retired:` line naming that code and the tests in
+the file that fail, and stops while the old lanes still run. Fix those tests
+by hand in the setup folder (on `spirality-setup`), commit there, and rerun:
+the pull request lists each one under "Tests kept, fixed by hand", with what
+failed. The list is kept beside the setup folder
+(`<slug>-setup-hand-fix.json`).
+
 The copy step then always runs with `--allow-replace`, since the setup
 replaces the old copy's files, and its pull request lists every file of
 the old copy it replaces, and every other file in the folders it writes
@@ -578,7 +591,9 @@ changing the file: `CLICKUP_WORKSPACE_ID`, `CLICKUP_SPACE_ID`,
   - `.claude/skills/loop-build/`, `loop-review/`, `loop-intake/` and
     `loop-spec/` (each a `SKILL.md`).
   - `.claude/settings.json`, which wires the PreToolUse hook
-    `scripts/hooks/block_edits_on_main.cjs`.
+    `scripts/hooks/block_edits_on_main.cjs`. The setup merges it into the
+    project's own (SP-254): every hook and permission of the project's is
+    kept, the loop's are added, each once, and the written file is read back.
   - `CLAUDE.md` (the rules for every session, including "How to work with
     Dane" and where the project's tickets live) and
     `docs/LOOP_ENGINEERING.md`.

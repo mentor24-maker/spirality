@@ -6,7 +6,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { logFolderOf, pipelineOf, readStage, readTail, STAGES } from './pipeline.mjs';
+import { FAILING_AFTER, FAILING_REASONS, logFolderOf, pipelineOf, readStage, readTail, STAGES } from './pipeline.mjs';
 import { logClock, logDate } from './demoData.mjs';
 import { INTERVALS } from '../scripts/lib/loopSchedule.mjs';
 
@@ -49,6 +49,7 @@ test('four stages from scratch logs: a sleeping lane, a running lane, the relay,
       name: 'Review', job: 'loop-review', logged: true, running: false,
       lastStart: at('2026-11-09T18:22:34').toISOString(), lastEnd: at('2026-11-09T18:25:36').toISOString(), lastExit: 0,
       interval: 1800, nextDue: at('2026-11-09T18:55:36').toISOString(),
+      failing: false, failedPasses: 0, failingSince: null, failingReason: null,
     });
     assert.equal(by.Build.running, true);
     assert.equal(by.Build.nextDue, null);
@@ -62,12 +63,12 @@ test('four stages from scratch logs: a sleeping lane, a running lane, the relay,
     assert.equal(by.Relay.lastEnd, at('2026-11-09T18:37:52').toISOString());
     assert.equal(by.Relay.lastExit, 0);
     // No log: nothing logged, and it wakes as the installer sets it to.
-    assert.deepEqual(by.Intake, { name: 'Intake', job: 'loop-intake', logged: false, running: false, lastStart: null, lastEnd: null, lastExit: null, interval: INTERVALS['loop-intake'], nextDue: null });
+    assert.deepEqual(by.Intake, { name: 'Intake', job: 'loop-intake', logged: false, running: false, lastStart: null, lastEnd: null, lastExit: null, interval: INTERVALS['loop-intake'], nextDue: null, failing: false, failedPasses: 0, failingSince: null, failingReason: null });
     // Times and flags only: no log text anywhere in the answer.
     const text = JSON.stringify(answer);
     assert.doesNotMatch(text, /SECRET|REPORT|working|under way|WebApps|=====/);
     for (const s of answer.stages) {
-      assert.deepEqual(Object.keys(s).sort(), ['interval', 'job', 'lastEnd', 'lastExit', 'lastStart', 'logged', 'name', 'nextDue', 'running']);
+      assert.deepEqual(Object.keys(s).sort(), ['failedPasses', 'failing', 'failingReason', 'failingSince', 'interval', 'job', 'lastEnd', 'lastExit', 'lastStart', 'logged', 'name', 'nextDue', 'running']);
       // Times, codes and intervals only: every value a flag, a name, an ISO time, a number or null.
       for (const t of [s.lastStart, s.lastEnd, s.nextDue]) assert.ok(t === null || /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(t), t);
       assert.ok(s.lastExit === null || Number.isInteger(s.lastExit));
@@ -178,4 +179,115 @@ test('each exit code the runners write on an END line is read back as its number
   const bare = readStage([start('loop-build', at('2026-11-09T10:00:00')), `===== ${logDate(at('2026-11-09T10:01:00'))} END /loop-build =====`].join('\n'), 'loop-build');
   assert.equal(bare.lastExit, null);
   assert.equal(bare.running, false);
+});
+
+// ── SP-218: a stage that keeps failing ──────────────────────────────────────
+const relayFailed = (d) => `===== ${logDate(d)} END relay — A STEP FAILED AND SAID SO ABOVE (exit 1) =====`;
+/** One relay pass that could not resolve GitHub, as on 11/11. */
+const offlineRelayPass = (began) => [
+  relayStart(began),
+  "fatal: unable to access 'https://github.com/someone/project.git/': Could not resolve host: github.com",
+  relayFailed(new Date(began.getTime() + 15_000)),
+];
+/** One lane pass: its exit 0 is "not a verdict", so only a FAILED: line in its report fails it. */
+const lanePass = (job, began, reportLines, code = 0) => [
+  start(job, began),
+  ...reportLines,
+  `===== ${logDate(new Date(began.getTime() + 120_000))} END /${job} (exit ${code} — not a verdict; the pass's report above is) =====`,
+  sleeping(job, new Date(began.getTime() + 120_000)),
+];
+
+test('three relay passes in a row that could not resolve GitHub: failing since the first of them started, and the reason is the internet (SP-218)', () => {
+  assert.equal(FAILING_AFTER, 3);
+  const firsts = ['2026-11-10T21:00:00', '2026-11-10T21:10:00', '2026-11-10T21:20:00'].map(at);
+  const text = [
+    relayStart(at('2026-11-10T20:50:00')), relayEnd(at('2026-11-10T20:50:20')),
+    ...firsts.flatMap(offlineRelayPass),
+  ].join('\n');
+  const relay = readStage(text, 'relay', { interval: 600 });
+  assert.deepEqual(
+    { failing: relay.failing, failedPasses: relay.failedPasses, failingSince: relay.failingSince.toISOString(), failingReason: relay.failingReason },
+    { failing: true, failedPasses: 3, failingSince: firsts[0].toISOString(), failingReason: "can't reach the internet" },
+  );
+  // A fourth pass under way neither breaks the run nor adds to it.
+  const running = readStage([text, relayStart(at('2026-11-10T21:30:00'))].join('\n'), 'relay', { interval: 600 });
+  assert.equal(running.running, true);
+  assert.equal(running.failedPasses, 3);
+  assert.equal(running.failing, true);
+});
+
+test('two failed passes in a row are not failing; one passing pass after the failures clears it (SP-218)', () => {
+  const two = [
+    ...offlineRelayPass(at('2026-11-10T21:00:00')),
+    ...offlineRelayPass(at('2026-11-10T21:10:00')),
+  ];
+  const twoRead = readStage(two.join('\n'), 'relay');
+  assert.deepEqual([twoRead.failing, twoRead.failedPasses, twoRead.failingReason], [false, 2, null]);
+  const many = [...two, ...offlineRelayPass(at('2026-11-10T21:20:00')), ...offlineRelayPass(at('2026-11-10T21:30:00'))];
+  assert.equal(readStage(many.join('\n'), 'relay').failedPasses, 4);
+  const back = readStage([...many, relayStart(at('2026-11-11T09:22:00')), relayEnd(at('2026-11-11T09:22:30'))].join('\n'), 'relay');
+  assert.deepEqual([back.failing, back.failedPasses, back.failingSince, back.failingReason], [false, 0, null, null]);
+});
+
+test('a lane pass that exits 0 but reports FAILED: counts as failed; one without such a line counts as passed; a bad exit fails it too (SP-218)', () => {
+  const job = 'loop-intake';
+  const failedReport = ['the pass did its work', 'FAILED: the intake pass could not hand SP-1 to you.'];
+  const quiet = ['the pass did its work', 'Filed SP-2. Nothing FAILED: here mid-line.'];
+  const passes = (reports) => reports.flatMap((r, i) => lanePass(job, new Date(at('2026-11-10T14:30:00').getTime() + i * 1800_000), r.lines, r.code ?? 0));
+  const allFailed = readStage(passes([{ lines: failedReport }, { lines: failedReport }, { lines: [], code: 1 }]).join('\n'), job);
+  assert.deepEqual(
+    [allFailed.failing, allFailed.failedPasses, allFailed.failingSince.toISOString(), allFailed.failingReason],
+    [true, 3, at('2026-11-10T14:30:00').toISOString(), 'keeps failing'],
+  );
+  const middlePassed = readStage(passes([{ lines: failedReport }, { lines: quiet }, { lines: failedReport }]).join('\n'), job);
+  assert.deepEqual([middlePassed.failing, middlePassed.failedPasses], [false, 1]);
+  // The relay's exit is its verdict: a FAILED: line in a relay pass that ended 0 is not a failure.
+  const relay = readStage([relayStart(at('2026-11-10T10:00:00')), 'FAILED: something', relayEnd(at('2026-11-10T10:00:10'))].join('\n'), 'relay');
+  assert.equal(relay.failedPasses, 0);
+});
+
+test('the reason comes from the newest failed pass: offline earlier, failing otherwise now, says "keeps failing" (SP-218)', () => {
+  const lines = [
+    ...offlineRelayPass(at('2026-11-10T21:00:00')),
+    ...offlineRelayPass(at('2026-11-10T21:10:00')),
+    relayStart(at('2026-11-10T21:20:00')), 'some other trouble', relayFailed(at('2026-11-10T21:20:10')),
+  ];
+  assert.equal(readStage(lines.join('\n'), 'relay').failingReason, FAILING_REASONS.failing);
+  for (const said of ['getaddrinfo ENOTFOUND api.doppler.com', 'Error: getaddrinfo EAI_AGAIN github.com']) {
+    const offline = [0, 10, 20].flatMap((m) => [relayStart(at(`2026-11-10T21:${String(m).padStart(2, '0')}:00`)), said, relayFailed(at(`2026-11-10T21:${String(m).padStart(2, '0')}:10`))]);
+    assert.equal(readStage(offline.join('\n'), 'relay').failingReason, FAILING_REASONS.offline, said);
+  }
+  assert.deepEqual(Object.values(FAILING_REASONS).sort(), ["can't reach the internet", 'keeps failing']);
+});
+
+test('GET /pipeline\'s answer for a failing stage carries counts, a time and the fixed reason words, never a line of the log (SP-218)', () => {
+  const secret = 'TOKEN=dp.st.made-up-secret-value-1234567890';
+  const dir = scratch({
+    'proj-relay.log': [0, 10, 20].flatMap((m) => [
+      relayStart(at(`2026-11-10T21:${String(m).padStart(2, '0')}:00`)),
+      secret,
+      "fatal: unable to access 'https://github.com/someone/project.git/': Could not resolve host: github.com",
+      relayFailed(at(`2026-11-10T21:${String(m).padStart(2, '0')}:15`)),
+    ]).join('\n'),
+    'proj-loop-review.log': [0, 1, 2].flatMap((i) => lanePass('loop-review', new Date(at('2026-11-10T12:00:00').getTime() + i * 1800_000), [secret, 'FAILED: review could not run verify'])).join('\n'),
+  });
+  try {
+    const answer = pipelineOf({ logDir: dir, slug: 'proj' });
+    const by = Object.fromEntries(answer.stages.map((s) => [s.job, s]));
+    assert.deepEqual(
+      [by.relay.failing, by.relay.failedPasses, by.relay.failingSince, by.relay.failingReason],
+      [true, 3, at('2026-11-10T21:00:00').toISOString(), "can't reach the internet"],
+    );
+    assert.deepEqual([by['loop-review'].failing, by['loop-review'].failingReason], [true, 'keeps failing']);
+    assert.deepEqual([by['loop-build'].failing, by['loop-build'].failedPasses, by['loop-build'].failingSince, by['loop-build'].failingReason], [false, 0, null, null]);
+    const text = JSON.stringify(answer);
+    assert.doesNotMatch(text, /made-up-secret|TOKEN|dp\.st|github\.com|resolve|FAILED|verify|fatal/);
+    for (const s of answer.stages) {
+      assert.ok(s.failingReason === null || Object.values(FAILING_REASONS).includes(s.failingReason));
+      assert.ok(Number.isInteger(s.failedPasses));
+      assert.equal(typeof s.failing, 'boolean');
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
