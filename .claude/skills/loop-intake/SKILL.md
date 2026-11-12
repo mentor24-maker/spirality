@@ -1,6 +1,14 @@
 ---
 name: loop-intake
 description: Take the oldest "Requested" ticket (a request Dane filed from the tracker page), write it up as a proper spec (or several, one per pull request) with his words kept verbatim, and hand every resulting ticket to him in "Needs your input" to approve with "go". Runs unattended on the Mini as its own launchd lane. Never writes code, never queues anything itself.
+summary: Turns a request into ready tickets
+about: >
+  This is the first step for anything Dane asks for on the tracker page. It
+  takes the oldest request, keeps his own words exactly as he wrote them, and
+  writes them up as a proper plan: what will change, what will not, and how to
+  check it worked. A big request becomes several small tickets. Each one goes
+  back to Dane, who replies "go" to approve it. It runs by itself on a timer.
+  It never writes code and never starts building anything on its own.
 ---
 
 # Loop: Intake

@@ -31,7 +31,11 @@ export const COMMAND_NAME = /^[A-Za-z0-9][A-Za-z0-9-]*$/;
 
 /**
  * A SKILL.md's front matter (the `---` block at its top) as `{ name,
- * description }`, and its steps (the text below the block). A value may be
+ * description, summary, about }`, and its steps (the text below the block).
+ * `summary` (4 to 7 words) and `about` (a few plain sentences) are optional
+ * (SP-212): the Docs page's Quick Claude Commands pod shows them, and they
+ * are null when the file has none. `description` is left for Claude Code,
+ * which reads it to decide when to run the skill. A value may be
  * quoted, or folded over indented lines after `>` or `|`. Null when the file
  * has no front matter.
  */
@@ -53,7 +57,7 @@ export function parseSkill(text) {
     }
     fields[kv[1]] = value;
   }
-  return { name: fields.name ?? null, description: fields.description ?? null, steps: text.slice(m[0].length).replace(/^\s*\n/, '') };
+  return { name: fields.name ?? null, description: fields.description ?? null, summary: fields.summary || null, about: fields.about || null, steps: text.slice(m[0].length).replace(/^\s*\n/, '') };
 }
 
 /** The file system calls this module makes, so a test can see every path it touches. */
@@ -71,7 +75,8 @@ function look(disk, path) {
 
 /**
  * Every command in the two folders under `root`, as `{ name, source,
- * description, steps }`: Your commands first, then Loop skills, each by
+ * description, summary, about, steps }` (summary and about null when the
+ * file has none): Your commands first, then Loop skills, each by
  * name. A missing folder lists nothing. A file without a `name:` and
  * `description:` line is left out. A name taken by both folders is listed
  * once, as Your command.
@@ -93,7 +98,7 @@ export function listCommands({ root = REPO_ROOT, disk = DISK } = {}) {
       const skill = parseSkill(disk.read(file));
       if (!skill || !skill.name || !COMMAND_NAME.test(skill.name) || !skill.description || seen.has(skill.name)) continue;
       seen.add(skill.name);
-      out.push({ name: skill.name, source, description: skill.description, steps: skill.steps });
+      out.push({ name: skill.name, source, description: skill.description, summary: skill.summary, about: skill.about, steps: skill.steps });
     }
   }
   return out;

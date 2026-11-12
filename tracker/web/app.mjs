@@ -26,7 +26,7 @@
  * an emailed link's own page. The link's token is sent only in a JSON body,
  * never in an address.
  */
-import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, unwrapDoc, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, lookupTicket, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, pipelinePodLabel, renderCommandList, renderCommandView, renderContextDocs, renderSortHeadings, renderListPriority, sortTickets, nextSort, renderDocumentation, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine } from './render.mjs';
+import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, unwrapDoc, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, lookupTicket, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, pipelinePodLabel, renderCommandList, renderCommandView, renderCommandDetails, renderContextDocs, renderSortHeadings, renderListPriority, sortTickets, nextSort, renderDocumentation, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine } from './render.mjs';
 
 /** Where an earlier version of the page kept a pasted token; removed on load, never read. */
 const OLD_TOKEN_KEY = 'tracker-token';
@@ -2371,9 +2371,9 @@ async function drawUsers(done = '', problem = '') {
  * Each is read back from the table's own list before the page says it
  * worked. `done` and `problem` are the line the last change left, and
  * `section` says whose it is: 'docs' (Context Documents) or 'files' (Task
- * Files), so it shows in that section only. Then the Commands section
- * (SP-179): every slash command, searchable, each opening its own page.
- * Last, folded away, Reference Docs and Work Log (SP-175, SP-195): every
+ * Files), so it shows in that section only. The Quick Claude Commands pod
+ * (SP-179, SP-212) sits down the left third: every slash command,
+ * searchable, each opening a pop-up. Last on the right, folded away, Reference Docs and Work Log (SP-175, SP-195): every
  * Markdown file in the repository's docs/ folder, each opening at
  * /docs/spirality/<path>, sortable and filtered on the page.
  */
@@ -2388,7 +2388,7 @@ async function drawDocs(done = '', problem = '', section = 'files') {
   setTitle('Docs · Tracker');
   const documentation = renderDocumentation(files, docAddress);
   if (!projects.length) {
-    main.innerHTML = `<h1>Docs</h1><h2>Task Files</h2><p class="quiet">There are no projects yet.</p>${commandsSection()}${documentation}`;
+    main.innerHTML = `<h1>Docs</h1>${docsColumns(`<h2>Task Files</h2><p class="quiet">There are no projects yet.</p>${documentation}`)}`;
     showCommands(commands);
     wireDocumentation(files);
     putTrail([{ label: 'Docs' }]);
@@ -2418,6 +2418,7 @@ async function drawDocs(done = '', problem = '', section = 'files') {
   };
   main.innerHTML = `
     <h1>Docs</h1>
+    ${docsColumns(`
     ${renderContextDocs({ project, docs }, { size: sizeOf, timeOf: when })}
     <h2>Task Files</h2>
     <p class="quiet">Files kept on the tasks of ${escapeHtml(project.name)}. Pick another project on the <a href="/projects">Projects</a> page.</p>
@@ -2432,8 +2433,7 @@ async function drawDocs(done = '', problem = '', section = 'files') {
     ? `<table class="projects task-files"><thead><tr><th>File</th><th>Task</th><th>Type</th><th>Size</th><th>Added By</th><th>Added On</th><th><span class="hidden">Actions</span></th></tr></thead>
       <tbody>${attachments.map(row).join('')}</tbody></table>`
     : `<p class="quiet">No task in ${escapeHtml(project.name)} has a file yet.</p>`}
-    ${commandsSection()}
-    ${documentation}`;
+    ${documentation}`)}`;
   const note = main.querySelector('.file-note');
   const busy = (text) => { note.className = 'note file-note quiet'; note.textContent = text; };
   const refused = (control, text) => { note.className = 'note file-note error'; note.textContent = text; if (control) control.disabled = false; };
@@ -2507,19 +2507,42 @@ async function drawDocs(done = '', problem = '', section = 'files') {
 }
 
 /**
- * The Docs page's Commands section (SP-179): a search box over every slash
- * command (GET /commands), each opening its own page. Typing filters the
- * list by name or description as it is typed; nothing is read again.
+ * The Docs page in two columns (SP-212): the Quick Claude Commands pod down
+ * the left third, `rest` (Context Documents, Task Files, Reference Docs and
+ * Work Log) on the right. A narrow screen stacks the pod above the rest
+ * (app.css).
+ */
+const docsColumns = (rest) => `<div class="docs-columns">${commandsSection()}<div class="docs-main">${rest}</div></div>`;
+
+/**
+ * The Quick Claude Commands pod (SP-179, SP-212): a search box over every
+ * slash command (GET /commands), each a name and a few words that open its
+ * pop-up. Typing filters the list by name, summary or explanation as it is
+ * typed; nothing is read again.
  */
 function commandsSection() {
-  return `
-    <h2>Commands</h2>
-    <p class="quiet">Every slash command you can give a session: your own and the loop skills. Type part of a name or what you want to do.</p>
+  return `<section class="commands-pod" aria-labelledby="commands-pod-title">
+    <h2 id="commands-pod-title">Quick Claude Commands</h2>
+    <p class="quiet">Every slash command you can give a session: your own and the loop skills. Click one to see what it does.</p>
     <input type="search" id="command-search" aria-label="Find a command" placeholder="Find a command" autocomplete="off">
-    <div id="command-list"></div>`;
+    <div id="command-list"></div>
+    <dialog class="command-details" aria-labelledby="command-details-title">
+      <form method="dialog">
+        <button type="submit" class="close" aria-label="Close">×</button>
+        <div class="command-details-body"></div>
+        <div class="row"><button type="submit">Close</button></div>
+      </form>
+    </dialog>
+  </section>`;
 }
 
-/** Fill the Commands list and keep it filtered as the search box is typed in; null (the list could not be read) says so. */
+/**
+ * Fill the Quick Claude Commands list and keep it filtered as the search box
+ * is typed in; null (the list could not be read) says so. A click on a
+ * command opens its pop-up (SP-212); Escape or Close shuts it, and focus
+ * goes back to the command clicked. A click with Ctrl, Cmd or Shift held
+ * still follows the link to its steps page.
+ */
 function showCommands(commands) {
   const box = document.getElementById('command-search');
   const list = document.getElementById('command-list');
@@ -2531,6 +2554,21 @@ function showCommands(commands) {
   const show = () => { list.innerHTML = renderCommandList(commands, box.value); };
   box.addEventListener('input', show);
   show();
+  const dialog = main.querySelector('dialog.command-details');
+  let opener = null;
+  list.addEventListener('click', (e) => {
+    const link = e.target.closest('a.command-open');
+    if (!link || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+    const command = commands.find((c) => c.name === link.dataset.command);
+    if (!command) return;
+    // Not on to the page's own link handler, which would open the steps page instead.
+    e.preventDefault();
+    e.stopPropagation();
+    opener = link;
+    dialog.querySelector('.command-details-body').innerHTML = renderCommandDetails(command);
+    dialog.showModal();
+  });
+  dialog.addEventListener('close', () => opener?.focus());
 }
 
 /**
