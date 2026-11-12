@@ -1,5 +1,5 @@
 {
-  "//": "What a project gets from Spirality in its one setup pull request (SP-110), taken from what Normie's PRs #62, #64, #65 and #66 received, plus every module the ticket door imports today. `files` are copied from Spirality: with no `edits`, byte for byte, checked with cmp; with `edits`, each `find` must appear exactly once in Spirality's file, or the copy stops naming it, so a change to Spirality's wording can never slip through unadapted. The ticket door goes under loop/, apart from the project's own lib/ and scripts/; the runners, hook, skills and settings keep Spirality's paths, because each finds the project's folder from where it sits. `made` are written from the answers.",
+  "//": "What a project gets from Spirality in its one setup pull request (SP-110), taken from what Normie's PRs #62, #64, #65 and #66 received, plus every module the ticket door imports today. `files` are copied from Spirality: with no `edits`, byte for byte, checked with cmp; with `edits`, each `find` must appear exactly once in Spirality's file, or the copy stops naming it, so a change to Spirality's wording can never slip through unadapted. The ticket door goes under loop/, apart from the project's own lib/ and scripts/; the runners, hook, skills and settings keep Spirality's paths, because each finds the project's folder from where it sits. `made` are written from the answers and the project's own files (`.claude/settings.json` is merged, never replaced: SP-254).",
   "files": [
     {
       "from": "lib/autoMergeLane.js",
@@ -293,10 +293,6 @@
       "to": "scripts/hooks/block_edits_on_main.cjs"
     },
     {
-      "from": ".claude/settings.json",
-      "to": ".claude/settings.json"
-    },
-    {
       "from": ".claude/skills/loop-intake/SKILL.md",
       "to": ".claude/skills/loop-intake/SKILL.md",
       "why": "Spirality's statuses contract lives in Spirality, not in the project",
@@ -441,6 +437,11 @@
       "to": ".gitignore",
       "from": "the project's own (made if it has none), with these lines added where missing: the lanes' working copies live in .claude/worktrees/, and a main checkout that shows them as changed never pulls (SP-120)",
       "ignoreLines": [".claude/worktrees/"]
+    },
+    {
+      "to": ".claude/settings.json",
+      "from": "the project's own, with Spirality's .claude/settings.json merged in (SP-254): every hook and permission of either, each once; nothing of the project's is dropped. A project with none gets Spirality's as it is",
+      "mergeFrom": ".claude/settings.json"
     },
     {
       "to": "spirality.project.json",

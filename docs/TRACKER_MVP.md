@@ -244,7 +244,8 @@ answers are JSON (structured text programs read).
 | `POST /tickets/:id/comments` | a comment, or a reply when `parent` is given |
 | `GET /tickets/:id/events` | the history |
 | `GET /waiting` | for Dane's page: tickets in the operator's two statuses across every project, by the loop's own `waiting` verdict for the caller, newest first |
-| `GET /pipeline` | for Dane's page: the Pipeline Status pod (SP-168). `{ stages: [{ name, job, logged, running, lastStart, nextDue }] }` for Relay, Build, Review and Intake, read from the ends of this machine's loop logs (`<logDir>/<projectSlug>-<job>.log`, from the project config); times as ISO strings, never a line of log text. A stage with no log or no pass yet answers `logged: false`; 503 `no-pipeline` when the project config was not usable at start |
+| `GET /pipeline` | for Dane's page: the Pipeline Status pod (SP-168). `{ stages: [{ name, job, logged, running, lastStart, nextDue }] }` for Relay, Build, Review and Intake, read from the ends of this machine's loop logs (`<logDir>/<projectSlug>-<job>.log`, from the project config); times as ISO strings, never a line of log text. A stage with no log or no pass yet answers `logged: false`; 503 `no-pipeline` when the project config was not usable at start. Each stage also says whether it is failing (SP-218): `failing` once its last 3 finished passes all failed (a relay END exit other than 0; a lane's, or a `FAILED:` line in its report), `failedPasses`, `failingSince` and `failingReason` (only "can't reach the internet" or "keeps failing"), which every page shows in its header as "Relay can't reach the internet since 9:00 PM" until the first passing pass |
+| `GET /in-flight` | for the Console view (SP-221): every ticket in flight (any status but Live) on every project the caller may see, `{ projects: [{ slug, name, prefix, logo }], tickets: [{ id, project, name, status, tags, priority, assignee, updatedAt, stageSince, waitingOnOperator, answerIn, pullRequest, nextChange }] }`, in the contract's stage order then `queue` order. `stageSince` is when it entered its status (`updatedAt` when the history has no such step). `nextChange` is the lane that acts on it from `GET /pipeline`'s answer: Requested to Intake, Queued and Rework to Build, In review to Review, as `{ kind: 'lane', lane, job, running, due }`; Building is `{ kind: 'running', lane, job }`; Needs your input and Ready to launch are `{ kind: 'operator' }`; null when the lane's time cannot be read or the ticket's project is not the one whose loop logs this tracker reads |
 | `GET /tickets/:id/thread` | for Dane's page: the ticket with each comment's author named and machine comments marked, its project's operator by id and name, and the Change panel's choices: the store's priorities and the four statuses a person may pick (Requested, Rework, Queued, Live) |
 | `GET /projects` | for Dane's page: every project with its slug, name, ticket prefix and open count, and the project the New request form starts on |
 | `POST /projects` | for Dane's page: add a project (`{ name, slug, prefix, url?, logo?, owner?, repo? }`), answered with its details read back; **a person's token only**: a machine's gets 403 and nothing is written. A duplicate slug or prefix, a slug that is not small letters, digits and hyphens (or is `new`), an owner who is not a person, an address that is not http(s), or a repo that is not `owner/name` (or its github.com address) gets 400 |
@@ -394,6 +395,47 @@ no token is kept in the browser. "Forgot password?" asks for an email and
 sends a 1-hour reset link to it if it has an account, saying the same
 either way. The page shows a count of tickets waiting on him in the
 browser tab's title, so a pinned tab tells him at a glance.
+
+### The Add Task Box's Project Check
+
+Before the Tasks page's Add Task box files a request, it asks the server
+whether the words fit another project better, and if one clearly does, asks
+"Did you mean for that to be associated with project X?". It is plain word
+matching on the tickets already in the tracker, no AI; the rules are written
+out at the top of `tracker/projectGuess.mjs`.
+
+**The bar is a better hit rate, not a perfect one.** Dane, on SP-225, "The
+Add Task box keeps asking whether a Spirality task belongs to WaveCenter"
+(2026-11-11): "It doesn't have to be perfect. Just a better hit rate is a
+win." Before SP-225 everyday words two projects share added up over a long
+request (WaveCenter is itself about scoring tasks, so "task" is in most of
+its tickets), and nearly every request about the Tasks page asked about
+WaveCenter. SP-225 made a word the project being filed into already uses
+count for no project.
+
+**How to measure it: the replay.** Every ticket whose description has a
+`## Asked` block holds Dane's own words, verbatim (the fenced block's first
+line is his title). Take those words as a fresh request, with the ticket
+left out of its own project's tickets, and run `guessProject`:
+
+- filed into its own project, any suggestion is a **false alarm**;
+- typed into each other project that has tickets, naming the ticket's real
+  project is a **catch**.
+
+The tickets come from `GET /projects` and `GET /projects/<slug>/tickets`.
+Fetch them one project at a time; `tickets --json --include-closed` reads
+every ticket's history and is slow over the home network. On 2026-11-11, 149
+requests:
+
+| | Before SP-225 | After |
+|---|---|---|
+| False alarms | 35 of 149 | 5 of 149 |
+| Catches | 128 of 596 | 117 of 596 |
+
+A change to the check should be run against the replay and say both numbers
+in its pull request. Ideas for when there is more data are parked on
+SP-227, "Improve the Add Task box's project check hit rate as the tickets
+grow" (`deferred`).
 
 ### How the loops switch over without a rewrite
 

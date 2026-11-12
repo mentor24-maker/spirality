@@ -386,6 +386,30 @@ export function renderPipelinePod(answer, timeOf, now = Date.now()) {
 }
 
 /**
+ * The header's lane health lines (SP-218), from GET /pipeline: one sentence
+ * per failing stage, "Relay can't reach the internet since 9:00 PM", in the
+ * stages' order. The reason is the answer's own fixed words (tracker/
+ * pipeline.mjs FAILING_REASONS); one that is missing says "keeps failing".
+ * `timeOf` turns the ISO start of the failures into the page's own time. No
+ * failing stage, or a missing or malformed answer, gives no lines: the line
+ * is gone at the first passing pass.
+ */
+export function healthLines(answer, timeOf) {
+  const stages = Array.isArray(answer?.stages) ? answer.stages : [];
+  return stages
+    .filter((s) => s?.failing === true)
+    .map((s) => {
+      const reason = typeof s.failingReason === 'string' && s.failingReason ? s.failingReason : 'keeps failing';
+      return s.failingSince ? `${s.name} ${reason} since ${timeOf(s.failingSince)}` : `${s.name} ${reason}`;
+    });
+}
+
+/** The header's health lines as HTML, one `<span>` each; empty when nothing is failing. */
+export function renderHealth(answer, timeOf) {
+  return healthLines(answer, timeOf).map((line) => `<span>${escapeHtml(line)}</span>`).join('');
+}
+
+/**
  * The pod button's accessible name (SP-173): "Pipeline Status: Relay 10:45,
  * Build running, Review –, Intake 11:04", so a screen reader names the button
  * for what it opens and still reads each stage. A missing or malformed answer

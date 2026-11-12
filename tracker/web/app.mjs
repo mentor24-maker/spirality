@@ -26,7 +26,7 @@
  * an emailed link's own page. The link's token is sent only in a JSON body,
  * never in an address.
  */
-import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, unwrapDoc, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, lookupTicket, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, lowerMeridiem, pipelinePodLabel, renderCommandList, renderCommandView, renderCommandDetails, renderContextDocs, renderSortHeadings, renderListPriority, sortTickets, nextSort, renderDocumentation, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine } from './render.mjs';
+import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, unwrapDoc, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, lookupTicket, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, pipelinePodLabel, renderHealth, healthLines, renderCommandList, renderCommandView, renderCommandDetails, renderContextDocs, renderSortHeadings, renderListPriority, sortTickets, nextSort, renderDocumentation, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, lowerMeridiem } from './render.mjs';
 
 /** Where an earlier version of the page kept a pasted token; removed on load, never read. */
 const OLD_TOKEN_KEY = 'tracker-token';
@@ -44,6 +44,7 @@ const headerProject = document.getElementById('project');
 const signOut = document.getElementById('sign-out');
 const bell = document.getElementById('bell');
 const busCount = document.getElementById('bus');
+const health = document.getElementById('health');
 const siteNav = document.querySelector('header nav.site');
 let me = null;
 
@@ -58,7 +59,7 @@ const REFRESH_EVERY_MS = 60_000;
  * is watching it. Only while the page says it follows (setupFollows).
  */
 const SETUP_REFRESH_EVERY_MS = 4_000;
-/** How often the Tasks page's Pipeline Status pod reads GET /pipeline again (SP-168). */
+/** How often GET /pipeline is read again: the Tasks page's pod (SP-168) and, on every page, the header's health lines (SP-218). */
 const PIPELINE_REFRESH_EVERY_MS = 60_000;
 /** The title the page itself asks for, and the last waiting count read (null: none yet). */
 let pageTitle = 'Tracker';
@@ -149,13 +150,23 @@ const clockTime = (iso) => lowerMeridiem(new Date(iso).toLocaleTimeString(undefi
 /** The last Pipeline Status answer read (GET /pipeline), or null before any or after a failed read. */
 let pipelineState = null;
 
+/** When a failing stage's failures began, in the page's own time: "9:00 PM" today, "Nov 10, 9:00 PM" before. */
+const sinceTime = (iso) => {
+  const d = new Date(iso);
+  return d.toDateString() === new Date().toDateString()
+    ? clockTime(iso)
+    : d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+};
+
 /**
- * Fill the Tasks page's Pipeline Status pod, when it is on the page (SP-168):
- * at once from the last answer, so a redraw never blanks it, then from a
- * fresh read. A failed read says so in the pod and touches nothing else.
+ * Read GET /pipeline again, on every page while signed in: it fills the
+ * header's health lines (SP-218) and, when it is on the page, the Tasks
+ * page's Pipeline Status pod (SP-168), at once from the last answer, so a
+ * redraw never blanks it, then from a fresh read. A failed read says so in
+ * the pod, shows no health line, and touches nothing else.
  */
 async function refreshPipeline() {
-  if (!me || !main.querySelector('.pipeline-pod')) return;
+  if (!me) return;
   showPipeline();
   try {
     pipelineState = await api('GET', '/pipeline', undefined, { unrecorded: true });
@@ -166,8 +177,16 @@ async function refreshPipeline() {
   showPipeline(true);
 }
 
+/** The header's health lines from the last answer: one per failing stage, hidden when none is (or signed out). */
+function showHealth() {
+  const lines = me ? healthLines(pipelineState, sinceTime) : [];
+  health.hidden = !lines.length;
+  health.innerHTML = lines.length ? renderHealth(pipelineState, sinceTime) : '';
+}
+
 /** Draw the pod from the last answer; before the first read, it waits quietly. The dialog, when open, redraws with it. */
 function showPipeline(read = false) {
+  showHealth();
   const pod = main.querySelector('.pipeline-pod');
   if (!pod || (!pipelineState && !read)) return;
   pod.innerHTML = renderPipelinePod(pipelineState, clockTime, Date.now());
@@ -335,6 +354,7 @@ async function drawSetPassword() {
   signOut.hidden = true;
   bell.hidden = true;
   busCount.hidden = true;
+  health.hidden = true;
   siteNav.hidden = true;
   setTitle('Set Your Password · Tracker');
   const link = new URLSearchParams(location.search).get('link') ?? '';
@@ -397,6 +417,7 @@ function signedOutHeader(title) {
   signOut.hidden = true;
   bell.hidden = true;
   busCount.hidden = true;
+  health.hidden = true;
   siteNav.hidden = true;
   setTitle(title);
 }
@@ -1188,8 +1209,9 @@ function wireSortHeadings(stages) {
  *
  * Above the stages sits the Add Task box (wireAddTask), closed unless
  * `adding` asks for it open or a kept draft has text in it. `filed` is the
- * id of the ticket the box just filed, named in a note after the redraw;
- * `unchecked` adds that the project check could not run. The question box
+ * id of the ticket the box just filed, named after the redraw in a pod
+ * that fades (filedPod); `unchecked` and `notUploaded` are warnings, kept
+ * as a lasting line under the toolbar. The question box
  * (the Add Task box's "Did you mean ...?") is drawn here, closed.
  *
  * In the List view each row's priority is a dropdown that saves on change
@@ -1263,14 +1285,14 @@ async function drawProject(slug, view, { adding = false, filed = null, unchecked
   const live = liveColumn && { ...liveColumn, tickets: liveColumn.tickets.slice().sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0)) };
 
   main.innerHTML = `
-    <h1>Tasks</h1>
+    <div class="tasks-head"><h1>Tasks</h1>${filed ? filedPod(filed, uploaded) : ''}</div>
     <div class="toolbar">
       ${renderProjectPicker(projects, board.project)}
       ${searchForm('')}
       <button type="button" class="pipeline-pod" aria-haspopup="dialog" title="Open Pipeline Status"></button>
       <nav class="views" aria-label="View">${toggle}</nav>
     </div>
-    ${filed ? `<p class="filed-note">Filed <a href="/t/${encodeURIComponent(filed)}">${escapeHtml(filed)}</a>${unchecked ? `. ${UNCHECKED_NOTE}` : ''}${filesNote(uploaded, notUploaded)}</p>` : ''}
+    ${filed && (unchecked || notUploaded.length) ? `<p class="filed-note">${unchecked ? UNCHECKED_NOTE : ''}${notUploadedNote(notUploaded)}</p>` : ''}
     <details class="add-task">
       <summary>Add Task</summary>
       <form class="request">
@@ -1318,6 +1340,7 @@ async function drawProject(slug, view, { adding = false, filed = null, unchecked
   wireSortHeadings(view === 'board' ? (live ? [live] : []) : board.columns);
   wireSearch();
   wireAddTask(board.project, view, adding);
+  wireFiledPod();
   wirePipeline();
   refreshPipeline();
   // Picking a project opens it in this same view, as a link would: Back returns here.
@@ -1879,20 +1902,37 @@ function wireEditPanel(t) {
 }
 
 /**
- * The filed note's words about the files picked: which went up, and which
- * did not, each by name with why. Nothing when no file was picked.
+ * The "Filed SP-n" pod (SP-223): the new ticket's id, linked, and the names
+ * of any files that went up with it. It floats centred on the Tasks
+ * heading's row, out of the page flow, so nothing moves; the stylesheet
+ * holds it 3 seconds and fades it over the next 1, and wireFiledPod takes
+ * it off the page once it has faded.
  */
-function filesNote(uploaded, notUploaded) {
-  const names = (list) => list.map((n) => `<strong>${escapeHtml(n)}</strong>`).join(', ');
-  let words = '';
-  if (uploaded.length) words += `. Uploaded ${names(uploaded)}`;
-  if (notUploaded.length) {
-    words += `. <span class="error">Not uploaded: ${notUploaded.map((f) => `<strong>${escapeHtml(f.name)}</strong> (${escapeHtml(f.why)})`).join(', ')}. The ticket is filed without ${notUploaded.length === 1 ? 'it' : 'them'}.</span>`;
-  }
-  return words;
+function filedPod(filed, uploaded) {
+  const names = uploaded.map((n) => `<strong>${escapeHtml(n)}</strong>`).join(', ');
+  return `<output class="filed-pod">Filed <a href="/t/${encodeURIComponent(filed)}">${escapeHtml(filed)}</a>${uploaded.length ? `. Uploaded ${names}` : ''}</output>`;
 }
 
-/** The filed note's words when the Add Task box's project check could not run. */
+/** How long the filed pod stays on the page: 3 seconds shown, 1 fading. */
+const FILED_POD_MS = 4000;
+
+/** Take the filed pod off the page once it has faded, so it catches no clicks. */
+function wireFiledPod() {
+  const pod = main.querySelector('.filed-pod');
+  if (pod) setTimeout(() => pod.remove(), FILED_POD_MS);
+}
+
+/**
+ * The lasting line's words about files that did not go up, each by name with
+ * why. A warning stays under the toolbar rather than in the fading pod, so it
+ * cannot vanish before it is read. Nothing when every file went up.
+ */
+function notUploadedNote(notUploaded) {
+  if (!notUploaded.length) return '';
+  return ` <span class="error">Not uploaded: ${notUploaded.map((f) => `<strong>${escapeHtml(f.name)}</strong> (${escapeHtml(f.why)})`).join(', ')}. The ticket is filed without ${notUploaded.length === 1 ? 'it' : 'them'}.</span>`;
+}
+
+/** The lasting line's words when the Add Task box's project check could not run. */
 const UNCHECKED_NOTE = 'The project check could not run, so it went into the project shown.';
 
 /** The draft kept for the Add Task box, or empty fields. */
@@ -2048,7 +2088,9 @@ function spanOf(ms) {
  * selected project or for all of them, and how the finished ones flowed:
  * time to finish, how many were sent back, and time waiting on the
  * operator, and the human hours of work the finished ones add up to, by the
- * build loop's estimates. Every figure is worked out by the
+ * build loop's estimates, and where every task's time went (Where the Time
+ * Goes: working, waiting for a lane, waiting on the operator, broken), with
+ * the tasks that took the most time in the range picked. Every figure is worked out by the
  * server (pageData.mjs reportsOf); the page only draws them, so the ranges
  * and the stages come from its answer, never typed out here. A stage wears
  * its Settings colour as properties, never as markup.
@@ -2080,6 +2122,22 @@ async function drawReporting(chosen) {
     return `<td class="count">${h.finished ? `${Number(h.estimated)} of ${Number(h.finished)} estimated` : '<span class="quiet">none finished in this range</span>'}</td>`;
   }).join('')}</tr>`;
   const hoursOf = (n) => `${Number(n)} hour${Number(n) === 1 ? '' : 's'}`;
+  // Where the Time Goes (SP-220): the four buckets by range, then the tickets with the most time in one range.
+  const BUCKET_LABELS = [['working', 'Working'], ['lane', 'Waiting for a Lane'], ['operator', 'Waiting on You'], ['broken', 'Broken']];
+  const bucketSpan = (ms) => (Number(ms) > 0 ? spanOf(Number(ms)) : 'none');
+  const splitLine = (key, label) => `<tr><td class="name">${label}</td>${r.ranges.map((g) => {
+    const t = r.timeSplit[g.key];
+    if (!t.total) return '<td class="count"><span class="quiet">none in this range</span></td>';
+    const b = t.buckets[key];
+    return `<td class="count">${escapeHtml(bucketSpan(b.ms))} (${Math.round(Number(b.share) * 100)}%)</td>`;
+  }).join('')}</tr>`;
+  const splitTable = BUCKET_LABELS.map(([key, label]) => splitLine(key, label)).join('');
+  const splitTickets = (rangeKey) => {
+    const t = r.timeSplit[rangeKey];
+    if (!t || !t.tickets.length) return '<p class="quiet">No task was open in this range.</p>';
+    const rows = t.tickets.map((x) => `<tr><td><a href="/t/${encodeURIComponent(x.id)}">${escapeHtml(x.id)}</a></td><td class="name">${escapeHtml(x.name)}</td><td class="count">${escapeHtml(bucketSpan(x.total))}</td>${BUCKET_LABELS.map(([key]) => `<td class="count">${escapeHtml(bucketSpan(x[key]))}</td>`).join('')}</tr>`).join('');
+    return `<table class="counts report time-split-tickets"><thead><tr><th>Task</th><th>Name</th><th class="count">Total</th>${BUCKET_LABELS.map(([, label]) => `<th class="count">${label}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table>`;
+  };
   const open = r.open.map((s) => `<tr data-stage="${escapeHtml(s.status)}"><td class="status">${escapeHtml(s.status)}</td><td class="count">${Number(s.count)}</td></tr>`).join('');
   main.innerHTML = `
     <h1>Reporting</h1>
@@ -2105,6 +2163,14 @@ async function drawReporting(chosen) {
     'For tasks finished in that time: time spent in Needs your input or Ready to launch before going Live, added up and the middle (median) task.',
     flowLine('Total', (f) => span(f.waiting.total)) + flowLine('Middle (median)', (f) => span(f.waiting.median)))}
     <p class="waiting-now">Waiting on you right now: <strong>${Number(r.waitingNow)}</strong> task${Number(r.waitingNow) === 1 ? '' : 's'} in Needs your input or Ready to launch.</p>
+    <h2>Where the Time Goes</h2>
+    <p class="quiet">Every task's time in that range, open ones too, Live left out. Working: in Building. Waiting on You: in Needs your input or Ready to launch with your reply not yet the newest comment. Broken: from a loop's failure note on the task until its next move or your next comment. Waiting for a Lane: everything else, including all of In review, since nothing marks when a review starts. A loop that failed without writing on the task shows as waiting, not broken.</p>
+    <table class="counts report time-split"><thead>${head}</thead><tbody>${splitTable}</tbody></table>
+    <form class="report-scope time-split-range">
+      <label for="time-split-range">Tasks with the Most Time In</label>
+      <select id="time-split-range">${r.ranges.map((g, i) => `<option value="${escapeHtml(g.key)}"${i === 0 ? ' selected' : ''}>${escapeHtml(g.label)}</option>`).join('')}</select>
+    </form>
+    <div class="time-split-list">${splitTickets(r.ranges[0]?.key)}</div>
     <h2>Open Now</h2>
     <p class="quiet">Tasks in each stage that is not Live.</p>
     <table class="counts stages"><thead><tr><th>Stage</th><th class="count">Tasks</th></tr></thead><tbody>${open}</tbody></table>`;
@@ -2117,6 +2183,9 @@ async function drawReporting(chosen) {
     el.style.setProperty('--stage-tint', look.tint);
     el.style.setProperty('--stage-text', look.text);
   }
+  main.querySelector('#time-split-range').addEventListener('change', (e) => {
+    main.querySelector('.time-split-list').innerHTML = splitTickets(e.target.value);
+  });
   main.querySelector('#report-project').addEventListener('change', (e) => {
     drawReporting(e.target.value).catch((err) => (err instanceof SignedOut ? drawSignIn() : showError(err)));
   });
@@ -2771,6 +2840,9 @@ async function route({ place = null } = {}) {
     bell.hidden = false;
     siteNav.hidden = false;
     showProject();
+    // The health lines are on every page (SP-218): drawn from the last answer, read at once when there is none yet.
+    if (pipelineState) showHealth();
+    else refreshPipeline();
     const ticket = /^\/t\/([^/]+)$/.exec(location.pathname);
     const project = /^\/(board|list)(?:\/([^/]+))?$/.exec(location.pathname);
     const projects = location.pathname === '/projects';
@@ -2969,7 +3041,7 @@ try { localStorage.removeItem(OLD_TOKEN_KEY); } catch { /* nothing kept */ }
 // The count in the tab title stays current while the tab sits pinned in the
 // background; the page itself is read again only while it is in view.
 setInterval(beat, REFRESH_EVERY_MS);
-// The Pipeline Status pod on the Tasks page reads again once a minute (SP-168).
+// The header's health lines (SP-218) and the Tasks page's Pipeline Status pod (SP-168) read again once a minute.
 setInterval(refreshPipeline, PIPELINE_REFRESH_EVERY_MS);
 // A setup page under way reads again every few seconds; every other page waits for the beat.
 setInterval(() => {
