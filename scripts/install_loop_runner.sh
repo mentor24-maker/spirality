@@ -68,6 +68,7 @@ label_of() { echo "$PREFIX.$1"; }
 plist_of() { echo "$HOME/Library/LaunchAgents/$(label_of "$1").plist"; }
 log_of() { echo "$LOG_DIR/$SLUG-$1.log"; }
 lock_of() { echo "$LOG_DIR/$SLUG-$1.lock"; }
+wake_of() { echo "$LOG_DIR/$SLUG-$1.wake"; }
 
 status_one() {
   local job="$1" label plist lock log line
@@ -92,6 +93,11 @@ status_one() {
     else echo "lock:     STALE (pid ${pid:-unrecorded} is gone) — the next start clears it"; fi
   else
     echo "lock:     none"
+  fi
+  # A lane's wake file (SP-219): the runner ends its sleep on it within seconds,
+  # so one still here means the runner is mid-pass, or not running at all.
+  if [ "$job" != "$RELAY" ] && [ -e "$(wake_of "$job")" ]; then
+    echo "wake:     waiting at $(wake_of "$job") (sent $(date -r "$(wake_of "$job")" '+%Y-%m-%d %H:%M')) — the next pass starts as soon as this one ends"
   fi
   if [ -f "$log" ]; then
     echo "log:      $log (last modified $(date -r "$log" '+%Y-%m-%d %H:%M'))"
