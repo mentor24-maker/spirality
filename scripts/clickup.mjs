@@ -86,6 +86,7 @@ import stageCounts from '../lib/stageCounts.js';
 // A ticket's `Waits on:` line (task 86bctfun6): the claim leaves it alone
 // until every ticket it names is closed.
 import { waitsOn, waitsOnText, holdReasons } from '../lib/waitsOn.js';
+import waitingOnOperator from '../lib/waitingOnOperator.js';
 import { ticketLine } from '../lib/clickupTicketLink.js';
 // Telling in-flight tickets that main moved under them (task 86bctjffu).
 import {
@@ -369,6 +370,20 @@ function clock(ms) {
 function gh(args) {
   const out = spawnSync('gh', args, { encoding: 'utf8' });
   return { ok: out.status === 0, stdout: String(out.stdout || ''), stderr: String(out.stderr || '') };
+}
+
+/**
+ * A recorded PR's live state, as waitingVerdict reads it (SP-217): null for
+ * no PR recorded, else { number, state } with state OPEN, MERGED or CLOSED,
+ * or null when GitHub could not be read or the PR is in another repository.
+ * A failed read is null, never a guess.
+ */
+function livePrState(found, repo) {
+  if (!found) return null;
+  if (`${found.owner}/${found.repo}`.toLowerCase() !== String(repo).toLowerCase()) return { number: found.number, state: null };
+  const view = gh(['pr', 'view', String(found.number), '--repo', repo, '--json', 'state']);
+  if (!view.ok) return { number: found.number, state: null };
+  try { return { number: found.number, state: String(JSON.parse(view.stdout).state || '') || null }; } catch { return { number: found.number, state: null }; }
 }
 
 /**
@@ -1053,23 +1068,35 @@ if (cmd === 'whoami') {
   reportLimits();
 
 } else if (cmd === 'waiting') {
+  // The verdict is waitingOnOperator's, the same module the tracker page
+  // uses, so the door and the page cannot disagree (SP-217). This command
+  // only does the reads: the ticket, its comments and, in his two lanes, the
+  // recorded PR's live state on GitHub.
+  const { waitingVerdict, verdictLine, prLabel, exitCodeFor, sweepSummary, WAITING, CANNOT_TELL } = waitingOnOperator;
   const task = arg('task');
   const tasks = task ? [await readTask(task)] : (await fetchAllTasks(LOOP_QUEUE_LIST)).filter((t) => isOperatorStatus(t.status?.status));
-  let his = 0;
+  const verdicts = [];
   for (const t of tasks) {
     const comments = await readComments(t.id);
     const newest = newestFirst(comments)[0];
     const assigned = (t.assignees || []).some((a) => a.id === OPERATOR_ID);
     const status = t.status?.status ?? '?';
-    let verdict;
-    if (!isOperatorStatus(status)) verdict = `NOT HIS — status "${status}" is a machine status`;
-    else if (operatorSpokeLast(comments, OPERATOR_ID)) verdict = 'ANSWERED — his comment is the newest; a machine owes the next move';
-    else { verdict = `WAITING ON DANE — "${status}"${assigned ? '' : ' (but he is NOT assigned — fix the handoff)'}`; his += 1; }
+    // GitHub is asked only in his two lanes; a machine status settles it.
+    const recorded = findPullRequest(comments);
+    const pr = isOperatorStatus(status) ? livePrState(recorded, project.githubRepo) : null;
+    const prText = !isOperatorStatus(status) && recorded ? `PR #${recorded.number} not checked (machine status)` : prLabel(pr);
+    const result = waitingVerdict({ task: t, comments, pr }, { operatorId: OPERATOR_ID });
+    verdicts.push(result.verdict);
     const lastWord = newest ? `${isMachineComment(newest.comment_text) ? 'a loop' : (newest.user?.username ?? '?')} ${clock(newest.date)} MT` : '(no comments)';
-    console.log(`${t.id}\t${status}\tassigned: ${assigned ? 'Dane' : 'not Dane'}\tlast word: ${lastWord}\t${verdict}\t${t.name}`);
+    console.log(`${t.id}\t${status}\tassigned: ${assigned ? 'Dane' : 'not Dane'}\tlast word: ${lastWord}\t${prText}\t${verdictLine(result)}\t${t.name}`);
   }
-  console.error(`${his} ticket(s) actually waiting on Dane${task ? '' : ` in list ${LOOP_QUEUE_LIST}`}.`);
-  process.exit(his ? 3 : 0);
+  console.error(sweepSummary({
+    checked: tasks.length,
+    waiting: verdicts.filter((v) => v === WAITING).length,
+    cannotTell: verdicts.filter((v) => v === CANNOT_TELL).length,
+    lists: task ? [] : [`list ${LOOP_QUEUE_LIST}`],
+  }));
+  process.exit(exitCodeFor(verdicts));
 
 } else if (cmd === 'task') {
   const list = arg('list') || LOOP_QUEUE_LIST;

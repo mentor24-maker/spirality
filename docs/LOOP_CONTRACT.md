@@ -767,9 +767,10 @@ StarCaster stays on its own relay until SP-25 switches it over.
 ## "Is this waiting on Dane?" — the three verdicts
 
 No agent tells Dane something is waiting on him without running
-`npm run clickup -- waiting --task <id>` first. It decides from three live
-facts and nothing else: the status, whether Dane is assigned, and whether the
-newest comment is his (by the rule in "Who is talking").
+`npm run clickup -- waiting --task <id>` first. It decides from four live
+facts and nothing else: the status, whether Dane is assigned, whether the
+newest comment is his (by the rule in "Who is talking"), and, in his two
+statuses, the live state on GitHub of the ticket's recorded pull request.
 
 The checks run in this order, and the first that applies decides:
 
@@ -778,10 +779,17 @@ The checks run in this order, and the first that applies decides:
 | 1 | **CANNOT TELL** | 1 | The ticket could not be read, it has no readable status, or its assignees or its comments could not be read. A failed read decides before anything else, even if Dane's comment would have been newest. |
 | 2 | **NOT waiting on Dane** | 0 | His own comment is the newest word on it: a machine owes the next move, whatever the status says. |
 | 3 | **NOT waiting on Dane** | 0 | The status is a machine status. |
-| 4 | **WAITING ON DANE** | 3 | The status is one of his two, he is assigned, and the newest comment is not his. |
-| 5 | **CANNOT TELL** | 1 | It is in his status but not assigned to him (a half-finished handoff). |
+| 4 | **NOT waiting on Dane** | 0 | It is `Ready to launch` and its pull request is already merged or closed: a machine owes the move to Live (or the next move), not Dane. |
+| 5 | **WAITING ON DANE** | 3 | The status is one of his two, he is assigned, and the newest comment is not his. |
+| 6 | **CANNOT TELL** | 1 | It is in his status but not assigned to him (a half-finished handoff). |
 
 CANNOT TELL is never treated as either of the others.
+
+A pull request whose state GitHub did not give back is never counted as
+merged: the verdict is what it would have been without it, and the reason
+says the state could not be checked. In `Needs your input` the pull
+request's state is only reported, never decisive: a question there is still
+his to answer, even about a closed pull request.
 
 Run with no ticket, it checks every open ticket in two lists, the Loop
 Queue and StarCaster's Agent Response list, and says how many it checked
