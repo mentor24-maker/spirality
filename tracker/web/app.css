@@ -184,6 +184,10 @@ span.action.answer-in-icon { color: #2e7d32; }
 .quick { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; align-items: start; margin-bottom: 2rem; }
 .quick h1 { margin-top: 0; }
 .quick .needed { color: var(--red); font-weight: 700; white-space: pre-wrap; }
+.quick .ticket-name { margin: -0.5rem 0 1rem; font-size: 0.9em; }
+.quick .request-heading { font-size: 0.95rem; color: var(--quiet); font-weight: 600; margin: 1.25rem 0 0.35rem; }
+.quick .original-request { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; padding: 0.6rem 0.8rem; border-left: 3px solid var(--blue); background: var(--machine); }
+.quick .sliced-from { margin: 0.5rem 0 0; font-size: 0.9em; }
 .quick .act { min-width: 0; }
 .quick .commands { margin-bottom: 1.25rem; }
 .quick .command { display: flex; gap: 0.5rem; align-items: flex-start; margin-bottom: 0.5rem; }
