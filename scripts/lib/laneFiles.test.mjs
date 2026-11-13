@@ -37,13 +37,14 @@ test('every lane file a runner, the relay, the installer or a module names in th
   }
 });
 
-test('the runners name the files Dane sees in --status: log, lock, wake, sync lock and snapshot', () => {
+test('the runners name the files Dane sees in --status: log, lock, wake, sync lock and snapshot, and the relay\'s tick files', () => {
   const runner = laneFileNames(readFileSync(join(REPO, 'scripts/loop_runner.sh'), 'utf8'), { lang: 'sh' }).map((f) => f.name);
   for (const want of ['$SLUG-$SKILL.log', '$SLUG-$SKILL.lock', '$SLUG-$SKILL.wake', '$SLUG-sync.lock', '$SLUG-$SKILL.timeout-snapshot']) {
     assert.ok(runner.includes(want), `loop_runner.sh no longer names ${want}`);
   }
   const relay = laneFileNames(readFileSync(join(REPO, 'scripts/run_relay.sh'), 'utf8'), { lang: 'sh' }).map((f) => f.name);
-  assert.deepEqual(relay.sort(), ['$SLUG-relay.lock', '$SLUG-sync.lock']);
+  // The tick's start time, kept wake time and wake file (SP-236), beside the lock.
+  assert.deepEqual(relay.sort(), ['$SLUG-relay.interval', '$SLUG-relay.last-start', '$SLUG-relay.lock', '$SLUG-relay.wake', '$SLUG-sync.lock']);
 });
 
 test('a file without the project\'s name is refused', () => {

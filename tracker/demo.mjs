@@ -24,7 +24,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openStore } from './store.mjs';
 import { CLOSE_PHRASE, GO_PHRASE, startServer } from './server.mjs';
-import { demoPrState, seedDemo, tickingClock, writeDemoLogs } from './demoData.mjs';
+import { DEMO_OWN_PROJECT, demoNewestRelease, demoPrState, seedDemo, tickingClock, writeDemoLogs } from './demoData.mjs';
 import { setPasswordUrl } from './account.mjs';
 import { loadProjectConfig } from '../lib/projectConfig.mjs';
 
@@ -54,13 +54,16 @@ const port = Number(process.env.TRACKER_PORT ?? 0);
 let mergePhrase = null;
 try { mergePhrase = loadProjectConfig().mergePhrases[0] ?? null; } catch (err) { console.log(`no Merge button: the project config is not usable (${err.message}).`); }
 const accountMail = { send: printEmail, pageUrl: null, projectName: 'Demo' };
-// The Pipeline Status pod reads scratch logs in the demo's own folder, never the Mini's real ones.
-// They are project Alpha's, as the real tracker reads its own project's, so
-// Alpha's pause switches on the Settings page show in the pod (SP-237).
+// The Pipeline Status pod reads scratch logs in the demo's own folder, never
+// the Mini's real ones, written as Alpha's, so the Settings page shows what
+// Alpha's lanes last used beside each wake time (SP-236) and Alpha's pause
+// switches show in the pod (SP-237).
 writeDemoLogs(dir, 'alpha');
 const pipeline = { logDir: dir, slug: 'alpha' };
 // The pull requests' state on GitHub is a stand-in (SP-226): the demo never calls GitHub.
-const server = await startServer({ store, port, log: (line) => console.log(line), mergePhrase, closePhrase: CLOSE_PHRASE, goPhrase: GO_PHRASE, accountMail, pipeline, readPrState: demoPrState });
+const server = await startServer({ store, port, log: (line) => console.log(line), mergePhrase, closePhrase: CLOSE_PHRASE, goPhrase: GO_PHRASE, accountMail, pipeline, readPrState: demoPrState,
+  // The Settings page's Spirality Release group: Alpha stands in for Spirality's own project, and the newest release is a stand-in too (SP-275).
+  ownProject: DEMO_OWN_PROJECT, newestRelease: demoNewestRelease });
 accountMail.pageUrl = `http://127.0.0.1:${server.address().port}`;
 
 console.log(`\nDemo tracker (test data only) at http://127.0.0.1:${server.address().port}/`);

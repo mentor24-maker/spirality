@@ -34,7 +34,7 @@ function scratch({ text, exit }) {
   mkdirSync(join(repo, 'scripts', 'lib'), { recursive: true });
   mkdirSync(join(dir, 'bin'));
   for (const f of ['loop_runner.sh', 'run_relay.sh', 'run_with_time_limit.sh']) copyFileSync(join(SCRIPTS, f), join(repo, 'scripts', f));
-  for (const f of ['back_to_main.sh', 'tracker_restart.sh']) copyFileSync(join(SCRIPTS, 'lib', f), join(repo, 'scripts', 'lib', f));
+  for (const f of ['back_to_main.sh', 'tracker_restart.sh', 'relay_app_checks.sh']) copyFileSync(join(SCRIPTS, 'lib', f), join(repo, 'scripts', 'lib', f));
   writeFileSync(join(repo, 'scripts', 'project_config.mjs'),
     `const v = { projectSlug: 'proj', logDir: ${JSON.stringify(logs)}, launchdPrefix: 'com.example', trackerPort: '' };\n`
     + 'console.log(v[process.argv[2]] ?? "");\n');

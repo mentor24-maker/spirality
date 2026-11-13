@@ -6,9 +6,9 @@ import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
-import { seedDemo, tickingClock } from './demoData.mjs';
+import { DEMO_NEWEST_RELEASE, DEMO_OWN_PROJECT, demoNewestRelease, seedDemo, tickingClock } from './demoData.mjs';
 import { reportsOf, REPORT_RANGES, searchTickets, PRIORITIES, timeSplitOf, isFailureNote, TIME_BUCKETS } from './pageData.mjs';
-import { escapeHtml, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, controlValueText, mountainTime, drainLine } from './web/render.mjs';
+import { escapeHtml, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, renderReleaseGroup, controlValueText, mountainTime, wakeInEffectText, renderConsole, renderConsoleTile, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, drainLine } from './web/render.mjs';
 import { startServer, setupSettingsOf } from './server.mjs';
 import { saveAnswers, setupFields, setupOf } from './setup.mjs';
 import { DANE_FIELDS as SETUP_FIELDS, STEPS as SETUP_STEPS } from '../scripts/onboard/onboard.mjs';
@@ -544,7 +544,8 @@ test('the list and the board draw one object: the toggle keeps the project and o
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   // One fetch serves both views, so they cannot disagree about what is where.
   assert.equal(app.match(/\/board`\)[;,]/g)?.length, 1);
-  assert.match(app, /\['board', 'list'\]\.map\(\(v\) => `<a href="\$\{at\(v, board\.project\)\}"/);
+  assert.match(app, /\$\{viewSwitch\(board\.project, view\)\}/);
+  assert.match(/function viewSwitch\(slug, current\) \{([\s\S]*?)\n\}/.exec(app)[1], /\['board', 'Board', `\/board\/\$\{encodeURIComponent\(slug\)\}`\], \['list', 'List', `\/list\/\$\{encodeURIComponent\(slug\)\}`\]/);
 });
 
 test('each ticket on the board carries its assignee\'s name and its last change, for the list', async () => {
@@ -835,10 +836,10 @@ test('the ticket page offers every other project to copy into, opens the copy, a
 
 // ── The page itself ──────────────────────────────────────────────────────────
 
-test('the page is served at /, at a ticket\'s address, at Projects, at Tasks, at the board, at the list and at the old New request address without a token, locked to its own scripts', async () => {
+test('the page is served at /, at a ticket\'s address, at Projects, at Tasks, at the board, at the list, at the Console and at the old New request address without a token, locked to its own scripts', async () => {
   const f = await fixture();
   try {
-    for (const path of ['/', '/t/AL-1', '/tasks', '/board', '/board/alpha', '/list', '/list/alpha', '/new']) {
+    for (const path of ['/', '/t/AL-1', '/tasks', '/board', '/board/alpha', '/list', '/list/alpha', '/console', '/new']) {
       const r = await f.call('GET', path, { token: null });
       assert.equal(r.status, 200);
       assert.match(r.headers.get('content-type'), /^text\/html/);
@@ -912,6 +913,63 @@ test('the Settings page is in the header after Reporting and Users, lists the st
   } finally { await f.cleanup(); }
 });
 
+test('the Settings page\'s Spirality Release group: the release, when and by whom, the one before, Move to Newest and Roll Back for the operator; Spirality\'s own and a project with none named say so (SP-275)', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tracker-web-release-'));
+  const clock = tickingClock();
+  const store = openStore(join(dir, 'tracker.db'), { now: clock });
+  const seed = seedDemo(store, { operatorName: 'Dane', clock });
+  // As the demo serves it: Alpha stands in for Spirality's own, the newest is a stand-in.
+  const server = await startServer({ store, port: 0, ownProject: DEMO_OWN_PROJECT, newestRelease: demoNewestRelease });
+  const url = `http://127.0.0.1:${server.address().port}`;
+  const get = async (path) => (await fetch(`${url}${path}`, { headers: { authorization: `Bearer ${seed.token}` } })).json();
+  try {
+    const { projects } = await get('/pipeline-controls');
+    const beta = projects.find((p) => p.project.slug === 'beta');
+    const html = renderPipelineControls(beta);
+    assert.match(html, /<h4>Spirality Release<\/h4>/);
+    assert.ok(html.indexOf('Spirality Release') < html.indexOf('Change Log'), 'above the change log');
+    assert.match(html, /Runs <strong>release-2<\/strong>, named [^<]+M[SD]T by Dane\./);
+    assert.match(html, /Before that: <strong>release-1<\/strong>, named [^<]+ by Loop \(build\)\./);
+    assert.match(html, new RegExp(`The newest release is <strong>${DEMO_NEWEST_RELEASE}</strong>\\.`));
+    assert.match(html, /<button type="button" data-release-action="newest">Move to Newest<\/button>/);
+    assert.match(html, /<button type="button" data-release-action="back">Roll Back to release-1<\/button>/);
+    assert.match(html, /Named, but the lanes do not run from it yet \(SP-276\)\./);
+
+    const alpha = projects.find((p) => p.project.slug === 'alpha');
+    const own = renderPipelineControls(alpha);
+    assert.match(own, /Always the newest release: Spirality&#39;s own lanes meet every change first\./);
+    assert.doesNotMatch(own, /data-release-action/);
+
+    // Another reader sees the release, never the buttons.
+    assert.doesNotMatch(renderReleaseGroup({ ...beta.release, canChange: false }), /<button/);
+    // None named yet: the line, and only Move to Newest.
+    const none = renderReleaseGroup({ ...beta.release, current: null, previous: null, rollBackTo: null });
+    assert.match(none, /No release named yet\./);
+    assert.match(none, /Move to Newest/);
+    assert.doesNotMatch(none, /Roll Back/);
+    // Already on the newest: Move to Newest is greyed and says why; nowhere back says so.
+    const upToDate = renderReleaseGroup({ ...beta.release, current: { ...beta.release.current, release: DEMO_NEWEST_RELEASE }, rollBackTo: null });
+    assert.match(upToDate, /data-release-action="newest" disabled>Move to Newest/);
+    assert.match(upToDate, /It runs the newest release\./);
+    assert.match(upToDate, /No earlier release to roll back to\./);
+    // The newest unreadable: said, and Move to Newest greyed.
+    const blind = renderReleaseGroup({ ...beta.release, newest: null, newestProblem: 'git ls-remote failed: offline' });
+    assert.match(blind, /The newest release could not be read: git ls-remote failed: offline/);
+    assert.match(blind, /data-release-action="newest" disabled/);
+    // A button's outcome shows beside the buttons.
+    assert.match(renderReleaseGroup(beta.release, { ok: false, text: 'Not saved: no' }), /<span class="note error">Not saved: no<\/span>/);
+
+    // Roll Back on the demo: release-2 back to release-1.
+    const back = await fetch(`${url}/releases/beta/back`, { method: 'POST', headers: { authorization: `Bearer ${seed.token}`, 'content-type': 'application/json' }, body: '{}' });
+    assert.equal(back.status, 200);
+    assert.equal((await get('/pipeline-controls/beta')).release.current.release, 'release-1');
+  } finally {
+    await new Promise((r) => server.close(r));
+    store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('Pipeline Controls on the Settings page: each control with its value, "default" while it has it, the not-yet line naming its slice, and the change log in Mountain time (SP-224)', async () => {
   const f = await fixture();
   try {
@@ -923,7 +981,10 @@ test('Pipeline Controls on the Settings page: each control with its value, "defa
     const html = renderPipelineControls(alpha);
     assert.match(html, /<h3>Alpha<\/h3>/);
     for (const title of ['Wake Times', 'Pause and Resume', 'Work-in-Progress Cap', 'Model per Lane', 'Change Log']) assert.match(html, new RegExp(`<h4>${title}</h4>`));
-    for (const slice of ['SP-236', 'SP-238', 'SP-239']) assert.match(html, new RegExp(`Saved, but the lanes do not use this yet \\(${slice}\\)\\.`));
+    for (const slice of ['SP-238', 'SP-239']) assert.match(html, new RegExp(`Saved, but the lanes do not use this yet \\(${slice}\\)\\.`));
+    // The lanes use the wake times (SP-236): no not-yet line, and each says what its lane last used.
+    assert.doesNotMatch(html, /SP-236/);
+    assert.match(html, /1,800 seconds \(Every 30 minutes\)<span class="in-effect">Last used: not known on this machine yet\.<\/span>/);
     // The pause switches are wired in (SP-237): no not-yet line, and no drain line while nothing is paused.
     assert.doesNotMatch(html, /\(SP-237\)/);
     assert.doesNotMatch(html, /Draining|Paused: nothing in flight/);
@@ -948,6 +1009,22 @@ test('Pipeline Controls on the Settings page: each control with its value, "defa
     const saved = await f.call('PUT', '/pipeline-controls/alpha', { body: { setting: 'wake.loop-build', value: '900' } });
     assert.equal(saved.status, 200, saved.text);
     assert.match(renderPipelineControls(saved.body), /<td>Dane<\/td><td>loop-build wake time<\/td><td>1800<\/td><td>900<\/td>/);
+  } finally { await f.cleanup(); }
+});
+
+test('each wake time on the Settings page says what its lane last used, and says plainly while the lane has not picked up the set value (SP-236)', async () => {
+  const f = await fixture();
+  try {
+    const alpha = (await f.call('GET', '/pipeline-controls')).body.projects.find((p) => p.project.slug === 'alpha');
+    const withUsed = (key, used) => ({ ...alpha, controls: alpha.controls.map((c) => (c.key === key ? { ...c, value: '600', isDefault: false, used, inEffect: used == null ? null : String(used) === '600' } : c)) });
+    const waiting = renderPipelineControls(withUsed('wake.loop-build', 1800));
+    assert.match(waiting, /600 seconds \(Every 10 minutes\)<span class="in-effect waiting">Last used: 1,800 seconds\. Waiting for the lane&#39;s next pass to pick this up\.<\/span>/);
+    const taken = renderPipelineControls(withUsed('wake.loop-build', 600));
+    assert.match(taken, /<span class="in-effect">In effect: the lane last used 600 seconds\.<\/span>/);
+    assert.doesNotMatch(taken, /Waiting for the lane/);
+    assert.equal(wakeInEffectText({ used: null, inEffect: null }), 'Last used: not known on this machine yet.');
+    // Only the wake times say it.
+    assert.equal((taken.match(/class="in-effect/g) || []).length, 4);
   } finally { await f.cleanup(); }
 });
 
@@ -2468,6 +2545,17 @@ test('Reporting is in the header after Tasks, served at /reporting, and its figu
   } finally { await f.cleanup(); }
 });
 
+test('Reporting: the first table is Task Productivity, Tasks started above Tasks finished, and its note names Started first (SP-230)', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const fn = app.slice(app.indexOf('async function drawReporting('));
+  const page = fn.slice(fn.indexOf('<h1>Reporting</h1>'));
+  const firstHeading = page.match(/<h2>([^<]*)<\/h2>/);
+  assert.equal(firstHeading[1], 'Task Productivity');
+  assert.doesNotMatch(app, /Tasks Finished and Started/);
+  assert.match(page, /<p class="quiet">Started: filed in that time\. Finished: moved to Live in that time and still Live\.<\/p>/);
+  assert.match(page, /<tbody>\$\{line\('Tasks started', r\.started\)\}\$\{line\('Tasks finished', r\.finished\)\}<\/tbody>/);
+});
+
 /** True when `ms` is within ten minutes of `days` days: the test clock ticks a minute per reading. */
 const near = (ms, days) => ms != null && Math.abs(ms - days * DAY) < 10 * 60_000;
 
@@ -3206,7 +3294,7 @@ test('the Tasks toolbar picks a project from a dropdown, "Project: ", the one in
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   const draw = app.slice(app.indexOf('async function drawProject'), app.indexOf('async function copyText'));
   assert.match(draw, /api\('GET', '\/projects'\),\n  \]\);/);
-  assert.match(draw, /<div class="toolbar">\s*\$\{renderProjectPicker\(projects, board\.project\)\}\s*\$\{searchForm\(''\)\}\s*<button type="button" class="pipeline-pod"[^>]*><\/button>\s*<nav class="views"/);
+  assert.match(draw, /<div class="toolbar">\s*\$\{renderProjectPicker\(projects, board\.project\)\}\s*\$\{searchForm\(''\)\}\s*<button type="button" class="pipeline-pod"[^>]*><\/button>\s*\$\{viewSwitch\(board\.project, view\)\}/);
   assert.doesNotMatch(app, /Change project/);
   assert.match(draw, /querySelector\('\.project-picker select'\)\.addEventListener\('change', \(e\) => \{\s*history\.pushState\(null, '', at\(view, e\.target\.value\)\);\s*route\(\);/);
   assert.match(readFileSync(WEB('app.css'), 'utf8'), /\.toolbar \.project-picker select \{/);
@@ -3746,11 +3834,11 @@ test('the pod restyled (SP-222): a larger heading, #cceeff with a #000077 border
 
 test('the Tasks page puts the pod between the search field and Board/List, fills it on draw and once a minute, and a failed read touches only the pod (SP-168)', () => {
   const app = readFileSync(WEB('app.mjs'), 'utf8');
-  const tasks = app.indexOf('<h1>Tasks</h1>');
-  const toolbar = app.slice(app.indexOf('<div class="toolbar">', tasks), app.indexOf('</nav>', tasks));
+  const tasks = app.indexOf('<h1>Tasks</h1>', app.indexOf('async function drawProject('));
+  const toolbar = app.slice(app.indexOf('<div class="toolbar">', tasks), app.indexOf('</div>', app.indexOf('<div class="toolbar">', tasks)));
   const search = toolbar.indexOf("${searchForm('')}");
   const pod = toolbar.indexOf('class="pipeline-pod"');
-  const views = toolbar.indexOf('<nav class="views"');
+  const views = toolbar.indexOf('${viewSwitch(board.project, view)}');
   assert.ok(search !== -1 && search < pod && pod < views, 'search field, then the pod, then the Board/List toggle');
   const draw = app.slice(app.indexOf('async function drawProject('), app.indexOf('async function drawProject(') + 12000);
   assert.match(draw, /refreshPipeline\(\);/);
@@ -4313,4 +4401,148 @@ test('GET /pipeline marks the stages paused from the project\'s controls (SP-237
     store.close();
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// ── The Console view (SP-233) ────────────────────────────────────────────────
+
+const CONSOLE_NOW = Date.parse('2026-11-12T18:00:00.000Z');
+const consoleTicket = (over = {}) => ({
+  id: 'AL-7', project: 'alpha', name: 'Fix the thing', status: 'Queued', tags: [], priority: null, assignee: null,
+  updatedAt: '2026-11-12T15:00:00.000Z', stageSince: '2026-11-12T15:00:00.000Z',
+  waitingOnOperator: false, answerIn: false, pullRequest: null,
+  nextChange: { kind: 'lane', lane: 'Build', job: 'loop-build', running: false, due: '2026-11-12T18:12:00.000Z' },
+  ...over,
+});
+const ALPHA = { slug: 'alpha', name: 'Alpha', prefix: 'AL', logo: 'https://alpha.example/logo.png' };
+const BETA = { slug: 'beta', name: 'Beta', prefix: 'BE', logo: null };
+
+test('a Console tile for a project with a logo: the logo, the number over it, stage, next change and time in stage, a link to the ticket', () => {
+  const html = renderConsoleTile(consoleTicket(), ALPHA, CONSOLE_NOW);
+  assert.match(html, /^<a class="tile" href="\/t\/AL-7" title="AL-7: Fix the thing"/);
+  assert.match(html, /<img class="tile-logo" src="https:\/\/alpha\.example\/logo\.png" alt="" referrerpolicy="no-referrer">/);
+  assert.doesNotMatch(html, /tile-prefix/);
+  assert.match(html, /<span class="tile-number">AL-7<\/span>/);
+  assert.match(html, /<span class="fact stage" data-stage="Queued">Queued<\/span>/);
+  assert.match(html, /<span class="fact next" title="Build&#39;s next pass is due Nov 12, 2026, 11:12 AM MST">in 12 min<\/span>/);
+  assert.match(html, /<span class="fact age" title="In Queued for 3h">3h<\/span>/);
+});
+
+test('a Console tile for a project with no logo shows its ticket prefix in large letters; a logo that is not a web address is not drawn', () => {
+  const html = renderConsoleTile(consoleTicket({ id: 'BE-2', project: 'beta' }), BETA, CONSOLE_NOW);
+  assert.match(html, /<span class="tile-prefix" aria-hidden="true">BE<\/span>/);
+  assert.doesNotMatch(html, /<img/);
+  const odd = renderConsoleTile(consoleTicket(), { ...ALPHA, logo: 'javascript:alert(1)' }, CONSOLE_NOW);
+  assert.doesNotMatch(odd, /<img|javascript:/);
+  assert.match(odd, /<span class="tile-prefix" aria-hidden="true">AL<\/span>/);
+  // No project in the answer: the prefix is read off the ticket number.
+  assert.match(renderConsoleTile(consoleTicket({ id: 'ZZ-1' }), null, CONSOLE_NOW), /<span class="tile-prefix" aria-hidden="true">ZZ<\/span>/);
+});
+
+test('a Console tile waiting on the operator is ringed, and its next change is "You"', () => {
+  const his = renderConsoleTile(consoleTicket({ status: 'Needs your input', waitingOnOperator: true, nextChange: { kind: 'operator' } }), ALPHA, CONSOLE_NOW);
+  assert.match(his, /^<a class="tile waiting"/);
+  assert.match(his, /<span class="fact next" title="Your move: no lane acts on it until you do">You<\/span>/);
+  assert.match(his, /waiting on you\.">/);
+  assert.equal(consoleWaiting(consoleTicket({ answerIn: true })), true, 'an answer of his that is in');
+  assert.equal(consoleWaiting(consoleTicket({ nextChange: { kind: 'operator' } })), true, 'one of his statuses');
+  assert.equal(consoleWaiting(consoleTicket()), false);
+  assert.match(renderConsoleTile(consoleTicket(), ALPHA, CONSOLE_NOW), /^<a class="tile" /);
+});
+
+test('a Console tile whose next change is unknown shows a dash; Building and a running lane show "Now"', () => {
+  for (const nextChange of [null, undefined, { kind: 'lane', due: null }, { kind: 'lane', due: 'not a time' }, { kind: 'odd' }]) {
+    assert.deepEqual(consoleNextChange(nextChange, CONSOLE_NOW), { text: CONSOLE_UNKNOWN, title: 'When the next pass picks it up is not known' });
+  }
+  assert.match(renderConsoleTile(consoleTicket({ nextChange: null }), ALPHA, CONSOLE_NOW), /<span class="fact next" title="When the next pass picks it up is not known">—<\/span>/);
+  assert.equal(consoleNextChange({ kind: 'running', lane: 'Build', job: 'loop-build' }, CONSOLE_NOW).text, 'Now');
+  assert.equal(consoleNextChange({ kind: 'lane', lane: 'Review', running: true, due: null }, CONSOLE_NOW).text, 'Now');
+  assert.equal(consoleNextChange({ kind: 'lane', lane: 'Review', running: false, due: '2026-11-12T17:59:00.000Z' }, CONSOLE_NOW).text, 'Now', 'a pass already due');
+  assert.equal(consoleNextChange({ kind: 'lane', lane: 'Review', running: false, due: '2026-11-12T20:10:00.000Z' }, CONSOLE_NOW).text, 'in 2 h');
+});
+
+test('a Console next change counts whole hours down the way it counts minutes, never rounding up', () => {
+  const at = (minutes) => consoleNextChange({ kind: 'lane', lane: 'Review', running: false, due: new Date(CONSOLE_NOW + minutes * 60_000).toISOString() }, CONSOLE_NOW).text;
+  assert.equal(at(59), 'in 59 min');
+  assert.equal(at(60), 'in 1 h');
+  assert.equal(at(89), 'in 1 h', 'not "in 1 h" at 89 and "in 2 h" at 90');
+  assert.equal(at(90), 'in 1 h');
+  assert.equal(at(119), 'in 1 h');
+  assert.equal(at(120), 'in 2 h');
+});
+
+test('time in stage reads short: minutes, hours under two days, then days; an unreadable time is a dash', () => {
+  assert.equal(consoleAge('2026-11-12T17:59:30.000Z', CONSOLE_NOW), '0m');
+  assert.equal(consoleAge('2026-11-12T17:15:00.000Z', CONSOLE_NOW), '45m');
+  assert.equal(consoleAge('2026-11-11T18:00:00.000Z', CONSOLE_NOW), '24h');
+  assert.equal(consoleAge('2026-11-09T18:00:00.000Z', CONSOLE_NOW), '3d');
+  assert.equal(consoleAge(null, CONSOLE_NOW), CONSOLE_UNKNOWN);
+});
+
+test('a Console tile escapes every piece of ticket and project text', () => {
+  const html = renderConsoleTile(consoleTicket({ id: 'AL-<b>', name: '<script>alert(1)</script> "x"', status: '<i>Queued</i>' }), { ...ALPHA, prefix: '<u>', logo: 'https://a.example/x.png?"><script>' }, CONSOLE_NOW);
+  assert.doesNotMatch(html, /<script>|<b>|<i>|<u>|"><script/);
+  assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt; &quot;x&quot;/);
+  assert.match(html, /href="\/t\/AL-%3Cb%3E"/);
+});
+
+test('the Console groups tiles by stage in the order given, shows an empty stage\'s heading, never draws Live, and never drops a ticket', () => {
+  const stages = ['Requested', 'Rework', 'Queued', 'Building', 'In review', 'Needs your input', 'Ready to launch', 'Live'];
+  const answer = {
+    projects: [ALPHA, BETA],
+    tickets: [
+      consoleTicket({ id: 'AL-1', status: 'Queued' }),
+      consoleTicket({ id: 'BE-1', project: 'beta', status: 'Needs your input', nextChange: { kind: 'operator' } }),
+      consoleTicket({ id: 'AL-2', status: 'Odd' }),
+    ],
+  };
+  const html = renderConsole(answer, stages, CONSOLE_NOW);
+  const order = [...html.matchAll(/<section class="console-stage" data-stage="([^"]+)">/g)].map((m) => m[1]);
+  assert.deepEqual(order, ['Requested', 'Rework', 'Queued', 'Building', 'In review', 'Needs your input', 'Ready to launch', 'Odd']);
+  assert.match(html, /data-stage="Requested"><h2><span class="stage-name">Requested<\/span><span class="count quiet">0<\/span><\/h2><div class="tiles"><\/div>/);
+  const queued = html.slice(html.indexOf('data-stage="Queued">'), html.indexOf('data-stage="Building">'));
+  assert.match(queued, /href="\/t\/AL-1"/);
+  assert.match(queued, /tile-logo/);
+  const his = html.slice(html.indexOf('<section class="console-stage" data-stage="Needs your input">'), html.indexOf('<section class="console-stage" data-stage="Ready to launch">'));
+  assert.match(his, /<a class="tile waiting" href="\/t\/BE-1"/);
+  assert.match(his, /tile-prefix" aria-hidden="true">BE</);
+  // No stage list (it could not be read): the tickets' own stages, in the answer's order.
+  const bare = renderConsole(answer, [], CONSOLE_NOW);
+  assert.deepEqual([...bare.matchAll(/<section class="console-stage" data-stage="([^"]+)">/g)].map((m) => m[1]), ['Queued', 'Needs your input', 'Odd']);
+  assert.equal(renderConsole(null, [], CONSOLE_NOW), '<div class="console"></div>');
+});
+
+test('the Console page: /in-flight and the stage colours drawn, a Console link beside Board and List, remembered for "Tasks", redrawn every beat', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const draw = /async function drawConsole\(\) \{([\s\S]*?)\n\}/.exec(app)[1];
+  assert.match(draw, /api\('GET', '\/in-flight'\)/);
+  assert.match(draw, /api\('GET', '\/stage-colours'\)/);
+  assert.match(draw, /localStorage\.setItem\(VIEW_KEY, 'console'\)/);
+  assert.match(draw, /renderConsole\(answer, stages\)/);
+  assert.match(draw, /viewSwitch\(slug, 'console'\)/);
+  // The view switch names all three in Title Case, the current one marked.
+  const sw = /function viewSwitch\(slug, current\) \{([\s\S]*?)\n\}/.exec(app)[1];
+  assert.match(sw, /\['board', 'Board', [^\]]+\], \['list', 'List', [^\]]+\], \['console', 'Console', '\/console'\]/);
+  assert.match(sw, /v === current \? ' class="current" aria-current="page"' : ''/);
+  assert.match(/async function drawProject\(([^)]*)\) \{([\s\S]*?)\n\}/.exec(app)[2], /\$\{viewSwitch\(board\.project, view\)\}/);
+  // "Tasks" in the header reopens the Console when it was chosen last.
+  assert.match(app, /await drawTasks\(tasks \? savedTasksView\(\) : project\[1\]\);/);
+  assert.match(/async function drawTasks\(view, opts = \{\}\) \{([\s\S]*?)\n\}/.exec(app)[1], /if \(view === 'console'\) \{\s*history\.replaceState\(null, '', '\/console'\);\s*return drawConsole\(\);/);
+  // The minute's beat draws it again whether or not the answer changed, so "in 12 min" counts down.
+  assert.match(app, /lastDrawn = \{ address: here\(\), reads, ticking: true \}/);
+  assert.match(app, /const changed = drawn\.ticking \|\|/);
+  // That beat does not read every answer first only to throw it away: one read of /in-flight a minute, not two.
+  const refresh = /async function refreshPage\(\) \{[\s\S]*?\n\}/.exec(app)[0];
+  assert.match(refresh, /const now = drawn\.ticking \? \[\] : await Promise\.all\(/);
+});
+
+test('the Console\'s minute redraw keeps how far across he has scrolled', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  assert.match(app, /const SIDEWAYS = '\.console';/);
+  const place = /function keepPlace\(\) \{[\s\S]*?\n\}/.exec(app)[0];
+  // Read before the redraw, put back on the new columns before the page is shown.
+  assert.match(place, /const across = \[\.\.\.main\.querySelectorAll\(SIDEWAYS\)\]\.map\(\(el\) => el\.scrollLeft\);/);
+  assert.match(place, /restore\(\) \{[\s\S]*\[\.\.\.main\.querySelectorAll\(SIDEWAYS\)\]\.forEach\(\(el, i\) => \{ if \(i < across\.length\) el\.scrollLeft = across\[i\]; \}\);[\s\S]*window\.scrollTo\(0, y\);/);
+  // The Console's columns are the area that scrolls sideways.
+  assert.match(renderConsole({ tickets: [], projects: [] }, ['Queued']), /^<div class="console">/);
+  assert.match(readFileSync(WEB('app.css'), 'utf8'), /\.console \{[^}]*overflow-x: auto/);
 });

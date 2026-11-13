@@ -46,6 +46,17 @@ const FINISHED_DAYS_AGO = Object.freeze([1, 3, 6, 12, 20, 27, 45]);
 /** The human-hours estimate on each of those tasks' pull requests; null is a task with none. */
 const FINISHED_HUMAN_HOURS = Object.freeze([6, 2.5, null, 12, 4, 8, null]);
 
+/** The demo's home project: the one that always runs main, as Spirality's own does (SP-275). */
+export const DEMO_OWN_PROJECT = 'alpha';
+
+/** The demo's newest release cut, a stand-in for reading the tags (SP-275): the demo never calls GitHub. */
+export const DEMO_NEWEST_RELEASE = 'release-3';
+
+/** The server's newestRelease for the demo: always DEMO_NEWEST_RELEASE. */
+export async function demoNewestRelease() {
+  return { newest: { name: DEMO_NEWEST_RELEASE, number: 3, commit: '0'.repeat(40) }, problem: null };
+}
+
 /**
  * Fill an empty store. Answers the actors (with the operator's token, for
  * signing in), and each ticket's id with what `waiting` would say about it:
@@ -184,6 +195,12 @@ export function seedDemo(store, { operatorName = substrateConfig.operatorName(),
   store.setPipelineSetting({ project: 'alpha', setting: 'wip-cap', value: '3', actor: op.id });
   store.setPipelineSetting({ project: 'alpha', setting: 'wip-cap', value: '5', actor: op.id });
 
+  // Two Spirality releases named for Beta (SP-275), so the Settings page's
+  // Spirality Release group shows one running and one before it, and Roll
+  // Back has somewhere to go. Alpha is the demo's home project (DEMO_OWN_PROJECT).
+  store.nameRelease({ project: 'beta', release: 'release-1', actor: loop.id, ownProject: DEMO_OWN_PROJECT });
+  store.nameRelease({ project: 'beta', release: 'release-2', actor: op.id, ownProject: DEMO_OWN_PROJECT });
+
   if (clock) {
     const start = clock.time();
     const HOUR = 60 * 60_000;
@@ -235,19 +252,20 @@ export const logClock = (d) => `${pad(d.getHours())}:${pad(d.getMinutes())}:${pa
 /**
  * Scratch loop logs for the demo's Pipeline Status pod (SP-168), in the
  * runners' own line shapes: the relay ran four minutes ago, Build is running
- * now, Review and Intake are sleeping until later. Written to `folder` as
- * `<slug>-<job>.log`, the names tracker/pipeline.mjs reads. Test data only.
+ * now (its pass before slept 1,800 seconds), Review and Intake are sleeping
+ * until later. Written to `folder` as `<slug>-<job>.log`, the names
+ * tracker/pipeline.mjs reads. Test data only.
  */
 export function writeDemoLogs(folder, slug, now = new Date()) {
   const ago = (min) => new Date(now.getTime() - min * 60_000);
   const lane = (job, start, end, seconds) => [
     `===== ${logDate(start)} START /${job} =====`,
     'A pass report, which the pod never shows.',
-    ...(end ? [`===== ${logDate(end)} END /${job} (exit 0 — not a verdict; the pass's report above is) =====`, `[loop-runner] ${logClock(end)} sleeping ${seconds}s before the next /${job}`] : []),
+    ...(end ? [`===== ${logDate(end)} END /${job} (exit 0 — not a verdict; the pass's report above is) =====`, `[loop-runner] ${logClock(end)} sleeping ${seconds}s before the next /${job} (a wake ends it early)`] : []),
   ].join('\n');
   const files = {
     relay: [`===== ${logDate(ago(4))} START relay — demo =====`, `===== ${logDate(ago(3.9))} END relay — pass complete (exit 0) =====`].join('\n'),
-    'loop-build': lane('loop-build', ago(2), null, 1800),
+    'loop-build': [lane('loop-build', ago(36), ago(32), 1800), lane('loop-build', ago(2), null, 1800)].join('\n'),
     'loop-review': lane('loop-review', ago(20), ago(17), 1800),
     'loop-intake': lane('loop-intake', ago(9), ago(8), 1800),
   };
