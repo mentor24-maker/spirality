@@ -196,7 +196,8 @@ const PERSON_STATUSES = Object.freeze(['requested', 'rework', 'queued', 'live']
  * Dane's page (tracker/web/): the only files served without a token, and the
  * only ones served at all, by name. The page holds no data; everything it
  * shows comes through the API below with his token. `/`, `/t/<id>`, `/board`,
- * `/board/<project>`, `/list`, `/list/<project>`, `/new` (the New request
+ * `/board/<project>`, `/list`, `/list/<project>`, `/console` (every
+ * ticket in flight), `/new` (the New request
  * form), `/settings` (the stage colours) and `/set-password` (an emailed
  * link's page, `?link=<token>`, which the page reads and never sends back
  * in an address) all answer the page itself, so each address opens its own view;
@@ -244,7 +245,7 @@ const PAGE_HEADERS = Object.freeze({
  */
 function pageFile(pathname, accept = '') {
   if (/^\/(?:projects(?:\/[^/]+)?|search|setup\/(?!fields$)[^/]+)$/.test(pathname)) return /\btext\/html\b/.test(accept) ? 'index.html' : null;
-  if (pathname === '/' || /^\/(?:tasks|board|list|new|settings|set-password|reporting|users|docs)$/.test(pathname) || /^\/(?:t|board|list)\/[^/]+$/.test(pathname)) return 'index.html';
+  if (pathname === '/' || /^\/(?:tasks|board|list|console|new|settings|set-password|reporting|users|docs)$/.test(pathname) || /^\/(?:t|board|list)\/[^/]+$/.test(pathname)) return 'index.html';
   if (/^\/projects\/[^/]+\/edit$/.test(pathname)) return 'index.html';
   // A page under the Docs page, such as one of the substrate's own
   // documentation files: the page itself draws what the rest names.

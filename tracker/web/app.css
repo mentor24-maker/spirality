@@ -389,3 +389,24 @@ table.spirality-docs th button.sort:hover { text-decoration: underline; }
 table.spirality-docs th button.sort:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
 table.spirality-docs th .arrow { font-size: 0.75em; }
 table.spirality-docs td.date { white-space: nowrap; }
+
+/* The Console view (SP-233): every ticket in flight as a tile, one column per stage. */
+.console { display: flex; gap: 0.75rem; align-items: flex-start; overflow-x: auto; padding-bottom: 1rem; }
+.console-stage { flex: 1 1 0; min-width: 9rem; background: #f5f5f7; border: var(--hairline); border-radius: 8px; padding: 0.5rem; }
+.console-stage h2 { font-size: 0.95rem; margin: 0 0 0.5rem; display: flex; align-items: baseline; gap: 0.5rem; }
+.console-stage h2 .count { margin-left: auto; }
+.console-stage.coloured { border-color: var(--stage-border); }
+.console-stage.coloured h2 { background: var(--stage-tint); color: var(--stage-text); margin: -0.5rem -0.5rem 0.5rem; padding: 0.5rem 0.75rem; border-radius: 7px 7px 0 0; }
+.console-stage.coloured h2 .quiet { color: var(--stage-text); }
+.tiles { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.tile { position: relative; display: flex; flex-direction: column; width: 8rem; height: 8rem; background: #fff; border: var(--hairline); border-radius: 10px; overflow: hidden; color: var(--ink); text-decoration: none; }
+.tile:hover, .tile:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
+.tile.waiting { box-shadow: 0 0 0 3px #e0a800; }
+.tile-picture { flex: 1; display: flex; align-items: center; justify-content: center; min-height: 0; }
+.tile-logo { max-width: 70%; max-height: 4.5rem; object-fit: contain; opacity: 0.45; }
+.tile-prefix { font-size: 3.4rem; font-weight: 800; letter-spacing: 0.05em; color: #ececf0; }
+.tile-number { position: absolute; top: 2.1rem; left: 0; right: 0; text-align: center; font-size: 1.2rem; font-weight: 700; text-shadow: 0 0 6px #fff, 0 0 3px #fff, 0 0 1px #fff; }
+.tile-facts { display: grid; grid-template-columns: 1fr auto auto; gap: 0.25rem; align-items: center; padding: 0.25rem 0.35rem; border-top: var(--hairline); font-size: 0.7rem; white-space: nowrap; }
+.tile-facts .stage { overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+.tile-facts .stage.coloured { color: var(--stage-text); }
+.tile-facts .age { color: var(--quiet); }

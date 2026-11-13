@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { seedDemo, tickingClock } from './demoData.mjs';
 import { reportsOf, REPORT_RANGES, searchTickets, PRIORITIES, timeSplitOf, isFailureNote, TIME_BUCKETS } from './pageData.mjs';
-import { escapeHtml, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, controlValueText, mountainTime } from './web/render.mjs';
+import { escapeHtml, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, controlValueText, mountainTime, renderConsole, renderConsoleTile, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN } from './web/render.mjs';
 import { startServer, setupSettingsOf } from './server.mjs';
 import { saveAnswers, setupFields, setupOf } from './setup.mjs';
 import { DANE_FIELDS as SETUP_FIELDS, STEPS as SETUP_STEPS } from '../scripts/onboard/onboard.mjs';
@@ -544,7 +544,8 @@ test('the list and the board draw one object: the toggle keeps the project and o
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   // One fetch serves both views, so they cannot disagree about what is where.
   assert.equal(app.match(/\/board`\)[;,]/g)?.length, 1);
-  assert.match(app, /\['board', 'list'\]\.map\(\(v\) => `<a href="\$\{at\(v, board\.project\)\}"/);
+  assert.match(app, /\$\{viewSwitch\(board\.project, view\)\}/);
+  assert.match(/function viewSwitch\(slug, current\) \{([\s\S]*?)\n\}/.exec(app)[1], /\['board', 'Board', `\/board\/\$\{encodeURIComponent\(slug\)\}`\], \['list', 'List', `\/list\/\$\{encodeURIComponent\(slug\)\}`\]/);
 });
 
 test('each ticket on the board carries its assignee\'s name and its last change, for the list', async () => {
@@ -835,10 +836,10 @@ test('the ticket page offers every other project to copy into, opens the copy, a
 
 // ── The page itself ──────────────────────────────────────────────────────────
 
-test('the page is served at /, at a ticket\'s address, at Projects, at Tasks, at the board, at the list and at the old New request address without a token, locked to its own scripts', async () => {
+test('the page is served at /, at a ticket\'s address, at Projects, at Tasks, at the board, at the list, at the Console and at the old New request address without a token, locked to its own scripts', async () => {
   const f = await fixture();
   try {
-    for (const path of ['/', '/t/AL-1', '/tasks', '/board', '/board/alpha', '/list', '/list/alpha', '/new']) {
+    for (const path of ['/', '/t/AL-1', '/tasks', '/board', '/board/alpha', '/list', '/list/alpha', '/console', '/new']) {
       const r = await f.call('GET', path, { token: null });
       assert.equal(r.status, 200);
       assert.match(r.headers.get('content-type'), /^text\/html/);
@@ -3203,7 +3204,7 @@ test('the Tasks toolbar picks a project from a dropdown, "Project: ", the one in
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   const draw = app.slice(app.indexOf('async function drawProject'), app.indexOf('async function copyText'));
   assert.match(draw, /api\('GET', '\/projects'\),\n  \]\);/);
-  assert.match(draw, /<div class="toolbar">\s*\$\{renderProjectPicker\(projects, board\.project\)\}\s*\$\{searchForm\(''\)\}\s*<button type="button" class="pipeline-pod"[^>]*><\/button>\s*<nav class="views"/);
+  assert.match(draw, /<div class="toolbar">\s*\$\{renderProjectPicker\(projects, board\.project\)\}\s*\$\{searchForm\(''\)\}\s*<button type="button" class="pipeline-pod"[^>]*><\/button>\s*\$\{viewSwitch\(board\.project, view\)\}/);
   assert.doesNotMatch(app, /Change project/);
   assert.match(draw, /querySelector\('\.project-picker select'\)\.addEventListener\('change', \(e\) => \{\s*history\.pushState\(null, '', at\(view, e\.target\.value\)\);\s*route\(\);/);
   assert.match(readFileSync(WEB('app.css'), 'utf8'), /\.toolbar \.project-picker select \{/);
@@ -3743,11 +3744,11 @@ test('the pod restyled (SP-222): a larger heading, #cceeff with a #000077 border
 
 test('the Tasks page puts the pod between the search field and Board/List, fills it on draw and once a minute, and a failed read touches only the pod (SP-168)', () => {
   const app = readFileSync(WEB('app.mjs'), 'utf8');
-  const tasks = app.indexOf('<h1>Tasks</h1>');
-  const toolbar = app.slice(app.indexOf('<div class="toolbar">', tasks), app.indexOf('</nav>', tasks));
+  const tasks = app.indexOf('<h1>Tasks</h1>', app.indexOf('async function drawProject('));
+  const toolbar = app.slice(app.indexOf('<div class="toolbar">', tasks), app.indexOf('</div>', app.indexOf('<div class="toolbar">', tasks)));
   const search = toolbar.indexOf("${searchForm('')}");
   const pod = toolbar.indexOf('class="pipeline-pod"');
-  const views = toolbar.indexOf('<nav class="views"');
+  const views = toolbar.indexOf('${viewSwitch(board.project, view)}');
   assert.ok(search !== -1 && search < pod && pod < views, 'search field, then the pod, then the Board/List toggle');
   const draw = app.slice(app.indexOf('async function drawProject('), app.indexOf('async function drawProject(') + 12000);
   assert.match(draw, /refreshPipeline\(\);/);
@@ -4196,4 +4197,123 @@ test('the Docs page puts Reference Docs and Work Log last in the right column, w
   assert.match(wire, /sortDocs\(filterDocs\(rows, \{ kind: kind\.value, text: search\.value \}\), sort\)/, 'both filters together, then the sort');
   assert.match(wire, /sort = nextSort\(sort, button\.dataset\.sort\);/, 'a second click reverses it');
   assert.match(wire, /count\.textContent = docCountLine\(shown\.length, rows\.length\);/, 'the count line is text, matching the rows shown');
+});
+
+// ── The Console view (SP-233) ────────────────────────────────────────────────
+
+const CONSOLE_NOW = Date.parse('2026-11-12T18:00:00.000Z');
+const consoleTicket = (over = {}) => ({
+  id: 'AL-7', project: 'alpha', name: 'Fix the thing', status: 'Queued', tags: [], priority: null, assignee: null,
+  updatedAt: '2026-11-12T15:00:00.000Z', stageSince: '2026-11-12T15:00:00.000Z',
+  waitingOnOperator: false, answerIn: false, pullRequest: null,
+  nextChange: { kind: 'lane', lane: 'Build', job: 'loop-build', running: false, due: '2026-11-12T18:12:00.000Z' },
+  ...over,
+});
+const ALPHA = { slug: 'alpha', name: 'Alpha', prefix: 'AL', logo: 'https://alpha.example/logo.png' };
+const BETA = { slug: 'beta', name: 'Beta', prefix: 'BE', logo: null };
+
+test('a Console tile for a project with a logo: the logo, the number over it, stage, next change and time in stage, a link to the ticket', () => {
+  const html = renderConsoleTile(consoleTicket(), ALPHA, CONSOLE_NOW);
+  assert.match(html, /^<a class="tile" href="\/t\/AL-7" title="AL-7: Fix the thing"/);
+  assert.match(html, /<img class="tile-logo" src="https:\/\/alpha\.example\/logo\.png" alt="" referrerpolicy="no-referrer">/);
+  assert.doesNotMatch(html, /tile-prefix/);
+  assert.match(html, /<span class="tile-number">AL-7<\/span>/);
+  assert.match(html, /<span class="fact stage" data-stage="Queued">Queued<\/span>/);
+  assert.match(html, /<span class="fact next" title="Build&#39;s next pass is due Nov 12, 2026, 11:12 AM MST">in 12 min<\/span>/);
+  assert.match(html, /<span class="fact age" title="In Queued for 3h">3h<\/span>/);
+});
+
+test('a Console tile for a project with no logo shows its ticket prefix in large letters; a logo that is not a web address is not drawn', () => {
+  const html = renderConsoleTile(consoleTicket({ id: 'BE-2', project: 'beta' }), BETA, CONSOLE_NOW);
+  assert.match(html, /<span class="tile-prefix" aria-hidden="true">BE<\/span>/);
+  assert.doesNotMatch(html, /<img/);
+  const odd = renderConsoleTile(consoleTicket(), { ...ALPHA, logo: 'javascript:alert(1)' }, CONSOLE_NOW);
+  assert.doesNotMatch(odd, /<img|javascript:/);
+  assert.match(odd, /<span class="tile-prefix" aria-hidden="true">AL<\/span>/);
+  // No project in the answer: the prefix is read off the ticket number.
+  assert.match(renderConsoleTile(consoleTicket({ id: 'ZZ-1' }), null, CONSOLE_NOW), /<span class="tile-prefix" aria-hidden="true">ZZ<\/span>/);
+});
+
+test('a Console tile waiting on the operator is ringed, and its next change is "You"', () => {
+  const his = renderConsoleTile(consoleTicket({ status: 'Needs your input', waitingOnOperator: true, nextChange: { kind: 'operator' } }), ALPHA, CONSOLE_NOW);
+  assert.match(his, /^<a class="tile waiting"/);
+  assert.match(his, /<span class="fact next" title="Your move: no lane acts on it until you do">You<\/span>/);
+  assert.match(his, /waiting on you\.">/);
+  assert.equal(consoleWaiting(consoleTicket({ answerIn: true })), true, 'an answer of his that is in');
+  assert.equal(consoleWaiting(consoleTicket({ nextChange: { kind: 'operator' } })), true, 'one of his statuses');
+  assert.equal(consoleWaiting(consoleTicket()), false);
+  assert.match(renderConsoleTile(consoleTicket(), ALPHA, CONSOLE_NOW), /^<a class="tile" /);
+});
+
+test('a Console tile whose next change is unknown shows a dash; Building and a running lane show "Now"', () => {
+  for (const nextChange of [null, undefined, { kind: 'lane', due: null }, { kind: 'lane', due: 'not a time' }, { kind: 'odd' }]) {
+    assert.deepEqual(consoleNextChange(nextChange, CONSOLE_NOW), { text: CONSOLE_UNKNOWN, title: 'When the next pass picks it up is not known' });
+  }
+  assert.match(renderConsoleTile(consoleTicket({ nextChange: null }), ALPHA, CONSOLE_NOW), /<span class="fact next" title="When the next pass picks it up is not known">—<\/span>/);
+  assert.equal(consoleNextChange({ kind: 'running', lane: 'Build', job: 'loop-build' }, CONSOLE_NOW).text, 'Now');
+  assert.equal(consoleNextChange({ kind: 'lane', lane: 'Review', running: true, due: null }, CONSOLE_NOW).text, 'Now');
+  assert.equal(consoleNextChange({ kind: 'lane', lane: 'Review', running: false, due: '2026-11-12T17:59:00.000Z' }, CONSOLE_NOW).text, 'Now', 'a pass already due');
+  assert.equal(consoleNextChange({ kind: 'lane', lane: 'Review', running: false, due: '2026-11-12T20:10:00.000Z' }, CONSOLE_NOW).text, 'in 2 h');
+});
+
+test('time in stage reads short: minutes, hours under two days, then days; an unreadable time is a dash', () => {
+  assert.equal(consoleAge('2026-11-12T17:59:30.000Z', CONSOLE_NOW), '0m');
+  assert.equal(consoleAge('2026-11-12T17:15:00.000Z', CONSOLE_NOW), '45m');
+  assert.equal(consoleAge('2026-11-11T18:00:00.000Z', CONSOLE_NOW), '24h');
+  assert.equal(consoleAge('2026-11-09T18:00:00.000Z', CONSOLE_NOW), '3d');
+  assert.equal(consoleAge(null, CONSOLE_NOW), CONSOLE_UNKNOWN);
+});
+
+test('a Console tile escapes every piece of ticket and project text', () => {
+  const html = renderConsoleTile(consoleTicket({ id: 'AL-<b>', name: '<script>alert(1)</script> "x"', status: '<i>Queued</i>' }), { ...ALPHA, prefix: '<u>', logo: 'https://a.example/x.png?"><script>' }, CONSOLE_NOW);
+  assert.doesNotMatch(html, /<script>|<b>|<i>|<u>|"><script/);
+  assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt; &quot;x&quot;/);
+  assert.match(html, /href="\/t\/AL-%3Cb%3E"/);
+});
+
+test('the Console groups tiles by stage in the order given, shows an empty stage\'s heading, never draws Live, and never drops a ticket', () => {
+  const stages = ['Requested', 'Rework', 'Queued', 'Building', 'In review', 'Needs your input', 'Ready to launch', 'Live'];
+  const answer = {
+    projects: [ALPHA, BETA],
+    tickets: [
+      consoleTicket({ id: 'AL-1', status: 'Queued' }),
+      consoleTicket({ id: 'BE-1', project: 'beta', status: 'Needs your input', nextChange: { kind: 'operator' } }),
+      consoleTicket({ id: 'AL-2', status: 'Odd' }),
+    ],
+  };
+  const html = renderConsole(answer, stages, CONSOLE_NOW);
+  const order = [...html.matchAll(/<section class="console-stage" data-stage="([^"]+)">/g)].map((m) => m[1]);
+  assert.deepEqual(order, ['Requested', 'Rework', 'Queued', 'Building', 'In review', 'Needs your input', 'Ready to launch', 'Odd']);
+  assert.match(html, /data-stage="Requested"><h2><span class="stage-name">Requested<\/span><span class="count quiet">0<\/span><\/h2><div class="tiles"><\/div>/);
+  const queued = html.slice(html.indexOf('data-stage="Queued">'), html.indexOf('data-stage="Building">'));
+  assert.match(queued, /href="\/t\/AL-1"/);
+  assert.match(queued, /tile-logo/);
+  const his = html.slice(html.indexOf('<section class="console-stage" data-stage="Needs your input">'), html.indexOf('<section class="console-stage" data-stage="Ready to launch">'));
+  assert.match(his, /<a class="tile waiting" href="\/t\/BE-1"/);
+  assert.match(his, /tile-prefix" aria-hidden="true">BE</);
+  // No stage list (it could not be read): the tickets' own stages, in the answer's order.
+  const bare = renderConsole(answer, [], CONSOLE_NOW);
+  assert.deepEqual([...bare.matchAll(/<section class="console-stage" data-stage="([^"]+)">/g)].map((m) => m[1]), ['Queued', 'Needs your input', 'Odd']);
+  assert.equal(renderConsole(null, [], CONSOLE_NOW), '<div class="console"></div>');
+});
+
+test('the Console page: /in-flight and the stage colours drawn, a Console link beside Board and List, remembered for "Tasks", redrawn every beat', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const draw = /async function drawConsole\(\) \{([\s\S]*?)\n\}/.exec(app)[1];
+  assert.match(draw, /api\('GET', '\/in-flight'\)/);
+  assert.match(draw, /api\('GET', '\/stage-colours'\)/);
+  assert.match(draw, /localStorage\.setItem\(VIEW_KEY, 'console'\)/);
+  assert.match(draw, /renderConsole\(answer, stages\)/);
+  assert.match(draw, /viewSwitch\(slug, 'console'\)/);
+  // The view switch names all three in Title Case, the current one marked.
+  const sw = /function viewSwitch\(slug, current\) \{([\s\S]*?)\n\}/.exec(app)[1];
+  assert.match(sw, /\['board', 'Board', [^\]]+\], \['list', 'List', [^\]]+\], \['console', 'Console', '\/console'\]/);
+  assert.match(sw, /v === current \? ' class="current" aria-current="page"' : ''/);
+  assert.match(/async function drawProject\(([^)]*)\) \{([\s\S]*?)\n\}/.exec(app)[2], /\$\{viewSwitch\(board\.project, view\)\}/);
+  // "Tasks" in the header reopens the Console when it was chosen last.
+  assert.match(app, /await drawTasks\(tasks \? savedTasksView\(\) : project\[1\]\);/);
+  assert.match(/async function drawTasks\(view, opts = \{\}\) \{([\s\S]*?)\n\}/.exec(app)[1], /if \(view === 'console'\) \{\s*history\.replaceState\(null, '', '\/console'\);\s*return drawConsole\(\);/);
+  // The minute's beat draws it again whether or not the answer changed, so "in 12 min" counts down.
+  assert.match(app, /lastDrawn = \{ address: here\(\), reads, ticking: true \}/);
+  assert.match(app, /const changed = drawn\.ticking \|\|/);
 });
