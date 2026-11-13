@@ -18,8 +18,10 @@
  *                  default, what the runner does today) or one of MODELS
  *
  * The lanes on the Mini read the wake times (SP-236: a lane before every
- * sleep, the relay after every ticked pass) and the pause switches (SP-237:
- * a lane's runner asks them before every pass, scripts/pause_check.sh). A
+ * sleep, the relay after every ticked pass), the pause switches (SP-237:
+ * a lane's runner asks them before every pass, scripts/pause_check.sh) and
+ * the cap (SP-238: loop-build runs `npm run clickup -- wip-check` before it
+ * claims, lib/wipCheck.js). A
  * group they do not use yet names the ticket that wires it in (`wiredBy`);
  * the Settings page says so under it, and that ticket sets its own to null.
  */
@@ -52,7 +54,7 @@ export const CAP_RANGE = Object.freeze({ min: 1, max: 50 });
 export const GROUPS = Object.freeze([
   Object.freeze({ key: 'wake', title: 'Wake Times', wiredBy: null }),
   Object.freeze({ key: 'pause', title: 'Pause and Resume', wiredBy: null }),
-  Object.freeze({ key: 'cap', title: 'Work-in-Progress Cap', wiredBy: 'SP-238' }),
+  Object.freeze({ key: 'cap', title: 'Work-in-Progress Cap', wiredBy: null }),
   Object.freeze({ key: 'model', title: 'Model per Lane', wiredBy: 'SP-239' }),
 ]);
 

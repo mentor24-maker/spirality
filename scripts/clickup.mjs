@@ -98,6 +98,7 @@ import { parseRepoFromRemoteUrl } from '../lib/branchCatchUp.js';
 // A ticket left in Building by a build pass that died (SP-101).
 import passClaim from '../lib/passClaim.js';
 import { settingsPauseVerdict } from '../lib/pipelinePause.js';
+import { capInForce, wipCheckVerdict, unknownVerdict } from '../lib/wipCheck.js';
 import {
   BUILD_SKILL, buildLockPath, lockState, writesMarker, seatGate, handbackDestination, leftoverWorktrees, markerBlocksClaim, handbackNote,
 } from '../lib/passHandback.js';
@@ -255,6 +256,9 @@ npm run clickup -- <command> [flags]      (Loop Queue: list ${LOOP_QUEUE_LIST}, 
                                                   name=value line each, defaults included. Exit 1 saying why when they cannot be read
   pause-check --lane <lane>                       read-only: may this lane start a pass? One line; exit 0 run, 3 paused (the Settings
                                                   page's switches, SP-237). Settings that cannot be read count as paused (exit 3)
+  wip-check                                       read-only: may loop-build claim another ticket? One line, "room: N of CAP in flight"
+                                                  (exit 0) or "full: N of CAP in flight (<ids>)" (exit 3), the cap from the Settings page
+                                                  (SP-238). Exit 1 when it could not tell: the pass goes on without the cap
   release list                                    Spirality's releases: each project and the release it runs (tab-separated), Spirality's own
                                                   as "${OWN_PROJECT_RELEASE}", then the newest release. Exit 1 saying why on a failed read
   release name --project <slug> --to release-<n>  name the release a project runs, read back. Refused (exit 2) for a release with no tag
@@ -2436,6 +2440,55 @@ if (cmd === 'whoami') {
   const changed = out.json.controls.filter((c) => !c.isDefault).length;
   console.error(`settings: ${lines.length} pipeline control(s) for ${project.projectSlug}, ${changed} changed from the default.`);
   reportLimits();
+
+} else if (cmd === 'wip-check') {
+  // Asked by loop-build before it claims (its SKILL.md, SP-238): is the
+  // number of tickets in flight at the cap Dane set on the Settings page?
+  // Read-only. The deciding is lib/wipCheck.js; this block only reads the
+  // three facts it needs. Any fact that cannot be read is exit 1, "could not
+  // tell", and the pass goes on and says so (the cap fails open, as
+  // lib/wipCap.js explains).
+  const stop = (why) => {
+    const v = unknownVerdict(why);
+    console.log(v.line);
+    reportLimits();
+    process.exit(v.code);
+  };
+  let settings;
+  try {
+    const out = await tracker.pipelineSettings();
+    if (out.unsupported) settings = { unsupported: true };
+    else if (!out.res.ok) settings = { ok: false, why: `HTTP ${out.res.status}${out.json?.err ? `: ${out.json.err}` : ''}` };
+    else settings = { ok: true, controls: out.json.controls };
+  } catch (err) {
+    settings = { ok: false, why: err.message };
+  }
+  const cap = capInForce({ settings, env: process.env });
+  if (cap.cap == null) stop(cap.why);
+  // Every ticket, closed ones too: a pull request whose ticket is Live must
+  // be known as that, not as "no ticket found".
+  const tickets = [];
+  try {
+    for (let page = 0; ; page += 1) {
+      if (page >= 50) stop('the ticket list ran past 50 pages, so the count would be a guess');
+      const out = await tracker.listTasksPage(LOOP_QUEUE_LIST, page, { includeClosed: true });
+      if (!out.res.ok || !Array.isArray(out.json?.tasks)) stop(`the tickets could not be listed (HTTP ${out.res.status})`);
+      tickets.push(...out.json.tasks);
+      if (out.json.last_page !== false || out.json.tasks.length === 0) break;
+    }
+  } catch (err) {
+    stop(`the tickets could not be listed: ${err.message}`);
+  }
+  const prs = gh(['pr', 'list', '--repo', project.githubRepo, '--state', 'open', '--json', 'number,state,body', '--limit', '500']);
+  if (!prs.ok) stop(`GitHub's open pull requests for ${project.githubRepo} could not be listed: ${prs.stderr.trim().split('\n')[0] || 'gh failed'}`);
+  let openPrs;
+  try { openPrs = JSON.parse(prs.stdout); } catch { openPrs = null; }
+  if (!Array.isArray(openPrs)) stop('GitHub answered the pull request list with something that is not a list');
+  const verdict = wipCheckVerdict({ tickets, prs: openPrs, cap: cap.cap });
+  console.log(verdict.line);
+  console.error(`wip-check: cap ${cap.cap} from ${cap.source}; ${verdict.detail}`);
+  reportLimits();
+  process.exit(verdict.code);
 
 } else if (cmd === 'pause-check') {
   // Asked by a lane's runner before every pass (scripts/pause_check.sh,

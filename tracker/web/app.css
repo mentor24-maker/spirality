@@ -237,6 +237,8 @@ section.pipeline-controls .default { color: var(--quiet); font-size: 0.75rem; bo
 section.pipeline-controls p.not-yet { margin-top: 0.25rem; font-size: 0.85rem; }
 section.pipeline-controls .in-effect { display: block; color: var(--quiet); font-size: 0.85rem; }
 section.pipeline-controls .in-effect.waiting { color: var(--ink); font-weight: 600; }
+section.pipeline-controls .in-flight { display: block; color: var(--quiet); font-size: 0.85rem; }
+section.pipeline-controls .in-flight.full { color: var(--ink); font-weight: 600; }
 section.pipeline-controls .release-group p { margin: 0.25rem 0; }
 section.pipeline-controls .release-actions { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin: 0.5rem 0; }
 /* What a pause is waiting on (SP-237): "Draining" while tickets are still finishing. */
