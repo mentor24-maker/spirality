@@ -42,8 +42,9 @@ prefix, merge phrases, protected files (`governancePaths`), auto-merge
 lanes, and the application checks below.
 
 - **Spirality owns the format.** It is written down once, with a version
-  number. A manifest with a missing field, an unknown field or the wrong
-  version is refused, with the field named, before any lane runs.
+  number, in [PROJECT_MANIFEST.md](PROJECT_MANIFEST.md) (SP-262). A
+  manifest with a missing field, an unknown field or the wrong version is
+  refused, with the field named, before any lane runs.
 - **Nothing about the machine goes in it.** Which machine runs the tracker,
   and its address, are Spirality's to know, not the project's.
 
@@ -149,6 +150,11 @@ is a ticket in that project's own queue, filed once Spirality's side is Live:
    does not match it.
 2. Run a project's lanes, door, skills and hooks from Spirality's folder,
    with pacing and pauses scoped to one project.
+   Slice 1 done (SP-263): every lane file in the log folder is named for its
+   project, checked by `scripts/lib/laneFiles.test.mjs`. The project-scoped
+   pause lookup (`projectPauseVerdict` in `lib/pipelinePause.js`) exists, but
+   no lane asks the pause switch yet: SP-237 must use it when it wires the
+   pause into the lanes.
 3. Let a project list application checks in its manifest for Spirality to run
    and post to its bus.
 4. Move the pipeline watchdogs into Spirality for every project (SP-260,

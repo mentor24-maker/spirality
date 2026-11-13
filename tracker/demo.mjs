@@ -24,7 +24,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openStore } from './store.mjs';
 import { CLOSE_PHRASE, GO_PHRASE, startServer } from './server.mjs';
-import { seedDemo, tickingClock, writeDemoLogs } from './demoData.mjs';
+import { demoPrState, seedDemo, tickingClock, writeDemoLogs } from './demoData.mjs';
 import { setPasswordUrl } from './account.mjs';
 import { loadProjectConfig } from '../lib/projectConfig.mjs';
 
@@ -57,7 +57,8 @@ const accountMail = { send: printEmail, pageUrl: null, projectName: 'Demo' };
 // The Pipeline Status pod reads scratch logs in the demo's own folder, never the Mini's real ones.
 writeDemoLogs(dir, 'demo');
 const pipeline = { logDir: dir, slug: 'demo' };
-const server = await startServer({ store, port, log: (line) => console.log(line), mergePhrase, closePhrase: CLOSE_PHRASE, goPhrase: GO_PHRASE, accountMail, pipeline });
+// The pull requests' state on GitHub is a stand-in (SP-226): the demo never calls GitHub.
+const server = await startServer({ store, port, log: (line) => console.log(line), mergePhrase, closePhrase: CLOSE_PHRASE, goPhrase: GO_PHRASE, accountMail, pipeline, readPrState: demoPrState });
 accountMail.pageUrl = `http://127.0.0.1:${server.address().port}`;
 
 console.log(`\nDemo tracker (test data only) at http://127.0.0.1:${server.address().port}/`);

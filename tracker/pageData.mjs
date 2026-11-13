@@ -51,10 +51,15 @@ function trailComments(store, ticketId) {
 /**
  * A ticket and its comments in the shape waitingVerdict reads. Comments go
  * newest first: the verdict sorts by date, and two comments in the same
- * millisecond must resolve to the later one, not the earlier.
+ * millisecond must resolve to the later one, not the earlier. `prStates`
+ * (a Map, ticket id to `{ number, state }`, from the server's GitHub read,
+ * SP-226) adds the ticket's pull request as the verdict's fourth fact; a
+ * ticket it does not hold is judged exactly as before.
  */
-function verdictInput(ticket, comments) {
+function verdictInput(ticket, comments, prStates = null) {
+  const pr = prStates?.get(ticket.id);
   return {
+    ...(pr ? { pr } : {}),
     task: {
       status: { status: ticket.status },
       assignees: ticket.assignee == null ? [] : [{ id: ticket.assignee }],
@@ -84,9 +89,43 @@ function answerIsIn(ticket, comments, operatorId) {
  * ticket by: one of the operator's two statuses and a WAITING verdict for
  * that person. With no viewer, never.
  */
-function waitsOn(ticket, comments, viewerId) {
+function waitsOn(ticket, comments, viewerId, prStates = null) {
   if (viewerId == null || !OPERATOR_LANE.includes(ticket.status)) return false;
-  return waitingVerdict(verdictInput(ticket, comments), { operatorId: viewerId }).verdict === WAITING;
+  return waitingVerdict(verdictInput(ticket, comments, prStates), { operatorId: viewerId }).verdict === WAITING;
+}
+
+/**
+ * The pull request the page asks GitHub about for one ticket (SP-226), or
+ * null: only a ticket in the operator's two statuses, and only the PR its
+ * trail records (findPullRequest, the one a merge would act on). `repo` is
+ * the repository to ask, `owner/name`: the PR address's own, when it is the
+ * project's repository or the project names none. A PR in another
+ * repository than the project's gets `repo: null`, which is never asked and
+ * reads as "could not check", the door's rule (scripts/clickup.mjs,
+ * livePrState).
+ */
+export function prToCheck(store, ticket) {
+  if (!ticket || !OPERATOR_LANE.includes(ticket.status)) return null;
+  const found = findPullRequest(trailComments(store, ticket.id));
+  if (!found) return null;
+  const own = `${found.owner}/${found.repo}`;
+  const projectRepo = store.getProject(ticket.project)?.repo ?? null;
+  const same = !projectRepo || projectRepo.toLowerCase() === own.toLowerCase();
+  return { ticket: ticket.id, number: found.number, repo: same ? own : null };
+}
+
+/** Every pull request prToCheck names, across every project `only` lets through. */
+export function prsToCheck(store, { only = null } = {}) {
+  const out = [];
+  for (const project of visibleProjects(store, only)) {
+    for (const status of OPERATOR_LANE) {
+      for (const ticket of store.listTickets(project.slug, { status })) {
+        const pr = prToCheck(store, ticket);
+        if (pr) out.push(pr);
+      }
+    }
+  }
+  return out;
 }
 
 /**
@@ -109,14 +148,15 @@ function waitsOn(ticket, comments, viewerId) {
  *
  * Answers `{ stage, job, reason, since }` (the stage's name, its job, one
  * of pipeline.mjs's FAILING_REASONS, and when its first failed pass began,
- * as given), or null.
+ * as given), or null. `prStates` is the same live pull-request map the
+ * verdict takes elsewhere (SP-226), so both read one answer.
  */
-export function heldUpBy(ticket, comments, operatorId, lanes) {
+export function heldUpBy(ticket, comments, operatorId, lanes, prStates = null) {
   if (!lanes || !ticket) return null;
   let job;
   if (OPERATOR_LANE.includes(ticket.status)) {
     if (operatorId == null) return null;
-    const input = verdictInput(ticket, comments);
+    const input = verdictInput(ticket, comments, prStates);
     if (waitingVerdict(input, { operatorId }).verdict === WAITING) return null;
     if (!operatorSpokeLast(input.comments, { operatorId })) return null;
     job = 'relay';
@@ -157,7 +197,10 @@ export function busUnseen(store, actorId, { only = null } = {}) {
 
 /**
  * Every ticket in the operator's two statuses, across every project `only`
- * lets through (visibleProjects), with the loop's verdict for `operatorId`. `waiting` holds the WAITING ones;
+ * lets through (visibleProjects), with the loop's verdict for `operatorId`.
+ * `prStates` is the server's read of each one's pull request (SP-226,
+ * verdictInput), so a ticket whose PR is merged or closed drops off.
+ * `waiting` holds the WAITING ones;
  * `unsure` holds the ones the verdict cannot decide (his status, but not
  * assigned to him), so a half-finished hand-off is shown, never dropped.
  * Both newest first, by the ticket's last change.
@@ -166,7 +209,7 @@ export function busUnseen(store, actorId, { only = null } = {}) {
  * whose logs it read) leaves out a ticket held up by a failing lane
  * (heldUpBy, SP-228), so the bell does not count it while the lane fails.
  */
-export function waitingFor(store, operatorId, { only = null, pipeline = null } = {}) {
+export function waitingFor(store, operatorId, { only = null, pipeline = null, prStates = null } = {}) {
   const waiting = [];
   const unsure = [];
   for (const project of visibleProjects(store, only)) {
@@ -174,8 +217,8 @@ export function waitingFor(store, operatorId, { only = null, pipeline = null } =
     for (const status of OPERATOR_LANE) {
       for (const ticket of store.listTickets(project.slug, { status })) {
         const comments = store.listComments(ticket.id);
-        if (heldUpBy(ticket, comments, project.operator, lanes)) continue;
-        const result = waitingVerdict(verdictInput(ticket, comments), { operatorId });
+        if (heldUpBy(ticket, comments, project.operator, lanes, prStates)) continue;
+        const result = waitingVerdict(verdictInput(ticket, comments, prStates), { operatorId });
         const row = {
           id: ticket.id,
           project: project.slug,
@@ -201,9 +244,11 @@ export function waitingFor(store, operatorId, { only = null, pipeline = null } =
  * stamp line itself is taken off the shown text; `machine` says it instead.
  * `answerIn` says his answer is in (answerIsIn). `heldUp` says a failing
  * lane owes the next move (heldUpBy, SP-228), from `pipeline` (`{ slug,
- * stages }`), or null. Null when there is no such ticket.
+ * stages }`), or null. `pullRequestState`, there only when `prStates` holds
+ * the ticket (SP-226), is `{ number, state }`, state OPEN, MERGED, CLOSED or
+ * null for could not check. Null when there is no such ticket.
  */
-export function threadOf(store, ticketId, { pipeline = null } = {}) {
+export function threadOf(store, ticketId, { pipeline = null, prStates = null } = {}) {
   const ticket = store.getTicket(ticketId);
   if (!ticket) return null;
   const project = store.getProject(ticket.project);
@@ -232,8 +277,10 @@ export function threadOf(store, ticketId, { pipeline = null } = {}) {
     operator: namedActor(store, project?.operator),
     comments,
     answerIn: answerIsIn(ticket, store.listComments(ticket.id), project?.operator),
-    heldUp: heldUpBy(ticket, store.listComments(ticket.id), project?.operator, lanesOf(pipeline, ticket.project)),
+    heldUp: heldUpBy(ticket, store.listComments(ticket.id), project?.operator, lanesOf(pipeline, ticket.project), prStates),
     pullRequest: findPullRequest(trailComments(store, ticket.id))?.url ?? null,
+    // SP-226: its live state on GitHub, for the Merge button. Absent when it was not asked.
+    ...(prStates?.has(ticket.id) ? { pullRequestState: prStates.get(ticket.id) } : {}),
   };
 }
 
@@ -313,10 +360,10 @@ export function projectDetailsOf(store, slug, { withAlerts = false } = {}) {
  * same as the ticket page). `waiting` says the ticket waits on `viewerId`,
  * the person signed in: the same verdict, for the same person, that puts it
  * on their Waiting on You page (waitingFor), so the list's clock and that
- * page cannot disagree (SP-201). With no `viewerId`, never. Null when there
- * is no such project.
+ * page cannot disagree (SP-201); `prStates` is the same GitHub read that page
+ * gets (SP-226). With no `viewerId`, never. Null when there is no such project.
  */
-export function boardOf(store, slug, { viewerId = null } = {}) {
+export function boardOf(store, slug, { viewerId = null, prStates = null } = {}) {
   const project = store.getProject(slug);
   if (!project) return null;
   const byStatus = new Map(STAGE_ORDER.map((name) => [statusOf(name), []]));
@@ -347,7 +394,7 @@ export function boardOf(store, slug, { viewerId = null } = {}) {
         updatedAt: t.updatedAt,
         pullRequest: pullRequestOf(t.id),
         answerIn: answerIsIn(t, store.listComments(t.id), project.operator),
-        waiting: waitsOn(t, store.listComments(t.id), viewerId),
+        waiting: waitsOn(t, store.listComments(t.id), viewerId, prStates),
         // SP-208: the List view's priority dropdown saves with it (ifVersion).
         version: t.version,
       })),
@@ -429,9 +476,10 @@ function nextChangeOf(status, lanes) {
  *
  * `pipeline` is `{ slug, stages }`: GET /pipeline's answer (pipelineOf) and
  * the project whose logs it read. Only that project's tickets get a lane's
- * time (nextChangeOf); null, or another project, gets none.
+ * time (nextChangeOf); null, or another project, gets none. `prStates` is
+ * the server's GitHub read (SP-226), as waitingFor takes it.
  */
-export function consoleOf(store, { only = null, pipeline = null } = {}) {
+export function consoleOf(store, { only = null, pipeline = null, prStates = null } = {}) {
   const projects = visibleProjects(store, only);
   const lanes = pipeline?.stages ? new Map(pipeline.stages.map((s) => [s.job, s])) : null;
   const rank = new Map(STAGE_ORDER.map((name, i) => [statusOf(name), i]));
@@ -464,7 +512,7 @@ export function consoleOf(store, { only = null, pipeline = null } = {}) {
           assignee: nameOf(t.assignee),
           updatedAt: t.updatedAt,
           stageSince: stageSinceOf(store, t),
-          waitingOnOperator: waitsOn(t, comments, project.operator),
+          waitingOnOperator: waitsOn(t, comments, project.operator, prStates),
           answerIn: answerIsIn(t, comments, project.operator),
           pullRequest: findPullRequest(trailComments(store, t.id))?.url ?? null,
           nextChange: nextChangeOf(t.status, projectLanes),

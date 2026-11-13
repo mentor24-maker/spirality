@@ -280,6 +280,9 @@ dialog.project-check button.close { float: right; border: 0; background: transpa
 .card .answer-in { display: block; }
 /* On the ticket page it is the whole answer (SP-160): a boxed notice, not a grey aside. */
 p.answer-in { font-size: 1rem; font-style: normal; color: var(--ink); background: #eaf5fe; border-left: 4px solid var(--blue); border-radius: 4px; padding: 0.75rem 1rem; margin: 0 0 1rem; }
+/* SP-226: the pull request's live state, in place of the Merge button when it is merged or closed. */
+p.pr-state { font-size: 1rem; color: var(--ink); background: #f3f3f3; border-left: 4px solid var(--quiet); border-radius: 4px; padding: 0.75rem 1rem; margin: 0 0 1rem; }
+p.pr-state.quiet { color: var(--quiet); }
 form.invite { max-width: 36rem; margin-bottom: 1.5rem; }
 form.invite label { display: block; font-weight: 600; }
 form.invite .row { display: flex; gap: 0.75rem; align-items: center; margin-top: 0.35rem; }

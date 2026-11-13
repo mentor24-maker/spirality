@@ -169,6 +169,15 @@ export function seedDemo(store, { operatorName = substrateConfig.operatorName(),
     '@@NEEDED', 'Nothing to merge: PR #7 has already landed.', 'Your move: Close — its work is live.',
   ].join('\n')).rendered));
 
+  // SP-226: Dane's merge word landed on GitHub, but the relay has not moved
+  // it to Live yet. By status alone it waits on him; the demo's stand-in
+  // GitHub read (demoPrState) says PR #14 is merged, so the page leaves it
+  // off Waiting on You and shows the "is merged" line in place of Merge.
+  const mergedNotLive = file('beta', 'Merged on GitHub but not yet Live', 'ready to launch',
+    { assigned: true, description: 'The pull request is merged; the relay moves this to Live at its next pass.' }, 'waiting');
+  say(mergedNotLive, loop.id, `PR opened: ${DEMO_MERGED_PR}`);
+  say(mergedNotLive, loop.id, 'REVIEW: PASSED. Ready for your merge word.');
+
   // Two Pipeline Controls changes on Alpha (SP-224), so the Settings page's
   // change log shows rows: the cap tried at 3 and put back, which leaves every
   // control on its default.
@@ -205,6 +214,17 @@ export function seedDemo(store, { operatorName = substrateConfig.operatorName(),
   }
 
   return { operator: op, loop, token, expect };
+}
+
+/** The demo pull request that reads as merged on GitHub (SP-226): "Merged on GitHub but not yet Live". */
+export const DEMO_MERGED_PR = 'https://github.com/example/repo/pull/14';
+
+/**
+ * The demo's stand-in for the GitHub read (tracker/prState.mjs, ghPrState):
+ * PR #14 is merged, every other one is open. It never calls GitHub.
+ */
+export async function demoPrState({ repo, number }) {
+  return `https://github.com/${repo}/pull/${number}` === DEMO_MERGED_PR ? 'MERGED' : 'OPEN';
 }
 
 /** A local time as the runners write it: `2026-11-09 18:22:34` (date) or `18:22:34` (clock). */
