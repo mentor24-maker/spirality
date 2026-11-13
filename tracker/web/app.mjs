@@ -3071,10 +3071,13 @@ async function drawAgain(draw) {
 /** Why this beat must leave the page alone, or null. */
 const hold = () => redrawHold({ hidden: document.hidden, drawing: drawing > 0, writing: writing > 0, dialog: Boolean(main.querySelector('dialog[open]')), fields: fieldsOf(main) });
 
+/** The page's areas that scroll sideways, whose place keepPlace keeps. */
+const SIDEWAYS = '.console';
+
 /**
  * Where he is on the page: how far down, which folding sections
  * (Details, each Tasks stage, the Add Task box, the Change panel) are open,
- * and how each Tasks table is sorted.
+ * how each Tasks table is sorted, and how far across the Console is scrolled.
  * `restore` puts them back on the page drawn again.
  */
 function keepPlace() {
@@ -3085,10 +3088,14 @@ function keepPlace() {
   const y = window.scrollY;
   // Each stage's sort (SP-174), by stage, put back on the stage's new table.
   const sorts = new Map(sortableTables().filter(({ table }) => sorted.get(table)?.sort).map(({ table, stage }) => [stage, sorted.get(table).sort]));
+  // How far across each sideways-scrolling area is (the Console's stage
+  // columns, SP-233), so his own columns at the right stay in view.
+  const across = [...main.querySelectorAll(SIDEWAYS)].map((el) => el.scrollLeft);
   return {
     restore() {
       for (const d of main.querySelectorAll('details')) if (open.has(key(d))) d.open = open.get(key(d));
       for (const { table, stage } of sortableTables()) if (sorts.has(stage)) sorted.get(table)?.apply(sorts.get(stage));
+      [...main.querySelectorAll(SIDEWAYS)].forEach((el, i) => { if (i < across.length) el.scrollLeft = across[i]; });
       window.scrollTo(0, y);
     },
   };
@@ -3107,7 +3114,8 @@ async function refreshPage() {
   if (checking || !me || !drawn || drawn.address !== here() || hold()) return;
   checking = true;
   try {
-    const now = await Promise.all([...drawn.reads].map(([path]) => api('GET', path)));
+    // A page drawn every beat anyway (the Console) is not read twice to compare.
+    const now = drawn.ticking ? [] : await Promise.all([...drawn.reads].map(([path]) => api('GET', path)));
     const changed = drawn.ticking || [...drawn.reads].some(([, before], i) => JSON.stringify(now[i]) !== before);
     // He may have moved on, or started typing, while it read.
     if (!changed || lastDrawn !== drawn || drawn.address !== here() || hold()) return;

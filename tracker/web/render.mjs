@@ -2012,7 +2012,8 @@ export function consoleNextChange(nextChange, now = Date.now()) {
   const at = `${lane}'s next pass is due ${mountainTime(nextChange.due)}`;
   if (away <= 0) return { text: 'Now', title: at };
   const minutes = Math.ceil(away / 60_000);
-  return { text: minutes < 60 ? `in ${minutes} min` : `in ${Math.round(minutes / 60)} h`, title: at };
+  // Whole hours count down the same way minutes do: 89 minutes is still "in 1 h", never rounded up to 2.
+  return { text: minutes < 60 ? `in ${minutes} min` : `in ${Math.floor(minutes / 60)} h`, title: at };
 }
 
 /**

@@ -17,3 +17,13 @@ Click a tile to open the ticket. Once you pick Console, the Tasks link in
 the header remembers it. The page refreshes itself every minute so the
 countdowns stay true. Nothing about Board, List or the data behind them
 changed; colour-coding tiles by feature comes in the next slice.
+
+**After review.** Review found that the Console jumped back to its left edge
+every minute when it redrew, so on a laptop-width window the two columns
+that are Dane's own moves (Needs Your Input and Ready to Launch) kept
+sliding out of view. The minute's redraw now remembers how far across he
+has scrolled and puts it back, the same way it already kept how far down.
+The same redraw used to fetch the in-flight list twice a minute (once to
+compare, once to draw) and now fetches it once. And "next change" now
+counts hours down the way it counts minutes: 89 minutes away reads "in 1 h",
+not rounded up to 2.

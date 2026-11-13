@@ -4256,6 +4256,16 @@ test('a Console tile whose next change is unknown shows a dash; Building and a r
   assert.equal(consoleNextChange({ kind: 'lane', lane: 'Review', running: false, due: '2026-11-12T20:10:00.000Z' }, CONSOLE_NOW).text, 'in 2 h');
 });
 
+test('a Console next change counts whole hours down the way it counts minutes, never rounding up', () => {
+  const at = (minutes) => consoleNextChange({ kind: 'lane', lane: 'Review', running: false, due: new Date(CONSOLE_NOW + minutes * 60_000).toISOString() }, CONSOLE_NOW).text;
+  assert.equal(at(59), 'in 59 min');
+  assert.equal(at(60), 'in 1 h');
+  assert.equal(at(89), 'in 1 h', 'not "in 1 h" at 89 and "in 2 h" at 90');
+  assert.equal(at(90), 'in 1 h');
+  assert.equal(at(119), 'in 1 h');
+  assert.equal(at(120), 'in 2 h');
+});
+
 test('time in stage reads short: minutes, hours under two days, then days; an unreadable time is a dash', () => {
   assert.equal(consoleAge('2026-11-12T17:59:30.000Z', CONSOLE_NOW), '0m');
   assert.equal(consoleAge('2026-11-12T17:15:00.000Z', CONSOLE_NOW), '45m');
@@ -4316,4 +4326,19 @@ test('the Console page: /in-flight and the stage colours drawn, a Console link b
   // The minute's beat draws it again whether or not the answer changed, so "in 12 min" counts down.
   assert.match(app, /lastDrawn = \{ address: here\(\), reads, ticking: true \}/);
   assert.match(app, /const changed = drawn\.ticking \|\|/);
+  // That beat does not read every answer first only to throw it away: one read of /in-flight a minute, not two.
+  const refresh = /async function refreshPage\(\) \{[\s\S]*?\n\}/.exec(app)[0];
+  assert.match(refresh, /const now = drawn\.ticking \? \[\] : await Promise\.all\(/);
+});
+
+test('the Console\'s minute redraw keeps how far across he has scrolled', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  assert.match(app, /const SIDEWAYS = '\.console';/);
+  const place = /function keepPlace\(\) \{[\s\S]*?\n\}/.exec(app)[0];
+  // Read before the redraw, put back on the new columns before the page is shown.
+  assert.match(place, /const across = \[\.\.\.main\.querySelectorAll\(SIDEWAYS\)\]\.map\(\(el\) => el\.scrollLeft\);/);
+  assert.match(place, /restore\(\) \{[\s\S]*\[\.\.\.main\.querySelectorAll\(SIDEWAYS\)\]\.forEach\(\(el, i\) => \{ if \(i < across\.length\) el\.scrollLeft = across\[i\]; \}\);[\s\S]*window\.scrollTo\(0, y\);/);
+  // The Console's columns are the area that scrolls sideways.
+  assert.match(renderConsole({ tickets: [], projects: [] }, ['Queued']), /^<div class="console">/);
+  assert.match(readFileSync(WEB('app.css'), 'utf8'), /\.console \{[^}]*overflow-x: auto/);
 });
