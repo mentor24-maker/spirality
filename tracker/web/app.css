@@ -419,3 +419,25 @@ table.spirality-docs td.date { white-space: nowrap; }
 .tile-facts .stage { overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
 .tile-facts .stage.coloured { color: var(--stage-text); }
 .tile-facts .age { color: var(--quiet); }
+/* SP-234: a tile's background is its feature's colour (render.mjs FEATURE_PALETTE, same order); the facts strip stays white so the stage colours read. */
+.feature-0 { --feature: #ffd6d6; }
+.feature-1 { --feature: #ffe2c2; }
+.feature-2 { --feature: #fff3b0; }
+.feature-3 { --feature: #d9f2c4; }
+.feature-4 { --feature: #c8f0e4; }
+.feature-5 { --feature: #cfe8ff; }
+.feature-6 { --feature: #dcd6ff; }
+.feature-7 { --feature: #f5d0f0; }
+.feature-8 { --feature: #e6dccb; }
+.feature-9 { --feature: #d5dde6; }
+.tile.feature { background: var(--feature); }
+.tile.feature .tile-facts { background: #fff; }
+.tile.feature .tile-prefix { color: rgba(255, 255, 255, 0.6); }
+.tile.dimmed { opacity: 0.25; }
+.feature-key { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; margin: 0 0 0.75rem; font-size: 0.85rem; }
+.feature-key .key-title { font-weight: 600; margin-right: 0.25rem; }
+.feature-pick { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.15rem 0.5rem; border: var(--hairline); border-radius: 999px; background: #fff; color: var(--ink); font: inherit; cursor: pointer; }
+.feature-pick .swatch { width: 0.8rem; height: 0.8rem; border-radius: 3px; border: 1px solid rgba(0, 0, 0, 0.35); background: var(--feature); }
+.feature-pick .count { color: var(--quiet); }
+.feature-pick[aria-pressed="true"] { background: var(--feature); outline: 2px solid var(--blue); outline-offset: 1px; }
+.feature-pick[aria-pressed="true"] .count { color: var(--ink); }

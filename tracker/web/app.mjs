@@ -1172,6 +1172,26 @@ async function drawTasks(view, opts = {}) {
  * reopens it. A view only: nothing here changes a ticket. The beat draws it
  * again every minute (route marks it `ticking`), so "in 12 min" counts down.
  */
+/**
+ * The feature picked in the Console's Features key (SP-234), or null: kept
+ * here so the minute's redraw keeps it. A reload clears it.
+ */
+let pickedFeature = null;
+
+/**
+ * Show the Console's pick: every tile of another feature (or of none) dims,
+ * and the picked feature's button reads pressed. A picked feature no longer
+ * on screen is let go, so no tile stays dimmed with nothing pressed.
+ */
+function showFeaturePick() {
+  const picks = [...main.querySelectorAll('.feature-pick')];
+  if (!picks.some((b) => b.dataset.feature === pickedFeature)) pickedFeature = null;
+  for (const b of picks) b.setAttribute('aria-pressed', String(b.dataset.feature === pickedFeature));
+  for (const tile of main.querySelectorAll('.console .tile')) {
+    tile.classList.toggle('dimmed', pickedFeature !== null && tile.dataset.feature !== pickedFeature);
+  }
+}
+
 async function drawConsole() {
   const [answer, colours] = await Promise.all([
     api('GET', '/in-flight'),
@@ -1198,6 +1218,14 @@ async function drawConsole() {
     el.style.setProperty('--stage-tint', look.tint);
     el.style.setProperty('--stage-text', look.text);
   }
+  // A click on a feature in the key dims every other tile; a second click on it shows them all again.
+  for (const b of main.querySelectorAll('.feature-pick')) {
+    b.addEventListener('click', () => {
+      pickedFeature = pickedFeature === b.dataset.feature ? null : b.dataset.feature;
+      showFeaturePick();
+    });
+  }
+  showFeaturePick();
   putTrail([{ label: 'Tasks' }, { label: 'Console' }]);
 }
 
