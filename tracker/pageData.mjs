@@ -25,10 +25,10 @@ import { GROUPS, MODELS, DEFAULT_MODEL, RELEASE_GROUP } from './pipelineControls
 import { OWN_RELEASE_LINE, rollBackTarget } from '../lib/releases.mjs';
 import { STAGES } from './pipeline.mjs';
 
-const { OPERATOR_LANE, WAITING, CANNOT_TELL, waitingVerdict, operatorSpokeLast } = waitingOnOperator;
+const { OPERATOR_LANE, WAITING, CANNOT_TELL, waitingVerdict, operatorSpokeLast, standingMergeWord } = waitingOnOperator;
 const { isMachineComment, stripMachineMarker } = machineComment;
 const { STAGE_ORDER, LIVE, QUEUED, BUILDING, REWORK, OPERATOR_HELD_STATUSES, TERMINAL_STATUSES, DISPLAY, PRIORITY_RANK, statusOf } = loopStatuses;
-const { findPullRequest } = mergeOnComment;
+const { findPullRequest, isMergeCommand, isReviewVerdict, isReviewPassed } = mergeOnComment;
 const { findHumanHours } = humanHours;
 const { isTeamChatTask } = busFallback;
 
@@ -67,6 +67,7 @@ function verdictInput(ticket, comments, prStates = null) {
       assignees: ticket.assignee == null ? [] : [{ id: ticket.assignee }],
     },
     comments: comments.slice().reverse().map((c) => ({
+      id: c.id,
       user: { id: c.author },
       comment_text: c.body,
       date: String(Date.parse(c.createdAt)),
@@ -84,6 +85,20 @@ function verdictInput(ticket, comments, prStates = null) {
 function answerIsIn(ticket, comments, operatorId) {
   if (operatorId == null || !OPERATOR_LANE.includes(ticket.status)) return false;
   return operatorSpokeLast(verdictInput(ticket, comments).comments, { operatorId });
+}
+
+/**
+ * Does his merge word still stand (SP-285)? A Ready to launch ticket on
+ * which he has said a merge phrase since the newest review PASS: the relay
+ * keeps re-trying that merge on every pass, so the page shows no Merge
+ * button and no "Your move" for it, even after a machine note (a conflict
+ * hand-off) has become the newest comment. The same rule the verdict drops
+ * the ticket from Waiting on You by (standingMergeWord, rule 3b of
+ * waitingVerdict), so the page and that list cannot disagree.
+ */
+function mergeStands(ticket, comments, operatorId) {
+  if (operatorId == null || ticket.status !== 'ready to launch') return false;
+  return Boolean(standingMergeWord(verdictInput(ticket, comments).comments, { operatorId }));
 }
 
 /**
@@ -160,7 +175,8 @@ export function heldUpBy(ticket, comments, operatorId, lanes, prStates = null) {
     if (operatorId == null) return null;
     const input = verdictInput(ticket, comments, prStates);
     if (waitingVerdict(input, { operatorId }).verdict === WAITING) return null;
-    if (!operatorSpokeLast(input.comments, { operatorId })) return null;
+    if (!operatorSpokeLast(input.comments, { operatorId })
+      && !(ticket.status === 'ready to launch' && standingMergeWord(input.comments, { operatorId }))) return null;
     job = 'relay';
   } else {
     job = NEXT_LANE.has(ticket.status) ? laneOf(NEXT_LANE.get(ticket.status)).job : null;
@@ -279,6 +295,7 @@ export function threadOf(store, ticketId, { pipeline = null, prStates = null } =
     operator: namedActor(store, project?.operator),
     comments,
     answerIn: answerIsIn(ticket, store.listComments(ticket.id), project?.operator),
+    mergeStands: mergeStands(ticket, store.listComments(ticket.id), project?.operator),
     heldUp: heldUpBy(ticket, store.listComments(ticket.id), project?.operator, lanesOf(pipeline, ticket.project), prStates),
     pullRequest: findPullRequest(trailComments(store, ticket.id))?.url ?? null,
     // SP-226: its live state on GitHub, for the Merge button. Absent when it was not asked.
@@ -396,6 +413,7 @@ export function boardOf(store, slug, { viewerId = null, prStates = null } = {}) 
         updatedAt: t.updatedAt,
         pullRequest: pullRequestOf(t.id),
         answerIn: answerIsIn(t, store.listComments(t.id), project.operator),
+        mergeStands: mergeStands(t, store.listComments(t.id), project.operator),
         waiting: waitsOn(t, store.listComments(t.id), viewerId, prStates),
         // SP-208: the List view's priority dropdown saves with it (ifVersion).
         version: t.version,
@@ -709,7 +727,9 @@ export function isFailureNote(text) {
  *     status change or the next comment from the operator, whichever first;
  *  2. operator: in Needs your input or Ready to launch while the newest
  *     comment is not the operator's own (the contract's "Is this waiting on
- *     Dane?" rule, operatorSpokeLast);
+ *     Dane?" rule, operatorSpokeLast), and, in Ready to launch, his merge
+ *     word does not still stand (SP-285: said since the newest review PASS;
+ *     the relay holds it while a conflict is worked, standingMergeWord);
  *  3. working: in Building;
  *  4. lane: every other stage but Live (Requested, Queued, Rework, In
  *     review, and the operator's two once his reply is the newest word).
@@ -717,7 +737,9 @@ export function isFailureNote(text) {
  *
  * `steps` are the ticket's [ms, status] steps oldest first (statusSteps);
  * `comments` are `{ at, byMachine, byOperator }`, `at` in ms, and
- * `failure` when it is a machine's failure note. Answers the stretches as
+ * `failure` when it is a machine's failure note, `verdict` ('pass' or
+ * 'fail') when it is a review verdict, `mergeWord` when it is his merge
+ * phrase. Answers the stretches as
  * `{ from, to, bucket }`, oldest first, touching end to end; none before the
  * ticket's first step.
  */
@@ -734,10 +756,13 @@ export function timeSplitOf(steps, comments, { now }) {
   let status = null;
   let broken = false;
   let operatorLast = false;
+  let passed = false;
+  let mergeStanding = false;
   const bucketNow = () => {
     if (status == null || status === LIVE) return null;
     if (broken) return 'broken';
-    if (OPERATOR_HELD_STATUSES.includes(status) && !operatorLast) return 'operator';
+    const merging = status === 'ready to launch' && mergeStanding;
+    if (OPERATOR_HELD_STATUSES.includes(status) && !operatorLast && !merging) return 'operator';
     if (status === BUILDING) return 'working';
     return 'lane';
   };
@@ -760,6 +785,11 @@ export function timeSplitOf(steps, comments, { now }) {
     } else {
       const c = e.comment;
       operatorLast = Boolean(c.byOperator);
+      if (c.verdict) {
+        passed = c.verdict === 'pass';
+        mergeStanding = false;
+      }
+      if (c.byOperator && c.mergeWord && passed) mergeStanding = true;
       if (c.byOperator) broken = false;
       else if (c.byMachine && c.failure) broken = true;
     }
@@ -895,11 +925,14 @@ export function reportsOf(store, { project = null, now = Date.now(), only = null
     for (const ticket of store.listTickets(p.slug)) {
       const comments = store.listComments(ticket.id).map((c) => {
         const byMachine = isMachineActor(c.author) || isMachineComment(c.body);
+        const byOperator = p.operator != null && c.author === p.operator && !byMachine;
         return {
           at: Date.parse(c.createdAt),
           byMachine,
-          byOperator: p.operator != null && c.author === p.operator && !byMachine,
+          byOperator,
           failure: byMachine && isFailureNote(c.body),
+          verdict: isReviewVerdict(c.body) ? (isReviewPassed(c.body) ? 'pass' : 'fail') : null,
+          mergeWord: byOperator && isMergeCommand(c.body),
         };
       });
       const stretches = timeSplitOf(statusSteps(store, ticket), comments, { now });
