@@ -22,7 +22,7 @@ function fixture({ busProject = 'pressplay-bus' } = {}) {
   const store = openStore(join(dir, 'tracker.db'));
   const operator = store.createActor({ kind: 'human', name: 'Dana' });
   const raw = {
-    workspaceId: '0', spaceId: '0', loopQueueListId: '0',
+    manifestVersion: 1, workspaceId: '0', spaceId: '0', loopQueueListId: '0',
     operatorUserId: String(operator.id), machineUserId: '0',
     githubRepo: 'owner/pressplay', dopplerProject: 'pressplay', dopplerConfig: 'dev',
     launchdPrefix: 'com.pressplay', logDir: '~/loop-logs', mergePhrases: ['merge'],

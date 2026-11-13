@@ -333,62 +333,13 @@ The items below marked **missing**, gathered here so they can become tickets:
   exits non-zero naming the key if anything in the file is wrong.
 - **Today.** **Manual** (written by hand; the checking is automated).
 
-The keys. "Required" means the file is refused without it. Spirality's value
-is the example.
-
-| Key | Required? | What it means | Spirality |
-|---|---|---|---|
-| `workspaceId` | required | The ClickUp workspace. Still checked even on the tracker; a project that never used ClickUp still has to fill it with digits. | `"90141423066"` |
-| `spaceId` | required | The ClickUp space holding the project's lists. | `"90146476540"` |
-| `loopQueueListId` | required | The Loop Queue list the loops drain. On the tracker, this value stands for the tracker project. | `"901418065068"` |
-| `operatorUserId` | required | Dane's seat: every hand-off to him assigns it. On the tracker, his actor id. | `"1"` |
-| `machineUserId` | required | The machine's seat, never assigned a ticket. On the tracker, `loop-build`'s actor id. | `"2"` |
-| `githubRepo` | required | The repository pull requests go to, `owner/name`. | `"mentor24-maker/spirality"` |
-| `dopplerProject` | required | The Doppler project holding the project's keys. | `"spirality"` |
-| `dopplerConfig` | required | The config inside it the loops use. | `"dev"` |
-| `launchdPrefix` | required | The start of every launchd label the installer makes. | `"com.spirality"` |
-| `logDir` | required | The folder the runners write logs and locks to. | `"~/loop-logs"` |
-| `mergePhrases` | required | What Dane writes on a ticket to mean "merge this" (at least one). | `["merge", "merge it", "ship it", "approve"]` |
-| `governancePaths` | required | Files and folders a loop may not change unattended, and no auto-merge lane may carry, on top of the floor every project shares (`lib/autoMergeLane.js`). An entry ending `/` is a folder; a bare name is that file, or that module and its test, in any folder; any other path is one file. StarCaster's own entries are `lib/fixtures/starcasterGovernancePaths.json`. | `["CLAUDE.md", "docs/LOOP_ENGINEERING.md", "docs/DOCTRINE.md", ".claude/skills/", ".claude/settings.json", ".github/workflows/"]` |
-| `autoMergeLanes` | required | Lanes allowed to merge without Dane; empty means none. | `[]` |
-| `operatorName` | required | What the loops call the operator in anything he reads. | `"Dane"` |
-| `projectSlug` | required | The project's short name: log and lock file names, the machine's sender tag, and the tracker project's slug. | `"spirality"` |
-| `legacyMachinePrefixes` | required | Comment prefixes the project's loops used before the `[machine]` stamp. A new project: `[]`. | `[]` |
-| `projectScripts` | required | Paths to the project's own scripts that substrate wiring tests read (`lib/projectScripts.js`). May be `{}`. | `{}` |
-| `tracker` | optional | `"clickup"` (the default) or `"api"`, the tracker on the Mini. A new project: `"api"`. | `"api"` |
-| `trackerPrefix` | optional | The start of every ticket id (`SP-12`). Capital letters and digits. Normie might use `NO`. | `"SP"` |
-| `trackerPort` | optional | The port the tracker service listens on. **Only the project that runs the tracker sets it**; a project that uses Spirality's tracker leaves it out, so the installer installs no second tracker. | `4180` |
-| `trackerHost` | optional | Where that service listens; with `trackerPort` only. | `"0.0.0.0"` |
-| `trackerDataDir` | optional (required with `trackerPort`) | The folder holding the tracker database and its backups. | `"~/spirality-tracker"` |
-| `trackerUrl` | optional (required with `"api"`) | The tracker's address for Dane's browser and the hand-over email. | `"http://mac-mini.local:4180"` |
-| `trackerApiUrl` | optional | The address the loops themselves call; on the Mini, its own `127.0.0.1`. Defaults to `trackerUrl`. | `"http://127.0.0.1:4180"` |
-| `trackerPublicUrl` | optional | The tracker's https address on the internet, through Tailscale Funnel; the API and the page (behind sign-in) answer there. **Only the project that runs the tracker sets it.** Port 443, 8443 or 10000. | `"https://mac-mini.tail7fc5c6.ts.net:8443"` |
-| `trackerPageUrl` | optional | The https name people outside the home network open the tracker's page by, through a small forwarding site made from `trackerPublicUrl` (`docs/TRACKER_MVP.md`, "The page's own name"). Invite and reset emails link there when it is set. **Only the project that runs the tracker sets it**, and only once the name shows the sign-in screen. | `"https://spirality.alphire.agency"` |
-| `tailscaleLabel` | optional (needed by the Funnel script) | The launchd job that keeps Tailscale running on that machine. | `"com.starcaster.tailscaled"` |
-| `tailscaleSocket` | optional (needed by the Funnel script) | Tailscale's socket on that machine (it runs without root). | `"~/.tailscale/tailscaled.sock"` |
-
-**The old names still work, for now (SP-130).** Until November 2026 two of
-these were called `productSlug` and `productScripts` (and the setup's answers
-file had `productName`). A settings file that still uses them loads exactly as
-before: the reader (`OLD_NAMES` in `lib/projectConfig.mjs`) reads each old
-name as its new one, and `node scripts/project_config.mjs productSlug` still
-answers. A file that gives one field under both names with **different**
-values is refused, naming both. To move a project over, its settings file
-changes in one pull request, two lines:
-
-```diff
--  "productSlug": "normie",
-+  "projectSlug": "normie",
--  "productScripts": {},
-+  "projectScripts": {},
-```
-
-The old names go away in a later ticket, once every project has moved over.
-
-Seven of these may be overridden from the environment (Doppler) without
-changing the file: `CLICKUP_WORKSPACE_ID`, `CLICKUP_SPACE_ID`,
-`CLICKUP_LOOP_QUEUE_LIST`, `CLICKUP_OPERATOR_ID`, `CLICKUP_MACHINE_ID`,
-`TRACKER_URL` and `TRACKER_API_URL` (`SCHEMA` in `lib/projectConfig.mjs`).
+The fields, what each is for, whether it is required, its default and an
+example, and the format's version (`"manifestVersion": 1`, the first line of
+every manifest), are written once, in
+[PROJECT_MANIFEST.md](PROJECT_MANIFEST.md). A manifest without the version,
+or written to another one, is refused before any lane runs. The old names
+`productSlug` and `productScripts` still load for now; the same document
+says how to move off them.
 
 ## 3. The Doppler project and its keys
 
