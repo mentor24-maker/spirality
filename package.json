@@ -34,6 +34,7 @@
     "onboard:settings": "node scripts/with_doppler.mjs node --disable-warning=ExperimentalWarning scripts/onboard/settings.mjs",
     "onboard:copy": "node scripts/onboard/copy.mjs",
     "commands:copy": "node scripts/commands_copy.mjs",
+    "release": "node scripts/release.mjs",
     "app-checks": "node scripts/app_checks.mjs",
     "check:syntax": "node scripts/check_syntax.mjs",
     "check:secrets": "node scripts/check_secrets.mjs",

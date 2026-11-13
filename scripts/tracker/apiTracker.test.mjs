@@ -28,7 +28,7 @@ const CARD = `@@ASKED\nbuild the to-do list\n@@CONTEXT\n${sixty}\n@@NEEDED\nPick
  * process, and answers `{ code, out, err }`. A fake `gh` on the PATH answers
  * `pr view` with whatever `f.prBody` holds.
  */
-async function fixture() {
+async function fixture({ serverOptions = {} } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'api-tracker-'));
   const store = openStore(join(dir, 'tracker.db'));
   const human = store.createActor({ kind: 'human', name: 'Dana' });
@@ -36,7 +36,7 @@ async function fixture() {
   const humanToken = store.issueToken(human.id);
   const machineToken = store.issueToken(machine.id);
   store.createProject({ slug: 'alpha', name: 'Alpha', prefix: 'AL', operator: human.id });
-  const server = await startServer({ store, port: 0 });
+  const server = await startServer({ store, port: 0, ...serverOptions });
   const url = `http://127.0.0.1:${server.address().port}`;
 
   const project = join(dir, 'project');
@@ -1205,5 +1205,82 @@ test('stage-counts: a bad date exits 2 reading nothing; one unreadable history e
     assert.equal(r.code, 1);
     assert.equal(r.out, '');
     assert.match(r.err, /stage-counts FAILED: 1 ticket history read\(s\) did not come back, so nothing was printed: AL-2 \(HTTP 502: the tracker's history of AL-2 has no filing or status move\.\)/);
+  } finally { await f.cleanup(); }
+});
+
+/** A scratch remote holding release tags at its main: `release-1` .. `release-<count>`. */
+function releaseRemoteWith(dir, count) {
+  const remote = join(dir, 'releases.git');
+  const work = join(dir, 'release-work');
+  scratchGit.git(dir, 'init', '--quiet', '--bare', '--initial-branch=main', remote);
+  scratchGit.git(dir, 'clone', '--quiet', remote, work);
+  for (let n = 1; n <= count; n += 1) {
+    writeFileSync(join(work, 'file.txt'), String(n));
+    scratchGit.git(work, 'add', 'file.txt');
+    scratchGit.git(work, 'commit', '--quiet', '-m', String(n));
+    scratchGit.git(work, 'push', '--quiet', 'origin', `HEAD:main`, `HEAD:refs/tags/release-${n}`);
+  }
+  return remote;
+}
+
+test('release list shows every project, Spirality\'s own as main, and the newest release (SP-265)', async () => {
+  const f = await fixture({ serverOptions: { ownProject: 'home' } });
+  try {
+    f.store.createProject({ slug: 'home', name: 'Home', prefix: 'HO', operator: f.human.id });
+    const env = { SPIRALITY_RELEASE_REMOTE: releaseRemoteWith(f.dir, 2) };
+    const r = await f.door(['release', 'list'], { env });
+    assert.equal(r.code, 0, r.err);
+    assert.equal(r.out, 'alpha\tnone named\nhome\tmain (always the newest)\n');
+    assert.match(r.err, /2 project\(s\); the newest release is release-2\./);
+    const gone = await f.door(['release', 'list'], { env: { SPIRALITY_RELEASE_REMOTE: join(f.dir, 'no-such.git') } });
+    assert.equal(gone.code, 1, 'a failed tag read says so');
+    assert.match(gone.err, /release list FAILED — the projects are above, but the newest release could not be read/);
+  } finally { await f.cleanup(); }
+});
+
+test('release name and back change the record and read it back; Spirality\'s own, a missing tag and nowhere to roll back exit 2, writing nothing (SP-265)', async () => {
+  const f = await fixture({ serverOptions: { ownProject: 'home' } });
+  try {
+    f.store.createProject({ slug: 'home', name: 'Home', prefix: 'HO', operator: f.human.id });
+    const env = { SPIRALITY_RELEASE_REMOTE: releaseRemoteWith(f.dir, 2) };
+    const own = await f.door(['release', 'name', '--project', 'home', '--to', 'release-1'], { env });
+    assert.equal(own.code, 2);
+    assert.match(own.err, /home is Spirality's own project: Spirality's own lanes always run main/);
+    const missing = await f.door(['release', 'name', '--project', 'alpha', '--to', 'release-9'], { env });
+    assert.equal(missing.code, 2);
+    assert.match(missing.err, /release-9 has no tag on .*; the newest release is release-2/);
+    assert.equal((await f.door(['release', 'name', '--project', 'alpha', '--to', 'v9'], { env })).code, 2);
+    assert.equal((await f.door(['release', 'name', '--project', 'nope', '--to', 'release-1'], { env })).code, 2);
+    const nowhere = await f.door(['release', 'back', '--project', 'alpha'], { env });
+    assert.equal(nowhere.code, 2);
+    assert.match(nowhere.err, /no release named yet/);
+    assert.deepEqual(f.store.projectReleases('alpha'), []);
+
+    const one = await f.door(['release', 'name', '--project', 'alpha', '--to', 'release-1'], { env });
+    assert.equal(one.code, 0, one.err);
+    assert.equal(one.out, 'alpha\trelease-1\n');
+    assert.match(one.err, /alpha now runs release-1 \(it ran none named\), read back/);
+    assert.equal((await f.door(['release', 'name', '--project', 'alpha', '--to', 'release-2'], { env })).code, 0);
+    const same = await f.door(['release', 'name', '--project', 'alpha', '--to', 'release-2'], { env });
+    assert.equal(same.code, 0);
+    assert.match(same.err, /already runs release-2; nothing written/);
+    const back = await f.door(['release', 'back', '--project', 'alpha'], { env });
+    assert.equal(back.code, 0, back.err);
+    assert.equal(back.out, 'alpha\trelease-1\n');
+    assert.match(back.err, /alpha now runs release-1 \(it ran release-2\), read back/);
+    assert.deepEqual(f.store.projectReleases('alpha').map((r) => [r.release, r.actor]),
+      [['release-1', f.machine.id], ['release-2', f.machine.id], ['release-1', f.machine.id]]);
+    assert.equal((await f.door(['release', 'list'], { env })).out, 'alpha\trelease-1\nhome\tmain (always the newest)\n');
+  } finally { await f.cleanup(); }
+});
+
+test('release name on a tracker that cannot tell Spirality\'s own project fails with exit 1, writing nothing (SP-265)', async () => {
+  const f = await fixture();
+  try {
+    const env = { SPIRALITY_RELEASE_REMOTE: releaseRemoteWith(f.dir, 1) };
+    const r = await f.door(['release', 'name', '--project', 'alpha', '--to', 'release-1'], { env });
+    assert.equal(r.code, 1);
+    assert.match(r.err, /cannot say which project is Spirality's own/);
+    assert.deepEqual(f.store.projectReleases('alpha'), []);
   } finally { await f.cleanup(); }
 });

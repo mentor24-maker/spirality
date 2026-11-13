@@ -28,8 +28,8 @@ async function fixture() {
   const lines = [];
   const servers = [];
   const stores = [store];
-  async function serve(s = store) {
-    const server = await startServer({ store: s, port: 0, log: (line) => lines.push(line) });
+  async function serve(s = store, options = {}) {
+    const server = await startServer({ store: s, port: 0, log: (line) => lines.push(line), ...options });
     servers.push(server);
     return `http://127.0.0.1:${server.address().port}`;
   }
@@ -2830,5 +2830,66 @@ test('pipeline controls: anyone signed in reads them, defaults marked; the opera
     }
     assert.equal(f.store.pipelineSettingChanges('alpha').length, 1, 'a refused change logs nothing');
     assert.equal(control(f.store.pipelineSettings('alpha').reduce((v, c) => ({ controls: [...v.controls, c] }), { controls: [] }), 'wake.loop-build').value, '900');
+  } finally { await f.cleanup(); }
+});
+
+test('releases: GET answers each project\'s release, Spirality\'s own as main; a loop or the operator names one and rolls it back, read back (SP-265)', async () => {
+  const f = await fixture();
+  try {
+    f.store.createProject({ slug: 'home', name: 'Home', prefix: 'HO', operator: f.human.id });
+    const at = await f.serve(f.store, { ownProject: 'home' });
+    const all = await f.call('GET', '/releases', { at });
+    assert.equal(all.status, 200);
+    assert.equal(all.body.ownProject, 'home');
+    assert.equal(all.body.ownRelease, 'main (always the newest)');
+    assert.deepEqual(all.body.projects.map((p) => [p.slug, p.own, p.release]), [['alpha', false, null], ['home', true, null]]);
+
+    const named = await f.call('PUT', '/releases/alpha', { at, body: { release: 'release-1' } });
+    assert.equal(named.status, 200);
+    assert.deepEqual(named.body.saved, { project: 'alpha', from: null, to: 'release-1', changed: true });
+    assert.equal(named.body.release, 'release-1');
+    await f.call('PUT', '/releases/alpha', { at, token: f.humanToken, body: { release: 'release-2' } });
+    const read = await f.call('GET', '/releases/alpha', { at, token: f.humanToken });
+    assert.equal(read.body.release, 'release-2', 'read back by another sign-in');
+    assert.deepEqual(read.body.history.map((h) => [h.release, h.actor]), [['release-2', f.human.id], ['release-1', f.machine.id]]);
+
+    const back = await f.call('POST', '/releases/alpha/back', { at });
+    assert.equal(back.status, 200);
+    assert.deepEqual(back.body.saved, { project: 'alpha', from: 'release-2', to: 'release-1', changed: true });
+    assert.equal((await f.call('GET', '/releases/alpha', { at })).body.release, 'release-1');
+    assert.ok(f.lines.some((l) => l === `release alpha release-2 -> release-1 (roll-back) actor=${f.machine.id}`));
+  } finally { await f.cleanup(); }
+});
+
+test('releases: Spirality\'s own project, a bad name, a roll-back with nowhere to go, someone else and a tracker that cannot tell its own project are refused, writing nothing (SP-265)', async () => {
+  const f = await fixture();
+  try {
+    f.store.createProject({ slug: 'home', name: 'Home', prefix: 'HO', operator: f.human.id });
+    const at = await f.serve(f.store, { ownProject: 'home' });
+    const own = await f.call('PUT', '/releases/home', { at, body: { release: 'release-1' } });
+    assert.equal(own.status, 409);
+    assert.equal(own.body.error, 'own-project');
+    assert.match(own.body.message, /its lanes always run main/);
+    assert.equal((await f.call('POST', '/releases/home/back', { at })).body.error, 'own-project');
+    const bad = await f.call('PUT', '/releases/alpha', { at, body: { release: 'v2' } });
+    assert.equal(bad.status, 400);
+    assert.equal(bad.body.error, 'bad-release');
+    assert.equal((await f.call('PUT', '/releases/alpha', { at, body: { release: 'release-1', extra: 1 } })).body.error, 'bad-field');
+    const nowhere = await f.call('POST', '/releases/alpha/back', { at });
+    assert.equal(nowhere.status, 409);
+    assert.equal(nowhere.body.error, 'nothing-to-roll-back-to');
+    const someone = f.store.createActor({ kind: 'human', name: 'Someone Else' });
+    f.store.addMember({ project: 'alpha', actor: someone.id, by: f.human.id });
+    const otherToken = f.store.issueToken(someone.id);
+    const other = await f.call('PUT', '/releases/alpha', { at, token: otherToken, body: { release: 'release-1' } });
+    assert.equal(other.status, 403);
+    assert.equal(other.body.error, 'not-allowed');
+    assert.equal((await f.call('GET', '/releases/nope', { at })).status, 404);
+    assert.equal((await f.call('GET', '/releases', { at, token: null })).status, 401);
+    // The fixture's first server was started with no project config.
+    const blind = await f.call('PUT', '/releases/alpha', { body: { release: 'release-1' } });
+    assert.equal(blind.status, 503);
+    assert.equal(blind.body.error, 'no-own-project');
+    assert.deepEqual(f.store.projectReleases('alpha'), []);
   } finally { await f.cleanup(); }
 });

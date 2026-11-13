@@ -126,6 +126,14 @@
       "to": "loop/lib/relayLane.test.js"
     },
     {
+      "from": "lib/releases.mjs",
+      "to": "loop/lib/releases.mjs"
+    },
+    {
+      "from": "lib/releases.test.mjs",
+      "to": "loop/lib/releases.test.mjs"
+    },
+    {
       "from": "lib/sendBackRounds.js",
       "to": "loop/lib/sendBackRounds.js"
     },

@@ -55,6 +55,8 @@ import { readLedgerFile, saveLedgerIfReadable } from '../lib/autoMergeLedgerFile
 import { readLeaseFile, saveLeaseIfReadable } from '../lib/mergeWindowLeaseFile.js';
 
 import { loadProjectConfig, ProjectConfigError } from '../lib/projectConfig.mjs';
+// Spirality's releases (SP-265): what one is, and reading the tags.
+import { isReleaseName, OWN_PROJECT_RELEASE, readReleaseTags, releaseRemote } from '../lib/releases.mjs';
 // The merge lane's decisions (task 86bchpkxz). `mergeDecision` says whether
 // Dane's word authorizes a merge, `githubGate` whether GitHub allows it; the
 // notices pair the words he reads with the marker the next pass reads. All
@@ -245,6 +247,13 @@ npm run clickup -- <command> [flags]      (Loop Queue: list ${LOOP_QUEUE_LIST}, 
   bus-read [--operator] [--since <time>]          the bus's comments, oldest first: time (ISO, UTC: feeds --since), ticket, operator|machine, author, first line
   settings                                        read-only: this project's pipeline controls (the Settings page), one
                                                   name=value line each, defaults included. Exit 1 saying why when they cannot be read
+  release list                                    Spirality's releases: each project and the release it runs (tab-separated), Spirality's own
+                                                  as "${OWN_PROJECT_RELEASE}", then the newest release. Exit 1 saying why on a failed read
+  release name --project <slug> --to release-<n>  name the release a project runs, read back. Refused (exit 2) for a release with no tag
+                                                  and for Spirality's own project; exit 1 when the write did not stick
+  release back --project <slug>                   roll a project back: name the release it ran before this one again, read back.
+                                                  Exit 2 when there is none; 1 when the write did not stick
+                                                  (cut a release with \`npm run release -- cut\`)
   main-moved --pr <merged #> [--list <id>] [--dry-run]
                                                   tell every Building / In review / Rework ticket with an open PR whether
                                                   that merge moved main under it: no-overlap, same-files, conflict or
@@ -2311,6 +2320,69 @@ if (cmd === 'whoami') {
   const changed = out.json.controls.filter((c) => !c.isDefault).length;
   console.error(`settings: ${lines.length} pipeline control(s) for ${project.projectSlug}, ${changed} changed from the default.`);
   reportLimits();
+
+} else if (cmd === 'release') {
+  // Spirality's releases (SP-265, docs/INTEGRATION.md "How a change reaches
+  // the projects"). A release is a tag on Spirality's main; which one each
+  // project runs is the tracker's record. The tags are read from the remote
+  // of the Spirality checkout this door runs from, never a local copy.
+  const sub = process.argv[3];
+  const git = (args) => spawnSync('git', args, { cwd: REPO_ROOT, encoding: 'utf8', timeout: 60_000 });
+  const remote = releaseRemote();
+  const refuse = (why) => { console.error(`release ${sub}: refused — ${why}`); reportLimits(); process.exit(2); };
+  const fail = (why) => { console.error(`release ${sub} FAILED — ${why}`); reportLimits(); process.exit(1); };
+  const all = await tracker.releases();
+  if (!all.res.ok) {
+    if (all.unsupported) refuse(all.json.err);
+    die('read the releases', all);
+  }
+  const ownProject = all.json.ownProject ?? null;
+
+  if (sub === 'list') {
+    for (const p of all.json.projects) {
+      console.log(`${p.slug}\t${p.own ? OWN_PROJECT_RELEASE : p.release ?? 'none named'}`);
+    }
+    const read = readReleaseTags({ git, remote });
+    if (read.problem) fail(`the projects are above, but the newest release could not be read: ${read.problem}`);
+    console.error(`release list: ${all.json.projects.length} project(s); the newest release is ${read.tags[0]?.name ?? 'none (no release cut yet: npm run release -- cut)'}.`);
+    if (!ownProject) console.error('  (the tracker could not say which project is Spirality\'s own: its project config was not usable when it started.)');
+    reportLimits();
+
+  } else if (sub === 'name' || sub === 'back') {
+    const slug = arg('project');
+    const to = sub === 'name' ? arg('to') : null;
+    if (!slug || (sub === 'name' && !to)) usage();
+    if (!ownProject) fail('the tracker cannot say which project is Spirality\'s own (its project config was not usable when it started), so no release can be named.');
+    const target = all.json.projects.find((p) => p.slug === slug);
+    if (!target) refuse(`no project "${slug}" that this sign-in can see.`);
+    if (slug === ownProject) refuse(`${slug} is Spirality's own project: Spirality's own lanes always run main, so no release is named for it.`);
+    if (sub === 'name') {
+      if (!isReleaseName(to)) refuse(`"${to}" is not a release name; a release is named release-<n>, n a whole number from 1.`);
+      const read = readReleaseTags({ git, remote });
+      if (read.problem) fail(`could not check that ${to} exists: ${read.problem}`);
+      if (!read.tags.some((t) => t.name === to)) {
+        refuse(`${to} has no tag on ${remote}${read.tags.length ? `; the newest release is ${read.tags[0].name}` : '; no release has been cut yet (npm run release -- cut)'}.`);
+      }
+    }
+    const out = sub === 'name' ? await tracker.nameRelease(slug, to) : await tracker.rollBackRelease(slug);
+    if (!out.res.ok) {
+      const why = out.json?.err || out.json?.message || String(out.text || '').slice(0, 300);
+      if (out.res.status >= 400 && out.res.status < 500) refuse(why);
+      fail(`HTTP ${out.res.status}: ${why}`);
+    }
+    const saved = out.json.saved;
+    const back = await tracker.projectRelease(slug);
+    if (!back.res.ok) fail(`the tracker answered, but the record could not be read back (HTTP ${back.res.status}); treat it as not saved.`);
+    if (back.json.release !== saved.to) fail(`${slug}'s release read back as ${back.json.release ?? 'none'}, not ${saved.to}; treat it as not saved.`);
+    console.log(`${slug}\t${back.json.release}`);
+    console.error(saved.changed
+      ? `release ${sub}: ${slug} now runs ${saved.to} (it ran ${saved.from ?? 'none named'}), read back.`
+      : `release ${sub}: ${slug} already runs ${saved.to}; nothing written.`);
+    reportLimits();
+
+  } else {
+    usage();
+  }
 
 } else if (cmd === 'main-moved') {
   // The relay runs this step after every merge it makes; a session that
