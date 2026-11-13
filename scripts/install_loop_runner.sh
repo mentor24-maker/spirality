@@ -88,7 +88,7 @@ status_one() {
     echo "loaded:   no"
   fi
   if [ -d "$lock" ]; then
-    local pid; pid="$(cat "$lock/pid" 2>/dev/null)"
+    local pid; pid="$(cat "$lock/pid" 2>/dev/null || true)"
     if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then echo "lock:     held by live pid $pid — a pass is working"
     else echo "lock:     STALE (pid ${pid:-unrecorded} is gone) — the next start clears it"; fi
   else
