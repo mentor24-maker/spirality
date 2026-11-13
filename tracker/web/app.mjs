@@ -2280,7 +2280,36 @@ function drawPipelineControls(box, views) {
         const button = tr.querySelector('button');
         if (button) button.addEventListener('click', () => save(slug, tr, button));
       }
+      for (const button of section.querySelectorAll('button[data-release-action]')) {
+        button.addEventListener('click', () => moveRelease(slug, button.dataset.releaseAction, section));
+      }
     }
+  };
+  /**
+   * Move to Newest or Roll Back (SP-275): the write, then the project's
+   * controls read again, and "Now runs" only when the release read back is
+   * the one the tracker says it named. A refusal shows its reason.
+   */
+  const moveRelease = async (slug, action, section) => {
+    const mine = notes.get(slug) ?? {};
+    notes.set(slug, mine);
+    for (const b of section.querySelectorAll('button[data-release-action]')) b.disabled = true;
+    const note = section.querySelector('.release-actions .note');
+    if (note) { note.className = 'note quiet'; note.textContent = 'Saving…'; }
+    try {
+      const answer = await api('POST', `/releases/${encodeURIComponent(slug)}/${action}`, {});
+      const to = answer.saved?.to;
+      // Read back before saying it worked.
+      const back = await api('GET', `/pipeline-controls/${encodeURIComponent(slug)}`);
+      const now = back.release?.current?.release ?? null;
+      if (!to || now !== to) throw new Error(`the tracker read it back as ${now ?? 'no release'}, not ${to ?? 'the one asked for'}.`);
+      mine.release = { ok: true, text: answer.saved.changed ? `Saved: it now runs ${to}.` : `Saved (it already ran ${to}).` };
+      views = views.map((v) => (v.project.slug === slug ? back : v));
+    } catch (err) {
+      if (err instanceof SignedOut) return drawSignIn('You were signed out; the release was not changed.');
+      mine.release = { ok: false, text: `Not saved: ${err.message}` };
+    }
+    draw();
   };
   const save = async (slug, tr, button) => {
     const key = tr.dataset.control;
