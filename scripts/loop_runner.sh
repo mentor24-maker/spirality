@@ -138,6 +138,31 @@ read_wake_time() {
   echo "[loop-runner] $(date "+%H:%M:%S") could not read /$SKILL's wake time from the tracker (${said:-no answer}) — keeping the last good value, ${INTERVAL}s" >> "$LOG"
 }
 
+# The model Dane chose for this lane on the tracker's Settings page (SP-239),
+# read before every pass, so a change takes effect at the next pass with no
+# launchd reload. scripts/lib/modelSetting.mjs prints `default` or one id from
+# the Settings page's own list (scripts/lib/laneModels.mjs MODELS), or one
+# line saying why it could not. A chosen model adds `--model <id>` to the
+# claude line; `default`, or anything that could not be read or is not a
+# plain model id, adds nothing, so the command is exactly what it was before
+# the setting existed, and the log says why in one line. PASS_MODEL is what
+# the START line names.
+read_model() {
+  PASS_MODEL=default
+  MODEL_ARGS=()
+  local said code
+  said="$(node "$REPO/scripts/lib/modelSetting.mjs" "$SKILL" 2>/dev/null)"
+  code=$?
+  if [ "$code" -eq 0 ]; then
+    case "$said" in
+      default) return 0 ;;
+      *[!a-z0-9.-]*) ;;
+      claude-?*) PASS_MODEL="$said"; MODEL_ARGS=(--model "$said"); return 0 ;;
+    esac
+  fi
+  echo "[loop-runner] $(date "+%H:%M:%S") could not read /$SKILL's model from the tracker (${said:-no answer}) — this pass runs on Claude's default" >> "$LOG"
+}
+
 # A template with X's, the one form macOS and GNU mktemp both accept.
 PASS_OUT="$(mktemp "${TMPDIR:-/tmp}/$SLUG-pass.XXXXXX")"
 trap 'rm -rf "$LOCK" "$PASS_OUT" 2>/dev/null; [ "$(cat "$SYNC_LOCK/pid" 2>/dev/null)" = "$$" ] && rm -rf "$SYNC_LOCK"' EXIT
@@ -206,8 +231,11 @@ while true; do
   # This pass reads the queue afresh, so every wake sent before now is answered
   # by it. A wake sent from here on is kept for the next one.
   rm -f "$WAKE"
+  read_model
   echo "" >> "$LOG"
-  echo "===== $(date "+%Y-%m-%d %H:%M:%S") START /$SKILL =====" >> "$LOG"
+  # The START line names the model, so the Settings page (tracker/pipeline.mjs)
+  # and the time-in-status report can tell which pass ran on what.
+  echo "===== $(date "+%Y-%m-%d %H:%M:%S") START /$SKILL (model: $PASS_MODEL) =====" >> "$LOG"
   # The pass's output goes to the log as it happens AND to its own file, so
   # the sign-in check below reads this pass only, not an older one.
   # The time limit writes what the pass was running into this file when it has
@@ -217,7 +245,7 @@ while true; do
   rm -f "$SNAPSHOT"
   RUN_WITH_TIME_LIMIT_SNAPSHOT="$SNAPSHOT" \
   "$REPO/scripts/run_with_time_limit.sh" "${LOOP_PASS_LIMIT_SECONDS:-7200}" -- \
-    "$CLAUDE_BIN" -p "/$SKILL" \
+    "$CLAUDE_BIN" -p "/$SKILL" ${MODEL_ARGS[@]+"${MODEL_ARGS[@]}"} \
     --allowedTools Bash Edit Write Read Glob Grep Task TodoWrite WebFetch \
     2>&1 | tee "$PASS_OUT" >> "$LOG"
   CODE=${PIPESTATUS[0]}

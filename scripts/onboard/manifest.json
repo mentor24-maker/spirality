@@ -271,6 +271,16 @@
       "why": "loop_runner.sh and run_relay.sh read the wake time set on the Settings page with it"
     },
     {
+      "from": "scripts/lib/modelSetting.mjs",
+      "to": "scripts/lib/modelSetting.mjs",
+      "why": "loop_runner.sh reads the model chosen for its lane on the Settings page with it"
+    },
+    {
+      "from": "scripts/lib/laneModels.mjs",
+      "to": "scripts/lib/laneModels.mjs",
+      "why": "modelSetting.mjs checks the chosen model against this list"
+    },
+    {
       "from": "scripts/lib/gh_auth.sh",
       "to": "scripts/lib/gh_auth.sh"
     },

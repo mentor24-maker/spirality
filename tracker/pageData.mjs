@@ -578,7 +578,9 @@ export function stageColoursOf(store) {
  * (pipelineOf), or null when it reads no logs of it. With them, each wake
  * time carries `used`, the seconds its job last actually woke on (null when
  * its log does not say yet), and `inEffect`, whether that is the set value;
- * without them both are null, never a guess (SP-236).
+ * without them both are null, never a guess (SP-236). Each model carries
+ * `lastModel`, the model its lane's last pass ran on (the lane's START line:
+ * an id or `default`), null when the log does not say (SP-239).
  */
 export function pipelineControlsOf(store, slug, { reader = null, lanes = null, ownProject = null, newest = null } = {}) {
   const project = store.getProject(slug);
@@ -594,6 +596,7 @@ export function pipelineControlsOf(store, slug, { reader = null, lanes = null, o
     groups: GROUPS.map((g) => ({ ...g })),
     models: [{ id: DEFAULT_MODEL, label: "Claude's default" }, ...MODELS.map((m) => ({ ...m }))],
     controls: store.pipelineSettings(project.slug).map((c) => {
+      if (c.group === 'model') return { ...c, lastModel: lanes?.find((l) => `model.${l.job}` === c.key)?.model ?? null };
       if (c.group !== 'wake') return { ...c };
       const used = lanes?.find((l) => `wake.${l.job}` === c.key)?.used ?? null;
       return { ...c, used, inEffect: used == null ? null : String(used) === c.value };

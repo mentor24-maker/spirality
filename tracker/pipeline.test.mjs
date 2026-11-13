@@ -50,7 +50,7 @@ test('four stages from scratch logs: a sleeping lane, a running lane, the relay,
       lastStart: at('2026-11-09T18:22:34').toISOString(), lastEnd: at('2026-11-09T18:25:36').toISOString(), lastExit: 0,
       interval: 1800, set: 1800, used: 1800, nextDue: at('2026-11-09T18:55:36').toISOString(),
       failing: false, failedPasses: 0, failingSince: null, failingReason: null,
-      paused: null,
+      paused: null, model: null,
     });
     assert.equal(by.Build.running, true);
     assert.equal(by.Build.nextDue, null);
@@ -64,12 +64,12 @@ test('four stages from scratch logs: a sleeping lane, a running lane, the relay,
     assert.equal(by.Relay.lastEnd, at('2026-11-09T18:37:52').toISOString());
     assert.equal(by.Relay.lastExit, 0);
     // No log: nothing logged, and it wakes as the installer sets it to.
-    assert.deepEqual(by.Intake, { name: 'Intake', job: 'loop-intake', logged: false, running: false, lastStart: null, lastEnd: null, lastExit: null, interval: INTERVALS['loop-intake'], set: INTERVALS['loop-intake'], used: null, nextDue: null, failing: false, failedPasses: 0, failingSince: null, failingReason: null, paused: null });
+    assert.deepEqual(by.Intake, { name: 'Intake', job: 'loop-intake', logged: false, running: false, lastStart: null, lastEnd: null, lastExit: null, interval: INTERVALS['loop-intake'], set: INTERVALS['loop-intake'], used: null, nextDue: null, failing: false, failedPasses: 0, failingSince: null, failingReason: null, paused: null, model: null });
     // Times and flags only: no log text anywhere in the answer.
     const text = JSON.stringify(answer);
     assert.doesNotMatch(text, /SECRET|REPORT|working|under way|WebApps|=====/);
     for (const s of answer.stages) {
-      assert.deepEqual(Object.keys(s).sort(), ['failedPasses', 'failing', 'failingReason', 'failingSince', 'interval', 'job', 'lastEnd', 'lastExit', 'lastStart', 'logged', 'name', 'nextDue', 'paused', 'running', 'set', 'used']);
+      assert.deepEqual(Object.keys(s).sort(), ['failedPasses', 'failing', 'failingReason', 'failingSince', 'interval', 'job', 'lastEnd', 'lastExit', 'lastStart', 'logged', 'model', 'name', 'nextDue', 'paused', 'running', 'set', 'used']);
       // Times, codes and intervals only: every value a flag, a name, an ISO time, a number or null.
       for (const t of [s.lastStart, s.lastEnd, s.nextDue]) assert.ok(t === null || /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(t), t);
       assert.ok(s.lastExit === null || Number.isInteger(s.lastExit));
@@ -351,4 +351,31 @@ test('pipelineOf marks each stage paused from the controls it is given, logged o
     const whole = pipelineOf({ logDir: dir, slug: 'proj' }, { controls: [{ key: 'paused', value: 'on' }] });
     assert.ok(whole.stages.every((s) => s.paused === 'pipeline'));
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('a lane\'s model is the one its newest START line names; an older START line, or one with no plain model id, names none (SP-239)', () => {
+  const started = (job, d, model) => `===== ${logDate(d)} START /${job} (model: ${model}) =====`;
+  const dir = scratch({
+    'proj-loop-review.log': [
+      started('loop-review', at('2026-11-13T12:00:00'), 'claude-opus-5-5'),
+      end('loop-review', at('2026-11-13T12:05:00')),
+      sleeping('loop-review', at('2026-11-13T12:05:00')),
+      started('loop-review', at('2026-11-13T12:35:00'), 'claude-sonnet-5-5'),
+      end('loop-review', at('2026-11-13T12:40:00')),
+    ].join('\n'),
+    'proj-loop-build.log': [
+      started('loop-build', at('2026-11-13T12:00:00'), 'claude-haiku-5-5'),
+      end('loop-build', at('2026-11-13T12:05:00')),
+      start('loop-build', at('2026-11-13T12:35:00')),
+    ].join('\n'),
+    'proj-loop-intake.log': [started('loop-intake', at('2026-11-13T12:00:00'), 'default'), end('loop-intake', at('2026-11-13T12:05:00'))].join('\n'),
+    'proj-relay.log': [relayStart(at('2026-11-13T12:00:00')), relayEnd(at('2026-11-13T12:00:10'))].join('\n'),
+  });
+  try {
+    const by = Object.fromEntries(pipelineOf({ logDir: dir, slug: 'proj' }).stages.map((s) => [s.job, s.model]));
+    assert.deepEqual(by, { relay: null, 'loop-build': null, 'loop-review': 'claude-sonnet-5-5', 'loop-intake': 'default' });
+    assert.equal(readStage(started('loop-build', at('2026-11-13T12:00:00'), 'Some Thing <b>'), 'loop-build').model, null, 'only a plain id leaves here');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

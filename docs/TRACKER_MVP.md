@@ -416,8 +416,16 @@ drains, never kills). Settings that cannot be read count as paused, and the
 line says so: a tracker outage pauses every lane until it answers again. The
 Pipeline Status pod shows a paused stage as "Paused", and the Settings page
 says "Draining: N ticket(s) still finishing" until nothing is in flight. The
-rest are not acted on yet: SP-238 (the cap) and SP-239 (the model) each wire
-one in.
+model per lane is in effect too (SP-239): before every pass a lane's runner
+reads its model (`scripts/lib/modelSetting.mjs`) and adds `--model <id>` to
+its `claude` line; Claude's default, settings that cannot be read, or a value
+not on the page's list (`scripts/lib/laneModels.mjs`) run today's command
+with no `--model`, the last two with one log line saying why. The START line
+names the model (`START /loop-build (model: <id or default>)`), and the page
+shows beside each lane the model its last pass ran on. The work-in-progress
+cap is in effect too (SP-238): before it claims, loop-build runs `npm run
+clickup -- wip-check` (`lib/wipCheck.js`) and claims nothing while the tickets
+in flight are at the page's cap.
 A browser opening `/projects` or `/projects/<slug>` gets the page; the page's own
 call to the same address gets the data. `/users` is the page alone; its data
 is still `GET /people` (the onboarding scripts read it), and a browser opening

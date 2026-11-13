@@ -13,8 +13,8 @@ test('the defaults are today\'s behaviour, read from where it lives now (SP-224)
   assert.deepEqual(CONTROLS.filter((c) => c.kind === 'model').map((c) => c.key), MODEL_LANES.map((l) => `model.${l}`));
 });
 
-test('every group the lanes do not use yet names the ticket that wires it in (the wake times, SP-236, and the pause switches, SP-237, are wired), and every control is in a group', () => {
-  assert.deepEqual(GROUPS.map((g) => [g.key, g.wiredBy]), [['wake', null], ['pause', null], ['cap', null], ['model', 'SP-239']]);
+test('every group the lanes do not use yet names the ticket that wires it in (the wake times, SP-236, the pause switches, SP-237, the cap, SP-238, and the models, SP-239, are all wired), and every control is in a group', () => {
+  assert.deepEqual(GROUPS.map((g) => [g.key, g.wiredBy]), [['wake', null], ['pause', null], ['cap', null], ['model', null]]);
   assert.ok(CONTROLS.every((c) => GROUPS.some((g) => g.key === c.group)));
   assert.deepEqual(RELEASE_GROUP, { key: 'release', title: 'Spirality Release', wiredBy: 'SP-276' }, 'the release group is not a control, and SP-276 wires it in (SP-275)');
   assert.ok(!CONTROLS.some((c) => c.group === RELEASE_GROUP.key));

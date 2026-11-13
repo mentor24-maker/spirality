@@ -521,6 +521,20 @@ export function wakeInEffectText(control) {
   return `Last used: ${secondsText(control.used)}. Waiting for the lane's next pass to pick this up.`;
 }
 
+/**
+ * Under a lane's model (SP-239): the model its last pass ran on, read from
+ * the START line its runner writes. The runner reads the setting before each
+ * pass, so after a change the next pass shows it; until then this names the
+ * one the lane is still on.
+ */
+export function modelLastPassText(control, models = []) {
+  const last = control?.lastModel;
+  if (last == null) return 'Last pass ran on: not known on this machine yet.';
+  const label = models.find((m) => m.id === last)?.label ?? last;
+  if (last === control.value) return `In effect: the last pass ran on ${label}.`;
+  return `Last pass ran on: ${label}. The lane's next pass picks this up.`;
+}
+
 /** One control's input, named by its key: a number box, an On/Off choice or a model choice. */
 function controlInput(c, models, id, locked) {
   const off = locked ? ' disabled' : '';
@@ -577,7 +591,8 @@ export function capInFlightText(c, capInFlight) {
  * them), then, for a group the lanes do not use yet, a line saying so,
  * naming the ticket that wires it in, and under the pause switches, while
  * any is on, the drain line (drainLine). Each wake time also says what its
- * lane last used (wakeInEffectText). Under them, the change log, newest first, in
+ * lane last used (wakeInEffectText), and each model what its lane's last
+ * pass ran on (modelLastPassText). Under them, the change log, newest first, in
  * Mountain time. `notes` is `{ key: { ok, text } }`, a Save's outcome to show
  * beside its control.
  */
@@ -592,7 +607,7 @@ export function renderPipelineControls(view, notes = {}) {
     return `<tr data-control="${escapeHtml(c.key)}" data-kind="${escapeHtml(c.kind)}">
       <td class="label"><label for="${id}">${escapeHtml(c.label)}</label>${mark}</td>
       <td class="input">${controlInput(c, models, id, locked)}</td>
-      <td class="value">${escapeHtml(controlValueText(c, models))}${c.group === 'wake' ? `<span class="in-effect${c.inEffect === false ? ' waiting' : ''}">${escapeHtml(wakeInEffectText(c))}</span>` : ''}${c.key === 'wip-cap' ? capInFlightText(c, view.capInFlight) : ''}</td>
+      <td class="value">${escapeHtml(controlValueText(c, models))}${c.group === 'wake' ? `<span class="in-effect${c.inEffect === false ? ' waiting' : ''}">${escapeHtml(wakeInEffectText(c))}</span>` : ''}${c.group === 'model' ? `<span class="in-effect${c.lastModel != null && c.lastModel !== c.value ? ' waiting' : ''}">${escapeHtml(modelLastPassText(c, models))}</span>` : ''}${c.key === 'wip-cap' ? capInFlightText(c, view.capInFlight) : ''}</td>
       <td class="save">${locked ? '' : '<button type="button">Save</button>'}<span class="note${note ? (note.ok ? ' quiet' : ' error') : ''}">${note ? escapeHtml(note.text) : ''}</span></td>
     </tr>`;
   };
