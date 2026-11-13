@@ -2177,15 +2177,24 @@ function spanOf(ms) {
  * the tasks that took the most time in the range picked. Every figure is worked out by the
  * server (pageData.mjs reportsOf); the page only draws them, so the ranges
  * and the stages come from its answer, never typed out here. A stage wears
- * its Settings colour as properties, never as markup.
+ * its Settings colour as properties, never as markup. Task Productivity
+ * also has its own range (SP-240): a Start Date and an End Date picker in
+ * its header, 30 days ago to today on arrival (`range` keeps the picked dates
+ * when the project changes); a picker change asks the server again and
+ * redraws only those cells.
  */
-async function drawReporting(chosen) {
+async function drawReporting(chosen, range = defaultReportRange()) {
   const { projects } = await api('GET', '/projects');
   const slug = chosen !== undefined ? chosen : (projects.some((p) => p.slug === savedProject()) ? savedProject() : '');
-  const r = await api('GET', `/reports${slug ? `?project=${encodeURIComponent(slug)}` : ''}`);
+  const r = await api('GET', reportsPath(slug, range));
   setTitle('Reporting · Tracker');
   const head = `<tr><th>Report</th>${r.ranges.map((g) => `<th class="count">${escapeHtml(g.label)}</th>`).join('')}</tr>`;
-  const line = (label, counts) => `<tr><td class="name">${label}</td>${r.ranges.map((g) => `<td class="count">${Number(counts[g.key])}</td>`).join('')}</tr>`;
+  // Task Productivity's own range (SP-240): a Start Date and an End Date column after the fixed ones, a picker in each header.
+  const productivityHead = `<tr><th>Report</th>${r.ranges.map((g) => `<th class="count">${escapeHtml(g.label)}</th>`).join('')}`
+    + `<th class="count custom-range"><label for="report-from">Start Date</label><input type="date" id="report-from" value="${escapeHtml(range.from)}"></th>`
+    + `<th class="count custom-range"><label for="report-to">End Date</label><input type="date" id="report-to" value="${escapeHtml(range.to)}"></th></tr>`;
+  const line = (label, counts) => `<tr><td class="name">${label}</td>${r.ranges.map((g) => `<td class="count">${Number(counts[g.key])}</td>`).join('')}`
+    + `<td class="count" data-custom-from></td><td class="count" data-custom="${counts === r.started ? 'started' : 'finished'}"></td></tr>`;
   // A flow row: one cell per range, "none finished in this range" where nothing finished.
   const flowLine = (label, cell) => `<tr><td class="name">${label}</td>${r.ranges.map((g) => {
     const f = r.flow[g.key];
@@ -2231,7 +2240,8 @@ async function drawReporting(chosen) {
     </form>
     <h2>Task Productivity</h2>
     <p class="quiet">Started: filed in that time. Finished: moved to Live in that time and still Live.</p>
-    <table class="counts report"><thead>${head}</thead><tbody>${line('Tasks started', r.started)}${line('Tasks finished', r.finished)}</tbody></table>
+    <table class="counts report productivity"><thead>${productivityHead}</thead><tbody>${line('Tasks started', r.started)}${line('Tasks finished', r.finished)}</tbody></table>
+    <p class="quiet custom-range-note" hidden></p>
     <h2>Human Hours of Work Done</h2>
     <p class="quiet">For tasks finished in that time: the build loop's estimate, recorded on each pull request, of the hours an experienced programmer new to the code would take to do the same work. An estimate, not a measurement; tasks with none are left out of the total, and counted here.</p>
     <table class="counts report human-hours"><thead>${head}</thead><tbody>${hoursLine('Total', (h) => hoursOf(h.hours))}${estimatedLine}${hoursLine('Per day', (h) => `about ${Number(h.perDay)} human hour${Number(h.perDay) === 1 ? '' : 's'} a day`)}</tbody></table>
@@ -2270,10 +2280,85 @@ async function drawReporting(chosen) {
   main.querySelector('#time-split-range').addEventListener('change', (e) => {
     main.querySelector('.time-split-list').innerHTML = splitTickets(e.target.value);
   });
+  // The custom range: a picker change asks again and redraws only those cells; the newest ask wins.
+  const fromPicker = main.querySelector('#report-from');
+  const toPicker = main.querySelector('#report-to');
+  let asked = 0;
+  const showCustom = (figures, note) => {
+    for (const cell of main.querySelectorAll('[data-custom-from]')) {
+      cell.innerHTML = figures ? `<span class="quiet">from ${escapeHtml(dayLabel(fromPicker.value))}</span>` : '';
+    }
+    for (const cell of main.querySelectorAll('[data-custom]')) {
+      cell.textContent = figures ? String(Number(figures[cell.dataset.custom])) : '';
+    }
+    const p = main.querySelector('.custom-range-note');
+    p.textContent = note ?? '';
+    p.hidden = !note;
+  };
+  const rangeProblem = (picked) => {
+    if (!picked.from || !picked.to) return 'Pick both a start date and an end date.';
+    return picked.from > picked.to ? 'The start date is after the end date.' : null;
+  };
+  showCustom(r.custom ?? null, rangeProblem(range));
+  const repick = async () => {
+    const picked = { from: fromPicker.value, to: toPicker.value };
+    const ask = ++asked;
+    const problem = rangeProblem(picked);
+    if (problem) { showCustom(null, problem); return; }
+    const again = await api('GET', reportsPath(r.project ?? '', picked));
+    if (ask === asked) showCustom(again.custom, null);
+  };
+  for (const picker of [fromPicker, toPicker]) {
+    picker.addEventListener('change', () => {
+      repick().catch((err) => (err instanceof SignedOut ? drawSignIn() : showError(err)));
+    });
+  }
   main.querySelector('#report-project').addEventListener('change', (e) => {
-    drawReporting(e.target.value).catch((err) => (err instanceof SignedOut ? drawSignIn() : showError(err)));
+    drawReporting(e.target.value, { from: fromPicker.value, to: toPicker.value }).catch((err) => (err instanceof SignedOut ? drawSignIn() : showError(err)));
   });
   putTrail([{ label: 'Reporting' }]);
+}
+
+/** A date picker's value (YYYY-MM-DD) for a local calendar day. */
+function pickerDay(date) {
+  const two = (n) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${two(date.getMonth() + 1)}-${two(date.getDate())}`;
+}
+
+/** The Task Productivity table's range on arrival: 30 days ago to today, in the browser's own time zone. */
+function defaultReportRange(today = new Date()) {
+  const start = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 30);
+  return { from: pickerDay(start), to: pickerDay(today) };
+}
+
+/** A picker's YYYY-MM-DD as a local Date at `hours:minutes:seconds.ms`, or null when it is not one. */
+function localDay(value, ...time) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value ?? '');
+  return m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), ...time) : null;
+}
+
+/** "Oct 14, 2026" for a picker's value. */
+function dayLabel(value) {
+  const day = localDay(value, 0, 0, 0, 0);
+  return day ? day.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : value;
+}
+
+/**
+ * GET /reports for a project ('' for all) and, when both pickers hold a
+ * date with the start not after the end, the custom range from the start of
+ * the start date to the end of the end date, local time (SP-240).
+ */
+function reportsPath(slug, range) {
+  const query = new URLSearchParams();
+  if (slug) query.set('project', slug);
+  const from = localDay(range?.from, 0, 0, 0, 0);
+  const to = localDay(range?.to, 23, 59, 59, 999);
+  if (from && to && from <= to) {
+    query.set('from', from.toISOString());
+    query.set('to', to.toISOString());
+  }
+  const text = query.toString();
+  return `/reports${text ? `?${text}` : ''}`;
 }
 
 /**
