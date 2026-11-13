@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { DEMO_NEWEST_RELEASE, DEMO_OWN_PROJECT, demoNewestRelease, seedDemo, tickingClock } from './demoData.mjs';
 import { reportsOf, REPORT_RANGES, searchTickets, PRIORITIES, timeSplitOf, isFailureNote, TIME_BUCKETS } from './pageData.mjs';
-import { escapeHtml, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, renderReleaseGroup, controlValueText, mountainTime, wakeInEffectText, renderConsole, renderConsoleTile, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, drainLine } from './web/render.mjs';
+import { escapeHtml, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, renderReleaseGroup, controlValueText, mountainTime, wakeInEffectText, renderConsole, renderConsoleTile, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, consoleFeature, featureColourIndex, renderFeatureKey, FEATURE_PALETTE, drainLine } from './web/render.mjs';
 import { startServer, setupSettingsOf } from './server.mjs';
 import { saveAnswers, setupFields, setupOf } from './setup.mjs';
 import { DANE_FIELDS as SETUP_FIELDS, STEPS as SETUP_STEPS } from '../scripts/onboard/onboard.mjs';
@@ -4582,4 +4582,84 @@ test('the Console\'s minute redraw keeps how far across he has scrolled', () => 
   // The Console's columns are the area that scrolls sideways.
   assert.match(renderConsole({ tickets: [], projects: [] }, ['Queued']), /^<div class="console">/);
   assert.match(readFileSync(WEB('app.css'), 'utf8'), /\.console \{[^}]*overflow-x: auto/);
+});
+
+// ── The Console's feature colours (SP-234) ──────────────────────────────────
+
+test('a ticket\'s feature is its first tag, passing over request-form; no tag, or only request-form, is no feature', () => {
+  assert.equal(consoleFeature(consoleTicket({ tags: ['tracker', 'tracker-5'] })), 'tracker');
+  assert.equal(consoleFeature(consoleTicket({ tags: ['request-form', 'console'] })), 'console');
+  assert.equal(consoleFeature(consoleTicket({ tags: ['request-form'] })), null);
+  assert.equal(consoleFeature(consoleTicket({ tags: [] })), null);
+  assert.equal(consoleFeature(consoleTicket({ tags: null })), null);
+  assert.equal(consoleFeature(consoleTicket({ tags: ['', '  '] })), null);
+});
+
+test('a feature\'s colour is a pure function of its tag: the same on every call, always a palette colour, and different tags usually differ', () => {
+  for (const tag of ['tracker', 'console', 'onboarding', 'ünïcode', '']) {
+    const i = featureColourIndex(tag);
+    assert.ok(Number.isInteger(i) && i >= 0 && i < FEATURE_PALETTE.length, tag);
+    assert.equal(featureColourIndex(tag), i, `${tag} keeps its colour`);
+  }
+  // Fixed values, so a change to the rule (which would recolour every feature) is a decision, not an accident.
+  assert.deepEqual(['tracker', 'console', 'onboarding'].map(featureColourIndex), [5, 8, 6]);
+  const many = Array.from({ length: 200 }, (_, i) => featureColourIndex(`feature-${i}`));
+  assert.equal(new Set(many).size, FEATURE_PALETTE.length, 'the rule uses every colour');
+});
+
+test('two tiles with the same feature share a colour class; a tile with no feature keeps the plain tile', () => {
+  const a = renderConsoleTile(consoleTicket({ id: 'AL-1', tags: ['tracker'] }), ALPHA, CONSOLE_NOW);
+  const b = renderConsoleTile(consoleTicket({ id: 'BE-1', project: 'beta', tags: ['tracker', 'other'] }), BETA, CONSOLE_NOW);
+  const n = featureColourIndex('tracker');
+  for (const html of [a, b]) {
+    assert.match(html, new RegExp(`^<a class="tile feature feature-${n}" data-feature="tracker" `));
+    assert.match(html, /aria-label="[^"]*; feature tracker\."/);
+  }
+  assert.match(renderConsoleTile(consoleTicket({ tags: ['request-form'] }), ALPHA, CONSOLE_NOW), /^<a class="tile" href=/);
+  assert.match(renderConsoleTile(consoleTicket({ tags: ['x'], waitingOnOperator: true }), ALPHA, CONSOLE_NOW), /^<a class="tile feature feature-\d+ waiting" data-feature="x" /);
+  assert.match(renderConsoleTile(consoleTicket({ tags: ['<b>"'] }), ALPHA, CONSOLE_NOW), /data-feature="&lt;b&gt;&quot;"/);
+});
+
+test('every feature colour has its rule in app.css, in palette order, and the tile\'s text reads on it', () => {
+  const css = readFileSync(WEB('app.css'), 'utf8');
+  const rules = [...css.matchAll(/^\.feature-(\d+) \{ --feature: (#[0-9a-f]{6}); \}$/gm)].map((m) => [Number(m[1]), m[2]]);
+  assert.deepEqual(rules, FEATURE_PALETTE.map((c, i) => [i, c]));
+  assert.match(css, /\.tile\.feature \{ background: var\(--feature\); \}/);
+  assert.match(css, /\.tile\.dimmed \{ opacity: [0-9.]+; \}/);
+  const ink = /--ink: (#[0-9a-f]{6})/.exec(css)[1];
+  for (const colour of FEATURE_PALETTE) assert.ok(contrast(ink, colour) >= 4.5, `${ink} reads on ${colour}`);
+  // The facts strip stays white, so the stage colours and the quiet age read as before.
+  assert.match(css, /\.tile\.feature \.tile-facts \{ background: #fff; \}/);
+});
+
+test('the Features key lists each feature on screen with its count, most first, and nothing when there is none', () => {
+  const tickets = [
+    consoleTicket({ id: 'AL-1', tags: ['console'] }),
+    consoleTicket({ id: 'AL-2', tags: ['tracker'] }),
+    consoleTicket({ id: 'AL-3', tags: ['tracker'] }),
+    consoleTicket({ id: 'AL-4', tags: ['request-form'] }),
+    consoleTicket({ id: 'AL-5', tags: ['alpha'] }),
+  ];
+  const key = renderFeatureKey(tickets);
+  assert.match(key, /^<div class="feature-key" role="group" aria-label="Features"><span class="key-title">Features<\/span>/);
+  const listed = [...key.matchAll(/data-feature="([^"]+)" aria-pressed="false"[^>]*><span class="swatch" aria-hidden="true"><\/span>[^<]+<span class="count">(\d+)<\/span>/g)].map((m) => [m[1], Number(m[2])]);
+  assert.deepEqual(listed, [['tracker', 2], ['alpha', 1], ['console', 1]]);
+  assert.match(key, new RegExp(`class="feature-pick feature-${featureColourIndex('tracker')}" data-feature="tracker"`));
+  assert.match(renderFeatureKey(tickets, 'tracker'), /data-feature="tracker" aria-pressed="true"/);
+  assert.equal(renderFeatureKey([consoleTicket({ tags: ['request-form'] })]), '');
+  assert.equal(renderFeatureKey(null), '');
+  assert.match(renderFeatureKey([consoleTicket({ tags: ['<i>'] })]), /data-feature="&lt;i&gt;"[^>]*>.*&lt;i&gt;<span class="count">1/);
+  // The Console draws the key above its stages.
+  assert.match(renderConsole({ tickets, projects: [ALPHA] }, ['Queued'], CONSOLE_NOW), /^<div class="feature-key"[\s\S]*<\/div><div class="console">/);
+});
+
+test('a click on a feature in the key dims every other tile, a second click shows them all, and the minute redraw keeps the pick', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const draw = /async function drawConsole\(\) \{([\s\S]*?)\n\}/.exec(app)[1];
+  assert.match(draw, /pickedFeature = pickedFeature === b\.dataset\.feature \? null : b\.dataset\.feature;/);
+  assert.match(draw, /showFeaturePick\(\);\s*putTrail/, 'the pick is put back after every draw');
+  const show = /function showFeaturePick\(\) \{([\s\S]*?)\n\}/.exec(app)[1];
+  assert.match(show, /tile\.classList\.toggle\('dimmed', pickedFeature !== null && tile\.dataset\.feature !== pickedFeature\)/);
+  assert.match(show, /b\.setAttribute\('aria-pressed', String\(b\.dataset\.feature === pickedFeature\)\)/);
+  assert.match(show, /if \(!picks\.some\(\(b\) => b\.dataset\.feature === pickedFeature\)\) pickedFeature = null;/);
 });
