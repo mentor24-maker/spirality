@@ -202,10 +202,18 @@ record back after the write, and exit 1 when it did not stick. A roll-back
 names the newest earlier release numbered lower than the one running now, so
 rolling back twice goes two steps back, never back up to the bad one.
 
-Slice 1 of 4: nothing runs from the record yet. Still to come: showing each
-project's release on the Settings page with Move to Newest and Roll Back
-(SP-275), running each project's lanes on its release (SP-276), and moving a
-project to the newest release after a quiet period (SP-277).
+The Settings page shows each project's release in its **Spirality Release**
+group (SP-275): the release it runs, when and who named it, and the one
+before it. Its operator gets **Move to Newest** (names the newest release,
+read from the tags at the moment of the click) and **Roll Back** (the same
+roll-back as `release back`). Both go through the same store call as the
+commands, and the page reads the record back before it says it saved.
+Spirality's own project shows that it always runs the newest release, with
+no buttons.
+
+Slices 1 and 2 of 4: nothing runs from the record yet. Still to come:
+running each project's lanes on its release (SP-276), and moving a project to
+the newest release after a quiet period (SP-277).
 
 ## The moves
 
@@ -231,6 +239,7 @@ is a ticket in that project's own queue, filed once Spirality's side is Live:
 5. Name a Spirality release for each project, Spirality's own lanes first.
    Slice 1 done (SP-265): releases, the tracker's record of which one each
    project runs, and the commands to cut, name and roll back (above).
+   Slice 2 (SP-275): the Settings page's Spirality Release group.
 6. In each project's queue: remove the copied loop (`loop/`, the copied
    `.claude/` skills and hooks) and, in StarCaster, the tracker posting in
    `scripts/lib/clickup.cjs` and the watchdogs in `run_bus_relay.sh`.
