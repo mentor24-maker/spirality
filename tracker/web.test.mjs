@@ -2522,6 +2522,17 @@ test('Reporting is in the header after Tasks, served at /reporting, and its figu
   } finally { await f.cleanup(); }
 });
 
+test('Reporting: the first table is Task Productivity, Tasks started above Tasks finished, and its note names Started first (SP-230)', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const fn = app.slice(app.indexOf('async function drawReporting('));
+  const page = fn.slice(fn.indexOf('<h1>Reporting</h1>'));
+  const firstHeading = page.match(/<h2>([^<]*)<\/h2>/);
+  assert.equal(firstHeading[1], 'Task Productivity');
+  assert.doesNotMatch(app, /Tasks Finished and Started/);
+  assert.match(page, /<p class="quiet">Started: filed in that time\. Finished: moved to Live in that time and still Live\.<\/p>/);
+  assert.match(page, /<tbody>\$\{line\('Tasks started', r\.started\)\}\$\{line\('Tasks finished', r\.finished\)\}<\/tbody>/);
+});
+
 /** True when `ms` is within ten minutes of `days` days: the test clock ticks a minute per reading. */
 const near = (ms, days) => ms != null && Math.abs(ms - days * DAY) < 10 * 60_000;
 
