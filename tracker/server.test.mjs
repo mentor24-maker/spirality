@@ -1502,6 +1502,36 @@ test('GET /reports answers the Reporting figures for every project or one, 404 f
   } finally { await f.cleanup(); }
 });
 
+test('GET /reports with from and to answers the custom range; one alone, an unreadable one or from after to is a 400 (SP-240)', async () => {
+  const f = await fixture();
+  try {
+    const t = f.store.fileTicket({ project: 'alpha', actor: f.machine.id, name: 'x', status: 'queued' });
+    f.store.changeTicket(t.id, { actor: f.machine.id, status: 'live' });
+    const from = new Date(Date.parse(t.createdAt) - 60_000).toISOString();
+    const to = new Date(Date.now() + 3_600_000).toISOString();
+    const r = await f.call('GET', `/reports?project=alpha&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+    assert.equal(r.status, 200);
+    assert.deepEqual(r.body.custom, { from, to, started: 1, finished: 1 });
+    assert.deepEqual(r.body.finished, { week: 1, month: 1, all: 1 });
+    assert.equal('custom' in (await f.call('GET', '/reports')).body, false);
+    const later = new Date(Date.parse(to) + 60_000).toISOString();
+    const empty = await f.call('GET', `/reports?from=${encodeURIComponent(to)}&to=${encodeURIComponent(later)}`);
+    assert.deepEqual(empty.body.custom, { from: to, to: later, started: 0, finished: 0 });
+    for (const [query, says] of [
+      [`from=${encodeURIComponent(from)}`, /to is missing/],
+      [`to=${encodeURIComponent(to)}`, /from is missing/],
+      [`from=yesterday&to=${encodeURIComponent(to)}`, /from must be an ISO date-time, not "yesterday"/],
+      [`from=${encodeURIComponent(from)}&to=2026-13-45`, /to must be an ISO date-time/],
+      [`from=${encodeURIComponent(to)}&to=${encodeURIComponent(from)}`, /is after to/],
+    ]) {
+      const bad = await f.call('GET', `/reports?${query}`);
+      assert.equal(bad.status, 400, query);
+      assert.equal(bad.body.error, 'bad-field', query);
+      assert.match(bad.body.message ?? JSON.stringify(bad.body), says, query);
+    }
+  } finally { await f.cleanup(); }
+});
+
 test('GET /reports answers Where the Time Goes: the four buckets per range and the open ticket by its exact name (SP-220)', async () => {
   const f = await fixture();
   try {

@@ -2495,7 +2495,7 @@ function reportingStore() {
   };
   const ticket = (...args) => filedAs('queued', ...args);
   const done = () => { store.close(); rmSync(dir, { recursive: true, force: true }); };
-  return { store, loop, ticket, filedAs, now, done };
+  return { store, loop, ticket, filedAs, now, done, clock };
 }
 
 test('Reporting: a task finished 3 days ago counts in all three ranges, 20 days ago in two, 60 days ago only in all time', () => {
@@ -2598,6 +2598,66 @@ test('Reporting: the first table is Task Productivity, Tasks started above Tasks
   assert.doesNotMatch(app, /Tasks Finished and Started/);
   assert.match(page, /<p class="quiet">Started: filed in that time\. Finished: moved to Live in that time and still Live\.<\/p>/);
   assert.match(page, /<tbody>\$\{line\('Tasks started', r\.started\)\}\$\{line\('Tasks finished', r\.finished\)\}<\/tbody>/);
+});
+
+test('Reporting: a custom range counts tasks started and finished on its start and end dates, not the day before or after (SP-240)', () => {
+  const r = reportingStore();
+  try {
+    const at = (iso) => Date.parse(iso);
+    const fileAt = (iso, status = 'queued') => {
+      r.clock.moveTo(at(iso));
+      return r.store.fileTicket({ project: 'alpha', actor: r.loop.id, name: `filed ${iso}`, status }).id;
+    };
+    const finishAt = (iso) => {
+      const id = fileAt('2026-10-01T12:00:00Z');
+      r.clock.moveTo(at(iso));
+      r.store.changeTicket(id, { actor: r.loop.id, status: 'live' });
+    };
+    // The range: the whole of Oct 10 to the whole of Oct 15.
+    const custom = { from: at('2026-10-10T00:00:00Z'), to: at('2026-10-15T23:59:59.999Z') };
+    fileAt('2026-10-10T00:00:00Z');
+    fileAt('2026-10-15T23:00:00Z');
+    fileAt('2026-10-09T23:00:00Z');
+    fileAt('2026-10-16T01:00:00Z');
+    finishAt('2026-10-10T01:00:00Z');
+    finishAt('2026-10-15T23:00:00Z');
+    finishAt('2026-10-09T23:00:00Z');
+    finishAt('2026-10-16T01:00:00Z');
+    const rep = reportsOf(r.store, { now: r.now, custom });
+    assert.deepEqual(rep.custom, { from: '2026-10-10T00:00:00.000Z', to: '2026-10-15T23:59:59.999Z', started: 2, finished: 2 });
+    // The fixed ranges are counted as before, and with no range there is no custom figure.
+    const plain = reportsOf(r.store, { now: r.now });
+    assert.equal('custom' in plain, false);
+    assert.deepEqual(rep.started, plain.started);
+    assert.deepEqual(rep.finished, plain.finished);
+    // One project only: beta has none of them.
+    assert.deepEqual(reportsOf(r.store, { project: 'beta', now: r.now, custom }).custom, { ...rep.custom, started: 0, finished: 0 });
+  } finally { r.done(); }
+});
+
+test('Reporting: Task Productivity has Start Date and End Date pickers after the fixed ranges, 30 days ago to today, redrawn in place (SP-240)', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const fn = app.slice(app.indexOf('async function drawReporting('), app.indexOf('function pickerDay('));
+  assert.match(fn, /<th class="count custom-range"><label for="report-from">Start Date<\/label><input type="date" id="report-from"/);
+  assert.match(fn, /<th class="count custom-range"><label for="report-to">End Date<\/label><input type="date" id="report-to"/);
+  assert.ok(fn.indexOf('report-from') < fn.indexOf('report-to'), 'Start Date comes before End Date');
+  assert.match(fn, /<span class="quiet">from \$\{escapeHtml\(dayLabel\(fromPicker\.value\)\)\}<\/span>/);
+  assert.match(fn, /'The start date is after the end date\.'/);
+  // A picker change asks /reports again for the same project and redraws only the custom cells.
+  assert.match(fn, /api\('GET', reportsPath\(r\.project \?\? '', picked\)\)/);
+  assert.doesNotMatch(fn.slice(fn.indexOf('const repick')), /main\.innerHTML/);
+  // The helpers, run here: the default range, and the local-day edges sent to the server.
+  const helpers = app.slice(app.indexOf('function pickerDay('), app.indexOf('function reportsPath('));
+  const reportsPathFn = app.slice(app.indexOf('function reportsPath('));
+  const body = reportsPathFn.slice(0, reportsPathFn.indexOf('\n}\n') + 3);
+  const { defaultReportRange, reportsPath } = new Function(`${helpers}\n${body}\nreturn { defaultReportRange, reportsPath };`)();
+  assert.deepEqual(defaultReportRange(new Date(2026, 10, 13, 15, 0)), { from: '2026-10-14', to: '2026-11-13' });
+  const path = new URL(`http://x${reportsPath('alpha', { from: '2026-10-14', to: '2026-11-13' })}`);
+  assert.equal(path.searchParams.get('project'), 'alpha');
+  assert.equal(path.searchParams.get('from'), new Date(2026, 9, 14, 0, 0, 0, 0).toISOString());
+  assert.equal(path.searchParams.get('to'), new Date(2026, 10, 13, 23, 59, 59, 999).toISOString());
+  assert.equal(reportsPath('', { from: '2026-11-14', to: '2026-11-13' }), '/reports', 'a start after the end is never asked for');
+  assert.equal(reportsPath('', { from: '', to: '2026-11-13' }), '/reports');
 });
 
 /** True when `ms` is within ten minutes of `days` days: the test clock ticks a minute per reading. */
@@ -2863,7 +2923,8 @@ test('the Reporting page draws only the server\'s figures: ranges and stages fro
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   const draw = app.slice(app.indexOf('async function drawReporting'), app.indexOf('/**\n * The Settings page'));
   assert.ok(draw.length > 0);
-  assert.match(draw, /api\('GET', `\/reports\$\{slug \? `\?project=\$\{encodeURIComponent\(slug\)\}` : ''\}`\)/);
+  assert.match(draw, /api\('GET', reportsPath\(slug, range\)\)/);
+  assert.match(draw, /if \(slug\) query\.set\('project', slug\);/);
   assert.match(draw, /r\.ranges\.map/);
   assert.match(draw, /r\.open\.map/);
   assert.match(draw, /savedProject\(\)/, 'it opens on the selected project');
