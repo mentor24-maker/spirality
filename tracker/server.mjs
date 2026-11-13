@@ -75,7 +75,8 @@ import { promisify } from 'node:util';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { MAX_ATTACHMENT, openStore, StoreError } from './store.mjs';
 import { SOURCE as IMPORT_SOURCE } from './import.mjs';
-import { boardOf, consoleOf, lookupTickets, PRIORITIES, projectDetailsOf, projectsList, readSearchFilters, reportsOf, searchTickets, stageColoursOf, threadOf, waitingFor, busUnseen, pipelineControlsOf } from './pageData.mjs';
+import { boardOf, consoleOf, lookupTickets, PRIORITIES, prToCheck, prsToCheck, projectDetailsOf, projectsList, readSearchFilters, reportsOf, searchTickets, stageColoursOf, threadOf, waitingFor, busUnseen, pipelineControlsOf } from './pageData.mjs';
+import { ghPrState, prStateCache } from './prState.mjs';
 import { createNotifier, DEFAULT_FROM, MAIL_FROM, MAIL_KEY, mailEnvFromDoppler, mailSettingsFromEnv, resendSender, textSettings } from './notify.mjs';
 import { sendInvite, sendResetLink } from './account.mjs';
 import { guessProject } from './projectGuess.mjs';
@@ -524,8 +525,23 @@ export const CLOSE_PHRASE = busRelayPlan.CLOSE_PHRASES[0];
 /** The word the Go button posts: the one an intake card asks for (GO_PHRASE in lib/busRelayPlan.js). */
 export const GO_PHRASE = busRelayPlan.GO_PHRASE;
 
-export function createHandler(store, { log = () => {}, notifier = null, defaultProject = null, mergePhrase = null, closePhrase = null, goPhrase = null, accountMail = null, setup = null, now = Date.now, publicUrl = null, pipeline = null, docsDir = DOCS_DIR, commandsRoot = REPO_ROOT } = {}) {
+export function createHandler(store, { log = () => {}, notifier = null, defaultProject = null, mergePhrase = null, closePhrase = null, goPhrase = null, accountMail = null, setup = null, now = Date.now, publicUrl = null, pipeline = null, docsDir = DOCS_DIR, commandsRoot = REPO_ROOT, readPrState = null } = {}) {
   const failures = failureCounter(now);
+  // Each pull request's live state on GitHub, kept a minute. With no
+  // reader (tests, the switch check) the page goes by status alone, as before.
+  const prCache = readPrState ? prStateCache({ read: readPrState, now }) : null;
+
+  /**
+   * The live state of each pull request in `prs` (prToCheck's shape), as the
+   * Map pageData takes: ticket id to `{ number, state }`, state null when it
+   * could not be read. Null with no reader. A PR in another repository than
+   * its project's is never asked.
+   */
+  async function prStatesOf(prs) {
+    if (!prCache) return null;
+    const answers = await Promise.all(prs.map((pr) => (pr.repo ? prCache.stateOf(pr) : Promise.resolve(null))));
+    return new Map(prs.map((pr, i) => [pr.ticket, { number: pr.number, state: answers[i] }]));
+  }
   const resets = resetLimiter(now);
   // The public address's host as a Host header names it (`name:8443`; no port for 443).
   const publicHost = publicUrl ? new URL(publicUrl).host.toLowerCase() : null;
@@ -656,7 +672,8 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     // Dane's page: what waits on the caller, across every project, by the
     // loop's own verdict (tracker/pageData.mjs).
     if (parts.length === 1 && parts[0] === 'waiting' && method === 'GET') {
-      return [200, waitingFor(store, me.id, { only: scopeOf(me) })];
+      const only = scopeOf(me);
+      return [200, waitingFor(store, me.id, { only, prStates: await prStatesOf(prsToCheck(store, { only })) })];
     }
 
     // Dane's page: the bus count in the header (Dane's choice D on the bus ticket), the posts on each
@@ -693,7 +710,8 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
           log(`in-flight: the loop logs could not be read, so no ticket has a next change time (${err.message}).`);
         }
       }
-      return [200, consoleOf(store, { only: scopeOf(me), pipeline: lanes })];
+      const only = scopeOf(me);
+      return [200, consoleOf(store, { only, pipeline: lanes, prStates: await prStatesOf(prsToCheck(store, { only })) })];
     }
 
     // Dane's page: the Projects screen, the project Tasks opens, and the New
@@ -948,7 +966,9 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     // Dane's page: one project's board, the eight statuses in the contract's
     // order, each column in `queue` order.
     if (parts.length === 3 && parts[0] === 'projects' && parts[2] === 'board' && method === 'GET') {
-      const board = boardOf(store, requireProject(parts[1], me).slug, { viewerId: me.id });
+      const slug = requireProject(parts[1], me).slug;
+      const prStates = await prStatesOf(prsToCheck(store, { only: new Set([slug]) }));
+      const board = boardOf(store, slug, { viewerId: me.id, prStates });
       return [200, board];
     }
 
@@ -1205,7 +1225,9 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     // Dane's page: one ticket with each comment's author named and machine
     // comments marked.
     if (parts.length === 3 && parts[0] === 'tickets' && parts[2] === 'thread' && method === 'GET') {
-      const thread = threadOf(store, requireTicket(parts[1], me).id);
+      const ticket = requireTicket(parts[1], me);
+      const pr = prToCheck(store, ticket);
+      const thread = threadOf(store, ticket.id, { prStates: await prStatesOf(pr ? [pr] : []) });
       return [200, { ...thread, attachments: store.listAttachments(thread.id), mergePhrase, closePhrase, goPhrase, choices: { priorities: PRIORITIES, statuses: PERSON_STATUSES } }];
     }
 
@@ -1377,8 +1399,8 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
 }
 
 /** Start a server on `port` (0 = any free port) against an open store. Resolves to the http.Server. */
-export function startServer({ store, port, host = '127.0.0.1', log, notifier, defaultProject, mergePhrase, closePhrase, goPhrase, accountMail, setup, now, publicUrl, pipeline, docsDir, commandsRoot }) {
-  const server = createServer(createHandler(store, { log, notifier, defaultProject, mergePhrase, closePhrase, goPhrase, accountMail, setup, now, publicUrl, pipeline, docsDir, commandsRoot }));
+export function startServer({ store, port, host = '127.0.0.1', log, notifier, defaultProject, mergePhrase, closePhrase, goPhrase, accountMail, setup, now, publicUrl, pipeline, docsDir, commandsRoot, readPrState }) {
+  const server = createServer(createHandler(store, { log, notifier, defaultProject, mergePhrase, closePhrase, goPhrase, accountMail, setup, now, publicUrl, pipeline, docsDir, commandsRoot, readPrState }));
   return new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(port, host, () => {
@@ -1524,7 +1546,8 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     const { setup, why: noSetup } = setupSettingsOf({ db: resolve(db) });
     log(setup ? `set up a project: on, reading ${setup.homeConfig.logDir}/onboard.` : `set up a project: off. ${noSetup}.`);
     log(publicUrl ? `public address: ${publicUrl} serves the page and the API, with a Secure cookie.` : 'public address: none set (trackerPublicUrl).');
-    const server = await startServer({ store, port, host, log, notifier, defaultProject, mergePhrase, closePhrase: CLOSE_PHRASE, goPhrase: GO_PHRASE, accountMail, setup, publicUrl, pipeline });
+    // The bell, Waiting on You and the Merge button check each pull request on GitHub.
+    const server = await startServer({ store, port, host, log, notifier, defaultProject, mergePhrase, closePhrase: CLOSE_PHRASE, goPhrase: GO_PHRASE, accountMail, setup, publicUrl, pipeline, readPrState: ghPrState() });
     console.log(`tracker listening on http://${host}:${server.address().port}/`);
   } catch (err) {
     console.error(`tracker server did not start: ${err.message}`);
