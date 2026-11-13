@@ -2,7 +2,8 @@
 
 Read this file first, then [docs/LOOP_ENGINEERING.md](docs/LOOP_ENGINEERING.md).
 Every prompt Dane gives a hand-run thread is logged, word for word, in
-[docs/OPERATOR_PROMPTS.md](docs/OPERATOR_PROMPTS.md).
+[docs/operator-prompts/](docs/operator-prompts/), one file per thread
+([docs/OPERATOR_PROMPTS.md](docs/OPERATOR_PROMPTS.md) says how).
 Any change to the words or look of the tracker page follows
 [docs/DOCTRINE.md](docs/DOCTRINE.md) (Title Case for buttons and headings).
 
