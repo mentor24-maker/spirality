@@ -75,6 +75,7 @@ import { promisify } from 'node:util';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { MAX_ATTACHMENT, openStore, StoreError } from './store.mjs';
 import { OWN_PROJECT_RELEASE } from '../lib/releases.mjs';
+import { controlOf, GROUPS } from './pipelineControls.mjs';
 import { SOURCE as IMPORT_SOURCE } from './import.mjs';
 import { boardOf, consoleOf, lookupTickets, PRIORITIES, prToCheck, prsToCheck, projectDetailsOf, projectsList, readSearchFilters, reportsOf, searchTickets, stageColoursOf, threadOf, waitingFor, busUnseen, pipelineControlsOf } from './pageData.mjs';
 import { ghPrState, prStateCache } from './prState.mjs';
@@ -853,18 +854,23 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     if (parts[0] === 'pipeline-controls' && parts.length === 1 && method === 'GET') {
       const scope = scopeOf(me);
       const projects = store.listProjects().filter((p) => scope == null || scope.has(p.slug))
-        .map((p) => pipelineControlsOf(store, p.slug, { reader: me.id }));
+        .map((p) => pipelineControlsOf(store, p.slug, { reader: me.id, ownProject }));
       return [200, { projects }];
     }
     if (parts[0] === 'pipeline-controls' && parts.length === 2) {
       const project = requireProject(parts[1], me);
-      if (method === 'GET') return [200, pipelineControlsOf(store, project.slug, { reader: me.id })];
+      if (method === 'GET') return [200, pipelineControlsOf(store, project.slug, { reader: me.id, ownProject })];
       if (method === 'PUT') {
         if (me.kind !== 'human' || project.operator !== me.id) {
           throw new HttpError(403, 'not-operator', `only ${project.name}'s operator, signed in as a person, may change its pipeline controls; ${me.kind === 'human' ? 'you are not its operator' : 'a loop sign-in may not'}.`);
         }
         const body = await readJson(req);
         checkBody(body, me, ['setting', 'value']);
+        // The tracker's home project always runs main: no release setting there.
+        const group = GROUPS.find((g) => g.key === controlOf(body.setting)?.group);
+        if (group?.notOnOwnProject && ownProject != null && project.slug === ownProject) {
+          throw new HttpError(409, 'own-project', `${project.name} is the tracker's home project: its lanes always run main, so "${group.title}" is not set for it.`);
+        }
         let saved;
         try {
           saved = store.setPipelineSetting({ project: project.slug, setting: body.setting, value: body.value, actor: me.id });
@@ -872,7 +878,7 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
           if (err instanceof StoreError && err.code === 'not-operator') throw new HttpError(403, err.code, err.message);
           throw err;
         }
-        const view = pipelineControlsOf(store, project.slug, { reader: me.id });
+        const view = pipelineControlsOf(store, project.slug, { reader: me.id, ownProject });
         const stored = view.controls.find((c) => c.key === saved.setting)?.value;
         if (stored !== saved.to) throw new HttpError(500, 'write-failed', `the ${saved.setting} setting read back as ${stored}, not ${saved.to}; treat it as not saved.`);
         log(`pipeline control ${project.slug} ${saved.setting} ${saved.changed ? `${saved.from} -> ${saved.to}` : `unchanged (${saved.to})`} actor=${me.id}`);

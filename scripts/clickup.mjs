@@ -57,6 +57,8 @@ import { readLeaseFile, saveLeaseIfReadable } from '../lib/mergeWindowLeaseFile.
 import { loadProjectConfig, ProjectConfigError } from '../lib/projectConfig.mjs';
 // Spirality's releases (SP-265): what one is, and reading the tags.
 import { isReleaseName, OWN_PROJECT_RELEASE, readReleaseTags, releaseRemote } from '../lib/releases.mjs';
+// A project moves to the newest release by itself after a quiet period (SP-277).
+import { followReleases, QUIET_DAYS_KEY } from '../lib/releaseFollow.mjs';
 // The merge lane's decisions (task 86bchpkxz). `mergeDecision` says whether
 // Dane's word authorizes a merge, `githubGate` whether GitHub allows it; the
 // notices pair the words he reads with the marker the next pass reads. All
@@ -233,6 +235,9 @@ npm run clickup -- <command> [flags]      (Loop Queue: list ${LOOP_QUEUE_LIST}, 
                                                   ticket moves it to Queued, Rework or Live by the contract's table.
                                                   With "autoMergeLanes" in the project config, the auto-merge lanes run too, up to
                                                   a "would merge" note: nothing merges without his word yet (SP-202).
+                                                  On the tracker's home project it also moves each other project whose
+                                                  release.quiet-days is above 0 to the newest release once that has run that
+                                                  many days with no ALARM on this project's bus, and tells its bus (SP-277).
                                                   One line per ticket he holds. --dry-run prints what it would do, writes nothing
   tickets --json [--include-closed] [--project <slug>] [--comments]
                                                   read-only: the tickets as JSON for a scheduled check, one object each (id,
@@ -518,10 +523,13 @@ async function readBusMessages() {
   return { ok: true, messages };
 }
 
-/** Post to the bus's Team chat ticket and read it back. Never creates it: `bus-post` does that. */
-async function postBusMessage(text) {
-  if (project.tracker !== 'api' || !project.busProject) return { ok: false, why: 'this project has no bus' };
-  const bus = project.busProject;
+/**
+ * Post to the bus's Team chat ticket and read it back. Never creates it: `bus-post` does that.
+ * `bus` is this project's own bus unless another is named (the release
+ * step tells another project's bus that it moved, SP-277).
+ */
+async function postBusMessage(text, bus = project.busProject) {
+  if (project.tracker !== 'api' || !bus) return { ok: false, why: 'this project has no bus' };
   const listed = await tracker.listTasksPage(bus, 0, { includeClosed: true });
   if (!listed.res.ok || !Array.isArray(listed.json?.tasks)) return { ok: false, why: `the bus project ${bus} could not be listed (HTTP ${listed.res.status})` };
   const chat = trackerBus.pickTeamChat(listed.json.tasks);
@@ -534,6 +542,72 @@ async function postBusMessage(text) {
   const back = await readCommentsOrProblem(chat.id);
   if (back.problem || !back.comments.some((c) => String(c.id) === id)) return { ok: false, why: `comment ${id || '(no id)'} did not read back` };
   return { ok: true, id };
+}
+
+/**
+ * The relay's release step (SP-277, lib/releaseFollow.mjs). Reads every
+ * project's Quiet Days Before Moving first, and nothing more when none is
+ * above 0, so the step costs one read while it is off everywhere. Acts only
+ * when this door's project is the tracker's home. Answers `{ lines, problems }`.
+ */
+async function releaseFollowStep({ dryRun }) {
+  const fail = (why) => ({ lines: [], problems: [`release-follow: ${why}; no project was moved by it this pass`] });
+  const controls = await tracker.allPipelineControls();
+  if (!controls.res.ok) return fail(`the pipeline controls could not be read (HTTP ${controls.res.status}: ${String(controls.json?.err || controls.text || '').slice(0, 200)})`);
+  const quietDaysOf = new Map(controls.json.projects.map((v) => [v.project?.slug, Number(v.controls?.find((c) => c.key === QUIET_DAYS_KEY)?.value ?? 0)]));
+  const on = [...quietDaysOf.values()].some((n) => n > 0);
+  if (!on) return { lines: [], problems: [] };
+
+  const all = await tracker.releases();
+  if (!all.res.ok) return fail(`the releases could not be read (HTTP ${all.res.status}: ${String(all.json?.err || all.text || '').slice(0, 200)})`);
+  const ownProject = all.json.ownProject ?? null;
+  if (!ownProject) return fail('the tracker cannot say which project is its home (its project config was not usable when it started)');
+  if (ownProject !== project.projectSlug) return { lines: [], problems: [] }; // the home project's relay does it
+  const git = (args) => spawnSync('git', args, { cwd: REPO_ROOT, encoding: 'utf8', timeout: 60_000 });
+  const remote = releaseRemote();
+  const tags = readReleaseTags({ git, remote });
+  if (tags.problem) return fail(`the release tags could not be read: ${tags.problem}`);
+  const slugs = new Set(all.json.projects.map((p) => p.slug));
+
+  return followReleases({
+    projects: all.json.projects.map((p) => ({ ...p, quietDays: quietDaysOf.get(p.slug) ?? 0 })),
+    newest: tags.tags[0] ?? null,
+    now: Date.now(),
+    dryRun,
+    io: {
+      // When the release's commit reached main: here already, or fetched
+      // (into FETCH_HEAD only; no branch or tag here is changed).
+      releasedAt: (commit) => {
+        const when = () => git(['show', '-s', '--format=%ct', `${commit}^{commit}`]);
+        let out = when();
+        if (out.status !== 0) {
+          const fetched = git(['fetch', '--quiet', '--no-tags', remote, 'main']);
+          if (fetched.status !== 0) return { problem: `git fetch ${remote} main failed: ${String(fetched.stderr || '').trim().slice(0, 200)}` };
+          out = when();
+        }
+        const secs = Number(String(out.stdout || '').trim());
+        return out.status === 0 && secs > 0 ? secs * 1000 : { problem: `commit ${commit.slice(0, 12)} is not in this checkout or on ${remote}'s main` };
+      },
+      alarms: async () => {
+        if (!project.busProject) return { problem: `${project.projectSlug}'s project config names no bus ("busProject"), so no alarm could be seen` };
+        const read = await readBusMessages();
+        if (!read.ok) return { problem: `its bus could not be read (${read.why})` };
+        return { times: read.messages.filter((m) => trackerBus.isAlarmPost(m.text)).map((m) => m.at) };
+      },
+      nameRelease: async (slug, to) => {
+        const out = await tracker.nameRelease(slug, to);
+        if (!out.res.ok) return { ok: false, problem: `HTTP ${out.res.status}: ${String(out.json?.err || out.text || '').slice(0, 200)}` };
+        const back = await tracker.projectRelease(slug);
+        if (!back.res.ok) return { ok: false, problem: `named, but the record could not be read back (HTTP ${back.res.status})` };
+        return { ok: true, release: back.json.release ?? null };
+      },
+      busOf: (slug) => (slugs.has(trackerBus.busProjectFor(slug)) ? trackerBus.busProjectFor(slug) : null),
+      postBus: async (bus, text) => {
+        const out = await postBusMessage(text, bus);
+        return out.ok ? { ok: true } : { ok: false, problem: out.why };
+      },
+    },
+  });
 }
 
 /** Post a lane notice on a ticket and read it back, returning the tracker's own time for it. */
@@ -2129,6 +2203,20 @@ if (cmd === 'whoami') {
         console.error(`\nBUS — ${laneOut.busSkipped.length} post(s) or read(s) did not land:`);
         for (const line of laneOut.busSkipped) console.error(`  - ${line}`);
       }
+    }
+  }
+
+  // Spirality's releases (SP-277): a project whose Quiet Days Before Moving
+  // is above 0 moves to the newest release once it has run that long on
+  // Spirality's own lanes with no alarm on Spirality's bus. Only the relay of
+  // the tracker's home project does it, for every other project.
+  if (project.tracker === 'api') {
+    try {
+      const follow = await releaseFollowStep({ dryRun });
+      for (const l of follow.lines) console.log(l);
+      unchecked.push(...follow.problems);
+    } catch (err) {
+      unchecked.push(`release-follow stopped (${err.message}); no project was moved by it this pass`);
     }
   }
 

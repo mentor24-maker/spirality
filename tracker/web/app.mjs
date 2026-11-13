@@ -2285,7 +2285,7 @@ function drawPipelineControls(box, views) {
   const save = async (slug, tr, button) => {
     const key = tr.dataset.control;
     const raw = tr.querySelector('input, select').value.trim();
-    const numeric = tr.dataset.kind === 'seconds' || tr.dataset.kind === 'count';
+    const numeric = ['seconds', 'count', 'days'].includes(tr.dataset.kind);
     const sent = numeric && /^-?[0-9]+$/.test(raw) ? String(Number(raw)) : raw;
     const mine = notes.get(slug) ?? {};
     notes.set(slug, mine);

@@ -484,19 +484,20 @@ export function mountainTime(iso) {
   return d.toLocaleString('en-US', { timeZone: 'America/Denver', month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
 }
 
-/** A pipeline control's value in words: "1,800 seconds (Every 30 minutes)", "On", "Claude's default". */
+/** A pipeline control's value in words: "1,800 seconds (Every 30 minutes)", "On", "Claude's default", "7 days". */
 export function controlValueText(control, models = []) {
   const v = String(control?.value ?? '');
   if (control?.kind === 'seconds') return `${Number(v).toLocaleString('en-US')} seconds (${wakesEvery(Number(v))})`;
   if (control?.kind === 'switch') return v === 'on' ? 'On' : 'Off';
   if (control?.kind === 'model') return models.find((m) => m.id === v)?.label ?? v;
+  if (control?.kind === 'days') return v === '0' ? '0 (moves only when named by hand)' : `${v} day${v === '1' ? '' : 's'}`;
   return v;
 }
 
 /** One control's input, named by its key: a number box, an On/Off choice or a model choice. */
 function controlInput(c, models, id, locked) {
   const off = locked ? ' disabled' : '';
-  if (c.kind === 'seconds' || c.kind === 'count') {
+  if (c.kind === 'seconds' || c.kind === 'count' || c.kind === 'days') {
     return `<input id="${id}" type="number" min="${c.min}" max="${c.max}" step="1" value="${escapeHtml(c.value)}"${off}>`;
   }
   const options = c.kind === 'switch' ? [{ id: 'off', label: 'Off' }, { id: 'on', label: 'On' }] : models;
@@ -529,11 +530,12 @@ export function renderPipelineControls(view, notes = {}) {
     </tr>`;
   };
   const group = (g) => {
+    if (g.notOnOwnProject && view.own) return '';
     const controls = view.controls.filter((c) => c.group === g.key);
     if (!controls.length) return '';
     return `<h4>${escapeHtml(g.title)}</h4>
     <table class="controls"><tbody>${controls.map(row).join('')}</tbody></table>
-    <p class="quiet not-yet">Saved, but the lanes do not use this yet (${escapeHtml(g.wiredBy)}).</p>`;
+    ${g.wiredBy ? `<p class="quiet not-yet">Saved, but the lanes do not use this yet (${escapeHtml(g.wiredBy)}).</p>` : ''}`;
   };
   const who = view.operator ? escapeHtml(view.operator.name) : 'nobody (this project has no operator)';
   const lockedLine = locked ? `<p class="quiet">Only ${who}, the project's operator, may change these.</p>` : '';

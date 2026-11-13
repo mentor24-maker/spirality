@@ -2805,7 +2805,7 @@ test('pipeline controls: anyone signed in reads them, defaults marked; the opera
     assert.equal(read.status, 200);
     assert.deepEqual(control(read.body, 'wake.loop-build'), { ...control(read.body, 'wake.loop-build'), value: '1800', isDefault: true });
     assert.equal(read.body.canChange, false, 'a loop may never change its own controls');
-    assert.deepEqual(read.body.groups.map((g) => g.wiredBy), ['SP-236', 'SP-237', 'SP-238', 'SP-239']);
+    assert.deepEqual(read.body.groups.map((g) => g.wiredBy), ['SP-236', 'SP-237', 'SP-238', 'SP-239', null], 'Quiet Days Before Moving is in use already (SP-277)');
     assert.equal((await f.call('GET', '/pipeline-controls/alpha', { token: f.humanToken })).body.canChange, true);
     assert.equal((await f.call('GET', '/pipeline-controls/alpha', { token: otherToken })).body.canChange, false);
     assert.equal((await f.call('GET', '/pipeline-controls/nope')).status, 404);
@@ -2830,6 +2830,33 @@ test('pipeline controls: anyone signed in reads them, defaults marked; the opera
     }
     assert.equal(f.store.pipelineSettingChanges('alpha').length, 1, 'a refused change logs nothing');
     assert.equal(control(f.store.pipelineSettings('alpha').reduce((v, c) => ({ controls: [...v.controls, c] }), { controls: [] }), 'wake.loop-build').value, '900');
+  } finally { await f.cleanup(); }
+});
+
+test('Quiet Days Before Moving: 0 to 30, default 0; set for another project, refused 409 for the tracker\'s home, whose page view leaves it out (SP-277)', async () => {
+  const f = await fixture();
+  try {
+    f.store.createProject({ slug: 'home', name: 'Home', prefix: 'HO', operator: f.human.id });
+    const at = await f.serve(f.store, { ownProject: 'home' });
+    const value = (view) => view.controls.find((c) => c.key === 'release.quiet-days');
+    const alpha = (await f.call('GET', '/pipeline-controls/alpha', { at })).body;
+    assert.equal(alpha.own, false);
+    assert.deepEqual({ ...value(alpha) }, { ...value(alpha), value: '0', isDefault: true, min: 0, max: 30, kind: 'days', group: 'release-move' });
+    assert.deepEqual(alpha.groups.at(-1), { key: 'release-move', title: 'Quiet Days Before Moving', wiredBy: null, notOnOwnProject: true });
+    assert.equal((await f.call('GET', '/pipeline-controls/home', { at })).body.own, true);
+
+    const saved = await f.call('PUT', '/pipeline-controls/alpha', { at, token: f.humanToken, body: { setting: 'release.quiet-days', value: '7' } });
+    assert.equal(saved.status, 200, saved.text);
+    assert.deepEqual(saved.body.saved, { setting: 'release.quiet-days', from: '0', to: '7', changed: true });
+    for (const bad of ['31', '-1', 'soon']) {
+      assert.equal((await f.call('PUT', '/pipeline-controls/alpha', { at, token: f.humanToken, body: { setting: 'release.quiet-days', value: bad } })).status, 400, bad);
+    }
+    const own = await f.call('PUT', '/pipeline-controls/home', { at, token: f.humanToken, body: { setting: 'release.quiet-days', value: '3' } });
+    assert.equal(own.status, 409, own.text);
+    assert.match(own.body.message, /Home is the tracker's home project: its lanes always run main, so "Quiet Days Before Moving" is not set for it/);
+    assert.equal(f.store.pipelineSettingChanges('home').length, 0, 'the refusal wrote nothing');
+    const wake = await f.call('PUT', '/pipeline-controls/home', { at, token: f.humanToken, body: { setting: 'wake.relay', value: '900' } });
+    assert.equal(wake.status, 200, 'the home project\'s other controls still change');
   } finally { await f.cleanup(); }
 });
 

@@ -16,10 +16,16 @@
  *                  default lib/wipCap.js (DEFAULT_WIP_CAP)
  *   model.<lane>   the model a lane's passes run on: `default` (Claude's
  *                  default, what the runner does today) or one of MODELS
+ *   release.quiet-days
+ *                  days the newest release runs quietly on the tracker's
+ *                  home project's lanes before a project moves to it by
+ *                  itself, 0 to 30; default 0, "only when named by hand"
+ *                  (lib/releaseFollow.mjs, SP-277). The home project has
+ *                  none to set: it always runs main (`notOnOwnProject`).
  *
- * Nothing on the Mini reads them yet. Each group names the ticket that wires
- * it in (`wiredBy`); the Settings page says so under it, and that ticket
- * removes its own line.
+ * A group nothing on the Mini reads yet names the ticket that wires it in
+ * (`wiredBy`); the Settings page says so under it, and that ticket removes
+ * its own line. A group with no `wiredBy` is already in use.
  */
 import { intervalOf } from '../scripts/lib/loopSchedule.mjs';
 import wipCap from '../lib/wipCap.js';
@@ -44,6 +50,7 @@ export const MODELS = Object.freeze([
 /** The shortest and longest wake time, in seconds, and the cap's range. */
 export const WAKE_RANGE = Object.freeze({ min: 60, max: 86400 });
 export const CAP_RANGE = Object.freeze({ min: 1, max: 50 });
+export const QUIET_DAYS_RANGE = Object.freeze({ min: 0, max: 30 });
 
 /** The groups the page shows, in order, each with the ticket that makes the lanes use it. */
 export const GROUPS = Object.freeze([
@@ -51,6 +58,7 @@ export const GROUPS = Object.freeze([
   Object.freeze({ key: 'pause', title: 'Pause and Resume', wiredBy: 'SP-237' }),
   Object.freeze({ key: 'cap', title: 'Work-in-Progress Cap', wiredBy: 'SP-238' }),
   Object.freeze({ key: 'model', title: 'Model per Lane', wiredBy: 'SP-239' }),
+  Object.freeze({ key: 'release-move', title: 'Quiet Days Before Moving', wiredBy: null, notOnOwnProject: true }),
 ]);
 
 const control = (fields) => Object.freeze(fields);
@@ -67,6 +75,10 @@ export const CONTROLS = Object.freeze([
   ...MODEL_LANES.map((lane) => control({
     key: `model.${lane}`, group: 'model', kind: 'model', label: `${lane} model`, default: DEFAULT_MODEL,
   })),
+  control({
+    key: 'release.quiet-days', group: 'release-move', kind: 'days',
+    label: 'quiet days before moving to the newest release', default: '0', ...QUIET_DAYS_RANGE,
+  }),
 ]);
 
 const BY_KEY = new Map(CONTROLS.map((c) => [c.key, c]));
@@ -92,16 +104,16 @@ function wholeNumber(value) {
 
 /**
  * `value` as `key` stores it (always text), or a ControlError saying what is
- * wrong in words Dane can act on. Seconds and the cap are whole numbers in
- * range; a switch is `on` or `off` (true and false are read as those); a
+ * wrong in words Dane can act on. Seconds, days and the cap are whole
+ * numbers in range; a switch is `on` or `off` (true and false are read as those); a
  * model is `default` or one of MODELS.
  */
 export function checkControl(key, value) {
   const c = controlOf(key);
   if (!c) throw new ControlError('unknown-setting', `there is no pipeline setting "${key}"; the settings are ${CONTROLS.map((x) => x.key).join(', ')}.`);
-  if (c.kind === 'seconds' || c.kind === 'count') {
+  if (c.kind === 'seconds' || c.kind === 'count' || c.kind === 'days') {
     const n = wholeNumber(value);
-    const unit = c.kind === 'seconds' ? ' seconds' : '';
+    const unit = c.kind === 'seconds' ? ' seconds' : c.kind === 'days' ? ' days' : '';
     if (n == null || n < c.min || n > c.max) {
       throw new ControlError('bad-setting', `the ${c.label} must be a whole number from ${c.min.toLocaleString('en-US')} to ${c.max.toLocaleString('en-US')}${unit}; "${value}" is not.`);
     }
