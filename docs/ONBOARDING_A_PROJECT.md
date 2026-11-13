@@ -242,15 +242,14 @@ to check each one by hand.
 
 The items below marked **missing**, gathered here so they can become tickets:
 
-1. **No shared package yet.** A project cannot "pin a version" of the
-   substrate (`CLAUDE.md`, "What we are building", point 3): there is no
-   tagged release and nothing published. Today a project must carry its own
-   copy of `scripts/`, `lib/` and `.claude/` (item 6). **That is the plan
-   for now, not only a gap:** WaveCenter and StarCaster leave ClickUp as a
-   wizard copy, like Normie, not by pinning a release. Dane chose this on
-   2026-11-08, planning SP-23 and SP-25: *"a wizard copy now is fine for
-   now."* The package (`docs/PLAN.md`, phases 1 to 5) is deferred, not
-   dropped.
+1. **The loop is still copied into the project.** Today a project carries
+   its own copy of `scripts/`, `lib/` and `.claude/` (item 6), as WaveCenter,
+   StarCaster and Normie do. Dane chose the copy on 2026-11-08, planning
+   SP-23 and SP-25: *"a wizard copy now is fine for now."* Where it ends up
+   is no longer a pinned package: on 2026-11-12 Dane decided loop code lives
+   only in Spirality, its lanes run against the project from Spirality's own
+   folder, and nothing is copied in ([INTEGRATION.md](INTEGRATION.md),
+   SP-261). Until those moves land, the wizard copy stays.
 2. **Some of the copied code still said "spirality".** Both halves are
    fixed. SP-96 fixed the Doppler half: the npm scripts run `doppler run`
    through `scripts/with_doppler.mjs`, and `npm run doctor` checks, all with
@@ -606,6 +605,9 @@ changing the file: `CLICKUP_WORKSPACE_ID`, `CLICKUP_SPACE_ID`,
 - **Check.** In a session started in the project's repository, an edit on
   `main` is refused ("Checking branch (no edits on main)"), and
   `npm run clickup -- queue --claimable` answers.
-- **Today.** **Manual** (copied by hand). **Missing**: a package the project
-  depends on at a pinned version, so a substrate fix reaches it as a pull
-  request instead of a re-copy (gap 1).
+- **Today.** **Manual** (copied by hand). **Missing**: Spirality supplying
+  the skills, hooks and door to each lane's session from its own folder, so
+  none of it lives in the project and a fix reaches every project without a
+  re-copy (gap 1, [INTEGRATION.md](INTEGRATION.md)). The project's
+  `CLAUDE.md` and doctrine stay in the project: they are its rules for
+  agents.

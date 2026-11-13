@@ -26,10 +26,14 @@ and lessons learned in one do not reach the other. Spirality ends that:
    hooks, each parameterised by a **project config** object: workspace, space,
    Loop Queue list, operator id, machine user id, GitHub repo, Doppler project,
    launchd label prefix, log folder, merge phrases, governance paths.
-3. **Projects pin a version.** StarCaster and WaveCenter depend on a tagged
-   release; an upgrade is a pull request with CI. A substrate change can never
-   reach both projects at once unchecked. (Deferred for now: projects get the
-   loop as a wizard copy; see `docs/ONBOARDING_A_PROJECT.md`, gap 1.)
+3. **Loop code lives only in Spirality.** A project provides a manifest
+   (`spirality.project.json`), `npm run verify`, optional application checks and
+   its own rules for agents, and nothing else; Spirality's lanes run from
+   this repository against the project's. A change reaches Spirality's own
+   lanes first and each project after it, so it can never reach every project
+   at once unchecked. See [docs/INTEGRATION.md](docs/INTEGRATION.md) (Dane,
+   SP-261, 2026-11-12). Until those moves land, projects still carry a wizard
+   copy (`docs/ONBOARDING_A_PROJECT.md`, gap 1).
 
 The full analysis and the five-phase plan are on the WaveCenter ticket that
 created this repository (86bcgm97x) and in `docs/PLAN.md`.
