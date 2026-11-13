@@ -42,8 +42,9 @@ prefix, merge phrases, protected files (`governancePaths`), auto-merge
 lanes, and the application checks below.
 
 - **Spirality owns the format.** It is written down once, with a version
-  number. A manifest with a missing field, an unknown field or the wrong
-  version is refused, with the field named, before any lane runs.
+  number, in [PROJECT_MANIFEST.md](PROJECT_MANIFEST.md) (SP-262). A
+  manifest with a missing field, an unknown field or the wrong version is
+  refused, with the field named, before any lane runs.
 - **Nothing about the machine goes in it.** Which machine runs the tracker,
   and its address, are Spirality's to know, not the project's.
 

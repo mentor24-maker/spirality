@@ -168,7 +168,7 @@ test('the door names no ClickUp address of its own', () => {
 function clickupDoor(apiBase, args) {
   const dir = mkdtempSync(join(tmpdir(), 'clickup-door-'));
   writeFileSync(join(dir, 'spirality.project.json'), JSON.stringify({
-    workspaceId: '111', spaceId: '222', loopQueueListId: '333',
+    manifestVersion: 1, workspaceId: '111', spaceId: '222', loopQueueListId: '333',
     operatorUserId: 1, machineUserId: 2,
     githubRepo: 'owner/repo', dopplerProject: 'proj', dopplerConfig: 'dev',
     launchdPrefix: 'com.example', logDir: '~/loop-logs', mergePhrases: ['merge'],

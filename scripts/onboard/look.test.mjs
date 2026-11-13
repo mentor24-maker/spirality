@@ -15,7 +15,7 @@ import { join } from 'node:path';
 import { parseNodeNeed } from '../../lib/onboardAnswers.mjs';
 
 const homeConfig = validateProjectConfig({
-  workspaceId: '1', spaceId: '1', loopQueueListId: '1', operatorUserId: '1', machineUserId: '2',
+  manifestVersion: 1, workspaceId: '1', spaceId: '1', loopQueueListId: '1', operatorUserId: '1', machineUserId: '2',
   githubRepo: 'owner/home', dopplerProject: 'home', dopplerConfig: 'dev', launchdPrefix: 'com.home',
   logDir: '~/loop-logs', mergePhrases: ['merge'], governancePaths: ['CLAUDE.md'], autoMergeLanes: [],
   operatorName: 'Dane', projectSlug: 'home', legacyMachinePrefixes: [], projectScripts: {},
