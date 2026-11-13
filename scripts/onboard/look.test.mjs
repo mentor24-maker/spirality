@@ -221,7 +221,7 @@ test('the tracker for a project already set up: every row ready', async () => {
 test('the tracker for a new project: project and sign-ins will do; a taken prefix is BLOCKED', async () => {
   const fresh = await trackerRows({ ...trackerArgs, get: fakeTracker({ projects: [{ slug: 'spirality', name: 'Spirality', prefix: 'SP' }], actors: ['Dane', 'normie loop-build'] }) });
   assert.deepEqual(fresh.map((r) => r.verdict), [READY, WILL_DO, READY, WILL_DO, READY]);
-  assert.match(fresh[3].why, /1 of 5 exist/);
+  assert.match(fresh[3].why, /1 of 6 exist/);
   const taken = await trackerRows({ ...trackerArgs, get: fakeTracker({ projects: [{ slug: 'nobody', name: 'Nobody', prefix: 'NO' }] }) });
   assert.equal(taken[2].verdict, BLOCKED);
   assert.match(taken[2].why, /NO is Nobody's \(nobody\)/);
