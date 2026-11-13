@@ -72,6 +72,45 @@ project's bus, as an alarm (texted to Dane) or a plain post, by the same
 rules as every other bus post. The check's code stays in the project because
 only the project knows what "healthy" means for it.
 
+**The field** is `applicationChecks` (`docs/PROJECT_MANIFEST.md`, manifest
+version 2). Each entry:
+
+```json
+{ "name": "site-import-watch", "command": "node scripts/site_import_watch.mjs",
+  "everyMinutes": 10, "alarm": true, "timeoutSeconds": 60 }
+```
+
+`name` (a slug, unique), `command` (one shell string, run from the folder
+holding the manifest) and `everyMinutes` (10 or more) are required; `alarm`
+defaults to `true` and `timeoutSeconds` to 60 (at most 300). A wrong entry is
+refused when the manifest loads, naming the entry and the field, and a list
+with checks in it needs `busProject` and `"tracker": "api"` (the bus is a
+tracker project).
+
+**The runner** is `npm run app-checks` (`scripts/app_checks.mjs`, decisions
+in `lib/appChecks.js`). It runs the checks that are due, without the
+tracker's sign-in in their environment, and posts through `bus-post`, read
+back. `--dry-run` prints what it would post and writes nothing. Until SP-274
+puts it on every relay pass, it runs by hand.
+
+**The post rules**, by what the check said last time and this time:
+
+| Before | Now | Posts |
+|---|---|---|
+| well (or never run) | failing | `<name>: <its one line>`, with `ALARM: ` in front when `alarm` is true |
+| failing | failing | nothing, except once a day: `<name>: still failing since <time, MT>: <line>` (an alarm check's reminder is an alarm too) |
+| failing | well | `<name>: well again`, never an alarm |
+| well | well | nothing |
+
+Only the first line a check prints is posted (cut at 300 characters), and
+the value of any variable whose name looks like a key or token is replaced
+by `[hidden]`. A command that exits non-zero printing nothing is posted as
+`exited <code> with no message`; one past its time limit is stopped and
+posted as `did not finish in <n> seconds`. What each check said last is kept
+in `<logDir>/<projectSlug>-app-checks.json`, saved only once its post
+landed, so a post that did not land is tried again on the next pass, and
+the pass exits 1 naming it.
+
 ### 4. Its rules for agents
 
 The project's `CLAUDE.md` and its doctrine (`docs/DOCTRINE.md` and the
@@ -157,6 +196,8 @@ is a ticket in that project's own queue, filed once Spirality's side is Live:
    pause into the lanes.
 3. Let a project list application checks in its manifest for Spirality to run
    and post to its bus.
+   Slice 1 done (SP-264): the `applicationChecks` field and
+   `npm run app-checks`, run by hand. SP-274 runs it on every relay pass.
 4. Move the pipeline watchdogs into Spirality for every project (SP-260,
    filed 2026-11-12, which also sorts StarCaster's watchdogs into pipeline
    watchdogs and application checks).
