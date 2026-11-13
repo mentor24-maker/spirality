@@ -422,8 +422,10 @@ its `claude` line; Claude's default, settings that cannot be read, or a value
 not on the page's list (`scripts/lib/laneModels.mjs`) run today's command
 with no `--model`, the last two with one log line saying why. The START line
 names the model (`START /loop-build (model: <id or default>)`), and the page
-shows beside each lane the model its last pass ran on. The cap is not acted
-on yet: SP-238 wires it in.
+shows beside each lane the model its last pass ran on. The work-in-progress
+cap is in effect too (SP-238): before it claims, loop-build runs `npm run
+clickup -- wip-check` (`lib/wipCheck.js`) and claims nothing while the tickets
+in flight are at the page's cap.
 A browser opening `/projects` or `/projects/<slug>` gets the page; the page's own
 call to the same address gets the data. `/users` is the page alone; its data
 is still `GET /people` (the onboarding scripts read it), and a browser opening
