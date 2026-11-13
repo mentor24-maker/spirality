@@ -26,7 +26,7 @@
  * an emailed link's own page. The link's token is sent only in a JSON body,
  * never in an address.
  */
-import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, unwrapDoc, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderAnswerIn, renderHeldUp, renderReplyForm, statusLabel, ANSWER_IN_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, lookupTicket, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, pipelinePodLabel, renderHealth, healthLines, renderCommandList, renderCommandView, renderCommandDetails, renderContextDocs, renderSortHeadings, renderListPriority, sortTickets, nextSort, renderDocumentation, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, lowerMeridiem, renderPipelineControls } from './render.mjs';
+import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, unwrapDoc, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderAnswerIn, renderHeldUp, renderReplyForm, statusLabel, ANSWER_IN_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, lookupTicket, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, pipelinePodLabel, renderHealth, healthLines, renderCommandList, renderCommandView, renderCommandDetails, renderContextDocs, renderSortHeadings, renderListPriority, sortTickets, nextSort, renderDocumentation, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, lowerMeridiem, renderPipelineControls, renderConsole } from './render.mjs';
 
 /** Where an earlier version of the page kept a pasted token; removed on load, never read. */
 const OLD_TOKEN_KEY = 'tracker-token';
@@ -562,9 +562,21 @@ const repoOf = (p) => (isRepo(p.repo)
   ? `<a href="https://github.com/${escapeHtml(p.repo)}" target="_blank" rel="noopener noreferrer">${escapeHtml(p.repo)}</a>`
   : '<span class="quiet">none</span>');
 
-/** The remembered view; a browser that will not keep it answers "list". */
+/** The remembered project view, Board or List; a browser that will not keep it (or that last chose the Console) answers "list". */
 function savedView() {
   try { return localStorage.getItem(VIEW_KEY) === 'board' ? 'board' : 'list'; } catch { return 'list'; }
+}
+
+/** The Tasks view "Tasks" in the header reopens: "console" when the Console was chosen last (SP-233), else savedView(). */
+function savedTasksView() {
+  try { if (localStorage.getItem(VIEW_KEY) === 'console') return 'console'; } catch { /* nothing remembered */ }
+  return savedView();
+}
+
+/** The Tasks page's view switch: Board and List for project `slug`, then the Console (every project), `current` marked. */
+function viewSwitch(slug, current) {
+  const views = [['board', 'Board', `/board/${encodeURIComponent(slug)}`], ['list', 'List', `/list/${encodeURIComponent(slug)}`], ['console', 'Console', '/console']];
+  return `<nav class="views" aria-label="View">${views.map(([v, label, href]) => `<a href="${href}"${v === current ? ' class="current" aria-current="page"' : ''}>${label}</a>`).join('')}</nav>`;
 }
 
 /** The selected project's slug, or null when none is remembered. */
@@ -1133,6 +1145,10 @@ async function drawSetup(slug) {
  * none selected, or one that no longer exists, the first project.
  */
 async function drawTasks(view, opts = {}) {
+  if (view === 'console') {
+    history.replaceState(null, '', '/console');
+    return drawConsole();
+  }
   const { projects } = await api('GET', '/projects');
   if (!projects.length) {
     setTitle('Tasks · Tracker');
@@ -1143,6 +1159,44 @@ async function drawTasks(view, opts = {}) {
   const slug = projects.some((p) => p.slug === savedProject()) ? savedProject() : projects[0].slug;
   history.replaceState(null, '', `/${view}/${encodeURIComponent(slug)}`);
   await drawProject(slug, view, opts);
+}
+
+/**
+ * The Console view (SP-233): every ticket in flight on every project he can
+ * see, as icon tiles grouped by stage in pipeline order (renderConsole),
+ * from GET /in-flight. The stages and their colours come from GET
+ * /stage-colours; an unreadable answer there draws the stages the tickets
+ * are in, uncoloured. Choosing it is remembered, so "Tasks" in the header
+ * reopens it. A view only: nothing here changes a ticket. The beat draws it
+ * again every minute (route marks it `ticking`), so "in 12 min" counts down.
+ */
+async function drawConsole() {
+  const [answer, colours] = await Promise.all([
+    api('GET', '/in-flight'),
+    api('GET', '/stage-colours').catch((err) => { if (err instanceof SignedOut) throw err; return null; }),
+  ]);
+  try { localStorage.setItem(VIEW_KEY, 'console'); } catch { /* the page still works; it is only not remembered */ }
+  const looks = stageLooks(colours);
+  const stages = Array.isArray(colours?.stages) ? colours.stages.map((s) => s.status) : [];
+  const project = savedProject();
+  const slug = answer.projects.some((p) => p.slug === project) ? project : answer.projects[0]?.slug;
+  setTitle('Console · Tracker');
+  main.innerHTML = `
+    <div class="tasks-head"><h1>Tasks</h1></div>
+    <div class="toolbar">
+      ${slug ? viewSwitch(slug, 'console') : ''}
+    </div>
+    ${answer.tickets.length ? '' : '<p class="quiet">Nothing is in flight.</p>'}
+    ${renderConsole(answer, stages)}`;
+  for (const el of main.querySelectorAll('[data-stage]')) {
+    const look = looks[el.dataset.stage];
+    if (!look) continue;
+    el.classList.add('coloured');
+    el.style.setProperty('--stage-border', look.border);
+    el.style.setProperty('--stage-tint', look.tint);
+    el.style.setProperty('--stage-text', look.text);
+  }
+  putTrail([{ label: 'Tasks' }, { label: 'Console' }]);
 }
 
 /**
@@ -1233,7 +1287,6 @@ async function drawProject(slug, view, { adding = false, filed = null, unchecked
   showProject();
   setTitle(`${board.projectName} ${view} · Tracker`);
   const at = (v, s) => `/${v}/${encodeURIComponent(s)}`;
-  const toggle = ['board', 'list'].map((v) => `<a href="${at(v, board.project)}"${v === view ? ' class="current" aria-current="page"' : ''}>${v === 'board' ? 'Board' : 'List'}</a>`).join('');
   /**
    * A stage's heading (SP-196): its name on the left, its count right-aligned,
    * then the fold arrow, which the stylesheet draws from the block's open
@@ -1290,7 +1343,7 @@ async function drawProject(slug, view, { adding = false, filed = null, unchecked
       ${renderProjectPicker(projects, board.project)}
       ${searchForm('')}
       <button type="button" class="pipeline-pod" aria-haspopup="dialog" title="Open Pipeline Status"></button>
-      <nav class="views" aria-label="View">${toggle}</nav>
+      ${viewSwitch(board.project, view)}
     </div>
     ${filed && (unchecked || notUploaded.length) ? `<p class="filed-note">${unchecked ? UNCHECKED_NOTE : ''}${notUploadedNote(notUploaded)}</p>` : ''}
     <details class="add-task">
@@ -2932,6 +2985,7 @@ async function route({ place = null } = {}) {
     const details = !newProject && /^\/projects\/([^/]+)$/.exec(location.pathname);
     const editProject = /^\/projects\/([^/]+)\/edit$/.exec(location.pathname);
     const tasks = location.pathname === '/tasks';
+    const consolePage = location.pathname === '/console';
     const isNew = location.pathname === '/new';
     const settings = location.pathname === '/settings';
     const reporting = location.pathname === '/reporting';
@@ -2946,8 +3000,8 @@ async function route({ place = null } = {}) {
     const setupPage = !setupNew && /^\/setup\/([^/]+)$/.exec(location.pathname);
     const setupAny = setupNew || setupAnswers || setupPage;
     let following = false;
-    const waiting = !(setupAny || search || reporting || settings || usersPage || docsPage || docAny || isNew || ticket || projects || newProject || editProject || details || tasks || project);
-    markNav(reporting ? 'reporting' : settings ? 'settings' : usersPage ? 'users' : docsPage || docAny ? 'docs' : projects || newProject || details || editProject || setupAny ? 'projects' : ticket || project || tasks || isNew || search ? 'tasks' : 'waiting');
+    const waiting = !(setupAny || search || reporting || settings || usersPage || docsPage || docAny || isNew || ticket || projects || newProject || editProject || details || tasks || consolePage || project);
+    markNav(reporting ? 'reporting' : settings ? 'settings' : usersPage ? 'users' : docsPage || docAny ? 'docs' : projects || newProject || details || editProject || setupAny ? 'projects' : ticket || project || tasks || consolePage || isNew || search ? 'tasks' : 'waiting');
     if (setupNew) {
       await drawSetupNew(null);
     } else if (setupAnswers) {
@@ -2971,6 +3025,8 @@ async function route({ place = null } = {}) {
     } else if (isNew) {
       // The old New request address: the Tasks page with its Add Task box open.
       await drawTasks(savedView(), { adding: true });
+    } else if (consolePage) {
+      await drawConsole();
     } else if (ticket) {
       await drawTicket(decodeURIComponent(ticket[1]));
     } else if (projects) {
@@ -2983,7 +3039,7 @@ async function route({ place = null } = {}) {
       await drawProjectDetails(decodeURIComponent(details[1]));
     } else if (tasks || (project && project[2] == null)) {
       // "Tasks" in the header: the selected project, in the view last used.
-      await drawTasks(tasks ? savedView() : project[1]);
+      await drawTasks(tasks ? savedTasksView() : project[1]);
     } else if (project) {
       await drawProject(decodeURIComponent(project[2]), project[1]);
     } else {
@@ -2995,6 +3051,8 @@ async function route({ place = null } = {}) {
     // Waiting on you read the count as it drew; every other page reads it now.
     if (!waiting) await refreshCount();
     if (kept) lastDrawn = ticket || project || tasks || isNew || waiting ? { address: here(), reads } : null;
+    // The Console's "in 12 min" counts down on its own, so the beat draws it every time, changed or not.
+    if (kept && (consolePage || (tasks && here() === '/console'))) lastDrawn = { address: here(), reads, ticking: true };
     // Waiting on you skipped refreshCount, so the bus count in the header is read here.
     if (waiting) await refreshBus();
     // A setup page under way follows it every few seconds (the fast beat below).
@@ -3042,10 +3100,13 @@ async function drawAgain(draw) {
 /** Why this beat must leave the page alone, or null. */
 const hold = () => redrawHold({ hidden: document.hidden, drawing: drawing > 0, writing: writing > 0, dialog: Boolean(main.querySelector('dialog[open]')), fields: fieldsOf(main) });
 
+/** The page's areas that scroll sideways, whose place keepPlace keeps. */
+const SIDEWAYS = '.console';
+
 /**
  * Where he is on the page: how far down, which folding sections
  * (Details, each Tasks stage, the Add Task box, the Change panel) are open,
- * and how each Tasks table is sorted.
+ * how each Tasks table is sorted, and how far across the Console is scrolled.
  * `restore` puts them back on the page drawn again.
  */
 function keepPlace() {
@@ -3056,10 +3117,14 @@ function keepPlace() {
   const y = window.scrollY;
   // Each stage's sort (SP-174), by stage, put back on the stage's new table.
   const sorts = new Map(sortableTables().filter(({ table }) => sorted.get(table)?.sort).map(({ table, stage }) => [stage, sorted.get(table).sort]));
+  // How far across each sideways-scrolling area is (the Console's stage
+  // columns, SP-233), so his own columns at the right stay in view.
+  const across = [...main.querySelectorAll(SIDEWAYS)].map((el) => el.scrollLeft);
   return {
     restore() {
       for (const d of main.querySelectorAll('details')) if (open.has(key(d))) d.open = open.get(key(d));
       for (const { table, stage } of sortableTables()) if (sorts.has(stage)) sorted.get(table)?.apply(sorts.get(stage));
+      [...main.querySelectorAll(SIDEWAYS)].forEach((el, i) => { if (i < across.length) el.scrollLeft = across[i]; });
       window.scrollTo(0, y);
     },
   };
@@ -3078,8 +3143,9 @@ async function refreshPage() {
   if (checking || !me || !drawn || drawn.address !== here() || hold()) return;
   checking = true;
   try {
-    const now = await Promise.all([...drawn.reads].map(([path]) => api('GET', path)));
-    const changed = [...drawn.reads].some(([, before], i) => JSON.stringify(now[i]) !== before);
+    // A page drawn every beat anyway (the Console) is not read twice to compare.
+    const now = drawn.ticking ? [] : await Promise.all([...drawn.reads].map(([path]) => api('GET', path)));
+    const changed = drawn.ticking || [...drawn.reads].some(([, before], i) => JSON.stringify(now[i]) !== before);
     // He may have moved on, or started typing, while it read.
     if (!changed || lastDrawn !== drawn || drawn.address !== here() || hold()) return;
     refreshing = true;

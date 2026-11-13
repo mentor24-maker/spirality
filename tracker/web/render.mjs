@@ -2042,3 +2042,115 @@ export function renderDocumentation(files, address) {
       <tbody>${renderDocBody(rows, address)}</tbody></table>
   </details>`;
 }
+
+/**
+ * The Console view (SP-233): every ticket in flight as an icon tile, from
+ * GET /in-flight (pageData.consoleOf). Everything below is pure, so the
+ * tests draw exactly what the page draws.
+ */
+
+/** What a Console tile shows when a fact is not known. */
+export const CONSOLE_UNKNOWN = '—';
+
+/**
+ * A ticket's next change as a tile's short fact and its hover text, from
+ * the answer's `nextChange`: `You` when it is the operator's move, `Now`
+ * while Building (or while the lane that acts on it runs), `in 12 min` /
+ * `in 2 h` until the lane's next pass (its clock time in Mountain time on
+ * hover), `Now` for a pass already due, and CONSOLE_UNKNOWN when no time is
+ * known. `now` is a time in milliseconds, given so a test can fix the clock.
+ */
+export function consoleNextChange(nextChange, now = Date.now()) {
+  const lane = typeof nextChange?.lane === 'string' ? nextChange.lane : 'The lane';
+  if (nextChange?.kind === 'operator') return { text: 'You', title: 'Your move: no lane acts on it until you do' };
+  if (nextChange?.kind === 'running') return { text: 'Now', title: `${lane} is working on it now` };
+  if (nextChange?.kind !== 'lane') return { text: CONSOLE_UNKNOWN, title: 'When the next pass picks it up is not known' };
+  if (nextChange.running) return { text: 'Now', title: `${lane} is running now` };
+  const due = Date.parse(nextChange.due);
+  if (Number.isNaN(due)) return { text: CONSOLE_UNKNOWN, title: 'When the next pass picks it up is not known' };
+  const away = due - now;
+  const at = `${lane}'s next pass is due ${mountainTime(nextChange.due)}`;
+  if (away <= 0) return { text: 'Now', title: at };
+  const minutes = Math.ceil(away / 60_000);
+  // Whole hours count down the same way minutes do: 89 minutes is still "in 1 h", never rounded up to 2.
+  return { text: minutes < 60 ? `in ${minutes} min` : `in ${Math.floor(minutes / 60)} h`, title: at };
+}
+
+/**
+ * How long a ticket has sat in its stage, short: `5m`, `3h`, `2d` (under a
+ * minute is `0m`), or CONSOLE_UNKNOWN for a time that cannot be read.
+ */
+export function consoleAge(since, now = Date.now()) {
+  const at = Date.parse(since);
+  if (Number.isNaN(at)) return CONSOLE_UNKNOWN;
+  const minutes = Math.max(0, Math.floor((now - at) / 60_000));
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  return hours < 48 ? `${hours}h` : `${Math.floor(hours / 24)}d`;
+}
+
+/**
+ * True when a tile is ringed as waiting on the operator: the loop's own
+ * verdict (`waitingOnOperator`), one of his two statuses (`nextChange` of
+ * kind `operator`), or an answer of his that is in (`answerIn`).
+ */
+export function consoleWaiting(t) {
+  return t?.waitingOnOperator === true || t?.answerIn === true || t?.nextChange?.kind === 'operator';
+}
+
+/**
+ * One Console tile as HTML: a link to the ticket, its full name on hover;
+ * the project's logo as its picture (only an http(s) address is drawn), or
+ * the project's ticket prefix in large letters when it has none; the ticket
+ * number over it; and along the bottom the stage, the next change
+ * (consoleNextChange) and the time in stage (consoleAge). A ticket waiting
+ * on the operator carries `waiting` (the ring). The stage fact carries
+ * `data-stage`, so the page puts the Settings page's stage colour on it
+ * after drawing (no inline style). Every piece of ticket and project text
+ * is escaped.
+ */
+export function renderConsoleTile(t, project = null, now = Date.now()) {
+  const id = String(t?.id ?? '');
+  const prefix = project?.prefix ?? id.replace(/-.*$/, '');
+  const logo = typeof project?.logo === 'string' && /^https?:\/\//i.test(project.logo) ? project.logo : null;
+  const picture = logo
+    ? `<img class="tile-logo" src="${escapeHtml(logo)}" alt="" referrerpolicy="no-referrer">`
+    : `<span class="tile-prefix" aria-hidden="true">${escapeHtml(prefix)}</span>`;
+  const next = consoleNextChange(t?.nextChange, now);
+  const age = consoleAge(t?.stageSince, now);
+  const waiting = consoleWaiting(t);
+  const status = String(t?.status ?? '');
+  const label = `${id}: ${t?.name ?? ''}`;
+  const spoken = `${label}. ${status}; next change ${next.text}; in this stage ${age}${waiting ? '; waiting on you' : ''}.`;
+  return `<a class="tile${waiting ? ' waiting' : ''}" href="/t/${encodeURIComponent(id)}" title="${escapeHtml(label)}" aria-label="${escapeHtml(spoken)}">`
+    + `<span class="tile-picture">${picture}</span>`
+    + `<span class="tile-number">${escapeHtml(id)}</span>`
+    + '<span class="tile-facts">'
+    + `<span class="fact stage" data-stage="${escapeHtml(status)}">${escapeHtml(status)}</span>`
+    + `<span class="fact next" title="${escapeHtml(next.title)}">${escapeHtml(next.text)}</span>`
+    + `<span class="fact age" title="${escapeHtml(`In ${status} for ${age}`)}">${escapeHtml(age)}</span>`
+    + '</span></a>';
+}
+
+/**
+ * The Console's stages as HTML, left to right in `stages` order (the
+ * Settings page's stage list, GET /stage-colours, in pipeline order), each
+ * a column with its name, its count and its tiles; an empty stage still
+ * shows its heading. A ticket whose status is not in `stages` (the list
+ * could not be read) gets a column of its own after them, in the answer's
+ * order, so no ticket is ever left off. Live is never drawn: nothing in
+ * flight is Live.
+ */
+export function renderConsole(answer, stages = [], now = Date.now()) {
+  const tickets = Array.isArray(answer?.tickets) ? answer.tickets : [];
+  const projects = new Map((Array.isArray(answer?.projects) ? answer.projects : []).map((p) => [p.slug, p]));
+  const order = stages.filter((s) => typeof s === 'string' && s !== 'Live');
+  for (const t of tickets) if (!order.includes(t.status)) order.push(t.status);
+  const column = (status) => {
+    const here = tickets.filter((t) => t.status === status);
+    return `<section class="console-stage" data-stage="${escapeHtml(status)}">`
+      + `<h2><span class="stage-name">${escapeHtml(status)}</span><span class="count quiet">${here.length}</span></h2>`
+      + `<div class="tiles">${here.map((t) => renderConsoleTile(t, projects.get(t.project), now)).join('')}</div></section>`;
+  };
+  return `<div class="console">${order.map(column).join('')}</div>`;
+}
