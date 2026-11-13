@@ -66,6 +66,11 @@ img.logo { width: 1.75rem; height: 1.75rem; object-fit: contain; vertical-align:
 img.logo.big { width: 2.5rem; height: 2.5rem; margin-right: 0.75rem; }
 table.projects td.logo { width: 1%; padding-right: 0; }
 table.projects td.url, table.projects td.repo { overflow-wrap: anywhere; }
+/* The Topics page's Create Topic form (SP-243). */
+form.create-topic { max-width: 40rem; }
+form.create-topic label { display: block; margin-top: 0.75rem; font-weight: 600; }
+form.create-topic input, form.create-topic textarea { display: block; width: 100%; font: inherit; padding: 0.5rem; box-sizing: border-box; margin-top: 0.35rem; }
+form.create-topic .row { display: flex; gap: 1rem; align-items: center; margin-top: 1rem; }
 form.copy label { display: block; }
 form.copy .row { display: flex; gap: 1rem; align-items: center; margin-top: 0.5rem; }
 form.copy select { font: inherit; padding: 0.4rem; }

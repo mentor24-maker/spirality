@@ -3044,3 +3044,72 @@ test('releases: Spirality\'s own project, a bad name, a roll-back with nowhere t
     assert.deepEqual(f.store.projectReleases('alpha'), []);
   } finally { await f.cleanup(); }
 });
+
+// ── Topics (SP-243) ─────────────────────────────────────────────────────────
+
+test('a project\'s topics are made by POST and listed by GET for that project only, newest first; a blank name is refused with 400 and nothing is kept', async () => {
+  const f = await fixture();
+  try {
+    f.store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE', operator: f.human.id });
+    const h = (method, path, body) => f.call(method, path, { token: f.humanToken, body });
+    assert.deepEqual((await h('GET', '/projects/alpha/topics')).body, { project: 'alpha', topics: [] });
+    const made = await h('POST', '/projects/alpha/topics', { name: 'Login', description: 'Signing in' });
+    assert.equal(made.status, 201, made.text);
+    assert.equal(made.body.name, 'Login');
+    assert.equal(made.body.description, 'Signing in');
+    assert.equal(made.body.project, 'alpha');
+    assert.equal(made.body.createdByName, 'Operator');
+    const second = await h('POST', '/projects/alpha/topics', { name: 'Billing' });
+    assert.equal(second.status, 201, second.text);
+    assert.equal(second.body.description, '');
+    assert.deepEqual((await h('GET', '/projects/alpha/topics')).body.topics.map((t) => t.name), ['Billing', 'Login']);
+    assert.deepEqual((await h('GET', '/projects/beta/topics')).body.topics, [], 'another project has its own list');
+    for (const body of [{ name: '' }, { name: '   ' }, {}, { name: 7 }]) {
+      const r = await h('POST', '/projects/beta/topics', body);
+      assert.equal(r.status, 400, JSON.stringify(body));
+      assert.equal(r.body.error, 'bad-name');
+      assert.match(r.body.message, /a topic needs a name/);
+    }
+    assert.deepEqual(f.store.listTopics('beta'), [], 'nothing was kept');
+  } finally { await f.cleanup(); }
+});
+
+test('someone who is not on the project gets the same 404 from both topic calls as from the Docs page\'s call; signed out is 401; nothing is made', async () => {
+  const f = await fixture();
+  try {
+    const base = await f.serve();
+    f.store.addTopic({ project: 'alpha', name: 'Secret plan', actor: f.human.id });
+    const viewer = f.store.createActor({ kind: 'human', name: 'Viewer' });
+    const vt = f.store.issueToken(viewer.id);
+    f.store.setRole({ actor: viewer.id, role: 'viewer', by: f.human.id });
+    const auth = { authorization: `Bearer ${vt}` };
+    const docs = await fetch(`${base}/projects/alpha/docs`, { headers: auth });
+    const docsText = await docs.text();
+    assert.equal(docs.status, 404);
+    const calls = [
+      (p, h) => fetch(`${base}/projects/${p}/topics`, { headers: h }),
+      (p, h) => fetch(`${base}/projects/${p}/topics`, { method: 'POST', headers: { ...h, 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Mine' }) }),
+    ];
+    for (const [i, call] of calls.entries()) {
+      const r = await call('alpha', auth);
+      const text = await r.text();
+      assert.equal(r.status, 404, `call ${i}: ${text}`);
+      assert.equal(text, docsText, `call ${i}: the same refusal as the Docs page's call`);
+      assert.ok(!text.includes('Secret'), `call ${i} gives nothing away`);
+      assert.equal((await call('alpha', {})).status, 401, `call ${i} signed out`);
+    }
+    assert.deepEqual(f.store.listTopics('alpha').map((t) => t.name), ['Secret plan'], 'nothing was made');
+    f.store.addMember({ project: 'alpha', actor: viewer.id, by: f.human.id });
+    assert.equal((await fetch(`${base}/projects/alpha/topics`, { headers: auth })).status, 200, 'made a member, they reach it');
+  } finally { await f.cleanup(); }
+});
+
+test('/topics is the page itself', async () => {
+  const f = await fixture();
+  try {
+    const base = await f.serve();
+    const r = await fetch(`${base}/topics`, { headers: { accept: 'text/html' } });
+    assert.equal(r.status, 200);
+    assert.match(await r.text(), /<nav class="site" hidden>/);
+  } finally { await f.cleanup(); }
+});
