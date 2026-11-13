@@ -18,31 +18,27 @@
  *                  default, what the runner does today) or one of MODELS
  *
  * The lanes on the Mini read the wake times (SP-236: a lane before every
- * sleep, the relay after every ticked pass) and the pause switches (SP-237:
- * a lane's runner asks them before every pass, scripts/pause_check.sh). A
+ * sleep, the relay after every ticked pass), the pause switches (SP-237:
+ * a lane's runner asks them before every pass, scripts/pause_check.sh) and
+ * the models (SP-239: a lane's runner before every pass,
+ * scripts/lib/modelSetting.mjs). A
  * group they do not use yet names the ticket that wires it in (`wiredBy`);
  * the Settings page says so under it, and that ticket sets its own to null.
  */
 import { intervalOf, WAKE_RANGE } from '../scripts/lib/loopSchedule.mjs';
+import { DEFAULT_MODEL, MODEL_LANES, MODELS } from '../scripts/lib/laneModels.mjs';
 import wipCap from '../lib/wipCap.js';
 import { RELEASE_GROUP_TITLE } from '../lib/releases.mjs';
 
 /** The lanes that wake on a timer and can be paused. */
 export const LANES = Object.freeze(['loop-intake', 'loop-build', 'loop-review', 'relay']);
 
-/** The lanes that run a Claude session, so have a model. The relay runs none. */
-export const MODEL_LANES = Object.freeze(['loop-intake', 'loop-build', 'loop-review']);
-
-/** "Claude's default": the runner passes no model, as it does today. */
-export const DEFAULT_MODEL = 'default';
-
-/** The models a lane may be set to, the one place they are listed. */
-export const MODELS = Object.freeze([
-  Object.freeze({ id: 'claude-opus-5-5', label: 'Opus 5.5' }),
-  Object.freeze({ id: 'claude-sonnet-5-5', label: 'Sonnet 5.5' }),
-  Object.freeze({ id: 'claude-haiku-5-5', label: 'Haiku 5.5' }),
-  Object.freeze({ id: 'claude-fable-5-2', label: 'Fable 5.2' }),
-]);
+/**
+ * The lanes that run a model, "Claude's default" and the models a lane may
+ * be set to, listed once beside the other lane constants, where the runner's
+ * own check (scripts/lib/modelSetting.mjs) reads them too.
+ */
+export { MODEL_LANES, DEFAULT_MODEL, MODELS };
 
 /** The shortest and longest wake time, in seconds (kept with the defaults), and the cap's range. */
 export { WAKE_RANGE };
@@ -53,7 +49,7 @@ export const GROUPS = Object.freeze([
   Object.freeze({ key: 'wake', title: 'Wake Times', wiredBy: null }),
   Object.freeze({ key: 'pause', title: 'Pause and Resume', wiredBy: null }),
   Object.freeze({ key: 'cap', title: 'Work-in-Progress Cap', wiredBy: 'SP-238' }),
-  Object.freeze({ key: 'model', title: 'Model per Lane', wiredBy: 'SP-239' }),
+  Object.freeze({ key: 'model', title: 'Model per Lane', wiredBy: null }),
 ]);
 
 /**

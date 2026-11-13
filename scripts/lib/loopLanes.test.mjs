@@ -120,7 +120,7 @@ test('loop_runner.sh names no project of its own', () => {
 // file, ends on time without one, and a wake sent during a pass neither stops
 // nor doubles it. Each test runs the real runner in a scratch copy, as above,
 // with the wake file looked for every second.
-async function withRunner({ interval, claude, wakeSetting = null }, body) {
+async function withRunner({ interval, claude, wakeSetting = null, modelSetting = null }, body) {
   const scratch = mkdtempSync(join(tmpdir(), 'runner-wake-'));
   const logDir = mkdtempSync(join(tmpdir(), 'runner-wake-logs-'));
   let runner;
@@ -132,6 +132,8 @@ async function withRunner({ interval, claude, wakeSetting = null }, body) {
     for (const f of ['project_config.mjs', 'run_with_time_limit.sh', 'lib/wakeLane.mjs']) symlinkSync(join(REPO, 'scripts', f), join(scratch, 'scripts', f));
     // A stand-in for the tracker's answer (SP-236), when the test gives one: never the live tracker.
     if (wakeSetting) writeFileSync(join(scratch, 'scripts/lib/wakeSetting.mjs'), wakeSetting({ logDir }));
+    // A stand-in for the model chosen on the Settings page (SP-239), the same way.
+    if (modelSetting) writeFileSync(join(scratch, 'scripts/lib/modelSetting.mjs'), modelSetting({ logDir }));
     const spirality = JSON.parse(readFileSync(join(REPO, 'spirality.project.json'), 'utf8'));
     writeFileSync(join(scratch, 'spirality.project.json'), JSON.stringify({
       ...spirality, projectSlug: 'normie', launchdPrefix: 'com.normie', logDir,
@@ -231,13 +233,58 @@ test('the runner sleeps the wake time set on the Settings page, read before ever
     assert.equal(count(STARTS), 3, 'a failed read stopped the lane');
     const sleeps = text.match(/sleeping \d+s before the next \/loop-build/g);
     assert.deepEqual(sleeps, ['sleeping 2s before the next /loop-build', 'sleeping 2s before the next /loop-build', 'sleeping 600s before the next /loop-build']);
-    const failed = text.match(/^\[loop-runner\] .*could not read .*$/gm);
+    const failed = text.match(/^\[loop-runner\] .*could not read \/loop-build's wake time.*$/gm);
     assert.equal(failed.length, 2, text);
     assert.match(failed[0], /could not read \/loop-build's wake time from the tracker \(the settings read failed \(exit 1: fetch failed\)\) — keeping the last good value, 2s$/);
     assert.match(failed[1], /could not read \/loop-build's wake time from the tracker \(0\) — keeping the last good value, 2s$/);
     // The read comes after the pass and before its sleep line, so the line says what it will sleep.
-    assert.match(text, /END \/loop-build[^\n]*\n\[loop-runner\][^\n]*could not read[^\n]*\n\[loop-runner\][^\n]*sleeping 2s/);
+    assert.match(text, /END \/loop-build[^\n]*\n\[loop-runner\][^\n]*could not read[^\n]*wake time[^\n]*\n\[loop-runner\][^\n]*sleeping 2s/);
   });
+});
+
+// The model chosen on the Settings page (SP-239): read before every pass.
+// The stand-in claude prints the arguments it was given, so the log shows
+// the exact command each pass ran.
+const modelAnswer = (code, line) => () => `console.log(${JSON.stringify(line)}); process.exit(${code});\n`;
+const TODAYS_ARGS = 'ARGS: -p /loop-build --allowedTools Bash Edit Write Read Glob Grep Task TodoWrite WebFetch';
+
+async function onePass(modelSetting) {
+  let text = '';
+  await withRunner({ interval: 3600, claude: () => 'echo "ARGS: $*"', modelSetting }, async ({ read, until }) => {
+    await until('the pass never finished', () => /sleeping 3600s/.test(read()), 30);
+    text = read();
+  });
+  return text;
+}
+
+test('a model chosen for the lane goes on the claude line as --model <id>, and the START line names it (SP-239)', { timeout: 60_000 }, async () => {
+  const text = await onePass(modelAnswer(0, 'claude-sonnet-5-5'));
+  assert.match(text, /^===== \d{4}-\d\d-\d\d \d\d:\d\d:\d\d START \/loop-build \(model: claude-sonnet-5-5\) =====$/m);
+  assert.match(text, /^ARGS: -p \/loop-build --model claude-sonnet-5-5 --allowedTools Bash Edit Write Read Glob Grep Task TodoWrite WebFetch$/m);
+  assert.doesNotMatch(text, /could not read \/loop-build's model/);
+});
+
+test('with Claude\'s default chosen, the claude line is today\'s, byte for byte, with no --model (SP-239)', { timeout: 60_000 }, async () => {
+  const text = await onePass(modelAnswer(0, 'default'));
+  assert.match(text, /START \/loop-build \(model: default\) =====/);
+  assert.equal(text.split('\n').filter((l) => l.startsWith('ARGS: ')).join('\n'), TODAYS_ARGS);
+  assert.doesNotMatch(text, /could not read \/loop-build's model/);
+});
+
+test('settings that cannot be read, or a model not on the list, run the pass on Claude\'s default with one log line saying why (SP-239)', { timeout: 90_000 }, async () => {
+  const cases = [
+    [modelAnswer(1, 'the settings read failed (exit 1: fetch failed)'), /could not read \/loop-build's model from the tracker \(the settings read failed \(exit 1: fetch failed\)\) — this pass runs on Claude's default$/m],
+    // The runner checks again: even a reader that answered 0 never hands claude anything but a plain model id.
+    [modelAnswer(0, 'gpt-9'), /could not read \/loop-build's model from the tracker \(gpt-9\) — this pass runs on Claude's default$/m],
+    [modelAnswer(0, 'claude-x --dangerously-skip-permissions'), /could not read \/loop-build's model from the tracker \(claude-x --dangerously-skip-permissions\) — this pass runs on Claude's default$/m],
+  ];
+  for (const [answer, said] of cases) {
+    const text = await onePass(answer);
+    assert.match(text, said);
+    assert.equal((text.match(/could not read \/loop-build's model/g) || []).length, 1, text);
+    assert.match(text, /START \/loop-build \(model: default\) =====/);
+    assert.equal(text.split('\n').filter((l) => l.startsWith('ARGS: ')).join('\n'), TODAYS_ARGS);
+  }
 });
 
 test('the relay\'s plist starts run_relay.sh --tick on the one-minute tick, never on the wake time, so a new wake time needs no reinstall (SP-236)', () => {

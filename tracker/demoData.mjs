@@ -259,7 +259,7 @@ export const logClock = (d) => `${pad(d.getHours())}:${pad(d.getMinutes())}:${pa
 export function writeDemoLogs(folder, slug, now = new Date()) {
   const ago = (min) => new Date(now.getTime() - min * 60_000);
   const lane = (job, start, end, seconds) => [
-    `===== ${logDate(start)} START /${job} =====`,
+    `===== ${logDate(start)} START /${job} (model: default) =====`,
     'A pass report, which the pod never shows.',
     ...(end ? [`===== ${logDate(end)} END /${job} (exit 0 — not a verdict; the pass's report above is) =====`, `[loop-runner] ${logClock(end)} sleeping ${seconds}s before the next /${job} (a wake ends it early)`] : []),
   ].join('\n');

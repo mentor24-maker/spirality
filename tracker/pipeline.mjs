@@ -12,6 +12,7 @@
  * The lines it reads, each written by one runner:
  *
  *   ===== 2026-11-09 18:22:34 START /loop-review =====          scripts/loop_runner.sh
+ *   ===== 2026-11-13 14:02:10 START /loop-review (model: claude-sonnet-5-5) =====   since SP-239
  *   ===== 2026-11-09 18:25:36 END /loop-review (exit 0 ...) =====
  *   [loop-runner] 18:25:36 sleeping 1800s before the next /loop-review (a wake ends it early)
  *   ===== 2026-11-09 18:37:36 START relay — <repo> =====       scripts/run_relay.sh
@@ -31,6 +32,11 @@
  * sleeping line, the relay's kept wake time. They differ for a while after a
  * change, until the job's next pass reads the new value; until then the
  * next run shown is when the job will really wake, on the value it is using.
+ *
+ * A lane's START line names the model its pass ran on (SP-239): `model` is
+ * the newest START's, an id or `default` (Claude's default), and null when
+ * that line names none (a pass from before SP-239, or the relay, which runs
+ * no model). Only a value shaped like a model id leaves here.
  *
  * Log times are this machine's own clock, the one the runners wrote them
  * with; the tracker runs on the same machine, so they are read as local time.
@@ -104,6 +110,8 @@ const REPORT_FAILED = /^FAILED:/;
 
 const DATED = /^===== (\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2}) (START|END) (\S+)/;
 const EXIT = /\(exit (\d+)/;
+// The model a lane's START line names (SP-239): `default` or an id, nothing else.
+const MODEL = /\(model: ([a-z0-9.-]{1,60})\)/;
 // The runner adds "(a wake ends it early)" after the lane's name (SP-219).
 const SLEEPING = /^\[loop-runner\] (\d{2}):(\d{2}):(\d{2}) sleeping (\d+)s before the next \/(\S+)(?: .*)?$/;
 
@@ -119,7 +127,8 @@ const jobOf = (word) => word.replace(/^\//, '');
  * "(exit N)", null when it has none. `interval` (seconds) is how often the
  * job wakes: the newest sleeping line's own seconds (a lane), else the one
  * given (the relay, which has no such line). `slept` is that sleeping
- * line's seconds alone, null when none is in view.
+ * line's seconds alone, null when none is in view. `model` is the model
+ * the newest START line names, null when it names none.
  *
  * `failedPasses` counts the newest finished passes that failed, one after
  * another (a pass under way neither adds to it nor breaks it), and
@@ -130,6 +139,7 @@ const jobOf = (word) => word.replace(/^\//, '');
 export function readStage(text, job, { interval = null } = {}) {
   let lastStart = null;
   let lastEnd = null;
+  let model = null;
   let sleep = null;
   let lastDated = null;
   let index = 0;
@@ -146,6 +156,7 @@ export function readStage(text, job, { interval = null } = {}) {
       if (jobOf(word) !== job) continue;
       if (kind === 'START') {
         lastStart = { at, index };
+        model = MODEL.exec(line)?.[1] ?? null;
         open = { start: at, reportFailed: false, offline: false };
       } else {
         const code = EXIT.exec(line);
@@ -181,14 +192,14 @@ export function readStage(text, job, { interval = null } = {}) {
     failingReason: failing ? (passes[passes.length - 1].offline ? FAILING_REASONS.offline : FAILING_REASONS.failing) : null,
   };
   const slept = sleep ? sleep.seconds : null;
-  if (!lastStart && !sleep && !lastEnd) return { logged: false, running: false, lastStart: null, lastEnd: null, lastExit: null, interval: every, slept, nextDue: null, ...NOT_FAILING };
+  if (!lastStart && !sleep && !lastEnd) return { logged: false, running: false, lastStart: null, lastEnd: null, lastExit: null, interval: every, slept, nextDue: null, model: null, ...NOT_FAILING };
   const running = Boolean(lastStart && (!lastEnd || lastStart.index > lastEnd.index));
   let nextDue = null;
   if (!running) {
     if (sleep && sleep.index > (lastStart?.index ?? 0)) nextDue = new Date(sleep.at.getTime() + sleep.seconds * 1000);
     else if (interval != null && lastStart) nextDue = new Date(lastStart.at.getTime() + interval * 1000);
   }
-  return { logged: true, running, lastStart: lastStart?.at ?? null, lastEnd: lastEnd?.at ?? null, lastExit: lastEnd?.exit ?? null, interval: every, slept, nextDue, ...health };
+  return { logged: true, running, lastStart: lastStart?.at ?? null, lastEnd: lastEnd?.at ?? null, lastExit: lastEnd?.exit ?? null, interval: every, slept, nextDue, model, ...health };
 }
 
 /** A stage with nothing failing, or nothing known: the health fields' quiet values. */
@@ -233,7 +244,8 @@ export function pausedBy(controls, job) {
 /**
  * GET /pipeline's answer: `{ stages: [{ name, job, logged, running,
  * lastStart, lastEnd, lastExit, interval, set, used, nextDue, failing,
- * failedPasses, failingSince, failingReason, paused }] }`, times as ISO
+ * failedPasses, failingSince, failingReason, paused, model }] }`, `model`
+ * the model the lane's last pass ran on (readStage; null when not known), times as ISO
  * strings, the exit code and the seconds as numbers or null, the reason one
  * of FAILING_REASONS or null, `paused` pausedBy's answer from `controls` (the
  * project's pipeline controls; null leaves every stage unpaused).
@@ -261,7 +273,7 @@ export function pipelineOf({ logDir, slug }, { tailBytes = TAIL_BYTES, wake = {}
       try {
         text = readTail(join(folder, `${slug}-${job}.log`), tailBytes);
       } catch {
-        return { name, job, logged: false, running: false, lastStart: null, lastEnd: null, lastExit: null, interval: relayUsed ?? set, set, used: relayUsed, nextDue: null, ...NOT_FAILING, paused, unreadable: true };
+        return { name, job, logged: false, running: false, lastStart: null, lastEnd: null, lastExit: null, interval: relayUsed ?? set, set, used: relayUsed, nextDue: null, ...NOT_FAILING, paused, model: null, unreadable: true };
       }
       const stage = readStage(text, job, { interval: relayUsed ?? set });
       const used = job === 'relay' ? relayUsed : stage.slept;
@@ -273,6 +285,7 @@ export function pipelineOf({ logDir, slug }, { tailBytes = TAIL_BYTES, wake = {}
         failing: stage.failing, failedPasses: stage.failedPasses,
         failingSince: iso(stage.failingSince), failingReason: stage.failingReason,
         paused,
+        model: stage.model,
       };
     }),
   };

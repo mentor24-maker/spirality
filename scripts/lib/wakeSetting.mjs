@@ -47,13 +47,13 @@ export function wakeFrom(text, job) {
 }
 
 /** The door's own `settings` command, run from this checkout. */
-function defaultRead() {
+export function defaultRead() {
   const r = spawnSync('npm', ['run', '--silent', 'clickup', '--', 'settings'], { cwd: REPO, encoding: 'utf8', timeout: READ_TIMEOUT_MS });
   return { status: r.status, stdout: r.stdout ?? '', stderr: r.stderr ?? '', error: r.error ?? null };
 }
 
 /** The last line of `text` that says something, cut short; null when none does. */
-function lastSaid(text) {
+export function lastSaid(text) {
   const lines = String(text ?? '').split('\n').map((l) => l.trim()).filter(Boolean);
   if (!lines.length) return null;
   const last = lines[lines.length - 1];
