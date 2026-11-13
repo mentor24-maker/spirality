@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, statSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -213,6 +213,7 @@ test('loop_runner.sh: LOOP_IDLE_PASS_EVERY_SECONDS=0 turns the skipping off: the
 
 test('the real work_check.sh runs workCheck.mjs for the lane, and the runner asks it after the pause check and before START', () => {
   const check = readFileSync(join(SCRIPTS, 'work_check.sh'), 'utf8');
+  assert.ok(statSync(join(SCRIPTS, 'work_check.sh')).mode & 0o100, 'work_check.sh is executable: the runner calls it directly, and a check that cannot run never skips');
   assert.match(check, /exec node "\$REPO\/scripts\/lib\/workCheck\.mjs" "\$LANE"/);
   const runner = readFileSync(join(SCRIPTS, 'loop_runner.sh'), 'utf8');
   const at = (s) => runner.indexOf(s);
