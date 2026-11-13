@@ -2137,8 +2137,8 @@ function spanOf(ms) {
 }
 
 /**
- * The Reporting page: how many tasks were finished and started in each of
- * the server's time ranges, and how many are open in each stage now, for the
+ * The Reporting page: how many tasks were started and finished in each of
+ * the server's time ranges (Task Productivity), and how many are open in each stage now, for the
  * selected project or for all of them, and how the finished ones flowed:
  * time to finish, how many were sent back, and time waiting on the
  * operator, and the human hours of work the finished ones add up to, by the
@@ -2199,9 +2199,9 @@ async function drawReporting(chosen) {
       <label for="report-project">Project</label>
       <select id="report-project"><option value="">All projects</option>${projects.map((p) => `<option value="${escapeHtml(p.slug)}"${p.slug === r.project ? ' selected' : ''}>${escapeHtml(p.name)}</option>`).join('')}</select>
     </form>
-    <h2>Tasks Finished and Started</h2>
-    <p class="quiet">Finished: moved to Live in that time and still Live. Started: filed in that time.</p>
-    <table class="counts report"><thead>${head}</thead><tbody>${line('Tasks finished', r.finished)}${line('Tasks started', r.started)}</tbody></table>
+    <h2>Task Productivity</h2>
+    <p class="quiet">Started: filed in that time. Finished: moved to Live in that time and still Live.</p>
+    <table class="counts report"><thead>${head}</thead><tbody>${line('Tasks started', r.started)}${line('Tasks finished', r.finished)}</tbody></table>
     <h2>Human Hours of Work Done</h2>
     <p class="quiet">For tasks finished in that time: the build loop's estimate, recorded on each pull request, of the hours an experienced programmer new to the code would take to do the same work. An estimate, not a measurement; tasks with none are left out of the total, and counted here.</p>
     <table class="counts report human-hours"><thead>${head}</thead><tbody>${hoursLine('Total', (h) => hoursOf(h.hours))}${estimatedLine}${hoursLine('Per day', (h) => `about ${Number(h.perDay)} human hour${Number(h.perDay) === 1 ? '' : 's'} a day`)}</tbody></table>
@@ -2333,7 +2333,36 @@ function drawPipelineControls(box, views) {
         const button = tr.querySelector('button');
         if (button) button.addEventListener('click', () => save(slug, tr, button));
       }
+      for (const button of section.querySelectorAll('button[data-release-action]')) {
+        button.addEventListener('click', () => moveRelease(slug, button.dataset.releaseAction, section));
+      }
     }
+  };
+  /**
+   * Move to Newest or Roll Back (SP-275): the write, then the project's
+   * controls read again, and "Now runs" only when the release read back is
+   * the one the tracker says it named. A refusal shows its reason.
+   */
+  const moveRelease = async (slug, action, section) => {
+    const mine = notes.get(slug) ?? {};
+    notes.set(slug, mine);
+    for (const b of section.querySelectorAll('button[data-release-action]')) b.disabled = true;
+    const note = section.querySelector('.release-actions .note');
+    if (note) { note.className = 'note quiet'; note.textContent = 'Saving…'; }
+    try {
+      const answer = await api('POST', `/releases/${encodeURIComponent(slug)}/${action}`, {});
+      const to = answer.saved?.to;
+      // Read back before saying it worked.
+      const back = await api('GET', `/pipeline-controls/${encodeURIComponent(slug)}`);
+      const now = back.release?.current?.release ?? null;
+      if (!to || now !== to) throw new Error(`the tracker read it back as ${now ?? 'no release'}, not ${to ?? 'the one asked for'}.`);
+      mine.release = { ok: true, text: answer.saved.changed ? `Saved: it now runs ${to}.` : `Saved (it already ran ${to}).` };
+      views = views.map((v) => (v.project.slug === slug ? back : v));
+    } catch (err) {
+      if (err instanceof SignedOut) return drawSignIn('You were signed out; the release was not changed.');
+      mine.release = { ok: false, text: `Not saved: ${err.message}` };
+    }
+    draw();
   };
   const save = async (slug, tr, button) => {
     const key = tr.dataset.control;

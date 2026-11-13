@@ -400,8 +400,15 @@ person, may change one: another person and any loop's token are refused
 (403), and nothing is logged. A value out of range is refused with a plain
 message. The page says "Saved" only when the value the tracker reads back is
 the one sent. A lane reads its project's with `npm run clickup -- settings`
-(`name=value` lines). Nothing on the Mini acts on them yet: SP-236 (wake
-times), SP-237 (pause), SP-238 (the cap) and SP-239 (the model) each wire one in.
+(`name=value` lines). The wake times are in use (SP-236): a lane reads its
+own before every sleep between passes, and the relay, which launchd starts
+on a one-minute tick, runs a pass only once its wake time has passed since
+its last start, reading the value after each pass. A read that fails keeps
+the last good value and says so in the lane's log. Beside each wake time the
+page shows the value the lane last used (from its log; the relay's from the
+wake time it kept) and says "Waiting for the lane's next pass to pick this
+up" until the two agree. The rest are not acted on yet: SP-237 (pause),
+SP-238 (the cap) and SP-239 (the model) each wire one in.
 A browser opening `/projects` or `/projects/<slug>` gets the page; the page's own
 call to the same address gets the data. `/users` is the page alone; its data
 is still `GET /people` (the onboarding scripts read it), and a browser opening
@@ -1277,7 +1284,8 @@ It prints one JSON object:
 
 The window is whole days in UTC, `--since` from midnight to the end of
 `--until`, as StarCaster's command read it. Shipped and filed are counted the
-way the Reporting page counts Finished and Started, so the figures match it
+way the Reporting page's Task Productivity table counts Tasks started and
+Tasks finished, so the figures match it
 for the same days (its "Last 7 Days" is the seven days up to the moment it is
 opened, so a window of whole days can differ by what moved at the edges). It
 writes nothing. A bad date exits 2 before anything is read; when the list or

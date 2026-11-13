@@ -20,7 +20,8 @@ import humanHours from '../lib/humanHours.js';
 import busFallback from '../lib/busFallback.js';
 import { compareWithinStatus } from '../scripts/lib/loopStatuses.mjs';
 import { searchPattern } from './web/render.mjs';
-import { GROUPS, MODELS, DEFAULT_MODEL } from './pipelineControls.mjs';
+import { GROUPS, MODELS, DEFAULT_MODEL, RELEASE_GROUP } from './pipelineControls.mjs';
+import { OWN_RELEASE_LINE, rollBackTarget } from '../lib/releases.mjs';
 import { STAGES } from './pipeline.mjs';
 
 const { OPERATOR_LANE, WAITING, CANNOT_TELL, waitingVerdict, operatorSpokeLast } = waitingOnOperator;
@@ -544,21 +545,66 @@ export function stageColoursOf(store) {
  * fall in (each naming the ticket that makes the lanes use it), the models
  * a lane may choose, the change log newest first with each changer's name,
  * and `canChange`: whether this reader may change them (the project's
- * operator, signed in as a person). Null for a project that does not exist.
+ * operator, signed in as a person), and `release`, its release
+ * group (releaseGroupOf; `ownProject` and `newest` come from the server).
+ * Null for a project that does not exist.
+ *
+ * `lanes` is this machine's Pipeline Status stages for the project
+ * (pipelineOf), or null when it reads no logs of it. With them, each wake
+ * time carries `used`, the seconds its job last actually woke on (null when
+ * its log does not say yet), and `inEffect`, whether that is the set value;
+ * without them both are null, never a guess (SP-236).
  */
-export function pipelineControlsOf(store, slug, { reader = null } = {}) {
+export function pipelineControlsOf(store, slug, { reader = null, lanes = null, ownProject = null, newest = null } = {}) {
   const project = store.getProject(slug);
   if (!project) return null;
   const nameOf = (id) => store.getActor(id)?.name ?? `actor ${id}`;
   const who = reader == null ? null : store.getActor(reader);
+  const canChange = who != null && who.kind === 'human' && who.id === project.operator;
   return {
     project: { slug: project.slug, name: project.name },
     operator: project.operator == null ? null : { id: project.operator, name: nameOf(project.operator) },
-    canChange: who != null && who.kind === 'human' && who.id === project.operator,
+    canChange,
+    release: releaseGroupOf(store, project, { canChange, ownProject, newest, nameOf }),
     groups: GROUPS.map((g) => ({ ...g })),
     models: [{ id: DEFAULT_MODEL, label: "Claude's default" }, ...MODELS.map((m) => ({ ...m }))],
-    controls: store.pipelineSettings(project.slug).map((c) => ({ ...c })),
+    controls: store.pipelineSettings(project.slug).map((c) => {
+      if (c.group !== 'wake') return { ...c };
+      const used = lanes?.find((l) => `wake.${l.job}` === c.key)?.used ?? null;
+      return { ...c, used, inEffect: used == null ? null : String(used) === c.value };
+    }),
     changes: store.pipelineSettingChanges(project.slug).map((c) => ({ ...c, actorName: nameOf(c.actor) })),
+  };
+}
+
+/**
+ * The Settings page's release group (SP-275) for one project:
+ * the release it runs (`current`, with when and who named it), the one
+ * named before it (`previous`), the release Roll Back would name
+ * (`rollBackTo`, lib/releases.mjs rollBackTarget) and the newest release
+ * cut (`newest`, from `newest`: the server's newestRelease answer, or null
+ * when it reads none, with `newestProblem` saying why). `own` is true for
+ * the tracker's home project, which always runs main and has no buttons;
+ * `known` is false when the tracker cannot tell which project that is, and
+ * then nothing can be named. `canChange` is the operator, signed in as a
+ * person, on a project a release can be named for.
+ */
+function releaseGroupOf(store, project, { canChange, ownProject, newest, nameOf }) {
+  const known = typeof ownProject === 'string' && ownProject !== '';
+  const own = known && project.slug === ownProject;
+  const history = own ? [] : store.projectReleases(project.slug);
+  const entry = (h) => (h ? { release: h.release, at: h.at, actor: h.actor, actorName: nameOf(h.actor) } : null);
+  return {
+    ...RELEASE_GROUP,
+    known,
+    own,
+    ownLine: OWN_RELEASE_LINE,
+    current: entry(history[0]),
+    previous: entry(history[1]),
+    rollBackTo: rollBackTarget(history),
+    newest: newest?.newest?.name ?? null,
+    newestProblem: newest == null ? 'this tracker does not read the release tags.' : newest.problem ?? null,
+    canChange: canChange && known && !own,
   };
 }
 

@@ -17,12 +17,14 @@
  *   model.<lane>   the model a lane's passes run on: `default` (Claude's
  *                  default, what the runner does today) or one of MODELS
  *
- * Nothing on the Mini reads them yet. Each group names the ticket that wires
- * it in (`wiredBy`); the Settings page says so under it, and that ticket
- * removes its own line.
+ * The lanes on the Mini read the wake times (SP-236: a lane before every
+ * sleep, the relay after every ticked pass). A group they do not use yet
+ * names the ticket that wires it in (`wiredBy`); the Settings page says so
+ * under it, and that ticket sets its own to null.
  */
-import { intervalOf } from '../scripts/lib/loopSchedule.mjs';
+import { intervalOf, WAKE_RANGE } from '../scripts/lib/loopSchedule.mjs';
 import wipCap from '../lib/wipCap.js';
+import { RELEASE_GROUP_TITLE } from '../lib/releases.mjs';
 
 /** The lanes that wake on a timer and can be paused. */
 export const LANES = Object.freeze(['loop-intake', 'loop-build', 'loop-review', 'relay']);
@@ -41,17 +43,25 @@ export const MODELS = Object.freeze([
   Object.freeze({ id: 'claude-fable-5-2', label: 'Fable 5.2' }),
 ]);
 
-/** The shortest and longest wake time, in seconds, and the cap's range. */
-export const WAKE_RANGE = Object.freeze({ min: 60, max: 86400 });
+/** The shortest and longest wake time, in seconds (kept with the defaults), and the cap's range. */
+export { WAKE_RANGE };
 export const CAP_RANGE = Object.freeze({ min: 1, max: 50 });
 
-/** The groups the page shows, in order, each with the ticket that makes the lanes use it. */
+/** The groups the page shows, in order, each with the ticket that makes the lanes use it (null once they do). */
 export const GROUPS = Object.freeze([
-  Object.freeze({ key: 'wake', title: 'Wake Times', wiredBy: 'SP-236' }),
+  Object.freeze({ key: 'wake', title: 'Wake Times', wiredBy: null }),
   Object.freeze({ key: 'pause', title: 'Pause and Resume', wiredBy: 'SP-237' }),
   Object.freeze({ key: 'cap', title: 'Work-in-Progress Cap', wiredBy: 'SP-238' }),
   Object.freeze({ key: 'model', title: 'Model per Lane', wiredBy: 'SP-239' }),
 ]);
+
+/**
+ * The release group (SP-275): which release of the loop the project runs,
+ * from the record SP-265 keeps (lib/releases.mjs, which also names the
+ * heading), with Move to Newest and Roll Back. It is not a control: it has
+ * its own record and its own writes. Nothing runs from it until SP-276.
+ */
+export const RELEASE_GROUP = Object.freeze({ key: 'release', title: RELEASE_GROUP_TITLE, wiredBy: 'SP-276' });
 
 const control = (fields) => Object.freeze(fields);
 
