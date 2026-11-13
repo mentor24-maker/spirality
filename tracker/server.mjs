@@ -74,6 +74,7 @@ import { resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { MAX_ATTACHMENT, openStore, StoreError } from './store.mjs';
+import { OWN_PROJECT_RELEASE } from '../lib/releases.mjs';
 import { SOURCE as IMPORT_SOURCE } from './import.mjs';
 import { boardOf, consoleOf, lookupTickets, PRIORITIES, prToCheck, prsToCheck, projectDetailsOf, projectsList, readSearchFilters, reportsOf, searchTickets, stageColoursOf, threadOf, waitingFor, busUnseen, pipelineControlsOf } from './pageData.mjs';
 import { ghPrState, prStateCache } from './prState.mjs';
@@ -152,6 +153,8 @@ const NOT_FOUND_CODES = new Set(['unknown-ticket', 'unknown-project', 'unknown-i
 /** setRole's refusals that are not a bad field: a non-admin is forbidden, and the last admin's change conflicts with the tracker's state. */
 const ROLE_REFUSALS = Object.freeze({ 'not-admin': 403, 'last-admin': 409 });
 /** addMember's and removeMember's refusals that are not a bad field. */
+/** The release writes' refusals that are not a bad field; `write-failed` is the store's read-back. */
+const RELEASE_REFUSALS = Object.freeze({ 'own-project': 409, 'not-allowed': 403, 'nothing-to-roll-back-to': 409, 'write-failed': 500 });
 const MEMBER_REFUSALS = Object.freeze({ 'not-admin': 403, 'already-member': 409, 'required-member': 409, 'not-member': 404, 'unknown-project': 404 });
 
 /** The HTTP status each refused invite answers with (tracker/account.mjs sendInvite); any other is 400. */
@@ -525,7 +528,7 @@ export const CLOSE_PHRASE = busRelayPlan.CLOSE_PHRASES[0];
 /** The word the Go button posts: the one an intake card asks for (GO_PHRASE in lib/busRelayPlan.js). */
 export const GO_PHRASE = busRelayPlan.GO_PHRASE;
 
-export function createHandler(store, { log = () => {}, notifier = null, defaultProject = null, mergePhrase = null, closePhrase = null, goPhrase = null, accountMail = null, setup = null, now = Date.now, publicUrl = null, pipeline = null, docsDir = DOCS_DIR, commandsRoot = REPO_ROOT, readPrState = null } = {}) {
+export function createHandler(store, { log = () => {}, notifier = null, defaultProject = null, mergePhrase = null, closePhrase = null, goPhrase = null, accountMail = null, setup = null, now = Date.now, publicUrl = null, pipeline = null, docsDir = DOCS_DIR, commandsRoot = REPO_ROOT, readPrState = null, ownProject = null } = {}) {
   const failures = failureCounter(now);
   // Each pull request's live state on GitHub, kept a minute. With no
   // reader (tests, the switch check) the page goes by status alone, as before.
@@ -586,6 +589,17 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     return scope == null
       ? new HttpError(404, code, `no ${what}.`)
       : new HttpError(404, code, `no ${what} that you can see: there is none, or you are not on its project.`, { yourProjectsOnly: true });
+  }
+
+  /**
+   * One project's release record: `{ slug, name, own,
+   * release, history }`. `release` is the one it runs (null when none is
+   * named); the tracker's home project has none, and `own` true.
+   */
+  function releasesOf(project) {
+    const history = store.projectReleases(project.slug);
+    const own = ownProject != null && project.slug === ownProject;
+    return { slug: project.slug, name: project.name, own, release: own ? null : history[0]?.release ?? null, history };
   }
 
   /** A project the caller may see, or 404 (notFound). */
@@ -855,6 +869,42 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
         const stored = view.controls.find((c) => c.key === saved.setting)?.value;
         if (stored !== saved.to) throw new HttpError(500, 'write-failed', `the ${saved.setting} setting read back as ${stored}, not ${saved.to}; treat it as not saved.`);
         log(`pipeline control ${project.slug} ${saved.setting} ${saved.changed ? `${saved.from} -> ${saved.to}` : `unchanged (${saved.to})`} actor=${me.id}`);
+        return [200, { saved, ...view }];
+      }
+    }
+
+    // Releases (docs/INTEGRATION.md, "How a change reaches the projects"): which release each
+    // project runs, newest first, for `npm run clickup -- release ...`.
+    // Anyone signed in reads them for the projects they may see; the
+    // project's operator, as a person, or a loop names one (PUT) or rolls
+    // it back (POST .../back). The tracker's home project always runs main.
+    // Every answer to a write is the record as stored, read back.
+    if (parts[0] === 'releases' && parts.length === 1 && method === 'GET') {
+      const scope = scopeOf(me);
+      const projects = store.listProjects().filter((p) => scope == null || scope.has(p.slug)).map((p) => releasesOf(p));
+      return [200, { ownProject, ownRelease: OWN_PROJECT_RELEASE, projects }];
+    }
+    if (parts[0] === 'releases' && (parts.length === 2 || (parts.length === 3 && parts[2] === 'back'))) {
+      const project = requireProject(parts[1], me);
+      if (method === 'GET' && parts.length === 2) return [200, releasesOf(project)];
+      const naming = method === 'PUT' && parts.length === 2;
+      const rolling = method === 'POST' && parts.length === 3;
+      if (naming || rolling) {
+        if (!ownProject) throw new HttpError(503, 'no-own-project', 'this tracker cannot tell which project is its home (the project config was not usable when it started; its log says why), so no release can be named.');
+        const body = await readJson(req);
+        checkBody(body, me, naming ? ['release'] : []);
+        let saved;
+        try {
+          saved = naming
+            ? store.nameRelease({ project: project.slug, release: body.release, actor: me.id, ownProject })
+            : store.rollBackRelease({ project: project.slug, actor: me.id, ownProject });
+        } catch (err) {
+          if (err instanceof StoreError && RELEASE_REFUSALS[err.code]) throw new HttpError(RELEASE_REFUSALS[err.code], err.code, err.message);
+          throw err;
+        }
+        const view = releasesOf(project);
+        if (view.release !== saved.to) throw new HttpError(500, 'write-failed', `${project.name}'s release read back as ${view.release ?? 'none'}, not ${saved.to}; treat it as not saved.`);
+        log(`release ${project.slug} ${saved.changed ? `${saved.from ?? 'none'} -> ${saved.to}` : `unchanged (${saved.to})`}${rolling ? ' (roll-back)' : ''} actor=${me.id}`);
         return [200, { saved, ...view }];
       }
     }
@@ -1399,8 +1449,8 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
 }
 
 /** Start a server on `port` (0 = any free port) against an open store. Resolves to the http.Server. */
-export function startServer({ store, port, host = '127.0.0.1', log, notifier, defaultProject, mergePhrase, closePhrase, goPhrase, accountMail, setup, now, publicUrl, pipeline, docsDir, commandsRoot, readPrState }) {
-  const server = createServer(createHandler(store, { log, notifier, defaultProject, mergePhrase, closePhrase, goPhrase, accountMail, setup, now, publicUrl, pipeline, docsDir, commandsRoot, readPrState }));
+export function startServer({ store, port, host = '127.0.0.1', log, notifier, defaultProject, mergePhrase, closePhrase, goPhrase, accountMail, setup, now, publicUrl, pipeline, docsDir, commandsRoot, readPrState, ownProject }) {
+  const server = createServer(createHandler(store, { log, notifier, defaultProject, mergePhrase, closePhrase, goPhrase, accountMail, setup, now, publicUrl, pipeline, docsDir, commandsRoot, readPrState, ownProject }));
   return new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(port, host, () => {
@@ -1532,22 +1582,26 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     let mergePhrase = null;
     let publicUrl = null;
     let pipeline = null;
+    let ownProject = null;
     try {
       const config = loadProjectConfig();
       defaultProject = config.projectSlug;
+      // The tracker's home project is the one it runs from: the one whose
+      // lanes always run main, and no release is named for.
+      ownProject = config.projectSlug;
       mergePhrase = config.mergePhrases[0] ?? null;
       publicUrl = config.trackerPublicUrl;
       // The Pipeline Status pod reads this project's loop logs, named as the installer names them.
       pipeline = { logDir: config.logDir, slug: config.projectSlug };
     } catch (err) {
-      log(`the New request form starts on the first project and the ticket page has no Merge button: the project config is not usable (${err.message}).`);
+      log(`the New request form starts on the first project, the ticket page has no Merge button and no release can be named: the project config is not usable (${err.message}).`);
     }
     const accountMail = mail.account && { ...mail.account, projectName: store.getProject(defaultProject)?.name ?? 'tracker' };
     const { setup, why: noSetup } = setupSettingsOf({ db: resolve(db) });
     log(setup ? `set up a project: on, reading ${setup.homeConfig.logDir}/onboard.` : `set up a project: off. ${noSetup}.`);
     log(publicUrl ? `public address: ${publicUrl} serves the page and the API, with a Secure cookie.` : 'public address: none set (trackerPublicUrl).');
     // The bell, Waiting on You and the Merge button check each pull request on GitHub.
-    const server = await startServer({ store, port, host, log, notifier, defaultProject, mergePhrase, closePhrase: CLOSE_PHRASE, goPhrase: GO_PHRASE, accountMail, setup, publicUrl, pipeline, readPrState: ghPrState() });
+    const server = await startServer({ store, port, host, log, notifier, defaultProject, mergePhrase, closePhrase: CLOSE_PHRASE, goPhrase: GO_PHRASE, accountMail, setup, publicUrl, pipeline, readPrState: ghPrState(), ownProject });
     console.log(`tracker listening on http://${host}:${server.address().port}/`);
   } catch (err) {
     console.error(`tracker server did not start: ${err.message}`);

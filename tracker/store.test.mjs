@@ -1739,3 +1739,68 @@ test('deleting a project takes its pipeline controls and their log with it (SP-2
     assert.deepEqual(store.pipelineSettingChanges('beta'), []);
   } finally { cleanup(); }
 });
+
+test('Spirality releases: each project\'s record, newest first, named and read back; naming the one it runs writes nothing (SP-265)', () => {
+  const { store, human, machine, cleanup } = fixture();
+  try {
+    store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE', operator: human.id });
+    assert.deepEqual(store.projectReleases('alpha'), [], 'none named yet');
+    const first = store.nameRelease({ project: 'alpha', release: 'release-1', actor: machine.id, ownProject: 'beta' });
+    assert.deepEqual(first, { project: 'alpha', from: null, to: 'release-1', changed: true });
+    const second = store.nameRelease({ project: 'alpha', release: ' release-3 ', actor: human.id, ownProject: 'beta' });
+    assert.deepEqual(second, { project: 'alpha', from: 'release-1', to: 'release-3', changed: true });
+    const record = store.projectReleases('alpha');
+    assert.deepEqual(record.map((r) => [r.release, r.actor]), [['release-3', human.id], ['release-1', machine.id]]);
+    assert.match(record[0].at, /^2026-10-26T12:00:/);
+    assert.deepEqual(store.nameRelease({ project: 'alpha', release: 'release-3', actor: machine.id, ownProject: 'beta' }),
+      { project: 'alpha', from: 'release-3', to: 'release-3', changed: false });
+    assert.equal(store.projectReleases('alpha').length, 2, 'nothing written for the release it already runs');
+  } finally { cleanup(); }
+});
+
+test('Spirality releases: a roll-back names the earlier release again, going further back each time, and refuses when there is none (SP-265)', () => {
+  const { store, machine, cleanup } = fixture();
+  try {
+    const back = () => store.rollBackRelease({ project: 'alpha', actor: machine.id, ownProject: 'spirality' });
+    const name = (release) => store.nameRelease({ project: 'alpha', release, actor: machine.id, ownProject: 'spirality' });
+    assert.throws(back, { code: 'nothing-to-roll-back-to', message: /no release named yet/ });
+    name('release-1');
+    assert.throws(back, { code: 'nothing-to-roll-back-to', message: /runs release-1, and no earlier release/ });
+    name('release-2');
+    name('release-3');
+    assert.deepEqual(back(), { project: 'alpha', from: 'release-3', to: 'release-2', changed: true });
+    assert.deepEqual(back(), { project: 'alpha', from: 'release-2', to: 'release-1', changed: true }, 'never bounces back to release-3');
+    assert.throws(back, { code: 'nothing-to-roll-back-to' });
+    assert.deepEqual(store.projectReleases('alpha').map((r) => r.release), ['release-1', 'release-2', 'release-3', 'release-2', 'release-1']);
+  } finally { cleanup(); }
+});
+
+test('Spirality releases: Spirality\'s own project, a bad name, an unknown project and anyone but its operator or a loop are refused, writing nothing (SP-265)', () => {
+  const { store, human, machine, cleanup } = fixture();
+  try {
+    const other = store.createActor({ kind: 'human', name: 'Someone Else' });
+    const name = (fields) => store.nameRelease({ project: 'alpha', release: 'release-1', actor: machine.id, ownProject: 'spirality', ...fields });
+    assert.throws(() => name({ ownProject: 'alpha' }), { code: 'own-project', message: /Alpha is the tracker's home project: its lanes always run main/ });
+    assert.throws(() => store.rollBackRelease({ project: 'alpha', actor: machine.id, ownProject: 'alpha' }), { code: 'own-project' });
+    assert.throws(() => name({ ownProject: null }), { code: 'no-own-project' });
+    for (const bad of ['release-0', 'release-01', 'Release-1', 'v1', '', 'release-1a']) {
+      assert.throws(() => name({ release: bad }), { code: 'bad-release' }, bad);
+    }
+    assert.throws(() => name({ project: 'nope' }), { code: 'unknown-project' });
+    assert.throws(() => name({ actor: other.id }), { code: 'not-allowed', message: /only Alpha's operator/ });
+    assert.throws(() => name({ actor: 999 }), { code: 'unknown-actor' });
+    assert.deepEqual(store.projectReleases('alpha'), []);
+    assert.equal(name({ actor: human.id }).changed, true, 'the operator may');
+  } finally { cleanup(); }
+});
+
+test('deleting a project takes its release record with it (SP-265)', () => {
+  const { store, human, machine, cleanup } = fixture();
+  try {
+    store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE', operator: human.id });
+    store.nameRelease({ project: 'beta', release: 'release-2', actor: machine.id, ownProject: 'alpha' });
+    store.deleteProject('beta');
+    store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE', operator: human.id });
+    assert.deepEqual(store.projectReleases('beta'), []);
+  } finally { cleanup(); }
+});
