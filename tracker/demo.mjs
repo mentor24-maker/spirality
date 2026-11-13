@@ -24,7 +24,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openStore } from './store.mjs';
 import { CLOSE_PHRASE, GO_PHRASE, startServer } from './server.mjs';
-import { demoPrState, seedDemo, tickingClock, writeDemoLogs } from './demoData.mjs';
+import { DEMO_OWN_PROJECT, demoNewestRelease, demoPrState, seedDemo, tickingClock, writeDemoLogs } from './demoData.mjs';
 import { setPasswordUrl } from './account.mjs';
 import { loadProjectConfig } from '../lib/projectConfig.mjs';
 
@@ -60,7 +60,9 @@ const accountMail = { send: printEmail, pageUrl: null, projectName: 'Demo' };
 writeDemoLogs(dir, 'alpha');
 const pipeline = { logDir: dir, slug: 'alpha' };
 // The pull requests' state on GitHub is a stand-in (SP-226): the demo never calls GitHub.
-const server = await startServer({ store, port, log: (line) => console.log(line), mergePhrase, closePhrase: CLOSE_PHRASE, goPhrase: GO_PHRASE, accountMail, pipeline, readPrState: demoPrState });
+const server = await startServer({ store, port, log: (line) => console.log(line), mergePhrase, closePhrase: CLOSE_PHRASE, goPhrase: GO_PHRASE, accountMail, pipeline, readPrState: demoPrState,
+  // The Settings page's Spirality Release group: Alpha stands in for Spirality's own project, and the newest release is a stand-in too (SP-275).
+  ownProject: DEMO_OWN_PROJECT, newestRelease: demoNewestRelease });
 accountMail.pageUrl = `http://127.0.0.1:${server.address().port}`;
 
 console.log(`\nDemo tracker (test data only) at http://127.0.0.1:${server.address().port}/`);

@@ -46,6 +46,17 @@ const FINISHED_DAYS_AGO = Object.freeze([1, 3, 6, 12, 20, 27, 45]);
 /** The human-hours estimate on each of those tasks' pull requests; null is a task with none. */
 const FINISHED_HUMAN_HOURS = Object.freeze([6, 2.5, null, 12, 4, 8, null]);
 
+/** The demo's home project: the one that always runs main, as Spirality's own does (SP-275). */
+export const DEMO_OWN_PROJECT = 'alpha';
+
+/** The demo's newest release cut, a stand-in for reading the tags (SP-275): the demo never calls GitHub. */
+export const DEMO_NEWEST_RELEASE = 'release-3';
+
+/** The server's newestRelease for the demo: always DEMO_NEWEST_RELEASE. */
+export async function demoNewestRelease() {
+  return { newest: { name: DEMO_NEWEST_RELEASE, number: 3, commit: '0'.repeat(40) }, problem: null };
+}
+
 /**
  * Fill an empty store. Answers the actors (with the operator's token, for
  * signing in), and each ticket's id with what `waiting` would say about it:
@@ -183,6 +194,12 @@ export function seedDemo(store, { operatorName = substrateConfig.operatorName(),
   // control on its default.
   store.setPipelineSetting({ project: 'alpha', setting: 'wip-cap', value: '3', actor: op.id });
   store.setPipelineSetting({ project: 'alpha', setting: 'wip-cap', value: '5', actor: op.id });
+
+  // Two Spirality releases named for Beta (SP-275), so the Settings page's
+  // Spirality Release group shows one running and one before it, and Roll
+  // Back has somewhere to go. Alpha is the demo's home project (DEMO_OWN_PROJECT).
+  store.nameRelease({ project: 'beta', release: 'release-1', actor: loop.id, ownProject: DEMO_OWN_PROJECT });
+  store.nameRelease({ project: 'beta', release: 'release-2', actor: op.id, ownProject: DEMO_OWN_PROJECT });
 
   if (clock) {
     const start = clock.time();

@@ -90,8 +90,23 @@ tracker project).
 **The runner** is `npm run app-checks` (`scripts/app_checks.mjs`, decisions
 in `lib/appChecks.js`). It runs the checks that are due, without the
 tracker's sign-in in their environment, and posts through `bus-post`, read
-back. `--dry-run` prints what it would post and writes nothing. Until SP-274
-puts it on every relay pass, it runs by hand.
+back. `--dry-run` prints what it would post and writes nothing.
+
+**When it runs:** on every relay pass, every 10 minutes (SP-274,
+`scripts/run_relay.sh` with `scripts/lib/relay_app_checks.sh`), after the
+relay's own pass and signed in as the relay; each check's `everyMinutes`
+still decides whether it actually runs. When the manifest lists a check,
+the relay's 480 seconds are shared: the check step gets at most 180 of them
+(`RELAY_APP_CHECKS_LIMIT_SECONDS`, at least 1) and the relay part the rest,
+so a check that hangs is stopped and said so in the log, and can never hold
+up a merge. A check whose own `timeoutSeconds` is longer than that share is
+cut short at it. A project that lists no checks keeps all 480 seconds for
+the relay part, starts nothing, and logs `app-checks: none listed`. A
+checkout whose `package.json` cannot be read is a failed step, never "none
+listed". A check pass that fails makes the relay's END
+line read `A STEP FAILED AND SAID SO ABOVE`, never `pass complete`; the relay
+part's merges and hand-backs in that pass stand. `scripts/install_loop_runner.sh
+--status` shows the newest `app-checks:` line from the relay log.
 
 **The post rules**, by what the check said last time and this time:
 
@@ -202,10 +217,18 @@ record back after the write, and exit 1 when it did not stick. A roll-back
 names the newest earlier release numbered lower than the one running now, so
 rolling back twice goes two steps back, never back up to the bad one.
 
-Slice 1 of 4: nothing runs from the record yet. Still to come: showing each
-project's release on the Settings page with Move to Newest and Roll Back
-(SP-275), running each project's lanes on its release (SP-276), and moving a
-project to the newest release after a quiet period (SP-277).
+The Settings page shows each project's release in its **Spirality Release**
+group (SP-275): the release it runs, when and who named it, and the one
+before it. Its operator gets **Move to Newest** (names the newest release,
+read from the tags at the moment of the click) and **Roll Back** (the same
+roll-back as `release back`). Both go through the same store call as the
+commands, and the page reads the record back before it says it saved.
+Spirality's own project shows that it always runs the newest release, with
+no buttons.
+
+Slices 1 and 2 of 4: nothing runs from the record yet. Still to come:
+running each project's lanes on its release (SP-276), and moving a project to
+the newest release after a quiet period (SP-277).
 
 ## The moves
 
@@ -223,14 +246,15 @@ is a ticket in that project's own queue, filed once Spirality's side is Live:
    pause into the lanes.
 3. Let a project list application checks in its manifest for Spirality to run
    and post to its bus.
-   Slice 1 done (SP-264): the `applicationChecks` field and
-   `npm run app-checks`, run by hand. SP-274 runs it on every relay pass.
+   Done: SP-264 added the `applicationChecks` field and
+   `npm run app-checks`; SP-274 runs it on every relay pass.
 4. Move the pipeline watchdogs into Spirality for every project (SP-260,
    filed 2026-11-12, which also sorts StarCaster's watchdogs into pipeline
    watchdogs and application checks).
 5. Name a Spirality release for each project, Spirality's own lanes first.
    Slice 1 done (SP-265): releases, the tracker's record of which one each
    project runs, and the commands to cut, name and roll back (above).
+   Slice 2 (SP-275): the Settings page's Spirality Release group.
 6. In each project's queue: remove the copied loop (`loop/`, the copied
    `.claude/` skills and hooks) and, in StarCaster, the tracker posting in
    `scripts/lib/clickup.cjs` and the watchdogs in `run_bus_relay.sh`.

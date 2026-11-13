@@ -24,6 +24,7 @@
  */
 import { intervalOf, WAKE_RANGE } from '../scripts/lib/loopSchedule.mjs';
 import wipCap from '../lib/wipCap.js';
+import { RELEASE_GROUP_TITLE } from '../lib/releases.mjs';
 
 /** The lanes that wake on a timer and can be paused. */
 export const LANES = Object.freeze(['loop-intake', 'loop-build', 'loop-review', 'relay']);
@@ -53,6 +54,14 @@ export const GROUPS = Object.freeze([
   Object.freeze({ key: 'cap', title: 'Work-in-Progress Cap', wiredBy: 'SP-238' }),
   Object.freeze({ key: 'model', title: 'Model per Lane', wiredBy: 'SP-239' }),
 ]);
+
+/**
+ * The release group (SP-275): which release of the loop the project runs,
+ * from the record SP-265 keeps (lib/releases.mjs, which also names the
+ * heading), with Move to Newest and Roll Back. It is not a control: it has
+ * its own record and its own writes. Nothing runs from it until SP-276.
+ */
+export const RELEASE_GROUP = Object.freeze({ key: 'release', title: RELEASE_GROUP_TITLE, wiredBy: 'SP-276' });
 
 const control = (fields) => Object.freeze(fields);
 

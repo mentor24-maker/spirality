@@ -235,6 +235,8 @@ section.pipeline-controls .default { color: var(--quiet); font-size: 0.75rem; bo
 section.pipeline-controls p.not-yet { margin-top: 0.25rem; font-size: 0.85rem; }
 section.pipeline-controls .in-effect { display: block; color: var(--quiet); font-size: 0.85rem; }
 section.pipeline-controls .in-effect.waiting { color: var(--ink); font-weight: 600; }
+section.pipeline-controls .release-group p { margin: 0.25rem 0; }
+section.pipeline-controls .release-actions { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin: 0.5rem 0; }
 table.control-changes { max-width: 48rem; font-size: 0.9rem; }
 button.action { display: inline-flex; padding: 0.2rem; margin-right: 0.15rem; border: 0; border-radius: 4px; background: transparent; color: var(--quiet); cursor: pointer; }
 button.action:hover { color: var(--red); background: #fbe9e9; }

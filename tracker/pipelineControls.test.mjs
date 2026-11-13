@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { CONTROLS, GROUPS, LANES, MODEL_LANES, MODELS, checkControl, settingLines, withValues } from './pipelineControls.mjs';
+import { CONTROLS, GROUPS, RELEASE_GROUP, LANES, MODEL_LANES, MODELS, checkControl, settingLines, withValues } from './pipelineControls.mjs';
 import { intervalOf } from '../scripts/lib/loopSchedule.mjs';
 import wipCap from '../lib/wipCap.js';
 
@@ -16,6 +16,8 @@ test('the defaults are today\'s behaviour, read from where it lives now (SP-224)
 test('every group the lanes do not use yet names the ticket that wires it in (the wake times are wired, SP-236), and every control is in a group', () => {
   assert.deepEqual(GROUPS.map((g) => [g.key, g.wiredBy]), [['wake', null], ['pause', 'SP-237'], ['cap', 'SP-238'], ['model', 'SP-239']]);
   assert.ok(CONTROLS.every((c) => GROUPS.some((g) => g.key === c.group)));
+  assert.deepEqual(RELEASE_GROUP, { key: 'release', title: 'Spirality Release', wiredBy: 'SP-276' }, 'the release group is not a control, and SP-276 wires it in (SP-275)');
+  assert.ok(!CONTROLS.some((c) => c.group === RELEASE_GROUP.key));
 });
 
 test('checkControl stores text: numbers whole and in range, switches on or off, models on the list', () => {

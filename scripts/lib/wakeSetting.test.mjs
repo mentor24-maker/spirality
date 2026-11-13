@@ -59,9 +59,12 @@ function relayScratch() {
   const logDir = mkdtempSync(join(tmpdir(), 'relay-tick-logs-'));
   mkdirSync(join(scratch, 'scripts/lib'), { recursive: true });
   copyFileSync(join(REPO, 'scripts/run_relay.sh'), join(scratch, 'scripts/run_relay.sh'));
-  for (const f of ['project_config.mjs', 'run_with_time_limit.sh', 'lib/loopSchedule.mjs', 'lib/back_to_main.sh', 'lib/tracker_restart.sh']) {
+  for (const f of ['project_config.mjs', 'run_with_time_limit.sh', 'lib/loopSchedule.mjs', 'lib/back_to_main.sh', 'lib/tracker_restart.sh', 'lib/relay_app_checks.sh']) {
     symlinkSync(join(REPO, 'scripts', f), join(scratch, 'scripts', f));
   }
+  // relay_app_checks.sh reads the manifest's application checks through
+  // lib/projectConfig.mjs beside the scripts folder (SP-274).
+  symlinkSync(join(REPO, 'lib'), join(scratch, 'lib'));
   const answer = join(logDir, 'wake-answer');
   writeFileSync(join(scratch, 'scripts/lib/wakeSetting.mjs'), [
     "import { readFileSync } from 'node:fs';",

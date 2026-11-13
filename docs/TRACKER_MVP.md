@@ -801,6 +801,7 @@ made each move. The tokens live only in Doppler (project `spirality`, config
 | `loop-intake` | machine | `TRACKER_TOKEN_LOOP_INTAKE` | `scripts/loop_runner.sh loop-intake` |
 | `relay` | machine | `TRACKER_TOKEN_RELAY` | `scripts/run_relay.sh` |
 | `hand-run` | machine | `TRACKER_TOKEN_HAND_RUN` | a session started by hand (no runner) |
+| `app` | machine | `TRACKER_TOKEN_APP` | the project's live website: its bug reports become tickets and its alarms go to the bus (SP-279); the operator pastes the token into the website's host |
 
 The list is `TRACKER_SEATS` in `scripts/lib/expectedSecrets.mjs`, so
 `npm run doctor` reports each one as present or MISSING.

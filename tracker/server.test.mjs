@@ -2907,6 +2907,78 @@ test('releases: GET answers each project\'s release, Spirality\'s own as main; a
   } finally { await f.cleanup(); }
 });
 
+test('the Settings page\'s release group: each project\'s release, when and by whom, the one before it and the newest; Move to Newest names the newest, read fresh; Roll Back goes back; Spirality\'s own has no buttons (SP-275)', async () => {
+  const f = await fixture();
+  try {
+    f.store.createProject({ slug: 'home', name: 'Home', prefix: 'HO', operator: f.human.id });
+    let newest = 'release-2';
+    let reads = 0;
+    const newestRelease = async ({ fresh = false } = {}) => { reads += 1; return { newest: { name: fresh ? newest : 'release-2', number: 2, commit: 'a'.repeat(40) }, problem: null }; };
+    const at = await f.serve(f.store, { ownProject: 'home', newestRelease });
+    const group = async (slug, token = f.humanToken) => (await f.call('GET', `/pipeline-controls/${slug}`, { at, token })).body.release;
+
+    const none = await group('alpha');
+    assert.deepEqual({ ...none, ownLine: undefined }, {
+      key: 'release', title: 'Spirality Release', wiredBy: 'SP-276', known: true, own: false, ownLine: undefined,
+      current: null, previous: null, rollBackTo: null, newest: 'release-2', newestProblem: null, canChange: true,
+    });
+    const home = await group('home');
+    assert.equal(home.own, true);
+    assert.equal(home.canChange, false, 'Spirality\'s own project has no buttons');
+    assert.equal(home.ownLine, "Always the newest release: Spirality's own lanes meet every change first.");
+    assert.equal((await group('alpha', f.machineToken)).canChange, false, 'the page\'s buttons are the operator\'s, as a person');
+    const all = await f.call('GET', '/pipeline-controls', { at });
+    assert.deepEqual(all.body.projects.map((p) => [p.project.slug, p.release.own]), [['alpha', false], ['home', true]]);
+
+    f.store.nameRelease({ project: 'alpha', release: 'release-1', actor: f.machine.id, ownProject: 'home' });
+    newest = 'release-3';
+    const moved = await f.call('POST', '/releases/alpha/newest', { at, token: f.humanToken, body: {} });
+    assert.equal(moved.status, 200, moved.text);
+    assert.deepEqual(moved.body.saved, { project: 'alpha', from: 'release-1', to: 'release-3', changed: true }, 'the newest read fresh at the click, not the kept one');
+    const after = await group('alpha');
+    assert.deepEqual([after.current.release, after.current.actorName, after.previous.release, after.previous.actorName, after.rollBackTo], ['release-3', 'Operator', 'release-1', 'Loop', 'release-1']);
+    assert.ok(after.current.at);
+    assert.ok(f.lines.some((l) => l === `release alpha release-1 -> release-3 (move to newest) actor=${f.human.id}`));
+
+    const back = await f.call('POST', '/releases/alpha/back', { at, token: f.humanToken, body: {} });
+    assert.equal(back.status, 200, back.text);
+    assert.equal((await group('alpha')).current.release, 'release-1');
+    assert.ok(reads >= 1);
+  } finally { await f.cleanup(); }
+});
+
+test('Move to Newest refuses Spirality\'s own project, a release that cannot be read, none cut yet, and someone else, writing nothing (SP-275)', async () => {
+  const f = await fixture();
+  try {
+    f.store.createProject({ slug: 'home', name: 'Home', prefix: 'HO', operator: f.human.id });
+    let answer = { newest: null, problem: 'git ls-remote --tags origin failed: offline' };
+    const at = await f.serve(f.store, { ownProject: 'home', newestRelease: async () => answer });
+    const own = await f.call('POST', '/releases/home/newest', { at, token: f.humanToken, body: {} });
+    assert.equal(own.status, 409);
+    assert.equal(own.body.error, 'own-project');
+    const blind = await f.call('POST', '/releases/alpha/newest', { at, token: f.humanToken, body: {} });
+    assert.equal(blind.status, 503);
+    assert.match(blind.body.message, /could not be read, so nothing was named: git ls-remote --tags origin failed: offline/);
+    assert.equal((await f.call('GET', '/pipeline-controls/alpha', { at, token: f.humanToken })).body.release.newestProblem, answer.problem);
+    answer = { newest: null, problem: null };
+    const empty = await f.call('POST', '/releases/alpha/newest', { at, token: f.humanToken, body: {} });
+    assert.equal(empty.status, 409);
+    assert.equal(empty.body.error, 'no-release');
+    answer = { newest: { name: 'release-1', number: 1, commit: 'a'.repeat(40) }, problem: null };
+    const someone = f.store.createActor({ kind: 'human', name: 'Someone Else' });
+    f.store.addMember({ project: 'alpha', actor: someone.id, by: f.human.id });
+    const other = await f.call('POST', '/releases/alpha/newest', { at, token: f.store.issueToken(someone.id), body: {} });
+    assert.equal(other.status, 403);
+    assert.equal(other.body.error, 'not-allowed');
+    assert.equal((await f.call('POST', '/releases/alpha/newest', { at, token: f.humanToken, body: { release: 'release-9' } })).body.error, 'bad-field');
+    assert.deepEqual(f.store.projectReleases('alpha'), []);
+    // A tracker that reads no tags says so, on the page and to the button.
+    const plain = await f.call('GET', '/pipeline-controls/alpha', { token: f.humanToken });
+    assert.equal(plain.body.release.newestProblem, 'this tracker does not read the release tags.');
+    assert.equal(plain.body.release.known, false);
+  } finally { await f.cleanup(); }
+});
+
 test('releases: Spirality\'s own project, a bad name, a roll-back with nowhere to go, someone else and a tracker that cannot tell its own project are refused, writing nothing (SP-265)', async () => {
   const f = await fixture();
   try {

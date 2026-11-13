@@ -74,7 +74,7 @@ import { resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { MAX_ATTACHMENT, openStore, StoreError } from './store.mjs';
-import { OWN_PROJECT_RELEASE } from '../lib/releases.mjs';
+import { newestReleaseReader, OWN_PROJECT_RELEASE, releaseRemote } from '../lib/releases.mjs';
 import { SOURCE as IMPORT_SOURCE } from './import.mjs';
 import { boardOf, consoleOf, lookupTickets, PRIORITIES, prToCheck, prsToCheck, projectDetailsOf, projectsList, readSearchFilters, reportsOf, searchTickets, stageColoursOf, threadOf, waitingFor, busUnseen, pipelineControlsOf } from './pageData.mjs';
 import { ghPrState, prStateCache } from './prState.mjs';
@@ -528,7 +528,7 @@ export const CLOSE_PHRASE = busRelayPlan.CLOSE_PHRASES[0];
 /** The word the Go button posts: the one an intake card asks for (GO_PHRASE in lib/busRelayPlan.js). */
 export const GO_PHRASE = busRelayPlan.GO_PHRASE;
 
-export function createHandler(store, { log = () => {}, notifier = null, defaultProject = null, mergePhrase = null, closePhrase = null, goPhrase = null, accountMail = null, setup = null, now = Date.now, publicUrl = null, pipeline = null, docsDir = DOCS_DIR, commandsRoot = REPO_ROOT, readPrState = null, ownProject = null } = {}) {
+export function createHandler(store, { log = () => {}, notifier = null, defaultProject = null, mergePhrase = null, closePhrase = null, goPhrase = null, accountMail = null, setup = null, now = Date.now, publicUrl = null, pipeline = null, docsDir = DOCS_DIR, commandsRoot = REPO_ROOT, readPrState = null, ownProject = null, newestRelease = null } = {}) {
   /**
    * This machine's lanes as the page data reads them, `{ slug, stages }`
    * (pipelineOf), or null when this tracker reads no logs or they cannot be
@@ -614,6 +614,19 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     return scope == null
       ? new HttpError(404, code, `no ${what}.`)
       : new HttpError(404, code, `no ${what} that you can see: there is none, or you are not on its project.`, { yourProjectsOnly: true });
+  }
+
+  /**
+   * The newest release cut, `{ newest, problem }` (lib/releases.mjs
+   * newestReleaseReader), or a problem when this tracker reads no tags.
+   */
+  async function newestNow(options) {
+    if (!newestRelease) return { newest: null, problem: 'this tracker does not read the release tags.' };
+    try {
+      return await newestRelease(options);
+    } catch (err) {
+      return { newest: null, problem: err.message };
+    }
   }
 
   /**
@@ -860,15 +873,18 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     // its own project's (`npm run clickup -- settings`); only the project's
     // operator, signed in as a person, changes one, never a loop. The answer
     // to a change is the control as stored, read back, with the whole view.
+    // Each project's view carries its release group, with the newest
+    // release read from the tags (kept a few minutes).
     if (parts[0] === 'pipeline-controls' && parts.length === 1 && method === 'GET') {
       const scope = scopeOf(me);
+      const newest = await newestNow();
       const projects = store.listProjects().filter((p) => scope == null || scope.has(p.slug))
-        .map((p) => pipelineControlsOf(store, p.slug, { reader: me.id, lanes: lanesFor(p.slug) }));
+        .map((p) => pipelineControlsOf(store, p.slug, { reader: me.id, lanes: lanesFor(p.slug), ownProject, newest }));
       return [200, { projects }];
     }
     if (parts[0] === 'pipeline-controls' && parts.length === 2) {
       const project = requireProject(parts[1], me);
-      if (method === 'GET') return [200, pipelineControlsOf(store, project.slug, { reader: me.id, lanes: lanesFor(project.slug) })];
+      if (method === 'GET') return [200, pipelineControlsOf(store, project.slug, { reader: me.id, lanes: lanesFor(project.slug), ownProject, newest: await newestNow() })];
       if (method === 'PUT') {
         if (me.kind !== 'human' || project.operator !== me.id) {
           throw new HttpError(403, 'not-operator', `only ${project.name}'s operator, signed in as a person, may change its pipeline controls; ${me.kind === 'human' ? 'you are not its operator' : 'a loop sign-in may not'}.`);
@@ -882,7 +898,7 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
           if (err instanceof StoreError && err.code === 'not-operator') throw new HttpError(403, err.code, err.message);
           throw err;
         }
-        const view = pipelineControlsOf(store, project.slug, { reader: me.id, lanes: lanesFor(project.slug) });
+        const view = pipelineControlsOf(store, project.slug, { reader: me.id, lanes: lanesFor(project.slug), ownProject, newest: await newestNow() });
         const stored = view.controls.find((c) => c.key === saved.setting)?.value;
         if (stored !== saved.to) throw new HttpError(500, 'write-failed', `the ${saved.setting} setting read back as ${stored}, not ${saved.to}; treat it as not saved.`);
         log(`pipeline control ${project.slug} ${saved.setting} ${saved.changed ? `${saved.from} -> ${saved.to}` : `unchanged (${saved.to})`} actor=${me.id}`);
@@ -901,27 +917,39 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
       const projects = store.listProjects().filter((p) => scope == null || scope.has(p.slug)).map((p) => releasesOf(p));
       return [200, { ownProject, ownRelease: OWN_PROJECT_RELEASE, projects }];
     }
-    if (parts[0] === 'releases' && (parts.length === 2 || (parts.length === 3 && parts[2] === 'back'))) {
+    // POST .../newest (the Settings page's Move to Newest) names the
+    // newest release cut, read fresh from the tags at that moment, through
+    // the same store call as PUT.
+    if (parts[0] === 'releases' && (parts.length === 2 || (parts.length === 3 && (parts[2] === 'back' || parts[2] === 'newest')))) {
       const project = requireProject(parts[1], me);
       if (method === 'GET' && parts.length === 2) return [200, releasesOf(project)];
       const naming = method === 'PUT' && parts.length === 2;
-      const rolling = method === 'POST' && parts.length === 3;
-      if (naming || rolling) {
+      const rolling = method === 'POST' && parts.length === 3 && parts[2] === 'back';
+      const newestly = method === 'POST' && parts.length === 3 && parts[2] === 'newest';
+      if (naming || rolling || newestly) {
         if (!ownProject) throw new HttpError(503, 'no-own-project', 'this tracker cannot tell which project is its home (the project config was not usable when it started; its log says why), so no release can be named.');
         const body = await readJson(req);
         checkBody(body, me, naming ? ['release'] : []);
+        let release = naming ? body.release : null;
+        if (newestly) {
+          if (project.slug === ownProject) throw new HttpError(409, 'own-project', `${project.name} is the tracker's home project: its lanes always run main, so no release is named for it.`);
+          const read = await newestNow({ fresh: true });
+          if (read.problem) throw new HttpError(503, 'no-release-tags', `the newest release could not be read, so nothing was named: ${read.problem}`);
+          if (!read.newest) throw new HttpError(409, 'no-release', 'no release has been cut yet (npm run release -- cut), so there is nothing to move to.');
+          release = read.newest.name;
+        }
         let saved;
         try {
-          saved = naming
-            ? store.nameRelease({ project: project.slug, release: body.release, actor: me.id, ownProject })
-            : store.rollBackRelease({ project: project.slug, actor: me.id, ownProject });
+          saved = rolling
+            ? store.rollBackRelease({ project: project.slug, actor: me.id, ownProject })
+            : store.nameRelease({ project: project.slug, release, actor: me.id, ownProject });
         } catch (err) {
           if (err instanceof StoreError && RELEASE_REFUSALS[err.code]) throw new HttpError(RELEASE_REFUSALS[err.code], err.code, err.message);
           throw err;
         }
         const view = releasesOf(project);
         if (view.release !== saved.to) throw new HttpError(500, 'write-failed', `${project.name}'s release read back as ${view.release ?? 'none'}, not ${saved.to}; treat it as not saved.`);
-        log(`release ${project.slug} ${saved.changed ? `${saved.from ?? 'none'} -> ${saved.to}` : `unchanged (${saved.to})`}${rolling ? ' (roll-back)' : ''} actor=${me.id}`);
+        log(`release ${project.slug} ${saved.changed ? `${saved.from ?? 'none'} -> ${saved.to}` : `unchanged (${saved.to})`}${rolling ? ' (roll-back)' : newestly ? ' (move to newest)' : ''} actor=${me.id}`);
         return [200, { saved, ...view }];
       }
     }
@@ -1466,8 +1494,8 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
 }
 
 /** Start a server on `port` (0 = any free port) against an open store. Resolves to the http.Server. */
-export function startServer({ store, port, host = '127.0.0.1', log, notifier, defaultProject, mergePhrase, closePhrase, goPhrase, accountMail, setup, now, publicUrl, pipeline, docsDir, commandsRoot, readPrState, ownProject }) {
-  const server = createServer(createHandler(store, { log, notifier, defaultProject, mergePhrase, closePhrase, goPhrase, accountMail, setup, now, publicUrl, pipeline, docsDir, commandsRoot, readPrState, ownProject }));
+export function startServer({ store, port, host = '127.0.0.1', log, notifier, defaultProject, mergePhrase, closePhrase, goPhrase, accountMail, setup, now, publicUrl, pipeline, docsDir, commandsRoot, readPrState, ownProject, newestRelease }) {
+  const server = createServer(createHandler(store, { log, notifier, defaultProject, mergePhrase, closePhrase, goPhrase, accountMail, setup, now, publicUrl, pipeline, docsDir, commandsRoot, readPrState, ownProject, newestRelease }));
   return new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(port, host, () => {
@@ -1618,7 +1646,9 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     log(setup ? `set up a project: on, reading ${setup.homeConfig.logDir}/onboard.` : `set up a project: off. ${noSetup}.`);
     log(publicUrl ? `public address: ${publicUrl} serves the page and the API, with a Secure cookie.` : 'public address: none set (trackerPublicUrl).');
     // The bell, Waiting on You and the Merge button check each pull request on GitHub.
-    const server = await startServer({ store, port, host, log, notifier, defaultProject, mergePhrase, closePhrase: CLOSE_PHRASE, goPhrase: GO_PHRASE, accountMail, setup, publicUrl, pipeline, readPrState: ghPrState(), ownProject });
+    const server = await startServer({ store, port, host, log, notifier, defaultProject, mergePhrase, closePhrase: CLOSE_PHRASE, goPhrase: GO_PHRASE, accountMail, setup, publicUrl, pipeline, readPrState: ghPrState(), ownProject,
+      // The Settings page's Move to Newest reads the release tags from this checkout's remote.
+      newestRelease: newestReleaseReader({ run: promisify(execFile), cwd: REPO_ROOT, remote: releaseRemote() }) });
     console.log(`tracker listening on http://${host}:${server.address().port}/`);
   } catch (err) {
     console.error(`tracker server did not start: ${err.message}`);

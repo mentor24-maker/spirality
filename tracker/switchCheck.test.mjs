@@ -128,7 +128,7 @@ async function preparedDatabase(tasks) {
   for (const [secret, kind, name] of [
     ['TRACKER_TOKEN_OPERATOR', 'human', 'Pat'], ['TRACKER_TOKEN_LOOP_BUILD', 'machine', 'loop-build'],
     ['TRACKER_TOKEN_LOOP_REVIEW', 'machine', 'loop-review'], ['TRACKER_TOKEN_RELAY', 'machine', 'relay'],
-    ['TRACKER_TOKEN_HAND_RUN', 'machine', 'hand-run'], ['TRACKER_TOKEN_LOOP_INTAKE', 'machine', 'loop-intake'],
+    ['TRACKER_TOKEN_HAND_RUN', 'machine', 'hand-run'], ['TRACKER_TOKEN_LOOP_INTAKE', 'machine', 'loop-intake'], ['TRACKER_TOKEN_APP', 'machine', 'app'],
   ]) {
     env[secret] = store.issueToken(store.createActor({ kind, name }).id);
   }
@@ -189,7 +189,7 @@ async function guestDatabase(tasks, slug) {
   const env = {};
   for (const [secret, name] of [
     ['TRACKER_TOKEN_LOOP_BUILD', 'loop-build'], ['TRACKER_TOKEN_LOOP_REVIEW', 'loop-review'], ['TRACKER_TOKEN_RELAY', 'relay'],
-    ['TRACKER_TOKEN_HAND_RUN', 'hand-run'], ['TRACKER_TOKEN_LOOP_INTAKE', 'loop-intake'],
+    ['TRACKER_TOKEN_HAND_RUN', 'hand-run'], ['TRACKER_TOKEN_LOOP_INTAKE', 'loop-intake'], ['TRACKER_TOKEN_APP', 'app'],
   ]) {
     env[secret] = store.issueToken(store.createActor({ kind: 'machine', name: `${slug} ${name}` }).id);
   }
