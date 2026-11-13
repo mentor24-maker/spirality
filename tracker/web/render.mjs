@@ -327,6 +327,17 @@ export function busLink(answer) {
   };
 }
 
+/** How near a stage's next time must be for the pod to draw it gold (SP-222): under 3 minutes. */
+export const PIPELINE_SOON_MS = 3 * 60 * 1000;
+
+/**
+ * The pod's clock time with its am/pm in lowercase (SP-222): "10:45 AM"
+ * becomes "10:45 am". Text with no AM or PM comes back unchanged.
+ */
+export function lowerMeridiem(text) {
+  return String(text).replace(/\b(AM|PM)\b/g, (m) => m.toLowerCase());
+}
+
 /** What the Pipeline Status pod says when GET /pipeline could not be read. */
 export const PIPELINE_UNAVAILABLE = 'Pipeline Status unavailable';
 
@@ -339,15 +350,19 @@ export const PIPELINE_UNAVAILABLE = 'Pipeline Status unavailable';
  * a CSS grid of spans (`.stages` in app.css). `timeOf` turns an ISO time into
  * the page's own clock time. A stage with no pass logged yet, or no next time
  * known, shows a dash, its title saying which. A running stage's two cells
- * carry `running`, which app.css draws green. A missing or malformed answer
- * says PIPELINE_UNAVAILABLE.
+ * carry `running`, which app.css draws green. A stage whose next time is
+ * less than PIPELINE_SOON_MS from `now` (or already past: a pass that is due)
+ * carries `soon` instead, which app.css draws gold (SP-222); a running stage
+ * is never `soon`. `now` is a time in milliseconds, given so a test can fix
+ * the clock. A missing or malformed answer says PIPELINE_UNAVAILABLE.
  */
-export function renderPipelinePod(answer, timeOf) {
+export function renderPipelinePod(answer, timeOf, now = Date.now()) {
   const stages = Array.isArray(answer?.stages) ? answer.stages : null;
   if (!stages || !stages.length) return `<span class="unavailable">${escapeHtml(PIPELINE_UNAVAILABLE)}</span>`;
   const item = (s) => {
     let shown;
     let title;
+    let soon = false;
     if (s.running) {
       shown = 'running';
       title = `${s.name}: a pass is running now`;
@@ -359,13 +374,39 @@ export function renderPipelinePod(answer, timeOf) {
       title = `${s.name}: the next pass's time is not known yet`;
     } else {
       shown = timeOf(s.nextDue);
-      title = `${s.name}: next pass due ${shown}`;
+      const away = Date.parse(s.nextDue) - now;
+      soon = away < PIPELINE_SOON_MS;
+      title = `${s.name}: next pass due ${shown}${away <= 0 ? ' (due now)' : soon ? ' (due within 3 minutes)' : ''}`;
     }
-    const cls = s.running ? ' running' : '';
+    const cls = s.running ? ' running' : soon ? ' soon' : '';
     const tip = escapeHtml(title);
     return `<span class="stage${cls}" title="${tip}">${escapeHtml(s.name)}</span><span class="time${cls}" title="${tip}">${escapeHtml(shown)}</span>`;
   };
   return `<span class="heading">Pipeline Stages</span><span class="stages">${stages.map(item).join('')}</span>`;
+}
+
+/**
+ * The header's lane health lines (SP-218), from GET /pipeline: one sentence
+ * per failing stage, "Relay can't reach the internet since 9:00 PM", in the
+ * stages' order. The reason is the answer's own fixed words (tracker/
+ * pipeline.mjs FAILING_REASONS); one that is missing says "keeps failing".
+ * `timeOf` turns the ISO start of the failures into the page's own time. No
+ * failing stage, or a missing or malformed answer, gives no lines: the line
+ * is gone at the first passing pass.
+ */
+export function healthLines(answer, timeOf) {
+  const stages = Array.isArray(answer?.stages) ? answer.stages : [];
+  return stages
+    .filter((s) => s?.failing === true)
+    .map((s) => {
+      const reason = typeof s.failingReason === 'string' && s.failingReason ? s.failingReason : 'keeps failing';
+      return s.failingSince ? `${s.name} ${reason} since ${timeOf(s.failingSince)}` : `${s.name} ${reason}`;
+    });
+}
+
+/** The header's health lines as HTML, one `<span>` each; empty when nothing is failing. */
+export function renderHealth(answer, timeOf) {
+  return healthLines(answer, timeOf).map((line) => `<span>${escapeHtml(line)}</span>`).join('');
 }
 
 /**

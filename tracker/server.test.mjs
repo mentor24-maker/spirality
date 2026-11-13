@@ -1502,6 +1502,24 @@ test('GET /reports answers the Reporting figures for every project or one, 404 f
   } finally { await f.cleanup(); }
 });
 
+test('GET /reports answers Where the Time Goes: the four buckets per range and the open ticket by its exact name (SP-220)', async () => {
+  const f = await fixture();
+  try {
+    const t = f.store.fileTicket({ project: 'alpha', actor: f.machine.id, name: 'An open one', status: 'queued' });
+    await new Promise((resolve) => setTimeout(resolve, 20)); // so it has been open a while when the figures are read
+    const r = await f.call('GET', '/reports?project=alpha');
+    assert.equal(r.status, 200);
+    for (const key of ['week', 'month', 'all']) {
+      const split = r.body.timeSplit[key];
+      assert.deepEqual(Object.keys(split.buckets), ['working', 'lane', 'operator', 'broken'], key);
+      assert.ok(split.total > 0, key);
+      assert.equal(split.buckets.lane.share, 1, `${key}: its time in Queued, waiting for a lane`);
+      assert.deepEqual(split.tickets.map((x) => [x.id, x.name]), [[t.id, 'An open one']], key);
+    }
+    assert.equal(f.store.getTicket(t.id).version, 1, 'reading the figures writes nothing');
+  } finally { await f.cleanup(); }
+});
+
 test('GET /search ranks title over description over people\'s comments over loop comments, across every project, and writes nothing', async () => {
   const f = await fixture();
   try {
@@ -2601,6 +2619,8 @@ test('GET /pipeline answers each loop stage from the logs the project config nam
         assert.equal(answer.body.stages[2].lastStart, began.toISOString());
         // SP-173's extra fields for the dialog: the last end and its exit code, and how often it wakes.
         assert.deepEqual([answer.body.stages[2].lastEnd, answer.body.stages[2].lastExit, answer.body.stages[2].interval], [null, null, 1800]);
+        // SP-218's health fields: nothing has failed, so nothing is failing.
+        for (const s of answer.body.stages) assert.deepEqual([s.failing, s.failedPasses, s.failingSince, s.failingReason], [false, 0, null, null]);
         assert.doesNotMatch(answer.text, /report text/);
       }
       assert.equal((await f.call('GET', '/pipeline', { token: null, at })).status, 401);
@@ -2609,6 +2629,60 @@ test('GET /pipeline answers each loop stage from the logs the project config nam
     const none = await f.call('GET', '/pipeline');
     assert.equal(none.status, 503);
     assert.equal(none.body.error, 'no-pipeline');
+  } finally { await f.cleanup(); }
+});
+
+test('GET /in-flight lists every ticket but Live on the projects the caller may see, with next change from the loop logs; a member of one project sees only it; signed out is 401 (SP-221)', async () => {
+  const f = await fixture();
+  try {
+    f.store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE', operator: f.human.id });
+    const viewer = f.store.createActor({ kind: 'human', name: 'Viewer' });
+    const vt = f.store.issueToken(viewer.id);
+    f.store.setRole({ actor: viewer.id, role: 'viewer', by: f.human.id });
+    f.store.addMember({ project: 'alpha', actor: viewer.id, by: f.human.id });
+    const statuses = loopStatuses.STAGE_ORDER;
+    for (const status of statuses) f.store.fileTicket({ project: 'alpha', actor: f.machine.id, name: `Alpha ${status}`, status });
+    const hidden = f.store.fileTicket({ project: 'beta', actor: f.machine.id, name: 'Hidden comet', status: 'Queued' });
+
+    const logs = join(f.dir, 'logs');
+    mkdirSync(logs);
+    const stamp = (d) => d.toLocaleString('sv-SE').replace('T', ' ');
+    const ended = new Date('2026-11-09T18:25:36');
+    writeFileSync(join(logs, 'alpha-loop-build.log'), [
+      `===== ${stamp(new Date('2026-11-09T18:22:34'))} START /loop-build =====`,
+      `===== ${stamp(ended)} END /loop-build (exit 0) =====`,
+      `[loop-runner] ${stamp(ended).slice(11)} sleeping 1800s before the next /loop-build`, '',
+    ].join('\n'));
+    const server = await startServer({ store: f.store, port: 0, pipeline: { logDir: logs, slug: 'alpha' } });
+    try {
+      const at = `http://127.0.0.1:${server.address().port}`;
+      const admin = await f.call('GET', '/in-flight', { token: f.humanToken, at });
+      assert.equal(admin.status, 200, admin.text);
+      assert.deepEqual(admin.body.projects.map((p) => [p.slug, p.logo]), [['alpha', null], ['beta', null]]);
+      assert.deepEqual(admin.body.tickets.filter((t) => t.project === 'alpha').map((t) => t.status), statuses.filter((s) => s !== 'Live'));
+      assert.ok(admin.body.tickets.some((t) => t.id === hidden.id), 'an admin sees every project');
+      const byStatus = Object.fromEntries(admin.body.tickets.filter((t) => t.project === 'alpha').map((t) => [t.status, t.nextChange]));
+      const due = new Date(ended.getTime() + 1800 * 1000).toISOString();
+      assert.deepEqual(byStatus.Queued, { kind: 'lane', lane: 'Build', job: 'loop-build', running: false, due });
+      assert.deepEqual(byStatus.Rework, byStatus.Queued);
+      assert.equal(byStatus['In review'], null, 'no review log: null, never a guess');
+      assert.equal(byStatus.Requested, null, 'no intake log');
+      assert.deepEqual(byStatus.Building, { kind: 'running', lane: 'Build', job: 'loop-build' });
+      assert.deepEqual(byStatus['Needs your input'], { kind: 'operator' });
+      assert.equal(admin.body.tickets.find((t) => t.id === hidden.id).nextChange, null, 'beta is not the project whose logs this tracker reads');
+
+      const member = await f.call('GET', '/in-flight', { token: vt, at });
+      assert.equal(member.status, 200);
+      assert.deepEqual(member.body.projects.map((p) => p.slug), ['alpha']);
+      assert.ok(member.body.tickets.every((t) => t.project === 'alpha'));
+      assert.ok(!member.text.includes('Hidden comet') && !member.text.includes('Beta'), 'nothing of beta is given away');
+
+      assert.equal((await f.call('GET', '/in-flight', { token: null, at })).status, 401);
+    } finally { await new Promise((r) => server.close(r)); }
+    // A tracker that cannot read the loop logs still answers, with no lane times.
+    const blind = await f.call('GET', '/in-flight');
+    assert.equal(blind.status, 200);
+    assert.equal(blind.body.tickets.find((t) => t.status === 'Queued').nextChange, null);
   } finally { await f.cleanup(); }
 });
 

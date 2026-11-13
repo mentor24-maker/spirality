@@ -75,7 +75,7 @@ import { promisify } from 'node:util';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { MAX_ATTACHMENT, openStore, StoreError } from './store.mjs';
 import { SOURCE as IMPORT_SOURCE } from './import.mjs';
-import { boardOf, lookupTickets, PRIORITIES, pipelineControlsOf, projectDetailsOf, projectsList, readSearchFilters, reportsOf, searchTickets, stageColoursOf, threadOf, waitingFor, busUnseen } from './pageData.mjs';
+import { boardOf, consoleOf, lookupTickets, PRIORITIES, projectDetailsOf, projectsList, readSearchFilters, reportsOf, searchTickets, stageColoursOf, threadOf, waitingFor, busUnseen, pipelineControlsOf } from './pageData.mjs';
 import { createNotifier, DEFAULT_FROM, MAIL_FROM, MAIL_KEY, mailEnvFromDoppler, mailSettingsFromEnv, resendSender, textSettings } from './notify.mjs';
 import { sendInvite, sendResetLink } from './account.mjs';
 import { guessProject } from './projectGuess.mjs';
@@ -678,6 +678,22 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     if (parts.length === 1 && parts[0] === 'pipeline' && method === 'GET') {
       if (!pipeline) throw new HttpError(503, 'no-pipeline', 'this tracker cannot read the loop logs: the project config was not usable when it started (its log says why).');
       return [200, pipelineOf(pipeline)];
+    }
+
+    // Dane's page: the Console view, every ticket in flight on every
+    // project the caller may see, with when the lane that acts on it runs
+    // next. A tracker that cannot read the loop logs still answers, with no
+    // lane times (pageData.consoleOf says null, never a guess).
+    if (parts.length === 1 && parts[0] === 'in-flight' && method === 'GET') {
+      let lanes = null;
+      if (pipeline) {
+        try {
+          lanes = { slug: pipeline.slug, stages: pipelineOf(pipeline).stages };
+        } catch (err) {
+          log(`in-flight: the loop logs could not be read, so no ticket has a next change time (${err.message}).`);
+        }
+      }
+      return [200, consoleOf(store, { only: scopeOf(me), pipeline: lanes })];
     }
 
     // Dane's page: the Projects screen, the project Tasks opens, and the New

@@ -7,8 +7,8 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { seedDemo, tickingClock } from './demoData.mjs';
-import { reportsOf, REPORT_RANGES, searchTickets, PRIORITIES } from './pageData.mjs';
-import { escapeHtml, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, renderPipelineControls, controlValueText, mountainTime } from './web/render.mjs';
+import { reportsOf, REPORT_RANGES, searchTickets, PRIORITIES, timeSplitOf, isFailureNote, TIME_BUCKETS } from './pageData.mjs';
+import { escapeHtml, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, controlValueText, mountainTime } from './web/render.mjs';
 import { startServer, setupSettingsOf } from './server.mjs';
 import { saveAnswers, setupFields, setupOf } from './setup.mjs';
 import { DANE_FIELDS as SETUP_FIELDS, STEPS as SETUP_STEPS } from '../scripts/onboard/onboard.mjs';
@@ -643,7 +643,7 @@ test('the Add Task box on the Tasks page files into the project shown, in Reques
   assert.match(draw, /<details class="add-task">\s*<summary>Add Task<\/summary>\s*<form class="request">/, 'drawn closed, on the board and the list alike');
   assert.match(draw, /<button type="submit">Submit Task<\/button>/, 'the button says Submit Task, in his words');
   assert.doesNotMatch(app, /File request/i, 'the old button words are gone');
-  assert.match(draw, /Filed <a href="\/t\/\$\{encodeURIComponent\(filed\)\}">\$\{escapeHtml\(filed\)\}<\/a>/);
+  assert.match(app, /Filed <a href="\/t\/\$\{encodeURIComponent\(filed\)\}">\$\{escapeHtml\(filed\)\}<\/a>/);
   assert.match(draw, /wireAddTask\(board\.project, view, adding\);/);
   assert.doesNotMatch(app, /drawNew/, 'the separate New request page is gone');
   // The old address opens the Tasks page with the box open.
@@ -678,14 +678,40 @@ test('the Add Task box takes files: the ticket is filed first, then each file go
   assert.match(up, /'content-type': 'application\/octet-stream'/);
   assert.match(up, /'x-file-name': encodeURIComponent\(file\.name\)/);
   assert.match(up, /body: file,/);
-  // The note: uploaded names, then the ones that were not, each with why, escaped.
-  const note = /function filesNote[\s\S]*?\n\}/.exec(app)[0];
-  assert.match(note, /Uploaded \$\{names\(uploaded\)\}/);
+  // Uploaded names ride in the filed pod; the ones that were not stay in the lasting line, each with why, escaped (SP-223).
+  const pod = /function filedPod[\s\S]*?\n\}/.exec(app)[0];
+  assert.match(pod, /Uploaded \$\{names\}/);
+  assert.match(pod, /escapeHtml\(n\)/);
+  const note = /function notUploadedNote[\s\S]*?\n\}/.exec(app)[0];
   assert.match(note, /Not uploaded: /);
   assert.match(note, /The ticket is filed without/);
-  assert.match(note, /escapeHtml\(n\)/);
   assert.match(note, /escapeHtml\(f\.name\)/);
-  assert.match(draw, /\$\{filesNote\(uploaded, notUploaded\)\}<\/p>/);
+  assert.match(draw, /\$\{notUploadedNote\(notUploaded\)\}<\/p>/);
+});
+
+test('a filed task shows a larger pod centred on the Tasks heading row, above the page and out of its flow, for 3 seconds then a 1-second fade, then gone; warnings stay as a lasting line (SP-223)', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const draw = app.slice(app.indexOf('async function drawProject'), app.indexOf('async function copyText'));
+  // The pod sits in the heading's own row, drawn only after a filing.
+  assert.match(draw, /<div class="tasks-head"><h1>Tasks<\/h1>\$\{filed \? filedPod\(filed, uploaded\) : ''\}<\/div>/);
+  const pod = /function filedPod[\s\S]*?\n\}/.exec(app)[0];
+  assert.match(pod, /<output class="filed-pod">Filed <a href="\/t\/\$\{encodeURIComponent\(filed\)\}">\$\{escapeHtml\(filed\)\}<\/a>/, 'the id is still a link');
+  // The old line under the toolbar is drawn only for a warning, and never says Filed.
+  assert.match(draw, /\$\{filed && \(unchecked \|\| notUploaded\.length\) \? `<p class="filed-note">/);
+  assert.doesNotMatch(draw, /<p class="filed-note">Filed/, 'a plain success is the pod alone');
+  // Off the page once faded, so it catches no clicks.
+  assert.match(app, /const FILED_POD_MS = 4000;/);
+  assert.match(/function wireFiledPod[\s\S]*?\n\}/.exec(app)[0], /setTimeout\(\(\) => pod\.remove\(\), FILED_POD_MS\);/);
+  assert.match(draw, /wireFiledPod\(\);/);
+  const css = readFileSync(WEB('app.css'), 'utf8');
+  assert.match(css, /\.tasks-head \{ position: relative; \}/, 'the row the pod is centred on; adds no height of its own');
+  const rule = /\.filed-pod \{([^}]*)\}/.exec(css)[1];
+  assert.match(rule, /position: absolute;/, 'out of the page flow: nothing moves');
+  assert.match(rule, /top: 50%; left: 50%; transform: translate\(-50%, -50%\);/, 'centred on the heading row');
+  assert.match(rule, /z-index: 10;/, 'drawn above the heading, toolbar and tables');
+  assert.match(rule, /font-size: 1\.25rem;/, 'larger than the body text');
+  assert.match(rule, /animation: filed-pod-fade 4s linear forwards;/);
+  assert.match(css, /@keyframes filed-pod-fade \{ 0%, 75% \{ opacity: 1; \} 100% \{ opacity: 0; \} \}/, '3 seconds full, then 1 second to nothing');
 });
 
 test('the ticket page lists its attachments by name and size, each a download, a plain picture also previewed, never an SVG (SP-140)', () => {
@@ -716,7 +742,7 @@ test('the Add Task box checks the project before filing: asks "Did you mean ...?
   assert.match(wire, /\} catch \(err\) \{\s*if \(err instanceof SignedOut\) return drawSignIn\([^)]*\);\s*unchecked = true;\s*\}/);
   assert.match(app, /const UNCHECKED_NOTE = 'The project check could not run, so it went into the project shown\.';/);
   const draw = app.slice(app.indexOf('async function drawProject'), app.indexOf('async function copyText'));
-  assert.match(draw, /\$\{unchecked \? `\. \$\{UNCHECKED_NOTE\}` : ''\}/);
+  assert.match(draw, /\$\{unchecked \? UNCHECKED_NOTE : ''\}/);
   // Filed elsewhere: X's board opens, naming X's new ticket id.
   assert.match(wire, /if \(into !== slug\) history\.pushState\(null, '', `\/\$\{view\}\/\$\{encodeURIComponent\(into\)\}`\);/);
   // The question box: the words of the ticket, File in X, Keep in the project shown, and a close.
@@ -2551,6 +2577,113 @@ test('the demo spreads its finished tasks over the last month, so every range ha
   } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
 });
 
+// ── Where the Time Goes (SP-220) ────────────────────────────────────────────
+
+const HOUR = 60 * 60_000;
+/** Each bucket's total ms in some stretches. */
+const sumBuckets = (stretches) => Object.fromEntries(TIME_BUCKETS.map((b) => [b, stretches.filter((s) => s.bucket === b).reduce((n, s) => n + s.to - s.from, 0)]));
+
+test('Time split: Queued, 1h Building, 2h In review, 3h Ready to launch, his "merge", 30 minutes, Live', () => {
+  const t0 = Date.parse('2026-11-01T15:00:00Z');
+  const at = (h) => t0 + h * HOUR;
+  const steps = [[at(0), 'queued'], [at(5), 'building'], [at(6), 'in review'], [at(8), 'ready to launch'], [at(11.5), 'live']];
+  const comments = [
+    { at: at(8), byMachine: true, byOperator: false, failure: false }, // the card
+    { at: at(11), byMachine: false, byOperator: true, failure: false }, // "merge"
+  ];
+  const stretches = timeSplitOf(steps, comments, { now: at(30) });
+  assert.deepEqual(sumBuckets(stretches), { working: 1 * HOUR, lane: 5 * HOUR + 2 * HOUR + 0.5 * HOUR, operator: 3 * HOUR, broken: 0 });
+  // Every second of its life before Live is in exactly one bucket, end to end.
+  for (let i = 1; i < stretches.length; i += 1) assert.equal(stretches[i].from, stretches[i - 1].to);
+  assert.equal(stretches[0].from, at(0));
+  assert.equal(stretches[stretches.length - 1].to, at(11.5), 'Live time is not counted');
+});
+
+test('Time split: a loop\'s failure note with no move for 4 hours is broken, until the next move or his next comment', () => {
+  const t0 = Date.parse('2026-11-01T15:00:00Z');
+  const at = (h) => t0 + h * HOUR;
+  const failed = (h) => ({ at: at(h), byMachine: true, byOperator: false, failure: true });
+  // Building for an hour, then loop-build FAILED: and nothing moves for 4 hours, then back to Queued.
+  const a = timeSplitOf([[at(0), 'building'], [at(5), 'queued']], [failed(1)], { now: at(6) });
+  assert.deepEqual(sumBuckets(a), { working: HOUR, lane: HOUR, operator: 0, broken: 4 * HOUR });
+  // In Ready to launch: a failure note, then his reply 2 hours later ends it; his reply is the newest word, so a lane owes the move.
+  const b = timeSplitOf([[at(0), 'ready to launch']], [failed(1), { at: at(3), byMachine: false, byOperator: true }], { now: at(4) });
+  assert.deepEqual(sumBuckets(b), { working: 0, lane: HOUR, operator: HOUR, broken: 2 * HOUR });
+  // A machine's ordinary note does not end it; an open ticket counts up to now.
+  const c = timeSplitOf([[at(0), 'in review']], [failed(0), { at: at(1), byMachine: true, byOperator: false }], { now: at(2) });
+  assert.deepEqual(sumBuckets(c), { working: 0, lane: 0, operator: 0, broken: 2 * HOUR });
+  // A person who is not the operator saying something does not clear his stage's wait.
+  const d = timeSplitOf([[at(0), 'needs your input']], [{ at: at(1), byMachine: false, byOperator: false }], { now: at(2) });
+  assert.deepEqual(sumBuckets(d), { working: 0, lane: 0, operator: 2 * HOUR, broken: 0 });
+});
+
+test('Time split: what counts as a failure note is a line that starts with one', () => {
+  for (const text of ['loop-build FAILED: verify exited 1', 'FAILED: step 3', 'relay GAVE UP: after 3 tries', 'Round 2\n**loop-review FAILED:** gh down']) {
+    assert.ok(isFailureNote(text), text);
+  }
+  for (const text of ['The relay logged FAILED: twice', 'nothing failed', '', null, 'GAVE UP: no lane named']) {
+    assert.ok(!isFailureNote(text), String(text));
+  }
+});
+
+test('Reporting time split: every ticket\'s open time in exactly one bucket, a stretch over the range start cut at it, the most time first', () => {
+  const r = reportingStore();
+  try {
+    const dane = r.store.createActor({ kind: 'human', name: 'Dane' });
+    r.store.createProject({ slug: 'gamma', name: 'Gamma', prefix: 'GA', operator: dane.id });
+    // Queued 10 days ago, Building from 9 to 1 day ago (crosses the 7-day start), Live 1 day ago.
+    const long = r.ticket('gamma', 10, [9, 'building'], [1, 'live']);
+    // Filed 2 days ago, Ready to launch since 1 day ago, open now: waiting on him.
+    const open = r.ticket('gamma', 2, [1, 'ready to launch']);
+    // Filed into review 3 days ago, a loop's failure note on it a minute later, still there: broken since.
+    const failing = r.filedAs('in review', 'gamma', 3);
+    r.store.postComment({ ticket: failing, author: r.loop.id, body: 'loop-review FAILED: gh could not be reached' });
+    const { timeSplit } = reportsOf(r.store, { project: 'gamma', now: r.now });
+    const week = timeSplit.week;
+    const row = (id) => week.tickets.find((t) => t.id === id);
+    assert.ok(near(row(long).working, 6), `working cut at the range start: ${row(long).working / DAY}`);
+    assert.ok(near(row(long).lane, 0));
+    assert.ok(near(timeSplit.all.tickets.find((t) => t.id === long).working, 8));
+    assert.ok(near(timeSplit.all.tickets.find((t) => t.id === long).lane, 1), 'its day in Queued');
+    assert.ok(near(row(open).operator, 1) && near(row(open).lane, 1));
+    assert.ok(row(failing).broken > 0 && near(row(failing).broken + row(failing).lane, 3));
+    for (const key of ['week', 'month', 'all']) {
+      const t = timeSplit[key];
+      for (const x of t.tickets) assert.equal(TIME_BUCKETS.reduce((n, b) => n + x[b], 0), x.total, `${key} ${x.id} adds up`);
+      assert.equal(TIME_BUCKETS.reduce((n, b) => n + t.buckets[b].ms, 0), t.total, key);
+      assert.ok(Math.abs(TIME_BUCKETS.reduce((n, b) => n + t.buckets[b].share, 0) - 1) < 1e-9, `${key} shares`);
+      assert.deepEqual(t.tickets.map((x) => x.total), t.tickets.map((x) => x.total).sort((a, b) => b - a), 'most time first');
+    }
+    assert.equal(row(long).name, r.store.getTicket(long).name, 'its exact name');
+  } finally { r.done(); }
+});
+
+test('Reporting time split: a range with nothing open has a zero total and no shares, and lists no tasks', () => {
+  const r = reportingStore();
+  try {
+    r.ticket('alpha', 70, [65, 'live']);
+    const { timeSplit } = reportsOf(r.store, { now: r.now });
+    assert.equal(timeSplit.week.total, 0);
+    assert.deepEqual(timeSplit.week.tickets, []);
+    for (const b of TIME_BUCKETS) assert.deepEqual(timeSplit.week.buckets[b], { ms: 0, share: null });
+    assert.ok(near(timeSplit.all.buckets.lane.ms, 5));
+  } finally { r.done(); }
+});
+
+test('the Reporting page draws Where the Time Goes from the server: four buckets by range, its note, a range picker, task links', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const draw = app.slice(app.indexOf('async function drawReporting'), app.indexOf('/**\n * The Settings page'));
+  assert.match(draw, /<h2>Where the Time Goes<\/h2>\s*<p class="quiet">[^<]*Working: in Building\.[^<]*Waiting on You:[^<]*Broken:[^<]*Waiting for a Lane:[^<]*In review[^<]*waiting, not broken\.<\/p>/);
+  for (const label of ['Working', 'Waiting for a Lane', 'Waiting on You', 'Broken']) assert.match(draw, new RegExp(`'${label}'\\]`), label);
+  assert.match(draw, /r\.timeSplit\[g\.key\]/, 'figures per range, from the server');
+  assert.match(draw, /<span class="quiet">none in this range<\/span>/, 'nothing open is said in words, never 0 hours');
+  assert.match(draw, /<label for="time-split-range">Tasks with the Most Time In<\/label>/);
+  assert.match(draw, /<a href="\/t\/\$\{encodeURIComponent\(x\.id\)\}">/, 'each task id links to its page');
+  assert.match(draw, /escapeHtml\(x\.name\)/);
+  assert.match(draw, /spanOf\(Number\(ms\)\)/, 'durations in the page\'s own wording');
+  for (const heading of ['Task', 'Name', 'Total']) assert.match(draw, new RegExp(`<th(?: class="count")?>${heading}</th>`), heading);
+});
+
 test('the Reporting page draws only the server\'s figures: ranges and stages from its answer, colours as properties, the selected project first', () => {
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   const draw = app.slice(app.indexOf('async function drawReporting'), app.indexOf('/**\n * The Settings page'));
@@ -3477,7 +3610,7 @@ test('the Pipeline Status pod: each stage\'s next time or "running", a dash for 
     { name: 'Build', logged: true, running: true, nextDue: null },
     { name: 'Review', logged: true, running: false, nextDue: null },
     { name: 'Intake', logged: false, running: false, nextDue: null },
-  ] }, timeOf);
+  ] }, timeOf, Date.parse('2026-11-09T17:00:00.000Z'));
   // Cells joined with a bar, so the order and the name/time pairing both show.
   const cells = [...html.matchAll(/<span class="([^"]*)"[^>]*>([^<]*)<\/span>/g)].map((m) => m[2]);
   assert.equal(cells.join('|'), 'Pipeline Stages|Relay|[17:45]|Build|running|Review|–|Intake|–');
@@ -3499,7 +3632,7 @@ test('the pod reads as a small table (SP-194): a "Pipeline Stages" heading, one 
     { name: 'Build', logged: true, running: true, nextDue: null },
     { name: 'Review', logged: true, running: false, nextDue: '2026-11-09T18:10:00.000Z' },
     { name: 'Intake', logged: true, running: false, nextDue: '2026-11-09T18:04:00.000Z' },
-  ] }, timeOf);
+  ] }, timeOf, Date.parse('2026-11-09T17:00:00.000Z'));
   // The heading comes first, then the grid holding every cell.
   assert.match(html, /^<span class="heading">Pipeline Stages<\/span><span class="stages">/);
   // No table inside the button: HTML does not allow one there.
@@ -3522,7 +3655,7 @@ test('the pod reads as a small table (SP-194): a "Pipeline Stages" heading, one 
     return css.slice(at, css.indexOf('}', at));
   };
   const pod = rule('.toolbar .pipeline-pod');
-  assert.match(pod, /background: #eaf5fe;/, 'the page\'s light blue, as on the Files Made box');
+  assert.match(pod, /background: #cceeff;/, 'Dane\'s light blue (SP-222)');
   assert.match(pod, /flex-direction: column;/, 'the heading sits above the stages');
   assert.match(rule('.toolbar .pipeline-pod .stages'), /display: grid; grid-template-columns: auto auto;/, 'two lined-up columns');
   assert.match(rule('.toolbar .pipeline-pod .stage'), /font-weight: 700;/, 'stage names are bold');
@@ -3530,10 +3663,59 @@ test('the pod reads as a small table (SP-194): a "Pipeline Stages" heading, one 
   assert.ok(green, 'a running stage has its own colour');
   const [r, g, b] = [1, 3, 5].map((i) => parseInt(green[1].slice(i, i + 2), 16));
   assert.ok(g > r * 2 && g > b * 2, `${green[1]} is a green`);
-  assert.ok(contrast(green[1], '#eaf5fe') >= 4.5, 'the green reads on the light blue (WCAG AA for small text)');
+  // SP-222: Dane chose #00AA00. It is fainter on #cceeff than the 4.5:1
+  // small-text bar, so the test checks his colour, not its contrast.
+  assert.equal(green[1], '#00AA00', 'the brighter green Dane chose (SP-222)');
   // The button is unchanged: same class, still opens the dialog.
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   assert.match(app, /<button type="button" class="pipeline-pod" aria-haspopup="dialog" title="Open Pipeline Status"><\/button>/);
+});
+
+test('the pod restyled (SP-222): a larger heading, #cceeff with a #000077 border, 10px/20px margins, a stage due within 3 minutes gold, am/pm lowercase', () => {
+  const timeOf = (iso) => `[${iso.slice(11, 16)}]`;
+  const now = Date.parse('2026-11-09T18:00:00.000Z');
+  const html = renderPipelinePod({ stages: [
+    { name: 'Relay', logged: true, running: false, nextDue: '2026-11-09T18:02:59.000Z' }, // under 3 minutes
+    { name: 'Build', logged: true, running: true, nextDue: '2026-11-09T18:01:00.000Z' }, // running wins
+    { name: 'Review', logged: true, running: false, nextDue: '2026-11-09T18:03:00.000Z' }, // exactly 3 minutes: not soon
+    { name: 'Intake', logged: true, running: false, nextDue: '2026-11-09T17:55:00.000Z' }, // already past: due
+  ] }, timeOf, now);
+  const grid = html.slice(html.indexOf('<span class="stages">') + '<span class="stages">'.length, -'</span>'.length);
+  const cells = [...grid.matchAll(/<span class="([^"]*)"[^>]*>([^<]*)<\/span>/g)].map((m) => [m[1], m[2]]);
+  assert.deepEqual(cells, [
+    ['stage soon', 'Relay'], ['time soon', '[18:02]'],
+    ['stage running', 'Build'], ['time running', 'running'],
+    ['stage', 'Review'], ['time', '[18:03]'],
+    ['stage soon', 'Intake'], ['time soon', '[17:55]'],
+  ]);
+  assert.match(html, /title="Relay: next pass due \[18:02\] \(due within 3 minutes\)"/);
+  assert.match(html, /title="Review: next pass due \[18:03\]"/);
+  assert.match(html, /title="Intake: next pass due \[17:55\] \(due now\)"/);
+  assert.equal(PIPELINE_SOON_MS, 3 * 60 * 1000);
+  const css = readFileSync(WEB('app.css'), 'utf8');
+  const rule = (selector) => {
+    const at = css.indexOf(`${selector} {`);
+    assert.notEqual(at, -1, `app.css has a ${selector} rule`);
+    return css.slice(at, css.indexOf('}', at));
+  };
+  const pod = rule('.toolbar .pipeline-pod');
+  assert.match(pod, /margin: 10px 20px;/, '10px top and bottom, 20px left and right');
+  assert.match(pod, /border: 1px solid #000077;/);
+  assert.match(pod, /background: #cceeff;/);
+  assert.match(rule('.toolbar .pipeline-pod:hover'), /background: #b8e4ff;/, 'hover still shows on the new blue');
+  assert.match(rule('.toolbar .pipeline-pod .heading'), /font-size: 1\.5em;/, 'the heading 50% larger');
+  assert.match(rule('.toolbar .pipeline-pod .soon'), /color: #B8860B;/, 'gold that reads on light blue');
+  // The Files Made box keeps its light blue (non-goal).
+  assert.match(rule('.files-made'), /background: #eaf5fe;/);
+  // Lowercase am/pm, for the pod's times only.
+  assert.equal(lowerMeridiem('10:45 AM'), '10:45 am');
+  assert.equal(lowerMeridiem('2:05\u202fPM'), '2:05\u202fpm');
+  assert.equal(lowerMeridiem('14:05'), '14:05');
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  assert.match(app, /const clockTime = \(iso\) => lowerMeridiem\(/);
+  assert.match(app, /renderPipelinePod\(pipelineState, clockTime, Date\.now\(\)\)/);
+  // The dialog keeps its own times.
+  assert.match(app, /renderPipelineDetails\(pipelineState, when\)/);
 });
 
 test('the Tasks page puts the pod between the search field and Board/List, fills it on draw and once a minute, and a failed read touches only the pod (SP-168)', () => {
@@ -3637,6 +3819,59 @@ test('the pod button is named for what it opens and still reads each stage (SP-1
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   const show = app.slice(app.indexOf('function showPipeline'), app.indexOf('function showPipeline') + 600);
   assert.match(show, /pod\.setAttribute\('aria-label', pipelinePodLabel\(pipelineState, clockTime\)\);/);
+});
+
+// ── SP-218: the header's health line when a lane keeps failing ───────────────
+test('the header says each failing stage in one plain line with when it began, and nothing when every stage passes (SP-218)', () => {
+  const timeOf = (iso) => `[${iso.slice(11, 16)}]`;
+  const stage = (name, extra = {}) => ({ name, logged: true, running: false, failing: false, failedPasses: 0, failingSince: null, failingReason: null, ...extra });
+  const answer = { stages: [
+    stage('Relay', { failing: true, failedPasses: 3, failingSince: '2026-11-11T04:00:00.000Z', failingReason: "can't reach the internet" }),
+    stage('Build', { failedPasses: 2 }),
+    stage('Review', { failing: true, failedPasses: 5, failingSince: '2026-11-10T21:30:00.000Z', failingReason: 'keeps failing' }),
+    stage('Intake'),
+  ] };
+  assert.deepEqual(healthLines(answer, timeOf), [
+    "Relay can't reach the internet since [04:00]",
+    'Review keeps failing since [21:30]',
+  ]);
+  assert.equal(renderHealth(answer, timeOf), "<span>Relay can&#39;t reach the internet since [04:00]</span><span>Review keeps failing since [21:30]</span>");
+  // Two failures in a row, or the first passing pass after them: no line.
+  assert.deepEqual(healthLines({ stages: [stage('Relay', { failedPasses: 2 }), stage('Build')] }, timeOf), []);
+  assert.equal(renderHealth({ stages: [stage('Relay')] }, timeOf), '');
+  for (const failed of [null, undefined, {}, { stages: [] }, { error: 'no-pipeline' }]) assert.deepEqual(healthLines(failed, timeOf), []);
+  // A reason missing from the answer says "keeps failing"; names are escaped like every other text.
+  assert.deepEqual(healthLines({ stages: [stage('Relay', { failing: true, failingSince: null })] }, timeOf), ['Relay keeps failing']);
+  assert.doesNotMatch(renderHealth({ stages: [stage('<b>x', { failing: true })] }, timeOf), /<b>x/);
+});
+
+test('every page carries the health line in its header, in the bell\'s warning yellow on the black header, hidden until a stage is failing (SP-218)', () => {
+  const html = readFileSync(WEB('index.html'), 'utf8');
+  const header = html.slice(html.indexOf('<header>'), html.indexOf('</header>'));
+  assert.match(header, /<span id="health" class="health" role="status" hidden><\/span>\s*<span class="me">/);
+  const css = readFileSync(WEB('app.css'), 'utf8');
+  const rule = (selector) => {
+    const at = css.indexOf(`${selector} {`);
+    assert.notEqual(at, -1, `app.css has a ${selector} rule`);
+    return css.slice(at, css.indexOf('}', at));
+  };
+  const yellow = rule('header .health').match(/color: (#[0-9a-fA-F]{6});/)[1];
+  assert.equal(yellow, css.match(/header #bell\[data-colour="yellow"\] \{ color: (#[0-9a-fA-F]{6}); \}/)[1], 'the same warning colour as the bell');
+  assert.ok(contrast(yellow, '#000000') >= 4.5, 'it reads on the black header');
+  assert.match(rule('header .health[hidden]'), /display: none;/);
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  // Read on every page while signed in, not only where the pod is, on the pod's own timer.
+  const refresh = app.slice(app.indexOf('async function refreshPipeline'), app.indexOf('/** The header\'s health lines from the last answer'));
+  assert.match(refresh, /if \(!me\) return;/);
+  assert.doesNotMatch(refresh, /querySelector\('\.pipeline-pod'\)/);
+  assert.match(app, /setInterval\(refreshPipeline, PIPELINE_REFRESH_EVERY_MS\);/);
+  const show = app.slice(app.indexOf('function showPipeline'), app.indexOf('function showPipeline') + 300);
+  assert.match(show, /^function showPipeline\(read = false\) \{\n\s+showHealth\(\);/);
+  assert.match(app, /function showHealth\(\) \{\n\s+const lines = me \? healthLines\(pipelineState, sinceTime\) : \[\];\n\s+health\.hidden = !lines\.length;/);
+  const route = app.slice(app.indexOf('async function route('), app.indexOf('async function route(') + 1500);
+  assert.match(route, /if \(pipelineState\) showHealth\(\);\n\s+else refreshPipeline\(\);/);
+  // Signed out, it goes with the bell.
+  assert.equal((app.match(/bell\.hidden = true;\n\s+busCount\.hidden = true;\n\s+health\.hidden = true;/g) || []).length, 2);
 });
 
 // ── SP-170: the Files Made box, drawn from the relay's merge note (SP-166) ───

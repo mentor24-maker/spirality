@@ -21,10 +21,11 @@ import busFallback from '../lib/busFallback.js';
 import { compareWithinStatus } from '../scripts/lib/loopStatuses.mjs';
 import { searchPattern } from './web/render.mjs';
 import { GROUPS, MODELS, DEFAULT_MODEL } from './pipelineControls.mjs';
+import { STAGES } from './pipeline.mjs';
 
 const { OPERATOR_LANE, WAITING, CANNOT_TELL, waitingVerdict, operatorSpokeLast } = waitingOnOperator;
 const { isMachineComment, stripMachineMarker } = machineComment;
-const { STAGE_ORDER, LIVE, QUEUED, REWORK, OPERATOR_HELD_STATUSES, TERMINAL_STATUSES, DISPLAY, PRIORITY_RANK, statusOf } = loopStatuses;
+const { STAGE_ORDER, LIVE, QUEUED, BUILDING, REWORK, OPERATOR_HELD_STATUSES, TERMINAL_STATUSES, DISPLAY, PRIORITY_RANK, statusOf } = loopStatuses;
 const { findPullRequest } = mergeOnComment;
 const { findHumanHours } = humanHours;
 const { isTeamChatTask } = busFallback;
@@ -300,6 +301,131 @@ export function boardOf(store, slug, { viewerId = null } = {}) {
 }
 
 /**
+ * Which loop lane acts next on a ticket in each in-flight status, by its
+ * name in tracker/pipeline.mjs's STAGES. A status not named
+ * here is either Building (a build pass has it now) or one of the
+ * operator's two (OPERATOR_LANE: it waits on him, no lane is due).
+ */
+const NEXT_LANE = new Map([
+  [statusOf('Requested'), 'Intake'],
+  [statusOf('Queued'), 'Build'],
+  [statusOf('Rework'), 'Build'],
+  [statusOf('In review'), 'Review'],
+]);
+const BUILDING_LANE = 'Build';
+
+/** A lane by its name in STAGES: `{ lane, job }`. */
+function laneOf(name) {
+  const stage = STAGES.find((s) => s.name === name);
+  return { lane: stage.name, job: stage.job };
+}
+
+/**
+ * When a ticket entered its present status: the newest event in its
+ * history that set its status (or filed it) to that status. Its last change
+ * (`updatedAt`) when the history records no such step.
+ */
+function stageSinceOf(store, ticket) {
+  let at = null;
+  for (const e of store.listEvents(ticket.id)) {
+    if ((e.field === 'status' || e.field === 'created') && e.to === ticket.status) at = e.at;
+  }
+  return at ?? ticket.updatedAt;
+}
+
+/**
+ * A ticket's next change, from the Pipeline Status answer for the project
+ * whose loop logs this tracker reads (`lanes`, keyed by job, or null for
+ * any other project or when the logs cannot be read):
+ *  - Building: `{ kind: 'running', lane, job }`, a build pass has it now;
+ *  - the operator's two statuses: `{ kind: 'operator' }`, no lane is due;
+ *  - Requested, Queued, Rework, In review: `{ kind: 'lane', lane, job,
+ *    running, due }`, the lane that acts on it, whether a pass of it runs
+ *    now, and when its next pass is due (ISO, null while one runs);
+ *  - null when that lane's time cannot be read (no logs for this project,
+ *    a lane with no pass logged, or one idle with no next time), never a guess.
+ */
+function nextChangeOf(status, lanes) {
+  if (OPERATOR_LANE.includes(status)) return { kind: 'operator' };
+  if (status === BUILDING) return { kind: 'running', ...laneOf(BUILDING_LANE) };
+  if (!NEXT_LANE.has(status) || !lanes) return null;
+  const { lane, job } = laneOf(NEXT_LANE.get(status));
+  const stage = lanes.get(job);
+  if (!stage || !stage.logged) return null;
+  if (stage.running) return { kind: 'lane', lane, job, running: true, due: null };
+  if (!stage.nextDue) return null;
+  return { kind: 'lane', lane, job, running: false, due: stage.nextDue };
+}
+
+/**
+ * The Console view's answer (SP-221): every ticket in flight (any status but
+ * Live) on every project `only` lets through (visibleProjects), with the
+ * facts a Console tile shows, so the page works nothing out itself.
+ *
+ * `{ projects: [{ slug, name, prefix, logo }], tickets: [{ id, project,
+ * name, status, tags, priority, assignee, updatedAt, stageSince,
+ * waitingOnOperator, answerIn, pullRequest, nextChange }] }`. Tickets go
+ * in the contract's STAGE_ORDER, then `queue` order within a status (as
+ * boardOf). `status` is the contract's own spelling; `assignee` is by name;
+ * `waitingOnOperator` is the loop's own verdict (waitingVerdict) for the
+ * ticket's project operator, the same rule his Waiting on You page lists by;
+ * `answerIn` says his answer is in (answerIsIn); `pullRequest` is the merge
+ * step's own answer (findPullRequest), or null.
+ *
+ * `pipeline` is `{ slug, stages }`: GET /pipeline's answer (pipelineOf) and
+ * the project whose logs it read. Only that project's tickets get a lane's
+ * time (nextChangeOf); null, or another project, gets none.
+ */
+export function consoleOf(store, { only = null, pipeline = null } = {}) {
+  const projects = visibleProjects(store, only);
+  const lanes = pipeline?.stages ? new Map(pipeline.stages.map((s) => [s.job, s])) : null;
+  const rank = new Map(STAGE_ORDER.map((name, i) => [statusOf(name), i]));
+  const spelled = new Map(STAGE_ORDER.map((name) => [statusOf(name), name]));
+  const queueShape = (t) => ({
+    priority: t.priority ? { priority: t.priority } : null,
+    date_created: String(Date.parse(t.createdAt)),
+  });
+  const names = new Map();
+  const nameOf = (id) => {
+    if (id == null) return null;
+    if (!names.has(id)) names.set(id, store.getActor(id)?.name ?? `actor ${id}`);
+    return names.get(id);
+  };
+  const rows = [];
+  for (const project of projects) {
+    const projectLanes = pipeline && project.slug === pipeline.slug ? lanes : null;
+    for (const t of store.listTickets(project.slug)) {
+      if (TERMINAL_STATUSES.includes(t.status) || !rank.has(t.status)) continue;
+      const comments = store.listComments(t.id);
+      rows.push({
+        ticket: t,
+        out: {
+          id: t.id,
+          project: project.slug,
+          name: t.name,
+          status: spelled.get(t.status),
+          tags: t.tags,
+          priority: t.priority,
+          assignee: nameOf(t.assignee),
+          updatedAt: t.updatedAt,
+          stageSince: stageSinceOf(store, t),
+          waitingOnOperator: waitsOn(t, comments, project.operator),
+          answerIn: answerIsIn(t, comments, project.operator),
+          pullRequest: findPullRequest(trailComments(store, t.id))?.url ?? null,
+          nextChange: nextChangeOf(t.status, projectLanes),
+        },
+      });
+    }
+  }
+  rows.sort((a, b) => (rank.get(a.ticket.status) - rank.get(b.ticket.status))
+    || compareWithinStatus(queueShape(a.ticket), queueShape(b.ticket)));
+  return {
+    projects: projects.map((p) => ({ slug: p.slug, name: p.name, prefix: p.prefix, logo: p.logo ?? null })),
+    tickets: rows.map((r) => r.out),
+  };
+}
+
+/**
  * The Settings page's stage colours: the eight statuses in the contract's
  * STAGE_ORDER, each with its `#rrggbb` colour, or null when it has none.
  * The page lists exactly these, so it never types the stages out itself.
@@ -398,6 +524,108 @@ function flowOf(steps, doneAt) {
   };
 }
 
+/**
+ * The four buckets a ticket's time goes into (SP-220), in the order the
+ * Reporting page lists them: a loop working on it (Building), waiting for
+ * the next lane to wake, waiting on the operator, and broken (a lane's
+ * failure note sits on it).
+ */
+export const TIME_BUCKETS = Object.freeze(['working', 'lane', 'operator', 'broken']);
+
+/**
+ * A lane's failure note: a line that starts `FAILED:`, `<lane> FAILED:` or
+ * `<lane> GAVE UP:` (an optional `**` in front, for one written in bold).
+ * Line-anchored on purpose: a note that mentions "FAILED:" mid-sentence is
+ * talking about a failure, not reporting one.
+ */
+const FAILURE_NOTE = /^[ \t]*(?:\*\*)?(?:FAILED:|[a-z][\w-]* (?:FAILED|GAVE UP):)/m;
+
+/** Does this text carry a lane's failure note? */
+export function isFailureNote(text) {
+  return FAILURE_NOTE.test(String(text ?? ''));
+}
+
+/**
+ * Cut one ticket's life into stretches and put each in exactly one of the
+ * TIME_BUCKETS, by these rules, in order:
+ *  1. broken: from a machine comment carrying a failure note until the next
+ *     status change or the next comment from the operator, whichever first;
+ *  2. operator: in Needs your input or Ready to launch while the newest
+ *     comment is not the operator's own (the contract's "Is this waiting on
+ *     Dane?" rule, operatorSpokeLast);
+ *  3. working: in Building;
+ *  4. lane: every other stage but Live (Requested, Queued, Rework, In
+ *     review, and the operator's two once his reply is the newest word).
+ * Live time is not counted; an open ticket counts up to `now`.
+ *
+ * `steps` are the ticket's [ms, status] steps oldest first (statusSteps);
+ * `comments` are `{ at, byMachine, byOperator }`, `at` in ms, and
+ * `failure` when it is a machine's failure note. Answers the stretches as
+ * `{ from, to, bucket }`, oldest first, touching end to end; none before the
+ * ticket's first step.
+ */
+export function timeSplitOf(steps, comments, { now }) {
+  if (!steps.length) return [];
+  const events = [
+    ...steps.map(([at, status]) => ({ at, status })),
+    ...comments.filter((c) => Number.isFinite(c.at)).map((c) => ({ at: c.at, comment: c })),
+  ].filter((e) => e.at <= now);
+  // Same moment: the status change first, so a failure note written with a move counts from it.
+  const rank = (e) => (e.status !== undefined ? 0 : 1);
+  events.sort((a, b) => a.at - b.at || rank(a) - rank(b));
+  const stretches = [];
+  let status = null;
+  let broken = false;
+  let operatorLast = false;
+  const bucketNow = () => {
+    if (status == null || status === LIVE) return null;
+    if (broken) return 'broken';
+    if (OPERATOR_HELD_STATUSES.includes(status) && !operatorLast) return 'operator';
+    if (status === BUILDING) return 'working';
+    return 'lane';
+  };
+  let from = null;
+  let bucket = null;
+  const close = (at) => {
+    if (bucket != null && at > from) {
+      const last = stretches[stretches.length - 1];
+      if (last && last.bucket === bucket && last.to === from) last.to = at;
+      else stretches.push({ from, to: at, bucket });
+    }
+    from = at;
+    bucket = bucketNow();
+  };
+  for (const e of events) {
+    close(e.at);
+    if (e.status !== undefined) {
+      status = e.status;
+      broken = false;
+    } else {
+      const c = e.comment;
+      operatorLast = Boolean(c.byOperator);
+      if (c.byOperator) broken = false;
+      else if (c.byMachine && c.failure) broken = true;
+    }
+    bucket = bucketNow();
+  }
+  close(now);
+  return stretches;
+}
+
+/** How many ms of `stretches` fall in each bucket between `start` (or the beginning, null) and `end`. */
+function bucketTotals(stretches, start, end) {
+  const totals = Object.fromEntries(TIME_BUCKETS.map((b) => [b, 0]));
+  for (const s of stretches) {
+    const from = start == null ? s.from : Math.max(s.from, start);
+    const to = Math.min(s.to, end);
+    if (to > from) totals[s.bucket] += to - from;
+  }
+  return totals;
+}
+
+/** How many tickets the Where the Time Goes section lists per range, most time first. */
+export const TIME_SPLIT_TICKETS = 10;
+
 /** The middle of a list of numbers (the mean of the middle two when even); null when empty. */
 function median(values) {
   if (!values.length) return null;
@@ -464,7 +692,13 @@ function humanHoursFigures(estimates, days) {
  *    comment's) of the tickets finished in it added up, how many had one
  *    and how many did not, and the total per day of the range; all time
  *    runs from the first ticket filed in scope, at least one day;
- *  - waitingNow: how many tickets sit in the operator's stages now.
+ *  - waitingNow: how many tickets sit in the operator's stages now;
+ *  - timeSplit: per range, where every ticket's time in it went (open ones
+ *    too, timeSplitOf), as `total` ms and, per TIME_BUCKETS bucket, its `ms`
+ *    and `share` of the total (null when the total is 0), and `tickets`: the
+ *    TIME_SPLIT_TICKETS with the most time in the range, each with its id,
+ *    exact name, project, `total` and its ms per bucket. A stretch that
+ *    starts before the range counts only its part inside it.
  * A range counts what happened in the last `days` days before `now`.
  * Null when `project` names no project. `only` narrows "every project" to
  * the ones the reader may see (visibleProjects), and a `project` outside it
@@ -494,8 +728,29 @@ export function reportsOf(store, { project = null, now = Date.now(), only = null
   const colours = store.stageColours();
   const openStages = STAGE_ORDER.filter((name) => !TERMINAL_STATUSES.includes(statusOf(name)));
   const open = new Map(openStages.map((name) => [statusOf(name), 0]));
+  const split = Object.fromEntries(REPORT_RANGES.map((r) => [r.key, []]));
+  const machineActor = new Map();
+  const isMachineActor = (id) => {
+    if (!machineActor.has(id)) machineActor.set(id, store.getActor(id)?.kind === 'machine');
+    return machineActor.get(id);
+  };
   for (const p of projects) {
     for (const ticket of store.listTickets(p.slug)) {
+      const comments = store.listComments(ticket.id).map((c) => {
+        const byMachine = isMachineActor(c.author) || isMachineComment(c.body);
+        return {
+          at: Date.parse(c.createdAt),
+          byMachine,
+          byOperator: p.operator != null && c.author === p.operator && !byMachine,
+          failure: byMachine && isFailureNote(c.body),
+        };
+      });
+      const stretches = timeSplitOf(statusSteps(store, ticket), comments, { now });
+      for (const r of REPORT_RANGES) {
+        const totals = bucketTotals(stretches, r.days == null ? null : now - r.days * DAY_MS, now);
+        const total = TIME_BUCKETS.reduce((n, b) => n + totals[b], 0);
+        if (total > 0) split[r.key].push({ id: ticket.id, name: ticket.name, project: p.slug, total, ...totals });
+      }
       tally(started, ticket.createdAt);
       const filed = Date.parse(ticket.createdAt);
       if (!Number.isNaN(filed) && (firstFiled == null || filed < firstFiled)) firstFiled = filed;
@@ -530,6 +785,18 @@ export function reportsOf(store, { project = null, now = Date.now(), only = null
       return [r.key, humanHoursFigures(estimates[r.key], days)];
     })),
     waitingNow,
+    timeSplit: Object.fromEntries(REPORT_RANGES.map((r) => {
+      const rows = split[r.key];
+      const total = rows.reduce((n, t) => n + t.total, 0);
+      const buckets = Object.fromEntries(TIME_BUCKETS.map((b) => {
+        const ms = rows.reduce((n, t) => n + t[b], 0);
+        return [b, { ms, share: total > 0 ? ms / total : null }];
+      }));
+      const tickets = rows.slice()
+        .sort((a, b) => b.total - a.total || a.id.localeCompare(b.id, undefined, { numeric: true }))
+        .slice(0, TIME_SPLIT_TICKETS);
+      return [r.key, { total, buckets, tickets }];
+    })),
   };
 }
 
