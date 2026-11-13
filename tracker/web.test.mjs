@@ -47,7 +47,7 @@ async function fixture({ mergePhrase, closePhrase, goPhrase } = {}) {
     const project = join(dir, slug);
     mkdirSync(project, { recursive: true });
     writeFileSync(join(project, 'spirality.project.json'), JSON.stringify({
-      manifestVersion: 1, workspaceId: '111', spaceId: '222', loopQueueListId: '333',
+      manifestVersion: 2, workspaceId: '111', spaceId: '222', loopQueueListId: '333',
       operatorUserId: seed.operator.id, machineUserId: seed.loop.id,
       githubRepo: 'owner/repo', dopplerProject: 'proj', dopplerConfig: 'dev',
       launchdPrefix: 'com.example', logDir: '~/loop-logs', mergePhrases: ['merge'],

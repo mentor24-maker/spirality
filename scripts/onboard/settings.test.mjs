@@ -8,7 +8,7 @@ import { seatsForConfig } from '../../tracker/signins.mjs';
 import { buildSeatName, loadHome, readActors, runFill, runWrite, writeAndReadBack } from './settings.mjs';
 
 const homeConfig = validateProjectConfig({
-  manifestVersion: 1, workspaceId: '90141423066', spaceId: '90146476540', loopQueueListId: '901418065068',
+  manifestVersion: 2, workspaceId: '90141423066', spaceId: '90146476540', loopQueueListId: '901418065068',
   operatorUserId: '1', machineUserId: '2', githubRepo: 'mentor24-maker/spirality',
   dopplerProject: 'spirality', dopplerConfig: 'dev', launchdPrefix: 'com.spirality', logDir: '~/loop-logs',
   mergePhrases: ['merge', 'merge it', 'ship it', 'approve'],
