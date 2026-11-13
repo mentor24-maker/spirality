@@ -233,6 +233,8 @@ table.controls td.save .note:not(:empty) { display: block; margin-top: 0.25rem; 
 table.controls input[type="number"] { width: 7rem; }
 section.pipeline-controls .default { color: var(--quiet); font-size: 0.75rem; border: var(--hairline); border-radius: 4px; padding: 0 0.3rem; margin-left: 0.4rem; }
 section.pipeline-controls p.not-yet { margin-top: 0.25rem; font-size: 0.85rem; }
+section.pipeline-controls .release-group p { margin: 0.25rem 0; }
+section.pipeline-controls .release-actions { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin: 0.5rem 0; }
 table.control-changes { max-width: 48rem; font-size: 0.9rem; }
 button.action { display: inline-flex; padding: 0.2rem; margin-right: 0.15rem; border: 0; border-radius: 4px; background: transparent; color: var(--quiet); cursor: pointer; }
 button.action:hover { color: var(--red); background: #fbe9e9; }

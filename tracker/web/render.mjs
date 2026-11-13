@@ -545,9 +545,52 @@ export function renderPipelineControls(view, notes = {}) {
     <h3>${escapeHtml(view.project.name)}</h3>
     ${lockedLine}
     ${(view.groups ?? []).map(group).join('')}
+    ${view.release ? renderReleaseGroup(view.release, notes.release) : ''}
     <h4>Change Log</h4>
     ${log}
   </section>`;
+}
+
+/**
+ * One project's release group on the Settings page (SP-275), from
+ * the `release` part of GET /pipeline-controls: the release it runs, when
+ * and who named it, and the one before it; a Move to Newest button (names
+ * the newest release cut) and a Roll Back button (names the earlier one
+ * again), for the operator only. The tracker's home project shows its
+ * `ownLine` and no buttons. A project with no release named shows
+ * "No release named yet" and only Move to Newest. Under it, the line saying
+ * the lanes do not run from it yet, naming the ticket that wires it in.
+ * `note` is `{ ok, text }`, a button's outcome.
+ */
+export function renderReleaseGroup(r, note = null) {
+  const notYet = `<p class="quiet not-yet">Named, but the lanes do not run from it yet (${escapeHtml(r.wiredBy)}).</p>`;
+  const head = `<h4>${escapeHtml(r.title)}</h4>`;
+  if (r.own) return `<div class="release-group">${head}<p class="release-own">${escapeHtml(r.ownLine)}</p></div>`;
+  const when = (e) => `${escapeHtml(e.release)}</strong>, named ${escapeHtml(mountainTime(e.at))} by ${escapeHtml(e.actorName)}`;
+  const lines = [];
+  if (!r.known) lines.push('<p class="quiet">This tracker cannot tell which project is its home (its project config was not usable when it started), so no release can be named here.</p>');
+  lines.push(r.current
+    ? `<p class="release-current">Runs <strong>${when(r.current)}.</p>`
+    : '<p class="release-current">No release named yet.</p>');
+  if (r.previous) lines.push(`<p class="release-previous quiet">Before that: <strong>${when(r.previous)}.</p>`);
+  const newestLine = r.newestProblem
+    ? `The newest release could not be read: ${escapeHtml(r.newestProblem)}`
+    : r.newest ? `The newest release is <strong>${escapeHtml(r.newest)}</strong>.` : 'No release has been cut yet.';
+  lines.push(`<p class="release-newest quiet">${newestLine}</p>`);
+  let buttons = '';
+  if (r.canChange) {
+    const upToDate = r.newest != null && r.current?.release === r.newest;
+    const canMove = r.newest != null && !upToDate;
+    const move = `<button type="button" data-release-action="newest"${canMove ? '' : ' disabled'}>Move to Newest</button>`;
+    const back = r.current
+      ? (r.rollBackTo
+        ? `<button type="button" data-release-action="back">Roll Back to ${escapeHtml(r.rollBackTo)}</button>`
+        : '<span class="quiet">No earlier release to roll back to.</span>')
+      : '';
+    const why = upToDate ? '<span class="quiet">It runs the newest release.</span>' : '';
+    buttons = `<div class="row release-actions">${move}${back}${why}<span class="note${note ? (note.ok ? ' quiet' : ' error') : ''}">${note ? escapeHtml(note.text) : ''}</span></div>`;
+  }
+  return `<div class="release-group">${head}${lines.join('')}${buttons}${notYet}</div>`;
 }
 
 const CONTEXT_HEADING = "WHAT'S GOING ON";
