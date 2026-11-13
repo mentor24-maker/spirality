@@ -11,4 +11,4 @@ The relay's merges always come first. The checks get their own slice of the
 pass's time (at most three of its eight minutes), so a check that hangs is
 stopped, and the log says so; it can never hold up a merge. A check pass that
 fails makes the relay's log say a step failed, never "pass complete", and the
-Settings status command shows the last thing the checks said.
+lanes' status report (`scripts/install_loop_runner.sh --status`) shows the last thing the checks said.
