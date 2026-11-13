@@ -104,6 +104,10 @@ status_one() {
     if [ "$job" = "$RELAY" ]; then
       echo "last pass: $(grep -E "START relay" "$log" | tail -1 | sed 's/=//g' | xargs || echo '(none yet)')"
       echo "last end:  $(grep -E "END relay" "$log" | tail -1 | sed 's/=//g' | xargs || echo '(none yet)')"
+      # The newest line of the application checks the relay runs after its
+      # own pass (SP-274), so Dane can see when they last ran and what said.
+      local checks; checks="$(grep -E '^app-checks:' "$log" | tail -1 | sed 's/^app-checks: *//')"
+      echo "app-checks: ${checks:-(none yet)}"
     else
       echo "last pass: $(grep -E "START /$job" "$log" | tail -1 | sed 's/=//g' | xargs || echo '(none yet)')"
     fi

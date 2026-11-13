@@ -90,8 +90,20 @@ tracker project).
 **The runner** is `npm run app-checks` (`scripts/app_checks.mjs`, decisions
 in `lib/appChecks.js`). It runs the checks that are due, without the
 tracker's sign-in in their environment, and posts through `bus-post`, read
-back. `--dry-run` prints what it would post and writes nothing. Until SP-274
-puts it on every relay pass, it runs by hand.
+back. `--dry-run` prints what it would post and writes nothing.
+
+**When it runs:** on every relay pass, every 10 minutes (SP-274,
+`scripts/run_relay.sh` with `scripts/lib/relay_app_checks.sh`), after the
+relay's own pass and signed in as the relay; each check's `everyMinutes`
+still decides whether it actually runs. The relay's 480 seconds are shared:
+the check step gets at most 180 of them (`RELAY_APP_CHECKS_LIMIT_SECONDS`)
+and the relay part the rest, so a check that hangs is stopped and said so in
+the log, and can never hold up a merge. A check whose own `timeoutSeconds`
+is longer than that share is cut short at it. A project that lists no checks
+logs `app-checks: none listed`. A check pass that fails makes the relay's END
+line read `A STEP FAILED AND SAID SO ABOVE`, never `pass complete`; the relay
+part's merges and hand-backs in that pass stand. `scripts/install_loop_runner.sh
+--status` shows the newest `app-checks:` line from the relay log.
 
 **The post rules**, by what the check said last time and this time:
 
@@ -196,8 +208,8 @@ is a ticket in that project's own queue, filed once Spirality's side is Live:
    pause into the lanes.
 3. Let a project list application checks in its manifest for Spirality to run
    and post to its bus.
-   Slice 1 done (SP-264): the `applicationChecks` field and
-   `npm run app-checks`, run by hand. SP-274 runs it on every relay pass.
+   Done: SP-264 added the `applicationChecks` field and
+   `npm run app-checks`; SP-274 runs it on every relay pass.
 4. Move the pipeline watchdogs into Spirality for every project (SP-260,
    filed 2026-11-12, which also sorts StarCaster's watchdogs into pipeline
    watchdogs and application checks).

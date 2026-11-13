@@ -2,7 +2,8 @@
 #
 # What the relay schedule (every 10 minutes) actually runs: bring the main
 # checkout up to date, then one `relay` pass of the door (`npm run clickup`,
-# which talks to the tracker the project config names).
+# which talks to the tracker the project config names), then one pass of the
+# project's application checks (`npm run app-checks`, SP-274).
 #
 #   ./scripts/run_relay.sh            # one pass, output to stdout
 #   ./scripts/run_relay.sh --dry-run  # one pass that prints and writes nothing
@@ -44,6 +45,13 @@ SYNC_LOCK="$LOG_DIR/$SLUG-sync.lock"
 # A pass must finish inside the schedule's own interval (600s), with room to
 # spare, or two passes could overlap and both decide the same ticket.
 PASS_LIMIT="${RELAY_PASS_LIMIT_SECONDS:-480}"
+# The application checks' share of it (SP-274): the relay part gets the rest.
+CHECKS_SHARE="${RELAY_APP_CHECKS_LIMIT_SECONDS:-180}"
+if ! [[ "$PASS_LIMIT" =~ ^[0-9]+$ && "$CHECKS_SHARE" =~ ^[0-9]+$ ]] || [ "$CHECKS_SHARE" -ge "$PASS_LIMIT" ]; then
+  echo "[relay] the time limits are not usable (pass ${PASS_LIMIT}s, application checks ${CHECKS_SHARE}s): both whole seconds, the checks' share less than the pass's." >&2
+  exit 2
+fi
+RELAY_LIMIT=$((PASS_LIMIT - CHECKS_SHARE))
 
 echo ""
 echo "===== $(date '+%Y-%m-%d %H:%M:%S') START relay — $REPO ====="
@@ -84,6 +92,9 @@ source "$REPO/scripts/lib/back_to_main.sh"
 # A pull that changes a file the tracker server loads restarts it, so it runs the new code (SP-150).
 # shellcheck source=lib/tracker_restart.sh
 source "$REPO/scripts/lib/tracker_restart.sh"
+# After the relay part, one application-checks pass (SP-274).
+# shellcheck source=lib/relay_app_checks.sh
+source "$REPO/scripts/lib/relay_app_checks.sh"
 # Where main was before this pass synced: noted before the back-to-main step,
 # which can fast-forward main itself (SP-150).
 BEFORE="$(git rev-parse HEAD 2>/dev/null)"
@@ -118,18 +129,25 @@ fi
 # On the tracker, the relay signs in as itself: TRACKER_TOKEN_NAME names its
 # own Doppler secret (never the value), which the door reads.
 export TRACKER_TOKEN_NAME=TRACKER_TOKEN_RELAY
-"$REPO/scripts/run_with_time_limit.sh" "$PASS_LIMIT" -- \
+PASS_START=$(date +%s)
+"$REPO/scripts/run_with_time_limit.sh" "$RELAY_LIMIT" -- \
   npm run --silent clickup -- relay "$@"
 status=$?
 
-# The exit code is the pass's own verdict, and it says so in words:
-#   0   the pass finished and every write read back
-#   1   at least one step failed and said which (read the UNCHECKED lines above)
-#   124 the pass hit its time limit and was stopped
-case "$status" in
-  0)   echo "===== $(date '+%Y-%m-%d %H:%M:%S') END relay — pass complete (exit 0) =====" ;;
-  1)   echo "===== $(date '+%Y-%m-%d %H:%M:%S') END relay — A STEP FAILED AND SAID SO ABOVE (exit 1) =====" ;;
-  124) echo "===== $(date '+%Y-%m-%d %H:%M:%S') END relay — hit the ${PASS_LIMIT}s time limit and was stopped (exit 124); its tickets are untouched or marked, never half-moved silently =====" ;;
-  *)   echo "===== $(date '+%Y-%m-%d %H:%M:%S') END relay — the pass could not run (exit $status) =====" ;;
-esac
-exit "$status"
+# Then the project's application checks (SP-274), signed in as the relay too,
+# with what is left of the pass's time. It runs whatever the relay part did,
+# and nothing it does can undo that part: the merges and hand-backs are done.
+CHECK_ARGS=()
+for arg in "$@"; do [ "$arg" = "--dry-run" ] && CHECK_ARGS+=(--dry-run); done
+CHECKS_LIMIT="$(relay_app_checks_budget "$PASS_LIMIT" "$CHECKS_SHARE" $(( $(date +%s) - PASS_START )))"
+run_relay_app_checks "$CHECKS_LIMIT" ${CHECK_ARGS[@]+"${CHECK_ARGS[@]}"}
+checks_status=$?
+
+# The exit code is the pass's own verdict, and the END line says it in words,
+# the relay part's first, then the checks':
+#   0   both finished and every write read back
+#   1   at least one step failed and said which (read the UNCHECKED and
+#       FAILED lines above); the relay part's own work stands
+#   124 the relay part hit its time limit and was stopped
+echo "===== $(date '+%Y-%m-%d %H:%M:%S') END relay — $(relay_end_words "$status" "$checks_status" "$RELAY_LIMIT" "$CHECKS_LIMIT") ====="
+exit "$(relay_pass_exit "$status" "$checks_status")"
