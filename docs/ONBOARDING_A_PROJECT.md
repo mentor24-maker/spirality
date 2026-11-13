@@ -368,6 +368,7 @@ post rules are in [PROJECT_MANIFEST.md](PROJECT_MANIFEST.md) and
   | `TRACKER_TOKEN_LOOP_INTAKE` | the intake loop's tracker sign-in |
   | `TRACKER_TOKEN_RELAY` | the relay's tracker sign-in |
   | `TRACKER_TOKEN_HAND_RUN` | a session started by hand |
+  | `TRACKER_TOKEN_APP` | the project's live website, for its bug reports and alarms (the operator pastes it into the website's host) |
   | `TRACKER_TOKEN_OPERATOR` | Dane's own sign-in, for the page |
   | `RESEND_API_KEY` | the key the tracker sends the hand-over email with |
   | `TRACKER_NOTIFY_TO` | Dane's address for that email |
