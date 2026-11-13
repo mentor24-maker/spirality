@@ -411,10 +411,6 @@
         {
           "find": "Every `CLAUDE.md` engineering rule kept (nothing\n     project-specific hard-coded, modules moved not rewritten, every ClickUp\n     write read back, a failed step says so)?",
           "replace": "Every `CLAUDE.md` loop rule kept (`main` never\n     changed unchecked, no secret in the repository or a log, every tracker\n     write read back, a failed step says so)?"
-        },
-        {
-          "find": "as SP-64's did)",
-          "replace": "as Spirality's SP-64 did)"
         }
       ]
     },

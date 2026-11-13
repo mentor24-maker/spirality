@@ -33,7 +33,7 @@ import { fileURLToPath } from 'node:url';
 import { homedir, hostname } from 'node:os';
 import { join as joinPath, basename, extname, resolve as resolvePath } from 'node:path';
 import {
-  DISPLAY, STAGE_ORDER, CLAIMABLE_BY_BUILD, OPERATOR_STATUSES, BUILDING, NEEDS_YOUR_INPUT, QUEUED, PRIORITY_VALUE,
+  DISPLAY, STAGE_ORDER, CLAIMABLE_BY_BUILD, OPERATOR_STATUSES, BUILDING, NEEDS_YOUR_INPUT, QUEUED, LIVE, PRIORITY_VALUE,
   isClaimableByBuild, isOperatorStatus, isReadyToLaunch, claimOrder, compareWithinStatus, statusOf, TERMINAL_STATUSES,
 } from './lib/loopStatuses.mjs';
 import {
@@ -72,7 +72,7 @@ import {
 } from '../lib/relayLane.js';
 import {
   conflictTicketName, conflictTicketBody, conflictTicketFiledComment, findConflictTicket, unstuckPullRequest,
-  stalledSummaryHeadline,
+  stalledSummaryHeadline, catchUpClosePlan, fixupLiveNote,
 } from '../lib/conflictWork.js';
 import {
   handbackDoneText, handbackFailureText, repliesShowHandbackDone, repliesShowHandbackFailure, HANDBACK_FAILURE_MARKER,
@@ -224,6 +224,11 @@ npm run clickup -- <command> [flags]      (Loop Queue: list ${LOOP_QUEUE_LIST}, 
   claim --task <id>                               safe claim: reads the status and guards the write on it
   status --task <id> --status S [--if-status S] [--assign <uid>] [--clear-assignees] [--no-auto-assign] [--no-card]
   ask --task <id> [--status "Needs your input"|"Ready to launch"] --body-file <f|-> [--no-move] [--after-his-answer]
+                                                  [--ask-anyway] [--ask-again]
+  fixup-live --task <id> [--if-status S]         a catch-up ticket ("Find out why PR #N ... will not merge") whose PR already
+                                                  merged: move it to Live with a note, never ask Dane (SP-288). Exit 0 moved /
+                                                  4 not one (its own PR, none named, or not merged): carry on / 3 moved meanwhile /
+                                                  1 a read or write failed
   pr-opened --task <id> --pr <url|number> [--repo owner/name] [--if-missing] [--human-hours <N>] [--body-file <f|->]
   verdict --task <id> --pass|--fail --if-status "In review" [--body-file <f|->] [--no-guard] [--fourth-round-anyway]
   priority --task <id> --priority urgent|high|normal|low [--operator-asked]
@@ -452,6 +457,84 @@ async function alreadyAnsweredRefused(task, status) {
     return 2;
   }
   return null;
+}
+
+/**
+ * A catch-up ticket and whether its work already landed (SP-288): the
+ * ticket, its comments, the PR it was filed to unstick and catchUpClosePlan's
+ * answer. GitHub is asked only when the answer turns on it.
+ */
+async function catchUpReading(task) {
+  const t = await readTask(task);
+  const comments = await readComments(task);
+  const ownPr = findPullRequest(comments);
+  const unstuck = ownPr ? null : unstuckPullRequest(t.markdown_description || t.description || '');
+  const status = t.status?.status ?? '';
+  let live = null;
+  let plan = catchUpClosePlan({ status, ownPr, unstuck, live });
+  if (plan.act === 'cannot-tell') {
+    live = { state: null, mergedAt: null };
+    if (`${unstuck.owner}/${unstuck.repo}`.toLowerCase() === String(project.githubRepo).toLowerCase()) {
+      const view = gh(['pr', 'view', String(unstuck.number), '--repo', project.githubRepo, '--json', 'state,mergedAt']);
+      if (view.ok) {
+        try {
+          const got = JSON.parse(view.stdout);
+          live = { state: String(got.state || '') || null, mergedAt: got.mergedAt || null };
+        } catch { /* non-JSON: left unread */ }
+      }
+    }
+    plan = catchUpClosePlan({ status, ownPr, unstuck, live });
+  }
+  return { t, comments, unstuck, live, plan };
+}
+
+/** A merge time from GitHub, in Mountain time, or '' when there is none. */
+function mergedAtText(iso) {
+  const ms = Date.parse(String(iso || ''));
+  return Number.isFinite(ms) ? `${clock(ms)} MT` : '';
+}
+
+/**
+ * `ask` must not hand Dane a catch-up ticket whose pull request already
+ * merged (SP-288): there is nothing for him to do, and `fixup-live` closes it.
+ * Returns the exit code, or null to carry on. A failed GitHub read carries on:
+ * the ask stands as it did before this guard.
+ */
+async function catchUpMergedRefused(task) {
+  if (flag('ask-anyway')) {
+    console.error('Asking although its pull request may already be merged (--ask-anyway). Recorded in this transcript.');
+    return null;
+  }
+  const r = await catchUpReading(task);
+  if (r.plan.act !== 'close') return null;
+  console.error(`\nREFUSED — ${task} is a catch-up ticket and ${r.plan.why}${r.live?.mergedAt ? ` (${mergedAtText(r.live.mergedAt)})` : ''}.`);
+  console.error('Its work is already live, so there is nothing to ask Dane. Close it yourself, with a note:');
+  console.error(`  npm run clickup -- fixup-live --task ${task} --if-status "${r.t.status?.status ?? ''}"`);
+  console.error('Nothing was posted and the status has NOT moved.');
+  return 2;
+}
+
+/**
+ * One question, one card (SP-288): a ticket already in that status of his,
+ * with a machine card he has not answered yet, has been asked. A second card
+ * posts the same question twice on his list.
+ */
+async function alreadyAskedRefused(task, status) {
+  if (flag('ask-again')) {
+    console.error('Posting a second card on an unanswered one (--ask-again). Recorded in this transcript.');
+    return null;
+  }
+  const t = await readTask(task);
+  if (statusOf(t.status?.status ?? '') !== statusOf(status)) return null;
+  const comments = await readComments(task);
+  const verdict = handbackAnswer({ comments, operatorId: OPERATOR_ID, isMachine: isMachineComment });
+  if (verdict.state !== 'none') return null;
+  console.error(`\nREFUSED — ${task} is already in "${t.status?.status}" with a card Dane has not answered yet, so he has been asked.`);
+  console.error('A second card puts the same question in front of him twice. To add something, post a plain note:');
+  console.error(`  npm run clickup -- comment --task ${task} --body-file -`);
+  console.error('If this really is a different question, say so on the record: ... --ask-again');
+  console.error('Nothing was posted and the status has NOT moved.');
+  return 2;
 }
 
 /** Exit 2, before any write, when `text` links a GitHub file by branch (SP-178). */
@@ -1378,6 +1461,8 @@ if (cmd === 'whoami') {
   // @@ASKED is exempt: it is his own words, fenced on the card.
   refuseBranchLinks([card.context, card.needed, card.evidence].join('\n'), 'Nothing was posted and the status has NOT moved.');
   if (!noMove) { const stop = await alreadyAnsweredRefused(task, status); if (stop !== null) process.exit(stop); }
+  if (!noMove) { const stop = await catchUpMergedRefused(task); if (stop !== null) process.exit(stop); }
+  if (!noMove) { const stop = await alreadyAskedRefused(task, status); if (stop !== null) process.exit(stop); }
   const { id: cardId, stored } = await postComment(task, { comment: commentBody });
   const lost = cardSurvived(card, stored.comment_text);
   if (lost) { console.error(`\n${lost}\nComment ${cardId} is on the task. The status has NOT been moved.`); process.exit(1); }
@@ -1390,6 +1475,34 @@ if (cmd === 'whoami') {
   if (!(moved.json.assignees || []).some((a) => a.id === OPERATOR_ID)) { console.error(`Card posted and status moved to "${now}", but Dane is NOT assigned — the handoff is incomplete.`); process.exit(1); }
   console.log(`Task ${task}: card ${cardId} posted, "${was}" -> "${now}", assigned: ${assigneeNames(moved.json)}.`);
   clearPassMarkerFor(task, now);
+  reportLimits();
+
+} else if (cmd === 'fixup-live') {
+  // A catch-up ticket whose PR already merged closes itself (SP-288): the
+  // pass that finds it moves it to Live with one note, and Dane is never asked.
+  const task = arg('task');
+  if (!task) usage();
+  const ifStatus = arg('if-status');
+  const r = await catchUpReading(task);
+  const was = r.t.status?.status ?? '?';
+  if (ifStatus && statusOf(was) !== statusOf(ifStatus)) {
+    console.error(`NOT moved: expected status "${ifStatus}" but the task is "${was}" — another loop or Dane got there first.`);
+    process.exit(3);
+  }
+  if (r.plan.act === 'cannot-tell') { console.error(`${task}: NOT moved — ${r.plan.why}. Try again, or carry on as before.`); process.exit(1); }
+  if (r.plan.act !== 'close') { console.log(`${task}: left as it is — ${r.plan.why}. Carry on as before.`); process.exit(4); }
+  const rem = (r.t.assignees || []).map((a) => a.id);
+  const out = await tracker.updateTask(task, { status: DISPLAY[LIVE], assignees: { add: [], rem } }, { ifStatus: was });
+  if (out.moved) { console.error(`NOT moved: the tracker refused the write — ${String(out.json?.err || 'the ticket moved').replace(/\.$/, '')}. Another loop or Dane got there first.`); process.exit(3); }
+  if (!out.res.ok) die('set status', out);
+  const back = await readTask(task);
+  const now = back.status?.status ?? '?';
+  if (statusOf(now) !== LIVE) { console.error(`Status did NOT stick: asked for "${DISPLAY[LIVE]}", the ticket reads back "${now}". No note was posted.`); process.exit(1); }
+  if ((back.assignees || []).length) { console.error(`Moved to "${now}", but assignees did NOT clear: ${assigneeNames(back)}.`); process.exit(1); }
+  clearPassMarkerFor(task, now);
+  const note = fixupLiveNote({ unstuck: r.unstuck, mergedAt: mergedAtText(r.live?.mergedAt), from: was });
+  const { id } = await postComment(task, { comment_text: note });
+  console.log(`Task ${task}: "${was}" -> "${now}" (read back), note ${id} posted (read back): ${r.plan.why}.`);
   reportLimits();
 
 } else if (cmd === 'relay') {
