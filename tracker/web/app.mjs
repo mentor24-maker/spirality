@@ -2084,8 +2084,8 @@ function spanOf(ms) {
 }
 
 /**
- * The Reporting page: how many tasks were finished and started in each of
- * the server's time ranges, and how many are open in each stage now, for the
+ * The Reporting page: how many tasks were started and finished in each of
+ * the server's time ranges (Task Productivity), and how many are open in each stage now, for the
  * selected project or for all of them, and how the finished ones flowed:
  * time to finish, how many were sent back, and time waiting on the
  * operator, and the human hours of work the finished ones add up to, by the
@@ -2146,9 +2146,9 @@ async function drawReporting(chosen) {
       <label for="report-project">Project</label>
       <select id="report-project"><option value="">All projects</option>${projects.map((p) => `<option value="${escapeHtml(p.slug)}"${p.slug === r.project ? ' selected' : ''}>${escapeHtml(p.name)}</option>`).join('')}</select>
     </form>
-    <h2>Tasks Finished and Started</h2>
-    <p class="quiet">Finished: moved to Live in that time and still Live. Started: filed in that time.</p>
-    <table class="counts report"><thead>${head}</thead><tbody>${line('Tasks finished', r.finished)}${line('Tasks started', r.started)}</tbody></table>
+    <h2>Task Productivity</h2>
+    <p class="quiet">Started: filed in that time. Finished: moved to Live in that time and still Live.</p>
+    <table class="counts report"><thead>${head}</thead><tbody>${line('Tasks started', r.started)}${line('Tasks finished', r.finished)}</tbody></table>
     <h2>Human Hours of Work Done</h2>
     <p class="quiet">For tasks finished in that time: the build loop's estimate, recorded on each pull request, of the hours an experienced programmer new to the code would take to do the same work. An estimate, not a measurement; tasks with none are left out of the total, and counted here.</p>
     <table class="counts report human-hours"><thead>${head}</thead><tbody>${hoursLine('Total', (h) => hoursOf(h.hours))}${estimatedLine}${hoursLine('Per day', (h) => `about ${Number(h.perDay)} human hour${Number(h.perDay) === 1 ? '' : 's'} a day`)}</tbody></table>

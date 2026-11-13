@@ -1276,7 +1276,8 @@ It prints one JSON object:
 
 The window is whole days in UTC, `--since` from midnight to the end of
 `--until`, as StarCaster's command read it. Shipped and filed are counted the
-way the Reporting page counts Finished and Started, so the figures match it
+way the Reporting page's Task Productivity table counts Tasks started and
+Tasks finished, so the figures match it
 for the same days (its "Last 7 Days" is the seven days up to the moment it is
 opened, so a window of whole days can differ by what moved at the edges). It
 writes nothing. A bad date exits 2 before anything is read; when the list or
