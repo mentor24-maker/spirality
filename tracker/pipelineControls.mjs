@@ -17,9 +17,10 @@
  *   model.<lane>   the model a lane's passes run on: `default` (Claude's
  *                  default, what the runner does today) or one of MODELS
  *
- * Nothing on the Mini reads them yet. Each group names the ticket that wires
- * it in (`wiredBy`); the Settings page says so under it, and that ticket
- * removes its own line.
+ * A group the lanes do not use yet names the ticket that wires it in
+ * (`wiredBy`); the Settings page says so under it, and that ticket sets its
+ * own to null. The pause switches are wired in (SP-237): a lane's runner
+ * asks them before every pass (scripts/pause_check.sh).
  */
 import { intervalOf } from '../scripts/lib/loopSchedule.mjs';
 import wipCap from '../lib/wipCap.js';
@@ -45,10 +46,10 @@ export const MODELS = Object.freeze([
 export const WAKE_RANGE = Object.freeze({ min: 60, max: 86400 });
 export const CAP_RANGE = Object.freeze({ min: 1, max: 50 });
 
-/** The groups the page shows, in order, each with the ticket that makes the lanes use it. */
+/** The groups the page shows, in order, each with the ticket that makes the lanes use it (null once they do). */
 export const GROUPS = Object.freeze([
   Object.freeze({ key: 'wake', title: 'Wake Times', wiredBy: 'SP-236' }),
-  Object.freeze({ key: 'pause', title: 'Pause and Resume', wiredBy: 'SP-237' }),
+  Object.freeze({ key: 'pause', title: 'Pause and Resume', wiredBy: null }),
   Object.freeze({ key: 'cap', title: 'Work-in-Progress Cap', wiredBy: 'SP-238' }),
   Object.freeze({ key: 'model', title: 'Model per Lane', wiredBy: 'SP-239' }),
 ]);

@@ -97,6 +97,8 @@ import {
 import { parseRepoFromRemoteUrl } from '../lib/branchCatchUp.js';
 // A ticket left in Building by a build pass that died (SP-101).
 import passClaim from '../lib/passClaim.js';
+import { settingsPauseVerdict } from '../lib/pipelinePause.js';
+import { LANES as PIPELINE_LANES } from '../tracker/pipelineControls.mjs';
 import {
   BUILD_SKILL, buildLockPath, lockState, writesMarker, seatGate, handbackDestination, leftoverWorktrees, markerBlocksClaim, handbackNote,
 } from '../lib/passHandback.js';
@@ -247,6 +249,8 @@ npm run clickup -- <command> [flags]      (Loop Queue: list ${LOOP_QUEUE_LIST}, 
   bus-read [--operator] [--since <time>]          the bus's comments, oldest first: time (ISO, UTC: feeds --since), ticket, operator|machine, author, first line
   settings                                        read-only: this project's pipeline controls (the Settings page), one
                                                   name=value line each, defaults included. Exit 1 saying why when they cannot be read
+  pause-check --lane <lane>                       read-only: may this lane start a pass? One line; exit 0 run, 3 paused (the Settings
+                                                  page's switches, SP-237). Settings that cannot be read count as paused (exit 3)
   release list                                    Spirality's releases: each project and the release it runs (tab-separated), Spirality's own
                                                   as "${OWN_PROJECT_RELEASE}", then the newest release. Exit 1 saying why on a failed read
   release name --project <slug> --to release-<n>  name the release a project runs, read back. Refused (exit 2) for a release with no tag
@@ -2320,6 +2324,31 @@ if (cmd === 'whoami') {
   const changed = out.json.controls.filter((c) => !c.isDefault).length;
   console.error(`settings: ${lines.length} pipeline control(s) for ${project.projectSlug}, ${changed} changed from the default.`);
   reportLimits();
+
+} else if (cmd === 'pause-check') {
+  // Asked by a lane's runner before every pass (scripts/pause_check.sh,
+  // SP-237): is the whole pipeline, or this lane, paused on the Settings
+  // page? One line on stdout, which the runner logs. It fails safe: a read
+  // that did not work is exit 3, paused, in words that say so; only a project
+  // whose tickets are not on the tracker (no controls exist) runs unasked.
+  const lane = arg('lane');
+  if (!PIPELINE_LANES.includes(lane)) {
+    console.error(`pause-check: refused — --lane must be one of ${PIPELINE_LANES.join(', ')}; got ${lane == null ? 'none' : `"${lane}"`}.`);
+    process.exit(2);
+  }
+  let read;
+  try {
+    const out = await tracker.pipelineSettings();
+    if (out.unsupported) read = { unsupported: true, why: out.json?.err };
+    else if (!out.res.ok) read = { ok: false, why: `HTTP ${out.res.status}${out.json?.err ? `: ${out.json.err}` : ''}` };
+    else read = { ok: true, controls: out.json.controls, changes: out.json.changes };
+  } catch (err) {
+    read = { ok: false, why: err.message };
+  }
+  const verdict = settingsPauseVerdict(read, lane);
+  console.log(verdict.line);
+  reportLimits();
+  process.exit(verdict.code);
 
 } else if (cmd === 'release') {
   // Spirality's releases (SP-265, docs/INTEGRATION.md "How a change reaches

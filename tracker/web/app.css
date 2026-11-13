@@ -90,6 +90,8 @@ button { font: inherit; padding: 0.4rem 1rem; }
 .toolbar .pipeline-pod .time { color: var(--ink); }
 .toolbar .pipeline-pod .running { color: #00AA00; }
 .toolbar .pipeline-pod .soon { color: #B8860B; }
+/* A stage paused on the Settings page (SP-237): quiet, never gold, since nothing is due. */
+.toolbar .pipeline-pod .time.paused { color: var(--quiet); font-style: italic; }
 .toolbar .pipeline-pod .unavailable { color: var(--quiet); }
 /* The Pipeline Status dialog (SP-173): the detail behind each stage's next time, opened from the pod. */
 dialog.pipeline-status { border: var(--hairline); border-radius: 8px; padding: 1rem 1.25rem; max-width: 95vw; color: var(--ink); }
@@ -233,6 +235,9 @@ table.controls td.save .note:not(:empty) { display: block; margin-top: 0.25rem; 
 table.controls input[type="number"] { width: 7rem; }
 section.pipeline-controls .default { color: var(--quiet); font-size: 0.75rem; border: var(--hairline); border-radius: 4px; padding: 0 0.3rem; margin-left: 0.4rem; }
 section.pipeline-controls p.not-yet { margin-top: 0.25rem; font-size: 0.85rem; }
+/* What a pause is waiting on (SP-237): "Draining" while tickets are still finishing. */
+section.pipeline-controls .drain { margin-top: 0.25rem; }
+section.pipeline-controls .drain.draining { color: #B8860B; }
 table.control-changes { max-width: 48rem; font-size: 0.9rem; }
 button.action { display: inline-flex; padding: 0.2rem; margin-right: 0.15rem; border: 0; border-radius: 4px; background: transparent; color: var(--quiet); cursor: pointer; }
 button.action:hover { color: var(--red); background: #fbe9e9; }

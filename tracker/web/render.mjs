@@ -338,6 +338,11 @@ export function lowerMeridiem(text) {
   return String(text).replace(/\b(AM|PM)\b/g, (m) => m.toLowerCase());
 }
 
+/** Why a stage is paused, in words: "the whole pipeline is paused", "Build is paused". */
+function pausedWords(s) {
+  return s.paused === 'pipeline' ? 'the whole pipeline is paused' : `${s.name} is paused`;
+}
+
 /** What the Pipeline Status pod says when GET /pipeline could not be read. */
 export const PIPELINE_UNAVAILABLE = 'Pipeline Status unavailable';
 
@@ -353,7 +358,10 @@ export const PIPELINE_UNAVAILABLE = 'Pipeline Status unavailable';
  * carry `running`, which app.css draws green. A stage whose next time is
  * less than PIPELINE_SOON_MS from `now` (or already past: a pass that is due)
  * carries `soon` instead, which app.css draws gold (SP-222); a running stage
- * is never `soon`. `now` is a time in milliseconds, given so a test can fix
+ * is never `soon`. A stage paused on the Settings page (`paused`, SP-237)
+ * shows "Paused" and carries `paused` instead of a next time, never `soon`;
+ * one still running its last pass shows "running", its title saying the
+ * pause lets it finish. `now` is a time in milliseconds, given so a test can fix
  * the clock. A missing or malformed answer says PIPELINE_UNAVAILABLE.
  */
 export function renderPipelinePod(answer, timeOf, now = Date.now()) {
@@ -365,7 +373,10 @@ export function renderPipelinePod(answer, timeOf, now = Date.now()) {
     let soon = false;
     if (s.running) {
       shown = 'running';
-      title = `${s.name}: a pass is running now`;
+      title = `${s.name}: a pass is running now${s.paused ? `; ${pausedWords(s)}, so it finishes and no new one starts` : ''}`;
+    } else if (s.paused) {
+      shown = 'Paused';
+      title = `${s.name}: ${pausedWords(s)} on the Settings page`;
     } else if (!s.logged) {
       shown = '–';
       title = `${s.name}: no passes logged yet`;
@@ -378,7 +389,7 @@ export function renderPipelinePod(answer, timeOf, now = Date.now()) {
       soon = away < PIPELINE_SOON_MS;
       title = `${s.name}: next pass due ${shown}${away <= 0 ? ' (due now)' : soon ? ' (due within 3 minutes)' : ''}`;
     }
-    const cls = s.running ? ' running' : soon ? ' soon' : '';
+    const cls = s.running ? ' running' : s.paused ? ' paused' : soon ? ' soon' : '';
     const tip = escapeHtml(title);
     return `<span class="stage${cls}" title="${tip}">${escapeHtml(s.name)}</span><span class="time${cls}" title="${tip}">${escapeHtml(shown)}</span>`;
   };
@@ -418,7 +429,7 @@ export function renderHealth(answer, timeOf) {
 export function pipelinePodLabel(answer, timeOf) {
   const stages = Array.isArray(answer?.stages) ? answer.stages : null;
   if (!stages || !stages.length) return PIPELINE_UNAVAILABLE;
-  const shown = (s) => (s.running ? 'running' : s.logged && s.nextDue ? timeOf(s.nextDue) : '–');
+  const shown = (s) => (s.running ? 'running' : s.paused ? 'paused' : s.logged && s.nextDue ? timeOf(s.nextDue) : '–');
   return `Pipeline Status: ${stages.map((s) => `${s.name} ${shown(s)}`).join(', ')}`;
 }
 
@@ -460,9 +471,10 @@ export function renderPipelineDetails(answer, timeOf) {
   const row = (s) => {
     const name = `<th scope="row">${escapeHtml(s.name)}</th>`;
     const wakes = `<td>${escapeHtml(wakesEvery(s.interval))}</td>`;
-    if (!s.logged) return `<tr>${name}<td colspan="3" class="quiet">No passes logged yet</td>${wakes}</tr>`;
+    if (!s.logged) return `<tr>${name}<td colspan="3" class="quiet">${s.paused ? `Paused (${escapeHtml(pausedWords(s))}); ` : ''}No passes logged yet</td>${wakes}</tr>`;
     let next;
-    if (s.running) next = s.lastStart ? `Running now, since ${timeOf(s.lastStart)}` : 'Running now';
+    if (s.running) next = `${s.lastStart ? `Running now, since ${timeOf(s.lastStart)}` : 'Running now'}${s.paused ? ` (paused: this pass finishes, no new one starts)` : ''}`;
+    else if (s.paused) next = `Paused (${pausedWords(s)})`;
     else next = s.nextDue ? timeOf(s.nextDue) : 'Not known yet';
     const started = s.lastStart ? timeOf(s.lastStart) : '–';
     // While a pass runs, the last END belongs to the pass before it: say so, so
@@ -504,12 +516,37 @@ function controlInput(c, models, id, locked) {
 }
 
 /**
+ * What a pause is waiting on (SP-237), under the pause switches, from the
+ * view's `inFlight` tickets (all of them for the whole pipeline; a lane's
+ * own kind for one lane, so a paused intake or relay has nothing to drain):
+ * nothing while no switch is on; "Draining: N
+ * ticket(s) still finishing" and each one (linked) while a lane still works
+ * on one; "Paused: nothing in flight" once none is left. A pause stops new
+ * passes and never a running one, so this is what Dane waits for before the
+ * deck is clear.
+ */
+const DRAIN_KINDS = Object.freeze({ 'paused.loop-build': 'a build', 'paused.loop-review': 'a review' });
+
+export function drainLine(view) {
+  const on = (view?.controls ?? []).filter((c) => c.group === 'pause' && c.value === 'on').map((c) => c.key);
+  if (!on.length) return '';
+  // The whole pipeline waits on every ticket in flight; one lane only on its own kind of pass.
+  const whole = on.includes('paused');
+  const kinds = new Set(on.map((k) => DRAIN_KINDS[k]).filter(Boolean));
+  const tickets = (Array.isArray(view.inFlight) ? view.inFlight : []).filter((t) => whole || kinds.has(t.kind));
+  if (!tickets.length) return '<p class="drain paused">Paused: nothing in flight.</p>';
+  const item = (t) => `<li><a href="/t/${encodeURIComponent(t.id)}">${escapeHtml(t.id)}</a> ${escapeHtml(t.name)} <span class="quiet">(${escapeHtml(t.kind)})</span></li>`;
+  return `<div class="drain draining"><p>Draining: ${tickets.length} ticket(s) still finishing.</p><ul>${tickets.map(item).join('')}</ul></div>`;
+}
+
+/**
  * One project's Pipeline Controls section on the Settings page (SP-224),
  * from GET /pipeline-controls: each group of controls under its heading, each
  * control with its value, a "default" mark while it has its default, and a
  * Save button (none, and the inputs locked, for a reader who may not change
- * them), then the line saying the lanes do not use that group yet, naming
- * the ticket that wires it in. Under them, the change log, newest first, in
+ * them), then, for a group the lanes do not use yet, the line saying so,
+ * naming the ticket that wires it in, and under the pause switches, while
+ * any is on, the drain line (drainLine). Under them, the change log, newest first, in
  * Mountain time. `notes` is `{ key: { ok, text } }`, a Save's outcome to show
  * beside its control.
  */
@@ -531,9 +568,10 @@ export function renderPipelineControls(view, notes = {}) {
   const group = (g) => {
     const controls = view.controls.filter((c) => c.group === g.key);
     if (!controls.length) return '';
+    const notYet = g.wiredBy ? `<p class="quiet not-yet">Saved, but the lanes do not use this yet (${escapeHtml(g.wiredBy)}).</p>` : '';
     return `<h4>${escapeHtml(g.title)}</h4>
     <table class="controls"><tbody>${controls.map(row).join('')}</tbody></table>
-    <p class="quiet not-yet">Saved, but the lanes do not use this yet (${escapeHtml(g.wiredBy)}).</p>`;
+    ${notYet}${g.key === 'pause' ? `<div class="drain-box">${drainLine(view)}</div>` : ''}`;
   };
   const who = view.operator ? escapeHtml(view.operator.name) : 'nobody (this project has no operator)';
   const lockedLine = locked ? `<p class="quiet">Only ${who}, the project's operator, may change these.</p>` : '';

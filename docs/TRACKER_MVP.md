@@ -400,8 +400,17 @@ person, may change one: another person and any loop's token are refused
 (403), and nothing is logged. A value out of range is refused with a plain
 message. The page says "Saved" only when the value the tracker reads back is
 the one sent. A lane reads its project's with `npm run clickup -- settings`
-(`name=value` lines). Nothing on the Mini acts on them yet: SP-236 (wake
-times), SP-237 (pause), SP-238 (the cap) and SP-239 (the model) each wire one in.
+(`name=value` lines). The pause switches are in effect (SP-237): before
+every pass a lane's runner asks `npm run clickup -- pause-check --lane
+<lane>` (through `scripts/pause_check.sh`; the relay asks before its START
+line). Paused, it logs `paused by <who> at <Mountain time> — not starting
+/<lane>` and sleeps; a pass already running always finishes (it drains, never
+kills). Settings that cannot be read count as paused, and the line says so:
+a tracker outage pauses every lane until it answers again. The Pipeline
+Status pod shows a paused stage as "Paused", and the Settings page says
+"Draining: N ticket(s) still finishing" until nothing is in flight. The rest
+are not acted on yet: SP-236 (wake times), SP-238 (the cap) and SP-239 (the
+model) each wire one in.
 A browser opening `/projects` or `/projects/<slug>` gets the page; the page's own
 call to the same address gets the data. `/users` is the page alone; its data
 is still `GET /people` (the onboarding scripts read it), and a browser opening

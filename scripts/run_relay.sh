@@ -45,6 +45,22 @@ SYNC_LOCK="$LOG_DIR/$SLUG-sync.lock"
 # spare, or two passes could overlap and both decide the same ticket.
 PASS_LIMIT="${RELAY_PASS_LIMIT_SECONDS:-480}"
 
+# Paused? (SP-237) The Settings page's switches, the whole pipeline and the
+# relay, asked before the START line and the lock, so a paused relay touches nothing
+# and the Pipeline Status pod never reads a pass that did not run. ANY
+# non-zero exit counts as paused, a check that could not run included (it
+# fails safe); a paused pass is not a failed one, so it exits 0 and writes no
+# END line.
+# The check signs in as the relay, as the pass below does.
+export TRACKER_TOKEN_NAME=TRACKER_TOKEN_RELAY
+PAUSE_LINE="$("$REPO/scripts/pause_check.sh" relay)"
+PAUSE_CODE=$?
+if [ "$PAUSE_CODE" -ne 0 ]; then
+  [ -n "$PAUSE_LINE" ] || PAUSE_LINE="could not read the pipeline settings (the check exited $PAUSE_CODE and said nothing; its errors are above), so the relay pass is treated as PAUSED and not starting (it fails safe)"
+  echo "[relay] $(date '+%Y-%m-%d %H:%M:%S') $PAUSE_LINE"
+  exit 0
+fi
+
 echo ""
 echo "===== $(date '+%Y-%m-%d %H:%M:%S') START relay — $REPO ====="
 

@@ -6,7 +6,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { FAILING_AFTER, FAILING_REASONS, logFolderOf, pipelineOf, readStage, readTail, STAGES } from './pipeline.mjs';
+import { FAILING_AFTER, FAILING_REASONS, logFolderOf, pausedBy, pipelineOf, readStage, readTail, STAGES } from './pipeline.mjs';
 import { logClock, logDate } from './demoData.mjs';
 import { INTERVALS } from '../scripts/lib/loopSchedule.mjs';
 
@@ -50,6 +50,7 @@ test('four stages from scratch logs: a sleeping lane, a running lane, the relay,
       lastStart: at('2026-11-09T18:22:34').toISOString(), lastEnd: at('2026-11-09T18:25:36').toISOString(), lastExit: 0,
       interval: 1800, nextDue: at('2026-11-09T18:55:36').toISOString(),
       failing: false, failedPasses: 0, failingSince: null, failingReason: null,
+      paused: null,
     });
     assert.equal(by.Build.running, true);
     assert.equal(by.Build.nextDue, null);
@@ -63,12 +64,12 @@ test('four stages from scratch logs: a sleeping lane, a running lane, the relay,
     assert.equal(by.Relay.lastEnd, at('2026-11-09T18:37:52').toISOString());
     assert.equal(by.Relay.lastExit, 0);
     // No log: nothing logged, and it wakes as the installer sets it to.
-    assert.deepEqual(by.Intake, { name: 'Intake', job: 'loop-intake', logged: false, running: false, lastStart: null, lastEnd: null, lastExit: null, interval: INTERVALS['loop-intake'], nextDue: null, failing: false, failedPasses: 0, failingSince: null, failingReason: null });
+    assert.deepEqual(by.Intake, { name: 'Intake', job: 'loop-intake', logged: false, running: false, lastStart: null, lastEnd: null, lastExit: null, interval: INTERVALS['loop-intake'], nextDue: null, failing: false, failedPasses: 0, failingSince: null, failingReason: null, paused: null });
     // Times and flags only: no log text anywhere in the answer.
     const text = JSON.stringify(answer);
     assert.doesNotMatch(text, /SECRET|REPORT|working|under way|WebApps|=====/);
     for (const s of answer.stages) {
-      assert.deepEqual(Object.keys(s).sort(), ['failedPasses', 'failing', 'failingReason', 'failingSince', 'interval', 'job', 'lastEnd', 'lastExit', 'lastStart', 'logged', 'name', 'nextDue', 'running']);
+      assert.deepEqual(Object.keys(s).sort(), ['failedPasses', 'failing', 'failingReason', 'failingSince', 'interval', 'job', 'lastEnd', 'lastExit', 'lastStart', 'logged', 'name', 'nextDue', 'paused', 'running']);
       // Times, codes and intervals only: every value a flag, a name, an ISO time, a number or null.
       for (const t of [s.lastStart, s.lastEnd, s.nextDue]) assert.ok(t === null || /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(t), t);
       assert.ok(s.lastExit === null || Number.isInteger(s.lastExit));
@@ -290,4 +291,25 @@ test('GET /pipeline\'s answer for a failing stage carries counts, a time and the
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('pausedBy reads the Settings page\'s two switches: the whole pipeline first, then the lane (SP-237)', () => {
+  const controls = (on) => ['paused', 'paused.loop-build', 'paused.relay'].map((key) => ({ key, value: on.includes(key) ? 'on' : 'off' }));
+  assert.equal(pausedBy(controls([]), 'loop-build'), null);
+  assert.equal(pausedBy(controls(['paused.loop-build']), 'loop-build'), 'lane');
+  assert.equal(pausedBy(controls(['paused.loop-build']), 'loop-review'), null);
+  assert.equal(pausedBy(controls(['paused', 'paused.relay']), 'relay'), 'pipeline');
+  assert.equal(pausedBy(controls(['paused']), 'loop-intake'), 'pipeline');
+  assert.equal(pausedBy(null, 'relay'), null, 'controls not known: nothing shown paused');
+});
+
+test('pipelineOf marks each stage paused from the controls it is given, logged or not (SP-237)', () => {
+  const dir = scratch({});
+  try {
+    const answer = pipelineOf({ logDir: dir, slug: 'proj' }, { controls: [{ key: 'paused', value: 'off' }, { key: 'paused.loop-build', value: 'on' }] });
+    const by = Object.fromEntries(answer.stages.map((s) => [s.job, s.paused]));
+    assert.deepEqual(by, { relay: null, 'loop-build': 'lane', 'loop-review': null, 'loop-intake': null });
+    const whole = pipelineOf({ logDir: dir, slug: 'proj' }, { controls: [{ key: 'paused', value: 'on' }] });
+    assert.ok(whole.stages.every((s) => s.paused === 'pipeline'));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });

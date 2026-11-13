@@ -535,10 +535,22 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
    * read; `call` names the caller in the log line. Read per call, so a lane
    * that passes again shows at once (a held-up ticket, pageData.heldUpBy).
    */
+  /**
+   * The project's pipeline controls, so a stage paused on the Settings page
+   * shows as paused (SP-237); null, and nothing shown paused, when its
+   * project is not in this tracker.
+   */
+  const controlsNow = () => {
+    try {
+      return store.getProject(pipeline.slug) ? store.pipelineSettings(pipeline.slug) : null;
+    } catch {
+      return null;
+    }
+  };
   const lanesNow = (call) => {
     if (!pipeline) return null;
     try {
-      return { slug: pipeline.slug, stages: pipelineOf(pipeline).stages };
+      return { slug: pipeline.slug, stages: pipelineOf(pipeline, { controls: controlsNow() }).stages };
     } catch (err) {
       log(`${call}: the loop logs could not be read, so no lane's times or health are shown (${err.message}).`);
       return null;
@@ -723,7 +735,7 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     // runners' logs (tracker/pipeline.mjs). Times and flags only, never log text.
     if (parts.length === 1 && parts[0] === 'pipeline' && method === 'GET') {
       if (!pipeline) throw new HttpError(503, 'no-pipeline', 'this tracker cannot read the loop logs: the project config was not usable when it started (its log says why).');
-      return [200, pipelineOf(pipeline)];
+      return [200, pipelineOf(pipeline, { controls: controlsNow() })];
     }
 
     // Dane's page: the Console view, every ticket in flight on every
