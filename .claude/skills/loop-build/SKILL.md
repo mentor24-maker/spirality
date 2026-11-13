@@ -299,7 +299,17 @@ Exit **0** nothing of his / **3** something IS his / **1** could not tell.
    ticket, the newest `PR opened:` comment is the one counted, so if you
    record the PR again, estimate the whole pull request as it now stands.
 
-8. **Hand off to review.** `npm run clickup -- status --task <id> --status
+8. **Hand off to review.** **A catch-up ticket** ("Find out why PR #N
+   (<branch>) will not merge", no PR of its own: you merged `main` into that
+   PR's branch and skipped `pr-opened`) can find its PR already merged by
+   the relay while you waited on the checks. After your "Done:"
+   comment, run `npm run clickup -- fixup-live --task <id> --if-status
+   Building`. Exit 0: that PR is merged, so the ticket is now Live with a
+   note naming the merge; finish, nothing for review or Dane. Exit 4 (not
+   merged yet): hand off as below. Exit 1: say so in your report and hand off
+   as below.
+
+   Otherwise: `npm run clickup -- status --task <id> --status
    "In review"`. Leave it unassigned (it is the machine's turn). **Do NOT
    merge** — merges happen only on Dane's explicit say-so. `loop-review` takes
    it from here.

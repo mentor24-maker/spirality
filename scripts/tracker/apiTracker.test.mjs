@@ -747,6 +747,98 @@ test('relay merges on his word and the merge marker lands as a reply, even after
   } finally { await f.cleanup(); }
 });
 
+/** A catch-up ticket shaped like SP-284: no PR of its own, filed to unstick PR #7. */
+function fileCatchUp(f, status) {
+  return f.file({ name: 'Find out why PR #7 (fix) will not merge', status, description: '## The branch\n\n- PR: https://github.com/owner/repo/pull/7\n- Branch: `fix`\n- Waiting ticket: AL-9' });
+}
+
+test('a catch-up ticket whose PR already merged is never handed to Dane: ask refuses, fixup-live moves it to Live with one note (SP-288)', async () => {
+  const f = await fixture();
+  try {
+    fileCatchUp(f, 'in review');
+    f.prJson = { number: 7, state: 'MERGED', mergedAt: '2026-11-13T17:39:00Z' };
+
+    const ask = await f.door(['ask', '--task', 'AL-1', '--body-file', '-'], { stdin: CARD });
+    assert.equal(ask.code, 2, ask.err);
+    assert.match(ask.err, /REFUSED — AL-1 is a catch-up ticket and PR #7, the pull request it was filed to unstick, is merged \(11\/13, 10:39 AM MT\)/);
+    assert.match(ask.err, /npm run clickup -- fixup-live --task AL-1 --if-status "in review"/);
+    assert.equal(f.store.getTicket('AL-1').status, 'in review', 'nothing moved');
+    assert.equal(f.store.listComments('AL-1').length, 0, 'no card posted');
+
+    const r = await f.door(['fixup-live', '--task', 'AL-1', '--if-status', 'In review']);
+    assert.equal(r.code, 0, r.err);
+    assert.match(r.out, /^Task AL-1: "in review" -> "live" \(read back\), note \d+ posted \(read back\): PR #7, the pull request it was filed to unstick, is merged\.\n$/);
+    const t = f.store.getTicket('AL-1');
+    assert.equal(t.status, 'live');
+    assert.equal(t.assignee, null, 'never assigned to Dane');
+    const notes = f.store.listComments('AL-1');
+    assert.equal(notes.length, 1, 'one note, no card');
+    assert.match(notes[0].body, /CLOSED, WORK ALREADY LIVE: PR #7 \(https:\/\/github\.com\/owner\/repo\/pull\/7\), the pull request this ticket was filed to unstick, was merged into main at 11\/13, 10:39 AM MT\./);
+    assert.match(notes[0].body, /moved from "in review" to Live by itself/);
+    assert.doesNotMatch(notes[0].body, /Your move/);
+    assert.ok(isMachineComment(notes[0].body), 'the note carries the machine stamp');
+
+    const again = await f.door(['fixup-live', '--task', 'AL-1']);
+    assert.equal(again.code, 4);
+    assert.match(again.out, /left as it is — it is already Live/);
+    assert.equal(f.store.listComments('AL-1').length, 1, 'a second run writes nothing');
+  } finally { await f.cleanup(); }
+});
+
+test('a catch-up ticket whose PR is still open goes to Dane as today, and only once; fixup-live leaves it (SP-288)', async () => {
+  const f = await fixture();
+  try {
+    fileCatchUp(f, 'building');
+    f.prJson = { number: 7, state: 'OPEN' };
+    const stay = await f.door(['fixup-live', '--task', 'AL-1', '--if-status', 'Building']);
+    assert.equal(stay.code, 4, stay.err);
+    assert.match(stay.out, /left as it is — PR #7 is open, not merged\. Carry on as before\./);
+    assert.equal(f.store.getTicket('AL-1').status, 'building');
+    assert.equal(f.store.listComments('AL-1').length, 0);
+
+    const ask = await f.door(['ask', '--task', 'AL-1', '--body-file', '-'], { stdin: CARD });
+    assert.equal(ask.code, 0, ask.err);
+    assert.equal(f.store.getTicket('AL-1').status, 'needs your input');
+
+    // The review posted its card twice on SP-284; the second is refused.
+    const twice = await f.door(['ask', '--task', 'AL-1', '--body-file', '-'], { stdin: CARD });
+    assert.equal(twice.code, 2);
+    assert.match(twice.err, /REFUSED — AL-1 is already in "needs your input" with a card Dane has not answered yet/);
+    assert.equal(f.store.listComments('AL-1').length, 1, 'one card, not two');
+    const forced = await f.door(['ask', '--task', 'AL-1', '--ask-again', '--body-file', '-'], { stdin: CARD });
+    assert.equal(forced.code, 0, forced.err);
+
+    // Once in his status, even a merge does not take it out: that is his move.
+    f.prJson = { number: 7, state: 'MERGED' };
+    const his = await f.door(['fixup-live', '--task', 'AL-1']);
+    assert.equal(his.code, 4);
+    assert.match(his.out, /it is in "needs your input", not a status a loop moves/);
+    assert.equal(f.store.getTicket('AL-1').status, 'needs your input');
+  } finally { await f.cleanup(); }
+});
+
+test('fixup-live: a failed GitHub read moves nothing (exit 1), a ticket with its own PR is not a catch-up (exit 4), and a stale guard exits 3 (SP-288)', async () => {
+  const f = await fixture();
+  try {
+    fileCatchUp(f, 'in review');
+    writeFileSync(join(f.bin, 'gh'), '#!/bin/sh\necho "gh: not signed in" >&2\nexit 1\n');
+    const blind = await f.door(['fixup-live', '--task', 'AL-1']);
+    assert.equal(blind.code, 1);
+    assert.match(blind.err, /NOT moved — GitHub could not be read for PR #7/);
+    assert.equal(f.store.getTicket('AL-1').status, 'in review');
+
+    const stale = await f.door(['fixup-live', '--task', 'AL-1', '--if-status', 'Building']);
+    assert.equal(stale.code, 3);
+    assert.match(stale.err, /NOT moved: expected status "Building" but the task is "in review"/);
+
+    f.file({ name: 'own work', status: 'in review' });
+    f.store.postComment({ ticket: 'AL-2', author: f.machine.id, body: 'PR opened: https://github.com/owner/repo/pull/8' });
+    const own = await f.door(['fixup-live', '--task', 'AL-2']);
+    assert.equal(own.code, 4, own.err);
+    assert.match(own.out, /it has a pull request of its own \(#8\)/);
+  } finally { await f.cleanup(); }
+});
+
 /** A Ready to launch catch-up ticket shaped like SP-64: no PR of its own, a Close card, and his close word. */
 async function closeOnReadyToLaunch(f) {
   f.file({ name: 'Find out why PR #7 (fix) will not merge', status: 'ready to launch', description: '## The branch\n\n- PR: https://github.com/owner/repo/pull/7\n- Branch: `fix`' });
