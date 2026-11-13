@@ -438,7 +438,8 @@ given the tracker's sign-in. Only the first line it prints is posted.
 A wrong entry (a missing or unknown field, a name listed twice,
 `everyMinutes` under 10) is refused, naming the entry and the field. A list
 with any check in it needs `busProject`: without a bus, what the checks find
-would have nowhere to post.
+would have nowhere to post. It needs `"tracker": "api"` too: the bus is a
+tracker project, so on a ClickUp project every post would be refused.
 
 - **Kind**: a list of the objects above
 - **Required**: no

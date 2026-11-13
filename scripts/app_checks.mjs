@@ -69,6 +69,10 @@ export function runCommand(command, { cwd, env, timeoutSeconds }) {
     let stderr = '';
     let timedOut = false;
     let settled = false;
+    // Declared before finish(), which clears them: a spawn that throws calls
+    // finish() before any timer is set (SP-264 review).
+    let timer = null;
+    let killer = null;
     const finish = (r) => { if (!settled) { settled = true; clearTimeout(timer); clearTimeout(killer); done({ stdout, stderr, timedOut, ...r }); } };
     let child;
     try {
@@ -85,8 +89,7 @@ export function runCommand(command, { cwd, env, timeoutSeconds }) {
     child.stderr.setEncoding('utf8').on('data', keep('err'));
     // The whole process group: a check's own children stop with it.
     const signal = (sig) => { try { process.kill(-child.pid, sig); } catch { try { child.kill(sig); } catch { /* already gone */ } } };
-    let killer = null;
-    const timer = setTimeout(() => {
+    timer = setTimeout(() => {
       timedOut = true;
       signal('SIGTERM');
       killer = setTimeout(() => signal('SIGKILL'), KILL_GRACE_MS);

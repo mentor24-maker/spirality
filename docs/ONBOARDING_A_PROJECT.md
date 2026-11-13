@@ -345,9 +345,11 @@ A project with health checks of its own (is the site importing, are its
 keys good, are its links whole) lists them in the manifest as
 `applicationChecks`: each a name, a shell command and how often, in minutes.
 Each command exits 0 when all is well and non-zero printing one line saying
-what is wrong, and posts nothing itself. Spirality runs them
-(`npm run app-checks`, from the project's repository) and posts what changed
-to the project's bus, so the list needs `busProject` too. The shape and the
+what is wrong, and posts nothing itself. Spirality runs them from its own
+checkout (`npm run app-checks -- --config <the project's
+spirality.project.json>`; each command runs in the project's folder) and
+posts what changed to the project's bus, so the list needs `busProject` and
+`"tracker": "api"` too. The shape and the
 post rules are in [PROJECT_MANIFEST.md](PROJECT_MANIFEST.md) and
 [INTEGRATION.md](INTEGRATION.md), "3. Application checks".
 

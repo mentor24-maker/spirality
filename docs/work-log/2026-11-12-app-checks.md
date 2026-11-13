@@ -18,3 +18,13 @@ through, the pass says so and tries again next time, instead of forgetting.
 The settings file's format moved to version 2, because it gained a field.
 Nothing runs the checks on a timer yet (SP-274 does that), and Spirality has
 none of its own, so nothing new appears on any bus today.
+
+**Second round, after review.** Review found two real faults and two smaller
+ones, all fixed. A key a check printed could leak in part when it sat across
+the 300-character cut, because the hiding ran after the cut; now the hiding
+runs first. A check that could not be started at all crashed the whole pass
+instead of being reported as "could not be run"; now it is reported and the
+other checks run. A manifest that lists checks on a project still on ClickUp
+is now refused when it loads, since the bus would refuse every post. And the
+onboarding page now says the command runs from Spirality's folder with
+`--config`, not from the project's.

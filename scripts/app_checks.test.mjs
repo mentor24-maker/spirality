@@ -16,6 +16,7 @@ const manifest = (over = {}) => ({
   githubRepo: 'owner/example', dopplerProject: 'example', dopplerConfig: 'dev', launchdPrefix: 'com.example',
   logDir: '', mergePhrases: ['merge'], governancePaths: [], autoMergeLanes: [], operatorName: 'Dana',
   projectSlug: 'example', legacyMachinePrefixes: [], projectScripts: {}, busProject: 'example-bus',
+  tracker: 'api', trackerUrl: 'http://tracker.example:4180',
   ...over,
 });
 
@@ -121,6 +122,23 @@ test('app-checks: a check runs in the project folder, without the tracker sign-i
   const slow = await runCommand('sleep 30', { cwd: dir, env, timeoutSeconds: 1 });
   assert.equal(slow.timedOut, true);
   assert.ok(Date.now() - started < 10000, 'stopped well before it would have finished');
+});
+
+test('app-checks: a check whose spawn throws resolves as "could not be run" instead of crashing the pass', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'appchecks-throw-'));
+  // A NUL byte in an environment value makes spawn throw before any timer is set.
+  const ran = await runCommand('true', { cwd: dir, env: { PATH: process.env.PATH, BAD: 'a\u0000b' }, timeoutSeconds: 5 });
+  assert.equal(ran.code, null);
+  assert.ok(ran.error, 'the spawn error is reported');
+  const lines = [];
+  const code = await runAppChecks({
+    config: config([{ name: 'nul-env', command: 'true', everyMinutes: 10 }]),
+    repoDir: dir, statePath: join(dir, 'state.json'), dryRun: true,
+    env: { PATH: process.env.PATH, BAD: 'a\u0000b' }, log: (l) => lines.push(l), warn: (l) => lines.push(l),
+  });
+  assert.equal(code, 0);
+  assert.match(lines.join('\n'), /nul-env: failing: could not be run/);
+  assert.match(lines.at(-1), /^app-checks: 1 run/);
 });
 
 test('app-checks: the runner names no project, machine or list of its own', () => {

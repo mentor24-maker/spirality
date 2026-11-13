@@ -84,7 +84,8 @@ version 2). Each entry:
 holding the manifest) and `everyMinutes` (10 or more) are required; `alarm`
 defaults to `true` and `timeoutSeconds` to 60 (at most 300). A wrong entry is
 refused when the manifest loads, naming the entry and the field, and a list
-with checks in it needs `busProject`.
+with checks in it needs `busProject` and `"tracker": "api"` (the bus is a
+tracker project).
 
 **The runner** is `npm run app-checks` (`scripts/app_checks.mjs`, decisions
 in `lib/appChecks.js`). It runs the checks that are due, without the
