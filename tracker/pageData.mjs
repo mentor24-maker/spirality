@@ -545,8 +545,14 @@ export function stageColoursOf(store) {
  * a lane may choose, the change log newest first with each changer's name,
  * and `canChange`: whether this reader may change them (the project's
  * operator, signed in as a person). Null for a project that does not exist.
+ *
+ * `lanes` is this machine's Pipeline Status stages for the project
+ * (pipelineOf), or null when it reads no logs of it. With them, each wake
+ * time carries `used`, the seconds its job last actually woke on (null when
+ * its log does not say yet), and `inEffect`, whether that is the set value;
+ * without them both are null, never a guess (SP-236).
  */
-export function pipelineControlsOf(store, slug, { reader = null } = {}) {
+export function pipelineControlsOf(store, slug, { reader = null, lanes = null } = {}) {
   const project = store.getProject(slug);
   if (!project) return null;
   const nameOf = (id) => store.getActor(id)?.name ?? `actor ${id}`;
@@ -557,7 +563,11 @@ export function pipelineControlsOf(store, slug, { reader = null } = {}) {
     canChange: who != null && who.kind === 'human' && who.id === project.operator,
     groups: GROUPS.map((g) => ({ ...g })),
     models: [{ id: DEFAULT_MODEL, label: "Claude's default" }, ...MODELS.map((m) => ({ ...m }))],
-    controls: store.pipelineSettings(project.slug).map((c) => ({ ...c })),
+    controls: store.pipelineSettings(project.slug).map((c) => {
+      if (c.group !== 'wake') return { ...c };
+      const used = lanes?.find((l) => `wake.${l.job}` === c.key)?.used ?? null;
+      return { ...c, used, inEffect: used == null ? null : String(used) === c.value };
+    }),
     changes: store.pipelineSettingChanges(project.slug).map((c) => ({ ...c, actorName: nameOf(c.actor) })),
   };
 }

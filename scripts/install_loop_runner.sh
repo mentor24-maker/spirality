@@ -3,7 +3,8 @@
 # Install (or remove) the Spirality loop jobs on THIS machine: loop-build,
 # loop-review and loop-intake (each a launchd agent that keeps the committed
 # runner alive, with its own lock and log),
-# the relay (a launchd agent that runs one pass every ten minutes) and, when
+# the relay (a launchd agent started every minute, which runs a pass when its
+# wake time from the Settings page is up: every ten minutes by default) and, when
 # the project config names a trackerPort, the tracker (a kept-alive web
 # server, docs/TRACKER_MVP.md) with its nightly database backup.
 #
@@ -52,10 +53,14 @@ TRACKER_DB="$TRACKER_DATA_DIR/tracker.db"
 TRACKER_BACKUP_DIR="$TRACKER_DATA_DIR/backups"
 tracker_configured() { [ -n "$TRACKER_PORT" ]; }
 
-# How often each job wakes, in seconds. The numbers live in one place,
-# scripts/lib/loopSchedule.mjs, which the tracker's Pipeline Status pod reads
-# too (SP-168), so the page never says a different time than the plist.
+# How often each job wakes by default, in seconds. The numbers live in one
+# place, scripts/lib/loopSchedule.mjs, which the tracker's Pipeline Status pod
+# reads too (SP-168). The wake time set on the Settings page (SP-236) wins
+# over them once a job has read it, with no plist rewrite: a lane reads it
+# before every sleep, and the relay's tick (relay_tick) reads it after every
+# pass.
 interval_of() { PATH="$LAUNCHD_PATH" node "$REPO/scripts/lib/loopSchedule.mjs" interval "$1"; }
+relay_tick() { PATH="$LAUNCHD_PATH" node "$REPO/scripts/lib/loopSchedule.mjs" tick; }
 # loaded_line and reload_job: read launchd's list safely, and replace a job
 # only once the old one is really gone.
 # shellcheck source=lib/launchd_reload.sh
@@ -80,7 +85,7 @@ status_one() {
   if [ -n "$line" ]; then
     echo "loaded:   yes — $line"
     if [ "$job" = "$RELAY" ]; then
-      echo "          (columns: PID, last exit code, label. '-' for PID means not running right now, which is normal between passes; it wakes every $(( $(interval_of "$job") / 60 )) minutes.)"
+      echo "          (columns: PID, last exit code, label. '-' for PID means not running right now, which is normal between passes; launchd starts it every $(relay_tick)s and it runs a pass when its wake time is up, $(interval_of "$job")s unless the Settings page says otherwise.)"
     else
       echo "          (columns: PID, last exit code, label. A PID here means the runner is alive right now.)"
     fi
@@ -371,8 +376,11 @@ PLIST_BODY
     fi
   done
 
-  # The relay: one pass per wake, on a timer. Its own output IS its log, so the
-  # plist points stdout and stderr at the log the status reader looks for.
+  # The relay: started on a short fixed tick with --tick, and run_relay.sh
+  # runs a pass only when the wake time set on the Settings page is up
+  # (SP-236), so changing it needs no plist rewrite. Its own output IS its
+  # log, so the plist points stdout and stderr at the log the status reader
+  # looks for; a tick that runs no pass writes nothing there.
   local_label="$(label_of "$RELAY")"; local_plist="$(plist_of "$RELAY")"; local_rlog="$(log_of "$RELAY")"
   cat > "$local_plist" <<PLIST_BODY
 <?xml version="1.0" encoding="UTF-8"?>
@@ -384,11 +392,12 @@ PLIST_BODY
     <key>ProgramArguments</key>
     <array>
         <string>$REPO/scripts/run_relay.sh</string>
+        <string>--tick</string>
     </array>
     <key>WorkingDirectory</key>
     <string>$REPO</string>
     <key>StartInterval</key>
-    <integer>$(interval_of "$RELAY")</integer>
+    <integer>$(relay_tick)</integer>
     <key>RunAtLoad</key>
     <true/>
 $(plist_env)
@@ -400,7 +409,7 @@ $(plist_env)
 </plist>
 PLIST_BODY
   if reload_job "$local_label" "$local_plist"; then
-    echo "Installed $local_label — one pass every $(( $(interval_of "$RELAY") / 60 )) minutes from $REPO, log $local_rlog."
+    echo "Installed $local_label — started every $(relay_tick)s from $REPO, a pass each time its wake time is up ($(interval_of "$RELAY")s unless the Settings page says otherwise), log $local_rlog."
   else
     not_loaded+=("$local_label")
   fi

@@ -28,6 +28,10 @@ set -u
 export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$PATH"
 
 SKILL=${1:?usage: loop_runner.sh <skill-name> [interval-seconds]}
+# The first sleep's length, handed in by the installer (the default in
+# scripts/lib/loopSchedule.mjs). Before every sleep the runner asks the
+# tracker for the wake time set on the Settings page (read_wake_time, below)
+# and keeps this one only while that cannot be read.
 INTERVAL=${2:-1800}
 
 # The repo is WHERE THIS SCRIPT LIVES, never a path typed from memory, and it
@@ -116,6 +120,24 @@ sleep_until_woken() {
   done
 }
 
+# The wake time Dane set for this lane on the tracker's Settings page
+# (SP-236), read before every sleep, so a change takes effect at the next
+# sleep with no launchd reload. scripts/lib/wakeSetting.mjs prints the number,
+# or one line saying why it could not; only a whole number of at least 60
+# seconds is ever slept on. Anything else keeps the last good value (on the
+# first pass, the one launchd passed in), and the log says so in one line:
+# the lane never stops and never sleeps 0.
+read_wake_time() {
+  local said
+  said="$(node "$REPO/scripts/lib/wakeSetting.mjs" "$SKILL" 2>/dev/null)"
+  local code=$?
+  case "$said" in
+    ""|*[!0-9]*) ;;
+    *) if [ "$code" -eq 0 ] && [ "$said" -ge 60 ]; then INTERVAL="$said"; return 0; fi ;;
+  esac
+  echo "[loop-runner] $(date "+%H:%M:%S") could not read /$SKILL's wake time from the tracker (${said:-no answer}) — keeping the last good value, ${INTERVAL}s" >> "$LOG"
+}
+
 # A template with X's, the one form macOS and GNU mktemp both accept.
 PASS_OUT="$(mktemp "${TMPDIR:-/tmp}/$SLUG-pass.XXXXXX")"
 trap 'rm -rf "$LOCK" "$PASS_OUT" 2>/dev/null; [ "$(cat "$SYNC_LOCK/pid" 2>/dev/null)" = "$$" ] && rm -rf "$SYNC_LOCK"' EXIT
@@ -200,6 +222,7 @@ while true; do
     echo "[loop-runner] $(date "+%H:%M:%S") THIS PASS COULD NOT SIGN IN TO CLAUDE. Nothing will change until a person signs in on this machine (claude login) and restarts this job: launchctl kickstart -k gui/$(id -u)/$PREFIX.$SKILL" >> "$LOG"
   fi
 
+  read_wake_time
   echo "[loop-runner] $(date "+%H:%M:%S") sleeping ${INTERVAL}s before the next /$SKILL (a wake ends it early)" >> "$LOG"
   sleep_until_woken
 done

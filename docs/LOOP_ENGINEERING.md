@@ -226,7 +226,9 @@ Three things the log can say that need a person:
   whether the runner is alive. A stale lock clears itself on the next start.
 
 **Merges: the relay.** The third job, `com.spirality.relay`, runs
-`scripts/run_relay.sh` every 10 minutes: one `npm run clickup -- relay` pass
+`scripts/run_relay.sh` every 10 minutes (the default; launchd starts it every
+minute and it runs a pass when the wake time set on the tracker's Settings
+page is up, SP-236): one `npm run clickup -- relay` pass
 that reads every `Ready to launch` ticket, and when your comment is exactly a
 merge phrase (`merge`, `merge it`, `ship it`, `approve`; the list is
 `mergePhrases` in `spirality.project.json`) re-checks every gate (ticket still

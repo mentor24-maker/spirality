@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { seedDemo, tickingClock } from './demoData.mjs';
 import { reportsOf, REPORT_RANGES, searchTickets, PRIORITIES, timeSplitOf, isFailureNote, TIME_BUCKETS } from './pageData.mjs';
-import { escapeHtml, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, controlValueText, mountainTime } from './web/render.mjs';
+import { escapeHtml, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, controlValueText, mountainTime, wakeInEffectText } from './web/render.mjs';
 import { startServer, setupSettingsOf } from './server.mjs';
 import { saveAnswers, setupFields, setupOf } from './setup.mjs';
 import { DANE_FIELDS as SETUP_FIELDS, STEPS as SETUP_STEPS } from '../scripts/onboard/onboard.mjs';
@@ -923,7 +923,10 @@ test('Pipeline Controls on the Settings page: each control with its value, "defa
     const html = renderPipelineControls(alpha);
     assert.match(html, /<h3>Alpha<\/h3>/);
     for (const title of ['Wake Times', 'Pause and Resume', 'Work-in-Progress Cap', 'Model per Lane', 'Change Log']) assert.match(html, new RegExp(`<h4>${title}</h4>`));
-    for (const slice of ['SP-236', 'SP-237', 'SP-238', 'SP-239']) assert.match(html, new RegExp(`Saved, but the lanes do not use this yet \\(${slice}\\)\\.`));
+    for (const slice of ['SP-237', 'SP-238', 'SP-239']) assert.match(html, new RegExp(`Saved, but the lanes do not use this yet \\(${slice}\\)\\.`));
+    // The lanes use the wake times (SP-236): no not-yet line, and each says what its lane last used.
+    assert.doesNotMatch(html, /SP-236/);
+    assert.match(html, /1,800 seconds \(Every 30 minutes\)<span class="in-effect">Last used: not known on this machine yet\.<\/span>/);
     assert.match(html, /<tr data-control="wake\.loop-build" data-kind="seconds">[\s\S]*?loop-build wake time<\/label> <span class="default">default<\/span>[\s\S]*?type="number" min="60" max="86400" step="1" value="1800"[\s\S]*?1,800 seconds \(Every 30 minutes\)[\s\S]*?<button type="button">Save<\/button>/);
     assert.match(html, /<option value="default" selected>Claude&#39;s default<\/option>/);
     assert.match(html, /<option value="off" selected>Off<\/option><option value="on">On<\/option>/);
@@ -945,6 +948,22 @@ test('Pipeline Controls on the Settings page: each control with its value, "defa
     const saved = await f.call('PUT', '/pipeline-controls/alpha', { body: { setting: 'wake.loop-build', value: '900' } });
     assert.equal(saved.status, 200, saved.text);
     assert.match(renderPipelineControls(saved.body), /<td>Dane<\/td><td>loop-build wake time<\/td><td>1800<\/td><td>900<\/td>/);
+  } finally { await f.cleanup(); }
+});
+
+test('each wake time on the Settings page says what its lane last used, and says plainly while the lane has not picked up the set value (SP-236)', async () => {
+  const f = await fixture();
+  try {
+    const alpha = (await f.call('GET', '/pipeline-controls')).body.projects.find((p) => p.project.slug === 'alpha');
+    const withUsed = (key, used) => ({ ...alpha, controls: alpha.controls.map((c) => (c.key === key ? { ...c, value: '600', isDefault: false, used, inEffect: used == null ? null : String(used) === '600' } : c)) });
+    const waiting = renderPipelineControls(withUsed('wake.loop-build', 1800));
+    assert.match(waiting, /600 seconds \(Every 10 minutes\)<span class="in-effect waiting">Last used: 1,800 seconds\. Waiting for the lane&#39;s next pass to pick this up\.<\/span>/);
+    const taken = renderPipelineControls(withUsed('wake.loop-build', 600));
+    assert.match(taken, /<span class="in-effect">In effect: the lane last used 600 seconds\.<\/span>/);
+    assert.doesNotMatch(taken, /Waiting for the lane/);
+    assert.equal(wakeInEffectText({ used: null, inEffect: null }), 'Last used: not known on this machine yet.');
+    // Only the wake times say it.
+    assert.equal((taken.match(/class="in-effect/g) || []).length, 4);
   } finally { await f.cleanup(); }
 });
 

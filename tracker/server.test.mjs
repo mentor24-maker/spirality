@@ -2805,7 +2805,10 @@ test('pipeline controls: anyone signed in reads them, defaults marked; the opera
     assert.equal(read.status, 200);
     assert.deepEqual(control(read.body, 'wake.loop-build'), { ...control(read.body, 'wake.loop-build'), value: '1800', isDefault: true });
     assert.equal(read.body.canChange, false, 'a loop may never change its own controls');
-    assert.deepEqual(read.body.groups.map((g) => g.wiredBy), ['SP-236', 'SP-237', 'SP-238', 'SP-239']);
+    assert.deepEqual(read.body.groups.map((g) => g.wiredBy), [null, 'SP-237', 'SP-238', 'SP-239']);
+    // This tracker reads no loop logs, so no wake time claims what its lane used (SP-236).
+    assert.deepEqual([control(read.body, 'wake.loop-build').used, control(read.body, 'wake.loop-build').inEffect], [null, null]);
+    assert.equal(control(read.body, 'wip-cap').used, undefined, 'only a wake time has a value last used');
     assert.equal((await f.call('GET', '/pipeline-controls/alpha', { token: f.humanToken })).body.canChange, true);
     assert.equal((await f.call('GET', '/pipeline-controls/alpha', { token: otherToken })).body.canChange, false);
     assert.equal((await f.call('GET', '/pipeline-controls/nope')).status, 404);
@@ -2830,6 +2833,49 @@ test('pipeline controls: anyone signed in reads them, defaults marked; the opera
     }
     assert.equal(f.store.pipelineSettingChanges('alpha').length, 1, 'a refused change logs nothing');
     assert.equal(control(f.store.pipelineSettings('alpha').reduce((v, c) => ({ controls: [...v.controls, c] }), { controls: [] }), 'wake.loop-build').value, '900');
+  } finally { await f.cleanup(); }
+});
+
+test('the wake times set on the Settings page reach the Pipeline Status pod, and each says what its lane last used and whether that is the set value (SP-236)', async () => {
+  const f = await fixture();
+  try {
+    const logs = join(f.dir, 'logs');
+    mkdirSync(logs);
+    const stamp = (d) => d.toLocaleString('sv-SE').replace('T', ' ');
+    const clock = (d) => d.toLocaleTimeString('en-GB', { hour12: false });
+    const began = new Date('2026-11-09T18:22:34');
+    const ended = new Date('2026-11-09T18:25:36');
+    writeFileSync(join(logs, 'alpha-loop-build.log'), [
+      `===== ${stamp(began)} START /loop-build =====`,
+      `===== ${stamp(ended)} END /loop-build (exit 0 — not a verdict; the pass's report above is) =====`,
+      `[loop-runner] ${clock(ended)} sleeping 1800s before the next /loop-build (a wake ends it early)`,
+    ].join('\n'));
+    writeFileSync(join(logs, 'alpha-relay.log'), `===== ${stamp(began)} START relay — /repo =====\n===== ${stamp(ended)} END relay — pass complete (exit 0) =====\n`);
+    writeFileSync(join(logs, 'alpha-relay.interval'), '300\n');
+    const server = await startServer({ store: f.store, port: 0, pipeline: { logDir: logs, slug: 'alpha' } });
+    try {
+      const at = `http://127.0.0.1:${server.address().port}`;
+      const control = (view, key) => view.controls.find((c) => c.key === key);
+      const saved = await f.call('PUT', '/pipeline-controls/alpha', { at, token: f.humanToken, body: { setting: 'wake.loop-build', value: '600' } });
+      assert.equal(saved.status, 200, saved.text);
+      // Set to 600; the lane is sleeping its 1800 still, so not in effect, and the pod says when it really wakes.
+      assert.deepEqual([control(saved.body, 'wake.loop-build').used, control(saved.body, 'wake.loop-build').inEffect], [1800, false]);
+      const stages = Object.fromEntries((await f.call('GET', '/pipeline', { at })).body.stages.map((s) => [s.job, s]));
+      assert.deepEqual([stages['loop-build'].set, stages['loop-build'].used], [600, 1800]);
+      assert.equal(stages['loop-build'].nextDue, new Date(ended.getTime() + 1800 * 1000).toISOString());
+      // The relay goes by the 300 it kept; set to 300, it is in effect, and its next pass is 300s after its start.
+      assert.equal((await f.call('PUT', '/pipeline-controls/alpha', { at, token: f.humanToken, body: { setting: 'wake.relay', value: '300' } })).status, 200);
+      const read = (await f.call('GET', '/pipeline-controls/alpha', { at })).body;
+      assert.deepEqual([control(read, 'wake.relay').used, control(read, 'wake.relay').inEffect], [300, true]);
+      const relay = (await f.call('GET', '/pipeline', { at })).body.stages.find((s) => s.job === 'relay');
+      assert.deepEqual([relay.set, relay.used, relay.nextDue], [300, 300, new Date(began.getTime() + 300 * 1000).toISOString()]);
+      // A lane with no log here says nothing it does not know.
+      assert.deepEqual([control(read, 'wake.loop-intake').used, control(read, 'wake.loop-intake').inEffect], [null, null]);
+      // The lane slept the new value: in effect.
+      writeFileSync(join(logs, 'alpha-loop-build.log'), `\n[loop-runner] ${clock(new Date(ended.getTime() + 1000))} sleeping 600s before the next /loop-build (a wake ends it early)\n`, { flag: 'a' });
+      const after = (await f.call('GET', '/pipeline-controls', { at })).body.projects.find((p) => p.project.slug === 'alpha');
+      assert.deepEqual([control(after, 'wake.loop-build').used, control(after, 'wake.loop-build').inEffect], [600, true]);
+    } finally { await new Promise((r) => server.close(r)); }
   } finally { await f.cleanup(); }
 });
 

@@ -54,9 +54,11 @@ const port = Number(process.env.TRACKER_PORT ?? 0);
 let mergePhrase = null;
 try { mergePhrase = loadProjectConfig().mergePhrases[0] ?? null; } catch (err) { console.log(`no Merge button: the project config is not usable (${err.message}).`); }
 const accountMail = { send: printEmail, pageUrl: null, projectName: 'Demo' };
-// The Pipeline Status pod reads scratch logs in the demo's own folder, never the Mini's real ones.
-writeDemoLogs(dir, 'demo');
-const pipeline = { logDir: dir, slug: 'demo' };
+// The Pipeline Status pod reads scratch logs in the demo's own folder, never
+// the Mini's real ones, written as Alpha's, so the Settings page shows what
+// Alpha's lanes last used beside each wake time (SP-236).
+writeDemoLogs(dir, 'alpha');
+const pipeline = { logDir: dir, slug: 'alpha' };
 // The pull requests' state on GitHub is a stand-in (SP-226): the demo never calls GitHub.
 const server = await startServer({ store, port, log: (line) => console.log(line), mergePhrase, closePhrase: CLOSE_PHRASE, goPhrase: GO_PHRASE, accountMail, pipeline, readPrState: demoPrState });
 accountMail.pageUrl = `http://127.0.0.1:${server.address().port}`;

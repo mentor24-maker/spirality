@@ -63,7 +63,7 @@ test('a wake file that cannot be written exits 1 with one line, never a success 
   assert.doesNotMatch(r.line, /woken —/);
 });
 
-test('the relay is kickstarted WITHOUT -k when no pass is running', () => {
+test('the relay is kickstarted WITHOUT -k when no pass is running, after its wake file, so the tick it starts runs a pass (SP-236)', () => {
   const { logDir, config } = scratch();
   try {
     const calls = [];
@@ -71,7 +71,7 @@ test('the relay is kickstarted WITHOUT -k when no pass is running', () => {
     assert.deepEqual(calls, [['kickstart', 'gui/501/com.normie.relay']]);
     assert.equal(r.code, 0);
     assert.equal(r.line, 'relay: woken — launchctl kickstart gui/501/com.normie.relay started a pass');
-    assert.ok(!existsSync(join(logDir, 'normie-relay.wake')), 'the relay has no wake file');
+    assert.ok(existsSync(join(logDir, 'normie-relay.wake')), 'the relay\'s wake file was not written: its tick would skip');
   } finally {
     rmSync(logDir, { recursive: true, force: true });
   }
@@ -83,6 +83,7 @@ test('a relay pass already running is left alone: nothing is started', () => {
     holdLock(logDir, 'relay', process.pid);
     const r = wakeLane('relay', { config, launchctl: () => assert.fail('started a second relay') });
     assert.equal(r.code, 0);
+    assert.ok(!existsSync(join(logDir, 'normie-relay.wake')), 'a wake for a running pass would start a second one behind it');
     assert.match(r.line, /^relay: a pass is already running \(pid \d+\) — not starting a second/);
   } finally {
     rmSync(logDir, { recursive: true, force: true });
@@ -102,12 +103,12 @@ test('a stale relay lock (its pid gone) does not stop the kickstart', () => {
   }
 });
 
-test('a kickstart that fails exits 1 naming launchctl\'s answer', () => {
+test('a kickstart that fails exits 1 naming launchctl\'s answer, and says the next tick runs the pass', () => {
   const { logDir, config } = scratch();
   try {
     const r = wakeLane('relay', { config, uid: 501, launchctl: () => ({ status: 113, output: 'Could not find service "com.normie.relay" in domain for user gui: 501' }) });
     assert.equal(r.code, 1);
-    assert.equal(r.line, 'relay: NOT WOKEN — launchctl kickstart gui/501/com.normie.relay exited 113 (Could not find service "com.normie.relay" in domain for user gui: 501)');
+    assert.equal(r.line, `relay: NOT WOKEN — launchctl kickstart gui/501/com.normie.relay exited 113 (Could not find service "com.normie.relay" in domain for user gui: 501); the wake file ${join(logDir, 'normie-relay.wake')} is written, so the next tick runs a pass`);
   } finally {
     rmSync(logDir, { recursive: true, force: true });
   }

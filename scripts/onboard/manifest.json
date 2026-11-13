@@ -258,6 +258,11 @@
       "to": "scripts/lib/loopSchedule.mjs"
     },
     {
+      "from": "scripts/lib/wakeSetting.mjs",
+      "to": "scripts/lib/wakeSetting.mjs",
+      "why": "loop_runner.sh and run_relay.sh read the wake time set on the Settings page with it"
+    },
+    {
       "from": "scripts/lib/gh_auth.sh",
       "to": "scripts/lib/gh_auth.sh"
     },

@@ -13,8 +13,8 @@ test('the defaults are today\'s behaviour, read from where it lives now (SP-224)
   assert.deepEqual(CONTROLS.filter((c) => c.kind === 'model').map((c) => c.key), MODEL_LANES.map((l) => `model.${l}`));
 });
 
-test('every group names the ticket that wires it in, and every control is in a group', () => {
-  assert.deepEqual(GROUPS.map((g) => [g.key, g.wiredBy]), [['wake', 'SP-236'], ['pause', 'SP-237'], ['cap', 'SP-238'], ['model', 'SP-239']]);
+test('every group the lanes do not use yet names the ticket that wires it in (the wake times are wired, SP-236), and every control is in a group', () => {
+  assert.deepEqual(GROUPS.map((g) => [g.key, g.wiredBy]), [['wake', null], ['pause', 'SP-237'], ['cap', 'SP-238'], ['model', 'SP-239']]);
   assert.ok(CONTROLS.every((c) => GROUPS.some((g) => g.key === c.group)));
 });
 
