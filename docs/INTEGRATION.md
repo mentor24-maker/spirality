@@ -95,12 +95,15 @@ back. `--dry-run` prints what it would post and writes nothing.
 **When it runs:** on every relay pass, every 10 minutes (SP-274,
 `scripts/run_relay.sh` with `scripts/lib/relay_app_checks.sh`), after the
 relay's own pass and signed in as the relay; each check's `everyMinutes`
-still decides whether it actually runs. The relay's 480 seconds are shared:
-the check step gets at most 180 of them (`RELAY_APP_CHECKS_LIMIT_SECONDS`)
-and the relay part the rest, so a check that hangs is stopped and said so in
-the log, and can never hold up a merge. A check whose own `timeoutSeconds`
-is longer than that share is cut short at it. A project that lists no checks
-logs `app-checks: none listed`. A check pass that fails makes the relay's END
+still decides whether it actually runs. When the manifest lists a check,
+the relay's 480 seconds are shared: the check step gets at most 180 of them
+(`RELAY_APP_CHECKS_LIMIT_SECONDS`, at least 1) and the relay part the rest,
+so a check that hangs is stopped and said so in the log, and can never hold
+up a merge. A check whose own `timeoutSeconds` is longer than that share is
+cut short at it. A project that lists no checks keeps all 480 seconds for
+the relay part, starts nothing, and logs `app-checks: none listed`. A
+checkout whose `package.json` cannot be read is a failed step, never "none
+listed". A check pass that fails makes the relay's END
 line read `A STEP FAILED AND SAID SO ABOVE`, never `pass complete`; the relay
 part's merges and hand-backs in that pass stand. `scripts/install_loop_runner.sh
 --status` shows the newest `app-checks:` line from the relay log.

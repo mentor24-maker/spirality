@@ -7,8 +7,10 @@
 # posted to the project's bus. It runs AFTER the relay part, under its own time
 # limit, so a check that hangs or crashes can never stop a merge.
 #
-# The time: the pass has one limit (480 seconds). The relay part gets that
-# limit minus the check step's share; the check step gets whatever of the
+# The time: the pass has one limit (480 seconds). When the manifest lists no
+# check, the relay part keeps all of it and nothing is started. Otherwise the
+# relay part gets that limit minus the check step's share; the check step gets
+# whatever of the
 # limit is left once the relay part ends, never more than its share, less a
 # margin for the stop-and-wait at the end, so the two together never outlast
 # the pass's limit.
@@ -18,6 +20,31 @@
 RELAY_APP_CHECKS_POLL=1
 RELAY_APP_CHECKS_GRACE=5
 RELAY_APP_CHECKS_MARGIN=$((RELAY_APP_CHECKS_POLL + RELAY_APP_CHECKS_GRACE + 4))
+
+# relay_app_checks_listed <checkout folder>
+# Prints how many application checks the checkout's manifest lists: "none",
+# a number, or "unknown" when the manifest or its reader cannot be loaded
+# here (the check step then runs and says why). Read with the same reader
+# every module uses, lib/projectConfig.mjs, beside this file.
+relay_app_checks_listed() {
+  local n reader
+  reader="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/lib/projectConfig.mjs"
+  n="$(cd "$1" && RELAY_CONFIG_READER="$reader" node --input-type=module -e "
+    const { loadProjectConfig } = await import(process.env.RELAY_CONFIG_READER);
+    console.log((loadProjectConfig().applicationChecks || []).length);
+  " 2>/dev/null)" || n=""
+  if ! [[ "$n" =~ ^[0-9]+$ ]]; then echo unknown
+  elif [ "$n" -eq 0 ]; then echo none
+  else echo "$n"; fi
+}
+
+# relay_limits_usable <pass limit> <checks share>
+# True when both are whole seconds and the share is at least 1 and less than
+# the pass limit. A share of 0 is refused here, up front, rather than leaving
+# every pass with no time for its checks.
+relay_limits_usable() {
+  [[ "$1" =~ ^[0-9]+$ && "$2" =~ ^[0-9]+$ ]] && [ "$2" -ge 1 ] && [ "$2" -lt "$1" ]
+}
 
 # relay_app_checks_budget <pass limit> <checks share> <seconds the pass has run>
 # Prints the seconds the check step may take: what is left of the pass limit,
@@ -44,10 +71,20 @@ run_relay_app_checks() {
   # A project carrying a wizard copy of the loop has no app-checks command:
   # its checks are not run from here until its lanes run from Spirality's
   # folder (docs/INTEGRATION.md, move 2). Said, and not a failed step.
-  if ! node -e "process.exit(require(process.cwd() + '/package.json').scripts?.['app-checks'] ? 0 : 1)" 2>/dev/null; then
-    echo "app-checks: none listed (this checkout has no app-checks command)"
-    return 0
-  fi
+  # A package.json that is missing or cannot be read is a broken checkout,
+  # never "none listed": it is said, and the step fails.
+  local probe
+  probe="$(node -e "
+    let pkg;
+    try { pkg = JSON.parse(require('fs').readFileSync('package.json', 'utf8')); }
+    catch (err) { console.log(err.message.split('\\n')[0]); process.exit(2); }
+    process.exit(pkg.scripts && pkg.scripts['app-checks'] ? 0 : 1);
+  " 2>&1)"
+  case "$?" in
+    0) ;;
+    1) echo "app-checks: none listed (this checkout has no app-checks command)"; return 0 ;;
+    *) echo "app-checks: FAILED: this checkout's package.json could not be read ($probe), so the checks did not run."; return 2 ;;
+  esac
   local here
   here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
   RUN_WITH_TIME_LIMIT_POLL="$RELAY_APP_CHECKS_POLL" RUN_WITH_TIME_LIMIT_GRACE="$RELAY_APP_CHECKS_GRACE" \

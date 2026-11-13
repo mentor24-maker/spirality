@@ -202,10 +202,69 @@ test('app-checks on the relay: run_relay.sh runs the step after the relay part, 
   assert.equal(text.split('PASS_START=$(date +%s)').length - 1, 1);
 });
 
+/** The real installer's --status, reading a scratch manifest (no tracker port) from its folder. */
+function status(s) {
+  const r = spawnSync('bash', [join(HERE, '..', 'install_loop_runner.sh'), '--status'], { cwd: s.dir, encoding: 'utf8' });
+  return { status: r.status, out: r.stdout, err: r.stderr };
+}
+
+test('app-checks on the relay: --status over a relay log with no app-checks line yet says "(none yet)" and still prints the tracker section', () => {
+  const s = scratch(null);
+  writeFileSync(join(s.dir, 'logs', 'example-relay.log'), '===== 2026-11-13 00:31:55 START relay — /x =====\n===== 2026-11-13 00:32:11 END relay — pass complete (exit 0) =====\n');
+  const r = status(s);
+  assert.equal(r.status, 0, `${r.out}${r.err}`);
+  assert.match(r.out, /^last end: +2026-11-13 00:32:11 END relay — pass complete \(exit 0\)$/m);
+  assert.match(r.out, /^app-checks: \(none yet\)$/m);
+  assert.match(r.out, /^── tracker$/m, 'the sections after the relay still print');
+});
+
 test('app-checks on the relay: --status shows the newest app-checks line from the relay log', () => {
-  const text = readFileSync(join(HERE, '..', 'install_loop_runner.sh'), 'utf8');
-  assert.match(text, /checks="\$\(grep -E '\^app-checks:' "\$log" \| tail -1/);
-  assert.ok(text.includes('echo "app-checks: ${checks:-(none yet)}"'));
+  const s = scratch(null);
+  writeFileSync(join(s.dir, 'logs', 'example-relay.log'), 'app-checks: none listed\napp-checks: 1 run, 0 not due yet, 1 failing, 1 posted.\n===== END relay — pass complete (exit 0); app-checks finished =====\n');
+  const r = status(s);
+  assert.equal(r.status, 0, `${r.out}${r.err}`);
+  assert.match(r.out, /^app-checks: 1 run, 0 not due yet, 1 failing, 1 posted\.$/m);
+  assert.match(r.out, /^── tracker$/m);
+});
+
+test('app-checks on the relay: the relay part keeps the whole limit when no check is listed, and sets the share aside only when one is', () => {
+  assert.equal(fn('relay_app_checks_listed', scratch(null).dir), 'none');
+  assert.equal(fn('relay_app_checks_listed', scratch([]).dir), 'none');
+  assert.equal(fn('relay_app_checks_listed', scratch([DISK, { ...DISK, name: 'disk2' }]).dir), '2');
+  // A manifest that cannot be read here: the share is set aside and the check step says why.
+  const broken = scratch(null);
+  writeFileSync(join(broken.dir, 'spirality.project.json'), '{ not json');
+  assert.equal(fn('relay_app_checks_listed', broken.dir), 'unknown');
+
+  const text = readFileSync(join(HERE, '..', 'run_relay.sh'), 'utf8');
+  assert.ok(text.includes('if [ "$CHECKS_LISTED" = "none" ]; then RELAY_LIMIT="$PASS_LIMIT"; else RELAY_LIMIT=$((PASS_LIMIT - CHECKS_SHARE)); fi'));
+  const listed = text.indexOf('CHECKS_LISTED="$(relay_app_checks_listed "$REPO")"');
+  assert.ok(listed > text.indexOf('back_to_main') && listed < text.indexOf('PASS_START=$(date +%s)'), 'counted after the pull, before the relay part starts');
+});
+
+test('app-checks on the relay: a checks share of 0, or one not less than the pass limit, is refused up front', () => {
+  const usable = (pass, share) => spawnSync('bash', ['-c', 'source "$1"; relay_limits_usable "$2" "$3"', 'x', LIB, pass, share]).status === 0;
+  assert.equal(usable('480', '180'), true);
+  assert.equal(usable('480', '1'), true);
+  assert.equal(usable('480', '0'), false);
+  assert.equal(usable('480', '480'), false);
+  assert.equal(usable('480', 'abc'), false);
+  assert.equal(usable('', '180'), false);
+  assert.ok(readFileSync(join(HERE, '..', 'run_relay.sh'), 'utf8').includes('if ! relay_limits_usable "$PASS_LIMIT" "$CHECKS_SHARE"; then'));
+});
+
+test('app-checks on the relay: a package.json that cannot be read is a failed step, never "none listed"', () => {
+  const s = scratch([DISK]);
+  writeFileSync(join(s.dir, 'package.json'), '{ broken');
+  const r = step(s, 60, { cwd: s.dir });
+  assert.equal(r.status, 2, r.out);
+  assert.match(r.out, /^app-checks: FAILED: this checkout's package\.json could not be read \(.+\), so the checks did not run\.$/m);
+  assert.doesNotMatch(r.out, /none listed/);
+  const missing = scratch([DISK]);
+  const m = step(missing, 60, { cwd: missing.dir });
+  assert.equal(m.status, 2, m.out);
+  assert.match(m.out, /^app-checks: FAILED: .*package\.json could not be read/m);
+  assert.deepEqual(s.posts(), []);
 });
 
 test('app-checks on the relay: the step names no project, label, port or folder', () => {

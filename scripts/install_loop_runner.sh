@@ -88,7 +88,7 @@ status_one() {
     echo "loaded:   no"
   fi
   if [ -d "$lock" ]; then
-    local pid; pid="$(cat "$lock/pid" 2>/dev/null || true)"
+    local pid; pid="$(cat "$lock/pid" 2>/dev/null)"
     if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then echo "lock:     held by live pid $pid — a pass is working"
     else echo "lock:     STALE (pid ${pid:-unrecorded} is gone) — the next start clears it"; fi
   else
@@ -106,7 +106,9 @@ status_one() {
       echo "last end:  $(grep -E "END relay" "$log" | tail -1 | sed 's/=//g' | xargs || echo '(none yet)')"
       # The newest line of the application checks the relay runs after its
       # own pass (SP-274), so Dane can see when they last ran and what said.
-      local checks; checks="$(grep -E '^app-checks:' "$log" | tail -1 | sed 's/^app-checks: *//')"
+      # A log with none yet is normal: grep finds nothing, and under pipefail
+      # that would end the whole --status here, so it is caught.
+      local checks; checks="$(grep -E '^app-checks:' "$log" | tail -1 | sed 's/^app-checks: *//' || true)"
       echo "app-checks: ${checks:-(none yet)}"
     else
       echo "last pass: $(grep -E "START /$job" "$log" | tail -1 | sed 's/=//g' | xargs || echo '(none yet)')"
@@ -160,7 +162,7 @@ status_tracker() {
   echo "          (columns: PID, last exit code, label. A PID here means the server is up right now.)"
   # /me without a token answers 401: the tracker's own answer to a knock with
   # no key. Silence, or any other answer, means it is not the tracker there.
-  code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 "$(tracker_url)/me" 2>/dev/null || true)"
+  code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 "$(tracker_url)/me" 2>/dev/null)"
   if [ "$code" = "401" ]; then
     echo "answers:  yes — $(tracker_url) (listening on $TRACKER_HOST:$TRACKER_PORT)"
   else
@@ -174,7 +176,7 @@ status_tracker() {
 
   status_job_header "$BACKUP"
   echo "          (runs nightly at $(printf '%02d:%02d' "$BACKUP_HOUR" "$BACKUP_MINUTE"); '-' for PID is normal between runs.)"
-  newest="$(ls -1 "$TRACKER_BACKUP_DIR"/tracker-*.db 2>/dev/null | tail -1 || true)"
+  newest="$(ls -1 "$TRACKER_BACKUP_DIR"/tracker-*.db 2>/dev/null | tail -1)"
   if [ -n "$newest" ]; then
     echo "backups:  $(ls -1 "$TRACKER_BACKUP_DIR"/tracker-*.db | wc -l | xargs) in $TRACKER_BACKUP_DIR, newest $(basename "$newest")"
   else
