@@ -195,6 +195,33 @@ pin a package version. Dane chose to keep the safeguard another way (SP-261,
 - **A bad release is rolled back for one project** by naming its previous
   release again, without touching the others.
 
+### What a release is, and the commands (SP-265)
+
+A **release** is one commit of Spirality's `main`, named by a git tag
+`release-1`, `release-2` and so on, counting up. Which release each project
+runs is written down in the tracker (next to its pipeline controls), never in
+a committed file: every release ever named for a project, newest first, with
+who named it and when. The newest is the one it runs. Spirality's own project
+has no release: its lanes always run `main`, so they meet every change first.
+
+| What | Command | Refused (exit 2) when |
+| --- | --- | --- |
+| Cut a release | `npm run release -- cut` | `main` has not moved since the last release |
+| See them | `npm run clickup -- release list` | (read-only; exit 1 if the tags cannot be read) |
+| Name one for a project | `npm run clickup -- release name --project <slug> --to release-<n>` | the tag does not exist, or it is Spirality's own project |
+| Roll a project back | `npm run clickup -- release back --project <slug>` | it has no earlier release to go back to |
+
+`cut` reads `main` and the tags from GitHub itself, pushes the new tag and
+reads it back. It changes no branch. `name` and `back` read the tracker's
+record back after the write, and exit 1 when it did not stick. A roll-back
+names the newest earlier release numbered lower than the one running now, so
+rolling back twice goes two steps back, never back up to the bad one.
+
+Slice 1 of 4: nothing runs from the record yet. Still to come: showing each
+project's release on the Settings page with Move to Newest and Roll Back
+(SP-275), running each project's lanes on its release (SP-276), and moving a
+project to the newest release after a quiet period (SP-277).
+
 ## The moves
 
 Each is its own ticket in Spirality's queue, and each removal from a project
@@ -217,6 +244,8 @@ is a ticket in that project's own queue, filed once Spirality's side is Live:
    filed 2026-11-12, which also sorts StarCaster's watchdogs into pipeline
    watchdogs and application checks).
 5. Name a Spirality release for each project, Spirality's own lanes first.
+   Slice 1 done (SP-265): releases, the tracker's record of which one each
+   project runs, and the commands to cut, name and roll back (above).
 6. In each project's queue: remove the copied loop (`loop/`, the copied
    `.claude/` skills and hooks) and, in StarCaster, the tracker posting in
    `scripts/lib/clickup.cjs` and the watchdogs in `run_bus_relay.sh`.

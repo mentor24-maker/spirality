@@ -307,6 +307,24 @@ export function createApiTracker({ token, baseUrl, project, listId, timeoutMs, l
       return out;
     },
 
+    /**
+     * Spirality's releases (SP-265): `{ ownProject, ownRelease, projects:
+     * [{ slug, name, own, release, history }] }` for every project this
+     * sign-in may see. Read-only.
+     */
+    async releases() {
+      const out = await call('GET', '/releases');
+      if (!out.res.ok) return out;
+      if (!Array.isArray(out.json?.projects)) return refused(502, 'the tracker answered the releases without a list of projects.');
+      return out;
+    },
+    /** One project's release record (`{ slug, own, release, history }`), for a read-back. */
+    projectRelease: (slug) => call('GET', `/releases/${encodeURIComponent(slug)}`),
+    /** Name a release for a project; the answer is the record as stored. */
+    nameRelease: (slug, release) => call('PUT', `/releases/${encodeURIComponent(slug)}`, { release }),
+    /** Roll a project back to the release it ran before; the answer is the record as stored. */
+    rollBackRelease: (slug) => call('POST', `/releases/${encodeURIComponent(slug)}/back`, {}),
+
     /** The tracker has no spaces: its one "list" is the configured project. */
     listsInSpace: async () => ({ res: { ok: true, status: 200, headers: { get: () => null } }, json: { lists: [{ id: project, name: `${project} (tracker project)` }] }, text: '' }),
     foldersInSpace: async () => ({ res: { ok: true, status: 200, headers: { get: () => null } }, json: { folders: [] }, text: '' }),

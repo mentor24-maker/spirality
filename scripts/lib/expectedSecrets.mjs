@@ -35,6 +35,12 @@ import { ProjectConfigError } from '../../lib/projectConfig.mjs';
  * under the same secret names in its own Doppler project, its actors named
  * for it (`normie loop-build`): seatsForConfig in tracker/signins.mjs.
  *
+ * The `app` seat is the project's live website (StarCaster's on Vercel):
+ * it files the site's bug reports as tickets and posts its alarms to the
+ * project's bus (SP-279). It is a seat of its own so those read as the
+ * website's, never as `hand-run`. Its token is made here like any other;
+ * putting it into the website's host is the operator's paste.
+ *
  * These are the built-in seats every project has. A project that runs a lane
  * of its own adds a machine seat for it by naming it in its project config's
  * `projectLanes` (laneSeats below); no project's lane names live here.
@@ -46,6 +52,7 @@ export const TRACKER_SEATS = [
   { secret: 'TRACKER_TOKEN_LOOP_INTAKE', kind: 'machine', name: 'loop-intake', what: "the intake loop's tracker sign-in" },
   { secret: 'TRACKER_TOKEN_RELAY', kind: 'machine', name: 'relay', what: "the relay's tracker sign-in" },
   { secret: 'TRACKER_TOKEN_HAND_RUN', kind: 'machine', name: 'hand-run', handRun: true, what: "a hand-run session's tracker sign-in" },
+  { secret: 'TRACKER_TOKEN_APP', kind: 'machine', name: 'app', app: true, what: "the project's live website's tracker sign-in, for its bug reports and alarms" },
 ];
 
 /** The secret a lane's runner names (scripts/loop_runner.sh): loop-handoff -> TRACKER_TOKEN_LOOP_HANDOFF. */

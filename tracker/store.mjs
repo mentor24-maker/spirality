@@ -64,6 +64,16 @@
  *    value, new value, who, when) in that transaction, and the value is read
  *    back before it returns. Setting a control to the value it already has
  *    writes nothing and logs nothing.
+ *  - A project's release (docs/INTEGRATION.md, "How a change reaches the projects") is a
+ *    record, next to its pipeline controls: one `project_releases` row each
+ *    time a release (`release-<n>`, lib/releases.mjs) is named for it, with
+ *    who and when, never edited or removed while the project lives. The
+ *    release it runs is the newest row; none at all means none named.
+ *    The tracker's home project is never given one (its lanes always run
+ *    `main`): the caller names it, and the store refuses it. Only the
+ *    project's operator, as a person, or a loop names one, checked in the
+ *    same transaction as the write, and the newest row is read back before
+ *    it returns. Naming the release it already runs writes nothing.
  *  - A person's account is an email (unique, kept lower-case) and a password
  *    of at least 12 characters, stored only as a salted scrypt hash. A
  *    machine never holds an email, a password or a session: the loops keep
@@ -111,6 +121,7 @@ import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypt
 import { DatabaseSync } from 'node:sqlite';
 import loopStatuses from '../lib/loopStatuses.js';
 import { checkControl, ControlError, controlOf, withValues } from './pipelineControls.mjs';
+import { isReleaseName, rollBackTarget } from '../lib/releases.mjs';
 
 const { DISPLAY, TERMINAL_STATUSES, PRIORITY_RANK, statusOf } = loopStatuses;
 
@@ -300,6 +311,14 @@ CREATE TABLE IF NOT EXISTS pipeline_setting_changes (
   at          TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS pipeline_setting_changes_by_project ON pipeline_setting_changes (project, id);
+CREATE TABLE IF NOT EXISTS project_releases (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  project     TEXT NOT NULL REFERENCES projects(slug),
+  release     TEXT NOT NULL,
+  actor       INTEGER NOT NULL REFERENCES actors(id),
+  at          TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS project_releases_by_project ON project_releases (project, id);
 CREATE INDEX IF NOT EXISTS project_members_by_actor ON project_members (actor, project);
 CREATE INDEX IF NOT EXISTS attachments_by_ticket ON attachments (ticket, id);
 CREATE INDEX IF NOT EXISTS project_docs_by_project ON project_docs (project, id);
@@ -745,6 +764,44 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
       throw new StoreError('unknown-actor', `${what} ${id} is not a known actor.`);
     }
     return id;
+  }
+
+  /**
+   * The checks every release write makes, inside its transaction: the
+   * project exists and is not the home project, and the actor is its
+   * operator as a person, or a loop. Answers the project.
+   */
+  function releaseWriteCheck(store, { project, actor, ownProject }) {
+    if (typeof ownProject !== 'string' || !ownProject) {
+      throw new StoreError('no-own-project', 'the caller did not say which project is the tracker\'s home, so no release can be named.');
+    }
+    const p = store.getProject(project);
+    if (!p) throw new StoreError('unknown-project', `no project "${project}".`);
+    if (p.slug === ownProject) {
+      throw new StoreError('own-project', `${p.name} is the tracker's home project: its lanes always run main, so no release is named for it.`);
+    }
+    requireActor(actor, 'the actor');
+    const who = store.getActor(actor);
+    if (who.kind !== 'machine' && p.operator !== who.id) {
+      throw new StoreError('not-allowed', `only ${p.name}'s operator, signed in as a person, or a loop may name the release it runs.`);
+    }
+    return p;
+  }
+
+  /**
+   * Inside a release write's transaction: name `to` for project `p`, read
+   * it back, and answer `{ project, from, to, changed }` (nothing written
+   * when it already runs `to`).
+   */
+  function writeRelease(store, p, to, actor) {
+    const before = store.projectReleases(p.slug)[0]?.release ?? null;
+    if (before === to) return { project: p.slug, from: before, to, changed: false };
+    db.prepare('INSERT INTO project_releases (project, release, actor, at) VALUES (?, ?, ?, ?)').run(p.slug, to, actor, now());
+    const after = store.projectReleases(p.slug)[0];
+    if (after?.release !== to || after.actor !== actor) {
+      throw new StoreError('write-failed', `${p.name}'s release read back as ${after?.release ?? 'none'}, not ${to}.`);
+    }
+    return { project: p.slug, from: before, to, changed: true };
   }
 
   /** A person's id, or a thrown refusal: unknown, or a machine. */
@@ -1443,6 +1500,7 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
         // made later under the same slug starts from the defaults.
         db.prepare('DELETE FROM pipeline_settings WHERE project = ?').run(slug);
         db.prepare('DELETE FROM pipeline_setting_changes WHERE project = ?').run(slug);
+        db.prepare('DELETE FROM project_releases WHERE project = ?').run(slug);
         const r = db.prepare('DELETE FROM projects WHERE slug = ?').run(slug);
         if (num(r.changes) !== 1 || this.getProject(slug)) {
           throw new StoreError('write-failed', `project "${slug}" was not deleted.`);
@@ -1875,6 +1933,59 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
       const n = Number.isInteger(limit) && limit > 0 ? limit : 200;
       return db.prepare('SELECT * FROM pipeline_setting_changes WHERE project = ? ORDER BY id DESC LIMIT ?').all(String(project), n)
         .map((r) => ({ id: num(r.id), setting: r.setting, label: controlOf(r.setting)?.label ?? r.setting, from: r.from_value, to: r.to_value, actor: num(r.actor), at: r.at }));
+    },
+
+    /**
+     * Every release named for a project, newest first:
+     * `[{ id, release, actor, at }]`. The first is the one it runs; an empty
+     * list means none has been named.
+     */
+    projectReleases(project) {
+      if (!this.getProject(project)) throw new StoreError('unknown-project', `no project "${project}".`);
+      return db.prepare('SELECT * FROM project_releases WHERE project = ? ORDER BY id DESC').all(String(project))
+        .map((r) => ({ id: num(r.id), release: r.release, actor: num(r.actor), at: r.at }));
+    },
+
+    /**
+     * Name a release for a project. `ownProject` is the
+     * slug of the tracker's home project, which the caller knows and the store
+     * does not: it is refused (`own-project`), as is a name that is not
+     * `release-<n>` (`bad-release`), a project nobody may see
+     * (`unknown-project`), and anyone but the project's operator as a person
+     * or a loop (`not-allowed`). Whether the tag exists is the caller's to
+     * check: the store has no git. In one transaction: the release it runs is
+     * read, the new row written and read back. Answers `{ project, from, to,
+     * changed }`; `changed` is false, and nothing is written, when it already
+     * runs that release.
+     */
+    nameRelease({ project, release, actor, ownProject }) {
+      const to = String(release ?? '').trim();
+      if (!isReleaseName(to)) throw new StoreError('bad-release', `"${release}" is not a release name; a release is named release-<n>, n a whole number from 1.`);
+      return transaction(() => {
+        const p = releaseWriteCheck(this, { project, actor, ownProject });
+        return writeRelease(this, p, to, actor);
+      });
+    },
+
+    /**
+     * Roll a project back: name again the release it ran before the
+     * one it runs now (lib/releases.mjs rollBackTarget: the newest earlier
+     * entry numbered lower). The same refusals as nameRelease, and
+     * `nothing-to-roll-back-to` when there is no such release. Answers
+     * `{ project, from, to, changed: true }`, read back.
+     */
+    rollBackRelease({ project, actor, ownProject }) {
+      return transaction(() => {
+        const p = releaseWriteCheck(this, { project, actor, ownProject });
+        const history = this.projectReleases(p.slug);
+        const to = rollBackTarget(history);
+        if (!to) {
+          throw new StoreError('nothing-to-roll-back-to', history.length
+            ? `${p.name} runs ${history[0].release}, and no earlier release was ever named for it; there is nothing to roll back to.`
+            : `${p.name} has no release named yet; there is nothing to roll back to.`);
+        }
+        return writeRelease(this, p, to, actor);
+      });
     },
 
     /**
