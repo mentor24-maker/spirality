@@ -2,6 +2,8 @@
 
 Filed as WaveCenter ticket 86bcgm97x on 2026-10-11 and decided by Dane the same day: the substrate is Alphire Spirality, in this repository. The text below is the ticket's analysis and plan, kept here so the repository carries its own reason for existing.
 
+**Where it ends up changed (2026-11-12).** The plan below has projects import a shared package and pin its version (phases 1, 2 and 5). Dane decided instead that loop code lives only in Spirality: a project provides a manifest, `npm run verify`, optional application checks and its rules for agents, Spirality's lanes run against it from this repository, and a staged rollout replaces the pinned version. That is [INTEGRATION.md](INTEGRATION.md) (SP-261). The analysis, the gaps and phase 3's list of watchdogs below still hold.
+
 ## Goal
 Dane asked (2026-10-11): review the StarCaster and WaveCenter pipelines, confirm they are consistent, and plan a properly abstracted multi-project substrate. This ticket carries the analysis and the plan, and asks for the decisions that unlock it. It is not itself build work; the build tickets are filed after Dane answers.
 
