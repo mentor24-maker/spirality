@@ -996,13 +996,14 @@ export function askParagraphs(ask) {
  * typed them under "Original Request", a link to the ticket a slice was cut
  * from, and only then the summary, under "How the Loop Understood It".
  */
-export function renderQuickAction({ name, description, status, comments = [], answerIn = false, pullRequestState = null }) {
+export function renderQuickAction({ name, description, status, comments = [], answerIn = false, mergeStands = false, pullRequestState = null }) {
   const card = newestCard(comments);
   const summary = card ? cardContext(card.body) ?? firstParagraph(description) : firstParagraph(description);
   const state = String(status ?? '').toLowerCase();
   const his = HIS_STATUSES.includes(state);
   // SP-226: a merged or closed PR is past the card's "Your move: Merge".
-  const ask = card && his && !answerIn && !prSettled({ status, pullRequestState }) ? cardAsk(card.body) : null;
+  // SP-285: nor is it his move while his merge word still stands.
+  const ask = card && his && !answerIn && !mergeStands && !prSettled({ status, pullRequestState }) ? cardAsk(card.body) : null;
   const where = his ? null : STATUS_LINES[state] ?? null;
   const asked = originalRequest(description);
   const top = asked ? [
@@ -1069,12 +1070,21 @@ export function cardMove(body) {
 export const ANSWER_IN_NOTE = 'your answer is in';
 
 /**
- * A ticket's status as the page writes it, with ANSWER_IN_NOTE after it
- * when his answer is in: "Ready to launch · your answer is in". Plain text.
+ * The short note beside the status of a Ready to launch ticket whose merge
+ * word still stands (SP-285): he said it, a machine has written since (a
+ * conflict hand-off), and the relay merges on its own once it can.
  */
-export function statusLabel({ status, answerIn = false }) {
+export const MERGE_STANDS_NOTE = 'your merge word stands';
+
+/**
+ * A ticket's status as the page writes it, with ANSWER_IN_NOTE after it
+ * when his answer is in: "Ready to launch · your answer is in", or
+ * MERGE_STANDS_NOTE when his merge word still stands. Plain text.
+ */
+export function statusLabel({ status, answerIn = false, mergeStands = false }) {
   const name = String(status ?? '').replace(/^./, (c) => c.toUpperCase());
-  return answerIn ? `${name} · ${ANSWER_IN_NOTE}` : name;
+  if (answerIn) return `${name} · ${ANSWER_IN_NOTE}`;
+  return mergeStands ? `${name} · ${MERGE_STANDS_NOTE}` : name;
 }
 
 /**
@@ -1103,8 +1113,11 @@ export function renderHeldUp(t, timeOf) {
  * server stops saying so. No minutes are spelled out; the relay's interval
  * lives in the installer.
  */
-export function renderAnswerIn({ answerIn = false }) {
-  return answerIn ? '<p class="answer-in">Your answer is in. The relay acts on it at its next pass.</p>' : '';
+export function renderAnswerIn({ answerIn = false, mergeStands = false }) {
+  if (answerIn) return '<p class="answer-in">Your answer is in. The relay acts on it at its next pass.</p>';
+  // SP-285: said, then a machine wrote (a conflict hand-off). Still his answer.
+  if (mergeStands) return '<p class="answer-in">Your merge word stands. The relay merges this on its own as soon as it can; you do not need to say it again.</p>';
+  return '';
 }
 
 /**
@@ -1132,10 +1145,10 @@ export function renderReplyForm({ answerIn = false }, name) {
  * entry); the button posts it as his reply and the relay does the merge,
  * exactly as if he had typed it. Never once his answer is in (renderAnswerIn).
  */
-export function renderMergeAction({ status, mergePhrase, pullRequest, pullRequestState = null, comments = [], answerIn = false }) {
+export function renderMergeAction({ status, mergePhrase, pullRequest, pullRequestState = null, comments = [], answerIn = false, mergeStands = false }) {
   const line = renderPullRequestState({ status, pullRequest, pullRequestState });
   if (prSettled({ status, pullRequestState })) return line;
-  if (answerIn) return line;
+  if (answerIn || mergeStands) return line;
   if (String(status ?? '').toLowerCase() !== READY_TO_LAUNCH || !mergePhrase || !pullRequest) return line;
   const card = newestCard(comments);
   const move = card ? cardMove(card.body) : null;

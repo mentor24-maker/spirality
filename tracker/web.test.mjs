@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { DEMO_NEWEST_RELEASE, DEMO_OWN_PROJECT, demoNewestRelease, seedDemo, tickingClock } from './demoData.mjs';
 import { reportsOf, REPORT_RANGES, searchTickets, PRIORITIES, timeSplitOf, isFailureNote, TIME_BUCKETS } from './pageData.mjs';
-import { escapeHtml, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, renderReleaseGroup, controlValueText, mountainTime, wakeInEffectText, renderConsole, renderConsoleTile, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, drainLine } from './web/render.mjs';
+import { escapeHtml, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, renderReleaseGroup, controlValueText, mountainTime, wakeInEffectText, renderConsole, renderConsoleTile, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, drainLine } from './web/render.mjs';
 import { startServer, setupSettingsOf } from './server.mjs';
 import { saveAnswers, setupFields, setupOf } from './setup.mjs';
 import { DANE_FIELDS as SETUP_FIELDS, STEPS as SETUP_STEPS } from '../scripts/onboard/onboard.mjs';
@@ -170,15 +170,35 @@ test('pressing Merge puts "your answer is in" on the ticket page and the board, 
     assert.equal(statusLabel(thread), `Ready to launch · ${ANSWER_IN_NOTE}`);
     assert.equal((await boardTickets(f, 'beta')).get('BE-1').answerIn, true, 'the board and list say so too');
 
-    // The relay answers (here with a refusal): its comment is newest, the note goes, the button returns.
+    // The relay answers (here with a refusal): its comment is newest, so "your answer is in" goes and
+    // the reply box returns. But his merge word still stands (SP-285): the relay re-tries it on every
+    // pass, so no Merge button, no place on Waiting on You, and the page says it stands.
     const loopToken = f.store.issueToken(f.loop.id);
     assert.equal((await f.call('POST', '/tickets/BE-1/comments', { token: loopToken, body: { body: 'MERGE REFUSED: the check is red.' } })).status, 201);
     thread = (await f.call('GET', '/tickets/BE-1/thread')).body;
     assert.equal(thread.answerIn, false);
-    assert.match(renderMergeAction(thread), /merge-action/);
-    assert.equal(statusLabel(thread), 'Ready to launch');
+    assert.equal(thread.mergeStands, true);
+    assert.doesNotMatch(renderMergeAction(thread), /merge-action/, 'no second Merge button while his word stands (SP-285)');
+    assert.match(renderAnswerIn(thread), /Your merge word stands\. The relay merges this on its own as soon as it can; you do not need to say it again\./);
+    assert.doesNotMatch(renderQuickAction(thread), /Your move|class="needed"/);
+    assert.equal(statusLabel(thread), `Ready to launch · ${MERGE_STANDS_NOTE}`);
     assert.match(renderReplyForm(thread, 'Dane'), /<form class="reply">[\s\S]*Post Reply/, "the reply box comes back with the relay's comment");
-    assert.equal((await boardTickets(f, 'beta')).get('BE-1').answerIn, false);
+    const row = (await boardTickets(f, 'beta')).get('BE-1');
+    assert.deepEqual([row.answerIn, row.mergeStands, row.waiting], [false, true, false]);
+    assert.ok(!(await f.call('GET', '/waiting')).body.waiting.some((t) => t.id === 'BE-1'), 'not back on Waiting on You (SP-285)');
+  } finally { await f.cleanup(); }
+});
+
+test('SP-285: a new review PASS after his merge is a new round — the Merge button and Waiting on You come back', async () => {
+  const f = await fixture({ mergePhrase: 'merge' });
+  try {
+    const loopToken = f.store.issueToken(f.loop.id);
+    assert.equal((await f.call('POST', '/tickets/BE-1/comments', { body: { body: 'merge' } })).status, 201);
+    assert.equal((await f.call('POST', '/tickets/BE-1/comments', { token: loopToken, body: { body: 'REVIEW: PASSED — round 2, after a rework.' } })).status, 201);
+    const thread = (await f.call('GET', '/tickets/BE-1/thread')).body;
+    assert.equal(thread.mergeStands, false);
+    assert.match(renderMergeAction(thread), /merge-action/);
+    assert.ok((await f.call('GET', '/waiting')).body.waiting.some((t) => t.id === 'BE-1'));
   } finally { await f.cleanup(); }
 });
 
@@ -323,7 +343,7 @@ test('the list row starts its Actions cell with a check, a clock or an empty slo
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   const icon = /\nfunction statusIcon\(t\) \{[\s\S]*?\n\}\n/.exec(app)?.[0] ?? '';
   assert.ok(icon, 'statusIcon found');
-  assert.match(icon, /if \(t\.answerIn\)[\s\S]*title="Your Answer Is In" aria-label="Your Answer Is In"[\s\S]*ICONS\.answerIn/);
+  assert.match(icon, /if \(t\.answerIn \|\| t\.mergeStands\)[\s\S]*'Your Merge Word Stands' : 'Your Answer Is In'[\s\S]*title="\$\{said\}" aria-label="\$\{said\}"[\s\S]*ICONS\.answerIn/);
   assert.match(icon, /if \(t\.waiting\) return action\(`\$\{at\}#reply`, 'Waiting on Your Response', ICONS\.waiting\);/);
   assert.match(icon, /<span class="action status-icon empty" aria-hidden="true"><\/span>/);
   assert.doesNotMatch(icon, /style=/, 'no inline style');
@@ -331,7 +351,7 @@ test('the list row starts its Actions cell with a check, a clock or an empty slo
   assert.match(actions, /return \[\s*statusIcon\(t\),\s*action\(at, 'Open Ticket'/, 'the status icon comes first');
   for (const key of ['answerIn', 'waiting']) assert.match(app, new RegExp(`\\n  ${key}: '<(path|circle) `), `ICONS.${key} is a line drawing`);
   // The card keeps its words; the ticket page keeps its notice.
-  assert.match(app, /\$\{t\.answerIn \? `<span class="answer-in">\$\{escapeHtml\(ANSWER_IN_NOTE\)\}<\/span>` : ''\}/);
+  assert.match(app, /\$\{t\.answerIn \? `<span class="answer-in">\$\{escapeHtml\(ANSWER_IN_NOTE\)\}<\/span>` : t\.mergeStands \? `<span class="answer-in">\$\{escapeHtml\(MERGE_STANDS_NOTE\)\}<\/span>` : ''\}/);
   const css = readFileSync(WEB('app.css'), 'utf8');
   const green = /\nspan\.action\.answer-in-icon \{ color: (#[0-9a-fA-F]{6}); \}/.exec(css)?.[1];
   assert.ok(green, 'the check has its own colour');
@@ -2711,6 +2731,23 @@ test('Time split: Queued, 1h Building, 2h In review, 3h Ready to launch, his "me
   for (let i = 1; i < stretches.length; i += 1) assert.equal(stretches[i].from, stretches[i - 1].to);
   assert.equal(stretches[0].from, at(0));
   assert.equal(stretches[stretches.length - 1].to, at(11.5), 'Live time is not counted');
+});
+
+test('Time split (SP-285): after his "merge", a relay conflict note does not put the time back on him; a new review round does', () => {
+  const t0 = Date.parse('2026-11-13T14:00:00Z');
+  const at = (h) => t0 + h * HOUR;
+  const pass = (h) => ({ at: at(h), byMachine: true, byOperator: false, failure: false, verdict: 'pass' });
+  const note = (h) => ({ at: at(h), byMachine: true, byOperator: false, failure: false });
+  const merge = (h) => ({ at: at(h), byMachine: false, byOperator: true, failure: false, mergeWord: true });
+  // SP-237's day: PASS and card, 1h for him, "merge", relay note 1h later, 3h of catch-up, Live.
+  const a = timeSplitOf([[at(0), 'ready to launch'], [at(5), 'live']], [pass(0), note(0), merge(1), note(2)], { now: at(6) });
+  assert.deepEqual(sumBuckets(a), { working: 0, lane: 4 * HOUR, operator: HOUR, broken: 0 });
+  // A new PASS after his merge (a rebuilt round) is his again until he answers it.
+  const b = timeSplitOf([[at(0), 'ready to launch']], [pass(0), merge(1), note(2), pass(3)], { now: at(4) });
+  assert.deepEqual(sumBuckets(b), { working: 0, lane: 2 * HOUR, operator: 2 * HOUR, broken: 0 });
+  // A merge said before any PASS does not stand.
+  const c = timeSplitOf([[at(0), 'ready to launch']], [merge(0), note(1)], { now: at(2) });
+  assert.deepEqual(sumBuckets(c), { working: 0, lane: HOUR, operator: HOUR, broken: 0 });
 });
 
 test('Time split: a loop\'s failure note with no move for 4 hours is broken, until the next move or his next comment', () => {
