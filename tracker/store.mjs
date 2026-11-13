@@ -55,6 +55,15 @@
  *  - A stage's colour (the Settings page's pickers) is one of the eight
  *    statuses and a `#rrggbb` value, or no row at all. One set for the whole
  *    tracker, not one per project.
+ *  - A project's pipeline controls (the Settings page's Pipeline Controls,
+ *    tracker/pipelineControls.mjs) are one `pipeline_settings` row per
+ *    control that differs from its default, and no row at all otherwise.
+ *    Only the project's operator, signed in as a person, changes one: never
+ *    a loop, never anyone else, checked in the same transaction as the
+ *    write. Every change writes one `pipeline_setting_changes` row (old
+ *    value, new value, who, when) in that transaction, and the value is read
+ *    back before it returns. Setting a control to the value it already has
+ *    writes nothing and logs nothing.
  *  - A person's account is an email (unique, kept lower-case) and a password
  *    of at least 12 characters, stored only as a salted scrypt hash. A
  *    machine never holds an email, a password or a session: the loops keep
@@ -101,6 +110,7 @@
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import loopStatuses from '../lib/loopStatuses.js';
+import { checkControl, ControlError, controlOf, withValues } from './pipelineControls.mjs';
 
 const { DISPLAY, TERMINAL_STATUSES, PRIORITY_RANK, statusOf } = loopStatuses;
 
@@ -274,6 +284,22 @@ CREATE TABLE IF NOT EXISTS seen_marks (
   at          TEXT NOT NULL,
   PRIMARY KEY (actor, ticket)
 );
+CREATE TABLE IF NOT EXISTS pipeline_settings (
+  project     TEXT NOT NULL REFERENCES projects(slug),
+  setting     TEXT NOT NULL,
+  value       TEXT NOT NULL,
+  PRIMARY KEY (project, setting)
+);
+CREATE TABLE IF NOT EXISTS pipeline_setting_changes (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  project     TEXT NOT NULL REFERENCES projects(slug),
+  setting     TEXT NOT NULL,
+  from_value  TEXT NOT NULL,
+  to_value    TEXT NOT NULL,
+  actor       INTEGER NOT NULL REFERENCES actors(id),
+  at          TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS pipeline_setting_changes_by_project ON pipeline_setting_changes (project, id);
 CREATE INDEX IF NOT EXISTS project_members_by_actor ON project_members (actor, project);
 CREATE INDEX IF NOT EXISTS attachments_by_ticket ON attachments (ticket, id);
 CREATE INDEX IF NOT EXISTS project_docs_by_project ON project_docs (project, id);
@@ -1413,6 +1439,10 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
           throw err;
         }
         db.prepare('DELETE FROM project_members WHERE project = ?').run(slug);
+        // Its pipeline controls and their change log go with it: a project
+        // made later under the same slug starts from the defaults.
+        db.prepare('DELETE FROM pipeline_settings WHERE project = ?').run(slug);
+        db.prepare('DELETE FROM pipeline_setting_changes WHERE project = ?').run(slug);
         const r = db.prepare('DELETE FROM projects WHERE slug = ?').run(slug);
         if (num(r.changes) !== 1 || this.getProject(slug)) {
           throw new StoreError('write-failed', `project "${slug}" was not deleted.`);
@@ -1784,6 +1814,67 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
         }
         return after;
       });
+    },
+
+    /**
+     * A project's pipeline controls, every one, in the order
+     * tracker/pipelineControls.mjs lists them: `[{ key, group, kind, label,
+     * default, value, isDefault, ... }]`, the stored value or the default.
+     */
+    pipelineSettings(project) {
+      if (!this.getProject(project)) throw new StoreError('unknown-project', `no project "${project}".`);
+      const stored = Object.fromEntries(db.prepare('SELECT setting, value FROM pipeline_settings WHERE project = ?').all(String(project))
+        .map((r) => [r.setting, r.value]));
+      return withValues(stored);
+    },
+
+    /**
+     * Change one pipeline control. Only the project's operator, signed in as
+     * a person, may (`not-operator` otherwise); the value is checked against
+     * its control (`unknown-setting`, `bad-setting`) before anything is read
+     * or written. In one transaction: the old value is read, the new one
+     * written (no row when it is the default), read back, and one change row
+     * logged. Answers `{ setting, from, to, changed }`; `changed` is false,
+     * and nothing is written or logged, when the value is already that.
+     */
+    setPipelineSetting({ project, setting, value, actor }) {
+      let to;
+      try {
+        to = checkControl(setting, value);
+      } catch (err) {
+        if (err instanceof ControlError) throw new StoreError(err.code, err.message);
+        throw err;
+      }
+      const c = controlOf(setting);
+      return transaction(() => {
+        const p = this.getProject(project);
+        if (!p) throw new StoreError('unknown-project', `no project "${project}".`);
+        requireActor(actor, 'the actor');
+        const who = this.getActor(actor);
+        if (who.kind !== 'human' || p.operator !== who.id) {
+          throw new StoreError('not-operator', `only ${p.name}'s operator, signed in as a person, may change its pipeline controls.`);
+        }
+        const before = this.pipelineSettings(project).find((x) => x.key === c.key).value;
+        if (before === to) return { setting: c.key, from: before, to, changed: false };
+        if (to === c.default) db.prepare('DELETE FROM pipeline_settings WHERE project = ? AND setting = ?').run(p.slug, c.key);
+        else db.prepare('INSERT INTO pipeline_settings (project, setting, value) VALUES (?, ?, ?) ON CONFLICT (project, setting) DO UPDATE SET value = excluded.value').run(p.slug, c.key, to);
+        const after = this.pipelineSettings(project).find((x) => x.key === c.key).value;
+        if (after !== to) throw new StoreError('write-failed', `the ${c.label} read back as ${after}, not ${to}.`);
+        db.prepare('INSERT INTO pipeline_setting_changes (project, setting, from_value, to_value, actor, at) VALUES (?, ?, ?, ?, ?, ?)')
+          .run(p.slug, c.key, before, to, who.id, now());
+        return { setting: c.key, from: before, to, changed: true };
+      });
+    },
+
+    /**
+     * A project's pipeline control changes, newest first, at most `limit`:
+     * `[{ id, setting, label, from, to, actor, at }]`. `label` is the
+     * control's name as the page shows it (the key, for one no longer listed).
+     */
+    pipelineSettingChanges(project, { limit = 200 } = {}) {
+      const n = Number.isInteger(limit) && limit > 0 ? limit : 200;
+      return db.prepare('SELECT * FROM pipeline_setting_changes WHERE project = ? ORDER BY id DESC LIMIT ?').all(String(project), n)
+        .map((r) => ({ id: num(r.id), setting: r.setting, label: controlOf(r.setting)?.label ?? r.setting, from: r.from_value, to: r.to_value, actor: num(r.actor), at: r.at }));
     },
 
     /**

@@ -296,6 +296,17 @@ export function createApiTracker({ token, baseUrl, project, listId, timeoutMs, l
     /** The configured project's details (name, prefix, GitHub repository, ...). Read-only. */
     projectDetails: () => call('GET', `/projects/${encodeURIComponent(project)}`),
 
+    /**
+     * The configured project's pipeline controls (SP-224) as `{ controls:
+     * [{ key, value, isDefault }] }`, defaults included. Read-only.
+     */
+    async pipelineSettings() {
+      const out = await call('GET', `/pipeline-controls/${encodeURIComponent(project)}`);
+      if (!out.res.ok) return out;
+      if (!Array.isArray(out.json?.controls) || !out.json.controls.length) return refused(502, 'the tracker answered without any pipeline controls.');
+      return out;
+    },
+
     /** The tracker has no spaces: its one "list" is the configured project. */
     listsInSpace: async () => ({ res: { ok: true, status: 200, headers: { get: () => null } }, json: { lists: [{ id: project, name: `${project} (tracker project)` }] }, text: '' }),
     foldersInSpace: async () => ({ res: { ok: true, status: 200, headers: { get: () => null } }, json: { folders: [] }, text: '' }),

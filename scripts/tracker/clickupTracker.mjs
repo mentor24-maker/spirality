@@ -149,6 +149,8 @@ export function createClickupTracker({ token, apiBase, timeoutMs, log = console.
     getTimeInStatus: (task) => call('GET', `/api/v2/task/${task}/time_in_status`),
     // ClickUp keeps per-status totals, not each move, so `stage-counts` has no
     // window to count on a ClickUp project (SP-206).
+    // The pipeline controls live in the tracker's own data (SP-224); ClickUp keeps none.
+    pipelineSettings: async () => unsupported('the pipeline controls are kept only in the tracker; this project\'s tickets are on ClickUp, where there are none to read.'),
     getStatusHistory: async () => unsupported('ClickUp keeps no move-by-move status history this door reads; stage-counts counts a window only on the tracker.'),
     createTask: (list, fields) => call('POST', `/api/v2/list/${list}/task`, fields),
     updateTask: (task, fields) => call('PUT', `/api/v2/task/${task}`, fields),

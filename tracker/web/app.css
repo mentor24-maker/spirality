@@ -220,6 +220,18 @@ table.colours td.value { color: var(--quiet); font-family: ui-monospace, Menlo, 
 table.colours tr.unset input { opacity: 0.25; }
 table.colours input[type="color"] { width: 3rem; height: 2rem; padding: 0; border: var(--hairline); border-radius: 4px; cursor: pointer; }
 form.colours .row { display: flex; gap: 1rem; align-items: center; margin-top: 1rem; }
+section.pipeline-controls { margin-bottom: 2rem; }
+section.pipeline-controls h4 { margin: 1.25rem 0 0.25rem; }
+table.controls { width: 100%; max-width: 56rem; table-layout: fixed; }
+table.controls td { vertical-align: middle; }
+table.controls td.label { width: 17rem; }
+table.controls td.input { width: 10rem; }
+table.controls td.value { width: 14rem; color: var(--quiet); font-size: 0.85rem; }
+table.controls td.save .note:not(:empty) { display: block; margin-top: 0.25rem; }
+table.controls input[type="number"] { width: 7rem; }
+section.pipeline-controls .default { color: var(--quiet); font-size: 0.75rem; border: var(--hairline); border-radius: 4px; padding: 0 0.3rem; margin-left: 0.4rem; }
+section.pipeline-controls p.not-yet { margin-top: 0.25rem; font-size: 0.85rem; }
+table.control-changes { max-width: 48rem; font-size: 0.9rem; }
 button.action { display: inline-flex; padding: 0.2rem; margin-right: 0.15rem; border: 0; border-radius: 4px; background: transparent; color: var(--quiet); cursor: pointer; }
 button.action:hover { color: var(--red); background: #fbe9e9; }
 .quick form.delete-action { margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--line); }
