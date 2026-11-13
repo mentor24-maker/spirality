@@ -18,6 +18,7 @@ import loopStatuses from '../lib/loopStatuses.js';
 import mergeOnComment from '../lib/mergeOnComment.js';
 import humanHours from '../lib/humanHours.js';
 import busFallback from '../lib/busFallback.js';
+import pipelinePause from '../lib/pipelinePause.js';
 import { compareWithinStatus } from '../scripts/lib/loopStatuses.mjs';
 import { searchPattern } from './web/render.mjs';
 import { GROUPS, MODELS, DEFAULT_MODEL, RELEASE_GROUP } from './pipelineControls.mjs';
@@ -545,9 +546,12 @@ export function stageColoursOf(store) {
  * fall in (each naming the ticket that makes the lanes use it), the models
  * a lane may choose, the change log newest first with each changer's name,
  * and `canChange`: whether this reader may change them (the project's
- * operator, signed in as a person), and `release`, its release
- * group (releaseGroupOf; `ownProject` and `newest` come from the server).
- * Null for a project that does not exist.
+ * operator, signed in as a person), `release`, its release group
+ * (releaseGroupOf; `ownProject` and `newest` come from the server), and
+ * `inFlight`: the tickets a lane is working on now,
+ * `[{ id, name, status, kind }]` (in Building, or in review under a review
+ * pass's claim note: lib/pipelinePause.js classifyTicket), which a pause
+ * waits on to drain (SP-237). Null for a project that does not exist.
  *
  * `lanes` is this machine's Pipeline Status stages for the project
  * (pipelineOf), or null when it reads no logs of it. With them, each wake
@@ -574,6 +578,10 @@ export function pipelineControlsOf(store, slug, { reader = null, lanes = null, o
       return { ...c, used, inEffect: used == null ? null : String(used) === c.value };
     }),
     changes: store.pipelineSettingChanges(project.slug).map((c) => ({ ...c, actorName: nameOf(c.actor) })),
+    inFlight: store.listTickets(project.slug)
+      .map((t) => pipelinePause.classifyTicket(t))
+      .filter(Boolean)
+      .map(({ id, name, status, kind }) => ({ id, name, status, kind })),
   };
 }
 

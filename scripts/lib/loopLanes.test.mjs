@@ -67,6 +67,8 @@ test('loop_runner.sh names its log, lock, sync lock and restart label from the s
   try {
     mkdirSync(join(scratch, 'scripts'));
     copyFileSync(join(REPO, 'scripts/loop_runner.sh'), join(scratch, 'scripts/loop_runner.sh'));
+    // A stand-in for the Settings page's pause check (SP-237): not paused.
+    writeFileSync(join(scratch, 'scripts/pause_check.sh'), '#!/bin/bash\necho "running"\n', { mode: 0o755 });
     // A link, so project_config.mjs still finds lib/ beside the real file.
     for (const f of ['project_config.mjs', 'run_with_time_limit.sh']) symlinkSync(join(REPO, 'scripts', f), join(scratch, 'scripts', f));
     const spirality = JSON.parse(readFileSync(join(REPO, 'spirality.project.json'), 'utf8'));
@@ -125,6 +127,8 @@ async function withRunner({ interval, claude, wakeSetting = null }, body) {
   try {
     mkdirSync(join(scratch, 'scripts/lib'), { recursive: true });
     copyFileSync(join(REPO, 'scripts/loop_runner.sh'), join(scratch, 'scripts/loop_runner.sh'));
+    // A stand-in for the Settings page's pause check (SP-237): not paused.
+    writeFileSync(join(scratch, 'scripts/pause_check.sh'), '#!/bin/bash\necho "running"\n', { mode: 0o755 });
     for (const f of ['project_config.mjs', 'run_with_time_limit.sh', 'lib/wakeLane.mjs']) symlinkSync(join(REPO, 'scripts', f), join(scratch, 'scripts', f));
     // A stand-in for the tracker's answer (SP-236), when the test gives one: never the live tracker.
     if (wakeSetting) writeFileSync(join(scratch, 'scripts/lib/wakeSetting.mjs'), wakeSetting({ logDir }));

@@ -65,6 +65,8 @@ function relayScratch() {
   // relay_app_checks.sh reads the manifest's application checks through
   // lib/projectConfig.mjs beside the scripts folder (SP-274).
   symlinkSync(join(REPO, 'lib'), join(scratch, 'lib'));
+  // The pause check (SP-237) answers "running": these tests are about the tick.
+  writeFileSync(join(scratch, 'scripts/pause_check.sh'), '#!/bin/bash\necho "running — stand-in pause check"\n', { mode: 0o755 });
   const answer = join(logDir, 'wake-answer');
   writeFileSync(join(scratch, 'scripts/lib/wakeSetting.mjs'), [
     "import { readFileSync } from 'node:fs';",

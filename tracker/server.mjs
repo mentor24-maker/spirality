@@ -541,8 +541,23 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
    * read; `call` names the caller in the log line. Read per call, so a lane
    * that passes again shows at once (a held-up ticket, pageData.heldUpBy).
    */
-  /** pipelineOf with the wake times set on the Settings page for the project whose logs these are. */
-  const lanesOf = () => pipelineOf(pipeline, { wake: wakeTimesOf(store, pipeline.slug) });
+  /**
+   * The project's pipeline controls, so a stage paused on the Settings page
+   * shows as paused; null, and nothing shown paused, when its
+   * project is not in this tracker.
+   */
+  const controlsNow = () => {
+    try {
+      return store.getProject(pipeline.slug) ? store.pipelineSettings(pipeline.slug) : null;
+    } catch {
+      return null;
+    }
+  };
+  /**
+   * pipelineOf with the wake times set on the Settings page for the project
+   * whose logs these are, and its pause switches.
+   */
+  const lanesOf = () => pipelineOf(pipeline, { wake: wakeTimesOf(store, pipeline.slug), controls: controlsNow() });
   /**
    * The lanes for `slug`'s Settings page, or null: only the project whose
    * logs this tracker reads has any, and a read that fails shows none.

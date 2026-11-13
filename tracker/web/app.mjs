@@ -26,7 +26,7 @@
  * an emailed link's own page. The link's token is sent only in a JSON body,
  * never in an address.
  */
-import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, unwrapDoc, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderAnswerIn, renderHeldUp, renderReplyForm, statusLabel, ANSWER_IN_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, lookupTicket, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, pipelinePodLabel, renderHealth, healthLines, renderCommandList, renderCommandView, renderCommandDetails, renderContextDocs, renderSortHeadings, renderListPriority, sortTickets, nextSort, renderDocumentation, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, lowerMeridiem, renderPipelineControls, renderConsole } from './render.mjs';
+import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, unwrapDoc, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderAnswerIn, renderHeldUp, renderReplyForm, statusLabel, ANSWER_IN_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, lookupTicket, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, pipelinePodLabel, renderHealth, healthLines, renderCommandList, renderCommandView, renderCommandDetails, renderContextDocs, renderSortHeadings, renderListPriority, sortTickets, nextSort, renderDocumentation, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, lowerMeridiem, renderPipelineControls, renderConsole, drainLine } from './render.mjs';
 
 /** Where an earlier version of the page kept a pasted token; removed on load, never read. */
 const OLD_TOKEN_KEY = 'tracker-token';
@@ -2389,7 +2389,28 @@ function drawPipelineControls(box, views) {
     draw();
   };
   draw();
+  // While a pause is draining (SP-237), its line is read again every
+  // DRAIN_REFRESH_MS, so "Draining" turns to "Paused: nothing in flight" as
+  // the last pass finishes. Only the drain lines are redrawn, never a control
+  // being edited; it stops once the page is left.
+  const timer = setInterval(async () => {
+    if (!box.isConnected) return clearInterval(timer);
+    if (!box.querySelector('.drain.draining')) return;
+    let fresh;
+    try {
+      ({ projects: fresh = [] } = await api('GET', '/pipeline-controls'));
+    } catch {
+      return; // the next tick tries again; the line already shown stays
+    }
+    for (const v of fresh) {
+      const slot = [...box.querySelectorAll('section.pipeline-controls')].find((s) => s.dataset.project === v.project.slug)?.querySelector('.drain-box');
+      if (slot) slot.innerHTML = drainLine(v);
+    }
+  }, DRAIN_REFRESH_MS);
 }
+
+/** How often a draining pause's line is read again on the Settings page. */
+const DRAIN_REFRESH_MS = 15_000;
 
 /**
  * The Users page: everyone who has an account (name and email), the open

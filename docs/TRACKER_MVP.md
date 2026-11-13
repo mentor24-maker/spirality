@@ -407,8 +407,17 @@ its last start, reading the value after each pass. A read that fails keeps
 the last good value and says so in the lane's log. Beside each wake time the
 page shows the value the lane last used (from its log; the relay's from the
 wake time it kept) and says "Waiting for the lane's next pass to pick this
-up" until the two agree. The rest are not acted on yet: SP-237 (pause),
-SP-238 (the cap) and SP-239 (the model) each wire one in.
+up" until the two agree. The pause switches are in effect too (SP-237):
+before every pass a lane's runner asks `npm run clickup -- pause-check --lane
+<lane>` (through `scripts/pause_check.sh`; the relay asks once a tick is due,
+before its START line). Paused, it logs `paused by <who> at <Mountain time> —
+not starting /<lane>` and sleeps; a pass already running always finishes (it
+drains, never kills). Settings that cannot be read count as paused, and the
+line says so: a tracker outage pauses every lane until it answers again. The
+Pipeline Status pod shows a paused stage as "Paused", and the Settings page
+says "Draining: N ticket(s) still finishing" until nothing is in flight. The
+rest are not acted on yet: SP-238 (the cap) and SP-239 (the model) each wire
+one in.
 A browser opening `/projects` or `/projects/<slug>` gets the page; the page's own
 call to the same address gets the data. `/users` is the page alone; its data
 is still `GET /people` (the onboarding scripts read it), and a browser opening

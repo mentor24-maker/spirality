@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { DEMO_NEWEST_RELEASE, DEMO_OWN_PROJECT, demoNewestRelease, seedDemo, tickingClock } from './demoData.mjs';
 import { reportsOf, REPORT_RANGES, searchTickets, PRIORITIES, timeSplitOf, isFailureNote, TIME_BUCKETS } from './pageData.mjs';
-import { escapeHtml, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, renderReleaseGroup, controlValueText, mountainTime, wakeInEffectText, renderConsole, renderConsoleTile, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN } from './web/render.mjs';
+import { escapeHtml, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, renderReleaseGroup, controlValueText, mountainTime, wakeInEffectText, renderConsole, renderConsoleTile, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, drainLine } from './web/render.mjs';
 import { startServer, setupSettingsOf } from './server.mjs';
 import { saveAnswers, setupFields, setupOf } from './setup.mjs';
 import { DANE_FIELDS as SETUP_FIELDS, STEPS as SETUP_STEPS } from '../scripts/onboard/onboard.mjs';
@@ -981,10 +981,13 @@ test('Pipeline Controls on the Settings page: each control with its value, "defa
     const html = renderPipelineControls(alpha);
     assert.match(html, /<h3>Alpha<\/h3>/);
     for (const title of ['Wake Times', 'Pause and Resume', 'Work-in-Progress Cap', 'Model per Lane', 'Change Log']) assert.match(html, new RegExp(`<h4>${title}</h4>`));
-    for (const slice of ['SP-237', 'SP-238', 'SP-239']) assert.match(html, new RegExp(`Saved, but the lanes do not use this yet \\(${slice}\\)\\.`));
+    for (const slice of ['SP-238', 'SP-239']) assert.match(html, new RegExp(`Saved, but the lanes do not use this yet \\(${slice}\\)\\.`));
     // The lanes use the wake times (SP-236): no not-yet line, and each says what its lane last used.
     assert.doesNotMatch(html, /SP-236/);
     assert.match(html, /1,800 seconds \(Every 30 minutes\)<span class="in-effect">Last used: not known on this machine yet\.<\/span>/);
+    // The pause switches are wired in (SP-237): no not-yet line, and no drain line while nothing is paused.
+    assert.doesNotMatch(html, /\(SP-237\)/);
+    assert.doesNotMatch(html, /Draining|Paused: nothing in flight/);
     assert.match(html, /<tr data-control="wake\.loop-build" data-kind="seconds">[\s\S]*?loop-build wake time<\/label> <span class="default">default<\/span>[\s\S]*?type="number" min="60" max="86400" step="1" value="1800"[\s\S]*?1,800 seconds \(Every 30 minutes\)[\s\S]*?<button type="button">Save<\/button>/);
     assert.match(html, /<option value="default" selected>Claude&#39;s default<\/option>/);
     assert.match(html, /<option value="off" selected>Off<\/option><option value="on">On<\/option>/);
@@ -4284,6 +4287,120 @@ test('the Docs page puts Reference Docs and Work Log last in the right column, w
   assert.match(wire, /sortDocs\(filterDocs\(rows, \{ kind: kind\.value, text: search\.value \}\), sort\)/, 'both filters together, then the sort');
   assert.match(wire, /sort = nextSort\(sort, button\.dataset\.sort\);/, 'a second click reverses it');
   assert.match(wire, /count\.textContent = docCountLine\(shown\.length, rows\.length\);/, 'the count line is text, matching the rows shown');
+});
+
+test('npm run clickup -- pause-check: exit 0 running, 3 paused naming who and when, 3 on a failed read or a lane with no switch, 2 with no lane (SP-237)', async () => {
+  const f = await fixture();
+  try {
+    const running = await f.door('alpha', 'pause-check', '--lane', 'loop-build');
+    assert.equal(running.code, 0, running.err);
+    assert.equal(running.out.trim(), 'running — neither the whole pipeline nor loop-build is paused');
+
+    f.store.setPipelineSetting({ project: 'alpha', setting: 'paused.loop-build', value: 'on', actor: f.operator.id });
+    const lane = await f.door('alpha', 'pause-check', '--lane', 'loop-build');
+    assert.equal(lane.code, 3, lane.err);
+    assert.match(lane.out.trim(), /^paused by Dane at [A-Z][a-z]{2} \d{1,2}, \d{4}, \d{1,2}:\d\d [AP]M M[SD]T — not starting \/loop-build \(loop-build is paused/);
+    const other = await f.door('alpha', 'pause-check', '--lane', 'loop-review');
+    assert.equal(other.code, 0, 'the other lanes run as normal');
+
+    f.store.setPipelineSetting({ project: 'alpha', setting: 'paused', value: 'on', actor: f.operator.id });
+    for (const l of ['loop-intake', 'loop-review', 'relay']) {
+      const r = await f.door('alpha', 'pause-check', '--lane', l);
+      assert.equal(r.code, 3, l);
+      assert.match(r.out, /the whole pipeline is paused/);
+    }
+
+    // Resume: the lane may start again.
+    f.store.setPipelineSetting({ project: 'alpha', setting: 'paused', value: 'off', actor: f.operator.id });
+    f.store.setPipelineSetting({ project: 'alpha', setting: 'paused.loop-build', value: 'off', actor: f.operator.id });
+    assert.equal((await f.door('alpha', 'pause-check', '--lane', 'loop-build')).code, 0);
+
+    const unreadable = await f.door('nope', 'pause-check', '--lane', 'loop-build');
+    assert.equal(unreadable.code, 3, 'settings that cannot be read count as paused');
+    assert.match(unreadable.out, /^could not read the pipeline settings, so \/loop-build is treated as PAUSED and not starting \(it fails safe[^)]*\)\. Reason: HTTP 404/);
+
+    // A lane with no switch of its own fails safe, naming the missing setting; no lane at all is refused.
+    const unknown = await f.door('alpha', 'pause-check', '--lane', 'loop-nonsense');
+    assert.equal(unknown.code, 3);
+    assert.match(unknown.out, /has no "paused\.loop-nonsense" setting/);
+    const bad = await f.door('alpha', 'pause-check');
+    assert.equal(bad.code, 2);
+    assert.match(bad.err, /--lane names the lane asking/);
+  } finally { await f.cleanup(); }
+});
+
+test('the Pipeline Status pod, its label and its dialog show a paused stage as Paused, never due, and a running one as finishing (SP-237)', () => {
+  const timeOf = (iso) => iso.slice(11, 16);
+  const now = Date.parse('2026-11-13T15:00:00Z');
+  const answer = { stages: [
+    { name: 'Relay', job: 'relay', logged: true, running: false, nextDue: '2026-11-13T14:00:00Z', paused: 'pipeline' },
+    { name: 'Build', job: 'loop-build', logged: true, running: true, lastStart: '2026-11-13T14:50:00Z', nextDue: null, paused: 'lane' },
+    { name: 'Review', job: 'loop-review', logged: true, running: false, nextDue: '2026-11-13T15:01:00Z', paused: null },
+  ] };
+  const pod = renderPipelinePod(answer, timeOf, now);
+  assert.match(pod, /<span class="stage paused" title="Relay: the whole pipeline is paused on the Settings page">Relay<\/span><span class="time paused"[^>]*>Paused<\/span>/);
+  assert.doesNotMatch(pod, /Relay: next pass due/, 'a paused stage is never due');
+  assert.match(pod, /<span class="time running" title="Build: a pass is running now; Build is paused, so it finishes and no new one starts">running<\/span>/);
+  assert.match(pod, /<span class="time soon"[^>]*>15:01<\/span>/, 'an unpaused stage is unchanged');
+  assert.equal(pipelinePodLabel(answer, timeOf), 'Pipeline Status: Relay paused, Build running, Review 15:01');
+  const details = renderPipelineDetails(answer, timeOf);
+  assert.match(details, /<th scope="row">Relay<\/th><td>Paused \(the whole pipeline is paused\)<\/td>/);
+  assert.match(details, /Running now, since 14:50 \(paused: this pass finishes, no new one starts\)/);
+  const css = readFileSync(WEB('app.css'), 'utf8');
+  assert.match(css, /\.toolbar \.pipeline-pod \.time\.paused \{/);
+});
+
+test('GET /pipeline-controls lists the tickets in flight, and the Settings page says Draining while a pause waits on them, then Paused: nothing in flight (SP-237)', async () => {
+  const f = await fixture();
+  try {
+    const { body } = await f.call('GET', '/pipeline-controls/alpha');
+    const building = f.store.listTickets('alpha').filter((t) => t.status === 'building').map((t) => t.id);
+    assert.deepEqual(body.inFlight.filter((t) => t.kind === 'a build').map((t) => t.id), building);
+    assert.ok(body.inFlight.every((t) => ['a build', 'a review'].includes(t.kind)));
+
+    const view = (on, inFlight) => ({
+      controls: ['paused', 'paused.loop-build', 'paused.loop-review', 'paused.loop-intake'].map((key) => ({ key, group: 'pause', value: on.includes(key) ? 'on' : 'off' })),
+      inFlight,
+    });
+    const build = { id: 'AL-7', name: 'Build <it>', status: 'building', kind: 'a build' };
+    const review = { id: 'AL-9', name: 'Check it', status: 'in review', kind: 'a review' };
+    assert.equal(drainLine(view([], [build])), '', 'nothing paused, nothing said');
+    const whole = drainLine(view(['paused'], [build, review]));
+    assert.match(whole, /<div class="drain draining"><p>Draining: 2 ticket\(s\) still finishing\.<\/p>/);
+    assert.match(whole, /<a href="\/t\/AL-7">AL-7<\/a> Build &lt;it&gt; <span class="quiet">\(a build\)<\/span>/);
+    // One lane waits only on its own kind of pass; intake has none to wait on.
+    assert.match(drainLine(view(['paused.loop-review'], [build, review])), /Draining: 1 ticket\(s\)[\s\S]*AL-9/);
+    assert.equal(drainLine(view(['paused.loop-intake'], [build, review])), '<p class="drain paused">Paused: nothing in flight.</p>');
+    assert.equal(drainLine(view(['paused'], [])), '<p class="drain paused">Paused: nothing in flight.</p>');
+
+    // On the page, under the pause switches, once a switch is on.
+    const saved = await f.call('PUT', '/pipeline-controls/alpha', { body: { setting: 'paused', value: 'on' } });
+    assert.equal(saved.status, 200);
+    const html = renderPipelineControls(saved.body);
+    assert.match(html, /<h4>Pause and Resume<\/h4>[\s\S]*?<div class="drain-box">(<div class="drain draining">|<p class="drain paused">)[\s\S]*?<h4>Work-in-Progress Cap<\/h4>/);
+    // The page reads the drain line again while it drains, redrawing only that line.
+    const app = readFileSync(WEB('app.mjs'), 'utf8');
+    assert.match(app, /if \(!box\.querySelector\('\.drain\.draining'\)\) return;/);
+    assert.match(app, /if \(slot\) slot\.innerHTML = drainLine\(v\);/);
+  } finally { await f.cleanup(); }
+});
+
+test('GET /pipeline marks the stages paused from the project\'s controls (SP-237)', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tracker-pipeline-paused-'));
+  const store = openStore(join(dir, 'tracker.db'), { now: tickingClock() });
+  const seed = seedDemo(store, { operatorName: 'Dane', clock: tickingClock() });
+  const server = await startServer({ store, port: 0, pipeline: { logDir: dir, slug: 'alpha' } });
+  try {
+    store.setPipelineSetting({ project: 'alpha', setting: 'paused.relay', value: 'on', actor: seed.operator.id });
+    const res = await fetch(`http://127.0.0.1:${server.address().port}/pipeline`, { headers: { authorization: `Bearer ${seed.token}` } });
+    const body = await res.json();
+    assert.equal(res.status, 200);
+    assert.deepEqual(Object.fromEntries(body.stages.map((s) => [s.job, s.paused])), { relay: 'lane', 'loop-build': null, 'loop-review': null, 'loop-intake': null });
+  } finally {
+    await new Promise((r) => server.close(r));
+    store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 // ── The Console view (SP-233) ────────────────────────────────────────────────

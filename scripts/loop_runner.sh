@@ -185,6 +185,24 @@ while true; do
     echo "[loop-runner] $(date "+%H:%M:%S") main checkout is not on a clean main — not pulling. Every pass runs stale code until it is put back on main." >> "$LOG"
   fi
 
+  # 2. Paused? (SP-237) The Settings page's switches, the whole pipeline and
+  #    this lane, asked here, between passes, so a pause never stops a pass
+  #    already running: it drains. Asked after the pull, so the check is the
+  #    newest code. ANY non-zero exit counts as paused, a check that could not
+  #    run included (it fails safe), and the line it printed says which.
+  PAUSE_LINE="$("$REPO/scripts/pause_check.sh" "$SKILL" 2>>"$LOG")"
+  PAUSE_CODE=$?
+  if [ "$PAUSE_CODE" -ne 0 ]; then
+    [ -n "$PAUSE_LINE" ] || PAUSE_LINE="could not read the pipeline settings (the check exited $PAUSE_CODE and said nothing; its errors are above), so /$SKILL is treated as PAUSED and not starting (it fails safe)"
+    echo "[loop-runner] $(date "+%H:%M:%S") $PAUSE_LINE" >> "$LOG"
+    # A wake sent while paused is answered by this check, not kept: kept, it
+    # would end every sleep at once and ask again every few seconds.
+    rm -f "$WAKE"
+    echo "[loop-runner] $(date "+%H:%M:%S") sleeping ${INTERVAL}s before the next /$SKILL (a wake ends it early)" >> "$LOG"
+    sleep_until_woken
+    continue
+  fi
+
   # This pass reads the queue afresh, so every wake sent before now is answered
   # by it. A wake sent from here on is kept for the next one.
   rm -f "$WAKE"

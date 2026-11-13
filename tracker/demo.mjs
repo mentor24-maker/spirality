@@ -56,7 +56,8 @@ try { mergePhrase = loadProjectConfig().mergePhrases[0] ?? null; } catch (err) {
 const accountMail = { send: printEmail, pageUrl: null, projectName: 'Demo' };
 // The Pipeline Status pod reads scratch logs in the demo's own folder, never
 // the Mini's real ones, written as Alpha's, so the Settings page shows what
-// Alpha's lanes last used beside each wake time (SP-236).
+// Alpha's lanes last used beside each wake time (SP-236) and Alpha's pause
+// switches show in the pod (SP-237).
 writeDemoLogs(dir, 'alpha');
 const pipeline = { logDir: dir, slug: 'alpha' };
 // The pull requests' state on GitHub is a stand-in (SP-226): the demo never calls GitHub.

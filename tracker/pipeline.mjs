@@ -215,11 +215,28 @@ export function relayIntervalOf(folder, slug) {
 }
 
 /**
+ * Whether a stage is paused on the Settings page (SP-237), from the
+ * project's pipeline controls (`[{ key, value }]`, tracker/
+ * pipelineControls.mjs): 'pipeline' when the whole pipeline is, 'lane' when
+ * only this one is, null when neither (or the controls are not known). The
+ * same two switches the runners ask before every pass (lib/pipelinePause.js
+ * settingsPauseVerdict).
+ */
+export function pausedBy(controls, job) {
+  if (!Array.isArray(controls)) return null;
+  const on = (key) => controls.some((c) => c && c.key === key && c.value === 'on');
+  if (on('paused')) return 'pipeline';
+  if (on(`paused.${job}`)) return 'lane';
+  return null;
+}
+
+/**
  * GET /pipeline's answer: `{ stages: [{ name, job, logged, running,
  * lastStart, lastEnd, lastExit, interval, set, used, nextDue, failing,
- * failedPasses, failingSince, failingReason }] }`, times as ISO strings, the
- * exit code and the seconds as numbers or null, the reason one of
- * FAILING_REASONS or null.
+ * failedPasses, failingSince, failingReason, paused }] }`, times as ISO
+ * strings, the exit code and the seconds as numbers or null, the reason one
+ * of FAILING_REASONS or null, `paused` pausedBy's answer from `controls` (the
+ * project's pipeline controls; null leaves every stage unpaused).
  *
  * `wake` is `{ job: seconds }`, the wake times set on the Settings page for
  * this project (wakeTimesOf); a job missing from it is on its default.
@@ -232,10 +249,11 @@ export function relayIntervalOf(folder, slug) {
  * cannot be read answers that too, with `unreadable: true`. One stage never
  * fails the others.
  */
-export function pipelineOf({ logDir, slug }, { tailBytes = TAIL_BYTES, wake = {} } = {}) {
+export function pipelineOf({ logDir, slug }, { tailBytes = TAIL_BYTES, wake = {}, controls = null } = {}) {
   const folder = logFolderOf(logDir);
   return {
     stages: STAGES.map(({ name, job }) => {
+      const paused = pausedBy(controls, job);
       const set = seconds(wake?.[job]) ?? intervalOf(job);
       // The relay's next start comes from the wake time its tick goes by; the lanes write theirs as a sleeping line.
       const relayUsed = job === 'relay' ? (relayIntervalOf(folder, slug) ?? intervalOf(job)) : null;
@@ -243,7 +261,7 @@ export function pipelineOf({ logDir, slug }, { tailBytes = TAIL_BYTES, wake = {}
       try {
         text = readTail(join(folder, `${slug}-${job}.log`), tailBytes);
       } catch {
-        return { name, job, logged: false, running: false, lastStart: null, lastEnd: null, lastExit: null, interval: relayUsed ?? set, set, used: relayUsed, nextDue: null, ...NOT_FAILING, unreadable: true };
+        return { name, job, logged: false, running: false, lastStart: null, lastEnd: null, lastExit: null, interval: relayUsed ?? set, set, used: relayUsed, nextDue: null, ...NOT_FAILING, paused, unreadable: true };
       }
       const stage = readStage(text, job, { interval: relayUsed ?? set });
       const used = job === 'relay' ? relayUsed : stage.slept;
@@ -254,6 +272,7 @@ export function pipelineOf({ logDir, slug }, { tailBytes = TAIL_BYTES, wake = {}
         nextDue: iso(stage.nextDue),
         failing: stage.failing, failedPasses: stage.failedPasses,
         failingSince: iso(stage.failingSince), failingReason: stage.failingReason,
+        paused,
       };
     }),
   };
