@@ -556,6 +556,20 @@ export function drainLine(view) {
 }
 
 /**
+ * Beside the work-in-progress cap (SP-238): how many tickets are in flight
+ * now (in Building or In review, `view.capInFlight`), so a stalled build lane
+ * is easy to see; marked when the count has reached the cap. Nothing when
+ * the count is not known.
+ */
+export function capInFlightText(c, capInFlight) {
+  const count = capInFlight?.count;
+  if (!Number.isInteger(count)) return '';
+  const full = count >= Number(c.value);
+  const words = `${count} in flight now${full ? ': full, loop-build is not claiming new tickets' : ''}.`;
+  return `<span class="in-flight${full ? ' full' : ''}">${escapeHtml(words)}</span>`;
+}
+
+/**
  * One project's Pipeline Controls section on the Settings page (SP-224),
  * from GET /pipeline-controls: each group of controls under its heading, each
  * control with its value, a "default" mark while it has its default, and a
@@ -578,7 +592,7 @@ export function renderPipelineControls(view, notes = {}) {
     return `<tr data-control="${escapeHtml(c.key)}" data-kind="${escapeHtml(c.kind)}">
       <td class="label"><label for="${id}">${escapeHtml(c.label)}</label>${mark}</td>
       <td class="input">${controlInput(c, models, id, locked)}</td>
-      <td class="value">${escapeHtml(controlValueText(c, models))}${c.group === 'wake' ? `<span class="in-effect${c.inEffect === false ? ' waiting' : ''}">${escapeHtml(wakeInEffectText(c))}</span>` : ''}</td>
+      <td class="value">${escapeHtml(controlValueText(c, models))}${c.group === 'wake' ? `<span class="in-effect${c.inEffect === false ? ' waiting' : ''}">${escapeHtml(wakeInEffectText(c))}</span>` : ''}${c.key === 'wip-cap' ? capInFlightText(c, view.capInFlight) : ''}</td>
       <td class="save">${locked ? '' : '<button type="button">Save</button>'}<span class="note${note ? (note.ok ? ' quiet' : ' error') : ''}">${note ? escapeHtml(note.text) : ''}</span></td>
     </tr>`;
   };
