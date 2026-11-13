@@ -898,12 +898,13 @@ export function askParagraphs(ask) {
  * typed them under "Original Request", a link to the ticket a slice was cut
  * from, and only then the summary, under "How the Loop Understood It".
  */
-export function renderQuickAction({ name, description, status, comments = [], answerIn = false }) {
+export function renderQuickAction({ name, description, status, comments = [], answerIn = false, pullRequestState = null }) {
   const card = newestCard(comments);
   const summary = card ? cardContext(card.body) ?? firstParagraph(description) : firstParagraph(description);
   const state = String(status ?? '').toLowerCase();
   const his = HIS_STATUSES.includes(state);
-  const ask = card && his && !answerIn ? cardAsk(card.body) : null;
+  // SP-226: a merged or closed PR is past the card's "Your move: Merge".
+  const ask = card && his && !answerIn && !prSettled({ status, pullRequestState }) ? cardAsk(card.body) : null;
   const where = his ? null : STATUS_LINES[state] ?? null;
   const asked = originalRequest(description);
   const top = asked ? [
@@ -1014,17 +1015,45 @@ export function renderReplyForm({ answerIn = false }, name) {
  * entry); the button posts it as his reply and the relay does the merge,
  * exactly as if he had typed it. Never once his answer is in (renderAnswerIn).
  */
-export function renderMergeAction({ status, mergePhrase, pullRequest, comments = [], answerIn = false }) {
-  if (answerIn) return '';
-  if (String(status ?? '').toLowerCase() !== READY_TO_LAUNCH || !mergePhrase || !pullRequest) return '';
+export function renderMergeAction({ status, mergePhrase, pullRequest, pullRequestState = null, comments = [], answerIn = false }) {
+  const line = renderPullRequestState({ status, pullRequest, pullRequestState });
+  if (prSettled({ status, pullRequestState })) return line;
+  if (answerIn) return line;
+  if (String(status ?? '').toLowerCase() !== READY_TO_LAUNCH || !mergePhrase || !pullRequest) return line;
   const card = newestCard(comments);
   const move = card ? cardMove(card.body) : null;
   // A regex, not a quoted word: the page's code spells no merge phrase.
   if (move && !/^Merge$/.test(move)) return '';
-  return `<form class="merge-action">
+  return `${line}<form class="merge-action">
         <button type="submit">Merge</button><span class="note"></span>
         <p class="quiet">Posts &ldquo;${escapeHtml(mergePhrase)}&rdquo; as your reply; the relay merges it within a few minutes.</p>
       </form>`;
+}
+
+/**
+ * Is a Ready to launch ticket's pull request already past the merge
+ * (SP-226)? Merged or closed on GitHub, by the server's live read. A read
+ * that failed (state null) or was not made is never settled: a failed read
+ * must not hide a real merge.
+ */
+export function prSettled({ status, pullRequestState = null }) {
+  if (String(status ?? '').toLowerCase() !== READY_TO_LAUNCH) return false;
+  return pullRequestState?.state === 'MERGED' || pullRequestState?.state === 'CLOSED';
+}
+
+/**
+ * The one line a Ready to launch ticket's page shows about its pull
+ * request's live state (SP-226), as HTML, or '' when there is nothing to
+ * say (an open PR, no PR, no read made, another status). Merged or closed
+ * stands in place of the Merge button; "could not check" goes above it.
+ */
+export function renderPullRequestState({ status, pullRequest = null, pullRequestState = null }) {
+  if (String(status ?? '').toLowerCase() !== READY_TO_LAUNCH || !pullRequest || !pullRequestState) return '';
+  const n = escapeHtml(pullRequestState.number ?? /\/pull\/(\d+)/.exec(pullRequest)?.[1] ?? '?');
+  if (pullRequestState.state === 'MERGED') return `<p class="pr-state">PR #${n} is merged. The ticket has not moved to Live yet; that is the relay's job, not yours.</p>`;
+  if (pullRequestState.state === 'CLOSED') return `<p class="pr-state">PR #${n} was closed without merging.</p>`;
+  if (pullRequestState.state == null) return `<p class="pr-state quiet">Could not check PR #${n} on GitHub just now.</p>`;
+  return '';
 }
 
 /** The one question the Merge button asks before it posts. Plain text, for confirm(). */
