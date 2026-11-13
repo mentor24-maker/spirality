@@ -379,3 +379,21 @@ test('a lane\'s model is the one its newest START line names; an older START lin
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('a SKIP line (the work check found no work, SP-292) dates the sleeping lines after it but is not a pass: days of skips still give the right next time, and the last pass is the last real one', () => {
+  const skip = (job, d) => `===== ${logDate(d)} SKIP /${job} (no work: no claimable ticket (Rework or Queued); Claude not started) =====`;
+  const text = [
+    ...lanePass('loop-build', at('2026-11-10T09:00:00'), ['FAILED: one step'], 0),
+    ...lanePass('loop-build', at('2026-11-10T09:30:00'), ['FAILED: one step'], 0),
+    sleeping('loop-build', at('2026-11-10T09:32:00'), 300),
+    skip('loop-build', at('2026-11-11T09:00:00')),
+    sleeping('loop-build', at('2026-11-11T09:00:02'), 300),
+    skip('loop-build', at('2026-11-12T14:00:00')),
+    sleeping('loop-build', at('2026-11-12T14:00:03'), 300),
+  ].join('\n');
+  const build = readStage(text, 'loop-build');
+  assert.equal(build.running, false, 'a skip is never a pass under way');
+  assert.equal(build.lastStart.toISOString(), at('2026-11-10T09:30:00').toISOString());
+  assert.equal(build.nextDue.toISOString(), at('2026-11-12T14:05:03').toISOString(), 'dated by the skip, two days on');
+  assert.equal(build.failedPasses, 2, 'skips neither add to nor clear the failed passes');
+});

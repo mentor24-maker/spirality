@@ -58,6 +58,13 @@ WAKE="$LOG_DIR/$SLUG-$SKILL.wake"
 # How often the sleep looks for the wake file, in seconds.
 WAKE_POLL="${LOOP_WAKE_POLL_SECONDS:-5}"
 case "$WAKE_POLL" in ""|*[!0-9]*|0) WAKE_POLL=5 ;; esac
+# The longest a lane goes without a real Claude pass while its queue is
+# empty, in seconds (SP-292): the work check skips empty passes only while
+# the last real one is younger than this. 0 turns the skipping off.
+IDLE_PASS_EVERY="${LOOP_IDLE_PASS_EVERY_SECONDS:-21600}"
+case "$IDLE_PASS_EVERY" in ""|*[!0-9]*) IDLE_PASS_EVERY=21600 ;; esac
+# When the last real pass started (epoch seconds); 0 until the first, which always runs.
+LAST_REAL_PASS=0
 mkdir -p "$LOG_DIR"
 CLAUDE_BIN="${CLAUDE_BIN:-$(command -v claude || echo "$HOME/.local/bin/claude")}"
 
@@ -228,9 +235,38 @@ while true; do
     continue
   fi
 
-  # This pass reads the queue afresh, so every wake sent before now is answered
-  # by it. A wake sent from here on is kept for the next one.
+  # This pass reads the queue afresh (the work check below, then the pass), so
+  # every wake sent before now is answered by it. A wake sent from here on is
+  # kept for the next one.
   rm -f "$WAKE"
+
+  # 3. Anything to do? (SP-292) A pass with nothing to do used to start a
+  #    Claude session only to say "nothing to do", and every one counted
+  #    against the weekly limit, so a short wake time cost quota on every
+  #    empty tick. scripts/work_check.sh asks the door the same first
+  #    questions the skill asks, with no AI, and exits 3 only on a clean read
+  #    that found nothing; any other exit (work, could not tell, the check
+  #    could not run) starts the pass as before, so a ticket is never left
+  #    waiting on the check. It is not asked on the first pass after this
+  #    runner starts, nor when the last real pass is IDLE_PASS_EVERY seconds
+  #    old or more: those passes run anyway, so a broken Claude sign-in still
+  #    shows on the Pipeline Status pod within hours, and a new project's
+  #    first pass is still there for `npm run onboard:lanes` to read. The
+  #    skipped pass leaves a dated SKIP line (never START or END, so no
+  #    reader counts it as a pass), which the pod dates its sleeping lines by.
+  if [ "$LAST_REAL_PASS" -gt 0 ] && [ $(( $(date +%s) - LAST_REAL_PASS )) -lt "$IDLE_PASS_EVERY" ]; then
+    WORK_LINE="$("$REPO/scripts/work_check.sh" "$SKILL" 2>>"$LOG")"
+    WORK_CODE=$?
+    if [ "$WORK_CODE" -eq 3 ]; then
+      echo "===== $(date "+%Y-%m-%d %H:%M:%S") SKIP /$SKILL (${WORK_LINE:-no work}; Claude not started) =====" >> "$LOG"
+      read_wake_time
+      echo "[loop-runner] $(date "+%H:%M:%S") sleeping ${INTERVAL}s before the next /$SKILL (a wake ends it early)" >> "$LOG"
+      sleep_until_woken
+      continue
+    fi
+    echo "[loop-runner] $(date "+%H:%M:%S") work check: ${WORK_LINE:-the check exited $WORK_CODE and said nothing} — starting /$SKILL" >> "$LOG"
+  fi
+  LAST_REAL_PASS="$(date +%s)"
   read_model
   echo "" >> "$LOG"
   # The START line names the model, so the Settings page (tracker/pipeline.mjs)

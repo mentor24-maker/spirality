@@ -301,6 +301,16 @@
       "to": "scripts/pause_check.sh"
     },
     {
+      "from": "scripts/work_check.sh",
+      "to": "scripts/work_check.sh",
+      "why": "loop_runner.sh asks it, with no AI, whether the lane has work before starting a Claude session"
+    },
+    {
+      "from": "scripts/lib/workCheck.mjs",
+      "to": "scripts/lib/workCheck.mjs",
+      "why": "work_check.sh runs it: the door questions that decide whether a lane has work"
+    },
+    {
       "from": "scripts/lib/back_to_main.sh",
       "to": "scripts/lib/back_to_main.sh"
     },

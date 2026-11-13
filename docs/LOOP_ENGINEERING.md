@@ -224,6 +224,15 @@ Three things the log can say that need a person:
   Read the ticket and hand it back or `ask`.
 - **Nothing written for hours** while the queue has work: `--status` says
   whether the runner is alive. A stale lock clears itself on the next start.
+- **`SKIP /loop-build (no work: …; Claude not started)`** is normal (SP-292).
+  Before each pass the runner asks the tracker, with no AI, whether the lane
+  has anything to do (`scripts/work_check.sh`: claimable tickets for build,
+  `In review` for review, `Requested` for intake), and skips the Claude
+  session when it has nothing, so a short wake time costs no quota on an
+  empty queue. A check that cannot tell starts the pass, so a ticket is never
+  held up by it. The first pass after a runner starts always runs, and so
+  does one at least every 6 hours (`LOOP_IDLE_PASS_EVERY_SECONDS`, 0 turns
+  skipping off), so an expired Claude sign-in still shows within hours.
 
 **Merges: the relay.** The third job, `com.spirality.relay`, runs
 `scripts/run_relay.sh` every 10 minutes (the default; launchd starts it every
