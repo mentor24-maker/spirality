@@ -149,6 +149,9 @@ is a ticket in that project's own queue, filed once Spirality's side is Live:
    does not match it.
 2. Run a project's lanes, door, skills and hooks from Spirality's folder,
    with pacing and pauses scoped to one project.
+   Slice 1 done (SP-263): every lane file in the log folder is named for its
+   project, checked by `scripts/lib/laneFiles.test.mjs`, and the pause switch
+   is looked for only in the project's own tracker project.
 3. Let a project list application checks in its manifest for Spirality to run
    and post to its bus.
 4. Move the pipeline watchdogs into Spirality for every project (SP-260,
