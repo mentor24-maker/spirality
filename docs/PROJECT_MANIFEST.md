@@ -22,13 +22,13 @@ in the file is wrong.
 
 ## The version
 
-The current version is **1**.
+The current version is **2**.
 
 Every manifest says which version it is written to, as its first field:
 
 ```json
 {
-  "manifestVersion": 1,
+  "manifestVersion": 2,
   ...
 }
 ```
@@ -40,6 +40,13 @@ alone. Raising it is one pull request that changes `MANIFEST_VERSION` in
 other project's manifest then gets its one-line change as a ticket in that
 project's queue. Until it does, Spirality refuses to run that project's
 lanes, and says which number it found and which it expects.
+
+What each version added:
+
+- **1** (SP-262, 2026-11-12): the format as first written.
+- **2** (SP-264, 2026-11-12): `applicationChecks`. A version 1 manifest
+  becomes version 2 by changing its first line alone: the new field is
+  optional.
 
 ## What each entry below says
 
@@ -408,6 +415,35 @@ merges nothing (`docs/LOOP_CONTRACT.md`, "A project's own pre-merge step").
 - **Required**: no
 - **Default**: none: no step
 - **Example**: `["node", "scripts/apply_migrations.mjs"]` (Spirality has none)
+
+### `applicationChecks`
+
+The project's own health checks (SP-264, `docs/INTEGRATION.md`, "3.
+Application checks"): checks that watch the application, not the pipeline.
+Spirality runs the ones that are due (`npm run app-checks`) and posts what
+changed to the project's bus. Each entry is an object:
+
+| Field | Required | What it is |
+|---|---|---|
+| `name` | yes | a short slug (`site-import-watch`), unique within the list |
+| `command` | yes | the shell command, one string, run from the folder holding this manifest |
+| `everyMinutes` | yes | a whole number, 10 or more (the relay ticks every 10 minutes) |
+| `alarm` | no, default `true` | `true`: a failure is posted starting `ALARM:` (texted); `false`: a plain post |
+| `timeoutSeconds` | no, default `60` | a whole number from 1 to 300; past it the command is stopped |
+
+The command exits 0 when all is well, and non-zero printing one line saying
+what is wrong. It posts nothing and calls nothing of Spirality's; it is not
+given the tracker's sign-in. Only the first line it prints is posted.
+
+A wrong entry (a missing or unknown field, a name listed twice,
+`everyMinutes` under 10) is refused, naming the entry and the field. A list
+with any check in it needs `busProject`: without a bus, what the checks find
+would have nowhere to post.
+
+- **Kind**: a list of the objects above
+- **Required**: no
+- **Default**: `[]`
+- **Example**: `[{ "name": "broken-links", "command": "node scripts/broken_links.mjs", "everyMinutes": 60, "alarm": false }]` (Spirality has none)
 
 ## Old names that still load (SP-130)
 

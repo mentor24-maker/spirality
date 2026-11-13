@@ -334,12 +334,22 @@ The items below marked **missing**, gathered here so they can become tickets:
 - **Today.** **Manual** (written by hand; the checking is automated).
 
 The fields, what each is for, whether it is required, its default and an
-example, and the format's version (`"manifestVersion": 1`, the first line of
+example, and the format's version (`"manifestVersion": 2`, the first line of
 every manifest), are written once, in
 [PROJECT_MANIFEST.md](PROJECT_MANIFEST.md). A manifest without the version,
 or written to another one, is refused before any lane runs. The old names
 `productSlug` and `productScripts` still load for now; the same document
 says how to move off them.
+
+A project with health checks of its own (is the site importing, are its
+keys good, are its links whole) lists them in the manifest as
+`applicationChecks`: each a name, a shell command and how often, in minutes.
+Each command exits 0 when all is well and non-zero printing one line saying
+what is wrong, and posts nothing itself. Spirality runs them
+(`npm run app-checks`, from the project's repository) and posts what changed
+to the project's bus, so the list needs `busProject` too. The shape and the
+post rules are in [PROJECT_MANIFEST.md](PROJECT_MANIFEST.md) and
+[INTEGRATION.md](INTEGRATION.md), "3. Application checks".
 
 ## 3. The Doppler project and its keys
 
