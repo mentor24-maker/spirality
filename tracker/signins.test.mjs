@@ -457,6 +457,62 @@ test('a second project\'s create leaves every token of the first signing in, and
   } finally { f.cleanup(); }
 });
 
+test('a project\'s live website gets its own sign-in (SP-279): create makes it under the project\'s name, check proves it, it files a ticket and comments on the bus, and a rerun leaves it alone', async () => {
+  const f = fixture();
+  try {
+    // The app seat is a machine seat of its own: never the hand-run one, never the operator.
+    const app = TRACKER_SEATS.filter((s) => s.app);
+    assert.deepEqual(app.map((s) => [s.secret, s.kind, s.name, Boolean(s.handRun)]), [['TRACKER_TOKEN_APP', 'machine', 'app', false]]);
+    assert.ok(EXPECTED_SECRETS.some((s) => s.name === 'TRACKER_TOKEN_APP' && !s.trackerHome), 'doctor asks every project for it');
+    assert.ok(seatsForConfig(HOME).seats.some((s) => s.secret === 'TRACKER_TOKEN_APP' && s.name === 'app'));
+
+    await createSignins({ ...f, seats: seatsForConfig(HOME).seats, env: {}, project: PROJECT });
+    const operator = f.store.actorsNamed({ kind: 'human', name: 'Dana' })[0];
+    const guestVault = {};
+    const guest = {
+      ...f, seats: seatsForConfig(GUEST).seats, guest: true, operatorName: 'Dana',
+      project: { slug: 'beta', name: 'Beta', prefix: 'BE' },
+      setSecret: (name, value) => { guestVault[name] = value; },
+      getSecret: (name) => guestVault[name],
+    };
+    const made = await createSignins({ ...guest, env: {} });
+    assert.equal(made.ok, true, made.lines.join('\n'));
+    assert.match(made.lines.join('\n'), /TRACKER_TOKEN_APP: actor \d+ \(machine, "beta app"\) made; token stored in Doppler and read back\./);
+    const token = guestVault.TRACKER_TOKEN_APP;
+    assert.ok(token);
+    for (const line of made.lines) assert.ok(!line.includes(token), line);
+    f.store.createProject({ slug: 'beta-bus', name: 'Beta bus', prefix: 'BEBUS', operator: operator.id });
+    const alarm = f.store.fileTicket({ project: 'beta-bus', name: 'Alarms', status: 'Queued', actor: operator.id });
+
+    const server = await startServer({ store: f.store, port: 0 });
+    try {
+      const url = `http://127.0.0.1:${server.address().port}`;
+      const checked = await checkSignins({ url, seats: seatsForConfig(GUEST).seats, env: guestVault });
+      assert.equal(checked.ok, true, checked.lines.join('\n'));
+      assert.match(checked.lines.join('\n'), /TRACKER_TOKEN_APP: GET \/me answers "beta app" \(machine, actor \d+\)\. OK/);
+      const auth = { Authorization: `Bearer ${token}`, 'content-type': 'application/json' };
+      const bus = await fetch(`${url}/tickets/${alarm.key ?? alarm.id}`, { headers: auth });
+      assert.equal(bus.status, 200);
+      const filed = await fetch(`${url}/projects/beta/tickets`, { method: 'POST', headers: auth, body: JSON.stringify({ name: 'A client bug report', status: 'Requested' }) });
+      assert.equal(filed.status, 201, await filed.clone().text());
+      const ticket = await filed.json();
+      assert.equal(ticket.project, 'beta');
+      const said = await fetch(`${url}/tickets/${alarm.key ?? alarm.id}/comments`, { method: 'POST', headers: auth, body: JSON.stringify({ body: 'ALARM: AI spending is over the line' }) });
+      assert.equal(said.status, 201, await said.clone().text());
+      assert.equal((await said.json()).author, f.store.actorForToken(token).id);
+    } finally {
+      await new Promise((res) => server.close(res));
+    }
+
+    // Run again with the tokens in the environment, as doppler run gives them: the working app token stays.
+    const again = await createSignins({ ...guest, env: { ...guestVault } });
+    assert.equal(again.ok, true, again.lines.join('\n'));
+    assert.match(again.lines.join('\n'), /TRACKER_TOKEN_APP: already signs in as "beta app" \(actor \d+\), left alone\./);
+    assert.equal(guestVault.TRACKER_TOKEN_APP, token);
+    assert.equal(f.store.actorForToken(token)?.name, 'beta app');
+  } finally { f.cleanup(); }
+});
+
 test('a second project that wrongly keeps the bare seat names is refused before any token of the first is replaced', async () => {
   const f = fixture();
   try {

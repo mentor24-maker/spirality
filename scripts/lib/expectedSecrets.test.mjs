@@ -299,14 +299,14 @@ test('projectSeats: the built-in seats untouched, then one machine seat per proj
   const seats = projectSeats({ projectLanes: ['loop-handoff'] });
   assert.deepEqual(seats.slice(0, TRACKER_SEATS.length), TRACKER_SEATS);
   assert.deepEqual(seats.slice(TRACKER_SEATS.length).map((s) => [s.secret, s.kind, s.name, Boolean(s.handRun)]), [['TRACKER_TOKEN_LOOP_HANDOFF', 'machine', 'loop-handoff', false]]);
-  for (const taken of ['loop-build', 'relay', 'hand-run', 'operator']) {
+  for (const taken of ['loop-build', 'relay', 'hand-run', 'app', 'operator']) {
     assert.throws(() => laneSeats({ projectLanes: [taken] }), (err) => err instanceof ProjectConfigError && err.message.includes(`"${taken}"`) && /built-in tracker seat/.test(err.message), taken);
   }
 });
 
 test('nothing in the substrate names a project\'s own lane: the built-in seats are the same for every project', () => {
   const builtIn = TRACKER_SEATS.map((s) => s.name).filter(Boolean);
-  assert.deepEqual(builtIn, ['loop-build', 'loop-review', 'loop-intake', 'relay', 'hand-run']);
+  assert.deepEqual(builtIn, ['loop-build', 'loop-review', 'loop-intake', 'relay', 'hand-run', 'app']);
 });
 
 test('the config refuses every built-in seat as a lane: RESERVED_LANE_NAMES covers TRACKER_SEATS and TRACKER_TOKEN_NAME, so the door never sees one', () => {
