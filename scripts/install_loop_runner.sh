@@ -162,7 +162,7 @@ status_tracker() {
   echo "          (columns: PID, last exit code, label. A PID here means the server is up right now.)"
   # /me without a token answers 401: the tracker's own answer to a knock with
   # no key. Silence, or any other answer, means it is not the tracker there.
-  code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 "$(tracker_url)/me" 2>/dev/null)"
+  code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 "$(tracker_url)/me" 2>/dev/null || true)"
   if [ "$code" = "401" ]; then
     echo "answers:  yes — $(tracker_url) (listening on $TRACKER_HOST:$TRACKER_PORT)"
   else
@@ -176,7 +176,7 @@ status_tracker() {
 
   status_job_header "$BACKUP"
   echo "          (runs nightly at $(printf '%02d:%02d' "$BACKUP_HOUR" "$BACKUP_MINUTE"); '-' for PID is normal between runs.)"
-  newest="$(ls -1 "$TRACKER_BACKUP_DIR"/tracker-*.db 2>/dev/null | tail -1)"
+  newest="$(ls -1 "$TRACKER_BACKUP_DIR"/tracker-*.db 2>/dev/null | tail -1 || true)"
   if [ -n "$newest" ]; then
     echo "backups:  $(ls -1 "$TRACKER_BACKUP_DIR"/tracker-*.db | wc -l | xargs) in $TRACKER_BACKUP_DIR, newest $(basename "$newest")"
   else
