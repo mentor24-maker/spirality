@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { seedDemo, tickingClock } from './demoData.mjs';
 import { reportsOf, REPORT_RANGES, searchTickets, PRIORITIES, timeSplitOf, isFailureNote, TIME_BUCKETS } from './pageData.mjs';
-import { escapeHtml, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderReplyForm, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, controlValueText, mountainTime } from './web/render.mjs';
+import { escapeHtml, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, controlValueText, mountainTime } from './web/render.mjs';
 import { startServer, setupSettingsOf } from './server.mjs';
 import { saveAnswers, setupFields, setupOf } from './setup.mjs';
 import { DANE_FIELDS as SETUP_FIELDS, STEPS as SETUP_STEPS } from '../scripts/onboard/onboard.mjs';
@@ -47,7 +47,7 @@ async function fixture({ mergePhrase, closePhrase, goPhrase } = {}) {
     const project = join(dir, slug);
     mkdirSync(project, { recursive: true });
     writeFileSync(join(project, 'spirality.project.json'), JSON.stringify({
-      manifestVersion: 1, workspaceId: '111', spaceId: '222', loopQueueListId: '333',
+      manifestVersion: 2, workspaceId: '111', spaceId: '222', loopQueueListId: '333',
       operatorUserId: seed.operator.id, machineUserId: seed.loop.id,
       githubRepo: 'owner/repo', dopplerProject: 'proj', dopplerConfig: 'dev',
       launchdPrefix: 'com.example', logDir: '~/loop-logs', mergePhrases: ['merge'],
@@ -255,6 +255,29 @@ test('with his answer in, the ticket page draws no reply box and copes with it m
   for (const rule of [/font-style: normal/, /color: var\(--ink\)/, /background: #/, /border-left: \d+px solid var\(--blue\)/, /padding: /]) assert.match(notice, rule);
   assert.match(css, /\n\.answer-in \{ font-size: 0\.85rem; font-style: italic; color: var\(--quiet\); \}/);
   assert.equal(renderAnswerIn({ answerIn: true }), '<p class="answer-in">Your answer is in. The relay acts on it at its next pass.</p>');
+});
+
+test('a ticket held up by a failing lane says so in one line above the card, with the stage, reason and start, before any "Your move" (SP-228)', () => {
+  const timeOf = (iso) => `at ${iso}`;
+  const held = { heldUp: { stage: 'Relay', job: 'relay', reason: 'keeps failing', since: '2026-11-11T04:00:00.000Z' } };
+  assert.equal(heldUpLine(held, timeOf), 'Held up: Relay keeps failing since at 2026-11-11T04:00:00.000Z');
+  assert.equal(renderHeldUp(held, timeOf), '<p class="held-up" role="status">Held up: Relay keeps failing since at 2026-11-11T04:00:00.000Z</p>');
+  assert.equal(heldUpLine({ heldUp: { stage: 'Build', reason: "can't reach the internet", since: null } }, timeOf), "Held up: Build can't reach the internet");
+  assert.equal(heldUpLine({ heldUp: { stage: 'Review' } }, timeOf), 'Held up: Review keeps failing');
+  assert.match(renderHeldUp({ heldUp: { stage: '<b>', reason: 'keeps failing' } }, timeOf), /&lt;b&gt;/, 'escaped');
+  for (const none of [{}, { heldUp: null }, { heldUp: {} }, { heldUp: { stage: '' } }]) assert.equal(renderHeldUp(none, timeOf), '');
+
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const draw = /\nasync function drawTicket\(id[^)]*\) \{[\s\S]*?\n\}\n/.exec(app)?.[0] ?? '';
+  const line = draw.indexOf('${renderHeldUp(t, sinceTime)}');
+  assert.ok(line > 0, 'the ticket page draws the line, with the header health line\'s times');
+  assert.ok(line < draw.indexOf('${renderQuickAction(t)}'), 'above the card, so it is read first');
+  const css = readFileSync(WEB('app.css'), 'utf8');
+  const rule = /\n\.quick \.held-up \{([^}]*)\}/.exec(css)?.[1] ?? '';
+  assert.match(rule, /grid-column: 1 \/ -1/, 'across the whole top, not in one column');
+  const ink = /(?:^|;)\s*color: (#[0-9a-f]{6})/.exec(rule)?.[1];
+  const paper = /background: (#[0-9a-f]{6})/.exec(rule)?.[1];
+  assert.ok(contrast(ink, paper) >= 4.5, `readable: ${ink} on ${paper}`);
 });
 
 // ── The list's status icons (SP-201) ─────────────────────────────────────────

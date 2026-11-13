@@ -291,7 +291,11 @@ anything once ClickUp is gone. Desktop browser only. Three screens, nothing
 more:
 
 1. **Waiting on you**: tickets in his two statuses, across every project,
-   newest first. This is the one view he uses today.
+   newest first. This is the one view he uses today. A ticket he has
+   already answered while the relay keeps failing is left off it (and off
+   the bell), and its page says "Held up: Relay keeps failing since <time>"
+   above the card instead (SP-228); a ticket in Queued, Rework, In review or
+   Requested says the same of Build, Review or Intake.
 2. **A ticket**: the description, the comments (cards drawn with the red
    `NEEDED FROM DANE` banner, machine comments visibly marked as such), and a
    reply box. He answers and says "merge" here. Under Details, a person

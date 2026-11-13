@@ -191,6 +191,8 @@ span.action.answer-in-icon { color: #2e7d32; }
 .coloured > table { border-top-color: var(--stage-border); }
 .quick { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; align-items: start; margin-bottom: 2rem; }
 .quick h1 { margin-top: 0; }
+/* A failing lane owes the next move (SP-228): one line across the top, above the card. */
+.quick .held-up { grid-column: 1 / -1; margin: 0; padding: 0.6rem 1rem; border-left: 4px solid #b26a00; border-radius: 4px; background: #fff4e0; color: #7a4800; font-weight: 600; }
 .quick .needed { color: var(--red); font-weight: 700; white-space: pre-wrap; }
 .quick .ticket-name { margin: -0.5rem 0 1rem; font-size: 0.9em; }
 .quick .request-heading { font-size: 0.95rem; color: var(--quiet); font-weight: 600; margin: 1.25rem 0 0.35rem; }

@@ -2632,6 +2632,53 @@ test('GET /pipeline answers each loop stage from the logs the project config nam
   } finally { await f.cleanup(); }
 });
 
+test('a relay that keeps failing holds up a ticket he already answered: the ticket says so and GET /waiting leaves it out; one passing pass brings it back only if it is still his move (SP-228)', async () => {
+  const f = await fixture();
+  try {
+    const logs = join(f.dir, 'logs');
+    mkdirSync(logs);
+    const stamp = (d) => d.toLocaleString('sv-SE').replace('T', ' ');
+    const first = new Date('2026-11-10T21:00:00');
+    const pass = (start, exit) => [
+      `===== ${stamp(start)} START relay — /repo =====`,
+      exit ? 'gh: a step failed' : 'merged nothing',
+      `===== ${stamp(new Date(start.getTime() + 15000))} END relay — ${exit ? 'A STEP FAILED AND SAID SO ABOVE' : 'pass complete'} (exit ${exit}) =====`,
+    ];
+    const relayLog = join(logs, 'alpha-relay.log');
+    const failed = [0, 10, 20].flatMap((m) => pass(new Date(first.getTime() + m * 60000), 1));
+    writeFileSync(relayLog, `${failed.join('\n')}\n`);
+
+    const answered = f.store.fileTicket({ project: 'alpha', actor: f.machine.id, name: 'Answered comet', status: 'Ready to launch', assignee: f.human.id });
+    f.store.postComment({ ticket: answered.id, author: f.machine.id, body: '@@ASKED\nmerge it\n\nYour move: Merge', parent: null });
+    f.store.postComment({ ticket: answered.id, author: f.human.id, body: 'merge', parent: null });
+    const asked = f.store.fileTicket({ project: 'alpha', actor: f.machine.id, name: 'Asked comet', status: 'Needs your input', assignee: f.human.id });
+    f.store.postComment({ ticket: asked.id, author: f.human.id, body: 'an earlier word', parent: null });
+    f.store.postComment({ ticket: asked.id, author: f.machine.id, body: '@@ASKED\nwhich?\n\nYour move: Reply', parent: null });
+
+    const server = await startServer({ store: f.store, port: 0, pipeline: { logDir: logs, slug: 'alpha' } });
+    try {
+      const at = `http://127.0.0.1:${server.address().port}`;
+      const as = (method, path) => f.call(method, path, { token: f.humanToken, at });
+      const listed = async () => (await as('GET', '/waiting')).body.waiting.map((t) => t.id);
+
+      const held = (await as('GET', `/tickets/${answered.id}/thread`)).body;
+      assert.deepEqual(held.heldUp, { stage: 'Relay', job: 'relay', reason: 'keeps failing', since: first.toISOString() });
+      assert.equal((await as('GET', `/tickets/${asked.id}/thread`)).body.heldUp, null, 'a loop\'s question is truly his move, failing relay or not');
+      assert.deepEqual(await listed(), [asked.id], 'the held-up ticket is not on Waiting on You; the real wait is');
+
+      // One passing relay pass: the line goes. His "merge" is still the newest word, so by the loop's own verdict it is not his move.
+      writeFileSync(relayLog, `${[...failed, ...pass(new Date(first.getTime() + 30 * 60000), 0)].join('\n')}\n`);
+      assert.equal((await as('GET', `/tickets/${answered.id}/thread`)).body.heldUp, null);
+      assert.deepEqual(await listed(), [asked.id]);
+      // The relay answers him (as on SP-207, a refusal): now it is his move again, and listed.
+      f.store.postComment({ ticket: answered.id, author: f.machine.id, body: 'The PR is already merged. Your move: Close', parent: null });
+      assert.deepEqual((await listed()).sort(), [answered.id, asked.id].sort());
+    } finally { await new Promise((r) => server.close(r)); }
+    // A tracker that reads no logs holds nothing up.
+    assert.equal((await f.call('GET', `/tickets/${answered.id}/thread`, { token: f.humanToken })).body.heldUp, null);
+  } finally { await f.cleanup(); }
+});
+
 test('GET /in-flight lists every ticket but Live on the projects the caller may see, with next change from the loop logs; a member of one project sees only it; signed out is 401 (SP-221)', async () => {
   const f = await fixture();
   try {

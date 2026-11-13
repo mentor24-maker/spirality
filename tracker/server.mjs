@@ -529,6 +529,21 @@ export const CLOSE_PHRASE = busRelayPlan.CLOSE_PHRASES[0];
 export const GO_PHRASE = busRelayPlan.GO_PHRASE;
 
 export function createHandler(store, { log = () => {}, notifier = null, defaultProject = null, mergePhrase = null, closePhrase = null, goPhrase = null, accountMail = null, setup = null, now = Date.now, publicUrl = null, pipeline = null, docsDir = DOCS_DIR, commandsRoot = REPO_ROOT, readPrState = null, ownProject = null } = {}) {
+  /**
+   * This machine's lanes as the page data reads them, `{ slug, stages }`
+   * (pipelineOf), or null when this tracker reads no logs or they cannot be
+   * read; `call` names the caller in the log line. Read per call, so a lane
+   * that passes again shows at once (a held-up ticket, pageData.heldUpBy).
+   */
+  const lanesNow = (call) => {
+    if (!pipeline) return null;
+    try {
+      return { slug: pipeline.slug, stages: pipelineOf(pipeline).stages };
+    } catch (err) {
+      log(`${call}: the loop logs could not be read, so no lane's times or health are shown (${err.message}).`);
+      return null;
+    }
+  };
   const failures = failureCounter(now);
   // Each pull request's live state on GitHub, kept a minute. With no
   // reader (tests, the switch check) the page goes by status alone, as before.
@@ -687,7 +702,7 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     // loop's own verdict (tracker/pageData.mjs).
     if (parts.length === 1 && parts[0] === 'waiting' && method === 'GET') {
       const only = scopeOf(me);
-      return [200, waitingFor(store, me.id, { only, prStates: await prStatesOf(prsToCheck(store, { only })) })];
+      return [200, waitingFor(store, me.id, { only, pipeline: lanesNow('waiting'), prStates: await prStatesOf(prsToCheck(store, { only })) })];
     }
 
     // Dane's page: the bus count in the header (Dane's choice D on the bus ticket), the posts on each
@@ -716,16 +731,8 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     // next. A tracker that cannot read the loop logs still answers, with no
     // lane times (pageData.consoleOf says null, never a guess).
     if (parts.length === 1 && parts[0] === 'in-flight' && method === 'GET') {
-      let lanes = null;
-      if (pipeline) {
-        try {
-          lanes = { slug: pipeline.slug, stages: pipelineOf(pipeline).stages };
-        } catch (err) {
-          log(`in-flight: the loop logs could not be read, so no ticket has a next change time (${err.message}).`);
-        }
-      }
       const only = scopeOf(me);
-      return [200, consoleOf(store, { only, pipeline: lanes, prStates: await prStatesOf(prsToCheck(store, { only })) })];
+      return [200, consoleOf(store, { only, pipeline: lanesNow('in-flight'), prStates: await prStatesOf(prsToCheck(store, { only })) })];
     }
 
     // Dane's page: the Projects screen, the project Tasks opens, and the New
@@ -1277,7 +1284,7 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     if (parts.length === 3 && parts[0] === 'tickets' && parts[2] === 'thread' && method === 'GET') {
       const ticket = requireTicket(parts[1], me);
       const pr = prToCheck(store, ticket);
-      const thread = threadOf(store, ticket.id, { prStates: await prStatesOf(pr ? [pr] : []) });
+      const thread = threadOf(store, ticket.id, { pipeline: lanesNow('thread'), prStates: await prStatesOf(pr ? [pr] : []) });
       return [200, { ...thread, attachments: store.listAttachments(thread.id), mergePhrase, closePhrase, goPhrase, choices: { priorities: PRIORITIES, statuses: PERSON_STATUSES } }];
     }
 

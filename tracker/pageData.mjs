@@ -129,6 +129,52 @@ export function prsToCheck(store, { only = null } = {}) {
 }
 
 /**
+ * Is this ticket held up by a lane that keeps failing (SP-228)? On 11/11
+ * SP-207 showed "Your move: Merge" for 12.5 hours after Dane had said
+ * "merge", because the relay could not reach GitHub.
+ *
+ * `lanes` maps a job (`relay`, `loop-build`, ...) to its stage in GET
+ * /pipeline's answer (tracker/pipeline.mjs, SP-218), for the ticket's own
+ * project; null when this tracker reads no logs for it, and then never.
+ *
+ * - One of his two statuses: held up only when the loop's own verdict
+ *   (waitingVerdict) says it is NOT waiting on him and his comment is the
+ *   newest word (operatorSpokeLast), so the relay owes the next move. A
+ *   ticket that truly waits on him is never held up, whatever is failing:
+ *   hiding a real wait would be worse than today.
+ * - Requested, Queued, Rework, In review: held up when the lane that acts
+ *   next (NEXT_LANE, the Console view's table) is failing. Building is not
+ *   one: a pass is on it, and one that died is handed back by the next.
+ *
+ * Answers `{ stage, job, reason, since }` (the stage's name, its job, one
+ * of pipeline.mjs's FAILING_REASONS, and when its first failed pass began,
+ * as given), or null. `prStates` is the same live pull-request map the
+ * verdict takes elsewhere (SP-226), so both read one answer.
+ */
+export function heldUpBy(ticket, comments, operatorId, lanes, prStates = null) {
+  if (!lanes || !ticket) return null;
+  let job;
+  if (OPERATOR_LANE.includes(ticket.status)) {
+    if (operatorId == null) return null;
+    const input = verdictInput(ticket, comments, prStates);
+    if (waitingVerdict(input, { operatorId }).verdict === WAITING) return null;
+    if (!operatorSpokeLast(input.comments, { operatorId })) return null;
+    job = 'relay';
+  } else {
+    job = NEXT_LANE.has(ticket.status) ? laneOf(NEXT_LANE.get(ticket.status)).job : null;
+  }
+  const stage = job ? lanes.get(job) : null;
+  if (!stage || stage.failing !== true) return null;
+  return { stage: stage.name, job, reason: stage.failingReason ?? 'keeps failing', since: stage.failingSince ?? null };
+}
+
+/** `pipeline` (`{ slug, stages }`) as heldUpBy's lanes for `slug`; null for another project or none. */
+function lanesOf(pipeline, slug) {
+  if (!pipeline?.stages || pipeline.slug !== slug) return null;
+  return new Map(pipeline.stages.map((s) => [s.job, s]));
+}
+
+/**
  * The bus count in the page's header (Dane's choice D on the bus ticket): every
  * "Team chat" ticket (lib/busFallback.js, by its name) on a project `only`
  * lets through, with how many of its comments `actorId` has not seen
@@ -158,14 +204,21 @@ export function busUnseen(store, actorId, { only = null } = {}) {
  * `unsure` holds the ones the verdict cannot decide (his status, but not
  * assigned to him), so a half-finished hand-off is shown, never dropped.
  * Both newest first, by the ticket's last change.
+ *
+ * `pipeline` (`{ slug, stages }`, GET /pipeline's answer and the project
+ * whose logs it read) leaves out a ticket held up by a failing lane
+ * (heldUpBy, SP-228), so the bell does not count it while the lane fails.
  */
-export function waitingFor(store, operatorId, { only = null, prStates = null } = {}) {
+export function waitingFor(store, operatorId, { only = null, pipeline = null, prStates = null } = {}) {
   const waiting = [];
   const unsure = [];
   for (const project of visibleProjects(store, only)) {
+    const lanes = lanesOf(pipeline, project.slug);
     for (const status of OPERATOR_LANE) {
       for (const ticket of store.listTickets(project.slug, { status })) {
-        const result = waitingVerdict(verdictInput(ticket, store.listComments(ticket.id), prStates), { operatorId });
+        const comments = store.listComments(ticket.id);
+        if (heldUpBy(ticket, comments, project.operator, lanes, prStates)) continue;
+        const result = waitingVerdict(verdictInput(ticket, comments, prStates), { operatorId });
         const row = {
           id: ticket.id,
           project: project.slug,
@@ -189,11 +242,13 @@ export function waitingFor(store, operatorId, { only = null, prStates = null } =
  * and kind, and `machine`: true when a machine actor wrote it, or when it
  * carries the machine stamp (a loop posting under Dane's own token). The
  * stamp line itself is taken off the shown text; `machine` says it instead.
- * `answerIn` says his answer is in (answerIsIn). `pullRequestState`, there
- * only when `prStates` holds the ticket (SP-226), is `{ number, state }`,
- * state OPEN, MERGED, CLOSED or null for could not check. Null when there is no such ticket.
+ * `answerIn` says his answer is in (answerIsIn). `heldUp` says a failing
+ * lane owes the next move (heldUpBy, SP-228), from `pipeline` (`{ slug,
+ * stages }`), or null. `pullRequestState`, there only when `prStates` holds
+ * the ticket (SP-226), is `{ number, state }`, state OPEN, MERGED, CLOSED or
+ * null for could not check. Null when there is no such ticket.
  */
-export function threadOf(store, ticketId, { prStates = null } = {}) {
+export function threadOf(store, ticketId, { pipeline = null, prStates = null } = {}) {
   const ticket = store.getTicket(ticketId);
   if (!ticket) return null;
   const project = store.getProject(ticket.project);
@@ -222,6 +277,7 @@ export function threadOf(store, ticketId, { prStates = null } = {}) {
     operator: namedActor(store, project?.operator),
     comments,
     answerIn: answerIsIn(ticket, store.listComments(ticket.id), project?.operator),
+    heldUp: heldUpBy(ticket, store.listComments(ticket.id), project?.operator, lanesOf(pipeline, ticket.project), prStates),
     pullRequest: findPullRequest(trailComments(store, ticket.id))?.url ?? null,
     // SP-226: its live state on GitHub, for the Merge button. Absent when it was not asked.
     ...(prStates?.has(ticket.id) ? { pullRequestState: prStates.get(ticket.id) } : {}),

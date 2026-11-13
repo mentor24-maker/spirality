@@ -170,7 +170,7 @@ function makeWorld(t) {
   const dir = mkdtempSync(join(tmpdir(), 'onboard-wizard-test-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const homeConfig = validateProjectConfig({
-    manifestVersion: 1, workspaceId: '0', spaceId: '0', loopQueueListId: '0', operatorUserId: '1', machineUserId: '2',
+    manifestVersion: 2, workspaceId: '0', spaceId: '0', loopQueueListId: '0', operatorUserId: '1', machineUserId: '2',
     githubRepo: 'mentor24-maker/spirality', dopplerProject: 'spirality', dopplerConfig: 'dev', launchdPrefix: 'com.spirality',
     logDir: join(dir, 'logs'), mergePhrases: ['merge', 'ship it'], governancePaths: ['CLAUDE.md'], autoMergeLanes: [],
     operatorName: 'Dane', projectSlug: 'spirality', legacyMachinePrefixes: [], projectScripts: {}, trackerPrefix: 'SP',
@@ -1486,7 +1486,7 @@ test('an old loop under --no-prompt with no ClickUp answer: STOPPED at answers, 
 
 test('the ClickUp answers: digits, the seat required with a list, and none without one', () => {
   const homeConfig = validateProjectConfig({
-    manifestVersion: 1, workspaceId: '0', spaceId: '0', loopQueueListId: '0', operatorUserId: '1', machineUserId: '2',
+    manifestVersion: 2, workspaceId: '0', spaceId: '0', loopQueueListId: '0', operatorUserId: '1', machineUserId: '2',
     githubRepo: 'mentor24-maker/spirality', dopplerProject: 'spirality', dopplerConfig: 'dev', launchdPrefix: 'com.spirality',
     logDir: '/tmp/logs', mergePhrases: ['merge'], governancePaths: ['CLAUDE.md'], autoMergeLanes: [],
     operatorName: 'Dane', projectSlug: 'spirality', legacyMachinePrefixes: [], projectScripts: {}, trackerPrefix: 'SP',
