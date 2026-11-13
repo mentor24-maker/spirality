@@ -2164,12 +2164,82 @@ export function consoleWaiting(t) {
 }
 
 /**
+ * The tag a ticket from the tracker page carries (SP-221): it says where the
+ * request came from, not what feature it is part of.
+ */
+export const REQUEST_FORM_TAG = 'request-form';
+
+/**
+ * The Console's feature colours (SP-234): light backgrounds, so the ticket
+ * number (the page's ink) reads on every one of them. app.css has one
+ * `.tile.feature-<n>` rule per colour, in this order; a test holds the two
+ * together and checks each colour's contrast.
+ */
+export const FEATURE_PALETTE = Object.freeze([
+  '#ffd6d6', '#ffe2c2', '#fff3b0', '#d9f2c4', '#c8f0e4',
+  '#cfe8ff', '#dcd6ff', '#f5d0f0', '#e6dccb', '#d5dde6',
+]);
+
+/**
+ * A ticket's feature: its first tag (the loops tag each ticket with its
+ * epic's name), passing over `request-form`, which says only where the
+ * request came from. Null for a ticket with no such tag, which keeps the
+ * plain tile.
+ */
+export function consoleFeature(t) {
+  const tags = Array.isArray(t?.tags) ? t.tags : [];
+  const tag = tags.find((x) => typeof x === 'string' && x.trim() && x.trim() !== REQUEST_FORM_TAG);
+  return tag ? tag.trim() : null;
+}
+
+/**
+ * Which FEATURE_PALETTE colour a feature gets: a pure function of the tag
+ * (an FNV-1a hash of its characters), so the same tag has the same colour on
+ * every load and every machine. Two tags can share a colour, more often once
+ * there are more features than colours.
+ */
+export function featureColourIndex(tag) {
+  let hash = 0x811c9dc5;
+  for (const ch of String(tag)) {
+    hash ^= ch.codePointAt(0);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash % FEATURE_PALETTE.length;
+}
+
+/**
+ * The Console's Features key as HTML (SP-234): each feature on screen, with
+ * its colour swatch and how many tickets in flight carry it, most tickets
+ * first (ties by name). Each is a button; the page dims every other tile
+ * while one is picked (`picked`, the feature's tag, shown pressed). Nothing
+ * when no ticket on screen has a feature.
+ */
+export function renderFeatureKey(tickets, picked = null) {
+  const counts = new Map();
+  for (const t of Array.isArray(tickets) ? tickets : []) {
+    const feature = consoleFeature(t);
+    if (feature) counts.set(feature, (counts.get(feature) ?? 0) + 1);
+  }
+  if (!counts.size) return '';
+  const order = [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  const pick = ([feature, n]) => {
+    const on = feature === picked;
+    const say = `${feature}: ${n} ticket${n === 1 ? '' : 's'}`;
+    return `<button type="button" class="feature-pick feature-${featureColourIndex(feature)}" data-feature="${escapeHtml(feature)}" aria-pressed="${on}" title="${escapeHtml(on ? `Show every ticket again` : `Show only ${feature}`)}" aria-label="${escapeHtml(say)}">`
+      + `<span class="swatch" aria-hidden="true"></span>${escapeHtml(feature)}<span class="count">${n}</span></button>`;
+  };
+  return `<div class="feature-key" role="group" aria-label="Features"><span class="key-title">Features</span>${order.map(pick).join('')}</div>`;
+}
+
+/**
  * One Console tile as HTML: a link to the ticket, its full name on hover;
  * the project's logo as its picture (only an http(s) address is drawn), or
  * the project's ticket prefix in large letters when it has none; the ticket
  * number over it; and along the bottom the stage, the next change
  * (consoleNextChange) and the time in stage (consoleAge). A ticket waiting
- * on the operator carries `waiting` (the ring). The stage fact carries
+ * on the operator carries `waiting` (the ring). A ticket with a feature
+ * (consoleFeature) carries `feature feature-<n>` (its colour, from app.css)
+ * and `data-feature`, which the Features key's pick dims by. The stage fact carries
  * `data-stage`, so the page puts the Settings page's stage colour on it
  * after drawing (no inline style). Every piece of ticket and project text
  * is escaped.
@@ -2184,10 +2254,13 @@ export function renderConsoleTile(t, project = null, now = Date.now()) {
   const next = consoleNextChange(t?.nextChange, now);
   const age = consoleAge(t?.stageSince, now);
   const waiting = consoleWaiting(t);
+  const feature = consoleFeature(t);
   const status = String(t?.status ?? '');
   const label = `${id}: ${t?.name ?? ''}`;
-  const spoken = `${label}. ${status}; next change ${next.text}; in this stage ${age}${waiting ? '; waiting on you' : ''}.`;
-  return `<a class="tile${waiting ? ' waiting' : ''}" href="/t/${encodeURIComponent(id)}" title="${escapeHtml(label)}" aria-label="${escapeHtml(spoken)}">`
+  const spoken = `${label}. ${status}; next change ${next.text}; in this stage ${age}${feature ? `; feature ${feature}` : ''}${waiting ? '; waiting on you' : ''}.`;
+  const classes = `tile${feature ? ` feature feature-${featureColourIndex(feature)}` : ''}${waiting ? ' waiting' : ''}`;
+  const marked = feature ? ` data-feature="${escapeHtml(feature)}"` : '';
+  return `<a class="${classes}"${marked} href="/t/${encodeURIComponent(id)}" title="${escapeHtml(label)}" aria-label="${escapeHtml(spoken)}">`
     + `<span class="tile-picture">${picture}</span>`
     + `<span class="tile-number">${escapeHtml(id)}</span>`
     + '<span class="tile-facts">'
@@ -2204,7 +2277,7 @@ export function renderConsoleTile(t, project = null, now = Date.now()) {
  * shows its heading. A ticket whose status is not in `stages` (the list
  * could not be read) gets a column of its own after them, in the answer's
  * order, so no ticket is ever left off. Live is never drawn: nothing in
- * flight is Live.
+ * flight is Live. The Features key (renderFeatureKey) goes above the stages.
  */
 export function renderConsole(answer, stages = [], now = Date.now()) {
   const tickets = Array.isArray(answer?.tickets) ? answer.tickets : [];
@@ -2217,5 +2290,5 @@ export function renderConsole(answer, stages = [], now = Date.now()) {
       + `<h2><span class="stage-name">${escapeHtml(status)}</span><span class="count quiet">${here.length}</span></h2>`
       + `<div class="tiles">${here.map((t) => renderConsoleTile(t, projects.get(t.project), now)).join('')}</div></section>`;
   };
-  return `<div class="console">${order.map(column).join('')}</div>`;
+  return `${renderFeatureKey(tickets)}<div class="console">${order.map(column).join('')}</div>`;
 }
