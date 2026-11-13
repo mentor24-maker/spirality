@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { DEMO_NEWEST_RELEASE, DEMO_OWN_PROJECT, demoNewestRelease, seedDemo, tickingClock } from './demoData.mjs';
 import { reportsOf, REPORT_RANGES, searchTickets, PRIORITIES, timeSplitOf, isFailureNote, TIME_BUCKETS, pipelineControlsOf } from './pageData.mjs';
-import { escapeHtml, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, renderReleaseGroup, controlValueText, mountainTime, wakeInEffectText, modelLastPassText, renderConsole, renderConsoleTile, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, consoleFeature, featureColourIndex, renderFeatureKey, FEATURE_PALETTE, drainLine, capInFlightText } from './web/render.mjs';
+import { escapeHtml, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, renderTopics, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, renderReleaseGroup, controlValueText, mountainTime, wakeInEffectText, modelLastPassText, renderConsole, renderConsoleTile, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, consoleFeature, featureColourIndex, renderFeatureKey, FEATURE_PALETTE, drainLine, capInFlightText } from './web/render.mjs';
 import { startServer, setupSettingsOf } from './server.mjs';
 import { saveAnswers, setupFields, setupOf } from './setup.mjs';
 import { DANE_FIELDS as SETUP_FIELDS, STEPS as SETUP_STEPS } from '../scripts/onboard/onboard.mjs';
@@ -1123,7 +1123,7 @@ test('bellColour: grey while nothing waits, yellow for 1 to 3, red for more than
 test('Waiting on you is a bell on the right, just before "Signed in as", coloured from the count wherever it is read', () => {
   const html = readFileSync(WEB('index.html'), 'utf8');
   const nav = /<nav class="site" hidden>([\s\S]*?)<\/nav>/.exec(html)[1];
-  assert.deepEqual([...nav.matchAll(/>([^<]+)<\/a>/g)].map((m) => m[1]), ['Projects', 'Tasks', 'Reporting', 'Users', 'Docs', 'Settings']);
+  assert.deepEqual([...nav.matchAll(/>([^<]+)<\/a>/g)].map((m) => m[1]), ['Projects', 'Tasks', 'Topics', 'Reporting', 'Users', 'Docs', 'Settings']);
   assert.doesNotMatch(nav, /Waiting on you/);
   const me = /<span class="me">([\s\S]*?)<\/span>\s*<\/header>/.exec(html)[1];
   assert.match(me, /<a id="bell" href="\/" title="Waiting on You" aria-label="Waiting on You" data-colour="grey" hidden><svg [^>]*aria-hidden="true">[\s\S]*?<\/svg><\/a>\s*<span id="who"><\/span>/);
@@ -2566,9 +2566,9 @@ test('Reporting: one project or all of them; an unknown project is null; open co
   } finally { r.done(); }
 });
 
-test('Reporting is in the header after Tasks, served at /reporting, and its figures need a sign-in; the demo holds finished tasks', async () => {
+test('Reporting is in the header after Tasks and Topics, served at /reporting, and its figures need a sign-in; the demo holds finished tasks', async () => {
   const html = readFileSync(WEB('index.html'), 'utf8');
-  assert.match(html, /<a href="\/tasks" data-nav="tasks">Tasks<\/a>\s*<a href="\/reporting" data-nav="reporting">Reporting<\/a>/);
+  assert.match(html, /<a href="\/tasks" data-nav="tasks">Tasks<\/a>\s*<a href="\/topics" data-nav="topics">Topics<\/a>\s*<a href="\/reporting" data-nav="reporting">Reporting<\/a>/);
   const f = await fixture();
   try {
     const page = await f.call('GET', '/reporting', { token: null });
@@ -4695,4 +4695,51 @@ test('a click on a feature in the key dims every other tile, a second click show
   assert.match(show, /tile\.classList\.toggle\('dimmed', pickedFeature !== null && tile\.dataset\.feature !== pickedFeature\)/);
   assert.match(show, /b\.setAttribute\('aria-pressed', String\(b\.dataset\.feature === pickedFeature\)\)/);
   assert.match(show, /if \(!picks\.some\(\(b\) => b\.dataset\.feature === pickedFeature\)\) pickedFeature = null;/);
+});
+
+// ── Topics (SP-243) ─────────────────────────────────────────────────────────
+
+test('Topics in the top menu opens /topics, right after Tasks, and is marked current on its own page (SP-243)', () => {
+  const html = readFileSync(WEB('index.html'), 'utf8');
+  assert.match(html, /<a href="\/tasks" data-nav="tasks">Tasks<\/a>\s*<a href="\/topics" data-nav="topics">Topics<\/a>/);
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  assert.match(app, /const topicsPage = location\.pathname === '\/topics';/);
+  assert.match(app, /topicsPage \? 'topics' :/, 'marked current');
+  assert.match(app, /\} else if \(topicsPage\) \{\s*await drawTopics\(\);/);
+});
+
+test('the Topics page lists the picked project\'s topics newest first, every name escaped, says "No topics yet" when there are none, and has a Create Topic form (SP-243)', () => {
+  const projects = [{ slug: 'alpha', name: 'Alpha <One>' }, { slug: 'beta', name: 'Beta' }];
+  const project = projects[0];
+  const html = renderTopics({ projects, project, topics: [
+    { id: 2, name: 'Login <b>', description: 'Signing "in"', createdByName: 'Dane <D>', createdAt: '2026-11-13T12:00:00Z' },
+    { id: 1, name: 'Billing', description: '', createdByName: null, createdAt: '2026-11-12T12:00:00Z' },
+  ] }, { timeOf: (iso) => `at ${iso}` });
+  assert.match(html, /<h1>Topics<\/h1>/);
+  for (const heading of ['Name', 'Description', 'Created By', 'Created']) assert.match(html, new RegExp(`<th>${heading}</th>`), heading);
+  assert.match(html, /<td class="name">Login &lt;b&gt;<\/td>/);
+  assert.match(html, /<td class="about">Signing &quot;in&quot;<\/td>/);
+  assert.match(html, /<td class="by">Dane &lt;D&gt;<\/td>/);
+  assert.match(html, /<td class="when">at 2026-11-13T12:00:00Z<\/td>/);
+  assert.ok(html.indexOf('data-topic="2"') < html.indexOf('data-topic="1"'), 'in the order the server lists them (newest first)');
+  assert.match(html, /<option value="alpha" selected>Alpha &lt;One&gt;<\/option>/, 'the picked project is chosen in the picker');
+  assert.match(html, /<h2>Create Topic<\/h2>/);
+  assert.match(html, /<form class="create-topic">[\s\S]*<label for="topic-name">Name<\/label>[\s\S]*<label for="topic-description">Description<\/label>[\s\S]*<button type="submit">Create Topic<\/button>/);
+  assert.doesNotMatch(html, /<b>|<One>|<D>/, 'nothing unescaped');
+  assert.doesNotMatch(html, /No topics yet/);
+  const empty = renderTopics({ projects, project, topics: [] }, { timeOf: String });
+  assert.match(empty, /No topics yet\./);
+  assert.doesNotMatch(empty, /<table/);
+  assert.match(empty, /Create Topic<\/button>/, 'an empty project can still create one');
+  assert.match(renderTopics({ projects, project, topics: [] }, { timeOf: String, problem: 'Not created: a topic needs a name.' }), /<p class="note topic-note error" role="status">Not created: a topic needs a name\.<\/p>/);
+});
+
+test('the Topics page refuses a blank name before sending, and says a create worked only when the topic reads back in the list (SP-243)', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const draw = app.slice(app.indexOf('async function drawTopics'), app.indexOf('/**\n * The Docs page in two columns'));
+  assert.match(draw, /if \(!name\) return say\('Not created: a topic needs a name\.', true\);/);
+  assert.ok(draw.indexOf("if (!name)") < draw.indexOf("api('POST', topicsPath"), 'refused before anything is sent');
+  assert.match(draw, /api\('GET', topicsPath, undefined, \{ unrecorded: true \}\)/, 'the list is read back');
+  assert.match(draw, /back\?\.topics\?\.some\(\(t\) => t\.id === made\.id\)/);
+  assert.match(draw, /localStorage\.setItem\(PROJECT_KEY, chosen\.slug\)/, 'picking a project here selects it');
 });

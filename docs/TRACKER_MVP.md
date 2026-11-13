@@ -172,6 +172,17 @@ account_links  token hash, purpose (setup|invite|reset), email, actor,
   `tracker/backup.mjs`. It is never edited; it is removed one at a time, and
   a project that still holds any is not deleted (409 `has-docs`). The build
   loop does not read them automatically.
+- **A topic** is a key aspect of one project (SP-243): its features,
+  mostly, but also its constituents or challenges. In Dane's words, "when
+  there is a parent feature with a series of children, there is a topic."
+  Each topic belongs to exactly one project, and a project has many: a name
+  (required), a description, who made it and when, in the `topics` table.
+  The **Topics** page (`/topics`, in the top menu after Tasks) lists the
+  picked project's topics, newest first, and has a **Create Topic** form;
+  `GET` and `POST /projects/<slug>/topics` sit behind the same project check
+  as the Docs page. This first page only adds and lists topics. Linking them
+  to tasks (many to many), to each other, and editing or deleting them come
+  in later tickets. A deleted project's topics go with it.
 - **Roles and permissions** (SP-143): every person has one of five roles,
   **admin**, **editor**, **contributor**, **reviewer** and **viewer**, each
   with a plain-words description, and each role a set of permissions. The

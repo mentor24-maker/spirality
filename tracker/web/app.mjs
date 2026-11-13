@@ -26,7 +26,7 @@
  * an emailed link's own page. The link's token is sent only in a JSON body,
  * never in an address.
  */
-import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, unwrapDoc, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderAnswerIn, renderHeldUp, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, lookupTicket, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, pipelinePodLabel, renderHealth, healthLines, renderCommandList, renderCommandView, renderCommandDetails, renderContextDocs, renderSortHeadings, renderListPriority, sortTickets, nextSort, renderDocumentation, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, lowerMeridiem, renderPipelineControls, renderConsole, drainLine } from './render.mjs';
+import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, unwrapDoc, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderAnswerIn, renderHeldUp, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, lookupTicket, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, pipelinePodLabel, renderHealth, healthLines, renderCommandList, renderCommandView, renderCommandDetails, renderContextDocs, renderTopics, renderSortHeadings, renderListPriority, sortTickets, nextSort, renderDocumentation, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, lowerMeridiem, renderPipelineControls, renderConsole, drainLine } from './render.mjs';
 
 /** Where an earlier version of the page kept a pasted token; removed on load, never read. */
 const OLD_TOKEN_KEY = 'tracker-token';
@@ -2765,6 +2765,63 @@ async function drawDocs(done = '', problem = '', section = 'files') {
 }
 
 /**
+ * The Topics page (SP-243): the topics of the project picked here (or on
+ * the Projects page, else the first) and a Create Topic form. Picking
+ * another project here selects it, as the Tasks page's picker does. A blank
+ * name is refused on the page before anything is sent; after a create the
+ * list is read again, and the page says it worked only when the new topic
+ * is on it. `done` and `problem` are the line the last create left.
+ */
+async function drawTopics(done = '', problem = '') {
+  const { projects } = await api('GET', '/projects');
+  setTitle('Topics · Tracker');
+  putTrail([{ label: 'Topics' }]);
+  if (!projects.length) {
+    main.innerHTML = '<h1>Topics</h1><p class="quiet">There are no projects yet.</p>';
+    return;
+  }
+  const project = projects.find((p) => p.slug === savedProject()) ?? projects[0];
+  const topicsPath = `/projects/${encodeURIComponent(project.slug)}/topics`;
+  const { topics } = await api('GET', topicsPath);
+  main.innerHTML = renderTopics({ projects, project, topics }, { timeOf: when, done, problem });
+  const note = main.querySelector('.topic-note');
+  const say = (text, failed = false) => { note.className = `note topic-note ${failed ? 'error' : 'quiet'}`; note.textContent = text; };
+  const again = (text, failed) => drawAgain(() => drawTopics(failed ? '' : text, failed ? text : ''))
+    .catch((err) => (err instanceof SignedOut ? drawSignIn() : showError(err)));
+  main.querySelector('.project-picker select').addEventListener('change', (e) => {
+    const chosen = projects.find((p) => p.slug === e.target.value);
+    if (!chosen) return;
+    try {
+      localStorage.setItem(PROJECT_KEY, chosen.slug);
+      localStorage.setItem(PROJECT_NAME_KEY, chosen.name);
+    } catch { /* the page still works; it is only not remembered */ }
+    showProject();
+    again('', false);
+  });
+  const form = main.querySelector('form.create-topic');
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const name = form.querySelector('#topic-name').value.trim();
+    const description = form.querySelector('#topic-description').value.trim();
+    const button = form.querySelector('button');
+    if (!name) return say('Not created: a topic needs a name.', true);
+    button.disabled = true;
+    say(`Creating ${name}…`);
+    let made;
+    try {
+      made = await api('POST', topicsPath, { name, description });
+    } catch (err) {
+      if (err instanceof SignedOut) return drawSignIn(`You were signed out; ${name} was not created.`);
+      button.disabled = false;
+      return say(`Not created: ${err.message}`, true);
+    }
+    const back = await api('GET', topicsPath, undefined, { unrecorded: true }).catch(() => null);
+    const listed = back?.topics?.some((t) => t.id === made.id);
+    again(listed ? `Created ${made.name} in ${project.name}.` : `The tracker said ${made.name} was created, but ${back ? 'it is not listed when read back' : 'the list could not be read back'}.`, !listed);
+  });
+}
+
+/**
  * The Docs page in two columns (SP-212): the Quick Claude Commands pod down
  * the left third, `rest` (Context Documents, Task Files, Reference Docs and
  * Work Log) on the right. A narrow screen stacks the pod above the rest
@@ -3042,6 +3099,7 @@ async function route({ place = null } = {}) {
     const reporting = location.pathname === '/reporting';
     const usersPage = location.pathname === '/users';
     const docsPage = location.pathname === '/docs';
+    const topicsPage = location.pathname === '/topics';
     const docPath = docAt();
     const docsCommand = commandAt();
     const docAny = underDocs();
@@ -3051,8 +3109,8 @@ async function route({ place = null } = {}) {
     const setupPage = !setupNew && /^\/setup\/([^/]+)$/.exec(location.pathname);
     const setupAny = setupNew || setupAnswers || setupPage;
     let following = false;
-    const waiting = !(setupAny || search || reporting || settings || usersPage || docsPage || docAny || isNew || ticket || projects || newProject || editProject || details || tasks || consolePage || project);
-    markNav(reporting ? 'reporting' : settings ? 'settings' : usersPage ? 'users' : docsPage || docAny ? 'docs' : projects || newProject || details || editProject || setupAny ? 'projects' : ticket || project || tasks || consolePage || isNew || search ? 'tasks' : 'waiting');
+    const waiting = !(setupAny || search || reporting || settings || usersPage || docsPage || topicsPage || docAny || isNew || ticket || projects || newProject || editProject || details || tasks || consolePage || project);
+    markNav(reporting ? 'reporting' : settings ? 'settings' : usersPage ? 'users' : topicsPage ? 'topics' : docsPage || docAny ? 'docs' : projects || newProject || details || editProject || setupAny ? 'projects' : ticket || project || tasks || consolePage || isNew || search ? 'tasks' : 'waiting');
     if (setupNew) {
       await drawSetupNew(null);
     } else if (setupAnswers) {
@@ -3067,6 +3125,8 @@ async function route({ place = null } = {}) {
       await drawSettings();
     } else if (usersPage) {
       await drawUsers();
+    } else if (topicsPage) {
+      await drawTopics();
     } else if (docsPage) {
       await drawDocs();
     } else if (docsCommand != null) {

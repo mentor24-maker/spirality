@@ -43,6 +43,9 @@
  * way, listed by `GET /projects/<slug>/docs` and removed one at a time by
  * `DELETE /projects/<slug>/docs/<n>`; only someone who can see the project
  * reaches any of them.
+ * A project's topics are listed by `GET /projects/<slug>/topics`
+ * and made one at a time by `POST /projects/<slug>/topics` (`{ name,
+ * description }`, a name required), behind the same project check.
  * A refused write writes nothing. A token never appears in an answer or a
  * log line: the log names the actor id, never the header.
  *
@@ -246,7 +249,7 @@ const PAGE_HEADERS = Object.freeze({
  */
 function pageFile(pathname, accept = '') {
   if (/^\/(?:projects(?:\/[^/]+)?|search|setup\/(?!fields$)[^/]+)$/.test(pathname)) return /\btext\/html\b/.test(accept) ? 'index.html' : null;
-  if (pathname === '/' || /^\/(?:tasks|board|list|console|new|settings|set-password|reporting|users|docs)$/.test(pathname) || /^\/(?:t|board|list)\/[^/]+$/.test(pathname)) return 'index.html';
+  if (pathname === '/' || /^\/(?:tasks|board|list|console|new|settings|set-password|reporting|users|docs|topics)$/.test(pathname) || /^\/(?:t|board|list)\/[^/]+$/.test(pathname)) return 'index.html';
   if (/^\/projects\/[^/]+\/edit$/.test(pathname)) return 'index.html';
   // A page under the Docs page, such as one of the substrate's own
   // documentation files: the page itself draws what the rest names.
@@ -1094,6 +1097,18 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     if (parts.length === 3 && parts[0] === 'projects' && parts[2] === 'attachments' && method === 'GET') {
       const project = requireProject(parts[1], me);
       return [200, { project: project.slug, attachments: store.listProjectAttachments(project.slug) }];
+    }
+
+    // A project's topics: key aspects of the project, mostly
+    // features. The list, newest first, and one create (a name is
+    // required), behind the same project check as the Docs page.
+    if (parts.length === 3 && parts[0] === 'projects' && parts[2] === 'topics' && (method === 'GET' || method === 'POST')) {
+      const project = requireProject(parts[1], me);
+      if (method === 'GET') return [200, { project: project.slug, topics: store.listTopics(project.slug) }];
+      const body = await readJson(req);
+      const made = store.addTopic({ project: project.slug, name: body?.name, description: body?.description ?? '', actor: me.id });
+      log(`made topic ${made.id} on ${project.slug} actor=${me.id}`);
+      return [201, made];
     }
 
     // A project's context documents: files kept on the project,
