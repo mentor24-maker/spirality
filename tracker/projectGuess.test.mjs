@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { guessProject, scoreProjects, wordsOf, MARGIN, NAME_WORD, PRIOR_TICKETS, COMMON_WORDS } from './projectGuess.mjs';
+import { guessProject, scoreProjects, wordsOf, MARGIN, NAME_WORD, PRIOR_TICKETS, HOME_SHARE, COMMON_WORDS } from './projectGuess.mjs';
 
 const t = (name, description = '') => ({ name, description });
 
@@ -100,4 +100,59 @@ test('scores come highest first and say which projects the request names', () =>
   assert.deepEqual(scores.map((p) => p.slug), ['empty', 'game', 'tracker']);
   assert.deepEqual(scores.map((p) => p.named), [true, false, false]);
   assert.equal(scores[0].score, NAME_WORD);
+});
+
+/**
+ * SP-225: two projects that share everyday words, one using them far more.
+ * "Loop" is the tracker, whose tickets sometimes say "task"; "Scores" is a
+ * project about scoring tasks, whose every ticket says "task" and "page".
+ * Sixty tickets each, so a word in one ticket of Loop's is under HOME_SHARE.
+ */
+const many = (n, make) => Array.from({ length: n }, (_, i) => make(i));
+const SHARED = [
+  {
+    slug: 'loop', name: 'Loop', tickets: [
+      ...many(20, (i) => t(`Tasks page column ${i}`, 'The task list on the Tasks page.')),
+      ...many(39, (i) => t(`Relay lane ${i} stops`, 'The relay merges after the lane wakes.')),
+      t('Logo on the header'),
+    ],
+  },
+  {
+    slug: 'scores', name: 'Scores', tickets: [
+      ...many(55, (i) => t(`Task points rule ${i}`, 'Each task page shows its points and its factor ratings.')),
+      ...many(5, (i) => t(`Supabase table ${i}`, 'The Supabase table that holds a task\'s factor ratings.')),
+    ],
+  },
+];
+
+test('the rule 3 number is written down too', () => {
+  assert.ok(HOME_SHARE > 0 && HOME_SHARE < 1 / (1 + PRIOR_TICKETS), 'a word in one ticket of a small project is at home');
+});
+
+test('everyday words the project already uses never name another project, however much more the other uses them', () => {
+  // Without rule 3 "task", "tasks", "page" and "list" add up to Scores.
+  const asked = t('Tasks page task list', 'On the Tasks page, show each task in the list with its page link.');
+  assert.ok(scoreProjects(asked, SHARED)[0].slug === 'scores', 'every word counted, Scores leads');
+  assert.equal(guessProject(asked, 'loop', SHARED), null);
+  // Its words are not at home in Scores, so they still say Loop when filed there.
+  assert.equal(guessProject(t('Relay lane stops'), 'scores', SHARED)?.slug, 'loop');
+});
+
+test('words strange to the project being filed into still name the project that uses them', () => {
+  assert.deepEqual(guessProject(t('Supabase factor ratings table', 'Points for each task.'), 'loop', SHARED), { slug: 'scores', name: 'Scores' });
+});
+
+test('a word in one ticket of the project being filed into is at home in a small project, not in a big one', () => {
+  // "logo": one Loop ticket of sixty, 1/70, is under HOME_SHARE: not at home, so it is kept and scores for Loop.
+  const scored = scoreProjects(t('Logo'), SHARED, 'loop');
+  assert.ok(scored.find((p) => p.slug === 'loop').score > 0);
+  // In the four-ticket Tracker project one ticket is 1/14: at home, so it scores nothing for anyone.
+  const small = scoreProjects(t('Narrow Spaceship'), PROJECTS, 'tracker');
+  assert.equal(small.find((p) => p.slug === 'tracker').score, 0);
+  assert.ok(small.find((p) => p.slug === 'game').score > 0, '"spaceship" is strange to Tracker and still counts for Starfield');
+});
+
+test('a project\'s name is never at home: a Loop ticket that says "Scores" does not stop "Scores" naming it', () => {
+  const projects = [{ ...SHARED[0], tickets: [...SHARED[0].tickets, ...many(10, (i) => t(`Copy the loop to Scores ${i}`))] }, SHARED[1]];
+  assert.deepEqual(guessProject(t('Scores credits roll'), 'loop', projects), { slug: 'scores', name: 'Scores' });
 });

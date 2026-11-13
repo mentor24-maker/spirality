@@ -327,6 +327,17 @@ export function busLink(answer) {
   };
 }
 
+/** How near a stage's next time must be for the pod to draw it gold (SP-222): under 3 minutes. */
+export const PIPELINE_SOON_MS = 3 * 60 * 1000;
+
+/**
+ * The pod's clock time with its am/pm in lowercase (SP-222): "10:45 AM"
+ * becomes "10:45 am". Text with no AM or PM comes back unchanged.
+ */
+export function lowerMeridiem(text) {
+  return String(text).replace(/\b(AM|PM)\b/g, (m) => m.toLowerCase());
+}
+
 /** What the Pipeline Status pod says when GET /pipeline could not be read. */
 export const PIPELINE_UNAVAILABLE = 'Pipeline Status unavailable';
 
@@ -339,15 +350,19 @@ export const PIPELINE_UNAVAILABLE = 'Pipeline Status unavailable';
  * a CSS grid of spans (`.stages` in app.css). `timeOf` turns an ISO time into
  * the page's own clock time. A stage with no pass logged yet, or no next time
  * known, shows a dash, its title saying which. A running stage's two cells
- * carry `running`, which app.css draws green. A missing or malformed answer
- * says PIPELINE_UNAVAILABLE.
+ * carry `running`, which app.css draws green. A stage whose next time is
+ * less than PIPELINE_SOON_MS from `now` (or already past: a pass that is due)
+ * carries `soon` instead, which app.css draws gold (SP-222); a running stage
+ * is never `soon`. `now` is a time in milliseconds, given so a test can fix
+ * the clock. A missing or malformed answer says PIPELINE_UNAVAILABLE.
  */
-export function renderPipelinePod(answer, timeOf) {
+export function renderPipelinePod(answer, timeOf, now = Date.now()) {
   const stages = Array.isArray(answer?.stages) ? answer.stages : null;
   if (!stages || !stages.length) return `<span class="unavailable">${escapeHtml(PIPELINE_UNAVAILABLE)}</span>`;
   const item = (s) => {
     let shown;
     let title;
+    let soon = false;
     if (s.running) {
       shown = 'running';
       title = `${s.name}: a pass is running now`;
@@ -359,9 +374,11 @@ export function renderPipelinePod(answer, timeOf) {
       title = `${s.name}: the next pass's time is not known yet`;
     } else {
       shown = timeOf(s.nextDue);
-      title = `${s.name}: next pass due ${shown}`;
+      const away = Date.parse(s.nextDue) - now;
+      soon = away < PIPELINE_SOON_MS;
+      title = `${s.name}: next pass due ${shown}${away <= 0 ? ' (due now)' : soon ? ' (due within 3 minutes)' : ''}`;
     }
-    const cls = s.running ? ' running' : '';
+    const cls = s.running ? ' running' : soon ? ' soon' : '';
     const tip = escapeHtml(title);
     return `<span class="stage${cls}" title="${tip}">${escapeHtml(s.name)}</span><span class="time${cls}" title="${tip}">${escapeHtml(shown)}</span>`;
   };
@@ -458,6 +475,79 @@ export function renderPipelineDetails(answer, timeOf) {
     <thead><tr><th scope="col">Stage</th><th scope="col">Next Pass</th><th scope="col">Last Started</th><th scope="col">Last Ended</th><th scope="col">Wakes</th></tr></thead>
     <tbody>${stages.map(row).join('')}</tbody>
   </table>`;
+}
+
+/** A time as Mountain time, the way the change log shows it: "Nov 12, 2026, 6:48 AM MST". */
+export function mountainTime(iso) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '–';
+  return d.toLocaleString('en-US', { timeZone: 'America/Denver', month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
+}
+
+/** A pipeline control's value in words: "1,800 seconds (Every 30 minutes)", "On", "Claude's default". */
+export function controlValueText(control, models = []) {
+  const v = String(control?.value ?? '');
+  if (control?.kind === 'seconds') return `${Number(v).toLocaleString('en-US')} seconds (${wakesEvery(Number(v))})`;
+  if (control?.kind === 'switch') return v === 'on' ? 'On' : 'Off';
+  if (control?.kind === 'model') return models.find((m) => m.id === v)?.label ?? v;
+  return v;
+}
+
+/** One control's input, named by its key: a number box, an On/Off choice or a model choice. */
+function controlInput(c, models, id, locked) {
+  const off = locked ? ' disabled' : '';
+  if (c.kind === 'seconds' || c.kind === 'count') {
+    return `<input id="${id}" type="number" min="${c.min}" max="${c.max}" step="1" value="${escapeHtml(c.value)}"${off}>`;
+  }
+  const options = c.kind === 'switch' ? [{ id: 'off', label: 'Off' }, { id: 'on', label: 'On' }] : models;
+  return `<select id="${id}"${off}>${options.map((o) => `<option value="${escapeHtml(o.id)}"${o.id === c.value ? ' selected' : ''}>${escapeHtml(o.label)}</option>`).join('')}</select>`;
+}
+
+/**
+ * One project's Pipeline Controls section on the Settings page (SP-224),
+ * from GET /pipeline-controls: each group of controls under its heading, each
+ * control with its value, a "default" mark while it has its default, and a
+ * Save button (none, and the inputs locked, for a reader who may not change
+ * them), then the line saying the lanes do not use that group yet, naming
+ * the ticket that wires it in. Under them, the change log, newest first, in
+ * Mountain time. `notes` is `{ key: { ok, text } }`, a Save's outcome to show
+ * beside its control.
+ */
+export function renderPipelineControls(view, notes = {}) {
+  const slug = view.project.slug;
+  const locked = view.canChange !== true;
+  const models = view.models ?? [];
+  const row = (c) => {
+    const id = `control-${escapeHtml(slug)}-${escapeHtml(c.key.replace(/[^A-Za-z0-9-]/g, '-'))}`;
+    const note = notes[c.key];
+    const mark = c.isDefault ? ' <span class="default">default</span>' : '';
+    return `<tr data-control="${escapeHtml(c.key)}" data-kind="${escapeHtml(c.kind)}">
+      <td class="label"><label for="${id}">${escapeHtml(c.label)}</label>${mark}</td>
+      <td class="input">${controlInput(c, models, id, locked)}</td>
+      <td class="value">${escapeHtml(controlValueText(c, models))}</td>
+      <td class="save">${locked ? '' : '<button type="button">Save</button>'}<span class="note${note ? (note.ok ? ' quiet' : ' error') : ''}">${note ? escapeHtml(note.text) : ''}</span></td>
+    </tr>`;
+  };
+  const group = (g) => {
+    const controls = view.controls.filter((c) => c.group === g.key);
+    if (!controls.length) return '';
+    return `<h4>${escapeHtml(g.title)}</h4>
+    <table class="controls"><tbody>${controls.map(row).join('')}</tbody></table>
+    <p class="quiet not-yet">Saved, but the lanes do not use this yet (${escapeHtml(g.wiredBy)}).</p>`;
+  };
+  const who = view.operator ? escapeHtml(view.operator.name) : 'nobody (this project has no operator)';
+  const lockedLine = locked ? `<p class="quiet">Only ${who}, the project's operator, may change these.</p>` : '';
+  const changes = view.changes ?? [];
+  const log = changes.length
+    ? `<table class="control-changes"><thead><tr><th>When</th><th>Who</th><th>Setting</th><th>Old Value</th><th>New Value</th></tr></thead><tbody>${changes.map((x) => `<tr><td>${escapeHtml(mountainTime(x.at))}</td><td>${escapeHtml(x.actorName)}</td><td>${escapeHtml(x.label)}</td><td>${escapeHtml(x.from)}</td><td>${escapeHtml(x.to)}</td></tr>`).join('')}</tbody></table>`
+    : '<p class="quiet">No changes yet.</p>';
+  return `<section class="pipeline-controls" data-project="${escapeHtml(slug)}">
+    <h3>${escapeHtml(view.project.name)}</h3>
+    ${lockedLine}
+    ${(view.groups ?? []).map(group).join('')}
+    <h4>Change Log</h4>
+    ${log}
+  </section>`;
 }
 
 const CONTEXT_HEADING = "WHAT'S GOING ON";

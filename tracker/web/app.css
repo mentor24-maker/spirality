@@ -81,14 +81,15 @@ button { font: inherit; padding: 0.4rem 1rem; }
 .toolbar .project-picker { font-weight: 600; }
 .toolbar .project-picker select { font: inherit; font-weight: normal; padding: 0.35rem; margin-left: 0.25rem; }
 /* The Pipeline Status pod (SP-168): when each loop stage runs next, between the search field and Board/List. */
-.toolbar .pipeline-pod { display: flex; flex-direction: column; align-items: flex-start; padding: 0.3rem 0.75rem; border: var(--hairline); border-radius: 6px; background: #eaf5fe; font-size: 0.85rem; color: var(--ink); white-space: nowrap; cursor: pointer; text-align: left; font-family: inherit; }
-.toolbar .pipeline-pod:hover { background: #d6ecfd; }
+.toolbar .pipeline-pod { display: flex; flex-direction: column; align-items: flex-start; margin: 10px 20px; padding: 0.3rem 0.75rem; border: 1px solid #000077; border-radius: 6px; background: #cceeff; font-size: 0.85rem; color: var(--ink); white-space: nowrap; cursor: pointer; text-align: left; font-family: inherit; }
+.toolbar .pipeline-pod:hover { background: #b8e4ff; }
 .toolbar .pipeline-pod:empty { display: none; }
-.toolbar .pipeline-pod .heading { font-weight: 600; margin-bottom: 0.15rem; }
+.toolbar .pipeline-pod .heading { font-size: 1.5em; font-weight: 600; margin-bottom: 0.15rem; }
 .toolbar .pipeline-pod .stages { display: grid; grid-template-columns: auto auto; column-gap: 0.75rem; row-gap: 0.05rem; }
 .toolbar .pipeline-pod .stage { font-weight: 700; color: var(--ink); }
 .toolbar .pipeline-pod .time { color: var(--ink); }
-.toolbar .pipeline-pod .running { color: #006600; }
+.toolbar .pipeline-pod .running { color: #00AA00; }
+.toolbar .pipeline-pod .soon { color: #B8860B; }
 .toolbar .pipeline-pod .unavailable { color: var(--quiet); }
 /* The Pipeline Status dialog (SP-173): the detail behind each stage's next time, opened from the pod. */
 dialog.pipeline-status { border: var(--hairline); border-radius: 8px; padding: 1rem 1.25rem; max-width: 95vw; color: var(--ink); }
@@ -219,6 +220,18 @@ table.colours td.value { color: var(--quiet); font-family: ui-monospace, Menlo, 
 table.colours tr.unset input { opacity: 0.25; }
 table.colours input[type="color"] { width: 3rem; height: 2rem; padding: 0; border: var(--hairline); border-radius: 4px; cursor: pointer; }
 form.colours .row { display: flex; gap: 1rem; align-items: center; margin-top: 1rem; }
+section.pipeline-controls { margin-bottom: 2rem; }
+section.pipeline-controls h4 { margin: 1.25rem 0 0.25rem; }
+table.controls { width: 100%; max-width: 56rem; table-layout: fixed; }
+table.controls td { vertical-align: middle; }
+table.controls td.label { width: 17rem; }
+table.controls td.input { width: 10rem; }
+table.controls td.value { width: 14rem; color: var(--quiet); font-size: 0.85rem; }
+table.controls td.save .note:not(:empty) { display: block; margin-top: 0.25rem; }
+table.controls input[type="number"] { width: 7rem; }
+section.pipeline-controls .default { color: var(--quiet); font-size: 0.75rem; border: var(--hairline); border-radius: 4px; padding: 0 0.3rem; margin-left: 0.4rem; }
+section.pipeline-controls p.not-yet { margin-top: 0.25rem; font-size: 0.85rem; }
+table.control-changes { max-width: 48rem; font-size: 0.9rem; }
 button.action { display: inline-flex; padding: 0.2rem; margin-right: 0.15rem; border: 0; border-radius: 4px; background: transparent; color: var(--quiet); cursor: pointer; }
 button.action:hover { color: var(--red); background: #fbe9e9; }
 .quick form.delete-action { margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--line); }

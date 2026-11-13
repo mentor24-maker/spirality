@@ -20,6 +20,7 @@ import humanHours from '../lib/humanHours.js';
 import busFallback from '../lib/busFallback.js';
 import { compareWithinStatus } from '../scripts/lib/loopStatuses.mjs';
 import { searchPattern } from './web/render.mjs';
+import { GROUPS, MODELS, DEFAULT_MODEL } from './pipelineControls.mjs';
 import { STAGES } from './pipeline.mjs';
 
 const { OPERATOR_LANE, WAITING, CANNOT_TELL, waitingVerdict, operatorSpokeLast } = waitingOnOperator;
@@ -432,6 +433,30 @@ export function consoleOf(store, { only = null, pipeline = null } = {}) {
 export function stageColoursOf(store) {
   const colours = store.stageColours();
   return { stages: STAGE_ORDER.map((name) => ({ status: name, colour: colours[statusOf(name)] ?? null })) };
+}
+
+/**
+ * The Settings page's Pipeline Controls for one project (SP-224): every
+ * control with its value and whether that is its default, the groups they
+ * fall in (each naming the ticket that makes the lanes use it), the models
+ * a lane may choose, the change log newest first with each changer's name,
+ * and `canChange`: whether this reader may change them (the project's
+ * operator, signed in as a person). Null for a project that does not exist.
+ */
+export function pipelineControlsOf(store, slug, { reader = null } = {}) {
+  const project = store.getProject(slug);
+  if (!project) return null;
+  const nameOf = (id) => store.getActor(id)?.name ?? `actor ${id}`;
+  const who = reader == null ? null : store.getActor(reader);
+  return {
+    project: { slug: project.slug, name: project.name },
+    operator: project.operator == null ? null : { id: project.operator, name: nameOf(project.operator) },
+    canChange: who != null && who.kind === 'human' && who.id === project.operator,
+    groups: GROUPS.map((g) => ({ ...g })),
+    models: [{ id: DEFAULT_MODEL, label: "Claude's default" }, ...MODELS.map((m) => ({ ...m }))],
+    controls: store.pipelineSettings(project.slug).map((c) => ({ ...c })),
+    changes: store.pipelineSettingChanges(project.slug).map((c) => ({ ...c, actorName: nameOf(c.actor) })),
+  };
 }
 
 /** The Reporting page's time ranges, newest first; `days: null` is all time. */

@@ -383,6 +383,21 @@ there refreshes it (it copies only each `SKILL.md`, removes a copy whose
 original is gone, and writes nothing when a file looks like it holds a key,
 when a name is not plain, or when it finds no commands at all); the refreshed
 copy goes in through a pull request.
+**Settings** (`/settings`) holds the stage colours and, under them,
+**Pipeline Controls** (SP-224): for each project the reader may see, how
+often each lane wakes, whether the whole pipeline or one lane is paused, the
+work-in-progress cap and the model each lane runs on, every one marked
+"default" while it has today's value, then the change log, newest first (who,
+when in Mountain time, which setting, old value, new value). They live in the
+tracker's own data, one set per project (`tracker/pipelineControls.mjs` lists
+them, their ranges and their defaults), so changing one is not a code change.
+Everyone signed in may read them; only the project's operator, signed in as a
+person, may change one: another person and any loop's token are refused
+(403), and nothing is logged. A value out of range is refused with a plain
+message. The page says "Saved" only when the value the tracker reads back is
+the one sent. A lane reads its project's with `npm run clickup -- settings`
+(`name=value` lines). Nothing on the Mini acts on them yet: SP-236 (wake
+times), SP-237 (pause), SP-238 (the cap) and SP-239 (the model) each wire one in.
 A browser opening `/projects` or `/projects/<slug>` gets the page; the page's own
 call to the same address gets the data. `/users` is the page alone; its data
 is still `GET /people` (the onboarding scripts read it), and a browser opening
@@ -395,6 +410,47 @@ no token is kept in the browser. "Forgot password?" asks for an email and
 sends a 1-hour reset link to it if it has an account, saying the same
 either way. The page shows a count of tickets waiting on him in the
 browser tab's title, so a pinned tab tells him at a glance.
+
+### The Add Task Box's Project Check
+
+Before the Tasks page's Add Task box files a request, it asks the server
+whether the words fit another project better, and if one clearly does, asks
+"Did you mean for that to be associated with project X?". It is plain word
+matching on the tickets already in the tracker, no AI; the rules are written
+out at the top of `tracker/projectGuess.mjs`.
+
+**The bar is a better hit rate, not a perfect one.** Dane, on SP-225, "The
+Add Task box keeps asking whether a Spirality task belongs to WaveCenter"
+(2026-11-11): "It doesn't have to be perfect. Just a better hit rate is a
+win." Before SP-225 everyday words two projects share added up over a long
+request (WaveCenter is itself about scoring tasks, so "task" is in most of
+its tickets), and nearly every request about the Tasks page asked about
+WaveCenter. SP-225 made a word the project being filed into already uses
+count for no project.
+
+**How to measure it: the replay.** Every ticket whose description has a
+`## Asked` block holds Dane's own words, verbatim (the fenced block's first
+line is his title). Take those words as a fresh request, with the ticket
+left out of its own project's tickets, and run `guessProject`:
+
+- filed into its own project, any suggestion is a **false alarm**;
+- typed into each other project that has tickets, naming the ticket's real
+  project is a **catch**.
+
+The tickets come from `GET /projects` and `GET /projects/<slug>/tickets`.
+Fetch them one project at a time; `tickets --json --include-closed` reads
+every ticket's history and is slow over the home network. On 2026-11-11, 149
+requests:
+
+| | Before SP-225 | After |
+|---|---|---|
+| False alarms | 35 of 149 | 5 of 149 |
+| Catches | 128 of 596 | 117 of 596 |
+
+A change to the check should be run against the replay and say both numbers
+in its pull request. Ideas for when there is more data are parked on
+SP-227, "Improve the Add Task box's project check hit rate as the tickets
+grow" (`deferred`).
 
 ### How the loops switch over without a rewrite
 

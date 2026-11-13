@@ -243,6 +243,8 @@ npm run clickup -- <command> [flags]      (Loop Queue: list ${LOOP_QUEUE_LIST}, 
                                                   (enteredInWindow). Exit 2 on a bad date; 1, printing nothing, on any failed read
   bus-post --body-file <f|-> [--from <name>]      post an alarm or report to the bus project's "Team chat" ticket, read back; a message starting ALARM: is texted
   bus-read [--operator] [--since <time>]          the bus's comments, oldest first: time (ISO, UTC: feeds --since), ticket, operator|machine, author, first line
+  settings                                        read-only: this project's pipeline controls (the Settings page), one
+                                                  name=value line each, defaults included. Exit 1 saying why when they cannot be read
   main-moved --pr <merged #> [--list <id>] [--dry-run]
                                                   tell every Building / In review / Rework ticket with an open PR whether
                                                   that merge moved main under it: no-overlap, same-files, conflict or
@@ -2291,6 +2293,23 @@ if (cmd === 'whoami') {
   }
   console.log(JSON.stringify(stageCounts.countStages(tickets, { list: where, since, until, window, histories }), null, 2));
   console.error(`stage-counts: ${tickets.length} ticket(s) in ${where}${window.cutoff == null ? ', no window' : `, window ${since} to ${until || 'now'} (UTC days)`}.`);
+  reportLimits();
+
+} else if (cmd === 'settings') {
+  // The pipeline controls Dane sets on the Settings page (SP-224), for the
+  // lanes to read: this project's, as the project config names it, never a
+  // literal. Every control is printed, defaults included, or nothing is: a
+  // lane that reads half a list would run on a default it was told to drop.
+  const out = await tracker.pipelineSettings();
+  if (!out.res.ok) die('read the pipeline controls', out);
+  const lines = out.json.controls.map((c) => `${c.key}=${c.value}`);
+  if (out.json.controls.some((c) => typeof c.key !== 'string' || c.value == null)) {
+    console.error('read the pipeline controls FAILED — the tracker answered a control without a name or a value. Nothing was printed.');
+    process.exit(1);
+  }
+  for (const l of lines) console.log(l);
+  const changed = out.json.controls.filter((c) => !c.isDefault).length;
+  console.error(`settings: ${lines.length} pipeline control(s) for ${project.projectSlug}, ${changed} changed from the default.`);
   reportLimits();
 
 } else if (cmd === 'main-moved') {
