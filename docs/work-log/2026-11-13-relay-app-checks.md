@@ -1,0 +1,14 @@
+## 2026-11-13 — Run a project's application checks on every relay pass (#205)
+
+A project can list its own health checks in its manifest (for example "is the
+disk nearly full?"), and since SP-264 Spirality could run them and post what
+changed to the project's message board, but only when someone started it by
+hand. Now the relay, the job that wakes every ten minutes to merge what Dane
+approved, runs them at the end of every pass. Each check still runs only as
+often as its own setting says.
+
+The relay's merges always come first. The checks get their own slice of the
+pass's time (at most three of its eight minutes), so a check that hangs is
+stopped, and the log says so; it can never hold up a merge. A check pass that
+fails makes the relay's log say a step failed, never "pass complete", and the
+Settings status command shows the last thing the checks said.
