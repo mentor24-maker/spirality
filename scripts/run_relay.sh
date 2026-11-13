@@ -1,12 +1,21 @@
 #!/bin/bash
 #
-# What the relay schedule (every 10 minutes) actually runs: bring the main
-# checkout up to date, then one `relay` pass of the door (`npm run clickup`,
-# which talks to the tracker the project config names), then one pass of the
-# project's application checks (`npm run app-checks`, SP-274).
+# What the relay schedule actually runs: bring the main checkout up to date,
+# then one `relay` pass of the door (`npm run clickup`, which talks to the
+# tracker the project config names), then one pass of the project's
+# application checks (`npm run app-checks`, SP-274).
 #
 #   ./scripts/run_relay.sh            # one pass, output to stdout
 #   ./scripts/run_relay.sh --dry-run  # one pass that prints and writes nothing
+#   ./scripts/run_relay.sh --tick     # what launchd runs every minute: a pass
+#                                     # only when the relay's wake time is up
+#
+# The relay's wake time is set on the tracker's Settings page (SP-236), so
+# launchd starts this every RELAY_TICK seconds (scripts/lib/loopSchedule.mjs)
+# with --tick, and a tick runs a pass only when that wake time has passed
+# since the last real start, or a wake was sent (scripts/lib/wakeLane.mjs).
+# Every other tick ends at once, before the lock, the pull and Doppler, and
+# writes nothing to the log. A run without --tick (by hand) always runs.
 #
 # Same shape as StarCaster's scripts/run_bus_relay.sh with the StarCaster-only
 # watchdogs left out. The pull is deliberately timid — only main, only a clean
@@ -45,8 +54,9 @@ SYNC_LOCK="$LOG_DIR/$SLUG-sync.lock"
 # After the relay part, one application-checks pass (SP-274).
 # shellcheck source=lib/relay_app_checks.sh
 source "$REPO/scripts/lib/relay_app_checks.sh"
-# A pass must finish inside the schedule's own interval (600s), with room to
-# spare, or two passes could overlap and both decide the same ticket.
+# A pass is time-limited so a stuck one cannot hold the relay for good; two
+# passes never overlap, whatever the wake time, because the second finds the
+# lock held.
 PASS_LIMIT="${RELAY_PASS_LIMIT_SECONDS:-480}"
 # The application checks' share of it (SP-274), set aside only when the
 # manifest lists a check: a project that lists none keeps the whole limit for
@@ -56,6 +66,38 @@ if ! relay_limits_usable "$PASS_LIMIT" "$CHECKS_SHARE"; then
   echo "[relay] the time limits are not usable (pass ${PASS_LIMIT}s, application checks ${CHECKS_SHARE}s): both whole seconds, the checks' share at least 1 and less than the pass's." >&2
   exit 2
 fi
+
+# The tick (SP-236). Three small files beside the lock, named like it:
+#   <slug>-relay.last-start  when the last real pass started (seconds since 1970)
+#   <slug>-relay.interval    the wake time the last ticked pass read from the
+#                            tracker; the default from loopSchedule.mjs until then
+#   <slug>-relay.wake        a wake sent by wakeLane.mjs: run this tick
+# A tick counts as due within half a tick of the wake time, so a pass due at
+# 600s is not pushed to 660s by a second's jitter in launchd's start. A
+# missing or unreadable start time, or one in the future, is due.
+LAST_START_FILE="$LOG_DIR/$SLUG-relay.last-start"
+INTERVAL_FILE="$LOG_DIR/$SLUG-relay.interval"
+WAKE_FILE="$LOG_DIR/$SLUG-relay.wake"
+TICKED=""
+if [ "${1:-}" = "--tick" ]; then
+  shift
+  TICKED=yes
+  if [ ! -e "$WAKE_FILE" ]; then
+    LAST="$(cat "$LAST_START_FILE" 2>/dev/null || true)"
+    EVERY="$(cat "$INTERVAL_FILE" 2>/dev/null || true)"
+    case "$EVERY" in ""|*[!0-9]*) EVERY="$(node "$REPO/scripts/lib/loopSchedule.mjs" interval relay 2>/dev/null)" ;; esac
+    TICK="$(node "$REPO/scripts/lib/loopSchedule.mjs" tick 2>/dev/null)"
+    NOW="$(date +%s)"
+    # Any of these not a number (a schedule that could not be read) is due:
+    # a pass that runs too often is seen, a relay that never runs is not.
+    case "$LAST$EVERY$TICK" in
+      *[!0-9]*) ;;
+      *) if [ -n "$LAST" ] && [ -n "$EVERY" ] && [ -n "$TICK" ] && [ "$NOW" -ge "$LAST" ] && [ $((NOW - LAST)) -lt $((EVERY - TICK / 2)) ]; then exit 0; fi ;;
+    esac
+  fi
+fi
+DRY_RUN=""
+for a in "$@"; do [ "$a" = "--dry-run" ] && DRY_RUN=yes; done
 
 echo ""
 echo "===== $(date '+%Y-%m-%d %H:%M:%S') START relay — $REPO ====="
@@ -74,6 +116,12 @@ if ! mkdir "$LOCK" 2>/dev/null; then
   mkdir "$LOCK" 2>/dev/null || { echo "[relay] the lock could not be retaken. Stopping." >&2; exit 1; }
 fi
 echo "$$" > "$LOCK/pid"
+# A real start: the next tick counts from here, and any wake sent before now
+# is answered by this pass. A dry run writes nothing, these included.
+if [ -z "$DRY_RUN" ]; then
+  date +%s > "$LAST_START_FILE"
+  rm -f "$WAKE_FILE"
+fi
 trap 'rm -rf "$LOCK" 2>/dev/null; [ "$(cat "$SYNC_LOCK/pid" 2>/dev/null)" = "$$" ] && rm -rf "$SYNC_LOCK"' EXIT
 
 # The timid pull, under the loops' sync lock. Wait up to two minutes for the
@@ -140,6 +188,24 @@ PASS_START=$(date +%s)
 "$REPO/scripts/run_with_time_limit.sh" "$RELAY_LIMIT" -- \
   npm run --silent clickup -- relay "$@"
 status=$?
+
+# The wake time for the next tick to go by, read from the tracker after a
+# ticked pass (a run by hand leaves it as it is, so the Settings page never
+# reads a value from a relay launchd is not yet ticking). A read that fails
+# keeps the last good one and says so in one line.
+if [ -n "$TICKED" ] && [ -z "$DRY_RUN" ]; then
+  SAID="$(node "$REPO/scripts/lib/wakeSetting.mjs" relay 2>/dev/null)"
+  SAID_CODE=$?
+  case "$SAID" in
+    ""|*[!0-9]*) SAID_OK="" ;;
+    *) SAID_OK="$([ "$SAID_CODE" -eq 0 ] && [ "$SAID" -ge 60 ] && echo yes)" ;;
+  esac
+  if [ -n "$SAID_OK" ]; then
+    echo "$SAID" > "$INTERVAL_FILE"
+  else
+    echo "[relay] could not read the relay's wake time from the tracker (${SAID:-no answer}) — keeping the last good value, $(cat "$INTERVAL_FILE" 2>/dev/null || node "$REPO/scripts/lib/loopSchedule.mjs" interval relay)s"
+  fi
+fi
 
 # Then the project's application checks (SP-274), signed in as the relay too,
 # with what is left of the pass's time. It runs whatever the relay part did,

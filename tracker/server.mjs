@@ -84,7 +84,7 @@ import { guessProject } from './projectGuess.mjs';
 import { findConfigFile, loadProjectConfig } from '../lib/projectConfig.mjs';
 import { saveAnswers, setupFields, setupList, setupOf, SetupError } from './setup.mjs';
 import busRelayPlan from '../lib/busRelayPlan.js';
-import { pipelineOf } from './pipeline.mjs';
+import { pipelineOf, wakeTimesOf } from './pipeline.mjs';
 import { listCommands, REPO_ROOT } from './commands.mjs';
 import { listDocs, readDoc } from './docsFolder.mjs';
 import loopStatuses from '../lib/loopStatuses.js';
@@ -535,10 +535,20 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
    * read; `call` names the caller in the log line. Read per call, so a lane
    * that passes again shows at once (a held-up ticket, pageData.heldUpBy).
    */
+  /** pipelineOf with the wake times set on the Settings page for the project whose logs these are. */
+  const lanesOf = () => pipelineOf(pipeline, { wake: wakeTimesOf(store, pipeline.slug) });
+  /**
+   * The lanes for `slug`'s Settings page, or null: only the project whose
+   * logs this tracker reads has any, and a read that fails shows none.
+   */
+  const lanesFor = (slug) => {
+    if (!pipeline || slug !== pipeline.slug) return null;
+    return lanesNow('pipeline-controls')?.stages ?? null;
+  };
   const lanesNow = (call) => {
     if (!pipeline) return null;
     try {
-      return { slug: pipeline.slug, stages: pipelineOf(pipeline).stages };
+      return { slug: pipeline.slug, stages: lanesOf().stages };
     } catch (err) {
       log(`${call}: the loop logs could not be read, so no lane's times or health are shown (${err.message}).`);
       return null;
@@ -736,7 +746,7 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     // runners' logs (tracker/pipeline.mjs). Times and flags only, never log text.
     if (parts.length === 1 && parts[0] === 'pipeline' && method === 'GET') {
       if (!pipeline) throw new HttpError(503, 'no-pipeline', 'this tracker cannot read the loop logs: the project config was not usable when it started (its log says why).');
-      return [200, pipelineOf(pipeline)];
+      return [200, lanesOf()];
     }
 
     // Dane's page: the Console view, every ticket in flight on every
@@ -869,12 +879,12 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
       const scope = scopeOf(me);
       const newest = await newestNow();
       const projects = store.listProjects().filter((p) => scope == null || scope.has(p.slug))
-        .map((p) => pipelineControlsOf(store, p.slug, { reader: me.id, ownProject, newest }));
+        .map((p) => pipelineControlsOf(store, p.slug, { reader: me.id, lanes: lanesFor(p.slug), ownProject, newest }));
       return [200, { projects }];
     }
     if (parts[0] === 'pipeline-controls' && parts.length === 2) {
       const project = requireProject(parts[1], me);
-      if (method === 'GET') return [200, pipelineControlsOf(store, project.slug, { reader: me.id, ownProject, newest: await newestNow() })];
+      if (method === 'GET') return [200, pipelineControlsOf(store, project.slug, { reader: me.id, lanes: lanesFor(project.slug), ownProject, newest: await newestNow() })];
       if (method === 'PUT') {
         if (me.kind !== 'human' || project.operator !== me.id) {
           throw new HttpError(403, 'not-operator', `only ${project.name}'s operator, signed in as a person, may change its pipeline controls; ${me.kind === 'human' ? 'you are not its operator' : 'a loop sign-in may not'}.`);
@@ -888,7 +898,7 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
           if (err instanceof StoreError && err.code === 'not-operator') throw new HttpError(403, err.code, err.message);
           throw err;
         }
-        const view = pipelineControlsOf(store, project.slug, { reader: me.id, ownProject, newest: await newestNow() });
+        const view = pipelineControlsOf(store, project.slug, { reader: me.id, lanes: lanesFor(project.slug), ownProject, newest: await newestNow() });
         const stored = view.controls.find((c) => c.key === saved.setting)?.value;
         if (stored !== saved.to) throw new HttpError(500, 'write-failed', `the ${saved.setting} setting read back as ${stored}, not ${saved.to}; treat it as not saved.`);
         log(`pipeline control ${project.slug} ${saved.setting} ${saved.changed ? `${saved.from} -> ${saved.to}` : `unchanged (${saved.to})`} actor=${me.id}`);

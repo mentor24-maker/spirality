@@ -48,7 +48,7 @@ test('four stages from scratch logs: a sleeping lane, a running lane, the relay,
     assert.deepEqual(by.Review, {
       name: 'Review', job: 'loop-review', logged: true, running: false,
       lastStart: at('2026-11-09T18:22:34').toISOString(), lastEnd: at('2026-11-09T18:25:36').toISOString(), lastExit: 0,
-      interval: 1800, nextDue: at('2026-11-09T18:55:36').toISOString(),
+      interval: 1800, set: 1800, used: 1800, nextDue: at('2026-11-09T18:55:36').toISOString(),
       failing: false, failedPasses: 0, failingSince: null, failingReason: null,
     });
     assert.equal(by.Build.running, true);
@@ -56,24 +56,63 @@ test('four stages from scratch logs: a sleeping lane, a running lane, the relay,
     assert.equal(by.Build.lastStart, at('2026-11-09T18:46:58').toISOString());
     // While a pass runs, its last end is the pass before it.
     assert.equal(by.Build.lastEnd, at('2026-11-09T18:16:57').toISOString());
-    // The relay: its last start plus the interval the installer writes into its plist.
+    // The relay: its last start plus its wake time, the default while it has kept none.
     assert.equal(by.Relay.running, false);
     assert.equal(by.Relay.nextDue, new Date(at('2026-11-09T18:37:36').getTime() + INTERVALS.relay * 1000).toISOString());
     assert.equal(by.Relay.interval, INTERVALS.relay);
     assert.equal(by.Relay.lastEnd, at('2026-11-09T18:37:52').toISOString());
     assert.equal(by.Relay.lastExit, 0);
     // No log: nothing logged, and it wakes as the installer sets it to.
-    assert.deepEqual(by.Intake, { name: 'Intake', job: 'loop-intake', logged: false, running: false, lastStart: null, lastEnd: null, lastExit: null, interval: INTERVALS['loop-intake'], nextDue: null, failing: false, failedPasses: 0, failingSince: null, failingReason: null });
+    assert.deepEqual(by.Intake, { name: 'Intake', job: 'loop-intake', logged: false, running: false, lastStart: null, lastEnd: null, lastExit: null, interval: INTERVALS['loop-intake'], set: INTERVALS['loop-intake'], used: null, nextDue: null, failing: false, failedPasses: 0, failingSince: null, failingReason: null });
     // Times and flags only: no log text anywhere in the answer.
     const text = JSON.stringify(answer);
     assert.doesNotMatch(text, /SECRET|REPORT|working|under way|WebApps|=====/);
     for (const s of answer.stages) {
-      assert.deepEqual(Object.keys(s).sort(), ['failedPasses', 'failing', 'failingReason', 'failingSince', 'interval', 'job', 'lastEnd', 'lastExit', 'lastStart', 'logged', 'name', 'nextDue', 'running']);
+      assert.deepEqual(Object.keys(s).sort(), ['failedPasses', 'failing', 'failingReason', 'failingSince', 'interval', 'job', 'lastEnd', 'lastExit', 'lastStart', 'logged', 'name', 'nextDue', 'running', 'set', 'used']);
       // Times, codes and intervals only: every value a flag, a name, an ISO time, a number or null.
       for (const t of [s.lastStart, s.lastEnd, s.nextDue]) assert.ok(t === null || /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(t), t);
       assert.ok(s.lastExit === null || Number.isInteger(s.lastExit));
       assert.ok(Number.isInteger(s.interval));
     }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('the wake times set on the Settings page: a lane sleeping on an older value shows when it really wakes, and the set one once it has slept on it; the relay goes by the wake time it kept (SP-236)', () => {
+  const dir = scratch({
+    // The runner's own line since SP-219, with "(a wake ends it early)" after the lane.
+    'proj-loop-review.log': [
+      start('loop-review', at('2026-11-09T18:22:34')),
+      end('loop-review', at('2026-11-09T18:25:36')),
+      `${sleeping('loop-review', at('2026-11-09T18:25:36'), 1800)} (a wake ends it early)`,
+    ].join('\n'),
+    'proj-loop-build.log': [
+      start('loop-build', at('2026-11-09T18:13:25')),
+      end('loop-build', at('2026-11-09T18:16:57')),
+      `${sleeping('loop-build', at('2026-11-09T18:16:57'), 600)} (a wake ends it early)`,
+    ].join('\n'),
+    'proj-relay.log': [relayStart(at('2026-11-09T18:37:36')), relayEnd(at('2026-11-09T18:37:52'))].join('\n'),
+    'proj-relay.interval': '300',
+  });
+  try {
+    const wake = { 'loop-review': 900, 'loop-build': 600, relay: 300, 'loop-intake': 1200 };
+    const by = Object.fromEntries(pipelineOf({ logDir: dir, slug: 'proj' }, { wake }).stages.map((s) => [s.job, s]));
+    // Set to 900 while it sleeps 1800: it still wakes at the end of the 1800.
+    assert.deepEqual([by['loop-review'].set, by['loop-review'].used, by['loop-review'].interval], [900, 1800, 1800]);
+    assert.equal(by['loop-review'].nextDue, at('2026-11-09T18:55:36').toISOString());
+    // Set to 600 and sleeping 600: picked up.
+    assert.deepEqual([by['loop-build'].set, by['loop-build'].used], [600, 600]);
+    assert.equal(by['loop-build'].nextDue, at('2026-11-09T18:26:57').toISOString());
+    // The relay's next pass is its last start plus the 300 its tick goes by.
+    assert.deepEqual([by.relay.set, by.relay.used, by.relay.interval], [300, 300, 300]);
+    assert.equal(by.relay.nextDue, at('2026-11-09T18:42:36').toISOString());
+    // No log: it sleeps the set value first.
+    assert.deepEqual([by['loop-intake'].set, by['loop-intake'].used, by['loop-intake'].interval], [1200, null, 1200]);
+    // A kept wake time that is not a number is not used: the default is.
+    writeFileSync(join(dir, 'proj-relay.interval'), 'soon\n');
+    const relay = pipelineOf({ logDir: dir, slug: 'proj' }, { wake }).stages.find((s) => s.job === 'relay');
+    assert.deepEqual([relay.set, relay.used], [300, INTERVALS.relay]);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
