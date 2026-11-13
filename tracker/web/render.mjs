@@ -493,6 +493,22 @@ export function controlValueText(control, models = []) {
   return v;
 }
 
+/** Seconds in words, as the page writes a wake time: "1,800 seconds". */
+const secondsText = (n) => `${Number(n).toLocaleString('en-US')} seconds`;
+
+/**
+ * Under a wake time (SP-236): the seconds its lane last actually woke on and
+ * whether that is the set value. The lane reads the set value before its
+ * next sleep (the relay after its next pass), so for a while after a change
+ * the two differ, and the page says so in plain words rather than claiming
+ * the change has taken effect.
+ */
+export function wakeInEffectText(control) {
+  if (control?.used == null) return 'Last used: not known on this machine yet.';
+  if (control.inEffect) return `In effect: the lane last used ${secondsText(control.used)}.`;
+  return `Last used: ${secondsText(control.used)}. Waiting for the lane's next pass to pick this up.`;
+}
+
 /** One control's input, named by its key: a number box, an On/Off choice or a model choice. */
 function controlInput(c, models, id, locked) {
   const off = locked ? ' disabled' : '';
@@ -508,8 +524,9 @@ function controlInput(c, models, id, locked) {
  * from GET /pipeline-controls: each group of controls under its heading, each
  * control with its value, a "default" mark while it has its default, and a
  * Save button (none, and the inputs locked, for a reader who may not change
- * them), then the line saying the lanes do not use that group yet, naming
- * the ticket that wires it in. Under them, the change log, newest first, in
+ * them), then, for a group the lanes do not use yet, a line saying so,
+ * naming the ticket that wires it in. Each wake time also says what its lane
+ * last used (wakeInEffectText). Under them, the change log, newest first, in
  * Mountain time. `notes` is `{ key: { ok, text } }`, a Save's outcome to show
  * beside its control.
  */
@@ -524,7 +541,7 @@ export function renderPipelineControls(view, notes = {}) {
     return `<tr data-control="${escapeHtml(c.key)}" data-kind="${escapeHtml(c.kind)}">
       <td class="label"><label for="${id}">${escapeHtml(c.label)}</label>${mark}</td>
       <td class="input">${controlInput(c, models, id, locked)}</td>
-      <td class="value">${escapeHtml(controlValueText(c, models))}</td>
+      <td class="value">${escapeHtml(controlValueText(c, models))}${c.group === 'wake' ? `<span class="in-effect${c.inEffect === false ? ' waiting' : ''}">${escapeHtml(wakeInEffectText(c))}</span>` : ''}</td>
       <td class="save">${locked ? '' : '<button type="button">Save</button>'}<span class="note${note ? (note.ok ? ' quiet' : ' error') : ''}">${note ? escapeHtml(note.text) : ''}</span></td>
     </tr>`;
   };
@@ -533,7 +550,7 @@ export function renderPipelineControls(view, notes = {}) {
     if (!controls.length) return '';
     return `<h4>${escapeHtml(g.title)}</h4>
     <table class="controls"><tbody>${controls.map(row).join('')}</tbody></table>
-    <p class="quiet not-yet">Saved, but the lanes do not use this yet (${escapeHtml(g.wiredBy)}).</p>`;
+    ${g.wiredBy ? `<p class="quiet not-yet">Saved, but the lanes do not use this yet (${escapeHtml(g.wiredBy)}).</p>` : ''}`;
   };
   const who = view.operator ? escapeHtml(view.operator.name) : 'nobody (this project has no operator)';
   const lockedLine = locked ? `<p class="quiet">Only ${who}, the project's operator, may change these.</p>` : '';
@@ -545,9 +562,52 @@ export function renderPipelineControls(view, notes = {}) {
     <h3>${escapeHtml(view.project.name)}</h3>
     ${lockedLine}
     ${(view.groups ?? []).map(group).join('')}
+    ${view.release ? renderReleaseGroup(view.release, notes.release) : ''}
     <h4>Change Log</h4>
     ${log}
   </section>`;
+}
+
+/**
+ * One project's release group on the Settings page (SP-275), from
+ * the `release` part of GET /pipeline-controls: the release it runs, when
+ * and who named it, and the one before it; a Move to Newest button (names
+ * the newest release cut) and a Roll Back button (names the earlier one
+ * again), for the operator only. The tracker's home project shows its
+ * `ownLine` and no buttons. A project with no release named shows
+ * "No release named yet" and only Move to Newest. Under it, the line saying
+ * the lanes do not run from it yet, naming the ticket that wires it in.
+ * `note` is `{ ok, text }`, a button's outcome.
+ */
+export function renderReleaseGroup(r, note = null) {
+  const notYet = `<p class="quiet not-yet">Named, but the lanes do not run from it yet (${escapeHtml(r.wiredBy)}).</p>`;
+  const head = `<h4>${escapeHtml(r.title)}</h4>`;
+  if (r.own) return `<div class="release-group">${head}<p class="release-own">${escapeHtml(r.ownLine)}</p></div>`;
+  const when = (e) => `${escapeHtml(e.release)}</strong>, named ${escapeHtml(mountainTime(e.at))} by ${escapeHtml(e.actorName)}`;
+  const lines = [];
+  if (!r.known) lines.push('<p class="quiet">This tracker cannot tell which project is its home (its project config was not usable when it started), so no release can be named here.</p>');
+  lines.push(r.current
+    ? `<p class="release-current">Runs <strong>${when(r.current)}.</p>`
+    : '<p class="release-current">No release named yet.</p>');
+  if (r.previous) lines.push(`<p class="release-previous quiet">Before that: <strong>${when(r.previous)}.</p>`);
+  const newestLine = r.newestProblem
+    ? `The newest release could not be read: ${escapeHtml(r.newestProblem)}`
+    : r.newest ? `The newest release is <strong>${escapeHtml(r.newest)}</strong>.` : 'No release has been cut yet.';
+  lines.push(`<p class="release-newest quiet">${newestLine}</p>`);
+  let buttons = '';
+  if (r.canChange) {
+    const upToDate = r.newest != null && r.current?.release === r.newest;
+    const canMove = r.newest != null && !upToDate;
+    const move = `<button type="button" data-release-action="newest"${canMove ? '' : ' disabled'}>Move to Newest</button>`;
+    const back = r.current
+      ? (r.rollBackTo
+        ? `<button type="button" data-release-action="back">Roll Back to ${escapeHtml(r.rollBackTo)}</button>`
+        : '<span class="quiet">No earlier release to roll back to.</span>')
+      : '';
+    const why = upToDate ? '<span class="quiet">It runs the newest release.</span>' : '';
+    buttons = `<div class="row release-actions">${move}${back}${why}<span class="note${note ? (note.ok ? ' quiet' : ' error') : ''}">${note ? escapeHtml(note.text) : ''}</span></div>`;
+  }
+  return `<div class="release-group">${head}${lines.join('')}${buttons}${notYet}</div>`;
 }
 
 const CONTEXT_HEADING = "WHAT'S GOING ON";

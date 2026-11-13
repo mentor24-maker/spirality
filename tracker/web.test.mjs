@@ -6,9 +6,9 @@ import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
-import { seedDemo, tickingClock } from './demoData.mjs';
+import { DEMO_NEWEST_RELEASE, DEMO_OWN_PROJECT, demoNewestRelease, seedDemo, tickingClock } from './demoData.mjs';
 import { reportsOf, REPORT_RANGES, searchTickets, PRIORITIES, timeSplitOf, isFailureNote, TIME_BUCKETS } from './pageData.mjs';
-import { escapeHtml, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, controlValueText, mountainTime } from './web/render.mjs';
+import { escapeHtml, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, renderReleaseGroup, controlValueText, mountainTime, wakeInEffectText } from './web/render.mjs';
 import { startServer, setupSettingsOf } from './server.mjs';
 import { saveAnswers, setupFields, setupOf } from './setup.mjs';
 import { DANE_FIELDS as SETUP_FIELDS, STEPS as SETUP_STEPS } from '../scripts/onboard/onboard.mjs';
@@ -912,6 +912,63 @@ test('the Settings page is in the header after Reporting and Users, lists the st
   } finally { await f.cleanup(); }
 });
 
+test('the Settings page\'s Spirality Release group: the release, when and by whom, the one before, Move to Newest and Roll Back for the operator; Spirality\'s own and a project with none named say so (SP-275)', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tracker-web-release-'));
+  const clock = tickingClock();
+  const store = openStore(join(dir, 'tracker.db'), { now: clock });
+  const seed = seedDemo(store, { operatorName: 'Dane', clock });
+  // As the demo serves it: Alpha stands in for Spirality's own, the newest is a stand-in.
+  const server = await startServer({ store, port: 0, ownProject: DEMO_OWN_PROJECT, newestRelease: demoNewestRelease });
+  const url = `http://127.0.0.1:${server.address().port}`;
+  const get = async (path) => (await fetch(`${url}${path}`, { headers: { authorization: `Bearer ${seed.token}` } })).json();
+  try {
+    const { projects } = await get('/pipeline-controls');
+    const beta = projects.find((p) => p.project.slug === 'beta');
+    const html = renderPipelineControls(beta);
+    assert.match(html, /<h4>Spirality Release<\/h4>/);
+    assert.ok(html.indexOf('Spirality Release') < html.indexOf('Change Log'), 'above the change log');
+    assert.match(html, /Runs <strong>release-2<\/strong>, named [^<]+M[SD]T by Dane\./);
+    assert.match(html, /Before that: <strong>release-1<\/strong>, named [^<]+ by Loop \(build\)\./);
+    assert.match(html, new RegExp(`The newest release is <strong>${DEMO_NEWEST_RELEASE}</strong>\\.`));
+    assert.match(html, /<button type="button" data-release-action="newest">Move to Newest<\/button>/);
+    assert.match(html, /<button type="button" data-release-action="back">Roll Back to release-1<\/button>/);
+    assert.match(html, /Named, but the lanes do not run from it yet \(SP-276\)\./);
+
+    const alpha = projects.find((p) => p.project.slug === 'alpha');
+    const own = renderPipelineControls(alpha);
+    assert.match(own, /Always the newest release: Spirality&#39;s own lanes meet every change first\./);
+    assert.doesNotMatch(own, /data-release-action/);
+
+    // Another reader sees the release, never the buttons.
+    assert.doesNotMatch(renderReleaseGroup({ ...beta.release, canChange: false }), /<button/);
+    // None named yet: the line, and only Move to Newest.
+    const none = renderReleaseGroup({ ...beta.release, current: null, previous: null, rollBackTo: null });
+    assert.match(none, /No release named yet\./);
+    assert.match(none, /Move to Newest/);
+    assert.doesNotMatch(none, /Roll Back/);
+    // Already on the newest: Move to Newest is greyed and says why; nowhere back says so.
+    const upToDate = renderReleaseGroup({ ...beta.release, current: { ...beta.release.current, release: DEMO_NEWEST_RELEASE }, rollBackTo: null });
+    assert.match(upToDate, /data-release-action="newest" disabled>Move to Newest/);
+    assert.match(upToDate, /It runs the newest release\./);
+    assert.match(upToDate, /No earlier release to roll back to\./);
+    // The newest unreadable: said, and Move to Newest greyed.
+    const blind = renderReleaseGroup({ ...beta.release, newest: null, newestProblem: 'git ls-remote failed: offline' });
+    assert.match(blind, /The newest release could not be read: git ls-remote failed: offline/);
+    assert.match(blind, /data-release-action="newest" disabled/);
+    // A button's outcome shows beside the buttons.
+    assert.match(renderReleaseGroup(beta.release, { ok: false, text: 'Not saved: no' }), /<span class="note error">Not saved: no<\/span>/);
+
+    // Roll Back on the demo: release-2 back to release-1.
+    const back = await fetch(`${url}/releases/beta/back`, { method: 'POST', headers: { authorization: `Bearer ${seed.token}`, 'content-type': 'application/json' }, body: '{}' });
+    assert.equal(back.status, 200);
+    assert.equal((await get('/pipeline-controls/beta')).release.current.release, 'release-1');
+  } finally {
+    await new Promise((r) => server.close(r));
+    store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('Pipeline Controls on the Settings page: each control with its value, "default" while it has it, the not-yet line naming its slice, and the change log in Mountain time (SP-224)', async () => {
   const f = await fixture();
   try {
@@ -923,7 +980,10 @@ test('Pipeline Controls on the Settings page: each control with its value, "defa
     const html = renderPipelineControls(alpha);
     assert.match(html, /<h3>Alpha<\/h3>/);
     for (const title of ['Wake Times', 'Pause and Resume', 'Work-in-Progress Cap', 'Model per Lane', 'Change Log']) assert.match(html, new RegExp(`<h4>${title}</h4>`));
-    for (const slice of ['SP-236', 'SP-237', 'SP-238', 'SP-239']) assert.match(html, new RegExp(`Saved, but the lanes do not use this yet \\(${slice}\\)\\.`));
+    for (const slice of ['SP-237', 'SP-238', 'SP-239']) assert.match(html, new RegExp(`Saved, but the lanes do not use this yet \\(${slice}\\)\\.`));
+    // The lanes use the wake times (SP-236): no not-yet line, and each says what its lane last used.
+    assert.doesNotMatch(html, /SP-236/);
+    assert.match(html, /1,800 seconds \(Every 30 minutes\)<span class="in-effect">Last used: not known on this machine yet\.<\/span>/);
     assert.match(html, /<tr data-control="wake\.loop-build" data-kind="seconds">[\s\S]*?loop-build wake time<\/label> <span class="default">default<\/span>[\s\S]*?type="number" min="60" max="86400" step="1" value="1800"[\s\S]*?1,800 seconds \(Every 30 minutes\)[\s\S]*?<button type="button">Save<\/button>/);
     assert.match(html, /<option value="default" selected>Claude&#39;s default<\/option>/);
     assert.match(html, /<option value="off" selected>Off<\/option><option value="on">On<\/option>/);
@@ -945,6 +1005,22 @@ test('Pipeline Controls on the Settings page: each control with its value, "defa
     const saved = await f.call('PUT', '/pipeline-controls/alpha', { body: { setting: 'wake.loop-build', value: '900' } });
     assert.equal(saved.status, 200, saved.text);
     assert.match(renderPipelineControls(saved.body), /<td>Dane<\/td><td>loop-build wake time<\/td><td>1800<\/td><td>900<\/td>/);
+  } finally { await f.cleanup(); }
+});
+
+test('each wake time on the Settings page says what its lane last used, and says plainly while the lane has not picked up the set value (SP-236)', async () => {
+  const f = await fixture();
+  try {
+    const alpha = (await f.call('GET', '/pipeline-controls')).body.projects.find((p) => p.project.slug === 'alpha');
+    const withUsed = (key, used) => ({ ...alpha, controls: alpha.controls.map((c) => (c.key === key ? { ...c, value: '600', isDefault: false, used, inEffect: used == null ? null : String(used) === '600' } : c)) });
+    const waiting = renderPipelineControls(withUsed('wake.loop-build', 1800));
+    assert.match(waiting, /600 seconds \(Every 10 minutes\)<span class="in-effect waiting">Last used: 1,800 seconds\. Waiting for the lane&#39;s next pass to pick this up\.<\/span>/);
+    const taken = renderPipelineControls(withUsed('wake.loop-build', 600));
+    assert.match(taken, /<span class="in-effect">In effect: the lane last used 600 seconds\.<\/span>/);
+    assert.doesNotMatch(taken, /Waiting for the lane/);
+    assert.equal(wakeInEffectText({ used: null, inEffect: null }), 'Last used: not known on this machine yet.');
+    // Only the wake times say it.
+    assert.equal((taken.match(/class="in-effect/g) || []).length, 4);
   } finally { await f.cleanup(); }
 });
 
@@ -2463,6 +2539,17 @@ test('Reporting is in the header after Tasks, served at /reporting, and its figu
     assert.equal(alpha.body.finished.all, live('alpha'));
     assert.equal((await f.call('GET', '/reports?project=no-such-thing')).status, 404);
   } finally { await f.cleanup(); }
+});
+
+test('Reporting: the first table is Task Productivity, Tasks started above Tasks finished, and its note names Started first (SP-230)', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const fn = app.slice(app.indexOf('async function drawReporting('));
+  const page = fn.slice(fn.indexOf('<h1>Reporting</h1>'));
+  const firstHeading = page.match(/<h2>([^<]*)<\/h2>/);
+  assert.equal(firstHeading[1], 'Task Productivity');
+  assert.doesNotMatch(app, /Tasks Finished and Started/);
+  assert.match(page, /<p class="quiet">Started: filed in that time\. Finished: moved to Live in that time and still Live\.<\/p>/);
+  assert.match(page, /<tbody>\$\{line\('Tasks started', r\.started\)\}\$\{line\('Tasks finished', r\.finished\)\}<\/tbody>/);
 });
 
 /** True when `ms` is within ten minutes of `days` days: the test clock ticks a minute per reading. */

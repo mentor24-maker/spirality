@@ -118,7 +118,7 @@ test('loop_runner.sh names no project of its own', () => {
 // file, ends on time without one, and a wake sent during a pass neither stops
 // nor doubles it. Each test runs the real runner in a scratch copy, as above,
 // with the wake file looked for every second.
-async function withRunner({ interval, claude }, body) {
+async function withRunner({ interval, claude, wakeSetting = null }, body) {
   const scratch = mkdtempSync(join(tmpdir(), 'runner-wake-'));
   const logDir = mkdtempSync(join(tmpdir(), 'runner-wake-logs-'));
   let runner;
@@ -126,6 +126,8 @@ async function withRunner({ interval, claude }, body) {
     mkdirSync(join(scratch, 'scripts/lib'), { recursive: true });
     copyFileSync(join(REPO, 'scripts/loop_runner.sh'), join(scratch, 'scripts/loop_runner.sh'));
     for (const f of ['project_config.mjs', 'run_with_time_limit.sh', 'lib/wakeLane.mjs']) symlinkSync(join(REPO, 'scripts', f), join(scratch, 'scripts', f));
+    // A stand-in for the tracker's answer (SP-236), when the test gives one: never the live tracker.
+    if (wakeSetting) writeFileSync(join(scratch, 'scripts/lib/wakeSetting.mjs'), wakeSetting({ logDir }));
     const spirality = JSON.parse(readFileSync(join(REPO, 'spirality.project.json'), 'utf8'));
     writeFileSync(join(scratch, 'spirality.project.json'), JSON.stringify({
       ...spirality, projectSlug: 'normie', launchdPrefix: 'com.normie', logDir,
@@ -201,4 +203,44 @@ test('wakes sent during a pass never stop or double it: exactly one more pass fo
     assert.match(text, /woken early after 0s of 3600s/);
     assert.ok(!existsSync(wake));
   });
+});
+
+// The wake time set on the Settings page (SP-236): read before every sleep.
+// The stand-in answers in turn from a list, one answer per read: the
+// tracker unreachable, a 0 it must never sleep on, then the set value.
+const answering = (answers) => ({ logDir }) => [
+  "import { existsSync, readFileSync, writeFileSync } from 'node:fs';",
+  `const calls = ${JSON.stringify(join(logDir, 'wake-calls'))};`,
+  'const n = existsSync(calls) ? Number(readFileSync(calls, "utf8")) + 1 : 1;',
+  'writeFileSync(calls, String(n));',
+  `const answers = ${JSON.stringify(answers)};`,
+  'const [code, line] = answers[Math.min(n, answers.length) - 1];',
+  "if (process.argv[2] !== 'loop-build') { console.log(`asked for ${process.argv[2]}`); process.exit(1); }",
+  'console.log(line); process.exit(code);',
+].join('\n');
+
+test('the runner sleeps the wake time set on the Settings page, read before every sleep; a read that fails or answers 0 keeps the last good value in one log line, and the lane carries on (SP-236)', { timeout: 60_000 }, async () => {
+  const wakeSetting = answering([[1, 'the settings read failed (exit 1: fetch failed)'], [0, '0'], [0, '600']]);
+  await withRunner({ interval: 2, claude: () => 'echo pass', wakeSetting }, async ({ read, count, until }) => {
+    await until('the runner never slept the set value', () => read().includes('sleeping 600s'), 30);
+    const text = read();
+    assert.equal(count(STARTS), 3, 'a failed read stopped the lane');
+    const sleeps = text.match(/sleeping \d+s before the next \/loop-build/g);
+    assert.deepEqual(sleeps, ['sleeping 2s before the next /loop-build', 'sleeping 2s before the next /loop-build', 'sleeping 600s before the next /loop-build']);
+    const failed = text.match(/^\[loop-runner\] .*could not read .*$/gm);
+    assert.equal(failed.length, 2, text);
+    assert.match(failed[0], /could not read \/loop-build's wake time from the tracker \(the settings read failed \(exit 1: fetch failed\)\) — keeping the last good value, 2s$/);
+    assert.match(failed[1], /could not read \/loop-build's wake time from the tracker \(0\) — keeping the last good value, 2s$/);
+    // The read comes after the pass and before its sleep line, so the line says what it will sleep.
+    assert.match(text, /END \/loop-build[^\n]*\n\[loop-runner\][^\n]*could not read[^\n]*\n\[loop-runner\][^\n]*sleeping 2s/);
+  });
+});
+
+test('the relay\'s plist starts run_relay.sh --tick on the one-minute tick, never on the wake time, so a new wake time needs no reinstall (SP-236)', () => {
+  const relay = installer.slice(installer.indexOf('# The relay: started on a short fixed tick'), installer.indexOf('if tracker_configured; then install_tracker'));
+  assert.match(relay, /<string>\$REPO\/scripts\/run_relay\.sh<\/string>\n\s*<string>--tick<\/string>/);
+  assert.match(relay, /<key>StartInterval<\/key>\n\s*<integer>\$\(relay_tick\)<\/integer>/);
+  assert.match(installer, /^relay_tick\(\) \{ PATH="\$LAUNCHD_PATH" node "\$REPO\/scripts\/lib\/loopSchedule\.mjs" tick; \}$/m);
+  // The lanes are handed their default as the first sleep, and read the set one after.
+  assert.match(installer, /<string>\$s<\/string>\n\s*<string>\$\(interval_of "\$s"\)<\/string>/);
 });
