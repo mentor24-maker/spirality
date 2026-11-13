@@ -11,10 +11,12 @@ test('the defaults are today\'s behaviour, read from where it lives now (SP-224)
   assert.ok(CONTROLS.filter((c) => c.kind === 'switch').every((c) => c.default === 'off'));
   assert.ok(CONTROLS.filter((c) => c.kind === 'model').every((c) => c.default === 'default'));
   assert.deepEqual(CONTROLS.filter((c) => c.kind === 'model').map((c) => c.key), MODEL_LANES.map((l) => `model.${l}`));
+  assert.equal(CONTROLS.find((c) => c.key === 'release.quiet-days').default, '0', 'nothing moves by itself until Dane turns it on (SP-277)');
 });
 
 test('every group names the ticket that wires it in, and every control is in a group', () => {
-  assert.deepEqual(GROUPS.map((g) => [g.key, g.wiredBy]), [['wake', 'SP-236'], ['pause', 'SP-237'], ['cap', 'SP-238'], ['model', 'SP-239']]);
+  assert.deepEqual(GROUPS.map((g) => [g.key, g.wiredBy]), [['wake', 'SP-236'], ['pause', 'SP-237'], ['cap', 'SP-238'], ['model', 'SP-239'], ['release-move', null]]);
+  assert.deepEqual(GROUPS.filter((g) => g.notOnOwnProject).map((g) => g.key), ['release-move'], 'only the release group is left out for the home project (SP-277)');
   assert.ok(CONTROLS.every((c) => GROUPS.some((g) => g.key === c.group)));
 });
 
@@ -25,7 +27,9 @@ test('checkControl stores text: numbers whole and in range, switches on or off, 
   assert.equal(checkControl('paused', true), 'on');
   assert.equal(checkControl('paused.relay', 'off'), 'off');
   assert.equal(checkControl('model.loop-review', MODELS[0].id), MODELS[0].id);
-  for (const [key, value] of [['wake.loop-build', 59], ['wake.loop-build', ''], ['wip-cap', -1], ['paused', 1], ['model.loop-build', 'opus']]) {
+  assert.equal(checkControl('release.quiet-days', '0'), '0');
+  assert.equal(checkControl('release.quiet-days', 30), '30');
+  for (const [key, value] of [['wake.loop-build', 59], ['wake.loop-build', ''], ['wip-cap', -1], ['paused', 1], ['model.loop-build', 'opus'], ['release.quiet-days', 31], ['release.quiet-days', -1], ['release.quiet-days', '2.5']]) {
     assert.throws(() => checkControl(key, value), { code: 'bad-setting' }, `${key}=${value}`);
   }
 });

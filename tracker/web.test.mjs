@@ -948,6 +948,23 @@ test('Pipeline Controls on the Settings page: each control with its value, "defa
   } finally { await f.cleanup(); }
 });
 
+test('Quiet Days Before Moving: a number box from 0 to 30 with no not-yet line, left out for the tracker\'s home project; the page saves it as a number (SP-277)', async () => {
+  const f = await fixture();
+  try {
+    const { body } = await f.call('GET', '/pipeline-controls');
+    const alpha = body.projects.find((p) => p.project.slug === 'alpha');
+    const html = renderPipelineControls({ ...alpha, own: false });
+    assert.match(html, /<h4>Quiet Days Before Moving<\/h4>\s*<table class="controls"><tbody><tr data-control="release\.quiet-days" data-kind="days">[\s\S]*?type="number" min="0" max="30" step="1" value="0"[\s\S]*?0 \(moves only when named by hand\)/);
+    const after = html.slice(html.indexOf('<h4>Quiet Days Before Moving</h4>'), html.indexOf('<h4>Change Log</h4>'));
+    assert.doesNotMatch(after, /do not use this yet/, 'the relay uses it already');
+    const own = renderPipelineControls({ ...alpha, own: true });
+    assert.doesNotMatch(own, /Quiet Days Before Moving|release\.quiet-days/);
+    assert.match(own, /<h4>Wake Times<\/h4>/, 'the home project keeps its other controls');
+  } finally { await f.cleanup(); }
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  assert.match(app, /const numeric = \['seconds', 'count', 'days'\]\.includes\(tr\.dataset\.kind\);/);
+});
+
 test('the Settings page draws Pipeline Controls from the server and says Saved only when the stored value read back is the one sent (SP-224)', () => {
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   const draw = app.slice(app.indexOf('async function drawSettings'), app.indexOf('/**\n * The Users page'));
@@ -962,6 +979,9 @@ test('controlValueText and mountainTime say a control and a time in words', () =
   assert.equal(controlValueText({ kind: 'seconds', value: '900' }), '900 seconds (Every 15 minutes)');
   assert.equal(controlValueText({ kind: 'switch', value: 'on' }), 'On');
   assert.equal(controlValueText({ kind: 'model', value: 'x' }, [{ id: 'x', label: 'Model X' }]), 'Model X');
+  assert.equal(controlValueText({ kind: 'days', value: '0' }), '0 (moves only when named by hand)');
+  assert.equal(controlValueText({ kind: 'days', value: '1' }), '1 day');
+  assert.equal(controlValueText({ kind: 'days', value: '7' }), '7 days');
   assert.equal(mountainTime('2026-11-12T13:48:00Z'), 'Nov 12, 2026, 6:48 AM MST');
   assert.equal(mountainTime('2026-07-01T18:00:00Z'), 'Jul 1, 2026, 12:00 PM MDT');
   assert.equal(mountainTime('nope'), '–');
@@ -976,8 +996,8 @@ test('npm run clickup -- settings prints every control as name=value, defaults i
     const lines = r.out.trim().split('\n');
     assert.equal(lines.length, f.store.pipelineSettings('alpha').length);
     assert.ok(lines.every((l) => /^[a-z.-]+=[^\s]+$/.test(l)), r.out);
-    for (const l of ['wake.loop-build=900', 'wake.relay=600', 'paused=off', 'wip-cap=5', 'model.loop-review=default']) assert.ok(lines.includes(l), l);
-    assert.match(r.err, /13 pipeline control\(s\) for alpha, 1 changed from the default/);
+    for (const l of ['wake.loop-build=900', 'wake.relay=600', 'paused=off', 'wip-cap=5', 'model.loop-review=default', 'release.quiet-days=0']) assert.ok(lines.includes(l), l);
+    assert.match(r.err, /14 pipeline control\(s\) for alpha, 1 changed from the default/);
     const missing = await f.door('nope', 'settings');
     assert.equal(missing.code, 1);
     assert.equal(missing.out, '');

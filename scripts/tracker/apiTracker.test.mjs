@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, chmod
 import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { openStore } from '../../tracker/store.mjs';
 import { startServer } from '../../tracker/server.mjs';
@@ -1282,5 +1282,100 @@ test('release name on a tracker that cannot tell Spirality\'s own project fails 
     assert.equal(r.code, 1);
     assert.match(r.err, /cannot say which project is Spirality's own/);
     assert.deepEqual(f.store.projectReleases('alpha'), []);
+  } finally { await f.cleanup(); }
+});
+
+/**
+ * A scratch remote whose releases' commits all reached main `daysAgo` days
+ * ago: `release-1` .. `release-<count>`. The door finds those commits through
+ * GIT_ALTERNATE_OBJECT_DIRECTORIES (`objects`), so nothing is fetched into
+ * this repository.
+ */
+function oldReleaseRemote(dir, count, daysAgo) {
+  const remote = join(dir, 'old-releases.git');
+  const work = join(dir, 'old-release-work');
+  scratchGit.git(dir, 'init', '--quiet', '--bare', '--initial-branch=main', remote);
+  scratchGit.git(dir, 'clone', '--quiet', remote, work);
+  const when = new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000).toISOString();
+  for (let n = 1; n <= count; n += 1) {
+    writeFileSync(join(work, 'file.txt'), String(n));
+    scratchGit.git(work, 'add', 'file.txt');
+    const made = spawnSync('git', [...scratchGit.SCRATCH_IDENTITY, 'commit', '--quiet', '-m', String(n)], {
+      cwd: work, encoding: 'utf8', env: { ...scratchGit.scratchGitEnv(), GIT_COMMITTER_DATE: when, GIT_AUTHOR_DATE: when },
+    });
+    assert.equal(made.status, 0, made.stderr);
+    scratchGit.git(work, 'push', '--quiet', 'origin', 'HEAD:main', `HEAD:refs/tags/release-${n}`);
+  }
+  return { SPIRALITY_RELEASE_REMOTE: remote, GIT_ALTERNATE_OBJECT_DIRECTORIES: join(remote, 'objects') };
+}
+
+test('relay on the home project moves another project to the newest release after its quiet days, tells its bus and reads it back; 0 moves nothing; an ALARM on the home bus holds it (SP-277)', async () => {
+  const f = await fixture({ serverOptions: { ownProject: 'alpha' } });
+  try {
+    // alpha is the home project, with a bus; beta runs release-1 and has a bus too.
+    const config = JSON.parse(readFileSync(join(f.project, 'spirality.project.json'), 'utf8'));
+    writeFileSync(join(f.project, 'spirality.project.json'), JSON.stringify({ ...config, busProject: 'alpha-bus' }));
+    for (const [slug, name, prefix] of [['alpha-bus', 'Alpha bus', 'ALB'], ['beta', 'Beta', 'BE'], ['beta-bus', 'Beta bus', 'BEB']]) {
+      f.store.createProject({ slug, name, prefix, operator: f.human.id });
+    }
+    const homeChat = f.store.fileTicket({ project: 'alpha-bus', actor: f.machine.id, name: 'Team chat', status: 'live' });
+    const betaChat = f.store.fileTicket({ project: 'beta-bus', actor: f.machine.id, name: 'Team chat', status: 'live' });
+    f.store.nameRelease({ project: 'beta', release: 'release-1', actor: f.human.id, ownProject: 'alpha' });
+    const env = oldReleaseRemote(f.dir, 2, 3);
+
+    const off = await f.door(['relay'], { env });
+    assert.equal(off.code, 0, `${off.out}\n${off.err}`);
+    assert.doesNotMatch(off.out, /release-follow/, 'quiet days 0 everywhere: nothing read, nothing moved');
+    assert.equal(f.store.projectReleases('beta')[0].release, 'release-1');
+
+    f.store.setPipelineSetting({ project: 'beta', setting: 'release.quiet-days', value: '2', actor: f.human.id });
+    const dry = await f.door(['relay', '--dry-run'], { env });
+    assert.equal(dry.code, 0, `${dry.out}\n${dry.err}`);
+    assert.match(dry.out, /^beta\trelease-follow\twould-move: release-1 -> release-2/m);
+    assert.equal(f.store.projectReleases('beta')[0].release, 'release-1', 'a dry run writes nothing');
+
+    const moved = await f.door(['relay'], { env });
+    assert.equal(moved.code, 0, `${moved.out}\n${moved.err}`);
+    assert.match(moved.out, /^beta\trelease-follow\tmoved: release-1 -> release-2, read back .*told its bus beta-bus$/m);
+    assert.deepEqual(f.store.projectReleases('beta').map((r) => [r.release, r.actor]), [['release-2', f.machine.id], ['release-1', f.human.id]]);
+    const told = f.store.listComments(betaChat.id).map((c) => c.body);
+    assert.equal(told.length, 1);
+    assert.match(told[0], /Spirality release: Beta moved from release-1 to release-2 by itself/);
+    assert.equal(f.store.listComments(homeChat.id).length, 0, 'the home bus hears nothing');
+
+    const again = await f.door(['relay'], { env });
+    assert.match(again.out, /^beta\trelease-follow\tstay: it already runs release-2, the newest$/m);
+    assert.equal(f.store.listComments(betaChat.id).length, 1, 'one bus line per move');
+
+    // A third release, as old, but an alarm on the home bus since it reached main.
+    mkdirSync(join(f.dir, 'later'));
+    const newer = oldReleaseRemote(join(f.dir, 'later'), 3, 3);
+    f.store.postComment({ ticket: homeChat.id, author: f.machine.id, body: 'ALARM: the build lane failed three passes running' });
+    const held = await f.door(['relay'], { env: newer });
+    assert.equal(held.code, 0, `${held.out}\n${held.err}`);
+    assert.match(held.out, /^beta\trelease-follow\theld: 1 ALARM post\(s\) on Spirality's bus since release-3 reached main/m);
+    assert.equal(f.store.projectReleases('beta')[0].release, 'release-2');
+  } finally { await f.cleanup(); }
+});
+
+test('relay with a project set to move but no bus on the home project moves nothing and fails saying why (SP-277)', async () => {
+  const f = await fixture({ serverOptions: { ownProject: 'alpha' } });
+  try {
+    f.store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE', operator: f.human.id });
+    f.store.nameRelease({ project: 'beta', release: 'release-1', actor: f.human.id, ownProject: 'alpha' });
+    f.store.setPipelineSetting({ project: 'beta', setting: 'release.quiet-days', value: '1', actor: f.human.id });
+    const r = await f.door(['relay'], { env: oldReleaseRemote(f.dir, 2, 3) });
+    assert.equal(r.code, 1, `${r.out}\n${r.err}`);
+    assert.match(r.err, /release-follow beta: could not tell whether Spirality's own lanes were quiet: alpha's project config names no bus \("busProject"\)/);
+    assert.equal(f.store.projectReleases('beta')[0].release, 'release-1');
+  } finally { await f.cleanup(); }
+});
+
+test('settings lists release.quiet-days=0 among the controls (SP-277)', async () => {
+  const f = await fixture();
+  try {
+    const r = await f.door(['settings']);
+    assert.equal(r.code, 0, r.err);
+    assert.match(r.out, /^release\.quiet-days=0$/m);
   } finally { await f.cleanup(); }
 });

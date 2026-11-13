@@ -204,8 +204,36 @@ rolling back twice goes two steps back, never back up to the bad one.
 
 Slice 1 of 4: nothing runs from the record yet. Still to come: showing each
 project's release on the Settings page with Move to Newest and Roll Back
-(SP-275), running each project's lanes on its release (SP-276), and moving a
-project to the newest release after a quiet period (SP-277).
+(SP-275) and running each project's lanes on its release (SP-276).
+
+### Moving to the newest release by itself (SP-277)
+
+Each project other than Spirality's own has a pipeline control on the
+Settings page, **Quiet Days Before Moving** (`release.quiet-days`, 0 to 30).
+At **0**, the default, nothing moves by itself: a project moves only when a
+release is named for it by hand. Above 0, every relay pass of Spirality's own
+project moves it to the newest release once all of these hold:
+
+- the newest release is newer than the one the project runs (a project with
+  no release named yet is left alone: its first release is named by hand);
+- the project was never rolled back from that release (a release some later
+  entry replaced with a lower one waits for a person to name it again);
+- that release has run on Spirality's own lanes for at least that many days,
+  counted from when its commit reached `main` (Spirality's lanes always run
+  `main`, so that is when they began running it; a release tag records no
+  time of its own);
+- there has been no `ALARM:` post on Spirality's own bus (`busProject` in
+  Spirality's `spirality.project.json`) since then.
+
+The move is the same record write as `release name`, read back, and the
+project's bus (`<slug>-bus`, the name the setup wizard gives it) hears one
+plain line naming the old and new release and how to roll back. When
+Spirality has no bus, or it or the release's time cannot be read, nobody can
+tell whether the release was quiet: nothing moves, and the relay pass lists
+it among the steps that failed. The relay prints one `release-follow` line per project with quiet days
+above 0, saying what it did, or why not.
+Spirality's own project has no such control: the Settings page leaves it out
+and the tracker refuses it, because its lanes always run `main`.
 
 ## The moves
 
@@ -231,6 +259,8 @@ is a ticket in that project's own queue, filed once Spirality's side is Live:
 5. Name a Spirality release for each project, Spirality's own lanes first.
    Slice 1 done (SP-265): releases, the tracker's record of which one each
    project runs, and the commands to cut, name and roll back (above).
+   Slice 4 done (SP-277): Quiet Days Before Moving, a project moving to the
+   newest release by itself after a quiet period (above).
 6. In each project's queue: remove the copied loop (`loop/`, the copied
    `.claude/` skills and hooks) and, in StarCaster, the tracker posting in
    `scripts/lib/clickup.cjs` and the watchdogs in `run_bus_relay.sh`.

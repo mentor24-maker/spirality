@@ -544,9 +544,11 @@ export function stageColoursOf(store) {
  * fall in (each naming the ticket that makes the lanes use it), the models
  * a lane may choose, the change log newest first with each changer's name,
  * and `canChange`: whether this reader may change them (the project's
- * operator, signed in as a person). Null for a project that does not exist.
+ * operator, signed in as a person). `own` is true for the tracker's home
+ * project (`ownProject`), whose page leaves out the groups marked
+ * `notOnOwnProject`. Null for a project that does not exist.
  */
-export function pipelineControlsOf(store, slug, { reader = null } = {}) {
+export function pipelineControlsOf(store, slug, { reader = null, ownProject = null } = {}) {
   const project = store.getProject(slug);
   if (!project) return null;
   const nameOf = (id) => store.getActor(id)?.name ?? `actor ${id}`;
@@ -555,6 +557,7 @@ export function pipelineControlsOf(store, slug, { reader = null } = {}) {
     project: { slug: project.slug, name: project.name },
     operator: project.operator == null ? null : { id: project.operator, name: nameOf(project.operator) },
     canChange: who != null && who.kind === 'human' && who.id === project.operator,
+    own: ownProject != null && project.slug === ownProject,
     groups: GROUPS.map((g) => ({ ...g })),
     models: [{ id: DEFAULT_MODEL, label: "Claude's default" }, ...MODELS.map((m) => ({ ...m }))],
     controls: store.pipelineSettings(project.slug).map((c) => ({ ...c })),

@@ -308,6 +308,18 @@ export function createApiTracker({ token, baseUrl, project, listId, timeoutMs, l
     },
 
     /**
+     * Every project's pipeline controls this sign-in may see, `{ projects:
+     * [{ project: { slug, name }, own, controls }] }`: what the relay reads
+     * for each project's Quiet Days Before Moving (SP-277). Read-only.
+     */
+    async allPipelineControls() {
+      const out = await call('GET', '/pipeline-controls');
+      if (!out.res.ok) return out;
+      if (!Array.isArray(out.json?.projects)) return refused(502, 'the tracker answered the pipeline controls without a list of projects.');
+      return out;
+    },
+
+    /**
      * Spirality's releases (SP-265): `{ ownProject, ownRelease, projects:
      * [{ slug, name, own, release, history }] }` for every project this
      * sign-in may see. Read-only.
