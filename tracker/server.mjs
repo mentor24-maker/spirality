@@ -490,6 +490,31 @@ function flag(value) {
   throw new HttpError(400, 'bad-field', `open must be true or false, not "${value}".`);
 }
 
+/** An ISO date or date-time: what `from` and `to` on GET /reports accept. */
+const ISO_DATE_TIME = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})?)?$/;
+
+/**
+ * GET /reports' custom range as `{ from, to }` in ms, or null when
+ * neither is given. One without the other, one that is not an ISO date-time,
+ * or `from` after `to` is a 400 naming the problem.
+ */
+function readReportRange(fromText, toText) {
+  const given = (v) => v != null && v !== '';
+  if (!given(fromText) && !given(toText)) return null;
+  if (!given(fromText) || !given(toText)) {
+    throw new HttpError(400, 'bad-field', `from and to go together: ${given(fromText) ? 'to' : 'from'} is missing.`);
+  }
+  const read = (name, text) => {
+    const ms = ISO_DATE_TIME.test(text) ? Date.parse(text) : Number.NaN;
+    if (Number.isNaN(ms)) throw new HttpError(400, 'bad-field', `${name} must be an ISO date-time, not "${text}".`);
+    return ms;
+  };
+  const from = read('from', fromText);
+  const to = read('to', toText);
+  if (from > to) throw new HttpError(400, 'bad-field', `from (${fromText}) is after to (${toText}).`);
+  return { from, to };
+}
+
 /**
  * Build the request handler around an open store. `log` gets one line per
  * request (method, path, status, actor id); it is never handed a token.
@@ -977,10 +1002,14 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
 
     // Dane's page: the Reporting page's figures, for one project
     // (`?project=<slug>`) or, with none named, every project. Read-only.
+    // `from` and `to` (ISO date-times, both or neither) add the Task
+    // Productivity table's own range; one alone, an unreadable
+    // one, or `from` after `to` is refused, never answered as zero.
     if (parts.length === 1 && parts[0] === 'reports' && method === 'GET') {
       const slug = url.searchParams.get('project');
       const scope = scopeOf(me);
-      const reports = reportsOf(store, { project: slug == null || slug === '' ? null : slug, only: scope });
+      const custom = readReportRange(url.searchParams.get('from'), url.searchParams.get('to'));
+      const reports = reportsOf(store, { project: slug == null || slug === '' ? null : slug, only: scope, custom });
       if (!reports) throw notFound('unknown-project', `project "${slug}"`, scope);
       return [200, reports];
     }

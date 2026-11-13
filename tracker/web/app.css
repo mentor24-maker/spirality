@@ -113,6 +113,10 @@ table.projects td.name a:hover { text-decoration: underline; }
 table.projects td.actions { white-space: nowrap; width: 1%; }
 table.counts { max-width: 24rem; }
 table.counts.report { max-width: 40rem; }
+table.counts.report.productivity { max-width: 56rem; }
+table.counts th.custom-range { vertical-align: top; }
+table.counts th.custom-range label { display: block; }
+table.counts th.custom-range input { font: inherit; font-weight: normal; padding: 0.2rem; margin-top: 0.25rem; }
 /* Where the Time Goes' task list (SP-220): wide enough for a name, the id and the durations on one line each. */
 table.counts.report.time-split-tickets { max-width: 64rem; }
 table.time-split-tickets td:first-child, table.time-split-tickets td.count { white-space: nowrap; }
