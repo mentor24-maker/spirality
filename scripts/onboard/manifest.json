@@ -282,6 +282,11 @@
       "to": "scripts/lib/tracker_restart.sh"
     },
     {
+      "from": "scripts/lib/relay_app_checks.sh",
+      "to": "scripts/lib/relay_app_checks.sh",
+      "why": "run_relay.sh sources it; a copy with no app-checks command logs that and runs nothing"
+    },
+    {
       "from": "scripts/lib/trackerFiles.mjs",
       "to": "scripts/lib/trackerFiles.mjs",
       "why": "the settings reader sits under loop/ in a project",
