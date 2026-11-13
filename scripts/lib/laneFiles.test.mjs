@@ -62,6 +62,16 @@ test('a file without the project\'s name is refused', () => {
   assert.deepEqual(unscopedLaneFiles(js).map((b) => b.name), ['loops.standdown', '${job}.log', '${skill}.log', 'loop-review.log']);
 });
 
+test('a log folder reached through a property (config.logDir) is read too', () => {
+  const js = [
+    "const a = join(config.logDir, 'loops.standdown');",
+    "const b = join(this.project.logDir, 'x.lock');",
+    'const ok = join(config.logDir, `${config.projectSlug}-standdown`);',
+  ].join('\n');
+  assert.deepEqual(unscopedLaneFiles(js).map((b) => [b.line, b.name]), [[1, 'loops.standdown'], [2, 'x.lock']]);
+  assert.equal(laneFileNames(js).length, 3);
+});
+
 test('a stand-down file is <projectSlug>-standdown, so two projects never share one', () => {
   const a = { logDir: '~/loop-logs', projectSlug: 'alpha' };
   const b = { logDir: '~/loop-logs', projectSlug: 'beta' };
@@ -118,4 +128,32 @@ test('a switch that cannot be told apart, or a config with no project, is treate
   const none = pipelinePause.projectPauseVerdict({ tracker: 'clickup', loopQueueListId: '0' }, { tasks: [switchIn('x', '0')] });
   assert.equal(none.code, 3);
   assert.match(none.message, /names no tracker project/);
+});
+
+test('the switch that was not read is never "running": a failed tickets read, a failed or async comments read', () => {
+  const alpha = { tracker: 'api', projectSlug: 'alpha' };
+  const tasks = [switchIn('AL-1', 'alpha')];
+
+  // (a) An async read handed in where the comments are needed: a Promise is not a trail.
+  const asyncRead = pipelinePause.projectPauseVerdict(alpha, { tasks, commentsOf: async () => [running] });
+  assert.equal(asyncRead.code, 3);
+  assert.equal(asyncRead.paused, true);
+  assert.equal(asyncRead.certain, false);
+  assert.match(asyncRead.message, /came back as a Promise/);
+  const nullRead = pipelinePause.projectPauseVerdict(alpha, { tasks, commentsOf: () => null });
+  assert.equal(nullRead.code, 3);
+
+  // (b) A comments read that throws becomes the unreadable verdict, not an escaped error.
+  const threw = pipelinePause.projectPauseVerdict(alpha, { tasks, commentsOf: () => { throw new Error('tracker 503'); } });
+  assert.equal(threw.code, 3);
+  assert.equal(threw.certain, false);
+  assert.match(threw.message, /tracker 503/);
+
+  // (c) A tickets read that failed is not "no switch, running".
+  for (const bad of [null, { error: 'timeout' }, 'oops']) {
+    const v = pipelinePause.projectPauseVerdict(alpha, { tasks: bad, commentsOf: () => [] });
+    assert.equal(v.code, 3, `tasks=${JSON.stringify(bad)}`);
+    assert.equal(v.certain, false);
+    assert.match(v.message, /did not come back as a list/);
+  }
 });

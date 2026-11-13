@@ -68,7 +68,7 @@ const baseOf = (name) => name.slice(name.lastIndexOf('/') + 1);
  * `[{ line, name, scoped }]`. What counts as "in the log folder":
  *
  *   sh  `$LOG_DIR/<name>` or `${LOG_DIR}/<name>`
- *   js  `join(<logDir|folder|dir|logDir()|expandHome(…logDir…)>, <literal>)`,
+ *   js  `join(<logDir|config.logDir|folder|dir|logDir()|expandHome(…logDir…)>, <literal>)`,
  *       `${logDir}/<name>` or `${logDir()}/<name>` in a template, and any
  *       literal naming `loop-logs/<name>` (the folder typed in)
  */
@@ -84,7 +84,7 @@ export function laneFileNames(text, { lang = 'js' } = {}) {
       for (const m of l.matchAll(/\$\{?LOG_DIR\}?\/([^\s"';)]+)/g)) add(n, m[1]);
       continue;
     }
-    for (const m of l.matchAll(/join\(\s*(?:logDir(?:\(\))?|folder|dir|expandHome\([^()]*logDir\)|expandLogDir\([^()]*\))\s*,\s*([`'"])([^`'"]+)\1/g)) add(n, m[2]);
+    for (const m of l.matchAll(/join\(\s*(?:(?:\w+\.)*logDir(?:\(\))?|folder|dir|expandHome\([^()]*logDir\)|expandLogDir\([^()]*\))\s*,\s*([`'"])([^`'"]+)\1/g)) add(n, m[2]);
     for (const m of l.matchAll(/\$\{logDir(?:\(\))?\}\/([^\s`'")]+)/g)) add(n, m[1]);
     for (const m of l.matchAll(/loop-logs\/([^\s`'")]+)/g)) add(n, m[1]);
   }
