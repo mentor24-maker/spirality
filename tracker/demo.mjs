@@ -55,8 +55,10 @@ let mergePhrase = null;
 try { mergePhrase = loadProjectConfig().mergePhrases[0] ?? null; } catch (err) { console.log(`no Merge button: the project config is not usable (${err.message}).`); }
 const accountMail = { send: printEmail, pageUrl: null, projectName: 'Demo' };
 // The Pipeline Status pod reads scratch logs in the demo's own folder, never the Mini's real ones.
-writeDemoLogs(dir, 'demo');
-const pipeline = { logDir: dir, slug: 'demo' };
+// They are project Alpha's, as the real tracker reads its own project's, so
+// Alpha's pause switches on the Settings page show in the pod (SP-237).
+writeDemoLogs(dir, 'alpha');
+const pipeline = { logDir: dir, slug: 'alpha' };
 // The pull requests' state on GitHub is a stand-in (SP-226): the demo never calls GitHub.
 const server = await startServer({ store, port, log: (line) => console.log(line), mergePhrase, closePhrase: CLOSE_PHRASE, goPhrase: GO_PHRASE, accountMail, pipeline, readPrState: demoPrState });
 accountMail.pageUrl = `http://127.0.0.1:${server.address().port}`;

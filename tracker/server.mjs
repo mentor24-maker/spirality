@@ -537,7 +537,7 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
    */
   /**
    * The project's pipeline controls, so a stage paused on the Settings page
-   * shows as paused (SP-237); null, and nothing shown paused, when its
+   * shows as paused; null, and nothing shown paused, when its
    * project is not in this tracker.
    */
   const controlsNow = () => {

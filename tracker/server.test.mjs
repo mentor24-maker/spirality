@@ -2805,7 +2805,7 @@ test('pipeline controls: anyone signed in reads them, defaults marked; the opera
     assert.equal(read.status, 200);
     assert.deepEqual(control(read.body, 'wake.loop-build'), { ...control(read.body, 'wake.loop-build'), value: '1800', isDefault: true });
     assert.equal(read.body.canChange, false, 'a loop may never change its own controls');
-    assert.deepEqual(read.body.groups.map((g) => g.wiredBy), ['SP-236', 'SP-237', 'SP-238', 'SP-239']);
+    assert.deepEqual(read.body.groups.map((g) => g.wiredBy), ['SP-236', null, 'SP-238', 'SP-239']);
     assert.equal((await f.call('GET', '/pipeline-controls/alpha', { token: f.humanToken })).body.canChange, true);
     assert.equal((await f.call('GET', '/pipeline-controls/alpha', { token: otherToken })).body.canChange, false);
     assert.equal((await f.call('GET', '/pipeline-controls/nope')).status, 404);

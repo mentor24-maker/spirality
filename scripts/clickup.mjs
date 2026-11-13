@@ -98,7 +98,6 @@ import { parseRepoFromRemoteUrl } from '../lib/branchCatchUp.js';
 // A ticket left in Building by a build pass that died (SP-101).
 import passClaim from '../lib/passClaim.js';
 import { settingsPauseVerdict } from '../lib/pipelinePause.js';
-import { LANES as PIPELINE_LANES } from '../tracker/pipelineControls.mjs';
 import {
   BUILD_SKILL, buildLockPath, lockState, writesMarker, seatGate, handbackDestination, leftoverWorktrees, markerBlocksClaim, handbackNote,
 } from '../lib/passHandback.js';
@@ -2331,9 +2330,11 @@ if (cmd === 'whoami') {
   // page? One line on stdout, which the runner logs. It fails safe: a read
   // that did not work is exit 3, paused, in words that say so; only a project
   // whose tickets are not on the tracker (no controls exist) runs unasked.
+  // A lane the controls do not list is not refused here: the verdict finds
+  // no switch for it and counts it as paused, saying which setting is missing.
   const lane = arg('lane');
-  if (!PIPELINE_LANES.includes(lane)) {
-    console.error(`pause-check: refused — --lane must be one of ${PIPELINE_LANES.join(', ')}; got ${lane == null ? 'none' : `"${lane}"`}.`);
+  if (!lane || !/^[a-z][a-z-]*$/.test(lane)) {
+    console.error(`pause-check: refused — --lane names the lane asking, e.g. loop-build or relay; got ${lane == null ? 'none' : `"${lane}"`}.`);
     process.exit(2);
   }
   let read;

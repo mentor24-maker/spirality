@@ -4201,7 +4201,7 @@ test('the Docs page puts Reference Docs and Work Log last in the right column, w
   assert.match(wire, /count\.textContent = docCountLine\(shown\.length, rows\.length\);/, 'the count line is text, matching the rows shown');
 });
 
-test('npm run clickup -- pause-check: exit 0 running, 3 paused naming who and when, 3 on a failed read, 2 on a bad lane (SP-237)', async () => {
+test('npm run clickup -- pause-check: exit 0 running, 3 paused naming who and when, 3 on a failed read or a lane with no switch, 2 with no lane (SP-237)', async () => {
   const f = await fixture();
   try {
     const running = await f.door('alpha', 'pause-check', '--lane', 'loop-build');
@@ -4231,9 +4231,13 @@ test('npm run clickup -- pause-check: exit 0 running, 3 paused naming who and wh
     assert.equal(unreadable.code, 3, 'settings that cannot be read count as paused');
     assert.match(unreadable.out, /^could not read the pipeline settings, so \/loop-build is treated as PAUSED and not starting \(it fails safe[^)]*\)\. Reason: HTTP 404/);
 
-    const bad = await f.door('alpha', 'pause-check', '--lane', 'loop-nonsense');
+    // A lane with no switch of its own fails safe, naming the missing setting; no lane at all is refused.
+    const unknown = await f.door('alpha', 'pause-check', '--lane', 'loop-nonsense');
+    assert.equal(unknown.code, 3);
+    assert.match(unknown.out, /has no "paused\.loop-nonsense" setting/);
+    const bad = await f.door('alpha', 'pause-check');
     assert.equal(bad.code, 2);
-    assert.match(bad.err, /--lane must be one of loop-intake, loop-build, loop-review, relay/);
+    assert.match(bad.err, /--lane names the lane asking/);
   } finally { await f.cleanup(); }
 });
 

@@ -274,6 +274,10 @@
       "to": "scripts/run_relay.sh"
     },
     {
+      "from": "scripts/pause_check.sh",
+      "to": "scripts/pause_check.sh"
+    },
+    {
       "from": "scripts/lib/back_to_main.sh",
       "to": "scripts/lib/back_to_main.sh"
     },
