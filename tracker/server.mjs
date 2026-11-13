@@ -525,6 +525,21 @@ export const CLOSE_PHRASE = busRelayPlan.CLOSE_PHRASES[0];
 export const GO_PHRASE = busRelayPlan.GO_PHRASE;
 
 export function createHandler(store, { log = () => {}, notifier = null, defaultProject = null, mergePhrase = null, closePhrase = null, goPhrase = null, accountMail = null, setup = null, now = Date.now, publicUrl = null, pipeline = null, docsDir = DOCS_DIR, commandsRoot = REPO_ROOT } = {}) {
+  /**
+   * This machine's lanes as the page data reads them, `{ slug, stages }`
+   * (pipelineOf), or null when this tracker reads no logs or they cannot be
+   * read; `call` names the caller in the log line. Read per call, so a lane
+   * that passes again shows at once (a held-up ticket, pageData.heldUpBy).
+   */
+  const lanesNow = (call) => {
+    if (!pipeline) return null;
+    try {
+      return { slug: pipeline.slug, stages: pipelineOf(pipeline).stages };
+    } catch (err) {
+      log(`${call}: the loop logs could not be read, so no lane's times or health are shown (${err.message}).`);
+      return null;
+    }
+  };
   const failures = failureCounter(now);
   const resets = resetLimiter(now);
   // The public address's host as a Host header names it (`name:8443`; no port for 443).
@@ -656,7 +671,7 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     // Dane's page: what waits on the caller, across every project, by the
     // loop's own verdict (tracker/pageData.mjs).
     if (parts.length === 1 && parts[0] === 'waiting' && method === 'GET') {
-      return [200, waitingFor(store, me.id, { only: scopeOf(me) })];
+      return [200, waitingFor(store, me.id, { only: scopeOf(me), pipeline: lanesNow('waiting') })];
     }
 
     // Dane's page: the bus count in the header (Dane's choice D on the bus ticket), the posts on each
@@ -685,15 +700,7 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     // next. A tracker that cannot read the loop logs still answers, with no
     // lane times (pageData.consoleOf says null, never a guess).
     if (parts.length === 1 && parts[0] === 'in-flight' && method === 'GET') {
-      let lanes = null;
-      if (pipeline) {
-        try {
-          lanes = { slug: pipeline.slug, stages: pipelineOf(pipeline).stages };
-        } catch (err) {
-          log(`in-flight: the loop logs could not be read, so no ticket has a next change time (${err.message}).`);
-        }
-      }
-      return [200, consoleOf(store, { only: scopeOf(me), pipeline: lanes })];
+      return [200, consoleOf(store, { only: scopeOf(me), pipeline: lanesNow('in-flight') })];
     }
 
     // Dane's page: the Projects screen, the project Tasks opens, and the New
@@ -1205,7 +1212,7 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     // Dane's page: one ticket with each comment's author named and machine
     // comments marked.
     if (parts.length === 3 && parts[0] === 'tickets' && parts[2] === 'thread' && method === 'GET') {
-      const thread = threadOf(store, requireTicket(parts[1], me).id);
+      const thread = threadOf(store, requireTicket(parts[1], me).id, { pipeline: lanesNow('thread') });
       return [200, { ...thread, attachments: store.listAttachments(thread.id), mergePhrase, closePhrase, goPhrase, choices: { priorities: PRIORITIES, statuses: PERSON_STATUSES } }];
     }
 

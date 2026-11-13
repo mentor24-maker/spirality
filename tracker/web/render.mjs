@@ -979,6 +979,25 @@ export function statusLabel({ status, answerIn = false }) {
 }
 
 /**
+ * The ticket page's held-up line (SP-228), from the server's `heldUp`
+ * (pageData.heldUpBy): "Held up: Relay keeps failing since 9:00 pm", or ''
+ * when no failing lane owes the next move. `timeOf` writes the time, the
+ * same way the header's health line does. It goes above the card, so it is
+ * read before any "Your move".
+ */
+export function heldUpLine({ heldUp = null } = {}, timeOf) {
+  if (!heldUp || typeof heldUp.stage !== 'string' || !heldUp.stage) return '';
+  const reason = typeof heldUp.reason === 'string' && heldUp.reason ? heldUp.reason : 'keeps failing';
+  return heldUp.since ? `Held up: ${heldUp.stage} ${reason} since ${timeOf(heldUp.since)}` : `Held up: ${heldUp.stage} ${reason}`;
+}
+
+/** heldUpLine as HTML, a `<p class="held-up">`, or ''. */
+export function renderHeldUp(t, timeOf) {
+  const line = heldUpLine(t, timeOf);
+  return line ? `<p class="held-up" role="status">${escapeHtml(line)}</p>` : '';
+}
+
+/**
  * The one line that stands in for the Merge, Close and Go buttons once his
  * answer is in (the server's `answerIn`), as HTML, or ''. The buttons stay
  * away until the relay answers: its comment becomes the newest, and the
