@@ -2805,7 +2805,7 @@ test('pipeline controls: anyone signed in reads them, defaults marked; the opera
     assert.equal(read.status, 200);
     assert.deepEqual(control(read.body, 'wake.loop-build'), { ...control(read.body, 'wake.loop-build'), value: '1800', isDefault: true });
     assert.equal(read.body.canChange, false, 'a loop may never change its own controls');
-    assert.deepEqual(read.body.groups.map((g) => g.wiredBy), [null, null, 'SP-238', null]);
+    assert.deepEqual(read.body.groups.map((g) => g.wiredBy), [null, null, null, null]);
     // This tracker reads no loop logs, so no wake time claims what its lane used (SP-236).
     assert.deepEqual([control(read.body, 'wake.loop-build').used, control(read.body, 'wake.loop-build').inEffect], [null, null]);
     assert.equal(control(read.body, 'wip-cap').used, undefined, 'only a wake time has a value last used');

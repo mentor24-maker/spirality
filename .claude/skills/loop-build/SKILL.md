@@ -77,6 +77,34 @@ marker is the only record of the stranded ticket. A claim refused at its guard
 (exit 3) clears the marker it wrote. Any other `Building` ticket is not yours:
 leave it.
 
+## Then: is there room for another ticket?
+
+Right after `pass-reconcile` (so a ticket it handed back is not counted) and
+before any claim, ask whether the work in flight is already at the
+work-in-progress cap Dane sets on the Settings page (Spirality's SP-238):
+
+```bash
+npm run clickup -- wip-check
+```
+
+It counts the tickets in flight (an open pull request whose ticket is in
+`Building` or `In review`, and a `Building` ticket with no pull request yet)
+against the page's cap, prints one line, and exits:
+
+- **0**, `room: 2 of 5 in flight`: carry on and claim.
+- **3**, `full: 5 of 5 in flight (<ticket ids>)`: claim nothing. The first
+  line of your report is exactly `WIP CAP REACHED: <the full: line>`, and the
+  pass ends there. This is a normal outcome, not a failure: with every merge
+  dating every other open pull request, more open work ships slower
+  (`lib/wipCap.js` explains). Rework does not count, and is not claimed
+  either while the cap is full.
+- **1**, could not tell (GitHub or the tracker did not answer): carry on and
+  claim, and say in your report that the cap was not applied this pass. The
+  cap fails open on purpose: refusing on a passing outage would stop all work.
+
+`CLAUDE_LOOP_WIP_CAP` overrides the page's cap for a session started by hand;
+on the lane the page's value always wins.
+
 ## Ticket access: the direct script, not the connector
 
 Every ticket touch (the tracker, since the switch from ClickUp) goes through **`npm run clickup -- <command>`** — a full
@@ -86,6 +114,7 @@ loop makes:
 
 ```bash
 npm run clickup -- pass-reconcile                                      # FIRST: hand back the ticket a dead pass left in Building
+npm run clickup -- wip-check                                           # THEN: room under the Settings page's cap? exit 3 = full, claim nothing
 npm run clickup -- queue --claimable                                   # FIRST LINE is the task to claim (all Rework, then Queued)
 npm run clickup -- claim --task <id>                                   # safe claim; exit 3 = moved or still waits on a ticket, take the next
 npm run clickup -- get --task <id>                                     # header + body; also shows any recorded PR, send-back rounds and attachments
@@ -135,9 +164,13 @@ Exit **0** nothing of his / **3** something IS his / **1** could not tell.
 
    ```bash
    npm run clickup -- pass-reconcile
+   npm run clickup -- wip-check
    npm run clickup -- queue --claimable
    npm run clickup -- claim --task <id>
    ```
+
+   `wip-check` exit 3 (`full:`) ends the pass before the queue is read
+   ("Then: is there room for another ticket?" above).
 
    `--claimable` returns every `Rework` ticket before any `Queued` one —
    rework oldest-first, then queued by priority-then-oldest. A `Rework` ticket

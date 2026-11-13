@@ -569,7 +569,10 @@ export function stageColoursOf(store) {
  * `inFlight`: the tickets a lane is working on now,
  * `[{ id, name, status, kind }]` (in Building, or in review under a review
  * pass's claim note: lib/pipelinePause.js classifyTicket), which a pause
- * waits on to drain (SP-237). Null for a project that does not exist.
+ * waits on to drain (SP-237), and `capInFlight`, `{ count, ids }`: the
+ * tickets in Building or In review, which the cap row shows beside the cap
+ * (SP-238; loop-build's `wip-check` counts the same tickets, by their open
+ * pull requests). Null for a project that does not exist.
  *
  * `lanes` is this machine's Pipeline Status stages for the project
  * (pipelineOf), or null when it reads no logs of it. With them, each wake
@@ -603,7 +606,17 @@ export function pipelineControlsOf(store, slug, { reader = null, lanes = null, o
       .map((t) => pipelinePause.classifyTicket(t))
       .filter(Boolean)
       .map(({ id, name, status, kind }) => ({ id, name, status, kind })),
+    capInFlight: capInFlightOf(store.listTickets(project.slug)),
   };
+}
+
+/** The tickets the work-in-progress cap counts (SP-238): in Building or In review, `{ count, ids }`. */
+function capInFlightOf(tickets) {
+  const counted = [loopStatuses.BUILDING, loopStatuses.IN_REVIEW];
+  const ids = tickets
+    .filter((t) => counted.includes(String(t.status?.status ?? t.status ?? '').trim().toLowerCase()))
+    .map((t) => String(t.id));
+  return { count: ids.length, ids };
 }
 
 /**

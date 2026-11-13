@@ -178,6 +178,14 @@
       "to": "loop/lib/waitsOn.test.js"
     },
     {
+      "from": "lib/wipCap.js",
+      "to": "loop/lib/wipCap.js"
+    },
+    {
+      "from": "lib/wipCheck.js",
+      "to": "loop/lib/wipCheck.js"
+    },
+    {
       "from": "scripts/clickup.mjs",
       "to": "loop/scripts/clickup.mjs"
     },
