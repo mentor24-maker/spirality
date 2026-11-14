@@ -2448,3 +2448,134 @@ export function renderConsole(answer, stages = [], now = Date.now()) {
   };
   return `${renderFeatureKey(tickets)}<div class="console">${order.map(column).join('')}</div>`;
 }
+
+// ── Suggest Next Tasks (SP-251) ──────────────────────────────────────────────
+
+/** How often the Suggest Next Tasks box checks back while a run is going. */
+export const SUGGEST_POLL_MS = 10_000;
+
+/**
+ * `order` (the suggestions' keys, first place first) with the one at `from`
+ * moved to `to` (both 0-based, `to` held inside the list), the rest closing
+ * up behind it: moving the fifth to second makes the old second to fourth
+ * the third to fifth. A new array; the numbers shown are always place + 1,
+ * so they stay 1, 2, 3 ... with no gaps or repeats.
+ */
+export function moveSuggestion(order, from, to) {
+  const list = [...order];
+  if (!Number.isInteger(from) || from < 0 || from >= list.length) return list;
+  const at = Math.max(0, Math.min(list.length - 1, Number.isInteger(to) ? to : from));
+  const [moved] = list.splice(from, 1);
+  list.splice(at, 0, moved);
+  return list;
+}
+
+/**
+ * The Suggest Next Tasks box's kept state for a run that finished at `at`
+ * with `count` suggestions: `saved` when it is for that same run and still
+ * holds every suggestion once, else a fresh one (the list order, all kept,
+ * none filed). `order` holds each suggestion's index in the run's list,
+ * `dropped` the indexes unticked, `filed` index -> `{ id, project }`.
+ */
+export function suggestState(saved, at, count) {
+  const fresh = { at, order: Array.from({ length: count }, (_, i) => i), dropped: [], filed: {} };
+  if (!saved || typeof saved !== 'object' || saved.at !== at || !Array.isArray(saved.order)) return fresh;
+  const order = saved.order;
+  if (order.length !== count || [...order].sort((a, b) => a - b).some((v, i) => v !== i)) return fresh;
+  const dropped = Array.isArray(saved.dropped) ? saved.dropped.filter((i) => Number.isInteger(i) && i >= 0 && i < count) : [];
+  const filed = {};
+  for (const [k, v] of Object.entries(saved.filed ?? {})) {
+    if (Number(k) >= 0 && Number(k) < count && typeof v?.id === 'string' && typeof v?.project === 'string') filed[k] = { id: v.id, project: v.project };
+  }
+  return { at, order: [...order], dropped, filed };
+}
+
+/**
+ * What "File in This Order" does with `state` (suggestState): `file`, the
+ * kept suggestions not yet filed, in the order shown; `kept`, every kept
+ * one in that order (filed before or now), whose tickets get places 1, 2,
+ * 3 ... A suggestion already filed is never in `file`, so a retry files
+ * nothing twice.
+ */
+export function filingPlan(state) {
+  const dropped = new Set(state.dropped);
+  const kept = state.order.filter((i) => !dropped.has(i));
+  return { kept, file: kept.filter((i) => !state.filed[i]) };
+}
+
+/**
+ * Which kept rows' tickets File in This Order puts in order (SP-251).
+ * `kept` is filingPlan's kept rows in the order shown, `filed` the state's
+ * filed tickets (`{ id, project }` by row), and `now` the tickets filed by
+ * an earlier press as read back just now, by row: the ticket, or null when
+ * it no longer answers. A row missing from `now` was filed by this press.
+ *
+ * Only a ticket still waiting (Requested, in the project it was filed into)
+ * is ordered: placing a started one bumps its version, and a lane's or the
+ * page's guarded write on it then fails (orderTickets, tracker/store.mjs).
+ * A started one is left alone; one deleted or moved to another project is
+ * `gone`, since naming it would make the whole order call fail.
+ * Answers `{ byProject, leftAlone, gone }`: byProject maps a project to its
+ * ids in the order shown; the other two are lists of `{ index, id }`.
+ */
+export function orderPlan(kept, filed, now = {}) {
+  const byProject = new Map();
+  const leftAlone = [];
+  const gone = [];
+  for (const index of kept) {
+    const f = filed[index];
+    if (!f) continue;
+    if (Object.hasOwn(now, index)) {
+      const t = now[index];
+      if (!t || t.project !== f.project) { gone.push({ index, id: f.id }); continue; }
+      if (t.status !== 'requested') { leftAlone.push({ index, id: f.id }); continue; }
+    }
+    byProject.set(f.project, [...(byProject.get(f.project) ?? []), f.id]);
+  }
+  return { byProject, leftAlone, gone };
+}
+
+/** "SP-1", "SP-1 and SP-2", "SP-1, SP-2 and SP-3". */
+export function andList(items) {
+  if (items.length < 2) return items.join('');
+  return `${items.slice(0, -1).join(', ')} and ${items.at(-1)}`;
+}
+
+/** The box's line for a run: what is going on, or why it failed. Empty for a finished one. */
+export function suggestRunLine(run) {
+  if (!run) return '';
+  if (run.state === 'running') return 'Reading the project for its next tasks… This takes a few minutes; the list shows here when it is done.';
+  if (run.state === 'failed') return `No suggestions this time: ${run.message ?? 'the run failed.'}`;
+  return '';
+}
+
+/**
+ * The Suggest Next Tasks rows for `suggestions` in `state`'s order (suggestState):
+ * each a drag handle (arrow keys move it too), its place as a dropdown of
+ * 1 to the number of rows, a Keep checkbox, the title, and the why and
+ * description under More. A filed row names its ticket. Every word is
+ * escaped: a suggestion is text, never markup.
+ */
+export function renderSuggestRows(suggestions, state) {
+  const n = state.order.length;
+  const dropped = new Set(state.dropped);
+  return state.order.map((i, place) => {
+    const s = suggestions[i] ?? {};
+    const title = escapeHtml(s.title ?? '');
+    const options = Array.from({ length: n }, (_, k) => `<option value="${k + 1}"${k === place ? ' selected' : ''}>${k + 1}</option>`).join('');
+    const filed = state.filed[i];
+    return `<li class="suggestion" data-index="${i}" draggable="true">`
+      + `<button type="button" class="drag-handle" aria-label="Move ${title}: arrow keys, or drag" title="Drag, or use the arrow keys">⠿</button>`
+      + `<select class="place" aria-label="Place of ${title}">${options}</select>`
+      // The value is written out: a checkbox without one reads "on" against a
+      // drawn value of "", which the page's redraw hold takes for typing, and
+      // the minute's redraw would never run while the list shows.
+      + `<label class="keep"><input type="checkbox" value="keep"${dropped.has(i) ? '' : ' checked'}> Keep</label>`
+      + `<span class="suggestion-title">${title}</span>`
+      + (filed ? `<span class="filed">Filed <a href="/t/${encodeURIComponent(filed.id)}">${escapeHtml(filed.id)}</a></span>` : '')
+      + `<details class="more"><summary>More</summary>`
+      + (s.why ? `<p class="why"><strong>Why:</strong> ${escapeHtml(s.why)}</p>` : '')
+      + (s.description ? `<p class="suggestion-description">${escapeHtml(s.description)}</p>` : '')
+      + `</details></li>`;
+  }).join('');
+}

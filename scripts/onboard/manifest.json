@@ -328,6 +328,16 @@
       "why": "run_relay.sh sources it; a copy with no app-checks command logs that and runs nothing"
     },
     {
+      "from": "scripts/lib/relay_heartbeat.sh",
+      "to": "scripts/lib/relay_heartbeat.sh",
+      "why": "run_relay.sh sources it; a copy with no scripts/heartbeat.mjs logs that and runs nothing (the setup wizard ticket, SP-269, brings the heartbeat itself)"
+    },
+    {
+      "from": "scripts/lib/relay_watchdogs.sh",
+      "to": "scripts/lib/relay_watchdogs.sh",
+      "why": "run_relay.sh sources it; a copy with no scripts/stale_ready.mjs or scripts/stale_answer.mjs logs that and runs nothing (the setup wizard ticket, SP-269, brings the watchdogs themselves)"
+    },
+    {
       "from": "scripts/lib/relay_queue_watchdogs.sh",
       "to": "scripts/lib/relay_queue_watchdogs.sh",
       "why": "run_relay.sh sources it; a copy with no throughput or checkout-currency script logs that and runs nothing (SP-269 brings the watchdogs themselves)"

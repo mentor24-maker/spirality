@@ -544,6 +544,20 @@ post rules are in [PROJECT_MANIFEST.md](PROJECT_MANIFEST.md) and
   project's runners keep to their own files (`normie-loop-build.log`,
   `normie-sync.lock`). Never rerun the full installer from a loop session:
   it reloads the lane that session runs in.
+- **Coming: run from Spirality's folder (SP-271).** The installer in
+  Spirality's own folder now takes the project's checkout:
+  `./scripts/install_loop_runner.sh --status --project ~/WebApps/<project>`
+  lists that project's jobs and, on each one's `runs:` line, whether it runs
+  Spirality's runner or the project's own copy, and in which folder. With
+  `--install --project <checkout>` it writes the project's jobs under its own
+  `launchdPrefix`, starting Spirality's `scripts/loop_runner.sh` (or
+  `run_relay.sh`) in the project's checkout, with `SPIRALITY_PROJECT` naming
+  it; each pass pulls the project's main and never Spirality's. It refuses
+  to replace jobs that still run the project's own copy unless
+  `--take-over` is given too, because that is switching the project over, a
+  step Dane approves. `--print-plists --project <checkout>` shows the files
+  it would write, and writes nothing. The tracker and its backup are never
+  installed for a project.
 
 ## 6. The skills, hooks and rules in the project's repository
 

@@ -3,7 +3,8 @@
 # What the relay schedule actually runs: bring the main checkout up to date,
 # then one `relay` pass of the door (`npm run clickup`, which talks to the
 # tracker the project config names), then one pass of the project's
-# application checks (`npm run app-checks`, SP-274), then the throughput and
+# application checks (`npm run app-checks`, SP-274), then the ticket
+# watchdogs (`stale-ready`, `stale-answer`, SP-267), then the throughput and
 # checkout-currency watchdogs (SP-268).
 #
 #   ./scripts/run_relay.sh            # one pass, output to stdout
@@ -42,19 +43,45 @@ if [ -f "$REPO/.git" ] && grep -q '^gitdir:.*worktrees' "$REPO/.git" 2>/dev/null
   echo "[relay] Refusing to run from a worktree ($REPO) — worktrees are deleted when their work ships." >&2
   exit 1
 fi
-cd "$REPO" || exit 1
+# The project this relay works for (SP-271). Unset, it is Spirality itself,
+# exactly as before. Set (the installer's --project writes it into the
+# plist), SPIRALITY_PROJECT names another project's checkout: the pull below
+# is of THAT checkout's main, never of Spirality's (only Spirality's own lanes
+# pull Spirality), and the door and the application checks run from this
+# folder, acting for the project because the name is exported.
+PROJECT="$REPO"
+if [ -n "${SPIRALITY_PROJECT:-}" ]; then
+  PROJECT="$(cd "$SPIRALITY_PROJECT" 2>/dev/null && pwd)" || { echo "[relay] SPIRALITY_PROJECT names $SPIRALITY_PROJECT, which is not a folder on this machine. Stopping." >&2; exit 1; }
+  if [ -f "$PROJECT/.git" ] && grep -q '^gitdir:.*worktrees' "$PROJECT/.git" 2>/dev/null; then
+    echo "[relay] Refusing to run for a worktree ($PROJECT) — worktrees are deleted when their work ships." >&2
+    exit 1
+  fi
+  export SPIRALITY_PROJECT="$PROJECT"
+fi
+# Yes when this relay works for Spirality's own checkout.
+OWN=""
+[ "$(cd "$PROJECT" && pwd -P)" = "$(cd "$REPO" && pwd -P)" ] && OWN=yes
+cd "$PROJECT" || exit 1
 
 SLUG="$(node "$REPO/scripts/project_config.mjs" projectSlug)" || { echo "[relay] could not read projectSlug from the project config" >&2; exit 1; }
 LOG_DIR="$(node "$REPO/scripts/project_config.mjs" logDir)" || { echo "[relay] could not read logDir from the project config" >&2; exit 1; }
 PREFIX="$(node "$REPO/scripts/project_config.mjs" launchdPrefix)" || { echo "[relay] could not read launchdPrefix from the project config" >&2; exit 1; }
 # Empty when the project runs no tracker: the restart step then does nothing.
 TRACKER_PORT="$(node "$REPO/scripts/project_config.mjs" trackerPort)" || { echo "[relay] could not read trackerPort from the project config" >&2; exit 1; }
+# The tracker is Spirality's own service: only Spirality's own relay restarts it.
+[ -n "$OWN" ] || TRACKER_PORT=""
 mkdir -p "$LOG_DIR"
 LOCK="$LOG_DIR/$SLUG-relay.lock"
 SYNC_LOCK="$LOG_DIR/$SLUG-sync.lock"
 # After the relay part, one application-checks pass (SP-274).
 # shellcheck source=lib/relay_app_checks.sh
 source "$REPO/scripts/lib/relay_app_checks.sh"
+# And after that, the heartbeat: is each lane still running? (SP-266)
+# shellcheck source=lib/relay_heartbeat.sh
+source "$REPO/scripts/lib/relay_heartbeat.sh"
+# And the ticket watchdogs: stale-ready and stale-answer (SP-267).
+# shellcheck source=lib/relay_watchdogs.sh
+source "$REPO/scripts/lib/relay_watchdogs.sh"
 # And the throughput and checkout-currency watchdogs (SP-268). A copy of this
 # runner without the file runs on without them.
 # shellcheck source=lib/relay_queue_watchdogs.sh
@@ -121,7 +148,7 @@ if [ "$PAUSE_CODE" -ne 0 ]; then
 fi
 
 echo ""
-echo "===== $(date '+%Y-%m-%d %H:%M:%S') START relay — $REPO ====="
+echo "===== $(date '+%Y-%m-%d %H:%M:%S') START relay — $PROJECT ====="
 
 # One relay at a time. launchd never overlaps the same job, but a pass run by
 # hand during a scheduled one would; a stale lock (its pid gone) is announced
@@ -205,6 +232,10 @@ else
   echo "[relay] main checkout is not on a clean main — not pulling. Every pass runs stale code until it is put back on main."
 fi
 
+# Everything from here runs Spirality's own scripts, so from Spirality's
+# folder (for Spirality's own relay, that is where it already is).
+cd "$REPO" || exit 1
+
 # The pass itself. Through npm, so Doppler supplies the token the same way
 # every other write to the tracker gets it. A dry run is passed straight through.
 # On the tracker, the relay signs in as itself: TRACKER_TOKEN_NAME names its
@@ -214,7 +245,7 @@ export TRACKER_TOKEN_NAME=TRACKER_TOKEN_RELAY
 # pass's manifest: "none", a number, or "unknown" when it cannot be read here.
 # Unknown sets the share aside too, so the check step still gets its time and
 # says what it found.
-CHECKS_LISTED="$(relay_app_checks_listed "$REPO")"
+CHECKS_LISTED="$(relay_app_checks_listed "$PROJECT")"
 if [ "$CHECKS_LISTED" = "none" ]; then RELAY_LIMIT="$PASS_LIMIT"; else RELAY_LIMIT=$((PASS_LIMIT - CHECKS_SHARE)); fi
 PASS_START=$(date +%s)
 "$REPO/scripts/run_with_time_limit.sh" "$RELAY_LIMIT" -- \
@@ -244,6 +275,8 @@ fi
 # and nothing it does can undo that part: the merges and hand-backs are done.
 CHECK_ARGS=()
 for arg in "$@"; do [ "$arg" = "--dry-run" ] && CHECK_ARGS+=(--dry-run); done
+# A project's checks are read from its own manifest, and run in its checkout.
+[ -n "$OWN" ] || CHECK_ARGS+=(--config "$PROJECT/spirality.project.json")
 CHECKS_LIMIT=0
 if [ "$CHECKS_LISTED" = "none" ]; then
   # Nothing to run, so nothing is started: the relay part may have used the
@@ -255,6 +288,24 @@ else
   run_relay_app_checks "$CHECKS_LIMIT" ${CHECK_ARGS[@]+"${CHECK_ARGS[@]}"}
   checks_status=$?
 fi
+
+# Then the heartbeat (SP-266): is each of this project's lanes still running?
+# A lane that has gone quiet is said on the bus, at most once every 6 hours
+# per lane (scripts/heartbeat.mjs). It runs on every wake, whatever the steps
+# above did, and it never changes this pass's verdict or stops it: a failure
+# is one line naming the heartbeat and its exit code. A dry run asks only,
+# posting nothing. (The relay cannot report itself quiet from here; this
+# check is for the lanes that run on their own.)
+run_relay_heartbeat "$REPO" "${RELAY_HEARTBEAT_LIMIT_SECONDS:-180}" ${DRY_RUN:+--dry-run}
+
+# Then the ticket watchdogs (SP-267): a ticket stuck in Ready to launch, and
+# an answer in Needs your input that nothing acted on, each said on the bus at
+# most once per ticket per reason every 6 hours (scripts/stale_ready.mjs,
+# scripts/stale_answer.mjs). They run on every wake, whatever the steps above
+# did, each under its own time limit, and they never change this pass's
+# verdict or stop it: a failure is one line naming the watchdog and its exit
+# code. A dry run reads and prints only.
+run_relay_watchdogs "$REPO" "${RELAY_WATCHDOG_LIMIT_SECONDS:-180}" ${DRY_RUN:+--dry-run}
 
 # Then the throughput and checkout-currency watchdogs (SP-268): is the queue
 # getting shorter, and did the pull above leave this machine on main's code?
