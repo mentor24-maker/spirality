@@ -54,6 +54,9 @@ SYNC_LOCK="$LOG_DIR/$SLUG-sync.lock"
 # After the relay part, one application-checks pass (SP-274).
 # shellcheck source=lib/relay_app_checks.sh
 source "$REPO/scripts/lib/relay_app_checks.sh"
+# And after that, the heartbeat: is each lane still running? (SP-266)
+# shellcheck source=lib/relay_heartbeat.sh
+source "$REPO/scripts/lib/relay_heartbeat.sh"
 # A pass is time-limited so a stuck one cannot hold the relay for good; two
 # passes never overlap, whatever the wake time, because the second finds the
 # lock held.
@@ -239,6 +242,15 @@ else
   run_relay_app_checks "$CHECKS_LIMIT" ${CHECK_ARGS[@]+"${CHECK_ARGS[@]}"}
   checks_status=$?
 fi
+
+# Then the heartbeat (SP-266): is each of this project's lanes still running?
+# A lane that has gone quiet is said on the bus, at most once every 6 hours
+# per lane (scripts/heartbeat.mjs). It runs on every wake, whatever the steps
+# above did, and it never changes this pass's verdict or stops it: a failure
+# is one line naming the heartbeat and its exit code. A dry run asks only,
+# posting nothing. (The relay cannot report itself quiet from here; this
+# check is for the lanes that run on their own.)
+run_relay_heartbeat "$REPO" "${RELAY_HEARTBEAT_LIMIT_SECONDS:-180}" ${DRY_RUN:+--dry-run}
 
 # The exit code is the pass's own verdict, and the END line says it in words,
 # the relay part's first, then the checks':
