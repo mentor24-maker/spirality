@@ -15,3 +15,12 @@ re-run and it is ready and green when Dane says merge. If they clash, it files
 the fix-up ticket straight away, so the build loop is already fixing it while
 Dane hasn't looked yet. It never moves Dane's ticket, never resolves a clash by
 itself, and leaves the branch alone while another merge is in progress.
+
+After review sent it back once: the fix-up ticket filed this way now says
+plainly that it is a real clash to resolve (it used to tell its builder to
+"find out" whether there was one, right under a line saying git had found
+it), and its test steps are ones that can pass before Dane says merge. A
+branch whose fix-up ticket is still being worked is left alone, so nobody's
+half-finished fix gets code pushed underneath it. And if the record of which
+merge is in progress cannot be read, the relay now says so instead of quietly
+skipping the catch-up forever.

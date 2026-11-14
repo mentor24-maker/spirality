@@ -68,11 +68,11 @@ import {
 } from '../lib/mergeOnComment.js';
 import {
   PR_VIEW_FIELDS, markerBookkeeping, recordBookkeeping, emptyBooks, mergeDestination, relayLine,
-  handbackAnswer, handbackPlan, closePlan, conflictFilingPlan,
+  handbackAnswer, handbackPlan, closePlan, conflictFilingPlan, CATCH_UP_WORKED_STATUSES,
   mergeWithPreMergeStep, commandLine, mergedBusLine, conflictBusLine, busAnnouncer, stalledHandOffPlan, remindStalledHandOff,
 } from '../lib/relayLane.js';
 import {
-  conflictTicketName, conflictTicketBody, conflictTicketFiledComment, findConflictTicket, unstuckPullRequest,
+  conflictTicketName, conflictTicketBody, conflictTicketFiledComment, findConflictTicket, unstuckPullRequest, aheadConflictVerdict,
   stalledSummaryHeadline, catchUpClosePlan, fixupLiveNote,
 } from '../lib/conflictWork.js';
 import {
@@ -1608,7 +1608,7 @@ if (cmd === 'whoami') {
   // `ahead` ({ mergedNumber, files }): filed when main moved, before his
   // merge word (SP-294), so the body does not claim he has given it.
   const fileCatchUp = async (task, prRef, branch, name, commentId, ahead = null) => {
-    const body = conflictTicketBody({ task, pr: prRef, branch, localVerdict: null, commentId, ahead });
+    const body = conflictTicketBody({ task, pr: prRef, branch, localVerdict: ahead ? aheadConflictVerdict(ahead) : null, commentId, ahead });
     const out = await tracker.createTask(list, {
       name, markdown_description: body, status: DISPLAY[QUEUED], priority: PRIORITY.high,
     });
@@ -1630,8 +1630,8 @@ if (cmd === 'whoami') {
   /** Write the `CONFLICT TICKET FILED:` trail on the waiting ticket — the
    *  line the next pass reads so it never files twice — and read it back
    *  through the same parser. Returns true only when it reads back. */
-  const recordCatchUp = async (task, filed, prNumber, refiledFrom = null) => {
-    const body = conflictTicketFiledComment({ id: filed.id, url: filed.url, prNumber, localVerdict: null, refiledFrom });
+  const recordCatchUp = async (task, filed, prNumber, refiledFrom = null, localVerdict = null) => {
+    const body = conflictTicketFiledComment({ id: filed.id, url: filed.url, prNumber, localVerdict, refiledFrom });
     const noteId = await postNote(task, body, `catch-up ticket ${filed.id} filed for PR #${prNumber}`);
     if (!noteId) return false;
     const found = findConflictTicket(await readComments(task.id), prNumber);
@@ -1647,7 +1647,9 @@ if (cmd === 'whoami') {
    *  plan, ticket and trail the merge step uses at his word, so that step
    *  finds it on file and never files a second. */
   const fileConflictAhead = async ({ task, comments, pr, branch, verdict }, mergedNumber) => {
-    const localVerdict = null;
+    // merge-tree found the overlap: a finding, so the real-conflict words.
+    const ahead = { mergedNumber, files: verdict.files };
+    const localVerdict = aheadConflictVerdict(ahead);
     const ticketName = conflictTicketName({ pr, branch, localVerdict });
     const trail = findConflictTicket(comments, pr.number);
     let filedStatus = null;
@@ -1661,12 +1663,12 @@ if (cmd === 'whoami') {
     if (plan.act === 'none') return { ok: false, problem: 'the filing plan filed nothing' };
     let filed = plan.filed;
     if (plan.act === 'file') {
-      filed = await fileCatchUp(task, pr, branch, ticketName, null, { mergedNumber, files: verdict.files });
+      filed = await fileCatchUp(task, pr, branch, ticketName, null, ahead);
       if (!filed) return { ok: false, problem: 'filing it failed (the reason is listed with the unchecked lines)' };
     }
     // A trail that does not read back is in `unchecked` already; the ticket
     // exists, and the merge step finds it by name.
-    if (!plan.recorded) await recordCatchUp(task, filed, pr.number, plan.refiledFrom);
+    if (!plan.recorded) await recordCatchUp(task, filed, pr.number, plan.refiledFrom, localVerdict);
     return { ok: true, filed, already: plan.act !== 'file' };
   };
 
@@ -1688,6 +1690,17 @@ if (cmd === 'whoami') {
       findPullRequest,
       contains: ({ branch }) => branchContains({ branch, mergeCommit: merge.oid, cwd: REPO_ROOT }),
       check: ({ branch }) => checkBranch({ base, branch, mergeCommit: merge.oid, cwd: REPO_ROOT }),
+      // A catch-up ticket on file for this PR, still with the loops, owns
+      // the branch (the newest trail; its status read from this pass's list).
+      catchUpBeingWorked: async ({ comments, prNumber }) => {
+        const trail = findConflictTicket(comments, prNumber);
+        if (!trail) return null;
+        const listed = tasks.find((t) => String(t.id).toLowerCase() === String(trail.id).toLowerCase());
+        const read = listed || await readTaskOrNull(trail.id);
+        const status = read ? statusOf(read) : '';
+        if (!status) return { id: trail.id, cannotTell: true };
+        return CATCH_UP_WORKED_STATUSES.includes(status) ? { id: trail.id, status: DISPLAY[status] || status } : null;
+      },
       window: ({ pr: n }) => windowDecision({ read: readLeaseFile(mergeWindowPath()), repo, pr: n, now: new Date().toISOString() }),
       updateBranch: (n) => {
         const out = gh(['pr', 'update-branch', String(n), '--repo', repo]);

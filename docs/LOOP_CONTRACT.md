@@ -371,18 +371,24 @@ Dane's merge word, then went round the whole cycle again.
 
 **`Ready to launch` is kept current too (SP-294).** Right after the same
 merge, the relay checks every `Ready to launch` ticket whose recorded PR is
-open against the same base, with the same in-memory `git merge-tree`, and
-writes no `MAIN MOVED:` note there (his inbox is not a log):
+open against the same base, with the same in-memory `git merge-tree`. It
+writes no `MAIN MOVED:` note there (his inbox is not a log); the only comment
+it ever writes on his ticket is the `CONFLICT TICKET FILED:` line below:
 
 - **Merges cleanly:** it catches the branch up through GitHub
   (`gh pr update-branch`, an ordinary merge of `main` in, never a force
   push), so CI re-runs and the PR is current and green when he says merge.
-  While another PR holds the merge window it leaves the branch for his word;
-  it never takes the window, because a PR that lands only on his word would
-  hold it for the full 45 minutes.
-- **Conflicts:** it files the catch-up ticket now, the same one and the same
-  `CONFLICT TICKET FILED:` record the merge step writes at his word, so that
-  step finds it on file and files no second. The branch is not touched.
+  No comment is written. While another PR holds the merge window it leaves
+  the branch for his word, and a window that cannot be read is reported; it
+  never takes the window, because a PR that lands only on his word would
+  hold it for the full 45 minutes. While a catch-up ticket for that PR is
+  still with the loops (Queued, Building, Rework or In review), its builder
+  owns the branch and it is not touched.
+- **Conflicts:** it files the catch-up ticket now ("Resolve the merge
+  conflict on PR #N", since `git merge-tree` found the overlap), and writes
+  the same `CONFLICT TICKET FILED:` comment on his ticket that the merge step
+  writes at his word, so that step finds it on file and files no second. The
+  branch is not touched.
 - **Cannot tell:** nothing is done, and the pass reports it.
 
 It moves no status and never resolves a conflict. His merge word, if already
