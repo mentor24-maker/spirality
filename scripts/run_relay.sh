@@ -3,7 +3,8 @@
 # What the relay schedule actually runs: bring the main checkout up to date,
 # then one `relay` pass of the door (`npm run clickup`, which talks to the
 # tracker the project config names), then one pass of the project's
-# application checks (`npm run app-checks`, SP-274).
+# application checks (`npm run app-checks`, SP-274), then the ticket
+# watchdogs (`stale-ready`, `stale-answer`, SP-267).
 #
 #   ./scripts/run_relay.sh            # one pass, output to stdout
 #   ./scripts/run_relay.sh --dry-run  # one pass that prints and writes nothing
@@ -77,6 +78,9 @@ source "$REPO/scripts/lib/relay_app_checks.sh"
 # And after that, the heartbeat: is each lane still running? (SP-266)
 # shellcheck source=lib/relay_heartbeat.sh
 source "$REPO/scripts/lib/relay_heartbeat.sh"
+# And the ticket watchdogs: stale-ready and stale-answer (SP-267).
+# shellcheck source=lib/relay_watchdogs.sh
+source "$REPO/scripts/lib/relay_watchdogs.sh"
 # A pass is time-limited so a stuck one cannot hold the relay for good; two
 # passes never overlap, whatever the wake time, because the second finds the
 # lock held.
@@ -277,6 +281,15 @@ fi
 # posting nothing. (The relay cannot report itself quiet from here; this
 # check is for the lanes that run on their own.)
 run_relay_heartbeat "$REPO" "${RELAY_HEARTBEAT_LIMIT_SECONDS:-180}" ${DRY_RUN:+--dry-run}
+
+# Then the ticket watchdogs (SP-267): a ticket stuck in Ready to launch, and
+# an answer in Needs your input that nothing acted on, each said on the bus at
+# most once per ticket per reason every 6 hours (scripts/stale_ready.mjs,
+# scripts/stale_answer.mjs). They run on every wake, whatever the steps above
+# did, each under its own time limit, and they never change this pass's
+# verdict or stop it: a failure is one line naming the watchdog and its exit
+# code. A dry run reads and prints only.
+run_relay_watchdogs "$REPO" "${RELAY_WATCHDOG_LIMIT_SECONDS:-180}" ${DRY_RUN:+--dry-run}
 
 # The exit code is the pass's own verdict, and the END line says it in words,
 # the relay part's first, then the checks':
