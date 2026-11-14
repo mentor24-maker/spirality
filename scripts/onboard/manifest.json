@@ -348,6 +348,190 @@
       "why": "loop_runner.sh sources it; a copy with no scripts/report_job_failure.mjs logs that a failed pass was not reported and runs on"
     },
     {
+      "from": "lib/heartbeat.js",
+      "to": "loop/lib/heartbeat.js",
+      "why": "the heartbeat's decisions: is each lane still running (SP-266)"
+    },
+    {
+      "from": "lib/staleReady.js",
+      "to": "loop/lib/staleReady.js",
+      "why": "the stale-ready watchdog's decisions: a ticket stuck in Ready to launch (SP-267)"
+    },
+    {
+      "from": "lib/staleAnswer.js",
+      "to": "loop/lib/staleAnswer.js",
+      "why": "the stale-answer watchdog's decisions: an answer in Needs your input nothing acted on (SP-267)"
+    },
+    {
+      "from": "lib/loopThroughput.js",
+      "to": "loop/lib/loopThroughput.js",
+      "why": "the throughput watchdog's decisions: is the queue getting shorter (SP-268)"
+    },
+    {
+      "from": "lib/checkoutCurrency.js",
+      "to": "loop/lib/checkoutCurrency.js",
+      "why": "the checkout-currency watchdog's decisions: did the relay's pull bring the checkout level with main (SP-268)"
+    },
+    {
+      "from": "lib/watchdogPosts.js",
+      "to": "loop/lib/watchdogPosts.js",
+      "why": "what the watchdogs share: how often a post is said again, and times in Mountain time (SP-268)"
+    },
+    {
+      "from": "lib/loopNoticeboards.js",
+      "to": "loop/lib/loopNoticeboards.js",
+      "why": "the throughput watchdog reads the bus and the pause switch with it (SP-268)"
+    },
+    {
+      "from": "lib/pulse.js",
+      "to": "loop/lib/pulse.js",
+      "why": "staleReady.js reads each stage's time limits from it"
+    },
+    {
+      "from": "lib/onboardLanes.mjs",
+      "to": "loop/lib/onboardLanes.mjs",
+      "why": "the heartbeat reads the four lanes from it"
+    },
+    {
+      "from": "scripts/heartbeat.mjs",
+      "to": "scripts/heartbeat.mjs",
+      "why": "run_relay.sh runs it on every wake (scripts/lib/relay_heartbeat.sh): a lane that stopped running is said on the bus; its modules sit under loop/lib/ in a project",
+      "edits": [
+        {
+          "find": "import { loadProjectConfig, namedProjectFolder } from '../lib/projectConfig.mjs';",
+          "replace": "import { loadProjectConfig, namedProjectFolder } from '../loop/lib/projectConfig.mjs';"
+        },
+        {
+          "find": "import { LANES } from '../lib/onboardLanes.mjs';",
+          "replace": "import { LANES } from '../loop/lib/onboardLanes.mjs';"
+        },
+        {
+          "find": "const hb = require('../lib/heartbeat.js');",
+          "replace": "const hb = require('../loop/lib/heartbeat.js');"
+        },
+        {
+          "find": "const { mountainTime } = require('../lib/trackerBus.js');",
+          "replace": "const { mountainTime } = require('../loop/lib/trackerBus.js');"
+        },
+        {
+          "find": "const { settingsPauseVerdict } = require('../lib/pipelinePause.js');",
+          "replace": "const { settingsPauseVerdict } = require('../loop/lib/pipelinePause.js');"
+        }
+      ]
+    },
+    {
+      "from": "scripts/stale_ready.mjs",
+      "to": "scripts/stale_ready.mjs",
+      "why": "run_relay.sh runs it on every wake (scripts/lib/relay_watchdogs.sh): a ticket stuck in Ready to launch is said on the bus; its modules sit under loop/lib/ in a project",
+      "edits": [
+        {
+          "find": "import { loadProjectConfig, namedProjectFolder } from '../lib/projectConfig.mjs';",
+          "replace": "import { loadProjectConfig, namedProjectFolder } from '../loop/lib/projectConfig.mjs';"
+        },
+        {
+          "find": "const staleReady = require('../lib/staleReady.js');",
+          "replace": "const staleReady = require('../loop/lib/staleReady.js');"
+        },
+        {
+          "find": "const { findPullRequest, mergeDecision, checkState } = require('../lib/mergeOnComment.js');",
+          "replace": "const { findPullRequest, mergeDecision, checkState } = require('../loop/lib/mergeOnComment.js');"
+        }
+      ]
+    },
+    {
+      "from": "scripts/stale_answer.mjs",
+      "to": "scripts/stale_answer.mjs",
+      "why": "run_relay.sh runs it on every wake (scripts/lib/relay_watchdogs.sh): an answer nothing acted on is said on the bus; its modules sit under loop/lib/ in a project",
+      "edits": [
+        {
+          "find": "import { loadProjectConfig, namedProjectFolder } from '../lib/projectConfig.mjs';",
+          "replace": "import { loadProjectConfig, namedProjectFolder } from '../loop/lib/projectConfig.mjs';"
+        },
+        {
+          "find": "const staleAnswer = require('../lib/staleAnswer.js');",
+          "replace": "const staleAnswer = require('../loop/lib/staleAnswer.js');"
+        },
+        {
+          "find": "const staleReady = require('../lib/staleReady.js');",
+          "replace": "const staleReady = require('../loop/lib/staleReady.js');"
+        },
+        {
+          "find": "const busRelayPlan = require('../lib/busRelayPlan.js');",
+          "replace": "const busRelayPlan = require('../loop/lib/busRelayPlan.js');"
+        },
+        {
+          "find": "const { handbackAnswer } = require('../lib/relayLane.js');",
+          "replace": "const { handbackAnswer } = require('../loop/lib/relayLane.js');"
+        },
+        {
+          "find": "const { isMachineAuthored } = require('../lib/machineComment.js');",
+          "replace": "const { isMachineAuthored } = require('../loop/lib/machineComment.js');"
+        }
+      ]
+    },
+    {
+      "from": "scripts/loop_throughput.mjs",
+      "to": "scripts/loop_throughput.mjs",
+      "why": "run_relay.sh runs it on every wake (scripts/lib/relay_queue_watchdogs.sh): a queue that stopped getting shorter is said on the bus; its modules sit under loop/lib/ in a project",
+      "edits": [
+        {
+          "find": "const throughput = require('../lib/loopThroughput.js');",
+          "replace": "const throughput = require('../loop/lib/loopThroughput.js');"
+        },
+        {
+          "find": "const heartbeat = require('../lib/watchdogPosts.js');",
+          "replace": "const heartbeat = require('../loop/lib/watchdogPosts.js');"
+        }
+      ]
+    },
+    {
+      "from": "scripts/checkout_currency.mjs",
+      "to": "scripts/checkout_currency.mjs",
+      "why": "run_relay.sh runs it after its pull (scripts/lib/relay_queue_watchdogs.sh): a checkout left on old code is said on the bus; its modules sit under loop/lib/ in a project",
+      "edits": [
+        {
+          "find": "const currency = require('../lib/checkoutCurrency.js');",
+          "replace": "const currency = require('../loop/lib/checkoutCurrency.js');"
+        },
+        {
+          "find": "const posts = require('../lib/watchdogPosts.js');",
+          "replace": "const posts = require('../loop/lib/watchdogPosts.js');"
+        }
+      ]
+    },
+    {
+      "from": "scripts/report_job_failure.mjs",
+      "to": "scripts/report_job_failure.mjs",
+      "why": "loop_runner.sh runs it when a pass exits non-zero (scripts/lib/lane_failure.sh): one alarm on the bus naming the lane; its modules sit under loop/lib/ in a project",
+      "edits": [
+        {
+          "find": "const posts = require('../lib/watchdogPosts.js');",
+          "replace": "const posts = require('../loop/lib/watchdogPosts.js');"
+        }
+      ]
+    },
+    {
+      "from": "scripts/lib/watchdogDoor.mjs",
+      "to": "scripts/lib/watchdogDoor.mjs",
+      "why": "stale_ready.mjs and stale_answer.mjs read tickets and post to the bus through the door with it"
+    },
+    {
+      "from": "scripts/lib/watchdogDoorCalls.mjs",
+      "to": "scripts/lib/watchdogDoorCalls.mjs",
+      "why": "loop_throughput.mjs, checkout_currency.mjs and report_job_failure.mjs read tickets and post to the bus through the door with it; its modules sit under loop/lib/ in a project",
+      "edits": [
+        {
+          "find": "import { loadProjectConfig, namedProjectFolder } from '../../lib/projectConfig.mjs';",
+          "replace": "import { loadProjectConfig, namedProjectFolder } from '../../loop/lib/projectConfig.mjs';"
+        }
+      ]
+    },
+    {
+      "from": "scripts/lib/laneFiles.mjs",
+      "to": "scripts/lib/laneFiles.mjs",
+      "why": "the watchdogs name each lane's log and stamp files with it (SP-263)"
+    },
+    {
       "from": "scripts/lib/trackerFiles.mjs",
       "to": "scripts/lib/trackerFiles.mjs",
       "why": "the settings reader sits under loop/ in a project",
@@ -542,7 +726,13 @@
   "npmScripts": {
     "clickup": "node loop/scripts/with_doppler.mjs node loop/scripts/clickup.mjs",
     "doctor": "node loop/scripts/doctor.mjs",
-    "test:loop": "node --test \"loop/**/*.test.js\" \"loop/**/*.test.mjs\""
+    "test:loop": "node --test \"loop/**/*.test.js\" \"loop/**/*.test.mjs\"",
+    "heartbeat": "node scripts/heartbeat.mjs",
+    "stale-ready": "node scripts/stale_ready.mjs",
+    "stale-answer": "node scripts/stale_answer.mjs",
+    "throughput": "node scripts/loop_throughput.mjs",
+    "checkout:current": "node scripts/checkout_currency.mjs",
+    "report:failure": "node scripts/report_job_failure.mjs"
   },
   "verifyIfAbsent": "{{checkCommand}} && npm run test:loop"
 }

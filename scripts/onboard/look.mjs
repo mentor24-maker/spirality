@@ -31,6 +31,8 @@
  *            that the prefix is not another project's; the operator found
  *            by name.
  *   Doppler  whether the project's Doppler project and config exist.
+ *   Bus      where the pipeline watchdogs will post: the project's bus, or,
+ *            with none, a plain line that they have nowhere to post.
  *   Check    the project's own check, run on a clean scratch clone of its
  *            main branch (pass or fail, last lines shown). `--no-check`
  *            skips it, and says so as "could not tell".
@@ -422,6 +424,23 @@ export async function trackerRows({ get, apiUrl, pageUrl, answers, operatorName,
   return rows;
 }
 
+// --- The bus ---------------------------------------------------------------
+
+/**
+ * Where the pipeline watchdogs the setup copies (heartbeat, stale ready,
+ * stale answer, throughput, checkout currency, failed passes: SP-269) post.
+ * They say what they find on the project's bus, so a project with no bus
+ * (`hasBus` not true, so no `busProject`) is told plainly that they have
+ * nowhere to post. Not BLOCKED: a project may run without a bus, it just
+ * hears nothing from them.
+ */
+export function busRow(answers) {
+  const item = 'Bus: where the pipeline watchdogs post';
+  if (answers.busProject) return row(item, READY, `${answers.busProject}, which the setup's bus step makes if it is missing`);
+  return row(item, READY, 'none, since hasBus is not true, so the watchdogs have nowhere to post: '
+    + 'a lane that stops or a ticket that sticks is said nowhere. Answer hasBus "yes" to give it one');
+}
+
 // --- The project's own check ---------------------------------------------
 
 /** The plain environment the project's check runs with: never this process's Doppler keys. */
@@ -601,6 +620,7 @@ export async function look({ answers, homeConfig, runCheck = true, deps }) {
     const known = Array.isArray(projectList) && projectList.some((p) => p.slug === answers.dopplerProject || p.name === answers.dopplerProject);
     const configsRun = known ? run('doppler', ['configs', '--project', answers.dopplerProject, '--json', '--no-check-version']) : null;
     rows.push(...readDoppler(projectsRun, configsRun, { project: answers.dopplerProject, config: answers.dopplerConfig }));
+    rows.push(busRow(answers));
   } finally {
     if (scratch) deps.removeScratch(scratch);
   }

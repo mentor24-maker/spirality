@@ -5,7 +5,7 @@ import { resolveAnswers } from '../../lib/onboardAnswers.mjs';
 import { seatsForConfig } from '../../tracker/signins.mjs';
 import {
   BLOCKED, READY, UNKNOWN, WILL_DO, checkEnv, cloneFolder, exitCodeFor, formatRow, ghApiFailure, lastLines, look,
-  readCheck, readCheckout, readClaude, readDoppler, readDopplerMe, readNode, readProtection,
+  busRow, readCheck, readCheckout, readClaude, readDoppler, readDopplerMe, readNode, readProtection,
   projectMismatch, readRepo, withoutSignIn, nodeNeedOf, samePathOnDisk, summaryLine, trackerRows,
 } from './look.mjs';
 import { normalRepo } from '../lib/repoCheck.mjs';
@@ -330,7 +330,21 @@ test('a project already set up: every row ready, exit 0', async () => {
   const rows = await look({ answers, homeConfig, deps: w.deps });
   assert.deepEqual(rows.filter((r) => r.verdict !== READY).map(formatRow), []);
   assert.equal(exitCodeFor(rows), 0);
-  assert.equal(rows.length, 15);
+  assert.equal(rows.length, 16);
+});
+
+test('the bus row: a project with a bus names it; one with none is told plainly the watchdogs have nowhere to post (SP-269)', async () => {
+  const none = busRow(answers);
+  assert.equal(none.verdict, READY, 'no bus is allowed, never BLOCKED');
+  assert.equal(formatRow(none), 'Bus: where the pipeline watchdogs post: ready (none, since hasBus is not true, so the watchdogs have nowhere to post: '
+    + 'a lane that stops or a ticket that sticks is said nowhere. Answer hasBus "yes" to give it one)');
+  const withBus = resolveAnswers({
+    projectName: 'Normie', githubRepo: 'mentor24-maker/normie', trackerPrefix: 'NO', hasBus: true,
+    checkoutDir: '/Users/dane/WebApps/normie', checkCommand: 'npm run verify:full', description: 'Polls.',
+  }, { homeConfig, homeRoot: '/Users/dane/WebApps/home' });
+  assert.match(formatRow(busRow(withBus)), /^Bus: where the pipeline watchdogs post: ready \(normie-bus, which the setup's bus step makes if it is missing\)$/);
+  const rows = await look({ answers, homeConfig, deps: fakeWorld().deps });
+  assert.match(rows.map(formatRow).join('\n'), /the watchdogs have nowhere to post/);
 });
 
 test('a new project: the tracker, Doppler and checkout rows say will do, exit 0', async () => {
