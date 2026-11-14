@@ -301,6 +301,16 @@ details.add-task .note:not(:empty) { background: #fff; border-radius: 4px; paddi
 details.add-task .hint { color: var(--ink); }
 details.add-task > summary { cursor: pointer; font-weight: 600; }
 details.add-task form.request textarea { min-height: 8rem; }
+/* The title toggle and the suggested titles (SP-248): radio buttons sit beside their words, not as full-width fields. */
+details.add-task [hidden] { display: none; }
+details.add-task .title-mode { display: inline-flex; margin-top: 0.75rem; border: 1px solid var(--ink); border-radius: 6px; overflow: hidden; background: #fff; }
+details.add-task .title-mode label { display: flex; align-items: center; gap: 0.4rem; margin: 0; padding: 0.35rem 0.85rem; cursor: pointer; font-weight: 600; }
+details.add-task .title-mode label + label { border-left: 1px solid var(--ink); }
+details.add-task .title-mode label:has(input:checked) { background: var(--ink); color: #fff; }
+details.add-task form.request .title-mode input, details.add-task form.request .title-choice input { display: inline-block; width: auto; margin: 0; padding: 0; }
+details.add-task fieldset.title-choices { margin: 1rem 0 0; padding: 0.5rem 0.85rem 0.75rem; border: 1px solid var(--ink); border-radius: 6px; background: #fff; }
+details.add-task fieldset.title-choices legend { font-weight: 600; padding: 0 0.35rem; background: #fff; border-radius: 4px; }
+details.add-task form.request label.title-choice { display: flex; align-items: baseline; gap: 0.5rem; margin-top: 0.4rem; font-weight: 400; cursor: pointer; }
 p.filed-note { margin: 0 0 1rem; }
 .tasks-head { position: relative; }
 .filed-pod { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 10; max-width: 90%; padding: 0.5rem 1.25rem; border: 2px solid var(--blue); border-radius: 10px; background: #eaf5fe; color: var(--ink); font-size: 1.25rem; font-weight: 600; text-align: center; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15); animation: filed-pod-fade 4s linear forwards; }
