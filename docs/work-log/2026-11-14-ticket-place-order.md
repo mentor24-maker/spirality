@@ -20,3 +20,12 @@ Review sent it back once: putting a few tickets in order left the tickets
 already placed where they were, so two tickets could both be number 1. Now
 the others move down to make room, keeping the order they had, so every place
 is held by one ticket, as "the others adjust" asks.
+
+Review sent it back a second time: that renumbering also rewrote tickets
+already being built, in review or finished, because a ticket keeps its place
+after it leaves the queue. Each rewrite reset the clock the loops use to spot
+a stuck ticket, and made a change already in flight on that ticket fail as
+out of date. Now only tickets still waiting (Requested or Queued) move; a
+started ticket is left exactly as it was. And if the tracker cannot read its
+own write back, it now says the fault is its own (a server error) rather
+than blaming the caller.

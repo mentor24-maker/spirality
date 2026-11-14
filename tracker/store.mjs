@@ -1776,9 +1776,11 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
      * `bad-order` and nothing changes. Each ticket whose place moves gets a
      * version bump and a `place` event, as a priority change does; one
      * already in its place is left alone. The project's other placed
-     * tickets follow on, n+1, n+2 ..., in the order they already had (place,
-     * then oldest), so the others adjust and no two tickets ever share a
-     * place; an unplaced ticket not named stays unplaced. Answers
+     * tickets nobody has started (`Requested`, `Queued`) follow on, n+1,
+     * n+2 ..., in the order they already had (place, then oldest), so the
+     * others adjust and no two waiting tickets share a place; an unplaced
+     * ticket not named stays unplaced, and a started ticket not named is
+     * not touched at all (no version bump, no event). Answers
      * `{ project, tickets, changed }`: the named tickets read back in the
      * order given, and the ids that moved (named or not).
      */
@@ -1806,11 +1808,17 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
           }
           return row;
         });
-        // The rest of the project's placed tickets, in their current order,
-        // follow the named ones: "the others adjust", in Dane's words.
+        // The rest of the project's placed tickets nobody has started, in
+        // their current order, follow the named ones: "the others adjust",
+        // in Dane's words. A started ticket (Building, In review, Live ...)
+        // keeps its old place untouched: rewriting it would bump its version
+        // (a lane's or the page's guarded write on it then fails) and its
+        // updated_at, which pulse, wip-check and the pipeline pause read as
+        // its time in the stage.
         const named = new Set(rows.map((row) => row.id));
-        const others = db.prepare('SELECT * FROM tickets WHERE project = ? AND place IS NOT NULL ORDER BY place, created_at, number')
-          .all(slug)
+        const unstarted = DELETABLE.map(() => '?').join(', ');
+        const others = db.prepare(`SELECT * FROM tickets WHERE project = ? AND place IS NOT NULL AND status IN (${unstarted}) ORDER BY place, created_at, number`)
+          .all(slug, ...DELETABLE)
           .filter((row) => !named.has(row.id));
         const all = [...rows, ...others];
         const at = now();

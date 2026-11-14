@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { openStore } from './store.mjs';
+import { openStore, StoreError } from './store.mjs';
 import { SOURCE as IMPORT_SOURCE } from './import.mjs';
 import { startServer, settingsFromEnv, setupSettingsOf, viaPublicAddress, failureCounter, outsidePageUrl } from './server.mjs';
 import { DANE_FIELDS, STEPS } from '../scripts/onboard/onboard.mjs';
@@ -444,6 +444,17 @@ test('POST /projects/:slug/tickets/order gives places 1..n in one write; an id f
     assert.equal((await f.call('POST', '/projects/nope/tickets/order', { body: { ids: ['AL-1'] } })).status, 404);
     // A loop's token may order too, the same as it may change a priority.
     assert.equal((await f.call('POST', '/projects/alpha/tickets/order', { body: { ids: ['AL-1'] } })).status, 200);
+  } finally { await f.cleanup(); }
+});
+
+test('POST /projects/:slug/tickets/order answers 500, not 400, when the store\'s read-back fails', async () => {
+  const f = await fixture();
+  try {
+    f.store.fileTicket({ project: 'alpha', actor: f.machine.id, name: 'a', status: 'queued' });
+    f.store.orderTickets = () => { throw new StoreError('write-failed', 'ticket AL-1 read back at place 2, expected 1.'); };
+    const r = await f.call('POST', '/projects/alpha/tickets/order', { token: f.humanToken, body: { ids: ['AL-1'] } });
+    assert.equal(r.status, 500);
+    assert.equal(r.body.error, 'write-failed');
   } finally { await f.cleanup(); }
 });
 

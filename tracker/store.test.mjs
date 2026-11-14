@@ -1156,6 +1156,28 @@ test('orderTickets: a partial order on top of an existing one renumbers the othe
   } finally { cleanup(); }
 });
 
+test('orderTickets: a started ticket that still has a place is not touched when the waiting ones are reordered', () => {
+  const { store, human, machine, cleanup } = fixture();
+  try {
+    for (const name of ['A', 'B', 'C']) store.fileTicket({ project: 'alpha', actor: machine.id, name, status: 'queued' });
+    store.orderTickets('alpha', { ids: ['AL-1', 'AL-2', 'AL-3'], actor: human.id });
+    // AL-1 is claimed: it keeps place 1 after it leaves Queued.
+    store.changeTicket('AL-1', { actor: machine.id, ifStatus: 'queued', status: 'building' });
+    const before = store.getTicket('AL-1');
+    const eventsBefore = store.listEvents('AL-1').length;
+    const r = store.orderTickets('alpha', { ids: ['AL-3'], actor: human.id });
+    const after = store.getTicket('AL-1');
+    assert.equal(after.version, before.version, 'no version bump on the Building ticket');
+    assert.equal(after.updatedAt, before.updatedAt, 'its time in the stage is not reset');
+    assert.equal(after.place, before.place, 'its old place is left as it was');
+    assert.equal(store.listEvents('AL-1').length, eventsBefore, 'no place event on it');
+    assert.ok(!r.changed.includes('AL-1'));
+    // The waiting ones still adjust: AL-3 first, AL-2 after it.
+    assert.equal(store.getTicket('AL-3').place, 1);
+    assert.equal(store.getTicket('AL-2').place, 2);
+  } finally { cleanup(); }
+});
+
 test('orderTickets: an id from another project, an unknown or a repeated id changes nothing', () => {
   const { store, human, machine, cleanup } = fixture();
   try {
