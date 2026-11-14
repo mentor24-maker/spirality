@@ -18,3 +18,12 @@ once his answer is in, it says "Your answer is in; the loop takes it from
 here. Nothing is needed from you.", and once his merge word stands, "Your
 merge word is in; the relay merges it on its next pass. Nothing is needed
 from you." So the icon never asks for a move he has already made.
+
+Review sent it back a second time for the same kind of slip: on a Ready to
+launch ticket whose pull request was already merged on GitHub (waiting only
+for the relay to mark it Live), the "i" still said the work waited on his
+Merge, while the page beneath it said the merge was done. Now the "i" reads
+the same live GitHub check the page already uses: merged says "The pull
+request is merged; the relay moves this to Live on its next pass. Nothing is
+needed from you.", and closed without merging says so and points to the note
+below.

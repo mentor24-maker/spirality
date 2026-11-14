@@ -1627,6 +1627,21 @@ test('the status is first under the heading, with its line behind an information
   assert.match(merging, new RegExp(`status-name">Ready to launch · ${MERGE_STANDS_NOTE}<`));
   assert.match(merging, /role="tooltip">Your merge word is in; the relay merges it on its next pass\. Nothing is needed from you\.</);
   assert.doesNotMatch(merging, /waits on your Merge/);
+  // A pull request past the merge (SP-226) asks nothing of him either (second send-back).
+  const merged = renderStatusLine({ status: 'ready to launch', pullRequestState: { number: 14, state: 'MERGED' } });
+  assert.match(merged, /role="tooltip">The pull request is merged; the relay moves this to Live on its next pass\. Nothing is needed from you\.</);
+  assert.doesNotMatch(merged, /waits on your Merge/);
+  const closed = renderStatusLine({ status: 'ready to launch', pullRequestState: { number: 14, state: 'CLOSED' } });
+  assert.match(closed, /role="tooltip">The pull request was closed without merging; see the note below\.</);
+  assert.doesNotMatch(closed, /waits on your Merge/);
+  // Merged wins over a merge word still standing; a failed read (state null) is not settled.
+  assert.match(renderStatusLine({ status: 'ready to launch', mergeStands: true, pullRequestState: { number: 14, state: 'MERGED' } }), /role="tooltip">The pull request is merged;/);
+  assert.match(renderStatusLine({ status: 'ready to launch', pullRequestState: { number: 14, state: null } }), /waits on your Merge/);
+  assert.match(renderStatusLine({ status: 'ready to launch', pullRequestState: { number: 14, state: 'OPEN' } }), /waits on your Merge/);
+  // The same through the whole page, as BE-8 ("Merged on GitHub but not yet Live") shows it.
+  const be8 = renderQuickAction({ name: 'Merged on GitHub but not yet Live', description: '', status: 'ready to launch', pullRequestState: { number: 14, state: 'MERGED' } });
+  assert.match(be8, /role="tooltip">The pull request is merged; the relay moves this to Live/);
+  assert.doesNotMatch(be8, /waits on your Merge/);
   // The same through the whole page, as AL-2 in the demo shows it.
   const al2 = renderQuickAction({ name: 'Ship it', description: '', status: 'ready to launch', answerIn: true });
   assert.match(al2, /role="tooltip">Your answer is in; the loop takes it from here/);

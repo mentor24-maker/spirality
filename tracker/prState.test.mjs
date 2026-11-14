@@ -245,6 +245,10 @@ test('the demo: "Merged on GitHub but not yet Live" is off Waiting on You and sh
     const html = renderMergeAction(t);
     assert.doesNotMatch(html, /<button/);
     assert.match(html, /^<p class="pr-state">PR #14 is merged\./);
+    // SP-290: the "i" beside its status says the same, never "waits on your Merge".
+    const top = renderQuickAction(t);
+    assert.match(top, /role="tooltip">The pull request is merged; the relay moves this to Live on its next pass\. Nothing is needed from you\.</);
+    assert.doesNotMatch(top, /waits on your Merge/);
   } finally { await f.cleanup(); }
 });
 
