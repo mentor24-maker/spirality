@@ -509,6 +509,8 @@ function scratchPair() {
   writeFileSync(join(spiralityDir, 'scripts/pause_check.sh'), '#!/bin/bash\necho "running"\n', { mode: 0o755 });
   for (const f of ['project_config.mjs', 'run_with_time_limit.sh']) symlinkSync(join(REPO, 'scripts', f), join(spiralityDir, 'scripts', f));
   for (const f of ['back_to_main.sh', 'tracker_restart.sh', 'relay_app_checks.sh', 'loopSchedule.mjs']) symlinkSync(join(REPO, 'scripts/lib', f), join(spiralityDir, 'scripts/lib', f));
+  // Spirality's plugin folder, the skills and hooks a project's pass is handed (SP-272).
+  symlinkSync(join(REPO, 'plugin'), join(spiralityDir, 'plugin'));
   writeFileSync(join(spiralityDir, 'spirality.project.json'), JSON.stringify(spirality));
   writeFileSync(join(projectDir, 'spirality.project.json'), JSON.stringify({ ...spirality, projectSlug: 'normie', launchdPrefix: 'com.normie', logDir }));
   const heads = {};
@@ -536,7 +538,7 @@ test('a runner for a named project starts its pass in the project\'s checkout an
   const pair = scratchPair();
   try {
     const fakeClaude = join(pair.root, 'fake-claude');
-    writeFileSync(fakeClaude, '#!/bin/bash\necho "PASS IN: $(pwd)"\necho "PASS FOR: $SPIRALITY_PROJECT"\n', { mode: 0o755 });
+    writeFileSync(fakeClaude, '#!/bin/bash\necho "PASS IN: $(pwd)"\necho "PASS FOR: $SPIRALITY_PROJECT"\necho "ARGS: $*"\n', { mode: 0o755 });
     const runner = spawn('bash', [join(pair.spiralityDir, 'scripts/loop_runner.sh'), 'loop-build', '3600'], {
       cwd: pair.spiralityDir, detached: true, stdio: 'ignore',
       env: { ...scratchGit.scratchGitEnv(), CLAUDE_BIN: fakeClaude, RUN_WITH_TIME_LIMIT_POLL: '1', SPIRALITY_PROJECT: pair.projectDir },
@@ -554,6 +556,10 @@ test('a runner for a named project starts its pass in the project\'s checkout an
     const real = (p) => realpathSync(p);
     assert.equal(real(text.match(/^PASS IN: (.*)$/m)[1]), real(pair.projectDir));
     assert.equal(text.match(/^PASS FOR: (.*)$/m)[1], pair.projectDir);
+    // Spirality's skills and hooks, by its plugin's name, so a project's own
+    // copy of /loop-build cannot win over Spirality's (SP-272).
+    assert.equal(text.match(/^ARGS: (.*)$/m)[1],
+      `-p /spirality:loop-build --plugin-dir ${pair.spiralityDir}/plugin --allowedTools Bash Edit Write Read Glob Grep Task TodoWrite WebFetch`);
     assert.equal(pair.head(pair.projectDir), pair.heads[pair.projectDir].origin, 'the project\'s main was not pulled');
     assert.equal(pair.head(pair.spiralityDir), pair.heads[pair.spiralityDir].before, 'Spirality\'s own main was pulled by a project\'s lane');
   } finally {
@@ -574,6 +580,22 @@ test('a relay for a named project pulls the project\'s main, never Spirality\'s,
     assert.equal(pair.head(pair.projectDir), pair.heads[pair.projectDir].origin, 'the project\'s main was not pulled');
     assert.equal(pair.head(pair.spiralityDir), pair.heads[pair.spiralityDir].before, 'Spirality\'s own main was pulled by a project\'s relay');
     assert.ok(existsSync(join(pair.logDir, 'normie-relay.last-start')) === false, 'a dry run wrote the start file');
+  } finally {
+    rmSync(pair.root, { recursive: true, force: true });
+  }
+});
+
+test('a runner for a named project refuses to start, saying why, when Spirality has no plugin folder to hand its passes (SP-272)', { timeout: 30_000 }, () => {
+  const pair = scratchPair();
+  try {
+    rmSync(join(pair.spiralityDir, 'plugin'));
+    const r = spawnSync('bash', [join(pair.spiralityDir, 'scripts/loop_runner.sh'), 'loop-build', '3600'], {
+      cwd: pair.spiralityDir, encoding: 'utf8', timeout: 20_000,
+      env: { ...scratchGit.scratchGitEnv(), CLAUDE_BIN: '/bin/false', SPIRALITY_PROJECT: pair.projectDir },
+    });
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assert.match(r.stderr, /plugin folder .* would find no skills or hooks\. Stopping\./);
+    assert.ok(!existsSync(join(pair.logDir, 'normie-loop-build.lock')), 'it took the lane lock before refusing');
   } finally {
     rmSync(pair.root, { recursive: true, force: true });
   }

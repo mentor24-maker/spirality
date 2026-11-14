@@ -262,6 +262,18 @@ is a ticket in that project's own queue, filed once Spirality's side is Live:
    `node_modules` from Spirality's folder without taking Spirality's sync
    lock, so Spirality's own lanes pulling main and running `npm ci` can
    change those files under a project's pass mid-call.
+   Slice 4 done (SP-272): a project's pass is handed Spirality's plugin
+   folder (`plugin/`) with Claude Code's standard `--plugin-dir` option and
+   asks for its skill as `/spirality:<skill>`. The folder's skills are
+   `.claude/skills` through a link, so there is one copy; its hooks run from
+   Spirality's folder: the no-edits-on-main hook, and
+   `scripts/hooks/door_from_spirality.cjs`, which points each
+   `npm run clickup` in the pass at Spirality's door, so the skills' door
+   lines work unchanged in a project with no door of its own. The plugin
+   name is used because a project's own copy of a skill under the bare name
+   (StarCaster's, until move 6) would win over Spirality's. Spirality's own
+   passes are started exactly as before. `scripts/dry_project_pass.sh` shows
+   it working for a project with no `.claude/` folder.
 3. Let a project list application checks in its manifest for Spirality to run
    and post to its bus.
    Done: SP-264 added the `applicationChecks` field and
