@@ -152,3 +152,41 @@ test('with_doppler reads the named project\'s Doppler project and config, and pa
     assert.match(calls().at(-1), /^run --project here-doppler --config dev /);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('the settings the door\'s modules read (stamp, merge phrases, operator, ticket links, project scripts) are the named project\'s, run from Spirality\'s own folder', async () => {
+  // Review of SP-270, round 1: the door loaded the named manifest, but
+  // lib/substrateConfig.js still walked up from the current folder, so every
+  // relay note on a StarCaster ticket was stamped `[CC-spirality relay]`.
+  const dir = mkdtempSync(join(tmpdir(), 'named-project-'));
+  try {
+    const alpha = writeProject(join(dir, 'alpha-checkout'), 'alpha', {
+      mergePhrases: ['ship the alpha'], operatorName: 'Alpha Operator', governancePaths: ['ALPHA_RULES.md'],
+      trackerUrl: 'http://alpha.example:4180', projectScripts: { check: 'scripts/check.sh' },
+    });
+    const probe = `
+      const sc = require('./lib/substrateConfig.js');
+      const m = require('./lib/mergeOnComment.js');
+      const ps = require('./lib/projectScripts.js');
+      console.log(JSON.stringify({
+        relay: sc.machineSenderTag('relay'), bus: sc.machineSenderTag('bus-relay'),
+        operator: sc.operatorName(), phrases: sc.mergePhrases(), governance: sc.governancePaths(),
+        filed: sc.filedTrackerUrl(), alphaMerges: m.isMergeCommand('ship the alpha'), plainMerges: m.isMergeCommand('merge'),
+        script: ps.projectScriptPath('check'),
+      }));`;
+    const env = { PATH: process.env.PATH, HOME: dir };
+    // cwd is Spirality's own checkout, which holds Spirality's manifest.
+    const named = await run(process.execPath, ['-e', probe], { cwd: ROOT, env: { ...env, SPIRALITY_PROJECT: alpha } });
+    assert.equal(named.code, 0, named.err);
+    assert.deepEqual(JSON.parse(named.out), {
+      relay: '[CC-alpha relay]', bus: '[CC-alpha bus-relay]', operator: 'Alpha Operator',
+      phrases: ['ship the alpha'], governance: ['ALPHA_RULES.md'], filed: 'http://alpha.example:4180',
+      alphaMerges: true, plainMerges: false, script: join(alpha, 'scripts/check.sh'),
+    });
+
+    // Nothing named: Spirality's own manifest, exactly as before.
+    const own = JSON.parse(readFileSync(join(ROOT, 'spirality.project.json'), 'utf8'));
+    const unnamed = await run(process.execPath, ['-e', probe], { cwd: ROOT, env });
+    assert.equal(unnamed.code, 0, unnamed.err);
+    assert.equal(JSON.parse(unnamed.out).relay, `[CC-${own.projectSlug} relay]`);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
