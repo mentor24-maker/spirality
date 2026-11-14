@@ -1050,6 +1050,7 @@ export const REPLY_LINE = 'It waits on your reply below.';
 
 /** The line for his statuses, from the move the page offers (see CLOSE_LINE). */
 function hisMoveLine(t, state) {
+  if (heldBugReport(t)) return HELD_REPORT_STATUS_LINE;
   if (offersClose(t)) return CLOSE_LINE;
   if (state === READY_TO_LAUNCH) return offersMerge(t) ? STATUS_LINES[state] : REPLY_LINE;
   return STATUS_LINES[state];
@@ -1307,9 +1308,14 @@ export function renderAnswerIn({ answerIn = false, mergeStands = false }) {
  * acts on it at its next pass, so a second reply typed in that gap would
  * quietly overrule the first. The box comes back with the relay's comment,
  * exactly as Merge, Close and Go do. `name` is who the reply posts as.
+ * Never on a held bug report (heldBugReport, SP-287): nothing reads a
+ * reply there, so its Approve and Reject stand in its place.
  */
-export function renderReplyForm({ answerIn = false }, name) {
+export function renderReplyForm(t, name) {
+  const { answerIn = false } = t ?? {};
   if (answerIn) return '';
+  // SP-287: no loop reads a reply on a held bug report; renderBugReportActions stands in.
+  if (heldBugReport(t)) return '';
   return `<form class="reply">
         <label for="reply">Reply as ${escapeHtml(name ?? 'you')}</label>
         <textarea id="reply" required></textarea>
@@ -1446,6 +1452,77 @@ export function renderGoAction({ status, goPhrase, comments = [], answerIn = fal
 /** The one question the Go button asks before it posts. Plain text, for confirm(). */
 export function goQuestion({ name }) {
   return `Send ${name} to the build queue?`;
+}
+
+/**
+ * Is this a held bug report (SP-287)? A ticket tagged BUG_REPORT_TAG, in
+ * Needs your input, with no operator card anywhere in its thread. A
+ * visitor's report arrives that way: the hold itself is the approval gate,
+ * and no loop reads a reply to it (the relay acts only on an answer to a
+ * card). Once a loop has asked about it, the card's own buttons and the
+ * reply box are back, exactly as on any other ticket.
+ */
+export function heldBugReport({ status, tags = [], comments = [] } = {}) {
+  if (!(tags ?? []).includes(BUG_REPORT_TAG)) return false;
+  if (String(status ?? '').toLowerCase() !== NEEDS_YOUR_INPUT) return false;
+  return !(comments ?? []).some((c) => cardAsk(c?.body) !== null);
+}
+
+/** The tag a rejected ticket carries: the contract's "killing a ticket" (docs/LOOP_CONTRACT.md). */
+export const WONT_DO_TAG = 'wont-do';
+
+/** The note Reject posts on the ticket, after moving it: why it is Live with nothing shipped. */
+export const REJECT_COMMENT = 'Rejected from the ticket page: this bug report will not be worked on, and nothing shipped for it.';
+
+/** The one line that stands where the reply box was on a held bug report. */
+export const HELD_REPORT_LINE = 'No loop reads a reply on a bug report held for you, so there is no reply box here. Approve or Reject it; the Change panel under Details still works for anything else.';
+
+/** The status line's "i" on a held bug report: its move is a button, not an answer. */
+export const HELD_REPORT_STATUS_LINE = 'It waits on you to Approve or Reject it below.';
+
+/**
+ * The Approve and Reject buttons on a held bug report (heldBugReport), and
+ * the line that stands in for its reply box, as HTML, or '' on any other
+ * ticket. Approve moves it to Requested, so the intake lane writes it up;
+ * Reject moves it to Live with the wont-do tag and posts REJECT_COMMENT.
+ * The page writes both itself (they are his own status changes, the same
+ * ones the Change panel makes), and reads each one back.
+ */
+export function renderBugReportActions(t) {
+  if (!heldBugReport(t)) return '';
+  return `<form class="approve-action">
+        <button type="submit">Approve</button><span class="note"></span>
+        <p class="quiet">Moves it to Requested; the intake lane writes it up as a spec for you to say go to.</p>
+      </form>
+      <form class="reject-action">
+        <button type="submit">Reject</button><span class="note"></span>
+        <p class="quiet">Moves it to Live with the ${escapeHtml(WONT_DO_TAG)} tag and a note that nothing shipped.</p>
+      </form>
+      <p class="held-report quiet">${escapeHtml(HELD_REPORT_LINE)}</p>`;
+}
+
+/** The one question Approve asks before it writes. Plain text, for confirm(). */
+export function approveQuestion({ name }) {
+  return `Approve ${name} and send it to intake?`;
+}
+
+/** The one question Reject asks before it writes. Plain text, for confirm(). */
+export function rejectQuestion({ name }) {
+  return `Reject ${name}? It moves to Live with the ${WONT_DO_TAG} tag, and nothing is built.`;
+}
+
+/**
+ * Did a page write stick? The server's answer to a change (`{ ticket }`)
+ * read against what was asked: the status, and every tag asked for.
+ * Answers '' when it did, or what did not, in plain words.
+ */
+export function changeProblem(answer, { status, tags = [] } = {}) {
+  const t = answer?.ticket;
+  if (!t) return 'the tracker did not answer with the ticket.';
+  const missing = [];
+  if (status && String(t.status ?? '').toLowerCase() !== status) missing.push(`the status reads "${t.status}", not "${status}"`);
+  for (const tag of tags) if (!(t.tags ?? []).includes(tag)) missing.push(`the ${tag} tag is not on it`);
+  return missing.length ? `${missing.join(' and ')}.` : '';
 }
 
 /** A stage colour the page will use: `#rrggbb` only, anything else is no colour. */
