@@ -26,7 +26,7 @@
  * an emailed link's own page. The link's token is sent only in a JSON body,
  * never in an address.
  */
-import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, unwrapDoc, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderAnswerIn, renderHeldUp, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, lookupTicket, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, pipelinePodLabel, renderHealth, healthLines, renderCommandList, renderCommandView, renderCommandDetails, renderContextDocs, renderTopics, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, renderListTopics, projectTags, sortTickets, nextSort, renderDocumentation, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, lowerMeridiem, renderPipelineControls, renderConsole, drainLine, renderTitleChoices, titleModeOf, SUGGEST_POLL_MS, moveSuggestion, suggestState, filingPlan, orderPlan, andList, suggestRunLine, renderSuggestRows } from './render.mjs';
+import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, unwrapDoc, renderCloseAction, renderGoAction, goQuestion, renderBugReportActions, approveQuestion, rejectQuestion, changeProblem, REJECT_COMMENT, WONT_DO_TAG, renderMergeAction, renderAnswerIn, renderHeldUp, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, lookupTicket, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, pipelinePodLabel, renderHealth, healthLines, renderCommandList, renderCommandView, renderCommandDetails, renderContextDocs, renderTopics, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, renderListTopics, projectTags, sortTickets, nextSort, renderDocumentation, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, lowerMeridiem, renderPipelineControls, renderConsole, drainLine, renderTitleChoices, titleModeOf, SUGGEST_POLL_MS, moveSuggestion, suggestState, filingPlan, orderPlan, andList, suggestRunLine, renderSuggestRows } from './render.mjs';
 
 /** Where an earlier version of the page kept a pasted token; removed on load, never read. */
 const OLD_TOKEN_KEY = 'tracker-token';
@@ -1843,6 +1843,7 @@ async function drawTicket(id, said = null, kept = null) {
       ${renderMergeAction(t)}
       ${renderCloseAction(t)}
       ${renderGoAction(t)}
+      ${renderBugReportActions(t)}
       ${renderReplyForm(t, me?.name)}
       ${renderDeleteAction(t)}
       </div>
@@ -1941,6 +1942,72 @@ async function drawTicket(id, said = null, kept = null) {
   wordButton('form.merge-action', mergeQuestion(t), t.mergePhrase, 'You were signed out; the merge word was not posted.');
   wordButton('form.close-action', closeQuestion(t), t.closePhrase, 'You were signed out; the close word was not posted.');
   wordButton('form.go-action', goQuestion(t), t.goPhrase, 'You were signed out; your go was not posted.');
+  // A held bug report's Approve and Reject (SP-287): his own status changes,
+  // the same PATCH the Change panel sends, guarded on the status and version
+  // the page was drawn with, and each read back. Reject is two writes: the
+  // status and the wont-do tag together (one change, so never one without the
+  // other), then the note. A write that fails says which, and the page is not
+  // redrawn over it; nothing is ever reported as done that did not stick.
+  const bugButton = (selector, question, steps) => {
+    const form = main.querySelector(selector);
+    form?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (!confirm(question)) return;
+      const buttons = [...main.querySelectorAll('form.approve-action button, form.reject-action button')];
+      const note = form.querySelector('.note');
+      for (const b of buttons) b.disabled = true;
+      note.className = 'note quiet';
+      note.textContent = 'Saving…';
+      const fail = (text) => {
+        note.className = 'note error';
+        note.textContent = text;
+      };
+      let done = 0;
+      for (const step of steps) {
+        let problem;
+        try {
+          problem = await step.write();
+        } catch (err) {
+          if (err instanceof SignedOut) return drawSignIn(`You were signed out; ${step.what} was not saved.`);
+          if (err instanceof Refused && err.status === 409) {
+            return fail(`Not saved: ${step.what}. This ticket changed since the page was drawn (a loop moved it, or another page saved first), so nothing was overwritten. Reload to see it as it is now.`);
+          }
+          problem = err.message;
+        }
+        if (problem) {
+          // Before the first write lands nothing has changed, so the buttons come back; after it, the ticket has moved, so only a reload is offered.
+          if (!done) for (const b of buttons) b.disabled = false;
+          const saved = steps.slice(0, done).map((s) => s.what).join(' and ');
+          return fail(`Not saved: ${step.what}: ${problem.replace(/\.$/, '')}.${done ? ` ${saved.replace(/^./, (c) => c.toUpperCase())} did save. Reload to see the ticket as stored.` : ''}`);
+        }
+        done += 1;
+      }
+      try {
+        await drawAgain(() => drawTicket(t.id));
+        afterPost();
+      } catch (err) {
+        if (err instanceof SignedOut) return drawSignIn('You were signed out; the change was saved, but the page could not show it.');
+        fail(`Saved, but the page could not refresh (${err.message}). Reload to see the ticket as stored.`);
+      }
+    });
+  };
+  const patch = (fields) => api('PATCH', `/tickets/${encodeURIComponent(t.id)}`, { ...fields, ifStatus: t.status, ifVersion: t.version });
+  bugButton('form.approve-action', approveQuestion(t), [
+    { what: 'the move to Requested', write: async () => changeProblem(await patch({ status: 'requested' }), { status: 'requested' }) },
+  ]);
+  bugButton('form.reject-action', rejectQuestion(t), [
+    {
+      what: `the move to Live with the ${WONT_DO_TAG} tag`,
+      write: async () => changeProblem(await patch({ status: 'live', tags: [...new Set([...t.tags, WONT_DO_TAG])] }), { status: 'live', tags: [WONT_DO_TAG] }),
+    },
+    {
+      what: 'the note saying nothing shipped',
+      write: async () => {
+        const posted = await api('POST', `/tickets/${encodeURIComponent(t.id)}/comments`, { body: REJECT_COMMENT });
+        return posted?.body === REJECT_COMMENT ? '' : 'the tracker did not answer with the note as posted.';
+      },
+    },
+  ]);
   // Delete: ask first, naming the ticket; on success go to its project's list.
   const deleteForm = main.querySelector('form.delete-action');
   deleteForm?.addEventListener('submit', async (e) => {
