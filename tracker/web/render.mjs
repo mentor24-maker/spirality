@@ -2503,6 +2503,44 @@ export function filingPlan(state) {
   return { kept, file: kept.filter((i) => !state.filed[i]) };
 }
 
+/**
+ * Which kept rows' tickets File in This Order puts in order (SP-251).
+ * `kept` is filingPlan's kept rows in the order shown, `filed` the state's
+ * filed tickets (`{ id, project }` by row), and `now` the tickets filed by
+ * an earlier press as read back just now, by row: the ticket, or null when
+ * it no longer answers. A row missing from `now` was filed by this press.
+ *
+ * Only a ticket still waiting (Requested, in the project it was filed into)
+ * is ordered: placing a started one bumps its version, and a lane's or the
+ * page's guarded write on it then fails (orderTickets, tracker/store.mjs).
+ * A started one is left alone; one deleted or moved to another project is
+ * `gone`, since naming it would make the whole order call fail.
+ * Answers `{ byProject, leftAlone, gone }`: byProject maps a project to its
+ * ids in the order shown; the other two are lists of `{ index, id }`.
+ */
+export function orderPlan(kept, filed, now = {}) {
+  const byProject = new Map();
+  const leftAlone = [];
+  const gone = [];
+  for (const index of kept) {
+    const f = filed[index];
+    if (!f) continue;
+    if (Object.hasOwn(now, index)) {
+      const t = now[index];
+      if (!t || t.project !== f.project) { gone.push({ index, id: f.id }); continue; }
+      if (t.status !== 'requested') { leftAlone.push({ index, id: f.id }); continue; }
+    }
+    byProject.set(f.project, [...(byProject.get(f.project) ?? []), f.id]);
+  }
+  return { byProject, leftAlone, gone };
+}
+
+/** "SP-1", "SP-1 and SP-2", "SP-1, SP-2 and SP-3". */
+export function andList(items) {
+  if (items.length < 2) return items.join('');
+  return `${items.slice(0, -1).join(', ')} and ${items.at(-1)}`;
+}
+
 /** The box's line for a run: what is going on, or why it failed. Empty for a finished one. */
 export function suggestRunLine(run) {
   if (!run) return '';

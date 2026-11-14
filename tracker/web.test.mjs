@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { DEMO_NEWEST_RELEASE, DEMO_OWN_PROJECT, DEMO_SUGGESTIONS, demoNewestRelease, demoSuggest, seedDemo, tickingClock } from './demoData.mjs';
 import { reportsOf, REPORT_RANGES, GROWTH_PERIODS, searchTickets, PRIORITIES, timeSplitOf, isFailureNote, TIME_BUCKETS, pipelineControlsOf } from './pageData.mjs';
-import { escapeHtml, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, renderTopics, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, renderListTopics, projectTags, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, renderReleaseGroup, controlValueText, mountainTime, wakeInEffectText, modelLastPassText, renderConsole, renderConsoleTile, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, consoleFeature, featureColourIndex, renderFeatureKey, FEATURE_PALETTE, drainLine, capInFlightText, renderTitleChoices, titleModeOf, TITLE_MODES, SUGGEST_POLL_MS, moveSuggestion, suggestState, filingPlan, suggestRunLine, renderSuggestRows } from './web/render.mjs';
+import { escapeHtml, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, renderTopics, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, renderListTopics, projectTags, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, renderReleaseGroup, controlValueText, mountainTime, wakeInEffectText, modelLastPassText, renderConsole, renderConsoleTile, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, consoleFeature, featureColourIndex, renderFeatureKey, FEATURE_PALETTE, drainLine, capInFlightText, renderTitleChoices, titleModeOf, TITLE_MODES, SUGGEST_POLL_MS, moveSuggestion, suggestState, filingPlan, orderPlan, andList, suggestRunLine, renderSuggestRows } from './web/render.mjs';
 import { startServer, setupSettingsOf } from './server.mjs';
 import { saveAnswers, setupFields, setupOf } from './setup.mjs';
 import { DANE_FIELDS as SETUP_FIELDS, STEPS as SETUP_STEPS } from '../scripts/onboard/onboard.mjs';
@@ -5335,6 +5335,64 @@ test('suggestState keeps the order, ticks and filed tickets for the same run onl
   assert.deepEqual(filingPlan({ ...kept, dropped: [0, 1, 2, 3] }), { kept: [], file: [] });
 });
 
+test('orderPlan orders only the kept tickets still in Requested in the project they were filed into; a started one is left alone and a deleted or moved one is gone (SP-251 review)', () => {
+  const filed = { 0: { id: 'AL-1', project: 'alpha' }, 1: { id: 'AL-2', project: 'alpha' }, 2: { id: 'AL-3', project: 'alpha' }, 3: { id: 'AL-4', project: 'alpha' }, 4: { id: 'BE-5', project: 'beta' } };
+  const now = {
+    0: { id: 'AL-1', project: 'alpha', status: 'needs-input' },
+    1: null,
+    2: { id: 'AL-3', project: 'beta', status: 'requested' },
+    3: { id: 'AL-4', project: 'alpha', status: 'requested' },
+  };
+  // Row 4 is missing from `now`: filed by this press, so ordered without a read.
+  const plan = orderPlan([4, 3, 2, 1, 0], filed, now);
+  assert.deepEqual([...plan.byProject], [['beta', ['BE-5']], ['alpha', ['AL-4']]]);
+  assert.deepEqual(plan.leftAlone, [{ index: 0, id: 'AL-1' }]);
+  assert.deepEqual(plan.gone, [{ index: 2, id: 'AL-3' }, { index: 1, id: 'AL-2' }]);
+  assert.deepEqual([...orderPlan([0, 3], filed).byProject], [['alpha', ['AL-1', 'AL-4']]], 'nothing read back: all filed by this press');
+  assert.deepEqual(orderPlan([9], filed).byProject.size, 0, 'a row never filed is not ordered');
+  assert.equal(andList([]), '');
+  assert.equal(andList(['A']), 'A');
+  assert.equal(andList(['A', 'B']), 'A and B');
+  assert.equal(andList(['A', 'B', 'C']), 'A, B and C');
+});
+
+test('File in This Order again, a day later, against the server: a ticket already started keeps its version, a deleted one is dropped, and the order call still works', async () => {
+  const f = await fixture();
+  try {
+    const filed = {};
+    for (const i of [0, 1, 2, 3]) {
+      const r = await f.call('POST', '/projects/alpha/tickets', { body: { name: `Suggestion ${i}`, description: '', status: 'Requested' } });
+      assert.equal(r.status, 201, r.text);
+      filed[i] = { id: r.body.id, project: 'alpha' };
+    }
+    assert.equal((await f.call('POST', '/projects/alpha/tickets/order', { body: { ids: [0, 1, 2, 3].map((i) => filed[i].id) } })).status, 200);
+    // Since then: intake took the first on, and the second was deleted.
+    f.store.changeTicket(filed[0].id, { actor: f.loop.id, status: 'Needs your input' });
+    f.store.deleteTicket(filed[1].id, { actor: f.operator.id });
+    const startedVersion = f.store.getTicket(filed[0].id).version;
+    // He ticks a fifth and presses again: it is filed, then the earlier ones are read back the way the page does.
+    const fifth = await f.call('POST', '/projects/alpha/tickets', { body: { name: 'Suggestion 4', description: '', status: 'Requested' } });
+    filed[4] = { id: fifth.body.id, project: 'alpha' };
+    const now = {};
+    for (const i of [0, 1, 2, 3]) {
+      const r = await f.call('GET', `/tickets/${filed[i].id}`);
+      if (r.status === 404) now[i] = null;
+      else { assert.equal(r.status, 200, r.text); now[i] = r.body; }
+    }
+    const plan = orderPlan([4, 0, 1, 2, 3], filed, now);
+    assert.deepEqual(plan.leftAlone.map((t) => t.id), [filed[0].id]);
+    assert.deepEqual(plan.gone.map((t) => t.id), [filed[1].id]);
+    const ids = plan.byProject.get('alpha');
+    assert.deepEqual(ids, [filed[4].id, filed[2].id, filed[3].id]);
+    // Naming the deleted one would fail the whole call: the old way, shown once.
+    assert.equal((await f.call('POST', '/projects/alpha/tickets/order', { body: { ids: [filed[1].id, ...ids] } })).status, 400);
+    const r = await f.call('POST', '/projects/alpha/tickets/order', { body: { ids } });
+    assert.equal(r.status, 200, r.text);
+    assert.deepEqual(r.body.tickets.map((t) => t.place), [1, 2, 3]);
+    assert.equal(f.store.getTicket(filed[0].id).version, startedVersion, 'the started ticket was not touched: a lane\'s guarded write on it still works');
+  } finally { await f.cleanup(); }
+});
+
 test('suggestRunLine says a run is going or why it failed, plainly', () => {
   assert.match(suggestRunLine({ state: 'running' }), /^Reading the project for its next tasks/);
   assert.equal(suggestRunLine({ state: 'failed', message: 'Claude is not set up on this machine.' }), 'No suggestions this time: Claude is not set up on this machine.');
@@ -5436,7 +5494,21 @@ test('File in This Order files only the kept rows not yet filed, in Requested, a
   assert.ok(check > 0 && check < post && post < order, 'checked, then filed, then ordered');
   assert.match(file, /\{ name: s\.title, description: s\.description \?\? '', status: 'Requested' \}/, 'title and description as shown');
   assert.match(file, /state\.filed\[i\] = \{ id: ticket\.id, project: into \};\s*save\(\);/, 'each filed ticket is kept at once: a retry never files it again');
-  assert.match(file, /for \(const i of plan\.kept\) \{/, 'every kept row is ordered, filed now or before');
+  assert.match(file, /for \(const i of plan\.kept\) \{\s*if \(fresh\.has\(i\) \|\| !state\.filed\[i\]\) continue;/, 'each ticket an earlier press filed is read back first');
+  assert.match(file, /const order = orderPlan\(plan\.kept, state\.filed, now\);/, 'only the ones still in Requested are ordered');
+  assert.match(file, /for \(const \[project, ids\] of order\.byProject\)/);
+  assert.match(file, /if \(err instanceof Refused && err\.status === 404\) \{ now\[i\] = null; continue; \}/, 'a deleted ticket is gone, not a failure');
+  assert.match(file, /state\.dropped = \[\.\.\.new Set\(\[\.\.\.state\.dropped, \.\.\.order\.gone\.map/, 'a gone ticket is unticked, so a later press never names it');
+  assert.match(file, /so \$\{order\.leftAlone\.length === 1 \? 'its' : 'their'\} place was left alone/);
+  assert.match(file, /no longer in this project \(deleted or moved\)/);
+  // The project check that cannot run says so, as Add Task does.
+  assert.match(file, /unchecked\.push\(s\.title\);/);
+  assert.match(file, /The project check could not run for /);
+  assert.doesNotMatch(file, /'the tracker did not answer\.'/, 'the words live in SUGGEST_NEXT_UNANSWERED');
+  // The smaller ones: Keep and the dropdown hold still while filing; the end of filing leaves a running run's button off.
+  assert.match(wire, /if \(filing\) \{ e\.target\.checked = !e\.target\.checked; return; \}/);
+  assert.match(wire, /if \(filing\) \{ drawRows\(\); return; \}/);
+  assert.match(file, /run\.disabled = running;/);
   assert.match(file, /Not filed: "\$\{s\.title\}"/);
   assert.match(file, /Their order was not set \(/);
   assert.match(file, /Press File in This Order again: nothing is filed twice\./);
