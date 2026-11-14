@@ -192,6 +192,12 @@ table.tickets, details.group { border: var(--hairline); border-radius: 8px; }
 .group td.assignee select { width: 100%; max-width: 9rem; }
 .group td.assignee .note { display: block; font-size: 0.8rem; }
 .group th.tags { width: 13%; }
+.group td.tags .tag { margin-bottom: 0.2rem; }
+.group td.tags button.remove-tag { border: 0; background: transparent; padding: 0 0 0 0.3rem; cursor: pointer; color: var(--quiet); font-size: 0.85rem; }
+.group td.tags button.remove-tag:hover { color: var(--red); }
+.group td.tags select, .group td.tags input.new-tag { display: block; width: 100%; max-width: 9rem; font: inherit; font-size: 0.85rem; margin-top: 0.15rem; box-sizing: border-box; }
+.group td.tags .note { display: block; font-size: 0.8rem; }
+.group td.tags input.new-tag[hidden] { display: none; }
 .group th.actions { width: 8%; }
 .group td.actions { white-space: nowrap; }
 a.action, button.action { display: inline-flex; padding: 0.2rem; margin-right: 0.15rem; border-radius: 4px; color: var(--quiet); }

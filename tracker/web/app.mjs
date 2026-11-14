@@ -26,7 +26,7 @@
  * an emailed link's own page. The link's token is sent only in a JSON body,
  * never in an address.
  */
-import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, unwrapDoc, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderAnswerIn, renderHeldUp, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, lookupTicket, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, pipelinePodLabel, renderHealth, healthLines, renderCommandList, renderCommandView, renderCommandDetails, renderContextDocs, renderTopics, renderSortHeadings, renderListPriority, renderListAssignee, sortTickets, nextSort, renderDocumentation, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, lowerMeridiem, renderPipelineControls, renderConsole, drainLine } from './render.mjs';
+import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, unwrapDoc, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderAnswerIn, renderHeldUp, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, lookupTicket, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, pipelinePodLabel, renderHealth, healthLines, renderCommandList, renderCommandView, renderCommandDetails, renderContextDocs, renderTopics, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, projectTags, sortTickets, nextSort, renderDocumentation, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, lowerMeridiem, renderPipelineControls, renderConsole, drainLine } from './render.mjs';
 
 /** Where an earlier version of the page kept a pasted token; removed on load, never read. */
 const OLD_TOKEN_KEY = 'tracker-token';
@@ -1299,7 +1299,8 @@ function wireSortHeadings(stages) {
  * (the Add Task box's "Did you mean ...?") is drawn here, closed.
  *
  * In the List view each row's priority (SP-208) and assignee (SP-244) is a
- * dropdown that saves on change (wireListPickers); `said` is
+ * dropdown that saves on change, and its tags (SP-246) gain a × each and an
+ * Add Tag dropdown (wireListPickers); `said` is
  * `{ id, field, text, error }`, the note that save leaves beside that
  * ticket's dropdown after the redraw.
  */
@@ -1348,12 +1349,14 @@ async function drawProject(slug, view, { adding = false, filed = null, unchecked
       canDelete(status) ? actionButton('Delete Ticket', ICONS.delete, { delete: t.id }) : '',
     ].join('');
   };
+  // The project's tags, for each List row's Add Tag dropdown (SP-246).
+  const known = projectTags(board);
   const row = (status) => (t) => `
     <tr data-id="${escapeHtml(t.id)}">
       <td class="id"><a href="/t/${encodeURIComponent(t.id)}">${escapeHtml(t.id)}</a></td>
       <td class="name"><a href="/t/${encodeURIComponent(t.id)}">${escapeHtml(t.name)}</a></td>
       <td class="priority">${view === 'list' ? renderListPriority(t) : t.priority ? escapeHtml(statusName(t.priority)) : '<span class="quiet">–</span>'}</td>
-      <td class="tags">${t.tags.map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join('')}</td>
+      <td class="tags">${view === 'list' ? renderListTags(t, known) : t.tags.map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join('')}</td>
       <td class="assignee">${view === 'list' ? renderListAssignee(t, board.operator) : t.assignee ? escapeHtml(t.assignee) : '<span class="quiet">nobody</span>'}</td>
       <td class="when">${escapeHtml(when(t.updatedAt))}</td>
       <td class="actions">${actions(t, status)}</td>
@@ -1468,19 +1471,20 @@ const LIST_PICKERS = Object.freeze({
 });
 
 /**
- * SP-208, SP-244: the List view's priority and assignee dropdowns. Picking
- * one sends only that field, with the version the board drew (`ifVersion`),
- * to the same PATCH /tickets/:id the ticket page's Change panel uses. One
- * save at a time: every dropdown in the list is held while a save is in
- * flight, and "Saving…" shows beside the one picked. Saved, the list is
- * drawn again from the server with "Saved" beside it. A 409 means a loop
- * moved the ticket: the list is drawn again as stored, with the moved
- * message beside it. Any other refusal shows the server's words and puts the
- * old value back.
+ * SP-208, SP-244, SP-246: the List view's priority and assignee dropdowns and
+ * its tag controls. Each change sends only that field (tags as the whole new
+ * list), with the version the board drew (`ifVersion`), to the same PATCH
+ * /tickets/:id the ticket page's Change panel uses. One save at a time: every
+ * dropdown, ×, and tag box in the list is held while a save is in flight, and
+ * "Saving…" shows beside the one changed. Saved, the list is drawn again from
+ * the server with "Saved" beside it. A 409 means a loop moved the ticket: the
+ * list is drawn again as stored, with the moved message beside it. Any other
+ * refusal shows the server's words and puts the control back as it was.
  */
 function wireListPickers(slug, view, board, said) {
   const fields = Object.keys(LIST_PICKERS);
   const selects = [...main.querySelectorAll(fields.map((f) => `select[data-${f}-of]`).join(', '))];
+  const controls = [...selects, ...main.querySelectorAll('select[data-tags-of], button[data-untag-of], input[data-new-tag-of]')];
   const fieldOf = (select) => fields.find((f) => select.hasAttribute(`data-${f}-of`));
   const noteOf = (field, id) => [...main.querySelectorAll(`[data-${field}-note]`)].find((n) => n.getAttribute(`data-${field}-note`) === id);
   if (said) {
@@ -1492,48 +1496,119 @@ function wireListPickers(slug, view, board, said) {
   }
   const tickets = new Map(board.columns.flatMap((c) => c.tickets).map((t) => [t.id, t]));
   let saving = false;
+  /** Sends `value` as `field` of ticket `id`; `undo` puts the control back when nothing is sent or it is refused. */
+  const save = async (id, field, value, undo) => {
+    const t = tickets.get(id);
+    if (!t) return;
+    if (saving) {
+      undo();
+      return;
+    }
+    saving = true;
+    const was = field === 'tags' ? 'were' : 'was';
+    const note = noteOf(field, id);
+    const held = controls.filter((c) => !c.disabled);
+    for (const c of held) c.disabled = true;
+    note.className = 'note quiet';
+    note.textContent = 'Saving…';
+    let after;
+    try {
+      await api('PATCH', `/tickets/${encodeURIComponent(id)}`, { [field]: value, ifVersion: t.version });
+      after = { id, field, text: 'Saved' };
+    } catch (err) {
+      if (err instanceof SignedOut) return drawSignIn(`You were signed out; the ${field} of ${id} ${was} not saved.`);
+      if (err instanceof Refused && err.status === 409) {
+        after = { id, field, text: MOVED_MESSAGE, error: true };
+      } else {
+        note.className = 'note error';
+        note.textContent = `Not saved: ${err.message}`;
+        undo();
+        for (const c of held) c.disabled = false;
+        saving = false;
+        return;
+      }
+    }
+    try {
+      await drawAgain(() => drawProject(slug, view, { said: after }));
+    } catch (err) {
+      if (err instanceof SignedOut) return drawSignIn(`You were signed out; the ${field} of ${id} ${was} ${after.error ? 'not ' : ''}saved, but the page could not show it.`);
+      note.className = 'note error';
+      note.textContent = `The page could not refresh (${err.message}): the ${field} ${was} ${after.error ? 'not ' : ''}saved. Reload to see the list as stored.`;
+    }
+  };
   for (const select of selects) {
     const field = fieldOf(select);
     const picker = LIST_PICKERS[field];
-    select.addEventListener('change', async () => {
-      const id = select.getAttribute(`data-${field}-of`);
-      const t = tickets.get(id);
+    select.addEventListener('change', () => {
+      const t = tickets.get(select.getAttribute(`data-${field}-of`));
       if (!t) return;
       const before = picker.before(t);
-      if (saving) {
-        select.value = before;
+      save(t.id, field, picker.value(select), () => { select.value = before; });
+    });
+  }
+  wireListTags(tickets, save, noteOf);
+}
+
+/**
+ * SP-246: a List row's tag controls, saving through wireListPickers' `save`.
+ * Picking a tag from Add Tag adds it; New Tag… opens the row's text box
+ * (Enter adds what is typed, trimmed, and a blank entry adds nothing; Escape
+ * closes it); a chip's × removes that tag. A tag the ticket already has is
+ * said, not sent.
+ */
+function wireListTags(tickets, save, noteOf) {
+  const boxOf = (id) => [...main.querySelectorAll('input[data-new-tag-of]')].find((b) => b.getAttribute('data-new-tag-of') === id);
+  const add = (t, tag, undo) => {
+    if (t.tags.includes(tag)) {
+      const note = noteOf('tags', t.id);
+      note.className = 'note quiet';
+      note.textContent = `${tag} is already a tag.`;
+      undo();
+      return;
+    }
+    save(t.id, 'tags', [...t.tags, tag], undo);
+  };
+  for (const select of main.querySelectorAll('select[data-tags-of]')) {
+    select.addEventListener('change', () => {
+      const t = tickets.get(select.getAttribute('data-tags-of'));
+      if (!t) return;
+      const reset = () => { select.value = ''; };
+      if (select.selectedOptions[0]?.hasAttribute('data-new-tag')) {
+        reset();
+        const box = boxOf(t.id);
+        box.hidden = false;
+        box.focus();
         return;
       }
-      saving = true;
-      const note = noteOf(field, id);
-      const held = selects.filter((c) => !c.disabled);
-      for (const c of held) c.disabled = true;
-      note.className = 'note quiet';
-      note.textContent = 'Saving…';
-      let after;
-      try {
-        await api('PATCH', `/tickets/${encodeURIComponent(id)}`, { [field]: picker.value(select), ifVersion: t.version });
-        after = { id, field, text: 'Saved' };
-      } catch (err) {
-        if (err instanceof SignedOut) return drawSignIn(`You were signed out; the ${field} of ${id} was not saved.`);
-        if (err instanceof Refused && err.status === 409) {
-          after = { id, field, text: MOVED_MESSAGE, error: true };
-        } else {
-          note.className = 'note error';
-          note.textContent = `Not saved: ${err.message}`;
-          select.value = before;
-          for (const c of held) c.disabled = false;
-          saving = false;
-          return;
-        }
+      if (!select.value) return;
+      add(t, select.value, reset);
+    });
+  }
+  for (const box of main.querySelectorAll('input[data-new-tag-of]')) {
+    const t = tickets.get(box.getAttribute('data-new-tag-of'));
+    if (!t) continue;
+    const close = () => {
+      box.value = '';
+      box.hidden = true;
+    };
+    box.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        close();
+        return;
       }
-      try {
-        await drawAgain(() => drawProject(slug, view, { said: after }));
-      } catch (err) {
-        if (err instanceof SignedOut) return drawSignIn(`You were signed out; the ${field} of ${id} was ${after.error ? 'not ' : ''}saved, but the page could not show it.`);
-        note.className = 'note error';
-        note.textContent = `The page could not refresh (${err.message}): the ${field} was ${after.error ? 'not ' : ''}saved. Reload to see the list as stored.`;
-      }
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      const tag = box.value.trim();
+      if (!tag) return close();
+      add(t, tag, () => {});
+    });
+  }
+  for (const button of main.querySelectorAll('button[data-untag-of]')) {
+    button.addEventListener('click', () => {
+      const t = tickets.get(button.getAttribute('data-untag-of'));
+      if (!t) return;
+      save(t.id, 'tags', t.tags.filter((tag) => tag !== button.dataset.tag), () => {});
     });
   }
 }

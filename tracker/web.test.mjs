@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { DEMO_NEWEST_RELEASE, DEMO_OWN_PROJECT, demoNewestRelease, seedDemo, tickingClock } from './demoData.mjs';
 import { reportsOf, REPORT_RANGES, GROWTH_PERIODS, searchTickets, PRIORITIES, timeSplitOf, isFailureNote, TIME_BUCKETS, pipelineControlsOf } from './pageData.mjs';
-import { escapeHtml, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, renderTopics, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, renderListAssignee, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, renderReleaseGroup, controlValueText, mountainTime, wakeInEffectText, modelLastPassText, renderConsole, renderConsoleTile, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, consoleFeature, featureColourIndex, renderFeatureKey, FEATURE_PALETTE, drainLine, capInFlightText } from './web/render.mjs';
+import { escapeHtml, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, renderTopics, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, projectTags, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, renderReleaseGroup, controlValueText, mountainTime, wakeInEffectText, modelLastPassText, renderConsole, renderConsoleTile, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, consoleFeature, featureColourIndex, renderFeatureKey, FEATURE_PALETTE, drainLine, capInFlightText } from './web/render.mjs';
 import { startServer, setupSettingsOf } from './server.mjs';
 import { saveAnswers, setupFields, setupOf } from './setup.mjs';
 import { DANE_FIELDS as SETUP_FIELDS, STEPS as SETUP_STEPS } from '../scripts/onboard/onboard.mjs';
@@ -2192,12 +2192,15 @@ test('picking a priority or assignee sends only that field with the board\'s ver
   assert.ok(wire, 'the dropdowns are wired');
   assert.match(app, /priority: \{ value: \(select\) => select\.value, before: \(t\) => t\.priority \?\? '' \}/, 'priority goes as picked');
   assert.match(app, /assignee: \{ value: \(select\) => \(select\.value \? Number\(select\.value\) : null\), before: \(t\) => String\(t\.assigneeId \?\? ''\) \}/, 'assignee goes as an id, or null for Nobody, as the Change panel sends it');
-  assert.match(wire, /api\('PATCH', `\/tickets\/\$\{encodeURIComponent\(id\)\}`, \{ \[field\]: picker\.value\(select\), ifVersion: t\.version \}\)/);
+  assert.match(wire, /api\('PATCH', `\/tickets\/\$\{encodeURIComponent\(id\)\}`, \{ \[field\]: value, ifVersion: t\.version \}\)/);
+  assert.match(wire, /save\(t\.id, field, picker\.value\(select\), \(\) => \{ select\.value = before; \}\);/, 'a dropdown sends its value and puts the old one back on a refusal');
   assert.match(wire, /const selects = \[\.\.\.main\.querySelectorAll\(fields\.map/, 'one save at a time across both kinds of dropdown');
+  assert.match(wire, /const controls = \[\.\.\.selects, \.\.\.main\.querySelectorAll\('select\[data-tags-of\], button\[data-untag-of\], input\[data-new-tag-of\]'\)\];/, 'the tag controls are held with the dropdowns');
+  assert.match(wire, /const held = controls\.filter/);
   assert.match(wire, /for \(const c of held\) c\.disabled = true;\s*note\.className = 'note quiet';\s*note\.textContent = 'Saving…';/);
   assert.match(wire, /after = \{ id, field, text: 'Saved' \};/);
   assert.match(wire, /err instanceof Refused && err\.status === 409\) \{\s*after = \{ id, field, text: MOVED_MESSAGE, error: true \};/, 'a 409 redraws as stored, with the moved message');
-  assert.match(wire, /note\.textContent = `Not saved: \$\{err\.message\}`;\s*select\.value = before;\s*for \(const c of held\) c\.disabled = false;/, 'any other refusal puts the old value back');
+  assert.match(wire, /note\.textContent = `Not saved: \$\{err\.message\}`;\s*undo\(\);\s*for \(const c of held\) c\.disabled = false;/, 'any other refusal puts the old value back');
   assert.match(wire, /await drawAgain\(\(\) => drawProject\(slug, view, \{ said: after \}\)\);/);
 });
 
@@ -2269,6 +2272,78 @@ test('an assignee picked through the page\'s save shows on the board and on the 
     const undone = await f.call('PATCH', `/tickets/${t.id}`, { body: { assignee: null, ifVersion: after.version } });
     assert.equal(undone.status, 200);
     assert.equal(f.store.getTicket(t.id).assignee, null);
+  } finally { await f.cleanup(); }
+});
+
+// ── Changing a ticket's tags from the List view (SP-246) ───────────────────
+
+test('the project\'s tags are every tag on its board once, alphabetical, skipping anything unreadable', () => {
+  const board = { columns: [
+    { status: 'Queued', tickets: [{ tags: ['tracker', 'Beta'] }, { tags: ['alpha', 'tracker'] }] },
+    { status: 'Live', tickets: [{ tags: ['zeta', 7, ''] }, { tags: null }, {}] },
+  ] };
+  assert.deepEqual(projectTags(board), ['alpha', 'Beta', 'tracker', 'zeta']);
+  for (const bad of [null, undefined, {}, { columns: 'x' }, { columns: [null] }]) assert.deepEqual(projectTags(bad), []);
+});
+
+test('a List row\'s tags are chips with a × each, then Add Tag offering the project\'s other tags and New Tag… last, a hidden box and a note', () => {
+  const html = renderListTags({ id: 'SP-12', tags: ['tracker', 'b"ad'] }, ['alpha', 'b"ad', 'tracker', 'zeta']);
+  const chips = [...html.matchAll(/<span class="tag">([^<]*)<button type="button" class="remove-tag" data-untag-of="SP-12" data-tag="([^"]*)"[^>]*aria-label="Remove tag [^"]* from SP-12">×<\/button><\/span>/g)].map((m) => [m[1], m[2]]);
+  assert.deepEqual(chips, [['tracker', 'tracker'], ['b&quot;ad', 'b&quot;ad']]);
+  const select = /<select class="list-tags" data-tags-of="SP-12" aria-label="Add a tag to SP-12">([\s\S]*?)<\/select>/.exec(html)?.[1];
+  assert.ok(select, 'an Add Tag dropdown');
+  const options = [...select.matchAll(/<option value="([^"]*)"( selected)?( data-new-tag)?>([^<]*)<\/option>/g)].map((m) => [m[1], m[4], Boolean(m[2]), Boolean(m[3])]);
+  assert.deepEqual(options, [['', 'Add Tag', true, false], ['alpha', 'alpha', false, false], ['zeta', 'zeta', false, false], ['', 'New Tag…', false, true]], 'never a tag the ticket has; New Tag… last');
+  assert.match(html, /<input type="text" class="new-tag" data-new-tag-of="SP-12" aria-label="New tag for SP-12" placeholder="New tag, then Enter" hidden>/);
+  assert.match(html, /<span class="note" data-tags-note="SP-12" role="status"><\/span>$/);
+  const none = renderListTags({ id: 'SP-13', tags: [] }, []);
+  assert.doesNotMatch(none, /class="tag"/);
+  assert.match(none, /<option value="" selected>Add Tag<\/option><option value="" data-new-tag>New Tag…<\/option>/);
+  assert.match(renderListTags({ id: '<b>', tags: ['x'] }, []), /data-tags-of="&lt;b&gt;"[\s\S]*data-tags-note="&lt;b&gt;"/);
+});
+
+test('the List view draws the tag controls in every row from the project\'s tags; the Board view\'s cards and Live rows stay as chips', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const draw = app.slice(app.indexOf('async function drawProject('), app.indexOf('async function copyText'));
+  assert.match(draw, /const known = projectTags\(board\);/);
+  assert.match(draw, /<td class="tags">\$\{view === 'list' \? renderListTags\(t, known\) : t\.tags\.map/);
+  const card = /const card = \(t\) => `([\s\S]*?)`;/.exec(app)[1];
+  assert.doesNotMatch(card, /select|renderListTags|remove-tag/);
+  assert.match(app, /wireListTags\(tickets, save, noteOf\);/);
+  const css = readFileSync(WEB('app.css'), 'utf8');
+  assert.match(css, /\.group td\.tags input\.new-tag\[hidden\] \{ display: none; \}/, 'the box stays hidden until New Tag… opens it');
+});
+
+test('a tag picked, typed or removed sends the whole new list through the shared save; a blank entry or a tag already there sends nothing', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const wire = /function wireListTags\(tickets, save, noteOf\) \{([\s\S]*?)\n\}/.exec(app)?.[1];
+  assert.ok(wire, 'the tag controls are wired');
+  assert.match(wire, /save\(t\.id, 'tags', \[\.\.\.t\.tags, tag\], undo\);/, 'adding sends the old tags plus the new one');
+  assert.match(wire, /if \(t\.tags\.includes\(tag\)\) \{[\s\S]*?is already a tag\.`;\s*undo\(\);\s*return;/, 'a tag already there is said, not sent');
+  assert.match(wire, /if \(select\.selectedOptions\[0\]\?\.hasAttribute\('data-new-tag'\)\) \{\s*reset\(\);\s*const box = boxOf\(t\.id\);\s*box\.hidden = false;\s*box\.focus\(\);/, 'New Tag… opens the box');
+  assert.match(wire, /const tag = box\.value\.trim\(\);\s*if \(!tag\) return close\(\);/, 'a blank entry adds nothing');
+  assert.match(wire, /if \(e\.key === 'Escape'\) \{\s*e\.preventDefault\(\);\s*close\(\);/, 'Escape cancels');
+  assert.match(wire, /save\(t\.id, 'tags', t\.tags\.filter\(\(tag\) => tag !== button\.dataset\.tag\), \(\) => \{\}\);/, '× sends the tags without that one');
+});
+
+test('tags changed through the page\'s save show on the board and on the ticket; removing one works the same; an old version is refused and changes nothing', async () => {
+  const f = await fixture();
+  try {
+    const rows = () => f.call('GET', '/projects/alpha/board').then((r) => r.body.columns.flatMap((c) => c.tickets));
+    const t = (await rows())[0];
+    assert.ok(t, 'the test data has a ticket');
+    const added = await f.call('PATCH', `/tickets/${t.id}`, { body: { tags: [...t.tags, 'urgent-fix'], ifVersion: t.version } });
+    assert.equal(added.status, 200);
+    const after = (await rows()).find((r) => r.id === t.id);
+    assert.deepEqual(after.tags, [...t.tags, 'urgent-fix']);
+    assert.deepEqual(f.store.getTicket(t.id).tags, [...t.tags, 'urgent-fix'], 'the ticket page reads the same tags');
+    assert.ok(projectTags({ columns: [{ tickets: await rows() }] }).includes('urgent-fix'), 'and every row\'s Add Tag now offers it');
+    const stale = await f.call('PATCH', `/tickets/${t.id}`, { body: { tags: [], ifVersion: t.version } });
+    assert.equal(stale.status, 409);
+    assert.deepEqual(f.store.getTicket(t.id).tags, [...t.tags, 'urgent-fix'], 'nothing overwritten');
+    const removed = await f.call('PATCH', `/tickets/${t.id}`, { body: { tags: after.tags.filter((x) => x !== 'urgent-fix'), ifVersion: after.version } });
+    assert.equal(removed.status, 200);
+    assert.deepEqual(f.store.getTicket(t.id).tags, t.tags);
   } finally { await f.cleanup(); }
 });
 
