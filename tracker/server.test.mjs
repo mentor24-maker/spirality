@@ -417,6 +417,37 @@ test('PATCH /tickets/:id changes fields; a guard that still holds wins, one that
   } finally { await f.cleanup(); }
 });
 
+test("PATCH /tickets/:id changes a ticket's topics (SP-247): the board shows them and the project's own, a topic of another project is refused, a stale version gets 409", async () => {
+  const f = await fixture();
+  try {
+    f.store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE' });
+    const login = f.store.addTopic({ project: 'alpha', name: 'Login', actor: f.human.id });
+    const billing = f.store.addTopic({ project: 'alpha', name: 'billing', actor: f.human.id });
+    const theirs = f.store.addTopic({ project: 'beta', name: 'Theirs', actor: f.human.id });
+    const one = f.store.fileTicket({ project: 'alpha', actor: f.machine.id, name: 'One', status: 'queued' });
+    const two = f.store.fileTicket({ project: 'alpha', actor: f.machine.id, name: 'Two', status: 'queued' });
+
+    const r = await f.call('PATCH', `/tickets/${one.id}`, { token: f.humanToken, body: { topics: [login.id, billing.id], ifVersion: one.version } });
+    assert.equal(r.status, 200);
+    assert.deepEqual(r.body.changed, ['topics']);
+    assert.equal((await f.call('PATCH', `/tickets/${two.id}`, { token: f.humanToken, body: { topics: [login.id], ifVersion: two.version } })).status, 200);
+
+    const board = (await f.call('GET', '/projects/alpha/board', { token: f.humanToken })).body;
+    assert.deepEqual(board.topics, [{ id: billing.id, name: 'billing' }, { id: login.id, name: 'Login' }], "the project's own, alphabetical, never another project's");
+    const byId = new Map(board.columns.flatMap((c) => c.tickets).map((t) => [t.id, t]));
+    assert.deepEqual(byId.get(one.id).topics, [{ id: billing.id, name: 'billing' }, { id: login.id, name: 'Login' }]);
+    assert.deepEqual(byId.get(two.id).topics, [{ id: login.id, name: 'Login' }]);
+
+    const refused = await f.call('PATCH', `/tickets/${two.id}`, { token: f.humanToken, body: { topics: [login.id, theirs.id], ifVersion: two.version + 1 } });
+    assert.equal(refused.status, 400);
+    assert.equal(refused.body.error, 'bad-topic');
+    const stale = await f.call('PATCH', `/tickets/${two.id}`, { token: f.humanToken, body: { topics: [], ifVersion: two.version } });
+    assert.equal(stale.status, 409);
+    assert.equal(stale.body.error, 'moved');
+    assert.deepEqual(f.store.ticketTopicsOf('alpha').get(two.id), [{ id: login.id, name: 'Login' }], 'neither changed anything');
+  } finally { await f.cleanup(); }
+});
+
 test('two concurrent guarded claims of one Queued ticket over HTTP, through two servers on one database: exactly one gets 200, the other 409', async () => {
   const f = await fixture();
   try {
@@ -2244,7 +2275,8 @@ test('GET /projects/:slug/board keeps the shape outside sites read: the eight co
     f.store.fileTicket({ project: 'alpha', actor: f.machine.id, name: 'One', status: 'queued', priority: 'high', tags: ['x'] });
     const r = await f.call('GET', '/projects/alpha/board', { token: f.humanToken });
     assert.equal(r.status, 200);
-    assert.deepEqual(Object.keys(r.body), ['project', 'projectName', 'columns', 'operator']);
+    assert.deepEqual(Object.keys(r.body), ['project', 'projectName', 'columns', 'operator', 'topics']);
+    assert.deepEqual(r.body.topics, [], "SP-247: the project's topics to pick from");
     assert.deepEqual([r.body.project, r.body.projectName], ['alpha', 'Alpha']);
     assert.deepEqual(r.body.operator, { id: f.human.id, name: 'Operator' }, 'SP-244: the one person a ticket may be assigned to');
     assert.deepEqual(r.body.columns.map((c) => c.status), [...loopStatuses.STAGE_ORDER]);
@@ -2254,8 +2286,9 @@ test('GET /projects/:slug/board keeps the shape outside sites read: the eight co
       assert.ok(Array.isArray(c.tickets));
     }
     const [ticket] = r.body.columns.find((c) => c.status === 'Queued').tickets;
-    assert.deepEqual(Object.keys(ticket), ['id', 'name', 'priority', 'tags', 'assignee', 'updatedAt', 'pullRequest', 'answerIn', 'mergeStands', 'waiting', 'version', 'assigneeId']);
+    assert.deepEqual(Object.keys(ticket), ['id', 'name', 'priority', 'tags', 'assignee', 'updatedAt', 'pullRequest', 'answerIn', 'mergeStands', 'waiting', 'version', 'assigneeId', 'topics']);
     assert.equal(ticket.assigneeId, null, 'SP-244: the assignee by id, beside its name');
+    assert.deepEqual(ticket.topics, [], "SP-247: the ticket's topics");
     assert.equal(ticket.version, f.store.getTicket('AL-1').version, 'the version the list saves with is the stored one');
     assert.deepEqual([ticket.id, ticket.name, ticket.priority, ticket.tags, ticket.assignee, ticket.pullRequest], ['AL-1', 'One', 'high', ['x'], null, null]);
     assert.equal(typeof ticket.updatedAt, 'string');
