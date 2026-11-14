@@ -594,9 +594,11 @@ export function capInFlightText(c, capInFlight) {
  * lane last used (wakeInEffectText), and each model what its lane's last
  * pass ran on (modelLastPassText). Under them, the change log, newest first, in
  * Mountain time. `notes` is `{ key: { ok, text } }`, a Save's outcome to show
- * beside its control.
+ * beside its control. The section is a box that opens and closes (SP-289),
+ * the project's name its header; it starts closed unless `open` is true (the
+ * page passes the box's state from before a redraw, so a Save keeps it open).
  */
-export function renderPipelineControls(view, notes = {}) {
+export function renderPipelineControls(view, notes = {}, open = false) {
   const slug = view.project.slug;
   const locked = view.canChange !== true;
   const models = view.models ?? [];
@@ -625,14 +627,16 @@ export function renderPipelineControls(view, notes = {}) {
   const log = changes.length
     ? `<table class="control-changes"><thead><tr><th>When</th><th>Who</th><th>Setting</th><th>Old Value</th><th>New Value</th></tr></thead><tbody>${changes.map((x) => `<tr><td>${escapeHtml(mountainTime(x.at))}</td><td>${escapeHtml(x.actorName)}</td><td>${escapeHtml(x.label)}</td><td>${escapeHtml(x.from)}</td><td>${escapeHtml(x.to)}</td></tr>`).join('')}</tbody></table>`
     : '<p class="quiet">No changes yet.</p>';
-  return `<section class="pipeline-controls" data-project="${escapeHtml(slug)}">
-    <h3>${escapeHtml(view.project.name)}</h3>
+  return `<details class="pipeline-controls" data-project="${escapeHtml(slug)}"${open ? ' open' : ''}>
+    <summary>${escapeHtml(view.project.name)}</summary>
+    <div class="project-body">
     ${lockedLine}
     ${(view.groups ?? []).map(group).join('')}
     ${view.release ? renderReleaseGroup(view.release, notes.release) : ''}
     <h4>Change Log</h4>
     ${log}
-  </section>`;
+    </div>
+  </details>`;
 }
 
 /**
@@ -1949,6 +1953,34 @@ export function renderListTags({ id, tags = [] }, known = []) {
     '<option value="" data-new-tag>New Tag…</option>',
   ].join('');
   return `${chips}<select class="list-tags" data-tags-of="${escapeHtml(id)}" aria-label="Add a tag to ${escapeHtml(id)}">${options}</select><input type="text" class="new-tag" data-new-tag-of="${escapeHtml(id)}" aria-label="New tag for ${escapeHtml(id)}" placeholder="New tag, then Enter" hidden><span class="note" data-tags-note="${escapeHtml(id)}" role="status"></span>`;
+}
+
+/**
+ * The Add Task box's two ways to name a task (SP-248): `suggest`, where the
+ * title is picked from suggestions made from the description alone, and
+ * `own`, where he types a title first and it is offered beside them.
+ */
+export const TITLE_MODES = Object.freeze(['suggest', 'own']);
+
+/** A kept title mode read back from the browser: `own` only when it says so, else `suggest`. */
+export function titleModeOf(text) {
+  return text === 'own' ? 'own' : 'suggest';
+}
+
+/**
+ * The Add Task box's choice list: in Write My Own Title his own title first
+ * ("Keep my title: ..."), then the suggested ones, each a radio button whose
+ * value is the title exactly as it is filed. A suggestion that repeats his
+ * own title is not offered twice. The first choice starts picked. Every
+ * title is escaped; an empty list draws nothing.
+ */
+export function renderTitleChoices({ own = null, titles = [] } = {}) {
+  const mine = typeof own === 'string' && own.trim() ? own : null;
+  const choices = [
+    ...(mine == null ? [] : [{ value: mine, text: `Keep my title: ${mine}` }]),
+    ...titles.filter((t) => typeof t === 'string' && t.trim() && t !== mine).map((t) => ({ value: t, text: t })),
+  ];
+  return choices.map((c, i) => `<label class="title-choice"><input type="radio" name="title-choice" value="${escapeHtml(c.value)}"${i === 0 ? ' checked' : ''}> <span>${escapeHtml(c.text)}</span></label>`).join('');
 }
 
 /** The columns a stage's table sorts on, in the order they are drawn, with the class each cell wears. */

@@ -250,8 +250,17 @@ table.colours td.value { color: var(--quiet); font-family: ui-monospace, Menlo, 
 table.colours tr.unset input { opacity: 0.25; }
 table.colours input[type="color"] { width: 3rem; height: 2rem; padding: 0; border: var(--hairline); border-radius: 4px; cursor: pointer; }
 form.colours .row { display: flex; gap: 1rem; align-items: center; margin-top: 1rem; }
-section.pipeline-controls { margin-bottom: 2rem; }
-section.pipeline-controls h4 { margin: 1.25rem 0 0.25rem; }
+/* The Settings page (SP-289): a menu of two tabs under the heading, each project a box that opens and closes, and one look for every button. */
+nav.settings-tabs { display: flex; gap: 2rem; margin: 0 0 1.5rem; border-bottom: 1px solid var(--line); }
+nav.settings-tabs a { padding: 0.5rem 0; margin-bottom: -1px; color: var(--quiet); font-weight: 600; text-decoration: none; border-bottom: 3px solid transparent; }
+nav.settings-tabs a:hover { color: var(--ink); }
+nav.settings-tabs a[aria-current] { color: #000077; border-bottom-color: #000077; }
+div.settings-tab button { border: 0; border-radius: 15px; background: #000077; color: #fff; font-weight: 700; cursor: pointer; }
+div.settings-tab button:disabled { opacity: 0.4; cursor: default; }
+details.pipeline-controls { margin-bottom: 1rem; border: 1px solid #000077; border-radius: 30px; overflow: hidden; }
+details.pipeline-controls > summary { padding: 0.75rem 1.5rem; background: #000077; color: #fff; font-weight: 700; font-size: 1.1rem; cursor: pointer; }
+details.pipeline-controls > .project-body { padding: 0.5rem 1.5rem 1.5rem; }
+details.pipeline-controls h4 { margin: 1.25rem 0 0.25rem; }
 table.controls { width: 100%; max-width: 56rem; table-layout: fixed; }
 table.controls td { vertical-align: middle; }
 table.controls td.label { width: 17rem; }
@@ -259,17 +268,17 @@ table.controls td.input { width: 10rem; }
 table.controls td.value { width: 14rem; color: var(--quiet); font-size: 0.85rem; }
 table.controls td.save .note:not(:empty) { display: block; margin-top: 0.25rem; }
 table.controls input[type="number"] { width: 7rem; }
-section.pipeline-controls .default { color: var(--quiet); font-size: 0.75rem; border: var(--hairline); border-radius: 4px; padding: 0 0.3rem; margin-left: 0.4rem; }
-section.pipeline-controls p.not-yet { margin-top: 0.25rem; font-size: 0.85rem; }
-section.pipeline-controls .in-effect { display: block; color: var(--quiet); font-size: 0.85rem; }
-section.pipeline-controls .in-effect.waiting { color: var(--ink); font-weight: 600; }
-section.pipeline-controls .in-flight { display: block; color: var(--quiet); font-size: 0.85rem; }
-section.pipeline-controls .in-flight.full { color: var(--ink); font-weight: 600; }
-section.pipeline-controls .release-group p { margin: 0.25rem 0; }
-section.pipeline-controls .release-actions { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin: 0.5rem 0; }
+details.pipeline-controls .default { color: var(--quiet); font-size: 0.75rem; border: var(--hairline); border-radius: 4px; padding: 0 0.3rem; margin-left: 0.4rem; }
+details.pipeline-controls p.not-yet { margin-top: 0.25rem; font-size: 0.85rem; }
+details.pipeline-controls .in-effect { display: block; color: var(--quiet); font-size: 0.85rem; }
+details.pipeline-controls .in-effect.waiting { color: var(--ink); font-weight: 600; }
+details.pipeline-controls .in-flight { display: block; color: var(--quiet); font-size: 0.85rem; }
+details.pipeline-controls .in-flight.full { color: var(--ink); font-weight: 600; }
+details.pipeline-controls .release-group p { margin: 0.25rem 0; }
+details.pipeline-controls .release-actions { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin: 0.5rem 0; }
 /* What a pause is waiting on (SP-237): "Draining" while tickets are still finishing. */
-section.pipeline-controls .drain { margin-top: 0.25rem; }
-section.pipeline-controls .drain.draining { color: #B8860B; }
+details.pipeline-controls .drain { margin-top: 0.25rem; }
+details.pipeline-controls .drain.draining { color: #B8860B; }
 table.control-changes { max-width: 48rem; font-size: 0.9rem; }
 button.action { display: inline-flex; padding: 0.2rem; margin-right: 0.15rem; border: 0; border-radius: 4px; background: transparent; color: var(--quiet); cursor: pointer; }
 button.action:hover { color: var(--red); background: #fbe9e9; }
@@ -298,6 +307,16 @@ details.add-task .note:not(:empty) { background: #fff; border-radius: 4px; paddi
 details.add-task .hint { color: var(--ink); }
 details.add-task > summary { cursor: pointer; font-weight: 600; }
 details.add-task form.request textarea { min-height: 8rem; }
+/* The title toggle and the suggested titles (SP-248): radio buttons sit beside their words, not as full-width fields. */
+details.add-task [hidden] { display: none; }
+details.add-task .title-mode { display: inline-flex; margin-top: 0.75rem; border: 1px solid var(--ink); border-radius: 6px; overflow: hidden; background: #fff; }
+details.add-task .title-mode label { display: flex; align-items: center; gap: 0.4rem; margin: 0; padding: 0.35rem 0.85rem; cursor: pointer; font-weight: 600; }
+details.add-task .title-mode label + label { border-left: 1px solid var(--ink); }
+details.add-task .title-mode label:has(input:checked) { background: var(--ink); color: #fff; }
+details.add-task form.request .title-mode input, details.add-task form.request .title-choice input { display: inline-block; width: auto; margin: 0; padding: 0; }
+details.add-task fieldset.title-choices { margin: 1rem 0 0; padding: 0.5rem 0.85rem 0.75rem; border: 1px solid var(--ink); border-radius: 6px; background: #fff; }
+details.add-task fieldset.title-choices legend { font-weight: 600; padding: 0 0.35rem; background: #fff; border-radius: 4px; }
+details.add-task form.request label.title-choice { display: flex; align-items: baseline; gap: 0.5rem; margin-top: 0.4rem; font-weight: 400; cursor: pointer; }
 p.filed-note { margin: 0 0 1rem; }
 .tasks-head { position: relative; }
 .filed-pod { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 10; max-width: 90%; padding: 0.5rem 1.25rem; border: 2px solid var(--blue); border-radius: 10px; background: #eaf5fe; color: var(--ink); font-size: 1.25rem; font-weight: 600; text-align: center; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15); animation: filed-pod-fade 4s linear forwards; }

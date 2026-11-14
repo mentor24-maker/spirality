@@ -26,7 +26,7 @@
  * an emailed link's own page. The link's token is sent only in a JSON body,
  * never in an address.
  */
-import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, unwrapDoc, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderAnswerIn, renderHeldUp, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, lookupTicket, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, pipelinePodLabel, renderHealth, healthLines, renderCommandList, renderCommandView, renderCommandDetails, renderContextDocs, renderTopics, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, projectTags, sortTickets, nextSort, renderDocumentation, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, lowerMeridiem, renderPipelineControls, renderConsole, drainLine } from './render.mjs';
+import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, unwrapDoc, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderAnswerIn, renderHeldUp, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, lookupTicket, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, pipelinePodLabel, renderHealth, healthLines, renderCommandList, renderCommandView, renderCommandDetails, renderContextDocs, renderTopics, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, projectTags, sortTickets, nextSort, renderDocumentation, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, lowerMeridiem, renderPipelineControls, renderConsole, drainLine, renderTitleChoices, titleModeOf } from './render.mjs';
 
 /** Where an earlier version of the page kept a pasted token; removed on load, never read. */
 const OLD_TOKEN_KEY = 'tracker-token';
@@ -38,6 +38,8 @@ const PROJECT_KEY = 'tracker-project';
 const PROJECT_NAME_KEY = 'tracker-project-name';
 /** The Add Task box's text while it is being typed, so a sign-out or a reload does not lose it. */
 const DRAFT_KEY = 'tracker-request-draft';
+/** The Add Task box's title toggle, Suggest a Title or Write My Own Title, kept beside the draft; it outlives a filing. */
+const TITLE_MODE_KEY = 'tracker-request-title-mode';
 const main = document.getElementById('main');
 const who = document.getElementById('who');
 const headerProject = document.getElementById('project');
@@ -1383,14 +1385,24 @@ async function drawProject(slug, view, { adding = false, filed = null, unchecked
     <details class="add-task">
       <summary>Add Task</summary>
       <form class="request">
-        <label for="title">Title</label>
-        <input id="title" type="text" required>
+        <div class="title-mode" role="radiogroup" aria-label="How the Title Is Chosen">
+          <label><input type="radio" name="title-mode" value="suggest"> Suggest a Title</label>
+          <label><input type="radio" name="title-mode" value="own"> Write My Own Title</label>
+        </div>
+        <div class="own-title">
+          <label for="title">Title</label>
+          <input id="title" type="text">
+        </div>
         <label for="description">Description</label>
         <textarea id="description"></textarea>
         <label for="files">Files</label>
         <input id="files" type="file" multiple>
         <span class="hint quiet">Screenshots, PDFs or notes, up to 10 MB each. Files are not kept in the saved draft: after a reload, pick them again.</span>
-        <div class="row"><button type="submit">Submit Task</button><span class="note"></span></div>
+        <fieldset class="title-choices" hidden>
+          <legend>Pick a Title</legend>
+          <div class="choices"></div>
+        </fieldset>
+        <div class="row"><button type="submit" class="submit-task">Suggest Titles</button><button type="button" class="suggest-again" hidden>Suggest Again</button><span class="note"></span></div>
       </form>
     </details>
     <dialog class="project-check" aria-labelledby="project-check-question">
@@ -2118,6 +2130,14 @@ function savedDraft() {
   } catch { return { title: '', description: '' }; }
 }
 
+/** The Add Task box's kept title mode (titleModeOf): Suggest a Title unless Write My Own Title was left picked. */
+function savedTitleMode() {
+  try { return titleModeOf(localStorage.getItem(TITLE_MODE_KEY)); } catch { return 'suggest'; }
+}
+
+/** What the box says when the title suggester did not answer at all (no word from the tracker). */
+const SUGGEST_UNANSWERED = 'No titles could be suggested: the tracker did not answer. Write your own title.';
+
 /**
  * The Tasks page's Add Task box: a title and a description, filed into
  * `slug`, the project the page is showing, in `Requested`, which no loop
@@ -2126,6 +2146,19 @@ function savedDraft() {
  * reload never loses it, and a kept draft with text in it opens the box on
  * its own; it is forgotten once the ticket is filed, and the page redraws
  * with the box closed and the new ticket in its stage.
+ *
+ * The title is picked from suggestions (SP-248). A toggle at the top picks
+ * how: Suggest a Title shows only the Description (required), Write My Own
+ * Title shows the Title too. The toggle is kept in this browser beside the
+ * draft and outlives a filing. Either way, the first submit ("Suggest
+ * Titles") sends the words to the title suggester
+ * (`/tickets/suggest-titles`) and shows its five titles as a choice list,
+ * his own title first in Write My Own Title; "Suggest Again" asks for a
+ * fresh five, the words untouched. Editing the words after that puts the
+ * button back to Suggest Titles, so a list never names stale words. When
+ * the suggester fails, the box says why in one line and shows the Title
+ * field, and the next submit files what he types there. The picked title
+ * is filed exactly as shown.
  *
  * Before filing, the box asks the server whether the words fit another
  * project better (tracker/projectGuess.mjs). If one does, the
@@ -2141,32 +2174,112 @@ function wireAddTask(slug, view, adding) {
   const title = form.querySelector('#title');
   const description = form.querySelector('#description');
   const files = form.querySelector('#files');
+  const ownTitle = form.querySelector('.own-title');
+  const modes = [...form.querySelectorAll('input[name="title-mode"]')];
+  const choices = form.querySelector('fieldset.title-choices');
+  const choiceList = choices.querySelector('.choices');
+  const button = form.querySelector('button.submit-task');
+  const again = form.querySelector('button.suggest-again');
   const draft = savedDraft();
   title.value = draft.title;
   description.value = draft.description;
-  box.addEventListener('toggle', () => { if (box.open) title.focus(); });
+  let mode = savedTitleMode();
+  // 'ask': the next submit asks for titles; 'pick': the choice list is up;
+  // 'type': the suggester failed, so he types the title himself.
+  let stage = 'ask';
+  const show = () => {
+    for (const m of modes) m.checked = m.value === mode;
+    const typing = mode === 'own' || stage === 'type';
+    ownTitle.hidden = !typing;
+    title.required = typing;
+    description.required = mode === 'suggest';
+    choices.hidden = stage !== 'pick';
+    if (stage !== 'pick') choiceList.innerHTML = '';
+    again.hidden = stage === 'ask';
+    button.textContent = stage === 'ask' ? 'Suggest Titles' : 'Submit Task';
+  };
+  const firstField = () => (mode === 'own' ? title : description);
+  show();
+  box.addEventListener('toggle', () => { if (box.open) firstField().focus(); });
   if (adding || draft.title || draft.description) box.open = true;
   const keep = () => {
     try {
       localStorage.setItem(DRAFT_KEY, JSON.stringify({ title: title.value, description: description.value }));
     } catch { /* the form still works; a sign-out would lose the text */ }
   };
-  form.addEventListener('input', keep);
+  form.addEventListener('input', (e) => {
+    keep();
+    // New words make the list stale: ask again. A failed suggestion's typed title stays.
+    if (stage === 'pick' && (e.target === title || e.target === description)) {
+      stage = 'ask';
+      show();
+    }
+  });
   const note = form.querySelector('.note');
+  const say = (text, kind = 'quiet') => {
+    note.className = kind ? `note ${kind}` : 'note';
+    note.textContent = text;
+  };
+  for (const m of modes) {
+    m.addEventListener('change', () => {
+      if (!m.checked) return;
+      mode = titleModeOf(m.value);
+      try { localStorage.setItem(TITLE_MODE_KEY, mode); } catch { /* the box still works; it opens on Suggest a Title next time */ }
+      stage = 'ask';
+      show();
+      say('', '');
+    });
+  }
+  const busy = (on) => {
+    button.disabled = on;
+    again.disabled = on;
+  };
+
+  // Ask for five titles from the words as typed; show them, or say why not and show the Title field.
+  const askTitles = async () => {
+    busy(true);
+    say('Suggesting titles…');
+    let titles;
+    try {
+      ({ titles } = await api('POST', `/projects/${encodeURIComponent(slug)}/tickets/suggest-titles`,
+        mode === 'own' ? { description: description.value, title: title.value } : { description: description.value }));
+    } catch (err) {
+      if (err instanceof SignedOut) return drawSignIn('You were signed out; your request was not filed. What you typed is kept: it will be back in the form once you sign in.');
+      stage = 'type';
+      show();
+      say(err instanceof Refused ? err.message : SUGGEST_UNANSWERED, 'error');
+      busy(false);
+      title.focus();
+      return;
+    }
+    choiceList.innerHTML = renderTitleChoices({ own: mode === 'own' ? title.value : null, titles });
+    stage = 'pick';
+    show();
+    say('', '');
+    busy(false);
+    choiceList.querySelector('input:checked')?.focus();
+  };
+  again.addEventListener('click', () => { keep(); askTitles(); });
+
   const question = main.querySelector('dialog.project-check');
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     keep();
-    const button = form.querySelector('button');
-    button.disabled = true;
-    note.className = 'note quiet';
-    note.textContent = 'Checking the project…';
+    if (stage === 'ask') return askTitles();
+    // The title as shown: the picked choice, or what he typed after a failed suggestion.
+    const picked = stage === 'pick' ? choiceList.querySelector('input[name="title-choice"]:checked')?.value : title.value;
+    if (!picked) {
+      say('Pick a title first.', 'error');
+      return;
+    }
+    busy(true);
+    say('Checking the project…');
     // The check reads the words and writes nothing; a failed check files here as before.
     let suggest = null;
     let unchecked = false;
     try {
       ({ suggest } = await api('POST', `/projects/${encodeURIComponent(slug)}/tickets/check`, {
-        name: title.value, description: description.value,
+        name: picked, description: description.value,
       }));
     } catch (err) {
       if (err instanceof SignedOut) return drawSignIn('You were signed out; your request was not filed. What you typed is kept: it will be back in the form once you sign in.');
@@ -2177,27 +2290,24 @@ function wireAddTask(slug, view, adding) {
       const choice = await askProject(question, suggest);
       if (choice === 'move') into = suggest.slug;
       else if (choice !== 'keep') {
-        // Closed: nothing filed, the text stays in the form.
-        note.className = 'note';
-        note.textContent = '';
-        button.disabled = false;
-        title.focus();
+        // Closed: nothing filed, the text and the choice stay in the form.
+        say('', '');
+        busy(false);
+        button.focus();
         return;
       }
     }
-    note.className = 'note quiet';
-    note.textContent = 'Filing…';
+    say('Filing…');
     let ticket;
     try {
       // Exactly as typed: no trimming, no formatting, the same rule as the reply box.
       ticket = await api('POST', `/projects/${encodeURIComponent(into)}/tickets`, {
-        name: title.value, description: description.value, status: 'Requested',
+        name: picked, description: description.value, status: 'Requested',
       });
     } catch (err) {
       if (err instanceof SignedOut) return drawSignIn('You were signed out; your request was not filed. What you typed is kept: it will be back in the form once you sign in.');
-      note.className = 'note error';
-      note.textContent = `Not filed: ${err.message}`;
-      button.disabled = false;
+      say(`Not filed: ${err.message}`, 'error');
+      busy(false);
       return;
     }
     try { localStorage.removeItem(DRAFT_KEY); } catch { /* nothing kept */ }
@@ -2225,8 +2335,7 @@ function wireAddTask(slug, view, adding) {
       await drawAgain(() => drawProject(into, view, { filed: ticket.id, unchecked, uploaded, notUploaded }));
     } catch (err) {
       if (err instanceof SignedOut) return drawSignIn(`You were signed out; ${ticket.id} was filed.`);
-      note.className = 'note error';
-      note.textContent = `Filed ${ticket.id}, but the page could not be drawn again: ${err.message}`;
+      say(`Filed ${ticket.id}, but the page could not be drawn again: ${err.message}`, 'error');
     }
   });
 }
@@ -2549,6 +2658,11 @@ function reportsPath(slug, range) {
  * all; the page then reads the colours back and says they were saved only
  * when what it reads is what it sent. A loop's sign-in is refused by the
  * server, and the page shows that refusal as it is.
+ *
+ * Two tabs (SP-289), chosen from a menu under the heading: Pipeline Controls
+ * (shown first) and Styles (Stage Colours). The chosen tab is kept in the
+ * address (`#pipeline-controls`, `#styles`), so a reload or a shared link
+ * opens the same one.
  */
 async function drawSettings() {
   const { stages } = await api('GET', '/stage-colours');
@@ -2565,15 +2679,29 @@ async function drawSettings() {
     </tr>`;
   main.innerHTML = `
     <h1>Settings</h1>
-    <h2>Stage Colours</h2>
-    <p class="quiet">Choose a colour for each stage of the loop. The same colours show for everyone.</p>
-    <form class="colours">
-      <table class="colours"><thead><tr><th>Stage</th><th>Colour</th><th></th><th></th></tr></thead><tbody>${stages.map(row).join('')}</tbody></table>
-      <div class="row"><button type="submit">Save</button><span class="note"></span></div>
-    </form>
-    <h2>Pipeline Controls</h2>
-    <p class="quiet">How each project's loop runs, for experimenting with the pipeline. Everyone can see them; only a project's operator can change them. Every change is logged below its project.</p>
-    <div class="pipeline-controls">${controls.length ? '' : '<p class="quiet">No projects to show.</p>'}</div>`;
+    <nav class="settings-tabs">${SETTINGS_TABS.map((t) => `<a href="#${t.id}" data-tab="${t.id}">${t.title}</a>`).join('')}</nav>
+    <div class="settings-tab" data-tab="pipeline-controls">
+      <p class="quiet">How each project's loop runs, for experimenting with the pipeline. Everyone can see them; only a project's operator can change them. Every change is logged below its project.</p>
+      <div class="pipeline-controls">${controls.length ? '' : '<p class="quiet">No projects to show.</p>'}</div>
+    </div>
+    <div class="settings-tab" data-tab="styles">
+      <h2>Stage Colours</h2>
+      <p class="quiet">Choose a colour for each stage of the loop. The same colours show for everyone.</p>
+      <form class="colours">
+        <table class="colours"><thead><tr><th>Stage</th><th>Colour</th><th></th><th></th></tr></thead><tbody>${stages.map(row).join('')}</tbody></table>
+        <div class="row"><button type="submit">Save</button><span class="note"></span></div>
+      </form>
+    </div>`;
+  showSettingsTab(settingsTabAt());
+  for (const a of main.querySelectorAll('nav.settings-tabs a')) {
+    a.addEventListener('click', (e) => {
+      // The tab changes in place: no redraw, so nothing typed is lost.
+      e.preventDefault();
+      e.stopPropagation();
+      history.replaceState(null, '', `${location.pathname}${location.search}#${a.dataset.tab}`);
+      showSettingsTab(a.dataset.tab);
+    });
+  }
   drawPipelineControls(main.querySelector('div.pipeline-controls'), controls);
   const form = main.querySelector('form.colours');
   const rows = [...form.querySelectorAll('tbody tr')];
@@ -2612,6 +2740,27 @@ async function drawSettings() {
   });
 }
 
+/** The Settings page's tabs (SP-289), in menu order; the first opens by default. */
+const SETTINGS_TABS = [
+  { id: 'pipeline-controls', title: 'Pipeline Controls' },
+  { id: 'styles', title: 'Styles' },
+];
+
+/** The Settings tab the address names (`#styles`), or the first one. */
+function settingsTabAt() {
+  const named = location.hash.slice(1);
+  return SETTINGS_TABS.some((t) => t.id === named) ? named : SETTINGS_TABS[0].id;
+}
+
+/** Show one Settings tab, hide the others, and mark its menu item chosen. */
+function showSettingsTab(id) {
+  for (const tab of main.querySelectorAll('div.settings-tab')) tab.hidden = tab.dataset.tab !== id;
+  for (const a of main.querySelectorAll('nav.settings-tabs a')) {
+    if (a.dataset.tab === id) a.setAttribute('aria-current', 'page');
+    else a.removeAttribute('aria-current');
+  }
+}
+
 /**
  * The Settings page's Pipeline Controls (SP-224): one section per project
  * (renderPipelineControls), each control with its own Save. A Save sends the
@@ -2623,8 +2772,10 @@ async function drawSettings() {
 function drawPipelineControls(box, views) {
   const notes = new Map();
   const draw = () => {
-    box.innerHTML = views.map((v) => renderPipelineControls(v, notes.get(v.project.slug) ?? {})).join('');
-    for (const section of box.querySelectorAll('section.pipeline-controls')) {
+    // A box open before the redraw stays open after it (SP-289).
+    const open = new Set([...box.querySelectorAll('details.pipeline-controls[open]')].map((d) => d.dataset.project));
+    box.innerHTML = views.map((v) => renderPipelineControls(v, notes.get(v.project.slug) ?? {}, open.has(v.project.slug))).join('');
+    for (const section of box.querySelectorAll('details.pipeline-controls')) {
       const slug = section.dataset.project;
       for (const tr of section.querySelectorAll('tr[data-control]')) {
         const button = tr.querySelector('button');
@@ -2700,7 +2851,7 @@ function drawPipelineControls(box, views) {
       return; // the next tick tries again; the line already shown stays
     }
     for (const v of fresh) {
-      const slot = [...box.querySelectorAll('section.pipeline-controls')].find((s) => s.dataset.project === v.project.slug)?.querySelector('.drain-box');
+      const slot = [...box.querySelectorAll('details.pipeline-controls')].find((s) => s.dataset.project === v.project.slug)?.querySelector('.drain-box');
       if (slot) slot.innerHTML = drainLine(v);
     }
   }, DRAIN_REFRESH_MS);
@@ -3490,7 +3641,8 @@ const SIDEWAYS = '.console';
 function keepPlace() {
   // A stage is known by its name alone, so a colour added on Settings between
   // two redraws (which changes its classes) does not lose its fold (SP-196).
-  const key = (d) => (d.dataset.stage ? `stage|${d.dataset.stage}` : d.className);
+  // A Settings project box (SP-289) is known by its project the same way.
+  const key = (d) => (d.dataset.stage ? `stage|${d.dataset.stage}` : d.dataset.project ? `project|${d.dataset.project}` : d.className);
   const open = new Map([...main.querySelectorAll('details')].map((d) => [key(d), d.open]));
   const y = window.scrollY;
   // Each stage's sort (SP-174), by stage, put back on the stage's new table.
