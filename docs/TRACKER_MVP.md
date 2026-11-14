@@ -249,6 +249,7 @@ answers are JSON (structured text programs read).
 | `GET /actors/:id` | an actor's id, kind and name (never a token), for showing who wrote a comment |
 | `GET /projects/:slug/tickets?status=&open=` | the queue |
 | `POST /projects/:slug/tickets` | file a ticket |
+| `POST /projects/:slug/tickets/suggest-titles` | for the Add Task box (SP-245): `{ description, title? }` → `{ titles: [five] }`, suggested by `claude -p` on this machine with the `suggest-titles` skill (no tools, 60 seconds, the words on standard input; `TRACKER_CLAUDE` names the command, `claude` on the PATH without it). The same sign-in and project rules as the Add Task box's project check; writes nothing. An empty description is 400 `no-description` and runs nothing; no `claude` 503 `no-claude`; too slow 504 `too-slow`; anything but five usable titles 502 `bad-answer` |
 | `GET /tickets/:id` | one ticket with its comments, oldest first |
 | `PATCH /tickets/:id` | change name, status, priority, tags, assignee, description or Loop note, with optional `ifStatus` / `ifVersion`; answers 409 ("conflict") and writes nothing if the ticket has moved. A person's token may assign the ticket only to its project's operator or to nobody: anyone else gets 400 `bad-assignee` and nothing is written |
 | `DELETE /tickets/:id` | delete a ticket nobody has started (`Requested` or `Queued`) with its comments and events; answers 409 `not-deletable` with its status for any other, 404 for an unknown one; the server log names the ticket and the actor |
