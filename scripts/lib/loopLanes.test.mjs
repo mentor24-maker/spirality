@@ -9,7 +9,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import {
-  copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync,
+  copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -287,11 +287,294 @@ test('settings that cannot be read, or a model not on the list, run the pass on 
   }
 });
 
+// The installer, run for real with --print-plists, which writes and loads
+// nothing (SP-271). HOME is a scratch folder whose .local/bin holds this node,
+// the last folder on launchd's PATH, so the installer's own node calls work
+// on any machine (CI included); plists it would write name that HOME.
+function scratchHome() {
+  const home = mkdtempSync(join(tmpdir(), 'installer-home-'));
+  mkdirSync(join(home, '.local/bin'), { recursive: true });
+  symlinkSync(process.execPath, join(home, '.local/bin/node'));
+  mkdirSync(join(home, 'Library/LaunchAgents'), { recursive: true });
+  return home;
+}
+
+/** A project checkout folder (not a git checkout) with its own manifest. */
+function scratchProject(overrides = {}) {
+  const dir = mkdtempSync(join(tmpdir(), 'installer-project-'));
+  const spirality = JSON.parse(readFileSync(join(REPO, 'spirality.project.json'), 'utf8'));
+  writeFileSync(join(dir, 'spirality.project.json'), JSON.stringify({
+    ...spirality, projectSlug: 'normie', launchdPrefix: 'com.normie', logDir: join(dir, 'logs'), ...overrides,
+  }));
+  return dir;
+}
+
+function runInstaller(args, home, cwd = REPO) {
+  const env = { ...process.env, HOME: home };
+  delete env.SPIRALITY_PROJECT;
+  return spawnSync('bash', [join(REPO, 'scripts/install_loop_runner.sh'), ...args], { encoding: 'utf8', env, cwd });
+}
+
+/** --print-plists output, as { file name: plist text }. */
+function printedPlists(args, home, cwd = REPO) {
+  const r = runInstaller(['--print-plists', ...args], home, cwd);
+  assert.equal(r.status, 0, r.stderr);
+  const out = {};
+  for (const part of r.stdout.split(/^=== /m).slice(1)) {
+    const nl = part.indexOf('\n');
+    out[part.slice(0, nl).split('/').pop()] = part.slice(nl + 1);
+  }
+  return out;
+}
+
+const stringAfter = (plist, key) => plist.match(new RegExp(`<key>${key}</key>\\s*(?:<array>\\s*)?<string>([^<]*)</string>`))?.[1];
+
+test('for a project, the installer writes plists whose program is Spirality\'s runner and whose working folder is the project\'s checkout (SP-271)', () => {
+  const home = scratchHome();
+  const project = scratchProject();
+  try {
+    const plists = printedPlists(['--project', project], home);
+    assert.deepEqual(Object.keys(plists).sort(), ['com.normie.loop-build.plist', 'com.normie.loop-intake.plist', 'com.normie.loop-review.plist', 'com.normie.relay.plist']);
+    for (const lane of lanes()) {
+      const text = plists[`com.normie.${lane}.plist`];
+      assert.equal(stringAfter(text, 'Label'), `com.normie.${lane}`);
+      assert.equal(stringAfter(text, 'ProgramArguments'), join(REPO, 'scripts/loop_runner.sh'), `${lane}: not Spirality's runner`);
+      assert.match(text, new RegExp(`<string>${lane}</string>\\n\\s*<string>${INTERVALS[lane]}</string>`));
+      assert.equal(stringAfter(text, 'WorkingDirectory'), project);
+      assert.equal(stringAfter(text, 'SPIRALITY_PROJECT'), project);
+    }
+    const relay = plists['com.normie.relay.plist'];
+    assert.equal(stringAfter(relay, 'ProgramArguments'), join(REPO, 'scripts/run_relay.sh'));
+    assert.match(relay, /<string>--tick<\/string>/);
+    assert.equal(stringAfter(relay, 'WorkingDirectory'), project);
+    assert.equal(stringAfter(relay, 'SPIRALITY_PROJECT'), project);
+    assert.equal(stringAfter(relay, 'StandardOutPath'), join(project, 'logs/normie-relay.log'));
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(project, { recursive: true, force: true });
+  }
+});
+
+test('Spirality\'s own plists are what they always were: its own folder, no SPIRALITY_PROJECT, even one left in the shell (SP-271)', () => {
+  const home = scratchHome();
+  try {
+    const own = JSON.parse(readFileSync(join(REPO, 'spirality.project.json'), 'utf8'));
+    const plists = printedPlists([], home);
+    assert.deepEqual(Object.keys(plists).sort(), [...lanes(), 'relay'].map((j) => `${own.launchdPrefix}.${j}.plist`).sort());
+    for (const text of Object.values(plists)) {
+      assert.equal(stringAfter(text, 'WorkingDirectory'), REPO.replace(/\/$/, ''));
+      assert.doesNotMatch(text, /SPIRALITY_PROJECT/);
+    }
+    // Naming Spirality's own folder as the project is Spirality's own lanes.
+    assert.deepEqual(printedPlists(['--project', REPO], home), plists);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test('the relay\'s plist starts run_relay.sh --tick on the one-minute tick, never on the wake time, so a new wake time needs no reinstall (SP-236)', () => {
-  const relay = installer.slice(installer.indexOf('# The relay: started on a short fixed tick'), installer.indexOf('if tracker_configured; then install_tracker'));
-  assert.match(relay, /<string>\$REPO\/scripts\/run_relay\.sh<\/string>\n\s*<string>--tick<\/string>/);
-  assert.match(relay, /<key>StartInterval<\/key>\n\s*<integer>\$\(relay_tick\)<\/integer>/);
+  const home = scratchHome();
+  try {
+    const relay = Object.entries(printedPlists([], home)).find(([f]) => f.endsWith('.relay.plist'))[1];
+    assert.match(relay, /<string>[^<]*\/scripts\/run_relay\.sh<\/string>\n\s*<string>--tick<\/string>/);
+    assert.match(relay, /<key>StartInterval<\/key>\n\s*<integer>(\d+)<\/integer>/);
+    assert.equal(Number(relay.match(/<key>StartInterval<\/key>\n\s*<integer>(\d+)<\/integer>/)[1]), Number(spawnSync(process.execPath, [join(REPO, 'scripts/lib/loopSchedule.mjs'), 'tick'], { encoding: 'utf8' }).stdout.trim()));
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
   assert.match(installer, /^relay_tick\(\) \{ PATH="\$LAUNCHD_PATH" node "\$REPO\/scripts\/lib\/loopSchedule\.mjs" tick; \}$/m);
-  // The lanes are handed their default as the first sleep, and read the set one after.
-  assert.match(installer, /<string>\$s<\/string>\n\s*<string>\$\(interval_of "\$s"\)<\/string>/);
+});
+
+test('installing for a project whose lanes run its own copy refuses, naming them, and changes nothing without --take-over (SP-271)', () => {
+  const home = scratchHome();
+  const project = scratchProject();
+  try {
+    const theirs = join(home, 'Library/LaunchAgents/com.normie.loop-build.plist');
+    const before = `<plist version="1.0">\n<dict>\n    <key>ProgramArguments</key>\n    <array>\n        <string>${project}/scripts/loop_runner.sh</string>\n    </array>\n</dict>\n</plist>\n`;
+    writeFileSync(theirs, before);
+    const r = runInstaller(['--install', '--project', project], home);
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assert.match(r.stderr, /Refusing to install: these jobs run something other than Spirality's runner/);
+    assert.match(r.stderr, new RegExp(`com\\.normie\\.loop-build \\(runs ${project}/scripts/loop_runner\\.sh\\)`));
+    assert.match(r.stderr, /--take-over/);
+    assert.equal(readFileSync(theirs, 'utf8'), before);
+    assert.deepEqual(readdirSync(join(home, 'Library/LaunchAgents')), ['com.normie.loop-build.plist']);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(project, { recursive: true, force: true });
+  }
+});
+
+test('a project naming Spirality\'s own label prefix or short name is refused before anything is printed or written (SP-271)', () => {
+  const home = scratchHome();
+  const own = JSON.parse(readFileSync(join(REPO, 'spirality.project.json'), 'utf8'));
+  for (const clash of [{ launchdPrefix: own.launchdPrefix }, { projectSlug: own.projectSlug }]) {
+    const project = scratchProject(clash);
+    try {
+      const r = runInstaller(['--print-plists', '--project', project], home);
+      assert.equal(r.status, 1);
+      assert.equal(r.stdout, '');
+      assert.match(r.stderr, /names Spirality's own launchdPrefix/);
+    } finally {
+      rmSync(project, { recursive: true, force: true });
+    }
+  }
+  rmSync(home, { recursive: true, force: true });
+});
+
+test('for a project, the clash guard reads Spirality\'s own values from Spirality\'s folder, wherever the installer is started from (SP-271 review)', () => {
+  const home = scratchHome();
+  const project = scratchProject();
+  const own = JSON.parse(readFileSync(join(REPO, 'spirality.project.json'), 'utf8'));
+  // A third project, sitting where the installer is started from, whose
+  // prefix is the project's: the clash guard must still compare against
+  // Spirality's own values, not this folder's.
+  const third = scratchProject({ projectSlug: 'third', launchdPrefix: 'com.normie' });
+  try {
+    // Started in the project's own folder, naming it as ".".
+    // (The started-in folder is the real path: /var is /private/var on a Mac.)
+    assert.deepEqual(printedPlists(['--project', '.'], home, project), printedPlists(['--project', realpathSync(project)], home));
+    // Started in a third project's folder: same plists for the project...
+    assert.deepEqual(printedPlists(['--project', project], home, third), printedPlists(['--project', project], home));
+    // A real clash with Spirality's prefix is still refused from there.
+    const clash = scratchProject({ launchdPrefix: own.launchdPrefix });
+    try {
+      const r = runInstaller(['--print-plists', '--project', clash], home, third);
+      assert.equal(r.status, 1, r.stdout + r.stderr);
+      assert.match(r.stderr, new RegExp(`names Spirality's own launchdPrefix \\(${own.launchdPrefix.replace(/\./g, '\\.')}\\)`));
+    } finally {
+      rmSync(clash, { recursive: true, force: true });
+    }
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(project, { recursive: true, force: true });
+    rmSync(third, { recursive: true, force: true });
+  }
+});
+
+test('--project=~/... is expanded like the space form (SP-271 review)', () => {
+  const home = scratchHome();
+  const project = scratchProject();
+  try {
+    // The project, reached through the scratch HOME.
+    symlinkSync(project, join(home, 'normie'));
+    const viaTilde = printedPlists(['--project=~/normie'], home);
+    assert.deepEqual(Object.keys(viaTilde).sort(), ['com.normie.loop-build.plist', 'com.normie.loop-intake.plist', 'com.normie.loop-review.plist', 'com.normie.relay.plist']);
+    assert.equal(stringAfter(viaTilde['com.normie.relay.plist'], 'WorkingDirectory'), join(home, 'normie'));
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(project, { recursive: true, force: true });
+  }
+});
+
+test('uninstalling for a project whose lanes run its own copy refuses, naming them, and removes nothing without --take-over (SP-271 review)', () => {
+  const home = scratchHome();
+  const project = scratchProject();
+  try {
+    const agents = join(home, 'Library/LaunchAgents');
+    const theirs = join(agents, 'com.normie.relay.plist');
+    const before = `<plist version="1.0">\n<dict>\n    <key>ProgramArguments</key>\n    <array>\n        <string>${project}/scripts/run_relay.sh</string>\n    </array>\n</dict>\n</plist>\n`;
+    writeFileSync(theirs, before);
+    const r = runInstaller(['--uninstall', '--project', project], home);
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assert.match(r.stderr, /Refusing to uninstall: these jobs run something other than Spirality's runner/);
+    assert.match(r.stderr, new RegExp(`com\\.normie\\.relay \\(runs ${project}/scripts/run_relay\\.sh\\)`));
+    assert.match(r.stderr, /--take-over/);
+    assert.doesNotMatch(r.stdout, /Removed/);
+    assert.equal(readFileSync(theirs, 'utf8'), before);
+    assert.deepEqual(readdirSync(agents), ['com.normie.relay.plist']);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(project, { recursive: true, force: true });
+  }
+});
+
+// The runner and the relay for a named project (SP-271), each in a scratch
+// Spirality folder beside a scratch project, both clean mains with an origin
+// that has moved on by one commit. The pass must start in the project, pull
+// the project's main, and leave Spirality's checkout where it was.
+function scratchPair() {
+  const root = mkdtempSync(join(tmpdir(), 'project-lanes-'));
+  const spiralityDir = join(root, 'spirality');
+  const projectDir = join(root, 'normie');
+  const logDir = join(root, 'logs');
+  const git = (cwd, ...args) => scratchGit.git(cwd, ...args);
+  const spirality = JSON.parse(readFileSync(join(REPO, 'spirality.project.json'), 'utf8'));
+  for (const dir of [spiralityDir, projectDir]) {
+    mkdirSync(dir);
+    git(dir, 'init', '-q', '-b', 'main');
+  }
+  mkdirSync(join(spiralityDir, 'scripts/lib'), { recursive: true });
+  for (const f of ['loop_runner.sh', 'run_relay.sh']) copyFileSync(join(REPO, 'scripts', f), join(spiralityDir, 'scripts', f));
+  writeFileSync(join(spiralityDir, 'scripts/pause_check.sh'), '#!/bin/bash\necho "running"\n', { mode: 0o755 });
+  for (const f of ['project_config.mjs', 'run_with_time_limit.sh']) symlinkSync(join(REPO, 'scripts', f), join(spiralityDir, 'scripts', f));
+  for (const f of ['back_to_main.sh', 'tracker_restart.sh', 'relay_app_checks.sh', 'loopSchedule.mjs']) symlinkSync(join(REPO, 'scripts/lib', f), join(spiralityDir, 'scripts/lib', f));
+  writeFileSync(join(spiralityDir, 'spirality.project.json'), JSON.stringify(spirality));
+  writeFileSync(join(projectDir, 'spirality.project.json'), JSON.stringify({ ...spirality, projectSlug: 'normie', launchdPrefix: 'com.normie', logDir }));
+  const heads = {};
+  for (const dir of [spiralityDir, projectDir]) {
+    git(dir, 'add', '-A');
+    git(dir, 'commit', '-q', '-m', 'scratch');
+    const origin = `${dir}.git`;
+    git(root, 'clone', '-q', '--bare', dir, origin);
+    git(dir, 'remote', 'add', 'origin', origin);
+    // origin moves on by one commit, through a second clone.
+    const other = `${dir}-other`;
+    git(root, 'clone', '-q', origin, other);
+    writeFileSync(join(other, 'moved.txt'), 'moved\n');
+    git(other, 'add', '-A');
+    git(other, 'commit', '-q', '-m', 'moved on');
+    git(other, 'push', '-q', 'origin', 'main');
+    git(dir, 'fetch', '-q', 'origin');
+    git(dir, 'branch', '-q', '--set-upstream-to=origin/main', 'main');
+    heads[dir] = { before: git(dir, 'rev-parse', 'HEAD').trim(), origin: git(other, 'rev-parse', 'HEAD').trim() };
+  }
+  return { root, spiralityDir, projectDir, logDir, heads, head: (dir) => git(dir, 'rev-parse', 'HEAD').trim() };
+}
+
+test('a runner for a named project starts its pass in the project\'s checkout and pulls the project\'s main, never Spirality\'s (SP-271)', { timeout: 60_000 }, async () => {
+  const pair = scratchPair();
+  try {
+    const fakeClaude = join(pair.root, 'fake-claude');
+    writeFileSync(fakeClaude, '#!/bin/bash\necho "PASS IN: $(pwd)"\necho "PASS FOR: $SPIRALITY_PROJECT"\n', { mode: 0o755 });
+    const runner = spawn('bash', [join(pair.spiralityDir, 'scripts/loop_runner.sh'), 'loop-build', '3600'], {
+      cwd: pair.spiralityDir, detached: true, stdio: 'ignore',
+      env: { ...scratchGit.scratchGitEnv(), CLAUDE_BIN: fakeClaude, RUN_WITH_TIME_LIMIT_POLL: '1', SPIRALITY_PROJECT: pair.projectDir },
+    });
+    const log = join(pair.logDir, 'normie-loop-build.log');
+    try {
+      for (let i = 0; !(existsSync(log) && readFileSync(log, 'utf8').includes('sleeping 3600s')); i++) {
+        assert.ok(i < 400, 'the runner never finished its first pass');
+        await new Promise((r) => setTimeout(r, 100));
+      }
+    } finally {
+      process.kill(-runner.pid, 'SIGKILL');
+    }
+    const text = readFileSync(log, 'utf8');
+    const real = (p) => realpathSync(p);
+    assert.equal(real(text.match(/^PASS IN: (.*)$/m)[1]), real(pair.projectDir));
+    assert.equal(text.match(/^PASS FOR: (.*)$/m)[1], pair.projectDir);
+    assert.equal(pair.head(pair.projectDir), pair.heads[pair.projectDir].origin, 'the project\'s main was not pulled');
+    assert.equal(pair.head(pair.spiralityDir), pair.heads[pair.spiralityDir].before, 'Spirality\'s own main was pulled by a project\'s lane');
+  } finally {
+    rmSync(pair.root, { recursive: true, force: true });
+  }
+});
+
+test('a relay for a named project pulls the project\'s main, never Spirality\'s, and names the project on its START line (SP-271)', { timeout: 60_000 }, () => {
+  const pair = scratchPair();
+  try {
+    // The scratch Spirality folder has no package.json, so the door step
+    // fails at once; this test is about where the relay pulls and works.
+    const r = spawnSync('bash', [join(pair.spiralityDir, 'scripts/run_relay.sh'), '--dry-run'], {
+      cwd: pair.spiralityDir, encoding: 'utf8', timeout: 50_000,
+      env: { ...scratchGit.scratchGitEnv(), SPIRALITY_PROJECT: pair.projectDir },
+    });
+    assert.match(r.stdout, new RegExp(`START relay — ${pair.projectDir} =====`), r.stdout + r.stderr);
+    assert.equal(pair.head(pair.projectDir), pair.heads[pair.projectDir].origin, 'the project\'s main was not pulled');
+    assert.equal(pair.head(pair.spiralityDir), pair.heads[pair.spiralityDir].before, 'Spirality\'s own main was pulled by a project\'s relay');
+    assert.ok(existsSync(join(pair.logDir, 'normie-relay.last-start')) === false, 'a dry run wrote the start file');
+  } finally {
+    rmSync(pair.root, { recursive: true, force: true });
+  }
 });

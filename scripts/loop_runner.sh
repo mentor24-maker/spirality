@@ -9,7 +9,7 @@
 # Spirality has an incident that needs them.
 #
 # Each iteration is a FRESH headless Claude Code session started in the main
-# checkout. Every loop skill picks the next ticket from the tracker on each run,
+# checkout (Spirality's own, or the project's that SPIRALITY_PROJECT names). Every loop skill picks the next ticket from the tracker on each run,
 # so there is no state to carry between runs, and a crashed run costs one
 # interval rather than the whole night.
 #
@@ -42,13 +42,37 @@ if [ -f "$REPO/.git" ] && grep -q '^gitdir:.*worktrees' "$REPO/.git" 2>/dev/null
   exit 1
 fi
 
-cd "$REPO" || exit 1
+# The project this runner works for (SP-271). Unset, it is Spirality itself,
+# exactly as before. Set (the installer's --project writes it into the
+# plist), SPIRALITY_PROJECT names another project's checkout: every pass then
+# starts THERE, so its CLAUDE.md and `npm run verify` apply, and the pull
+# below is of THAT checkout's main, never of Spirality's (which only
+# Spirality's own lanes pull, so a project's lanes never pick up new
+# Spirality code mid-pass). Spirality's own scripts (the door, the pause and
+# work checks) still run from this folder, and read the project's manifest
+# because the name is exported.
+PROJECT="$REPO"
+if [ -n "${SPIRALITY_PROJECT:-}" ]; then
+  PROJECT="$(cd "$SPIRALITY_PROJECT" 2>/dev/null && pwd)" || { echo "[loop-runner] SPIRALITY_PROJECT names $SPIRALITY_PROJECT, which is not a folder on this machine. Stopping." >&2; exit 1; }
+  if [ -f "$PROJECT/.git" ] && grep -q '^gitdir:.*worktrees' "$PROJECT/.git" 2>/dev/null; then
+    echo "[loop-runner] Refusing to run for a worktree ($PROJECT) — worktrees are deleted when their work ships." >&2
+    exit 1
+  fi
+  export SPIRALITY_PROJECT="$PROJECT"
+fi
+# Yes when this runner works for Spirality's own checkout.
+OWN=""
+[ "$(cd "$PROJECT" && pwd -P)" = "$(cd "$REPO" && pwd -P)" ] && OWN=yes
+
+cd "$PROJECT" || exit 1
 
 SLUG="$(node "$REPO/scripts/project_config.mjs" projectSlug)" || { echo "[loop-runner] could not read projectSlug from the project config" >&2; exit 1; }
 LOG_DIR="$(node "$REPO/scripts/project_config.mjs" logDir)" || { echo "[loop-runner] could not read logDir from the project config" >&2; exit 1; }
 PREFIX="$(node "$REPO/scripts/project_config.mjs" launchdPrefix)" || { echo "[loop-runner] could not read launchdPrefix from the project config" >&2; exit 1; }
 # Empty when the project runs no tracker: the restart step then does nothing.
 TRACKER_PORT="$(node "$REPO/scripts/project_config.mjs" trackerPort)" || { echo "[loop-runner] could not read trackerPort from the project config" >&2; exit 1; }
+# The tracker is Spirality's own service: only Spirality's own lanes restart it.
+[ -n "$OWN" ] || TRACKER_PORT=""
 LOG="$LOG_DIR/$SLUG-$SKILL.log"
 LOCK="$LOG_DIR/$SLUG-$SKILL.lock"
 # A file here ends the sleep between passes early (SP-219); `node
@@ -298,8 +322,10 @@ while true; do
   # never fails the runner: until the door has a `pass-timeout` command the
   # line below logs its "Unknown command" answer and carries on.
   if [ "$CODE" -eq 124 ]; then
-    npm run --silent clickup -- pass-timeout --pass "$SKILL" \
-      --limit "${LOOP_PASS_LIMIT_SECONDS:-7200}" --snapshot "$SNAPSHOT" \
+    # Spirality's door, from Spirality's folder (a project's checkout may
+    # have none, or an older copy); it acts for the exported project.
+    (cd "$REPO" && npm run --silent clickup -- pass-timeout --pass "$SKILL" \
+      --limit "${LOOP_PASS_LIMIT_SECONDS:-7200}" --snapshot "$SNAPSHOT") \
       >> "$LOG" 2>&1 || true
     echo "[loop-runner] the pass hit the ${LOOP_PASS_LIMIT_SECONDS:-7200}s time limit and was stopped; its ticket may still be in Building — the next pass or a person should hand it back." >> "$LOG"
   fi
