@@ -1235,6 +1235,29 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
       return [200, doc];
     }
 
+    // A queue's order (docs/LOOP_CONTRACT.md, "The claim order"): `{ ids: [...] }` gives those tickets places
+    // 1, 2, 3 ... in one write, all or none. Every id must be a ticket of
+    // this project; any other is a 400 and nothing changes. Same sign-in and
+    // project rules as changing a ticket's priority (PATCH /tickets/<id>).
+    if (parts.length === 4 && parts[0] === 'projects' && parts[2] === 'tickets' && parts[3] === 'order' && method === 'POST') {
+      const project = requireProject(parts[1], me);
+      const body = await readJson(req);
+      checkBody(body, me, ['ids']);
+      if (!Array.isArray(body.ids) || !body.ids.length || body.ids.some((id) => typeof id !== 'string')) {
+        throw new HttpError(400, 'bad-order', 'ids is a list of ticket ids, first place first; nothing was changed.');
+      }
+      let r;
+      try {
+        r = store.orderTickets(project.slug, { ids: body.ids, actor: me.id });
+      } catch (err) {
+        // A failed read-back is the tracker's fault, not the caller's: 500, not 400.
+        if (err instanceof StoreError && err.code === 'write-failed') throw new HttpError(500, err.code, err.message);
+        throw err;
+      }
+      log(`ordered ${r.tickets.length} ticket(s) in ${project.slug} (${r.changed.length} moved) actor=${me.id}`);
+      return [200, r];
+    }
+
     // Dane's page: the Add Task box asks, before it files, whether the words
     // fit another project better (tracker/projectGuess.mjs). Plain
     // word matching on the tickets already here; it writes nothing.

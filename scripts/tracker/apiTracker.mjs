@@ -254,6 +254,8 @@ export function createApiTracker({ token, baseUrl, project, listId, timeoutMs, l
       date_created: ms(t.createdAt),
       date_updated: ms(t.updatedAt),
       version: t.version,
+      // Its place in its queue (SP-249), or null; the order rule reads it.
+      place: t.place ?? null,
     };
   }
 

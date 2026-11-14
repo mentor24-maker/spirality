@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { openStore } from './store.mjs';
-import { consoleOf } from './pageData.mjs';
+import { boardOf, consoleOf } from './pageData.mjs';
 import { STAGES } from './pipeline.mjs';
 import loopStatuses from '../lib/loopStatuses.js';
 
@@ -117,4 +117,18 @@ test('consoleOf narrows to the projects `only` lets through', () => {
   const answer = consoleOf(store, { only: new Set(['alpha']) });
   assert.deepEqual(answer.projects.map((p) => p.slug), ['alpha']);
   assert.deepEqual(answer.tickets.map((t) => t.name), ['Seen']);
+});
+
+test('the Tasks page lists each status as the door does: priority, then place, then oldest (SP-249)', () => {
+  const { store, human, machine, tick } = fixture();
+  const file = (name, priority = null) => { tick(); return store.fileTicket({ project: 'alpha', actor: machine.id, name, status: 'queued', priority }).id; };
+  const unplaced = file('unplaced, oldest', 'normal');
+  const two = file('placed 2', 'normal');
+  const one = file('placed 1', 'normal');
+  const high = file('high, unplaced', 'high');
+  store.orderTickets('alpha', { ids: [one, two], actor: human.id });
+  const expected = [high, one, two, unplaced];
+  const queued = boardOf(store, 'alpha').columns.find((c) => c.status === 'Queued');
+  assert.deepEqual(queued.tickets.map((t) => t.id), expected);
+  assert.deepEqual(consoleOf(store).tickets.filter((t) => String(t.status).toLowerCase() === 'queued').map((t) => t.id), expected);
 });
