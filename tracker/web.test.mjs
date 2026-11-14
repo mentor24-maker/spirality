@@ -4335,7 +4335,23 @@ test('Reference Docs and Work Log: each docs/ file\'s kind comes from its folder
   assert.deepEqual(docInfo('work-log/20261110-x.md'), { kind: 'Work Log', date: null });
   assert.equal(docDay('2026-11-10'), 'Nov 10, 2026', 'a calendar day, never shifted by time zone');
   assert.equal(docDay(null), '');
-  assert.deepEqual(DOC_KINDS, ['Reference', 'Onboarding', 'Work Log']);
+  assert.deepEqual(DOC_KINDS, ['Reference', 'Onboarding', 'Work Log', 'Operator Prompts']);
+});
+
+test('Operator Prompts: each thread\'s own file is grouped under its own kind and dated, newest first after the Work Log (SP-293)', () => {
+  assert.deepEqual(docInfo('operator-prompts/2026-11-08-moving-off-clickup.md'), { kind: 'Operator Prompts', date: '2026-11-08' });
+  const rows = docRows([
+    { path: 'operator-prompts/2026-11-08-older.md', title: 'Older thread' },
+    { path: 'OPERATOR_PROMPTS.md', title: 'Operator prompts' },
+    { path: 'work-log/2026-11-01-entry.md', title: 'Entry' },
+    { path: 'operator-prompts/2026-11-11-newer.md', title: 'Newer thread' },
+  ]);
+  assert.deepEqual(rows.map((r) => r.path), ['OPERATOR_PROMPTS.md', 'work-log/2026-11-01-entry.md',
+    'operator-prompts/2026-11-11-newer.md', 'operator-prompts/2026-11-08-older.md']);
+  assert.deepEqual(filterDocs(rows, { kind: 'Operator Prompts' }).map((r) => r.title), ['Newer thread', 'Older thread']);
+  const html = renderDocumentation(rows, (p) => `/docs/spirality/${p}`);
+  assert.match(html, /<option value="Operator Prompts">Operator Prompts<\/option>/);
+  assert.match(html, /2026-11-11-newer\.md">Newer thread<\/a><\/td>\s*<td class="kind">Operator Prompts<\/td>\s*<td class="date">Nov 11, 2026<\/td>/);
 });
 
 const DOCS = [

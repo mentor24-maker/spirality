@@ -2042,8 +2042,10 @@ export function renderTopics({ projects, project, topics = [] }, { timeOf, done 
  * with (every work-log entry has one). Worked out here from the path, so
  * the server's /documentation answer stays as it is.
  */
-export const DOC_KINDS = ['Reference', 'Onboarding', 'Work Log'];
-const DOC_FOLDERS = { onboarding: 'Onboarding', 'work-log': 'Work Log' };
+export const DOC_KINDS = ['Reference', 'Onboarding', 'Work Log', 'Operator Prompts'];
+/** SP-293: operator-prompts/ holds one file per hand-run thread, dated like the work log. */
+const DOC_FOLDERS = { onboarding: 'Onboarding', 'work-log': 'Work Log', 'operator-prompts': 'Operator Prompts' };
+const NEWEST_FIRST = new Set(['Work Log', 'Operator Prompts']);
 
 /** A docs/ file's kind and date from its path (relative to docs/): `{ kind, date }`, date 'YYYY-MM-DD' or null. */
 export function docInfo(path) {
@@ -2071,9 +2073,9 @@ const DOC_COMPARE = {
   kind: (a, b) => kindRank(a.kind) - kindRank(b.kind) || byText(a.kind, b.kind),
   date: (a, b) => lastIfMissing(byText)(a.date, b.date),
 };
-/** The order the section opens in: Reference, then Onboarding, then Work Log newest first, then any other folder; title within a kind. */
+/** The order the section opens in: Reference, then Onboarding, then Work Log and Operator Prompts newest first, then any other folder; title within a kind. */
 const docStart = (a, b) => DOC_COMPARE.kind(a, b)
-  || (a.kind === 'Work Log' ? lastIfMissing(byText)(b.date, a.date) : 0)
+  || (NEWEST_FIRST.has(a.kind) ? lastIfMissing(byText)(b.date, a.date) : 0)
   || DOC_COMPARE.title(a, b) || byText(a.path, b.path);
 
 /** The /documentation files as the section's rows: `{ path, title, kind, date }`, in the order it opens in. Never changes `files`. */
