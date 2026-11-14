@@ -26,7 +26,7 @@
  * an emailed link's own page. The link's token is sent only in a JSON body,
  * never in an address.
  */
-import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, unwrapDoc, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderAnswerIn, renderHeldUp, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, lookupTicket, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, pipelinePodLabel, renderHealth, healthLines, renderCommandList, renderCommandView, renderCommandDetails, renderContextDocs, renderTopics, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, renderListTopics, projectTags, sortTickets, nextSort, renderDocumentation, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, lowerMeridiem, renderPipelineControls, renderConsole, drainLine, renderTitleChoices, titleModeOf } from './render.mjs';
+import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, unwrapDoc, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderAnswerIn, renderHeldUp, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, lookupTicket, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, pipelinePodLabel, renderHealth, healthLines, renderCommandList, renderCommandView, renderCommandDetails, renderContextDocs, renderTopics, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, renderListTopics, projectTags, sortTickets, nextSort, renderDocumentation, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, lowerMeridiem, renderPipelineControls, renderConsole, drainLine, renderTitleChoices, titleModeOf, SUGGEST_POLL_MS, moveSuggestion, suggestState, filingPlan, orderPlan, andList, suggestRunLine, renderSuggestRows } from './render.mjs';
 
 /** Where an earlier version of the page kept a pasted token; removed on load, never read. */
 const OLD_TOKEN_KEY = 'tracker-token';
@@ -40,6 +40,8 @@ const PROJECT_NAME_KEY = 'tracker-project-name';
 const DRAFT_KEY = 'tracker-request-draft';
 /** The Add Task box's title toggle, Suggest a Title or Write My Own Title, kept beside the draft; it outlives a filing. */
 const TITLE_MODE_KEY = 'tracker-request-title-mode';
+/** The Suggest Next Tasks box's order, ticks and filed tickets, per project (SP-251), so a redraw or a retry keeps them. */
+const SUGGEST_STATE_KEY = 'tracker-suggest-next';
 const main = document.getElementById('main');
 const who = document.getElementById('who');
 const headerProject = document.getElementById('project');
@@ -1407,6 +1409,13 @@ async function drawProject(slug, view, { adding = false, filed = null, unchecked
         <div class="row"><button type="submit" class="submit-task">Suggest Titles</button><button type="button" class="suggest-again" hidden>Suggest Again</button><span class="note"></span></div>
       </form>
     </details>
+    <details class="suggest-next">
+      <summary>Suggest Next Tasks</summary>
+      <p class="hint quiet">Reads the project (its plans, documents and code) and its open tickets, and suggests what to do next. Put them in order, untick any you do not want, and file the rest as requests.</p>
+      <div class="row"><button type="button" class="suggest-run">Suggest Next Tasks</button><span class="run-note note" role="status"></span></div>
+      <ol class="suggestions"></ol>
+      <div class="row file-row" hidden><button type="button" class="file-order">File in This Order</button><span class="file-note note" role="status"></span></div>
+    </details>
     <dialog class="project-check" aria-labelledby="project-check-question">
       <form method="dialog">
         <button type="submit" class="close" value="" aria-label="Close: file nothing">×</button>
@@ -1441,6 +1450,7 @@ async function drawProject(slug, view, { adding = false, filed = null, unchecked
   wireSortHeadings(view === 'board' ? (live ? [live] : []) : board.columns);
   wireSearch();
   wireAddTask(board.project, view, adding);
+  wireSuggestNext(board.project, view);
   wireFiledPod();
   wirePipeline();
   refreshPipeline();
@@ -2366,6 +2376,326 @@ function wireAddTask(slug, view, adding) {
       say(`Filed ${ticket.id}, but the page could not be drawn again: ${err.message}`, 'error');
     }
   });
+}
+
+/** The Suggest Next Tasks box's kept state for `slug`, or null. */
+function savedSuggestState(slug) {
+  try { return JSON.parse(localStorage.getItem(SUGGEST_STATE_KEY) ?? '{}')[slug] ?? null; } catch { return null; }
+}
+
+/** Keep `state` as `slug`'s Suggest Next Tasks state in this browser. */
+function keepSuggestState(slug, state) {
+  try {
+    const all = JSON.parse(localStorage.getItem(SUGGEST_STATE_KEY) ?? '{}');
+    all[slug] = state;
+    localStorage.setItem(SUGGEST_STATE_KEY, JSON.stringify(all));
+  } catch { /* the box still works; a redraw starts the list over */ }
+}
+
+/** What the box says when a suggestion run could not be started or read (no word from the tracker). */
+const SUGGEST_NEXT_UNANSWERED = 'the tracker did not answer.';
+
+/**
+ * SP-251: the Tasks page's Suggest Next Tasks box, beside Add Task. Its
+ * button starts a run of the next-task suggester (POST
+ * /projects/<slug>/suggest-next, tracker/nextSuggest.mjs); while it runs
+ * the box says so and checks back every SUGGEST_POLL_MS. When the page
+ * opens it shows the last list on its own (GET), and opens itself when
+ * a run is going or a list has rows still to file.
+ *
+ * Each suggestion is a row (renderSuggestRows). Dragging a row, the arrow
+ * keys on its handle, or a number from its dropdown moves it there and the
+ * rest renumber (moveSuggestion). The order, the ticks and what was filed
+ * are kept in this browser per project, for that run (suggestState), so a
+ * redraw keeps them.
+ *
+ * "File in This Order" files each kept row not yet filed (filingPlan) the
+ * way the Add Task box does: the project check, then POST .../tickets in
+ * Requested, title and description as shown. Then every kept row's ticket
+ * gets its place, in the order shown (POST .../tickets/order, one call per
+ * project they went into). A step that fails says which and stops; each
+ * filed ticket is kept at once, so pressing it again files nothing twice.
+ * A failed run says why and offers Try Again.
+ */
+function wireSuggestNext(slug, view) {
+  const box = main.querySelector('details.suggest-next');
+  const run = box.querySelector('button.suggest-run');
+  const runNote = box.querySelector('.run-note');
+  const list = box.querySelector('ol.suggestions');
+  const fileRow = box.querySelector('.file-row');
+  const fileButton = box.querySelector('button.file-order');
+  const fileNote = box.querySelector('.file-note');
+  const question = main.querySelector('dialog.project-check');
+  const path = `/projects/${encodeURIComponent(slug)}/suggest-next`;
+  let suggestions = [];
+  let state = null;
+  let polling = false;
+  let filing = false;
+  // A run is going: File in This Order's end must not turn the Suggest button back on.
+  let running = false;
+  // A run's answer that came while filing: drawn when filing ends, so the
+  // filing loop never writes into rows it did not plan from.
+  let held;
+  // The box opens on its own only when the page is first drawn: a minute's
+  // redraw (refreshing) keeps the fold keepPlace put back.
+  const mayOpen = !refreshing;
+  const say = (el, text, kind = 'quiet') => {
+    el.classList.remove('quiet', 'error');
+    if (text && kind) el.classList.add(kind);
+    el.textContent = text;
+  };
+  const save = () => keepSuggestState(slug, state);
+
+  // Draw the rows from `state`, putting focus back on a moved row's handle.
+  const drawRows = (focusIndex = null) => {
+    list.innerHTML = state ? renderSuggestRows(suggestions, state) : '';
+    fileRow.hidden = !state;
+    if (focusIndex != null) list.querySelector(`li[data-index="${focusIndex}"] .drag-handle`)?.focus();
+  };
+  const move = (from, to, focus = false) => {
+    // While filing, put a changed dropdown back as it was.
+    if (filing) { drawRows(); return; }
+    const index = state.order[from];
+    state.order = moveSuggestion(state.order, from, to);
+    save();
+    drawRows(focus ? index : null);
+  };
+  const placeOf = (li) => state.order.indexOf(Number(li.dataset.index));
+
+  // A run's answer, as drawn: running (check back), failed (Try Again), or done (the rows).
+  const show = (latest) => {
+    if (!box.isConnected) return;
+    if (filing) { held = latest; return; }
+    say(runNote, suggestRunLine(latest), latest?.state === 'failed' ? 'error' : 'quiet');
+    running = latest?.state === 'running';
+    run.disabled = running;
+    // While a run is going its rows are about to be replaced: nothing is filed from them.
+    fileButton.disabled = running;
+    run.textContent = latest?.state === 'failed' ? 'Try Again' : latest?.state === 'done' ? 'Suggest Again' : 'Suggest Next Tasks';
+    if (latest?.state === 'done' && Array.isArray(latest.suggestions)) {
+      suggestions = latest.suggestions;
+      state = suggestState(savedSuggestState(slug), latest.at, suggestions.length);
+      save();
+      drawRows();
+    } else if (latest?.state !== 'running') {
+      if (latest?.state === 'failed') { suggestions = []; state = null; }
+      drawRows();
+    }
+    if (latest?.state === 'running') checkBack();
+  };
+  const read = async () => {
+    try {
+      return await api('GET', path, undefined, { unrecorded: true });
+    } catch (err) {
+      if (err instanceof SignedOut) { drawSignIn(); return undefined; }
+      if (err instanceof Refused && err.status === 404) return null;
+      say(runNote, `Could not read the suggestions: ${err instanceof Refused ? err.message : SUGGEST_NEXT_UNANSWERED}`, 'error');
+      return undefined;
+    }
+  };
+  // While a run is going, read again about every SUGGEST_POLL_MS, until it ends or the page is drawn over.
+  const checkBack = () => {
+    if (polling) return;
+    polling = true;
+    setTimeout(async () => {
+      polling = false;
+      if (!box.isConnected) return;
+      const latest = await read();
+      if (latest === undefined) {
+        // Not answered: try again next time round, the line already says so.
+        if (box.isConnected) checkBack();
+        return;
+      }
+      show(latest);
+    }, SUGGEST_POLL_MS);
+  };
+
+  run.addEventListener('click', async () => {
+    run.disabled = true;
+    say(runNote, 'Starting…');
+    let started;
+    try {
+      ({ run: started } = await api('POST', path, {}));
+    } catch (err) {
+      if (err instanceof SignedOut) return drawSignIn('You were signed out; no suggestions were asked for.');
+      say(runNote, `No suggestions this time: ${err instanceof Refused ? err.message : SUGGEST_NEXT_UNANSWERED}`, 'error');
+      run.textContent = 'Try Again';
+      run.disabled = filing;
+      return;
+    }
+    show(started);
+  });
+
+  // The dropdown: pick a number, the row goes there.
+  list.addEventListener('change', (e) => {
+    const li = e.target.closest('li.suggestion');
+    if (!li || !state) return;
+    if (e.target.matches('select.place')) move(placeOf(li), Number(e.target.value) - 1);
+    else if (e.target.matches('.keep input')) {
+      // While filing, the plan is already made: a tick now would not be what was filed.
+      if (filing) { e.target.checked = !e.target.checked; return; }
+      const i = Number(li.dataset.index);
+      state.dropped = e.target.checked ? state.dropped.filter((d) => d !== i) : [...new Set([...state.dropped, i])];
+      save();
+    }
+  });
+  // The keyboard: the arrow keys on a row's handle move it up or down one, Home and End to the ends.
+  list.addEventListener('keydown', (e) => {
+    if (!e.target.matches('.drag-handle') || !state) return;
+    const from = placeOf(e.target.closest('li.suggestion'));
+    const to = { ArrowUp: from - 1, ArrowDown: from + 1, Home: 0, End: state.order.length - 1 }[e.key];
+    if (to === undefined) return;
+    e.preventDefault();
+    move(from, to, true);
+  });
+  // The mouse: drag a row onto another and it takes that row's place.
+  let dragging = null;
+  list.addEventListener('dragstart', (e) => {
+    const li = e.target.closest?.('li.suggestion');
+    if (!li || filing) return;
+    dragging = placeOf(li);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', li.dataset.index);
+    li.classList.add('dragging');
+  });
+  list.addEventListener('dragover', (e) => {
+    if (dragging == null || !e.target.closest('li.suggestion')) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+  });
+  list.addEventListener('drop', (e) => {
+    const li = e.target.closest('li.suggestion');
+    if (dragging == null || !li) return;
+    e.preventDefault();
+    const from = dragging;
+    dragging = null;
+    move(from, placeOf(li));
+  });
+  list.addEventListener('dragend', () => {
+    dragging = null;
+    for (const li of list.querySelectorAll('.dragging')) li.classList.remove('dragging');
+  });
+
+  // File in This Order: file what is kept and not yet filed, then put the kept ones still waiting in order.
+  fileButton.addEventListener('click', async () => {
+    if (!state || filing || running) return;
+    const plan = filingPlan(state);
+    if (!plan.kept.length) {
+      say(fileNote, 'Tick at least one suggestion to file.', 'error');
+      return;
+    }
+    filing = true;
+    fileButton.disabled = true;
+    run.disabled = true;
+    const done = (text, kind) => {
+      filing = false;
+      fileButton.disabled = running;
+      run.disabled = running;
+      // A run that answered while filing is drawn now, over the rows just filed from.
+      if (held !== undefined) {
+        const latest = held;
+        held = undefined;
+        show(latest);
+      } else drawRows();
+      say(fileNote, text, kind);
+    };
+    const filedNow = [];
+    const unchecked = [];
+    const named = () => (filedNow.length ? `Filed ${andList(filedNow)}. ` : '');
+    const uncheckedLine = () => (unchecked.length
+      ? `The project check could not run for ${andList(unchecked.map((t) => `"${t}"`))}, so ${unchecked.length === 1 ? 'it' : 'they'} went into the project shown. `
+      : '');
+    for (const i of plan.file) {
+      const s = suggestions[i];
+      say(fileNote, `${named()}Checking the project for "${s.title}"…`);
+      // The same check as Add Task; one that cannot run files here, and the note says so.
+      let suggest = null;
+      try {
+        ({ suggest } = await api('POST', `/projects/${encodeURIComponent(slug)}/tickets/check`, { name: s.title, description: s.description ?? '' }));
+      } catch (err) {
+        if (err instanceof SignedOut) return drawSignIn(`You were signed out; ${filedNow.length ? `${andList(filedNow)} ${filedNow.length === 1 ? 'was' : 'were'} filed and the rest were not` : 'nothing was filed'}. Press File in This Order again once signed in.`);
+        unchecked.push(s.title);
+      }
+      let into = slug;
+      if (suggest) {
+        const choice = await askProject(question, suggest);
+        if (choice === 'move') into = suggest.slug;
+        else if (choice !== 'keep') return done(`${named()}${uncheckedLine()}Stopped before "${s.title}": nothing more was filed, and no order was set. Press File in This Order again to go on.`, 'error');
+      }
+      say(fileNote, `${named()}Filing "${s.title}"…`);
+      let ticket;
+      try {
+        ticket = await api('POST', `/projects/${encodeURIComponent(into)}/tickets`, { name: s.title, description: s.description ?? '', status: 'Requested' });
+      } catch (err) {
+        if (err instanceof SignedOut) return drawSignIn(`You were signed out; "${s.title}" may not have been filed. Check the Requested stage before pressing File in This Order again.`);
+        return done(`${named()}${uncheckedLine()}Not filed: "${s.title}": ${err instanceof Refused ? err.message : SUGGEST_NEXT_UNANSWERED} No order was set. Press File in This Order again to file the rest.`, 'error');
+      }
+      // Kept at once, so a retry never files it again.
+      state.filed[i] = { id: ticket.id, project: into };
+      save();
+      filedNow.push(ticket.id);
+    }
+    // Tickets an earlier press filed may have moved on since: read each back, so only the ones still waiting get a place.
+    const now = {};
+    const fresh = new Set(plan.file);
+    for (const i of plan.kept) {
+      if (fresh.has(i) || !state.filed[i]) continue;
+      const f = state.filed[i];
+      try {
+        now[i] = await api('GET', `/tickets/${encodeURIComponent(f.id)}`, undefined, { unrecorded: true });
+      } catch (err) {
+        if (err instanceof SignedOut) return drawSignIn(`You were signed out; ${named() || 'nothing new was filed. '}Their order was not set: press File in This Order again once signed in.`);
+        if (err instanceof Refused && err.status === 404) { now[i] = null; continue; }
+        return done(`${named()}${uncheckedLine()}Their order was not set: ${f.id} could not be read (${err instanceof Refused ? err.message : SUGGEST_NEXT_UNANSWERED}) Press File in This Order again: nothing is filed twice.`, 'error');
+      }
+    }
+    const order = orderPlan(plan.kept, state.filed, now);
+    // A ticket that is gone is unticked, so no later press names it and every later order call can still work.
+    if (order.gone.length) {
+      state.dropped = [...new Set([...state.dropped, ...order.gone.map((g) => g.index)])];
+      save();
+    }
+    const aside = [
+      order.leftAlone.length ? `${andList(order.leftAlone.map((t) => t.id))} ${order.leftAlone.length === 1 ? 'is' : 'are'} already past Requested, so ${order.leftAlone.length === 1 ? 'its' : 'their'} place was left alone.` : '',
+      order.gone.length ? `${andList(order.gone.map((t) => t.id))} ${order.gone.length === 1 ? 'is' : 'are'} no longer in this project (deleted or moved), so ${order.gone.length === 1 ? 'it was' : 'they were'} left out of the order and unticked.` : '',
+    ].filter(Boolean).join(' ');
+    say(fileNote, `${named()}Setting their order…`);
+    for (const [project, ids] of order.byProject) {
+      try {
+        await api('POST', `/projects/${encodeURIComponent(project)}/tickets/order`, { ids });
+      } catch (err) {
+        if (err instanceof SignedOut) return drawSignIn(`You were signed out; ${named() || 'nothing new was filed. '}Their order was not set: press File in This Order again once signed in.`);
+        return done(`${named()}${uncheckedLine()}Their order was not set (${andList(ids)}): ${err instanceof Refused ? err.message : SUGGEST_NEXT_UNANSWERED} Press File in This Order again: nothing is filed twice.`, 'error');
+      }
+    }
+    const ordered = [...order.byProject.values()].flat();
+    const inOrder = ordered.length ? `In order: ${ordered.join(', ')}.` : 'No order was set: none of them is still in Requested.';
+    done(`${named() || 'Nothing new to file. '}${uncheckedLine()}${inOrder}${aside ? ` ${aside}` : ''}`, unchecked.length || order.gone.length ? 'error' : 'quiet');
+    // The new tickets show in their stage once the page reads again; the box keeps its rows and says what was filed.
+    const note = fileNote.textContent;
+    const noteKind = fileNote.classList.contains('error') ? 'error' : 'quiet';
+    try {
+      await drawAgain(() => drawProject(slug, view));
+      const again = main.querySelector('details.suggest-next');
+      if (again) {
+        again.open = true;
+        const n = again.querySelector('.file-note');
+        n.classList.remove('quiet', 'error');
+        n.classList.add(noteKind);
+        n.textContent = note;
+      }
+    } catch (err) {
+      if (err instanceof SignedOut) return drawSignIn(`You were signed out after filing: ${note}`);
+    }
+  });
+
+  // On opening the page: the last list, on its own.
+  (async () => {
+    const latest = await read();
+    if (!latest || !box.isConnected) return;
+    show(latest);
+    if (mayOpen && (running || (latest.state === 'done' && state && filingPlan(state).file.length))) box.open = true;
+  })();
 }
 
 /**
