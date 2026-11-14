@@ -53,6 +53,7 @@ import { filedTrackerUrl, machineSenderTag } from '../lib/substrateConfig.js';
 import { runLanePass } from '../lib/relayAutoMerge.js';
 import { readLedgerFile, saveLedgerIfReadable } from '../lib/autoMergeLedgerFile.js';
 import { readLeaseFile, saveLeaseIfReadable } from '../lib/mergeWindowLeaseFile.js';
+import { windowDecision } from '../lib/mergeWindowLease.js';
 
 import { loadProjectConfig, ProjectConfigError } from '../lib/projectConfig.mjs';
 // Spirality's releases (SP-265): what one is, and reading the tags.
@@ -95,6 +96,8 @@ import {
   checkBranch, branchContains, tellTickets, latestMainMoved,
 } from '../lib/mainMoved.js';
 import { parseRepoFromRemoteUrl } from '../lib/branchCatchUp.js';
+// Keeping Ready to launch pull requests current after a merge (SP-294).
+import { catchUpReadyTickets } from '../lib/readyCatchUp.js';
 // A ticket left in Building by a build pass that died (SP-101).
 import passClaim from '../lib/passClaim.js';
 import { settingsPauseVerdict } from '../lib/pipelinePause.js';
@@ -697,7 +700,10 @@ const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url));
  * returned in `problems` and the pass carries on (lib/mainMoved.js tellTickets).
  *
  * @param tasks the list's open tickets when the caller already has them
- * @returns {{ lines: string[], problems: string[], told: number }}
+ * @returns {{ lines: string[], problems: string[], told: number, ctx }}
+ *   `ctx` ({ merge, base, openPrs }) is set only when the merge, the fetch and
+ *   the open PRs all read, so the Ready to launch catch-up (SP-294) reuses
+ *   them instead of reading them again.
  */
 async function tellMainMoved({ mergedNumber, list, dryRun, tasks = null }) {
   const lines = [], problems = [];
@@ -743,7 +749,8 @@ async function tellMainMoved({ mergedNumber, list, dryRun, tasks = null }) {
     check: ({ branch }) => checkBranch({ base, branch, mergeCommit: merge.oid, cwd: REPO_ROOT }),
   };
   // The relay passes its own list; the standalone command reads it here.
-  return tellTickets({ tasks: tasks || await fetchAllTasks(list), merge, base, repo, openPrs, dryRun, io });
+  const result = await tellTickets({ tasks: tasks || await fetchAllTasks(list), merge, base, repo, openPrs, dryRun, io });
+  return { ...result, ctx: { merge, base, openPrs } };
 }
 
 // ── Building tickets a dead pass left behind (SP-101) ────────────────────────
@@ -1598,8 +1605,10 @@ if (cmd === 'whoami') {
    *  Queued, and read it back. Returns { id, url } only when the ticket reads
    *  back with that name, in Queued, with a description; otherwise null, with
    *  the reason in `unchecked`. */
-  const fileCatchUp = async (task, prRef, branch, name, commentId) => {
-    const body = conflictTicketBody({ task, pr: prRef, branch, localVerdict: null, commentId });
+  // `ahead` ({ mergedNumber, files }): filed when main moved, before his
+  // merge word (SP-294), so the body does not claim he has given it.
+  const fileCatchUp = async (task, prRef, branch, name, commentId, ahead = null) => {
+    const body = conflictTicketBody({ task, pr: prRef, branch, localVerdict: null, commentId, ahead });
     const out = await tracker.createTask(list, {
       name, markdown_description: body, status: DISPLAY[QUEUED], priority: PRIORITY.high,
     });
@@ -1631,6 +1640,65 @@ if (cmd === 'whoami') {
       return false;
     }
     return true;
+  };
+
+  /** File the catch-up ticket for a `Ready to launch` PR that conflicts with
+   *  the main a merge just made, before his merge word (SP-294). The same
+   *  plan, ticket and trail the merge step uses at his word, so that step
+   *  finds it on file and never files a second. */
+  const fileConflictAhead = async ({ task, comments, pr, branch, verdict }, mergedNumber) => {
+    const localVerdict = null;
+    const ticketName = conflictTicketName({ pr, branch, localVerdict });
+    const trail = findConflictTicket(comments, pr.number);
+    let filedStatus = null;
+    if (trail) {
+      const listed = tasks.find((t) => String(t.id).toLowerCase() === String(trail.id).toLowerCase());
+      const read = listed || await readTaskOrNull(trail.id);
+      filedStatus = read ? String(read.status?.status ?? '') : null;
+    }
+    const plan = conflictFilingPlan({ comments, prNumber: pr.number, queueTasks: tasks, ticketName, localVerdict, filedStatus });
+    if (plan.act === 'cannot-tell') return { ok: false, problem: `the catch-up ticket on file (${plan.filed.id}) could not be read` };
+    if (plan.act === 'none') return { ok: false, problem: 'the filing plan filed nothing' };
+    let filed = plan.filed;
+    if (plan.act === 'file') {
+      filed = await fileCatchUp(task, pr, branch, ticketName, null, { mergedNumber, files: verdict.files });
+      if (!filed) return { ok: false, problem: 'filing it failed (the reason is listed with the unchecked lines)' };
+    }
+    // A trail that does not read back is in `unchecked` already; the ticket
+    // exists, and the merge step finds it by name.
+    if (!plan.recorded) await recordCatchUp(task, filed, pr.number, plan.refiledFrom);
+    return { ok: true, filed, already: plan.act !== 'file' };
+  };
+
+  /** main just moved: tell every ticket still in flight (task 86bctjffu),
+   *  then keep each Ready to launch PR current, or file its fix-up (SP-294). */
+  const afterMainMoved = async (task, mergedNumber) => {
+    const news = await tellMainMoved({ mergedNumber, list, dryRun: false, tasks });
+    for (const l of news.lines) console.log(`  main-moved\t${l}`);
+    unchecked.push(...news.problems.map((p) => `main-moved after PR #${mergedNumber}: ${p}`));
+    say(task, 'main-moved', `${news.told} in-flight ticket(s) told that PR #${mergedNumber} moved main`);
+    if (!news.ctx) {
+      unchecked.push(`ready-catch-up after PR #${mergedNumber}: not run, because main-moved could not read the merge, fetch or the open PRs (above) — no Ready to launch PR was checked`);
+      return;
+    }
+    const { merge, base, openPrs } = news.ctx;
+    const io = {
+      readComments: readCommentsOrProblem,
+      readStatus: async (id) => (await readTaskOrNull(id))?.status?.status ?? null,
+      findPullRequest,
+      contains: ({ branch }) => branchContains({ branch, mergeCommit: merge.oid, cwd: REPO_ROOT }),
+      check: ({ branch }) => checkBranch({ base, branch, mergeCommit: merge.oid, cwd: REPO_ROOT }),
+      window: ({ pr: n }) => windowDecision({ read: readLeaseFile(mergeWindowPath()), repo, pr: n, now: new Date().toISOString() }),
+      updateBranch: (n) => {
+        const out = gh(['pr', 'update-branch', String(n), '--repo', repo]);
+        return out.ok ? { ok: true } : { ok: false, why: out.stderr.trim().slice(0, 200) || 'gh failed' };
+      },
+      fileConflict: (args) => fileConflictAhead(args, mergedNumber),
+    };
+    const ready = await catchUpReadyTickets({ tasks, merge, base, repo, openPrs, dryRun: false, io });
+    for (const l of ready.lines) console.log(`  ready-catch-up\t${l}`);
+    unchecked.push(...ready.problems.map((p) => `ready-catch-up after PR #${mergedNumber}: ${p}`));
+    say(task, 'ready-catch-up', `${ready.caughtUp} Ready to launch PR(s) caught up and ${ready.filed} catch-up ticket(s) filed after PR #${mergedNumber} moved main`);
   };
 
   /** Read a comment's reply thread, or null when it could not be read. */
@@ -1839,10 +1907,7 @@ if (cmd === 'whoami') {
         const failed = [!noteId && 'note FAILED', !stuck && 'marker UNVERIFIED'].filter(Boolean);
         say(task, 'already-merged', `PR #${pr.number}${plan.mergedAt ? ` merged at ${plan.mergedAt}` : ''}; ticket -> ${dest.status} (verified); recorded on ${who}'s comment ${decision.commentId}${failed.length ? ` (${failed.join(', ')}, see below)` : ''} (${dest.why})${plan.healed ? '; replaces the old "already merged" refusal' : ''}`);
         await announce(task, mergedBusLine({ tag: busTag, task, url: ticketUrl(task), pr, dest, already: true }), `PR #${pr.number} already merged`);
-        const news = await tellMainMoved({ mergedNumber: pr.number, list, dryRun: false, tasks });
-        for (const l of news.lines) console.log(`  main-moved\t${l}`);
-        unchecked.push(...news.problems.map((p) => `main-moved after PR #${pr.number}: ${p}`));
-        say(task, 'main-moved', `${news.told} in-flight ticket(s) told that PR #${pr.number} moved main`);
+        await afterMainMoved(task, pr.number);
         return;
       }
     }
@@ -2017,10 +2082,7 @@ if (cmd === 'whoami') {
 
     // main just moved: tell every ticket still in flight, so its next pass
     // catches up before review instead of after (task 86bctjffu).
-    const news = await tellMainMoved({ mergedNumber: pr.number, list, dryRun: false, tasks });
-    for (const l of news.lines) console.log(`  main-moved\t${l}`);
-    unchecked.push(...news.problems.map((p) => `main-moved after PR #${pr.number}: ${p}`));
-    say(task, 'main-moved', `${news.told} in-flight ticket(s) told that PR #${pr.number} moved main`);
+    await afterMainMoved(task, pr.number);
   };
 
   const tasks = await fetchAllTasks(list);
@@ -2208,10 +2270,7 @@ if (cmd === 'whoami') {
     settled.add(task.id);
     say(task, alreadyMerged ? 'already-merged' : 'merged', `Lane ${laneName}: PR #${pr.number}; ticket -> ${dest.status}${moved ? '' : ' (MOVE FAILED, see below)'} (${dest.why})`);
     if (!alreadyMerged) {
-      const news = await tellMainMoved({ mergedNumber: pr.number, list, dryRun: false, tasks });
-      for (const l of news.lines) console.log(`  main-moved\t${l}`);
-      unchecked.push(...news.problems.map((p) => `main-moved after PR #${pr.number}: ${p}`));
-      say(task, 'main-moved', `${news.told} in-flight ticket(s) told that PR #${pr.number} moved main`);
+      await afterMainMoved(task, pr.number);
     }
     // postNote, moveMergedTicket and tellMainMoved report into `unchecked` themselves.
     return { ok: moved, dest, problems: [] };
