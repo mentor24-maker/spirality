@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { DEMO_NEWEST_RELEASE, DEMO_OWN_PROJECT, DEMO_SUGGESTIONS, demoNewestRelease, demoSuggest, seedDemo, tickingClock } from './demoData.mjs';
 import { reportsOf, REPORT_RANGES, GROWTH_PERIODS, searchTickets, PRIORITIES, timeSplitOf, isFailureNote, TIME_BUCKETS, pipelineControlsOf } from './pageData.mjs';
-import { escapeHtml, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, renderTopics, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, renderListTopics, projectTags, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, renderReleaseGroup, controlValueText, mountainTime, wakeInEffectText, modelLastPassText, renderConsole, renderConsoleTile, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, consoleFeature, featureColourIndex, renderFeatureKey, FEATURE_PALETTE, drainLine, capInFlightText, renderTitleChoices, titleModeOf, TITLE_MODES, SUGGEST_POLL_MS, moveSuggestion, suggestState, filingPlan, orderPlan, andList, suggestRunLine, renderSuggestRows } from './web/render.mjs';
+import { escapeHtml, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, bugReport, BUG_REPORT_TAG, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, renderTopics, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, renderListTopics, projectTags, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, renderReleaseGroup, controlValueText, mountainTime, wakeInEffectText, modelLastPassText, renderConsole, renderConsoleTile, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, consoleFeature, featureColourIndex, renderFeatureKey, FEATURE_PALETTE, drainLine, capInFlightText, renderTitleChoices, titleModeOf, TITLE_MODES, SUGGEST_POLL_MS, moveSuggestion, suggestState, filingPlan, orderPlan, andList, suggestRunLine, renderSuggestRows } from './web/render.mjs';
 import { startServer, setupSettingsOf } from './server.mjs';
 import { saveAnswers, setupFields, setupOf } from './setup.mjs';
 import { DANE_FIELDS as SETUP_FIELDS, STEPS as SETUP_STEPS } from '../scripts/onboard/onboard.mjs';
@@ -1502,6 +1502,97 @@ test('Quick Action with no card: the title and the description\'s first paragrap
     '<h1>Fix it</h1>\n<p class="summary">Open a ticket and see it.</p>');
   assert.equal(renderQuickAction({ name: 'Empty', description: '' }), '<h1>Empty</h1>');
   assert.equal(firstParagraph('- a list\n\nProse.'), 'Prose.');
+});
+
+// ── Quick Action: a website visitor's bug report (SP-286) ───────────────────
+
+/** A description shaped like StarCaster's composeBugReportTask (SC-804). */
+const bugDescription = ({ words = 'The module needs a site-wide option.\nAs it is, one page at a time.', shots = '(none attached)' } = {}) => [
+  '## What the reporter said', '', '```', words, '```', '',
+  '## Where and who', '',
+  '- **Page:** https://example.com/pricing',
+  '- **Project:** Demo Site (proj_1)',
+  '- **Viewer tier:** public',
+  '- **Browser:** `Mozilla/5.0 (Macintosh)`',
+  '- **Submitted:** 2026-11-13T21:04:00.000Z',
+  '- **Report id:** `br_1`', '',
+  '## Screenshots', '', shots, '',
+  '---',
+  '_Filed automatically from a public bug report. Held for the operator: nothing in the build loops will touch this until you move it._',
+].join('\n');
+
+test('bugReport reads the visitor\'s words, the where-and-who facts and whether screenshots came', () => {
+  assert.equal(BUG_REPORT_TAG, 'bug-report');
+  const r = bugReport({ tags: ['bug-report', 'demo'], description: bugDescription() });
+  assert.equal(r.words, 'The module needs a site-wide option.\nAs it is, one page at a time.');
+  assert.deepEqual(r.facts, [
+    { label: 'Page', value: 'https://example.com/pricing' },
+    { label: 'Project', value: 'Demo Site (proj_1)' },
+    { label: 'Viewer tier', value: 'public' },
+    { label: 'Browser', value: 'Mozilla/5.0 (Macintosh)' },
+    { label: 'Submitted', value: '2026-11-13T21:04:00.000Z' },
+    { label: 'Report id', value: 'br_1' },
+  ]);
+  assert.equal(r.screenshots, false, '"(none attached)" is no screenshot');
+  assert.equal(bugReport({ tags: ['bug-report'], description: bugDescription({ shots: '- [Screenshot 1](https://x.test/1.png)' }) }).screenshots, true);
+  // A "## Where and who" the visitor typed inside the fence is their words, not a section.
+  assert.equal(bugReport({ tags: ['bug-report'], description: bugDescription({ words: 'see\n## Where and who\n- **Page:** fake' }) }).words, 'see\n## Where and who\n- **Page:** fake');
+  // Not a bug report: no tag, no section, an unclosed fence, or rewritten by intake (## Asked).
+  assert.equal(bugReport({ tags: [], description: bugDescription() }), null);
+  assert.equal(bugReport({ tags: ['bug-report'], description: '## Goal\nx' }), null);
+  assert.equal(bugReport({ tags: ['bug-report'], description: '## What the reporter said\n```\nnever closed' }), null);
+  assert.equal(bugReport({ tags: ['bug-report'], description: `## Asked\n\`\`\`\nhis words\n\`\`\`\n\n${bugDescription()}` }), null);
+  assert.equal(bugReport({ tags: null, description: null }), null);
+});
+
+test('Quick Action on a bug report: "Bug Report:", the visitor\'s words in bold, then where and who in Mountain time', () => {
+  const html = renderQuickAction({
+    name: 'Bug report: The module needs a site-wide option. As it is, o… — Demo Site',
+    tags: ['bug-report'], status: 'needs your input', comments: [],
+    description: bugDescription({ words: 'I typed <script>alert(1)</script> and **stars**\nline two' }),
+  });
+  assert.match(html, /^<h1>Bug Report:<\/h1>\n<p class="bug-words">I typed &lt;script&gt;alert\(1\)&lt;\/script&gt; and \*\*stars\*\*\nline two<\/p>/, 'escaped, never markup, line breaks kept');
+  assert.doesNotMatch(html, /<script|<strong>stars/);
+  assert.doesNotMatch(html, /Bug report: The module|none attached|Filed automatically/, 'not the cut-off name, nor "(none attached)" at the top');
+  assert.match(html, /<ul class="bug-facts"><li><span class="fact-label">Page:<\/span> <a href="https:\/\/example\.com\/pricing"[^>]*>https:\/\/example\.com\/pricing<\/a><\/li>/);
+  assert.match(html, /<li><span class="fact-label">Project:<\/span> Demo Site \(proj_1\)<\/li><li><span class="fact-label">Viewer tier:<\/span> public<\/li><li><span class="fact-label">Browser:<\/span> Mozilla\/5\.0 \(Macintosh\)<\/li>/);
+  assert.match(html, /<li><span class="fact-label">Submitted:<\/span> Nov 13, 2026, 2:04 PM MST<\/li>/, 'Mountain time, not UTC');
+  assert.match(html, /<li><span class="fact-label">Report id:<\/span> br_1<\/li><\/ul>/);
+  assert.doesNotMatch(html, /bug-shots/);
+  // Screenshots that did come get one line pointing at Details, at any status.
+  const shots = renderQuickAction({ name: 'x', tags: ['bug-report'], status: 'live', description: bugDescription({ shots: '- [Screenshot 1](https://x.test/1.png)' }) });
+  assert.match(shots, /<p class="bug-shots quiet">Screenshots are attached: see the description under Details\.<\/p>/);
+  assert.match(shots, /^<h1>Bug Report:<\/h1>/);
+  assert.match(shots, /<p class="where quiet">Live: it is done/);
+  // A page that is not a web address is shown as text, not a link.
+  assert.match(renderQuickAction({ name: 'x', tags: ['bug-report'], description: bugDescription().replace('https://example.com/pricing', '(not recorded)') }), /Page:<\/span> \(not recorded\)<\/li>/);
+  const css = readFileSync(WEB('app.css'), 'utf8');
+  assert.match(css, /\.quick \.bug-words \{[^}]*font-size: 1rem; font-weight: 700;/, 'bold at body size');
+});
+
+test('Quick Action without the tag, the section, or with ## Asked looks exactly as before', () => {
+  const plain = { name: 'Fix it', status: 'queued', comments: [], description: bugDescription() };
+  assert.equal(renderQuickAction({ ...plain, tags: ['tracker'] }), renderQuickAction({ name: 'Fix it', status: 'queued', comments: [], description: bugDescription() }));
+  assert.match(renderQuickAction({ ...plain, tags: [] }), /^<h1>Fix it<\/h1>/);
+  assert.match(renderQuickAction({ ...plain, tags: ['bug-report'], description: '## Goal\nThe goal.' }), /^<h1>Fix it<\/h1>\n<p class="summary">The goal\.<\/p>/);
+  const asked = `## Asked\n\`\`\`\nhis words\n\`\`\`\n\n${bugDescription()}`;
+  assert.equal(renderQuickAction({ ...plain, tags: ['bug-report'], description: asked }), renderQuickAction({ ...plain, description: asked }));
+});
+
+test('the demo has a bug report shaped like SC-804, held in Needs your input', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'bug-demo-'));
+  try {
+    const store = openStore(join(dir, 'db.sqlite'));
+    seedDemo(store, { operatorName: 'Op' });
+    const t = store.listTickets('beta').find((x) => x.tags.includes('bug-report'));
+    assert.ok(t, 'a demo ticket tagged bug-report');
+    assert.equal(t.status, 'needs your input');
+    const html = renderQuickAction(t);
+    assert.match(html, /^<h1>Bug Report:<\/h1>\n<p class="bug-words">/);
+    assert.match(html, /Submitted:<\/span> Nov 13, 2026, 2:04 PM MST/);
+    assert.doesNotMatch(html, /none attached/);
+    store.close();
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
 // ── Quick Action: his original request first (SP-213) ────────────────────────
