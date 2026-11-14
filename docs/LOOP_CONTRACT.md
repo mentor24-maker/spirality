@@ -181,7 +181,9 @@ loop-build takes **every `Rework` ticket before any `Queued` one**:
   then place, then oldest first. A ticket's **place** is its place in the
   queue (1, 2, 3 ...), set by `POST /projects/<slug>/tickets/order` (SP-249):
   at the same priority, a ticket with a place comes before one without, lower
-  place first. Place never beats priority, and a ClickUp task has none.
+  place first. Ordering some tickets moves the project's other placed
+  tickets down after them, keeping their order, so no two share a place.
+  Place never beats priority, and a ClickUp task has none.
 
 Every list of tickets in one status (`queue --status`, the Tasks page) uses
 the same rule: priority, then place, then oldest.

@@ -15,3 +15,8 @@ exactly as before. The build loop, the `queue` command and the Tasks page all
 use the same rule, so they cannot disagree. A new tracker call sets the
 places for a whole list at once; the third step, the suggestions list on the
 page, is what will use it.
+
+Review sent it back once: putting a few tickets in order left the tickets
+already placed where they were, so two tickets could both be number 1. Now
+the others move down to make room, keeping the order they had, so every place
+is held by one ticket, as "the others adjust" asks.

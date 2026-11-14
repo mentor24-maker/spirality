@@ -1775,9 +1775,12 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
      * be a ticket of `project`, named once; anything else is refused with
      * `bad-order` and nothing changes. Each ticket whose place moves gets a
      * version bump and a `place` event, as a priority change does; one
-     * already in its place is left alone. Places of tickets not named are
-     * not touched. Answers `{ project, tickets, changed }`: the named tickets
-     * read back in the order given, and the ids that moved.
+     * already in its place is left alone. The project's other placed
+     * tickets follow on, n+1, n+2 ..., in the order they already had (place,
+     * then oldest), so the others adjust and no two tickets ever share a
+     * place; an unplaced ticket not named stays unplaced. Answers
+     * `{ project, tickets, changed }`: the named tickets read back in the
+     * order given, and the ids that moved (named or not).
      */
     orderTickets(project, { ids, actor }) {
       const slug = String(project ?? '');
@@ -1803,9 +1806,16 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
           }
           return row;
         });
+        // The rest of the project's placed tickets, in their current order,
+        // follow the named ones: "the others adjust", in Dane's words.
+        const named = new Set(rows.map((row) => row.id));
+        const others = db.prepare('SELECT * FROM tickets WHERE project = ? AND place IS NOT NULL ORDER BY place, created_at, number')
+          .all(slug)
+          .filter((row) => !named.has(row.id));
+        const all = [...rows, ...others];
         const at = now();
         const changed = [];
-        rows.forEach((row, i) => {
+        all.forEach((row, i) => {
           const place = i + 1;
           if (num(row.place) === place) return;
           const version = num(row.version);
@@ -1821,6 +1831,12 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
             throw new StoreError('write-failed', `ticket ${row.id} read back at place ${after.place}, expected ${i + 1}.`);
           }
           return after;
+        });
+        others.forEach((row, i) => {
+          const after = num(ticketRow(row.id).place);
+          if (after !== rows.length + i + 1) {
+            throw new StoreError('write-failed', `ticket ${row.id} read back at place ${after}, expected ${rows.length + i + 1}.`);
+          }
         });
         return { project: slug, tickets, changed };
       });

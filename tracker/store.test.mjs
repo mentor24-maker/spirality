@@ -1130,6 +1130,32 @@ test('orderTickets: places 1..n in one write, each move an event and a version b
   } finally { cleanup(); }
 });
 
+test('orderTickets: a partial order on top of an existing one renumbers the others after it, no two sharing a place', () => {
+  const { store, human, machine, cleanup } = fixture();
+  try {
+    for (const name of ['A', 'B', 'C', 'D', 'E']) store.fileTicket({ project: 'alpha', actor: machine.id, name, status: 'queued' });
+    store.orderTickets('alpha', { ids: ['AL-1', 'AL-2', 'AL-3'], actor: human.id });
+    // The review's example: AL-4 alone, sent after AL-1..3 hold places 1..3.
+    const r = store.orderTickets('alpha', { ids: ['AL-4'], actor: human.id });
+    const placed = store.listTickets('alpha').map((t) => [t.id, t.place]);
+    assert.deepEqual(placed, [['AL-1', 2], ['AL-2', 3], ['AL-3', 4], ['AL-4', 1], ['AL-5', null]],
+      'the others keep their order, one place down; an unplaced ticket stays unplaced');
+    assert.deepEqual(r.tickets.map((t) => [t.id, t.place]), [['AL-4', 1]]);
+    assert.deepEqual(r.changed, ['AL-4', 'AL-1', 'AL-2', 'AL-3']);
+    const ev = store.listEvents('AL-1').filter((e) => e.field === 'place').at(-1);
+    assert.equal(ev.from, '1');
+    assert.equal(ev.to, '2');
+    assert.equal(store.getTicket('AL-1').version, 3, 'one version bump per move');
+
+    // Moving one from the middle to the front closes its gap.
+    store.orderTickets('alpha', { ids: ['AL-3'], actor: human.id });
+    const places = store.listTickets('alpha').map((t) => t.place).filter((p) => p !== null);
+    assert.deepEqual([...places].sort((a, b) => a - b), [1, 2, 3, 4], 'places stay 1..n, none shared');
+    assert.deepEqual(store.listTickets('alpha').map((t) => [t.id, t.place]),
+      [['AL-1', 3], ['AL-2', 4], ['AL-3', 1], ['AL-4', 2], ['AL-5', null]]);
+  } finally { cleanup(); }
+});
+
 test('orderTickets: an id from another project, an unknown or a repeated id changes nothing', () => {
   const { store, human, machine, cleanup } = fixture();
   try {
