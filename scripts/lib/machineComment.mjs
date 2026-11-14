@@ -9,6 +9,8 @@
  * reader from either repo recognises the other's comments.
  */
 
+import machineCommentCjs from '../../lib/machineComment.js';
+
 export const MACHINE_MARKER = '[machine]';
 export const MACHINE_MARKER_LINE = `${MACHINE_MARKER} posted by a loop under Dane's token — not his word`;
 
@@ -76,3 +78,11 @@ export function stripMachineMarker(text) {
   }
   return String(text == null ? '' : text).trim();
 }
+
+/**
+ * Who wrote this comment, read off its author's kind (SP-26): the tracker's
+ * door puts `user.kind` ('human' or 'machine') on every comment it hands
+ * back, and the ClickUp door derives it from the stamp. The one definition is
+ * lib/machineComment.js; these re-export it for the door's ES modules.
+ */
+export const { authorKind, isMachineAuthored, isOperatorAuthored } = machineCommentCjs;

@@ -202,12 +202,12 @@ test('SP-285: a new review PASS after his merge is a new round — the Merge but
   } finally { await f.cleanup(); }
 });
 
-test('a loop writing under his token does not count as his answer', async () => {
+test('a loop\'s comment with no machine stamp does not count as his answer (SP-26)', async () => {
   const f = await fixture();
   try {
     const tickets = await boardTickets(f, 'beta');
-    const underToken = [...tickets.values()].find((t) => t.name === 'A question a loop asked under your token');
-    assert.equal(underToken.answerIn, false);
+    const unstamped = [...tickets.values()].find((t) => t.name === 'A question a loop asked, with no machine stamp');
+    assert.equal(unstamped.answerIn, false);
   } finally { await f.cleanup(); }
 });
 
@@ -585,7 +585,7 @@ test('each ticket on the board carries its assignee\'s name and its last change,
 
 // ── A ticket's thread ────────────────────────────────────────────────────────
 
-test('a ticket\'s thread is oldest first, names each author, and marks machine comments, stamped or not', async () => {
+test('a ticket\'s thread is oldest first, names each author, and marks machine comments by their author', async () => {
   const f = await fixture();
   try {
     const r = await f.call('GET', '/tickets/AL-2/thread');
@@ -597,11 +597,17 @@ test('a ticket\'s thread is oldest first, names each author, and marks machine c
       ['Loop (build)', true, 'REVIEW: PASSED. Ready for your merge word.'],
       ['Dane', false, 'merge'],
     ]);
-    // A loop posting under Dane's own token: his name, but marked, and the stamp line not shown.
-    const under = (await f.call('GET', '/tickets/BE-3/thread')).body.comments[0];
-    assert.equal(under.author.name, 'Dane');
-    assert.equal(under.machine, true);
-    assert.equal(under.body, 'Which name should the tab show?');
+    // A loop's comment with no stamp is marked by its author (SP-26).
+    const unstamped = (await f.call('GET', '/tickets/BE-3/thread')).body.comments[0];
+    assert.equal(unstamped.author.name, 'Loop (build)');
+    assert.equal(unstamped.machine, true);
+    assert.equal(unstamped.body, 'Which name should the tab show?');
+    // And his own comment ending in a pasted [machine] line is his: the stamp
+    // decides nothing, and is only taken off for display.
+    assert.equal((await f.call('POST', '/tickets/BE-3/comments', { body: { body: 'Call it Board.\n\n[machine] posted by a loop under Dane\'s token — not his word' } })).status, 201);
+    const his = (await f.call('GET', '/tickets/BE-3/thread')).body;
+    assert.deepEqual([his.comments.at(-1).author.name, his.comments.at(-1).machine], ['Dane', false]);
+    assert.equal(his.answerIn, true, 'his comment is his answer, pasted stamp and all');
     assert.equal((await f.call('GET', '/tickets/NOPE-1/thread')).status, 404);
     assert.equal((await f.call('GET', '/tickets/AL-2/thread', { token: null })).status, 401);
   } finally { await f.cleanup(); }
@@ -2148,7 +2154,7 @@ test('the Go button posts the substrate\'s one go word, handed to the page by th
     for (const t of threads) assert.equal(t.goPhrase, GO_PHRASE, t.id);
     const shown = threads.filter((t) => renderGoAction(t));
     assert.deepEqual(shown.map((t) => t.name), ['A request written up as a spec, waiting for your go']);
-    assert.equal(renderGoAction(threads.find((t) => t.name === 'A question a loop asked under your token')), '');
+    assert.equal(renderGoAction(threads.find((t) => t.name === 'A question a loop asked, with no machine stamp')), '');
     const posted = await f.call('POST', `/tickets/${shown[0].id}/comments`, { body: { body: GO_PHRASE } });
     assert.equal(posted.status, 201);
     const stored = f.store.listComments(shown[0].id).at(-1);
