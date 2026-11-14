@@ -23,9 +23,10 @@
 #
 #   ./scripts/install_loop_runner.sh --status --project ~/WebApps/starcaster
 #
-# Installing for a project whose lanes still run its own copy of the loop
-# replaces them: that is the switch-over, a step Dane approves, so it refuses,
-# naming the jobs, unless --take-over is given too.
+# Installing or uninstalling for a project whose lanes still run its own copy
+# of the loop replaces or stops them: that is the switch-over, a step Dane
+# approves, so both refuse, naming the jobs, unless --take-over is given too.
+# --project=~/... works too: the installer expands the leading ~ itself.
 #
 # Copied from StarCaster's installer. launchd starts a job at load, restarts a
 # kept-alive one if it dies, and survives a reboot; a screen session does none
@@ -73,6 +74,11 @@ LAUNCHD_PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$HO
 # The project's values: the label prefix, the log folder and the short name
 # every log and lock file starts with (CLAUDE.md engineering rule 2).
 config_value() { PATH="$LAUNCHD_PATH" node "$REPO/scripts/project_config.mjs" "$1"; }
+# Spirality's OWN value, asked from Spirality's folder, so it is never
+# whichever manifest sits above the folder the installer was started from
+# (SP-271 review: started in StarCaster's folder, the clash guard compared
+# StarCaster with itself).
+own_config_value() { (cd "$REPO" && config_value "$1"); }
 
 # Which project (SP-271). PROJECT_DIR is empty for Spirality's own lanes, and
 # then nothing below differs from before: a SPIRALITY_PROJECT left in the
@@ -80,6 +86,12 @@ config_value() { PATH="$LAUNCHD_PATH" node "$REPO/scripts/project_config.mjs" "$
 # the lanes work in.
 unset SPIRALITY_PROJECT
 PROJECT_DIR=""
+# A leading ~ is expanded here, because bash does not expand it after
+# --project= (the space form gets it from the shell).
+case "$PROJECT_ARG" in
+  "~")   PROJECT_ARG="$HOME" ;;
+  "~/"*) PROJECT_ARG="$HOME/${PROJECT_ARG#"~/"}" ;;
+esac
 if [ -n "$PROJECT_ARG" ]; then
   if [ ! -d "$PROJECT_ARG" ]; then
     echo "Refusing: --project names $PROJECT_ARG, which is not a folder on this machine." >&2
@@ -92,9 +104,10 @@ fi
 WORK="${PROJECT_DIR:-$REPO}"
 if [ -n "$PROJECT_DIR" ]; then
   # A project whose prefix or short name is Spirality's own would install
-  # over Spirality's jobs, or share their locks and logs.
-  OWN_PREFIX="$(config_value launchdPrefix)"
-  OWN_SLUG="$(config_value projectSlug)"
+  # over Spirality's jobs, or share their locks and logs. These two are
+  # Spirality's own, read from its folder before SPIRALITY_PROJECT is set.
+  OWN_PREFIX="$(own_config_value launchdPrefix)"
+  OWN_SLUG="$(own_config_value projectSlug)"
   export SPIRALITY_PROJECT="$PROJECT_DIR"
   if [ "$(config_value launchdPrefix)" = "$OWN_PREFIX" ] || [ "$(config_value projectSlug)" = "$OWN_SLUG" ]; then
     echo "Refusing: $PROJECT_DIR/spirality.project.json names Spirality's own launchdPrefix ($OWN_PREFIX) or projectSlug ($OWN_SLUG), so its jobs would replace Spirality's own or share their locks and logs." >&2
@@ -381,6 +394,10 @@ PLIST_BODY
 uninstall() {
   # The tracker jobs are removed whether or not the config still names them;
   # their database and backups are left where they are.
+  # A project's own copy of its lanes is stopped only with --take-over, the
+  # same as installing over it (SP-271 review); first, so a refusal touches
+  # nothing.
+  refuse_unless_take_over uninstall
   local jobs=("${SKILLS[@]}" "$RELAY")
   # A project's uninstall touches only its lanes: the tracker is Spirality's.
   [ -n "$PROJECT_DIR" ] || jobs+=("$TRACKER" "$BACKUP")
@@ -491,7 +508,10 @@ print_plists() {
 
 # A project's lanes still running its own copy of the loop are only replaced
 # with --take-over: that is the switch-over, Dane's step (SP-271).
+# $1 is the verb named in the refusal: install and uninstall both replace or
+# remove them, so both refuse.
 refuse_unless_take_over() {
+  local verb="$1"
   [ -n "$PROJECT_DIR" ] && [ -z "$TAKE_OVER" ] || return 0
   local s plist prog others=()
   for s in "${SKILLS[@]}" "$RELAY"; do
@@ -501,15 +521,19 @@ refuse_unless_take_over() {
     [ "$prog" = "$(program_of "$s")" ] || others+=("$(label_of "$s") (runs $prog)")
   done
   [ "${#others[@]}" -eq 0 ] && return 0
-  echo "Refusing to install: these jobs run something other than Spirality's runner, and installing would replace them:" >&2
+  if [ "$verb" = uninstall ]; then
+    echo "Refusing to uninstall: these jobs run something other than Spirality's runner (the project's own copy of the loop), and uninstalling would stop and remove them:" >&2
+  else
+    echo "Refusing to install: these jobs run something other than Spirality's runner, and installing would replace them:" >&2
+  fi
   printf '  %s\n' "${others[@]}" >&2
-  echo "That is switching the project over to Spirality's lanes, a step Dane approves. With his word, run again with --take-over." >&2
+  echo "That is part of switching the project over to Spirality's lanes, a step Dane approves. With his word, run again with --take-over." >&2
   exit 1
 }
 
 install() {
   # First of all, so a refused switch-over touches nothing (SP-271).
-  refuse_unless_take_over
+  refuse_unless_take_over install
   # Before anything is written: a signed-out gh would install a relay that
   # fails the first merge Dane asks for (SP-181).
   gh_require_signed_in || exit 1

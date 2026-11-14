@@ -309,15 +309,15 @@ function scratchProject(overrides = {}) {
   return dir;
 }
 
-function runInstaller(args, home) {
+function runInstaller(args, home, cwd = REPO) {
   const env = { ...process.env, HOME: home };
   delete env.SPIRALITY_PROJECT;
-  return spawnSync('bash', [join(REPO, 'scripts/install_loop_runner.sh'), ...args], { encoding: 'utf8', env });
+  return spawnSync('bash', [join(REPO, 'scripts/install_loop_runner.sh'), ...args], { encoding: 'utf8', env, cwd });
 }
 
 /** --print-plists output, as { file name: plist text }. */
-function printedPlists(args, home) {
-  const r = runInstaller(['--print-plists', ...args], home);
+function printedPlists(args, home, cwd = REPO) {
+  const r = runInstaller(['--print-plists', ...args], home, cwd);
   assert.equal(r.status, 0, r.stderr);
   const out = {};
   for (const part of r.stdout.split(/^=== /m).slice(1)) {
@@ -420,6 +420,73 @@ test('a project naming Spirality\'s own label prefix or short name is refused be
     }
   }
   rmSync(home, { recursive: true, force: true });
+});
+
+test('for a project, the clash guard reads Spirality\'s own values from Spirality\'s folder, wherever the installer is started from (SP-271 review)', () => {
+  const home = scratchHome();
+  const project = scratchProject();
+  const own = JSON.parse(readFileSync(join(REPO, 'spirality.project.json'), 'utf8'));
+  // A third project, sitting where the installer is started from, whose
+  // prefix is the project's: the clash guard must still compare against
+  // Spirality's own values, not this folder's.
+  const third = scratchProject({ projectSlug: 'third', launchdPrefix: 'com.normie' });
+  try {
+    // Started in the project's own folder, naming it as ".".
+    // (The started-in folder is the real path: /var is /private/var on a Mac.)
+    assert.deepEqual(printedPlists(['--project', '.'], home, project), printedPlists(['--project', realpathSync(project)], home));
+    // Started in a third project's folder: same plists for the project...
+    assert.deepEqual(printedPlists(['--project', project], home, third), printedPlists(['--project', project], home));
+    // A real clash with Spirality's prefix is still refused from there.
+    const clash = scratchProject({ launchdPrefix: own.launchdPrefix });
+    try {
+      const r = runInstaller(['--print-plists', '--project', clash], home, third);
+      assert.equal(r.status, 1, r.stdout + r.stderr);
+      assert.match(r.stderr, new RegExp(`names Spirality's own launchdPrefix \\(${own.launchdPrefix.replace(/\./g, '\\.')}\\)`));
+    } finally {
+      rmSync(clash, { recursive: true, force: true });
+    }
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(project, { recursive: true, force: true });
+    rmSync(third, { recursive: true, force: true });
+  }
+});
+
+test('--project=~/... is expanded like the space form (SP-271 review)', () => {
+  const home = scratchHome();
+  const project = scratchProject();
+  try {
+    // The project, reached through the scratch HOME.
+    symlinkSync(project, join(home, 'normie'));
+    const viaTilde = printedPlists(['--project=~/normie'], home);
+    assert.deepEqual(Object.keys(viaTilde).sort(), ['com.normie.loop-build.plist', 'com.normie.loop-intake.plist', 'com.normie.loop-review.plist', 'com.normie.relay.plist']);
+    assert.equal(stringAfter(viaTilde['com.normie.relay.plist'], 'WorkingDirectory'), join(home, 'normie'));
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(project, { recursive: true, force: true });
+  }
+});
+
+test('uninstalling for a project whose lanes run its own copy refuses, naming them, and removes nothing without --take-over (SP-271 review)', () => {
+  const home = scratchHome();
+  const project = scratchProject();
+  try {
+    const agents = join(home, 'Library/LaunchAgents');
+    const theirs = join(agents, 'com.normie.relay.plist');
+    const before = `<plist version="1.0">\n<dict>\n    <key>ProgramArguments</key>\n    <array>\n        <string>${project}/scripts/run_relay.sh</string>\n    </array>\n</dict>\n</plist>\n`;
+    writeFileSync(theirs, before);
+    const r = runInstaller(['--uninstall', '--project', project], home);
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assert.match(r.stderr, /Refusing to uninstall: these jobs run something other than Spirality's runner/);
+    assert.match(r.stderr, new RegExp(`com\\.normie\\.relay \\(runs ${project}/scripts/run_relay\\.sh\\)`));
+    assert.match(r.stderr, /--take-over/);
+    assert.doesNotMatch(r.stdout, /Removed/);
+    assert.equal(readFileSync(theirs, 'utf8'), before);
+    assert.deepEqual(readdirSync(agents), ['com.normie.relay.plist']);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(project, { recursive: true, force: true });
+  }
 });
 
 // The runner and the relay for a named project (SP-271), each in a scratch
