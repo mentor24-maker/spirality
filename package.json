@@ -37,6 +37,8 @@
     "release": "node scripts/release.mjs",
     "app-checks": "node scripts/app_checks.mjs",
     "heartbeat": "node scripts/heartbeat.mjs",
+    "stale-ready": "node scripts/stale_ready.mjs",
+    "stale-answer": "node scripts/stale_answer.mjs",
     "check:syntax": "node scripts/check_syntax.mjs",
     "check:secrets": "node scripts/check_secrets.mjs",
     "check:wording": "node scripts/check_wording.mjs",
