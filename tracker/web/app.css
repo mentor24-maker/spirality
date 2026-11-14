@@ -323,6 +323,27 @@ details.add-task form.request .title-mode input, details.add-task form.request .
 details.add-task fieldset.title-choices { margin: 1rem 0 0; padding: 0.5rem 0.85rem 0.75rem; border: 1px solid var(--ink); border-radius: 6px; background: #fff; }
 details.add-task fieldset.title-choices legend { font-weight: 600; padding: 0 0.35rem; background: #fff; border-radius: 4px; }
 details.add-task form.request label.title-choice { display: flex; align-items: baseline; gap: 0.5rem; margin-top: 0.4rem; font-weight: 400; cursor: pointer; }
+/* Suggest Next Tasks (SP-251): beside Add Task, the same blue box; each suggestion a white row with its handle, place, Keep and title. */
+details.suggest-next { border: var(--hairline); border-radius: 8px; padding: 0.5rem 1.25rem; margin-bottom: 1rem; background: var(--blue); color: var(--ink); }
+details.suggest-next[open] { padding-bottom: 1rem; }
+details.suggest-next > summary { cursor: pointer; font-weight: 600; }
+details.suggest-next [hidden] { display: none; }
+details.suggest-next .hint { color: var(--ink); }
+details.suggest-next .note:not(:empty) { background: #fff; border-radius: 4px; padding: 0.15rem 0.5rem; }
+details.suggest-next ol.suggestions { list-style: none; margin: 0.75rem 0 0; padding: 0; }
+details.suggest-next ol.suggestions:empty { display: none; }
+details.suggest-next li.suggestion { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem; margin: 0 0 0.4rem; padding: 0.4rem 0.75rem; border: 1px solid var(--ink); border-radius: 6px; background: #fff; }
+details.suggest-next li.suggestion.dragging { opacity: 0.5; }
+details.suggest-next .drag-handle { cursor: grab; border: 0; background: transparent; padding: 0 0.2rem; font-size: 1.1rem; line-height: 1; color: var(--quiet); }
+details.suggest-next .drag-handle:focus-visible { outline: 2px solid var(--blue); color: var(--ink); }
+details.suggest-next select.place { width: auto; margin: 0; }
+details.suggest-next label.keep { display: flex; align-items: center; gap: 0.3rem; margin: 0; font-weight: 400; }
+details.suggest-next label.keep input { width: auto; margin: 0; }
+details.suggest-next .suggestion-title { flex: 1 1 16rem; font-weight: 600; }
+details.suggest-next .filed { font-size: 0.9em; }
+details.suggest-next details.more { flex-basis: 100%; }
+details.suggest-next details.more > summary { cursor: pointer; color: var(--quiet); font-size: 0.9em; }
+details.suggest-next details.more p { margin: 0.3rem 0 0; white-space: pre-wrap; }
 p.filed-note { margin: 0 0 1rem; }
 .tasks-head { position: relative; }
 .filed-pod { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 10; max-width: 90%; padding: 0.5rem 1.25rem; border: 2px solid var(--blue); border-radius: 10px; background: #eaf5fe; color: var(--ink); font-size: 1.25rem; font-weight: 600; text-align: center; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15); animation: filed-pod-fade 4s linear forwards; }
