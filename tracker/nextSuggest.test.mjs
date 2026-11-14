@@ -1,11 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { openStore } from './store.mjs';
-import { createSuggester, FIELD_LIMITS, readSuggestions, runSuggest, skillPrompt, SuggestError, ticketsInput } from './nextSuggest.mjs';
+import { claudeArgs, createSuggester, FIELD_LIMITS, FOLDER_PREFIX, readSuggestions, runSuggest, skillPrompt, stripNumbering, SuggestError, sweepOldFolders, ticketsInput } from './nextSuggest.mjs';
 
 const five = (prefix = 'Add') => [1, 2, 3, 4, 5].map((n) => ({ title: `${prefix} thing ${n}`, description: `Do thing ${n}.`, why: `docs/PLAN.md says ${n}.` }));
 
@@ -70,6 +70,38 @@ test('readSuggestions reads a clean list, taking off fences, numbering and repea
   assert.ok(got[3].title.endsWith('…'));
 });
 
+test('stripNumbering takes off list numbering but keeps a number that is part of the title', () => {
+  assert.equal(stripNumbering('1. Add a column'), 'Add a column');
+  assert.equal(stripNumbering('2) Add a column'), 'Add a column');
+  assert.equal(stripNumbering('3: Add a column'), 'Add a column');
+  assert.equal(stripNumbering('#4 Add a column'), 'Add a column');
+  assert.equal(stripNumbering('- Add a column'), 'Add a column');
+  assert.equal(stripNumbering('2 factor sign-in for the tracker'), '2 factor sign-in for the tracker');
+  assert.equal(stripNumbering('10 minute limit on runs'), '10 minute limit on runs');
+});
+
+test('the claude arguments confine the file tools and carry no tickets', () => {
+  const args = claudeArgs('the prompt');
+  assert.deepEqual(args, ['-p', 'the prompt', '--output-format', 'text', '--restricted', '--tools', 'Read,Grep,Glob', '--allowedTools', 'Read,Grep,Glob', '--strict-mcp-config', '--no-session-persistence']);
+});
+
+test('sweepOldFolders removes only old suggest folders, left by a run a restart cut off', () => {
+  const root = mkdtempSync(join(tmpdir(), 'next-suggest-sweep-'));
+  try {
+    const old = join(root, `${FOLDER_PREFIX}old`);
+    const young = join(root, `${FOLDER_PREFIX}young`);
+    const other = join(root, 'something-else');
+    for (const d of [old, young, other]) mkdirSync(join(d, 'project'), { recursive: true });
+    const hourAgo = (Date.now() - 60 * 60 * 1000) / 1000;
+    utimesSync(old, hourAgo, hourAgo);
+    utimesSync(other, hourAgo, hourAgo);
+    const removed = sweepOldFolders({ tmpRoot: root, olderThanMs: 11 * 60 * 1000 });
+    assert.deepEqual(removed, [old]);
+    assert.deepEqual(readdirSync(root).sort(), ['something-else', `${FOLDER_PREFIX}young`]);
+    assert.deepEqual(sweepOldFolders({ tmpRoot: join(root, 'missing') }), [], 'a missing temp folder is not an error');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test('readSuggestions refuses anything but three to seven titled items, never a half list', () => {
   const bad = [
     'not json at all', '[{"title": "Add x",', '{"title": "Add x"}', '[]',
@@ -118,6 +150,11 @@ test('a run copies main into a fresh folder, gives claude the tickets on standar
     assert.ok(argv.includes('# Suggest next tasks'), 'the skill is the prompt');
     assert.equal(r.args[r.args.indexOf('--tools') + 1], 'Read,Grep,Glob', 'read-only tools only');
     assert.equal(r.args[r.args.indexOf('--allowedTools') + 1], 'Read,Grep,Glob');
+    // Restricted mode is what keeps Read and Grep inside the copy: without it
+    // they read any file on the machine. The real claude is checked against a
+    // file outside the folder by npm run check:suggest-confinement.
+    assert.ok(r.args.includes('--restricted'), 'file tools confined to the copy');
+    assert.deepEqual(r.args, claudeArgs(skillPrompt()), 'exactly the argument set the confinement check proves');
     assert.ok(folder && !existsSync(folder));
     assert.deepEqual(s.leftovers(), []);
   } finally { s.cleanup(); }

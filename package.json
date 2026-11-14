@@ -40,6 +40,7 @@
     "check:secrets": "node scripts/check_secrets.mjs",
     "check:wording": "node scripts/check_wording.mjs",
     "check:tracker-page": "node scripts/tracker_page_site.mjs --check",
+    "check:suggest-confinement": "node --disable-warning=ExperimentalWarning scripts/check_suggest_confinement.mjs",
     "test": "node --test scripts/*.test.mjs scripts/lib/*.test.mjs scripts/tracker/*.test.mjs scripts/onboard/*.test.mjs lib/*.test.mjs lib/*.test.js tracker/*.test.mjs",
     "verify": "npm run check:syntax && npm run check:secrets && npm run check:wording && npm run check:tracker-page && npm test",
     "tracker:test-email": "node --disable-warning=ExperimentalWarning tracker/testEmail.mjs",

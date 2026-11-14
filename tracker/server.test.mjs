@@ -336,6 +336,21 @@ test('suggest-next fails with a plain message for a project with no repository, 
   } finally { await f.cleanup(); }
 });
 
+test('suggest-next runs the server\'s own claudeCommand when no claude is named for it, so a stub there can never start the real claude', async () => {
+  const f = await fixture();
+  try {
+    const three = [1, 2, 3].map((n) => ({ title: `Add thing ${n}`, description: '', why: '' }));
+    const x = suggestScratch(f.dir, JSON.stringify(three));
+    f.store.updateProject('alpha', { repo: 'me/app' });
+    const at = await f.serve(f.store, { claudeCommand: x.stub, suggest: { source: () => x.repo, tmpRoot: x.tmpRoot } });
+    await f.call('POST', '/projects/alpha/suggest-next', { at });
+    const done = await settledSuggest(f, at, 'alpha');
+    assert.equal(done.body.state, 'done', done.text);
+    assert.deepEqual(done.body.suggestions, three);
+    assert.ok(x.recorded().args.includes('--restricted'), 'the stub claude ran, confined');
+  } finally { await f.cleanup(); }
+});
+
 test('GET /tickets/:id answers the ticket with its comments, oldest first, replies linked', async () => {
   const f = await fixture();
   try {

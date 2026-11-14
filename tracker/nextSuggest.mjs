@@ -7,6 +7,16 @@
  * Grep, Glob), and reads back three to seven suggestions:
  * `[{ title, description, why }]`.
  *
+ * - Claude runs in restricted mode (`--restricted`), which confines its file
+ *   tools to the copy. Without it, Read and Grep reach any file on the
+ *   machine (tested on the Mini, SP-250's review): a ticket or a file in the
+ *   copy could tell Claude to read the tracker's database or a key and put
+ *   it in a suggestion, which the tracker keeps and shows to the project.
+ *   Restricted mode also refuses a symlink in the copy that points outside
+ *   it, and ignores the machine's own Claude settings files.
+ *   `npm run check:suggest-confinement` proves it with the real `claude`
+ *   against a file outside the folder (scripts/check_suggest_confinement.mjs).
+ *
  * - The copy is never the lanes' own checkout, and it is removed afterwards
  *   whatever happens (a good answer, a bad one, a crash, the time limit).
  * - The open tickets go to `claude` on standard input, never on its command
@@ -24,7 +34,7 @@
  * one run; `createSuggester` keeps at most one run per project going.
  */
 import { spawn } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseSkill, REPO_ROOT } from './commands.mjs';
@@ -49,6 +59,21 @@ const TICKET_DESCRIPTION_LIMIT = 4000;
 const COMMENT_LIMIT = 1500;
 /** How much of a failed step's own output a failure message quotes. */
 const QUOTE_LIMIT = 300;
+/** How much of a step's output is kept; past it the rest is dropped. */
+export const MAX_OUTPUT = 256 * 1024;
+/** What every run's temp folder is called, under the system's temp folder. */
+export const FOLDER_PREFIX = 'spirality-suggest-';
+
+/**
+ * The arguments for one Claude run with `prompt`. `--restricted` is what
+ * keeps the file tools inside the copy (the working folder); `--tools`
+ * leaves only the read-only ones. The run's input never goes here: it goes
+ * on standard input.
+ */
+export function claudeArgs(prompt) {
+  const tools = READ_ONLY_TOOLS.join(',');
+  return ['-p', prompt, '--output-format', 'text', '--restricted', '--tools', tools, '--allowedTools', tools, '--strict-mcp-config', '--no-session-persistence'];
+}
 
 /** A failed run, with a plain message saying why; `code` names the kind. */
 export class SuggestError extends Error {
@@ -65,9 +90,12 @@ function cap(text, limit) {
   return s.length > limit ? `${s.slice(0, limit - 1).trimEnd()}…` : s;
 }
 
-/** A title with any leading numbering taken off: "1. ", "2) ", "#3 ", "- ", "* ". */
-function stripNumbering(title) {
-  return title.replace(/^\s*(?:(?:#?\d+\s*[.):-]?|[-*•])\s+)+/, '').trim();
+/**
+ * A title with any leading numbering taken off: "1. ", "2) ", "3: ", "#4 ",
+ * "- ", "* ". A bare number is part of the title ("2 factor sign-in").
+ */
+export function stripNumbering(title) {
+  return title.replace(/^\s*(?:(?:#\d+[.):]?|\d+[.):]|[-*•])\s+)+/, '').trim();
 }
 
 /**
@@ -164,8 +192,10 @@ function runProcess(command, args, { cwd, input = '', deadline, limitMs, env, wh
   return new Promise((resolve, reject) => {
     let child;
     try {
-      // Its own process group, so the time limit stops whatever it started too.
-      child = spawn(command, args, { cwd, env, stdio: ['pipe', 'pipe', 'pipe'], detached: true });
+      // In the tracker's own process group, not one of its own, so a tracker
+      // restart (launchctl kickstart -k, every pull that changes it: SP-150)
+      // stops a run going too instead of leaving it behind.
+      child = spawn(command, args, { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
     } catch (err) {
       reject(new SuggestError('not-found', `${what} could not be started (${err.message}).`));
       return;
@@ -176,7 +206,7 @@ function runProcess(command, args, { cwd, input = '', deadline, limitMs, env, wh
     let timedOut = false;
     let killer = null;
     const stop = (signal) => {
-      try { process.kill(-child.pid, signal); } catch { try { child.kill(signal); } catch { /* already gone */ } }
+      try { child.kill(signal); } catch { /* already gone */ }
     };
     const finish = (fn) => { if (!done) { done = true; clearTimeout(timer); clearTimeout(killer); fn(); } };
     // Past the deadline the process is asked to stop, then made to; the run
@@ -187,8 +217,8 @@ function runProcess(command, args, { cwd, input = '', deadline, limitMs, env, wh
       stop('SIGTERM');
       killer = setTimeout(() => stop('SIGKILL'), 2000);
     }, Math.max(0, deadline - now()));
-    child.stdout.on('data', (d) => { stdout += d; });
-    child.stderr.on('data', (d) => { stderr += d; });
+    child.stdout.on('data', (d) => { if (stdout.length < MAX_OUTPUT) stdout += d; });
+    child.stderr.on('data', (d) => { if (stderr.length < MAX_OUTPUT) stderr += d; });
     child.on('error', (err) => finish(() => reject(err.code === 'ENOENT'
       ? new SuggestError('not-found', `${what} was not found (no "${command}" on this machine).`)
       : new SuggestError('failed', `${what} could not be started (${err.message}).`))));
@@ -201,6 +231,28 @@ function runProcess(command, args, { cwd, input = '', deadline, limitMs, env, wh
     child.stdin.on('error', () => {});
     child.stdin.end(input);
   });
+}
+
+/**
+ * Removes temp folders left by runs that cannot still be going: any
+ * `spirality-suggest-*` folder in `tmpRoot` older than `olderThanMs`. A run
+ * cut off by a tracker restart never reaches its own clean-up, so the next
+ * run does it. Never throws: a folder it cannot remove is left for next time.
+ */
+export function sweepOldFolders({ tmpRoot = tmpdir(), olderThanMs = SUGGEST_TIME_LIMIT_MS + 60000, now = Date.now } = {}) {
+  let names = [];
+  try { names = readdirSync(tmpRoot); } catch { return []; }
+  const removed = [];
+  for (const name of names) {
+    if (!name.startsWith(FOLDER_PREFIX)) continue;
+    const path = join(tmpRoot, name);
+    try {
+      if (now() - statSync(path).mtimeMs < olderThanMs) continue;
+      rmSync(path, { recursive: true, force: true });
+      removed.push(path);
+    } catch { /* left for next time */ }
+  }
+  return removed;
 }
 
 /**
@@ -217,7 +269,8 @@ export async function runSuggest({ repo, input, claudeBin = 'claude', source = g
   if (!repo) throw new SuggestError('no-repo', 'this project has no GitHub repository set, so there is nothing to read; set one on its Edit Project page.');
   const deadline = now() + timeLimitMs;
   const prompt = skillPrompt(skillFile);
-  const folder = mkdtempSync(join(tmpRoot, 'spirality-suggest-'));
+  sweepOldFolders({ tmpRoot, olderThanMs: timeLimitMs + 60000, now });
+  const folder = mkdtempSync(join(tmpRoot, FOLDER_PREFIX));
   onFolder(folder);
   try {
     const copy = join(folder, 'project');
@@ -225,8 +278,7 @@ export async function runSuggest({ repo, input, claudeBin = 'claude', source = g
     const gitEnv = { ...env, GIT_TERMINAL_PROMPT: '0' };
     const git = await runProcess('git', ['clone', '--quiet', '--depth', '1', '--single-branch', '--branch', 'main', source(repo), copy], { cwd: folder, deadline, limitMs: timeLimitMs, env: gitEnv, what: 'Copying the project', now });
     if (git.code !== 0) throw new SuggestError('copy-failed', `the project's main branch could not be copied from ${repo}${quote(git.stderr)}.`);
-    const args = ['-p', prompt, '--output-format', 'text', '--tools', READ_ONLY_TOOLS.join(','), '--allowedTools', READ_ONLY_TOOLS.join(','), '--strict-mcp-config', '--no-session-persistence'];
-    const claude = await runProcess(claudeBin, args, { cwd: copy, input, deadline, limitMs: timeLimitMs, env, what: 'Claude', now }).catch((err) => {
+    const claude = await runProcess(claudeBin, claudeArgs(prompt), { cwd: copy, input, deadline, limitMs: timeLimitMs, env, what: 'Claude', now }).catch((err) => {
       if (err.code === 'not-found') throw new SuggestError('not-found', `Claude was not found on this machine (no "${claudeBin}"); install Claude Code there, or set ${CLAUDE_BIN_SETTING} to where it is.`);
       throw err;
     });

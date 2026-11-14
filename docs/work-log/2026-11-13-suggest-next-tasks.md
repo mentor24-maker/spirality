@@ -21,3 +21,17 @@ the same spots, main was merged in with both features kept. The two now
 share one setting for which Claude to run on the Mini (`TRACKER_CLAUDE`),
 rather than each having its own, so pointing the tracker at a different
 Claude changes both at once.
+
+Review sent it back a second time with a real hole: "read-only" was not the
+same as "only reads the copy". Asked to, Claude could read any file on the
+Mini, and since the open tickets and the copied files are text anyone on the
+project can write, one of them could have told Claude to fetch a private file
+and put it in a suggestion everyone sees. Claude now runs in restricted mode,
+which keeps it inside the copy, including refusing a shortcut (symlink) in
+the copy that points outside it. A new check, `npm run
+check:suggest-confinement`, runs the real Claude against a secret file just
+outside the copy and fails if the secret appears; it passed, and it does
+report a leak when restricted mode is taken away. Three smaller fixes came
+with it: a title that starts with a number ("2 factor sign-in") keeps it, a
+tracker restart now stops a run going instead of leaving it behind (and the
+next run clears any folder one left), and Claude's output is capped in size.

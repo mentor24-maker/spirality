@@ -624,10 +624,12 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
   // reading a fresh copy of the project and its open tickets
   // (tracker/nextSuggest.mjs). `suggest` holds the run's settings
   // (claudeBin, source, timeLimitMs), or a whole `run` in a test.
+  // The run's claude defaults to the handler's own claudeCommand, so a test
+  // that gives a stub claudeCommand can never start the real claude here.
   const { run: suggestRun, ...suggestOptions } = suggest ?? {};
   const suggester = createSuggester({
     store,
-    options: suggestOptions,
+    options: { claudeBin: claudeCommand, ...suggestOptions },
     ...(suggestRun ? { run: suggestRun } : {}),
     inputOf: (project) => ticketsInput(store.listTickets(project.slug, { open: true }), (id) => store.listComments(id)),
     log,
