@@ -1401,6 +1401,10 @@ together):
 | `waiting` sweeping the Agent Response list for "what actually needs me?" | The page's Waiting on You list, which reads every project the operator is on, the bus project included, but shows only tickets in the operator's statuses: a steward question shows there once it has been through `ask`, never straight after `task` |
 | The operator seeing a new post: the "Team chat" ticket puts itself in their ClickUp "Assigned to me" list | An alarm (a post whose message starts with `ALARM:`) is texted to the bus project's alert phone; every post, alarm or not, counts in the "New on the Bus" number in the page's header until the operator opens "Team chat" (SP-163, the operator's choice D) |
 
+Which of those alarms are pipeline watchdogs that move into Spirality for
+every project, and which stay in StarCaster: [WATCHDOGS.md](WATCHDOGS.md)
+(SP-260).
+
 **How loud a post is** (SP-163; Dane chose D on 2026-11-09: "a text for
 alarms only, plus the page count for everything else"):
 
