@@ -235,6 +235,11 @@ Three things the log can say that need a person:
   held up by it. The first pass after a runner starts always runs, and so
   does one at least every 6 hours (`LOOP_IDLE_PASS_EVERY_SECONDS`, 0 turns
   skipping off), so an expired Claude sign-in still shows within hours.
+- **`PAUSED /loop-build`** is normal while the lane or the whole pipeline is
+  paused on the Settings page (or the page cannot be read: the runner fails
+  safe). It is written on every wake the runner holds off, so the heartbeat
+  (`npm run heartbeat`, SP-266) counts a paused lane as alive and does not
+  raise an alarm the moment it is unpaused. It is never a pass.
 
 **Merges: the relay.** The third job, `com.spirality.relay`, runs
 `scripts/run_relay.sh` every 10 minutes (the default; launchd starts it every

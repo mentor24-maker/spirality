@@ -328,6 +328,11 @@
       "why": "run_relay.sh sources it; a copy with no app-checks command logs that and runs nothing"
     },
     {
+      "from": "scripts/lib/relay_heartbeat.sh",
+      "to": "scripts/lib/relay_heartbeat.sh",
+      "why": "run_relay.sh sources it; a copy with no scripts/heartbeat.mjs logs that and runs nothing (the setup wizard ticket, SP-269, brings the heartbeat itself)"
+    },
+    {
       "from": "scripts/lib/trackerFiles.mjs",
       "to": "scripts/lib/trackerFiles.mjs",
       "why": "the settings reader sits under loop/ in a project",
