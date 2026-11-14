@@ -4,7 +4,8 @@
 # then one `relay` pass of the door (`npm run clickup`, which talks to the
 # tracker the project config names), then one pass of the project's
 # application checks (`npm run app-checks`, SP-274), then the ticket
-# watchdogs (`stale-ready`, `stale-answer`, SP-267).
+# watchdogs (`stale-ready`, `stale-answer`, SP-267), then the throughput and
+# checkout-currency watchdogs (SP-268).
 #
 #   ./scripts/run_relay.sh            # one pass, output to stdout
 #   ./scripts/run_relay.sh --dry-run  # one pass that prints and writes nothing
@@ -81,6 +82,10 @@ source "$REPO/scripts/lib/relay_heartbeat.sh"
 # And the ticket watchdogs: stale-ready and stale-answer (SP-267).
 # shellcheck source=lib/relay_watchdogs.sh
 source "$REPO/scripts/lib/relay_watchdogs.sh"
+# And the throughput and checkout-currency watchdogs (SP-268). A copy of this
+# runner without the file runs on without them.
+# shellcheck source=lib/relay_queue_watchdogs.sh
+[ -f "$REPO/scripts/lib/relay_queue_watchdogs.sh" ] && source "$REPO/scripts/lib/relay_queue_watchdogs.sh"
 # A pass is time-limited so a stuck one cannot hold the relay for good; two
 # passes never overlap, whatever the wake time, because the second finds the
 # lock held.
@@ -159,13 +164,16 @@ if ! mkdir "$LOCK" 2>/dev/null; then
   mkdir "$LOCK" 2>/dev/null || { echo "[relay] the lock could not be retaken. Stopping." >&2; exit 1; }
 fi
 echo "$$" > "$LOCK/pid"
+# What a refused pull said, for the checkout-currency watchdog to name
+# (SP-268). A temporary file, removed when the pass ends.
+PULL_OUTPUT="$(mktemp "${TMPDIR:-/tmp}/$SLUG-relay-pull.XXXXXX")" || PULL_OUTPUT=""
 # A real start: the next tick counts from here, and any wake sent before now
 # is answered by this pass. A dry run writes nothing, these included.
 if [ -z "$DRY_RUN" ]; then
   date +%s > "$LAST_START_FILE"
   rm -f "$WAKE_FILE"
 fi
-trap 'rm -rf "$LOCK" 2>/dev/null; [ "$(cat "$SYNC_LOCK/pid" 2>/dev/null)" = "$$" ] && rm -rf "$SYNC_LOCK"' EXIT
+trap 'rm -rf "$LOCK" 2>/dev/null; [ -n "$PULL_OUTPUT" ] && rm -f "$PULL_OUTPUT"; [ "$(cat "$SYNC_LOCK/pid" 2>/dev/null)" = "$$" ] && rm -rf "$SYNC_LOCK"' EXIT
 
 # The timid pull, under the loops' sync lock. Wait up to two minutes for the
 # other lane; a lock whose pid is gone is cleared.
@@ -199,7 +207,15 @@ if [ "$(git rev-parse --abbrev-ref HEAD 2>/dev/null)" != "main" ] && [ -z "$(git
 fi
 if [ "$(git rev-parse --abbrev-ref HEAD 2>/dev/null)" = "main" ] && [ -z "$(git status --porcelain)" ]; then
   if take_sync_lock; then
-    git pull -q --ff-only origin main 2>&1 || echo "[relay] pull of main refused (see above) — running on the checkout as it is"
+    # The pull's own words still go to the log; a refusal's are kept too, so
+    # the checkout-currency watchdog below names git's reason (SP-268).
+    if ! PULL_SAID="$(git pull -q --ff-only origin main 2>&1)"; then
+      [ -n "$PULL_SAID" ] && printf '%s\n' "$PULL_SAID"
+      [ -n "$PULL_OUTPUT" ] && printf '%s\n' "${PULL_SAID:-git pull --ff-only failed and said nothing}" > "$PULL_OUTPUT"
+      echo "[relay] pull of main refused (see above) — running on the checkout as it is"
+    else
+      [ -n "$PULL_SAID" ] && printf '%s\n' "$PULL_SAID"
+    fi
     # The loop lanes run npm ci on every pull; the relay only when the pull
     # changed the package files, so a restart below lands on the new
     # dependencies, not the old node_modules (SP-150).
@@ -290,6 +306,18 @@ run_relay_heartbeat "$REPO" "${RELAY_HEARTBEAT_LIMIT_SECONDS:-180}" ${DRY_RUN:+-
 # verdict or stop it: a failure is one line naming the watchdog and its exit
 # code. A dry run reads and prints only.
 run_relay_watchdogs "$REPO" "${RELAY_WATCHDOG_LIMIT_SECONDS:-180}" ${DRY_RUN:+--dry-run}
+
+# Then the throughput and checkout-currency watchdogs (SP-268): is the queue
+# getting shorter, and did the pull above leave this machine on main's code?
+# Each posts to the bus only when something is wrong (STALLED, UNKNOWN or a
+# stale checkout), at most once every 6 hours per finding; the checkout one
+# only reports, never pulls or repairs. They run on every wake, whatever the
+# steps above did, each under its own time limit, and they never change this
+# pass's verdict or stop it: a failure is one line naming the watchdog. A dry
+# run reads and prints only.
+if declare -F run_relay_queue_watchdogs >/dev/null; then
+  run_relay_queue_watchdogs "$REPO" "${RELAY_QUEUE_WATCHDOG_LIMIT_SECONDS:-180}" "$BEFORE" "$PULL_OUTPUT" ${DRY_RUN:+--dry-run}
+fi
 
 # The exit code is the pass's own verdict, and the END line says it in words,
 # the relay part's first, then the checks':
