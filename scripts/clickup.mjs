@@ -42,7 +42,7 @@ import {
   findPullRequest, newestFirst, ESCALATE_AT_ROUND,
 } from './lib/loopTrail.mjs';
 import { buildCard, cardSurvived, findBlockquoteLines, findBranchLinks, branchLinkRefusal, CONTEXT_MIN_WORDS, CONTEXT_MAX_WORDS } from './lib/operatorCard.mjs';
-import { isMachineComment, stripMachineMarker } from './lib/machineComment.mjs';
+import { isMachineAuthored, isOperatorAuthored, stripMachineMarker } from './lib/machineComment.mjs';
 import { parseHumanHours, findHumanHours } from '../lib/humanHours.js';
 import { createClickupTracker } from './tracker/clickupTracker.mjs';
 import { createApiTracker, trackerTokenEnv } from './tracker/apiTracker.mjs';
@@ -534,7 +534,7 @@ async function alreadyAskedRefused(task, status) {
   const t = await readTask(task);
   if (statusOf(t.status?.status ?? '') !== statusOf(status)) return null;
   const comments = await readComments(task);
-  const verdict = handbackAnswer({ comments, operatorId: OPERATOR_ID, isMachine: isMachineComment });
+  const verdict = handbackAnswer({ comments, operatorId: OPERATOR_ID, isMachine: isMachineAuthored });
   if (verdict.state !== 'none') return null;
   console.error(`\nREFUSED — ${task} is already in "${t.status?.status}" with a card Dane has not answered yet, so he has been asked.`);
   console.error('A second card puts the same question in front of him twice. To add something, post a plain note:');
@@ -605,7 +605,7 @@ async function readBusMessages() {
     const read = await readCommentsOrProblem(t.id);
     if (read.problem) return { ok: false, why: `the comments on ${t.id} "${t.name}" could not be read (${read.problem})` };
     for (const c of read.comments) {
-      messages.push({ id: String(c.id), at: Number(c.date) || 0, authorId: c.user?.id == null ? null : Number(c.user.id), ticket: String(t.id), text: String(c.comment_text ?? '') });
+      messages.push({ id: String(c.id), at: Number(c.date) || 0, authorId: c.user?.id == null ? null : Number(c.user.id), authorKind: c.user?.kind ?? null, ticket: String(t.id), text: String(c.comment_text ?? '') });
     }
   }
   return { ok: true, messages };
@@ -924,7 +924,7 @@ if (cmd === 'whoami') {
   const out = await tracker.whoAmI();
   if (!out.res.ok) die('whoami', out);
   console.log(`Token valid. Acting as: ${out.json.user.username} <${out.json.user.email}> (id ${out.json.user.id})`);
-  if (Number(out.json.user.id) === OPERATOR_ID) console.error("  (This is Dane's own seat, as on StarCaster. Every comment this script posts carries the [machine] marker so readers can tell.)");
+  if (Number(out.json.user.id) === OPERATOR_ID) console.error("  (This is Dane's own seat, as on ClickUp. The ClickUp door stamps every comment it posts with the [machine] marker so readers can tell; on the tracker each loop signs in as its own machine actor instead.)");
   reportLimits();
 
 } else if (cmd === 'repo-check') {
@@ -1167,7 +1167,7 @@ if (cmd === 'whoami') {
   if (!task) usage();
   const comments = newestFirst(await readComments(task)).reverse();
   for (const c of comments) {
-    const who = isMachineComment(c.comment_text) ? `${c.user?.username ?? '?'} [machine]` : (c.user?.username ?? '?');
+    const who = isMachineAuthored(c) ? `${c.user?.username ?? '?'} [machine]` : (c.user?.username ?? '?');
     console.log(`[${clock(c.date)} MT] ${who} (${c.user?.id ?? '?'}, comment ${c.id}):`);
     console.log(stripMachineMarker(c.comment_text) || '(empty)');
     console.log('---');
@@ -1195,7 +1195,7 @@ if (cmd === 'whoami') {
     const prText = !isOperatorStatus(status) && recorded ? `PR #${recorded.number} not checked (machine status)` : prLabel(pr);
     const result = waitingVerdict({ task: t, comments, pr }, { operatorId: OPERATOR_ID });
     verdicts.push(result.verdict);
-    const lastWord = newest ? `${isMachineComment(newest.comment_text) ? 'a loop' : (newest.user?.username ?? '?')} ${clock(newest.date)} MT` : '(no comments)';
+    const lastWord = newest ? `${isMachineAuthored(newest) ? 'a loop' : (newest.user?.username ?? '?')} ${clock(newest.date)} MT` : '(no comments)';
     console.log(`${t.id}\t${status}\tassigned: ${assigned ? 'Dane' : 'not Dane'}\tlast word: ${lastWord}\t${prText}\t${verdictLine(result)}\t${t.name}`);
   }
   console.error(sweepSummary({
@@ -1743,7 +1743,7 @@ if (cmd === 'whoami') {
   // The decision is closePlan's (lib/relayLane.js). Returns true when it
   // decided this ticket, so the merge step does not also act on it.
   const relayCloseReadyToLaunch = async (task, comments) => {
-    const verdict = handbackAnswer({ comments, operatorId: OPERATOR_ID, isMachine: isMachineComment });
+    const verdict = handbackAnswer({ comments, operatorId: OPERATOR_ID, isMachine: isMachineAuthored });
     if (verdict.state !== 'answered' || !isCloseCommand(verdict.answer?.comment_text)) return false;
     const answerId = verdict.answer.id;
     const replies = await readReplies(answerId);
@@ -1825,7 +1825,7 @@ if (cmd === 'whoami') {
     // Only his merge phrases need their reply threads read — that is where an
     // earlier pass left its marker. Everything else costs a request and says nothing.
     const books = emptyBooks();
-    const hisPhrases = comments.filter((c) => Number(c.user?.id) === OPERATOR_ID && !isMachineComment(c.comment_text) && isMergeCommand(c.comment_text));
+    const hisPhrases = comments.filter((c) => isOperatorAuthored(c, OPERATOR_ID) && isMergeCommand(c.comment_text));
     for (const c of hisPhrases) {
       const out = await tracker.listReplies(c.id);
       if (!out.res.ok) {
@@ -2113,7 +2113,7 @@ if (cmd === 'whoami') {
   const relayNeedsYourInput = async (task) => {
     const comments = await readComments(task.id);
     seen.set(task.id, { task, comments });
-    const verdict = handbackAnswer({ comments, operatorId: OPERATOR_ID, isMachine: isMachineComment });
+    const verdict = handbackAnswer({ comments, operatorId: OPERATOR_ID, isMachine: isMachineAuthored });
     let replies = [];
     if (verdict.state === 'answered') {
       replies = await readReplies(verdict.answer.id);

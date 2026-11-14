@@ -53,9 +53,11 @@ name.
 developer seat (`48012725`) and Pulse, the workspace's service account
 (`54254347`). The API token in Doppler acts as **his own seat** — `npm run
 clickup -- whoami` says "Acting as: Dane" — exactly as StarCaster's does. So
-every comment the script posts ends with a `[machine]` marker line, stamped
-at the one place comments are sent, and every reader that asks "did Dane
-speak last?" skips stamped comments. Never assign Pulse.
+on ClickUp every comment the script posts ends with a `[machine]` marker
+line, stamped at the one place comments are sent. In the tracker each loop
+signs in as its own machine actor, no stamp is written, and every reader
+that asks "did Dane speak last?" reads the comment's author instead
+(`docs/LOOP_CONTRACT.md`, "Who is talking"; SP-26). Never assign Pulse.
 
 The everyday commands (`npm run clickup` bare prints the full list):
 

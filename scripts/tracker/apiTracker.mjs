@@ -37,14 +37,15 @@
  * With this tracker the project config's operator and machine ids are the
  * tracker's actor ids, so `user.id` compares as it does on ClickUp.
  *
- * The machine stamp keeps being written (the non-goal of this phase): a
- * comment or reply this tracker posts ends with the [machine] line, exactly
- * as on ClickUp, so the readers stay correct on either tracker.
+ * The machine stamp is not written (SP-26): every comment carries its
+ * author's actor, and every comment this door hands back says that actor's
+ * kind as `user.kind` ('human' or 'machine'), which is what the readers ask
+ * (lib/machineComment.js isMachineAuthored). Comments imported from ClickUp
+ * keep their stamp text as history, and the readers ignore it.
  *
  * The token is handed in, never printed and never logged.
  */
 
-import { stampCommentBody } from '../lib/machineComment.mjs';
 import { PRIORITY_VALUE, QUEUED, TERMINAL_STATUSES } from '../lib/loopStatuses.mjs';
 import { TRACKER_SEATS } from '../lib/expectedSecrets.mjs';
 import { fenceFor } from '../lib/operatorCard.mjs';
@@ -143,6 +144,8 @@ export function createApiTracker({ token, baseUrl, project, listId, timeoutMs, l
   let requests = 0;
   /** Actor names, read once per run: the API's answers carry ids only. */
   const names = new Map();
+  /** Actor kinds ('human' | 'machine'), read with the names. */
+  const kinds = new Map();
   /** Comment id -> its ticket, from every comment this run has read or written.
    *  A reply is posted on the ticket, so the ticket must be known. */
   const commentTicket = new Map();
@@ -217,8 +220,17 @@ export function createApiTracker({ token, baseUrl, project, listId, timeoutMs, l
     if (!names.has(id)) {
       const out = await call('GET', `/actors/${encodeURIComponent(id)}`);
       names.set(id, out.res.ok && out.json?.name ? out.json.name : `actor ${id}`);
+      const kind = out.res.ok ? out.json?.kind : null;
+      if (kind === 'human' || kind === 'machine') kinds.set(id, kind);
     }
     return names.get(id);
+  }
+
+  /** An actor's kind, read with its name; null when it could not be read. */
+  async function kindOf(id) {
+    if (id == null) return null;
+    await nameOf(id);
+    return kinds.get(id) ?? null;
   }
 
   async function taskFromTicket(t) {
@@ -253,7 +265,7 @@ export function createApiTracker({ token, baseUrl, project, listId, timeoutMs, l
       id: String(c.id),
       comment_text: c.body,
       comment: [{ text: c.body }],
-      user: { id: c.author, username: await nameOf(c.author) },
+      user: { id: c.author, username: await nameOf(c.author), kind: await kindOf(c.author) },
       date: ms(c.createdAt),
       parent: c.parent == null ? null : String(c.parent),
     };
@@ -274,7 +286,7 @@ export function createApiTracker({ token, baseUrl, project, listId, timeoutMs, l
   }
 
   async function postOn(ticket, body, parent = null) {
-    const text = commentText(stampCommentBody(body));
+    const text = commentText(body);
     const out = await call('POST', `${ticketPath(ticket)}/comments`, parent == null ? { body: text } : { body: text, parent: Number(parent) });
     if (!out.res.ok) return out;
     return withJson(out, await commentFromRow(out.json));
@@ -292,6 +304,7 @@ export function createApiTracker({ token, baseUrl, project, listId, timeoutMs, l
       const out = await call('GET', '/me');
       if (!out.res.ok) return out;
       names.set(out.json.id, out.json.name);
+      if (out.json.kind === 'human' || out.json.kind === 'machine') kinds.set(out.json.id, out.json.kind);
       return withJson(out, { user: { id: out.json.id, username: out.json.name, email: `${out.json.kind} actor in the tracker` } });
     },
 

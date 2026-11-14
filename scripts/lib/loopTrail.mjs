@@ -11,7 +11,7 @@
  * StarCaster's loopTrail.js and mergeOnComment.js.
  */
 
-import { isMachineComment } from './machineComment.mjs';
+import { isOperatorAuthored } from './machineComment.mjs';
 import { bodyNamesTicket as namesTicket } from '../../lib/clickupTicketLink.js';
 import { humanHoursLine } from '../../lib/humanHours.js';
 
@@ -117,13 +117,12 @@ export function roundSummaryLines(comments) {
 }
 
 /**
- * Is the newest comment on the ticket Dane's own word? The loops post under
- * his seat, so authorship alone cannot answer it: a comment carrying the
- * machine marker is a loop's, whatever account posted it.
+ * Is the newest comment on the ticket Dane's own word? His actor, and not a
+ * machine's (SP-26): every loop posts as its own machine actor, so the author
+ * answers it, with no stamp involved.
  */
 export function operatorSpokeLast(comments, operatorId) {
   const newest = newestFirst(comments)[0];
   if (!newest) return false;
-  if (isMachineComment(newest.comment_text)) return false;
-  return String(newest.user && newest.user.id) === String(operatorId);
+  return isOperatorAuthored(newest, operatorId);
 }

@@ -246,54 +246,44 @@ not the builder. The round count is never stored; it is counted from the
 `REVIEW:` verdict comments already on the ticket. `verdict --fail` refuses
 the fourth send-back. Written override: `verdict --fourth-round-anyway`.
 
-## Who is talking: the machine stamp
+## Who is talking: the author
 
-**What the code does today:** every loop and script posts to ClickUp under
-**Dane's own API token**, so every comment a machine writes comes back from
-ClickUp with Dane's user id on it. The user id therefore does **not** say who
-wrote a comment.
+**What the code does today (SP-26, 2026-11-14):** in the tracker every
+comment carries its author, and every author is either a **person** or a
+**machine** (an actor of kind `human` or `machine`). Each loop signs in with
+its own machine seat (`loop-build`, `loop-review`, `relay`, `hand-run`, ...),
+never with Dane's, so who wrote a comment is a fact read off the comment,
+not a guess.
 
-> StarCaster's `docs/LOOP_ENGINEERING.md` still describes a two-account
-> model, where the machine posts as a separate "Pulse" service account. The
-> code does not do that. This contract states what the code does. A separate
-> machine identity is still the better long-term fix; until it exists, the
-> stamp below is the rule.
+- A comment is **machine-written** when its author is a machine actor.
+- A comment is **Dane's** when its author is his actor (the project's
+  operator) and that actor is a person. Nothing in the text changes that:
+  if he quotes or pastes a machine card, above or below his words, the
+  comment is still his.
+- The door hands every comment to the readers with its author's kind
+  (`user.kind`, `human` or `machine`), and the readers ask that and nothing
+  else (`isMachineAuthored` and `isOperatorAuthored` in
+  `lib/machineComment.js`). A comment whose author's kind could not be read
+  is not counted as a machine's.
+- No stamp is written. Comments imported from ClickUp keep the old
+  `[machine] posted by a loop under Dane's token — not his word` line as
+  history: the importer gave each one the author its stamp named, the
+  readers ignore the line, and the tracker page leaves it off when it shows
+  the comment.
+- The ClickUp door, kept for a project still on ClickUp, posts every comment
+  under Dane's token, so there the author cannot say who wrote it. That door
+  alone still writes the stamp as the last line of each comment it posts,
+  and turns it back into the same author kind on every read, so the readers
+  ask one question on either tracker.
 
-So every comment a machine posts carries a **stamp** as its last non-empty
-line:
-
-```
-[machine] posted by a loop under Dane's token — not his word
-```
-
-- The stamp is added where requests are sent, not by each caller, so a newly
-  added caller cannot forget it. In StarCaster that is more than one place:
-  the ClickUp script's request function (`callOnce` in `clickup_direct.mjs`),
-  the pipeline runner's own request function (`scripts/pipeline.mjs`), and
-  the pipeline sweep's note (`pipelineSweep.js`), which stamps explicitly. It
-  is added whether the comment is plain text or ClickUp's rich-text form, and
-  adding it twice is impossible: a body already stamped is left unchanged.
-- A comment is **machine-written** if its last non-empty line starts with
-  `[machine]`. Comments from before the stamp existed are recognised by a
-  bracketed tag at the very start (`[CC-starcaster ...]`, `[auto-merge]`,
-  `[bus-relay]`, `[reconciler]` and similar).
-- A comment is **Dane's** only if it carries his user id **and** is not
-  machine-written.
-- If Dane quotes a machine card and types his words *under* it, it is still
-  his. If he types *above* a pasted card, the stamp ends up last and the
-  comment reads as a machine's. The same goes for quoting an **old** card
-  that opens with a bracketed tag: his comment then starts with that tag and
-  reads as a machine's, wherever he types. At the escalation that fails safe (his
-  ticket stays with him, loudly). Anywhere a misreading would cause an
-  action instead of a stall, the caller must ask a second question; the
-  stamp alone is not enough there.
-
-**Why (2026-09-01):** before the stamp, an `ask` card posted under Dane's
-token was read ten minutes later as Dane replying. The relay handed the
-ticket back to `Queued`, it vanished from his "Assigned to me", and a build
-loop would have built the very thing that had been escalated. The same
-mistake made `waiting` say "not waiting on Dane" while five approved merges
-sat parked.
+**Why (2026-09-01, then 2026-11-14):** on ClickUp, every loop posted under
+Dane's token, so an `ask` card was read ten minutes later as Dane replying.
+The relay handed the ticket back to `Queued`, it vanished from his "Assigned
+to me", and a build loop would have built the very thing that had been
+escalated. The stamp fixed that, but read the other way it could silence
+him: a card he pasted under his own words made his whole comment read as a
+machine's, and the auto-merge lane needed a second test (`quotesMachineText`)
+to tell. In the tracker the author answers both, so the stamp was retired.
 
 ## Markers: the exact lines the loop reads back
 
@@ -440,7 +430,8 @@ comment so the same answer is never posted twice:
   only gets its `[merge-on-comment]` marker re-stamped with a fresh time, and
   only if the bus post succeeded, so the next reminder is a day away and a
   failed post is retried next pass.
-- The **newest** marker on the thread decides. The machine stamp is removed
+- The **newest** marker on the thread decides. A machine stamp (on a
+  marker imported from ClickUp, or posted by the ClickUp door) is removed
   before the marker is read.
 
 **Why (2026-08-22, 2026-08-23):** two tickets refused for a missing
@@ -566,8 +557,8 @@ Before merging, the relay checks, on that pass, that:
 
 1. the ticket is in `Ready to launch` **now** (the same word on any other
    status does nothing);
-2. the comment carries Dane's user id (a machine comment always ends in the
-   stamp, so it can never be exactly a merge phrase);
+2. the comment is Dane's: his actor wrote it, and it is not a machine's (see
+   "Who is talking");
 3. the newest review verdict on the ticket is a PASS, **and his comment is
    not older than it** (one with the very same timestamp passes), so a
    "merge" from an earlier round cannot release a PR rebuilt since;
@@ -749,10 +740,9 @@ So "every file is a test, a document or a script" is necessary, not
 sufficient: the governance check comes first.
 
 The relay announces the ticket, waits a **one-hour** window, and merges
-unless Dane comments in that hour. A comment cancels unless it is
-positively recognised as machine-written by the tail stamp; the older
-bracketed tags do not count here, so an unstamped comment carrying his id
-is always read as his objection. Nothing else is loosened: the PASS
+unless Dane comments in that hour. A comment cancels unless its author is a
+machine actor, so anything his actor wrote, whatever it quotes, is always
+read as his objection. Nothing else is loosened: the PASS
 verdict and every PR check in the list above are still required. It is
 capped per hour and per day, turns itself off on trouble, and can be stopped
 with a switch phrase on any ticket or the bus. Spirality and WaveCenter have
@@ -766,8 +756,8 @@ writes nothing more than before. With lanes listed it runs
 
 - It announces an eligible ticket, and the hour runs from the tracker's own
   time for that comment.
-- An unstamped comment from Dane in the hour cancels it; a comment with the
-  machine stamp does not.
+- A comment from Dane in the hour cancels it; a comment by a machine actor
+  does not.
 - At the end of the hour it reads the PR from GitHub and asks the same gate
   a merge phrase does (`githubGate`): a PASS verdict on file and no newer
   send-back, an open PR, green checks, current with main, no conflict.

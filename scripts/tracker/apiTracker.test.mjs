@@ -509,7 +509,8 @@ test('ask posts the card, moves to Needs your input and assigns the operator; wa
     // The card keeps its marks as markdown: his words fenced, the headings bold.
     assert.ok(card.body.includes("**DANE'S WORDS — the instruction behind this ticket**\n\n```\nbuild the to-do list\n```\n"), card.body);
     assert.ok(card.body.includes("**WHAT'S GOING ON**\n\n"), card.body);
-    assert.ok(isMachineComment(card.body), 'the card carries the machine stamp');
+    // SP-26: no stamp; the author is the machine, and that is what says so.
+    assert.ok(!isMachineComment(card.body), 'the tracker\'s door writes no machine stamp');
     assert.equal(card.author, f.machine.id);
 
     const waiting = await f.door(['waiting', '--task', 'AL-1']);
@@ -725,7 +726,8 @@ test('relay hands a ticket back on his answer: the move and the reply marker are
     assert.equal(t.assignee, null);
     const replies = f.store.listComments('AL-1').filter((c) => c.parent === answer.id);
     assert.equal(replies.length, 1);
-    assert.ok(isMachineComment(replies[0].body), 'the reply carries the machine stamp');
+    assert.ok(!isMachineComment(replies[0].body), 'the reply carries no machine stamp (SP-26)');
+    assert.equal(f.store.getActor(replies[0].author).kind, 'machine', 'its author is a machine');
 
     const quiet = await f.door(['relay']);
     assert.equal(quiet.code, 0, quiet.err);
@@ -796,7 +798,8 @@ test('a catch-up ticket whose PR already merged is never handed to Dane: ask ref
     assert.match(notes[0].body, /CLOSED, WORK ALREADY LIVE: PR #7 \(https:\/\/github\.com\/owner\/repo\/pull\/7\), the pull request this ticket was filed to unstick, was merged into main at 11\/13, 10:39 AM MT\./);
     assert.match(notes[0].body, /moved from "in review" to Live by itself/);
     assert.doesNotMatch(notes[0].body, /Your move/);
-    assert.ok(isMachineComment(notes[0].body), 'the note carries the machine stamp');
+    assert.ok(!isMachineComment(notes[0].body), 'the note carries no machine stamp (SP-26)');
+    assert.equal(f.store.getActor(notes[0].author).kind, 'machine', 'its author is a machine');
 
     const again = await f.door(['fixup-live', '--task', 'AL-1']);
     assert.equal(again.code, 4);
@@ -934,7 +937,9 @@ test('replies: posted under a comment, listed apart from the top-level trail, an
     assert.deepEqual(paged.comments.map((c) => c.id), [top.json.id]);
     const replies = await t.listReplies(top.json.id);
     assert.deepEqual(replies.json.comments.map((c) => c.id), [reply.json.id]);
-    assert.ok(replies.json.comments.every((c) => isMachineComment(c.comment_text)));
+    // SP-26: the door says each author's kind, and writes no stamp.
+    assert.ok(replies.json.comments.every((c) => c.user.kind === 'machine' && !isMachineComment(c.comment_text)));
+    assert.ok(paged.comments.every((c) => c.user.kind === 'machine'));
   } finally { await f.cleanup(); }
 });
 

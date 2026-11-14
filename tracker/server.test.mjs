@@ -1809,10 +1809,13 @@ test('GET /search ranks title over description over people\'s comments over loop
     assert.equal(r.status, 200);
     assert.equal(r.body.query, 'widget');
     const ids = r.body.results.map((x) => x.id);
-    assert.deepEqual(ids.slice(0, 3), [titled.id, described.id, discussed.id]);
-    assert.deepEqual(ids.slice(3).sort(), [loopsOnly.id, stamped.id].sort());
+    // A person's comment ending in a [machine] line is still a person's
+    // (SP-26): the author decides, and the stamp is history.
+    assert.deepEqual(ids.slice(0, 2), [titled.id, described.id]);
+    assert.deepEqual(ids.slice(2, 4).sort(), [discussed.id, stamped.id].sort());
+    assert.deepEqual(ids.slice(4), [loopsOnly.id]);
     const byId = Object.fromEntries(r.body.results.map((x) => [x.id, x]));
-    assert.deepEqual([titled, described, discussed, loopsOnly, stamped].map((t) => byId[t.id].score), [8, 4, 2, 1, 1]);
+    assert.deepEqual([titled, described, discussed, stamped, loopsOnly].map((t) => byId[t.id].score), [8, 4, 2, 2, 1]);
     assert.equal(byId[titled.id].place, null);
     assert.equal(byId[titled.id].excerpt, null);
     assert.equal(byId[described.id].place, 'description');
@@ -1822,7 +1825,7 @@ test('GET /search ranks title over description over people\'s comments over loop
     assert.ok(byId[described.id].excerpt.length <= 162);
     assert.equal(byId[discussed.id].place, 'discussion');
     assert.equal(byId[loopsOnly.id].place, 'development');
-    assert.equal(byId[stamped.id].place, 'development');
+    assert.equal(byId[stamped.id].place, 'discussion');
     assert.equal(byId[stamped.id].excerpt, 'Built the widget.');
 
     // One phrase, as typed, any case; regular-expression characters are plain text.
