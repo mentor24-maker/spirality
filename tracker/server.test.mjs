@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -148,6 +148,114 @@ test('POST /projects/:slug/tickets/check names the project the words fit better,
     assert.equal((await f.call('POST', '/projects/alpha/tickets/check', { token: null, body: { name: 'x' } })).status, 401);
 
     assert.equal(JSON.stringify([f.store.listTickets('alpha'), f.store.listTickets('game'), f.store.listEvents('AL-1')]), before, 'the check wrote nothing');
+  } finally { await f.cleanup(); }
+});
+
+/**
+ * A local git repository with one commit on main, and a stub `claude` that
+ * writes its arguments and standard input to `record.json` beside it and
+ * prints `out` (or hangs, with STUB_HANG). For the suggest-next calls.
+ */
+function suggestScratch(dir, out) {
+  const repo = join(dir, 'repo');
+  mkdirSync(repo);
+  const git = (...args) => spawnSync('git', args, { cwd: repo, stdio: 'pipe' });
+  git('init', '--quiet', '-b', 'main');
+  writeFileSync(join(repo, 'CLAUDE.md'), '# A test project\n');
+  git('add', '.');
+  git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '--quiet', '-m', 'first');
+  const stub = join(dir, 'claude-stub');
+  const record = join(dir, 'record.json');
+  writeFileSync(stub, `#!/usr/bin/env node
+const fs = require('node:fs');
+let input = '';
+process.stdin.on('data', (d) => { input += d; });
+process.stdin.on('end', () => {
+  fs.writeFileSync(${JSON.stringify(record)}, JSON.stringify({ args: process.argv.slice(2), input }));
+  setTimeout(() => { process.stdout.write(${JSON.stringify(out)}); }, 300);
+});
+`);
+  spawnSync('chmod', ['+x', stub]);
+  const tmpRoot = join(dir, 'suggest-tmp');
+  mkdirSync(tmpRoot);
+  return { repo, stub, tmpRoot, recorded: () => JSON.parse(readFileSync(record, 'utf8')) };
+}
+
+/** Ask GET /projects/<slug>/suggest-next until the run is not running, at most `ms`. */
+async function settledSuggest(f, at, slug, ms = 10000) {
+  const until = Date.now() + ms;
+  for (;;) {
+    const r = await f.call('GET', `/projects/${slug}/suggest-next`, { at });
+    if (r.body.state !== 'running' || Date.now() > until) return r;
+    await new Promise((res) => setTimeout(res, 100));
+  }
+}
+
+test('POST then GET /projects/:slug/suggest-next runs claude on a fresh copy and answers its five suggestions; two starts give one run; no ticket is written', async () => {
+  const f = await fixture();
+  try {
+    const five = [1, 2, 3, 4, 5].map((n) => ({ title: `Add thing ${n}`, description: `Do thing ${n}.`, why: `Plan step ${n}.` }));
+    const x = suggestScratch(f.dir, JSON.stringify(five));
+    f.store.updateProject('alpha', { repo: 'me/app' });
+    const t = f.store.fileTicket({ project: 'alpha', name: 'Unmistakable open ticket', status: 'queued', actor: f.machine.id });
+    f.store.postComment({ ticket: t.id, author: f.machine.id, body: 'a comment worth reading', parent: null });
+    const before = JSON.stringify([f.store.listTickets('alpha'), f.store.listComments(t.id), f.store.listEvents(t.id)]);
+    const at = await f.serve(f.store, { suggest: { claudeBin: x.stub, source: () => x.repo, tmpRoot: x.tmpRoot } });
+
+    assert.equal((await f.call('GET', '/projects/alpha/suggest-next', { at })).status, 404, 'none asked for yet');
+    const first = await f.call('POST', '/projects/alpha/suggest-next', { at, token: f.humanToken, body: {} });
+    assert.equal(first.status, 202, first.text);
+    assert.equal(first.body.run.state, 'running');
+    const second = await f.call('POST', '/projects/alpha/suggest-next', { at });
+    assert.equal(second.status, 202);
+    assert.equal(second.body.run.id, first.body.run.id, 'a second start answers the run already going');
+    assert.equal((await f.call('GET', '/projects/alpha/suggest-next', { at })).body.state, 'running');
+
+    const done = await settledSuggest(f, at, 'alpha');
+    assert.equal(done.status, 200, done.text);
+    assert.equal(done.body.state, 'done', done.text);
+    assert.deepEqual(done.body.suggestions, five);
+    assert.equal(f.lines.filter((l) => /suggest-next: started run/.test(l)).length, 1, 'one run');
+    const r = x.recorded();
+    assert.ok(r.input.includes('Unmistakable open ticket') && r.input.includes('a comment worth reading'), 'the open tickets went in on standard input');
+    assert.ok(!r.args.join(' ').includes('Unmistakable open ticket'), 'never in the arguments');
+    assert.deepEqual(readdirSync(x.tmpRoot), [], 'the copy is gone');
+    assert.equal(JSON.stringify([f.store.listTickets('alpha'), f.store.listComments(t.id), f.store.listEvents(t.id)]), before, 'no ticket was created or changed');
+
+    // The list is kept: a restart (a new server on the same store) still answers it.
+    const again = await f.serve(f.store);
+    assert.deepEqual((await f.call('GET', '/projects/alpha/suggest-next', { at: again })).body.suggestions, five);
+
+    // Refused: an unknown project, a field it does not read, no token.
+    assert.equal((await f.call('POST', '/projects/nowhere/suggest-next', { at })).status, 404);
+    assert.equal((await f.call('POST', '/projects/alpha/suggest-next', { at, body: { repo: 'other/repo' } })).status, 400);
+    assert.equal((await f.call('POST', '/projects/alpha/suggest-next', { at, token: null })).status, 401);
+  } finally { await f.cleanup(); }
+});
+
+test('suggest-next fails with a plain message for a project with no repository, a bad answer, or no claude', async () => {
+  const f = await fixture();
+  try {
+    const x = suggestScratch(f.dir, JSON.stringify([{ title: 'Add one' }, { title: 'Add two' }]));
+    const at = await f.serve(f.store, { suggest: { claudeBin: x.stub, source: () => x.repo, tmpRoot: x.tmpRoot } });
+    await f.call('POST', '/projects/alpha/suggest-next', { at });
+    const noRepo = await settledSuggest(f, at, 'alpha');
+    assert.equal(noRepo.body.state, 'failed');
+    assert.match(noRepo.body.message, /no GitHub repository/);
+
+    f.store.updateProject('alpha', { repo: 'me/app' });
+    await f.call('POST', '/projects/alpha/suggest-next', { at });
+    const two = await settledSuggest(f, at, 'alpha');
+    assert.equal(two.body.state, 'failed');
+    assert.match(two.body.message, /Claude gave 2 suggestions; a good answer has 3 to 7/);
+    assert.equal(two.body.suggestions, undefined, 'never a half list');
+
+    const missing = await f.serve(f.store, { suggest: { claudeBin: join(f.dir, 'no-claude-here'), source: () => x.repo, tmpRoot: x.tmpRoot } });
+    await f.call('POST', '/projects/alpha/suggest-next', { at: missing });
+    const none = await settledSuggest(f, missing, 'alpha');
+    assert.equal(none.body.state, 'failed');
+    assert.match(none.body.message, /Claude was not found/);
+    assert.deepEqual(readdirSync(x.tmpRoot), [], 'no copy left behind');
   } finally { await f.cleanup(); }
 });
 
@@ -903,6 +1011,7 @@ test('strict membership: a person who is not an admin sees only their own projec
       ['GET', '/projects/beta'], ['GET', '/projects/beta/board'], ['GET', '/projects/beta/tickets'],
       ['POST', '/projects/beta/tickets', { name: 'Sneak in', status: 'Requested' }],
       ['POST', '/projects/beta/tickets/check', { name: 'x' }], ['GET', '/reports?project=beta'],
+      ['POST', '/projects/beta/suggest-next'], ['GET', '/projects/beta/suggest-next'],
       ['GET', `/tickets/${theirs.id}`], ['GET', `/tickets/${theirs.id}/thread`], ['GET', `/tickets/${theirs.id}/events`],
       ['GET', `/tickets/${theirs.id}/attachments`], ['GET', `/tickets/${theirs.id}/attachments/1`], ['GET', '/projects/beta/attachments'],
       ['PATCH', `/tickets/${theirs.id}/attachments/${theirFile.id}`, { name: 'renamed.txt' }], ['DELETE', `/tickets/${theirs.id}/attachments/${theirFile.id}`],

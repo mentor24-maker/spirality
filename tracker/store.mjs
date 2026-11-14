@@ -335,6 +335,13 @@ CREATE TABLE IF NOT EXISTS project_releases (
   at          TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS project_releases_by_project ON project_releases (project, id);
+CREATE TABLE IF NOT EXISTS next_suggestions (
+  project     TEXT PRIMARY KEY REFERENCES projects(slug),
+  state       TEXT NOT NULL,
+  suggestions TEXT,
+  message     TEXT,
+  at          TEXT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS project_members_by_actor ON project_members (actor, project);
 CREATE INDEX IF NOT EXISTS attachments_by_ticket ON attachments (ticket, id);
 CREATE INDEX IF NOT EXISTS project_docs_by_project ON project_docs (project, id);
@@ -1531,6 +1538,7 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
         db.prepare('DELETE FROM pipeline_settings WHERE project = ?').run(slug);
         db.prepare('DELETE FROM pipeline_setting_changes WHERE project = ?').run(slug);
         db.prepare('DELETE FROM project_releases WHERE project = ?').run(slug);
+        db.prepare('DELETE FROM next_suggestions WHERE project = ?').run(slug);
         // Its topics go too: there is no other way to remove them yet.
         db.prepare('DELETE FROM topics WHERE project = ?').run(slug);
         const r = db.prepare('DELETE FROM projects WHERE slug = ?').run(slug);
@@ -1965,6 +1973,40 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
       const n = Number.isInteger(limit) && limit > 0 ? limit : 200;
       return db.prepare('SELECT * FROM pipeline_setting_changes WHERE project = ? ORDER BY id DESC LIMIT ?').all(String(project), n)
         .map((r) => ({ id: num(r.id), setting: r.setting, label: controlOf(r.setting)?.label ?? r.setting, from: r.from_value, to: r.to_value, actor: num(r.actor), at: r.at }));
+    },
+
+    /**
+     * Keep a project's latest finished next-tasks run (tracker/nextSuggest.mjs),
+     * in place of the one before: `state` is `done` with its `suggestions`
+     * (`[{ title, description, why }]`) or `failed` with a `message`. Read
+     * back; answers what nextSuggestions reads. Writes no ticket.
+     */
+    saveNextSuggestions({ project, state, suggestions = null, message = null, at = now() }) {
+      if (state !== 'done' && state !== 'failed') throw new StoreError('bad-field', `a finished run is done or failed, not "${state}".`);
+      if (state === 'done' && !Array.isArray(suggestions)) throw new StoreError('bad-field', 'a done run keeps its list of suggestions.');
+      if (state === 'failed') requireText(message, 'a failed run\'s message');
+      return transaction(() => {
+        if (!this.getProject(project)) throw new StoreError('unknown-project', `no project "${project}".`);
+        const list = state === 'done' ? JSON.stringify(suggestions) : null;
+        db.prepare('INSERT INTO next_suggestions (project, state, suggestions, message, at) VALUES (?, ?, ?, ?, ?) ON CONFLICT (project) DO UPDATE SET state = excluded.state, suggestions = excluded.suggestions, message = excluded.message, at = excluded.at')
+          .run(String(project), state, list, state === 'failed' ? message : null, at);
+        const back = this.nextSuggestions(project);
+        if (!back || back.state !== state || back.at !== at || JSON.stringify(back.suggestions) !== (list ?? 'null')) {
+          throw new StoreError('write-failed', `the next-tasks run for ${project} did not read back.`);
+        }
+        return back;
+      });
+    },
+
+    /**
+     * A project's latest finished next-tasks run, `{ state, suggestions,
+     * message, at }` (suggestions null when it failed, message null when it
+     * did not), or null when none was ever kept.
+     */
+    nextSuggestions(project) {
+      const r = db.prepare('SELECT * FROM next_suggestions WHERE project = ?').get(String(project));
+      if (!r) return null;
+      return { state: r.state, suggestions: r.suggestions == null ? null : JSON.parse(r.suggestions), message: r.message, at: r.at };
     },
 
     /**

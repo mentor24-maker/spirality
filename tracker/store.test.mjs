@@ -680,6 +680,29 @@ test('updateProject refuses a new slug, prefix or operator, a machine owner, a b
   } finally { cleanup(); }
 });
 
+test('saveNextSuggestions keeps a project\'s latest finished next-tasks run, read back, replacing the one before; deleting the project removes it', () => {
+  const { store, cleanup } = fixture();
+  try {
+    assert.equal(store.nextSuggestions('alpha'), null);
+    const list = [{ title: 'Add x', description: 'd', why: 'w' }];
+    assert.deepEqual(store.saveNextSuggestions({ project: 'alpha', state: 'done', suggestions: list, at: '2026-11-13T20:00:00.000Z' }),
+      { state: 'done', suggestions: list, message: null, at: '2026-11-13T20:00:00.000Z' });
+    store.saveNextSuggestions({ project: 'alpha', state: 'failed', message: 'Claude gave 2 suggestions.', at: '2026-11-13T21:00:00.000Z' });
+    assert.deepEqual(store.nextSuggestions('alpha'), { state: 'failed', suggestions: null, message: 'Claude gave 2 suggestions.', at: '2026-11-13T21:00:00.000Z' });
+    // Refused, nothing written: a state that is not finished, a done run with no list, a failure with no message, an unknown project.
+    assert.throws(() => store.saveNextSuggestions({ project: 'alpha', state: 'running' }), { code: 'bad-field' });
+    assert.throws(() => store.saveNextSuggestions({ project: 'alpha', state: 'done' }), { code: 'bad-field' });
+    assert.throws(() => store.saveNextSuggestions({ project: 'alpha', state: 'failed' }));
+    assert.throws(() => store.saveNextSuggestions({ project: 'nope', state: 'done', suggestions: list }), { code: 'unknown-project' });
+    assert.equal(store.nextSuggestions('alpha').state, 'failed');
+
+    store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE' });
+    store.saveNextSuggestions({ project: 'beta', state: 'done', suggestions: list });
+    store.deleteProject('beta');
+    assert.equal(store.nextSuggestions('beta'), null);
+  } finally { cleanup(); }
+});
+
 test('deleteProject removes a project with no tickets, and refuses one with tickets, naming how many, removing nothing', () => {
   const { store, human, cleanup } = fixture();
   try {
