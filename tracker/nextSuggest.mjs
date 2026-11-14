@@ -14,7 +14,8 @@
  * - The whole run (copy and Claude) has one time limit, 10 minutes unless
  *   set; past it the run is stopped and fails.
  * - Which `claude` to run comes from the server's settings
- *   (TRACKER_CLAUDE_BIN, default `claude` on the PATH), so tests swap in a
+ *   (TRACKER_CLAUDE, the same one the title suggester runs; default `claude`
+ *   on the PATH), so tests swap in a
  *   stub. It uses the Claude sign-in the Mini's loops already use: no new key.
  * - A run writes no ticket. The latest finished run per project is kept in
  *   the store (`saveNextSuggestions`), so a reload or a restart still shows it.
@@ -27,6 +28,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseSkill, REPO_ROOT } from './commands.mjs';
+import { CLAUDE_COMMAND_VAR } from './titleSuggest.mjs';
 
 /** The time limit for one whole run: the copy and Claude together. */
 export const SUGGEST_TIME_LIMIT_MS = 10 * 60 * 1000;
@@ -39,8 +41,8 @@ export const FIELD_LIMITS = Object.freeze({ title: 160, description: 2000, why: 
 export const READ_ONLY_TOOLS = Object.freeze(['Read', 'Grep', 'Glob']);
 /** The skill the run follows, in this checkout (the tracker's), not the project's copy. */
 export const SKILL_FILE = join(REPO_ROOT, '.claude', 'skills', 'suggest-next', 'SKILL.md');
-/** The setting that names which `claude` to run. */
-export const CLAUDE_BIN_SETTING = 'TRACKER_CLAUDE_BIN';
+/** The setting that names which `claude` to run: one for every Claude run the tracker makes. */
+export const CLAUDE_BIN_SETTING = CLAUDE_COMMAND_VAR;
 /** How much of each open ticket goes to Claude: its newest comments, and caps on long text. */
 const TICKET_COMMENTS = 5;
 const TICKET_DESCRIPTION_LIMIT = 4000;

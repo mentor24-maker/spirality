@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -118,6 +118,83 @@ test('POST /projects/:slug/tickets files a ticket under the caller, and GET list
 
     // The filer recorded in the history is the token's actor.
     assert.equal(f.store.listEvents('AL-1')[0].actor, f.machine.id);
+  } finally { await f.cleanup(); }
+});
+
+/**
+ * A stand-in `claude` for the title suggester: it saves its arguments and
+ * standard input beside itself, then runs `body` (plain Node).
+ */
+function stubClaude(dir, name, body) {
+  const command = join(dir, name);
+  writeFileSync(command, `#!/usr/bin/env node
+let input = '';
+process.stdin.on('data', (c) => { input += c; });
+process.stdin.on('end', () => {
+  require('node:fs').writeFileSync(${JSON.stringify(`${command}.seen.json`)}, JSON.stringify({ args: process.argv.slice(2), input }));
+  ${body}
+});
+`);
+  chmodSync(command, 0o755);
+  return { command, seen: () => (existsSync(`${command}.seen.json`) ? JSON.parse(readFileSync(`${command}.seen.json`, 'utf8')) : null) };
+}
+
+test('POST /projects/:slug/tickets/suggest-titles answers five titles from a stub claude, and writes nothing', async () => {
+  const f = await fixture();
+  try {
+    const five = ['Add a title suggester', 'Suggest titles from a description', 'Offer five titles on Add Task', 'Let the tracker name tasks', 'Show title choices when adding'];
+    const good = stubClaude(f.dir, 'good', `process.stdout.write(${JSON.stringify(five.join('\n'))});`);
+    const three = stubClaude(f.dir, 'three', `process.stdout.write('a\\nb\\nc\\n');`);
+    const silent = stubClaude(f.dir, 'silent', '');
+    const hang = stubClaude(f.dir, 'hang', 'setInterval(() => {}, 1000);');
+    const at = (command, extra = {}) => f.serve(f.store, { claudeCommand: command, suggestTimeoutMs: 400, ...extra });
+    const path = '/projects/alpha/tickets/suggest-titles';
+    f.store.fileTicket({ project: 'alpha', name: 'Existing', status: 'queued', actor: f.machine.id });
+    const before = JSON.stringify([f.store.listTickets('alpha'), f.store.listEvents('AL-1')]);
+
+    const goodAt = await at(good.command);
+    const ok = await f.call('POST', path, { at: goodAt, token: f.humanToken, body: { description: 'On the Add Task form, suggest titles: quokka-77', title: 'Title helper' } });
+    assert.equal(ok.status, 200, ok.text);
+    assert.deepEqual(ok.body, { titles: five });
+    const seen = good.seen();
+    assert.equal(seen.input, 'Description: On the Add Task form, suggest titles: quokka-77\nTitle: Title helper\n', 'the words arrive on standard input');
+    assert.ok(!seen.args.some((a) => a.includes('quokka-77') || a.includes('Title helper')), `never in its arguments: ${JSON.stringify(seen.args)}`);
+    assert.equal((await f.call('POST', path, { at: goodAt, body: { description: 'From a loop' } })).status, 200, 'a loop\'s token may ask too, as with /tickets/check');
+
+    // Three lines, or nothing: a bad answer. A hang: stopped at the limit. No claude at all: 503.
+    const r3 = await f.call('POST', path, { at: await at(three.command), body: { description: 'x' } });
+    assert.equal(r3.status, 502, r3.text);
+    assert.equal(r3.body.error, 'bad-answer');
+    assert.match(r3.body.message, /Try again, or write your own/);
+    assert.equal((await f.call('POST', path, { at: await at(silent.command), body: { description: 'x' } })).status, 502);
+    const started = Date.now();
+    const slow = await f.call('POST', path, { at: await at(hang.command), body: { description: 'x' } });
+    assert.equal(slow.status, 504, slow.text);
+    assert.ok(Date.now() - started < 3000, 'answered at the limit');
+    const none = await f.call('POST', path, { at: await at(join(f.dir, 'no-such-claude')), body: { description: 'x' } });
+    assert.equal(none.status, 503, none.text);
+    assert.equal(none.body.error, 'no-claude');
+    assert.ok(f.lines.some((l) => l.includes('suggest-titles: no suggestions (no-claude)')), 'the log says why');
+
+    // An empty description is 400 and runs nothing; so is a field it does not read, or words that are not text.
+    const spy = stubClaude(f.dir, 'spy', `process.stdout.write(${JSON.stringify(five.join('\n'))});`);
+    const spyAt = await at(spy.command);
+    for (const body of [{}, { description: '' }, { description: '   ', title: 'Only a title' }]) {
+      const r = await f.call('POST', path, { at: spyAt, body });
+      assert.equal(r.status, 400, JSON.stringify(body));
+      assert.equal(r.body.error, 'no-description');
+    }
+    assert.equal((await f.call('POST', path, { at: spyAt, body: { description: 'x', status: 'queued' } })).status, 400);
+    assert.equal((await f.call('POST', path, { at: spyAt, body: { description: 7 } })).status, 400);
+    assert.equal((await f.call('POST', path, { at: spyAt, body: { description: 'x', title: 7 } })).status, 400);
+    assert.equal(spy.seen(), null, 'a refused call never runs claude');
+
+    // No token, an unknown project.
+    assert.equal((await f.call('POST', path, { at: spyAt, token: null, body: { description: 'x' } })).status, 401);
+    assert.equal((await f.call('POST', '/projects/nowhere/tickets/suggest-titles', { at: spyAt, body: { description: 'x' } })).status, 404);
+    assert.equal(spy.seen(), null);
+
+    assert.equal(JSON.stringify([f.store.listTickets('alpha'), f.store.listEvents('AL-1')]), before, 'nothing was written');
   } finally { await f.cleanup(); }
 });
 
@@ -1012,6 +1089,7 @@ test('strict membership: a person who is not an admin sees only their own projec
       ['POST', '/projects/beta/tickets', { name: 'Sneak in', status: 'Requested' }],
       ['POST', '/projects/beta/tickets/check', { name: 'x' }], ['GET', '/reports?project=beta'],
       ['POST', '/projects/beta/suggest-next'], ['GET', '/projects/beta/suggest-next'],
+      ['POST', '/projects/beta/tickets/suggest-titles', { description: 'x' }],
       ['GET', `/tickets/${theirs.id}`], ['GET', `/tickets/${theirs.id}/thread`], ['GET', `/tickets/${theirs.id}/events`],
       ['GET', `/tickets/${theirs.id}/attachments`], ['GET', `/tickets/${theirs.id}/attachments/1`], ['GET', '/projects/beta/attachments'],
       ['PATCH', `/tickets/${theirs.id}/attachments/${theirFile.id}`, { name: 'renamed.txt' }], ['DELETE', `/tickets/${theirs.id}/attachments/${theirFile.id}`],

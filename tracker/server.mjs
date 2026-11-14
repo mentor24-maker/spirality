@@ -77,6 +77,7 @@ import { resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { MAX_ATTACHMENT, openStore, StoreError } from './store.mjs';
+import { claudeCommandOf, CLAUDE_COMMAND_VAR, suggestTitles, TIME_LIMIT_MS as SUGGEST_TIME_LIMIT_MS, TitleSuggestError } from './titleSuggest.mjs';
 import { newestReleaseReader, OWN_PROJECT_RELEASE, releaseRemote } from '../lib/releases.mjs';
 import { SOURCE as IMPORT_SOURCE } from './import.mjs';
 import { boardOf, consoleOf, lookupTickets, PRIORITIES, prToCheck, prsToCheck, projectDetailsOf, projectsList, readSearchFilters, reportsOf, searchTickets, stageColoursOf, threadOf, waitingFor, busUnseen, pipelineControlsOf } from './pageData.mjs';
@@ -84,7 +85,7 @@ import { ghPrState, prStateCache } from './prState.mjs';
 import { createNotifier, DEFAULT_FROM, MAIL_FROM, MAIL_KEY, mailEnvFromDoppler, mailSettingsFromEnv, resendSender, textSettings } from './notify.mjs';
 import { sendInvite, sendResetLink } from './account.mjs';
 import { guessProject } from './projectGuess.mjs';
-import { CLAUDE_BIN_SETTING, createSuggester, ticketsInput } from './nextSuggest.mjs';
+import { createSuggester, ticketsInput } from './nextSuggest.mjs';
 import { findConfigFile, loadProjectConfig } from '../lib/projectConfig.mjs';
 import { saveAnswers, setupFields, setupList, setupOf, SetupError } from './setup.mjs';
 import busRelayPlan from '../lib/busRelayPlan.js';
@@ -169,6 +170,18 @@ const INVITE_REFUSALS = Object.freeze({ 'duplicate-email': 409, 'duplicate-invit
 const FILE_FIELDS = Object.freeze(['name', 'description', 'status', 'priority', 'tags', 'assignee', 'loopNote']);
 /** What the Add Task box's project check reads: the words about to be filed. */
 const CHECK_FIELDS = Object.freeze(['name', 'description']);
+/** What the title suggester reads: the description, and the title when one was typed. */
+const SUGGEST_FIELDS = Object.freeze(['description', 'title']);
+/** What the page shows for each refused suggestion: plain words, never the run's own output. */
+const SUGGEST_MESSAGES = Object.freeze({
+  'no-description': 'Write a description first: the titles are suggested from it.',
+  'no-claude': 'Title suggestions are not available: Claude is not set up on the tracker\'s machine. Write your own title.',
+  'too-slow': 'The title suggestions took too long and were stopped. Try again, or write your own.',
+  'bad-answer': 'The title suggestions came back garbled. Try again, or write your own.',
+  failed: 'No titles could be suggested this time. Try again, or write your own.',
+});
+/** The answer each refused suggestion gets (tracker/titleSuggest.mjs); any other code is 502. */
+const SUGGEST_REFUSALS = Object.freeze({ 'no-description': 400, 'no-claude': 503, 'too-slow': 504, 'bad-answer': 502, failed: 502 });
 
 /** The fields a new project may carry. */
 const PROJECT_FIELDS = Object.freeze(['name', 'slug', 'prefix', 'url', 'logo', 'owner', 'repo', 'alertEmail', 'alertPhone']);
@@ -553,6 +566,9 @@ function readReportRange(fromText, toText) {
  * gone back, like the notifier, and wakes the lane the ticket was handed
  * to; it is not waited on, and a wake that fails never fails the write.
  * Null means no lane is ever woken from here.
+ * `claudeCommand` is the `claude` the title suggester runs:
+ * TRACKER_CLAUDE when the server starts, else `claude` on the PATH; a test
+ * names a stub. `suggestTimeoutMs` is how long one suggestion may take.
  */
 /**
  * The word the ticket page's Close button posts: the first of the relay's
@@ -563,7 +579,7 @@ export const CLOSE_PHRASE = busRelayPlan.CLOSE_PHRASES[0];
 /** The word the Go button posts: the one an intake card asks for (GO_PHRASE in lib/busRelayPlan.js). */
 export const GO_PHRASE = busRelayPlan.GO_PHRASE;
 
-export function createHandler(store, { log = () => {}, notifier = null, defaultProject = null, mergePhrase = null, closePhrase = null, goPhrase = null, accountMail = null, setup = null, now = Date.now, publicUrl = null, pipeline = null, docsDir = DOCS_DIR, commandsRoot = REPO_ROOT, readPrState = null, ownProject = null, newestRelease = null, waker = null, suggest = {} } = {}) {
+export function createHandler(store, { log = () => {}, notifier = null, defaultProject = null, mergePhrase = null, closePhrase = null, goPhrase = null, accountMail = null, setup = null, now = Date.now, publicUrl = null, pipeline = null, docsDir = DOCS_DIR, commandsRoot = REPO_ROOT, readPrState = null, ownProject = null, newestRelease = null, waker = null, suggest = {}, claudeCommand = 'claude', suggestTimeoutMs = SUGGEST_TIME_LIMIT_MS } = {}) {
   /**
    * This machine's lanes as the page data reads them, `{ slug, stages }`
    * (pipelineOf), or null when this tracker reads no logs or they cannot be
@@ -1249,6 +1265,28 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
       return [200, latest];
     }
 
+    // The Add Task box's title suggester: five titles from the
+    // description, and the title typed when there is one, by a Claude run on
+    // this machine (tracker/titleSuggest.mjs). The same sign-in and project
+    // rules as the check above; it writes nothing.
+    if (parts.length === 4 && parts[0] === 'projects' && parts[2] === 'tickets' && parts[3] === 'suggest-titles' && method === 'POST') {
+      requireProject(parts[1], me);
+      const body = await readJson(req);
+      checkBody(body, me, SUGGEST_FIELDS);
+      for (const key of SUGGEST_FIELDS) {
+        if (body[key] != null && typeof body[key] !== 'string') throw new HttpError(400, 'bad-field', `${key} must be text.`);
+      }
+      if (!body.description?.trim()) throw new HttpError(400, 'no-description', 'Write a description first: the titles are suggested from it.');
+      try {
+        const titles = await suggestTitles({ description: body.description, title: body.title ?? null }, { command: claudeCommand, timeoutMs: suggestTimeoutMs });
+        return [200, { titles }];
+      } catch (err) {
+        if (!(err instanceof TitleSuggestError)) throw err;
+        log(`suggest-titles: no suggestions (${err.code}): ${err.message}`);
+        throw new HttpError(SUGGEST_REFUSALS[err.code] ?? 502, err.code, SUGGEST_MESSAGES[err.code] ?? 'No titles could be suggested this time. Try again, or write your own.');
+      }
+    }
+
     if (parts.length === 3 && parts[0] === 'projects' && parts[2] === 'tickets') {
       const project = requireProject(parts[1], me);
       if (method === 'GET') {
@@ -1588,8 +1626,8 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
 }
 
 /** Start a server on `port` (0 = any free port) against an open store. Resolves to the http.Server. */
-export function startServer({ store, port, host = '127.0.0.1', log, notifier, defaultProject, mergePhrase, closePhrase, goPhrase, accountMail, setup, now, publicUrl, pipeline, docsDir, commandsRoot, readPrState, ownProject, newestRelease, waker, suggest }) {
-  const server = createServer(createHandler(store, { log, notifier, defaultProject, mergePhrase, closePhrase, goPhrase, accountMail, setup, now, publicUrl, pipeline, docsDir, commandsRoot, readPrState, ownProject, newestRelease, waker, suggest }));
+export function startServer({ store, port, host = '127.0.0.1', log, notifier, defaultProject, mergePhrase, closePhrase, goPhrase, accountMail, setup, now, publicUrl, pipeline, docsDir, commandsRoot, readPrState, ownProject, newestRelease, waker, suggest, claudeCommand, suggestTimeoutMs }) {
+  const server = createServer(createHandler(store, { log, notifier, defaultProject, mergePhrase, closePhrase, goPhrase, accountMail, setup, now, publicUrl, pipeline, docsDir, commandsRoot, readPrState, ownProject, newestRelease, waker, suggest, claudeCommand, suggestTimeoutMs }));
   return new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(port, host, () => {
@@ -1743,12 +1781,15 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     log(waker ? `wake lanes: on, for ${ownProject}'s tickets; a ticket handed to a lane starts its next pass, the timers stay as the fallback.` : 'wake lanes: off, because the project config is not usable; the lanes wake on their timers alone.');
     log(publicUrl ? `public address: ${publicUrl} serves the page and the API, with a Secure cookie.` : 'public address: none set (trackerPublicUrl).');
     // The bell, Waiting on You and the Merge button check each pull request on GitHub.
-    const server = await startServer({ store, port, host, log, notifier, defaultProject, mergePhrase, closePhrase: CLOSE_PHRASE, goPhrase: GO_PHRASE, accountMail, setup, publicUrl, pipeline, readPrState: ghPrState(), ownProject,
+    // The Add Task box's title suggester and the next-task suggestions run this claude.
+    const claudeCommand = claudeCommandOf();
+    log(`title and next-task suggestions: through "${claudeCommand}" on this machine${process.env[CLAUDE_COMMAND_VAR] ? ` (${CLAUDE_COMMAND_VAR})` : `; set ${CLAUDE_COMMAND_VAR} to name another`}.`);
+    const server = await startServer({ store, port, host, log, claudeCommand, notifier, defaultProject, mergePhrase, closePhrase: CLOSE_PHRASE, goPhrase: GO_PHRASE, accountMail, setup, publicUrl, pipeline, readPrState: ghPrState(), ownProject,
       // The Settings page's Move to Newest reads the release tags from this checkout's remote.
       newestRelease: newestReleaseReader({ run: promisify(execFile), cwd: REPO_ROOT, remote: releaseRemote() }),
       waker,
-      // Next-task suggestions run this `claude` (TRACKER_CLAUDE_BIN, else the one on the PATH).
-      suggest: { claudeBin: process.env[CLAUDE_BIN_SETTING] || 'claude' } });
+      // Next-task suggestions run the same `claude` (TRACKER_CLAUDE, else the one on the PATH).
+      suggest: { claudeBin: claudeCommand } });
     console.log(`tracker listening on http://${host}:${server.address().port}/`);
   } catch (err) {
     console.error(`tracker server did not start: ${err.message}`);
