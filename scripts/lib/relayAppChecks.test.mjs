@@ -238,7 +238,7 @@ test('app-checks on the relay: the relay part keeps the whole limit when no chec
 
   const text = readFileSync(join(HERE, '..', 'run_relay.sh'), 'utf8');
   assert.ok(text.includes('if [ "$CHECKS_LISTED" = "none" ]; then RELAY_LIMIT="$PASS_LIMIT"; else RELAY_LIMIT=$((PASS_LIMIT - CHECKS_SHARE)); fi'));
-  const listed = text.indexOf('CHECKS_LISTED="$(relay_app_checks_listed "$REPO")"');
+  const listed = text.indexOf('CHECKS_LISTED="$(relay_app_checks_listed "$PROJECT")"');
   assert.ok(listed > text.indexOf('back_to_main') && listed < text.indexOf('PASS_START=$(date +%s)'), 'counted after the pull, before the relay part starts');
 });
 

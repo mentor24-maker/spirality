@@ -156,11 +156,12 @@ test('run through a linked path (/tmp on a Mac), the command still runs', () => 
 
 test('the installer trusts the checkout before any lane, and --status shows it', () => {
   const text = readFileSync(join(HERE, '..', 'install_loop_runner.sh'), 'utf8');
-  const install = text.slice(text.indexOf('install() {'));
-  const ensure = install.indexOf('claudeTrust.mjs" ensure "$REPO"');
+  // The checkout the lanes work in: Spirality's own, or a project's (SP-271).
+  const install = text.slice(text.indexOf('\ninstall() {'));
+  const ensure = install.indexOf('claudeTrust.mjs" ensure "$WORK"');
   const firstLane = install.indexOf('for s in "${SKILLS[@]}"; do');
   assert.ok(ensure > 0 && ensure < firstLane, 'ensure runs before the first lane is loaded');
   assert.match(install, /if \[ -n "\$trust_failed" \]; then[\s\S]*?FAILED:[\s\S]*?exit 1/);
   const status = text.slice(text.indexOf('status() {'), text.indexOf('install_tracker() {'));
-  assert.match(status, /claudeTrust\.mjs" check "\$REPO" \|\| true/);
+  assert.match(status, /claudeTrust\.mjs" check "\$WORK" \|\| true/);
 });

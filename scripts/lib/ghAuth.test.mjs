@@ -88,7 +88,8 @@ test('the installer checks gh first, before it writes anything, and shows it in 
   assert.equal(spawnSync('bash', ['-n', LIB]).status, 0, 'gh_auth.sh parses');
   const src = readFileSync(INSTALLER, 'utf8');
   assert.match(src, /source "\$REPO\/scripts\/lib\/gh_auth\.sh"/);
-  assert.match(src, /\ninstall\(\) \{\n(?: {2}#.*\n)* {2}gh_require_signed_in \|\| exit 1\n/,
+  // Only the take-over check (SP-271), which reads plists and writes nothing, comes before it.
+  assert.match(src, /\ninstall\(\) \{\n(?: {2}#.*\n)*(?: {2}refuse_unless_take_over\n(?: {2}#.*\n)*)? {2}gh_require_signed_in \|\| exit 1\n/,
     'the first thing install() does');
   assert.match(src, /\nstatus\(\) \{\n(?:.*\n){0,4} {2}gh_state\n/, '--status prints the gh: line');
 });

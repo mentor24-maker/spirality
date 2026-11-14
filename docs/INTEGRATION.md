@@ -250,6 +250,14 @@ is a ticket in that project's own queue, filed once Spirality's side is Live:
    project's manifest and Doppler project, and the door does its git work in
    that checkout. Unset, they read the manifest found from the current folder
    up, as before. The runners set it in slice 3.
+   Slice 3 done (SP-271): `scripts/install_loop_runner.sh --project
+   <checkout>` installs a project's four lanes under its own prefix, each
+   starting Spirality's runner in the project's checkout with
+   `SPIRALITY_PROJECT` set; `scripts/loop_runner.sh` and
+   `scripts/run_relay.sh` then pull that checkout's main (never Spirality's),
+   start each pass there, and run Spirality's door and application checks
+   for it. No project is switched over yet: replacing a project's own-copy
+   jobs needs `--take-over`, with Dane's word.
 3. Let a project list application checks in its manifest for Spirality to run
    and post to its bus.
    Done: SP-264 added the `applicationChecks` field and
