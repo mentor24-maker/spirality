@@ -244,6 +244,12 @@ is a ticket in that project's own queue, filed once Spirality's side is Live:
    pause lookup (`projectPauseVerdict` in `lib/pipelinePause.js`) exists, but
    no lane asks the pause switch yet: SP-237 must use it when it wires the
    pause into the lanes.
+   Slice 2 done (SP-270): with `SPIRALITY_PROJECT` set to a project's
+   checkout folder, the door (`npm run clickup`), `scripts/project_config.mjs`
+   and `scripts/with_doppler.mjs`, run from Spirality's folder, read that
+   project's manifest and Doppler project, and the door does its git work in
+   that checkout. Unset, they read the manifest found from the current folder
+   up, as before. The runners set it in slice 3.
 3. Let a project list application checks in its manifest for Spirality to run
    and post to its bus.
    Done: SP-264 added the `applicationChecks` field and

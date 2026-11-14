@@ -296,6 +296,26 @@ test('queue --claimable lists every Rework ticket first (oldest first), then Que
   } finally { await f.cleanup(); }
 });
 
+test('queue --claimable orders same-priority Queued tickets by place: 1, 2, then unplaced; priority still beats place; rework ignores it (SP-249)', async () => {
+  const f = await fixture();
+  try {
+    f.file({ name: 'unplaced, filed first', priority: 'normal' });
+    f.file({ name: 'placed 2', priority: 'normal' });
+    f.file({ name: 'placed 1', priority: 'normal' });
+    f.file({ name: 'high, unplaced', priority: 'high' });
+    f.file({ name: 'rework, filed before the placed one', status: 'rework' });
+    f.file({ name: 'rework placed 1', status: 'rework' });
+    f.store.orderTickets('alpha', { ids: ['AL-3', 'AL-2', 'AL-6'], actor: f.human.id });
+    const r = await f.door(['queue', '--claimable']);
+    assert.equal(r.code, 0, r.err);
+    assert.deepEqual(r.out.trim().split('\n').map((l) => l.split('\t')[0]), ['AL-5', 'AL-6', 'AL-4', 'AL-3', 'AL-2', 'AL-1']);
+    // `queue --status` lists one status in the same order.
+    const queued = await f.door(['queue', '--status', 'Queued']);
+    assert.equal(queued.code, 0, queued.err);
+    assert.deepEqual(queued.out.trim().split('\n').map((l) => l.split('\t')[0]), ['AL-4', 'AL-3', 'AL-2', 'AL-1']);
+  } finally { await f.cleanup(); }
+});
+
 test('a Requested ticket is never claimable and never waiting on Dane, even assigned to him with the newest word a loop\'s', async () => {
   const f = await fixture();
   try {
