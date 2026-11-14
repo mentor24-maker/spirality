@@ -23,3 +23,13 @@ Each says a finding at most once every six hours, and none of them can stop a
 lane or change what the relay decides. They post to Spirality's bus project,
 which still has to be created on the tracker (the step #237 left for Dane);
 until then their posts fail and say so in the log, as the relay's do.
+
+After review sent it back, five things were put right. The throughput check
+no longer counts tickets waiting on Dane (or his unspecced requests) as work
+the loops are sitting on, so a quiet day while he is away is not texted to
+him as a stall; it says how many wait on him, apart. Every time it shows is
+Mountain time, and its days are Mountain days, so an evening's work lands on
+that evening. It no longer tells the reader to run a heartbeat command this
+project does not have yet. A new project's empty queue reads as quiet, not as
+"could not take a reading". And the checkout check no longer reaches out to
+GitHub itself, so it can never collide with the relay's own update.

@@ -1,7 +1,7 @@
 #!/bin/bash
 # relay_queue_watchdogs.sh — the relay's throughput and checkout-currency
 # watchdogs (SP-268), sourced by scripts/run_relay.sh and by its test
-# (scripts/lib/relayQueueWatchdogs.test.mjs).
+# (scripts/watchdogScripts.test.mjs).
 #
 #   run_relay_queue_watchdogs <repo> <limit-seconds> <sha-before-pull> <pull-output-file> [--dry-run]
 #
@@ -32,7 +32,8 @@ run_relay_queue_watchdogs() {
     "$repo/scripts/run_with_time_limit.sh" "$limit" -- node "$repo/scripts/loop_throughput.mjs" --check ${extra[@]+"${extra[@]}"}
     status=$?
     # 0 moving or idle, 1 STALLED, 2 UNKNOWN: verdicts, said in the lines
-    # above (and on the bus). Anything else is the check itself failing.
+    # above (and on the bus). Anything else is the check itself failing:
+    # 3 a post that did not land, 4 a project config it could not read.
     case "$status" in
       0|1|2) ;;
       *) echo "[relay] the throughput check FAILED (exit $status; its lines above say why). The relay pass carries on and its verdict is unchanged." ;;

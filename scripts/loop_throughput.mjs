@@ -31,6 +31,8 @@
  *      rendered as healthy
  *   3  a post to the bus did not land (Spirality's addition: a step that
  *      fails says so, CLAUDE.md rule 6). The lines above say which.
+ *   4  the project config could not be read, so nothing was read or posted
+ *      (kept apart from 2 so the relay names it as a failure, SP-268)
  *
  * UNKNOWN POSTS TOO, SINCE 2026-09-01 (task 86bbr2jpq). It did not, and that
  * was the quietest failure in the file: StarCaster's relay discarded this
@@ -63,7 +65,9 @@ try {
   SETTINGS = watchdogSettings();
 } catch (err) {
   console.error(`throughput: the project config could not be read (${String(err?.message || err)}). Nothing was read or posted.`);
-  process.exit(2);
+  // 4, not 2: 2 is an UNKNOWN verdict, which the relay treats as a reading.
+  // A watchdog that cannot start is a failure and must be named (rule 6).
+  process.exit(4);
 }
 const STAMP_DIR = heartbeat.stampDir({ logDir: SETTINGS.logDir, slug: SETTINGS.slug });
 
@@ -79,6 +83,14 @@ const DRY = flag('dry-run');
 const DAYS = Number(arg('days', String(throughput.REPORT_DAYS))) || throughput.REPORT_DAYS;
 const NOW = Date.now();
 const NODE = { name: nodeName() };
+// Name `npm run heartbeat` in a post only where this checkout has it (SP-266
+// brings it); before that it would be a dead first step in an alarm.
+const HAS_HEARTBEAT = (() => {
+  try {
+    const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+    return Boolean(pkg && pkg.scripts && pkg.scripts.heartbeat);
+  } catch { return false; }
+})();
 // A post that did not land: the pass still exits with its verdict's code
 // unless this is set, and then exits 3 (see the exit codes above).
 let POST_FAILED = false;
@@ -104,7 +116,8 @@ const yellow = (t) => paint('33', t);
 async function readQueue() {
   const read = readAllTickets();
   if (!read.rows) return { tasks: null, why: read.why };
-  if (!read.rows.length) return { tasks: null, why: 'no tickets came back' };
+  // An empty list is a reading: a new project's queue with nothing in it is
+  // IDLE, not "could not take a reading" (SP-268, review round 1).
   return { tasks: throughput.fromTicketsJson(read.rows), why: null };
 }
 
@@ -266,7 +279,7 @@ function clearUnknownStamps() {
 function announceUnknown(v, evidence = null) {
   if (!CHECK) return;
   const text = throughput.renderUnknownPost({
-    verdict: v, now: NOW, node: NODE.name || 'an unnamed machine', evidence,
+    verdict: v, now: NOW, node: NODE.name || 'an unnamed machine', evidence, hasHeartbeat: HAS_HEARTBEAT,
   });
   if (DRY) {
     console.log('');
@@ -409,7 +422,7 @@ const undatedRecentIds = throughput
   .map((t) => String(t?.id ?? '')).filter(Boolean);
 
 const v = throughput.verdict({
-  closedLast24h, queue, queueTouched, trend, lastClose, undatedRecent,
+  closedLast24h, queue, queueTouched, trend, lastClose, undatedRecent, hasHeartbeat: HAS_HEARTBEAT,
 });
 
 const colour = v.state === 'STALLED' ? red : v.state === 'UNKNOWN' ? yellow : green;
@@ -476,7 +489,7 @@ if (!v.stalled) {
 
 const text = throughput.renderStallPost({
   verdict: v, closed, plateau, rework, queue, now: NOW, lastClose, undated,
-  reworkUnreadable: prRead.why, node: NODE.name || 'an unnamed machine',
+  reworkUnreadable: prRead.why, node: NODE.name || 'an unnamed machine', hasHeartbeat: HAS_HEARTBEAT,
 });
 
 if (DRY) {

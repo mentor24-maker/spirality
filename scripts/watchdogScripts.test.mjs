@@ -96,10 +96,32 @@ test('npm run throughput prints the queue counts and what moved, and posts nothi
     assert.equal(r.status, 0, r.out);
     assert.match(r.out, /MOVING/);
     assert.match(r.out, /1 ticket\(s\) reached Live in the last 24h/);
-    assert.match(r.out, /2 queued, 1 in flight, 3 open in total\./);
+    assert.match(r.out, /2 queued, 1 in flight, 3 a loop can move\./);
+    assert.match(r.out, /0 waiting on Dane, 0 requested \(no loop moves these\)\./);
     assert.match(r.out, /Rework pull requests could NOT be read/, 'no gh here: said, not shown as none');
     assert.equal(b.postCount(), 0, 'without --check nothing is posted');
     assert.equal(fs.existsSync(b.stamps), false, 'and nothing is written');
+  } finally { b.cleanup(); }
+});
+
+test('an empty queue is IDLE, not an unreadable one; a config it cannot read exits 4, not a verdict', () => {
+  // SP-268, review round 1: a new project's empty queue used to read as
+  // UNKNOWN "no tickets came back" and post every 6 hours.
+  const b = bench();
+  try {
+    const tasks = path.join(b.dir, 'tasks.json');
+    fs.writeFileSync(tasks, '[]');
+    const empty = b.run('loop_throughput.mjs', ['--check', '--force'], { env: { STUB_TASKS: tasks } });
+    assert.equal(empty.status, 0, empty.out);
+    assert.match(empty.out, /IDLE/);
+    assert.doesNotMatch(empty.out, /UNKNOWN/);
+    assert.equal(b.postCount(), 0, 'nothing posted for a healthy, empty queue');
+
+    // 2 is UNKNOWN, which the relay treats as a reading said on the bus. A
+    // watchdog that could not start must exit outside 0-2 so it is named.
+    const broken = b.run('loop_throughput.mjs', [], { env: { STUB_TASKS: tasks, SPIRALITY_PROJECT: path.join(b.dir, 'no-such-project') } });
+    assert.equal(broken.status, 4, broken.out);
+    assert.match(broken.out, /the project config could not be read/);
   } finally { b.cleanup(); }
 });
 
@@ -200,6 +222,11 @@ test('checkout:current reads current, behind with the blocking files, and behind
     fs.writeFileSync(path.join(work, 'docs', 'report.json'), '{"local":true}\n');
 
     const before = git(work, 'rev-parse', 'HEAD');
+    // It never fetches (SP-268, review round 1): until the relay's pull
+    // fetches, it reads origin/main as the last fetch left it.
+    const unfetched = b.run('checkout_currency.mjs', ['--dry-run'], { cwd: work });
+    assert.match(unfetched.stdout, /^current\n/, 'no fetch of its own: the new commit is not seen yet');
+    git(work, 'fetch', '-q', 'origin', 'main'); // the relay's pull, fetching
     const blocked = b.run('checkout_currency.mjs', ['--check'], { cwd: work });
     assert.equal(blocked.status, 0, blocked.out);
     assert.match(blocked.stdout, /^behind, could not pull: 1 untracked file\(s\) would be overwritten by the update: docs\/report\.json\n/);
@@ -227,6 +254,7 @@ test('checkout:current names git\'s own reason from a refused pull, and a failed
     git(other, 'add', 'NEW');
     git(other, 'commit', '-q', '-m', 'new');
     git(other, 'push', '-q', 'origin', 'main');
+    git(work, 'fetch', '-q', 'origin', 'main'); // the relay's pull, fetching
     const said = path.join(b.dir, 'pull.txt');
     fs.writeFileSync(said, 'fatal: Not possible to fast-forward, aborting.\n');
     const r = b.run('checkout_currency.mjs', ['--check', '--pull-output', said], { cwd: work, env: { FAKE_POST_FAILS: '1' } });

@@ -28,6 +28,10 @@
  * `behind, could not pull: <reason and files>`, `behind, not pulled yet: <why>`
  * or `cannot tell: <why>`.
  *
+ * It never fetches: it compares with `origin/main` as the relay's last pull
+ * fetched it, under the runners' sync lock, so it races nothing and a dry
+ * run writes nothing to the checkout.
+ *
  * Exit 0 whatever the checkout's state: the relay must not be failed by its
  * own watchdog. Exit 1 only when an alarm was due and its post did not land,
  * or the project config could not be read (a step that fails says so).
@@ -130,7 +134,12 @@ function reading() {
   // TRACKED changes only, as in StarCaster: untracked files are the
   // recoverable case, and are read separately below.
   const dirty = git(['status', '--porcelain', '--untracked-files=no']).stdout !== '';
-  const fetched = git(['fetch', '--quiet', 'origin', 'main']).ok;
+  // NO FETCH HERE (SP-268, review round 1). A `git fetch` in the shared
+  // checkout outside the runners' sync lock races their pulls, and a dry run
+  // promises to write nothing. The relay fetched `origin/main` moments ago in
+  // its own pull, under that lock, so this reads it as that pull left it (at
+  // most one relay wake old when run by hand).
+  const fetched = git(['rev-parse', '--verify', '--quiet', 'origin/main']).ok;
   const { behind, ahead } = fetched ? distance() : { behind: null, ahead: null };
   const head = git(['rev-parse', 'HEAD']).stdout;
 
@@ -154,6 +163,7 @@ function reading() {
 
   return currency.classify({
     branch, dirty, fetched, behind, ahead, mergeStderr,
+    unreachableWhy: 'this checkout has no origin/main to compare with (the relay\'s pull fetches it), so how far behind it is cannot be known',
     merged: Boolean(BEFORE && head && BEFORE !== head),
     pullRefused: Boolean(mergeStderr),
     blocking,

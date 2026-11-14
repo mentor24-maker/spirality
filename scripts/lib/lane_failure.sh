@@ -1,6 +1,6 @@
 #!/bin/bash
 # lane_failure.sh — the lane runner's failed-pass report (SP-268), sourced by
-# scripts/loop_runner.sh and by its test (scripts/lib/laneFailure.test.mjs).
+# scripts/loop_runner.sh and by its test (scripts/watchdogScripts.test.mjs).
 #
 #   report_lane_pass <repo> <stamp-file> <lane> <exit-code> <log>
 #
