@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { DEMO_NEWEST_RELEASE, DEMO_OWN_PROJECT, demoNewestRelease, seedDemo, tickingClock } from './demoData.mjs';
 import { reportsOf, REPORT_RANGES, GROWTH_PERIODS, searchTickets, PRIORITIES, timeSplitOf, isFailureNote, TIME_BUCKETS, pipelineControlsOf } from './pageData.mjs';
-import { escapeHtml, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, renderTopics, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, projectTags, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, renderReleaseGroup, controlValueText, mountainTime, wakeInEffectText, modelLastPassText, renderConsole, renderConsoleTile, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, consoleFeature, featureColourIndex, renderFeatureKey, FEATURE_PALETTE, drainLine, capInFlightText, renderTitleChoices, titleModeOf, TITLE_MODES } from './web/render.mjs';
+import { escapeHtml, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, renderTopics, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, renderListTopics, projectTags, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, renderReleaseGroup, controlValueText, mountainTime, wakeInEffectText, modelLastPassText, renderConsole, renderConsoleTile, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, consoleFeature, featureColourIndex, renderFeatureKey, FEATURE_PALETTE, drainLine, capInFlightText, renderTitleChoices, titleModeOf, TITLE_MODES } from './web/render.mjs';
 import { startServer, setupSettingsOf } from './server.mjs';
 import { saveAnswers, setupFields, setupOf } from './setup.mjs';
 import { DANE_FIELDS as SETUP_FIELDS, STEPS as SETUP_STEPS } from '../scripts/onboard/onboard.mjs';
@@ -2349,7 +2349,7 @@ test('picking a priority or assignee sends only that field with the board\'s ver
   assert.match(wire, /api\('PATCH', `\/tickets\/\$\{encodeURIComponent\(id\)\}`, \{ \[field\]: value, ifVersion: t\.version \}\)/);
   assert.match(wire, /save\(t\.id, field, picker\.value\(select\), \(\) => \{ select\.value = before; \}\);/, 'a dropdown sends its value and puts the old one back on a refusal');
   assert.match(wire, /const selects = \[\.\.\.main\.querySelectorAll\(fields\.map/, 'one save at a time across both kinds of dropdown');
-  assert.match(wire, /const controls = \[\.\.\.selects, \.\.\.main\.querySelectorAll\('select\[data-tags-of\], button\[data-untag-of\], input\[data-new-tag-of\]'\)\];/, 'the tag controls are held with the dropdowns');
+  assert.match(wire, /const controls = \[\.\.\.selects, \.\.\.main\.querySelectorAll\('select\[data-tags-of\], button\[data-untag-of\], input\[data-new-tag-of\], select\[data-topics-of\], button\[data-untopic-of\]'\)\];/, 'the tag and topic controls are held with the dropdowns');
   assert.match(wire, /const held = controls\.filter/);
   assert.match(wire, /for \(const c of held\) c\.disabled = true;\s*note\.className = 'note quiet';\s*note\.textContent = 'Saving…';/);
   assert.match(wire, /after = \{ id, field, text: 'Saved' \};/);
@@ -2498,6 +2498,68 @@ test('tags changed through the page\'s save show on the board and on the ticket;
     const removed = await f.call('PATCH', `/tickets/${t.id}`, { body: { tags: after.tags.filter((x) => x !== 'urgent-fix'), ifVersion: after.version } });
     assert.equal(removed.status, 200);
     assert.deepEqual(f.store.getTicket(t.id).tags, t.tags);
+  } finally { await f.cleanup(); }
+});
+
+// ── Changing a ticket's topics from the List view (SP-247) ─────────────────
+
+test('a List row\'s topics are chips with a × each (a quiet dash when none), then Add Topic offering the project\'s other topics, and a note', () => {
+  const known = [{ id: 3, name: 'Billing' }, { id: 1, name: 'Lo"gin' }, { id: 2, name: 'Search' }];
+  const html = renderListTopics({ id: 'SP-12', topics: [{ id: 1, name: 'Lo"gin' }] }, known);
+  const chips = [...html.matchAll(/<span class="tag topic">([^<]*)<button type="button" class="remove-tag" data-untopic-of="SP-12" data-topic="(\d+)"[^>]*aria-label="Remove topic [^"]* from SP-12">×<\/button><\/span>/g)].map((m) => [m[1], m[2]]);
+  assert.deepEqual(chips, [['Lo&quot;gin', '1']]);
+  assert.doesNotMatch(html, /class="quiet">–/, 'no dash beside a chip');
+  const select = /<select class="list-topics" data-topics-of="SP-12" aria-label="Add a topic to SP-12">([\s\S]*?)<\/select>/.exec(html)?.[1];
+  assert.ok(select, 'an Add Topic dropdown');
+  const options = [...select.matchAll(/<option value="([^"]*)"( selected)?>([^<]*)<\/option>/g)].map((m) => [m[1], m[3], Boolean(m[2])]);
+  assert.deepEqual(options, [['', 'Add Topic', true], ['3', 'Billing', false], ['2', 'Search', false]], 'never a topic the ticket has');
+  assert.match(html, /<span class="note" data-topics-note="SP-12" role="status"><\/span>$/);
+
+  const none = renderListTopics({ id: 'SP-13', topics: [] }, known);
+  assert.match(none, /^<span class="quiet">–<\/span><select/, 'a ticket with none shows a quiet dash and the dropdown');
+  const empty = renderListTopics({ id: 'SP-14' }, []);
+  assert.match(empty, /<option value="" selected>Add Topic<\/option><option value="" disabled>No topics yet: make one on the Topics page<\/option>/);
+  assert.match(renderListTopics({ id: '<b>', topics: [] }, []), /data-topics-of="&lt;b&gt;"[\s\S]*data-topics-note="&lt;b&gt;"/);
+});
+
+test('the List view draws a Topics cell after Tags from the board\'s topics; picking or × sends the whole new id list through the shared save', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const row = /const row = \(status\) => \(t\) => `[\s\S]*?<\/tr>`;/.exec(app)[0];
+  assert.match(row, /<td class="tags">[^\n]*<\/td>\s*<td class="topics">\$\{view === 'list' \? renderListTopics\(t, board\.topics\) :/);
+  const card = /const card = \(t\) => `([\s\S]*?)`;/.exec(app)[1];
+  assert.doesNotMatch(card, /topic/i, 'the Board view\'s cards show no topics');
+  assert.match(app, /wireListTopics\(tickets, save\);/);
+  assert.match(app, /select\[data-topics-of\], button\[data-untopic-of\]'\)\]/, 'held while a save is in flight');
+  const wire = /function wireListTopics\(tickets, save\) \{([\s\S]*?)\n\}/.exec(app)?.[1];
+  assert.ok(wire, 'the topic controls are wired');
+  assert.match(wire, /save\(t\.id, 'topics', \[\.\.\.idsOf\(t\), topic\], \(\) => \{ select\.value = ''; \}\);/);
+  assert.match(wire, /save\(t\.id, 'topics', idsOf\(t\)\.filter\(\(id\) => id !== topic\), \(\) => \{\}\);/);
+});
+
+test('sorting by Topics goes by each ticket\'s first topic, tickets with none last', () => {
+  const tickets = [{ id: 'A', topics: [] }, { id: 'B', topics: [{ id: 1, name: 'zeta' }] }, { id: 'C', topics: [{ id: 2, name: 'Alpha' }] }];
+  assert.deepEqual(sortTickets(tickets, { column: 'topics', direction: 'ascending' }).map((t) => t.id), ['C', 'B', 'A']);
+});
+
+test('topics added through the page\'s save show on the board after a reload; one topic sits on two tickets; × removes it; a moved ticket is refused', async () => {
+  const f = await fixture();
+  try {
+    const login = f.store.addTopic({ project: 'alpha', name: 'Login', actor: f.operator.id });
+    const rows = () => f.call('GET', '/projects/alpha/board').then((r) => r.body.columns.flatMap((c) => c.tickets));
+    const [one, two] = await rows();
+    assert.ok(one && two, 'the test data has two tickets');
+    assert.deepEqual((await f.call('GET', '/projects/alpha/board')).body.topics, [{ id: login.id, name: 'Login' }]);
+    assert.equal((await f.call('PATCH', `/tickets/${one.id}`, { body: { topics: [login.id], ifVersion: one.version } })).status, 200);
+    assert.equal((await f.call('PATCH', `/tickets/${two.id}`, { body: { topics: [login.id], ifVersion: two.version } })).status, 200);
+    let now = await rows();
+    for (const id of [one.id, two.id]) assert.deepEqual(now.find((r) => r.id === id).topics, [{ id: login.id, name: 'Login' }], id);
+    const stale = await f.call('PATCH', `/tickets/${one.id}`, { body: { topics: [], ifVersion: one.version } });
+    assert.equal(stale.status, 409);
+    const after = now.find((r) => r.id === one.id);
+    assert.equal((await f.call('PATCH', `/tickets/${one.id}`, { body: { topics: [], ifVersion: after.version } })).status, 200);
+    now = await rows();
+    assert.deepEqual(now.find((r) => r.id === one.id).topics, []);
+    assert.deepEqual(now.find((r) => r.id === two.id).topics, [{ id: login.id, name: 'Login' }]);
   } finally { await f.cleanup(); }
 });
 
@@ -4607,7 +4669,7 @@ test.describe('Files Made: the files a ticket made, from its newest merge note',
   test('the headings are buttons; only the sorted one has an arrow and aria-sort; Actions is plain', () => {
     const none = renderSortHeadings(null);
     assert.equal((none.match(/<button type="button" class="sort"/g) || []).length, SORT_COLUMNS.length);
-    assert.deepEqual(SORT_COLUMNS.map((c) => c.label), ['Ticket #', 'Ticket', 'Priority', 'Tags', 'Assigned To', 'Last Change']);
+    assert.deepEqual(SORT_COLUMNS.map((c) => c.label), ['Ticket #', 'Ticket', 'Priority', 'Tags', 'Topics', 'Assigned To', 'Last Change']);
     assert.match(none, /^<tr><th class="id"><button type="button" class="sort" data-sort="id">Ticket #<\/button><\/th><th class="name">/, 'Ticket # is the left-most heading (SP-193)');
     assert.doesNotMatch(none, /aria-sort|▲|▼/);
     assert.match(none, /<th class="actions">Actions<\/th>/);
@@ -4652,7 +4714,7 @@ test.describe('Files Made: the files a ticket made, from its newest merge note',
     // SP-193: Ticket # is narrow; the name keeps most of the width, and the set widths leave Last Change room.
     const width = (key) => Number(new RegExp(`\\.group th\\.${key} \\{ width: (\\d+)%; \\}`).exec(css)?.[1]);
     assert.ok(width('id') > 0 && width('id') < width('name'), 'Ticket # narrower than Ticket');
-    const set = ['id', 'name', 'priority', 'tags', 'assignee', 'actions'].reduce((sum, k) => sum + width(k), 0);
+    const set = ['id', 'name', 'priority', 'tags', 'topics', 'assignee', 'actions'].reduce((sum, k) => sum + width(k), 0);
     assert.ok(set <= 76, `the set widths (${set}%) leave Last Change room for its date`);
     assert.match(css, /^th \{ color: var\(--quiet\); font-weight: 500;/m, 'every other table keeps the grey heading');
   });
