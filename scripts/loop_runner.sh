@@ -179,6 +179,14 @@ source "$REPO/scripts/lib/back_to_main.sh"
 # A pull that changes a file the tracker server loads restarts it, so it runs the new code (SP-150).
 # shellcheck source=lib/tracker_restart.sh
 source "$REPO/scripts/lib/tracker_restart.sh"
+# A pass that exits non-zero is said on the bus (SP-268). A copy of this
+# runner without the file runs on without it.
+# shellcheck source=lib/lane_failure.sh
+[ -f "$REPO/scripts/lib/lane_failure.sh" ] && source "$REPO/scripts/lib/lane_failure.sh"
+# The reminder that this lane's failure was already posted, cleared by its
+# next good pass: lib/watchdogPosts.js failureStampFile names the same file.
+WATCHDOG_DIR="$LOG_DIR/$SLUG-watchdogs"
+FAILURE_STAMP="$WATCHDOG_DIR/failed-$(printf '%s' "$SKILL" | tr -c 'A-Za-z0-9-' '-').stamp"
 
 while true; do
   # Where main was before this pass synced: noted BEFORE step 0, because that
@@ -297,6 +305,13 @@ while true; do
       --limit "${LOOP_PASS_LIMIT_SECONDS:-7200}" --snapshot "$SNAPSHOT" \
       >> "$LOG" 2>&1 || true
     echo "[loop-runner] the pass hit the ${LOOP_PASS_LIMIT_SECONDS:-7200}s time limit and was stopped; its ticket may still be in Building — the next pass or a person should hand it back." >> "$LOG"
+  fi
+  # A pass that exited non-zero: one ALARM on the bus naming the lane and its
+  # exit, at most once every 6 hours; a good pass clears that reminder
+  # (SP-268). Under its own short time limit, and never allowed to change
+  # CODE, the runner's exit or the next pass.
+  if declare -F report_lane_pass >/dev/null; then
+    report_lane_pass "$REPO" "$FAILURE_STAMP" "$SKILL" "$CODE" "$LOG" >> "$LOG" 2>&1 || true
   fi
   # Only Claude's own sign-in errors, and only in this pass's last lines: a
   # pass that merely mentions "not logged in" (gh, supabase) is not one.

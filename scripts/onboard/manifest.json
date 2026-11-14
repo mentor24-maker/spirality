@@ -328,6 +328,16 @@
       "why": "run_relay.sh sources it; a copy with no app-checks command logs that and runs nothing"
     },
     {
+      "from": "scripts/lib/relay_queue_watchdogs.sh",
+      "to": "scripts/lib/relay_queue_watchdogs.sh",
+      "why": "run_relay.sh sources it; a copy with no throughput or checkout-currency script logs that and runs nothing (SP-269 brings the watchdogs themselves)"
+    },
+    {
+      "from": "scripts/lib/lane_failure.sh",
+      "to": "scripts/lib/lane_failure.sh",
+      "why": "loop_runner.sh sources it; a copy with no scripts/report_job_failure.mjs logs that a failed pass was not reported and runs on"
+    },
+    {
       "from": "scripts/lib/trackerFiles.mjs",
       "to": "scripts/lib/trackerFiles.mjs",
       "why": "the settings reader sits under loop/ in a project",

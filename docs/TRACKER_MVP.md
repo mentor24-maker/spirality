@@ -1409,6 +1409,21 @@ Which of those alarms are pipeline watchdogs that move into Spirality for
 every project, and which stay in StarCaster: [WATCHDOGS.md](WATCHDOGS.md)
 (SP-260).
 
+Three of them are Spirality's own now (SP-268), each posting through
+`bus-post`, read back, at most once every 6 hours per finding, with its
+reminder stamps in `<logDir>/<slug>-watchdogs/`. `npm run throughput` says
+whether the queue is getting shorter (tickets read through the door's
+`tickets --json --include-closed`, a finished ticket's closure being when it
+entered Live), an `ALARM:` when it is STALLED and a plain post when it
+cannot take a reading. `npm run checkout:current` says whether the relay's
+pull left the machine on `main`'s code (`current`, `behind, pulled`, or
+`behind, could not pull:` and the files in the way), an `ALARM:` when not;
+it never pulls. The relay runs both with `--check` on every wake. Every lane
+runner calls `npm run report:failure` when a pass exits non-zero: one
+`ALARM:` naming the lane, its exit and the end of its log. A failed post
+exits non-zero and is logged; none of them ever changes the relay's verdict
+or stops a lane ([WATCHDOGS.md](WATCHDOGS.md#running-the-moved-ones-by-hand)).
+
 **How loud a post is** (SP-163; Dane chose D on 2026-11-09: "a text for
 alarms only, plus the page count for everything else"):
 
