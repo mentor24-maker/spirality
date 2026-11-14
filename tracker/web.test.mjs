@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { chmodSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { DEMO_NEWEST_RELEASE, DEMO_OWN_PROJECT, demoNewestRelease, seedDemo, tickingClock } from './demoData.mjs';
 import { reportsOf, REPORT_RANGES, GROWTH_PERIODS, searchTickets, PRIORITIES, timeSplitOf, isFailureNote, TIME_BUCKETS, pipelineControlsOf } from './pageData.mjs';
-import { escapeHtml, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, renderTopics, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, renderListAssignee, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, renderReleaseGroup, controlValueText, mountainTime, wakeInEffectText, modelLastPassText, renderConsole, renderConsoleTile, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, consoleFeature, featureColourIndex, renderFeatureKey, FEATURE_PALETTE, drainLine, capInFlightText } from './web/render.mjs';
+import { escapeHtml, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, renderTopics, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, renderListAssignee, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, renderReleaseGroup, controlValueText, mountainTime, wakeInEffectText, modelLastPassText, renderConsole, renderConsoleTile, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, consoleFeature, featureColourIndex, renderFeatureKey, FEATURE_PALETTE, drainLine, capInFlightText, renderTitleChoices, titleModeOf, TITLE_MODES } from './web/render.mjs';
 import { startServer, setupSettingsOf } from './server.mjs';
 import { saveAnswers, setupFields, setupOf } from './setup.mjs';
 import { DANE_FIELDS as SETUP_FIELDS, STEPS as SETUP_STEPS } from '../scripts/onboard/onboard.mjs';
@@ -674,9 +674,9 @@ test('the projects list names the project the server was given as its default, a
 test('the Add Task box on the Tasks page files into the project shown, in Requested as typed, keeps the text when refused or signed out, and is gone from the header', () => {
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   const wire = app.slice(app.indexOf('function wireAddTask'), app.indexOf('/**', app.indexOf('function wireAddTask')));
-  assert.match(wire, /api\('POST', `\/projects\/\$\{encodeURIComponent\(into\)\}\/tickets`, \{\s*name: title\.value, description: description\.value, status: 'Requested',\s*\}\)/);
+  assert.match(wire, /api\('POST', `\/projects\/\$\{encodeURIComponent\(into\)\}\/tickets`, \{\s*name: picked, description: description\.value, status: 'Requested',\s*\}\)/);
   assert.ok(!/assignee/.test(wire), 'a request is filed unassigned');
-  assert.match(wire, /note\.textContent = `Not filed: \$\{err\.message\}`;/);
+  assert.match(wire, /say\(`Not filed: \$\{err\.message\}`, 'error'\);/);
   assert.match(wire, /localStorage\.setItem\(DRAFT_KEY,/);
   assert.match(wire, /title\.value = draft\.title;\s*description\.value = draft\.description;/);
   assert.match(wire, /if \(adding \|\| draft\.title \|\| draft\.description\) box\.open = true;/, 'kept text opens the box on its own');
@@ -685,7 +685,8 @@ test('the Add Task box on the Tasks page files into the project shown, in Reques
   assert.match(wire, /localStorage\.removeItem\(DRAFT_KEY\);[\s\S]*await drawAgain\(\(\) => drawProject\(into, view, \{ filed: ticket\.id, unchecked, uploaded, notUploaded \}\)\);/);
   const draw = app.slice(app.indexOf('async function drawProject'), app.indexOf('async function copyText'));
   assert.match(draw, /<details class="add-task">\s*<summary>Add Task<\/summary>\s*<form class="request">/, 'drawn closed, on the board and the list alike');
-  assert.match(draw, /<button type="submit">Submit Task<\/button>/, 'the button says Submit Task, in his words');
+  assert.match(draw, /<button type="submit" class="submit-task">Suggest Titles<\/button>/, 'the first submit asks for titles (SP-248)');
+  assert.match(wire, /button\.textContent = stage === 'ask' \? 'Suggest Titles' : 'Submit Task';/, 'once a title is up for picking, the button says Submit Task, in his words');
   assert.doesNotMatch(app, /File request/i, 'the old button words are gone');
   assert.match(app, /Filed <a href="\/t\/\$\{encodeURIComponent\(filed\)\}">\$\{escapeHtml\(filed\)\}<\/a>/);
   assert.match(draw, /wireAddTask\(board\.project, view, adding\);/);
@@ -776,11 +777,11 @@ test('the Add Task box checks the project before filing: asks "Did you mean ...?
   const check = wire.indexOf("api('POST', `/projects/${encodeURIComponent(slug)}/tickets/check`, {");
   const file = wire.indexOf("api('POST', `/projects/${encodeURIComponent(into)}/tickets`, {");
   assert.ok(check > 0 && file > check, 'the check is asked before the ticket is filed');
-  assert.match(wire.slice(check), /^api\('POST', [^,]+, \{\s*name: title\.value, description: description\.value,\s*\}\)/);
+  assert.match(wire.slice(check), /^api\('POST', [^,]+, \{\s*name: picked, description: description\.value,\s*\}\)/);
   // No suggestion: files into the project shown, as before.
   assert.match(wire, /let into = slug;\s*if \(suggest\) \{/);
   // A suggestion: File in X files there; Keep in files here; closing files nothing and keeps the text.
-  assert.match(wire, /const choice = await askProject\(question, suggest\);\s*if \(choice === 'move'\) into = suggest\.slug;\s*else if \(choice !== 'keep'\) \{[^}]*button\.disabled = false;[^}]*return;\s*\}/);
+  assert.match(wire, /const choice = await askProject\(question, suggest\);\s*if \(choice === 'move'\) into = suggest\.slug;\s*else if \(choice !== 'keep'\) \{[^}]*busy\(false\);[^}]*return;\s*\}/);
   assert.doesNotMatch(wire.slice(wire.indexOf("else if (choice !== 'keep')"), wire.indexOf('return;', wire.indexOf("else if (choice !== 'keep')"))), /removeItem|title\.value =|description\.value =/, 'closing leaves the form and the draft as they were');
   // A failed check (anything but a sign-out) files into the project shown, and the note says so.
   assert.match(wire, /\} catch \(err\) \{\s*if \(err instanceof SignedOut\) return drawSignIn\([^)]*\);\s*unchecked = true;\s*\}/);
@@ -800,6 +801,151 @@ test('the Add Task box checks the project before filing: asks "Did you mean ...?
   assert.match(ask, /button\[value="move"\]'\)\.textContent = `File in \$\{suggest\.name\}`;/);
   assert.match(ask, /question\.returnValue = '';[\s\S]*resolve\(question\.returnValue\)[\s\S]*question\.showModal\(\);/, 'Esc or the close button answers empty: file nothing');
   assert.match(readFileSync(WEB('app.css'), 'utf8'), /dialog\.project-check \{/);
+});
+
+// ── Suggested titles in the Add Task box (SP-248) ────────────────────────────
+
+test('the Add Task box has a Suggest a Title / Write My Own Title toggle: Suggest shows only the Description, Write My Own shows the Title too', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const draw = app.slice(app.indexOf('async function drawProject'), app.indexOf('async function copyText'));
+  const wire = app.slice(app.indexOf('function wireAddTask'), app.indexOf('/**', app.indexOf('function wireAddTask')));
+  // The toggle, first in the form, in Title Case (docs/DOCTRINE.md).
+  assert.match(draw, /<form class="request">\s*<div class="title-mode" role="radiogroup" aria-label="How the Title Is Chosen">\s*<label><input type="radio" name="title-mode" value="suggest"> Suggest a Title<\/label>\s*<label><input type="radio" name="title-mode" value="own"> Write My Own Title<\/label>\s*<\/div>/);
+  // The Title field sits in its own wrapper, required only while it shows.
+  assert.match(draw, /<div class="own-title">\s*<label for="title">Title<\/label>\s*<input id="title" type="text">\s*<\/div>/);
+  assert.doesNotMatch(draw, /<input id="title" type="text" required>/, 'never required while hidden: the browser would refuse the submit');
+  assert.match(wire, /const typing = mode === 'own' \|\| stage === 'type';\s*ownTitle\.hidden = !typing;\s*title\.required = typing;\s*description\.required = mode === 'suggest';/);
+  // The choice list and Suggest Again, both hidden until titles come back.
+  assert.match(draw, /<fieldset class="title-choices" hidden>\s*<legend>Pick a Title<\/legend>\s*<div class="choices"><\/div>\s*<\/fieldset>/);
+  assert.match(draw, /<button type="button" class="suggest-again" hidden>Suggest Again<\/button>/);
+  assert.match(wire, /choices\.hidden = stage !== 'pick';/);
+  assert.match(wire, /again\.hidden = stage === 'ask';/);
+  // Opening the box puts the cursor in the first field the mode shows.
+  assert.match(wire, /const firstField = \(\) => \(mode === 'own' \? title : description\);/);
+  assert.match(wire, /if \(box\.open\) firstField\(\)\.focus\(\);/);
+  const css = readFileSync(WEB('app.css'), 'utf8');
+  assert.match(css, /details\.add-task \[hidden\] \{ display: none; \}/, 'a hidden part stays hidden whatever else styles it');
+  assert.match(css, /details\.add-task \.title-mode label:has\(input:checked\) \{/, 'the picked side of the toggle stands out');
+  assert.match(css, /details\.add-task fieldset\.title-choices \{[^}]*background: #fff;/, 'the choices sit on white inside the blue box');
+});
+
+test('the title toggle is kept in this browser beside the draft and outlives a filing; anything but "own" reads as Suggest a Title', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const wire = app.slice(app.indexOf('function wireAddTask'), app.indexOf('/**', app.indexOf('function wireAddTask')));
+  assert.match(app, /const TITLE_MODE_KEY = 'tracker-request-title-mode';/);
+  assert.match(/function savedTitleMode[\s\S]*?\n\}/.exec(app)[0], /return titleModeOf\(localStorage\.getItem\(TITLE_MODE_KEY\)\);/);
+  assert.match(wire, /let mode = savedTitleMode\(\);/);
+  assert.match(wire, /mode = titleModeOf\(m\.value\);\s*try \{ localStorage\.setItem\(TITLE_MODE_KEY, mode\); \}/, 'a change of mode is kept at once');
+  assert.match(wire, /for \(const m of modes\) m\.checked = m\.value === mode;/, 'the box opens on the mode it was left in');
+  assert.doesNotMatch(app, /removeItem\(TITLE_MODE_KEY\)/, 'filing forgets the words, never the mode');
+  assert.deepEqual(TITLE_MODES, ['suggest', 'own']);
+  assert.equal(titleModeOf('own'), 'own');
+  for (const kept of ['suggest', null, undefined, '', 'OWN', 'nonsense']) assert.equal(titleModeOf(kept), 'suggest', String(kept));
+});
+
+test('either mode, the first submit asks the title suggester and shows the titles to pick from, his own first in Write My Own Title; Suggest Again asks again', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const wire = app.slice(app.indexOf('function wireAddTask'), app.indexOf('/**', app.indexOf('function wireAddTask')));
+  assert.match(wire, /if \(stage === 'ask'\) return askTitles\(\);/, 'the first submit asks, it does not file');
+  assert.match(wire, /api\('POST', `\/projects\/\$\{encodeURIComponent\(slug\)\}\/tickets\/suggest-titles`,\s*mode === 'own' \? \{ description: description\.value, title: title\.value \} : \{ description: description\.value \}\)/);
+  assert.match(wire, /choiceList\.innerHTML = renderTitleChoices\(\{ own: mode === 'own' \? title\.value : null, titles \}\);\s*stage = 'pick';/);
+  assert.match(wire, /again\.addEventListener\('click', \(\) => \{ keep\(\); askTitles\(\); \}\);/, 'Suggest Again asks for a fresh five; the words are not touched');
+  // New words after the list is up make it stale: the button goes back to Suggest Titles.
+  assert.match(wire, /if \(stage === 'pick' && \(e\.target === title \|\| e\.target === description\)\) \{\s*stage = 'ask';\s*show\(\);/);
+  // Filing takes the title exactly as shown: the picked choice, or what he typed after a failure.
+  assert.match(wire, /const picked = stage === 'pick' \? choiceList\.querySelector\('input\[name="title-choice"\]:checked'\)\?\.value : title\.value;/);
+  // The project check still runs before filing, with the picked title.
+  const check = wire.indexOf('/tickets/check`');
+  assert.ok(wire.indexOf('const picked =') < check && check < wire.indexOf("status: 'Requested'"), 'picked, then checked, then filed');
+});
+
+test('a failed suggestion says why in one line and shows the Title field, and the ticket can still be filed with what he types', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const wire = app.slice(app.indexOf('function wireAddTask'), app.indexOf('/**', app.indexOf('function wireAddTask')));
+  const failed = wire.slice(wire.indexOf('const askTitles'), wire.indexOf('choiceList.innerHTML = renderTitleChoices'));
+  assert.match(failed, /if \(err instanceof SignedOut\) return drawSignIn\('You were signed out; your request was not filed\. What you typed is kept/);
+  assert.match(failed, /stage = 'type';\s*show\(\);\s*say\(err instanceof Refused \? err\.message : SUGGEST_UNANSWERED, 'error'\);\s*busy\(false\);\s*title\.focus\(\);/);
+  assert.doesNotMatch(failed, /title\.value =|description\.value =|removeItem/, 'nothing typed is lost');
+  assert.match(app, /const SUGGEST_UNANSWERED = 'No titles could be suggested: the tracker did not answer\. Write your own title\.';/);
+  // In the 'type' stage the Title field shows and is required, the button files.
+  assert.match(wire, /button\.textContent = stage === 'ask' \? 'Suggest Titles' : 'Submit Task';/);
+});
+
+test('renderTitleChoices: his own title first as "Keep my title", then the suggestions, the first picked, every title escaped and filed as shown', () => {
+  const five = ['Add a title suggester', 'Suggest titles <b>now</b>', 'Offer five titles', 'Let the tracker name tasks', 'Show title choices'];
+  const box = (html) => [...html.matchAll(/<input type="radio" name="title-choice" value="([^"]*)"( checked)?> <span>([^<]*)<\/span>/g)].map((m) => ({ value: m[1], checked: Boolean(m[2]), label: m[3] }));
+  const suggestOnly = box(renderTitleChoices({ titles: five }));
+  assert.deepEqual(suggestOnly.map((c) => c.value), five.map(escapeHtml));
+  assert.deepEqual(suggestOnly.map((c) => c.checked), [true, false, false, false, false]);
+  assert.ok(!renderTitleChoices({ titles: five }).includes('<b>'), 'a title is text, never markup');
+  const own = box(renderTitleChoices({ own: '  My own "title" ', titles: five }));
+  assert.equal(own.length, 6);
+  assert.deepEqual(own[0], { value: escapeHtml('  My own "title" '), checked: true, label: escapeHtml('Keep my title:   My own "title" ') }, 'his title as typed, untrimmed');
+  assert.equal(box(renderTitleChoices({ own: 'Offer five titles', titles: five })).length, 5, 'a suggestion that is his own title is offered once');
+  assert.equal(box(renderTitleChoices({ own: '   ', titles: five })).length, 5, 'a blank title is no choice');
+  assert.equal(renderTitleChoices({}), '');
+});
+
+/** A stand-in `claude` for the title suggester: plain Node that answers `body`. */
+function stubClaude(dir, name, body) {
+  const command = join(dir, name);
+  writeFileSync(command, `#!/usr/bin/env node\nlet input = '';\nprocess.stdin.on('data', (c) => { input += c; });\nprocess.stdin.on('end', () => {\n  require('node:fs').writeFileSync(${JSON.stringify(`${command}.seen`)}, input);\n  ${body}\n});\n`);
+  chmodSync(command, 0o755);
+  return { command, seen: () => readFileSync(`${command}.seen`, 'utf8') };
+}
+
+test('against a stubbed suggester, the page\'s calls file the picked title: suggest, check, file; a failure answers one plain line and filing still works', async () => {
+  const f = await fixture();
+  const five = ['Add a title suggester', 'Suggest titles from a description', 'Offer five titles on Add Task', 'Let the tracker name tasks', 'Show title choices when adding'];
+  const stubs = mkdtempSync(join(tmpdir(), 'tracker-claude-'));
+  const good = stubClaude(stubs, 'good', `process.stdout.write(${JSON.stringify(five.join('\n'))});`);
+  const bad = stubClaude(stubs, 'bad', `process.stdout.write('only one\\n');`);
+  const serve = (claudeCommand) => startServer({ store: f.store, port: 0, claudeCommand, suggestTimeoutMs: 5000 });
+  const servers = [];
+  try {
+    const at = async (command) => { const s = await serve(command); servers.push(s); return `http://127.0.0.1:${s.address().port}`; };
+    const post = async (base, path, body) => {
+      const res = await fetch(`${base}${path}`, { method: 'POST', headers: { authorization: `Bearer ${f.token}`, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+      return { status: res.status, body: await res.json() };
+    };
+    const base = await at(good.command);
+    // Suggest a Title: the description alone.
+    const description = 'On the Add Task form, suggest titles from what I write.  ';
+    const s1 = await post(base, '/projects/alpha/tickets/suggest-titles', { description });
+    assert.equal(s1.status, 200, JSON.stringify(s1.body));
+    assert.deepEqual(s1.body.titles, five);
+    assert.doesNotMatch(good.seen(), /^Title:/m, 'no title sent in Suggest a Title');
+    // Write My Own Title: his title travels too, and leads the list the page draws.
+    const s2 = await post(base, '/projects/alpha/tickets/suggest-titles', { description, title: 'My own title' });
+    assert.equal(s2.status, 200);
+    assert.match(good.seen(), /^Title: My own title$/m);
+    const drawn = renderTitleChoices({ own: 'My own title', titles: s2.body.titles });
+    assert.ok(drawn.indexOf('Keep my title: My own title') < drawn.indexOf(five[0]));
+    // Picked: the project check runs, then the ticket is filed under the pick, exactly.
+    const picked = five[2];
+    assert.equal((await post(base, '/projects/alpha/tickets/check', { name: picked, description })).status, 200);
+    const filed = await post(base, '/projects/alpha/tickets', { name: picked, description, status: 'Requested' });
+    assert.equal(filed.status, 201, JSON.stringify(filed.body));
+    const back = f.store.getTicket(filed.body.id);
+    assert.equal(back.name, picked);
+    assert.equal(back.description, description, 'the description as typed, untrimmed');
+    // A failed suggestion: one plain line for the page to show, and a typed title still files.
+    const failed = await post(await at(bad.command), '/projects/alpha/tickets/suggest-titles', { description });
+    assert.equal(failed.status, 502);
+    assert.equal(failed.body.error, 'bad-answer');
+    assert.ok(failed.body.message && !failed.body.message.includes('\n'), `one line: ${failed.body.message}`);
+    assert.doesNotMatch(failed.body.message, /only one/, 'never the run\'s own output');
+    const none = await post(await at(join(stubs, 'no-such-claude')), '/projects/alpha/tickets/suggest-titles', { description });
+    assert.equal(none.status, 503);
+    assert.match(none.body.message, /Write your own title/);
+    const typed = await post(base, '/projects/alpha/tickets', { name: 'Typed after a failure', description, status: 'Requested' });
+    assert.equal(typed.status, 201);
+    assert.equal(f.store.getTicket(typed.body.id).name, 'Typed after a failure');
+  } finally {
+    for (const s of servers) await new Promise((r) => s.close(r));
+    rmSync(stubs, { recursive: true, force: true });
+    await f.cleanup();
+  }
 });
 
 // ── Copy to another project ──────────────────────────────────────────────────
