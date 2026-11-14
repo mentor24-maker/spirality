@@ -85,6 +85,7 @@ import { ghPrState, prStateCache } from './prState.mjs';
 import { createNotifier, DEFAULT_FROM, MAIL_FROM, MAIL_KEY, mailEnvFromDoppler, mailSettingsFromEnv, resendSender, textSettings } from './notify.mjs';
 import { sendInvite, sendResetLink } from './account.mjs';
 import { guessProject } from './projectGuess.mjs';
+import { createSuggester, ticketsInput } from './nextSuggest.mjs';
 import { findConfigFile, loadProjectConfig } from '../lib/projectConfig.mjs';
 import { saveAnswers, setupFields, setupList, setupOf, SetupError } from './setup.mjs';
 import busRelayPlan from '../lib/busRelayPlan.js';
@@ -578,7 +579,7 @@ export const CLOSE_PHRASE = busRelayPlan.CLOSE_PHRASES[0];
 /** The word the Go button posts: the one an intake card asks for (GO_PHRASE in lib/busRelayPlan.js). */
 export const GO_PHRASE = busRelayPlan.GO_PHRASE;
 
-export function createHandler(store, { log = () => {}, notifier = null, defaultProject = null, mergePhrase = null, closePhrase = null, goPhrase = null, accountMail = null, setup = null, now = Date.now, publicUrl = null, pipeline = null, docsDir = DOCS_DIR, commandsRoot = REPO_ROOT, readPrState = null, ownProject = null, newestRelease = null, waker = null, claudeCommand = 'claude', suggestTimeoutMs = SUGGEST_TIME_LIMIT_MS } = {}) {
+export function createHandler(store, { log = () => {}, notifier = null, defaultProject = null, mergePhrase = null, closePhrase = null, goPhrase = null, accountMail = null, setup = null, now = Date.now, publicUrl = null, pipeline = null, docsDir = DOCS_DIR, commandsRoot = REPO_ROOT, readPrState = null, ownProject = null, newestRelease = null, waker = null, suggest = {}, claudeCommand = 'claude', suggestTimeoutMs = SUGGEST_TIME_LIMIT_MS } = {}) {
   /**
    * This machine's lanes as the page data reads them, `{ slug, stages }`
    * (pipelineOf), or null when this tracker reads no logs or they cannot be
@@ -619,6 +620,20 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
       return null;
     }
   };
+  // Next-task suggestions: at most one run per project at a time, each
+  // reading a fresh copy of the project and its open tickets
+  // (tracker/nextSuggest.mjs). `suggest` holds the run's settings
+  // (claudeBin, source, timeLimitMs), or a whole `run` in a test.
+  // The run's claude defaults to the handler's own claudeCommand, so a test
+  // that gives a stub claudeCommand can never start the real claude here.
+  const { run: suggestRun, ...suggestOptions } = suggest ?? {};
+  const suggester = createSuggester({
+    store,
+    options: { claudeBin: claudeCommand, ...suggestOptions },
+    ...(suggestRun ? { run: suggestRun } : {}),
+    inputOf: (project) => ticketsInput(store.listTickets(project.slug, { open: true }), (id) => store.listComments(id)),
+    log,
+  });
   const failures = failureCounter(now);
   // Each pull request's live state on GitHub, kept a minute. With no
   // reader (tests, the switch check) the page goes by status alone, as before.
@@ -1237,6 +1252,21 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
       return [200, { suggest: guessProject({ name: body.name ?? '', description: body.description ?? '' }, project.slug, projects) }];
     }
 
+    // Next-task suggestions (tracker/nextSuggest.mjs): POST starts a run and
+    // answers at once, or answers the run already going; GET answers the
+    // latest. Same sign-in and project rules as the check above; no
+    // ticket is written.
+    if (parts.length === 3 && parts[0] === 'projects' && parts[2] === 'suggest-next' && (method === 'POST' || method === 'GET')) {
+      const project = requireProject(parts[1], me);
+      if (method === 'POST') {
+        checkBody(await readJson(req), me, []);
+        return [202, { run: suggester.start(project) }];
+      }
+      const latest = suggester.latest(project.slug);
+      if (!latest) throw new HttpError(404, 'no-run', `nobody has asked for ${project.name}'s next tasks yet.`);
+      return [200, latest];
+    }
+
     // The Add Task box's title suggester: five titles from the
     // description, and the title typed when there is one, by a Claude run on
     // this machine (tracker/titleSuggest.mjs). The same sign-in and project
@@ -1598,8 +1628,8 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
 }
 
 /** Start a server on `port` (0 = any free port) against an open store. Resolves to the http.Server. */
-export function startServer({ store, port, host = '127.0.0.1', log, notifier, defaultProject, mergePhrase, closePhrase, goPhrase, accountMail, setup, now, publicUrl, pipeline, docsDir, commandsRoot, readPrState, ownProject, newestRelease, waker, claudeCommand, suggestTimeoutMs }) {
-  const server = createServer(createHandler(store, { log, notifier, defaultProject, mergePhrase, closePhrase, goPhrase, accountMail, setup, now, publicUrl, pipeline, docsDir, commandsRoot, readPrState, ownProject, newestRelease, waker, claudeCommand, suggestTimeoutMs }));
+export function startServer({ store, port, host = '127.0.0.1', log, notifier, defaultProject, mergePhrase, closePhrase, goPhrase, accountMail, setup, now, publicUrl, pipeline, docsDir, commandsRoot, readPrState, ownProject, newestRelease, waker, suggest, claudeCommand, suggestTimeoutMs }) {
+  const server = createServer(createHandler(store, { log, notifier, defaultProject, mergePhrase, closePhrase, goPhrase, accountMail, setup, now, publicUrl, pipeline, docsDir, commandsRoot, readPrState, ownProject, newestRelease, waker, suggest, claudeCommand, suggestTimeoutMs }));
   return new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(port, host, () => {
@@ -1753,13 +1783,15 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     log(waker ? `wake lanes: on, for ${ownProject}'s tickets; a ticket handed to a lane starts its next pass, the timers stay as the fallback.` : 'wake lanes: off, because the project config is not usable; the lanes wake on their timers alone.');
     log(publicUrl ? `public address: ${publicUrl} serves the page and the API, with a Secure cookie.` : 'public address: none set (trackerPublicUrl).');
     // The bell, Waiting on You and the Merge button check each pull request on GitHub.
-    // The Add Task box's title suggester runs this claude.
+    // The Add Task box's title suggester and the next-task suggestions run this claude.
     const claudeCommand = claudeCommandOf();
-    log(`title suggestions: through "${claudeCommand}" on this machine${process.env[CLAUDE_COMMAND_VAR] ? ` (${CLAUDE_COMMAND_VAR})` : `; set ${CLAUDE_COMMAND_VAR} to name another`}.`);
+    log(`title and next-task suggestions: through "${claudeCommand}" on this machine${process.env[CLAUDE_COMMAND_VAR] ? ` (${CLAUDE_COMMAND_VAR})` : `; set ${CLAUDE_COMMAND_VAR} to name another`}.`);
     const server = await startServer({ store, port, host, log, claudeCommand, notifier, defaultProject, mergePhrase, closePhrase: CLOSE_PHRASE, goPhrase: GO_PHRASE, accountMail, setup, publicUrl, pipeline, readPrState: ghPrState(), ownProject,
       // The Settings page's Move to Newest reads the release tags from this checkout's remote.
       newestRelease: newestReleaseReader({ run: promisify(execFile), cwd: REPO_ROOT, remote: releaseRemote() }),
-      waker });
+      waker,
+      // Next-task suggestions run the same `claude` (TRACKER_CLAUDE, else the one on the PATH).
+      suggest: { claudeBin: claudeCommand } });
     console.log(`tracker listening on http://${host}:${server.address().port}/`);
   } catch (err) {
     console.error(`tracker server did not start: ${err.message}`);
