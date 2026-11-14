@@ -11,3 +11,10 @@ have one too: Needs your input says the loop is waiting on his answer, and
 Ready to launch says the work waits on his Merge. This is the first of two
 slices of his request. The second (SP-291) changes the right-hand column
 while a loop has the ticket.
+
+Review sent it back once: on a ticket where Dane had already answered (or
+already said Merge), the "i" still told him the loop was waiting on him. Now,
+once his answer is in, it says "Your answer is in; the loop takes it from
+here. Nothing is needed from you.", and once his merge word stands, "Your
+merge word is in; the relay merges it on its next pass. Nothing is needed
+from you." So the icon never asks for a move he has already made.

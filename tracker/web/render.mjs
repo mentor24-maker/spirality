@@ -951,20 +951,30 @@ export const STATUS_LINES = {
   live: 'It is done. Nothing is needed from you.',
 };
 
+/**
+ * The information line once his move is made (SP-290 send-back): his answer
+ * is in, or his merge word stands, so the page has dropped the ask and the
+ * Merge, and the line must not ask him again. Wins over STATUS_LINES, in the
+ * order statusLabel names them.
+ */
+export const ANSWER_IN_LINE = 'Your answer is in; the loop takes it from here. Nothing is needed from you.';
+export const MERGE_STANDS_LINE = 'Your merge word is in; the relay merges it on its next pass. Nothing is needed from you.';
+
 /** The information icon: a ring with an "i" in it, drawn here, never from ticket text. */
 const INFO_ICON = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v6"/><path d="M12 7.5v.01"/></svg>';
 
 /**
  * The ticket's status, first under its heading (SP-290): "Status: Queued" in
  * the page's own type, the status as statusLabel writes it, and beside it an
- * information button whose line (STATUS_LINES) shows on hover, on tap (the
+ * information button whose line (STATUS_LINES, or ANSWER_IN_LINE /
+ * MERGE_STANDS_LINE once his move is made) shows on hover, on tap (the
  * page toggles aria-expanded) and from the keyboard. '' with no status; no
  * button for a status with no line.
  */
 export function renderStatusLine({ status, answerIn = false, mergeStands = false }) {
   const state = String(status ?? '').trim().toLowerCase();
   if (!state) return '';
-  const line = STATUS_LINES[state];
+  const line = answerIn ? ANSWER_IN_LINE : mergeStands ? MERGE_STANDS_LINE : STATUS_LINES[state];
   const info = line
     ? `<button type="button" class="status-info" title="Status Information" aria-label="Status Information" aria-expanded="false" aria-describedby="status-tip">${INFO_ICON}</button>`
       + `<span class="status-tip" id="status-tip" role="tooltip">${escapeHtml(line)}</span>`

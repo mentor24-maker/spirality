@@ -1617,6 +1617,19 @@ test('the status is first under the heading, with its line behind an information
   assert.match(renderStatusLine({ status: 'Ready to launch' }), /role="tooltip">The work is built and checked, and waits on your Merge\.</);
   // His answer is in: the status says so, as the Details line does.
   assert.match(renderStatusLine({ status: 'needs your input', answerIn: true }), new RegExp(`status-name">Needs your input · ${ANSWER_IN_NOTE}<`));
+  // ...and the "i" no longer asks for his move once it is made (review send-back).
+  for (const status of ['needs your input', 'ready to launch']) {
+    const answered = renderStatusLine({ status, answerIn: true });
+    assert.match(answered, /role="tooltip">Your answer is in; the loop takes it from here\. Nothing is needed from you\.</, status);
+    assert.doesNotMatch(answered, /answer below|waits on your Merge/, status);
+  }
+  const merging = renderStatusLine({ status: 'ready to launch', mergeStands: true });
+  assert.match(merging, new RegExp(`status-name">Ready to launch · ${MERGE_STANDS_NOTE}<`));
+  assert.match(merging, /role="tooltip">Your merge word is in; the relay merges it on its next pass\. Nothing is needed from you\.</);
+  assert.doesNotMatch(merging, /waits on your Merge/);
+  // The same through the whole page, as AL-2 in the demo shows it.
+  const al2 = renderQuickAction({ name: 'Ship it', description: '', status: 'ready to launch', answerIn: true });
+  assert.match(al2, /role="tooltip">Your answer is in; the loop takes it from here/);
   // Under the Ticket name line when his title differs.
   const renamed = renderQuickAction({ name: 'Loop name', description: '## Asked\n```\nHis title\n\nwords\n```\n', status: 'building' }).split('\n');
   assert.match(renamed[1], /class="ticket-name/);
