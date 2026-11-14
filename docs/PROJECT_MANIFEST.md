@@ -383,7 +383,7 @@ sends, and `bus-read` reads them back. No loop claims from it.
 - **Kind**: slug; `null` is the same as left out
 - **Required**: no
 - **Default**: none: the project has no bus
-- **Example**: Spirality has none; StarCaster's is `"starcaster-bus"`
+- **Example**: Spirality's is `"spirality-bus"` (SP-281); StarCaster's is `"starcaster-bus"`
 
 ### `projectLanes`
 
