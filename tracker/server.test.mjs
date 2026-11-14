@@ -417,6 +417,36 @@ test('PATCH /tickets/:id changes fields; a guard that still holds wins, one that
   } finally { await f.cleanup(); }
 });
 
+test('POST /projects/:slug/tickets/order gives places 1..n in one write; an id from another project is 400 and changes nothing', async () => {
+  const f = await fixture();
+  try {
+    f.store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE', operator: f.human.id });
+    for (const name of ['a', 'b', 'c']) f.store.fileTicket({ project: 'alpha', actor: f.machine.id, name, status: 'queued' });
+    f.store.fileTicket({ project: 'beta', actor: f.machine.id, name: 'x', status: 'queued' });
+
+    const ok = await f.call('POST', '/projects/alpha/tickets/order', { token: f.humanToken, body: { ids: ['AL-2', 'AL-3', 'AL-1'] } });
+    assert.equal(ok.status, 200);
+    assert.deepEqual(ok.body.tickets.map((t) => [t.id, t.place]), [['AL-2', 1], ['AL-3', 2], ['AL-1', 3]]);
+    assert.deepEqual(ok.body.changed, ['AL-2', 'AL-3', 'AL-1']);
+    // Each move is in the ticket's history, under the caller, like a priority change.
+    const events = await f.call('GET', '/tickets/AL-2/events');
+    const place = events.body.events.find((e) => e.field === 'place');
+    assert.equal(place.to, '1');
+    assert.equal(place.actor, f.human.id);
+
+    const versions = () => ['AL-1', 'AL-2', 'AL-3', 'BE-1'].map((id) => [id, f.store.getTicket(id).place, f.store.getTicket(id).version]);
+    const before = versions();
+    for (const body of [{ ids: ['AL-1', 'BE-1'] }, { ids: ['AL-1', 'AL-9'] }, { ids: [] }, { ids: 'AL-1' }, { ids: ['AL-1'], place: 1 }]) {
+      const bad = await f.call('POST', '/projects/alpha/tickets/order', { token: f.humanToken, body });
+      assert.equal(bad.status, 400, JSON.stringify(body));
+    }
+    assert.deepEqual(versions(), before, 'nothing changed');
+    assert.equal((await f.call('POST', '/projects/nope/tickets/order', { body: { ids: ['AL-1'] } })).status, 404);
+    // A loop's token may order too, the same as it may change a priority.
+    assert.equal((await f.call('POST', '/projects/alpha/tickets/order', { body: { ids: ['AL-1'] } })).status, 200);
+  } finally { await f.cleanup(); }
+});
+
 test('two concurrent guarded claims of one Queued ticket over HTTP, through two servers on one database: exactly one gets 200, the other 409', async () => {
   const f = await fixture();
   try {

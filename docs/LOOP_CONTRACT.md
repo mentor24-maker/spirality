@@ -178,7 +178,13 @@ loop-build takes **every `Rework` ticket before any `Queued` one**:
   *start*; rework is not started, it is finished. Ordering it by priority
   recreated the same starvation one tier down.
 - `Queued`: priority first (urgent, high, normal, low; anything else last),
-  then oldest first.
+  then place, then oldest first. A ticket's **place** is its place in the
+  queue (1, 2, 3 ...), set by `POST /projects/<slug>/tickets/order` (SP-249):
+  at the same priority, a ticket with a place comes before one without, lower
+  place first. Place never beats priority, and a ClickUp task has none.
+
+Every list of tickets in one status (`queue --status`, the Tasks page) uses
+the same rule: priority, then place, then oldest.
 
 `npm run clickup -- queue --claimable` prints them in exactly that order;
 the first line is the one to take. A `Rework` ticket is finished on its

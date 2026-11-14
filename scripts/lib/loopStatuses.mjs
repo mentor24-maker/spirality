@@ -97,7 +97,29 @@ export function priorityRank(task) {
   return PRIORITY_RANK[String(task?.priority?.priority ?? '').toLowerCase()] ?? PRIORITY_UNKNOWN;
 }
 
-/** Rework before Queued; rework oldest-first; queued by priority then age. */
+/**
+ * A ticket's place in its queue (1, 2, 3 ...), or null for none. Only the
+ * tracker gives tickets a place (SP-249); a ClickUp task has none.
+ */
+export function placeOf(task) {
+  const n = task?.place;
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
+
+/** Same priority: a placed ticket before an unplaced one, lower place first. */
+export function comparePlace(a, b) {
+  const pa = placeOf(a);
+  const pb = placeOf(b);
+  if (pa === pb) return 0;
+  if (pa === null) return 1;
+  if (pb === null) return -1;
+  return pa - pb;
+}
+
+/**
+ * Rework before Queued; rework oldest-first (priority and place ignored);
+ * queued by priority, then place, then age.
+ */
 export function compareForClaim(a, b) {
   const ta = claimTier(statusOf(a));
   const tb = claimTier(statusOf(b));
@@ -108,6 +130,8 @@ export function compareForClaim(a, b) {
     const pa = priorityRank(a);
     const pb = priorityRank(b);
     if (pa !== pb) return pa - pb;
+    const byPlace = comparePlace(a, b);
+    if (byPlace) return byPlace;
   }
   return createdAt(a) - createdAt(b);
 }
@@ -120,7 +144,7 @@ export function claimOrder(tasks) {
     .sort(compareForClaim);
 }
 
-/** Within one status: highest priority first, then oldest. */
+/** Within one status: highest priority first, then place, then oldest. */
 export function compareWithinStatus(a, b) {
-  return priorityRank(a) - priorityRank(b) || createdAt(a) - createdAt(b);
+  return priorityRank(a) - priorityRank(b) || comparePlace(a, b) || createdAt(a) - createdAt(b);
 }

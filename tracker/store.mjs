@@ -202,6 +202,7 @@ CREATE TABLE IF NOT EXISTS tickets (
   created_at  TEXT NOT NULL,
   updated_at  TEXT NOT NULL,
   version     INTEGER NOT NULL DEFAULT 1,
+  place       INTEGER,
   UNIQUE (project, number)
 );
 CREATE TABLE IF NOT EXISTS comments (
@@ -496,6 +497,13 @@ export function checkSiteUrl(value) {
 const LATER_PROJECT_COLUMNS = Object.freeze({ url: 'TEXT', logo: 'TEXT', owner: 'INTEGER REFERENCES actors(id)', repo: 'TEXT', alert_email: 'TEXT', alert_phone: 'TEXT' });
 
 /**
+ * The columns a ticket gained after the first databases were made. `place`
+ * is its place in its queue (1, 2, 3 ...), empty for none: the order rule is
+ * priority, then place, then oldest (docs/LOOP_CONTRACT.md, "The claim order").
+ */
+const LATER_TICKET_COLUMNS = Object.freeze({ place: 'INTEGER' });
+
+/**
  * The five roles, in the order the Users page lists them, each with its
  * plain-words description: the model docs/TRACKER_MVP.md, "Roles and
  * permissions", says where it was borrowed from (the model, not the code). A person with no role
@@ -623,6 +631,7 @@ function ticketFromRow(row) {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     version: num(row.version),
+    place: num(row.place ?? null),
   };
 }
 
@@ -759,6 +768,12 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
   const projectColumns = new Set(db.prepare('PRAGMA table_info(projects)').all().map((c) => c.name));
   for (const [column, type] of Object.entries(LATER_PROJECT_COLUMNS)) {
     if (!projectColumns.has(column)) db.exec(`ALTER TABLE projects ADD COLUMN ${column} ${type}`);
+  }
+  // A database made before tickets had a place gains the column, empty for
+  // every ticket; no other column is touched.
+  const ticketColumns = new Set(db.prepare('PRAGMA table_info(tickets)').all().map((c) => c.name));
+  for (const [column, type] of Object.entries(LATER_TICKET_COLUMNS)) {
+    if (!ticketColumns.has(column)) db.exec(`ALTER TABLE tickets ADD COLUMN ${column} ${type}`);
   }
   // The roles and permissions are the lists above, written in on every open,
   // so a new permission or role reaches an old database as a new row.
@@ -1751,6 +1766,63 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
           throw new StoreError('write-failed', `ticket ${row.id} read back at version ${after.version}, expected ${version + 1}.`);
         }
         return { ok: true, ticket: after, changed: changed.map((c) => Object.keys(CHANGEABLE).find((k) => CHANGEABLE[k] === c)) };
+      });
+    },
+
+    /**
+     * Put tickets in order in their queue: `ids[0]` gets place 1, `ids[1]`
+     * place 2, and so on, all in one transaction (all or none). Every id must
+     * be a ticket of `project`, named once; anything else is refused with
+     * `bad-order` and nothing changes. Each ticket whose place moves gets a
+     * version bump and a `place` event, as a priority change does; one
+     * already in its place is left alone. Places of tickets not named are
+     * not touched. Answers `{ project, tickets, changed }`: the named tickets
+     * read back in the order given, and the ids that moved.
+     */
+    orderTickets(project, { ids, actor }) {
+      const slug = String(project ?? '');
+      if (!Array.isArray(ids) || !ids.length) {
+        throw new StoreError('bad-order', 'name the tickets to put in order, as a list of ids, first place first.');
+      }
+      const given = ids.map((id) => String(id ?? '').trim());
+      const seen = new Set();
+      for (const id of given) {
+        if (!id) throw new StoreError('bad-order', 'a ticket id in the list is empty; nothing was changed.');
+        if (seen.has(id.toUpperCase())) throw new StoreError('bad-order', `ticket ${id} is named twice; nothing was changed.`);
+        seen.add(id.toUpperCase());
+      }
+      return transaction(() => {
+        requireActor(actor, 'the actor');
+        if (!db.prepare('SELECT 1 FROM projects WHERE slug = ?').get(slug)) {
+          throw new StoreError('unknown-project', `no project "${slug}".`);
+        }
+        const rows = given.map((id) => {
+          const row = ticketRow(id) ?? ticketRow(id.toUpperCase());
+          if (!row || row.project !== slug) {
+            throw new StoreError('bad-order', `${id} is not a ticket of project "${slug}"; nothing was changed.`);
+          }
+          return row;
+        });
+        const at = now();
+        const changed = [];
+        rows.forEach((row, i) => {
+          const place = i + 1;
+          if (num(row.place) === place) return;
+          const version = num(row.version);
+          const r = db.prepare('UPDATE tickets SET place = ?, updated_at = ?, version = version + 1 WHERE id = ? AND version = ?')
+            .run(place, at, row.id, version);
+          if (num(r.changes) !== 1) throw new StoreError('write-failed', `ticket ${row.id} was not updated.`);
+          writeEvent(row.id, actor, 'place', eventValue('place', row.place), String(place), at);
+          changed.push(row.id);
+        });
+        const tickets = rows.map((row, i) => {
+          const after = ticketFromRow(ticketRow(row.id));
+          if (after.place !== i + 1) {
+            throw new StoreError('write-failed', `ticket ${row.id} read back at place ${after.place}, expected ${i + 1}.`);
+          }
+          return after;
+        });
+        return { project: slug, tickets, changed };
       });
     },
 

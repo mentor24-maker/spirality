@@ -370,7 +370,7 @@ export function projectDetailsOf(store, slug, { withAlerts = false } = {}) {
  * One project's board: the eight statuses as columns, left to right in the
  * contract's STAGE_ORDER, each holding its tickets in the order `npm run
  * clickup -- queue --status <S>` prints them. The order is the door's own
- * comparator (compareWithinStatus: priority, then oldest), fed each ticket
+ * comparator (compareWithinStatus: priority, then place, then oldest), fed each ticket
  * in the ClickUp shape it reads, so the board and `queue` cannot disagree.
  * The list view draws the same object as rows, so each ticket also carries
  * its assignee's name, its last change, and its pull request's address (or
@@ -391,6 +391,7 @@ export function boardOf(store, slug, { viewerId = null, prStates = null } = {}) 
   const queueShape = (t) => ({
     priority: t.priority ? { priority: t.priority } : null,
     date_created: String(Date.parse(t.createdAt)),
+    place: t.place ?? null,
   });
   const inQueueOrder = (a, b) => compareWithinStatus(queueShape(a), queueShape(b));
   const pullRequestOf = (id) => findPullRequest(trailComments(store, id))?.url ?? null;
@@ -512,6 +513,7 @@ export function consoleOf(store, { only = null, pipeline = null, prStates = null
   const queueShape = (t) => ({
     priority: t.priority ? { priority: t.priority } : null,
     date_created: String(Date.parse(t.createdAt)),
+    place: t.place ?? null,
   });
   const names = new Map();
   const nameOf = (id) => {
