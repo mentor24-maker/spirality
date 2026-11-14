@@ -1956,6 +1956,29 @@ export function renderListTags({ id, tags = [] }, known = []) {
 }
 
 /**
+ * SP-247: a List view row's Topics cell (app.mjs wireListPickers). Each of
+ * the ticket's topics a chip with a × that removes it (a quiet dash when it
+ * has none); then an Add Topic dropdown of the project's other topics
+ * (`known`, the board's `topics`, each `{ id, name }`), never one the ticket
+ * already has. A project with no topics says where they are made. Beside
+ * them, the note that says "Saving…", "Saved" or a refusal.
+ */
+export function renderListTopics({ id, topics = [] }, known = []) {
+  const own = Array.isArray(topics) ? topics.filter((t) => t && Number.isInteger(t.id)) : [];
+  const all = Array.isArray(known) ? known.filter((t) => t && Number.isInteger(t.id)) : [];
+  const ownIds = new Set(own.map((t) => t.id));
+  const chips = own.length
+    ? own.map((t) => `<span class="tag topic">${escapeHtml(t.name)}<button type="button" class="remove-tag" data-untopic-of="${escapeHtml(id)}" data-topic="${t.id}" title="Remove ${escapeHtml(t.name)}" aria-label="Remove topic ${escapeHtml(t.name)} from ${escapeHtml(id)}">×</button></span>`).join('')
+    : '<span class="quiet">–</span>';
+  const options = [
+    option('', 'Add Topic', true),
+    ...all.filter((t) => !ownIds.has(t.id)).map((t) => option(String(t.id), t.name, false)),
+    ...(all.length ? [] : ['<option value="" disabled>No topics yet: make one on the Topics page</option>']),
+  ].join('');
+  return `${chips}<select class="list-topics" data-topics-of="${escapeHtml(id)}" aria-label="Add a topic to ${escapeHtml(id)}">${options}</select><span class="note" data-topics-note="${escapeHtml(id)}" role="status"></span>`;
+}
+
+/**
  * The Add Task box's two ways to name a task (SP-248): `suggest`, where the
  * title is picked from suggestions made from the description alone, and
  * `own`, where he types a title first and it is offered beside them.
@@ -1989,6 +2012,7 @@ export const SORT_COLUMNS = Object.freeze([
   { key: 'name', label: 'Ticket' },
   { key: 'priority', label: 'Priority' },
   { key: 'tags', label: 'Tags' },
+  { key: 'topics', label: 'Topics' },
   { key: 'assignee', label: 'Assigned To' },
   { key: 'when', label: 'Last Change' },
 ]);
@@ -2010,6 +2034,7 @@ const COMPARE = {
   name: (a, b) => byText(String(a.name ?? ''), String(b.name ?? '')),
   priority: (a, b) => lastIfMissing((x, y) => x - y)(rankOf(a.priority), rankOf(b.priority)),
   tags: (a, b) => lastIfMissing(byText)(a.tags?.[0] ?? null, b.tags?.[0] ?? null),
+  topics: (a, b) => lastIfMissing(byText)(a.topics?.[0]?.name ?? null, b.topics?.[0]?.name ?? null),
   assignee: (a, b) => lastIfMissing(byText)(a.assignee || null, b.assignee || null),
   when: (a, b) => {
     const x = Date.parse(a.updatedAt);
