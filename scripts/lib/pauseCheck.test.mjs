@@ -34,7 +34,7 @@ function scratch({ text, exit }) {
   mkdirSync(join(repo, 'scripts', 'lib'), { recursive: true });
   mkdirSync(join(dir, 'bin'));
   for (const f of ['loop_runner.sh', 'run_relay.sh', 'run_with_time_limit.sh']) copyFileSync(join(SCRIPTS, f), join(repo, 'scripts', f));
-  for (const f of ['back_to_main.sh', 'tracker_restart.sh', 'relay_app_checks.sh', 'relay_watchdogs.sh']) copyFileSync(join(SCRIPTS, 'lib', f), join(repo, 'scripts', 'lib', f));
+  for (const f of ['back_to_main.sh', 'tracker_restart.sh', 'relay_app_checks.sh', 'relay_heartbeat.sh', 'relay_watchdogs.sh']) copyFileSync(join(SCRIPTS, 'lib', f), join(repo, 'scripts', 'lib', f));
   writeFileSync(join(repo, 'scripts', 'project_config.mjs'),
     `const v = { projectSlug: 'proj', logDir: ${JSON.stringify(logs)}, launchdPrefix: 'com.example', trackerPort: '' };\n`
     + 'console.log(v[process.argv[2]] ?? "");\n');
@@ -76,6 +76,7 @@ test('loop_runner.sh: with the lane paused, the wake logs the paused line and ne
     assert.match(log, /\[loop-runner\] \d\d:\d\d:\d\d paused by Dane at Nov 13, 2026, 7:30 AM MST — not starting \/loop-build/);
     assert.match(log, /sleeping 3600s before the next \/loop-build/);
     assert.doesNotMatch(log, /START \/loop-build/, 'no pass started, so the pod never reads one');
+    assert.match(log, /^===== \d{4}-\d\d-\d\d \d\d:\d\d:\d\d PAUSED \/loop-build =====$/m, 'a dated PAUSED line, which the heartbeat reads as the runner alive (SP-266)');
     assert.equal(called(s), false, 'claude was never called');
     assert.deepEqual(asked(s), ['loop-build'], 'the check is asked about this lane');
   } finally { s.cleanup(); }
@@ -97,6 +98,7 @@ test('loop_runner.sh: a check that fails and says nothing counts as paused, and 
   try {
     const log = await oneWake(s);
     assert.match(log, /could not read the pipeline settings \(the check exited 7 and said nothing; its errors are above\), so \/loop-build is treated as PAUSED and not starting \(it fails safe\)/);
+    assert.match(log, /PAUSED \/loop-build =====$/m, 'an unreadable check pauses the lane, and the heartbeat sees that too');
     assert.equal(called(s), false);
   } finally { s.cleanup(); }
 });
