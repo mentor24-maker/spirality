@@ -7,7 +7,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, unlink
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { runHeartbeat, laneSettings, passLimitMs } from './heartbeat.mjs';
+import { runHeartbeat, laneSettings, passLimitMs, readLaneLog, clearStamp } from './heartbeat.mjs';
 import { LANES } from '../lib/onboardLanes.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -29,7 +29,7 @@ const SETTINGS = ['wake.loop-intake=1800', 'wake.loop-build=1800', 'wake.loop-re
   'paused=off', 'paused.loop-intake=off', 'paused.loop-build=off', 'paused.loop-review=off', 'paused.relay=off'].join('\n');
 
 /** A scratch project: a log folder with every lane fresh but the ones given an age. */
-function scratch({ ages = {}, busProject = 'example-bus', settings = { ok: true, text: SETTINGS }, failPosts = false, installed = LANES } = {}) {
+function scratch({ ages = {}, busProject = 'example-bus', settings = { ok: true, text: SETTINGS }, failPosts = false, installed = LANES, clear = null } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'heartbeat-'));
   const logDir = join(dir, 'logs');
   mkdirSync(logDir);
@@ -53,7 +53,7 @@ function scratch({ ages = {}, busProject = 'example-bus', settings = { ok: true,
     stamps: {
       read: (lane) => (existsSync(stampFile(lane)) ? readFileSync(stampFile(lane), 'utf8').trim() : null),
       write: (lane, iso) => writeFileSync(stampFile(lane), iso),
-      clear: (lane) => { if (existsSync(stampFile(lane))) unlinkSync(stampFile(lane)); },
+      clear: clear || ((lane) => { if (existsSync(stampFile(lane))) unlinkSync(stampFile(lane)); }),
     },
     out: (l) => lines.push(l),
     err: (l) => problems.push(l),
@@ -144,19 +144,68 @@ test('a paused lane or one not installed is never judged; a lane with no pass ye
   assert.equal(whole.posts.length, 0, 'the whole pipeline paused: no lane is judged');
 });
 
-test('the Settings page\'s wake time sizes the threshold; an unreadable page falls back to the defaults', () => {
+test('the Settings page\'s wake time sizes the threshold; an unreadable page is paused, as the runners read it', () => {
   assert.deepEqual(laneSettings({ ok: true, text: SETTINGS.replace('wake.loop-build=1800', 'wake.loop-build=14400') }, 'loop-build'),
-    { intervalMs: 14400_000, intervalFrom: 'the Settings page', paused: false });
-  assert.deepEqual(laneSettings({ ok: false, why: 'down' }, 'relay'), { intervalMs: 600_000, intervalFrom: 'the default', paused: null });
+    { intervalMs: 14400_000, intervalFrom: 'the Settings page', paused: false, pausedWhy: null });
+  const down = laneSettings({ ok: false, why: 'down' }, 'relay');
+  assert.equal(down.intervalMs, 600_000);
+  assert.equal(down.intervalFrom, 'the default');
+  assert.equal(down.paused, true, 'pause_check.sh fails safe on an unreadable page, so the heartbeat does too');
+  assert.match(down.pausedWhy, /could not read the pipeline settings.*Reason: down/);
+  // A page that lacks a lane's switch is paused to the runner too.
+  assert.equal(laneSettings({ ok: true, text: SETTINGS.replace('paused.loop-review=off\n', '') }, 'loop-review').paused, true);
   // Four-hourly wakes: five hours of quiet is normal for that lane.
   const s = scratch({ ages: { 'loop-build': 5 }, settings: { ok: true, text: SETTINGS.replace('wake.loop-build=1800', 'wake.loop-build=14400') } });
   assert.equal(s.run(), 0);
   assert.equal(s.posts.length, 0);
-  // Settings unreadable: still judged, on the default, and the line says pausing could not be checked.
+  // Settings unreadable: every runner holds off (it fails safe), so no lane is called quiet.
   const u = scratch({ ages: { 'loop-build': 5 }, settings: { ok: false, why: 'down' } });
-  u.run();
-  assert.equal(u.posts.length, 1);
-  assert.match(u.lines.find((l) => l.startsWith('loop-build')), /whether it is paused could not be read/);
+  assert.equal(u.run(), 0);
+  assert.equal(u.posts.length, 0);
+  assert.match(u.lines.find((l) => l.startsWith('loop-build')), /paused \(could not read the pipeline settings/);
+});
+
+test('a lane paused for a day, then unpaused, is not called quiet when the relay wakes before the lane does', () => {
+  // Its last pass was 25 hours ago; while paused, its runner wrote a dated
+  // PAUSED line on every wake (scripts/loop_runner.sh), the newest 20 minutes ago.
+  const s = scratch();
+  const log = passAt('loop-build', NOW - 25 * HOUR)
+    + `[loop-runner] 11:40:00 paused by Dane — not starting /loop-build\n===== ${stamp(NOW - 50 * 60_000)} PAUSED /loop-build =====\n`
+    + `===== ${stamp(NOW - 20 * 60_000)} PAUSED /loop-build =====\n`;
+  writeFileSync(join(s.logDir, 'example-loop-build.log'), log);
+  assert.equal(s.run(), 0);
+  assert.equal(s.posts.length, 0, 'no false alarm after a pause');
+  assert.match(s.lines.find((l) => l.startsWith('loop-build')), /running$/);
+});
+
+test('a stamp that cannot be removed is a failure, said by name, never a success line', () => {
+  const s = scratch({ ages: { 'loop-review': 4 }, clear: () => { const e = new Error('EACCES: permission denied'); e.code = 'EACCES'; throw e; } });
+  s.run();
+  writeFileSync(join(s.logDir, 'example-loop-review.log'), passAt('loop-review', NOW + 10 * 60_000));
+  assert.equal(s.run({ now: NOW + 20 * 60_000 }), 1);
+  assert.match(s.problems.join('\n'), /loop-review runs again and the bus was told, but forgetting its quiet report FAILED \(EACCES\)/);
+  assert.doesNotMatch(s.lines.join('\n'), /runs again: said so on the bus/);
+
+  // clearStamp: a stamp already gone is fine; any other error is thrown.
+  const dir = mkdtempSync(join(tmpdir(), 'heartbeat-clear-'));
+  assert.doesNotThrow(() => clearStamp(join(dir, 'gone')));
+  assert.throws(() => clearStamp(dir), (e) => e.code !== 'ENOENT');
+});
+
+test('a lane log is read from its end, and whole only when the end holds no dated line for the lane', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'heartbeat-tail-'));
+  const file = join(dir, 'lane.log');
+  const old = passAt('loop-build', NOW - 30 * HOUR);
+  const recent = passAt('loop-build', NOW - HOUR);
+  writeFileSync(file, old + 'x'.repeat(2000) + '\n' + recent);
+  const tail = readLaneLog(file, 'loop-build', { tailBytes: 400 });
+  assert.equal(tail.readable, true);
+  assert.ok(!tail.text.includes('x'.repeat(500)) && tail.text.includes(recent.trim().split('\n')[0]), 'only the end was read');
+  // A long pass: its START is further back than the tail reaches.
+  writeFileSync(file, `===== ${stamp(NOW - HOUR)} START /loop-build x =====\n` + 'y'.repeat(2000) + '\n');
+  const whole = readLaneLog(file, 'loop-build', { tailBytes: 400 });
+  assert.match(whole.text, /START \/loop-build/, 'no dated line in the tail, so the whole log was read');
+  assert.deepEqual(readLaneLog(join(dir, 'none.log'), 'loop-build'), { readable: true, text: '' });
 });
 
 test('the pass limits are the runners\' own', () => {

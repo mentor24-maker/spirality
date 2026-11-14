@@ -26,7 +26,7 @@
  *   2  --check with no `busProject` in the project config: nowhere to post
  *   3  without --check: at least one lane is QUIET
  */
-import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync, realpathSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync, realpathSync, openSync, readSync, fstatSync, closeSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
@@ -41,6 +41,7 @@ import { defaultRead as readSettingsFromDoor, wakeFrom } from './lib/wakeSetting
 const require = createRequire(import.meta.url);
 const hb = require('../lib/heartbeat.js');
 const { mountainTime } = require('../lib/trackerBus.js');
+const { settingsPauseVerdict } = require('../lib/pipelinePause.js');
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -53,24 +54,70 @@ export function passLimitMs(lane, env = process.env) {
 
 /**
  * The Settings page's answer for one lane, from the `settings` command's
- * `name=value` lines: `{ intervalMs, intervalFrom, paused }`. `paused` is true,
- * false, or null when it could not be read; the interval falls back to the
- * lane's default (scripts/lib/loopSchedule.mjs), as the lanes themselves do.
+ * `name=value` lines: `{ intervalMs, intervalFrom, paused, pausedWhy }`.
+ *
+ * `paused` is the runners' own verdict (lib/pipelinePause.js
+ * settingsPauseVerdict, which scripts/pause_check.sh asks through the door),
+ * so the heartbeat and the lane never disagree: a page that cannot be read,
+ * or that lacks a lane's switch, is PAUSED to the runner (it fails safe), so
+ * the lane is deliberately not starting and is never called quiet here. Bus
+ * posts go through the same tracker, so an outage that hides the page could
+ * not carry an alarm either. The interval falls back to the lane's default
+ * (scripts/lib/loopSchedule.mjs), as the lanes themselves do.
  */
 export function laneSettings(settings, lane) {
-  const fallback = { intervalMs: intervalOf(lane) * 1000, intervalFrom: 'the default', paused: null };
-  if (!settings || !settings.ok) return fallback;
-  const value = (key) => {
-    const line = String(settings.text).split('\n').map((l) => l.trim()).find((l) => l.startsWith(`${key}=`));
-    return line == null ? null : line.slice(key.length + 1);
-  };
-  const { seconds } = wakeFrom(settings.text, lane);
-  const whole = value('paused');
-  const own = value(`paused.${lane}`);
-  const paused = whole === 'on' || own === 'on' ? true : (whole === 'off' && own === 'off' ? false : null);
+  const ok = Boolean(settings && settings.ok);
+  const controls = ok
+    ? String(settings.text).split('\n').map((l) => l.trim()).filter((l) => l.includes('='))
+      .map((l) => ({ key: l.slice(0, l.indexOf('=')), value: l.slice(l.indexOf('=') + 1) }))
+    : [];
+  const verdict = settingsPauseVerdict(ok ? { ok: true, controls } : { ok: false, why: (settings && settings.why) || 'the Settings page could not be read' }, lane);
+  const pause = { paused: verdict.paused, pausedWhy: verdict.paused ? verdict.line : null };
+  const { seconds } = ok ? wakeFrom(settings.text, lane) : {};
   return seconds
-    ? { intervalMs: seconds * 1000, intervalFrom: 'the Settings page', paused }
-    : { ...fallback, paused };
+    ? { intervalMs: seconds * 1000, intervalFrom: 'the Settings page', ...pause }
+    : { intervalMs: intervalOf(lane) * 1000, intervalFrom: 'the default', ...pause };
+}
+
+/** How much of the end of a lane log is read first: the newest dated line is near the end. */
+export const LOG_TAIL_BYTES = 512 * 1024;
+
+/**
+ * A lane's log, the end of it first (SP-266 review): the build and review
+ * logs are never rotated, and the heartbeat runs every relay wake. When the
+ * tail holds no dated line for the lane (a long pass's output pushed its
+ * START further back), the whole file is read, so a running pass is never
+ * missed for being long.
+ */
+export function readLaneLog(file, lane, { tailBytes = LOG_TAIL_BYTES } = {}) {
+  if (!existsSync(file)) return { readable: true, text: '' };
+  let fd;
+  try {
+    fd = openSync(file, 'r');
+    const size = fstatSync(fd).size;
+    if (size > tailBytes) {
+      const buf = Buffer.alloc(tailBytes);
+      const got = readSync(fd, buf, 0, tailBytes, size - tailBytes);
+      const tail = buf.subarray(0, got).toString('utf8');
+      // The first line of the tail may be cut part-way; drop it.
+      const text = tail.slice(tail.indexOf('\n') + 1);
+      if (hb.lastBeatFromLog(text, lane).found) return { readable: true, text };
+    }
+    return { readable: true, text: readFileSync(file, 'utf8') };
+  } catch (e) {
+    return { readable: false, why: e.code || e.message };
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
+}
+
+/**
+ * Forget a lane's "said quiet" stamp. Only "already gone" is fine: a stamp
+ * that stays would repeat the "running again" post on every wake, so any
+ * other error is thrown for the caller to report as a failure.
+ */
+export function clearStamp(file) {
+  try { unlinkSync(file); } catch (e) { if (e.code !== 'ENOENT') throw e; }
 }
 
 /** A stamp file's ISO time, or null (missing or empty). */
@@ -102,7 +149,7 @@ export function runHeartbeat({ config, check = false, now = Date.now(), readLog,
   for (const lane of LANES) {
     const set = laneSettings(settings, lane);
     if (!installed(lane)) { rows.push({ lane, word: 'not installed', note: `no launchd job ${config.launchdPrefix}.${lane}` }); continue; }
-    if (set.paused === true) { rows.push({ lane, word: 'paused', note: 'paused on the Settings page, so a quiet log is expected' }); continue; }
+    if (set.paused) { rows.push({ lane, word: 'paused', note: `${set.pausedWhy}; a quiet log is expected` }); continue; }
     const log = readLog(lane);
     const beat = !log.readable
       ? { readable: false, found: false, why: log.why }
@@ -126,9 +173,8 @@ export function runHeartbeat({ config, check = false, now = Date.now(), readLog,
     const v = verdictOf(row.lane);
     const b = row.entry.beat.beat;
     const last = b ? `last pass ${when(b.lastLineAt)}` : 'no pass yet';
-    const pausedNote = row.entry.set.paused === null ? '; whether it is paused could not be read' : '';
     if (report.quiet.includes(v)) {
-      out(`${name}  ${last}  QUIET (${v.reason}; quiet after ${hb.durationText(v.thresholdMs)}${pausedNote})`);
+      out(`${name}  ${last}  QUIET (${v.reason}; quiet after ${hb.durationText(v.thresholdMs)})`);
     } else if (report.fresh.includes(v)) {
       out(`${name}  ${last}  running${b.running ? ' (a pass is under way)' : ''}`);
     } else {
@@ -153,8 +199,13 @@ export function runHeartbeat({ config, check = false, now = Date.now(), readLog,
     if (!(Date.parse(lineAt) > Date.parse(since)) && Number.isFinite(Date.parse(since))) continue;
     const said = post(hb.renderRecoveredPost({ role: f.role, project, quietSince: since, when }));
     if (said.ok) {
-      stamps.clear(f.role);
-      out(`heartbeat: ${f.role} was reported quiet at ${when(since)} and runs again: said so on the bus.`);
+      try {
+        stamps.clear(f.role);
+        out(`heartbeat: ${f.role} was reported quiet at ${when(since)} and runs again: said so on the bus.`);
+      } catch (e) {
+        failed++;
+        err(`heartbeat: ${f.role} runs again and the bus was told, but forgetting its quiet report FAILED (${e.code || e.message}), so the next wake will say it again.`);
+      }
     } else {
       failed++;
       err(`heartbeat: ${f.role} runs again, but the bus post saying so FAILED (${said.why}); its quiet report stands and the next wake tries again.`);
@@ -194,15 +245,11 @@ function main(argv) {
   const stampOf = (lane) => laneFile(config, `heartbeat-quiet-${lane}`, { home });
   const read = readSettingsFromDoor();
   const settings = read.status === 0 ? { ok: true, text: read.stdout } : { ok: false, why: `the settings read exited ${read.status}` };
-  if (!settings.ok) console.error(`heartbeat: could not read the Settings page (${settings.why}): using each lane's default wake time, and judging every lane as not paused.`);
+  if (!settings.ok) console.error(`heartbeat: could not read the Settings page (${settings.why}): the lanes treat that as paused (they fail safe), so no lane is judged this wake.`);
   const code = runHeartbeat({
     config,
     check,
-    readLog: (lane) => {
-      const file = logOf(lane);
-      if (!existsSync(file)) return { readable: true, text: '' };
-      try { return { readable: true, text: readFileSync(file, 'utf8') }; } catch (e) { return { readable: false, why: e.code || e.message }; }
-    },
+    readLog: (lane) => readLaneLog(logOf(lane), lane),
     installed: (lane) => existsSync(join(home, 'Library', 'LaunchAgents', `${config.launchdPrefix}.${lane}.plist`)),
     settings,
     post: (text) => {
@@ -214,7 +261,7 @@ function main(argv) {
     stamps: {
       read: (lane) => readStamp(stampOf(lane)),
       write: (lane, iso) => { mkdirSync(dirname(stampOf(lane)), { recursive: true }); writeFileSync(stampOf(lane), `${iso}\n`); },
-      clear: (lane) => { try { unlinkSync(stampOf(lane)); } catch { /* already gone */ } },
+      clear: (lane) => clearStamp(stampOf(lane)),
     },
   });
   process.exit(code);
