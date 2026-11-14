@@ -866,8 +866,7 @@ Written down so nobody mistakes them for the contract:
   machine-written card is reported and left where it is, where StarCaster's
   bus-relay would move it on a fresh reply. On every project nothing merges
   without Dane's word.
-- **Spirality's relay files the conflict ticket but checks nothing locally
-  and announces no stall.** On a conflict it files the `Queued` catch-up
+- **Spirality's relay files the conflict ticket but checks nothing locally.** On a conflict it files the `Queued` catch-up
   ticket and records it (`CONFLICT TICKET FILED: PR #<n>`) on the waiting
   ticket, as above. That record counts as "on file" only while its ticket
   is in `Queued`, `Rework`, `Building` or `In review`: once the catch-up has
@@ -877,8 +876,9 @@ Written down so nobody mistakes them for the contract:
   that cannot be read is reported as unchecked, never as on file. It runs
   no `git merge-tree` cross-check, so every
   hand-off reads "no local check was attempted" and the ticket asks its
-  builder to find out first. It has no bus, so a stalled hand-off is not
-  announced; a filing that fails is retried on the next pass.
+  builder to find out first. A stalled hand-off is announced on the bus
+  (`spirality-bus` since SP-281), at most once a day; a filing that fails
+  is retried on the next pass.
 - **Any reply to an intake card queues the ticket.** The relay does not
   read what Dane said on a ticket `loop-intake` handed over: "go", "change
   the title" and an answer to a question all move it to `Queued` (no PR, so

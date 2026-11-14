@@ -30,6 +30,7 @@
   "legacyMachinePrefixes": [],
   "projectScripts": {},
   "trackerPrefix": "SP",
+  "busProject": "spirality-bus",
   "trackerPort": 4180,
   "trackerHost": "0.0.0.0",
   "trackerDataDir": "~/spirality-tracker",

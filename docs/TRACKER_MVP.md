@@ -1344,8 +1344,11 @@ StarCaster raises its alarms on **the bus**: a ClickUp chat channel (the
 "party line"), which ClickUp refuses on the free plan, so every post lands on
 a standing **Team chat** ticket instead, plus a second ClickUp list, **Agent
 Response**, where the steward asks Dane things and the relay watches for his
-replies. Spirality has no bus; StarCaster cannot move to the tracker without
-one (SP-24).
+replies. StarCaster cannot move to the tracker without a bus (SP-24).
+Spirality's own bus is the tracker project `spirality-bus` ("Spirality
+bus", tickets `SPBUS-…`), named as `busProject` in `spirality.project.json`
+(SP-281), so its relay's notices and any `ALARM:` line land on its "Team
+chat" ticket.
 
 The tracker's bus is **a project of its own**, named in the project config
 as `busProject` (for example `starcaster-bus`). It holds the same
