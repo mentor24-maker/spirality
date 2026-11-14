@@ -7,8 +7,8 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { DEMO_NEWEST_RELEASE, DEMO_OWN_PROJECT, demoNewestRelease, seedDemo, tickingClock } from './demoData.mjs';
-import { reportsOf, REPORT_RANGES, searchTickets, PRIORITIES, timeSplitOf, isFailureNote, TIME_BUCKETS, pipelineControlsOf } from './pageData.mjs';
-import { escapeHtml, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, renderReleaseGroup, controlValueText, mountainTime, wakeInEffectText, modelLastPassText, renderConsole, renderConsoleTile, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, consoleFeature, featureColourIndex, renderFeatureKey, FEATURE_PALETTE, drainLine, capInFlightText } from './web/render.mjs';
+import { reportsOf, REPORT_RANGES, GROWTH_PERIODS, searchTickets, PRIORITIES, timeSplitOf, isFailureNote, TIME_BUCKETS, pipelineControlsOf } from './pageData.mjs';
+import { escapeHtml, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, renderTopics, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, renderReleaseGroup, controlValueText, mountainTime, wakeInEffectText, modelLastPassText, renderConsole, renderConsoleTile, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, consoleFeature, featureColourIndex, renderFeatureKey, FEATURE_PALETTE, drainLine, capInFlightText } from './web/render.mjs';
 import { startServer, setupSettingsOf } from './server.mjs';
 import { saveAnswers, setupFields, setupOf } from './setup.mjs';
 import { DANE_FIELDS as SETUP_FIELDS, STEPS as SETUP_STEPS } from '../scripts/onboard/onboard.mjs';
@@ -1123,7 +1123,7 @@ test('bellColour: grey while nothing waits, yellow for 1 to 3, red for more than
 test('Waiting on you is a bell on the right, just before "Signed in as", coloured from the count wherever it is read', () => {
   const html = readFileSync(WEB('index.html'), 'utf8');
   const nav = /<nav class="site" hidden>([\s\S]*?)<\/nav>/.exec(html)[1];
-  assert.deepEqual([...nav.matchAll(/>([^<]+)<\/a>/g)].map((m) => m[1]), ['Projects', 'Tasks', 'Reporting', 'Users', 'Docs', 'Settings']);
+  assert.deepEqual([...nav.matchAll(/>([^<]+)<\/a>/g)].map((m) => m[1]), ['Projects', 'Tasks', 'Topics', 'Reporting', 'Users', 'Docs', 'Settings']);
   assert.doesNotMatch(nav, /Waiting on you/);
   const me = /<span class="me">([\s\S]*?)<\/span>\s*<\/header>/.exec(html)[1];
   assert.match(me, /<a id="bell" href="\/" title="Waiting on You" aria-label="Waiting on You" data-colour="grey" hidden><svg [^>]*aria-hidden="true">[\s\S]*?<\/svg><\/a>\s*<span id="who"><\/span>/);
@@ -2495,7 +2495,7 @@ function reportingStore() {
   };
   const ticket = (...args) => filedAs('queued', ...args);
   const done = () => { store.close(); rmSync(dir, { recursive: true, force: true }); };
-  return { store, loop, ticket, filedAs, now, done };
+  return { store, loop, ticket, filedAs, now, done, clock };
 }
 
 test('Reporting: a task finished 3 days ago counts in all three ranges, 20 days ago in two, 60 days ago only in all time', () => {
@@ -2566,9 +2566,9 @@ test('Reporting: one project or all of them; an unknown project is null; open co
   } finally { r.done(); }
 });
 
-test('Reporting is in the header after Tasks, served at /reporting, and its figures need a sign-in; the demo holds finished tasks', async () => {
+test('Reporting is in the header after Tasks and Topics, served at /reporting, and its figures need a sign-in; the demo holds finished tasks', async () => {
   const html = readFileSync(WEB('index.html'), 'utf8');
-  assert.match(html, /<a href="\/tasks" data-nav="tasks">Tasks<\/a>\s*<a href="\/reporting" data-nav="reporting">Reporting<\/a>/);
+  assert.match(html, /<a href="\/tasks" data-nav="tasks">Tasks<\/a>\s*<a href="\/topics" data-nav="topics">Topics<\/a>\s*<a href="\/reporting" data-nav="reporting">Reporting<\/a>/);
   const f = await fixture();
   try {
     const page = await f.call('GET', '/reporting', { token: null });
@@ -2598,6 +2598,128 @@ test('Reporting: the first table is Task Productivity, Tasks started above Tasks
   assert.doesNotMatch(app, /Tasks Finished and Started/);
   assert.match(page, /<p class="quiet">Started: filed in that time\. Finished: moved to Live in that time and still Live\.<\/p>/);
   assert.match(page, /<tbody>\$\{line\('Tasks started', r\.started\)\}\$\{line\('Tasks finished', r\.finished\)\}<\/tbody>/);
+});
+
+test('Reporting: a custom range counts tasks started and finished on its start and end dates, not the day before or after (SP-240)', () => {
+  const r = reportingStore();
+  try {
+    const at = (iso) => Date.parse(iso);
+    const fileAt = (iso, status = 'queued') => {
+      r.clock.moveTo(at(iso));
+      return r.store.fileTicket({ project: 'alpha', actor: r.loop.id, name: `filed ${iso}`, status }).id;
+    };
+    const finishAt = (iso) => {
+      const id = fileAt('2026-10-01T12:00:00Z');
+      r.clock.moveTo(at(iso));
+      r.store.changeTicket(id, { actor: r.loop.id, status: 'live' });
+    };
+    // The range: the whole of Oct 10 to the whole of Oct 15.
+    const custom = { from: at('2026-10-10T00:00:00Z'), to: at('2026-10-15T23:59:59.999Z') };
+    fileAt('2026-10-10T00:00:00Z');
+    fileAt('2026-10-15T23:00:00Z');
+    fileAt('2026-10-09T23:00:00Z');
+    fileAt('2026-10-16T01:00:00Z');
+    finishAt('2026-10-10T01:00:00Z');
+    finishAt('2026-10-15T23:00:00Z');
+    finishAt('2026-10-09T23:00:00Z');
+    finishAt('2026-10-16T01:00:00Z');
+    const rep = reportsOf(r.store, { now: r.now, custom });
+    assert.deepEqual(rep.custom, { from: '2026-10-10T00:00:00.000Z', to: '2026-10-15T23:59:59.999Z', started: 2, finished: 2 });
+    // The fixed ranges are counted as before, and with no range there is no custom figure.
+    const plain = reportsOf(r.store, { now: r.now });
+    assert.equal('custom' in plain, false);
+    assert.deepEqual(rep.started, plain.started);
+    assert.deepEqual(rep.finished, plain.finished);
+    // One project only: beta has none of them.
+    assert.deepEqual(reportsOf(r.store, { project: 'beta', now: r.now, custom }).custom, { ...rep.custom, started: 0, finished: 0 });
+  } finally { r.done(); }
+});
+
+test('Reporting: Task Productivity has Start Date and End Date pickers after the fixed ranges, 30 days ago to today, redrawn in place (SP-240)', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const fn = app.slice(app.indexOf('async function drawReporting('), app.indexOf('function pickerDay('));
+  assert.match(fn, /<th class="count custom-range"><label for="report-from">Start Date<\/label><input type="date" id="report-from"/);
+  assert.match(fn, /<th class="count custom-range"><label for="report-to">End Date<\/label><input type="date" id="report-to"/);
+  assert.ok(fn.indexOf('report-from') < fn.indexOf('report-to'), 'Start Date comes before End Date');
+  assert.match(fn, /<span class="quiet">from \$\{escapeHtml\(dayLabel\(fromPicker\.value\)\)\}<\/span>/);
+  assert.match(fn, /'The start date is after the end date\.'/);
+  // A picker change asks /reports again for the same project and redraws only the custom cells.
+  assert.match(fn, /api\('GET', reportsPath\(r\.project \?\? '', picked\)\)/);
+  assert.doesNotMatch(fn.slice(fn.indexOf('const repick')), /main\.innerHTML/);
+  // The helpers, run here: the default range, and the local-day edges sent to the server.
+  const helpers = app.slice(app.indexOf('function pickerDay('), app.indexOf('function reportsPath('));
+  const reportsPathFn = app.slice(app.indexOf('function reportsPath('));
+  const body = reportsPathFn.slice(0, reportsPathFn.indexOf('\n}\n') + 3);
+  const { defaultReportRange, reportsPath } = new Function(`${helpers}\n${body}\nreturn { defaultReportRange, reportsPath };`)();
+  assert.deepEqual(defaultReportRange(new Date(2026, 10, 13, 15, 0)), { from: '2026-10-14', to: '2026-11-13' });
+  const path = new URL(`http://x${reportsPath('alpha', { from: '2026-10-14', to: '2026-11-13' })}`);
+  assert.equal(path.searchParams.get('project'), 'alpha');
+  assert.equal(path.searchParams.get('from'), new Date(2026, 9, 14, 0, 0, 0, 0).toISOString());
+  assert.equal(path.searchParams.get('to'), new Date(2026, 10, 13, 23, 59, 59, 999).toISOString());
+  assert.equal(reportsPath('', { from: '2026-11-14', to: '2026-11-13' }), '/reports', 'a start after the end is never asked for');
+  assert.equal(reportsPath('', { from: '', to: '2026-11-13' }), '/reports');
+});
+
+test('Reporting growth: 4 started this week against 2 the week before is +100%, 2 against 4 is -50%, none before or too young says so (SP-241)', () => {
+  const growthOf = (setup, project = null) => {
+    const r = reportingStore();
+    try {
+      setup(r);
+      return reportsOf(r.store, { project, now: r.now }).growth;
+    } finally { r.done(); }
+  };
+  const many = (r, n, daysAgo) => { for (let i = 0; i < n; i += 1) r.ticket('alpha', daysAgo); };
+  // An old ticket, so the project has the history to compare a whole week.
+  const old = (r) => r.ticket('alpha', 400);
+  const up = growthOf((r) => { old(r); many(r, 4, 3); many(r, 2, 10); });
+  assert.deepEqual(up.week.started, { current: 4, previous: 2, change: 100, reason: null });
+  const down = growthOf((r) => { old(r); many(r, 2, 3); many(r, 4, 10); });
+  assert.deepEqual(down.week.started, { current: 2, previous: 4, change: -50, reason: null });
+  const flat = growthOf((r) => { old(r); many(r, 3, 3); many(r, 3, 10); });
+  assert.equal(flat.week.started.change, 0);
+  const noneBefore = growthOf((r) => { old(r); many(r, 3, 3); });
+  assert.deepEqual(noneBefore.week.started, { current: 3, previous: 0, change: null, reason: 'none-before' });
+  // A project younger than 14 days: not enough history for Weekly, nor Monthly or Annual.
+  const young = growthOf((r) => { many(r, 4, 3); many(r, 2, 10); });
+  for (const key of ['week', 'month', 'year']) assert.equal(young[key].started.reason, 'too-young', key);
+  assert.equal(young.week.started.change, null);
+  // Finished: counted by the move to Live, the same as the fixed ranges.
+  const done = growthOf((r) => { old(r); r.ticket('alpha', 50, [2, 'live']); r.ticket('alpha', 50, [3, 'live']); r.ticket('alpha', 50, [9, 'live']); });
+  assert.deepEqual(done.week.finished, { current: 2, previous: 1, change: 100, reason: null });
+  // Monthly and Annual compare 30 and 365 days.
+  const longer = growthOf((r) => { r.ticket('alpha', 800); many(r, 1, 20); many(r, 2, 40); many(r, 3, 100); many(r, 1, 500); });
+  assert.deepEqual(longer.month.started, { current: 1, previous: 2, change: -50, reason: null });
+  assert.deepEqual(longer.year.started, { current: 6, previous: 1, change: 500, reason: null });
+  // The answer names the timeframes for the picker, Weekly first.
+  const r = reportingStore();
+  try {
+    assert.deepEqual(reportsOf(r.store, { now: r.now }).growthPeriods, GROWTH_PERIODS.map(({ key, label }) => ({ key, label })));
+    assert.deepEqual(GROWTH_PERIODS.map((g) => g.label), ['Weekly', 'Monthly', 'Annual']);
+  } finally { r.done(); }
+});
+
+test('Reporting: Growth Rate is the last Task Productivity column, a Weekly/Monthly/Annual picker redrawn without asking the server (SP-241)', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const fn = app.slice(app.indexOf('async function drawReporting('), app.indexOf('function pickerDay('));
+  const head = fn.slice(fn.indexOf('const productivityHead'), fn.indexOf('const line ='));
+  assert.match(head, /<label for="report-growth">Growth Rate<\/label><select id="report-growth">\$\{r\.growthPeriods\.map/);
+  assert.ok(head.indexOf('report-to') < head.indexOf('report-growth'), 'Growth Rate comes after End Date');
+  assert.match(head, /i === 0 \? ' selected' : ''/);
+  const row = fn.slice(fn.indexOf('const line ='), fn.indexOf('// A flow row'));
+  assert.ok(row.indexOf('data-custom=') < row.indexOf('data-growth='), 'the growth cell is the last in each row');
+  // The picker redraws from the answer it already has: no api() call in it.
+  const show = fn.slice(fn.indexOf('const showGrowth'), fn.indexOf("growthPicker.addEventListener('change', showGrowth)"));
+  assert.match(show, /r\.growth\[growthPicker\.value\]/);
+  assert.doesNotMatch(show, /api\(/);
+  // The cell itself, run here.
+  const src = app.slice(app.indexOf('function growthCell('));
+  const growthCell = new Function(`${src.slice(0, src.indexOf('\n}\n') + 3)}\nreturn growthCell;`)();
+  assert.equal(growthCell({ change: 100, reason: null }), '+100%');
+  assert.equal(growthCell({ change: -50, reason: null }), '-50%');
+  assert.equal(growthCell({ change: 0, reason: null }), '0%');
+  assert.equal(growthCell({ change: null, reason: 'none-before' }), '<span class="quiet">none in the period before</span>');
+  assert.equal(growthCell({ change: null, reason: 'too-young' }), '<span class="quiet">not enough history yet</span>');
+  assert.equal(growthCell(undefined), '');
 });
 
 /** True when `ms` is within ten minutes of `days` days: the test clock ticks a minute per reading. */
@@ -2863,7 +2985,8 @@ test('the Reporting page draws only the server\'s figures: ranges and stages fro
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   const draw = app.slice(app.indexOf('async function drawReporting'), app.indexOf('/**\n * The Settings page'));
   assert.ok(draw.length > 0);
-  assert.match(draw, /api\('GET', `\/reports\$\{slug \? `\?project=\$\{encodeURIComponent\(slug\)\}` : ''\}`\)/);
+  assert.match(draw, /api\('GET', reportsPath\(slug, range\)\)/);
+  assert.match(draw, /if \(slug\) query\.set\('project', slug\);/);
   assert.match(draw, /r\.ranges\.map/);
   assert.match(draw, /r\.open\.map/);
   assert.match(draw, /savedProject\(\)/, 'it opens on the selected project');
@@ -4274,7 +4397,23 @@ test('Reference Docs and Work Log: each docs/ file\'s kind comes from its folder
   assert.deepEqual(docInfo('work-log/20261110-x.md'), { kind: 'Work Log', date: null });
   assert.equal(docDay('2026-11-10'), 'Nov 10, 2026', 'a calendar day, never shifted by time zone');
   assert.equal(docDay(null), '');
-  assert.deepEqual(DOC_KINDS, ['Reference', 'Onboarding', 'Work Log']);
+  assert.deepEqual(DOC_KINDS, ['Reference', 'Onboarding', 'Work Log', 'Operator Prompts']);
+});
+
+test('Operator Prompts: each thread\'s own file is grouped under its own kind and dated, newest first after the Work Log (SP-293)', () => {
+  assert.deepEqual(docInfo('operator-prompts/2026-11-08-moving-off-clickup.md'), { kind: 'Operator Prompts', date: '2026-11-08' });
+  const rows = docRows([
+    { path: 'operator-prompts/2026-11-08-older.md', title: 'Older thread' },
+    { path: 'OPERATOR_PROMPTS.md', title: 'Operator prompts' },
+    { path: 'work-log/2026-11-01-entry.md', title: 'Entry' },
+    { path: 'operator-prompts/2026-11-11-newer.md', title: 'Newer thread' },
+  ]);
+  assert.deepEqual(rows.map((r) => r.path), ['OPERATOR_PROMPTS.md', 'work-log/2026-11-01-entry.md',
+    'operator-prompts/2026-11-11-newer.md', 'operator-prompts/2026-11-08-older.md']);
+  assert.deepEqual(filterDocs(rows, { kind: 'Operator Prompts' }).map((r) => r.title), ['Newer thread', 'Older thread']);
+  const html = renderDocumentation(rows, (p) => `/docs/spirality/${p}`);
+  assert.match(html, /<option value="Operator Prompts">Operator Prompts<\/option>/);
+  assert.match(html, /2026-11-11-newer\.md">Newer thread<\/a><\/td>\s*<td class="kind">Operator Prompts<\/td>\s*<td class="date">Nov 11, 2026<\/td>/);
 });
 
 const DOCS = [
@@ -4695,4 +4834,51 @@ test('a click on a feature in the key dims every other tile, a second click show
   assert.match(show, /tile\.classList\.toggle\('dimmed', pickedFeature !== null && tile\.dataset\.feature !== pickedFeature\)/);
   assert.match(show, /b\.setAttribute\('aria-pressed', String\(b\.dataset\.feature === pickedFeature\)\)/);
   assert.match(show, /if \(!picks\.some\(\(b\) => b\.dataset\.feature === pickedFeature\)\) pickedFeature = null;/);
+});
+
+// ── Topics (SP-243) ─────────────────────────────────────────────────────────
+
+test('Topics in the top menu opens /topics, right after Tasks, and is marked current on its own page (SP-243)', () => {
+  const html = readFileSync(WEB('index.html'), 'utf8');
+  assert.match(html, /<a href="\/tasks" data-nav="tasks">Tasks<\/a>\s*<a href="\/topics" data-nav="topics">Topics<\/a>/);
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  assert.match(app, /const topicsPage = location\.pathname === '\/topics';/);
+  assert.match(app, /topicsPage \? 'topics' :/, 'marked current');
+  assert.match(app, /\} else if \(topicsPage\) \{\s*await drawTopics\(\);/);
+});
+
+test('the Topics page lists the picked project\'s topics newest first, every name escaped, says "No topics yet" when there are none, and has a Create Topic form (SP-243)', () => {
+  const projects = [{ slug: 'alpha', name: 'Alpha <One>' }, { slug: 'beta', name: 'Beta' }];
+  const project = projects[0];
+  const html = renderTopics({ projects, project, topics: [
+    { id: 2, name: 'Login <b>', description: 'Signing "in"', createdByName: 'Dane <D>', createdAt: '2026-11-13T12:00:00Z' },
+    { id: 1, name: 'Billing', description: '', createdByName: null, createdAt: '2026-11-12T12:00:00Z' },
+  ] }, { timeOf: (iso) => `at ${iso}` });
+  assert.match(html, /<h1>Topics<\/h1>/);
+  for (const heading of ['Name', 'Description', 'Created By', 'Created']) assert.match(html, new RegExp(`<th>${heading}</th>`), heading);
+  assert.match(html, /<td class="name">Login &lt;b&gt;<\/td>/);
+  assert.match(html, /<td class="about">Signing &quot;in&quot;<\/td>/);
+  assert.match(html, /<td class="by">Dane &lt;D&gt;<\/td>/);
+  assert.match(html, /<td class="when">at 2026-11-13T12:00:00Z<\/td>/);
+  assert.ok(html.indexOf('data-topic="2"') < html.indexOf('data-topic="1"'), 'in the order the server lists them (newest first)');
+  assert.match(html, /<option value="alpha" selected>Alpha &lt;One&gt;<\/option>/, 'the picked project is chosen in the picker');
+  assert.match(html, /<h2>Create Topic<\/h2>/);
+  assert.match(html, /<form class="create-topic">[\s\S]*<label for="topic-name">Name<\/label>[\s\S]*<label for="topic-description">Description<\/label>[\s\S]*<button type="submit">Create Topic<\/button>/);
+  assert.doesNotMatch(html, /<b>|<One>|<D>/, 'nothing unescaped');
+  assert.doesNotMatch(html, /No topics yet/);
+  const empty = renderTopics({ projects, project, topics: [] }, { timeOf: String });
+  assert.match(empty, /No topics yet\./);
+  assert.doesNotMatch(empty, /<table/);
+  assert.match(empty, /Create Topic<\/button>/, 'an empty project can still create one');
+  assert.match(renderTopics({ projects, project, topics: [] }, { timeOf: String, problem: 'Not created: a topic needs a name.' }), /<p class="note topic-note error" role="status">Not created: a topic needs a name\.<\/p>/);
+});
+
+test('the Topics page refuses a blank name before sending, and says a create worked only when the topic reads back in the list (SP-243)', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const draw = app.slice(app.indexOf('async function drawTopics'), app.indexOf('/**\n * The Docs page in two columns'));
+  assert.match(draw, /if \(!name\) return say\('Not created: a topic needs a name\.', true\);/);
+  assert.ok(draw.indexOf("if (!name)") < draw.indexOf("api('POST', topicsPath"), 'refused before anything is sent');
+  assert.match(draw, /api\('GET', topicsPath, undefined, \{ unrecorded: true \}\)/, 'the list is read back');
+  assert.match(draw, /back\?\.topics\?\.some\(\(t\) => t\.id === made\.id\)/);
+  assert.match(draw, /localStorage\.setItem\(PROJECT_KEY, chosen\.slug\)/, 'picking a project here selects it');
 });

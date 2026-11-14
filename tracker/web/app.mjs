@@ -26,7 +26,7 @@
  * an emailed link's own page. The link's token is sent only in a JSON body,
  * never in an address.
  */
-import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, unwrapDoc, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderAnswerIn, renderHeldUp, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, lookupTicket, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, pipelinePodLabel, renderHealth, healthLines, renderCommandList, renderCommandView, renderCommandDetails, renderContextDocs, renderSortHeadings, renderListPriority, sortTickets, nextSort, renderDocumentation, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, lowerMeridiem, renderPipelineControls, renderConsole, drainLine } from './render.mjs';
+import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, unwrapDoc, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderAnswerIn, renderHeldUp, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, lookupTicket, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, pipelinePodLabel, renderHealth, healthLines, renderCommandList, renderCommandView, renderCommandDetails, renderContextDocs, renderTopics, renderSortHeadings, renderListPriority, sortTickets, nextSort, renderDocumentation, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, lowerMeridiem, renderPipelineControls, renderConsole, drainLine } from './render.mjs';
 
 /** Where an earlier version of the page kept a pasted token; removed on load, never read. */
 const OLD_TOKEN_KEY = 'tracker-token';
@@ -2177,15 +2177,29 @@ function spanOf(ms) {
  * the tasks that took the most time in the range picked. Every figure is worked out by the
  * server (pageData.mjs reportsOf); the page only draws them, so the ranges
  * and the stages come from its answer, never typed out here. A stage wears
- * its Settings colour as properties, never as markup.
+ * its Settings colour as properties, never as markup. Task Productivity
+ * also has its own range (SP-240): a Start Date and an End Date picker in
+ * its header, 30 days ago to today on arrival (`range` keeps the picked dates
+ * when the project changes); a picker change asks the server again and
+ * redraws only those cells. Its last column, Growth Rate (SP-241), shows
+ * the server's growth figures for the timeframe picked in its header
+ * (Weekly on arrival), redrawn from the same answer.
  */
-async function drawReporting(chosen) {
+async function drawReporting(chosen, range = defaultReportRange()) {
   const { projects } = await api('GET', '/projects');
   const slug = chosen !== undefined ? chosen : (projects.some((p) => p.slug === savedProject()) ? savedProject() : '');
-  const r = await api('GET', `/reports${slug ? `?project=${encodeURIComponent(slug)}` : ''}`);
+  const r = await api('GET', reportsPath(slug, range));
   setTitle('Reporting · Tracker');
   const head = `<tr><th>Report</th>${r.ranges.map((g) => `<th class="count">${escapeHtml(g.label)}</th>`).join('')}</tr>`;
-  const line = (label, counts) => `<tr><td class="name">${label}</td>${r.ranges.map((g) => `<td class="count">${Number(counts[g.key])}</td>`).join('')}</tr>`;
+  // Task Productivity's own range (SP-240): a Start Date and an End Date column after the fixed ones, a picker in each header.
+  const productivityHead = `<tr><th>Report</th>${r.ranges.map((g) => `<th class="count">${escapeHtml(g.label)}</th>`).join('')}`
+    + `<th class="count custom-range"><label for="report-from">Start Date</label><input type="date" id="report-from" value="${escapeHtml(range.from)}"></th>`
+    + `<th class="count custom-range"><label for="report-to">End Date</label><input type="date" id="report-to" value="${escapeHtml(range.to)}"></th>`
+    // Growth Rate (SP-241): the last column, its timeframe picked in the header; the periods come from the server's answer.
+    + `<th class="count custom-range growth-rate"><label for="report-growth">Growth Rate</label><select id="report-growth">${r.growthPeriods.map((g, i) => `<option value="${escapeHtml(g.key)}"${i === 0 ? ' selected' : ''}>${escapeHtml(g.label)}</option>`).join('')}</select></th></tr>`;
+  const line = (label, counts) => `<tr><td class="name">${label}</td>${r.ranges.map((g) => `<td class="count">${Number(counts[g.key])}</td>`).join('')}`
+    + `<td class="count" data-custom-from></td><td class="count" data-custom="${counts === r.started ? 'started' : 'finished'}"></td>`
+    + `<td class="count" data-growth="${counts === r.started ? 'started' : 'finished'}"></td></tr>`;
   // A flow row: one cell per range, "none finished in this range" where nothing finished.
   const flowLine = (label, cell) => `<tr><td class="name">${label}</td>${r.ranges.map((g) => {
     const f = r.flow[g.key];
@@ -2231,7 +2245,8 @@ async function drawReporting(chosen) {
     </form>
     <h2>Task Productivity</h2>
     <p class="quiet">Started: filed in that time. Finished: moved to Live in that time and still Live.</p>
-    <table class="counts report"><thead>${head}</thead><tbody>${line('Tasks started', r.started)}${line('Tasks finished', r.finished)}</tbody></table>
+    <table class="counts report productivity"><thead>${productivityHead}</thead><tbody>${line('Tasks started', r.started)}${line('Tasks finished', r.finished)}</tbody></table>
+    <p class="quiet custom-range-note" hidden></p>
     <h2>Human Hours of Work Done</h2>
     <p class="quiet">For tasks finished in that time: the build loop's estimate, recorded on each pull request, of the hours an experienced programmer new to the code would take to do the same work. An estimate, not a measurement; tasks with none are left out of the total, and counted here.</p>
     <table class="counts report human-hours"><thead>${head}</thead><tbody>${hoursLine('Total', (h) => hoursOf(h.hours))}${estimatedLine}${hoursLine('Per day', (h) => `about ${Number(h.perDay)} human hour${Number(h.perDay) === 1 ? '' : 's'} a day`)}</tbody></table>
@@ -2270,10 +2285,107 @@ async function drawReporting(chosen) {
   main.querySelector('#time-split-range').addEventListener('change', (e) => {
     main.querySelector('.time-split-list').innerHTML = splitTickets(e.target.value);
   });
+  // Growth Rate: the picker redraws both cells from the answer already here, never asking the server again.
+  const growthPicker = main.querySelector('#report-growth');
+  const showGrowth = () => {
+    const period = r.growth[growthPicker.value];
+    for (const cell of main.querySelectorAll('[data-growth]')) cell.innerHTML = growthCell(period?.[cell.dataset.growth]);
+  };
+  showGrowth();
+  growthPicker.addEventListener('change', showGrowth);
+  // The custom range: a picker change asks again and redraws only those cells; the newest ask wins.
+  const fromPicker = main.querySelector('#report-from');
+  const toPicker = main.querySelector('#report-to');
+  let asked = 0;
+  const showCustom = (figures, note) => {
+    for (const cell of main.querySelectorAll('[data-custom-from]')) {
+      cell.innerHTML = figures ? `<span class="quiet">from ${escapeHtml(dayLabel(fromPicker.value))}</span>` : '';
+    }
+    for (const cell of main.querySelectorAll('[data-custom]')) {
+      cell.textContent = figures ? String(Number(figures[cell.dataset.custom])) : '';
+    }
+    const p = main.querySelector('.custom-range-note');
+    p.textContent = note ?? '';
+    p.hidden = !note;
+  };
+  const rangeProblem = (picked) => {
+    if (!picked.from || !picked.to) return 'Pick both a start date and an end date.';
+    return picked.from > picked.to ? 'The start date is after the end date.' : null;
+  };
+  showCustom(r.custom ?? null, rangeProblem(range));
+  const repick = async () => {
+    const picked = { from: fromPicker.value, to: toPicker.value };
+    const ask = ++asked;
+    const problem = rangeProblem(picked);
+    if (problem) { showCustom(null, problem); return; }
+    const again = await api('GET', reportsPath(r.project ?? '', picked));
+    if (ask === asked) showCustom(again.custom, null);
+  };
+  for (const picker of [fromPicker, toPicker]) {
+    picker.addEventListener('change', () => {
+      repick().catch((err) => (err instanceof SignedOut ? drawSignIn() : showError(err)));
+    });
+  }
   main.querySelector('#report-project').addEventListener('change', (e) => {
-    drawReporting(e.target.value).catch((err) => (err instanceof SignedOut ? drawSignIn() : showError(err)));
+    drawReporting(e.target.value, { from: fromPicker.value, to: toPicker.value }).catch((err) => (err instanceof SignedOut ? drawSignIn() : showError(err)));
   });
   putTrail([{ label: 'Reporting' }]);
+}
+
+/**
+ * One Growth Rate cell (SP-241) from the server's growth figure: the change
+ * with its sign ("+25%", "-10%", "0%"), or a quiet phrase when there is no
+ * fair number: not enough history yet, or none in the period before.
+ */
+function growthCell(figure) {
+  if (!figure) return '';
+  if (figure.change == null) {
+    return `<span class="quiet">${figure.reason === 'too-young' ? 'not enough history yet' : 'none in the period before'}</span>`;
+  }
+  const n = Number(figure.change);
+  return `${n > 0 ? '+' : ''}${n}%`;
+}
+
+/** A date picker's value (YYYY-MM-DD) for a local calendar day. */
+function pickerDay(date) {
+  const two = (n) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${two(date.getMonth() + 1)}-${two(date.getDate())}`;
+}
+
+/** The Task Productivity table's range on arrival: 30 days ago to today, in the browser's own time zone. */
+function defaultReportRange(today = new Date()) {
+  const start = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 30);
+  return { from: pickerDay(start), to: pickerDay(today) };
+}
+
+/** A picker's YYYY-MM-DD as a local Date at `hours:minutes:seconds.ms`, or null when it is not one. */
+function localDay(value, ...time) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value ?? '');
+  return m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), ...time) : null;
+}
+
+/** "Oct 14, 2026" for a picker's value. */
+function dayLabel(value) {
+  const day = localDay(value, 0, 0, 0, 0);
+  return day ? day.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : value;
+}
+
+/**
+ * GET /reports for a project ('' for all) and, when both pickers hold a
+ * date with the start not after the end, the custom range from the start of
+ * the start date to the end of the end date, local time (SP-240).
+ */
+function reportsPath(slug, range) {
+  const query = new URLSearchParams();
+  if (slug) query.set('project', slug);
+  const from = localDay(range?.from, 0, 0, 0, 0);
+  const to = localDay(range?.to, 23, 59, 59, 999);
+  if (from && to && from <= to) {
+    query.set('from', from.toISOString());
+    query.set('to', to.toISOString());
+  }
+  const text = query.toString();
+  return `/reports${text ? `?${text}` : ''}`;
 }
 
 /**
@@ -2765,6 +2877,63 @@ async function drawDocs(done = '', problem = '', section = 'files') {
 }
 
 /**
+ * The Topics page (SP-243): the topics of the project picked here (or on
+ * the Projects page, else the first) and a Create Topic form. Picking
+ * another project here selects it, as the Tasks page's picker does. A blank
+ * name is refused on the page before anything is sent; after a create the
+ * list is read again, and the page says it worked only when the new topic
+ * is on it. `done` and `problem` are the line the last create left.
+ */
+async function drawTopics(done = '', problem = '') {
+  const { projects } = await api('GET', '/projects');
+  setTitle('Topics · Tracker');
+  putTrail([{ label: 'Topics' }]);
+  if (!projects.length) {
+    main.innerHTML = '<h1>Topics</h1><p class="quiet">There are no projects yet.</p>';
+    return;
+  }
+  const project = projects.find((p) => p.slug === savedProject()) ?? projects[0];
+  const topicsPath = `/projects/${encodeURIComponent(project.slug)}/topics`;
+  const { topics } = await api('GET', topicsPath);
+  main.innerHTML = renderTopics({ projects, project, topics }, { timeOf: when, done, problem });
+  const note = main.querySelector('.topic-note');
+  const say = (text, failed = false) => { note.className = `note topic-note ${failed ? 'error' : 'quiet'}`; note.textContent = text; };
+  const again = (text, failed) => drawAgain(() => drawTopics(failed ? '' : text, failed ? text : ''))
+    .catch((err) => (err instanceof SignedOut ? drawSignIn() : showError(err)));
+  main.querySelector('.project-picker select').addEventListener('change', (e) => {
+    const chosen = projects.find((p) => p.slug === e.target.value);
+    if (!chosen) return;
+    try {
+      localStorage.setItem(PROJECT_KEY, chosen.slug);
+      localStorage.setItem(PROJECT_NAME_KEY, chosen.name);
+    } catch { /* the page still works; it is only not remembered */ }
+    showProject();
+    again('', false);
+  });
+  const form = main.querySelector('form.create-topic');
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const name = form.querySelector('#topic-name').value.trim();
+    const description = form.querySelector('#topic-description').value.trim();
+    const button = form.querySelector('button');
+    if (!name) return say('Not created: a topic needs a name.', true);
+    button.disabled = true;
+    say(`Creating ${name}…`);
+    let made;
+    try {
+      made = await api('POST', topicsPath, { name, description });
+    } catch (err) {
+      if (err instanceof SignedOut) return drawSignIn(`You were signed out; ${name} was not created.`);
+      button.disabled = false;
+      return say(`Not created: ${err.message}`, true);
+    }
+    const back = await api('GET', topicsPath, undefined, { unrecorded: true }).catch(() => null);
+    const listed = back?.topics?.some((t) => t.id === made.id);
+    again(listed ? `Created ${made.name} in ${project.name}.` : `The tracker said ${made.name} was created, but ${back ? 'it is not listed when read back' : 'the list could not be read back'}.`, !listed);
+  });
+}
+
+/**
  * The Docs page in two columns (SP-212): the Quick Claude Commands pod down
  * the left third, `rest` (Context Documents, Task Files, Reference Docs and
  * Work Log) on the right. A narrow screen stacks the pod above the rest
@@ -3042,6 +3211,7 @@ async function route({ place = null } = {}) {
     const reporting = location.pathname === '/reporting';
     const usersPage = location.pathname === '/users';
     const docsPage = location.pathname === '/docs';
+    const topicsPage = location.pathname === '/topics';
     const docPath = docAt();
     const docsCommand = commandAt();
     const docAny = underDocs();
@@ -3051,8 +3221,8 @@ async function route({ place = null } = {}) {
     const setupPage = !setupNew && /^\/setup\/([^/]+)$/.exec(location.pathname);
     const setupAny = setupNew || setupAnswers || setupPage;
     let following = false;
-    const waiting = !(setupAny || search || reporting || settings || usersPage || docsPage || docAny || isNew || ticket || projects || newProject || editProject || details || tasks || consolePage || project);
-    markNav(reporting ? 'reporting' : settings ? 'settings' : usersPage ? 'users' : docsPage || docAny ? 'docs' : projects || newProject || details || editProject || setupAny ? 'projects' : ticket || project || tasks || consolePage || isNew || search ? 'tasks' : 'waiting');
+    const waiting = !(setupAny || search || reporting || settings || usersPage || docsPage || topicsPage || docAny || isNew || ticket || projects || newProject || editProject || details || tasks || consolePage || project);
+    markNav(reporting ? 'reporting' : settings ? 'settings' : usersPage ? 'users' : topicsPage ? 'topics' : docsPage || docAny ? 'docs' : projects || newProject || details || editProject || setupAny ? 'projects' : ticket || project || tasks || consolePage || isNew || search ? 'tasks' : 'waiting');
     if (setupNew) {
       await drawSetupNew(null);
     } else if (setupAnswers) {
@@ -3067,6 +3237,8 @@ async function route({ place = null } = {}) {
       await drawSettings();
     } else if (usersPage) {
       await drawUsers();
+    } else if (topicsPage) {
+      await drawTopics();
     } else if (docsPage) {
       await drawDocs();
     } else if (docsCommand != null) {

@@ -116,6 +116,11 @@
  *    table, so the nightly backup holds it too. It is never edited; it is
  *    removed one at a time (removeProjectDoc), and a project that still
  *    holds any is not deleted (`has-docs`).
+ *  - A topic is a key aspect of one project, mostly a feature: a
+ *    name (required, at most MAX_TOPIC_NAME characters), a description
+ *    (may be blank), who made it and when, in the `topics` table. A project
+ *    has many topics; a topic belongs to exactly one project. This first
+ *    version only adds and lists them; a deleted project's topics go with it.
  */
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
@@ -142,6 +147,9 @@ const MIN_PASSWORD = 12;
 export const MAX_ATTACHMENT = 10 * 1024 * 1024;
 /** The longest file name kept, in characters. */
 const MAX_FILE_NAME = 255;
+/** The longest a topic's name and description may be, in characters. */
+export const MAX_TOPIC_NAME = 200;
+export const MAX_TOPIC_DESCRIPTION = 5000;
 
 /** The statuses a ticket may be deleted from: nobody has started it yet. */
 const DELETABLE = Object.freeze(['requested', 'queued']);
@@ -260,6 +268,14 @@ CREATE TABLE IF NOT EXISTS project_docs (
   added_by    INTEGER NOT NULL REFERENCES actors(id),
   created_at  TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS topics (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  project     TEXT NOT NULL REFERENCES projects(slug),
+  name        TEXT NOT NULL,
+  description TEXT NOT NULL,
+  created_by  INTEGER NOT NULL REFERENCES actors(id),
+  created_at  TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS roles (
   name        TEXT PRIMARY KEY,
   description TEXT NOT NULL,
@@ -322,6 +338,7 @@ CREATE INDEX IF NOT EXISTS project_releases_by_project ON project_releases (proj
 CREATE INDEX IF NOT EXISTS project_members_by_actor ON project_members (actor, project);
 CREATE INDEX IF NOT EXISTS attachments_by_ticket ON attachments (ticket, id);
 CREATE INDEX IF NOT EXISTS project_docs_by_project ON project_docs (project, id);
+CREATE INDEX IF NOT EXISTS topics_by_project ON topics (project, id);
 CREATE UNIQUE INDEX IF NOT EXISTS actors_by_token ON actors (token_hash);
 CREATE UNIQUE INDEX IF NOT EXISTS actors_by_email ON actors (email);
 CREATE INDEX IF NOT EXISTS sessions_by_actor ON sessions (actor);
@@ -637,6 +654,19 @@ function canonicalFileName(name) {
   const clean = name.split(/[\\/]/).pop().replace(/[\u0000-\u001f\u007f"]/g, '').trim().slice(0, MAX_FILE_NAME);
   if (!clean || clean === '.' || clean === '..') throw new StoreError('bad-name', 'an attachment needs a file name.');
   return clean;
+}
+
+/** A topic as listed. */
+function topicFromRow(row) {
+  return {
+    id: num(row.id),
+    project: row.project,
+    name: row.name,
+    description: row.description,
+    createdBy: num(row.created_by),
+    createdByName: row.created_by_name ?? null,
+    createdAt: row.created_at,
+  };
 }
 
 /** A project's context document as listed: everything but its bytes. */
@@ -1501,6 +1531,8 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
         db.prepare('DELETE FROM pipeline_settings WHERE project = ?').run(slug);
         db.prepare('DELETE FROM pipeline_setting_changes WHERE project = ?').run(slug);
         db.prepare('DELETE FROM project_releases WHERE project = ?').run(slug);
+        // Its topics go too: there is no other way to remove them yet.
+        db.prepare('DELETE FROM topics WHERE project = ?').run(slug);
         const r = db.prepare('DELETE FROM projects WHERE slug = ?').run(slug);
         if (num(r.changes) !== 1 || this.getProject(slug)) {
           throw new StoreError('write-failed', `project "${slug}" was not deleted.`);
@@ -2170,6 +2202,43 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
         }
         return projectDocFromRow(row);
       });
+    },
+
+    /**
+     * Make a topic on a project: `name` (trimmed, required),
+     * `description` (trimmed, may be blank), made by `actor`. Refused
+     * (`bad-name`, `bad-description`, `unknown-project`) with nothing written;
+     * read back in the same transaction, else nothing is kept
+     * (`write-failed`). Answers the topic as listed.
+     */
+    addTopic({ project, name, description = '', actor }) {
+      const cleanName = typeof name === 'string' ? name.trim() : '';
+      if (!cleanName) throw new StoreError('bad-name', 'a topic needs a name; nothing was saved.');
+      if (cleanName.length > MAX_TOPIC_NAME) throw new StoreError('bad-name', `a topic's name is at most ${MAX_TOPIC_NAME} characters; nothing was saved.`);
+      if (description != null && typeof description !== 'string') throw new StoreError('bad-description', "a topic's description is text; nothing was saved.");
+      const cleanDescription = (description ?? '').trim();
+      if (cleanDescription.length > MAX_TOPIC_DESCRIPTION) throw new StoreError('bad-description', `a topic's description is at most ${MAX_TOPIC_DESCRIPTION} characters; nothing was saved.`);
+      return transaction(() => {
+        requireActor(actor, 'the actor');
+        const p = this.getProject(project);
+        if (!p) throw new StoreError('unknown-project', `no project "${project}".`);
+        const r = db.prepare('INSERT INTO topics (project, name, description, created_by, created_at) VALUES (?, ?, ?, ?, ?)')
+          .run(p.slug, cleanName, cleanDescription, actor, now());
+        const back = db.prepare(`SELECT t.*, ac.name AS created_by_name FROM topics t LEFT JOIN actors ac ON ac.id = t.created_by WHERE t.id = ?`)
+          .get(num(r.lastInsertRowid));
+        if (!back || back.project !== p.slug || back.name !== cleanName || back.description !== cleanDescription) {
+          throw new StoreError('write-failed', `the topic ${cleanName} did not read back from the database.`);
+        }
+        return topicFromRow(back);
+      });
+    },
+
+    /** A project's topics, newest first, each with its maker's name. */
+    listTopics(project) {
+      return db.prepare(`SELECT t.*, ac.name AS created_by_name FROM topics t LEFT JOIN actors ac ON ac.id = t.created_by
+        WHERE t.project = ? ORDER BY t.created_at DESC, t.id DESC`)
+        .all(String(project))
+        .map(topicFromRow);
     },
 
     /** A ticket's history, oldest first. */

@@ -1,0 +1,5 @@
+## 2026-11-10: StarCaster's move to the tracker, held back
+
+1. > Run SP-25, StarCaster still runs on ClickUp: move it to the tracker, as a hand-run session.
+
+   Led to: no switch. Before the wizard's stop step, the session found that the move would turn off StarCaster's auto-merge Lanes A and B (Spirality's relay never reads `autoMergeLanes`) and leave its `bus-relay`, `pipeline-pulse` and `weekly-report` jobs and its `review-gate` workflow reading ClickUp. Dane chose to wait for the gaps (his answer in the session: "Wait for the gaps"). Filed [SP-199](http://mac-mini.local:4180/t/SP-199), "StarCaster's auto-merge lanes stop when it moves to the tracker: make the relay merge Lanes A and B", and [SP-200](http://mac-mini.local:4180/t/SP-200), "StarCaster's bus-relay, pulse and weekly report read ClickUp: list what each needs on the tracker and file the work", and added both to the `Waits on:` line of [SP-25](http://mac-mini.local:4180/t/SP-25), "StarCaster still runs on ClickUp: move it to the tracker", which went back to Queued. StarCaster's tracker project got its operator, Dane (actor 1).

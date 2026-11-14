@@ -2004,14 +2004,48 @@ export function renderContextDocs({ project, docs = [] }, { size, timeOf }) {
 }
 
 /**
+ * The Topics page (SP-243): the picked project's topics (key aspects of a
+ * project, mostly features), newest first, each with its description, maker
+ * and time, then a Create Topic form (Name, Description). `done` and
+ * `problem` are the line the last create left. `timeOf` puts a time in
+ * words. Every name and description is escaped.
+ */
+export function renderTopics({ projects, project, topics = [] }, { timeOf, done = '', problem = '' } = {}) {
+  const row = (t) => `<tr data-topic="${escapeHtml(t.id)}">
+      <td class="name">${escapeHtml(t.name)}</td>
+      <td class="about">${t.description ? escapeHtml(t.description) : '<span class="quiet">none</span>'}</td>
+      <td class="by">${t.createdByName ? escapeHtml(t.createdByName) : '<span class="quiet">unknown</span>'}</td>
+      <td class="when">${escapeHtml(timeOf(t.createdAt))}</td></tr>`;
+  return `<h1>Topics</h1>
+    <div class="toolbar">${renderProjectPicker(projects, project.slug)}</div>
+    <p class="quiet">The key aspects of ${escapeHtml(project.name)}: its features, mostly. Each topic belongs to one project.</p>
+    <p class="note topic-note${problem ? ' error' : ' quiet'}" role="status">${escapeHtml(problem || done)}</p>
+    <h2>Topics</h2>
+    ${topics.length
+    ? `<table class="projects topic-list"><thead><tr><th>Name</th><th>Description</th><th>Created By</th><th>Created</th></tr></thead>
+      <tbody>${topics.map(row).join('')}</tbody></table>`
+    : '<p class="quiet no-topics">No topics yet.</p>'}
+    <h2>Create Topic</h2>
+    <form class="create-topic">
+      <label for="topic-name">Name</label>
+      <input id="topic-name" name="name" maxlength="200" autocomplete="off">
+      <label for="topic-description">Description</label>
+      <textarea id="topic-description" name="description" rows="3" maxlength="5000"></textarea>
+      <div class="row"><button type="submit">Create Topic</button></div>
+    </form>`;
+}
+
+/**
  * SP-195: the Docs page's Reference Docs and Work Log section. Every file
  * there is one of the repository's docs/ Markdown files; its kind comes
  * from its folder and its date from the `YYYY-MM-DD` a file name starts
  * with (every work-log entry has one). Worked out here from the path, so
  * the server's /documentation answer stays as it is.
  */
-export const DOC_KINDS = ['Reference', 'Onboarding', 'Work Log'];
-const DOC_FOLDERS = { onboarding: 'Onboarding', 'work-log': 'Work Log' };
+export const DOC_KINDS = ['Reference', 'Onboarding', 'Work Log', 'Operator Prompts'];
+/** SP-293: operator-prompts/ holds one file per hand-run thread, dated like the work log. */
+const DOC_FOLDERS = { onboarding: 'Onboarding', 'work-log': 'Work Log', 'operator-prompts': 'Operator Prompts' };
+const NEWEST_FIRST = new Set(['Work Log', 'Operator Prompts']);
 
 /** A docs/ file's kind and date from its path (relative to docs/): `{ kind, date }`, date 'YYYY-MM-DD' or null. */
 export function docInfo(path) {
@@ -2039,9 +2073,9 @@ const DOC_COMPARE = {
   kind: (a, b) => kindRank(a.kind) - kindRank(b.kind) || byText(a.kind, b.kind),
   date: (a, b) => lastIfMissing(byText)(a.date, b.date),
 };
-/** The order the section opens in: Reference, then Onboarding, then Work Log newest first, then any other folder; title within a kind. */
+/** The order the section opens in: Reference, then Onboarding, then Work Log and Operator Prompts newest first, then any other folder; title within a kind. */
 const docStart = (a, b) => DOC_COMPARE.kind(a, b)
-  || (a.kind === 'Work Log' ? lastIfMissing(byText)(b.date, a.date) : 0)
+  || (NEWEST_FIRST.has(a.kind) ? lastIfMissing(byText)(b.date, a.date) : 0)
   || DOC_COMPARE.title(a, b) || byText(a.path, b.path);
 
 /** The /documentation files as the section's rows: `{ path, title, kind, date }`, in the order it opens in. Never changes `files`. */

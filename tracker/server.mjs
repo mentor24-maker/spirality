@@ -43,6 +43,9 @@
  * way, listed by `GET /projects/<slug>/docs` and removed one at a time by
  * `DELETE /projects/<slug>/docs/<n>`; only someone who can see the project
  * reaches any of them.
+ * A project's topics are listed by `GET /projects/<slug>/topics`
+ * and made one at a time by `POST /projects/<slug>/topics` (`{ name,
+ * description }`, a name required), behind the same project check.
  * A refused write writes nothing. A token never appears in an answer or a
  * log line: the log names the actor id, never the header.
  *
@@ -246,7 +249,7 @@ const PAGE_HEADERS = Object.freeze({
  */
 function pageFile(pathname, accept = '') {
   if (/^\/(?:projects(?:\/[^/]+)?|search|setup\/(?!fields$)[^/]+)$/.test(pathname)) return /\btext\/html\b/.test(accept) ? 'index.html' : null;
-  if (pathname === '/' || /^\/(?:tasks|board|list|console|new|settings|set-password|reporting|users|docs)$/.test(pathname) || /^\/(?:t|board|list)\/[^/]+$/.test(pathname)) return 'index.html';
+  if (pathname === '/' || /^\/(?:tasks|board|list|console|new|settings|set-password|reporting|users|docs|topics)$/.test(pathname) || /^\/(?:t|board|list)\/[^/]+$/.test(pathname)) return 'index.html';
   if (/^\/projects\/[^/]+\/edit$/.test(pathname)) return 'index.html';
   // A page under the Docs page, such as one of the substrate's own
   // documentation files: the page itself draws what the rest names.
@@ -488,6 +491,31 @@ function flag(value) {
   if (['1', 'true', 'yes'].includes(v)) return true;
   if (['', '0', 'false', 'no'].includes(v)) return false;
   throw new HttpError(400, 'bad-field', `open must be true or false, not "${value}".`);
+}
+
+/** An ISO date or date-time: what `from` and `to` on GET /reports accept. */
+const ISO_DATE_TIME = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})?)?$/;
+
+/**
+ * GET /reports' custom range as `{ from, to }` in ms, or null when
+ * neither is given. One without the other, one that is not an ISO date-time,
+ * or `from` after `to` is a 400 naming the problem.
+ */
+function readReportRange(fromText, toText) {
+  const given = (v) => v != null && v !== '';
+  if (!given(fromText) && !given(toText)) return null;
+  if (!given(fromText) || !given(toText)) {
+    throw new HttpError(400, 'bad-field', `from and to go together: ${given(fromText) ? 'to' : 'from'} is missing.`);
+  }
+  const read = (name, text) => {
+    const ms = ISO_DATE_TIME.test(text) ? Date.parse(text) : Number.NaN;
+    if (Number.isNaN(ms)) throw new HttpError(400, 'bad-field', `${name} must be an ISO date-time, not "${text}".`);
+    return ms;
+  };
+  const from = read('from', fromText);
+  const to = read('to', toText);
+  if (from > to) throw new HttpError(400, 'bad-field', `from (${fromText}) is after to (${toText}).`);
+  return { from, to };
 }
 
 /**
@@ -977,10 +1005,14 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
 
     // Dane's page: the Reporting page's figures, for one project
     // (`?project=<slug>`) or, with none named, every project. Read-only.
+    // `from` and `to` (ISO date-times, both or neither) add the Task
+    // Productivity table's own range; one alone, an unreadable
+    // one, or `from` after `to` is refused, never answered as zero.
     if (parts.length === 1 && parts[0] === 'reports' && method === 'GET') {
       const slug = url.searchParams.get('project');
       const scope = scopeOf(me);
-      const reports = reportsOf(store, { project: slug == null || slug === '' ? null : slug, only: scope });
+      const custom = readReportRange(url.searchParams.get('from'), url.searchParams.get('to'));
+      const reports = reportsOf(store, { project: slug == null || slug === '' ? null : slug, only: scope, custom });
       if (!reports) throw notFound('unknown-project', `project "${slug}"`, scope);
       return [200, reports];
     }
@@ -1094,6 +1126,18 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     if (parts.length === 3 && parts[0] === 'projects' && parts[2] === 'attachments' && method === 'GET') {
       const project = requireProject(parts[1], me);
       return [200, { project: project.slug, attachments: store.listProjectAttachments(project.slug) }];
+    }
+
+    // A project's topics: key aspects of the project, mostly
+    // features. The list, newest first, and one create (a name is
+    // required), behind the same project check as the Docs page.
+    if (parts.length === 3 && parts[0] === 'projects' && parts[2] === 'topics' && (method === 'GET' || method === 'POST')) {
+      const project = requireProject(parts[1], me);
+      if (method === 'GET') return [200, { project: project.slug, topics: store.listTopics(project.slug) }];
+      const body = await readJson(req);
+      const made = store.addTopic({ project: project.slug, name: body?.name, description: body?.description ?? '', actor: me.id });
+      log(`made topic ${made.id} on ${project.slug} actor=${me.id}`);
+      return [201, made];
     }
 
     // A project's context documents: files kept on the project,

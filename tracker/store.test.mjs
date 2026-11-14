@@ -1804,3 +1804,48 @@ test('deleting a project takes its release record with it (SP-265)', () => {
     assert.deepEqual(store.projectReleases('beta'), []);
   } finally { cleanup(); }
 });
+
+// ── Topics (SP-243) ─────────────────────────────────────────────────────────
+
+test('a topic is made on one project with its name, description and maker, listed newest first, and never shows on another project', () => {
+  const { store, human, machine, cleanup } = fixture();
+  try {
+    store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE' });
+    assert.deepEqual(store.listTopics('alpha'), [], 'none yet');
+    const a = store.addTopic({ project: 'alpha', name: '  Login  ', description: ' Signing in. ', actor: human.id });
+    assert.deepEqual(a, { id: a.id, project: 'alpha', name: 'Login', description: 'Signing in.', createdBy: human.id, createdByName: 'Operator', createdAt: a.createdAt });
+    const b = store.addTopic({ project: 'alpha', name: 'Billing', actor: machine.id });
+    assert.equal(b.description, '', 'a description may be left out');
+    store.addTopic({ project: 'beta', name: 'Theirs', description: '', actor: human.id });
+    assert.deepEqual(store.listTopics('alpha').map((t) => [t.name, t.createdByName]), [['Billing', 'Loop'], ['Login', 'Operator']], 'newest first, maker named');
+    assert.deepEqual(store.listTopics('alpha')[1], a);
+    assert.deepEqual(store.listTopics('beta').map((t) => t.name), ['Theirs']);
+    assert.deepEqual(store.listTopics('nope'), []);
+  } finally { cleanup(); }
+});
+
+test('a topic with no name, too long a name or description, on an unknown project or by an unknown actor is refused and nothing is kept', () => {
+  const { store, human, cleanup } = fixture();
+  try {
+    const add = (over) => () => store.addTopic({ project: 'alpha', name: 'Login', description: '', actor: human.id, ...over });
+    for (const name of ['', '   ', undefined, null, 42]) assert.throws(add({ name }), { code: 'bad-name', message: 'a topic needs a name; nothing was saved.' }, String(name));
+    assert.throws(add({ name: 'x'.repeat(201) }), { code: 'bad-name' });
+    assert.throws(add({ description: 'x'.repeat(5001) }), { code: 'bad-description' });
+    assert.throws(add({ description: 42 }), { code: 'bad-description' });
+    assert.throws(add({ project: 'nope' }), { code: 'unknown-project' });
+    assert.throws(add({ actor: 999 }), { code: 'unknown-actor' });
+    assert.deepEqual(store.listTopics('alpha'), []);
+    assert.equal(add({ name: 'x'.repeat(200), description: 'y'.repeat(5000) })().name.length, 200, 'exactly at the limits still goes in');
+  } finally { cleanup(); }
+});
+
+test('a deleted project takes its topics with it, so a project made later under the same slug starts with none', () => {
+  const { store, human, cleanup } = fixture();
+  try {
+    store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE' });
+    store.addTopic({ project: 'beta', name: 'Login', actor: human.id });
+    assert.deepEqual(store.deleteProject('beta'), { slug: 'beta', prefix: 'BE' });
+    store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE' });
+    assert.deepEqual(store.listTopics('beta'), []);
+  } finally { cleanup(); }
+});

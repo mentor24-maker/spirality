@@ -66,6 +66,10 @@
       "to": "loop/lib/mainMoved.js"
     },
     {
+      "from": "lib/readyCatchUp.js",
+      "to": "loop/lib/readyCatchUp.js"
+    },
+    {
       "from": "lib/mergeOnComment.js",
       "to": "loop/lib/mergeOnComment.js"
     },
