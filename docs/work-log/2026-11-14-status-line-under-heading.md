@@ -27,3 +27,15 @@ the same live GitHub check the page already uses: merged says "The pull
 request is merged; the relay moves this to Live on its next pass. Nothing is
 needed from you.", and closed without merging says so and points to the note
 below.
+
+Review sent it back a third time, and asked for the slips to stop being fixed
+one at a time. A Ready to launch ticket whose card asks Dane to Close (the
+pull request has already landed) showed a Close button, while the "i" still
+said the work waited on his Merge. Now, on his two statuses, the "i" no
+longer reads the bare status: it asks the very same questions the page asks
+before drawing the Merge and Close buttons (one shared check for each), so
+the two cannot disagree. When the page offers Close, the "i" says "It waits
+on your Close; the card below says why." When a Ready to launch ticket has no
+Merge to offer at all, it says "It waits on your reply below." A new test
+walks every ticket in the demo and fails if the "i" ever names a move the
+page does not offer.

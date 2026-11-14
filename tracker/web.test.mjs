@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { DEMO_NEWEST_RELEASE, DEMO_OWN_PROJECT, DEMO_SUGGESTIONS, demoNewestRelease, demoSuggest, seedDemo, tickingClock } from './demoData.mjs';
 import { reportsOf, REPORT_RANGES, GROWTH_PERIODS, searchTickets, PRIORITIES, timeSplitOf, isFailureNote, TIME_BUCKETS, pipelineControlsOf } from './pageData.mjs';
-import { escapeHtml, renderStatusLine, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, renderTopics, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, renderListTopics, projectTags, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, renderReleaseGroup, controlValueText, mountainTime, wakeInEffectText, modelLastPassText, renderConsole, renderConsoleTile, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, consoleFeature, featureColourIndex, renderFeatureKey, FEATURE_PALETTE, drainLine, capInFlightText, renderTitleChoices, titleModeOf, TITLE_MODES, SUGGEST_POLL_MS, moveSuggestion, suggestState, filingPlan, orderPlan, andList, suggestRunLine, renderSuggestRows } from './web/render.mjs';
+import { escapeHtml, renderStatusLine, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, CLOSE_LINE, REPLY_LINE, offersMerge, offersClose, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, renderTopics, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, renderListTopics, projectTags, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, renderReleaseGroup, controlValueText, mountainTime, wakeInEffectText, modelLastPassText, renderConsole, renderConsoleTile, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, consoleFeature, featureColourIndex, renderFeatureKey, FEATURE_PALETTE, drainLine, capInFlightText, renderTitleChoices, titleModeOf, TITLE_MODES, SUGGEST_POLL_MS, moveSuggestion, suggestState, filingPlan, orderPlan, andList, suggestRunLine, renderSuggestRows } from './web/render.mjs';
 import { startServer, setupSettingsOf } from './server.mjs';
 import { saveAnswers, setupFields, setupOf } from './setup.mjs';
 import { DANE_FIELDS as SETUP_FIELDS, STEPS as SETUP_STEPS } from '../scripts/onboard/onboard.mjs';
@@ -1614,7 +1614,23 @@ test('the status is first under the heading, with its line behind an information
     assert.doesNotMatch(html, /class="where/, `${name}: the old grey line is gone`);
   }
   assert.match(renderStatusLine({ status: 'queued' }), /role="tooltip">It waits for the build loop to pick it up\. Nothing is needed from you\.</);
-  assert.match(renderStatusLine({ status: 'Ready to launch' }), /role="tooltip">The work is built and checked, and waits on your Merge\.</);
+  // Ready to launch names the Merge only when the page offers the Merge button (third send-back).
+  const pr = 'https://github.com/o/r/pull/14';
+  const ready = { status: 'Ready to launch', mergePhrase: 'merge', pullRequest: pr };
+  assert.match(renderStatusLine(ready), /role="tooltip">The work is built and checked, and waits on your Merge\.</);
+  assert.ok(offersMerge(ready));
+  assert.match(renderStatusLine({ status: 'ready to launch' }), new RegExp(`role="tooltip">${REPLY_LINE.replace('.', '\\.')}<`), 'no pull request: no Merge to name');
+  assert.match(renderStatusLine({ ...ready, mergePhrase: null }), /role="tooltip">It waits on your reply below\.</, 'no merge word: no Merge button');
+  // A card whose move is Close: the "i" names Close, as the button does (BE-7).
+  const closeCard = { body: '@@ASKED\nx\n**NEEDED FROM DANE: Nothing to merge.**\n**Your move: Close — its work is live.**', machine: true };
+  for (const status of ['ready to launch', 'needs your input']) {
+    const closing = { ...ready, status, closePhrase: 'close', comments: [closeCard] };
+    assert.ok(offersClose(closing), `${status}: the card's move is Close`);
+    assert.match(renderStatusLine(closing), new RegExp(`role="tooltip">${CLOSE_LINE.replace(/[.;]/g, '\\$&')}<`), status);
+    assert.doesNotMatch(renderStatusLine(closing), /waits on your Merge|answer below/, status);
+    assert.match(renderCloseAction(closing), /close-action/, `${status}: and the page draws Close`);
+    assert.doesNotMatch(renderMergeAction(closing), /merge-action/, `${status}: and no Merge`);
+  }
   // His answer is in: the status says so, as the Details line does.
   assert.match(renderStatusLine({ status: 'needs your input', answerIn: true }), new RegExp(`status-name">Needs your input · ${ANSWER_IN_NOTE}<`));
   // ...and the "i" no longer asks for his move once it is made (review send-back).
@@ -1636,8 +1652,8 @@ test('the status is first under the heading, with its line behind an information
   assert.doesNotMatch(closed, /waits on your Merge/);
   // Merged wins over a merge word still standing; a failed read (state null) is not settled.
   assert.match(renderStatusLine({ status: 'ready to launch', mergeStands: true, pullRequestState: { number: 14, state: 'MERGED' } }), /role="tooltip">The pull request is merged;/);
-  assert.match(renderStatusLine({ status: 'ready to launch', pullRequestState: { number: 14, state: null } }), /waits on your Merge/);
-  assert.match(renderStatusLine({ status: 'ready to launch', pullRequestState: { number: 14, state: 'OPEN' } }), /waits on your Merge/);
+  assert.match(renderStatusLine({ ...ready, pullRequestState: { number: 14, state: null } }), /waits on your Merge/);
+  assert.match(renderStatusLine({ ...ready, pullRequestState: { number: 14, state: 'OPEN' } }), /waits on your Merge/);
   // The same through the whole page, as BE-8 ("Merged on GitHub but not yet Live") shows it.
   const be8 = renderQuickAction({ name: 'Merged on GitHub but not yet Live', description: '', status: 'ready to launch', pullRequestState: { number: 14, state: 'MERGED' } });
   assert.match(be8, /role="tooltip">The pull request is merged; the relay moves this to Live/);
