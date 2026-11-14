@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { DEMO_NEWEST_RELEASE, DEMO_OWN_PROJECT, DEMO_SUGGESTIONS, demoNewestRelease, demoSuggest, seedDemo, tickingClock } from './demoData.mjs';
 import { reportsOf, REPORT_RANGES, GROWTH_PERIODS, searchTickets, PRIORITIES, timeSplitOf, isFailureNote, TIME_BUCKETS, pipelineControlsOf } from './pageData.mjs';
-import { escapeHtml, renderStatusLine, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, CLOSE_LINE, REPLY_LINE, offersMerge, offersClose, bugReport, BUG_REPORT_TAG, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, renderTopics, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, renderListTopics, projectTags, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, renderReleaseGroup, controlValueText, mountainTime, wakeInEffectText, modelLastPassText, renderConsole, renderConsoleTile, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, consoleFeature, featureColourIndex, renderFeatureKey, FEATURE_PALETTE, drainLine, capInFlightText, renderTitleChoices, titleModeOf, TITLE_MODES, SUGGEST_POLL_MS, moveSuggestion, suggestState, filingPlan, orderPlan, andList, suggestRunLine, renderSuggestRows } from './web/render.mjs';
+import { escapeHtml, renderStatusLine, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, CLOSE_LINE, REPLY_LINE, offersMerge, offersClose, bugReport, BUG_REPORT_TAG, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, heldBugReport, renderBugReportActions, approveQuestion, rejectQuestion, changeProblem, REJECT_COMMENT, WONT_DO_TAG, HELD_REPORT_LINE, HELD_REPORT_STATUS_LINE, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, renderTopics, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, renderListTopics, projectTags, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, renderReleaseGroup, controlValueText, mountainTime, wakeInEffectText, modelLastPassText, renderConsole, renderConsoleTile, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, consoleFeature, featureColourIndex, renderFeatureKey, FEATURE_PALETTE, drainLine, capInFlightText, renderTitleChoices, titleModeOf, TITLE_MODES, SUGGEST_POLL_MS, moveSuggestion, suggestState, filingPlan, orderPlan, andList, suggestRunLine, renderSuggestRows } from './web/render.mjs';
 import { startServer, setupSettingsOf } from './server.mjs';
 import { saveAnswers, setupFields, setupOf } from './setup.mjs';
 import { DANE_FIELDS as SETUP_FIELDS, STEPS as SETUP_STEPS } from '../scripts/onboard/onboard.mjs';
@@ -1370,7 +1370,7 @@ test('an open page reads again once a minute and on coming back to the tab, neve
   // A save's own redraw keeps what the beat compares against, so the next beat does not undo its "Saved" note.
   assert.match(/async function drawAgain\(draw\) \{[\s\S]*?\n\}/.exec(app)[0], /await draw\(\);\s*if \(recording === reads && lastDrawn\?\.address === here\(\)\) lastDrawn = \{ address: here\(\), reads \};/);
   assert.equal(app.match(/await drawTicket\(t\.id/g), null, 'every in-page ticket redraw goes through drawAgain');
-  assert.equal((app.match(/await drawAgain\(\(\) => draw(Ticket|Project)\(/g) ?? []).length, 7, 'SP-208 added the List view priority save; SP-251 the Suggest Next Tasks filing');
+  assert.equal((app.match(/await drawAgain\(\(\) => draw(Ticket|Project)\(/g) ?? []).length, 8, 'SP-208 added the List view priority save; SP-251 the Suggest Next Tasks filing; SP-287 the bug report buttons');
   assert.match(route, /if \(place && !\(err instanceof SignedOut\)\) return;/, "a beat's failed draw does not replace the page with an error");
   assert.match(app, /if \(location\.hash === '#reply' && !refreshing\) \{/, 'a beat does not jump to the reply box again');
   assert.match(/function keepPlace\(\) \{[\s\S]*?\n\}/.exec(app)[0], /main\.querySelectorAll\('details'\)[\s\S]*window\.scrollTo\(0, y\);/);
@@ -1593,6 +1593,106 @@ test('the demo has a bug report shaped like SC-804, held in Needs your input', (
     assert.doesNotMatch(html, /none attached/);
     store.close();
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// ── A held bug report's Approve and Reject (SP-287) ─────────────────────────
+
+test('a held bug report is tagged bug-report, in Needs your input, with no card in its thread', () => {
+  const held = { tags: ['bug-report'], status: 'needs your input', comments: [{ body: 'A plain note.' }] };
+  assert.equal(heldBugReport(held), true);
+  assert.equal(heldBugReport({ ...held, status: 'Needs your input' }), true, 'either spelling');
+  assert.equal(heldBugReport({ ...held, comments: [...held.comments, { body: intakeCard() }] }), false, 'a loop asked about it: not held');
+  assert.equal(heldBugReport({ ...held, tags: ['tracker'] }), false);
+  assert.equal(heldBugReport({ ...held, status: 'requested' }), false);
+  assert.equal(heldBugReport({ ...held, status: 'ready to launch' }), false);
+  assert.equal(heldBugReport({}), false);
+  assert.equal(heldBugReport({ tags: null, status: null, comments: null }), false);
+});
+
+test('a held bug report shows Approve and Reject and a quiet line in place of the reply box; anything else is unchanged', () => {
+  const held = { name: 'Bug report: x', tags: ['bug-report'], status: 'needs your input', comments: [], description: bugDescription() };
+  const html = renderBugReportActions(held);
+  assert.match(html, /<form class="approve-action">\s*<button type="submit">Approve<\/button><span class="note"><\/span>/);
+  assert.match(html, /<form class="reject-action">\s*<button type="submit">Reject<\/button><span class="note"><\/span>/);
+  assert.ok(html.indexOf('approve-action') < html.indexOf('reject-action'), 'Approve first');
+  assert.match(html, /Moves it to Requested; the intake lane writes it up/);
+  assert.match(html, /Moves it to Live with the wont-do tag and a note that nothing shipped/);
+  assert.ok(html.includes(`<p class="held-report quiet">${escapeHtml(HELD_REPORT_LINE)}</p>`));
+  assert.match(HELD_REPORT_LINE, /No loop reads a reply[\s\S]*Approve or Reject[\s\S]*Change panel under Details/);
+  assert.equal(renderReplyForm(held, 'Dane'), '', 'no reply box on a held bug report');
+  // Nothing else on it offers a move: no card, so no Go, Close or Merge.
+  assert.equal(renderGoAction({ ...held, goPhrase: 'go' }), '');
+  assert.equal(renderCloseAction({ ...held, closePhrase: 'close' }), '');
+  // The status line's "i" names the buttons, not "your answer below".
+  assert.ok(renderStatusLine(held).includes(escapeHtml(HELD_REPORT_STATUS_LINE)));
+  // A carded bug report and any other ticket: no buttons, the reply box as before.
+  const carded = { ...held, comments: [{ body: intakeCard() }] };
+  for (const other of [carded, { ...held, tags: [] }, { ...held, status: 'requested' }, { name: 'x', status: 'needs your input', comments: [] }]) {
+    assert.equal(renderBugReportActions(other), '');
+    assert.match(renderReplyForm(other, 'Dane'), /<form class="reply">/);
+    assert.ok(!renderStatusLine(other).includes(escapeHtml(HELD_REPORT_STATUS_LINE)));
+  }
+  assert.match(renderGoAction({ ...carded, goPhrase: 'go' }), /go-action/, 'Go is back once intake has asked');
+  // Title Case labels (docs/DOCTRINE.md), and the look Merge, Close and Go share.
+  const css = readFileSync(WEB('app.css'), 'utf8');
+  assert.match(css, /\.quick form\.approve-action button, \.quick form\.reject-action button \{ font-weight: 700;/);
+});
+
+test('Approve and Reject ask first, naming the ticket, and changeProblem says what did not stick', () => {
+  assert.equal(approveQuestion({ name: 'Bug report: x' }), 'Approve Bug report: x and send it to intake?');
+  assert.equal(rejectQuestion({ name: 'Bug report: x' }), 'Reject Bug report: x? It moves to Live with the wont-do tag, and nothing is built.');
+  assert.equal(WONT_DO_TAG, 'wont-do');
+  assert.match(REJECT_COMMENT, /^Rejected from the ticket page:[\s\S]*nothing shipped/);
+  assert.equal(changeProblem({ ticket: { status: 'requested', tags: [] } }, { status: 'requested' }), '');
+  assert.equal(changeProblem({ ticket: { status: 'live', tags: ['bug-report', 'wont-do'] } }, { status: 'live', tags: ['wont-do'] }), '');
+  assert.equal(changeProblem({ ticket: { status: 'needs your input', tags: [] } }, { status: 'requested' }), 'the status reads "needs your input", not "requested".');
+  assert.equal(changeProblem({ ticket: { status: 'live', tags: [] } }, { status: 'live', tags: ['wont-do'] }), 'the wont-do tag is not on it.');
+  assert.equal(changeProblem({}, { status: 'live' }), 'the tracker did not answer with the ticket.');
+  assert.equal(changeProblem(null), 'the tracker did not answer with the ticket.');
+});
+
+test('the page wires Approve and Reject to guarded changes it reads back, and never says done over a failed write', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  assert.match(app, /\$\{renderGoAction\(t\)\}\s*\$\{renderBugReportActions\(t\)\}\s*\$\{renderReplyForm\(t, me\?\.name\)\}/, 'in the Quick Action column, where the reply box was');
+  assert.match(app, /api\('PATCH', `\/tickets\/\$\{encodeURIComponent\(t\.id\)\}`, \{ \.\.\.fields, ifStatus: t\.status, ifVersion: t\.version \}\)/, 'guarded on what the page was drawn with');
+  assert.match(app, /bugButton\('form\.approve-action', approveQuestion\(t\), \[\s*\{ what: 'the move to Requested', write: async \(\) => changeProblem\(await patch\(\{ status: 'requested' \}\), \{ status: 'requested' \}\) \}/);
+  assert.match(app, /bugButton\('form\.reject-action', rejectQuestion\(t\), \[[\s\S]*patch\(\{ status: 'live', tags: \[\.\.\.new Set\(\[\.\.\.t\.tags, WONT_DO_TAG\]\)\] \}\)[\s\S]*body: REJECT_COMMENT[\s\S]*posted\?\.body === REJECT_COMMENT/);
+  const wire = /const bugButton = [\s\S]*?\n {2}\};\n/.exec(app)?.[0] ?? '';
+  assert.ok(wire, 'bugButton found');
+  assert.match(wire, /if \(!confirm\(question\)\) return;/, 'asks first');
+  assert.match(wire, /if \(problem\) \{[\s\S]*return fail\(`Not saved: \$\{step\.what\}/, 'a write that did not stick stops there and says which');
+  assert.ok(wire.indexOf('return fail(`Not saved') < wire.indexOf('drawAgain'), 'the page redraws only once every write stuck');
+});
+
+test('on the server, Approve leaves a held bug report in Requested and Reject in Live with wont-do and the note; a stale page is refused', async () => {
+  const f = await fixture({ goPhrase: 'go' });
+  try {
+    const threads = await Promise.all(f.store.listTickets('beta').map(async (t) => (await f.call('GET', `/tickets/${t.id}/thread`)).body));
+    const held = threads.filter((t) => heldBugReport(t));
+    assert.equal(held.length, 2, 'the demo holds two bug reports, one to approve and one to reject');
+    for (const t of threads.filter((x) => !heldBugReport(x))) assert.equal(renderBugReportActions(t), '', t.name);
+    const [a, r] = held;
+    // Approve: the page's one change, as the page sends it.
+    const approved = await f.call('PATCH', `/tickets/${a.id}`, { body: { status: 'requested', ifStatus: a.status, ifVersion: a.version } });
+    assert.equal(approved.status, 200);
+    assert.equal(changeProblem(approved.body, { status: 'requested' }), '');
+    assert.equal((await f.call('GET', `/tickets/${a.id}/thread`)).body.status, 'requested');
+    // Reject: the status and tag together, then the note.
+    const rejected = await f.call('PATCH', `/tickets/${r.id}`, { body: { status: 'live', tags: [...new Set([...r.tags, WONT_DO_TAG])], ifStatus: r.status, ifVersion: r.version } });
+    assert.equal(rejected.status, 200);
+    assert.equal(changeProblem(rejected.body, { status: 'live', tags: [WONT_DO_TAG] }), '');
+    const posted = await f.call('POST', `/tickets/${r.id}/comments`, { body: { body: REJECT_COMMENT } });
+    assert.equal(posted.status, 201);
+    assert.equal(posted.body.body, REJECT_COMMENT);
+    const after = (await f.call('GET', `/tickets/${r.id}/thread`)).body;
+    assert.equal(after.status, 'live');
+    assert.deepEqual(after.tags.sort(), ['bug-report', 'demo-site', 'wont-do']);
+    assert.deepEqual([after.comments.at(-1).body, after.comments.at(-1).author.id], [REJECT_COMMENT, f.operator.id]);
+    // A page drawn before the ticket moved is refused, and nothing is written.
+    const stale = await f.call('PATCH', `/tickets/${r.id}`, { body: { status: 'requested', ifStatus: r.status, ifVersion: r.version } });
+    assert.equal(stale.status, 409);
+    assert.equal((await f.call('GET', `/tickets/${r.id}/thread`)).body.status, 'live');
+  } finally { await f.cleanup(); }
 });
 
 // ── Quick Action: his original request first (SP-213) ────────────────────────
@@ -2331,7 +2431,7 @@ test('the Go button posts the substrate\'s one go word, handed to the page by th
   } finally { await none.cleanup(); }
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   assert.match(app, /wordButton\('form\.go-action', goQuestion\(t\), t\.goPhrase,/);
-  assert.match(app, /\$\{renderCloseAction\(t\)\}\s*\$\{renderGoAction\(t\)\}\s*\$\{renderReplyForm\(t, me\?\.name\)\}/, 'Go sits between Close and the reply box');
+  assert.match(app, /\$\{renderCloseAction\(t\)\}\s*\$\{renderGoAction\(t\)\}\s*(?:\$\{renderBugReportActions\(t\)\}\s*)?\$\{renderReplyForm\(t, me\?\.name\)\}/, 'Go sits between Close and the reply box');
 });
 
 test('no go word is written into the page\'s code, and the Go button has the Merge look with 10px corners', () => {
@@ -2397,7 +2497,7 @@ test('clicking Merge and confirming posts exactly the merge phrase as Dane\'s ow
   const draw = /\nasync function drawTicket\(id(?:, said = null(?:, kept = null)?)?\) \{[\s\S]*?\n\}\n/.exec(app)?.[0] ?? '';
   assert.match(draw, /const wordButton = [\s\S]*wordButton\('form\.merge-action'[\s\S]*wordButton\('form\.close-action'/);
   assert.equal(app.match(/const wordButton = /g).length, 1);
-  assert.match(app, /<div class="act">\s*(?:\$\{renderCommands\(t\)\}\s*)?\$\{renderAnswerIn\(t\)\}\s*\$\{renderMergeAction\(t\)\}\s*\$\{renderCloseAction\(t\)\}\s*\$\{renderGoAction\(t\)\}\s*\$\{renderReplyForm\(t, me\?\.name\)\}/, 'the answer-is-in line, then Merge, Close and Go, sit above the reply box on the right');
+  assert.match(app, /<div class="act">\s*(?:\$\{renderCommands\(t\)\}\s*)?\$\{renderAnswerIn\(t\)\}\s*\$\{renderMergeAction\(t\)\}\s*\$\{renderCloseAction\(t\)\}\s*\$\{renderGoAction\(t\)\}\s*(?:\$\{renderBugReportActions\(t\)\}\s*)?\$\{renderReplyForm\(t, me\?\.name\)\}/, 'the answer-is-in line, then Merge, Close and Go, sit above the reply box on the right');
 });
 
 test('after a reply, Merge, Close or Go posts, the page stays at the top with no confirmation box', () => {

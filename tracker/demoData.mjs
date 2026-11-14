@@ -210,6 +210,24 @@ export function seedDemo(store, { operatorName = substrateConfig.operatorName(),
     ].join('\n'),
   }, 'waiting');
 
+  // SP-287: a second held bug report, so Approve can be tried on one and
+  // Reject on the other.
+  file('beta', 'Bug report: The contact form forgets what I typed when I go back. — Demo Site', 'needs your input', {
+    assigned: true,
+    tags: ['bug-report', 'demo-site'],
+    description: [
+      '## What the reporter said', '',
+      '```', 'The contact form forgets what I typed when I go back.', '```', '',
+      '## Where and who', '',
+      '- **Page:** https://example.com/contact',
+      '- **Project:** Demo Site (proj_demo)',
+      '- **Viewer tier:** member',
+      '- **Submitted:** 2026-11-14T16:30:00.000Z',
+      '- **Report id:** `br_demo_2`', '',
+      '## Screenshots', '', '(none attached)',
+    ].join('\n'),
+  }, 'waiting');
+
   // Two Pipeline Controls changes on Alpha (SP-224), so the Settings page's
   // change log shows rows: the cap tried at 3 and put back, which leaves every
   // control on its default.
