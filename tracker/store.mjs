@@ -121,6 +121,13 @@
  *    (may be blank), who made it and when, in the `topics` table. A project
  *    has many topics; a topic belongs to exactly one project. This first
  *    version only adds and lists them; a deleted project's topics go with it.
+ *  - A ticket carries any number of its own project's topics, and a topic
+ *    any number of tickets, in the `ticket_topics` link table.
+ *    They change through changeTicket's `topics` (the whole new list of
+ *    topic ids), with the same guards and version step as any other field,
+ *    and one `topics` event naming the ids before and after. A topic from
+ *    another project, or none at all, is refused (`bad-topic`) and nothing
+ *    changes. A deleted ticket's links go with it.
  */
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
@@ -276,6 +283,11 @@ CREATE TABLE IF NOT EXISTS topics (
   created_by  INTEGER NOT NULL REFERENCES actors(id),
   created_at  TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS ticket_topics (
+  ticket      TEXT NOT NULL REFERENCES tickets(id),
+  topic       INTEGER NOT NULL REFERENCES topics(id),
+  PRIMARY KEY (ticket, topic)
+);
 CREATE TABLE IF NOT EXISTS roles (
   name        TEXT PRIMARY KEY,
   description TEXT NOT NULL,
@@ -346,6 +358,7 @@ CREATE INDEX IF NOT EXISTS project_members_by_actor ON project_members (actor, p
 CREATE INDEX IF NOT EXISTS attachments_by_ticket ON attachments (ticket, id);
 CREATE INDEX IF NOT EXISTS project_docs_by_project ON project_docs (project, id);
 CREATE INDEX IF NOT EXISTS topics_by_project ON topics (project, id);
+CREATE INDEX IF NOT EXISTS ticket_topics_by_topic ON ticket_topics (topic, ticket);
 CREATE UNIQUE INDEX IF NOT EXISTS actors_by_token ON actors (token_hash);
 CREATE UNIQUE INDEX IF NOT EXISTS actors_by_email ON actors (email);
 CREATE INDEX IF NOT EXISTS sessions_by_actor ON sessions (actor);
@@ -388,6 +401,18 @@ function canonicalPriority(priority) {
     throw new StoreError('unknown-priority', `"${priority}" is not a priority: ${PRIORITIES.join(', ')}.`);
   }
   return p;
+}
+
+/**
+ * A ticket's new topics as sent: a list of topic ids (whole numbers above
+ * 0), each kept once, smallest first. Whether each is a topic of the
+ * ticket's project is checked in the write's transaction.
+ */
+function canonicalTopicIds(topics) {
+  if (!Array.isArray(topics) || topics.some((t) => !Number.isInteger(t) || t < 1)) {
+    throw new StoreError('bad-topics', "a ticket's topics are a list of topic ids (whole numbers); nothing was saved.");
+  }
+  return [...new Set(topics)].sort((a, b) => a - b);
 }
 
 function canonicalTags(tags) {
@@ -911,6 +936,11 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
 
   function endSessionsOf(actorId) {
     return num(db.prepare('DELETE FROM sessions WHERE actor = ?').run(actorId).changes);
+  }
+
+  /** The ids of the topics a ticket carries, smallest first. */
+  function topicIdsOf(ticket) {
+    return db.prepare('SELECT topic FROM ticket_topics WHERE ticket = ? ORDER BY topic').all(ticket).map((r) => num(r.topic));
   }
 
   function ticketRow(id) {
@@ -1698,11 +1728,13 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
      * transaction. Fields given with their current value are not changes:
      * no version bump, no event.
      */
-    changeTicket(id, { actor, ifStatus, ifVersion, ...fields }) {
+    changeTicket(id, { actor, ifStatus, ifVersion, topics, ...fields }) {
       const unknown = Object.keys(fields).filter((k) => !(k in CHANGEABLE));
       if (unknown.length) {
-        throw new StoreError('bad-field', `cannot change ${unknown.join(', ')}; changeable: ${Object.keys(CHANGEABLE).join(', ')}.`);
+        throw new StoreError('bad-field', `cannot change ${unknown.join(', ')}; changeable: ${[...Object.keys(CHANGEABLE), 'topics'].join(', ')}.`);
       }
+      // Topics live in their own link table, not a ticket column.
+      const wantedTopics = topics === undefined ? undefined : canonicalTopicIds(topics);
       const wanted = {};
       for (const [key, value] of Object.entries(fields)) {
         if (value === undefined) continue;
@@ -1732,12 +1764,23 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
           const before = column === 'assignee' ? num(row[column]) : row[column];
           return before !== wanted[column];
         });
-        if (!changed.length) return { ok: true, ticket: ticketFromRow(row), changed };
+        let topicsBefore = null;
+        if (wantedTopics !== undefined) {
+          for (const topic of wantedTopics) {
+            const owner = db.prepare('SELECT project FROM topics WHERE id = ?').get(topic);
+            if (!owner || owner.project !== row.project) {
+              throw new StoreError('bad-topic', `topic ${topic} is not a topic of ${row.id}'s project; nothing was saved.`);
+            }
+          }
+          topicsBefore = topicIdsOf(row.id);
+        }
+        const topicsChanged = topicsBefore != null && JSON.stringify(topicsBefore) !== JSON.stringify(wantedTopics);
+        if (!changed.length && !topicsChanged) return { ok: true, ticket: ticketFromRow(row), changed };
 
         const at = now();
         const sets = changed.map((column) => `${column} = ?`);
         const r = db.prepare(
-          `UPDATE tickets SET ${sets.join(', ')}, updated_at = ?, version = version + 1 WHERE id = ? AND version = ?`,
+          `UPDATE tickets SET ${[...sets, 'updated_at = ?'].join(', ')}, version = version + 1 WHERE id = ? AND version = ?`,
         ).run(...changed.map((c) => wanted[c]), at, row.id, version);
         if (num(r.changes) !== 1) {
           // Cannot happen while the write lock is held; if it ever does, say so.
@@ -1746,11 +1789,27 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
         for (const column of changed) {
           writeEvent(row.id, actor, column, eventValue(column, row[column]), eventValue(column, wanted[column]), at);
         }
+        if (topicsChanged) {
+          db.prepare('DELETE FROM ticket_topics WHERE ticket = ?').run(row.id);
+          const link = db.prepare('INSERT INTO ticket_topics (ticket, topic) VALUES (?, ?)');
+          for (const topic of wantedTopics) link.run(row.id, topic);
+          if (JSON.stringify(topicIdsOf(row.id)) !== JSON.stringify(wantedTopics)) {
+            throw new StoreError('write-failed', `ticket ${row.id}'s topics did not read back as saved.`);
+          }
+          writeEvent(row.id, actor, 'topics', JSON.stringify(topicsBefore), JSON.stringify(wantedTopics), at);
+        }
         const after = ticketFromRow(ticketRow(row.id));
         if (after.version !== version + 1) {
           throw new StoreError('write-failed', `ticket ${row.id} read back at version ${after.version}, expected ${version + 1}.`);
         }
-        return { ok: true, ticket: after, changed: changed.map((c) => Object.keys(CHANGEABLE).find((k) => CHANGEABLE[k] === c)) };
+        return {
+          ok: true,
+          ticket: after,
+          changed: [
+            ...changed.map((c) => Object.keys(CHANGEABLE).find((k) => CHANGEABLE[k] === c)),
+            ...(topicsChanged ? ['topics'] : []),
+          ],
+        };
       });
     },
 
@@ -1777,6 +1836,7 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
         db.prepare('DELETE FROM comments WHERE ticket = ?').run(row.id);
         db.prepare('DELETE FROM attachments WHERE ticket = ?').run(row.id);
         db.prepare('DELETE FROM seen_marks WHERE ticket = ?').run(row.id);
+        db.prepare('DELETE FROM ticket_topics WHERE ticket = ?').run(row.id);
         const r = db.prepare('DELETE FROM tickets WHERE id = ? AND status = ?').run(row.id, row.status);
         if (num(r.changes) !== 1 || ticketRow(row.id)) {
           throw new StoreError('write-failed', `ticket ${row.id} was not deleted.`);
@@ -2273,6 +2333,23 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
         }
         return topicFromRow(back);
       });
+    },
+
+    /**
+     * Every ticket of `project` that carries a topic, with its
+     * topics as `{ id, name }`, alphabetical (case aside): a Map keyed by
+     * ticket id. A ticket with none is not in it.
+     */
+    ticketTopicsOf(project) {
+      const rows = db.prepare(`SELECT tt.ticket, tp.id, tp.name FROM ticket_topics tt
+        JOIN topics tp ON tp.id = tt.topic JOIN tickets tk ON tk.id = tt.ticket
+        WHERE tk.project = ? ORDER BY tp.name COLLATE NOCASE, tp.id`).all(project);
+      const byTicket = new Map();
+      for (const r of rows) {
+        if (!byTicket.has(r.ticket)) byTicket.set(r.ticket, []);
+        byTicket.get(r.ticket).push({ id: num(r.id), name: r.name });
+      }
+      return byTicket;
     },
 
     /** A project's topics, newest first, each with its maker's name. */

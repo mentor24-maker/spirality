@@ -171,7 +171,8 @@ GET /projects/spirality/board
     { "status": "Queued", "tickets": [
       { "id": "SP-153", "name": "…", "priority": "urgent", "tags": ["starcaster-integration"],
         "assignee": null, "updatedAt": "2026-11-06T22:00:00.000Z",
-        "pullRequest": null, "answerIn": false, "version": 4, "assigneeId": null }
+        "pullRequest": null, "answerIn": false, "version": 4, "assigneeId": null,
+        "topics": [{ "id": 3, "name": "Login" }] }
     ] },
     { "status": "Building", "tickets": [] },
     { "status": "In review", "tickets": [] },
@@ -179,7 +180,8 @@ GET /projects/spirality/board
     { "status": "Ready to launch", "tickets": [] },
     { "status": "Live", "tickets": [] }
   ],
-  "operator": { "id": 1, "name": "Dane" }
+  "operator": { "id": 1, "name": "Dane" },
+  "topics": [{ "id": 5, "name": "Billing" }, { "id": 3, "name": "Login" }]
 }
 ```
 
@@ -190,7 +192,13 @@ order. `assignee` is a name or null; `pullRequest` a URL or null;
 change, so a change never overwrites a loop's move). `assigneeId` is the
 assignee's id or null, and `operator` the project's operator, `{ id, name }`
 or null: the one person a ticket may be assigned to, which the List view's
-Assigned To dropdown offers beside Nobody (SP-244).
+Assigned To dropdown offers beside Nobody (SP-244). Each ticket's `topics`
+are the topics it belongs to, `{ id, name }`, alphabetical (an empty list
+when none), and the board's own `topics` are the project's, the same shape,
+which the List view's Add Topic dropdown offers (SP-247). A ticket's topics
+change with `PATCH /tickets/:id` and `{ "topics": [3, 5], "ifVersion": 4 }`,
+the whole new list of topic ids; a topic of another project is refused with
+400 `bad-topic` and nothing changes.
 
 `GET /projects/:slug/tickets` answers the same tickets as one flat list,
 `{ project, tickets: [{ id, name, description, status, priority, tags, … }] }`,

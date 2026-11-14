@@ -422,6 +422,8 @@ export function boardOf(store, slug, { viewerId = null, prStates = null } = {}) 
     if (!names.has(id)) names.set(id, store.getActor(id)?.name ?? `actor ${id}`);
     return names.get(id);
   };
+  // SP-247: each ticket's topics, and the project's own to pick from.
+  const topicsOf = store.ticketTopicsOf(project.slug);
   return {
     project: project.slug,
     projectName: project.name,
@@ -442,10 +444,16 @@ export function boardOf(store, slug, { viewerId = null, prStates = null } = {}) 
         version: t.version,
         // SP-244: the List view's Assigned To dropdown selects by id; `assignee` stays a name.
         assigneeId: t.assignee ?? null,
+        // SP-247: the ticket's topics, `{ id, name }`, alphabetical.
+        topics: topicsOf.get(t.id) ?? [],
       })),
     })),
     // SP-244: the one person a ticket may be assigned to, for the List view's dropdown.
     operator: project.operator == null ? null : { id: project.operator, name: nameOf(project.operator) },
+    // SP-247: the project's topics, `{ id, name }`, alphabetical, for the List view's Add Topic dropdown.
+    topics: store.listTopics(project.slug)
+      .map((t) => ({ id: t.id, name: t.name }))
+      .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }) || a.id - b.id),
   };
 }
 

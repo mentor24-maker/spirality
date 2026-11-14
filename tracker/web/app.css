@@ -185,19 +185,25 @@ table.tickets, details.group { border: var(--hairline); border-radius: 8px; }
 .group td.id { white-space: nowrap; }
 .group td.id a { color: var(--quiet); text-decoration: none; }
 .group td.id a:hover { text-decoration: underline; }
-.group th.name { width: 27%; }
-.group th.priority { width: 11%; }
+.group th.name { width: 20%; }
+.group th.priority { width: 10%; }
 .group td.priority select { width: 100%; max-width: 7.5rem; }
 .group td.priority .note { display: block; font-size: 0.8rem; }
 .group td.assignee select { width: 100%; max-width: 9rem; }
 .group td.assignee .note { display: block; font-size: 0.8rem; }
-.group th.tags { width: 13%; }
+.group th.tags { width: 11%; }
 .group td.tags .tag { margin-bottom: 0.2rem; }
 .group td.tags button.remove-tag { border: 0; background: transparent; padding: 0 0 0 0.3rem; cursor: pointer; color: var(--quiet); font-size: 0.85rem; }
 .group td.tags button.remove-tag:hover { color: var(--red); }
 .group td.tags select, .group td.tags input.new-tag { display: block; width: 100%; max-width: 9rem; font: inherit; font-size: 0.85rem; margin-top: 0.15rem; box-sizing: border-box; }
 .group td.tags .note { display: block; font-size: 0.8rem; }
 .group td.tags input.new-tag[hidden] { display: none; }
+.group th.topics { width: 11%; }
+.group td.topics .tag { margin-bottom: 0.2rem; }
+.group td.topics button.remove-tag { border: 0; background: transparent; padding: 0 0 0 0.3rem; cursor: pointer; color: var(--quiet); font-size: 0.85rem; }
+.group td.topics button.remove-tag:hover { color: var(--red); }
+.group td.topics select { display: block; width: 100%; max-width: 9rem; font: inherit; font-size: 0.85rem; margin-top: 0.15rem; box-sizing: border-box; }
+.group td.topics .note { display: block; font-size: 0.8rem; }
 .group th.actions { width: 8%; }
 .group td.actions { white-space: nowrap; }
 a.action, button.action { display: inline-flex; padding: 0.2rem; margin-right: 0.15rem; border-radius: 4px; color: var(--quiet); }
@@ -208,7 +214,7 @@ button.action:disabled { opacity: 0.4; cursor: default; }
 span.action.status-icon { display: inline-flex; padding: 0.2rem; margin-right: 0.15rem; }
 span.action.status-icon.empty { width: 18px; height: 18px; }
 span.action.answer-in-icon { color: #2e7d32; }
-.group th.assignee { width: 12%; }
+.group th.assignee { width: 11%; }
 .group td { overflow-wrap: anywhere; }
 /* A stage's colour from the Settings page (app.mjs drawProject sets the three properties). */
 .column.coloured, .group.coloured { border-color: var(--stage-border); }

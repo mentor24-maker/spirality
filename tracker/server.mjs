@@ -199,7 +199,8 @@ const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const RESERVED_SLUGS = Object.freeze(['new']);
 
 /** The fields a change may carry, besides its guards. */
-const CHANGE_FIELDS = Object.freeze(['name', 'description', 'status', 'priority', 'tags', 'assignee', 'loopNote']);
+// `topics` is the whole new list of the ticket's topic ids.
+const CHANGE_FIELDS = Object.freeze(['name', 'description', 'status', 'priority', 'tags', 'assignee', 'loopNote', 'topics']);
 
 /**
  * The statuses a person may move a ticket to from the ticket page, in the

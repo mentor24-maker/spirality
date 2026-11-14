@@ -1872,3 +1872,71 @@ test('a deleted project takes its topics with it, so a project made later under 
     assert.deepEqual(store.listTopics('beta'), []);
   } finally { cleanup(); }
 });
+
+// ── A ticket's topics (SP-247) ──────────────────────────────────────────────
+
+test("a ticket's topics change through changeTicket: one ticket carries two topics, one topic sits on two tickets, each change steps the version and writes one event", () => {
+  const { store, human, machine, cleanup } = fixture();
+  try {
+    const login = store.addTopic({ project: 'alpha', name: 'login', actor: human.id });
+    const billing = store.addTopic({ project: 'alpha', name: 'Billing', actor: human.id });
+    const one = store.fileTicket({ project: 'alpha', actor: machine.id, name: 'One', status: 'queued' });
+    const two = store.fileTicket({ project: 'alpha', actor: machine.id, name: 'Two', status: 'queued' });
+    assert.deepEqual(store.ticketTopicsOf('alpha'), new Map(), 'none yet');
+
+    const r = store.changeTicket(one.id, { actor: human.id, topics: [login.id, billing.id, login.id], ifVersion: one.version });
+    assert.equal(r.ok, true);
+    assert.deepEqual(r.changed, ['topics']);
+    assert.equal(r.ticket.version, one.version + 1);
+    store.changeTicket(two.id, { actor: human.id, topics: [login.id] });
+    assert.deepEqual(store.ticketTopicsOf('alpha'), new Map([
+      [one.id, [{ id: billing.id, name: 'Billing' }, { id: login.id, name: 'login' }]],
+      [two.id, [{ id: login.id, name: 'login' }]],
+    ]), 'alphabetical, case aside');
+    const event = store.listEvents(one.id).find((e) => e.field === 'topics');
+    assert.deepEqual([event.actor, event.from, event.to], [human.id, '[]', JSON.stringify([login.id, billing.id].sort((a, b) => a - b))]);
+
+    const same = store.changeTicket(one.id, { actor: human.id, topics: [billing.id, login.id] });
+    assert.deepEqual([same.changed, same.ticket.version], [[], one.version + 1], 'the same topics again are not a change');
+
+    store.changeTicket(one.id, { actor: human.id, topics: [billing.id] });
+    assert.deepEqual(store.ticketTopicsOf('alpha').get(one.id), [{ id: billing.id, name: 'Billing' }], 'removed');
+    store.changeTicket(one.id, { actor: human.id, topics: [], priority: 'high' });
+    assert.equal(store.ticketTopicsOf('alpha').has(one.id), false);
+    assert.equal(store.getTicket(one.id).priority, 'high', 'other fields change in the same write');
+    assert.equal(store.getTicket(one.id).version, one.version + 3, 'one step per write');
+  } finally { cleanup(); }
+});
+
+test("a topic of another project, an unknown topic or a bad list is refused and changes nothing; a moved ticket is refused at its version guard", () => {
+  const { store, human, machine, cleanup } = fixture();
+  try {
+    store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE' });
+    const theirs = store.addTopic({ project: 'beta', name: 'Theirs', actor: human.id });
+    const ours = store.addTopic({ project: 'alpha', name: 'Ours', actor: human.id });
+    const t = store.fileTicket({ project: 'alpha', actor: machine.id, name: 'One', status: 'queued' });
+    assert.throws(() => store.changeTicket(t.id, { actor: human.id, topics: [ours.id, theirs.id], priority: 'high' }), { code: 'bad-topic' });
+    assert.throws(() => store.changeTicket(t.id, { actor: human.id, topics: [9999] }), { code: 'bad-topic' });
+    for (const topics of ['Ours', [String(ours.id)], [0], [1.5], null]) {
+      assert.throws(() => store.changeTicket(t.id, { actor: human.id, topics }), { code: 'bad-topics' }, JSON.stringify(topics));
+    }
+    const after = store.getTicket(t.id);
+    assert.deepEqual([after.version, after.priority], [t.version, null], 'nothing changed');
+    assert.equal(store.ticketTopicsOf('alpha').size, 0);
+    const moved = store.changeTicket(t.id, { actor: human.id, topics: [ours.id], ifVersion: t.version + 5 });
+    assert.deepEqual([moved.ok, moved.refused], [false, 'moved']);
+    assert.equal(store.ticketTopicsOf('alpha').size, 0);
+  } finally { cleanup(); }
+});
+
+test("a deleted ticket takes its topic links with it, and the topic stays", () => {
+  const { store, human, machine, cleanup } = fixture();
+  try {
+    const login = store.addTopic({ project: 'alpha', name: 'Login', actor: human.id });
+    const t = store.fileTicket({ project: 'alpha', actor: machine.id, name: 'One', status: 'queued' });
+    store.changeTicket(t.id, { actor: human.id, topics: [login.id] });
+    store.deleteTicket(t.id, { actor: human.id });
+    assert.equal(store.ticketTopicsOf('alpha').size, 0);
+    assert.deepEqual(store.listTopics('alpha').map((x) => x.name), ['Login']);
+  } finally { cleanup(); }
+});

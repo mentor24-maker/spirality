@@ -26,7 +26,7 @@
  * an emailed link's own page. The link's token is sent only in a JSON body,
  * never in an address.
  */
-import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, unwrapDoc, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderAnswerIn, renderHeldUp, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, lookupTicket, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, pipelinePodLabel, renderHealth, healthLines, renderCommandList, renderCommandView, renderCommandDetails, renderContextDocs, renderTopics, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, projectTags, sortTickets, nextSort, renderDocumentation, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, lowerMeridiem, renderPipelineControls, renderConsole, drainLine, renderTitleChoices, titleModeOf } from './render.mjs';
+import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, unwrapDoc, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderAnswerIn, renderHeldUp, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, lookupTicket, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, pipelinePodLabel, renderHealth, healthLines, renderCommandList, renderCommandView, renderCommandDetails, renderContextDocs, renderTopics, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, renderListTopics, projectTags, sortTickets, nextSort, renderDocumentation, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, lowerMeridiem, renderPipelineControls, renderConsole, drainLine, renderTitleChoices, titleModeOf } from './render.mjs';
 
 /** Where an earlier version of the page kept a pasted token; removed on load, never read. */
 const OLD_TOKEN_KEY = 'tracker-token';
@@ -1302,7 +1302,8 @@ function wireSortHeadings(stages) {
  *
  * In the List view each row's priority (SP-208) and assignee (SP-244) is a
  * dropdown that saves on change, and its tags (SP-246) gain a × each and an
- * Add Tag dropdown (wireListPickers); `said` is
+ * Add Tag dropdown, and its topics (SP-247) the same with Add Topic
+ * (wireListPickers); `said` is
  * `{ id, field, text, error }`, the note that save leaves beside that
  * ticket's dropdown after the redraw.
  */
@@ -1359,6 +1360,7 @@ async function drawProject(slug, view, { adding = false, filed = null, unchecked
       <td class="name"><a href="/t/${encodeURIComponent(t.id)}">${escapeHtml(t.name)}</a></td>
       <td class="priority">${view === 'list' ? renderListPriority(t) : t.priority ? escapeHtml(statusName(t.priority)) : '<span class="quiet">–</span>'}</td>
       <td class="tags">${view === 'list' ? renderListTags(t, known) : t.tags.map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join('')}</td>
+      <td class="topics">${view === 'list' ? renderListTopics(t, board.topics) : (t.topics ?? []).map((topic) => `<span class="tag topic">${escapeHtml(topic.name)}</span>`).join('') || '<span class="quiet">–</span>'}</td>
       <td class="assignee">${view === 'list' ? renderListAssignee(t, board.operator) : t.assignee ? escapeHtml(t.assignee) : '<span class="quiet">nobody</span>'}</td>
       <td class="when">${escapeHtml(when(t.updatedAt))}</td>
       <td class="actions">${actions(t, status)}</td>
@@ -1483,9 +1485,9 @@ const LIST_PICKERS = Object.freeze({
 });
 
 /**
- * SP-208, SP-244, SP-246: the List view's priority and assignee dropdowns and
- * its tag controls. Each change sends only that field (tags as the whole new
- * list), with the version the board drew (`ifVersion`), to the same PATCH
+ * SP-208, SP-244, SP-246, SP-247: the List view's priority and assignee
+ * dropdowns and its tag and topic controls. Each change sends only that field
+ * (tags and topics as the whole new list), with the version the board drew (`ifVersion`), to the same PATCH
  * /tickets/:id the ticket page's Change panel uses. One save at a time: every
  * dropdown, ×, and tag box in the list is held while a save is in flight, and
  * "Saving…" shows beside the one changed. Saved, the list is drawn again from
@@ -1496,7 +1498,7 @@ const LIST_PICKERS = Object.freeze({
 function wireListPickers(slug, view, board, said) {
   const fields = Object.keys(LIST_PICKERS);
   const selects = [...main.querySelectorAll(fields.map((f) => `select[data-${f}-of]`).join(', '))];
-  const controls = [...selects, ...main.querySelectorAll('select[data-tags-of], button[data-untag-of], input[data-new-tag-of]')];
+  const controls = [...selects, ...main.querySelectorAll('select[data-tags-of], button[data-untag-of], input[data-new-tag-of], select[data-topics-of], button[data-untopic-of]')];
   const fieldOf = (select) => fields.find((f) => select.hasAttribute(`data-${f}-of`));
   const noteOf = (field, id) => [...main.querySelectorAll(`[data-${field}-note]`)].find((n) => n.getAttribute(`data-${field}-note`) === id);
   if (said) {
@@ -1517,7 +1519,7 @@ function wireListPickers(slug, view, board, said) {
       return;
     }
     saving = true;
-    const was = field === 'tags' ? 'were' : 'was';
+    const was = field === 'tags' || field === 'topics' ? 'were' : 'was';
     const note = noteOf(field, id);
     const held = controls.filter((c) => !c.disabled);
     for (const c of held) c.disabled = true;
@@ -1559,6 +1561,32 @@ function wireListPickers(slug, view, board, said) {
     });
   }
   wireListTags(tickets, save, noteOf);
+  wireListTopics(tickets, save);
+}
+
+/**
+ * SP-247: a List row's topic controls, saving through wireListPickers' `save`
+ * with the whole new list of topic ids. Picking a topic from Add Topic adds
+ * it; a chip's × removes that topic.
+ */
+function wireListTopics(tickets, save) {
+  const idsOf = (t) => (t.topics ?? []).map((topic) => topic.id);
+  for (const select of main.querySelectorAll('select[data-topics-of]')) {
+    select.addEventListener('change', () => {
+      const t = tickets.get(select.getAttribute('data-topics-of'));
+      const topic = Number(select.value);
+      if (!t || !Number.isInteger(topic) || topic < 1) return;
+      save(t.id, 'topics', [...idsOf(t), topic], () => { select.value = ''; });
+    });
+  }
+  for (const button of main.querySelectorAll('button[data-untopic-of]')) {
+    button.addEventListener('click', () => {
+      const t = tickets.get(button.getAttribute('data-untopic-of'));
+      if (!t) return;
+      const topic = Number(button.dataset.topic);
+      save(t.id, 'topics', idsOf(t).filter((id) => id !== topic), () => {});
+    });
+  }
 }
 
 /**
