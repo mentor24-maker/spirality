@@ -15,3 +15,9 @@ instead of being half used. The open tickets are handed to Claude privately,
 never written on its command line where other programs could see them. The
 last list is saved, so it survives a page reload or a tracker restart. Asking
 for suggestions never creates or changes a ticket.
+
+After review sent it back because the title suggester (#227) had landed in
+the same spots, main was merged in with both features kept. The two now
+share one setting for which Claude to run on the Mini (`TRACKER_CLAUDE`),
+rather than each having its own, so pointing the tracker at a different
+Claude changes both at once.
