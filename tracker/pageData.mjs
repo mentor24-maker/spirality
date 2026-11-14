@@ -24,6 +24,7 @@ import { searchPattern } from './web/render.mjs';
 import { GROUPS, MODELS, DEFAULT_MODEL, RELEASE_GROUP } from './pipelineControls.mjs';
 import { OWN_RELEASE_LINE, rollBackTarget } from '../lib/releases.mjs';
 import { STAGES } from './pipeline.mjs';
+import { conflictReportOf } from './conflictReport.mjs';
 
 const { OPERATOR_LANE, WAITING, CANNOT_TELL, waitingVerdict, operatorSpokeLast, standingMergeWord } = waitingOnOperator;
 const { isMachineComment, stripMachineMarker } = machineComment;
@@ -907,6 +908,38 @@ function humanHoursFigures(estimates, days) {
 }
 
 /**
+ * Merge Conflicts (SP-295): every merge conflict in these projects, with the
+ * pipeline settings in force at the time, and conflicts per merged pull
+ * request by those settings. conflictReport.mjs works it out from plain
+ * rows; this reads them: each ticket's status steps and comments, and each
+ * project's settings changes and current values. All time, not by range:
+ * the comparison is between settings, and each setting has its own dates.
+ */
+function conflictsOf(store, projects) {
+  const tickets = [];
+  const settings = {};
+  for (const p of projects) {
+    settings[p.slug] = {
+      changes: store.pipelineSettingChanges(p.slug, { limit: 100000 }),
+      current: Object.fromEntries(store.pipelineSettings(p.slug).map((c) => [c.key, c.value])),
+    };
+    for (const ticket of store.listTickets(p.slug)) {
+      tickets.push({
+        id: ticket.id,
+        name: ticket.name,
+        project: p.slug,
+        description: ticket.description ?? '',
+        steps: statusSteps(store, ticket),
+        comments: store.listComments(ticket.id)
+          .map((c) => ({ at: Date.parse(c.createdAt), body: c.body }))
+          .filter((c) => !Number.isNaN(c.at)),
+      });
+    }
+  }
+  return conflictReportOf({ tickets, settings });
+}
+
+/**
  * The Reporting page's figures for one project (`project`, a slug) or, with
  * none, every project:
  *  - finished: how many tickets entered Live in each REPORT_RANGES range,
@@ -1040,6 +1073,7 @@ export function reportsOf(store, { project = null, now = Date.now(), only = null
       return [r.key, humanHoursFigures(estimates[r.key], days)];
     })),
     waitingNow,
+    conflicts: conflictsOf(store, projects),
     ...(custom ? { custom: { from: new Date(custom.from).toISOString(), to: new Date(custom.to).toISOString(), ...customCounts } } : {}),
     growthPeriods: GROWTH_PERIODS.map(({ key, label }) => ({ key, label })),
     growth: Object.fromEntries(GROWTH_PERIODS.map((g) => {

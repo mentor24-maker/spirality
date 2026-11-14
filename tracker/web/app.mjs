@@ -2199,7 +2199,9 @@ function spanOf(ms) {
  * when the project changes); a picker change asks the server again and
  * redraws only those cells. Its last column, Growth Rate (SP-241), shows
  * the server's growth figures for the timeframe picked in its header
- * (Weekly on arrival), redrawn from the same answer.
+ * (Weekly on arrival), redrawn from the same answer. Merge Conflicts
+ * (SP-295, conflictSection) shows conflicts per merged pull request by the
+ * pipeline settings in force, and lists each conflict.
  */
 async function drawReporting(chosen, range = defaultReportRange()) {
   const { projects } = await api('GET', '/projects');
@@ -2252,6 +2254,7 @@ async function drawReporting(chosen, range = defaultReportRange()) {
     const rows = t.tickets.map((x) => `<tr><td><a href="/t/${encodeURIComponent(x.id)}">${escapeHtml(x.id)}</a></td><td class="name">${escapeHtml(x.name)}</td><td class="count">${escapeHtml(bucketSpan(x.total))}</td>${BUCKET_LABELS.map(([key]) => `<td class="count">${escapeHtml(bucketSpan(x[key]))}</td>`).join('')}</tr>`).join('');
     return `<table class="counts report time-split-tickets"><thead><tr><th>Task</th><th>Name</th><th class="count">Total</th>${BUCKET_LABELS.map(([, label]) => `<th class="count">${label}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table>`;
   };
+  const conflictsHtml = conflictSection(r.conflicts);
   const open = r.open.map((s) => `<tr data-stage="${escapeHtml(s.status)}"><td class="status">${escapeHtml(s.status)}</td><td class="count">${Number(s.count)}</td></tr>`).join('');
   main.innerHTML = `
     <h1>Reporting</h1>
@@ -2286,6 +2289,7 @@ async function drawReporting(chosen, range = defaultReportRange()) {
       <select id="time-split-range">${r.ranges.map((g, i) => `<option value="${escapeHtml(g.key)}"${i === 0 ? ' selected' : ''}>${escapeHtml(g.label)}</option>`).join('')}</select>
     </form>
     <div class="time-split-list">${splitTickets(r.ranges[0]?.key)}</div>
+    ${conflictsHtml}
     <h2>Open Now</h2>
     <p class="quiet">Tasks in each stage that is not Live.</p>
     <table class="counts stages"><thead><tr><th>Stage</th><th class="count">Tasks</th></tr></thead><tbody>${open}</tbody></table>`;
@@ -2346,6 +2350,66 @@ async function drawReporting(chosen, range = defaultReportRange()) {
     drawReporting(e.target.value, { from: fromPicker.value, to: toPicker.value }).catch((err) => (err instanceof SignedOut ? drawSignIn() : showError(err)));
   });
   putTrail([{ label: 'Reporting' }]);
+}
+
+/** A share as a figure to two places: "0.29", or a quiet phrase when nothing merged. */
+const perMerge = (rate) => (rate == null ? '<span class="quiet">nothing merged</span>' : escapeHtml(Number(rate).toFixed(2)));
+
+/** What each note kind is called on the page. */
+const CONFLICT_KINDS = { 'main-moved': 'after a merge', 'merge-refused': 'merge refused', 'catch-up': 'catch-up filed' };
+
+/**
+ * The Reporting page's Merge Conflicts section (SP-295) from the server's
+ * `conflicts` answer (tracker/conflictReport.mjs works every figure out):
+ * conflicts per merged pull request by the settings in force, the files
+ * that conflict most, how many were between tickets split from one
+ * request, and every conflict, newest first, each linking to its ticket.
+ */
+function conflictSection(c) {
+  if (!c) return '';
+  const intro = `<h2>Merge Conflicts</h2>
+    <p class="quiet">A conflict: a pull request that stopped merging into main, from the loops' notes (a merge that left it conflicting, a merge word refused for a conflict, or a catch-up ticket filed). Notes on one pull request count once until it merges cleanly again. Each is counted under the wake times and work-in-progress cap in force when it happened; merges are counted the same way, so the last column compares settings fairly. All time.</p>`;
+  if (!c.merged && !c.total) return `${intro}<p class="quiet">No merges or conflicts recorded yet.</p>`;
+  const range = (g) => (g.since ? `${escapeHtml(when(g.since))} to ${escapeHtml(when(g.until))}` : '');
+  const settingRows = c.bySetting.map((g) => `<tr><td class="name">${escapeHtml(g.setting)}</td><td>${range(g)}</td><td class="count">${Number(g.merged)}</td><td class="count">${Number(g.conflicts)}</td><td class="count">${perMerge(g.rate)}</td></tr>`).join('');
+  const total = `<tr class="total"><td class="name">All settings</td><td></td><td class="count">${Number(c.merged)}</td><td class="count">${Number(c.total)}</td><td class="count">${perMerge(c.rate)}</td></tr>`;
+  const files = c.topFiles.length
+    ? `<table class="counts report conflict-files"><thead><tr><th>File</th><th class="count">Conflicts</th></tr></thead><tbody>${c.topFiles.map((f) => `<tr><td class="name"><code>${escapeHtml(f.file)}</code></td><td class="count">${Number(f.count)}</td></tr>`).join('')}</tbody></table>
+      <p class="quiet">From the ${Number(c.withFiles)} of ${Number(c.total)} conflicts whose note names its files.</p>`
+    : '<p class="quiet">No conflict note names its files yet.</p>';
+  const siblings = `<p class="conflict-siblings">Between tickets split from one request: <strong>${Number(c.siblings.count)}</strong> of the ${Number(c.siblings.known)} conflicts whose cause is known.</p>`;
+  const cause = (x) => {
+    if (!x.causedBy) return '<span class="quiet">not known</span>';
+    const pr = `PR #${Number(x.causedBy.pr)}`;
+    const ticket = x.causedBy.ticket ? ` (<a href="/t/${encodeURIComponent(x.causedBy.ticket)}">${escapeHtml(x.causedBy.ticket)}</a>)` : '';
+    return `${x.causedBy.inferred ? '<span class="quiet">probably</span> ' : ''}${pr}${ticket}`;
+  };
+  const rows = c.conflicts.map((x) => `<tr>
+      <td class="when">${escapeHtml(when(x.at))}</td>
+      <td class="ticket"><a href="/t/${encodeURIComponent(x.ticket)}">${escapeHtml(x.ticket)}</a></td>
+      <td class="name">${escapeHtml(x.name)}</td>
+      <td class="count">${x.pr == null ? '' : `#${Number(x.pr)}`}</td>
+      <td>${x.kinds.map((k) => escapeHtml(CONFLICT_KINDS[k] ?? k)).join(', ')}</td>
+      <td>${cause(x)}</td>
+      <td>${escapeHtml(statusName(x.status))}</td>
+      <td class="count">${x.prOpenMs == null ? '<span class="quiet">not known</span>' : escapeHtml(spanOf(x.prOpenMs))}</td>
+      <td class="count">${Number(x.openPrs)}</td>
+      <td>${x.sibling == null ? '' : x.sibling ? 'yes' : 'no'}</td>
+      <td class="settings">${escapeHtml(x.setting)}</td>
+      <td class="files">${x.files.length ? x.files.map((f) => `<code>${escapeHtml(f)}</code>`).join(' ') : '<span class="quiet">not named</span>'}</td>
+    </tr>`).join('');
+  const list = c.conflicts.length
+    ? `<div class="conflict-scroll"><table class="counts report conflict-list"><thead><tr><th>When</th><th>Task</th><th>Name</th><th class="count">Pull Request</th><th>Seen As</th><th>Caused By</th><th>Stage Then</th><th class="count">Open For</th><th class="count">Open Pull Requests</th><th>Siblings</th><th>Settings Then</th><th>Files</th></tr></thead><tbody>${rows}</tbody></table></div>
+      ${c.total > c.listed ? `<p class="quiet">The newest ${Number(c.listed)} of ${Number(c.total)} are listed; the counts above cover every one.</p>` : ''}`
+    : '<p class="quiet">No conflict recorded yet.</p>';
+  return `${intro}
+    <table class="counts report conflict-settings"><thead><tr><th>Settings in Force</th><th>Dates</th><th class="count">Merged</th><th class="count">Conflicts</th><th class="count">Per Merged Pull Request</th></tr></thead><tbody>${settingRows}${total}</tbody></table>
+    <p class="quiet">Open Pull Requests counts the project's tickets with a pull request opened and not yet merged at that moment; Caused By says "probably" where no note named the merge and it is the newest one before. Siblings: whether the two tickets were split from one request.</p>
+    ${siblings}
+    <h3>Files That Conflict Most</h3>
+    ${files}
+    <h3>Every Conflict</h3>
+    ${list}`;
 }
 
 /**
