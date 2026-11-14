@@ -184,6 +184,36 @@ Exit **0** nothing of his / **3** something IS his / **1** could not tell.
    `Waits on:` ticket that cannot be read: say so on the ticket, take the
    next.
 
+   **A `Queued` ticket for a hand-run session only.** When the ticket at the
+   head of the queue says in its description that only a hand-run session may
+   build it, this pass never builds it, but it does re-check, every pass,
+   whether what it waits on is still open. Skipping it on the last comment's
+   reasons is how Spirality's SP-25 sat in `Queued` for 31 hours after both
+   its blockers had cleared (Spirality's SP-296), with nothing telling Dane.
+
+   - **List its blockers:** every id on its `Waits on:` line, plus each
+     blocker its newest hold-back comment names: another ticket, or a word
+     Dane must write on a bus ticket (such as "resume auto-merging").
+   - **Re-check each blocker now, never by copying the last comment.** `get`
+     each named ticket (closed or `Live` = cleared); for a word on a bus
+     ticket, read that ticket's `comments` for it. A blocker clearing on
+     another ticket adds no comment to this one, so the old reasons are no
+     evidence at all.
+   - **All cleared:** hand the ticket to Dane with `ask --status "Needs your
+     input"`. The card says which blockers cleared, when, and how this pass
+     checked each one, and that the ticket is ready for a hand-run session.
+     Then take the next ticket as usual; the pass does not build it.
+   - **Some still open:** skip it. The skip note (your log line, and any
+     comment) names only the blockers still open, each with what was checked
+     ("SC-791 is still In review"). Never "nothing has changed since …" on
+     its own, and never a blocker that has cleared.
+   - **A blocker that cannot be checked** (its ticket unreadable, another
+     tracker out of reach): name it in the skip note as unreadable. It is
+     never counted as cleared.
+   - **Do not repeat the same skip comment every pass.** Write a new comment
+     only when the still-open blockers differ from what the newest note
+     already says; otherwise the log line is enough.
+
    **On a `Rework` ticket, do NOT start a second branch.** `get` prints the
    recorded PR. Check out that branch into a worktree
    (`git worktree add .claude/worktrees/<slug> -b <branch> origin/<branch>`),
