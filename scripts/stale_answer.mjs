@@ -29,11 +29,21 @@
  * question would be two definitions, and the quiet way they fail is this
  * report saying all-clear about the very ticket the relay will not move.
  *
- * Spirality's relay writes no reply-thread markers (it has no party line), so
- * there is no "was it delivered" to read: StarCaster's own tracker copy
- * answered "could not check" every time, and so does this one, by never
- * asking. A finding therefore always says the hand-back is failing, never
- * that the answer went undelivered.
+ * "Was it already handed back?" is read the way StarCaster read it: for an
+ * answer already past the threshold, one read of that answer's replies
+ * (`replies` through the door). The relay writes a
+ * `[bus-relay-handback-done]` reply on the answer once its move sticks
+ * (scripts/clickup.mjs, the hand-back and the close), and lib/relayLane.js
+ * treats an answer carrying it as spent. So a ticket answered, handed back
+ * and then parked in Needs your input again on purpose is `handled` here
+ * too, and stays quiet: an alarm on it would fire every six hours about a
+ * deliberate act. A replies read that fails leaves the answer `answered`, so
+ * the alarm can only be louder for it, never silenced.
+ *
+ * What Spirality does not write is StarCaster's party-line relay marker
+ * (there is no party line), so "was it delivered" is never asked and a
+ * finding always says the hand-back is failing, never that the answer went
+ * undelivered.
  */
 import { realpathSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -68,8 +78,8 @@ function nodeName() {
  * One pass, every read and write handed in (see runStaleReady).
  */
 export function runStaleAnswer({
-  argv = [], config, now = Date.now(), readTickets, paused, post, stamps, readClock,
-  node = 'an unnamed machine', out = console.log,
+  argv = [], config, now = Date.now(), readTickets, readReplies = () => ({ ok: false, why: 'no reply reader' }),
+  paused, post, stamps, readClock, node = 'an unnamed machine', out = console.log,
 }) {
   const flag = (name) => argv.includes(`--${name}`);
   const CHECK = flag('check');
@@ -126,13 +136,28 @@ export function runStaleAnswer({
     const at = answered.state === 'answered'
       ? answered.answerAt
       : (operatorSpokeLast ? busRelayPlan.commentAt(newest) : 0);
-    records.push({
+    const record = {
       ...base,
       commentsReadable: true,
       state: answered.state,
       operatorSpokeLast,
       answerMinutes: at > 0 ? (now - at) / staleAnswer.MS_PER_MINUTE : NaN,
-    });
+    };
+
+    // StarCaster's check, kept: only an answer ALREADY past the threshold
+    // spends the extra read, and an answer a hand-back already completed on
+    // means the ticket was parked here again on purpose. The relay reads the
+    // same marker and will not move it either. A failed read (null) leaves
+    // it `answered`: the alarm stays on rather than going quiet unchecked.
+    if (answered.state === 'answered' && Number.isFinite(record.answerMinutes)
+        && record.answerMinutes > staleAfterMinutes) {
+      let markers = null;
+      try {
+        markers = staleAnswer.markersFromReplyEnvelope(readReplies({ taskId: id, commentId: answered.answer.id }));
+      } catch { markers = null; }
+      if (markers && markers.handbackDone === true) record.state = 'handled';
+    }
+    records.push(record);
   }
 
   const { findings, fresh } = staleAnswer.answerFindings(records, { staleAfterMinutes });
@@ -192,6 +217,7 @@ function main(argv) {
     argv,
     config,
     readTickets: () => door.readTickets({ trackerUrl: config.trackerUrl }),
+    readReplies: ({ taskId, commentId }) => door.readReplies({ taskId, commentId }),
     paused: () => door.pausedNow(),
     post: (text) => door.postToBus(text),
     stamps: folderStamps(laneFile(config, 'answer-stale')),

@@ -18,3 +18,13 @@ the relay. The code came across from StarCaster with its tests. It was
 changed only to read tickets through Spirality's own door and to take every
 name from the project's settings, so the setup wizard can give the same
 watchdogs to WaveCenter and the others next (SP-269).
+
+Review sent it back once, rightly: the first copy of stale-answer had
+dropped StarCaster's "already handed back" check. When the relay moves an
+answered ticket on, it leaves a short reply under the answer saying so, and
+a ticket parked back in Needs your input on purpose after that is meant to
+stay quiet. Without the check, the watchdog would have called that a broken
+hand-back every six hours. Now, for an answer that is already late, it reads
+that reply through a new read-only door command (`replies`), the same reply
+the relay itself goes by, and stays quiet when it is there. If that read
+fails, the alarm still goes out; it is never silenced on a guess.

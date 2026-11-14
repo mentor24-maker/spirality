@@ -5,7 +5,8 @@
  * the tracker's API directly.
  *
  * It is StarCaster's `scripts/lib/trackerDoor.cjs` (SC-794), the half those
- * two watchdogs used, moved here: one `tickets --json [--comments]` read,
+ * two watchdogs used, moved here: one `tickets --json [--comments]` read
+ * (and, for an answer already past its threshold, one `replies` read),
  * handed back in the SAME shapes the watchdogs' pure modules already consume
  * (a ClickUp-style task: `status.status`, `date_updated`; a ClickUp-style
  * comment: `comment_text`, `user.id`, `user.kind`, `date`), so
@@ -113,6 +114,22 @@ export function readTickets({ trackerUrl, run } = {}) {
   const r = runDoor(['tickets', '--json', '--comments'], { run });
   if (r.error || r.status !== 0) throw new Error(`${what} through the door failed: ${firstLine(r)}`);
   return parseTickets(r.stdout, { trackerUrl, what });
+}
+
+/**
+ * One comment's replies, through `replies --task --comment --json`, in the
+ * envelope `staleAnswer.markersFromReplyEnvelope` reads: `{ ok: true, json:
+ * { comments } }` with each reply a ClickUp-style comment record, or
+ * `{ ok: false, why }` on any failed read. A failed read is never an empty
+ * thread: "I could not check" and "there is no reply" are different answers.
+ */
+export function readReplies({ taskId, commentId, run } = {}) {
+  const r = runDoor(['replies', '--task', String(taskId), '--comment', String(commentId), '--json'], { run, timeoutMs: 60_000 });
+  if (r.error || r.status !== 0) return { ok: false, why: firstLine(r) };
+  let out;
+  try { out = JSON.parse(String(r.stdout || '').trim() || 'null'); } catch { out = null; }
+  if (!Array.isArray(out)) return { ok: false, why: 'the door printed something that is not a JSON list of replies' };
+  return { ok: true, json: { comments: out.map(asCommentRecord) } };
 }
 
 /**

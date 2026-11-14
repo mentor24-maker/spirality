@@ -10,7 +10,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runStaleReady, folderStamps, fileClock } from './stale_ready.mjs';
 import { runStaleAnswer } from './stale_answer.mjs';
-import { parseTickets, asCommentRecord } from './lib/watchdogDoor.mjs';
+import { parseTickets, asCommentRecord, readReplies } from './lib/watchdogDoor.mjs';
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..');
 const HOUR = 3600 * 1000;
@@ -163,6 +163,53 @@ test('stale-answer: an answer inside the 30 minutes is quiet', () => {
   assert.equal(runStaleAnswer({ ...h.deps, ...s, argv: ['--check'] }), 0);
   assert.equal(h.posts.length, 0);
   assert.match(h.lines.join('\n'), /Nothing is stuck/);
+});
+
+test('stale-answer: an answer the relay already handed back stays quiet, read from its replies (review round 1)', async () => {
+  const { createRequire } = await import('node:module');
+  const require = createRequire(import.meta.url);
+  const { handbackDoneText } = require('../lib/busRelayPlan.js');
+  const s = scratch();
+  const asked = [];
+  const h = harness({ tickets: PARKED, comments: parkedComments(2) });
+  const readRepliesDone = ({ taskId, commentId }) => {
+    asked.push(`${taskId}/${commentId}`);
+    return { ok: true, json: { comments: [{ id: 'r1', comment_text: handbackDoneText({ target: 'Queued', at: '2026-11-14T16:30:00Z' }), user: { id: 2, kind: 'machine' }, date: String(NOW - HOUR) }] } };
+  };
+  assert.equal(runStaleAnswer({ ...h.deps, ...s, readReplies: readRepliesDone, argv: ['--check'] }), 0);
+  assert.deepEqual(asked, ['EX-9/a2'], 'the answer\'s own reply thread is the one read');
+  assert.equal(h.posts.length, 0);
+  assert.match(h.lines.join('\n'), /Nothing is stuck/);
+
+  // No done reply: the alarm stands. A replies read that FAILED: it stands too.
+  for (const readRepliesOther of [
+    () => ({ ok: true, json: { comments: [] } }),
+    () => ({ ok: false, why: 'replies exited 1' }),
+    () => { throw new Error('door gone'); },
+  ]) {
+    const t = harness({ tickets: PARKED, comments: parkedComments(2) });
+    assert.equal(runStaleAnswer({ ...t.deps, ...scratch(), readReplies: readRepliesOther, argv: ['--check'] }), 0);
+    assert.equal(t.posts.length, 1);
+  }
+
+  // Inside the 30 minutes the extra read is never spent.
+  const quiet = [];
+  const q = harness({ tickets: PARKED, comments: parkedComments(0.2) });
+  runStaleAnswer({ ...q.deps, ...scratch(), readReplies: (a) => { quiet.push(a); return { ok: false }; }, argv: [] });
+  assert.equal(quiet.length, 0);
+});
+
+test('the door\'s replies JSON comes back as the envelope stale-answer reads; a failed read is never an empty thread', () => {
+  const calls = [];
+  const ok = readReplies({ taskId: 'EX-9', commentId: 'a2', run: (cmd, args) => {
+    calls.push(args.join(' '));
+    return { status: 0, stdout: JSON.stringify([{ id: 'r1', author: { id: 2, name: 'Loop', kind: 'machine' }, by: 'machine', at: '2026-11-14T16:30:00.000Z', text: '[bus-relay-handback-done] x' }]) };
+  } });
+  assert.deepEqual(calls, ['run --silent clickup -- replies --task EX-9 --comment a2 --json']);
+  assert.equal(ok.ok, true);
+  assert.equal(ok.json.comments[0].comment_text, '[bus-relay-handback-done] x');
+  assert.equal(readReplies({ taskId: 'EX-9', commentId: 'a2', run: () => ({ status: 1, stderr: 'replies FAILED: down' }) }).ok, false);
+  assert.equal(readReplies({ taskId: 'EX-9', commentId: 'a2', run: () => ({ status: 0, stdout: 'nope' }) }).ok, false);
 });
 
 test('the door\'s tickets JSON comes back in the shapes the modules read, newest comment first', () => {
