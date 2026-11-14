@@ -6,9 +6,9 @@ import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
-import { DEMO_NEWEST_RELEASE, DEMO_OWN_PROJECT, demoNewestRelease, seedDemo, tickingClock } from './demoData.mjs';
+import { DEMO_NEWEST_RELEASE, DEMO_OWN_PROJECT, DEMO_SUGGESTIONS, demoNewestRelease, demoSuggest, seedDemo, tickingClock } from './demoData.mjs';
 import { reportsOf, REPORT_RANGES, GROWTH_PERIODS, searchTickets, PRIORITIES, timeSplitOf, isFailureNote, TIME_BUCKETS, pipelineControlsOf } from './pageData.mjs';
-import { escapeHtml, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, renderTopics, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, projectTags, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, renderReleaseGroup, controlValueText, mountainTime, wakeInEffectText, modelLastPassText, renderConsole, renderConsoleTile, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, consoleFeature, featureColourIndex, renderFeatureKey, FEATURE_PALETTE, drainLine, capInFlightText, renderTitleChoices, titleModeOf, TITLE_MODES } from './web/render.mjs';
+import { escapeHtml, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, renderTopics, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, projectTags, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, renderReleaseGroup, controlValueText, mountainTime, wakeInEffectText, modelLastPassText, renderConsole, renderConsoleTile, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, consoleFeature, featureColourIndex, renderFeatureKey, FEATURE_PALETTE, drainLine, capInFlightText, renderTitleChoices, titleModeOf, TITLE_MODES, SUGGEST_POLL_MS, moveSuggestion, suggestState, filingPlan, suggestRunLine, renderSuggestRows } from './web/render.mjs';
 import { startServer, setupSettingsOf } from './server.mjs';
 import { saveAnswers, setupFields, setupOf } from './setup.mjs';
 import { DANE_FIELDS as SETUP_FIELDS, STEPS as SETUP_STEPS } from '../scripts/onboard/onboard.mjs';
@@ -25,13 +25,13 @@ const DOOR = fileURLToPath(new URL('../scripts/clickup.mjs', import.meta.url));
 const WEB = (name) => fileURLToPath(new URL(`./web/${name}`, import.meta.url));
 
 /** The demo data in a fresh store, a server on a free port, and a caller signed in as the operator. */
-async function fixture({ mergePhrase, closePhrase, goPhrase } = {}) {
+async function fixture({ mergePhrase, closePhrase, goPhrase, suggest } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'tracker-web-'));
   const clock = tickingClock();
   const store = openStore(join(dir, 'tracker.db'), { now: clock });
   const seed = seedDemo(store, { operatorName: 'Dane', clock });
   const loopToken = store.issueToken(seed.loop.id);
-  const server = await startServer({ store, port: 0, mergePhrase, closePhrase, goPhrase });
+  const server = await startServer({ store, port: 0, mergePhrase, closePhrase, goPhrase, suggest });
   const url = `http://127.0.0.1:${server.address().port}`;
   async function call(method, path, { token = seed.token, body } = {}) {
     const headers = token ? { authorization: `Bearer ${token}` } : {};
@@ -1370,7 +1370,7 @@ test('an open page reads again once a minute and on coming back to the tab, neve
   // A save's own redraw keeps what the beat compares against, so the next beat does not undo its "Saved" note.
   assert.match(/async function drawAgain\(draw\) \{[\s\S]*?\n\}/.exec(app)[0], /await draw\(\);\s*if \(recording === reads && lastDrawn\?\.address === here\(\)\) lastDrawn = \{ address: here\(\), reads \};/);
   assert.equal(app.match(/await drawTicket\(t\.id/g), null, 'every in-page ticket redraw goes through drawAgain');
-  assert.equal((app.match(/await drawAgain\(\(\) => draw(Ticket|Project)\(/g) ?? []).length, 6, "SP-208 added the List view priority save");
+  assert.equal((app.match(/await drawAgain\(\(\) => draw(Ticket|Project)\(/g) ?? []).length, 7, 'SP-208 added the List view priority save; SP-251 the Suggest Next Tasks filing');
   assert.match(route, /if \(place && !\(err instanceof SignedOut\)\) return;/, "a beat's failed draw does not replace the page with an error");
   assert.match(app, /if \(location\.hash === '#reply' && !refreshing\) \{/, 'a beat does not jump to the reply box again');
   assert.match(/function keepPlace\(\) \{[\s\S]*?\n\}/.exec(app)[0], /main\.querySelectorAll\('details'\)[\s\S]*window\.scrollTo\(0, y\);/);
@@ -5190,4 +5190,192 @@ test('Settings is two tabs, each project a box that stays open across a Save, ev
   assert.match(css, /details\.pipeline-controls > summary \{[^}]*background: #000077; color: #fff; font-weight: 700;/);
   assert.match(css, /div\.settings-tab button \{[^}]*border-radius: 15px; background: #000077; color: #fff; font-weight: 700;/);
   assert.match(css, /div\.settings-tab button:disabled \{ opacity: 0\.4;/);
+});
+
+// ── Suggest Next Tasks (SP-251) ──────────────────────────────────────────────
+
+/** The page script's Suggest Next Tasks wiring, from its first line to the next comment block. */
+function suggestWire() {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const start = app.indexOf('function wireSuggestNext');
+  return { app, wire: app.slice(start, app.indexOf('/**', start)) };
+}
+
+/** Ask GET /projects/<slug>/suggest-next until the run is not running, at most `ms`. */
+async function settledRun(f, slug, ms = 5000) {
+  const until = Date.now() + ms;
+  for (;;) {
+    const r = await f.call('GET', `/projects/${slug}/suggest-next`);
+    if (r.body?.state !== 'running' || Date.now() > until) return r;
+    await new Promise((res) => setTimeout(res, 20));
+  }
+}
+
+test('moveSuggestion: moving a row by drag, keyboard or dropdown puts it there and the rest close up behind it, numbers 1, 2, 3 ... with no gaps or repeats', () => {
+  const rows = [0, 1, 2, 3, 4];
+  // The spec's own case: pick 2 for the row at 5; it becomes 2, the old 2 to 4 become 3 to 5.
+  assert.deepEqual(moveSuggestion(rows, 4, 1), [0, 4, 1, 2, 3]);
+  // Drag the last to the top; then pick 2 on the top row.
+  const dragged = moveSuggestion(rows, 4, 0);
+  assert.deepEqual(dragged, [4, 0, 1, 2, 3]);
+  assert.deepEqual(moveSuggestion(dragged, 0, 1), [0, 4, 1, 2, 3]);
+  // The arrow keys: one up, one down; past either end it stays put.
+  assert.deepEqual(moveSuggestion(rows, 2, 1), [0, 2, 1, 3, 4]);
+  assert.deepEqual(moveSuggestion(rows, 2, 3), [0, 1, 3, 2, 4]);
+  assert.deepEqual(moveSuggestion(rows, 0, -1), rows);
+  assert.deepEqual(moveSuggestion(rows, 4, 5), rows);
+  assert.deepEqual(moveSuggestion(rows, 9, 0), rows, 'no row there: nothing moves');
+  assert.notEqual(moveSuggestion(rows, 1, 2), rows, 'a new list, the old one untouched');
+  // Any run of moves leaves every row exactly once.
+  let order = rows;
+  for (const [from, to] of [[3, 0], [0, 4], [2, 2], [1, 3], [4, 0]]) {
+    order = moveSuggestion(order, from, to);
+    assert.deepEqual([...order].sort(), rows);
+  }
+  // And the dropdowns drawn from it read 1 to n, each row its own place.
+  const html = renderSuggestRows(DEMO_SUGGESTIONS, { order, dropped: [], filed: {} });
+  const selected = [...html.matchAll(/<option value="(\d)" selected>/g)].map((m) => Number(m[1]));
+  assert.deepEqual(selected, [1, 2, 3, 4, 5]);
+  assert.equal((html.match(/<option /g) ?? []).length, 25, 'five places offered on each of five rows');
+});
+
+test('renderSuggestRows: a handle, a place dropdown, Keep, the title, and the why and description under More; a filed row names its ticket; every word escaped', () => {
+  const suggestions = [
+    { title: 'Fix <b>this</b>', description: 'Line one\nline <i>two</i>', why: 'Because "so"' },
+    { title: 'Second', description: '', why: '' },
+  ];
+  const html = renderSuggestRows(suggestions, { order: [1, 0], dropped: [0], filed: { 1: { id: 'AL-9', project: 'alpha' } } });
+  const rows = html.split('</li>').filter(Boolean);
+  assert.equal(rows.length, 2);
+  assert.match(rows[0], /^<li class="suggestion" data-index="1" draggable="true">/, 'drawn in the order given');
+  assert.match(rows[0], /<button type="button" class="drag-handle" aria-label="Move Second: arrow keys, or drag"/);
+  assert.match(rows[0], /<label class="keep"><input type="checkbox" checked> Keep<\/label>/);
+  assert.match(rows[0], /<span class="filed">Filed <a href="\/t\/AL-9">AL-9<\/a><\/span>/);
+  assert.doesNotMatch(rows[0], /class="why"|suggestion-description/, 'nothing empty under More');
+  assert.match(rows[1], /<label class="keep"><input type="checkbox"> Keep<\/label>/, 'unticked stays unticked');
+  assert.match(rows[1], /<details class="more"><summary>More<\/summary><p class="why"><strong>Why:<\/strong> Because &quot;so&quot;<\/p><p class="suggestion-description">Line one\nline &lt;i&gt;two&lt;\/i&gt;<\/p><\/details>/);
+  assert.ok(!html.includes('<b>') && !html.includes('<i>'), 'a suggestion is text, never markup');
+  assert.equal(renderSuggestRows([], { order: [], dropped: [], filed: {} }), '');
+});
+
+test('suggestState keeps the order, ticks and filed tickets for the same run only; filingPlan files the kept rows not yet filed, and orders every kept one', () => {
+  const fresh = suggestState(null, 't1', 4);
+  assert.deepEqual(fresh, { at: 't1', order: [0, 1, 2, 3], dropped: [], filed: {} });
+  const kept = { at: 't1', order: [2, 0, 3, 1], dropped: [0], filed: { 2: { id: 'AL-7', project: 'alpha' } } };
+  assert.deepEqual(suggestState(kept, 't1', 4), kept);
+  assert.deepEqual(suggestState(kept, 't2', 4), { ...fresh, at: 't2' }, 'a new run starts over');
+  assert.deepEqual(suggestState({ ...kept, order: [0, 0, 1, 2] }, 't1', 4), fresh, 'a broken order starts over');
+  assert.deepEqual(suggestState({ ...kept, order: [0, 1] }, 't1', 4), fresh, 'a different count starts over');
+  assert.deepEqual(suggestState('nonsense', 't1', 4), fresh);
+  // Only the kept rows, in the order shown; the one already filed is not filed again.
+  assert.deepEqual(filingPlan(kept), { kept: [2, 3, 1], file: [3, 1] });
+  assert.deepEqual(filingPlan({ ...kept, filed: { 1: { id: 'a', project: 'x' }, 2: { id: 'b', project: 'x' }, 3: { id: 'c', project: 'x' } } }).file, [], 'a retry after everything filed files nothing');
+  assert.deepEqual(filingPlan({ ...kept, dropped: [0, 1, 2, 3] }), { kept: [], file: [] });
+});
+
+test('suggestRunLine says a run is going or why it failed, plainly', () => {
+  assert.match(suggestRunLine({ state: 'running' }), /^Reading the project for its next tasks/);
+  assert.equal(suggestRunLine({ state: 'failed', message: 'Claude is not set up on this machine.' }), 'No suggestions this time: Claude is not set up on this machine.');
+  assert.equal(suggestRunLine({ state: 'failed' }), 'No suggestions this time: the run failed.');
+  assert.equal(suggestRunLine({ state: 'done', suggestions: [] }), '');
+  assert.equal(suggestRunLine(null), '');
+  assert.equal(SUGGEST_POLL_MS, 10_000, 'it checks back about every 10 seconds');
+});
+
+test('Suggest Next Tasks, against a stubbed suggester: a run answers the list; filing the kept rows in Requested and setting their order puts them in that order on the Tasks page', async () => {
+  const f = await fixture({ suggest: { run: demoSuggest({ ms: 50 }) } });
+  try {
+    assert.equal((await f.call('GET', '/projects/alpha/suggest-next')).status, 404, 'nothing asked for yet: the box shows no list');
+    const started = await f.call('POST', '/projects/alpha/suggest-next', { body: {} });
+    assert.equal(started.status, 202);
+    assert.equal(started.body.run.state, 'running');
+    const latest = await settledRun(f, 'alpha');
+    assert.equal(latest.body.state, 'done');
+    assert.deepEqual(latest.body.suggestions.map((s) => s.title), DEMO_SUGGESTIONS.map((s) => s.title));
+
+    // What the page does: drag the last to the top, untick the third shown, file the rest in order.
+    let state = suggestState(null, latest.body.at, latest.body.suggestions.length);
+    state.order = moveSuggestion(state.order, 4, 0);
+    state.dropped = [state.order[2]];
+    const plan = filingPlan(state);
+    assert.equal(plan.file.length, 4);
+    for (const i of plan.file) {
+      const s = latest.body.suggestions[i];
+      const r = await f.call('POST', '/projects/alpha/tickets', { body: { name: s.title, description: s.description, status: 'Requested' } });
+      assert.equal(r.status, 201, r.text);
+      state.filed[i] = { id: r.body.id, project: 'alpha' };
+    }
+    const ids = plan.kept.map((i) => state.filed[i].id);
+    assert.equal((await f.call('POST', '/projects/alpha/tickets/order', { body: { ids } })).status, 200);
+    // A retry files nothing twice.
+    assert.deepEqual(filingPlan(state).file, []);
+
+    const board = (await f.call('GET', '/projects/alpha/board')).body;
+    const requested = board.columns.find((c) => c.status === 'Requested').tickets;
+    const titles = plan.kept.map((i) => latest.body.suggestions[i].title);
+    assert.deepEqual(requested.filter((t) => ids.includes(t.id)).map((t) => t.name), titles, 'the Requested stage lists them in the order set');
+    assert.ok(!requested.some((t) => t.name === latest.body.suggestions[state.dropped[0]].title), 'the unticked one was not filed');
+  } finally { await f.cleanup(); }
+});
+
+test('Suggest Next Tasks, against a stubbed suggester that fails: the run says why, and Try Again starts another', async () => {
+  let calls = 0;
+  const f = await fixture({ suggest: { run: async () => { calls += 1; if (calls === 1) throw new Error('the copy could not be made'); return DEMO_SUGGESTIONS.map((s) => ({ ...s })); } } });
+  try {
+    await f.call('POST', '/projects/alpha/suggest-next', { body: {} });
+    const failed = await settledRun(f, 'alpha');
+    assert.equal(failed.body.state, 'failed');
+    assert.match(suggestRunLine(failed.body), /^No suggestions this time: the run failed \(the copy could not be made\)\.$/);
+    await f.call('POST', '/projects/alpha/suggest-next', { body: {} });
+    assert.equal((await settledRun(f, 'alpha')).body.state, 'done', 'Try Again is just another run');
+  } finally { await f.cleanup(); }
+});
+
+test('the Suggest Next Tasks box sits beside Add Task, in Title Case, and its button runs the suggester and checks back while it runs', () => {
+  const { app, wire } = suggestWire();
+  const draw = app.slice(app.indexOf('async function drawProject'), app.indexOf('function wireListPickers'));
+  assert.ok(draw.indexOf('<details class="add-task">') < draw.indexOf('<details class="suggest-next">'), 'just after Add Task');
+  assert.match(draw, /<summary>Suggest Next Tasks<\/summary>/);
+  assert.match(draw, /<button type="button" class="suggest-run">Suggest Next Tasks<\/button>/);
+  assert.match(draw, /<div class="row file-row" hidden><button type="button" class="file-order">File in This Order<\/button>/);
+  assert.match(draw, /wireSuggestNext\(board\.project, view\);/);
+  assert.match(wire, /run\.textContent = latest\?\.state === 'failed' \? 'Try Again' : latest\?\.state === 'done' \? 'Suggest Again' : 'Suggest Next Tasks';/);
+  // POST starts it; GET reads it, unrecorded so a finished run never redraws the whole page under him.
+  assert.match(wire, /api\('POST', path, \{\}\)/);
+  assert.match(wire, /api\('GET', path, undefined, \{ unrecorded: true \}\)/);
+  assert.match(wire, /const path = `\/projects\/\$\{encodeURIComponent\(slug\)\}\/suggest-next`;/);
+  assert.match(wire, /setTimeout\(async \(\) => \{[\s\S]*?\}, SUGGEST_POLL_MS\);/, 'checks back about every 10 seconds');
+  assert.match(wire, /if \(!box\.isConnected\) return;/, 'a page drawn over stops checking back');
+  // The page opens on the last list, on its own.
+  assert.match(wire, /\/\/ On opening the page: the last list, on its own\.\s*\(async \(\) => \{\s*const latest = await read\(\);/);
+  const css = readFileSync(WEB('app.css'), 'utf8');
+  assert.match(css, /details\.suggest-next \[hidden\] \{ display: none; \}/);
+});
+
+test('the Suggest Next Tasks rows move by dropdown, by the arrow keys on the handle, and by dragging, all through moveSuggestion, and the state is kept for a redraw', () => {
+  const { wire } = suggestWire();
+  assert.match(wire, /if \(e\.target\.matches\('select\.place'\)\) move\(placeOf\(li\), Number\(e\.target\.value\) - 1\);/);
+  assert.match(wire, /const to = \{ ArrowUp: from - 1, ArrowDown: from \+ 1, Home: 0, End: state\.order\.length - 1 \}\[e\.key\];/);
+  assert.match(wire, /move\(from, to, true\);/, 'the keyboard keeps focus on the moved handle');
+  assert.match(wire, /list\.addEventListener\('drop', /);
+  assert.match(wire, /move\(from, placeOf\(li\)\);/);
+  assert.match(wire, /state\.order = moveSuggestion\(state\.order, from, to\);\s*save\(\);\s*drawRows\(/);
+  assert.match(wire, /state = suggestState\(savedSuggestState\(slug\), latest\.at, suggestions\.length\);/);
+});
+
+test('File in This Order files only the kept rows not yet filed, in Requested, after the project check; keeps each at once; then sets the order; a failed step says which', () => {
+  const { wire } = suggestWire();
+  const file = wire.slice(wire.indexOf("fileButton.addEventListener('click'"));
+  assert.match(file, /const plan = filingPlan\(state\);/);
+  assert.match(file, /for \(const i of plan\.file\) \{/);
+  const check = file.indexOf('/tickets/check`');
+  const post = file.indexOf("status: 'Requested'");
+  const order = file.indexOf('/tickets/order`');
+  assert.ok(check > 0 && check < post && post < order, 'checked, then filed, then ordered');
+  assert.match(file, /\{ name: s\.title, description: s\.description \?\? '', status: 'Requested' \}/, 'title and description as shown');
+  assert.match(file, /state\.filed\[i\] = \{ id: ticket\.id, project: into \};\s*save\(\);/, 'each filed ticket is kept at once: a retry never files it again');
+  assert.match(file, /for \(const i of plan\.kept\) \{/, 'every kept row is ordered, filed now or before');
+  assert.match(file, /Not filed: "\$\{s\.title\}"/);
+  assert.match(file, /Their order was not set \(/);
+  assert.match(file, /Press File in This Order again: nothing is filed twice\./);
 });
