@@ -86,6 +86,20 @@ test('a comment or a reply carries the machine stamp; a task write does not', as
   } finally { await api.close(); }
 });
 
+test('every comment read back says its author\'s kind, from the stamp, since ClickUp puts all under one id (SP-26)', async () => {
+  const stamped = 'BUILD: done\n\n[machine] posted by a loop under Dane\'s token — not his word';
+  const api = await fakeClickup(() => ({ status: 200, json: { comments: [
+    { id: '1', date: '2', comment_text: stamped, user: { id: 7, username: 'Dane' } },
+    { id: '2', date: '1', comment_text: 'merge', user: { id: 7, username: 'Dane' } },
+  ] } }));
+  const t = createClickupTracker({ token: 'tok', apiBase: api.apiBase, log: () => {} });
+  try {
+    const replies = await t.listReplies('9');
+    assert.deepEqual(replies.json.comments.map((c) => [c.id, c.user.id, c.user.kind]), [['1', 7, 'machine'], ['2', 7, 'human']]);
+    assert.equal(replies.json.comments[0].comment_text, stamped, 'the text is handed back as it was read');
+  } finally { await api.close(); }
+});
+
 test('a failed comment read comes back as `bad`, for the door to report', async () => {
   const api = await fakeClickup(() => ({ status: 500, json: { err: 'boom' } }));
   const t = createClickupTracker({ token: 'tok', apiBase: api.apiBase, log: () => {} });

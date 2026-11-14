@@ -9,13 +9,11 @@
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import operatorCard from '../lib/operatorCard.js';
-import machineComment from '../lib/machineComment.js';
 import mergeOnComment from '../lib/mergeOnComment.js';
 import substrateConfig from '../lib/substrateConfig.js';
 import humanHours from '../lib/humanHours.js';
 
 const { buildCard } = operatorCard;
-const { stampMachineComment } = machineComment;
 
 const CONTEXT = 'The page that shows tickets outside ClickUp needs a place to run. '
   + 'The loops already live on the Mini, so the simplest home is the Mini as well, '
@@ -91,7 +89,7 @@ export function seedDemo(store, { operatorName = substrateConfig.operatorName(),
   const asked = file('alpha', 'The tracker has nowhere to run: choose where it lives', 'needs your input',
     { assigned: true, description: '## Goal\nChoose where the tracker runs.\n\n- [x] Options written up\n- [ ] Choice made' }, 'waiting');
   say(asked, loop.id, 'Started building this.');
-  say(asked, loop.id, stampMachineComment(card.rendered));
+  say(asked, loop.id, card.rendered);
 
   const answered = file('alpha', 'Merging stalls on a conflict: file the catch-up ticket', 'ready to launch',
     { assigned: true, description: 'Fix the relay.' }, 'answered');
@@ -112,7 +110,7 @@ export function seedDemo(store, { operatorName = substrateConfig.operatorName(),
   const merged = file('alpha', 'Finished and merged', 'live', { priority: 'normal' }, 'machine');
   // The relay's merge note, with the files the pull request made: its page shows the Files Made box (SP-170).
   say(merged, loop.id, 'PR opened: https://github.com/example/repo/pull/9');
-  say(merged, loop.id, stampMachineComment([
+  say(merged, loop.id, [
     'Merged: PR #9 (https://github.com/example/repo/pull/9) squash-merged into main at 2026-11-09T12:00:00Z, on your comment 1.',
     'Checks were green and the branch was up to date at merge time; the branch has been deleted.',
     '',
@@ -124,7 +122,7 @@ export function seedDemo(store, { operatorName = substrateConfig.operatorName(),
     }).lines,
     '',
     '(Automatic — relay merge step.)',
-  ].join('\n')));
+  ].join('\n'));
   file('alpha', 'A request filed from the page', 'requested', { description: 'Nobody has specced it yet.' }, 'machine');
 
   const review = file('beta', 'Descriptions with HTML break the page: show them as text', 'ready to launch', {
@@ -138,25 +136,25 @@ export function seedDemo(store, { operatorName = substrateConfig.operatorName(),
   file('beta', 'A hand-off that never finished: in your status but not assigned', 'needs your input',
     { description: 'Nobody is assigned.' }, 'unassigned');
 
-  // A loop posting under the operator's own token: his id, but the machine stamp.
-  const underToken = file('beta', 'A question a loop asked under your token', 'needs your input',
-    { assigned: true, description: 'The newest comment carries your id and the machine stamp.' }, 'waiting');
-  say(underToken, op.id, stampMachineComment('Which name should the tab show?'));
+  // A loop's question with no machine stamp: its author says it is a loop's (SP-26).
+  const unstamped = file('beta', 'A question a loop asked, with no machine stamp', 'needs your input',
+    { assigned: true, description: 'The newest comment is a loop\'s, and carries no stamp: its author is what says so.' }, 'waiting');
+  say(unstamped, loop.id, 'Which name should the tab show?');
 
   // An intake card, as loop-intake posts it: reply "go" to queue it (SP-86).
   const intake = file('beta', 'A request written up as a spec, waiting for your go', 'needs your input',
     { assigned: true, description: '## Asked\n```\nmake the board easier to read\n```\n\n## Goal\nA clearer board.' }, 'waiting');
-  say(intake, loop.id, stampMachineComment(buildCard([
+  say(intake, loop.id, buildCard([
     '@@ASKED', 'make the board easier to read', '@@CONTEXT', CONTEXT,
     '@@NEEDED', 'Reply "go" to queue it as written, or reply with what to change.', 'Your move: Reply — "go", or what to change.',
-  ].join('\n')).rendered));
+  ].join('\n')).rendered);
 
   // A card that names its command mid-sentence and runs its options together
   // on one line, like SP-23's (SP-169): the command gets a Copy box, and the
   // red ask reads Options:, each option and Your move on lines of their own.
   const command = file('beta', 'Move WaveCenter to the tracker: pick when', 'needs your input',
     { assigned: true, description: '## Goal\nMove WaveCenter off ClickUp.' }, 'waiting');
-  say(command, loop.id, stampMachineComment(buildCard([
+  say(command, loop.id, buildCard([
     '@@ASKED', 'a wizard copy now is fine for now',
     '@@CONTEXT', 'Everything this move waits on is finished, so WaveCenter can now leave ClickUp for the tracker. '
       + 'A loop must not do it: the setup wizard stops the lanes first, so an unattended pass would cut itself off halfway. '
@@ -164,7 +162,7 @@ export function seedDemo(store, { operatorName = substrateConfig.operatorName(),
       + 'that WaveCenter is already on ClickUp. Nothing has changed yet.',
     '@@NEEDED', 'A decision that is yours: when to switch (switching back is in docs/TRACKER_MVP.md). Options: A) "go now": start a session by hand on the Mini and ask it to run the move. B) "later": name a time and it waits here.',
     'Your move: Reply "go now" or a time.',
-  ].join('\n')).rendered));
+  ].join('\n')).rendered);
 
   file('beta', 'A question with no comments yet', 'needs your input', { assigned: true }, 'waiting');
 
@@ -175,10 +173,10 @@ export function seedDemo(store, { operatorName = substrateConfig.operatorName(),
     description: '## The branch\n\n- PR: https://github.com/example/repo/pull/7\n- Branch: `conflict-fix`',
   }, 'waiting');
   say(unstuck, loop.id, 'REVIEW: PASSED. PR #7 is merged; this ticket has no pull request of its own.');
-  say(unstuck, loop.id, stampMachineComment(buildCard([
+  say(unstuck, loop.id, buildCard([
     '@@ASKED', 'merge', '@@CONTEXT', CONTEXT,
     '@@NEEDED', 'Nothing to merge: PR #7 has already landed.', 'Your move: Close — its work is live.',
-  ].join('\n')).rendered));
+  ].join('\n')).rendered);
 
   // SP-226: Dane's merge word landed on GitHub, but the relay has not moved
   // it to Live yet. By status alone it waits on him; the demo's stand-in

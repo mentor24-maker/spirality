@@ -52,6 +52,27 @@ function trailComments(store, ticketId) {
 }
 
 /**
+ * Each actor's kind ('human' or 'machine'), read once per store: an actor is
+ * created with its kind and it never changes.
+ */
+const actorKinds = new WeakMap();
+function kindOfActor(store, id) {
+  if (!actorKinds.has(store)) actorKinds.set(store, new Map());
+  const kinds = actorKinds.get(store);
+  if (!kinds.has(id)) kinds.set(id, store.getActor(id)?.kind ?? null);
+  return kinds.get(id);
+}
+
+/**
+ * A ticket's comments, each with its author's kind as `authorKind` (SP-26).
+ * "Machine or Dane" is read off the author, never off a stamp, so every
+ * comment the waiting verdict reads comes through here.
+ */
+function commentsOf(store, ticketId) {
+  return store.listComments(ticketId).map((c) => ({ ...c, authorKind: kindOfActor(store, c.author) }));
+}
+
+/**
  * A ticket and its comments in the shape waitingVerdict reads. Comments go
  * newest first: the verdict sorts by date, and two comments in the same
  * millisecond must resolve to the later one, not the earlier. `prStates`
@@ -69,7 +90,7 @@ function verdictInput(ticket, comments, prStates = null) {
     },
     comments: comments.slice().reverse().map((c) => ({
       id: c.id,
-      user: { id: c.author },
+      user: { id: c.author, kind: c.authorKind ?? null },
       comment_text: c.body,
       date: String(Date.parse(c.createdAt)),
     })),
@@ -235,7 +256,7 @@ export function waitingFor(store, operatorId, { only = null, pipeline = null, pr
     const lanes = lanesOf(pipeline, project.slug);
     for (const status of OPERATOR_LANE) {
       for (const ticket of store.listTickets(project.slug, { status })) {
-        const comments = store.listComments(ticket.id);
+        const comments = commentsOf(store, ticket.id);
         if (heldUpBy(ticket, comments, project.operator, lanes, prStates)) continue;
         const result = waitingVerdict(verdictInput(ticket, comments, prStates), { operatorId });
         const row = {
@@ -278,13 +299,14 @@ export function threadOf(store, ticketId, { pipeline = null, prStates = null } =
   };
   const comments = store.listComments(ticket.id).map((c) => {
     const author = actor(c.author);
-    const stamped = isMachineComment(c.body);
+    // Machine or not is the author's kind (SP-26). A stamp line on a comment
+    // imported from ClickUp is history, and is only taken off for display.
     return {
       id: c.id,
       parent: c.parent,
       author,
-      machine: author.kind === 'machine' || stamped,
-      body: stamped ? stripMachineMarker(c.body) : c.body,
+      machine: author.kind === 'machine',
+      body: isMachineComment(c.body) ? stripMachineMarker(c.body) : c.body,
       createdAt: c.createdAt,
     };
   });
@@ -295,9 +317,9 @@ export function threadOf(store, ticketId, { pipeline = null, prStates = null } =
     // The one person the ticket may be assigned to, for the ticket page's picker.
     operator: namedActor(store, project?.operator),
     comments,
-    answerIn: answerIsIn(ticket, store.listComments(ticket.id), project?.operator),
-    mergeStands: mergeStands(ticket, store.listComments(ticket.id), project?.operator),
-    heldUp: heldUpBy(ticket, store.listComments(ticket.id), project?.operator, lanesOf(pipeline, ticket.project), prStates),
+    answerIn: answerIsIn(ticket, commentsOf(store, ticket.id), project?.operator),
+    mergeStands: mergeStands(ticket, commentsOf(store, ticket.id), project?.operator),
+    heldUp: heldUpBy(ticket, commentsOf(store, ticket.id), project?.operator, lanesOf(pipeline, ticket.project), prStates),
     pullRequest: findPullRequest(trailComments(store, ticket.id))?.url ?? null,
     // SP-226: its live state on GitHub, for the Merge button. Absent when it was not asked.
     ...(prStates?.has(ticket.id) ? { pullRequestState: prStates.get(ticket.id) } : {}),
@@ -413,9 +435,9 @@ export function boardOf(store, slug, { viewerId = null, prStates = null } = {}) 
         assignee: nameOf(t.assignee),
         updatedAt: t.updatedAt,
         pullRequest: pullRequestOf(t.id),
-        answerIn: answerIsIn(t, store.listComments(t.id), project.operator),
-        mergeStands: mergeStands(t, store.listComments(t.id), project.operator),
-        waiting: waitsOn(t, store.listComments(t.id), viewerId, prStates),
+        answerIn: answerIsIn(t, commentsOf(store, t.id), project.operator),
+        mergeStands: mergeStands(t, commentsOf(store, t.id), project.operator),
+        waiting: waitsOn(t, commentsOf(store, t.id), viewerId, prStates),
         // SP-208: the List view's priority dropdown saves with it (ifVersion).
         version: t.version,
         // SP-244: the List view's Assigned To dropdown selects by id; `assignee` stays a name.
@@ -524,7 +546,7 @@ export function consoleOf(store, { only = null, pipeline = null, prStates = null
     const projectLanes = pipeline && project.slug === pipeline.slug ? lanes : null;
     for (const t of store.listTickets(project.slug)) {
       if (TERMINAL_STATUSES.includes(t.status) || !rank.has(t.status)) continue;
-      const comments = store.listComments(t.id);
+      const comments = commentsOf(store, t.id);
       rows.push({
         ticket: t,
         out: {
@@ -1022,7 +1044,7 @@ export function reportsOf(store, { project = null, now = Date.now(), only = null
   for (const p of projects) {
     for (const ticket of store.listTickets(p.slug)) {
       const comments = store.listComments(ticket.id).map((c) => {
-        const byMachine = isMachineActor(c.author) || isMachineComment(c.body);
+        const byMachine = isMachineActor(c.author);
         const byOperator = p.operator != null && c.author === p.operator && !byMachine;
         return {
           at: Date.parse(c.createdAt),
@@ -1224,7 +1246,7 @@ export function searchTickets(store, query, filters = null, { only = null } = {}
   const kinds = new Map();
   const isMachine = (c) => {
     if (!kinds.has(c.author)) kinds.set(c.author, store.getActor(c.author)?.kind);
-    return kinds.get(c.author) === 'machine' || isMachineComment(c.body);
+    return kinds.get(c.author) === 'machine';
   };
   const results = [];
   for (const project of visibleProjects(store, only)) {
@@ -1234,8 +1256,11 @@ export function searchTickets(store, query, filters = null, { only = null } = {}
       const discussion = [];
       const development = [];
       for (const c of store.listComments(ticket.id)) {
-        if (isMachine(c)) development.push(isMachineComment(c.body) ? stripMachineMarker(c.body) : c.body);
-        else discussion.push(c.body);
+        // Who wrote it decides which it is (SP-26); a stamp line on an
+        // imported comment is history, taken off whoever wrote it.
+        const text = isMachineComment(c.body) ? stripMachineMarker(c.body) : c.body;
+        if (isMachine(c)) development.push(text);
+        else discussion.push(text);
       }
       const places = [
         ['title', [ticket.name]],
