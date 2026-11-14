@@ -26,7 +26,7 @@
  * an emailed link's own page. The link's token is sent only in a JSON body,
  * never in an address.
  */
-import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, unwrapDoc, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderAnswerIn, renderHeldUp, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, lookupTicket, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, pipelinePodLabel, renderHealth, healthLines, renderCommandList, renderCommandView, renderCommandDetails, renderContextDocs, renderTopics, renderSortHeadings, renderListPriority, sortTickets, nextSort, renderDocumentation, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, lowerMeridiem, renderPipelineControls, renderConsole, drainLine } from './render.mjs';
+import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, unwrapDoc, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderAnswerIn, renderHeldUp, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, lookupTicket, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, pipelinePodLabel, renderHealth, healthLines, renderCommandList, renderCommandView, renderCommandDetails, renderContextDocs, renderTopics, renderSortHeadings, renderListPriority, renderListAssignee, sortTickets, nextSort, renderDocumentation, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, lowerMeridiem, renderPipelineControls, renderConsole, drainLine } from './render.mjs';
 
 /** Where an earlier version of the page kept a pasted token; removed on load, never read. */
 const OLD_TOKEN_KEY = 'tracker-token';
@@ -1298,9 +1298,10 @@ function wireSortHeadings(stages) {
  * as a lasting line under the toolbar. The question box
  * (the Add Task box's "Did you mean ...?") is drawn here, closed.
  *
- * In the List view each row's priority is a dropdown that saves on change
- * (SP-208, wireListPriorities); `said` is `{ id, text, error }`, the note
- * that save leaves beside that ticket's dropdown after the redraw.
+ * In the List view each row's priority (SP-208) and assignee (SP-244) is a
+ * dropdown that saves on change (wireListPickers); `said` is
+ * `{ id, field, text, error }`, the note that save leaves beside that
+ * ticket's dropdown after the redraw.
  */
 async function drawProject(slug, view, { adding = false, filed = null, unchecked = false, uploaded = [], notUploaded = [], said = null } = {}) {
   const [board, looks, { projects }] = await Promise.all([
@@ -1353,7 +1354,7 @@ async function drawProject(slug, view, { adding = false, filed = null, unchecked
       <td class="name"><a href="/t/${encodeURIComponent(t.id)}">${escapeHtml(t.name)}</a></td>
       <td class="priority">${view === 'list' ? renderListPriority(t) : t.priority ? escapeHtml(statusName(t.priority)) : '<span class="quiet">–</span>'}</td>
       <td class="tags">${t.tags.map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join('')}</td>
-      <td class="assignee">${t.assignee ? escapeHtml(t.assignee) : '<span class="quiet">nobody</span>'}</td>
+      <td class="assignee">${view === 'list' ? renderListAssignee(t, board.operator) : t.assignee ? escapeHtml(t.assignee) : '<span class="quiet">nobody</span>'}</td>
       <td class="when">${escapeHtml(when(t.updatedAt))}</td>
       <td class="actions">${actions(t, status)}</td>
     </tr>`;
@@ -1431,7 +1432,7 @@ async function drawProject(slug, view, { adding = false, filed = null, unchecked
     history.pushState(null, '', at(view, e.target.value));
     route();
   });
-  wireListPriorities(slug, view, board, said);
+  wireListPickers(slug, view, board, said);
   // Delete: ask first, naming the ticket; then redraw from the server. A
   // refusal is said in words and nothing leaves the list until a redraw.
   const listNote = main.querySelector('.list-note');
@@ -1457,20 +1458,33 @@ async function drawProject(slug, view, { adding = false, filed = null, unchecked
 }
 
 /**
- * SP-208: the List view's priority dropdowns. Picking one sends only the
- * priority, with the version the board drew (`ifVersion`), to the same
- * PATCH /tickets/:id the ticket page's Change panel uses. One save at a
- * time: every priority dropdown is held while a save is in flight, and
- * "Saving…" shows beside the one picked. Saved, the list is drawn again from
- * the server with "Saved" beside it. A 409 means a loop moved the ticket:
- * the list is drawn again as stored, with the moved message beside it. Any
- * other refusal shows the server's words and puts the old value back.
+ * The List view's dropdowns that save on change, by the field each sends:
+ * priority (SP-208) as picked, assignee (SP-244) as the person's id, or null
+ * for Nobody. `before` is the value the board drew, put back on a refusal.
  */
-function wireListPriorities(slug, view, board, said) {
-  const selects = [...main.querySelectorAll('select[data-priority-of]')];
-  const noteOf = (id) => [...main.querySelectorAll('[data-priority-note]')].find((n) => n.dataset.priorityNote === id);
+const LIST_PICKERS = Object.freeze({
+  priority: { value: (select) => select.value, before: (t) => t.priority ?? '' },
+  assignee: { value: (select) => (select.value ? Number(select.value) : null), before: (t) => String(t.assigneeId ?? '') },
+});
+
+/**
+ * SP-208, SP-244: the List view's priority and assignee dropdowns. Picking
+ * one sends only that field, with the version the board drew (`ifVersion`),
+ * to the same PATCH /tickets/:id the ticket page's Change panel uses. One
+ * save at a time: every dropdown in the list is held while a save is in
+ * flight, and "Saving…" shows beside the one picked. Saved, the list is
+ * drawn again from the server with "Saved" beside it. A 409 means a loop
+ * moved the ticket: the list is drawn again as stored, with the moved
+ * message beside it. Any other refusal shows the server's words and puts the
+ * old value back.
+ */
+function wireListPickers(slug, view, board, said) {
+  const fields = Object.keys(LIST_PICKERS);
+  const selects = [...main.querySelectorAll(fields.map((f) => `select[data-${f}-of]`).join(', '))];
+  const fieldOf = (select) => fields.find((f) => select.hasAttribute(`data-${f}-of`));
+  const noteOf = (field, id) => [...main.querySelectorAll(`[data-${field}-note]`)].find((n) => n.getAttribute(`data-${field}-note`) === id);
   if (said) {
-    const note = noteOf(said.id);
+    const note = noteOf(said.field, said.id);
     if (note) {
       note.className = `note${said.error ? ' error' : ' quiet'}`;
       note.textContent = said.text;
@@ -1479,29 +1493,31 @@ function wireListPriorities(slug, view, board, said) {
   const tickets = new Map(board.columns.flatMap((c) => c.tickets).map((t) => [t.id, t]));
   let saving = false;
   for (const select of selects) {
+    const field = fieldOf(select);
+    const picker = LIST_PICKERS[field];
     select.addEventListener('change', async () => {
-      const id = select.dataset.priorityOf;
+      const id = select.getAttribute(`data-${field}-of`);
       const t = tickets.get(id);
       if (!t) return;
-      const before = t.priority ?? '';
+      const before = picker.before(t);
       if (saving) {
         select.value = before;
         return;
       }
       saving = true;
-      const note = noteOf(id);
+      const note = noteOf(field, id);
       const held = selects.filter((c) => !c.disabled);
       for (const c of held) c.disabled = true;
       note.className = 'note quiet';
       note.textContent = 'Saving…';
       let after;
       try {
-        await api('PATCH', `/tickets/${encodeURIComponent(id)}`, { priority: select.value, ifVersion: t.version });
-        after = { id, text: 'Saved' };
+        await api('PATCH', `/tickets/${encodeURIComponent(id)}`, { [field]: picker.value(select), ifVersion: t.version });
+        after = { id, field, text: 'Saved' };
       } catch (err) {
-        if (err instanceof SignedOut) return drawSignIn(`You were signed out; the priority of ${id} was not saved.`);
+        if (err instanceof SignedOut) return drawSignIn(`You were signed out; the ${field} of ${id} was not saved.`);
         if (err instanceof Refused && err.status === 409) {
-          after = { id, text: MOVED_MESSAGE, error: true };
+          after = { id, field, text: MOVED_MESSAGE, error: true };
         } else {
           note.className = 'note error';
           note.textContent = `Not saved: ${err.message}`;
@@ -1514,9 +1530,9 @@ function wireListPriorities(slug, view, board, said) {
       try {
         await drawAgain(() => drawProject(slug, view, { said: after }));
       } catch (err) {
-        if (err instanceof SignedOut) return drawSignIn(`You were signed out; the priority of ${id} was ${after.error ? 'not ' : ''}saved, but the page could not show it.`);
+        if (err instanceof SignedOut) return drawSignIn(`You were signed out; the ${field} of ${id} was ${after.error ? 'not ' : ''}saved, but the page could not show it.`);
         note.className = 'note error';
-        note.textContent = `The page could not refresh (${err.message}): the priority was ${after.error ? 'not ' : ''}saved. Reload to see the list as stored.`;
+        note.textContent = `The page could not refresh (${err.message}): the ${field} was ${after.error ? 'not ' : ''}saved. Reload to see the list as stored.`;
       }
     });
   }

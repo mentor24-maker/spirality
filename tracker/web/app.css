@@ -181,6 +181,8 @@ table.tickets, details.group { border: var(--hairline); border-radius: 8px; }
 .group th.priority { width: 11%; }
 .group td.priority select { width: 100%; max-width: 7.5rem; }
 .group td.priority .note { display: block; font-size: 0.8rem; }
+.group td.assignee select { width: 100%; max-width: 9rem; }
+.group td.assignee .note { display: block; font-size: 0.8rem; }
 .group th.tags { width: 13%; }
 .group th.actions { width: 8%; }
 .group td.actions { white-space: nowrap; }

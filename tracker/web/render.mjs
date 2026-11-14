@@ -1901,6 +1901,22 @@ export function renderListPriority({ id, priority }) {
   return `<select class="list-priority" data-priority-of="${escapeHtml(id)}" aria-label="Priority of ${escapeHtml(id)}">${options}</select><span class="note" data-priority-note="${escapeHtml(id)}" role="status"></span>`;
 }
 
+/**
+ * SP-244: a List view row's Assigned To cell, a dropdown that saves on change
+ * (app.mjs wireListPickers). The same choices and rule as the Change panel's
+ * picker: the project's operator, the current assignee marked "(now)" when
+ * it is someone else, and Nobody. `operator` is the board's `{ id, name }`,
+ * or null. Beside it, the note that says "Saving…", "Saved" or a refusal.
+ */
+export function renderListAssignee({ id, assignee, assigneeId }, operator) {
+  const options = [
+    ...(operator ? [option(String(operator.id), operator.name, assigneeId === operator.id)] : []),
+    ...(assigneeId != null && assigneeId !== operator?.id ? [option(String(assigneeId), `${assignee ?? `actor ${assigneeId}`} (now)`, true)] : []),
+    option('', 'Nobody', assigneeId == null),
+  ].join('');
+  return `<select class="list-assignee" data-assignee-of="${escapeHtml(id)}" aria-label="Assignee of ${escapeHtml(id)}">${options}</select><span class="note" data-assignee-note="${escapeHtml(id)}" role="status"></span>`;
+}
+
 /** The columns a stage's table sorts on, in the order they are drawn, with the class each cell wears. */
 export const SORT_COLUMNS = Object.freeze([
   { key: 'id', label: 'Ticket #' },

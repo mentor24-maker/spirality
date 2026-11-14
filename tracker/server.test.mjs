@@ -2039,8 +2039,9 @@ test('GET /projects/:slug/board keeps the shape outside sites read: the eight co
     f.store.fileTicket({ project: 'alpha', actor: f.machine.id, name: 'One', status: 'queued', priority: 'high', tags: ['x'] });
     const r = await f.call('GET', '/projects/alpha/board', { token: f.humanToken });
     assert.equal(r.status, 200);
-    assert.deepEqual(Object.keys(r.body), ['project', 'projectName', 'columns']);
+    assert.deepEqual(Object.keys(r.body), ['project', 'projectName', 'columns', 'operator']);
     assert.deepEqual([r.body.project, r.body.projectName], ['alpha', 'Alpha']);
+    assert.deepEqual(r.body.operator, { id: f.human.id, name: 'Operator' }, 'SP-244: the one person a ticket may be assigned to');
     assert.deepEqual(r.body.columns.map((c) => c.status), [...loopStatuses.STAGE_ORDER]);
     assert.deepEqual(r.body.columns.map((c) => c.status), ['Requested', 'Rework', 'Queued', 'Building', 'In review', 'Needs your input', 'Ready to launch', 'Live']);
     for (const c of r.body.columns) {
@@ -2048,7 +2049,8 @@ test('GET /projects/:slug/board keeps the shape outside sites read: the eight co
       assert.ok(Array.isArray(c.tickets));
     }
     const [ticket] = r.body.columns.find((c) => c.status === 'Queued').tickets;
-    assert.deepEqual(Object.keys(ticket), ['id', 'name', 'priority', 'tags', 'assignee', 'updatedAt', 'pullRequest', 'answerIn', 'mergeStands', 'waiting', 'version']);
+    assert.deepEqual(Object.keys(ticket), ['id', 'name', 'priority', 'tags', 'assignee', 'updatedAt', 'pullRequest', 'answerIn', 'mergeStands', 'waiting', 'version', 'assigneeId']);
+    assert.equal(ticket.assigneeId, null, 'SP-244: the assignee by id, beside its name');
     assert.equal(ticket.version, f.store.getTicket('AL-1').version, 'the version the list saves with is the stored one');
     assert.deepEqual([ticket.id, ticket.name, ticket.priority, ticket.tags, ticket.assignee, ticket.pullRequest], ['AL-1', 'One', 'high', ['x'], null, null]);
     assert.equal(typeof ticket.updatedAt, 'string');
