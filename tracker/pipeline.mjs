@@ -15,6 +15,7 @@
  *   ===== 2026-11-13 14:02:10 START /loop-review (model: claude-sonnet-5-5) =====   since SP-239
  *   ===== 2026-11-09 18:25:36 END /loop-review (exit 0 ...) =====
  *   [loop-runner] 18:25:36 sleeping 1800s before the next /loop-review (a wake ends it early)
+ *   ===== 2026-11-13 18:55:40 SKIP /loop-review (no work: no ticket in In review; Claude not started) =====   SP-292
  *   ===== 2026-11-09 18:37:36 START relay — <repo> =====       scripts/run_relay.sh
  *   ===== 2026-11-09 18:37:52 END relay — pass complete ... =====
  *
@@ -108,7 +109,9 @@ const NO_INTERNET = /Could not resolve host|ENOTFOUND|getaddrinfo/;
 /** A lane's report line that says a step failed (the skills print it). */
 const REPORT_FAILED = /^FAILED:/;
 
-const DATED = /^===== (\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2}) (START|END) (\S+)/;
+// SKIP (SP-292): a lane pass the runner's work check found nothing for, with
+// no Claude session. Not a pass: it only dates the sleeping lines after it.
+const DATED = /^===== (\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2}) (START|END|SKIP) (\S+)/;
 const EXIT = /\(exit (\d+)/;
 // The model a lane's START line names (SP-239): `default` or an id, nothing else.
 const MODEL = /\(model: ([a-z0-9.-]{1,60})\)/;
@@ -153,7 +156,7 @@ export function readStage(text, job, { interval = null } = {}) {
       const [, y, mo, d, h, mi, s, kind, word] = dated;
       const at = new Date(Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi), Number(s));
       lastDated = at;
-      if (jobOf(word) !== job) continue;
+      if (jobOf(word) !== job || kind === 'SKIP') continue;
       if (kind === 'START') {
         lastStart = { at, index };
         model = MODEL.exec(line)?.[1] ?? null;
