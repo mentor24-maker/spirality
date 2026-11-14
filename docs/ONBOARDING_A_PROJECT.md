@@ -97,6 +97,49 @@ pull request, and run `npm run tracker:bus -- --config <that file> --name
 echo "the heartbeat stopped at 09:10" | npm run clickup -- bus-post --body-file -   # from the project's folder: posts, read back
 ```
 
+### The pipeline watchdogs (SP-269)
+
+The copy gives every project the pipeline watchdogs, so a lane that stops
+or a ticket that sticks is said on its bus
+([WATCHDOGS.md](WATCHDOGS.md)): the heartbeat, stale ready, stale answer,
+throughput, checkout currency and the failed-pass report, with the modules
+they use under `loop/lib/` and their npm commands (`heartbeat`,
+`stale-ready`, `stale-answer`, `throughput`, `checkout:current`,
+`report:failure`). The scripts keep Spirality's paths, because the
+project's `run_relay.sh` and `loop_runner.sh` look for them there; only
+their `lib/` imports change, to `loop/lib/`. `scripts/onboard/manifest.test.mjs`
+checks each one is listed and copied byte for byte or with only those
+edits.
+
+They post only to a bus. The look says where: `Bus: where the pipeline
+watchdogs post: ready (<slug>-bus, ...)`, or, with no bus, that they have
+nowhere to post. Without one the relay still starts them on every wake,
+and each that has something to say finds no bus and says so in the relay's
+log, naming the missing `busProject`; nothing reaches
+Dane. Giving the project a bus is above.
+
+**A project already set up** (WaveCenter, Normie, PressPlay) does not get
+them from `npm run onboard` again: once its setup is merged, that run skips
+the copy step ("the setup is merged"). The copy step run on its own opens
+one new pull request in the project's own repository, from Spirality's
+folder on the Mini, on a clean `main`:
+
+```bash
+npm run onboard:copy -- --answers ~/loop-logs/onboard/<slug>.answers.json --dry-run
+npm run onboard:copy -- --answers ~/loop-logs/onboard/<slug>.answers.json \
+  --config ~/loop-logs/onboard/<slug>-settings/spirality.project.json --allow-replace
+```
+
+The dry run lists every file the pull request holds (the watchdog files
+show as `new`) and every file of the project's it would replace: its older
+copies of the runners and the loop's other files. Read that list before the
+real run; `--allow-replace` is what lets the copy write over them. A
+project's own npm command under one of the watchdogs' names (StarCaster's
+`heartbeat`) is a conflict the dry run names, and `--allow-replace`
+replaces it with the loop's, listed in the pull request. The pull request
+is reviewed and merged in that project, on Dane's word, like the first
+setup. Running it is that project's step, not this repository's.
+
 ### A project already on ClickUp (WaveCenter, StarCaster)
 
 A project that already runs its own copy of the loop, with its tickets in a
