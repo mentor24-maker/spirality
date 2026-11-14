@@ -55,7 +55,7 @@ import { readLedgerFile, saveLedgerIfReadable } from '../lib/autoMergeLedgerFile
 import { readLeaseFile, saveLeaseIfReadable } from '../lib/mergeWindowLeaseFile.js';
 import { windowDecision } from '../lib/mergeWindowLease.js';
 
-import { loadProjectConfig, ProjectConfigError } from '../lib/projectConfig.mjs';
+import { loadProjectConfig, namedProjectFolder, ProjectConfigError } from '../lib/projectConfig.mjs';
 // Spirality's releases (SP-265): what one is, and reading the tags.
 import { isReleaseName, OWN_PROJECT_RELEASE, readReleaseTags, releaseRemote } from '../lib/releases.mjs';
 // The merge lane's decisions (task 86bchpkxz). `mergeDecision` says whether
@@ -111,9 +111,16 @@ import {
 // lib/projectConfig.mjs). Each is still overridable from the environment
 // (CLICKUP_LOOP_QUEUE_LIST, CLICKUP_OPERATOR_ID, ...), so a moved list or a
 // renamed seat is a one-line change in Doppler, not a code change.
+//
+// THE PROJECT IT ACTS FOR (SP-270). With SPIRALITY_PROJECT set to a project's
+// checkout folder, this door, run from Spirality's folder, reads that
+// project's spirality.project.json (its tracker, prefix, queue, seats) and
+// does its git work in that checkout, so the project needs no copy of the
+// door. Unset: the manifest found from the current folder up, as always.
+const NAMED_PROJECT = namedProjectFolder();
 let project;
 try {
-  project = loadProjectConfig();
+  project = loadProjectConfig({ project: NAMED_PROJECT });
 } catch (err) {
   if (!(err instanceof ProjectConfigError)) throw err;
   console.error(`clickup: the project config is not usable — ${err.message}`);
@@ -688,9 +695,15 @@ function laneIo(repo) {
 }
 
 // ── Main moved: tell every ticket still in flight (task 86bctjffu) ───────────
-// The checkout this script lives in. The relay runs from the main checkout;
-// the git reads here are a fetch and an in-memory merge, so nothing in it moves.
-const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url));
+// The Spirality checkout this script lives in (its releases are read here).
+const SPIRALITY_ROOT = fileURLToPath(new URL('..', import.meta.url));
+// The checkout of the project the door acts for: the one SPIRALITY_PROJECT
+// names (SP-270), else this one. The relay runs from the main checkout; the
+// git reads here are a fetch and an in-memory merge, so nothing in it moves.
+const REPO_ROOT = NAMED_PROJECT ?? SPIRALITY_ROOT;
+// Where the git reads that follow the current folder run (worktrees, the
+// claim marker): the named project's checkout, else the current folder.
+const GIT_CWD = NAMED_PROJECT ?? undefined;
 
 /**
  * After PR `mergedNumber` merged: one `MAIN MOVED:` note on every ticket in a
@@ -788,7 +801,7 @@ function ancestorPids() {
 
 /** Every linked worktree of the checkout the door runs in: path, branch, when it was made, pushed?, dirty? */
 function listWorktrees() {
-  const out = spawnSync('git', ['worktree', 'list', '--porcelain'], { encoding: 'utf8' });
+  const out = spawnSync('git', ['worktree', 'list', '--porcelain'], { cwd: GIT_CWD, encoding: 'utf8' });
   if (out.status !== 0) return { problem: String(out.stderr || '').trim().slice(0, 200) || 'git worktree list failed', worktrees: [] };
   const entries = String(out.stdout).split(/\n\n+/).map((block) => {
     const e = {};
@@ -802,7 +815,7 @@ function listWorktrees() {
   const worktrees = entries.slice(1).map((e) => {
     let createdMs = NaN;
     try { const st = statSync(joinPath(e.path, '.git')); createdMs = st.birthtimeMs || st.mtimeMs; } catch { /* gone or unreadable */ }
-    const pushed = Boolean(e.branch) && spawnSync('git', ['rev-parse', '--verify', '--quiet', `refs/remotes/origin/${e.branch}`]).status === 0;
+    const pushed = Boolean(e.branch) && spawnSync('git', ['rev-parse', '--verify', '--quiet', `refs/remotes/origin/${e.branch}`], { cwd: GIT_CWD }).status === 0;
     const st = spawnSync('git', ['-C', e.path, 'status', '--porcelain'], { encoding: 'utf8' });
     return { path: e.path, branch: e.branch || '', createdMs, pushed, dirty: st.status === 0 && String(st.stdout).trim() !== '' };
   });
@@ -816,7 +829,7 @@ function listWorktrees() {
  * pass's worktree, where plain `.git` is a FILE pointing elsewhere.
  */
 function passMarkerPath() {
-  const r = spawnSync('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], { encoding: 'utf8' });
+  const r = spawnSync('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], { cwd: GIT_CWD, encoding: 'utf8' });
   const out = r.status === 0 ? String(r.stdout || '').trim() : '';
   return passClaim.markerPath(out || '.git');
 }
@@ -2595,7 +2608,7 @@ if (cmd === 'whoami') {
   // project runs is the tracker's record. The tags are read from the remote
   // of the Spirality checkout this door runs from, never a local copy.
   const sub = process.argv[3];
-  const git = (args) => spawnSync('git', args, { cwd: REPO_ROOT, encoding: 'utf8', timeout: 60_000 });
+  const git = (args) => spawnSync('git', args, { cwd: SPIRALITY_ROOT, encoding: 'utf8', timeout: 60_000 });
   const remote = releaseRemote();
   const refuse = (why) => { console.error(`release ${sub}: refused — ${why}`); reportLimits(); process.exit(2); };
   const fail = (why) => { console.error(`release ${sub} FAILED — ${why}`); reportLimits(); process.exit(1); };

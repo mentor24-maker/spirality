@@ -14,10 +14,14 @@
  *
  * A leading `~/` in a path-like value is expanded to the home folder, because
  * launchd gives a plist no shell to expand it with.
+ *
+ * With SPIRALITY_PROJECT set to a project's checkout folder (SP-270), the
+ * value comes from that project's spirality.project.json, so a runner in
+ * Spirality's folder can ask about the project it runs for.
  */
 
 import { homedir } from 'node:os';
-import { loadProjectConfig, ProjectConfigError, SCHEMA, OLD_NAMES } from '../lib/projectConfig.mjs';
+import { loadProjectConfig, namedProjectFolder, ProjectConfigError, SCHEMA, OLD_NAMES } from '../lib/projectConfig.mjs';
 
 // An old field name (`productSlug`) still answers, as its new one, so a
 // project's own copy of an older runner keeps working (SP-130).
@@ -30,7 +34,7 @@ if (!key || key === '--help' || !Object.hasOwn(SCHEMA, key)) {
 
 let config;
 try {
-  config = loadProjectConfig();
+  config = loadProjectConfig({ project: namedProjectFolder() });
 } catch (err) {
   if (!(err instanceof ProjectConfigError)) throw err;
   console.error(`project_config: the project config is not usable — ${err.message}`);
