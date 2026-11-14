@@ -9,7 +9,9 @@
 # Spirality has an incident that needs them.
 #
 # Each iteration is a FRESH headless Claude Code session started in the main
-# checkout (Spirality's own, or the project's that SPIRALITY_PROJECT names). Every loop skill picks the next ticket from the tracker on each run,
+# checkout (Spirality's own, or the project's that SPIRALITY_PROJECT names,
+# with Spirality's skills and hooks handed to it: see SESSION_ARGS below).
+# Every loop skill picks the next ticket from the tracker on each run,
 # so there is no state to carry between runs, and a crashed run costs one
 # interval rather than the whole night.
 #
@@ -65,6 +67,32 @@ OWN=""
 [ "$(cd "$PROJECT" && pwd -P)" = "$(cd "$REPO" && pwd -P)" ] && OWN=yes
 
 cd "$PROJECT" || exit 1
+
+# The skills and hooks a project's pass works under (SP-272). Spirality's own
+# pass finds them in its own .claude/ folder, exactly as before, so it gets
+# no extra options. A project's pass is handed Spirality's plugin folder
+# (plugin/: the skills, through a link to .claude/skills, and the hooks in
+# plugin/hooks/hooks.json, which run from this folder) with Claude Code's
+# standard --plugin-dir option, and asks for the skill by its plugin name,
+# /<plugin>:<skill>: a project that still carries its own copy of a skill
+# under the same name would otherwise win over Spirality's (checked
+# 2026-11-14 on Claude Code 2.1.323). The project's own CLAUDE.md is read as
+# always: the pass starts in its checkout.
+PROMPT="/$SKILL"
+SESSION_ARGS=()
+if [ -z "$OWN" ]; then
+  PLUGIN_DIR="$REPO/plugin"
+  PLUGIN_NAME="$(node -e 'process.stdout.write(String(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).name || ""))' "$PLUGIN_DIR/.claude-plugin/plugin.json" 2>/dev/null)"
+  case "$PLUGIN_NAME" in
+    ""|*[!a-z0-9-]*) echo "[loop-runner] Spirality's plugin folder ($PLUGIN_DIR) has no usable name in .claude-plugin/plugin.json, so a project's pass would find no skills or hooks. Stopping." >&2; exit 1 ;;
+  esac
+  if [ ! -f "$PLUGIN_DIR/skills/$SKILL/SKILL.md" ]; then
+    echo "[loop-runner] Spirality's plugin folder has no /$SKILL skill ($PLUGIN_DIR/skills/$SKILL/SKILL.md). Stopping." >&2
+    exit 1
+  fi
+  PROMPT="/$PLUGIN_NAME:$SKILL"
+  SESSION_ARGS=(--plugin-dir "$PLUGIN_DIR")
+fi
 
 SLUG="$(node "$REPO/scripts/project_config.mjs" projectSlug)" || { echo "[loop-runner] could not read projectSlug from the project config" >&2; exit 1; }
 LOG_DIR="$(node "$REPO/scripts/project_config.mjs" logDir)" || { echo "[loop-runner] could not read logDir from the project config" >&2; exit 1; }
@@ -318,7 +346,8 @@ while true; do
   rm -f "$SNAPSHOT"
   RUN_WITH_TIME_LIMIT_SNAPSHOT="$SNAPSHOT" \
   "$REPO/scripts/run_with_time_limit.sh" "${LOOP_PASS_LIMIT_SECONDS:-7200}" -- \
-    "$CLAUDE_BIN" -p "/$SKILL" ${MODEL_ARGS[@]+"${MODEL_ARGS[@]}"} \
+    "$CLAUDE_BIN" -p "$PROMPT" ${MODEL_ARGS[@]+"${MODEL_ARGS[@]}"} \
+    ${SESSION_ARGS[@]+"${SESSION_ARGS[@]}"} \
     --allowedTools Bash Edit Write Read Glob Grep Task TodoWrite WebFetch \
     2>&1 | tee "$PASS_OUT" >> "$LOG"
   CODE=${PIPESTATUS[0]}

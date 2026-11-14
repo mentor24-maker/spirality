@@ -1,0 +1,5 @@
+{
+  "name": "spirality",
+  "description": "The loop skills and safety hooks Spirality supplies to every project's lane sessions (scripts/loop_runner.sh passes this folder with --plugin-dir). The skills are .claude/skills, through a link, so there is one copy.",
+  "version": "1.0.0"
+}
