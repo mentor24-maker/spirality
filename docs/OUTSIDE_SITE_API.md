@@ -171,22 +171,26 @@ GET /projects/spirality/board
     { "status": "Queued", "tickets": [
       { "id": "SP-153", "name": "…", "priority": "urgent", "tags": ["starcaster-integration"],
         "assignee": null, "updatedAt": "2026-11-06T22:00:00.000Z",
-        "pullRequest": null, "answerIn": false, "version": 4 }
+        "pullRequest": null, "answerIn": false, "version": 4, "assigneeId": null }
     ] },
     { "status": "Building", "tickets": [] },
     { "status": "In review", "tickets": [] },
     { "status": "Needs your input", "tickets": [] },
     { "status": "Ready to launch", "tickets": [] },
     { "status": "Live", "tickets": [] }
-  ]
+  ],
+  "operator": { "id": 1, "name": "Dane" }
 }
 ```
 
 Always the eight columns, in that order; each column's tickets in queue
 order. `assignee` is a name or null; `pullRequest` a URL or null;
 `version` the ticket's version number, which goes up by one on every change
-(the tracker's own List view sends it back with a priority change, so a
-change never overwrites a loop's move).
+(the tracker's own List view sends it back with a priority or assignee
+change, so a change never overwrites a loop's move). `assigneeId` is the
+assignee's id or null, and `operator` the project's operator, `{ id, name }`
+or null: the one person a ticket may be assigned to, which the List view's
+Assigned To dropdown offers beside Nobody (SP-244).
 
 `GET /projects/:slug/tickets` answers the same tickets as one flat list,
 `{ project, tickets: [{ id, name, description, status, priority, tags, … }] }`,

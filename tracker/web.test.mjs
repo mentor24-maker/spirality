@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { DEMO_NEWEST_RELEASE, DEMO_OWN_PROJECT, demoNewestRelease, seedDemo, tickingClock } from './demoData.mjs';
 import { reportsOf, REPORT_RANGES, GROWTH_PERIODS, searchTickets, PRIORITIES, timeSplitOf, isFailureNote, TIME_BUCKETS, pipelineControlsOf } from './pageData.mjs';
-import { escapeHtml, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, renderTopics, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, renderReleaseGroup, controlValueText, mountainTime, wakeInEffectText, modelLastPassText, renderConsole, renderConsoleTile, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, consoleFeature, featureColourIndex, renderFeatureKey, FEATURE_PALETTE, drainLine, capInFlightText } from './web/render.mjs';
+import { escapeHtml, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, renderTopics, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, renderListAssignee, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, renderReleaseGroup, controlValueText, mountainTime, wakeInEffectText, modelLastPassText, renderConsole, renderConsoleTile, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, consoleFeature, featureColourIndex, renderFeatureKey, FEATURE_PALETTE, drainLine, capInFlightText } from './web/render.mjs';
 import { startServer, setupSettingsOf } from './server.mjs';
 import { saveAnswers, setupFields, setupOf } from './setup.mjs';
 import { DANE_FIELDS as SETUP_FIELDS, STEPS as SETUP_STEPS } from '../scripts/onboard/onboard.mjs';
@@ -2183,17 +2183,20 @@ test('the List view draws the dropdown in every row; the Board view\'s Live rows
   assert.match(draw, /<td class="priority">\$\{view === 'list' \? renderListPriority\(t\) : t\.priority \? escapeHtml\(statusName\(t\.priority\)\)/);
   const card = /const card = \(t\) => `([\s\S]*?)`;/.exec(app)[1];
   assert.doesNotMatch(card, /select|renderListPriority/);
-  assert.match(draw, /wireListPriorities\(slug, view, board, said\);/);
+  assert.match(draw, /wireListPickers\(slug, view, board, said\);/);
 });
 
-test('picking a priority sends only it with the board\'s version, holds the dropdowns, and says Saved, moved or the server\'s words', () => {
+test('picking a priority or assignee sends only that field with the board\'s version, holds every dropdown, and says Saved, moved or the server\'s words', () => {
   const app = readFileSync(WEB('app.mjs'), 'utf8');
-  const wire = /function wireListPriorities\(slug, view, board, said\) \{([\s\S]*?)\n\}/.exec(app)?.[1];
+  const wire = /function wireListPickers\(slug, view, board, said\) \{([\s\S]*?)\n\}/.exec(app)?.[1];
   assert.ok(wire, 'the dropdowns are wired');
-  assert.match(wire, /api\('PATCH', `\/tickets\/\$\{encodeURIComponent\(id\)\}`, \{ priority: select\.value, ifVersion: t\.version \}\)/);
+  assert.match(app, /priority: \{ value: \(select\) => select\.value, before: \(t\) => t\.priority \?\? '' \}/, 'priority goes as picked');
+  assert.match(app, /assignee: \{ value: \(select\) => \(select\.value \? Number\(select\.value\) : null\), before: \(t\) => String\(t\.assigneeId \?\? ''\) \}/, 'assignee goes as an id, or null for Nobody, as the Change panel sends it');
+  assert.match(wire, /api\('PATCH', `\/tickets\/\$\{encodeURIComponent\(id\)\}`, \{ \[field\]: picker\.value\(select\), ifVersion: t\.version \}\)/);
+  assert.match(wire, /const selects = \[\.\.\.main\.querySelectorAll\(fields\.map/, 'one save at a time across both kinds of dropdown');
   assert.match(wire, /for \(const c of held\) c\.disabled = true;\s*note\.className = 'note quiet';\s*note\.textContent = 'Saving…';/);
-  assert.match(wire, /after = \{ id, text: 'Saved' \};/);
-  assert.match(wire, /err instanceof Refused && err\.status === 409\) \{\s*after = \{ id, text: MOVED_MESSAGE, error: true \};/, 'a 409 redraws as stored, with the moved message');
+  assert.match(wire, /after = \{ id, field, text: 'Saved' \};/);
+  assert.match(wire, /err instanceof Refused && err\.status === 409\) \{\s*after = \{ id, field, text: MOVED_MESSAGE, error: true \};/, 'a 409 redraws as stored, with the moved message');
   assert.match(wire, /note\.textContent = `Not saved: \$\{err\.message\}`;\s*select\.value = before;\s*for \(const c of held\) c\.disabled = false;/, 'any other refusal puts the old value back');
   assert.match(wire, /await drawAgain\(\(\) => drawProject\(slug, view, \{ said: after \}\)\);/);
 });
@@ -2213,6 +2216,59 @@ test('a priority picked through the page\'s save shows on the board and on the t
     const stale = await f.call('PATCH', `/tickets/${t.id}`, { body: { priority: 'low', ifVersion: t.version } });
     assert.equal(stale.status, 409);
     assert.equal(f.store.getTicket(t.id).priority, 'high');
+  } finally { await f.cleanup(); }
+});
+
+// ── Changing a ticket's assignee from the List view (SP-244) ───────────────
+
+const optionsOf = (html) => [...html.matchAll(/<option value="([^"]*)"( selected)?>([^<]*)<\/option>/g)].map((m) => [m[1], m[3], Boolean(m[2])]);
+
+test('a List row\'s Assigned To is a dropdown with the Change panel\'s choices: the operator, the current assignee "(now)" when someone else, and Nobody', () => {
+  const operator = { id: 1, name: 'Dane' };
+  const nobody = renderListAssignee({ id: 'SP-12', assignee: null, assigneeId: null }, operator);
+  assert.match(nobody, /^<select class="list-assignee" data-assignee-of="SP-12" aria-label="Assignee of SP-12">/);
+  assert.deepEqual(optionsOf(nobody), [['1', 'Dane', false], ['', 'Nobody', true]]);
+  assert.match(nobody, /<span class="note" data-assignee-note="SP-12" role="status"><\/span>$/, 'a note beside it for Saving…, Saved or a refusal');
+  assert.deepEqual(optionsOf(renderListAssignee({ id: 'SP-12', assignee: 'Dane', assigneeId: 1 }, operator)), [['1', 'Dane', true], ['', 'Nobody', false]]);
+  assert.deepEqual(optionsOf(renderListAssignee({ id: 'SP-12', assignee: 'Tess', assigneeId: 7 }, operator)), [['1', 'Dane', false], ['7', 'Tess (now)', true], ['', 'Nobody', false]]);
+  assert.deepEqual(optionsOf(renderListAssignee({ id: 'SP-12', assignee: null, assigneeId: null }, null)), [['', 'Nobody', true]], 'a project with no operator offers only Nobody');
+  assert.match(renderListAssignee({ id: '<b>', assignee: null, assigneeId: null }, operator), /data-assignee-of="&lt;b&gt;"/);
+  // The same choices, in the same order, as the ticket page's Change panel.
+  for (const [assignee, assigneeId] of [[null, null], ['Dane', 1], ['Tess', 7]]) {
+    const panel = renderEditPanel({ name: 'x', status: 'queued', operator, assignee: assigneeId == null ? null : { id: assigneeId, name: assignee } });
+    const who = /<select id="edit-assignee"[^>]*>([\s\S]*?)<\/select>/.exec(panel)[1];
+    assert.deepEqual(optionsOf(renderListAssignee({ id: 'SP-1', assignee, assigneeId }, operator)), optionsOf(who), String(assignee));
+  }
+});
+
+test('the List view draws the assignee dropdown in every row; the Board view\'s Live rows and cards stay as text', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const draw = app.slice(app.indexOf('async function drawProject('), app.indexOf('async function copyText'));
+  assert.match(draw, /<td class="assignee">\$\{view === 'list' \? renderListAssignee\(t, board\.operator\) : t\.assignee \? escapeHtml\(t\.assignee\)/);
+  const card = /const card = \(t\) => `([\s\S]*?)`;/.exec(app)[1];
+  assert.doesNotMatch(card, /select|renderListAssignee/);
+});
+
+test('an assignee picked through the page\'s save shows on the board and on the ticket; Nobody undoes it; an old version is refused and changes nothing', async () => {
+  const f = await fixture();
+  try {
+    const board = () => f.call('GET', '/projects/alpha/board').then((r) => r.body);
+    const first = await board();
+    assert.ok(first.operator, 'the board names the operator');
+    const t = first.columns.flatMap((c) => c.tickets).find((r) => r.assigneeId == null);
+    assert.ok(t, 'the test data has an unassigned ticket');
+    assert.equal(t.assignee, null);
+    const saved = await f.call('PATCH', `/tickets/${t.id}`, { body: { assignee: first.operator.id, ifVersion: t.version } });
+    assert.equal(saved.status, 200);
+    const after = (await board()).columns.flatMap((c) => c.tickets).find((r) => r.id === t.id);
+    assert.deepEqual([after.assigneeId, after.assignee], [first.operator.id, first.operator.name]);
+    assert.equal((await f.call('GET', `/tickets/${t.id}/thread`)).body.assignee.id, first.operator.id, 'the ticket page reads the same assignee');
+    const stale = await f.call('PATCH', `/tickets/${t.id}`, { body: { assignee: null, ifVersion: t.version } });
+    assert.equal(stale.status, 409);
+    assert.equal(f.store.getTicket(t.id).assignee, first.operator.id, 'nothing overwritten');
+    const undone = await f.call('PATCH', `/tickets/${t.id}`, { body: { assignee: null, ifVersion: after.version } });
+    assert.equal(undone.status, 200);
+    assert.equal(f.store.getTicket(t.id).assignee, null);
   } finally { await f.cleanup(); }
 });
 

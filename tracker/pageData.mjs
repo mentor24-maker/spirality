@@ -418,8 +418,12 @@ export function boardOf(store, slug, { viewerId = null, prStates = null } = {}) 
         waiting: waitsOn(t, store.listComments(t.id), viewerId, prStates),
         // SP-208: the List view's priority dropdown saves with it (ifVersion).
         version: t.version,
+        // SP-244: the List view's Assigned To dropdown selects by id; `assignee` stays a name.
+        assigneeId: t.assignee ?? null,
       })),
     })),
+    // SP-244: the one person a ticket may be assigned to, for the List view's dropdown.
+    operator: project.operator == null ? null : { id: project.operator, name: nameOf(project.operator) },
   };
 }
 
