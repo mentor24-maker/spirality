@@ -594,9 +594,11 @@ export function capInFlightText(c, capInFlight) {
  * lane last used (wakeInEffectText), and each model what its lane's last
  * pass ran on (modelLastPassText). Under them, the change log, newest first, in
  * Mountain time. `notes` is `{ key: { ok, text } }`, a Save's outcome to show
- * beside its control.
+ * beside its control. The section is a box that opens and closes (SP-289),
+ * the project's name its header; it starts closed unless `open` is true (the
+ * page passes the box's state from before a redraw, so a Save keeps it open).
  */
-export function renderPipelineControls(view, notes = {}) {
+export function renderPipelineControls(view, notes = {}, open = false) {
   const slug = view.project.slug;
   const locked = view.canChange !== true;
   const models = view.models ?? [];
@@ -625,14 +627,16 @@ export function renderPipelineControls(view, notes = {}) {
   const log = changes.length
     ? `<table class="control-changes"><thead><tr><th>When</th><th>Who</th><th>Setting</th><th>Old Value</th><th>New Value</th></tr></thead><tbody>${changes.map((x) => `<tr><td>${escapeHtml(mountainTime(x.at))}</td><td>${escapeHtml(x.actorName)}</td><td>${escapeHtml(x.label)}</td><td>${escapeHtml(x.from)}</td><td>${escapeHtml(x.to)}</td></tr>`).join('')}</tbody></table>`
     : '<p class="quiet">No changes yet.</p>';
-  return `<section class="pipeline-controls" data-project="${escapeHtml(slug)}">
-    <h3>${escapeHtml(view.project.name)}</h3>
+  return `<details class="pipeline-controls" data-project="${escapeHtml(slug)}"${open ? ' open' : ''}>
+    <summary>${escapeHtml(view.project.name)}</summary>
+    <div class="project-body">
     ${lockedLine}
     ${(view.groups ?? []).map(group).join('')}
     ${view.release ? renderReleaseGroup(view.release, notes.release) : ''}
     <h4>Change Log</h4>
     ${log}
-  </section>`;
+    </div>
+  </details>`;
 }
 
 /**

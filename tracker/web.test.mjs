@@ -519,7 +519,7 @@ test('a stage heading reads its name, then the count right-aligned, then one arr
 test('a stage folded or opened by hand stays that way through the page\'s own redraw, even if its colour changed (SP-196)', () => {
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   const place = /function keepPlace\(\) \{[\s\S]*?\n\}/.exec(app)[0];
-  assert.match(place, /const key = \(d\) => \(d\.dataset\.stage \? `stage\|\$\{d\.dataset\.stage\}` : d\.className\);/, 'a stage is known by its name, not its classes');
+  assert.match(place, /const key = \(d\) => \(d\.dataset\.stage \? `stage\|\$\{d\.dataset\.stage\}` : d\.dataset\.project \? `project\|\$\{d\.dataset\.project\}` : d\.className\);/, 'a stage is known by its name, not its classes (and a Settings project box by its project, SP-289)');
   assert.match(place, /const open = new Map\(\[\.\.\.main\.querySelectorAll\('details'\)\]\.map\(\(d\) => \[key\(d\), d\.open\]\)\);/, 'every stage is a details, so every stage is kept');
   assert.match(place, /for \(const d of main\.querySelectorAll\('details'\)\) if \(open\.has\(key\(d\)\)\) d\.open = open\.get\(key\(d\)\);/);
 });
@@ -999,7 +999,9 @@ test('Pipeline Controls on the Settings page: each control with its value, "defa
     assert.ok(alpha.controls.every((c) => c.isDefault), 'the demo leaves every control on its default');
     assert.deepEqual(alpha.changes.map((c) => [c.actorName, c.label, c.from, c.to]), [['Dane', 'work-in-progress cap', '3', '5'], ['Dane', 'work-in-progress cap', '5', '3']]);
     const html = renderPipelineControls(alpha);
-    assert.match(html, /<h3>Alpha<\/h3>/);
+    // A box that opens and closes (SP-289), its name the header, closed unless asked open.
+    assert.match(html, /^<details class="pipeline-controls" data-project="alpha">\s*<summary>Alpha<\/summary>/);
+    assert.match(renderPipelineControls(alpha, {}, true), /^<details class="pipeline-controls" data-project="alpha" open>/);
     for (const title of ['Wake Times', 'Pause and Resume', 'Work-in-Progress Cap', 'Model per Lane', 'Change Log']) assert.match(html, new RegExp(`<h4>${title}</h4>`));
     // Every group is wired now (SP-238 the cap, SP-239 the models): no not-yet line at all.
     assert.doesNotMatch(html, /Saved, but the lanes do not use this yet/);
@@ -1076,7 +1078,7 @@ test('the Settings page draws Pipeline Controls from the server and says Saved o
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   const draw = app.slice(app.indexOf('async function drawSettings'), app.indexOf('/**\n * The Users page'));
   assert.match(draw, /await api\('GET', '\/pipeline-controls'\)/);
-  assert.match(draw, /<h2>Pipeline Controls<\/h2>/);
+  assert.match(draw, /\{ id: 'pipeline-controls', title: 'Pipeline Controls' \}/);
   assert.match(draw, /await api\('PUT', `\/pipeline-controls\/\$\{encodeURIComponent\(slug\)\}`, \{ setting: key, value: sent \}\);\s*\/\/ Read back before saying it worked/);
   assert.match(draw, /if \(stored !== sent \|\| answer\.saved\?\.to !== sent\) throw/);
   assert.match(draw, /text: `Not saved: \$\{err\.message\}`/);
@@ -4937,4 +4939,28 @@ test('the Topics page refuses a blank name before sending, and says a create wor
   assert.match(draw, /api\('GET', topicsPath, undefined, \{ unrecorded: true \}\)/, 'the list is read back');
   assert.match(draw, /back\?\.topics\?\.some\(\(t\) => t\.id === made\.id\)/);
   assert.match(draw, /localStorage\.setItem\(PROJECT_KEY, chosen\.slug\)/, 'picking a project here selects it');
+});
+
+test('Settings is two tabs, each project a box that stays open across a Save, every button one look (SP-289)', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const css = readFileSync(WEB('app.css'), 'utf8');
+  // The menu: Pipeline Controls first (and the default), then Styles; the address names the tab.
+  assert.match(app, /const SETTINGS_TABS = \[\s*\{ id: 'pipeline-controls', title: 'Pipeline Controls' \},\s*\{ id: 'styles', title: 'Styles' \},\s*\];/);
+  assert.match(app, /return SETTINGS_TABS\.some\(\(t\) => t\.id === named\) \? named : SETTINGS_TABS\[0\]\.id;/);
+  assert.match(app, /history\.replaceState\(null, '', `\$\{location\.pathname\}\$\{location\.search\}#\$\{a\.dataset\.tab\}`\);/);
+  // Stage Colours sits in the Styles tab, the projects in Pipeline Controls.
+  const settings = app.slice(app.indexOf('async function drawSettings'), app.indexOf('const SETTINGS_TABS'));
+  const styles = settings.indexOf('<div class="settings-tab" data-tab="styles">');
+  assert.ok(styles > settings.indexOf('<div class="settings-tab" data-tab="pipeline-controls">'));
+  assert.ok(settings.indexOf('<h2>Stage Colours</h2>') > styles);
+  assert.ok(settings.indexOf('<div class="pipeline-controls">') < styles);
+  // A box open before a redraw (a Save, Move to Newest, Roll Back) is drawn open again; a whole-page refresh keeps it by project.
+  assert.match(app, /const open = new Set\(\[\.\.\.box\.querySelectorAll\('details\.pipeline-controls\[open\]'\)\]\.map\(\(d\) => d\.dataset\.project\)\);/);
+  assert.match(app, /renderPipelineControls\(v, notes\.get\(v\.project\.slug\) \?\? \{\}, open\.has\(v\.project\.slug\)\)/);
+  assert.match(app, /d\.dataset\.project \? `project\|\$\{d\.dataset\.project\}`/);
+  // The look: reverse-colour header, 1px border, 30px corners; buttons 15px, #000077, bold white; disabled dimmed.
+  assert.match(css, /details\.pipeline-controls \{[^}]*border: 1px solid #000077; border-radius: 30px; overflow: hidden;/);
+  assert.match(css, /details\.pipeline-controls > summary \{[^}]*background: #000077; color: #fff; font-weight: 700;/);
+  assert.match(css, /div\.settings-tab button \{[^}]*border-radius: 15px; background: #000077; color: #fff; font-weight: 700;/);
+  assert.match(css, /div\.settings-tab button:disabled \{ opacity: 0\.4;/);
 });

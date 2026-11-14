@@ -2474,6 +2474,11 @@ function reportsPath(slug, range) {
  * all; the page then reads the colours back and says they were saved only
  * when what it reads is what it sent. A loop's sign-in is refused by the
  * server, and the page shows that refusal as it is.
+ *
+ * Two tabs (SP-289), chosen from a menu under the heading: Pipeline Controls
+ * (shown first) and Styles (Stage Colours). The chosen tab is kept in the
+ * address (`#pipeline-controls`, `#styles`), so a reload or a shared link
+ * opens the same one.
  */
 async function drawSettings() {
   const { stages } = await api('GET', '/stage-colours');
@@ -2490,15 +2495,29 @@ async function drawSettings() {
     </tr>`;
   main.innerHTML = `
     <h1>Settings</h1>
-    <h2>Stage Colours</h2>
-    <p class="quiet">Choose a colour for each stage of the loop. The same colours show for everyone.</p>
-    <form class="colours">
-      <table class="colours"><thead><tr><th>Stage</th><th>Colour</th><th></th><th></th></tr></thead><tbody>${stages.map(row).join('')}</tbody></table>
-      <div class="row"><button type="submit">Save</button><span class="note"></span></div>
-    </form>
-    <h2>Pipeline Controls</h2>
-    <p class="quiet">How each project's loop runs, for experimenting with the pipeline. Everyone can see them; only a project's operator can change them. Every change is logged below its project.</p>
-    <div class="pipeline-controls">${controls.length ? '' : '<p class="quiet">No projects to show.</p>'}</div>`;
+    <nav class="settings-tabs">${SETTINGS_TABS.map((t) => `<a href="#${t.id}" data-tab="${t.id}">${t.title}</a>`).join('')}</nav>
+    <div class="settings-tab" data-tab="pipeline-controls">
+      <p class="quiet">How each project's loop runs, for experimenting with the pipeline. Everyone can see them; only a project's operator can change them. Every change is logged below its project.</p>
+      <div class="pipeline-controls">${controls.length ? '' : '<p class="quiet">No projects to show.</p>'}</div>
+    </div>
+    <div class="settings-tab" data-tab="styles">
+      <h2>Stage Colours</h2>
+      <p class="quiet">Choose a colour for each stage of the loop. The same colours show for everyone.</p>
+      <form class="colours">
+        <table class="colours"><thead><tr><th>Stage</th><th>Colour</th><th></th><th></th></tr></thead><tbody>${stages.map(row).join('')}</tbody></table>
+        <div class="row"><button type="submit">Save</button><span class="note"></span></div>
+      </form>
+    </div>`;
+  showSettingsTab(settingsTabAt());
+  for (const a of main.querySelectorAll('nav.settings-tabs a')) {
+    a.addEventListener('click', (e) => {
+      // The tab changes in place: no redraw, so nothing typed is lost.
+      e.preventDefault();
+      e.stopPropagation();
+      history.replaceState(null, '', `${location.pathname}${location.search}#${a.dataset.tab}`);
+      showSettingsTab(a.dataset.tab);
+    });
+  }
   drawPipelineControls(main.querySelector('div.pipeline-controls'), controls);
   const form = main.querySelector('form.colours');
   const rows = [...form.querySelectorAll('tbody tr')];
@@ -2537,6 +2556,27 @@ async function drawSettings() {
   });
 }
 
+/** The Settings page's tabs (SP-289), in menu order; the first opens by default. */
+const SETTINGS_TABS = [
+  { id: 'pipeline-controls', title: 'Pipeline Controls' },
+  { id: 'styles', title: 'Styles' },
+];
+
+/** The Settings tab the address names (`#styles`), or the first one. */
+function settingsTabAt() {
+  const named = location.hash.slice(1);
+  return SETTINGS_TABS.some((t) => t.id === named) ? named : SETTINGS_TABS[0].id;
+}
+
+/** Show one Settings tab, hide the others, and mark its menu item chosen. */
+function showSettingsTab(id) {
+  for (const tab of main.querySelectorAll('div.settings-tab')) tab.hidden = tab.dataset.tab !== id;
+  for (const a of main.querySelectorAll('nav.settings-tabs a')) {
+    if (a.dataset.tab === id) a.setAttribute('aria-current', 'page');
+    else a.removeAttribute('aria-current');
+  }
+}
+
 /**
  * The Settings page's Pipeline Controls (SP-224): one section per project
  * (renderPipelineControls), each control with its own Save. A Save sends the
@@ -2548,8 +2588,10 @@ async function drawSettings() {
 function drawPipelineControls(box, views) {
   const notes = new Map();
   const draw = () => {
-    box.innerHTML = views.map((v) => renderPipelineControls(v, notes.get(v.project.slug) ?? {})).join('');
-    for (const section of box.querySelectorAll('section.pipeline-controls')) {
+    // A box open before the redraw stays open after it (SP-289).
+    const open = new Set([...box.querySelectorAll('details.pipeline-controls[open]')].map((d) => d.dataset.project));
+    box.innerHTML = views.map((v) => renderPipelineControls(v, notes.get(v.project.slug) ?? {}, open.has(v.project.slug))).join('');
+    for (const section of box.querySelectorAll('details.pipeline-controls')) {
       const slug = section.dataset.project;
       for (const tr of section.querySelectorAll('tr[data-control]')) {
         const button = tr.querySelector('button');
@@ -2625,7 +2667,7 @@ function drawPipelineControls(box, views) {
       return; // the next tick tries again; the line already shown stays
     }
     for (const v of fresh) {
-      const slot = [...box.querySelectorAll('section.pipeline-controls')].find((s) => s.dataset.project === v.project.slug)?.querySelector('.drain-box');
+      const slot = [...box.querySelectorAll('details.pipeline-controls')].find((s) => s.dataset.project === v.project.slug)?.querySelector('.drain-box');
       if (slot) slot.innerHTML = drainLine(v);
     }
   }, DRAIN_REFRESH_MS);
@@ -3415,7 +3457,8 @@ const SIDEWAYS = '.console';
 function keepPlace() {
   // A stage is known by its name alone, so a colour added on Settings between
   // two redraws (which changes its classes) does not lose its fold (SP-196).
-  const key = (d) => (d.dataset.stage ? `stage|${d.dataset.stage}` : d.className);
+  // A Settings project box (SP-289) is known by its project the same way.
+  const key = (d) => (d.dataset.stage ? `stage|${d.dataset.stage}` : d.dataset.project ? `project|${d.dataset.project}` : d.className);
   const open = new Map([...main.querySelectorAll('details')].map((d) => [key(d), d.open]));
   const y = window.scrollY;
   // Each stage's sort (SP-174), by stage, put back on the stage's new table.
