@@ -252,6 +252,7 @@ answers are JSON (structured text programs read).
 | `POST /projects/:slug/tickets/suggest-titles` | for the Add Task box (SP-245): `{ description, title? }` → `{ titles: [five] }`, suggested by `claude -p` on this machine with the `suggest-titles` skill (no tools, 60 seconds, the words on standard input; `TRACKER_CLAUDE` names the command, `claude` on the PATH without it). The same sign-in and project rules as the Add Task box's project check; writes nothing. An empty description is 400 `no-description` and runs nothing; no `claude` 503 `no-claude`; too slow 504 `too-slow`; anything but five usable titles 502 `bad-answer` |
 | `GET /tickets/:id` | one ticket with its comments, oldest first |
 | `PATCH /tickets/:id` | change name, status, priority, tags, assignee, description or Loop note, with optional `ifStatus` / `ifVersion`; answers 409 ("conflict") and writes nothing if the ticket has moved. A person's token may assign the ticket only to its project's operator or to nobody: anyone else gets 400 `bad-assignee` and nothing is written |
+| `POST /projects/:slug/tickets/order` | put tickets in order in their queue (SP-249): `{ ids: [...] }` gives them places 1, 2, 3 ... in that order, in one write, all or none. Every id must be a ticket of that project, named once; any other is 400 `bad-order` and nothing changes. Each ticket whose place moves writes a `place` event and a version bump, read back; the project's other placed tickets nobody has started (`requested`, `queued`) follow on, n+1, n+2 ..., in the order they had, so no two waiting tickets share a place (an unplaced ticket stays unplaced, and a started ticket not named is not touched: no version bump, no event). A failed read-back answers 500 `write-failed`. Answers `{ project, tickets, changed }`: `changed` names every ticket that moved, named or not. The same sign-in and project rules as `PATCH /tickets/:id`. The order rule everywhere is priority, then place, then oldest (`docs/LOOP_CONTRACT.md`, "The claim order") |
 | `DELETE /tickets/:id` | delete a ticket nobody has started (`Requested` or `Queued`) with its comments and events; answers 409 `not-deletable` with its status for any other, 404 for an unknown one; the server log names the ticket and the actor |
 | `POST /tickets/:id/comments` | a comment, or a reply when `parent` is given |
 | `GET /tickets/:id/events` | the history |
@@ -1403,6 +1404,10 @@ together):
 | The relay watching Agent Response tickets ("pending response", "responding") for the operator's comments | `bus-read --operator --since <time>`, across every ticket in the bus project |
 | `waiting` sweeping the Agent Response list for "what actually needs me?" | The page's Waiting on You list, which reads every project the operator is on, the bus project included, but shows only tickets in the operator's statuses: a steward question shows there once it has been through `ask`, never straight after `task` |
 | The operator seeing a new post: the "Team chat" ticket puts itself in their ClickUp "Assigned to me" list | An alarm (a post whose message starts with `ALARM:`) is texted to the bus project's alert phone; every post, alarm or not, counts in the "New on the Bus" number in the page's header until the operator opens "Team chat" (SP-163, the operator's choice D) |
+
+Which of those alarms are pipeline watchdogs that move into Spirality for
+every project, and which stay in StarCaster: [WATCHDOGS.md](WATCHDOGS.md)
+(SP-260).
 
 **How loud a post is** (SP-163; Dane chose D on 2026-11-09: "a text for
 alarms only, plus the page count for everything else"):
