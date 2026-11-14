@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { DEMO_NEWEST_RELEASE, DEMO_OWN_PROJECT, DEMO_SUGGESTIONS, demoNewestRelease, demoSuggest, seedDemo, tickingClock } from './demoData.mjs';
 import { reportsOf, REPORT_RANGES, GROWTH_PERIODS, searchTickets, PRIORITIES, timeSplitOf, isFailureNote, TIME_BUCKETS, pipelineControlsOf } from './pageData.mjs';
-import { escapeHtml, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, bugReport, BUG_REPORT_TAG, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, renderTopics, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, renderListTopics, projectTags, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, renderReleaseGroup, controlValueText, mountainTime, wakeInEffectText, modelLastPassText, renderConsole, renderConsoleTile, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, consoleFeature, featureColourIndex, renderFeatureKey, FEATURE_PALETTE, drainLine, capInFlightText, renderTitleChoices, titleModeOf, TITLE_MODES, SUGGEST_POLL_MS, moveSuggestion, suggestState, filingPlan, orderPlan, andList, suggestRunLine, renderSuggestRows } from './web/render.mjs';
+import { escapeHtml, renderStatusLine, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, CLOSE_LINE, REPLY_LINE, offersMerge, offersClose, bugReport, BUG_REPORT_TAG, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, renderTopics, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, renderListTopics, projectTags, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, renderReleaseGroup, controlValueText, mountainTime, wakeInEffectText, modelLastPassText, renderConsole, renderConsoleTile, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, consoleFeature, featureColourIndex, renderFeatureKey, FEATURE_PALETTE, drainLine, capInFlightText, renderTitleChoices, titleModeOf, TITLE_MODES, SUGGEST_POLL_MS, moveSuggestion, suggestState, filingPlan, orderPlan, andList, suggestRunLine, renderSuggestRows } from './web/render.mjs';
 import { startServer, setupSettingsOf } from './server.mjs';
 import { saveAnswers, setupFields, setupOf } from './setup.mjs';
 import { DANE_FIELDS as SETUP_FIELDS, STEPS as SETUP_STEPS } from '../scripts/onboard/onboard.mjs';
@@ -1551,7 +1551,7 @@ test('Quick Action on a bug report: "Bug Report:", the visitor\'s words in bold,
     tags: ['bug-report'], status: 'needs your input', comments: [],
     description: bugDescription({ words: 'I typed <script>alert(1)</script> and **stars**\nline two' }),
   });
-  assert.match(html, /^<h1>Bug Report:<\/h1>\n<p class="bug-words">I typed &lt;script&gt;alert\(1\)&lt;\/script&gt; and \*\*stars\*\*\nline two<\/p>/, 'escaped, never markup, line breaks kept');
+  assert.match(html, /^<h1>Bug Report:<\/h1>\n<p class="status-line">Status: [^\n]*<\/p>\n<p class="bug-words">I typed &lt;script&gt;alert\(1\)&lt;\/script&gt; and \*\*stars\*\*\nline two<\/p>/, 'escaped, never markup, line breaks kept');
   assert.doesNotMatch(html, /<script|<strong>stars/);
   assert.doesNotMatch(html, /Bug report: The module|none attached|Filed automatically/, 'not the cut-off name, nor "(none attached)" at the top');
   assert.match(html, /<ul class="bug-facts"><li><span class="fact-label">Page:<\/span> <a href="https:\/\/example\.com\/pricing"[^>]*>https:\/\/example\.com\/pricing<\/a><\/li>/);
@@ -1563,7 +1563,7 @@ test('Quick Action on a bug report: "Bug Report:", the visitor\'s words in bold,
   const shots = renderQuickAction({ name: 'x', tags: ['bug-report'], status: 'live', description: bugDescription({ shots: '- [Screenshot 1](https://x.test/1.png)' }) });
   assert.match(shots, /<p class="bug-shots quiet">Screenshots are attached: see the description under Details\.<\/p>/);
   assert.match(shots, /^<h1>Bug Report:<\/h1>/);
-  assert.match(shots, /<p class="where quiet">Live: it is done/);
+  assert.match(shots, /^<h1>Bug Report:<\/h1>\n<p class="status-line">Status: <span class="status-name">Live<\/span>/, 'the status line sits under "Bug Report:" too (SP-290)');
   // A page that is not a web address is shown as text, not a link.
   assert.match(renderQuickAction({ name: 'x', tags: ['bug-report'], description: bugDescription().replace('https://example.com/pricing', '(not recorded)') }), /Page:<\/span> \(not recorded\)<\/li>/);
   const css = readFileSync(WEB('app.css'), 'utf8');
@@ -1574,7 +1574,7 @@ test('Quick Action without the tag, the section, or with ## Asked looks exactly 
   const plain = { name: 'Fix it', status: 'queued', comments: [], description: bugDescription() };
   assert.equal(renderQuickAction({ ...plain, tags: ['tracker'] }), renderQuickAction({ name: 'Fix it', status: 'queued', comments: [], description: bugDescription() }));
   assert.match(renderQuickAction({ ...plain, tags: [] }), /^<h1>Fix it<\/h1>/);
-  assert.match(renderQuickAction({ ...plain, tags: ['bug-report'], description: '## Goal\nThe goal.' }), /^<h1>Fix it<\/h1>\n<p class="summary">The goal\.<\/p>/);
+  assert.match(renderQuickAction({ ...plain, tags: ['bug-report'], description: '## Goal\nThe goal.' }), /^<h1>Fix it<\/h1>\n<p class="status-line">Status: [^\n]*<\/p>\n<p class="summary">The goal\.<\/p>/);
   const asked = `## Asked\n\`\`\`\nhis words\n\`\`\`\n\n${bugDescription()}`;
   assert.equal(renderQuickAction({ ...plain, tags: ['bug-report'], description: asked }), renderQuickAction({ ...plain, description: asked }));
 });
@@ -1588,7 +1588,7 @@ test('the demo has a bug report shaped like SC-804, held in Needs your input', (
     assert.ok(t, 'a demo ticket tagged bug-report');
     assert.equal(t.status, 'needs your input');
     const html = renderQuickAction(t);
-    assert.match(html, /^<h1>Bug Report:<\/h1>\n<p class="bug-words">/);
+    assert.match(html, /^<h1>Bug Report:<\/h1>\n<p class="status-line">Status: [^\n]*<\/p>\n<p class="bug-words">/);
     assert.match(html, /Submitted:<\/span> Nov 13, 2026, 2:04 PM MST/);
     assert.doesNotMatch(html, /none attached/);
     store.close();
@@ -1637,7 +1637,7 @@ test('Quick Action puts his title and words first, the loop\'s reading after, an
   // The same name as his title: no Ticket name line, and no slice line without ## Order.
   const same = renderQuickAction({ name: 'Fix it', description: '## Asked\n```\nFix it\n\nplease\n```\n', status: 'queued' });
   assert.doesNotMatch(same, /Ticket name:|Sliced from|How the Loop/);
-  assert.match(same, /^<h1>Fix it<\/h1>\n<h2 class="request-heading">Original Request<\/h2>\n<p class="original-request">please<\/p>\n<p class="where quiet">/);
+  assert.match(same, /^<h1>Fix it<\/h1>\n<p class="status-line">Status: <span class="status-name">Queued<\/span>[\s\S]*<\/p>\n<h2 class="request-heading">Original Request<\/h2>\n<p class="original-request">please<\/p>$/);
   // His words keep their line breaks on the page.
   assert.match(readFileSync(WEB('app.css'), 'utf8'), /\.quick \.original-request \{[^}]*white-space: pre-wrap/);
   // The tab title is still the ticket's current name.
@@ -1671,12 +1671,12 @@ test('Quick Action asks for his move only while the ticket waits on him (SP-118)
   // SP-112: answered go, built, sent back. The old card is still the newest card.
   const rework = renderQuickAction({ ...ticket, status: 'rework' });
   assert.doesNotMatch(rework, /Your move|class="needed"/);
-  assert.match(rework, /<p class="where quiet">In Rework: the build loop is fixing what review found\. Nothing is needed from you\.<\/p>/);
+  assert.match(rework, /<span class="status-tip" id="status-tip" role="tooltip">The build loop is fixing what review found\. Nothing is needed from you\.<\/span>/);
   assert.equal(renderGoAction({ ...ticket, status: 'rework' }), '', 'and no Go button');
-  // The same card on Needs your input: the ask and the Go button, and no quiet line.
+  // The same card on Needs your input: the ask and the Go button, and his own line.
   const nyi = renderQuickAction({ ...ticket, status: 'needs your input' });
   assert.match(nyi, /<p class="needed">[^<]*go[\s\S]*Your move: Reply/);
-  assert.doesNotMatch(nyi, /class="where/);
+  assert.match(nyi, /role="tooltip">The loop is waiting on your answer below\.<\/span>/);
   assert.match(renderGoAction({ ...ticket, status: 'needs your input' }), /go-action/);
   // His answer is in: no ask, even in his status.
   assert.doesNotMatch(renderQuickAction({ ...ticket, status: 'needs your input', answerIn: true }), /Your move|class="needed"/);
@@ -1685,10 +1685,84 @@ test('Quick Action asks for his move only while the ticket waits on him (SP-118)
   for (const status of ['requested', 'queued', 'building', 'in review', 'rework', 'live']) {
     const html = renderQuickAction({ ...ticket, status });
     assert.doesNotMatch(html, /Your move|class="needed"/, status);
-    assert.match(html, /class="where quiet">[^<]*Nothing is needed from you\.<\/p>/, status);
+    assert.match(html, /role="tooltip">[^<]*Nothing is needed from you\.<\/span>/, status);
   }
   // The page hands the function the ticket's status and answerIn (the whole thread).
   assert.match(readFileSync(WEB('app.mjs'), 'utf8'), /renderQuickAction\(t\)/);
+});
+
+test('the status is first under the heading, with its line behind an information icon (SP-290)', () => {
+  const contract = readFileSync(new URL('../docs/LOOP_CONTRACT.md', import.meta.url), 'utf8');
+  const spelled = ['Requested', 'Rework', 'Queued', 'Building', 'In review', 'Needs your input', 'Ready to launch', 'Live'];
+  for (const name of spelled) {
+    assert.match(contract, new RegExp(`\\| \\*{0,2}\`${name}\`\\*{0,2} \\|`), `${name} is spelled as LOOP_CONTRACT.md spells it`);
+    const html = renderQuickAction({ name: 'Fix it', description: '', status: name.toLowerCase() });
+    const lines = html.split('\n');
+    assert.equal(lines[0], '<h1>Fix it</h1>');
+    assert.ok(lines[1].startsWith(`<p class="status-line">Status: <span class="status-name">${name}</span>`), `${name}: right under the heading`);
+    assert.match(lines[1], /<button type="button" class="status-info" title="Status Information" aria-label="Status Information" aria-expanded="false" aria-describedby="status-tip"><svg[^>]*aria-hidden="true">/, name);
+    assert.match(lines[1], /<span class="status-tip" id="status-tip" role="tooltip">[^<]+<\/span><\/p>$/, name);
+    assert.doesNotMatch(html, /class="where/, `${name}: the old grey line is gone`);
+  }
+  assert.match(renderStatusLine({ status: 'queued' }), /role="tooltip">It waits for the build loop to pick it up\. Nothing is needed from you\.</);
+  // Ready to launch names the Merge only when the page offers the Merge button (third send-back).
+  const pr = 'https://github.com/o/r/pull/14';
+  const ready = { status: 'Ready to launch', mergePhrase: 'merge', pullRequest: pr };
+  assert.match(renderStatusLine(ready), /role="tooltip">The work is built and checked, and waits on your Merge\.</);
+  assert.ok(offersMerge(ready));
+  assert.match(renderStatusLine({ status: 'ready to launch' }), new RegExp(`role="tooltip">${REPLY_LINE.replace('.', '\\.')}<`), 'no pull request: no Merge to name');
+  assert.match(renderStatusLine({ ...ready, mergePhrase: null }), /role="tooltip">It waits on your reply below\.</, 'no merge word: no Merge button');
+  // A card whose move is Close: the "i" names Close, as the button does (BE-7).
+  const closeCard = { body: '@@ASKED\nx\n**NEEDED FROM DANE: Nothing to merge.**\n**Your move: Close — its work is live.**', machine: true };
+  for (const status of ['ready to launch', 'needs your input']) {
+    const closing = { ...ready, status, closePhrase: 'close', comments: [closeCard] };
+    assert.ok(offersClose(closing), `${status}: the card's move is Close`);
+    assert.match(renderStatusLine(closing), new RegExp(`role="tooltip">${CLOSE_LINE.replace(/[.;]/g, '\\$&')}<`), status);
+    assert.doesNotMatch(renderStatusLine(closing), /waits on your Merge|answer below/, status);
+    assert.match(renderCloseAction(closing), /close-action/, `${status}: and the page draws Close`);
+    assert.doesNotMatch(renderMergeAction(closing), /merge-action/, `${status}: and no Merge`);
+  }
+  // His answer is in: the status says so, as the Details line does.
+  assert.match(renderStatusLine({ status: 'needs your input', answerIn: true }), new RegExp(`status-name">Needs your input · ${ANSWER_IN_NOTE}<`));
+  // ...and the "i" no longer asks for his move once it is made (review send-back).
+  for (const status of ['needs your input', 'ready to launch']) {
+    const answered = renderStatusLine({ status, answerIn: true });
+    assert.match(answered, /role="tooltip">Your answer is in; the loop takes it from here\. Nothing is needed from you\.</, status);
+    assert.doesNotMatch(answered, /answer below|waits on your Merge/, status);
+  }
+  const merging = renderStatusLine({ status: 'ready to launch', mergeStands: true });
+  assert.match(merging, new RegExp(`status-name">Ready to launch · ${MERGE_STANDS_NOTE}<`));
+  assert.match(merging, /role="tooltip">Your merge word is in; the relay merges it on its next pass\. Nothing is needed from you\.</);
+  assert.doesNotMatch(merging, /waits on your Merge/);
+  // A pull request past the merge (SP-226) asks nothing of him either (second send-back).
+  const merged = renderStatusLine({ status: 'ready to launch', pullRequestState: { number: 14, state: 'MERGED' } });
+  assert.match(merged, /role="tooltip">The pull request is merged; the relay moves this to Live on its next pass\. Nothing is needed from you\.</);
+  assert.doesNotMatch(merged, /waits on your Merge/);
+  const closed = renderStatusLine({ status: 'ready to launch', pullRequestState: { number: 14, state: 'CLOSED' } });
+  assert.match(closed, /role="tooltip">The pull request was closed without merging; see the note below\.</);
+  assert.doesNotMatch(closed, /waits on your Merge/);
+  // Merged wins over a merge word still standing; a failed read (state null) is not settled.
+  assert.match(renderStatusLine({ status: 'ready to launch', mergeStands: true, pullRequestState: { number: 14, state: 'MERGED' } }), /role="tooltip">The pull request is merged;/);
+  assert.match(renderStatusLine({ ...ready, pullRequestState: { number: 14, state: null } }), /waits on your Merge/);
+  assert.match(renderStatusLine({ ...ready, pullRequestState: { number: 14, state: 'OPEN' } }), /waits on your Merge/);
+  // The same through the whole page, as BE-8 ("Merged on GitHub but not yet Live") shows it.
+  const be8 = renderQuickAction({ name: 'Merged on GitHub but not yet Live', description: '', status: 'ready to launch', pullRequestState: { number: 14, state: 'MERGED' } });
+  assert.match(be8, /role="tooltip">The pull request is merged; the relay moves this to Live/);
+  assert.doesNotMatch(be8, /waits on your Merge/);
+  // The same through the whole page, as AL-2 in the demo shows it.
+  const al2 = renderQuickAction({ name: 'Ship it', description: '', status: 'ready to launch', answerIn: true });
+  assert.match(al2, /role="tooltip">Your answer is in; the loop takes it from here/);
+  // Under the Ticket name line when his title differs.
+  const renamed = renderQuickAction({ name: 'Loop name', description: '## Asked\n```\nHis title\n\nwords\n```\n', status: 'building' }).split('\n');
+  assert.match(renamed[1], /class="ticket-name/);
+  assert.match(renamed[2], /^<p class="status-line">Status: <span class="status-name">Building</);
+  // No status, no line; an unknown status is named but has no icon.
+  assert.equal(renderStatusLine({ status: '' }), '');
+  assert.doesNotMatch(renderStatusLine({ status: 'odd' }), /status-info/);
+  // Hover, keyboard focus and a tap (aria-expanded, toggled by the page) all show the line.
+  const css = readFileSync(WEB('app.css'), 'utf8');
+  for (const show of [':hover', ':focus-visible', '[aria-expanded="true"]']) assert.ok(css.includes(`.quick .status-info${show} + .status-tip`), show);
+  assert.match(readFileSync(WEB('app.mjs'), 'utf8'), /statusInfo\?\.addEventListener\('click'/);
 });
 
 // ── Quick Action: commands he is asked to run, click-to-copy ─────────────────

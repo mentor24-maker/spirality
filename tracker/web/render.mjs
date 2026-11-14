@@ -1001,18 +1001,86 @@ export function renderFilesMade({ comments = [] }) {
 }
 
 /**
- * Where a ticket sits, in one quiet line, for each status that is the
- * machine's turn (SP-118): shown in place of a card's ask, which is only his
- * move while the ticket is in one of his two statuses.
+ * What each status means for him, in one line (SP-118, SP-290): shown behind
+ * the information icon beside "Status: <status>" under the ticket's heading.
+ * The machine's statuses say nothing is needed; his two say what is.
  */
 export const STATUS_LINES = {
-  requested: 'In Requested: the intake loop is writing it up as a spec. Nothing is needed from you.',
-  queued: 'In Queued: it waits for the build loop to pick it up. Nothing is needed from you.',
-  building: 'In Building: the build loop is working on it. Nothing is needed from you.',
-  'in review': 'In review: the review loop is checking the pull request. Nothing is needed from you.',
-  rework: 'In Rework: the build loop is fixing what review found. Nothing is needed from you.',
-  live: 'Live: it is done. Nothing is needed from you.',
+  requested: 'The intake loop is writing it up as a spec. Nothing is needed from you.',
+  queued: 'It waits for the build loop to pick it up. Nothing is needed from you.',
+  building: 'The build loop is working on it. Nothing is needed from you.',
+  'in review': 'The review loop is checking the pull request. Nothing is needed from you.',
+  rework: 'The build loop is fixing what review found. Nothing is needed from you.',
+  'needs your input': 'The loop is waiting on your answer below.',
+  'ready to launch': 'The work is built and checked, and waits on your Merge.',
+  live: 'It is done. Nothing is needed from you.',
 };
+
+/**
+ * The information line once his move is made (SP-290 send-back): his answer
+ * is in, or his merge word stands, so the page has dropped the ask and the
+ * Merge, and the line must not ask him again. Wins over STATUS_LINES, in the
+ * order statusLabel names them.
+ */
+export const ANSWER_IN_LINE = 'Your answer is in; the loop takes it from here. Nothing is needed from you.';
+export const MERGE_STANDS_LINE = 'Your merge word is in; the relay merges it on its next pass. Nothing is needed from you.';
+
+/**
+ * The information line once a Ready to launch ticket's pull request is past
+ * the merge (SP-290 second send-back, SP-226's prSettled): merged, or closed
+ * without merging. Wins over the merge word and the bare status, because the
+ * page has dropped the Merge in both cases.
+ */
+export const PR_MERGED_LINE = 'The pull request is merged; the relay moves this to Live on its next pass. Nothing is needed from you.';
+export const PR_CLOSED_LINE = 'The pull request was closed without merging; see the note below.';
+
+/** The information icon: a ring with an "i" in it, drawn here, never from ticket text. */
+const INFO_ICON = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v6"/><path d="M12 7.5v.01"/></svg>';
+
+/**
+ * The information line for one of his two statuses while his move is still
+ * to make (SP-290 third send-back): it names the move the page's own buttons
+ * offer, decided by the same tests the buttons use (offersMerge,
+ * offersClose), never by the bare status. Close wins over the status's own
+ * line; a Ready to launch ticket with no Merge to offer (no pull request,
+ * no merge word, or a card asking for a reply) points at the reply box.
+ */
+export const CLOSE_LINE = 'It waits on your Close; the card below says why.';
+export const REPLY_LINE = 'It waits on your reply below.';
+
+/** The line for his statuses, from the move the page offers (see CLOSE_LINE). */
+function hisMoveLine(t, state) {
+  if (offersClose(t)) return CLOSE_LINE;
+  if (state === READY_TO_LAUNCH) return offersMerge(t) ? STATUS_LINES[state] : REPLY_LINE;
+  return STATUS_LINES[state];
+}
+
+/**
+ * The ticket's status, first under its heading (SP-290): "Status: Queued" in
+ * the page's own type, the status as statusLabel writes it, and beside it an
+ * information button whose line (STATUS_LINES, or ANSWER_IN_LINE /
+ * MERGE_STANDS_LINE once his move is made, or PR_MERGED_LINE /
+ * PR_CLOSED_LINE once the pull request is past the merge, or on his two
+ * statuses the move the page's buttons offer, hisMoveLine) shows on hover,
+ * on tap (the page toggles aria-expanded) and from the keyboard. Takes the
+ * page's whole ticket, as the buttons do. '' with no status; no button for
+ * a status with no line.
+ */
+export function renderStatusLine(t) {
+  const { status, answerIn = false, mergeStands = false, pullRequestState = null } = t;
+  const state = String(status ?? '').trim().toLowerCase();
+  if (!state) return '';
+  const settled = prSettled({ status, pullRequestState })
+    ? (pullRequestState.state === 'MERGED' ? PR_MERGED_LINE : PR_CLOSED_LINE)
+    : null;
+  const line = settled ?? (answerIn ? ANSWER_IN_LINE : mergeStands ? MERGE_STANDS_LINE
+    : HIS_STATUSES.includes(state) ? hisMoveLine(t, state) : STATUS_LINES[state]);
+  const info = line
+    ? `<button type="button" class="status-info" title="Status Information" aria-label="Status Information" aria-expanded="false" aria-describedby="status-tip">${INFO_ICON}</button>`
+      + `<span class="status-tip" id="status-tip" role="tooltip">${escapeHtml(line)}</span>`
+    : '';
+  return `<p class="status-line">Status: <span class="status-name">${escapeHtml(statusLabel({ status, answerIn, mergeStands }))}</span>${info}</p>`;
+}
 
 /** Where `line`'s inline code spans sit, as [start, end) pairs: nothing inside one is ever split. */
 const codeRanges = (line) => [...line.matchAll(CODE_SPAN)].map((m) => [m.index, m.index + m[0].length]);
@@ -1086,7 +1154,7 @@ export function askParagraphs(ask) {
  * needed is that newest card's ask, drawn only while the ticket is in one of
  * his two statuses and his answer is not in (renderAnswerIn); a card stays in
  * the thread after he answers, and its ask is no longer his move (SP-118).
- * On a machine status, one quiet line says where it is instead.
+ * Under the heading (and the Ticket name line) comes renderStatusLine.
  *
  * When the description carries his `## Asked` request (SP-213), his own
  * words come first: his title is the heading (the ticket's current name on a
@@ -1100,7 +1168,8 @@ export function askParagraphs(ask) {
  * the description's first paragraph (its "(none attached)" line) is never
  * the summary.
  */
-export function renderQuickAction({ name, description, status, tags = [], comments = [], answerIn = false, mergeStands = false, pullRequestState = null }) {
+export function renderQuickAction(t) {
+  const { name, description, status, tags = [], comments = [], answerIn = false, mergeStands = false, pullRequestState = null } = t;
   const card = newestCard(comments);
   const report = bugReport({ tags, description });
   // A bug report's first paragraph is its "(none attached)" screenshots line (SP-286): only a card's context is a summary.
@@ -1111,26 +1180,26 @@ export function renderQuickAction({ name, description, status, tags = [], commen
   // SP-226: a merged or closed PR is past the card's "Your move: Merge".
   // SP-285: nor is it his move while his merge word still stands.
   const ask = card && his && !answerIn && !mergeStands && !prSettled({ status, pullRequestState }) ? cardAsk(card.body) : null;
-  const where = his ? null : STATUS_LINES[state] ?? null;
   const asked = originalRequest(description);
   const top = asked ? [
     `<h1>${escapeHtml(asked.title)}</h1>`,
     String(name ?? '').trim() !== asked.title ? `<p class="ticket-name quiet">Ticket name: ${escapeHtml(name)}</p>` : '',
+    renderStatusLine(t),
     '<h2 class="request-heading">Original Request</h2>',
     `<p class="original-request">${escapeHtml(asked.words)}</p>`,
     asked.slicedFrom ? `<p class="sliced-from">Sliced from <a href="/t/${escapeHtml(asked.slicedFrom)}">${escapeHtml(asked.slicedFrom)}</a></p>` : '',
     summary ? '<h2 class="request-heading">How the Loop Understood It</h2>' : '',
   ] : report ? [
     '<h1>Bug Report:</h1>',
+    renderStatusLine(t),
     `<p class="bug-words">${escapeHtml(report.words)}</p>`,
     report.facts.length ? `<ul class="bug-facts">${report.facts.map(bugReportFact).join('')}</ul>` : '',
     report.screenshots ? '<p class="bug-shots quiet">Screenshots are attached: see the description under Details.</p>' : '',
-  ] : [`<h1>${escapeHtml(name)}</h1>`];
+  ] : [`<h1>${escapeHtml(name)}</h1>`, renderStatusLine(t)];
   return [
     ...top,
     summary ? `<p class="summary">${renderInline(summary)}</p>` : '',
     ask ? askParagraphs(ask).map((p) => `<p class="needed">${p.map(renderInline).join('<br>')}</p>`).join('\n') : '',
-    where ? `<p class="where quiet">${escapeHtml(where)}</p>` : '',
   ].filter(Boolean).join('\n');
 }
 
@@ -1262,14 +1331,26 @@ export function renderMergeAction({ status, mergePhrase, pullRequest, pullReques
   if (prSettled({ status, pullRequestState })) return line;
   if (answerIn || mergeStands) return line;
   if (String(status ?? '').toLowerCase() !== READY_TO_LAUNCH || !mergePhrase || !pullRequest) return line;
-  const card = newestCard(comments);
-  const move = card ? cardMove(card.body) : null;
-  // A regex, not a quoted word: the page's code spells no merge phrase.
-  if (move && !/^Merge$/.test(move)) return '';
+  if (!offersMerge({ status, mergePhrase, pullRequest, pullRequestState, comments, answerIn, mergeStands })) return '';
   return `${line}<form class="merge-action">
         <button type="submit">Merge</button><span class="note"></span>
         <p class="quiet">Posts &ldquo;${escapeHtml(mergePhrase)}&rdquo; as your reply; the relay merges it within a few minutes.</p>
       </form>`;
+}
+
+/**
+ * Does the page offer the Merge button (renderMergeAction)? A Ready to
+ * launch ticket with a pull request, a merge word from the server, nothing
+ * settled or said yet, and a newest card that names no other move. The
+ * status line's "i" asks the same (hisMoveLine), so the two never disagree.
+ */
+export function offersMerge({ status, mergePhrase, pullRequest, pullRequestState = null, comments = [], answerIn = false, mergeStands = false }) {
+  if (prSettled({ status, pullRequestState }) || answerIn || mergeStands) return false;
+  if (String(status ?? '').toLowerCase() !== READY_TO_LAUNCH || !mergePhrase || !pullRequest) return false;
+  const card = newestCard(comments);
+  const move = card ? cardMove(card.body) : null;
+  // A regex, not a quoted word: the page's code spells no merge phrase.
+  return !move || /^Merge$/.test(move);
 }
 
 /**
@@ -1312,10 +1393,7 @@ export function mergeQuestion({ name, pullRequest }) {
  * Never once his answer is in (renderAnswerIn).
  */
 export function renderCloseAction({ status, closePhrase, comments = [], answerIn = false }) {
-  if (answerIn) return '';
-  if (!HIS_STATUSES.includes(String(status ?? '').toLowerCase()) || !closePhrase) return '';
-  const card = newestCard(comments);
-  if (!card || cardMove(card.body) !== 'Close') return '';
+  if (!offersClose({ status, closePhrase, comments, answerIn })) return '';
   // The relay's two close paths differ: on Ready to launch it waits for the
   // work to be merged; on Needs your input the hand-back closes it at once.
   const when = String(status).toLowerCase() === READY_TO_LAUNCH
@@ -1325,6 +1403,18 @@ export function renderCloseAction({ status, closePhrase, comments = [], answerIn
         <button type="submit">Close</button><span class="note"></span>
         <p class="quiet">Posts &ldquo;${escapeHtml(closePhrase)}&rdquo; as your reply; ${when}.</p>
       </form>`;
+}
+
+/**
+ * Does the page offer the Close button (renderCloseAction)? One of his two
+ * statuses, a close word from the server, his answer not in, and a newest
+ * card whose move is Close. The status line's "i" asks the same.
+ */
+export function offersClose({ status, closePhrase, comments = [], answerIn = false }) {
+  if (answerIn) return false;
+  if (!HIS_STATUSES.includes(String(status ?? '').toLowerCase()) || !closePhrase) return false;
+  const card = newestCard(comments);
+  return Boolean(card) && cardMove(card.body) === 'Close';
 }
 
 /** The one question the Close button asks before it posts. Plain text, for confirm(). */

@@ -229,6 +229,13 @@ span.action.answer-in-icon { color: #2e7d32; }
 .quick .held-up { grid-column: 1 / -1; margin: 0; padding: 0.6rem 1rem; border-left: 4px solid #b26a00; border-radius: 4px; background: #fff4e0; color: #7a4800; font-weight: 600; }
 .quick .needed { color: var(--red); font-weight: 700; white-space: pre-wrap; }
 .quick .ticket-name { margin: -0.5rem 0 1rem; font-size: 0.9em; }
+/* SP-290: the status, first under the heading, in the page's own type; its line behind the "i". */
+.quick .status-line { position: relative; margin: -0.5rem 0 1rem; }
+.quick .status-name { font-weight: 600; }
+.quick .status-info { display: inline-flex; vertical-align: middle; margin-left: 0.35rem; padding: 0.15rem; border: 0; border-radius: 50%; background: transparent; color: var(--blue); cursor: help; }
+.quick .status-info:hover, .quick .status-info:focus-visible, .quick .status-info[aria-expanded="true"] { background: var(--machine); }
+.quick .status-tip { display: none; position: absolute; z-index: 5; left: 0; top: 100%; margin-top: 0.3rem; max-width: 26rem; padding: 0.5rem 0.75rem; border: var(--hairline); border-radius: 6px; background: #fff; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15); }
+.quick .status-info:hover + .status-tip, .quick .status-info:focus-visible + .status-tip, .quick .status-info[aria-expanded="true"] + .status-tip { display: block; }
 .quick .request-heading { font-size: 0.95rem; color: var(--quiet); font-weight: 600; margin: 1.25rem 0 0.35rem; }
 .quick .original-request { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; padding: 0.6rem 0.8rem; border-left: 3px solid var(--blue); background: var(--machine); }
 .quick .sliced-from { margin: 0.5rem 0 0; font-size: 0.9em; }

@@ -1882,6 +1882,10 @@ async function drawTicket(id, said = null, kept = null) {
     { label: `Task ${t.id}`, href: `/t/${encodeURIComponent(t.id)}` },
     { label: 'Details' },
   ]);
+  // SP-290: the status line's "i" opens and closes on a tap or Enter; hover and keyboard focus show it too (app.css).
+  const statusInfo = main.querySelector('.status-info');
+  statusInfo?.addEventListener('click', () => statusInfo.setAttribute('aria-expanded', String(statusInfo.getAttribute('aria-expanded') !== 'true')));
+  statusInfo?.addEventListener('keydown', (e) => { if (e.key === 'Escape') statusInfo.setAttribute('aria-expanded', 'false'); });
   const copyForm = main.querySelector('form.copy');
   copyForm?.addEventListener('submit', async (e) => {
     e.preventDefault();
