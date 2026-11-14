@@ -1495,6 +1495,11 @@ test('GET /reports answers the Reporting figures for every project or one, 404 f
       assert.deepEqual(r.body.humanHours.week, { finished: 1, estimated: 0, notEstimated: 1, hours: null, days: 7, perDay: null }, path);
     }
     assert.equal((await f.call('GET', '/reports?project=alpha')).body.projectName, 'Alpha');
+    // Growth Rate (SP-241): the answer carries all three timeframes; one ticket filed today is too young to compare.
+    const growth = (await f.call('GET', '/reports?project=alpha')).body;
+    assert.deepEqual(growth.growthPeriods.map((g) => g.label), ['Weekly', 'Monthly', 'Annual']);
+    assert.deepEqual(growth.growth.week.started, { current: 1, previous: 0, change: null, reason: 'too-young' });
+    assert.deepEqual(Object.keys(growth.growth), ['week', 'month', 'year']);
     const unknown = await f.call('GET', '/reports?project=nope');
     assert.equal(unknown.status, 404);
     assert.equal(unknown.body.error, 'unknown-project');

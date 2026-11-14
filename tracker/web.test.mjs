@@ -7,7 +7,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { DEMO_NEWEST_RELEASE, DEMO_OWN_PROJECT, demoNewestRelease, seedDemo, tickingClock } from './demoData.mjs';
-import { reportsOf, REPORT_RANGES, searchTickets, PRIORITIES, timeSplitOf, isFailureNote, TIME_BUCKETS, pipelineControlsOf } from './pageData.mjs';
+import { reportsOf, REPORT_RANGES, GROWTH_PERIODS, searchTickets, PRIORITIES, timeSplitOf, isFailureNote, TIME_BUCKETS, pipelineControlsOf } from './pageData.mjs';
 import { escapeHtml, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, renderTopics, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, renderReleaseGroup, controlValueText, mountainTime, wakeInEffectText, modelLastPassText, renderConsole, renderConsoleTile, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, consoleFeature, featureColourIndex, renderFeatureKey, FEATURE_PALETTE, drainLine, capInFlightText } from './web/render.mjs';
 import { startServer, setupSettingsOf } from './server.mjs';
 import { saveAnswers, setupFields, setupOf } from './setup.mjs';
@@ -2658,6 +2658,68 @@ test('Reporting: Task Productivity has Start Date and End Date pickers after the
   assert.equal(path.searchParams.get('to'), new Date(2026, 10, 13, 23, 59, 59, 999).toISOString());
   assert.equal(reportsPath('', { from: '2026-11-14', to: '2026-11-13' }), '/reports', 'a start after the end is never asked for');
   assert.equal(reportsPath('', { from: '', to: '2026-11-13' }), '/reports');
+});
+
+test('Reporting growth: 4 started this week against 2 the week before is +100%, 2 against 4 is -50%, none before or too young says so (SP-241)', () => {
+  const growthOf = (setup, project = null) => {
+    const r = reportingStore();
+    try {
+      setup(r);
+      return reportsOf(r.store, { project, now: r.now }).growth;
+    } finally { r.done(); }
+  };
+  const many = (r, n, daysAgo) => { for (let i = 0; i < n; i += 1) r.ticket('alpha', daysAgo); };
+  // An old ticket, so the project has the history to compare a whole week.
+  const old = (r) => r.ticket('alpha', 400);
+  const up = growthOf((r) => { old(r); many(r, 4, 3); many(r, 2, 10); });
+  assert.deepEqual(up.week.started, { current: 4, previous: 2, change: 100, reason: null });
+  const down = growthOf((r) => { old(r); many(r, 2, 3); many(r, 4, 10); });
+  assert.deepEqual(down.week.started, { current: 2, previous: 4, change: -50, reason: null });
+  const flat = growthOf((r) => { old(r); many(r, 3, 3); many(r, 3, 10); });
+  assert.equal(flat.week.started.change, 0);
+  const noneBefore = growthOf((r) => { old(r); many(r, 3, 3); });
+  assert.deepEqual(noneBefore.week.started, { current: 3, previous: 0, change: null, reason: 'none-before' });
+  // A project younger than 14 days: not enough history for Weekly, nor Monthly or Annual.
+  const young = growthOf((r) => { many(r, 4, 3); many(r, 2, 10); });
+  for (const key of ['week', 'month', 'year']) assert.equal(young[key].started.reason, 'too-young', key);
+  assert.equal(young.week.started.change, null);
+  // Finished: counted by the move to Live, the same as the fixed ranges.
+  const done = growthOf((r) => { old(r); r.ticket('alpha', 50, [2, 'live']); r.ticket('alpha', 50, [3, 'live']); r.ticket('alpha', 50, [9, 'live']); });
+  assert.deepEqual(done.week.finished, { current: 2, previous: 1, change: 100, reason: null });
+  // Monthly and Annual compare 30 and 365 days.
+  const longer = growthOf((r) => { r.ticket('alpha', 800); many(r, 1, 20); many(r, 2, 40); many(r, 3, 100); many(r, 1, 500); });
+  assert.deepEqual(longer.month.started, { current: 1, previous: 2, change: -50, reason: null });
+  assert.deepEqual(longer.year.started, { current: 6, previous: 1, change: 500, reason: null });
+  // The answer names the timeframes for the picker, Weekly first.
+  const r = reportingStore();
+  try {
+    assert.deepEqual(reportsOf(r.store, { now: r.now }).growthPeriods, GROWTH_PERIODS.map(({ key, label }) => ({ key, label })));
+    assert.deepEqual(GROWTH_PERIODS.map((g) => g.label), ['Weekly', 'Monthly', 'Annual']);
+  } finally { r.done(); }
+});
+
+test('Reporting: Growth Rate is the last Task Productivity column, a Weekly/Monthly/Annual picker redrawn without asking the server (SP-241)', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const fn = app.slice(app.indexOf('async function drawReporting('), app.indexOf('function pickerDay('));
+  const head = fn.slice(fn.indexOf('const productivityHead'), fn.indexOf('const line ='));
+  assert.match(head, /<label for="report-growth">Growth Rate<\/label><select id="report-growth">\$\{r\.growthPeriods\.map/);
+  assert.ok(head.indexOf('report-to') < head.indexOf('report-growth'), 'Growth Rate comes after End Date');
+  assert.match(head, /i === 0 \? ' selected' : ''/);
+  const row = fn.slice(fn.indexOf('const line ='), fn.indexOf('// A flow row'));
+  assert.ok(row.indexOf('data-custom=') < row.indexOf('data-growth='), 'the growth cell is the last in each row');
+  // The picker redraws from the answer it already has: no api() call in it.
+  const show = fn.slice(fn.indexOf('const showGrowth'), fn.indexOf("growthPicker.addEventListener('change', showGrowth)"));
+  assert.match(show, /r\.growth\[growthPicker\.value\]/);
+  assert.doesNotMatch(show, /api\(/);
+  // The cell itself, run here.
+  const src = app.slice(app.indexOf('function growthCell('));
+  const growthCell = new Function(`${src.slice(0, src.indexOf('\n}\n') + 3)}\nreturn growthCell;`)();
+  assert.equal(growthCell({ change: 100, reason: null }), '+100%');
+  assert.equal(growthCell({ change: -50, reason: null }), '-50%');
+  assert.equal(growthCell({ change: 0, reason: null }), '0%');
+  assert.equal(growthCell({ change: null, reason: 'none-before' }), '<span class="quiet">none in the period before</span>');
+  assert.equal(growthCell({ change: null, reason: 'too-young' }), '<span class="quiet">not enough history yet</span>');
+  assert.equal(growthCell(undefined), '');
 });
 
 /** True when `ms` is within ten minutes of `days` days: the test clock ticks a minute per reading. */
