@@ -1917,6 +1917,34 @@ export function renderListAssignee({ id, assignee, assigneeId }, operator) {
   return `<select class="list-assignee" data-assignee-of="${escapeHtml(id)}" aria-label="Assignee of ${escapeHtml(id)}">${options}</select><span class="note" data-assignee-note="${escapeHtml(id)}" role="status"></span>`;
 }
 
+/**
+ * The Add Task box's two ways to name a task (SP-248): `suggest`, where the
+ * title is picked from suggestions made from the description alone, and
+ * `own`, where he types a title first and it is offered beside them.
+ */
+export const TITLE_MODES = Object.freeze(['suggest', 'own']);
+
+/** A kept title mode read back from the browser: `own` only when it says so, else `suggest`. */
+export function titleModeOf(text) {
+  return text === 'own' ? 'own' : 'suggest';
+}
+
+/**
+ * The Add Task box's choice list: in Write My Own Title his own title first
+ * ("Keep my title: ..."), then the suggested ones, each a radio button whose
+ * value is the title exactly as it is filed. A suggestion that repeats his
+ * own title is not offered twice. The first choice starts picked. Every
+ * title is escaped; an empty list draws nothing.
+ */
+export function renderTitleChoices({ own = null, titles = [] } = {}) {
+  const mine = typeof own === 'string' && own.trim() ? own : null;
+  const choices = [
+    ...(mine == null ? [] : [{ value: mine, text: `Keep my title: ${mine}` }]),
+    ...titles.filter((t) => typeof t === 'string' && t.trim() && t !== mine).map((t) => ({ value: t, text: t })),
+  ];
+  return choices.map((c, i) => `<label class="title-choice"><input type="radio" name="title-choice" value="${escapeHtml(c.value)}"${i === 0 ? ' checked' : ''}> <span>${escapeHtml(c.text)}</span></label>`).join('');
+}
+
 /** The columns a stage's table sorts on, in the order they are drawn, with the class each cell wears. */
 export const SORT_COLUMNS = Object.freeze([
   { key: 'id', label: 'Ticket #' },

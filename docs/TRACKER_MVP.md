@@ -453,6 +453,19 @@ sends a 1-hour reset link to it if it has an account, saying the same
 either way. The page shows a count of tickets waiting on him in the
 browser tab's title, so a pinned tab tells him at a glance.
 
+### The Add Task Box's Suggested Titles
+
+The Add Task box opens with a toggle (SP-248): **Suggest a Title** shows only
+the Description; **Write My Own Title** shows the Title too. Either way the
+first submit, "Suggest Titles", sends the words to
+`POST /projects/:slug/tickets/suggest-titles` and shows the five titles to
+pick from, his own first ("Keep my title: ...") when he typed one. "Suggest
+Again" asks for a fresh five; editing the words puts the button back to
+Suggest Titles. The picked title goes through the project check below and is
+filed exactly as shown. When the suggester fails, the box says why in one
+line and shows the Title field, so he can type one and file. The toggle is
+kept in the browser and outlives a filing.
+
 ### The Add Task Box's Project Check
 
 Before the Tasks page's Add Task box files a request, it asks the server
