@@ -20,7 +20,7 @@ StarCaster's watchdogs into one of two kinds:
 The slices that move them build from this table: SP-266 (heartbeat),
 SP-267 (stale ready, stale answer), SP-268 (throughput, failed-job report,
 checkout currency), then SP-269 has the setup wizard give every project the
-lot. A pipeline row with no ticket says why; Dane decides whether it gets one.
+lot ([ONBOARDING_A_PROJECT.md, "The pipeline watchdogs"](ONBOARDING_A_PROJECT.md#the-pipeline-watchdogs-sp-269)). A pipeline row with no ticket says why; Dane decides whether it gets one.
 
 Where it was read: StarCaster's `main` at commit `e825945`, the schedule's
 own wake ([run_bus_relay.sh](https://github.com/mentor24-maker/starcaster/blob/e82594523d1a15ee9df8b08e6c7667f43f915bb3/scripts/run_bus_relay.sh),

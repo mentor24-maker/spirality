@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, existsSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join, dirname, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { needs, planCopies, templateVars, render } from '../../lib/onboardCopy.mjs';
 
@@ -58,8 +58,72 @@ test('nothing the ticket door, the runners or the copied tests need is left out'
 
 test('the door\'s commands are among the copies the npm scripts run', () => {
   for (const command of Object.values(manifest.npmScripts)) {
-    for (const m of command.matchAll(/node (loop\/\S+\.mjs)/g)) assert.ok(to.has(m[1]), `${m[1]} is run but not copied`);
+    for (const m of command.matchAll(/node (\S+\.mjs)/g)) assert.ok(to.has(m[1]), `${m[1]} is run but not copied`);
   }
+});
+
+// The pipeline watchdogs (SP-266, SP-267, SP-268), which the setup gives
+// every project (SP-269): the scripts the relay and the lane runner start,
+// the modules they use and the door helpers they post through.
+const WATCHDOG_SCRIPTS = {
+  heartbeat: 'scripts/heartbeat.mjs',
+  'stale-ready': 'scripts/stale_ready.mjs',
+  'stale-answer': 'scripts/stale_answer.mjs',
+  throughput: 'scripts/loop_throughput.mjs',
+  'checkout:current': 'scripts/checkout_currency.mjs',
+  'report:failure': 'scripts/report_job_failure.mjs',
+};
+const WATCHDOG_FILES = [
+  ...Object.values(WATCHDOG_SCRIPTS),
+  'scripts/lib/watchdogDoor.mjs', 'scripts/lib/watchdogDoorCalls.mjs', 'scripts/lib/laneFiles.mjs',
+  'lib/heartbeat.js', 'lib/staleReady.js', 'lib/staleAnswer.js', 'lib/loopThroughput.js', 'lib/checkoutCurrency.js',
+  'lib/watchdogPosts.js', 'lib/loopNoticeboards.js', 'lib/pulse.js', 'lib/onboardLanes.mjs',
+  'scripts/lib/relay_heartbeat.sh', 'scripts/lib/relay_watchdogs.sh', 'scripts/lib/relay_queue_watchdogs.sh', 'scripts/lib/lane_failure.sh',
+];
+// A watchdog's only edit: its modules sit under loop/lib/ in a project.
+const LIB_MOVE = /^(.*'(?:\.\.\/)+)(lib\/[\w.]+'.*)$/;
+
+for (const file of WATCHDOG_FILES) {
+  test(`the setup copies the watchdog file ${file}, byte for byte or with only its lib/ imports moved`, () => {
+    const entry = manifest.files.find((f) => f.from === file);
+    assert.ok(entry, `${file} is not in the manifest`);
+    const planned = planCopies(manifest, { readSpirality: read, vars }).find((f) => f.from === file);
+    if (!entry.edits) {
+      assert.equal(planned.content, read(file), `${file} is not copied byte for byte`);
+      assert.equal(entry.to, file.startsWith('lib/') ? `loop/${file}` : file, 'a module goes under loop/, a script keeps its path');
+      return;
+    }
+    assert.equal(entry.to, file, 'an adapted script keeps its path, where the relay and the runner look for it');
+    for (const { find, replace } of entry.edits) {
+      const m = LIB_MOVE.exec(find);
+      assert.ok(m, `${file}: an edit that is not a lib/ import (${find})`);
+      assert.equal(replace, `${m[1]}loop/${m[2]}`, `${file}: an edit does more than move its import to loop/lib/`);
+    }
+    let back = planned.content;
+    for (const { find, replace } of entry.edits) back = back.replace(replace, () => find);
+    assert.equal(back, read(file), `${file} differs from Spirality's by more than its named edits`);
+  });
+}
+
+test('each watchdog has its npm command, the same as Spirality\'s own', () => {
+  const own = JSON.parse(read('package.json')).scripts;
+  for (const [name, file] of Object.entries(WATCHDOG_SCRIPTS)) {
+    assert.equal(manifest.npmScripts[name], `node ${file}`, `npm run ${name}`);
+    assert.equal(own[name], manifest.npmScripts[name], `Spirality's own npm run ${name} runs something else`);
+  }
+});
+
+test('every relative import in a copied file finds a file the setup writes, at the project\'s paths', () => {
+  const unresolved = [];
+  for (const f of planCopies(manifest, { readSpirality: read, vars })) {
+    if (!/\.(?:m|c)?js$/.test(f.to)) continue;
+    for (const m of String(f.content).matchAll(/(?:\bfrom\s+|\brequire\(\s*|\bimport\(\s*)['"](\.{1,2}\/[^'"]+)['"]/g)) {
+      let target = normalize(join(dirname(f.to), m[1]));
+      if (!/\.[a-z]+$/.test(target)) target += '.js';
+      if (!to.has(target)) unresolved.push(`${f.to} imports ${m[1]} (${target})`);
+    }
+  }
+  assert.deepEqual(unresolved, []);
 });
 
 // Every file Normie's setup pull requests wrote (gh pr view <n> --repo
