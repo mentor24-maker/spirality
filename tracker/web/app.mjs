@@ -2433,6 +2433,12 @@ function wireSuggestNext(slug, view) {
   let filing = false;
   // A run is going: File in This Order's end must not turn the Suggest button back on.
   let running = false;
+  // A run's answer that came while filing: drawn when filing ends, so the
+  // filing loop never writes into rows it did not plan from.
+  let held;
+  // The box opens on its own only when the page is first drawn: a minute's
+  // redraw (refreshing) keeps the fold keepPlace put back.
+  const mayOpen = !refreshing;
   const say = (el, text, kind = 'quiet') => {
     el.classList.remove('quiet', 'error');
     if (text && kind) el.classList.add(kind);
@@ -2459,9 +2465,12 @@ function wireSuggestNext(slug, view) {
   // A run's answer, as drawn: running (check back), failed (Try Again), or done (the rows).
   const show = (latest) => {
     if (!box.isConnected) return;
+    if (filing) { held = latest; return; }
     say(runNote, suggestRunLine(latest), latest?.state === 'failed' ? 'error' : 'quiet');
     running = latest?.state === 'running';
-    run.disabled = running || filing;
+    run.disabled = running;
+    // While a run is going its rows are about to be replaced: nothing is filed from them.
+    fileButton.disabled = running;
     run.textContent = latest?.state === 'failed' ? 'Try Again' : latest?.state === 'done' ? 'Suggest Again' : 'Suggest Next Tasks';
     if (latest?.state === 'done' && Array.isArray(latest.suggestions)) {
       suggestions = latest.suggestions;
@@ -2472,10 +2481,7 @@ function wireSuggestNext(slug, view) {
       if (latest?.state === 'failed') { suggestions = []; state = null; }
       drawRows();
     }
-    if (latest?.state === 'running') {
-      box.open = true;
-      checkBack();
-    }
+    if (latest?.state === 'running') checkBack();
   };
   const read = async () => {
     try {
@@ -2514,7 +2520,7 @@ function wireSuggestNext(slug, view) {
       if (err instanceof SignedOut) return drawSignIn('You were signed out; no suggestions were asked for.');
       say(runNote, `No suggestions this time: ${err instanceof Refused ? err.message : SUGGEST_NEXT_UNANSWERED}`, 'error');
       run.textContent = 'Try Again';
-      run.disabled = false;
+      run.disabled = filing;
       return;
     }
     show(started);
@@ -2572,7 +2578,7 @@ function wireSuggestNext(slug, view) {
 
   // File in This Order: file what is kept and not yet filed, then put the kept ones still waiting in order.
   fileButton.addEventListener('click', async () => {
-    if (!state || filing) return;
+    if (!state || filing || running) return;
     const plan = filingPlan(state);
     if (!plan.kept.length) {
       say(fileNote, 'Tick at least one suggestion to file.', 'error');
@@ -2583,9 +2589,14 @@ function wireSuggestNext(slug, view) {
     run.disabled = true;
     const done = (text, kind) => {
       filing = false;
-      fileButton.disabled = false;
+      fileButton.disabled = running;
       run.disabled = running;
-      drawRows();
+      // A run that answered while filing is drawn now, over the rows just filed from.
+      if (held !== undefined) {
+        const latest = held;
+        held = undefined;
+        show(latest);
+      } else drawRows();
       say(fileNote, text, kind);
     };
     const filedNow = [];
@@ -2683,7 +2694,7 @@ function wireSuggestNext(slug, view) {
     const latest = await read();
     if (!latest || !box.isConnected) return;
     show(latest);
-    if (latest.state === 'done' && state && filingPlan(state).file.length) box.open = true;
+    if (mayOpen && (running || (latest.state === 'done' && state && filingPlan(state).file.length))) box.open = true;
   })();
 }
 

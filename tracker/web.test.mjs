@@ -5311,10 +5311,14 @@ test('renderSuggestRows: a handle, a place dropdown, Keep, the title, and the wh
   assert.equal(rows.length, 2);
   assert.match(rows[0], /^<li class="suggestion" data-index="1" draggable="true">/, 'drawn in the order given');
   assert.match(rows[0], /<button type="button" class="drag-handle" aria-label="Move Second: arrow keys, or drag"/);
-  assert.match(rows[0], /<label class="keep"><input type="checkbox" checked> Keep<\/label>/);
+  assert.match(rows[0], /<label class="keep"><input type="checkbox" value="keep" checked> Keep<\/label>/);
   assert.match(rows[0], /<span class="filed">Filed <a href="\/t\/AL-9">AL-9<\/a><\/span>/);
   assert.doesNotMatch(rows[0], /class="why"|suggestion-description/, 'nothing empty under More');
-  assert.match(rows[1], /<label class="keep"><input type="checkbox"> Keep<\/label>/, 'unticked stays unticked');
+  assert.match(rows[1], /<label class="keep"><input type="checkbox" value="keep"> Keep<\/label>/, 'unticked stays unticked');
+  // Every Keep box carries its value: one with none reads "on" against a drawn "" and holds the page's redraw for good.
+  assert.equal((html.match(/<input type="checkbox"/g) || []).length, (html.match(/<input type="checkbox" value="keep"/g) || []).length);
+  assert.equal(redrawHold({ fields: [{ focused: false, value: 'keep', initial: 'keep' }] }), null, 'a Keep box as drawn does not hold the redraw');
+  assert.equal(redrawHold({ fields: [{ focused: false, value: 'on', initial: '' }] }), 'typing', 'what a box with no value would read');
   assert.match(rows[1], /<details class="more"><summary>More<\/summary><p class="why"><strong>Why:<\/strong> Because &quot;so&quot;<\/p><p class="suggestion-description">Line one\nline &lt;i&gt;two&lt;\/i&gt;<\/p><\/details>/);
   assert.ok(!html.includes('<b>') && !html.includes('<i>'), 'a suggestion is text, never markup');
   assert.equal(renderSuggestRows([], { order: [], dropped: [], filed: {} }), '');
@@ -5481,6 +5485,29 @@ test('the Suggest Next Tasks rows move by dropdown, by the arrow keys on the han
   assert.match(wire, /move\(from, placeOf\(li\)\);/);
   assert.match(wire, /state\.order = moveSuggestion\(state\.order, from, to\);\s*save\(\);\s*drawRows\(/);
   assert.match(wire, /state = suggestState\(savedSuggestState\(slug\), latest\.at, suggestions\.length\);/);
+});
+
+test('a run that answers while File in This Order is filing waits until filing ends, File in This Order is off while a run goes, and the box opens on its own only on the page\'s first draw', () => {
+  const { wire } = suggestWire();
+  const show = wire.slice(wire.indexOf('const show = (latest) => {'), wire.indexOf('const read = async'));
+  // A finished (or failed) run never swaps suggestions and state under the filing loop: it is held.
+  assert.match(show, /if \(!box\.isConnected\) return;\s*if \(filing\) \{ held = latest; return; \}\s*say\(runNote/, 'held before anything is drawn or replaced');
+  assert.ok(show.indexOf('held = latest') < show.indexOf('suggestions = latest.suggestions'), 'held before the rows are replaced');
+  assert.ok(show.indexOf('held = latest') < show.indexOf('state = null'), 'held before a failed run clears the state');
+  // While a run is going, nothing is filed from the rows it is about to replace.
+  assert.match(show, /running = latest\?\.state === 'running';\s*run\.disabled = running;[\s\S]*?fileButton\.disabled = running;/);
+  const file = wire.slice(wire.indexOf("fileButton.addEventListener('click'"));
+  assert.match(file, /if \(!state \|\| filing \|\| running\) return;/);
+  // When filing ends, the held answer is drawn, and File in This Order stays off if it is a run still going.
+  assert.match(file, /filing = false;\s*fileButton\.disabled = running;\s*run\.disabled = running;\s*\/\/[^\n]*\n\s*if \(held !== undefined\) \{\s*const latest = held;\s*held = undefined;\s*show\(latest\);\s*\} else drawRows\(\);/);
+  // A failed start while filing leaves Suggest off until filing ends.
+  assert.match(wire, /run\.textContent = 'Try Again';\s*run\.disabled = filing;/);
+  // The box opens on its own only on the page's first draw: a minute's redraw keeps his fold.
+  assert.match(wire, /const mayOpen = !refreshing;/);
+  assert.doesNotMatch(show, /box\.open = true/, 'a check-back never opens a box he closed');
+  const opening = wire.slice(wire.indexOf('// On opening the page'));
+  assert.match(opening, /show\(latest\);\s*if \(mayOpen && \(running \|\| \(latest\.state === 'done' && state && filingPlan\(state\)\.file\.length\)\)\) box\.open = true;/);
+  assert.equal((wire.match(/box\.open = true/g) || []).length, 1, 'only the first draw opens it');
 });
 
 test('File in This Order files only the kept rows not yet filed, in Requested, after the project check; keeps each at once; then sets the order; a failed step says which', () => {

@@ -2567,7 +2567,10 @@ export function renderSuggestRows(suggestions, state) {
     return `<li class="suggestion" data-index="${i}" draggable="true">`
       + `<button type="button" class="drag-handle" aria-label="Move ${title}: arrow keys, or drag" title="Drag, or use the arrow keys">⠿</button>`
       + `<select class="place" aria-label="Place of ${title}">${options}</select>`
-      + `<label class="keep"><input type="checkbox"${dropped.has(i) ? '' : ' checked'}> Keep</label>`
+      // The value is written out: a checkbox without one reads "on" against a
+      // drawn value of "", which the page's redraw hold takes for typing, and
+      // the minute's redraw would never run while the list shows.
+      + `<label class="keep"><input type="checkbox" value="keep"${dropped.has(i) ? '' : ' checked'}> Keep</label>`
       + `<span class="suggestion-title">${title}</span>`
       + (filed ? `<span class="filed">Filed <a href="/t/${encodeURIComponent(filed.id)}">${escapeHtml(filed.id)}</a></span>` : '')
       + `<details class="more"><summary>More</summary>`

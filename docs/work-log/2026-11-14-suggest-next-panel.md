@@ -12,3 +12,13 @@ the ones still in Requested get a place, a started one is left alone, and
 one that was deleted or moved is left out and unticked, so a later press
 still works. The note names each of those. When the project check cannot
 run, the note says so, as Add Task does.
+
+**After the second review.** If a new list came back while File in This
+Order was still filing, the box swapped in the new list halfway through, so
+a ticket it had just filed showed as not filed and the next press would
+have filed it again. Now a list that arrives while filing waits until
+filing ends, and File in This Order is switched off while a new list is
+being made. The box also opens on its own only when the page is first
+opened, so closing it sticks. And a small markup slip stopped the page from
+refreshing itself every minute while the list was showing; that is fixed
+too.
