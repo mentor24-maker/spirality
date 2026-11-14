@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { DEMO_NEWEST_RELEASE, DEMO_OWN_PROJECT, DEMO_SUGGESTIONS, demoNewestRelease, demoSuggest, seedDemo, tickingClock } from './demoData.mjs';
 import { reportsOf, REPORT_RANGES, GROWTH_PERIODS, searchTickets, PRIORITIES, timeSplitOf, isFailureNote, TIME_BUCKETS, pipelineControlsOf } from './pageData.mjs';
-import { escapeHtml, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, renderTopics, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, renderListTopics, projectTags, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, renderReleaseGroup, controlValueText, mountainTime, wakeInEffectText, modelLastPassText, renderConsole, renderConsoleTile, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, consoleFeature, featureColourIndex, renderFeatureKey, FEATURE_PALETTE, drainLine, capInFlightText, renderTitleChoices, titleModeOf, TITLE_MODES, SUGGEST_POLL_MS, moveSuggestion, suggestState, filingPlan, orderPlan, andList, suggestRunLine, renderSuggestRows } from './web/render.mjs';
+import { escapeHtml, renderStatusLine, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, renderTopics, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, renderListTopics, projectTags, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, renderReleaseGroup, controlValueText, mountainTime, wakeInEffectText, modelLastPassText, renderConsole, renderConsoleTile, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, consoleFeature, featureColourIndex, renderFeatureKey, FEATURE_PALETTE, drainLine, capInFlightText, renderTitleChoices, titleModeOf, TITLE_MODES, SUGGEST_POLL_MS, moveSuggestion, suggestState, filingPlan, orderPlan, andList, suggestRunLine, renderSuggestRows } from './web/render.mjs';
 import { startServer, setupSettingsOf } from './server.mjs';
 import { saveAnswers, setupFields, setupOf } from './setup.mjs';
 import { DANE_FIELDS as SETUP_FIELDS, STEPS as SETUP_STEPS } from '../scripts/onboard/onboard.mjs';
@@ -1546,7 +1546,7 @@ test('Quick Action puts his title and words first, the loop\'s reading after, an
   // The same name as his title: no Ticket name line, and no slice line without ## Order.
   const same = renderQuickAction({ name: 'Fix it', description: '## Asked\n```\nFix it\n\nplease\n```\n', status: 'queued' });
   assert.doesNotMatch(same, /Ticket name:|Sliced from|How the Loop/);
-  assert.match(same, /^<h1>Fix it<\/h1>\n<h2 class="request-heading">Original Request<\/h2>\n<p class="original-request">please<\/p>\n<p class="where quiet">/);
+  assert.match(same, /^<h1>Fix it<\/h1>\n<p class="status-line">Status: <span class="status-name">Queued<\/span>[\s\S]*<\/p>\n<h2 class="request-heading">Original Request<\/h2>\n<p class="original-request">please<\/p>$/);
   // His words keep their line breaks on the page.
   assert.match(readFileSync(WEB('app.css'), 'utf8'), /\.quick \.original-request \{[^}]*white-space: pre-wrap/);
   // The tab title is still the ticket's current name.
@@ -1580,12 +1580,12 @@ test('Quick Action asks for his move only while the ticket waits on him (SP-118)
   // SP-112: answered go, built, sent back. The old card is still the newest card.
   const rework = renderQuickAction({ ...ticket, status: 'rework' });
   assert.doesNotMatch(rework, /Your move|class="needed"/);
-  assert.match(rework, /<p class="where quiet">In Rework: the build loop is fixing what review found\. Nothing is needed from you\.<\/p>/);
+  assert.match(rework, /<span class="status-tip" id="status-tip" role="tooltip">The build loop is fixing what review found\. Nothing is needed from you\.<\/span>/);
   assert.equal(renderGoAction({ ...ticket, status: 'rework' }), '', 'and no Go button');
-  // The same card on Needs your input: the ask and the Go button, and no quiet line.
+  // The same card on Needs your input: the ask and the Go button, and his own line.
   const nyi = renderQuickAction({ ...ticket, status: 'needs your input' });
   assert.match(nyi, /<p class="needed">[^<]*go[\s\S]*Your move: Reply/);
-  assert.doesNotMatch(nyi, /class="where/);
+  assert.match(nyi, /role="tooltip">The loop is waiting on your answer below\.<\/span>/);
   assert.match(renderGoAction({ ...ticket, status: 'needs your input' }), /go-action/);
   // His answer is in: no ask, even in his status.
   assert.doesNotMatch(renderQuickAction({ ...ticket, status: 'needs your input', answerIn: true }), /Your move|class="needed"/);
@@ -1594,10 +1594,40 @@ test('Quick Action asks for his move only while the ticket waits on him (SP-118)
   for (const status of ['requested', 'queued', 'building', 'in review', 'rework', 'live']) {
     const html = renderQuickAction({ ...ticket, status });
     assert.doesNotMatch(html, /Your move|class="needed"/, status);
-    assert.match(html, /class="where quiet">[^<]*Nothing is needed from you\.<\/p>/, status);
+    assert.match(html, /role="tooltip">[^<]*Nothing is needed from you\.<\/span>/, status);
   }
   // The page hands the function the ticket's status and answerIn (the whole thread).
   assert.match(readFileSync(WEB('app.mjs'), 'utf8'), /renderQuickAction\(t\)/);
+});
+
+test('the status is first under the heading, with its line behind an information icon (SP-290)', () => {
+  const contract = readFileSync(new URL('../docs/LOOP_CONTRACT.md', import.meta.url), 'utf8');
+  const spelled = ['Requested', 'Rework', 'Queued', 'Building', 'In review', 'Needs your input', 'Ready to launch', 'Live'];
+  for (const name of spelled) {
+    assert.match(contract, new RegExp(`\\| \\*{0,2}\`${name}\`\\*{0,2} \\|`), `${name} is spelled as LOOP_CONTRACT.md spells it`);
+    const html = renderQuickAction({ name: 'Fix it', description: '', status: name.toLowerCase() });
+    const lines = html.split('\n');
+    assert.equal(lines[0], '<h1>Fix it</h1>');
+    assert.ok(lines[1].startsWith(`<p class="status-line">Status: <span class="status-name">${name}</span>`), `${name}: right under the heading`);
+    assert.match(lines[1], /<button type="button" class="status-info" title="Status Information" aria-label="Status Information" aria-expanded="false" aria-describedby="status-tip"><svg[^>]*aria-hidden="true">/, name);
+    assert.match(lines[1], /<span class="status-tip" id="status-tip" role="tooltip">[^<]+<\/span><\/p>$/, name);
+    assert.doesNotMatch(html, /class="where/, `${name}: the old grey line is gone`);
+  }
+  assert.match(renderStatusLine({ status: 'queued' }), /role="tooltip">It waits for the build loop to pick it up\. Nothing is needed from you\.</);
+  assert.match(renderStatusLine({ status: 'Ready to launch' }), /role="tooltip">The work is built and checked, and waits on your Merge\.</);
+  // His answer is in: the status says so, as the Details line does.
+  assert.match(renderStatusLine({ status: 'needs your input', answerIn: true }), new RegExp(`status-name">Needs your input · ${ANSWER_IN_NOTE}<`));
+  // Under the Ticket name line when his title differs.
+  const renamed = renderQuickAction({ name: 'Loop name', description: '## Asked\n```\nHis title\n\nwords\n```\n', status: 'building' }).split('\n');
+  assert.match(renamed[1], /class="ticket-name/);
+  assert.match(renamed[2], /^<p class="status-line">Status: <span class="status-name">Building</);
+  // No status, no line; an unknown status is named but has no icon.
+  assert.equal(renderStatusLine({ status: '' }), '');
+  assert.doesNotMatch(renderStatusLine({ status: 'odd' }), /status-info/);
+  // Hover, keyboard focus and a tap (aria-expanded, toggled by the page) all show the line.
+  const css = readFileSync(WEB('app.css'), 'utf8');
+  for (const show of [':hover', ':focus-visible', '[aria-expanded="true"]']) assert.ok(css.includes(`.quick .status-info${show} + .status-tip`), show);
+  assert.match(readFileSync(WEB('app.mjs'), 'utf8'), /statusInfo\?\.addEventListener\('click'/);
 });
 
 // ── Quick Action: commands he is asked to run, click-to-copy ─────────────────

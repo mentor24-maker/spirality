@@ -936,18 +936,41 @@ export function renderFilesMade({ comments = [] }) {
 }
 
 /**
- * Where a ticket sits, in one quiet line, for each status that is the
- * machine's turn (SP-118): shown in place of a card's ask, which is only his
- * move while the ticket is in one of his two statuses.
+ * What each status means for him, in one line (SP-118, SP-290): shown behind
+ * the information icon beside "Status: <status>" under the ticket's heading.
+ * The machine's statuses say nothing is needed; his two say what is.
  */
 export const STATUS_LINES = {
-  requested: 'In Requested: the intake loop is writing it up as a spec. Nothing is needed from you.',
-  queued: 'In Queued: it waits for the build loop to pick it up. Nothing is needed from you.',
-  building: 'In Building: the build loop is working on it. Nothing is needed from you.',
-  'in review': 'In review: the review loop is checking the pull request. Nothing is needed from you.',
-  rework: 'In Rework: the build loop is fixing what review found. Nothing is needed from you.',
-  live: 'Live: it is done. Nothing is needed from you.',
+  requested: 'The intake loop is writing it up as a spec. Nothing is needed from you.',
+  queued: 'It waits for the build loop to pick it up. Nothing is needed from you.',
+  building: 'The build loop is working on it. Nothing is needed from you.',
+  'in review': 'The review loop is checking the pull request. Nothing is needed from you.',
+  rework: 'The build loop is fixing what review found. Nothing is needed from you.',
+  'needs your input': 'The loop is waiting on your answer below.',
+  'ready to launch': 'The work is built and checked, and waits on your Merge.',
+  live: 'It is done. Nothing is needed from you.',
 };
+
+/** The information icon: a ring with an "i" in it, drawn here, never from ticket text. */
+const INFO_ICON = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v6"/><path d="M12 7.5v.01"/></svg>';
+
+/**
+ * The ticket's status, first under its heading (SP-290): "Status: Queued" in
+ * the page's own type, the status as statusLabel writes it, and beside it an
+ * information button whose line (STATUS_LINES) shows on hover, on tap (the
+ * page toggles aria-expanded) and from the keyboard. '' with no status; no
+ * button for a status with no line.
+ */
+export function renderStatusLine({ status, answerIn = false, mergeStands = false }) {
+  const state = String(status ?? '').trim().toLowerCase();
+  if (!state) return '';
+  const line = STATUS_LINES[state];
+  const info = line
+    ? `<button type="button" class="status-info" title="Status Information" aria-label="Status Information" aria-expanded="false" aria-describedby="status-tip">${INFO_ICON}</button>`
+      + `<span class="status-tip" id="status-tip" role="tooltip">${escapeHtml(line)}</span>`
+    : '';
+  return `<p class="status-line">Status: <span class="status-name">${escapeHtml(statusLabel({ status, answerIn, mergeStands }))}</span>${info}</p>`;
+}
 
 /** Where `line`'s inline code spans sit, as [start, end) pairs: nothing inside one is ever split. */
 const codeRanges = (line) => [...line.matchAll(CODE_SPAN)].map((m) => [m.index, m.index + m[0].length]);
@@ -1021,7 +1044,7 @@ export function askParagraphs(ask) {
  * needed is that newest card's ask, drawn only while the ticket is in one of
  * his two statuses and his answer is not in (renderAnswerIn); a card stays in
  * the thread after he answers, and its ask is no longer his move (SP-118).
- * On a machine status, one quiet line says where it is instead.
+ * Under the heading (and the Ticket name line) comes renderStatusLine.
  *
  * When the description carries his `## Asked` request (SP-213), his own
  * words come first: his title is the heading (the ticket's current name on a
@@ -1037,21 +1060,20 @@ export function renderQuickAction({ name, description, status, comments = [], an
   // SP-226: a merged or closed PR is past the card's "Your move: Merge".
   // SP-285: nor is it his move while his merge word still stands.
   const ask = card && his && !answerIn && !mergeStands && !prSettled({ status, pullRequestState }) ? cardAsk(card.body) : null;
-  const where = his ? null : STATUS_LINES[state] ?? null;
   const asked = originalRequest(description);
   const top = asked ? [
     `<h1>${escapeHtml(asked.title)}</h1>`,
     String(name ?? '').trim() !== asked.title ? `<p class="ticket-name quiet">Ticket name: ${escapeHtml(name)}</p>` : '',
+    renderStatusLine({ status, answerIn, mergeStands }),
     '<h2 class="request-heading">Original Request</h2>',
     `<p class="original-request">${escapeHtml(asked.words)}</p>`,
     asked.slicedFrom ? `<p class="sliced-from">Sliced from <a href="/t/${escapeHtml(asked.slicedFrom)}">${escapeHtml(asked.slicedFrom)}</a></p>` : '',
     summary ? '<h2 class="request-heading">How the Loop Understood It</h2>' : '',
-  ] : [`<h1>${escapeHtml(name)}</h1>`];
+  ] : [`<h1>${escapeHtml(name)}</h1>`, renderStatusLine({ status, answerIn, mergeStands })];
   return [
     ...top,
     summary ? `<p class="summary">${renderInline(summary)}</p>` : '',
     ask ? askParagraphs(ask).map((p) => `<p class="needed">${p.map(renderInline).join('<br>')}</p>`).join('\n') : '',
-    where ? `<p class="where quiet">${escapeHtml(where)}</p>` : '',
   ].filter(Boolean).join('\n');
 }
 
