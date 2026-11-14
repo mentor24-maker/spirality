@@ -292,3 +292,21 @@ export function writeDemoLogs(folder, slug, now = new Date()) {
   };
   for (const [job, text] of Object.entries(files)) writeFileSync(join(folder, `${slug}-${job}.log`), `${text}\n`);
 }
+
+/** The demo's five made-up next tasks (SP-251), answered by demoSuggest. */
+export const DEMO_SUGGESTIONS = Object.freeze([
+  { title: 'Add a search box to the Board view', description: 'The List view can be searched; the Board cannot.\nPut the same search box above the columns.', why: 'Two open tickets ask for it.' },
+  { title: 'Show who last changed each ticket', description: 'Name the person or loop beside "Last Change".', why: 'The docs plan names it as the next step.' },
+  { title: 'Let a project be archived', description: 'An archived project leaves the picker but keeps its tickets.', why: 'Old test projects crowd the picker.' },
+  { title: 'Send a weekly summary email', description: 'Every Monday morning, what went Live last week.', why: 'Asked for in the plan, never built.' },
+  { title: 'Explain each status on hover', description: 'A short line under each stage name.', why: 'New people ask what "Rework" means.' },
+]);
+
+/**
+ * The demo's stand-in next-task suggester: no copy, no Claude. It answers
+ * DEMO_SUGGESTIONS after `ms` (two seconds unless set), so the Tasks page's
+ * Suggest Next Tasks box shows a run going and then its list.
+ */
+export function demoSuggest({ ms = 2000 } = {}) {
+  return () => new Promise((resolve) => { setTimeout(() => resolve(DEMO_SUGGESTIONS.map((s) => ({ ...s }))), ms); });
+}

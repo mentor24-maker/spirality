@@ -255,6 +255,9 @@ npm run clickup -- <command> [flags]      (Loop Queue: list ${LOOP_QUEUE_LIST}, 
                                                   read-only: the tickets as JSON for a scheduled check, one object each (id,
                                                   name, status, priority, tags, created, updated, statusSince; --comments adds
                                                   the top-level comments). Exit 1 naming what failed, printing nothing, on any failed read
+  replies --task <id> --comment <id> --json       read-only: one comment's replies as a JSON list, oldest first, in the
+                                                  tickets --json comment shape (what stale-answer reads for the relay's
+                                                  hand-back-done reply). Exit 1, printing nothing, on a failed read
   stage-counts [--project <slug> | --list <id>] [--since YYYY-MM-DD [--until YYYY-MM-DD]]
                                                   read-only: one JSON object for the weekly report: tickets per status now
                                                   (byStatus, total) and, in the window (whole UTC days), how many shipped
@@ -2462,6 +2465,34 @@ if (cmd === 'whoami') {
   }
   console.log(JSON.stringify(out, null, 2));
   console.error(`${out.length} ticket(s) in ${slug || (project.tracker === 'api' ? project.projectSlug : `list ${LOOP_QUEUE_LIST}`)}${flag('include-closed') ? ', Live included' : ', open only'}${withComments ? ', with their comments' : ''}.`);
+  reportLimits();
+
+} else if (cmd === 'replies') {
+  // One comment's reply thread as data (SP-267): stale-answer reads it, only
+  // for an answer already past its threshold, to see the relay's
+  // `[bus-relay-handback-done]` reply, the same marker the relay itself treats
+  // as "this answer is spent". Read-only. The ticket's comments are read first
+  // because the tracker finds a comment's replies through its ticket.
+  const task = arg('task');
+  const commentId = arg('comment');
+  if (!task || !commentId || !flag('json')) usage();
+  const read = await readCommentsOrProblem(task);
+  if (read.problem) {
+    console.error(`replies FAILED: the comments on ${task} could not be read (${read.problem}), so nothing was printed.`);
+    process.exit(1);
+  }
+  if (!read.comments.some((c) => String(c.id) === String(commentId))) {
+    console.error(`replies FAILED: ${task} has no top-level comment ${commentId}, so nothing was printed.`);
+    process.exit(1);
+  }
+  const out = await tracker.listReplies(commentId);
+  const replies = out.res.ok ? (out.json?.comments || out.json?.replies) : null;
+  if (!Array.isArray(replies)) {
+    console.error(`replies FAILED: the replies to comment ${commentId} could not be read (${out.res.ok ? 'no reply list in the answer' : `HTTP ${out.res.status}`}), so nothing was printed.`);
+    process.exit(1);
+  }
+  console.log(JSON.stringify(replies.map((c) => ticketsJson.commentJson(c, { operatorId: OPERATOR_ID })), null, 2));
+  console.error(`${replies.length} repl(ies) to comment ${commentId} on ${task}.`);
   reportLimits();
 
 } else if (cmd === 'stage-counts') {

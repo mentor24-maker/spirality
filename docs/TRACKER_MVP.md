@@ -1388,13 +1388,27 @@ has a bus (SP-204, `hasBus`): its `bus` step makes the tracker project
 it, and the settings file it writes names it as `busProject`
 ([ONBOARDING_A_PROJECT.md](ONBOARDING_A_PROJECT.md#a-project-with-a-bus-starcaster)).
 
+Two of StarCaster's watchdogs are Spirality's own (SP-267), and the relay
+runs both with `--check` on every wake (`scripts/lib/relay_watchdogs.sh`), a
+failure logged by name and never stopping the relay. `npm run stale-ready`
+names a ticket stuck in `Ready to launch`, and whose hands it needs: past 24
+hours there, or 2 hours after the operator's merge word, with a red or
+missing check, a merged pull request, or a green one still waiting on the
+operator's word. `npm run stale-answer` names a `Needs your input` ticket the operator
+answered more than 30 minutes ago that never moved. Each reads the tickets through
+the door (`tickets --json --comments`), posts nothing unless `--check` is
+given, and says each finding once per ticket per reason every 6 hours,
+cleared when the ticket moves (stamps in `<logDir>/<slug>-ready-stale/` and
+`<slug>-answer-stale/`). Neither posts while the Settings page has the
+relay paused.
+
 Every way StarCaster uses the bus today, and its tracker equivalent (the same
 table is `BUS_USES` in `lib/trackerBus.js`, and a test holds the two
 together):
 
 | StarCaster today | In the tracker |
 |---|---|
-| Alarms and reports posted to the party line (`postBusMessage`, the `chat` command): heartbeat, throughput, report_job_failure, reconcile, stale_answer, stale_ready, checkout_currency, ai_keys_check, site_import_watch, unapplied_sql_watch, pulse_publish, weekly_report, repair | `npm run clickup -- bus-post --body-file -`: one comment on the bus project's "Team chat" ticket, read back |
+| Alarms and reports posted to the party line (`postBusMessage`, the `chat` command): heartbeat, throughput, report_job_failure, reconcile, stale_answer, stale_ready, checkout_currency, ai_keys_check, site_import_watch, unapplied_sql_watch, pulse_publish, weekly_report, repair | `npm run clickup -- bus-post --body-file -`: one comment on the bus project's "Team chat" ticket, read back. The heartbeat is Spirality's own (SP-266): the relay runs `npm run heartbeat -- --check` on every wake, which reads each lane's log and posts one `ALARM:` per lane that has gone quiet, at most once every 6 hours per lane, and one closing line when it runs again |
 | Direct chat posts that skip `postBusMessage`: the pause switch's `announce` (pipeline.mjs), the review gate's `announceWaiver`, the reconciler's `postBus` | `bus-post`, the same one command |
 | The relay's own notices (`postToBus` / `postOrSaveToBus`): merged, merge refused or deferred, stalled hand-off, auto-merge latched off, lane armed, "<operator> replied on ..." | The relay posts them itself, through the same read-back post as `bus-post`, when the project names a `busProject` (SP-207): one line for each merge it makes, each refusal and each conflict hand-off the first time it is written on the ticket (a quiet pass posts nothing), and the lanes' own notices (SP-202). A post that does not land is an UNCHECKED line and the pass exits 1; the merge is never undone or retried for it. A conflict hand-off still stuck a day later (or at once, with nothing filed to fix it) is said again, at most once a day: StarCaster's stall rule, without its "failed N times" alarm, because this relay's markers count reminders, not tries. Not carried over: the "replied on" relay, because the steward reads the operator's replies with `bus-read --operator` |
 | The fallback when the party line refuses (`saveUndeliveredAlarm`): a comment on the "Team chat" ticket in the Loop Queue, created if missing, oldest wins | `bus-post` IS that ticket, in the bus project: there is no plan limit to fall back from, and a refused write exits 1 and says so |
@@ -1408,6 +1422,21 @@ together):
 Which of those alarms are pipeline watchdogs that move into Spirality for
 every project, and which stay in StarCaster: [WATCHDOGS.md](WATCHDOGS.md)
 (SP-260).
+
+Three of them are Spirality's own now (SP-268), each posting through
+`bus-post`, read back, at most once every 6 hours per finding, with its
+reminder stamps in `<logDir>/<slug>-watchdogs/`. `npm run throughput` says
+whether the queue is getting shorter (tickets read through the door's
+`tickets --json --include-closed`, a finished ticket's closure being when it
+entered Live), an `ALARM:` when it is STALLED and a plain post when it
+cannot take a reading. `npm run checkout:current` says whether the relay's
+pull left the machine on `main`'s code (`current`, `behind, pulled`, or
+`behind, could not pull:` and the files in the way), an `ALARM:` when not;
+it never pulls. The relay runs both with `--check` on every wake. Every lane
+runner calls `npm run report:failure` when a pass exits non-zero: one
+`ALARM:` naming the lane, its exit and the end of its log. A failed post
+exits non-zero and is logged; none of them ever changes the relay's verdict
+or stops a lane ([WATCHDOGS.md](WATCHDOGS.md#running-the-moved-ones-by-hand)).
 
 **How loud a post is** (SP-163; Dane chose D on 2026-11-09: "a text for
 alarms only, plus the page count for everything else"):
