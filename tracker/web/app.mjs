@@ -2181,7 +2181,9 @@ function spanOf(ms) {
  * also has its own range (SP-240): a Start Date and an End Date picker in
  * its header, 30 days ago to today on arrival (`range` keeps the picked dates
  * when the project changes); a picker change asks the server again and
- * redraws only those cells.
+ * redraws only those cells. Its last column, Growth Rate (SP-241), shows
+ * the server's growth figures for the timeframe picked in its header
+ * (Weekly on arrival), redrawn from the same answer.
  */
 async function drawReporting(chosen, range = defaultReportRange()) {
   const { projects } = await api('GET', '/projects');
@@ -2192,9 +2194,12 @@ async function drawReporting(chosen, range = defaultReportRange()) {
   // Task Productivity's own range (SP-240): a Start Date and an End Date column after the fixed ones, a picker in each header.
   const productivityHead = `<tr><th>Report</th>${r.ranges.map((g) => `<th class="count">${escapeHtml(g.label)}</th>`).join('')}`
     + `<th class="count custom-range"><label for="report-from">Start Date</label><input type="date" id="report-from" value="${escapeHtml(range.from)}"></th>`
-    + `<th class="count custom-range"><label for="report-to">End Date</label><input type="date" id="report-to" value="${escapeHtml(range.to)}"></th></tr>`;
+    + `<th class="count custom-range"><label for="report-to">End Date</label><input type="date" id="report-to" value="${escapeHtml(range.to)}"></th>`
+    // Growth Rate (SP-241): the last column, its timeframe picked in the header; the periods come from the server's answer.
+    + `<th class="count custom-range growth-rate"><label for="report-growth">Growth Rate</label><select id="report-growth">${r.growthPeriods.map((g, i) => `<option value="${escapeHtml(g.key)}"${i === 0 ? ' selected' : ''}>${escapeHtml(g.label)}</option>`).join('')}</select></th></tr>`;
   const line = (label, counts) => `<tr><td class="name">${label}</td>${r.ranges.map((g) => `<td class="count">${Number(counts[g.key])}</td>`).join('')}`
-    + `<td class="count" data-custom-from></td><td class="count" data-custom="${counts === r.started ? 'started' : 'finished'}"></td></tr>`;
+    + `<td class="count" data-custom-from></td><td class="count" data-custom="${counts === r.started ? 'started' : 'finished'}"></td>`
+    + `<td class="count" data-growth="${counts === r.started ? 'started' : 'finished'}"></td></tr>`;
   // A flow row: one cell per range, "none finished in this range" where nothing finished.
   const flowLine = (label, cell) => `<tr><td class="name">${label}</td>${r.ranges.map((g) => {
     const f = r.flow[g.key];
@@ -2280,6 +2285,14 @@ async function drawReporting(chosen, range = defaultReportRange()) {
   main.querySelector('#time-split-range').addEventListener('change', (e) => {
     main.querySelector('.time-split-list').innerHTML = splitTickets(e.target.value);
   });
+  // Growth Rate: the picker redraws both cells from the answer already here, never asking the server again.
+  const growthPicker = main.querySelector('#report-growth');
+  const showGrowth = () => {
+    const period = r.growth[growthPicker.value];
+    for (const cell of main.querySelectorAll('[data-growth]')) cell.innerHTML = growthCell(period?.[cell.dataset.growth]);
+  };
+  showGrowth();
+  growthPicker.addEventListener('change', showGrowth);
   // The custom range: a picker change asks again and redraws only those cells; the newest ask wins.
   const fromPicker = main.querySelector('#report-from');
   const toPicker = main.querySelector('#report-to');
@@ -2317,6 +2330,20 @@ async function drawReporting(chosen, range = defaultReportRange()) {
     drawReporting(e.target.value, { from: fromPicker.value, to: toPicker.value }).catch((err) => (err instanceof SignedOut ? drawSignIn() : showError(err)));
   });
   putTrail([{ label: 'Reporting' }]);
+}
+
+/**
+ * One Growth Rate cell (SP-241) from the server's growth figure: the change
+ * with its sign ("+25%", "-10%", "0%"), or a quiet phrase when there is no
+ * fair number: not enough history yet, or none in the period before.
+ */
+function growthCell(figure) {
+  if (!figure) return '';
+  if (figure.change == null) {
+    return `<span class="quiet">${figure.reason === 'too-young' ? 'not enough history yet' : 'none in the period before'}</span>`;
+  }
+  const n = Number(figure.change);
+  return `${n > 0 ? '+' : ''}${n}%`;
 }
 
 /** A date picker's value (YYYY-MM-DD) for a local calendar day. */

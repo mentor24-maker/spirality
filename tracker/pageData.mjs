@@ -660,6 +660,31 @@ export const REPORT_RANGES = Object.freeze([
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
+ * The Task Productivity table's Growth Rate timeframes (SP-241): each
+ * compares the last `days` days before now with the `days` days before
+ * those.
+ */
+export const GROWTH_PERIODS = Object.freeze([
+  Object.freeze({ key: 'week', label: 'Weekly', days: 7 }),
+  Object.freeze({ key: 'month', label: 'Monthly', days: 30 }),
+  Object.freeze({ key: 'year', label: 'Annual', days: 365 }),
+]);
+
+/**
+ * One growth figure: `current` and `previous` counts, and `change`, the
+ * percentage change from previous to current rounded to a whole number, or
+ * null with `reason`: 'too-young' when the first ticket in scope was filed
+ * after the earlier period began (not a whole period to compare), else
+ * 'none-before' when the earlier period had no tasks. `reason` is null
+ * whenever `change` is a number.
+ */
+export function growthFigure(current, previous, { firstFiled, start }) {
+  if (firstFiled == null || firstFiled > start) return { current, previous, change: null, reason: 'too-young' };
+  if (previous === 0) return { current, previous, change: null, reason: 'none-before' };
+  return { current, previous, change: Math.round(((current - previous) / previous) * 100), reason: null };
+}
+
+/**
  * When a ticket last entered Live, from its history: the newest event that
  * moved its status to Live (or filed it there). Null when it is not Live
  * now, so a ticket moved to Live and back out counts nowhere, and one moved
@@ -911,6 +936,11 @@ function humanHoursFigures(estimates, days) {
  * own date range: the answer then carries `custom: { from, to, started,
  * finished }` (times as ISO strings), counted the same way as the fixed
  * ranges, with both ends included. Without it the answer has no `custom`.
+ *
+ * `growth` (SP-241): per GROWTH_PERIODS key, `{ started, finished }`, each a
+ * growthFigure comparing the last `days` days before `now` with the `days`
+ * before those, counted the same way as the fixed ranges; `growthPeriods`
+ * names them for the page's picker, Weekly first.
  */
 export function reportsOf(store, { project = null, now = Date.now(), only = null, custom = null } = {}) {
   let projects = visibleProjects(store, only);
@@ -923,6 +953,9 @@ export function reportsOf(store, { project = null, now = Date.now(), only = null
   const started = zero();
   const inRange = (r, when) => r.days == null || (when > now - r.days * DAY_MS && when <= now);
   const customCounts = { started: 0, finished: 0 };
+  const growthCounts = Object.fromEntries(GROWTH_PERIODS.map((g) => [g.key, {
+    started: { current: 0, previous: 0 }, finished: { current: 0, previous: 0 },
+  }]));
   const tally = (counts, at, kind) => {
     const when = Date.parse(at);
     if (Number.isNaN(when)) return;
@@ -930,6 +963,11 @@ export function reportsOf(store, { project = null, now = Date.now(), only = null
       if (inRange(r, when)) counts[r.key] += 1;
     }
     if (custom && when >= custom.from && when <= custom.to) customCounts[kind] += 1;
+    for (const g of GROWTH_PERIODS) {
+      const span = g.days * DAY_MS;
+      if (when > now - span && when <= now) growthCounts[g.key][kind].current += 1;
+      else if (when > now - 2 * span && when <= now - span) growthCounts[g.key][kind].previous += 1;
+    }
   };
   const flows = Object.fromEntries(REPORT_RANGES.map((r) => [r.key, []]));
   const estimates = Object.fromEntries(REPORT_RANGES.map((r) => [r.key, []]));
@@ -999,6 +1037,12 @@ export function reportsOf(store, { project = null, now = Date.now(), only = null
     })),
     waitingNow,
     ...(custom ? { custom: { from: new Date(custom.from).toISOString(), to: new Date(custom.to).toISOString(), ...customCounts } } : {}),
+    growthPeriods: GROWTH_PERIODS.map(({ key, label }) => ({ key, label })),
+    growth: Object.fromEntries(GROWTH_PERIODS.map((g) => {
+      const start = now - 2 * g.days * DAY_MS;
+      const figure = (kind) => growthFigure(growthCounts[g.key][kind].current, growthCounts[g.key][kind].previous, { firstFiled, start });
+      return [g.key, { started: figure('started'), finished: figure('finished') }];
+    })),
     timeSplit: Object.fromEntries(REPORT_RANGES.map((r) => {
       const rows = split[r.key];
       const total = rows.reduce((n, t) => n + t.total, 0);
