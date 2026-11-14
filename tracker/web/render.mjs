@@ -1922,6 +1922,40 @@ export function renderListAssignee({ id, assignee, assigneeId }, operator) {
 }
 
 /**
+ * SP-246: every tag used on a board's tickets, each once, alphabetical
+ * (case aside), for the List view's Add Tag dropdowns. `board` is the
+ * server's board answer; anything unreadable in it is skipped.
+ */
+export function projectTags(board) {
+  const seen = new Set();
+  for (const c of Array.isArray(board?.columns) ? board.columns : []) {
+    for (const t of Array.isArray(c?.tickets) ? c.tickets : []) {
+      for (const tag of Array.isArray(t?.tags) ? t.tags : []) if (typeof tag === 'string' && tag) seen.add(tag);
+    }
+  }
+  return [...seen].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }) || (a < b ? -1 : a > b ? 1 : 0));
+}
+
+/**
+ * SP-246: a List view row's Tags cell (app.mjs wireListPickers). Each tag a
+ * chip with a × that removes it; then an Add Tag dropdown of the project's
+ * other tags (`known`, from projectTags), never one the ticket already has,
+ * with New Tag… last, which opens the hidden text box beside it (Enter adds,
+ * Escape cancels). Beside them, the note that says "Saving…", "Saved" or a
+ * refusal.
+ */
+export function renderListTags({ id, tags = [] }, known = []) {
+  const own = Array.isArray(tags) ? tags : [];
+  const chips = own.map((tag) => `<span class="tag">${escapeHtml(tag)}<button type="button" class="remove-tag" data-untag-of="${escapeHtml(id)}" data-tag="${escapeHtml(tag)}" title="Remove ${escapeHtml(tag)}" aria-label="Remove tag ${escapeHtml(tag)} from ${escapeHtml(id)}">×</button></span>`).join('');
+  const options = [
+    option('', 'Add Tag', true),
+    ...known.filter((tag) => !own.includes(tag)).map((tag) => option(tag, tag, false)),
+    '<option value="" data-new-tag>New Tag…</option>',
+  ].join('');
+  return `${chips}<select class="list-tags" data-tags-of="${escapeHtml(id)}" aria-label="Add a tag to ${escapeHtml(id)}">${options}</select><input type="text" class="new-tag" data-new-tag-of="${escapeHtml(id)}" aria-label="New tag for ${escapeHtml(id)}" placeholder="New tag, then Enter" hidden><span class="note" data-tags-note="${escapeHtml(id)}" role="status"></span>`;
+}
+
+/**
  * The Add Task box's two ways to name a task (SP-248): `suggest`, where the
  * title is picked from suggestions made from the description alone, and
  * `own`, where he types a title first and it is offered beside them.
