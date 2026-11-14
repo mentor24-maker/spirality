@@ -1388,6 +1388,20 @@ has a bus (SP-204, `hasBus`): its `bus` step makes the tracker project
 it, and the settings file it writes names it as `busProject`
 ([ONBOARDING_A_PROJECT.md](ONBOARDING_A_PROJECT.md#a-project-with-a-bus-starcaster)).
 
+Two of StarCaster's watchdogs are Spirality's own (SP-267), and the relay
+runs both with `--check` on every wake (`scripts/lib/relay_watchdogs.sh`), a
+failure logged by name and never stopping the relay. `npm run stale-ready`
+names a ticket stuck in `Ready to launch`, and whose hands it needs: past 24
+hours there, or 2 hours after the operator's merge word, with a red or
+missing check, a merged pull request, or a green one still waiting on the
+operator's word. `npm run stale-answer` names a `Needs your input` ticket the operator
+answered more than 30 minutes ago that never moved. Each reads the tickets through
+the door (`tickets --json --comments`), posts nothing unless `--check` is
+given, and says each finding once per ticket per reason every 6 hours,
+cleared when the ticket moves (stamps in `<logDir>/<slug>-ready-stale/` and
+`<slug>-answer-stale/`). Neither posts while the Settings page has the
+relay paused.
+
 Every way StarCaster uses the bus today, and its tracker equivalent (the same
 table is `BUS_USES` in `lib/trackerBus.js`, and a test holds the two
 together):

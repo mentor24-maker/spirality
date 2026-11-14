@@ -328,6 +328,11 @@
       "why": "run_relay.sh sources it; a copy with no app-checks command logs that and runs nothing"
     },
     {
+      "from": "scripts/lib/relay_watchdogs.sh",
+      "to": "scripts/lib/relay_watchdogs.sh",
+      "why": "run_relay.sh sources it; a copy with no scripts/stale_ready.mjs or scripts/stale_answer.mjs logs that and runs nothing (the setup wizard ticket, SP-269, brings the watchdogs themselves)"
+    },
+    {
       "from": "scripts/lib/trackerFiles.mjs",
       "to": "scripts/lib/trackerFiles.mjs",
       "why": "the settings reader sits under loop/ in a project",

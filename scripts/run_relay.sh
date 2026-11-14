@@ -3,7 +3,8 @@
 # What the relay schedule actually runs: bring the main checkout up to date,
 # then one `relay` pass of the door (`npm run clickup`, which talks to the
 # tracker the project config names), then one pass of the project's
-# application checks (`npm run app-checks`, SP-274).
+# application checks (`npm run app-checks`, SP-274), then the ticket
+# watchdogs (`stale-ready`, `stale-answer`, SP-267).
 #
 #   ./scripts/run_relay.sh            # one pass, output to stdout
 #   ./scripts/run_relay.sh --dry-run  # one pass that prints and writes nothing
@@ -54,6 +55,9 @@ SYNC_LOCK="$LOG_DIR/$SLUG-sync.lock"
 # After the relay part, one application-checks pass (SP-274).
 # shellcheck source=lib/relay_app_checks.sh
 source "$REPO/scripts/lib/relay_app_checks.sh"
+# And the ticket watchdogs: stale-ready and stale-answer (SP-267).
+# shellcheck source=lib/relay_watchdogs.sh
+source "$REPO/scripts/lib/relay_watchdogs.sh"
 # A pass is time-limited so a stuck one cannot hold the relay for good; two
 # passes never overlap, whatever the wake time, because the second finds the
 # lock held.
@@ -239,6 +243,15 @@ else
   run_relay_app_checks "$CHECKS_LIMIT" ${CHECK_ARGS[@]+"${CHECK_ARGS[@]}"}
   checks_status=$?
 fi
+
+# Then the ticket watchdogs (SP-267): a ticket stuck in Ready to launch, and
+# an answer in Needs your input that nothing acted on, each said on the bus at
+# most once per ticket per reason every 6 hours (scripts/stale_ready.mjs,
+# scripts/stale_answer.mjs). They run on every wake, whatever the steps above
+# did, each under its own time limit, and they never change this pass's
+# verdict or stop it: a failure is one line naming the watchdog and its exit
+# code. A dry run reads and prints only.
+run_relay_watchdogs "$REPO" "${RELAY_WATCHDOG_LIMIT_SECONDS:-180}" ${DRY_RUN:+--dry-run}
 
 # The exit code is the pass's own verdict, and the END line says it in words,
 # the relay part's first, then the checks':
