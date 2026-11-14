@@ -1068,9 +1068,134 @@ test('a database made before projects had a web address, logo and owner gains th
     try {
       assert.deepEqual(raw.prepare('PRAGMA table_info(projects)').all().map((c) => c.name),
         ['slug', 'name', 'prefix', 'operator', 'next_number', 'url', 'logo', 'owner', 'repo', 'alert_email', 'alert_phone']);
-      assert.deepEqual(raw.prepare("SELECT * FROM tickets WHERE id IN ('OL-1', 'OL-2') ORDER BY id").all(), ticketsBefore);
+      // Every old column byte-for-byte; the one new column, place (SP-249), empty.
+      assert.deepEqual(raw.prepare("SELECT * FROM tickets WHERE id IN ('OL-1', 'OL-2') ORDER BY id").all().map((r) => ({ ...r })),
+        ticketsBefore.map((r) => ({ ...r, place: null })));
     } finally { raw.close(); }
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('a database made before tickets had a place gains the column, every ticket\'s place empty, nothing else touched', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tracker-store-'));
+  const path = join(dir, 'old.db');
+  try {
+    const first = openStore(path);
+    const human = first.createActor({ kind: 'human', name: 'Operator' });
+    first.createProject({ slug: 'alpha', name: 'Alpha', prefix: 'AL', operator: human.id });
+    first.fileTicket({ project: 'alpha', actor: human.id, name: 'One', status: 'queued', priority: 'high' });
+    first.fileTicket({ project: 'alpha', actor: human.id, name: 'Two', status: 'live' });
+    first.close();
+    // Make it the shape it had before: no place column.
+    const old = new DatabaseSync(path);
+    old.exec('ALTER TABLE tickets DROP COLUMN place');
+    const before = old.prepare('SELECT * FROM tickets ORDER BY id').all().map((r) => ({ ...r }));
+    old.close();
+    assert.equal('place' in before[0], false);
+
+    const store = openStore(path);
+    try {
+      assert.deepEqual(store.listTickets('alpha').map((t) => [t.id, t.place]), [['AL-1', null], ['AL-2', null]]);
+    } finally { store.close(); }
+    const raw = new DatabaseSync(path);
+    try {
+      assert.deepEqual(raw.prepare('SELECT * FROM tickets ORDER BY id').all().map((r) => ({ ...r })),
+        before.map((r) => ({ ...r, place: null })));
+    } finally { raw.close(); }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('orderTickets: places 1..n in one write, each move an event and a version bump, read back', () => {
+  const { store, human, machine, cleanup } = fixture();
+  try {
+    for (const name of ['A', 'B', 'C', 'D']) store.fileTicket({ project: 'alpha', actor: machine.id, name, status: 'queued' });
+    assert.equal(store.getTicket('AL-1').place, null);
+    const r = store.orderTickets('alpha', { ids: ['AL-3', 'al-1', 'AL-2'], actor: human.id });
+    assert.deepEqual(r.tickets.map((t) => [t.id, t.place]), [['AL-3', 1], ['AL-1', 2], ['AL-2', 3]]);
+    assert.deepEqual(r.changed, ['AL-3', 'AL-1', 'AL-2']);
+    assert.equal(store.getTicket('AL-4').place, null, 'a ticket not named keeps its place');
+    assert.equal(store.getTicket('AL-3').version, 2);
+    const ev = store.listEvents('AL-3').find((e) => e.field === 'place');
+    assert.equal(ev.from, null);
+    assert.equal(ev.to, '1');
+    assert.equal(ev.actor, human.id);
+
+    // The same order again moves nothing: no event, no version bump.
+    const again = store.orderTickets('alpha', { ids: ['AL-3', 'AL-1', 'AL-2'], actor: human.id });
+    assert.deepEqual(again.changed, []);
+    assert.equal(store.getTicket('AL-3').version, 2);
+    // A new order moves only the ones whose place changed.
+    const swap = store.orderTickets('alpha', { ids: ['AL-1', 'AL-3'], actor: human.id });
+    assert.deepEqual(swap.changed, ['AL-1', 'AL-3']);
+    assert.equal(store.listEvents('AL-1').filter((e) => e.field === 'place').at(-1).from, '2');
+  } finally { cleanup(); }
+});
+
+test('orderTickets: a partial order on top of an existing one renumbers the others after it, no two sharing a place', () => {
+  const { store, human, machine, cleanup } = fixture();
+  try {
+    for (const name of ['A', 'B', 'C', 'D', 'E']) store.fileTicket({ project: 'alpha', actor: machine.id, name, status: 'queued' });
+    store.orderTickets('alpha', { ids: ['AL-1', 'AL-2', 'AL-3'], actor: human.id });
+    // The review's example: AL-4 alone, sent after AL-1..3 hold places 1..3.
+    const r = store.orderTickets('alpha', { ids: ['AL-4'], actor: human.id });
+    const placed = store.listTickets('alpha').map((t) => [t.id, t.place]);
+    assert.deepEqual(placed, [['AL-1', 2], ['AL-2', 3], ['AL-3', 4], ['AL-4', 1], ['AL-5', null]],
+      'the others keep their order, one place down; an unplaced ticket stays unplaced');
+    assert.deepEqual(r.tickets.map((t) => [t.id, t.place]), [['AL-4', 1]]);
+    assert.deepEqual(r.changed, ['AL-4', 'AL-1', 'AL-2', 'AL-3']);
+    const ev = store.listEvents('AL-1').filter((e) => e.field === 'place').at(-1);
+    assert.equal(ev.from, '1');
+    assert.equal(ev.to, '2');
+    assert.equal(store.getTicket('AL-1').version, 3, 'one version bump per move');
+
+    // Moving one from the middle to the front closes its gap.
+    store.orderTickets('alpha', { ids: ['AL-3'], actor: human.id });
+    const places = store.listTickets('alpha').map((t) => t.place).filter((p) => p !== null);
+    assert.deepEqual([...places].sort((a, b) => a - b), [1, 2, 3, 4], 'places stay 1..n, none shared');
+    assert.deepEqual(store.listTickets('alpha').map((t) => [t.id, t.place]),
+      [['AL-1', 3], ['AL-2', 4], ['AL-3', 1], ['AL-4', 2], ['AL-5', null]]);
+  } finally { cleanup(); }
+});
+
+test('orderTickets: a started ticket that still has a place is not touched when the waiting ones are reordered', () => {
+  const { store, human, machine, cleanup } = fixture();
+  try {
+    for (const name of ['A', 'B', 'C']) store.fileTicket({ project: 'alpha', actor: machine.id, name, status: 'queued' });
+    store.orderTickets('alpha', { ids: ['AL-1', 'AL-2', 'AL-3'], actor: human.id });
+    // AL-1 is claimed: it keeps place 1 after it leaves Queued.
+    store.changeTicket('AL-1', { actor: machine.id, ifStatus: 'queued', status: 'building' });
+    const before = store.getTicket('AL-1');
+    const eventsBefore = store.listEvents('AL-1').length;
+    const r = store.orderTickets('alpha', { ids: ['AL-3'], actor: human.id });
+    const after = store.getTicket('AL-1');
+    assert.equal(after.version, before.version, 'no version bump on the Building ticket');
+    assert.equal(after.updatedAt, before.updatedAt, 'its time in the stage is not reset');
+    assert.equal(after.place, before.place, 'its old place is left as it was');
+    assert.equal(store.listEvents('AL-1').length, eventsBefore, 'no place event on it');
+    assert.ok(!r.changed.includes('AL-1'));
+    // The waiting ones still adjust: AL-3 first, AL-2 after it.
+    assert.equal(store.getTicket('AL-3').place, 1);
+    assert.equal(store.getTicket('AL-2').place, 2);
+  } finally { cleanup(); }
+});
+
+test('orderTickets: an id from another project, an unknown or a repeated id changes nothing', () => {
+  const { store, human, machine, cleanup } = fixture();
+  try {
+    store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE', operator: human.id });
+    store.fileTicket({ project: 'alpha', actor: machine.id, name: 'A', status: 'queued' });
+    store.fileTicket({ project: 'alpha', actor: machine.id, name: 'B', status: 'queued' });
+    store.fileTicket({ project: 'beta', actor: machine.id, name: 'X', status: 'queued' });
+    for (const ids of [['AL-1', 'BE-1'], ['AL-2', 'AL-9'], ['AL-1', 'AL-1'], [], ['AL-1', '']]) {
+      assert.throws(() => store.orderTickets('alpha', { ids, actor: human.id }),
+        (err) => err instanceof StoreError && err.code === 'bad-order', JSON.stringify(ids));
+    }
+    for (const id of ['AL-1', 'AL-2', 'BE-1']) {
+      const t = store.getTicket(id);
+      assert.equal(t.place, null, id);
+      assert.equal(t.version, 1, id);
+    }
+    assert.throws(() => store.orderTickets('nope', { ids: ['AL-1'], actor: human.id }), (err) => err.code === 'unknown-project');
+  } finally { cleanup(); }
 });
 
 test('stage colours: set, read back, cleared, kept across a reopen; a bad colour or status writes nothing', () => {
@@ -1441,7 +1566,10 @@ test('today\'s database gains emails, passwords, sessions and links, and every e
       assert.deepEqual(raw.prepare('PRAGMA table_info(actors)').all().map((c) => c.name), ['id', 'kind', 'name', 'token_hash', 'email', 'password_hash', 'site_url']);
       assert.deepEqual(raw.prepare('SELECT id, kind, name, token_hash FROM actors ORDER BY id').all(), before.actors);
       assert.deepEqual(raw.prepare('SELECT slug, name, prefix, operator, next_number, url, logo, owner FROM projects ORDER BY rowid').all(), before.projects);
-      for (const t of ['tickets', 'comments', 'stage_colours']) {
+      // Tickets also gain place (SP-249), empty; every old column is unchanged.
+      assert.deepEqual(raw.prepare('SELECT * FROM tickets ORDER BY rowid').all().map((r) => ({ ...r })),
+        before.tickets.map((r) => ({ ...r, place: null })), 'tickets');
+      for (const t of ['comments', 'stage_colours']) {
         assert.deepEqual(raw.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all(), before[t], t);
       }
     } finally { raw.close(); }
