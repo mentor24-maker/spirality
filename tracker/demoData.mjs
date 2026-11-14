@@ -187,6 +187,29 @@ export function seedDemo(store, { operatorName = substrateConfig.operatorName(),
   say(mergedNotLive, loop.id, `PR opened: ${DEMO_MERGED_PR}`);
   say(mergedNotLive, loop.id, 'REVIEW: PASSED. Ready for your merge word.');
 
+  // SP-286: a website visitor's bug report, as StarCaster's Bug Report
+  // module files it (composeBugReportTask, like SC-804): held in his status,
+  // no card. The page's top reads "Bug Report:", the visitor's words in
+  // bold, then where and who it came from.
+  file('beta', 'Bug report: The Bug Report module should have a site-wide option under Placement. As it is, you can o… — Demo Site', 'needs your input', {
+    assigned: true,
+    tags: ['bug-report', 'demo-site'],
+    description: [
+      '## What the reporter said', '',
+      '```', 'The Bug Report module should have a site-wide option under Placement.', 'As it is, you can only put it on one page at a time, and I typed <script>alert(1)</script> and **stars** to test it.', '```', '',
+      '## Where and who', '',
+      '- **Page:** https://example.com/pricing',
+      '- **Project:** Demo Site (proj_demo)',
+      '- **Viewer tier:** public',
+      '- **Browser:** `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Safari/605.1.15`',
+      '- **Submitted:** 2026-11-13T21:04:00.000Z',
+      '- **Report id:** `br_demo_1`', '',
+      '## Screenshots', '', '(none attached)', '',
+      '---',
+      '_Filed automatically from a public bug report. Held for the operator: nothing in the build loops will touch this until you move it._',
+    ].join('\n'),
+  }, 'waiting');
+
   // Two Pipeline Controls changes on Alpha (SP-224), so the Settings page's
   // change log shows rows: the cap tried at 3 and put back, which leaves every
   // control on its default.

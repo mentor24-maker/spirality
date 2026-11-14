@@ -782,6 +782,71 @@ export function originalRequest(description) {
   return { title, words, slicedFrom };
 }
 
+/** The tag a website visitor's bug report is filed with (StarCaster's composeBugReportTask). */
+export const BUG_REPORT_TAG = 'bug-report';
+
+/**
+ * A website visitor's bug report, read off a ticket (SP-286): only for a
+ * ticket tagged BUG_REPORT_TAG whose description has a `## What the reporter
+ * said` section with a fenced block under it, and no `## Asked` section (a
+ * report intake has rewritten shows his request instead). Returns
+ * `{ words, facts, screenshots }`: the visitor's words exactly as typed
+ * (line breaks kept), the `## Where and who` bullets as `{ label, value }`
+ * (`- **Page:** …`, the value's code backticks taken off), and whether the
+ * `## Screenshots` section holds anything but "(none attached)". Null
+ * otherwise. Headings inside a fence are never read as sections. Text only:
+ * nothing is escaped here.
+ */
+export function bugReport({ tags = [], description } = {}) {
+  if (!(tags ?? []).includes(BUG_REPORT_TAG)) return null;
+  const lines = String(description ?? '').replace(/\r\n?/g, '\n').split('\n');
+  const sections = new Map();
+  let run = null;
+  lines.forEach((line, i) => {
+    if (run) { if (closesFence(line, run)) run = null; return; }
+    const fence = FENCE.exec(line);
+    if (fence) { run = fence[1]; return; }
+    const h = /^##\s+(.+?)\s*$/.exec(line);
+    if (h && !sections.has(h[1].toLowerCase())) sections.set(h[1].toLowerCase(), i);
+  });
+  if (sections.has('asked') || !sections.has('what the reporter said')) return null;
+  // A section's lines: up to the next heading that is not inside a fence.
+  const starts = [...sections.values()].sort((a, b) => a - b);
+  const sectionLines = (name) => {
+    if (!sections.has(name)) return [];
+    const from = sections.get(name);
+    const to = starts.find((s) => s > from) ?? lines.length;
+    return lines.slice(from + 1, to);
+  };
+  const said = sectionLines('what the reporter said');
+  let i = 0;
+  while (i < said.length && !said[i].trim()) i += 1;
+  const open = FENCE.exec(said[i] ?? '');
+  if (!open) return null;
+  const body = [];
+  for (i += 1; i < said.length && !closesFence(said[i], open[1]); i += 1) body.push(said[i]);
+  if (i >= said.length) return null;
+  while (body.length && !body[0].trim()) body.shift();
+  while (body.length && !body.at(-1).trim()) body.pop();
+  const facts = [];
+  for (const line of sectionLines('where and who')) {
+    const m = /^\s*[-*+]\s+\*\*([^*]+?):?\*\*:?\s*(.*)$/.exec(line);
+    if (m) facts.push({ label: m[1].replace(/:$/, '').trim(), value: m[2].trim().replace(/^`([^`]*)`$/, '$1') });
+  }
+  const shots = sectionLines('screenshots').map((l) => l.trim())
+    .filter((l) => l && !RULE.test(l) && !/^_.*_$/.test(l) && l !== '(none attached)');
+  return { words: body.join('\n'), facts, screenshots: shots.length > 0 };
+}
+
+/** One `## Where and who` fact as a list row: a page is a link, a submitted time reads in Mountain time. */
+function bugReportFact({ label, value }) {
+  const key = label.toLowerCase();
+  let shown = escapeHtml(value);
+  if (key === 'page' && /^https?:\/\/\S+$/.test(value)) shown = link(value, escapeHtml(value));
+  else if (key === 'submitted' && !Number.isNaN(Date.parse(value)) && /\d{4}-\d{2}-\d{2}T/.test(value)) shown = escapeHtml(mountainTime(value));
+  return `<li><span class="fact-label">${escapeHtml(label)}:</span> ${shown}</li>`;
+}
+
 /** The newest comment that carries an operator card, or undefined. */
 const newestCard = (comments = []) => [...comments].reverse().find((c) => cardAsk(c.body) !== null);
 
@@ -1096,11 +1161,20 @@ export function askParagraphs(ask) {
  * quiet line under it when a loop renamed it), then his words exactly as he
  * typed them under "Original Request", a link to the ticket a slice was cut
  * from, and only then the summary, under "How the Loop Understood It".
+ *
+ * A website visitor's bug report (bugReport, SP-286) has no `## Asked`:
+ * its heading is "Bug Report:" in place of the name the sending app cut off,
+ * then the visitor's words in bold, then the `## Where and who` facts, and
+ * the description's first paragraph (its "(none attached)" line) is never
+ * the summary.
  */
 export function renderQuickAction(t) {
-  const { name, description, status, comments = [], answerIn = false, mergeStands = false, pullRequestState = null } = t;
+  const { name, description, status, tags = [], comments = [], answerIn = false, mergeStands = false, pullRequestState = null } = t;
   const card = newestCard(comments);
-  const summary = card ? cardContext(card.body) ?? firstParagraph(description) : firstParagraph(description);
+  const report = bugReport({ tags, description });
+  // A bug report's first paragraph is its "(none attached)" screenshots line (SP-286): only a card's context is a summary.
+  const fallback = report ? '' : firstParagraph(description);
+  const summary = card ? cardContext(card.body) ?? fallback : fallback;
   const state = String(status ?? '').toLowerCase();
   const his = HIS_STATUSES.includes(state);
   // SP-226: a merged or closed PR is past the card's "Your move: Merge".
@@ -1115,6 +1189,12 @@ export function renderQuickAction(t) {
     `<p class="original-request">${escapeHtml(asked.words)}</p>`,
     asked.slicedFrom ? `<p class="sliced-from">Sliced from <a href="/t/${escapeHtml(asked.slicedFrom)}">${escapeHtml(asked.slicedFrom)}</a></p>` : '',
     summary ? '<h2 class="request-heading">How the Loop Understood It</h2>' : '',
+  ] : report ? [
+    '<h1>Bug Report:</h1>',
+    renderStatusLine(t),
+    `<p class="bug-words">${escapeHtml(report.words)}</p>`,
+    report.facts.length ? `<ul class="bug-facts">${report.facts.map(bugReportFact).join('')}</ul>` : '',
+    report.screenshots ? '<p class="bug-shots quiet">Screenshots are attached: see the description under Details.</p>' : '',
   ] : [`<h1>${escapeHtml(name)}</h1>`, renderStatusLine(t)];
   return [
     ...top,
