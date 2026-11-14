@@ -251,6 +251,11 @@ while true; do
   if [ "$PAUSE_CODE" -ne 0 ]; then
     [ -n "$PAUSE_LINE" ] || PAUSE_LINE="could not read the pipeline settings (the check exited $PAUSE_CODE and said nothing; its errors are above), so /$SKILL is treated as PAUSED and not starting (it fails safe)"
     echo "[loop-runner] $(date "+%H:%M:%S") $PAUSE_LINE" >> "$LOG"
+    # A dated PAUSED line (SP-266): the runner is alive and holding off on
+    # purpose. The heartbeat (lib/heartbeat.js) reads it as a beat, so a lane
+    # just unpaused is not called quiet on the last pass from before the
+    # pause. Never START or END, so no reader counts it as a pass.
+    echo "===== $(date "+%Y-%m-%d %H:%M:%S") PAUSED /$SKILL =====" >> "$LOG"
     # A wake sent while paused is answered by this check, not kept: kept, it
     # would end every sleep at once and ask again every few seconds.
     rm -f "$WAKE"

@@ -36,6 +36,7 @@
     "commands:copy": "node scripts/commands_copy.mjs",
     "release": "node scripts/release.mjs",
     "app-checks": "node scripts/app_checks.mjs",
+    "heartbeat": "node scripts/heartbeat.mjs",
     "check:syntax": "node scripts/check_syntax.mjs",
     "check:secrets": "node scripts/check_secrets.mjs",
     "check:wording": "node scripts/check_wording.mjs",
