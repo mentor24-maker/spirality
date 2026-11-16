@@ -717,7 +717,7 @@ which Lane A did not cover, went seven hours with no merge while he slept:
 
 - **Governance first, in both lanes.** A PR that touches any governance path
   is refused outright, whatever else it holds: `.github/`, `.claude/`,
-  skills, any `CLAUDE.md`, `docs/DOCTRINE.md`, `docs/LOOP_ENGINEERING.md`,
+  skills, any `CLAUDE.md`, `docs/DOCTRINE.md`, `docs/UI_DOCTRINE.md`, `docs/LOOP_ENGINEERING.md`,
   `scripts/check_*`, `scripts/install_*`, `scripts/git-hooks/`, and the
   merge machinery itself with its tests. A machine may never auto-merge a
   change to the rules that govern machines. Since SP-199 the list has two

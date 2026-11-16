@@ -815,7 +815,7 @@ test('the Add Task box has a Suggest a Title / Write My Own Title toggle: Sugges
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   const draw = app.slice(app.indexOf('async function drawProject'), app.indexOf('async function copyText'));
   const wire = app.slice(app.indexOf('function wireAddTask'), app.indexOf('/**', app.indexOf('function wireAddTask')));
-  // The toggle, first in the form, in Title Case (docs/DOCTRINE.md).
+  // The toggle, first in the form, in Title Case (docs/UI_DOCTRINE.md).
   assert.match(draw, /<form class="request"\$\{suggesting \? ' hidden' : ''\}>\s*<div class="title-mode" role="radiogroup" aria-label="How the Title Is Chosen">\s*<label><input type="radio" name="title-mode" value="suggest"> Suggest a Title<\/label>\s*<label><input type="radio" name="title-mode" value="own"> Write My Own Title<\/label>\s*<\/div>/);
   // The Title field sits in its own wrapper, required only while it shows.
   assert.match(draw, /<div class="own-title">\s*<label for="title">Title<\/label>\s*<input id="title" type="text">\s*<\/div>/);
@@ -1738,7 +1738,7 @@ test('a held bug report shows Approve and Reject and a quiet line in place of th
     assert.ok(!renderStatusLine(other).includes(escapeHtml(HELD_REPORT_STATUS_LINE)));
   }
   assert.match(renderGoAction({ ...carded, goPhrase: 'go' }), /go-action/, 'Go is back once intake has asked');
-  // Title Case labels (docs/DOCTRINE.md), and the look Merge, Close and Go share.
+  // Title Case labels (docs/UI_DOCTRINE.md), and the look Merge, Close and Go share.
   const css = readFileSync(WEB('app.css'), 'utf8');
   assert.match(css, /\.quick form\.approve-action button, \.quick form\.reject-action button \{ font-weight: 700;/);
 });

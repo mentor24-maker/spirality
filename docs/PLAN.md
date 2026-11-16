@@ -42,7 +42,7 @@ One shared package that owns everything in the list above that is NOT about a pa
 5. Upgrades as PRs. A project pins a substrate version; a bump is a PR with CI, so rule 1 (nothing reaches main unchecked) covers substrate changes too, and a bad release can never reach both projects at once.
 
 ## What stays project-specific, on purpose
-StarCaster: asset pinning, Vercel bundle and UI doctrine checks, `check:shots`, site import, worker-watch, weekly report content, DOCTRINE.md. WaveCenter: core boundary check, secrets scan, browser-secrets check, Supabase RLS check, DATA_MODEL and EXTENSION_MODEL. Each project's CLAUDE.md.
+StarCaster: asset pinning, Vercel bundle and UI doctrine checks, `check:shots`, site import, worker-watch, weekly report content, and the sections of its DOCTRINE.md about its own application (the loop's sections moved to Spirality's `docs/DOCTRINE.md` on 2026-11-15, SP-318). WaveCenter: core boundary check, secrets scan, browser-secrets check, Supabase RLS check, DATA_MODEL and EXTENSION_MODEL. Each project's CLAUDE.md.
 
 ## Risks and how the plan handles them
 - Size: 50,000 lines. Move module by module behind the existing tests; never rewrite. Phase 1 is the cheapest and highest-value step because those modules are already pure.
