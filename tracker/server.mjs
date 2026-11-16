@@ -1192,7 +1192,7 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     }
 
     // One topic changed (a new name and/or description) or deleted
-    // (SP-308), behind the same project check. A topic of another project is
+    // behind the same project check. A topic of another project is
     // `unknown-topic` (404) and nothing changes. A delete takes the topic off
     // every ticket carrying it and names them.
     if (parts.length === 4 && parts[0] === 'projects' && parts[2] === 'topics' && (method === 'PATCH' || method === 'DELETE')) {

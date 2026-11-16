@@ -2462,7 +2462,7 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
     },
 
     /**
-     * Change a topic of `project` (SP-308): a new `name` and/or
+     * Change a topic of `project`: a new `name` and/or
      * `description`, either left out to keep it, with addTopic's limits and
      * refusals. A topic that is not `project`'s, or no topic at all, is
      * refused (`unknown-topic`) and nothing changes. Read back in the same
@@ -2486,7 +2486,7 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
     },
 
     /**
-     * Delete a topic of `project` (SP-308), and take it off every ticket that
+     * Delete a topic of `project`, and take it off every ticket that
      * carries it: each such ticket gets one `topics` event (the ids before
      * and after) and steps its version, as changeTicket does. All in one
      * transaction, so a failure part-way leaves everything as it was. A

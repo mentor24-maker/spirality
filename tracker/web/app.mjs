@@ -3837,10 +3837,10 @@ function wireTopicRows(project, topics, topicsPath, say, again) {
   const readBack = () => api('GET', topicsPath, undefined, { unrecorded: true }).catch((err) => { if (err instanceof SignedOut) throw err; return null; });
   for (const button of main.querySelectorAll('button[data-edit-topic]')) {
     button.addEventListener('click', () => {
-      const t = byId.get(button.dataset.editTopic);
+      const topic = byId.get(button.dataset.editTopic);
       const row = button.closest('tr');
-      if (!t || !row) return;
-      row.innerHTML = renderTopicEditRow(t);
+      if (!topic || !row) return;
+      row.innerHTML = renderTopicEditRow(topic);
       const form = row.querySelector('form.edit-topic');
       form.querySelector('input').focus();
       form.querySelector('.cancel-edit').addEventListener('click', () => again('', false));
@@ -3852,15 +3852,15 @@ function wireTopicRows(project, topics, topicsPath, say, again) {
         for (const control of form.querySelectorAll('button')) control.disabled = true;
         say(`Saving ${name}…`);
         try {
-          await api('PATCH', `${topicsPath}/${encodeURIComponent(t.id)}`, { name, description });
+          await api('PATCH', `${topicsPath}/${encodeURIComponent(topic.id)}`, { name, description });
         } catch (err) {
-          if (err instanceof SignedOut) return drawSignIn(`You were signed out; ${t.name} was not saved.`);
+          if (err instanceof SignedOut) return drawSignIn(`You were signed out; ${topic.name} was not saved.`);
           for (const control of form.querySelectorAll('button')) control.disabled = false;
           return say(`Not saved: ${err.message}`, true);
         }
         let back;
         try { back = await readBack(); } catch { return drawSignIn(); }
-        const listed = back?.topics?.find((x) => x.id === t.id);
+        const listed = back?.topics?.find((x) => x.id === topic.id);
         const ok = listed && listed.name === name && listed.description === description;
         again(ok ? `Saved ${name}.` : `The tracker said ${name} was saved, but ${back ? 'the list does not show the new words when read back' : 'the list could not be read back'}.`, !ok);
       });
@@ -3868,25 +3868,25 @@ function wireTopicRows(project, topics, topicsPath, say, again) {
   }
   for (const button of main.querySelectorAll('button[data-delete-topic]')) {
     button.addEventListener('click', async () => {
-      const t = byId.get(button.dataset.deleteTopic);
-      if (!t || !confirm(topicDeleteQuestion(t))) return;
+      const topic = byId.get(button.dataset.deleteTopic);
+      if (!topic || !confirm(topicDeleteQuestion(topic))) return;
       button.disabled = true;
-      say(`Deleting ${t.name}…`);
+      say(`Deleting ${topic.name}…`);
       let gone;
       try {
-        gone = await api('DELETE', `${topicsPath}/${encodeURIComponent(t.id)}`);
+        gone = await api('DELETE', `${topicsPath}/${encodeURIComponent(topic.id)}`);
       } catch (err) {
-        if (err instanceof SignedOut) return drawSignIn(`You were signed out; ${t.name} was not deleted.`);
+        if (err instanceof SignedOut) return drawSignIn(`You were signed out; ${topic.name} was not deleted.`);
         button.disabled = false;
         return say(`Not deleted: ${err.message}`, true);
       }
       let back;
       try { back = await readBack(); } catch { return drawSignIn(); }
-      const stillThere = !back || back.topics?.some((x) => x.id === t.id);
+      const stillThere = !back || back.topics?.some((x) => x.id === topic.id);
       const n = gone?.tickets?.length ?? 0;
       again(stillThere
-        ? `The tracker said ${t.name} was deleted, but ${back ? 'it is still listed when read back' : 'the list could not be read back'}.`
-        : `Deleted ${t.name} from ${project.name}${n ? ` and from the ${n === 1 ? '1 task' : `${n} tasks`} that carried it` : ''}.`, stillThere);
+        ? `The tracker said ${topic.name} was deleted, but ${back ? 'it is still listed when read back' : 'the list could not be read back'}.`
+        : `Deleted ${topic.name} from ${project.name}${n ? ` and from the ${n === 1 ? '1 task' : `${n} tasks`} that carried it` : ''}.`, stillThere);
     });
   }
 }

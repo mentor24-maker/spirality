@@ -5636,9 +5636,9 @@ test('the Topics page refuses a blank name before sending, asks before a delete,
   const wire = app.slice(app.indexOf('function wireTopicRows'), app.indexOf('/**\n * The Docs page in two columns'));
   assert.match(app, /wireTopicRows\(project, topics, topicsPath, say, again\);/);
   assert.ok(wire.indexOf("if (!name) return say('Not saved: a topic needs a name.', true);") < wire.indexOf("api('PATCH'"), 'a blank name is refused before anything is sent');
-  assert.ok(wire.indexOf('confirm(topicDeleteQuestion(t))') < wire.indexOf("api('DELETE'"), 'asks before deleting');
+  assert.ok(wire.indexOf('confirm(topicDeleteQuestion(topic))') < wire.indexOf("api('DELETE'"), 'asks before deleting');
   assert.match(wire, /listed\.name === name && listed\.description === description/, 'an edit is checked against the list read back');
-  assert.match(wire, /const stillThere = !back \|\| back\.topics\?\.some\(\(x\) => x\.id === t\.id\);/, 'a delete is checked against the list read back');
+  assert.match(wire, /const stillThere = !back \|\| back\.topics\?\.some\(\(x\) => x\.id === topic\.id\);/, 'a delete is checked against the list read back');
   assert.match(wire, /again\(stillThere[\s\S]*, stillThere\);/);
   assert.match(wire, /addEventListener\('click', \(\) => again\('', false\)\)/, 'Cancel draws the page again');
 });
