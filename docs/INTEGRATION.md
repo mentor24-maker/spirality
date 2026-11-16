@@ -226,9 +226,37 @@ commands, and the page reads the record back before it says it saved.
 Spirality's own project shows that it always runs the newest release, with
 no buttons.
 
-Slices 1 and 2 of 4: nothing runs from the record yet. Still to come:
-running each project's lanes on its release (SP-276), and moving a project to
-the newest release after a quiet period (SP-277).
+### How a project's lanes run on their release (SP-276)
+
+It now works this way. The runners (`scripts/loop_runner.sh` and
+`scripts/run_relay.sh`) stay in Spirality's main checkout. For a project other
+than Spirality, at the start of every pass they read the release the tracker
+names for it (`release list`) and run the pass from that release's own copy
+of Spirality: the door, the plugin's skills and hooks, and the pause, work,
+wake and model checks all come from there. Spirality's own lanes keep pulling
+and running `main`.
+
+- **One copy per release in use**, in Spirality's log folder:
+  `<logDir>/releases/release-<n>`, made with `git worktree add --detach` at
+  the release's tag, then `npm ci`. It is used only once it is whole (a ready
+  mark names its commit). `scripts/lib/releaseCheckout.mjs` keeps them, under
+  Spirality's sync lock so a fetch never meets a pull.
+- **A newly named release** (a move or a roll-back) takes effect at the start
+  of that project's next pass. A pass already running is never stopped.
+- **No release named:** the pass does not run, and its log says so in one
+  line. Never a silent run on `main`.
+- **The named release cannot be made ready** (the tag is missing, the fetch
+  fails, `npm ci` fails, the record cannot be read): the pass runs on the
+  release that project ran last, logs why, and posts one line to the project's
+  bus (once, not every pass). With no release run before, it does not run,
+  and the bus line is an ALARM.
+- **Tidying:** at the end of a pass, a copy that no project names, no project
+  ran last, no live pass is on, and that is not the newest release is removed.
+- `scripts/install_loop_runner.sh --status` shows the release each project's
+  lanes run on, and the copies on this machine.
+
+Slices 1 to 3 of 4 are done. Still to come: moving a project to the newest
+release after a quiet period (SP-277).
 
 ## The moves
 

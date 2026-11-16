@@ -26,6 +26,15 @@
 # runners take around their own pull, so two lanes never pull into one
 # checkout at once.
 #
+# A project's relay pass runs on the Spirality release the tracker names for
+# it (SP-276): this script, in Spirality's main checkout, takes the lock and
+# pulls the project's main, then runs the door, the application checks and
+# the watchdogs from that release's own checkout, which
+# scripts/lib/releaseCheckout.mjs keeps in Spirality's log folder.
+# Spirality's own relay runs all of it from this folder, on main. The tick
+# and the pause check come first, before the release is read, so they run
+# from this folder for every project.
+#
 # Every project-specific value (the log folder, the project's short name)
 # comes from the project config through scripts/project_config.mjs; nothing
 # here names a project.
@@ -232,9 +241,49 @@ else
   echo "[relay] main checkout is not on a clean main — not pulling. Every pass runs stale code until it is put back on main."
 fi
 
-# Everything from here runs Spirality's own scripts, so from Spirality's
-# folder (for Spirality's own relay, that is where it already is).
-cd "$REPO" || exit 1
+# Which Spirality the rest of the pass runs (SP-276). Spirality's own relay:
+# this folder, on the main just pulled. A project's: the release the tracker
+# names for it, read now, so a move or a roll-back takes effect at this pass.
+# A release that cannot be made ready falls back to the one the project ran
+# last (said once on its bus); with none to fall back on, or none named, the
+# pass does not run, and says so. Never a silent run on main.
+# It runs under its own time limit, so a new release's fetch and `npm ci`
+# (or a wait on the releases or sync lock) never hold the relay lock past
+# it: the time is counted against the relay's own share below. Its errors
+# are kept and printed here, so the END line's "why" is in this log.
+RUN_DIR="$REPO"
+RELEASE_LIMIT="${RELAY_RELEASE_LIMIT_SECONDS:-300}"
+case "$RELEASE_LIMIT" in ""|*[!0-9]*|0) RELEASE_LIMIT=300 ;; esac
+if [ -z "$OWN" ]; then
+  RELEASE_ERR="$(mktemp "${TMPDIR:-/tmp}/$SLUG-relay-release.XXXXXX")" || RELEASE_ERR="/dev/null"
+  RELEASE_START=$(date +%s)
+  RELEASE_SAID="$(RUN_WITH_TIME_LIMIT_POLL=1 "$REPO/scripts/run_with_time_limit.sh" "$RELEASE_LIMIT" -- \
+    node "$REPO/scripts/lib/releaseCheckout.mjs" prepare --root "$REPO" --project "$SLUG" --pid "$$" ${DRY_RUN:+--dry-run} 2>"$RELEASE_ERR")"
+  RELEASE_CODE=$?
+  RELEASE_TOOK=$(( $(date +%s) - RELEASE_START ))
+  RUN_DIR="$(printf '%s\n' "$RELEASE_SAID" | head -1)"
+  printf '%s\n' "$RELEASE_SAID" | tail -n +2 | sed -n 's/^\(..*\)$/[relay] release: \1/p'
+  if [ "$RELEASE_ERR" != "/dev/null" ]; then
+    sed -n 's/^\(..*\)$/[relay] release check said: \1/p' "$RELEASE_ERR"
+    rm -f "$RELEASE_ERR"
+  fi
+  if [ -z "$RUN_DIR" ] || [ ! -d "$RUN_DIR" ]; then
+    case "$RELEASE_CODE" in
+      4) WHY_NOT="no Spirality release is named for this project" ;;
+      5) WHY_NOT="the named release could not be made ready and there is no earlier one to fall back on" ;;
+      124) WHY_NOT="the release check ran past its ${RELEASE_LIMIT}s limit and was stopped" ;;
+      *) WHY_NOT="the release check failed" ;;
+    esac
+    echo "===== $(date '+%Y-%m-%d %H:%M:%S') END relay — not run: no Spirality release to run on ($WHY_NOT; it exited $RELEASE_CODE, its lines above say more) ====="
+    # No release named is a project not switched over yet, not a failure.
+    [ "$RELEASE_CODE" -eq 4 ] && exit 0
+    exit 1
+  fi
+fi
+
+# Everything from here runs Spirality's own scripts, so from that folder (for
+# Spirality's own relay, this one).
+cd "$RUN_DIR" || exit 1
 
 # The pass itself. Through npm, so Doppler supplies the token the same way
 # every other write to the tracker gets it. A dry run is passed straight through.
@@ -247,8 +296,13 @@ export TRACKER_TOKEN_NAME=TRACKER_TOKEN_RELAY
 # says what it found.
 CHECKS_LISTED="$(relay_app_checks_listed "$PROJECT")"
 if [ "$CHECKS_LISTED" = "none" ]; then RELAY_LIMIT="$PASS_LIMIT"; else RELAY_LIMIT=$((PASS_LIMIT - CHECKS_SHARE)); fi
+# The release check's time comes out of the relay's own share (SP-276), never
+# below a minute, so one pass stays near the pass limit however long a new
+# release took to set up.
+RELAY_LIMIT=$(( RELAY_LIMIT - ${RELEASE_TOOK:-0} ))
+[ "$RELAY_LIMIT" -lt 60 ] && RELAY_LIMIT=60
 PASS_START=$(date +%s)
-"$REPO/scripts/run_with_time_limit.sh" "$RELAY_LIMIT" -- \
+"$RUN_DIR/scripts/run_with_time_limit.sh" "$RELAY_LIMIT" -- \
   npm run --silent clickup -- relay "$@"
 status=$?
 
@@ -257,7 +311,7 @@ status=$?
 # reads a value from a relay launchd is not yet ticking). A read that fails
 # keeps the last good one and says so in one line.
 if [ -n "$TICKED" ] && [ -z "$DRY_RUN" ]; then
-  SAID="$(node "$REPO/scripts/lib/wakeSetting.mjs" relay 2>/dev/null)"
+  SAID="$(node "$RUN_DIR/scripts/lib/wakeSetting.mjs" relay 2>/dev/null)"
   SAID_CODE=$?
   case "$SAID" in
     ""|*[!0-9]*) SAID_OK="" ;;
@@ -266,7 +320,7 @@ if [ -n "$TICKED" ] && [ -z "$DRY_RUN" ]; then
   if [ -n "$SAID_OK" ]; then
     echo "$SAID" > "$INTERVAL_FILE"
   else
-    echo "[relay] could not read the relay's wake time from the tracker (${SAID:-no answer}) — keeping the last good value, $(cat "$INTERVAL_FILE" 2>/dev/null || node "$REPO/scripts/lib/loopSchedule.mjs" interval relay)s"
+    echo "[relay] could not read the relay's wake time from the tracker (${SAID:-no answer}) — keeping the last good value, $(cat "$INTERVAL_FILE" 2>/dev/null || node "$RUN_DIR/scripts/lib/loopSchedule.mjs" interval relay)s"
   fi
 fi
 
@@ -296,7 +350,7 @@ fi
 # is one line naming the heartbeat and its exit code. A dry run asks only,
 # posting nothing. (The relay cannot report itself quiet from here; this
 # check is for the lanes that run on their own.)
-run_relay_heartbeat "$REPO" "${RELAY_HEARTBEAT_LIMIT_SECONDS:-180}" ${DRY_RUN:+--dry-run}
+run_relay_heartbeat "$RUN_DIR" "${RELAY_HEARTBEAT_LIMIT_SECONDS:-180}" ${DRY_RUN:+--dry-run}
 
 # Then the ticket watchdogs (SP-267): a ticket stuck in Ready to launch, and
 # an answer in Needs your input that nothing acted on, each said on the bus at
@@ -305,7 +359,7 @@ run_relay_heartbeat "$REPO" "${RELAY_HEARTBEAT_LIMIT_SECONDS:-180}" ${DRY_RUN:+-
 # did, each under its own time limit, and they never change this pass's
 # verdict or stop it: a failure is one line naming the watchdog and its exit
 # code. A dry run reads and prints only.
-run_relay_watchdogs "$REPO" "${RELAY_WATCHDOG_LIMIT_SECONDS:-180}" ${DRY_RUN:+--dry-run}
+run_relay_watchdogs "$RUN_DIR" "${RELAY_WATCHDOG_LIMIT_SECONDS:-180}" ${DRY_RUN:+--dry-run}
 
 # Then the throughput and checkout-currency watchdogs (SP-268): is the queue
 # getting shorter, and did the pull above leave this machine on main's code?
@@ -316,7 +370,18 @@ run_relay_watchdogs "$REPO" "${RELAY_WATCHDOG_LIMIT_SECONDS:-180}" ${DRY_RUN:+--
 # pass's verdict or stop it: a failure is one line naming the watchdog. A dry
 # run reads and prints only.
 if declare -F run_relay_queue_watchdogs >/dev/null; then
-  run_relay_queue_watchdogs "$REPO" "${RELAY_QUEUE_WATCHDOG_LIMIT_SECONDS:-180}" "$BEFORE" "$PULL_OUTPUT" ${DRY_RUN:+--dry-run}
+  # From the project's checkout, the one the pull above brought level and
+  # $BEFORE was read in: the currency check reads the checkout it runs in,
+  # and a release checkout is detached at a tag and behind main on purpose,
+  # so read there it would cry STALE CHECKOUT on every pass (SP-276).
+  (cd "$PROJECT" && run_relay_queue_watchdogs "$RUN_DIR" "${RELAY_QUEUE_WATCHDOG_LIMIT_SECONDS:-180}" "$BEFORE" "$PULL_OUTPUT" ${DRY_RUN:+--dry-run})
+fi
+
+# A project's pass is over: its release checkout is no longer in use by this
+# relay, and any checkout nothing needs any more is removed (SP-276). It
+# never changes this pass's verdict. A dry run removes nothing.
+if [ -z "$OWN" ] && [ -z "$DRY_RUN" ]; then
+  node "$REPO/scripts/lib/releaseCheckout.mjs" finish --root "$REPO" --pid "$$" | sed -n 's/^\(..*\)$/[relay] release: \1/p'
 fi
 
 # The exit code is the pass's own verdict, and the END line says it in words,
