@@ -29,8 +29,8 @@ the tracker, the bus or the loop's own code.**
 This replaces two earlier answers: "projects pin a version of a shared
 package" (`docs/PLAN.md`, phase 5) and "a project gets the loop as a wizard
 copy" (Dane, 2026-11-08: *"a wizard copy now is fine for now"*). Both
-put loop code inside the project. The wizard copy stays in use until the
-moves below are done.
+put loop code inside the project. A new project gets no copy since SP-273;
+the projects set up before then keep theirs until move 6 below.
 
 ## What a project provides
 
@@ -274,6 +274,14 @@ is a ticket in that project's own queue, filed once Spirality's side is Live:
    (StarCaster's, until move 6) would win over Spirality's. Spirality's own
    passes are started exactly as before. `scripts/dry_project_pass.sh` shows
    it working for a project with no `.claude/` folder.
+   Slice 5 done (SP-273): the setup wizard copies none of the loop into a
+   new project. Its setup pull request holds the project's settings file
+   and `verify` gate, plus the `.gitignore` line and `CLAUDE.md` sections
+   its lanes need (`scripts/onboard/manifest.json`), and its lanes step
+   installs the lanes with Spirality's own installer, `--project
+   <checkout>`, and files the setup ticket through Spirality's door.
+   `scripts/dry_onboard_lanes.sh` shows the lanes step for a project with no
+   loop code. Projects set up before then keep their copy until move 6.
 3. Let a project list application checks in its manifest for Spirality to run
    and post to its bus.
    Done: SP-264 added the `applicationChecks` field and
