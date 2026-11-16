@@ -670,7 +670,7 @@ async function drawProjects(done = '', problem = '') {
   // The owner and operator are never taken off: a tag, no Remove.
   const fixedAs = (p, m) => [m.id === p.owner?.id ? 'Owner' : null, m.id === p.operator?.id ? 'Operator' : null].filter(Boolean);
   const memberOf = (p, m) => `<span class="member">${escapeHtml(m.name)}${fixedAs(p, m).map((t) => `<span class="tag">${escapeHtml(t)}</span>`).join('')}${editing && !fixedAs(p, m).length
-    ? `<button type="button" class="remove-member" data-remove="${escapeHtml(m.id)}" data-name="${escapeHtml(m.name)}" data-slug="${escapeHtml(p.slug)}" data-project="${escapeHtml(p.name)}" aria-label="Remove ${escapeHtml(m.name)} from ${escapeHtml(p.name)}">Remove</button>`
+    ? `<button type="button" class="btn btn-danger btn-sm remove-member" data-remove="${escapeHtml(m.id)}" data-name="${escapeHtml(m.name)}" data-slug="${escapeHtml(p.slug)}" data-project="${escapeHtml(p.name)}" aria-label="Remove ${escapeHtml(m.name)} from ${escapeHtml(p.name)}">Remove</button>`
     : ''}</span>`;
   const membersCell = (p) => {
     const members = p.members ?? [];
@@ -703,7 +703,7 @@ async function drawProjects(done = '', problem = '') {
     </tr>`;
   main.innerHTML = `
     <h1>Projects</h1>
-    ${me?.kind === 'human' ? '<div class="toolbar"><a class="button" href="/setup/new">Set Up a Project</a></div>' : ''}
+    ${me?.kind === 'human' ? '<div class="toolbar"><a class="button btn btn-primary" href="/setup/new">Set Up a Project</a></div>' : ''}
     <p class="note${problem ? ' error' : (done ? ' quiet' : '')}" role="status">${escapeHtml(problem || done)}</p>
     ${renderSetupList(setups)}
     ${projects.length
@@ -806,7 +806,7 @@ async function drawProjectDetails(slug, done = '', problem = '') {
     <tr><td class="name">${escapeHtml(m.name)}${fixedAs(m).map((t) => `<span class="tag">${escapeHtml(t)}</span>`).join('')}</td>
       <td class="by">${m.addedBy ? escapeHtml(m.addedBy.name) : '<span class="quiet">the tracker</span>'}</td>
       <td class="added">${escapeHtml(when(m.addedAt))}</td>
-      ${editing ? `<td class="actions">${fixedAs(m).length ? '' : `<button type="button" data-remove="${escapeHtml(m.id)}" data-name="${escapeHtml(m.name)}">Remove</button>`}</td>` : ''}</tr>`;
+      ${editing ? `<td class="actions">${fixedAs(m).length ? '' : `<button type="button" class="btn btn-danger btn-sm" data-remove="${escapeHtml(m.id)}" data-name="${escapeHtml(m.name)}">Remove</button>`}</td>` : ''}</tr>`;
   main.innerHTML = `
     <h1 class="project">${logoOf(p, 'logo big')}${escapeHtml(p.name)}</h1>
     <div class="toolbar">
@@ -832,7 +832,7 @@ async function drawProjectDetails(slug, done = '', problem = '') {
     ${editing ? (addable.length
     ? `<form class="invite members">
       <label for="add-member">Add a member</label>
-      <div class="row"><select id="add-member">${addable.map((x) => `<option value="${escapeHtml(x.id)}">${escapeHtml(x.name)}</option>`).join('')}</select><button type="submit">Add Member</button></div>
+      <div class="row"><select id="add-member">${addable.map((x) => `<option value="${escapeHtml(x.id)}">${escapeHtml(x.name)}</option>`).join('')}</select><button type="submit" class="btn btn-primary">Add Member</button></div>
     </form>`
     : '<p class="quiet">Everyone with an account is a member.</p>') : ''}
     <p class="quiet">Only its members (and admins) see this project and its tickets.</p>`;
@@ -919,7 +919,7 @@ async function drawCreateProject() {
       ${field('alertPhone', 'Alert phone', ALERT_PHONE_HINT, ' inputmode="tel" autocomplete="tel" spellcheck="false"')}
       <label for="owner">Owner</label>
       <select id="owner"><option value="">Nobody</option>${people.map((p) => `<option value="${escapeHtml(p.id)}"${p.id === me.id ? ' selected' : ''}>${escapeHtml(p.name)}</option>`).join('')}</select>
-      <div class="row"><button type="submit">Add Project</button><a href="/projects">Cancel</a><span class="note"></span></div>
+      <div class="row"><button type="submit" class="btn btn-primary">Add Project</button><a href="/projects">Cancel</a><span class="note"></span></div>
     </form>`;
   const form = main.querySelector('form.project');
   const value = (id) => form.querySelector(`#${id}`).value;
@@ -988,7 +988,7 @@ async function drawEditProject(slug) {
       ${field('alertPhone', 'Alert phone', ALERT_PHONE_HINT, ` inputmode="tel" autocomplete="tel" spellcheck="false"${filled(p.alertPhone)}`)}
       <label for="owner">Owner</label>
       <select id="owner"><option value="">Nobody</option>${people.map((o) => `<option value="${escapeHtml(o.id)}"${o.id === p.owner?.id ? ' selected' : ''}>${escapeHtml(o.name)}</option>`).join('')}</select>
-      <div class="row"><button type="submit">Save</button><a href="/projects">Cancel</a><span class="note"></span></div>
+      <div class="row"><button type="submit" class="btn btn-save">Save</button><a href="/projects">Cancel</a><span class="note"></span></div>
     </form>`;
   putTrail([{ label: p.name, href: '/projects' }, { label: 'Edit' }]);
   const form = main.querySelector('form.project');
@@ -1050,7 +1050,7 @@ async function drawSetupNew(project) {
     <form class="request setup">
       ${renderSetupForm(fields, saved?.answers ?? null)}
       <p class="quiet">Its slug, in every address and file name: <span class="slug">${escapeHtml(project ?? '')}</span></p>
-      <div class="row"><button type="submit">Save</button><a href="${project ? `/setup/${encodeURIComponent(project)}` : '/projects'}">Cancel</a><span class="note form-note"></span></div>
+      <div class="row"><button type="submit" class="btn btn-save">Save</button><a href="${project ? `/setup/${encodeURIComponent(project)}` : '/projects'}">Cancel</a><span class="note form-note"></span></div>
     </form>`;
   const form = main.querySelector('form.setup');
   const note = form.querySelector('.form-note');
@@ -1410,20 +1410,20 @@ async function drawProject(slug, view, { adding = false, filed = null, unchecked
           <legend>Pick a Title</legend>
           <div class="choices"></div>
         </fieldset>
-        <div class="row"><button type="submit" class="submit-task">Suggest Titles</button><button type="button" class="suggest-again" hidden>Suggest Again</button><span class="note"></span></div>
+        <div class="row"><button type="submit" class="btn btn-primary submit-task">Suggest Titles</button><button type="button" class="btn suggest-again" hidden>Suggest Again</button><span class="note"></span></div>
       </form>
       <div class="suggest-next"${suggesting ? '' : ' hidden'}>
         <p class="hint quiet">Reads the project (its plans, documents and code) and its open tickets, and suggests what to do next. Put them in order, untick any you do not want, and file the rest as requests.</p>
-        <div class="row"><button type="button" class="suggest-run">Suggest Next Tasks</button><span class="run-note note" role="status"></span></div>
+        <div class="row"><button type="button" class="btn btn-primary suggest-run">Suggest Next Tasks</button><span class="run-note note" role="status"></span></div>
         <ol class="suggestions"></ol>
-        <div class="row file-row" hidden><button type="button" class="file-order">File in This Order</button><span class="file-note note" role="status"></span></div>
+        <div class="row file-row" hidden><button type="button" class="btn btn-primary file-order">File in This Order</button><span class="file-note note" role="status"></span></div>
       </div>
     </details>
     <dialog class="suggestion-info" aria-labelledby="suggestion-info-title">
       <form method="dialog">
         <button type="submit" class="close" aria-label="Close">×</button>
         <div class="suggestion-info-body"></div>
-        <div class="row"><button type="submit">Close</button></div>
+        <div class="row"><button type="submit" class="btn">Close</button></div>
       </form>
     </dialog>
     <dialog class="project-check" aria-labelledby="project-check-question">
@@ -1431,8 +1431,8 @@ async function drawProject(slug, view, { adding = false, filed = null, unchecked
         <button type="submit" class="close" value="" aria-label="Close: file nothing">×</button>
         <p id="project-check-question">Did you mean for that to be associated with project <strong class="project-name"></strong>?</p>
         <div class="row">
-          <button type="submit" value="move">File in</button>
-          <button type="submit" value="keep">Keep in ${escapeHtml(board.projectName)}</button>
+          <button type="submit" class="btn btn-primary" value="move">File in</button>
+          <button type="submit" class="btn" value="keep">Keep in ${escapeHtml(board.projectName)}</button>
         </div>
       </form>
     </dialog>
@@ -1441,7 +1441,7 @@ async function drawProject(slug, view, { adding = false, filed = null, unchecked
         <button type="submit" class="close" aria-label="Close">×</button>
         <h2 id="pipeline-status-title">Pipeline Status</h2>
         <div class="pipeline-details"></div>
-        <div class="row"><button type="submit">Close</button></div>
+        <div class="row"><button type="submit" class="btn">Close</button></div>
       </form>
     </dialog>
     <p class="error list-note" role="alert" hidden></p>
@@ -1866,7 +1866,7 @@ async function drawTicket(id, said = null, kept = null) {
         <label for="copy-to">A new ticket with this title and description, in Requested there. This ticket stays exactly as it is.</label>
         <div class="row">
           <select id="copy-to">${others.map((p) => `<option value="${escapeHtml(p.slug)}">${escapeHtml(p.name)}</option>`).join('')}</select>
-          <button type="submit">Copy</button><span class="note"></span>
+          <button type="submit" class="btn">Copy</button><span class="note"></span>
         </div>
       </form>` : '<p class="quiet">There is no other project to copy into yet.</p>'}`;
   main.innerHTML = `
@@ -3250,7 +3250,7 @@ async function drawSettings() {
       <td class="status"><label for="colour-${i}">${escapeHtml(s.status)}</label></td>
       <td class="picker"><input id="colour-${i}" type="color"></td>
       <td class="value"></td>
-      <td class="clear"><button type="button">Clear</button></td>
+      <td class="clear"><button type="button" class="btn btn-sm">Clear</button></td>
     </tr>`;
   main.innerHTML = `
     <h1>Settings</h1>
@@ -3264,7 +3264,7 @@ async function drawSettings() {
       <p class="quiet">Choose a colour for each stage of the loop. The same colours show for everyone.</p>
       <form class="colours">
         <table class="colours"><thead><tr><th>Stage</th><th>Colour</th><th></th><th></th></tr></thead><tbody>${stages.map(row).join('')}</tbody></table>
-        <div class="row"><button type="submit">Save</button><span class="note"></span></div>
+        <div class="row"><button type="submit" class="btn btn-save">Save</button><span class="note"></span></div>
       </form>
     </div>`;
   showSettingsTab(settingsTabAt());
@@ -3478,7 +3478,7 @@ async function drawUsers(done = '', problem = '') {
     const addable = all.filter((x) => !mine.some((m) => m.slug === x.slug));
     return `${mine.length ? mine.map((x) => `<span class="member"><a href="/projects/${encodeURIComponent(x.slug)}">${escapeHtml(x.name)}</a>${fixedAs(p, x).map((t) => `<span class="tag">${escapeHtml(t)}</span>`).join('')}${fixedAs(p, x).length
       ? ''
-      : `<button type="button" class="remove-member" data-remove-from="${escapeHtml(x.slug)}" data-project="${escapeHtml(x.name)}" data-person="${escapeHtml(p.id)}" data-name="${escapeHtml(p.name)}" aria-label="Remove ${escapeHtml(p.name)} from ${escapeHtml(x.name)}">Remove</button>`}</span>`).join('') : none}${addable.length
+      : `<button type="button" class="btn btn-danger btn-sm remove-member" data-remove-from="${escapeHtml(x.slug)}" data-project="${escapeHtml(x.name)}" data-person="${escapeHtml(p.id)}" data-name="${escapeHtml(p.name)}" aria-label="Remove ${escapeHtml(p.name)} from ${escapeHtml(x.name)}">Remove</button>`}</span>`).join('') : none}${addable.length
       ? `<select class="add-member" data-person="${escapeHtml(p.id)}" data-name="${escapeHtml(p.name)}" aria-label="Add ${escapeHtml(p.name)} to a project"><option value="">Add to Project…</option>${addable.map((x) => `<option value="${escapeHtml(x.slug)}">${escapeHtml(x.name)}</option>`).join('')}</select>`
       : ''}`;
   };
@@ -3492,13 +3492,13 @@ async function drawUsers(done = '', problem = '') {
     <tr><td class="name"><b>${escapeHtml(r.name)}</b><span class="hint quiet">${escapeHtml(r.description)}</span></td>${permissions.map((x) => `<td class="has">${r.permissions.includes(x.name) ? '✓' : '<span class="hidden">no</span>'}</td>`).join('')}</tr>`;
   const inviteRow = (i) => `
     <tr><td class="email">${escapeHtml(i.email)}</td><td class="by">${escapeHtml(i.invitedBy.name)}</td><td class="expires">${escapeHtml(when(i.expiresAt))}</td>
-      <td class="actions">${person ? `<button type="button" data-cancel="${escapeHtml(i.id)}" data-email="${escapeHtml(i.email)}">Cancel</button>` : ''}</td></tr>`;
+      <td class="actions">${person ? `<button type="button" class="btn btn-sm" data-cancel="${escapeHtml(i.id)}" data-email="${escapeHtml(i.email)}">Cancel</button>` : ''}</td></tr>`;
   main.innerHTML = `
     <h1>Users</h1>
     <p class="note${problem ? ' error' : ' quiet'}" role="status">${escapeHtml(problem || done)}</p>
     ${person ? `<form class="invite">
       <label for="invite-email">Invite someone</label>
-      <div class="row"><input id="invite-email" type="email" autocomplete="off" placeholder="their@email.com" required><button type="submit">Send Invite</button></div>
+      <div class="row"><input id="invite-email" type="email" autocomplete="off" placeholder="their@email.com" required><button type="submit" class="btn btn-primary">Send Invite</button></div>
       ${sites.length ? `<label for="invite-site">Send the link to</label>
       <div class="row"><select id="invite-site"><option value="">the tracker page</option>${sites.map((x) => `<option value="${escapeHtml(x.id)}">${escapeHtml(x.name)}</option>`).join('')}</select></div>` : ''}
       <span class="hint quiet">They get an email with a link to choose their name and password. It works once, for 7 days.</span>
@@ -3664,8 +3664,8 @@ async function drawDocs(done = '', problem = '', section = 'files') {
       <td class="size">${escapeHtml(sizeOf(a.size))}</td>
       <td class="by">${a.addedByName ? escapeHtml(a.addedByName) : '<span class="quiet">unknown</span>'}</td>
       <td class="when">${escapeHtml(when(a.createdAt))}</td>
-      <td class="actions"><button type="button" class="rename-file" ${data} aria-label="Rename ${escapeHtml(a.name)}">Rename</button>
-        <button type="button" class="remove-file" ${data} aria-label="Remove ${escapeHtml(a.name)} from ${escapeHtml(a.ticket)}">Remove</button></td></tr>`;
+      <td class="actions"><button type="button" class="btn btn-sm rename-file" ${data} aria-label="Rename ${escapeHtml(a.name)}">Rename</button>
+        <button type="button" class="btn btn-danger btn-sm remove-file" ${data} aria-label="Remove ${escapeHtml(a.name)} from ${escapeHtml(a.ticket)}">Remove</button></td></tr>`;
   };
   main.innerHTML = `
     <h1>Docs</h1>
@@ -3677,7 +3677,7 @@ async function drawDocs(done = '', problem = '', section = 'files') {
     ${tickets.length ? `<form class="add-file">
       <label for="add-file-task">Add a file to a task</label>
       <div class="row"><select id="add-file-task" required><option value="">Pick a task…</option>${tickets.map((t) => `<option value="${escapeHtml(t.id)}">${escapeHtml(t.id)} ${escapeHtml(t.name)}</option>`).join('')}</select>
-        <input id="add-file-file" type="file" required aria-label="The file to add"><button type="submit">Add File</button></div>
+        <input id="add-file-file" type="file" required aria-label="The file to add"><button type="submit" class="btn btn-primary">Add File</button></div>
       <span class="hint quiet">Up to 10 MB. It shows here and on the task's own page.</span>
     </form>` : ''}
     ${attachments.length
@@ -3843,7 +3843,7 @@ function commandsSection() {
       <form method="dialog">
         <button type="submit" class="close" aria-label="Close">×</button>
         <div class="command-details-body"></div>
-        <div class="row"><button type="submit">Close</button></div>
+        <div class="row"><button type="submit" class="btn">Close</button></div>
       </form>
     </dialog>
   </section>`;
