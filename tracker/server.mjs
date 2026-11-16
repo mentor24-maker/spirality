@@ -48,6 +48,10 @@
  * description }`, a name required), behind the same project check;
  * one is changed by `PATCH /projects/<slug>/topics/<n>` and deleted (taken
  * off every ticket carrying it) by `DELETE /projects/<slug>/topics/<n>`.
+ * Its tags are listed and made the same way at `/projects/<slug>/tags`;
+ * one is renamed or given a description by `PATCH
+ * /projects/<slug>/tags/<name>` (`{ name, description }`) and deleted by
+ * `DELETE /projects/<slug>/tags/<name>`, on every ticket carrying it.
  * A refused write writes nothing. A token never appears in an answer or a
  * log line: the log names the actor id, never the header.
  *
@@ -158,7 +162,7 @@ const NO_MATCH = 'That email and password do not match.';
 const MAX_BODY = 1024 * 1024;
 
 /** Store refusals that mean "no such thing", answered 404 rather than 400. */
-const NOT_FOUND_CODES = new Set(['unknown-ticket', 'unknown-project', 'unknown-invite', 'unknown-attachment', 'unknown-topic']);
+const NOT_FOUND_CODES = new Set(['unknown-ticket', 'unknown-project', 'unknown-invite', 'unknown-attachment', 'unknown-topic', 'unknown-tag']);
 /** setRole's refusals that are not a bad field: a non-admin is forbidden, and the last admin's change conflicts with the tracker's state. */
 const ROLE_REFUSALS = Object.freeze({ 'not-admin': 403, 'last-admin': 409 });
 /** addMember's and removeMember's refusals that are not a bad field. */
@@ -1239,6 +1243,30 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
       }
       log(`made tag on ${project.slug} actor=${me.id}`);
       return [201, made];
+    }
+
+    // One tag renamed (and/or its description changed) or deleted, by its
+    // exact name, behind the same project check. Every ticket of the project
+    // carrying it changes with it, and the answer names them. A name the
+    // project does not have is `unknown-tag` (404); a new name another tag
+    // already has, in any case, is a 409 and nothing changes.
+    if (parts.length === 4 && parts[0] === 'projects' && parts[2] === 'tags' && (method === 'PATCH' || method === 'DELETE')) {
+      const project = requireProject(parts[1], me);
+      if (method === 'DELETE') {
+        const gone = store.removeTag({ project: project.slug, name: parts[3], actor: me.id });
+        log(`deleted a tag on ${project.slug} from ${gone.tickets.length} ticket(s) actor=${me.id}`);
+        return [200, gone];
+      }
+      const body = await readJson(req);
+      let changed;
+      try {
+        changed = store.renameTag({ project: project.slug, name: parts[3], newName: body?.name, description: body?.description, actor: me.id });
+      } catch (err) {
+        if (err instanceof StoreError && err.code === 'tag-exists') throw new HttpError(409, err.code, err.message);
+        throw err;
+      }
+      log(`changed a tag on ${project.slug} on ${changed.tickets.length} ticket(s) actor=${me.id}`);
+      return [200, changed];
     }
 
     // One topic changed (a new name and/or description) or deleted

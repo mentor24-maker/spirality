@@ -143,8 +143,12 @@
  *    can be made before any ticket carries it. listTags answers the saved
  *    tags and every tag in use on the project's tickets, each spelling once,
  *    with how many tickets carry it; addTag refuses a name already on that
- *    list in any case (`tag-exists`). Tickets still carry their tags as
- *    words, and a deleted project's saved tags go with it.
+ *    list in any case (`tag-exists`). renameTag and removeTag change or
+ *    take a tag off every ticket of the project carrying it (each with a
+ *    `tags` event and a version step) and off the saved list, in one
+ *    transaction; a rename onto another tag's name is refused, never merged.
+ *    Tickets still carry their tags as words, and a deleted project's saved
+ *    tags go with it.
  */
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
@@ -762,6 +766,27 @@ function canonicalFileName(name) {
   return clean;
 }
 
+/**
+ * A tag's name as sent, trimmed; refused (`bad-name`) when blank, too long,
+ * or only "." or "..", which an address folds away (a page could not then
+ * change or delete it by its own address).
+ */
+function tagName(name) {
+  const clean = typeof name === 'string' ? name.trim() : '';
+  if (!clean) throw new StoreError('bad-name', 'a tag needs a name; nothing was saved.');
+  if (clean.length > MAX_TAG_NAME) throw new StoreError('bad-name', `a tag's name is at most ${MAX_TAG_NAME} characters; nothing was saved.`);
+  if (clean === '.' || clean === '..') throw new StoreError('bad-name', `a tag cannot be named ${clean}; nothing was saved.`);
+  return clean;
+}
+
+/** A tag's description as sent, trimmed (may be blank); refused (`bad-description`) when not text or too long. */
+function tagDescription(description) {
+  if (description != null && typeof description !== 'string') throw new StoreError('bad-description', "a tag's description is text; nothing was saved.");
+  const clean = (description ?? '').trim();
+  if (clean.length > MAX_TAG_DESCRIPTION) throw new StoreError('bad-description', `a tag's description is at most ${MAX_TAG_DESCRIPTION} characters; nothing was saved.`);
+  return clean;
+}
+
 /** A topic's name as sent, trimmed; refused (`bad-name`) when blank or too long. */
 function topicName(name) {
   const clean = typeof name === 'string' ? name.trim() : '';
@@ -1056,6 +1081,48 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
     return db.prepare(`SELECT t.*, ac.name AS created_by_name,
         (SELECT COUNT(*) FROM ticket_topics tt WHERE tt.topic = t.id) AS tickets
       FROM topics t LEFT JOIN actors ac ON ac.id = t.created_by WHERE t.id = ?`).get(id);
+  }
+
+  /**
+   * The project and its tag spelled exactly `name`, as listTags answers
+   * them; `unknown-project`, or `unknown-tag` when the project has no such
+   * tag, saved or in use.
+   */
+  function projectTag(store, project, name) {
+    const p = store.getProject(project);
+    if (!p) throw new StoreError('unknown-project', `no project "${project}".`);
+    const tag = typeof name === 'string' ? store.listTags(p.slug).find((t) => t.name === name) : undefined;
+    if (!tag) throw new StoreError('unknown-tag', `project "${p.slug}" has no tag ${name}; nothing was changed.`);
+    return { p, tag };
+  }
+
+  /**
+   * Every ticket of `project` carrying the tag `from` gets `to` in its place
+   * (null: taken off), once, where `from` stood; each changed ticket gets one
+   * `tags` event and a version step, read back. Answers the changed ids.
+   * Run inside a transaction.
+   */
+  function retagTickets(project, from, to, actor, at) {
+    const changed = [];
+    for (const row of db.prepare('SELECT id, tags, version FROM tickets WHERE project = ? ORDER BY number').all(project)) {
+      let before;
+      try { before = JSON.parse(row.tags); } catch { continue; }
+      if (!Array.isArray(before) || !before.includes(from)) continue;
+      const after = [];
+      for (const t of before) {
+        const next = t === from ? to : t;
+        if (next != null && !after.includes(next)) after.push(next);
+      }
+      const value = JSON.stringify(after);
+      const r = db.prepare('UPDATE tickets SET tags = ?, updated_at = ?, version = version + 1 WHERE id = ? AND version = ?')
+        .run(value, at, row.id, num(row.version));
+      if (num(r.changes) !== 1 || ticketRow(row.id).tags !== value) {
+        throw new StoreError('write-failed', `ticket ${row.id}'s tags did not read back without ${from}.`);
+      }
+      writeEvent(row.id, actor, 'tags', row.tags, value, at);
+      changed.push(row.id);
+    }
+    return changed;
   }
 
   /** Topic `id`'s row, only when it is a topic of `project`; else `unknown-topic`. */
@@ -2731,12 +2798,8 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
      * tag as listTags would.
      */
     addTag({ project, name, description = '', actor }) {
-      const cleanName = typeof name === 'string' ? name.trim() : '';
-      if (!cleanName) throw new StoreError('bad-name', 'a tag needs a name; nothing was saved.');
-      if (cleanName.length > MAX_TAG_NAME) throw new StoreError('bad-name', `a tag's name is at most ${MAX_TAG_NAME} characters; nothing was saved.`);
-      if (description != null && typeof description !== 'string') throw new StoreError('bad-description', "a tag's description is text; nothing was saved.");
-      const cleanDescription = (description ?? '').trim();
-      if (cleanDescription.length > MAX_TAG_DESCRIPTION) throw new StoreError('bad-description', `a tag's description is at most ${MAX_TAG_DESCRIPTION} characters; nothing was saved.`);
+      const cleanName = tagName(name);
+      const cleanDescription = tagDescription(description);
       return transaction(() => {
         requireActor(actor, 'the actor');
         const p = this.getProject(project);
@@ -2751,6 +2814,70 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
           throw new StoreError('write-failed', `the tag ${cleanName} did not read back from the database.`);
         }
         return { ...tagFromRow(back), count: 0 };
+      });
+    },
+
+    /**
+     * Change a tag of `project`, found by its exact `name` (as listTags
+     * answers it): a new name (`newName`) and/or `description`, either left
+     * out to keep it, with addTag's limits. A new name rewrites the tag on
+     * every ticket of the project that carries it, each with one `tags`
+     * event (the list before and after) and a version step, as changeTicket
+     * does; a new description is kept on the saved tag (saving the tag when
+     * it was only in use). A new name another of the project's tags already
+     * has, in any case, is refused (`tag-exists`): tags are never merged. A
+     * name the project does not have is `unknown-tag`. All in one
+     * transaction and read back, else nothing is kept (`write-failed`).
+     * Answers `{ tag, tickets }`: the tag as listTags now answers it, and the
+     * ids of the tickets whose tags changed.
+     */
+    renameTag({ project, name, newName, description, actor }) {
+      const cleanNew = newName === undefined ? undefined : tagName(newName);
+      const cleanDescription = description === undefined ? undefined : tagDescription(description);
+      return transaction(() => {
+        requireActor(actor, 'the actor');
+        const { p, tag } = projectTag(this, project, name);
+        const target = cleanNew ?? tag.name;
+        const clash = this.listTags(p.slug).find((t) => t.name !== tag.name && t.name.toLowerCase() === target.toLowerCase());
+        if (clash) throw new StoreError('tag-exists', `a tag named ${clash.name} already exists in ${p.name}; nothing was changed.`);
+        const wantedDescription = cleanDescription ?? tag.description;
+        const at = now();
+        const tickets = target === tag.name ? [] : retagTickets(p.slug, tag.name, target, actor, at);
+        const savedRows = db.prepare('SELECT id FROM project_tags WHERE project = ? AND name = ?').all(p.slug, tag.name);
+        if (savedRows.length) {
+          db.prepare('UPDATE project_tags SET name = ?, description = ? WHERE project = ? AND name = ?').run(target, wantedDescription, p.slug, tag.name);
+        } else if (wantedDescription) {
+          db.prepare('INSERT INTO project_tags (project, name, description, created_by, created_at) VALUES (?, ?, ?, ?, ?)')
+            .run(p.slug, target, wantedDescription, actor, at);
+        }
+        const listed = this.listTags(p.slug);
+        const back = listed.find((t) => t.name === target);
+        if (!back || back.description !== wantedDescription || back.count !== tag.count
+            || (target !== tag.name && listed.some((t) => t.name === tag.name))) {
+          throw new StoreError('write-failed', `the tag ${target} did not read back as saved.`);
+        }
+        return { tag: back, tickets };
+      });
+    },
+
+    /**
+     * Delete a tag of `project`, found by its exact `name`: it comes off
+     * every ticket of the project that carries it (each with one `tags`
+     * event and a version step) and off the project's saved list. All in one
+     * transaction, so a failure part-way leaves everything as it was. A name
+     * the project does not have is `unknown-tag`. Answers `{ tag, tickets }`:
+     * the tag as it was listed, and the ids of the tickets it came off.
+     */
+    removeTag({ project, name, actor }) {
+      return transaction(() => {
+        requireActor(actor, 'the actor');
+        const { p, tag } = projectTag(this, project, name);
+        const tickets = retagTickets(p.slug, tag.name, null, actor, now());
+        db.prepare('DELETE FROM project_tags WHERE project = ? AND name = ?').run(p.slug, tag.name);
+        if (this.listTags(p.slug).some((t) => t.name === tag.name)) {
+          throw new StoreError('write-failed', `the tag ${tag.name} was not removed.`);
+        }
+        return { tag, tickets };
       });
     },
 
