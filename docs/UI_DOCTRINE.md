@@ -107,7 +107,9 @@ Every size and colour comes from a named value (a CSS custom property, a
 and values are StarCaster's, so the two projects can be compared line for line.
 A literal colour (`#00AA00`) or font size (`13px`) in a rule is a bug; a
 literal inside a `var(--x, #fallback)` fallback is allowed (MODULE_UI_DOCTRINE
-R3, R8).
+R3, R8). `npm run verify` checks it (`tracker/cssTokens.test.mjs`, SP-320): no
+literal colour, and no font size, corner or gap that is not a token, anywhere
+below `:root`; and every token in the tables below is in `:root` with its value.
 
 **Font.** `-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica,
 Arial, sans-serif`, with `-webkit-font-smoothing: antialiased`. Black text on a
@@ -146,6 +148,21 @@ padding use these steps (checked by eye).
 
 **Corners.** `--radius-btn` 10px for buttons, `--radius-input` 8px for boxes
 and table wraps, `--radius-container` 20px for cards and pods.
+
+**The tracker's own tokens.** A few parts of the page have no StarCaster
+counterpart, so they have tokens of their own, in a separate group at the end of
+`:root`: the black header and its colours (`--header-*`), the logo blue of the
+Add Task box (`--brand-blue`, `--brand-blue-tint`), the light-blue pods and
+their navy (`--pod-*`, `--navy`, `--navy-soft`), link blue (`--link-ink`),
+error red (`--ink-error`, StarCaster's `--btn-danger-flat`), shadows and the
+dialog backdrop, the Console's feature colours (`--feature-0` to `--feature-9`),
+small corners for tag chips and icon buttons (`--radius-sm` 4px) and round ones
+(`--radius-pill`), and code text (`--text-code`, 0.9em of the text around it).
+Colours Dane picked by hand keep their value as a token: the Pipeline Status
+pod's green and gold (`--pod-running`, `--pod-soon`, SP-222) and the ticket
+page's green buttons (`--ticket-btn-bg`, SP-76) until SP-321 gives every button
+a kind. A new colour goes into `:root` with a name first; reuse a StarCaster
+token wherever one means the same thing.
 
 **Contrast.** Text is always readable on what it sits on; light text on a light
 fill is a release-blocking bug (UI_RULES R1, R9). The one deliberate exception
@@ -351,7 +368,7 @@ Measured 2026-11-15 on `tracker/web/app.css`, `app.mjs` and `render.mjs`.
 | Section | Today | Brought into line by |
 |---|---|---|
 | 1 Capital letters | Buttons, headings, toggles, columns, tab titles and trail: followed and checked. Field labels and tabs: sentence case in places, not checked. | SP-325 |
-| 2 Tokens | Seven tokens of its own (`--ink`, `--blue`…); about 45 literal colours, 16 font sizes and 11 corner sizes. | SP-320 |
+| 2 Tokens | Followed and checked (SP-320, 2026-11-15): every colour, font size, corner and gap is a token in `:root`, StarCaster's where it has one. Padding and margins are still literal lengths, near the steps. | SP-320 |
 | 3 Buttons | No kinds: each page paints bare buttons its own way (all green on a ticket, dark blue on Settings, black links); disabled fades. | SP-321 |
 | 4 Title row | Default-size `<h1>`; buttons on a separate row below it. | SP-322 |
 | 5 Tabs | Board / List / Console is a black segmented control; Settings tabs are close but dark blue. | SP-322 |
@@ -359,9 +376,11 @@ Measured 2026-11-15 on `tracker/web/app.css`, `app.mjs` and `render.mjs`.
 | 7 Messages | Notes beside each button and under the title; no single strip. Empty states: followed, but for a bare "None." | SP-323 |
 | 8 Tables | Grey or bold headings; no fixed heading row. Names, ids, actions and sideways scroll: followed. | SP-324 |
 | 9 Dialogs | Fixed caps (`max-width: 28rem`, `95vw`). | SP-324 |
-| 10 Small rules | Followed, except icon strokes (1.75, not 1). | SP-320 |
+| 10 Small rules | Followed; icon strokes are 1 and checked (SP-320). | SP-320 |
 
-**The checks.** `tracker/style.test.mjs` checks section 1. Each ticket above
+**The checks.** `tracker/style.test.mjs` checks section 1;
+`tracker/cssTokens.test.mjs` checks section 2 and the icon strokes of section 10.
+Each ticket above
 adds the check for its part to `npm run verify`, as StarCaster's
 `scripts/check_ui_doctrine.cjs` does for its screens: every `<button>` has a
 kind; no literal colour or font size outside `:root`; no `style=""`; no

@@ -1035,7 +1035,7 @@ export const PR_MERGED_LINE = 'The pull request is merged; the relay moves this 
 export const PR_CLOSED_LINE = 'The pull request was closed without merging; see the note below.';
 
 /** The information icon: a ring with an "i" in it, drawn here, never from ticket text. */
-const INFO_ICON = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v6"/><path d="M12 7.5v.01"/></svg>';
+const INFO_ICON = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v6"/><path d="M12 7.5v.01"/></svg>';
 
 /**
  * The information line for one of his two statuses while his move is still

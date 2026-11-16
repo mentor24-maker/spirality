@@ -520,14 +520,14 @@ const ICONS = Object.freeze({
 function action(href, label, icon, offSite = false) {
   const target = offSite ? ' target="_blank" rel="noopener noreferrer"' : '';
   return `<a class="action" href="${escapeHtml(href)}" title="${label}" aria-label="${label}"${target}>`
-    + `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icon}</svg></a>`;
+    + `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icon}</svg></a>`;
 }
 
 /** The same icon as a button, for an action that writes rather than goes somewhere. `data` is its own data-* attributes. */
 function actionButton(label, icon, data) {
   const attrs = Object.entries(data).map(([k, v]) => ` data-${k}="${escapeHtml(v)}"`).join('');
   return `<button type="button" class="action" title="${label}" aria-label="${label}"${attrs}>`
-    + `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icon}</svg></button>`;
+    + `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icon}</svg></button>`;
 }
 
 /**
@@ -543,7 +543,7 @@ function statusIcon(t) {
     // SP-285: a merge word that still stands is his answer too, the same check.
     const said = !t.answerIn && t.mergeStands ? 'Your Merge Word Stands' : 'Your Answer Is In';
     return `<span class="action status-icon answer-in-icon" role="img" title="${said}" aria-label="${said}">`
-      + `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS.answerIn}</svg></span>`;
+      + `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS.answerIn}</svg></span>`;
   }
   if (t.waiting) return action(`${at}#reply`, 'Waiting on Your Response', ICONS.waiting);
   return '<span class="action status-icon empty" aria-hidden="true"></span>';

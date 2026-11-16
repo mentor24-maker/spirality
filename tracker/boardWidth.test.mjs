@@ -7,6 +7,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { rootTokens } from './cssTokens.mjs';
 
 const CSS = readFileSync(fileURLToPath(new URL('./web/app.css', import.meta.url)), 'utf8');
 
@@ -25,8 +26,12 @@ function rule(css, selector) {
   }));
 }
 
-/** A CSS length in pixels; 0 for an unset or unitless zero. Throws on a unit this test does not know. */
+const TOKENS = rootTokens(CSS);
+
+/** A CSS length in pixels; 0 for an unset or unitless zero; a token (SP-320) is read from :root. Throws on a unit this test does not know. */
 function px(value) {
+  const token = /^var\((--[\w-]+)\)$/.exec(value ?? '');
+  if (token) return px(TOKENS.get(token[1]));
   if (value === undefined || value === '0' || value === 'auto') return 0;
   const m = /^(-?[\d.]+)(px|rem)$/.exec(value);
   if (!m) throw new Error(`cannot read the length "${value}"`);

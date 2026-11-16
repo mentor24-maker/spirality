@@ -20,9 +20,12 @@ import loopStatuses from '../lib/loopStatuses.js';
 import mergeOnComment from '../lib/mergeOnComment.js';
 import busRelayPlan from '../lib/busRelayPlan.js';
 import { prOpenedComment } from '../scripts/lib/loopTrail.mjs';
+import { withTokensResolved } from './cssTokens.mjs';
 
 const DOOR = fileURLToPath(new URL('../scripts/clickup.mjs', import.meta.url));
 const WEB = (name) => fileURLToPath(new URL(`./web/${name}`, import.meta.url));
+/** app.css with its tokens filled in (SP-320), for a check on the colour or size the page draws. */
+const drawnCss = () => withTokensResolved(readFileSync(WEB('app.css'), 'utf8'));
 
 /** The demo data in a fresh store, a server on a free port, and a caller signed in as the operator. */
 async function fixture({ mergePhrase, closePhrase, goPhrase, suggest } = {}) {
@@ -273,8 +276,8 @@ test('with his answer in, the ticket page draws no reply box and copes with it m
   // The ticket page's notice: tinted, a blue bar on the left, ink, upright. The board and list note unchanged.
   const css = readFileSync(WEB('app.css'), 'utf8');
   const notice = /\np\.answer-in \{([^}]*)\}/.exec(css)?.[1] ?? '';
-  for (const rule of [/font-style: normal/, /color: var\(--ink\)/, /background: #/, /border-left: \d+px solid var\(--blue\)/, /padding: /]) assert.match(notice, rule);
-  assert.match(css, /\n\.answer-in \{ font-size: 0\.85rem; font-style: italic; color: var\(--quiet\); \}/);
+  for (const rule of [/font-style: normal/, /color: var\(--ink-primary\)/, /background: var\(--brand-blue-tint\)/, /border-left: \d+px solid var\(--brand-blue\)/, /padding: /]) assert.match(notice, rule);
+  assert.match(css, /\n\.answer-in \{ font-size: var\(--text-sm\); font-style: italic; color: var\(--ink-secondary\); \}/);
   assert.equal(renderAnswerIn({ answerIn: true }), '<p class="answer-in">Your answer is in. The relay acts on it at its next pass.</p>');
 });
 
@@ -293,7 +296,7 @@ test('a ticket held up by a failing lane says so in one line above the card, wit
   const line = draw.indexOf('${renderHeldUp(t, sinceTime)}');
   assert.ok(line > 0, 'the ticket page draws the line, with the header health line\'s times');
   assert.ok(line < draw.indexOf('${renderQuickAction(t)}'), 'above the card, so it is read first');
-  const css = readFileSync(WEB('app.css'), 'utf8');
+  const css = drawnCss();
   const rule = /\n\.quick \.held-up \{([^}]*)\}/.exec(css)?.[1] ?? '';
   assert.match(rule, /grid-column: 1 \/ -1/, 'across the whole top, not in one column');
   const ink = /(?:^|;)\s*color: (#[0-9a-f]{6})/.exec(rule)?.[1];
@@ -353,7 +356,7 @@ test('the list row starts its Actions cell with a check, a clock or an empty slo
   for (const key of ['answerIn', 'waiting']) assert.match(app, new RegExp(`\\n  ${key}: '<(path|circle) `), `ICONS.${key} is a line drawing`);
   // The card keeps its words; the ticket page keeps its notice.
   assert.match(app, /\$\{t\.answerIn \? `<span class="answer-in">\$\{escapeHtml\(ANSWER_IN_NOTE\)\}<\/span>` : t\.mergeStands \? `<span class="answer-in">\$\{escapeHtml\(MERGE_STANDS_NOTE\)\}<\/span>` : ''\}/);
-  const css = readFileSync(WEB('app.css'), 'utf8');
+  const css = drawnCss();
   const green = /\nspan\.action\.answer-in-icon \{ color: (#[0-9a-fA-F]{6}); \}/.exec(css)?.[1];
   assert.ok(green, 'the check has its own colour');
   const [r, g, b] = [1, 3, 5].map((i) => parseInt(green.slice(i, i + 2), 16));
@@ -704,11 +707,11 @@ test('the Add Task box on the Tasks page files into the project shown, in Reques
   const css = readFileSync(WEB('app.css'), 'utf8');
   const box = /details\.add-task \{([^}]*)\}/.exec(css);
   assert.ok(box, 'the Add Task box has its own rule');
-  assert.match(box[1], /background: var\(--blue\);/, 'the box is the logo blue, closed and open');
-  assert.match(box[1], /color: var\(--ink\);/, 'dark text on the blue, not white');
-  assert.match(css, /details\.add-task form\.request input, details\.add-task form\.request textarea \{[^}]*background: #fff;/, 'the fields stay white');
+  assert.match(box[1], /background: var\(--brand-blue\);/, 'the box is the logo blue, closed and open');
+  assert.match(box[1], /color: var\(--ink-primary\);/, 'dark text on the blue, not white');
+  assert.match(css, /details\.add-task form\.request input, details\.add-task form\.request textarea \{[^}]*background: var\(--bg-surface\);/, 'the fields stay white');
   // The status line (Filing…, Not filed: …) keeps its quiet grey and red, so it sits on white, readable on the blue.
-  assert.match(css, /details\.add-task \.note:not\(:empty\) \{[^}]*background: #fff;/, 'the note sits on a white pill inside the blue box');
+  assert.match(css, /details\.add-task \.note:not\(:empty\) \{[^}]*background: var\(--bg-surface\);/, 'the note sits on a white pill inside the blue box');
 });
 
 test('the Add Task box takes files: the ticket is filed first, then each file goes up as itself, and the note names any that did not (SP-140)', () => {
@@ -761,7 +764,7 @@ test('a filed task shows a larger pod centred on the Tasks heading row, above th
   assert.match(rule, /position: absolute;/, 'out of the page flow: nothing moves');
   assert.match(rule, /top: 50%; left: 50%; transform: translate\(-50%, -50%\);/, 'centred on the heading row');
   assert.match(rule, /z-index: 10;/, 'drawn above the heading, toolbar and tables');
-  assert.match(rule, /font-size: 1\.25rem;/, 'larger than the body text');
+  assert.match(rule, /font-size: var\(--text-xl\);/, 'larger than the body text');
   assert.match(rule, /animation: filed-pod-fade 4s linear forwards;/);
   assert.match(css, /@keyframes filed-pod-fade \{ 0%, 75% \{ opacity: 1; \} 100% \{ opacity: 0; \} \}/, '3 seconds full, then 1 second to nothing');
 });
@@ -838,7 +841,7 @@ test('the Add Task box has a Suggest a Title / Write My Own Title toggle: Sugges
   const css = readFileSync(WEB('app.css'), 'utf8');
   assert.match(css, /details\.add-task \[hidden\] \{ display: none; \}/, 'a hidden part stays hidden whatever else styles it');
   assert.match(css, /details\.add-task \.title-mode label:has\(input:checked\) \{/, 'the picked side of the toggle stands out');
-  assert.match(css, /details\.add-task fieldset\.title-choices \{[^}]*background: #fff;/, 'the choices sit on white inside the blue box');
+  assert.match(css, /details\.add-task fieldset\.title-choices \{[^}]*background: var\(--bg-surface\);/, 'the choices sit on white inside the blue box');
 });
 
 test('SP-303: the Add Task bar has a Suggest checkbox at its right; ticked shows Suggest Next Tasks in the same box, unticked the form; switching keeps both, opens a shut box, and the tick is kept in this browser', () => {
@@ -1325,7 +1328,7 @@ test('Waiting on you is a bell on the right, just before "Signed in as", coloure
   assert.match(/function drawSignIn[\s\S]*?\n\}/.exec(app)[0], /signedOutHeader\(/);
   assert.match(/async function route\(\{ place = null \} = \{\}\) \{[\s\S]*?\n\}/.exec(app)[0], /signOut\.hidden = false;\s*bell\.hidden = false;/);
   assert.match(app, /bell\.classList\.toggle\('current', which === 'waiting'\);/);
-  const css = readFileSync(WEB('app.css'), 'utf8');
+  const css = drawnCss();
   for (const colour of ['grey', 'yellow', 'red']) assert.match(css, new RegExp(`header #bell\\[data-colour="${colour}"\\] \\{ color: #`));
   assert.match(css, /header #bell\[hidden\] \{ display: none; \}/, 'display: flex must not undo hidden');
 });
@@ -1511,7 +1514,7 @@ test('Quick Action\'s left side: the title, the newest card\'s context and its a
   assert.match(html, /<p class="needed">Reply A or B\.<br>A is cheaper\.<br>Your move: Reply — new\.<\/p>/);
   assert.doesNotMatch(html, /old|The description|NEEDED FROM/);
   const css = readFileSync(WEB('app.css'), 'utf8');
-  assert.match(css, /\.quick \.needed \{ color: var\(--red\); font-weight: 700;/, 'the same red as the banner, bold');
+  assert.match(css, /\.quick \.needed \{ color: var\(--ink-error\); font-weight: 700;/, 'the same red as the banner, bold');
   // An authored card that reached the tracker as @@ text reads the same way.
   assert.equal(cardContext('@@ASKED\nx\n@@CONTEXT\nWhy it\nmatters.\n@@NEEDED\nPick.'), 'Why it matters.');
 });
@@ -1600,7 +1603,7 @@ test('Quick Action on a bug report: "Bug Report:", the visitor\'s words in bold,
   // A page that is not a web address is shown as text, not a link.
   assert.match(renderQuickAction({ name: 'x', tags: ['bug-report'], description: bugDescription().replace('https://example.com/pricing', '(not recorded)') }), /Page:<\/span> \(not recorded\)<\/li>/);
   const css = readFileSync(WEB('app.css'), 'utf8');
-  assert.match(css, /\.quick \.bug-words \{[^}]*font-size: 1rem; font-weight: 700;/, 'bold at body size');
+  assert.match(css, /\.quick \.bug-words \{[^}]*font-size: var\(--text-md\); font-weight: 700;/, 'bold at body size');
 });
 
 test('Quick Action without the tag, the section, or with ## Asked looks exactly as before', () => {
@@ -2201,7 +2204,7 @@ test('every page puts its trail at the top: ticket, board, list, Waiting on you,
   assert.match(app, /main\.insertAdjacentHTML\('afterbegin', renderTrail\(steps\)\)/);
   assert.doesNotMatch(/function drawSignIn[\s\S]*?\n\}/.exec(app)[0], /putTrail/, 'no trail on the sign-in screen');
   const css = readFileSync(WEB('app.css'), 'utf8');
-  assert.match(css, /nav\.trail \{ font-size: 0\.85rem;/, 'a small, quiet line, not a heading');
+  assert.match(css, /nav\.trail \{ font-size: var\(--text-sm\);/, 'a small, quiet line, not a heading');
 });
 
 // ── Create Project ───────────────────────────────────────────────────────────
@@ -2550,8 +2553,8 @@ test('no go word is written into the page\'s code, and the Go button has the Mer
   // One rule draws Merge's weight and padding, and Go is in it; the green comes from `.quick button`, which both share.
   const shared = rules.filter((r) => r.sel.includes('.quick form.merge-action button'));
   assert.ok(shared.length && shared.every((r) => r.sel.includes('.quick form.go-action button')), 'Go has every Merge button rule');
-  assert.ok(rules.some((r) => r.sel.includes('.quick button') && /background: #00AA00/i.test(r.body)), 'the Merge colour');
-  assert.ok(rules.some((r) => r.sel.length === 1 && r.sel[0] === '.quick form.go-action button' && /border-radius: 10px/.test(r.body)), '10px corners of its own');
+  assert.ok(rules.some((r) => r.sel.includes('.quick button') && /background: var\(--ticket-btn-bg\)/.test(r.body)), 'the Merge colour');
+  assert.ok(rules.some((r) => r.sel.length === 1 && r.sel[0] === '.quick form.go-action button' && /border-radius: var\(--radius-btn\)/.test(r.body)), '10px corners of its own');
 });
 
 test('the Merge button asks once, naming the PR number and the ticket', () => {
@@ -3730,7 +3733,7 @@ test('every button on a ticket\'s page is green with a darker border and rounded
   const css = readFileSync(WEB('app.css'), 'utf8');
   const rule = /^\.quick button, \.details form\.copy button, details\.edit button:not\(\.remove-tag\) \{([^}]*)\}/m.exec(css);
   assert.ok(rule, 'one rule covers Copy, Merge, Close, Post reply, Delete, the Change panel and the Details Copy');
-  for (const part of ['background: #00AA00;', 'border: 1px solid #006600;', 'border-radius: 10px;', 'color: #fff;']) assert.ok(rule[1].includes(part), part);
+  for (const part of ['background: var(--ticket-btn-bg);', 'border: 1px solid var(--ticket-btn-border);', 'border-radius: var(--radius-btn);', 'color: var(--btn-flat-ink);']) assert.ok(rule[1].includes(part), part);
   // Delete no longer overrides the green with its old red outline.
   assert.doesNotMatch(css, /\.quick form\.delete-action button \{/);
   // Scoped to the ticket page: the plain button rule every other page uses is untouched.
@@ -4018,7 +4021,7 @@ test('the Docs page carries the Commands section; /docs/commands/<name> opens on
   assert.match(draw, /renderCommandDetails\(command\);\s*dialog\.showModal\(\);/);
   assert.match(draw, /e\.preventDefault\(\);\s*e\.stopPropagation\(\);/, 'a click opens the pop-up, not the steps page');
   const css = readFileSync(WEB('app.css'), 'utf8');
-  assert.match(css, /section\.commands-pod \{ background: #cceeff; border: 1px solid #003377; border-radius: 20px;/);
+  assert.match(css, /section\.commands-pod \{ background: var\(--pod-bg\); border: 1px solid var\(--navy-soft\); border-radius: var\(--radius-container\);/);
   assert.match(css, /\.docs-columns \{ display: grid; grid-template-columns: minmax\(0, 1fr\) minmax\(0, 2fr\);/, 'the pod takes a third');
   assert.match(css, /@media \(max-width: 800px\) \{ \.docs-columns \{ grid-template-columns: minmax\(0, 1fr\); \} \}/, 'stacked on a narrow screen');
   assert.match(draw, /<input type="search" id="command-search"/);
@@ -4665,7 +4668,7 @@ test('the pod reads as a small table (SP-194): a "Pipeline Stages" heading, one 
   ]);
   // Only the running stage carries `running`.
   assert.equal((html.match(/ running"/g) || []).length, 2);
-  const css = readFileSync(WEB('app.css'), 'utf8');
+  const css = drawnCss();
   const rule = (selector) => {
     const at = css.indexOf(`${selector} {`);
     assert.notEqual(at, -1, `app.css has a ${selector} rule`);
@@ -4709,7 +4712,7 @@ test('the pod restyled (SP-222): a larger heading, #cceeff with a #000077 border
   assert.match(html, /title="Review: next pass due \[18:03\]"/);
   assert.match(html, /title="Intake: next pass due \[17:55\] \(due now\)"/);
   assert.equal(PIPELINE_SOON_MS, 3 * 60 * 1000);
-  const css = readFileSync(WEB('app.css'), 'utf8');
+  const css = drawnCss();
   const rule = (selector) => {
     const at = css.indexOf(`${selector} {`);
     assert.notEqual(at, -1, `app.css has a ${selector} rule`);
@@ -4720,7 +4723,7 @@ test('the pod restyled (SP-222): a larger heading, #cceeff with a #000077 border
   assert.match(pod, /border: 1px solid #000077;/);
   assert.match(pod, /background: #cceeff;/);
   assert.match(rule('.toolbar .pipeline-pod:hover'), /background: #b8e4ff;/, 'hover still shows on the new blue');
-  assert.match(rule('.toolbar .pipeline-pod .heading'), /font-size: 1\.5em;/, 'the heading 50% larger');
+  assert.match(rule('.toolbar .pipeline-pod .heading'), /font-size: 1\.25rem;/, 'the heading larger (--text-xl, SP-320)');
   assert.match(rule('.toolbar .pipeline-pod .soon'), /color: #B8860B;/, 'gold that reads on light blue');
   // The Files Made box keeps its light blue (non-goal).
   assert.match(rule('.files-made'), /background: #eaf5fe;/);
@@ -4866,7 +4869,7 @@ test('every page carries the health line in its header, in the bell\'s warning y
   const html = readFileSync(WEB('index.html'), 'utf8');
   const header = html.slice(html.indexOf('<header>'), html.indexOf('</header>'));
   assert.match(header, /<span id="health" class="health" role="status" hidden><\/span>\s*<span class="me">/);
-  const css = readFileSync(WEB('app.css'), 'utf8');
+  const css = drawnCss();
   const rule = (selector) => {
     const at = css.indexOf(`${selector} {`);
     assert.notEqual(at, -1, `app.css has a ${selector} rule`);
@@ -5082,13 +5085,13 @@ test.describe('Files Made: the files a ticket made, from its newest merge note',
     assert.doesNotMatch(nameCell, /ANSWER_IN_NOTE|answer-in/, 'the answer-in words are gone from the name cell (SP-201)');
     assert.equal((row.match(/<td class="/g) || []).length, SORT_COLUMNS.length + 1, 'one cell per heading, plus Actions');
     const css = readFileSync(WEB('app.css'), 'utf8');
-    assert.match(css, /\.group table\.sortable th \{ color: #000; font-weight: 700; \}/);
+    assert.match(css, /\.group table\.sortable th \{ color: var\(--ink-primary\); font-weight: 700; \}/);
     // SP-193: Ticket # is narrow; the name keeps most of the width, and the set widths leave Last Change room.
     const width = (key) => Number(new RegExp(`\\.group th\\.${key} \\{ width: (\\d+)%; \\}`).exec(css)?.[1]);
     assert.ok(width('id') > 0 && width('id') < width('name'), 'Ticket # narrower than Ticket');
     const set = ['id', 'name', 'priority', 'tags', 'topics', 'assignee', 'actions'].reduce((sum, k) => sum + width(k), 0);
     assert.ok(set <= 76, `the set widths (${set}%) leave Last Change room for its date`);
-    assert.match(css, /^th \{ color: var\(--quiet\); font-weight: 500;/m, 'every other table keeps the grey heading');
+    assert.match(css, /^th \{ color: var\(--ink-secondary\); font-weight: 500;/m, 'every other table keeps the grey heading');
   });
 }
 
@@ -5512,15 +5515,15 @@ test('two tiles with the same feature share a colour class; a tile with no featu
 });
 
 test('every feature colour has its rule in app.css, in palette order, and the tile\'s text reads on it', () => {
-  const css = readFileSync(WEB('app.css'), 'utf8');
+  const css = drawnCss();
   const rules = [...css.matchAll(/^\.feature-(\d+) \{ --feature: (#[0-9a-f]{6}); \}$/gm)].map((m) => [Number(m[1]), m[2]]);
   assert.deepEqual(rules, FEATURE_PALETTE.map((c, i) => [i, c]));
   assert.match(css, /\.tile\.feature \{ background: var\(--feature\); \}/);
   assert.match(css, /\.tile\.dimmed \{ opacity: [0-9.]+; \}/);
-  const ink = /--ink: (#[0-9a-f]{6})/.exec(css)[1];
+  const ink = /--ink-primary: (#[0-9a-f]{6})/.exec(css)[1];
   for (const colour of FEATURE_PALETTE) assert.ok(contrast(ink, colour) >= 4.5, `${ink} reads on ${colour}`);
   // The facts strip stays white, so the stage colours and the quiet age read as before.
-  assert.match(css, /\.tile\.feature \.tile-facts \{ background: #fff; \}/);
+  assert.match(css, /\.tile\.feature \.tile-facts \{ background: #fff(?:fff)?; \}/);
 });
 
 test('the Features key lists each feature on screen with its count, most first, and nothing when there is none', () => {
@@ -5673,10 +5676,10 @@ test('Settings is two tabs, each project a box that stays open across a Save, ev
   assert.match(app, /const open = new Set\(\[\.\.\.box\.querySelectorAll\('details\.pipeline-controls\[open\]'\)\]\.map\(\(d\) => d\.dataset\.project\)\);/);
   assert.match(app, /renderPipelineControls\(v, notes\.get\(v\.project\.slug\) \?\? \{\}, open\.has\(v\.project\.slug\)\)/);
   assert.match(app, /d\.dataset\.project \? `project\|\$\{d\.dataset\.project\}`/);
-  // The look: reverse-colour header, 1px border, 30px corners; buttons 15px, #000077, bold white; disabled dimmed.
-  assert.match(css, /details\.pipeline-controls \{[^}]*border: 1px solid #000077; border-radius: 30px; overflow: hidden;/);
-  assert.match(css, /details\.pipeline-controls > summary \{[^}]*background: #000077; color: #fff; font-weight: 700;/);
-  assert.match(css, /div\.settings-tab button \{[^}]*border-radius: 15px; background: #000077; color: #fff; font-weight: 700;/);
+  // The look: reverse-colour header, 1px border, container corners; buttons in button corners, #000077, bold white; disabled dimmed (SP-320 put the corners on tokens).
+  assert.match(css, /details\.pipeline-controls \{[^}]*border: 1px solid var\(--navy\); border-radius: var\(--radius-container\); overflow: hidden;/);
+  assert.match(css, /details\.pipeline-controls > summary \{[^}]*background: var\(--navy\); color: var\(--btn-flat-ink\); font-weight: 700;/);
+  assert.match(css, /div\.settings-tab button \{[^}]*border-radius: var\(--radius-btn\); background: var\(--navy\); color: var\(--btn-flat-ink\); font-weight: 700;/);
   assert.match(css, /div\.settings-tab button:disabled \{ opacity: 0\.4;/);
 });
 
