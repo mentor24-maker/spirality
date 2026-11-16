@@ -26,7 +26,7 @@
  * an emailed link's own page. The link's token is sent only in a JSON body,
  * never in an address.
  */
-import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, loopHasIt, renderCommentForm, MOVED_MESSAGE, renderMarkdown, unwrapDoc, renderCloseAction, renderGoAction, goQuestion, renderBugReportActions, approveQuestion, rejectQuestion, changeProblem, REJECT_COMMENT, WONT_DO_TAG, renderMergeAction, renderAnswerIn, renderHeldUp, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, lookupTicket, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, pipelinePodLabel, renderHealth, healthLines, renderCommandList, renderCommandView, renderCommandDetails, renderContextDocs, renderTopics, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, renderListTopics, projectTags, projectTagCounts, sortTickets, nextSort, renderDocumentation, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, lowerMeridiem, renderPipelineControls, renderConsole, drainLine, renderTitleChoices, titleModeOf, SUGGEST_POLL_MS, moveSuggestion, suggestState, filingPlan, orderPlan, andList, suggestRunLine, renderSuggestRows, renderSuggestionInfo, renderMessage, renderSavedCard, MESSAGE_CLOSES_MS, SAVED_CARD_MS } from './render.mjs';
+import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, loopHasIt, renderCommentForm, MOVED_MESSAGE, renderMarkdown, unwrapDoc, renderCloseAction, renderGoAction, goQuestion, renderBugReportActions, approveQuestion, rejectQuestion, changeProblem, REJECT_COMMENT, WONT_DO_TAG, renderMergeAction, renderAnswerIn, renderHeldUp, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, lookupTicket, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, pipelinePodLabel, renderHealth, healthLines, renderCommandList, renderCommandView, renderCommandDetails, renderContextDocs, renderTopics, renderTopicEditRow, topicDeleteQuestion, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, renderListTopics, projectTags, projectTagCounts, sortTickets, nextSort, renderDocumentation, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, lowerMeridiem, renderPipelineControls, renderConsole, drainLine, renderTitleChoices, titleModeOf, SUGGEST_POLL_MS, moveSuggestion, suggestState, filingPlan, orderPlan, andList, suggestRunLine, renderSuggestRows, renderSuggestionInfo, renderMessage, renderSavedCard, MESSAGE_CLOSES_MS, SAVED_CARD_MS } from './render.mjs';
 
 /** Where an earlier version of the page kept a pasted token; removed on load, never read. */
 const OLD_TOKEN_KEY = 'tracker-token';
@@ -835,9 +835,8 @@ async function drawProjectDetails(slug, done = '', problem = '') {
     ? `<div class="table-wrap"><table class="projects people members"><thead><tr><th class="name">Name</th><th class="by">Added By</th><th class="added">Added</th>${editing ? '<th class="actions"><span class="hidden">Actions</span></th>' : ''}</tr></thead><tbody>${members.map(memberRow).join('')}</tbody></table></div>`
     : '<p class="quiet">Nobody is a member of this project yet.</p>'}
     ${editing ? (addable.length
-    ? `<form class="invite members">
-      <label for="add-member">Add a member</label>
-      <div class="row"><select id="add-member">${addable.map((x) => `<option value="${escapeHtml(x.id)}">${escapeHtml(x.name)}</option>`).join('')}</select><button type="submit" class="btn btn-primary">Add Member</button></div>
+    ? `<form class="invite members fields">
+      <div class="row"><label for="add-member">Add a Member</label><select id="add-member">${addable.map((x) => `<option value="${escapeHtml(x.id)}">${escapeHtml(x.name)}</option>`).join('')}</select><button type="submit" class="btn btn-primary">Add Member</button></div>
     </form>`
     : '<p class="quiet">Everyone with an account is a member.</p>') : ''}
     <p class="quiet">Only its members (and admins) see this project and its tickets.</p>`;
@@ -887,7 +886,7 @@ async function drawProjectDetails(slug, done = '', problem = '') {
 /** One labelled text box of the project forms. `attrs` is its own extra attributes, already safe. */
 const field = (id, label, hint, attrs = '') => `
       <label for="${id}">${label}</label>
-      ${hint ? `<span class="hint quiet">${hint}</span>` : ''}
+      ${hint ? `<span class="hint">${hint}</span>` : ''}
       <input id="${id}" type="text"${attrs}>`;
 
 /** The GitHub repository box's hint, the same on both project forms. */
@@ -913,17 +912,17 @@ async function drawCreateProject() {
   const { people } = await api('GET', '/people');
   main.innerHTML = `
     <h1>New Project</h1>
-    <form class="request project">
+    <form class="request project fields">
       ${field('name', 'Name', '', ' required')}
       ${field('slug', 'Slug', 'Its part of every address, like my-project: small letters, digits and hyphens.', ' required autocapitalize="off" spellcheck="false"')}
-      ${field('prefix', 'Ticket prefix', 'The start of its ticket ids, like SP in SP-12: capital letters and digits.', ' required autocapitalize="characters" spellcheck="false"')}
-      ${field('url', 'Web address', 'Optional. Starts http:// or https://.', ' inputmode="url" spellcheck="false"')}
-      ${field('logo', 'Logo', "Optional. An image's web address, starting http:// or https://.", ' inputmode="url" spellcheck="false"')}
-      ${field('repo', 'GitHub repository', REPO_HINT, ' autocapitalize="off" spellcheck="false"')}
-      ${field('alertEmail', 'Alert email', ALERT_EMAIL_HINT, ' inputmode="email" autocapitalize="off" spellcheck="false"')}
-      ${field('alertPhone', 'Alert phone', ALERT_PHONE_HINT, ' inputmode="tel" autocomplete="tel" spellcheck="false"')}
-      <label for="owner">Owner</label>
-      <select id="owner"><option value="">Nobody</option>${people.map((p) => `<option value="${escapeHtml(p.id)}"${p.id === me.id ? ' selected' : ''}>${escapeHtml(p.name)}</option>`).join('')}</select>
+      ${field('prefix', 'Ticket Prefix', 'The start of its ticket ids, like SP in SP-12: capital letters and digits.', ' required autocapitalize="characters" spellcheck="false"')}
+      ${field('url', 'Web Address', 'Optional. Starts http:// or https://.', ' class="field-long" inputmode="url" spellcheck="false"')}
+      ${field('logo', 'Logo', "Optional. An image's web address, starting http:// or https://.", ' class="field-long" inputmode="url" spellcheck="false"')}
+      ${field('repo', 'GitHub Repository', REPO_HINT, ' class="field-long" autocapitalize="off" spellcheck="false"')}
+      ${field('alertEmail', 'Alert Email', ALERT_EMAIL_HINT, ' inputmode="email" autocapitalize="off" spellcheck="false"')}
+      ${field('alertPhone', 'Alert Phone', ALERT_PHONE_HINT, ' inputmode="tel" autocomplete="tel" spellcheck="false"')}
+      <div class="beside"><label for="owner">Owner</label>
+      <select id="owner"><option value="">Nobody</option>${people.map((p) => `<option value="${escapeHtml(p.id)}"${p.id === me.id ? ' selected' : ''}>${escapeHtml(p.name)}</option>`).join('')}</select></div>
       <div class="row"><button type="submit" class="btn btn-primary">Add Project</button><a href="/projects">Cancel</a><span class="note"></span></div>
     </form>`;
   const form = main.querySelector('form.project');
@@ -982,17 +981,17 @@ async function drawEditProject(slug) {
   const fixed = 'It cannot change: every ticket\'s id is built from it.';
   main.innerHTML = `
     <h1>Edit Project</h1>
-    <form class="request project">
+    <form class="request project fields">
       ${field('name', 'Name', '', ` required${filled(p.name)}`)}
       ${field('slug', 'Slug', fixed, ` disabled${filled(p.slug)}`)}
-      ${field('prefix', 'Ticket prefix', fixed, ` disabled${filled(p.prefix)}`)}
-      ${field('url', 'Web address', 'Optional. Starts http:// or https://.', ` inputmode="url" spellcheck="false"${filled(p.url)}`)}
-      ${field('logo', 'Logo', "Optional. An image's web address, starting http:// or https://.", ` inputmode="url" spellcheck="false"${filled(p.logo)}`)}
-      ${field('repo', 'GitHub repository', REPO_HINT, ` autocapitalize="off" spellcheck="false"${filled(p.repo)}`)}
-      ${field('alertEmail', 'Alert email', ALERT_EMAIL_HINT, ` inputmode="email" autocapitalize="off" spellcheck="false"${filled(p.alertEmail)}`)}
-      ${field('alertPhone', 'Alert phone', ALERT_PHONE_HINT, ` inputmode="tel" autocomplete="tel" spellcheck="false"${filled(p.alertPhone)}`)}
-      <label for="owner">Owner</label>
-      <select id="owner"><option value="">Nobody</option>${people.map((o) => `<option value="${escapeHtml(o.id)}"${o.id === p.owner?.id ? ' selected' : ''}>${escapeHtml(o.name)}</option>`).join('')}</select>
+      ${field('prefix', 'Ticket Prefix', fixed, ` disabled${filled(p.prefix)}`)}
+      ${field('url', 'Web Address', 'Optional. Starts http:// or https://.', ` class="field-long" inputmode="url" spellcheck="false"${filled(p.url)}`)}
+      ${field('logo', 'Logo', "Optional. An image's web address, starting http:// or https://.", ` class="field-long" inputmode="url" spellcheck="false"${filled(p.logo)}`)}
+      ${field('repo', 'GitHub Repository', REPO_HINT, ` class="field-long" autocapitalize="off" spellcheck="false"${filled(p.repo)}`)}
+      ${field('alertEmail', 'Alert Email', ALERT_EMAIL_HINT, ` inputmode="email" autocapitalize="off" spellcheck="false"${filled(p.alertEmail)}`)}
+      ${field('alertPhone', 'Alert Phone', ALERT_PHONE_HINT, ` inputmode="tel" autocomplete="tel" spellcheck="false"${filled(p.alertPhone)}`)}
+      <div class="beside"><label for="owner">Owner</label>
+      <select id="owner"><option value="">Nobody</option>${people.map((o) => `<option value="${escapeHtml(o.id)}"${o.id === p.owner?.id ? ' selected' : ''}>${escapeHtml(o.name)}</option>`).join('')}</select></div>
       <div class="row"><button type="submit" class="btn btn-save">Save</button><a href="/projects">Cancel</a><span class="note"></span></div>
     </form>`;
   putTrail([{ label: p.name, href: '/projects' }, { label: 'Edit' }]);
@@ -1052,7 +1051,7 @@ async function drawSetupNew(project) {
   main.innerHTML = `
     <h1>${project ? `Set Up ${escapeHtml(setupName(saved))}: Its Answers` : 'Set Up a Project'}</h1>
     <p class="quiet">The setup runs on the Mini: after Save, its page shows the command to paste into a Terminal there, and follows every step. A tracker project with no GitHub repository? <a href="/projects/new">New project</a>.</p>
-    <form class="request setup">
+    <form class="request setup fields">
       ${renderSetupForm(fields, saved?.answers ?? null)}
       <p class="quiet">Its slug, in every address and file name: <span class="slug">${escapeHtml(project ?? '')}</span></p>
       <div class="row"><button type="submit" class="btn btn-save">Save</button><a href="${project ? `/setup/${encodeURIComponent(project)}` : '/projects'}">Cancel</a><span class="note form-note"></span></div>
@@ -1395,20 +1394,20 @@ async function drawProject(slug, view, { adding = false, filed = null, unchecked
     ${filed && (unchecked || notUploaded.length) ? `<p class="filed-note">${unchecked ? UNCHECKED_NOTE : ''}${notUploadedNote(notUploaded)}</p>` : ''}
     <details class="add-task">
       <summary>Add Task<label class="suggest-switch">Suggest <input type="checkbox" value="on" aria-label="Suggest Next Tasks"${suggesting ? ' checked' : ''}></label></summary>
-      <form class="request"${suggesting ? ' hidden' : ''}>
+      <form class="request fields"${suggesting ? ' hidden' : ''}>
         <div class="title-mode" role="radiogroup" aria-label="How the Title Is Chosen">
           <label><input type="radio" name="title-mode" value="suggest"> Suggest a Title</label>
           <label><input type="radio" name="title-mode" value="own"> Write My Own Title</label>
         </div>
         <div class="own-title">
           <label for="title">Title</label>
-          <input id="title" type="text">
+          <input id="title" type="text" class="field-long">
         </div>
         <label for="description">Description</label>
         <textarea id="description"></textarea>
-        <label for="files">Files</label>
-        <input id="files" type="file" multiple>
-        <span class="hint quiet">Screenshots, PDFs or notes, up to 10 MB each. Files are not kept in the saved draft: after a reload, pick them again.</span>
+        <div class="beside"><label for="files">Files</label>
+        <input id="files" type="file" multiple aria-describedby="files-hint">
+        <span class="hint" id="files-hint">Screenshots, PDFs or notes, up to 10 MB each. Files are not kept in the saved draft: after a reload, pick them again.</span></div>
         <fieldset class="title-choices" hidden>
           <legend>Pick a Title</legend>
           <div class="choices"></div>
@@ -1417,7 +1416,7 @@ async function drawProject(slug, view, { adding = false, filed = null, unchecked
       </form>
       <div class="suggest-next"${suggesting ? '' : ' hidden'}>
         <p class="hint quiet">Reads the project (its plans, documents and code) and its open tickets, and suggests what to do next. Put them in order, untick any you do not want, and file the rest as requests.</p>
-        <div class="row"><button type="button" class="btn btn-primary suggest-run">Suggest Next Tasks</button><span class="run-note note" role="status"></span></div>
+        <div class="row run-row"><button type="button" class="btn btn-primary suggest-run">Suggest Next Tasks</button><span class="run-note note" role="status"></span></div>
         <ol class="suggestions"></ol>
         <div class="row file-row" hidden><button type="button" class="btn btn-primary file-order">File in This Order</button><span class="file-note note" role="status"></span></div>
       </div>
@@ -1680,7 +1679,8 @@ function wireListTags(tickets, save, noteOf) {
 /** The Search field, holding `term`. The page allows no form to submit itself; wireSearch sends it. */
 const searchForm = (term) => `
   <form class="search" role="search">
-    <input type="search" name="q" aria-label="Search every task" placeholder="Search every task" value="${escapeHtml(term)}">
+    <label for="search-q">Search</label>
+    <input type="search" id="search-q" name="q" placeholder="merge conflict" value="${escapeHtml(term)}">
   </form>`;
 
 /**
@@ -1866,9 +1866,10 @@ async function drawTicket(id, said = null, kept = null) {
       <h2>Copy to Another Project</h2>
       ${others.length ? `
       <form class="copy">
-        <label for="copy-to">A new ticket with this title and description, in Requested there. This ticket stays exactly as it is.</label>
+        <p class="hint" id="copy-to-hint">A new ticket with this title and description, in Requested there. This ticket stays exactly as it is.</p>
         <div class="row">
-          <select id="copy-to">${others.map((p) => `<option value="${escapeHtml(p.slug)}">${escapeHtml(p.name)}</option>`).join('')}</select>
+          <label for="copy-to">Copy To</label>
+          <select id="copy-to" aria-describedby="copy-to-hint">${others.map((p) => `<option value="${escapeHtml(p.slug)}">${escapeHtml(p.name)}</option>`).join('')}</select>
           <button type="submit" class="btn">Copy</button><span class="note"></span>
         </div>
       </form>` : '<p class="quiet">There is no other project to copy into yet.</p>'}`;
@@ -2608,6 +2609,7 @@ function wireSuggestNext(slug, view) {
   const fold = box.closest('details.add-task');
   const run = box.querySelector('button.suggest-run');
   const runNote = box.querySelector('.run-note');
+  const runRow = box.querySelector('.run-row');
   const list = box.querySelector('ol.suggestions');
   const fileRow = box.querySelector('.file-row');
   const fileButton = box.querySelector('button.file-order');
@@ -2639,6 +2641,11 @@ function wireSuggestNext(slug, view) {
   const drawRows = (focusIndex = null) => {
     list.innerHTML = state ? renderSuggestRows(suggestions, state) : '';
     fileRow.hidden = !state;
+    // SP-319: with suggestions showing, the one run button (Suggest Again)
+    // sits at the right of the bottom row, across from File in This Order;
+    // with none, it is back at the top. Its status line stays at the top.
+    if (state) { if (run.parentNode !== fileRow) fileRow.append(run); }
+    else if (run.parentNode !== runRow) runRow.prepend(run);
     if (focusIndex != null) list.querySelector(`li[data-index="${focusIndex}"] .drag-handle`)?.focus();
   };
   const move = (from, to, focus = false) => {
@@ -3498,12 +3505,13 @@ async function drawUsers(done = '', problem = '') {
   main.innerHTML = `
     <h1>Users</h1>
     <p class="note${problem ? ' error' : ' quiet'}" role="status">${escapeHtml(problem || done)}</p>
-    ${person ? `<form class="invite">
-      <label for="invite-email">Invite someone</label>
-      <div class="row"><input id="invite-email" type="email" autocomplete="off" placeholder="their@email.com" required><button type="submit" class="btn btn-primary">Send Invite</button></div>
-      ${sites.length ? `<label for="invite-site">Send the link to</label>
-      <div class="row"><select id="invite-site"><option value="">the tracker page</option>${sites.map((x) => `<option value="${escapeHtml(x.id)}">${escapeHtml(x.name)}</option>`).join('')}</select></div>` : ''}
-      <span class="hint quiet">They get an email with a link to choose their name and password. It works once, for 7 days.</span>
+    ${person ? `<form class="invite fields">
+      <label for="invite-email">Invite Someone</label>
+      <span class="hint" id="invite-hint">Their email. They get an email with a link to choose their name and password. It works once, for 7 days.</span>
+      <input id="invite-email" type="email" autocomplete="off" placeholder="their@email.com" aria-describedby="invite-hint" required>
+      ${sites.length ? `<div class="beside"><label for="invite-site">Send the Link To</label>
+      <select id="invite-site"><option value="">the tracker page</option>${sites.map((x) => `<option value="${escapeHtml(x.id)}">${escapeHtml(x.name)}</option>`).join('')}</select></div>` : ''}
+      <div class="row"><button type="submit" class="btn btn-primary">Send Invite</button></div>
     </form>` : ''}
     <h2>Users with an Account</h2>
     <div class="table-wrap"><table class="projects people"><thead><tr><th class="name">Name</th><th class="email">Email</th><th class="role">Role</th><th class="projects">Projects</th></tr></thead><tbody>${people.map(personRow).join('')}</tbody></table></div>
@@ -3676,11 +3684,13 @@ async function drawDocs(done = '', problem = '', section = 'files') {
     <h2>Task Files</h2>
     <p class="quiet">Files kept on the tasks of ${escapeHtml(project.name)}. Pick another project on the <a href="/projects">Projects</a> page.</p>
     <p class="note file-note${fileLine.problem ? ' error' : ' quiet'}" role="status">${escapeHtml(fileLine.problem || fileLine.done)}</p>
-    ${tickets.length ? `<form class="add-file">
-      <label for="add-file-task">Add a file to a task</label>
-      <div class="row"><select id="add-file-task" required><option value="">Pick a task…</option>${tickets.map((t) => `<option value="${escapeHtml(t.id)}">${escapeHtml(t.id)} ${escapeHtml(t.name)}</option>`).join('')}</select>
-        <input id="add-file-file" type="file" required aria-label="The file to add"><button type="submit" class="btn btn-primary">Add File</button></div>
-      <span class="hint quiet">Up to 10 MB. It shows here and on the task's own page.</span>
+    ${tickets.length ? `<form class="add-file fields">
+      <div class="beside"><label for="add-file-task">Task</label>
+      <select id="add-file-task" required><option value="">Pick a task…</option>${tickets.map((t) => `<option value="${escapeHtml(t.id)}">${escapeHtml(t.id)} ${escapeHtml(t.name)}</option>`).join('')}</select></div>
+      <div class="beside"><label for="add-file-file">File</label>
+      <input id="add-file-file" type="file" required aria-describedby="add-file-hint">
+      <span class="hint" id="add-file-hint">Up to 10 MB. It shows here and on the task's own page.</span></div>
+      <div class="row"><button type="submit" class="btn btn-primary">Add File</button></div>
     </form>` : ''}
     ${attachments.length
     ? `<div class="table-wrap"><table class="projects task-files"><thead><tr><th>File</th><th>Task</th><th>Type</th><th>Size</th><th>Added By</th><th>Added On</th><th><span class="hidden">Actions</span></th></tr></thead>
@@ -3819,6 +3829,74 @@ async function drawTopics(done = '', problem = '') {
     const listed = back?.topics?.some((t) => t.id === made.id);
     again(listed ? `Created ${made.name} in ${project.name}.` : `The tracker said ${made.name} was created, but ${back ? 'it is not listed when read back' : 'the list could not be read back'}.`, !listed);
   });
+  wireTopicRows(project, topics, topicsPath, say, again);
+}
+
+/**
+ * SP-308: each Topics row's Edit and Delete. Edit draws the row as Name and
+ * Description boxes (a blank name is refused before anything is sent);
+ * Cancel draws the page again. Delete asks first, naming how many tasks
+ * carry the topic. After either, the list is read again and the page says
+ * it worked only when the read-back shows it: the new words for an edit,
+ * the topic gone for a delete.
+ */
+function wireTopicRows(project, topics, topicsPath, say, again) {
+  const byId = new Map(topics.map((t) => [String(t.id), t]));
+  const readBack = () => api('GET', topicsPath, undefined, { unrecorded: true }).catch((err) => { if (err instanceof SignedOut) throw err; return null; });
+  for (const button of main.querySelectorAll('button[data-edit-topic]')) {
+    button.addEventListener('click', () => {
+      const topic = byId.get(button.dataset.editTopic);
+      const row = button.closest('tr');
+      if (!topic || !row) return;
+      row.innerHTML = renderTopicEditRow(topic);
+      const form = row.querySelector('form.edit-topic');
+      form.querySelector('input').focus();
+      form.querySelector('.cancel-edit').addEventListener('click', () => again('', false));
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const name = form.querySelector('input[name="name"]').value.trim();
+        const description = form.querySelector('textarea[name="description"]').value.trim();
+        if (!name) return say('Not saved: a topic needs a name.', true);
+        for (const control of form.querySelectorAll('button')) control.disabled = true;
+        say(`Saving ${name}…`);
+        try {
+          await api('PATCH', `${topicsPath}/${encodeURIComponent(topic.id)}`, { name, description });
+        } catch (err) {
+          if (err instanceof SignedOut) return drawSignIn(`You were signed out; ${topic.name} was not saved.`);
+          for (const control of form.querySelectorAll('button')) control.disabled = false;
+          return say(`Not saved: ${err.message}`, true);
+        }
+        let back;
+        try { back = await readBack(); } catch { return drawSignIn(); }
+        const listed = back?.topics?.find((x) => x.id === topic.id);
+        const ok = listed && listed.name === name && listed.description === description;
+        again(ok ? `Saved ${name}.` : `The tracker said ${name} was saved, but ${back ? 'the list does not show the new words when read back' : 'the list could not be read back'}.`, !ok);
+      });
+    });
+  }
+  for (const button of main.querySelectorAll('button[data-delete-topic]')) {
+    button.addEventListener('click', async () => {
+      const topic = byId.get(button.dataset.deleteTopic);
+      if (!topic || !confirm(topicDeleteQuestion(topic))) return;
+      button.disabled = true;
+      say(`Deleting ${topic.name}…`);
+      let gone;
+      try {
+        gone = await api('DELETE', `${topicsPath}/${encodeURIComponent(topic.id)}`);
+      } catch (err) {
+        if (err instanceof SignedOut) return drawSignIn(`You were signed out; ${topic.name} was not deleted.`);
+        button.disabled = false;
+        return say(`Not deleted: ${err.message}`, true);
+      }
+      let back;
+      try { back = await readBack(); } catch { return drawSignIn(); }
+      const stillThere = !back || back.topics?.some((x) => x.id === topic.id);
+      const n = gone?.tickets?.length ?? 0;
+      again(stillThere
+        ? `The tracker said ${topic.name} was deleted, but ${back ? 'it is still listed when read back' : 'the list could not be read back'}.`
+        : `Deleted ${topic.name} from ${project.name}${n ? ` and from the ${n === 1 ? '1 task' : `${n} tasks`} that carried it` : ''}.`, stillThere);
+    });
+  }
 }
 
 /**
@@ -3839,7 +3917,8 @@ function commandsSection() {
   return `<section class="commands-pod" aria-labelledby="commands-pod-title">
     <h2 id="commands-pod-title">Quick Claude Commands</h2>
     <p class="quiet">Every slash command you can give a session: your own and the loop skills. Click one to see what it does.</p>
-    <input type="search" id="command-search" aria-label="Find a command" placeholder="Find a command" autocomplete="off">
+    <label for="command-search">Find a Command</label>
+    <input type="search" id="command-search" placeholder="loop-build" autocomplete="off">
     <div id="command-list"></div>
     <dialog class="command-details" aria-labelledby="command-details-title">
       <form method="dialog">

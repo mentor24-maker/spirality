@@ -119,8 +119,10 @@
  *  - A topic is a key aspect of one project, mostly a feature: a
  *    name (required, at most MAX_TOPIC_NAME characters), a description
  *    (may be blank), who made it and when, in the `topics` table. A project
- *    has many topics; a topic belongs to exactly one project. This first
- *    version only adds and lists them; a deleted project's topics go with it.
+ *    has many topics; a topic belongs to exactly one project. They are
+ *    added, listed, changed (changeTopic) and deleted (removeTopic, which
+ *    takes the topic off every ticket carrying it, each with a `topics`
+ *    event and a version step); a deleted project's topics go with it.
  *  - A ticket carries any number of its own project's topics, and a topic
  *    any number of tickets, in the `ticket_topics` link table.
  *    They change through changeTicket's `topics` (the whole new list of
@@ -697,7 +699,23 @@ function canonicalFileName(name) {
   return clean;
 }
 
-/** A topic as listed. */
+/** A topic's name as sent, trimmed; refused (`bad-name`) when blank or too long. */
+function topicName(name) {
+  const clean = typeof name === 'string' ? name.trim() : '';
+  if (!clean) throw new StoreError('bad-name', 'a topic needs a name; nothing was saved.');
+  if (clean.length > MAX_TOPIC_NAME) throw new StoreError('bad-name', `a topic's name is at most ${MAX_TOPIC_NAME} characters; nothing was saved.`);
+  return clean;
+}
+
+/** A topic's description as sent, trimmed (may be blank); refused (`bad-description`) when not text or too long. */
+function topicDescription(description) {
+  if (description != null && typeof description !== 'string') throw new StoreError('bad-description', "a topic's description is text; nothing was saved.");
+  const clean = (description ?? '').trim();
+  if (clean.length > MAX_TOPIC_DESCRIPTION) throw new StoreError('bad-description', `a topic's description is at most ${MAX_TOPIC_DESCRIPTION} characters; nothing was saved.`);
+  return clean;
+}
+
+/** A topic as listed: `tickets` is how many tickets carry it. */
 function topicFromRow(row) {
   return {
     id: num(row.id),
@@ -707,6 +725,7 @@ function topicFromRow(row) {
     createdBy: num(row.created_by),
     createdByName: row.created_by_name ?? null,
     createdAt: row.created_at,
+    tickets: num(row.tickets ?? 0),
   };
 }
 
@@ -956,6 +975,21 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
   /** The ids of the topics a ticket carries, smallest first. */
   function topicIdsOf(ticket) {
     return db.prepare('SELECT topic FROM ticket_topics WHERE ticket = ? ORDER BY topic').all(ticket).map((r) => num(r.topic));
+  }
+
+  /** A topic's row with its maker's name and how many tickets carry it, or undefined. */
+  function topicRowWithCount(id) {
+    return db.prepare(`SELECT t.*, ac.name AS created_by_name,
+        (SELECT COUNT(*) FROM ticket_topics tt WHERE tt.topic = t.id) AS tickets
+      FROM topics t LEFT JOIN actors ac ON ac.id = t.created_by WHERE t.id = ?`).get(id);
+  }
+
+  /** Topic `id`'s row, only when it is a topic of `project`; else `unknown-topic`. */
+  function projectTopicRow(project, id) {
+    const n = Number(id);
+    const row = Number.isInteger(n) && n > 0 ? db.prepare('SELECT * FROM topics WHERE id = ?').get(n) : undefined;
+    if (!row || row.project !== String(project)) throw new StoreError('unknown-topic', `project "${project}" has no topic ${id}; nothing was changed.`);
+    return row;
   }
 
   function ticketRow(id) {
@@ -2410,12 +2444,8 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
      * (`write-failed`). Answers the topic as listed.
      */
     addTopic({ project, name, description = '', actor }) {
-      const cleanName = typeof name === 'string' ? name.trim() : '';
-      if (!cleanName) throw new StoreError('bad-name', 'a topic needs a name; nothing was saved.');
-      if (cleanName.length > MAX_TOPIC_NAME) throw new StoreError('bad-name', `a topic's name is at most ${MAX_TOPIC_NAME} characters; nothing was saved.`);
-      if (description != null && typeof description !== 'string') throw new StoreError('bad-description', "a topic's description is text; nothing was saved.");
-      const cleanDescription = (description ?? '').trim();
-      if (cleanDescription.length > MAX_TOPIC_DESCRIPTION) throw new StoreError('bad-description', `a topic's description is at most ${MAX_TOPIC_DESCRIPTION} characters; nothing was saved.`);
+      const cleanName = topicName(name);
+      const cleanDescription = topicDescription(description);
       return transaction(() => {
         requireActor(actor, 'the actor');
         const p = this.getProject(project);
@@ -2428,6 +2458,65 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
           throw new StoreError('write-failed', `the topic ${cleanName} did not read back from the database.`);
         }
         return topicFromRow(back);
+      });
+    },
+
+    /**
+     * Change a topic of `project`: a new `name` and/or
+     * `description`, either left out to keep it, with addTopic's limits and
+     * refusals. A topic that is not `project`'s, or no topic at all, is
+     * refused (`unknown-topic`) and nothing changes. Read back in the same
+     * transaction, else nothing is kept (`write-failed`). Answers the topic
+     * as listed.
+     */
+    changeTopic({ project, id, name, description, actor }) {
+      const cleanName = name === undefined ? undefined : topicName(name);
+      const cleanDescription = description === undefined ? undefined : topicDescription(description);
+      return transaction(() => {
+        requireActor(actor, 'the actor');
+        const row = projectTopicRow(project, id);
+        const wanted = { name: cleanName ?? row.name, description: cleanDescription ?? row.description };
+        db.prepare('UPDATE topics SET name = ?, description = ? WHERE id = ?').run(wanted.name, wanted.description, row.id);
+        const back = topicRowWithCount(row.id);
+        if (!back || back.project !== row.project || back.name !== wanted.name || back.description !== wanted.description) {
+          throw new StoreError('write-failed', `the topic ${wanted.name} did not read back as saved.`);
+        }
+        return topicFromRow(back);
+      });
+    },
+
+    /**
+     * Delete a topic of `project`, and take it off every ticket that
+     * carries it: each such ticket gets one `topics` event (the ids before
+     * and after) and steps its version, as changeTicket does. All in one
+     * transaction, so a failure part-way leaves everything as it was. A
+     * topic that is not `project`'s is refused (`unknown-topic`). Answers
+     * `{ topic, tickets }`: the topic as it was, and the ids of the tickets
+     * it came off.
+     */
+    removeTopic({ project, id, actor }) {
+      return transaction(() => {
+        requireActor(actor, 'the actor');
+        const row = projectTopicRow(project, id);
+        const before = topicRowWithCount(row.id);
+        const carriers = db.prepare('SELECT ticket FROM ticket_topics WHERE topic = ? ORDER BY ticket').all(row.id).map((r) => r.ticket);
+        const at = now();
+        for (const ticket of carriers) {
+          const topicsBefore = topicIdsOf(ticket);
+          const topicsAfter = topicsBefore.filter((t) => t !== row.id);
+          const version = num(ticketRow(ticket).version);
+          db.prepare('DELETE FROM ticket_topics WHERE ticket = ? AND topic = ?').run(ticket, row.id);
+          const r = db.prepare('UPDATE tickets SET updated_at = ?, version = version + 1 WHERE id = ? AND version = ?').run(at, ticket, version);
+          if (num(r.changes) !== 1 || JSON.stringify(topicIdsOf(ticket)) !== JSON.stringify(topicsAfter)) {
+            throw new StoreError('write-failed', `ticket ${ticket}'s topics did not read back without ${row.name}.`);
+          }
+          writeEvent(ticket, actor, 'topics', JSON.stringify(topicsBefore), JSON.stringify(topicsAfter), at);
+        }
+        const r = db.prepare('DELETE FROM topics WHERE id = ?').run(row.id);
+        if (num(r.changes) !== 1 || db.prepare('SELECT 1 FROM topics WHERE id = ?').get(row.id)) {
+          throw new StoreError('write-failed', `the topic ${row.name} was not removed.`);
+        }
+        return { topic: topicFromRow(before), tickets: carriers };
       });
     },
 
@@ -2448,9 +2537,11 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
       return byTicket;
     },
 
-    /** A project's topics, newest first, each with its maker's name. */
+    /** A project's topics, newest first, each with its maker's name and how many tickets carry it. */
     listTopics(project) {
-      return db.prepare(`SELECT t.*, ac.name AS created_by_name FROM topics t LEFT JOIN actors ac ON ac.id = t.created_by
+      return db.prepare(`SELECT t.*, ac.name AS created_by_name,
+          (SELECT COUNT(*) FROM ticket_topics tt WHERE tt.topic = t.id) AS tickets
+        FROM topics t LEFT JOIN actors ac ON ac.id = t.created_by
         WHERE t.project = ? ORDER BY t.created_at DESC, t.id DESC`)
         .all(String(project))
         .map(topicFromRow);

@@ -1180,8 +1180,8 @@ export function searchFilterChoices(store, { only = null } = {}) {
     { key: 'project', label: 'Project', options: visibleProjects(store, only).map((p) => ({ value: p.slug, label: p.name })) },
     { key: 'status', label: 'Status', options: STAGE_ORDER.map((name) => ({ value: name, label: name })) },
     { key: 'priority', label: 'Priority', options: [...PRIORITIES.map((p) => ({ value: p, label: capital(p) })), { value: 'none', label: 'None' }] },
-    { key: 'createdBy', label: 'Created by', options: actors },
-    { key: 'assignee', label: 'Assigned to', options: [{ value: 'nobody', label: 'Nobody' }, ...actors] },
+    { key: 'createdBy', label: 'Created By', options: actors },
+    { key: 'assignee', label: 'Assigned To', options: [{ value: 'nobody', label: 'Nobody' }, ...actors] },
   ];
 }
 
