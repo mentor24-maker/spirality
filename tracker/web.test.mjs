@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { DEMO_NEWEST_RELEASE, DEMO_OWN_PROJECT, DEMO_SUGGESTIONS, demoNewestRelease, demoSuggest, seedDemo, tickingClock } from './demoData.mjs';
 import { reportsOf, REPORT_RANGES, GROWTH_PERIODS, searchTickets, PRIORITIES, timeSplitOf, isFailureNote, TIME_BUCKETS, pipelineControlsOf } from './pageData.mjs';
-import { escapeHtml, renderStatusLine, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, CLOSE_LINE, REPLY_LINE, offersMerge, offersClose, bugReport, BUG_REPORT_TAG, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, heldBugReport, renderBugReportActions, approveQuestion, rejectQuestion, changeProblem, REJECT_COMMENT, WONT_DO_TAG, HELD_REPORT_LINE, HELD_REPORT_STATUS_LINE, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, loopHasIt, renderCommentForm, LOOP_HAS_STATUSES, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, renderTopics, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, renderListTopics, projectTags, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, renderReleaseGroup, controlValueText, mountainTime, wakeInEffectText, modelLastPassText, renderConsole, renderConsoleTile, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, consoleFeature, featureColourIndex, renderFeatureKey, FEATURE_PALETTE, drainLine, capInFlightText, renderTitleChoices, titleModeOf, TITLE_MODES, SUGGEST_POLL_MS, moveSuggestion, suggestState, filingPlan, orderPlan, andList, suggestRunLine, renderSuggestRows } from './web/render.mjs';
+import { escapeHtml, renderStatusLine, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, CLOSE_LINE, REPLY_LINE, offersMerge, offersClose, bugReport, BUG_REPORT_TAG, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, heldBugReport, renderBugReportActions, approveQuestion, rejectQuestion, changeProblem, REJECT_COMMENT, WONT_DO_TAG, HELD_REPORT_LINE, HELD_REPORT_STATUS_LINE, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, loopHasIt, renderCommentForm, LOOP_HAS_STATUSES, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, renderTopics, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, renderListTopics, projectTags, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, renderReleaseGroup, controlValueText, mountainTime, wakeInEffectText, modelLastPassText, renderConsole, renderConsoleTile, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, consoleFeature, featureColourIndex, renderFeatureKey, FEATURE_PALETTE, drainLine, capInFlightText, renderTitleChoices, titleModeOf, TITLE_MODES, SUGGEST_POLL_MS, moveSuggestion, suggestState, filingPlan, orderPlan, andList, suggestRunLine, renderSuggestRows, renderSuggestionInfo } from './web/render.mjs';
 import { startServer, setupSettingsOf } from './server.mjs';
 import { saveAnswers, setupFields, setupOf } from './setup.mjs';
 import { DANE_FIELDS as SETUP_FIELDS, STEPS as SETUP_STEPS } from '../scripts/onboard/onboard.mjs';
@@ -5694,6 +5694,39 @@ test('renderSuggestRows: a handle, a place dropdown, Keep, the title, and the wh
   assert.match(rows[1], /<details class="more"><summary>More<\/summary><p class="why"><strong>Why:<\/strong> Because &quot;so&quot;<\/p><p class="suggestion-description">Line one\nline &lt;i&gt;two&lt;\/i&gt;<\/p><\/details>/);
   assert.ok(!html.includes('<b>') && !html.includes('<i>'), 'a suggestion is text, never markup');
   assert.equal(renderSuggestRows([], { order: [], dropped: [], filed: {} }), '');
+});
+
+test('renderSuggestRows: each row has an i that names its own suggestion, wherever the row is moved (SP-304)', () => {
+  const suggestions = [{ title: 'A <one>' }, { title: 'B' }, { title: 'C' }];
+  const html = renderSuggestRows(suggestions, { order: [2, 0, 1], dropped: [], filed: {} });
+  const rows = html.split('</li>').filter(Boolean);
+  assert.equal(rows.length, 3);
+  for (const [place, index] of [[0, 2], [1, 0], [2, 1]]) {
+    const i = rows[place].match(/<button type="button" class="suggestion-info-open" data-index="(\d)" aria-label="About ([^"]*)" title="About This Task"><svg [^>]*aria-hidden="true">[\s\S]*?<\/svg><\/button>/);
+    assert.ok(i, `row ${place + 1} has an i button`);
+    assert.equal(Number(i[1]), index, 'the i carries the suggestion\'s own index, not its place');
+    assert.equal(i[2], escapeHtml(suggestions[index].title));
+  }
+  // Moved again, each i still names the same suggestion.
+  const moved = renderSuggestRows(suggestions, { order: moveSuggestion([2, 0, 1], 0, 2), dropped: [], filed: {} });
+  assert.match(moved.split('</li>')[2], /class="suggestion-info-open" data-index="2" aria-label="About C"/);
+  assert.match(html, /<span class="suggestion-title">A &lt;one&gt;<\/span><button type="button" class="suggestion-info-open"/, 'the i sits beside the title');
+  assert.match(html, /<details class="more"><summary>More<\/summary>/, 'the More fold stays');
+});
+
+test('renderSuggestionInfo: the title as heading, Why It Matters and Description, every word escaped (SP-304)', () => {
+  const html = renderSuggestionInfo({ title: 'Fix <b>this</b> & that', why: 'Because <script>x</script> & so', description: 'Line one\nline <i>two</i>' });
+  assert.match(html, /^<h2 id="suggestion-info-title">Fix &lt;b&gt;this&lt;\/b&gt; &amp; that<\/h2>/);
+  assert.match(html, /<h3>Why It Matters<\/h3><p>Because &lt;script&gt;x&lt;\/script&gt; &amp; so<\/p>/);
+  assert.match(html, /<h3>Description<\/h3><p>Line one\nline &lt;i&gt;two&lt;\/i&gt;<\/p>/);
+  assert.ok(!/<(b|i|script)>/.test(html), 'a suggestion is text, never markup');
+  assert.ok(html.indexOf('Why It Matters') < html.indexOf('Description'));
+  // A section the suggestion lacks is left out; one with neither says so.
+  const bare = renderSuggestionInfo({ title: 'Bare', why: '', description: 'Only this' });
+  assert.doesNotMatch(bare, /Why It Matters/);
+  assert.match(bare, /<h3>Description<\/h3><p>Only this<\/p>/);
+  assert.match(renderSuggestionInfo({ title: 'Empty' }), /<p class="quiet">This suggestion came with nothing more to say\.<\/p>/);
+  assert.equal(renderSuggestionInfo(undefined), '<h2 id="suggestion-info-title"></h2><p class="quiet">This suggestion came with nothing more to say.</p>');
 });
 
 test('suggestState keeps the order, ticks and filed tickets for the same run only; filingPlan files the kept rows not yet filed, and orders every kept one', () => {
