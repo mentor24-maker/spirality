@@ -26,7 +26,7 @@
  * an emailed link's own page. The link's token is sent only in a JSON body,
  * never in an address.
  */
-import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, unwrapDoc, renderCloseAction, renderGoAction, goQuestion, renderBugReportActions, approveQuestion, rejectQuestion, changeProblem, REJECT_COMMENT, WONT_DO_TAG, renderMergeAction, renderAnswerIn, renderHeldUp, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, lookupTicket, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, pipelinePodLabel, renderHealth, healthLines, renderCommandList, renderCommandView, renderCommandDetails, renderContextDocs, renderTopics, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, renderListTopics, projectTags, sortTickets, nextSort, renderDocumentation, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, lowerMeridiem, renderPipelineControls, renderConsole, drainLine, renderTitleChoices, titleModeOf, SUGGEST_POLL_MS, moveSuggestion, suggestState, filingPlan, orderPlan, andList, suggestRunLine, renderSuggestRows } from './render.mjs';
+import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, loopHasIt, renderCommentForm, MOVED_MESSAGE, renderMarkdown, unwrapDoc, renderCloseAction, renderGoAction, goQuestion, renderBugReportActions, approveQuestion, rejectQuestion, changeProblem, REJECT_COMMENT, WONT_DO_TAG, renderMergeAction, renderAnswerIn, renderHeldUp, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, lookupTicket, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, pipelinePodLabel, renderHealth, healthLines, renderCommandList, renderCommandView, renderCommandDetails, renderContextDocs, renderTopics, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, renderListTopics, projectTags, sortTickets, nextSort, renderDocumentation, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, lowerMeridiem, renderPipelineControls, renderConsole, drainLine, renderTitleChoices, titleModeOf, SUGGEST_POLL_MS, moveSuggestion, suggestState, filingPlan, orderPlan, andList, suggestRunLine, renderSuggestRows } from './render.mjs';
 
 /** Where an earlier version of the page kept a pasted token; removed on load, never read. */
 const OLD_TOKEN_KEY = 'tracker-token';
@@ -1836,25 +1836,12 @@ async function drawTicket(id, said = null, kept = null) {
       </div>
       ${renderComment(c.body, { operatorName: me?.name })}
     </article>`).join('');
-  // What it needs from Dane on top; everything else folded away, closed until he opens it.
-  main.innerHTML = `
-    <section class="quick">
-      ${renderHeldUp(t, sinceTime)}
-      <div class="ask">${renderQuickAction(t)}</div>
-      <div class="act">
-      ${renderCommands(t)}
-      ${renderAnswerIn(t)}
-      ${renderMergeAction(t)}
-      ${renderCloseAction(t)}
-      ${renderGoAction(t)}
-      ${renderBugReportActions(t)}
-      ${renderReplyForm(t, me?.name)}
-      ${renderDeleteAction(t)}
-      </div>
-    </section>
-    ${renderFilesMade(t)}
-    <details class="details">
-      <summary>Details</summary>
+  // The ticket itself: what Details holds. While a loop has it (SP-291) nothing
+  // asks him for a reply, so this goes in the right column, open, with the
+  // Add Comment box under the comments; in his two statuses it stays folded
+  // under Details, closed until he opens it, below the ask and the reply box.
+  const inline = loopHasIt(t);
+  const ticketBody = `
       <p class="meta">
         <span>${escapeHtml(t.id)}</span><span>${escapeHtml(t.projectName)}</span>
         <span>${escapeHtml(statusLabel(t))}</span>
@@ -1865,6 +1852,7 @@ async function drawTicket(id, said = null, kept = null) {
       ${renderAttachments(t)}
       <h2 id="comments">Comments</h2>
       ${comments || '<p class="quiet">No comments yet.</p>'}
+      ${renderCommentForm(t)}
       <h2>Copy to Another Project</h2>
       ${others.length ? `
       <form class="copy">
@@ -1873,12 +1861,36 @@ async function drawTicket(id, said = null, kept = null) {
           <select id="copy-to">${others.map((p) => `<option value="${escapeHtml(p.slug)}">${escapeHtml(p.name)}</option>`).join('')}</select>
           <button type="submit">Copy</button><span class="note"></span>
         </div>
-      </form>` : '<p class="quiet">There is no other project to copy into yet.</p>'}
-    </details>`;
+      </form>` : '<p class="quiet">There is no other project to copy into yet.</p>'}`;
+  main.innerHTML = `
+    <section class="quick${inline ? ' loop-has' : ''}">
+      ${renderHeldUp(t, sinceTime)}
+      <div class="ask">${renderQuickAction(t)}</div>
+      <div class="act">
+      ${renderCommands(t)}
+      ${renderAnswerIn(t)}
+      ${renderMergeAction(t)}
+      ${renderCloseAction(t)}
+      ${renderGoAction(t)}
+      ${renderBugReportActions(t)}
+      ${renderReplyForm(t, me?.name)}
+      ${inline ? `<div class="details">${ticketBody}</div>` : ''}
+      ${renderDeleteAction(t)}
+      </div>
+    </section>
+    ${renderFilesMade(t)}
+    ${inline ? '' : `<details class="details">
+      <summary>Details</summary>${ticketBody}
+    </details>`}`;
+  // Details, when it is a fold (his two statuses), opened; while a loop has it there is nothing to open.
+  const openDetails = () => {
+    const fold = main.querySelector('details.details');
+    if (fold) fold.open = true;
+  };
   wireCopyButtons();
   // Arrived by the bus count in the header: open the fold at the comments, where the posts are.
   if (location.hash === '#comments' && !refreshing) {
-    main.querySelector('details.details').open = true;
+    openDetails();
     document.getElementById('comments').scrollIntoView({ block: 'start' });
   }
   // The ticket's own project, in the view last used; then the ticket; then this page of it.
@@ -1914,7 +1926,7 @@ async function drawTicket(id, said = null, kept = null) {
   // Go): Details open so the new reply is there when he scrolls down, and
   // the page kept at the top.
   const afterPost = () => {
-    main.querySelector('details.details').open = true;
+    openDetails();
     window.scrollTo(0, 0);
   };
   // Merge, Close and Go: his word from the server (the project config's merge
@@ -2037,17 +2049,54 @@ async function drawTicket(id, said = null, kept = null) {
   const panel = wireEditPanel(t);
   if (kept) {
     // No box while his answer is in: nothing typed there to put back.
-    const keptBox = main.querySelector('form.reply textarea');
+    const keptBox = main.querySelector('form.reply textarea, form.add-comment textarea');
     if (keptBox) keptBox.value = kept.reply;
     panel?.restore(kept);
   }
   if (said) {
-    main.querySelector('details.details').open = true;
+    openDetails();
     const where = main.querySelector(said.field ? `.edit [data-note="${said.field}"]` : '.edit-note');
     if (where) {
       where.className = `note${said.error ? ' error' : ' quiet'}${said.field ? '' : ' edit-note'}`;
       where.textContent = said.text;
     }
+  }
+  // Add Comment (SP-291), on a ticket a loop has: posted exactly as typed
+  // through the same call as the reply box, the page then drawn again from
+  // the server so the comment shown is the one stored. A failed post says so
+  // and keeps the words. A #reply address (the list's Reply icon) lands here.
+  const commentForm = main.querySelector('form.add-comment');
+  if (commentForm) {
+    const commentBox = commentForm.querySelector('textarea');
+    if (location.hash === '#reply' && !refreshing) {
+      commentForm.scrollIntoView({ block: 'center' });
+      commentBox.focus();
+    }
+    commentForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const button = commentForm.querySelector('button');
+      const commentNote = commentForm.querySelector('.note');
+      button.disabled = true;
+      commentNote.className = 'note quiet';
+      commentNote.textContent = 'Posting…';
+      try {
+        await api('POST', `/tickets/${encodeURIComponent(t.id)}/comments`, { body: commentBox.value });
+      } catch (err) {
+        if (err instanceof SignedOut) return drawSignIn('You were signed out; your comment was not posted.');
+        commentNote.className = 'note error';
+        commentNote.textContent = `Not posted: ${err.message}`;
+        button.disabled = false;
+        return;
+      }
+      try {
+        await drawAgain(() => drawTicket(t.id));
+        main.querySelector('form.add-comment')?.scrollIntoView({ block: 'center' });
+      } catch (err) {
+        if (err instanceof SignedOut) return drawSignIn('You were signed out; your comment was posted, but the page could not show it.');
+        commentNote.className = 'note error';
+        commentNote.textContent = `Posted, but the page could not refresh (${err.message}). Reload to see it.`;
+      }
+    });
   }
   // While his answer is in there is no reply box (renderReplyForm): the
   // notice is all the page says, and a #reply address just shows it.
@@ -2102,7 +2151,7 @@ function wireEditPanel(t) {
   const tagBox = panel.querySelector('#edit-tag');
   // What is typed and not yet saved, except the field this save sends.
   const typed = (field) => ({
-    reply: main.querySelector('form.reply textarea')?.value ?? '',
+    reply: main.querySelector('form.reply textarea, form.add-comment textarea')?.value ?? '',
     tag: field === 'tags' ? '' : tagBox.value,
     name: field !== 'name' && nameBox && nameBox.value !== t.name ? nameBox.value : null,
     description: field !== 'description' && !editor.hidden ? area.value : null,
@@ -2263,12 +2312,14 @@ const SUGGEST_UNANSWERED = 'No titles could be suggested: the tracker did not an
  * The title is picked from suggestions (SP-248). A toggle at the top picks
  * how: Suggest a Title shows only the Description (required), Write My Own
  * Title shows the Title too. The toggle is kept in this browser beside the
- * draft and outlives a filing. Either way, the first submit ("Suggest
- * Titles") sends the words to the title suggester
- * (`/tickets/suggest-titles`) and shows its five titles as a choice list,
- * his own title first in Write My Own Title; "Suggest Again" asks for a
- * fresh five, the words untouched. Editing the words after that puts the
- * button back to Suggest Titles, so a list never names stale words. When
+ * draft and outlives a filing. In Suggest a Title the first submit
+ * ("Suggest Titles") sends the words to the title suggester
+ * (`/tickets/suggest-titles`) and shows its five titles as a choice list.
+ * In Write My Own Title the button reads "Submit Task" from the start and
+ * files his title as typed; a "Suggest Titles" button beside it asks for
+ * the list anyway, his own title first. "Suggest Again" asks for a fresh
+ * five, the words untouched. Editing the words after that puts the box back
+ * to its first stage, so a list never names stale words. When
  * the suggester fails, the box says why in one line and shows the Title
  * field, and the next submit files what he types there. The picked title
  * is filed exactly as shown.
@@ -2308,8 +2359,11 @@ function wireAddTask(slug, view, adding) {
     description.required = mode === 'suggest';
     choices.hidden = stage !== 'pick';
     if (stage !== 'pick') choiceList.innerHTML = '';
-    again.hidden = stage === 'ask';
-    button.textContent = stage === 'ask' ? 'Suggest Titles' : 'Submit Task';
+    // Write My Own Title files his title straight away; Suggest Titles beside it is optional.
+    const asking = stage === 'ask' && mode === 'suggest';
+    again.hidden = asking;
+    again.textContent = stage === 'ask' ? 'Suggest Titles' : 'Suggest Again';
+    button.textContent = asking ? 'Suggest Titles' : 'Submit Task';
   };
   const firstField = () => (mode === 'own' ? title : description);
   show();
@@ -2381,8 +2435,8 @@ function wireAddTask(slug, view, adding) {
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     keep();
-    if (stage === 'ask') return askTitles();
-    // The title as shown: the picked choice, or what he typed after a failed suggestion.
+    if (stage === 'ask' && mode === 'suggest') return askTitles();
+    // The title as shown: the picked choice, or what he typed (Write My Own Title, or after a failed suggestion).
     const picked = stage === 'pick' ? choiceList.querySelector('input[name="title-choice"]:checked')?.value : title.value;
     if (!picked) {
       say('Pick a title first.', 'error');

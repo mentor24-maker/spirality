@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { DEMO_NEWEST_RELEASE, DEMO_OWN_PROJECT, DEMO_SUGGESTIONS, demoNewestRelease, demoSuggest, seedDemo, tickingClock } from './demoData.mjs';
 import { reportsOf, REPORT_RANGES, GROWTH_PERIODS, searchTickets, PRIORITIES, timeSplitOf, isFailureNote, TIME_BUCKETS, pipelineControlsOf } from './pageData.mjs';
-import { escapeHtml, renderStatusLine, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, CLOSE_LINE, REPLY_LINE, offersMerge, offersClose, bugReport, BUG_REPORT_TAG, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, heldBugReport, renderBugReportActions, approveQuestion, rejectQuestion, changeProblem, REJECT_COMMENT, WONT_DO_TAG, HELD_REPORT_LINE, HELD_REPORT_STATUS_LINE, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, renderTopics, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, renderListTopics, projectTags, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, renderReleaseGroup, controlValueText, mountainTime, wakeInEffectText, modelLastPassText, renderConsole, renderConsoleTile, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, consoleFeature, featureColourIndex, renderFeatureKey, FEATURE_PALETTE, drainLine, capInFlightText, renderTitleChoices, titleModeOf, TITLE_MODES, SUGGEST_POLL_MS, moveSuggestion, suggestState, filingPlan, orderPlan, andList, suggestRunLine, renderSuggestRows } from './web/render.mjs';
+import { escapeHtml, renderStatusLine, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, CLOSE_LINE, REPLY_LINE, offersMerge, offersClose, bugReport, BUG_REPORT_TAG, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, heldBugReport, renderBugReportActions, approveQuestion, rejectQuestion, changeProblem, REJECT_COMMENT, WONT_DO_TAG, HELD_REPORT_LINE, HELD_REPORT_STATUS_LINE, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, loopHasIt, renderCommentForm, LOOP_HAS_STATUSES, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, renderTopics, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, renderListTopics, projectTags, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, renderReleaseGroup, controlValueText, mountainTime, wakeInEffectText, modelLastPassText, renderConsole, renderConsoleTile, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, consoleFeature, featureColourIndex, renderFeatureKey, FEATURE_PALETTE, drainLine, capInFlightText, renderTitleChoices, titleModeOf, TITLE_MODES, SUGGEST_POLL_MS, moveSuggestion, suggestState, filingPlan, orderPlan, andList, suggestRunLine, renderSuggestRows } from './web/render.mjs';
 import { startServer, setupSettingsOf } from './server.mjs';
 import { saveAnswers, setupFields, setupOf } from './setup.mjs';
 import { DANE_FIELDS as SETUP_FIELDS, STEPS as SETUP_STEPS } from '../scripts/onboard/onboard.mjs';
@@ -268,7 +268,7 @@ test('with his answer in, the ticket page draws no reply box and copes with it m
   assert.doesNotMatch(draw, /querySelector\('form\.reply textarea'\)\.value =/);
   assert.match(draw, /const form = main\.querySelector\('form\.reply'\);\s*if \(!form\) return;\s*const box = form\.querySelector\('textarea'\);/);
   assert.match(draw, /if \(!form\) return;[\s\S]*location\.hash === '#reply'[\s\S]*form\.addEventListener\('submit'/);
-  assert.match(app, /reply: main\.querySelector\('form\.reply textarea'\)\?\.value \?\? ''/);
+  assert.match(app, /reply: main\.querySelector\('form\.reply textarea, form\.add-comment textarea'\)\?\.value \?\? ''/);
   // The ticket page's notice: tinted, a blue bar on the left, ink, upright. The board and list note unchanged.
   const css = readFileSync(WEB('app.css'), 'utf8');
   const notice = /\np\.answer-in \{([^}]*)\}/.exec(css)?.[1] ?? '';
@@ -692,7 +692,7 @@ test('the Add Task box on the Tasks page files into the project shown, in Reques
   const draw = app.slice(app.indexOf('async function drawProject'), app.indexOf('async function copyText'));
   assert.match(draw, /<details class="add-task">\s*<summary>Add Task<label class="suggest-switch">[\s\S]*?<\/label><\/summary>\s*<form class="request"\$\{suggesting \? ' hidden' : ''\}>/, 'drawn closed, on the board and the list alike');
   assert.match(draw, /<button type="submit" class="submit-task">Suggest Titles<\/button>/, 'the first submit asks for titles (SP-248)');
-  assert.match(wire, /button\.textContent = stage === 'ask' \? 'Suggest Titles' : 'Submit Task';/, 'once a title is up for picking, the button says Submit Task, in his words');
+  assert.match(wire, /button\.textContent = asking \? 'Suggest Titles' : 'Submit Task';/, 'once a title is up for picking (or his own is typed), the button says Submit Task, in his words');
   assert.doesNotMatch(app, /File request/i, 'the old button words are gone');
   assert.match(app, /Filed <a href="\/t\/\$\{encodeURIComponent\(filed\)\}">\$\{escapeHtml\(filed\)\}<\/a>/);
   assert.match(draw, /wireAddTask\(board\.project, view, adding\);/);
@@ -825,7 +825,7 @@ test('the Add Task box has a Suggest a Title / Write My Own Title toggle: Sugges
   assert.match(draw, /<fieldset class="title-choices" hidden>\s*<legend>Pick a Title<\/legend>\s*<div class="choices"><\/div>\s*<\/fieldset>/);
   assert.match(draw, /<button type="button" class="suggest-again" hidden>Suggest Again<\/button>/);
   assert.match(wire, /choices\.hidden = stage !== 'pick';/);
-  assert.match(wire, /again\.hidden = stage === 'ask';/);
+  assert.match(wire, /const asking = stage === 'ask' && mode === 'suggest';\s*again\.hidden = asking;\s*again\.textContent = stage === 'ask' \? 'Suggest Titles' : 'Suggest Again';/, 'Write My Own Title offers Suggest Titles beside Submit Task');
   // Opening the box puts the cursor in the first field the mode shows.
   assert.match(wire, /const firstField = \(\) => \(mode === 'own' \? title : description\);/);
   // Not when the form is hidden behind the Suggest side, nor when the Suggest checkbox opened it (SP-303).
@@ -874,10 +874,11 @@ test('the title toggle is kept in this browser beside the draft and outlives a f
   for (const kept of ['suggest', null, undefined, '', 'OWN', 'nonsense']) assert.equal(titleModeOf(kept), 'suggest', String(kept));
 });
 
-test('either mode, the first submit asks the title suggester and shows the titles to pick from, his own first in Write My Own Title; Suggest Again asks again', () => {
+test('Suggest a Title: the first submit asks the title suggester; Write My Own Title shows Submit Task at once and files his title, with Suggest Titles beside it (his own first)', () => {
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   const wire = app.slice(app.indexOf('function wireAddTask'), app.indexOf('/**', app.indexOf('function wireAddTask')));
-  assert.match(wire, /if \(stage === 'ask'\) return askTitles\(\);/, 'the first submit asks, it does not file');
+  assert.match(wire, /if \(stage === 'ask' && mode === 'suggest'\) return askTitles\(\);/, 'in Suggest a Title the first submit asks, it does not file');
+  assert.match(wire, /button\.textContent = asking \? 'Suggest Titles' : 'Submit Task';/, 'in Write My Own Title the button is Submit Task from the start');
   assert.match(wire, /api\('POST', `\/projects\/\$\{encodeURIComponent\(slug\)\}\/tickets\/suggest-titles`,\s*mode === 'own' \? \{ description: description\.value, title: title\.value \} : \{ description: description\.value \}\)/);
   assert.match(wire, /choiceList\.innerHTML = renderTitleChoices\(\{ own: mode === 'own' \? title\.value : null, titles \}\);\s*stage = 'pick';/);
   assert.match(wire, /again\.addEventListener\('click', \(\) => \{ keep\(\); askTitles\(\); \}\);/, 'Suggest Again asks for a fresh five; the words are not touched');
@@ -899,7 +900,7 @@ test('a failed suggestion says why in one line and shows the Title field, and th
   assert.doesNotMatch(failed, /title\.value =|description\.value =|removeItem/, 'nothing typed is lost');
   assert.match(app, /const SUGGEST_UNANSWERED = 'No titles could be suggested: the tracker did not answer\. Write your own title\.';/);
   // In the 'type' stage the Title field shows and is required, the button files.
-  assert.match(wire, /button\.textContent = stage === 'ask' \? 'Suggest Titles' : 'Submit Task';/);
+  assert.match(wire, /const asking = stage === 'ask' && mode === 'suggest';[\s\S]*button\.textContent = asking \? 'Suggest Titles' : 'Submit Task';/);
 });
 
 test('renderTitleChoices: his own title first as "Keep my title", then the suggestions, the first picked, every title escaped and filed as shown', () => {
@@ -1395,7 +1396,7 @@ test('an open page reads again once a minute and on coming back to the tab, neve
   // A save's own redraw keeps what the beat compares against, so the next beat does not undo its "Saved" note.
   assert.match(/async function drawAgain\(draw\) \{[\s\S]*?\n\}/.exec(app)[0], /await draw\(\);\s*if \(recording === reads && lastDrawn\?\.address === here\(\)\) lastDrawn = \{ address: here\(\), reads \};/);
   assert.equal(app.match(/await drawTicket\(t\.id/g), null, 'every in-page ticket redraw goes through drawAgain');
-  assert.equal((app.match(/await drawAgain\(\(\) => draw(Ticket|Project)\(/g) ?? []).length, 8, 'SP-208 added the List view priority save; SP-251 the Suggest Next Tasks filing; SP-287 the bug report buttons');
+  assert.equal((app.match(/await drawAgain\(\(\) => draw(Ticket|Project)\(/g) ?? []).length, 9, 'SP-208 added the List view priority save; SP-251 the Suggest Next Tasks filing; SP-287 the bug report buttons; SP-291 the Add Comment box');
   assert.match(route, /if \(place && !\(err instanceof SignedOut\)\) return;/, "a beat's failed draw does not replace the page with an error");
   assert.match(app, /if \(location\.hash === '#reply' && !refreshing\) \{/, 'a beat does not jump to the reply box again');
   assert.match(/function keepPlace\(\) \{[\s\S]*?\n\}/.exec(app)[0], /main\.querySelectorAll\('details'\)[\s\S]*window\.scrollTo\(0, y\);/);
@@ -1473,13 +1474,15 @@ test('an operator card draws its NEEDED FROM DANE banner in the red box, as `ask
 
 test('the ticket page opens on the Quick Action section, with everything it showed before in a closed Details box', () => {
   const app = readFileSync(WEB('app.mjs'), 'utf8');
-  const page = /main\.innerHTML = `\s*<section class="quick">([\s\S]*?)<\/section>\s*(?:\$\{renderFilesMade\(t\)\}\s*)?<details class="details">([\s\S]*?)<\/details>`;/.exec(app);
-  assert.ok(page, 'Quick Action first, then Details');
-  const [, quick, details] = page;
+  const page = /main\.innerHTML = `\s*<section class="quick\$\{inline \? ' loop-has' : ''\}">([\s\S]*?)<\/section>\s*(?:\$\{renderFilesMade\(t\)\}\s*)?\$\{inline \? '' : `<details class="details">([\s\S]*?)<\/details>`\}`;/.exec(app);
+  assert.ok(page, 'Quick Action first, then Details (folded in his two statuses, SP-291)');
+  const [, quick, fold] = page;
+  // What Details holds is one block, drawn folded or, while a loop has the ticket, open in the right column.
+  const details = fold + (/const ticketBody = `([\s\S]*?)`;\n  main\.innerHTML/.exec(app)?.[1] ?? '');
   assert.match(quick, /renderQuickAction\(t\)/);
   assert.match(quick, /\$\{renderReplyForm\(t, me\?\.name\)\}/, 'the reply box is on the right of Quick Action');
   assert.match(renderReplyForm({}, 'Dane'), /<form class="reply">[\s\S]*<label for="reply">Reply as Dane<\/label>[\s\S]*<textarea id="reply" required>/);
-  assert.match(details, /^\s*<summary>Details<\/summary>/);
+  assert.match(fold, /^\s*<summary>Details<\/summary>\$\{ticketBody\}\s*$/);
   // The status line, the description and the comments, all inside Details.
   for (const part of [/statusLabel\(t\)/, /renderMarkdown\(t\.description\)/, /\$\{comments \|\|/]) assert.match(details, part);
   assert.ok(!/<details class="details"[^>]*\bopen\b/.test(app), 'Details is never drawn open');
@@ -1634,6 +1637,79 @@ test('a held bug report is tagged bug-report, in Needs your input, with no card 
   assert.equal(heldBugReport({ tags: null, status: null, comments: null }), false);
 });
 
+// ── While a loop has the ticket (SP-291) ─────────────────────────────────────
+
+test('while a loop has the ticket there is no reply box, and an Add Comment box stands in; his two statuses keep the reply box', () => {
+  assert.deepEqual([...LOOP_HAS_STATUSES], ['requested', 'queued', 'building', 'in review', 'rework', 'live']);
+  for (const status of LOOP_HAS_STATUSES) {
+    const t = { status, comments: [] };
+    assert.equal(loopHasIt(t), true, status);
+    assert.equal(loopHasIt({ status: status.toUpperCase() }), true, `${status}, any case`);
+    assert.equal(renderReplyForm(t, 'Dane'), '', `no Reply box in ${status}`);
+    const box = renderCommentForm(t);
+    assert.match(box, /^<form class="add-comment">/, status);
+    assert.match(box, /<label for="add-comment">Add a note for the loop<\/label>/);
+    assert.match(box, /<textarea id="add-comment" required><\/textarea>/);
+    assert.match(box, /<button type="submit">Add Comment<\/button><span class="note"><\/span>/);
+  }
+  for (const status of ['needs your input', 'ready to launch', undefined, 'something new']) {
+    const t = { status, comments: [] };
+    assert.equal(loopHasIt(t), false, String(status));
+    assert.equal(renderCommentForm(t), '', `no Add Comment box in ${status}`);
+    assert.match(renderReplyForm(t, 'Dane'), /<form class="reply">[\s\S]*Reply as Dane[\s\S]*Post Reply/, `the reply box as before in ${status}`);
+  }
+});
+
+test('the demo data: a Queued ticket gets the comment box and a Needs your input ticket the reply box; a comment added there is on the ticket as typed', async () => {
+  const f = await fixture();
+  try {
+    const tickets = (await f.call('GET', '/projects/alpha/tickets')).body.tickets ?? [];
+    const queued = tickets.find((t) => t.name === 'The board is missing: draw the seven columns');
+    const asked = tickets.find((t) => t.name === 'The tracker has nowhere to run: choose where it lives');
+    assert.ok(queued && asked, 'both demo tickets found');
+    let thread = (await f.call('GET', `/tickets/${queued.id}/thread`)).body;
+    assert.equal(renderReplyForm(thread, 'Dane'), '');
+    assert.match(renderCommentForm(thread), /Add Comment/);
+    const words = '  Try this on a phone first\n';
+    assert.equal((await f.call('POST', `/tickets/${queued.id}/comments`, { body: { body: words } })).status, 201);
+    thread = (await f.call('GET', `/tickets/${queued.id}/thread`)).body;
+    assert.equal(thread.comments.at(-1).body, words, 'the newest comment, exactly as typed');
+    assert.equal(thread.status, 'queued', 'a comment moves nothing');
+    const his = (await f.call('GET', `/tickets/${asked.id}/thread`)).body;
+    assert.match(renderReplyForm(his, 'Dane'), /<form class="reply">/);
+    assert.equal(renderCommentForm(his), '');
+  } finally { await f.cleanup(); }
+});
+
+test('the ticket page puts the details in the right column, open, while a loop has it, and posts Add Comment exactly as typed', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const draw = /\nasync function drawTicket\(id, said = null, kept = null\) \{[\s\S]*?\n\}\n/.exec(app)?.[0] ?? '';
+  assert.ok(draw, 'drawTicket found');
+  assert.match(draw, /const inline = loopHasIt\(t\);/);
+  const body = /const ticketBody = `([\s\S]*?)`;\n  main\.innerHTML/.exec(draw)?.[1] ?? '';
+  // Everything Details held, the Add Comment box under the comments, Copy at the end.
+  const order = ['<p class="meta">', 'renderEditPanel(t)', '<section class="description">', 'renderAttachments(t)', '<h2 id="comments">Comments</h2>', '${comments ||', '${renderCommentForm(t)}', '<h2>Copy to Another Project</h2>'];
+  const at = order.map((part) => body.indexOf(part));
+  assert.ok(at.every((i) => i >= 0), `all in the one block: ${order.filter((_, i) => at[i] < 0)}`);
+  assert.deepEqual([...at].sort((a, b) => a - b), at, 'in that order');
+  // In the right column (no fold, so already open) on a loop ticket; folded below on his.
+  assert.match(draw, /\$\{renderReplyForm\(t, me\?\.name\)\}\s*\$\{inline \? `<div class="details">\$\{ticketBody\}<\/div>` : ''\}\s*\$\{renderDeleteAction\(t\)\}\s*<\/div>/);
+  assert.match(draw, /\$\{inline \? '' : `<details class="details">\s*<summary>Details<\/summary>\$\{ticketBody\}\s*<\/details>`\}/);
+  // The box posts its words untouched; a failed post says so and keeps them; a post that landed never says it did not.
+  const wire = draw.slice(draw.indexOf("const commentForm = main.querySelector('form.add-comment');"), draw.indexOf("const form = main.querySelector('form.reply');"));
+  assert.match(wire, /api\('POST', `\/tickets\/\$\{encodeURIComponent\(t\.id\)\}\/comments`, \{ body: commentBox\.value \}\)/);
+  assert.match(wire, /commentNote\.textContent = `Not posted: \$\{err\.message\}`;\s*button\.disabled = false;\s*return;/);
+  assert.doesNotMatch(wire, /commentBox\.value = ''/, 'the words are never cleared by hand: the redraw draws a fresh box');
+  assert.match(wire, /await drawAgain\(\(\) => drawTicket\(t\.id\)\);[\s\S]*Posted, but the page could not refresh/);
+  assert.match(wire, /location\.hash === '#reply' && !refreshing\) \{\s*commentForm\.scrollIntoView\(\{ block: 'center' \}\);\s*commentBox\.focus\(\);/, "the list's Reply icon lands in the box");
+  assert.ok(draw.indexOf('const commentForm') < draw.indexOf('if (!form) return;'), 'wired before the reply box\'s early return');
+  // Two columns that stack under 800px, as the docs page's do; his two statuses' layout untouched.
+  const css = readFileSync(WEB('app.css'), 'utf8');
+  assert.match(css, /@media \(max-width: 800px\) \{ \.quick\.loop-has \{ grid-template-columns: minmax\(0, 1fr\); \} \}/);
+  assert.match(css, /^\.quick \{ display: grid; grid-template-columns: 1fr 1fr;/m);
+  assert.match(css, /form\.add-comment textarea \{ width: 100%;/);
+});
+
 test('a held bug report shows Approve and Reject and a quiet line in place of the reply box; anything else is unchanged', () => {
   const held = { name: 'Bug report: x', tags: ['bug-report'], status: 'needs your input', comments: [], description: bugDescription() };
   const html = renderBugReportActions(held);
@@ -1652,7 +1728,7 @@ test('a held bug report shows Approve and Reject and a quiet line in place of th
   assert.ok(renderStatusLine(held).includes(escapeHtml(HELD_REPORT_STATUS_LINE)));
   // A carded bug report and any other ticket: no buttons, the reply box as before.
   const carded = { ...held, comments: [{ body: intakeCard() }] };
-  for (const other of [carded, { ...held, tags: [] }, { ...held, status: 'requested' }, { name: 'x', status: 'needs your input', comments: [] }]) {
+  for (const other of [carded, { ...held, tags: [] }, { ...held, status: 'ready to launch' }, { name: 'x', status: 'needs your input', comments: [] }]) {
     assert.equal(renderBugReportActions(other), '');
     assert.match(renderReplyForm(other, 'Dane'), /<form class="reply">/);
     assert.ok(!renderStatusLine(other).includes(escapeHtml(HELD_REPORT_STATUS_LINE)));
@@ -1934,7 +2010,7 @@ test('Copy copies exactly the block\'s text: no fence, no extra spaces or line b
   assert.match(app, /navigator\.clipboard\.writeText\(text\)/);
   assert.match(app, /document\.execCommand\('copy'\)/);
   assert.match(app, /'Copied'/);
-  const quick = /<section class="quick">([\s\S]*?)<\/section>/.exec(app)[1];
+  const quick = /<section class="quick[^"]*">([\s\S]*?)<\/section>/.exec(app)[1];
   assert.match(quick, /\$\{renderCommands\(t\)\}[\s\S]*\$\{renderReplyForm\(t, me\?\.name\)\}/, 'the commands sit on the right, above the reply box');
 });
 
@@ -2537,7 +2613,8 @@ test('after a reply, Merge, Close or Go posts, the page stays at the top with no
   // One helper: Details open, the page at the top.
   const helper = /const afterPost = \(\) => \{([\s\S]*?)\n  \};/.exec(app)?.[1];
   assert.ok(helper, 'one shared helper');
-  assert.match(helper, /details\.details'\)\.open = true;\s*window\.scrollTo\(0, 0\);\s*$/);
+  assert.match(helper, /^\s*openDetails\(\);\s*window\.scrollTo\(0, 0\);\s*$/);
+  assert.match(app, /const openDetails = \(\) => \{\s*const fold = main\.querySelector\('details\.details'\);\s*if \(fold\) fold\.open = true;\s*\};/, 'opens the fold only when there is one (SP-291)');
   assert.doesNotMatch(helper, /showModal/, 'the helper opens no box');
   // Nothing scrolls to the last comment any more.
   assert.doesNotMatch(app, /\.comment:last-of-type/);
@@ -3056,12 +3133,12 @@ test('a save carries over what is typed elsewhere on the page: the reply box, an
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   const wire = /function wireEditPanel\(t\) \{([\s\S]*?)\n\}/.exec(app)?.[1];
   const typed = wire.slice(wire.indexOf('const typed ='), wire.indexOf('const redraw ='));
-  assert.match(typed, /reply: main\.querySelector\('form\.reply textarea'\)\?\.value/);
+  assert.match(typed, /reply: main\.querySelector\('form\.reply textarea, form\.add-comment textarea'\)\?\.value/, 'the reply box, or the Add Comment box on a loop ticket');
   assert.match(typed, /description: field !== 'description' && !editor\.hidden \? area\.value : null/, 'an open edit is kept unless it is what was saved');
   assert.match(typed, /name: field !== 'name' && nameBox && nameBox\.value !== t\.name \? nameBox\.value : null/);
   assert.match(typed, /tag: field === 'tags' \? '' : tagBox\.value/);
   const draw = /\nasync function drawTicket\(id, said = null, kept = null\) \{[\s\S]*?\n\}\n/.exec(app)?.[0] ?? '';
-  assert.match(draw, /const panel = wireEditPanel\(t\);\s*if \(kept\) \{[^}]*const keptBox = main\.querySelector\('form\.reply textarea'\);\s*if \(keptBox\) keptBox\.value = kept\.reply;\s*panel\?\.restore\(kept\);/);
+  assert.match(draw, /const panel = wireEditPanel\(t\);\s*if \(kept\) \{[^}]*const keptBox = main\.querySelector\('form\.reply textarea, form\.add-comment textarea'\);\s*if \(keptBox\) keptBox\.value = kept\.reply;\s*panel\?\.restore\(kept\);/);
   assert.match(wire, /restore\(kept\) \{[\s\S]*area\.value = kept\.description;\s*openEditor\(\);/, 'the description edit opens again with its text');
 });
 
@@ -3646,7 +3723,7 @@ test('the Reporting page draws only the server\'s figures: ranges and stages fro
 
 test('every button on a ticket\'s page is green with a darker border and rounded corners; other pages keep theirs', () => {
   const css = readFileSync(WEB('app.css'), 'utf8');
-  const rule = /^\.quick button, details\.details form\.copy button, details\.edit button:not\(\.remove-tag\) \{([^}]*)\}/m.exec(css);
+  const rule = /^\.quick button, \.details form\.copy button, details\.edit button:not\(\.remove-tag\) \{([^}]*)\}/m.exec(css);
   assert.ok(rule, 'one rule covers Copy, Merge, Close, Post reply, Delete, the Change panel and the Details Copy');
   for (const part of ['background: #00AA00;', 'border: 1px solid #006600;', 'border-radius: 10px;', 'color: #fff;']) assert.ok(rule[1].includes(part), part);
   // Delete no longer overrides the green with its old red outline.
@@ -4895,7 +4972,7 @@ test.describe('Files Made: the files a ticket made, from its newest merge note',
 
   test('the ticket page draws the box between the Quick Action section and the Details fold', () => {
     const app = readFileSync(WEB('app.mjs'), 'utf8');
-    assert.match(app, /<\/section>\s*\$\{renderFilesMade\(t\)\}\s*<details class="details">/);
+    assert.match(app, /<\/section>\s*\$\{renderFilesMade\(t\)\}\s*\$\{inline \? '' : `<details class="details">/);
     assert.match(readFileSync(WEB('app.css'), 'utf8'), /\.files-made \{[^}]*background:[^}]*border:/);
   });
 });
