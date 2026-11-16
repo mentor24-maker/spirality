@@ -1379,6 +1379,39 @@ test('a ticket\'s kind, who started it and how it ended: filed, changed, read ba
   } finally { await f.cleanup(); }
 });
 
+test('a filing that does not say who started it is read from who filed it; a clone keeps both (SP-346)', async () => {
+  const f = await fixture();
+  try {
+    const fileAs = async (token, body) => {
+      const out = await f.call('POST', '/projects/alpha/tickets', { token, body: { name: 'x', status: 'requested', ...body } });
+      assert.equal(out.status, 201, out.text);
+      const read = await f.call('GET', `/tickets/${out.body.id}`);
+      return [read.body.kind, read.body.startedBy];
+    };
+    // A loop's sign-in: an agent session; its kind is never guessed.
+    assert.deepEqual(await fileAs(f.machineToken, {}), [null, 'agent']);
+    assert.deepEqual(await fileAs(f.machineToken, { kind: 'operational' }), ['operational', 'agent']);
+    // The project's operator, signed in as a person.
+    assert.deepEqual(await fileAs(f.humanToken, {}), [null, 'operator']);
+    // Any other person (a teammate filing from an outside site): a client's bug report.
+    const other = f.store.createActor({ kind: 'human', name: 'Tess' });
+    f.store.addMember({ project: 'alpha', actor: other.id, by: f.human.id });
+    const otherToken = f.store.issueToken(other.id);
+    assert.deepEqual(await fileAs(otherToken, {}), ['fix', 'client']);
+    assert.deepEqual(await fileAs(otherToken, { kind: 'feature' }), ['feature', 'client']);
+    // The caller's own word, even "none", is never replaced.
+    assert.deepEqual(await fileAs(f.machineToken, { startedBy: 'operator' }), [null, 'operator']);
+    assert.deepEqual(await fileAs(otherToken, { startedBy: null, kind: null }), [null, null]);
+
+    f.store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE', operator: f.human.id });
+    const from = f.store.fileTicket({ project: 'alpha', actor: f.machine.id, name: 'Copy me', status: 'queued', kind: 'documentation', startedBy: 'client' });
+    const copied = await f.call('POST', `/tickets/${from.id}/clone`, { token: f.humanToken, body: { project: 'beta' } });
+    assert.ok(copied.status < 300, copied.text);
+    const copy = f.store.listTickets('beta')[0];
+    assert.deepEqual([copy.kind, copy.startedBy], ['documentation', 'client']);
+  } finally { await f.cleanup(); }
+});
+
 /**
  * A server on the fixture's store with `options` (accountMail, now), the
  * operator holding an email and a password, and a raw caller that sends

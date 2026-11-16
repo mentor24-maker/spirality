@@ -1895,8 +1895,8 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
     },
 
     /**
-     * Copy a ticket into another project: its name, description, priority
-     * and tags, as a new ticket in `Requested` there, unassigned, filed by
+     * Copy a ticket into another project: its name, description, priority,
+     * tags, kind and who started it, as a new ticket in `Requested` there, unassigned, filed by
      * `actor`, with one comment on the copy naming the ticket it came from.
      * The original is only read: no field, version, event or comment of it
      * changes. Copying into the ticket's own project is refused.
@@ -1912,6 +1912,7 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
         const copy = insertTicket(checkNewTicket({
           project, actor, name: from.name, description: from.description,
           status: 'requested', priority: from.priority, tags: from.tags,
+          kind: from.kind, startedBy: from.startedBy,
         }), at, null);
         const source = this.getProject(from.project);
         insertComment({ ticket: copy.id, author: actor, body: `Copied from ${from.id} in ${source.name}.`, parent: null }, at);
