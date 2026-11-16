@@ -695,7 +695,7 @@ test('the Add Task box on the Tasks page files into the project shown, in Reques
   assert.match(wire, /localStorage\.removeItem\(DRAFT_KEY\);[\s\S]*await drawAgain\(\(\) => drawProject\(into, view, \{ filed: ticket\.id, unchecked, uploaded, notUploaded \}\)\);/);
   const draw = app.slice(app.indexOf('async function drawProject'), app.indexOf('async function copyText'));
   assert.match(draw, /<details class="add-task">\s*<summary>Add Task<label class="suggest-switch">[\s\S]*?<\/label><\/summary>\s*<form class="request"\$\{suggesting \? ' hidden' : ''\}>/, 'drawn closed, on the board and the list alike');
-  assert.match(draw, /<button type="submit" class="submit-task">Suggest Titles<\/button>/, 'the first submit asks for titles (SP-248)');
+  assert.match(draw, /<button type="submit" class="btn btn-primary submit-task">Suggest Titles<\/button>/, 'the first submit asks for titles (SP-248)');
   assert.match(wire, /button\.textContent = asking \? 'Suggest Titles' : 'Submit Task';/, 'once a title is up for picking (or his own is typed), the button says Submit Task, in his words');
   assert.doesNotMatch(app, /File request/i, 'the old button words are gone');
   assert.match(app, /Filed <a href="\/t\/\$\{encodeURIComponent\(filed\)\}">\$\{escapeHtml\(filed\)\}<\/a>/);
@@ -803,8 +803,8 @@ test('the Add Task box checks the project before filing: asks "Did you mean ...?
   // The question box: the words of the ticket, File in X, Keep in the project shown, and a close.
   assert.match(draw, /<dialog class="project-check"[^>]*>\s*<form method="dialog">/);
   assert.match(draw, /Did you mean for that to be associated with project <strong class="project-name"><\/strong>\?/);
-  assert.match(draw, /<button type="submit" value="move">File in<\/button>/);
-  assert.match(draw, /<button type="submit" value="keep">Keep in \$\{escapeHtml\(board\.projectName\)\}<\/button>/);
+  assert.match(draw, /<button type="submit" class="btn btn-primary" value="move">File in<\/button>/);
+  assert.match(draw, /<button type="submit" class="btn" value="keep">Keep in \$\{escapeHtml\(board\.projectName\)\}<\/button>/);
   assert.match(draw, /<button type="submit" class="close" value="" aria-label="Close: file nothing">/);
   const ask = app.slice(app.indexOf('function askProject'), app.indexOf('/**', app.indexOf('function askProject')));
   assert.match(ask, /\.project-name'\)\.textContent = suggest\.name;/, 'the name goes in as text, never markup');
@@ -827,7 +827,7 @@ test('the Add Task box has a Suggest a Title / Write My Own Title toggle: Sugges
   assert.match(wire, /const typing = mode === 'own' \|\| stage === 'type';\s*ownTitle\.hidden = !typing;\s*title\.required = typing;\s*description\.required = mode === 'suggest';/);
   // The choice list and Suggest Again, both hidden until titles come back.
   assert.match(draw, /<fieldset class="title-choices" hidden>\s*<legend>Pick a Title<\/legend>\s*<div class="choices"><\/div>\s*<\/fieldset>/);
-  assert.match(draw, /<button type="button" class="suggest-again" hidden>Suggest Again<\/button>/);
+  assert.match(draw, /<button type="button" class="btn suggest-again" hidden>Suggest Again<\/button>/);
   assert.match(wire, /choices\.hidden = stage !== 'pick';/);
   assert.match(wire, /const asking = stage === 'ask' && mode === 'suggest';\s*again\.hidden = asking;\s*again\.textContent = stage === 'ask' \? 'Suggest Titles' : 'Suggest Again';/, 'Write My Own Title offers Suggest Titles beside Submit Task');
   // Opening the box puts the cursor in the first field the mode shows.
@@ -1137,8 +1137,8 @@ test('the Settings page\'s Spirality Release group: the release, when and by who
     assert.match(html, /Runs <strong>release-2<\/strong>, named [^<]+M[SD]T by Dane\./);
     assert.match(html, /Before that: <strong>release-1<\/strong>, named [^<]+ by Loop \(build\)\./);
     assert.match(html, new RegExp(`The newest release is <strong>${DEMO_NEWEST_RELEASE}</strong>\\.`));
-    assert.match(html, /<button type="button" data-release-action="newest">Move to Newest<\/button>/);
-    assert.match(html, /<button type="button" data-release-action="back">Roll Back to release-1<\/button>/);
+    assert.match(html, /<button type="button" class="btn" data-release-action="newest">Move to Newest<\/button>/);
+    assert.match(html, /<button type="button" class="btn" data-release-action="back">Roll Back to release-1<\/button>/);
     assert.match(html, /Named, but the lanes do not run from it yet \(SP-276\)\./);
 
     const alpha = projects.find((p) => p.project.slug === 'alpha');
@@ -1201,7 +1201,7 @@ test('Pipeline Controls on the Settings page: each control with its value, "defa
     // The pause switches are wired in (SP-237): no not-yet line, and no drain line while nothing is paused.
     assert.doesNotMatch(html, /\(SP-237\)/);
     assert.doesNotMatch(html, /Draining|Paused: nothing in flight/);
-    assert.match(html, /<tr data-control="wake\.loop-build" data-kind="seconds">[\s\S]*?loop-build wake time<\/label> <span class="default">default<\/span>[\s\S]*?type="number" min="60" max="86400" step="1" value="1800"[\s\S]*?1,800 seconds \(Every 30 minutes\)[\s\S]*?<button type="button">Save<\/button>/);
+    assert.match(html, /<tr data-control="wake\.loop-build" data-kind="seconds">[\s\S]*?loop-build wake time<\/label> <span class="default">default<\/span>[\s\S]*?type="number" min="60" max="86400" step="1" value="1800"[\s\S]*?1,800 seconds \(Every 30 minutes\)[\s\S]*?<button type="button" class="btn btn-save btn-sm">Save<\/button>/);
     assert.match(html, /<option value="default" selected>Claude&#39;s default<\/option>/);
     assert.match(html, /<option value="off" selected>Off<\/option><option value="on">On<\/option>/);
     assert.match(html, /<td>Dane<\/td><td>work-in-progress cap<\/td><td>3<\/td><td>5<\/td>/);
@@ -1679,7 +1679,7 @@ test('while a loop has the ticket there is no reply box, and an Add Comment box 
     assert.match(box, /^<form class="add-comment">/, status);
     assert.match(box, /<label for="add-comment">Add a note for the loop<\/label>/);
     assert.match(box, /<textarea id="add-comment" required><\/textarea>/);
-    assert.match(box, /<button type="submit">Add Comment<\/button><span class="note"><\/span>/);
+    assert.match(box, /<button type="submit" class="btn">Add Comment<\/button><span class="note"><\/span>/);
   }
   for (const status of ['needs your input', 'ready to launch', undefined, 'something new']) {
     const t = { status, comments: [] };
@@ -1742,8 +1742,8 @@ test('the ticket page puts the details in the right column, open, while a loop h
 test('a held bug report shows Approve and Reject and a quiet line in place of the reply box; anything else is unchanged', () => {
   const held = { name: 'Bug report: x', tags: ['bug-report'], status: 'needs your input', comments: [], description: bugDescription() };
   const html = renderBugReportActions(held);
-  assert.match(html, /<form class="approve-action">\s*<button type="submit">Approve<\/button><span class="note"><\/span>/);
-  assert.match(html, /<form class="reject-action">\s*<button type="submit">Reject<\/button><span class="note"><\/span>/);
+  assert.match(html, /<form class="approve-action">\s*<button type="submit" class="btn btn-primary">Approve<\/button><span class="note"><\/span>/);
+  assert.match(html, /<form class="reject-action">\s*<button type="submit" class="btn btn-danger">Reject<\/button><span class="note"><\/span>/);
   assert.ok(html.indexOf('approve-action') < html.indexOf('reject-action'), 'Approve first');
   assert.match(html, /Moves it to Requested; the intake lane writes it up/);
   assert.match(html, /Moves it to Live with the wont-do tag and a note that nothing shipped/);
@@ -1763,9 +1763,6 @@ test('a held bug report shows Approve and Reject and a quiet line in place of th
     assert.ok(!renderStatusLine(other).includes(escapeHtml(HELD_REPORT_STATUS_LINE)));
   }
   assert.match(renderGoAction({ ...carded, goPhrase: 'go' }), /go-action/, 'Go is back once intake has asked');
-  // Title Case labels (docs/UI_DOCTRINE.md), and the look Merge, Close and Go share.
-  const css = readFileSync(WEB('app.css'), 'utf8');
-  assert.match(css, /\.quick form\.approve-action button, \.quick form\.reject-action button \{ font-weight: 700;/);
 });
 
 test('Approve and Reject ask first, naming the ticket, and changeProblem says what did not stick', () => {
@@ -2017,7 +2014,7 @@ test('a card whose ask has command blocks shows each one on the right with its o
   for (const body of Object.values(commandCards(needed))) {
     const html = renderCommands({ comments: [{ body }, { body: 'go' }] });
     assert.equal(codes(html).length, 2);
-    assert.equal(html.match(/<button type="button" class="copy-command">Copy<\/button>/g).length, 2);
+    assert.equal(html.match(/<button type="button" class="btn copy-command">Copy<\/button>/g).length, 2);
     assert.match(html, /^<div class="commands">(<div class="command"><pre><code>[^<]*<\/code><\/pre><button[^>]*>Copy<\/button><\/div>){2}<\/div>$/);
   }
   // Only the newest card counts.
@@ -2118,7 +2115,7 @@ test('SP-23\'s card: the command in its WHAT\'S GOING ON gets a Copy box, and st
   assert.deepEqual(cardCommands(SP23_CARD), ['npm run onboard -- --product wavecenter']);
   const html = renderCommands({ comments: [{ body: SP23_CARD }] });
   assert.deepEqual(codes(html), ['npm run onboard -- --product wavecenter'], 'Copy copies exactly that text');
-  assert.equal(html.match(/class="copy-command">Copy</g).length, 1);
+  assert.equal(html.match(/class="btn copy-command">Copy</g).length, 1);
   const quick = renderQuickAction({ name: 'SP-23', description: '', status: 'needs your input', comments: [{ body: SP23_CARD }] });
   assert.match(quick, /<p class="summary">[^]*which runs <code>npm run onboard -- --product wavecenter<\/code> and answers/);
 });
@@ -2156,7 +2153,7 @@ test('inline code that is not a command gets no Copy box; a command fenced and i
   const needed = 'See `docs/TRACKER_MVP.md` and the `Waits on:` line, then run `npm run verify`:\n```\nnpm run verify\n```\nthen `git status`.';
   for (const body of Object.values(commandCards(needed))) {
     assert.deepEqual(cardCommands(body), ['npm run verify', 'git status'], 'the fenced one first, each once');
-    assert.equal(renderCommands({ comments: [{ body }] }).match(/class="copy-command"/g).length, 2);
+    assert.equal(renderCommands({ comments: [{ body }] }).match(/class="btn copy-command"/g).length, 2);
   }
   // A context command and the same command in the ask: one box.
   const sixty = Array.from({ length: 58 }, (_, i) => `w${i}`).join(' ');
@@ -2280,7 +2277,7 @@ test('/projects/new is the page to a browser, and its logo can be drawn: the loc
 test('the New project button and form are a person\'s only; a refused save keeps what was typed and says why; success opens the details page', () => {
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   // SP-127: the Projects page's button is Set up a project; the bare form is a link on its page.
-  assert.match(app, /<div class="title-row"><h1>Projects<\/h1>\s*\$\{me\?\.kind === 'human' \? '<div class="toolbar"><a class="button" href="\/setup\/new">Set Up a Project<\/a><\/div>' : ''\}<\/div>/);
+  assert.match(app, /<div class="title-row"><h1>Projects<\/h1>\s*\$\{me\?\.kind === 'human' \? '<div class="toolbar"><a class="btn btn-primary" href="\/setup\/new">Set Up a Project<\/a><\/div>' : ''\}<\/div>/);
   assert.match(app, /<a href="\/projects\/new">New project<\/a>/);
   const form = app.slice(app.indexOf('async function drawCreateProject'), app.indexOf('/**', app.indexOf('async function drawCreateProject')));
   assert.match(form, /if \(me\?\.kind !== 'human'\)[\s\S]{0,200}Only a person signed in to the tracker can add a project\./);
@@ -2419,7 +2416,7 @@ const PR = 'https://github.com/o/r/pull/41';
 test('only a Ready to launch ticket gets the Merge button, and only when the server named a merge phrase', () => {
   for (const name of loopStatuses.STAGE_ORDER) {
     const html = renderMergeAction({ status: loopStatuses.statusOf(name), mergePhrase: 'merge', pullRequest: PR });
-    if (loopStatuses.statusOf(name) === loopStatuses.READY_TO_LAUNCH) assert.match(html, /<form class="merge-action">\s*<button type="submit">Merge<\/button>/, name);
+    if (loopStatuses.statusOf(name) === loopStatuses.READY_TO_LAUNCH) assert.match(html, /<form class="merge-action">\s*<button type="submit" class="btn btn-primary">Merge<\/button>/, name);
     else assert.equal(html, '', name);
   }
   assert.equal(renderMergeAction({ status: 'ready to launch', mergePhrase: null, pullRequest: PR }), '', 'no phrase, no button');
@@ -2459,7 +2456,7 @@ test('Close shows on his two statuses when the newest card\'s move is Close, and
   for (const name of loopStatuses.STAGE_ORDER) {
     const status = loopStatuses.statusOf(name);
     const html = renderCloseAction({ status, closePhrase: 'close', comments });
-    if (loopStatuses.OPERATOR_HELD_STATUSES.includes(status)) assert.match(html, /<form class="close-action">\s*<button type="submit">Close<\/button>/, name);
+    if (loopStatuses.OPERATOR_HELD_STATUSES.includes(status)) assert.match(html, /<form class="close-action">\s*<button type="submit" class="btn">Close<\/button>/, name);
     else assert.equal(html, '', name);
   }
   assert.equal(renderCloseAction({ status: 'ready to launch', closePhrase: null, comments }), '', 'no word, no button');
@@ -2524,7 +2521,7 @@ test('Go shows only on Needs your input, under an intake card, with a go word fr
   for (const name of loopStatuses.STAGE_ORDER) {
     const status = loopStatuses.statusOf(name);
     const html = renderGoAction({ status, goPhrase: 'go', comments });
-    if (status === loopStatuses.NEEDS_YOUR_INPUT) assert.match(html, /<form class="go-action">\s*<button type="submit">Go<\/button>/, name);
+    if (status === loopStatuses.NEEDS_YOUR_INPUT) assert.match(html, /<form class="go-action">\s*<button type="submit" class="btn btn-primary">Go<\/button>/, name);
     else assert.equal(html, '', name);
   }
   const nyi = { status: 'needs your input', goPhrase: 'go' };
@@ -2564,18 +2561,17 @@ test('the Go button posts the substrate\'s one go word, handed to the page by th
   assert.match(app, /\$\{renderCloseAction\(t\)\}\s*\$\{renderGoAction\(t\)\}\s*(?:\$\{renderBugReportActions\(t\)\}\s*)?\$\{renderReplyForm\(t, me\?\.name\)\}/, 'Go sits between Close and the reply box');
 });
 
-test('no go word is written into the page\'s code, and the Go button has the Merge look with 10px corners', () => {
+test('no go word is written into the page\'s code, and the Go button is the same main-action kind as Merge (UI_DOCTRINE 3, SP-321)', () => {
   const code = (name) => readFileSync(WEB(name), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
   for (const name of ['app.mjs', 'render.mjs', 'index.html']) {
     assert.doesNotMatch(code(name), new RegExp(`['"\`]${busRelayPlan.GO_PHRASE}['"\`]`, 'i'), name);
   }
-  const rules = code('app.css').split('}').map((r) => r.split('{')).filter((r) => r.length === 2)
-    .map(([sel, body]) => ({ sel: sel.split(',').map((x) => x.trim()), body }));
-  // One rule draws Merge's weight and padding, and Go is in it; the green comes from `.quick button`, which both share.
-  const shared = rules.filter((r) => r.sel.includes('.quick form.merge-action button'));
-  assert.ok(shared.length && shared.every((r) => r.sel.includes('.quick form.go-action button')), 'Go has every Merge button rule');
-  assert.ok(rules.some((r) => r.sel.includes('.quick button') && /background: var\(--ticket-btn-bg\)/.test(r.body)), 'the Merge colour');
-  assert.ok(rules.some((r) => r.sel.length === 1 && r.sel[0] === '.quick form.go-action button' && /border-radius: var\(--radius-btn\)/.test(r.body)), '10px corners of its own');
+  // Both are the screen's main action, blue; neither sets its own size or corners (SP-86's 10px are every button's now).
+  const render = readFileSync(WEB('render.mjs'), 'utf8');
+  assert.match(render, /<form class="merge-action">\s*<button type="submit" class="btn btn-primary">Merge<\/button>/);
+  assert.match(render, /<form class="go-action">\s*<button type="submit" class="btn btn-primary">Go<\/button>/);
+  assert.doesNotMatch(code('app.css'), /form\.(?:merge|go)-action button/);
+  assert.match(code('app.css'), /^\.btn \{[^}]*border-radius: var\(--radius-btn\);/m);
 });
 
 test('the Merge button asks once, naming the PR number and the ticket', () => {
@@ -2966,7 +2962,7 @@ test('Delete is offered only for Requested and Queued, in either spelling of the
     const unstarted = name === 'Requested' || name === 'Queued';
     for (const status of [name, loopStatuses.statusOf(name)]) {
       assert.equal(canDelete(status), unstarted, status);
-      if (unstarted) assert.match(renderDeleteAction({ status }), /<form class="delete-action">\s*<button type="submit">Delete<\/button>/, status);
+      if (unstarted) assert.match(renderDeleteAction({ status }), /<form class="delete-action">\s*<button type="submit" class="btn btn-danger">Delete<\/button>/, status);
       else assert.equal(renderDeleteAction({ status }), '', status);
     }
   }
@@ -3750,16 +3746,15 @@ test('the Reporting page draws only the server\'s figures: ranges and stages fro
   assert.match(app, /if \(reporting\) \{\s*await drawReporting\(\);/);
 });
 
-test('every button on a ticket\'s page is green with a darker border and rounded corners; other pages keep theirs', () => {
+test('no page paints its buttons its own way: the ticket page\'s green (SP-76), Settings\' dark blue (SP-289), the header\'s and the black link are gone (SP-321)', () => {
   const css = readFileSync(WEB('app.css'), 'utf8');
-  const rule = /^\.quick button, \.details form\.copy button, details\.edit button:not\(\.remove-tag\) \{([^}]*)\}/m.exec(css);
-  assert.ok(rule, 'one rule covers Copy, Merge, Close, Post reply, Delete, the Change panel and the Details Copy');
-  for (const part of ['background: var(--ticket-btn-bg);', 'border: 1px solid var(--ticket-btn-border);', 'border-radius: var(--radius-btn);', 'color: var(--btn-flat-ink);']) assert.ok(rule[1].includes(part), part);
-  // Delete no longer overrides the green with its old red outline.
-  assert.doesNotMatch(css, /\.quick form\.delete-action button \{/);
-  // Scoped to the ticket page: the plain button rule every other page uses is untouched.
+  assert.doesNotMatch(css, /\.quick button|details\.edit button:not|div\.settings-tab button|^header button|^a\.button/m);
+  assert.doesNotMatch(css, /--ticket-btn-/, 'the ticket page\'s green tokens are gone with its rule');
+  // Delete is red again, as a removal (UI_DOCTRINE 3), and Reject with it.
+  const render = readFileSync(WEB('render.mjs'), 'utf8');
+  assert.match(render, /<form class="delete-action">\s*<button type="submit" class="btn btn-danger">Delete<\/button>/);
+  // The plain button rule only sets the font and a padding for the listed exceptions; .btn overrides it.
   assert.match(css, /^button \{ font: inherit; padding: 0\.4rem 1rem; \}$/m);
-  assert.doesNotMatch(css, /^button \{[^}]*#00AA00/m);
 });
 
 // ── Users ────────────────────────────────────────────────────────────────────
@@ -3813,7 +3808,7 @@ test('the Docs table adds, renames and removes task files, each read back, a rem
   const draw = app.slice(app.indexOf('async function drawDocs'), app.indexOf('/** Underline the header link'));
   // Add File: pick one of the project's tasks and a file; the same upload the New Task form uses.
   assert.match(draw, /\{ tickets \}\] = await Promise\.all\(\[[\s\S]*?api\('GET', `\/projects\/\$\{encodeURIComponent\(project\.slug\)\}\/tickets`\),\s*\]\);/);
-  assert.match(draw, /<button type="submit">Add File<\/button>/);
+  assert.match(draw, /<button type="submit" class="btn btn-primary">Add File<\/button>/);
   assert.match(draw, /made = await uploadFile\(ticket, file\)/);
   assert.match(draw, /file\.size > MAX_FILE/, 'too large is said before sending');
   // Rename: the file's name only, an empty one refused on the page before any call.
@@ -3849,7 +3844,7 @@ test('the Docs page\'s Context Documents list the project\'s own files, each a d
     { id: 8, project: 'al pha', name: 'notes.txt', type: 'text/plain', size: 2, addedByName: null, createdAt: '2026-11-09T12:00:00Z' },
   ] }, words);
   assert.match(html, /<h2>Context Documents<\/h2>/);
-  assert.match(html, /<button type="button" class="upload-doc">Upload Document<\/button><input type="file" class="doc-file" hidden>/, 'one file at a time');
+  assert.match(html, /<button type="button" class="btn btn-primary upload-doc">Upload Document<\/button><input type="file" class="doc-file" hidden>/, 'one file at a time');
   for (const heading of ['File', 'Type', 'Size', 'Added By', 'Added On']) assert.match(html, new RegExp(`<th>${heading}</th>`), heading);
   assert.match(html, /<a href="\/projects\/al%20pha\/docs\/7" download="brief &quot;&lt;b&gt;&quot;\.pdf">Download<\/a>/, 'always saved, through the project\'s own address');
   assert.match(html, /data-remove-doc="7" data-name="brief &quot;&lt;b&gt;&quot;\.pdf" aria-label="Remove brief &quot;&lt;b&gt;&quot;\.pdf">Remove<\/button>/);
@@ -4038,7 +4033,7 @@ test('the Docs page carries the Commands section; /docs/commands/<name> opens on
   assert.match(draw, /<div class="docs-columns">\$\{commandsSection\(\)\}<div class="docs-main">\$\{rest\}<\/div><\/div>/, 'the pod on the left, the rest on the right');
   assert.equal((draw.match(/\$\{docsColumns\(`/g) ?? []).length, 2, 'with projects and without, the page is drawn in the two columns');
   assert.doesNotMatch(draw, /\$\{commandsSection\(\)\}\s*\$\{documentation\}/, 'the pod is no longer a section between the others');
-  assert.match(draw, /<dialog class="command-details" aria-labelledby="command-details-title">[\s\S]*<button type="submit">Close<\/button>[\s\S]*<\/dialog>/);
+  assert.match(draw, /<dialog class="command-details" aria-labelledby="command-details-title">[\s\S]*<button type="submit" class="btn">Close<\/button>[\s\S]*<\/dialog>/);
   assert.match(draw, /renderCommandDetails\(command\);\s*dialog\.showModal\(\);/);
   assert.match(draw, /e\.preventDefault\(\);\s*e\.stopPropagation\(\);/, 'a click opens the pop-up, not the steps page');
   const css = readFileSync(WEB('app.css'), 'utf8');
@@ -4084,7 +4079,7 @@ test('the Users page escapes every name and email, offers the form and Cancel to
   assert.ok(draw.length > 100);
   for (const field of ['p.name', 'p.email', 'i.email', 'i.invitedBy.name', 'x.id', 'x.name']) assert.match(draw, new RegExp(`escapeHtml\\(${field.replace('.', '\\.')}\\)`), field);
   assert.match(draw, /\$\{person \? `<form class="invite">/);
-  assert.match(draw, /\$\{person \? `<button type="button" data-cancel=/);
+  assert.match(draw, /\$\{person \? `<button type="button" class="btn btn-sm" data-cancel=/);
   // "Send the link to": only when the tracker knows an outside site, the tracker page first and chosen by default.
   assert.match(draw, /\$\{sites\.length \? `<label for="invite-site">Send the link to<\/label>/);
   assert.match(draw, /<select id="invite-site"><option value="">the tracker page<\/option>\$\{sites\.map/);
@@ -4123,8 +4118,8 @@ test('a project\'s details page lists its members, gives an admin Add Member and
   for (const field of ['m.name', 'm.addedBy.name', 'x.name', 'x.id', 'm.id', 't']) assert.match(draw, new RegExp(`escapeHtml\\(${field.replace('.', '\\.')}\\)`), field);
   // Only an admin signed in as a person gets the controls; the owner and operator get a tag, no Remove.
   assert.match(draw, /const editing = me\?\.kind === 'human' && p\.canEditMembers === true;/);
-  assert.match(draw, /fixedAs\(m\)\.length \? '' : `<button type="button" data-remove=/);
-  assert.match(draw, /<button type="submit">Add Member<\/button>/);
+  assert.match(draw, /fixedAs\(m\)\.length \? '' : `<button type="button" class="btn btn-danger btn-sm" data-remove=/);
+  assert.match(draw, /<button type="submit" class="btn btn-primary">Add Member<\/button>/);
   assert.match(draw, />Remove<\/button>/);
   // The picker offers only people not on the project yet.
   assert.match(draw, /const addable = people\.filter\(\(x\) => !members\.some\(\(m\) => m\.id === x\.id\)\);/);
@@ -4165,7 +4160,7 @@ test('the Users page gives an admin Remove on each of a user\'s projects (never 
   assert.match(draw, /const editing = person && canEditMembers === true;/);
   // The owner and operator get a tag and no Remove.
   assert.match(draw, /pr\?\.owner\?\.id === p\.id \? 'Owner' : null, pr\?\.operator\?\.id === p\.id \? 'Operator' : null/);
-  assert.match(draw, /\$\{fixedAs\(p, x\)\.length\s*\? ''\s*: `<button type="button" class="remove-member"/);
+  assert.match(draw, /\$\{fixedAs\(p, x\)\.length\s*\? ''\s*: `<button type="button" class="btn btn-danger btn-sm remove-member"/);
   // The picker offers only the projects they are not on yet.
   assert.match(draw, /const addable = all\.filter\(\(x\) => !mine\.some\(\(m\) => m\.slug === x\.slug\)\);/);
   assert.match(draw, /<option value="">Add to Project…<\/option>/);
@@ -4184,7 +4179,7 @@ test('the Projects page has a Members column; an admin gets Remove on each membe
   assert.match(draw, /const editing = people && canEditMembers === true;/);
   assert.match(draw, /const everyone = editing \? \(await api\('GET', '\/people'\)\)\.people \?\? \[\] : \[\];/);
   assert.match(draw, /m\.id === p\.owner\?\.id \? 'Owner' : null, m\.id === p\.operator\?\.id \? 'Operator' : null/);
-  assert.match(draw, /\$\{editing && !fixedAs\(p, m\)\.length\s*\? `<button type="button" class="remove-member"/);
+  assert.match(draw, /\$\{editing && !fixedAs\(p, m\)\.length\s*\? `<button type="button" class="btn btn-danger btn-sm remove-member"/);
   assert.match(draw, /const addable = everyone\.filter\(\(x\) => !members\.some\(\(m\) => m\.id === x\.id\)\);/);
   assert.match(draw, /<option value="">Add Member…<\/option>/);
   for (const field of ['m.name', 'm.id', 'p.slug', 'p.name', 'x.id', 'x.name', 't']) assert.match(draw, new RegExp(`escapeHtml\\(${field.replace('.', '\\.')}\\)`), field);
@@ -4385,7 +4380,7 @@ function setupHome() {
 }
 
 /** The `<code>` texts in a box, and how many Copy buttons sit beside them. */
-const copies = (html) => ({ codes: codes(html), buttons: (html.match(/<button type="button" class="copy-command">Copy<\/button>/g) ?? []).length });
+const copies = (html) => ({ codes: codes(html), buttons: (html.match(/<button type="button" class="btn copy-command">Copy<\/button>/g) ?? []).length });
 
 test('the setup page\'s next-step box, for a state file of each kind: every command with a Copy button whose text is exactly it', () => {
   const h = setupHome();
@@ -4563,7 +4558,7 @@ test('the page makes a slug by the wizard\'s rule, and refuses the two that are 
 test('the Projects page has Set up a project, lists the projects mid-setup, and keeps New project a link away', () => {
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   const projects = /async function drawProjects\(done = '', problem = ''\) \{[\s\S]*?\n\}/.exec(app)[0];
-  assert.match(projects, /<a class="button" href="\/setup\/new">Set Up a Project<\/a>/);
+  assert.match(projects, /<a class="btn btn-primary" href="\/setup\/new">Set Up a Project<\/a>/);
   assert.doesNotMatch(projects, /href="\/projects\/new">New project/);
   assert.match(projects, /api\('GET', '\/setup'\)/);
   assert.match(projects, /\$\{renderSetupList\(setups\)\}/);
@@ -4826,7 +4821,7 @@ test('the pod is a button that opens the Pipeline Status dialog; Escape or Close
   // A <dialog> with a form of method="dialog": Escape and both close buttons shut it natively.
   assert.match(draw, /<dialog class="pipeline-status" aria-labelledby="pipeline-status-title">\s*<form method="dialog">/);
   assert.match(draw, /<h2 id="pipeline-status-title">Pipeline Status<\/h2>/);
-  assert.match(draw, /<button type="submit">Close<\/button>/);
+  assert.match(draw, /<button type="submit" class="btn">Close<\/button>/);
   assert.match(draw, /wirePipeline\(\);/);
   const wire = app.slice(app.indexOf('function wirePipeline'), app.indexOf('function wirePipeline') + 800);
   assert.match(wire, /pod\.addEventListener\('click'/);
@@ -5608,7 +5603,7 @@ test('the Topics page lists the picked project\'s topics newest first, every nam
   assert.ok(html.indexOf('data-topic="2"') < html.indexOf('data-topic="1"'), 'in the order the server lists them (newest first)');
   assert.match(html, /<option value="alpha" selected>Alpha &lt;One&gt;<\/option>/, 'the picked project is chosen in the picker');
   assert.match(html, /<summary><span class="fold" aria-hidden="true"><\/span>Add Topic<\/summary>/);
-  assert.match(html, /<form class="create-topic">[\s\S]*<label for="topic-name">Name<\/label>[\s\S]*<label for="topic-description">Description<\/label>[\s\S]*<button type="submit">Create Topic<\/button>/);
+  assert.match(html, /<form class="create-topic">[\s\S]*<label for="topic-name">Name<\/label>[\s\S]*<label for="topic-description">Description<\/label>[\s\S]*<button type="submit" class="btn btn-primary">Create Topic<\/button>/);
   assert.doesNotMatch(html, /<b>|<One>|<D>/, 'nothing unescaped');
   assert.doesNotMatch(html, /No topics yet/);
   const empty = renderTopics({ projects, project, topics: [] }, { timeOf: String });
@@ -5682,7 +5677,7 @@ test('the Topics page refuses a blank name before sending, and says a create wor
   assert.match(draw, /localStorage\.setItem\(PROJECT_KEY, chosen\.slug\)/, 'picking a project here selects it');
 });
 
-test('Settings is two tabs, each project a box that stays open across a Save, every button one look (SP-289)', () => {
+test('Settings is two tabs, each project a box that stays open across a Save, its buttons the four kinds (SP-289, SP-321)', () => {
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   const css = readFileSync(WEB('app.css'), 'utf8');
   // The menu: Pipeline Controls first (and the default), then Styles; the address names the tab.
@@ -5699,11 +5694,11 @@ test('Settings is two tabs, each project a box that stays open across a Save, ev
   assert.match(app, /const open = new Set\(\[\.\.\.box\.querySelectorAll\('details\.pipeline-controls\[open\]'\)\]\.map\(\(d\) => d\.dataset\.project\)\);/);
   assert.match(app, /renderPipelineControls\(v, notes\.get\(v\.project\.slug\) \?\? \{\}, open\.has\(v\.project\.slug\)\)/);
   assert.match(app, /d\.dataset\.project \? `project\|\$\{d\.dataset\.project\}`/);
-  // The look: reverse-colour header, 1px border, container corners; buttons in button corners, #000077, bold white; disabled dimmed (SP-320 put the corners on tokens).
+  // The look: reverse-colour header, 1px border, container corners (SP-320 put the corners on tokens). Its buttons take the four kinds (SP-321): no look of their own.
   assert.match(css, /details\.pipeline-controls \{[^}]*border: 1px solid var\(--navy\); border-radius: var\(--radius-container\); overflow: hidden;/);
   assert.match(css, /details\.pipeline-controls > summary \{[^}]*background: var\(--navy\); color: var\(--btn-flat-ink\); font-weight: 700;/);
-  assert.match(css, /div\.settings-tab button \{[^}]*border-radius: var\(--radius-btn\); background: var\(--navy\); color: var\(--btn-flat-ink\); font-weight: 700;/);
-  assert.match(css, /div\.settings-tab button:disabled \{ opacity: 0\.4;/);
+  assert.doesNotMatch(css, /div\.settings-tab button/);
+  assert.match(settings, /<button type="submit" class="btn btn-save">Save<\/button>/, 'Stage Colours\' Save is a Save');
 });
 
 // ── Suggest Next Tasks (SP-251) ──────────────────────────────────────────────
@@ -6029,8 +6024,8 @@ test('the Suggest Next Tasks box sits beside Add Task, in Title Case, and its bu
   assert.ok(draw.indexOf('</form>', draw.indexOf('<details class="add-task">')) < draw.indexOf('<div class="suggest-next"'), 'inside the Add Task box, after the form');
   assert.ok(draw.indexOf('<div class="suggest-next"') < draw.indexOf('</details>', draw.indexOf('<details class="add-task">')), 'inside the Add Task box');
   assert.doesNotMatch(draw, /<details class="suggest-next">|<summary>Suggest Next Tasks<\/summary>/, 'no separate Suggest Next Tasks bar');
-  assert.match(draw, /<button type="button" class="suggest-run">Suggest Next Tasks<\/button>/);
-  assert.match(draw, /<div class="row file-row" hidden><button type="button" class="file-order">File in This Order<\/button>/);
+  assert.match(draw, /<button type="button" class="btn btn-primary suggest-run">Suggest Next Tasks<\/button>/);
+  assert.match(draw, /<div class="row file-row" hidden><button type="button" class="btn btn-primary file-order">File in This Order<\/button>/);
   assert.match(draw, /wireSuggestNext\(board\.project, view\);/);
   assert.match(wire, /run\.textContent = latest\?\.state === 'failed' \? 'Try Again' : latest\?\.state === 'done' \? 'Suggest Again' : 'Suggest Next Tasks';/);
   // POST starts it; GET reads it, unrecorded so a finished run never redraws the whole page under him.
