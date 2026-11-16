@@ -457,12 +457,14 @@ browser tab's title, so a pinned tab tells him at a glance.
 ### The Add Task Box's Suggested Titles
 
 The Add Task box opens with a toggle (SP-248): **Suggest a Title** shows only
-the Description; **Write My Own Title** shows the Title too. Either way the
-first submit, "Suggest Titles", sends the words to
+the Description; **Write My Own Title** shows the Title too. In Suggest a
+Title the first submit, "Suggest Titles", sends the words to
 `POST /projects/:slug/tickets/suggest-titles` and shows the five titles to
-pick from, his own first ("Keep my title: ...") when he typed one. "Suggest
-Again" asks for a fresh five; editing the words puts the button back to
-Suggest Titles. The picked title goes through the project check below and is
+pick from. In Write My Own Title the button reads "Submit Task" from the
+start and files his title as typed; a "Suggest Titles" button beside it asks
+for the list anyway, his own first ("Keep my title: ..."). "Suggest Again"
+asks for a fresh five; editing the words puts the box back to its first
+stage. The picked title goes through the project check below and is
 filed exactly as shown. When the suggester fails, the box says why in one
 line and shows the Title field, so he can type one and file. The toggle is
 kept in the browser and outlives a filing.

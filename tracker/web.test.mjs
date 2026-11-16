@@ -692,7 +692,7 @@ test('the Add Task box on the Tasks page files into the project shown, in Reques
   const draw = app.slice(app.indexOf('async function drawProject'), app.indexOf('async function copyText'));
   assert.match(draw, /<details class="add-task">\s*<summary>Add Task<\/summary>\s*<form class="request">/, 'drawn closed, on the board and the list alike');
   assert.match(draw, /<button type="submit" class="submit-task">Suggest Titles<\/button>/, 'the first submit asks for titles (SP-248)');
-  assert.match(wire, /button\.textContent = stage === 'ask' \? 'Suggest Titles' : 'Submit Task';/, 'once a title is up for picking, the button says Submit Task, in his words');
+  assert.match(wire, /button\.textContent = asking \? 'Suggest Titles' : 'Submit Task';/, 'once a title is up for picking (or his own is typed), the button says Submit Task, in his words');
   assert.doesNotMatch(app, /File request/i, 'the old button words are gone');
   assert.match(app, /Filed <a href="\/t\/\$\{encodeURIComponent\(filed\)\}">\$\{escapeHtml\(filed\)\}<\/a>/);
   assert.match(draw, /wireAddTask\(board\.project, view, adding\);/);
@@ -825,7 +825,7 @@ test('the Add Task box has a Suggest a Title / Write My Own Title toggle: Sugges
   assert.match(draw, /<fieldset class="title-choices" hidden>\s*<legend>Pick a Title<\/legend>\s*<div class="choices"><\/div>\s*<\/fieldset>/);
   assert.match(draw, /<button type="button" class="suggest-again" hidden>Suggest Again<\/button>/);
   assert.match(wire, /choices\.hidden = stage !== 'pick';/);
-  assert.match(wire, /again\.hidden = stage === 'ask';/);
+  assert.match(wire, /const asking = stage === 'ask' && mode === 'suggest';\s*again\.hidden = asking;\s*again\.textContent = stage === 'ask' \? 'Suggest Titles' : 'Suggest Again';/, 'Write My Own Title offers Suggest Titles beside Submit Task');
   // Opening the box puts the cursor in the first field the mode shows.
   assert.match(wire, /const firstField = \(\) => \(mode === 'own' \? title : description\);/);
   assert.match(wire, /if \(box\.open\) firstField\(\)\.focus\(\);/);
@@ -849,10 +849,11 @@ test('the title toggle is kept in this browser beside the draft and outlives a f
   for (const kept of ['suggest', null, undefined, '', 'OWN', 'nonsense']) assert.equal(titleModeOf(kept), 'suggest', String(kept));
 });
 
-test('either mode, the first submit asks the title suggester and shows the titles to pick from, his own first in Write My Own Title; Suggest Again asks again', () => {
+test('Suggest a Title: the first submit asks the title suggester; Write My Own Title shows Submit Task at once and files his title, with Suggest Titles beside it (his own first)', () => {
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   const wire = app.slice(app.indexOf('function wireAddTask'), app.indexOf('/**', app.indexOf('function wireAddTask')));
-  assert.match(wire, /if \(stage === 'ask'\) return askTitles\(\);/, 'the first submit asks, it does not file');
+  assert.match(wire, /if \(stage === 'ask' && mode === 'suggest'\) return askTitles\(\);/, 'in Suggest a Title the first submit asks, it does not file');
+  assert.match(wire, /button\.textContent = asking \? 'Suggest Titles' : 'Submit Task';/, 'in Write My Own Title the button is Submit Task from the start');
   assert.match(wire, /api\('POST', `\/projects\/\$\{encodeURIComponent\(slug\)\}\/tickets\/suggest-titles`,\s*mode === 'own' \? \{ description: description\.value, title: title\.value \} : \{ description: description\.value \}\)/);
   assert.match(wire, /choiceList\.innerHTML = renderTitleChoices\(\{ own: mode === 'own' \? title\.value : null, titles \}\);\s*stage = 'pick';/);
   assert.match(wire, /again\.addEventListener\('click', \(\) => \{ keep\(\); askTitles\(\); \}\);/, 'Suggest Again asks for a fresh five; the words are not touched');
@@ -874,7 +875,7 @@ test('a failed suggestion says why in one line and shows the Title field, and th
   assert.doesNotMatch(failed, /title\.value =|description\.value =|removeItem/, 'nothing typed is lost');
   assert.match(app, /const SUGGEST_UNANSWERED = 'No titles could be suggested: the tracker did not answer\. Write your own title\.';/);
   // In the 'type' stage the Title field shows and is required, the button files.
-  assert.match(wire, /button\.textContent = stage === 'ask' \? 'Suggest Titles' : 'Submit Task';/);
+  assert.match(wire, /const asking = stage === 'ask' && mode === 'suggest';[\s\S]*button\.textContent = asking \? 'Suggest Titles' : 'Submit Task';/);
 });
 
 test('renderTitleChoices: his own title first as "Keep my title", then the suggestions, the first picked, every title escaped and filed as shown', () => {
