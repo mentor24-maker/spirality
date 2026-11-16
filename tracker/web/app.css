@@ -674,6 +674,14 @@ form.request .field-note { display: block; font-size: var(--text-sm); }
 .docs-main { min-width: 0; }
 .docs-main > h2:first-child { margin-top: 0; }
 @media (max-width: 800px) { .docs-columns { grid-template-columns: minmax(0, 1fr); } }
+/* The Loop Queue diagram at the top of the Docs page's right-hand column (SP-337): the picture at the column's width, an SVG of links laid exactly over it, one per status box. */
+figure.loop-diagram { position: relative; margin: 0 0 var(--space-5); }
+figure.loop-diagram img { display: block; width: 100%; height: auto; }
+svg.loop-diagram-links { position: absolute; inset: 0; width: 100%; height: 100%; }
+svg.loop-diagram-links a.diagram-box { cursor: pointer; outline: none; }
+svg.loop-diagram-links a.diagram-box rect { fill: transparent; stroke: transparent; stroke-width: 12; }
+svg.loop-diagram-links a.diagram-box:hover rect { stroke: var(--navy-soft); }
+svg.loop-diagram-links a.diagram-box:focus-visible rect { stroke: var(--focus-ring-color); stroke-width: 16; }
 /* The Quick Claude Commands pod (SP-179, SP-212): a search box and the slash commands, each a name and a few words. */
 section.commands-pod { background: var(--pod-bg); border: 1px solid var(--navy-soft); border-radius: var(--radius-container); padding: 1rem 1.25rem; box-sizing: border-box; }
 section.commands-pod h2 { margin-top: 0; }
