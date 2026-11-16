@@ -79,6 +79,10 @@
   --header-alert: #ff453a;
   --header-bus-bg: #ff9f0a;
   --link-ink: #0066cc;
+  --table-head-bg: #000000;
+  --table-head-ink: #ffffff;
+  --table-filter-bg: #b8e0ff;
+  --table-filter-ink: #0b3d7a;
   --ink-error: var(--btn-danger-flat);
   --danger-tint: #fbe9e9;
   --brand-blue: #2b9cf2;
@@ -152,9 +156,26 @@ nav.tabs a:hover { color: var(--ink-primary); }
 nav.tabs a[aria-current] { color: var(--tab-selected); font-weight: 700; border-bottom-color: var(--tab-selected); }
 .quiet { color: var(--ink-secondary); }
 .error { color: var(--ink-error); font-weight: 600; }
+/* Tables (UI_DOCTRINE 8, StarCaster's UI_RULES T11, SP-324): one look everywhere. A black heading row with
+   bold white text; a light-blue filter row where a table has one; body rows 0.5rem top and bottom. Every
+   table with headings sits in a .table-wrap that scrolls both ways and stops short of the screen's height,
+   so its heading row stays in sight while the rows scroll under it. The 10rem left free is StarCaster's:
+   the heading sticks to the top of the wrap, so the wrap must fit on screen with whatever sits below it. */
 table { width: 100%; border-collapse: collapse; }
-th, td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--border-light); vertical-align: top; }
-th { color: var(--ink-secondary); font-weight: 500; font-size: var(--text-sm); }
+th, td { text-align: left; padding: 0.5rem 0.85rem; border-bottom: 1px solid var(--border-light); vertical-align: top; }
+th { font-size: var(--text-sm); }
+thead th { padding-top: calc(0.65rem - 2px); padding-bottom: calc(0.65rem - 2px); }
+thead tr:not(.table-filter-row) th { background: var(--table-head-bg); color: var(--table-head-ink); font-weight: 700; border-bottom: 0; }
+thead tr.table-filter-row th { background: var(--table-filter-bg); color: var(--table-filter-ink); font-weight: 400; }
+.table-wrap { box-sizing: border-box; width: 100%; max-height: max(20rem, calc(100vh - 10rem)); overflow: auto; border: 1px solid var(--border-black); border-radius: var(--radius-input); }
+.table-wrap > table thead tr:not(.table-filter-row) th { position: sticky; top: 0; z-index: 2; }
+.table-wrap > table tbody tr:last-child td { border-bottom: 0; }
+/* A sort button in a heading cell (SP-174) is the one place the tracker differs from StarCaster on purpose: it
+   is a real button, reached from the keyboard, with aria-sort on its cell. It takes the heading's white. */
+thead th button.sort { background: none; border: 0; padding: 0; margin: 0; font: inherit; color: inherit; cursor: pointer; text-align: left; }
+thead th button.sort:hover { text-decoration: underline; }
+thead th button.sort:focus-visible { outline: 2px solid var(--table-head-ink); outline-offset: 2px; }
+thead th .arrow { font-size: var(--text-xs); }
 td.when, td.status, td.project { white-space: nowrap; }
 .meta { color: var(--ink-secondary); margin: 0.25rem 0 1.5rem; }
 .meta span + span::before { content: " · "; }
@@ -249,41 +270,44 @@ button { font: inherit; padding: 0.4rem 1rem; }
 .toolbar .pipeline-pod .time.paused { color: var(--ink-secondary); font-style: italic; }
 .toolbar .pipeline-pod .unavailable { color: var(--ink-secondary); }
 /* The Pipeline Status dialog (SP-173): the detail behind each stage's next time, opened from the pod. */
-dialog.pipeline-status { border: 1px solid var(--border-black); border-radius: var(--radius-input); padding: 1rem 1.25rem; max-width: 95vw; color: var(--ink-primary); }
+/* Dialogs (UI_DOCTRINE 9, StarCaster's UI_RULES D7, SP-324): as wide as what is in them, above a floor each
+   one sets and below three quarters of the screen; never a bare width. Text inside is at most 56ch wide. */
+dialog { box-sizing: border-box; width: max-content; min-width: min(320px, 100%); max-width: min(75vw, 100%); }
+dialog p, dialog li { max-width: 56ch; }
+dialog.pipeline-status { border: 1px solid var(--border-black); border-radius: var(--radius-input); padding: 1rem 1.25rem; min-width: min(560px, 100%); color: var(--ink-primary); }
 dialog.pipeline-status::backdrop { background: var(--backdrop); }
 dialog.pipeline-status h2 { margin: 0 2rem 0.75rem 0; font-size: var(--text-lg); }
 dialog.pipeline-status button.close { float: right; border: 0; background: transparent; cursor: pointer; padding: 0 0.25rem; font-size: var(--text-xl); line-height: 1; color: var(--ink-secondary); }
-dialog.pipeline-status table.pipeline-stages { border-collapse: collapse; margin-bottom: 1rem; }
-dialog.pipeline-status table.pipeline-stages th, dialog.pipeline-status table.pipeline-stages td { text-align: left; padding: 0.35rem 1.25rem 0.35rem 0; vertical-align: top; white-space: nowrap; }
+dialog.pipeline-status .table-wrap { margin-bottom: 1rem; }
+/* Cells wrap rather than run past the dialog's 75% ceiling: a dialog never scrolls sideways (UI_RULES D7). */
 dialog.pipeline-status table.pipeline-stages th[scope="row"] { color: var(--ink-primary); font-weight: 600; font-size: inherit; }
 dialog.pipeline-status tr.running td:nth-of-type(1) { font-weight: 600; }
 dialog.pipeline-status td.failed { color: var(--ink-error); }
 dialog.pipeline-status .row { display: flex; justify-content: flex-end; }
-table.projects, table.counts { border: 1px solid var(--border-black); border-radius: var(--radius-input); border-collapse: separate; border-spacing: 0; overflow: hidden; }
-table.projects tbody tr:last-child td, table.counts tbody tr:last-child td { border-bottom: 0; }
 table.projects tbody tr:hover { background: var(--bg-hover); }
 table.projects tr.selected td.name { box-shadow: inset 3px 0 0 var(--brand-blue); }
 table.projects td.name a { color: var(--ink-primary); text-decoration: none; font-weight: 600; }
 table.projects td.name a:hover { text-decoration: underline; }
 table.projects td.actions { white-space: nowrap; width: 1%; }
-table.counts { max-width: 24rem; }
-table.counts.report { max-width: 40rem; }
-table.counts.report.productivity { max-width: 56rem; }
+/* A short table's wrap is as narrow as the table was before it had one. */
+.table-wrap:has(> table.counts) { max-width: 24rem; }
+.table-wrap:has(> table.counts.report) { max-width: 40rem; }
+.table-wrap:has(> table.counts.report.productivity) { max-width: 56rem; }
 table.counts th.custom-range { vertical-align: top; }
 table.counts th.custom-range label { display: block; }
 table.counts th.custom-range input { font: inherit; font-weight: normal; padding: 0.2rem; margin-top: 0.25rem; }
 table.counts th.custom-range select { font: inherit; font-weight: normal; padding: 0.2rem; margin-top: 0.25rem; }
 /* Where the Time Goes' task list (SP-220): wide enough for a name, the id and the durations on one line each. */
-table.counts.report.time-split-tickets { max-width: 64rem; }
+.table-wrap:has(> table.counts.report.time-split-tickets) { max-width: 64rem; }
 table.time-split-tickets td:first-child, table.time-split-tickets td.count { white-space: nowrap; }
 /* Merge Conflicts (SP-295): the settings table is wide enough for its dates; the list is wide, so smaller, with the time and ticket kept on one line, in a box that scrolls sideways on a narrow screen. */
-table.counts.report.conflict-settings { max-width: 64rem; }
-table.counts.report.conflict-list { max-width: none; font-size: var(--text-sm); }
+.table-wrap:has(> table.counts.report.conflict-settings) { max-width: 64rem; }
+.table-wrap:has(> table.counts.report.conflict-list) { max-width: none; }
+table.counts.report.conflict-list { font-size: var(--text-sm); }
 table.conflict-list td.when, table.conflict-list td.ticket, table.conflict-list td.count { white-space: nowrap; }
 table.conflict-list td.files { min-width: 18rem; }
 table.conflict-list td.settings { min-width: 9rem; }
 table.conflict-list td.files code { display: block; white-space: nowrap; }
-div.conflict-scroll { overflow-x: auto; }
 form.report-scope { display: flex; gap: var(--space-4); align-items: center; margin: 0.5rem 0 1rem; }
 form.report-scope select { font: inherit; padding: 0.35rem; }
 /* A stage's colour from the Settings page (app.mjs drawReporting sets the properties). */
@@ -306,7 +330,7 @@ dl.details dd { margin: 0; }
 .card .tag { margin-left: 0; margin-right: 0.3rem; }
 /* A long ticket name or tag wraps inside its card rather than widening the column. */
 .card .name, .card .tags { overflow-wrap: anywhere; min-width: 0; }
-table.tickets, details.group { border: 1px solid var(--border-black); border-radius: var(--radius-input); }
+details.group { border: 1px solid var(--border-black); border-radius: var(--radius-input); }
 .group { margin-bottom: 1rem; overflow: hidden; }
 .group h2 { font-size: var(--text-base); margin: 0; }
 .group > summary { padding: 0.5rem 0.75rem; }
@@ -320,8 +344,8 @@ table.tickets, details.group { border: 1px solid var(--border-black); border-rad
 .column > summary .fold::before, .group > summary .fold::before { content: '▸'; }
 .column[open] > summary .fold::before, .group[open] > summary .fold::before { content: '▾'; }
 .column > summary:focus-visible, .group > summary:focus-visible { outline: 2px solid var(--focus-ring-color); outline-offset: -2px; }
-.group table { border-top: 1px solid var(--border-black); }
-.group tbody tr:last-child td { border-bottom: 0; }
+/* A stage's table sits inside the stage's own box, so its wrap draws only the line under the heading. */
+.group > .table-wrap { border: 0; border-top: 1px solid var(--border-black); border-radius: 0; }
 .group tbody tr:hover { background: var(--bg-hover); }
 .group td.name a { color: var(--ink-primary); text-decoration: none; font-weight: 500; }
 .group td.name a:hover { text-decoration: underline; }
@@ -332,7 +356,8 @@ table.tickets, details.group { border: 1px solid var(--border-black); border-rad
 .group td.id a { color: var(--ink-secondary); text-decoration: none; }
 .group td.id a:hover { text-decoration: underline; }
 .group th.name { width: 20%; }
-.group th.priority { width: 10%; }
+/* SP-324: priority and assignee gave a point each to Last Change when every cell's side padding grew to StarCaster's 0.85rem. */
+.group th.priority { width: 9%; }
 .group td.priority select { width: 100%; max-width: 7.5rem; }
 .group td.priority .note { display: block; font-size: var(--text-sm); }
 .group td.assignee select { width: 100%; max-width: 9rem; }
@@ -360,7 +385,7 @@ button.action:disabled { color: var(--ink-muted); background: transparent; curso
 span.action.status-icon { display: inline-flex; padding: 0.2rem; margin-right: 0.15rem; }
 span.action.status-icon.empty { width: 18px; height: 18px; }
 span.action.answer-in-icon { color: var(--status-ok-ink); }
-.group th.assignee { width: 11%; }
+.group th.assignee { width: 10%; }
 .group td { overflow-wrap: anywhere; }
 /* A stage's colour from the Settings page (app.mjs drawProject sets the three properties). */
 .column.coloured, .group.coloured { border-color: var(--stage-border); }
@@ -368,7 +393,7 @@ span.action.answer-in-icon { color: var(--status-ok-ink); }
 .coloured h2, .coloured h2 .quiet, .coloured > summary .fold { color: var(--stage-text); }
 .column.coloured > summary { margin: -0.5rem -0.5rem 0.5rem; padding: 0.5rem 0.75rem; border-radius: calc(var(--radius-input) - 1px) calc(var(--radius-input) - 1px) 0 0; }
 .column.coloured:not([open]) > summary { margin-bottom: -0.5rem; border-radius: calc(var(--radius-input) - 1px); }
-.coloured > table { border-top-color: var(--stage-border); }
+.coloured > .table-wrap { border-top-color: var(--stage-border); }
 .quick { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-7); align-items: start; margin-bottom: 2rem; }
 .quick h1 { margin-top: 0; }
 /* A failing lane owes the next move (SP-228): one line across the top, above the card. */
@@ -416,7 +441,7 @@ nav.trail { font-size: var(--text-sm); color: var(--ink-secondary); margin: -0.5
 nav.trail a { color: var(--ink-secondary); }
 nav.trail a:hover { color: var(--ink-primary); }
 nav.trail [aria-current] { color: var(--ink-primary); }
-table.colours { max-width: 32rem; }
+.table-wrap:has(> table.colours) { max-width: 32rem; }
 table.colours td { vertical-align: middle; }
 table.colours td.value { color: var(--ink-secondary); font-family: var(--font-mono); font-size: var(--text-sm); }
 table.colours tr.unset input { opacity: 0.25; }
@@ -445,7 +470,8 @@ details.pipeline-controls .release-actions { display: flex; gap: var(--space-3);
 /* What a pause is waiting on (SP-237): "Draining" while tickets are still finishing. */
 details.pipeline-controls .drain { margin-top: 0.25rem; }
 details.pipeline-controls .drain.draining { color: var(--pod-soon); }
-table.control-changes { max-width: 48rem; font-size: var(--text-base); }
+.table-wrap:has(> table.control-changes) { max-width: 48rem; }
+table.control-changes { font-size: var(--text-base); }
 button.action { display: inline-flex; padding: 0.2rem; margin-right: 0.15rem; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--ink-secondary); cursor: pointer; }
 button.action:hover { color: var(--ink-error); background: var(--danger-tint); }
 .quick form.delete-action { margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--border-light); }
@@ -503,7 +529,7 @@ details.add-task .suggest-next button.suggestion-info-open { flex: none; display
 details.add-task .suggest-next button.suggestion-info-open svg { width: 1.25em; height: 1.25em; }
 details.add-task .suggest-next button.suggestion-info-open:hover, details.add-task .suggest-next button.suggestion-info-open:focus-visible { background: var(--brand-blue); }
 /* SP-304: a suggestion's About box, the same look as a command's pop-up. */
-dialog.suggestion-info { border: 1px solid var(--border-black); border-radius: var(--radius-input); padding: 1rem 1.25rem; max-width: min(36rem, 95vw); color: var(--ink-primary); }
+dialog.suggestion-info { border: 1px solid var(--border-black); border-radius: var(--radius-input); padding: 1rem 1.25rem; min-width: min(420px, 100%); color: var(--ink-primary); }
 dialog.suggestion-info::backdrop { background: var(--backdrop); }
 dialog.suggestion-info h2 { margin: 0 2rem 0.25rem 0; font-size: var(--text-lg); }
 dialog.suggestion-info h3 { margin: 0.75rem 0 0.25rem; font-size: var(--text-base); }
@@ -526,7 +552,7 @@ section.attachments li { margin: 0.5rem 0; }
 section.attachments .preview { display: block; margin-top: 0.35rem; }
 section.attachments img { max-width: 16rem; max-height: 12rem; border: 1px solid var(--border-black); border-radius: var(--radius-sm); }
 /* The Add Task box's question: "Did you mean for that to be associated with project X?" */
-dialog.project-check { border: 1px solid var(--border-black); border-radius: var(--radius-input); padding: 1rem 1.25rem; max-width: 28rem; color: var(--ink-primary); }
+dialog.project-check { border: 1px solid var(--border-black); border-radius: var(--radius-input); padding: 1rem 1.25rem; min-width: min(360px, 100%); color: var(--ink-primary); }
 dialog.project-check::backdrop { background: var(--backdrop); }
 dialog.project-check p { margin: 0 1.5rem 1rem 0; }
 dialog.project-check .row { display: flex; gap: var(--space-3); flex-wrap: wrap; }
@@ -615,19 +641,13 @@ ul.command-list a.command-open { display: block; padding: 0.5rem 0; color: inher
 ul.command-list a.command-open:hover .command-summary, ul.command-list a.command-open:focus .command-summary { text-decoration: underline; }
 ul.command-list a.command-open code { color: var(--navy-soft); font-weight: 600; }
 /* A command's pop-up (SP-212), the same look as the Pipeline Status dialog. */
-dialog.command-details { border: 1px solid var(--border-black); border-radius: var(--radius-input); padding: 1rem 1.25rem; max-width: min(36rem, 95vw); color: var(--ink-primary); }
+dialog.command-details { border: 1px solid var(--border-black); border-radius: var(--radius-input); padding: 1rem 1.25rem; min-width: min(420px, 100%); color: var(--ink-primary); }
 dialog.command-details::backdrop { background: var(--backdrop); }
 dialog.command-details h2 { margin: 0 2rem 0.25rem 0; font-size: var(--text-lg); }
 dialog.command-details button.close { float: right; border: 0; background: transparent; cursor: pointer; padding: 0 0.25rem; font-size: var(--text-xl); line-height: 1; color: var(--ink-secondary); }
 dialog.command-details .row { display: flex; justify-content: flex-end; }
 .command-steps { max-width: 48rem; }
 
-/* SP-174: the Tasks tables' headings, bold and black, each a button that sorts its stage. Other tables keep the grey headings. */
-.group table.sortable th { color: var(--ink-primary); font-weight: 700; }
-.group table.sortable th button.sort { background: none; border: 0; padding: 0; margin: 0; font: inherit; color: inherit; cursor: pointer; text-align: left; }
-.group table.sortable th button.sort:hover { text-decoration: underline; }
-.group table.sortable th button.sort:focus-visible { outline: 2px solid var(--focus-ring-color); outline-offset: 2px; }
-.group table.sortable th .arrow { font-size: var(--text-xs); }
 /* The Docs page's Context Documents (SP-176): Download and Remove side by side. */
 table.doc-list td.actions a { margin-right: 0.6rem; }
 section.context-docs { margin-bottom: 1.5rem; }
@@ -638,11 +658,6 @@ details.spirality-docs > summary h2 { display: inline; }
 .doc-filters { display: flex; gap: var(--space-3); align-items: center; flex-wrap: wrap; margin: 0 0 0.5rem; }
 .doc-filters select, #doc-search { font: inherit; padding: 0.35rem 0.6rem; border: 1px solid var(--border-black); border-radius: var(--radius-input); }
 #doc-search { width: 100%; max-width: 24rem; box-sizing: border-box; }
-table.spirality-docs th { color: var(--ink-primary); font-weight: 700; }
-table.spirality-docs th button.sort { background: none; border: 0; padding: 0; margin: 0; font: inherit; color: inherit; cursor: pointer; text-align: left; }
-table.spirality-docs th button.sort:hover { text-decoration: underline; }
-table.spirality-docs th button.sort:focus-visible { outline: 2px solid var(--focus-ring-color); outline-offset: 2px; }
-table.spirality-docs th .arrow { font-size: var(--text-xs); }
 table.spirality-docs td.date { white-space: nowrap; }
 
 /* The Console view (SP-233): every ticket in flight as a tile, one column per stage. */

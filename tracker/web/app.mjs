@@ -493,7 +493,7 @@ async function drawWaiting() {
       <td><a href="/t/${encodeURIComponent(t.id)}">${escapeHtml(t.name)}</a> <span class="quiet">${escapeHtml(t.id)}</span></td>
       <td class="when">${escapeHtml(when(t.updatedAt))}</td>
     </tr>`).join('');
-  const table = (list) => `<table class="tickets"><thead><tr><th>Project</th><th>Status</th><th>Ticket</th><th>Last Change</th></tr></thead><tbody>${rows(list)}</tbody></table>`;
+  const table = (list) => `<div class="table-wrap"><table class="tickets"><thead><tr><th>Project</th><th>Status</th><th>Ticket</th><th>Last Change</th></tr></thead><tbody>${rows(list)}</tbody></table></div>`;
   main.innerHTML = `
     <h1>Waiting on You</h1>
     ${waiting.length ? table(waiting) : '<p class="quiet">Nothing is waiting on you.</p>'}
@@ -713,7 +713,7 @@ async function drawProjects(done = '', problem = '') {
     ${renderSetupList(setups)}
     ${projects.length
     ? `<p class="quiet">Choose a project's name to see its tasks.</p>
-      <table class="projects"><thead><tr><th class="logo"><span class="hidden">Logo</span></th><th class="name">Name</th><th class="slug">Slug</th><th class="prefix">Ticket Prefix</th><th class="url">Web Address</th><th class="repo">GitHub Repository</th><th class="owner">Owner</th><th class="members">Members</th><th class="open">Open Tickets</th><th class="actions">Actions</th></tr></thead><tbody>${projects.map(row).join('')}</tbody></table>`
+      <div class="table-wrap"><table class="projects"><thead><tr><th class="logo"><span class="hidden">Logo</span></th><th class="name">Name</th><th class="slug">Slug</th><th class="prefix">Ticket Prefix</th><th class="url">Web Address</th><th class="repo">GitHub Repository</th><th class="owner">Owner</th><th class="members">Members</th><th class="open">Open Tickets</th><th class="actions">Actions</th></tr></thead><tbody>${projects.map(row).join('')}</tbody></table></div>`
     : '<p class="quiet">There are no projects yet.</p>'}`;
   putTrail([{ label: 'Projects' }]);
   const note = main.querySelector('p.note');
@@ -828,11 +828,11 @@ async function drawProjectDetails(slug, done = '', problem = '') {
       <dt>Open tickets</dt><dd>${p.open}</dd>
     </dl>
     <h2>Tickets by Status</h2>
-    <table class="counts"><thead><tr><th>Status</th><th class="count">Tickets</th></tr></thead><tbody>${counts}</tbody></table>
+    <div class="table-wrap"><table class="counts"><thead><tr><th>Status</th><th class="count">Tickets</th></tr></thead><tbody>${counts}</tbody></table></div>
     <h2>Members</h2>
     <p class="note${problem ? ' error' : ' quiet'}" role="status">${escapeHtml(problem || done)}</p>
     ${members.length
-    ? `<table class="projects people members"><thead><tr><th class="name">Name</th><th class="by">Added By</th><th class="added">Added</th>${editing ? '<th class="actions"><span class="hidden">Actions</span></th>' : ''}</tr></thead><tbody>${members.map(memberRow).join('')}</tbody></table>`
+    ? `<div class="table-wrap"><table class="projects people members"><thead><tr><th class="name">Name</th><th class="by">Added By</th><th class="added">Added</th>${editing ? '<th class="actions"><span class="hidden">Actions</span></th>' : ''}</tr></thead><tbody>${members.map(memberRow).join('')}</tbody></table></div>`
     : '<p class="quiet">Nobody is a member of this project yet.</p>'}
     ${editing ? (addable.length
     ? `<form class="invite members">
@@ -1373,7 +1373,7 @@ async function drawProject(slug, view, { adding = false, filed = null, unchecked
       <td class="actions">${actions(t, status)}</td>
     </tr>`;
   const group = (c) => block(c, 'group', c.tickets.length
-    ? `<table class="sortable"><thead>${renderSortHeadings(null)}</thead><tbody>${c.tickets.map(row(c.status)).join('')}</tbody></table>`
+    ? `<div class="table-wrap"><table class="sortable"><thead>${renderSortHeadings(null)}</thead><tbody>${c.tickets.map(row(c.status)).join('')}</tbody></table></div>`
     : '');
 
   // The board's columns are the working stages; Live, which only grows, is a
@@ -2990,7 +2990,7 @@ async function drawReporting(chosen, range = defaultReportRange()) {
   const flow = (title, how, rows) => `
     <h2>${title}</h2>
     <p class="quiet">${how}</p>
-    <table class="counts report flow"><thead>${head}</thead><tbody>${rows}</tbody></table>`;
+    <div class="table-wrap"><table class="counts report flow"><thead>${head}</thead><tbody>${rows}</tbody></table></div>`;
   // A human-hours row: "no estimates yet in this range" where none was recorded, never 0 hours.
   const hoursLine = (label, cell) => `<tr><td class="name">${label}</td>${r.ranges.map((g) => {
     const h = r.humanHours[g.key];
@@ -3015,7 +3015,7 @@ async function drawReporting(chosen, range = defaultReportRange()) {
     const t = r.timeSplit[rangeKey];
     if (!t || !t.tickets.length) return '<p class="quiet">No task was open in this range.</p>';
     const rows = t.tickets.map((x) => `<tr><td><a href="/t/${encodeURIComponent(x.id)}">${escapeHtml(x.id)}</a></td><td class="name">${escapeHtml(x.name)}</td><td class="count">${escapeHtml(bucketSpan(x.total))}</td>${BUCKET_LABELS.map(([key]) => `<td class="count">${escapeHtml(bucketSpan(x[key]))}</td>`).join('')}</tr>`).join('');
-    return `<table class="counts report time-split-tickets"><thead><tr><th>Task</th><th>Name</th><th class="count">Total</th>${BUCKET_LABELS.map(([, label]) => `<th class="count">${label}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table>`;
+    return `<div class="table-wrap"><table class="counts report time-split-tickets"><thead><tr><th>Task</th><th>Name</th><th class="count">Total</th>${BUCKET_LABELS.map(([, label]) => `<th class="count">${label}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table></div>`;
   };
   const conflictsHtml = conflictSection(r.conflicts);
   const open = r.open.map((s) => `<tr data-stage="${escapeHtml(s.status)}"><td class="status">${escapeHtml(s.status)}</td><td class="count">${Number(s.count)}</td></tr>`).join('');
@@ -3027,11 +3027,11 @@ async function drawReporting(chosen, range = defaultReportRange()) {
     </form>
     <h2>Task Productivity</h2>
     <p class="quiet">Started: filed in that time. Finished: moved to Live in that time and still Live.</p>
-    <table class="counts report productivity"><thead>${productivityHead}</thead><tbody>${line('Tasks started', r.started)}${line('Tasks finished', r.finished)}</tbody></table>
+    <div class="table-wrap"><table class="counts report productivity"><thead>${productivityHead}</thead><tbody>${line('Tasks started', r.started)}${line('Tasks finished', r.finished)}</tbody></table></div>
     <p class="quiet custom-range-note" hidden></p>
     <h2>Human Hours of Work Done</h2>
     <p class="quiet">For tasks finished in that time: the build loop's estimate, recorded on each pull request, of the hours an experienced programmer new to the code would take to do the same work. An estimate, not a measurement; tasks with none are left out of the total, and counted here.</p>
-    <table class="counts report human-hours"><thead>${head}</thead><tbody>${hoursLine('Total', (h) => hoursOf(h.hours))}${estimatedLine}${hoursLine('Per day', (h) => `about ${Number(h.perDay)} human hour${Number(h.perDay) === 1 ? '' : 's'} a day`)}</tbody></table>
+    <div class="table-wrap"><table class="counts report human-hours"><thead>${head}</thead><tbody>${hoursLine('Total', (h) => hoursOf(h.hours))}${estimatedLine}${hoursLine('Per day', (h) => `about ${Number(h.perDay)} human hour${Number(h.perDay) === 1 ? '' : 's'} a day`)}</tbody></table></div>
     ${flow('Time to Finish',
     'For tasks finished in that time: from first entering Queued to entering Live. Tasks that never entered Queued are left out, and counted here.',
     flowLine('Middle (median)', (f) => span(f.timeToFinish.median))
@@ -3046,7 +3046,7 @@ async function drawReporting(chosen, range = defaultReportRange()) {
     <p class="waiting-now">Waiting on you right now: <strong>${Number(r.waitingNow)}</strong> task${Number(r.waitingNow) === 1 ? '' : 's'} in Needs your input or Ready to launch.</p>
     <h2>Where the Time Goes</h2>
     <p class="quiet">Every task's time in that range, open ones too, Live left out. Working: in Building. Waiting on You: in Needs your input or Ready to launch with your reply not yet the newest comment, and no merge word of yours still standing. Broken: from a loop's failure note on the task until its next move or your next comment. Waiting for a Lane: everything else, including all of In review, since nothing marks when a review starts. A loop that failed without writing on the task shows as waiting, not broken.</p>
-    <table class="counts report time-split"><thead>${head}</thead><tbody>${splitTable}</tbody></table>
+    <div class="table-wrap"><table class="counts report time-split"><thead>${head}</thead><tbody>${splitTable}</tbody></table></div>
     <form class="report-scope time-split-range">
       <label for="time-split-range">Tasks with the Most Time In</label>
       <select id="time-split-range">${r.ranges.map((g, i) => `<option value="${escapeHtml(g.key)}"${i === 0 ? ' selected' : ''}>${escapeHtml(g.label)}</option>`).join('')}</select>
@@ -3055,7 +3055,7 @@ async function drawReporting(chosen, range = defaultReportRange()) {
     ${conflictsHtml}
     <h2>Open Now</h2>
     <p class="quiet">Tasks in each stage that is not Live.</p>
-    <table class="counts stages"><thead><tr><th>Stage</th><th class="count">Tasks</th></tr></thead><tbody>${open}</tbody></table>`;
+    <div class="table-wrap"><table class="counts stages"><thead><tr><th>Stage</th><th class="count">Tasks</th></tr></thead><tbody>${open}</tbody></table></div>`;
   const looks = stageLooks({ stages: r.open });
   for (const el of main.querySelectorAll('[data-stage]')) {
     const look = looks[el.dataset.stage];
@@ -3137,7 +3137,7 @@ function conflictSection(c) {
   const settingRows = c.bySetting.map((g) => `<tr><td class="name">${escapeHtml(g.setting)}</td><td>${range(g)}</td><td class="count">${Number(g.merged)}</td><td class="count">${Number(g.conflicts)}</td><td class="count">${perMerge(g.rate)}</td></tr>`).join('');
   const total = `<tr class="total"><td class="name">All settings</td><td></td><td class="count">${Number(c.merged)}</td><td class="count">${Number(c.total)}</td><td class="count">${perMerge(c.rate)}</td></tr>`;
   const files = c.topFiles.length
-    ? `<table class="counts report conflict-files"><thead><tr><th>File</th><th class="count">Conflicts</th></tr></thead><tbody>${c.topFiles.map((f) => `<tr><td class="name"><code>${escapeHtml(f.file)}</code></td><td class="count">${Number(f.count)}</td></tr>`).join('')}</tbody></table>
+    ? `<div class="table-wrap"><table class="counts report conflict-files"><thead><tr><th>File</th><th class="count">Conflicts</th></tr></thead><tbody>${c.topFiles.map((f) => `<tr><td class="name"><code>${escapeHtml(f.file)}</code></td><td class="count">${Number(f.count)}</td></tr>`).join('')}</tbody></table></div>
       <p class="quiet">From the ${Number(c.withFiles)} of ${Number(c.total)} conflicts whose note names its files.</p>`
     : '<p class="quiet">No conflict note names its files yet.</p>';
   const siblings = `<p class="conflict-siblings">Between tickets split from one request: <strong>${Number(c.siblings.count)}</strong> of the ${Number(c.siblings.known)} conflicts whose cause is known.</p>`;
@@ -3162,11 +3162,11 @@ function conflictSection(c) {
       <td class="files">${x.files.length ? x.files.map((f) => `<code>${escapeHtml(f)}</code>`).join(' ') : '<span class="quiet">not named</span>'}</td>
     </tr>`).join('');
   const list = c.conflicts.length
-    ? `<div class="conflict-scroll"><table class="counts report conflict-list"><thead><tr><th>When</th><th>Task</th><th>Name</th><th class="count">Pull Request</th><th>Seen As</th><th>Caused By</th><th>Stage Then</th><th class="count">Open For</th><th class="count">Open Pull Requests</th><th>Siblings</th><th>Settings Then</th><th>Files</th></tr></thead><tbody>${rows}</tbody></table></div>
+    ? `<div class="table-wrap"><table class="counts report conflict-list"><thead><tr><th>When</th><th>Task</th><th>Name</th><th class="count">Pull Request</th><th>Seen As</th><th>Caused By</th><th>Stage Then</th><th class="count">Open For</th><th class="count">Open Pull Requests</th><th>Siblings</th><th>Settings Then</th><th>Files</th></tr></thead><tbody>${rows}</tbody></table></div>
       ${c.total > c.listed ? `<p class="quiet">The newest ${Number(c.listed)} of ${Number(c.total)} are listed; the counts above cover every one.</p>` : ''}`
     : '<p class="quiet">No conflict recorded yet.</p>';
   return `${intro}
-    <table class="counts report conflict-settings"><thead><tr><th>Settings in Force</th><th>Dates</th><th class="count">Merged</th><th class="count">Conflicts</th><th class="count">Per Merged Pull Request</th></tr></thead><tbody>${settingRows}${total}</tbody></table>
+    <div class="table-wrap"><table class="counts report conflict-settings"><thead><tr><th>Settings in Force</th><th>Dates</th><th class="count">Merged</th><th class="count">Conflicts</th><th class="count">Per Merged Pull Request</th></tr></thead><tbody>${settingRows}${total}</tbody></table></div>
     <p class="quiet">Open Pull Requests counts the project's tickets with a pull request opened and not yet merged at that moment; Caused By says "probably" where no note named the merge and it is the newest one before. Siblings: whether the two tickets were split from one request.</p>
     ${siblings}
     <h3>Files That Conflict Most</h3>
@@ -3267,7 +3267,7 @@ async function drawSettings() {
       <h2>Stage Colours</h2>
       <p class="quiet">Choose a colour for each stage of the loop. The same colours show for everyone.</p>
       <form class="colours">
-        <table class="colours"><thead><tr><th>Stage</th><th>Colour</th><th></th><th></th></tr></thead><tbody>${stages.map(row).join('')}</tbody></table>
+        <div class="table-wrap"><table class="colours"><thead><tr><th>Stage</th><th>Colour</th><th></th><th></th></tr></thead><tbody>${stages.map(row).join('')}</tbody></table></div>
         <div class="row"><button type="submit" class="btn btn-save">Save</button><span class="note"></span></div>
       </form>
     </div>`;
@@ -3508,14 +3508,14 @@ async function drawUsers(done = '', problem = '') {
       <span class="hint quiet">They get an email with a link to choose their name and password. It works once, for 7 days.</span>
     </form>` : ''}
     <h2>Users with an Account</h2>
-    <table class="projects people"><thead><tr><th class="name">Name</th><th class="email">Email</th><th class="role">Role</th><th class="projects">Projects</th></tr></thead><tbody>${people.map(personRow).join('')}</tbody></table>
+    <div class="table-wrap"><table class="projects people"><thead><tr><th class="name">Name</th><th class="email">Email</th><th class="role">Role</th><th class="projects">Projects</th></tr></thead><tbody>${people.map(personRow).join('')}</tbody></table></div>
     <h2>Open Invites</h2>
     ${invites.length
-    ? `<table class="projects invites"><thead><tr><th class="email">Email</th><th class="by">Invited By</th><th class="expires">Expires</th><th class="actions"><span class="hidden">Actions</span></th></tr></thead><tbody>${invites.map(inviteRow).join('')}</tbody></table>`
+    ? `<div class="table-wrap"><table class="projects invites"><thead><tr><th class="email">Email</th><th class="by">Invited By</th><th class="expires">Expires</th><th class="actions"><span class="hidden">Actions</span></th></tr></thead><tbody>${invites.map(inviteRow).join('')}</tbody></table></div>`
     : '<p class="quiet">No open invites.</p>'}
     <h2>Roles and Permissions</h2>
     <p class="quiet">Each role's permissions are recorded, not yet enforced: for now everyone may do what they could before.</p>
-    <table class="projects roles"><thead><tr><th class="name">Role</th>${permissions.map((x) => `<th class="has" title="${escapeHtml(x.name)}">${escapeHtml(x.description)}</th>`).join('')}</tr></thead><tbody>${roles.map(roleRow).join('')}</tbody></table>`;
+    <div class="table-wrap"><table class="projects roles"><thead><tr><th class="name">Role</th>${permissions.map((x) => `<th class="has" title="${escapeHtml(x.name)}">${escapeHtml(x.description)}</th>`).join('')}</tr></thead><tbody>${roles.map(roleRow).join('')}</tbody></table></div>`;
   putTrail([{ label: 'Users' }]);
   const note = main.querySelector('p.note');
   const busy = (text) => { note.className = 'note quiet'; note.textContent = text; };
@@ -3685,8 +3685,8 @@ async function drawDocs(done = '', problem = '', section = 'files') {
       <span class="hint quiet">Up to 10 MB. It shows here and on the task's own page.</span>
     </form>` : ''}
     ${attachments.length
-    ? `<table class="projects task-files"><thead><tr><th>File</th><th>Task</th><th>Type</th><th>Size</th><th>Added By</th><th>Added On</th><th><span class="hidden">Actions</span></th></tr></thead>
-      <tbody>${attachments.map(row).join('')}</tbody></table>`
+    ? `<div class="table-wrap"><table class="projects task-files"><thead><tr><th>File</th><th>Task</th><th>Type</th><th>Size</th><th>Added By</th><th>Added On</th><th><span class="hidden">Actions</span></th></tr></thead>
+      <tbody>${attachments.map(row).join('')}</tbody></table></div>`
     : `<p class="quiet">No task in ${escapeHtml(project.name)} has a file yet.</p>`}
     ${documentation}`)}`;
   const note = main.querySelector('.file-note');

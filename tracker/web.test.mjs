@@ -5090,9 +5090,9 @@ test.describe('Files Made: the files a ticket made, from its newest merge note',
     assert.equal((app.match(/keepPlace\(\)/g) ?? []).length, 2, 'defined once, called only by refreshPage');
   });
 
-  test('the List view\'s tables use the sortable headings, and only they are bold and black', () => {
+  test('the List view\'s tables use the sortable headings, in a table wrap with every table\'s heading look', () => {
     const app = readFileSync(WEB('app.mjs'), 'utf8');
-    assert.match(app, /<table class="sortable"><thead>\$\{renderSortHeadings\(null\)\}<\/thead>/);
+    assert.match(app, /<div class="table-wrap"><table class="sortable"><thead>\$\{renderSortHeadings\(null\)\}<\/thead>/);
     assert.match(app, /<tr data-id="\$\{escapeHtml\(t\.id\)\}">/);
     // SP-193: the id is the first cell, a link to the ticket, and the name cell no longer repeats it.
     const row = /const row = \(status\) => \(t\) => `[\s\S]*?<\/tr>`;/.exec(app)[0];
@@ -5102,13 +5102,13 @@ test.describe('Files Made: the files a ticket made, from its newest merge note',
     assert.doesNotMatch(nameCell, /ANSWER_IN_NOTE|answer-in/, 'the answer-in words are gone from the name cell (SP-201)');
     assert.equal((row.match(/<td class="/g) || []).length, SORT_COLUMNS.length + 1, 'one cell per heading, plus Actions');
     const css = readFileSync(WEB('app.css'), 'utf8');
-    assert.match(css, /\.group table\.sortable th \{ color: var\(--ink-primary\); font-weight: 700; \}/);
+    // SP-324: the black heading row is every table's now (UI_DOCTRINE 8), so the List view sets no heading colour of its own.
+    assert.doesNotMatch(css, /\.group table\.sortable th \{/);
     // SP-193: Ticket # is narrow; the name keeps most of the width, and the set widths leave Last Change room.
     const width = (key) => Number(new RegExp(`\\.group th\\.${key} \\{ width: (\\d+)%; \\}`).exec(css)?.[1]);
     assert.ok(width('id') > 0 && width('id') < width('name'), 'Ticket # narrower than Ticket');
     const set = ['id', 'name', 'priority', 'tags', 'topics', 'assignee', 'actions'].reduce((sum, k) => sum + width(k), 0);
     assert.ok(set <= 76, `the set widths (${set}%) leave Last Change room for its date`);
-    assert.match(css, /^th \{ color: var\(--ink-secondary\); font-weight: 500;/m, 'every other table keeps the grey heading');
   });
 }
 
