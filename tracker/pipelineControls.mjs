@@ -71,21 +71,26 @@ export const RELEASE_GROUP = Object.freeze({ key: 'release', title: RELEASE_GROU
 
 const control = (fields) => Object.freeze(fields);
 
-/** Every control, in the order the page and `settings` list them. */
+/**
+ * Every control, in the order the page and `settings` list them. `label` is
+ * the control's name inside a sentence ("the work-in-progress cap must be
+ * …"); `title` is its field label on the Settings page, in Title Case
+ * (docs/UI_DOCTRINE.md 1.1, SP-325). A lane's name stays as it is written.
+ */
 export const CONTROLS = Object.freeze([
   ...LANES.map((lane) => control({
-    key: `wake.${lane}`, group: 'wake', kind: 'seconds', label: `${lane} wake time`,
+    key: `wake.${lane}`, group: 'wake', kind: 'seconds', label: `${lane} wake time`, title: `${lane} Wake Time`,
     default: String(intervalOf(lane)), ...WAKE_RANGE,
   })),
-  control({ key: 'paused', group: 'pause', kind: 'switch', label: 'whole pipeline paused', default: 'off' }),
-  ...LANES.map((lane) => control({ key: `paused.${lane}`, group: 'pause', kind: 'switch', label: `${lane} paused`, default: 'off' })),
-  control({ key: 'wip-cap', group: 'cap', kind: 'count', label: 'work-in-progress cap', default: String(wipCap.DEFAULT_WIP_CAP), ...CAP_RANGE }),
+  control({ key: 'paused', group: 'pause', kind: 'switch', label: 'whole pipeline paused', title: 'Whole Pipeline Paused', default: 'off' }),
+  ...LANES.map((lane) => control({ key: `paused.${lane}`, group: 'pause', kind: 'switch', label: `${lane} paused`, title: `${lane} Paused`, default: 'off' })),
+  control({ key: 'wip-cap', group: 'cap', kind: 'count', label: 'work-in-progress cap', title: 'Work-in-Progress Cap', default: String(wipCap.DEFAULT_WIP_CAP), ...CAP_RANGE }),
   ...MODEL_LANES.map((lane) => control({
-    key: `model.${lane}`, group: 'model', kind: 'model', label: `${lane} model`, default: DEFAULT_MODEL,
+    key: `model.${lane}`, group: 'model', kind: 'model', label: `${lane} model`, title: `${lane} Model`, default: DEFAULT_MODEL,
   })),
   control({
     key: 'release.quiet-days', group: 'release-move', kind: 'days',
-    label: 'quiet days before moving to the newest release', default: '0', ...QUIET_DAYS_RANGE,
+    label: 'quiet days before moving to the newest release', title: 'Quiet Days Before Moving to the Newest Release', default: '0', ...QUIET_DAYS_RANGE,
   }),
 ]);
 

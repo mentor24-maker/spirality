@@ -66,6 +66,14 @@
   --radius-btn: 10px;
   --radius-input: 8px;
   --radius-container: 20px;
+  /* Forms (UI_DOCTRINE 6, StarCaster's UI_RULES W7 and W1): a box is as wide as what goes in it, plus 2rem for its padding. */
+  --field-w-number: calc(6ch + 2rem);
+  --field-w-short: calc(24ch + 2rem);
+  --field-w-long: calc(48ch + 2rem);
+  --field-pad-y: calc(0.55rem - 2px);
+  --field-pad-x: 0.75rem;
+  --field-label-min: 140px;
+  --field-label-max: 16rem;
 
   /* The tracker's own: parts of the page StarCaster has no token for (UI_DOCTRINE 2, The Tracker's Own Tokens). */
   --text-code: 0.9em;
@@ -171,6 +179,46 @@ nav.tabs a:hover { color: var(--ink-primary); }
 nav.tabs a[aria-current] { color: var(--tab-selected); font-weight: 700; border-bottom-color: var(--tab-selected); }
 .quiet { color: var(--ink-secondary); }
 .error { color: var(--ink-error); font-weight: 600; }
+/* Forms (UI_DOCTRINE 6, SP-325): one box style everywhere, each box sized by a width token and never wider than its container.
+   A short setting (a list, a switch, a number, a colour) keeps its label beside it; a text box takes its label above. */
+input:not([type="checkbox"], [type="radio"], [type="color"], [type="file"], [type="hidden"]), select, textarea {
+  box-sizing: border-box; max-width: 100%; margin: 0; padding: var(--field-pad-y) var(--field-pad-x);
+  border: 1px solid var(--border-light); border-radius: var(--radius-input); background: var(--bg-input); color: var(--ink-primary);
+  font-family: inherit; font-size: var(--text-md); line-height: var(--leading-tight);
+}
+input:not([type="checkbox"], [type="radio"], [type="color"], [type="file"], [type="hidden"]), textarea { width: var(--field-w-short); }
+input[type="number"] { width: var(--field-w-number); }
+textarea { display: block; width: var(--field-w-long); min-height: 7rem; line-height: var(--leading-normal); resize: vertical; }
+select { width: auto; }
+:is(input, select, textarea):focus { outline: none; border-color: var(--ink-primary); }
+/* Moved to by the keyboard: the same black border, and the focus ring round it so it is seen. */
+:is(input, select, textarea):focus-visible { box-shadow: 0 0 0 2px var(--focus-ring-color); }
+/* A locked box (read-only or disabled) is muted, so it never looks like one to type in. */
+:is(input, select, textarea):is([readonly], :disabled) { background: var(--bg-hover); color: var(--ink-secondary); cursor: default; }
+input[type="checkbox"], input[type="radio"] { margin: 0; }
+/* A box's width class, as specific as the rules above so it wins: long for a title, a name or an address. */
+:is(input, select, textarea).field-long { width: var(--field-w-long); }
+:is(input, select, textarea).field-short { width: var(--field-w-short); }
+/* A field label: left-aligned, never wider than 16rem, wraps to two lines at most. */
+label, .label { font-size: var(--text-sm); font-weight: 600; }
+/* A form of fields (.fields), two columns. A text box's label sits above it, both across the form; a short setting is
+   wrapped in .beside, which puts its label in the left column (left-aligned, 140px to 16rem, two lines at most) and the
+   setting, with any hint, in the right. Nothing stretches: each box keeps the width its token gives it. */
+.fields { display: grid; grid-template-columns: minmax(var(--field-label-min), max-content) minmax(0, 1fr); gap: var(--space-3) var(--space-5); align-items: center; }
+.fields > * { grid-column: 1 / -1; justify-self: start; min-width: 0; max-width: 100%; }
+.fields > label:not(:first-child), .fields > .label:not(:first-child) { margin-top: var(--space-4); }
+.fields > .beside { display: contents; }
+.fields > .beside > * { grid-column: 2; justify-self: start; min-width: 0; max-width: 100%; }
+.fields > .beside > :first-child { grid-column: 1; max-width: var(--field-label-max); }
+.fields > .beside:not(:first-child) > :is(:first-child, :nth-child(2)) { margin-top: var(--space-4); }
+.fields > .row { display: flex; flex-wrap: wrap; gap: var(--space-3) var(--space-5); align-items: center; margin-top: var(--space-5); }
+.fields .row { display: flex; flex-wrap: wrap; gap: var(--space-3) var(--space-4); align-items: center; }
+/* A box's help line, under or beside it: a sentence, so it is ordinary text. */
+.hint { display: block; font-size: var(--text-sm); font-weight: 400; color: var(--ink-secondary); }
+/* A radio button or checkbox: the control on the left, its words on the right, one per line. */
+label.check { display: flex; align-items: center; gap: var(--space-3); font-weight: 400; font-size: var(--text-base); }
+/* A box in a table row: the table's smaller type. It keeps its own width, so a table holding one is as wide as the box. */
+td :is(select, input:not([type="checkbox"], [type="radio"], [type="color"])) { font-size: var(--text-sm); }
 /* Tables (UI_DOCTRINE 8, StarCaster's UI_RULES T11, SP-324): one look everywhere. A black heading row with
    bold white text; a light-blue filter row where a table has one; body rows 0.5rem top and bottom. Every
    table with headings sits in a .table-wrap that scrolls both ways and stops short of the screen's height,
@@ -209,13 +257,8 @@ td.when, td.status, td.project { white-space: nowrap; }
 pre { background: var(--bg-hover); padding: 0.75rem; border-radius: var(--radius-input); overflow-x: auto; white-space: pre-wrap; }
 code { font-family: var(--font-mono); font-size: var(--text-code); }
 li.check { list-style: none; margin-left: -1.25rem; }
-form.reply textarea { width: 100%; min-height: 7rem; font: inherit; padding: 0.5rem; box-sizing: border-box; }
 form.reply .row { display: flex; gap: var(--space-5); align-items: center; margin-top: 0.5rem; }
-form.request label { display: block; margin-top: 1rem; font-weight: 600; }
-form.request select, form.request input, form.request textarea { display: block; width: 100%; font: inherit; padding: 0.5rem; box-sizing: border-box; margin-top: 0.35rem; }
 form.request textarea { min-height: 12rem; }
-form.request .row { display: flex; gap: var(--space-5); align-items: center; margin-top: 1rem; }
-form.request .hint { display: block; font-size: var(--text-sm); margin-top: 0.15rem; }
 .hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 img.logo { width: 1.75rem; height: 1.75rem; object-fit: contain; vertical-align: middle; }
 img.logo.big { width: 2.5rem; height: 2.5rem; margin-right: 0.75rem; }
@@ -236,19 +279,10 @@ details.colex > summary:focus-visible { outline: 2px solid var(--focus-ring-colo
 details.colex > form { padding: 0 0.75rem 0.75rem; }
 table.tag-list td.count, table.tag-list th:last-child { white-space: nowrap; text-align: right; }
 form.create-topic { max-width: 40rem; }
-form.create-topic label { display: block; margin-top: 0.75rem; font-weight: 600; }
-form.create-topic input, form.create-topic textarea { display: block; width: 100%; font: inherit; padding: 0.5rem; box-sizing: border-box; margin-top: 0.35rem; }
-form.create-topic .row { display: flex; gap: var(--space-5); align-items: center; margin-top: 1rem; }
-form.copy label { display: block; }
 form.copy .row { display: flex; gap: var(--space-5); align-items: center; margin-top: 0.5rem; }
-form.copy select { font: inherit; padding: 0.4rem; }
 form.sign-in { max-width: 28rem; }
-form.sign-in input { width: 100%; font: inherit; padding: 0.5rem; box-sizing: border-box; margin: 0.5rem 0; }
-form.sign-in > a { margin-left: 1rem; }
 /* "Forgot password?": a button that looks like a link. */
-form.sign-in button.link { background: none; border: none; padding: 0; margin-left: 1rem; color: inherit; text-decoration: underline; cursor: pointer; font: inherit; }
-/* The set-password page's email: shown, never changed there. */
-form.sign-in input[readonly] { background: var(--bg-hover); color: var(--ink-secondary); border: 1px solid var(--border-light); }
+form.sign-in button.link { background: none; border: none; padding: 0; color: inherit; text-decoration: underline; cursor: pointer; font: inherit; }
 button { font: inherit; padding: 0.4rem 1rem; }
 /* The four button kinds and two sizes (UI_DOCTRINE 3, SP-321): every button but the listed exceptions is .btn, plus a kind for a filled one.
    A button never sets its own height, padding or colour; tracker/buttonKinds.test.mjs fails one that has no kind. */
@@ -269,8 +303,7 @@ button { font: inherit; padding: 0.4rem 1rem; }
 .btn-danger:disabled, .btn-danger[aria-disabled="true"] { background: var(--btn-danger-flat-disabled); border-color: var(--btn-danger-flat-disabled); color: var(--btn-flat-ink); }
 .btn-sm { height: var(--btn-height-sm); padding: 0 0.625rem; font-size: var(--text-xs); }
 .toolbar { display: flex; gap: var(--space-7); align-items: center; justify-content: space-between; margin-bottom: 1rem; }
-.toolbar .project-picker { font-weight: 600; }
-.toolbar .project-picker select { font: inherit; font-weight: normal; padding: 0.35rem; margin-left: 0.25rem; }
+.toolbar .project-picker { font-weight: 600; display: flex; align-items: center; gap: var(--space-3); }
 /* The Pipeline Status pod (SP-168): when each loop stage runs next, between the search field and Board/List. */
 .toolbar .pipeline-pod { display: flex; flex-direction: column; align-items: flex-start; margin: 10px 20px; padding: 0.3rem 0.75rem; border: 1px solid var(--navy); border-radius: var(--radius-input); background: var(--pod-bg); font-size: var(--text-sm); color: var(--ink-primary); white-space: nowrap; cursor: pointer; text-align: left; font-family: inherit; }
 .toolbar .pipeline-pod:hover { background: var(--pod-bg-hover); }
@@ -310,8 +343,8 @@ table.projects td.actions { white-space: nowrap; width: 1%; }
 .table-wrap:has(> table.counts.report.productivity) { max-width: 56rem; }
 table.counts th.custom-range { vertical-align: top; }
 table.counts th.custom-range label { display: block; }
-table.counts th.custom-range input { font: inherit; font-weight: normal; padding: 0.2rem; margin-top: 0.25rem; }
-table.counts th.custom-range select { font: inherit; font-weight: normal; padding: 0.2rem; margin-top: 0.25rem; }
+/* The custom range's date boxes: the browser's own date width and the table's smaller type, so the counts columns stay on one line. */
+table.counts th.custom-range :is(input, select) { width: auto; padding: var(--space-1) var(--space-2); font-size: var(--text-sm); font-weight: normal; margin-top: var(--space-1); }
 /* Where the Time Goes' task list (SP-220): wide enough for a name, the id and the durations on one line each. */
 .table-wrap:has(> table.counts.report.time-split-tickets) { max-width: 64rem; }
 table.time-split-tickets td:first-child, table.time-split-tickets td.count { white-space: nowrap; }
@@ -324,7 +357,6 @@ table.conflict-list td.files { min-width: 18rem; }
 table.conflict-list td.settings { min-width: 9rem; }
 table.conflict-list td.files code { display: block; white-space: nowrap; }
 form.report-scope { display: flex; gap: var(--space-4); align-items: center; margin: 0.5rem 0 1rem; }
-form.report-scope select { font: inherit; padding: 0.35rem; }
 /* A stage's colour from the Settings page (app.mjs drawReporting sets the properties). */
 table.counts tr.coloured td { background: var(--stage-tint); color: var(--stage-text); }
 table.counts tr.coloured td.status { box-shadow: inset 4px 0 0 var(--stage-border); }
@@ -373,22 +405,22 @@ details.group { border: 1px solid var(--border-black); border-radius: var(--radi
 .group th.name { width: 20%; }
 /* SP-324: priority and assignee gave a point each to Last Change when every cell's side padding grew to StarCaster's 0.85rem. */
 .group th.priority { width: 9%; }
-.group td.priority select { width: 100%; max-width: 7.5rem; }
+.group td.priority select { width: 100%; }
 .group td.priority .note { display: block; font-size: var(--text-sm); }
-.group td.assignee select { width: 100%; max-width: 9rem; }
+.group td.assignee select { width: 100%; }
 .group td.assignee .note { display: block; font-size: var(--text-sm); }
 .group th.tags { width: 11%; }
 .group td.tags .tag { margin-bottom: 0.2rem; }
 .group td.tags button.remove-tag { border: 0; background: transparent; padding: 0 0 0 0.3rem; cursor: pointer; color: var(--ink-secondary); font-size: var(--text-sm); }
 .group td.tags button.remove-tag:hover { color: var(--ink-error); }
-.group td.tags select, .group td.tags input.new-tag { display: block; width: 100%; max-width: 9rem; font: inherit; font-size: var(--text-sm); margin-top: 0.15rem; box-sizing: border-box; }
+.group td.tags select, .group td.tags input.new-tag { display: block; width: 100%; font-size: var(--text-sm); margin-top: 0.15rem; }
 .group td.tags .note { display: block; font-size: var(--text-sm); }
 .group td.tags input.new-tag[hidden] { display: none; }
 .group th.topics { width: 11%; }
 .group td.topics .tag { margin-bottom: 0.2rem; }
 .group td.topics button.remove-tag { border: 0; background: transparent; padding: 0 0 0 0.3rem; cursor: pointer; color: var(--ink-secondary); font-size: var(--text-sm); }
 .group td.topics button.remove-tag:hover { color: var(--ink-error); }
-.group td.topics select { display: block; width: 100%; max-width: 9rem; font: inherit; font-size: var(--text-sm); margin-top: 0.15rem; box-sizing: border-box; }
+.group td.topics select { display: block; width: 100%; font-size: var(--text-sm); margin-top: 0.15rem; }
 .group td.topics .note { display: block; font-size: var(--text-sm); }
 .group th.actions { width: 8%; }
 .group td.actions { white-space: nowrap; }
@@ -447,8 +479,8 @@ details.details > summary { cursor: pointer; font-weight: 600; margin-bottom: 0.
 .quick .act > div.details > .meta:first-child { margin-top: 0; }
 .quick .act > div.details > h2 { font-size: var(--text-lg); }
 form.add-comment { margin-bottom: 1.5rem; }
-form.add-comment label { display: block; font-weight: 600; margin-bottom: 0.3rem; }
-form.add-comment textarea { width: 100%; min-height: 5rem; font: inherit; padding: 0.5rem; box-sizing: border-box; }
+form.add-comment label, form.reply label { display: block; margin-bottom: var(--space-3); }
+form.add-comment textarea { min-height: 5rem; }
 form.add-comment .row { display: flex; gap: var(--space-5); align-items: center; margin-top: 0.5rem; }
 .quick.loop-has { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
 @media (max-width: 800px) { .quick.loop-has { grid-template-columns: minmax(0, 1fr); } }
@@ -473,7 +505,6 @@ table.controls td.label { width: 17rem; }
 table.controls td.input { width: 10rem; }
 table.controls td.value { width: 14rem; color: var(--ink-secondary); font-size: var(--text-sm); }
 table.controls td.save .note:not(:empty) { display: block; margin-top: 0.25rem; }
-table.controls input[type="number"] { width: 7rem; }
 details.pipeline-controls .default { color: var(--ink-secondary); font-size: var(--text-xs); border: 1px solid var(--border-black); border-radius: var(--radius-sm); padding: 0 0.3rem; margin-left: 0.4rem; }
 details.pipeline-controls p.not-yet { margin-top: 0.25rem; font-size: var(--text-sm); }
 details.pipeline-controls .in-effect { display: block; color: var(--ink-secondary); font-size: var(--text-sm); }
@@ -495,12 +526,9 @@ button.action:hover { color: var(--ink-error); background: var(--danger-tint); }
 /* The ticket page's Change panel (render.mjs renderEditPanel). */
 details.edit { border: 1px solid var(--border-black); border-radius: var(--radius-input); padding: 0.5rem 1.25rem 1rem; margin-bottom: 1.5rem; }
 details.edit > summary { cursor: pointer; font-weight: 600; }
-details.edit label, details.edit .label { display: block; margin-top: 0.75rem; font-weight: 600; }
-details.edit .row { display: flex; gap: var(--space-4); align-items: center; flex-wrap: wrap; margin-top: 0.3rem; }
-details.edit .row .label { margin-top: 0; }
-details.edit select, details.edit input { font: inherit; padding: 0.35rem; }
-details.edit input#edit-name { flex: 1; min-width: 16rem; }
-details.edit textarea { width: 100%; min-height: 14rem; font: inherit; font-family: var(--font-mono); font-size: var(--text-base); padding: 0.5rem; box-sizing: border-box; margin-top: 0.5rem; }
+details.edit .row { display: flex; gap: var(--space-4); align-items: center; flex-wrap: wrap; }
+details.edit form + form { margin-top: var(--space-4); }
+details.edit textarea { min-height: 14rem; font-family: var(--font-mono); font-size: var(--text-base); margin-top: var(--space-3); }
 details.edit .tags .tag { margin-left: 0; margin-right: 0.3rem; }
 details.edit button.remove-tag { border: 0; background: transparent; padding: 0 0 0 0.3rem; cursor: pointer; color: var(--ink-secondary); font-size: var(--text-sm); }
 details.edit button.remove-tag:hover { color: var(--ink-error); }
@@ -508,26 +536,26 @@ details.edit p.locked { margin: 0.3rem 0 0; }
 details.edit p.locked + p { margin: 0.2rem 0 0; font-size: var(--text-base); }
 details.edit .edit-note:empty { display: none; }
 details.add-task { border: 1px solid var(--border-black); border-radius: var(--radius-input); padding: 0.5rem 1.25rem; margin-bottom: 1rem; background: var(--brand-blue); color: var(--ink-primary); }
-details.add-task form.request input, details.add-task form.request textarea { background: var(--bg-surface); color: var(--ink-primary); }
+details.add-task form.request :is(input, textarea) { background: var(--bg-surface); }
 details.add-task[open] { padding-bottom: 1rem; }
 details.add-task .note:not(:empty) { background: var(--bg-surface); border-radius: var(--radius-sm); padding: 0.15rem 0.5rem; }
 details.add-task .hint { color: var(--ink-primary); }
 details.add-task > summary { cursor: pointer; font-weight: 600; }
 details.add-task form.request textarea { min-height: 8rem; }
+/* The Title box sits in its own wrapper (shown only for Write My Own Title), its label above it like every text box. */
+details.add-task .own-title > label { display: block; margin-bottom: var(--space-3); }
 /* The title toggle and the suggested titles (SP-248): radio buttons sit beside their words, not as full-width fields. */
 details.add-task [hidden] { display: none; }
 details.add-task .title-mode { display: inline-flex; margin-top: 0.75rem; border: 1px solid var(--ink-primary); border-radius: var(--radius-input); overflow: hidden; background: var(--bg-surface); }
-details.add-task .title-mode label { display: flex; align-items: center; gap: var(--space-2); margin: 0; padding: 0.35rem 0.85rem; cursor: pointer; font-weight: 600; }
+details.add-task .title-mode label { display: flex; align-items: center; gap: var(--space-2); margin: 0; padding: 0.35rem 0.85rem; cursor: pointer; font-size: var(--text-base); }
 details.add-task .title-mode label + label { border-left: 1px solid var(--ink-primary); }
 details.add-task .title-mode label:has(input:checked) { background: var(--ink-primary); color: var(--btn-text); }
-details.add-task form.request .title-mode input, details.add-task form.request .title-choice input { display: inline-block; width: auto; margin: 0; padding: 0; }
 details.add-task fieldset.title-choices { margin: 1rem 0 0; padding: 0.5rem 0.85rem 0.75rem; border: 1px solid var(--ink-primary); border-radius: var(--radius-input); background: var(--bg-surface); }
 details.add-task fieldset.title-choices legend { font-weight: 600; padding: 0 0.35rem; background: var(--bg-surface); border-radius: var(--radius-sm); }
 details.add-task form.request label.title-choice { display: flex; align-items: baseline; gap: var(--space-3); margin-top: 0.4rem; font-weight: 400; cursor: pointer; }
 /* Suggest Next Tasks (SP-251): beside Add Task, the same blue box; each suggestion a white row with its handle, place, Keep and title. */
 /* SP-303: the Suggest checkbox sits at the right end of the Add Task bar; its part shares the one blue box. */
 details.add-task > summary .suggest-switch { float: right; display: flex; align-items: center; gap: var(--space-2); margin: 0; font-weight: 600; cursor: pointer; }
-details.add-task > summary .suggest-switch input { width: auto; margin: 0; }
 details.add-task .suggest-next > .hint { margin-top: 0.75rem; }
 details.add-task .suggest-next ol.suggestions { list-style: none; margin: 0.75rem 0 0; padding: 0; }
 details.add-task .suggest-next ol.suggestions:empty { display: none; }
@@ -535,9 +563,7 @@ details.add-task .suggest-next li.suggestion { display: flex; flex-wrap: wrap; a
 details.add-task .suggest-next li.suggestion.dragging { opacity: 0.5; }
 details.add-task .suggest-next .drag-handle { cursor: grab; border: 0; background: transparent; padding: 0 0.2rem; font-size: var(--text-lg); line-height: 1; color: var(--ink-secondary); }
 details.add-task .suggest-next .drag-handle:focus-visible { outline: 2px solid var(--focus-ring-color); color: var(--ink-primary); }
-details.add-task .suggest-next select.place { width: auto; margin: 0; }
 details.add-task .suggest-next label.keep { display: flex; align-items: center; gap: var(--space-1); margin: 0; font-weight: 400; }
-details.add-task .suggest-next label.keep input { width: auto; margin: 0; }
 details.add-task .suggest-next .suggestion-title { flex: 0 1 auto; font-weight: 600; }
 details.add-task .suggest-next .filed { font-size: var(--text-base); }
 details.add-task .suggest-next button.suggestion-info-open { flex: none; display: inline-flex; margin-right: auto; padding: 0.1rem; border: 0; border-radius: var(--radius-pill); background: transparent; color: var(--ink-primary); cursor: pointer; }
@@ -581,38 +607,25 @@ p.answer-in { font-size: var(--text-md); font-style: normal; color: var(--ink-pr
 p.pr-state { font-size: var(--text-md); color: var(--ink-primary); background: var(--bg-hover); border-left: 4px solid var(--ink-secondary); border-radius: var(--radius-sm); padding: 0.75rem 1rem; margin: 0 0 1rem; }
 p.pr-state.quiet { color: var(--ink-secondary); }
 form.invite { max-width: 36rem; margin-bottom: 1.5rem; }
-form.invite label { display: block; font-weight: 600; }
-form.invite .row { display: flex; gap: var(--space-4); align-items: center; margin-top: 0.35rem; }
-form.invite input { flex: 1; font: inherit; padding: 0.5rem; box-sizing: border-box; }
-form.invite select { font: inherit; padding: 0.45rem; }
-form.invite .row + label { margin-top: 0.75rem; }
-form.invite .hint { display: block; font-size: var(--text-sm); margin-top: 0.25rem; }
 form.add-file { max-width: 48rem; margin-bottom: 1.5rem; }
-form.add-file label { display: block; font-weight: 600; }
-form.add-file .row { display: flex; flex-wrap: wrap; gap: var(--space-4); align-items: center; margin-top: 0.35rem; }
-form.add-file select { font: inherit; padding: 0.45rem; flex: 1; min-width: 16rem; }
-form.add-file input[type=file] { font: inherit; }
-form.add-file .hint { display: block; font-size: var(--text-sm); margin-top: 0.25rem; }
 table.task-files td.actions { white-space: nowrap; }
 table.people, table.invites { max-width: 48rem; }
-table.people select { font: inherit; padding: 0.2rem; }
 /* A project's members (Projects page) or a user's projects (Users page): one per line, an admin's Remove beside each, the Add picker under them. */
 table.projects td .member { display: block; white-space: nowrap; }
 /* An admin's Projects cell says first that they see every project. */
 table.people td span.every { display: block; font-weight: 600; margin-bottom: 0.2rem; }
 table.projects td button.remove-member { margin-left: 0.4rem; }
-table.projects td select.add-member { display: block; margin-top: 0.3rem; font: inherit; font-size: var(--text-sm); padding: 0.15rem; }
+table.projects td select.add-member { display: block; margin-top: 0.3rem; font-size: var(--text-sm); }
 /* The Users page's Roles and Permissions table: each role, its description under it, a tick per permission. */
 table.roles .hint { display: block; font-size: var(--text-sm); }
 table.roles .has { text-align: center; }
 /* The Search field (Tasks page toolbar, search results page) and its results. */
-form.search { flex: 1; max-width: 24rem; }
-form.search input { width: 100%; box-sizing: border-box; font: inherit; padding: 0.35rem 0.6rem; border: 1px solid var(--border-black); border-radius: var(--radius-input); }
+form.search { flex: 1; max-width: 24rem; display: flex; align-items: center; gap: var(--space-3); }
+form.search input { flex: 1 1 auto; }
 .search-filters { display: flex; flex-wrap: wrap; gap: var(--space-3) var(--space-5); margin: 0 0 0.75rem; }
-.search-filters label { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-base); }
-.search-filters select { font: inherit; padding: 0.2rem 0.4rem; border: 1px solid var(--border-black); border-radius: var(--radius-input); }
+.search-filters label { display: flex; align-items: center; gap: var(--space-3); }
 .search-filters form.ticket-lookup { margin: 0; }
-.search-filters input[name="ticket"] { font: inherit; padding: 0.2rem 0.4rem; border: 1px solid var(--border-black); border-radius: var(--radius-input); }
+.search-filters input[name="ticket"] { width: calc(9ch + 2rem); }
 ol.search-results { list-style: none; padding: 0; margin: 0; max-width: 48rem; }
 ol.search-results li { padding: 0.75rem 0; border-bottom: 1px solid var(--border-black); }
 ol.search-results p { margin: 0.15rem 0; }
@@ -648,7 +661,8 @@ form.request .field-note { display: block; font-size: var(--text-sm); }
 /* The Quick Claude Commands pod (SP-179, SP-212): a search box and the slash commands, each a name and a few words. */
 section.commands-pod { background: var(--pod-bg); border: 1px solid var(--navy-soft); border-radius: var(--radius-container); padding: 1rem 1.25rem; box-sizing: border-box; }
 section.commands-pod h2 { margin-top: 0; }
-#command-search { width: 100%; box-sizing: border-box; font: inherit; padding: 0.35rem 0.6rem; border: 1px solid var(--border-black); border-radius: var(--radius-input); margin: 0 0 0.5rem; background: var(--bg-surface); }
+section.commands-pod label[for="command-search"] { display: block; margin-bottom: var(--space-2); }
+#command-search { margin: 0 0 0.5rem; background: var(--bg-surface); }
 ul.command-list { list-style: none; padding: 0; margin: 0; }
 ul.command-list li { border-bottom: 1px solid var(--pod-divider); }
 ul.command-list li:last-child { border-bottom: 0; }
@@ -671,8 +685,6 @@ details.spirality-docs { margin-top: 1.5rem; }
 details.spirality-docs > summary { cursor: pointer; }
 details.spirality-docs > summary h2 { display: inline; }
 .doc-filters { display: flex; gap: var(--space-3); align-items: center; flex-wrap: wrap; margin: 0 0 0.5rem; }
-.doc-filters select, #doc-search { font: inherit; padding: 0.35rem 0.6rem; border: 1px solid var(--border-black); border-radius: var(--radius-input); }
-#doc-search { width: 100%; max-width: 24rem; box-sizing: border-box; }
 table.spirality-docs td.date { white-space: nowrap; }
 
 /* The Console view (SP-233): every ticket in flight as a tile, one column per stage. */
