@@ -122,6 +122,15 @@
   --feature-7: #f5d0f0;
   --feature-8: #e6dccb;
   --feature-9: #d5dde6;
+  /* The Console map's area colours (SP-333), drawn at 20% over the page; a stage colour set on Settings replaces its own. */
+  --map-requested: #64748b;
+  --map-needs-input: #d97706;
+  --map-queued: #2563eb;
+  --map-building: #ea580c;
+  --map-in-review: #7c3aed;
+  --map-rework: #dc2626;
+  --map-ready: #16a34a;
+  --map-live: #0d9488;
 
   font-family: var(--font-sans);
   color: var(--ink-primary);
@@ -714,13 +723,50 @@ details.spirality-docs > summary h2 { display: inline; }
 table.spirality-docs td.date { white-space: nowrap; }
 
 /* The Console view (SP-233): every ticket in flight as a tile, one column per stage. */
-.console { display: flex; gap: var(--space-4); align-items: flex-start; overflow-x: auto; padding-bottom: 1rem; }
-.console-stage { flex: 1 1 0; min-width: 9rem; background: var(--bg-hover); border: 1px solid var(--border-black); border-radius: var(--radius-input); padding: 0.5rem; }
-.console-stage h2 { font-size: var(--text-base); margin: 0 0 0.5rem; display: flex; align-items: baseline; gap: var(--space-3); }
-.console-stage h2 .count { margin-left: auto; }
-.console-stage.coloured { border-color: var(--stage-border); }
-.console-stage.coloured h2 { background: var(--stage-tint); color: var(--stage-text); margin: -0.5rem -0.5rem 0.5rem; padding: 0.5rem 0.75rem; border-radius: calc(var(--radius-input) - 1px) calc(var(--radius-input) - 1px) 0 0; }
-.console-stage.coloured h2 .quiet { color: var(--stage-text); }
+/* SP-333: the Console is a map of the loop. render.mjs MAP_AREAS places each area and placeArea each tile, as
+   shares of the map (data-x, data-y, data-w, data-h, data-size), which app.mjs placeOnMap turns into --at-x, --at-y,
+   --at-w, --at-h and --at-size; the map keeps one shape, so the layout scales with the window. */
+.console { overflow-x: auto; padding-bottom: 1rem; }
+.console-map { position: relative; width: 100%; min-width: 60rem; aspect-ratio: 160 / 100; }
+.map-area { --area: var(--map-requested); position: absolute; box-sizing: border-box; left: calc(var(--at-x) * 100% + var(--space-1) / 2); top: calc(var(--at-y) * 100% + var(--space-1) / 2); width: calc(var(--at-w) * 100% - var(--space-1)); height: calc(var(--at-h) * 100% - var(--space-1)); background: color-mix(in srgb, var(--area) 20%, var(--bg-surface)); border: 1px solid color-mix(in srgb, var(--area) 45%, var(--bg-surface)); border-radius: var(--radius-input); }
+.map-area[data-area="Needs your input"] { --area: var(--map-needs-input); }
+.map-area[data-area="Queued"] { --area: var(--map-queued); }
+.map-area[data-area="Building"] { --area: var(--map-building); }
+.map-area[data-area="In review"] { --area: var(--map-in-review); }
+.map-area[data-area="Rework"] { --area: var(--map-rework); }
+.map-area[data-area="Ready to launch"] { --area: var(--map-ready); }
+.map-area[data-area="Live"] { --area: var(--map-live); }
+.map-area.coloured { --area: var(--stage-border); }
+.map-area h2 { font-size: var(--text-base); margin: 0; padding: 0.4rem 0.6rem; display: flex; align-items: baseline; gap: var(--space-3); }
+.map-area h2 .count { margin-left: auto; }
+.map-area.coloured h2, .map-area.coloured h2 .quiet { color: var(--stage-text); }
+.map-area > .tiles { position: absolute; inset: 0; display: block; pointer-events: none; }
+.console-map .tile { position: absolute; left: calc(var(--at-x) * 100%); top: calc(var(--at-y) * 100%); width: calc(var(--at-size) * 100%); height: auto; aspect-ratio: 1; box-sizing: border-box; pointer-events: auto; }
+.console-map .tile[data-fade] { opacity: var(--at-fade); }
+.tile-compact .tile-facts, .tile-tiny .tile-facts { display: none; }
+.tile-compact .tile-number, .tile-tiny .tile-number { top: 0; bottom: 0; display: flex; align-items: center; justify-content: center; font-size: var(--text-sm); }
+.tile-compact .tile-prefix { display: none; }
+.tile-tiny .tile-picture { display: none; }
+.tile-tiny .tile-number { font-size: var(--text-xs); line-height: var(--leading-tight); text-align: center; }
+.tile.more { overflow: visible; display: block; }
+.tile.more summary { display: flex; align-items: center; justify-content: center; height: 100%; font-size: var(--text-sm); font-weight: 700; cursor: pointer; list-style: none; text-align: center; }
+.tile.more summary::-webkit-details-marker { display: none; }
+.tile.more .more-list { position: absolute; z-index: 20; width: 22rem; max-height: 15rem; overflow-y: auto; margin: var(--space-1) 0 0; padding: 0.5rem 0.75rem; list-style: none; background: var(--bg-surface); border: 1px solid var(--border-black); border-radius: var(--radius-input); box-shadow: var(--shadow-pop); font-size: var(--text-sm); overflow-wrap: anywhere; }
+.tile.more .more-list li { padding: 0.15rem 0; }
+/* The list opens toward the middle of the map, so it never leaves it (render.mjs moreOpens): 15rem fits above or below any tile at the map's narrowest. */
+.tile.more.opens-right .more-list { left: 0; }
+.tile.more.opens-left .more-list { right: 0; }
+.tile.more.opens-down .more-list { top: 100%; margin: var(--space-1) 0 0; }
+.tile.more.opens-up .more-list { bottom: 100%; margin: 0 0 var(--space-1); }
+.console-other { margin-top: 1rem; }
+.console-other h2 { font-size: var(--text-base); margin: 0 0 0.5rem; }
+/* A narrow screen (a phone) stacks the areas in the loop's order instead of squashing the map. */
+@media (max-width: 700px) {
+  .console-map { min-width: 0; aspect-ratio: auto; display: flex; flex-direction: column; gap: var(--space-3); }
+  .map-area { position: static; width: auto; height: auto; padding-bottom: 0.5rem; }
+  .map-area > .tiles { position: static; display: flex; flex-wrap: wrap; gap: var(--space-3); padding: 0 0.5rem; pointer-events: auto; }
+  .console-map .tile { position: relative; left: auto; top: auto; width: 8rem; }
+}
 .tiles { display: flex; flex-wrap: wrap; gap: var(--space-3); }
 .tile { position: relative; display: flex; flex-direction: column; width: 8rem; height: 8rem; background: var(--bg-surface); border: 1px solid var(--border-black); border-radius: var(--radius-btn); overflow: hidden; color: var(--ink-primary); text-decoration: none; }
 .tile:hover, .tile:focus-visible { outline: 2px solid var(--focus-ring-color); outline-offset: 1px; }
@@ -748,6 +794,8 @@ table.spirality-docs td.date { white-space: nowrap; }
 .tile.feature .tile-facts { background: var(--bg-surface); }
 .tile.feature .tile-prefix { color: var(--tile-prefix-on-feature); }
 .tile.dimmed { opacity: 0.25; }
+/* On the map a Live tile's fade (.console-map .tile[data-fade]) is as specific as this and comes earlier, so a pick still dims it. */
+.console-map .tile.dimmed { opacity: 0.25; }
 .feature-key { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin: 0 0 0.75rem; font-size: var(--text-sm); }
 .feature-key .key-title { font-weight: 600; margin-right: 0.25rem; }
 .feature-pick { display: inline-flex; align-items: center; gap: var(--space-2); padding: 0.15rem 0.5rem; border: 1px solid var(--border-black); border-radius: var(--radius-pill); background: var(--bg-surface); color: var(--ink-primary); font: inherit; cursor: pointer; }

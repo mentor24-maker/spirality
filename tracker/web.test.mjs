@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { DEMO_NEWEST_RELEASE, DEMO_OWN_PROJECT, DEMO_SUGGESTIONS, DEMO_TOPICS, demoNewestRelease, demoSuggest, seedDemo, tickingClock } from './demoData.mjs';
 import { reportsOf, REPORT_RANGES, GROWTH_PERIODS, searchTickets, PRIORITIES, timeSplitOf, isFailureNote, TIME_BUCKETS, pipelineControlsOf } from './pageData.mjs';
-import { escapeHtml, renderStatusLine, renderComment, renderInline, renderMarkdown, unwrapDoc, headingId, renderQuickAction, CLOSE_LINE, REPLY_LINE, offersMerge, offersClose, bugReport, BUG_REPORT_TAG, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, heldBugReport, renderBugReportActions, approveQuestion, rejectQuestion, changeProblem, REJECT_COMMENT, WONT_DO_TAG, HELD_REPORT_LINE, HELD_REPORT_STATUS_LINE, cardMove, renderTrail, renderProjectPicker, renderTopicPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, loopHasIt, renderCommentForm, LOOP_HAS_STATUSES, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, renderLoopQueueDiagram, LOOP_QUEUE_DIAGRAM, renderTopics, renderTopicEditRow, topicDeleteQuestion, renderTagEditRow, tagDeleteQuestion, tagAddressable, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, renderListTopics, projectTags, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, renderReleaseGroup, controlValueText, mountainTime, wakeInEffectText, modelLastPassText, renderConsole, renderConsoleTile, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, consoleFeature, featureColourIndex, renderFeatureKey, FEATURE_PALETTE, drainLine, capInFlightText, renderTitleChoices, titleModeOf, TITLE_MODES, SUGGEST_POLL_MS, moveSuggestion, suggestState, filingPlan, orderPlan, andList, suggestRunLine, renderSuggestRows, renderSuggestionInfo, suggestionFileHref } from './web/render.mjs';
+import { escapeHtml, renderStatusLine, renderComment, renderInline, renderMarkdown, unwrapDoc, headingId, renderQuickAction, CLOSE_LINE, REPLY_LINE, offersMerge, offersClose, bugReport, BUG_REPORT_TAG, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, heldBugReport, renderBugReportActions, approveQuestion, rejectQuestion, changeProblem, REJECT_COMMENT, WONT_DO_TAG, HELD_REPORT_LINE, HELD_REPORT_STATUS_LINE, cardMove, renderTrail, renderProjectPicker, renderTopicPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, loopHasIt, renderCommentForm, LOOP_HAS_STATUSES, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, renderLoopQueueDiagram, LOOP_QUEUE_DIAGRAM, renderTopics, renderTopicEditRow, topicDeleteQuestion, renderTagEditRow, tagDeleteQuestion, tagAddressable, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, renderListTopics, projectTags, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, renderReleaseGroup, controlValueText, mountainTime, wakeInEffectText, modelLastPassText, renderConsole, renderConsoleTile, MAP_AREAS, MAP_UNITS, placeArea, driftOf, liveFade, slotShare, moreOpens, moreFeatures, tileSizeClass, TILE_MAX, TILE_MIN, TILE_COMPACT, TILE_TINY, LIVE_FADE_FLOOR, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, consoleFeature, featureColourIndex, renderFeatureKey, FEATURE_PALETTE, drainLine, capInFlightText, renderTitleChoices, titleModeOf, TITLE_MODES, SUGGEST_POLL_MS, moveSuggestion, suggestState, filingPlan, orderPlan, andList, suggestRunLine, renderSuggestRows, renderSuggestionInfo, suggestionFileHref } from './web/render.mjs';
 import { startServer, setupSettingsOf } from './server.mjs';
 import { saveAnswers, setupFields, setupOf } from './setup.mjs';
 import { DANE_FIELDS as SETUP_FIELDS, STEPS as SETUP_STEPS } from '../scripts/onboard/onboard.mjs';
@@ -5542,8 +5542,7 @@ test('a Console tile escapes every piece of ticket and project text', () => {
   assert.match(html, /href="\/t\/AL-%3Cb%3E"/);
 });
 
-test('the Console groups tiles by stage in the order given, shows an empty stage\'s heading, never draws Live, and never drops a ticket', () => {
-  const stages = ['Requested', 'Rework', 'Queued', 'Building', 'In review', 'Needs your input', 'Ready to launch', 'Live'];
+test('the Console map: an area per stage in the loop\'s order, each with its name, count and place; no ticket dropped, an unknown status listed under the map (SP-333)', () => {
   const answer = {
     projects: [ALPHA, BETA],
     tickets: [
@@ -5552,20 +5551,160 @@ test('the Console groups tiles by stage in the order given, shows an empty stage
       consoleTicket({ id: 'AL-2', status: 'Odd' }),
     ],
   };
-  const html = renderConsole(answer, stages, CONSOLE_NOW);
-  const order = [...html.matchAll(/<section class="console-stage" data-stage="([^"]+)">/g)].map((m) => m[1]);
-  assert.deepEqual(order, ['Requested', 'Rework', 'Queued', 'Building', 'In review', 'Needs your input', 'Ready to launch', 'Odd']);
-  assert.match(html, /data-stage="Requested"><h2><span class="stage-name">Requested<\/span><span class="count quiet">0<\/span><\/h2><div class="tiles"><\/div>/);
-  const queued = html.slice(html.indexOf('data-stage="Queued">'), html.indexOf('data-stage="Building">'));
-  assert.match(queued, /href="\/t\/AL-1"/);
-  assert.match(queued, /tile-logo/);
-  const his = html.slice(html.indexOf('<section class="console-stage" data-stage="Needs your input">'), html.indexOf('<section class="console-stage" data-stage="Ready to launch">'));
-  assert.match(his, /<a class="tile waiting" href="\/t\/BE-1"/);
-  assert.match(his, /tile-prefix" aria-hidden="true">BE</);
-  // No stage list (it could not be read): the tickets' own stages, in the answer's order.
-  const bare = renderConsole(answer, [], CONSOLE_NOW);
-  assert.deepEqual([...bare.matchAll(/<section class="console-stage" data-stage="([^"]+)">/g)].map((m) => m[1]), ['Queued', 'Needs your input', 'Odd']);
-  assert.equal(renderConsole(null, [], CONSOLE_NOW), '<div class="console"></div>');
+  const html = renderConsole(answer, CONSOLE_NOW);
+  const order = [...html.matchAll(/<section class="map-area" data-stage="([^"]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(order, ['Requested', 'Needs your input', 'Queued', 'Building', 'In review', 'Rework', 'Ready to launch', 'Live']);
+  assert.ok(!order.includes('Go'), '"Go" is the operator\'s answer, not a stage');
+  assert.match(html, /<div class="console"><div class="console-map" role="group" aria-label="The loop">/);
+  assert.match(html, /data-area="Requested" data-x="0" data-y="0" data-w="0\.2375" data-h="0\.64"><h2><span class="stage-name">Requested<\/span><span class="count quiet">0<\/span><\/h2><div class="tiles"><\/div>/);
+  const area = (s) => html.slice(html.indexOf(`<section class="map-area" data-stage="${s}"`), html.indexOf('</section>', html.indexOf(`<section class="map-area" data-stage="${s}"`)));
+  assert.match(area('Queued'), /<a class="tile" data-x="[\d.]+" data-y="[\d.]+" data-size="[\d.]+" href="\/t\/AL-1"/);
+  assert.match(area('Needs your input'), /<a class="tile waiting" data-x=[^>]*href="\/t\/BE-1"/);
+  assert.match(html, /<section class="console-other"><h2>Other Statuses<\/h2><div class="tiles"><a class="tile" href="\/t\/AL-2"/);
+  assert.doesNotMatch(html, /style="/, 'places are data, never a style attribute');
+  assert.match(renderConsole(null, CONSOLE_NOW), /^<div class="console"><div class="console-map"[^>]*>(<section class="map-area"[\s\S]*?<\/section>){8}<\/div><\/div>$/);
+});
+
+test('the Console map\'s areas tile the map with no overlap, the main path round the edge and the two detours inside it (SP-333)', () => {
+  const inside = (a) => a.x >= 0 && a.y >= 0 && a.x + a.w <= MAP_UNITS.width && a.y + a.h <= MAP_UNITS.height;
+  const overlap = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+  assert.ok(MAP_AREAS.every(inside));
+  for (const a of MAP_AREAS) for (const b of MAP_AREAS) if (a !== b) assert.ok(!overlap(a, b), `${a.status} overlaps ${b.status}`);
+  assert.equal(MAP_AREAS.reduce((n, a) => n + a.w * a.h, 0), MAP_UNITS.width * MAP_UNITS.height, 'every part of the map belongs to a stage');
+  const at = Object.fromEntries(MAP_AREAS.map((a) => [a.status, a]));
+  const edge = (a) => a.x === 0 || a.y === 0 || a.x + a.w === MAP_UNITS.width || a.y + a.h === MAP_UNITS.height;
+  for (const s of ['Requested', 'Queued', 'Building', 'In review', 'Ready to launch', 'Live']) assert.ok(edge(at[s]), `${s} is on the main path round the edge`);
+  for (const s of ['Needs your input', 'Rework']) assert.ok(!edge(at[s]), `${s} is a detour inside the ring`);
+  // Live closes the loop under Requested.
+  assert.equal(at.Live.x, at.Requested.x);
+  assert.equal(at.Live.y, at.Requested.y + at.Requested.h);
+  // The shares the page draws by meet exactly too: rounding must not push one area onto its neighbour.
+  const drawn = [...renderConsole(null, CONSOLE_NOW).matchAll(/data-area="([^"]+)" data-x="([\d.]+)" data-y="([\d.]+)" data-w="([\d.]+)" data-h="([\d.]+)"/g)]
+    .map(([, status, x, y, w, h]) => ({ status, x: +x, y: +y, w: +w, h: +h }));
+  assert.equal(drawn.length, MAP_AREAS.length);
+  const eps = 1e-9;
+  for (const a of drawn) for (const b of drawn) if (a !== b) assert.ok(!(a.x + eps < b.x + b.w && b.x + eps < a.x + a.w && a.y + eps < b.y + b.h && b.y + eps < a.y + a.h), `${a.status} drawn over ${b.status}`);
+  assert.deepEqual(MAP_AREAS.map((a) => a.status).sort(), ['Building', 'In review', 'Live', 'Needs your input', 'Queued', 'Ready to launch', 'Requested', 'Rework']);
+});
+
+test('in Queued the next to build sits nearest the exit toward Building, the rest in build order; the same answer always draws the same places (SP-333)', () => {
+  const queued = MAP_AREAS.find((a) => a.status === 'Queued');
+  const tickets = ['AL-1', 'AL-2', 'AL-3', 'AL-4'].map((id) => consoleTicket({ id }));
+  const placed = placeArea(queued, tickets, CONSOLE_NOW);
+  const first = placed.tiles[0];
+  assert.equal(first.ticket.id, 'AL-1');
+  assert.equal(first.col, placed.grid.cols - 1, 'the right-hand column, toward Building');
+  assert.equal(first.row, 0);
+  assert.deepEqual(placed.tiles.map((t) => t.ticket.id), ['AL-1', 'AL-2', 'AL-3', 'AL-4']);
+  for (let i = 1; i < placed.tiles.length; i++) assert.ok(placed.tiles[i].col <= placed.tiles[i - 1].col, 'each later one no nearer the exit');
+  assert.equal(renderConsole({ projects: [ALPHA], tickets }, CONSOLE_NOW), renderConsole({ projects: [ALPHA], tickets }, CONSOLE_NOW));
+  const slots = new Set(placed.tiles.map((t) => `${t.col},${t.row}`));
+  assert.equal(slots.size, tickets.length, 'no two tiles in one place');
+});
+
+test('in Building and In review a tile drifts toward the exit the longer it sits; a stuck one is pressed against it (SP-333)', () => {
+  const building = MAP_AREAS.find((a) => a.status === 'Building');
+  const review = MAP_AREAS.find((a) => a.status === 'In review');
+  const ago = (h) => new Date(CONSOLE_NOW - h * 3_600_000).toISOString();
+  assert.equal(driftOf(consoleTicket({ status: 'Building', stageSince: ago(0) }), CONSOLE_NOW), 0);
+  assert.equal(driftOf(consoleTicket({ status: 'Building', stageSince: ago(1.5) }), CONSOLE_NOW), 0.5);
+  assert.equal(driftOf(consoleTicket({ status: 'Building', stageSince: ago(30) }), CONSOLE_NOW), 1, 'never past the exit');
+  assert.equal(driftOf(consoleTicket({ status: 'In review', stageSince: ago(3) }), CONSOLE_NOW), 0.5);
+  assert.equal(driftOf(consoleTicket({ status: 'Queued', stageSince: ago(3) }), CONSOLE_NOW), 0, 'only the two drift areas drift');
+  const fresh = consoleTicket({ id: 'AL-1', status: 'Building', stageSince: ago(0) });
+  const stuck = consoleTicket({ id: 'AL-2', status: 'Building', stageSince: ago(5) });
+  const b = placeArea(building, [fresh, stuck], CONSOLE_NOW);
+  const col = (id) => b.tiles.find((t) => t.ticket.id === id).col;
+  assert.equal(col('AL-2'), b.grid.cols - 1, 'stuck: against the exit toward In review');
+  assert.equal(col('AL-1'), 0, 'just in: at the entrance');
+  // In review leaves downward, toward Ready to launch.
+  const r = placeArea(review, [consoleTicket({ id: 'AL-3', status: 'In review', stageSince: ago(9) })], CONSOLE_NOW);
+  assert.equal(r.tiles[0].row, r.grid.rows - 1);
+  // A full line pushes the next one to the nearest line with room, never onto another tile.
+  const many = Array.from({ length: 6 }, (_, i) => consoleTicket({ id: `AL-${10 + i}`, status: 'Building', stageSince: ago(9) }));
+  const crowd = placeArea(building, many, CONSOLE_NOW);
+  assert.equal(new Set(crowd.tiles.map((t) => `${t.col},${t.row}`)).size, crowd.tiles.length);
+});
+
+test('a filling area shrinks its tiles, and past what it holds shows "+N More" with the rest; fifty tickets never spill out of the area (SP-333)', () => {
+  const queued = MAP_AREAS.find((a) => a.status === 'Queued');
+  const one = placeArea(queued, [consoleTicket()], CONSOLE_NOW);
+  assert.equal(one.grid.size, TILE_MAX);
+  const many = Array.from({ length: 50 }, (_, i) => consoleTicket({ id: `AL-${i + 1}` }));
+  const full = placeArea(queued, many, CONSOLE_NOW);
+  assert.equal(full.grid.size, TILE_MIN);
+  assert.ok(full.more, 'a "+N more" tile');
+  assert.equal(full.tiles.length + full.more.hidden.length, 50, 'every ticket is shown or in the more list');
+  assert.equal(full.tiles.length + 1, full.grid.cols * full.grid.rows);
+  assert.equal(full.more.hidden[0].id, `AL-${full.tiles.length + 1}`, 'the last in build order go in it');
+  for (const slot of [...full.tiles, full.more]) {
+    const { x, y, size } = slotShare(queued, full.grid, slot);
+    assert.ok(x >= 0 && x + size <= 1, 'inside the area across');
+    assert.ok(y >= 0 && y + size * queued.w / queued.h <= 1.0001, 'inside the area down');
+  }
+  const html = renderConsole({ projects: [ALPHA], tickets: many.map((t) => ({ ...t, status: 'Queued' })) }, CONSOLE_NOW);
+  const n = full.more.hidden.length;
+  assert.match(html, new RegExp(`<details class="tile more opens-right opens-down tile-tiny" data-stage="Queued"[^>]*><summary aria-label="${n} more in Queued">\\+${n} More</summary><ul class="more-list"><li><a href="/t/AL-${full.tiles.length + 1}">`));
+  assert.match(html, /<a class="tile tile-tiny" data-x=/);
+  assert.equal(tileSizeClass(TILE_MAX), '');
+  assert.equal(tileSizeClass(TILE_COMPACT - 0.5), 'tile-compact');
+  assert.equal(tileSizeClass(TILE_TINY - 0.5), 'tile-tiny');
+});
+
+test('a "+N More" list opens toward the middle of the map, so Requested\'s, at the far left, and Live\'s, at the bottom, stay on screen (SP-333)', () => {
+  const many = (status) => Array.from({ length: 60 }, (_, i) => consoleTicket({ id: `AL-${i + 1}`, status, stageSince: new Date(CONSOLE_NOW - 3_600_000).toISOString() }));
+  const opens = {};
+  for (const area of MAP_AREAS) {
+    const placed = placeArea(area, many(area.status), CONSOLE_NOW);
+    assert.ok(placed.more, `${area.status} overflows at 60`);
+    opens[area.status] = moreOpens(area, placed.grid, placed.more);
+    // The tile's left edge, as a share of the map: an anchored-left list starts there, an anchored-right one ends at its right edge.
+    const { x, size } = slotShare(area, placed.grid, placed.more);
+    const left = (area.x + x * area.w) / MAP_UNITS.width;
+    const right = left + size * area.w / MAP_UNITS.width;
+    // At the map's narrowest (60rem) the 22rem list must fit on the side it opens toward.
+    if (opens[area.status].includes('opens-right')) assert.ok((1 - left) * 60 >= 22, `${area.status} opens right with room`);
+    else assert.ok(right * 60 >= 22, `${area.status} opens left with room`);
+  }
+  assert.equal(opens.Requested, 'opens-right opens-up', 'far left, low: rightward and up');
+  assert.match(opens.Live, /opens-right opens-up/);
+  assert.match(opens['Ready to launch'], /opens-up/);
+  assert.match(opens.Queued, /opens-down/);
+  const html = renderConsole({ projects: [ALPHA], tickets: many('Requested') }, CONSOLE_NOW);
+  assert.match(html, /<details class="tile more opens-right opens-up tile-tiny" data-stage="Requested"/);
+  const css = readFileSync(WEB('app.css'), 'utf8');
+  assert.match(css, /\.tile\.more\.opens-right \.more-list \{ left: 0; \}/);
+  assert.match(css, /\.tile\.more\.opens-up \.more-list \{ bottom: 100%;/);
+  assert.doesNotMatch(/\.tile\.more \.more-list \{[^}]*\}/.exec(css)[0], /right: 0|top: 100%/, 'the base list is anchored by its direction only');
+});
+
+test('a Live tile shows no next change, and says none aloud: it is finished (SP-333)', () => {
+  const live = renderConsoleTile(consoleTicket({ status: 'Live', nextChange: null }), ALPHA, CONSOLE_NOW);
+  assert.doesNotMatch(live, /class="fact next"/);
+  assert.doesNotMatch(live, /next change/);
+  assert.match(live, /class="fact age"/);
+  assert.match(renderConsoleTile(consoleTicket({ status: 'Queued' }), ALPHA, CONSOLE_NOW), /class="fact next"/, 'in flight: still shown');
+});
+
+test('Live shows the launches the server sends, newest nearest Requested, each fading with age (SP-333)', () => {
+  const ago = (h) => new Date(CONSOLE_NOW - h * 3_600_000).toISOString();
+  const tickets = [
+    consoleTicket({ id: 'AL-1', status: 'Live', stageSince: ago(20), nextChange: null }),
+    consoleTicket({ id: 'AL-2', status: 'Live', stageSince: ago(1), nextChange: null }),
+    consoleTicket({ id: 'AL-3', status: 'Live', stageSince: ago(30), nextChange: null }),
+  ];
+  const html = renderConsole({ projects: [ALPHA], tickets }, CONSOLE_NOW);
+  // The server (consoleOf, on its own clock) leaves out launches over a day old; the page does not filter again on the browser's clock.
+  assert.match(html, /\/t\/AL-3"/, 'sent by the server: drawn, at the fade floor');
+  assert.doesNotMatch(/export function renderConsole\([\s\S]*?\n\}/.exec(readFileSync(WEB('render.mjs'), 'utf8'))[0], /LIVE_SHOWN_MS/);
+  const live = html.slice(html.indexOf('data-stage="Live" data-area'));
+  assert.ok(live.indexOf('/t/AL-2"') < live.indexOf('/t/AL-1"'), 'newest first, nearest the exit toward Requested');
+  assert.match(live, /data-fade="0\.97" href="\/t\/AL-2"/);
+  assert.match(live, /data-fade="0\.42" href="\/t\/AL-1"/);
+  assert.equal(liveFade(consoleTicket({ stageSince: ago(0) }), CONSOLE_NOW), 1);
+  assert.equal(liveFade(consoleTicket({ stageSince: ago(24) }), CONSOLE_NOW), LIVE_FADE_FLOOR);
+  assert.match(live, /data-fade="0\.3" href="\/t\/AL-3"/);
+  assert.match(live, /<span class="count quiet">3<\/span>/);
 });
 
 test('the Console page: /in-flight and the stage colours drawn, a Console link beside Board and List, remembered for "Tasks", redrawn every beat', () => {
@@ -5574,7 +5713,11 @@ test('the Console page: /in-flight and the stage colours drawn, a Console link b
   assert.match(draw, /api\('GET', '\/in-flight'\)/);
   assert.match(draw, /api\('GET', '\/stage-colours'\)/);
   assert.match(draw, /localStorage\.setItem\(VIEW_KEY, 'console'\)/);
-  assert.match(draw, /renderConsole\(answer, stages\)/);
+  assert.match(draw, /renderConsole\(answer\)\}`;\s*placeOnMap\(\);/);
+  assert.match(draw, /answer\.tickets\.some\(\(t\) => t\.status !== 'Live'\) \? '' : '<p class="quiet">Nothing is in flight\.<\/p>'/, 'the last day\'s launches are not work in flight');
+  // Each place becomes a CSS value set from the page's code, never a style attribute.
+  const place = /function placeOnMap\(\) \{([\s\S]*?)\n\}/.exec(app)[1];
+  assert.match(place, /el\.style\.setProperty\(prop, el\.dataset\[key\]\)/);
   assert.match(draw, /<div class="tasks-head title-row"><h1>Tasks<\/h1>\$\{slug \? viewSwitch\(slug, 'console'\) : ''\}<\/div>/, 'the tabs at the right of the title row, as on Board and List (SP-326)');
   // The view switch names all three in Title Case, the current one marked.
   const sw = /function viewSwitch\(slug, current\) \{([\s\S]*?)\n\}/.exec(app)[1];
@@ -5593,6 +5736,20 @@ test('the Console page: /in-flight and the stage colours drawn, a Console link b
   assert.match(refresh, /const now = drawn\.ticking \? \[\] : await Promise\.all\(/);
 });
 
+test('the Console map\'s look: areas at 20% of their colour, a set stage colour taking over, the map one shape that scales, a narrow screen stacked (SP-333)', () => {
+  const css = readFileSync(WEB('app.css'), 'utf8');
+  assert.match(css, /\.console-map \{[^}]*aspect-ratio: 160 \/ 100;/);
+  assert.match(css, /\.map-area \{[^}]*background: color-mix\(in srgb, var\(--area\) 20%, var\(--bg-surface\)\);/);
+  assert.match(css, /\.map-area\.coloured \{ --area: var\(--stage-border\); \}/);
+  for (const a of MAP_AREAS.filter((x) => x.status !== 'Requested')) assert.match(css, new RegExp(`\\.map-area\\[data-area="${a.status}"\\] \\{ --area: var\\(--map-[a-z-]+\\); \\}`));
+  assert.match(css, /\.console-map \.tile \{[^}]*left: calc\(var\(--at-x\) \* 100%\);[^}]*width: calc\(var\(--at-size\) \* 100%\);[^}]*aspect-ratio: 1;/);
+  assert.match(css, /@media \(max-width: 700px\) \{[\s\S]*?\.map-area \{ position: static;/);
+  // The dim of a Features pick comes after Live's fade, so a picked feature still dims a Live tile.
+  // A Live tile's fade (.console-map .tile[data-fade]) is three selectors deep, so the map's dim is too, and comes after it: a pick dims a Live tile.
+  assert.match(css, /\n\.console-map \.tile\.dimmed \{ opacity: 0\.25; \}/);
+  assert.ok(css.indexOf('.console-map .tile[data-fade]') < css.indexOf('.console-map .tile.dimmed'));
+});
+
 test('the Console\'s minute redraw keeps how far across he has scrolled', () => {
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   assert.match(app, /const SIDEWAYS = '\.console';/);
@@ -5600,8 +5757,8 @@ test('the Console\'s minute redraw keeps how far across he has scrolled', () => 
   // Read before the redraw, put back on the new columns before the page is shown.
   assert.match(place, /const across = \[\.\.\.main\.querySelectorAll\(SIDEWAYS\)\]\.map\(\(el\) => el\.scrollLeft\);/);
   assert.match(place, /restore\(\) \{[\s\S]*\[\.\.\.main\.querySelectorAll\(SIDEWAYS\)\]\.forEach\(\(el, i\) => \{ if \(i < across\.length\) el\.scrollLeft = across\[i\]; \}\);[\s\S]*window\.scrollTo\(0, y\);/);
-  // The Console's columns are the area that scrolls sideways.
-  assert.match(renderConsole({ tickets: [], projects: [] }, ['Queued']), /^<div class="console">/);
+  // The Console's map is the area that scrolls sideways on a window narrower than it.
+  assert.match(renderConsole({ tickets: [], projects: [] }), /^<div class="console">/);
   assert.match(readFileSync(WEB('app.css'), 'utf8'), /\.console \{[^}]*overflow-x: auto/);
 });
 
@@ -5683,13 +5840,24 @@ test('the Features key lists each feature on screen with its count, most first, 
   assert.match(renderConsole({ tickets, projects: [ALPHA] }, ['Queued'], CONSOLE_NOW), /^<div class="feature-key"[\s\S]*<\/div><div class="console">/);
 });
 
+test('a "+N More" tile names the features of the tickets it holds, so a pick dims it only when none of them match (SP-333)', () => {
+  assert.equal(moreFeatures([consoleTicket({ tags: ['Board'] }), consoleTicket({ tags: [] }), consoleTicket({ tags: ['Board'] }), consoleTicket({ tags: ['Mail'] })]), 'Board\nMail');
+  assert.equal(moreFeatures([consoleTicket({ tags: [] })]), '', 'no feature: an empty list, which every pick dims');
+  assert.equal(moreFeatures(null), '');
+  const many = Array.from({ length: 60 }, (_, i) => consoleTicket({ id: `AL-${i + 1}`, status: 'Queued', tags: i === 59 ? ['Mail'] : ['Board'] }));
+  const html = renderConsole({ projects: [ALPHA], tickets: many }, CONSOLE_NOW);
+  assert.match(html, /<details class="tile more[^"]*" data-stage="Queued" data-features="Board\nMail" data-x=/);
+});
+
 test('a click on a feature in the key dims every other tile, a second click shows them all, and the minute redraw keeps the pick', () => {
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   const draw = /async function drawConsole\(\) \{([\s\S]*?)\n\}/.exec(app)[1];
   assert.match(draw, /pickedFeature = pickedFeature === b\.dataset\.feature \? null : b\.dataset\.feature;/);
   assert.match(draw, /showFeaturePick\(\);\s*putTrail/, 'the pick is put back after every draw');
   const show = /function showFeaturePick\(\) \{([\s\S]*?)\n\}/.exec(app)[1];
-  assert.match(show, /tile\.classList\.toggle\('dimmed', pickedFeature !== null && tile\.dataset\.feature !== pickedFeature\)/);
+  assert.match(show, /tile\.classList\.toggle\('dimmed', pickedFeature !== null && !has\)/);
+  // A "+N More" tile dims only when none of the tickets it holds is the picked feature.
+  assert.match(show, /const has = tile\.dataset\.features !== undefined\s*\? tile\.dataset\.features\.split\('\\n'\)\.includes\(pickedFeature\)\s*: tile\.dataset\.feature === pickedFeature;/);
   assert.match(show, /b\.setAttribute\('aria-pressed', String\(b\.dataset\.feature === pickedFeature\)\)/);
   assert.match(show, /if \(!picks\.some\(\(b\) => b\.dataset\.feature === pickedFeature\)\) pickedFeature = null;/);
 });

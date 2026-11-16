@@ -865,7 +865,7 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     // lane times (pageData.consoleOf says null, never a guess).
     if (parts.length === 1 && parts[0] === 'in-flight' && method === 'GET') {
       const only = scopeOf(me);
-      return [200, consoleOf(store, { only, pipeline: lanesNow('in-flight'), prStates: await prStatesOf(prsToCheck(store, { only })) })];
+      return [200, consoleOf(store, { only, now: now(), pipeline: lanesNow('in-flight'), prStates: await prStatesOf(prsToCheck(store, { only })) })];
     }
 
     // Dane's page: the Projects screen, the project Tasks opens, and the New
