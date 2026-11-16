@@ -583,9 +583,9 @@ function savedTasksView() {
 
 /**
  * The Tasks page's view switch: Board and List for project `slug`, then the
- * Console (every project), `current` marked. A tab bar of its own under the
- * title row (UI_DOCTRINE 5, SP-322): each tab is its own address, so a link
- * with `aria-current`.
+ * Console (every project), `current` marked. A tab bar (UI_DOCTRINE 5,
+ * SP-322) drawn as the last item of the Tasks title row, at its right-hand
+ * end (SP-326): each tab is its own address, so a link with `aria-current`.
  */
 function viewSwitch(slug, current) {
   const views = [['board', 'Board', `/board/${encodeURIComponent(slug)}`], ['list', 'List', `/list/${encodeURIComponent(slug)}`], ['console', 'Console', '/console']];
@@ -1214,8 +1214,7 @@ async function drawConsole() {
   const slug = answer.projects.some((p) => p.slug === project) ? project : answer.projects[0]?.slug;
   setTitle('Console · Tracker');
   main.innerHTML = `
-    <div class="tasks-head title-row"><h1>Tasks</h1></div>
-    ${slug ? viewSwitch(slug, 'console') : ''}
+    <div class="tasks-head title-row"><h1>Tasks</h1>${slug ? viewSwitch(slug, 'console') : ''}</div>
     ${answer.tickets.length ? '' : '<p class="quiet">Nothing is in flight.</p>'}
     ${renderConsole(answer, stages)}`;
   for (const el of main.querySelectorAll('[data-stage]')) {
@@ -1390,8 +1389,8 @@ async function drawProject(slug, view, { adding = false, filed = null, unchecked
         ${searchForm('')}
         <button type="button" class="pipeline-pod" aria-haspopup="dialog" title="Open Pipeline Status"></button>
       </div>
+      ${viewSwitch(board.project, view)}
     </div>
-    ${viewSwitch(board.project, view)}
     ${filed && (unchecked || notUploaded.length) ? `<p class="filed-note">${unchecked ? UNCHECKED_NOTE : ''}${notUploadedNote(notUploaded)}</p>` : ''}
     <details class="add-task">
       <summary>Add Task<label class="suggest-switch">Suggest <input type="checkbox" value="on" aria-label="Suggest Next Tasks"${suggesting ? ' checked' : ''}></label></summary>

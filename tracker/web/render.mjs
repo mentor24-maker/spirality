@@ -350,11 +350,12 @@ export const PIPELINE_UNAVAILABLE = 'Pipeline Status unavailable';
 
 /**
  * The Pipeline Status pod's contents on the Tasks page (SP-168), from GET
- * /pipeline, as HTML: the heading "Pipeline Stages", then one row per stage
- * (SP-194), its name on the left and its next time (or "running") on the
- * right, "Relay 10:45 / Build running / Review 11:10 / Intake 11:04". The pod
- * is a button, and a table is not allowed inside one, so the two columns are
- * a CSS grid of spans (`.stages` in app.css). `timeOf` turns an ISO time into
+ * /pipeline, as HTML: the heading "Pipeline Stages", then one column per
+ * stage, name above time (SP-326): the names "Relay Build Review Intake"
+ * along the top and each one's next time (or "running") under it. The pod is
+ * a button, and a table is not allowed inside one, so the columns are a CSS
+ * grid of spans (`.stages` in app.css), each stage's name then its time, which
+ * the grid turns into columns. `timeOf` turns an ISO time into
  * the page's own clock time. A stage with no pass logged yet, or no next time
  * known, shows a dash, its title saying which. A running stage's two cells
  * carry `running`, which app.css draws green. A stage whose next time is
