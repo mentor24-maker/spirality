@@ -1743,7 +1743,7 @@ export function renderEditPanel({ name, description, status, priority, tags = []
         <label for="edit-priority">Priority</label>
         <div class="row"><select id="edit-priority" data-field="priority">${priorityOptions}</select><span class="note" data-note="priority"></span></div>
         <label for="edit-tag">Tags</label>
-        <div class="row"><span class="tags">${chips || '<span class="quiet">none</span>'}</span><input id="edit-tag" type="text" placeholder="Add a tag, then Enter"><span class="note" data-note="tags"></span></div>
+        <div class="row"><span class="tags">${chips || '<span class="quiet">No tags yet</span>'}</span><input id="edit-tag" type="text" placeholder="Add a tag, then Enter"><span class="note" data-note="tags"></span></div>
         <label for="edit-assignee">Assigned to</label>
         <div class="row"><select id="edit-assignee" data-field="assignee">${who}</select><span class="note" data-note="assignee"></span></div>
         <label for="edit-status">Status</label>
@@ -2428,7 +2428,7 @@ export function renderTopics({ projects, project, topics = [], tags = [] }, { ti
       <td class="name"><span class="tag">${escapeHtml(tag)}</span></td>
       <td class="count">${count} ${count === 1 ? 'task' : 'tasks'}</td></tr>`;
   const tagList = tags === null
-    ? '<p class="note error no-tags">The tags could not be read. Reload the page to try again.</p>'
+    ? '<p class="error no-tags">The tags could not be read. Reload the page to try again.</p>'
     : tags.length
       ? `<table class="projects tag-list"><thead><tr><th>Tag</th><th>Tasks</th></tr></thead>
         <tbody>${tags.map(tagRow).join('')}</tbody></table>`
@@ -2959,4 +2959,45 @@ export function renderSuggestionInfo(suggestion, { repo = null } = {}) {
     + (links ? `<h3>Links</h3><ul class="links">${links}</ul>` : '');
   return `<h2 id="suggestion-info-title">${escapeHtml(s.title ?? '')}</h2>`
     + (body || '<p class="quiet">This suggestion came with nothing more to say.</p>');
+}
+
+// ── The message strip (UI_DOCTRINE section 7, SP-323) ──────────────────────
+// Every outcome the page reports (Saving…, Saved, Not saved: …) appears once,
+// in one strip between the header and the page, one message at a time. The
+// page's buttons still write their outcome into the small `.note` beside them
+// (which the stylesheet no longer shows); app.mjs watches those notes and puts
+// what they say in the strip, so no button can report anywhere else.
+
+/** How long a success or information message stays before it closes by itself; an error stays until its × is pressed. */
+export const MESSAGE_CLOSES_MS = 4000;
+/** How long the card after a Save stays before it fades by itself (it has nothing to close). */
+export const SAVED_CARD_MS = 3000;
+/** What the page watches: every button's note, and the List page's line for a refused delete. A setup field's own note stays beside its box. */
+export const MESSAGE_SOURCES = '.note:not(.field-note), .list-note';
+
+/**
+ * What a note says, as one message: `{ kind, text }`, where kind is `error`
+ * (its class says error), `info` (work under way, "Saving…", or a note marked
+ * `info`) or `success` (anything else: "Saved", "Added SP-12"). An empty or
+ * hidden note says nothing: null.
+ */
+export function messageOf({ className = '', text = '', hidden = false } = {}) {
+  const said = String(text ?? '').trim();
+  if (hidden || !said) return null;
+  const classes = String(className ?? '').split(/\s+/);
+  if (classes.includes('error')) return { kind: 'error', text: said };
+  if (classes.includes('info') || /(?:…|\.\.\.)$/.test(said)) return { kind: 'info', text: said };
+  return { kind: 'success', text: said };
+}
+
+/** The strip's contents for one message: the words, and a × on an error, the only kind that waits to be closed. */
+export function renderMessage({ kind, text }) {
+  const role = kind === 'error' ? 'alert' : 'status';
+  const close = kind === 'error' ? '<button type="button" class="message-close" aria-label="Close Message">×</button>' : '';
+  return `<p class="message message-${escapeHtml(kind)}" role="${role}"><span class="message-text">${escapeHtml(text)}</span>${close}</p>`;
+}
+
+/** The small card after a Save: what was saved, with a check, and nothing to close. */
+export function renderSavedCard(text) {
+  return `<p class="saved-card" role="status"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5 9-10"/></svg><span>${escapeHtml(text)}</span></p>`;
 }
