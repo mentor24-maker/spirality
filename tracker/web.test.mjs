@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { DEMO_NEWEST_RELEASE, DEMO_OWN_PROJECT, DEMO_SUGGESTIONS, DEMO_TOPICS, demoNewestRelease, demoSuggest, seedDemo, tickingClock } from './demoData.mjs';
 import { reportsOf, REPORT_RANGES, GROWTH_PERIODS, searchTickets, PRIORITIES, timeSplitOf, isFailureNote, TIME_BUCKETS, pipelineControlsOf } from './pageData.mjs';
-import { escapeHtml, renderStatusLine, renderComment, renderInline, renderMarkdown, unwrapDoc, headingId, renderQuickAction, CLOSE_LINE, REPLY_LINE, offersMerge, offersClose, bugReport, BUG_REPORT_TAG, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, heldBugReport, renderBugReportActions, approveQuestion, rejectQuestion, changeProblem, REJECT_COMMENT, WONT_DO_TAG, HELD_REPORT_LINE, HELD_REPORT_STATUS_LINE, cardMove, renderTrail, renderProjectPicker, renderTopicPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, loopHasIt, renderCommentForm, LOOP_HAS_STATUSES, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, renderTopics, renderTopicEditRow, topicDeleteQuestion, renderTagEditRow, tagDeleteQuestion, tagAddressable, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, renderListTopics, projectTags, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, renderReleaseGroup, controlValueText, mountainTime, wakeInEffectText, modelLastPassText, renderConsole, renderConsoleTile, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, consoleFeature, featureColourIndex, renderFeatureKey, FEATURE_PALETTE, drainLine, capInFlightText, renderTitleChoices, titleModeOf, TITLE_MODES, SUGGEST_POLL_MS, moveSuggestion, suggestState, filingPlan, orderPlan, andList, suggestRunLine, renderSuggestRows, renderSuggestionInfo, suggestionFileHref } from './web/render.mjs';
+import { escapeHtml, renderStatusLine, renderComment, renderInline, renderMarkdown, unwrapDoc, headingId, renderQuickAction, CLOSE_LINE, REPLY_LINE, offersMerge, offersClose, bugReport, BUG_REPORT_TAG, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, heldBugReport, renderBugReportActions, approveQuestion, rejectQuestion, changeProblem, REJECT_COMMENT, WONT_DO_TAG, HELD_REPORT_LINE, HELD_REPORT_STATUS_LINE, cardMove, renderTrail, renderProjectPicker, renderTopicPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, loopHasIt, renderCommentForm, LOOP_HAS_STATUSES, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, renderLoopQueueDiagram, LOOP_QUEUE_DIAGRAM, renderTopics, renderTopicEditRow, topicDeleteQuestion, renderTagEditRow, tagDeleteQuestion, tagAddressable, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, renderListTopics, projectTags, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, renderReleaseGroup, controlValueText, mountainTime, wakeInEffectText, modelLastPassText, renderConsole, renderConsoleTile, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, consoleFeature, featureColourIndex, renderFeatureKey, FEATURE_PALETTE, drainLine, capInFlightText, renderTitleChoices, titleModeOf, TITLE_MODES, SUGGEST_POLL_MS, moveSuggestion, suggestState, filingPlan, orderPlan, andList, suggestRunLine, renderSuggestRows, renderSuggestionInfo, suggestionFileHref } from './web/render.mjs';
 import { startServer, setupSettingsOf } from './server.mjs';
 import { saveAnswers, setupFields, setupOf } from './setup.mjs';
 import { DANE_FIELDS as SETUP_FIELDS, STEPS as SETUP_STEPS } from '../scripts/onboard/onboard.mjs';
@@ -1058,7 +1058,7 @@ test('the page is served at /, at a ticket\'s address, at Projects, at Tasks, at
       assert.equal(r.text, readFileSync(WEB(name), 'utf8'));
     }
     // The header's wordmark and the tab's icon, as images the page's lock allows.
-    for (const name of ['wordmark.png', 'icon.png']) {
+    for (const name of ['wordmark.png', 'icon.png', 'loop-queue-diagram.png']) {
       const r = await fetch(`${f.url}/web/${name}`);
       assert.equal(r.status, 200, name);
       assert.equal(r.headers.get('content-type'), 'image/png');
@@ -4117,7 +4117,7 @@ test('the Docs page carries the Commands section; /docs/commands/<name> opens on
   const draw = app.slice(app.indexOf('async function drawDocs'), app.indexOf('/** Underline the header link'));
   assert.match(draw, /await api\('GET', '\/commands'\)/);
   assert.match(draw, /<h2 id="commands-pod-title">Quick Claude Commands<\/h2>/);
-  assert.match(draw, /<div class="docs-columns">\$\{commandsSection\(\)\}<div class="docs-main">\$\{rest\}<\/div><\/div>/, 'the pod on the left, the rest on the right');
+  assert.match(draw, /<div class="docs-columns">\$\{commandsSection\(\)\}<div class="docs-main">\$\{renderLoopQueueDiagram\(docAddress\)\}\$\{rest\}<\/div><\/div>/, 'the pod on the left, the rest on the right, under the Loop Queue diagram (SP-337)');
   assert.equal((draw.match(/\$\{docsColumns\(`/g) ?? []).length, 2, 'with projects and without, the page is drawn in the two columns');
   assert.doesNotMatch(draw, /\$\{commandsSection\(\)\}\s*\$\{documentation\}/, 'the pod is no longer a section between the others');
   assert.match(draw, /<dialog class="command-details" aria-labelledby="command-details-title">[\s\S]*<button type="submit" class="btn">Close<\/button>[\s\S]*<\/dialog>/);
@@ -6330,4 +6330,42 @@ test('File in This Order files only the kept rows not yet filed, in Requested, a
   assert.match(file, /Not filed: "\$\{s\.title\}"/);
   assert.match(file, /Their order was not set \(/);
   assert.match(file, /Press File in This Order again: nothing is filed twice\./);
+});
+
+test('the Docs page opens with the Loop Queue diagram, each status box a link to its section of the anatomy page (SP-337)', () => {
+  const address = (path) => `/docs/spirality/${path}`;
+  const html = renderLoopQueueDiagram(address);
+  assert.match(html, /<img src="\/web\/loop-queue-diagram\.png" alt="Spirality Loop Queue: how a ticket moves from Requested to Live" width="3200" height="1800">/);
+  // The links are an SVG over the picture with the picture's own size as its viewBox, so they scale with it; never an inline style, which the page's lock refuses.
+  assert.match(html, /<svg class="loop-diagram-links" viewBox="0 0 3200 1800"/);
+  assert.doesNotMatch(html, /style=/);
+  const links = [...html.matchAll(/<a class="diagram-box" href="([^"]+)" aria-label="([^"]+)">/g)].map((m) => [m[2], m[1]]);
+  assert.deepEqual(links, [
+    ['Requested', '/docs/spirality/LOOP_QUEUE_ANATOMY.md#requested'],
+    ['Needs your input', '/docs/spirality/LOOP_QUEUE_ANATOMY.md#needs-your-input'],
+    ['Queued', '/docs/spirality/LOOP_QUEUE_ANATOMY.md#queued'],
+    ['Rework', '/docs/spirality/LOOP_QUEUE_ANATOMY.md#rework'],
+    ['Building', '/docs/spirality/LOOP_QUEUE_ANATOMY.md#building'],
+    ['In review', '/docs/spirality/LOOP_QUEUE_ANATOMY.md#in-review'],
+    ['Ready to launch', '/docs/spirality/LOOP_QUEUE_ANATOMY.md#ready-to-launch'],
+    ['Live', '/docs/spirality/LOOP_QUEUE_ANATOMY.md#live'],
+  ]);
+  // Every anchor is a heading the anatomy page really carries, drawn the way its page draws it.
+  const page = renderMarkdown(unwrapDoc(readFileSync(new URL('../docs/LOOP_QUEUE_ANATOMY.md', import.meta.url), 'utf8')), { headingIds: true });
+  for (const { anchor } of LOOP_QUEUE_DIAGRAM.boxes) assert.match(page, new RegExp(` id="${anchor}"`), anchor);
+  // Each box lies inside the picture and on none of the others.
+  const boxes = LOOP_QUEUE_DIAGRAM.boxes.map((b) => b.box);
+  for (const [l, t, r, b] of boxes) assert.ok(l >= 0 && t >= 0 && r <= 3200 && b <= 1800 && l < r && t < b);
+  for (let i = 0; i < boxes.length; i += 1) {
+    for (let j = i + 1; j < boxes.length; j += 1) {
+      const [a, c] = [boxes[i], boxes[j]];
+      assert.ok(a[2] <= c[0] || c[2] <= a[0] || a[3] <= c[1] || c[3] <= a[1], `${LOOP_QUEUE_DIAGRAM.boxes[i].label} overlaps ${LOOP_QUEUE_DIAGRAM.boxes[j].label}`);
+    }
+  }
+  // The Docs page draws it first in its right-hand column, on both of its screens (with and without projects).
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  assert.match(app, /<div class="docs-main">\$\{renderLoopQueueDiagram\(docAddress\)\}\$\{rest\}<\/div>/);
+  const css = readFileSync(WEB('app.css'), 'utf8');
+  assert.match(css, /a\.diagram-box:focus-visible rect \{[^}]*stroke: var\(--focus-ring-color\)/);
+  assert.match(css, /a\.diagram-box \{[^}]*cursor: pointer/);
 });
