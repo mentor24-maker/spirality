@@ -71,8 +71,16 @@ NOT write any code here. You produce well-formed tasks.
    - **One PR's worth of work** — if it needs more than a few files or touches
      unrelated systems, split it.
    - **Independent** — buildable without waiting on another task, so parallel
-     work does not collide. If two tasks must touch the same file, merge them
-     or state the ordering explicitly in both descriptions.
+     work does not collide. **Tasks that share a file wait on each other, in
+     a chain** (`docs/LOOP_CONTRACT.md`, "The files a ticket will likely
+     change"): each task names its likely files on a `Likely files:` line, and
+     a task whose likely files share any path with a ticket still open (any
+     status but `Live` or closed, including the tasks you file in this pass)
+     carries a `Waits on:` line naming that ticket; with several, the
+     **newest**, so they form a chain, never a fan from one parent. Before
+     filing, read the `Likely files:` lines of the open tickets
+     (`npm run clickup -- queue`, then `get` each). Merging two such tasks
+     into one is still fine when they make one pull request's worth.
    - **Reviewable by a human in a couple of minutes.**
 
 3. **Write each task.** `status: Queued`, **no assignee** (assignment is how
@@ -97,6 +105,8 @@ NOT write any code here. You produce well-formed tasks.
 
    ## Affected files / artifacts
    - Source files likely involved — real paths, checked, not guessed.
+
+   Likely files: <path>[, <path> ...]
 
    ## Acceptance criteria
    - [ ] Concrete, checkable outcomes. The build loop is done when all are met.
