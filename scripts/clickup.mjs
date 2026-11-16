@@ -92,7 +92,9 @@ import stageCounts from '../lib/stageCounts.js';
 // until every ticket it names is closed.
 import { waitsOn, waitsOnText, holdReasons } from '../lib/waitsOn.js';
 import waitingOnOperator from '../lib/waitingOnOperator.js';
-import { ticketLine } from '../lib/clickupTicketLink.js';
+import { ticketLine, findTicketId } from '../lib/clickupTicketLink.js';
+// Which files each open pull request changes (SP-349).
+import { parseRestFiles, sharedWith, refreshPlan, sharedLine, normalFiles } from '../lib/prFiles.js';
 // Telling in-flight tickets that main moved under them (task 86bctjffu).
 import {
   checkBranch, branchContains, tellTickets, latestMainMoved,
@@ -243,6 +245,11 @@ npm run clickup -- <command> [flags]      (Loop Queue: list ${LOOP_QUEUE_LIST}, 
                                                   4 not one (its own PR, none named, or not merged): carry on / 3 moved meanwhile /
                                                   1 a read or write failed
   pr-opened --task <id> --pr <url|number> [--repo owner/name] [--if-missing] [--human-hours <N>] [--body-file <f|->]
+  pr-files [--task <id>] [--files a,b,...] [--json]   which files each open pull request changes (SP-349); with --files or
+                                                  --task, the open pull requests sharing any of them. Exit 0 none shared /
+                                                  3 some shared / 1 could not tell
+  pr-files-refresh [--dry-run]                    the relay's step: re-read each open pull request's files when its branch
+                                                  moved, forget merged or closed ones. Exit 1 if any read or write failed
   verdict --task <id> --pass|--fail --if-status "In review" [--body-file <f|->] [--no-guard] [--fourth-round-anyway]
   priority --task <id> --priority urgent|high|normal|low [--operator-asked]
   tag --task <id> --add <name> | --remove <name>  e.g. wont-do, deferred, an epic name
@@ -411,6 +418,49 @@ function clock(ms) {
 function gh(args) {
   const out = spawnSync('gh', args, { encoding: 'utf8' });
   return { ok: out.status === 0, stdout: String(out.stdout || ''), stderr: String(out.stderr || '') };
+}
+
+/**
+ * Which files pull request `number` in `repo` changes, read from GitHub
+ * (SP-349): `{ ok: true, files, head, state }`, or `{ ok: false, why }`.
+ * The pull request's own head commit and changed-file count are read first,
+ * then every page of its files; a count that does not match (the branch
+ * moved between the two reads, or GitHub cut the list short) is a failed
+ * read, never a short list. A failed read is never "no files".
+ */
+function readPrFilesFromGitHub(repo, number) {
+  const first = (text) => String(text || '').trim().split('\n')[0] || 'gh failed';
+  const view = gh(['pr', 'view', String(number), '--repo', repo, '--json', 'headRefOid,changedFiles,state']);
+  if (!view.ok) return { ok: false, why: `GitHub did not answer for PR #${number}: ${first(view.stderr)}` };
+  let pr;
+  try { pr = JSON.parse(view.stdout); } catch { return { ok: false, why: `GitHub answered PR #${number} with something that is not JSON` }; }
+  if (!Number.isInteger(pr?.changedFiles) || typeof pr?.headRefOid !== 'string') return { ok: false, why: `GitHub's answer for PR #${number} has no changed-file count or head commit` };
+  const list = gh(['api', '--paginate', `repos/${repo}/pulls/${number}/files`, '--jq', '.[] | [.filename, (.previous_filename // "")] | @tsv']);
+  if (!list.ok) return { ok: false, why: `GitHub did not list PR #${number}'s files: ${first(list.stderr)}` };
+  const { files, count } = parseRestFiles(list.stdout);
+  if (files == null) return { ok: false, why: `GitHub's list of PR #${number}'s files could not be read` };
+  if (count !== pr.changedFiles) return { ok: false, why: `GitHub listed ${count} changed file(s) for PR #${number} but the pull request says ${pr.changedFiles}` };
+  return { ok: true, files, head: pr.headRefOid, state: pr.state };
+}
+
+/**
+ * Read PR #number's files from GitHub and record them on the tracker for
+ * `ticket`, read back (SP-349). `{ ok, line }` on a record that stuck;
+ * `{ ok: false, unsupported?, why }` otherwise, nothing stored. `read` is
+ * an already-made GitHub read, to save a second one.
+ */
+async function recordPrFiles(ticket, repo, number, read = null) {
+  const got = read || readPrFilesFromGitHub(repo, number);
+  if (!got.ok) return { ok: false, why: got.why };
+  const out = await tracker.recordPrFiles(number, { ticket: String(ticket).toUpperCase(), repo, head: got.head, files: got.files });
+  if (out.unsupported) return { ok: false, unsupported: true, why: out.json?.err || 'not kept on this tracker' };
+  if (out.res.status === 404 && out.json?.error === 'unknown-ticket') return { ok: false, unknownTicket: true, why: `${String(ticket).toUpperCase()} is not a ticket on this project` };
+  if (!out.res.ok) return { ok: false, why: `the tracker refused the record (HTTP ${out.res.status}${out.json?.message ? `: ${out.json.message}` : out.json?.err ? `: ${out.json.err}` : ''})` };
+  const kept = normalFiles(out.json?.files);
+  if (!kept || JSON.stringify(kept) !== JSON.stringify(got.files) || out.json?.head !== got.head) {
+    return { ok: false, why: 'the record did not read back as written' };
+  }
+  return { ok: true, files: kept, line: `PR #${number} (${String(ticket).toUpperCase()}): ${kept.length} changed file(s) recorded at ${got.head.slice(0, 7)}, read back.` };
 }
 
 /**
@@ -1545,7 +1595,95 @@ if (cmd === 'whoami') {
     console.log(`Task ${task}: PR #${prNumber} recorded (${prUrl}), read back and parsed by the gate's own reader.`);
     if (humanHours != null) console.log(`Task ${task}: human-hours estimate ${humanHours} recorded and read back.`);
   }
+  // Which files it changes (SP-349). The PR trail above is the record review
+  // and merge read, so a files read that fails does not undo it or fail the
+  // hand-off: it is said, nothing is stored as "no files", and the relay's
+  // pr-files-refresh reads them again on its next pass.
+  const filesKept = await recordPrFiles(task, repo, prNumber);
+  if (filesKept.ok) console.log(`Task ${task}: ${filesKept.line}`);
+  else if (filesKept.unsupported) console.error(`Task ${task}: changed files not recorded: ${filesKept.why}`);
+  else console.error(`Task ${task}: PR #${prNumber}'s changed files were NOT recorded: ${filesKept.why}. Nothing was stored for them; the relay's next pr-files-refresh tries again.`);
   reportLimits();
+
+} else if (cmd === 'pr-files') {
+  // Read-only (SP-349): which files each open pull request changes, as the
+  // tracker keeps them. With --files (comma-separated paths), which open
+  // pull requests change any of them; with --task, that ticket's own pull
+  // request's files and the other open pull requests sharing any. --json for
+  // the lanes. Exit 0 nothing shared (or a plain list), 3 some open pull
+  // request shares a file, 1 could not tell.
+  const task = arg('task') ? String(arg('task')).toUpperCase() : null;
+  const asked = arg('files') != null ? normalFiles(String(arg('files')).split(',')) : null;
+  if (arg('files') != null && !asked?.length) { console.error('pr-files: --files names one or more paths, comma-separated.'); process.exit(2); }
+  const out = await tracker.prFiles();
+  if (out.unsupported) { console.error(`pr-files: ${out.json?.err}`); process.exit(1); }
+  if (!out.res.ok) { console.error(`pr-files: could not read the records (HTTP ${out.res.status}). Could not tell.`); process.exit(1); }
+  const records = out.json.pullRequests;
+  const own = task ? records.filter((r) => String(r.ticket).toUpperCase() === task) : [];
+  if (task && !asked && !own.length) {
+    if (flag('json')) console.log(JSON.stringify({ ticket: task, pullRequests: [], shared: [] }));
+    else console.log(`${task}: no open pull request of its has its files recorded.`);
+    reportLimits();
+    process.exit(0);
+  }
+  if (!task && !asked) {
+    if (flag('json')) console.log(JSON.stringify({ project: out.json.project, pullRequests: records }));
+    else for (const r of records) console.log(`#${r.number}\t${r.ticket}\t${r.files.length} file(s)\t${r.head ? r.head.slice(0, 7) : '-'}\t${r.readAt}`);
+    console.error(`pr-files: ${records.length} open pull request(s) with files recorded on ${out.json.project}.`);
+    reportLimits();
+    process.exit(0);
+  }
+  const files = asked || normalFiles(own.flatMap((r) => r.files));
+  const shared = sharedWith(records, files, task ? { ticket: task } : {});
+  if (flag('json')) console.log(JSON.stringify({ ticket: task, files, pullRequests: own, shared }));
+  else if (shared.length) for (const x of shared) console.log(sharedLine(x));
+  else console.log(`No other open pull request changes ${asked ? 'any of those files' : `the files ${task}'s pull request changes`}.`);
+  reportLimits();
+  process.exit(shared.length ? 3 : 0);
+
+} else if (cmd === 'pr-files-refresh') {
+  // Run by the relay every pass (scripts/run_relay.sh, SP-349): bring the
+  // tracker's record of each open pull request's files up to date. A pull
+  // request with no record, or whose branch has moved since it was read, is
+  // read again; a record whose pull request merged or closed is forgotten.
+  // A pull request whose body links no ticket is left out, said in one line.
+  // Exit 0 all current, 1 some read or write failed (each said); --dry-run
+  // reads and prints only.
+  const dryRun = flag('dry-run');
+  const repo = project.githubRepo;
+  const out = await tracker.prFiles();
+  if (out.unsupported) { console.log(`pr-files-refresh: nothing to do — ${out.json?.err}`); process.exit(0); }
+  if (!out.res.ok) { console.error(`pr-files-refresh FAILED: the records could not be read (HTTP ${out.res.status}). Nothing was changed.`); process.exit(1); }
+  const records = out.json.pullRequests;
+  const listed = gh(['pr', 'list', '--repo', repo, '--state', 'open', '--json', 'number,headRefOid,body', '--limit', '500']);
+  let openPrs = null;
+  if (listed.ok) { try { openPrs = JSON.parse(listed.stdout); } catch { openPrs = null; } }
+  if (!Array.isArray(openPrs)) {
+    console.error(`pr-files-refresh FAILED: GitHub's open pull requests for ${repo} could not be listed (${listed.ok ? 'not a list' : listed.stderr.trim().split('\n')[0] || 'gh failed'}). Nothing was changed, nothing forgotten.`);
+    process.exit(1);
+  }
+  const plan = refreshPlan({ records, openPrs });
+  const failed = [];
+  let recorded = 0, forgotten = 0, untracked = 0;
+  for (const pr of plan.read) {
+    const had = records.find((r) => r.number === pr.number);
+    const ticket = had?.ticket || findTicketId(pr.body, project) || null;
+    if (!ticket) { untracked += 1; console.log(`PR #${pr.number}: its body links no ticket, so its files are not kept.`); continue; }
+    if (dryRun) { console.log(`PR #${pr.number} (${String(ticket).toUpperCase()}): would read its files (${had ? 'branch moved' : 'none recorded'}).`); continue; }
+    const kept = await recordPrFiles(ticket, repo, pr.number);
+    if (kept.ok) { recorded += 1; console.log(kept.line); } else if (kept.unknownTicket) { untracked += 1; console.log(`PR #${pr.number}: ${kept.why}, so its files are not kept.`); } else { failed.push(`PR #${pr.number}: ${kept.why}`); }
+  }
+  for (const r of plan.forget) {
+    if (dryRun) { console.log(`PR #${r.number} (${r.ticket}): would forget its files (no longer open).`); continue; }
+    const gone = await tracker.forgetPrFiles(r.number);
+    if (!gone.res.ok) { failed.push(`PR #${r.number}: no longer open, but its record could NOT be forgotten (HTTP ${gone.res.status})`); continue; }
+    forgotten += 1;
+    console.log(`PR #${r.number} (${r.ticket}): no longer open, its files forgotten.`);
+  }
+  for (const f of failed) console.error(`pr-files-refresh: ${f}. Nothing was stored for it; the next pass tries again.`);
+  console.log(`pr-files-refresh: ${openPrs.length} open pull request(s); ${plan.current} already current, ${recorded} read, ${forgotten} forgotten, ${untracked} with no ticket, ${failed.length} failed${dryRun ? ' (dry run: nothing written)' : ''}.`);
+  reportLimits();
+  process.exit(failed.length ? 1 : 0);
 
 } else if (cmd === 'verdict') {
   const task = arg('task');

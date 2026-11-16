@@ -74,6 +74,13 @@
  *    project's operator, as a person, or a loop names one, checked in the
  *    same transaction as the write, and the newest row is read back before
  *    it returns. Naming the release it already runs writes nothing.
+ *  - Which files each open pull request changes is a record per pull
+ *    request (`pr_files`, lib/prFiles.js): its ticket, repository, the
+ *    branch's head commit when read and the sorted list of paths, replaced
+ *    whole on every read and removed once it merges or closes. Only a loop
+ *    (a machine sign-in) writes one, the ticket must be in the same project,
+ *    and the row is read back before it returns. A list that is not a list
+ *    of paths is refused, never stored as "no files".
  *  - A person's account is an email (unique, kept lower-case) and a password
  *    of at least 12 characters, stored only as a salted scrypt hash. A
  *    machine never holds an email, a password or a session: the loops keep
@@ -144,6 +151,7 @@ import { DatabaseSync } from 'node:sqlite';
 import loopStatuses from '../lib/loopStatuses.js';
 import { checkControl, ControlError, controlOf, withValues } from './pipelineControls.mjs';
 import { isReleaseName, rollBackTarget } from '../lib/releases.mjs';
+import { normalFiles } from '../lib/prFiles.js';
 
 const { DISPLAY, TERMINAL_STATUSES, PRIORITY_RANK, statusOf } = loopStatuses;
 
@@ -378,6 +386,18 @@ CREATE TABLE IF NOT EXISTS project_releases (
   at          TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS project_releases_by_project ON project_releases (project, id);
+CREATE TABLE IF NOT EXISTS pr_files (
+  project     TEXT NOT NULL REFERENCES projects(slug),
+  number      INTEGER NOT NULL,
+  ticket      TEXT NOT NULL REFERENCES tickets(id),
+  repo        TEXT NOT NULL,
+  head        TEXT,
+  files       TEXT NOT NULL,
+  actor       INTEGER NOT NULL REFERENCES actors(id),
+  read_at     TEXT NOT NULL,
+  PRIMARY KEY (project, number)
+);
+CREATE INDEX IF NOT EXISTS pr_files_by_ticket ON pr_files (ticket);
 CREATE TABLE IF NOT EXISTS next_suggestions (
   project     TEXT PRIMARY KEY REFERENCES projects(slug),
   state       TEXT NOT NULL,
@@ -699,6 +719,20 @@ function commentFromRow(row) {
     author: num(row.author),
     body: row.body,
     createdAt: row.created_at,
+  };
+}
+
+/** One pull request's changed files as kept (`pr_files`). */
+function prFilesFromRow(row) {
+  return {
+    project: row.project,
+    number: num(row.number),
+    ticket: row.ticket,
+    repo: row.repo,
+    head: row.head ?? null,
+    files: JSON.parse(row.files),
+    actor: num(row.actor),
+    readAt: row.read_at,
   };
 }
 
@@ -1657,6 +1691,7 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
         db.prepare('DELETE FROM pipeline_settings WHERE project = ?').run(slug);
         db.prepare('DELETE FROM pipeline_setting_changes WHERE project = ?').run(slug);
         db.prepare('DELETE FROM project_releases WHERE project = ?').run(slug);
+        db.prepare('DELETE FROM pr_files WHERE project = ?').run(slug);
         db.prepare('DELETE FROM next_suggestions WHERE project = ?').run(slug);
         // Its topics go too: there is no other way to remove them yet.
         db.prepare('DELETE FROM topics WHERE project = ?').run(slug);
@@ -2239,6 +2274,75 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
       const r = db.prepare('SELECT * FROM next_suggestions WHERE project = ?').get(String(project));
       if (!r) return null;
       return { state: r.state, suggestions: r.suggestions == null ? null : JSON.parse(r.suggestions), message: r.message, at: r.at };
+    },
+
+    /**
+     * Every open pull request's changed files on a project, by number:
+     * `[{ project, number, ticket, repo, head, files, actor, readAt }]`.
+     */
+    prFiles(project) {
+      if (!this.getProject(project)) throw new StoreError('unknown-project', `no project "${project}".`);
+      return db.prepare('SELECT * FROM pr_files WHERE project = ? ORDER BY number').all(String(project)).map(prFilesFromRow);
+    },
+
+    /** One pull request's record, or null. */
+    prFilesOf(project, number) {
+      const r = db.prepare('SELECT * FROM pr_files WHERE project = ? AND number = ?').get(String(project), Number(number));
+      return r ? prFilesFromRow(r) : null;
+    },
+
+    /**
+     * Record which files pull request `number` changes, replacing what was
+     * kept for it. Refused: an actor who is not a machine (`not-allowed`),
+     * a project or ticket that does not exist or a ticket in another
+     * project (`unknown-project`, `unknown-ticket`), a number that is not a
+     * whole number from 1 (`bad-number`), no repository (`bad-repo`), and
+     * files that are not a list of paths (`bad-files`). Read back in the
+     * same transaction; answers the record as stored.
+     */
+    recordPrFiles({ project, number, ticket, repo, head = null, files, actor }) {
+      const n = Number(number);
+      if (!Number.isInteger(n) || n < 1) throw new StoreError('bad-number', `"${number}" is not a pull request number.`);
+      if (typeof repo !== 'string' || !/^[^/\s]+\/[^/\s]+$/.test(repo.trim())) throw new StoreError('bad-repo', `"${repo}" is not a GitHub repository (owner/name).`);
+      const list = normalFiles(files);
+      if (list == null) throw new StoreError('bad-files', 'files must be a list of paths; nothing was stored.');
+      if (head != null && (typeof head !== 'string' || !/^[0-9a-f]{7,64}$/i.test(head.trim()))) throw new StoreError('bad-head', `"${head}" is not a commit id.`);
+      return transaction(() => {
+        const p = this.getProject(project);
+        if (!p) throw new StoreError('unknown-project', `no project "${project}".`);
+        requireActor(actor, 'the recorder');
+        if (this.getActor(actor)?.kind !== 'machine') throw new StoreError('not-allowed', 'only a loop sign-in records which files a pull request changes.');
+        const t = this.getTicket(String(ticket ?? '').toUpperCase());
+        if (!t || t.project !== p.slug) throw new StoreError('unknown-ticket', `no ticket "${ticket}" in ${p.name}.`);
+        const files = JSON.stringify(list);
+        const h = head == null ? null : head.trim();
+        db.prepare(`INSERT INTO pr_files (project, number, ticket, repo, head, files, actor, read_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT (project, number) DO UPDATE SET ticket = excluded.ticket, repo = excluded.repo, head = excluded.head,
+            files = excluded.files, actor = excluded.actor, read_at = excluded.read_at`)
+          .run(p.slug, n, t.id, repo.trim(), h, files, actor, now());
+        const back = this.prFilesOf(p.slug, n);
+        if (!back || back.ticket !== t.id || JSON.stringify(back.files) !== files || back.head !== h) {
+          throw new StoreError('write-failed', `the files of pull request #${n} did not read back as written.`);
+        }
+        return back;
+      });
+    },
+
+    /**
+     * Forget pull request `number`'s files (it merged or closed). Only a
+     * machine. Answers `{ project, number, forgotten }`, `forgotten` false
+     * when there was no record; read back.
+     */
+    forgetPrFiles({ project, number, actor }) {
+      return transaction(() => {
+        const p = this.getProject(project);
+        if (!p) throw new StoreError('unknown-project', `no project "${project}".`);
+        requireActor(actor, 'the recorder');
+        if (this.getActor(actor)?.kind !== 'machine') throw new StoreError('not-allowed', 'only a loop sign-in forgets which files a pull request changes.');
+        const r = db.prepare('DELETE FROM pr_files WHERE project = ? AND number = ?').run(p.slug, Number(number));
+        if (this.prFilesOf(p.slug, number)) throw new StoreError('write-failed', `the files of pull request #${number} are still kept.`);
+        return { project: p.slug, number: Number(number), forgotten: num(r.changes) > 0 };
+      });
     },
 
     /**

@@ -19,6 +19,7 @@ import mergeOnComment from '../lib/mergeOnComment.js';
 import humanHours from '../lib/humanHours.js';
 import busFallback from '../lib/busFallback.js';
 import pipelinePause from '../lib/pipelinePause.js';
+import prFiles from '../lib/prFiles.js';
 import { compareWithinStatus } from '../scripts/lib/loopStatuses.mjs';
 import { searchPattern } from './web/render.mjs';
 import { GROUPS, MODELS, DEFAULT_MODEL, RELEASE_GROUP } from './pipelineControls.mjs';
@@ -328,7 +329,34 @@ export function threadOf(store, ticketId, { pipeline = null, prStates = null } =
     pullRequest: findPullRequest(trailComments(store, ticket.id))?.url ?? null,
     // SP-226: its live state on GitHub, for the Merge button. Absent when it was not asked.
     ...(prStates?.has(ticket.id) ? { pullRequestState: prStates.get(ticket.id) } : {}),
+    sharedFiles: sharedFilesOf(store, ticket),
   };
+}
+
+/**
+ * The other open pull requests on the ticket's project that change any of
+ * the files its own open pull request changes (lib/prFiles.js), as
+ * `[{ ticket, ticketName, number, url, files }]`, files being the shared
+ * ones; empty when it has no record or shares nothing.
+ */
+export function sharedFilesOf(store, ticket) {
+  const records = store.prFiles(ticket.project);
+  const seen = new Map();
+  for (const own of records.filter((r) => r.ticket === ticket.id)) {
+    for (const s of prFiles.sharedWith(records, own.files, { ticket: ticket.id })) {
+      const had = seen.get(s.number);
+      if (had) { had.files = [...new Set([...had.files, ...s.files])].sort(); continue; }
+      const other = records.find((r) => r.number === s.number);
+      seen.set(s.number, {
+        ticket: s.ticket,
+        ticketName: store.getTicket(s.ticket)?.name ?? null,
+        number: s.number,
+        url: `https://github.com/${other.repo}/pull/${s.number}`,
+        files: s.files,
+      });
+    }
+  }
+  return [...seen.values()].sort((a, b) => a.number - b.number);
 }
 
 /** An actor by id and name, or null for none; one that is gone is named by its id. */

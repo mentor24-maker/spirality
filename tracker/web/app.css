@@ -453,6 +453,8 @@ span.action.answer-in-icon { color: var(--status-ok-ink); }
 .quick h1 { margin-top: 0; }
 /* A failing lane owes the next move (SP-228): one line across the top, above the card. */
 .quick .held-up { grid-column: 1 / -1; margin: 0; padding: 0.6rem 1rem; border-left: 4px solid var(--status-warn); border-radius: var(--radius-sm); background: var(--status-warn-bg); color: var(--status-warn-ink); font-weight: 600; }
+/* SP-349: another open pull request changes the same files as this ticket's. */
+.shared-files { margin: 0 0 1rem; padding: 0.6rem 1rem 0.6rem 2rem; border-left: 4px solid var(--status-warn); border-radius: var(--radius-sm); background: var(--status-warn-bg); color: var(--status-warn-ink); overflow-wrap: anywhere; }
 .quick .needed { color: var(--ink-error); font-weight: 700; white-space: pre-wrap; }
 .quick .ticket-name { margin: -0.5rem 0 1rem; font-size: var(--text-base); }
 /* SP-290: the status, first under the heading, in the page's own type; its line behind the "i". */

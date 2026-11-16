@@ -91,6 +91,10 @@ source "$REPO/scripts/lib/relay_heartbeat.sh"
 # And the ticket watchdogs: stale-ready and stale-answer (SP-267).
 # shellcheck source=lib/relay_watchdogs.sh
 source "$REPO/scripts/lib/relay_watchdogs.sh"
+# The changed-files step (SP-349): which files each open pull request changes.
+# A copy of this runner without the file runs on without it.
+# shellcheck source=lib/relay_pr_files.sh
+[ -f "$REPO/scripts/lib/relay_pr_files.sh" ] && source "$REPO/scripts/lib/relay_pr_files.sh"
 # And the throughput and checkout-currency watchdogs (SP-268). A copy of this
 # runner without the file runs on without them.
 # shellcheck source=lib/relay_queue_watchdogs.sh
@@ -360,6 +364,16 @@ run_relay_heartbeat "$RUN_DIR" "${RELAY_HEARTBEAT_LIMIT_SECONDS:-180}" ${DRY_RUN
 # verdict or stop it: a failure is one line naming the watchdog and its exit
 # code. A dry run reads and prints only.
 run_relay_watchdogs "$RUN_DIR" "${RELAY_WATCHDOG_LIMIT_SECONDS:-180}" ${DRY_RUN:+--dry-run}
+
+# Then which files each open pull request changes (SP-349): a pull request
+# whose branch moved since its files were read is read again, and one that
+# merged or closed is forgotten (`npm run clickup -- pr-files-refresh`). It
+# runs on every wake, whatever the steps above did, under its own time limit,
+# and never changes this pass's verdict or stops it: a failure is one line
+# naming the step and its exit code. A dry run reads and prints only.
+if declare -F run_relay_pr_files >/dev/null; then
+  run_relay_pr_files "$RUN_DIR" "${RELAY_PR_FILES_LIMIT_SECONDS:-180}" ${DRY_RUN:+--dry-run}
+fi
 
 # Then the throughput and checkout-currency watchdogs (SP-268): is the queue
 # getting shorter, and did the pull above leave this machine on main's code?

@@ -1292,6 +1292,28 @@ export function heldUpLine({ heldUp = null } = {}, timeOf) {
   return heldUp.since ? `Held up: ${heldUp.stage} ${reason} since ${timeOf(heldUp.since)}` : `Held up: ${heldUp.stage} ${reason}`;
 }
 
+/**
+ * The ticket page's same-file lines (SP-349), from the server's
+ * `sharedFiles` (pageData.sharedFilesOf): one "Changes the same files as
+ * SP-12 (PR #40): a.js, b.js" per other open pull request that shares a
+ * file with this ticket's, the ticket and the pull request linked; '' when
+ * none does.
+ */
+export function renderSharedFiles({ sharedFiles = [] } = {}) {
+  const rows = (Array.isArray(sharedFiles) ? sharedFiles : []).filter((s) => s && Number.isInteger(s.number) && Array.isArray(s.files) && s.files.length);
+  if (!rows.length) return '';
+  const line = (s) => {
+    const pr = /^https:\/\/github\.com\//.test(String(s.url ?? ''))
+      ? `<a href="${escapeHtml(s.url)}" target="_blank" rel="noopener">PR #${s.number}</a>`
+      : `PR #${s.number}`;
+    const who = s.ticket
+      ? `<a href="/t/${encodeURIComponent(s.ticket)}"${s.ticketName ? ` title="${escapeHtml(s.ticketName)}"` : ''}>${escapeHtml(s.ticket)}</a> (${pr})`
+      : pr;
+    return `<li>Changes the same files as ${who}: ${s.files.map((f) => `<code>${escapeHtml(f)}</code>`).join(', ')}</li>`;
+  };
+  return `<ul class="shared-files">${rows.map(line).join('')}</ul>`;
+}
+
 /** heldUpLine as HTML, a `<p class="held-up">`, or ''. */
 export function renderHeldUp(t, timeOf) {
   const line = heldUpLine(t, timeOf);

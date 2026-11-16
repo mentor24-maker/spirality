@@ -23,6 +23,8 @@ function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
 /** Files on a ticket are kept only by the tracker (docs/TRACKER_MVP.md, "Attachments"). */
 export const NO_ATTACHMENTS_ON_CLICKUP = 'Attachments are kept only in the tracker; this project\'s tickets are on ClickUp, where this door reads no files. Nothing was saved.';
+/** SP-349: which files each open pull request changes is kept only in the tracker. */
+export const NO_PR_FILES_ON_CLICKUP = 'Which files each open pull request changes is kept only in the tracker; this project\'s tickets are on ClickUp, where none is kept.';
 
 /** An answer made here, not by ClickUp: this door has no way to do what was asked. */
 function unsupported(message) {
@@ -177,6 +179,9 @@ export function createClickupTracker({ token, apiBase, timeoutMs, log = console.
     projectRelease: async () => unsupported('which Spirality release each project runs is kept only in the tracker; this project\'s tickets are on ClickUp.'),
     nameRelease: async () => unsupported('which Spirality release each project runs is kept only in the tracker; this project\'s tickets are on ClickUp.'),
     rollBackRelease: async () => unsupported('which Spirality release each project runs is kept only in the tracker; this project\'s tickets are on ClickUp.'),
+    prFiles: async () => unsupported(NO_PR_FILES_ON_CLICKUP),
+    recordPrFiles: async () => unsupported(NO_PR_FILES_ON_CLICKUP),
+    forgetPrFiles: async () => unsupported(NO_PR_FILES_ON_CLICKUP),
     getStatusHistory: async () => unsupported('ClickUp keeps no move-by-move status history this door reads; stage-counts counts a window only on the tracker.'),
     createTask: (list, fields) => call('POST', `/api/v2/list/${list}/task`, fields),
     updateTask: (task, fields) => call('PUT', `/api/v2/task/${task}`, fields),
