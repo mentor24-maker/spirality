@@ -291,15 +291,16 @@ export function fallbackPost({ slug, named, why, last }) {
  * `{ code, dir, lines }` (EXIT above). Never throws for a git, npm or door
  * failure: each is a line and a fallback.
  */
-export function prepare({ dirs, slug, pid, deps, alive = pidAlive, dryRun = false }) {
+export function prepare({ dirs, slug, pid, deps, alive = pidAlive, dryRun = false, lockWaitMs = 600_000 }) {
   const lines = [];
   mkdirSync(dirs.releasesDir, { recursive: true });
-  const unlock = takeLock(join(dirs.releasesDir, '.lock'), { alive });
-  if (!unlock) {
-    lines.push(`another pass held the release checkouts' lock (${join(dirs.releasesDir, '.lock')}) for 10 minutes`);
-  }
+  const unlock = takeLock(join(dirs.releasesDir, '.lock'), { alive, waitMs: lockWaitMs });
+  // A busy lock is said once, in the fallback line below, and never told to
+  // the bus: it is a wait, not a broken release, and posting it would stand
+  // in for (and so hold back) a later, accurate post.
+  const lockBusy = unlock ? null : `another pass held the release checkouts' lock (${join(dirs.releasesDir, '.lock')}) for 10 minutes`;
   try {
-    const named = unlock ? namedFor(readRecord(deps.door), slug) : { problem: lines[0] };
+    const named = unlock ? namedFor(readRecord(deps.door), slug) : { problem: lockBusy };
     if (named.own) {
       return { code: EXIT.USAGE, dir: '', lines: [`${slug} is Spirality's own project: its lanes run main, never a release checkout`] };
     }
@@ -326,9 +327,13 @@ export function prepare({ dirs, slug, pid, deps, alive = pidAlive, dryRun = fals
     }
     const last = readText(lastFile(dirs, slug));
     const lastReady = isReleaseName(last) && last !== named.release && isReady(dirs, last, deps) ? last : '';
-    const key = `${named.release ?? 'unreadable'}`;
+    // What the bus was told: the release named and what the lanes run
+    // instead, so a WARNING that becomes an ALARM (the last release's
+    // checkout gone) is said again, and the same news is never said twice.
+    const key = `${named.release ?? 'unreadable'} -> ${lastReady || 'not running'}`;
     const post = () => {
       if (dryRun) return 'a dry run tells the bus nothing';
+      if (lockBusy) return 'the bus is not told about a busy lock; the next pass tries again';
       if (readText(saidFile(dirs, slug)) === key) return 'the bus was told already';
       const sent = deps.door(['bus-post', '--body-file', '-'], { input: fallbackPost({ slug, named: named.release, why, last: lastReady }) });
       if (sent.status === 0 && !sent.error) { writeFileSync(saidFile(dirs, slug), `${key}\n`); return 'said on the bus'; }

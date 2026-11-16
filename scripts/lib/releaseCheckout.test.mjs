@@ -181,6 +181,54 @@ test('npm ci failing leaves no checkout and falls back; with no release run befo
   }
 });
 
+test('a WARNING that becomes an ALARM (the last release\'s checkout gone) is told to the bus again', () => {
+  const s = scratchSpirality();
+  try {
+    const deps = standIns(s, { normie: 'release-1' });
+    assert.equal(prepare({ dirs: s.dirs, slug: 'normie', pid: process.pid, deps }).code, EXIT.READY);
+    deps.door.record.normie = 'release-9';
+    assert.equal(prepare({ dirs: s.dirs, slug: 'normie', pid: process.pid, deps }).code, EXIT.FELL_BACK);
+    assert.equal(deps.door.posts.length, 1);
+    assert.match(deps.door.posts[0], /^WARNING: /);
+    // The checkout it fell back on is gone: the lanes stop, and the bus hears so.
+    rmSync(join(s.dirs.releasesDir, '.ready-release-1'));
+    const out = prepare({ dirs: s.dirs, slug: 'normie', pid: process.pid, deps });
+    assert.equal(out.code, EXIT.CANNOT_RUN, out.lines.join('\n'));
+    assert.match(out.lines[0], /; said on the bus$/);
+    assert.equal(deps.door.posts.length, 2);
+    assert.match(deps.door.posts[1], /^ALARM: normie's lanes could not run on release-9/);
+    // And the same news again is not.
+    prepare({ dirs: s.dirs, slug: 'normie', pid: process.pid, deps });
+    assert.equal(deps.door.posts.length, 2);
+  } finally {
+    rmSync(s.root, { recursive: true, force: true });
+  }
+});
+
+test('a busy releases lock is said once in the log and never told to the bus', () => {
+  const s = scratchSpirality();
+  try {
+    const deps = standIns(s, { normie: 'release-1' });
+    assert.equal(prepare({ dirs: s.dirs, slug: 'normie', pid: process.pid, deps }).code, EXIT.READY);
+    const lock = join(s.dirs.releasesDir, '.lock');
+    mkdirSync(lock);
+    writeFileSync(join(lock, 'pid'), `${process.pid}\n`);
+    const out = prepare({ dirs: s.dirs, slug: 'normie', pid: process.pid, deps, lockWaitMs: 0 });
+    assert.equal(out.code, EXIT.FELL_BACK, out.lines.join('\n'));
+    assert.equal(out.lines.length, 1, out.lines.join('\n'));
+    assert.equal(out.lines[0].split('held the release checkouts\' lock').length, 2, 'the lock problem is said more than once');
+    assert.match(out.lines[0], /; the bus is not told about a busy lock; the next pass tries again$/);
+    assert.equal(deps.door.posts.length, 0);
+    // Nor does it stand in for a later, real failure: that is still told.
+    rmSync(lock, { recursive: true, force: true });
+    deps.door.down = true;
+    prepare({ dirs: s.dirs, slug: 'normie', pid: process.pid, deps });
+    assert.equal(deps.door.posts.length, 1);
+  } finally {
+    rmSync(s.root, { recursive: true, force: true });
+  }
+});
+
 test('a record that cannot be read falls back to the last release; a bus that cannot be told is said, and tried again next pass', () => {
   const s = scratchSpirality();
   try {

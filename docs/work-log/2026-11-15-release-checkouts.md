@@ -17,3 +17,14 @@ command now shows which release each project runs.
 
 Nothing changes on the Mini today: only Spirality's own lanes use this
 runner, and no release has been cut yet.
+
+Review sent it back for four things, now fixed. The relay's "is this machine
+on the latest code?" check had started looking at the release copy, which is
+behind `main` on purpose, so it would have raised a false alarm every ten
+minutes; it now looks at the project's own checkout again, and a test proves
+it stays quiet. A paused or idle project lane no longer sets up a release at
+all. Setting up a release in the relay now has its own five-minute limit and
+counts against the relay's time, so one slow install cannot hold the relay
+for half an hour. And the bus is told again when a warning turns into an
+alarm, never about a busy lock, and the log keeps the release check's own
+error lines.

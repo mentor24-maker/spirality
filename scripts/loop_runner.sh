@@ -125,7 +125,8 @@ pass_args() {
   SESSION_ARGS=(--plugin-dir "$code_dir/plugin")
 }
 # The Spirality folder this pass runs from: this one, until a project's
-# release is read at the start of each pass (step 1b below).
+# release is read just before each pass (step 4 below). The pause and work
+# checks always run from this folder, as the relay's tick and pause check do.
 RUN_DIR="$REPO"
 
 SLUG="$(node "$REPO/scripts/project_config.mjs" projectSlug)" || { echo "[loop-runner] could not read projectSlug from the project config" >&2; exit 1; }
@@ -311,45 +312,12 @@ while true; do
     echo "[loop-runner] $(date "+%H:%M:%S") main checkout is not on a clean main — not pulling. Every pass runs stale code until it is put back on main." >> "$LOG"
   fi
 
-  # 1b. Which Spirality this pass runs (SP-276). Spirality's own: this
-  #     folder, on the main just pulled. A project's: the release the tracker
-  #     names for it, read now, at the start of the pass, so a move or a
-  #     roll-back takes effect at this pass and never stops one running. A
-  #     release that cannot be made ready falls back to the one this project
-  #     ran last (said once on its bus); with none to fall back on, or none
-  #     named, the pass does not run. Never a silent run on main.
-  if [ -z "$OWN" ]; then
-    RELEASE_SAID="$(node "$REPO/scripts/lib/releaseCheckout.mjs" prepare --root "$REPO" --project "$SLUG" --pid "$$" 2>>"$LOG")"
-    RELEASE_CODE=$?
-    RUN_DIR="$(printf '%s\n' "$RELEASE_SAID" | head -1)"
-    while IFS= read -r line; do
-      [ -n "$line" ] && echo "[loop-runner] $(date "+%H:%M:%S") release: $line" >> "$LOG"
-    done < <(printf '%s\n' "$RELEASE_SAID" | tail -n +2)
-    WHY_NOT=""
-    if [ -z "$RUN_DIR" ] || [ ! -d "$RUN_DIR" ]; then
-      WHY_NOT="no Spirality release to run on (the release check exited $RELEASE_CODE)"
-    elif ! pass_args "$RUN_DIR"; then
-      WHY_NOT="$PASS_ARGS_WHY"
-    fi
-    if [ -n "$WHY_NOT" ]; then
-      RUN_DIR="$REPO"
-      echo "===== $(date "+%Y-%m-%d %H:%M:%S") SKIP /$SKILL ($WHY_NOT; Claude not started) =====" >> "$LOG"
-      rm -f "$WAKE"
-      read_wake_time
-      echo "[loop-runner] $(date "+%H:%M:%S") sleeping ${INTERVAL}s before the next /$SKILL (a wake ends it early)" >> "$LOG"
-      sleep_until_woken
-      continue
-    fi
-  else
-    pass_args "$REPO"
-  fi
-
   # 2. Paused? (SP-237) The Settings page's switches, the whole pipeline and
   #    this lane, asked here, between passes, so a pause never stops a pass
   #    already running: it drains. Asked after the pull, so the check is the
   #    newest code. ANY non-zero exit counts as paused, a check that could not
   #    run included (it fails safe), and the line it printed says which.
-  PAUSE_LINE="$("$RUN_DIR/scripts/pause_check.sh" "$SKILL" 2>>"$LOG")"
+  PAUSE_LINE="$("$REPO/scripts/pause_check.sh" "$SKILL" 2>>"$LOG")"
   PAUSE_CODE=$?
   if [ "$PAUSE_CODE" -ne 0 ]; then
     [ -n "$PAUSE_LINE" ] || PAUSE_LINE="could not read the pipeline settings (the check exited $PAUSE_CODE and said nothing; its errors are above), so /$SKILL is treated as PAUSED and not starting (it fails safe)"
@@ -387,7 +355,7 @@ while true; do
   #    skipped pass leaves a dated SKIP line (never START or END, so no
   #    reader counts it as a pass), which the pod dates its sleeping lines by.
   if [ "$LAST_REAL_PASS" -gt 0 ] && [ $(( $(date +%s) - LAST_REAL_PASS )) -lt "$IDLE_PASS_EVERY" ]; then
-    WORK_LINE="$("$RUN_DIR/scripts/work_check.sh" "$SKILL" 2>>"$LOG")"
+    WORK_LINE="$("$REPO/scripts/work_check.sh" "$SKILL" 2>>"$LOG")"
     WORK_CODE=$?
     if [ "$WORK_CODE" -eq 3 ]; then
       echo "===== $(date "+%Y-%m-%d %H:%M:%S") SKIP /$SKILL (${WORK_LINE:-no work}; Claude not started) =====" >> "$LOG"
@@ -398,6 +366,41 @@ while true; do
     fi
     echo "[loop-runner] $(date "+%H:%M:%S") work check: ${WORK_LINE:-the check exited $WORK_CODE and said nothing} — starting /$SKILL" >> "$LOG"
   fi
+  # 4. Which Spirality this pass runs (SP-276), asked only once the pause
+  #    and work checks above have said a pass is due, so a paused or idle
+  #    project lane never fetches, checks out or tells the bus anything.
+  #    Spirality's own: this folder, on the main just pulled. A project's:
+  #    the release the tracker names for it, read now, at the start of the
+  #    pass, so a move or a roll-back takes effect at this pass and never
+  #    stops one running. A
+  #    release that cannot be made ready falls back to the one this project
+  #    ran last (said once on its bus); with none to fall back on, or none
+  #    named, the pass does not run. Never a silent run on main.
+  if [ -z "$OWN" ]; then
+    RELEASE_SAID="$(node "$REPO/scripts/lib/releaseCheckout.mjs" prepare --root "$REPO" --project "$SLUG" --pid "$$" 2>>"$LOG")"
+    RELEASE_CODE=$?
+    RUN_DIR="$(printf '%s\n' "$RELEASE_SAID" | head -1)"
+    while IFS= read -r line; do
+      [ -n "$line" ] && echo "[loop-runner] $(date "+%H:%M:%S") release: $line" >> "$LOG"
+    done < <(printf '%s\n' "$RELEASE_SAID" | tail -n +2)
+    WHY_NOT=""
+    if [ -z "$RUN_DIR" ] || [ ! -d "$RUN_DIR" ]; then
+      WHY_NOT="no Spirality release to run on (the release check exited $RELEASE_CODE)"
+    elif ! pass_args "$RUN_DIR"; then
+      WHY_NOT="$PASS_ARGS_WHY"
+    fi
+    if [ -n "$WHY_NOT" ]; then
+      RUN_DIR="$REPO"
+      echo "===== $(date "+%Y-%m-%d %H:%M:%S") SKIP /$SKILL ($WHY_NOT; Claude not started) =====" >> "$LOG"
+      read_wake_time
+      echo "[loop-runner] $(date "+%H:%M:%S") sleeping ${INTERVAL}s before the next /$SKILL (a wake ends it early)" >> "$LOG"
+      sleep_until_woken
+      continue
+    fi
+  else
+    pass_args "$REPO"
+  fi
+
   LAST_REAL_PASS="$(date +%s)"
   read_model
   echo "" >> "$LOG"

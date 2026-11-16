@@ -540,7 +540,10 @@ function scratchPair() {
   for (const f of ['loop_runner.sh', 'run_relay.sh']) copyFileSync(join(REPO, 'scripts', f), join(spiralityDir, 'scripts', f));
   writeFileSync(join(spiralityDir, 'scripts/pause_check.sh'), '#!/bin/bash\necho "running"\n', { mode: 0o755 });
   for (const f of ['project_config.mjs', 'run_with_time_limit.sh']) symlinkSync(join(REPO, 'scripts', f), join(spiralityDir, 'scripts', f));
-  for (const f of ['back_to_main.sh', 'tracker_restart.sh', 'relay_app_checks.sh', 'loopSchedule.mjs', 'releaseCheckout.mjs']) symlinkSync(join(REPO, 'scripts/lib', f), join(spiralityDir, 'scripts/lib', f));
+  for (const f of ['back_to_main.sh', 'tracker_restart.sh', 'relay_app_checks.sh', 'relay_queue_watchdogs.sh', 'loopSchedule.mjs', 'releaseCheckout.mjs']) symlinkSync(join(REPO, 'scripts/lib', f), join(spiralityDir, 'scripts/lib', f));
+  // The real checkout-currency watchdog, so a relay on a release can be seen
+  // to watch the project's checkout, never the release's (SP-276).
+  symlinkSync(join(REPO, 'scripts/checkout_currency.mjs'), join(spiralityDir, 'scripts/checkout_currency.mjs'));
   // Spirality's plugin folder, the skills and hooks a project's pass is handed (SP-272).
   symlinkSync(join(REPO, 'plugin'), join(spiralityDir, 'plugin'));
   // Spirality's own log folder is the scratch one too, so the release
@@ -644,6 +647,37 @@ test('a runner for a project with no Spirality release named does not start Clau
   }
 });
 
+test('a paused project lane reads no release, checks nothing out and asks the door nothing (SP-276 review)', { timeout: 60_000 }, async () => {
+  const pair = scratchPair();
+  try {
+    writeFileSync(join(pair.spiralityDir, 'scripts/pause_check.sh'), '#!/bin/bash\necho "/loop-build is PAUSED on the Settings page"\nexit 3\n', { mode: 0o755 });
+    const asked = join(pair.root, 'door-asked');
+    writeFileSync(pair.env.SPIRALITY_RELEASE_DOOR, `#!/bin/bash\necho "$*" >> ${asked}\n`, { mode: 0o755 });
+    const fakeClaude = join(pair.root, 'fake-claude');
+    writeFileSync(fakeClaude, '#!/bin/bash\necho "CLAUDE STARTED"\n', { mode: 0o755 });
+    const runner = spawn('bash', [join(pair.spiralityDir, 'scripts/loop_runner.sh'), 'loop-build', '3600'], {
+      cwd: pair.spiralityDir, detached: true, stdio: 'ignore',
+      env: { ...pair.env, CLAUDE_BIN: fakeClaude, RUN_WITH_TIME_LIMIT_POLL: '1' },
+    });
+    const log = join(pair.logDir, 'normie-loop-build.log');
+    try {
+      for (let i = 0; !(existsSync(log) && readFileSync(log, 'utf8').includes('sleeping 3600s')); i++) {
+        assert.ok(i < 400, 'the runner never finished its first pass');
+        await new Promise((r) => setTimeout(r, 100));
+      }
+    } finally {
+      process.kill(-runner.pid, 'SIGKILL');
+    }
+    const text = readFileSync(log, 'utf8');
+    assert.match(text, /PAUSED \/loop-build/);
+    assert.doesNotMatch(text, /CLAUDE STARTED|release:/);
+    assert.ok(!existsSync(asked), `a paused lane asked the door: ${existsSync(asked) ? readFileSync(asked, 'utf8') : ''}`);
+    assert.ok(!existsSync(pair.release), 'a paused lane checked a release out');
+  } finally {
+    rmSync(pair.root, { recursive: true, force: true });
+  }
+});
+
 test('a relay for a named project pulls the project\'s main, never Spirality\'s, and names the project on its START line (SP-271)', { timeout: 60_000 }, () => {
   const pair = scratchPair();
   try {
@@ -660,8 +694,33 @@ test('a relay for a named project pulls the project\'s main, never Spirality\'s,
     // A dry run checks no release out (SP-276), so with none whole it does
     // not run, and says so: never a silent run on Spirality's main.
     assert.match(r.stdout, /\[relay\] release: could not run on release-1: release-1 is not checked out yet, and a dry run checks nothing out/);
-    assert.match(r.stdout, /END relay — not run: no Spirality release to run on \(the release check exited 5\)/);
+    assert.match(r.stdout, /END relay — not run: no Spirality release to run on \(the named release could not be made ready and there is no earlier one to fall back on; it exited 5, its lines above say more\)/);
     assert.equal(r.status, 1, r.stdout + r.stderr);
+  } finally {
+    rmSync(pair.root, { recursive: true, force: true });
+  }
+});
+
+test('a project\'s relay on a release behind Spirality\'s main watches the project\'s checkout, and cries no STALE CHECKOUT (SP-276)', { timeout: 90_000 }, () => {
+  const pair = scratchPair();
+  try {
+    // release-1 made whole first, as a lane's pass would; it is one commit
+    // behind Spirality's origin/main and detached at its tag, on purpose.
+    const made = spawnSync('node', [join(pair.spiralityDir, 'scripts/lib/releaseCheckout.mjs'), 'prepare', '--root', pair.spiralityDir, '--project', 'normie', '--pid', String(process.pid)], {
+      cwd: pair.spiralityDir, encoding: 'utf8', timeout: 60_000, env: pair.env,
+    });
+    assert.equal(made.status, 0, made.stdout + made.stderr);
+    const r = spawnSync('bash', [join(pair.spiralityDir, 'scripts/run_relay.sh'), '--dry-run'], {
+      cwd: pair.spiralityDir, encoding: 'utf8', timeout: 60_000, env: pair.env,
+    });
+    const said = r.stdout + r.stderr;
+    assert.match(r.stdout, new RegExp(`\\[relay\\] release: this pass runs on release-1 \\(${pair.release}\\)`), said);
+    // The currency check ran, on the project's checkout, which the pull just
+    // brought level with its main: "behind, pulled", on main, no alarm.
+    assert.match(r.stdout, /^behind, pulled$/m, said);
+    assert.match(r.stdout, /^update: fast-forwarded to origin\/main \(main\)$/m, said);
+    assert.doesNotMatch(said, /STALE CHECKOUT/);
+    assert.doesNotMatch(said, /not main/);
   } finally {
     rmSync(pair.root, { recursive: true, force: true });
   }
