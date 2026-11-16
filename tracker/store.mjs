@@ -130,6 +130,14 @@
  *    and one `topics` event naming the ids before and after. A topic from
  *    another project, or none at all, is refused (`bad-topic`) and nothing
  *    changes. A deleted ticket's links go with it.
+ *  - A tag is a word on a ticket (its `tags` column). A project also keeps
+ *    its own tag list in `project_tags` (a name, at most MAX_TAG_NAME
+ *    characters, an optional description, who made it and when), so a tag
+ *    can be made before any ticket carries it. listTags answers the saved
+ *    tags and every tag in use on the project's tickets, each spelling once,
+ *    with how many tickets carry it; addTag refuses a name already on that
+ *    list in any case (`tag-exists`). Tickets still carry their tags as
+ *    words, and a deleted project's saved tags go with it.
  */
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
@@ -159,6 +167,18 @@ const MAX_FILE_NAME = 255;
 /** The longest a topic's name and description may be, in characters. */
 export const MAX_TOPIC_NAME = 200;
 export const MAX_TOPIC_DESCRIPTION = 5000;
+/** The longest a saved tag's name and description may be, in characters. */
+export const MAX_TAG_NAME = 100;
+export const MAX_TAG_DESCRIPTION = 5000;
+
+/**
+ * Tags in the page's order: alphabetical with case aside, and two that differ
+ * only in case in a fixed order (the List view's Add Tag dropdown, render.mjs
+ * projectTags).
+ */
+function byTagName(a, b) {
+  return a.localeCompare(b, undefined, { sensitivity: 'base' }) || (a < b ? -1 : a > b ? 1 : 0);
+}
 
 /** The statuses a ticket may be deleted from: nobody has started it yet. */
 const DELETABLE = Object.freeze(['requested', 'queued']);
@@ -291,6 +311,14 @@ CREATE TABLE IF NOT EXISTS ticket_topics (
   topic       INTEGER NOT NULL REFERENCES topics(id),
   PRIMARY KEY (ticket, topic)
 );
+CREATE TABLE IF NOT EXISTS project_tags (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  project     TEXT NOT NULL REFERENCES projects(slug),
+  name        TEXT NOT NULL,
+  description TEXT NOT NULL,
+  created_by  INTEGER NOT NULL REFERENCES actors(id),
+  created_at  TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS roles (
   name        TEXT PRIMARY KEY,
   description TEXT NOT NULL,
@@ -362,6 +390,7 @@ CREATE INDEX IF NOT EXISTS attachments_by_ticket ON attachments (ticket, id);
 CREATE INDEX IF NOT EXISTS project_docs_by_project ON project_docs (project, id);
 CREATE INDEX IF NOT EXISTS topics_by_project ON topics (project, id);
 CREATE INDEX IF NOT EXISTS ticket_topics_by_topic ON ticket_topics (topic, ticket);
+CREATE INDEX IF NOT EXISTS project_tags_by_project ON project_tags (project, id);
 CREATE UNIQUE INDEX IF NOT EXISTS actors_by_token ON actors (token_hash);
 CREATE UNIQUE INDEX IF NOT EXISTS actors_by_email ON actors (email);
 CREATE INDEX IF NOT EXISTS sessions_by_actor ON sessions (actor);
@@ -726,6 +755,17 @@ function topicFromRow(row) {
     createdByName: row.created_by_name ?? null,
     createdAt: row.created_at,
     tickets: num(row.tickets ?? 0),
+  };
+}
+
+/** A saved tag as listed, before its task count is added. */
+function tagFromRow(row) {
+  return {
+    name: row.name,
+    description: row.description,
+    createdBy: num(row.created_by),
+    createdByName: row.created_by_name ?? null,
+    createdAt: row.created_at,
   };
 }
 
@@ -1620,6 +1660,8 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
         db.prepare('DELETE FROM next_suggestions WHERE project = ?').run(slug);
         // Its topics go too: there is no other way to remove them yet.
         db.prepare('DELETE FROM topics WHERE project = ?').run(slug);
+        // And its saved tags, for the same reason.
+        db.prepare('DELETE FROM project_tags WHERE project = ?').run(slug);
         const r = db.prepare('DELETE FROM projects WHERE slug = ?').run(slug);
         if (num(r.changes) !== 1 || this.getProject(slug)) {
           throw new StoreError('write-failed', `project "${slug}" was not deleted.`);
@@ -2545,6 +2587,67 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
         WHERE t.project = ? ORDER BY t.created_at DESC, t.id DESC`)
         .all(String(project))
         .map(topicFromRow);
+    },
+
+    /**
+     * A project's tags: every tag it has saved and every tag on its tickets,
+     * each spelling once, in byTagName order, as `{ name, description,
+     * createdBy, createdByName, createdAt, count }`. `count` is how many of
+     * the project's tickets carry it (a ticket listing it twice counts
+     * once); a tag only in use has a blank description and null maker and
+     * time. Two saved tags of one spelling (never made by addTag) list once,
+     * the older kept.
+     */
+    listTags(project) {
+      const slug = String(project);
+      const counts = new Map();
+      for (const r of db.prepare('SELECT tags FROM tickets WHERE project = ?').all(slug)) {
+        let tags;
+        try { tags = JSON.parse(r.tags); } catch { tags = []; }
+        const own = new Set((Array.isArray(tags) ? tags : []).filter((t) => typeof t === 'string' && t));
+        for (const t of own) counts.set(t, (counts.get(t) ?? 0) + 1);
+      }
+      const byName = new Map();
+      const saved = db.prepare(`SELECT pt.*, ac.name AS created_by_name FROM project_tags pt LEFT JOIN actors ac ON ac.id = pt.created_by
+        WHERE pt.project = ? ORDER BY pt.created_at, pt.id`).all(slug);
+      for (const row of saved) if (!byName.has(row.name)) byName.set(row.name, tagFromRow(row));
+      for (const name of counts.keys()) {
+        if (!byName.has(name)) byName.set(name, { name, description: '', createdBy: null, createdByName: null, createdAt: null });
+      }
+      return [...byName.keys()].sort(byTagName).map((name) => ({ ...byName.get(name), count: counts.get(name) ?? 0 }));
+    },
+
+    /**
+     * Save a tag on a project before any ticket carries it: `name` (trimmed,
+     * required), `description` (trimmed, may be blank), made by `actor`.
+     * Refused with nothing written (`bad-name`, `bad-description`,
+     * `unknown-project`, `unknown-actor`), and `tag-exists` when listTags
+     * already has that name in any case, saved or in use. Read back in the
+     * same transaction, else nothing is kept (`write-failed`). Answers the
+     * tag as listTags would.
+     */
+    addTag({ project, name, description = '', actor }) {
+      const cleanName = typeof name === 'string' ? name.trim() : '';
+      if (!cleanName) throw new StoreError('bad-name', 'a tag needs a name; nothing was saved.');
+      if (cleanName.length > MAX_TAG_NAME) throw new StoreError('bad-name', `a tag's name is at most ${MAX_TAG_NAME} characters; nothing was saved.`);
+      if (description != null && typeof description !== 'string') throw new StoreError('bad-description', "a tag's description is text; nothing was saved.");
+      const cleanDescription = (description ?? '').trim();
+      if (cleanDescription.length > MAX_TAG_DESCRIPTION) throw new StoreError('bad-description', `a tag's description is at most ${MAX_TAG_DESCRIPTION} characters; nothing was saved.`);
+      return transaction(() => {
+        requireActor(actor, 'the actor');
+        const p = this.getProject(project);
+        if (!p) throw new StoreError('unknown-project', `no project "${project}".`);
+        const same = this.listTags(p.slug).find((t) => t.name.toLowerCase() === cleanName.toLowerCase());
+        if (same) throw new StoreError('tag-exists', `a tag named ${same.name} already exists in ${p.name}; nothing was saved.`);
+        const r = db.prepare('INSERT INTO project_tags (project, name, description, created_by, created_at) VALUES (?, ?, ?, ?, ?)')
+          .run(p.slug, cleanName, cleanDescription, actor, now());
+        const back = db.prepare('SELECT pt.*, ac.name AS created_by_name FROM project_tags pt LEFT JOIN actors ac ON ac.id = pt.created_by WHERE pt.id = ?')
+          .get(num(r.lastInsertRowid));
+        if (!back || back.project !== p.slug || back.name !== cleanName || back.description !== cleanDescription) {
+          throw new StoreError('write-failed', `the tag ${cleanName} did not read back from the database.`);
+        }
+        return { ...tagFromRow(back), count: 0 };
+      });
     },
 
     /** A ticket's history, oldest first. */

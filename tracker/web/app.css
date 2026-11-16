@@ -280,7 +280,7 @@ details.colex[open] > summary .fold::before { content: '▾'; }
 details.colex > summary:focus-visible { outline: 2px solid var(--focus-ring-color); outline-offset: -2px; }
 details.colex > form { padding: 0 0.75rem 0.75rem; }
 table.tag-list td.count, table.tag-list th:last-child { white-space: nowrap; text-align: right; }
-form.create-topic { max-width: 40rem; }
+form.create-topic, form.create-tag { max-width: 40rem; }
 /* SP-308: a half-width table with Edit and Delete: the time may wrap so the buttons stay in view. */
 table.topic-list td.when { white-space: normal; min-width: 6rem; }
 form.copy .row { display: flex; gap: var(--space-5); align-items: center; margin-top: 0.5rem; }

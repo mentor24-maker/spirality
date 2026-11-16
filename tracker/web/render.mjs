@@ -2218,33 +2218,20 @@ export function renderListAssignee({ id, assignee, assigneeId }, operator) {
 
 /**
  * SP-246: every tag used on a board's tickets, each once, alphabetical
- * (case aside), for the List view's Add Tag dropdowns. `board` is the
+ * (case aside), for the List view's Add Tag dropdowns, with the project's
+ * saved tags (the board's `tags`, SP-309) among them, so a tag made on the
+ * Topics page is offered before any task carries it. `board` is the
  * server's board answer; anything unreadable in it is skipped.
  */
 export function projectTags(board) {
   const seen = new Set();
+  for (const tag of Array.isArray(board?.tags) ? board.tags : []) if (typeof tag === 'string' && tag) seen.add(tag);
   for (const c of Array.isArray(board?.columns) ? board.columns : []) {
     for (const t of Array.isArray(c?.tickets) ? c.tickets : []) {
       for (const tag of Array.isArray(t?.tags) ? t.tags : []) if (typeof tag === 'string' && tag) seen.add(tag);
     }
   }
   return [...seen].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }) || (a < b ? -1 : a > b ? 1 : 0));
-}
-
-/**
- * SP-307: every tag on a board's tickets with how many tickets carry it,
- * `[{ tag, count }]`, in projectTags' order (the List view's Add Tag list).
- * A tag a ticket lists twice counts that ticket once.
- */
-export function projectTagCounts(board) {
-  const counts = new Map();
-  for (const c of Array.isArray(board?.columns) ? board.columns : []) {
-    for (const t of Array.isArray(c?.tickets) ? c.tickets : []) {
-      const own = new Set((Array.isArray(t?.tags) ? t.tags : []).filter((tag) => typeof tag === 'string' && tag));
-      for (const tag of own) counts.set(tag, (counts.get(tag) ?? 0) + 1);
-    }
-  }
-  return projectTags(board).map((tag) => ({ tag, count: counts.get(tag) }));
 }
 
 /**
@@ -2447,16 +2434,18 @@ export function topicDeleteQuestion(t) {
 /**
  * The Topics page (SP-243), in two equal halves (SP-307): Topics on the
  * left, Tags on the right; a narrow screen stacks them, Topics first
- * (app.css). The Topics half opens with the Add Topic form folded shut (a
- * "colex", a <details>), then the picked project's topics, newest first,
- * each with its description, maker and time. The form is drawn open when
- * `problem` is set, so a refused create is not hidden away. The Tags half
- * lists every tag on the project's tasks once, with how many carry it
- * (`tags`, from projectTagCounts; null when they could not be read).
- * `done` and `problem` are the line the last create left. `timeOf` puts a
+ * (app.css). Each half opens with its add form folded shut (a "colex", a
+ * <details>): Add Topic, and Add Tag (SP-309). Then the Topics half lists
+ * the picked project's topics, newest first, each with its description,
+ * maker and time, and the Tags half every tag the project has saved or
+ * uses, alphabetically, each with its description and how many tasks carry
+ * it (`tags`, from GET /projects/<slug>/tags; null when they could not be
+ * read). `done` and `problem` are the line the last create left; when
+ * `problem` is set, the form it came from (`problemIn`, 'topic' or 'tag')
+ * is drawn open, so a refused create is not hidden away. `timeOf` puts a
  * time in words. Every name, description and tag is escaped.
  */
-export function renderTopics({ projects, project, topics = [], tags = [] }, { timeOf, done = '', problem = '' } = {}) {
+export function renderTopics({ projects, project, topics = [], tags = [] }, { timeOf, done = '', problem = '', problemIn = 'topic' } = {}) {
   const row = (t) => `<tr data-topic="${escapeHtml(t.id)}">
       <td class="name">${escapeHtml(t.name)}</td>
       <td class="about">${t.description ? escapeHtml(t.description) : '<span class="quiet">none</span>'}</td>
@@ -2464,13 +2453,14 @@ export function renderTopics({ projects, project, topics = [], tags = [] }, { ti
       <td class="when">${escapeHtml(timeOf(t.createdAt))}</td>
       <td class="actions"><button type="button" class="btn btn-sm edit-topic" data-edit-topic="${escapeHtml(t.id)}" aria-label="Edit ${escapeHtml(t.name)}">Edit</button>
         <button type="button" class="btn btn-danger btn-sm delete-topic" data-delete-topic="${escapeHtml(t.id)}" aria-label="Delete ${escapeHtml(t.name)}">Delete</button></td></tr>`;
-  const tagRow = ({ tag, count }) => `<tr data-tag="${escapeHtml(tag)}">
-      <td class="name"><span class="tag">${escapeHtml(tag)}</span></td>
+  const tagRow = ({ name, description, count }) => `<tr data-tag="${escapeHtml(name)}">
+      <td class="name"><span class="tag">${escapeHtml(name)}</span></td>
+      <td class="about">${description ? escapeHtml(description) : '<span class="quiet">none</span>'}</td>
       <td class="count">${count} ${count === 1 ? 'task' : 'tasks'}</td></tr>`;
   const tagList = tags === null
     ? '<p class="note error no-tags">The tags could not be read. Reload the page to try again.</p>'
     : tags.length
-      ? `<div class="table-wrap"><table class="projects tag-list"><thead><tr><th>Tag</th><th>Tasks</th></tr></thead>
+      ? `<div class="table-wrap"><table class="projects tag-list"><thead><tr><th>Tag</th><th>Description</th><th>Tasks</th></tr></thead>
         <tbody>${tags.map(tagRow).join('')}</tbody></table></div>`
       : '<p class="quiet no-tags">No tags yet.</p>';
   return `<div class="title-row"><h1>Topics</h1>
@@ -2479,7 +2469,7 @@ export function renderTopics({ projects, project, topics = [], tags = [] }, { ti
     <p class="note topic-note${problem ? ' error' : ' quiet'}" role="status">${escapeHtml(problem || done)}</p>
     <div class="topics-columns">
       <section class="topics-half" aria-labelledby="topics-title">
-        <details class="colex add-topic"${problem ? ' open' : ''}>
+        <details class="colex add-topic"${problem && problemIn !== 'tag' ? ' open' : ''}>
           <summary><span class="fold" aria-hidden="true"></span>Add Topic</summary>
           <form class="create-topic fields">
             <label for="topic-name">Name</label>
@@ -2496,6 +2486,16 @@ export function renderTopics({ projects, project, topics = [], tags = [] }, { ti
     : '<p class="quiet no-topics">No topics yet.</p>'}
       </section>
       <section class="tags-half" aria-labelledby="tags-title">
+        <details class="colex add-tag"${problem && problemIn === 'tag' ? ' open' : ''}>
+          <summary><span class="fold" aria-hidden="true"></span>Add Tag</summary>
+          <form class="create-tag fields">
+            <label for="tag-name">Name</label>
+            <input id="tag-name" name="name" maxlength="100" autocomplete="off">
+            <label for="tag-description">Description</label>
+            <textarea id="tag-description" name="description" rows="3" maxlength="5000"></textarea>
+            <div class="row"><button type="submit" class="btn btn-primary">Create Tag</button></div>
+          </form>
+        </details>
         <h2 id="tags-title">Tags</h2>
         ${tagList}
       </section>

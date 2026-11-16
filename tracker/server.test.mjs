@@ -2316,8 +2316,9 @@ test('GET /projects/:slug/board keeps the shape outside sites read: the eight co
     f.store.fileTicket({ project: 'alpha', actor: f.machine.id, name: 'One', status: 'queued', priority: 'high', tags: ['x'] });
     const r = await f.call('GET', '/projects/alpha/board', { token: f.humanToken });
     assert.equal(r.status, 200);
-    assert.deepEqual(Object.keys(r.body), ['project', 'projectName', 'columns', 'operator', 'topics']);
+    assert.deepEqual(Object.keys(r.body), ['project', 'projectName', 'columns', 'operator', 'topics', 'tags']);
     assert.deepEqual(r.body.topics, [], "SP-247: the project's topics to pick from");
+    assert.deepEqual(r.body.tags, ['x'], "SP-309: the project's tags, saved or in use, to pick from");
     assert.deepEqual([r.body.project, r.body.projectName], ['alpha', 'Alpha']);
     assert.deepEqual(r.body.operator, { id: f.human.id, name: 'Operator' }, 'SP-244: the one person a ticket may be assigned to');
     assert.deepEqual(r.body.columns.map((c) => c.status), [...loopStatuses.STAGE_ORDER]);
@@ -3414,6 +3415,69 @@ test('someone who is not on the project gets the same 404 from both topic calls 
     assert.deepEqual(f.store.listTopics('alpha').map((t) => t.name), ['Secret plan'], 'nothing was made');
     f.store.addMember({ project: 'alpha', actor: viewer.id, by: f.human.id });
     assert.equal((await fetch(`${base}/projects/alpha/topics`, { headers: auth })).status, 200, 'made a member, they reach it');
+  } finally { await f.cleanup(); }
+});
+
+// ── Saved tags (SP-309) ─────────────────────────────────────────────────────
+
+test("a project's tags are made by POST and listed by GET with their task counts; a blank name is 400 and a name already listed, in any case, is 409, and nothing is kept", async () => {
+  const f = await fixture();
+  try {
+    f.store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE', operator: f.human.id });
+    f.store.fileTicket({ project: 'alpha', actor: f.machine.id, name: 'One', status: 'queued', tags: ['tracker'] });
+    const h = (method, path, body) => f.call(method, path, { token: f.humanToken, body });
+    assert.deepEqual((await h('GET', '/projects/beta/tags')).body, { project: 'beta', tags: [] });
+    const made = await h('POST', '/projects/alpha/tags', { name: 'design', description: 'Looks' });
+    assert.equal(made.status, 201, made.text);
+    assert.deepEqual([made.body.name, made.body.description, made.body.createdByName, made.body.count], ['design', 'Looks', 'Operator', 0]);
+    const listed = (await h('GET', '/projects/alpha/tags')).body;
+    assert.equal(listed.project, 'alpha');
+    assert.deepEqual(listed.tags.map((t) => [t.name, t.count]), [['design', 0], ['tracker', 1]]);
+    assert.deepEqual((await h('GET', '/projects/beta/tags')).body.tags, [], 'another project has its own list');
+    for (const body of [{ name: '' }, { name: '   ' }, {}, { name: 7 }]) {
+      const r = await h('POST', '/projects/beta/tags', body);
+      assert.equal(r.status, 400, JSON.stringify(body));
+      assert.equal(r.body.error, 'bad-name');
+      assert.match(r.body.message, /a tag needs a name/);
+    }
+    for (const name of ['Design', 'TRACKER']) {
+      const r = await h('POST', '/projects/alpha/tags', { name });
+      assert.equal(r.status, 409, name);
+      assert.equal(r.body.error, 'tag-exists');
+      assert.match(r.body.message, /^a tag named (design|tracker) already exists in Alpha/);
+    }
+    assert.deepEqual(f.store.listTags('alpha').map((t) => t.name), ['design', 'tracker'], 'nothing more was kept');
+    assert.deepEqual(f.store.listTags('beta'), []);
+    const board = (await h('GET', '/projects/alpha/board')).body;
+    assert.deepEqual(board.tags, ['design', 'tracker'], "the board offers the saved tag to the List view's Add Tag dropdown");
+  } finally { await f.cleanup(); }
+});
+
+test('someone who is not on the project gets the same 404 from both tag calls as from the Docs page\'s call; signed out is 401; nothing is made', async () => {
+  const f = await fixture();
+  try {
+    const base = await f.serve();
+    f.store.addTag({ project: 'alpha', name: 'secret-plan', actor: f.human.id });
+    const viewer = f.store.createActor({ kind: 'human', name: 'Viewer' });
+    const vt = f.store.issueToken(viewer.id);
+    f.store.setRole({ actor: viewer.id, role: 'viewer', by: f.human.id });
+    const auth = { authorization: `Bearer ${vt}` };
+    const docs = await fetch(`${base}/projects/alpha/docs`, { headers: auth });
+    const docsText = await docs.text();
+    assert.equal(docs.status, 404);
+    const calls = [
+      (p, h) => fetch(`${base}/projects/${p}/tags`, { headers: h }),
+      (p, h) => fetch(`${base}/projects/${p}/tags`, { method: 'POST', headers: { ...h, 'content-type': 'application/json' }, body: JSON.stringify({ name: 'mine' }) }),
+    ];
+    for (const [i, call] of calls.entries()) {
+      const r = await call('alpha', auth);
+      const text = await r.text();
+      assert.equal(r.status, 404, `call ${i}: ${text}`);
+      assert.equal(text, docsText, `call ${i}: the same refusal as the Docs page's call`);
+      assert.ok(!text.includes('secret'), `call ${i} gives nothing away`);
+      assert.equal((await call('alpha', {})).status, 401, `call ${i} signed out`);
+    }
+    assert.deepEqual(f.store.listTags('alpha').map((t) => t.name), ['secret-plan'], 'nothing was made');
   } finally { await f.cleanup(); }
 });
 
