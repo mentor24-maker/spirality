@@ -191,7 +191,7 @@ test('app-checks on the relay: the two parts together never outlast the pass lim
 test('app-checks on the relay: run_relay.sh runs the step after the relay part, signed in as the relay, inside the pass limit', () => {
   const text = readFileSync(join(HERE, '..', 'run_relay.sh'), 'utf8');
   const token = text.indexOf('export TRACKER_TOKEN_NAME=TRACKER_TOKEN_RELAY');
-  const relay = text.indexOf('"$REPO/scripts/run_with_time_limit.sh" "$RELAY_LIMIT" --');
+  const relay = text.indexOf('"$RUN_DIR/scripts/run_with_time_limit.sh" "$RELAY_LIMIT" --');
   const budget = text.indexOf('CHECKS_LIMIT="$(relay_app_checks_budget "$PASS_LIMIT" "$CHECKS_SHARE"');
   const checks = text.indexOf('run_relay_app_checks "$CHECKS_LIMIT"');
   const end = text.indexOf('END relay — $(relay_end_words "$status" "$checks_status"');

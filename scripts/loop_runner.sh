@@ -20,6 +20,13 @@
 # cannot answer a permission prompt, so anything not listed is refused and
 # the run continues.
 #
+# A project's passes run on the Spirality release the tracker names for it
+# (SP-276): this runner, in Spirality's main checkout, launches them, and
+# everything a pass runs of Spirality's (the door, the plugin's skills and
+# hooks, the pause, work, wake and model checks) comes from that release's
+# own checkout, which scripts/lib/releaseCheckout.mjs keeps in Spirality's
+# log folder. Spirality's own passes run from this folder, on main.
+#
 # Every project-specific name (the log folder, the short name each log and
 # lock starts with, the launchd label) comes from the project config through
 # scripts/project_config.mjs, the way the installer and run_relay.sh read
@@ -77,7 +84,10 @@ cd "$PROJECT" || exit 1
 # /<plugin>:<skill>: a project that still carries its own copy of a skill
 # under the same name would otherwise win over Spirality's (checked
 # 2026-11-14 on Claude Code 2.1.323). The project's own CLAUDE.md is read as
-# always: the pass starts in its checkout.
+# always: the pass starts in its checkout. This folder's plugin is checked
+# once, here, so a runner that could never hand a pass its skill stops at
+# once; each pass is then handed the plugin of the release it runs
+# (pass_args, below, SP-276).
 PROMPT="/$SKILL"
 SESSION_ARGS=()
 if [ -z "$OWN" ]; then
@@ -90,9 +100,34 @@ if [ -z "$OWN" ]; then
     echo "[loop-runner] Spirality's plugin folder has no /$SKILL skill ($PLUGIN_DIR/skills/$SKILL/SKILL.md). Stopping." >&2
     exit 1
   fi
-  PROMPT="/$PLUGIN_NAME:$SKILL"
-  SESSION_ARGS=(--plugin-dir "$PLUGIN_DIR")
 fi
+
+# The prompt and the plugin folder for one pass run from Spirality folder $1
+# (SP-276: a release checkout, for a project). Spirality's own pass: the
+# skill by its plain name, no extra options. Returns 1, with PASS_ARGS_WHY
+# saying why in one line, when that folder's plugin cannot hand the pass a
+# skill. Run in this shell, never in $( ), so PROMPT and SESSION_ARGS stick.
+pass_args() {
+  local code_dir="$1" name
+  PROMPT="/$SKILL"
+  SESSION_ARGS=()
+  PASS_ARGS_WHY=""
+  [ -n "$OWN" ] && return 0
+  name="$(node -e 'process.stdout.write(String(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).name || ""))' "$code_dir/plugin/.claude-plugin/plugin.json" 2>/dev/null)"
+  case "$name" in
+    ""|*[!a-z0-9-]*) PASS_ARGS_WHY="the plugin folder in $code_dir has no usable name in .claude-plugin/plugin.json"; return 1 ;;
+  esac
+  if [ ! -f "$code_dir/plugin/skills/$SKILL/SKILL.md" ]; then
+    PASS_ARGS_WHY="the plugin folder in $code_dir has no /$SKILL skill"
+    return 1
+  fi
+  PROMPT="/$name:$SKILL"
+  SESSION_ARGS=(--plugin-dir "$code_dir/plugin")
+}
+# The Spirality folder this pass runs from: this one, until a project's
+# release is read just before each pass (step 4 below). The pause and work
+# checks always run from this folder, as the relay's tick and pause check do.
+RUN_DIR="$REPO"
 
 SLUG="$(node "$REPO/scripts/project_config.mjs" projectSlug)" || { echo "[loop-runner] could not read projectSlug from the project config" >&2; exit 1; }
 LOG_DIR="$(node "$REPO/scripts/project_config.mjs" logDir)" || { echo "[loop-runner] could not read logDir from the project config" >&2; exit 1; }
@@ -188,7 +223,7 @@ sleep_until_woken() {
 # the lane never stops and never sleeps 0.
 read_wake_time() {
   local said
-  said="$(node "$REPO/scripts/lib/wakeSetting.mjs" "$SKILL" 2>/dev/null)"
+  said="$(node "$RUN_DIR/scripts/lib/wakeSetting.mjs" "$SKILL" 2>/dev/null)"
   local code=$?
   case "$said" in
     ""|*[!0-9]*) ;;
@@ -210,7 +245,7 @@ read_model() {
   PASS_MODEL=default
   MODEL_ARGS=()
   local said code
-  said="$(node "$REPO/scripts/lib/modelSetting.mjs" "$SKILL" 2>/dev/null)"
+  said="$(node "$RUN_DIR/scripts/lib/modelSetting.mjs" "$SKILL" 2>/dev/null)"
   code=$?
   if [ "$code" -eq 0 ]; then
     case "$said" in
@@ -331,6 +366,41 @@ while true; do
     fi
     echo "[loop-runner] $(date "+%H:%M:%S") work check: ${WORK_LINE:-the check exited $WORK_CODE and said nothing} — starting /$SKILL" >> "$LOG"
   fi
+  # 4. Which Spirality this pass runs (SP-276), asked only once the pause
+  #    and work checks above have said a pass is due, so a paused or idle
+  #    project lane never fetches, checks out or tells the bus anything.
+  #    Spirality's own: this folder, on the main just pulled. A project's:
+  #    the release the tracker names for it, read now, at the start of the
+  #    pass, so a move or a roll-back takes effect at this pass and never
+  #    stops one running. A
+  #    release that cannot be made ready falls back to the one this project
+  #    ran last (said once on its bus); with none to fall back on, or none
+  #    named, the pass does not run. Never a silent run on main.
+  if [ -z "$OWN" ]; then
+    RELEASE_SAID="$(node "$REPO/scripts/lib/releaseCheckout.mjs" prepare --root "$REPO" --project "$SLUG" --pid "$$" 2>>"$LOG")"
+    RELEASE_CODE=$?
+    RUN_DIR="$(printf '%s\n' "$RELEASE_SAID" | head -1)"
+    while IFS= read -r line; do
+      [ -n "$line" ] && echo "[loop-runner] $(date "+%H:%M:%S") release: $line" >> "$LOG"
+    done < <(printf '%s\n' "$RELEASE_SAID" | tail -n +2)
+    WHY_NOT=""
+    if [ -z "$RUN_DIR" ] || [ ! -d "$RUN_DIR" ]; then
+      WHY_NOT="no Spirality release to run on (the release check exited $RELEASE_CODE)"
+    elif ! pass_args "$RUN_DIR"; then
+      WHY_NOT="$PASS_ARGS_WHY"
+    fi
+    if [ -n "$WHY_NOT" ]; then
+      RUN_DIR="$REPO"
+      echo "===== $(date "+%Y-%m-%d %H:%M:%S") SKIP /$SKILL ($WHY_NOT; Claude not started) =====" >> "$LOG"
+      read_wake_time
+      echo "[loop-runner] $(date "+%H:%M:%S") sleeping ${INTERVAL}s before the next /$SKILL (a wake ends it early)" >> "$LOG"
+      sleep_until_woken
+      continue
+    fi
+  else
+    pass_args "$REPO"
+  fi
+
   LAST_REAL_PASS="$(date +%s)"
   read_model
   echo "" >> "$LOG"
@@ -345,7 +415,7 @@ while true; do
   SNAPSHOT="$LOG_DIR/$SLUG-$SKILL.timeout-snapshot"
   rm -f "$SNAPSHOT"
   RUN_WITH_TIME_LIMIT_SNAPSHOT="$SNAPSHOT" \
-  "$REPO/scripts/run_with_time_limit.sh" "${LOOP_PASS_LIMIT_SECONDS:-7200}" -- \
+  "$RUN_DIR/scripts/run_with_time_limit.sh" "${LOOP_PASS_LIMIT_SECONDS:-7200}" -- \
     "$CLAUDE_BIN" -p "$PROMPT" ${MODEL_ARGS[@]+"${MODEL_ARGS[@]}"} \
     ${SESSION_ARGS[@]+"${SESSION_ARGS[@]}"} \
     --allowedTools Bash Edit Write Read Glob Grep Task TodoWrite WebFetch \
@@ -359,9 +429,9 @@ while true; do
   # never fails the runner: until the door has a `pass-timeout` command the
   # line below logs its "Unknown command" answer and carries on.
   if [ "$CODE" -eq 124 ]; then
-    # Spirality's door, from Spirality's folder (a project's checkout may
-    # have none, or an older copy); it acts for the exported project.
-    (cd "$REPO" && npm run --silent clickup -- pass-timeout --pass "$SKILL" \
+    # Spirality's door, from the Spirality folder this pass ran (a project's
+    # checkout may have none, or an older copy); it acts for the exported project.
+    (cd "$RUN_DIR" && npm run --silent clickup -- pass-timeout --pass "$SKILL" \
       --limit "${LOOP_PASS_LIMIT_SECONDS:-7200}" --snapshot "$SNAPSHOT") \
       >> "$LOG" 2>&1 || true
     echo "[loop-runner] the pass hit the ${LOOP_PASS_LIMIT_SECONDS:-7200}s time limit and was stopped; its ticket may still be in Building — the next pass or a person should hand it back." >> "$LOG"
@@ -371,12 +441,21 @@ while true; do
   # (SP-268). Under its own short time limit, and never allowed to change
   # CODE, the runner's exit or the next pass.
   if declare -F report_lane_pass >/dev/null; then
-    report_lane_pass "$REPO" "$FAILURE_STAMP" "$SKILL" "$CODE" "$LOG" >> "$LOG" 2>&1 || true
+    report_lane_pass "$RUN_DIR" "$FAILURE_STAMP" "$SKILL" "$CODE" "$LOG" >> "$LOG" 2>&1 || true
   fi
   # Only Claude's own sign-in errors, and only in this pass's last lines: a
   # pass that merely mentions "not logged in" (gh, supabase) is not one.
   if tail -20 "$PASS_OUT" | grep -qiE "OAuth session expired|Failed to authenticate|Invalid API key|Please run /login"; then
     echo "[loop-runner] $(date "+%H:%M:%S") THIS PASS COULD NOT SIGN IN TO CLAUDE. Nothing will change until a person signs in on this machine (claude login) and restarts this job: launchctl kickstart -k gui/$(id -u)/$PREFIX.$SKILL" >> "$LOG"
+  fi
+
+  # A project's pass is over: its release checkout is no longer in use by
+  # this runner, and any checkout nothing needs any more is removed (SP-276).
+  # It never changes the pass's code or stops the runner.
+  if [ -z "$OWN" ]; then
+    while IFS= read -r line; do
+      [ -n "$line" ] && echo "[loop-runner] $(date "+%H:%M:%S") release: $line" >> "$LOG"
+    done < <(node "$REPO/scripts/lib/releaseCheckout.mjs" finish --root "$REPO" --pid "$$" 2>>"$LOG")
   fi
 
   read_wake_time
