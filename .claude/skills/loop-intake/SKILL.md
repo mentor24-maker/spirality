@@ -142,10 +142,28 @@ stick. **A non-zero exit is a failure you report**, never one you talk past.
    ## Scope
    ## Non-goals
    ## Affected files / artifacts
+   - `<path>`
+
+   Likely files: <path>[, <path> ...]
    ## Acceptance criteria
    ## How to test
    ## Risk
    ````
+
+   **Every spec carries the `Likely files:` line** (`docs/LOOP_CONTRACT.md`,
+   "The files a ticket will likely change"): on a line of its own under
+   `## Affected files / artifacts`, the repository-relative paths of the
+   files you read to write the spec and expect it to change, separated by
+   commas. A best guess is fine; it is checked against the pull request's
+   real files later. Never put it on the `Waits on:` line.
+
+   **Chain tickets that share a file.** Before filing, list the open tickets
+   (`npm run clickup -- queue`, every status but `Live` and closed) and read
+   each one's `Likely files:` line with `get`. A new ticket that shares any
+   path with one of them gets a `Waits on:` line naming it; when it shares
+   with several, it names the **newest**, so they form a chain, never a fan.
+   A ticket with no `Likely files:` line yet is compared by its
+   `## Affected files / artifacts` paths.
 
    **Pick a fence his text cannot close.** A fence closes only on a line of
    the same character, at least as long, with nothing after it. So if his
@@ -186,6 +204,11 @@ stick. **A non-zero exit is a failure you report**, never one you talk past.
    ```
 
    (Leave out the `Waits on:` line for a slice that needs nothing first.)
+   **A slice that shares a likely file with an earlier slice waits on the
+   slice just before it** that shares the file, not only on the original:
+   slices 1, 2 and 3 that all change one file are 1, then 2 waiting on 1,
+   then 3 waiting on 2. A slice that also shares a file with an open ticket
+   outside this request names that one too, on the same `Waits on:` line.
    They are filed as `Requested` so no build loop can claim one before he has
    approved it. **Before the `describe`, record what you filed** on the
    original, so a pass that stops here never slices it twice:
