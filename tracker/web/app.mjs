@@ -26,7 +26,7 @@
  * an emailed link's own page. The link's token is sent only in a JSON body,
  * never in an address.
  */
-import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, loopHasIt, renderCommentForm, MOVED_MESSAGE, renderMarkdown, unwrapDoc, renderCloseAction, renderGoAction, goQuestion, renderBugReportActions, approveQuestion, rejectQuestion, changeProblem, REJECT_COMMENT, WONT_DO_TAG, renderMergeAction, renderAnswerIn, renderHeldUp, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, lookupTicket, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, pipelinePodLabel, renderHealth, healthLines, renderCommandList, renderCommandView, renderCommandDetails, renderContextDocs, renderTopics, renderTopicEditRow, topicDeleteQuestion, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, renderListTopics, projectTags, sortTickets, nextSort, renderDocumentation, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, lowerMeridiem, renderPipelineControls, renderConsole, drainLine, renderTitleChoices, titleModeOf, SUGGEST_POLL_MS, moveSuggestion, suggestState, filingPlan, orderPlan, andList, suggestRunLine, renderSuggestRows, renderSuggestionInfo, renderMessage, renderSavedCard, MESSAGE_CLOSES_MS, SAVED_CARD_MS } from './render.mjs';
+import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, loopHasIt, renderCommentForm, MOVED_MESSAGE, renderMarkdown, unwrapDoc, renderCloseAction, renderGoAction, goQuestion, renderBugReportActions, approveQuestion, rejectQuestion, changeProblem, REJECT_COMMENT, WONT_DO_TAG, renderMergeAction, renderAnswerIn, renderHeldUp, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, lookupTicket, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, pipelinePodLabel, renderHealth, healthLines, renderCommandList, renderCommandView, renderCommandDetails, renderContextDocs, renderTopics, renderTopicEditRow, topicDeleteQuestion, renderTagEditRow, tagDeleteQuestion, tagAddressable, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, renderListTopics, projectTags, sortTickets, nextSort, renderDocumentation, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, lowerMeridiem, renderPipelineControls, renderConsole, drainLine, renderTitleChoices, titleModeOf, SUGGEST_POLL_MS, moveSuggestion, suggestState, filingPlan, orderPlan, andList, suggestRunLine, renderSuggestRows, renderSuggestionInfo, renderMessage, renderSavedCard, MESSAGE_CLOSES_MS, SAVED_CARD_MS } from './render.mjs';
 
 /** Where an earlier version of the page kept a pasted token; removed on load, never read. */
 const OLD_TOKEN_KEY = 'tracker-token';
@@ -3855,6 +3855,87 @@ async function drawTopics(done = '', problem = '', problemIn = 'topic') {
     again(listed ? `Created the tag ${made.name} in ${project.name}.` : `The tracker said the tag ${made.name} was created, but ${back ? 'it is not listed when read back' : 'the list could not be read back'}.`, !listed, 'tag');
   });
   wireTopicRows(project, topics, topicsPath, say, again);
+  if (Array.isArray(tags)) wireTagRows(project, tags, tagsPath, say, again);
+}
+
+/**
+ * SP-310: each Tags row's Edit and Delete, as wireTopicRows does for
+ * topics. Edit draws the row as Name and Description boxes (a blank name is
+ * refused before anything is sent); Cancel draws the page again. Delete asks
+ * first, naming how many tasks carry the tag. After either, the list is read
+ * again and the page says it worked only when the read-back shows it: the
+ * new name and words with the same task count for an edit, the tag gone for
+ * a delete. A tag named "." or ".." is refused on the page (tagAddressable).
+ */
+function wireTagRows(project, tags, tagsPath, say, again) {
+  const byName = new Map(tags.map((t) => [t.name, t]));
+  const pathOf = (name) => `${tagsPath}/${encodeURIComponent(name)}`;
+  const readBack = () => api('GET', tagsPath, undefined, { unrecorded: true }).catch((err) => { if (err instanceof SignedOut) throw err; return null; });
+  const unsendable = (tag) => (tagAddressable(tag.name) ? '' : `the tag ${tag.name} cannot be changed here; take it off its tasks on the List view.`);
+  const editButtons = [...main.querySelectorAll('button[data-edit-tag]')];
+  editButtons.forEach((button, index) => {
+    button.addEventListener('click', () => {
+      const tag = byName.get(button.dataset.editTag);
+      const row = button.closest('tr');
+      if (!tag || !row) return;
+      if (unsendable(tag)) return say(`Not changed: ${unsendable(tag)}`, true);
+      row.innerHTML = renderTagEditRow(tag, index);
+      const form = row.querySelector('form.edit-tag');
+      form.querySelector('input').focus();
+      form.querySelector('.cancel-edit').addEventListener('click', () => again('', false, 'tag'));
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const name = form.querySelector('input[name="name"]').value.trim();
+        const description = form.querySelector('textarea[name="description"]').value.trim();
+        if (!name) return say('Not saved: a tag needs a name.', true);
+        for (const control of form.querySelectorAll('button')) control.disabled = true;
+        say(`Saving ${name}…`);
+        let changed;
+        try {
+          changed = await api('PATCH', pathOf(tag.name), { name, description });
+        } catch (err) {
+          if (err instanceof SignedOut) return drawSignIn(`You were signed out; ${tag.name} was not saved.`);
+          for (const control of form.querySelectorAll('button')) control.disabled = false;
+          return say(`Not saved: ${err.message}`, true);
+        }
+        let back;
+        try { back = await readBack(); } catch { return drawSignIn(); }
+        const listed = back?.tags?.find((x) => x.name === name);
+        const oldGone = name === tag.name || !back?.tags?.some((x) => x.name === tag.name);
+        const ok = Boolean(listed && oldGone && listed.description === description && listed.count === tag.count);
+        const n = changed?.tickets?.length ?? 0;
+        const moved = name === tag.name ? '' : ` (was ${tag.name}${n ? `, on ${n === 1 ? '1 task' : `${n} tasks`}` : ''})`;
+        again(ok
+          ? `Saved the tag ${name}${moved}.`
+          : `The tracker said the tag ${name} was saved, but ${back ? 'the list does not show it that way when read back' : 'the list could not be read back'}.`, !ok, 'tag');
+      });
+    });
+  });
+  for (const button of main.querySelectorAll('button[data-delete-tag]')) {
+    button.addEventListener('click', async () => {
+      const tag = byName.get(button.dataset.deleteTag);
+      if (!tag) return;
+      if (unsendable(tag)) return say(`Not deleted: ${unsendable(tag)}`, true);
+      if (!confirm(tagDeleteQuestion(tag))) return;
+      button.disabled = true;
+      say(`Deleting ${tag.name}…`);
+      let gone;
+      try {
+        gone = await api('DELETE', pathOf(tag.name));
+      } catch (err) {
+        if (err instanceof SignedOut) return drawSignIn(`You were signed out; ${tag.name} was not deleted.`);
+        button.disabled = false;
+        return say(`Not deleted: ${err.message}`, true);
+      }
+      let back;
+      try { back = await readBack(); } catch { return drawSignIn(); }
+      const stillThere = !back || back.tags?.some((x) => x.name === tag.name);
+      const n = gone?.tickets?.length ?? 0;
+      again(stillThere
+        ? `The tracker said the tag ${tag.name} was deleted, but ${back ? 'it is still listed when read back' : 'the list could not be read back'}.`
+        : `Deleted the tag ${tag.name} from ${project.name}${n ? ` and from the ${n === 1 ? '1 task' : `${n} tasks`} that carried it` : ''}.`, stillThere, 'tag');
+    });
+  }
 }
 
 /**
