@@ -483,10 +483,10 @@ export function renderPipelineDetails(answer, timeOf) {
     const failed = s.lastEnd && s.lastExit !== 0 && s.lastExit != null;
     return `<tr${s.running ? ' class="running"' : ''}>${name}<td>${escapeHtml(next)}</td><td>${escapeHtml(started)}</td><td${failed ? ' class="failed"' : ''}>${escapeHtml(ended)}</td>${wakes}</tr>`;
   };
-  return `<table class="pipeline-stages">
+  return `<div class="table-wrap"><table class="pipeline-stages">
     <thead><tr><th scope="col">Stage</th><th scope="col">Next Pass</th><th scope="col">Last Started</th><th scope="col">Last Ended</th><th scope="col">Wakes</th></tr></thead>
     <tbody>${stages.map(row).join('')}</tbody>
-  </table>`;
+  </table></div>`;
 }
 
 /** A time as Mountain time, the way the change log shows it: "Nov 12, 2026, 6:48 AM MST". */
@@ -628,7 +628,7 @@ export function renderPipelineControls(view, notes = {}, open = false) {
   const lockedLine = locked ? `<p class="quiet">Only ${who}, the project's operator, may change these.</p>` : '';
   const changes = view.changes ?? [];
   const log = changes.length
-    ? `<table class="control-changes"><thead><tr><th>When</th><th>Who</th><th>Setting</th><th>Old Value</th><th>New Value</th></tr></thead><tbody>${changes.map((x) => `<tr><td>${escapeHtml(mountainTime(x.at))}</td><td>${escapeHtml(x.actorName)}</td><td>${escapeHtml(x.label)}</td><td>${escapeHtml(x.from)}</td><td>${escapeHtml(x.to)}</td></tr>`).join('')}</tbody></table>`
+    ? `<div class="table-wrap"><table class="control-changes"><thead><tr><th>When</th><th>Who</th><th>Setting</th><th>Old Value</th><th>New Value</th></tr></thead><tbody>${changes.map((x) => `<tr><td>${escapeHtml(mountainTime(x.at))}</td><td>${escapeHtml(x.actorName)}</td><td>${escapeHtml(x.label)}</td><td>${escapeHtml(x.from)}</td><td>${escapeHtml(x.to)}</td></tr>`).join('')}</tbody></table></div>`
     : '<p class="quiet">No changes yet.</p>';
   return `<details class="pipeline-controls" data-project="${escapeHtml(slug)}"${open ? ' open' : ''}>
     <summary>${escapeHtml(view.project.name)}</summary>
@@ -2400,8 +2400,8 @@ export function renderContextDocs({ project, docs = [] }, { size, timeOf }) {
     <div class="row"><button type="button" class="btn btn-primary upload-doc">Upload Document</button><input type="file" class="doc-file" hidden></div>
     <p class="note quiet doc-note" role="status"></p>
     ${docs.length
-    ? `<table class="projects doc-list"><thead><tr><th>File</th><th>Type</th><th>Size</th><th>Added By</th><th>Added On</th><th></th></tr></thead>
-      <tbody>${docs.map(row).join('')}</tbody></table>`
+    ? `<div class="table-wrap"><table class="projects doc-list"><thead><tr><th>File</th><th>Type</th><th>Size</th><th>Added By</th><th>Added On</th><th></th></tr></thead>
+      <tbody>${docs.map(row).join('')}</tbody></table></div>`
     : `<p class="quiet">${escapeHtml(project.name)} has no context documents yet.</p>`}
   </section>`;
 }
@@ -2430,8 +2430,8 @@ export function renderTopics({ projects, project, topics = [], tags = [] }, { ti
   const tagList = tags === null
     ? '<p class="note error no-tags">The tags could not be read. Reload the page to try again.</p>'
     : tags.length
-      ? `<table class="projects tag-list"><thead><tr><th>Tag</th><th>Tasks</th></tr></thead>
-        <tbody>${tags.map(tagRow).join('')}</tbody></table>`
+      ? `<div class="table-wrap"><table class="projects tag-list"><thead><tr><th>Tag</th><th>Tasks</th></tr></thead>
+        <tbody>${tags.map(tagRow).join('')}</tbody></table></div>`
       : '<p class="quiet no-tags">No tags yet.</p>';
   return `<div class="title-row"><h1>Topics</h1>
     <div class="toolbar">${renderProjectPicker(projects, project.slug)}</div></div>
@@ -2451,8 +2451,8 @@ export function renderTopics({ projects, project, topics = [], tags = [] }, { ti
         </details>
         <h2 id="topics-title">Topics</h2>
         ${topics.length
-    ? `<table class="projects topic-list"><thead><tr><th>Name</th><th>Description</th><th>Created By</th><th>Created</th></tr></thead>
-        <tbody>${topics.map(row).join('')}</tbody></table>`
+    ? `<div class="table-wrap"><table class="projects topic-list"><thead><tr><th>Name</th><th>Description</th><th>Created By</th><th>Created</th></tr></thead>
+        <tbody>${topics.map(row).join('')}</tbody></table></div>`
     : '<p class="quiet no-topics">No topics yet.</p>'}
       </section>
       <section class="tags-half" aria-labelledby="tags-title">
@@ -2579,8 +2579,8 @@ export function renderDocumentation(files, address) {
       <input type="search" id="doc-search" aria-label="Find a document by title or path" placeholder="Find by title or path" autocomplete="off">
     </div>
     <p class="quiet doc-count" role="status">${docCountLine(rows.length, rows.length)}</p>
-    <table class="projects spirality-docs sortable"><thead>${renderDocHeadings(null)}</thead>
-      <tbody>${renderDocBody(rows, address)}</tbody></table>
+    <div class="table-wrap"><table class="projects spirality-docs sortable"><thead>${renderDocHeadings(null)}</thead>
+      <tbody>${renderDocBody(rows, address)}</tbody></table></div>
   </details>`;
 }
 
