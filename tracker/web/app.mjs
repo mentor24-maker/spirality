@@ -26,7 +26,7 @@
  * an emailed link's own page. The link's token is sent only in a JSON body,
  * never in an address.
  */
-import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, loopHasIt, renderCommentForm, MOVED_MESSAGE, renderMarkdown, unwrapDoc, renderCloseAction, renderGoAction, goQuestion, renderBugReportActions, approveQuestion, rejectQuestion, changeProblem, REJECT_COMMENT, WONT_DO_TAG, renderMergeAction, renderAnswerIn, renderHeldUp, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, lookupTicket, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, pipelinePodLabel, renderHealth, healthLines, renderCommandList, renderCommandView, renderCommandDetails, renderContextDocs, renderTopics, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, renderListTopics, projectTags, sortTickets, nextSort, renderDocumentation, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, lowerMeridiem, renderPipelineControls, renderConsole, drainLine, renderTitleChoices, titleModeOf, SUGGEST_POLL_MS, moveSuggestion, suggestState, filingPlan, orderPlan, andList, suggestRunLine, renderSuggestRows, renderSuggestionInfo } from './render.mjs';
+import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, loopHasIt, renderCommentForm, MOVED_MESSAGE, renderMarkdown, unwrapDoc, renderCloseAction, renderGoAction, goQuestion, renderBugReportActions, approveQuestion, rejectQuestion, changeProblem, REJECT_COMMENT, WONT_DO_TAG, renderMergeAction, renderAnswerIn, renderHeldUp, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, lookupTicket, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, pipelinePodLabel, renderHealth, healthLines, renderCommandList, renderCommandView, renderCommandDetails, renderContextDocs, renderTopics, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, renderListTopics, projectTags, projectTagCounts, sortTickets, nextSort, renderDocumentation, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, lowerMeridiem, renderPipelineControls, renderConsole, drainLine, renderTitleChoices, titleModeOf, SUGGEST_POLL_MS, moveSuggestion, suggestState, filingPlan, orderPlan, andList, suggestRunLine, renderSuggestRows, renderSuggestionInfo } from './render.mjs';
 
 /** Where an earlier version of the page kept a pasted token; removed on load, never read. */
 const OLD_TOKEN_KEY = 'tracker-token';
@@ -3756,7 +3756,9 @@ async function drawDocs(done = '', problem = '', section = 'files') {
 
 /**
  * The Topics page (SP-243): the topics of the project picked here (or on
- * the Projects page, else the first) and a Create Topic form. Picking
+ * the Projects page, else the first) and a Create Topic form, beside the
+ * tags on the project's tasks (SP-307, read from its board; a board that
+ * cannot be read says so in the Tags half and leaves Topics working). Picking
  * another project here selects it, as the Tasks page's picker does. A blank
  * name is refused on the page before anything is sent; after a create the
  * list is read again, and the page says it worked only when the new topic
@@ -3772,8 +3774,11 @@ async function drawTopics(done = '', problem = '') {
   }
   const project = projects.find((p) => p.slug === savedProject()) ?? projects[0];
   const topicsPath = `/projects/${encodeURIComponent(project.slug)}/topics`;
-  const { topics } = await api('GET', topicsPath);
-  main.innerHTML = renderTopics({ projects, project, topics }, { timeOf: when, done, problem });
+  const [{ topics }, tags] = await Promise.all([
+    api('GET', topicsPath),
+    api('GET', `/projects/${encodeURIComponent(project.slug)}/board`).then(projectTagCounts, (err) => { if (err instanceof SignedOut) throw err; return null; }),
+  ]);
+  main.innerHTML = renderTopics({ projects, project, topics, tags }, { timeOf: when, done, problem });
   const note = main.querySelector('.topic-note');
   const say = (text, failed = false) => { note.className = `note topic-note ${failed ? 'error' : 'quiet'}`; note.textContent = text; };
   const again = (text, failed) => drawAgain(() => drawTopics(failed ? '' : text, failed ? text : ''))

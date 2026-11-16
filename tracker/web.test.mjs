@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { DEMO_NEWEST_RELEASE, DEMO_OWN_PROJECT, DEMO_SUGGESTIONS, demoNewestRelease, demoSuggest, seedDemo, tickingClock } from './demoData.mjs';
 import { reportsOf, REPORT_RANGES, GROWTH_PERIODS, searchTickets, PRIORITIES, timeSplitOf, isFailureNote, TIME_BUCKETS, pipelineControlsOf } from './pageData.mjs';
-import { escapeHtml, renderStatusLine, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, CLOSE_LINE, REPLY_LINE, offersMerge, offersClose, bugReport, BUG_REPORT_TAG, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, heldBugReport, renderBugReportActions, approveQuestion, rejectQuestion, changeProblem, REJECT_COMMENT, WONT_DO_TAG, HELD_REPORT_LINE, HELD_REPORT_STATUS_LINE, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, loopHasIt, renderCommentForm, LOOP_HAS_STATUSES, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, renderTopics, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, renderListTopics, projectTags, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, renderReleaseGroup, controlValueText, mountainTime, wakeInEffectText, modelLastPassText, renderConsole, renderConsoleTile, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, consoleFeature, featureColourIndex, renderFeatureKey, FEATURE_PALETTE, drainLine, capInFlightText, renderTitleChoices, titleModeOf, TITLE_MODES, SUGGEST_POLL_MS, moveSuggestion, suggestState, filingPlan, orderPlan, andList, suggestRunLine, renderSuggestRows, renderSuggestionInfo } from './web/render.mjs';
+import { escapeHtml, renderStatusLine, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, CLOSE_LINE, REPLY_LINE, offersMerge, offersClose, bugReport, BUG_REPORT_TAG, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, heldBugReport, renderBugReportActions, approveQuestion, rejectQuestion, changeProblem, REJECT_COMMENT, WONT_DO_TAG, HELD_REPORT_LINE, HELD_REPORT_STATUS_LINE, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, loopHasIt, renderCommentForm, LOOP_HAS_STATUSES, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, renderTopics, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, renderListTopics, projectTags, projectTagCounts, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, renderReleaseGroup, controlValueText, mountainTime, wakeInEffectText, modelLastPassText, renderConsole, renderConsoleTile, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, consoleFeature, featureColourIndex, renderFeatureKey, FEATURE_PALETTE, drainLine, capInFlightText, renderTitleChoices, titleModeOf, TITLE_MODES, SUGGEST_POLL_MS, moveSuggestion, suggestState, filingPlan, orderPlan, andList, suggestRunLine, renderSuggestRows, renderSuggestionInfo } from './web/render.mjs';
 import { startServer, setupSettingsOf } from './server.mjs';
 import { saveAnswers, setupFields, setupOf } from './setup.mjs';
 import { DANE_FIELDS as SETUP_FIELDS, STEPS as SETUP_STEPS } from '../scripts/onboard/onboard.mjs';
@@ -5581,7 +5581,7 @@ test('the Topics page lists the picked project\'s topics newest first, every nam
   assert.match(html, /<td class="when">at 2026-11-13T12:00:00Z<\/td>/);
   assert.ok(html.indexOf('data-topic="2"') < html.indexOf('data-topic="1"'), 'in the order the server lists them (newest first)');
   assert.match(html, /<option value="alpha" selected>Alpha &lt;One&gt;<\/option>/, 'the picked project is chosen in the picker');
-  assert.match(html, /<h2>Create Topic<\/h2>/);
+  assert.match(html, /<summary><span class="fold" aria-hidden="true"><\/span>Add Topic<\/summary>/);
   assert.match(html, /<form class="create-topic">[\s\S]*<label for="topic-name">Name<\/label>[\s\S]*<label for="topic-description">Description<\/label>[\s\S]*<button type="submit">Create Topic<\/button>/);
   assert.doesNotMatch(html, /<b>|<One>|<D>/, 'nothing unescaped');
   assert.doesNotMatch(html, /No topics yet/);
@@ -5590,6 +5590,60 @@ test('the Topics page lists the picked project\'s topics newest first, every nam
   assert.doesNotMatch(empty, /<table/);
   assert.match(empty, /Create Topic<\/button>/, 'an empty project can still create one');
   assert.match(renderTopics({ projects, project, topics: [] }, { timeOf: String, problem: 'Not created: a topic needs a name.' }), /<p class="note topic-note error" role="status">Not created: a topic needs a name\.<\/p>/);
+});
+
+test('the Topics page is two equal halves, Topics left and Tags right, stacked Topics first on a narrow screen (SP-307)', () => {
+  const projects = [{ slug: 'alpha', name: 'Alpha' }];
+  const html = renderTopics({ projects, project: projects[0], topics: [], tags: [] }, { timeOf: String });
+  assert.match(html, /<div class="topics-columns">\s*<section class="topics-half"[\s\S]*<\/section>\s*<section class="tags-half"[\s\S]*<\/section>\s*<\/div>$/, 'Topics first, then Tags');
+  assert.match(html, /<h2 id="topics-title">Topics<\/h2>/);
+  assert.match(html, /<h2 id="tags-title">Tags<\/h2>/);
+  const css = readFileSync(WEB('app.css'), 'utf8');
+  assert.match(css, /\.topics-columns \{ display: grid; grid-template-columns: minmax\(0, 1fr\) minmax\(0, 1fr\);/, 'equal halves');
+  assert.match(css, /@media \(max-width: 800px\) \{ \.topics-columns \{ grid-template-columns: minmax\(0, 1fr\); \} \}/, 'stacked when narrow');
+});
+
+test('Add Topic is a colex at the top of the Topics half, closed on arrival and drawn open after a refused create (SP-307)', () => {
+  const projects = [{ slug: 'alpha', name: 'Alpha' }];
+  const topics = [{ id: 1, name: 'Billing', description: '', createdByName: 'Dane', createdAt: 'x' }];
+  const html = renderTopics({ projects, project: projects[0], topics }, { timeOf: String });
+  const half = html.slice(html.indexOf('<section class="topics-half"'), html.indexOf('<section class="tags-half"'));
+  assert.match(half, /<details class="colex add-topic">\s*<summary>[\s\S]*Add Topic<\/summary>\s*<form class="create-topic">[\s\S]*<\/form>\s*<\/details>/, 'closed, holding the form');
+  assert.ok(half.indexOf('<details class="colex add-topic"') < half.indexOf('<h2 id="topics-title">'), 'the form comes before the list');
+  assert.ok(half.indexOf('<h2 id="topics-title">') < half.indexOf('<table class="projects topic-list">'));
+  assert.doesNotMatch(html, /<h2>Create Topic<\/h2>/, 'no separate Create Topic heading any more');
+  const refused = renderTopics({ projects, project: projects[0], topics }, { timeOf: String, problem: 'Not created: no.' });
+  assert.match(refused, /<details class="colex add-topic" open>/);
+  const css = readFileSync(WEB('app.css'), 'utf8');
+  assert.match(css, /details\.colex\[open\] > summary \.fold::before \{ content: '▾'; \}/);
+});
+
+test('the Tags half lists each tag on the project\'s tasks once, alphabetically, with its task count, every tag escaped (SP-307)', () => {
+  const board = { columns: [
+    { tickets: [{ tags: ['zeta', 'alpha'] }, { tags: ['alpha', 'alpha'] }, { tags: [] }] },
+    { tickets: [{ tags: ['Beta', '<b>'] }, { tags: [null, ''] }, {}] },
+  ] };
+  const tags = projectTagCounts(board);
+  assert.deepEqual(tags, [{ tag: '<b>', count: 1 }, { tag: 'alpha', count: 2 }, { tag: 'Beta', count: 1 }, { tag: 'zeta', count: 1 }]);
+  assert.deepEqual(tags.map((t) => t.tag), projectTags(board), 'the same list and order as the List view\'s Add Tag dropdown');
+  for (const bad of [null, undefined, {}, { columns: 'x' }]) assert.deepEqual(projectTagCounts(bad), []);
+  const projects = [{ slug: 'alpha', name: 'Alpha' }];
+  const html = renderTopics({ projects, project: projects[0], topics: [], tags }, { timeOf: String });
+  const half = html.slice(html.indexOf('<section class="tags-half"'));
+  for (const heading of ['Tag', 'Tasks']) assert.match(half, new RegExp(`<th>${heading}</th>`), heading);
+  assert.match(half, /<tr data-tag="alpha">\s*<td class="name"><span class="tag">alpha<\/span><\/td>\s*<td class="count">2 tasks<\/td><\/tr>/);
+  assert.match(half, /<td class="name"><span class="tag">&lt;b&gt;<\/span><\/td>\s*<td class="count">1 task<\/td>/);
+  assert.doesNotMatch(half, /<b>/, 'nothing unescaped');
+  assert.ok(half.indexOf('data-tag="alpha"') < half.indexOf('data-tag="Beta"') && half.indexOf('data-tag="Beta"') < half.indexOf('data-tag="zeta"'), 'alphabetical');
+  assert.match(renderTopics({ projects, project: projects[0], topics: [], tags: [] }, { timeOf: String }), /<p class="quiet no-tags">No tags yet\.<\/p>/);
+  assert.match(renderTopics({ projects, project: projects[0], topics: [], tags: null }, { timeOf: String }), /<p class="note error no-tags">The tags could not be read\./, 'an unread board says so, never "No tags yet"');
+});
+
+test('the Topics page reads the project\'s board for its tags, and an unread board leaves the topics working (SP-307)', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const draw = app.slice(app.indexOf('async function drawTopics'), app.indexOf('/**\n * The Docs page in two columns'));
+  assert.match(draw, /api\('GET', `\/projects\/\$\{encodeURIComponent\(project\.slug\)\}\/board`\)\.then\(projectTagCounts, \(err\) => \{ if \(err instanceof SignedOut\) throw err; return null; \}\)/);
+  assert.match(draw, /renderTopics\(\{ projects, project, topics, tags \}/);
 });
 
 test('the Topics page refuses a blank name before sending, and says a create worked only when the topic reads back in the list (SP-243)', () => {
