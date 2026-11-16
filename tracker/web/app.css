@@ -52,6 +52,8 @@
   --btn-danger-flat-hover: #a30000;
   --btn-danger-flat-disabled: #ccaaaa;
   --btn-flat-ink: #ffffff;
+  --btn-height: 32px;
+  --btn-height-sm: 24px;
   /* Space and corners (UI_DOCTRINE 2, Space and Corners). */
   --space-1: 4px;
   --space-2: 6px;
@@ -89,8 +91,6 @@
   --navy-soft: #003377;
   --pod-running: #00AA00;
   --pod-soon: #B8860B;
-  --ticket-btn-bg: #00AA00;
-  --ticket-btn-border: #006600;
   --pod-bg: #cceeff;
   --pod-bg-hover: #b8e4ff;
   --pod-divider: rgba(0, 51, 119, 0.2);
@@ -138,8 +138,6 @@ header #bell.current { border-bottom-color: var(--brand-blue); }
 header #bell[data-colour="grey"] { color: var(--ink-muted); }
 header #bell[data-colour="yellow"] { color: var(--header-warn); }
 header #bell[data-colour="red"] { color: var(--header-alert); }
-header button { background: transparent; color: var(--header-ink); border: 1px solid var(--ink-secondary); border-radius: var(--radius-btn); cursor: pointer; }
-header button:hover { border-color: var(--header-ink); }
 /* One body width on every page (SP-184): 1440px to the column's outer edge, padding included, centred. */
 main { box-sizing: border-box; max-width: 1440px; margin: 0 auto; padding: 1.5rem 2rem 4rem; }
 a { color: var(--link-ink); }
@@ -203,8 +201,6 @@ form.request select, form.request input, form.request textarea { display: block;
 form.request textarea { min-height: 12rem; }
 form.request .row { display: flex; gap: var(--space-5); align-items: center; margin-top: 1rem; }
 form.request .hint { display: block; font-size: var(--text-sm); margin-top: 0.15rem; }
-a.button { display: inline-block; padding: 0.4rem 1rem; border: 1px solid var(--border-black); border-radius: var(--radius-btn); background: var(--btn-bg); color: var(--btn-text); text-decoration: none; font-weight: 600; }
-a.button:hover { background: var(--ink-secondary); }
 .hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 img.logo { width: 1.75rem; height: 1.75rem; object-fit: contain; vertical-align: middle; }
 img.logo.big { width: 2.5rem; height: 2.5rem; margin-right: 0.75rem; }
@@ -239,6 +235,24 @@ form.sign-in button.link { background: none; border: none; padding: 0; margin-le
 /* The set-password page's email: shown, never changed there. */
 form.sign-in input[readonly] { background: var(--bg-hover); color: var(--ink-secondary); border: 1px solid var(--border-light); }
 button { font: inherit; padding: 0.4rem 1rem; }
+/* The four button kinds and two sizes (UI_DOCTRINE 3, SP-321): every button but the listed exceptions is .btn, plus a kind for a filled one.
+   A button never sets its own height, padding or colour; tracker/buttonKinds.test.mjs fails one that has no kind. */
+.btn { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; flex: 0 0 auto; width: fit-content; min-width: fit-content; height: var(--btn-height); padding: 0 0.875rem; margin: 0; border: 1px solid var(--border-strong); border-radius: var(--radius-btn); background: var(--bg-surface); color: var(--ink-primary); font-family: inherit; font-size: var(--text-sm); font-weight: 600; line-height: 1.2; white-space: nowrap; text-decoration: none; cursor: pointer; vertical-align: middle; }
+/* .btn's display would beat the browser's own [hidden] { display: none }, so a hidden button (the signed-out page's Sign Out) would still show. */
+.btn[hidden] { display: none; }
+.btn:hover:not(:disabled) { background: var(--bg-hover); border-color: var(--ink-secondary); }
+.btn:focus-visible { outline: 2px solid var(--focus-ring-color); outline-offset: 2px; }
+.btn:disabled, .btn[aria-disabled="true"] { background: var(--bg-surface); border-color: var(--border-light); color: var(--ink-muted); cursor: default; }
+.btn-primary { background: var(--btn-blue); border-color: var(--btn-blue); color: var(--btn-flat-ink); }
+.btn-primary:hover:not(:disabled) { background: var(--btn-blue-hover); border-color: var(--btn-blue-hover); }
+.btn-primary:disabled, .btn-primary[aria-disabled="true"] { background: var(--btn-blue-disabled); border-color: var(--btn-blue-disabled); color: var(--btn-flat-ink); }
+.btn-save { background: var(--btn-green); border-color: var(--btn-green); color: var(--btn-flat-ink); }
+.btn-save:hover:not(:disabled) { background: var(--btn-green-hover); border-color: var(--btn-green-hover); }
+.btn-save:disabled, .btn-save[aria-disabled="true"] { background: var(--btn-green-disabled); border-color: var(--btn-green-disabled); color: var(--btn-flat-ink); }
+.btn-danger { background: var(--btn-danger-flat); border-color: var(--btn-danger-flat); color: var(--btn-flat-ink); }
+.btn-danger:hover:not(:disabled) { background: var(--btn-danger-flat-hover); border-color: var(--btn-danger-flat-hover); }
+.btn-danger:disabled, .btn-danger[aria-disabled="true"] { background: var(--btn-danger-flat-disabled); border-color: var(--btn-danger-flat-disabled); color: var(--btn-flat-ink); }
+.btn-sm { height: var(--btn-height-sm); padding: 0 0.625rem; font-size: var(--text-xs); }
 .toolbar { display: flex; gap: var(--space-7); align-items: center; justify-content: space-between; margin-bottom: 1rem; }
 .toolbar .project-picker { font-weight: 600; }
 .toolbar .project-picker select { font: inherit; font-weight: normal; padding: 0.35rem; margin-left: 0.25rem; }
@@ -366,7 +380,7 @@ details.group { border: 1px solid var(--border-black); border-radius: var(--radi
 a.action, button.action { display: inline-flex; padding: 0.2rem; margin-right: 0.15rem; border-radius: var(--radius-sm); color: var(--ink-secondary); }
 a.action:hover, button.action:hover { color: var(--ink-primary); background: var(--bg-hover); }
 button.action { border: 0; background: transparent; cursor: pointer; vertical-align: middle; }
-button.action:disabled { opacity: 0.4; cursor: default; }
+button.action:disabled { color: var(--ink-muted); background: transparent; cursor: default; }
 /* The list row's status icon (SP-201): the check is green; an empty slot keeps the icons after it lined up. */
 span.action.status-icon { display: inline-flex; padding: 0.2rem; margin-right: 0.15rem; }
 span.action.status-icon.empty { width: 18px; height: 18px; }
@@ -408,11 +422,6 @@ span.action.answer-in-icon { color: var(--status-ok-ink); }
 .quick .command pre { flex: 1; min-width: 0; margin: 0; }
 .offscreen { position: fixed; left: -9999px; top: 0; }
 .quick form.merge-action, .quick form.close-action, .quick form.go-action, .quick form.approve-action, .quick form.reject-action { margin-bottom: 1.25rem; }
-/* Every button on a ticket's page is green, Delete included (SP-76); the tag chips' small × keeps its own look. */
-.quick button, .details form.copy button, details.edit button:not(.remove-tag) { background: var(--ticket-btn-bg); border: 1px solid var(--ticket-btn-border); border-radius: var(--radius-btn); color: var(--btn-flat-ink); cursor: pointer; }
-.quick form.merge-action button, .quick form.close-action button, .quick form.go-action button, .quick form.approve-action button, .quick form.reject-action button { font-weight: 700; padding: 0.6rem 2rem; }
-/* Go is asked for in 10px corners (SP-86), whatever the shared rule above says. */
-.quick form.go-action button { border-radius: var(--radius-btn); }
 .quick form.merge-action p, .quick form.close-action p, .quick form.go-action p, .quick form.approve-action p, .quick form.reject-action p { margin: 0.4rem 0 0; font-size: var(--text-base); }
 .quick .held-report { margin: 0; font-size: var(--text-base); }
 details.details { border-top: 1px solid var(--border-black); padding-top: 0.75rem; }
@@ -438,9 +447,7 @@ table.colours td.value { color: var(--ink-secondary); font-family: var(--font-mo
 table.colours tr.unset input { opacity: 0.25; }
 table.colours input[type="color"] { width: 3rem; height: 2rem; padding: 0; border: 1px solid var(--border-black); border-radius: var(--radius-sm); cursor: pointer; }
 form.colours .row { display: flex; gap: var(--space-5); align-items: center; margin-top: 1rem; }
-/* The Settings page (SP-289): two tabs under the heading (nav.tabs, SP-322), each project a box that opens and closes, and one look for every button. */
-div.settings-tab button { border: 0; border-radius: var(--radius-btn); background: var(--navy); color: var(--btn-flat-ink); font-weight: 700; cursor: pointer; }
-div.settings-tab button:disabled { opacity: 0.4; cursor: default; }
+/* The Settings page (SP-289): two tabs under the heading (nav.tabs, SP-322), each project a box that opens and closes; its buttons take the four kinds (UI_DOCTRINE 3). */
 details.pipeline-controls { margin-bottom: 1rem; border: 1px solid var(--navy); border-radius: var(--radius-container); overflow: hidden; }
 details.pipeline-controls > summary { padding: 0.75rem 1.5rem; background: var(--navy); color: var(--btn-flat-ink); font-weight: 700; font-size: var(--text-lg); cursor: pointer; }
 details.pipeline-controls > .project-body { padding: 0.5rem 1.5rem 1.5rem; }
@@ -578,7 +585,7 @@ table.people select { font: inherit; padding: 0.2rem; }
 table.projects td .member { display: block; white-space: nowrap; }
 /* An admin's Projects cell says first that they see every project. */
 table.people td span.every { display: block; font-weight: 600; margin-bottom: 0.2rem; }
-table.projects td button.remove-member { margin-left: 0.4rem; font: inherit; font-size: var(--text-sm); padding: 0 0.4rem; cursor: pointer; }
+table.projects td button.remove-member { margin-left: 0.4rem; }
 table.projects td select.add-member { display: block; margin-top: 0.3rem; font: inherit; font-size: var(--text-sm); padding: 0.15rem; }
 /* The Users page's Roles and Permissions table: each role, its description under it, a tick per permission. */
 table.roles .hint { display: block; font-size: var(--text-sm); }
@@ -643,7 +650,6 @@ dialog.command-details .row { display: flex; justify-content: flex-end; }
 
 /* The Docs page's Context Documents (SP-176): Download and Remove side by side. */
 table.doc-list td.actions a { margin-right: 0.6rem; }
-table.doc-list td button.remove-doc { font: inherit; font-size: var(--text-sm); padding: 0 0.4rem; cursor: pointer; }
 section.context-docs { margin-bottom: 1.5rem; }
 /* SP-195: Reference Docs and Work Log, folded at the bottom of the Docs page, with a filter row and sortable headings. */
 details.spirality-docs { margin-top: 1.5rem; }
