@@ -25,7 +25,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openStore } from './store.mjs';
 import { CLOSE_PHRASE, GO_PHRASE, startServer } from './server.mjs';
-import { DEMO_OWN_PROJECT, demoNewestRelease, demoPrState, demoSuggest, seedDemo, tickingClock, writeDemoLogs } from './demoData.mjs';
+import { DEMO_OWN_PROJECT, DEMO_TOPICS, demoNewestRelease, demoPrState, demoSuggest, seedDemo, tickingClock, writeDemoLogs } from './demoData.mjs';
 import { setPasswordUrl } from './account.mjs';
 import { loadProjectConfig } from '../lib/projectConfig.mjs';
 
@@ -53,7 +53,13 @@ const printEmail = async ({ to, subject, text, kind, link }) => {
 const port = Number(process.env.TRACKER_PORT ?? 0);
 // The Merge button posts the project config's first merge phrase, as on the real server.
 let mergePhrase = null;
-try { mergePhrase = loadProjectConfig().mergePhrases[0] ?? null; } catch (err) { console.log(`no Merge button: the project config is not usable (${err.message}).`); }
+let config = null;
+try { config = loadProjectConfig(); mergePhrase = config.mergePhrases[0] ?? null; } catch (err) { console.log(`no Merge button: the project config is not usable (${err.message}).`); }
+// The Suggest Next Tasks info box (SP-305): Alpha gets this repository as
+// its GitHub repository, so a suggested file opens a real file there, and
+// the topics the stand-in suggestions name.
+if (config?.githubRepo) store.updateProject('alpha', { repo: config.githubRepo });
+for (const name of DEMO_TOPICS) store.addTopic({ project: 'alpha', name, actor: operator.id });
 const accountMail = { send: printEmail, pageUrl: null, projectName: 'Demo' };
 // The Pipeline Status pod reads scratch logs in the demo's own folder, never
 // the Mini's real ones, written as Alpha's, so the Settings page shows what

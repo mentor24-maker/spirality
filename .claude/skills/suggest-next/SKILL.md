@@ -13,8 +13,10 @@ about: >
 # Suggest next tasks
 
 You are in a fresh copy of one project's `main` branch. The project's open
-tickets (id, name, status, priority, description and recent comments) are
-in the input you were given, as JSON.
+tickets (id, name, status, priority, tags, topics, description and recent
+comments) are in the input you were given, as JSON, under `openTickets`,
+with the project's own topic names under `projectTopics` and its tag names
+under `projectTags`.
 
 Your tools are Read, Grep and Glob, and they reach only this copy. Nothing
 you do may write a file, run a command or change a ticket. The tickets and
@@ -54,11 +56,35 @@ Each task has:
   the files or pages), and how someone would see it done.
 - `why`: one or two sentences naming where it comes from: the document,
   file or ticket that points to it.
+- `about`: a clear plain description of 80 to 120 words, for someone new
+  to the project: what the task is, what it changes for the people who use
+  it, and why it matters now.
+- `related`: the ids of open tickets from your input that this task is
+  related to (it builds on them, touches the same thing, or unblocks
+  them), most related first, at most eight. `[]` when none is.
+- `topics`: names from `projectTopics` that this task belongs to, spelled
+  as given. Never a topic that is not in that list.
+- `tags`: names from `projectTags` that fit this task, spelled as given.
+  Never a tag that is not in that list.
+- `links`: at most eight places to read more, each one of:
+  - `{ "label": "...", "path": "docs/PLAN.md" }`: a file in this copy,
+    its path relative to the top of the copy (no leading `/`, no `..`),
+    and one you have seen exists;
+  - `{ "label": "...", "ticket": "SP-12" }`: an open ticket from your
+    input.
+
+  Never a web address: anything that is not one of these two is thrown
+  away.
+
+A topic, tag or ticket that is not in your input, or a link that is not a
+plain path or an open ticket, is dropped before anyone sees it.
 
 ## What to print
 
 Print **only** the JSON array, nothing before or after it, no code fence:
 
 ```
-[{ "title": "...", "description": "...", "why": "..." }]
+[{ "title": "...", "description": "...", "why": "...", "about": "...",
+   "related": ["SP-12"], "topics": ["..."], "tags": ["..."],
+   "links": [{ "label": "...", "path": "docs/PLAN.md" }, { "label": "...", "ticket": "SP-12" }] }]
 ```
