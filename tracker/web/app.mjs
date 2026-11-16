@@ -2612,6 +2612,8 @@ function wireSuggestNext(slug, view) {
   const question = main.querySelector('dialog.project-check');
   const path = `/projects/${encodeURIComponent(slug)}/suggest-next`;
   let suggestions = [];
+  // The project's GitHub repository, from the latest run's answer: where a suggestion's file links go (SP-305).
+  let repo = null;
   let state = null;
   let polling = false;
   let filing = false;
@@ -2658,6 +2660,7 @@ function wireSuggestNext(slug, view) {
     run.textContent = latest?.state === 'failed' ? 'Try Again' : latest?.state === 'done' ? 'Suggest Again' : 'Suggest Next Tasks';
     if (latest?.state === 'done' && Array.isArray(latest.suggestions)) {
       suggestions = latest.suggestions;
+      repo = typeof latest.repo === 'string' ? latest.repo : null;
       state = suggestState(savedSuggestState(slug), latest.at, suggestions.length);
       save();
       drawRows();
@@ -2721,7 +2724,7 @@ function wireSuggestNext(slug, view) {
     const suggestion = suggestions[Number(button.dataset.index)];
     if (!suggestion) return;
     infoOpener = button;
-    info.querySelector('.suggestion-info-body').innerHTML = renderSuggestionInfo(suggestion);
+    info.querySelector('.suggestion-info-body').innerHTML = renderSuggestionInfo(suggestion, { repo });
     info.showModal();
   });
   // A click on the backdrop lands on the dialog itself; one on its own

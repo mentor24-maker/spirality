@@ -495,6 +495,10 @@ dialog.suggestion-info::backdrop { background: var(--backdrop); }
 dialog.suggestion-info h2 { margin: 0 2rem 0.25rem 0; font-size: var(--text-lg); }
 dialog.suggestion-info h3 { margin: 0.75rem 0 0.25rem; font-size: var(--text-md); }
 dialog.suggestion-info p { margin: 0; white-space: pre-wrap; }
+dialog.suggestion-info p.chips { white-space: normal; }
+dialog.suggestion-info p.chips .tag { margin: 0 0.3rem 0.2rem 0; }
+dialog.suggestion-info ul { margin: 0; padding-left: 1.25rem; }
+dialog.suggestion-info ul code { font-size: 0.85em; color: var(--ink-secondary); }
 dialog.suggestion-info button.close { float: right; border: 0; background: transparent; cursor: pointer; padding: 0 0.25rem; font-size: var(--text-xl); line-height: 1; color: var(--ink-secondary); }
 dialog.suggestion-info .row { display: flex; justify-content: flex-end; margin-top: 1rem; }
 details.add-task .suggest-next details.more { flex-basis: 100%; }

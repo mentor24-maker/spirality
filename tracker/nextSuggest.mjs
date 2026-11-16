@@ -46,7 +46,7 @@ export const SUGGEST_TIME_LIMIT_MS = 10 * 60 * 1000;
 export const MIN_SUGGESTIONS = 3;
 export const MAX_SUGGESTIONS = 7;
 /** The longest each field may be; longer is cut, with an ellipsis. */
-export const FIELD_LIMITS = Object.freeze({ title: 160, description: 2000, why: 600 });
+export const FIELD_LIMITS = Object.freeze({ title: 160, description: 2000, why: 600, about: 1200, label: 120, related: 8, topics: 8, tags: 8, links: 8 });
 /** The read-only tools Claude may use in the copy; nothing that writes or runs a command. */
 export const READ_ONLY_TOOLS = Object.freeze(['Read', 'Grep', 'Glob']);
 /** The skill the run follows, in this checkout (the tracker's), not the project's copy. */
@@ -106,8 +106,14 @@ export function stripNumbering(title) {
  * ignored), and each field is cut to FIELD_LIMITS. Anything else (not JSON,
  * not a list, an item with no title, fewer than three or more than seven
  * after duplicates go) throws a SuggestError `bad-answer`: never a half list.
+ *
+ * SP-305: each suggestion may also carry `about`, `related`, `topics`,
+ * `tags` and `links` (extras), kept only when real against `known`
+ * (suggestKnown: the open tickets, topics and tags that went in). A field
+ * that is wrong is dropped, never the whole answer; an answer without them
+ * reads as before.
  */
-export function readSuggestions(text) {
+export function readSuggestions(text, known = null) {
   const raw = String(text ?? '');
   const start = raw.indexOf('[');
   const end = raw.lastIndexOf(']');
@@ -134,12 +140,102 @@ export function readSuggestions(text) {
       title,
       description: cap(typeof item.description === 'string' ? item.description : '', FIELD_LIMITS.description),
       why: cap(typeof item.why === 'string' ? item.why : '', FIELD_LIMITS.why),
+      ...extras(item, known),
     });
   }
   if (out.length < MIN_SUGGESTIONS || out.length > MAX_SUGGESTIONS) {
     throw new SuggestError('bad-answer', `Claude gave ${out.length} suggestion${out.length === 1 ? '' : 's'}${out.length === parsed.length ? '' : ` once repeats were dropped (${parsed.length} in all)`}; a good answer has ${MIN_SUGGESTIONS} to ${MAX_SUGGESTIONS}.`);
   }
   return out;
+}
+
+/**
+ * A plain path inside the project's copy: relative, with no `..` part, no
+ * web address or scheme (no `:` at all), no backslash or control
+ * character, and not a folder ending in `/`. Anything else is null.
+ */
+export function plainPath(value) {
+  if (typeof value !== 'string') return null;
+  const path = value.trim().replace(/^\.\/+/, '');
+  if (!path || path.length > 300) return null;
+  if (/[\u0000-\u001f\u007f\\:]/.test(path) || path.startsWith('/') || path.endsWith('/') || /^https?/i.test(path)) return null;
+  const parts = path.split('/');
+  if (parts.some((p) => p === '' || p === '..')) return null;
+  return path;
+}
+
+/** The names in `list` (strings) that `names` (lowercased name to name) holds, as that name, each once, at most `limit`. */
+function knownNames(list, names, limit) {
+  if (!Array.isArray(list) || !names) return [];
+  const out = [];
+  for (const v of list) {
+    const name = typeof v === 'string' ? names.get(v.trim().toLowerCase()) : undefined;
+    if (name && !out.includes(name)) out.push(name);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+/**
+ * A suggestion's SP-305 fields, each kept only when real, and only when it
+ * has something in it:
+ * - `about`: plain text, cut to FIELD_LIMITS.about;
+ * - `related`: `[{ id, name }]`, open tickets from `known.tickets` only;
+ * - `topics`, `tags`: names from `known.topics` / `known.tags` only, as the
+ *   project spells them;
+ * - `links`: `[{ label, path }]` (plainPath) or `[{ label, ticket }]` (an
+ *   open ticket's id), never a web address.
+ * With no `known`, nothing can be checked, so only `about` and file links
+ * are kept.
+ */
+function extras(item, known) {
+  const out = {};
+  const about = cap(typeof item.about === 'string' ? item.about : '', FIELD_LIMITS.about);
+  if (about) out.about = about;
+  const tickets = known?.tickets ?? null;
+  const ticketOf = (v) => (typeof v === 'string' && tickets ? tickets.get(v.trim().toUpperCase()) ?? null : null);
+  const related = [];
+  for (const v of Array.isArray(item.related) ? item.related : []) {
+    const t = ticketOf(v);
+    if (t && !related.some((r) => r.id === t.id)) related.push({ id: t.id, name: t.name });
+    if (related.length >= FIELD_LIMITS.related) break;
+  }
+  if (related.length) out.related = related;
+  const topics = knownNames(item.topics, known?.topics, FIELD_LIMITS.topics);
+  if (topics.length) out.topics = topics;
+  const tags = knownNames(item.tags, known?.tags, FIELD_LIMITS.tags);
+  if (tags.length) out.tags = tags;
+  const links = [];
+  for (const v of Array.isArray(item.links) ? item.links : []) {
+    if (v == null || typeof v !== 'object' || Array.isArray(v)) continue;
+    let link = null;
+    if (v.ticket !== undefined) {
+      const t = ticketOf(v.ticket);
+      if (t) link = { ticket: t.id, label: cap(typeof v.label === 'string' ? v.label : '', FIELD_LIMITS.label) || t.name };
+    } else {
+      const path = plainPath(v.path);
+      if (path) link = { path, label: cap(typeof v.label === 'string' ? v.label : '', FIELD_LIMITS.label) || path };
+    }
+    const key = link && (link.ticket ?? link.path);
+    if (link && !links.some((l) => (l.ticket ?? l.path) === key)) links.push(link);
+    if (links.length >= FIELD_LIMITS.links) break;
+  }
+  if (links.length) out.links = links;
+  return out;
+}
+
+/**
+ * What a run's answer is checked against (SP-305): the open tickets that
+ * went in (upper-cased id to `{ id, name }`), and the project's topic and
+ * tag names (lower-cased name to name).
+ */
+export function suggestKnown(tickets, { topics = [], tags = [] } = {}) {
+  const byName = (names) => new Map(names.filter((n) => typeof n === 'string' && n.trim()).map((n) => [n.trim().toLowerCase(), n]));
+  return {
+    tickets: new Map(tickets.map((t) => [String(t.id).toUpperCase(), { id: t.id, name: t.name }])),
+    topics: byName(topics),
+    tags: byName(tags),
+  };
 }
 
 /** `: "<the start of text>"`, for a failure message, or nothing for no text. */
@@ -150,19 +246,24 @@ function quote(text) {
 
 /**
  * What goes to Claude on standard input: the open tickets as JSON, each with
- * its id, name, status, priority, description and newest comments
- * (`commentsOf(id)` answers a ticket's comments, oldest first), long text cut.
+ * its id, name, status, priority, tags, topics (`topicsOf(id)` answers a
+ * ticket's topic names), description and newest comments (`commentsOf(id)`
+ * answers a ticket's comments, oldest first), long text cut; then the
+ * project's own topic and tag names (SP-305), the only ones a suggestion
+ * may name.
  */
-export function ticketsInput(tickets, commentsOf = () => []) {
+export function ticketsInput(tickets, commentsOf = () => [], { topicsOf = () => [], topics = [], tags = [] } = {}) {
   const open = tickets.map((t) => ({
     id: t.id,
     name: t.name,
     status: t.status,
     priority: t.priority ?? null,
+    tags: Array.isArray(t.tags) ? t.tags : [],
+    topics: topicsOf(t.id),
     description: cap(t.description, TICKET_DESCRIPTION_LIMIT),
     recentComments: commentsOf(t.id).slice(-TICKET_COMMENTS).map((c) => ({ at: c.createdAt, body: cap(c.body, COMMENT_LIMIT) })),
   }));
-  return `${JSON.stringify({ openTickets: open }, null, 2)}\n`;
+  return `${JSON.stringify({ openTickets: open, projectTopics: topics, projectTags: tags }, null, 2)}\n`;
 }
 
 /** The skill's steps (the text under its front matter), read from `file`. */
@@ -264,8 +365,10 @@ export function sweepOldFolders({ tmpRoot = tmpdir(), olderThanMs = SUGGEST_TIME
  * `claudeBin` is the command to run; `source(repo)` is where the copy comes
  * from (GitHub unless a test says otherwise); `timeLimitMs` covers the
  * whole run; `onFolder(path)` is told the temp folder (for tests).
+ * `known` (suggestKnown) is what the answer's tickets, topics and tags are
+ * checked against.
  */
-export async function runSuggest({ repo, input, claudeBin = 'claude', source = githubSource, timeLimitMs = SUGGEST_TIME_LIMIT_MS, skillFile = SKILL_FILE, tmpRoot = tmpdir(), env = process.env, now = Date.now, onFolder = () => {} }) {
+export async function runSuggest({ repo, input, known = null, claudeBin = 'claude', source = githubSource, timeLimitMs = SUGGEST_TIME_LIMIT_MS, skillFile = SKILL_FILE, tmpRoot = tmpdir(), env = process.env, now = Date.now, onFolder = () => {} }) {
   if (!repo) throw new SuggestError('no-repo', 'this project has no GitHub repository set, so there is nothing to read; set one on its Edit Project page.');
   const deadline = now() + timeLimitMs;
   const prompt = skillPrompt(skillFile);
@@ -283,7 +386,7 @@ export async function runSuggest({ repo, input, claudeBin = 'claude', source = g
       throw err;
     });
     if (claude.code !== 0) throw new SuggestError('claude-failed', `Claude stopped with exit ${claude.code}${quote(claude.stderr || claude.stdout)}.`);
-    return readSuggestions(claude.stdout);
+    return readSuggestions(claude.stdout, known);
   } finally {
     rmSync(folder, { recursive: true, force: true });
   }
@@ -297,7 +400,8 @@ export async function runSuggest({ repo, input, claudeBin = 'claude', source = g
  * at }`, or null when none was ever asked for.
  *
  * `run(options)` is runSuggest (tests swap it); `inputOf(project)` builds
- * the tickets' input; a finished run is saved with
+ * the tickets' input: the text, or `{ input, known }` (SP-305) with what the
+ * answer is checked against; a finished run is saved with
  * `store.saveNextSuggestions` and read with `store.nextSuggestions`.
  */
 export function createSuggester({ store, inputOf, run = runSuggest, options = {}, log = () => {}, now = () => new Date().toISOString() }) {
@@ -314,7 +418,9 @@ export function createSuggester({ store, inputOf, run = runSuggest, options = {}
     entry.done = (async () => {
       let outcome;
       try {
-        const suggestions = await run({ ...options, repo: project.repo, input: inputOf(project) });
+        const given = inputOf(project);
+        const { input, known = null } = typeof given === 'string' ? { input: given } : given;
+        const suggestions = await run({ ...options, repo: project.repo, input, known });
         outcome = { state: 'done', suggestions, message: null };
       } catch (err) {
         outcome = { state: 'failed', suggestions: null, message: err instanceof SuggestError ? err.message : `the run failed (${err?.message ?? err}).` };

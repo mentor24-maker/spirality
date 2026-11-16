@@ -311,10 +311,34 @@ export function writeDemoLogs(folder, slug, now = new Date()) {
   for (const [job, text] of Object.entries(files)) writeFileSync(join(folder, `${slug}-${job}.log`), `${text}\n`);
 }
 
-/** The demo's five made-up next tasks (SP-251), answered by demoSuggest. */
+/**
+ * The demo's five made-up next tasks (SP-251), answered by demoSuggest. The
+ * first two carry SP-305's about, related, topics, tags and links; their
+ * topics are DEMO_TOPICS, which tracker/demo.mjs adds to Alpha.
+ */
+export const DEMO_TOPICS = Object.freeze(['Board', 'Notifications']);
 export const DEMO_SUGGESTIONS = Object.freeze([
-  { title: 'Add a search box to the Board view', description: 'The List view can be searched; the Board cannot.\nPut the same search box above the columns.', why: 'Two open tickets ask for it.' },
-  { title: 'Show who last changed each ticket', description: 'Name the person or loop beside "Last Change".', why: 'The docs plan names it as the next step.' },
+  {
+    title: 'Add a search box to the Board view',
+    description: 'The List view can be searched; the Board cannot.\nPut the same search box above the columns.',
+    why: 'Two open tickets ask for it.',
+    // SP-305: the info box's fuller fields, as a checked answer holds them.
+    about: 'The Board view shows every ticket as a card in its stage\'s column, but unlike the List view it has no way to look for one. On a busy project that means scrolling every column by eye to find a ticket whose name you half remember. This task puts the same search box the List view already has above the Board\'s columns, so typing a word narrows the cards in every column at once and clearing it brings them all back. It matters now because the queue has grown past what fits on one screen, and the two open tickets about the Board both run into it.',
+    related: [{ id: 'AL-3', name: 'The board is missing: draw the seven columns' }, { id: 'AL-8', name: 'A pull request waiting for review' }],
+    topics: ['Board'],
+    tags: ['tracker'],
+    links: [{ label: 'The tracker\'s plan', path: 'docs/TRACKER_MVP.md' }, { label: 'Where the page is drawn', path: 'tracker/web/render.mjs' }, { label: 'The Board ticket', ticket: 'AL-3' }],
+  },
+  {
+    title: 'Show who last changed each ticket',
+    description: 'Name the person or loop beside "Last Change".',
+    why: 'The docs plan names it as the next step.',
+    about: 'Each ticket shows when it last changed, but not who changed it, so a surprise move on the board leaves you opening the ticket\'s history to find out whether a loop or a person did it. This task names the person or loop beside the Last Change time on every card and row. It matters because the build and review loops move tickets all day, and telling their moves apart from a person\'s at a glance is how odd ones get noticed early.',
+    related: [{ id: 'AL-6', name: 'A send-back with review notes' }],
+    topics: ['Board', 'Notifications'],
+    tags: ['tracker', 'fix'],
+    links: [{ label: 'The Loop Contract', path: 'docs/LOOP_CONTRACT.md' }],
+  },
   { title: 'Let a project be archived', description: 'An archived project leaves the picker but keeps its tickets.', why: 'Old test projects crowd the picker.' },
   { title: 'Send a weekly summary email', description: 'Every Monday morning, what went Live last week.', why: 'Asked for in the plan, never built.' },
   { title: 'Explain each status on hover', description: 'A short line under each stage name.', why: 'New people ask what "Rework" means.' },

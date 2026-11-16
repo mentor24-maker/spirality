@@ -6,9 +6,9 @@ import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
-import { DEMO_NEWEST_RELEASE, DEMO_OWN_PROJECT, DEMO_SUGGESTIONS, demoNewestRelease, demoSuggest, seedDemo, tickingClock } from './demoData.mjs';
+import { DEMO_NEWEST_RELEASE, DEMO_OWN_PROJECT, DEMO_SUGGESTIONS, DEMO_TOPICS, demoNewestRelease, demoSuggest, seedDemo, tickingClock } from './demoData.mjs';
 import { reportsOf, REPORT_RANGES, GROWTH_PERIODS, searchTickets, PRIORITIES, timeSplitOf, isFailureNote, TIME_BUCKETS, pipelineControlsOf } from './pageData.mjs';
-import { escapeHtml, renderStatusLine, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, CLOSE_LINE, REPLY_LINE, offersMerge, offersClose, bugReport, BUG_REPORT_TAG, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, heldBugReport, renderBugReportActions, approveQuestion, rejectQuestion, changeProblem, REJECT_COMMENT, WONT_DO_TAG, HELD_REPORT_LINE, HELD_REPORT_STATUS_LINE, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, loopHasIt, renderCommentForm, LOOP_HAS_STATUSES, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, renderTopics, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, renderListTopics, projectTags, projectTagCounts, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, renderReleaseGroup, controlValueText, mountainTime, wakeInEffectText, modelLastPassText, renderConsole, renderConsoleTile, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, consoleFeature, featureColourIndex, renderFeatureKey, FEATURE_PALETTE, drainLine, capInFlightText, renderTitleChoices, titleModeOf, TITLE_MODES, SUGGEST_POLL_MS, moveSuggestion, suggestState, filingPlan, orderPlan, andList, suggestRunLine, renderSuggestRows, renderSuggestionInfo } from './web/render.mjs';
+import { escapeHtml, renderStatusLine, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, CLOSE_LINE, REPLY_LINE, offersMerge, offersClose, bugReport, BUG_REPORT_TAG, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, heldBugReport, renderBugReportActions, approveQuestion, rejectQuestion, changeProblem, REJECT_COMMENT, WONT_DO_TAG, HELD_REPORT_LINE, HELD_REPORT_STATUS_LINE, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, loopHasIt, renderCommentForm, LOOP_HAS_STATUSES, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, renderTopics, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, renderListTopics, projectTags, projectTagCounts, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, renderReleaseGroup, controlValueText, mountainTime, wakeInEffectText, modelLastPassText, renderConsole, renderConsoleTile, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, consoleFeature, featureColourIndex, renderFeatureKey, FEATURE_PALETTE, drainLine, capInFlightText, renderTitleChoices, titleModeOf, TITLE_MODES, SUGGEST_POLL_MS, moveSuggestion, suggestState, filingPlan, orderPlan, andList, suggestRunLine, renderSuggestRows, renderSuggestionInfo, suggestionFileHref } from './web/render.mjs';
 import { startServer, setupSettingsOf } from './server.mjs';
 import { saveAnswers, setupFields, setupOf } from './setup.mjs';
 import { DANE_FIELDS as SETUP_FIELDS, STEPS as SETUP_STEPS } from '../scripts/onboard/onboard.mjs';
@@ -5784,6 +5784,88 @@ test('renderSuggestionInfo: the title as heading, Why It Matters and Description
   assert.match(bare, /<h3>Description<\/h3><p>Only this<\/p>/);
   assert.match(renderSuggestionInfo({ title: 'Empty' }), /<p class="quiet">This suggestion came with nothing more to say\.<\/p>/);
   assert.equal(renderSuggestionInfo(undefined), '<h2 id="suggestion-info-title"></h2><p class="quiet">This suggestion came with nothing more to say.</p>');
+});
+
+test('renderSuggestionInfo shows About This Task, Related Tickets, Topics, Tags and Links, each only when there, every word escaped (SP-305)', () => {
+  const html = renderSuggestionInfo({
+    title: 'T', why: 'W', description: 'D',
+    about: 'About <b>it</b> & more',
+    related: [{ id: 'AL-3', name: 'The <i>board</i>' }],
+    topics: ['Board <x>'], tags: ['fix&go'],
+    links: [{ label: 'The <plan>', path: 'docs/PLAN.md' }, { label: 'Odd name', path: 'docs/a b#c.md' }, { label: 'Board ticket', ticket: 'AL-3' }],
+  }, { repo: 'owner/app' });
+  assert.match(html, /<h3>About This Task<\/h3><p>About &lt;b&gt;it&lt;\/b&gt; &amp; more<\/p>/);
+  assert.match(html, /<h3>Related Tickets<\/h3><ul class="related"><li><a href="\/t\/AL-3">AL-3<\/a> The &lt;i&gt;board&lt;\/i&gt;<\/li><\/ul>/, 'a related ticket links to its page, with its name');
+  assert.match(html, /<h3>Topics<\/h3><p class="chips"><span class="tag topic">Board &lt;x&gt;<\/span><\/p>/);
+  assert.match(html, /<h3>Tags<\/h3><p class="chips"><span class="tag">fix&amp;go<\/span><\/p>/);
+  assert.match(html, /<li><a href="https:\/\/github\.com\/owner\/app\/blob\/main\/docs\/PLAN\.md" target="_blank" rel="noopener noreferrer">The &lt;plan&gt;<\/a> <code>docs\/PLAN\.md<\/code><\/li>/, 'a file opens on GitHub at main');
+  assert.match(html, /href="https:\/\/github\.com\/owner\/app\/blob\/main\/docs\/a%20b%23c\.md"/, 'each part of the path is encoded');
+  assert.match(html, /<li><a href="\/t\/AL-3">Board ticket<\/a><\/li><\/ul>$/, 'a ticket link opens its page');
+  assert.ok(!/<(b|i|x|plan)>/.test(html), 'text, never markup');
+  const order = ['Why It Matters', 'Description', 'About This Task', 'Related Tickets', 'Topics', 'Tags', 'Links'].map((h) => html.indexOf(`<h3>${h}</h3>`));
+  assert.deepEqual([...order].sort((a, b) => a - b), order, 'under the Why and the description, in this order');
+  assert.ok(order.every((i) => i > 0));
+
+  // Empty sections are left out; an older suggestion draws exactly as before.
+  const old = { title: 'Old', why: 'W', description: 'D' };
+  assert.equal(renderSuggestionInfo({ ...old, related: [], topics: [], tags: [], links: [], about: '' }, { repo: 'owner/app' }), renderSuggestionInfo(old));
+  assert.doesNotMatch(renderSuggestionInfo(old), /About This Task|Related Tickets|Topics|Tags|Links/);
+
+  // With no repository, a file is named but not linked; a bad path is never linked.
+  const unlinked = renderSuggestionInfo({ title: 'T', links: [{ label: 'Plan', path: 'docs/PLAN.md' }] });
+  assert.match(unlinked, /<li>Plan <code>docs\/PLAN\.md<\/code><\/li>/);
+  assert.doesNotMatch(unlinked, /<a /);
+  for (const [repo, path] of [['owner/app', '../x'], ['owner/app', '/etc/passwd'], ['owner/app', 'javascript:alert(1)'], ['owner/app', 'a//b'], ['bad repo', 'x.md'], ['owner/app/extra', 'x.md'], [null, 'x.md']]) {
+    assert.equal(suggestionFileHref(repo, path), null, `${repo} ${path}`);
+  }
+  assert.match(renderSuggestionInfo({ title: 'T', links: [{ label: 'Up', path: '../x' }] }, { repo: 'owner/app' }), /<li>Up <code>\.\.\/x<\/code><\/li>/, 'shown as text, never a link');
+});
+
+test('the info box\'s file links use the repository the latest run answers with (SP-305)', () => {
+  const { wire } = suggestWire();
+  assert.match(wire, /repo = typeof latest\.repo === 'string' \? latest\.repo : null;/);
+  assert.match(wire, /renderSuggestionInfo\(suggestion, \{ repo \}\)/);
+});
+
+test('Suggest Next Tasks sends the open tickets\' tags and topics and the project\'s topic and tag names, checks the answer against them, and answers the repository (SP-305)', async () => {
+  const runs = [];
+  const f = await fixture({ suggest: { run: async (o) => { runs.push(o); return DEMO_SUGGESTIONS.map((s) => ({ ...s })); } } });
+  try {
+    const topic = f.store.addTopic({ project: 'alpha', name: 'Board', actor: f.operator.id });
+    f.store.changeTicket('AL-3', { actor: f.operator.id, topics: [topic.id] });
+    f.store.updateProject('alpha', { repo: 'owner/app' });
+    await f.call('POST', '/projects/alpha/suggest-next', { body: {} });
+    const latest = await settledRun(f, 'alpha');
+    assert.equal(latest.body.repo, 'owner/app');
+    const input = JSON.parse(runs[0].input);
+    assert.deepEqual(input.projectTopics, ['Board']);
+    assert.ok(input.projectTags.includes('tracker') && input.projectTags.includes('fix'), input.projectTags.join(', '));
+    assert.deepEqual(input.openTickets.find((t) => t.id === 'AL-3').topics, ['Board']);
+    assert.deepEqual(input.openTickets.find((t) => t.id === 'AL-5').tags, ['tracker', 'fix']);
+    const { known } = runs[0];
+    assert.deepEqual(known.tickets.get('AL-3'), { id: 'AL-3', name: 'The board is missing: draw the seven columns' });
+    assert.equal(known.tickets.has('AL-9'), false, 'a Live ticket is not open, so never related');
+    assert.equal(known.topics.get('board'), 'Board');
+    assert.equal(known.tags.get('tracker'), 'tracker');
+  } finally { await f.cleanup(); }
+});
+
+test('the demo\'s suggestions carry the info box\'s fields, naming only the demo\'s own tickets, topics and tags (SP-305)', () => {
+  const full = DEMO_SUGGESTIONS.filter((s) => s.about && s.related?.length && s.topics?.length && s.tags?.length && s.links?.length);
+  assert.ok(full.length >= 2);
+  const dir = mkdtempSync(join(tmpdir(), 'tracker-demo-sp305-'));
+  const store = openStore(join(dir, 'tracker.db'));
+  try {
+    seedDemo(store);
+    const open = new Map(store.listTickets('alpha', { open: true }).map((t) => [t.id, t.name]));
+    const tags = new Set(store.listTickets('alpha').flatMap((t) => t.tags));
+    for (const s of full) {
+      for (const r of s.related) assert.equal(open.get(r.id), r.name, r.id);
+      for (const t of s.topics) assert.ok(DEMO_TOPICS.includes(t), t);
+      for (const t of s.tags) assert.ok(tags.has(t), t);
+      for (const l of s.links) assert.ok(l.ticket ? open.has(l.ticket) : suggestionFileHref('o/r', l.path), JSON.stringify(l));
+    }
+  } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
 });
 
 test('suggestState keeps the order, ticks and filed tickets for the same run only; filingPlan files the kept rows not yet filed, and orders every kept one', () => {
