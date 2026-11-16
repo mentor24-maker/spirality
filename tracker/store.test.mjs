@@ -1964,7 +1964,7 @@ test('a topic is made on one project with its name, description and maker, liste
     store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE' });
     assert.deepEqual(store.listTopics('alpha'), [], 'none yet');
     const a = store.addTopic({ project: 'alpha', name: '  Login  ', description: ' Signing in. ', actor: human.id });
-    assert.deepEqual(a, { id: a.id, project: 'alpha', name: 'Login', description: 'Signing in.', createdBy: human.id, createdByName: 'Operator', createdAt: a.createdAt });
+    assert.deepEqual(a, { id: a.id, project: 'alpha', name: 'Login', description: 'Signing in.', createdBy: human.id, createdByName: 'Operator', createdAt: a.createdAt, tickets: 0 });
     const b = store.addTopic({ project: 'alpha', name: 'Billing', actor: machine.id });
     assert.equal(b.description, '', 'a description may be left out');
     store.addTopic({ project: 'beta', name: 'Theirs', description: '', actor: human.id });
@@ -1998,6 +1998,63 @@ test('a deleted project takes its topics with it, so a project made later under 
     assert.deepEqual(store.deleteProject('beta'), { slug: 'beta', prefix: 'BE' });
     store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE' });
     assert.deepEqual(store.listTopics('beta'), []);
+  } finally { cleanup(); }
+});
+
+// ── Changing and deleting a topic (SP-308) ──────────────────────────────────
+
+test("a topic's name and description change, either alone, with addTopic's limits; another project's topic is refused and nothing changes", () => {
+  const { store, human, cleanup } = fixture();
+  try {
+    store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE' });
+    const login = store.addTopic({ project: 'alpha', name: 'Login', description: 'Signing in.', actor: human.id });
+    const theirs = store.addTopic({ project: 'beta', name: 'Theirs', actor: human.id });
+    const renamed = store.changeTopic({ project: 'alpha', id: login.id, name: '  Sign-in  ', actor: human.id });
+    assert.deepEqual([renamed.name, renamed.description], ['Sign-in', 'Signing in.'], 'a name alone keeps the description');
+    const described = store.changeTopic({ project: 'alpha', id: login.id, description: ' ', actor: human.id });
+    assert.deepEqual([described.name, described.description], ['Sign-in', ''], 'a description alone keeps the name, and may be blank');
+    assert.deepEqual(store.listTopics('alpha')[0], described, 'read back as listed');
+    const change = (over) => () => store.changeTopic({ project: 'alpha', id: login.id, actor: human.id, ...over });
+    for (const name of ['', '   ', null, 42]) assert.throws(change({ name }), { code: 'bad-name' }, String(name));
+    assert.throws(change({ name: 'x'.repeat(201) }), { code: 'bad-name' });
+    assert.throws(change({ description: 'x'.repeat(5001) }), { code: 'bad-description' });
+    assert.throws(change({ actor: 999 }), { code: 'unknown-actor' });
+    for (const id of [theirs.id, 9999, 'x', 0]) assert.throws(change({ id, name: 'Mine' }), { code: 'unknown-topic' }, String(id));
+    assert.throws(() => store.changeTopic({ project: 'beta', id: login.id, name: 'Mine', actor: human.id }), { code: 'unknown-topic' });
+    assert.deepEqual(store.listTopics('alpha').map((t) => [t.name, t.description]), [['Sign-in', '']], 'nothing changed');
+    assert.deepEqual(store.listTopics('beta').map((t) => t.name), ['Theirs']);
+  } finally { cleanup(); }
+});
+
+test('deleting a topic takes it off every ticket carrying it, each with one topics event and a version step, and leaves other topics and projects alone', () => {
+  const { store, human, cleanup } = fixture();
+  try {
+    store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE' });
+    const login = store.addTopic({ project: 'alpha', name: 'Login', actor: human.id });
+    const billing = store.addTopic({ project: 'alpha', name: 'Billing', actor: human.id });
+    const theirs = store.addTopic({ project: 'beta', name: 'Theirs', actor: human.id });
+    const one = store.fileTicket({ project: 'alpha', actor: human.id, name: 'One', status: 'queued' });
+    const two = store.fileTicket({ project: 'alpha', actor: human.id, name: 'Two', status: 'queued' });
+    const three = store.fileTicket({ project: 'alpha', actor: human.id, name: 'Three', status: 'queued' });
+    store.changeTicket(one.id, { actor: human.id, topics: [login.id, billing.id] });
+    store.changeTicket(two.id, { actor: human.id, topics: [login.id] });
+    store.changeTicket(three.id, { actor: human.id, topics: [billing.id] });
+    assert.equal(store.listTopics('alpha').find((t) => t.id === login.id).tickets, 2, 'the list counts the tickets carrying it');
+    const versions = new Map([one, two, three].map((t) => [t.id, store.getTicket(t.id).version]));
+    assert.throws(() => store.removeTopic({ project: 'beta', id: login.id, actor: human.id }), { code: 'unknown-topic' });
+    assert.throws(() => store.removeTopic({ project: 'alpha', id: theirs.id, actor: human.id }), { code: 'unknown-topic' });
+    const gone = store.removeTopic({ project: 'alpha', id: login.id, actor: human.id });
+    assert.deepEqual([gone.topic.name, gone.topic.tickets, gone.tickets], ['Login', 2, [one.id, two.id].sort()]);
+    assert.deepEqual(store.listTopics('alpha').map((t) => t.name), ['Billing']);
+    assert.deepEqual(store.listTopics('beta').map((t) => t.name), ['Theirs']);
+    assert.deepEqual(store.ticketTopicsOf('alpha'), new Map([[one.id, [{ id: billing.id, name: 'Billing' }]], [three.id, [{ id: billing.id, name: 'Billing' }]]]));
+    assert.equal(store.getTicket(one.id).version, versions.get(one.id) + 1);
+    assert.equal(store.getTicket(two.id).version, versions.get(two.id) + 1);
+    assert.equal(store.getTicket(three.id).version, versions.get(three.id), 'a ticket without it is untouched');
+    const last = (id) => store.listEvents(id).filter((e) => e.field === 'topics').at(-1);
+    assert.deepEqual([last(one.id).from, last(one.id).to], [JSON.stringify([login.id, billing.id].sort((a, b) => a - b)), JSON.stringify([billing.id])]);
+    assert.deepEqual([last(two.id).from, last(two.id).to], [JSON.stringify([login.id]), '[]']);
+    assert.throws(() => store.removeTopic({ project: 'alpha', id: login.id, actor: human.id }), { code: 'unknown-topic' }, 'gone is gone');
   } finally { cleanup(); }
 });
 

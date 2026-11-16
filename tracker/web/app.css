@@ -224,6 +224,12 @@ form.create-topic { max-width: 40rem; }
 form.create-topic label { display: block; margin-top: 0.75rem; font-weight: 600; }
 form.create-topic input, form.create-topic textarea { display: block; width: 100%; font: inherit; padding: 0.5rem; box-sizing: border-box; margin-top: 0.35rem; }
 form.create-topic .row { display: flex; gap: var(--space-5); align-items: center; margin-top: 1rem; }
+/* SP-308: a half-width table with Edit and Delete: the time may wrap so the buttons stay in view. */
+table.topic-list td.when { white-space: normal; min-width: 6rem; }
+/* SP-308: a topic row being edited: its Name and Description boxes fill the row. */
+form.edit-topic label { display: block; margin-top: 0.5rem; font-weight: 600; }
+form.edit-topic input, form.edit-topic textarea { display: block; width: 100%; font: inherit; padding: 0.5rem; box-sizing: border-box; margin-top: 0.35rem; }
+form.edit-topic .row { display: flex; gap: var(--space-3); align-items: center; margin-top: 0.75rem; }
 form.copy label { display: block; }
 form.copy .row { display: flex; gap: var(--space-5); align-items: center; margin-top: 0.5rem; }
 form.copy select { font: inherit; padding: 0.4rem; }

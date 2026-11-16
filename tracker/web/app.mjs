@@ -26,7 +26,7 @@
  * an emailed link's own page. The link's token is sent only in a JSON body,
  * never in an address.
  */
-import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, loopHasIt, renderCommentForm, MOVED_MESSAGE, renderMarkdown, unwrapDoc, renderCloseAction, renderGoAction, goQuestion, renderBugReportActions, approveQuestion, rejectQuestion, changeProblem, REJECT_COMMENT, WONT_DO_TAG, renderMergeAction, renderAnswerIn, renderHeldUp, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, lookupTicket, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, pipelinePodLabel, renderHealth, healthLines, renderCommandList, renderCommandView, renderCommandDetails, renderContextDocs, renderTopics, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, renderListTopics, projectTags, projectTagCounts, sortTickets, nextSort, renderDocumentation, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, lowerMeridiem, renderPipelineControls, renderConsole, drainLine, renderTitleChoices, titleModeOf, SUGGEST_POLL_MS, moveSuggestion, suggestState, filingPlan, orderPlan, andList, suggestRunLine, renderSuggestRows, renderSuggestionInfo } from './render.mjs';
+import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, loopHasIt, renderCommentForm, MOVED_MESSAGE, renderMarkdown, unwrapDoc, renderCloseAction, renderGoAction, goQuestion, renderBugReportActions, approveQuestion, rejectQuestion, changeProblem, REJECT_COMMENT, WONT_DO_TAG, renderMergeAction, renderAnswerIn, renderHeldUp, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, lookupTicket, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, pipelinePodLabel, renderHealth, healthLines, renderCommandList, renderCommandView, renderCommandDetails, renderContextDocs, renderTopics, renderTopicEditRow, topicDeleteQuestion, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, renderListTopics, projectTags, projectTagCounts, sortTickets, nextSort, renderDocumentation, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, lowerMeridiem, renderPipelineControls, renderConsole, drainLine, renderTitleChoices, titleModeOf, SUGGEST_POLL_MS, moveSuggestion, suggestState, filingPlan, orderPlan, andList, suggestRunLine, renderSuggestRows, renderSuggestionInfo } from './render.mjs';
 
 /** Where an earlier version of the page kept a pasted token; removed on load, never read. */
 const OLD_TOKEN_KEY = 'tracker-token';
@@ -3821,6 +3821,74 @@ async function drawTopics(done = '', problem = '') {
     const listed = back?.topics?.some((t) => t.id === made.id);
     again(listed ? `Created ${made.name} in ${project.name}.` : `The tracker said ${made.name} was created, but ${back ? 'it is not listed when read back' : 'the list could not be read back'}.`, !listed);
   });
+  wireTopicRows(project, topics, topicsPath, say, again);
+}
+
+/**
+ * SP-308: each Topics row's Edit and Delete. Edit draws the row as Name and
+ * Description boxes (a blank name is refused before anything is sent);
+ * Cancel draws the page again. Delete asks first, naming how many tasks
+ * carry the topic. After either, the list is read again and the page says
+ * it worked only when the read-back shows it: the new words for an edit,
+ * the topic gone for a delete.
+ */
+function wireTopicRows(project, topics, topicsPath, say, again) {
+  const byId = new Map(topics.map((t) => [String(t.id), t]));
+  const readBack = () => api('GET', topicsPath, undefined, { unrecorded: true }).catch((err) => { if (err instanceof SignedOut) throw err; return null; });
+  for (const button of main.querySelectorAll('button[data-edit-topic]')) {
+    button.addEventListener('click', () => {
+      const t = byId.get(button.dataset.editTopic);
+      const row = button.closest('tr');
+      if (!t || !row) return;
+      row.innerHTML = renderTopicEditRow(t);
+      const form = row.querySelector('form.edit-topic');
+      form.querySelector('input').focus();
+      form.querySelector('.cancel-edit').addEventListener('click', () => again('', false));
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const name = form.querySelector('input[name="name"]').value.trim();
+        const description = form.querySelector('textarea[name="description"]').value.trim();
+        if (!name) return say('Not saved: a topic needs a name.', true);
+        for (const control of form.querySelectorAll('button')) control.disabled = true;
+        say(`Saving ${name}…`);
+        try {
+          await api('PATCH', `${topicsPath}/${encodeURIComponent(t.id)}`, { name, description });
+        } catch (err) {
+          if (err instanceof SignedOut) return drawSignIn(`You were signed out; ${t.name} was not saved.`);
+          for (const control of form.querySelectorAll('button')) control.disabled = false;
+          return say(`Not saved: ${err.message}`, true);
+        }
+        let back;
+        try { back = await readBack(); } catch { return drawSignIn(); }
+        const listed = back?.topics?.find((x) => x.id === t.id);
+        const ok = listed && listed.name === name && listed.description === description;
+        again(ok ? `Saved ${name}.` : `The tracker said ${name} was saved, but ${back ? 'the list does not show the new words when read back' : 'the list could not be read back'}.`, !ok);
+      });
+    });
+  }
+  for (const button of main.querySelectorAll('button[data-delete-topic]')) {
+    button.addEventListener('click', async () => {
+      const t = byId.get(button.dataset.deleteTopic);
+      if (!t || !confirm(topicDeleteQuestion(t))) return;
+      button.disabled = true;
+      say(`Deleting ${t.name}…`);
+      let gone;
+      try {
+        gone = await api('DELETE', `${topicsPath}/${encodeURIComponent(t.id)}`);
+      } catch (err) {
+        if (err instanceof SignedOut) return drawSignIn(`You were signed out; ${t.name} was not deleted.`);
+        button.disabled = false;
+        return say(`Not deleted: ${err.message}`, true);
+      }
+      let back;
+      try { back = await readBack(); } catch { return drawSignIn(); }
+      const stillThere = !back || back.topics?.some((x) => x.id === t.id);
+      const n = gone?.tickets?.length ?? 0;
+      again(stillThere
+        ? `The tracker said ${t.name} was deleted, but ${back ? 'it is still listed when read back' : 'the list could not be read back'}.`
+        : `Deleted ${t.name} from ${project.name}${n ? ` and from the ${n === 1 ? '1 task' : `${n} tasks`} that carried it` : ''}.`, stillThere);
+    });
+  }
 }
 
 /**

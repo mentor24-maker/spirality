@@ -3417,6 +3417,64 @@ test('someone who is not on the project gets the same 404 from both topic calls 
   } finally { await f.cleanup(); }
 });
 
+test('PATCH and DELETE /projects/:slug/topics/:id change and delete a topic (SP-308); a delete takes it off its tasks; another project\'s topic is 404 and nothing changes', async () => {
+  const f = await fixture();
+  try {
+    f.store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE', operator: f.human.id });
+    const h = (method, path, body) => f.call(method, path, { token: f.humanToken, body });
+    const login = f.store.addTopic({ project: 'alpha', name: 'Login', description: 'Signing in', actor: f.human.id });
+    const theirs = f.store.addTopic({ project: 'beta', name: 'Theirs', actor: f.human.id });
+    const one = f.store.fileTicket({ project: 'alpha', actor: f.machine.id, name: 'One', status: 'queued' });
+    f.store.changeTicket(one.id, { actor: f.human.id, topics: [login.id] });
+    assert.equal((await h('GET', '/projects/alpha/topics')).body.topics[0].tickets, 1, 'the list says how many tasks carry it');
+
+    const changed = await h('PATCH', `/projects/alpha/topics/${login.id}`, { name: 'Sign-in', description: 'Getting in' });
+    assert.equal(changed.status, 200, changed.text);
+    assert.deepEqual([changed.body.name, changed.body.description], ['Sign-in', 'Getting in']);
+    const blank = await h('PATCH', `/projects/alpha/topics/${login.id}`, { name: '  ' });
+    assert.deepEqual([blank.status, blank.body.error], [400, 'bad-name']);
+
+    for (const [method, path] of [['PATCH', `/projects/alpha/topics/${theirs.id}`], ['DELETE', `/projects/alpha/topics/${theirs.id}`], ['PATCH', `/projects/beta/topics/${login.id}`], ['DELETE', `/projects/beta/topics/${login.id}`], ['DELETE', '/projects/alpha/topics/nope']]) {
+      const r = await h(method, path, method === 'PATCH' ? { name: 'Mine' } : undefined);
+      assert.deepEqual([r.status, r.body.error], [404, 'unknown-topic'], `${method} ${path}`);
+    }
+    assert.deepEqual(f.store.listTopics('beta').map((t) => t.name), ['Theirs'], 'nothing changed');
+    assert.deepEqual(f.store.listTopics('alpha').map((t) => t.name), ['Sign-in']);
+
+    const gone = await h('DELETE', `/projects/alpha/topics/${login.id}`);
+    assert.equal(gone.status, 200, gone.text);
+    assert.deepEqual([gone.body.topic.id, gone.body.tickets], [login.id, [one.id]]);
+    assert.deepEqual((await h('GET', '/projects/alpha/topics')).body.topics, []);
+    const board = (await h('GET', '/projects/alpha/board')).body;
+    const ticket = board.columns.flatMap((c) => c.tickets).find((t) => t.id === one.id);
+    assert.deepEqual(ticket.topics, [], "the task's Topics cell no longer shows it");
+  } finally { await f.cleanup(); }
+});
+
+test('someone who is not on the project gets 404 from changing or deleting its topic, signed out is 401, and nothing changes (SP-308)', async () => {
+  const f = await fixture();
+  try {
+    const base = await f.serve();
+    const secret = f.store.addTopic({ project: 'alpha', name: 'Secret plan', actor: f.human.id });
+    const viewer = f.store.createActor({ kind: 'human', name: 'Viewer' });
+    const vt = f.store.issueToken(viewer.id);
+    f.store.setRole({ actor: viewer.id, role: 'viewer', by: f.human.id });
+    const auth = { authorization: `Bearer ${vt}` };
+    const calls = [
+      (h) => fetch(`${base}/projects/alpha/topics/${secret.id}`, { method: 'PATCH', headers: { ...h, 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Mine' }) }),
+      (h) => fetch(`${base}/projects/alpha/topics/${secret.id}`, { method: 'DELETE', headers: h }),
+    ];
+    for (const [i, call] of calls.entries()) {
+      const r = await call(auth);
+      const text = await r.text();
+      assert.equal(r.status, 404, `call ${i}: ${text}`);
+      assert.ok(!text.includes('Secret'), `call ${i} gives nothing away`);
+      assert.equal((await call({})).status, 401, `call ${i} signed out`);
+    }
+    assert.deepEqual(f.store.listTopics('alpha').map((t) => t.name), ['Secret plan'], 'nothing changed');
+  } finally { await f.cleanup(); }
+});
+
 test('/topics is the page itself', async () => {
   const f = await fixture();
   try {
