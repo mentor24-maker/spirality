@@ -1191,6 +1191,25 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
       return [201, made];
     }
 
+    // A project's tags: every saved tag and every tag in use on its
+    // tickets, each once with how many carry it, and one create of a saved
+    // tag (a name is required; one already listed, in any case, is a 409),
+    // behind the same project check as its topics.
+    if (parts.length === 3 && parts[0] === 'projects' && parts[2] === 'tags' && (method === 'GET' || method === 'POST')) {
+      const project = requireProject(parts[1], me);
+      if (method === 'GET') return [200, { project: project.slug, tags: store.listTags(project.slug) }];
+      const body = await readJson(req);
+      let made;
+      try {
+        made = store.addTag({ project: project.slug, name: body?.name, description: body?.description ?? '', actor: me.id });
+      } catch (err) {
+        if (err instanceof StoreError && err.code === 'tag-exists') throw new HttpError(409, err.code, err.message);
+        throw err;
+      }
+      log(`made tag on ${project.slug} actor=${me.id}`);
+      return [201, made];
+    }
+
     // One topic changed (a new name and/or description) or deleted
     // behind the same project check. A topic of another project is
     // `unknown-topic` (404) and nothing changes. A delete takes the topic off
