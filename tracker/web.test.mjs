@@ -1100,7 +1100,7 @@ test('the Settings page is in the header after Reporting and Users, lists the st
   assert.match(draw, /type="color"/);
   assert.match(draw, /chosen\[tr\.dataset\.status\] = null;/, 'Clear sets no colour');
   assert.match(draw, /await api\('PUT', '\/stage-colours', \{ colours: chosen \}\);\s*\/\/ Read back before saying it worked\.\s*const back = await api\('GET', '\/stage-colours'\);/);
-  assert.match(draw, /note\.textContent = `Not saved: \$\{err\.message\}`;/);
+  assert.match(draw, /showMessage\(\{ kind: 'error', text: `Not saved: \$\{err\.message\}` \}\);/, 'a refused Save is said in the message strip (SP-323)');
   assert.match(draw, /escapeHtml\(s\.status\)/);
   assert.match(app, /markNav\(reporting \? 'reporting' : settings \? 'settings' :/);
   const f = await fixture();
@@ -1652,6 +1652,65 @@ test('the demo has a bug report shaped like SC-804, held in Needs your input', (
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+// ── Older ClickUp-imported bug reports (SP-314) ─────────────────────────────
+
+/** SC-111 / SC-446..479's shape: a markdown-link page and a spaced `* * *` divider. */
+const olderBugDescription = ({ page = '[https://example.com/a](https://example.com/a)' } = {}) => bugDescription()
+  .replace('https://example.com/pricing', page)
+  .replace('\n---\n', '\n* * *\n\n');
+
+test('an older bug report: a spaced "* * *" is a rule, so "(none attached)" means no screenshots', () => {
+  const r = bugReport({ tags: ['bug-report'], description: olderBugDescription() });
+  assert.equal(r.screenshots, false);
+  assert.equal(r.facts[0].value, '[https://example.com/a](https://example.com/a)', 'read as text; the link is made at render');
+  for (const divider of ['- - -', '_ _ _', ' *  *  * ', '* * * *']) {
+    assert.equal(bugReport({ tags: ['bug-report'], description: bugDescription().replace('\n---\n', `\n${divider}\n`) }).screenshots, false, divider);
+  }
+  const html = renderQuickAction({ name: 'x', tags: ['bug-report'], status: 'needs your input', description: olderBugDescription() });
+  assert.doesNotMatch(html, /bug-shots|Screenshots are attached/);
+});
+
+test('an older bug report\'s markdown-link Page is one link showing the address, every character escaped', () => {
+  const html = renderQuickAction({ name: 'x', tags: ['bug-report'], description: olderBugDescription() });
+  assert.match(html, /<li><span class="fact-label">Page:<\/span> <a href="https:\/\/example\.com\/a" rel="noopener noreferrer" target="_blank">https:\/\/example\.com\/a<\/a><\/li>/);
+  assert.equal((html.match(/<a /g) ?? []).length, 1);
+  const nasty = renderQuickAction({ name: 'x', tags: ['bug-report'], description: olderBugDescription({ page: '[<b>"x"&y</b>](https://x.test/?a=1&b="2"<i>)' }) });
+  assert.match(nasty, /Page:<\/span> <a href="https:\/\/x\.test\/\?a=1&amp;b=&quot;2&quot;&lt;i&gt;" [^>]*>&lt;b&gt;&quot;x&quot;&amp;y&lt;\/b&gt;<\/a><\/li>/);
+  assert.doesNotMatch(nasty, /<b>|<i>|"x"/);
+  // Not a link: a javascript: address, or anything around the link.
+  for (const page of ['[click](javascript:alert(1))', '[click](javascript:alert)', 'see [a](https://x.test/a) here', '[a](https://x.test/a) [b](https://x.test/b)']) {
+    const out = renderQuickAction({ name: 'x', tags: ['bug-report'], description: olderBugDescription({ page }) });
+    const row = /<li><span class="fact-label">Page:<\/span> (.*?)<\/li>/.exec(out)[1];
+    assert.doesNotMatch(row, /<a /, page);
+    assert.equal(row, escapeHtml(page), page);
+  }
+});
+
+test('renderMarkdown: "* * *", "- - -" and "_ _ _" are rules; "* item" and "* * text" are not', () => {
+  for (const line of ['* * *', '- - -', '_ _ _', '***', '---', '  * * * *  ']) {
+    assert.equal(renderMarkdown(`a\n\n${line}\n\nb`).match(/<hr>/g)?.length, 1, line);
+  }
+  for (const line of ['* item', '* * text', '- - x', '* *', '*-*']) {
+    assert.doesNotMatch(renderMarkdown(line), /<hr>/, line);
+  }
+});
+
+test('the demo has an older-shape bug report, held, with a linked page and no screenshot line', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'bug-demo-old-'));
+  try {
+    const store = openStore(join(dir, 'db.sqlite'));
+    seedDemo(store, { operatorName: 'Op' });
+    const t = store.listTickets('beta').find((x) => x.tags.includes('bug-report') && x.description.includes('* * *'));
+    assert.ok(t, 'a demo bug report with a spaced divider');
+    assert.equal(t.status, 'needs your input');
+    const html = renderQuickAction(t);
+    assert.match(html, /^<h1>Bug Report:<\/h1>/);
+    assert.match(html, /Page:<\/span> <a href="https:\/\/example\.com\/blog"[^>]*>https:\/\/example\.com\/blog<\/a>/);
+    assert.doesNotMatch(html, /bug-shots|none attached/);
+    store.close();
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 // ── A held bug report's Approve and Reject (SP-287) ─────────────────────────
 
 test('a held bug report is tagged bug-report, in Needs your input, with no card in its thread', () => {
@@ -1796,7 +1855,7 @@ test('on the server, Approve leaves a held bug report in Requested and Reject in
   try {
     const threads = await Promise.all(f.store.listTickets('beta').map(async (t) => (await f.call('GET', `/tickets/${t.id}/thread`)).body));
     const held = threads.filter((t) => heldBugReport(t));
-    assert.equal(held.length, 2, 'the demo holds two bug reports, one to approve and one to reject');
+    assert.equal(held.length, 3, 'the demo holds three bug reports: one to approve, one to reject, and the older shape (SP-314)');
     for (const t of threads.filter((x) => !heldBugReport(x))) assert.equal(renderBugReportActions(t), '', t.name);
     const [a, r] = held;
     // Approve: the page's one change, as the page sends it.

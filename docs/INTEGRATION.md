@@ -296,10 +296,18 @@ is a ticket in that project's own queue, filed once Spirality's side is Live:
 2. Run a project's lanes, door, skills and hooks from Spirality's folder,
    with pacing and pauses scoped to one project.
    Slice 1 done (SP-263): every lane file in the log folder is named for its
-   project, checked by `scripts/lib/laneFiles.test.mjs`. The project-scoped
-   pause lookup (`projectPauseVerdict` in `lib/pipelinePause.js`) exists, but
-   no lane asks the pause switch yet: SP-237 must use it when it wires the
-   pause into the lanes.
+   project, checked by `scripts/lib/laneFiles.test.mjs`.
+   Pause done (SP-237): `scripts/loop_runner.sh` and `scripts/run_relay.sh`
+   ask `scripts/pause_check.sh` before every pass, and any non-zero exit
+   counts as paused. It runs `npm run clickup -- pause-check`, which applies
+   `settingsPauseVerdict` (`lib/pipelinePause.js`) to the Settings page's
+   switches, read from the tracker for this one project
+   (`/pipeline-controls/<project>`), so the pause is scoped to one project.
+   Gap: it does not use `projectPauseVerdict`, the older lookup in
+   `lib/pipelinePause.js` that finds a project's pause-switch ticket. No
+   lane, runner or script calls it; only its test,
+   `scripts/lib/laneFiles.test.mjs`, does. Removing it, or deciding to keep
+   it, is its own ticket.
    Slice 2 done (SP-270): with `SPIRALITY_PROJECT` set to a project's
    checkout folder, the door (`npm run clickup`), `scripts/project_config.mjs`
    and `scripts/with_doppler.mjs`, run from Spirality's folder, read that
@@ -345,6 +353,9 @@ is a ticket in that project's own queue, filed once Spirality's side is Live:
 4. Move the pipeline watchdogs into Spirality for every project (SP-260,
    filed 2026-11-12, which also sorts StarCaster's watchdogs into pipeline
    watchdogs and application checks).
+   Slice done (SP-266): the heartbeat watchdog (`scripts/heartbeat.mjs`)
+   runs in Spirality and says on the bus when a lane stops running.
+   The rest of SP-260's watchdogs are still to move.
 5. Name a Spirality release for each project, Spirality's own lanes first.
    Slice 1 done (SP-265): releases, the tracker's record of which one each
    project runs, and the commands to cut, name and roll back (above).

@@ -26,7 +26,7 @@
  * an emailed link's own page. The link's token is sent only in a JSON body,
  * never in an address.
  */
-import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, loopHasIt, renderCommentForm, MOVED_MESSAGE, renderMarkdown, unwrapDoc, renderCloseAction, renderGoAction, goQuestion, renderBugReportActions, approveQuestion, rejectQuestion, changeProblem, REJECT_COMMENT, WONT_DO_TAG, renderMergeAction, renderAnswerIn, renderHeldUp, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, lookupTicket, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, pipelinePodLabel, renderHealth, healthLines, renderCommandList, renderCommandView, renderCommandDetails, renderContextDocs, renderTopics, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, renderListTopics, projectTags, projectTagCounts, sortTickets, nextSort, renderDocumentation, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, lowerMeridiem, renderPipelineControls, renderConsole, drainLine, renderTitleChoices, titleModeOf, SUGGEST_POLL_MS, moveSuggestion, suggestState, filingPlan, orderPlan, andList, suggestRunLine, renderSuggestRows, renderSuggestionInfo } from './render.mjs';
+import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, loopHasIt, renderCommentForm, MOVED_MESSAGE, renderMarkdown, unwrapDoc, renderCloseAction, renderGoAction, goQuestion, renderBugReportActions, approveQuestion, rejectQuestion, changeProblem, REJECT_COMMENT, WONT_DO_TAG, renderMergeAction, renderAnswerIn, renderHeldUp, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, lookupTicket, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, pipelinePodLabel, renderHealth, healthLines, renderCommandList, renderCommandView, renderCommandDetails, renderContextDocs, renderTopics, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, renderListTopics, projectTags, projectTagCounts, sortTickets, nextSort, renderDocumentation, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, lowerMeridiem, renderPipelineControls, renderConsole, drainLine, renderTitleChoices, titleModeOf, SUGGEST_POLL_MS, moveSuggestion, suggestState, filingPlan, orderPlan, andList, suggestRunLine, renderSuggestRows, renderSuggestionInfo, renderMessage, renderSavedCard, MESSAGE_CLOSES_MS, SAVED_CARD_MS } from './render.mjs';
 
 /** Where an earlier version of the page kept a pasted token; removed on load, never read. */
 const OLD_TOKEN_KEY = 'tracker-token';
@@ -1346,7 +1346,7 @@ async function drawProject(slug, view, { adding = false, filed = null, unchecked
       ${t.answerIn ? `<span class="answer-in">${escapeHtml(ANSWER_IN_NOTE)}</span>` : t.mergeStands ? `<span class="answer-in">${escapeHtml(MERGE_STANDS_NOTE)}</span>` : ''}
       ${t.tags.length ? `<span class="tags">${t.tags.map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join('')}</span>` : ''}
     </a>`;
-  const column = (c) => block(c, 'column', c.tickets.map(card).join('') || '<p class="quiet">None.</p>');
+  const column = (c) => block(c, 'column', c.tickets.map(card).join('') || `<p class="quiet">No tickets are in ${escapeHtml(c.status)} right now.</p>`);
 
   const actions = (t, status) => {
     const at = `/t/${encodeURIComponent(t.id)}`;
@@ -3269,7 +3269,7 @@ async function drawSettings() {
       <p class="quiet">Choose a colour for each stage of the loop. The same colours show for everyone.</p>
       <form class="colours">
         <div class="table-wrap"><table class="colours"><thead><tr><th>Stage</th><th>Colour</th><th></th><th></th></tr></thead><tbody>${stages.map(row).join('')}</tbody></table></div>
-        <div class="row"><button type="submit" class="btn btn-save">Save</button><span class="note"></span></div>
+        <div class="row"><button type="submit" class="btn btn-save">Save</button></div>
       </form>
     </div>`;
   showSettingsTab(settingsTabAt());
@@ -3297,24 +3297,23 @@ async function drawSettings() {
     tr.querySelector('input').addEventListener('input', (e) => { chosen[tr.dataset.status] = e.target.value; show(tr); });
     tr.querySelector('button').addEventListener('click', () => { chosen[tr.dataset.status] = null; show(tr); });
   }
-  const note = form.querySelector('.note');
+  // The first Save on the message strip (UI_DOCTRINE 7, SP-323): its outcome
+  // is said in the strip under the header, never beside the button.
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const button = form.querySelector('button[type="submit"]');
     button.disabled = true;
-    note.className = 'note quiet';
-    note.textContent = 'Saving…';
+    showMessage({ kind: 'info', text: 'Saving…' });
     try {
       await api('PUT', '/stage-colours', { colours: chosen });
       // Read back before saying it worked.
       const back = await api('GET', '/stage-colours');
       const wrong = back.stages.filter((s) => s.colour !== (chosen[s.status] ?? null));
       if (wrong.length) throw new Error(`the tracker read back different colours for ${wrong.map((s) => s.status).join(', ')}.`);
-      note.textContent = 'Saved: the colours are stored on the tracker.';
+      showMessage({ kind: 'success', text: 'Saved: the colours are stored on the tracker.' }, { afterSave: true });
     } catch (err) {
       if (err instanceof SignedOut) return drawSignIn('You were signed out; the colours were not saved.');
-      note.className = 'note error';
-      note.textContent = `Not saved: ${err.message}`;
+      showMessage({ kind: 'error', text: `Not saved: ${err.message}` });
     }
     button.disabled = false;
   });
@@ -4077,6 +4076,8 @@ const boardAt = () => { const m = /^\/(?:board|list)\/([^/]+)$/.exec(location.pa
 async function route({ place = null } = {}) {
   const reads = new Map();
   drawing += 1;
+  // A page opened anew starts with nothing said; a page that only read itself again keeps its message.
+  if (!refreshing) clearMessage();
   try {
     if (location.pathname === '/set-password') {
       await drawSetPassword();
@@ -4282,6 +4283,43 @@ async function beat() {
   await refreshCount();
   await refreshPage();
 }
+
+// ── The message strip (docs/UI_DOCTRINE.md section 7, SP-323) ───────────────
+// One strip between the header and the page, one message at a time: an error
+// until its × is pressed, anything else for four seconds, and a Save's success
+// as the small card that fades by itself. A button reports here by calling
+// showMessage, never by writing a note beside itself. So far only the Settings
+// page's Stage Colours Save does; the other pages move onto it ticket by
+// ticket, and messages.test.mjs stops new notes being added meanwhile.
+const messages = document.getElementById('messages');
+let messageTimer = null;
+
+/** Empty the strip. */
+function clearMessage() {
+  clearTimeout(messageTimer);
+  messageTimer = null;
+  messages.hidden = true;
+  messages.innerHTML = '';
+}
+
+/** Show one message (`{ kind: 'success' | 'error' | 'info', text }`) in the strip, in place of whatever it held. */
+function showMessage(said, { afterSave = false } = {}) {
+  clearTimeout(messageTimer);
+  messageTimer = null;
+  messages.hidden = false;
+  if (afterSave && said.kind === 'success') {
+    messages.innerHTML = renderSavedCard(said.text);
+    window.scrollTo({ top: 0 });
+    messageTimer = setTimeout(clearMessage, SAVED_CARD_MS);
+    return;
+  }
+  messages.innerHTML = renderMessage(said);
+  messages.scrollIntoView({ block: 'nearest' });
+  if (said.kind !== 'error') messageTimer = setTimeout(clearMessage, MESSAGE_CLOSES_MS);
+}
+messages.addEventListener('click', (e) => {
+  if (e.target.closest('.message-close')) clearMessage();
+});
 
 // Links inside the page change the address without reloading it.
 document.addEventListener('click', (e) => {
