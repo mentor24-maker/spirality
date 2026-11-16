@@ -364,8 +364,19 @@ details.suggest-next .drag-handle:focus-visible { outline: 2px solid var(--blue)
 details.suggest-next select.place { width: auto; margin: 0; }
 details.suggest-next label.keep { display: flex; align-items: center; gap: 0.3rem; margin: 0; font-weight: 400; }
 details.suggest-next label.keep input { width: auto; margin: 0; }
-details.suggest-next .suggestion-title { flex: 1 1 16rem; font-weight: 600; }
+details.suggest-next .suggestion-title { flex: 0 1 auto; font-weight: 600; }
 details.suggest-next .filed { font-size: 0.9em; }
+details.suggest-next button.suggestion-info-open { flex: none; display: inline-flex; margin-right: auto; padding: 0.1rem; border: 0; border-radius: 50%; background: transparent; color: var(--ink); cursor: pointer; }
+details.suggest-next button.suggestion-info-open svg { width: 1.25em; height: 1.25em; }
+details.suggest-next button.suggestion-info-open:hover, details.suggest-next button.suggestion-info-open:focus-visible { background: var(--blue); }
+/* SP-304: a suggestion's About box, the same look as a command's pop-up. */
+dialog.suggestion-info { border: var(--hairline); border-radius: 8px; padding: 1rem 1.25rem; max-width: min(36rem, 95vw); color: var(--ink); }
+dialog.suggestion-info::backdrop { background: rgba(0, 0, 0, 0.3); }
+dialog.suggestion-info h2 { margin: 0 2rem 0.25rem 0; font-size: 1.1rem; }
+dialog.suggestion-info h3 { margin: 0.75rem 0 0.25rem; font-size: 1rem; }
+dialog.suggestion-info p { margin: 0; white-space: pre-wrap; }
+dialog.suggestion-info button.close { float: right; border: 0; background: transparent; cursor: pointer; padding: 0 0.25rem; font-size: 1.25rem; line-height: 1; color: var(--quiet); }
+dialog.suggestion-info .row { display: flex; justify-content: flex-end; margin-top: 1rem; }
 details.suggest-next details.more { flex-basis: 100%; }
 details.suggest-next details.more > summary { cursor: pointer; color: var(--quiet); font-size: 0.9em; }
 details.suggest-next details.more p { margin: 0.3rem 0 0; white-space: pre-wrap; }
