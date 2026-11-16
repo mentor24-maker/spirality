@@ -2308,12 +2308,14 @@ const SUGGEST_UNANSWERED = 'No titles could be suggested: the tracker did not an
  * The title is picked from suggestions (SP-248). A toggle at the top picks
  * how: Suggest a Title shows only the Description (required), Write My Own
  * Title shows the Title too. The toggle is kept in this browser beside the
- * draft and outlives a filing. Either way, the first submit ("Suggest
- * Titles") sends the words to the title suggester
- * (`/tickets/suggest-titles`) and shows its five titles as a choice list,
- * his own title first in Write My Own Title; "Suggest Again" asks for a
- * fresh five, the words untouched. Editing the words after that puts the
- * button back to Suggest Titles, so a list never names stale words. When
+ * draft and outlives a filing. In Suggest a Title the first submit
+ * ("Suggest Titles") sends the words to the title suggester
+ * (`/tickets/suggest-titles`) and shows its five titles as a choice list.
+ * In Write My Own Title the button reads "Submit Task" from the start and
+ * files his title as typed; a "Suggest Titles" button beside it asks for
+ * the list anyway, his own title first. "Suggest Again" asks for a fresh
+ * five, the words untouched. Editing the words after that puts the box back
+ * to its first stage, so a list never names stale words. When
  * the suggester fails, the box says why in one line and shows the Title
  * field, and the next submit files what he types there. The picked title
  * is filed exactly as shown.
@@ -2353,8 +2355,11 @@ function wireAddTask(slug, view, adding) {
     description.required = mode === 'suggest';
     choices.hidden = stage !== 'pick';
     if (stage !== 'pick') choiceList.innerHTML = '';
-    again.hidden = stage === 'ask';
-    button.textContent = stage === 'ask' ? 'Suggest Titles' : 'Submit Task';
+    // Write My Own Title files his title straight away; Suggest Titles beside it is optional.
+    const asking = stage === 'ask' && mode === 'suggest';
+    again.hidden = asking;
+    again.textContent = stage === 'ask' ? 'Suggest Titles' : 'Suggest Again';
+    button.textContent = asking ? 'Suggest Titles' : 'Submit Task';
   };
   const firstField = () => (mode === 'own' ? title : description);
   show();
@@ -2423,8 +2428,8 @@ function wireAddTask(slug, view, adding) {
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     keep();
-    if (stage === 'ask') return askTitles();
-    // The title as shown: the picked choice, or what he typed after a failed suggestion.
+    if (stage === 'ask' && mode === 'suggest') return askTitles();
+    // The title as shown: the picked choice, or what he typed (Write My Own Title, or after a failed suggestion).
     const picked = stage === 'pick' ? choiceList.querySelector('input[name="title-choice"]:checked')?.value : title.value;
     if (!picked) {
       say('Pick a title first.', 'error');
