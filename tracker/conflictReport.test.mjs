@@ -11,6 +11,7 @@ import mainMoved from '../lib/mainMoved.js';
 import conflictWork from '../lib/conflictWork.js';
 import { openStore } from './store.mjs';
 import { reportsOf } from './pageData.mjs';
+import { pageScript } from './pageScripts.mjs';
 
 const T = (iso) => Date.parse(iso);
 const REPO = 'https://github.com/o/r';
@@ -256,7 +257,7 @@ test('reportsOf carries the conflicts, read from the store: notes, status histor
 });
 
 test('the Reporting page draws Merge Conflicts from the server\'s answer, before Open Now, each conflict linking to its ticket', () => {
-  const app = readFileSync(new URL('./web/app.mjs', import.meta.url), 'utf8');
+  const app = pageScript();
   const fn = app.slice(app.indexOf('async function drawReporting('));
   const page = fn.slice(fn.indexOf('<h1>Reporting</h1>'), fn.indexOf('<h2>Open Now</h2>'));
   assert.match(page, /\$\{conflictsHtml\}/);

@@ -1,7 +1,7 @@
 /**
  * Test data for Dane's page: two projects and a handful of tickets covering
  * every way a ticket can stand with the operator. The tests read it
- * (tracker/web.test.mjs) and so does the demo server (tracker/demo.mjs), so
+ * (tracker/web-*.test.mjs) and so does the demo server (tracker/demo.mjs), so
  * what is tested is what he clicks through.
  *
  * `expect` names, per ticket, what the loop's `waiting` rule says about it.

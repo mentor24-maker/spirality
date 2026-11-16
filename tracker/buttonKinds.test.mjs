@@ -10,9 +10,10 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { declarationsOf, rootTokens } from './cssTokens.mjs';
+import { PAGE_SCRIPTS } from './pageScripts.mjs';
 
 const read = (path) => readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8');
-const SOURCES = ['./web/app.mjs', './web/render.mjs', './web/index.html'];
+const SOURCES = [...PAGE_SCRIPTS.map((name) => `./web/${name}`), './web/render.mjs', './web/index.html'];
 const CSS = read('./web/app.css');
 
 /**
