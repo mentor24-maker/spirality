@@ -457,21 +457,64 @@ async function readyToLaunchRefused(task, status) {
   return true;
 }
 
-/** Dane must not be asked for something he has already answered. */
+/**
+ * The relay's reading of who answered the card on a Needs your input ticket
+ * (SP-302): anyone on the project, and once an earlier answer after the card
+ * carries the done reply, only his own words newer than it. Shared by the
+ * relay and the `ask` guard, so the two cannot read a teammate differently.
+ * Returns { verdict } or { unreadable: <comment id> } when the replies under
+ * an earlier answer could not be read.
+ */
+async function teamAnswerVerdict(comments) {
+  const opts = { comments, operatorId: OPERATOR_ID, isMachine: isMachineAuthored, teammates: true };
+  let verdict = handbackAnswer(opts);
+  const earlier = earlierAnswerIds({ comments, verdict, operatorId: OPERATOR_ID, isMachine: isMachineAuthored });
+  if (!earlier.length) return { verdict };
+  const spent = [];
+  for (const id of earlier) {
+    const out = await tracker.listReplies(id);
+    if (!out.res.ok) return { unreadable: id };
+    if (repliesShowHandbackDone(out.json?.comments || out.json?.replies || [])) spent.push(id);
+  }
+  if (spent.length) verdict = handbackAnswer({ ...opts, spent });
+  return { verdict };
+}
+
+/**
+ * Dane must not be asked for something already answered: by him, or, on a
+ * Needs your input ticket, by a teammate whose reply the relay will act on
+ * (SP-302 round 2). A new card over that reply would make it older than the
+ * card, and the answer would be ignored.
+ */
 async function alreadyAnsweredRefused(task, status) {
   if (!isOperatorStatus(status)) return null;
   if (flag('after-his-answer')) {
-    console.error('Handing this back although he spoke last (--after-his-answer). Recorded in this transcript.');
+    console.error('Handing this back although it was answered last (--after-his-answer). Recorded in this transcript.');
     return null;
   }
   const comments = await readComments(task);
-  if (operatorSpokeLast(comments, OPERATOR_ID)) {
-    console.error(`\nREFUSED — Dane's own comment is the NEWEST one on ${task}, so a machine owes the next move.`);
-    console.error('Handing it back now asks him to answer twice. Read what he said:');
+  const refuse = (whose) => {
+    console.error(`\nREFUSED — ${whose} is the NEWEST one on ${task}, so a machine owes the next move.`);
+    console.error('Asking again now asks for the same answer twice. Read what was said:');
     console.error(`  npm run clickup -- waiting --task ${task}`);
     console.error('If this really is a NEW question, say so on the record: ... --after-his-answer');
     console.error('Nothing was posted and the status has NOT moved.');
     return 2;
+  };
+  if (operatorSpokeLast(comments, OPERATOR_ID)) return refuse("Dane's own comment");
+  const t = await readTask(task);
+  if (statusOf(t) !== NEEDS_YOUR_INPUT) return null;
+  const newest = newestFirst(comments)[0];
+  if (!newest) return null;
+  const read = await teamAnswerVerdict(comments);
+  if (read.unreadable != null) {
+    console.error(`\nREFUSED — the replies under comment ${read.unreadable} on ${task} could not be read, so it cannot be told whether a teammate's newest comment is an answer the relay will act on.`);
+    console.error('Nothing was posted and the status has NOT moved. Try again, or pass --after-his-answer if this really is a NEW question.');
+    return 1;
+  }
+  const { verdict } = read;
+  if (verdict.state === 'answered' && verdict.answer && String(verdict.answer.id) === String(newest.id)) {
+    return refuse(`${newest.user?.username ?? 'a teammate'}'s answer to the card`);
   }
   return null;
 }
@@ -2132,26 +2175,13 @@ if (cmd === 'whoami') {
     const comments = await readComments(task.id);
     seen.set(task.id, { task, comments });
     // Anyone on the project answers the card here, not only him (SP-302).
-    let verdict = handbackAnswer({ comments, operatorId: OPERATOR_ID, isMachine: isMachineAuthored, teammates: true });
-    // A teammate's answer, with earlier answers after the card: if one of
-    // those was already acted on, he parked it here again by hand and only
-    // his own word moves it (SP-302 round 2).
-    const earlier = earlierAnswerIds({ comments, verdict, operatorId: OPERATOR_ID, isMachine: isMachineAuthored });
-    if (earlier.length) {
-      const spent = [];
-      for (const id of earlier) {
-        const back = await readReplies(id);
-        if (back === null) {
-          unchecked.push(`${task.id}: could not read the replies under an earlier answer (comment ${id}) to see whether it was already acted on — not moved this pass`);
-          say(task, 'unchecked', `could not read the replies under comment ${id}`);
-          return;
-        }
-        if (repliesShowHandbackDone(back)) spent.push(id);
-      }
-      if (spent.length) {
-        verdict = handbackAnswer({ comments, operatorId: OPERATOR_ID, isMachine: isMachineAuthored, teammates: true, spent });
-      }
+    const read = await teamAnswerVerdict(comments);
+    if (read.unreadable != null) {
+      unchecked.push(`${task.id}: could not read the replies under an earlier answer (comment ${read.unreadable}) to see whether it was already acted on — not moved this pass`);
+      say(task, 'unchecked', `could not read the replies under comment ${read.unreadable}`);
+      return;
     }
+    const { verdict } = read;
     let replies = [];
     if (verdict.state === 'answered') {
       replies = await readReplies(verdict.answer.id);

@@ -160,13 +160,23 @@ export function runStaleAnswer({
         markers = staleAnswer.markersFromReplyEnvelope(readReplies({ taskId: id, commentId: answered.answer.id }));
       } catch { markers = null; }
       if (markers && markers.handbackDone === true) record.state = 'handled';
-      // A teammate's answer after one already acted on is no answer the
-      // relay will act on (SP-302 round 2): the same earlier reads it makes.
+      // A teammate's answer after one already acted on (SP-302 rounds 2
+      // and 3): the same earlier reads the relay makes, then the relay's own
+      // second reading with those spent. It is `answered` again only on a
+      // word of his NEWER than the spent answer, and then that word's age is
+      // the one that counts. An earlier read that fails is left unspent, so
+      // the alarm stays on rather than going quiet unchecked.
       if (record.state === 'answered') {
+        const spent = [];
         for (const commentId of earlierAnswerIds({ comments, verdict: answered, operatorId, isMachine: isMachineAuthored })) {
           let earlier = null;
           try { earlier = staleAnswer.markersFromReplyEnvelope(readReplies({ taskId: id, commentId })); } catch { earlier = null; }
-          if (earlier && earlier.handbackDone === true) { record.state = 'handled'; break; }
+          if (earlier && earlier.handbackDone === true) spent.push(commentId);
+        }
+        if (spent.length) {
+          const again = handbackAnswer({ comments, operatorId, isMachine: isMachineAuthored, teammates: true, spent });
+          record.state = again.state;
+          if (again.state === 'answered') record.answerMinutes = (now - again.answerAt) / staleAnswer.MS_PER_MINUTE;
         }
       }
     }

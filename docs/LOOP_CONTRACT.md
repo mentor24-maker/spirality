@@ -276,8 +276,10 @@ not a guess.
   machine-written question card (a ticket parked with no card stays on his
   list, because the relay never moves it), and once an answer after the card
   has been acted on (its `[bus-relay-handback-done]` reply) and the ticket is
-  parked there again by hand, only Dane's own word moves it. Only Dane's own
-  merge phrase merges, so in
+  parked there again by hand, only Dane's own word moves it, and only a word
+  of his newer than that answer (an older one was overtaken by it). `ask`
+  refuses a new card over a teammate's answer the relay would act on, as it
+  does over his. Only Dane's own merge phrase merges, so in
   `Ready to launch` a teammate's comment changes nothing (SP-302, Dane's
   choice A, 2026-11-14: "Their reply is the answer: it leaves every list at
   once and the loop acts on it, but only your own merge merges a pull

@@ -27,3 +27,12 @@ acted on and someone parks the ticket back for Dane by hand, a teammate's
 "your answer has sat" alarm follows the same rule, so it no longer fires
 about a teammate's passing comment. Replaying PP-8 from a copy of the live
 tracker still takes it off both lists.
+
+A second send-back found two more corners. When a teammate's answer had
+already been acted on and the ticket was parked again, an older comment of
+Dane's (say "let me think", written before the answer) could still be read
+as a fresh answer and send the ticket off. Now only something Dane writes
+after the answer that was acted on counts. And the step that posts a new
+question to Dane now refuses when a teammate has just answered the last
+one, the same way it already refused when Dane had, so a fresh question can
+never bury someone's answer.
