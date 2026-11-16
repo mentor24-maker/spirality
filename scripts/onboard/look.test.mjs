@@ -342,7 +342,7 @@ test('the bus row: a project with a bus names it; one with none is told plainly 
     projectName: 'Normie', githubRepo: 'mentor24-maker/normie', trackerPrefix: 'NO', hasBus: true,
     checkoutDir: '/Users/dane/WebApps/normie', checkCommand: 'npm run verify:full', description: 'Polls.',
   }, { homeConfig, homeRoot: '/Users/dane/WebApps/home' });
-  assert.match(formatRow(busRow(withBus)), /^Bus: where the pipeline watchdogs post: ready \(normie-bus, which the setup's bus step makes if it is missing\)$/);
+  assert.match(formatRow(busRow(withBus)), /^Bus: where the pipeline watchdogs post: ready \(normie's own queue, whose noticeboard tag the setup's bus step saves if it is missing\)$/);
   const rows = await look({ answers, homeConfig, deps: fakeWorld().deps });
   assert.match(rows.map(formatRow).join('\n'), /the watchdogs have nowhere to post/);
 });

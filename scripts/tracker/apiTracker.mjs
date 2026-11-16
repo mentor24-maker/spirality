@@ -474,6 +474,12 @@ export function createApiTracker({ token, baseUrl, project, listId, timeoutMs, l
       return withJson(out, await taskFromTicket(out.json.ticket));
     },
 
+    /** A project's tags, saved and in use, as `{ tags: [{ name, ... }] }` (SP-356). */
+    listProjectTags: (slug) => call('GET', `/projects/${encodeURIComponent(projectFor(slug))}/tags`),
+
+    /** Save a tag on a project's list; one already there (any case) is HTTP 409. */
+    addProjectTag: (slug, name, description = '') => call('POST', `/projects/${encodeURIComponent(projectFor(slug))}/tags`, { name, description }),
+
     /** Add or drop one tag, guarded on the version read just before, so a
      *  tag written by someone else in between is never overwritten. Any
      *  write in between (a status move, a comment) bumps that version, so a
