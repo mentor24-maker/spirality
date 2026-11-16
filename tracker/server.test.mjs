@@ -1907,7 +1907,7 @@ test('GET /search narrows by Status, Priority, Created by and Assigned to, alone
 
     const all = (await f.call('GET', '/search?q=widget')).body;
     assert.deepEqual(all.filters.map((x) => [x.key, x.label, x.value]),
-      [['project', 'Project', null], ['status', 'Status', null], ['priority', 'Priority', null], ['createdBy', 'Created by', null], ['assignee', 'Assigned to', null]]);
+      [['project', 'Project', null], ['status', 'Status', null], ['priority', 'Priority', null], ['createdBy', 'Created By', null], ['assignee', 'Assigned To', null]]);
     assert.deepEqual(all.filters[1].options.map((o) => o.value), loopStatuses.STAGE_ORDER);
     assert.deepEqual(all.filters[2].options.map((o) => o.value), ['urgent', 'high', 'normal', 'low', 'none']);
     assert.deepEqual(all.filters[3].options, [f.human, f.machine, other].map((x) => ({ value: String(x.id), label: x.name })));

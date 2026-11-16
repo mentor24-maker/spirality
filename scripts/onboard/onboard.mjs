@@ -145,20 +145,22 @@ export const ALL_STEPS = CLICKUP_RUN_STEPS;
  * person enters", the fields marked "Dane"): the only ones the wizard asks.
  * `fallback` describes the default shown in brackets; a blank answer writes
  * null, which lib/onboardAnswers.mjs reads as "use the default", and which
- * still counts as answered, so it is not asked again.
+ * still counts as answered, so it is not asked again. `label` is the field's
+ * name on the tracker's setup form, in Title Case (docs/UI_DOCTRINE.md 1.1,
+ * SP-325); the form shows `question` under it.
  */
 export const DANE_FIELDS = Object.freeze([
-  { key: 'projectName', question: 'Project name, as the tracker shows it', required: true },
-  { key: 'githubRepo', question: 'GitHub repository, as owner/name', required: true },
-  { key: 'trackerPrefix', question: 'Ticket prefix (the start of every ticket id)', fallback: ({ slug }) => slug.replace(/[^a-z]/g, '').slice(0, 2).toUpperCase() || null },
-  { key: 'mergePhrases', question: 'Merge phrases, the words that mean "merge this" (comma between)', list: true, fallback: ({ homeConfig }) => homeConfig.mergePhrases.join(', ') },
-  { key: 'autoMergeLanes', question: 'Lanes that may merge without you (comma between)', list: true, fallback: () => 'none' },
-  { key: 'extraGovernancePaths', question: 'Extra protected files, beyond the usual list (comma between)', list: true, fallback: () => 'none' },
+  { key: 'projectName', label: 'Project Name', question: 'Project name, as the tracker shows it', required: true },
+  { key: 'githubRepo', label: 'GitHub Repository', question: 'GitHub repository, as owner/name', required: true },
+  { key: 'trackerPrefix', label: 'Ticket Prefix', question: 'Ticket prefix (the start of every ticket id)', fallback: ({ slug }) => slug.replace(/[^a-z]/g, '').slice(0, 2).toUpperCase() || null },
+  { key: 'mergePhrases', label: 'Merge Phrases', question: 'Merge phrases, the words that mean "merge this" (comma between)', list: true, fallback: ({ homeConfig }) => homeConfig.mergePhrases.join(', ') },
+  { key: 'autoMergeLanes', label: 'Lanes That Merge Without You', question: 'Lanes that may merge without you (comma between)', list: true, fallback: () => 'none' },
+  { key: 'extraGovernancePaths', label: 'Extra Protected Files', question: 'Extra protected files, beyond the usual list (comma between)', list: true, fallback: () => 'none' },
   // SP-204. `added`: a question added after setups were already under way,
   // so an answers file that has every other answer is not stopped for it
   // (its default, no bus, stands); it is asked whenever anything else is.
-  { key: 'hasBus', question: 'Does it raise its alarms on a bus, a tracker project of its own? (yes or no)', yesNo: true, added: true, fallback: () => 'no' },
-  { key: 'description', question: 'What the project is, in two or three sentences, for its CLAUDE.md', required: true },
+  { key: 'hasBus', label: 'Bus Project', question: 'Does it raise its alarms on a bus, a tracker project of its own? (yes or no)', yesNo: true, added: true, fallback: () => 'no' },
+  { key: 'description', label: 'What the Project Is', question: 'What the project is, in two or three sentences, for its CLAUDE.md', required: true },
 ]);
 
 /**

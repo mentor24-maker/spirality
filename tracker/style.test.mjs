@@ -1,6 +1,6 @@
 // The tracker page's words follow docs/UI_DOCTRINE.md (SP-138): every button,
-// heading, table column heading, tab title and page trail step is in Title
-// Case. This reads the page's own source and names every label that is not,
+// heading, table column heading, tab, field label, tab title and page trail
+// step is in Title Case (field labels and tabs since SP-325). This reads the page's own source and names every label that is not,
 // so a new "Add thing" button fails `npm run verify` instead of reaching Dane.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -72,12 +72,24 @@ function labelsOf(source) {
   add('button', /textContent = \([^)]*\) \? '([^']+)'/g);
   add('button', /textContent = \([^)]*\) \? '[^']+' : '([^']+)'/g);
   add('range column', /label: '([^']+)', days:/g);
+  // SP-325: field labels. A <label> may wrap its control; only its own words are read, not the list's choices or a hint.
+  for (const m of source.matchAll(/<label\b[^>]*>([\s\S]*?)<\/label>/g)) {
+    const own = m[1].replace(/<(select|textarea|datalist)\b[\s\S]*?<\/\1>/g, ' ').replace(/<span class="(?:hint|note)[^"]*"[^>]*>[\s\S]*?<\/span>/g, ' ').replace(/<input\b[^>]*>/g, ' ');
+    found.push({ kind: 'field label', text: own.trim() });
+  }
+  add('field label', /\bfield\('[^']+', '([^']+)'/g);
+  add('field label', /\blabel: '([^']+)', question:/g);
+  add('field label', /\{ key: '[^']+', label: '([^']+)', options:/g);
+  add('field label', /\btitle: [`']([^`']+)[`'],/g);
+  // SP-325: tabs, the Tasks page's view switch and the Settings tabs.
+  add('tab', /\['[a-z]+', '([^']+)', `\//g);
+  add('tab', /\{ id: '[^']+', title: '([^']+)' \}/g);
   return found.filter((l) => l.text && !/^\$\{[^}]*\}$/.test(l.text));
 }
 
-const SOURCES = ['./web/app.mjs', './web/render.mjs', './web/index.html', './pageData.mjs'];
+const SOURCES = ['./web/app.mjs', './web/render.mjs', './web/index.html', './pageData.mjs', './pipelineControls.mjs', '../scripts/onboard/onboard.mjs', '../scripts/onboard/fromClickup.mjs'];
 
-test('every button, heading, column heading, tab title and trail step on the page is in Title Case (docs/UI_DOCTRINE.md)', () => {
+test('every button, heading, column heading, tab, field label, tab title and trail step on the page is in Title Case (docs/UI_DOCTRINE.md)', () => {
   const problems = [];
   let seen = 0;
   for (const path of SOURCES) {
@@ -103,10 +115,15 @@ test('the Title Case rule: big words capitalised, small words free inside, the f
   }
 });
 
-test('the label finder sees buttons, headings, toggles, column headings, tab titles and trail steps, and skips labels filled in at run time', () => {
+test('the label finder sees buttons, headings, toggles, column headings, field labels, tabs, tab titles and trail steps, and skips labels filled in at run time', () => {
   const labels = labelsOf(`<button type="submit">Post reply</button><h2>${'${head(c)}'}</h2><summary>Add Task</summary>
-    <th class="x">Last change</th>setTitle('New project · Tracker'); putTrail([{ label: 'Set up a project' }]); actionButton('Delete ticket', ICONS.delete)`);
+    <th class="x">Last change</th>setTitle('New project · Tracker'); putTrail([{ label: 'Set up a project' }]); actionButton('Delete ticket', ICONS.delete)
+    <label for="a">Invite someone</label><label for="b">${'${escapeHtml(f.label)}'}</label><label class="p">Project: <select><option>all projects</option></select></label>
+    <label><input type="radio" value="x"> Write my own title</label>\${field('url', 'Web address', '')}{ key: 'k', label: 'Ticket prefix', question: 'q' }
+    control({ key: 'c', title: 'Work cap', default: '0' }) ['board', 'Board view', \`/board\`] { id: 'styles', title: 'Page styles' }`);
   assert.deepEqual(labels.map((l) => `${l.kind}: ${l.text}`), [
     'button: Post reply', 'toggle: Add Task', 'column heading: Last change', 'icon button: Delete ticket', 'tab title: New project', 'trail step: Set up a project',
+    'field label: Invite someone', 'field label: Project:', 'field label: Write my own title', 'field label: Web address', 'field label: Ticket prefix',
+    'field label: Work cap', 'tab: Board view', 'tab: Page styles',
   ]);
 });

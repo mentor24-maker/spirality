@@ -56,7 +56,9 @@ field labels, in both projects. `npm run verify` checks the rule
 - **Tabs and view switches**: "Board", "List", "Console", the Settings tabs.
 - **Form field labels**, the words that name a box, a list or a switch: "Reply
   as Dane", "Invite Someone", "Ticket Prefix". (SP-318; until then they were
-  written as sentences. The check does not read them yet: section 12.)
+  written as sentences. Checked since SP-325, which moved the rest of a
+  sentence label into a hint under the box: the setup form shows "Project
+  Name" with the wizard's question under it.)
 - **The tab title and the trail at the top of the page**, which repeat the
   page's heading: "Set Up a Project · Tracker".
 
@@ -387,12 +389,12 @@ Measured 2026-11-15 on `tracker/web/app.css`, `app.mjs` and `render.mjs`.
 
 | Section | Today | Brought into line by |
 |---|---|---|
-| 1 Capital letters | Buttons, headings, toggles, columns, tab titles and trail: followed and checked. Field labels and tabs: sentence case in places, not checked. | SP-325 |
+| 1 Capital letters | Followed and checked (SP-325, 2026-11-16): buttons, headings, toggles, columns, tabs, field labels, tab titles and trail. A Settings control has a Title Case `title` for its label and keeps its lower-case `label` for sentences; a setup answer has a Title Case `label` over the wizard's question. | SP-325 |
 | 2 Tokens | Followed and checked (SP-320, 2026-11-15): every colour, font size, corner and gap is a token in `:root`, StarCaster's where it has one. Padding and margins are still literal lengths, near the steps. | SP-320 |
 | 3 Buttons | Followed and checked (SP-321, 2026-11-15): every button is `btn` plus a kind, or a listed exception; 32px and 24px; disabled is a colour; focus ring on every kind. The ticket page's green, Settings' dark blue and the black link are gone. | SP-321 |
 | 4 Title row | Followed and checked (SP-322, 2026-11-15): a 24px, weight 800 `<h1>` on every page, and every toolbar in the title row at its right, the trail above it; headings under it at `--text-lg` (h2) and `--text-base` (h3 to h6), with board columns and Console stages at `--text-base`. The ticket page keeps its two-column top, whose actions sit in the right column. | SP-322 |
 | 5 Tabs | Followed and checked (SP-322, 2026-11-15): Board / List / Console and the Settings tabs are one tab bar (`nav.tabs`), links with `aria-current`. | SP-322 |
-| 6 Forms | Every label above its box; boxes full width; tag boxes use the text inside the box as the instruction. | SP-325 |
+| 6 Forms | Followed and checked (SP-325, 2026-11-16): one box style from the tokens; boxes sized by `--field-w-number`, `--field-w-short` and `--field-w-long`, none full width but a box in a table cell, which fills its column; forms laid out as `.fields`, a short setting's label beside it (`.beside`), a text box's above; every box labelled, and the text inside an empty box an example. The search boxes have a visible label now. | SP-325 |
 | 7 Messages | Notes beside each button and under the title; no single strip. Empty states: followed, but for a bare "None." | SP-323 |
 | 8 Tables | Followed and checked (SP-324, 2026-11-16): black heading rows with white text, every table with headings in a `.table-wrap` with its heading row fixed, sort buttons kept in the heading cell. No table has a filter row yet; the rule for one is in place. | SP-324 |
 | 9 Dialogs | Followed and checked (SP-324): every dialog is `max-content` wide between its own floor and 75% of the screen; text in it at most 56ch. | SP-324 |
@@ -402,7 +404,8 @@ Measured 2026-11-15 on `tracker/web/app.css`, `app.mjs` and `render.mjs`.
 `tracker/cssTokens.test.mjs` checks section 2 and the icon strokes of section 10;
 `tracker/buttonKinds.test.mjs` checks section 3;
 `tracker/titleRow.test.mjs` checks sections 4 and 5;
-`tracker/tablesDialogs.test.mjs` checks sections 8 and 9.
+`tracker/tablesDialogs.test.mjs` checks sections 8 and 9;
+`tracker/forms.test.mjs` checks section 6.
 Each ticket above
 adds the check for its part to `npm run verify`, as StarCaster's
 `scripts/check_ui_doctrine.cjs` does for its screens: every `<button>` has a

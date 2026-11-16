@@ -609,7 +609,7 @@ export function renderPipelineControls(view, notes = {}, open = false) {
     const note = notes[c.key];
     const mark = c.isDefault ? ' <span class="default">default</span>' : '';
     return `<tr data-control="${escapeHtml(c.key)}" data-kind="${escapeHtml(c.kind)}">
-      <td class="label"><label for="${id}">${escapeHtml(c.label)}</label>${mark}</td>
+      <td class="label"><label for="${id}">${escapeHtml(c.title ?? c.label)}</label>${mark}</td>
       <td class="input">${controlInput(c, models, id, locked)}</td>
       <td class="value">${escapeHtml(controlValueText(c, models))}${c.group === 'wake' ? `<span class="in-effect${c.inEffect === false ? ' waiting' : ''}">${escapeHtml(wakeInEffectText(c))}</span>` : ''}${c.group === 'model' ? `<span class="in-effect${c.lastModel != null && c.lastModel !== c.value ? ' waiting' : ''}">${escapeHtml(modelLastPassText(c, models))}</span>` : ''}${c.key === 'wip-cap' ? capInFlightText(c, view.capInFlight) : ''}</td>
       <td class="save">${locked ? '' : '<button type="button" class="btn btn-save btn-sm">Save</button>'}<span class="note${note ? (note.ok ? ' quiet' : ' error') : ''}">${note ? escapeHtml(note.text) : ''}</span></td>
@@ -1351,7 +1351,7 @@ export function loopHasIt({ status } = {}) {
 export function renderCommentForm(t) {
   if (!loopHasIt(t)) return '';
   return `<form class="add-comment">
-        <label for="add-comment">Add a note for the loop</label>
+        <label for="add-comment">Add a Note for the Loop</label>
         <textarea id="add-comment" required></textarea>
         <div class="row"><button type="submit" class="btn">Add Comment</button><span class="note"></span></div>
       </form>`;
@@ -1678,19 +1678,21 @@ export function passwordProblem({ purpose, name, password, confirm }) {
 /** The set-password form for a link that can be used, as HTML. The email is shown, never changed here. */
 export function renderSetPassword({ purpose, email }) {
   const nameBox = purpose === 'invite'
-    ? `<label for="name">Your name</label>
+    ? `<label for="name">Your Name</label>
       <input id="name" type="text" autocomplete="name" required>`
     : '';
   return `<h1>Set Your Password</h1>
-    <form class="sign-in set-password">
+    <form class="sign-in set-password fields">
       <label for="email">Email</label>
       <input id="email" type="email" value="${escapeHtml(email)}" readonly autocomplete="username">
       ${nameBox}
-      <label for="password">Password (at least ${MIN_PASSWORD} characters)</label>
-      <input id="password" type="password" autocomplete="new-password" minlength="${MIN_PASSWORD}" required>
-      <label for="confirm">The same password again</label>
-      <input id="confirm" type="password" autocomplete="new-password" minlength="${MIN_PASSWORD}" required>
-      <button type="submit" class="btn btn-save">Save Password</button>
+      <label for="password">Password</label>
+      <span class="hint" id="password-hint">At least ${MIN_PASSWORD} characters.</span>
+      <input id="password" type="password" autocomplete="new-password" minlength="${MIN_PASSWORD}" aria-describedby="password-hint" required>
+      <label for="confirm">Confirm Password</label>
+      <span class="hint" id="confirm-hint">The same password again.</span>
+      <input id="confirm" type="password" autocomplete="new-password" minlength="${MIN_PASSWORD}" aria-describedby="confirm-hint" required>
+      <div class="row"><button type="submit" class="btn btn-save">Save Password</button></div>
       <p class="note"></p>
     </form>`;
 }
@@ -1735,19 +1737,22 @@ export function renderEditPanel({ name, description, status, priority, tags = []
   const nameField = pullRequest
     ? `<p id="edit-name" class="locked">${escapeHtml(name)}</p>
           <p class="quiet">The name cannot change now: a pull request is recorded, and its title must match the name exactly.</p>`
-    : `<div class="row"><input id="edit-name" type="text" value="${escapeHtml(name)}" required><button type="submit" class="btn btn-save">Save</button></div>`;
+    : `<div class="row"><input id="edit-name" class="field-long" type="text" value="${escapeHtml(name)}" required><button type="submit" class="btn btn-save">Save</button></div>`;
   return `<details class="edit" open>
       <summary>Change This Ticket</summary>
       <p class="note edit-note" role="status"></p>
-      <form class="edit-fields">
-        <label for="edit-priority">Priority</label>
-        <div class="row"><select id="edit-priority" data-field="priority">${priorityOptions}</select><span class="note" data-note="priority"></span></div>
-        <label for="edit-tag">Tags</label>
-        <div class="row"><span class="tags">${chips || '<span class="quiet">none</span>'}</span><input id="edit-tag" type="text" placeholder="Add a tag, then Enter"><span class="note" data-note="tags"></span></div>
-        <label for="edit-assignee">Assigned to</label>
-        <div class="row"><select id="edit-assignee" data-field="assignee">${who}</select><span class="note" data-note="assignee"></span></div>
-        <label for="edit-status">Status</label>
-        <div class="row"><select id="edit-status" data-field="status">${statusOptions}</select><span class="note" data-note="status"></span></div>
+      <form class="edit-fields fields">
+        <div class="beside"><label for="edit-priority">Priority</label>
+        <div class="row"><select id="edit-priority" data-field="priority">${priorityOptions}</select><span class="note" data-note="priority"></span></div></div>
+        <div class="beside"><span class="label">Tags</span>
+        <div class="row"><span class="tags">${chips || '<span class="quiet">none</span>'}</span><span class="note" data-note="tags"></span></div></div>
+        <div class="beside"><label for="edit-tag">Add a Tag</label>
+        <input id="edit-tag" type="text" placeholder="docs" aria-describedby="edit-tag-hint">
+        <span class="hint" id="edit-tag-hint">Type a tag and press Enter.</span></div>
+        <div class="beside"><label for="edit-assignee">Assigned To</label>
+        <div class="row"><select id="edit-assignee" data-field="assignee">${who}</select><span class="note" data-note="assignee"></span></div></div>
+        <div class="beside"><label for="edit-status">Status</label>
+        <div class="row"><select id="edit-status" data-field="status">${statusOptions}</select><span class="note" data-note="status"></span></div></div>
       </form>
       <form class="edit-name">
         <label for="edit-name">Name</label>
@@ -1755,7 +1760,7 @@ export function renderEditPanel({ name, description, status, priority, tags = []
         <span class="note" data-note="name"></span>
       </form>
       <form class="edit-description">
-        <div class="row"><span class="label">Description</span><button type="button" class="btn edit-open">Edit</button><span class="note" data-note="description"></span></div>
+        <div class="row"><label for="edit-description">Description</label><button type="button" class="btn edit-open">Edit</button><span class="note" data-note="description"></span></div>
         <div class="editor" hidden>
           <textarea id="edit-description">${escapeHtml(description ?? '')}</textarea>
           <div class="row"><button type="submit" class="btn btn-save">Save</button><button type="button" class="btn edit-cancel">Cancel</button></div>
@@ -1770,13 +1775,13 @@ export const MOVED_MESSAGE = 'Not saved: this ticket changed while you were look
 /** The sign-in form, as HTML: email, password, and "Forgot password?". `problem` is said under it. */
 export function renderSignIn(problem) {
   return `<h1>Sign In</h1>
-    <form class="sign-in">
+    <form class="sign-in fields">
       <label for="email">Email</label>
       <input id="email" type="email" autocomplete="username" required>
       <label for="password">Password</label>
       <input id="password" type="password" autocomplete="current-password" required>
-      <button type="submit" class="btn btn-primary">Sign In</button>
-      <button type="button" class="link forgot">Forgot Password?</button>
+      <div class="row"><button type="submit" class="btn btn-primary">Sign In</button>
+      <button type="button" class="link forgot">Forgot Password?</button></div>
       <p class="note${problem ? ' error' : ''}">${problem ? escapeHtml(problem) : ''}</p>
     </form>`;
 }
@@ -1784,12 +1789,12 @@ export function renderSignIn(problem) {
 /** "Forgot password?", as HTML: one email box, and a way back to signing in. */
 export function renderForgot(email = '') {
   return `<h1>Forgot Password</h1>
-    <form class="sign-in forgot">
+    <form class="sign-in forgot fields">
       <p>Type your email. If it has an account, a link to set a new password is emailed to it. The link works for 1 hour.</p>
       <label for="email">Email</label>
       <input id="email" type="email" autocomplete="username" value="${escapeHtml(email)}" required>
-      <button type="submit" class="btn btn-primary">Email Me a Link</button>
-      <a href="/">Back to Sign In</a>
+      <div class="row"><button type="submit" class="btn btn-primary">Email Me a Link</button>
+      <a href="/">Back to Sign In</a></div>
       <p class="note"></p>
     </form>`;
 }
@@ -1867,7 +1872,7 @@ export function renderTicketLookup(tickets = []) {
   const offered = tickets.map((t) => `<option value="${escapeHtml(t.id)}">${escapeHtml(`${t.id} · ${t.name}`)}</option>`).join('');
   return `
     <form class="ticket-lookup">
-      <label>Ticket number
+      <label>Ticket Number
         <input type="text" name="ticket" list="ticket-numbers" autocomplete="off" spellcheck="false"${example} size="9">
       </label>
       <datalist id="ticket-numbers">${offered}</datalist>
@@ -2056,7 +2061,8 @@ export function setupFieldText(field, answers) {
 
 /**
  * The answers form: one box per field the server gives (`GET
- * /setup/fields`), in its order, each with its question and filled in from
+ * /setup/fields`), in its order, each named by its label with its question
+ * under it (SP-325), and filled in from
  * the saved answers or the default. Each has a note beside it for a
  * refusal naming it.
  */
@@ -2064,13 +2070,14 @@ export function renderSetupForm(fields, answers = null) {
   const box = (f) => {
     const id = `setup-${escapeHtml(f.key)}`;
     const value = setupFieldText(f, answers);
-    const attrs = `id="${id}" name="${escapeHtml(f.key)}" data-default="${escapeHtml(f.default ?? '')}"${f.required ? ' required' : ''} autocapitalize="off" spellcheck="false"`;
+    const attrs = `name="${escapeHtml(f.key)}" data-default="${escapeHtml(f.default ?? '')}"${f.required ? ' required' : ''} autocapitalize="off" spellcheck="false"`;
     const input = f.key === 'description'
-      ? `<textarea ${attrs}>${escapeHtml(value)}</textarea>`
-      : `<input type="text" ${attrs} value="${escapeHtml(value)}">`;
+      ? `<textarea id="${id}" ${attrs}>${escapeHtml(value)}</textarea>`
+      : `<input type="text" id="${id}" ${attrs} value="${escapeHtml(value)}">`;
+    const hint = [f.label && f.label !== f.question ? f.question : '', f.list ? 'Commas between; "none" for none.' : ''].filter(Boolean).join('. ');
     return `
-      <label for="${id}">${escapeHtml(f.question)}</label>
-      ${f.list ? '<span class="hint quiet">Commas between; "none" for none.</span>' : ''}
+      <label for="${id}">${escapeHtml(f.label ?? f.question)}</label>
+      ${hint ? `<span class="hint">${escapeHtml(hint)}</span>` : ''}
       ${input}
       <span class="note field-note" data-for="${escapeHtml(f.key)}"></span>`;
   };
@@ -2248,7 +2255,7 @@ export function renderListTags({ id, tags = [] }, known = []) {
     ...known.filter((tag) => !own.includes(tag)).map((tag) => option(tag, tag, false)),
     '<option value="" data-new-tag>New Tag…</option>',
   ].join('');
-  return `${chips}<select class="list-tags" data-tags-of="${escapeHtml(id)}" aria-label="Add a tag to ${escapeHtml(id)}">${options}</select><input type="text" class="new-tag" data-new-tag-of="${escapeHtml(id)}" aria-label="New tag for ${escapeHtml(id)}" placeholder="New tag, then Enter" hidden><span class="note" data-tags-note="${escapeHtml(id)}" role="status"></span>`;
+  return `${chips}<select class="list-tags" data-tags-of="${escapeHtml(id)}" aria-label="Add a tag to ${escapeHtml(id)}">${options}</select><input type="text" class="new-tag" data-new-tag-of="${escapeHtml(id)}" aria-label="New tag for ${escapeHtml(id)}: type it and press Enter" placeholder="docs" hidden><span class="note" data-tags-note="${escapeHtml(id)}" role="status"></span>`;
 }
 
 /**
@@ -2397,7 +2404,7 @@ export function renderContextDocs({ project, docs = [] }, { size, timeOf }) {
   return `<section class="context-docs">
     <h2>Context Documents</h2>
     <p class="quiet">Briefs, notes and reference files that belong to ${escapeHtml(project.name)} as a whole, not to one task. One file at a time, up to 10 MB.</p>
-    <div class="row"><button type="button" class="btn btn-primary upload-doc">Upload Document</button><input type="file" class="doc-file" hidden></div>
+    <div class="row"><button type="button" class="btn btn-primary upload-doc">Upload Document</button><input type="file" class="doc-file" aria-label="Document to Upload" hidden></div>
     <p class="note quiet doc-note" role="status"></p>
     ${docs.length
     ? `<div class="table-wrap"><table class="projects doc-list"><thead><tr><th>File</th><th>Type</th><th>Size</th><th>Added By</th><th>Added On</th><th></th></tr></thead>
@@ -2576,7 +2583,9 @@ export function renderDocumentation(files, address) {
     <div class="row doc-filters">
       <label for="doc-kind">Kind</label>
       <select id="doc-kind"><option value="">All</option>${kinds.map((k) => `<option value="${escapeHtml(k)}">${escapeHtml(k)}</option>`).join('')}</select>
-      <input type="search" id="doc-search" aria-label="Find a document by title or path" placeholder="Find by title or path" autocomplete="off">
+      <label for="doc-search">Find a Document</label>
+      <input type="search" id="doc-search" aria-describedby="doc-search-hint" placeholder="UI_DOCTRINE" autocomplete="off">
+      <span class="hint" id="doc-search-hint">By its title or its path.</span>
     </div>
     <p class="quiet doc-count" role="status">${docCountLine(rows.length, rows.length)}</p>
     <div class="table-wrap"><table class="projects spirality-docs sortable"><thead>${renderDocHeadings(null)}</thead>

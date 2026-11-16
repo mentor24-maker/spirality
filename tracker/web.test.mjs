@@ -694,7 +694,7 @@ test('the Add Task box on the Tasks page files into the project shown, in Reques
   // Filed: the draft is forgotten and the page redraws, box closed, naming the new id.
   assert.match(wire, /localStorage\.removeItem\(DRAFT_KEY\);[\s\S]*await drawAgain\(\(\) => drawProject\(into, view, \{ filed: ticket\.id, unchecked, uploaded, notUploaded \}\)\);/);
   const draw = app.slice(app.indexOf('async function drawProject'), app.indexOf('async function copyText'));
-  assert.match(draw, /<details class="add-task">\s*<summary>Add Task<label class="suggest-switch">[\s\S]*?<\/label><\/summary>\s*<form class="request"\$\{suggesting \? ' hidden' : ''\}>/, 'drawn closed, on the board and the list alike');
+  assert.match(draw, /<details class="add-task">\s*<summary>Add Task<label class="suggest-switch">[\s\S]*?<\/label><\/summary>\s*<form class="request fields"\$\{suggesting \? ' hidden' : ''\}>/, 'drawn closed, on the board and the list alike');
   assert.match(draw, /<button type="submit" class="btn btn-primary submit-task">Suggest Titles<\/button>/, 'the first submit asks for titles (SP-248)');
   assert.match(wire, /button\.textContent = asking \? 'Suggest Titles' : 'Submit Task';/, 'once a title is up for picking (or his own is typed), the button says Submit Task, in his words');
   assert.doesNotMatch(app, /File request/i, 'the old button words are gone');
@@ -709,7 +709,7 @@ test('the Add Task box on the Tasks page files into the project shown, in Reques
   assert.ok(box, 'the Add Task box has its own rule');
   assert.match(box[1], /background: var\(--brand-blue\);/, 'the box is the logo blue, closed and open');
   assert.match(box[1], /color: var\(--ink-primary\);/, 'dark text on the blue, not white');
-  assert.match(css, /details\.add-task form\.request input, details\.add-task form\.request textarea \{[^}]*background: var\(--bg-surface\);/, 'the fields stay white');
+  assert.match(css, /details\.add-task form\.request :is\(input, textarea\) \{[^}]*background: var\(--bg-surface\);/, 'the fields stay white');
   // The status line (Filing…, Not filed: …) keeps its quiet grey and red, so it sits on white, readable on the blue.
   assert.match(css, /details\.add-task \.note:not\(:empty\) \{[^}]*background: var\(--bg-surface\);/, 'the note sits on a white pill inside the blue box');
 });
@@ -718,7 +718,7 @@ test('the Add Task box takes files: the ticket is filed first, then each file go
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   const wire = app.slice(app.indexOf('function wireAddTask'), app.indexOf('/**', app.indexOf('function wireAddTask')));
   const draw = app.slice(app.indexOf('async function drawProject'), app.indexOf('async function copyText'));
-  assert.match(draw, /<label for="files">Files<\/label>\s*<input id="files" type="file" multiple>/, 'several at once');
+  assert.match(draw, /<label for="files">Files<\/label>\s*<input id="files" type="file" multiple aria-describedby="files-hint">/, 'several at once');
   assert.match(draw, /Files are not kept in the saved draft: after a reload, pick them again\./);
   // Filed first, then the files, one at a time; a failure is kept by name and the ticket stands.
   const filed = wire.indexOf("api('POST', `/projects/${encodeURIComponent(into)}/tickets`");
@@ -820,9 +820,9 @@ test('the Add Task box has a Suggest a Title / Write My Own Title toggle: Sugges
   const draw = app.slice(app.indexOf('async function drawProject'), app.indexOf('async function copyText'));
   const wire = app.slice(app.indexOf('function wireAddTask'), app.indexOf('/**', app.indexOf('function wireAddTask')));
   // The toggle, first in the form, in Title Case (docs/UI_DOCTRINE.md).
-  assert.match(draw, /<form class="request"\$\{suggesting \? ' hidden' : ''\}>\s*<div class="title-mode" role="radiogroup" aria-label="How the Title Is Chosen">\s*<label><input type="radio" name="title-mode" value="suggest"> Suggest a Title<\/label>\s*<label><input type="radio" name="title-mode" value="own"> Write My Own Title<\/label>\s*<\/div>/);
+  assert.match(draw, /<form class="request fields"\$\{suggesting \? ' hidden' : ''\}>\s*<div class="title-mode" role="radiogroup" aria-label="How the Title Is Chosen">\s*<label><input type="radio" name="title-mode" value="suggest"> Suggest a Title<\/label>\s*<label><input type="radio" name="title-mode" value="own"> Write My Own Title<\/label>\s*<\/div>/);
   // The Title field sits in its own wrapper, required only while it shows.
-  assert.match(draw, /<div class="own-title">\s*<label for="title">Title<\/label>\s*<input id="title" type="text">\s*<\/div>/);
+  assert.match(draw, /<div class="own-title">\s*<label for="title">Title<\/label>\s*<input id="title" type="text" class="field-long">\s*<\/div>/);
   assert.doesNotMatch(draw, /<input id="title" type="text" required>/, 'never required while hidden: the browser would refuse the submit');
   assert.match(wire, /const typing = mode === 'own' \|\| stage === 'type';\s*ownTitle\.hidden = !typing;\s*title\.required = typing;\s*description\.required = mode === 'suggest';/);
   // The choice list and Suggest Again, both hidden until titles come back.
@@ -853,7 +853,7 @@ test('SP-303: the Add Task bar has a Suggest checkbox at its right; ticked shows
   // value="on" matches what the browser reads back, so the minute's redraw never takes the checkbox for typing.
   assert.match(draw, /const suggesting = savedSuggestSwitch\(\);/);
   // Drawn on the side he left: the other side hidden from the first paint.
-  assert.match(draw, /<form class="request"\$\{suggesting \? ' hidden' : ''\}>/);
+  assert.match(draw, /<form class="request fields"\$\{suggesting \? ' hidden' : ''\}>/);
   assert.match(draw, /<div class="suggest-next"\$\{suggesting \? '' : ' hidden'\}>/);
   assert.match(draw, /wireSuggestSwitch\(\);/);
   // Kept in this browser, as the title toggle is.
@@ -1201,7 +1201,7 @@ test('Pipeline Controls on the Settings page: each control with its value, "defa
     // The pause switches are wired in (SP-237): no not-yet line, and no drain line while nothing is paused.
     assert.doesNotMatch(html, /\(SP-237\)/);
     assert.doesNotMatch(html, /Draining|Paused: nothing in flight/);
-    assert.match(html, /<tr data-control="wake\.loop-build" data-kind="seconds">[\s\S]*?loop-build wake time<\/label> <span class="default">default<\/span>[\s\S]*?type="number" min="60" max="86400" step="1" value="1800"[\s\S]*?1,800 seconds \(Every 30 minutes\)[\s\S]*?<button type="button" class="btn btn-save btn-sm">Save<\/button>/);
+    assert.match(html, /<tr data-control="wake\.loop-build" data-kind="seconds">[\s\S]*?loop-build Wake Time<\/label> <span class="default">default<\/span>[\s\S]*?type="number" min="60" max="86400" step="1" value="1800"[\s\S]*?1,800 seconds \(Every 30 minutes\)[\s\S]*?<button type="button" class="btn btn-save btn-sm">Save<\/button>/);
     assert.match(html, /<option value="default" selected>Claude&#39;s default<\/option>/);
     assert.match(html, /<option value="off" selected>Off<\/option><option value="on">On<\/option>/);
     assert.match(html, /<td>Dane<\/td><td>work-in-progress cap<\/td><td>3<\/td><td>5<\/td>/);
@@ -1677,7 +1677,7 @@ test('while a loop has the ticket there is no reply box, and an Add Comment box 
     assert.equal(renderReplyForm(t, 'Dane'), '', `no Reply box in ${status}`);
     const box = renderCommentForm(t);
     assert.match(box, /^<form class="add-comment">/, status);
-    assert.match(box, /<label for="add-comment">Add a note for the loop<\/label>/);
+    assert.match(box, /<label for="add-comment">Add a Note for the Loop<\/label>/);
     assert.match(box, /<textarea id="add-comment" required><\/textarea>/);
     assert.match(box, /<button type="submit" class="btn">Add Comment<\/button><span class="note"><\/span>/);
   }
@@ -1736,7 +1736,7 @@ test('the ticket page puts the details in the right column, open, while a loop h
   const css = readFileSync(WEB('app.css'), 'utf8');
   assert.match(css, /@media \(max-width: 800px\) \{ \.quick\.loop-has \{ grid-template-columns: minmax\(0, 1fr\); \} \}/);
   assert.match(css, /^\.quick \{ display: grid; grid-template-columns: 1fr 1fr;/m);
-  assert.match(css, /form\.add-comment textarea \{ width: 100%;/);
+  assert.match(css, /form\.add-comment textarea \{ min-height: 5rem; \}/, 'the long width token, as every text box (SP-325)');
 });
 
 test('a held bug report shows Approve and Reject and a quiet line in place of the reply box; anything else is unchanged', () => {
@@ -2339,8 +2339,8 @@ test('both project forms carry an Alert email and an Alert phone box with their 
   assert.match(app, /const ALERT_PHONE_HINT = 'For iMessage alerts, e\.g\. 801 555 0123, or \+44 20 7946 0000 outside the US\. Empty: no texts\.';/);
   for (const fn of ['drawCreateProject', 'drawEditProject']) {
     const form = app.slice(app.indexOf(`async function ${fn}`), app.indexOf('/**', app.indexOf(`async function ${fn}`)));
-    assert.match(form, /field\('alertEmail', 'Alert email', ALERT_EMAIL_HINT,/, fn);
-    assert.match(form, /field\('alertPhone', 'Alert phone', ALERT_PHONE_HINT,/, fn);
+    assert.match(form, /field\('alertEmail', 'Alert Email', ALERT_EMAIL_HINT,/, fn);
+    assert.match(form, /field\('alertPhone', 'Alert Phone', ALERT_PHONE_HINT,/, fn);
     assert.match(form, /alertEmail: value\('alertEmail'\), alertPhone: value\('alertPhone'\),/, fn);
   }
   const table = app.slice(app.indexOf('async function drawProjects'), app.indexOf('/**', app.indexOf('async function drawProjects')));
@@ -2840,7 +2840,7 @@ test('a List row\'s tags are chips with a × each, then Add Tag offering the pro
   assert.ok(select, 'an Add Tag dropdown');
   const options = [...select.matchAll(/<option value="([^"]*)"( selected)?( data-new-tag)?>([^<]*)<\/option>/g)].map((m) => [m[1], m[4], Boolean(m[2]), Boolean(m[3])]);
   assert.deepEqual(options, [['', 'Add Tag', true, false], ['alpha', 'alpha', false, false], ['zeta', 'zeta', false, false], ['', 'New Tag…', false, true]], 'never a tag the ticket has; New Tag… last');
-  assert.match(html, /<input type="text" class="new-tag" data-new-tag-of="SP-12" aria-label="New tag for SP-12" placeholder="New tag, then Enter" hidden>/);
+  assert.match(html, /<input type="text" class="new-tag" data-new-tag-of="SP-12" aria-label="New tag for SP-12: type it and press Enter" placeholder="docs" hidden>/);
   assert.match(html, /<span class="note" data-tags-note="SP-12" role="status"><\/span>$/);
   const none = renderListTags({ id: 'SP-13', tags: [] }, []);
   assert.doesNotMatch(none, /class="tag"/);
@@ -3087,7 +3087,7 @@ test('the Change panel offers the server\'s priorities and person statuses, keep
 
 test('the name is locked, with the reason, once a pull request is recorded', () => {
   const open = renderEditPanel({ name: 'n', status: 'queued', pullRequest: null });
-  assert.match(open, /<input id="edit-name" type="text" value="n" required>/);
+  assert.match(open, /<input id="edit-name" class="field-long" type="text" value="n" required>/);
   const locked = renderEditPanel({ name: 'n', status: 'in review', pullRequest: 'https://github.com/o/r/pull/3' });
   assert.ok(!/<input id="edit-name"/.test(locked));
   assert.match(locked, /a pull request is recorded, and its title must match the name exactly/);
@@ -3844,7 +3844,7 @@ test('the Docs page\'s Context Documents list the project\'s own files, each a d
     { id: 8, project: 'al pha', name: 'notes.txt', type: 'text/plain', size: 2, addedByName: null, createdAt: '2026-11-09T12:00:00Z' },
   ] }, words);
   assert.match(html, /<h2>Context Documents<\/h2>/);
-  assert.match(html, /<button type="button" class="btn btn-primary upload-doc">Upload Document<\/button><input type="file" class="doc-file" hidden>/, 'one file at a time');
+  assert.match(html, /<button type="button" class="btn btn-primary upload-doc">Upload Document<\/button><input type="file" class="doc-file" aria-label="Document to Upload" hidden>/, 'one file at a time');
   for (const heading of ['File', 'Type', 'Size', 'Added By', 'Added On']) assert.match(html, new RegExp(`<th>${heading}</th>`), heading);
   assert.match(html, /<a href="\/projects\/al%20pha\/docs\/7" download="brief &quot;&lt;b&gt;&quot;\.pdf">Download<\/a>/, 'always saved, through the project\'s own address');
   assert.match(html, /data-remove-doc="7" data-name="brief &quot;&lt;b&gt;&quot;\.pdf" aria-label="Remove brief &quot;&lt;b&gt;&quot;\.pdf">Remove<\/button>/);
@@ -4078,10 +4078,10 @@ test('the Users page escapes every name and email, offers the form and Cancel to
   const draw = app.slice(app.indexOf('async function drawUsers'), app.indexOf('/** Underline the header link'));
   assert.ok(draw.length > 100);
   for (const field of ['p.name', 'p.email', 'i.email', 'i.invitedBy.name', 'x.id', 'x.name']) assert.match(draw, new RegExp(`escapeHtml\\(${field.replace('.', '\\.')}\\)`), field);
-  assert.match(draw, /\$\{person \? `<form class="invite">/);
+  assert.match(draw, /\$\{person \? `<form class="invite fields">/);
   assert.match(draw, /\$\{person \? `<button type="button" class="btn btn-sm" data-cancel=/);
   // "Send the link to": only when the tracker knows an outside site, the tracker page first and chosen by default.
-  assert.match(draw, /\$\{sites\.length \? `<label for="invite-site">Send the link to<\/label>/);
+  assert.match(draw, /\$\{sites\.length \? `<div class="beside"><label for="invite-site">Send the Link To<\/label>/);
   assert.match(draw, /<select id="invite-site"><option value="">the tracker page<\/option>\$\{sites\.map/);
   assert.match(draw, /api\('POST', '\/invites', site \? \{ email, site: Number\(site\) \} : \{ email \}\)/);
   assert.match(draw, /api\('DELETE', `\/invites\/\$\{encodeURIComponent\(id\)\}`\)/);
@@ -4219,7 +4219,7 @@ test('the Tasks toolbar picks a project from a dropdown, "Project: ", the one in
   assert.match(draw, /<div class="toolbar">\s*\$\{renderProjectPicker\(projects, board\.project\)\}\s*\$\{searchForm\(''\)\}\s*<button type="button" class="pipeline-pod"[^>]*><\/button>\s*<\/div>\s*<\/div>\s*\$\{viewSwitch\(board\.project, view\)\}/);
   assert.doesNotMatch(app, /Change project/);
   assert.match(draw, /querySelector\('\.project-picker select'\)\.addEventListener\('change', \(e\) => \{\s*history\.pushState\(null, '', at\(view, e\.target\.value\)\);\s*route\(\);/);
-  assert.match(readFileSync(WEB('app.css'), 'utf8'), /\.toolbar \.project-picker select \{/);
+  assert.match(readFileSync(WEB('app.css'), 'utf8'), /\.toolbar \.project-picker \{ display: flex;/);
 });
 
 test('search bolds every occurrence of the term, any case, after escaping the ticket\'s own text', () => {
@@ -4282,8 +4282,8 @@ test('the Tasks page\'s toolbar holds the Search field, and Enter opens the resu
 const FILTERS = [
   { key: 'status', label: 'Status', value: 'Queued', options: [{ value: 'Rework', label: 'Rework' }, { value: 'Queued', label: 'Queued' }] },
   { key: 'priority', label: 'Priority', value: null, options: [{ value: 'urgent', label: 'Urgent' }, { value: 'none', label: 'None' }] },
-  { key: 'createdBy', label: 'Created by', value: null, options: [{ value: '3', label: 'Tom & <Jerry>' }] },
-  { key: 'assignee', label: 'Assigned to', value: 'nobody', options: [{ value: 'nobody', label: 'Nobody' }, { value: '3', label: 'Tom & <Jerry>' }] },
+  { key: 'createdBy', label: 'Created By', value: null, options: [{ value: '3', label: 'Tom & <Jerry>' }] },
+  { key: 'assignee', label: 'Assigned To', value: 'nobody', options: [{ value: 'nobody', label: 'Nobody' }, { value: '3', label: 'Tom & <Jerry>' }] },
 ];
 
 test('the search filters are one picker each, "Any" first, the server\'s choices in its order, the chosen one selected', () => {
@@ -4294,9 +4294,9 @@ test('the search filters are one picker each, "Any" first, the server\'s choices
   assert.match(html, /<select name="priority"><option value="" selected>Any<\/option><option value="urgent">Urgent<\/option><option value="none">None<\/option>/);
   assert.match(html, /<select name="createdBy"><option value="" selected>Any<\/option><option value="3">Tom &amp; &lt;Jerry&gt;<\/option>/);
   assert.match(html, /<select name="assignee"><option value="">Any<\/option><option value="nobody" selected>Nobody<\/option>/);
-  assert.deepEqual(activeFilters(FILTERS), ['Status: Queued', 'Assigned to: Nobody']);
+  assert.deepEqual(activeFilters(FILTERS), ['Status: Queued', 'Assigned To: Nobody']);
   assert.match(renderSearchResults({ query: 'widget', filters: FILTERS, results: [] }),
-    /<p class="quiet search-note">No tickets match widget with Status: Queued, Assigned to: Nobody<\/p>/);
+    /<p class="quiet search-note">No tickets match widget with Status: Queued, Assigned To: Nobody<\/p>/);
   assert.match(renderSearchResults({ query: 'widget', filters: FILTERS.map((f) => ({ ...f, value: null })), results: [] }),
     /<p class="quiet search-note">No tickets match widget<\/p>/);
 });
@@ -4304,10 +4304,10 @@ test('the search filters are one picker each, "Any" first, the server\'s choices
 test('the Ticket number field sits beside the Project filter and offers each ticket as "SP-12 · <title>", escaped', () => {
   const project = { key: 'project', label: 'Project', value: null, options: [{ value: 'spirality', label: 'Spirality' }] };
   const html = renderSearchFilters([project, ...FILTERS], { tickets: [{ id: 'SP-12', name: 'Fix <b>it</b> & more' }, { id: 'SP-13', name: 'Next' }] });
-  assert.ok(html.indexOf('name="project"') < html.indexOf('Ticket number') && html.indexOf('Ticket number') < html.indexOf('name="status"'), 'right after Project');
-  assert.match(html, /<form class="ticket-lookup">\s*<label>Ticket number\s*<input type="text" name="ticket" list="ticket-numbers"/);
+  assert.ok(html.indexOf('name="project"') < html.indexOf('Ticket Number') && html.indexOf('Ticket Number') < html.indexOf('name="status"'), 'right after Project');
+  assert.match(html, /<form class="ticket-lookup">\s*<label>Ticket Number\s*<input type="text" name="ticket" list="ticket-numbers"/);
   assert.match(html, /<option value="SP-12">SP-12 · Fix &lt;b&gt;it&lt;\/b&gt; &amp; more<\/option><option value="SP-13">SP-13 · Next<\/option>/);
-  assert.ok(!renderSearchFilters([project, ...FILTERS]).includes('Ticket number'), 'only where the page asks for it');
+  assert.ok(!renderSearchFilters([project, ...FILTERS]).includes('Ticket Number'), 'only where the page asks for it');
   assert.match(html, /placeholder="SP-13"/, 'an example from the tickets offered, never a typed-out prefix');
   assert.match(renderTicketLookup([]), /<datalist id="ticket-numbers"><\/datalist>/);
   assert.ok(!renderTicketLookup([]).includes('placeholder'));
@@ -4476,7 +4476,7 @@ test('the setup form asks the wizard\'s own questions with their defaults, and s
     const fields = setupFields(h.setup, 'press-play');
     const html = renderSetupForm(fields);
     assert.deepEqual([...html.matchAll(/name="([A-Za-z]+)"/g)].map((m) => m[1]), SETUP_FIELDS.map((f) => f.key));
-    assert.match(html, /<label for="setup-projectName">Project name, as the tracker shows it<\/label>/);
+    assert.match(html, /<label for="setup-projectName">Project Name<\/label>\s*<span class="hint">Project name, as the tracker shows it<\/span>/, 'a Title Case label, the wizard\'s question under it (SP-325)');
     assert.match(html, /name="trackerPrefix" data-default="PR" autocapitalize="off" spellcheck="false" value="PR">/);
     assert.match(html, /<textarea id="setup-description"/);
     assert.match(html, /<span class="note field-note" data-for="githubRepo"><\/span>/);
@@ -4518,7 +4518,7 @@ test('the setup form asks the ClickUp questions only for a project whose checkou
     assert.deepEqual(keys('wave-thing'), [...SETUP_FIELDS.map((f) => f.key), ...clickupKeys]);
     const fields = setupFields(h.setup, 'wave-thing');
     const html = renderSetupForm(fields);
-    assert.match(html, /<label for="setup-clickupListId">Does this project already run a loop on ClickUp\?/);
+    assert.match(html, /<label for="setup-clickupListId">ClickUp Loop Queue List<\/label>\s*<span class="hint">Does this project already run a loop on ClickUp\?/);
     assert.ok(!/name="clickupOperatorId"[^>]*required/.test(html), 'needed only with a list, which the checker says by name');
 
     // A list without the seats: refused, naming the field, nothing written.
