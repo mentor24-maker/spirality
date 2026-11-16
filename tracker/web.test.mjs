@@ -685,12 +685,12 @@ test('the Add Task box on the Tasks page files into the project shown, in Reques
   assert.match(wire, /say\(`Not filed: \$\{err\.message\}`, 'error'\);/);
   assert.match(wire, /localStorage\.setItem\(DRAFT_KEY,/);
   assert.match(wire, /title\.value = draft\.title;\s*description\.value = draft\.description;/);
-  assert.match(wire, /if \(adding \|\| draft\.title \|\| draft\.description\) box\.open = true;/, 'kept text opens the box on its own');
+  assert.match(wire, /if \(adding \|\| \(\(draft\.title \|\| draft\.description\) && !savedSuggestSwitch\(\)\)\) box\.open = true;/, 'kept text opens the box on its own, on the Add Task side only (SP-303)');
   assert.match(wire, /drawSignIn\('You were signed out; your request was not filed\. What you typed is kept/);
   // Filed: the draft is forgotten and the page redraws, box closed, naming the new id.
   assert.match(wire, /localStorage\.removeItem\(DRAFT_KEY\);[\s\S]*await drawAgain\(\(\) => drawProject\(into, view, \{ filed: ticket\.id, unchecked, uploaded, notUploaded \}\)\);/);
   const draw = app.slice(app.indexOf('async function drawProject'), app.indexOf('async function copyText'));
-  assert.match(draw, /<details class="add-task">\s*<summary>Add Task<\/summary>\s*<form class="request">/, 'drawn closed, on the board and the list alike');
+  assert.match(draw, /<details class="add-task">\s*<summary>Add Task<label class="suggest-switch">[\s\S]*?<\/label><\/summary>\s*<form class="request"\$\{suggesting \? ' hidden' : ''\}>/, 'drawn closed, on the board and the list alike');
   assert.match(draw, /<button type="submit" class="submit-task">Suggest Titles<\/button>/, 'the first submit asks for titles (SP-248)');
   assert.match(wire, /button\.textContent = stage === 'ask' \? 'Suggest Titles' : 'Submit Task';/, 'once a title is up for picking, the button says Submit Task, in his words');
   assert.doesNotMatch(app, /File request/i, 'the old button words are gone');
@@ -816,7 +816,7 @@ test('the Add Task box has a Suggest a Title / Write My Own Title toggle: Sugges
   const draw = app.slice(app.indexOf('async function drawProject'), app.indexOf('async function copyText'));
   const wire = app.slice(app.indexOf('function wireAddTask'), app.indexOf('/**', app.indexOf('function wireAddTask')));
   // The toggle, first in the form, in Title Case (docs/DOCTRINE.md).
-  assert.match(draw, /<form class="request">\s*<div class="title-mode" role="radiogroup" aria-label="How the Title Is Chosen">\s*<label><input type="radio" name="title-mode" value="suggest"> Suggest a Title<\/label>\s*<label><input type="radio" name="title-mode" value="own"> Write My Own Title<\/label>\s*<\/div>/);
+  assert.match(draw, /<form class="request"\$\{suggesting \? ' hidden' : ''\}>\s*<div class="title-mode" role="radiogroup" aria-label="How the Title Is Chosen">\s*<label><input type="radio" name="title-mode" value="suggest"> Suggest a Title<\/label>\s*<label><input type="radio" name="title-mode" value="own"> Write My Own Title<\/label>\s*<\/div>/);
   // The Title field sits in its own wrapper, required only while it shows.
   assert.match(draw, /<div class="own-title">\s*<label for="title">Title<\/label>\s*<input id="title" type="text">\s*<\/div>/);
   assert.doesNotMatch(draw, /<input id="title" type="text" required>/, 'never required while hidden: the browser would refuse the submit');
@@ -828,11 +828,36 @@ test('the Add Task box has a Suggest a Title / Write My Own Title toggle: Sugges
   assert.match(wire, /again\.hidden = stage === 'ask';/);
   // Opening the box puts the cursor in the first field the mode shows.
   assert.match(wire, /const firstField = \(\) => \(mode === 'own' \? title : description\);/);
-  assert.match(wire, /if \(box\.open\) firstField\(\)\.focus\(\);/);
+  // Not when the form is hidden behind the Suggest side, nor when the Suggest checkbox opened it (SP-303).
+  assert.match(wire, /if \(box\.open && !form\.hidden && !box\.querySelector\('summary'\)\.contains\(document\.activeElement\)\) firstField\(\)\.focus\(\);/);
   const css = readFileSync(WEB('app.css'), 'utf8');
   assert.match(css, /details\.add-task \[hidden\] \{ display: none; \}/, 'a hidden part stays hidden whatever else styles it');
   assert.match(css, /details\.add-task \.title-mode label:has\(input:checked\) \{/, 'the picked side of the toggle stands out');
   assert.match(css, /details\.add-task fieldset\.title-choices \{[^}]*background: #fff;/, 'the choices sit on white inside the blue box');
+});
+
+test('SP-303: the Add Task bar has a Suggest checkbox at its right; ticked shows Suggest Next Tasks in the same box, unticked the form; switching keeps both, opens a shut box, and the tick is kept in this browser', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const draw = app.slice(app.indexOf('async function drawProject'), app.indexOf('async function copyText'));
+  // One box: the checkbox sits in its bar, after the words Add Task.
+  assert.equal((draw.match(/<details class="add-task">/g) || []).length, 1, 'one Add Task box');
+  assert.match(draw, /<summary>Add Task<label class="suggest-switch">Suggest <input type="checkbox" value="on" aria-label="Suggest Next Tasks"\$\{suggesting \? ' checked' : ''\}><\/label><\/summary>/);
+  // value="on" matches what the browser reads back, so the minute's redraw never takes the checkbox for typing.
+  assert.match(draw, /const suggesting = savedSuggestSwitch\(\);/);
+  // Drawn on the side he left: the other side hidden from the first paint.
+  assert.match(draw, /<form class="request"\$\{suggesting \? ' hidden' : ''\}>/);
+  assert.match(draw, /<div class="suggest-next"\$\{suggesting \? '' : ' hidden'\}>/);
+  assert.match(draw, /wireSuggestSwitch\(\);/);
+  // Kept in this browser, as the title toggle is.
+  assert.match(app, /const SUGGEST_SWITCH_KEY = 'tracker-add-task-suggest';/);
+  assert.match(/function savedSuggestSwitch[\s\S]*?\n\}/.exec(app)[0], /return localStorage\.getItem\(SUGGEST_SWITCH_KEY\) === '1';/);
+  const wire = /function wireSuggestSwitch\(\) \{[\s\S]*?\n\}/.exec(app)[0];
+  assert.match(wire, /localStorage\.setItem\(SUGGEST_SWITCH_KEY, tick\.checked \? '1' : '0'\)/, 'kept at once');
+  // Switching only hides one side and shows the other: nothing is redrawn, so a draft, a picked title, the rows and a run all stay.
+  assert.match(wire, /form\.hidden = tick\.checked;\s*part\.hidden = !tick\.checked;\s*box\.open = true;/, 'opens a shut box, never folds an open one');
+  assert.doesNotMatch(wire, /innerHTML|box\.open = false|\.value = /, 'switching wipes nothing');
+  const css = readFileSync(WEB('app.css'), 'utf8');
+  assert.match(css, /details\.add-task > summary \.suggest-switch \{[^}]*float: right;/, 'right-aligned on the bar');
 });
 
 test('the title toggle is kept in this browser beside the draft and outlives a filing; anything but "own" reads as Suggest a Title', () => {
@@ -5723,8 +5748,10 @@ test('Suggest Next Tasks, against a stubbed suggester that fails: the run says w
 test('the Suggest Next Tasks box sits beside Add Task, in Title Case, and its button runs the suggester and checks back while it runs', () => {
   const { app, wire } = suggestWire();
   const draw = app.slice(app.indexOf('async function drawProject'), app.indexOf('function wireListPickers'));
-  assert.ok(draw.indexOf('<details class="add-task">') < draw.indexOf('<details class="suggest-next">'), 'just after Add Task');
-  assert.match(draw, /<summary>Suggest Next Tasks<\/summary>/);
+  // SP-303: inside the Add Task box, after its form; no box of its own.
+  assert.ok(draw.indexOf('</form>', draw.indexOf('<details class="add-task">')) < draw.indexOf('<div class="suggest-next"'), 'inside the Add Task box, after the form');
+  assert.ok(draw.indexOf('<div class="suggest-next"') < draw.indexOf('</details>', draw.indexOf('<details class="add-task">')), 'inside the Add Task box');
+  assert.doesNotMatch(draw, /<details class="suggest-next">|<summary>Suggest Next Tasks<\/summary>/, 'no separate Suggest Next Tasks bar');
   assert.match(draw, /<button type="button" class="suggest-run">Suggest Next Tasks<\/button>/);
   assert.match(draw, /<div class="row file-row" hidden><button type="button" class="file-order">File in This Order<\/button>/);
   assert.match(draw, /wireSuggestNext\(board\.project, view\);/);
@@ -5738,7 +5765,8 @@ test('the Suggest Next Tasks box sits beside Add Task, in Title Case, and its bu
   // The page opens on the last list, on its own.
   assert.match(wire, /\/\/ On opening the page: the last list, on its own\.\s*\(async \(\) => \{\s*const latest = await read\(\);/);
   const css = readFileSync(WEB('app.css'), 'utf8');
-  assert.match(css, /details\.suggest-next \[hidden\] \{ display: none; \}/);
+  assert.match(css, /details\.add-task \[hidden\] \{ display: none; \}/, 'the hidden side stays hidden');
+  assert.doesNotMatch(css, /details\.suggest-next/, 'no rule for the old separate box');
 });
 
 test('the Suggest Next Tasks rows move by dropdown, by the arrow keys on the handle, and by dragging, all through moveSuggestion, and the state is kept for a redraw', () => {
@@ -5769,10 +5797,12 @@ test('a run that answers while File in This Order is filing waits until filing e
   assert.match(wire, /run\.textContent = 'Try Again';\s*run\.disabled = filing;/);
   // The box opens on its own only on the page's first draw: a minute's redraw keeps his fold.
   assert.match(wire, /const mayOpen = !refreshing;/);
-  assert.doesNotMatch(show, /box\.open = true/, 'a check-back never opens a box he closed');
+  assert.doesNotMatch(show, /(box|fold)\.open = true/, 'a check-back never opens a box he closed');
   const opening = wire.slice(wire.indexOf('// On opening the page'));
-  assert.match(opening, /show\(latest\);\s*if \(mayOpen && \(running \|\| \(latest\.state === 'done' && state && filingPlan\(state\)\.file\.length\)\)\) box\.open = true;/);
-  assert.equal((wire.match(/box\.open = true/g) || []).length, 1, 'only the first draw opens it');
+  // SP-303: and only while the Suggest checkbox is ticked; it never ticks the checkbox itself.
+  assert.match(opening, /show\(latest\);\s*\/\/[^\n]*\n\s*if \(mayOpen && savedSuggestSwitch\(\) && \(running \|\| \(latest\.state === 'done' && state && filingPlan\(state\)\.file\.length\)\)\) fold\.open = true;/);
+  assert.equal((wire.match(/(box|fold)\.open = true/g) || []).length, 1, 'only the first draw opens it');
+  assert.doesNotMatch(wire, /SUGGEST_SWITCH_KEY|\.checked = true/, 'never flips the checkbox');
 });
 
 test('File in This Order files only the kept rows not yet filed, in Requested, after the project check; keeps each at once; then sets the order; a failed step says which', () => {
