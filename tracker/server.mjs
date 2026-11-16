@@ -243,6 +243,7 @@ const WEB_FILES = Object.freeze({
   'render.mjs': 'text/javascript; charset=utf-8',
   'wordmark.png': 'image/png',
   'icon.png': 'image/png',
+  'loop-queue-diagram.png': 'image/png',
 });
 
 /**

@@ -3344,3 +3344,46 @@ export function renderMessage({ kind, text }) {
 export function renderSavedCard(text) {
   return `<p class="saved-card" role="status"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5 9-10"/></svg><span>${escapeHtml(text)}</span></p>`;
 }
+
+/**
+ * The boxes on Dane's Spirality Loop Queue diagram (SP-337), in the order a
+ * ticket meets them, each with its place in the 3200 x 1800 picture (left,
+ * top, right, bottom, in pixels) and its section on the Loop Queue Anatomy
+ * page, whose heading ids come from headingId.
+ */
+export const LOOP_QUEUE_DIAGRAM = Object.freeze({
+  src: '/web/loop-queue-diagram.png',
+  alt: 'Spirality Loop Queue: how a ticket moves from Requested to Live',
+  width: 3200,
+  height: 1800,
+  page: 'LOOP_QUEUE_ANATOMY.md',
+  boxes: Object.freeze([
+    { label: 'Requested', box: [62, 1213, 468, 1387] },
+    { label: 'Needs your input', box: [62, 652, 497, 826] },
+    { label: 'Queued', box: [702, 1002, 1199, 1387] },
+    { label: 'Rework', box: [702, 652, 1199, 797] },
+    { label: 'Building', box: [1441, 1213, 1789, 1387] },
+    { label: 'In review', box: [1941, 1213, 2288, 1387] },
+    { label: 'Ready to launch', box: [2442, 1213, 2857, 1387] },
+    { label: 'Live', box: [3001, 1213, 3157, 1387] },
+  ].map((b) => Object.freeze({ ...b, anchor: headingId(b.label) }))),
+});
+
+/**
+ * The Loop Queue diagram for the top of the Docs page's right-hand column
+ * (SP-337): the picture at the column's width, and over each status box a
+ * link to that status's section of the anatomy page. A plain image map uses
+ * fixed pixels and drifts once the picture is scaled, so the links are an
+ * SVG laid over the picture with the picture's own size as its viewBox: each
+ * box keeps its pixel place in the original and scales with it at any width.
+ * (An inline style would place them too, but the page's lock forbids it.)
+ * `docAddress` turns a docs/ path into the page's address for it.
+ */
+export function renderLoopQueueDiagram(docAddress) {
+  const d = LOOP_QUEUE_DIAGRAM;
+  const links = d.boxes.map(({ label, box: [l, t, r, b], anchor }) => {
+    const href = escapeHtml(`${docAddress(d.page)}#${anchor}`);
+    return `<a class="diagram-box" href="${href}" aria-label="${escapeHtml(label)}"><title>${escapeHtml(label)}</title><rect x="${l}" y="${t}" width="${r - l}" height="${b - t}" rx="24"></rect></a>`;
+  }).join('');
+  return `<figure class="loop-diagram"><img src="${d.src}" alt="${escapeHtml(d.alt)}" width="${d.width}" height="${d.height}"><svg class="loop-diagram-links" viewBox="0 0 ${d.width} ${d.height}" role="group" aria-label="Loop Queue statuses">${links}</svg></figure>`;
+}

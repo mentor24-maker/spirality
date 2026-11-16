@@ -276,6 +276,34 @@ both waited on SP-307 but not on each other, were built side by side and
 clashed; SP-320 to SP-325 all waited only on SP-318 and clashed with one
 another all day. Dane: "make a second ticket sharing a file always wait."
 
+**The build lane holds a ticket that shares a file with work in flight
+(SP-351).** Before it claims a `Queued` ticket, the build lane compares the
+ticket's likely files with the files every open pull request changes (as the
+tracker records them, SP-349) and with the likely files of every ticket in
+`Building` that has no pull request yet. Any one shared file holds it:
+`queue --claimable` leaves it out and `claim` refuses it (exit 3), both
+through `lib/fileHold.js`, so the two cannot disagree. The lane says so on
+the held ticket once (`queue --claimable --note-holds`), naming the tickets
+and files that hold it, and builds another ticket in its place. A pull
+request whose ticket is `Live` or closed holds nothing, so the held ticket
+takes its normal place in line the moment those pull requests merge or close.
+A hold never moves the ticket and is never waiting on Dane.
+
+- **Only a ticket that will open a new pull request is held**: `Queued`, and
+  not a merge fix-up ("Find out why PR #N ... will not merge"). A `Rework`
+  ticket and a fix-up push to a pull request that already exists, so holding
+  them cannot prevent the overlap, and two sharing a file would hold each
+  other for ever. A ticket is never held by its own pull request.
+- **A ticket with no `Likely files:` line** is read by the backticked paths
+  under its `## Affected files / artifacts` heading. One that names no files
+  at all is refused at `claim` (exit 2) while anything is in flight; the build
+  pass works its files out from the spec and writes the line
+  (`npm run clickup -- likely-files --task <id> --files <path>,<path>`),
+  then claims again.
+- **A tracker that keeps no pull request files** (ClickUp), or one that does
+  not answer, skips the check and says so: like the work-in-progress cap, it
+  fails open, because refusing on a passing outage would stop all work.
+
 ### Two passes, one ticket (2026-08-22)
 
 Claiming is check-then-act: read the status, compare, write. That is only
