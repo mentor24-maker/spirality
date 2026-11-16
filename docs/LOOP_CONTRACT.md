@@ -231,6 +231,51 @@ Prose that mentions waiting does nothing; only the line counts
 a build loop could not start a step before the step it builds on had merged,
 and Dane looked for the plan in the Loop Queue and could not find it.
 
+### The files a ticket will likely change (2026-11-16)
+
+Every ticket a loop files names the files it will likely change, on a line
+of its own under `## Affected files / artifacts`:
+
+```
+Likely files: <path>[, <path> ...]
+```
+
+Each path is relative to the repository's top folder; paths are separated by
+commas. For example:
+
+```
+## Affected files / artifacts
+- `docs/LOOP_CONTRACT.md`
+- `.claude/skills/loop-intake/SKILL.md`
+
+Likely files: docs/LOOP_CONTRACT.md, .claude/skills/loop-intake/SKILL.md
+```
+
+It is a best guess, taken from the files read to write the spec. Once the
+ticket has a pull request, the pull request's real files are recorded and
+checked against it (SP-349), and the build lane's hold check reads the line
+to keep two tickets that change the same file from being built side by side
+(SP-351). It is never on the same line as `Waits on:`, which is read exactly
+as before.
+
+**Tickets that share a file wait on each other, in a chain.** A ticket whose
+likely files share any path with a ticket still open (any status but `Live`
+or closed) carries a `Waits on:` line naming that ticket. When it shares a
+file with several, it names the **newest** of them, so they form a chain
+(the first, then the second, then the third), never a fan of tickets all
+waiting on one parent and built side by side. This holds for the slices of
+one request as much as for tickets filed apart: each slice that shares a
+file with an earlier slice waits on the slice just before it. The filer reads
+the `Likely files:` lines of the open tickets in the queue before filing.
+A second ticket sharing a file always waits; the build lane takes another
+ticket in its place, so no pass is lost.
+
+**Why (2026-11-16):** `Waits on:` was written only for "this needs that one
+merged first", never for "these two change the same file". SP-308 and SP-309
+both waited on SP-307 but not on each other, were built side by side and
+clashed; SP-320 to SP-325 all waited only on SP-318 and clashed with one
+another all day. Dane: "make a second ticket sharing a file always wait."
+
 ### Two passes, one ticket (2026-08-22)
 
 Claiming is check-then-act: read the status, compare, write. That is only
