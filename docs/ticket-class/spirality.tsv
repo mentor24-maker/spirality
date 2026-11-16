@@ -1,0 +1,378 @@
+# Spirality's tickets, classed by reading each one (SP-348, 2026-11-16).
+# Applied with: node scripts/classify_backfill.mjs docs/ticket-class/spirality.tsv --apply
+# The values and what they mean: docs/LOOP_CONTRACT.md, "A ticket's kind, who started it and how it ended".
+#
+# How each column was decided:
+# - kind: Feature unless the note or the rules below say otherwise. Loop and tracker work is
+#   Spirality's feature work. Fix = something that should already have worked (a refusal, a
+#   wrong page, a check that misread). Operational = every merge-conflict fix-up, plus
+#   SP-35 and SP-98 (named in the note). Documentation = only written rules, plans or
+#   explanations came out of it.
+# - started_by: operator when the ticket quotes Dane asking for it, or Dane choosing to have
+#   it filed ("yes, file it", an option he picked). agent when a loop or session filed it
+#   from something it found, with no words of Dane's naming it: every merge-conflict fix-up,
+#   and the follow-ups found during a migration or an incident.
+# - outcome: Done for every Live ticket, except Won't do (tagged wont-do or deferred) and
+#   Duplicate (named in the note). Open tickets have none. No Spirality ticket is a test ticket.
+#
+# id	kind	started_by	outcome	note
+SP-1	feature	operator	done	
+SP-2	documentation	operator	done	docs only: the loop contract
+SP-3	feature	operator	done	
+SP-4	feature	operator	done	
+SP-5	feature	operator	done	
+SP-6	fix	operator	done	
+SP-7	fix	operator	done	
+SP-8	documentation	operator	done	docs only: the tracker MVP design
+SP-9	feature	operator	done	
+SP-10	feature	operator	done	
+SP-11	fix	operator	done	
+SP-12	feature	operator	done	
+SP-13	feature	operator	done	
+SP-14	feature	operator	done	
+SP-15	feature	operator	done	
+SP-16	feature	operator	done	
+SP-17	feature	operator	done	
+SP-18	feature	operator	done	
+SP-19	feature	operator	done	
+SP-20	feature	operator	done	
+SP-21	feature	operator	done	
+SP-22	feature	operator	done	
+SP-23	feature	operator	done	
+SP-24	feature	operator	done	
+SP-25	feature	operator	done	
+SP-26	feature	operator	done	
+SP-27	feature	operator	done	
+SP-28	operational	agent	done	merge-conflict fix-up filed by the relay
+SP-29	operational	agent	done	merge-conflict fix-up filed by the relay
+SP-30	operational	agent	done	merge-conflict fix-up filed by the relay
+SP-31	feature	operator	done	
+SP-32	fix	agent	done	
+SP-33	fix	agent	done	
+SP-34	feature	agent	done	
+SP-35	operational	agent	done	putting two values into Doppler
+SP-36	operational	agent	done	merge-conflict fix-up filed by the relay
+SP-37	operational	agent	done	merge-conflict fix-up filed by the relay
+SP-38	feature	operator	done	
+SP-39	fix	operator	done	
+SP-40	feature	operator	done	
+SP-41	feature	operator	done	
+SP-42	feature	operator	done	
+SP-43	feature	operator	done	
+SP-44	feature	operator	done	
+SP-45	fix	operator	done	
+SP-46	feature	operator	done	
+SP-47	feature	operator	done	
+SP-48	operational	agent	done	merge-conflict fix-up filed by the relay
+SP-49	feature	operator	done	
+SP-50	feature	operator	done	
+SP-51	feature	operator	done	
+SP-52	feature	operator	duplicate	duplicate of SP-46, SP-50 and SP-51 (intake said so)
+SP-53	feature	operator	done	
+SP-54	feature	operator	done	
+SP-55	feature	operator	done	
+SP-56	feature	operator	done	
+SP-57	feature	operator	done	
+SP-58	feature	operator	done	
+SP-59	feature	operator	done	
+SP-60	operational	agent	done	merge-conflict fix-up filed by the relay
+SP-61	feature	operator	done	
+SP-62	operational	agent	done	merge-conflict fix-up filed by the relay
+SP-63	operational	agent	done	merge-conflict fix-up filed by the relay
+SP-64	operational	agent	done	merge-conflict fix-up filed by the relay
+SP-65	operational	agent	done	merge-conflict fix-up filed by the relay
+SP-66	operational	agent	done	merge-conflict fix-up filed by the relay
+SP-67	operational	agent	done	merge-conflict fix-up filed by the relay
+SP-68	feature	operator	done	
+SP-69	feature	operator	done	
+SP-70	feature	operator	done	
+SP-71	feature	operator	done	
+SP-72	feature	operator	done	
+SP-73	feature	operator	done	
+SP-74	feature	operator	done	
+SP-75	feature	operator	done	
+SP-76	feature	operator	done	
+SP-77	feature	operator	done	
+SP-78	feature	operator	done	
+SP-79	feature	operator	done	
+SP-80	feature	operator	done	
+SP-81	operational	agent	done	merge-conflict fix-up filed by the relay
+SP-82	feature	operator	done	
+SP-83	feature	operator	done	
+SP-84	feature	operator	done	
+SP-85	operational	agent	done	merge-conflict fix-up filed by the relay
+SP-86	feature	operator	done	
+SP-87	operational	agent	done	merge-conflict fix-up filed by the relay
+SP-88	documentation	operator	done	docs only: onboarding checklist
+SP-89	documentation	operator	done	a written plan filed as tickets, no code
+SP-90	operational	agent	done	merge-conflict fix-up filed by the relay
+SP-91	operational	agent	done	merge-conflict fix-up filed by the relay
+SP-92	feature	operator	done	
+SP-93	fix	operator	done	
+SP-94	feature	operator	done	
+SP-95	feature	operator	done	
+SP-96	feature	operator	done	
+SP-97	feature	operator	done	
+SP-98	operational	operator	done	setting up Normie's tracker project, Doppler project and sign-ins
+SP-99	feature	operator	done	
+SP-100	fix	operator	done	
+SP-101	fix	operator	done	
+SP-102	fix	operator	done	
+SP-103	fix	operator	done	
+SP-104	fix	operator	done	
+SP-105	documentation	operator	done	docs only: setup write-up and wizard design
+SP-106	documentation	operator	done	docs only: SETUP_REVIEW.md
+SP-107	feature	operator	done	
+SP-108	feature	operator	done	
+SP-109	feature	operator	done	
+SP-110	feature	operator	done	
+SP-111	feature	operator	done	
+SP-112	feature	operator	done	
+SP-113	feature	operator	done	
+SP-114	feature	operator	done	
+SP-115	fix	operator	done	
+SP-116	fix	operator	done	
+SP-117	fix	operator	done	
+SP-118	fix	operator	done	
+SP-119	fix	operator	done	
+SP-120	fix	operator	done	
+SP-121	fix	operator	done	
+SP-122	fix	operator	done	
+SP-123	fix	operator	done	
+SP-124	fix	operator	done	
+SP-125	feature	operator	done	
+SP-126	feature	operator	done	
+SP-127	feature	operator	done	
+SP-128	feature	operator	done	
+SP-129	feature	operator	duplicate	filed twice by mistake; the real one is SP-128
+SP-130	feature	operator	done	
+SP-131	operational	agent	done	merge-conflict fix-up filed by the relay
+SP-132	operational	agent	done	merge-conflict fix-up filed by the relay
+SP-133	operational	agent	done	merge-conflict fix-up filed by the relay
+SP-134	operational	agent	done	merge-conflict fix-up filed by the relay
+SP-135	operational	agent	done	merge-conflict fix-up filed by the relay
+SP-136	feature	operator	done	
+SP-137	feature	operator	done	
+SP-138	feature	operator	done	
+SP-139	feature	operator	done	
+SP-140	feature	operator	done	
+SP-141	feature	operator	done	
+SP-142	feature	operator	done	
+SP-143	feature	operator	done	
+SP-144	feature	operator	done	
+SP-145	feature	operator	done	
+SP-146	feature	operator	done	
+SP-147	operational	agent	done	merge-conflict fix-up filed by the relay
+SP-148	operational	agent	done	merge-conflict fix-up filed by the relay
+SP-149	feature	operator	wont-do	tag wont-do
+SP-150	fix	agent	done	
+SP-151	feature	operator	wont-do	tag wont-do
+SP-152	feature	operator	done	
+SP-153	feature	operator	done	
+SP-154	fix	agent	done	
+SP-155	fix	agent	done	
+SP-156	fix	agent	done	
+SP-157	fix	agent	done	
+SP-158	feature	operator	done	
+SP-159	feature	operator	done	
+SP-160	feature	operator	done	
+SP-161	feature	operator	done	
+SP-162	feature	operator	done	
+SP-163	feature	agent	done	
+SP-164	feature	operator	done	
+SP-165	feature	operator	done	
+SP-166	feature	operator	done	
+SP-167	documentation	operator	done	title rule written down and existing titles reworded; no code
+SP-168	feature	operator	done	
+SP-169	feature	operator	done	
+SP-170	feature	operator	done	
+SP-171	feature	operator	done	
+SP-172	fix	agent	done	
+SP-173	feature	operator	done	
+SP-174	feature	operator	done	
+SP-175	feature	operator	done	
+SP-176	feature	operator	done	
+SP-177	feature	operator	done	
+SP-178	fix	operator	done	
+SP-179	feature	operator	done	
+SP-180	feature	operator	done	
+SP-181	fix	agent	done	
+SP-182	documentation	operator	done	docs only: prompt log started
+SP-183	documentation	operator	done	docs only: decisions written down
+SP-184	feature	operator	done	
+SP-185	feature	operator	done	
+SP-186	operational	agent	done	merge-conflict fix-up filed by the relay
+SP-187	operational	agent	done	merge-conflict fix-up filed by the relay
+SP-188	operational	agent	done	merge-conflict fix-up filed by the relay
+SP-189	operational	agent	done	merge-conflict fix-up filed by the relay
+SP-190	operational	agent	done	merge-conflict fix-up filed by the relay
+SP-191	feature	operator	done	
+SP-192	feature	operator	done	
+SP-193	feature	operator	done	
+SP-194	feature	operator	done	
+SP-195	feature	operator	done	
+SP-196	feature	operator	done	
+SP-197	fix	operator	done	
+SP-198	fix	agent	done	
+SP-199	feature	operator	done	
+SP-200	documentation	agent	done	a written inventory filed as tickets
+SP-201	feature	operator	done	
+SP-202	feature	operator	done	
+SP-203	feature	operator	done	
+SP-204	feature	agent	done	
+SP-205	feature	operator	done	
+SP-206	feature	agent	done	
+SP-207	feature	agent	done	
+SP-208	feature	operator	done	
+SP-209	fix	agent	done	
+SP-210	documentation	agent	done	a rule written down
+SP-211	feature	operator	done	
+SP-212	feature	operator	done	
+SP-213	feature	operator	done	
+SP-214	fix	operator	done	
+SP-215	operational	agent	done	merge-conflict fix-up filed by the relay
+SP-216	fix	agent	done	
+SP-217	fix	agent	done	
+SP-218	feature	agent	done	
+SP-219	feature	agent	done	
+SP-220	feature	operator	done	
+SP-221	feature	operator	done	
+SP-222	feature	operator	done	
+SP-223	feature	operator	done	
+SP-224	feature	agent	done	
+SP-225	fix	operator	done	
+SP-226	feature	operator	done	
+SP-227	feature	operator	wont-do	tag deferred
+SP-228	fix	operator	done	
+SP-229	fix	operator	done	
+SP-230	feature	operator	done	
+SP-231	feature	operator	done	
+SP-232	documentation	agent	done	docs only: onboarding steps corrected
+SP-233	feature	operator	done	
+SP-234	feature	operator	done	
+SP-235	fix	agent	done	
+SP-236	feature	operator	done	
+SP-237	feature	operator	done	
+SP-238	feature	operator	done	
+SP-239	feature	operator	done	
+SP-240	feature	operator	done	
+SP-241	feature	operator	done	
+SP-242	fix	agent	done	
+SP-243	feature	operator	done	
+SP-244	feature	operator	done	
+SP-245	feature	operator	done	
+SP-246	feature	operator	done	
+SP-247	feature	operator	done	
+SP-248	feature	operator	done	
+SP-249	feature	operator	done	
+SP-250	feature	operator	done	
+SP-251	feature	operator	done	
+SP-252	fix	agent	done	
+SP-253	fix	agent	done	
+SP-254	fix	agent	done	
+SP-255	operational	agent	done	merge-conflict fix-up filed by the relay
+SP-256	operational	agent	done	merge-conflict fix-up filed by the relay
+SP-257	operational	agent	done	merge-conflict fix-up filed by the relay
+SP-258	operational	agent	done	merge-conflict fix-up filed by the relay
+SP-259	operational	agent	done	merge-conflict fix-up filed by the relay
+SP-260	documentation	operator	done	docs only: watchdog inventory
+SP-261	documentation	operator	done	docs only (its own goal says so)
+SP-262	feature	operator	done	
+SP-263	feature	operator	done	
+SP-264	feature	operator	done	
+SP-265	feature	operator	done	
+SP-266	feature	operator	done	
+SP-267	feature	operator	done	
+SP-268	feature	operator	done	
+SP-269	feature	operator	done	
+SP-270	feature	operator	done	
+SP-271	feature	operator	done	
+SP-272	feature	operator	done	
+SP-273	feature	operator	done	
+SP-274	feature	operator	done	
+SP-275	feature	operator	done	
+SP-276	feature	operator	done	
+SP-277	feature	operator	done	
+SP-278	operational	agent	done	merge-conflict fix-up filed by the relay
+SP-279	feature	operator	done	
+SP-280	operational	agent	done	merge-conflict fix-up filed by the relay
+SP-281	feature	operator	done	
+SP-282	operational	agent	done	merge-conflict fix-up filed by the relay
+SP-283	operational	agent	done	merge-conflict fix-up filed by the relay
+SP-284	operational	agent	done	merge-conflict fix-up filed by the relay
+SP-285	fix	operator	done	
+SP-286	feature	operator	done	
+SP-287	feature	operator	done	
+SP-288	fix	operator	done	
+SP-289	feature	operator	done	
+SP-290	feature	operator	done	
+SP-291	feature	operator	done	
+SP-292	feature	operator	done	
+SP-293	feature	operator	done	
+SP-294	feature	operator	done	
+SP-295	feature	operator	done	
+SP-296	fix	operator	done	
+SP-297	operational	agent	done	merge-conflict fix-up filed by the relay
+SP-298	operational	agent	done	merge-conflict fix-up filed by the relay
+SP-299	operational	agent	done	merge-conflict fix-up filed by the relay
+SP-300	operational	agent	done	merge-conflict fix-up filed by the relay
+SP-301	operational	agent	done	merge-conflict fix-up filed by the relay
+SP-302	fix	operator	done	
+SP-303	feature	operator	done	
+SP-304	feature	operator	done	
+SP-305	feature	operator	done	
+SP-306	fix	operator	done	
+SP-307	feature	operator	done	
+SP-308	feature	operator	done	
+SP-309	feature	operator	done	
+SP-310	feature	operator	done	
+SP-311	operational	agent	done	merge-conflict fix-up filed by the relay
+SP-312	fix	operator	done	
+SP-313	fix	operator	done	
+SP-314	fix	operator	done	
+SP-315	documentation	operator	done	contract example
+SP-316	documentation	operator	done	docs only: seven questions
+SP-317	operational	agent	done	merge-conflict fix-up filed by the relay
+SP-318	documentation	operator	done	contract example
+SP-319	feature	operator	done	
+SP-320	feature	operator	done	
+SP-321	feature	operator	done	
+SP-322	feature	operator	done	
+SP-323	feature	operator	done	
+SP-324	feature	operator	done	
+SP-325	feature	operator	done	
+SP-326	feature	operator	done	
+SP-327	feature	operator	done	
+SP-328	operational	agent	done	merge-conflict fix-up filed by the relay
+SP-329	feature	operator	done	
+SP-330	documentation	operator	done	docs only: answers recorded
+SP-331	feature	operator	done	
+SP-332	operational	agent	done	merge-conflict fix-up filed by the relay
+SP-333	feature	operator		
+SP-334	feature	operator		
+SP-335	feature	operator		
+SP-336	operational	agent	done	merge-conflict fix-up filed by the relay
+SP-337	feature	operator	done	
+SP-338	operational	agent	done	merge-conflict fix-up filed by the relay
+SP-339	operational	agent	done	merge-conflict fix-up filed by the relay
+SP-340	operational	agent	done	merge-conflict fix-up filed by the relay
+SP-341	operational	agent	done	merge-conflict fix-up filed by the relay
+SP-342	operational	agent	done	merge-conflict fix-up filed by the relay
+SP-343	operational	agent	done	merge-conflict fix-up filed by the relay
+SP-344	operational	agent	done	merge-conflict fix-up filed by the relay
+SP-345	feature	operator	done	
+SP-346	feature	operator		
+SP-347	feature	operator		
+SP-348	feature	operator		
+SP-349	feature	operator	done	
+SP-350	feature	operator	done	
+SP-351	feature	operator	done	
+SP-352	feature	operator		
+SP-353	operational	agent	done	merge-conflict fix-up filed by the relay
+SP-354	feature	operator		
+SP-355	feature	operator		
+SP-356	feature	operator		
+SP-357	feature	operator		
+SP-358	feature	operator		
+SP-359	feature	operator		
+SP-360	feature	operator		
