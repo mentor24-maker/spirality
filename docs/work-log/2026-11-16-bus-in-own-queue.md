@@ -1,0 +1,5 @@
+## 2026-11-16 — Let a project's bus live in its own queue (#290)
+
+Each project's "bus" is where the machines post their alarms and reports, and where Dane writes "stop" or "resume". Until now it lived in a second project on the tracker ("Spirality Bus", "StarCaster Bus"). That doubled the project list, and anything filed there by mistake was never built: the weekly report's ticket sat in one for days.
+
+Now a project can be its own bus. Its Team chat ticket and its other standing boards sit in its own queue, marked with a `noticeboard` tag. The loops treat those as notice boards, not work. They are never picked up to build and never counted as shipped. When the loops read Dane's stop and resume words, they read only those boards, so a comment of his on an ordinary ticket is never mistaken for one. A question the steward files for Dane goes straight into a status no loop picks up, and the filing command now refuses any other status. New projects set up by the wizard get this arrangement. Moving Spirality's and StarCaster's existing buses is left to later tickets.
