@@ -25,3 +25,11 @@ boxes have a visible name for the same reason.
 `npm run verify` now checks all of this: a box with no name, grey text that
 gives an instruction, a box stretched to full width or a box name not in Title
 Case fails the pull request.
+
+Review sent the first version back with four forms it had broken: Add Topic
+ran its name, box and description together on one line, Add a Member lost the
+space between its parts, the locked Slug and Ticket Prefix boxes on Edit
+Project looked as if you could type in them, and the date boxes on the
+Reporting page had grown wide enough to squeeze the column headings onto two
+lines. Each is fixed, pictured again against `main`, and pinned by a test so
+it cannot quietly come back.
