@@ -127,6 +127,9 @@ test('bus-post from the project\'s folder, signed in as its build loop, posts to
   const posted = await door(['bus-post', '--body-file', '-', '--from', 'mini'], 'the heartbeat stopped at 09:10');
   assert.equal(posted.code, 0, `${posted.out}\n${posted.err}`);
   assert.match(posted.out, /Posted to the bus: comment \d+ on PPBUS-1 "Team chat" in pressplay-bus \(verified by reading it back\)/);
+  // The team chat it made is the loop's own operational ticket (SP-346).
+  const chat = f.store.getTicket('PPBUS-1');
+  assert.deepEqual([chat.kind, chat.startedBy], ['operational', 'agent']);
   const read = await door(['bus-read']);
   assert.equal(read.code, 0, `${read.out}\n${read.err}`);
   assert.match(read.out, /PPBUS-1\tmachine\tpressplay loop-build\t/);

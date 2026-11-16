@@ -289,6 +289,7 @@ test('copying a ticket files a new one in the other project, in Requested, and l
     const t = store.fileTicket({
       project: 'alpha', actor: machine.id, name: 'Copy me', description: '## Goal\nKeep **this**.\n',
       status: 'building', priority: 'high', tags: ['tracker'], assignee: human.id, loopNote: 'note',
+      kind: 'fix', startedBy: 'client',
     });
     store.postComment({ ticket: t.id, author: machine.id, body: 'a comment that stays here' });
     const before = { ticket: store.getTicket(t.id), comments: store.listComments(t.id), events: store.listEvents(t.id) };
@@ -299,6 +300,7 @@ test('copying a ticket files a new one in the other project, in Requested, and l
       [copy.project, copy.name, copy.description, copy.status, copy.priority, copy.tags, copy.assignee, copy.loopNote, copy.version],
       ['beta', 'Copy me', '## Goal\nKeep **this**.\n', 'requested', 'high', ['tracker'], null, '', 1],
     );
+    assert.deepEqual([copy.kind, copy.startedBy, copy.outcome], ['fix', 'client', null], 'the copy keeps its kind and who started it (SP-346)');
     assert.deepEqual(store.getTicket('BE-1'), copy, 'the copy reads back');
     assert.deepEqual(store.listComments('BE-1').map((c) => [c.author, c.body]), [[human.id, 'Copied from AL-1 in Alpha.']]);
     assert.deepEqual(store.listEvents('BE-1').map((e) => [e.field, e.to, e.actor]), [['created', 'requested', human.id]]);
