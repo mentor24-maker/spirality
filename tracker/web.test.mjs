@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { DEMO_NEWEST_RELEASE, DEMO_OWN_PROJECT, DEMO_SUGGESTIONS, DEMO_TOPICS, demoNewestRelease, demoSuggest, seedDemo, tickingClock } from './demoData.mjs';
 import { reportsOf, REPORT_RANGES, GROWTH_PERIODS, searchTickets, PRIORITIES, timeSplitOf, isFailureNote, TIME_BUCKETS, pipelineControlsOf } from './pageData.mjs';
-import { escapeHtml, renderStatusLine, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, CLOSE_LINE, REPLY_LINE, offersMerge, offersClose, bugReport, BUG_REPORT_TAG, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, heldBugReport, renderBugReportActions, approveQuestion, rejectQuestion, changeProblem, REJECT_COMMENT, WONT_DO_TAG, HELD_REPORT_LINE, HELD_REPORT_STATUS_LINE, cardMove, renderTrail, renderProjectPicker, renderTopicPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, loopHasIt, renderCommentForm, LOOP_HAS_STATUSES, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, renderTopics, renderTopicEditRow, topicDeleteQuestion, renderTagEditRow, tagDeleteQuestion, tagAddressable, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, renderListTopics, projectTags, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, renderReleaseGroup, controlValueText, mountainTime, wakeInEffectText, modelLastPassText, renderConsole, renderConsoleTile, MAP_AREAS, MAP_UNITS, placeArea, driftOf, liveFade, slotShare, tileSizeClass, TILE_MAX, TILE_MIN, TILE_COMPACT, TILE_TINY, LIVE_FADE_FLOOR, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, consoleFeature, featureColourIndex, renderFeatureKey, FEATURE_PALETTE, drainLine, capInFlightText, renderTitleChoices, titleModeOf, TITLE_MODES, SUGGEST_POLL_MS, moveSuggestion, suggestState, filingPlan, orderPlan, andList, suggestRunLine, renderSuggestRows, renderSuggestionInfo, suggestionFileHref } from './web/render.mjs';
+import { escapeHtml, renderStatusLine, renderComment, renderInline, renderMarkdown, unwrapDoc, headingId, renderQuickAction, CLOSE_LINE, REPLY_LINE, offersMerge, offersClose, bugReport, BUG_REPORT_TAG, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, heldBugReport, renderBugReportActions, approveQuestion, rejectQuestion, changeProblem, REJECT_COMMENT, WONT_DO_TAG, HELD_REPORT_LINE, HELD_REPORT_STATUS_LINE, cardMove, renderTrail, renderProjectPicker, renderTopicPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, loopHasIt, renderCommentForm, LOOP_HAS_STATUSES, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, renderTopics, renderTopicEditRow, topicDeleteQuestion, renderTagEditRow, tagDeleteQuestion, tagAddressable, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, renderListTopics, projectTags, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, renderReleaseGroup, controlValueText, mountainTime, wakeInEffectText, modelLastPassText, renderConsole, renderConsoleTile, MAP_AREAS, MAP_UNITS, placeArea, driftOf, liveFade, slotShare, tileSizeClass, TILE_MAX, TILE_MIN, TILE_COMPACT, TILE_TINY, LIVE_FADE_FLOOR, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, consoleFeature, featureColourIndex, renderFeatureKey, FEATURE_PALETTE, drainLine, capInFlightText, renderTitleChoices, titleModeOf, TITLE_MODES, SUGGEST_POLL_MS, moveSuggestion, suggestState, filingPlan, orderPlan, andList, suggestRunLine, renderSuggestRows, renderSuggestionInfo, suggestionFileHref } from './web/render.mjs';
 import { startServer, setupSettingsOf } from './server.mjs';
 import { saveAnswers, setupFields, setupOf } from './setup.mjs';
 import { DANE_FIELDS as SETUP_FIELDS, STEPS as SETUP_STEPS } from '../scripts/onboard/onboard.mjs';
@@ -3966,7 +3966,7 @@ test('the Docs page lists Spirality\'s documentation by title above Task Files, 
   assert.match(draw, /api\('GET', '\/documentation'\)\.then\(\(r\) => r\.files, \(\) => null\)/, 'a failed documentation call is caught on its own, so Task Files still draws');
   assert.match(renderDocumentation(null, (p) => p), /The reference docs and work log could not be read\./);
   const one = app.slice(app.indexOf('async function drawDoc('), app.indexOf('/** Underline the header link'));
-  assert.match(one, /renderMarkdown\(unwrapDoc\(body\)\)/, 'drawn with the ticket page\'s Markdown drawing, never as raw text');
+  assert.match(one, /renderMarkdown\(unwrapDoc\(body\)[,)]/, 'drawn with the ticket page\'s Markdown drawing, never as raw text');
   assert.match(one, /<a href="\/docs">Back to Docs<\/a>/);
   assert.match(one, /<h1>\$\{escapeHtml\(doc\.title\)\}<\/h1>/);
   assert.match(one, /There is no documentation file at/, 'a missing file says so');
@@ -3976,6 +3976,34 @@ test('the Docs page lists Spirality\'s documentation by title above Task Files, 
   assert.match(drawn, /<h4>Statuses<\/h4>/);
   assert.match(drawn, /<ul><li>Queued<\/li><li>Building<\/li><\/ul>/);
   assert.match(drawn, /<pre><code>npm run verify<\/code><\/pre>/);
+});
+
+test('a documentation page gives each heading an id from its words, a repeat a distinct one; a ticket description gives none (SP-331)', () => {
+  assert.equal(headingId('Needs your input'), 'needs-your-input');
+  assert.equal(headingId('**Ready to launch**'), 'ready-to-launch');
+  assert.equal(headingId('`npm run verify` — the gates!'), 'npm-run-verify-the-gates');
+  assert.equal(headingId('???'), 'section');
+  const doc = renderMarkdown('## Rework\n\ntext\n\n## Rework\n\n### In review', { headingIds: true });
+  assert.match(doc, /<h4 id="rework">Rework<\/h4>/);
+  assert.match(doc, /<h4 id="rework-2">Rework<\/h4>/);
+  assert.match(doc, /<h5 id="in-review">In review<\/h5>/);
+  // A ticket description is drawn exactly as before: no id anywhere, so none can clash with #comments or #reply.
+  assert.equal(renderMarkdown('## Comments\n\n## Reply'), '<h4>Comments</h4>\n<h4>Reply</h4>');
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const one = app.slice(app.indexOf('async function drawDoc('), app.indexOf('/** Underline the header link'));
+  assert.match(one, /renderMarkdown\(unwrapDoc\(body\), \{ headingIds: true \}\)/, 'a documentation page asks for the ids');
+  assert.match(one, /const named = location\.hash\.slice\(1\);\s*if \(named\) document\.getElementById\(named\)\?\.scrollIntoView\(\{ block: 'start' \}\);/, 'drawn after load, so it scrolls to the heading the address names');
+  assert.match(app, /<section class="description">\$\{renderMarkdown\(t\.description\) \|\|/, 'the ticket page still draws its description without ids');
+});
+
+test('the Loop Queue Anatomy page has the eight statuses in order, each about 200 words, each with its anchor (SP-331)', () => {
+  const text = readFileSync(new URL('../docs/LOOP_QUEUE_ANATOMY.md', import.meta.url), 'utf8');
+  assert.match(text, /^# Loop Queue Anatomy\n/);
+  const sections = text.split(/^## /m).slice(1).map((s) => { const [h, ...rest] = s.split('\n'); return { h, words: rest.join(' ').split(/\s+/).filter(Boolean).length }; });
+  assert.deepEqual(sections.map((s) => s.h), ['Requested', 'Needs your input', 'Queued', 'Rework', 'Building', 'In review', 'Ready to launch', 'Live']);
+  for (const { h, words } of sections) assert.ok(words >= 180 && words <= 220, `${h}: ${words} words`);
+  const drawn = renderMarkdown(unwrapDoc(text.replace(/^#[ \t]+.*\n/, '')), { headingIds: true });
+  for (const id of ['requested', 'needs-your-input', 'queued', 'rework', 'building', 'in-review', 'ready-to-launch', 'live']) assert.match(drawn, new RegExp(`id="${id}"`), id);
 });
 
 test('unwrapDoc joins a documentation file\'s hard-wrapped lines, keeps list items, headings, tables and code as written (SP-175)', () => {

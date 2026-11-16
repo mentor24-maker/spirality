@@ -76,8 +76,29 @@ function listItem(text) {
   return `<li class="check${done ? ' done' : ''}"><span class="box">${done ? '☑' : '☐'}</span> ${renderInline(box[2])}</li>`;
 }
 
-/** A block of Markdown, escaped, as HTML. */
-export function renderMarkdown(text) {
+/**
+ * A heading's anchor (SP-331): its words in lower case, spaces to hyphens,
+ * every other character dropped. "Needs your input" is `needs-your-input`.
+ */
+export function headingId(words) {
+  return String(words ?? '').toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '').replace(/-{2,}/g, '-').replace(/^-|-$/g, '') || 'section';
+}
+
+/**
+ * A block of Markdown, escaped, as HTML. With `headingIds` (a documentation
+ * file's page only, SP-331) each heading carries an `id` from headingId, a
+ * repeat getting `-2`, `-3`, so a link can open the page at it. A ticket's
+ * description never gets them: no id there may clash with the ticket page's
+ * own `#comments` and `#reply`.
+ */
+export function renderMarkdown(text, { headingIds = false } = {}) {
+  const used = new Map();
+  const idFor = (words) => {
+    const base = headingId(words);
+    const n = (used.get(base) ?? 0) + 1;
+    used.set(base, n);
+    return n === 1 ? base : `${base}-${n}`;
+  };
   const lines = String(text ?? '').replace(/\r\n?/g, '\n').split('\n');
   const out = [];
   let i = 0;
@@ -96,7 +117,8 @@ export function renderMarkdown(text) {
     const heading = HEADING.exec(line);
     if (heading) {
       const level = Math.min(heading[1].length + 2, 6); // the page's own h1/h2 sit above
-      out.push(`<h${level}>${renderInline(heading[2])}</h${level}>`);
+      const id = headingIds ? ` id="${escapeHtml(idFor(heading[2]))}"` : '';
+      out.push(`<h${level}${id}>${renderInline(heading[2])}</h${level}>`);
       i += 1;
       continue;
     }
