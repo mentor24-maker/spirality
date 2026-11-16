@@ -327,6 +327,53 @@ not the builder. The round count is never stored; it is counted from the
 `REVIEW:` verdict comments already on the ticket. `verdict --fail` refuses
 the fourth send-back. Written override: `verdict --fourth-round-anyway`.
 
+## A ticket's kind, who started it and how it ended (2026-11-16)
+
+Every ticket in the tracker carries three fields, so a report on
+productivity can count a feature, a fix-up and a dropped ticket apart
+instead of counting each as one finished ticket. They are part of this
+contract, the same values in every project, and live in one place:
+`lib/ticketClass.js`. Each is one of its values or none (a ticket filed
+before the fields existed has none until it is given one). Tags stay tags;
+these are fields, so a report never guesses from tags or titles.
+
+**Kind**, exactly one, judged inside the project whose queue the ticket is in:
+
+| Value | Means | For example |
+|---|---|---|
+| `feature` | Something new or changed that the project does. In Spirality the loop, the lanes, the relay, the watchdogs, the door and the tracker's pages are its features. A ticket that changes the tracker's Docs page is a Feature, not Documentation. | SP-295, the conflict report; SP-175 |
+| `fix` | Something that should already work in the project and does not. | SP-100, the merge word ignored for hours |
+| `operational` | Work that adds nothing new and exists only to keep things running. The test: if the pipeline had run perfectly, would this ticket exist? Merge-conflict fix-ups ("Resolve the merge conflict on PR #N", "Find out why PR #N will not merge"), re-running a failed step, unsticking a ticket, setting up a machine, rotating a key. The same in every project: a conflict on a StarCaster pull request is StarCaster operational work. | |
+| `documentation` | The ticket's only output is written rules or explanations. The work log and the prompt log every ticket writes do not make it one. | SP-318, SP-315 |
+
+**Started by**: `operator` (Dane), `client`, or `agent` (an agent session,
+which is never a person).
+
+**How it ended**, closed tickets only: `done`, `wont-do`, `duplicate` or
+`test`. The tracker refuses an ending on an open ticket, and a ticket moved
+back out of `Live` loses the ending it had in the same write. Before these
+fields, a dropped ticket closed as `Live` with a `wont-do` or `deferred`
+tag, and a test ticket carried `synthetic` or `loop-dryrun`, so every
+report counted them as finished.
+
+Where they are set and read:
+
+- `npm run clickup -- task ... --kind k --started-by s` at filing (and
+  `--outcome o` for a ticket filed closed), every value read back.
+- `npm run clickup -- classify --task <id> [--kind k] [--started-by s]
+  [--outcome o]` afterwards, read back; `none` clears one.
+- `get` prints `kind:`, `started:` and `ended:`; `tickets --json` carries
+  `kind`, `startedBy` and `outcome`.
+- The ticket page's Change This Ticket panel shows and changes all three;
+  the Tasks page filters by each.
+
+ClickUp keeps none of them: on a project still on ClickUp the class flags
+are refused (exit 2) and nothing is written.
+
+**Why (2026-11-16, SP-345):** 58 of Spirality's 344 tickets (17%) were
+merge-conflict fix-ups the loop filed for itself, 9 of them on 2026-11-16
+alone, and every one counted as a finished ticket beside the features.
+
 ## Who is talking: the author
 
 **What the code does today (SP-26, 2026-11-14):** in the tracker every

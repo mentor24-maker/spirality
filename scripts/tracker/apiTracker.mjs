@@ -50,6 +50,9 @@ import { PRIORITY_VALUE, QUEUED, TERMINAL_STATUSES } from '../lib/loopStatuses.m
 import { TRACKER_SEATS } from '../lib/expectedSecrets.mjs';
 import { fenceFor } from '../lib/operatorCard.mjs';
 
+/** A ticket's class fields (SP-345), by the API's names; createTask and updateTask pass each through. */
+const CLASS_KEYS = Object.freeze(['kind', 'startedBy', 'outcome']);
+
 /** ClickUp's priority number -> the tracker's name. */
 const PRIORITY_NAME = Object.freeze(Object.fromEntries(Object.entries(PRIORITY_VALUE).map(([k, v]) => [v, k])));
 
@@ -256,6 +259,11 @@ export function createApiTracker({ token, baseUrl, project, listId, timeoutMs, l
       version: t.version,
       // Its place in its queue (SP-249), or null; the order rule reads it.
       place: t.place ?? null,
+      // Its class (SP-345, lib/ticketClass.js): each a value or null. ClickUp
+      // has no such fields, so a ClickUp task never carries these keys.
+      kind: t.kind ?? null,
+      started_by: t.startedBy ?? null,
+      outcome: t.outcome ?? null,
     };
   }
 
@@ -436,6 +444,7 @@ export function createApiTracker({ token, baseUrl, project, listId, timeoutMs, l
       };
       if (fields.priority != null) body.priority = PRIORITY_NAME[fields.priority] ?? fields.priority;
       if (fields.tags) body.tags = fields.tags;
+      for (const key of CLASS_KEYS) if (fields[key] != null) body[key] = fields[key];
       const out = await call('POST', `/projects/${encodeURIComponent(projectFor(list))}/tickets`, body);
       if (!out.res.ok) return out;
       return withJson(out, await taskFromTicket(out.json));
@@ -454,6 +463,7 @@ export function createApiTracker({ token, baseUrl, project, listId, timeoutMs, l
       if (fields.markdown_description !== undefined) body.description = fields.markdown_description;
       else if (fields.description !== undefined) body.description = fields.description;
       if (fields.priority !== undefined) body.priority = fields.priority == null ? null : (PRIORITY_NAME[fields.priority] ?? fields.priority);
+      for (const key of CLASS_KEYS) if (fields[key] !== undefined) body[key] = fields[key];
       const who = assigneeChange(fields.assignees);
       if (who.error) return refused(400, who.error);
       if (who.value !== undefined) body.assignee = who.value;

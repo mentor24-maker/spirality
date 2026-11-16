@@ -172,7 +172,8 @@ GET /projects/spirality/board
       { "id": "SP-153", "name": "…", "priority": "urgent", "tags": ["starcaster-integration"],
         "assignee": null, "updatedAt": "2026-11-06T22:00:00.000Z",
         "pullRequest": null, "answerIn": false, "version": 4, "assigneeId": null,
-        "topics": [{ "id": 3, "name": "Login" }] }
+        "topics": [{ "id": 3, "name": "Login" }],
+        "kind": "feature", "startedBy": "operator", "outcome": null }
     ] },
     { "status": "Building", "tickets": [] },
     { "status": "In review", "tickets": [] },
@@ -181,7 +182,13 @@ GET /projects/spirality/board
     { "status": "Live", "tickets": [] }
   ],
   "operator": { "id": 1, "name": "Dane" },
-  "topics": [{ "id": 5, "name": "Billing" }, { "id": 3, "name": "Login" }]
+  "topics": [{ "id": 5, "name": "Billing" }, { "id": 3, "name": "Login" }],
+  "tags": ["starcaster-integration"],
+  "classes": [
+    { "key": "kind", "label": "Kind", "options": [{ "value": "feature", "label": "Feature" }, …] },
+    { "key": "startedBy", "label": "Started By", "options": […] },
+    { "key": "outcome", "label": "How It Ended", "options": […] }
+  ]
 }
 ```
 
@@ -199,6 +206,16 @@ which the List view's Add Topic dropdown offers (SP-247). A ticket's topics
 change with `PATCH /tickets/:id` and `{ "topics": [3, 5], "ifVersion": 4 }`,
 the whole new list of topic ids; a topic of another project is refused with
 400 `bad-topic` and nothing changes.
+
+Each ticket's `kind`, `startedBy` and `outcome` are its class (SP-345,
+`docs/LOOP_CONTRACT.md`, "A ticket's kind, who started it and how it
+ended"): each one of its values or null for none, and `outcome` only ever
+set on a `Live` ticket. The board's own `classes` lists each field with its
+label and choices, in the contract's order, which the Tasks page's filters
+offer. They change with `PATCH /tickets/:id`, for example
+`{ "kind": "fix", "ifVersion": 4 }`; a value that is none of the choices is
+refused with 400 `unknown-kind`, `unknown-started-by` or `unknown-outcome`,
+and an ending on an open ticket with 400 `outcome-on-open`, nothing changed.
 
 `GET /projects/:slug/tickets` answers the same tickets as one flat list,
 `{ project, tickets: [{ id, name, description, status, priority, tags, … }] }`,
