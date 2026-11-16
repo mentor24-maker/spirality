@@ -550,10 +550,16 @@ function nextChangeOf(status, lanes) {
   return { kind: 'lane', lane, job, running: false, due: stage.nextDue };
 }
 
+/** How long a launched ticket stays on the Console's map, fading (render.mjs LIVE_SHOWN_MS). */
+export const CONSOLE_LIVE_MS = 24 * 3_600_000;
+
 /**
  * The Console view's answer (SP-221): every ticket in flight (any status but
  * Live) on every project `only` lets through (visibleProjects), with the
- * facts a Console tile shows, so the page works nothing out itself.
+ * facts a Console tile shows, so the page works nothing out itself. Since
+ * SP-333 it carries the tickets that went Live in the last CONSOLE_LIVE_MS
+ * too (`now`, milliseconds, given so a test can fix the clock), for the
+ * map's Live area.
  *
  * `{ projects: [{ slug, name, prefix, logo }], tickets: [{ id, project,
  * name, status, tags, priority, assignee, updatedAt, stageSince,
@@ -570,7 +576,7 @@ function nextChangeOf(status, lanes) {
  * time (nextChangeOf); null, or another project, gets none. `prStates` is
  * the server's GitHub read (SP-226), as waitingFor takes it.
  */
-export function consoleOf(store, { only = null, pipeline = null, prStates = null } = {}) {
+export function consoleOf(store, { only = null, pipeline = null, prStates = null, now = Date.now() } = {}) {
   const projects = visibleProjects(store, only);
   const lanes = pipeline?.stages ? new Map(pipeline.stages.map((s) => [s.job, s])) : null;
   const rank = new Map(STAGE_ORDER.map((name, i) => [statusOf(name), i]));
@@ -590,7 +596,10 @@ export function consoleOf(store, { only = null, pipeline = null, prStates = null
   for (const project of projects) {
     const projectLanes = pipeline && project.slug === pipeline.slug ? lanes : null;
     for (const t of store.listTickets(project.slug)) {
-      if (TERMINAL_STATUSES.includes(t.status) || !rank.has(t.status)) continue;
+      if (!rank.has(t.status)) continue;
+      const stageSince = stageSinceOf(store, t);
+      // The map's Live area shows the last day's launches only (SP-333).
+      if (TERMINAL_STATUSES.includes(t.status) && !(t.status === LIVE && now - Date.parse(stageSince) <= CONSOLE_LIVE_MS)) continue;
       const comments = commentsOf(store, t.id);
       rows.push({
         ticket: t,
@@ -603,7 +612,7 @@ export function consoleOf(store, { only = null, pipeline = null, prStates = null
           priority: t.priority,
           assignee: nameOf(t.assignee),
           updatedAt: t.updatedAt,
-          stageSince: stageSinceOf(store, t),
+          stageSince,
           waitingOnOperator: waitsOn(t, comments, project.operator, prStates),
           answerIn: answerIsIn(t, comments, project.operator),
           pullRequest: findPullRequest(trailComments(store, t.id))?.url ?? null,

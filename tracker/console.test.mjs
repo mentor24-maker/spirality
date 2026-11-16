@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { openStore } from './store.mjs';
-import { boardOf, consoleOf } from './pageData.mjs';
+import { boardOf, consoleOf, CONSOLE_LIVE_MS } from './pageData.mjs';
 import { STAGES } from './pipeline.mjs';
 import loopStatuses from '../lib/loopStatuses.js';
 
@@ -35,7 +35,7 @@ const ALL_KNOWN = {
   'loop-intake': { logged: true, running: true },
 };
 
-test('consoleOf lists every ticket but Live, in STAGE_ORDER, each with the fields a Console tile shows, and every project with its logo', () => {
+test('consoleOf lists every ticket but one Live for more than a day, in STAGE_ORDER, each with the fields a Console tile shows, and every project with its logo', () => {
   const { store, human, machine } = fixture();
   store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE', operator: human.id });
   const filed = IN_FLIGHT.slice().reverse().map((status) => store.fileTicket({ project: 'alpha', actor: machine.id, name: `In ${status}`, status, tags: ['epic-x'] }));
@@ -44,12 +44,12 @@ test('consoleOf lists every ticket but Live, in STAGE_ORDER, each with the field
   const review = filed.find((t) => t.status === 'in review');
   store.postComment({ ticket: review.id, author: machine.id, body: 'PR opened: https://github.com/example/repo/pull/7' });
 
-  const answer = consoleOf(store, { pipeline: pipelineFor('alpha', ALL_KNOWN) });
+  const answer = consoleOf(store, { pipeline: pipelineFor('alpha', ALL_KNOWN), now: Date.parse('2026-11-14T10:00:00Z') });
   assert.deepEqual(answer.projects, [
     { slug: 'alpha', name: 'Alpha', prefix: 'AL', logo: 'https://alpha.example/logo.png' },
     { slug: 'beta', name: 'Beta', prefix: 'BE', logo: null },
   ]);
-  assert.ok(!answer.tickets.some((t) => t.name === 'Done'), 'a Live ticket is not in flight');
+  assert.ok(!answer.tickets.some((t) => t.name === 'Done'), 'a ticket Live for two days is off the map');
   assert.deepEqual(answer.tickets.map((t) => t.status), ['Requested', 'Rework', 'Queued', 'Queued', 'Building', 'In review', 'Needs your input', 'Ready to launch']);
   for (const t of answer.tickets) {
     assert.deepEqual(Object.keys(t).sort(), ['answerIn', 'assignee', 'id', 'name', 'nextChange', 'priority', 'project', 'pullRequest', 'stageSince', 'status', 'tags', 'updatedAt', 'waitingOnOperator'].sort());
@@ -107,6 +107,25 @@ test('consoleOf: stageSince is when the ticket entered its status, not its last 
   store.postComment({ ticket: t.id, author: human.id, body: 'go' });
   assert.equal(one().answerIn, true);
   assert.equal(one().waitingOnOperator, false, 'his answer is in, so it no longer waits on him');
+});
+
+test('consoleOf carries the tickets that went Live in the last day, for the map\'s Live area, and none older (SP-333)', () => {
+  const { store, machine, tick } = fixture();
+  const old = store.fileTicket({ project: 'alpha', actor: machine.id, name: 'Old launch', status: 'In review' });
+  const fresh = store.fileTicket({ project: 'alpha', actor: machine.id, name: 'New launch', status: 'In review' });
+  store.changeTicket(old.id, { actor: machine.id, status: 'live' });
+  const oldAt = Date.parse(store.listEvents(old.id).filter((e) => e.field === 'status').at(-1).at);
+  tick(20 * 3_600_000);
+  store.changeTicket(fresh.id, { actor: machine.id, status: 'live' });
+  const freshAt = Date.parse(store.listEvents(fresh.id).filter((e) => e.field === 'status').at(-1).at);
+  const live = (now) => consoleOf(store, { now }).tickets.filter((t) => t.status === 'Live').map((t) => t.name);
+  assert.deepEqual(live(freshAt), ['Old launch', 'New launch']);
+  assert.deepEqual(live(oldAt + CONSOLE_LIVE_MS + 1), ['New launch'], 'a day on, the older one is gone');
+  assert.deepEqual(live(freshAt + CONSOLE_LIVE_MS + 1), []);
+  const t = consoleOf(store, { now: freshAt }).tickets.find((x) => x.name === 'New launch');
+  assert.equal(t.stageSince, new Date(freshAt).toISOString(), 'when it went Live, for its fade');
+  assert.equal(t.nextChange, null);
+  assert.equal(t.waitingOnOperator, false);
 });
 
 test('consoleOf narrows to the projects `only` lets through', () => {

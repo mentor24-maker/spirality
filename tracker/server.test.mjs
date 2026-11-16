@@ -3044,7 +3044,7 @@ test('a relay that keeps failing holds up a ticket he already answered: the tick
   } finally { await f.cleanup(); }
 });
 
-test('GET /in-flight lists every ticket but Live on the projects the caller may see, with next change from the loop logs; a member of one project sees only it; signed out is 401 (SP-221)', async () => {
+test('GET /in-flight lists every ticket in flight, and those Live in the last day, on the projects the caller may see, with next change from the loop logs; a member of one project sees only it; signed out is 401 (SP-221)', async () => {
   const f = await fixture();
   try {
     f.store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE', operator: f.human.id });
@@ -3071,7 +3071,7 @@ test('GET /in-flight lists every ticket but Live on the projects the caller may 
       const admin = await f.call('GET', '/in-flight', { token: f.humanToken, at });
       assert.equal(admin.status, 200, admin.text);
       assert.deepEqual(admin.body.projects.map((p) => [p.slug, p.logo]), [['alpha', null], ['beta', null]]);
-      assert.deepEqual(admin.body.tickets.filter((t) => t.project === 'alpha').map((t) => t.status), statuses.filter((s) => s !== 'Live'));
+      assert.deepEqual(admin.body.tickets.filter((t) => t.project === 'alpha').map((t) => t.status), statuses, 'the Live one went Live just now, so the map shows it (SP-333)');
       assert.ok(admin.body.tickets.some((t) => t.id === hidden.id), 'an admin sees every project');
       const byStatus = Object.fromEntries(admin.body.tickets.filter((t) => t.project === 'alpha').map((t) => [t.status, t.nextChange]));
       const due = new Date(ended.getTime() + 1800 * 1000).toISOString();

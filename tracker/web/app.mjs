@@ -1175,10 +1175,10 @@ async function drawTasks(view, opts = {}) {
 
 /**
  * The Console view (SP-233): every ticket in flight on every project he can
- * see, as icon tiles grouped by stage in pipeline order (renderConsole),
- * from GET /in-flight. The stages and their colours come from GET
- * /stage-colours; an unreadable answer there draws the stages the tickets
- * are in, uncoloured. Choosing it is remembered, so "Tasks" in the header
+ * see, as icon tiles on a map of the loop, each placed by its status
+ * (renderConsole, SP-333), from GET /in-flight. The stages' colours come
+ * from GET /stage-colours; an unreadable answer there draws each area in its
+ * own default colour. Choosing it is remembered, so "Tasks" in the header
  * reopens it. A view only: nothing here changes a ticket. The beat draws it
  * again every minute (route marks it `ticking`), so "in 12 min" counts down.
  */
@@ -1202,6 +1202,18 @@ function showFeaturePick() {
   }
 }
 
+/**
+ * Put each area and tile of the Console's map where renderConsole placed it
+ * (SP-333): its data-x, data-y, data-w / data-size and data-fade become CSS
+ * values (--at-x and the rest), because the page's rules forbid a style attribute in the HTML itself.
+ */
+function placeOnMap() {
+  const put = { x: '--at-x', y: '--at-y', w: '--at-w', h: '--at-h', size: '--at-size', fade: '--at-fade' };
+  for (const el of main.querySelectorAll('.console-map [data-x]')) {
+    for (const [key, prop] of Object.entries(put)) if (el.dataset[key] !== undefined) el.style.setProperty(prop, el.dataset[key]);
+  }
+}
+
 async function drawConsole() {
   const [answer, colours] = await Promise.all([
     api('GET', '/in-flight'),
@@ -1209,14 +1221,14 @@ async function drawConsole() {
   ]);
   try { localStorage.setItem(VIEW_KEY, 'console'); } catch { /* the page still works; it is only not remembered */ }
   const looks = stageLooks(colours);
-  const stages = Array.isArray(colours?.stages) ? colours.stages.map((s) => s.status) : [];
   const project = savedProject();
   const slug = answer.projects.some((p) => p.slug === project) ? project : answer.projects[0]?.slug;
   setTitle('Console · Tracker');
   main.innerHTML = `
     <div class="tasks-head title-row"><h1>Tasks</h1>${slug ? viewSwitch(slug, 'console') : ''}</div>
-    ${answer.tickets.length ? '' : '<p class="quiet">Nothing is in flight.</p>'}
-    ${renderConsole(answer, stages)}`;
+    ${answer.tickets.some((t) => t.status !== 'Live') ? '' : '<p class="quiet">Nothing is in flight.</p>'}
+    ${renderConsole(answer)}`;
+  placeOnMap();
   for (const el of main.querySelectorAll('[data-stage]')) {
     const look = looks[el.dataset.stage];
     if (!look) continue;
