@@ -3071,7 +3071,7 @@ test('a relay that keeps failing holds up a ticket he already answered: the tick
   } finally { await f.cleanup(); }
 });
 
-test('GET /in-flight lists every ticket but Live on the projects the caller may see, with next change from the loop logs; a member of one project sees only it; signed out is 401 (SP-221)', async () => {
+test('GET /in-flight lists every ticket in flight, and those Live in the last day, on the projects the caller may see, with next change from the loop logs; a member of one project sees only it; signed out is 401 (SP-221)', async () => {
   const f = await fixture();
   try {
     f.store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE', operator: f.human.id });
@@ -3098,7 +3098,7 @@ test('GET /in-flight lists every ticket but Live on the projects the caller may 
       const admin = await f.call('GET', '/in-flight', { token: f.humanToken, at });
       assert.equal(admin.status, 200, admin.text);
       assert.deepEqual(admin.body.projects.map((p) => [p.slug, p.logo]), [['alpha', null], ['beta', null]]);
-      assert.deepEqual(admin.body.tickets.filter((t) => t.project === 'alpha').map((t) => t.status), statuses.filter((s) => s !== 'Live'));
+      assert.deepEqual(admin.body.tickets.filter((t) => t.project === 'alpha').map((t) => t.status), statuses, 'the Live one went Live just now, so the map shows it (SP-333)');
       assert.ok(admin.body.tickets.some((t) => t.id === hidden.id), 'an admin sees every project');
       const byStatus = Object.fromEntries(admin.body.tickets.filter((t) => t.project === 'alpha').map((t) => [t.status, t.nextChange]));
       const due = new Date(ended.getTime() + 1800 * 1000).toISOString();
@@ -3122,6 +3122,19 @@ test('GET /in-flight lists every ticket but Live on the projects the caller may 
     const blind = await f.call('GET', '/in-flight');
     assert.equal(blind.status, 200);
     assert.equal(blind.body.tickets.find((t) => t.status === 'Queued').nextChange, null);
+  } finally { await f.cleanup(); }
+});
+
+test('GET /in-flight reads the server\'s own clock for the Live window, not the wall clock (SP-333)', async () => {
+  const f = await fixture();
+  try {
+    f.store.fileTicket({ project: 'alpha', actor: f.machine.id, name: 'Launched', status: 'Live' });
+    const launched = (body) => body.tickets.filter((t) => t.status === 'Live').map((t) => t.name);
+    assert.deepEqual(launched((await f.call('GET', '/in-flight', { token: f.humanToken })).body), ['Launched'], 'just launched: on the map');
+    const later = await f.serve(f.store, { now: () => Date.now() + 2 * 24 * 3_600_000 });
+    const answer = await f.call('GET', '/in-flight', { token: f.humanToken, at: later });
+    assert.equal(answer.status, 200, answer.text);
+    assert.deepEqual(launched(answer.body), [], 'two days on by the server\'s clock: gone');
   } finally { await f.cleanup(); }
 });
 
