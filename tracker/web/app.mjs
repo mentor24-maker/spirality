@@ -4235,9 +4235,12 @@ async function drawDoc(path) {
     ${back}
     <h1>${escapeHtml(doc.title)}</h1>
     <p class="quiet"><code>docs/${escapeHtml(doc.path)}</code></p>
-    <section class="description doc">${renderMarkdown(unwrapDoc(body)) || '<p class="quiet">This file is empty.</p>'}</section>
+    <section class="description doc">${renderMarkdown(unwrapDoc(body), { headingIds: true }) || '<p class="quiet">This file is empty.</p>'}</section>
     ${back}`;
   putTrail([{ label: 'Docs', href: '/docs' }, { label: doc.title }]);
+  // SP-331: the page is drawn after it loads, so the browser cannot jump to `#rework` itself; scroll to the heading the address names.
+  const named = location.hash.slice(1);
+  if (named) document.getElementById(named)?.scrollIntoView({ block: 'start' });
 }
 
 /** Underline the header link (or the bell, for Waiting on you) for the screen showing. */
