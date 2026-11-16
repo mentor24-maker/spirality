@@ -1,6 +1,6 @@
 /**
  * Ticket text to HTML, for Dane's page. Runs in the browser and, unchanged,
- * in the Node tests (tracker/web.test.mjs), so what is tested is what draws.
+ * in the Node tests (tracker/web-*.test.mjs), so what is tested is what draws.
  *
  * EVERY CHARACTER OF TICKET TEXT IS ESCAPED BEFORE IT IS DRAWN. Descriptions
  * and comments are written by loops, by Dane and, once imported, by whatever

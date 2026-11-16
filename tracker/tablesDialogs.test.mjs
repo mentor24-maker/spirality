@@ -11,10 +11,11 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { declarationsOf, resolveColour } from './cssTokens.mjs';
+import { PAGE_SCRIPTS } from './pageScripts.mjs';
 
 const read = (path) => readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8');
 const CSS = read('./web/app.css');
-const SOURCES = { 'tracker/web/app.mjs': read('./web/app.mjs'), 'tracker/web/render.mjs': read('./web/render.mjs') };
+const SOURCES = { ...Object.fromEntries(PAGE_SCRIPTS.map((name) => [`tracker/web/${name}`, read(`./web/${name}`)])), 'tracker/web/render.mjs': read('./web/render.mjs') };
 const DECLS = declarationsOf(CSS).filter((d) => d.selector !== ':root');
 
 /** The value of `property` in the one rule whose selector is exactly `selector`, or undefined. */

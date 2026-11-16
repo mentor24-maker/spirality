@@ -9,6 +9,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { renderMessage, renderSavedCard, MESSAGE_CLOSES_MS, SAVED_CARD_MS } from './web/render.mjs';
 import { withTokensResolved } from './cssTokens.mjs';
+import { PAGE_SCRIPTS, pageScript } from './pageScripts.mjs';
 
 const WEB = (name) => readFileSync(fileURLToPath(new URL(`./web/${name}`, import.meta.url)), 'utf8');
 
@@ -50,7 +51,7 @@ test('the strip sits between the header and the page, in normal flow, and starts
 });
 
 test('showMessage shows one message at a time: an error until its ×, others for four seconds, a Save\'s success as the card', () => {
-  const app = WEB('app.mjs');
+  const app = pageScript();
   const show = /function showMessage\(said, \{ afterSave = false \} = \{\}\) \{([\s\S]*?)\n\}/.exec(app)?.[1] ?? '';
   assert.match(show, /window\.scrollTo\(\{ top: 0 \}\);\s*messageTimer = setTimeout\(clearMessage, SAVED_CARD_MS\);/, 'after a Save: the top, the card, three seconds');
   assert.match(show, /messages\.scrollIntoView\(\{ block: 'nearest' \}\);\s*if \(said\.kind !== 'error'\) messageTimer = setTimeout\(clearMessage, MESSAGE_CLOSES_MS\);/, 'an error waits for its ×');
@@ -61,7 +62,7 @@ test('showMessage shows one message at a time: an error until its ×, others for
 });
 
 test('the Settings page\'s Stage Colours Save reports in the strip, not beside its button', () => {
-  const app = WEB('app.mjs');
+  const app = pageScript();
   const draw = app.slice(app.indexOf('async function drawSettings'), app.indexOf('/** The Settings page\'s tabs'));
   assert.match(draw, /<div class="row"><button type="submit" class="btn btn-save">Save<\/button><\/div>/, 'no note beside the Save');
   assert.match(draw, /showMessage\(\{ kind: 'info', text: 'Saving…' \}\);/);
@@ -72,7 +73,7 @@ test('the Settings page\'s Stage Colours Save reports in the strip, not beside i
 });
 
 test('an empty board column names what it would hold, never a bare "None."', () => {
-  const app = WEB('app.mjs');
+  const app = pageScript();
   assert.doesNotMatch(app, /None\.</);
   assert.match(app, /`<p class="quiet">No tickets are in \$\{escapeHtml\(c\.status\)\} right now\.<\/p>`/);
 });
@@ -97,7 +98,20 @@ function noteSites(source) {
  * a page onto the strip lowers its number in the same pull request; a new
  * note beside a button fails here and should call showMessage instead.
  */
-const NOTE_SITES = { 'app.mjs': 70, 'render.mjs': 26 };
+const NOTE_SITES = {
+  'app.mjs': 7,
+  'page-projects.mjs': 19,
+  'page-tasks.mjs': 8,
+  'page-console.mjs': 0,
+  'page-ticket.mjs': 18,
+  'page-add-task.mjs': 2,
+  'page-reporting.mjs': 4,
+  'page-settings.mjs': 2,
+  'page-users.mjs': 4,
+  'page-docs.mjs': 5,
+  'page-topics.mjs': 1,
+  'render.mjs': 26,
+};
 
 test('no new note is added beside a button: a button reports in the message strip', () => {
   assert.equal(noteSites('<span class="note"></span> note.className = \'note error\'; <p class="filed-note"> querySelector(\'.note\')'), 2, 'the counter counts the class, not the word');

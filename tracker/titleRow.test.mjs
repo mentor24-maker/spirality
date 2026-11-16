@@ -9,10 +9,11 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { declarationsOf, rootTokens } from './cssTokens.mjs';
+import { PAGE_SCRIPTS, pageScript } from './pageScripts.mjs';
 
 const read = (path) => readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8');
 const CSS = read('./web/app.css');
-const SOURCES = { 'app.mjs': read('./web/app.mjs'), 'render.mjs': read('./web/render.mjs') };
+const SOURCES = { ...Object.fromEntries(PAGE_SCRIPTS.map((name) => [name, read(`./web/${name}`)])), 'render.mjs': read('./web/render.mjs') };
 const declarations = declarationsOf(CSS);
 
 /** The declarations of the rule whose selector is exactly `selector`, as { property: value }. */
@@ -85,12 +86,13 @@ test('Board / List / Console and the Settings tabs are one tab bar (UI_DOCTRINE 
     for (const m of source.matchAll(/<nav class="tabs[^"]*"([^>]*)>/g)) assert.match(m[1], /aria-label="/, `${file}: a tab bar is named`);
   }
   assert.match(SOURCES['app.mjs'], /<nav class="tabs" aria-label="View">/);
-  assert.match(SOURCES['app.mjs'], /<nav class="tabs settings-tabs" aria-label="Settings">/);
+  assert.match(SOURCES['page-settings.mjs'], /<nav class="tabs settings-tabs" aria-label="Settings">/);
   // SP-326: in a title row (the Tasks page's) the bar has no gap under it,
   // and as a flex item its line is only as wide as the tabs. Settings' tabs
   // stay a row of their own, outside any title row.
   assert.equal(rule('.title-row > nav.tabs').margin, '0');
-  const settings = SOURCES['app.mjs'].indexOf('<nav class="tabs settings-tabs"');
-  const rowOpen = SOURCES['app.mjs'].lastIndexOf('class="title-row"', settings);
-  assert.ok(SOURCES['app.mjs'].indexOf('</div>', rowOpen) < settings, 'the Settings tabs sit under the title row, not in it');
+  const page = pageScript();
+  const settings = page.indexOf('<nav class="tabs settings-tabs"');
+  const rowOpen = page.lastIndexOf('class="title-row"', settings);
+  assert.ok(page.indexOf('</div>', rowOpen) < settings, 'the Settings tabs sit under the title row, not in it');
 });
