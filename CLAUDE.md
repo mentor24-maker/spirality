@@ -4,8 +4,11 @@ Read this file first, then [docs/LOOP_ENGINEERING.md](docs/LOOP_ENGINEERING.md).
 Every prompt Dane gives a hand-run thread is logged, word for word, in
 [docs/operator-prompts/](docs/operator-prompts/), one file per thread
 ([docs/OPERATOR_PROMPTS.md](docs/OPERATOR_PROMPTS.md) says how).
-Any change to the words or look of the tracker page follows
-[docs/DOCTRINE.md](docs/DOCTRINE.md) (Title Case for buttons and headings).
+The rules that earned their place, each with its incident, are
+[docs/DOCTRINE.md](docs/DOCTRINE.md); code cites them by number
+(`DOCTRINE 3.11`). Any change to the words or look of the tracker page follows
+[docs/UI_DOCTRINE.md](docs/UI_DOCTRINE.md): StarCaster's conventions, one look
+for every Alphire project, and Title Case for buttons, headings and labels.
 
 **This repository is public.** Never commit a key, password, token or `.env`
 file. Keys live in Doppler (project `spirality`).
