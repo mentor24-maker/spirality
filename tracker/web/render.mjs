@@ -62,7 +62,9 @@ const closesFence = (line, run) => {
   return Boolean(m) && m[1][0] === run[0] && m[1].length >= run.length && !line.trim().slice(m[1].length).trim();
 };
 const HEADING = /^(#{1,6})\s+(.*)$/;
-const RULE = /^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/;
+// Three or more of one mark, spaces allowed between them: `---`, and the
+// `* * *` older ClickUp-imported bug reports carry (SP-314).
+const RULE = /^\s*(?:(?:-[ \t]*){3,}|(?:\*[ \t]*){3,}|(?:_[ \t]*){3,})$/;
 const BULLET = /^\s*[-*+]\s+(.*)$/;
 const NUMBERED = /^\s*\d+[.)]\s+(.*)$/;
 const CHECKBOX = /^\[([ xX])\]\s+(.*)$/;
@@ -842,11 +844,14 @@ export function bugReport({ tags = [], description } = {}) {
   return { words: body.join('\n'), facts, screenshots: shots.length > 0 };
 }
 
-/** One `## Where and who` fact as a list row: a page is a link, a submitted time reads in Mountain time. */
+/** One `## Where and who` fact as a list row: a page (bare, or one markdown link) is a link, a submitted time reads in Mountain time. */
 function bugReportFact({ label, value }) {
   const key = label.toLowerCase();
   let shown = escapeHtml(value);
+  // An older ClickUp-imported report writes its page as one markdown link (SP-314).
+  const md = /^\[([^\[\]]*)\]\((https?:\/\/[^\s()]+)\)$/.exec(value);
   if (key === 'page' && /^https?:\/\/\S+$/.test(value)) shown = link(value, escapeHtml(value));
+  else if (key === 'page' && md) shown = link(md[2], escapeHtml(md[1] || md[2]));
   else if (key === 'submitted' && !Number.isNaN(Date.parse(value)) && /\d{4}-\d{2}-\d{2}T/.test(value)) shown = escapeHtml(mountainTime(value));
   return `<li><span class="fact-label">${escapeHtml(label)}:</span> ${shown}</li>`;
 }
