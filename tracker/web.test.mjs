@@ -2256,7 +2256,7 @@ test('/projects/new is the page to a browser, and its logo can be drawn: the loc
 test('the New project button and form are a person\'s only; a refused save keeps what was typed and says why; success opens the details page', () => {
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   // SP-127: the Projects page's button is Set up a project; the bare form is a link on its page.
-  assert.match(app, /me\?\.kind === 'human' \? '<div class="toolbar"><a class="button btn btn-primary" href="\/setup\/new">Set Up a Project<\/a><\/div>' : ''/);
+  assert.match(app, /me\?\.kind === 'human' \? '<div class="toolbar"><a class="btn btn-primary" href="\/setup\/new">Set Up a Project<\/a><\/div>' : ''/);
   assert.match(app, /<a href="\/projects\/new">New project<\/a>/);
   const form = app.slice(app.indexOf('async function drawCreateProject'), app.indexOf('/**', app.indexOf('async function drawCreateProject')));
   assert.match(form, /if \(me\?\.kind !== 'human'\)[\s\S]{0,200}Only a person signed in to the tracker can add a project\./);
@@ -4537,7 +4537,7 @@ test('the page makes a slug by the wizard\'s rule, and refuses the two that are 
 test('the Projects page has Set up a project, lists the projects mid-setup, and keeps New project a link away', () => {
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   const projects = /async function drawProjects\(done = '', problem = ''\) \{[\s\S]*?\n\}/.exec(app)[0];
-  assert.match(projects, /<a class="button btn btn-primary" href="\/setup\/new">Set Up a Project<\/a>/);
+  assert.match(projects, /<a class="btn btn-primary" href="\/setup\/new">Set Up a Project<\/a>/);
   assert.doesNotMatch(projects, /href="\/projects\/new">New project/);
   assert.match(projects, /api\('GET', '\/setup'\)/);
   assert.match(projects, /\$\{renderSetupList\(setups\)\}/);

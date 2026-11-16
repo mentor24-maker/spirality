@@ -203,6 +203,8 @@ button { font: inherit; padding: 0.4rem 1rem; }
 /* The four button kinds and two sizes (UI_DOCTRINE 3, SP-321): every button but the listed exceptions is .btn, plus a kind for a filled one.
    A button never sets its own height, padding or colour; tracker/buttonKinds.test.mjs fails one that has no kind. */
 .btn { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; flex: 0 0 auto; width: fit-content; min-width: fit-content; height: var(--btn-height); padding: 0 0.875rem; margin: 0; border: 1px solid var(--border-strong); border-radius: var(--radius-btn); background: var(--bg-surface); color: var(--ink-primary); font-family: inherit; font-size: var(--text-sm); font-weight: 600; line-height: 1.2; white-space: nowrap; text-decoration: none; cursor: pointer; vertical-align: middle; }
+/* .btn's display would beat the browser's own [hidden] { display: none }, so a hidden button (the signed-out page's Sign Out) would still show. */
+.btn[hidden] { display: none; }
 .btn:hover:not(:disabled) { background: var(--bg-hover); border-color: var(--ink-secondary); }
 .btn:focus-visible { outline: 2px solid var(--focus-ring-color); outline-offset: 2px; }
 .btn:disabled, .btn[aria-disabled="true"] { background: var(--bg-surface); border-color: var(--border-light); color: var(--ink-muted); cursor: default; }

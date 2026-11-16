@@ -102,6 +102,23 @@ test('the check itself: a bare button, two kinds, an unknown kind and an excepti
   }
 });
 
+const EXCEPTION_NAMES = Object.keys(EXCEPTIONS).join('|');
+/** A selector reaching one of the listed exceptions' classes, matched whole: `.close` never matches `.close-action`. */
+const EXCEPTION_SELECTOR = new RegExp(`\\.(?:${EXCEPTION_NAMES})(?![\\w-])`);
+const DRAWS = /^(?:background(?:-color)?|color|border(?:-[\w-]+)?|height|padding|font-size|font-weight|opacity)$/;
+
+/**
+ * The declarations that draw a button which is not a listed exception, as
+ * `selector { property: value }`. A rule reaching such a button may place it
+ * (margins), never draw it: its look is its kind's.
+ */
+export function paintedButtons(declarations) {
+  return declarations
+    .filter((d) => DRAWS.test(d.property)
+      && d.selector.split(',').some((s) => /\bbutton\b/.test(s) && !EXCEPTION_SELECTOR.test(s) && s.trim() !== 'button'))
+    .map((d) => `${d.selector} { ${d.property}: ${d.value} }`);
+}
+
 /** The declarations of the rule whose selector is exactly `selector`, as a property → value map. */
 function rule(selector) {
   const found = declarationsOf(CSS).filter((d) => d.selector === selector);
@@ -154,9 +171,24 @@ test('disabled is a colour, never a fade, and no other rule paints a kind\'s but
   const faded = declarations.filter((d) => /:disabled|aria-disabled/.test(d.selector) && d.property === 'opacity');
   assert.deepEqual(faded.map((d) => d.selector), []);
   // A rule reaching a button that is not a listed exception may place it (margins), never draw it.
-  const exception = new RegExp(`button(?:\\.[\\w-]+)*\\.(?:${Object.keys(EXCEPTIONS).join('|')})\\b|\\.(?:${Object.keys(EXCEPTIONS).join('|')})\\b`);
-  const draws = /^(?:background(?:-color)?|color|border(?:-[\w-]+)?|height|padding|font-size|font-weight|opacity)$/;
-  const wrong = declarations.filter((d) => d.selector.split(',').some((s) => /\bbutton\b/.test(s) && !exception.test(s) && s.trim() !== 'button')
-    && draws.test(d.property));
-  assert.deepEqual(wrong.map((d) => `${d.selector} { ${d.property}: ${d.value} }`), []);
+  assert.deepEqual(paintedButtons(declarations), []);
+});
+
+test('a hidden button stays hidden: .btn\'s display must not beat the hidden attribute', () => {
+  assert.equal(rule('.btn[hidden]').display, 'none');
+  assert.ok(CSS.indexOf('.btn[hidden]') > CSS.indexOf('.btn {'), '.btn[hidden] comes after .btn, so it wins');
+});
+
+test('the check itself: a rule drawing a button is refused unless its class is a listed exception, matched whole', () => {
+  const at = (text) => paintedButtons(declarationsOf(text));
+  assert.deepEqual(at('.quick form.close-action button { background: red; padding: 0 }'), [
+    '.quick form.close-action button { background: red }',
+    '.quick form.close-action button { padding: 0 }',
+  ]);
+  assert.deepEqual(at('button.close-ish { color: red }'), ['button.close-ish { color: red }']);
+  assert.deepEqual(at('button.sorted { height: 2rem }'), ['button.sorted { height: 2rem }']);
+  assert.deepEqual(at('.toolbar button { margin-left: 1rem }'), [], 'placing a button is fine');
+  assert.deepEqual(at('button.close { background: none }'), []);
+  assert.deepEqual(at('dialog .close { color: red }'), []);
+  assert.deepEqual(at('th button.sort:hover { color: red }'), []);
 });

@@ -199,8 +199,9 @@ never sets its own height, padding or colour; it takes a kind.
   (section 1.1).
 - **A choice inside a dialog** ("Overwrite", "Save & Publish") is the main
   action, blue, not green.
-- **Which kind on the tracker** (SP-321): Merge, Go, Approve, Sign In and the
-  "Add…", "Create…", "Send…" and "Suggest…" buttons are the main action; every
+- **Which kind on the tracker** (SP-321): Merge, Go, Approve, Sign In, Email
+  Me a Link, Upload Document, File in This Order, File in and the "Add…",
+  "Create…", "Send…" and "Suggest…" buttons are the main action; every
   Save is a Save; Delete, Reject and every Remove are Delete; Post Reply, Add
   Comment, Close, Cancel, Copy, Edit and the rest are secondary. A button in a
   table row is small (`btn-sm`).

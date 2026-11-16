@@ -703,7 +703,7 @@ async function drawProjects(done = '', problem = '') {
     </tr>`;
   main.innerHTML = `
     <h1>Projects</h1>
-    ${me?.kind === 'human' ? '<div class="toolbar"><a class="button btn btn-primary" href="/setup/new">Set Up a Project</a></div>' : ''}
+    ${me?.kind === 'human' ? '<div class="toolbar"><a class="btn btn-primary" href="/setup/new">Set Up a Project</a></div>' : ''}
     <p class="note${problem ? ' error' : (done ? ' quiet' : '')}" role="status">${escapeHtml(problem || done)}</p>
     ${renderSetupList(setups)}
     ${projects.length
