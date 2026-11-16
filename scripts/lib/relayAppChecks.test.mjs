@@ -202,9 +202,15 @@ test('app-checks on the relay: run_relay.sh runs the step after the relay part, 
   assert.equal(text.split('PASS_START=$(date +%s)').length - 1, 1);
 });
 
-/** The real installer's --status, reading a scratch manifest (no tracker port) from its folder. */
+/**
+ * The real installer's --status for a scratch project (no tracker port),
+ * named with --project: started in a folder with no --project, the installer
+ * reads Spirality's own manifest, never that folder's (SP-312).
+ */
 function status(s) {
-  const r = spawnSync('bash', [join(HERE, '..', 'install_loop_runner.sh'), '--status'], { cwd: s.dir, encoding: 'utf8' });
+  // A project's checkout is a git checkout; --status reads its branch.
+  spawnSync('git', ['init', '-q', s.dir]);
+  const r = spawnSync('bash', [join(HERE, '..', 'install_loop_runner.sh'), '--status', '--project', s.dir], { cwd: s.dir, encoding: 'utf8' });
   return { status: r.status, out: r.stdout, err: r.stderr };
 }
 
