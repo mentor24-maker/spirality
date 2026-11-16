@@ -20,3 +20,13 @@ not shuffle the board. On a phone-width screen the areas stack in loop order.
 Walking the page in a headless browser before opening the pull request caught
 one real fault: rounding laid one area ten pixels over its neighbour. That is
 fixed, and a test now checks the areas never overlap.
+
+Review sent it back once. The "+N More" list in Requested opened off the left
+edge of the screen, so its hidden tickets could not be read or clicked. Each
+list now opens toward the middle of the map: rightward from a tile on the left
+half, upward from a tile low on the map. A browser walk at full width and at
+the map's narrowest opened every "+N More" list and found each one whole and
+clickable. The same pass made the Live window follow the tracker's own clock,
+dropped the meaningless "next change" from finished Live tiles, and stopped
+the Console reading the history of every ticket ever launched on each minute's
+refresh.

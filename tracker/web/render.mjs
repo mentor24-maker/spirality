@@ -2852,7 +2852,7 @@ export function renderFeatureKey(tickets, picked = null) {
  * the project's logo as its picture (only an http(s) address is drawn), or
  * the project's ticket prefix in large letters when it has none; the ticket
  * number over it; and along the bottom the stage, the next change
- * (consoleNextChange) and the time in stage (consoleAge). A ticket waiting
+ * (consoleNextChange) and the time in stage (consoleAge); a Live tile has no next change. A ticket waiting
  * on the operator carries `waiting` (the ring). A ticket with a feature
  * (consoleFeature) carries `feature feature-<n>` (its colour, from app.css)
  * and `data-feature`, which the Features key's pick dims by. The stage fact carries
@@ -2874,7 +2874,9 @@ export function renderConsoleTile(t, project = null, now = Date.now(), { attrs =
   const feature = consoleFeature(t);
   const status = String(t?.status ?? '');
   const label = `${id}: ${t?.name ?? ''}`;
-  const spoken = `${label}. ${status}; next change ${next.text}; in this stage ${age}${feature ? `; feature ${feature}` : ''}${waiting ? '; waiting on you' : ''}.`;
+  // A launched ticket has no next change (SP-333's Live area): finished work says only how long ago.
+  const done = status === 'Live';
+  const spoken = `${label}. ${status}${done ? '' : `; next change ${next.text}`}; in this stage ${age}${feature ? `; feature ${feature}` : ''}${waiting ? '; waiting on you' : ''}.`;
   const classes = `tile${size ? ` ${size}` : ''}${feature ? ` feature feature-${featureColourIndex(feature)}` : ''}${waiting ? ' waiting' : ''}`;
   const marked = feature ? ` data-feature="${escapeHtml(feature)}"` : '';
   return `<a class="${classes}"${marked}${attrs} href="/t/${encodeURIComponent(id)}" title="${escapeHtml(label)}" aria-label="${escapeHtml(spoken)}">`
@@ -2882,7 +2884,7 @@ export function renderConsoleTile(t, project = null, now = Date.now(), { attrs =
     + `<span class="tile-number">${escapeHtml(id)}</span>`
     + '<span class="tile-facts">'
     + `<span class="fact stage" data-stage="${escapeHtml(status)}">${escapeHtml(status)}</span>`
-    + `<span class="fact next" title="${escapeHtml(next.title)}">${escapeHtml(next.text)}</span>`
+    + (done ? '' : `<span class="fact next" title="${escapeHtml(next.title)}">${escapeHtml(next.text)}</span>`)
     + `<span class="fact age" title="${escapeHtml(`In ${status} for ${age}`)}">${escapeHtml(age)}</span>`
     + '</span></a>';
 }
@@ -3056,6 +3058,21 @@ export function slotShare(area, grid, { col, row }) {
   return { x: share((x - area.x) / area.w), y: share((y - area.y) / area.h), size: share(grid.size / area.w) };
 }
 
+/**
+ * Which way a "+N More" tile's list opens, so it stays on the map (SP-333):
+ * a tile in the left half of the map opens its list to the right
+ * (`opens-right`, anchored on the tile's left edge), one in the right half
+ * to the left; a tile whose middle is in the bottom half opens upward
+ * (`opens-up`), one in the top half downward. Returned as the classes to add.
+ */
+export function moreOpens(area, grid, { col, row }) {
+  const left = area.x + AREA_PAD + col * (grid.size + grid.gap);
+  const middle = area.y + AREA_HEAD + row * (grid.size + grid.gap) + grid.size / 2;
+  const across = left / MAP_UNITS.width < 0.5 ? 'opens-right' : 'opens-left';
+  const down = middle / MAP_UNITS.height > 0.5 ? 'opens-up' : 'opens-down';
+  return `${across} ${down}`;
+}
+
 /** A tile's size class: `tile-compact` (no facts strip) or `tile-tiny` (the number alone), or ''. */
 export function tileSizeClass(size) {
   if (size < TILE_TINY) return 'tile-tiny';
@@ -3098,7 +3115,7 @@ export function renderConsole(answer, now = Date.now()) {
     });
     if (placed.more) {
       const n = placed.more.hidden.length;
-      tiles.push(`<details class="tile more${sizeClass ? ` ${sizeClass}` : ''}" data-stage="${escapeHtml(area.status)}"${placeAttrs(area, placed.grid, placed.more)}>`
+      tiles.push(`<details class="tile more ${moreOpens(area, placed.grid, placed.more)}${sizeClass ? ` ${sizeClass}` : ''}" data-stage="${escapeHtml(area.status)}"${placeAttrs(area, placed.grid, placed.more)}>`
         + `<summary aria-label="${escapeHtml(`${n} more in ${area.status}`)}">+${n} More</summary>`
         + `<ul class="more-list">${placed.more.hidden.map((t) => `<li><a href="/t/${encodeURIComponent(String(t.id ?? ''))}">${escapeHtml(String(t.id ?? ''))}</a> ${escapeHtml(t.name ?? '')}</li>`).join('')}</ul></details>`);
     }

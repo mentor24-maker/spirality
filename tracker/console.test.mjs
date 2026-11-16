@@ -128,6 +128,19 @@ test('consoleOf carries the tickets that went Live in the last day, for the map\
   assert.equal(t.waitingOnOperator, false);
 });
 
+test('consoleOf reads no events for a ticket last edited before the Live window: an old launch costs nothing on the minute\'s redraw (SP-333)', () => {
+  const { store, machine, tick } = fixture();
+  const old = store.fileTicket({ project: 'alpha', actor: machine.id, name: 'Old launch', status: 'Live' });
+  tick(2 * CONSOLE_LIVE_MS);
+  store.fileTicket({ project: 'alpha', actor: machine.id, name: 'In flight', status: 'Queued' });
+  const read = [];
+  const listEvents = store.listEvents.bind(store);
+  const watched = Object.create(store, { listEvents: { value: (id, ...rest) => { read.push(id); return listEvents(id, ...rest); } } });
+  const names = consoleOf(watched, { now: Date.parse(old.updatedAt) + 2 * CONSOLE_LIVE_MS }).tickets.map((t) => t.name);
+  assert.deepEqual(names, ['In flight']);
+  assert.ok(!read.includes(old.id), 'the old launch\'s events were never read');
+});
+
 test('consoleOf narrows to the projects `only` lets through', () => {
   const { store, human, machine } = fixture();
   store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE', operator: human.id });

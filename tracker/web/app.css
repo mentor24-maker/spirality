@@ -741,8 +741,13 @@ table.spirality-docs td.date { white-space: nowrap; }
 .tile.more { overflow: visible; display: block; }
 .tile.more summary { display: flex; align-items: center; justify-content: center; height: 100%; font-size: var(--text-sm); font-weight: 700; cursor: pointer; list-style: none; text-align: center; }
 .tile.more summary::-webkit-details-marker { display: none; }
-.tile.more .more-list { position: absolute; z-index: 20; top: 100%; right: 0; width: 22rem; max-height: 20rem; overflow-y: auto; margin: var(--space-1) 0 0; padding: 0.5rem 0.75rem; list-style: none; background: var(--bg-surface); border: 1px solid var(--border-black); border-radius: var(--radius-input); box-shadow: var(--shadow-pop); font-size: var(--text-sm); overflow-wrap: anywhere; }
+.tile.more .more-list { position: absolute; z-index: 20; width: 22rem; max-height: 15rem; overflow-y: auto; margin: var(--space-1) 0 0; padding: 0.5rem 0.75rem; list-style: none; background: var(--bg-surface); border: 1px solid var(--border-black); border-radius: var(--radius-input); box-shadow: var(--shadow-pop); font-size: var(--text-sm); overflow-wrap: anywhere; }
 .tile.more .more-list li { padding: 0.15rem 0; }
+/* The list opens toward the middle of the map, so it never leaves it (render.mjs moreOpens): 15rem fits above or below any tile at the map's narrowest. */
+.tile.more.opens-right .more-list { left: 0; }
+.tile.more.opens-left .more-list { right: 0; }
+.tile.more.opens-down .more-list { top: 100%; margin: var(--space-1) 0 0; }
+.tile.more.opens-up .more-list { bottom: 100%; margin: 0 0 var(--space-1); }
 .console-other { margin-top: 1rem; }
 .console-other h2 { font-size: var(--text-base); margin: 0 0 0.5rem; }
 /* A narrow screen (a phone) stacks the areas in the loop's order instead of squashing the map. */

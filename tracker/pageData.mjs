@@ -554,8 +554,7 @@ function nextChangeOf(status, lanes) {
 export const CONSOLE_LIVE_MS = 24 * 3_600_000;
 
 /**
- * The Console view's answer (SP-221): every ticket in flight (any status but
- * Live) on every project `only` lets through (visibleProjects), with the
+ * The Console view's answer (SP-221): every ticket in flight on every project `only` lets through (visibleProjects), with the
  * facts a Console tile shows, so the page works nothing out itself. Since
  * SP-333 it carries the tickets that went Live in the last CONSOLE_LIVE_MS
  * too (`now`, milliseconds, given so a test can fix the clock), for the
@@ -597,9 +596,12 @@ export function consoleOf(store, { only = null, pipeline = null, prStates = null
     const projectLanes = pipeline && project.slug === pipeline.slug ? lanes : null;
     for (const t of store.listTickets(project.slug)) {
       if (!rank.has(t.status)) continue;
+      const done = TERMINAL_STATUSES.includes(t.status);
+      // A ticket last edited before the window cannot have gone Live inside it: skip it before reading its events.
+      if (done && (t.status !== LIVE || now - Date.parse(t.updatedAt) > CONSOLE_LIVE_MS)) continue;
       const stageSince = stageSinceOf(store, t);
       // The map's Live area shows the last day's launches only (SP-333).
-      if (TERMINAL_STATUSES.includes(t.status) && !(t.status === LIVE && now - Date.parse(stageSince) <= CONSOLE_LIVE_MS)) continue;
+      if (done && !(now - Date.parse(stageSince) <= CONSOLE_LIVE_MS)) continue;
       const comments = commentsOf(store, t.id);
       rows.push({
         ticket: t,

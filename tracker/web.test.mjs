@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { DEMO_NEWEST_RELEASE, DEMO_OWN_PROJECT, DEMO_SUGGESTIONS, DEMO_TOPICS, demoNewestRelease, demoSuggest, seedDemo, tickingClock } from './demoData.mjs';
 import { reportsOf, REPORT_RANGES, GROWTH_PERIODS, searchTickets, PRIORITIES, timeSplitOf, isFailureNote, TIME_BUCKETS, pipelineControlsOf } from './pageData.mjs';
-import { escapeHtml, renderStatusLine, renderComment, renderInline, renderMarkdown, unwrapDoc, headingId, renderQuickAction, CLOSE_LINE, REPLY_LINE, offersMerge, offersClose, bugReport, BUG_REPORT_TAG, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, heldBugReport, renderBugReportActions, approveQuestion, rejectQuestion, changeProblem, REJECT_COMMENT, WONT_DO_TAG, HELD_REPORT_LINE, HELD_REPORT_STATUS_LINE, cardMove, renderTrail, renderProjectPicker, renderTopicPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, loopHasIt, renderCommentForm, LOOP_HAS_STATUSES, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, renderTopics, renderTopicEditRow, topicDeleteQuestion, renderTagEditRow, tagDeleteQuestion, tagAddressable, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, renderListTopics, projectTags, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, renderReleaseGroup, controlValueText, mountainTime, wakeInEffectText, modelLastPassText, renderConsole, renderConsoleTile, MAP_AREAS, MAP_UNITS, placeArea, driftOf, liveFade, slotShare, tileSizeClass, TILE_MAX, TILE_MIN, TILE_COMPACT, TILE_TINY, LIVE_FADE_FLOOR, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, consoleFeature, featureColourIndex, renderFeatureKey, FEATURE_PALETTE, drainLine, capInFlightText, renderTitleChoices, titleModeOf, TITLE_MODES, SUGGEST_POLL_MS, moveSuggestion, suggestState, filingPlan, orderPlan, andList, suggestRunLine, renderSuggestRows, renderSuggestionInfo, suggestionFileHref } from './web/render.mjs';
+import { escapeHtml, renderStatusLine, renderComment, renderInline, renderMarkdown, unwrapDoc, headingId, renderQuickAction, CLOSE_LINE, REPLY_LINE, offersMerge, offersClose, bugReport, BUG_REPORT_TAG, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, heldBugReport, renderBugReportActions, approveQuestion, rejectQuestion, changeProblem, REJECT_COMMENT, WONT_DO_TAG, HELD_REPORT_LINE, HELD_REPORT_STATUS_LINE, cardMove, renderTrail, renderProjectPicker, renderTopicPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, loopHasIt, renderCommentForm, LOOP_HAS_STATUSES, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, renderTopics, renderTopicEditRow, topicDeleteQuestion, renderTagEditRow, tagDeleteQuestion, tagAddressable, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, renderListTopics, projectTags, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, renderReleaseGroup, controlValueText, mountainTime, wakeInEffectText, modelLastPassText, renderConsole, renderConsoleTile, MAP_AREAS, MAP_UNITS, placeArea, driftOf, liveFade, slotShare, moreOpens, tileSizeClass, TILE_MAX, TILE_MIN, TILE_COMPACT, TILE_TINY, LIVE_FADE_FLOOR, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, consoleFeature, featureColourIndex, renderFeatureKey, FEATURE_PALETTE, drainLine, capInFlightText, renderTitleChoices, titleModeOf, TITLE_MODES, SUGGEST_POLL_MS, moveSuggestion, suggestState, filingPlan, orderPlan, andList, suggestRunLine, renderSuggestRows, renderSuggestionInfo, suggestionFileHref } from './web/render.mjs';
 import { startServer, setupSettingsOf } from './server.mjs';
 import { saveAnswers, setupFields, setupOf } from './setup.mjs';
 import { DANE_FIELDS as SETUP_FIELDS, STEPS as SETUP_STEPS } from '../scripts/onboard/onboard.mjs';
@@ -5642,11 +5642,46 @@ test('a filling area shrinks its tiles, and past what it holds shows "+N More" w
   }
   const html = renderConsole({ projects: [ALPHA], tickets: many.map((t) => ({ ...t, status: 'Queued' })) }, CONSOLE_NOW);
   const n = full.more.hidden.length;
-  assert.match(html, new RegExp(`<details class="tile more tile-tiny" data-stage="Queued"[^>]*><summary aria-label="${n} more in Queued">\\+${n} More</summary><ul class="more-list"><li><a href="/t/AL-${full.tiles.length + 1}">`));
+  assert.match(html, new RegExp(`<details class="tile more opens-right opens-down tile-tiny" data-stage="Queued"[^>]*><summary aria-label="${n} more in Queued">\\+${n} More</summary><ul class="more-list"><li><a href="/t/AL-${full.tiles.length + 1}">`));
   assert.match(html, /<a class="tile tile-tiny" data-x=/);
   assert.equal(tileSizeClass(TILE_MAX), '');
   assert.equal(tileSizeClass(TILE_COMPACT - 0.5), 'tile-compact');
   assert.equal(tileSizeClass(TILE_TINY - 0.5), 'tile-tiny');
+});
+
+test('a "+N More" list opens toward the middle of the map, so Requested\'s, at the far left, and Live\'s, at the bottom, stay on screen (SP-333)', () => {
+  const many = (status) => Array.from({ length: 60 }, (_, i) => consoleTicket({ id: `AL-${i + 1}`, status, stageSince: new Date(CONSOLE_NOW - 3_600_000).toISOString() }));
+  const opens = {};
+  for (const area of MAP_AREAS) {
+    const placed = placeArea(area, many(area.status), CONSOLE_NOW);
+    assert.ok(placed.more, `${area.status} overflows at 60`);
+    opens[area.status] = moreOpens(area, placed.grid, placed.more);
+    // The tile's left edge, as a share of the map: an anchored-left list starts there, an anchored-right one ends at its right edge.
+    const { x, size } = slotShare(area, placed.grid, placed.more);
+    const left = (area.x + x * area.w) / MAP_UNITS.width;
+    const right = left + size * area.w / MAP_UNITS.width;
+    // At the map's narrowest (60rem) the 22rem list must fit on the side it opens toward.
+    if (opens[area.status].includes('opens-right')) assert.ok((1 - left) * 60 >= 22, `${area.status} opens right with room`);
+    else assert.ok(right * 60 >= 22, `${area.status} opens left with room`);
+  }
+  assert.equal(opens.Requested, 'opens-right opens-up', 'far left, low: rightward and up');
+  assert.match(opens.Live, /opens-right opens-up/);
+  assert.match(opens['Ready to launch'], /opens-up/);
+  assert.match(opens.Queued, /opens-down/);
+  const html = renderConsole({ projects: [ALPHA], tickets: many('Requested') }, CONSOLE_NOW);
+  assert.match(html, /<details class="tile more opens-right opens-up tile-tiny" data-stage="Requested"/);
+  const css = readFileSync(WEB('app.css'), 'utf8');
+  assert.match(css, /\.tile\.more\.opens-right \.more-list \{ left: 0; \}/);
+  assert.match(css, /\.tile\.more\.opens-up \.more-list \{ bottom: 100%;/);
+  assert.doesNotMatch(/\.tile\.more \.more-list \{[^}]*\}/.exec(css)[0], /right: 0|top: 100%/, 'the base list is anchored by its direction only');
+});
+
+test('a Live tile shows no next change, and says none aloud: it is finished (SP-333)', () => {
+  const live = renderConsoleTile(consoleTicket({ status: 'Live', nextChange: null }), ALPHA, CONSOLE_NOW);
+  assert.doesNotMatch(live, /class="fact next"/);
+  assert.doesNotMatch(live, /next change/);
+  assert.match(live, /class="fact age"/);
+  assert.match(renderConsoleTile(consoleTicket({ status: 'Queued' }), ALPHA, CONSOLE_NOW), /class="fact next"/, 'in flight: still shown');
 });
 
 test('Live shows only the last day\'s launches, newest nearest Requested, each fading with age (SP-333)', () => {

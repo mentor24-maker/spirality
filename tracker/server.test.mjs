@@ -3098,6 +3098,19 @@ test('GET /in-flight lists every ticket in flight, and those Live in the last da
   } finally { await f.cleanup(); }
 });
 
+test('GET /in-flight reads the server\'s own clock for the Live window, not the wall clock (SP-333)', async () => {
+  const f = await fixture();
+  try {
+    f.store.fileTicket({ project: 'alpha', actor: f.machine.id, name: 'Launched', status: 'Live' });
+    const launched = (body) => body.tickets.filter((t) => t.status === 'Live').map((t) => t.name);
+    assert.deepEqual(launched((await f.call('GET', '/in-flight', { token: f.humanToken })).body), ['Launched'], 'just launched: on the map');
+    const later = await f.serve(f.store, { now: () => Date.now() + 2 * 24 * 3_600_000 });
+    const answer = await f.call('GET', '/in-flight', { token: f.humanToken, at: later });
+    assert.equal(answer.status, 200, answer.text);
+    assert.deepEqual(launched(answer.body), [], 'two days on by the server\'s clock: gone');
+  } finally { await f.cleanup(); }
+});
+
 test('GET /documentation lists the docs folder\'s Markdown by title and reads one; a path outside it is 404 and reads nothing (SP-175)', async () => {
   const f = await fixture();
   try {
