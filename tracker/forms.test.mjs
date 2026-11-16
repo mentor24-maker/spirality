@@ -7,10 +7,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { PAGE_SCRIPTS } from './pageScripts.mjs';
 
 const read = (path) => readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8');
 
-const SOURCES = ['./web/app.mjs', './web/render.mjs', './web/index.html'];
+const SOURCES = [...PAGE_SCRIPTS.map((name) => `./web/${name}`), './web/render.mjs', './web/index.html'];
 
 /** Every box in `source`: its tag, its attributes and where it starts. Hidden fields are not boxes. */
 function boxesOf(source) {

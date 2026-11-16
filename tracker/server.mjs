@@ -102,6 +102,7 @@ import { listCommands, REPO_ROOT } from './commands.mjs';
 import { listDocs, readDoc } from './docsFolder.mjs';
 import loopStatuses from '../lib/loopStatuses.js';
 import { CLASS_FIELDS } from '../lib/ticketClass.js';
+import { PAGE_SCRIPTS } from './pageScripts.mjs';
 
 /**
  * The session cookie's name and how long it lasts: 30 days, the store's own
@@ -249,7 +250,7 @@ const DOCS_DIR = fileURLToPath(new URL('../docs/', import.meta.url));
 const WEB_FILES = Object.freeze({
   'index.html': 'text/html; charset=utf-8',
   'app.css': 'text/css; charset=utf-8',
-  'app.mjs': 'text/javascript; charset=utf-8',
+  ...Object.fromEntries(PAGE_SCRIPTS.map((name) => [name, 'text/javascript; charset=utf-8'])),
   'render.mjs': 'text/javascript; charset=utf-8',
   'wordmark.png': 'image/png',
   'icon.png': 'image/png',
