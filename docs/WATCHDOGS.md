@@ -20,7 +20,7 @@ StarCaster's watchdogs into one of two kinds:
 The slices that move them build from this table: SP-266 (heartbeat),
 SP-267 (stale ready, stale answer), SP-268 (throughput, failed-job report,
 checkout currency), then SP-269 has the setup wizard give every project the
-lot ([ONBOARDING_A_PROJECT.md, "The pipeline watchdogs"](ONBOARDING_A_PROJECT.md#the-pipeline-watchdogs-sp-269)). A pipeline row with no ticket says why; Dane decides whether it gets one.
+lot ([ONBOARDING_A_PROJECT.md, "The pipeline watchdogs"](ONBOARDING_A_PROJECT.md#the-pipeline-watchdogs-sp-269)). A pipeline row with no ticket says why, with Dane's answer ([Seven questions](#seven-questions)).
 
 Where it was read: StarCaster's `main` at commit `e825945`, the schedule's
 own wake ([run_bus_relay.sh](https://github.com/mentor24-maker/starcaster/blob/e82594523d1a15ee9df8b08e6c7667f43f915bb3/scripts/run_bus_relay.sh),
@@ -30,9 +30,9 @@ weekly report) and the review gate. Each file link names that commit.
 | Watchdog | How StarCaster runs it | What it watches | StarCaster files | Watches | Goes to |
 |---|---|---|---|---|---|
 | Checkout currency | `npm run checkout:current -- --check` | Whether the machine could bring its checkout of `main` up to date, naming the files that blocked it when it could not. | [checkout_currency.mjs](https://github.com/mentor24-maker/starcaster/blob/e82594523d1a15ee9df8b08e6c7667f43f915bb3/scripts/checkout_currency.mjs), [checkoutCurrency.js](https://github.com/mentor24-maker/starcaster/blob/e82594523d1a15ee9df8b08e6c7667f43f915bb3/lib/checkoutCurrency.js) | pipeline | Moved (SP-268): `npm run checkout:current`, `lib/checkoutCurrency.js`; the relay runs it after its own pull on every wake. It only reports: Spirality's runners make the pull. |
-| Relay interval | `scripts/bus_relay_interval.sh` (a shell line, not `npm run`) | Whether the schedule installed on the machine still wakes the relay as often as the repository says it should. | [bus_relay_interval.sh](https://github.com/mentor24-maker/starcaster/blob/e82594523d1a15ee9df8b08e6c7667f43f915bb3/scripts/bus_relay_interval.sh), [install_bus_relay.sh](https://github.com/mentor24-maker/starcaster/blob/e82594523d1a15ee9df8b08e6c7667f43f915bb3/scripts/install_bus_relay.sh) | pipeline | No ticket yet: Spirality's relay reads its wake time from the Settings page on every pass, so the gap this catches (the repository changed, the installed schedule did not) may not arise here. Dane decides. |
+| Relay interval | `scripts/bus_relay_interval.sh` (a shell line, not `npm run`) | Whether the schedule installed on the machine still wakes the relay as often as the repository says it should. | [bus_relay_interval.sh](https://github.com/mentor24-maker/starcaster/blob/e82594523d1a15ee9df8b08e6c7667f43f915bb3/scripts/bus_relay_interval.sh), [install_bus_relay.sh](https://github.com/mentor24-maker/starcaster/blob/e82594523d1a15ee9df8b08e6c7667f43f915bb3/scripts/install_bus_relay.sh) | pipeline | Not moving, by Dane's choice (Dane, 2026-11-16): the relay reads its wake time from the Settings page on every pass, so the gap this catches (the repository changed, the installed schedule did not) does not arise here. |
 | Heartbeat | `npm run heartbeat -- --push-owned`, `-- --check`, `-- --stale-check --check`, and the closing `-- --beat --role bus-relay` | Whether each scheduled job is still running: every job leaves a stamp when it runs, and a job whose stamp goes stale is said on the bus. | [node_heartbeat.mjs](https://github.com/mentor24-maker/starcaster/blob/e82594523d1a15ee9df8b08e6c7667f43f915bb3/scripts/node_heartbeat.mjs), [nodeHeartbeat.js](https://github.com/mentor24-maker/starcaster/blob/e82594523d1a15ee9df8b08e6c7667f43f915bb3/lib/nodeHeartbeat.js) | pipeline | Moved by SP-266: `npm run heartbeat` ([heartbeat.mjs](../scripts/heartbeat.mjs), [heartbeat.js](../lib/heartbeat.js)) reads each lane's last pass from its log, and the relay runs it with `--check` on every wake. The roll call shared between machines stays behind (see node roles). |
-| Node roles | Read by every line above (not run on its own) | Which machine may run which job, so two machines never run the same lane and the heartbeat knows whose stamp to read. | [nodeRoles.js](https://github.com/mentor24-maker/starcaster/blob/e82594523d1a15ee9df8b08e6c7667f43f915bb3/lib/nodeRoles.js) | pipeline | No ticket yet: every Spirality lane runs on the Mini, so there is one machine and nothing to divide; SP-266 leaves it out on purpose. It matters only if lanes ever run on a second machine. |
+| Node roles | Read by every line above (not run on its own) | Which machine may run which job, so two machines never run the same lane and the heartbeat knows whose stamp to read. | [nodeRoles.js](https://github.com/mentor24-maker/starcaster/blob/e82594523d1a15ee9df8b08e6c7667f43f915bb3/lib/nodeRoles.js) | pipeline | Not moving, by Dane's choice (Dane, 2026-11-16), until lanes run on a second machine: every Spirality lane runs on the Mini, so there is nothing to divide; SP-266 leaves it out on purpose. |
 | Throughput | `npm run throughput -- --check` | Whether the loop is getting anything done: lanes that run and exit cleanly while the queue does not move. | [loop_throughput.mjs](https://github.com/mentor24-maker/starcaster/blob/e82594523d1a15ee9df8b08e6c7667f43f915bb3/scripts/loop_throughput.mjs), [loopThroughput.js](https://github.com/mentor24-maker/starcaster/blob/e82594523d1a15ee9df8b08e6c7667f43f915bb3/lib/loopThroughput.js) | pipeline | Moved (SP-268): `npm run throughput`, `lib/loopThroughput.js`; the relay runs it on every wake, reading at most once an hour. |
 | Stale ready | `npm run stale-ready -- --check` | Tickets stuck in `Ready to launch`: approved but not merged (a red check, a dead merge step). | [stale_ready.mjs](https://github.com/mentor24-maker/starcaster/blob/e82594523d1a15ee9df8b08e6c7667f43f915bb3/scripts/stale_ready.mjs), [staleReady.js](https://github.com/mentor24-maker/starcaster/blob/e82594523d1a15ee9df8b08e6c7667f43f915bb3/lib/staleReady.js) | pipeline | Moved (SP-267): `npm run stale-ready`, `lib/staleReady.js`; the relay runs it on every wake. |
 | Stale answer | `npm run stale-answer -- --check` | Tickets in `Needs your input` where Dane has answered and the ticket still has not moved after 30 minutes. | [stale_answer.mjs](https://github.com/mentor24-maker/starcaster/blob/e82594523d1a15ee9df8b08e6c7667f43f915bb3/scripts/stale_answer.mjs), [staleAnswer.js](https://github.com/mentor24-maker/starcaster/blob/e82594523d1a15ee9df8b08e6c7667f43f915bb3/lib/staleAnswer.js) | pipeline | Moved (SP-267): `npm run stale-answer`, `lib/staleAnswer.js`; the relay runs it on every wake. |
@@ -41,13 +41,13 @@ weekly report) and the review gate. Each file link names that commit.
 | Unapplied SQL | `npm run sql:unapplied -- --check` | Database changes merged into StarCaster's `docs/SQL` that were never run on the live database. | [unapplied_sql_watch.mjs](https://github.com/mentor24-maker/starcaster/blob/e82594523d1a15ee9df8b08e6c7667f43f915bb3/scripts/unapplied_sql_watch.mjs), [unappliedSql.js](https://github.com/mentor24-maker/starcaster/blob/e82594523d1a15ee9df8b08e6c7667f43f915bb3/lib/unappliedSql.js) | app | Stays in StarCaster; posts through `bus-post`. |
 | Broken links | `npm run broken-links -- --check` | Links on client sites that point at a page which was deleted, checked once a week. | [broken_links_check.mjs](https://github.com/mentor24-maker/starcaster/blob/e82594523d1a15ee9df8b08e6c7667f43f915bb3/scripts/broken_links_check.mjs), [brokenLinksTicket.js](https://github.com/mentor24-maker/starcaster/blob/e82594523d1a15ee9df8b08e6c7667f43f915bb3/lib/brokenLinksTicket.js), [pageInboundLinks.js](https://github.com/mentor24-maker/starcaster/blob/e82594523d1a15ee9df8b08e6c7667f43f915bb3/lib/pageInboundLinks.js) | app | Stays in StarCaster. It writes one standing ticket, never the bus, by Dane's choice. |
 | AI keys | `npm run ai-keys -- --check` | Whether each AI key the website uses still works, and which account it bills, so a key out of credit is named. | [ai_keys_check.mjs](https://github.com/mentor24-maker/starcaster/blob/e82594523d1a15ee9df8b08e6c7667f43f915bb3/scripts/ai_keys_check.mjs), [aiKeys.js](https://github.com/mentor24-maker/starcaster/blob/e82594523d1a15ee9df8b08e6c7667f43f915bb3/lib/aiKeys.js) | app | Stays in StarCaster: the keys are the website's; posts through `bus-post`. |
-| Repair | `npm run repair -- --check` | Tickets the loop left stranded (a dead pass's claim, a ticket stuck mid-hand-off, a ticket that disagrees with GitHub), fixing only what the evidence proves and reporting the rest. | [repair.mjs](https://github.com/mentor24-maker/starcaster/blob/e82594523d1a15ee9df8b08e6c7667f43f915bb3/scripts/repair.mjs), [repair.js](https://github.com/mentor24-maker/starcaster/blob/e82594523d1a15ee9df8b08e6c7667f43f915bb3/scripts/builder/repair.js) | pipeline | No ticket yet: Spirality already runs the first of its three steps, `pass-reconcile`, at the start of every build pass, and the other two are written against ClickUp. Whether the scheduled sweep is still needed is Dane's call. |
-| Reconcile | Run by repair as its drift step; also `npm run reconcile` by hand | Tickets whose status disagrees with GitHub, for example `Ready to launch` while its pull request is already merged. | [reconcile_clickup_github.cjs](https://github.com/mentor24-maker/starcaster/blob/e82594523d1a15ee9df8b08e6c7667f43f915bb3/scripts/reconcile_clickup_github.cjs) | pipeline | No ticket yet: Spirality's relay already moves a ticket to Live when its pull request merges (`fixup-live`), which covers the commonest drift; the rest needs a new reading against the tracker. Dane decides. |
-| Machine backup | `npm run backup:node -- --scheduled` | A daily copy of what exists only on this machine's disk (its identity, launch agents, loop logs, sign-ins) into a private GitHub repository. | [backup_node.mjs](https://github.com/mentor24-maker/starcaster/blob/e82594523d1a15ee9df8b08e6c7667f43f915bb3/scripts/backup_node.mjs), [nodeBackup.js](https://github.com/mentor24-maker/starcaster/blob/e82594523d1a15ee9df8b08e6c7667f43f915bb3/lib/nodeBackup.js) | pipeline | No ticket yet: it backs up the Mini, which runs every project's lanes and the tracker, not StarCaster alone, so it is pipeline; but it is a machine job rather than a watchdog, and what it should hold for Spirality (the tracker's database, for one) needs deciding first. |
+| Repair | `npm run repair -- --check` | Tickets the loop left stranded (a dead pass's claim, a ticket stuck mid-hand-off, a ticket that disagrees with GitHub), fixing only what the evidence proves and reporting the rest. | [repair.mjs](https://github.com/mentor24-maker/starcaster/blob/e82594523d1a15ee9df8b08e6c7667f43f915bb3/scripts/repair.mjs), [repair.js](https://github.com/mentor24-maker/starcaster/blob/e82594523d1a15ee9df8b08e6c7667f43f915bb3/scripts/builder/repair.js) | pipeline | Not moving, by Dane's choice (Dane, 2026-11-16): `pass-reconcile` already hands back a dead pass's ticket at the start of every build pass, the relay moves a ticket to Live when it merges it, and the GitHub drift step goes to reconcile (SP-354). |
+| Reconcile | Run by repair as its drift step; also `npm run reconcile` by hand | Tickets whose status disagrees with GitHub, for example `Ready to launch` while its pull request is already merged. | [reconcile_clickup_github.cjs](https://github.com/mentor24-maker/starcaster/blob/e82594523d1a15ee9df8b08e6c7667f43f915bb3/scripts/reconcile_clickup_github.cjs) | pipeline | SP-354, in part (Dane, 2026-11-16): a read-only check, run by the relay, that names any open ticket whose pull request was merged or closed straight on GitHub and posts it on the bus. It changes no ticket. |
+| Machine backup | `npm run backup:node -- --scheduled` | A daily copy of what exists only on this machine's disk (its identity, launch agents, loop logs, sign-ins) into a private GitHub repository. | [backup_node.mjs](https://github.com/mentor24-maker/starcaster/blob/e82594523d1a15ee9df8b08e6c7667f43f915bb3/scripts/backup_node.mjs), [nodeBackup.js](https://github.com/mentor24-maker/starcaster/blob/e82594523d1a15ee9df8b08e6c7667f43f915bb3/lib/nodeBackup.js) | pipeline | SP-355, in part (Dane, 2026-11-16): copy the tracker's nightly backups and the Mini's launch agents to a private place off the Mini. StarCaster's sign-ins and identity files stay where they are. |
 | Failed-job report | `npm run report:failure` (called by the pulse and weekly report runners, and three StarCaster app runners, when a job exits non-zero) | Says on the bus that a scheduled job failed, with the end of its log. | [report_job_failure.mjs](https://github.com/mentor24-maker/starcaster/blob/e82594523d1a15ee9df8b08e6c7667f43f915bb3/scripts/report_job_failure.mjs) | pipeline | Moved (SP-268): `npm run report:failure`; every lane runner calls it when a pass exits non-zero. StarCaster's own app jobs (media intake, Reddit watch, Substack notes) keep calling theirs, through `bus-post`. |
-| Pipeline pulse | `npm run pulse:publish`, hourly, from its own schedule (`npm run pulse` prints the same reading by hand) | The loop's flow, hour by hour: tickets moving, passes declining, pull requests and tickets that do not name each other; publishes the report and posts what needs someone. | [run_pipeline_pulse.sh](https://github.com/mentor24-maker/starcaster/blob/e82594523d1a15ee9df8b08e6c7667f43f915bb3/scripts/run_pipeline_pulse.sh), [pulse_publish.mjs](https://github.com/mentor24-maker/starcaster/blob/e82594523d1a15ee9df8b08e6c7667f43f915bb3/scripts/pulse_publish.mjs), [pulse.cjs](https://github.com/mentor24-maker/starcaster/blob/e82594523d1a15ee9df8b08e6c7667f43f915bb3/scripts/pulse.cjs), [pulse.js](https://github.com/mentor24-maker/starcaster/blob/e82594523d1a15ee9df8b08e6c7667f43f915bb3/scripts/builder/pulse.js), [pulseDigest.js](https://github.com/mentor24-maker/starcaster/blob/e82594523d1a15ee9df8b08e6c7667f43f915bb3/lib/pulseDigest.js) | pipeline | No ticket yet: it is the biggest of the set and overlaps throughput (SP-268) and the tracker's Reporting page; whether it moves whole, in part, or not at all is Dane's call. |
+| Pipeline pulse | `npm run pulse:publish`, hourly, from its own schedule (`npm run pulse` prints the same reading by hand) | The loop's flow, hour by hour: tickets moving, passes declining, pull requests and tickets that do not name each other; publishes the report and posts what needs someone. | [run_pipeline_pulse.sh](https://github.com/mentor24-maker/starcaster/blob/e82594523d1a15ee9df8b08e6c7667f43f915bb3/scripts/run_pipeline_pulse.sh), [pulse_publish.mjs](https://github.com/mentor24-maker/starcaster/blob/e82594523d1a15ee9df8b08e6c7667f43f915bb3/scripts/pulse_publish.mjs), [pulse.cjs](https://github.com/mentor24-maker/starcaster/blob/e82594523d1a15ee9df8b08e6c7667f43f915bb3/scripts/pulse.cjs), [pulse.js](https://github.com/mentor24-maker/starcaster/blob/e82594523d1a15ee9df8b08e6c7667f43f915bb3/scripts/builder/pulse.js), [pulseDigest.js](https://github.com/mentor24-maker/starcaster/blob/e82594523d1a15ee9df8b08e6c7667f43f915bb3/lib/pulseDigest.js) | pipeline | Not moving, by Dane's choice (Dane, 2026-11-16): throughput (SP-268), `wip-check` and the tracker's Reporting page already cover what it reports. |
 | Weekly report | `npm run report:weekly -- --publish`, Mondays at 07:00, from its own schedule | Gathers the week's figures into a page uploaded to Google Drive, leaving room for the written summary. | [run_weekly_report.sh](https://github.com/mentor24-maker/starcaster/blob/e82594523d1a15ee9df8b08e6c7667f43f915bb3/scripts/run_weekly_report.sh), [weekly_report.mjs](https://github.com/mentor24-maker/starcaster/blob/e82594523d1a15ee9df8b08e6c7667f43f915bb3/scripts/weekly_report.mjs), [weeklyReport.js](https://github.com/mentor24-maker/starcaster/blob/e82594523d1a15ee9df8b08e6c7667f43f915bb3/scripts/builder/weeklyReport.js), [weeklyReportDrive.js](https://github.com/mentor24-maker/starcaster/blob/e82594523d1a15ee9df8b08e6c7667f43f915bb3/lib/weeklyReportDrive.js), [weeklyReportHome.js](https://github.com/mentor24-maker/starcaster/blob/e82594523d1a15ee9df8b08e6c7667f43f915bb3/lib/weeklyReportHome.js) | app | Stays in StarCaster (PLAN.md keeps weekly report content there); posts through `bus-post`. Many of its figures are loop figures, which the tracker's Reporting page already counts for every project. |
-| Review gate | A GitHub check on every pull request, not a scheduled job | Pull requests about to merge without a review verdict on their ticket or Dane's word; advisory (it annotates and passes) until Dane makes it a required check. | [review-gate.yml](https://github.com/mentor24-maker/starcaster/blob/e82594523d1a15ee9df8b08e6c7667f43f915bb3/.github/workflows/review-gate.yml) | pipeline | No ticket yet: it is a workflow file inside each project's own repository, which sits awkwardly with loop code living only in Spirality (INTEGRATION.md), so its shape needs deciding before anything moves. |
+| Review gate | A GitHub check on every pull request, not a scheduled job | Pull requests about to merge without a review verdict on their ticket or Dane's word; advisory (it annotates and passes) until Dane makes it a required check. | [review-gate.yml](https://github.com/mentor24-maker/starcaster/blob/e82594523d1a15ee9df8b08e6c7667f43f915bb3/.github/workflows/review-gate.yml) | pipeline | Not moving for now, by Dane's choice (Dane, 2026-11-16): merges go only through the relay on Dane's word, and the gate is a workflow file inside each project's own repository, which goes against loop code living only in Spirality (INTEGRATION.md). |
 
 ## Running the moved ones by hand
 
@@ -89,10 +89,12 @@ StarCaster. Three rows are closer calls than the rest:
 - **AI keys** is sorted app because the keys are the website's, although one
   copy lives on the Mini.
 
-Seven pipeline rows have no ticket yet: relay interval, node roles, repair,
-reconcile, machine backup, pipeline pulse and the review gate. Each says
-above why it waits, and [Seven questions](#seven-questions) below asks the
-one thing each is waiting on, with a recommended answer.
+Seven pipeline rows had no ticket: relay interval, node roles, repair,
+reconcile, machine backup, pipeline pulse and the review gate.
+[Seven questions](#seven-questions) below asked the one thing each was
+waiting on, with a recommended answer, and Dane answered all seven on
+2026-11-16 (SP-330): reconcile and machine backup move in part (SP-354,
+SP-355), and the other five do not move, by his choice.
 
 ## Seven questions
 
@@ -100,8 +102,9 @@ One question per ticketless pipeline row, in the table's order. Each can be
 answered in a word or a line: **move it** (build it into Spirality for every
 project), **move part of it** (and which part), or **do not move it**. Each
 recommendation was checked against Spirality's `main` at commit `e03a997`.
-SP-330 sends these to Dane and writes his answers into the table's "Goes to"
-column.
+SP-330 sent these to Dane, and he answered "all as recommended" on
+2026-11-16 at 11:43 AM Mountain time; his answers are in the table's
+"Goes to" column and under each question.
 
 1. **Relay interval.** Should Spirality get a check that the relay's installed
    schedule still matches what the repository says?
@@ -112,12 +115,16 @@ column.
    real wake time from the Settings page on every pass (`scripts/run_relay.sh`),
    so changing how often it runs never needs the installed schedule to change.
 
+   **Dane, 2026-11-16:** as recommended: not moving.
+
 2. **Node roles.** Should Spirality get StarCaster's list of which machine may
    run which job?
    **Recommended:** do not move it, until lanes run on a second machine.
    Every Spirality lane and the tracker run on the Mini, so there is nothing
    to divide, and SP-266's heartbeat already reads each lane's own log
    without it.
+
+   **Dane, 2026-11-16:** as recommended: not moving until lanes run on a second machine.
 
 3. **Repair.** Should Spirality get StarCaster's scheduled sweep that fixes
    tickets the loop left stranded?
@@ -127,6 +134,8 @@ column.
    the start of every build pass, and the relay already moves a ticket to
    Live when it merges that ticket's pull request (`lib/relayLane.js`), which
    leaves the sweep's last step, written against ClickUp, to question 4.
+
+   **Dane, 2026-11-16:** as recommended: not moving.
 
 4. **Reconcile.** Should Spirality get a check for tickets whose status
    disagrees with GitHub (for example `Ready to launch` while its pull request
@@ -140,6 +149,8 @@ column.
    GitHub leaves its ticket behind with nothing to say so, and a report that
    changes nothing is cheap and safe.
 
+   **Dane, 2026-11-16:** as recommended: moving in part, as SP-354.
+
 5. **Machine backup.** Should Spirality get a daily copy, off the Mini, of
    what exists only on its disk?
    **Recommended:** move part of it: copy the tracker's nightly backups and
@@ -149,6 +160,8 @@ column.
    (`tracker/backup.mjs`), but only onto the Mini's own disk, so a dead disk
    today loses every project's tickets at once.
 
+   **Dane, 2026-11-16:** as recommended: moving in part, as SP-355.
+
 6. **Pipeline pulse.** Should Spirality get StarCaster's hourly report on how
    the loop is flowing?
    **Recommended:** do not move it.
@@ -156,6 +169,8 @@ column.
    `wip-check` already pairs every open pull request with its ticket, and the
    tracker's Reporting page already counts each project's tickets and passes,
    so the pulse would mostly repeat them.
+
+   **Dane, 2026-11-16:** as recommended: not moving.
 
 7. **Review gate.** Should every project's pull requests carry a GitHub check
    that refuses a merge with no review verdict or word from Dane?
@@ -165,3 +180,5 @@ column.
    to live inside each project's repository, which goes against loop code
    living only in Spirality ([INTEGRATION.md](INTEGRATION.md)); StarCaster's
    own copy only advises and has never been made required.
+
+   **Dane, 2026-11-16:** as recommended: not moving for now.
