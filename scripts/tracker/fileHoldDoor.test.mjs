@@ -158,8 +158,6 @@ test('a ticket that names no files is refused at claim while work is in flight, 
     assert.match(refused.err, /names no files it will change/);
     assert.equal(f.store.getTicket(old).status, 'queued');
 
-    const got = await f.door(['get', '--task', old]);
-    assert.match(got.out, /^likely: {3}\(names no files/m);
     const w = await f.door(['likely-files', '--task', old, '--files', 'b.js, docs/D.md']);
     assert.equal(w.code, 0, w.err);
     assert.match(w.out, /Likely files: b\.js, docs\/D\.md \(added and read back\)/);
@@ -167,7 +165,6 @@ test('a ticket that names no files is refused at claim while work is in flight, 
     const again = await f.door(['likely-files', '--task', old, '--files', 'c.js']);
     assert.equal(again.code, 2);
     assert.match(again.err, /already has a Likely files: line/);
-    assert.match((await f.door(['get', '--task', old])).out, /^likely: {3}b\.js, docs\/D\.md \(from its Likely files: line\)/m);
     const claimed = await f.door(['claim', '--task', old]);
     assert.equal(claimed.code, 0, claimed.err);
   } finally { await f.cleanup(); }

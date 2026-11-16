@@ -1359,11 +1359,6 @@ if (cmd === 'whoami') {
     console.error(`\nread the attachments FAILED — ${files.problem.replace(/\.$/, '')}. The ticket may have files this pass cannot see; say so before speccing or building from it.`);
   } else if (!files.files.length) console.log('attachments: (none)');
   else for (const a of files.files) console.log(`attachments: ${attachmentLine(a)}`);
-  {
-    const likely = readLikelyFiles(t.markdown_description ?? t.description ?? '');
-    const from = likely.source === 'line' ? 'its Likely files: line' : 'the paths under ## Affected files / artifacts';
-    console.log(`likely:   ${likely.source ? `${likely.files.join(', ')} (from ${from})` : '(names no files: write them with likely-files before claiming)'}`);
-  }
   console.log(`url:      ${t.url}`);
   console.log('---');
   console.log(t.markdown_description || t.description || '(no body)');
