@@ -26,7 +26,7 @@
  * an emailed link's own page. The link's token is sent only in a JSON body,
  * never in an address.
  */
-import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, loopHasIt, renderCommentForm, MOVED_MESSAGE, renderMarkdown, unwrapDoc, renderCloseAction, renderGoAction, goQuestion, renderBugReportActions, approveQuestion, rejectQuestion, changeProblem, REJECT_COMMENT, WONT_DO_TAG, renderMergeAction, renderAnswerIn, renderHeldUp, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, lookupTicket, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, pipelinePodLabel, renderHealth, healthLines, renderCommandList, renderCommandView, renderCommandDetails, renderContextDocs, renderTopics, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, renderListTopics, projectTags, sortTickets, nextSort, renderDocumentation, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, lowerMeridiem, renderPipelineControls, renderConsole, drainLine, renderTitleChoices, titleModeOf, SUGGEST_POLL_MS, moveSuggestion, suggestState, filingPlan, orderPlan, andList, suggestRunLine, renderSuggestRows } from './render.mjs';
+import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, loopHasIt, renderCommentForm, MOVED_MESSAGE, renderMarkdown, unwrapDoc, renderCloseAction, renderGoAction, goQuestion, renderBugReportActions, approveQuestion, rejectQuestion, changeProblem, REJECT_COMMENT, WONT_DO_TAG, renderMergeAction, renderAnswerIn, renderHeldUp, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, lookupTicket, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, pipelinePodLabel, renderHealth, healthLines, renderCommandList, renderCommandView, renderCommandDetails, renderContextDocs, renderTopics, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, renderListTopics, projectTags, projectTagCounts, sortTickets, nextSort, renderDocumentation, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, lowerMeridiem, renderPipelineControls, renderConsole, drainLine, renderTitleChoices, titleModeOf, SUGGEST_POLL_MS, moveSuggestion, suggestState, filingPlan, orderPlan, andList, suggestRunLine, renderSuggestRows, renderSuggestionInfo } from './render.mjs';
 
 /** Where an earlier version of the page kept a pasted token; removed on load, never read. */
 const OLD_TOKEN_KEY = 'tracker-token';
@@ -1419,6 +1419,13 @@ async function drawProject(slug, view, { adding = false, filed = null, unchecked
         <div class="row file-row" hidden><button type="button" class="file-order">File in This Order</button><span class="file-note note" role="status"></span></div>
       </div>
     </details>
+    <dialog class="suggestion-info" aria-labelledby="suggestion-info-title">
+      <form method="dialog">
+        <button type="submit" class="close" aria-label="Close">×</button>
+        <div class="suggestion-info-body"></div>
+        <div class="row"><button type="submit">Close</button></div>
+      </form>
+    </dialog>
     <dialog class="project-check" aria-labelledby="project-check-question">
       <form method="dialog">
         <button type="submit" class="close" value="" aria-label="Close: file nothing">×</button>
@@ -2703,6 +2710,35 @@ function wireSuggestNext(slug, view) {
     show(started);
   });
 
+  // The i on a row (SP-304): its suggestion's About box, found by the
+  // suggestion's own index, so a moved row's i opens its own. Close, Escape
+  // or a click outside the box shuts it, and focus goes back to that i.
+  const info = main.querySelector('dialog.suggestion-info');
+  let infoOpener = null;
+  list.addEventListener('click', (e) => {
+    const button = e.target.closest('button.suggestion-info-open');
+    if (!button) return;
+    const suggestion = suggestions[Number(button.dataset.index)];
+    if (!suggestion) return;
+    infoOpener = button;
+    info.querySelector('.suggestion-info-body').innerHTML = renderSuggestionInfo(suggestion);
+    info.showModal();
+  });
+  // A click on the backdrop lands on the dialog itself; one on its own
+  // padding does too, so only a click beyond its edges closes it.
+  info.addEventListener('click', (e) => {
+    if (e.target !== info) return;
+    const r = info.getBoundingClientRect();
+    if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) info.close();
+  });
+  info.addEventListener('close', () => {
+    // A redraw since may have replaced the row: focus the i drawn for the same suggestion.
+    const index = infoOpener?.dataset.index;
+    infoOpener = null;
+    const again = index != null ? list.querySelector(`button.suggestion-info-open[data-index="${index}"]`) : null;
+    again?.focus();
+  });
+
   // The dropdown: pick a number, the row goes there.
   list.addEventListener('change', (e) => {
     const li = e.target.closest('li.suggestion');
@@ -3720,7 +3756,9 @@ async function drawDocs(done = '', problem = '', section = 'files') {
 
 /**
  * The Topics page (SP-243): the topics of the project picked here (or on
- * the Projects page, else the first) and a Create Topic form. Picking
+ * the Projects page, else the first) and a Create Topic form, beside the
+ * tags on the project's tasks (SP-307, read from its board; a board that
+ * cannot be read says so in the Tags half and leaves Topics working). Picking
  * another project here selects it, as the Tasks page's picker does. A blank
  * name is refused on the page before anything is sent; after a create the
  * list is read again, and the page says it worked only when the new topic
@@ -3736,8 +3774,11 @@ async function drawTopics(done = '', problem = '') {
   }
   const project = projects.find((p) => p.slug === savedProject()) ?? projects[0];
   const topicsPath = `/projects/${encodeURIComponent(project.slug)}/topics`;
-  const { topics } = await api('GET', topicsPath);
-  main.innerHTML = renderTopics({ projects, project, topics }, { timeOf: when, done, problem });
+  const [{ topics }, tags] = await Promise.all([
+    api('GET', topicsPath),
+    api('GET', `/projects/${encodeURIComponent(project.slug)}/board`).then(projectTagCounts, (err) => { if (err instanceof SignedOut) throw err; return null; }),
+  ]);
+  main.innerHTML = renderTopics({ projects, project, topics, tags }, { timeOf: when, done, problem });
   const note = main.querySelector('.topic-note');
   const say = (text, failed = false) => { note.className = `note topic-note ${failed ? 'error' : 'quiet'}`; note.textContent = text; };
   const again = (text, failed) => drawAgain(() => drawTopics(failed ? '' : text, failed ? text : ''))

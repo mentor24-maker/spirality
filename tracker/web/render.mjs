@@ -2213,6 +2213,22 @@ export function projectTags(board) {
 }
 
 /**
+ * SP-307: every tag on a board's tickets with how many tickets carry it,
+ * `[{ tag, count }]`, in projectTags' order (the List view's Add Tag list).
+ * A tag a ticket lists twice counts that ticket once.
+ */
+export function projectTagCounts(board) {
+  const counts = new Map();
+  for (const c of Array.isArray(board?.columns) ? board.columns : []) {
+    for (const t of Array.isArray(c?.tickets) ? c.tickets : []) {
+      const own = new Set((Array.isArray(t?.tags) ? t.tags : []).filter((tag) => typeof tag === 'string' && tag));
+      for (const tag of own) counts.set(tag, (counts.get(tag) ?? 0) + 1);
+    }
+  }
+  return projectTags(board).map((tag) => ({ tag, count: counts.get(tag) }));
+}
+
+/**
  * SP-246: a List view row's Tags cell (app.mjs wireListPickers). Each tag a
  * chip with a × that removes it; then an Add Tag dropdown of the project's
  * other tags (`known`, from projectTags), never one the ticket already has,
@@ -2387,35 +2403,59 @@ export function renderContextDocs({ project, docs = [] }, { size, timeOf }) {
 }
 
 /**
- * The Topics page (SP-243): the picked project's topics (key aspects of a
- * project, mostly features), newest first, each with its description, maker
- * and time, then a Create Topic form (Name, Description). `done` and
- * `problem` are the line the last create left. `timeOf` puts a time in
- * words. Every name and description is escaped.
+ * The Topics page (SP-243), in two equal halves (SP-307): Topics on the
+ * left, Tags on the right; a narrow screen stacks them, Topics first
+ * (app.css). The Topics half opens with the Add Topic form folded shut (a
+ * "colex", a <details>), then the picked project's topics, newest first,
+ * each with its description, maker and time. The form is drawn open when
+ * `problem` is set, so a refused create is not hidden away. The Tags half
+ * lists every tag on the project's tasks once, with how many carry it
+ * (`tags`, from projectTagCounts; null when they could not be read).
+ * `done` and `problem` are the line the last create left. `timeOf` puts a
+ * time in words. Every name, description and tag is escaped.
  */
-export function renderTopics({ projects, project, topics = [] }, { timeOf, done = '', problem = '' } = {}) {
+export function renderTopics({ projects, project, topics = [], tags = [] }, { timeOf, done = '', problem = '' } = {}) {
   const row = (t) => `<tr data-topic="${escapeHtml(t.id)}">
       <td class="name">${escapeHtml(t.name)}</td>
       <td class="about">${t.description ? escapeHtml(t.description) : '<span class="quiet">none</span>'}</td>
       <td class="by">${t.createdByName ? escapeHtml(t.createdByName) : '<span class="quiet">unknown</span>'}</td>
       <td class="when">${escapeHtml(timeOf(t.createdAt))}</td></tr>`;
+  const tagRow = ({ tag, count }) => `<tr data-tag="${escapeHtml(tag)}">
+      <td class="name"><span class="tag">${escapeHtml(tag)}</span></td>
+      <td class="count">${count} ${count === 1 ? 'task' : 'tasks'}</td></tr>`;
+  const tagList = tags === null
+    ? '<p class="note error no-tags">The tags could not be read. Reload the page to try again.</p>'
+    : tags.length
+      ? `<table class="projects tag-list"><thead><tr><th>Tag</th><th>Tasks</th></tr></thead>
+        <tbody>${tags.map(tagRow).join('')}</tbody></table>`
+      : '<p class="quiet no-tags">No tags yet.</p>';
   return `<h1>Topics</h1>
     <div class="toolbar">${renderProjectPicker(projects, project.slug)}</div>
-    <p class="quiet">The key aspects of ${escapeHtml(project.name)}: its features, mostly. Each topic belongs to one project.</p>
+    <p class="quiet">The key aspects of ${escapeHtml(project.name)}: its features, mostly. Each topic belongs to one project. Tags are the labels on its tasks.</p>
     <p class="note topic-note${problem ? ' error' : ' quiet'}" role="status">${escapeHtml(problem || done)}</p>
-    <h2>Topics</h2>
-    ${topics.length
+    <div class="topics-columns">
+      <section class="topics-half" aria-labelledby="topics-title">
+        <details class="colex add-topic"${problem ? ' open' : ''}>
+          <summary><span class="fold" aria-hidden="true"></span>Add Topic</summary>
+          <form class="create-topic">
+            <label for="topic-name">Name</label>
+            <input id="topic-name" name="name" maxlength="200" autocomplete="off">
+            <label for="topic-description">Description</label>
+            <textarea id="topic-description" name="description" rows="3" maxlength="5000"></textarea>
+            <div class="row"><button type="submit">Create Topic</button></div>
+          </form>
+        </details>
+        <h2 id="topics-title">Topics</h2>
+        ${topics.length
     ? `<table class="projects topic-list"><thead><tr><th>Name</th><th>Description</th><th>Created By</th><th>Created</th></tr></thead>
-      <tbody>${topics.map(row).join('')}</tbody></table>`
+        <tbody>${topics.map(row).join('')}</tbody></table>`
     : '<p class="quiet no-topics">No topics yet.</p>'}
-    <h2>Create Topic</h2>
-    <form class="create-topic">
-      <label for="topic-name">Name</label>
-      <input id="topic-name" name="name" maxlength="200" autocomplete="off">
-      <label for="topic-description">Description</label>
-      <textarea id="topic-description" name="description" rows="3" maxlength="5000"></textarea>
-      <div class="row"><button type="submit">Create Topic</button></div>
-    </form>`;
+      </section>
+      <section class="tags-half" aria-labelledby="tags-title">
+        <h2 id="tags-title">Tags</h2>
+        ${tagList}
+      </section>
+    </div>`;
 }
 
 /**
@@ -2828,8 +2868,10 @@ export function suggestRunLine(run) {
 /**
  * The Suggest Next Tasks rows for `suggestions` in `state`'s order (suggestState):
  * each a drag handle (arrow keys move it too), its place as a dropdown of
- * 1 to the number of rows, a Keep checkbox, the title, and the why and
- * description under More. A filed row names its ticket. Every word is
+ * 1 to the number of rows, a Keep checkbox, the title, an i button that
+ * opens the row's About box (SP-304, renderSuggestionInfo), and the why and
+ * description under More. The i carries the suggestion's own index, not its
+ * place, so a moved row's i still opens its own suggestion. A filed row names its ticket. Every word is
  * escaped: a suggestion is text, never markup.
  */
 export function renderSuggestRows(suggestions, state) {
@@ -2848,10 +2890,27 @@ export function renderSuggestRows(suggestions, state) {
       // the minute's redraw would never run while the list shows.
       + `<label class="keep"><input type="checkbox" value="keep"${dropped.has(i) ? '' : ' checked'}> Keep</label>`
       + `<span class="suggestion-title">${title}</span>`
+      + `<button type="button" class="suggestion-info-open" data-index="${i}" aria-label="About ${title}" title="About This Task">${INFO_ICON}</button>`
       + (filed ? `<span class="filed">Filed <a href="/t/${encodeURIComponent(filed.id)}">${escapeHtml(filed.id)}</a></span>` : '')
       + `<details class="more"><summary>More</summary>`
       + (s.why ? `<p class="why"><strong>Why:</strong> ${escapeHtml(s.why)}</p>` : '')
       + (s.description ? `<p class="suggestion-description">${escapeHtml(s.description)}</p>` : '')
       + `</details></li>`;
   }).join('');
+}
+
+/**
+ * What a suggestion's About box holds (SP-304): its title as the heading,
+ * Why It Matters and Description, each only when the suggestion has it.
+ * Every word is escaped: a suggestion is text, never markup. SP-305 adds
+ * its related tickets, topics, tags and links here.
+ */
+export function renderSuggestionInfo(suggestion) {
+  const s = suggestion ?? {};
+  const section = (heading, text) => (text
+    ? `<h3>${heading}</h3><p>${escapeHtml(text)}</p>`
+    : '');
+  const body = section('Why It Matters', s.why) + section('Description', s.description);
+  return `<h2 id="suggestion-info-title">${escapeHtml(s.title ?? '')}</h2>`
+    + (body || '<p class="quiet">This suggestion came with nothing more to say.</p>');
 }

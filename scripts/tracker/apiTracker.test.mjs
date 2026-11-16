@@ -528,6 +528,37 @@ test('ask posts the card, moves to Needs your input and assigns the operator; wa
   } finally { await f.cleanup(); }
 });
 
+test('ask refuses a new card over a teammate\'s answer to the card in Needs your input (SP-302 round 2)', async () => {
+  const f = await fixture();
+  try {
+    const rich = f.store.createActor({ kind: 'human', name: 'Rich' });
+    f.file({ name: 'one', status: 'building' });
+    const r = await f.door(['ask', '--task', 'AL-1', '--body-file', '-'], { stdin: CARD });
+    assert.equal(r.code, 0, r.err);
+    f.store.postComment({ ticket: 'AL-1', author: rich.id, body: 'UPI ok' });
+
+    const again = await f.door(['ask', '--task', 'AL-1', '--body-file', '-'], { stdin: CARD });
+    assert.equal(again.code, 2, again.err);
+    assert.match(again.err, /REFUSED — Rich's answer to the card is the NEWEST one on AL-1/);
+    assert.equal(f.store.listComments('AL-1').length, 2, 'no second card was posted');
+
+    // Said on the record to be a new question, it goes through.
+    const said = await f.door(['ask', '--task', 'AL-1', '--after-his-answer', '--body-file', '-'], { stdin: CARD });
+    assert.equal(said.code, 0, said.err);
+  } finally { await f.cleanup(); }
+});
+
+test('ask is not refused by a teammate\'s comment on a ticket outside Needs your input', async () => {
+  const f = await fixture();
+  try {
+    const rich = f.store.createActor({ kind: 'human', name: 'Rich' });
+    f.file({ name: 'one', status: 'building' });
+    f.store.postComment({ ticket: 'AL-1', author: rich.id, body: 'looks fine to me' });
+    const r = await f.door(['ask', '--task', 'AL-1', '--body-file', '-'], { stdin: CARD });
+    assert.equal(r.code, 0, r.err);
+  } finally { await f.cleanup(); }
+});
+
 test('a card whose @@ASKED holds his own "> " and ``` lines posts, stores and renders with the ask outside the code box (SP-44)', async () => {
   const f = await fixture();
   try {

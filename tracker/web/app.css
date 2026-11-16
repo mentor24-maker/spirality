@@ -66,7 +66,20 @@ img.logo { width: 1.75rem; height: 1.75rem; object-fit: contain; vertical-align:
 img.logo.big { width: 2.5rem; height: 2.5rem; margin-right: 0.75rem; }
 table.projects td.logo { width: 1%; padding-right: 0; }
 table.projects td.url, table.projects td.repo { overflow-wrap: anywhere; }
-/* The Topics page's Create Topic form (SP-243). */
+/* The Topics page (SP-243): Topics and Tags in two equal halves (SP-307), stacked on a narrow screen. */
+.topics-columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 2rem; align-items: start; margin-top: 1rem; }
+.topics-columns > section { min-width: 0; }
+.topics-columns > section > h2:first-child { margin-top: 0; }
+@media (max-width: 800px) { .topics-columns { grid-template-columns: minmax(0, 1fr); } }
+/* An add form folded shut until clicked open (a "colex"). */
+details.colex { border: var(--hairline); border-radius: 8px; margin-bottom: 1rem; }
+details.colex > summary { display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 0.75rem; cursor: pointer; list-style: none; font-weight: 600; }
+details.colex > summary::-webkit-details-marker { display: none; }
+details.colex > summary .fold::before { content: '▸'; }
+details.colex[open] > summary .fold::before { content: '▾'; }
+details.colex > summary:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }
+details.colex > form { padding: 0 0.75rem 0.75rem; }
+table.tag-list td.count, table.tag-list th:last-child { white-space: nowrap; text-align: right; }
 form.create-topic { max-width: 40rem; }
 form.create-topic label { display: block; margin-top: 0.75rem; font-weight: 600; }
 form.create-topic input, form.create-topic textarea { display: block; width: 100%; font: inherit; padding: 0.5rem; box-sizing: border-box; margin-top: 0.35rem; }
@@ -362,8 +375,19 @@ details.add-task .suggest-next .drag-handle:focus-visible { outline: 2px solid v
 details.add-task .suggest-next select.place { width: auto; margin: 0; }
 details.add-task .suggest-next label.keep { display: flex; align-items: center; gap: 0.3rem; margin: 0; font-weight: 400; }
 details.add-task .suggest-next label.keep input { width: auto; margin: 0; }
-details.add-task .suggest-next .suggestion-title { flex: 1 1 16rem; font-weight: 600; }
+details.add-task .suggest-next .suggestion-title { flex: 0 1 auto; font-weight: 600; }
 details.add-task .suggest-next .filed { font-size: 0.9em; }
+details.add-task .suggest-next button.suggestion-info-open { flex: none; display: inline-flex; margin-right: auto; padding: 0.1rem; border: 0; border-radius: 50%; background: transparent; color: var(--ink); cursor: pointer; }
+details.add-task .suggest-next button.suggestion-info-open svg { width: 1.25em; height: 1.25em; }
+details.add-task .suggest-next button.suggestion-info-open:hover, details.add-task .suggest-next button.suggestion-info-open:focus-visible { background: var(--blue); }
+/* SP-304: a suggestion's About box, the same look as a command's pop-up. */
+dialog.suggestion-info { border: var(--hairline); border-radius: 8px; padding: 1rem 1.25rem; max-width: min(36rem, 95vw); color: var(--ink); }
+dialog.suggestion-info::backdrop { background: rgba(0, 0, 0, 0.3); }
+dialog.suggestion-info h2 { margin: 0 2rem 0.25rem 0; font-size: 1.1rem; }
+dialog.suggestion-info h3 { margin: 0.75rem 0 0.25rem; font-size: 1rem; }
+dialog.suggestion-info p { margin: 0; white-space: pre-wrap; }
+dialog.suggestion-info button.close { float: right; border: 0; background: transparent; cursor: pointer; padding: 0 0.25rem; font-size: 1.25rem; line-height: 1; color: var(--quiet); }
+dialog.suggestion-info .row { display: flex; justify-content: flex-end; margin-top: 1rem; }
 details.add-task .suggest-next details.more { flex-basis: 100%; }
 details.add-task .suggest-next details.more > summary { cursor: pointer; color: var(--quiet); font-size: 0.9em; }
 details.add-task .suggest-next details.more p { margin: 0.3rem 0 0; white-space: pre-wrap; }

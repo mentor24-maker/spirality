@@ -63,3 +63,80 @@ test('a failing stage with no reason or start still says it is held up (SP-228)'
   const bare = new Map([['loop-build', { name: 'Build', job: 'loop-build', failing: true }]]);
   assert.deepEqual(heldUpBy(ticket('queued'), [], DANE, bare), { stage: 'Build', job: 'loop-build', reason: 'keeps failing', since: null });
 });
+
+// SP-302 (Dane's choice A, 2026-11-14): PP-8 showed on both Dane's and Rich's
+// Waiting on You lists; Rich answered it and it stayed on Dane's. Through a
+// real store, the way GET /waiting reads it for each of them.
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { openStore } from './store.mjs';
+import { waitingFor, threadOf } from './pageData.mjs';
+import operatorCard from '../lib/operatorCard.js';
+import busRelayPlan from '../lib/busRelayPlan.js';
+
+const ASK_CARD = `@@NEEDED\nWhich feed?\n${operatorCard.BANNER_LABEL}Your move: Reply`;
+
+function teamStore() {
+  const dir = mkdtempSync(join(tmpdir(), 'sp302-'));
+  // A clock that moves a second each write: a reply is always AFTER the card
+  // it answers, as it is in life (the same millisecond reads as before it).
+  let tick = Date.parse('2026-11-14T21:00:00Z');
+  const store = openStore(join(dir, 'tracker.db'), { now: () => new Date((tick += 1000)).toISOString() });
+  const dane = store.createActor({ kind: 'human', name: 'Dane' });
+  const rich = store.createActor({ kind: 'human', name: 'Rich' });
+  const loop = store.createActor({ kind: 'machine', name: 'Loop' });
+  store.createProject({ slug: 'pp', name: 'PressPlay', prefix: 'PP', operator: dane.id });
+  return { store, dane, rich, loop, done: () => { store.close(); rmSync(dir, { recursive: true, force: true }); } };
+}
+const listed = (w) => [...w.waiting, ...w.unsure].map((x) => x.id);
+
+test('SP-302: a teammate\'s reply to a Needs your input card takes it off every list, and the page says the answer is in', () => {
+  const { store, dane, rich, loop, done } = teamStore();
+  try {
+    const t = store.fileTicket({ project: 'pp', actor: loop.id, name: 'Add a feed', status: 'Needs your input', assignee: dane.id });
+    store.postComment({ ticket: t.id, author: loop.id, body: ASK_CARD, parent: null });
+    assert.ok(listed(waitingFor(store, dane.id)).includes(t.id), 'on Dane\'s list before anyone answers');
+    assert.ok(listed(waitingFor(store, rich.id)).includes(t.id), 'and on Rich\'s');
+
+    store.postComment({ ticket: t.id, author: rich.id, body: 'UPI ok', parent: null });
+    assert.deepEqual(listed(waitingFor(store, dane.id)), [], 'off Dane\'s list once Rich answered');
+    assert.deepEqual(listed(waitingFor(store, rich.id)), [], 'and off Rich\'s');
+    assert.equal(threadOf(store, t.id).answerIn, true);
+  } finally { done(); }
+});
+
+test('SP-302: in Ready to launch a teammate\'s comment leaves it on Dane\'s list: only his merge word merges', () => {
+  const { store, dane, rich, loop, done } = teamStore();
+  try {
+    const t = store.fileTicket({ project: 'pp', actor: loop.id, name: 'Add a feed', status: 'Ready to launch', assignee: dane.id });
+    store.postComment({ ticket: t.id, author: loop.id, body: 'REVIEW: PASSED — all green.', parent: null });
+    store.postComment({ ticket: t.id, author: rich.id, body: 'looks good', parent: null });
+    assert.ok(waitingFor(store, dane.id).waiting.map((x) => x.id).includes(t.id));
+    assert.equal(threadOf(store, t.id).answerIn, false);
+  } finally { done(); }
+});
+
+test('SP-302: a teammate\'s comment on a ticket parked with no card leaves it on Dane\'s list (the relay never moves it)', () => {
+  const { store, dane, rich, loop, done } = teamStore();
+  try {
+    const t = store.fileTicket({ project: 'pp', actor: loop.id, name: 'Add a feed', status: 'Needs your input', assignee: dane.id });
+    store.postComment({ ticket: t.id, author: loop.id, body: 'Parked for Dane by hand.', parent: null });
+    store.postComment({ ticket: t.id, author: rich.id, body: 'I will look later', parent: null });
+    assert.ok(listed(waitingFor(store, dane.id)).includes(t.id));
+    assert.equal(threadOf(store, t.id).answerIn, false);
+  } finally { done(); }
+});
+
+test('SP-302: after an answer the relay already acted on, a teammate\'s "any update?" leaves it on Dane\'s list', () => {
+  const { store, dane, rich, loop, done } = teamStore();
+  try {
+    const t = store.fileTicket({ project: 'pp', actor: loop.id, name: 'Add a feed', status: 'Needs your input', assignee: dane.id });
+    store.postComment({ ticket: t.id, author: loop.id, body: ASK_CARD, parent: null });
+    const his = store.postComment({ ticket: t.id, author: dane.id, body: 'B', parent: null });
+    store.postComment({ ticket: t.id, author: loop.id, body: busRelayPlan.handbackDoneText({ target: 'Queued' }), parent: his.id });
+    store.postComment({ ticket: t.id, author: rich.id, body: 'any update?', parent: null });
+    assert.ok(listed(waitingFor(store, dane.id)).includes(t.id));
+    assert.equal(threadOf(store, t.id).answerIn, false);
+  } finally { done(); }
+});
