@@ -58,7 +58,7 @@ const require = createRequire(import.meta.url);
 const staleAnswer = require('../lib/staleAnswer.js');
 const staleReady = require('../lib/staleReady.js');
 const busRelayPlan = require('../lib/busRelayPlan.js');
-const { handbackAnswer } = require('../lib/relayLane.js');
+const { handbackAnswer, earlierAnswerIds } = require('../lib/relayLane.js');
 const { isMachineAuthored } = require('../lib/machineComment.js');
 
 /**
@@ -124,14 +124,18 @@ export function runStaleAnswer({
     if (!comments) { records.push({ ...base, commentsReadable: false }); continue; }
 
     // The SAME derivation the relay hands the ticket back on.
-    const answered = handbackAnswer({ comments, operatorId, isMachine: isMachineAuthored });
+    const answered = handbackAnswer({ comments, operatorId, isMachine: isMachineAuthored, teammates: true });
 
     const newest = comments.reduce(
       (best, c) => (busRelayPlan.commentAt(c) > busRelayPlan.commentAt(best) ? c : best),
       comments[0] || null,
     );
+    // His own newest word, or a teammate's newest that IS the relay's answer
+    // to the card (SP-302): a teammate's comment on a ticket with no card is
+    // nothing the relay acts on, so it raises no "your answer has sat" alarm.
     const operatorSpokeLast = busRelayPlan
-      .operatorComments(newest ? [newest] : [], { operatorId, isMachine: isMachineAuthored }).length > 0;
+      .operatorComments(newest ? [newest] : [], { operatorId, isMachine: isMachineAuthored }).length > 0
+      || Boolean(newest && answered.state === 'answered' && String(answered.answer?.id) === String(newest.id));
 
     const at = answered.state === 'answered'
       ? answered.answerAt
@@ -156,6 +160,25 @@ export function runStaleAnswer({
         markers = staleAnswer.markersFromReplyEnvelope(readReplies({ taskId: id, commentId: answered.answer.id }));
       } catch { markers = null; }
       if (markers && markers.handbackDone === true) record.state = 'handled';
+      // A teammate's answer after one already acted on (SP-302 rounds 2
+      // and 3): the same earlier reads the relay makes, then the relay's own
+      // second reading with those spent. It is `answered` again only on a
+      // word of his NEWER than the spent answer, and then that word's age is
+      // the one that counts. An earlier read that fails is left unspent, so
+      // the alarm stays on rather than going quiet unchecked.
+      if (record.state === 'answered') {
+        const spent = [];
+        for (const commentId of earlierAnswerIds({ comments, verdict: answered, operatorId, isMachine: isMachineAuthored })) {
+          let earlier = null;
+          try { earlier = staleAnswer.markersFromReplyEnvelope(readReplies({ taskId: id, commentId })); } catch { earlier = null; }
+          if (earlier && earlier.handbackDone === true) spent.push(commentId);
+        }
+        if (spent.length) {
+          const again = handbackAnswer({ comments, operatorId, isMachine: isMachineAuthored, teammates: true, spent });
+          record.state = again.state;
+          if (again.state === 'answered') record.answerMinutes = (now - again.answerAt) / staleAnswer.MS_PER_MINUTE;
+        }
+      }
     }
     records.push(record);
   }
