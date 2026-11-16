@@ -1417,7 +1417,7 @@ async function drawProject(slug, view, { adding = false, filed = null, unchecked
       </form>
       <div class="suggest-next"${suggesting ? '' : ' hidden'}>
         <p class="hint quiet">Reads the project (its plans, documents and code) and its open tickets, and suggests what to do next. Put them in order, untick any you do not want, and file the rest as requests.</p>
-        <div class="row"><button type="button" class="btn btn-primary suggest-run">Suggest Next Tasks</button><span class="run-note note" role="status"></span></div>
+        <div class="row run-row"><button type="button" class="btn btn-primary suggest-run">Suggest Next Tasks</button><span class="run-note note" role="status"></span></div>
         <ol class="suggestions"></ol>
         <div class="row file-row" hidden><button type="button" class="btn btn-primary file-order">File in This Order</button><span class="file-note note" role="status"></span></div>
       </div>
@@ -2610,6 +2610,7 @@ function wireSuggestNext(slug, view) {
   const fold = box.closest('details.add-task');
   const run = box.querySelector('button.suggest-run');
   const runNote = box.querySelector('.run-note');
+  const runRow = box.querySelector('.run-row');
   const list = box.querySelector('ol.suggestions');
   const fileRow = box.querySelector('.file-row');
   const fileButton = box.querySelector('button.file-order');
@@ -2641,6 +2642,11 @@ function wireSuggestNext(slug, view) {
   const drawRows = (focusIndex = null) => {
     list.innerHTML = state ? renderSuggestRows(suggestions, state) : '';
     fileRow.hidden = !state;
+    // SP-319: with suggestions showing, the one run button (Suggest Again)
+    // sits at the right of the bottom row, across from File in This Order;
+    // with none, it is back at the top. Its status line stays at the top.
+    if (state) { if (run.parentNode !== fileRow) fileRow.append(run); }
+    else if (run.parentNode !== runRow) runRow.prepend(run);
     if (focusIndex != null) list.querySelector(`li[data-index="${focusIndex}"] .drag-handle`)?.focus();
   };
   const move = (from, to, focus = false) => {

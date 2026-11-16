@@ -559,6 +559,8 @@ details.add-task form.request label.title-choice { display: flex; align-items: b
 /* SP-303: the Suggest checkbox sits at the right end of the Add Task bar; its part shares the one blue box. */
 details.add-task > summary .suggest-switch { float: right; display: flex; align-items: center; gap: var(--space-2); margin: 0; font-weight: 600; cursor: pointer; }
 details.add-task .suggest-next > .hint { margin-top: 0.75rem; }
+details.add-task .suggest-next .row:not([hidden]) { display: flex; flex-wrap: wrap; gap: var(--space-4); align-items: center; }
+details.add-task .suggest-next .file-row button.suggest-run { margin-left: auto; }
 details.add-task .suggest-next ol.suggestions { list-style: none; margin: 0.75rem 0 0; padding: 0; }
 details.add-task .suggest-next ol.suggestions:empty { display: none; }
 details.add-task .suggest-next li.suggestion { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); margin: 0 0 0.4rem; padding: 0.4rem 0.75rem; border: 1px solid var(--ink-primary); border-radius: var(--radius-input); background: var(--bg-surface); }

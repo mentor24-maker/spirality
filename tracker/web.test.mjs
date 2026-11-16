@@ -6116,9 +6116,14 @@ test('the Suggest Next Tasks box sits beside Add Task, in Title Case, and its bu
   assert.ok(draw.indexOf('</form>', draw.indexOf('<details class="add-task">')) < draw.indexOf('<div class="suggest-next"'), 'inside the Add Task box, after the form');
   assert.ok(draw.indexOf('<div class="suggest-next"') < draw.indexOf('</details>', draw.indexOf('<details class="add-task">')), 'inside the Add Task box');
   assert.doesNotMatch(draw, /<details class="suggest-next">|<summary>Suggest Next Tasks<\/summary>/, 'no separate Suggest Next Tasks bar');
-  assert.match(draw, /<button type="button" class="btn btn-primary suggest-run">Suggest Next Tasks<\/button>/);
+  assert.match(draw, /<div class="row run-row"><button type="button" class="btn btn-primary suggest-run">Suggest Next Tasks<\/button><span class="run-note note" role="status"><\/span><\/div>/, 'before any suggestions, the run button is at the top');
   assert.match(draw, /<div class="row file-row" hidden><button type="button" class="btn btn-primary file-order">File in This Order<\/button>/);
   assert.match(draw, /wireSuggestNext\(board\.project, view\);/);
+  // SP-319: with suggestions showing, the one run button moves to the right of
+  // the bottom row, across from File in This Order; with none, back to the top.
+  const drawRows = wire.slice(wire.indexOf('const drawRows = '), wire.indexOf('const move = '));
+  assert.match(drawRows, /fileRow\.hidden = !state;\s*[\s\S]*?if \(state\) \{ if \(run\.parentNode !== fileRow\) fileRow\.append\(run\); \}\s*else if \(run\.parentNode !== runRow\) runRow\.prepend\(run\);/, 'the run button follows the file row');
+  assert.match(wire, /const runRow = box\.querySelector\('\.run-row'\);/);
   assert.match(wire, /run\.textContent = latest\?\.state === 'failed' \? 'Try Again' : latest\?\.state === 'done' \? 'Suggest Again' : 'Suggest Next Tasks';/);
   // POST starts it; GET reads it, unrecorded so a finished run never redraws the whole page under him.
   assert.match(wire, /api\('POST', path, \{\}\)/);
@@ -6131,6 +6136,9 @@ test('the Suggest Next Tasks box sits beside Add Task, in Title Case, and its bu
   const css = readFileSync(WEB('app.css'), 'utf8');
   assert.match(css, /details\.add-task \[hidden\] \{ display: none; \}/, 'the hidden side stays hidden');
   assert.doesNotMatch(css, /details\.suggest-next/, 'no rule for the old separate box');
+  // SP-319: the rows lay out as rows (never un-hiding the hidden file row), Suggest Again pushed right, wrapping on a narrow window.
+  assert.match(css, /details\.add-task \.suggest-next \.row:not\(\[hidden\]\) \{ display: flex; flex-wrap: wrap; gap: var\(--space-4\); align-items: center; \}/);
+  assert.match(css, /details\.add-task \.suggest-next \.file-row button\.suggest-run \{ margin-left: auto; \}/);
 });
 
 test('the Suggest Next Tasks rows move by dropdown, by the arrow keys on the handle, and by dragging, all through moveSuggestion, and the state is kept for a redraw', () => {
