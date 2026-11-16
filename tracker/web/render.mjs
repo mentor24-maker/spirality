@@ -1314,12 +1314,42 @@ export function renderAnswerIn({ answerIn = false, mergeStands = false }) {
 export function renderReplyForm(t, name) {
   const { answerIn = false } = t ?? {};
   if (answerIn) return '';
+  // SP-291: while a loop has the ticket nothing asks him for a reply; renderCommentForm stands in.
+  if (loopHasIt(t)) return '';
   // SP-287: no loop reads a reply on a held bug report; renderBugReportActions stands in.
   if (heldBugReport(t)) return '';
   return `<form class="reply">
         <label for="reply">Reply as ${escapeHtml(name ?? 'you')}</label>
         <textarea id="reply" required></textarea>
         <div class="row"><button type="submit">Post Reply</button><span class="note"></span></div>
+      </form>`;
+}
+
+/**
+ * The six statuses in which a loop has the ticket (SP-291): nothing on its
+ * page asks him for a reply, so the right column shows the ticket itself.
+ * His two (Needs your input, Ready to launch) are not here, nor is a status
+ * the page does not know, which keeps today's layout.
+ */
+export const LOOP_HAS_STATUSES = Object.freeze(['requested', 'queued', 'building', 'in review', 'rework', 'live']);
+
+/** Does a loop have this ticket (LOOP_HAS_STATUSES)? */
+export function loopHasIt({ status } = {}) {
+  return LOOP_HAS_STATUSES.includes(String(status ?? '').toLowerCase());
+}
+
+/**
+ * The Add Comment box under a loop ticket's comments (SP-291), as HTML, or
+ * '' on any other ticket (his two statuses keep the reply box). It posts
+ * through the same comments route as the reply box, so a note on a Queued
+ * ticket is there when the build loop reads it.
+ */
+export function renderCommentForm(t) {
+  if (!loopHasIt(t)) return '';
+  return `<form class="add-comment">
+        <label for="add-comment">Add a note for the loop</label>
+        <textarea id="add-comment" required></textarea>
+        <div class="row"><button type="submit">Add Comment</button><span class="note"></span></div>
       </form>`;
 }
 

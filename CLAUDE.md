@@ -33,8 +33,9 @@ and lessons learned in one do not reach the other. Spirality ends that:
    this repository against the project's. A change reaches Spirality's own
    lanes first and each project after it, so it can never reach every project
    at once unchecked. See [docs/INTEGRATION.md](docs/INTEGRATION.md) (Dane,
-   SP-261, 2026-11-12). Until those moves land, projects still carry a wizard
-   copy (`docs/ONBOARDING_A_PROJECT.md`, gap 1).
+   SP-261, 2026-11-12). A new project gets no copy of the loop (SP-273); the
+   projects set up before then still carry a wizard copy until their own
+   queues remove it (`docs/ONBOARDING_A_PROJECT.md`, gap 1).
 
 The full analysis and the five-phase plan are on the WaveCenter ticket that
 created this repository (86bcgm97x) and in `docs/PLAN.md`.
