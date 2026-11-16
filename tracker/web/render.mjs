@@ -2899,18 +2899,60 @@ export function renderSuggestRows(suggestions, state) {
   }).join('');
 }
 
+/** A GitHub repository's `owner/name`, the store's own shape; anything else links no file. */
+const GITHUB_REPO = /^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/;
+
+/**
+ * A suggested file's address on GitHub, at `main` (SP-305), or null when
+ * `repo` is not an `owner/name` or `path` is not a plain relative path (the
+ * server checks it too: no `..`, no leading `/`, no scheme or `:`).
+ */
+export function suggestionFileHref(repo, path) {
+  if (typeof repo !== 'string' || !GITHUB_REPO.test(repo) || typeof path !== 'string' || !path) return null;
+  if (path.startsWith('/') || /[\u0000-\u001f\u007f\\:]/.test(path)) return null;
+  const parts = path.split('/');
+  if (parts.some((p) => p === '' || p === '..')) return null;
+  return `https://github.com/${repo}/blob/main/${parts.map(encodeURIComponent).join('/')}`;
+}
+
 /**
  * What a suggestion's About box holds (SP-304): its title as the heading,
- * Why It Matters and Description, each only when the suggestion has it.
- * Every word is escaped: a suggestion is text, never markup. SP-305 adds
- * its related tickets, topics, tags and links here.
+ * Why It Matters and Description, then (SP-305) About This Task, Related
+ * Tickets (each a link to its ticket, with its name), Topics and Tags as
+ * chips, and Links: a file opens on the project's GitHub repository
+ * (`repo`) at main, a ticket opens its page. Each only when the suggestion
+ * has it; a file with no repository to link it to is named, unlinked.
+ * Every word is escaped: a suggestion is text, never markup.
  */
-export function renderSuggestionInfo(suggestion) {
+export function renderSuggestionInfo(suggestion, { repo = null } = {}) {
   const s = suggestion ?? {};
+  const list = (v) => (Array.isArray(v) ? v : []);
   const section = (heading, text) => (text
     ? `<h3>${heading}</h3><p>${escapeHtml(text)}</p>`
     : '');
-  const body = section('Why It Matters', s.why) + section('Description', s.description);
+  const ticketLink = (id, label) => `<a href="/t/${encodeURIComponent(id)}">${escapeHtml(label)}</a>`;
+  const related = list(s.related).filter((r) => typeof r?.id === 'string' && r.id)
+    .map((r) => `<li>${ticketLink(r.id, r.id)}${r.name ? ` ${escapeHtml(r.name)}` : ''}</li>`).join('');
+  const chips = (heading, cls, names) => {
+    const shown = list(names).filter((n) => typeof n === 'string' && n);
+    return shown.length ? `<h3>${heading}</h3><p class="chips">${shown.map((n) => `<span class="${cls}">${escapeHtml(n)}</span>`).join('')}</p>` : '';
+  };
+  const links = list(s.links).map((l) => {
+    if (typeof l?.ticket === 'string' && l.ticket) return `<li>${ticketLink(l.ticket, l.label || l.ticket)}</li>`;
+    if (typeof l?.path !== 'string' || !l.path) return '';
+    const href = suggestionFileHref(repo, l.path);
+    const label = escapeHtml(l.label || l.path);
+    const where = l.label && l.label !== l.path ? ` <code>${escapeHtml(l.path)}</code>` : '';
+    return href
+      ? `<li><a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">${label}</a>${where}</li>`
+      : `<li>${label}${where}</li>`;
+  }).join('');
+  const body = section('Why It Matters', s.why) + section('Description', s.description)
+    + section('About This Task', s.about)
+    + (related ? `<h3>Related Tickets</h3><ul class="related">${related}</ul>` : '')
+    + chips('Topics', 'tag topic', s.topics)
+    + chips('Tags', 'tag', s.tags)
+    + (links ? `<h3>Links</h3><ul class="links">${links}</ul>` : '');
   return `<h2 id="suggestion-info-title">${escapeHtml(s.title ?? '')}</h2>`
     + (body || '<p class="quiet">This suggestion came with nothing more to say.</p>');
 }
