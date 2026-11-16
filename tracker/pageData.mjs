@@ -1196,18 +1196,27 @@ export const PRIORITIES = Object.freeze(Object.keys(PRIORITY_RANK).sort((a, b) =
 const capital = (s) => String(s).replace(/^./, (c) => c.toUpperCase());
 
 /**
- * The search's five filters, in the order the page shows them, each with
+ * The search's six filters, in the order the page shows them, each with
  * the query parameter that carries it, its label, and its choices as
  * `{ value, label }` (the value is what the address holds): the projects
- * the reader may see (visibleProjects, `only`) by name, the eight
- * statuses in the contract's STAGE_ORDER, the store's priorities plus
- * "none", and every actor, people and loops, by name ("Assigned to" also
- * takes "nobody"). "Created by" is the actor on a ticket's `created` event.
+ * the reader may see (visibleProjects, `only`) by name, the topics of
+ * `project` (a slug of one of those projects) by name, alphabetical, each
+ * by its id, and none while no project is chosen, the eight statuses in
+ * the contract's STAGE_ORDER, the store's priorities plus "none", and
+ * every actor, people and loops, by name ("Assigned to" also takes
+ * "nobody"). "Created by" is the actor on a ticket's `created` event.
  */
-export function searchFilterChoices(store, { only = null } = {}) {
+export function searchFilterChoices(store, { only = null, project = null } = {}) {
   const actors = store.listActors().map((a) => ({ value: String(a.id), label: a.name }));
+  const projects = visibleProjects(store, only);
+  const topics = project != null && projects.some((p) => p.slug === project)
+    ? store.listTopics(project)
+      .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }) || a.id - b.id)
+      .map((t) => ({ value: String(t.id), label: t.name }))
+    : [];
   return [
-    { key: 'project', label: 'Project', options: visibleProjects(store, only).map((p) => ({ value: p.slug, label: p.name })) },
+    { key: 'project', label: 'Project', options: projects.map((p) => ({ value: p.slug, label: p.name })) },
+    { key: 'topic', label: 'Topic', options: topics },
     { key: 'status', label: 'Status', options: STAGE_ORDER.map((name) => ({ value: name, label: name })) },
     { key: 'priority', label: 'Priority', options: [...PRIORITIES.map((p) => ({ value: p, label: capital(p) })), { value: 'none', label: 'None' }] },
     { key: 'createdBy', label: 'Created By', options: actors },
@@ -1216,7 +1225,7 @@ export function searchFilterChoices(store, { only = null } = {}) {
 }
 
 /** What a filter's value is called in a refusal. */
-const FILTER_NOUNS = Object.freeze({ project: 'project', status: 'status', priority: 'priority', createdBy: 'actor', assignee: 'actor' });
+const FILTER_NOUNS = Object.freeze({ project: 'project', topic: 'topic', status: 'status', priority: 'priority', createdBy: 'actor', assignee: 'actor' });
 
 /**
  * Read the search's filters from `get(key)` (the address's query
@@ -1225,16 +1234,21 @@ const FILTER_NOUNS = Object.freeze({ project: 'project', status: 'status', prior
  * chosen (as its choice writes it) or null, or `{ problem }`, a plain
  * sentence naming the value that is not one of the choices. A project the
  * reader may not see (`only`) is not one of them: it is refused word for
- * word as one that does not exist, never answered.
+ * word as one that does not exist, never answered. A topic is one of the
+ * chosen project's, so one from another project, or any topic while no
+ * project is chosen, is refused too.
  */
 export function readSearchFilters(store, get, { only = null } = {}) {
-  const filters = searchFilterChoices(store, { only }).map((f) => ({ ...f, value: null }));
+  const project = String(get('project') ?? '').trim() || null;
+  const filters = searchFilterChoices(store, { only, project }).map((f) => ({ ...f, value: null }));
   for (const f of filters) {
     const raw = String(get(f.key) ?? '').trim();
     if (!raw) continue;
     const hit = f.options.find((o) => (f.key === 'status' || f.key === 'priority' ? o.value.toLowerCase() === raw.toLowerCase() : o.value === raw));
     if (!hit) {
-      const known = f.key === 'status' || f.key === 'priority' ? ` ${f.label} is one of: ${f.options.map((o) => o.label).join(', ')}.` : '';
+      const known = f.key === 'status' || f.key === 'priority' ? ` ${f.label} is one of: ${f.options.map((o) => o.label).join(', ')}.`
+        : f.key === 'topic' && project == null ? ' Pick a project first: a topic belongs to one project.'
+        : f.key === 'topic' ? ` ${f.label} is one of that project's topics${f.options.length ? `: ${f.options.map((o) => o.label).join(', ')}` : ', and it has none'}.` : '';
       return { problem: `There is no ${FILTER_NOUNS[f.key]} "${raw}" to filter ${f.label} by.${known}` };
     }
     f.value = hit.value;
@@ -1243,7 +1257,8 @@ export function readSearchFilters(store, get, { only = null } = {}) {
 }
 
 /** Does `ticket` pass every chosen filter? Created by is read from its events only when that filter is on. */
-function passesFilters(store, ticket, chosen) {
+function passesFilters(store, ticket, chosen, topicsOf) {
+  if (chosen.topic != null && !(topicsOf.get(ticket.id) ?? []).some((t) => String(t.id) === chosen.topic)) return false;
   if (chosen.status != null && ticket.status !== statusOf(chosen.status)) return false;
   if (chosen.priority != null && (ticket.priority ?? 'none') !== chosen.priority) return false;
   if (chosen.assignee != null && String(ticket.assignee ?? 'nobody') !== chosen.assignee) return false;
@@ -1299,8 +1314,9 @@ export function searchTickets(store, query, filters = null, { only = null } = {}
   const results = [];
   for (const project of visibleProjects(store, only)) {
     if (chosen.project != null && project.slug !== chosen.project) continue;
+    const topicsOf = chosen.topic != null ? store.ticketTopicsOf(project.slug) : null;
     for (const ticket of store.listTickets(project.slug)) {
-      if (!passesFilters(store, ticket, chosen)) continue;
+      if (!passesFilters(store, ticket, chosen, topicsOf)) continue;
       const discussion = [];
       const development = [];
       for (const c of store.listComments(ticket.id)) {

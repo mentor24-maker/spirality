@@ -1907,11 +1907,12 @@ test('GET /search narrows by Status, Priority, Created by and Assigned to, alone
 
     const all = (await f.call('GET', '/search?q=widget')).body;
     assert.deepEqual(all.filters.map((x) => [x.key, x.label, x.value]),
-      [['project', 'Project', null], ['status', 'Status', null], ['priority', 'Priority', null], ['createdBy', 'Created By', null], ['assignee', 'Assigned To', null]]);
-    assert.deepEqual(all.filters[1].options.map((o) => o.value), loopStatuses.STAGE_ORDER);
-    assert.deepEqual(all.filters[2].options.map((o) => o.value), ['urgent', 'high', 'normal', 'low', 'none']);
-    assert.deepEqual(all.filters[3].options, [f.human, f.machine, other].map((x) => ({ value: String(x.id), label: x.name })));
-    assert.deepEqual(all.filters[4].options[0], { value: 'nobody', label: 'Nobody' });
+      [['project', 'Project', null], ['topic', 'Topic', null], ['status', 'Status', null], ['priority', 'Priority', null], ['createdBy', 'Created By', null], ['assignee', 'Assigned To', null]]);
+    assert.deepEqual(all.filters[1].options, [], 'no project chosen, no topics offered');
+    assert.deepEqual(all.filters[2].options.map((o) => o.value), loopStatuses.STAGE_ORDER);
+    assert.deepEqual(all.filters[3].options.map((o) => o.value), ['urgent', 'high', 'normal', 'low', 'none']);
+    assert.deepEqual(all.filters[4].options, [f.human, f.machine, other].map((x) => ({ value: String(x.id), label: x.name })));
+    assert.deepEqual(all.filters[5].options[0], { value: 'nobody', label: 'Nobody' });
 
     assert.deepEqual(await ids('&status=Queued'), [a.id, b.id, d.id, e.id].sort());
     assert.deepEqual(await ids('&status=rework'), [c.id]);
@@ -1927,7 +1928,7 @@ test('GET /search narrows by Status, Priority, Created by and Assigned to, alone
     // The weighted order holds: a title match before a comment match, whatever the filter.
     const ranked = (await f.call('GET', `/search?q=widget&status=Queued&createdBy=${f.machine.id}`)).body;
     assert.deepEqual(ranked.results.map((x) => x.id), [a.id, e.id]);
-    assert.deepEqual(ranked.filters.map((x) => x.value), [null, 'Queued', null, String(f.machine.id), null]);
+    assert.deepEqual(ranked.filters.map((x) => x.value), [null, null, 'Queued', null, String(f.machine.id), null]);
 
     // Created by is the actor on the `created` event, not whoever changed the ticket last.
     f.store.changeTicket(b.id, { actor: f.machine.id, status: 'rework' });
@@ -1940,6 +1941,53 @@ test('GET /search narrows by Status, Priority, Created by and Assigned to, alone
       ['&assignee=someone', /no actor "someone"/],
     ]) {
       const r = await f.call('GET', `/search?q=widget${query}`);
+      assert.equal(r.status, 400, query);
+      assert.equal(r.body.error, 'unknown-filter');
+      assert.match(r.body.message, words);
+    }
+  } finally { await f.cleanup(); }
+});
+
+test('GET /search narrows to one topic with Topic, offers only the chosen project\'s topics, and refuses a topic with no project or from another project', async () => {
+  const f = await fixture();
+  try {
+    f.store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE', operator: f.human.id });
+    const notifications = f.store.addTopic({ project: 'alpha', name: 'Notifications', actor: f.human.id });
+    const board = f.store.addTopic({ project: 'alpha', name: 'board', actor: f.human.id });
+    const theirs = f.store.addTopic({ project: 'beta', name: 'Theirs', actor: f.human.id });
+    const file = (project, name, topics = []) => {
+      const t = f.store.fileTicket({ project, actor: f.human.id, name, status: 'queued' });
+      if (topics.length) f.store.changeTicket(t.id, { actor: f.human.id, topics });
+      return t;
+    };
+    const a = file('alpha', 'Comet board', [board.id]);
+    const b = file('alpha', 'Comet both', [board.id, notifications.id]);
+    const c = file('alpha', 'Comet none');
+    const d = file('beta', 'Comet theirs', [theirs.id]);
+    const ids = async (query) => (await f.call('GET', `/search?q=comet${query}`)).body.results.map((x) => x.id).sort();
+
+    // The chosen project's topics, alphabetical (case aside), each by its id.
+    const alpha = (await f.call('GET', '/search?q=comet&project=alpha')).body;
+    const topic = alpha.filters.find((x) => x.key === 'topic');
+    assert.equal(alpha.filters[1], topic, 'right after Project');
+    assert.equal(topic.label, 'Topic');
+    assert.deepEqual(topic.options, [{ value: String(board.id), label: 'board' }, { value: String(notifications.id), label: 'Notifications' }]);
+    assert.deepEqual((await f.call('GET', '/search?q=comet&project=beta')).body.filters[1].options, [{ value: String(theirs.id), label: 'Theirs' }]);
+
+    // Every result carries the topic chosen; none chosen answers what it did before.
+    assert.deepEqual(await ids(`&project=alpha&topic=${board.id}`), [a.id, b.id].sort());
+    assert.deepEqual(await ids(`&project=alpha&topic=${notifications.id}`), [b.id]);
+    assert.deepEqual(await ids(`&project=beta&topic=${theirs.id}`), [d.id]);
+    assert.deepEqual(await ids('&project=alpha&topic='), [a.id, b.id, c.id].sort());
+    assert.deepEqual(await ids(''), [a.id, b.id, c.id, d.id].sort());
+    assert.equal((await f.call('GET', `/search?q=comet&project=alpha&topic=${board.id}`)).body.filters[1].value, String(board.id));
+
+    for (const [query, words] of [
+      [`&topic=${board.id}`, /no topic "\d+" to filter Topic by\. Pick a project first/],
+      [`&project=alpha&topic=${theirs.id}`, /no topic "\d+" to filter Topic by\. Topic is one of that project's topics: board, Notifications\./],
+      ['&project=alpha&topic=nonsense', /no topic "nonsense"/],
+    ]) {
+      const r = await f.call('GET', `/search?q=comet${query}`);
       assert.equal(r.status, 400, query);
       assert.equal(r.body.error, 'unknown-filter');
       assert.match(r.body.message, words);

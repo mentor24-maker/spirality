@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { DEMO_NEWEST_RELEASE, DEMO_OWN_PROJECT, DEMO_SUGGESTIONS, DEMO_TOPICS, demoNewestRelease, demoSuggest, seedDemo, tickingClock } from './demoData.mjs';
 import { reportsOf, REPORT_RANGES, GROWTH_PERIODS, searchTickets, PRIORITIES, timeSplitOf, isFailureNote, TIME_BUCKETS, pipelineControlsOf } from './pageData.mjs';
-import { escapeHtml, renderStatusLine, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, CLOSE_LINE, REPLY_LINE, offersMerge, offersClose, bugReport, BUG_REPORT_TAG, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, heldBugReport, renderBugReportActions, approveQuestion, rejectQuestion, changeProblem, REJECT_COMMENT, WONT_DO_TAG, HELD_REPORT_LINE, HELD_REPORT_STATUS_LINE, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, loopHasIt, renderCommentForm, LOOP_HAS_STATUSES, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, renderTopics, renderTopicEditRow, topicDeleteQuestion, renderTagEditRow, tagDeleteQuestion, tagAddressable, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, renderListTopics, projectTags, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, renderReleaseGroup, controlValueText, mountainTime, wakeInEffectText, modelLastPassText, renderConsole, renderConsoleTile, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, consoleFeature, featureColourIndex, renderFeatureKey, FEATURE_PALETTE, drainLine, capInFlightText, renderTitleChoices, titleModeOf, TITLE_MODES, SUGGEST_POLL_MS, moveSuggestion, suggestState, filingPlan, orderPlan, andList, suggestRunLine, renderSuggestRows, renderSuggestionInfo, suggestionFileHref } from './web/render.mjs';
+import { escapeHtml, renderStatusLine, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, CLOSE_LINE, REPLY_LINE, offersMerge, offersClose, bugReport, BUG_REPORT_TAG, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, heldBugReport, renderBugReportActions, approveQuestion, rejectQuestion, changeProblem, REJECT_COMMENT, WONT_DO_TAG, HELD_REPORT_LINE, HELD_REPORT_STATUS_LINE, cardMove, renderTrail, renderProjectPicker, renderTopicPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, loopHasIt, renderCommentForm, LOOP_HAS_STATUSES, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, renderTopics, renderTopicEditRow, topicDeleteQuestion, renderTagEditRow, tagDeleteQuestion, tagAddressable, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, renderListTopics, projectTags, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, renderReleaseGroup, controlValueText, mountainTime, wakeInEffectText, modelLastPassText, renderConsole, renderConsoleTile, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, consoleFeature, featureColourIndex, renderFeatureKey, FEATURE_PALETTE, drainLine, capInFlightText, renderTitleChoices, titleModeOf, TITLE_MODES, SUGGEST_POLL_MS, moveSuggestion, suggestState, filingPlan, orderPlan, andList, suggestRunLine, renderSuggestRows, renderSuggestionInfo, suggestionFileHref } from './web/render.mjs';
 import { startServer, setupSettingsOf } from './server.mjs';
 import { saveAnswers, setupFields, setupOf } from './setup.mjs';
 import { DANE_FIELDS as SETUP_FIELDS, STEPS as SETUP_STEPS } from '../scripts/onboard/onboard.mjs';
@@ -4275,10 +4275,10 @@ test('the Tasks toolbar picks a project from a dropdown, "Project: ", the one in
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   const draw = app.slice(app.indexOf('async function drawProject'), app.indexOf('async function copyText'));
   assert.match(draw, /api\('GET', '\/projects'\),\n  \]\);/);
-  assert.match(draw, /<div class="toolbar">\s*\$\{renderProjectPicker\(projects, board\.project\)\}\s*\$\{searchForm\(''\)\}\s*<button type="button" class="pipeline-pod"[^>]*><\/button>\s*<\/div>\s*\$\{viewSwitch\(board\.project, view\)\}\s*<\/div>/, 'the tabs close the title row, after the toolbar (SP-326)');
+  assert.match(draw, /<div class="toolbar">\s*\$\{renderProjectPicker\(projects, board\.project\)\}\s*\$\{renderTopicPicker\(board\.topics \?\? \[\]\)\}\s*\$\{searchForm\(''\)\}\s*<button type="button" class="pipeline-pod"[^>]*><\/button>\s*<\/div>\s*\$\{viewSwitch\(board\.project, view\)\}\s*<\/div>/, 'the tabs close the title row, after the toolbar (SP-326)');
   assert.doesNotMatch(app, /Change project/);
   assert.match(draw, /querySelector\('\.project-picker select'\)\.addEventListener\('change', \(e\) => \{\s*history\.pushState\(null, '', at\(view, e\.target\.value\)\);\s*route\(\);/);
-  assert.match(readFileSync(WEB('app.css'), 'utf8'), /\.toolbar \.project-picker \{[^}]*display: flex;/);
+  assert.match(readFileSync(WEB('app.css'), 'utf8'), /\.toolbar \.project-picker(, \.toolbar \.topic-picker)? \{[^}]*display: flex;/);
 });
 
 test('search bolds every occurrence of the term, any case, after escaping the ticket\'s own text', () => {
@@ -4332,7 +4332,7 @@ test('the search finds the demo\'s tickets in every project and names its status
 
 test('the Tasks page\'s toolbar holds the Search field, and Enter opens the results page', () => {
   const app = readFileSync(WEB('app.mjs'), 'utf8');
-  assert.match(app, /\$\{renderProjectPicker\(projects, board\.project\)\}\s*\$\{searchForm\(''\)\}/);
+  assert.match(app, /\$\{renderProjectPicker\(projects, board\.project\)\}\s*\$\{renderTopicPicker\(board\.topics \?\? \[\]\)\}\s*\$\{searchForm\(''\)\}/);
   assert.match(app, /history\.pushState\(null, '', searchAddress\(form\.elements\.q\.value\.trim\(\)\)\)/);
   assert.match(app, /renderSearchResults\(answer\)/);
 });
@@ -4390,7 +4390,7 @@ test('the search results page draws the filters from the server\'s answer, keeps
   const draw = app.slice(app.indexOf('function searchAddress('), app.indexOf('/**\n * Put `text` on the clipboard'));
   assert.match(draw, /renderSearchFilters\(answer\.filters, /);
   assert.match(draw, /api\('GET', `\/search\?\$\{params\}`\)/);
-  assert.match(draw, /for \(const select of main\.querySelectorAll\('\.search-filters select'\)\) select\.addEventListener\('change', go\)/);
+  assert.match(draw, /for \(const select of main\.querySelectorAll\('\.search-filters select'\)\) \{\s*select\.addEventListener\('change', \(\) => \{/);
   assert.match(draw, /<p class="error">\$\{escapeHtml\(refusal\)\}<\/p>/);
   // No status, priority or person is typed out: every choice comes from the server.
   for (const word of [...loopStatuses.STAGE_ORDER, 'urgent', 'Urgent', 'Nobody', 'nobody']) {
@@ -4399,10 +4399,31 @@ test('the search results page draws the filters from the server\'s answer, keeps
   assert.match(app, /await drawSearch\(new URLSearchParams\(location\.search\)\)/);
 });
 
+test('the Tasks toolbar\'s Topic picker offers "Any" then the project\'s topics, and the Search page\'s Topic filter waits for a project', () => {
+  assert.equal(renderTopicPicker([{ id: 4, name: 'Board' }, { id: 2, name: 'R&D <b>' }]),
+    '<label class="topic-picker">Topic: <select name="topic"><option value="" selected>Any</option>'
+    + '<option value="4">Board</option><option value="2">R&amp;D &lt;b&gt;</option></select></label>');
+  assert.equal(renderTopicPicker([]), '<label class="topic-picker">Topic: <select name="topic"><option value="" selected>Any</option></select></label>', 'a project with no topics: "Any" only');
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  assert.match(readFileSync(WEB('app.css'), 'utf8'), /\.toolbar \.project-picker, \.toolbar \.topic-picker \{[^}]*display: flex;/);
+  // Changing Project on the Search page drops the topic before searching again.
+  const wire = app.slice(app.indexOf('function wireSearch('), app.indexOf('function wireTicketLookup('));
+  assert.match(wire, /if \(select\.name === 'project' && topic\) topic\.value = '';\s*go\(\);/);
+
+  const topic = { key: 'topic', label: 'Topic', value: null, options: [{ value: '4', label: 'Board' }] };
+  const project = { key: 'project', label: 'Project', value: null, options: [{ value: 'alpha', label: 'Alpha' }] };
+  const idle = renderSearchFilters([project, topic]);
+  assert.match(idle, /<label>Topic\s*<select name="topic" disabled title="Pick a project first"><option value="" selected>Any<\/option><\/select><span class="quiet hint">Pick a project first<\/span>/);
+  const chosen = renderSearchFilters([{ ...project, value: 'alpha' }, { ...topic, value: '4' }]);
+  assert.match(chosen, /<label>Topic\s*<select name="topic"><option value="">Any<\/option><option value="4" selected>Board<\/option><\/select>\s*<\/label>/);
+  assert.ok(chosen.indexOf('name="project"') < chosen.indexOf('name="topic"'));
+  assert.deepEqual(activeFilters([{ ...project, value: 'alpha' }, { ...topic, value: '4' }]), ['Project: Alpha', 'Topic: Board']);
+});
+
 test('searching from the Tasks page carries the project chosen in its picker into the address as the Project filter (SP-191)', () => {
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   const address = app.slice(app.indexOf('function searchAddress('), app.indexOf('/** Enter in the Search field'));
-  assert.match(address, /main\.querySelectorAll\('\.project-picker select, \.search-filters select'\)/);
+  assert.match(address, /main\.querySelectorAll\('\.project-picker select, \.topic-picker select, \.search-filters select'\)/);
   assert.match(address, /params\.set\(select\.name, select\.value\)/);
   // The picker's field is named what the server's Project filter reads, and the results page's row draws it.
   assert.match(renderProjectPicker([{ slug: 'alpha', name: 'Alpha' }, { slug: 'beta', name: 'Beta' }], 'beta'),

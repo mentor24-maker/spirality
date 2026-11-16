@@ -1240,6 +1240,18 @@ export function renderProjectPicker(projects, current) {
   return `<label class="project-picker">Project: <select name="project">${options.join('')}</select></label>`;
 }
 
+/**
+ * The Topic picker on the Tasks page's toolbar, beside the project picker:
+ * "Topic: " and a dropdown of "Any" then `topics` (the board's, `{ id, name }`,
+ * already alphabetical), each by its id. It changes nothing on the board:
+ * the topic chosen goes into the search as its Topic filter. Names are
+ * typed by people, so every one is escaped.
+ */
+export function renderTopicPicker(topics = []) {
+  const options = topics.map((t) => option(String(t.id), t.name, false));
+  return `<label class="topic-picker">Topic: <select name="topic">${option('', 'Any', true)}${options.join('')}</select></label>`;
+}
+
 /** The status the relay merges from, as the tracker stores it (lib/mergeOnComment.js). */
 const READY_TO_LAUNCH = 'ready to launch';
 /** The two statuses that are his, where a card can ask him to close (lib/loopStatuses.js). */
@@ -1877,13 +1889,20 @@ export function activeFilters(filters = []) {
 /**
  * The search results page's filter row, from the server's answer: one
  * picker for each filter, its choices as the server lists them, "Any"
- * first, the chosen value selected.
+ * first, the chosen value selected. The Topic filter offers the chosen
+ * project's topics, so while Project is "Any" it is greyed out, "Any"
+ * alone, with the hint "Pick a project first".
  */
 export function renderSearchFilters(filters = [], { tickets = null } = {}) {
-  const picker = (f) => `
+  const noProject = filters.find((f) => f.key === 'project')?.value == null;
+  const picker = (f) => {
+    const idle = f.key === 'topic' && noProject;
+    const choices = idle ? '' : f.options.map((o) => option(o.value, o.label, o.value === f.value)).join('');
+    return `
     <label>${escapeHtml(f.label)}
-      <select name="${escapeHtml(f.key)}">${option('', 'Any', f.value == null)}${f.options.map((o) => option(o.value, o.label, o.value === f.value)).join('')}</select>
+      <select name="${escapeHtml(f.key)}"${idle ? ' disabled title="Pick a project first"' : ''}>${option('', 'Any', idle || f.value == null)}${choices}</select>${idle ? '<span class="quiet hint">Pick a project first</span>' : ''}
     </label>${f.key === 'project' && tickets ? renderTicketLookup(tickets) : ''}`;
+  };
   return `<div class="search-filters">${filters.map(picker).join('')}</div>`;
 }
 
