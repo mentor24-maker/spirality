@@ -452,6 +452,38 @@ test('for a project, the clash guard reads Spirality\'s own values from Spiralit
   }
 });
 
+test('with no --project, the installer shows Spirality\'s own lanes wherever it is started from, and still refuses a real clash (SP-312)', () => {
+  const home = scratchHome();
+  const project = scratchProject();
+  const own = JSON.parse(readFileSync(join(REPO, 'spirality.project.json'), 'utf8'));
+  try {
+    // Started in another project's folder (prefix com.normie), no --project.
+    const fromThere = printedPlists([], home, project);
+    assert.deepEqual(Object.keys(fromThere).sort(), [...lanes(), 'relay'].map((j) => `${own.launchdPrefix}.${j}.plist`).sort());
+    assert.ok(!Object.keys(fromThere).some((f) => f.startsWith('com.normie.')));
+    for (const text of Object.values(fromThere)) {
+      assert.equal(stringAfter(text, 'WorkingDirectory'), REPO.replace(/\/$/, ''));
+      assert.doesNotMatch(text, /SPIRALITY_PROJECT/);
+      assert.doesNotMatch(text, /normie/);
+    }
+    // The same plists as when started from Spirality's own folder.
+    assert.deepEqual(fromThere, printedPlists([], home));
+    // From that same folder, a project naming Spirality's own prefix is refused.
+    const clash = scratchProject({ launchdPrefix: own.launchdPrefix });
+    try {
+      const r = runInstaller(['--print-plists', '--project', clash], home, project);
+      assert.equal(r.status, 1, r.stdout + r.stderr);
+      assert.equal(r.stdout, '');
+      assert.match(r.stderr, /names Spirality's own launchdPrefix/);
+    } finally {
+      rmSync(clash, { recursive: true, force: true });
+    }
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(project, { recursive: true, force: true });
+  }
+});
+
 test('--project=~/... is expanded like the space form (SP-271 review)', () => {
   const home = scratchHome();
   const project = scratchProject();
