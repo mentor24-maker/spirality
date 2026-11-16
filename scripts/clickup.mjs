@@ -92,6 +92,7 @@ import stageCounts from '../lib/stageCounts.js';
 // A ticket's `Waits on:` line (task 86bctfun6): the claim leaves it alone
 // until every ticket it names is closed.
 import { waitsOn, waitsOnText, holdReasons } from '../lib/waitsOn.js';
+import { isNoticeboard } from '../lib/loopNoticeboards.js';
 import waitingOnOperator from '../lib/waitingOnOperator.js';
 import { ticketLine, findTicketId } from '../lib/clickupTicketLink.js';
 // Which files each open pull request changes (SP-349).
@@ -1173,6 +1174,13 @@ if (cmd === 'claim') {
     console.error(`Claimable statuses, in drain order: ${CLAIMABLE_BY_BUILD.map((x) => DISPLAY[x]).join(', ')}. Take the next task.`);
     process.exit(3);
   }
+  // A noticeboard is not work (SP-356): with the bus in the project's own
+  // queue, a steward's question parked in a claimable status by hand must
+  // still never be built.
+  if (isNoticeboard(seen)) {
+    console.error(`NOT claimed: "${task}" is a noticeboard (Team chat, the pause switch, or tagged noticeboard), not work. Nothing was written. Take the next task.`);
+    process.exit(3);
+  }
   const states = await prerequisiteStates([seen]);
   const held = holdReasons(seen, (id) => states.get(id));
   if (held.reasons.length) {
@@ -1276,7 +1284,10 @@ if (cmd === 'whoami') {
   if (claimable) {
     // A ticket from this (open-only) list is open; any other prerequisite
     // is read on its own, so queue and claim apply the same rule.
-    const ordered = claimOrder(tasks);
+    const ordered = claimOrder(tasks).filter((t) => {
+      if (isNoticeboard(t)) console.error(`skipped ${t.id}: a noticeboard, not work (SP-356)`);
+      return !isNoticeboard(t);
+    });
     const states = await prerequisiteStates(ordered, tasks.map((t) => t.id));
     wanted = ordered.filter((t) => {
       const held = holdReasons(t, (id) => states.get(id));
@@ -2624,7 +2635,9 @@ if (cmd === 'whoami') {
       }
       description = out.json.markdown_description || out.json.description || '';
     }
-    const plan = handbackPlan({ status: task.status?.status, verdict, answerReplies: replies, pr, description });
+    const plan = handbackPlan({
+      status: task.status?.status, verdict, answerReplies: replies, pr, description, noticeboard: isNoticeboard(task),
+    });
     if (plan.act === 'waiting') { say(task, 'waiting', `waiting on ${who}: ${plan.why}`); return; }
     if (plan.act === 'cannot-tell') {
       unchecked.push(`${task.id}: ${who} answered, but ${plan.why}`);

@@ -238,4 +238,16 @@ test('own-queue bus through the door: bus-post makes Team chat in Live tagged no
   assert.equal(question.status, 'live');
   const claimable = await door(['queue', '--claimable']);
   assert.doesNotMatch(claimable.out, new RegExp(`${question.id}|${chat.id}|${board.id}`), 'no noticeboard is ever claimable');
+
+  // Parked in Queued by hand, a noticeboard is still not work: the queue
+  // skips it and claim refuses it, writing nothing (SP-356 review).
+  const parked = f.store.fileTicket({ project: 'pressplay', actor: f.loops.TRACKER_TOKEN_LOOP_BUILD.id, status: 'queued', name: 'Another question for Dana', tags: ['noticeboard'] });
+  const listed = await door(['queue', '--claimable']);
+  assert.doesNotMatch(listed.out, new RegExp(`${parked.id}\\t`));
+  assert.match(listed.err, new RegExp(`skipped ${parked.id}: a noticeboard, not work`));
+  assert.match(listed.out, new RegExp(`^${work.id}\\t`, 'm'), 'the work beside it is still claimable');
+  const claimed = await door(['claim', '--task', parked.id]);
+  assert.equal(claimed.code, 3, claimed.err);
+  assert.match(claimed.err, /is a noticeboard .*not work\. Nothing was written/);
+  assert.equal(f.store.getTicket(parked.id).status, 'queued');
 });
