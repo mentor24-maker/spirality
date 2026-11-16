@@ -146,13 +146,13 @@ test('task files a ticket and reads it back; get and task-name print it as on Cl
     assert.equal(r.code, 0, r.err);
     assert.ok(r.out.startsWith(`\nCreated task AL-1\n  ${f.url}/tickets/AL-1\n`), r.out);
     // The tracker also keeps the ticket's class (SP-345), which ClickUp does not: one more line.
-    assert.match(r.out, / {2}status: {6}queued\n {2}priority: {4}high\n {2}tags: {8}tracker, phase-2\n {2}kind: {8}\(none\); started by \(none\); ended \(none\)\n {2}description: 15 characters\n/);
+    assert.match(r.out, / {2}status: {6}queued\n {2}priority: {4}high\n {2}tags: {8}tracker, phase-2\n {2}kind: {8}\(none\); started by agent; ended \(none\)\n {2}description: 15 characters\n/);
 
     const get = await f.door(['get', '--task', 'AL-1']);
     assert.equal(get.code, 0, get.err);
     assert.equal(get.out, [
       'id:       AL-1', 'name:     Fix the thing', 'status:   queued', 'priority: high', 'assigned: (nobody)',
-      'tags:     tracker, phase-2', 'kind:     (none)', 'started:  (none)', 'ended:    (still open)', 'list:     alpha (alpha)', 'pr:       (none recorded)', 'rounds:   0 send-back(s) so far',
+      'tags:     tracker, phase-2', 'kind:     (none)', 'started:  agent', 'ended:    (still open)', 'list:     alpha (alpha)', 'pr:       (none recorded)', 'rounds:   0 send-back(s) so far',
       'main:     (no MAIN MOVED note)', 'attachments: (none)', `url:      ${f.url}/tickets/AL-1`, '---', '## Goal\nDo it.\n', '',
     ].join('\n'));
 

@@ -286,6 +286,20 @@ Exit **0** nothing of his / **3** something IS his / **1** could not tell.
    are unknown: say so on the ticket and in your report, and never treat it
    as none.
 
+   **Apply the kind he chose before building (SP-346).** `get` prints the
+   ticket's `kind:`. When Dane's reply to the intake card (or any later
+   comment of his) names a different kind than that line (Feature, Fix,
+   Operational or Documentation), his word wins: set it and read it back
+   before any code,
+
+   ```bash
+   npm run clickup -- classify --task <id> --kind <the kind he named>
+   ```
+
+   and fix the description's `## Kind` line with `describe` if it has one.
+   A `kind: (none)` ticket whose description has a `## Kind` line gets that
+   kind the same way. Never guess one otherwise.
+
    **Verify the premise before building it.** A defect ticket is a claim to
    check, not a spec to obey. If the premise is wrong, post the correction on
    the ticket FIRST (a `comment`), then build what is true.

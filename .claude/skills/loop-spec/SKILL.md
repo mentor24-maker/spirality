@@ -30,8 +30,16 @@ NOT write any code here. You produce well-formed tasks.
   priority and tags and verifies the body saved:
 
   ```bash
-  npm run clickup -- task --name "..." --status Queued --priority high --tags "epic-name" --body-file -
+  npm run clickup -- task --name "..." --status Queued --priority high --tags "epic-name" \
+    --kind feature --started-by operator --body-file -
   ```
+
+  **Every task gets its kind and who started it** (`docs/LOOP_CONTRACT.md`,
+  "A ticket's kind, who started it and how it ended"). `--kind` is exactly
+  one of `feature`, `fix`, `operational` or `documentation`, judged inside
+  the project whose queue it is in. `--started-by` is `operator` when Dane
+  asked for it and `agent` when the session found it on its own. The script
+  reads both back.
 
   (body on stdin). **Never file Spirality work in StarCaster's Loop Queue**
   (`901418546619`) — that queue builds StarCaster.

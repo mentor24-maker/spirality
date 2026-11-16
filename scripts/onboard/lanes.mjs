@@ -56,6 +56,7 @@ import { createRequire } from 'node:module';
 import { loadProjectConfig, CONFIG_FILE } from '../../lib/projectConfig.mjs';
 import { expandHome } from '../../lib/onboardAnswers.mjs';
 import { LANES, spiralityInstallerPath, installerCommand, parseStatus, readPasses, judgeFirstPass, rerunSince, ticketsNamed, waitMinutesFrom, setupTicketBody, withLine } from '../../lib/onboardLanes.mjs';
+import { LOOP_FILING_CLASS } from '../../lib/ticketClass.js';
 
 const require = createRequire(import.meta.url);
 const { findTicketId, ticketLine } = require('../../lib/clickupTicketLink.js');
@@ -196,7 +197,10 @@ if (ticket) {
       // next step), so nothing can take it half-filed, and it is never moved
       // again by this script. A rerun finds it in whatever status a lane has
       // since put it: Dane's Ready to launch, or Rework with a send-back.
-      const made = door('task', '--name', prNow.title, '--body-file', join(scratch, 'body.md'), '--status', 'In review', '--id-out', join(scratch, 'id'));
+      // Setting a project up is Operational work an agent session filed
+      // (SP-346, docs/LOOP_CONTRACT.md); only the tracker keeps a class.
+      const filedClass = config.tracker === 'api' ? ['--kind', LOOP_FILING_CLASS.kind, '--started-by', LOOP_FILING_CLASS.startedBy] : [];
+      const made = door('task', '--name', prNow.title, '--body-file', join(scratch, 'body.md'), '--status', 'In review', '--id-out', join(scratch, 'id'), ...filedClass);
       if (!made.ok || !existsSync(join(scratch, 'id'))) fail('ticket', `filing the setup ticket failed: ${last(made.err || made.out)}`);
       ticket = readFileSync(join(scratch, 'id'), 'utf8').trim();
       say('ticket', `filed ${ticket}, "${prNow.title}", in In review, read back`);

@@ -13,6 +13,8 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { openStore } from '../../tracker/store.mjs';
 import { startServer } from '../../tracker/server.mjs';
+import { createApiTracker } from './apiTracker.mjs';
+import conflictWork from '../../lib/conflictWork.js';
 
 const DOOR = fileURLToPath(new URL('../clickup.mjs', import.meta.url));
 
@@ -36,7 +38,7 @@ async function fixture({ tracker = 'api' } = {}) {
     legacyMachinePrefixes: [], projectScripts: {}, tracker, trackerUrl: url, trackerPrefix: 'AL',
   }));
   return {
-    store, machine,
+    store, machine, url, machineToken,
     door(args, stdin = '') {
       return new Promise((resolve) => {
         const env = { PATH: process.env.PATH, HOME: process.env.HOME, TRACKER_TOKEN_HAND_RUN: machineToken, CLICKUP_API_TOKEN: 'not-used' };
@@ -113,5 +115,36 @@ test('tickets --json carries kind, startedBy and outcome', async () => {
     assert.equal(out.code, 0, out.err);
     const [t] = JSON.parse(out.out);
     assert.deepEqual([t.kind, t.startedBy, t.outcome], ['documentation', 'client', null]);
+  } finally { await f.cleanup(); }
+});
+
+test('task from a loop sign-in that names no starter files as an agent session, kind left as given (SP-346)', async () => {
+  const f = await fixture();
+  try {
+    const filed = await f.door(['task', '--name', 'Something a session found', '--body-file', '-'], 'The spec.');
+    assert.equal(filed.code, 0, filed.err);
+    assert.match(filed.out, /kind: {8}\(none\); started by agent; ended \(none\)/);
+    const t = f.store.listTickets('alpha')[0];
+    assert.deepEqual([t.kind, t.startedBy], [null, 'agent']);
+    const asked = await f.door(['task', '--name', 'Something Dane asked for', '--body-file', '-', '--kind', 'feature', '--started-by', 'operator'], 'The spec.');
+    assert.equal(asked.code, 0, asked.err);
+    const u = f.store.listTickets('alpha')[1];
+    assert.deepEqual([u.kind, u.startedBy], ['feature', 'operator']);
+  } finally { await f.cleanup(); }
+});
+
+test('the merge step\'s catch-up ticket files as Operational, started by an agent session, and reads back so (SP-346)', async () => {
+  const f = await fixture();
+  try {
+    const tracker = createApiTracker({ token: f.machineToken, baseUrl: f.url, project: 'alpha', listId: '333', log: () => {} });
+    const pr = { number: 9, url: 'https://github.com/owner/repo/pull/9' };
+    const name = conflictWork.conflictTicketName({ pr, branch: 'some-branch', localVerdict: null });
+    const body = conflictWork.conflictTicketBody({ task: { id: 'AL-1', name: 'Waiting ticket' }, pr, branch: 'some-branch', localVerdict: null, commentId: null });
+    const out = await tracker.createTask('333', conflictWork.catchUpTicketFields({ name, body, keepsClass: true }));
+    assert.equal(out.res.ok, true, out.text);
+    const back = await tracker.getTask(out.json.id, { markdown: true });
+    assert.equal(back.res.ok, true, back.text);
+    assert.deepEqual([back.json.name, back.json.status.status.toLowerCase(), back.json.kind, back.json.started_by], [name, 'queued', 'operational', 'agent']);
+    assert.deepEqual(Object.keys(conflictWork.catchUpTicketFields({ name, body, keepsClass: false })).sort(), ['markdown_description', 'name', 'priority', 'status']);
   } finally { await f.cleanup(); }
 });
