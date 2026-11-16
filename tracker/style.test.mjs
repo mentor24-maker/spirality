@@ -128,3 +128,21 @@ test('the label finder sees buttons, headings, toggles, column headings, field l
     "field label: Old loop's user id", 'field label: Work cap', 'tab: Board view', 'tab: Page styles',
   ]);
 });
+
+// The top banner stays put while the page scrolls under it (SP-327): sticky at the top, above every other
+// layer the page draws, and every "scroll to this" jump lands below it rather than under it.
+test('the top banner is sticky at the top of the window, above every other layer, and page jumps land below it', () => {
+  const css = read('./web/app.css');
+  const rule = css.match(/^header \{([^}]*)\}/m);
+  assert.ok(rule, 'app.css has no top-level header rule');
+  const body = rule[1];
+  assert.match(body, /position:\s*sticky/, 'the header rule must keep position: sticky');
+  assert.match(body, /(^|;)\s*top:\s*0\b/, 'the header rule must keep top: 0');
+  const z = body.match(/z-index:\s*(\d+)/);
+  assert.ok(z, 'the header rule must keep a z-index');
+  const others = [...css.matchAll(/z-index:\s*(\d+)/g)].map((m) => Number(m[1]));
+  assert.equal(Number(z[1]), Math.max(...others), 'the header must sit above every other z-index on the page');
+  const height = body.match(/height:\s*([\d.]+rem)/)?.[1];
+  assert.ok(height, 'the header rule names its height');
+  assert.match(css, new RegExp(`^html \\{[^}]*scroll-padding-top:\\s*${height.replace('.', '\\.')}`, 'm'), 'html must pad page jumps by the banner\'s height');
+});
