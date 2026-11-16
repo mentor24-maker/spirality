@@ -14,7 +14,9 @@ about: >
 # Loop: Build
 
 Step 2 of 3 in the Spirality development loop (spec → build → review).
-See `docs/LOOP_ENGINEERING.md` for the whole system.
+See Spirality's `docs/LOOP_ENGINEERING.md` (in Spirality's folder, three folders
+up from this skill's base directory, not in a project's checkout)
+for the whole system.
 
 Each run builds **one** task into **one** PR. Under `/loop` it repeats,
 draining the queue one clean PR at a time.
