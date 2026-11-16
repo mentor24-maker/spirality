@@ -124,14 +124,14 @@ export function runStaleAnswer({
     if (!comments) { records.push({ ...base, commentsReadable: false }); continue; }
 
     // The SAME derivation the relay hands the ticket back on.
-    const answered = handbackAnswer({ comments, operatorId, isMachine: isMachineAuthored });
+    const answered = handbackAnswer({ comments, operatorId, isMachine: isMachineAuthored, teammates: true });
 
     const newest = comments.reduce(
       (best, c) => (busRelayPlan.commentAt(c) > busRelayPlan.commentAt(best) ? c : best),
       comments[0] || null,
     );
     const operatorSpokeLast = busRelayPlan
-      .operatorComments(newest ? [newest] : [], { operatorId, isMachine: isMachineAuthored }).length > 0;
+      .operatorComments(newest ? [newest] : [], { operatorId, isMachine: isMachineAuthored, teammates: true }).length > 0;
 
     const at = answered.state === 'answered'
       ? answered.answerAt

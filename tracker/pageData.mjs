@@ -26,7 +26,7 @@ import { OWN_RELEASE_LINE, rollBackTarget } from '../lib/releases.mjs';
 import { STAGES } from './pipeline.mjs';
 import { conflictReportOf } from './conflictReport.mjs';
 
-const { OPERATOR_LANE, WAITING, CANNOT_TELL, waitingVerdict, operatorSpokeLast, standingMergeWord } = waitingOnOperator;
+const { OPERATOR_LANE, WAITING, CANNOT_TELL, waitingVerdict, answeredLast, standingMergeWord } = waitingOnOperator;
 const { isMachineComment, stripMachineMarker } = machineComment;
 const { STAGE_ORDER, LIVE, QUEUED, BUILDING, REWORK, OPERATOR_HELD_STATUSES, TERMINAL_STATUSES, DISPLAY, PRIORITY_RANK, statusOf } = loopStatuses;
 const { findPullRequest, isMergeCommand, isReviewVerdict, isReviewPassed } = mergeOnComment;
@@ -100,13 +100,14 @@ function verdictInput(ticket, comments, prStates = null) {
 /**
  * Is his answer in? The ticket sits in one of his two statuses and his own
  * comment is the newest word on it, so the relay owes the next move (SP-93).
- * The same rule the Waiting on you list drops a ticket by (operatorSpokeLast,
- * rule 1 of waitingVerdict), so the page and that list cannot disagree.
+ * In Needs your input a teammate's reply counts too (SP-302). The same rule
+ * the Waiting on you list drops a ticket by (answeredLast, rules 1 and 1b of
+ * waitingVerdict), so the page and that list cannot disagree.
  * `operatorId` is the project's operator; with none, never.
  */
 function answerIsIn(ticket, comments, operatorId) {
   if (operatorId == null || !OPERATOR_LANE.includes(ticket.status)) return false;
-  return operatorSpokeLast(verdictInput(ticket, comments).comments, { operatorId });
+  return answeredLast(verdictInput(ticket, comments).comments, { operatorId, status: ticket.status });
 }
 
 /**
@@ -178,7 +179,8 @@ export function prsToCheck(store, { only = null } = {}) {
  *
  * - One of his two statuses: held up only when the loop's own verdict
  *   (waitingVerdict) says it is NOT waiting on him and his comment is the
- *   newest word (operatorSpokeLast), so the relay owes the next move. A
+ *   newest word (answeredLast: a teammate's, too, in Needs your input,
+ *   SP-302), so the relay owes the next move. A
  *   ticket that truly waits on him is never held up, whatever is failing:
  *   hiding a real wait would be worse than today.
  * - Requested, Queued, Rework, In review: held up when the lane that acts
@@ -197,7 +199,7 @@ export function heldUpBy(ticket, comments, operatorId, lanes, prStates = null) {
     if (operatorId == null) return null;
     const input = verdictInput(ticket, comments, prStates);
     if (waitingVerdict(input, { operatorId }).verdict === WAITING) return null;
-    if (!operatorSpokeLast(input.comments, { operatorId })
+    if (!answeredLast(input.comments, { operatorId, status: ticket.status })
       && !(ticket.status === 'ready to launch' && standingMergeWord(input.comments, { operatorId }))) return null;
     job = 'relay';
   } else {

@@ -544,7 +544,9 @@ async function alreadyAskedRefused(task, status) {
   const t = await readTask(task);
   if (statusOf(t.status?.status ?? '') !== statusOf(status)) return null;
   const comments = await readComments(task);
-  const verdict = handbackAnswer({ comments, operatorId: OPERATOR_ID, isMachine: isMachineAuthored });
+  // In Needs your input a teammate's reply answers the card too (SP-302).
+  const teammates = statusOf(status) === statusOf('Needs your input');
+  const verdict = handbackAnswer({ comments, operatorId: OPERATOR_ID, isMachine: isMachineAuthored, teammates });
   if (verdict.state !== 'none') return null;
   console.error(`\nREFUSED — ${task} is already in "${t.status?.status}" with a card Dane has not answered yet, so he has been asked.`);
   console.error('A second card puts the same question in front of him twice. To add something, post a plain note:');
@@ -2129,7 +2131,8 @@ if (cmd === 'whoami') {
   const relayNeedsYourInput = async (task) => {
     const comments = await readComments(task.id);
     seen.set(task.id, { task, comments });
-    const verdict = handbackAnswer({ comments, operatorId: OPERATOR_ID, isMachine: isMachineAuthored });
+    // Anyone on the project answers the card here, not only him (SP-302).
+    const verdict = handbackAnswer({ comments, operatorId: OPERATOR_ID, isMachine: isMachineAuthored, teammates: true });
     let replies = [];
     if (verdict.state === 'answered') {
       replies = await readReplies(verdict.answer.id);

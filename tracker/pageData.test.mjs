@@ -63,3 +63,49 @@ test('a failing stage with no reason or start still says it is held up (SP-228)'
   const bare = new Map([['loop-build', { name: 'Build', job: 'loop-build', failing: true }]]);
   assert.deepEqual(heldUpBy(ticket('queued'), [], DANE, bare), { stage: 'Build', job: 'loop-build', reason: 'keeps failing', since: null });
 });
+
+// SP-302 (Dane's choice A, 2026-11-14): PP-8 showed on both Dane's and Rich's
+// Waiting on You lists; Rich answered it and it stayed on Dane's. Through a
+// real store, the way GET /waiting reads it for each of them.
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { openStore } from './store.mjs';
+import { waitingFor, threadOf } from './pageData.mjs';
+
+function teamStore() {
+  const dir = mkdtempSync(join(tmpdir(), 'sp302-'));
+  const store = openStore(join(dir, 'tracker.db'));
+  const dane = store.createActor({ kind: 'human', name: 'Dane' });
+  const rich = store.createActor({ kind: 'human', name: 'Rich' });
+  const loop = store.createActor({ kind: 'machine', name: 'Loop' });
+  store.createProject({ slug: 'pp', name: 'PressPlay', prefix: 'PP', operator: dane.id });
+  return { store, dane, rich, loop, done: () => { store.close(); rmSync(dir, { recursive: true, force: true }); } };
+}
+const listed = (w) => [...w.waiting, ...w.unsure].map((x) => x.id);
+
+test('SP-302: a teammate\'s reply to a Needs your input card takes it off every list, and the page says the answer is in', () => {
+  const { store, dane, rich, loop, done } = teamStore();
+  try {
+    const t = store.fileTicket({ project: 'pp', actor: loop.id, name: 'Add a feed', status: 'Needs your input', assignee: dane.id });
+    store.postComment({ ticket: t.id, author: loop.id, body: '@@NEEDED\nWhich feed?\nYour move: Reply', parent: null });
+    assert.ok(listed(waitingFor(store, dane.id)).includes(t.id), 'on Dane\'s list before anyone answers');
+    assert.ok(listed(waitingFor(store, rich.id)).includes(t.id), 'and on Rich\'s');
+
+    store.postComment({ ticket: t.id, author: rich.id, body: 'UPI ok', parent: null });
+    assert.deepEqual(listed(waitingFor(store, dane.id)), [], 'off Dane\'s list once Rich answered');
+    assert.deepEqual(listed(waitingFor(store, rich.id)), [], 'and off Rich\'s');
+    assert.equal(threadOf(store, t.id).answerIn, true);
+  } finally { done(); }
+});
+
+test('SP-302: in Ready to launch a teammate\'s comment leaves it on Dane\'s list: only his merge word merges', () => {
+  const { store, dane, rich, loop, done } = teamStore();
+  try {
+    const t = store.fileTicket({ project: 'pp', actor: loop.id, name: 'Add a feed', status: 'Ready to launch', assignee: dane.id });
+    store.postComment({ ticket: t.id, author: loop.id, body: 'REVIEW: PASSED — all green.', parent: null });
+    store.postComment({ ticket: t.id, author: rich.id, body: 'looks good', parent: null });
+    assert.ok(waitingFor(store, dane.id).waiting.map((x) => x.id).includes(t.id));
+    assert.equal(threadOf(store, t.id).answerIn, false);
+  } finally { done(); }
+});
