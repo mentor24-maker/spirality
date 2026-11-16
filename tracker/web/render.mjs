@@ -612,7 +612,7 @@ export function renderPipelineControls(view, notes = {}, open = false) {
       <td class="label"><label for="${id}">${escapeHtml(c.label)}</label>${mark}</td>
       <td class="input">${controlInput(c, models, id, locked)}</td>
       <td class="value">${escapeHtml(controlValueText(c, models))}${c.group === 'wake' ? `<span class="in-effect${c.inEffect === false ? ' waiting' : ''}">${escapeHtml(wakeInEffectText(c))}</span>` : ''}${c.group === 'model' ? `<span class="in-effect${c.lastModel != null && c.lastModel !== c.value ? ' waiting' : ''}">${escapeHtml(modelLastPassText(c, models))}</span>` : ''}${c.key === 'wip-cap' ? capInFlightText(c, view.capInFlight) : ''}</td>
-      <td class="save">${locked ? '' : '<button type="button">Save</button>'}<span class="note${note ? (note.ok ? ' quiet' : ' error') : ''}">${note ? escapeHtml(note.text) : ''}</span></td>
+      <td class="save">${locked ? '' : '<button type="button" class="btn btn-save btn-sm">Save</button>'}<span class="note${note ? (note.ok ? ' quiet' : ' error') : ''}">${note ? escapeHtml(note.text) : ''}</span></td>
     </tr>`;
   };
   const group = (g) => {
@@ -673,10 +673,10 @@ export function renderReleaseGroup(r, note = null) {
   if (r.canChange) {
     const upToDate = r.newest != null && r.current?.release === r.newest;
     const canMove = r.newest != null && !upToDate;
-    const move = `<button type="button" data-release-action="newest"${canMove ? '' : ' disabled'}>Move to Newest</button>`;
+    const move = `<button type="button" class="btn" data-release-action="newest"${canMove ? '' : ' disabled'}>Move to Newest</button>`;
     const back = r.current
       ? (r.rollBackTo
-        ? `<button type="button" data-release-action="back">Roll Back to ${escapeHtml(r.rollBackTo)}</button>`
+        ? `<button type="button" class="btn" data-release-action="back">Roll Back to ${escapeHtml(r.rollBackTo)}</button>`
         : '<span class="quiet">No earlier release to roll back to.</span>')
       : '';
     const why = upToDate ? '<span class="quiet">It runs the newest release.</span>' : '';
@@ -1325,7 +1325,7 @@ export function renderReplyForm(t, name) {
   return `<form class="reply">
         <label for="reply">Reply as ${escapeHtml(name ?? 'you')}</label>
         <textarea id="reply" required></textarea>
-        <div class="row"><button type="submit">Post Reply</button><span class="note"></span></div>
+        <div class="row"><button type="submit" class="btn">Post Reply</button><span class="note"></span></div>
       </form>`;
 }
 
@@ -1353,7 +1353,7 @@ export function renderCommentForm(t) {
   return `<form class="add-comment">
         <label for="add-comment">Add a note for the loop</label>
         <textarea id="add-comment" required></textarea>
-        <div class="row"><button type="submit">Add Comment</button><span class="note"></span></div>
+        <div class="row"><button type="submit" class="btn">Add Comment</button><span class="note"></span></div>
       </form>`;
 }
 
@@ -1373,7 +1373,7 @@ export function renderMergeAction({ status, mergePhrase, pullRequest, pullReques
   if (String(status ?? '').toLowerCase() !== READY_TO_LAUNCH || !mergePhrase || !pullRequest) return line;
   if (!offersMerge({ status, mergePhrase, pullRequest, pullRequestState, comments, answerIn, mergeStands })) return '';
   return `${line}<form class="merge-action">
-        <button type="submit">Merge</button><span class="note"></span>
+        <button type="submit" class="btn btn-primary">Merge</button><span class="note"></span>
         <p class="quiet">Posts &ldquo;${escapeHtml(mergePhrase)}&rdquo; as your reply; the relay merges it within a few minutes.</p>
       </form>`;
 }
@@ -1440,7 +1440,7 @@ export function renderCloseAction({ status, closePhrase, comments = [], answerIn
     ? 'the relay closes it within a few minutes once its work is merged'
     : 'the relay closes it on its next pass, a few minutes from now';
   return `<form class="close-action">
-        <button type="submit">Close</button><span class="note"></span>
+        <button type="submit" class="btn">Close</button><span class="note"></span>
         <p class="quiet">Posts &ldquo;${escapeHtml(closePhrase)}&rdquo; as your reply; ${when}.</p>
       </form>`;
 }
@@ -1478,7 +1478,7 @@ export function renderGoAction({ status, goPhrase, comments = [], answerIn = fal
   const word = goPhrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   if (!new RegExp(`["\u201c]${word}["\u201d]`, 'i').test(cardAsk(card.body) ?? '')) return '';
   return `<form class="go-action">
-        <button type="submit">Go</button><span class="note"></span>
+        <button type="submit" class="btn btn-primary">Go</button><span class="note"></span>
         <p class="quiet">Posts &ldquo;${escapeHtml(goPhrase)}&rdquo; as your reply; the relay queues it on its next pass.</p>
       </form>`;
 }
@@ -1525,11 +1525,11 @@ export const HELD_REPORT_STATUS_LINE = 'It waits on you to Approve or Reject it 
 export function renderBugReportActions(t) {
   if (!heldBugReport(t)) return '';
   return `<form class="approve-action">
-        <button type="submit">Approve</button><span class="note"></span>
+        <button type="submit" class="btn btn-primary">Approve</button><span class="note"></span>
         <p class="quiet">Moves it to Requested; the intake lane writes it up as a spec for you to say go to.</p>
       </form>
       <form class="reject-action">
-        <button type="submit">Reject</button><span class="note"></span>
+        <button type="submit" class="btn btn-danger">Reject</button><span class="note"></span>
         <p class="quiet">Moves it to Live with the ${escapeHtml(WONT_DO_TAG)} tag and a note that nothing shipped.</p>
       </form>
       <p class="held-report quiet">${escapeHtml(HELD_REPORT_LINE)}</p>`;
@@ -1644,7 +1644,7 @@ export function deleteRefusal(id, err) {
 export function renderDeleteAction({ status }) {
   if (!canDelete(status)) return '';
   return `<form class="delete-action">
-        <button type="submit">Delete</button><span class="note"></span>
+        <button type="submit" class="btn btn-danger">Delete</button><span class="note"></span>
         <p class="quiet">Nobody has started this ticket yet, so it can still be deleted, with its comments.</p>
       </form>`;
 }
@@ -1690,7 +1690,7 @@ export function renderSetPassword({ purpose, email }) {
       <input id="password" type="password" autocomplete="new-password" minlength="${MIN_PASSWORD}" required>
       <label for="confirm">The same password again</label>
       <input id="confirm" type="password" autocomplete="new-password" minlength="${MIN_PASSWORD}" required>
-      <button type="submit">Save Password</button>
+      <button type="submit" class="btn btn-save">Save Password</button>
       <p class="note"></p>
     </form>`;
 }
@@ -1735,7 +1735,7 @@ export function renderEditPanel({ name, description, status, priority, tags = []
   const nameField = pullRequest
     ? `<p id="edit-name" class="locked">${escapeHtml(name)}</p>
           <p class="quiet">The name cannot change now: a pull request is recorded, and its title must match the name exactly.</p>`
-    : `<div class="row"><input id="edit-name" type="text" value="${escapeHtml(name)}" required><button type="submit">Save</button></div>`;
+    : `<div class="row"><input id="edit-name" type="text" value="${escapeHtml(name)}" required><button type="submit" class="btn btn-save">Save</button></div>`;
   return `<details class="edit" open>
       <summary>Change This Ticket</summary>
       <p class="note edit-note" role="status"></p>
@@ -1755,10 +1755,10 @@ export function renderEditPanel({ name, description, status, priority, tags = []
         <span class="note" data-note="name"></span>
       </form>
       <form class="edit-description">
-        <div class="row"><span class="label">Description</span><button type="button" class="edit-open">Edit</button><span class="note" data-note="description"></span></div>
+        <div class="row"><span class="label">Description</span><button type="button" class="btn edit-open">Edit</button><span class="note" data-note="description"></span></div>
         <div class="editor" hidden>
           <textarea id="edit-description">${escapeHtml(description ?? '')}</textarea>
-          <div class="row"><button type="submit">Save</button><button type="button" class="edit-cancel">Cancel</button></div>
+          <div class="row"><button type="submit" class="btn btn-save">Save</button><button type="button" class="btn edit-cancel">Cancel</button></div>
         </div>
       </form>
     </details>`;
@@ -1775,7 +1775,7 @@ export function renderSignIn(problem) {
       <input id="email" type="email" autocomplete="username" required>
       <label for="password">Password</label>
       <input id="password" type="password" autocomplete="current-password" required>
-      <button type="submit">Sign In</button>
+      <button type="submit" class="btn btn-primary">Sign In</button>
       <button type="button" class="link forgot">Forgot Password?</button>
       <p class="note${problem ? ' error' : ''}">${problem ? escapeHtml(problem) : ''}</p>
     </form>`;
@@ -1788,7 +1788,7 @@ export function renderForgot(email = '') {
       <p>Type your email. If it has an account, a link to set a new password is emailed to it. The link works for 1 hour.</p>
       <label for="email">Email</label>
       <input id="email" type="email" autocomplete="username" value="${escapeHtml(email)}" required>
-      <button type="submit">Email Me a Link</button>
+      <button type="submit" class="btn btn-primary">Email Me a Link</button>
       <a href="/">Back to Sign In</a>
       <p class="note"></p>
     </form>`;
@@ -1929,7 +1929,7 @@ export function renderSearchResults({ query, filters = [], results = [] }) {
  * which is `text` exactly (escaped here, unescaped by the browser).
  */
 export function renderCopyRow(text) {
-  return `<div class="command"><pre><code>${escapeHtml(text)}</code></pre><button type="button" class="copy-command">Copy</button></div>`;
+  return `<div class="command"><pre><code>${escapeHtml(text)}</code></pre><button type="button" class="btn copy-command">Copy</button></div>`;
 }
 
 /** A project's slug from its name, the wizard's own rule (lib/onboardAnswers.mjs slugFromName). */
@@ -2393,11 +2393,11 @@ export function renderContextDocs({ project, docs = [] }, { size, timeOf }) {
       <td class="by">${d.addedByName ? escapeHtml(d.addedByName) : '<span class="quiet">unknown</span>'}</td>
       <td class="when">${escapeHtml(timeOf(d.createdAt))}</td>
       <td class="actions"><a href="${base}/${encodeURIComponent(d.id)}" download="${escapeHtml(d.name)}">Download</a>
-        <button type="button" class="remove-doc" data-remove-doc="${escapeHtml(d.id)}" data-name="${escapeHtml(d.name)}" aria-label="Remove ${escapeHtml(d.name)}">Remove</button></td></tr>`;
+        <button type="button" class="btn btn-danger btn-sm remove-doc" data-remove-doc="${escapeHtml(d.id)}" data-name="${escapeHtml(d.name)}" aria-label="Remove ${escapeHtml(d.name)}">Remove</button></td></tr>`;
   return `<section class="context-docs">
     <h2>Context Documents</h2>
     <p class="quiet">Briefs, notes and reference files that belong to ${escapeHtml(project.name)} as a whole, not to one task. One file at a time, up to 10 MB.</p>
-    <div class="row"><button type="button" class="upload-doc">Upload Document</button><input type="file" class="doc-file" hidden></div>
+    <div class="row"><button type="button" class="btn btn-primary upload-doc">Upload Document</button><input type="file" class="doc-file" hidden></div>
     <p class="note quiet doc-note" role="status"></p>
     ${docs.length
     ? `<table class="projects doc-list"><thead><tr><th>File</th><th>Type</th><th>Size</th><th>Added By</th><th>Added On</th><th></th></tr></thead>
@@ -2446,7 +2446,7 @@ export function renderTopics({ projects, project, topics = [], tags = [] }, { ti
             <input id="topic-name" name="name" maxlength="200" autocomplete="off">
             <label for="topic-description">Description</label>
             <textarea id="topic-description" name="description" rows="3" maxlength="5000"></textarea>
-            <div class="row"><button type="submit">Create Topic</button></div>
+            <div class="row"><button type="submit" class="btn btn-primary">Create Topic</button></div>
           </form>
         </details>
         <h2 id="topics-title">Topics</h2>

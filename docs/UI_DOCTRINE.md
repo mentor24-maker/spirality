@@ -162,9 +162,9 @@ dialog backdrop, the Console's feature colours (`--feature-0` to `--feature-9`),
 small corners for tag chips and icon buttons (`--radius-sm` 4px) and round ones
 (`--radius-pill`), and code text (`--text-code`, 0.9em of the text around it).
 Colours Dane picked by hand keep their value as a token: the Pipeline Status
-pod's green and gold (`--pod-running`, `--pod-soon`, SP-222) and the ticket
-page's green buttons (`--ticket-btn-bg`, SP-76) until SP-321 gives every button
-a kind. A new colour goes into `:root` with a name first; reuse a StarCaster
+pod's green and gold (`--pod-running`, `--pod-soon`, SP-222). (The ticket
+page's green buttons, `--ticket-btn-bg` from SP-76, went with SP-321, when every
+button took a kind.) A new colour goes into `:root` with a name first; reuse a StarCaster
 token wherever one means the same thing.
 
 **Contrast.** Text is always readable on what it sits on; light text on a light
@@ -202,6 +202,22 @@ never sets its own height, padding or colour; it takes a kind.
   (section 1.1).
 - **A choice inside a dialog** ("Overwrite", "Save & Publish") is the main
   action, blue, not green.
+- **Which kind on the tracker** (SP-321): Merge, Go, Approve, Sign In, Email
+  Me a Link, Upload Document, File in This Order, File in and the "Add…",
+  "Create…", "Send…" and "Suggest…" buttons are the main action; every
+  Save is a Save; Delete, Reject and every Remove are Delete; Post Reply, Add
+  Comment, Close, Cancel, Copy, Edit and the rest are secondary. A button in a
+  table row is small (`btn-sm`).
+
+**Not a kind.** These buttons draw themselves in rules of their own, and are
+the only ones the check lets through without `btn` (`EXCEPTIONS` in
+`tracker/buttonKinds.test.mjs`, which names each one's class): the icon buttons
+(`action`, `status-info`, `suggestion-info-open`, `drag-handle`, the
+chips' `remove-tag` ×), a dialog's corner × (`close`), a table heading's
+`sort`, "Forgot Password?" written as a link (`link`), a Console tile's
+feature chip (`feature-pick`) and the Pipeline Status pod (`pipeline-pod`).
+A new exception is added to that list, with its reason, in the same pull
+request; anything else takes a kind.
 
 This replaces two page-level looks Dane had asked for before: the ticket page's
 all-green buttons (SP-76) and the Settings page's rounded dark-blue ones
@@ -379,7 +395,7 @@ Measured 2026-11-15 on `tracker/web/app.css`, `app.mjs` and `render.mjs`.
 |---|---|---|
 | 1 Capital letters | Buttons, headings, toggles, columns, tab titles and trail: followed and checked. Field labels and tabs: sentence case in places, not checked. | SP-325 |
 | 2 Tokens | Followed and checked (SP-320, 2026-11-15): every colour, font size, corner and gap is a token in `:root`, StarCaster's where it has one. Padding and margins are still literal lengths, near the steps. | SP-320 |
-| 3 Buttons | No kinds: each page paints bare buttons its own way (all green on a ticket, dark blue on Settings, black links); disabled fades. | SP-321 |
+| 3 Buttons | Followed and checked (SP-321, 2026-11-15): every button is `btn` plus a kind, or a listed exception; 32px and 24px; disabled is a colour; focus ring on every kind. The ticket page's green, Settings' dark blue and the black link are gone. | SP-321 |
 | 4 Title row | Followed and checked (SP-322, 2026-11-15): a 24px, weight 800 `<h1>` on every page, and every toolbar in the title row at its right, the trail above it; headings under it at `--text-lg` (h2) and `--text-base` (h3 to h6), with board columns and Console stages at `--text-base`. The ticket page keeps its two-column top, whose actions sit in the right column. | SP-322 |
 | 5 Tabs | Followed and checked (SP-322, 2026-11-15): Board / List / Console and the Settings tabs are one tab bar (`nav.tabs`), links with `aria-current`. | SP-322 |
 | 6 Forms | Every label above its box; boxes full width; tag boxes use the text inside the box as the instruction. | SP-325 |
@@ -390,6 +406,7 @@ Measured 2026-11-15 on `tracker/web/app.css`, `app.mjs` and `render.mjs`.
 
 **The checks.** `tracker/style.test.mjs` checks section 1;
 `tracker/cssTokens.test.mjs` checks section 2 and the icon strokes of section 10;
+`tracker/buttonKinds.test.mjs` checks section 3;
 `tracker/titleRow.test.mjs` checks sections 4 and 5;
 `tracker/messages.test.mjs` checks section 7.
 Each ticket above

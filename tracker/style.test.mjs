@@ -63,7 +63,7 @@ function labelsOf(source) {
   add('heading', /<h[1-6]\b[^>]*>([\s\S]*?)<\/h[1-6]>/g);
   add('toggle', /<summary\b[^>]*>((?:(?!<h[1-6])[\s\S])*?)<\/summary>/g);
   add('column heading', /<th\b[^>]*>([\s\S]*?)<\/th>/g);
-  add('button link', /<a class="button"[^>]*>([\s\S]*?)<\/a>/g);
+  add('button link', /<a class="(?:button|btn)\b[^"]*"[^>]*>([\s\S]*?)<\/a>/g);
   add('icon button', /actionButton\('([^']+)'/g);
   add('icon link', /action\([^\n]*?, '([^']+)', ICONS\./g);
   add('tab title', /setTitle\(['`]([^'`]+?) · Tracker['`]\)/g);
