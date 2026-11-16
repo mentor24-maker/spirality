@@ -247,13 +247,13 @@ fi
 # A release that cannot be made ready falls back to the one the project ran
 # last (said once on its bus); with none to fall back on, or none named, the
 # pass does not run, and says so. Never a silent run on main.
-CODE="$REPO"
+RUN_DIR="$REPO"
 if [ -z "$OWN" ]; then
-  RELEASE_SAID="$(node "$REPO/scripts/lib/releaseCheckout.mjs" prepare --spirality "$REPO" --project "$SLUG" --pid "$$" ${DRY_RUN:+--dry-run})"
+  RELEASE_SAID="$(node "$REPO/scripts/lib/releaseCheckout.mjs" prepare --root "$REPO" --project "$SLUG" --pid "$$" ${DRY_RUN:+--dry-run})"
   RELEASE_CODE=$?
-  CODE="$(printf '%s\n' "$RELEASE_SAID" | head -1)"
+  RUN_DIR="$(printf '%s\n' "$RELEASE_SAID" | head -1)"
   printf '%s\n' "$RELEASE_SAID" | tail -n +2 | sed -n 's/^\(..*\)$/[relay] release: \1/p'
-  if [ -z "$CODE" ] || [ ! -d "$CODE" ]; then
+  if [ -z "$RUN_DIR" ] || [ ! -d "$RUN_DIR" ]; then
     # No release named is a project not switched over yet, not a failure.
     echo "===== $(date '+%Y-%m-%d %H:%M:%S') END relay — not run: no Spirality release to run on (the release check exited $RELEASE_CODE) ====="
     [ "$RELEASE_CODE" -eq 4 ] && exit 0
@@ -263,7 +263,7 @@ fi
 
 # Everything from here runs Spirality's own scripts, so from that folder (for
 # Spirality's own relay, this one).
-cd "$CODE" || exit 1
+cd "$RUN_DIR" || exit 1
 
 # The pass itself. Through npm, so Doppler supplies the token the same way
 # every other write to the tracker gets it. A dry run is passed straight through.
@@ -277,7 +277,7 @@ export TRACKER_TOKEN_NAME=TRACKER_TOKEN_RELAY
 CHECKS_LISTED="$(relay_app_checks_listed "$PROJECT")"
 if [ "$CHECKS_LISTED" = "none" ]; then RELAY_LIMIT="$PASS_LIMIT"; else RELAY_LIMIT=$((PASS_LIMIT - CHECKS_SHARE)); fi
 PASS_START=$(date +%s)
-"$CODE/scripts/run_with_time_limit.sh" "$RELAY_LIMIT" -- \
+"$RUN_DIR/scripts/run_with_time_limit.sh" "$RELAY_LIMIT" -- \
   npm run --silent clickup -- relay "$@"
 status=$?
 
@@ -286,7 +286,7 @@ status=$?
 # reads a value from a relay launchd is not yet ticking). A read that fails
 # keeps the last good one and says so in one line.
 if [ -n "$TICKED" ] && [ -z "$DRY_RUN" ]; then
-  SAID="$(node "$CODE/scripts/lib/wakeSetting.mjs" relay 2>/dev/null)"
+  SAID="$(node "$RUN_DIR/scripts/lib/wakeSetting.mjs" relay 2>/dev/null)"
   SAID_CODE=$?
   case "$SAID" in
     ""|*[!0-9]*) SAID_OK="" ;;
@@ -295,7 +295,7 @@ if [ -n "$TICKED" ] && [ -z "$DRY_RUN" ]; then
   if [ -n "$SAID_OK" ]; then
     echo "$SAID" > "$INTERVAL_FILE"
   else
-    echo "[relay] could not read the relay's wake time from the tracker (${SAID:-no answer}) — keeping the last good value, $(cat "$INTERVAL_FILE" 2>/dev/null || node "$CODE/scripts/lib/loopSchedule.mjs" interval relay)s"
+    echo "[relay] could not read the relay's wake time from the tracker (${SAID:-no answer}) — keeping the last good value, $(cat "$INTERVAL_FILE" 2>/dev/null || node "$RUN_DIR/scripts/lib/loopSchedule.mjs" interval relay)s"
   fi
 fi
 
@@ -325,7 +325,7 @@ fi
 # is one line naming the heartbeat and its exit code. A dry run asks only,
 # posting nothing. (The relay cannot report itself quiet from here; this
 # check is for the lanes that run on their own.)
-run_relay_heartbeat "$CODE" "${RELAY_HEARTBEAT_LIMIT_SECONDS:-180}" ${DRY_RUN:+--dry-run}
+run_relay_heartbeat "$RUN_DIR" "${RELAY_HEARTBEAT_LIMIT_SECONDS:-180}" ${DRY_RUN:+--dry-run}
 
 # Then the ticket watchdogs (SP-267): a ticket stuck in Ready to launch, and
 # an answer in Needs your input that nothing acted on, each said on the bus at
@@ -334,7 +334,7 @@ run_relay_heartbeat "$CODE" "${RELAY_HEARTBEAT_LIMIT_SECONDS:-180}" ${DRY_RUN:+-
 # did, each under its own time limit, and they never change this pass's
 # verdict or stop it: a failure is one line naming the watchdog and its exit
 # code. A dry run reads and prints only.
-run_relay_watchdogs "$CODE" "${RELAY_WATCHDOG_LIMIT_SECONDS:-180}" ${DRY_RUN:+--dry-run}
+run_relay_watchdogs "$RUN_DIR" "${RELAY_WATCHDOG_LIMIT_SECONDS:-180}" ${DRY_RUN:+--dry-run}
 
 # Then the throughput and checkout-currency watchdogs (SP-268): is the queue
 # getting shorter, and did the pull above leave this machine on main's code?
@@ -345,14 +345,14 @@ run_relay_watchdogs "$CODE" "${RELAY_WATCHDOG_LIMIT_SECONDS:-180}" ${DRY_RUN:+--
 # pass's verdict or stop it: a failure is one line naming the watchdog. A dry
 # run reads and prints only.
 if declare -F run_relay_queue_watchdogs >/dev/null; then
-  run_relay_queue_watchdogs "$CODE" "${RELAY_QUEUE_WATCHDOG_LIMIT_SECONDS:-180}" "$BEFORE" "$PULL_OUTPUT" ${DRY_RUN:+--dry-run}
+  run_relay_queue_watchdogs "$RUN_DIR" "${RELAY_QUEUE_WATCHDOG_LIMIT_SECONDS:-180}" "$BEFORE" "$PULL_OUTPUT" ${DRY_RUN:+--dry-run}
 fi
 
 # A project's pass is over: its release checkout is no longer in use by this
 # relay, and any checkout nothing needs any more is removed (SP-276). It
 # never changes this pass's verdict. A dry run removes nothing.
 if [ -z "$OWN" ] && [ -z "$DRY_RUN" ]; then
-  node "$REPO/scripts/lib/releaseCheckout.mjs" finish --spirality "$REPO" --pid "$$" | sed -n 's/^\(..*\)$/[relay] release: \1/p'
+  node "$REPO/scripts/lib/releaseCheckout.mjs" finish --root "$REPO" --pid "$$" | sed -n 's/^\(..*\)$/[relay] release: \1/p'
 fi
 
 # The exit code is the pass's own verdict, and the END line says it in words,

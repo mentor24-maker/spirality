@@ -203,7 +203,12 @@ labels come from `launchdPrefix` in `spirality.project.json`. Each lane
 keeps the committed `scripts/loop_runner.sh` alive
 across crashes and reboots; each pass is a fresh headless Claude Code session
 that pulls `main`, runs one skill, and sleeps 30 minutes. A pass has a
-two-hour time limit. Nobody starts a loop by hand while those are loaded: a
+two-hour time limit. That is Spirality's own lanes. Another project's lanes
+run from the same runner but on the Spirality release the tracker names for
+that project, from a copy of Spirality kept at `~/loop-logs/releases/release-<n>`;
+with none named they do not run (SP-276, `docs/INTEGRATION.md`, "How a
+project's lanes run on their release"). `--status` prints a `release:` line
+saying which. Nobody starts a loop by hand while those are loaded: a
 second claimant makes the check-then-act claim unsound.
 
 So the question is never "shall I start one", it is "what is it doing":

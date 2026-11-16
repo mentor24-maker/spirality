@@ -307,7 +307,7 @@ test('the command line, end to end with a real npm ci: the folder on line one, t
     const door = join(s.root, 'door');
     writeFileSync(door, '#!/bin/bash\n[ "$1 $2" = "release list" ] && printf "spirality\\tmain (always the newest)\\nnormie\\trelease-3\\n"\n', { mode: 0o755 });
     const env = { ...scratchGit.scratchGitEnv(), [DOOR_ENV]: door, [RELEASES_DIR_ENV]: '' };
-    const run = (...args) => spawnSync('node', [MODULE, ...args, '--spirality', s.dir], { encoding: 'utf8', env, timeout: 120_000 });
+    const run = (...args) => spawnSync('node', [MODULE, ...args, '--root', s.dir], { encoding: 'utf8', env, timeout: 120_000 });
     const r = run('prepare', '--project', 'normie', '--pid', String(process.pid));
     assert.equal(r.status, 0, r.stdout + r.stderr);
     const [dir, line] = r.stdout.split('\n');

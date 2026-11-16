@@ -540,17 +540,30 @@ function scratchPair() {
   for (const f of ['loop_runner.sh', 'run_relay.sh']) copyFileSync(join(REPO, 'scripts', f), join(spiralityDir, 'scripts', f));
   writeFileSync(join(spiralityDir, 'scripts/pause_check.sh'), '#!/bin/bash\necho "running"\n', { mode: 0o755 });
   for (const f of ['project_config.mjs', 'run_with_time_limit.sh']) symlinkSync(join(REPO, 'scripts', f), join(spiralityDir, 'scripts', f));
-  for (const f of ['back_to_main.sh', 'tracker_restart.sh', 'relay_app_checks.sh', 'loopSchedule.mjs']) symlinkSync(join(REPO, 'scripts/lib', f), join(spiralityDir, 'scripts/lib', f));
+  for (const f of ['back_to_main.sh', 'tracker_restart.sh', 'relay_app_checks.sh', 'loopSchedule.mjs', 'releaseCheckout.mjs']) symlinkSync(join(REPO, 'scripts/lib', f), join(spiralityDir, 'scripts/lib', f));
   // Spirality's plugin folder, the skills and hooks a project's pass is handed (SP-272).
   symlinkSync(join(REPO, 'plugin'), join(spiralityDir, 'plugin'));
-  writeFileSync(join(spiralityDir, 'spirality.project.json'), JSON.stringify(spirality));
+  // Spirality's own log folder is the scratch one too, so the release
+  // checkouts and the sync lock (SP-276) never reach the Mini's real ones.
+  writeFileSync(join(spiralityDir, 'spirality.project.json'), JSON.stringify({ ...spirality, logDir }));
+  // An empty package and lockfile, so `npm ci` in a release checkout runs offline.
+  writeFileSync(join(spiralityDir, 'package.json'), JSON.stringify({ name: 'scratch-spirality', version: '1.0.0', private: true }));
+  writeFileSync(join(spiralityDir, 'package-lock.json'), JSON.stringify({ name: 'scratch-spirality', version: '1.0.0', lockfileVersion: 3, requires: true, packages: { '': { name: 'scratch-spirality', version: '1.0.0' } } }));
+  writeFileSync(join(spiralityDir, '.gitignore'), 'node_modules\n');
+  // The door's `release list`, standing in for the tracker: the project runs
+  // release-1 (SP-276), tagged on Spirality's first commit below.
+  const door = join(root, 'door');
+  writeFileSync(door, '#!/bin/bash\n[ "$1 $2" = "release list" ] && printf "spirality\\tmain (always the newest)\\nnormie\\trelease-1\\n"\n', { mode: 0o755 });
   writeFileSync(join(projectDir, 'spirality.project.json'), JSON.stringify({ ...spirality, projectSlug: 'normie', launchdPrefix: 'com.normie', logDir }));
   const heads = {};
   for (const dir of [spiralityDir, projectDir]) {
     git(dir, 'add', '-A');
     git(dir, 'commit', '-q', '-m', 'scratch');
+    if (dir === spiralityDir) git(dir, 'tag', 'release-1');
     const origin = `${dir}.git`;
     git(root, 'clone', '-q', '--bare', dir, origin);
+    // The main checkout keeps no local tags: they come from origin, as on the Mini.
+    if (dir === spiralityDir) git(dir, 'tag', '-d', 'release-1');
     git(dir, 'remote', 'add', 'origin', origin);
     // origin moves on by one commit, through a second clone.
     const other = `${dir}-other`;
@@ -563,7 +576,8 @@ function scratchPair() {
     git(dir, 'branch', '-q', '--set-upstream-to=origin/main', 'main');
     heads[dir] = { before: git(dir, 'rev-parse', 'HEAD').trim(), origin: git(other, 'rev-parse', 'HEAD').trim() };
   }
-  return { root, spiralityDir, projectDir, logDir, heads, head: (dir) => git(dir, 'rev-parse', 'HEAD').trim() };
+  const env = { ...scratchGit.scratchGitEnv(), SPIRALITY_PROJECT: projectDir, SPIRALITY_RELEASE_DOOR: door };
+  return { root, spiralityDir, projectDir, logDir, heads, env, release: join(logDir, 'releases', 'release-1'), head: (dir) => git(dir, 'rev-parse', 'HEAD').trim() };
 }
 
 test('a runner for a named project starts its pass in the project\'s checkout and pulls the project\'s main, never Spirality\'s (SP-271)', { timeout: 60_000 }, async () => {
@@ -573,7 +587,7 @@ test('a runner for a named project starts its pass in the project\'s checkout an
     writeFileSync(fakeClaude, '#!/bin/bash\necho "PASS IN: $(pwd)"\necho "PASS FOR: $SPIRALITY_PROJECT"\necho "ARGS: $*"\n', { mode: 0o755 });
     const runner = spawn('bash', [join(pair.spiralityDir, 'scripts/loop_runner.sh'), 'loop-build', '3600'], {
       cwd: pair.spiralityDir, detached: true, stdio: 'ignore',
-      env: { ...scratchGit.scratchGitEnv(), CLAUDE_BIN: fakeClaude, RUN_WITH_TIME_LIMIT_POLL: '1', SPIRALITY_PROJECT: pair.projectDir },
+      env: { ...pair.env, CLAUDE_BIN: fakeClaude, RUN_WITH_TIME_LIMIT_POLL: '1' },
     });
     const log = join(pair.logDir, 'normie-loop-build.log');
     try {
@@ -589,11 +603,42 @@ test('a runner for a named project starts its pass in the project\'s checkout an
     assert.equal(real(text.match(/^PASS IN: (.*)$/m)[1]), real(pair.projectDir));
     assert.equal(text.match(/^PASS FOR: (.*)$/m)[1], pair.projectDir);
     // Spirality's skills and hooks, by its plugin's name, so a project's own
-    // copy of /loop-build cannot win over Spirality's (SP-272).
+    // copy of /loop-build cannot win over Spirality's (SP-272), from the
+    // checkout of the release the tracker names for the project (SP-276).
     assert.equal(text.match(/^ARGS: (.*)$/m)[1],
-      `-p /spirality:loop-build --plugin-dir ${pair.spiralityDir}/plugin --allowedTools Bash Edit Write Read Glob Grep Task TodoWrite WebFetch`);
+      `-p /spirality:loop-build --plugin-dir ${pair.release}/plugin --allowedTools Bash Edit Write Read Glob Grep Task TodoWrite WebFetch`);
+    assert.match(text, new RegExp(`release: this pass runs on release-1 \\(${pair.release}\\)`));
     assert.equal(pair.head(pair.projectDir), pair.heads[pair.projectDir].origin, 'the project\'s main was not pulled');
     assert.equal(pair.head(pair.spiralityDir), pair.heads[pair.spiralityDir].before, 'Spirality\'s own main was pulled by a project\'s lane');
+  } finally {
+    rmSync(pair.root, { recursive: true, force: true });
+  }
+});
+
+test('a runner for a project with no Spirality release named does not start Claude, and says so in one line (SP-276)', { timeout: 60_000 }, async () => {
+  const pair = scratchPair();
+  try {
+    writeFileSync(pair.env.SPIRALITY_RELEASE_DOOR, '#!/bin/bash\n[ "$1 $2" = "release list" ] && printf "spirality\\tmain (always the newest)\\nnormie\\tnone named\\n"\n', { mode: 0o755 });
+    const fakeClaude = join(pair.root, 'fake-claude');
+    writeFileSync(fakeClaude, '#!/bin/bash\necho "CLAUDE STARTED"\n', { mode: 0o755 });
+    const runner = spawn('bash', [join(pair.spiralityDir, 'scripts/loop_runner.sh'), 'loop-build', '3600'], {
+      cwd: pair.spiralityDir, detached: true, stdio: 'ignore',
+      env: { ...pair.env, CLAUDE_BIN: fakeClaude, RUN_WITH_TIME_LIMIT_POLL: '1' },
+    });
+    const log = join(pair.logDir, 'normie-loop-build.log');
+    try {
+      for (let i = 0; !(existsSync(log) && readFileSync(log, 'utf8').includes('sleeping 3600s')); i++) {
+        assert.ok(i < 400, 'the runner never finished its first pass');
+        await new Promise((r) => setTimeout(r, 100));
+      }
+    } finally {
+      process.kill(-runner.pid, 'SIGKILL');
+    }
+    const text = readFileSync(log, 'utf8');
+    assert.doesNotMatch(text, /CLAUDE STARTED/);
+    assert.match(text, /release: normie has no Spirality release named/);
+    assert.match(text, /SKIP \/loop-build \(no Spirality release to run on \(the release check exited 4\); Claude not started\)/);
+    assert.ok(!existsSync(pair.release), 'a release was checked out with none named');
   } finally {
     rmSync(pair.root, { recursive: true, force: true });
   }
@@ -606,12 +651,17 @@ test('a relay for a named project pulls the project\'s main, never Spirality\'s,
     // fails at once; this test is about where the relay pulls and works.
     const r = spawnSync('bash', [join(pair.spiralityDir, 'scripts/run_relay.sh'), '--dry-run'], {
       cwd: pair.spiralityDir, encoding: 'utf8', timeout: 50_000,
-      env: { ...scratchGit.scratchGitEnv(), SPIRALITY_PROJECT: pair.projectDir },
+      env: pair.env,
     });
     assert.match(r.stdout, new RegExp(`START relay — ${pair.projectDir} =====`), r.stdout + r.stderr);
     assert.equal(pair.head(pair.projectDir), pair.heads[pair.projectDir].origin, 'the project\'s main was not pulled');
     assert.equal(pair.head(pair.spiralityDir), pair.heads[pair.spiralityDir].before, 'Spirality\'s own main was pulled by a project\'s relay');
     assert.ok(existsSync(join(pair.logDir, 'normie-relay.last-start')) === false, 'a dry run wrote the start file');
+    // A dry run checks no release out (SP-276), so with none whole it does
+    // not run, and says so: never a silent run on Spirality's main.
+    assert.match(r.stdout, /\[relay\] release: could not run on release-1: release-1 is not checked out yet, and a dry run checks nothing out/);
+    assert.match(r.stdout, /END relay — not run: no Spirality release to run on \(the release check exited 5\)/);
+    assert.equal(r.status, 1, r.stdout + r.stderr);
   } finally {
     rmSync(pair.root, { recursive: true, force: true });
   }
@@ -623,7 +673,7 @@ test('a runner for a named project refuses to start, saying why, when Spirality 
     rmSync(join(pair.spiralityDir, 'plugin'));
     const r = spawnSync('bash', [join(pair.spiralityDir, 'scripts/loop_runner.sh'), 'loop-build', '3600'], {
       cwd: pair.spiralityDir, encoding: 'utf8', timeout: 20_000,
-      env: { ...scratchGit.scratchGitEnv(), CLAUDE_BIN: '/bin/false', SPIRALITY_PROJECT: pair.projectDir },
+      env: { ...pair.env, CLAUDE_BIN: '/bin/false' },
     });
     assert.equal(r.status, 1, r.stdout + r.stderr);
     assert.match(r.stderr, /plugin folder .* would find no skills or hooks\. Stopping\./);

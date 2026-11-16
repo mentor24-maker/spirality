@@ -24,9 +24,9 @@
  * of Spirality's (the door, the plugin's skills and hooks, the checks) comes
  * from the folder `prepare` prints.
  *
- *   node scripts/lib/releaseCheckout.mjs prepare --spirality <dir> --project <slug> --pid <pid> [--dry-run]
- *   node scripts/lib/releaseCheckout.mjs finish  --spirality <dir> --pid <pid>
- *   node scripts/lib/releaseCheckout.mjs status  --spirality <dir> --project <slug>
+ *   node scripts/lib/releaseCheckout.mjs prepare --root <dir> --project <slug> --pid <pid> [--dry-run]
+ *   node scripts/lib/releaseCheckout.mjs finish  --root <dir> --pid <pid>
+ *   node scripts/lib/releaseCheckout.mjs status  --root <dir> --project <slug>
  *
  * `prepare` prints the folder to run from on its first line (empty when the
  * pass must not run), then one or more lines for the pass log. Exit 0 the
@@ -401,11 +401,11 @@ function main(argv, env = process.env) {
   const [sub, ...rest] = argv;
   const arg = (name) => { const i = rest.indexOf(`--${name}`); return i >= 0 && rest[i + 1] && !rest[i + 1].startsWith('--') ? rest[i + 1] : ''; };
   const usage = (why) => {
-    console.error(`releaseCheckout: ${why}\n  usage: releaseCheckout.mjs prepare --spirality <dir> --project <slug> --pid <pid>\n         releaseCheckout.mjs finish --spirality <dir> --pid <pid>\n         releaseCheckout.mjs status --spirality <dir> --project <slug>`);
+    console.error(`releaseCheckout: ${why}\n  usage: releaseCheckout.mjs prepare --root <dir> --project <slug> --pid <pid>\n         releaseCheckout.mjs finish --root <dir> --pid <pid>\n         releaseCheckout.mjs status --root <dir> --project <slug>`);
     return EXIT.USAGE;
   };
-  const spirality = arg('spirality');
-  if (!spirality) return usage('--spirality <Spirality\'s main checkout> is required');
+  const spirality = arg('root');
+  if (!spirality) return usage('--root <Spirality\'s main checkout> is required');
   const spiralityDir = resolve(spirality);
   let dirs;
   try {

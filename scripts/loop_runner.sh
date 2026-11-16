@@ -126,7 +126,7 @@ pass_args() {
 }
 # The Spirality folder this pass runs from: this one, until a project's
 # release is read at the start of each pass (step 1b below).
-CODE="$REPO"
+RUN_DIR="$REPO"
 
 SLUG="$(node "$REPO/scripts/project_config.mjs" projectSlug)" || { echo "[loop-runner] could not read projectSlug from the project config" >&2; exit 1; }
 LOG_DIR="$(node "$REPO/scripts/project_config.mjs" logDir)" || { echo "[loop-runner] could not read logDir from the project config" >&2; exit 1; }
@@ -222,7 +222,7 @@ sleep_until_woken() {
 # the lane never stops and never sleeps 0.
 read_wake_time() {
   local said
-  said="$(node "$CODE/scripts/lib/wakeSetting.mjs" "$SKILL" 2>/dev/null)"
+  said="$(node "$RUN_DIR/scripts/lib/wakeSetting.mjs" "$SKILL" 2>/dev/null)"
   local code=$?
   case "$said" in
     ""|*[!0-9]*) ;;
@@ -244,7 +244,7 @@ read_model() {
   PASS_MODEL=default
   MODEL_ARGS=()
   local said code
-  said="$(node "$CODE/scripts/lib/modelSetting.mjs" "$SKILL" 2>/dev/null)"
+  said="$(node "$RUN_DIR/scripts/lib/modelSetting.mjs" "$SKILL" 2>/dev/null)"
   code=$?
   if [ "$code" -eq 0 ]; then
     case "$said" in
@@ -319,20 +319,20 @@ while true; do
   #     ran last (said once on its bus); with none to fall back on, or none
   #     named, the pass does not run. Never a silent run on main.
   if [ -z "$OWN" ]; then
-    RELEASE_SAID="$(node "$REPO/scripts/lib/releaseCheckout.mjs" prepare --spirality "$REPO" --project "$SLUG" --pid "$$" 2>>"$LOG")"
+    RELEASE_SAID="$(node "$REPO/scripts/lib/releaseCheckout.mjs" prepare --root "$REPO" --project "$SLUG" --pid "$$" 2>>"$LOG")"
     RELEASE_CODE=$?
-    CODE="$(printf '%s\n' "$RELEASE_SAID" | head -1)"
+    RUN_DIR="$(printf '%s\n' "$RELEASE_SAID" | head -1)"
     while IFS= read -r line; do
       [ -n "$line" ] && echo "[loop-runner] $(date "+%H:%M:%S") release: $line" >> "$LOG"
     done < <(printf '%s\n' "$RELEASE_SAID" | tail -n +2)
     WHY_NOT=""
-    if [ -z "$CODE" ] || [ ! -d "$CODE" ]; then
+    if [ -z "$RUN_DIR" ] || [ ! -d "$RUN_DIR" ]; then
       WHY_NOT="no Spirality release to run on (the release check exited $RELEASE_CODE)"
-    elif ! pass_args "$CODE"; then
+    elif ! pass_args "$RUN_DIR"; then
       WHY_NOT="$PASS_ARGS_WHY"
     fi
     if [ -n "$WHY_NOT" ]; then
-      CODE="$REPO"
+      RUN_DIR="$REPO"
       echo "===== $(date "+%Y-%m-%d %H:%M:%S") SKIP /$SKILL ($WHY_NOT; Claude not started) =====" >> "$LOG"
       rm -f "$WAKE"
       read_wake_time
@@ -349,7 +349,7 @@ while true; do
   #    already running: it drains. Asked after the pull, so the check is the
   #    newest code. ANY non-zero exit counts as paused, a check that could not
   #    run included (it fails safe), and the line it printed says which.
-  PAUSE_LINE="$("$CODE/scripts/pause_check.sh" "$SKILL" 2>>"$LOG")"
+  PAUSE_LINE="$("$RUN_DIR/scripts/pause_check.sh" "$SKILL" 2>>"$LOG")"
   PAUSE_CODE=$?
   if [ "$PAUSE_CODE" -ne 0 ]; then
     [ -n "$PAUSE_LINE" ] || PAUSE_LINE="could not read the pipeline settings (the check exited $PAUSE_CODE and said nothing; its errors are above), so /$SKILL is treated as PAUSED and not starting (it fails safe)"
@@ -387,7 +387,7 @@ while true; do
   #    skipped pass leaves a dated SKIP line (never START or END, so no
   #    reader counts it as a pass), which the pod dates its sleeping lines by.
   if [ "$LAST_REAL_PASS" -gt 0 ] && [ $(( $(date +%s) - LAST_REAL_PASS )) -lt "$IDLE_PASS_EVERY" ]; then
-    WORK_LINE="$("$CODE/scripts/work_check.sh" "$SKILL" 2>>"$LOG")"
+    WORK_LINE="$("$RUN_DIR/scripts/work_check.sh" "$SKILL" 2>>"$LOG")"
     WORK_CODE=$?
     if [ "$WORK_CODE" -eq 3 ]; then
       echo "===== $(date "+%Y-%m-%d %H:%M:%S") SKIP /$SKILL (${WORK_LINE:-no work}; Claude not started) =====" >> "$LOG"
@@ -412,7 +412,7 @@ while true; do
   SNAPSHOT="$LOG_DIR/$SLUG-$SKILL.timeout-snapshot"
   rm -f "$SNAPSHOT"
   RUN_WITH_TIME_LIMIT_SNAPSHOT="$SNAPSHOT" \
-  "$CODE/scripts/run_with_time_limit.sh" "${LOOP_PASS_LIMIT_SECONDS:-7200}" -- \
+  "$RUN_DIR/scripts/run_with_time_limit.sh" "${LOOP_PASS_LIMIT_SECONDS:-7200}" -- \
     "$CLAUDE_BIN" -p "$PROMPT" ${MODEL_ARGS[@]+"${MODEL_ARGS[@]}"} \
     ${SESSION_ARGS[@]+"${SESSION_ARGS[@]}"} \
     --allowedTools Bash Edit Write Read Glob Grep Task TodoWrite WebFetch \
@@ -428,7 +428,7 @@ while true; do
   if [ "$CODE" -eq 124 ]; then
     # Spirality's door, from the Spirality folder this pass ran (a project's
     # checkout may have none, or an older copy); it acts for the exported project.
-    (cd "$CODE" && npm run --silent clickup -- pass-timeout --pass "$SKILL" \
+    (cd "$RUN_DIR" && npm run --silent clickup -- pass-timeout --pass "$SKILL" \
       --limit "${LOOP_PASS_LIMIT_SECONDS:-7200}" --snapshot "$SNAPSHOT") \
       >> "$LOG" 2>&1 || true
     echo "[loop-runner] the pass hit the ${LOOP_PASS_LIMIT_SECONDS:-7200}s time limit and was stopped; its ticket may still be in Building — the next pass or a person should hand it back." >> "$LOG"
@@ -438,7 +438,7 @@ while true; do
   # (SP-268). Under its own short time limit, and never allowed to change
   # CODE, the runner's exit or the next pass.
   if declare -F report_lane_pass >/dev/null; then
-    report_lane_pass "$CODE" "$FAILURE_STAMP" "$SKILL" "$CODE" "$LOG" >> "$LOG" 2>&1 || true
+    report_lane_pass "$RUN_DIR" "$FAILURE_STAMP" "$SKILL" "$CODE" "$LOG" >> "$LOG" 2>&1 || true
   fi
   # Only Claude's own sign-in errors, and only in this pass's last lines: a
   # pass that merely mentions "not logged in" (gh, supabase) is not one.
@@ -452,7 +452,7 @@ while true; do
   if [ -z "$OWN" ]; then
     while IFS= read -r line; do
       [ -n "$line" ] && echo "[loop-runner] $(date "+%H:%M:%S") release: $line" >> "$LOG"
-    done < <(node "$REPO/scripts/lib/releaseCheckout.mjs" finish --spirality "$REPO" --pid "$$" 2>>"$LOG")
+    done < <(node "$REPO/scripts/lib/releaseCheckout.mjs" finish --root "$REPO" --pid "$$" 2>>"$LOG")
   fi
 
   read_wake_time

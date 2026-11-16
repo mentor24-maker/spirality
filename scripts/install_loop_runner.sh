@@ -308,7 +308,7 @@ status_tracker() {
 # checkouts on this machine: one line each, from scripts/lib/releaseCheckout.mjs.
 # Spirality's own lanes run main. A read that fails is said, never fatal.
 release_state() {
-  (cd "$REPO" && PATH="$LAUNCHD_PATH" node "$REPO/scripts/lib/releaseCheckout.mjs" status --spirality "$REPO" --project "$SLUG") \
+  (cd "$REPO" && PATH="$LAUNCHD_PATH" node "$REPO/scripts/lib/releaseCheckout.mjs" status --root "$REPO" --project "$SLUG") \
     || echo "release:  could not be read (scripts/lib/releaseCheckout.mjs status failed; its line above says why)"
 }
 
