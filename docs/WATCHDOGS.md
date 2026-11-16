@@ -91,4 +91,77 @@ StarCaster. Three rows are closer calls than the rest:
 
 Seven pipeline rows have no ticket yet: relay interval, node roles, repair,
 reconcile, machine backup, pipeline pulse and the review gate. Each says
-above why it waits.
+above why it waits, and [Seven questions](#seven-questions) below asks the
+one thing each is waiting on, with a recommended answer.
+
+## Seven questions
+
+One question per ticketless pipeline row, in the table's order. Each can be
+answered in a word or a line: **move it** (build it into Spirality for every
+project), **move part of it** (and which part), or **do not move it**. Each
+recommendation was checked against Spirality's `main` at commit `e03a997`.
+SP-330 sends these to Dane and writes his answers into the table's "Goes to"
+column.
+
+1. **Relay interval.** Should Spirality get a check that the relay's installed
+   schedule still matches what the repository says?
+   **Recommended:** do not move it.
+   The schedule installed on the Mini (its launchd job, the Mac's built-in
+   scheduler) only wakes the relay once a minute, a fixed figure
+   (`RELAY_TICK` in `scripts/lib/loopSchedule.mjs`), and the relay reads its
+   real wake time from the Settings page on every pass (`scripts/run_relay.sh`),
+   so changing how often it runs never needs the installed schedule to change.
+
+2. **Node roles.** Should Spirality get StarCaster's list of which machine may
+   run which job?
+   **Recommended:** do not move it, until lanes run on a second machine.
+   Every Spirality lane and the tracker run on the Mini, so there is nothing
+   to divide, and SP-266's heartbeat already reads each lane's own log
+   without it.
+
+3. **Repair.** Should Spirality get StarCaster's scheduled sweep that fixes
+   tickets the loop left stranded?
+   **Recommended:** do not move it; file a ticket only if a ticket gets
+   stranded in a way nothing below catches.
+   A dead build pass's ticket is already handed back by `pass-reconcile` at
+   the start of every build pass, and the relay already moves a ticket to
+   Live when it merges that ticket's pull request (`lib/relayLane.js`), which
+   leaves the sweep's last step, written against ClickUp, to question 4.
+
+4. **Reconcile.** Should Spirality get a check for tickets whose status
+   disagrees with GitHub (for example `Ready to launch` while its pull request
+   is already merged)?
+   **Recommended:** move part of it: a read-only check, run by the relay, that
+   names any open ticket whose pull request is already merged or was closed
+   without merging, and posts it on the bus.
+   The relay moves a ticket only when it is the one merging, or when Dane
+   answers a ticket whose pull request is already merged
+   (`lib/busRelayPlan.js`), so a pull request merged or closed straight on
+   GitHub leaves its ticket behind with nothing to say so, and a report that
+   changes nothing is cheap and safe.
+
+5. **Machine backup.** Should Spirality get a daily copy, off the Mini, of
+   what exists only on its disk?
+   **Recommended:** move part of it: copy the tracker's nightly backups and
+   the Mini's launch agents to a private place off the machine, and leave
+   StarCaster's sign-ins and identity files where they are.
+   The tracker already backs up its database every night at 03:15
+   (`tracker/backup.mjs`), but only onto the Mini's own disk, so a dead disk
+   today loses every project's tickets at once.
+
+6. **Pipeline pulse.** Should Spirality get StarCaster's hourly report on how
+   the loop is flowing?
+   **Recommended:** do not move it.
+   Throughput (SP-268) already raises the alarm when the queue stops moving,
+   `wip-check` already pairs every open pull request with its ticket, and the
+   tracker's Reporting page already counts each project's tickets and passes,
+   so the pulse would mostly repeat them.
+
+7. **Review gate.** Should every project's pull requests carry a GitHub check
+   that refuses a merge with no review verdict or word from Dane?
+   **Recommended:** do not move it for now.
+   Spirality's pull requests merge only through the relay on Dane's word
+   (`lib/mergeOnComment.js`), and the gate is a workflow file that would have
+   to live inside each project's repository, which goes against loop code
+   living only in Spirality ([INTEGRATION.md](INTEGRATION.md)); StarCaster's
+   own copy only advises and has never been made required.

@@ -100,7 +100,7 @@ export function formFields(setup, slug = '') {
 
 /**
  * The answer fields the form asks (formFields), in the wizard's order, each
- * with its question and the default the wizard would show in brackets
+ * with its label (Title Case, for the form), its question and the default the wizard would show in brackets
  * (null: no default). `slug` fills the defaults made from a project's slug;
  * without one those are null. A ClickUp id needed once the list is named
  * (`requiredWith`) is not required by the form itself: the wizard's checker
@@ -110,6 +110,7 @@ export function setupFields(setup, slug = '') {
   const { homeConfig } = setup;
   return formFields(setup, slug).map((f) => ({
     key: f.key,
+    label: f.label ?? f.question,
     question: f.question,
     required: Boolean(f.required),
     list: Boolean(f.list),
