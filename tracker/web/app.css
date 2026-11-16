@@ -154,6 +154,8 @@ nav.tabs { display: flex; margin: 0 0 var(--space-5); border-bottom: 2px solid v
 nav.tabs a { padding: var(--space-3) var(--space-5); margin-bottom: -2px; border-bottom: 3px solid transparent; background: transparent; color: var(--ink-secondary); font-size: var(--text-base); font-weight: 500; text-decoration: none; }
 nav.tabs a:hover { color: var(--ink-primary); }
 nav.tabs a[aria-current] { color: var(--tab-selected); font-weight: 700; border-bottom-color: var(--tab-selected); }
+/* The Tasks page's Board / List / Console tabs sit at the right of its title row (SP-326): no gap under them there, and the line under them only as wide as the tabs. */
+.title-row > nav.tabs { margin: 0; }
 .quiet { color: var(--ink-secondary); }
 .error { color: var(--ink-error); font-weight: 600; }
 /* Tables (UI_DOCTRINE 8, StarCaster's UI_RULES T11, SP-324): one look everywhere. A black heading row with
@@ -254,14 +256,18 @@ button { font: inherit; padding: 0.4rem 1rem; }
 .btn-danger:disabled, .btn-danger[aria-disabled="true"] { background: var(--btn-danger-flat-disabled); border-color: var(--btn-danger-flat-disabled); color: var(--btn-flat-ink); }
 .btn-sm { height: var(--btn-height-sm); padding: 0 0.625rem; font-size: var(--text-xs); }
 .toolbar { display: flex; gap: var(--space-7); align-items: center; justify-content: space-between; margin-bottom: 1rem; }
+/* On the Tasks title row the toolbar takes the free space, so the pod can widen into it and the tabs still end at the right edge (SP-326). */
+.tasks-head > .toolbar { flex-grow: 1; flex-wrap: wrap; }
+.tasks-head > .toolbar form.search { min-width: 12rem; }
 .toolbar .project-picker { font-weight: 600; }
 .toolbar .project-picker select { font: inherit; font-weight: normal; padding: 0.35rem; margin-left: 0.25rem; }
 /* The Pipeline Status pod (SP-168): when each loop stage runs next, between the search field and Board/List. */
-.toolbar .pipeline-pod { display: flex; flex-direction: column; align-items: flex-start; margin: 10px 20px; padding: 0.3rem 0.75rem; border: 1px solid var(--navy); border-radius: var(--radius-input); background: var(--pod-bg); font-size: var(--text-sm); color: var(--ink-primary); white-space: nowrap; cursor: pointer; text-align: left; font-family: inherit; }
+.toolbar .pipeline-pod { flex-grow: 1; display: flex; flex-direction: column; align-items: flex-start; margin: 10px 20px; padding: 0.3rem 0.75rem; border: 1px solid var(--navy); border-radius: var(--radius-input); background: var(--pod-bg); font-size: var(--text-sm); color: var(--ink-primary); white-space: nowrap; cursor: pointer; text-align: left; font-family: inherit; }
 .toolbar .pipeline-pod:hover { background: var(--pod-bg-hover); }
 .toolbar .pipeline-pod:empty { display: none; }
 .toolbar .pipeline-pod .heading { font-size: var(--text-xl); font-weight: 600; margin-bottom: 0.15rem; }
-.toolbar .pipeline-pod .stages { display: grid; grid-template-columns: auto auto; column-gap: var(--space-4); row-gap: 0; }
+/* One column per stage, name above time (SP-326), for however many stages there are. */
+.toolbar .pipeline-pod .stages { display: grid; grid-template-rows: auto auto; grid-auto-flow: column; grid-auto-columns: 1fr; align-self: stretch; column-gap: var(--space-4); row-gap: 0; }
 .toolbar .pipeline-pod .stage { font-weight: 700; color: var(--ink-primary); }
 .toolbar .pipeline-pod .time { color: var(--ink-primary); }
 .toolbar .pipeline-pod .running { color: var(--pod-running); }

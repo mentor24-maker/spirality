@@ -251,7 +251,10 @@ Switching between views of the same thing is a tab, never a button (UI_RULES
 C9, tabs): the Board / List / Console switch and the Settings tabs.
 
 - A tab bar is its own row under the title, with a 2px `--border-strong`
-  bottom border and 16px below it.
+  bottom border and 16px below it. One exception: the Tasks page's Board /
+  List / Console tabs sit at the right-hand end of its title row, after the
+  toolbar, with no gap below them and the line under them only as wide as
+  the tabs (Dane, SP-326, 2026-11-16). The Settings tabs keep their own row.
 - A tab is transparent text, padding 8px 16px, `--text-base`, weight 500,
   `--ink-secondary`; the selected one is `#0b82d4`, weight 700, with a 3px
   underline in the same colour.
@@ -391,7 +394,7 @@ Measured 2026-11-15 on `tracker/web/app.css`, `app.mjs` and `render.mjs`.
 | 2 Tokens | Followed and checked (SP-320, 2026-11-15): every colour, font size, corner and gap is a token in `:root`, StarCaster's where it has one. Padding and margins are still literal lengths, near the steps. | SP-320 |
 | 3 Buttons | Followed and checked (SP-321, 2026-11-15): every button is `btn` plus a kind, or a listed exception; 32px and 24px; disabled is a colour; focus ring on every kind. The ticket page's green, Settings' dark blue and the black link are gone. | SP-321 |
 | 4 Title row | Followed and checked (SP-322, 2026-11-15): a 24px, weight 800 `<h1>` on every page, and every toolbar in the title row at its right, the trail above it; headings under it at `--text-lg` (h2) and `--text-base` (h3 to h6), with board columns and Console stages at `--text-base`. The ticket page keeps its two-column top, whose actions sit in the right column. | SP-322 |
-| 5 Tabs | Followed and checked (SP-322, 2026-11-15): Board / List / Console and the Settings tabs are one tab bar (`nav.tabs`), links with `aria-current`. | SP-322 |
+| 5 Tabs | Followed and checked (SP-322, 2026-11-15): Board / List / Console and the Settings tabs are one tab bar (`nav.tabs`), links with `aria-current`. Board / List / Console sit at the right of the Tasks title row (SP-326, 2026-11-16); the Settings tabs on a row of their own. | SP-322, SP-326 |
 | 6 Forms | Every label above its box; boxes full width; tag boxes use the text inside the box as the instruction. | SP-325 |
 | 7 Messages | Notes beside each button and under the title; no single strip. Empty states: followed, but for a bare "None." | SP-323 |
 | 8 Tables | Followed and checked (SP-324, 2026-11-16): black heading rows with white text, every table with headings in a `.table-wrap` with its heading row fixed, sort buttons kept in the heading cell. No table has a filter row yet; the rule for one is in place. | SP-324 |

@@ -4216,7 +4216,7 @@ test('the Tasks toolbar picks a project from a dropdown, "Project: ", the one in
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   const draw = app.slice(app.indexOf('async function drawProject'), app.indexOf('async function copyText'));
   assert.match(draw, /api\('GET', '\/projects'\),\n  \]\);/);
-  assert.match(draw, /<div class="toolbar">\s*\$\{renderProjectPicker\(projects, board\.project\)\}\s*\$\{searchForm\(''\)\}\s*<button type="button" class="pipeline-pod"[^>]*><\/button>\s*<\/div>\s*<\/div>\s*\$\{viewSwitch\(board\.project, view\)\}/);
+  assert.match(draw, /<div class="toolbar">\s*\$\{renderProjectPicker\(projects, board\.project\)\}\s*\$\{searchForm\(''\)\}\s*<button type="button" class="pipeline-pod"[^>]*><\/button>\s*<\/div>\s*\$\{viewSwitch\(board\.project, view\)\}\s*<\/div>/, 'the tabs close the title row, after the toolbar (SP-326)');
   assert.doesNotMatch(app, /Change project/);
   assert.match(draw, /querySelector\('\.project-picker select'\)\.addEventListener\('change', \(e\) => \{\s*history\.pushState\(null, '', at\(view, e\.target\.value\)\);\s*route\(\);/);
   assert.match(readFileSync(WEB('app.css'), 'utf8'), /\.toolbar \.project-picker select \{/);
@@ -4661,7 +4661,7 @@ test('the Pipeline Status pod: each stage\'s next time or "running", a dash for 
   assert.doesNotMatch(renderPipelinePod({ stages: [{ name: '<b>x', logged: false }] }, timeOf), /<b>x/);
 });
 
-test('the pod reads as a small table (SP-194): a "Pipeline Stages" heading, one stage per row in two columns, bold names, a running stage green, on light blue', () => {
+test('the pod reads as a small table (SP-194, SP-326): a "Pipeline Stages" heading, one column per stage with its name above its time, bold names, a running stage green, on light blue', () => {
   const timeOf = (iso) => `[${iso.slice(11, 16)}]`;
   const html = renderPipelinePod({ stages: [
     { name: 'Relay', logged: true, running: false, nextDue: '2026-11-09T17:45:00.000Z' },
@@ -4673,7 +4673,7 @@ test('the pod reads as a small table (SP-194): a "Pipeline Stages" heading, one 
   assert.match(html, /^<span class="heading">Pipeline Stages<\/span><span class="stages">/);
   // No table inside the button: HTML does not allow one there.
   assert.doesNotMatch(html, /<(table|tr|td|th|div|h[1-6]|p)\b/);
-  // Two cells per stage, name then time, in Relay, Build, Review, Intake order.
+  // Two cells per stage, name then time, in Relay, Build, Review, Intake order; the grid turns them into columns.
   const grid = html.slice(html.indexOf('<span class="stages">') + '<span class="stages">'.length, -'</span>'.length);
   const cells = [...grid.matchAll(/<span class="([^"]*)"[^>]*>([^<]*)<\/span>/g)].map((m) => [m[1], m[2]]);
   assert.deepEqual(cells, [
@@ -4693,7 +4693,11 @@ test('the pod reads as a small table (SP-194): a "Pipeline Stages" heading, one 
   const pod = rule('.toolbar .pipeline-pod');
   assert.match(pod, /background: #cceeff;/, 'Dane\'s light blue (SP-222)');
   assert.match(pod, /flex-direction: column;/, 'the heading sits above the stages');
-  assert.match(rule('.toolbar .pipeline-pod .stages'), /display: grid; grid-template-columns: auto auto;/, 'two lined-up columns');
+  const stages = rule('.toolbar .pipeline-pod .stages');
+  assert.match(stages, /display: grid; grid-template-rows: auto auto; grid-auto-flow: column;/, 'one column per stage, name above time (SP-326)');
+  assert.doesNotMatch(stages, /grid-template-columns/, 'no fixed column count: however many stages there are');
+  assert.match(pod, /flex-grow: 1;/, 'the pod widens into the free space of the title row (SP-326)');
+  assert.match(css, /\.tasks-head > \.toolbar \{ flex-grow: 1;/, 'the toolbar grows with it, so the tabs still end at the right edge');
   assert.match(rule('.toolbar .pipeline-pod .stage'), /font-weight: 700;/, 'stage names are bold');
   const green = rule('.toolbar .pipeline-pod .running').match(/color: (#[0-9a-fA-F]{6});/);
   assert.ok(green, 'a running stage has its own colour');
@@ -4761,8 +4765,9 @@ test('the Tasks page puts the pod between the search field and Board/List, fills
   const search = head.indexOf("${searchForm('')}");
   const pod = head.indexOf('class="pipeline-pod"');
   const views = head.indexOf('${viewSwitch(board.project, view)}');
-  // SP-322: Board/List left the toolbar for a tab bar of its own, under the title row the pod sits in.
+  // SP-322: Board/List left the toolbar for a tab bar; SP-326 put it at the right end of the title row the pod sits in.
   assert.ok(search !== -1 && search < pod && pod < views, 'search field, then the pod, then the Board/List tabs');
+  assert.match(head, /<\/div>\s*\$\{viewSwitch\(board\.project, view\)\}\s*<\/div>/, 'the tabs are the title row\'s last item, after the toolbar (SP-326)');
   const draw = app.slice(app.indexOf('async function drawProject('), app.indexOf('async function drawProject(') + 12000);
   assert.match(draw, /refreshPipeline\(\);/);
   assert.match(app, /const PIPELINE_REFRESH_EVERY_MS = 60_000;/);
@@ -5457,7 +5462,7 @@ test('the Console page: /in-flight and the stage colours drawn, a Console link b
   assert.match(draw, /api\('GET', '\/stage-colours'\)/);
   assert.match(draw, /localStorage\.setItem\(VIEW_KEY, 'console'\)/);
   assert.match(draw, /renderConsole\(answer, stages\)/);
-  assert.match(draw, /viewSwitch\(slug, 'console'\)/);
+  assert.match(draw, /<div class="tasks-head title-row"><h1>Tasks<\/h1>\$\{slug \? viewSwitch\(slug, 'console'\) : ''\}<\/div>/, 'the tabs at the right of the title row, as on Board and List (SP-326)');
   // The view switch names all three in Title Case, the current one marked.
   const sw = /function viewSwitch\(slug, current\) \{([\s\S]*?)\n\}/.exec(app)[1];
   assert.match(sw, /\['board', 'Board', [^\]]+\], \['list', 'List', [^\]]+\], \['console', 'Console', '\/console'\]/);
