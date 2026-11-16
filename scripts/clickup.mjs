@@ -75,7 +75,7 @@ import {
 } from '../lib/relayLane.js';
 import {
   conflictTicketName, conflictTicketBody, conflictTicketFiledComment, findConflictTicket, unstuckPullRequest, aheadConflictVerdict,
-  stalledSummaryHeadline, catchUpClosePlan, fixupLiveNote,
+  stalledSummaryHeadline, catchUpClosePlan, fixupLiveNote, catchUpTicketFields,
 } from '../lib/conflictWork.js';
 import {
   handbackDoneText, handbackFailureText, repliesShowHandbackDone, repliesShowHandbackFailure, HANDBACK_FAILURE_MARKER,
@@ -86,7 +86,7 @@ import trackerBus from '../lib/trackerBus.js';
 import { FALLBACK_TASK_NAME } from '../lib/busFallback.js';
 // Tickets as data for scheduled checks (SP-205).
 import ticketsJson from '../lib/ticketsJson.js';
-import { CLASS_FIELDS, classValue } from '../lib/ticketClass.js';
+import { CLASS_FIELDS, classValue, LOOP_FILING_CLASS } from '../lib/ticketClass.js';
 // Stage counts for StarCaster's weekly report (SP-206).
 import stageCounts from '../lib/stageCounts.js';
 // A ticket's `Waits on:` line (task 86bctfun6): the claim leaves it alone
@@ -358,6 +358,13 @@ function classFlags(doing) {
   }
   return wanted;
 }
+
+/**
+ * The class a ticket the door files on its own carries (SP-346,
+ * lib/ticketClass.js LOOP_FILING_CLASS): Operational, started by an agent
+ * session. Only the tracker keeps a class, so on ClickUp it is nothing.
+ */
+const ownFilingClass = () => (project.tracker === 'api' ? LOOP_FILING_CLASS : {});
 
 /** The class fields a read ticket carries that differ from `wanted`, as "kind: asked x, got y" lines. */
 function classMismatches(t, wanted) {
@@ -2067,9 +2074,7 @@ if (cmd === 'whoami') {
   // merge word (SP-294), so the body does not claim he has given it.
   const fileCatchUp = async (task, prRef, branch, name, commentId, ahead = null) => {
     const body = conflictTicketBody({ task, pr: prRef, branch, localVerdict: ahead ? aheadConflictVerdict(ahead) : null, commentId, ahead });
-    const out = await tracker.createTask(list, {
-      name, markdown_description: body, status: DISPLAY[QUEUED], priority: PRIORITY.high,
-    });
+    const out = await tracker.createTask(list, catchUpTicketFields({ name, body, keepsClass: project.tracker === 'api' }));
     const id = out.res.ok && out.json?.id ? String(out.json.id) : '';
     if (!id) {
       unchecked.push(`${task.id}: PR #${prRef.number} conflicts, and filing the catch-up ticket FAILED (HTTP ${out.res.status}) — the next pass tries again`);
@@ -2082,6 +2087,10 @@ if (cmd === 'whoami') {
       unchecked.push(`${task.id}: PR #${prRef.number} conflicts; catch-up ticket ${id} was created but ${why} — not counted as filed, a session must look`);
       return null;
     }
+    // Its class (SP-346) is read back too; one that did not stick is said, but
+    // the ticket still counts as filed: the conflict is the urgent part.
+    const classWrong = classMismatches(back, ownFilingClass());
+    if (classWrong.length) unchecked.push(`${task.id}: catch-up ticket ${id} is filed, but its class did not stick (${classWrong.join('; ')}) — set it with classify`);
     return { id, url: out.json.url || back.url || `https://app.clickup.com/t/${id}` };
   };
 
@@ -2846,6 +2855,7 @@ if (cmd === 'whoami') {
     if (!chat) {
       const made = await tracker.createTask(bus, {
         name: FALLBACK_TASK_NAME, markdown_description: trackerBus.renderTeamChatSeed(), status: trackerBus.TEAM_CHAT_STATUS,
+        ...LOOP_FILING_CLASS,
       });
       if (!made.res.ok) die(`create the "${FALLBACK_TASK_NAME}" ticket in ${bus}`, made);
       chat = await readTask(made.json.id);
@@ -2858,6 +2868,8 @@ if (cmd === 'whoami') {
         console.error(`bus-post: created ${chat.id} "${chat.name}", but it read back in status ${JSON.stringify(statusOf(chat))}, not "${trackerBus.TEAM_CHAT_STATUS}", so a loop could claim it. Nothing was posted; move it to ${trackerBus.TEAM_CHAT_STATUS} on the page.`);
         process.exit(1);
       }
+      const classWrong = classMismatches(chat, LOOP_FILING_CLASS);
+      if (classWrong.length) console.error(`bus-post: created ${chat.id}, but its class did not stick (${classWrong.join('; ')}); set it with classify.`);
       console.error(`bus-post: there was no "${FALLBACK_TASK_NAME}" ticket in ${bus}; created ${chat.id} in ${trackerBus.TEAM_CHAT_STATUS} (read back).`);
     }
     const { id } = await postComment(chat.id, { comment_text: post });

@@ -35,8 +35,9 @@ npm run clickup -- queue --status Requested                     # the requests, 
 npm run clickup -- get --task <id>                              # his title and his words
 npm run clickup -- attachments --task <id> --to /tmp/<id>-attachments   # save the files he attached, to read
 npm run clickup -- comments --task <id>                         # anything he added since
-npm run clickup -- task --name "..." --status Requested --tags <tag> --body-file -   # a further slice
+npm run clickup -- task --name "..." --status Requested --tags <tag> --kind <k> --started-by <s> --body-file -   # a further slice
 npm run clickup -- describe --task <id> --body-file -           # REPLACE the description with the spec
+npm run clickup -- classify --task <id> --kind <k> [--started-by <s>]   # the kind you propose, read back
 npm run clickup -- ask --task <id> --status "Needs your input" --body-file -          # hand it to him
 npm run clickup -- comment --task <id> --body-file -            # a plain note (failures)
 ```
@@ -138,6 +139,8 @@ stick. **A non-zero exit is a failure you report**, never one you talk past.
    ```
    Attached: <each file's name as `get` lists it, comma-separated; only when there are files>
 
+   ## Kind
+   <Feature | Fix | Operational | Documentation>: <one line on why>
    ## Goal
    ## Scope
    ## Non-goals
@@ -149,6 +152,23 @@ stick. **A non-zero exit is a failure you report**, never one you talk past.
    ## How to test
    ## Risk
    ````
+
+   **Every spec proposes its kind** (`docs/LOOP_CONTRACT.md`, "A ticket's
+   kind, who started it and how it ended"): exactly one of Feature, Fix,
+   Operational or Documentation, judged inside the project whose queue the
+   ticket is in, on the `## Kind` line with one line on why. In Spirality the
+   loop, the lanes and the tracker's pages are features; a change to the
+   tracker's Docs page is a Feature, not Documentation. After the `describe`
+   (or the `task`, for a slice), set it on the ticket and read it back:
+
+   ```bash
+   npm run clickup -- classify --task <id> --kind <kind> --started-by <starter>
+   ```
+
+   `<starter>` is the request's own: `get` prints it on the `started:` line
+   (the page fills it in at filing). Keep it; give `operator` only when it
+   reads `(none)`. A slice gets the same starter as the request it came from,
+   on its `task` line (`--kind <k> --started-by <s>`).
 
    **Every spec carries the `Likely files:` line** (`docs/LOOP_CONTRACT.md`,
    "The files a ticket will likely change"): on a line of its own under
@@ -190,7 +210,7 @@ stick. **A non-zero exit is a failure you report**, never one you talk past.
    one, so a failure leaves his request untouched:
 
    ```bash
-   npm run clickup -- task --name "..." --status Requested --tags request-form --body-file -
+   npm run clickup -- task --name "..." --status Requested --tags request-form --kind <k> --started-by <s> --body-file -
    ```
 
    Each slice gets the same shape, the same `## Asked` block (his whole
@@ -231,7 +251,9 @@ stick. **A non-zero exit is a failure you report**, never one you talk past.
    @@CONTEXT
    What you understood him to want and what this ticket does about it, in
    plain English, 50-100 words. For a slice: which slice of how many, and
-   what the others cover.
+   what the others cover. End with one sentence naming the kind you set
+   ("Proposed kind: Feature."): his "go" keeps it, and a reply naming
+   another kind changes it before the build.
    @@NEEDED
    Reply "go" to queue it as written, or reply with what to change.
    Your move: Reply — "go", or what to change.

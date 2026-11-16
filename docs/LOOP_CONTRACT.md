@@ -370,6 +370,22 @@ Where they are set and read:
 ClickUp keeps none of them: on a project still on ClickUp the class flags
 are refused (exit 2) and nothing is written.
 
+**Who sets them at filing (SP-346).** A new ticket never arrives blank.
+When a filing does not say who started it, the tracker reads it from who
+filed it (`lib/ticketClass.js`, `filedClass`): a loop's sign-in is `agent`,
+the project's operator signed in as a person is `operator`, and any other
+person (a teammate filing from an outside site) is `client`, with kind
+`fix` unless they named one. A kind is never guessed for a loop. A ticket
+a loop or watchdog files on its own (the merge-conflict catch-up, the bus's
+team chat, a project's setup ticket) is `operational`, started by `agent`
+(`LOOP_FILING_CLASS`). `loop-intake` proposes the kind on each spec (a
+`## Kind` section, a sentence in the card's `@@CONTEXT`) and sets it with
+the started-by of the request it came from; Dane's "go" keeps it, and a reply
+naming another kind is applied by `loop-build` before it builds. `loop-spec`
+sets both on what it files: `operator` when he asked for it, `agent` when the
+session found it. A copy made with Clone keeps the original's kind and
+who started it. A value the filing gives, even `none`, is never replaced.
+
 **Why (2026-11-16, SP-345):** 58 of Spirality's 344 tickets (17%) were
 merge-conflict fix-ups the loop filed for itself, 9 of them on 2026-11-16
 alone, and every one counted as a finished ticket beside the features.

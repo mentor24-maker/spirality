@@ -101,7 +101,7 @@ import { createLaneWaker } from './wakeLanes.mjs';
 import { listCommands, REPO_ROOT } from './commands.mjs';
 import { listDocs, readDoc } from './docsFolder.mjs';
 import loopStatuses from '../lib/loopStatuses.js';
-import { CLASS_FIELDS } from '../lib/ticketClass.js';
+import { CLASS_FIELDS, filedClass } from '../lib/ticketClass.js';
 
 /**
  * The session cookie's name and how long it lasts: 30 days, the store's own
@@ -1452,7 +1452,16 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
       if (method === 'POST') {
         const body = await readJson(req);
         checkBody(body, me, FILE_FIELDS);
-        const ticket = store.fileTicket({ ...pick(body, FILE_FIELDS), project: project.slug, actor: me.id });
+        // Who started it, read from who filed it when the filing does not
+        // say (lib/ticketClass.js filedClass), so a new ticket never arrives
+        // blank: a loop as an agent session, the operator as operator, any
+        // other person as a client with kind Fix.
+        const fields = pick(body, FILE_FIELDS);
+        const ticket = store.fileTicket({
+          ...fields,
+          ...filedClass({ actorKind: me.kind, isOperator: project.operator === me.id, given: fields }),
+          project: project.slug, actor: me.id,
+        });
         return [201, ticket, { ticket, changed: ['status'] }];
       }
     }
