@@ -2828,8 +2828,10 @@ export function suggestRunLine(run) {
 /**
  * The Suggest Next Tasks rows for `suggestions` in `state`'s order (suggestState):
  * each a drag handle (arrow keys move it too), its place as a dropdown of
- * 1 to the number of rows, a Keep checkbox, the title, and the why and
- * description under More. A filed row names its ticket. Every word is
+ * 1 to the number of rows, a Keep checkbox, the title, an i button that
+ * opens the row's About box (SP-304, renderSuggestionInfo), and the why and
+ * description under More. The i carries the suggestion's own index, not its
+ * place, so a moved row's i still opens its own suggestion. A filed row names its ticket. Every word is
  * escaped: a suggestion is text, never markup.
  */
 export function renderSuggestRows(suggestions, state) {
@@ -2848,10 +2850,27 @@ export function renderSuggestRows(suggestions, state) {
       // the minute's redraw would never run while the list shows.
       + `<label class="keep"><input type="checkbox" value="keep"${dropped.has(i) ? '' : ' checked'}> Keep</label>`
       + `<span class="suggestion-title">${title}</span>`
+      + `<button type="button" class="suggestion-info-open" data-index="${i}" aria-label="About ${title}" title="About This Task">${INFO_ICON}</button>`
       + (filed ? `<span class="filed">Filed <a href="/t/${encodeURIComponent(filed.id)}">${escapeHtml(filed.id)}</a></span>` : '')
       + `<details class="more"><summary>More</summary>`
       + (s.why ? `<p class="why"><strong>Why:</strong> ${escapeHtml(s.why)}</p>` : '')
       + (s.description ? `<p class="suggestion-description">${escapeHtml(s.description)}</p>` : '')
       + `</details></li>`;
   }).join('');
+}
+
+/**
+ * What a suggestion's About box holds (SP-304): its title as the heading,
+ * Why It Matters and Description, each only when the suggestion has it.
+ * Every word is escaped: a suggestion is text, never markup. SP-305 adds
+ * its related tickets, topics, tags and links here.
+ */
+export function renderSuggestionInfo(suggestion) {
+  const s = suggestion ?? {};
+  const section = (heading, text) => (text
+    ? `<h3>${heading}</h3><p>${escapeHtml(text)}</p>`
+    : '');
+  const body = section('Why It Matters', s.why) + section('Description', s.description);
+  return `<h2 id="suggestion-info-title">${escapeHtml(s.title ?? '')}</h2>`
+    + (body || '<p class="quiet">This suggestion came with nothing more to say.</p>');
 }
