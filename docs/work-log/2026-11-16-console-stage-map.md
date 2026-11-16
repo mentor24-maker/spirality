@@ -30,3 +30,13 @@ clickable. The same pass made the Live window follow the tracker's own clock,
 dropped the meaningless "next change" from finished Live tiles, and stopped
 the Console reading the history of every ticket ever launched on each minute's
 refresh.
+
+The second send-back found that picking a feature in the Features key no
+longer faded the other features' tiles in Live (Live's own age fade won over
+it), and that every "+N More" tile faded even when the tickets it held were
+the feature picked. Both are fixed: a pick now fades a Live tile like any
+other, and a "+N More" tile stays bright when any ticket inside it is the
+picked feature. The page also stopped deciding a second time, on the
+browser's clock, which launches are recent enough to show; the tracker's
+answer decides. A browser walk picked a feature held only inside Queued's
+"+N More" and saw that tile alone stay bright, with every Live tile faded.

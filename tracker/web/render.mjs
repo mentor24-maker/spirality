@@ -2987,8 +2987,8 @@ export function driftOf(t, now = Date.now()) {
 export function liveFade(t, now = Date.now()) {
   const at = Date.parse(t?.stageSince);
   if (Number.isNaN(at)) return LIVE_FADE_FLOOR;
-  const share = Math.min(1, Math.max(0, (now - at) / LIVE_SHOWN_MS));
-  return tidy(1 - share * (1 - LIVE_FADE_FLOOR));
+  const age = Math.min(1, Math.max(0, (now - at) / LIVE_SHOWN_MS));
+  return tidy(1 - age * (1 - LIVE_FADE_FLOOR));
 }
 
 /**
@@ -3090,11 +3090,20 @@ function placeAttrs(area, grid, slot, fade = null) {
 }
 
 /**
+ * The features of the tickets a "+N More" tile holds, one per line, each
+ * once: its `data-features`, so a pick in the Features key dims the More
+ * tile only when none of its hidden tickets is the picked feature.
+ */
+export function moreFeatures(hidden) {
+  return [...new Set((Array.isArray(hidden) ? hidden : []).map(consoleFeature).filter(Boolean))].join('\n');
+}
+
+/**
  * The Console as HTML (SP-333, replacing SP-233's stage columns): the
  * Features key (renderFeatureKey) over the map, MAP_AREAS each a
  * `map-area` with its name, its count and its tiles placed by placeArea. The
  * map's areas come in the loop's own order, so a narrow screen, which stacks
- * them, reads the same path. Live shows only the last day's launches, each
+ * them, reads the same path. Live shows the launches /in-flight sends (the last day's, on the server's clock), each
  * fading with age. A ticket whose status is not on the map is listed under
  * it ("Other Statuses"), so no ticket is ever left off.
  */
@@ -3102,8 +3111,8 @@ export function renderConsole(answer, now = Date.now()) {
   const tickets = Array.isArray(answer?.tickets) ? answer.tickets : [];
   const projects = new Map((Array.isArray(answer?.projects) ? answer.projects : []).map((p) => [p.slug, p]));
   const onMap = new Set(MAP_AREAS.map((a) => a.status));
-  const live = (t) => now - (Date.parse(t.stageSince) || 0) <= LIVE_SHOWN_MS;
-  const shown = tickets.filter((t) => t.status !== 'Live' || live(t));
+  // Which Live tickets are recent enough to show is the server's answer (consoleOf, on its clock); the page only fades them.
+  const shown = tickets;
   const tile = (t, opts) => renderConsoleTile(t, projects.get(t.project), now, opts);
   const areaHtml = (area) => {
     const here = shown.filter((t) => t.status === area.status);
@@ -3115,7 +3124,7 @@ export function renderConsole(answer, now = Date.now()) {
     });
     if (placed.more) {
       const n = placed.more.hidden.length;
-      tiles.push(`<details class="tile more ${moreOpens(area, placed.grid, placed.more)}${sizeClass ? ` ${sizeClass}` : ''}" data-stage="${escapeHtml(area.status)}"${placeAttrs(area, placed.grid, placed.more)}>`
+      tiles.push(`<details class="tile more ${moreOpens(area, placed.grid, placed.more)}${sizeClass ? ` ${sizeClass}` : ''}" data-stage="${escapeHtml(area.status)}" data-features="${escapeHtml(moreFeatures(placed.more.hidden))}"${placeAttrs(area, placed.grid, placed.more)}>`
         + `<summary aria-label="${escapeHtml(`${n} more in ${area.status}`)}">+${n} More</summary>`
         + `<ul class="more-list">${placed.more.hidden.map((t) => `<li><a href="/t/${encodeURIComponent(String(t.id ?? ''))}">${escapeHtml(String(t.id ?? ''))}</a> ${escapeHtml(t.name ?? '')}</li>`).join('')}</ul></details>`);
     }

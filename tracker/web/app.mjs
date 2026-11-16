@@ -1198,7 +1198,11 @@ function showFeaturePick() {
   if (!picks.some((b) => b.dataset.feature === pickedFeature)) pickedFeature = null;
   for (const b of picks) b.setAttribute('aria-pressed', String(b.dataset.feature === pickedFeature));
   for (const tile of main.querySelectorAll('.console .tile')) {
-    tile.classList.toggle('dimmed', pickedFeature !== null && tile.dataset.feature !== pickedFeature);
+    // A "+N More" tile carries its hidden tickets' features (render.mjs moreFeatures), one per line.
+    const has = tile.dataset.features !== undefined
+      ? tile.dataset.features.split('\n').includes(pickedFeature)
+      : tile.dataset.feature === pickedFeature;
+    tile.classList.toggle('dimmed', pickedFeature !== null && !has);
   }
 }
 

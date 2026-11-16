@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { DEMO_NEWEST_RELEASE, DEMO_OWN_PROJECT, DEMO_SUGGESTIONS, DEMO_TOPICS, demoNewestRelease, demoSuggest, seedDemo, tickingClock } from './demoData.mjs';
 import { reportsOf, REPORT_RANGES, GROWTH_PERIODS, searchTickets, PRIORITIES, timeSplitOf, isFailureNote, TIME_BUCKETS, pipelineControlsOf } from './pageData.mjs';
-import { escapeHtml, renderStatusLine, renderComment, renderInline, renderMarkdown, unwrapDoc, headingId, renderQuickAction, CLOSE_LINE, REPLY_LINE, offersMerge, offersClose, bugReport, BUG_REPORT_TAG, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, heldBugReport, renderBugReportActions, approveQuestion, rejectQuestion, changeProblem, REJECT_COMMENT, WONT_DO_TAG, HELD_REPORT_LINE, HELD_REPORT_STATUS_LINE, cardMove, renderTrail, renderProjectPicker, renderTopicPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, loopHasIt, renderCommentForm, LOOP_HAS_STATUSES, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, renderLoopQueueDiagram, LOOP_QUEUE_DIAGRAM, renderTopics, renderTopicEditRow, topicDeleteQuestion, renderTagEditRow, tagDeleteQuestion, tagAddressable, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, renderListTopics, projectTags, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, renderReleaseGroup, controlValueText, mountainTime, wakeInEffectText, modelLastPassText, renderConsole, renderConsoleTile, MAP_AREAS, MAP_UNITS, placeArea, driftOf, liveFade, slotShare, moreOpens, tileSizeClass, TILE_MAX, TILE_MIN, TILE_COMPACT, TILE_TINY, LIVE_FADE_FLOOR, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, consoleFeature, featureColourIndex, renderFeatureKey, FEATURE_PALETTE, drainLine, capInFlightText, renderTitleChoices, titleModeOf, TITLE_MODES, SUGGEST_POLL_MS, moveSuggestion, suggestState, filingPlan, orderPlan, andList, suggestRunLine, renderSuggestRows, renderSuggestionInfo, suggestionFileHref } from './web/render.mjs';
+import { escapeHtml, renderStatusLine, renderComment, renderInline, renderMarkdown, unwrapDoc, headingId, renderQuickAction, CLOSE_LINE, REPLY_LINE, offersMerge, offersClose, bugReport, BUG_REPORT_TAG, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, heldBugReport, renderBugReportActions, approveQuestion, rejectQuestion, changeProblem, REJECT_COMMENT, WONT_DO_TAG, HELD_REPORT_LINE, HELD_REPORT_STATUS_LINE, cardMove, renderTrail, renderProjectPicker, renderTopicPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, loopHasIt, renderCommentForm, LOOP_HAS_STATUSES, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, renderLoopQueueDiagram, LOOP_QUEUE_DIAGRAM, renderTopics, renderTopicEditRow, topicDeleteQuestion, renderTagEditRow, tagDeleteQuestion, tagAddressable, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, renderListTopics, projectTags, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, renderReleaseGroup, controlValueText, mountainTime, wakeInEffectText, modelLastPassText, renderConsole, renderConsoleTile, MAP_AREAS, MAP_UNITS, placeArea, driftOf, liveFade, slotShare, moreOpens, moreFeatures, tileSizeClass, TILE_MAX, TILE_MIN, TILE_COMPACT, TILE_TINY, LIVE_FADE_FLOOR, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, consoleFeature, featureColourIndex, renderFeatureKey, FEATURE_PALETTE, drainLine, capInFlightText, renderTitleChoices, titleModeOf, TITLE_MODES, SUGGEST_POLL_MS, moveSuggestion, suggestState, filingPlan, orderPlan, andList, suggestRunLine, renderSuggestRows, renderSuggestionInfo, suggestionFileHref } from './web/render.mjs';
 import { startServer, setupSettingsOf } from './server.mjs';
 import { saveAnswers, setupFields, setupOf } from './setup.mjs';
 import { DANE_FIELDS as SETUP_FIELDS, STEPS as SETUP_STEPS } from '../scripts/onboard/onboard.mjs';
@@ -5684,7 +5684,7 @@ test('a Live tile shows no next change, and says none aloud: it is finished (SP-
   assert.match(renderConsoleTile(consoleTicket({ status: 'Queued' }), ALPHA, CONSOLE_NOW), /class="fact next"/, 'in flight: still shown');
 });
 
-test('Live shows only the last day\'s launches, newest nearest Requested, each fading with age (SP-333)', () => {
+test('Live shows the launches the server sends, newest nearest Requested, each fading with age (SP-333)', () => {
   const ago = (h) => new Date(CONSOLE_NOW - h * 3_600_000).toISOString();
   const tickets = [
     consoleTicket({ id: 'AL-1', status: 'Live', stageSince: ago(20), nextChange: null }),
@@ -5692,14 +5692,17 @@ test('Live shows only the last day\'s launches, newest nearest Requested, each f
     consoleTicket({ id: 'AL-3', status: 'Live', stageSince: ago(30), nextChange: null }),
   ];
   const html = renderConsole({ projects: [ALPHA], tickets }, CONSOLE_NOW);
-  assert.doesNotMatch(html, /\/t\/AL-3"/, 'launched more than a day ago: gone');
+  // The server (consoleOf, on its own clock) leaves out launches over a day old; the page does not filter again on the browser's clock.
+  assert.match(html, /\/t\/AL-3"/, 'sent by the server: drawn, at the fade floor');
+  assert.doesNotMatch(/export function renderConsole\([\s\S]*?\n\}/.exec(readFileSync(WEB('render.mjs'), 'utf8'))[0], /LIVE_SHOWN_MS/);
   const live = html.slice(html.indexOf('data-stage="Live" data-area'));
   assert.ok(live.indexOf('/t/AL-2"') < live.indexOf('/t/AL-1"'), 'newest first, nearest the exit toward Requested');
   assert.match(live, /data-fade="0\.97" href="\/t\/AL-2"/);
   assert.match(live, /data-fade="0\.42" href="\/t\/AL-1"/);
   assert.equal(liveFade(consoleTicket({ stageSince: ago(0) }), CONSOLE_NOW), 1);
   assert.equal(liveFade(consoleTicket({ stageSince: ago(24) }), CONSOLE_NOW), LIVE_FADE_FLOOR);
-  assert.match(live, /<span class="count quiet">2<\/span>/);
+  assert.match(live, /data-fade="0\.3" href="\/t\/AL-3"/);
+  assert.match(live, /<span class="count quiet">3<\/span>/);
 });
 
 test('the Console page: /in-flight and the stage colours drawn, a Console link beside Board and List, remembered for "Tasks", redrawn every beat', () => {
@@ -5740,7 +5743,9 @@ test('the Console map\'s look: areas at 20% of their colour, a set stage colour 
   assert.match(css, /\.console-map \.tile \{[^}]*left: calc\(var\(--at-x\) \* 100%\);[^}]*width: calc\(var\(--at-size\) \* 100%\);[^}]*aspect-ratio: 1;/);
   assert.match(css, /@media \(max-width: 700px\) \{[\s\S]*?\.map-area \{ position: static;/);
   // The dim of a Features pick comes after Live's fade, so a picked feature still dims a Live tile.
-  assert.ok(css.indexOf('.console-map .tile[data-fade]') < css.indexOf('.tile.dimmed'));
+  // A Live tile's fade (.console-map .tile[data-fade]) is three selectors deep, so the map's dim is too, and comes after it: a pick dims a Live tile.
+  assert.match(css, /\n\.console-map \.tile\.dimmed \{ opacity: 0\.25; \}/);
+  assert.ok(css.indexOf('.console-map .tile[data-fade]') < css.indexOf('.console-map .tile.dimmed'));
 });
 
 test('the Console\'s minute redraw keeps how far across he has scrolled', () => {
@@ -5833,13 +5838,24 @@ test('the Features key lists each feature on screen with its count, most first, 
   assert.match(renderConsole({ tickets, projects: [ALPHA] }, ['Queued'], CONSOLE_NOW), /^<div class="feature-key"[\s\S]*<\/div><div class="console">/);
 });
 
+test('a "+N More" tile names the features of the tickets it holds, so a pick dims it only when none of them match (SP-333)', () => {
+  assert.equal(moreFeatures([consoleTicket({ tags: ['Board'] }), consoleTicket({ tags: [] }), consoleTicket({ tags: ['Board'] }), consoleTicket({ tags: ['Mail'] })]), 'Board\nMail');
+  assert.equal(moreFeatures([consoleTicket({ tags: [] })]), '', 'no feature: an empty list, which every pick dims');
+  assert.equal(moreFeatures(null), '');
+  const many = Array.from({ length: 60 }, (_, i) => consoleTicket({ id: `AL-${i + 1}`, status: 'Queued', tags: i === 59 ? ['Mail'] : ['Board'] }));
+  const html = renderConsole({ projects: [ALPHA], tickets: many }, CONSOLE_NOW);
+  assert.match(html, /<details class="tile more[^"]*" data-stage="Queued" data-features="Board\nMail" data-x=/);
+});
+
 test('a click on a feature in the key dims every other tile, a second click shows them all, and the minute redraw keeps the pick', () => {
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   const draw = /async function drawConsole\(\) \{([\s\S]*?)\n\}/.exec(app)[1];
   assert.match(draw, /pickedFeature = pickedFeature === b\.dataset\.feature \? null : b\.dataset\.feature;/);
   assert.match(draw, /showFeaturePick\(\);\s*putTrail/, 'the pick is put back after every draw');
   const show = /function showFeaturePick\(\) \{([\s\S]*?)\n\}/.exec(app)[1];
-  assert.match(show, /tile\.classList\.toggle\('dimmed', pickedFeature !== null && tile\.dataset\.feature !== pickedFeature\)/);
+  assert.match(show, /tile\.classList\.toggle\('dimmed', pickedFeature !== null && !has\)/);
+  // A "+N More" tile dims only when none of the tickets it holds is the picked feature.
+  assert.match(show, /const has = tile\.dataset\.features !== undefined\s*\? tile\.dataset\.features\.split\('\\n'\)\.includes\(pickedFeature\)\s*: tile\.dataset\.feature === pickedFeature;/);
   assert.match(show, /b\.setAttribute\('aria-pressed', String\(b\.dataset\.feature === pickedFeature\)\)/);
   assert.match(show, /if \(!picks\.some\(\(b\) => b\.dataset\.feature === pickedFeature\)\) pickedFeature = null;/);
 });
