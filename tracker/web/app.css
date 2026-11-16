@@ -127,7 +127,11 @@
   color: var(--ink-primary);
 }
 body { margin: 0; background: var(--bg-page); color: var(--ink-primary); -webkit-font-smoothing: antialiased; }
-header { display: flex; gap: var(--space-7); align-items: center; padding: 0 2rem; height: 3.5rem; background: var(--header-bg); color: var(--header-ink); }
+/* The banner stays at the top of the window and the page scrolls under it (SP-327). Its z-index sits above
+   every other layer on the page (the filed pod is 10), and html's scroll-padding-top, the banner's height,
+   makes every "scroll to this" jump (the comments link, the comment box) land below it, not under it. */
+html { scroll-padding-top: 3.5rem; }
+header { position: sticky; top: 0; z-index: 100; display: flex; gap: var(--space-7); align-items: center; padding: 0 2rem; height: 3.5rem; background: var(--header-bg); color: var(--header-ink); }
 header .brand { display: flex; }
 header .brand img { height: 2.25rem; width: auto; }
 header nav.site { display: flex; gap: var(--space-6); align-self: stretch; }
