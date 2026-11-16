@@ -3481,6 +3481,70 @@ test('someone who is not on the project gets the same 404 from both tag calls as
   } finally { await f.cleanup(); }
 });
 
+test('PATCH and DELETE /projects/:slug/tags/:name rename and delete a tag on every task carrying it (SP-310); a name another tag has is 409; an unknown or other project\'s tag is 404; nothing changes', async () => {
+  const f = await fixture();
+  try {
+    f.store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE', operator: f.human.id });
+    const h = (method, path, body) => f.call(method, path, { token: f.humanToken, body });
+    const one = f.store.fileTicket({ project: 'alpha', actor: f.machine.id, name: 'One', status: 'queued', tags: ['ui'] });
+    const two = f.store.fileTicket({ project: 'alpha', actor: f.machine.id, name: 'Two', status: 'queued', tags: ['ui', 'tracker'] });
+    const theirs = f.store.fileTicket({ project: 'beta', actor: f.machine.id, name: 'Theirs', status: 'queued', tags: ['ui', 'a/b'] });
+    f.store.addTag({ project: 'alpha', name: 'design', actor: f.human.id });
+
+    const clash = await h('PATCH', '/projects/alpha/tags/ui', { name: 'Design' });
+    assert.deepEqual([clash.status, clash.body.error], [409, 'tag-exists'], clash.text);
+    for (const [method, path] of [['PATCH', '/projects/alpha/tags/nope'], ['DELETE', '/projects/alpha/tags/nope'], ['PATCH', '/projects/alpha/tags/a%2Fb'], ['DELETE', '/projects/alpha/tags/a%2Fb'], ['DELETE', '/projects/alpha/tags/UI']]) {
+      const r = await h(method, path, method === 'PATCH' ? { name: 'Mine' } : undefined);
+      assert.deepEqual([r.status, r.body.error], [404, 'unknown-tag'], `${method} ${path}`);
+    }
+    const blank = await h('PATCH', '/projects/alpha/tags/ui', { name: '  ' });
+    assert.deepEqual([blank.status, blank.body.error], [400, 'bad-name']);
+    assert.deepEqual(f.store.listTags('alpha').map((t) => [t.name, t.count]), [['design', 0], ['tracker', 1], ['ui', 2]], 'nothing changed');
+
+    const changed = await h('PATCH', '/projects/alpha/tags/ui', { name: 'page', description: 'The page' });
+    assert.equal(changed.status, 200, changed.text);
+    assert.deepEqual([changed.body.tag.name, changed.body.tag.description, changed.body.tag.count, changed.body.tickets], ['page', 'The page', 2, [one.id, two.id]]);
+    const board = (await h('GET', '/projects/alpha/board')).body;
+    const tagsOf = (b, id) => b.columns.flatMap((c) => c.tickets).find((t) => t.id === id).tags;
+    assert.deepEqual([tagsOf(board, one.id), tagsOf(board, two.id)], [['page'], ['page', 'tracker']], 'both tasks now show the new name');
+    assert.deepEqual(f.store.getTicket(theirs.id).tags, ['ui', 'a/b'], "another project's tag is never touched");
+
+    const slash = await h('PATCH', '/projects/beta/tags/a%2Fb', { name: 'c/d' });
+    assert.deepEqual([slash.status, slash.body.tag?.name], [200, 'c/d'], 'a name holding a slash is found by its encoded address');
+
+    const gone = await h('DELETE', '/projects/alpha/tags/page');
+    assert.equal(gone.status, 200, gone.text);
+    assert.deepEqual([gone.body.tag.name, gone.body.tag.count, gone.body.tickets], ['page', 2, [one.id, two.id]]);
+    assert.deepEqual((await h('GET', '/projects/alpha/tags')).body.tags.map((t) => t.name), ['design', 'tracker']);
+    const after = (await h('GET', '/projects/alpha/board')).body;
+    assert.deepEqual([tagsOf(after, one.id), tagsOf(after, two.id)], [[], ['tracker']], 'gone from both tasks');
+  } finally { await f.cleanup(); }
+});
+
+test('someone who is not on the project gets 404 from renaming or deleting its tag, signed out is 401, and nothing changes (SP-310)', async () => {
+  const f = await fixture();
+  try {
+    const base = await f.serve();
+    f.store.addTag({ project: 'alpha', name: 'secret-plan', actor: f.human.id });
+    const viewer = f.store.createActor({ kind: 'human', name: 'Viewer' });
+    const vt = f.store.issueToken(viewer.id);
+    f.store.setRole({ actor: viewer.id, role: 'viewer', by: f.human.id });
+    const auth = { authorization: `Bearer ${vt}` };
+    const calls = [
+      (h) => fetch(`${base}/projects/alpha/tags/secret-plan`, { method: 'PATCH', headers: { ...h, 'content-type': 'application/json' }, body: JSON.stringify({ name: 'mine' }) }),
+      (h) => fetch(`${base}/projects/alpha/tags/secret-plan`, { method: 'DELETE', headers: h }),
+    ];
+    for (const [i, call] of calls.entries()) {
+      const r = await call(auth);
+      const text = await r.text();
+      assert.equal(r.status, 404, `call ${i}: ${text}`);
+      assert.ok(!text.includes('secret'), `call ${i} gives nothing away`);
+      assert.equal((await call({})).status, 401, `call ${i} signed out`);
+    }
+    assert.deepEqual(f.store.listTags('alpha').map((t) => t.name), ['secret-plan'], 'nothing changed');
+  } finally { await f.cleanup(); }
+});
+
 test('PATCH and DELETE /projects/:slug/topics/:id change and delete a topic (SP-308); a delete takes it off its tasks; another project\'s topic is 404 and nothing changes', async () => {
   const f = await fixture();
   try {
