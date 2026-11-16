@@ -61,9 +61,9 @@ test('a checkout with no heartbeat says so in one line and does not fail', () =>
 test('run_relay.sh sources the step and runs it after the application checks, before the END line', () => {
   const sh = readFileSync(join(REPO, 'scripts', 'run_relay.sh'), 'utf8');
   assert.match(sh, /source "\$REPO\/scripts\/lib\/relay_heartbeat\.sh"/);
-  const at = sh.indexOf('run_relay_heartbeat "$REPO"');
+  const at = sh.indexOf('run_relay_heartbeat "$RUN_DIR"');
   assert.ok(at > sh.indexOf('run_relay_app_checks "$CHECKS_LIMIT"'), 'after the application checks');
-  assert.ok(at < sh.indexOf('END relay —'), 'before the END line');
-  const between = sh.slice(at, sh.indexOf('END relay —')).split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+  assert.ok(at < sh.lastIndexOf('END relay —'), 'before the END line');
+  const between = sh.slice(at, sh.lastIndexOf('END relay —')).split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
   assert.doesNotMatch(between, /\$\?|exit /, 'its result never reaches the pass\'s verdict');
 });
