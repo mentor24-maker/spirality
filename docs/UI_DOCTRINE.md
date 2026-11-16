@@ -154,7 +154,9 @@ counterpart, so they have tokens of their own, in a separate group at the end of
 `:root`: the black header and its colours (`--header-*`), the logo blue of the
 Add Task box (`--brand-blue`, `--brand-blue-tint`), the light-blue pods and
 their navy (`--pod-*`, `--navy`, `--navy-soft`), link blue (`--link-ink`),
-error red (`--ink-error`, StarCaster's `--btn-danger-flat`), shadows and the
+error red (`--ink-error`, StarCaster's `--btn-danger-flat`), the table
+heading and filter rows (`--table-head-*`, `--table-filter-*`, StarCaster's
+T11 values, which its `_tables.css` writes as literals), shadows and the
 dialog backdrop, the Console's feature colours (`--feature-0` to `--feature-9`),
 small corners for tag chips and icon buttons (`--radius-sm` 4px) and round ones
 (`--radius-pill`), and code text (`--text-code`, 0.9em of the text around it).
@@ -295,8 +297,9 @@ C9, tabs): the Board / List / Console switch and the Settings tabs.
 ## 8. Tables
 
 - **One table look** (UI_RULES T11, 2026-11-05): the heading row is black with
-  bold white text, left-aligned; a filter row under it is `#b8e0ff` with
-  `#0b3d7a` text. Heading cells are padded `calc(0.65rem - 2px) 0.85rem`, body
+  bold white text, left-aligned; a filter row (`tr.table-filter-row`), where a table has
+  one, sits above it in `#b8e0ff` with `#0b3d7a` text, as StarCaster's T11
+  has it, and scrolls away while the heading row stays. Heading cells are padded `calc(0.65rem - 2px) 0.85rem`, body
   rows 0.5rem top and bottom.
 - **A table sits in a wrap** (`.table-wrap`): 1px border, `--radius-input`,
   at most `max(20rem, 100vh - 10rem)` tall, scrolling inside itself both ways,
@@ -374,12 +377,13 @@ Measured 2026-11-15 on `tracker/web/app.css`, `app.mjs` and `render.mjs`.
 | 5 Tabs | Board / List / Console is a black segmented control; Settings tabs are close but dark blue. | SP-322 |
 | 6 Forms | Every label above its box; boxes full width; tag boxes use the text inside the box as the instruction. | SP-325 |
 | 7 Messages | Notes beside each button and under the title; no single strip. Empty states: followed, but for a bare "None." | SP-323 |
-| 8 Tables | Grey or bold headings; no fixed heading row. Names, ids, actions and sideways scroll: followed. | SP-324 |
-| 9 Dialogs | Fixed caps (`max-width: 28rem`, `95vw`). | SP-324 |
+| 8 Tables | Followed and checked (SP-324, 2026-11-16): black heading rows with white text, every table with headings in a `.table-wrap` with its heading row fixed, sort buttons kept in the heading cell. No table has a filter row yet; the rule for one is in place. | SP-324 |
+| 9 Dialogs | Followed and checked (SP-324): every dialog is `max-content` wide between its own floor and 75% of the screen; text in it at most 56ch. | SP-324 |
 | 10 Small rules | Followed; icon strokes are 1 and checked (SP-320). | SP-320 |
 
 **The checks.** `tracker/style.test.mjs` checks section 1;
-`tracker/cssTokens.test.mjs` checks section 2 and the icon strokes of section 10.
+`tracker/cssTokens.test.mjs` checks section 2 and the icon strokes of section 10;
+`tracker/tablesDialogs.test.mjs` checks sections 8 and 9.
 Each ticket above
 adds the check for its part to `npm run verify`, as StarCaster's
 `scripts/check_ui_doctrine.cjs` does for its screens: every `<button>` has a
