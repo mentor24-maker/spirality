@@ -90,6 +90,9 @@ function verdictInput(ticket, comments, prStates = null) {
     },
     comments: comments.slice().reverse().map((c) => ({
       id: c.id,
+      // A reply's thread, so a spent answer (the relay's done reply under
+      // it) is read here the way the relay reads it (SP-302).
+      parent: c.parent ?? null,
       user: { id: c.author, kind: c.authorKind ?? null },
       comment_text: c.body,
       date: String(Date.parse(c.createdAt)),

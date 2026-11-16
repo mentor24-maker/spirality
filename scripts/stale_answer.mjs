@@ -58,7 +58,7 @@ const require = createRequire(import.meta.url);
 const staleAnswer = require('../lib/staleAnswer.js');
 const staleReady = require('../lib/staleReady.js');
 const busRelayPlan = require('../lib/busRelayPlan.js');
-const { handbackAnswer } = require('../lib/relayLane.js');
+const { handbackAnswer, earlierAnswerIds } = require('../lib/relayLane.js');
 const { isMachineAuthored } = require('../lib/machineComment.js');
 
 /**
@@ -130,8 +130,12 @@ export function runStaleAnswer({
       (best, c) => (busRelayPlan.commentAt(c) > busRelayPlan.commentAt(best) ? c : best),
       comments[0] || null,
     );
+    // His own newest word, or a teammate's newest that IS the relay's answer
+    // to the card (SP-302): a teammate's comment on a ticket with no card is
+    // nothing the relay acts on, so it raises no "your answer has sat" alarm.
     const operatorSpokeLast = busRelayPlan
-      .operatorComments(newest ? [newest] : [], { operatorId, isMachine: isMachineAuthored, teammates: true }).length > 0;
+      .operatorComments(newest ? [newest] : [], { operatorId, isMachine: isMachineAuthored }).length > 0
+      || Boolean(newest && answered.state === 'answered' && String(answered.answer?.id) === String(newest.id));
 
     const at = answered.state === 'answered'
       ? answered.answerAt
@@ -156,6 +160,15 @@ export function runStaleAnswer({
         markers = staleAnswer.markersFromReplyEnvelope(readReplies({ taskId: id, commentId: answered.answer.id }));
       } catch { markers = null; }
       if (markers && markers.handbackDone === true) record.state = 'handled';
+      // A teammate's answer after one already acted on is no answer the
+      // relay will act on (SP-302 round 2): the same earlier reads it makes.
+      if (record.state === 'answered') {
+        for (const commentId of earlierAnswerIds({ comments, verdict: answered, operatorId, isMachine: isMachineAuthored })) {
+          let earlier = null;
+          try { earlier = staleAnswer.markersFromReplyEnvelope(readReplies({ taskId: id, commentId })); } catch { earlier = null; }
+          if (earlier && earlier.handbackDone === true) { record.state = 'handled'; break; }
+        }
+      }
     }
     records.push(record);
   }

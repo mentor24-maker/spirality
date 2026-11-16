@@ -460,8 +460,8 @@
           "replace": "const busRelayPlan = require('../loop/lib/busRelayPlan.js');"
         },
         {
-          "find": "const { handbackAnswer } = require('../lib/relayLane.js');",
-          "replace": "const { handbackAnswer } = require('../loop/lib/relayLane.js');"
+          "find": "const { handbackAnswer, earlierAnswerIds } = require('../lib/relayLane.js');",
+          "replace": "const { handbackAnswer, earlierAnswerIds } = require('../loop/lib/relayLane.js');"
         },
         {
           "find": "const { isMachineAuthored } = require('../lib/machineComment.js');",

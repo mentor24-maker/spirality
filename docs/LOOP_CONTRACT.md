@@ -120,7 +120,7 @@ checks on it. Every write is read back before the command reports success.
 | `Rework`, `Queued`, `Building` or `In review` | `Live` | loop-build or loop-review | `fixup-live --if-status <status>`, for a catch-up ticket only ("Find out why PR #N ... will not merge": no `PR opened:` line of its own, a `- PR:` line under `## The branch`) whose PR GitHub reads as merged. It moves the ticket, reads it back, clears assignees and posts one note naming the merge; Dane is never asked (SP-288). `ask` refuses such a ticket, and refuses a second card on a ticket already in that status of his whose card he has not answered. |
 | `In review` | `Rework` | loop-review | `verdict --fail --if-status "In review"`, then `status --status Rework --if-status "In review"`. |
 | `In review` | `Needs your input` | loop-review | `ask`. Required instead of a fourth send-back (see "Four rounds, then ask"). |
-| `Needs your input` | `Queued`, `Rework` or `Live` | Dane, or anyone else on the project, by replying | The relay moves it on his reply, or on a teammate's: any person's reply (an author of kind `human`) to the card is the answer (SP-302). The relay reads the ticket's PR state first, then decides. If his reply answers a machine-written question card and is a close phrase ("close it") → `Live`, whatever that PR state says: it closes the ticket even when its PR is still open (that PR is left untouched and the note says so) or its state could not be read. With no card on the ticket (for example one parked by `status --no-card`), a close phrase is not treated specially and goes by the PR like any other reply (Spirality's relay does not move a ticket with no card at all; see "Known differences today"). Any other reply goes by the ticket's PR: none, or closed unmerged → `Queued`; still open → `Rework`; already merged → `Live`; state cannot be read → nothing moves. |
+| `Needs your input` | `Queued`, `Rework` or `Live` | Dane, or anyone else on the project, by replying | The relay moves it on his reply, or on a teammate's: any person's reply (an author of kind `human`) to the card is the answer, except after an answer already acted on, when only his own reply moves it again (SP-302). The relay reads the ticket's PR state first, then decides. If his reply answers a machine-written question card and is a close phrase ("close it") → `Live`, whatever that PR state says: it closes the ticket even when its PR is still open (that PR is left untouched and the note says so) or its state could not be read. With no card on the ticket (for example one parked by `status --no-card`), a close phrase is not treated specially and goes by the PR like any other reply (Spirality's relay does not move a ticket with no card at all; see "Known differences today"). Any other reply goes by the ticket's PR: none, or closed unmerged → `Queued`; still open → `Rework`; already merged → `Live`; state cannot be read → nothing moves. |
 | `Ready to launch` | `Live` | Dane, by a merge phrase | The relay merges the PR and closes the ticket, after re-checking every gate (see "Merge phrases"). |
 | `Ready to launch` | `Live` | StarCaster's relay, with no word from Dane | **StarCaster only: auto-merge Lanes A and B** (see "StarCaster's auto-merge lanes"). |
 | any | `Live` + `wont-do` tag | Dane's decision | Killing a ticket. *(Convention.)* |
@@ -271,7 +271,13 @@ not a guess.
 - A comment is **a teammate's** when its author is a person other than
   Dane. In `Needs your input` a teammate's reply answers the card the same
   as his: it takes the ticket off every Waiting on You list and the relay
-  hands the ticket back on it. Only Dane's own merge phrase merges, so in
+  hands the ticket back on it. Two limits keep the list and the relay
+  agreeing: a teammate's comment counts only when it answers a
+  machine-written question card (a ticket parked with no card stays on his
+  list, because the relay never moves it), and once an answer after the card
+  has been acted on (its `[bus-relay-handback-done]` reply) and the ticket is
+  parked there again by hand, only Dane's own word moves it. Only Dane's own
+  merge phrase merges, so in
   `Ready to launch` a teammate's comment changes nothing (SP-302, Dane's
   choice A, 2026-11-14: "Their reply is the answer: it leaves every list at
   once and the loop acts on it, but only your own merge merges a pull
@@ -818,7 +824,7 @@ The checks run in this order, and the first that applies decides:
 | Order | Verdict | Exit code | When |
 |---|---|---|---|
 | 1 | **CANNOT TELL** | 1 | The ticket could not be read, it has no readable status, or its assignees or its comments could not be read. A failed read decides before anything else, even if Dane's comment would have been newest. |
-| 2 | **NOT waiting on Dane** | 0 | His own comment is the newest word on it: a machine owes the next move, whatever the status says. In `Needs your input` a teammate's comment as the newest word counts the same (SP-302). |
+| 2 | **NOT waiting on Dane** | 0 | His own comment is the newest word on it: a machine owes the next move, whatever the status says. In `Needs your input` a teammate's comment as the newest word counts the same when it is the answer the relay acts on: it answers a question card, and no answer after that card was already acted on (SP-302). |
 | 3 | **NOT waiting on Dane** | 0 | The status is a machine status. |
 | 4 | **NOT waiting on Dane** | 0 | It is `Ready to launch` and its pull request is already merged or closed: a machine owes the move to Live (or the next move), not Dane. |
 | 5 | **WAITING ON DANE** | 3 | The status is one of his two, he is assigned, and the newest comment is not his. |

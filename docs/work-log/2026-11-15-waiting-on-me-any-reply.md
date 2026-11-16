@@ -16,3 +16,14 @@ Checked against PP-8's real history: the old code kept it on Dane's list;
 the new code takes it off both. The list still refreshes once a minute and
 whenever the tab comes back into view; refreshing at once was left for Dane
 to decide.
+
+Review sent it back once, because the list and the relay could still
+disagree about a teammate's comment, and a ticket could vanish from Dane's
+list while nothing moved it. Two cases are now closed. A teammate's comment
+counts only when it answers one of the loop's question cards: a ticket
+parked with no question stays on Dane's list. And once an answer has been
+acted on and someone parks the ticket back for Dane by hand, a teammate's
+"any update?" no longer sends it off again; only Dane's own word does. The
+"your answer has sat" alarm follows the same rule, so it no longer fires
+about a teammate's passing comment. Replaying PP-8 from a copy of the live
+tracker still takes it off both lists.

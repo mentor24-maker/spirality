@@ -68,7 +68,7 @@ import {
 } from '../lib/mergeOnComment.js';
 import {
   PR_VIEW_FIELDS, markerBookkeeping, recordBookkeeping, emptyBooks, mergeDestination, relayLine,
-  handbackAnswer, handbackPlan, closePlan, conflictFilingPlan, CATCH_UP_WORKED_STATUSES,
+  handbackAnswer, earlierAnswerIds, handbackPlan, closePlan, conflictFilingPlan, CATCH_UP_WORKED_STATUSES,
   mergeWithPreMergeStep, commandLine, mergedBusLine, conflictBusLine, busAnnouncer, stalledHandOffPlan, remindStalledHandOff,
 } from '../lib/relayLane.js';
 import {
@@ -2132,7 +2132,26 @@ if (cmd === 'whoami') {
     const comments = await readComments(task.id);
     seen.set(task.id, { task, comments });
     // Anyone on the project answers the card here, not only him (SP-302).
-    const verdict = handbackAnswer({ comments, operatorId: OPERATOR_ID, isMachine: isMachineAuthored, teammates: true });
+    let verdict = handbackAnswer({ comments, operatorId: OPERATOR_ID, isMachine: isMachineAuthored, teammates: true });
+    // A teammate's answer, with earlier answers after the card: if one of
+    // those was already acted on, he parked it here again by hand and only
+    // his own word moves it (SP-302 round 2).
+    const earlier = earlierAnswerIds({ comments, verdict, operatorId: OPERATOR_ID, isMachine: isMachineAuthored });
+    if (earlier.length) {
+      const spent = [];
+      for (const id of earlier) {
+        const back = await readReplies(id);
+        if (back === null) {
+          unchecked.push(`${task.id}: could not read the replies under an earlier answer (comment ${id}) to see whether it was already acted on — not moved this pass`);
+          say(task, 'unchecked', `could not read the replies under comment ${id}`);
+          return;
+        }
+        if (repliesShowHandbackDone(back)) spent.push(id);
+      }
+      if (spent.length) {
+        verdict = handbackAnswer({ comments, operatorId: OPERATOR_ID, isMachine: isMachineAuthored, teammates: true, spent });
+      }
+    }
     let replies = [];
     if (verdict.state === 'answered') {
       replies = await readReplies(verdict.answer.id);
