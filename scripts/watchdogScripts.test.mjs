@@ -348,11 +348,11 @@ test('the relay\'s hook runs both watchdogs, passes the pull\'s readings, and ne
 test('the runners source the hooks only when present and never let them change an exit', () => {
   const runner = fs.readFileSync(path.join(REPO, 'scripts', 'loop_runner.sh'), 'utf8');
   assert.match(runner, /\[ -f "\$REPO\/scripts\/lib\/lane_failure\.sh" \] && source "\$REPO\/scripts\/lib\/lane_failure\.sh"/);
-  assert.match(runner, /report_lane_pass "\$REPO" "\$FAILURE_STAMP" "\$SKILL" "\$CODE" "\$LOG" >> "\$LOG" 2>&1 \|\| true/);
+  assert.match(runner, /report_lane_pass "\$RUN_DIR" "\$FAILURE_STAMP" "\$SKILL" "\$CODE" "\$LOG" >> "\$LOG" 2>&1 \|\| true/);
   const relay = fs.readFileSync(path.join(REPO, 'scripts', 'run_relay.sh'), 'utf8');
   assert.match(relay, /\[ -f "\$REPO\/scripts\/lib\/relay_queue_watchdogs\.sh" \] && source/);
   assert.match(relay, /if declare -F run_relay_queue_watchdogs >\/dev\/null; then/);
   // The watchdogs run before the END line, and the exit is still the relay's own verdict.
-  assert.ok(relay.indexOf('run_relay_queue_watchdogs "$REPO"') < relay.indexOf('END relay'));
+  assert.ok(relay.indexOf('run_relay_queue_watchdogs "$RUN_DIR"') < relay.lastIndexOf('END relay'));
   assert.match(relay, /exit "\$\(relay_pass_exit "\$status" "\$checks_status"\)"/);
 });
