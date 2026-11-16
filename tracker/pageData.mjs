@@ -26,6 +26,15 @@ import { GROUPS, MODELS, DEFAULT_MODEL, RELEASE_GROUP } from './pipelineControls
 import { OWN_RELEASE_LINE, rollBackTarget } from '../lib/releases.mjs';
 import { STAGES } from './pipeline.mjs';
 import { conflictReportOf } from './conflictReport.mjs';
+import { CLASS_FIELDS } from '../lib/ticketClass.js';
+
+/**
+ * The Tasks page's class filters (SP-345, lib/ticketClass.js): each field's
+ * key, label and choices, `{ value, label }`, in the contract's order.
+ */
+const CLASS_FILTERS = Object.freeze(Object.entries(CLASS_FIELDS).map(([key, spec]) => Object.freeze({
+  key, label: spec.label, options: spec.values.map((v) => ({ value: v, label: spec.labels[v] })),
+})));
 
 const { OPERATOR_LANE, WAITING, CANNOT_TELL, waitingVerdict, answeredLast, standingMergeWord } = waitingOnOperator;
 const { isMachineComment, stripMachineMarker } = machineComment;
@@ -480,6 +489,10 @@ export function boardOf(store, slug, { viewerId = null, prStates = null } = {}) 
         assigneeId: t.assignee ?? null,
         // SP-247: the ticket's topics, `{ id, name }`, alphabetical.
         topics: topicsOf.get(t.id) ?? [],
+        // The ticket's class (lib/ticketClass.js), each a value or null: the Tasks page filters on them.
+        kind: t.kind ?? null,
+        startedBy: t.startedBy ?? null,
+        outcome: t.outcome ?? null,
       })),
     })),
     // SP-244: the one person a ticket may be assigned to, for the List view's dropdown.
@@ -490,6 +503,8 @@ export function boardOf(store, slug, { viewerId = null, prStates = null } = {}) 
       .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }) || a.id - b.id),
     // SP-309: the project's tags, saved or in use, by name, for the List view's Add Tag dropdown.
     tags: store.listTags(project.slug).map((t) => t.name),
+    // SP-345: the Tasks page's Kind, Started By and How It Ended filters, each with its choices.
+    classes: CLASS_FILTERS,
   };
 }
 

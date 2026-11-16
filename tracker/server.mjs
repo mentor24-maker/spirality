@@ -101,6 +101,7 @@ import { createLaneWaker } from './wakeLanes.mjs';
 import { listCommands, REPO_ROOT } from './commands.mjs';
 import { listDocs, readDoc } from './docsFolder.mjs';
 import loopStatuses from '../lib/loopStatuses.js';
+import { CLASS_FIELDS } from '../lib/ticketClass.js';
 
 /**
  * The session cookie's name and how long it lasts: 30 days, the store's own
@@ -174,7 +175,7 @@ const MEMBER_REFUSALS = Object.freeze({ 'not-admin': 403, 'already-member': 409,
 const INVITE_REFUSALS = Object.freeze({ 'duplicate-email': 409, 'duplicate-invite': 409, 'no-mail': 503, 'no-address': 503, 'not-sent': 502 });
 
 /** The fields a new ticket may carry. */
-const FILE_FIELDS = Object.freeze(['name', 'description', 'status', 'priority', 'tags', 'assignee', 'loopNote']);
+const FILE_FIELDS = Object.freeze(['name', 'description', 'status', 'priority', 'tags', 'assignee', 'loopNote', 'kind', 'startedBy', 'outcome']);
 /** What the Add Task box's project check reads: the words about to be filed. */
 const CHECK_FIELDS = Object.freeze(['name', 'description']);
 /** What the title suggester reads: the description, and the title when one was typed. */
@@ -207,7 +208,8 @@ const RESERVED_SLUGS = Object.freeze(['new']);
 
 /** The fields a change may carry, besides its guards. */
 // `topics` is the whole new list of the ticket's topic ids.
-const CHANGE_FIELDS = Object.freeze(['name', 'description', 'status', 'priority', 'tags', 'assignee', 'loopNote', 'topics']);
+// `kind`, `startedBy` and `outcome` are the ticket's class (lib/ticketClass.js).
+const CHANGE_FIELDS = Object.freeze(['name', 'description', 'status', 'priority', 'tags', 'assignee', 'loopNote', 'topics', 'kind', 'startedBy', 'outcome']);
 
 /**
  * The statuses a person may move a ticket to from the ticket page, in the
@@ -217,6 +219,14 @@ const CHANGE_FIELDS = Object.freeze(['name', 'description', 'status', 'priority'
  */
 const PERSON_STATUSES = Object.freeze(['requested', 'rework', 'queued', 'live']
   .map((s) => ({ value: s, label: loopStatuses.DISPLAY[s] })));
+
+/**
+ * The ticket page's three class pickers (lib/ticketClass.js): each field's
+ * values with their labels, in the contract's order. The same in every
+ * project: they are part of the contract, not a project's config.
+ */
+const CLASS_CHOICES = Object.freeze(Object.fromEntries(Object.entries(CLASS_FIELDS)
+  .map(([field, spec]) => [field, spec.values.map((v) => ({ value: v, label: spec.labels[v] }))])));
 
 /**
  * Dane's page (tracker/web/): the only files served without a token, and the
@@ -1596,7 +1606,7 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
       const ticket = requireTicket(parts[1], me);
       const pr = prToCheck(store, ticket);
       const thread = threadOf(store, ticket.id, { pipeline: lanesNow('thread'), prStates: await prStatesOf(pr ? [pr] : []) });
-      return [200, { ...thread, attachments: store.listAttachments(thread.id), mergePhrase, closePhrase, goPhrase, choices: { priorities: PRIORITIES, statuses: PERSON_STATUSES } }];
+      return [200, { ...thread, attachments: store.listAttachments(thread.id), mergePhrase, closePhrase, goPhrase, choices: { priorities: PRIORITIES, statuses: PERSON_STATUSES, ...CLASS_CHOICES } }];
     }
 
     if (parts.length === 3 && parts[0] === 'tickets' && parts[2] === 'events' && method === 'GET') {

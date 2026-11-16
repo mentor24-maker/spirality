@@ -156,6 +156,7 @@ import loopStatuses from '../lib/loopStatuses.js';
 import { checkControl, ControlError, controlOf, withValues } from './pipelineControls.mjs';
 import { isReleaseName, rollBackTarget } from '../lib/releases.mjs';
 import { normalFiles } from '../lib/prFiles.js';
+import { classValue } from '../lib/ticketClass.js';
 
 const { DISPLAY, TERMINAL_STATUSES, PRIORITY_RANK, statusOf } = loopStatuses;
 
@@ -204,6 +205,9 @@ const CHANGEABLE = Object.freeze({
   tags: 'tags',
   assignee: 'assignee',
   loopNote: 'loop_note',
+  kind: 'kind',
+  startedBy: 'started_by',
+  outcome: 'outcome',
 });
 
 const SCHEMA = `
@@ -244,6 +248,9 @@ CREATE TABLE IF NOT EXISTS tickets (
   updated_at  TEXT NOT NULL,
   version     INTEGER NOT NULL DEFAULT 1,
   place       INTEGER,
+  kind        TEXT,
+  started_by  TEXT,
+  outcome     TEXT,
   UNIQUE (project, number)
 );
 CREATE TABLE IF NOT EXISTS comments (
@@ -450,6 +457,20 @@ function canonicalColour(colour, status) {
   return colour.toLowerCase();
 }
 
+/** A kind, a starter or an ending as kept (lib/ticketClass.js), null for none, or a thrown refusal. */
+function canonicalClass(field, value) {
+  const read = classValue(field, value);
+  if (read.problem) throw new StoreError(`unknown-${field === 'startedBy' ? 'started-by' : field}`, read.problem);
+  return read.value;
+}
+
+/** Only a closed ticket has an ending: an open one with one is refused, nothing saved. */
+function requireClosedForOutcome(outcome, status, id = 'a ticket') {
+  if (outcome != null && !TERMINAL_STATUSES.includes(status)) {
+    throw new StoreError('outcome-on-open', `only a closed ticket has an ending; ${id} is ${DISPLAY[status] ?? status}, so it cannot end "${outcome}". Nothing was saved.`);
+  }
+}
+
 function canonicalPriority(priority) {
   if (priority == null) return null;
   const p = String(priority).trim().toLowerCase();
@@ -581,7 +602,7 @@ const LATER_PROJECT_COLUMNS = Object.freeze({ url: 'TEXT', logo: 'TEXT', owner: 
  * is its place in its queue (1, 2, 3 ...), empty for none: the order rule is
  * priority, then place, then oldest (docs/LOOP_CONTRACT.md, "The claim order").
  */
-const LATER_TICKET_COLUMNS = Object.freeze({ place: 'INTEGER' });
+const LATER_TICKET_COLUMNS = Object.freeze({ place: 'INTEGER', kind: 'TEXT', started_by: 'TEXT', outcome: 'TEXT' });
 
 /**
  * The five roles, in the order the Users page lists them, each with its
@@ -712,6 +733,9 @@ function ticketFromRow(row) {
     updatedAt: row.updated_at,
     version: num(row.version),
     place: num(row.place ?? null),
+    kind: row.kind ?? null,
+    startedBy: row.started_by ?? null,
+    outcome: row.outcome ?? null,
   };
 }
 
@@ -1160,12 +1184,15 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
   }
 
   /** A new ticket's fields, checked before any transaction opens. */
-  function checkNewTicket({ project, actor, name, description = '', status, priority = null, tags = [], assignee = null, loopNote = '' }) {
+  function checkNewTicket({ project, actor, name, description = '', status, priority = null, tags = [], assignee = null, loopNote = '', kind = null, startedBy = null, outcome = null }) {
     requireText(name, "a ticket's name");
-    return {
+    const t = {
       project, actor, name, description: String(description), status: canonicalStatus(status),
       priority: canonicalPriority(priority), tags: canonicalTags(tags), assignee, loopNote: String(loopNote),
+      kind: canonicalClass('kind', kind), startedBy: canonicalClass('startedBy', startedBy), outcome: canonicalClass('outcome', outcome),
     };
+    requireClosedForOutcome(t.outcome, t.status);
+    return t;
   }
 
   /** Insert a checked ticket at `at`; call inside a transaction. */
@@ -1178,9 +1205,9 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
     const id = `${proj.prefix}-${number}`;
     db.prepare('UPDATE projects SET next_number = ? WHERE slug = ?').run(number + 1, t.project);
     db.prepare(
-      `INSERT INTO tickets (id, project, number, name, description, status, priority, tags, assignee, loop_note, created_at, updated_at, version)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
-    ).run(id, t.project, number, t.name, t.description, t.status, t.priority, t.tags, t.assignee, t.loopNote, at, updatedAt ?? at);
+      `INSERT INTO tickets (id, project, number, name, description, status, priority, tags, assignee, loop_note, kind, started_by, outcome, created_at, updated_at, version)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+    ).run(id, t.project, number, t.name, t.description, t.status, t.priority, t.tags, t.assignee, t.loopNote, t.kind ?? null, t.startedBy ?? null, t.outcome ?? null, at, updatedAt ?? at);
     writeEvent(id, t.actor, 'created', null, t.status, at);
     return ticketFromRow(ticketRow(id));
   }
@@ -1937,6 +1964,7 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
         else if (column === 'tags') wanted[column] = canonicalTags(value);
         else if (column === 'name') wanted[column] = requireText(value, "a ticket's name");
         else if (column === 'assignee') wanted[column] = value;
+        else if (column === 'kind' || column === 'started_by' || column === 'outcome') wanted[column] = canonicalClass(key, value);
         else wanted[column] = String(value ?? '');
       }
       const guardStatus = ifStatus === undefined ? undefined : canonicalStatus(ifStatus);
@@ -1953,6 +1981,12 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
             || (ifVersion !== undefined && version !== ifVersion)) {
           return { ok: false, refused: 'moved', ticket: row.id, status: row.status, version };
         }
+        // Only a closed ticket has an ending (lib/ticketClass.js): one set on
+        // an open ticket is refused, and a ticket reopened loses the ending it
+        // had, in the same write, so no open ticket ever reads as ended.
+        const statusAfter = wanted.status ?? row.status;
+        requireClosedForOutcome(wanted.outcome !== undefined ? wanted.outcome : null, statusAfter, row.id);
+        if (wanted.outcome === undefined && row.outcome != null && !TERMINAL_STATUSES.includes(statusAfter)) wanted.outcome = null;
         const changed = Object.keys(wanted).filter((column) => {
           const before = column === 'assignee' ? num(row[column]) : row[column];
           return before !== wanted[column];

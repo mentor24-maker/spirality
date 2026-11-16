@@ -1274,6 +1274,39 @@ export function renderTopicPicker(topics = []) {
   return `<label class="topic-picker">Topic: <select name="topic">${option('', 'Any', true)}${options.join('')}</select></label>`;
 }
 
+/**
+ * SP-345: the Tasks page's class filters, one picker each for Kind, Started
+ * By and How It Ended, from the board's `classes` (each `{ key, label,
+ * options }`). "Any" first, then "None" (a ticket not given one yet), then
+ * the choices; `chosen` holds each picker's value ('' for Any).
+ */
+export function renderClassFilters(classes = [], chosen = {}) {
+  if (!Array.isArray(classes) || !classes.length) return '';
+  const picker = (f) => {
+    const on = chosen[f.key] ?? '';
+    const choices = [option('', 'Any', on === ''), option(NO_CLASS, 'None', on === NO_CLASS),
+      ...(f.options ?? []).map((o) => option(o.value, o.label, on === o.value))].join('');
+    return `<label>${escapeHtml(f.label)}: <select name="${escapeHtml(f.key)}">${choices}</select></label>`;
+  };
+  return `<div class="class-filters" role="group" aria-label="Filter by Kind, Started By and How It Ended">${classes.map(picker).join('')}</div>`;
+}
+
+/** The class filters' value for "a ticket with none yet". */
+export const NO_CLASS = 'none';
+
+/**
+ * SP-345: the board's columns with only the tickets every chosen class
+ * filter lets through (`chosen`: key -> value, '' or absent for Any,
+ * NO_CLASS for none). Every column stays, so a stage with none left shows
+ * its empty line; nothing here changes `columns`.
+ */
+export function filterByClass(columns = [], chosen = {}) {
+  const on = Object.entries(chosen ?? {}).filter(([, v]) => v);
+  if (!on.length) return columns;
+  const passes = (t) => on.every(([key, v]) => (v === NO_CLASS ? t[key] == null : t[key] === v));
+  return columns.map((c) => ({ ...c, tickets: c.tickets.filter(passes) }));
+}
+
 /** The status the relay merges from, as the tracker stores it (lib/mergeOnComment.js). */
 const READY_TO_LAUNCH = 'ready to launch';
 /** The two statuses that are his, where a card can ask him to close (lib/loopStatuses.js). */
@@ -1779,7 +1812,7 @@ const option = (value, label, on) => `<option value="${escapeHtml(value)}"${on ?
  * assignee always show, even when a person could not choose them. The name
  * is locked once a pull request is recorded: its title must match the name.
  */
-export function renderEditPanel({ name, description, status, priority, tags = [], assignee, operator, pullRequest, choices = {} }) {
+export function renderEditPanel({ name, description, status, priority, tags = [], assignee, operator, pullRequest, choices = {}, kind = null, startedBy = null, outcome = null }) {
   const statuses = choices.statuses ?? [];
   const current = String(status ?? '').toLowerCase();
   const statusOptions = [
@@ -1795,6 +1828,21 @@ export function renderEditPanel({ name, description, status, priority, tags = []
     ...(assignee && assignee.id !== operator?.id ? [option(assignee.id, `${assignee.name} (now)`, true)] : []),
     option('', 'Nobody', assignee == null),
   ].join('');
+  // SP-345: the ticket's class. A choice the server no longer offers still shows, marked "(now)".
+  // These three report a save in the message strip (UI_DOCTRINE 7), never beside themselves.
+  const classOptions = (field, value) => {
+    const offered = choices[field] ?? [];
+    return [
+      option('', 'None', value == null),
+      ...(value != null && !offered.some((c) => c.value === value) ? [option(value, `${value} (now)`, true)] : []),
+      ...offered.map((c) => option(c.value, c.label, c.value === value)),
+    ].join('');
+  };
+  // Only a closed ticket has an ending (lib/ticketClass.js), so How It Ended waits until it is Live.
+  const closed = current === 'live';
+  const endedPicker = closed || outcome != null
+    ? `<select id="edit-outcome" data-field="outcome">${classOptions('outcome', outcome)}</select>`
+    : '<select id="edit-outcome" disabled aria-describedby="edit-outcome-hint"><option selected>Still Open</option></select><span class="hint" id="edit-outcome-hint">Set when the ticket closes.</span>';
   const chips = tags.map((tag) => `<span class="tag">${escapeHtml(tag)}<button type="button" class="remove-tag" data-tag="${escapeHtml(tag)}" title="Remove ${escapeHtml(tag)}" aria-label="Remove tag ${escapeHtml(tag)}">×</button></span>`).join('');
   const nameField = pullRequest
     ? `<p id="edit-name" class="locked">${escapeHtml(name)}</p>
@@ -1815,6 +1863,12 @@ export function renderEditPanel({ name, description, status, priority, tags = []
         <div class="row"><select id="edit-assignee" data-field="assignee">${who}</select><span class="note" data-note="assignee"></span></div></div>
         <div class="beside"><label for="edit-status">Status</label>
         <div class="row"><select id="edit-status" data-field="status">${statusOptions}</select><span class="note" data-note="status"></span></div></div>
+        <div class="beside"><label for="edit-kind">Kind</label>
+        <div class="row"><select id="edit-kind" data-field="kind">${classOptions('kind', kind)}</select></div></div>
+        <div class="beside"><label for="edit-started-by">Started By</label>
+        <div class="row"><select id="edit-started-by" data-field="startedBy">${classOptions('startedBy', startedBy)}</select></div></div>
+        <div class="beside"><label for="edit-outcome">How It Ended</label>
+        <div class="row">${endedPicker}</div></div>
       </form>
       <form class="edit-name">
         <label for="edit-name">Name</label>

@@ -86,6 +86,7 @@ import trackerBus from '../lib/trackerBus.js';
 import { FALLBACK_TASK_NAME } from '../lib/busFallback.js';
 // Tickets as data for scheduled checks (SP-205).
 import ticketsJson from '../lib/ticketsJson.js';
+import { CLASS_FIELDS, classValue } from '../lib/ticketClass.js';
 // Stage counts for StarCaster's weekly report (SP-206).
 import stageCounts from '../lib/stageCounts.js';
 // A ticket's `Waits on:` line (task 86bctfun6): the claim leaves it alone
@@ -238,6 +239,7 @@ npm run clickup -- <command> [flags]      (Loop Queue: list ${LOOP_QUEUE_LIST}, 
   comments --task <id>                            the comments, oldest first
   waiting [--task <id>]                           read-only: is this ACTUALLY waiting on Dane? exit 0 no / 3 yes / 1 could not tell
   task --name "..." --body-file <f|-> [--list <id>] [--status S] [--priority p] [--tags a,b] [--id-out <file>]
+       [--kind k] [--started-by s] [--outcome o]  the ticket's class (SP-345), tracker only; see classify
   describe --task <id> --body-file <f|->          REPLACE the description (the left column)
   likely-files --task <id> --files a,b,...        add the Likely files: line to a ticket that has none, read back (SP-351)
   comment --task <id> --body-file <f|->           a plain note
@@ -258,6 +260,9 @@ npm run clickup -- <command> [flags]      (Loop Queue: list ${LOOP_QUEUE_LIST}, 
                                                   moved, forget merged or closed ones. Exit 1 if any read or write failed
   verdict --task <id> --pass|--fail --if-status "In review" [--body-file <f|->] [--no-guard] [--fourth-round-anyway]
   priority --task <id> --priority urgent|high|normal|low [--operator-asked]
+  classify --task <id> [--kind feature|fix|operational|documentation] [--started-by operator|client|agent]
+           [--outcome done|wont-do|duplicate|test]   the ticket's class (SP-345, docs/LOOP_CONTRACT.md), each read
+                                                  back; "none" clears one. An ending only on a closed ticket. Tracker only
   tag --task <id> --add <name> | --remove <name>  e.g. wont-do, deferred, an epic name
   relay [--list <id>] [--dry-run]                 the merge lane: act on Dane's merge phrase on every "Ready to launch"
                                                   ticket (re-check every gate, merge, move the ticket, write the record),
@@ -271,7 +276,7 @@ npm run clickup -- <command> [flags]      (Loop Queue: list ${LOOP_QUEUE_LIST}, 
                                                   One line per ticket he holds. --dry-run prints what it would do, writes nothing
   tickets --json [--include-closed] [--project <slug>] [--comments]
                                                   read-only: the tickets as JSON for a scheduled check, one object each (id,
-                                                  name, status, priority, tags, created, updated, statusSince; --comments adds
+                                                  name, status, priority, tags, kind, startedBy, outcome, created, updated, statusSince; --comments adds
                                                   the top-level comments). Exit 1 naming what failed, printing nothing, on any failed read
   replies --task <id> --comment <id> --json       read-only: one comment's replies as a JSON list, oldest first, in the
                                                   tickets --json comment shape (what stale-answer reads for the relay's
@@ -322,6 +327,43 @@ async function fetchAllTasks(list, { includeClosed = false, markdown = false, st
   // A caller that prints the list as whole cannot carry on with half of it.
   if (strict) process.exit(1);
   return tasks;
+}
+
+/** A ticket's class fields (SP-345): the API's name, the door's flag, and the key a read ticket carries. */
+const CLASS_FLAGS = Object.freeze([
+  { field: 'kind', flag: 'kind', key: 'kind' },
+  { field: 'startedBy', flag: 'started-by', key: 'started_by' },
+  { field: 'outcome', flag: 'outcome', key: 'outcome' },
+]);
+
+/**
+ * The class flags given on the command line, checked: `{ wanted }`, the API
+ * field -> its value (null for "none"), only the flags given. A value that
+ * is not one of the field's exits 2, and so does a class flag on a tracker
+ * that keeps none (ClickUp): nothing is written either way.
+ */
+function classFlags(doing) {
+  const wanted = {};
+  for (const { field, flag: name } of CLASS_FLAGS) {
+    if (!process.argv.includes(`--${name}`)) continue;
+    const given = arg(name);
+    if (given == null) { console.error(`--${name} needs a value: ${CLASS_FIELDS[field].values.join(', ')} or none. ${doing}`); process.exit(2); }
+    const read = classValue(field, given);
+    if (read.problem) { console.error(`--${name}: ${read.problem} ${doing}`); process.exit(2); }
+    wanted[field] = read.value;
+  }
+  if (Object.keys(wanted).length && project.tracker !== 'api') {
+    console.error(`A ticket's kind, who started it and how it ended are kept only on the tracker, not on ${project.tracker}. ${doing}`);
+    process.exit(2);
+  }
+  return wanted;
+}
+
+/** The class fields a read ticket carries that differ from `wanted`, as "kind: asked x, got y" lines. */
+function classMismatches(t, wanted) {
+  return CLASS_FLAGS.filter(({ field }) => field in wanted)
+    .filter(({ field, key }) => (t[key] ?? null) !== wanted[field])
+    .map(({ field, key }) => `${CLASS_FIELDS[field].label}: asked "${wanted[field] ?? 'none'}", got "${t[key] ?? 'none'}"`);
 }
 
 async function readTask(task) {
@@ -1343,6 +1385,12 @@ if (cmd === 'whoami') {
   console.log(`priority: ${t.priority?.priority ?? 'none'}`);
   console.log(`assigned: ${assigneeNames(t)}`);
   console.log(`tags:     ${(t.tags || []).map((x) => x.name).join(', ') || '(none)'}`);
+  // Its class (SP-345): only the tracker keeps one, so a ClickUp task shows none of these lines.
+  if ('kind' in t) {
+    console.log(`kind:     ${t.kind ?? '(none)'}`);
+    console.log(`started:  ${t.started_by ?? '(none)'}`);
+    console.log(`ended:    ${t.outcome ?? (t.status?.type === 'closed' ? '(none)' : '(still open)')}`);
+  }
   console.log(`list:     ${t.list?.name} (${t.list?.id})`);
   console.log(`pr:       ${pr ? pr.url : '(none recorded)'}`);
   console.log(`rounds:   ${sendBackRounds(comments)} send-back(s) so far`);
@@ -1491,6 +1539,7 @@ if (cmd === 'whoami') {
     process.exit(2);
   }
   refuseBranchLinks(body, 'Nothing was created.');
+  const classWanted = classFlags('Nothing was created.');
   const tags = arg('tags') ? arg('tags').split(',').map((s) => s.trim()).filter(Boolean) : undefined;
   const out = await tracker.createTask(list, {
     name,
@@ -1498,6 +1547,7 @@ if (cmd === 'whoami') {
     status: arg('status') || undefined,
     priority: PRIORITY[String(arg('priority', '')).toLowerCase()] || undefined,
     tags,
+    ...classWanted,
   });
   if (!out.res.ok) die('create task', out);
   const id = out.json.id;
@@ -1511,7 +1561,10 @@ if (cmd === 'whoami') {
   console.log(`  status:      ${t.status?.status}`);
   console.log(`  priority:    ${t.priority?.priority ?? '(none)'}`);
   console.log(`  tags:        ${(t.tags || []).map((x) => x.name).join(', ') || '(none)'}`);
+  if ('kind' in t) console.log(`  kind:        ${t.kind ?? '(none)'}; started by ${t.started_by ?? '(none)'}; ended ${t.outcome ?? '(none)'}`);
   console.log(`  description: ${chars} characters`);
+  const classWrong = classMismatches(t, classWanted);
+  if (classWrong.length) { console.error(`\n  CLASS DID NOT STICK: ${classWrong.join('; ')}`); process.exit(1); }
   if (tags && tags.length) {
     const landed = new Set((t.tags || []).map((x) => String(x.name || '').toLowerCase()));
     const missing = tags.filter((w) => !landed.has(w.toLowerCase()));
@@ -1644,6 +1697,25 @@ if (cmd === 'whoami') {
   const now = out.json.priority?.priority ?? '(none)';
   if (now !== wanted) { console.error(`Priority did NOT stick: asked "${wanted}", got "${now}".`); process.exit(1); }
   console.log(`Task ${task}: priority "${before.priority?.priority ?? '(none)'}" -> "${now}".`);
+  reportLimits();
+
+} else if (cmd === 'classify') {
+  // A ticket's kind, who started it and how it ended (SP-345, lib/ticketClass.js),
+  // set after filing, each read back. "none" clears one. Only a closed ticket
+  // has an ending: the tracker refuses one on an open ticket, writing nothing.
+  const task = arg('task');
+  if (!task) usage();
+  const wanted = classFlags('Nothing was written.');
+  if (!Object.keys(wanted).length) { console.error('classify: give at least one of --kind, --started-by, --outcome. Nothing was written.'); usage(); }
+  const before = await readTask(task);
+  const out = await tracker.updateTask(task, wanted);
+  if (!out.res.ok) die('set the ticket class', out);
+  const t = await readTask(task);
+  const wrong = classMismatches(t, wanted);
+  if (wrong.length) { console.error(`The class did NOT stick on ${task}: ${wrong.join('; ')}.`); process.exit(1); }
+  const said = CLASS_FLAGS.filter(({ field }) => field in wanted)
+    .map(({ field, key }) => `${CLASS_FIELDS[field].label.toLowerCase()} "${before[key] ?? 'none'}" -> "${t[key] ?? 'none'}"`);
+  console.log(`Task ${task}: ${said.join(', ')} (read back).`);
   reportLimits();
 
 } else if (cmd === 'tag') {
