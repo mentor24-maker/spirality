@@ -26,6 +26,7 @@ export const EXCEPTIONS = Object.freeze({
   'drag-handle': 'the grip that drags a suggested task into order',
   'remove-tag': 'the small × on a tag or topic chip',
   close: 'the × in a dialog\'s corner',
+  'message-close': 'the × that closes an error in the message strip (SP-323)',
   sort: 'a table heading that sorts its column',
   link: 'a button written as a link in a sentence ("Forgot Password?")',
   'feature-pick': 'a Console tile\'s feature chip, a filter that toggles',
