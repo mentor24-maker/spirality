@@ -1070,7 +1070,7 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
 
     // Dane's page: the search results page's tickets, across every project,
     // best matches first (tracker/pageData.mjs searchTickets), narrowed by
-    // its filters (`project`, `status`, `priority`, `createdBy`,
+    // its filters (`project`, `topic`, `status`, `priority`, `createdBy`,
     // `assignee`); a value that is none of the choices is refused, never an
     // empty list. `project` offers only the projects the reader may see, so
     // one they may not is refused the same as one that does not exist.
