@@ -352,6 +352,22 @@ export function createApiTracker({ token, baseUrl, project, listId, timeoutMs, l
     /** Roll a project back to the release it ran before; the answer is the record as stored. */
     rollBackRelease: (slug) => call('POST', `/releases/${encodeURIComponent(slug)}/back`, {}),
 
+    /**
+     * Which files each open pull request on the configured project changes
+     * (SP-349): `{ project, pullRequests: [{ number, ticket, repo, head,
+     * files, readAt }] }`. Read-only.
+     */
+    async prFiles() {
+      const out = await call('GET', `/pr-files/${encodeURIComponent(project)}`);
+      if (!out.res.ok) return out;
+      if (!Array.isArray(out.json?.pullRequests)) return refused(502, 'the tracker answered the pull request files without a list.');
+      return out;
+    },
+    /** Record pull request `number`'s files (`{ ticket, repo, head, files }`); the answer is the record as stored. */
+    recordPrFiles: (number, body) => call('PUT', `/pr-files/${encodeURIComponent(project)}/${encodeURIComponent(String(number))}`, body),
+    /** Forget pull request `number`'s files (it merged or closed); `{ forgotten }` says whether there was a record. */
+    forgetPrFiles: (number) => call('DELETE', `/pr-files/${encodeURIComponent(project)}/${encodeURIComponent(String(number))}`),
+
     /** The tracker has no spaces: its one "list" is the configured project. */
     listsInSpace: async () => ({ res: { ok: true, status: 200, headers: { get: () => null } }, json: { lists: [{ id: project, name: `${project} (tracker project)` }] }, text: '' }),
     foldersInSpace: async () => ({ res: { ok: true, status: 200, headers: { get: () => null } }, json: { folders: [] }, text: '' }),

@@ -1058,6 +1058,37 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
       }
     }
 
+    // Which files each open pull request changes (lib/prFiles.js): anyone
+    // signed in reads a project's records (`npm run clickup -- pr-files`);
+    // only a loop sign-in records one (PUT, the whole list, replaced) or
+    // forgets one that merged or closed (DELETE). Each write is read back by
+    // the store before it answers.
+    if (parts[0] === 'pr-files' && parts.length === 2 && method === 'GET') {
+      const project = requireProject(parts[1], me);
+      return [200, { project: project.slug, pullRequests: store.prFiles(project.slug) }];
+    }
+    if (parts[0] === 'pr-files' && parts.length === 3 && (method === 'PUT' || method === 'DELETE')) {
+      const body = method === 'PUT' ? await readJson(req) : null;
+      if (body) checkBody(body, me, ['ticket', 'repo', 'head', 'files']);
+      const project = requireProject(parts[1], me);
+      if (!/^[0-9]+$/.test(parts[2])) throw new HttpError(404, 'no-such-call', `"${parts[2]}" is not a pull request number.`);
+      if (me.kind !== 'machine') throw new HttpError(403, 'machines-only', 'only a loop sign-in records which files a pull request changes; a person may not.');
+      try {
+        if (body) {
+          const saved = store.recordPrFiles({ project: project.slug, number: Number(parts[2]), ticket: body.ticket, repo: body.repo, head: body.head ?? null, files: body.files, actor: me.id });
+          log(`pr files ${project.slug} #${saved.number} (${saved.ticket}): ${saved.files.length} file(s) actor=${me.id}`);
+          return [200, saved];
+        }
+        const gone = store.forgetPrFiles({ project: project.slug, number: Number(parts[2]), actor: me.id });
+        log(`pr files ${project.slug} #${gone.number} ${gone.forgotten ? 'forgotten' : 'had no record'} actor=${me.id}`);
+        return [200, gone];
+      } catch (err) {
+        if (err instanceof StoreError && err.code === 'not-allowed') throw new HttpError(403, err.code, err.message);
+        if (err instanceof StoreError && err.code === 'write-failed') throw new HttpError(500, err.code, err.message);
+        throw err;
+      }
+    }
+
     // Dane's page: the Reporting page's figures, for one project
     // (`?project=<slug>`) or, with none named, every project. Read-only.
     // `from` and `to` (ISO date-times, both or neither) add the Task
