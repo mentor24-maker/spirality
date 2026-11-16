@@ -21,10 +21,14 @@ test('the old names on the allow-list pass, the word beside them does not', () =
   for (const a of ALLOWED) assert.ok(a.why, `${a.text} gives its reason`);
 });
 
-test('the work log is history and is not searched; a binary file is not either', () => {
+test('the work log and the operator prompt log are history and are not searched; a binary file is not either', () => {
   assert.equal(isExempt('docs/work-log/2026-11-01-x.md'), true);
   assert.equal(isExempt('docs/WORK-LOG.md'), true);
+  assert.equal(isExempt('docs/operator-prompts/2026-11-15-doctrine.md'), true);
+  assert.deepEqual(findWording('docs/operator-prompts/2026-11-15-doctrine.md', `> two Alphire ${W}s`), []);
+  assert.equal(isExempt('docs/OPERATOR_PROMPTS.md'), false);
   assert.equal(isExempt('docs/DOCTRINE.md'), false);
+  assert.equal(isExempt('docs/UI_DOCTRINE.md'), false);
   assert.deepEqual(findWording('docs/work-log/2026-11-01-x.md', `a ${W}`), []);
   assert.deepEqual(findWording('picture.png', null), []);
 });

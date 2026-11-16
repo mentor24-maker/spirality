@@ -72,13 +72,17 @@ BACKUP_MINUTE=15
 LAUNCHD_PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$HOME/.local/bin"
 
 # The project's values: the label prefix, the log folder and the short name
-# every log and lock file starts with (CLAUDE.md engineering rule 2).
-config_value() { PATH="$LAUNCHD_PATH" node "$REPO/scripts/project_config.mjs" "$1"; }
-# Spirality's OWN value, asked from Spirality's folder, so it is never
-# whichever manifest sits above the folder the installer was started from
-# (SP-271 review: started in StarCaster's folder, the clash guard compared
-# StarCaster with itself).
-own_config_value() { (cd "$REPO" && config_value "$1"); }
+# every log and lock file starts with (CLAUDE.md engineering rule 2). Always
+# asked from Spirality's folder: with --project, SPIRALITY_PROJECT (set below)
+# names the project's manifest; without it, the value is Spirality's own,
+# never whichever manifest sits above the folder the installer was started
+# from (SP-312: started in StarCaster's checkout, it read com.starcaster and
+# would have written StarCaster's job names over StarCaster's own jobs).
+config_value() { (cd "$REPO" && PATH="$LAUNCHD_PATH" node "$REPO/scripts/project_config.mjs" "$1"); }
+# Spirality's OWN value, read before SPIRALITY_PROJECT is set (SP-271 review:
+# started in StarCaster's folder, the clash guard compared StarCaster with
+# itself).
+own_config_value() { (unset SPIRALITY_PROJECT; config_value "$1"); }
 
 # Which project (SP-271). PROJECT_DIR is empty for Spirality's own lanes, and
 # then nothing below differs from before: a SPIRALITY_PROJECT left in the
