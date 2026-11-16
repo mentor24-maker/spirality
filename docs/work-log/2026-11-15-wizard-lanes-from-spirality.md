@@ -17,3 +17,10 @@ A new script, `scripts/dry_onboard_lanes.sh`, shows this on a throwaway
 project: the lanes step names Spirality's installer, not one inside the
 project. Projects set up before today keep their copy until each one's own
 queue removes it.
+
+After review: the setup ticket the wizard files in the new project now
+describes what its pull request really holds (the settings file and the
+`verify` check, no loop code), and its test steps use Spirality's own
+commands, since the project no longer has copies to run. The loop skills
+now point at Spirality's own `docs/LOOP_ENGINEERING.md`, which a new
+project no longer gets a copy of.

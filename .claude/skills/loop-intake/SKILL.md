@@ -15,8 +15,10 @@ about: >
 
 The step before step 1. `loop-spec` is a session with Dane; this is the
 unattended version for the requests he files himself from the tracker page
-(`/new`), which land in `Requested`. See `docs/LOOP_ENGINEERING.md` for the
-whole system and `docs/LOOP_CONTRACT.md` for the statuses.
+(`/new`), which land in `Requested`. See Spirality's `docs/LOOP_ENGINEERING.md`
+for the whole system and its `docs/LOOP_CONTRACT.md` for the statuses (both in
+Spirality's folder, three folders up from this skill's base directory, not in a
+project's checkout).
 
 Each pass handles **at most one** `Requested` ticket. You write tickets; you
 do NOT write code, open a worktree, or touch a pull request.

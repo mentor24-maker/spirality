@@ -39,8 +39,8 @@
  * Every project value comes from the project's settings file on the setup
  * branch (rule 2). Every write is read back (rule 5). A failed step prints
  * `FAILED: <step>: <what was seen>` and the rerun command, and nothing after
- * it runs (rule 6). Ticket writes go through the project's own door, so
- * Doppler supplies its token and none is ever printed (rule 4).
+ * it runs (rule 6). Doppler supplies the token and none is ever printed
+ * (rule 4).
  *
  * Ticket writes go through Spirality's door, run from Spirality's folder
  * with SPIRALITY_PROJECT naming the checkout (SP-270), so it reads the
@@ -55,7 +55,7 @@ import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { loadProjectConfig, CONFIG_FILE } from '../../lib/projectConfig.mjs';
 import { expandHome } from '../../lib/onboardAnswers.mjs';
-import { LANES, installerPath, installerCommand, parseStatus, readPasses, judgeFirstPass, rerunSince, ticketsNamed, waitMinutesFrom, setupTicketBody, withLine } from '../../lib/onboardLanes.mjs';
+import { LANES, spiralityInstallerPath, installerCommand, parseStatus, readPasses, judgeFirstPass, rerunSince, ticketsNamed, waitMinutesFrom, setupTicketBody, withLine } from '../../lib/onboardLanes.mjs';
 
 const require = createRequire(import.meta.url);
 const { findTicketId, ticketLine } = require('../../lib/clickupTicketLink.js');
@@ -191,7 +191,7 @@ if (ticket) {
       const askedFile = arg('asked-file') ? expandHome(arg('asked-file')) : null;
       if (askedFile && !existsSync(askedFile)) fail('ticket', `--asked-file ${askedFile} does not exist`);
       const asked = askedFile ? readFileSync(askedFile, 'utf8') : '';
-      writeFileSync(join(scratch, 'body.md'), setupTicketBody({ projectSlug: config.projectSlug, githubRepo: config.githubRepo, prUrl, branch, asked }));
+      writeFileSync(join(scratch, 'body.md'), setupTicketBody({ projectSlug: config.projectSlug, githubRepo: config.githubRepo, prUrl, branch, asked, spiralityDir: SPIRALITY, checkout }));
       // Filed straight into In review: no lane is installed yet (that is the
       // next step), so nothing can take it half-filed, and it is never moved
       // again by this script. A rerun finds it in whatever status a lane has
@@ -223,7 +223,7 @@ if (!dryRun) {
 }
 
 // ── 3. install ─────────────────────────────────────────────────────────────
-const installer = installerPath(SPIRALITY);
+const installer = spiralityInstallerPath(SPIRALITY);
 if (!existsSync(installer)) fail('install', `Spirality's installer ${installer} is not there`);
 if (dryRun && onBranch !== branch) {
   // The installer reads the checkout's settings file, which is on the branch, not checked out yet.

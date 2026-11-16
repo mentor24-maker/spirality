@@ -161,7 +161,7 @@ const manifest = JSON.parse(readFileSync(new URL('./manifest.json', import.meta.
 const pkgText = readProject('package.json');
 if (pkgText == null) fail('look', `${answers.githubRepo} has no package.json on main`);
 const varsFor = (ownVerify) => templateVars(answers, homeConfig, { spiralityCommit: commit.slice(0, 7), visibility: repoView.out, ownVerify });
-// Its own verify is kept; with none, it gets the check plus the loop's tests (SP-121).
+// Its own verify is kept; with none, it gets the answers' check (SP-121), and no loop tests (SP-273).
 let verify;
 try { verify = verifyScriptFor(pkgText, manifest.verifyIfAbsent, varsFor(null)); } catch (e) { fail('look', e.message); }
 const vars = varsFor(verify.own);
@@ -216,7 +216,7 @@ const extra = [
   { to: 'CLAUDE.md', kind: 'made', from: claude.added ? 'the project\'s own, plus the loop\'s sections' : 'the project\'s own (the loop\'s sections are already there)', content: claude.text },
   ...(haveVerify ? [] : [{
     to: '.github/workflows/verify.yml', kind: 'made',
-    from: verify.add ? 'runs npm run verify, which the setup adds' : 'the answers\' check command, then the loop\'s tests',
+    from: verify.add ? 'runs npm run verify, which the setup adds' : 'runs the answers\' check command',
     content: verifyWorkflow(answers, { verifyAdded: Boolean(verify.add) }),
   }]),
 ];

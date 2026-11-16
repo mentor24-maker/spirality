@@ -14,7 +14,9 @@ about: >
 # Loop: Review
 
 Step 3 of 3 in the Spirality development loop (spec → build → review).
-See `docs/LOOP_ENGINEERING.md` for the whole system.
+See Spirality's `docs/LOOP_ENGINEERING.md` (in Spirality's folder, three folders
+up from this skill's base directory, not in a project's checkout)
+for the whole system.
 
 Each run verifies **one** task's PR, so Dane only ever sees PRs that already
 passed an independent check.
