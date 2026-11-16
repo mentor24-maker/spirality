@@ -4322,9 +4322,9 @@ messages.addEventListener('click', (e) => {
   if (e.target.closest('.message-close')) clearMessage();
 });
 
-/** Whether a note reports a Save: the form, row or cell it sits in has a Save button. */
+/** Whether a note reports a Save: the form, row or cell it sits in has a Save button (UI_DOCTRINE 3's green kind, or one named Save). */
 const reportsSave = (note) => [...(note.closest('form, .row, td') ?? note.parentElement)?.querySelectorAll('button') ?? []]
-  .some((b) => /^Save\b/.test(b.textContent.trim()));
+  .some((b) => b.classList.contains('btn-save') || /^Save\b/.test(b.textContent.trim()));
 
 /** The note an element is, or sits inside, or null. */
 const noteOf = (node) => (node?.nodeType === 1 ? node : node?.parentElement)?.closest(MESSAGE_SOURCES) ?? null;

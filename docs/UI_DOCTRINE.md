@@ -213,7 +213,8 @@ never sets its own height, padding or colour; it takes a kind.
 the only ones the check lets through without `btn` (`EXCEPTIONS` in
 `tracker/buttonKinds.test.mjs`, which names each one's class): the icon buttons
 (`action`, `status-info`, `suggestion-info-open`, `drag-handle`, the
-chips' `remove-tag` ×), a dialog's corner × (`close`), a table heading's
+chips' `remove-tag` ×), a dialog's corner × (`close`), the message strip's ×
+(`message-close`, section 7), a table heading's
 `sort`, "Forgot Password?" written as a link (`link`), a Console tile's
 feature chip (`feature-pick`) and the Pipeline Status pod (`pipeline-pod`).
 A new exception is added to that list, with its reason, in the same pull
