@@ -252,7 +252,7 @@ span.action.answer-in-icon { color: #2e7d32; }
 .offscreen { position: fixed; left: -9999px; top: 0; }
 .quick form.merge-action, .quick form.close-action, .quick form.go-action, .quick form.approve-action, .quick form.reject-action { margin-bottom: 1.25rem; }
 /* Every button on a ticket's page is green, Delete included (SP-76); the tag chips' small × keeps its own look. */
-.quick button, details.details form.copy button, details.edit button:not(.remove-tag) { background: #00AA00; border: 1px solid #006600; border-radius: 10px; color: #fff; cursor: pointer; }
+.quick button, .details form.copy button, details.edit button:not(.remove-tag) { background: #00AA00; border: 1px solid #006600; border-radius: 10px; color: #fff; cursor: pointer; }
 .quick form.merge-action button, .quick form.close-action button, .quick form.go-action button, .quick form.approve-action button, .quick form.reject-action button { font-weight: 700; padding: 0.6rem 2rem; }
 /* Go is asked for in 10px corners (SP-86), whatever the shared rule above says. */
 .quick form.go-action button { border-radius: 10px; }
@@ -260,6 +260,17 @@ span.action.answer-in-icon { color: #2e7d32; }
 .quick .held-report { margin: 0; font-size: 0.9em; }
 details.details { border-top: var(--hairline); padding-top: 0.75rem; }
 details.details > summary { cursor: pointer; font-weight: 600; margin-bottom: 0.5rem; }
+/* SP-291: while a loop has the ticket its details sit in the right column, open, under any actions. */
+.quick .act > div.details { margin-top: 1rem; }
+.quick .act > div.details:first-child { margin-top: 0; }
+.quick .act > div.details > .meta:first-child { margin-top: 0; }
+.quick .act > div.details > h2 { font-size: 1.1rem; }
+form.add-comment { margin-bottom: 1.5rem; }
+form.add-comment label { display: block; font-weight: 600; margin-bottom: 0.3rem; }
+form.add-comment textarea { width: 100%; min-height: 5rem; font: inherit; padding: 0.5rem; box-sizing: border-box; }
+form.add-comment .row { display: flex; gap: 1rem; align-items: center; margin-top: 0.5rem; }
+.quick.loop-has { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+@media (max-width: 800px) { .quick.loop-has { grid-template-columns: minmax(0, 1fr); } }
 nav.trail { font-size: 0.85rem; color: var(--quiet); margin: -0.5rem 0 1rem; }
 nav.trail a { color: var(--quiet); }
 nav.trail a:hover { color: var(--ink); }
