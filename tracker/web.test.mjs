@@ -1100,7 +1100,7 @@ test('the Settings page is in the header after Reporting and Users, lists the st
   assert.match(draw, /type="color"/);
   assert.match(draw, /chosen\[tr\.dataset\.status\] = null;/, 'Clear sets no colour');
   assert.match(draw, /await api\('PUT', '\/stage-colours', \{ colours: chosen \}\);\s*\/\/ Read back before saying it worked\.\s*const back = await api\('GET', '\/stage-colours'\);/);
-  assert.match(draw, /note\.textContent = `Not saved: \$\{err\.message\}`;/);
+  assert.match(draw, /showMessage\(\{ kind: 'error', text: `Not saved: \$\{err\.message\}` \}\);/, 'a refused Save is said in the message strip (SP-323)');
   assert.match(draw, /escapeHtml\(s\.status\)/);
   assert.match(app, /markNav\(reporting \? 'reporting' : settings \? 'settings' :/);
   const f = await fixture();

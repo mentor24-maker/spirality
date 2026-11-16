@@ -2960,3 +2960,25 @@ export function renderSuggestionInfo(suggestion, { repo = null } = {}) {
   return `<h2 id="suggestion-info-title">${escapeHtml(s.title ?? '')}</h2>`
     + (body || '<p class="quiet">This suggestion came with nothing more to say.</p>');
 }
+
+// ── The message strip (UI_DOCTRINE section 7, SP-323) ──────────────────────
+// What a button reports (Saving…, Saved, Not saved: …) appears once, in one
+// strip between the header and the page, one message at a time. app.mjs's
+// showMessage puts it there; these draw what it shows.
+
+/** How long a success or information message stays before it closes by itself; an error stays until its × is pressed. */
+export const MESSAGE_CLOSES_MS = 4000;
+/** How long the card after a Save stays before it fades by itself (it has nothing to close). */
+export const SAVED_CARD_MS = 3000;
+
+/** The strip's contents for one message: the words, and a × on an error, the only kind that waits to be closed. */
+export function renderMessage({ kind, text }) {
+  const role = kind === 'error' ? 'alert' : 'status';
+  const close = kind === 'error' ? '<button type="button" class="message-close" aria-label="Close Message">×</button>' : '';
+  return `<p class="message message-${escapeHtml(kind)}" role="${role}"><span class="message-text">${escapeHtml(text)}</span>${close}</p>`;
+}
+
+/** The small card after a Save: what was saved, with a check, and nothing to close. */
+export function renderSavedCard(text) {
+  return `<p class="saved-card" role="status"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5 9-10"/></svg><span>${escapeHtml(text)}</span></p>`;
+}

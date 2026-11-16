@@ -155,7 +155,9 @@ counterpart, so they have tokens of their own, in a separate group at the end of
 `:root`: the black header and its colours (`--header-*`), the logo blue of the
 Add Task box (`--brand-blue`, `--brand-blue-tint`), the light-blue pods and
 their navy (`--pod-*`, `--navy`, `--navy-soft`), link blue (`--link-ink`),
-error red (`--ink-error`, StarCaster's `--btn-danger-flat`), the table
+error red (`--ink-error`, StarCaster's `--btn-danger-flat`), the message strip's
+three colours (`--message-success`, `--message-error`, `--message-info`,
+section 7; its white text is `--btn-text`), the table
 heading and filter rows (`--table-head-*`, `--table-filter-*`, StarCaster's
 T11 values, which its `_tables.css` writes as literals), shadows and the
 dialog backdrop, the Console's feature colours (`--feature-0` to `--feature-9`),
@@ -213,7 +215,8 @@ never sets its own height, padding or colour; it takes a kind.
 the only ones the check lets through without `btn` (`EXCEPTIONS` in
 `tracker/buttonKinds.test.mjs`, which names each one's class): the icon buttons
 (`action`, `status-info`, `suggestion-info-open`, `drag-handle`, the
-chips' `remove-tag` ×), a dialog's corner × (`close`), a table heading's
+chips' `remove-tag` ×), a dialog's corner × (`close`), the message strip's ×
+(`message-close`, section 7), a table heading's
 `sort`, "Forgot Password?" written as a link (`link`), a Console tile's
 feature chip (`feature-pick`) and the Pipeline Status pod (`pipeline-pod`).
 A new exception is added to that list, with its reason, in the same pull
@@ -292,9 +295,21 @@ C9, tabs): the Board / List / Console switch and the Settings tabs.
   information close after four seconds, and the page scrolls the strip into
   view. Padding 8px 16px, `--text-sm`, weight 500, white text on success
   `#38a169`, error `#e53e3e`, information `#1a73e8`.
+  On the tracker the strip is `div#messages`, right after the header, and a
+  button reports there by calling `showMessage` in `tracker/web/app.mjs`
+  with its kind (`success`, `error` or `info`) and words; it is never fed by
+  copying a note. Opening another page empties it; the page reading itself
+  again every half minute does not. The Settings page's Stage Colours Save is
+  the first to use it (SP-323). The other pages still write a note beside
+  their buttons and move onto the strip a ticket at a time;
+  `tracker/messages.test.mjs` counts those notes and fails on a new one. A
+  setup field's own note stays beside its box, and a page that cannot be
+  drawn at all says so in place of the page.
 - **After a Save**, the page scrolls to the top and a small card says it
   saved, then fades by itself after three seconds, with nothing to close
-  (MODULE_UI_DOCTRINE §2, Feedback, 2026-11-04).
+  (MODULE_UI_DOCTRINE §2, Feedback, 2026-11-04). On the tracker it takes the strip's
+  place, so there is still one message at a time; a Save asks for it with
+  `showMessage(…, { afterSave: true })`.
 - **An error says what happened and what to do, in terms of the thing the
   reader touches, and names the specific thing**; a message that cannot tell
   the cause says what happened and stops ([DOCTRINE.md](DOCTRINE.md) §2.1 to
@@ -393,7 +408,7 @@ Measured 2026-11-15 on `tracker/web/app.css`, `app.mjs` and `render.mjs`.
 | 4 Title row | Followed and checked (SP-322, 2026-11-15): a 24px, weight 800 `<h1>` on every page, and every toolbar in the title row at its right, the trail above it; headings under it at `--text-lg` (h2) and `--text-base` (h3 to h6), with board columns and Console stages at `--text-base`. The ticket page keeps its two-column top, whose actions sit in the right column. | SP-322 |
 | 5 Tabs | Followed and checked (SP-322, 2026-11-15): Board / List / Console and the Settings tabs are one tab bar (`nav.tabs`), links with `aria-current`. | SP-322 |
 | 6 Forms | Every label above its box; boxes full width; tag boxes use the text inside the box as the instruction. | SP-325 |
-| 7 Messages | Notes beside each button and under the title; no single strip. Empty states: followed, but for a bare "None." | SP-323 |
+| 7 Messages | The strip and the card after a Save are built and checked (SP-323, 2026-11-16): one strip under the header, errors until closed, others for four seconds. Only the Settings page's Stage Colours Save uses it so far; every other button still writes a note beside itself, and the check stops new ones. An empty board column says what it would hold. | SP-323 |
 | 8 Tables | Followed and checked (SP-324, 2026-11-16): black heading rows with white text, every table with headings in a `.table-wrap` with its heading row fixed, sort buttons kept in the heading cell. No table has a filter row yet; the rule for one is in place. | SP-324 |
 | 9 Dialogs | Followed and checked (SP-324): every dialog is `max-content` wide between its own floor and 75% of the screen; text in it at most 56ch. | SP-324 |
 | 10 Small rules | Followed; icon strokes are 1 and checked (SP-320). | SP-320 |
@@ -402,7 +417,8 @@ Measured 2026-11-15 on `tracker/web/app.css`, `app.mjs` and `render.mjs`.
 `tracker/cssTokens.test.mjs` checks section 2 and the icon strokes of section 10;
 `tracker/buttonKinds.test.mjs` checks section 3;
 `tracker/titleRow.test.mjs` checks sections 4 and 5;
-`tracker/tablesDialogs.test.mjs` checks sections 8 and 9.
+`tracker/tablesDialogs.test.mjs` checks sections 8 and 9;
+`tracker/messages.test.mjs` checks section 7.
 Each ticket above
 adds the check for its part to `npm run verify`, as StarCaster's
 `scripts/check_ui_doctrine.cjs` does for its screens: every `<button>` has a
