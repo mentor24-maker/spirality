@@ -26,7 +26,7 @@
  * an emailed link's own page. The link's token is sent only in a JSON body,
  * never in an address.
  */
-import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, loopHasIt, renderCommentForm, MOVED_MESSAGE, renderMarkdown, unwrapDoc, renderCloseAction, renderGoAction, goQuestion, renderBugReportActions, approveQuestion, rejectQuestion, changeProblem, REJECT_COMMENT, WONT_DO_TAG, renderMergeAction, renderAnswerIn, renderHeldUp, renderSharedFiles, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, renderQuickAction, renderProjectPicker, renderTopicPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, lookupTicket, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, pipelinePodLabel, renderHealth, healthLines, renderCommandList, renderCommandView, renderCommandDetails, renderContextDocs, renderLoopQueueDiagram, renderTopics, renderTopicEditRow, topicDeleteQuestion, renderTagEditRow, tagDeleteQuestion, tagAddressable, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, renderListTopics, projectTags, sortTickets, nextSort, renderDocumentation, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, lowerMeridiem, renderPipelineControls, renderConsole, drainLine, renderTitleChoices, titleModeOf, SUGGEST_POLL_MS, moveSuggestion, suggestState, filingPlan, orderPlan, andList, suggestRunLine, renderSuggestRows, renderSuggestionInfo, renderMessage, renderSavedCard, MESSAGE_CLOSES_MS, SAVED_CARD_MS } from './render.mjs';
+import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, loopHasIt, renderCommentForm, MOVED_MESSAGE, renderMarkdown, unwrapDoc, renderCloseAction, renderGoAction, goQuestion, renderBugReportActions, approveQuestion, rejectQuestion, changeProblem, REJECT_COMMENT, WONT_DO_TAG, renderMergeAction, renderAnswerIn, renderHeldUp, renderSharedFiles, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, renderQuickAction, renderProjectPicker, renderTopicPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, lookupTicket, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, pipelinePodLabel, renderHealth, healthLines, renderCommandList, renderCommandView, renderCommandDetails, renderContextDocs, renderLoopQueueDiagram, renderTopics, renderTopicEditRow, topicDeleteQuestion, renderTagEditRow, tagDeleteQuestion, tagAddressable, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, renderListTopics, projectTags, renderClassFilters, filterByClass, sortTickets, nextSort, renderDocumentation, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, lowerMeridiem, renderPipelineControls, renderConsole, drainLine, renderTitleChoices, titleModeOf, SUGGEST_POLL_MS, moveSuggestion, suggestState, filingPlan, orderPlan, andList, suggestRunLine, renderSuggestRows, renderSuggestionInfo, renderMessage, renderSavedCard, MESSAGE_CLOSES_MS, SAVED_CARD_MS } from './render.mjs';
 
 /** Where an earlier version of the page kept a pasted token; removed on load, never read. */
 const OLD_TOKEN_KEY = 'tracker-token';
@@ -1328,6 +1328,13 @@ function wireSortHeadings(stages) {
  * `{ id, field, text, error }`, the note that save leaves beside that
  * ticket's dropdown after the redraw.
  */
+/**
+ * SP-345: the Tasks page's Kind, Started By and How It Ended filters, key ->
+ * value ('' for Any). Kept here so the minute's redraw and a save keep them,
+ * across projects and both views; a reload clears them.
+ */
+const pickedClass = {};
+
 async function drawProject(slug, view, { adding = false, filed = null, unchecked = false, uploaded = [], notUploaded = [], said = null } = {}) {
   const [board, looks, { projects }] = await Promise.all([
     api('GET', `/projects/${encodeURIComponent(slug)}/board`),
@@ -1392,8 +1399,10 @@ async function drawProject(slug, view, { adding = false, filed = null, unchecked
 
   // The board's columns are the working stages; Live, which only grows, is a
   // list section under them (SP-165), newest change first.
-  const working = board.columns.filter((c) => c.status !== 'Live');
-  const liveColumn = board.columns.find((c) => c.status === 'Live');
+  // SP-345: only the tickets the Kind, Started By and How It Ended filters let through.
+  const columns = filterByClass(board.columns, pickedClass);
+  const working = columns.filter((c) => c.status !== 'Live');
+  const liveColumn = columns.find((c) => c.status === 'Live');
   const live = liveColumn && { ...liveColumn, tickets: liveColumn.tickets.slice().sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0)) };
 
   // Which side of the Add Task box shows: its Suggest checkbox, kept in this browser (SP-303).
@@ -1408,6 +1417,7 @@ async function drawProject(slug, view, { adding = false, filed = null, unchecked
       </div>
       ${viewSwitch(board.project, view)}
     </div>
+    ${renderClassFilters(board.classes, pickedClass)}
     ${filed && (unchecked || notUploaded.length) ? `<p class="filed-note">${unchecked ? UNCHECKED_NOTE : ''}${notUploadedNote(notUploaded)}</p>` : ''}
     <details class="add-task">
       <summary>Add Task<label class="suggest-switch">Suggest <input type="checkbox" value="on" aria-label="Suggest Next Tasks"${suggesting ? ' checked' : ''}></label></summary>
@@ -1466,7 +1476,7 @@ async function drawProject(slug, view, { adding = false, filed = null, unchecked
     <p class="error list-note" role="alert" hidden></p>
     ${view === 'board'
     ? `<div class="board">${working.map(column).join('')}</div>${live ? `<div class="list board-live">${group(live)}</div>` : ''}`
-    : `<div class="list">${board.columns.map(group).join('')}</div>`}`;
+    : `<div class="list">${columns.map(group).join('')}</div>`}`;
   for (const el of main.querySelectorAll('[data-stage]')) {
     const look = looks[el.dataset.stage];
     if (!look) continue;
@@ -1476,7 +1486,14 @@ async function drawProject(slug, view, { adding = false, filed = null, unchecked
     el.style.setProperty('--stage-text', look.text);
   }
   putTrail([{ label: board.projectName, href: '/projects' }, { label: view === 'board' ? 'Board' : 'List' }]);
-  wireSortHeadings(view === 'board' ? (live ? [live] : []) : board.columns);
+  wireSortHeadings(view === 'board' ? (live ? [live] : []) : columns);
+  // A class filter changed: keep it, and draw the project again through it.
+  for (const select of main.querySelectorAll('.class-filters select')) {
+    select.addEventListener('change', () => {
+      pickedClass[select.name] = select.value;
+      drawProject(board.project, view).catch((err) => (err instanceof SignedOut ? drawSignIn() : showError(err)));
+    });
+  }
   wireSearch();
   wireAddTask(board.project, view, adding);
   wireSuggestNext(board.project, view);
@@ -2096,6 +2113,8 @@ async function drawTicket(id, said = null, kept = null) {
     if (where) {
       where.className = `note${said.error ? ' error' : ' quiet'}${said.field ? '' : ' edit-note'}`;
       where.textContent = said.text;
+    } else if (STRIP_FIELDS[said.field]) {
+      showMessage({ kind: said.error ? 'error' : 'success', text: `${STRIP_FIELDS[said.field]}: ${said.text}.` });
     }
   }
   // Add Comment (SP-291), on a ticket a loop has: posted exactly as typed
@@ -2167,6 +2186,27 @@ async function drawTicket(id, said = null, kept = null) {
 }
 
 /**
+ * SP-345: the Change panel's class pickers, by field, with the label their
+ * messages use. They write nothing beside themselves: a save reports in the
+ * message strip (UI_DOCTRINE 7), through stripNote and drawTicket's `said`.
+ */
+const STRIP_FIELDS = Object.freeze({ kind: 'Kind', startedBy: 'Started By', outcome: 'How It Ended' });
+
+/**
+ * A stand-in for the element a save writes its progress into, for a picker
+ * with none: "Saving…" is dropped (the panel is held meanwhile), and a
+ * refusal or a failed redraw goes to the message strip as an error.
+ */
+function stripNote(field) {
+  return {
+    className: '',
+    set textContent(text) {
+      if (/\berror\b/.test(this.className)) showMessage({ kind: 'error', text: `${STRIP_FIELDS[field] ?? field}: ${text}` });
+    },
+  };
+}
+
+/**
  * The Change panel's controls (render.mjs renderEditPanel): selects save on
  * change, tags on add or remove, name and description on Save. Each sends
  * only its own field with `ifVersion: t.version`. One save at a time: the
@@ -2229,7 +2269,7 @@ function wireEditPanel(t) {
     select.addEventListener('change', () => {
       const { field } = select.dataset;
       const value = field === 'assignee' ? (select.value ? Number(select.value) : null) : (select.value || null);
-      save(field, value, panel.querySelector(`[data-note="${field}"]`));
+      save(field, value, panel.querySelector(`[data-note="${field}"]`) ?? stripNote(field));
     });
   }
   const tagNote = panel.querySelector('[data-note="tags"]');

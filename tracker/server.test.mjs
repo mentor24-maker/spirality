@@ -1348,7 +1348,34 @@ test('the thread answer names the project\'s operator and the choices the ticket
     assert.deepEqual(body.operator, { id: f.human.id, name: 'Operator' });
     assert.deepEqual(body.choices.priorities, ['urgent', 'high', 'normal', 'low']);
     assert.deepEqual(body.choices.statuses.map((s) => s.label), ['Requested', 'Rework', 'Queued', 'Live']);
+    assert.deepEqual(body.choices.kind.map((c) => c.label), ['Feature', 'Fix', 'Operational', 'Documentation']);
+    assert.deepEqual(body.choices.startedBy.map((c) => c.value), ['operator', 'client', 'agent']);
+    assert.deepEqual(body.choices.outcome.map((c) => c.label), ['Done', "Won't Do", 'Duplicate', 'Test']);
     assert.equal(body.version, 1);
+  } finally { await f.cleanup(); }
+});
+
+test('a ticket\'s kind, who started it and how it ended: filed, changed, read back, and refused when wrong', async () => {
+  const f = await fixture();
+  try {
+    const filed = await f.call('POST', '/projects/alpha/tickets', { body: { name: 'x', status: 'queued', kind: 'operational', startedBy: 'agent' } });
+    assert.equal(filed.status, 201, filed.text);
+    assert.deepEqual([filed.body.kind, filed.body.startedBy, filed.body.outcome], ['operational', 'agent', null]);
+    const id = filed.body.id;
+    const bad = await f.call('PATCH', `/tickets/${id}`, { body: { kind: 'bug' } });
+    assert.equal(bad.status, 400, bad.text);
+    assert.match(bad.body.err ?? bad.text, /not a kind/);
+    const open = await f.call('PATCH', `/tickets/${id}`, { body: { outcome: 'done' } });
+    assert.equal(open.status, 400, open.text);
+    assert.match(open.text, /only a closed ticket has an ending/);
+    const closed = await f.call('PATCH', `/tickets/${id}`, { token: f.humanToken, body: { status: 'live', outcome: 'duplicate', kind: 'fix' } });
+    assert.equal(closed.status, 200, closed.text);
+    const read = await f.call('GET', `/tickets/${id}`);
+    assert.deepEqual([read.body.kind, read.body.startedBy, read.body.outcome], ['fix', 'agent', 'duplicate']);
+    const board = await f.call('GET', '/projects/alpha/board', { token: f.humanToken });
+    const live = board.body.columns.find((c) => c.status === 'Live').tickets[0];
+    assert.deepEqual([live.kind, live.startedBy, live.outcome], ['fix', 'agent', 'duplicate']);
+    assert.deepEqual(board.body.classes.map((c) => c.label), ['Kind', 'Started By', 'How It Ended']);
   } finally { await f.cleanup(); }
 });
 
@@ -2364,7 +2391,7 @@ test('GET /projects/:slug/board keeps the shape outside sites read: the eight co
     f.store.fileTicket({ project: 'alpha', actor: f.machine.id, name: 'One', status: 'queued', priority: 'high', tags: ['x'] });
     const r = await f.call('GET', '/projects/alpha/board', { token: f.humanToken });
     assert.equal(r.status, 200);
-    assert.deepEqual(Object.keys(r.body), ['project', 'projectName', 'columns', 'operator', 'topics', 'tags']);
+    assert.deepEqual(Object.keys(r.body), ['project', 'projectName', 'columns', 'operator', 'topics', 'tags', 'classes']);
     assert.deepEqual(r.body.topics, [], "SP-247: the project's topics to pick from");
     assert.deepEqual(r.body.tags, ['x'], "SP-309: the project's tags, saved or in use, to pick from");
     assert.deepEqual([r.body.project, r.body.projectName], ['alpha', 'Alpha']);
@@ -2376,7 +2403,7 @@ test('GET /projects/:slug/board keeps the shape outside sites read: the eight co
       assert.ok(Array.isArray(c.tickets));
     }
     const [ticket] = r.body.columns.find((c) => c.status === 'Queued').tickets;
-    assert.deepEqual(Object.keys(ticket), ['id', 'name', 'priority', 'tags', 'assignee', 'updatedAt', 'pullRequest', 'answerIn', 'mergeStands', 'waiting', 'version', 'assigneeId', 'topics']);
+    assert.deepEqual(Object.keys(ticket), ['id', 'name', 'priority', 'tags', 'assignee', 'updatedAt', 'pullRequest', 'answerIn', 'mergeStands', 'waiting', 'version', 'assigneeId', 'topics', 'kind', 'startedBy', 'outcome']);
     assert.equal(ticket.assigneeId, null, 'SP-244: the assignee by id, beside its name');
     assert.deepEqual(ticket.topics, [], "SP-247: the ticket's topics");
     assert.equal(ticket.version, f.store.getTicket('AL-1').version, 'the version the list saves with is the stored one');

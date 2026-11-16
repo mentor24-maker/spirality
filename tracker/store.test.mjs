@@ -1070,7 +1070,7 @@ test('a database made before projects had a web address, logo and owner gains th
         ['slug', 'name', 'prefix', 'operator', 'next_number', 'url', 'logo', 'owner', 'repo', 'alert_email', 'alert_phone']);
       // Every old column byte-for-byte; the one new column, place (SP-249), empty.
       assert.deepEqual(raw.prepare("SELECT * FROM tickets WHERE id IN ('OL-1', 'OL-2') ORDER BY id").all().map((r) => ({ ...r })),
-        ticketsBefore.map((r) => ({ ...r, place: null })));
+        ticketsBefore.map((r) => ({ ...r, place: null, kind: null, started_by: null, outcome: null })));
     } finally { raw.close(); }
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
@@ -1568,7 +1568,7 @@ test('today\'s database gains emails, passwords, sessions and links, and every e
       assert.deepEqual(raw.prepare('SELECT slug, name, prefix, operator, next_number, url, logo, owner FROM projects ORDER BY rowid').all(), before.projects);
       // Tickets also gain place (SP-249), empty; every old column is unchanged.
       assert.deepEqual(raw.prepare('SELECT * FROM tickets ORDER BY rowid').all().map((r) => ({ ...r })),
-        before.tickets.map((r) => ({ ...r, place: null })), 'tickets');
+        before.tickets.map((r) => ({ ...r, place: null, kind: null, started_by: null, outcome: null })), 'tickets');
       for (const t of ['comments', 'stage_colours']) {
         assert.deepEqual(raw.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all(), before[t], t);
       }
@@ -2269,4 +2269,76 @@ test("a deleted ticket takes its topic links with it, and the topic stays", () =
     assert.equal(store.ticketTopicsOf('alpha').size, 0);
     assert.deepEqual(store.listTopics('alpha').map((x) => x.name), ['Login']);
   } finally { cleanup(); }
+});
+
+test('a ticket\'s class: kind, who started it and how it ended, at filing and by a change, each an event (SP-345)', () => {
+  const { store, human, machine, cleanup } = fixture();
+  try {
+    const t = store.fileTicket({ project: 'alpha', actor: machine.id, name: 'Fix-up', status: 'queued', kind: 'Operational', startedBy: 'agent' });
+    assert.equal(t.kind, 'operational');
+    assert.equal(t.startedBy, 'agent');
+    assert.equal(t.outcome, null);
+    const bare = store.fileTicket({ project: 'alpha', actor: machine.id, name: 'Old', status: 'queued' });
+    assert.deepEqual([bare.kind, bare.startedBy, bare.outcome], [null, null, null]);
+
+    const out = store.changeTicket(t.id, { actor: human.id, kind: 'fix', startedBy: 'operator' });
+    assert.equal(out.ok, true);
+    assert.deepEqual(out.changed.sort(), ['kind', 'startedBy']);
+    assert.equal(store.getTicket(t.id).kind, 'fix');
+    assert.deepEqual(store.listEvents(t.id).filter((e) => e.field === 'kind').map((e) => [e.from, e.to]), [['operational', 'fix']]);
+    // "none" clears one.
+    assert.equal(store.changeTicket(t.id, { actor: human.id, startedBy: 'none' }).ticket.startedBy, null);
+  } finally { cleanup(); }
+});
+
+test('a ticket\'s class: a value that is none of the choices is refused, nothing saved', () => {
+  const { store, machine, cleanup } = fixture();
+  try {
+    assert.throws(() => store.fileTicket({ project: 'alpha', actor: machine.id, name: 'x', status: 'queued', kind: 'bug' }), { code: 'unknown-kind' });
+    assert.equal(store.listTickets('alpha').length, 0);
+    const t = store.fileTicket({ project: 'alpha', actor: machine.id, name: 'x', status: 'queued' });
+    assert.throws(() => store.changeTicket(t.id, { actor: machine.id, startedBy: 'robot' }), { code: 'unknown-started-by' });
+    assert.equal(store.getTicket(t.id).version, 1);
+  } finally { cleanup(); }
+});
+
+test('only a closed ticket has an ending; reopening one clears it in the same write', () => {
+  const { store, human, machine, cleanup } = fixture();
+  try {
+    assert.throws(() => store.fileTicket({ project: 'alpha', actor: machine.id, name: 'x', status: 'queued', outcome: 'done' }), { code: 'outcome-on-open' });
+    const t = store.fileTicket({ project: 'alpha', actor: machine.id, name: 'x', status: 'queued' });
+    assert.throws(() => store.changeTicket(t.id, { actor: human.id, outcome: 'wont-do' }), { code: 'outcome-on-open' });
+    assert.equal(store.getTicket(t.id).version, 1);
+    // Closing and ending in one write is allowed.
+    const closed = store.changeTicket(t.id, { actor: human.id, status: 'live', outcome: "Won't do" });
+    assert.equal(closed.ticket.outcome, 'wont-do');
+    // Back out of Live: the ending goes with it, recorded as an event.
+    const reopened = store.changeTicket(t.id, { actor: human.id, status: 'queued' });
+    assert.equal(reopened.ticket.outcome, null);
+    assert.deepEqual(reopened.changed.sort(), ['outcome', 'status']);
+    assert.deepEqual(store.listEvents(t.id).filter((e) => e.field === 'outcome').map((e) => [e.from, e.to]), [[null, 'wont-do'], ['wont-do', null]]);
+    // Filed closed with an ending (an import or a test ticket).
+    assert.equal(store.fileTicket({ project: 'alpha', actor: machine.id, name: 'y', status: 'live', outcome: 'test' }).outcome, 'test');
+  } finally { cleanup(); }
+});
+
+test('a database made before tickets had a class gains the three columns, empty, nothing else touched', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tracker-store-'));
+  const path = join(dir, 'old.db');
+  try {
+    const first = openStore(path);
+    const human = first.createActor({ kind: 'human', name: 'Operator' });
+    first.createProject({ slug: 'alpha', name: 'Alpha', prefix: 'AL', operator: human.id });
+    first.fileTicket({ project: 'alpha', actor: human.id, name: 'One', status: 'queued', priority: 'high' });
+    first.close();
+    const old = new DatabaseSync(path);
+    for (const c of ['kind', 'started_by', 'outcome']) old.exec(`ALTER TABLE tickets DROP COLUMN ${c}`);
+    old.close();
+    const store = openStore(path);
+    try {
+      const t = store.getTicket('AL-1');
+      assert.deepEqual([t.name, t.priority, t.kind, t.startedBy, t.outcome], ['One', 'high', null, null, null]);
+      assert.equal(store.changeTicket('AL-1', { actor: human.id, kind: 'feature' }).ticket.kind, 'feature');
+    } finally { store.close(); }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
