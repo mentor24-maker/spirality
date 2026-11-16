@@ -1,4 +1,4 @@
-## 2026-11-15 — Give tracker tables and dialogs StarCaster's look and sizing (#264)
+## 2026-11-16 — Give tracker tables and dialogs StarCaster's look and sizing (#264)
 
 Every table on the tracker page now has the same look as StarCaster's: a black
 row of column names in bold white along the top. Each table sits in its own
