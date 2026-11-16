@@ -460,6 +460,8 @@ export function boardOf(store, slug, { viewerId = null, prStates = null } = {}) 
     topics: store.listTopics(project.slug)
       .map((t) => ({ id: t.id, name: t.name }))
       .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }) || a.id - b.id),
+    // SP-309: the project's tags, saved or in use, by name, for the List view's Add Tag dropdown.
+    tags: store.listTags(project.slug).map((t) => t.name),
   };
 }
 

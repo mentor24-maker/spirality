@@ -220,10 +220,10 @@ details.colex[open] > summary .fold::before { content: '▾'; }
 details.colex > summary:focus-visible { outline: 2px solid var(--focus-ring-color); outline-offset: -2px; }
 details.colex > form { padding: 0 0.75rem 0.75rem; }
 table.tag-list td.count, table.tag-list th:last-child { white-space: nowrap; text-align: right; }
-form.create-topic { max-width: 40rem; }
-form.create-topic label { display: block; margin-top: 0.75rem; font-weight: 600; }
-form.create-topic input, form.create-topic textarea { display: block; width: 100%; font: inherit; padding: 0.5rem; box-sizing: border-box; margin-top: 0.35rem; }
-form.create-topic .row { display: flex; gap: var(--space-5); align-items: center; margin-top: 1rem; }
+form.create-topic, form.create-tag { max-width: 40rem; }
+form.create-topic label, form.create-tag label { display: block; margin-top: 0.75rem; font-weight: 600; }
+form.create-topic input, form.create-topic textarea, form.create-tag input, form.create-tag textarea { display: block; width: 100%; font: inherit; padding: 0.5rem; box-sizing: border-box; margin-top: 0.35rem; }
+form.create-topic .row, form.create-tag .row { display: flex; gap: var(--space-5); align-items: center; margin-top: 1rem; }
 form.copy label { display: block; }
 form.copy .row { display: flex; gap: var(--space-5); align-items: center; margin-top: 0.5rem; }
 form.copy select { font: inherit; padding: 0.4rem; }

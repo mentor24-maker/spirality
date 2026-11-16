@@ -26,7 +26,7 @@
  * an emailed link's own page. The link's token is sent only in a JSON body,
  * never in an address.
  */
-import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, loopHasIt, renderCommentForm, MOVED_MESSAGE, renderMarkdown, unwrapDoc, renderCloseAction, renderGoAction, goQuestion, renderBugReportActions, approveQuestion, rejectQuestion, changeProblem, REJECT_COMMENT, WONT_DO_TAG, renderMergeAction, renderAnswerIn, renderHeldUp, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, lookupTicket, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, pipelinePodLabel, renderHealth, healthLines, renderCommandList, renderCommandView, renderCommandDetails, renderContextDocs, renderTopics, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, renderListTopics, projectTags, projectTagCounts, sortTickets, nextSort, renderDocumentation, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, lowerMeridiem, renderPipelineControls, renderConsole, drainLine, renderTitleChoices, titleModeOf, SUGGEST_POLL_MS, moveSuggestion, suggestState, filingPlan, orderPlan, andList, suggestRunLine, renderSuggestRows, renderSuggestionInfo } from './render.mjs';
+import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, loopHasIt, renderCommentForm, MOVED_MESSAGE, renderMarkdown, unwrapDoc, renderCloseAction, renderGoAction, goQuestion, renderBugReportActions, approveQuestion, rejectQuestion, changeProblem, REJECT_COMMENT, WONT_DO_TAG, renderMergeAction, renderAnswerIn, renderHeldUp, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, lookupTicket, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, pipelinePodLabel, renderHealth, healthLines, renderCommandList, renderCommandView, renderCommandDetails, renderContextDocs, renderTopics, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, renderListTopics, projectTags, sortTickets, nextSort, renderDocumentation, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, lowerMeridiem, renderPipelineControls, renderConsole, drainLine, renderTitleChoices, titleModeOf, SUGGEST_POLL_MS, moveSuggestion, suggestState, filingPlan, orderPlan, andList, suggestRunLine, renderSuggestRows, renderSuggestionInfo } from './render.mjs';
 
 /** Where an earlier version of the page kept a pasted token; removed on load, never read. */
 const OLD_TOKEN_KEY = 'tracker-token';
@@ -3764,14 +3764,15 @@ async function drawDocs(done = '', problem = '', section = 'files') {
 /**
  * The Topics page (SP-243): the topics of the project picked here (or on
  * the Projects page, else the first) and a Create Topic form, beside the
- * tags on the project's tasks (SP-307, read from its board; a board that
- * cannot be read says so in the Tags half and leaves Topics working). Picking
- * another project here selects it, as the Tasks page's picker does. A blank
- * name is refused on the page before anything is sent; after a create the
- * list is read again, and the page says it worked only when the new topic
- * is on it. `done` and `problem` are the line the last create left.
+ * project's tags and a Create Tag form (SP-307, SP-309; tags that cannot be
+ * read say so in the Tags half and leave Topics working). Picking another
+ * project here selects it, as the Tasks page's picker does. A blank name is
+ * refused on the page before anything is sent; after a create the list is
+ * read again, and the page says it worked only when the new topic or tag is
+ * on it. `done` and `problem` are the line the last create left, and
+ * `problemIn` which form it came from.
  */
-async function drawTopics(done = '', problem = '') {
+async function drawTopics(done = '', problem = '', problemIn = 'topic') {
   const { projects } = await api('GET', '/projects');
   setTitle('Topics · Tracker');
   putTrail([{ label: 'Topics' }]);
@@ -3781,14 +3782,15 @@ async function drawTopics(done = '', problem = '') {
   }
   const project = projects.find((p) => p.slug === savedProject()) ?? projects[0];
   const topicsPath = `/projects/${encodeURIComponent(project.slug)}/topics`;
+  const tagsPath = `/projects/${encodeURIComponent(project.slug)}/tags`;
   const [{ topics }, tags] = await Promise.all([
     api('GET', topicsPath),
-    api('GET', `/projects/${encodeURIComponent(project.slug)}/board`).then(projectTagCounts, (err) => { if (err instanceof SignedOut) throw err; return null; }),
+    api('GET', tagsPath).then((r) => (Array.isArray(r?.tags) ? r.tags : null), (err) => { if (err instanceof SignedOut) throw err; return null; }),
   ]);
-  main.innerHTML = renderTopics({ projects, project, topics, tags }, { timeOf: when, done, problem });
+  main.innerHTML = renderTopics({ projects, project, topics, tags }, { timeOf: when, done, problem, problemIn });
   const note = main.querySelector('.topic-note');
   const say = (text, failed = false) => { note.className = `note topic-note ${failed ? 'error' : 'quiet'}`; note.textContent = text; };
-  const again = (text, failed) => drawAgain(() => drawTopics(failed ? '' : text, failed ? text : ''))
+  const again = (text, failed, from = 'topic') => drawAgain(() => drawTopics(failed ? '' : text, failed ? text : '', from))
     .catch((err) => (err instanceof SignedOut ? drawSignIn() : showError(err)));
   main.querySelector('.project-picker select').addEventListener('change', (e) => {
     const chosen = projects.find((p) => p.slug === e.target.value);
@@ -3820,6 +3822,29 @@ async function drawTopics(done = '', problem = '') {
     const back = await api('GET', topicsPath, undefined, { unrecorded: true }).catch(() => null);
     const listed = back?.topics?.some((t) => t.id === made.id);
     again(listed ? `Created ${made.name} in ${project.name}.` : `The tracker said ${made.name} was created, but ${back ? 'it is not listed when read back' : 'the list could not be read back'}.`, !listed);
+  });
+  // SP-309: Add Tag, the same way: refused blank before sending, said to
+  // have worked only when the tag reads back on the list with 0 tasks.
+  const tagForm = main.querySelector('form.create-tag');
+  tagForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const name = tagForm.querySelector('#tag-name').value.trim();
+    const description = tagForm.querySelector('#tag-description').value.trim();
+    const button = tagForm.querySelector('button');
+    if (!name) return say('Not created: a tag needs a name.', true);
+    button.disabled = true;
+    say(`Creating ${name}…`);
+    let made;
+    try {
+      made = await api('POST', tagsPath, { name, description });
+    } catch (err) {
+      if (err instanceof SignedOut) return drawSignIn(`You were signed out; ${name} was not created.`);
+      button.disabled = false;
+      return say(`Not created: ${err.message}`, true);
+    }
+    const back = await api('GET', tagsPath, undefined, { unrecorded: true }).catch(() => null);
+    const listed = back?.tags?.some((t) => t.name === made.name && t.count === 0);
+    again(listed ? `Created the tag ${made.name} in ${project.name}.` : `The tracker said the tag ${made.name} was created, but ${back ? 'it is not listed when read back' : 'the list could not be read back'}.`, !listed, 'tag');
   });
 }
 

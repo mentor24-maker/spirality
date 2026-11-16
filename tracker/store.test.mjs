@@ -2001,6 +2001,60 @@ test('a deleted project takes its topics with it, so a project made later under 
   } finally { cleanup(); }
 });
 
+// ── A project's saved tags (SP-309) ─────────────────────────────────────────
+
+test("a project's tags are its saved tags and every tag on its tickets, each once, alphabetical with case aside, with how many tickets carry each", () => {
+  const { store, human, machine, cleanup } = fixture();
+  try {
+    store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE' });
+    assert.deepEqual(store.listTags('alpha'), [], 'none yet');
+    store.fileTicket({ project: 'alpha', actor: machine.id, name: 'One', status: 'queued', tags: ['tracker', 'Beta', 'tracker'] });
+    store.fileTicket({ project: 'alpha', actor: machine.id, name: 'Two', status: 'queued', tags: ['tracker'] });
+    store.fileTicket({ project: 'beta', actor: machine.id, name: 'Theirs', status: 'queued', tags: ['theirs'] });
+    const made = store.addTag({ project: 'alpha', name: '  design  ', description: ' Looks. ', actor: human.id });
+    assert.deepEqual(made, { name: 'design', description: 'Looks.', createdBy: human.id, createdByName: 'Operator', createdAt: made.createdAt, count: 0 });
+    const listed = store.listTags('alpha');
+    assert.deepEqual(listed.map((t) => [t.name, t.count]), [['Beta', 1], ['design', 0], ['tracker', 2]], 'a ticket listing a tag twice counts once');
+    assert.deepEqual(listed[1], made, 'a saved tag lists as addTag answered it');
+    assert.deepEqual(listed[0], { name: 'Beta', description: '', createdBy: null, createdByName: null, createdAt: null, count: 1 }, 'a tag only in use has no maker');
+    assert.deepEqual(store.listTags('beta').map((t) => t.name), ['theirs'], 'another project has its own list');
+    assert.deepEqual(store.listTags('nope'), []);
+    store.fileTicket({ project: 'alpha', actor: machine.id, name: 'Three', status: 'queued', tags: ['design'] });
+    assert.deepEqual(store.listTags('alpha').map((t) => [t.name, t.count, t.description]), [['Beta', 1, ''], ['design', 1, 'Looks.'], ['tracker', 2, '']], 'a saved tag in use is listed once, counted, keeping its description');
+  } finally { cleanup(); }
+});
+
+test('a tag with no name, too long a name or description, a name already listed in any case, on an unknown project or by an unknown actor is refused and nothing is kept', () => {
+  const { store, human, machine, cleanup } = fixture();
+  try {
+    store.fileTicket({ project: 'alpha', actor: machine.id, name: 'One', status: 'queued', tags: ['tracker'] });
+    const add = (over) => () => store.addTag({ project: 'alpha', name: 'design', description: '', actor: human.id, ...over });
+    for (const name of ['', '   ', undefined, null, 42]) assert.throws(add({ name }), { code: 'bad-name', message: 'a tag needs a name; nothing was saved.' }, String(name));
+    assert.throws(add({ name: 'x'.repeat(101) }), { code: 'bad-name' });
+    assert.throws(add({ description: 'x'.repeat(5001) }), { code: 'bad-description' });
+    assert.throws(add({ description: 42 }), { code: 'bad-description' });
+    assert.throws(add({ project: 'nope' }), { code: 'unknown-project' });
+    assert.throws(add({ actor: 999 }), { code: 'unknown-actor' });
+    assert.throws(add({ name: 'Tracker' }), { code: 'tag-exists', message: 'a tag named tracker already exists in Alpha; nothing was saved.' }, 'a tag in use, in another case');
+    assert.deepEqual(store.listTags('alpha').map((t) => t.name), ['tracker'], 'nothing was kept');
+    add()();
+    for (const name of ['design', 'Design', ' DESIGN ']) assert.throws(add({ name }), { code: 'tag-exists' }, name);
+    assert.deepEqual(store.listTags('alpha').map((t) => t.name), ['design', 'tracker']);
+    assert.equal(add({ name: 'x'.repeat(100), description: 'y'.repeat(5000) })().name.length, 100, 'exactly at the limits still goes in');
+  } finally { cleanup(); }
+});
+
+test('a deleted project takes its saved tags with it, so a project made later under the same slug starts with none', () => {
+  const { store, human, cleanup } = fixture();
+  try {
+    store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE' });
+    store.addTag({ project: 'beta', name: 'design', actor: human.id });
+    assert.deepEqual(store.deleteProject('beta'), { slug: 'beta', prefix: 'BE' });
+    store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE' });
+    assert.deepEqual(store.listTags('beta'), []);
+  } finally { cleanup(); }
+});
+
 // ── A ticket's topics (SP-247) ──────────────────────────────────────────────
 
 test("a ticket's topics change through changeTicket: one ticket carries two topics, one topic sits on two tickets, each change steps the version and writes one event", () => {
