@@ -1100,7 +1100,7 @@ test('the Settings page is in the header after Reporting and Users, lists the st
   assert.match(draw, /type="color"/);
   assert.match(draw, /chosen\[tr\.dataset\.status\] = null;/, 'Clear sets no colour');
   assert.match(draw, /await api\('PUT', '\/stage-colours', \{ colours: chosen \}\);\s*\/\/ Read back before saying it worked\.\s*const back = await api\('GET', '\/stage-colours'\);/);
-  assert.match(draw, /note\.textContent = `Not saved: \$\{err\.message\}`;/);
+  assert.match(draw, /showMessage\(\{ kind: 'error', text: `Not saved: \$\{err\.message\}` \}\);/, 'a refused Save is said in the message strip (SP-323)');
   assert.match(draw, /escapeHtml\(s\.status\)/);
   assert.match(app, /markNav\(reporting \? 'reporting' : settings \? 'settings' :/);
   const f = await fixture();
@@ -5657,7 +5657,7 @@ test('the Tags half lists each tag on the project\'s tasks once, alphabetically,
   assert.doesNotMatch(half, /<b>/, 'nothing unescaped');
   assert.ok(half.indexOf('data-tag="alpha"') < half.indexOf('data-tag="Beta"') && half.indexOf('data-tag="Beta"') < half.indexOf('data-tag="zeta"'), 'alphabetical');
   assert.match(renderTopics({ projects, project: projects[0], topics: [], tags: [] }, { timeOf: String }), /<p class="quiet no-tags">No tags yet\.<\/p>/);
-  assert.match(renderTopics({ projects, project: projects[0], topics: [], tags: null }, { timeOf: String }), /<p class="error no-tags">The tags could not be read\./, 'an unread board says so, never "No tags yet"');
+  assert.match(renderTopics({ projects, project: projects[0], topics: [], tags: null }, { timeOf: String }), /<p class="note error no-tags">The tags could not be read\./, 'an unread board says so, never "No tags yet"');
 });
 
 test('the Topics page reads the project\'s board for its tags, and an unread board leaves the topics working (SP-307)', () => {

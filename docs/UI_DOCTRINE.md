@@ -156,8 +156,8 @@ counterpart, so they have tokens of their own, in a separate group at the end of
 Add Task box (`--brand-blue`, `--brand-blue-tint`), the light-blue pods and
 their navy (`--pod-*`, `--navy`, `--navy-soft`), link blue (`--link-ink`),
 error red (`--ink-error`, StarCaster's `--btn-danger-flat`), the message strip's
-three colours and its white text (`--message-success`, `--message-error`,
-`--message-info`, `--message-ink`, section 7), shadows and the
+three colours (`--message-success`, `--message-error`, `--message-info`,
+section 7; its white text is `--btn-text`), shadows and the
 dialog backdrop, the Console's feature colours (`--feature-0` to `--feature-9`),
 small corners for tag chips and icon buttons (`--radius-sm` 4px) and round ones
 (`--radius-pill`), and code text (`--text-code`, 0.9em of the text around it).
@@ -293,16 +293,21 @@ C9, tabs): the Board / List / Console switch and the Settings tabs.
   information close after four seconds, and the page scrolls the strip into
   view. Padding 8px 16px, `--text-sm`, weight 500, white text on success
   `#38a169`, error `#e53e3e`, information `#1a73e8`.
-  On the tracker the strip is `div#messages`, right after the header. A
-  button still writes its outcome into the small `.note` beside it, which is
-  not shown; `tracker/web/app.mjs` watches every note and puts the newest in
-  the strip (`messageOf` in `render.mjs` tells error, information "Saving…"
-  and success apart). A setup field's own note stays beside its box, and a
-  page that cannot be drawn at all says so in place of the page.
+  On the tracker the strip is `div#messages`, right after the header, and a
+  button reports there by calling `showMessage` in `tracker/web/app.mjs`
+  with its kind (`success`, `error` or `info`) and words; it is never fed by
+  copying a note. Opening another page empties it; the page reading itself
+  again every half minute does not. The Settings page's Stage Colours Save is
+  the first to use it (SP-323). The other pages still write a note beside
+  their buttons and move onto the strip a ticket at a time;
+  `tracker/messages.test.mjs` counts those notes and fails on a new one. A
+  setup field's own note stays beside its box, and a page that cannot be
+  drawn at all says so in place of the page.
 - **After a Save**, the page scrolls to the top and a small card says it
   saved, then fades by itself after three seconds, with nothing to close
   (MODULE_UI_DOCTRINE §2, Feedback, 2026-11-04). On the tracker it takes the strip's
-  place, so there is still one message at a time.
+  place, so there is still one message at a time; a Save asks for it with
+  `showMessage(…, { afterSave: true })`.
 - **An error says what happened and what to do, in terms of the thing the
   reader touches, and names the specific thing**; a message that cannot tell
   the cause says what happened and stops ([DOCTRINE.md](DOCTRINE.md) §2.1 to
@@ -400,7 +405,7 @@ Measured 2026-11-15 on `tracker/web/app.css`, `app.mjs` and `render.mjs`.
 | 4 Title row | Followed and checked (SP-322, 2026-11-15): a 24px, weight 800 `<h1>` on every page, and every toolbar in the title row at its right, the trail above it; headings under it at `--text-lg` (h2) and `--text-base` (h3 to h6), with board columns and Console stages at `--text-base`. The ticket page keeps its two-column top, whose actions sit in the right column. | SP-322 |
 | 5 Tabs | Followed and checked (SP-322, 2026-11-15): Board / List / Console and the Settings tabs are one tab bar (`nav.tabs`), links with `aria-current`. | SP-322 |
 | 6 Forms | Every label above its box; boxes full width; tag boxes use the text inside the box as the instruction. | SP-325 |
-| 7 Messages | Followed and checked (SP-323, 2026-11-16): one strip under the header for every button's outcome, errors until closed, others for four seconds; the card after a Save; an empty board column and a ticket with no tags say so in words. | SP-323 |
+| 7 Messages | The strip and the card after a Save are built and checked (SP-323, 2026-11-16): one strip under the header, errors until closed, others for four seconds. Only the Settings page's Stage Colours Save uses it so far; every other button still writes a note beside itself, and the check stops new ones. An empty board column says what it would hold. | SP-323 |
 | 8 Tables | Grey or bold headings; no fixed heading row. Names, ids, actions and sideways scroll: followed. | SP-324 |
 | 9 Dialogs | Fixed caps (`max-width: 28rem`, `95vw`). | SP-324 |
 | 10 Small rules | Followed; icon strokes are 1 and checked (SP-320). | SP-320 |
