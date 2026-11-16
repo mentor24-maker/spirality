@@ -97,6 +97,11 @@ export function seedDemo(store, { operatorName = substrateConfig.operatorName(),
   say(answered, loop.id, 'REVIEW: PASSED. Ready for your merge word.');
   say(answered, op.id, 'merge');
 
+  // SP-349: two open pull requests on Alpha that change the same file, so
+  // each ticket page shows "Changes the same files as ...".
+  store.recordPrFiles({ project: 'alpha', number: 7, ticket: answered, repo: 'example/repo', head: '7'.repeat(40), files: ['lib/relayLane.js', 'scripts/clickup.mjs'], actor: loop.id });
+  store.recordPrFiles({ project: 'alpha', number: 8, ticket: asked, repo: 'example/repo', head: '8'.repeat(40), files: ['docs/TRACKER_MVP.md', 'lib/relayLane.js'], actor: loop.id });
+
   file('alpha', 'The board is missing: draw the seven columns', 'queued', { description: 'Later.' }, 'machine');
 
   // One of each machine status, and Live, for the board. Queued holds three
