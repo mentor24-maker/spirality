@@ -79,6 +79,10 @@
   --header-alert: #ff453a;
   --header-bus-bg: #ff9f0a;
   --link-ink: #0066cc;
+  /* The message strip (UI_DOCTRINE 7, SP-323): StarCaster's S9 colours, with white text (--btn-text) on each. */
+  --message-success: #38a169;
+  --message-error: #e53e3e;
+  --message-info: #1a73e8;
   --table-head-bg: #000000;
   --table-head-ink: #ffffff;
   --table-filter-bg: #b8e0ff;
@@ -140,6 +144,17 @@ header #bell[data-colour="yellow"] { color: var(--header-warn); }
 header #bell[data-colour="red"] { color: var(--header-alert); }
 /* One body width on every page (SP-184): 1440px to the column's outer edge, padding included, centred. */
 main { box-sizing: border-box; max-width: 1440px; margin: 0 auto; padding: 1.5rem 2rem 4rem; }
+/* One message strip between the header and the page, in normal flow (UI_DOCTRINE 7, SP-323). */
+.messages[hidden] { display: none; }
+.message { display: flex; gap: var(--space-5); align-items: center; justify-content: space-between; margin: 0; padding: 8px 16px; font-size: var(--text-sm); font-weight: 500; line-height: var(--leading-normal); color: var(--btn-text); overflow-wrap: anywhere; }
+.message-success { background: var(--message-success); }
+.message-error { background: var(--message-error); }
+.message-info { background: var(--message-info); }
+.message-close { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; background: transparent; color: var(--btn-text); border: 1px solid var(--btn-text); border-radius: var(--radius-sm); font-size: var(--text-md); line-height: 1; cursor: pointer; }
+.message-close:focus-visible { outline: 2px solid var(--btn-text); outline-offset: 2px; }
+/* After a Save: a small card at the top that fades by itself (UI_DOCTRINE 7). */
+.saved-card { display: flex; gap: var(--space-3); align-items: center; width: fit-content; margin: var(--space-4) auto 0; padding: var(--space-3) var(--space-5); background: var(--bg-surface); color: var(--status-ok-ink); border: 1px solid var(--status-ok); border-radius: var(--radius-input); box-shadow: var(--shadow-card); font-size: var(--text-sm); font-weight: 600; animation: saved-card-fade 3s ease-in forwards; }
+@keyframes saved-card-fade { 0%, 70% { opacity: 1; } 100% { opacity: 0; } }
 a { color: var(--link-ink); }
 /* The title row and the headings under it (UI_DOCTRINE 4, SP-322): one 24px title, buttons at its right, the trail above it. */
 h1 { font-size: var(--page-title-size); font-weight: 800; line-height: var(--leading-tight); margin: 0 0 var(--space-5); }
