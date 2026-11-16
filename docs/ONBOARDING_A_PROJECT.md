@@ -48,8 +48,9 @@ order: the read-only look, the start (only for an empty repository: its
 first commit, see section 1), the clone (the project's `main` into its
 checkout folder, only when that folder does not exist yet), the settings file, the sign-ins (**real secret values**: it shows
 the commands and asks `Run these now? [y/N]`; on Dane's y it runs them in his
-Terminal, on anything else it prints them and stops), the bus (below), the copy into the project's repository as
-one pull request, the lanes and the setup ticket, the merge (Dane's merge
+Terminal, on anything else it prints them and stops), the bus (below), the setup
+pull request in the project's repository (its settings file and its `verify`
+gate, nothing of the loop's: SP-273), the lanes and the setup ticket, the merge (Dane's merge
 phrase on that ticket: **a decision**) and protecting `main`. Each step
 checks first whether it is already done, so a rerun after a failed step
 picks up there and asks nothing twice. A failed step prints
@@ -99,17 +100,14 @@ echo "the heartbeat stopped at 09:10" | npm run clickup -- bus-post --body-file 
 
 ### The pipeline watchdogs (SP-269)
 
-The copy gives every project the pipeline watchdogs, so a lane that stops
-or a ticket that sticks is said on its bus
-([WATCHDOGS.md](WATCHDOGS.md)): the heartbeat, stale ready, stale answer,
-throughput, checkout currency and the failed-pass report, with the modules
-they use under `loop/lib/` and their npm commands (`heartbeat`,
-`stale-ready`, `stale-answer`, `throughput`, `checkout:current`,
-`report:failure`). The scripts keep Spirality's paths, because the
-project's `run_relay.sh` and `loop_runner.sh` look for them there; only
-their `lib/` imports change, to `loop/lib/`. `scripts/onboard/manifest.test.mjs`
-checks each one is listed and copied byte for byte or with only those
-edits.
+Every project gets the pipeline watchdogs, so a lane that stops or a ticket
+that sticks is said on its bus ([WATCHDOGS.md](WATCHDOGS.md)): the
+heartbeat, stale ready, stale answer, throughput, checkout currency and the
+failed-pass report. Since SP-273 none of them is copied into the project:
+its relay and lane runner are Spirality's, run from Spirality's folder, and
+run Spirality's own watchdogs for it (`SPIRALITY_PROJECT` names the
+project's checkout). `scripts/onboard/manifest.test.mjs` checks that the
+setup copies none of them.
 
 They post only to a bus. The look says where: `Bus: where the pipeline
 watchdogs post: ready (<slug>-bus, ...)`, or, with no bus, that they have
@@ -268,15 +266,19 @@ the pull request lists each one under "Tests kept, fixed by hand", with what
 failed. The list is kept beside the setup folder
 (`<slug>-setup-hand-fix.json`).
 
-The copy step then always runs with `--allow-replace`, since the setup
-replaces the old copy's files, and its pull request lists every file of
-the old copy it replaces, and every other file in the folders it writes
-into, which it does not touch (nothing is deleted; the list is for the
-reviewer, not a to-do list). The old copy's own `clickup` and `doctor` npm
-commands are replaced with the loop's too, and the pull request names what
-each one was, so one still wanted can be put back under another name before
-merging (SP-172; the project's own `verify` is always kept). The lanes step installs the new lanes, under the same
-launchd labels the old ones had.
+The copy step then always runs with `--allow-replace`, and its pull
+request lists every file of the project's it replaces (since SP-273 only
+the made files: `CLAUDE.md`, `package.json`, `.gitignore`, the settings
+file), and every other file in the folders it writes into, which it does
+not touch (nothing is deleted; the list is for the reviewer, not a to-do
+list). The old copy itself (`loop/`, its `scripts/`, its `.claude/` skills
+and hooks) stays where it is until the project's own queue removes it
+(move 6 in [INTEGRATION.md](INTEGRATION.md)); the setup adds no npm
+command, so the old copy's `clickup` and `doctor` are left as they were
+(the project's own `verify` is always kept). The lanes step installs the new
+lanes with Spirality's installer (`--project <checkout>`), under the same
+launchd labels the old ones had; the old lanes are already stopped by then,
+and the installer refuses, naming them, if any is still installed.
 
 The checklist below stays as what the wizard does, item by item, and how
 to check each one by hand.
@@ -285,14 +287,17 @@ to check each one by hand.
 
 The items below marked **missing**, gathered here so they can become tickets:
 
-1. **The loop is still copied into the project.** Today a project carries
-   its own copy of `scripts/`, `lib/` and `.claude/` (item 6), as WaveCenter,
-   StarCaster and Normie do. Dane chose the copy on 2026-11-08, planning
-   SP-23 and SP-25: *"a wizard copy now is fine for now."* Where it ends up
-   is no longer a pinned package: on 2026-11-12 Dane decided loop code lives
-   only in Spirality, its lanes run against the project from Spirality's own
-   folder, and nothing is copied in ([INTEGRATION.md](INTEGRATION.md),
-   SP-261). Until those moves land, the wizard copy stays.
+1. **The loop was copied into the project.** Closed for a new project by
+   SP-273. Dane chose the copy on 2026-11-08, planning SP-23 and SP-25:
+   *"a wizard copy now is fine for now,"* and on 2026-11-12 decided loop
+   code lives only in Spirality, its lanes run against the project from
+   Spirality's own folder, and nothing is copied in
+   ([INTEGRATION.md](INTEGRATION.md), SP-261). The setup now writes only
+   the project's settings file and `verify` gate (with the `.gitignore` line
+   and `CLAUDE.md` sections its lanes need), and installs its lanes with
+   Spirality's installer. WaveCenter, StarCaster and Normie still carry the
+   copy they were given (`scripts/`, `lib/`, `loop/`, `.claude/`); removing
+   it is a ticket in each one's own queue (move 6).
 2. **Some of the copied code still said "spirality".** Both halves are
    fixed. SP-96 fixed the Doppler half: the npm scripts run `doppler run`
    through `scripts/with_doppler.mjs`, and `npm run doctor` checks, all with
@@ -572,22 +577,26 @@ post rules are in [PROJECT_MANIFEST.md](PROJECT_MANIFEST.md) and
   launchd job (the Mac's own service manager: it starts a job at login,
   restarts it if it stops, and survives a reboot).
 - **Where.** `~/Library/LaunchAgents/<launchdPrefix>.<job>.plist` on the
-  Mini, made by `scripts/install_loop_runner.sh` from the project's own main
-  checkout. The runners are `scripts/loop_runner.sh` and
-  `scripts/run_relay.sh`. Logs are `<logDir>/<projectSlug>-<job>.log`. The
+  Mini, made by Spirality's `scripts/install_loop_runner.sh --project
+  <checkout>` (the setup's lanes step runs it, SP-273). The runners are
+  Spirality's `scripts/loop_runner.sh` and `scripts/run_relay.sh`, started
+  in the project's main checkout. Logs are `<logDir>/<projectSlug>-<job>.log`. The
   labels and the log folder come from the config, so Normie's jobs
   (`com.normie.loop-build`, say) can sit beside Spirality's.
 - **Who.** An agent session on the Mini, from the project's main checkout on
   a clean `main`. Signing Claude in on the Mini (`claude login`), if it is
   not, is Dane's (**a browser login**).
-- **Check.** `./scripts/install_loop_runner.sh --status` shows every job
-  `loaded: yes`, and after the first pass each log has a `START` line.
+- **Check.** In Spirality's folder,
+  `./scripts/install_loop_runner.sh --status --project <checkout>` shows
+  every job `loaded: yes`, and after the first pass each log has a `START`
+  line. (A project still on its own copy: the same command without
+  `--project`, in its checkout.)
 - **Today.** **Automated** (the installer). Since SP-97 the runners name
   every log, lock and restart label from the config too, so a second
   project's runners keep to their own files (`normie-loop-build.log`,
   `normie-sync.lock`). Never rerun the full installer from a loop session:
   it reloads the lane that session runs in.
-- **Coming: run from Spirality's folder (SP-271).** The installer in
+- **Run from Spirality's folder (SP-271; the setup's way since SP-273).** The installer in
   Spirality's own folder now takes the project's checkout:
   `./scripts/install_loop_runner.sh --status --project ~/WebApps/<project>`
   lists that project's jobs and, on each one's `runs:` line, whether it runs
@@ -607,28 +616,23 @@ post rules are in [PROJECT_MANIFEST.md](PROJECT_MANIFEST.md) and
 - **What.** What a Claude session in the project's repository reads and is
   held to: the four loop skills, the hook that stops edits on `main`, and the
   rules file.
-- **Where.** In the project's repository, today as copies of Spirality's:
-  - `.claude/skills/loop-build/`, `loop-review/`, `loop-intake/` and
-    `loop-spec/` (each a `SKILL.md`).
-  - `.claude/settings.json`, which wires the PreToolUse hook
-    `scripts/hooks/block_edits_on_main.cjs`. The setup merges it into the
-    project's own (SP-254): every hook and permission of the project's is
-    kept, the loop's are added, each once, and the written file is read back.
+- **Where.** The skills, the hooks and the door stay in Spirality's
+  folder. A lane's pass is handed Spirality's `plugin/` folder (the skills,
+  and the no-edits-on-main and door hooks, SP-272), and its
+  `npm run clickup` reaches Spirality's door. In the project's repository
+  there is only:
   - `CLAUDE.md` (the rules for every session, including "How to work with
-    Dane" and where the project's tickets live) and
-    `docs/LOOP_ENGINEERING.md`.
-  - The door and the tools they call: `scripts/clickup.mjs`,
-    `scripts/with_doppler.mjs`, `scripts/tracker/`, `scripts/lib/`, `lib/`,
-    and the `clickup`, `verify` and `doctor` scripts in `package.json`.
-- **Who.** An agent session copies them and adjusts the project's wording.
-  What the rules say about the project (what it is, who its users are) is
-  Dane's decision.
-- **Check.** In a session started in the project's repository, an edit on
-  `main` is refused ("Checking branch (no edits on main)"), and
-  `npm run clickup -- queue --claimable` answers.
-- **Today.** **Manual** (copied by hand). **Missing**: Spirality supplying
-  the skills, hooks and door to each lane's session from its own folder, so
-  none of it lives in the project and a fix reaches every project without a
-  re-copy (gap 1, [INTEGRATION.md](INTEGRATION.md)). The project's
-  `CLAUDE.md` and doctrine stay in the project: they are its rules for
-  agents.
+    Dane" and where the project's tickets live), with the setup's sections
+    appended once.
+  - `spirality.project.json`, and the `verify` script in `package.json`
+    (the project's own, or its check command when it has none).
+- **Who.** The setup writes them. What the rules say about the project
+  (what it is, who its users are) is Dane's decision.
+- **Check.** `scripts/dry_project_pass.sh` in Spirality's folder: a pass
+  for a project with no `.claude/` folder finds its skill and is refused an
+  edit on `main`.
+- **Today.** **Automated** for a new project (SP-273): nothing of the loop
+  is copied in, so a fix reaches every project without a re-copy. A project
+  set up before then still carries its copy until its own queue removes it
+  (gap 1). The project's `CLAUDE.md` and doctrine stay in the project: they
+  are its rules for agents.

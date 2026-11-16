@@ -20,7 +20,13 @@
  *                reused, never a second); the PR body gets its `Ticket:` line;
  *                `pr-opened` records the PR; the ticket goes to In review.
  *                All before any lane exists, so no lane sees it half-filed.
- *   3. install   the project's own scripts/install_loop_runner.sh.
+ *   3. install   Spirality's own scripts/install_loop_runner.sh, with
+ *                --project <checkout> (SP-271): the project's lanes run
+ *                Spirality's runner from Spirality's folder, working in the
+ *                project's checkout. The project holds no installer (SP-273).
+ *                A project whose own copy of the lanes is still installed is
+ *                refused by the installer (switching it over is Dane's step,
+ *                --take-over), and this step fails saying so.
  *   4. lanes     `--status` shows every lane loaded, and each lane's first
  *                pass did its lane's work rather than stand down
  *                (lib/onboardLanes.mjs, hold-up 14). On a rerun with every
@@ -33,17 +39,23 @@
  * Every project value comes from the project's settings file on the setup
  * branch (rule 2). Every write is read back (rule 5). A failed step prints
  * `FAILED: <step>: <what was seen>` and the rerun command, and nothing after
- * it runs (rule 6). Ticket writes go through the project's own door, so
- * Doppler supplies its token and none is ever printed (rule 4).
+ * it runs (rule 6). Doppler supplies the token and none is ever printed
+ * (rule 4).
+ *
+ * Ticket writes go through Spirality's door, run from Spirality's folder
+ * with SPIRALITY_PROJECT naming the checkout (SP-270), so it reads the
+ * project's settings file and Doppler project: the project has no door of
+ * its own (SP-273).
  */
 import { spawnSync } from 'node:child_process';
 import { existsSync, statSync, readFileSync, writeFileSync, mkdtempSync, rmSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { loadProjectConfig, CONFIG_FILE } from '../../lib/projectConfig.mjs';
 import { expandHome } from '../../lib/onboardAnswers.mjs';
-import { LANES, parseStatus, readPasses, judgeFirstPass, rerunSince, ticketsNamed, waitMinutesFrom, setupTicketBody, withLine } from '../../lib/onboardLanes.mjs';
+import { LANES, spiralityInstallerPath, installerCommand, parseStatus, readPasses, judgeFirstPass, rerunSince, ticketsNamed, waitMinutesFrom, setupTicketBody, withLine } from '../../lib/onboardLanes.mjs';
 
 const require = createRequire(import.meta.url);
 const { findTicketId, ticketLine } = require('../../lib/clickupTicketLink.js');
@@ -74,13 +86,15 @@ function fail(step, seen) {
 }
 const say = (step, line) => console.log(`${step.padEnd(8)} ${line}`);
 
-function run(cmd, args, { cwd = checkout, input } = {}) {
-  const r = spawnSync(cmd, args, { cwd, encoding: 'utf8', input });
+function run(cmd, args, { cwd = checkout, input, env } = {}) {
+  const r = spawnSync(cmd, args, { cwd, encoding: 'utf8', input, env });
   return { ok: r.status === 0, code: r.status, out: String(r.stdout || '').trim(), err: String(r.stderr || r.error || '').trim() };
 }
 const git = (...args) => run('git', args);
-// The project's own door, from its checkout: its config, its Doppler project, its hand-run seat.
-const door = (...args) => run('npm', ['run', '--silent', 'clickup', '--', ...args]);
+// Spirality's folder: this script's, two up. Its installer and door act for the project.
+const SPIRALITY = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+// Spirality's door, for the checkout: its config, its Doppler project, its hand-run seat (SP-270).
+const door = (...args) => run('npm', ['run', '--silent', 'clickup', '--', ...args], { cwd: SPIRALITY, env: { ...process.env, SPIRALITY_PROJECT: checkout } });
 const last = (text, n = 6) => String(text || '').split('\n').filter(Boolean).slice(-n).join(' | ');
 
 const pr = /^https:\/\/github\.com\/([^/\s]+\/[^/\s]+)\/pull\/(\d+)\/?$/.exec(prArg.trim());
@@ -153,8 +167,8 @@ let ticket = findTicketId(prNow.body, linkOpts);
 // already filed, under the PR's exact name. Find it rather than file a second.
 let existing = [];
 if (!ticket && dryRun && onBranch !== branch) {
-  // The checkout is still on the project's own main, which has no ticket door yet.
-  say('ticket', `would look in ${config.projectSlug}'s project for a ticket already named "${prNow.title}" (the door is on ${branch}, not checked out in a dry run)`);
+  // The checkout is still on the project's own main, which has no settings file for the door to read yet.
+  say('ticket', `would look in ${config.projectSlug}'s project for a ticket already named "${prNow.title}" (the settings file is on ${branch}, not checked out in a dry run)`);
 } else if (!ticket) {
   const listed = door('queue');
   if (!listed.ok) fail('ticket', `could not list ${config.projectSlug}'s tickets to look for one already filed: ${last(listed.err || listed.out)}`);
@@ -177,7 +191,7 @@ if (ticket) {
       const askedFile = arg('asked-file') ? expandHome(arg('asked-file')) : null;
       if (askedFile && !existsSync(askedFile)) fail('ticket', `--asked-file ${askedFile} does not exist`);
       const asked = askedFile ? readFileSync(askedFile, 'utf8') : '';
-      writeFileSync(join(scratch, 'body.md'), setupTicketBody({ projectSlug: config.projectSlug, githubRepo: config.githubRepo, prUrl, branch, asked }));
+      writeFileSync(join(scratch, 'body.md'), setupTicketBody({ projectSlug: config.projectSlug, githubRepo: config.githubRepo, prUrl, branch, asked, spiralityDir: SPIRALITY, checkout }));
       // Filed straight into In review: no lane is installed yet (that is the
       // next step), so nothing can take it half-filed, and it is never moved
       // again by this script. A rerun finds it in whatever status a lane has
@@ -209,33 +223,34 @@ if (!dryRun) {
 }
 
 // ── 3. install ─────────────────────────────────────────────────────────────
-const installer = join(checkout, 'scripts', 'install_loop_runner.sh');
+const installer = spiralityInstallerPath(SPIRALITY);
+if (!existsSync(installer)) fail('install', `Spirality's installer ${installer} is not there`);
 if (dryRun && onBranch !== branch) {
-  // The installer to run is the branch's, and the checkout is not on it yet.
-  if (!git('cat-file', '-e', `origin/${branch}:scripts/install_loop_runner.sh`).ok) fail('install', `${branch} has no scripts/install_loop_runner.sh`);
-  say('install', `would run ${branch}'s scripts/install_loop_runner.sh, then read back --status and each lane's first pass`);
+  // The installer reads the checkout's settings file, which is on the branch, not checked out yet.
+  say('install', `would run Spirality's installer ${installerCommand(SPIRALITY, checkout).join(' ')}, then read back --status and each lane's first pass`);
   console.log('\nDry run done: nothing was changed.');
   process.exit(0);
 }
-if (!existsSync(installer)) fail('install', `${branch} has no scripts/install_loop_runner.sh`);
 const statusNow = () => {
-  const s = run('bash', [installer, '--status']);
+  const s = run('bash', installerCommand(SPIRALITY, checkout, '--status'), { cwd: SPIRALITY });
   return { text: s.out, jobs: parseStatus(s.out) };
 };
 const notLoaded = (jobs) => LANES.filter((l) => !jobs[l]?.installed || !jobs[l]?.loaded);
 const installedAt = new Date();
 const before = notLoaded(statusNow().jobs);
 if (dryRun) {
-  say('install', before.length ? `would install the lanes (not loaded now: ${before.join(', ')})` : 'every lane is already loaded; would leave them');
+  say('install', before.length
+    ? `would install the lanes with Spirality's installer ${installerCommand(SPIRALITY, checkout).join(' ')} (not loaded now: ${before.join(', ')})`
+    : 'every lane is already loaded; would leave them');
   console.log('\nDry run done: nothing was changed.');
   process.exit(0);
 }
 if (!before.length) {
   say('install', 'every lane is already installed and loaded; not reinstalling (judging each lane\'s newest pass instead)');
 } else {
-  const inst = run('bash', [installer]);
-  if (!inst.ok) fail('install', `install_loop_runner.sh exit ${inst.code}: ${last(inst.err || inst.out)}`);
-  say('install', 'install_loop_runner.sh finished');
+  const inst = run('bash', installerCommand(SPIRALITY, checkout), { cwd: SPIRALITY });
+  if (!inst.ok) fail('install', `Spirality's install_loop_runner.sh --project ${checkout} exit ${inst.code}: ${last(inst.err || inst.out)}`);
+  say('install', `Spirality's install_loop_runner.sh --project ${checkout} finished`);
 }
 
 // ── 4. lanes ───────────────────────────────────────────────────────────────
@@ -269,5 +284,5 @@ for (;;) {
   await new Promise((r) => setTimeout(r, 15000));
 }
 
-console.log(`\nDone: ${config.projectSlug}'s lanes are running from ${branch}, and ${ticket} is In review in its project.`);
+console.log(`\nDone: ${config.projectSlug}'s lanes are running from Spirality's folder, working in ${checkout} on ${branch}, and ${ticket} is In review in its project.`);
 console.log(`Its review lane reviews PR #${prNumber} and asks Dane to merge it; its relay merges it on his merge phrase.`);

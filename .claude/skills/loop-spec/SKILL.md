@@ -14,7 +14,9 @@ about: >
 # Loop: Spec
 
 Step 1 of 3 in the Spirality development loop (spec → build → review).
-See `docs/LOOP_ENGINEERING.md` for the whole system.
+See Spirality's `docs/LOOP_ENGINEERING.md` (in Spirality's folder, three folders
+up from this skill's base directory, not in a project's checkout)
+for the whole system.
 
 Your job: interview Dane about an idea, then break it into a queue of small
 tasks that the `loop-build` skill can build one pull request at a time. You do
