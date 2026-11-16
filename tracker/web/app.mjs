@@ -26,7 +26,7 @@
  * an emailed link's own page. The link's token is sent only in a JSON body,
  * never in an address.
  */
-import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, renderMarkdown, unwrapDoc, renderCloseAction, renderGoAction, goQuestion, renderMergeAction, renderAnswerIn, renderHeldUp, renderReplyForm, statusLabel, ANSWER_IN_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, lookupTicket, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, pipelinePodLabel, renderHealth, healthLines, renderCommandList, renderCommandView, renderCommandDetails, renderContextDocs, renderSortHeadings, renderListPriority, sortTickets, nextSort, renderDocumentation, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, lowerMeridiem, renderPipelineControls } from './render.mjs';
+import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, loopHasIt, renderCommentForm, MOVED_MESSAGE, renderMarkdown, unwrapDoc, renderCloseAction, renderGoAction, goQuestion, renderBugReportActions, approveQuestion, rejectQuestion, changeProblem, REJECT_COMMENT, WONT_DO_TAG, renderMergeAction, renderAnswerIn, renderHeldUp, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, lookupTicket, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, pipelinePodLabel, renderHealth, healthLines, renderCommandList, renderCommandView, renderCommandDetails, renderContextDocs, renderTopics, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, renderListTopics, projectTags, projectTagCounts, sortTickets, nextSort, renderDocumentation, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, lowerMeridiem, renderPipelineControls, renderConsole, drainLine, renderTitleChoices, titleModeOf, SUGGEST_POLL_MS, moveSuggestion, suggestState, filingPlan, orderPlan, andList, suggestRunLine, renderSuggestRows, renderSuggestionInfo } from './render.mjs';
 
 /** Where an earlier version of the page kept a pasted token; removed on load, never read. */
 const OLD_TOKEN_KEY = 'tracker-token';
@@ -38,6 +38,12 @@ const PROJECT_KEY = 'tracker-project';
 const PROJECT_NAME_KEY = 'tracker-project-name';
 /** The Add Task box's text while it is being typed, so a sign-out or a reload does not lose it. */
 const DRAFT_KEY = 'tracker-request-draft';
+/** The Add Task box's title toggle, Suggest a Title or Write My Own Title, kept beside the draft; it outlives a filing. */
+const TITLE_MODE_KEY = 'tracker-request-title-mode';
+/** The Suggest Next Tasks box's order, ticks and filed tickets, per project (SP-251), so a redraw or a retry keeps them. */
+const SUGGEST_STATE_KEY = 'tracker-suggest-next';
+/** The Add Task bar's Suggest checkbox (SP-303): '1' shows Suggest Next Tasks in the box, anything else the Add Task form. */
+const SUGGEST_SWITCH_KEY = 'tracker-add-task-suggest';
 const main = document.getElementById('main');
 const who = document.getElementById('who');
 const headerProject = document.getElementById('project');
@@ -514,14 +520,14 @@ const ICONS = Object.freeze({
 function action(href, label, icon, offSite = false) {
   const target = offSite ? ' target="_blank" rel="noopener noreferrer"' : '';
   return `<a class="action" href="${escapeHtml(href)}" title="${label}" aria-label="${label}"${target}>`
-    + `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icon}</svg></a>`;
+    + `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icon}</svg></a>`;
 }
 
 /** The same icon as a button, for an action that writes rather than goes somewhere. `data` is its own data-* attributes. */
 function actionButton(label, icon, data) {
   const attrs = Object.entries(data).map(([k, v]) => ` data-${k}="${escapeHtml(v)}"`).join('');
   return `<button type="button" class="action" title="${label}" aria-label="${label}"${attrs}>`
-    + `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icon}</svg></button>`;
+    + `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icon}</svg></button>`;
 }
 
 /**
@@ -533,9 +539,11 @@ function actionButton(label, icon, data) {
  */
 function statusIcon(t) {
   const at = `/t/${encodeURIComponent(t.id)}`;
-  if (t.answerIn) {
-    return `<span class="action status-icon answer-in-icon" role="img" title="Your Answer Is In" aria-label="Your Answer Is In">`
-      + `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS.answerIn}</svg></span>`;
+  if (t.answerIn || t.mergeStands) {
+    // SP-285: a merge word that still stands is his answer too, the same check.
+    const said = !t.answerIn && t.mergeStands ? 'Your Merge Word Stands' : 'Your Answer Is In';
+    return `<span class="action status-icon answer-in-icon" role="img" title="${said}" aria-label="${said}">`
+      + `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS.answerIn}</svg></span>`;
   }
   if (t.waiting) return action(`${at}#reply`, 'Waiting on Your Response', ICONS.waiting);
   return '<span class="action status-icon empty" aria-hidden="true"></span>';
@@ -562,9 +570,21 @@ const repoOf = (p) => (isRepo(p.repo)
   ? `<a href="https://github.com/${escapeHtml(p.repo)}" target="_blank" rel="noopener noreferrer">${escapeHtml(p.repo)}</a>`
   : '<span class="quiet">none</span>');
 
-/** The remembered view; a browser that will not keep it answers "list". */
+/** The remembered project view, Board or List; a browser that will not keep it (or that last chose the Console) answers "list". */
 function savedView() {
   try { return localStorage.getItem(VIEW_KEY) === 'board' ? 'board' : 'list'; } catch { return 'list'; }
+}
+
+/** The Tasks view "Tasks" in the header reopens: "console" when the Console was chosen last (SP-233), else savedView(). */
+function savedTasksView() {
+  try { if (localStorage.getItem(VIEW_KEY) === 'console') return 'console'; } catch { /* nothing remembered */ }
+  return savedView();
+}
+
+/** The Tasks page's view switch: Board and List for project `slug`, then the Console (every project), `current` marked. */
+function viewSwitch(slug, current) {
+  const views = [['board', 'Board', `/board/${encodeURIComponent(slug)}`], ['list', 'List', `/list/${encodeURIComponent(slug)}`], ['console', 'Console', '/console']];
+  return `<nav class="views" aria-label="View">${views.map(([v, label, href]) => `<a href="${href}"${v === current ? ' class="current" aria-current="page"' : ''}>${label}</a>`).join('')}</nav>`;
 }
 
 /** The selected project's slug, or null when none is remembered. */
@@ -1133,6 +1153,10 @@ async function drawSetup(slug) {
  * none selected, or one that no longer exists, the first project.
  */
 async function drawTasks(view, opts = {}) {
+  if (view === 'console') {
+    history.replaceState(null, '', '/console');
+    return drawConsole();
+  }
   const { projects } = await api('GET', '/projects');
   if (!projects.length) {
     setTitle('Tasks · Tracker');
@@ -1143,6 +1167,72 @@ async function drawTasks(view, opts = {}) {
   const slug = projects.some((p) => p.slug === savedProject()) ? savedProject() : projects[0].slug;
   history.replaceState(null, '', `/${view}/${encodeURIComponent(slug)}`);
   await drawProject(slug, view, opts);
+}
+
+/**
+ * The Console view (SP-233): every ticket in flight on every project he can
+ * see, as icon tiles grouped by stage in pipeline order (renderConsole),
+ * from GET /in-flight. The stages and their colours come from GET
+ * /stage-colours; an unreadable answer there draws the stages the tickets
+ * are in, uncoloured. Choosing it is remembered, so "Tasks" in the header
+ * reopens it. A view only: nothing here changes a ticket. The beat draws it
+ * again every minute (route marks it `ticking`), so "in 12 min" counts down.
+ */
+/**
+ * The feature picked in the Console's Features key (SP-234), or null: kept
+ * here so the minute's redraw keeps it. A reload clears it.
+ */
+let pickedFeature = null;
+
+/**
+ * Show the Console's pick: every tile of another feature (or of none) dims,
+ * and the picked feature's button reads pressed. A picked feature no longer
+ * on screen is let go, so no tile stays dimmed with nothing pressed.
+ */
+function showFeaturePick() {
+  const picks = [...main.querySelectorAll('.feature-pick')];
+  if (!picks.some((b) => b.dataset.feature === pickedFeature)) pickedFeature = null;
+  for (const b of picks) b.setAttribute('aria-pressed', String(b.dataset.feature === pickedFeature));
+  for (const tile of main.querySelectorAll('.console .tile')) {
+    tile.classList.toggle('dimmed', pickedFeature !== null && tile.dataset.feature !== pickedFeature);
+  }
+}
+
+async function drawConsole() {
+  const [answer, colours] = await Promise.all([
+    api('GET', '/in-flight'),
+    api('GET', '/stage-colours').catch((err) => { if (err instanceof SignedOut) throw err; return null; }),
+  ]);
+  try { localStorage.setItem(VIEW_KEY, 'console'); } catch { /* the page still works; it is only not remembered */ }
+  const looks = stageLooks(colours);
+  const stages = Array.isArray(colours?.stages) ? colours.stages.map((s) => s.status) : [];
+  const project = savedProject();
+  const slug = answer.projects.some((p) => p.slug === project) ? project : answer.projects[0]?.slug;
+  setTitle('Console · Tracker');
+  main.innerHTML = `
+    <div class="tasks-head"><h1>Tasks</h1></div>
+    <div class="toolbar">
+      ${slug ? viewSwitch(slug, 'console') : ''}
+    </div>
+    ${answer.tickets.length ? '' : '<p class="quiet">Nothing is in flight.</p>'}
+    ${renderConsole(answer, stages)}`;
+  for (const el of main.querySelectorAll('[data-stage]')) {
+    const look = looks[el.dataset.stage];
+    if (!look) continue;
+    el.classList.add('coloured');
+    el.style.setProperty('--stage-border', look.border);
+    el.style.setProperty('--stage-tint', look.tint);
+    el.style.setProperty('--stage-text', look.text);
+  }
+  // A click on a feature in the key dims every other tile; a second click on it shows them all again.
+  for (const b of main.querySelectorAll('.feature-pick')) {
+    b.addEventListener('click', () => {
+      pickedFeature = pickedFeature === b.dataset.feature ? null : b.dataset.feature;
+      showFeaturePick();
+    });
+  }
+  showFeaturePick();
+  putTrail([{ label: 'Tasks' }, { label: 'Console' }]);
 }
 
 /**
@@ -1214,9 +1304,12 @@ function wireSortHeadings(stages) {
  * as a lasting line under the toolbar. The question box
  * (the Add Task box's "Did you mean ...?") is drawn here, closed.
  *
- * In the List view each row's priority is a dropdown that saves on change
- * (SP-208, wireListPriorities); `said` is `{ id, text, error }`, the note
- * that save leaves beside that ticket's dropdown after the redraw.
+ * In the List view each row's priority (SP-208) and assignee (SP-244) is a
+ * dropdown that saves on change, and its tags (SP-246) gain a × each and an
+ * Add Tag dropdown, and its topics (SP-247) the same with Add Topic
+ * (wireListPickers); `said` is
+ * `{ id, field, text, error }`, the note that save leaves beside that
+ * ticket's dropdown after the redraw.
  */
 async function drawProject(slug, view, { adding = false, filed = null, unchecked = false, uploaded = [], notUploaded = [], said = null } = {}) {
   const [board, looks, { projects }] = await Promise.all([
@@ -1233,7 +1326,6 @@ async function drawProject(slug, view, { adding = false, filed = null, unchecked
   showProject();
   setTitle(`${board.projectName} ${view} · Tracker`);
   const at = (v, s) => `/${v}/${encodeURIComponent(s)}`;
-  const toggle = ['board', 'list'].map((v) => `<a href="${at(v, board.project)}"${v === view ? ' class="current" aria-current="page"' : ''}>${v === 'board' ? 'Board' : 'List'}</a>`).join('');
   /**
    * A stage's heading (SP-196): its name on the left, its count right-aligned,
    * then the fold arrow, which the stylesheet draws from the block's open
@@ -1249,7 +1341,7 @@ async function drawProject(slug, view, { adding = false, filed = null, unchecked
     <a class="card" href="/t/${encodeURIComponent(t.id)}">
       <span class="name">${escapeHtml(t.name)}</span>
       <span class="quiet">${escapeHtml(t.id)}${t.priority ? ` · ${escapeHtml(t.priority)}` : ''}</span>
-      ${t.answerIn ? `<span class="answer-in">${escapeHtml(ANSWER_IN_NOTE)}</span>` : ''}
+      ${t.answerIn ? `<span class="answer-in">${escapeHtml(ANSWER_IN_NOTE)}</span>` : t.mergeStands ? `<span class="answer-in">${escapeHtml(MERGE_STANDS_NOTE)}</span>` : ''}
       ${t.tags.length ? `<span class="tags">${t.tags.map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join('')}</span>` : ''}
     </a>`;
   const column = (c) => block(c, 'column', c.tickets.map(card).join('') || '<p class="quiet">None.</p>');
@@ -1264,13 +1356,16 @@ async function drawProject(slug, view, { adding = false, filed = null, unchecked
       canDelete(status) ? actionButton('Delete Ticket', ICONS.delete, { delete: t.id }) : '',
     ].join('');
   };
+  // The project's tags, for each List row's Add Tag dropdown (SP-246).
+  const known = projectTags(board);
   const row = (status) => (t) => `
     <tr data-id="${escapeHtml(t.id)}">
       <td class="id"><a href="/t/${encodeURIComponent(t.id)}">${escapeHtml(t.id)}</a></td>
       <td class="name"><a href="/t/${encodeURIComponent(t.id)}">${escapeHtml(t.name)}</a></td>
       <td class="priority">${view === 'list' ? renderListPriority(t) : t.priority ? escapeHtml(statusName(t.priority)) : '<span class="quiet">–</span>'}</td>
-      <td class="tags">${t.tags.map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join('')}</td>
-      <td class="assignee">${t.assignee ? escapeHtml(t.assignee) : '<span class="quiet">nobody</span>'}</td>
+      <td class="tags">${view === 'list' ? renderListTags(t, known) : t.tags.map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join('')}</td>
+      <td class="topics">${view === 'list' ? renderListTopics(t, board.topics) : (t.topics ?? []).map((topic) => `<span class="tag topic">${escapeHtml(topic.name)}</span>`).join('') || '<span class="quiet">–</span>'}</td>
+      <td class="assignee">${view === 'list' ? renderListAssignee(t, board.operator) : t.assignee ? escapeHtml(t.assignee) : '<span class="quiet">nobody</span>'}</td>
       <td class="when">${escapeHtml(when(t.updatedAt))}</td>
       <td class="actions">${actions(t, status)}</td>
     </tr>`;
@@ -1284,28 +1379,53 @@ async function drawProject(slug, view, { adding = false, filed = null, unchecked
   const liveColumn = board.columns.find((c) => c.status === 'Live');
   const live = liveColumn && { ...liveColumn, tickets: liveColumn.tickets.slice().sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0)) };
 
+  // Which side of the Add Task box shows: its Suggest checkbox, kept in this browser (SP-303).
+  const suggesting = savedSuggestSwitch();
   main.innerHTML = `
     <div class="tasks-head"><h1>Tasks</h1>${filed ? filedPod(filed, uploaded) : ''}</div>
     <div class="toolbar">
       ${renderProjectPicker(projects, board.project)}
       ${searchForm('')}
       <button type="button" class="pipeline-pod" aria-haspopup="dialog" title="Open Pipeline Status"></button>
-      <nav class="views" aria-label="View">${toggle}</nav>
+      ${viewSwitch(board.project, view)}
     </div>
     ${filed && (unchecked || notUploaded.length) ? `<p class="filed-note">${unchecked ? UNCHECKED_NOTE : ''}${notUploadedNote(notUploaded)}</p>` : ''}
     <details class="add-task">
-      <summary>Add Task</summary>
-      <form class="request">
-        <label for="title">Title</label>
-        <input id="title" type="text" required>
+      <summary>Add Task<label class="suggest-switch">Suggest <input type="checkbox" value="on" aria-label="Suggest Next Tasks"${suggesting ? ' checked' : ''}></label></summary>
+      <form class="request"${suggesting ? ' hidden' : ''}>
+        <div class="title-mode" role="radiogroup" aria-label="How the Title Is Chosen">
+          <label><input type="radio" name="title-mode" value="suggest"> Suggest a Title</label>
+          <label><input type="radio" name="title-mode" value="own"> Write My Own Title</label>
+        </div>
+        <div class="own-title">
+          <label for="title">Title</label>
+          <input id="title" type="text">
+        </div>
         <label for="description">Description</label>
         <textarea id="description"></textarea>
         <label for="files">Files</label>
         <input id="files" type="file" multiple>
         <span class="hint quiet">Screenshots, PDFs or notes, up to 10 MB each. Files are not kept in the saved draft: after a reload, pick them again.</span>
-        <div class="row"><button type="submit">Submit Task</button><span class="note"></span></div>
+        <fieldset class="title-choices" hidden>
+          <legend>Pick a Title</legend>
+          <div class="choices"></div>
+        </fieldset>
+        <div class="row"><button type="submit" class="submit-task">Suggest Titles</button><button type="button" class="suggest-again" hidden>Suggest Again</button><span class="note"></span></div>
       </form>
+      <div class="suggest-next"${suggesting ? '' : ' hidden'}>
+        <p class="hint quiet">Reads the project (its plans, documents and code) and its open tickets, and suggests what to do next. Put them in order, untick any you do not want, and file the rest as requests.</p>
+        <div class="row"><button type="button" class="suggest-run">Suggest Next Tasks</button><span class="run-note note" role="status"></span></div>
+        <ol class="suggestions"></ol>
+        <div class="row file-row" hidden><button type="button" class="file-order">File in This Order</button><span class="file-note note" role="status"></span></div>
+      </div>
     </details>
+    <dialog class="suggestion-info" aria-labelledby="suggestion-info-title">
+      <form method="dialog">
+        <button type="submit" class="close" aria-label="Close">×</button>
+        <div class="suggestion-info-body"></div>
+        <div class="row"><button type="submit">Close</button></div>
+      </form>
+    </dialog>
     <dialog class="project-check" aria-labelledby="project-check-question">
       <form method="dialog">
         <button type="submit" class="close" value="" aria-label="Close: file nothing">×</button>
@@ -1340,6 +1460,8 @@ async function drawProject(slug, view, { adding = false, filed = null, unchecked
   wireSortHeadings(view === 'board' ? (live ? [live] : []) : board.columns);
   wireSearch();
   wireAddTask(board.project, view, adding);
+  wireSuggestNext(board.project, view);
+  wireSuggestSwitch();
   wireFiledPod();
   wirePipeline();
   refreshPipeline();
@@ -1348,7 +1470,7 @@ async function drawProject(slug, view, { adding = false, filed = null, unchecked
     history.pushState(null, '', at(view, e.target.value));
     route();
   });
-  wireListPriorities(slug, view, board, said);
+  wireListPickers(slug, view, board, said);
   // Delete: ask first, naming the ticket; then redraw from the server. A
   // refusal is said in words and nothing leaves the list until a redraw.
   const listNote = main.querySelector('.list-note');
@@ -1374,20 +1496,34 @@ async function drawProject(slug, view, { adding = false, filed = null, unchecked
 }
 
 /**
- * SP-208: the List view's priority dropdowns. Picking one sends only the
- * priority, with the version the board drew (`ifVersion`), to the same
- * PATCH /tickets/:id the ticket page's Change panel uses. One save at a
- * time: every priority dropdown is held while a save is in flight, and
- * "Saving…" shows beside the one picked. Saved, the list is drawn again from
- * the server with "Saved" beside it. A 409 means a loop moved the ticket:
- * the list is drawn again as stored, with the moved message beside it. Any
- * other refusal shows the server's words and puts the old value back.
+ * The List view's dropdowns that save on change, by the field each sends:
+ * priority (SP-208) as picked, assignee (SP-244) as the person's id, or null
+ * for Nobody. `before` is the value the board drew, put back on a refusal.
  */
-function wireListPriorities(slug, view, board, said) {
-  const selects = [...main.querySelectorAll('select[data-priority-of]')];
-  const noteOf = (id) => [...main.querySelectorAll('[data-priority-note]')].find((n) => n.dataset.priorityNote === id);
+const LIST_PICKERS = Object.freeze({
+  priority: { value: (select) => select.value, before: (t) => t.priority ?? '' },
+  assignee: { value: (select) => (select.value ? Number(select.value) : null), before: (t) => String(t.assigneeId ?? '') },
+});
+
+/**
+ * SP-208, SP-244, SP-246, SP-247: the List view's priority and assignee
+ * dropdowns and its tag and topic controls. Each change sends only that field
+ * (tags and topics as the whole new list), with the version the board drew (`ifVersion`), to the same PATCH
+ * /tickets/:id the ticket page's Change panel uses. One save at a time: every
+ * dropdown, ×, and tag box in the list is held while a save is in flight, and
+ * "Saving…" shows beside the one changed. Saved, the list is drawn again from
+ * the server with "Saved" beside it. A 409 means a loop moved the ticket: the
+ * list is drawn again as stored, with the moved message beside it. Any other
+ * refusal shows the server's words and puts the control back as it was.
+ */
+function wireListPickers(slug, view, board, said) {
+  const fields = Object.keys(LIST_PICKERS);
+  const selects = [...main.querySelectorAll(fields.map((f) => `select[data-${f}-of]`).join(', '))];
+  const controls = [...selects, ...main.querySelectorAll('select[data-tags-of], button[data-untag-of], input[data-new-tag-of], select[data-topics-of], button[data-untopic-of]')];
+  const fieldOf = (select) => fields.find((f) => select.hasAttribute(`data-${f}-of`));
+  const noteOf = (field, id) => [...main.querySelectorAll(`[data-${field}-note]`)].find((n) => n.getAttribute(`data-${field}-note`) === id);
   if (said) {
-    const note = noteOf(said.id);
+    const note = noteOf(said.field, said.id);
     if (note) {
       note.className = `note${said.error ? ' error' : ' quiet'}`;
       note.textContent = said.text;
@@ -1395,46 +1531,145 @@ function wireListPriorities(slug, view, board, said) {
   }
   const tickets = new Map(board.columns.flatMap((c) => c.tickets).map((t) => [t.id, t]));
   let saving = false;
-  for (const select of selects) {
-    select.addEventListener('change', async () => {
-      const id = select.dataset.priorityOf;
-      const t = tickets.get(id);
-      if (!t) return;
-      const before = t.priority ?? '';
-      if (saving) {
-        select.value = before;
+  /** Sends `value` as `field` of ticket `id`; `undo` puts the control back when nothing is sent or it is refused. */
+  const save = async (id, field, value, undo) => {
+    const t = tickets.get(id);
+    if (!t) return;
+    if (saving) {
+      undo();
+      return;
+    }
+    saving = true;
+    const was = field === 'tags' || field === 'topics' ? 'were' : 'was';
+    const note = noteOf(field, id);
+    const held = controls.filter((c) => !c.disabled);
+    for (const c of held) c.disabled = true;
+    note.className = 'note quiet';
+    note.textContent = 'Saving…';
+    let after;
+    try {
+      await api('PATCH', `/tickets/${encodeURIComponent(id)}`, { [field]: value, ifVersion: t.version });
+      after = { id, field, text: 'Saved' };
+    } catch (err) {
+      if (err instanceof SignedOut) return drawSignIn(`You were signed out; the ${field} of ${id} ${was} not saved.`);
+      if (err instanceof Refused && err.status === 409) {
+        after = { id, field, text: MOVED_MESSAGE, error: true };
+      } else {
+        note.className = 'note error';
+        note.textContent = `Not saved: ${err.message}`;
+        undo();
+        for (const c of held) c.disabled = false;
+        saving = false;
         return;
       }
-      saving = true;
-      const note = noteOf(id);
-      const held = selects.filter((c) => !c.disabled);
-      for (const c of held) c.disabled = true;
+    }
+    try {
+      await drawAgain(() => drawProject(slug, view, { said: after }));
+    } catch (err) {
+      if (err instanceof SignedOut) return drawSignIn(`You were signed out; the ${field} of ${id} ${was} ${after.error ? 'not ' : ''}saved, but the page could not show it.`);
+      note.className = 'note error';
+      note.textContent = `The page could not refresh (${err.message}): the ${field} ${was} ${after.error ? 'not ' : ''}saved. Reload to see the list as stored.`;
+    }
+  };
+  for (const select of selects) {
+    const field = fieldOf(select);
+    const picker = LIST_PICKERS[field];
+    select.addEventListener('change', () => {
+      const t = tickets.get(select.getAttribute(`data-${field}-of`));
+      if (!t) return;
+      const before = picker.before(t);
+      save(t.id, field, picker.value(select), () => { select.value = before; });
+    });
+  }
+  wireListTags(tickets, save, noteOf);
+  wireListTopics(tickets, save);
+}
+
+/**
+ * SP-247: a List row's topic controls, saving through wireListPickers' `save`
+ * with the whole new list of topic ids. Picking a topic from Add Topic adds
+ * it; a chip's × removes that topic.
+ */
+function wireListTopics(tickets, save) {
+  const idsOf = (t) => (t.topics ?? []).map((topic) => topic.id);
+  for (const select of main.querySelectorAll('select[data-topics-of]')) {
+    select.addEventListener('change', () => {
+      const t = tickets.get(select.getAttribute('data-topics-of'));
+      const topic = Number(select.value);
+      if (!t || !Number.isInteger(topic) || topic < 1) return;
+      save(t.id, 'topics', [...idsOf(t), topic], () => { select.value = ''; });
+    });
+  }
+  for (const button of main.querySelectorAll('button[data-untopic-of]')) {
+    button.addEventListener('click', () => {
+      const t = tickets.get(button.getAttribute('data-untopic-of'));
+      if (!t) return;
+      const topic = Number(button.dataset.topic);
+      save(t.id, 'topics', idsOf(t).filter((id) => id !== topic), () => {});
+    });
+  }
+}
+
+/**
+ * SP-246: a List row's tag controls, saving through wireListPickers' `save`.
+ * Picking a tag from Add Tag adds it; New Tag… opens the row's text box
+ * (Enter adds what is typed, trimmed, and a blank entry adds nothing; Escape
+ * closes it); a chip's × removes that tag. A tag the ticket already has is
+ * said, not sent.
+ */
+function wireListTags(tickets, save, noteOf) {
+  const boxOf = (id) => [...main.querySelectorAll('input[data-new-tag-of]')].find((b) => b.getAttribute('data-new-tag-of') === id);
+  const add = (t, tag, undo) => {
+    if (t.tags.includes(tag)) {
+      const note = noteOf('tags', t.id);
       note.className = 'note quiet';
-      note.textContent = 'Saving…';
-      let after;
-      try {
-        await api('PATCH', `/tickets/${encodeURIComponent(id)}`, { priority: select.value, ifVersion: t.version });
-        after = { id, text: 'Saved' };
-      } catch (err) {
-        if (err instanceof SignedOut) return drawSignIn(`You were signed out; the priority of ${id} was not saved.`);
-        if (err instanceof Refused && err.status === 409) {
-          after = { id, text: MOVED_MESSAGE, error: true };
-        } else {
-          note.className = 'note error';
-          note.textContent = `Not saved: ${err.message}`;
-          select.value = before;
-          for (const c of held) c.disabled = false;
-          saving = false;
-          return;
-        }
+      note.textContent = `${tag} is already a tag.`;
+      undo();
+      return;
+    }
+    save(t.id, 'tags', [...t.tags, tag], undo);
+  };
+  for (const select of main.querySelectorAll('select[data-tags-of]')) {
+    select.addEventListener('change', () => {
+      const t = tickets.get(select.getAttribute('data-tags-of'));
+      if (!t) return;
+      const reset = () => { select.value = ''; };
+      if (select.selectedOptions[0]?.hasAttribute('data-new-tag')) {
+        reset();
+        const box = boxOf(t.id);
+        box.hidden = false;
+        box.focus();
+        return;
       }
-      try {
-        await drawAgain(() => drawProject(slug, view, { said: after }));
-      } catch (err) {
-        if (err instanceof SignedOut) return drawSignIn(`You were signed out; the priority of ${id} was ${after.error ? 'not ' : ''}saved, but the page could not show it.`);
-        note.className = 'note error';
-        note.textContent = `The page could not refresh (${err.message}): the priority was ${after.error ? 'not ' : ''}saved. Reload to see the list as stored.`;
+      if (!select.value) return;
+      add(t, select.value, reset);
+    });
+  }
+  for (const box of main.querySelectorAll('input[data-new-tag-of]')) {
+    const t = tickets.get(box.getAttribute('data-new-tag-of'));
+    if (!t) continue;
+    const close = () => {
+      box.value = '';
+      box.hidden = true;
+    };
+    box.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        close();
+        return;
       }
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      const tag = box.value.trim();
+      if (!tag) return close();
+      add(t, tag, () => {});
+    });
+  }
+  for (const button of main.querySelectorAll('button[data-untag-of]')) {
+    button.addEventListener('click', () => {
+      const t = tickets.get(button.getAttribute('data-untag-of'));
+      if (!t) return;
+      save(t.id, 'tags', t.tags.filter((tag) => tag !== button.dataset.tag), () => {});
     });
   }
 }
@@ -1608,24 +1843,12 @@ async function drawTicket(id, said = null, kept = null) {
       </div>
       ${renderComment(c.body, { operatorName: me?.name })}
     </article>`).join('');
-  // What it needs from Dane on top; everything else folded away, closed until he opens it.
-  main.innerHTML = `
-    <section class="quick">
-      ${renderHeldUp(t, sinceTime)}
-      <div class="ask">${renderQuickAction(t)}</div>
-      <div class="act">
-      ${renderCommands(t)}
-      ${renderAnswerIn(t)}
-      ${renderMergeAction(t)}
-      ${renderCloseAction(t)}
-      ${renderGoAction(t)}
-      ${renderReplyForm(t, me?.name)}
-      ${renderDeleteAction(t)}
-      </div>
-    </section>
-    ${renderFilesMade(t)}
-    <details class="details">
-      <summary>Details</summary>
+  // The ticket itself: what Details holds. While a loop has it (SP-291) nothing
+  // asks him for a reply, so this goes in the right column, open, with the
+  // Add Comment box under the comments; in his two statuses it stays folded
+  // under Details, closed until he opens it, below the ask and the reply box.
+  const inline = loopHasIt(t);
+  const ticketBody = `
       <p class="meta">
         <span>${escapeHtml(t.id)}</span><span>${escapeHtml(t.projectName)}</span>
         <span>${escapeHtml(statusLabel(t))}</span>
@@ -1636,6 +1859,7 @@ async function drawTicket(id, said = null, kept = null) {
       ${renderAttachments(t)}
       <h2 id="comments">Comments</h2>
       ${comments || '<p class="quiet">No comments yet.</p>'}
+      ${renderCommentForm(t)}
       <h2>Copy to Another Project</h2>
       ${others.length ? `
       <form class="copy">
@@ -1644,12 +1868,36 @@ async function drawTicket(id, said = null, kept = null) {
           <select id="copy-to">${others.map((p) => `<option value="${escapeHtml(p.slug)}">${escapeHtml(p.name)}</option>`).join('')}</select>
           <button type="submit">Copy</button><span class="note"></span>
         </div>
-      </form>` : '<p class="quiet">There is no other project to copy into yet.</p>'}
-    </details>`;
+      </form>` : '<p class="quiet">There is no other project to copy into yet.</p>'}`;
+  main.innerHTML = `
+    <section class="quick${inline ? ' loop-has' : ''}">
+      ${renderHeldUp(t, sinceTime)}
+      <div class="ask">${renderQuickAction(t)}</div>
+      <div class="act">
+      ${renderCommands(t)}
+      ${renderAnswerIn(t)}
+      ${renderMergeAction(t)}
+      ${renderCloseAction(t)}
+      ${renderGoAction(t)}
+      ${renderBugReportActions(t)}
+      ${renderReplyForm(t, me?.name)}
+      ${inline ? `<div class="details">${ticketBody}</div>` : ''}
+      ${renderDeleteAction(t)}
+      </div>
+    </section>
+    ${renderFilesMade(t)}
+    ${inline ? '' : `<details class="details">
+      <summary>Details</summary>${ticketBody}
+    </details>`}`;
+  // Details, when it is a fold (his two statuses), opened; while a loop has it there is nothing to open.
+  const openDetails = () => {
+    const fold = main.querySelector('details.details');
+    if (fold) fold.open = true;
+  };
   wireCopyButtons();
   // Arrived by the bus count in the header: open the fold at the comments, where the posts are.
   if (location.hash === '#comments' && !refreshing) {
-    main.querySelector('details.details').open = true;
+    openDetails();
     document.getElementById('comments').scrollIntoView({ block: 'start' });
   }
   // The ticket's own project, in the view last used; then the ticket; then this page of it.
@@ -1658,6 +1906,10 @@ async function drawTicket(id, said = null, kept = null) {
     { label: `Task ${t.id}`, href: `/t/${encodeURIComponent(t.id)}` },
     { label: 'Details' },
   ]);
+  // SP-290: the status line's "i" opens and closes on a tap or Enter; hover and keyboard focus show it too (app.css).
+  const statusInfo = main.querySelector('.status-info');
+  statusInfo?.addEventListener('click', () => statusInfo.setAttribute('aria-expanded', String(statusInfo.getAttribute('aria-expanded') !== 'true')));
+  statusInfo?.addEventListener('keydown', (e) => { if (e.key === 'Escape') statusInfo.setAttribute('aria-expanded', 'false'); });
   const copyForm = main.querySelector('form.copy');
   copyForm?.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -1681,7 +1933,7 @@ async function drawTicket(id, said = null, kept = null) {
   // Go): Details open so the new reply is there when he scrolls down, and
   // the page kept at the top.
   const afterPost = () => {
-    main.querySelector('details.details').open = true;
+    openDetails();
     window.scrollTo(0, 0);
   };
   // Merge, Close and Go: his word from the server (the project config's merge
@@ -1713,6 +1965,72 @@ async function drawTicket(id, said = null, kept = null) {
   wordButton('form.merge-action', mergeQuestion(t), t.mergePhrase, 'You were signed out; the merge word was not posted.');
   wordButton('form.close-action', closeQuestion(t), t.closePhrase, 'You were signed out; the close word was not posted.');
   wordButton('form.go-action', goQuestion(t), t.goPhrase, 'You were signed out; your go was not posted.');
+  // A held bug report's Approve and Reject (SP-287): his own status changes,
+  // the same PATCH the Change panel sends, guarded on the status and version
+  // the page was drawn with, and each read back. Reject is two writes: the
+  // status and the wont-do tag together (one change, so never one without the
+  // other), then the note. A write that fails says which, and the page is not
+  // redrawn over it; nothing is ever reported as done that did not stick.
+  const bugButton = (selector, question, steps) => {
+    const form = main.querySelector(selector);
+    form?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (!confirm(question)) return;
+      const buttons = [...main.querySelectorAll('form.approve-action button, form.reject-action button')];
+      const note = form.querySelector('.note');
+      for (const b of buttons) b.disabled = true;
+      note.className = 'note quiet';
+      note.textContent = 'Saving…';
+      const fail = (text) => {
+        note.className = 'note error';
+        note.textContent = text;
+      };
+      let done = 0;
+      for (const step of steps) {
+        let problem;
+        try {
+          problem = await step.write();
+        } catch (err) {
+          if (err instanceof SignedOut) return drawSignIn(`You were signed out; ${step.what} was not saved.`);
+          if (err instanceof Refused && err.status === 409) {
+            return fail(`Not saved: ${step.what}. This ticket changed since the page was drawn (a loop moved it, or another page saved first), so nothing was overwritten. Reload to see it as it is now.`);
+          }
+          problem = err.message;
+        }
+        if (problem) {
+          // Before the first write lands nothing has changed, so the buttons come back; after it, the ticket has moved, so only a reload is offered.
+          if (!done) for (const b of buttons) b.disabled = false;
+          const saved = steps.slice(0, done).map((s) => s.what).join(' and ');
+          return fail(`Not saved: ${step.what}: ${problem.replace(/\.$/, '')}.${done ? ` ${saved.replace(/^./, (c) => c.toUpperCase())} did save. Reload to see the ticket as stored.` : ''}`);
+        }
+        done += 1;
+      }
+      try {
+        await drawAgain(() => drawTicket(t.id));
+        afterPost();
+      } catch (err) {
+        if (err instanceof SignedOut) return drawSignIn('You were signed out; the change was saved, but the page could not show it.');
+        fail(`Saved, but the page could not refresh (${err.message}). Reload to see the ticket as stored.`);
+      }
+    });
+  };
+  const patch = (fields) => api('PATCH', `/tickets/${encodeURIComponent(t.id)}`, { ...fields, ifStatus: t.status, ifVersion: t.version });
+  bugButton('form.approve-action', approveQuestion(t), [
+    { what: 'the move to Requested', write: async () => changeProblem(await patch({ status: 'requested' }), { status: 'requested' }) },
+  ]);
+  bugButton('form.reject-action', rejectQuestion(t), [
+    {
+      what: `the move to Live with the ${WONT_DO_TAG} tag`,
+      write: async () => changeProblem(await patch({ status: 'live', tags: [...new Set([...t.tags, WONT_DO_TAG])] }), { status: 'live', tags: [WONT_DO_TAG] }),
+    },
+    {
+      what: 'the note saying nothing shipped',
+      write: async () => {
+        const posted = await api('POST', `/tickets/${encodeURIComponent(t.id)}/comments`, { body: REJECT_COMMENT });
+        return posted?.body === REJECT_COMMENT ? '' : 'the tracker did not answer with the note as posted.';
+      },
+    },
+  ]);
   // Delete: ask first, naming the ticket; on success go to its project's list.
   const deleteForm = main.querySelector('form.delete-action');
   deleteForm?.addEventListener('submit', async (e) => {
@@ -1738,17 +2056,54 @@ async function drawTicket(id, said = null, kept = null) {
   const panel = wireEditPanel(t);
   if (kept) {
     // No box while his answer is in: nothing typed there to put back.
-    const keptBox = main.querySelector('form.reply textarea');
+    const keptBox = main.querySelector('form.reply textarea, form.add-comment textarea');
     if (keptBox) keptBox.value = kept.reply;
     panel?.restore(kept);
   }
   if (said) {
-    main.querySelector('details.details').open = true;
+    openDetails();
     const where = main.querySelector(said.field ? `.edit [data-note="${said.field}"]` : '.edit-note');
     if (where) {
       where.className = `note${said.error ? ' error' : ' quiet'}${said.field ? '' : ' edit-note'}`;
       where.textContent = said.text;
     }
+  }
+  // Add Comment (SP-291), on a ticket a loop has: posted exactly as typed
+  // through the same call as the reply box, the page then drawn again from
+  // the server so the comment shown is the one stored. A failed post says so
+  // and keeps the words. A #reply address (the list's Reply icon) lands here.
+  const commentForm = main.querySelector('form.add-comment');
+  if (commentForm) {
+    const commentBox = commentForm.querySelector('textarea');
+    if (location.hash === '#reply' && !refreshing) {
+      commentForm.scrollIntoView({ block: 'center' });
+      commentBox.focus();
+    }
+    commentForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const button = commentForm.querySelector('button');
+      const commentNote = commentForm.querySelector('.note');
+      button.disabled = true;
+      commentNote.className = 'note quiet';
+      commentNote.textContent = 'Posting…';
+      try {
+        await api('POST', `/tickets/${encodeURIComponent(t.id)}/comments`, { body: commentBox.value });
+      } catch (err) {
+        if (err instanceof SignedOut) return drawSignIn('You were signed out; your comment was not posted.');
+        commentNote.className = 'note error';
+        commentNote.textContent = `Not posted: ${err.message}`;
+        button.disabled = false;
+        return;
+      }
+      try {
+        await drawAgain(() => drawTicket(t.id));
+        main.querySelector('form.add-comment')?.scrollIntoView({ block: 'center' });
+      } catch (err) {
+        if (err instanceof SignedOut) return drawSignIn('You were signed out; your comment was posted, but the page could not show it.');
+        commentNote.className = 'note error';
+        commentNote.textContent = `Posted, but the page could not refresh (${err.message}). Reload to see it.`;
+      }
+    });
   }
   // While his answer is in there is no reply box (renderReplyForm): the
   // notice is all the page says, and a #reply address just shows it.
@@ -1803,7 +2158,7 @@ function wireEditPanel(t) {
   const tagBox = panel.querySelector('#edit-tag');
   // What is typed and not yet saved, except the field this save sends.
   const typed = (field) => ({
-    reply: main.querySelector('form.reply textarea')?.value ?? '',
+    reply: main.querySelector('form.reply textarea, form.add-comment textarea')?.value ?? '',
     tag: field === 'tags' ? '' : tagBox.value,
     name: field !== 'name' && nameBox && nameBox.value !== t.name ? nameBox.value : null,
     description: field !== 'description' && !editor.hidden ? area.value : null,
@@ -1944,6 +2299,14 @@ function savedDraft() {
   } catch { return { title: '', description: '' }; }
 }
 
+/** The Add Task box's kept title mode (titleModeOf): Suggest a Title unless Write My Own Title was left picked. */
+function savedTitleMode() {
+  try { return titleModeOf(localStorage.getItem(TITLE_MODE_KEY)); } catch { return 'suggest'; }
+}
+
+/** What the box says when the title suggester did not answer at all (no word from the tracker). */
+const SUGGEST_UNANSWERED = 'No titles could be suggested: the tracker did not answer. Write your own title.';
+
 /**
  * The Tasks page's Add Task box: a title and a description, filed into
  * `slug`, the project the page is showing, in `Requested`, which no loop
@@ -1952,6 +2315,21 @@ function savedDraft() {
  * reload never loses it, and a kept draft with text in it opens the box on
  * its own; it is forgotten once the ticket is filed, and the page redraws
  * with the box closed and the new ticket in its stage.
+ *
+ * The title is picked from suggestions (SP-248). A toggle at the top picks
+ * how: Suggest a Title shows only the Description (required), Write My Own
+ * Title shows the Title too. The toggle is kept in this browser beside the
+ * draft and outlives a filing. In Suggest a Title the first submit
+ * ("Suggest Titles") sends the words to the title suggester
+ * (`/tickets/suggest-titles`) and shows its five titles as a choice list.
+ * In Write My Own Title the button reads "Submit Task" from the start and
+ * files his title as typed; a "Suggest Titles" button beside it asks for
+ * the list anyway, his own title first. "Suggest Again" asks for a fresh
+ * five, the words untouched. Editing the words after that puts the box back
+ * to its first stage, so a list never names stale words. When
+ * the suggester fails, the box says why in one line and shows the Title
+ * field, and the next submit files what he types there. The picked title
+ * is filed exactly as shown.
  *
  * Before filing, the box asks the server whether the words fit another
  * project better (tracker/projectGuess.mjs). If one does, the
@@ -1967,32 +2345,131 @@ function wireAddTask(slug, view, adding) {
   const title = form.querySelector('#title');
   const description = form.querySelector('#description');
   const files = form.querySelector('#files');
+  const ownTitle = form.querySelector('.own-title');
+  const modes = [...form.querySelectorAll('input[name="title-mode"]')];
+  const choices = form.querySelector('fieldset.title-choices');
+  const choiceList = choices.querySelector('.choices');
+  const button = form.querySelector('button.submit-task');
+  const again = form.querySelector('button.suggest-again');
   const draft = savedDraft();
   title.value = draft.title;
   description.value = draft.description;
-  box.addEventListener('toggle', () => { if (box.open) title.focus(); });
-  if (adding || draft.title || draft.description) box.open = true;
+  let mode = savedTitleMode();
+  // 'ask': the next submit asks for titles; 'pick': the choice list is up;
+  // 'type': the suggester failed, so he types the title himself.
+  let stage = 'ask';
+  const show = () => {
+    for (const m of modes) m.checked = m.value === mode;
+    const typing = mode === 'own' || stage === 'type';
+    ownTitle.hidden = !typing;
+    title.required = typing;
+    description.required = mode === 'suggest';
+    choices.hidden = stage !== 'pick';
+    if (stage !== 'pick') choiceList.innerHTML = '';
+    // Write My Own Title files his title straight away; Suggest Titles beside it is optional.
+    const asking = stage === 'ask' && mode === 'suggest';
+    again.hidden = asking;
+    again.textContent = stage === 'ask' ? 'Suggest Titles' : 'Suggest Again';
+    button.textContent = asking ? 'Suggest Titles' : 'Submit Task';
+  };
+  const firstField = () => (mode === 'own' ? title : description);
+  show();
+  // Opened from the bar (a click or Enter, which focus the <summary>), the
+  // form's first field takes focus; opened by the Suggest checkbox, which
+  // marks the box first (wireSuggestSwitch), focus stays on the checkbox.
+  box.addEventListener('toggle', () => {
+    const bySwitch = box.dataset.openedBySwitch === '1';
+    delete box.dataset.openedBySwitch;
+    if (box.open && !form.hidden && !bySwitch) firstField().focus();
+  });
+  // The old New request address (adding) always opens on the form: it
+  // unticks Suggest and keeps that, so the page and the checkbox agree (SP-303).
+  if (adding) {
+    box.querySelector('summary .suggest-switch input').checked = false;
+    form.hidden = false;
+    box.querySelector('.suggest-next').hidden = true;
+    try { localStorage.setItem(SUGGEST_SWITCH_KEY, '0'); } catch { /* the form still shows; a reload shows the kept side */ }
+  }
+  // A kept draft opens the box only on the Add Task side; it never flips the checkbox (SP-303).
+  if (adding || ((draft.title || draft.description) && !savedSuggestSwitch())) box.open = true;
   const keep = () => {
     try {
       localStorage.setItem(DRAFT_KEY, JSON.stringify({ title: title.value, description: description.value }));
     } catch { /* the form still works; a sign-out would lose the text */ }
   };
-  form.addEventListener('input', keep);
+  form.addEventListener('input', (e) => {
+    keep();
+    // New words make the list stale: ask again. A failed suggestion's typed title stays.
+    if (stage === 'pick' && (e.target === title || e.target === description)) {
+      stage = 'ask';
+      show();
+    }
+  });
   const note = form.querySelector('.note');
+  const say = (text, kind = 'quiet') => {
+    note.className = kind ? `note ${kind}` : 'note';
+    note.textContent = text;
+  };
+  for (const m of modes) {
+    m.addEventListener('change', () => {
+      if (!m.checked) return;
+      mode = titleModeOf(m.value);
+      try { localStorage.setItem(TITLE_MODE_KEY, mode); } catch { /* the box still works; it opens on Suggest a Title next time */ }
+      stage = 'ask';
+      show();
+      say('', '');
+    });
+  }
+  const busy = (on) => {
+    button.disabled = on;
+    again.disabled = on;
+  };
+
+  // Ask for five titles from the words as typed; show them, or say why not and show the Title field.
+  const askTitles = async () => {
+    busy(true);
+    say('Suggesting titles…');
+    let titles;
+    try {
+      ({ titles } = await api('POST', `/projects/${encodeURIComponent(slug)}/tickets/suggest-titles`,
+        mode === 'own' ? { description: description.value, title: title.value } : { description: description.value }));
+    } catch (err) {
+      if (err instanceof SignedOut) return drawSignIn('You were signed out; your request was not filed. What you typed is kept: it will be back in the form once you sign in.');
+      stage = 'type';
+      show();
+      say(err instanceof Refused ? err.message : SUGGEST_UNANSWERED, 'error');
+      busy(false);
+      title.focus();
+      return;
+    }
+    choiceList.innerHTML = renderTitleChoices({ own: mode === 'own' ? title.value : null, titles });
+    stage = 'pick';
+    show();
+    say('', '');
+    busy(false);
+    choiceList.querySelector('input:checked')?.focus();
+  };
+  again.addEventListener('click', () => { keep(); askTitles(); });
+
   const question = main.querySelector('dialog.project-check');
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     keep();
-    const button = form.querySelector('button');
-    button.disabled = true;
-    note.className = 'note quiet';
-    note.textContent = 'Checking the project…';
+    if (stage === 'ask' && mode === 'suggest') return askTitles();
+    // The title as shown: the picked choice, or what he typed (Write My Own Title, or after a failed suggestion).
+    const picked = stage === 'pick' ? choiceList.querySelector('input[name="title-choice"]:checked')?.value : title.value;
+    if (!picked) {
+      say('Pick a title first.', 'error');
+      return;
+    }
+    busy(true);
+    say('Checking the project…');
     // The check reads the words and writes nothing; a failed check files here as before.
     let suggest = null;
     let unchecked = false;
     try {
       ({ suggest } = await api('POST', `/projects/${encodeURIComponent(slug)}/tickets/check`, {
-        name: title.value, description: description.value,
+        name: picked, description: description.value,
       }));
     } catch (err) {
       if (err instanceof SignedOut) return drawSignIn('You were signed out; your request was not filed. What you typed is kept: it will be back in the form once you sign in.');
@@ -2003,27 +2480,24 @@ function wireAddTask(slug, view, adding) {
       const choice = await askProject(question, suggest);
       if (choice === 'move') into = suggest.slug;
       else if (choice !== 'keep') {
-        // Closed: nothing filed, the text stays in the form.
-        note.className = 'note';
-        note.textContent = '';
-        button.disabled = false;
-        title.focus();
+        // Closed: nothing filed, the text and the choice stay in the form.
+        say('', '');
+        busy(false);
+        button.focus();
         return;
       }
     }
-    note.className = 'note quiet';
-    note.textContent = 'Filing…';
+    say('Filing…');
     let ticket;
     try {
       // Exactly as typed: no trimming, no formatting, the same rule as the reply box.
       ticket = await api('POST', `/projects/${encodeURIComponent(into)}/tickets`, {
-        name: title.value, description: description.value, status: 'Requested',
+        name: picked, description: description.value, status: 'Requested',
       });
     } catch (err) {
       if (err instanceof SignedOut) return drawSignIn('You were signed out; your request was not filed. What you typed is kept: it will be back in the form once you sign in.');
-      note.className = 'note error';
-      note.textContent = `Not filed: ${err.message}`;
-      button.disabled = false;
+      say(`Not filed: ${err.message}`, 'error');
+      busy(false);
       return;
     }
     try { localStorage.removeItem(DRAFT_KEY); } catch { /* nothing kept */ }
@@ -2051,10 +2525,394 @@ function wireAddTask(slug, view, adding) {
       await drawAgain(() => drawProject(into, view, { filed: ticket.id, unchecked, uploaded, notUploaded }));
     } catch (err) {
       if (err instanceof SignedOut) return drawSignIn(`You were signed out; ${ticket.id} was filed.`);
-      note.className = 'note error';
-      note.textContent = `Filed ${ticket.id}, but the page could not be drawn again: ${err.message}`;
+      say(`Filed ${ticket.id}, but the page could not be drawn again: ${err.message}`, 'error');
     }
   });
+}
+
+/** The Add Task bar's kept Suggest checkbox (SP-303): ticked only when it was left ticked. */
+function savedSuggestSwitch() {
+  try { return localStorage.getItem(SUGGEST_SWITCH_KEY) === '1'; } catch { return false; }
+}
+
+/**
+ * SP-303: the Suggest checkbox at the right of the Add Task bar. Ticked, the
+ * box shows the Suggest Next Tasks part; unticked, the Add Task form. Both
+ * stay drawn and are only hidden, so a typed draft, a picked title, the
+ * suggestions' order and ticks, and a run already going are all still there
+ * on switching back. Either way the box opens if it was shut, and the click
+ * never folds it: a click on a control inside a <summary> (the checkbox, or
+ * its label's word) works that control and does not fold the box. The tick is kept in this browser, as the title toggle
+ * is, so the minute's redraw and a reload keep the side he picked.
+ */
+function wireSuggestSwitch() {
+  const box = main.querySelector('details.add-task');
+  const tick = box.querySelector('summary .suggest-switch input');
+  const form = box.querySelector('form.request');
+  const part = box.querySelector('.suggest-next');
+  tick.addEventListener('change', () => {
+    try { localStorage.setItem(SUGGEST_SWITCH_KEY, tick.checked ? '1' : '0'); } catch { /* the box still works; a reload shows the Add Task side */ }
+    form.hidden = tick.checked;
+    part.hidden = !tick.checked;
+    // A shut box opened by the checkbox leaves focus on the checkbox (wireAddTask's toggle).
+    if (!box.open) box.dataset.openedBySwitch = '1';
+    box.open = true;
+  });
+}
+
+/** The Suggest Next Tasks box's kept state for `slug`, or null. */
+function savedSuggestState(slug) {
+  try { return JSON.parse(localStorage.getItem(SUGGEST_STATE_KEY) ?? '{}')[slug] ?? null; } catch { return null; }
+}
+
+/** Keep `state` as `slug`'s Suggest Next Tasks state in this browser. */
+function keepSuggestState(slug, state) {
+  try {
+    const all = JSON.parse(localStorage.getItem(SUGGEST_STATE_KEY) ?? '{}');
+    all[slug] = state;
+    localStorage.setItem(SUGGEST_STATE_KEY, JSON.stringify(all));
+  } catch { /* the box still works; a redraw starts the list over */ }
+}
+
+/** What the box says when a suggestion run could not be started or read (no word from the tracker). */
+const SUGGEST_NEXT_UNANSWERED = 'the tracker did not answer.';
+
+/**
+ * SP-251: the Tasks page's Suggest Next Tasks box, beside Add Task. Its
+ * button starts a run of the next-task suggester (POST
+ * /projects/<slug>/suggest-next, tracker/nextSuggest.mjs); while it runs
+ * the box says so and checks back every SUGGEST_POLL_MS. When the page
+ * opens it shows the last list on its own (GET), and opens itself when
+ * a run is going or a list has rows still to file.
+ *
+ * Each suggestion is a row (renderSuggestRows). Dragging a row, the arrow
+ * keys on its handle, or a number from its dropdown moves it there and the
+ * rest renumber (moveSuggestion). The order, the ticks and what was filed
+ * are kept in this browser per project, for that run (suggestState), so a
+ * redraw keeps them.
+ *
+ * "File in This Order" files each kept row not yet filed (filingPlan) the
+ * way the Add Task box does: the project check, then POST .../tickets in
+ * Requested, title and description as shown. Then every kept row's ticket
+ * gets its place, in the order shown (POST .../tickets/order, one call per
+ * project they went into). A step that fails says which and stops; each
+ * filed ticket is kept at once, so pressing it again files nothing twice.
+ * A failed run says why and offers Try Again.
+ */
+function wireSuggestNext(slug, view) {
+  // The Suggest Next Tasks part of the Add Task box (SP-303), and the box it folds in.
+  const box = main.querySelector('details.add-task .suggest-next');
+  const fold = box.closest('details.add-task');
+  const run = box.querySelector('button.suggest-run');
+  const runNote = box.querySelector('.run-note');
+  const list = box.querySelector('ol.suggestions');
+  const fileRow = box.querySelector('.file-row');
+  const fileButton = box.querySelector('button.file-order');
+  const fileNote = box.querySelector('.file-note');
+  const question = main.querySelector('dialog.project-check');
+  const path = `/projects/${encodeURIComponent(slug)}/suggest-next`;
+  let suggestions = [];
+  // The project's GitHub repository, from the latest run's answer: where a suggestion's file links go (SP-305).
+  let repo = null;
+  let state = null;
+  let polling = false;
+  let filing = false;
+  // A run is going: File in This Order's end must not turn the Suggest button back on.
+  let running = false;
+  // A run's answer that came while filing: drawn when filing ends, so the
+  // filing loop never writes into rows it did not plan from.
+  let held;
+  // The box opens on its own only when the page is first drawn: a minute's
+  // redraw (refreshing) keeps the fold keepPlace put back.
+  const mayOpen = !refreshing;
+  const say = (el, text, kind = 'quiet') => {
+    el.classList.remove('quiet', 'error');
+    if (text && kind) el.classList.add(kind);
+    el.textContent = text;
+  };
+  const save = () => keepSuggestState(slug, state);
+
+  // Draw the rows from `state`, putting focus back on a moved row's handle.
+  const drawRows = (focusIndex = null) => {
+    list.innerHTML = state ? renderSuggestRows(suggestions, state) : '';
+    fileRow.hidden = !state;
+    if (focusIndex != null) list.querySelector(`li[data-index="${focusIndex}"] .drag-handle`)?.focus();
+  };
+  const move = (from, to, focus = false) => {
+    // While filing, put a changed dropdown back as it was.
+    if (filing) { drawRows(); return; }
+    const index = state.order[from];
+    state.order = moveSuggestion(state.order, from, to);
+    save();
+    drawRows(focus ? index : null);
+  };
+  const placeOf = (li) => state.order.indexOf(Number(li.dataset.index));
+
+  // A run's answer, as drawn: running (check back), failed (Try Again), or done (the rows).
+  const show = (latest) => {
+    if (!box.isConnected) return;
+    if (filing) { held = latest; return; }
+    say(runNote, suggestRunLine(latest), latest?.state === 'failed' ? 'error' : 'quiet');
+    running = latest?.state === 'running';
+    run.disabled = running;
+    // While a run is going its rows are about to be replaced: nothing is filed from them.
+    fileButton.disabled = running;
+    run.textContent = latest?.state === 'failed' ? 'Try Again' : latest?.state === 'done' ? 'Suggest Again' : 'Suggest Next Tasks';
+    if (latest?.state === 'done' && Array.isArray(latest.suggestions)) {
+      suggestions = latest.suggestions;
+      repo = typeof latest.repo === 'string' ? latest.repo : null;
+      state = suggestState(savedSuggestState(slug), latest.at, suggestions.length);
+      save();
+      drawRows();
+    } else if (latest?.state !== 'running') {
+      if (latest?.state === 'failed') { suggestions = []; state = null; }
+      drawRows();
+    }
+    if (latest?.state === 'running') checkBack();
+  };
+  const read = async () => {
+    try {
+      return await api('GET', path, undefined, { unrecorded: true });
+    } catch (err) {
+      if (err instanceof SignedOut) { drawSignIn(); return undefined; }
+      if (err instanceof Refused && err.status === 404) return null;
+      say(runNote, `Could not read the suggestions: ${err instanceof Refused ? err.message : SUGGEST_NEXT_UNANSWERED}`, 'error');
+      return undefined;
+    }
+  };
+  // While a run is going, read again about every SUGGEST_POLL_MS, until it ends or the page is drawn over.
+  const checkBack = () => {
+    if (polling) return;
+    polling = true;
+    setTimeout(async () => {
+      polling = false;
+      if (!box.isConnected) return;
+      const latest = await read();
+      if (latest === undefined) {
+        // Not answered: try again next time round, the line already says so.
+        if (box.isConnected) checkBack();
+        return;
+      }
+      show(latest);
+    }, SUGGEST_POLL_MS);
+  };
+
+  run.addEventListener('click', async () => {
+    run.disabled = true;
+    say(runNote, 'Starting…');
+    let started;
+    try {
+      ({ run: started } = await api('POST', path, {}));
+    } catch (err) {
+      if (err instanceof SignedOut) return drawSignIn('You were signed out; no suggestions were asked for.');
+      say(runNote, `No suggestions this time: ${err instanceof Refused ? err.message : SUGGEST_NEXT_UNANSWERED}`, 'error');
+      run.textContent = 'Try Again';
+      run.disabled = filing;
+      return;
+    }
+    show(started);
+  });
+
+  // The i on a row (SP-304): its suggestion's About box, found by the
+  // suggestion's own index, so a moved row's i opens its own. Close, Escape
+  // or a click outside the box shuts it, and focus goes back to that i.
+  const info = main.querySelector('dialog.suggestion-info');
+  let infoOpener = null;
+  list.addEventListener('click', (e) => {
+    const button = e.target.closest('button.suggestion-info-open');
+    if (!button) return;
+    const suggestion = suggestions[Number(button.dataset.index)];
+    if (!suggestion) return;
+    infoOpener = button;
+    info.querySelector('.suggestion-info-body').innerHTML = renderSuggestionInfo(suggestion, { repo });
+    info.showModal();
+  });
+  // A click on the backdrop lands on the dialog itself; one on its own
+  // padding does too, so only a click beyond its edges closes it.
+  info.addEventListener('click', (e) => {
+    if (e.target !== info) return;
+    const r = info.getBoundingClientRect();
+    if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) info.close();
+  });
+  info.addEventListener('close', () => {
+    // A redraw since may have replaced the row: focus the i drawn for the same suggestion.
+    const index = infoOpener?.dataset.index;
+    infoOpener = null;
+    const again = index != null ? list.querySelector(`button.suggestion-info-open[data-index="${index}"]`) : null;
+    again?.focus();
+  });
+
+  // The dropdown: pick a number, the row goes there.
+  list.addEventListener('change', (e) => {
+    const li = e.target.closest('li.suggestion');
+    if (!li || !state) return;
+    if (e.target.matches('select.place')) move(placeOf(li), Number(e.target.value) - 1);
+    else if (e.target.matches('.keep input')) {
+      // While filing, the plan is already made: a tick now would not be what was filed.
+      if (filing) { e.target.checked = !e.target.checked; return; }
+      const i = Number(li.dataset.index);
+      state.dropped = e.target.checked ? state.dropped.filter((d) => d !== i) : [...new Set([...state.dropped, i])];
+      save();
+    }
+  });
+  // The keyboard: the arrow keys on a row's handle move it up or down one, Home and End to the ends.
+  list.addEventListener('keydown', (e) => {
+    if (!e.target.matches('.drag-handle') || !state) return;
+    const from = placeOf(e.target.closest('li.suggestion'));
+    const to = { ArrowUp: from - 1, ArrowDown: from + 1, Home: 0, End: state.order.length - 1 }[e.key];
+    if (to === undefined) return;
+    e.preventDefault();
+    move(from, to, true);
+  });
+  // The mouse: drag a row onto another and it takes that row's place.
+  let dragging = null;
+  list.addEventListener('dragstart', (e) => {
+    const li = e.target.closest?.('li.suggestion');
+    if (!li || filing) return;
+    dragging = placeOf(li);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', li.dataset.index);
+    li.classList.add('dragging');
+  });
+  list.addEventListener('dragover', (e) => {
+    if (dragging == null || !e.target.closest('li.suggestion')) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+  });
+  list.addEventListener('drop', (e) => {
+    const li = e.target.closest('li.suggestion');
+    if (dragging == null || !li) return;
+    e.preventDefault();
+    const from = dragging;
+    dragging = null;
+    move(from, placeOf(li));
+  });
+  list.addEventListener('dragend', () => {
+    dragging = null;
+    for (const li of list.querySelectorAll('.dragging')) li.classList.remove('dragging');
+  });
+
+  // File in This Order: file what is kept and not yet filed, then put the kept ones still waiting in order.
+  fileButton.addEventListener('click', async () => {
+    if (!state || filing || running) return;
+    const plan = filingPlan(state);
+    if (!plan.kept.length) {
+      say(fileNote, 'Tick at least one suggestion to file.', 'error');
+      return;
+    }
+    filing = true;
+    fileButton.disabled = true;
+    run.disabled = true;
+    const done = (text, kind) => {
+      filing = false;
+      fileButton.disabled = running;
+      run.disabled = running;
+      // A run that answered while filing is drawn now, over the rows just filed from.
+      if (held !== undefined) {
+        const latest = held;
+        held = undefined;
+        show(latest);
+      } else drawRows();
+      say(fileNote, text, kind);
+    };
+    const filedNow = [];
+    const unchecked = [];
+    const named = () => (filedNow.length ? `Filed ${andList(filedNow)}. ` : '');
+    const uncheckedLine = () => (unchecked.length
+      ? `The project check could not run for ${andList(unchecked.map((t) => `"${t}"`))}, so ${unchecked.length === 1 ? 'it' : 'they'} went into the project shown. `
+      : '');
+    for (const i of plan.file) {
+      const s = suggestions[i];
+      say(fileNote, `${named()}Checking the project for "${s.title}"…`);
+      // The same check as Add Task; one that cannot run files here, and the note says so.
+      let suggest = null;
+      try {
+        ({ suggest } = await api('POST', `/projects/${encodeURIComponent(slug)}/tickets/check`, { name: s.title, description: s.description ?? '' }));
+      } catch (err) {
+        if (err instanceof SignedOut) return drawSignIn(`You were signed out; ${filedNow.length ? `${andList(filedNow)} ${filedNow.length === 1 ? 'was' : 'were'} filed and the rest were not` : 'nothing was filed'}. Press File in This Order again once signed in.`);
+        unchecked.push(s.title);
+      }
+      let into = slug;
+      if (suggest) {
+        const choice = await askProject(question, suggest);
+        if (choice === 'move') into = suggest.slug;
+        else if (choice !== 'keep') return done(`${named()}${uncheckedLine()}Stopped before "${s.title}": nothing more was filed, and no order was set. Press File in This Order again to go on.`, 'error');
+      }
+      say(fileNote, `${named()}Filing "${s.title}"…`);
+      let ticket;
+      try {
+        ticket = await api('POST', `/projects/${encodeURIComponent(into)}/tickets`, { name: s.title, description: s.description ?? '', status: 'Requested' });
+      } catch (err) {
+        if (err instanceof SignedOut) return drawSignIn(`You were signed out; "${s.title}" may not have been filed. Check the Requested stage before pressing File in This Order again.`);
+        return done(`${named()}${uncheckedLine()}Not filed: "${s.title}": ${err instanceof Refused ? err.message : SUGGEST_NEXT_UNANSWERED} No order was set. Press File in This Order again to file the rest.`, 'error');
+      }
+      // Kept at once, so a retry never files it again.
+      state.filed[i] = { id: ticket.id, project: into };
+      save();
+      filedNow.push(ticket.id);
+    }
+    // Tickets an earlier press filed may have moved on since: read each back, so only the ones still waiting get a place.
+    const now = {};
+    const fresh = new Set(plan.file);
+    for (const i of plan.kept) {
+      if (fresh.has(i) || !state.filed[i]) continue;
+      const f = state.filed[i];
+      try {
+        now[i] = await api('GET', `/tickets/${encodeURIComponent(f.id)}`, undefined, { unrecorded: true });
+      } catch (err) {
+        if (err instanceof SignedOut) return drawSignIn(`You were signed out; ${named() || 'nothing new was filed. '}Their order was not set: press File in This Order again once signed in.`);
+        if (err instanceof Refused && err.status === 404) { now[i] = null; continue; }
+        return done(`${named()}${uncheckedLine()}Their order was not set: ${f.id} could not be read (${err instanceof Refused ? err.message : SUGGEST_NEXT_UNANSWERED}) Press File in This Order again: nothing is filed twice.`, 'error');
+      }
+    }
+    const order = orderPlan(plan.kept, state.filed, now);
+    // A ticket that is gone is unticked, so no later press names it and every later order call can still work.
+    if (order.gone.length) {
+      state.dropped = [...new Set([...state.dropped, ...order.gone.map((g) => g.index)])];
+      save();
+    }
+    const aside = [
+      order.leftAlone.length ? `${andList(order.leftAlone.map((t) => t.id))} ${order.leftAlone.length === 1 ? 'is' : 'are'} already past Requested, so ${order.leftAlone.length === 1 ? 'its' : 'their'} place was left alone.` : '',
+      order.gone.length ? `${andList(order.gone.map((t) => t.id))} ${order.gone.length === 1 ? 'is' : 'are'} no longer in this project (deleted or moved), so ${order.gone.length === 1 ? 'it was' : 'they were'} left out of the order and unticked.` : '',
+    ].filter(Boolean).join(' ');
+    say(fileNote, `${named()}Setting their order…`);
+    for (const [project, ids] of order.byProject) {
+      try {
+        await api('POST', `/projects/${encodeURIComponent(project)}/tickets/order`, { ids });
+      } catch (err) {
+        if (err instanceof SignedOut) return drawSignIn(`You were signed out; ${named() || 'nothing new was filed. '}Their order was not set: press File in This Order again once signed in.`);
+        return done(`${named()}${uncheckedLine()}Their order was not set (${andList(ids)}): ${err instanceof Refused ? err.message : SUGGEST_NEXT_UNANSWERED} Press File in This Order again: nothing is filed twice.`, 'error');
+      }
+    }
+    const ordered = [...order.byProject.values()].flat();
+    const inOrder = ordered.length ? `In order: ${ordered.join(', ')}.` : 'No order was set: none of them is still in Requested.';
+    done(`${named() || 'Nothing new to file. '}${uncheckedLine()}${inOrder}${aside ? ` ${aside}` : ''}`, unchecked.length || order.gone.length ? 'error' : 'quiet');
+    // The new tickets show in their stage once the page reads again; the box keeps its rows and says what was filed.
+    const note = fileNote.textContent;
+    const noteKind = fileNote.classList.contains('error') ? 'error' : 'quiet';
+    try {
+      await drawAgain(() => drawProject(slug, view));
+      const again = main.querySelector('details.add-task .suggest-next');
+      if (again) {
+        again.closest('details.add-task').open = true;
+        const n = again.querySelector('.file-note');
+        n.classList.remove('quiet', 'error');
+        n.classList.add(noteKind);
+        n.textContent = note;
+      }
+    } catch (err) {
+      if (err instanceof SignedOut) return drawSignIn(`You were signed out after filing: ${note}`);
+    }
+  });
+
+  // On opening the page: the last list, on its own.
+  (async () => {
+    const latest = await read();
+    if (!latest || !box.isConnected) return;
+    show(latest);
+    // Only on the Suggest side: a run or unfiled rows never flip the checkbox (SP-303).
+    if (mayOpen && savedSuggestSwitch() && (running || (latest.state === 'done' && state && filingPlan(state).file.length))) fold.open = true;
+  })();
 }
 
 /**
@@ -2084,8 +2942,8 @@ function spanOf(ms) {
 }
 
 /**
- * The Reporting page: how many tasks were finished and started in each of
- * the server's time ranges, and how many are open in each stage now, for the
+ * The Reporting page: how many tasks were started and finished in each of
+ * the server's time ranges (Task Productivity), and how many are open in each stage now, for the
  * selected project or for all of them, and how the finished ones flowed:
  * time to finish, how many were sent back, and time waiting on the
  * operator, and the human hours of work the finished ones add up to, by the
@@ -2094,15 +2952,31 @@ function spanOf(ms) {
  * the tasks that took the most time in the range picked. Every figure is worked out by the
  * server (pageData.mjs reportsOf); the page only draws them, so the ranges
  * and the stages come from its answer, never typed out here. A stage wears
- * its Settings colour as properties, never as markup.
+ * its Settings colour as properties, never as markup. Task Productivity
+ * also has its own range (SP-240): a Start Date and an End Date picker in
+ * its header, 30 days ago to today on arrival (`range` keeps the picked dates
+ * when the project changes); a picker change asks the server again and
+ * redraws only those cells. Its last column, Growth Rate (SP-241), shows
+ * the server's growth figures for the timeframe picked in its header
+ * (Weekly on arrival), redrawn from the same answer. Merge Conflicts
+ * (SP-295, conflictSection) shows conflicts per merged pull request by the
+ * pipeline settings in force, and lists each conflict.
  */
-async function drawReporting(chosen) {
+async function drawReporting(chosen, range = defaultReportRange()) {
   const { projects } = await api('GET', '/projects');
   const slug = chosen !== undefined ? chosen : (projects.some((p) => p.slug === savedProject()) ? savedProject() : '');
-  const r = await api('GET', `/reports${slug ? `?project=${encodeURIComponent(slug)}` : ''}`);
+  const r = await api('GET', reportsPath(slug, range));
   setTitle('Reporting · Tracker');
   const head = `<tr><th>Report</th>${r.ranges.map((g) => `<th class="count">${escapeHtml(g.label)}</th>`).join('')}</tr>`;
-  const line = (label, counts) => `<tr><td class="name">${label}</td>${r.ranges.map((g) => `<td class="count">${Number(counts[g.key])}</td>`).join('')}</tr>`;
+  // Task Productivity's own range (SP-240): a Start Date and an End Date column after the fixed ones, a picker in each header.
+  const productivityHead = `<tr><th>Report</th>${r.ranges.map((g) => `<th class="count">${escapeHtml(g.label)}</th>`).join('')}`
+    + `<th class="count custom-range"><label for="report-from">Start Date</label><input type="date" id="report-from" value="${escapeHtml(range.from)}"></th>`
+    + `<th class="count custom-range"><label for="report-to">End Date</label><input type="date" id="report-to" value="${escapeHtml(range.to)}"></th>`
+    // Growth Rate (SP-241): the last column, its timeframe picked in the header; the periods come from the server's answer.
+    + `<th class="count custom-range growth-rate"><label for="report-growth">Growth Rate</label><select id="report-growth">${r.growthPeriods.map((g, i) => `<option value="${escapeHtml(g.key)}"${i === 0 ? ' selected' : ''}>${escapeHtml(g.label)}</option>`).join('')}</select></th></tr>`;
+  const line = (label, counts) => `<tr><td class="name">${label}</td>${r.ranges.map((g) => `<td class="count">${Number(counts[g.key])}</td>`).join('')}`
+    + `<td class="count" data-custom-from></td><td class="count" data-custom="${counts === r.started ? 'started' : 'finished'}"></td>`
+    + `<td class="count" data-growth="${counts === r.started ? 'started' : 'finished'}"></td></tr>`;
   // A flow row: one cell per range, "none finished in this range" where nothing finished.
   const flowLine = (label, cell) => `<tr><td class="name">${label}</td>${r.ranges.map((g) => {
     const f = r.flow[g.key];
@@ -2139,6 +3013,7 @@ async function drawReporting(chosen) {
     const rows = t.tickets.map((x) => `<tr><td><a href="/t/${encodeURIComponent(x.id)}">${escapeHtml(x.id)}</a></td><td class="name">${escapeHtml(x.name)}</td><td class="count">${escapeHtml(bucketSpan(x.total))}</td>${BUCKET_LABELS.map(([key]) => `<td class="count">${escapeHtml(bucketSpan(x[key]))}</td>`).join('')}</tr>`).join('');
     return `<table class="counts report time-split-tickets"><thead><tr><th>Task</th><th>Name</th><th class="count">Total</th>${BUCKET_LABELS.map(([, label]) => `<th class="count">${label}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table>`;
   };
+  const conflictsHtml = conflictSection(r.conflicts);
   const open = r.open.map((s) => `<tr data-stage="${escapeHtml(s.status)}"><td class="status">${escapeHtml(s.status)}</td><td class="count">${Number(s.count)}</td></tr>`).join('');
   main.innerHTML = `
     <h1>Reporting</h1>
@@ -2146,9 +3021,10 @@ async function drawReporting(chosen) {
       <label for="report-project">Project</label>
       <select id="report-project"><option value="">All projects</option>${projects.map((p) => `<option value="${escapeHtml(p.slug)}"${p.slug === r.project ? ' selected' : ''}>${escapeHtml(p.name)}</option>`).join('')}</select>
     </form>
-    <h2>Tasks Finished and Started</h2>
-    <p class="quiet">Finished: moved to Live in that time and still Live. Started: filed in that time.</p>
-    <table class="counts report"><thead>${head}</thead><tbody>${line('Tasks finished', r.finished)}${line('Tasks started', r.started)}</tbody></table>
+    <h2>Task Productivity</h2>
+    <p class="quiet">Started: filed in that time. Finished: moved to Live in that time and still Live.</p>
+    <table class="counts report productivity"><thead>${productivityHead}</thead><tbody>${line('Tasks started', r.started)}${line('Tasks finished', r.finished)}</tbody></table>
+    <p class="quiet custom-range-note" hidden></p>
     <h2>Human Hours of Work Done</h2>
     <p class="quiet">For tasks finished in that time: the build loop's estimate, recorded on each pull request, of the hours an experienced programmer new to the code would take to do the same work. An estimate, not a measurement; tasks with none are left out of the total, and counted here.</p>
     <table class="counts report human-hours"><thead>${head}</thead><tbody>${hoursLine('Total', (h) => hoursOf(h.hours))}${estimatedLine}${hoursLine('Per day', (h) => `about ${Number(h.perDay)} human hour${Number(h.perDay) === 1 ? '' : 's'} a day`)}</tbody></table>
@@ -2165,13 +3041,14 @@ async function drawReporting(chosen) {
     flowLine('Total', (f) => span(f.waiting.total)) + flowLine('Middle (median)', (f) => span(f.waiting.median)))}
     <p class="waiting-now">Waiting on you right now: <strong>${Number(r.waitingNow)}</strong> task${Number(r.waitingNow) === 1 ? '' : 's'} in Needs your input or Ready to launch.</p>
     <h2>Where the Time Goes</h2>
-    <p class="quiet">Every task's time in that range, open ones too, Live left out. Working: in Building. Waiting on You: in Needs your input or Ready to launch with your reply not yet the newest comment. Broken: from a loop's failure note on the task until its next move or your next comment. Waiting for a Lane: everything else, including all of In review, since nothing marks when a review starts. A loop that failed without writing on the task shows as waiting, not broken.</p>
+    <p class="quiet">Every task's time in that range, open ones too, Live left out. Working: in Building. Waiting on You: in Needs your input or Ready to launch with your reply not yet the newest comment, and no merge word of yours still standing. Broken: from a loop's failure note on the task until its next move or your next comment. Waiting for a Lane: everything else, including all of In review, since nothing marks when a review starts. A loop that failed without writing on the task shows as waiting, not broken.</p>
     <table class="counts report time-split"><thead>${head}</thead><tbody>${splitTable}</tbody></table>
     <form class="report-scope time-split-range">
       <label for="time-split-range">Tasks with the Most Time In</label>
       <select id="time-split-range">${r.ranges.map((g, i) => `<option value="${escapeHtml(g.key)}"${i === 0 ? ' selected' : ''}>${escapeHtml(g.label)}</option>`).join('')}</select>
     </form>
     <div class="time-split-list">${splitTickets(r.ranges[0]?.key)}</div>
+    ${conflictsHtml}
     <h2>Open Now</h2>
     <p class="quiet">Tasks in each stage that is not Live.</p>
     <table class="counts stages"><thead><tr><th>Stage</th><th class="count">Tasks</th></tr></thead><tbody>${open}</tbody></table>`;
@@ -2187,10 +3064,167 @@ async function drawReporting(chosen) {
   main.querySelector('#time-split-range').addEventListener('change', (e) => {
     main.querySelector('.time-split-list').innerHTML = splitTickets(e.target.value);
   });
+  // Growth Rate: the picker redraws both cells from the answer already here, never asking the server again.
+  const growthPicker = main.querySelector('#report-growth');
+  const showGrowth = () => {
+    const period = r.growth[growthPicker.value];
+    for (const cell of main.querySelectorAll('[data-growth]')) cell.innerHTML = growthCell(period?.[cell.dataset.growth]);
+  };
+  showGrowth();
+  growthPicker.addEventListener('change', showGrowth);
+  // The custom range: a picker change asks again and redraws only those cells; the newest ask wins.
+  const fromPicker = main.querySelector('#report-from');
+  const toPicker = main.querySelector('#report-to');
+  let asked = 0;
+  const showCustom = (figures, note) => {
+    for (const cell of main.querySelectorAll('[data-custom-from]')) {
+      cell.innerHTML = figures ? `<span class="quiet">from ${escapeHtml(dayLabel(fromPicker.value))}</span>` : '';
+    }
+    for (const cell of main.querySelectorAll('[data-custom]')) {
+      cell.textContent = figures ? String(Number(figures[cell.dataset.custom])) : '';
+    }
+    const p = main.querySelector('.custom-range-note');
+    p.textContent = note ?? '';
+    p.hidden = !note;
+  };
+  const rangeProblem = (picked) => {
+    if (!picked.from || !picked.to) return 'Pick both a start date and an end date.';
+    return picked.from > picked.to ? 'The start date is after the end date.' : null;
+  };
+  showCustom(r.custom ?? null, rangeProblem(range));
+  const repick = async () => {
+    const picked = { from: fromPicker.value, to: toPicker.value };
+    const ask = ++asked;
+    const problem = rangeProblem(picked);
+    if (problem) { showCustom(null, problem); return; }
+    const again = await api('GET', reportsPath(r.project ?? '', picked));
+    if (ask === asked) showCustom(again.custom, null);
+  };
+  for (const picker of [fromPicker, toPicker]) {
+    picker.addEventListener('change', () => {
+      repick().catch((err) => (err instanceof SignedOut ? drawSignIn() : showError(err)));
+    });
+  }
   main.querySelector('#report-project').addEventListener('change', (e) => {
-    drawReporting(e.target.value).catch((err) => (err instanceof SignedOut ? drawSignIn() : showError(err)));
+    drawReporting(e.target.value, { from: fromPicker.value, to: toPicker.value }).catch((err) => (err instanceof SignedOut ? drawSignIn() : showError(err)));
   });
   putTrail([{ label: 'Reporting' }]);
+}
+
+/** A share as a figure to two places: "0.29", or a quiet phrase when nothing merged. */
+const perMerge = (rate) => (rate == null ? '<span class="quiet">nothing merged</span>' : escapeHtml(Number(rate).toFixed(2)));
+
+/** What each note kind is called on the page. */
+const CONFLICT_KINDS = { 'main-moved': 'after a merge', 'merge-refused': 'merge refused', 'catch-up': 'catch-up filed' };
+
+/**
+ * The Reporting page's Merge Conflicts section (SP-295) from the server's
+ * `conflicts` answer (tracker/conflictReport.mjs works every figure out):
+ * conflicts per merged pull request by the settings in force, the files
+ * that conflict most, how many were between tickets split from one
+ * request, and every conflict, newest first, each linking to its ticket.
+ */
+function conflictSection(c) {
+  if (!c) return '';
+  const intro = `<h2>Merge Conflicts</h2>
+    <p class="quiet">A conflict: a pull request that stopped merging into main, from the loops' notes (a merge that left it conflicting, a merge word refused for a conflict, or a catch-up ticket filed). Notes on one pull request count once until it merges cleanly again. Each is counted under the wake times and work-in-progress cap in force when it happened; merges are counted the same way, so the last column compares settings fairly. All time.</p>`;
+  if (!c.merged && !c.total) return `${intro}<p class="quiet">No merges or conflicts recorded yet.</p>`;
+  const range = (g) => (g.since ? `${escapeHtml(when(g.since))} to ${escapeHtml(when(g.until))}` : '');
+  const settingRows = c.bySetting.map((g) => `<tr><td class="name">${escapeHtml(g.setting)}</td><td>${range(g)}</td><td class="count">${Number(g.merged)}</td><td class="count">${Number(g.conflicts)}</td><td class="count">${perMerge(g.rate)}</td></tr>`).join('');
+  const total = `<tr class="total"><td class="name">All settings</td><td></td><td class="count">${Number(c.merged)}</td><td class="count">${Number(c.total)}</td><td class="count">${perMerge(c.rate)}</td></tr>`;
+  const files = c.topFiles.length
+    ? `<table class="counts report conflict-files"><thead><tr><th>File</th><th class="count">Conflicts</th></tr></thead><tbody>${c.topFiles.map((f) => `<tr><td class="name"><code>${escapeHtml(f.file)}</code></td><td class="count">${Number(f.count)}</td></tr>`).join('')}</tbody></table>
+      <p class="quiet">From the ${Number(c.withFiles)} of ${Number(c.total)} conflicts whose note names its files.</p>`
+    : '<p class="quiet">No conflict note names its files yet.</p>';
+  const siblings = `<p class="conflict-siblings">Between tickets split from one request: <strong>${Number(c.siblings.count)}</strong> of the ${Number(c.siblings.known)} conflicts whose cause is known.</p>`;
+  const cause = (x) => {
+    if (!x.causedBy) return '<span class="quiet">not known</span>';
+    const pr = `PR #${Number(x.causedBy.pr)}`;
+    const ticket = x.causedBy.ticket ? ` (<a href="/t/${encodeURIComponent(x.causedBy.ticket)}">${escapeHtml(x.causedBy.ticket)}</a>)` : '';
+    return `${x.causedBy.inferred ? '<span class="quiet">probably</span> ' : ''}${pr}${ticket}`;
+  };
+  const rows = c.conflicts.map((x) => `<tr>
+      <td class="when">${escapeHtml(when(x.at))}</td>
+      <td class="ticket"><a href="/t/${encodeURIComponent(x.ticket)}">${escapeHtml(x.ticket)}</a></td>
+      <td class="name">${escapeHtml(x.name)}</td>
+      <td class="count">${x.pr == null ? '' : `#${Number(x.pr)}`}</td>
+      <td>${x.kinds.map((k) => escapeHtml(CONFLICT_KINDS[k] ?? k)).join(', ')}</td>
+      <td>${cause(x)}</td>
+      <td>${escapeHtml(statusName(x.status))}</td>
+      <td class="count">${x.prOpenMs == null ? '<span class="quiet">not known</span>' : escapeHtml(spanOf(x.prOpenMs))}</td>
+      <td class="count">${Number(x.openPrs)}</td>
+      <td>${x.sibling == null ? '' : x.sibling ? 'yes' : 'no'}</td>
+      <td class="settings">${escapeHtml(x.setting)}</td>
+      <td class="files">${x.files.length ? x.files.map((f) => `<code>${escapeHtml(f)}</code>`).join(' ') : '<span class="quiet">not named</span>'}</td>
+    </tr>`).join('');
+  const list = c.conflicts.length
+    ? `<div class="conflict-scroll"><table class="counts report conflict-list"><thead><tr><th>When</th><th>Task</th><th>Name</th><th class="count">Pull Request</th><th>Seen As</th><th>Caused By</th><th>Stage Then</th><th class="count">Open For</th><th class="count">Open Pull Requests</th><th>Siblings</th><th>Settings Then</th><th>Files</th></tr></thead><tbody>${rows}</tbody></table></div>
+      ${c.total > c.listed ? `<p class="quiet">The newest ${Number(c.listed)} of ${Number(c.total)} are listed; the counts above cover every one.</p>` : ''}`
+    : '<p class="quiet">No conflict recorded yet.</p>';
+  return `${intro}
+    <table class="counts report conflict-settings"><thead><tr><th>Settings in Force</th><th>Dates</th><th class="count">Merged</th><th class="count">Conflicts</th><th class="count">Per Merged Pull Request</th></tr></thead><tbody>${settingRows}${total}</tbody></table>
+    <p class="quiet">Open Pull Requests counts the project's tickets with a pull request opened and not yet merged at that moment; Caused By says "probably" where no note named the merge and it is the newest one before. Siblings: whether the two tickets were split from one request.</p>
+    ${siblings}
+    <h3>Files That Conflict Most</h3>
+    ${files}
+    <h3>Every Conflict</h3>
+    ${list}`;
+}
+
+/**
+ * One Growth Rate cell (SP-241) from the server's growth figure: the change
+ * with its sign ("+25%", "-10%", "0%"), or a quiet phrase when there is no
+ * fair number: not enough history yet, or none in the period before.
+ */
+function growthCell(figure) {
+  if (!figure) return '';
+  if (figure.change == null) {
+    return `<span class="quiet">${figure.reason === 'too-young' ? 'not enough history yet' : 'none in the period before'}</span>`;
+  }
+  const n = Number(figure.change);
+  return `${n > 0 ? '+' : ''}${n}%`;
+}
+
+/** A date picker's value (YYYY-MM-DD) for a local calendar day. */
+function pickerDay(date) {
+  const two = (n) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${two(date.getMonth() + 1)}-${two(date.getDate())}`;
+}
+
+/** The Task Productivity table's range on arrival: 30 days ago to today, in the browser's own time zone. */
+function defaultReportRange(today = new Date()) {
+  const start = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 30);
+  return { from: pickerDay(start), to: pickerDay(today) };
+}
+
+/** A picker's YYYY-MM-DD as a local Date at `hours:minutes:seconds.ms`, or null when it is not one. */
+function localDay(value, ...time) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value ?? '');
+  return m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), ...time) : null;
+}
+
+/** "Oct 14, 2026" for a picker's value. */
+function dayLabel(value) {
+  const day = localDay(value, 0, 0, 0, 0);
+  return day ? day.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : value;
+}
+
+/**
+ * GET /reports for a project ('' for all) and, when both pickers hold a
+ * date with the start not after the end, the custom range from the start of
+ * the start date to the end of the end date, local time (SP-240).
+ */
+function reportsPath(slug, range) {
+  const query = new URLSearchParams();
+  if (slug) query.set('project', slug);
+  const from = localDay(range?.from, 0, 0, 0, 0);
+  const to = localDay(range?.to, 23, 59, 59, 999);
+  if (from && to && from <= to) {
+    query.set('from', from.toISOString());
+    query.set('to', to.toISOString());
+  }
+  const text = query.toString();
+  return `/reports${text ? `?${text}` : ''}`;
 }
 
 /**
@@ -2199,6 +3233,11 @@ async function drawReporting(chosen) {
  * all; the page then reads the colours back and says they were saved only
  * when what it reads is what it sent. A loop's sign-in is refused by the
  * server, and the page shows that refusal as it is.
+ *
+ * Two tabs (SP-289), chosen from a menu under the heading: Pipeline Controls
+ * (shown first) and Styles (Stage Colours). The chosen tab is kept in the
+ * address (`#pipeline-controls`, `#styles`), so a reload or a shared link
+ * opens the same one.
  */
 async function drawSettings() {
   const { stages } = await api('GET', '/stage-colours');
@@ -2215,15 +3254,29 @@ async function drawSettings() {
     </tr>`;
   main.innerHTML = `
     <h1>Settings</h1>
-    <h2>Stage Colours</h2>
-    <p class="quiet">Choose a colour for each stage of the loop. The same colours show for everyone.</p>
-    <form class="colours">
-      <table class="colours"><thead><tr><th>Stage</th><th>Colour</th><th></th><th></th></tr></thead><tbody>${stages.map(row).join('')}</tbody></table>
-      <div class="row"><button type="submit">Save</button><span class="note"></span></div>
-    </form>
-    <h2>Pipeline Controls</h2>
-    <p class="quiet">How each project's loop runs, for experimenting with the pipeline. Everyone can see them; only a project's operator can change them. Every change is logged below its project.</p>
-    <div class="pipeline-controls">${controls.length ? '' : '<p class="quiet">No projects to show.</p>'}</div>`;
+    <nav class="settings-tabs">${SETTINGS_TABS.map((t) => `<a href="#${t.id}" data-tab="${t.id}">${t.title}</a>`).join('')}</nav>
+    <div class="settings-tab" data-tab="pipeline-controls">
+      <p class="quiet">How each project's loop runs, for experimenting with the pipeline. Everyone can see them; only a project's operator can change them. Every change is logged below its project.</p>
+      <div class="pipeline-controls">${controls.length ? '' : '<p class="quiet">No projects to show.</p>'}</div>
+    </div>
+    <div class="settings-tab" data-tab="styles">
+      <h2>Stage Colours</h2>
+      <p class="quiet">Choose a colour for each stage of the loop. The same colours show for everyone.</p>
+      <form class="colours">
+        <table class="colours"><thead><tr><th>Stage</th><th>Colour</th><th></th><th></th></tr></thead><tbody>${stages.map(row).join('')}</tbody></table>
+        <div class="row"><button type="submit">Save</button><span class="note"></span></div>
+      </form>
+    </div>`;
+  showSettingsTab(settingsTabAt());
+  for (const a of main.querySelectorAll('nav.settings-tabs a')) {
+    a.addEventListener('click', (e) => {
+      // The tab changes in place: no redraw, so nothing typed is lost.
+      e.preventDefault();
+      e.stopPropagation();
+      history.replaceState(null, '', `${location.pathname}${location.search}#${a.dataset.tab}`);
+      showSettingsTab(a.dataset.tab);
+    });
+  }
   drawPipelineControls(main.querySelector('div.pipeline-controls'), controls);
   const form = main.querySelector('form.colours');
   const rows = [...form.querySelectorAll('tbody tr')];
@@ -2262,6 +3315,27 @@ async function drawSettings() {
   });
 }
 
+/** The Settings page's tabs (SP-289), in menu order; the first opens by default. */
+const SETTINGS_TABS = [
+  { id: 'pipeline-controls', title: 'Pipeline Controls' },
+  { id: 'styles', title: 'Styles' },
+];
+
+/** The Settings tab the address names (`#styles`), or the first one. */
+function settingsTabAt() {
+  const named = location.hash.slice(1);
+  return SETTINGS_TABS.some((t) => t.id === named) ? named : SETTINGS_TABS[0].id;
+}
+
+/** Show one Settings tab, hide the others, and mark its menu item chosen. */
+function showSettingsTab(id) {
+  for (const tab of main.querySelectorAll('div.settings-tab')) tab.hidden = tab.dataset.tab !== id;
+  for (const a of main.querySelectorAll('nav.settings-tabs a')) {
+    if (a.dataset.tab === id) a.setAttribute('aria-current', 'page');
+    else a.removeAttribute('aria-current');
+  }
+}
+
 /**
  * The Settings page's Pipeline Controls (SP-224): one section per project
  * (renderPipelineControls), each control with its own Save. A Save sends the
@@ -2273,14 +3347,45 @@ async function drawSettings() {
 function drawPipelineControls(box, views) {
   const notes = new Map();
   const draw = () => {
-    box.innerHTML = views.map((v) => renderPipelineControls(v, notes.get(v.project.slug) ?? {})).join('');
-    for (const section of box.querySelectorAll('section.pipeline-controls')) {
+    // A box open before the redraw stays open after it (SP-289).
+    const open = new Set([...box.querySelectorAll('details.pipeline-controls[open]')].map((d) => d.dataset.project));
+    box.innerHTML = views.map((v) => renderPipelineControls(v, notes.get(v.project.slug) ?? {}, open.has(v.project.slug))).join('');
+    for (const section of box.querySelectorAll('details.pipeline-controls')) {
       const slug = section.dataset.project;
       for (const tr of section.querySelectorAll('tr[data-control]')) {
         const button = tr.querySelector('button');
         if (button) button.addEventListener('click', () => save(slug, tr, button));
       }
+      for (const button of section.querySelectorAll('button[data-release-action]')) {
+        button.addEventListener('click', () => moveRelease(slug, button.dataset.releaseAction, section));
+      }
     }
+  };
+  /**
+   * Move to Newest or Roll Back (SP-275): the write, then the project's
+   * controls read again, and "Now runs" only when the release read back is
+   * the one the tracker says it named. A refusal shows its reason.
+   */
+  const moveRelease = async (slug, action, section) => {
+    const mine = notes.get(slug) ?? {};
+    notes.set(slug, mine);
+    for (const b of section.querySelectorAll('button[data-release-action]')) b.disabled = true;
+    const note = section.querySelector('.release-actions .note');
+    if (note) { note.className = 'note quiet'; note.textContent = 'Saving…'; }
+    try {
+      const answer = await api('POST', `/releases/${encodeURIComponent(slug)}/${action}`, {});
+      const to = answer.saved?.to;
+      // Read back before saying it worked.
+      const back = await api('GET', `/pipeline-controls/${encodeURIComponent(slug)}`);
+      const now = back.release?.current?.release ?? null;
+      if (!to || now !== to) throw new Error(`the tracker read it back as ${now ?? 'no release'}, not ${to ?? 'the one asked for'}.`);
+      mine.release = { ok: true, text: answer.saved.changed ? `Saved: it now runs ${to}.` : `Saved (it already ran ${to}).` };
+      views = views.map((v) => (v.project.slug === slug ? back : v));
+    } catch (err) {
+      if (err instanceof SignedOut) return drawSignIn('You were signed out; the release was not changed.');
+      mine.release = { ok: false, text: `Not saved: ${err.message}` };
+    }
+    draw();
   };
   const save = async (slug, tr, button) => {
     const key = tr.dataset.control;
@@ -2307,7 +3412,28 @@ function drawPipelineControls(box, views) {
     draw();
   };
   draw();
+  // While a pause is draining (SP-237), its line is read again every
+  // DRAIN_REFRESH_MS, so "Draining" turns to "Paused: nothing in flight" as
+  // the last pass finishes. Only the drain lines are redrawn, never a control
+  // being edited; it stops once the page is left.
+  const timer = setInterval(async () => {
+    if (!box.isConnected) return clearInterval(timer);
+    if (!box.querySelector('.drain.draining')) return;
+    let fresh;
+    try {
+      ({ projects: fresh = [] } = await api('GET', '/pipeline-controls'));
+    } catch {
+      return; // the next tick tries again; the line already shown stays
+    }
+    for (const v of fresh) {
+      const slot = [...box.querySelectorAll('details.pipeline-controls')].find((s) => s.dataset.project === v.project.slug)?.querySelector('.drain-box');
+      if (slot) slot.innerHTML = drainLine(v);
+    }
+  }, DRAIN_REFRESH_MS);
 }
+
+/** How often a draining pause's line is read again on the Settings page. */
+const DRAIN_REFRESH_MS = 15_000;
 
 /**
  * The Users page: everyone who has an account (name and email), the open
@@ -2632,6 +3758,68 @@ async function drawDocs(done = '', problem = '', section = 'files') {
 }
 
 /**
+ * The Topics page (SP-243): the topics of the project picked here (or on
+ * the Projects page, else the first) and a Create Topic form, beside the
+ * tags on the project's tasks (SP-307, read from its board; a board that
+ * cannot be read says so in the Tags half and leaves Topics working). Picking
+ * another project here selects it, as the Tasks page's picker does. A blank
+ * name is refused on the page before anything is sent; after a create the
+ * list is read again, and the page says it worked only when the new topic
+ * is on it. `done` and `problem` are the line the last create left.
+ */
+async function drawTopics(done = '', problem = '') {
+  const { projects } = await api('GET', '/projects');
+  setTitle('Topics · Tracker');
+  putTrail([{ label: 'Topics' }]);
+  if (!projects.length) {
+    main.innerHTML = '<h1>Topics</h1><p class="quiet">There are no projects yet.</p>';
+    return;
+  }
+  const project = projects.find((p) => p.slug === savedProject()) ?? projects[0];
+  const topicsPath = `/projects/${encodeURIComponent(project.slug)}/topics`;
+  const [{ topics }, tags] = await Promise.all([
+    api('GET', topicsPath),
+    api('GET', `/projects/${encodeURIComponent(project.slug)}/board`).then(projectTagCounts, (err) => { if (err instanceof SignedOut) throw err; return null; }),
+  ]);
+  main.innerHTML = renderTopics({ projects, project, topics, tags }, { timeOf: when, done, problem });
+  const note = main.querySelector('.topic-note');
+  const say = (text, failed = false) => { note.className = `note topic-note ${failed ? 'error' : 'quiet'}`; note.textContent = text; };
+  const again = (text, failed) => drawAgain(() => drawTopics(failed ? '' : text, failed ? text : ''))
+    .catch((err) => (err instanceof SignedOut ? drawSignIn() : showError(err)));
+  main.querySelector('.project-picker select').addEventListener('change', (e) => {
+    const chosen = projects.find((p) => p.slug === e.target.value);
+    if (!chosen) return;
+    try {
+      localStorage.setItem(PROJECT_KEY, chosen.slug);
+      localStorage.setItem(PROJECT_NAME_KEY, chosen.name);
+    } catch { /* the page still works; it is only not remembered */ }
+    showProject();
+    again('', false);
+  });
+  const form = main.querySelector('form.create-topic');
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const name = form.querySelector('#topic-name').value.trim();
+    const description = form.querySelector('#topic-description').value.trim();
+    const button = form.querySelector('button');
+    if (!name) return say('Not created: a topic needs a name.', true);
+    button.disabled = true;
+    say(`Creating ${name}…`);
+    let made;
+    try {
+      made = await api('POST', topicsPath, { name, description });
+    } catch (err) {
+      if (err instanceof SignedOut) return drawSignIn(`You were signed out; ${name} was not created.`);
+      button.disabled = false;
+      return say(`Not created: ${err.message}`, true);
+    }
+    const back = await api('GET', topicsPath, undefined, { unrecorded: true }).catch(() => null);
+    const listed = back?.topics?.some((t) => t.id === made.id);
+    again(listed ? `Created ${made.name} in ${project.name}.` : `The tracker said ${made.name} was created, but ${back ? 'it is not listed when read back' : 'the list could not be read back'}.`, !listed);
+  });
+}
+
+/**
  * The Docs page in two columns (SP-212): the Quick Claude Commands pod down
  * the left third, `rest` (Context Documents, Task Files, Reference Docs and
  * Work Log) on the right. A narrow screen stacks the pod above the rest
@@ -2903,11 +4091,13 @@ async function route({ place = null } = {}) {
     const details = !newProject && /^\/projects\/([^/]+)$/.exec(location.pathname);
     const editProject = /^\/projects\/([^/]+)\/edit$/.exec(location.pathname);
     const tasks = location.pathname === '/tasks';
+    const consolePage = location.pathname === '/console';
     const isNew = location.pathname === '/new';
     const settings = location.pathname === '/settings';
     const reporting = location.pathname === '/reporting';
     const usersPage = location.pathname === '/users';
     const docsPage = location.pathname === '/docs';
+    const topicsPage = location.pathname === '/topics';
     const docPath = docAt();
     const docsCommand = commandAt();
     const docAny = underDocs();
@@ -2917,8 +4107,8 @@ async function route({ place = null } = {}) {
     const setupPage = !setupNew && /^\/setup\/([^/]+)$/.exec(location.pathname);
     const setupAny = setupNew || setupAnswers || setupPage;
     let following = false;
-    const waiting = !(setupAny || search || reporting || settings || usersPage || docsPage || docAny || isNew || ticket || projects || newProject || editProject || details || tasks || project);
-    markNav(reporting ? 'reporting' : settings ? 'settings' : usersPage ? 'users' : docsPage || docAny ? 'docs' : projects || newProject || details || editProject || setupAny ? 'projects' : ticket || project || tasks || isNew || search ? 'tasks' : 'waiting');
+    const waiting = !(setupAny || search || reporting || settings || usersPage || docsPage || topicsPage || docAny || isNew || ticket || projects || newProject || editProject || details || tasks || consolePage || project);
+    markNav(reporting ? 'reporting' : settings ? 'settings' : usersPage ? 'users' : topicsPage ? 'topics' : docsPage || docAny ? 'docs' : projects || newProject || details || editProject || setupAny ? 'projects' : ticket || project || tasks || consolePage || isNew || search ? 'tasks' : 'waiting');
     if (setupNew) {
       await drawSetupNew(null);
     } else if (setupAnswers) {
@@ -2933,6 +4123,8 @@ async function route({ place = null } = {}) {
       await drawSettings();
     } else if (usersPage) {
       await drawUsers();
+    } else if (topicsPage) {
+      await drawTopics();
     } else if (docsPage) {
       await drawDocs();
     } else if (docsCommand != null) {
@@ -2942,6 +4134,8 @@ async function route({ place = null } = {}) {
     } else if (isNew) {
       // The old New request address: the Tasks page with its Add Task box open.
       await drawTasks(savedView(), { adding: true });
+    } else if (consolePage) {
+      await drawConsole();
     } else if (ticket) {
       await drawTicket(decodeURIComponent(ticket[1]));
     } else if (projects) {
@@ -2954,7 +4148,7 @@ async function route({ place = null } = {}) {
       await drawProjectDetails(decodeURIComponent(details[1]));
     } else if (tasks || (project && project[2] == null)) {
       // "Tasks" in the header: the selected project, in the view last used.
-      await drawTasks(tasks ? savedView() : project[1]);
+      await drawTasks(tasks ? savedTasksView() : project[1]);
     } else if (project) {
       await drawProject(decodeURIComponent(project[2]), project[1]);
     } else {
@@ -2966,6 +4160,8 @@ async function route({ place = null } = {}) {
     // Waiting on you read the count as it drew; every other page reads it now.
     if (!waiting) await refreshCount();
     if (kept) lastDrawn = ticket || project || tasks || isNew || waiting ? { address: here(), reads } : null;
+    // The Console's "in 12 min" counts down on its own, so the beat draws it every time, changed or not.
+    if (kept && (consolePage || (tasks && here() === '/console'))) lastDrawn = { address: here(), reads, ticking: true };
     // Waiting on you skipped refreshCount, so the bus count in the header is read here.
     if (waiting) await refreshBus();
     // A setup page under way follows it every few seconds (the fast beat below).
@@ -3013,24 +4209,32 @@ async function drawAgain(draw) {
 /** Why this beat must leave the page alone, or null. */
 const hold = () => redrawHold({ hidden: document.hidden, drawing: drawing > 0, writing: writing > 0, dialog: Boolean(main.querySelector('dialog[open]')), fields: fieldsOf(main) });
 
+/** The page's areas that scroll sideways, whose place keepPlace keeps. */
+const SIDEWAYS = '.console';
+
 /**
  * Where he is on the page: how far down, which folding sections
  * (Details, each Tasks stage, the Add Task box, the Change panel) are open,
- * and how each Tasks table is sorted.
+ * how each Tasks table is sorted, and how far across the Console is scrolled.
  * `restore` puts them back on the page drawn again.
  */
 function keepPlace() {
   // A stage is known by its name alone, so a colour added on Settings between
   // two redraws (which changes its classes) does not lose its fold (SP-196).
-  const key = (d) => (d.dataset.stage ? `stage|${d.dataset.stage}` : d.className);
+  // A Settings project box (SP-289) is known by its project the same way.
+  const key = (d) => (d.dataset.stage ? `stage|${d.dataset.stage}` : d.dataset.project ? `project|${d.dataset.project}` : d.className);
   const open = new Map([...main.querySelectorAll('details')].map((d) => [key(d), d.open]));
   const y = window.scrollY;
   // Each stage's sort (SP-174), by stage, put back on the stage's new table.
   const sorts = new Map(sortableTables().filter(({ table }) => sorted.get(table)?.sort).map(({ table, stage }) => [stage, sorted.get(table).sort]));
+  // How far across each sideways-scrolling area is (the Console's stage
+  // columns, SP-233), so his own columns at the right stay in view.
+  const across = [...main.querySelectorAll(SIDEWAYS)].map((el) => el.scrollLeft);
   return {
     restore() {
       for (const d of main.querySelectorAll('details')) if (open.has(key(d))) d.open = open.get(key(d));
       for (const { table, stage } of sortableTables()) if (sorts.has(stage)) sorted.get(table)?.apply(sorts.get(stage));
+      [...main.querySelectorAll(SIDEWAYS)].forEach((el, i) => { if (i < across.length) el.scrollLeft = across[i]; });
       window.scrollTo(0, y);
     },
   };
@@ -3049,8 +4253,9 @@ async function refreshPage() {
   if (checking || !me || !drawn || drawn.address !== here() || hold()) return;
   checking = true;
   try {
-    const now = await Promise.all([...drawn.reads].map(([path]) => api('GET', path)));
-    const changed = [...drawn.reads].some(([, before], i) => JSON.stringify(now[i]) !== before);
+    // A page drawn every beat anyway (the Console) is not read twice to compare.
+    const now = drawn.ticking ? [] : await Promise.all([...drawn.reads].map(([path]) => api('GET', path)));
+    const changed = drawn.ticking || [...drawn.reads].some(([, before], i) => JSON.stringify(now[i]) !== before);
     // He may have moved on, or started typing, while it read.
     if (!changed || lastDrawn !== drawn || drawn.address !== here() || hold()) return;
     refreshing = true;

@@ -29,8 +29,8 @@ the tracker, the bus or the loop's own code.**
 This replaces two earlier answers: "projects pin a version of a shared
 package" (`docs/PLAN.md`, phase 5) and "a project gets the loop as a wizard
 copy" (Dane, 2026-11-08: *"a wizard copy now is fine for now"*). Both
-put loop code inside the project. The wizard copy stays in use until the
-moves below are done.
+put loop code inside the project. A new project gets no copy since SP-273;
+the projects set up before then keep theirs until move 6 below.
 
 ## What a project provides
 
@@ -90,8 +90,23 @@ tracker project).
 **The runner** is `npm run app-checks` (`scripts/app_checks.mjs`, decisions
 in `lib/appChecks.js`). It runs the checks that are due, without the
 tracker's sign-in in their environment, and posts through `bus-post`, read
-back. `--dry-run` prints what it would post and writes nothing. Until SP-274
-puts it on every relay pass, it runs by hand.
+back. `--dry-run` prints what it would post and writes nothing.
+
+**When it runs:** on every relay pass, every 10 minutes (SP-274,
+`scripts/run_relay.sh` with `scripts/lib/relay_app_checks.sh`), after the
+relay's own pass and signed in as the relay; each check's `everyMinutes`
+still decides whether it actually runs. When the manifest lists a check,
+the relay's 480 seconds are shared: the check step gets at most 180 of them
+(`RELAY_APP_CHECKS_LIMIT_SECONDS`, at least 1) and the relay part the rest,
+so a check that hangs is stopped and said so in the log, and can never hold
+up a merge. A check whose own `timeoutSeconds` is longer than that share is
+cut short at it. A project that lists no checks keeps all 480 seconds for
+the relay part, starts nothing, and logs `app-checks: none listed`. A
+checkout whose `package.json` cannot be read is a failed step, never "none
+listed". A check pass that fails makes the relay's END
+line read `A STEP FAILED AND SAID SO ABOVE`, never `pass complete`; the relay
+part's merges and hand-backs in that pass stand. `scripts/install_loop_runner.sh
+--status` shows the newest `app-checks:` line from the relay log.
 
 **The post rules**, by what the check said last time and this time:
 
@@ -202,9 +217,43 @@ record back after the write, and exit 1 when it did not stick. A roll-back
 names the newest earlier release numbered lower than the one running now, so
 rolling back twice goes two steps back, never back up to the bad one.
 
-Slice 1 of 4: nothing runs from the record yet. Still to come: showing each
-project's release on the Settings page with Move to Newest and Roll Back
-(SP-275) and running each project's lanes on its release (SP-276).
+The Settings page shows each project's release in its **Spirality Release**
+group (SP-275): the release it runs, when and who named it, and the one
+before it. Its operator gets **Move to Newest** (names the newest release,
+read from the tags at the moment of the click) and **Roll Back** (the same
+roll-back as `release back`). Both go through the same store call as the
+commands, and the page reads the record back before it says it saved.
+Spirality's own project shows that it always runs the newest release, with
+no buttons.
+
+### How a project's lanes run on their release (SP-276)
+
+It now works this way. The runners (`scripts/loop_runner.sh` and
+`scripts/run_relay.sh`) stay in Spirality's main checkout. For a project other
+than Spirality, at the start of every pass they read the release the tracker
+names for it (`release list`) and run the pass from that release's own copy
+of Spirality: the door, the plugin's skills and hooks, and the pause, work,
+wake and model checks all come from there. Spirality's own lanes keep pulling
+and running `main`.
+
+- **One copy per release in use**, in Spirality's log folder:
+  `<logDir>/releases/release-<n>`, made with `git worktree add --detach` at
+  the release's tag, then `npm ci`. It is used only once it is whole (a ready
+  mark names its commit). `scripts/lib/releaseCheckout.mjs` keeps them, under
+  Spirality's sync lock so a fetch never meets a pull.
+- **A newly named release** (a move or a roll-back) takes effect at the start
+  of that project's next pass. A pass already running is never stopped.
+- **No release named:** the pass does not run, and its log says so in one
+  line. Never a silent run on `main`.
+- **The named release cannot be made ready** (the tag is missing, the fetch
+  fails, `npm ci` fails, the record cannot be read): the pass runs on the
+  release that project ran last, logs why, and posts one line to the project's
+  bus (once, not every pass). With no release run before, it does not run,
+  and the bus line is an ALARM.
+- **Tidying:** at the end of a pass, a copy that no project names, no project
+  ran last, no live pass is on, and that is not the newest release is removed.
+- `scripts/install_loop_runner.sh --status` shows the release each project's
+  lanes run on, and the copies on this machine.
 
 ### Moving to the newest release by itself (SP-277)
 
@@ -228,12 +277,14 @@ project moves it to the newest release once all of these hold:
 The move is the same record write as `release name`, read back, and the
 project's bus (`<slug>-bus`, the name the setup wizard gives it) hears one
 plain line naming the old and new release and how to roll back. When
-Spirality has no bus, or it or the release's time cannot be read, nobody can
-tell whether the release was quiet: nothing moves, and the relay pass lists
+Spirality's bus, or the release's time, cannot be read, nobody can tell
+whether the release was quiet: nothing moves, and the relay pass lists
 it among the steps that failed. The relay prints one `release-follow` line per project with quiet days
 above 0, saying what it did, or why not.
 Spirality's own project has no such control: the Settings page leaves it out
 and the tracker refuses it, because its lanes always run `main`.
+
+All four slices are done.
 
 ## The moves
 
@@ -249,16 +300,56 @@ is a ticket in that project's own queue, filed once Spirality's side is Live:
    pause lookup (`projectPauseVerdict` in `lib/pipelinePause.js`) exists, but
    no lane asks the pause switch yet: SP-237 must use it when it wires the
    pause into the lanes.
+   Slice 2 done (SP-270): with `SPIRALITY_PROJECT` set to a project's
+   checkout folder, the door (`npm run clickup`), `scripts/project_config.mjs`
+   and `scripts/with_doppler.mjs`, run from Spirality's folder, read that
+   project's manifest and Doppler project, and the door does its git work in
+   that checkout. Unset, they read the manifest found from the current folder
+   up, as before. The runners set it in slice 3.
+   Slice 3 done (SP-271): `scripts/install_loop_runner.sh --project
+   <checkout>` installs a project's four lanes under its own prefix, each
+   starting Spirality's runner in the project's checkout with
+   `SPIRALITY_PROJECT` set; `scripts/loop_runner.sh` and
+   `scripts/run_relay.sh` then pull that checkout's main (never Spirality's),
+   start each pass there, and run Spirality's door and application checks
+   for it. No project is switched over yet: replacing or removing a
+   project's own-copy jobs needs `--take-over`, with Dane's word.
+   Open before a switch-over: a project's lanes run Spirality's scripts and
+   `node_modules` from Spirality's folder without taking Spirality's sync
+   lock, so Spirality's own lanes pulling main and running `npm ci` can
+   change those files under a project's pass mid-call.
+   Slice 4 done (SP-272): a project's pass is handed Spirality's plugin
+   folder (`plugin/`) with Claude Code's standard `--plugin-dir` option and
+   asks for its skill as `/spirality:<skill>`. The folder's skills are
+   `.claude/skills` through a link, so there is one copy; its hooks run from
+   Spirality's folder: the no-edits-on-main hook, and
+   `scripts/hooks/door_from_spirality.cjs`, which points each
+   `npm run clickup` in the pass at Spirality's door, so the skills' door
+   lines work unchanged in a project with no door of its own. The plugin
+   name is used because a project's own copy of a skill under the bare name
+   (StarCaster's, until move 6) would win over Spirality's. Spirality's own
+   passes are started exactly as before. `scripts/dry_project_pass.sh` shows
+   it working for a project with no `.claude/` folder.
+   Slice 5 done (SP-273): the setup wizard copies none of the loop into a
+   new project. Its setup pull request holds the project's settings file
+   and `verify` gate, plus the `.gitignore` line and `CLAUDE.md` sections
+   its lanes need (`scripts/onboard/manifest.json`), and its lanes step
+   installs the lanes with Spirality's own installer, `--project
+   <checkout>`, and files the setup ticket through Spirality's door.
+   `scripts/dry_onboard_lanes.sh` shows the lanes step for a project with no
+   loop code. Projects set up before then keep their copy until move 6.
 3. Let a project list application checks in its manifest for Spirality to run
    and post to its bus.
-   Slice 1 done (SP-264): the `applicationChecks` field and
-   `npm run app-checks`, run by hand. SP-274 runs it on every relay pass.
+   Done: SP-264 added the `applicationChecks` field and
+   `npm run app-checks`; SP-274 runs it on every relay pass.
 4. Move the pipeline watchdogs into Spirality for every project (SP-260,
    filed 2026-11-12, which also sorts StarCaster's watchdogs into pipeline
    watchdogs and application checks).
 5. Name a Spirality release for each project, Spirality's own lanes first.
    Slice 1 done (SP-265): releases, the tracker's record of which one each
    project runs, and the commands to cut, name and roll back (above).
+   Slice 2 (SP-275): the Settings page's Spirality Release group.
+   Slice 3 (SP-276): each project's lanes run on the release named for it.
    Slice 4 done (SP-277): Quiet Days Before Moving, a project moving to the
    newest release by itself after a quiet period (above).
 6. In each project's queue: remove the copied loop (`loop/`, the copied

@@ -53,9 +53,11 @@ name.
 developer seat (`48012725`) and Pulse, the workspace's service account
 (`54254347`). The API token in Doppler acts as **his own seat** — `npm run
 clickup -- whoami` says "Acting as: Dane" — exactly as StarCaster's does. So
-every comment the script posts ends with a `[machine]` marker line, stamped
-at the one place comments are sent, and every reader that asks "did Dane
-speak last?" skips stamped comments. Never assign Pulse.
+on ClickUp every comment the script posts ends with a `[machine]` marker
+line, stamped at the one place comments are sent. In the tracker each loop
+signs in as its own machine actor, no stamp is written, and every reader
+that asks "did Dane speak last?" reads the comment's author instead
+(`docs/LOOP_CONTRACT.md`, "Who is talking"; SP-26). Never assign Pulse.
 
 The everyday commands (`npm run clickup` bare prints the full list):
 
@@ -201,7 +203,12 @@ labels come from `launchdPrefix` in `spirality.project.json`. Each lane
 keeps the committed `scripts/loop_runner.sh` alive
 across crashes and reboots; each pass is a fresh headless Claude Code session
 that pulls `main`, runs one skill, and sleeps 30 minutes. A pass has a
-two-hour time limit. Nobody starts a loop by hand while those are loaded: a
+two-hour time limit. That is Spirality's own lanes. Another project's lanes
+run from the same runner but on the Spirality release the tracker names for
+that project, from a copy of Spirality kept at `~/loop-logs/releases/release-<n>`;
+with none named they do not run (SP-276, `docs/INTEGRATION.md`, "How a
+project's lanes run on their release"). `--status` prints a `release:` line
+saying which. Nobody starts a loop by hand while those are loaded: a
 second claimant makes the check-then-act claim unsound.
 
 So the question is never "shall I start one", it is "what is it doing":
@@ -224,9 +231,25 @@ Three things the log can say that need a person:
   Read the ticket and hand it back or `ask`.
 - **Nothing written for hours** while the queue has work: `--status` says
   whether the runner is alive. A stale lock clears itself on the next start.
+- **`SKIP /loop-build (no work: …; Claude not started)`** is normal (SP-292).
+  Before each pass the runner asks the tracker, with no AI, whether the lane
+  has anything to do (`scripts/work_check.sh`: claimable tickets for build,
+  `In review` for review, `Requested` for intake), and skips the Claude
+  session when it has nothing, so a short wake time costs no quota on an
+  empty queue. A check that cannot tell starts the pass, so a ticket is never
+  held up by it. The first pass after a runner starts always runs, and so
+  does one at least every 6 hours (`LOOP_IDLE_PASS_EVERY_SECONDS`, 0 turns
+  skipping off), so an expired Claude sign-in still shows within hours.
+- **`PAUSED /loop-build`** is normal while the lane or the whole pipeline is
+  paused on the Settings page (or the page cannot be read: the runner fails
+  safe). It is written on every wake the runner holds off, so the heartbeat
+  (`npm run heartbeat`, SP-266) counts a paused lane as alive and does not
+  raise an alarm the moment it is unpaused. It is never a pass.
 
 **Merges: the relay.** The third job, `com.spirality.relay`, runs
-`scripts/run_relay.sh` every 10 minutes: one `npm run clickup -- relay` pass
+`scripts/run_relay.sh` every 10 minutes (the default; launchd starts it every
+minute and it runs a pass when the wake time set on the tracker's Settings
+page is up, SP-236): one `npm run clickup -- relay` pass
 that reads every `Ready to launch` ticket, and when your comment is exactly a
 merge phrase (`merge`, `merge it`, `ship it`, `approve`; the list is
 `mergePhrases` in `spirality.project.json`) re-checks every gate (ticket still

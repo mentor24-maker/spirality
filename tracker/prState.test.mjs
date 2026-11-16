@@ -9,9 +9,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openStore } from './store.mjs';
 import { seedDemo, tickingClock, demoPrState, DEMO_MERGED_PR } from './demoData.mjs';
-import { startServer } from './server.mjs';
+import { CLOSE_PHRASE, GO_PHRASE, startServer } from './server.mjs';
 import { ghPrState, prStateCache, normalState, PR_STATE_KEEP_MS } from './prState.mjs';
-import { renderMergeAction, renderQuickAction, renderPullRequestState, prSettled } from './web/render.mjs';
+import { renderMergeAction, renderCloseAction, renderGoAction, renderReplyForm, renderQuickAction, renderPullRequestState, prSettled, STATUS_LINES, CLOSE_LINE } from './web/render.mjs';
 import operatorCard from '../lib/operatorCard.js';
 import machineComment from '../lib/machineComment.js';
 
@@ -104,7 +104,7 @@ async function fixture(states = {}) {
     if (s !== undefined) return s;
     return demoPrState({ repo, number });
   };
-  const server = await startServer({ store, port: 0, mergePhrase: 'merge', now: () => at, readPrState });
+  const server = await startServer({ store, port: 0, mergePhrase: 'merge', closePhrase: CLOSE_PHRASE, goPhrase: GO_PHRASE, now: () => at, readPrState });
   const url = `http://127.0.0.1:${server.address().port}`;
   const call = async (path) => {
     const res = await fetch(`${url}${path}`, { headers: { authorization: `Bearer ${seed.token}` } });
@@ -245,6 +245,48 @@ test('the demo: "Merged on GitHub but not yet Live" is off Waiting on You and sh
     const html = renderMergeAction(t);
     assert.doesNotMatch(html, /<button/);
     assert.match(html, /^<p class="pr-state">PR #14 is merged\./);
+    // SP-290: the "i" beside its status says the same, never "waits on your Merge".
+    const top = renderQuickAction(t);
+    assert.match(top, /role="tooltip">The pull request is merged; the relay moves this to Live on its next pass\. Nothing is needed from you\.</);
+    assert.doesNotMatch(top, /waits on your Merge/);
+  } finally { await f.cleanup(); }
+});
+
+test('the demo: BE-7\'s "i" asks for the Close its card and button ask for, never a Merge (SP-290)', async () => {
+  const f = await fixture();
+  try {
+    const t = await f.thread(f.idOf('Find out why PR #7 (conflict-fix) will not merge'));
+    assert.match(renderCloseAction(t), /close-action/, 'the page offers Close');
+    assert.doesNotMatch(renderMergeAction(t), /merge-action/, 'and no Merge');
+    const top = renderQuickAction(t);
+    assert.match(top, /Status: <span class="status-name">Ready to launch</);
+    assert.match(top, new RegExp(`role="tooltip">${CLOSE_LINE.replace(/[.;]/g, '\\$&')}<`));
+    assert.doesNotMatch(top, /waits on your Merge/);
+  } finally { await f.cleanup(); }
+});
+
+test('the demo: on every ticket the "i" names only a move the page offers (SP-290)', async () => {
+  const f = await fixture();
+  try {
+    const names = f.store.listTickets('alpha').concat(f.store.listTickets('beta')).map((t) => t.id);
+    assert.ok(names.length > 20, 'the whole demo');
+    for (const id of names) {
+      const t = await f.thread(id);
+      const tip = /role="tooltip">([^<]*)</.exec(renderQuickAction(t))?.[1] ?? '';
+      const offered = {
+        Merge: /merge-action/.test(renderMergeAction(t)),
+        Close: /close-action/.test(renderCloseAction(t)),
+        Go: /go-action/.test(renderGoAction(t)),
+        reply: /form class="reply"/.test(renderReplyForm(t, 'Dane')),
+      };
+      for (const move of ['Merge', 'Close', 'Go']) {
+        if (new RegExp(`your ${move}\\b`).test(tip)) assert.ok(offered[move], `${t.id} "${t.name}": the "i" says "${tip}" but the page offers no ${move}`);
+      }
+      if (/answer below|reply below/.test(tip)) assert.ok(offered.reply, `${t.id}: the "i" points at a reply box the page does not draw`);
+      // A Merge the page offers is named by the "i", so he is told where to look.
+      if (offered.Merge) assert.equal(tip, STATUS_LINES['ready to launch'], t.id);
+      if (offered.Close) assert.equal(tip, CLOSE_LINE, t.id);
+    }
   } finally { await f.cleanup(); }
 });
 

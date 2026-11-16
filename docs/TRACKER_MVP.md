@@ -172,6 +172,17 @@ account_links  token hash, purpose (setup|invite|reset), email, actor,
   `tracker/backup.mjs`. It is never edited; it is removed one at a time, and
   a project that still holds any is not deleted (409 `has-docs`). The build
   loop does not read them automatically.
+- **A topic** is a key aspect of one project (SP-243): its features,
+  mostly, but also its constituents or challenges. In Dane's words, "when
+  there is a parent feature with a series of children, there is a topic."
+  Each topic belongs to exactly one project, and a project has many: a name
+  (required), a description, who made it and when, in the `topics` table.
+  The **Topics** page (`/topics`, in the top menu after Tasks) lists the
+  picked project's topics, newest first, and has a **Create Topic** form;
+  `GET` and `POST /projects/<slug>/topics` sit behind the same project check
+  as the Docs page. This first page only adds and lists topics. Linking them
+  to tasks (many to many), to each other, and editing or deleting them come
+  in later tickets. A deleted project's topics go with it.
 - **Roles and permissions** (SP-143): every person has one of five roles,
   **admin**, **editor**, **contributor**, **reviewer** and **viewer**, each
   with a plain-words description, and each role a set of permissions. The
@@ -238,8 +249,10 @@ answers are JSON (structured text programs read).
 | `GET /actors/:id` | an actor's id, kind and name (never a token), for showing who wrote a comment |
 | `GET /projects/:slug/tickets?status=&open=` | the queue |
 | `POST /projects/:slug/tickets` | file a ticket |
+| `POST /projects/:slug/tickets/suggest-titles` | for the Add Task box (SP-245): `{ description, title? }` → `{ titles: [five] }`, suggested by `claude -p` on this machine with the `suggest-titles` skill (no tools, 60 seconds, the words on standard input; `TRACKER_CLAUDE` names the command, `claude` on the PATH without it). The same sign-in and project rules as the Add Task box's project check; writes nothing. An empty description is 400 `no-description` and runs nothing; no `claude` 503 `no-claude`; too slow 504 `too-slow`; anything but five usable titles 502 `bad-answer` |
 | `GET /tickets/:id` | one ticket with its comments, oldest first |
 | `PATCH /tickets/:id` | change name, status, priority, tags, assignee, description or Loop note, with optional `ifStatus` / `ifVersion`; answers 409 ("conflict") and writes nothing if the ticket has moved. A person's token may assign the ticket only to its project's operator or to nobody: anyone else gets 400 `bad-assignee` and nothing is written |
+| `POST /projects/:slug/tickets/order` | put tickets in order in their queue (SP-249): `{ ids: [...] }` gives them places 1, 2, 3 ... in that order, in one write, all or none. Every id must be a ticket of that project, named once; any other is 400 `bad-order` and nothing changes. Each ticket whose place moves writes a `place` event and a version bump, read back; the project's other placed tickets nobody has started (`requested`, `queued`) follow on, n+1, n+2 ..., in the order they had, so no two waiting tickets share a place (an unplaced ticket stays unplaced, and a started ticket not named is not touched: no version bump, no event). A failed read-back answers 500 `write-failed`. Answers `{ project, tickets, changed }`: `changed` names every ticket that moved, named or not. The same sign-in and project rules as `PATCH /tickets/:id`. The order rule everywhere is priority, then place, then oldest (`docs/LOOP_CONTRACT.md`, "The claim order") |
 | `DELETE /tickets/:id` | delete a ticket nobody has started (`Requested` or `Queued`) with its comments and events; answers 409 `not-deletable` with its status for any other, 404 for an unknown one; the server log names the ticket and the actor |
 | `POST /tickets/:id/comments` | a comment, or a reply when `parent` is given |
 | `GET /tickets/:id/events` | the history |
@@ -277,6 +290,8 @@ answers are JSON (structured text programs read).
 | `DELETE /tickets/:id/attachments/:n` | remove one file, bytes and all: answers `{ removed, ticket, name }`, checked gone, with an `attachment` event (from its name to nothing). A file not on that ticket is 404 |
 | `GET /tickets/:id/attachments/:n` | one file, byte for byte, always as a download (`Content-Disposition: attachment`, `X-Content-Type-Options: nosniff`, a sandboxing `Content-Security-Policy`), so an uploaded HTML file can never run as the tracker's page |
 | `POST /tickets/:id/clone` | for Dane's page: copy a ticket into another project (`{ project }`), as a new ticket in `Requested` there with one comment naming where it came from; the original does not change |
+| `POST /projects/:slug/suggest-next` | ask for the project's next few tasks (SP-250): starts a run and answers at once, 202 `{ run: { id, state: 'running', at } }`; a second start while one is running answers the running one, never a second run. The run makes a shallow copy of the project's `main` from its `repo` into a fresh folder under the system's temp folder (removed afterwards whatever happens), and runs `claude -p` there with the `suggest-next` skill, read-only tools only (Read, Grep, Glob), in restricted mode (`--restricted`, which confines those tools to the copy: without it they read any file on the machine; `npm run check:suggest-confinement` proves it with the real `claude`) and a 10-minute limit; the open tickets (id, name, status, priority, tags, topics, description, newest comments) and the project's own topic and tag names go in on standard input, never on the command line. Which `claude` comes from `TRACKER_CLAUDE`, the same setting the title suggester reads (default: the one on the PATH). The same sign-in and project rules as `/tickets/check`; a project the caller is not on is 404, the same as one that does not exist. No ticket is written (`tracker/nextSuggest.mjs`) |
+| `GET /projects/:slug/suggest-next` | the latest run: `{ state: 'running' \| 'done' \| 'failed', suggestions?, message?, at }`, `suggestions` being 3 to 7 `{ title, description, why }`, most useful first, each with any of `about`, `related` (`[{ id, name }]`), `topics`, `tags` and `links` (`[{ label, path }]` or `[{ label, ticket }]`) that checked out against the open tickets, the project's topics and tags, and plain paths (SP-305: anything else is dropped), and `repo` the project's GitHub repository, which the page links a suggestion's files to, and `message` a plain reason for a failed run (no `repo` set, no `claude` found, a bad answer, the time limit). The latest finished run is kept in the store, so a reload or a restart still answers it; 404 `no-run` before anyone has asked |
 
 The store enforces only what keeps the data true: valid statuses, the
 atomic guards, authorship from the token. The contract's rules (only `ask`
@@ -400,8 +415,32 @@ person, may change one: another person and any loop's token are refused
 (403), and nothing is logged. A value out of range is refused with a plain
 message. The page says "Saved" only when the value the tracker reads back is
 the one sent. A lane reads its project's with `npm run clickup -- settings`
-(`name=value` lines). Nothing on the Mini acts on them yet: SP-236 (wake
-times), SP-237 (pause), SP-238 (the cap) and SP-239 (the model) each wire one in.
+(`name=value` lines). The wake times are in use (SP-236): a lane reads its
+own before every sleep between passes, and the relay, which launchd starts
+on a one-minute tick, runs a pass only once its wake time has passed since
+its last start, reading the value after each pass. A read that fails keeps
+the last good value and says so in the lane's log. Beside each wake time the
+page shows the value the lane last used (from its log; the relay's from the
+wake time it kept) and says "Waiting for the lane's next pass to pick this
+up" until the two agree. The pause switches are in effect too (SP-237):
+before every pass a lane's runner asks `npm run clickup -- pause-check --lane
+<lane>` (through `scripts/pause_check.sh`; the relay asks once a tick is due,
+before its START line). Paused, it logs `paused by <who> at <Mountain time> —
+not starting /<lane>` and sleeps; a pass already running always finishes (it
+drains, never kills). Settings that cannot be read count as paused, and the
+line says so: a tracker outage pauses every lane until it answers again. The
+Pipeline Status pod shows a paused stage as "Paused", and the Settings page
+says "Draining: N ticket(s) still finishing" until nothing is in flight. The
+model per lane is in effect too (SP-239): before every pass a lane's runner
+reads its model (`scripts/lib/modelSetting.mjs`) and adds `--model <id>` to
+its `claude` line; Claude's default, settings that cannot be read, or a value
+not on the page's list (`scripts/lib/laneModels.mjs`) run today's command
+with no `--model`, the last two with one log line saying why. The START line
+names the model (`START /loop-build (model: <id or default>)`), and the page
+shows beside each lane the model its last pass ran on. The work-in-progress
+cap is in effect too (SP-238): before it claims, loop-build runs `npm run
+clickup -- wip-check` (`lib/wipCheck.js`) and claims nothing while the tickets
+in flight are at the page's cap.
 A browser opening `/projects` or `/projects/<slug>` gets the page; the page's own
 call to the same address gets the data. `/users` is the page alone; its data
 is still `GET /people` (the onboarding scripts read it), and a browser opening
@@ -414,6 +453,21 @@ no token is kept in the browser. "Forgot password?" asks for an email and
 sends a 1-hour reset link to it if it has an account, saying the same
 either way. The page shows a count of tickets waiting on him in the
 browser tab's title, so a pinned tab tells him at a glance.
+
+### The Add Task Box's Suggested Titles
+
+The Add Task box opens with a toggle (SP-248): **Suggest a Title** shows only
+the Description; **Write My Own Title** shows the Title too. In Suggest a
+Title the first submit, "Suggest Titles", sends the words to
+`POST /projects/:slug/tickets/suggest-titles` and shows the five titles to
+pick from. In Write My Own Title the button reads "Submit Task" from the
+start and files his title as typed; a "Suggest Titles" button beside it asks
+for the list anyway, his own first ("Keep my title: ..."). "Suggest Again"
+asks for a fresh five; editing the words puts the box back to its first
+stage. The picked title goes through the project check below and is
+filed exactly as shown. When the suggester fails, the box says why in one
+line and shows the Title field, so he can type one and file. The toggle is
+kept in the browser and outlives a filing.
 
 ### The Add Task Box's Project Check
 
@@ -1277,7 +1331,8 @@ It prints one JSON object:
 
 The window is whole days in UTC, `--since` from midnight to the end of
 `--until`, as StarCaster's command read it. Shipped and filed are counted the
-way the Reporting page counts Finished and Started, so the figures match it
+way the Reporting page's Task Productivity table counts Tasks started and
+Tasks finished, so the figures match it
 for the same days (its "Last 7 Days" is the seven days up to the moment it is
 opened, so a window of whole days can differ by what moved at the edges). It
 writes nothing. A bad date exits 2 before anything is read; when the list or
@@ -1292,8 +1347,11 @@ StarCaster raises its alarms on **the bus**: a ClickUp chat channel (the
 "party line"), which ClickUp refuses on the free plan, so every post lands on
 a standing **Team chat** ticket instead, plus a second ClickUp list, **Agent
 Response**, where the steward asks Dane things and the relay watches for his
-replies. Spirality has no bus; StarCaster cannot move to the tracker without
-one (SP-24).
+replies. StarCaster cannot move to the tracker without a bus (SP-24).
+Spirality's own bus is the tracker project `spirality-bus` ("Spirality
+bus", tickets `SPBUS-…`), named as `busProject` in `spirality.project.json`
+(SP-281), so its relay's notices and any `ALARM:` line land on its "Team
+chat" ticket.
 
 The tracker's bus is **a project of its own**, named in the project config
 as `busProject` (for example `starcaster-bus`). It holds the same
@@ -1332,13 +1390,27 @@ has a bus (SP-204, `hasBus`): its `bus` step makes the tracker project
 it, and the settings file it writes names it as `busProject`
 ([ONBOARDING_A_PROJECT.md](ONBOARDING_A_PROJECT.md#a-project-with-a-bus-starcaster)).
 
+Two of StarCaster's watchdogs are Spirality's own (SP-267), and the relay
+runs both with `--check` on every wake (`scripts/lib/relay_watchdogs.sh`), a
+failure logged by name and never stopping the relay. `npm run stale-ready`
+names a ticket stuck in `Ready to launch`, and whose hands it needs: past 24
+hours there, or 2 hours after the operator's merge word, with a red or
+missing check, a merged pull request, or a green one still waiting on the
+operator's word. `npm run stale-answer` names a `Needs your input` ticket the operator
+answered more than 30 minutes ago that never moved. Each reads the tickets through
+the door (`tickets --json --comments`), posts nothing unless `--check` is
+given, and says each finding once per ticket per reason every 6 hours,
+cleared when the ticket moves (stamps in `<logDir>/<slug>-ready-stale/` and
+`<slug>-answer-stale/`). Neither posts while the Settings page has the
+relay paused.
+
 Every way StarCaster uses the bus today, and its tracker equivalent (the same
 table is `BUS_USES` in `lib/trackerBus.js`, and a test holds the two
 together):
 
 | StarCaster today | In the tracker |
 |---|---|
-| Alarms and reports posted to the party line (`postBusMessage`, the `chat` command): heartbeat, throughput, report_job_failure, reconcile, stale_answer, stale_ready, checkout_currency, ai_keys_check, site_import_watch, unapplied_sql_watch, pulse_publish, weekly_report, repair | `npm run clickup -- bus-post --body-file -`: one comment on the bus project's "Team chat" ticket, read back |
+| Alarms and reports posted to the party line (`postBusMessage`, the `chat` command): heartbeat, throughput, report_job_failure, reconcile, stale_answer, stale_ready, checkout_currency, ai_keys_check, site_import_watch, unapplied_sql_watch, pulse_publish, weekly_report, repair | `npm run clickup -- bus-post --body-file -`: one comment on the bus project's "Team chat" ticket, read back. The heartbeat is Spirality's own (SP-266): the relay runs `npm run heartbeat -- --check` on every wake, which reads each lane's log and posts one `ALARM:` per lane that has gone quiet, at most once every 6 hours per lane, and one closing line when it runs again |
 | Direct chat posts that skip `postBusMessage`: the pause switch's `announce` (pipeline.mjs), the review gate's `announceWaiver`, the reconciler's `postBus` | `bus-post`, the same one command |
 | The relay's own notices (`postToBus` / `postOrSaveToBus`): merged, merge refused or deferred, stalled hand-off, auto-merge latched off, lane armed, "<operator> replied on ..." | The relay posts them itself, through the same read-back post as `bus-post`, when the project names a `busProject` (SP-207): one line for each merge it makes, each refusal and each conflict hand-off the first time it is written on the ticket (a quiet pass posts nothing), and the lanes' own notices (SP-202). A post that does not land is an UNCHECKED line and the pass exits 1; the merge is never undone or retried for it. A conflict hand-off still stuck a day later (or at once, with nothing filed to fix it) is said again, at most once a day: StarCaster's stall rule, without its "failed N times" alarm, because this relay's markers count reminders, not tries. Not carried over: the "replied on" relay, because the steward reads the operator's replies with `bus-read --operator` |
 | The fallback when the party line refuses (`saveUndeliveredAlarm`): a comment on the "Team chat" ticket in the Loop Queue, created if missing, oldest wins | `bus-post` IS that ticket, in the bus project: there is no plan limit to fall back from, and a refused write exits 1 and says so |
@@ -1348,6 +1420,25 @@ together):
 | The relay watching Agent Response tickets ("pending response", "responding") for the operator's comments | `bus-read --operator --since <time>`, across every ticket in the bus project |
 | `waiting` sweeping the Agent Response list for "what actually needs me?" | The page's Waiting on You list, which reads every project the operator is on, the bus project included, but shows only tickets in the operator's statuses: a steward question shows there once it has been through `ask`, never straight after `task` |
 | The operator seeing a new post: the "Team chat" ticket puts itself in their ClickUp "Assigned to me" list | An alarm (a post whose message starts with `ALARM:`) is texted to the bus project's alert phone; every post, alarm or not, counts in the "New on the Bus" number in the page's header until the operator opens "Team chat" (SP-163, the operator's choice D) |
+
+Which of those alarms are pipeline watchdogs that move into Spirality for
+every project, and which stay in StarCaster: [WATCHDOGS.md](WATCHDOGS.md)
+(SP-260).
+
+Three of them are Spirality's own now (SP-268), each posting through
+`bus-post`, read back, at most once every 6 hours per finding, with its
+reminder stamps in `<logDir>/<slug>-watchdogs/`. `npm run throughput` says
+whether the queue is getting shorter (tickets read through the door's
+`tickets --json --include-closed`, a finished ticket's closure being when it
+entered Live), an `ALARM:` when it is STALLED and a plain post when it
+cannot take a reading. `npm run checkout:current` says whether the relay's
+pull left the machine on `main`'s code (`current`, `behind, pulled`, or
+`behind, could not pull:` and the files in the way), an `ALARM:` when not;
+it never pulls. The relay runs both with `--check` on every wake. Every lane
+runner calls `npm run report:failure` when a pass exits non-zero: one
+`ALARM:` naming the lane, its exit and the end of its log. A failed post
+exits non-zero and is logged; none of them ever changes the relay's verdict
+or stops a lane ([WATCHDOGS.md](WATCHDOGS.md#running-the-moved-ones-by-hand)).
 
 **How loud a post is** (SP-163; Dane chose D on 2026-11-09: "a text for
 alarms only, plus the page count for everything else"):

@@ -33,7 +33,7 @@ import { fileURLToPath } from 'node:url';
 import { homedir, hostname } from 'node:os';
 import { join as joinPath, basename, extname, resolve as resolvePath } from 'node:path';
 import {
-  DISPLAY, STAGE_ORDER, CLAIMABLE_BY_BUILD, OPERATOR_STATUSES, BUILDING, NEEDS_YOUR_INPUT, QUEUED, PRIORITY_VALUE,
+  DISPLAY, STAGE_ORDER, CLAIMABLE_BY_BUILD, OPERATOR_STATUSES, BUILDING, NEEDS_YOUR_INPUT, QUEUED, LIVE, PRIORITY_VALUE,
   isClaimableByBuild, isOperatorStatus, isReadyToLaunch, claimOrder, compareWithinStatus, statusOf, TERMINAL_STATUSES,
 } from './lib/loopStatuses.mjs';
 import {
@@ -42,7 +42,7 @@ import {
   findPullRequest, newestFirst, ESCALATE_AT_ROUND,
 } from './lib/loopTrail.mjs';
 import { buildCard, cardSurvived, findBlockquoteLines, findBranchLinks, branchLinkRefusal, CONTEXT_MIN_WORDS, CONTEXT_MAX_WORDS } from './lib/operatorCard.mjs';
-import { isMachineComment, stripMachineMarker } from './lib/machineComment.mjs';
+import { isMachineAuthored, isOperatorAuthored, stripMachineMarker } from './lib/machineComment.mjs';
 import { parseHumanHours, findHumanHours } from '../lib/humanHours.js';
 import { createClickupTracker } from './tracker/clickupTracker.mjs';
 import { createApiTracker, trackerTokenEnv } from './tracker/apiTracker.mjs';
@@ -53,8 +53,9 @@ import { filedTrackerUrl, machineSenderTag } from '../lib/substrateConfig.js';
 import { runLanePass } from '../lib/relayAutoMerge.js';
 import { readLedgerFile, saveLedgerIfReadable } from '../lib/autoMergeLedgerFile.js';
 import { readLeaseFile, saveLeaseIfReadable } from '../lib/mergeWindowLeaseFile.js';
+import { windowDecision } from '../lib/mergeWindowLease.js';
 
-import { loadProjectConfig, ProjectConfigError } from '../lib/projectConfig.mjs';
+import { loadProjectConfig, namedProjectFolder, ProjectConfigError } from '../lib/projectConfig.mjs';
 // Spirality's releases (SP-265): what one is, and reading the tags.
 import { isReleaseName, OWN_PROJECT_RELEASE, readReleaseTags, releaseRemote } from '../lib/releases.mjs';
 // A project moves to the newest release by itself after a quiet period (SP-277).
@@ -69,12 +70,12 @@ import {
 } from '../lib/mergeOnComment.js';
 import {
   PR_VIEW_FIELDS, markerBookkeeping, recordBookkeeping, emptyBooks, mergeDestination, relayLine,
-  handbackAnswer, handbackPlan, closePlan, conflictFilingPlan,
+  handbackAnswer, earlierAnswerIds, handbackPlan, closePlan, conflictFilingPlan, CATCH_UP_WORKED_STATUSES,
   mergeWithPreMergeStep, commandLine, mergedBusLine, conflictBusLine, busAnnouncer, stalledHandOffPlan, remindStalledHandOff,
 } from '../lib/relayLane.js';
 import {
-  conflictTicketName, conflictTicketBody, conflictTicketFiledComment, findConflictTicket, unstuckPullRequest,
-  stalledSummaryHeadline,
+  conflictTicketName, conflictTicketBody, conflictTicketFiledComment, findConflictTicket, unstuckPullRequest, aheadConflictVerdict,
+  stalledSummaryHeadline, catchUpClosePlan, fixupLiveNote,
 } from '../lib/conflictWork.js';
 import {
   handbackDoneText, handbackFailureText, repliesShowHandbackDone, repliesShowHandbackFailure, HANDBACK_FAILURE_MARKER,
@@ -97,8 +98,12 @@ import {
   checkBranch, branchContains, tellTickets, latestMainMoved,
 } from '../lib/mainMoved.js';
 import { parseRepoFromRemoteUrl } from '../lib/branchCatchUp.js';
+// Keeping Ready to launch pull requests current after a merge (SP-294).
+import { catchUpReadyTickets } from '../lib/readyCatchUp.js';
 // A ticket left in Building by a build pass that died (SP-101).
 import passClaim from '../lib/passClaim.js';
+import { settingsPauseVerdict } from '../lib/pipelinePause.js';
+import { capInForce, wipCheckVerdict, unknownVerdict } from '../lib/wipCheck.js';
 import {
   BUILD_SKILL, buildLockPath, lockState, writesMarker, seatGate, handbackDestination, leftoverWorktrees, markerBlocksClaim, handbackNote,
 } from '../lib/passHandback.js';
@@ -108,9 +113,16 @@ import {
 // lib/projectConfig.mjs). Each is still overridable from the environment
 // (CLICKUP_LOOP_QUEUE_LIST, CLICKUP_OPERATOR_ID, ...), so a moved list or a
 // renamed seat is a one-line change in Doppler, not a code change.
+//
+// THE PROJECT IT ACTS FOR (SP-270). With SPIRALITY_PROJECT set to a project's
+// checkout folder, this door, run from Spirality's folder, reads that
+// project's spirality.project.json (its tracker, prefix, queue, seats) and
+// does its git work in that checkout, so the project needs no copy of the
+// door. Unset: the manifest found from the current folder up, as always.
+const NAMED_PROJECT = namedProjectFolder();
 let project;
 try {
-  project = loadProjectConfig();
+  project = loadProjectConfig({ project: NAMED_PROJECT });
 } catch (err) {
   if (!(err instanceof ProjectConfigError)) throw err;
   console.error(`clickup: the project config is not usable — ${err.message}`);
@@ -225,6 +237,11 @@ npm run clickup -- <command> [flags]      (Loop Queue: list ${LOOP_QUEUE_LIST}, 
   claim --task <id>                               safe claim: reads the status and guards the write on it
   status --task <id> --status S [--if-status S] [--assign <uid>] [--clear-assignees] [--no-auto-assign] [--no-card]
   ask --task <id> [--status "Needs your input"|"Ready to launch"] --body-file <f|-> [--no-move] [--after-his-answer]
+                                                  [--ask-anyway] [--ask-again]
+  fixup-live --task <id> [--if-status S]         a catch-up ticket ("Find out why PR #N ... will not merge") whose PR already
+                                                  merged: move it to Live with a note, never ask Dane (SP-288). Exit 0 moved /
+                                                  4 not one (its own PR, none named, or not merged): carry on / 3 moved meanwhile /
+                                                  1 a read or write failed
   pr-opened --task <id> --pr <url|number> [--repo owner/name] [--if-missing] [--human-hours <N>] [--body-file <f|->]
   verdict --task <id> --pass|--fail --if-status "In review" [--body-file <f|->] [--no-guard] [--fourth-round-anyway]
   priority --task <id> --priority urgent|high|normal|low [--operator-asked]
@@ -243,6 +260,9 @@ npm run clickup -- <command> [flags]      (Loop Queue: list ${LOOP_QUEUE_LIST}, 
                                                   read-only: the tickets as JSON for a scheduled check, one object each (id,
                                                   name, status, priority, tags, created, updated, statusSince; --comments adds
                                                   the top-level comments). Exit 1 naming what failed, printing nothing, on any failed read
+  replies --task <id> --comment <id> --json       read-only: one comment's replies as a JSON list, oldest first, in the
+                                                  tickets --json comment shape (what stale-answer reads for the relay's
+                                                  hand-back-done reply). Exit 1, printing nothing, on a failed read
   stage-counts [--project <slug> | --list <id>] [--since YYYY-MM-DD [--until YYYY-MM-DD]]
                                                   read-only: one JSON object for the weekly report: tickets per status now
                                                   (byStatus, total) and, in the window (whole UTC days), how many shipped
@@ -252,6 +272,11 @@ npm run clickup -- <command> [flags]      (Loop Queue: list ${LOOP_QUEUE_LIST}, 
   bus-read [--operator] [--since <time>]          the bus's comments, oldest first: time (ISO, UTC: feeds --since), ticket, operator|machine, author, first line
   settings                                        read-only: this project's pipeline controls (the Settings page), one
                                                   name=value line each, defaults included. Exit 1 saying why when they cannot be read
+  pause-check --lane <lane>                       read-only: may this lane start a pass? One line; exit 0 run, 3 paused (the Settings
+                                                  page's switches, SP-237). Settings that cannot be read count as paused (exit 3)
+  wip-check                                       read-only: may loop-build claim another ticket? One line, "room: N of CAP in flight"
+                                                  (exit 0) or "full: N of CAP in flight (<ids>)" (exit 3), the cap from the Settings page
+                                                  (SP-238). Exit 1 when it could not tell: the pass goes on without the cap
   release list                                    Spirality's releases: each project and the release it runs (tab-separated), Spirality's own
                                                   as "${OWN_PROJECT_RELEASE}", then the newest release. Exit 1 saying why on a failed read
   release name --project <slug> --to release-<n>  name the release a project runs, read back. Refused (exit 2) for a release with no tag
@@ -437,23 +462,146 @@ async function readyToLaunchRefused(task, status) {
   return true;
 }
 
-/** Dane must not be asked for something he has already answered. */
+/**
+ * The relay's reading of who answered the card on a Needs your input ticket
+ * (SP-302): anyone on the project, and once an earlier answer after the card
+ * carries the done reply, only his own words newer than it. Shared by the
+ * relay and the `ask` guard, so the two cannot read a teammate differently.
+ * Returns { verdict } or { unreadable: <comment id> } when the replies under
+ * an earlier answer could not be read.
+ */
+async function teamAnswerVerdict(comments) {
+  const opts = { comments, operatorId: OPERATOR_ID, isMachine: isMachineAuthored, teammates: true };
+  let verdict = handbackAnswer(opts);
+  const earlier = earlierAnswerIds({ comments, verdict, operatorId: OPERATOR_ID, isMachine: isMachineAuthored });
+  if (!earlier.length) return { verdict };
+  const spent = [];
+  for (const id of earlier) {
+    const out = await tracker.listReplies(id);
+    if (!out.res.ok) return { unreadable: id };
+    if (repliesShowHandbackDone(out.json?.comments || out.json?.replies || [])) spent.push(id);
+  }
+  if (spent.length) verdict = handbackAnswer({ ...opts, spent });
+  return { verdict };
+}
+
+/**
+ * Dane must not be asked for something already answered: by him, or, on a
+ * Needs your input ticket, by a teammate whose reply the relay will act on
+ * (SP-302 round 2). A new card over that reply would make it older than the
+ * card, and the answer would be ignored.
+ */
 async function alreadyAnsweredRefused(task, status) {
   if (!isOperatorStatus(status)) return null;
   if (flag('after-his-answer')) {
-    console.error('Handing this back although he spoke last (--after-his-answer). Recorded in this transcript.');
+    console.error('Handing this back although it was answered last (--after-his-answer). Recorded in this transcript.');
     return null;
   }
   const comments = await readComments(task);
-  if (operatorSpokeLast(comments, OPERATOR_ID)) {
-    console.error(`\nREFUSED — Dane's own comment is the NEWEST one on ${task}, so a machine owes the next move.`);
-    console.error('Handing it back now asks him to answer twice. Read what he said:');
+  const refuse = (whose) => {
+    console.error(`\nREFUSED — ${whose} is the NEWEST one on ${task}, so a machine owes the next move.`);
+    console.error('Asking again now asks for the same answer twice. Read what was said:');
     console.error(`  npm run clickup -- waiting --task ${task}`);
     console.error('If this really is a NEW question, say so on the record: ... --after-his-answer');
     console.error('Nothing was posted and the status has NOT moved.');
     return 2;
+  };
+  if (operatorSpokeLast(comments, OPERATOR_ID)) return refuse("Dane's own comment");
+  const t = await readTask(task);
+  if (statusOf(t) !== NEEDS_YOUR_INPUT) return null;
+  const newest = newestFirst(comments)[0];
+  if (!newest) return null;
+  const read = await teamAnswerVerdict(comments);
+  if (read.unreadable != null) {
+    console.error(`\nREFUSED — the replies under comment ${read.unreadable} on ${task} could not be read, so it cannot be told whether a teammate's newest comment is an answer the relay will act on.`);
+    console.error('Nothing was posted and the status has NOT moved. Try again, or pass --after-his-answer if this really is a NEW question.');
+    return 1;
+  }
+  const { verdict } = read;
+  if (verdict.state === 'answered' && verdict.answer && String(verdict.answer.id) === String(newest.id)) {
+    return refuse(`${newest.user?.username ?? 'a teammate'}'s answer to the card`);
   }
   return null;
+}
+
+/**
+ * A catch-up ticket and whether its work already landed (SP-288): the
+ * ticket, its comments, the PR it was filed to unstick and catchUpClosePlan's
+ * answer. GitHub is asked only when the answer turns on it.
+ */
+async function catchUpReading(task) {
+  const t = await readTask(task);
+  const comments = await readComments(task);
+  const ownPr = findPullRequest(comments);
+  const unstuck = ownPr ? null : unstuckPullRequest(t.markdown_description || t.description || '');
+  const status = t.status?.status ?? '';
+  let live = null;
+  let plan = catchUpClosePlan({ status, ownPr, unstuck, live });
+  if (plan.act === 'cannot-tell') {
+    live = { state: null, mergedAt: null };
+    if (`${unstuck.owner}/${unstuck.repo}`.toLowerCase() === String(project.githubRepo).toLowerCase()) {
+      const view = gh(['pr', 'view', String(unstuck.number), '--repo', project.githubRepo, '--json', 'state,mergedAt']);
+      if (view.ok) {
+        try {
+          const got = JSON.parse(view.stdout);
+          live = { state: String(got.state || '') || null, mergedAt: got.mergedAt || null };
+        } catch { /* non-JSON: left unread */ }
+      }
+    }
+    plan = catchUpClosePlan({ status, ownPr, unstuck, live });
+  }
+  return { t, comments, unstuck, live, plan };
+}
+
+/** A merge time from GitHub, in Mountain time, or '' when there is none. */
+function mergedAtText(iso) {
+  const ms = Date.parse(String(iso || ''));
+  return Number.isFinite(ms) ? `${clock(ms)} MT` : '';
+}
+
+/**
+ * `ask` must not hand Dane a catch-up ticket whose pull request already
+ * merged (SP-288): there is nothing for him to do, and `fixup-live` closes it.
+ * Returns the exit code, or null to carry on. A failed GitHub read carries on:
+ * the ask stands as it did before this guard.
+ */
+async function catchUpMergedRefused(task) {
+  if (flag('ask-anyway')) {
+    console.error('Asking although its pull request may already be merged (--ask-anyway). Recorded in this transcript.');
+    return null;
+  }
+  const r = await catchUpReading(task);
+  if (r.plan.act !== 'close') return null;
+  console.error(`\nREFUSED — ${task} is a catch-up ticket and ${r.plan.why}${r.live?.mergedAt ? ` (${mergedAtText(r.live.mergedAt)})` : ''}.`);
+  console.error('Its work is already live, so there is nothing to ask Dane. Close it yourself, with a note:');
+  console.error(`  npm run clickup -- fixup-live --task ${task} --if-status "${r.t.status?.status ?? ''}"`);
+  console.error('Nothing was posted and the status has NOT moved.');
+  return 2;
+}
+
+/**
+ * One question, one card (SP-288): a ticket already in that status of his,
+ * with a machine card he has not answered yet, has been asked. A second card
+ * posts the same question twice on his list.
+ */
+async function alreadyAskedRefused(task, status) {
+  if (flag('ask-again')) {
+    console.error('Posting a second card on an unanswered one (--ask-again). Recorded in this transcript.');
+    return null;
+  }
+  const t = await readTask(task);
+  if (statusOf(t.status?.status ?? '') !== statusOf(status)) return null;
+  const comments = await readComments(task);
+  // In Needs your input a teammate's reply answers the card too (SP-302).
+  const teammates = statusOf(status) === statusOf('Needs your input');
+  const verdict = handbackAnswer({ comments, operatorId: OPERATOR_ID, isMachine: isMachineAuthored, teammates });
+  if (verdict.state !== 'none') return null;
+  console.error(`\nREFUSED — ${task} is already in "${t.status?.status}" with a card Dane has not answered yet, so he has been asked.`);
+  console.error('A second card puts the same question in front of him twice. To add something, post a plain note:');
+  console.error(`  npm run clickup -- comment --task ${task} --body-file -`);
+  console.error('If this really is a different question, say so on the record: ... --ask-again');
+  console.error('Nothing was posted and the status has NOT moved.');
+  return 2;
 }
 
 /** Exit 2, before any write, when `text` links a GitHub file by branch (SP-178). */
@@ -517,7 +665,7 @@ async function readBusMessages() {
     const read = await readCommentsOrProblem(t.id);
     if (read.problem) return { ok: false, why: `the comments on ${t.id} "${t.name}" could not be read (${read.problem})` };
     for (const c of read.comments) {
-      messages.push({ id: String(c.id), at: Number(c.date) || 0, authorId: c.user?.id == null ? null : Number(c.user.id), ticket: String(t.id), text: String(c.comment_text ?? '') });
+      messages.push({ id: String(c.id), at: Number(c.date) || 0, authorId: c.user?.id == null ? null : Number(c.user.id), authorKind: c.user?.kind ?? null, ticket: String(t.id), text: String(c.comment_text ?? '') });
     }
   }
   return { ok: true, messages };
@@ -669,9 +817,15 @@ function laneIo(repo) {
 }
 
 // ── Main moved: tell every ticket still in flight (task 86bctjffu) ───────────
-// The checkout this script lives in. The relay runs from the main checkout;
-// the git reads here are a fetch and an in-memory merge, so nothing in it moves.
-const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url));
+// The Spirality checkout this script lives in (its releases are read here).
+const SPIRALITY_ROOT = fileURLToPath(new URL('..', import.meta.url));
+// The checkout of the project the door acts for: the one SPIRALITY_PROJECT
+// names (SP-270), else this one. The relay runs from the main checkout; the
+// git reads here are a fetch and an in-memory merge, so nothing in it moves.
+const REPO_ROOT = NAMED_PROJECT ?? SPIRALITY_ROOT;
+// Where the git reads that follow the current folder run (worktrees, the
+// claim marker): the named project's checkout, else the current folder.
+const GIT_CWD = NAMED_PROJECT ?? undefined;
 
 /**
  * After PR `mergedNumber` merged: one `MAIN MOVED:` note on every ticket in a
@@ -681,7 +835,10 @@ const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url));
  * returned in `problems` and the pass carries on (lib/mainMoved.js tellTickets).
  *
  * @param tasks the list's open tickets when the caller already has them
- * @returns {{ lines: string[], problems: string[], told: number }}
+ * @returns {{ lines: string[], problems: string[], told: number, ctx }}
+ *   `ctx` ({ merge, base, openPrs }) is set only when the merge, the fetch and
+ *   the open PRs all read, so the Ready to launch catch-up (SP-294) reuses
+ *   them instead of reading them again.
  */
 async function tellMainMoved({ mergedNumber, list, dryRun, tasks = null }) {
   const lines = [], problems = [];
@@ -727,7 +884,8 @@ async function tellMainMoved({ mergedNumber, list, dryRun, tasks = null }) {
     check: ({ branch }) => checkBranch({ base, branch, mergeCommit: merge.oid, cwd: REPO_ROOT }),
   };
   // The relay passes its own list; the standalone command reads it here.
-  return tellTickets({ tasks: tasks || await fetchAllTasks(list), merge, base, repo, openPrs, dryRun, io });
+  const result = await tellTickets({ tasks: tasks || await fetchAllTasks(list), merge, base, repo, openPrs, dryRun, io });
+  return { ...result, ctx: { merge, base, openPrs } };
 }
 
 // ── Building tickets a dead pass left behind (SP-101) ────────────────────────
@@ -765,7 +923,7 @@ function ancestorPids() {
 
 /** Every linked worktree of the checkout the door runs in: path, branch, when it was made, pushed?, dirty? */
 function listWorktrees() {
-  const out = spawnSync('git', ['worktree', 'list', '--porcelain'], { encoding: 'utf8' });
+  const out = spawnSync('git', ['worktree', 'list', '--porcelain'], { cwd: GIT_CWD, encoding: 'utf8' });
   if (out.status !== 0) return { problem: String(out.stderr || '').trim().slice(0, 200) || 'git worktree list failed', worktrees: [] };
   const entries = String(out.stdout).split(/\n\n+/).map((block) => {
     const e = {};
@@ -779,7 +937,7 @@ function listWorktrees() {
   const worktrees = entries.slice(1).map((e) => {
     let createdMs = NaN;
     try { const st = statSync(joinPath(e.path, '.git')); createdMs = st.birthtimeMs || st.mtimeMs; } catch { /* gone or unreadable */ }
-    const pushed = Boolean(e.branch) && spawnSync('git', ['rev-parse', '--verify', '--quiet', `refs/remotes/origin/${e.branch}`]).status === 0;
+    const pushed = Boolean(e.branch) && spawnSync('git', ['rev-parse', '--verify', '--quiet', `refs/remotes/origin/${e.branch}`], { cwd: GIT_CWD }).status === 0;
     const st = spawnSync('git', ['-C', e.path, 'status', '--porcelain'], { encoding: 'utf8' });
     return { path: e.path, branch: e.branch || '', createdMs, pushed, dirty: st.status === 0 && String(st.stdout).trim() !== '' };
   });
@@ -793,7 +951,7 @@ function listWorktrees() {
  * pass's worktree, where plain `.git` is a FILE pointing elsewhere.
  */
 function passMarkerPath() {
-  const r = spawnSync('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], { encoding: 'utf8' });
+  const r = spawnSync('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], { cwd: GIT_CWD, encoding: 'utf8' });
   const out = r.status === 0 ? String(r.stdout || '').trim() : '';
   return passClaim.markerPath(out || '.git');
 }
@@ -901,7 +1059,7 @@ if (cmd === 'whoami') {
   const out = await tracker.whoAmI();
   if (!out.res.ok) die('whoami', out);
   console.log(`Token valid. Acting as: ${out.json.user.username} <${out.json.user.email}> (id ${out.json.user.id})`);
-  if (Number(out.json.user.id) === OPERATOR_ID) console.error("  (This is Dane's own seat, as on StarCaster. Every comment this script posts carries the [machine] marker so readers can tell.)");
+  if (Number(out.json.user.id) === OPERATOR_ID) console.error("  (This is Dane's own seat, as on ClickUp. The ClickUp door stamps every comment it posts with the [machine] marker so readers can tell; on the tracker each loop signs in as its own machine actor instead.)");
   reportLimits();
 
 } else if (cmd === 'repo-check') {
@@ -1144,7 +1302,7 @@ if (cmd === 'whoami') {
   if (!task) usage();
   const comments = newestFirst(await readComments(task)).reverse();
   for (const c of comments) {
-    const who = isMachineComment(c.comment_text) ? `${c.user?.username ?? '?'} [machine]` : (c.user?.username ?? '?');
+    const who = isMachineAuthored(c) ? `${c.user?.username ?? '?'} [machine]` : (c.user?.username ?? '?');
     console.log(`[${clock(c.date)} MT] ${who} (${c.user?.id ?? '?'}, comment ${c.id}):`);
     console.log(stripMachineMarker(c.comment_text) || '(empty)');
     console.log('---');
@@ -1172,7 +1330,7 @@ if (cmd === 'whoami') {
     const prText = !isOperatorStatus(status) && recorded ? `PR #${recorded.number} not checked (machine status)` : prLabel(pr);
     const result = waitingVerdict({ task: t, comments, pr }, { operatorId: OPERATOR_ID });
     verdicts.push(result.verdict);
-    const lastWord = newest ? `${isMachineComment(newest.comment_text) ? 'a loop' : (newest.user?.username ?? '?')} ${clock(newest.date)} MT` : '(no comments)';
+    const lastWord = newest ? `${isMachineAuthored(newest) ? 'a loop' : (newest.user?.username ?? '?')} ${clock(newest.date)} MT` : '(no comments)';
     console.log(`${t.id}\t${status}\tassigned: ${assigned ? 'Dane' : 'not Dane'}\tlast word: ${lastWord}\t${prText}\t${verdictLine(result)}\t${t.name}`);
   }
   console.error(sweepSummary({
@@ -1449,6 +1607,8 @@ if (cmd === 'whoami') {
   // @@ASKED is exempt: it is his own words, fenced on the card.
   refuseBranchLinks([card.context, card.needed, card.evidence].join('\n'), 'Nothing was posted and the status has NOT moved.');
   if (!noMove) { const stop = await alreadyAnsweredRefused(task, status); if (stop !== null) process.exit(stop); }
+  if (!noMove) { const stop = await catchUpMergedRefused(task); if (stop !== null) process.exit(stop); }
+  if (!noMove) { const stop = await alreadyAskedRefused(task, status); if (stop !== null) process.exit(stop); }
   const { id: cardId, stored } = await postComment(task, { comment: commentBody });
   const lost = cardSurvived(card, stored.comment_text);
   if (lost) { console.error(`\n${lost}\nComment ${cardId} is on the task. The status has NOT been moved.`); process.exit(1); }
@@ -1461,6 +1621,34 @@ if (cmd === 'whoami') {
   if (!(moved.json.assignees || []).some((a) => a.id === OPERATOR_ID)) { console.error(`Card posted and status moved to "${now}", but Dane is NOT assigned — the handoff is incomplete.`); process.exit(1); }
   console.log(`Task ${task}: card ${cardId} posted, "${was}" -> "${now}", assigned: ${assigneeNames(moved.json)}.`);
   clearPassMarkerFor(task, now);
+  reportLimits();
+
+} else if (cmd === 'fixup-live') {
+  // A catch-up ticket whose PR already merged closes itself (SP-288): the
+  // pass that finds it moves it to Live with one note, and Dane is never asked.
+  const task = arg('task');
+  if (!task) usage();
+  const ifStatus = arg('if-status');
+  const r = await catchUpReading(task);
+  const was = r.t.status?.status ?? '?';
+  if (ifStatus && statusOf(was) !== statusOf(ifStatus)) {
+    console.error(`NOT moved: expected status "${ifStatus}" but the task is "${was}" — another loop or Dane got there first.`);
+    process.exit(3);
+  }
+  if (r.plan.act === 'cannot-tell') { console.error(`${task}: NOT moved — ${r.plan.why}. Try again, or carry on as before.`); process.exit(1); }
+  if (r.plan.act !== 'close') { console.log(`${task}: left as it is — ${r.plan.why}. Carry on as before.`); process.exit(4); }
+  const rem = (r.t.assignees || []).map((a) => a.id);
+  const out = await tracker.updateTask(task, { status: DISPLAY[LIVE], assignees: { add: [], rem } }, { ifStatus: was });
+  if (out.moved) { console.error(`NOT moved: the tracker refused the write — ${String(out.json?.err || 'the ticket moved').replace(/\.$/, '')}. Another loop or Dane got there first.`); process.exit(3); }
+  if (!out.res.ok) die('set status', out);
+  const back = await readTask(task);
+  const now = back.status?.status ?? '?';
+  if (statusOf(now) !== LIVE) { console.error(`Status did NOT stick: asked for "${DISPLAY[LIVE]}", the ticket reads back "${now}". No note was posted.`); process.exit(1); }
+  if ((back.assignees || []).length) { console.error(`Moved to "${now}", but assignees did NOT clear: ${assigneeNames(back)}.`); process.exit(1); }
+  clearPassMarkerFor(task, now);
+  const note = fixupLiveNote({ unstuck: r.unstuck, mergedAt: mergedAtText(r.live?.mergedAt), from: was });
+  const { id } = await postComment(task, { comment_text: note });
+  console.log(`Task ${task}: "${was}" -> "${now}" (read back), note ${id} posted (read back): ${r.plan.why}.`);
   reportLimits();
 
 } else if (cmd === 'relay') {
@@ -1552,8 +1740,10 @@ if (cmd === 'whoami') {
    *  Queued, and read it back. Returns { id, url } only when the ticket reads
    *  back with that name, in Queued, with a description; otherwise null, with
    *  the reason in `unchecked`. */
-  const fileCatchUp = async (task, prRef, branch, name, commentId) => {
-    const body = conflictTicketBody({ task, pr: prRef, branch, localVerdict: null, commentId });
+  // `ahead` ({ mergedNumber, files }): filed when main moved, before his
+  // merge word (SP-294), so the body does not claim he has given it.
+  const fileCatchUp = async (task, prRef, branch, name, commentId, ahead = null) => {
+    const body = conflictTicketBody({ task, pr: prRef, branch, localVerdict: ahead ? aheadConflictVerdict(ahead) : null, commentId, ahead });
     const out = await tracker.createTask(list, {
       name, markdown_description: body, status: DISPLAY[QUEUED], priority: PRIORITY.high,
     });
@@ -1575,8 +1765,8 @@ if (cmd === 'whoami') {
   /** Write the `CONFLICT TICKET FILED:` trail on the waiting ticket — the
    *  line the next pass reads so it never files twice — and read it back
    *  through the same parser. Returns true only when it reads back. */
-  const recordCatchUp = async (task, filed, prNumber, refiledFrom = null) => {
-    const body = conflictTicketFiledComment({ id: filed.id, url: filed.url, prNumber, localVerdict: null, refiledFrom });
+  const recordCatchUp = async (task, filed, prNumber, refiledFrom = null, localVerdict = null) => {
+    const body = conflictTicketFiledComment({ id: filed.id, url: filed.url, prNumber, localVerdict, refiledFrom });
     const noteId = await postNote(task, body, `catch-up ticket ${filed.id} filed for PR #${prNumber}`);
     if (!noteId) return false;
     const found = findConflictTicket(await readComments(task.id), prNumber);
@@ -1585,6 +1775,78 @@ if (cmd === 'whoami') {
       return false;
     }
     return true;
+  };
+
+  /** File the catch-up ticket for a `Ready to launch` PR that conflicts with
+   *  the main a merge just made, before his merge word (SP-294). The same
+   *  plan, ticket and trail the merge step uses at his word, so that step
+   *  finds it on file and never files a second. */
+  const fileConflictAhead = async ({ task, comments, pr, branch, verdict }, mergedNumber) => {
+    // merge-tree found the overlap: a finding, so the real-conflict words.
+    const ahead = { mergedNumber, files: verdict.files };
+    const localVerdict = aheadConflictVerdict(ahead);
+    const ticketName = conflictTicketName({ pr, branch, localVerdict });
+    const trail = findConflictTicket(comments, pr.number);
+    let filedStatus = null;
+    if (trail) {
+      const listed = tasks.find((t) => String(t.id).toLowerCase() === String(trail.id).toLowerCase());
+      const read = listed || await readTaskOrNull(trail.id);
+      filedStatus = read ? String(read.status?.status ?? '') : null;
+    }
+    const plan = conflictFilingPlan({ comments, prNumber: pr.number, queueTasks: tasks, ticketName, localVerdict, filedStatus });
+    if (plan.act === 'cannot-tell') return { ok: false, problem: `the catch-up ticket on file (${plan.filed.id}) could not be read` };
+    if (plan.act === 'none') return { ok: false, problem: 'the filing plan filed nothing' };
+    let filed = plan.filed;
+    if (plan.act === 'file') {
+      filed = await fileCatchUp(task, pr, branch, ticketName, null, ahead);
+      if (!filed) return { ok: false, problem: 'filing it failed (the reason is listed with the unchecked lines)' };
+    }
+    // A trail that does not read back is in `unchecked` already; the ticket
+    // exists, and the merge step finds it by name.
+    if (!plan.recorded) await recordCatchUp(task, filed, pr.number, plan.refiledFrom, localVerdict);
+    return { ok: true, filed, already: plan.act !== 'file' };
+  };
+
+  /** main just moved: tell every ticket still in flight (task 86bctjffu),
+   *  then keep each Ready to launch PR current, or file its fix-up (SP-294). */
+  const afterMainMoved = async (task, mergedNumber) => {
+    const news = await tellMainMoved({ mergedNumber, list, dryRun: false, tasks });
+    for (const l of news.lines) console.log(`  main-moved\t${l}`);
+    unchecked.push(...news.problems.map((p) => `main-moved after PR #${mergedNumber}: ${p}`));
+    say(task, 'main-moved', `${news.told} in-flight ticket(s) told that PR #${mergedNumber} moved main`);
+    if (!news.ctx) {
+      unchecked.push(`ready-catch-up after PR #${mergedNumber}: not run, because main-moved could not read the merge, fetch or the open PRs (above) — no Ready to launch PR was checked`);
+      return;
+    }
+    const { merge, base, openPrs } = news.ctx;
+    const io = {
+      readComments: readCommentsOrProblem,
+      readStatus: async (id) => (await readTaskOrNull(id))?.status?.status ?? null,
+      findPullRequest,
+      contains: ({ branch }) => branchContains({ branch, mergeCommit: merge.oid, cwd: REPO_ROOT }),
+      check: ({ branch }) => checkBranch({ base, branch, mergeCommit: merge.oid, cwd: REPO_ROOT }),
+      // A catch-up ticket on file for this PR, still with the loops, owns
+      // the branch (the newest trail; its status read from this pass's list).
+      catchUpBeingWorked: async ({ comments, prNumber }) => {
+        const trail = findConflictTicket(comments, prNumber);
+        if (!trail) return null;
+        const listed = tasks.find((t) => String(t.id).toLowerCase() === String(trail.id).toLowerCase());
+        const read = listed || await readTaskOrNull(trail.id);
+        const status = read ? statusOf(read) : '';
+        if (!status) return { id: trail.id, cannotTell: true };
+        return CATCH_UP_WORKED_STATUSES.includes(status) ? { id: trail.id, status: DISPLAY[status] || status } : null;
+      },
+      window: ({ pr: n }) => windowDecision({ read: readLeaseFile(mergeWindowPath()), repo, pr: n, now: new Date().toISOString() }),
+      updateBranch: (n) => {
+        const out = gh(['pr', 'update-branch', String(n), '--repo', repo]);
+        return out.ok ? { ok: true } : { ok: false, why: out.stderr.trim().slice(0, 200) || 'gh failed' };
+      },
+      fileConflict: (args) => fileConflictAhead(args, mergedNumber),
+    };
+    const ready = await catchUpReadyTickets({ tasks, merge, base, repo, openPrs, dryRun: false, io });
+    for (const l of ready.lines) console.log(`  ready-catch-up\t${l}`);
+    unchecked.push(...ready.problems.map((p) => `ready-catch-up after PR #${mergedNumber}: ${p}`));
+    say(task, 'ready-catch-up', `${ready.caughtUp} Ready to launch PR(s) caught up and ${ready.filed} catch-up ticket(s) filed after PR #${mergedNumber} moved main`);
   };
 
   /** Read a comment's reply thread, or null when it could not be read. */
@@ -1616,7 +1878,7 @@ if (cmd === 'whoami') {
   // The decision is closePlan's (lib/relayLane.js). Returns true when it
   // decided this ticket, so the merge step does not also act on it.
   const relayCloseReadyToLaunch = async (task, comments) => {
-    const verdict = handbackAnswer({ comments, operatorId: OPERATOR_ID, isMachine: isMachineComment });
+    const verdict = handbackAnswer({ comments, operatorId: OPERATOR_ID, isMachine: isMachineAuthored });
     if (verdict.state !== 'answered' || !isCloseCommand(verdict.answer?.comment_text)) return false;
     const answerId = verdict.answer.id;
     const replies = await readReplies(answerId);
@@ -1698,7 +1960,7 @@ if (cmd === 'whoami') {
     // Only his merge phrases need their reply threads read — that is where an
     // earlier pass left its marker. Everything else costs a request and says nothing.
     const books = emptyBooks();
-    const hisPhrases = comments.filter((c) => Number(c.user?.id) === OPERATOR_ID && !isMachineComment(c.comment_text) && isMergeCommand(c.comment_text));
+    const hisPhrases = comments.filter((c) => isOperatorAuthored(c, OPERATOR_ID) && isMergeCommand(c.comment_text));
     for (const c of hisPhrases) {
       const out = await tracker.listReplies(c.id);
       if (!out.res.ok) {
@@ -1793,10 +2055,7 @@ if (cmd === 'whoami') {
         const failed = [!noteId && 'note FAILED', !stuck && 'marker UNVERIFIED'].filter(Boolean);
         say(task, 'already-merged', `PR #${pr.number}${plan.mergedAt ? ` merged at ${plan.mergedAt}` : ''}; ticket -> ${dest.status} (verified); recorded on ${who}'s comment ${decision.commentId}${failed.length ? ` (${failed.join(', ')}, see below)` : ''} (${dest.why})${plan.healed ? '; replaces the old "already merged" refusal' : ''}`);
         await announce(task, mergedBusLine({ tag: busTag, task, url: ticketUrl(task), pr, dest, already: true }), `PR #${pr.number} already merged`);
-        const news = await tellMainMoved({ mergedNumber: pr.number, list, dryRun: false, tasks });
-        for (const l of news.lines) console.log(`  main-moved\t${l}`);
-        unchecked.push(...news.problems.map((p) => `main-moved after PR #${pr.number}: ${p}`));
-        say(task, 'main-moved', `${news.told} in-flight ticket(s) told that PR #${pr.number} moved main`);
+        await afterMainMoved(task, pr.number);
         return;
       }
     }
@@ -1971,10 +2230,7 @@ if (cmd === 'whoami') {
 
     // main just moved: tell every ticket still in flight, so its next pass
     // catches up before review instead of after (task 86bctjffu).
-    const news = await tellMainMoved({ mergedNumber: pr.number, list, dryRun: false, tasks });
-    for (const l of news.lines) console.log(`  main-moved\t${l}`);
-    unchecked.push(...news.problems.map((p) => `main-moved after PR #${pr.number}: ${p}`));
-    say(task, 'main-moved', `${news.told} in-flight ticket(s) told that PR #${pr.number} moved main`);
+    await afterMainMoved(task, pr.number);
   };
 
   const tasks = await fetchAllTasks(list);
@@ -1992,7 +2248,14 @@ if (cmd === 'whoami') {
   const relayNeedsYourInput = async (task) => {
     const comments = await readComments(task.id);
     seen.set(task.id, { task, comments });
-    const verdict = handbackAnswer({ comments, operatorId: OPERATOR_ID, isMachine: isMachineComment });
+    // Anyone on the project answers the card here, not only him (SP-302).
+    const read = await teamAnswerVerdict(comments);
+    if (read.unreadable != null) {
+      unchecked.push(`${task.id}: could not read the replies under an earlier answer (comment ${read.unreadable}) to see whether it was already acted on — not moved this pass`);
+      say(task, 'unchecked', `could not read the replies under comment ${read.unreadable}`);
+      return;
+    }
+    const { verdict } = read;
     let replies = [];
     if (verdict.state === 'answered') {
       replies = await readReplies(verdict.answer.id);
@@ -2162,10 +2425,7 @@ if (cmd === 'whoami') {
     settled.add(task.id);
     say(task, alreadyMerged ? 'already-merged' : 'merged', `Lane ${laneName}: PR #${pr.number}; ticket -> ${dest.status}${moved ? '' : ' (MOVE FAILED, see below)'} (${dest.why})`);
     if (!alreadyMerged) {
-      const news = await tellMainMoved({ mergedNumber: pr.number, list, dryRun: false, tasks });
-      for (const l of news.lines) console.log(`  main-moved\t${l}`);
-      unchecked.push(...news.problems.map((p) => `main-moved after PR #${pr.number}: ${p}`));
-      say(task, 'main-moved', `${news.told} in-flight ticket(s) told that PR #${pr.number} moved main`);
+      await afterMainMoved(task, pr.number);
     }
     // postNote, moveMergedTicket and tellMainMoved report into `unchecked` themselves.
     return { ok: moved, dest, problems: [] };
@@ -2347,6 +2607,34 @@ if (cmd === 'whoami') {
   console.error(`${out.length} ticket(s) in ${slug || (project.tracker === 'api' ? project.projectSlug : `list ${LOOP_QUEUE_LIST}`)}${flag('include-closed') ? ', Live included' : ', open only'}${withComments ? ', with their comments' : ''}.`);
   reportLimits();
 
+} else if (cmd === 'replies') {
+  // One comment's reply thread as data (SP-267): stale-answer reads it, only
+  // for an answer already past its threshold, to see the relay's
+  // `[bus-relay-handback-done]` reply, the same marker the relay itself treats
+  // as "this answer is spent". Read-only. The ticket's comments are read first
+  // because the tracker finds a comment's replies through its ticket.
+  const task = arg('task');
+  const commentId = arg('comment');
+  if (!task || !commentId || !flag('json')) usage();
+  const read = await readCommentsOrProblem(task);
+  if (read.problem) {
+    console.error(`replies FAILED: the comments on ${task} could not be read (${read.problem}), so nothing was printed.`);
+    process.exit(1);
+  }
+  if (!read.comments.some((c) => String(c.id) === String(commentId))) {
+    console.error(`replies FAILED: ${task} has no top-level comment ${commentId}, so nothing was printed.`);
+    process.exit(1);
+  }
+  const out = await tracker.listReplies(commentId);
+  const replies = out.res.ok ? (out.json?.comments || out.json?.replies) : null;
+  if (!Array.isArray(replies)) {
+    console.error(`replies FAILED: the replies to comment ${commentId} could not be read (${out.res.ok ? 'no reply list in the answer' : `HTTP ${out.res.status}`}), so nothing was printed.`);
+    process.exit(1);
+  }
+  console.log(JSON.stringify(replies.map((c) => ticketsJson.commentJson(c, { operatorId: OPERATOR_ID })), null, 2));
+  console.error(`${replies.length} repl(ies) to comment ${commentId} on ${task}.`);
+  reportLimits();
+
 } else if (cmd === 'stage-counts') {
   // Every stage counted, as JSON, for StarCaster's weekly report
   // (lib/stageCounts.js holds the shape and the counting). Read-only. `--list`
@@ -2409,13 +2697,89 @@ if (cmd === 'whoami') {
   console.error(`settings: ${lines.length} pipeline control(s) for ${project.projectSlug}, ${changed} changed from the default.`);
   reportLimits();
 
+} else if (cmd === 'wip-check') {
+  // Asked by loop-build before it claims (its SKILL.md, SP-238): is the
+  // number of tickets in flight at the cap Dane set on the Settings page?
+  // Read-only. The deciding is lib/wipCheck.js; this block only reads the
+  // three facts it needs. Any fact that cannot be read is exit 1, "could not
+  // tell", and the pass goes on and says so (the cap fails open, as
+  // lib/wipCap.js explains).
+  const stop = (why) => {
+    const v = unknownVerdict(why);
+    console.log(v.line);
+    reportLimits();
+    process.exit(v.code);
+  };
+  let settings;
+  try {
+    const out = await tracker.pipelineSettings();
+    if (out.unsupported) settings = { unsupported: true };
+    else if (!out.res.ok) settings = { ok: false, why: `HTTP ${out.res.status}${out.json?.err ? `: ${out.json.err}` : ''}` };
+    else settings = { ok: true, controls: out.json.controls };
+  } catch (err) {
+    settings = { ok: false, why: err.message };
+  }
+  const cap = capInForce({ settings, env: process.env });
+  if (cap.cap == null) stop(cap.why);
+  // Every ticket, closed ones too: a pull request whose ticket is Live must
+  // be known as that, not as "no ticket found".
+  const tickets = [];
+  try {
+    for (let page = 0; ; page += 1) {
+      if (page >= 50) stop('the ticket list ran past 50 pages, so the count would be a guess');
+      const out = await tracker.listTasksPage(LOOP_QUEUE_LIST, page, { includeClosed: true });
+      if (!out.res.ok || !Array.isArray(out.json?.tasks)) stop(`the tickets could not be listed (HTTP ${out.res.status})`);
+      tickets.push(...out.json.tasks);
+      if (out.json.last_page !== false || out.json.tasks.length === 0) break;
+    }
+  } catch (err) {
+    stop(`the tickets could not be listed: ${err.message}`);
+  }
+  const prs = gh(['pr', 'list', '--repo', project.githubRepo, '--state', 'open', '--json', 'number,state,body', '--limit', '500']);
+  if (!prs.ok) stop(`GitHub's open pull requests for ${project.githubRepo} could not be listed: ${prs.stderr.trim().split('\n')[0] || 'gh failed'}`);
+  let openPrs;
+  try { openPrs = JSON.parse(prs.stdout); } catch { openPrs = null; }
+  if (!Array.isArray(openPrs)) stop('GitHub answered the pull request list with something that is not a list');
+  const verdict = wipCheckVerdict({ tickets, prs: openPrs, cap: cap.cap });
+  console.log(verdict.line);
+  console.error(`wip-check: cap ${cap.cap} from ${cap.source}; ${verdict.detail}`);
+  reportLimits();
+  process.exit(verdict.code);
+
+} else if (cmd === 'pause-check') {
+  // Asked by a lane's runner before every pass (scripts/pause_check.sh,
+  // SP-237): is the whole pipeline, or this lane, paused on the Settings
+  // page? One line on stdout, which the runner logs. It fails safe: a read
+  // that did not work is exit 3, paused, in words that say so; only a project
+  // whose tickets are not on the tracker (no controls exist) runs unasked.
+  // A lane the controls do not list is not refused here: the verdict finds
+  // no switch for it and counts it as paused, saying which setting is missing.
+  const lane = arg('lane');
+  if (!lane || !/^[a-z][a-z-]*$/.test(lane)) {
+    console.error(`pause-check: refused — --lane names the lane asking, e.g. loop-build or relay; got ${lane == null ? 'none' : `"${lane}"`}.`);
+    process.exit(2);
+  }
+  let read;
+  try {
+    const out = await tracker.pipelineSettings();
+    if (out.unsupported) read = { unsupported: true, why: out.json?.err };
+    else if (!out.res.ok) read = { ok: false, why: `HTTP ${out.res.status}${out.json?.err ? `: ${out.json.err}` : ''}` };
+    else read = { ok: true, controls: out.json.controls, changes: out.json.changes };
+  } catch (err) {
+    read = { ok: false, why: err.message };
+  }
+  const verdict = settingsPauseVerdict(read, lane);
+  console.log(verdict.line);
+  reportLimits();
+  process.exit(verdict.code);
+
 } else if (cmd === 'release') {
   // Spirality's releases (SP-265, docs/INTEGRATION.md "How a change reaches
   // the projects"). A release is a tag on Spirality's main; which one each
   // project runs is the tracker's record. The tags are read from the remote
   // of the Spirality checkout this door runs from, never a local copy.
   const sub = process.argv[3];
-  const git = (args) => spawnSync('git', args, { cwd: REPO_ROOT, encoding: 'utf8', timeout: 60_000 });
+  const git = (args) => spawnSync('git', args, { cwd: SPIRALITY_ROOT, encoding: 'utf8', timeout: 60_000 });
   const remote = releaseRemote();
   const refuse = (why) => { console.error(`release ${sub}: refused — ${why}`); reportLimits(); process.exit(2); };
   const fail = (why) => { console.error(`release ${sub} FAILED — ${why}`); reportLimits(); process.exit(1); };

@@ -21,12 +21,19 @@
  * `--config=<path>`), as `tracker:signins` does: then that settings file,
  * the same one the command reads, names the Doppler project, so a project's
  * sign-ins run from Spirality's checkout land in that project's Doppler.
+ *
+ * Otherwise, with SPIRALITY_PROJECT set to a project's checkout folder
+ * (SP-270), that project's settings file names the Doppler project and
+ * config, the same file the door then reads: a StarCaster lane run from
+ * Spirality's folder reads StarCaster's tracker token from StarCaster's
+ * Doppler, exactly as StarCaster's own copy does today, and the value is
+ * never printed. The variable passes through `doppler run` to the command.
  */
 
 import { spawn } from 'node:child_process';
 import { constants } from 'node:os';
 import { pathToFileURL } from 'node:url';
-import { loadProjectConfig, ProjectConfigError } from '../lib/projectConfig.mjs';
+import { loadProjectConfig, namedProjectFolder, ProjectConfigError } from '../lib/projectConfig.mjs';
 
 /** The settings file a wrapped command names with `--config`, or undefined. */
 export function configFileArg(command) {
@@ -50,7 +57,7 @@ async function main(command) {
   }
   let config;
   try {
-    config = loadProjectConfig({ file: configFileArg(command) });
+    config = loadProjectConfig({ file: configFileArg(command), project: namedProjectFolder() });
   } catch (err) {
     if (!(err instanceof ProjectConfigError)) throw err;
     console.error(`with_doppler: the project config is not usable — ${err.message}`);

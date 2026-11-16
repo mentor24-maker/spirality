@@ -1,0 +1,5 @@
+## 2026-11-13 — A clash fix-up ticket whose pull request already merged lands on the Waiting on You list asking Dane to press Close: close it automatically instead (#215)
+
+When two pieces of work clash, the relay files a small "find out why this will not merge" ticket. That ticket has nothing of its own to merge: once the original pull request goes in, it is finished. But this morning, after the relay had already merged the original on Dane's word, the review still handed the small ticket to Dane and asked him to press Close, twice. He was being asked to tidy up after work he had already approved.
+
+Now the loop closes these itself. A new step checks GitHub: if the original pull request has merged, the small ticket goes straight to Live with one note saying when it merged, and Dane is never asked. The step that hands work to Dane now refuses such a ticket outright, so a forgetful pass cannot put it on his list either. It also refuses to post the same question to him a second time while the first is still unanswered. A small ticket whose original is still waiting behaves exactly as before.

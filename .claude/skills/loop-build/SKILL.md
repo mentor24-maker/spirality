@@ -14,7 +14,9 @@ about: >
 # Loop: Build
 
 Step 2 of 3 in the Spirality development loop (spec → build → review).
-See `docs/LOOP_ENGINEERING.md` for the whole system.
+See Spirality's `docs/LOOP_ENGINEERING.md` (in Spirality's folder, three folders
+up from this skill's base directory, not in a project's checkout)
+for the whole system.
 
 Each run builds **one** task into **one** PR. Under `/loop` it repeats,
 draining the queue one clean PR at a time.
@@ -77,6 +79,34 @@ marker is the only record of the stranded ticket. A claim refused at its guard
 (exit 3) clears the marker it wrote. Any other `Building` ticket is not yours:
 leave it.
 
+## Then: is there room for another ticket?
+
+Right after `pass-reconcile` (so a ticket it handed back is not counted) and
+before any claim, ask whether the work in flight is already at the
+work-in-progress cap Dane sets on the Settings page (Spirality's SP-238):
+
+```bash
+npm run clickup -- wip-check
+```
+
+It counts the tickets in flight (an open pull request whose ticket is in
+`Building` or `In review`, and a `Building` ticket with no pull request yet)
+against the page's cap, prints one line, and exits:
+
+- **0**, `room: 2 of 5 in flight`: carry on and claim.
+- **3**, `full: 5 of 5 in flight (<ticket ids>)`: claim nothing. The first
+  line of your report is exactly `WIP CAP REACHED: <the full: line>`, and the
+  pass ends there. This is a normal outcome, not a failure: with every merge
+  dating every other open pull request, more open work ships slower
+  (`lib/wipCap.js` explains). Rework does not count, and is not claimed
+  either while the cap is full.
+- **1**, could not tell (GitHub or the tracker did not answer): carry on and
+  claim, and say in your report that the cap was not applied this pass. The
+  cap fails open on purpose: refusing on a passing outage would stop all work.
+
+`CLAUDE_LOOP_WIP_CAP` overrides the page's cap for a session started by hand;
+on the lane the page's value always wins.
+
 ## Ticket access: the direct script, not the connector
 
 Every ticket touch (the tracker, since the switch from ClickUp) goes through **`npm run clickup -- <command>`** — a full
@@ -86,6 +116,7 @@ loop makes:
 
 ```bash
 npm run clickup -- pass-reconcile                                      # FIRST: hand back the ticket a dead pass left in Building
+npm run clickup -- wip-check                                           # THEN: room under the Settings page's cap? exit 3 = full, claim nothing
 npm run clickup -- queue --claimable                                   # FIRST LINE is the task to claim (all Rework, then Queued)
 npm run clickup -- claim --task <id>                                   # safe claim; exit 3 = moved or still waits on a ticket, take the next
 npm run clickup -- get --task <id>                                     # header + body; also shows any recorded PR, send-back rounds and attachments
@@ -135,9 +166,13 @@ Exit **0** nothing of his / **3** something IS his / **1** could not tell.
 
    ```bash
    npm run clickup -- pass-reconcile
+   npm run clickup -- wip-check
    npm run clickup -- queue --claimable
    npm run clickup -- claim --task <id>
    ```
+
+   `wip-check` exit 3 (`full:`) ends the pass before the queue is read
+   ("Then: is there room for another ticket?" above).
 
    `--claimable` returns every `Rework` ticket before any `Queued` one —
    rework oldest-first, then queued by priority-then-oldest. A `Rework` ticket
@@ -150,6 +185,36 @@ Exit **0** nothing of his / **3** something IS his / **1** could not tell.
    still open (or a line it cannot read) — take the next task. Exit 1 on a
    `Waits on:` ticket that cannot be read: say so on the ticket, take the
    next.
+
+   **A `Queued` ticket for a hand-run session only.** When the ticket at the
+   head of the queue says in its description that only a hand-run session may
+   build it, this pass never builds it, but it does re-check, every pass,
+   whether what it waits on is still open. Skipping it on the last comment's
+   reasons is how Spirality's SP-25 sat in `Queued` for 31 hours after both
+   its blockers had cleared (Spirality's SP-296), with nothing telling Dane.
+
+   - **List its blockers:** every id on its `Waits on:` line, plus each
+     blocker its newest hold-back comment names: another ticket, or a word
+     Dane must write on a bus ticket (such as "resume auto-merging").
+   - **Re-check each blocker now, never by copying the last comment.** `get`
+     each named ticket (closed or `Live` = cleared); for a word on a bus
+     ticket, read that ticket's `comments` for it. A blocker clearing on
+     another ticket adds no comment to this one, so the old reasons are no
+     evidence at all.
+   - **All cleared:** hand the ticket to Dane with `ask --status "Needs your
+     input"`. The card says which blockers cleared, when, and how this pass
+     checked each one, and that the ticket is ready for a hand-run session.
+     Then take the next ticket as usual; the pass does not build it.
+   - **Some still open:** skip it. The skip note (your log line, and any
+     comment) names only the blockers still open, each with what was checked
+     ("SC-791 is still In review"). Never "nothing has changed since …" on
+     its own, and never a blocker that has cleared.
+   - **A blocker that cannot be checked** (its ticket unreadable, another
+     tracker out of reach): name it in the skip note as unreadable. It is
+     never counted as cleared.
+   - **Do not repeat the same skip comment every pass.** Write a new comment
+     only when the still-open blockers differ from what the newest note
+     already says; otherwise the log line is enough.
 
    **On a `Rework` ticket, do NOT start a second branch.** `get` prints the
    recorded PR. Check out that branch into a worktree
@@ -299,7 +364,17 @@ Exit **0** nothing of his / **3** something IS his / **1** could not tell.
    ticket, the newest `PR opened:` comment is the one counted, so if you
    record the PR again, estimate the whole pull request as it now stands.
 
-8. **Hand off to review.** `npm run clickup -- status --task <id> --status
+8. **Hand off to review.** **A catch-up ticket** ("Find out why PR #N
+   (<branch>) will not merge", no PR of its own: you merged `main` into that
+   PR's branch and skipped `pr-opened`) can find its PR already merged by
+   the relay while you waited on the checks. After your "Done:"
+   comment, run `npm run clickup -- fixup-live --task <id> --if-status
+   Building`. Exit 0: that PR is merged, so the ticket is now Live with a
+   note naming the merge; finish, nothing for review or Dane. Exit 4 (not
+   merged yet): hand off as below. Exit 1: say so in your report and hand off
+   as below.
+
+   Otherwise: `npm run clickup -- status --task <id> --status
    "In review"`. Leave it unassigned (it is the machine's turn). **Do NOT
    merge** — merges happen only on Dane's explicit say-so. `loop-review` takes
    it from here.

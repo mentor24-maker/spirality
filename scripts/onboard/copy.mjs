@@ -1,9 +1,12 @@
 #!/usr/bin/env node
 /**
  * The setup wizard's copy step (SP-110): everything a project needs from
- * Spirality arrives in ONE pull request in its repository, every copied file
- * checked byte for byte against the Spirality commit it came from
- * (SETUP_REVIEW.md part 3, step 4; Dane's answer to question 7).
+ * Spirality arrives in ONE pull request in its repository (SETUP_REVIEW.md
+ * part 3, step 4; Dane's answer to question 7). Since SP-273 that is only
+ * its manifest and its gate: the loop's door, runners, libraries, skills
+ * and hooks stay in Spirality, whose lanes run the project from Spirality's
+ * folder (docs/INTEGRATION.md). Any file the manifest does name is checked
+ * byte for byte against the Spirality commit it came from.
  *
  *   npm run onboard:copy -- --answers <file> --config <settings file> [--allow-replace] [--check-only]
  *   npm run onboard:copy -- --answers <file> [--config <file>] --dry-run
@@ -26,10 +29,10 @@
  *   2. write    a worktree on branch spirality-setup off origin's main, kept
  *               beside the answers file (never inside the project's
  *               checkout, which the lanes need clean): the files, the
- *               settings file, .claude/settings.json merged with the
- *               project's own (SP-254: every hook and permission of either,
- *               read back), the npm scripts (with a `verify` that runs
- *               the check and the loop's tests, if it has no verify script),
+ *               settings file, any .claude/settings.json the manifest names
+ *               merged with the project's own (SP-254; it names none since
+ *               SP-273), the npm scripts (a `verify` that runs the check,
+ *               if it has no verify script),
  *               the CLAUDE.md sections, the .gitignore lines the lanes need
  *               (SP-120) and, if it has no verify check yet, the CI workflow
  *               (running `npm run verify` when that was added).
@@ -60,9 +63,10 @@
  *               replaces, every file beside them it does not touch, and
  *               every test it retired, with why, and every test kept for a
  *               hand fix.
- *   7. readback from the worktree: `npm run doctor`, `npm run clickup --
- *               whoami` (the project's hand-run seat) and `queue`; then CI's
- *               verify on the pull request.
+ *   7. readback for the worktree, through Spirality's own door and doctor
+ *               (SPIRALITY_PROJECT names the worktree, SP-270): doctor,
+ *               `clickup -- whoami` (the project's hand-run seat) and
+ *               `queue`; then CI's verify on the pull request.
  *
  * It never touches the project's main and never merges: SP-111's lanes step
  * installs the lanes from the branch, and the project's own relay merges it
@@ -157,7 +161,7 @@ const manifest = JSON.parse(readFileSync(new URL('./manifest.json', import.meta.
 const pkgText = readProject('package.json');
 if (pkgText == null) fail('look', `${answers.githubRepo} has no package.json on main`);
 const varsFor = (ownVerify) => templateVars(answers, homeConfig, { spiralityCommit: commit.slice(0, 7), visibility: repoView.out, ownVerify });
-// Its own verify is kept; with none, it gets the check plus the loop's tests (SP-121).
+// Its own verify is kept; with none, it gets the answers' check (SP-121), and no loop tests (SP-273).
 let verify;
 try { verify = verifyScriptFor(pkgText, manifest.verifyIfAbsent, varsFor(null)); } catch (e) { fail('look', e.message); }
 const vars = varsFor(verify.own);
@@ -212,7 +216,7 @@ const extra = [
   { to: 'CLAUDE.md', kind: 'made', from: claude.added ? 'the project\'s own, plus the loop\'s sections' : 'the project\'s own (the loop\'s sections are already there)', content: claude.text },
   ...(haveVerify ? [] : [{
     to: '.github/workflows/verify.yml', kind: 'made',
-    from: verify.add ? 'runs npm run verify, which the setup adds' : 'the answers\' check command, then the loop\'s tests',
+    from: verify.add ? 'runs npm run verify, which the setup adds' : 'runs the answers\' check command',
     content: verifyWorkflow(answers, { verifyAdded: Boolean(verify.add) }),
   }]),
 ];
@@ -310,7 +314,7 @@ const commitStep = (message, step) => {
 wgit('add', '-A', '--', '.', ':(exclude)node_modules');
 installPackages(worktree, 'commit');
 if (!wgit('diff', '--cached', '--quiet').ok) {
-  const msg = `${answers.projectName} gets the loop from Spirality ${commit.slice(0, 7)}: settings, verify check, ticket door, skills and lanes\n\nWritten by Spirality's setup wizard (scripts/onboard/copy.mjs). Every\n"copy" file is byte for byte Spirality ${commit}.`;
+  const msg = `${answers.projectName} joins Spirality's loop at ${commit.slice(0, 7)}: its settings file and verify check\n\nWritten by Spirality's setup wizard (scripts/onboard/copy.mjs). The loop\nitself stays in Spirality, whose lanes run this project from its own folder.`;
   commitStep(msg, 'commit');
   // What git stored, not what was written: a project's .gitattributes (line
   // endings, filters) could change the bytes on the way in.
@@ -460,7 +464,7 @@ const push = wgit('push', '-q', '-u', 'origin', BRANCH);
 if (!push.ok) fail('pr', `git push: ${last(push.err)}`);
 if (wgit('rev-parse', 'HEAD').out !== wgit('rev-parse', `origin/${BRANCH}`).out) fail('pr', `origin's ${BRANCH} does not read back as the commit just pushed`);
 
-const title = `${answers.projectName} cannot run Spirality's loop yet: add its settings, verify check, ticket door, loop skills and lanes`;
+const title = `Add ${answers.projectName}'s Spirality settings file and verify check`;
 // A project that ran its own copy of the loop (SP-159): what of it this
 // replaces, and what it leaves in place, said in the pull request.
 let oldCopy = [];
@@ -491,9 +495,9 @@ const replacedNpm = npm.replaced.length ? [
 ] : [];
 const rows = all.map((f) => `| \`${f.to}\` | ${f.kind === 'copy' ? `copy of \`${f.from}\`, cmp identical` : f.kind === 'adapted' ? `\`${f.from}\` with the manifest's edits: ${f.why}` : f.from} | ${f.status} |`);
 const body = [
-  `Everything ${answers.projectName} needs to run Spirality's loop, in one pull request, written by Spirality's setup wizard.`,
+  `Everything ${answers.projectName} needs to run Spirality's loop, in one pull request, written by Spirality's setup wizard: its settings file and its \`verify\` gate. The loop's own code (the ticket door, the lanes, the skills and the hooks) is not copied here: Spirality runs ${answers.projectName}'s lanes from its own folder.`,
   '',
-  `**Spirality commit:** [\`${commit.slice(0, 7)}\`](https://github.com/${homeConfig.githubRepo}/commit/${commit}). Every "copy" file below was compared with \`cmp\` against that commit and is byte for byte identical. "Adapted" files are that commit's file with the named edits from \`scripts/onboard/manifest.json\`, each of which had to match exactly once.`,
+  `**Spirality commit:** [\`${commit.slice(0, 7)}\`](https://github.com/${homeConfig.githubRepo}/commit/${commit}). Any "copy" file below was compared with \`cmp\` against that commit and is byte for byte identical. "Adapted" files are that commit's file with the named edits from \`scripts/onboard/manifest.json\`, each of which had to match exactly once.`,
   '',
   '| File | From, and how it was checked | Here before |',
   '|---|---|---|',
@@ -503,7 +507,7 @@ const body = [
   ...retiredSection(retired, { projectName: answers.projectName, base: retired[0]?.base }),
   ...handFixSection(handFix.filter((h) => existsSync(join(worktree, h.file))), { projectName: answers.projectName }),
   ...replacedNpm,
-  'After this merges, `loop/` is never edited here: a change is made in Spirality first and copied in.',
+  'A change to how the loop works is made in Spirality, never here.',
   '',
   '🤖 Generated with [Claude Code](https://claude.com/claude-code)',
 ].join('\n');
@@ -528,10 +532,15 @@ const readBack = run('gh', ['pr', 'view', prUrl, '--json', 'headRefName,body', '
 if (readBack !== `${BRANCH} true`) fail('pr', `${prUrl} does not read back as ${BRANCH} naming ${commit.slice(0, 7)} (got "${readBack}")`);
 
 // ── 7. readback ────────────────────────────────────────────────────────────
-const door = (...a) => run('npm', ['run', '--silent', ...a], { cwd: worktree });
-const doctor = door('doctor');
-if (!doctor.ok) fail('readback', `npm run doctor in ${worktree}: ${last(doctor.out || doctor.err)}`);
-say('readback', 'npm run doctor passes');
+// Spirality's own door and doctor, acting for the worktree: the project has
+// no copy of either (SP-273). The door reads the worktree's settings file
+// because SPIRALITY_PROJECT names it (SP-270); the doctor finds it from the
+// folder it runs in.
+const forWorktree = { SPIRALITY_PROJECT: worktree };
+const door = (...a) => run('npm', ['run', '--silent', ...a], { cwd: spirality, env: forWorktree });
+const doctor = run('node', [join(spirality, 'scripts', 'doctor.mjs')], { cwd: worktree, env: forWorktree });
+if (!doctor.ok) fail('readback', `Spirality's doctor for ${worktree}: ${last(doctor.out || doctor.err)}`);
+say('readback', 'Spirality\'s doctor passes for the project');
 const who = door('clickup', '--', 'whoami');
 if (!who.ok || !answersAsHandRun(who.out, answers.projectSlug)) fail('readback', `npm run clickup -- whoami did not answer as ${answers.projectSlug}'s hand-run seat: ${last(who.out || who.err)}`);
 say('readback', `whoami: ${last(who.out, 1)}`);

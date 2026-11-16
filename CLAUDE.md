@@ -2,9 +2,13 @@
 
 Read this file first, then [docs/LOOP_ENGINEERING.md](docs/LOOP_ENGINEERING.md).
 Every prompt Dane gives a hand-run thread is logged, word for word, in
-[docs/OPERATOR_PROMPTS.md](docs/OPERATOR_PROMPTS.md).
-Any change to the words or look of the tracker page follows
-[docs/DOCTRINE.md](docs/DOCTRINE.md) (Title Case for buttons and headings).
+[docs/operator-prompts/](docs/operator-prompts/), one file per thread
+([docs/OPERATOR_PROMPTS.md](docs/OPERATOR_PROMPTS.md) says how).
+The rules that earned their place, each with its incident, are
+[docs/DOCTRINE.md](docs/DOCTRINE.md); code cites them by number
+(`DOCTRINE 3.11`). Any change to the words or look of the tracker page follows
+[docs/UI_DOCTRINE.md](docs/UI_DOCTRINE.md): StarCaster's conventions, one look
+for every Alphire project, and Title Case for buttons, headings and labels.
 
 **This repository is public.** Never commit a key, password, token or `.env`
 file. Keys live in Doppler (project `spirality`).
@@ -32,8 +36,9 @@ and lessons learned in one do not reach the other. Spirality ends that:
    this repository against the project's. A change reaches Spirality's own
    lanes first and each project after it, so it can never reach every project
    at once unchecked. See [docs/INTEGRATION.md](docs/INTEGRATION.md) (Dane,
-   SP-261, 2026-11-12). Until those moves land, projects still carry a wizard
-   copy (`docs/ONBOARDING_A_PROJECT.md`, gap 1).
+   SP-261, 2026-11-12). A new project gets no copy of the loop (SP-273); the
+   projects set up before then still carry a wizard copy until their own
+   queues remove it (`docs/ONBOARDING_A_PROJECT.md`, gap 1).
 
 The full analysis and the five-phase plan are on the WaveCenter ticket that
 created this repository (86bcgm97x) and in `docs/PLAN.md`.

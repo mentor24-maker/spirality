@@ -1,14 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { chmodSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
-import { seedDemo, tickingClock } from './demoData.mjs';
-import { reportsOf, REPORT_RANGES, searchTickets, PRIORITIES, timeSplitOf, isFailureNote, TIME_BUCKETS } from './pageData.mjs';
-import { escapeHtml, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, controlValueText, mountainTime } from './web/render.mjs';
+import { DEMO_NEWEST_RELEASE, DEMO_OWN_PROJECT, DEMO_SUGGESTIONS, DEMO_TOPICS, demoNewestRelease, demoSuggest, seedDemo, tickingClock } from './demoData.mjs';
+import { reportsOf, REPORT_RANGES, GROWTH_PERIODS, searchTickets, PRIORITIES, timeSplitOf, isFailureNote, TIME_BUCKETS, pipelineControlsOf } from './pageData.mjs';
+import { escapeHtml, renderStatusLine, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, CLOSE_LINE, REPLY_LINE, offersMerge, offersClose, bugReport, BUG_REPORT_TAG, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, heldBugReport, renderBugReportActions, approveQuestion, rejectQuestion, changeProblem, REJECT_COMMENT, WONT_DO_TAG, HELD_REPORT_LINE, HELD_REPORT_STATUS_LINE, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, loopHasIt, renderCommentForm, LOOP_HAS_STATUSES, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, renderTopics, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, renderListTopics, projectTags, projectTagCounts, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, renderReleaseGroup, controlValueText, mountainTime, wakeInEffectText, modelLastPassText, renderConsole, renderConsoleTile, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, consoleFeature, featureColourIndex, renderFeatureKey, FEATURE_PALETTE, drainLine, capInFlightText, renderTitleChoices, titleModeOf, TITLE_MODES, SUGGEST_POLL_MS, moveSuggestion, suggestState, filingPlan, orderPlan, andList, suggestRunLine, renderSuggestRows, renderSuggestionInfo, suggestionFileHref } from './web/render.mjs';
 import { startServer, setupSettingsOf } from './server.mjs';
 import { saveAnswers, setupFields, setupOf } from './setup.mjs';
 import { DANE_FIELDS as SETUP_FIELDS, STEPS as SETUP_STEPS } from '../scripts/onboard/onboard.mjs';
@@ -20,18 +20,21 @@ import loopStatuses from '../lib/loopStatuses.js';
 import mergeOnComment from '../lib/mergeOnComment.js';
 import busRelayPlan from '../lib/busRelayPlan.js';
 import { prOpenedComment } from '../scripts/lib/loopTrail.mjs';
+import { withTokensResolved } from './cssTokens.mjs';
 
 const DOOR = fileURLToPath(new URL('../scripts/clickup.mjs', import.meta.url));
 const WEB = (name) => fileURLToPath(new URL(`./web/${name}`, import.meta.url));
+/** app.css with its tokens filled in (SP-320), for a check on the colour or size the page draws. */
+const drawnCss = () => withTokensResolved(readFileSync(WEB('app.css'), 'utf8'));
 
 /** The demo data in a fresh store, a server on a free port, and a caller signed in as the operator. */
-async function fixture({ mergePhrase, closePhrase, goPhrase } = {}) {
+async function fixture({ mergePhrase, closePhrase, goPhrase, suggest } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'tracker-web-'));
   const clock = tickingClock();
   const store = openStore(join(dir, 'tracker.db'), { now: clock });
   const seed = seedDemo(store, { operatorName: 'Dane', clock });
   const loopToken = store.issueToken(seed.loop.id);
-  const server = await startServer({ store, port: 0, mergePhrase, closePhrase, goPhrase });
+  const server = await startServer({ store, port: 0, mergePhrase, closePhrase, goPhrase, suggest });
   const url = `http://127.0.0.1:${server.address().port}`;
   async function call(method, path, { token = seed.token, body } = {}) {
     const headers = token ? { authorization: `Bearer ${token}` } : {};
@@ -170,24 +173,44 @@ test('pressing Merge puts "your answer is in" on the ticket page and the board, 
     assert.equal(statusLabel(thread), `Ready to launch · ${ANSWER_IN_NOTE}`);
     assert.equal((await boardTickets(f, 'beta')).get('BE-1').answerIn, true, 'the board and list say so too');
 
-    // The relay answers (here with a refusal): its comment is newest, the note goes, the button returns.
+    // The relay answers (here with a refusal): its comment is newest, so "your answer is in" goes and
+    // the reply box returns. But his merge word still stands (SP-285): the relay re-tries it on every
+    // pass, so no Merge button, no place on Waiting on You, and the page says it stands.
     const loopToken = f.store.issueToken(f.loop.id);
     assert.equal((await f.call('POST', '/tickets/BE-1/comments', { token: loopToken, body: { body: 'MERGE REFUSED: the check is red.' } })).status, 201);
     thread = (await f.call('GET', '/tickets/BE-1/thread')).body;
     assert.equal(thread.answerIn, false);
-    assert.match(renderMergeAction(thread), /merge-action/);
-    assert.equal(statusLabel(thread), 'Ready to launch');
+    assert.equal(thread.mergeStands, true);
+    assert.doesNotMatch(renderMergeAction(thread), /merge-action/, 'no second Merge button while his word stands (SP-285)');
+    assert.match(renderAnswerIn(thread), /Your merge word stands\. The relay merges this on its own as soon as it can; you do not need to say it again\./);
+    assert.doesNotMatch(renderQuickAction(thread), /Your move|class="needed"/);
+    assert.equal(statusLabel(thread), `Ready to launch · ${MERGE_STANDS_NOTE}`);
     assert.match(renderReplyForm(thread, 'Dane'), /<form class="reply">[\s\S]*Post Reply/, "the reply box comes back with the relay's comment");
-    assert.equal((await boardTickets(f, 'beta')).get('BE-1').answerIn, false);
+    const row = (await boardTickets(f, 'beta')).get('BE-1');
+    assert.deepEqual([row.answerIn, row.mergeStands, row.waiting], [false, true, false]);
+    assert.ok(!(await f.call('GET', '/waiting')).body.waiting.some((t) => t.id === 'BE-1'), 'not back on Waiting on You (SP-285)');
   } finally { await f.cleanup(); }
 });
 
-test('a loop writing under his token does not count as his answer', async () => {
+test('SP-285: a new review PASS after his merge is a new round — the Merge button and Waiting on You come back', async () => {
+  const f = await fixture({ mergePhrase: 'merge' });
+  try {
+    const loopToken = f.store.issueToken(f.loop.id);
+    assert.equal((await f.call('POST', '/tickets/BE-1/comments', { body: { body: 'merge' } })).status, 201);
+    assert.equal((await f.call('POST', '/tickets/BE-1/comments', { token: loopToken, body: { body: 'REVIEW: PASSED — round 2, after a rework.' } })).status, 201);
+    const thread = (await f.call('GET', '/tickets/BE-1/thread')).body;
+    assert.equal(thread.mergeStands, false);
+    assert.match(renderMergeAction(thread), /merge-action/);
+    assert.ok((await f.call('GET', '/waiting')).body.waiting.some((t) => t.id === 'BE-1'));
+  } finally { await f.cleanup(); }
+});
+
+test('a loop\'s comment with no machine stamp does not count as his answer (SP-26)', async () => {
   const f = await fixture();
   try {
     const tickets = await boardTickets(f, 'beta');
-    const underToken = [...tickets.values()].find((t) => t.name === 'A question a loop asked under your token');
-    assert.equal(underToken.answerIn, false);
+    const unstamped = [...tickets.values()].find((t) => t.name === 'A question a loop asked, with no machine stamp');
+    assert.equal(unstamped.answerIn, false);
   } finally { await f.cleanup(); }
 });
 
@@ -219,9 +242,10 @@ test('"your answer is in" and "Waiting on you" never disagree: an answered ticke
       }
     }
     assert.ok(answered >= 1, 'the demo data holds an answered ticket');
-    // The rule is the waiting module's own, not a second copy of it.
+    // The rule is the waiting module's own, not a second copy of it
+    // (answeredLast since SP-302: a teammate's answer counts in Needs your input).
     const source = readFileSync(fileURLToPath(new URL('./pageData.mjs', import.meta.url)), 'utf8');
-    assert.match(source, /operatorSpokeLast\(/);
+    assert.match(source, /answeredLast\(/);
   } finally { await f.cleanup(); }
 });
 
@@ -248,12 +272,12 @@ test('with his answer in, the ticket page draws no reply box and copes with it m
   assert.doesNotMatch(draw, /querySelector\('form\.reply textarea'\)\.value =/);
   assert.match(draw, /const form = main\.querySelector\('form\.reply'\);\s*if \(!form\) return;\s*const box = form\.querySelector\('textarea'\);/);
   assert.match(draw, /if \(!form\) return;[\s\S]*location\.hash === '#reply'[\s\S]*form\.addEventListener\('submit'/);
-  assert.match(app, /reply: main\.querySelector\('form\.reply textarea'\)\?\.value \?\? ''/);
+  assert.match(app, /reply: main\.querySelector\('form\.reply textarea, form\.add-comment textarea'\)\?\.value \?\? ''/);
   // The ticket page's notice: tinted, a blue bar on the left, ink, upright. The board and list note unchanged.
   const css = readFileSync(WEB('app.css'), 'utf8');
   const notice = /\np\.answer-in \{([^}]*)\}/.exec(css)?.[1] ?? '';
-  for (const rule of [/font-style: normal/, /color: var\(--ink\)/, /background: #/, /border-left: \d+px solid var\(--blue\)/, /padding: /]) assert.match(notice, rule);
-  assert.match(css, /\n\.answer-in \{ font-size: 0\.85rem; font-style: italic; color: var\(--quiet\); \}/);
+  for (const rule of [/font-style: normal/, /color: var\(--ink-primary\)/, /background: var\(--brand-blue-tint\)/, /border-left: \d+px solid var\(--brand-blue\)/, /padding: /]) assert.match(notice, rule);
+  assert.match(css, /\n\.answer-in \{ font-size: var\(--text-sm\); font-style: italic; color: var\(--ink-secondary\); \}/);
   assert.equal(renderAnswerIn({ answerIn: true }), '<p class="answer-in">Your answer is in. The relay acts on it at its next pass.</p>');
 });
 
@@ -272,7 +296,7 @@ test('a ticket held up by a failing lane says so in one line above the card, wit
   const line = draw.indexOf('${renderHeldUp(t, sinceTime)}');
   assert.ok(line > 0, 'the ticket page draws the line, with the header health line\'s times');
   assert.ok(line < draw.indexOf('${renderQuickAction(t)}'), 'above the card, so it is read first');
-  const css = readFileSync(WEB('app.css'), 'utf8');
+  const css = drawnCss();
   const rule = /\n\.quick \.held-up \{([^}]*)\}/.exec(css)?.[1] ?? '';
   assert.match(rule, /grid-column: 1 \/ -1/, 'across the whole top, not in one column');
   const ink = /(?:^|;)\s*color: (#[0-9a-f]{6})/.exec(rule)?.[1];
@@ -323,7 +347,7 @@ test('the list row starts its Actions cell with a check, a clock or an empty slo
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   const icon = /\nfunction statusIcon\(t\) \{[\s\S]*?\n\}\n/.exec(app)?.[0] ?? '';
   assert.ok(icon, 'statusIcon found');
-  assert.match(icon, /if \(t\.answerIn\)[\s\S]*title="Your Answer Is In" aria-label="Your Answer Is In"[\s\S]*ICONS\.answerIn/);
+  assert.match(icon, /if \(t\.answerIn \|\| t\.mergeStands\)[\s\S]*'Your Merge Word Stands' : 'Your Answer Is In'[\s\S]*title="\$\{said\}" aria-label="\$\{said\}"[\s\S]*ICONS\.answerIn/);
   assert.match(icon, /if \(t\.waiting\) return action\(`\$\{at\}#reply`, 'Waiting on Your Response', ICONS\.waiting\);/);
   assert.match(icon, /<span class="action status-icon empty" aria-hidden="true"><\/span>/);
   assert.doesNotMatch(icon, /style=/, 'no inline style');
@@ -331,8 +355,8 @@ test('the list row starts its Actions cell with a check, a clock or an empty slo
   assert.match(actions, /return \[\s*statusIcon\(t\),\s*action\(at, 'Open Ticket'/, 'the status icon comes first');
   for (const key of ['answerIn', 'waiting']) assert.match(app, new RegExp(`\\n  ${key}: '<(path|circle) `), `ICONS.${key} is a line drawing`);
   // The card keeps its words; the ticket page keeps its notice.
-  assert.match(app, /\$\{t\.answerIn \? `<span class="answer-in">\$\{escapeHtml\(ANSWER_IN_NOTE\)\}<\/span>` : ''\}/);
-  const css = readFileSync(WEB('app.css'), 'utf8');
+  assert.match(app, /\$\{t\.answerIn \? `<span class="answer-in">\$\{escapeHtml\(ANSWER_IN_NOTE\)\}<\/span>` : t\.mergeStands \? `<span class="answer-in">\$\{escapeHtml\(MERGE_STANDS_NOTE\)\}<\/span>` : ''\}/);
+  const css = drawnCss();
   const green = /\nspan\.action\.answer-in-icon \{ color: (#[0-9a-fA-F]{6}); \}/.exec(css)?.[1];
   assert.ok(green, 'the check has its own colour');
   const [r, g, b] = [1, 3, 5].map((i) => parseInt(green.slice(i, i + 2), 16));
@@ -499,7 +523,7 @@ test('a stage heading reads its name, then the count right-aligned, then one arr
 test('a stage folded or opened by hand stays that way through the page\'s own redraw, even if its colour changed (SP-196)', () => {
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   const place = /function keepPlace\(\) \{[\s\S]*?\n\}/.exec(app)[0];
-  assert.match(place, /const key = \(d\) => \(d\.dataset\.stage \? `stage\|\$\{d\.dataset\.stage\}` : d\.className\);/, 'a stage is known by its name, not its classes');
+  assert.match(place, /const key = \(d\) => \(d\.dataset\.stage \? `stage\|\$\{d\.dataset\.stage\}` : d\.dataset\.project \? `project\|\$\{d\.dataset\.project\}` : d\.className\);/, 'a stage is known by its name, not its classes (and a Settings project box by its project, SP-289)');
   assert.match(place, /const open = new Map\(\[\.\.\.main\.querySelectorAll\('details'\)\]\.map\(\(d\) => \[key\(d\), d\.open\]\)\);/, 'every stage is a details, so every stage is kept');
   assert.match(place, /for \(const d of main\.querySelectorAll\('details'\)\) if \(open\.has\(key\(d\)\)\) d\.open = open\.get\(key\(d\)\);/);
 });
@@ -544,7 +568,8 @@ test('the list and the board draw one object: the toggle keeps the project and o
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   // One fetch serves both views, so they cannot disagree about what is where.
   assert.equal(app.match(/\/board`\)[;,]/g)?.length, 1);
-  assert.match(app, /\['board', 'list'\]\.map\(\(v\) => `<a href="\$\{at\(v, board\.project\)\}"/);
+  assert.match(app, /\$\{viewSwitch\(board\.project, view\)\}/);
+  assert.match(/function viewSwitch\(slug, current\) \{([\s\S]*?)\n\}/.exec(app)[1], /\['board', 'Board', `\/board\/\$\{encodeURIComponent\(slug\)\}`\], \['list', 'List', `\/list\/\$\{encodeURIComponent\(slug\)\}`\]/);
 });
 
 test('each ticket on the board carries its assignee\'s name and its last change, for the list', async () => {
@@ -564,7 +589,7 @@ test('each ticket on the board carries its assignee\'s name and its last change,
 
 // ── A ticket's thread ────────────────────────────────────────────────────────
 
-test('a ticket\'s thread is oldest first, names each author, and marks machine comments, stamped or not', async () => {
+test('a ticket\'s thread is oldest first, names each author, and marks machine comments by their author', async () => {
   const f = await fixture();
   try {
     const r = await f.call('GET', '/tickets/AL-2/thread');
@@ -576,11 +601,17 @@ test('a ticket\'s thread is oldest first, names each author, and marks machine c
       ['Loop (build)', true, 'REVIEW: PASSED. Ready for your merge word.'],
       ['Dane', false, 'merge'],
     ]);
-    // A loop posting under Dane's own token: his name, but marked, and the stamp line not shown.
-    const under = (await f.call('GET', '/tickets/BE-3/thread')).body.comments[0];
-    assert.equal(under.author.name, 'Dane');
-    assert.equal(under.machine, true);
-    assert.equal(under.body, 'Which name should the tab show?');
+    // A loop's comment with no stamp is marked by its author (SP-26).
+    const unstamped = (await f.call('GET', '/tickets/BE-3/thread')).body.comments[0];
+    assert.equal(unstamped.author.name, 'Loop (build)');
+    assert.equal(unstamped.machine, true);
+    assert.equal(unstamped.body, 'Which name should the tab show?');
+    // And his own comment ending in a pasted [machine] line is his: the stamp
+    // decides nothing, and is only taken off for display.
+    assert.equal((await f.call('POST', '/tickets/BE-3/comments', { body: { body: 'Call it Board.\n\n[machine] posted by a loop under Dane\'s token — not his word' } })).status, 201);
+    const his = (await f.call('GET', '/tickets/BE-3/thread')).body;
+    assert.deepEqual([his.comments.at(-1).author.name, his.comments.at(-1).machine], ['Dane', false]);
+    assert.equal(his.answerIn, true, 'his comment is his answer, pasted stamp and all');
     assert.equal((await f.call('GET', '/tickets/NOPE-1/thread')).status, 404);
     assert.equal((await f.call('GET', '/tickets/AL-2/thread', { token: null })).status, 401);
   } finally { await f.cleanup(); }
@@ -653,18 +684,19 @@ test('the projects list names the project the server was given as its default, a
 test('the Add Task box on the Tasks page files into the project shown, in Requested as typed, keeps the text when refused or signed out, and is gone from the header', () => {
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   const wire = app.slice(app.indexOf('function wireAddTask'), app.indexOf('/**', app.indexOf('function wireAddTask')));
-  assert.match(wire, /api\('POST', `\/projects\/\$\{encodeURIComponent\(into\)\}\/tickets`, \{\s*name: title\.value, description: description\.value, status: 'Requested',\s*\}\)/);
+  assert.match(wire, /api\('POST', `\/projects\/\$\{encodeURIComponent\(into\)\}\/tickets`, \{\s*name: picked, description: description\.value, status: 'Requested',\s*\}\)/);
   assert.ok(!/assignee/.test(wire), 'a request is filed unassigned');
-  assert.match(wire, /note\.textContent = `Not filed: \$\{err\.message\}`;/);
+  assert.match(wire, /say\(`Not filed: \$\{err\.message\}`, 'error'\);/);
   assert.match(wire, /localStorage\.setItem\(DRAFT_KEY,/);
   assert.match(wire, /title\.value = draft\.title;\s*description\.value = draft\.description;/);
-  assert.match(wire, /if \(adding \|\| draft\.title \|\| draft\.description\) box\.open = true;/, 'kept text opens the box on its own');
+  assert.match(wire, /if \(adding \|\| \(\(draft\.title \|\| draft\.description\) && !savedSuggestSwitch\(\)\)\) box\.open = true;/, 'kept text opens the box on its own, on the Add Task side only (SP-303)');
   assert.match(wire, /drawSignIn\('You were signed out; your request was not filed\. What you typed is kept/);
   // Filed: the draft is forgotten and the page redraws, box closed, naming the new id.
   assert.match(wire, /localStorage\.removeItem\(DRAFT_KEY\);[\s\S]*await drawAgain\(\(\) => drawProject\(into, view, \{ filed: ticket\.id, unchecked, uploaded, notUploaded \}\)\);/);
   const draw = app.slice(app.indexOf('async function drawProject'), app.indexOf('async function copyText'));
-  assert.match(draw, /<details class="add-task">\s*<summary>Add Task<\/summary>\s*<form class="request">/, 'drawn closed, on the board and the list alike');
-  assert.match(draw, /<button type="submit">Submit Task<\/button>/, 'the button says Submit Task, in his words');
+  assert.match(draw, /<details class="add-task">\s*<summary>Add Task<label class="suggest-switch">[\s\S]*?<\/label><\/summary>\s*<form class="request"\$\{suggesting \? ' hidden' : ''\}>/, 'drawn closed, on the board and the list alike');
+  assert.match(draw, /<button type="submit" class="submit-task">Suggest Titles<\/button>/, 'the first submit asks for titles (SP-248)');
+  assert.match(wire, /button\.textContent = asking \? 'Suggest Titles' : 'Submit Task';/, 'once a title is up for picking (or his own is typed), the button says Submit Task, in his words');
   assert.doesNotMatch(app, /File request/i, 'the old button words are gone');
   assert.match(app, /Filed <a href="\/t\/\$\{encodeURIComponent\(filed\)\}">\$\{escapeHtml\(filed\)\}<\/a>/);
   assert.match(draw, /wireAddTask\(board\.project, view, adding\);/);
@@ -675,11 +707,11 @@ test('the Add Task box on the Tasks page files into the project shown, in Reques
   const css = readFileSync(WEB('app.css'), 'utf8');
   const box = /details\.add-task \{([^}]*)\}/.exec(css);
   assert.ok(box, 'the Add Task box has its own rule');
-  assert.match(box[1], /background: var\(--blue\);/, 'the box is the logo blue, closed and open');
-  assert.match(box[1], /color: var\(--ink\);/, 'dark text on the blue, not white');
-  assert.match(css, /details\.add-task form\.request input, details\.add-task form\.request textarea \{[^}]*background: #fff;/, 'the fields stay white');
+  assert.match(box[1], /background: var\(--brand-blue\);/, 'the box is the logo blue, closed and open');
+  assert.match(box[1], /color: var\(--ink-primary\);/, 'dark text on the blue, not white');
+  assert.match(css, /details\.add-task form\.request input, details\.add-task form\.request textarea \{[^}]*background: var\(--bg-surface\);/, 'the fields stay white');
   // The status line (Filing…, Not filed: …) keeps its quiet grey and red, so it sits on white, readable on the blue.
-  assert.match(css, /details\.add-task \.note:not\(:empty\) \{[^}]*background: #fff;/, 'the note sits on a white pill inside the blue box');
+  assert.match(css, /details\.add-task \.note:not\(:empty\) \{[^}]*background: var\(--bg-surface\);/, 'the note sits on a white pill inside the blue box');
 });
 
 test('the Add Task box takes files: the ticket is filed first, then each file goes up as itself, and the note names any that did not (SP-140)', () => {
@@ -732,7 +764,7 @@ test('a filed task shows a larger pod centred on the Tasks heading row, above th
   assert.match(rule, /position: absolute;/, 'out of the page flow: nothing moves');
   assert.match(rule, /top: 50%; left: 50%; transform: translate\(-50%, -50%\);/, 'centred on the heading row');
   assert.match(rule, /z-index: 10;/, 'drawn above the heading, toolbar and tables');
-  assert.match(rule, /font-size: 1\.25rem;/, 'larger than the body text');
+  assert.match(rule, /font-size: var\(--text-xl\);/, 'larger than the body text');
   assert.match(rule, /animation: filed-pod-fade 4s linear forwards;/);
   assert.match(css, /@keyframes filed-pod-fade \{ 0%, 75% \{ opacity: 1; \} 100% \{ opacity: 0; \} \}/, '3 seconds full, then 1 second to nothing');
 });
@@ -755,11 +787,11 @@ test('the Add Task box checks the project before filing: asks "Did you mean ...?
   const check = wire.indexOf("api('POST', `/projects/${encodeURIComponent(slug)}/tickets/check`, {");
   const file = wire.indexOf("api('POST', `/projects/${encodeURIComponent(into)}/tickets`, {");
   assert.ok(check > 0 && file > check, 'the check is asked before the ticket is filed');
-  assert.match(wire.slice(check), /^api\('POST', [^,]+, \{\s*name: title\.value, description: description\.value,\s*\}\)/);
+  assert.match(wire.slice(check), /^api\('POST', [^,]+, \{\s*name: picked, description: description\.value,\s*\}\)/);
   // No suggestion: files into the project shown, as before.
   assert.match(wire, /let into = slug;\s*if \(suggest\) \{/);
   // A suggestion: File in X files there; Keep in files here; closing files nothing and keeps the text.
-  assert.match(wire, /const choice = await askProject\(question, suggest\);\s*if \(choice === 'move'\) into = suggest\.slug;\s*else if \(choice !== 'keep'\) \{[^}]*button\.disabled = false;[^}]*return;\s*\}/);
+  assert.match(wire, /const choice = await askProject\(question, suggest\);\s*if \(choice === 'move'\) into = suggest\.slug;\s*else if \(choice !== 'keep'\) \{[^}]*busy\(false\);[^}]*return;\s*\}/);
   assert.doesNotMatch(wire.slice(wire.indexOf("else if (choice !== 'keep')"), wire.indexOf('return;', wire.indexOf("else if (choice !== 'keep')"))), /removeItem|title\.value =|description\.value =/, 'closing leaves the form and the draft as they were');
   // A failed check (anything but a sign-out) files into the project shown, and the note says so.
   assert.match(wire, /\} catch \(err\) \{\s*if \(err instanceof SignedOut\) return drawSignIn\([^)]*\);\s*unchecked = true;\s*\}/);
@@ -779,6 +811,181 @@ test('the Add Task box checks the project before filing: asks "Did you mean ...?
   assert.match(ask, /button\[value="move"\]'\)\.textContent = `File in \$\{suggest\.name\}`;/);
   assert.match(ask, /question\.returnValue = '';[\s\S]*resolve\(question\.returnValue\)[\s\S]*question\.showModal\(\);/, 'Esc or the close button answers empty: file nothing');
   assert.match(readFileSync(WEB('app.css'), 'utf8'), /dialog\.project-check \{/);
+});
+
+// ── Suggested titles in the Add Task box (SP-248) ────────────────────────────
+
+test('the Add Task box has a Suggest a Title / Write My Own Title toggle: Suggest shows only the Description, Write My Own shows the Title too', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const draw = app.slice(app.indexOf('async function drawProject'), app.indexOf('async function copyText'));
+  const wire = app.slice(app.indexOf('function wireAddTask'), app.indexOf('/**', app.indexOf('function wireAddTask')));
+  // The toggle, first in the form, in Title Case (docs/UI_DOCTRINE.md).
+  assert.match(draw, /<form class="request"\$\{suggesting \? ' hidden' : ''\}>\s*<div class="title-mode" role="radiogroup" aria-label="How the Title Is Chosen">\s*<label><input type="radio" name="title-mode" value="suggest"> Suggest a Title<\/label>\s*<label><input type="radio" name="title-mode" value="own"> Write My Own Title<\/label>\s*<\/div>/);
+  // The Title field sits in its own wrapper, required only while it shows.
+  assert.match(draw, /<div class="own-title">\s*<label for="title">Title<\/label>\s*<input id="title" type="text">\s*<\/div>/);
+  assert.doesNotMatch(draw, /<input id="title" type="text" required>/, 'never required while hidden: the browser would refuse the submit');
+  assert.match(wire, /const typing = mode === 'own' \|\| stage === 'type';\s*ownTitle\.hidden = !typing;\s*title\.required = typing;\s*description\.required = mode === 'suggest';/);
+  // The choice list and Suggest Again, both hidden until titles come back.
+  assert.match(draw, /<fieldset class="title-choices" hidden>\s*<legend>Pick a Title<\/legend>\s*<div class="choices"><\/div>\s*<\/fieldset>/);
+  assert.match(draw, /<button type="button" class="suggest-again" hidden>Suggest Again<\/button>/);
+  assert.match(wire, /choices\.hidden = stage !== 'pick';/);
+  assert.match(wire, /const asking = stage === 'ask' && mode === 'suggest';\s*again\.hidden = asking;\s*again\.textContent = stage === 'ask' \? 'Suggest Titles' : 'Suggest Again';/, 'Write My Own Title offers Suggest Titles beside Submit Task');
+  // Opening the box puts the cursor in the first field the mode shows.
+  assert.match(wire, /const firstField = \(\) => \(mode === 'own' \? title : description\);/);
+  // Not when the form is hidden behind the Suggest side, nor when the Suggest checkbox opened it (SP-303).
+  // Only a mark the checkbox sets says so: clicking the bar or Enter on it focuses the <summary> too, and must still land in the form.
+  assert.match(wire, /const bySwitch = box\.dataset\.openedBySwitch === '1';\s*delete box\.dataset\.openedBySwitch;\s*if \(box\.open && !form\.hidden && !bySwitch\) firstField\(\)\.focus\(\);/);
+  assert.doesNotMatch(wire, /contains\(document\.activeElement\)/, 'the bar focusing itself is no reason to skip the form');
+  // The old New request address opens on the form even with Suggest ticked, and unticks it.
+  assert.match(wire, /if \(adding\) \{\s*box\.querySelector\('summary \.suggest-switch input'\)\.checked = false;\s*form\.hidden = false;\s*box\.querySelector\('\.suggest-next'\)\.hidden = true;\s*try \{ localStorage\.setItem\(SUGGEST_SWITCH_KEY, '0'\); \}/);
+  const css = readFileSync(WEB('app.css'), 'utf8');
+  assert.match(css, /details\.add-task \[hidden\] \{ display: none; \}/, 'a hidden part stays hidden whatever else styles it');
+  assert.match(css, /details\.add-task \.title-mode label:has\(input:checked\) \{/, 'the picked side of the toggle stands out');
+  assert.match(css, /details\.add-task fieldset\.title-choices \{[^}]*background: var\(--bg-surface\);/, 'the choices sit on white inside the blue box');
+});
+
+test('SP-303: the Add Task bar has a Suggest checkbox at its right; ticked shows Suggest Next Tasks in the same box, unticked the form; switching keeps both, opens a shut box, and the tick is kept in this browser', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const draw = app.slice(app.indexOf('async function drawProject'), app.indexOf('async function copyText'));
+  // One box: the checkbox sits in its bar, after the words Add Task.
+  assert.equal((draw.match(/<details class="add-task">/g) || []).length, 1, 'one Add Task box');
+  assert.match(draw, /<summary>Add Task<label class="suggest-switch">Suggest <input type="checkbox" value="on" aria-label="Suggest Next Tasks"\$\{suggesting \? ' checked' : ''\}><\/label><\/summary>/);
+  // value="on" matches what the browser reads back, so the minute's redraw never takes the checkbox for typing.
+  assert.match(draw, /const suggesting = savedSuggestSwitch\(\);/);
+  // Drawn on the side he left: the other side hidden from the first paint.
+  assert.match(draw, /<form class="request"\$\{suggesting \? ' hidden' : ''\}>/);
+  assert.match(draw, /<div class="suggest-next"\$\{suggesting \? '' : ' hidden'\}>/);
+  assert.match(draw, /wireSuggestSwitch\(\);/);
+  // Kept in this browser, as the title toggle is.
+  assert.match(app, /const SUGGEST_SWITCH_KEY = 'tracker-add-task-suggest';/);
+  assert.match(/function savedSuggestSwitch[\s\S]*?\n\}/.exec(app)[0], /return localStorage\.getItem\(SUGGEST_SWITCH_KEY\) === '1';/);
+  const wire = /function wireSuggestSwitch\(\) \{[\s\S]*?\n\}/.exec(app)[0];
+  assert.match(wire, /localStorage\.setItem\(SUGGEST_SWITCH_KEY, tick\.checked \? '1' : '0'\)/, 'kept at once');
+  // Switching only hides one side and shows the other: nothing is redrawn, so a draft, a picked title, the rows and a run all stay.
+  assert.match(wire, /form\.hidden = tick\.checked;\s*part\.hidden = !tick\.checked;[\s\S]*?if \(!box\.open\) box\.dataset\.openedBySwitch = '1';\s*box\.open = true;/, 'opens a shut box, never folds an open one, and marks the opening as its own');
+  assert.doesNotMatch(wire, /innerHTML|box\.open = false|\.value = /, 'switching wipes nothing');
+  const css = readFileSync(WEB('app.css'), 'utf8');
+  assert.match(css, /details\.add-task > summary \.suggest-switch \{[^}]*float: right;/, 'right-aligned on the bar');
+});
+
+test('the title toggle is kept in this browser beside the draft and outlives a filing; anything but "own" reads as Suggest a Title', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const wire = app.slice(app.indexOf('function wireAddTask'), app.indexOf('/**', app.indexOf('function wireAddTask')));
+  assert.match(app, /const TITLE_MODE_KEY = 'tracker-request-title-mode';/);
+  assert.match(/function savedTitleMode[\s\S]*?\n\}/.exec(app)[0], /return titleModeOf\(localStorage\.getItem\(TITLE_MODE_KEY\)\);/);
+  assert.match(wire, /let mode = savedTitleMode\(\);/);
+  assert.match(wire, /mode = titleModeOf\(m\.value\);\s*try \{ localStorage\.setItem\(TITLE_MODE_KEY, mode\); \}/, 'a change of mode is kept at once');
+  assert.match(wire, /for \(const m of modes\) m\.checked = m\.value === mode;/, 'the box opens on the mode it was left in');
+  assert.doesNotMatch(app, /removeItem\(TITLE_MODE_KEY\)/, 'filing forgets the words, never the mode');
+  assert.deepEqual(TITLE_MODES, ['suggest', 'own']);
+  assert.equal(titleModeOf('own'), 'own');
+  for (const kept of ['suggest', null, undefined, '', 'OWN', 'nonsense']) assert.equal(titleModeOf(kept), 'suggest', String(kept));
+});
+
+test('Suggest a Title: the first submit asks the title suggester; Write My Own Title shows Submit Task at once and files his title, with Suggest Titles beside it (his own first)', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const wire = app.slice(app.indexOf('function wireAddTask'), app.indexOf('/**', app.indexOf('function wireAddTask')));
+  assert.match(wire, /if \(stage === 'ask' && mode === 'suggest'\) return askTitles\(\);/, 'in Suggest a Title the first submit asks, it does not file');
+  assert.match(wire, /button\.textContent = asking \? 'Suggest Titles' : 'Submit Task';/, 'in Write My Own Title the button is Submit Task from the start');
+  assert.match(wire, /api\('POST', `\/projects\/\$\{encodeURIComponent\(slug\)\}\/tickets\/suggest-titles`,\s*mode === 'own' \? \{ description: description\.value, title: title\.value \} : \{ description: description\.value \}\)/);
+  assert.match(wire, /choiceList\.innerHTML = renderTitleChoices\(\{ own: mode === 'own' \? title\.value : null, titles \}\);\s*stage = 'pick';/);
+  assert.match(wire, /again\.addEventListener\('click', \(\) => \{ keep\(\); askTitles\(\); \}\);/, 'Suggest Again asks for a fresh five; the words are not touched');
+  // New words after the list is up make it stale: the button goes back to Suggest Titles.
+  assert.match(wire, /if \(stage === 'pick' && \(e\.target === title \|\| e\.target === description\)\) \{\s*stage = 'ask';\s*show\(\);/);
+  // Filing takes the title exactly as shown: the picked choice, or what he typed after a failure.
+  assert.match(wire, /const picked = stage === 'pick' \? choiceList\.querySelector\('input\[name="title-choice"\]:checked'\)\?\.value : title\.value;/);
+  // The project check still runs before filing, with the picked title.
+  const check = wire.indexOf('/tickets/check`');
+  assert.ok(wire.indexOf('const picked =') < check && check < wire.indexOf("status: 'Requested'"), 'picked, then checked, then filed');
+});
+
+test('a failed suggestion says why in one line and shows the Title field, and the ticket can still be filed with what he types', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const wire = app.slice(app.indexOf('function wireAddTask'), app.indexOf('/**', app.indexOf('function wireAddTask')));
+  const failed = wire.slice(wire.indexOf('const askTitles'), wire.indexOf('choiceList.innerHTML = renderTitleChoices'));
+  assert.match(failed, /if \(err instanceof SignedOut\) return drawSignIn\('You were signed out; your request was not filed\. What you typed is kept/);
+  assert.match(failed, /stage = 'type';\s*show\(\);\s*say\(err instanceof Refused \? err\.message : SUGGEST_UNANSWERED, 'error'\);\s*busy\(false\);\s*title\.focus\(\);/);
+  assert.doesNotMatch(failed, /title\.value =|description\.value =|removeItem/, 'nothing typed is lost');
+  assert.match(app, /const SUGGEST_UNANSWERED = 'No titles could be suggested: the tracker did not answer\. Write your own title\.';/);
+  // In the 'type' stage the Title field shows and is required, the button files.
+  assert.match(wire, /const asking = stage === 'ask' && mode === 'suggest';[\s\S]*button\.textContent = asking \? 'Suggest Titles' : 'Submit Task';/);
+});
+
+test('renderTitleChoices: his own title first as "Keep my title", then the suggestions, the first picked, every title escaped and filed as shown', () => {
+  const five = ['Add a title suggester', 'Suggest titles <b>now</b>', 'Offer five titles', 'Let the tracker name tasks', 'Show title choices'];
+  const box = (html) => [...html.matchAll(/<input type="radio" name="title-choice" value="([^"]*)"( checked)?> <span>([^<]*)<\/span>/g)].map((m) => ({ value: m[1], checked: Boolean(m[2]), label: m[3] }));
+  const suggestOnly = box(renderTitleChoices({ titles: five }));
+  assert.deepEqual(suggestOnly.map((c) => c.value), five.map(escapeHtml));
+  assert.deepEqual(suggestOnly.map((c) => c.checked), [true, false, false, false, false]);
+  assert.ok(!renderTitleChoices({ titles: five }).includes('<b>'), 'a title is text, never markup');
+  const own = box(renderTitleChoices({ own: '  My own "title" ', titles: five }));
+  assert.equal(own.length, 6);
+  assert.deepEqual(own[0], { value: escapeHtml('  My own "title" '), checked: true, label: escapeHtml('Keep my title:   My own "title" ') }, 'his title as typed, untrimmed');
+  assert.equal(box(renderTitleChoices({ own: 'Offer five titles', titles: five })).length, 5, 'a suggestion that is his own title is offered once');
+  assert.equal(box(renderTitleChoices({ own: '   ', titles: five })).length, 5, 'a blank title is no choice');
+  assert.equal(renderTitleChoices({}), '');
+});
+
+/** A stand-in `claude` for the title suggester: plain Node that answers `body`. */
+function stubClaude(dir, name, body) {
+  const command = join(dir, name);
+  writeFileSync(command, `#!/usr/bin/env node\nlet input = '';\nprocess.stdin.on('data', (c) => { input += c; });\nprocess.stdin.on('end', () => {\n  require('node:fs').writeFileSync(${JSON.stringify(`${command}.seen`)}, input);\n  ${body}\n});\n`);
+  chmodSync(command, 0o755);
+  return { command, seen: () => readFileSync(`${command}.seen`, 'utf8') };
+}
+
+test('against a stubbed suggester, the page\'s calls file the picked title: suggest, check, file; a failure answers one plain line and filing still works', async () => {
+  const f = await fixture();
+  const five = ['Add a title suggester', 'Suggest titles from a description', 'Offer five titles on Add Task', 'Let the tracker name tasks', 'Show title choices when adding'];
+  const stubs = mkdtempSync(join(tmpdir(), 'tracker-claude-'));
+  const good = stubClaude(stubs, 'good', `process.stdout.write(${JSON.stringify(five.join('\n'))});`);
+  const bad = stubClaude(stubs, 'bad', `process.stdout.write('only one\\n');`);
+  const serve = (claudeCommand) => startServer({ store: f.store, port: 0, claudeCommand, suggestTimeoutMs: 5000 });
+  const servers = [];
+  try {
+    const at = async (command) => { const s = await serve(command); servers.push(s); return `http://127.0.0.1:${s.address().port}`; };
+    const post = async (base, path, body) => {
+      const res = await fetch(`${base}${path}`, { method: 'POST', headers: { authorization: `Bearer ${f.token}`, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+      return { status: res.status, body: await res.json() };
+    };
+    const base = await at(good.command);
+    // Suggest a Title: the description alone.
+    const description = 'On the Add Task form, suggest titles from what I write.  ';
+    const s1 = await post(base, '/projects/alpha/tickets/suggest-titles', { description });
+    assert.equal(s1.status, 200, JSON.stringify(s1.body));
+    assert.deepEqual(s1.body.titles, five);
+    assert.doesNotMatch(good.seen(), /^Title:/m, 'no title sent in Suggest a Title');
+    // Write My Own Title: his title travels too, and leads the list the page draws.
+    const s2 = await post(base, '/projects/alpha/tickets/suggest-titles', { description, title: 'My own title' });
+    assert.equal(s2.status, 200);
+    assert.match(good.seen(), /^Title: My own title$/m);
+    const drawn = renderTitleChoices({ own: 'My own title', titles: s2.body.titles });
+    assert.ok(drawn.indexOf('Keep my title: My own title') < drawn.indexOf(five[0]));
+    // Picked: the project check runs, then the ticket is filed under the pick, exactly.
+    const picked = five[2];
+    assert.equal((await post(base, '/projects/alpha/tickets/check', { name: picked, description })).status, 200);
+    const filed = await post(base, '/projects/alpha/tickets', { name: picked, description, status: 'Requested' });
+    assert.equal(filed.status, 201, JSON.stringify(filed.body));
+    const back = f.store.getTicket(filed.body.id);
+    assert.equal(back.name, picked);
+    assert.equal(back.description, description, 'the description as typed, untrimmed');
+    // A failed suggestion: one plain line for the page to show, and a typed title still files.
+    const failed = await post(await at(bad.command), '/projects/alpha/tickets/suggest-titles', { description });
+    assert.equal(failed.status, 502);
+    assert.equal(failed.body.error, 'bad-answer');
+    assert.ok(failed.body.message && !failed.body.message.includes('\n'), `one line: ${failed.body.message}`);
+    assert.doesNotMatch(failed.body.message, /only one/, 'never the run\'s own output');
+    const none = await post(await at(join(stubs, 'no-such-claude')), '/projects/alpha/tickets/suggest-titles', { description });
+    assert.equal(none.status, 503);
+    assert.match(none.body.message, /Write your own title/);
+    const typed = await post(base, '/projects/alpha/tickets', { name: 'Typed after a failure', description, status: 'Requested' });
+    assert.equal(typed.status, 201);
+    assert.equal(f.store.getTicket(typed.body.id).name, 'Typed after a failure');
+  } finally {
+    for (const s of servers) await new Promise((r) => s.close(r));
+    rmSync(stubs, { recursive: true, force: true });
+    await f.cleanup();
+  }
 });
 
 // ── Copy to another project ──────────────────────────────────────────────────
@@ -835,10 +1042,10 @@ test('the ticket page offers every other project to copy into, opens the copy, a
 
 // ── The page itself ──────────────────────────────────────────────────────────
 
-test('the page is served at /, at a ticket\'s address, at Projects, at Tasks, at the board, at the list and at the old New request address without a token, locked to its own scripts', async () => {
+test('the page is served at /, at a ticket\'s address, at Projects, at Tasks, at the board, at the list, at the Console and at the old New request address without a token, locked to its own scripts', async () => {
   const f = await fixture();
   try {
-    for (const path of ['/', '/t/AL-1', '/tasks', '/board', '/board/alpha', '/list', '/list/alpha', '/new']) {
+    for (const path of ['/', '/t/AL-1', '/tasks', '/board', '/board/alpha', '/list', '/list/alpha', '/console', '/new']) {
       const r = await f.call('GET', path, { token: null });
       assert.equal(r.status, 200);
       assert.match(r.headers.get('content-type'), /^text\/html/);
@@ -912,6 +1119,63 @@ test('the Settings page is in the header after Reporting and Users, lists the st
   } finally { await f.cleanup(); }
 });
 
+test('the Settings page\'s Spirality Release group: the release, when and by whom, the one before, Move to Newest and Roll Back for the operator; Spirality\'s own and a project with none named say so (SP-275)', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tracker-web-release-'));
+  const clock = tickingClock();
+  const store = openStore(join(dir, 'tracker.db'), { now: clock });
+  const seed = seedDemo(store, { operatorName: 'Dane', clock });
+  // As the demo serves it: Alpha stands in for Spirality's own, the newest is a stand-in.
+  const server = await startServer({ store, port: 0, ownProject: DEMO_OWN_PROJECT, newestRelease: demoNewestRelease });
+  const url = `http://127.0.0.1:${server.address().port}`;
+  const get = async (path) => (await fetch(`${url}${path}`, { headers: { authorization: `Bearer ${seed.token}` } })).json();
+  try {
+    const { projects } = await get('/pipeline-controls');
+    const beta = projects.find((p) => p.project.slug === 'beta');
+    const html = renderPipelineControls(beta);
+    assert.match(html, /<h4>Spirality Release<\/h4>/);
+    assert.ok(html.indexOf('Spirality Release') < html.indexOf('Change Log'), 'above the change log');
+    assert.match(html, /Runs <strong>release-2<\/strong>, named [^<]+M[SD]T by Dane\./);
+    assert.match(html, /Before that: <strong>release-1<\/strong>, named [^<]+ by Loop \(build\)\./);
+    assert.match(html, new RegExp(`The newest release is <strong>${DEMO_NEWEST_RELEASE}</strong>\\.`));
+    assert.match(html, /<button type="button" data-release-action="newest">Move to Newest<\/button>/);
+    assert.match(html, /<button type="button" data-release-action="back">Roll Back to release-1<\/button>/);
+    assert.match(html, /Named, but the lanes do not run from it yet \(SP-276\)\./);
+
+    const alpha = projects.find((p) => p.project.slug === 'alpha');
+    const own = renderPipelineControls(alpha);
+    assert.match(own, /Always the newest release: Spirality&#39;s own lanes meet every change first\./);
+    assert.doesNotMatch(own, /data-release-action/);
+
+    // Another reader sees the release, never the buttons.
+    assert.doesNotMatch(renderReleaseGroup({ ...beta.release, canChange: false }), /<button/);
+    // None named yet: the line, and only Move to Newest.
+    const none = renderReleaseGroup({ ...beta.release, current: null, previous: null, rollBackTo: null });
+    assert.match(none, /No release named yet\./);
+    assert.match(none, /Move to Newest/);
+    assert.doesNotMatch(none, /Roll Back/);
+    // Already on the newest: Move to Newest is greyed and says why; nowhere back says so.
+    const upToDate = renderReleaseGroup({ ...beta.release, current: { ...beta.release.current, release: DEMO_NEWEST_RELEASE }, rollBackTo: null });
+    assert.match(upToDate, /data-release-action="newest" disabled>Move to Newest/);
+    assert.match(upToDate, /It runs the newest release\./);
+    assert.match(upToDate, /No earlier release to roll back to\./);
+    // The newest unreadable: said, and Move to Newest greyed.
+    const blind = renderReleaseGroup({ ...beta.release, newest: null, newestProblem: 'git ls-remote failed: offline' });
+    assert.match(blind, /The newest release could not be read: git ls-remote failed: offline/);
+    assert.match(blind, /data-release-action="newest" disabled/);
+    // A button's outcome shows beside the buttons.
+    assert.match(renderReleaseGroup(beta.release, { ok: false, text: 'Not saved: no' }), /<span class="note error">Not saved: no<\/span>/);
+
+    // Roll Back on the demo: release-2 back to release-1.
+    const back = await fetch(`${url}/releases/beta/back`, { method: 'POST', headers: { authorization: `Bearer ${seed.token}`, 'content-type': 'application/json' }, body: '{}' });
+    assert.equal(back.status, 200);
+    assert.equal((await get('/pipeline-controls/beta')).release.current.release, 'release-1');
+  } finally {
+    await new Promise((r) => server.close(r));
+    store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('Pipeline Controls on the Settings page: each control with its value, "default" while it has it, the not-yet line naming its slice, and the change log in Mountain time (SP-224)', async () => {
   const f = await fixture();
   try {
@@ -921,9 +1185,22 @@ test('Pipeline Controls on the Settings page: each control with its value, "defa
     assert.ok(alpha.controls.every((c) => c.isDefault), 'the demo leaves every control on its default');
     assert.deepEqual(alpha.changes.map((c) => [c.actorName, c.label, c.from, c.to]), [['Dane', 'work-in-progress cap', '3', '5'], ['Dane', 'work-in-progress cap', '5', '3']]);
     const html = renderPipelineControls(alpha);
-    assert.match(html, /<h3>Alpha<\/h3>/);
+    // A box that opens and closes (SP-289), its name the header, closed unless asked open.
+    assert.match(html, /^<details class="pipeline-controls" data-project="alpha">\s*<summary>Alpha<\/summary>/);
+    assert.match(renderPipelineControls(alpha, {}, true), /^<details class="pipeline-controls" data-project="alpha" open>/);
     for (const title of ['Wake Times', 'Pause and Resume', 'Work-in-Progress Cap', 'Model per Lane', 'Change Log']) assert.match(html, new RegExp(`<h4>${title}</h4>`));
-    for (const slice of ['SP-236', 'SP-237', 'SP-238', 'SP-239']) assert.match(html, new RegExp(`Saved, but the lanes do not use this yet \\(${slice}\\)\\.`));
+    // Every group is wired now (SP-238 the cap, SP-239 the models): no not-yet line at all.
+    assert.doesNotMatch(html, /Saved, but the lanes do not use this yet/);
+    assert.doesNotMatch(html, /\(SP-23[89]\)/);
+    assert.match(html, /Claude&#39;s default<span class="in-effect">Last pass ran on: not known on this machine yet\.<\/span>/);
+    assert.equal(alpha.capInFlight.count, alpha.capInFlight.ids.length);
+    assert.match(html, new RegExp(`<tr data-control="wip-cap"[\\s\\S]*?<span class="in-flight[^"]*">${alpha.capInFlight.count} in flight now`));
+    // The lanes use the wake times (SP-236): no not-yet line, and each says what its lane last used.
+    assert.doesNotMatch(html, /SP-236/);
+    assert.match(html, /1,800 seconds \(Every 30 minutes\)<span class="in-effect">Last used: not known on this machine yet\.<\/span>/);
+    // The pause switches are wired in (SP-237): no not-yet line, and no drain line while nothing is paused.
+    assert.doesNotMatch(html, /\(SP-237\)/);
+    assert.doesNotMatch(html, /Draining|Paused: nothing in flight/);
     assert.match(html, /<tr data-control="wake\.loop-build" data-kind="seconds">[\s\S]*?loop-build wake time<\/label> <span class="default">default<\/span>[\s\S]*?type="number" min="60" max="86400" step="1" value="1800"[\s\S]*?1,800 seconds \(Every 30 minutes\)[\s\S]*?<button type="button">Save<\/button>/);
     assert.match(html, /<option value="default" selected>Claude&#39;s default<\/option>/);
     assert.match(html, /<option value="off" selected>Off<\/option><option value="on">On<\/option>/);
@@ -957,6 +1234,7 @@ test('Quiet Days Before Moving: a number box from 0 to 30 with no not-yet line, 
     assert.match(html, /<h4>Quiet Days Before Moving<\/h4>\s*<table class="controls"><tbody><tr data-control="release\.quiet-days" data-kind="days">[\s\S]*?type="number" min="0" max="30" step="1" value="0"[\s\S]*?0 \(moves only when named by hand\)/);
     const after = html.slice(html.indexOf('<h4>Quiet Days Before Moving</h4>'), html.indexOf('<h4>Change Log</h4>'));
     assert.doesNotMatch(after, /do not use this yet/, 'the relay uses it already');
+    assert.ok(html.indexOf('<h4>Spirality Release</h4>') > 0 && html.indexOf('<h4>Spirality Release</h4>') < html.indexOf('<h4>Quiet Days Before Moving</h4>'), 'it sits under the release it moves');
     const own = renderPipelineControls({ ...alpha, own: true });
     assert.doesNotMatch(own, /Quiet Days Before Moving|release\.quiet-days/);
     assert.match(own, /<h4>Wake Times<\/h4>/, 'the home project keeps its other controls');
@@ -965,11 +1243,46 @@ test('Quiet Days Before Moving: a number box from 0 to 30 with no not-yet line, 
   assert.match(app, /const numeric = \['seconds', 'count', 'days'\]\.includes\(tr\.dataset\.kind\);/);
 });
 
+test('each model on the Settings page says what its lane\'s last pass ran on, read from the lane\'s START line, and says plainly while the next pass has yet to pick up a change (SP-239)', async () => {
+  const f = await fixture();
+  try {
+    const lanes = [{ job: 'loop-review', model: 'claude-opus-5-5' }, { job: 'loop-build', model: 'default' }, { job: 'loop-intake', model: null }, { job: 'relay', model: null }];
+    const view = pipelineControlsOf(f.store, 'alpha', { lanes });
+    const lastOf = (key) => view.controls.find((c) => c.key === key).lastModel;
+    assert.deepEqual(['model.loop-review', 'model.loop-build', 'model.loop-intake'].map(lastOf), ['claude-opus-5-5', 'default', null]);
+    assert.equal(lastOf('wip-cap'), undefined);
+    const html = renderPipelineControls(view);
+    assert.match(html, /data-control="model\.loop-build"[\s\S]*?<span class="in-effect">In effect: the last pass ran on Claude&#39;s default\.<\/span>/);
+    assert.match(html, /data-control="model\.loop-review"[\s\S]*?<span class="in-effect waiting">Last pass ran on: Opus 5\.5\. The lane&#39;s next pass picks this up\.<\/span>/);
+    assert.match(html, /data-control="model\.loop-intake"[\s\S]*?<span class="in-effect">Last pass ran on: not known on this machine yet\.<\/span>/);
+    const models = view.models;
+    assert.equal(modelLastPassText({ value: 'claude-opus-5-5', lastModel: 'claude-opus-5-5' }, models), 'In effect: the last pass ran on Opus 5.5.');
+    assert.equal(modelLastPassText({ value: 'default', lastModel: 'claude-x-9' }, models), 'Last pass ran on: claude-x-9. The lane\'s next pass picks this up.');
+  } finally { await f.cleanup(); }
+});
+
+test('each wake time on the Settings page says what its lane last used, and says plainly while the lane has not picked up the set value (SP-236)', async () => {
+  const f = await fixture();
+  try {
+    const alpha = (await f.call('GET', '/pipeline-controls')).body.projects.find((p) => p.project.slug === 'alpha');
+    const withUsed = (key, used) => ({ ...alpha, controls: alpha.controls.map((c) => (c.key === key ? { ...c, value: '600', isDefault: false, used, inEffect: used == null ? null : String(used) === '600' } : c)) });
+    const waiting = renderPipelineControls(withUsed('wake.loop-build', 1800));
+    assert.match(waiting, /600 seconds \(Every 10 minutes\)<span class="in-effect waiting">Last used: 1,800 seconds\. Waiting for the lane&#39;s next pass to pick this up\.<\/span>/);
+    const taken = renderPipelineControls(withUsed('wake.loop-build', 600));
+    assert.match(taken, /<span class="in-effect">In effect: the lane last used 600 seconds\.<\/span>/);
+    assert.doesNotMatch(taken, /Waiting for the lane/);
+    assert.equal(wakeInEffectText({ used: null, inEffect: null }), 'Last used: not known on this machine yet.');
+    // Only the wake times and the models (SP-239) say it.
+    assert.equal((taken.match(/class="in-effect/g) || []).length, 4 + 3);
+    assert.equal((taken.match(/Last used:|In effect: the lane/g) || []).length, 4);
+  } finally { await f.cleanup(); }
+});
+
 test('the Settings page draws Pipeline Controls from the server and says Saved only when the stored value read back is the one sent (SP-224)', () => {
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   const draw = app.slice(app.indexOf('async function drawSettings'), app.indexOf('/**\n * The Users page'));
   assert.match(draw, /await api\('GET', '\/pipeline-controls'\)/);
-  assert.match(draw, /<h2>Pipeline Controls<\/h2>/);
+  assert.match(draw, /\{ id: 'pipeline-controls', title: 'Pipeline Controls' \}/);
   assert.match(draw, /await api\('PUT', `\/pipeline-controls\/\$\{encodeURIComponent\(slug\)\}`, \{ setting: key, value: sent \}\);\s*\/\/ Read back before saying it worked/);
   assert.match(draw, /if \(stored !== sent \|\| answer\.saved\?\.to !== sent\) throw/);
   assert.match(draw, /text: `Not saved: \$\{err\.message\}`/);
@@ -1019,7 +1332,7 @@ test('bellColour: grey while nothing waits, yellow for 1 to 3, red for more than
 test('Waiting on you is a bell on the right, just before "Signed in as", coloured from the count wherever it is read', () => {
   const html = readFileSync(WEB('index.html'), 'utf8');
   const nav = /<nav class="site" hidden>([\s\S]*?)<\/nav>/.exec(html)[1];
-  assert.deepEqual([...nav.matchAll(/>([^<]+)<\/a>/g)].map((m) => m[1]), ['Projects', 'Tasks', 'Reporting', 'Users', 'Docs', 'Settings']);
+  assert.deepEqual([...nav.matchAll(/>([^<]+)<\/a>/g)].map((m) => m[1]), ['Projects', 'Tasks', 'Topics', 'Reporting', 'Users', 'Docs', 'Settings']);
   assert.doesNotMatch(nav, /Waiting on you/);
   const me = /<span class="me">([\s\S]*?)<\/span>\s*<\/header>/.exec(html)[1];
   assert.match(me, /<a id="bell" href="\/" title="Waiting on You" aria-label="Waiting on You" data-colour="grey" hidden><svg [^>]*aria-hidden="true">[\s\S]*?<\/svg><\/a>\s*<span id="who"><\/span>/);
@@ -1036,7 +1349,7 @@ test('Waiting on you is a bell on the right, just before "Signed in as", coloure
   assert.match(/function drawSignIn[\s\S]*?\n\}/.exec(app)[0], /signedOutHeader\(/);
   assert.match(/async function route\(\{ place = null \} = \{\}\) \{[\s\S]*?\n\}/.exec(app)[0], /signOut\.hidden = false;\s*bell\.hidden = false;/);
   assert.match(app, /bell\.classList\.toggle\('current', which === 'waiting'\);/);
-  const css = readFileSync(WEB('app.css'), 'utf8');
+  const css = drawnCss();
   for (const colour of ['grey', 'yellow', 'red']) assert.match(css, new RegExp(`header #bell\\[data-colour="${colour}"\\] \\{ color: #`));
   assert.match(css, /header #bell\[hidden\] \{ display: none; \}/, 'display: flex must not undo hidden');
 });
@@ -1112,7 +1425,7 @@ test('an open page reads again once a minute and on coming back to the tab, neve
   // A save's own redraw keeps what the beat compares against, so the next beat does not undo its "Saved" note.
   assert.match(/async function drawAgain\(draw\) \{[\s\S]*?\n\}/.exec(app)[0], /await draw\(\);\s*if \(recording === reads && lastDrawn\?\.address === here\(\)\) lastDrawn = \{ address: here\(\), reads \};/);
   assert.equal(app.match(/await drawTicket\(t\.id/g), null, 'every in-page ticket redraw goes through drawAgain');
-  assert.equal((app.match(/await drawAgain\(\(\) => draw(Ticket|Project)\(/g) ?? []).length, 6, "SP-208 added the List view priority save");
+  assert.equal((app.match(/await drawAgain\(\(\) => draw(Ticket|Project)\(/g) ?? []).length, 9, 'SP-208 added the List view priority save; SP-251 the Suggest Next Tasks filing; SP-287 the bug report buttons; SP-291 the Add Comment box');
   assert.match(route, /if \(place && !\(err instanceof SignedOut\)\) return;/, "a beat's failed draw does not replace the page with an error");
   assert.match(app, /if \(location\.hash === '#reply' && !refreshing\) \{/, 'a beat does not jump to the reply box again');
   assert.match(/function keepPlace\(\) \{[\s\S]*?\n\}/.exec(app)[0], /main\.querySelectorAll\('details'\)[\s\S]*window\.scrollTo\(0, y\);/);
@@ -1190,13 +1503,15 @@ test('an operator card draws its NEEDED FROM DANE banner in the red box, as `ask
 
 test('the ticket page opens on the Quick Action section, with everything it showed before in a closed Details box', () => {
   const app = readFileSync(WEB('app.mjs'), 'utf8');
-  const page = /main\.innerHTML = `\s*<section class="quick">([\s\S]*?)<\/section>\s*(?:\$\{renderFilesMade\(t\)\}\s*)?<details class="details">([\s\S]*?)<\/details>`;/.exec(app);
-  assert.ok(page, 'Quick Action first, then Details');
-  const [, quick, details] = page;
+  const page = /main\.innerHTML = `\s*<section class="quick\$\{inline \? ' loop-has' : ''\}">([\s\S]*?)<\/section>\s*(?:\$\{renderFilesMade\(t\)\}\s*)?\$\{inline \? '' : `<details class="details">([\s\S]*?)<\/details>`\}`;/.exec(app);
+  assert.ok(page, 'Quick Action first, then Details (folded in his two statuses, SP-291)');
+  const [, quick, fold] = page;
+  // What Details holds is one block, drawn folded or, while a loop has the ticket, open in the right column.
+  const details = fold + (/const ticketBody = `([\s\S]*?)`;\n  main\.innerHTML/.exec(app)?.[1] ?? '');
   assert.match(quick, /renderQuickAction\(t\)/);
   assert.match(quick, /\$\{renderReplyForm\(t, me\?\.name\)\}/, 'the reply box is on the right of Quick Action');
   assert.match(renderReplyForm({}, 'Dane'), /<form class="reply">[\s\S]*<label for="reply">Reply as Dane<\/label>[\s\S]*<textarea id="reply" required>/);
-  assert.match(details, /^\s*<summary>Details<\/summary>/);
+  assert.match(fold, /^\s*<summary>Details<\/summary>\$\{ticketBody\}\s*$/);
   // The status line, the description and the comments, all inside Details.
   for (const part of [/statusLabel\(t\)/, /renderMarkdown\(t\.description\)/, /\$\{comments \|\|/]) assert.match(details, part);
   assert.ok(!/<details class="details"[^>]*\bopen\b/.test(app), 'Details is never drawn open');
@@ -1220,7 +1535,7 @@ test('Quick Action\'s left side: the title, the newest card\'s context and its a
   assert.match(html, /<p class="needed">Reply A or B\.<br>A is cheaper\.<br>Your move: Reply — new\.<\/p>/);
   assert.doesNotMatch(html, /old|The description|NEEDED FROM/);
   const css = readFileSync(WEB('app.css'), 'utf8');
-  assert.match(css, /\.quick \.needed \{ color: var\(--red\); font-weight: 700;/, 'the same red as the banner, bold');
+  assert.match(css, /\.quick \.needed \{ color: var\(--ink-error\); font-weight: 700;/, 'the same red as the banner, bold');
   // An authored card that reached the tracker as @@ text reads the same way.
   assert.equal(cardContext('@@ASKED\nx\n@@CONTEXT\nWhy it\nmatters.\n@@NEEDED\nPick.'), 'Why it matters.');
 });
@@ -1244,6 +1559,270 @@ test('Quick Action with no card: the title and the description\'s first paragrap
     '<h1>Fix it</h1>\n<p class="summary">Open a ticket and see it.</p>');
   assert.equal(renderQuickAction({ name: 'Empty', description: '' }), '<h1>Empty</h1>');
   assert.equal(firstParagraph('- a list\n\nProse.'), 'Prose.');
+});
+
+// ── Quick Action: a website visitor's bug report (SP-286) ───────────────────
+
+/** A description shaped like StarCaster's composeBugReportTask (SC-804). */
+const bugDescription = ({ words = 'The module needs a site-wide option.\nAs it is, one page at a time.', shots = '(none attached)' } = {}) => [
+  '## What the reporter said', '', '```', words, '```', '',
+  '## Where and who', '',
+  '- **Page:** https://example.com/pricing',
+  '- **Project:** Demo Site (proj_1)',
+  '- **Viewer tier:** public',
+  '- **Browser:** `Mozilla/5.0 (Macintosh)`',
+  '- **Submitted:** 2026-11-13T21:04:00.000Z',
+  '- **Report id:** `br_1`', '',
+  '## Screenshots', '', shots, '',
+  '---',
+  '_Filed automatically from a public bug report. Held for the operator: nothing in the build loops will touch this until you move it._',
+].join('\n');
+
+test('bugReport reads the visitor\'s words, the where-and-who facts and whether screenshots came', () => {
+  assert.equal(BUG_REPORT_TAG, 'bug-report');
+  const r = bugReport({ tags: ['bug-report', 'demo'], description: bugDescription() });
+  assert.equal(r.words, 'The module needs a site-wide option.\nAs it is, one page at a time.');
+  assert.deepEqual(r.facts, [
+    { label: 'Page', value: 'https://example.com/pricing' },
+    { label: 'Project', value: 'Demo Site (proj_1)' },
+    { label: 'Viewer tier', value: 'public' },
+    { label: 'Browser', value: 'Mozilla/5.0 (Macintosh)' },
+    { label: 'Submitted', value: '2026-11-13T21:04:00.000Z' },
+    { label: 'Report id', value: 'br_1' },
+  ]);
+  assert.equal(r.screenshots, false, '"(none attached)" is no screenshot');
+  assert.equal(bugReport({ tags: ['bug-report'], description: bugDescription({ shots: '- [Screenshot 1](https://x.test/1.png)' }) }).screenshots, true);
+  // A "## Where and who" the visitor typed inside the fence is their words, not a section.
+  assert.equal(bugReport({ tags: ['bug-report'], description: bugDescription({ words: 'see\n## Where and who\n- **Page:** fake' }) }).words, 'see\n## Where and who\n- **Page:** fake');
+  // Not a bug report: no tag, no section, an unclosed fence, or rewritten by intake (## Asked).
+  assert.equal(bugReport({ tags: [], description: bugDescription() }), null);
+  assert.equal(bugReport({ tags: ['bug-report'], description: '## Goal\nx' }), null);
+  assert.equal(bugReport({ tags: ['bug-report'], description: '## What the reporter said\n```\nnever closed' }), null);
+  assert.equal(bugReport({ tags: ['bug-report'], description: `## Asked\n\`\`\`\nhis words\n\`\`\`\n\n${bugDescription()}` }), null);
+  assert.equal(bugReport({ tags: null, description: null }), null);
+});
+
+test('Quick Action on a bug report: "Bug Report:", the visitor\'s words in bold, then where and who in Mountain time', () => {
+  const html = renderQuickAction({
+    name: 'Bug report: The module needs a site-wide option. As it is, o… — Demo Site',
+    tags: ['bug-report'], status: 'needs your input', comments: [],
+    description: bugDescription({ words: 'I typed <script>alert(1)</script> and **stars**\nline two' }),
+  });
+  assert.match(html, /^<h1>Bug Report:<\/h1>\n<p class="status-line">Status: [^\n]*<\/p>\n<p class="bug-words">I typed &lt;script&gt;alert\(1\)&lt;\/script&gt; and \*\*stars\*\*\nline two<\/p>/, 'escaped, never markup, line breaks kept');
+  assert.doesNotMatch(html, /<script|<strong>stars/);
+  assert.doesNotMatch(html, /Bug report: The module|none attached|Filed automatically/, 'not the cut-off name, nor "(none attached)" at the top');
+  assert.match(html, /<ul class="bug-facts"><li><span class="fact-label">Page:<\/span> <a href="https:\/\/example\.com\/pricing"[^>]*>https:\/\/example\.com\/pricing<\/a><\/li>/);
+  assert.match(html, /<li><span class="fact-label">Project:<\/span> Demo Site \(proj_1\)<\/li><li><span class="fact-label">Viewer tier:<\/span> public<\/li><li><span class="fact-label">Browser:<\/span> Mozilla\/5\.0 \(Macintosh\)<\/li>/);
+  assert.match(html, /<li><span class="fact-label">Submitted:<\/span> Nov 13, 2026, 2:04 PM MST<\/li>/, 'Mountain time, not UTC');
+  assert.match(html, /<li><span class="fact-label">Report id:<\/span> br_1<\/li><\/ul>/);
+  assert.doesNotMatch(html, /bug-shots/);
+  // Screenshots that did come get one line pointing at Details, at any status.
+  const shots = renderQuickAction({ name: 'x', tags: ['bug-report'], status: 'live', description: bugDescription({ shots: '- [Screenshot 1](https://x.test/1.png)' }) });
+  assert.match(shots, /<p class="bug-shots quiet">Screenshots are attached: see the description under Details\.<\/p>/);
+  assert.match(shots, /^<h1>Bug Report:<\/h1>/);
+  assert.match(shots, /^<h1>Bug Report:<\/h1>\n<p class="status-line">Status: <span class="status-name">Live<\/span>/, 'the status line sits under "Bug Report:" too (SP-290)');
+  // A page that is not a web address is shown as text, not a link.
+  assert.match(renderQuickAction({ name: 'x', tags: ['bug-report'], description: bugDescription().replace('https://example.com/pricing', '(not recorded)') }), /Page:<\/span> \(not recorded\)<\/li>/);
+  const css = readFileSync(WEB('app.css'), 'utf8');
+  assert.match(css, /\.quick \.bug-words \{[^}]*font-size: var\(--text-md\); font-weight: 700;/, 'bold at body size');
+});
+
+test('Quick Action without the tag, the section, or with ## Asked looks exactly as before', () => {
+  const plain = { name: 'Fix it', status: 'queued', comments: [], description: bugDescription() };
+  assert.equal(renderQuickAction({ ...plain, tags: ['tracker'] }), renderQuickAction({ name: 'Fix it', status: 'queued', comments: [], description: bugDescription() }));
+  assert.match(renderQuickAction({ ...plain, tags: [] }), /^<h1>Fix it<\/h1>/);
+  assert.match(renderQuickAction({ ...plain, tags: ['bug-report'], description: '## Goal\nThe goal.' }), /^<h1>Fix it<\/h1>\n<p class="status-line">Status: [^\n]*<\/p>\n<p class="summary">The goal\.<\/p>/);
+  const asked = `## Asked\n\`\`\`\nhis words\n\`\`\`\n\n${bugDescription()}`;
+  assert.equal(renderQuickAction({ ...plain, tags: ['bug-report'], description: asked }), renderQuickAction({ ...plain, description: asked }));
+});
+
+test('the demo has a bug report shaped like SC-804, held in Needs your input', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'bug-demo-'));
+  try {
+    const store = openStore(join(dir, 'db.sqlite'));
+    seedDemo(store, { operatorName: 'Op' });
+    const t = store.listTickets('beta').find((x) => x.tags.includes('bug-report'));
+    assert.ok(t, 'a demo ticket tagged bug-report');
+    assert.equal(t.status, 'needs your input');
+    const html = renderQuickAction(t);
+    assert.match(html, /^<h1>Bug Report:<\/h1>\n<p class="status-line">Status: [^\n]*<\/p>\n<p class="bug-words">/);
+    assert.match(html, /Submitted:<\/span> Nov 13, 2026, 2:04 PM MST/);
+    assert.doesNotMatch(html, /none attached/);
+    store.close();
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// ── A held bug report's Approve and Reject (SP-287) ─────────────────────────
+
+test('a held bug report is tagged bug-report, in Needs your input, with no card in its thread', () => {
+  const held = { tags: ['bug-report'], status: 'needs your input', comments: [{ body: 'A plain note.' }] };
+  assert.equal(heldBugReport(held), true);
+  assert.equal(heldBugReport({ ...held, status: 'Needs your input' }), true, 'either spelling');
+  assert.equal(heldBugReport({ ...held, comments: [...held.comments, { body: intakeCard() }] }), false, 'a loop asked about it: not held');
+  assert.equal(heldBugReport({ ...held, tags: ['tracker'] }), false);
+  assert.equal(heldBugReport({ ...held, status: 'requested' }), false);
+  assert.equal(heldBugReport({ ...held, status: 'ready to launch' }), false);
+  assert.equal(heldBugReport({}), false);
+  assert.equal(heldBugReport({ tags: null, status: null, comments: null }), false);
+});
+
+// ── While a loop has the ticket (SP-291) ─────────────────────────────────────
+
+test('while a loop has the ticket there is no reply box, and an Add Comment box stands in; his two statuses keep the reply box', () => {
+  assert.deepEqual([...LOOP_HAS_STATUSES], ['requested', 'queued', 'building', 'in review', 'rework', 'live']);
+  for (const status of LOOP_HAS_STATUSES) {
+    const t = { status, comments: [] };
+    assert.equal(loopHasIt(t), true, status);
+    assert.equal(loopHasIt({ status: status.toUpperCase() }), true, `${status}, any case`);
+    assert.equal(renderReplyForm(t, 'Dane'), '', `no Reply box in ${status}`);
+    const box = renderCommentForm(t);
+    assert.match(box, /^<form class="add-comment">/, status);
+    assert.match(box, /<label for="add-comment">Add a note for the loop<\/label>/);
+    assert.match(box, /<textarea id="add-comment" required><\/textarea>/);
+    assert.match(box, /<button type="submit">Add Comment<\/button><span class="note"><\/span>/);
+  }
+  for (const status of ['needs your input', 'ready to launch', undefined, 'something new']) {
+    const t = { status, comments: [] };
+    assert.equal(loopHasIt(t), false, String(status));
+    assert.equal(renderCommentForm(t), '', `no Add Comment box in ${status}`);
+    assert.match(renderReplyForm(t, 'Dane'), /<form class="reply">[\s\S]*Reply as Dane[\s\S]*Post Reply/, `the reply box as before in ${status}`);
+  }
+});
+
+test('the demo data: a Queued ticket gets the comment box and a Needs your input ticket the reply box; a comment added there is on the ticket as typed', async () => {
+  const f = await fixture();
+  try {
+    const tickets = (await f.call('GET', '/projects/alpha/tickets')).body.tickets ?? [];
+    const queued = tickets.find((t) => t.name === 'The board is missing: draw the seven columns');
+    const asked = tickets.find((t) => t.name === 'The tracker has nowhere to run: choose where it lives');
+    assert.ok(queued && asked, 'both demo tickets found');
+    let thread = (await f.call('GET', `/tickets/${queued.id}/thread`)).body;
+    assert.equal(renderReplyForm(thread, 'Dane'), '');
+    assert.match(renderCommentForm(thread), /Add Comment/);
+    const words = '  Try this on a phone first\n';
+    assert.equal((await f.call('POST', `/tickets/${queued.id}/comments`, { body: { body: words } })).status, 201);
+    thread = (await f.call('GET', `/tickets/${queued.id}/thread`)).body;
+    assert.equal(thread.comments.at(-1).body, words, 'the newest comment, exactly as typed');
+    assert.equal(thread.status, 'queued', 'a comment moves nothing');
+    const his = (await f.call('GET', `/tickets/${asked.id}/thread`)).body;
+    assert.match(renderReplyForm(his, 'Dane'), /<form class="reply">/);
+    assert.equal(renderCommentForm(his), '');
+  } finally { await f.cleanup(); }
+});
+
+test('the ticket page puts the details in the right column, open, while a loop has it, and posts Add Comment exactly as typed', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const draw = /\nasync function drawTicket\(id, said = null, kept = null\) \{[\s\S]*?\n\}\n/.exec(app)?.[0] ?? '';
+  assert.ok(draw, 'drawTicket found');
+  assert.match(draw, /const inline = loopHasIt\(t\);/);
+  const body = /const ticketBody = `([\s\S]*?)`;\n  main\.innerHTML/.exec(draw)?.[1] ?? '';
+  // Everything Details held, the Add Comment box under the comments, Copy at the end.
+  const order = ['<p class="meta">', 'renderEditPanel(t)', '<section class="description">', 'renderAttachments(t)', '<h2 id="comments">Comments</h2>', '${comments ||', '${renderCommentForm(t)}', '<h2>Copy to Another Project</h2>'];
+  const at = order.map((part) => body.indexOf(part));
+  assert.ok(at.every((i) => i >= 0), `all in the one block: ${order.filter((_, i) => at[i] < 0)}`);
+  assert.deepEqual([...at].sort((a, b) => a - b), at, 'in that order');
+  // In the right column (no fold, so already open) on a loop ticket; folded below on his.
+  assert.match(draw, /\$\{renderReplyForm\(t, me\?\.name\)\}\s*\$\{inline \? `<div class="details">\$\{ticketBody\}<\/div>` : ''\}\s*\$\{renderDeleteAction\(t\)\}\s*<\/div>/);
+  assert.match(draw, /\$\{inline \? '' : `<details class="details">\s*<summary>Details<\/summary>\$\{ticketBody\}\s*<\/details>`\}/);
+  // The box posts its words untouched; a failed post says so and keeps them; a post that landed never says it did not.
+  const wire = draw.slice(draw.indexOf("const commentForm = main.querySelector('form.add-comment');"), draw.indexOf("const form = main.querySelector('form.reply');"));
+  assert.match(wire, /api\('POST', `\/tickets\/\$\{encodeURIComponent\(t\.id\)\}\/comments`, \{ body: commentBox\.value \}\)/);
+  assert.match(wire, /commentNote\.textContent = `Not posted: \$\{err\.message\}`;\s*button\.disabled = false;\s*return;/);
+  assert.doesNotMatch(wire, /commentBox\.value = ''/, 'the words are never cleared by hand: the redraw draws a fresh box');
+  assert.match(wire, /await drawAgain\(\(\) => drawTicket\(t\.id\)\);[\s\S]*Posted, but the page could not refresh/);
+  assert.match(wire, /location\.hash === '#reply' && !refreshing\) \{\s*commentForm\.scrollIntoView\(\{ block: 'center' \}\);\s*commentBox\.focus\(\);/, "the list's Reply icon lands in the box");
+  assert.ok(draw.indexOf('const commentForm') < draw.indexOf('if (!form) return;'), 'wired before the reply box\'s early return');
+  // Two columns that stack under 800px, as the docs page's do; his two statuses' layout untouched.
+  const css = readFileSync(WEB('app.css'), 'utf8');
+  assert.match(css, /@media \(max-width: 800px\) \{ \.quick\.loop-has \{ grid-template-columns: minmax\(0, 1fr\); \} \}/);
+  assert.match(css, /^\.quick \{ display: grid; grid-template-columns: 1fr 1fr;/m);
+  assert.match(css, /form\.add-comment textarea \{ width: 100%;/);
+});
+
+test('a held bug report shows Approve and Reject and a quiet line in place of the reply box; anything else is unchanged', () => {
+  const held = { name: 'Bug report: x', tags: ['bug-report'], status: 'needs your input', comments: [], description: bugDescription() };
+  const html = renderBugReportActions(held);
+  assert.match(html, /<form class="approve-action">\s*<button type="submit">Approve<\/button><span class="note"><\/span>/);
+  assert.match(html, /<form class="reject-action">\s*<button type="submit">Reject<\/button><span class="note"><\/span>/);
+  assert.ok(html.indexOf('approve-action') < html.indexOf('reject-action'), 'Approve first');
+  assert.match(html, /Moves it to Requested; the intake lane writes it up/);
+  assert.match(html, /Moves it to Live with the wont-do tag and a note that nothing shipped/);
+  assert.ok(html.includes(`<p class="held-report quiet">${escapeHtml(HELD_REPORT_LINE)}</p>`));
+  assert.match(HELD_REPORT_LINE, /No loop reads a reply[\s\S]*Approve or Reject[\s\S]*Change panel under Details/);
+  assert.equal(renderReplyForm(held, 'Dane'), '', 'no reply box on a held bug report');
+  // Nothing else on it offers a move: no card, so no Go, Close or Merge.
+  assert.equal(renderGoAction({ ...held, goPhrase: 'go' }), '');
+  assert.equal(renderCloseAction({ ...held, closePhrase: 'close' }), '');
+  // The status line's "i" names the buttons, not "your answer below".
+  assert.ok(renderStatusLine(held).includes(escapeHtml(HELD_REPORT_STATUS_LINE)));
+  // A carded bug report and any other ticket: no buttons, the reply box as before.
+  const carded = { ...held, comments: [{ body: intakeCard() }] };
+  for (const other of [carded, { ...held, tags: [] }, { ...held, status: 'ready to launch' }, { name: 'x', status: 'needs your input', comments: [] }]) {
+    assert.equal(renderBugReportActions(other), '');
+    assert.match(renderReplyForm(other, 'Dane'), /<form class="reply">/);
+    assert.ok(!renderStatusLine(other).includes(escapeHtml(HELD_REPORT_STATUS_LINE)));
+  }
+  assert.match(renderGoAction({ ...carded, goPhrase: 'go' }), /go-action/, 'Go is back once intake has asked');
+  // Title Case labels (docs/UI_DOCTRINE.md), and the look Merge, Close and Go share.
+  const css = readFileSync(WEB('app.css'), 'utf8');
+  assert.match(css, /\.quick form\.approve-action button, \.quick form\.reject-action button \{ font-weight: 700;/);
+});
+
+test('Approve and Reject ask first, naming the ticket, and changeProblem says what did not stick', () => {
+  assert.equal(approveQuestion({ name: 'Bug report: x' }), 'Approve Bug report: x and send it to intake?');
+  assert.equal(rejectQuestion({ name: 'Bug report: x' }), 'Reject Bug report: x? It moves to Live with the wont-do tag, and nothing is built.');
+  assert.equal(WONT_DO_TAG, 'wont-do');
+  assert.match(REJECT_COMMENT, /^Rejected from the ticket page:[\s\S]*nothing shipped/);
+  assert.equal(changeProblem({ ticket: { status: 'requested', tags: [] } }, { status: 'requested' }), '');
+  assert.equal(changeProblem({ ticket: { status: 'live', tags: ['bug-report', 'wont-do'] } }, { status: 'live', tags: ['wont-do'] }), '');
+  assert.equal(changeProblem({ ticket: { status: 'needs your input', tags: [] } }, { status: 'requested' }), 'the status reads "needs your input", not "requested".');
+  assert.equal(changeProblem({ ticket: { status: 'live', tags: [] } }, { status: 'live', tags: ['wont-do'] }), 'the wont-do tag is not on it.');
+  assert.equal(changeProblem({}, { status: 'live' }), 'the tracker did not answer with the ticket.');
+  assert.equal(changeProblem(null), 'the tracker did not answer with the ticket.');
+});
+
+test('the page wires Approve and Reject to guarded changes it reads back, and never says done over a failed write', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  assert.match(app, /\$\{renderGoAction\(t\)\}\s*\$\{renderBugReportActions\(t\)\}\s*\$\{renderReplyForm\(t, me\?\.name\)\}/, 'in the Quick Action column, where the reply box was');
+  assert.match(app, /api\('PATCH', `\/tickets\/\$\{encodeURIComponent\(t\.id\)\}`, \{ \.\.\.fields, ifStatus: t\.status, ifVersion: t\.version \}\)/, 'guarded on what the page was drawn with');
+  assert.match(app, /bugButton\('form\.approve-action', approveQuestion\(t\), \[\s*\{ what: 'the move to Requested', write: async \(\) => changeProblem\(await patch\(\{ status: 'requested' \}\), \{ status: 'requested' \}\) \}/);
+  assert.match(app, /bugButton\('form\.reject-action', rejectQuestion\(t\), \[[\s\S]*patch\(\{ status: 'live', tags: \[\.\.\.new Set\(\[\.\.\.t\.tags, WONT_DO_TAG\]\)\] \}\)[\s\S]*body: REJECT_COMMENT[\s\S]*posted\?\.body === REJECT_COMMENT/);
+  const wire = /const bugButton = [\s\S]*?\n {2}\};\n/.exec(app)?.[0] ?? '';
+  assert.ok(wire, 'bugButton found');
+  assert.match(wire, /if \(!confirm\(question\)\) return;/, 'asks first');
+  assert.match(wire, /if \(problem\) \{[\s\S]*return fail\(`Not saved: \$\{step\.what\}/, 'a write that did not stick stops there and says which');
+  assert.ok(wire.indexOf('return fail(`Not saved') < wire.indexOf('drawAgain'), 'the page redraws only once every write stuck');
+});
+
+test('on the server, Approve leaves a held bug report in Requested and Reject in Live with wont-do and the note; a stale page is refused', async () => {
+  const f = await fixture({ goPhrase: 'go' });
+  try {
+    const threads = await Promise.all(f.store.listTickets('beta').map(async (t) => (await f.call('GET', `/tickets/${t.id}/thread`)).body));
+    const held = threads.filter((t) => heldBugReport(t));
+    assert.equal(held.length, 2, 'the demo holds two bug reports, one to approve and one to reject');
+    for (const t of threads.filter((x) => !heldBugReport(x))) assert.equal(renderBugReportActions(t), '', t.name);
+    const [a, r] = held;
+    // Approve: the page's one change, as the page sends it.
+    const approved = await f.call('PATCH', `/tickets/${a.id}`, { body: { status: 'requested', ifStatus: a.status, ifVersion: a.version } });
+    assert.equal(approved.status, 200);
+    assert.equal(changeProblem(approved.body, { status: 'requested' }), '');
+    assert.equal((await f.call('GET', `/tickets/${a.id}/thread`)).body.status, 'requested');
+    // Reject: the status and tag together, then the note.
+    const rejected = await f.call('PATCH', `/tickets/${r.id}`, { body: { status: 'live', tags: [...new Set([...r.tags, WONT_DO_TAG])], ifStatus: r.status, ifVersion: r.version } });
+    assert.equal(rejected.status, 200);
+    assert.equal(changeProblem(rejected.body, { status: 'live', tags: [WONT_DO_TAG] }), '');
+    const posted = await f.call('POST', `/tickets/${r.id}/comments`, { body: { body: REJECT_COMMENT } });
+    assert.equal(posted.status, 201);
+    assert.equal(posted.body.body, REJECT_COMMENT);
+    const after = (await f.call('GET', `/tickets/${r.id}/thread`)).body;
+    assert.equal(after.status, 'live');
+    assert.deepEqual(after.tags.sort(), ['bug-report', 'demo-site', 'wont-do']);
+    assert.deepEqual([after.comments.at(-1).body, after.comments.at(-1).author.id], [REJECT_COMMENT, f.operator.id]);
+    // A page drawn before the ticket moved is refused, and nothing is written.
+    const stale = await f.call('PATCH', `/tickets/${r.id}`, { body: { status: 'requested', ifStatus: r.status, ifVersion: r.version } });
+    assert.equal(stale.status, 409);
+    assert.equal((await f.call('GET', `/tickets/${r.id}/thread`)).body.status, 'live');
+  } finally { await f.cleanup(); }
 });
 
 // ── Quick Action: his original request first (SP-213) ────────────────────────
@@ -1288,7 +1867,7 @@ test('Quick Action puts his title and words first, the loop\'s reading after, an
   // The same name as his title: no Ticket name line, and no slice line without ## Order.
   const same = renderQuickAction({ name: 'Fix it', description: '## Asked\n```\nFix it\n\nplease\n```\n', status: 'queued' });
   assert.doesNotMatch(same, /Ticket name:|Sliced from|How the Loop/);
-  assert.match(same, /^<h1>Fix it<\/h1>\n<h2 class="request-heading">Original Request<\/h2>\n<p class="original-request">please<\/p>\n<p class="where quiet">/);
+  assert.match(same, /^<h1>Fix it<\/h1>\n<p class="status-line">Status: <span class="status-name">Queued<\/span>[\s\S]*<\/p>\n<h2 class="request-heading">Original Request<\/h2>\n<p class="original-request">please<\/p>$/);
   // His words keep their line breaks on the page.
   assert.match(readFileSync(WEB('app.css'), 'utf8'), /\.quick \.original-request \{[^}]*white-space: pre-wrap/);
   // The tab title is still the ticket's current name.
@@ -1322,12 +1901,12 @@ test('Quick Action asks for his move only while the ticket waits on him (SP-118)
   // SP-112: answered go, built, sent back. The old card is still the newest card.
   const rework = renderQuickAction({ ...ticket, status: 'rework' });
   assert.doesNotMatch(rework, /Your move|class="needed"/);
-  assert.match(rework, /<p class="where quiet">In Rework: the build loop is fixing what review found\. Nothing is needed from you\.<\/p>/);
+  assert.match(rework, /<span class="status-tip" id="status-tip" role="tooltip">The build loop is fixing what review found\. Nothing is needed from you\.<\/span>/);
   assert.equal(renderGoAction({ ...ticket, status: 'rework' }), '', 'and no Go button');
-  // The same card on Needs your input: the ask and the Go button, and no quiet line.
+  // The same card on Needs your input: the ask and the Go button, and his own line.
   const nyi = renderQuickAction({ ...ticket, status: 'needs your input' });
   assert.match(nyi, /<p class="needed">[^<]*go[\s\S]*Your move: Reply/);
-  assert.doesNotMatch(nyi, /class="where/);
+  assert.match(nyi, /role="tooltip">The loop is waiting on your answer below\.<\/span>/);
   assert.match(renderGoAction({ ...ticket, status: 'needs your input' }), /go-action/);
   // His answer is in: no ask, even in his status.
   assert.doesNotMatch(renderQuickAction({ ...ticket, status: 'needs your input', answerIn: true }), /Your move|class="needed"/);
@@ -1336,10 +1915,84 @@ test('Quick Action asks for his move only while the ticket waits on him (SP-118)
   for (const status of ['requested', 'queued', 'building', 'in review', 'rework', 'live']) {
     const html = renderQuickAction({ ...ticket, status });
     assert.doesNotMatch(html, /Your move|class="needed"/, status);
-    assert.match(html, /class="where quiet">[^<]*Nothing is needed from you\.<\/p>/, status);
+    assert.match(html, /role="tooltip">[^<]*Nothing is needed from you\.<\/span>/, status);
   }
   // The page hands the function the ticket's status and answerIn (the whole thread).
   assert.match(readFileSync(WEB('app.mjs'), 'utf8'), /renderQuickAction\(t\)/);
+});
+
+test('the status is first under the heading, with its line behind an information icon (SP-290)', () => {
+  const contract = readFileSync(new URL('../docs/LOOP_CONTRACT.md', import.meta.url), 'utf8');
+  const spelled = ['Requested', 'Rework', 'Queued', 'Building', 'In review', 'Needs your input', 'Ready to launch', 'Live'];
+  for (const name of spelled) {
+    assert.match(contract, new RegExp(`\\| \\*{0,2}\`${name}\`\\*{0,2} \\|`), `${name} is spelled as LOOP_CONTRACT.md spells it`);
+    const html = renderQuickAction({ name: 'Fix it', description: '', status: name.toLowerCase() });
+    const lines = html.split('\n');
+    assert.equal(lines[0], '<h1>Fix it</h1>');
+    assert.ok(lines[1].startsWith(`<p class="status-line">Status: <span class="status-name">${name}</span>`), `${name}: right under the heading`);
+    assert.match(lines[1], /<button type="button" class="status-info" title="Status Information" aria-label="Status Information" aria-expanded="false" aria-describedby="status-tip"><svg[^>]*aria-hidden="true">/, name);
+    assert.match(lines[1], /<span class="status-tip" id="status-tip" role="tooltip">[^<]+<\/span><\/p>$/, name);
+    assert.doesNotMatch(html, /class="where/, `${name}: the old grey line is gone`);
+  }
+  assert.match(renderStatusLine({ status: 'queued' }), /role="tooltip">It waits for the build loop to pick it up\. Nothing is needed from you\.</);
+  // Ready to launch names the Merge only when the page offers the Merge button (third send-back).
+  const pr = 'https://github.com/o/r/pull/14';
+  const ready = { status: 'Ready to launch', mergePhrase: 'merge', pullRequest: pr };
+  assert.match(renderStatusLine(ready), /role="tooltip">The work is built and checked, and waits on your Merge\.</);
+  assert.ok(offersMerge(ready));
+  assert.match(renderStatusLine({ status: 'ready to launch' }), new RegExp(`role="tooltip">${REPLY_LINE.replace('.', '\\.')}<`), 'no pull request: no Merge to name');
+  assert.match(renderStatusLine({ ...ready, mergePhrase: null }), /role="tooltip">It waits on your reply below\.</, 'no merge word: no Merge button');
+  // A card whose move is Close: the "i" names Close, as the button does (BE-7).
+  const closeCard = { body: '@@ASKED\nx\n**NEEDED FROM DANE: Nothing to merge.**\n**Your move: Close — its work is live.**', machine: true };
+  for (const status of ['ready to launch', 'needs your input']) {
+    const closing = { ...ready, status, closePhrase: 'close', comments: [closeCard] };
+    assert.ok(offersClose(closing), `${status}: the card's move is Close`);
+    assert.match(renderStatusLine(closing), new RegExp(`role="tooltip">${CLOSE_LINE.replace(/[.;]/g, '\\$&')}<`), status);
+    assert.doesNotMatch(renderStatusLine(closing), /waits on your Merge|answer below/, status);
+    assert.match(renderCloseAction(closing), /close-action/, `${status}: and the page draws Close`);
+    assert.doesNotMatch(renderMergeAction(closing), /merge-action/, `${status}: and no Merge`);
+  }
+  // His answer is in: the status says so, as the Details line does.
+  assert.match(renderStatusLine({ status: 'needs your input', answerIn: true }), new RegExp(`status-name">Needs your input · ${ANSWER_IN_NOTE}<`));
+  // ...and the "i" no longer asks for his move once it is made (review send-back).
+  for (const status of ['needs your input', 'ready to launch']) {
+    const answered = renderStatusLine({ status, answerIn: true });
+    assert.match(answered, /role="tooltip">Your answer is in; the loop takes it from here\. Nothing is needed from you\.</, status);
+    assert.doesNotMatch(answered, /answer below|waits on your Merge/, status);
+  }
+  const merging = renderStatusLine({ status: 'ready to launch', mergeStands: true });
+  assert.match(merging, new RegExp(`status-name">Ready to launch · ${MERGE_STANDS_NOTE}<`));
+  assert.match(merging, /role="tooltip">Your merge word is in; the relay merges it on its next pass\. Nothing is needed from you\.</);
+  assert.doesNotMatch(merging, /waits on your Merge/);
+  // A pull request past the merge (SP-226) asks nothing of him either (second send-back).
+  const merged = renderStatusLine({ status: 'ready to launch', pullRequestState: { number: 14, state: 'MERGED' } });
+  assert.match(merged, /role="tooltip">The pull request is merged; the relay moves this to Live on its next pass\. Nothing is needed from you\.</);
+  assert.doesNotMatch(merged, /waits on your Merge/);
+  const closed = renderStatusLine({ status: 'ready to launch', pullRequestState: { number: 14, state: 'CLOSED' } });
+  assert.match(closed, /role="tooltip">The pull request was closed without merging; see the note below\.</);
+  assert.doesNotMatch(closed, /waits on your Merge/);
+  // Merged wins over a merge word still standing; a failed read (state null) is not settled.
+  assert.match(renderStatusLine({ status: 'ready to launch', mergeStands: true, pullRequestState: { number: 14, state: 'MERGED' } }), /role="tooltip">The pull request is merged;/);
+  assert.match(renderStatusLine({ ...ready, pullRequestState: { number: 14, state: null } }), /waits on your Merge/);
+  assert.match(renderStatusLine({ ...ready, pullRequestState: { number: 14, state: 'OPEN' } }), /waits on your Merge/);
+  // The same through the whole page, as BE-8 ("Merged on GitHub but not yet Live") shows it.
+  const be8 = renderQuickAction({ name: 'Merged on GitHub but not yet Live', description: '', status: 'ready to launch', pullRequestState: { number: 14, state: 'MERGED' } });
+  assert.match(be8, /role="tooltip">The pull request is merged; the relay moves this to Live/);
+  assert.doesNotMatch(be8, /waits on your Merge/);
+  // The same through the whole page, as AL-2 in the demo shows it.
+  const al2 = renderQuickAction({ name: 'Ship it', description: '', status: 'ready to launch', answerIn: true });
+  assert.match(al2, /role="tooltip">Your answer is in; the loop takes it from here/);
+  // Under the Ticket name line when his title differs.
+  const renamed = renderQuickAction({ name: 'Loop name', description: '## Asked\n```\nHis title\n\nwords\n```\n', status: 'building' }).split('\n');
+  assert.match(renamed[1], /class="ticket-name/);
+  assert.match(renamed[2], /^<p class="status-line">Status: <span class="status-name">Building</);
+  // No status, no line; an unknown status is named but has no icon.
+  assert.equal(renderStatusLine({ status: '' }), '');
+  assert.doesNotMatch(renderStatusLine({ status: 'odd' }), /status-info/);
+  // Hover, keyboard focus and a tap (aria-expanded, toggled by the page) all show the line.
+  const css = readFileSync(WEB('app.css'), 'utf8');
+  for (const show of [':hover', ':focus-visible', '[aria-expanded="true"]']) assert.ok(css.includes(`.quick .status-info${show} + .status-tip`), show);
+  assert.match(readFileSync(WEB('app.mjs'), 'utf8'), /statusInfo\?\.addEventListener\('click'/);
 });
 
 // ── Quick Action: commands he is asked to run, click-to-copy ─────────────────
@@ -1386,7 +2039,7 @@ test('Copy copies exactly the block\'s text: no fence, no extra spaces or line b
   assert.match(app, /navigator\.clipboard\.writeText\(text\)/);
   assert.match(app, /document\.execCommand\('copy'\)/);
   assert.match(app, /'Copied'/);
-  const quick = /<section class="quick">([\s\S]*?)<\/section>/.exec(app)[1];
+  const quick = /<section class="quick[^"]*">([\s\S]*?)<\/section>/.exec(app)[1];
   assert.match(quick, /\$\{renderCommands\(t\)\}[\s\S]*\$\{renderReplyForm\(t, me\?\.name\)\}/, 'the commands sit on the right, above the reply box');
 });
 
@@ -1572,7 +2225,7 @@ test('every page puts its trail at the top: ticket, board, list, Waiting on you,
   assert.match(app, /main\.insertAdjacentHTML\('afterbegin', renderTrail\(steps\)\)/);
   assert.doesNotMatch(/function drawSignIn[\s\S]*?\n\}/.exec(app)[0], /putTrail/, 'no trail on the sign-in screen');
   const css = readFileSync(WEB('app.css'), 'utf8');
-  assert.match(css, /nav\.trail \{ font-size: 0\.85rem;/, 'a small, quiet line, not a heading');
+  assert.match(css, /nav\.trail \{ font-size: var\(--text-sm\);/, 'a small, quiet line, not a heading');
 });
 
 // ── Create Project ───────────────────────────────────────────────────────────
@@ -1896,7 +2549,7 @@ test('the Go button posts the substrate\'s one go word, handed to the page by th
     for (const t of threads) assert.equal(t.goPhrase, GO_PHRASE, t.id);
     const shown = threads.filter((t) => renderGoAction(t));
     assert.deepEqual(shown.map((t) => t.name), ['A request written up as a spec, waiting for your go']);
-    assert.equal(renderGoAction(threads.find((t) => t.name === 'A question a loop asked under your token')), '');
+    assert.equal(renderGoAction(threads.find((t) => t.name === 'A question a loop asked, with no machine stamp')), '');
     const posted = await f.call('POST', `/tickets/${shown[0].id}/comments`, { body: { body: GO_PHRASE } });
     assert.equal(posted.status, 201);
     const stored = f.store.listComments(shown[0].id).at(-1);
@@ -1908,7 +2561,7 @@ test('the Go button posts the substrate\'s one go word, handed to the page by th
   } finally { await none.cleanup(); }
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   assert.match(app, /wordButton\('form\.go-action', goQuestion\(t\), t\.goPhrase,/);
-  assert.match(app, /\$\{renderCloseAction\(t\)\}\s*\$\{renderGoAction\(t\)\}\s*\$\{renderReplyForm\(t, me\?\.name\)\}/, 'Go sits between Close and the reply box');
+  assert.match(app, /\$\{renderCloseAction\(t\)\}\s*\$\{renderGoAction\(t\)\}\s*(?:\$\{renderBugReportActions\(t\)\}\s*)?\$\{renderReplyForm\(t, me\?\.name\)\}/, 'Go sits between Close and the reply box');
 });
 
 test('no go word is written into the page\'s code, and the Go button has the Merge look with 10px corners', () => {
@@ -1921,8 +2574,8 @@ test('no go word is written into the page\'s code, and the Go button has the Mer
   // One rule draws Merge's weight and padding, and Go is in it; the green comes from `.quick button`, which both share.
   const shared = rules.filter((r) => r.sel.includes('.quick form.merge-action button'));
   assert.ok(shared.length && shared.every((r) => r.sel.includes('.quick form.go-action button')), 'Go has every Merge button rule');
-  assert.ok(rules.some((r) => r.sel.includes('.quick button') && /background: #00AA00/i.test(r.body)), 'the Merge colour');
-  assert.ok(rules.some((r) => r.sel.length === 1 && r.sel[0] === '.quick form.go-action button' && /border-radius: 10px/.test(r.body)), '10px corners of its own');
+  assert.ok(rules.some((r) => r.sel.includes('.quick button') && /background: var\(--ticket-btn-bg\)/.test(r.body)), 'the Merge colour');
+  assert.ok(rules.some((r) => r.sel.length === 1 && r.sel[0] === '.quick form.go-action button' && /border-radius: var\(--radius-btn\)/.test(r.body)), '10px corners of its own');
 });
 
 test('the Merge button asks once, naming the PR number and the ticket', () => {
@@ -1974,7 +2627,7 @@ test('clicking Merge and confirming posts exactly the merge phrase as Dane\'s ow
   const draw = /\nasync function drawTicket\(id(?:, said = null(?:, kept = null)?)?\) \{[\s\S]*?\n\}\n/.exec(app)?.[0] ?? '';
   assert.match(draw, /const wordButton = [\s\S]*wordButton\('form\.merge-action'[\s\S]*wordButton\('form\.close-action'/);
   assert.equal(app.match(/const wordButton = /g).length, 1);
-  assert.match(app, /<div class="act">\s*(?:\$\{renderCommands\(t\)\}\s*)?\$\{renderAnswerIn\(t\)\}\s*\$\{renderMergeAction\(t\)\}\s*\$\{renderCloseAction\(t\)\}\s*\$\{renderGoAction\(t\)\}\s*\$\{renderReplyForm\(t, me\?\.name\)\}/, 'the answer-is-in line, then Merge, Close and Go, sit above the reply box on the right');
+  assert.match(app, /<div class="act">\s*(?:\$\{renderCommands\(t\)\}\s*)?\$\{renderAnswerIn\(t\)\}\s*\$\{renderMergeAction\(t\)\}\s*\$\{renderCloseAction\(t\)\}\s*\$\{renderGoAction\(t\)\}\s*(?:\$\{renderBugReportActions\(t\)\}\s*)?\$\{renderReplyForm\(t, me\?\.name\)\}/, 'the answer-is-in line, then Merge, Close and Go, sit above the reply box on the right');
 });
 
 test('after a reply, Merge, Close or Go posts, the page stays at the top with no confirmation box', () => {
@@ -1989,7 +2642,8 @@ test('after a reply, Merge, Close or Go posts, the page stays at the top with no
   // One helper: Details open, the page at the top.
   const helper = /const afterPost = \(\) => \{([\s\S]*?)\n  \};/.exec(app)?.[1];
   assert.ok(helper, 'one shared helper');
-  assert.match(helper, /details\.details'\)\.open = true;\s*window\.scrollTo\(0, 0\);\s*$/);
+  assert.match(helper, /^\s*openDetails\(\);\s*window\.scrollTo\(0, 0\);\s*$/);
+  assert.match(app, /const openDetails = \(\) => \{\s*const fold = main\.querySelector\('details\.details'\);\s*if \(fold\) fold\.open = true;\s*\};/, 'opens the fold only when there is one (SP-291)');
   assert.doesNotMatch(helper, /showModal/, 'the helper opens no box');
   // Nothing scrolls to the last comment any more.
   assert.doesNotMatch(app, /\.comment:last-of-type/);
@@ -2079,18 +2733,24 @@ test('the List view draws the dropdown in every row; the Board view\'s Live rows
   assert.match(draw, /<td class="priority">\$\{view === 'list' \? renderListPriority\(t\) : t\.priority \? escapeHtml\(statusName\(t\.priority\)\)/);
   const card = /const card = \(t\) => `([\s\S]*?)`;/.exec(app)[1];
   assert.doesNotMatch(card, /select|renderListPriority/);
-  assert.match(draw, /wireListPriorities\(slug, view, board, said\);/);
+  assert.match(draw, /wireListPickers\(slug, view, board, said\);/);
 });
 
-test('picking a priority sends only it with the board\'s version, holds the dropdowns, and says Saved, moved or the server\'s words', () => {
+test('picking a priority or assignee sends only that field with the board\'s version, holds every dropdown, and says Saved, moved or the server\'s words', () => {
   const app = readFileSync(WEB('app.mjs'), 'utf8');
-  const wire = /function wireListPriorities\(slug, view, board, said\) \{([\s\S]*?)\n\}/.exec(app)?.[1];
+  const wire = /function wireListPickers\(slug, view, board, said\) \{([\s\S]*?)\n\}/.exec(app)?.[1];
   assert.ok(wire, 'the dropdowns are wired');
-  assert.match(wire, /api\('PATCH', `\/tickets\/\$\{encodeURIComponent\(id\)\}`, \{ priority: select\.value, ifVersion: t\.version \}\)/);
+  assert.match(app, /priority: \{ value: \(select\) => select\.value, before: \(t\) => t\.priority \?\? '' \}/, 'priority goes as picked');
+  assert.match(app, /assignee: \{ value: \(select\) => \(select\.value \? Number\(select\.value\) : null\), before: \(t\) => String\(t\.assigneeId \?\? ''\) \}/, 'assignee goes as an id, or null for Nobody, as the Change panel sends it');
+  assert.match(wire, /api\('PATCH', `\/tickets\/\$\{encodeURIComponent\(id\)\}`, \{ \[field\]: value, ifVersion: t\.version \}\)/);
+  assert.match(wire, /save\(t\.id, field, picker\.value\(select\), \(\) => \{ select\.value = before; \}\);/, 'a dropdown sends its value and puts the old one back on a refusal');
+  assert.match(wire, /const selects = \[\.\.\.main\.querySelectorAll\(fields\.map/, 'one save at a time across both kinds of dropdown');
+  assert.match(wire, /const controls = \[\.\.\.selects, \.\.\.main\.querySelectorAll\('select\[data-tags-of\], button\[data-untag-of\], input\[data-new-tag-of\], select\[data-topics-of\], button\[data-untopic-of\]'\)\];/, 'the tag and topic controls are held with the dropdowns');
+  assert.match(wire, /const held = controls\.filter/);
   assert.match(wire, /for \(const c of held\) c\.disabled = true;\s*note\.className = 'note quiet';\s*note\.textContent = 'Saving…';/);
-  assert.match(wire, /after = \{ id, text: 'Saved' \};/);
-  assert.match(wire, /err instanceof Refused && err\.status === 409\) \{\s*after = \{ id, text: MOVED_MESSAGE, error: true \};/, 'a 409 redraws as stored, with the moved message');
-  assert.match(wire, /note\.textContent = `Not saved: \$\{err\.message\}`;\s*select\.value = before;\s*for \(const c of held\) c\.disabled = false;/, 'any other refusal puts the old value back');
+  assert.match(wire, /after = \{ id, field, text: 'Saved' \};/);
+  assert.match(wire, /err instanceof Refused && err\.status === 409\) \{\s*after = \{ id, field, text: MOVED_MESSAGE, error: true \};/, 'a 409 redraws as stored, with the moved message');
+  assert.match(wire, /note\.textContent = `Not saved: \$\{err\.message\}`;\s*undo\(\);\s*for \(const c of held\) c\.disabled = false;/, 'any other refusal puts the old value back');
   assert.match(wire, /await drawAgain\(\(\) => drawProject\(slug, view, \{ said: after \}\)\);/);
 });
 
@@ -2109,6 +2769,193 @@ test('a priority picked through the page\'s save shows on the board and on the t
     const stale = await f.call('PATCH', `/tickets/${t.id}`, { body: { priority: 'low', ifVersion: t.version } });
     assert.equal(stale.status, 409);
     assert.equal(f.store.getTicket(t.id).priority, 'high');
+  } finally { await f.cleanup(); }
+});
+
+// ── Changing a ticket's assignee from the List view (SP-244) ───────────────
+
+const optionsOf = (html) => [...html.matchAll(/<option value="([^"]*)"( selected)?>([^<]*)<\/option>/g)].map((m) => [m[1], m[3], Boolean(m[2])]);
+
+test('a List row\'s Assigned To is a dropdown with the Change panel\'s choices: the operator, the current assignee "(now)" when someone else, and Nobody', () => {
+  const operator = { id: 1, name: 'Dane' };
+  const nobody = renderListAssignee({ id: 'SP-12', assignee: null, assigneeId: null }, operator);
+  assert.match(nobody, /^<select class="list-assignee" data-assignee-of="SP-12" aria-label="Assignee of SP-12">/);
+  assert.deepEqual(optionsOf(nobody), [['1', 'Dane', false], ['', 'Nobody', true]]);
+  assert.match(nobody, /<span class="note" data-assignee-note="SP-12" role="status"><\/span>$/, 'a note beside it for Saving…, Saved or a refusal');
+  assert.deepEqual(optionsOf(renderListAssignee({ id: 'SP-12', assignee: 'Dane', assigneeId: 1 }, operator)), [['1', 'Dane', true], ['', 'Nobody', false]]);
+  assert.deepEqual(optionsOf(renderListAssignee({ id: 'SP-12', assignee: 'Tess', assigneeId: 7 }, operator)), [['1', 'Dane', false], ['7', 'Tess (now)', true], ['', 'Nobody', false]]);
+  assert.deepEqual(optionsOf(renderListAssignee({ id: 'SP-12', assignee: null, assigneeId: null }, null)), [['', 'Nobody', true]], 'a project with no operator offers only Nobody');
+  assert.match(renderListAssignee({ id: '<b>', assignee: null, assigneeId: null }, operator), /data-assignee-of="&lt;b&gt;"/);
+  // The same choices, in the same order, as the ticket page's Change panel.
+  for (const [assignee, assigneeId] of [[null, null], ['Dane', 1], ['Tess', 7]]) {
+    const panel = renderEditPanel({ name: 'x', status: 'queued', operator, assignee: assigneeId == null ? null : { id: assigneeId, name: assignee } });
+    const who = /<select id="edit-assignee"[^>]*>([\s\S]*?)<\/select>/.exec(panel)[1];
+    assert.deepEqual(optionsOf(renderListAssignee({ id: 'SP-1', assignee, assigneeId }, operator)), optionsOf(who), String(assignee));
+  }
+});
+
+test('the List view draws the assignee dropdown in every row; the Board view\'s Live rows and cards stay as text', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const draw = app.slice(app.indexOf('async function drawProject('), app.indexOf('async function copyText'));
+  assert.match(draw, /<td class="assignee">\$\{view === 'list' \? renderListAssignee\(t, board\.operator\) : t\.assignee \? escapeHtml\(t\.assignee\)/);
+  const card = /const card = \(t\) => `([\s\S]*?)`;/.exec(app)[1];
+  assert.doesNotMatch(card, /select|renderListAssignee/);
+});
+
+test('an assignee picked through the page\'s save shows on the board and on the ticket; Nobody undoes it; an old version is refused and changes nothing', async () => {
+  const f = await fixture();
+  try {
+    const board = () => f.call('GET', '/projects/alpha/board').then((r) => r.body);
+    const first = await board();
+    assert.ok(first.operator, 'the board names the operator');
+    const t = first.columns.flatMap((c) => c.tickets).find((r) => r.assigneeId == null);
+    assert.ok(t, 'the test data has an unassigned ticket');
+    assert.equal(t.assignee, null);
+    const saved = await f.call('PATCH', `/tickets/${t.id}`, { body: { assignee: first.operator.id, ifVersion: t.version } });
+    assert.equal(saved.status, 200);
+    const after = (await board()).columns.flatMap((c) => c.tickets).find((r) => r.id === t.id);
+    assert.deepEqual([after.assigneeId, after.assignee], [first.operator.id, first.operator.name]);
+    assert.equal((await f.call('GET', `/tickets/${t.id}/thread`)).body.assignee.id, first.operator.id, 'the ticket page reads the same assignee');
+    const stale = await f.call('PATCH', `/tickets/${t.id}`, { body: { assignee: null, ifVersion: t.version } });
+    assert.equal(stale.status, 409);
+    assert.equal(f.store.getTicket(t.id).assignee, first.operator.id, 'nothing overwritten');
+    const undone = await f.call('PATCH', `/tickets/${t.id}`, { body: { assignee: null, ifVersion: after.version } });
+    assert.equal(undone.status, 200);
+    assert.equal(f.store.getTicket(t.id).assignee, null);
+  } finally { await f.cleanup(); }
+});
+
+// ── Changing a ticket's tags from the List view (SP-246) ───────────────────
+
+test('the project\'s tags are every tag on its board once, alphabetical, skipping anything unreadable', () => {
+  const board = { columns: [
+    { status: 'Queued', tickets: [{ tags: ['tracker', 'Beta'] }, { tags: ['alpha', 'tracker'] }] },
+    { status: 'Live', tickets: [{ tags: ['zeta', 7, ''] }, { tags: null }, {}] },
+  ] };
+  assert.deepEqual(projectTags(board), ['alpha', 'Beta', 'tracker', 'zeta']);
+  for (const bad of [null, undefined, {}, { columns: 'x' }, { columns: [null] }]) assert.deepEqual(projectTags(bad), []);
+});
+
+test('a List row\'s tags are chips with a × each, then Add Tag offering the project\'s other tags and New Tag… last, a hidden box and a note', () => {
+  const html = renderListTags({ id: 'SP-12', tags: ['tracker', 'b"ad'] }, ['alpha', 'b"ad', 'tracker', 'zeta']);
+  const chips = [...html.matchAll(/<span class="tag">([^<]*)<button type="button" class="remove-tag" data-untag-of="SP-12" data-tag="([^"]*)"[^>]*aria-label="Remove tag [^"]* from SP-12">×<\/button><\/span>/g)].map((m) => [m[1], m[2]]);
+  assert.deepEqual(chips, [['tracker', 'tracker'], ['b&quot;ad', 'b&quot;ad']]);
+  const select = /<select class="list-tags" data-tags-of="SP-12" aria-label="Add a tag to SP-12">([\s\S]*?)<\/select>/.exec(html)?.[1];
+  assert.ok(select, 'an Add Tag dropdown');
+  const options = [...select.matchAll(/<option value="([^"]*)"( selected)?( data-new-tag)?>([^<]*)<\/option>/g)].map((m) => [m[1], m[4], Boolean(m[2]), Boolean(m[3])]);
+  assert.deepEqual(options, [['', 'Add Tag', true, false], ['alpha', 'alpha', false, false], ['zeta', 'zeta', false, false], ['', 'New Tag…', false, true]], 'never a tag the ticket has; New Tag… last');
+  assert.match(html, /<input type="text" class="new-tag" data-new-tag-of="SP-12" aria-label="New tag for SP-12" placeholder="New tag, then Enter" hidden>/);
+  assert.match(html, /<span class="note" data-tags-note="SP-12" role="status"><\/span>$/);
+  const none = renderListTags({ id: 'SP-13', tags: [] }, []);
+  assert.doesNotMatch(none, /class="tag"/);
+  assert.match(none, /<option value="" selected>Add Tag<\/option><option value="" data-new-tag>New Tag…<\/option>/);
+  assert.match(renderListTags({ id: '<b>', tags: ['x'] }, []), /data-tags-of="&lt;b&gt;"[\s\S]*data-tags-note="&lt;b&gt;"/);
+});
+
+test('the List view draws the tag controls in every row from the project\'s tags; the Board view\'s cards and Live rows stay as chips', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const draw = app.slice(app.indexOf('async function drawProject('), app.indexOf('async function copyText'));
+  assert.match(draw, /const known = projectTags\(board\);/);
+  assert.match(draw, /<td class="tags">\$\{view === 'list' \? renderListTags\(t, known\) : t\.tags\.map/);
+  const card = /const card = \(t\) => `([\s\S]*?)`;/.exec(app)[1];
+  assert.doesNotMatch(card, /select|renderListTags|remove-tag/);
+  assert.match(app, /wireListTags\(tickets, save, noteOf\);/);
+  const css = readFileSync(WEB('app.css'), 'utf8');
+  assert.match(css, /\.group td\.tags input\.new-tag\[hidden\] \{ display: none; \}/, 'the box stays hidden until New Tag… opens it');
+});
+
+test('a tag picked, typed or removed sends the whole new list through the shared save; a blank entry or a tag already there sends nothing', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const wire = /function wireListTags\(tickets, save, noteOf\) \{([\s\S]*?)\n\}/.exec(app)?.[1];
+  assert.ok(wire, 'the tag controls are wired');
+  assert.match(wire, /save\(t\.id, 'tags', \[\.\.\.t\.tags, tag\], undo\);/, 'adding sends the old tags plus the new one');
+  assert.match(wire, /if \(t\.tags\.includes\(tag\)\) \{[\s\S]*?is already a tag\.`;\s*undo\(\);\s*return;/, 'a tag already there is said, not sent');
+  assert.match(wire, /if \(select\.selectedOptions\[0\]\?\.hasAttribute\('data-new-tag'\)\) \{\s*reset\(\);\s*const box = boxOf\(t\.id\);\s*box\.hidden = false;\s*box\.focus\(\);/, 'New Tag… opens the box');
+  assert.match(wire, /const tag = box\.value\.trim\(\);\s*if \(!tag\) return close\(\);/, 'a blank entry adds nothing');
+  assert.match(wire, /if \(e\.key === 'Escape'\) \{\s*e\.preventDefault\(\);\s*close\(\);/, 'Escape cancels');
+  assert.match(wire, /save\(t\.id, 'tags', t\.tags\.filter\(\(tag\) => tag !== button\.dataset\.tag\), \(\) => \{\}\);/, '× sends the tags without that one');
+});
+
+test('tags changed through the page\'s save show on the board and on the ticket; removing one works the same; an old version is refused and changes nothing', async () => {
+  const f = await fixture();
+  try {
+    const rows = () => f.call('GET', '/projects/alpha/board').then((r) => r.body.columns.flatMap((c) => c.tickets));
+    const t = (await rows())[0];
+    assert.ok(t, 'the test data has a ticket');
+    const added = await f.call('PATCH', `/tickets/${t.id}`, { body: { tags: [...t.tags, 'urgent-fix'], ifVersion: t.version } });
+    assert.equal(added.status, 200);
+    const after = (await rows()).find((r) => r.id === t.id);
+    assert.deepEqual(after.tags, [...t.tags, 'urgent-fix']);
+    assert.deepEqual(f.store.getTicket(t.id).tags, [...t.tags, 'urgent-fix'], 'the ticket page reads the same tags');
+    assert.ok(projectTags({ columns: [{ tickets: await rows() }] }).includes('urgent-fix'), 'and every row\'s Add Tag now offers it');
+    const stale = await f.call('PATCH', `/tickets/${t.id}`, { body: { tags: [], ifVersion: t.version } });
+    assert.equal(stale.status, 409);
+    assert.deepEqual(f.store.getTicket(t.id).tags, [...t.tags, 'urgent-fix'], 'nothing overwritten');
+    const removed = await f.call('PATCH', `/tickets/${t.id}`, { body: { tags: after.tags.filter((x) => x !== 'urgent-fix'), ifVersion: after.version } });
+    assert.equal(removed.status, 200);
+    assert.deepEqual(f.store.getTicket(t.id).tags, t.tags);
+  } finally { await f.cleanup(); }
+});
+
+// ── Changing a ticket's topics from the List view (SP-247) ─────────────────
+
+test('a List row\'s topics are chips with a × each (a quiet dash when none), then Add Topic offering the project\'s other topics, and a note', () => {
+  const known = [{ id: 3, name: 'Billing' }, { id: 1, name: 'Lo"gin' }, { id: 2, name: 'Search' }];
+  const html = renderListTopics({ id: 'SP-12', topics: [{ id: 1, name: 'Lo"gin' }] }, known);
+  const chips = [...html.matchAll(/<span class="tag topic">([^<]*)<button type="button" class="remove-tag" data-untopic-of="SP-12" data-topic="(\d+)"[^>]*aria-label="Remove topic [^"]* from SP-12">×<\/button><\/span>/g)].map((m) => [m[1], m[2]]);
+  assert.deepEqual(chips, [['Lo&quot;gin', '1']]);
+  assert.doesNotMatch(html, /class="quiet">–/, 'no dash beside a chip');
+  const select = /<select class="list-topics" data-topics-of="SP-12" aria-label="Add a topic to SP-12">([\s\S]*?)<\/select>/.exec(html)?.[1];
+  assert.ok(select, 'an Add Topic dropdown');
+  const options = [...select.matchAll(/<option value="([^"]*)"( selected)?>([^<]*)<\/option>/g)].map((m) => [m[1], m[3], Boolean(m[2])]);
+  assert.deepEqual(options, [['', 'Add Topic', true], ['3', 'Billing', false], ['2', 'Search', false]], 'never a topic the ticket has');
+  assert.match(html, /<span class="note" data-topics-note="SP-12" role="status"><\/span>$/);
+
+  const none = renderListTopics({ id: 'SP-13', topics: [] }, known);
+  assert.match(none, /^<span class="quiet">–<\/span><select/, 'a ticket with none shows a quiet dash and the dropdown');
+  const empty = renderListTopics({ id: 'SP-14' }, []);
+  assert.match(empty, /<option value="" selected>Add Topic<\/option><option value="" disabled>No topics yet: make one on the Topics page<\/option>/);
+  assert.match(renderListTopics({ id: '<b>', topics: [] }, []), /data-topics-of="&lt;b&gt;"[\s\S]*data-topics-note="&lt;b&gt;"/);
+});
+
+test('the List view draws a Topics cell after Tags from the board\'s topics; picking or × sends the whole new id list through the shared save', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const row = /const row = \(status\) => \(t\) => `[\s\S]*?<\/tr>`;/.exec(app)[0];
+  assert.match(row, /<td class="tags">[^\n]*<\/td>\s*<td class="topics">\$\{view === 'list' \? renderListTopics\(t, board\.topics\) :/);
+  const card = /const card = \(t\) => `([\s\S]*?)`;/.exec(app)[1];
+  assert.doesNotMatch(card, /topic/i, 'the Board view\'s cards show no topics');
+  assert.match(app, /wireListTopics\(tickets, save\);/);
+  assert.match(app, /select\[data-topics-of\], button\[data-untopic-of\]'\)\]/, 'held while a save is in flight');
+  const wire = /function wireListTopics\(tickets, save\) \{([\s\S]*?)\n\}/.exec(app)?.[1];
+  assert.ok(wire, 'the topic controls are wired');
+  assert.match(wire, /save\(t\.id, 'topics', \[\.\.\.idsOf\(t\), topic\], \(\) => \{ select\.value = ''; \}\);/);
+  assert.match(wire, /save\(t\.id, 'topics', idsOf\(t\)\.filter\(\(id\) => id !== topic\), \(\) => \{\}\);/);
+});
+
+test('sorting by Topics goes by each ticket\'s first topic, tickets with none last', () => {
+  const tickets = [{ id: 'A', topics: [] }, { id: 'B', topics: [{ id: 1, name: 'zeta' }] }, { id: 'C', topics: [{ id: 2, name: 'Alpha' }] }];
+  assert.deepEqual(sortTickets(tickets, { column: 'topics', direction: 'ascending' }).map((t) => t.id), ['C', 'B', 'A']);
+});
+
+test('topics added through the page\'s save show on the board after a reload; one topic sits on two tickets; × removes it; a moved ticket is refused', async () => {
+  const f = await fixture();
+  try {
+    const login = f.store.addTopic({ project: 'alpha', name: 'Login', actor: f.operator.id });
+    const rows = () => f.call('GET', '/projects/alpha/board').then((r) => r.body.columns.flatMap((c) => c.tickets));
+    const [one, two] = await rows();
+    assert.ok(one && two, 'the test data has two tickets');
+    assert.deepEqual((await f.call('GET', '/projects/alpha/board')).body.topics, [{ id: login.id, name: 'Login' }]);
+    assert.equal((await f.call('PATCH', `/tickets/${one.id}`, { body: { topics: [login.id], ifVersion: one.version } })).status, 200);
+    assert.equal((await f.call('PATCH', `/tickets/${two.id}`, { body: { topics: [login.id], ifVersion: two.version } })).status, 200);
+    let now = await rows();
+    for (const id of [one.id, two.id]) assert.deepEqual(now.find((r) => r.id === id).topics, [{ id: login.id, name: 'Login' }], id);
+    const stale = await f.call('PATCH', `/tickets/${one.id}`, { body: { topics: [], ifVersion: one.version } });
+    assert.equal(stale.status, 409);
+    const after = now.find((r) => r.id === one.id);
+    assert.equal((await f.call('PATCH', `/tickets/${one.id}`, { body: { topics: [], ifVersion: after.version } })).status, 200);
+    now = await rows();
+    assert.deepEqual(now.find((r) => r.id === one.id).topics, []);
+    assert.deepEqual(now.find((r) => r.id === two.id).topics, [{ id: login.id, name: 'Login' }]);
   } finally { await f.cleanup(); }
 });
 
@@ -2315,12 +3162,12 @@ test('a save carries over what is typed elsewhere on the page: the reply box, an
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   const wire = /function wireEditPanel\(t\) \{([\s\S]*?)\n\}/.exec(app)?.[1];
   const typed = wire.slice(wire.indexOf('const typed ='), wire.indexOf('const redraw ='));
-  assert.match(typed, /reply: main\.querySelector\('form\.reply textarea'\)\?\.value/);
+  assert.match(typed, /reply: main\.querySelector\('form\.reply textarea, form\.add-comment textarea'\)\?\.value/, 'the reply box, or the Add Comment box on a loop ticket');
   assert.match(typed, /description: field !== 'description' && !editor\.hidden \? area\.value : null/, 'an open edit is kept unless it is what was saved');
   assert.match(typed, /name: field !== 'name' && nameBox && nameBox\.value !== t\.name \? nameBox\.value : null/);
   assert.match(typed, /tag: field === 'tags' \? '' : tagBox\.value/);
   const draw = /\nasync function drawTicket\(id, said = null, kept = null\) \{[\s\S]*?\n\}\n/.exec(app)?.[0] ?? '';
-  assert.match(draw, /const panel = wireEditPanel\(t\);\s*if \(kept\) \{[^}]*const keptBox = main\.querySelector\('form\.reply textarea'\);\s*if \(keptBox\) keptBox\.value = kept\.reply;\s*panel\?\.restore\(kept\);/);
+  assert.match(draw, /const panel = wireEditPanel\(t\);\s*if \(kept\) \{[^}]*const keptBox = main\.querySelector\('form\.reply textarea, form\.add-comment textarea'\);\s*if \(keptBox\) keptBox\.value = kept\.reply;\s*panel\?\.restore\(kept\);/);
   assert.match(wire, /restore\(kept\) \{[\s\S]*area\.value = kept\.description;\s*openEditor\(\);/, 'the description edit opens again with its text');
 });
 
@@ -2391,7 +3238,7 @@ function reportingStore() {
   };
   const ticket = (...args) => filedAs('queued', ...args);
   const done = () => { store.close(); rmSync(dir, { recursive: true, force: true }); };
-  return { store, loop, ticket, filedAs, now, done };
+  return { store, loop, ticket, filedAs, now, done, clock };
 }
 
 test('Reporting: a task finished 3 days ago counts in all three ranges, 20 days ago in two, 60 days ago only in all time', () => {
@@ -2462,9 +3309,9 @@ test('Reporting: one project or all of them; an unknown project is null; open co
   } finally { r.done(); }
 });
 
-test('Reporting is in the header after Tasks, served at /reporting, and its figures need a sign-in; the demo holds finished tasks', async () => {
+test('Reporting is in the header after Tasks and Topics, served at /reporting, and its figures need a sign-in; the demo holds finished tasks', async () => {
   const html = readFileSync(WEB('index.html'), 'utf8');
-  assert.match(html, /<a href="\/tasks" data-nav="tasks">Tasks<\/a>\s*<a href="\/reporting" data-nav="reporting">Reporting<\/a>/);
+  assert.match(html, /<a href="\/tasks" data-nav="tasks">Tasks<\/a>\s*<a href="\/topics" data-nav="topics">Topics<\/a>\s*<a href="\/reporting" data-nav="reporting">Reporting<\/a>/);
   const f = await fixture();
   try {
     const page = await f.call('GET', '/reporting', { token: null });
@@ -2483,6 +3330,139 @@ test('Reporting is in the header after Tasks, served at /reporting, and its figu
     assert.equal(alpha.body.finished.all, live('alpha'));
     assert.equal((await f.call('GET', '/reports?project=no-such-thing')).status, 404);
   } finally { await f.cleanup(); }
+});
+
+test('Reporting: the first table is Task Productivity, Tasks started above Tasks finished, and its note names Started first (SP-230)', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const fn = app.slice(app.indexOf('async function drawReporting('));
+  const page = fn.slice(fn.indexOf('<h1>Reporting</h1>'));
+  const firstHeading = page.match(/<h2>([^<]*)<\/h2>/);
+  assert.equal(firstHeading[1], 'Task Productivity');
+  assert.doesNotMatch(app, /Tasks Finished and Started/);
+  assert.match(page, /<p class="quiet">Started: filed in that time\. Finished: moved to Live in that time and still Live\.<\/p>/);
+  assert.match(page, /<tbody>\$\{line\('Tasks started', r\.started\)\}\$\{line\('Tasks finished', r\.finished\)\}<\/tbody>/);
+});
+
+test('Reporting: a custom range counts tasks started and finished on its start and end dates, not the day before or after (SP-240)', () => {
+  const r = reportingStore();
+  try {
+    const at = (iso) => Date.parse(iso);
+    const fileAt = (iso, status = 'queued') => {
+      r.clock.moveTo(at(iso));
+      return r.store.fileTicket({ project: 'alpha', actor: r.loop.id, name: `filed ${iso}`, status }).id;
+    };
+    const finishAt = (iso) => {
+      const id = fileAt('2026-10-01T12:00:00Z');
+      r.clock.moveTo(at(iso));
+      r.store.changeTicket(id, { actor: r.loop.id, status: 'live' });
+    };
+    // The range: the whole of Oct 10 to the whole of Oct 15.
+    const custom = { from: at('2026-10-10T00:00:00Z'), to: at('2026-10-15T23:59:59.999Z') };
+    fileAt('2026-10-10T00:00:00Z');
+    fileAt('2026-10-15T23:00:00Z');
+    fileAt('2026-10-09T23:00:00Z');
+    fileAt('2026-10-16T01:00:00Z');
+    finishAt('2026-10-10T01:00:00Z');
+    finishAt('2026-10-15T23:00:00Z');
+    finishAt('2026-10-09T23:00:00Z');
+    finishAt('2026-10-16T01:00:00Z');
+    const rep = reportsOf(r.store, { now: r.now, custom });
+    assert.deepEqual(rep.custom, { from: '2026-10-10T00:00:00.000Z', to: '2026-10-15T23:59:59.999Z', started: 2, finished: 2 });
+    // The fixed ranges are counted as before, and with no range there is no custom figure.
+    const plain = reportsOf(r.store, { now: r.now });
+    assert.equal('custom' in plain, false);
+    assert.deepEqual(rep.started, plain.started);
+    assert.deepEqual(rep.finished, plain.finished);
+    // One project only: beta has none of them.
+    assert.deepEqual(reportsOf(r.store, { project: 'beta', now: r.now, custom }).custom, { ...rep.custom, started: 0, finished: 0 });
+  } finally { r.done(); }
+});
+
+test('Reporting: Task Productivity has Start Date and End Date pickers after the fixed ranges, 30 days ago to today, redrawn in place (SP-240)', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const fn = app.slice(app.indexOf('async function drawReporting('), app.indexOf('function pickerDay('));
+  assert.match(fn, /<th class="count custom-range"><label for="report-from">Start Date<\/label><input type="date" id="report-from"/);
+  assert.match(fn, /<th class="count custom-range"><label for="report-to">End Date<\/label><input type="date" id="report-to"/);
+  assert.ok(fn.indexOf('report-from') < fn.indexOf('report-to'), 'Start Date comes before End Date');
+  assert.match(fn, /<span class="quiet">from \$\{escapeHtml\(dayLabel\(fromPicker\.value\)\)\}<\/span>/);
+  assert.match(fn, /'The start date is after the end date\.'/);
+  // A picker change asks /reports again for the same project and redraws only the custom cells.
+  assert.match(fn, /api\('GET', reportsPath\(r\.project \?\? '', picked\)\)/);
+  assert.doesNotMatch(fn.slice(fn.indexOf('const repick')), /main\.innerHTML/);
+  // The helpers, run here: the default range, and the local-day edges sent to the server.
+  const helpers = app.slice(app.indexOf('function pickerDay('), app.indexOf('function reportsPath('));
+  const reportsPathFn = app.slice(app.indexOf('function reportsPath('));
+  const body = reportsPathFn.slice(0, reportsPathFn.indexOf('\n}\n') + 3);
+  const { defaultReportRange, reportsPath } = new Function(`${helpers}\n${body}\nreturn { defaultReportRange, reportsPath };`)();
+  assert.deepEqual(defaultReportRange(new Date(2026, 10, 13, 15, 0)), { from: '2026-10-14', to: '2026-11-13' });
+  const path = new URL(`http://x${reportsPath('alpha', { from: '2026-10-14', to: '2026-11-13' })}`);
+  assert.equal(path.searchParams.get('project'), 'alpha');
+  assert.equal(path.searchParams.get('from'), new Date(2026, 9, 14, 0, 0, 0, 0).toISOString());
+  assert.equal(path.searchParams.get('to'), new Date(2026, 10, 13, 23, 59, 59, 999).toISOString());
+  assert.equal(reportsPath('', { from: '2026-11-14', to: '2026-11-13' }), '/reports', 'a start after the end is never asked for');
+  assert.equal(reportsPath('', { from: '', to: '2026-11-13' }), '/reports');
+});
+
+test('Reporting growth: 4 started this week against 2 the week before is +100%, 2 against 4 is -50%, none before or too young says so (SP-241)', () => {
+  const growthOf = (setup, project = null) => {
+    const r = reportingStore();
+    try {
+      setup(r);
+      return reportsOf(r.store, { project, now: r.now }).growth;
+    } finally { r.done(); }
+  };
+  const many = (r, n, daysAgo) => { for (let i = 0; i < n; i += 1) r.ticket('alpha', daysAgo); };
+  // An old ticket, so the project has the history to compare a whole week.
+  const old = (r) => r.ticket('alpha', 400);
+  const up = growthOf((r) => { old(r); many(r, 4, 3); many(r, 2, 10); });
+  assert.deepEqual(up.week.started, { current: 4, previous: 2, change: 100, reason: null });
+  const down = growthOf((r) => { old(r); many(r, 2, 3); many(r, 4, 10); });
+  assert.deepEqual(down.week.started, { current: 2, previous: 4, change: -50, reason: null });
+  const flat = growthOf((r) => { old(r); many(r, 3, 3); many(r, 3, 10); });
+  assert.equal(flat.week.started.change, 0);
+  const noneBefore = growthOf((r) => { old(r); many(r, 3, 3); });
+  assert.deepEqual(noneBefore.week.started, { current: 3, previous: 0, change: null, reason: 'none-before' });
+  // A project younger than 14 days: not enough history for Weekly, nor Monthly or Annual.
+  const young = growthOf((r) => { many(r, 4, 3); many(r, 2, 10); });
+  for (const key of ['week', 'month', 'year']) assert.equal(young[key].started.reason, 'too-young', key);
+  assert.equal(young.week.started.change, null);
+  // Finished: counted by the move to Live, the same as the fixed ranges.
+  const done = growthOf((r) => { old(r); r.ticket('alpha', 50, [2, 'live']); r.ticket('alpha', 50, [3, 'live']); r.ticket('alpha', 50, [9, 'live']); });
+  assert.deepEqual(done.week.finished, { current: 2, previous: 1, change: 100, reason: null });
+  // Monthly and Annual compare 30 and 365 days.
+  const longer = growthOf((r) => { r.ticket('alpha', 800); many(r, 1, 20); many(r, 2, 40); many(r, 3, 100); many(r, 1, 500); });
+  assert.deepEqual(longer.month.started, { current: 1, previous: 2, change: -50, reason: null });
+  assert.deepEqual(longer.year.started, { current: 6, previous: 1, change: 500, reason: null });
+  // The answer names the timeframes for the picker, Weekly first.
+  const r = reportingStore();
+  try {
+    assert.deepEqual(reportsOf(r.store, { now: r.now }).growthPeriods, GROWTH_PERIODS.map(({ key, label }) => ({ key, label })));
+    assert.deepEqual(GROWTH_PERIODS.map((g) => g.label), ['Weekly', 'Monthly', 'Annual']);
+  } finally { r.done(); }
+});
+
+test('Reporting: Growth Rate is the last Task Productivity column, a Weekly/Monthly/Annual picker redrawn without asking the server (SP-241)', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const fn = app.slice(app.indexOf('async function drawReporting('), app.indexOf('function pickerDay('));
+  const head = fn.slice(fn.indexOf('const productivityHead'), fn.indexOf('const line ='));
+  assert.match(head, /<label for="report-growth">Growth Rate<\/label><select id="report-growth">\$\{r\.growthPeriods\.map/);
+  assert.ok(head.indexOf('report-to') < head.indexOf('report-growth'), 'Growth Rate comes after End Date');
+  assert.match(head, /i === 0 \? ' selected' : ''/);
+  const row = fn.slice(fn.indexOf('const line ='), fn.indexOf('// A flow row'));
+  assert.ok(row.indexOf('data-custom=') < row.indexOf('data-growth='), 'the growth cell is the last in each row');
+  // The picker redraws from the answer it already has: no api() call in it.
+  const show = fn.slice(fn.indexOf('const showGrowth'), fn.indexOf("growthPicker.addEventListener('change', showGrowth)"));
+  assert.match(show, /r\.growth\[growthPicker\.value\]/);
+  assert.doesNotMatch(show, /api\(/);
+  // The cell itself, run here.
+  const src = app.slice(app.indexOf('function growthCell('));
+  const growthCell = new Function(`${src.slice(0, src.indexOf('\n}\n') + 3)}\nreturn growthCell;`)();
+  assert.equal(growthCell({ change: 100, reason: null }), '+100%');
+  assert.equal(growthCell({ change: -50, reason: null }), '-50%');
+  assert.equal(growthCell({ change: 0, reason: null }), '0%');
+  assert.equal(growthCell({ change: null, reason: 'none-before' }), '<span class="quiet">none in the period before</span>');
+  assert.equal(growthCell({ change: null, reason: 'too-young' }), '<span class="quiet">not enough history yet</span>');
+  assert.equal(growthCell(undefined), '');
 });
 
 /** True when `ms` is within ten minutes of `days` days: the test clock ticks a minute per reading. */
@@ -2642,6 +3622,23 @@ test('Time split: Queued, 1h Building, 2h In review, 3h Ready to launch, his "me
   assert.equal(stretches[stretches.length - 1].to, at(11.5), 'Live time is not counted');
 });
 
+test('Time split (SP-285): after his "merge", a relay conflict note does not put the time back on him; a new review round does', () => {
+  const t0 = Date.parse('2026-11-13T14:00:00Z');
+  const at = (h) => t0 + h * HOUR;
+  const pass = (h) => ({ at: at(h), byMachine: true, byOperator: false, failure: false, verdict: 'pass' });
+  const note = (h) => ({ at: at(h), byMachine: true, byOperator: false, failure: false });
+  const merge = (h) => ({ at: at(h), byMachine: false, byOperator: true, failure: false, mergeWord: true });
+  // SP-237's day: PASS and card, 1h for him, "merge", relay note 1h later, 3h of catch-up, Live.
+  const a = timeSplitOf([[at(0), 'ready to launch'], [at(5), 'live']], [pass(0), note(0), merge(1), note(2)], { now: at(6) });
+  assert.deepEqual(sumBuckets(a), { working: 0, lane: 4 * HOUR, operator: HOUR, broken: 0 });
+  // A new PASS after his merge (a rebuilt round) is his again until he answers it.
+  const b = timeSplitOf([[at(0), 'ready to launch']], [pass(0), merge(1), note(2), pass(3)], { now: at(4) });
+  assert.deepEqual(sumBuckets(b), { working: 0, lane: 2 * HOUR, operator: 2 * HOUR, broken: 0 });
+  // A merge said before any PASS does not stand.
+  const c = timeSplitOf([[at(0), 'ready to launch']], [merge(0), note(1)], { now: at(2) });
+  assert.deepEqual(sumBuckets(c), { working: 0, lane: HOUR, operator: HOUR, broken: 0 });
+});
+
 test('Time split: a loop\'s failure note with no move for 4 hours is broken, until the next move or his next comment', () => {
   const t0 = Date.parse('2026-11-01T15:00:00Z');
   const at = (h) => t0 + h * HOUR;
@@ -2731,7 +3728,8 @@ test('the Reporting page draws only the server\'s figures: ranges and stages fro
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   const draw = app.slice(app.indexOf('async function drawReporting'), app.indexOf('/**\n * The Settings page'));
   assert.ok(draw.length > 0);
-  assert.match(draw, /api\('GET', `\/reports\$\{slug \? `\?project=\$\{encodeURIComponent\(slug\)\}` : ''\}`\)/);
+  assert.match(draw, /api\('GET', reportsPath\(slug, range\)\)/);
+  assert.match(draw, /if \(slug\) query\.set\('project', slug\);/);
   assert.match(draw, /r\.ranges\.map/);
   assert.match(draw, /r\.open\.map/);
   assert.match(draw, /savedProject\(\)/, 'it opens on the selected project');
@@ -2754,9 +3752,9 @@ test('the Reporting page draws only the server\'s figures: ranges and stages fro
 
 test('every button on a ticket\'s page is green with a darker border and rounded corners; other pages keep theirs', () => {
   const css = readFileSync(WEB('app.css'), 'utf8');
-  const rule = /^\.quick button, details\.details form\.copy button, details\.edit button:not\(\.remove-tag\) \{([^}]*)\}/m.exec(css);
+  const rule = /^\.quick button, \.details form\.copy button, details\.edit button:not\(\.remove-tag\) \{([^}]*)\}/m.exec(css);
   assert.ok(rule, 'one rule covers Copy, Merge, Close, Post reply, Delete, the Change panel and the Details Copy');
-  for (const part of ['background: #00AA00;', 'border: 1px solid #006600;', 'border-radius: 10px;', 'color: #fff;']) assert.ok(rule[1].includes(part), part);
+  for (const part of ['background: var(--ticket-btn-bg);', 'border: 1px solid var(--ticket-btn-border);', 'border-radius: var(--radius-btn);', 'color: var(--btn-flat-ink);']) assert.ok(rule[1].includes(part), part);
   // Delete no longer overrides the green with its old red outline.
   assert.doesNotMatch(css, /\.quick form\.delete-action button \{/);
   // Scoped to the ticket page: the plain button rule every other page uses is untouched.
@@ -3044,7 +4042,7 @@ test('the Docs page carries the Commands section; /docs/commands/<name> opens on
   assert.match(draw, /renderCommandDetails\(command\);\s*dialog\.showModal\(\);/);
   assert.match(draw, /e\.preventDefault\(\);\s*e\.stopPropagation\(\);/, 'a click opens the pop-up, not the steps page');
   const css = readFileSync(WEB('app.css'), 'utf8');
-  assert.match(css, /section\.commands-pod \{ background: #cceeff; border: 1px solid #003377; border-radius: 20px;/);
+  assert.match(css, /section\.commands-pod \{ background: var\(--pod-bg\); border: 1px solid var\(--navy-soft\); border-radius: var\(--radius-container\);/);
   assert.match(css, /\.docs-columns \{ display: grid; grid-template-columns: minmax\(0, 1fr\) minmax\(0, 2fr\);/, 'the pod takes a third');
   assert.match(css, /@media \(max-width: 800px\) \{ \.docs-columns \{ grid-template-columns: minmax\(0, 1fr\); \} \}/, 'stacked on a narrow screen');
   assert.match(draw, /<input type="search" id="command-search"/);
@@ -3223,7 +4221,7 @@ test('the Tasks toolbar picks a project from a dropdown, "Project: ", the one in
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   const draw = app.slice(app.indexOf('async function drawProject'), app.indexOf('async function copyText'));
   assert.match(draw, /api\('GET', '\/projects'\),\n  \]\);/);
-  assert.match(draw, /<div class="toolbar">\s*\$\{renderProjectPicker\(projects, board\.project\)\}\s*\$\{searchForm\(''\)\}\s*<button type="button" class="pipeline-pod"[^>]*><\/button>\s*<nav class="views"/);
+  assert.match(draw, /<div class="toolbar">\s*\$\{renderProjectPicker\(projects, board\.project\)\}\s*\$\{searchForm\(''\)\}\s*<button type="button" class="pipeline-pod"[^>]*><\/button>\s*\$\{viewSwitch\(board\.project, view\)\}/);
   assert.doesNotMatch(app, /Change project/);
   assert.match(draw, /querySelector\('\.project-picker select'\)\.addEventListener\('change', \(e\) => \{\s*history\.pushState\(null, '', at\(view, e\.target\.value\)\);\s*route\(\);/);
   assert.match(readFileSync(WEB('app.css'), 'utf8'), /\.toolbar \.project-picker select \{/);
@@ -3691,7 +4689,7 @@ test('the pod reads as a small table (SP-194): a "Pipeline Stages" heading, one 
   ]);
   // Only the running stage carries `running`.
   assert.equal((html.match(/ running"/g) || []).length, 2);
-  const css = readFileSync(WEB('app.css'), 'utf8');
+  const css = drawnCss();
   const rule = (selector) => {
     const at = css.indexOf(`${selector} {`);
     assert.notEqual(at, -1, `app.css has a ${selector} rule`);
@@ -3735,7 +4733,7 @@ test('the pod restyled (SP-222): a larger heading, #cceeff with a #000077 border
   assert.match(html, /title="Review: next pass due \[18:03\]"/);
   assert.match(html, /title="Intake: next pass due \[17:55\] \(due now\)"/);
   assert.equal(PIPELINE_SOON_MS, 3 * 60 * 1000);
-  const css = readFileSync(WEB('app.css'), 'utf8');
+  const css = drawnCss();
   const rule = (selector) => {
     const at = css.indexOf(`${selector} {`);
     assert.notEqual(at, -1, `app.css has a ${selector} rule`);
@@ -3746,7 +4744,7 @@ test('the pod restyled (SP-222): a larger heading, #cceeff with a #000077 border
   assert.match(pod, /border: 1px solid #000077;/);
   assert.match(pod, /background: #cceeff;/);
   assert.match(rule('.toolbar .pipeline-pod:hover'), /background: #b8e4ff;/, 'hover still shows on the new blue');
-  assert.match(rule('.toolbar .pipeline-pod .heading'), /font-size: 1\.5em;/, 'the heading 50% larger');
+  assert.match(rule('.toolbar .pipeline-pod .heading'), /font-size: 1\.25rem;/, 'the heading larger (--text-xl, SP-320)');
   assert.match(rule('.toolbar .pipeline-pod .soon'), /color: #B8860B;/, 'gold that reads on light blue');
   // The Files Made box keeps its light blue (non-goal).
   assert.match(rule('.files-made'), /background: #eaf5fe;/);
@@ -3763,11 +4761,11 @@ test('the pod restyled (SP-222): a larger heading, #cceeff with a #000077 border
 
 test('the Tasks page puts the pod between the search field and Board/List, fills it on draw and once a minute, and a failed read touches only the pod (SP-168)', () => {
   const app = readFileSync(WEB('app.mjs'), 'utf8');
-  const tasks = app.indexOf('<h1>Tasks</h1>');
-  const toolbar = app.slice(app.indexOf('<div class="toolbar">', tasks), app.indexOf('</nav>', tasks));
+  const tasks = app.indexOf('<h1>Tasks</h1>', app.indexOf('async function drawProject('));
+  const toolbar = app.slice(app.indexOf('<div class="toolbar">', tasks), app.indexOf('</div>', app.indexOf('<div class="toolbar">', tasks)));
   const search = toolbar.indexOf("${searchForm('')}");
   const pod = toolbar.indexOf('class="pipeline-pod"');
-  const views = toolbar.indexOf('<nav class="views"');
+  const views = toolbar.indexOf('${viewSwitch(board.project, view)}');
   assert.ok(search !== -1 && search < pod && pod < views, 'search field, then the pod, then the Board/List toggle');
   const draw = app.slice(app.indexOf('async function drawProject('), app.indexOf('async function drawProject(') + 12000);
   assert.match(draw, /refreshPipeline\(\);/);
@@ -3892,7 +4890,7 @@ test('every page carries the health line in its header, in the bell\'s warning y
   const html = readFileSync(WEB('index.html'), 'utf8');
   const header = html.slice(html.indexOf('<header>'), html.indexOf('</header>'));
   assert.match(header, /<span id="health" class="health" role="status" hidden><\/span>\s*<span class="me">/);
-  const css = readFileSync(WEB('app.css'), 'utf8');
+  const css = drawnCss();
   const rule = (selector) => {
     const at = css.indexOf(`${selector} {`);
     assert.notEqual(at, -1, `app.css has a ${selector} rule`);
@@ -4003,7 +5001,7 @@ test.describe('Files Made: the files a ticket made, from its newest merge note',
 
   test('the ticket page draws the box between the Quick Action section and the Details fold', () => {
     const app = readFileSync(WEB('app.mjs'), 'utf8');
-    assert.match(app, /<\/section>\s*\$\{renderFilesMade\(t\)\}\s*<details class="details">/);
+    assert.match(app, /<\/section>\s*\$\{renderFilesMade\(t\)\}\s*\$\{inline \? '' : `<details class="details">/);
     assert.match(readFileSync(WEB('app.css'), 'utf8'), /\.files-made \{[^}]*background:[^}]*border:/);
   });
 });
@@ -4067,7 +5065,7 @@ test.describe('Files Made: the files a ticket made, from its newest merge note',
   test('the headings are buttons; only the sorted one has an arrow and aria-sort; Actions is plain', () => {
     const none = renderSortHeadings(null);
     assert.equal((none.match(/<button type="button" class="sort"/g) || []).length, SORT_COLUMNS.length);
-    assert.deepEqual(SORT_COLUMNS.map((c) => c.label), ['Ticket #', 'Ticket', 'Priority', 'Tags', 'Assigned To', 'Last Change']);
+    assert.deepEqual(SORT_COLUMNS.map((c) => c.label), ['Ticket #', 'Ticket', 'Priority', 'Tags', 'Topics', 'Assigned To', 'Last Change']);
     assert.match(none, /^<tr><th class="id"><button type="button" class="sort" data-sort="id">Ticket #<\/button><\/th><th class="name">/, 'Ticket # is the left-most heading (SP-193)');
     assert.doesNotMatch(none, /aria-sort|▲|▼/);
     assert.match(none, /<th class="actions">Actions<\/th>/);
@@ -4108,13 +5106,13 @@ test.describe('Files Made: the files a ticket made, from its newest merge note',
     assert.doesNotMatch(nameCell, /ANSWER_IN_NOTE|answer-in/, 'the answer-in words are gone from the name cell (SP-201)');
     assert.equal((row.match(/<td class="/g) || []).length, SORT_COLUMNS.length + 1, 'one cell per heading, plus Actions');
     const css = readFileSync(WEB('app.css'), 'utf8');
-    assert.match(css, /\.group table\.sortable th \{ color: #000; font-weight: 700; \}/);
+    assert.match(css, /\.group table\.sortable th \{ color: var\(--ink-primary\); font-weight: 700; \}/);
     // SP-193: Ticket # is narrow; the name keeps most of the width, and the set widths leave Last Change room.
     const width = (key) => Number(new RegExp(`\\.group th\\.${key} \\{ width: (\\d+)%; \\}`).exec(css)?.[1]);
     assert.ok(width('id') > 0 && width('id') < width('name'), 'Ticket # narrower than Ticket');
-    const set = ['id', 'name', 'priority', 'tags', 'assignee', 'actions'].reduce((sum, k) => sum + width(k), 0);
+    const set = ['id', 'name', 'priority', 'tags', 'topics', 'assignee', 'actions'].reduce((sum, k) => sum + width(k), 0);
     assert.ok(set <= 76, `the set widths (${set}%) leave Last Change room for its date`);
-    assert.match(css, /^th \{ color: var\(--quiet\); font-weight: 500;/m, 'every other table keeps the grey heading');
+    assert.match(css, /^th \{ color: var\(--ink-secondary\); font-weight: 500;/m, 'every other table keeps the grey heading');
   });
 }
 
@@ -4142,7 +5140,23 @@ test('Reference Docs and Work Log: each docs/ file\'s kind comes from its folder
   assert.deepEqual(docInfo('work-log/20261110-x.md'), { kind: 'Work Log', date: null });
   assert.equal(docDay('2026-11-10'), 'Nov 10, 2026', 'a calendar day, never shifted by time zone');
   assert.equal(docDay(null), '');
-  assert.deepEqual(DOC_KINDS, ['Reference', 'Onboarding', 'Work Log']);
+  assert.deepEqual(DOC_KINDS, ['Reference', 'Onboarding', 'Work Log', 'Operator Prompts']);
+});
+
+test('Operator Prompts: each thread\'s own file is grouped under its own kind and dated, newest first after the Work Log (SP-293)', () => {
+  assert.deepEqual(docInfo('operator-prompts/2026-11-08-moving-off-clickup.md'), { kind: 'Operator Prompts', date: '2026-11-08' });
+  const rows = docRows([
+    { path: 'operator-prompts/2026-11-08-older.md', title: 'Older thread' },
+    { path: 'OPERATOR_PROMPTS.md', title: 'Operator prompts' },
+    { path: 'work-log/2026-11-01-entry.md', title: 'Entry' },
+    { path: 'operator-prompts/2026-11-11-newer.md', title: 'Newer thread' },
+  ]);
+  assert.deepEqual(rows.map((r) => r.path), ['OPERATOR_PROMPTS.md', 'work-log/2026-11-01-entry.md',
+    'operator-prompts/2026-11-11-newer.md', 'operator-prompts/2026-11-08-older.md']);
+  assert.deepEqual(filterDocs(rows, { kind: 'Operator Prompts' }).map((r) => r.title), ['Newer thread', 'Older thread']);
+  const html = renderDocumentation(rows, (p) => `/docs/spirality/${p}`);
+  assert.match(html, /<option value="Operator Prompts">Operator Prompts<\/option>/);
+  assert.match(html, /2026-11-11-newer\.md">Newer thread<\/a><\/td>\s*<td class="kind">Operator Prompts<\/td>\s*<td class="date">Nov 11, 2026<\/td>/);
 });
 
 const DOCS = [
@@ -4216,4 +5230,883 @@ test('the Docs page puts Reference Docs and Work Log last in the right column, w
   assert.match(wire, /sortDocs\(filterDocs\(rows, \{ kind: kind\.value, text: search\.value \}\), sort\)/, 'both filters together, then the sort');
   assert.match(wire, /sort = nextSort\(sort, button\.dataset\.sort\);/, 'a second click reverses it');
   assert.match(wire, /count\.textContent = docCountLine\(shown\.length, rows\.length\);/, 'the count line is text, matching the rows shown');
+});
+
+test('npm run clickup -- pause-check: exit 0 running, 3 paused naming who and when, 3 on a failed read or a lane with no switch, 2 with no lane (SP-237)', async () => {
+  const f = await fixture();
+  try {
+    const running = await f.door('alpha', 'pause-check', '--lane', 'loop-build');
+    assert.equal(running.code, 0, running.err);
+    assert.equal(running.out.trim(), 'running — neither the whole pipeline nor loop-build is paused');
+
+    f.store.setPipelineSetting({ project: 'alpha', setting: 'paused.loop-build', value: 'on', actor: f.operator.id });
+    const lane = await f.door('alpha', 'pause-check', '--lane', 'loop-build');
+    assert.equal(lane.code, 3, lane.err);
+    assert.match(lane.out.trim(), /^paused by Dane at [A-Z][a-z]{2} \d{1,2}, \d{4}, \d{1,2}:\d\d [AP]M M[SD]T — not starting \/loop-build \(loop-build is paused/);
+    const other = await f.door('alpha', 'pause-check', '--lane', 'loop-review');
+    assert.equal(other.code, 0, 'the other lanes run as normal');
+
+    f.store.setPipelineSetting({ project: 'alpha', setting: 'paused', value: 'on', actor: f.operator.id });
+    for (const l of ['loop-intake', 'loop-review', 'relay']) {
+      const r = await f.door('alpha', 'pause-check', '--lane', l);
+      assert.equal(r.code, 3, l);
+      assert.match(r.out, /the whole pipeline is paused/);
+    }
+
+    // Resume: the lane may start again.
+    f.store.setPipelineSetting({ project: 'alpha', setting: 'paused', value: 'off', actor: f.operator.id });
+    f.store.setPipelineSetting({ project: 'alpha', setting: 'paused.loop-build', value: 'off', actor: f.operator.id });
+    assert.equal((await f.door('alpha', 'pause-check', '--lane', 'loop-build')).code, 0);
+
+    const unreadable = await f.door('nope', 'pause-check', '--lane', 'loop-build');
+    assert.equal(unreadable.code, 3, 'settings that cannot be read count as paused');
+    assert.match(unreadable.out, /^could not read the pipeline settings, so \/loop-build is treated as PAUSED and not starting \(it fails safe[^)]*\)\. Reason: HTTP 404/);
+
+    // A lane with no switch of its own fails safe, naming the missing setting; no lane at all is refused.
+    const unknown = await f.door('alpha', 'pause-check', '--lane', 'loop-nonsense');
+    assert.equal(unknown.code, 3);
+    assert.match(unknown.out, /has no "paused\.loop-nonsense" setting/);
+    const bad = await f.door('alpha', 'pause-check');
+    assert.equal(bad.code, 2);
+    assert.match(bad.err, /--lane names the lane asking/);
+  } finally { await f.cleanup(); }
+});
+
+test('the Pipeline Status pod, its label and its dialog show a paused stage as Paused, never due, and a running one as finishing (SP-237)', () => {
+  const timeOf = (iso) => iso.slice(11, 16);
+  const now = Date.parse('2026-11-13T15:00:00Z');
+  const answer = { stages: [
+    { name: 'Relay', job: 'relay', logged: true, running: false, nextDue: '2026-11-13T14:00:00Z', paused: 'pipeline' },
+    { name: 'Build', job: 'loop-build', logged: true, running: true, lastStart: '2026-11-13T14:50:00Z', nextDue: null, paused: 'lane' },
+    { name: 'Review', job: 'loop-review', logged: true, running: false, nextDue: '2026-11-13T15:01:00Z', paused: null },
+  ] };
+  const pod = renderPipelinePod(answer, timeOf, now);
+  assert.match(pod, /<span class="stage paused" title="Relay: the whole pipeline is paused on the Settings page">Relay<\/span><span class="time paused"[^>]*>Paused<\/span>/);
+  assert.doesNotMatch(pod, /Relay: next pass due/, 'a paused stage is never due');
+  assert.match(pod, /<span class="time running" title="Build: a pass is running now; Build is paused, so it finishes and no new one starts">running<\/span>/);
+  assert.match(pod, /<span class="time soon"[^>]*>15:01<\/span>/, 'an unpaused stage is unchanged');
+  assert.equal(pipelinePodLabel(answer, timeOf), 'Pipeline Status: Relay paused, Build running, Review 15:01');
+  const details = renderPipelineDetails(answer, timeOf);
+  assert.match(details, /<th scope="row">Relay<\/th><td>Paused \(the whole pipeline is paused\)<\/td>/);
+  assert.match(details, /Running now, since 14:50 \(paused: this pass finishes, no new one starts\)/);
+  const css = readFileSync(WEB('app.css'), 'utf8');
+  assert.match(css, /\.toolbar \.pipeline-pod \.time\.paused \{/);
+});
+
+test('GET /pipeline-controls lists the tickets in flight, and the Settings page says Draining while a pause waits on them, then Paused: nothing in flight (SP-237)', async () => {
+  const f = await fixture();
+  try {
+    const { body } = await f.call('GET', '/pipeline-controls/alpha');
+    const building = f.store.listTickets('alpha').filter((t) => t.status === 'building').map((t) => t.id);
+    assert.deepEqual(body.inFlight.filter((t) => t.kind === 'a build').map((t) => t.id), building);
+    assert.ok(body.inFlight.every((t) => ['a build', 'a review'].includes(t.kind)));
+
+    const view = (on, inFlight) => ({
+      controls: ['paused', 'paused.loop-build', 'paused.loop-review', 'paused.loop-intake'].map((key) => ({ key, group: 'pause', value: on.includes(key) ? 'on' : 'off' })),
+      inFlight,
+    });
+    const build = { id: 'AL-7', name: 'Build <it>', status: 'building', kind: 'a build' };
+    const review = { id: 'AL-9', name: 'Check it', status: 'in review', kind: 'a review' };
+    assert.equal(drainLine(view([], [build])), '', 'nothing paused, nothing said');
+    const whole = drainLine(view(['paused'], [build, review]));
+    assert.match(whole, /<div class="drain draining"><p>Draining: 2 ticket\(s\) still finishing\.<\/p>/);
+    assert.match(whole, /<a href="\/t\/AL-7">AL-7<\/a> Build &lt;it&gt; <span class="quiet">\(a build\)<\/span>/);
+    // One lane waits only on its own kind of pass; intake has none to wait on.
+    assert.match(drainLine(view(['paused.loop-review'], [build, review])), /Draining: 1 ticket\(s\)[\s\S]*AL-9/);
+    assert.equal(drainLine(view(['paused.loop-intake'], [build, review])), '<p class="drain paused">Paused: nothing in flight.</p>');
+    assert.equal(drainLine(view(['paused'], [])), '<p class="drain paused">Paused: nothing in flight.</p>');
+
+    // On the page, under the pause switches, once a switch is on.
+    const saved = await f.call('PUT', '/pipeline-controls/alpha', { body: { setting: 'paused', value: 'on' } });
+    assert.equal(saved.status, 200);
+    const html = renderPipelineControls(saved.body);
+    assert.match(html, /<h4>Pause and Resume<\/h4>[\s\S]*?<div class="drain-box">(<div class="drain draining">|<p class="drain paused">)[\s\S]*?<h4>Work-in-Progress Cap<\/h4>/);
+    // The page reads the drain line again while it drains, redrawing only that line.
+    const app = readFileSync(WEB('app.mjs'), 'utf8');
+    assert.match(app, /if \(!box\.querySelector\('\.drain\.draining'\)\) return;/);
+    assert.match(app, /if \(slot\) slot\.innerHTML = drainLine\(v\);/);
+  } finally { await f.cleanup(); }
+});
+
+test('GET /pipeline marks the stages paused from the project\'s controls (SP-237)', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tracker-pipeline-paused-'));
+  const store = openStore(join(dir, 'tracker.db'), { now: tickingClock() });
+  const seed = seedDemo(store, { operatorName: 'Dane', clock: tickingClock() });
+  const server = await startServer({ store, port: 0, pipeline: { logDir: dir, slug: 'alpha' } });
+  try {
+    store.setPipelineSetting({ project: 'alpha', setting: 'paused.relay', value: 'on', actor: seed.operator.id });
+    const res = await fetch(`http://127.0.0.1:${server.address().port}/pipeline`, { headers: { authorization: `Bearer ${seed.token}` } });
+    const body = await res.json();
+    assert.equal(res.status, 200);
+    assert.deepEqual(Object.fromEntries(body.stages.map((s) => [s.job, s.paused])), { relay: 'lane', 'loop-build': null, 'loop-review': null, 'loop-intake': null });
+  } finally {
+    await new Promise((r) => server.close(r));
+    store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── The Console view (SP-233) ────────────────────────────────────────────────
+
+const CONSOLE_NOW = Date.parse('2026-11-12T18:00:00.000Z');
+const consoleTicket = (over = {}) => ({
+  id: 'AL-7', project: 'alpha', name: 'Fix the thing', status: 'Queued', tags: [], priority: null, assignee: null,
+  updatedAt: '2026-11-12T15:00:00.000Z', stageSince: '2026-11-12T15:00:00.000Z',
+  waitingOnOperator: false, answerIn: false, pullRequest: null,
+  nextChange: { kind: 'lane', lane: 'Build', job: 'loop-build', running: false, due: '2026-11-12T18:12:00.000Z' },
+  ...over,
+});
+const ALPHA = { slug: 'alpha', name: 'Alpha', prefix: 'AL', logo: 'https://alpha.example/logo.png' };
+const BETA = { slug: 'beta', name: 'Beta', prefix: 'BE', logo: null };
+
+test('a Console tile for a project with a logo: the logo, the number over it, stage, next change and time in stage, a link to the ticket', () => {
+  const html = renderConsoleTile(consoleTicket(), ALPHA, CONSOLE_NOW);
+  assert.match(html, /^<a class="tile" href="\/t\/AL-7" title="AL-7: Fix the thing"/);
+  assert.match(html, /<img class="tile-logo" src="https:\/\/alpha\.example\/logo\.png" alt="" referrerpolicy="no-referrer">/);
+  assert.doesNotMatch(html, /tile-prefix/);
+  assert.match(html, /<span class="tile-number">AL-7<\/span>/);
+  assert.match(html, /<span class="fact stage" data-stage="Queued">Queued<\/span>/);
+  assert.match(html, /<span class="fact next" title="Build&#39;s next pass is due Nov 12, 2026, 11:12 AM MST">in 12 min<\/span>/);
+  assert.match(html, /<span class="fact age" title="In Queued for 3h">3h<\/span>/);
+});
+
+test('a Console tile for a project with no logo shows its ticket prefix in large letters; a logo that is not a web address is not drawn', () => {
+  const html = renderConsoleTile(consoleTicket({ id: 'BE-2', project: 'beta' }), BETA, CONSOLE_NOW);
+  assert.match(html, /<span class="tile-prefix" aria-hidden="true">BE<\/span>/);
+  assert.doesNotMatch(html, /<img/);
+  const odd = renderConsoleTile(consoleTicket(), { ...ALPHA, logo: 'javascript:alert(1)' }, CONSOLE_NOW);
+  assert.doesNotMatch(odd, /<img|javascript:/);
+  assert.match(odd, /<span class="tile-prefix" aria-hidden="true">AL<\/span>/);
+  // No project in the answer: the prefix is read off the ticket number.
+  assert.match(renderConsoleTile(consoleTicket({ id: 'ZZ-1' }), null, CONSOLE_NOW), /<span class="tile-prefix" aria-hidden="true">ZZ<\/span>/);
+});
+
+test('a Console tile waiting on the operator is ringed, and its next change is "You"', () => {
+  const his = renderConsoleTile(consoleTicket({ status: 'Needs your input', waitingOnOperator: true, nextChange: { kind: 'operator' } }), ALPHA, CONSOLE_NOW);
+  assert.match(his, /^<a class="tile waiting"/);
+  assert.match(his, /<span class="fact next" title="Your move: no lane acts on it until you do">You<\/span>/);
+  assert.match(his, /waiting on you\.">/);
+  assert.equal(consoleWaiting(consoleTicket({ answerIn: true })), true, 'an answer of his that is in');
+  assert.equal(consoleWaiting(consoleTicket({ nextChange: { kind: 'operator' } })), true, 'one of his statuses');
+  assert.equal(consoleWaiting(consoleTicket()), false);
+  assert.match(renderConsoleTile(consoleTicket(), ALPHA, CONSOLE_NOW), /^<a class="tile" /);
+});
+
+test('a Console tile whose next change is unknown shows a dash; Building and a running lane show "Now"', () => {
+  for (const nextChange of [null, undefined, { kind: 'lane', due: null }, { kind: 'lane', due: 'not a time' }, { kind: 'odd' }]) {
+    assert.deepEqual(consoleNextChange(nextChange, CONSOLE_NOW), { text: CONSOLE_UNKNOWN, title: 'When the next pass picks it up is not known' });
+  }
+  assert.match(renderConsoleTile(consoleTicket({ nextChange: null }), ALPHA, CONSOLE_NOW), /<span class="fact next" title="When the next pass picks it up is not known">—<\/span>/);
+  assert.equal(consoleNextChange({ kind: 'running', lane: 'Build', job: 'loop-build' }, CONSOLE_NOW).text, 'Now');
+  assert.equal(consoleNextChange({ kind: 'lane', lane: 'Review', running: true, due: null }, CONSOLE_NOW).text, 'Now');
+  assert.equal(consoleNextChange({ kind: 'lane', lane: 'Review', running: false, due: '2026-11-12T17:59:00.000Z' }, CONSOLE_NOW).text, 'Now', 'a pass already due');
+  assert.equal(consoleNextChange({ kind: 'lane', lane: 'Review', running: false, due: '2026-11-12T20:10:00.000Z' }, CONSOLE_NOW).text, 'in 2 h');
+});
+
+test('a Console next change counts whole hours down the way it counts minutes, never rounding up', () => {
+  const at = (minutes) => consoleNextChange({ kind: 'lane', lane: 'Review', running: false, due: new Date(CONSOLE_NOW + minutes * 60_000).toISOString() }, CONSOLE_NOW).text;
+  assert.equal(at(59), 'in 59 min');
+  assert.equal(at(60), 'in 1 h');
+  assert.equal(at(89), 'in 1 h', 'not "in 1 h" at 89 and "in 2 h" at 90');
+  assert.equal(at(90), 'in 1 h');
+  assert.equal(at(119), 'in 1 h');
+  assert.equal(at(120), 'in 2 h');
+});
+
+test('time in stage reads short: minutes, hours under two days, then days; an unreadable time is a dash', () => {
+  assert.equal(consoleAge('2026-11-12T17:59:30.000Z', CONSOLE_NOW), '0m');
+  assert.equal(consoleAge('2026-11-12T17:15:00.000Z', CONSOLE_NOW), '45m');
+  assert.equal(consoleAge('2026-11-11T18:00:00.000Z', CONSOLE_NOW), '24h');
+  assert.equal(consoleAge('2026-11-09T18:00:00.000Z', CONSOLE_NOW), '3d');
+  assert.equal(consoleAge(null, CONSOLE_NOW), CONSOLE_UNKNOWN);
+});
+
+test('a Console tile escapes every piece of ticket and project text', () => {
+  const html = renderConsoleTile(consoleTicket({ id: 'AL-<b>', name: '<script>alert(1)</script> "x"', status: '<i>Queued</i>' }), { ...ALPHA, prefix: '<u>', logo: 'https://a.example/x.png?"><script>' }, CONSOLE_NOW);
+  assert.doesNotMatch(html, /<script>|<b>|<i>|<u>|"><script/);
+  assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt; &quot;x&quot;/);
+  assert.match(html, /href="\/t\/AL-%3Cb%3E"/);
+});
+
+test('the Console groups tiles by stage in the order given, shows an empty stage\'s heading, never draws Live, and never drops a ticket', () => {
+  const stages = ['Requested', 'Rework', 'Queued', 'Building', 'In review', 'Needs your input', 'Ready to launch', 'Live'];
+  const answer = {
+    projects: [ALPHA, BETA],
+    tickets: [
+      consoleTicket({ id: 'AL-1', status: 'Queued' }),
+      consoleTicket({ id: 'BE-1', project: 'beta', status: 'Needs your input', nextChange: { kind: 'operator' } }),
+      consoleTicket({ id: 'AL-2', status: 'Odd' }),
+    ],
+  };
+  const html = renderConsole(answer, stages, CONSOLE_NOW);
+  const order = [...html.matchAll(/<section class="console-stage" data-stage="([^"]+)">/g)].map((m) => m[1]);
+  assert.deepEqual(order, ['Requested', 'Rework', 'Queued', 'Building', 'In review', 'Needs your input', 'Ready to launch', 'Odd']);
+  assert.match(html, /data-stage="Requested"><h2><span class="stage-name">Requested<\/span><span class="count quiet">0<\/span><\/h2><div class="tiles"><\/div>/);
+  const queued = html.slice(html.indexOf('data-stage="Queued">'), html.indexOf('data-stage="Building">'));
+  assert.match(queued, /href="\/t\/AL-1"/);
+  assert.match(queued, /tile-logo/);
+  const his = html.slice(html.indexOf('<section class="console-stage" data-stage="Needs your input">'), html.indexOf('<section class="console-stage" data-stage="Ready to launch">'));
+  assert.match(his, /<a class="tile waiting" href="\/t\/BE-1"/);
+  assert.match(his, /tile-prefix" aria-hidden="true">BE</);
+  // No stage list (it could not be read): the tickets' own stages, in the answer's order.
+  const bare = renderConsole(answer, [], CONSOLE_NOW);
+  assert.deepEqual([...bare.matchAll(/<section class="console-stage" data-stage="([^"]+)">/g)].map((m) => m[1]), ['Queued', 'Needs your input', 'Odd']);
+  assert.equal(renderConsole(null, [], CONSOLE_NOW), '<div class="console"></div>');
+});
+
+test('the Console page: /in-flight and the stage colours drawn, a Console link beside Board and List, remembered for "Tasks", redrawn every beat', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const draw = /async function drawConsole\(\) \{([\s\S]*?)\n\}/.exec(app)[1];
+  assert.match(draw, /api\('GET', '\/in-flight'\)/);
+  assert.match(draw, /api\('GET', '\/stage-colours'\)/);
+  assert.match(draw, /localStorage\.setItem\(VIEW_KEY, 'console'\)/);
+  assert.match(draw, /renderConsole\(answer, stages\)/);
+  assert.match(draw, /viewSwitch\(slug, 'console'\)/);
+  // The view switch names all three in Title Case, the current one marked.
+  const sw = /function viewSwitch\(slug, current\) \{([\s\S]*?)\n\}/.exec(app)[1];
+  assert.match(sw, /\['board', 'Board', [^\]]+\], \['list', 'List', [^\]]+\], \['console', 'Console', '\/console'\]/);
+  assert.match(sw, /v === current \? ' class="current" aria-current="page"' : ''/);
+  assert.match(/async function drawProject\(([^)]*)\) \{([\s\S]*?)\n\}/.exec(app)[2], /\$\{viewSwitch\(board\.project, view\)\}/);
+  // "Tasks" in the header reopens the Console when it was chosen last.
+  assert.match(app, /await drawTasks\(tasks \? savedTasksView\(\) : project\[1\]\);/);
+  assert.match(/async function drawTasks\(view, opts = \{\}\) \{([\s\S]*?)\n\}/.exec(app)[1], /if \(view === 'console'\) \{\s*history\.replaceState\(null, '', '\/console'\);\s*return drawConsole\(\);/);
+  // The minute's beat draws it again whether or not the answer changed, so "in 12 min" counts down.
+  assert.match(app, /lastDrawn = \{ address: here\(\), reads, ticking: true \}/);
+  assert.match(app, /const changed = drawn\.ticking \|\|/);
+  // That beat does not read every answer first only to throw it away: one read of /in-flight a minute, not two.
+  const refresh = /async function refreshPage\(\) \{[\s\S]*?\n\}/.exec(app)[0];
+  assert.match(refresh, /const now = drawn\.ticking \? \[\] : await Promise\.all\(/);
+});
+
+test('the Console\'s minute redraw keeps how far across he has scrolled', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  assert.match(app, /const SIDEWAYS = '\.console';/);
+  const place = /function keepPlace\(\) \{[\s\S]*?\n\}/.exec(app)[0];
+  // Read before the redraw, put back on the new columns before the page is shown.
+  assert.match(place, /const across = \[\.\.\.main\.querySelectorAll\(SIDEWAYS\)\]\.map\(\(el\) => el\.scrollLeft\);/);
+  assert.match(place, /restore\(\) \{[\s\S]*\[\.\.\.main\.querySelectorAll\(SIDEWAYS\)\]\.forEach\(\(el, i\) => \{ if \(i < across\.length\) el\.scrollLeft = across\[i\]; \}\);[\s\S]*window\.scrollTo\(0, y\);/);
+  // The Console's columns are the area that scrolls sideways.
+  assert.match(renderConsole({ tickets: [], projects: [] }, ['Queued']), /^<div class="console">/);
+  assert.match(readFileSync(WEB('app.css'), 'utf8'), /\.console \{[^}]*overflow-x: auto/);
+});
+
+test('beside the work-in-progress cap: the count in flight now, marked full at the cap, nothing when unknown (SP-238)', () => {
+  const cap = { key: 'wip-cap', value: '3' };
+  assert.equal(capInFlightText(cap, { count: 2, ids: ['SP-1', 'SP-2'] }), '<span class="in-flight">2 in flight now.</span>');
+  assert.equal(capInFlightText(cap, { count: 3, ids: ['SP-1', 'SP-2', 'SP-3'] }),
+    '<span class="in-flight full">3 in flight now: full, loop-build is not claiming new tickets.</span>');
+  assert.equal(capInFlightText(cap, undefined), '');
+  assert.equal(capInFlightText(cap, { count: null }), '');
+});
+
+// ── The Console's feature colours (SP-234) ──────────────────────────────────
+
+test('a ticket\'s feature is its first tag, passing over request-form; no tag, or only request-form, is no feature', () => {
+  assert.equal(consoleFeature(consoleTicket({ tags: ['tracker', 'tracker-5'] })), 'tracker');
+  assert.equal(consoleFeature(consoleTicket({ tags: ['request-form', 'console'] })), 'console');
+  assert.equal(consoleFeature(consoleTicket({ tags: ['request-form'] })), null);
+  assert.equal(consoleFeature(consoleTicket({ tags: [] })), null);
+  assert.equal(consoleFeature(consoleTicket({ tags: null })), null);
+  assert.equal(consoleFeature(consoleTicket({ tags: ['', '  '] })), null);
+});
+
+test('a feature\'s colour is a pure function of its tag: the same on every call, always a palette colour, and different tags usually differ', () => {
+  for (const tag of ['tracker', 'console', 'onboarding', 'ünïcode', '']) {
+    const i = featureColourIndex(tag);
+    assert.ok(Number.isInteger(i) && i >= 0 && i < FEATURE_PALETTE.length, tag);
+    assert.equal(featureColourIndex(tag), i, `${tag} keeps its colour`);
+  }
+  // Fixed values, so a change to the rule (which would recolour every feature) is a decision, not an accident.
+  assert.deepEqual(['tracker', 'console', 'onboarding'].map(featureColourIndex), [5, 8, 6]);
+  const many = Array.from({ length: 200 }, (_, i) => featureColourIndex(`feature-${i}`));
+  assert.equal(new Set(many).size, FEATURE_PALETTE.length, 'the rule uses every colour');
+});
+
+test('two tiles with the same feature share a colour class; a tile with no feature keeps the plain tile', () => {
+  const a = renderConsoleTile(consoleTicket({ id: 'AL-1', tags: ['tracker'] }), ALPHA, CONSOLE_NOW);
+  const b = renderConsoleTile(consoleTicket({ id: 'BE-1', project: 'beta', tags: ['tracker', 'other'] }), BETA, CONSOLE_NOW);
+  const n = featureColourIndex('tracker');
+  for (const html of [a, b]) {
+    assert.match(html, new RegExp(`^<a class="tile feature feature-${n}" data-feature="tracker" `));
+    assert.match(html, /aria-label="[^"]*; feature tracker\."/);
+  }
+  assert.match(renderConsoleTile(consoleTicket({ tags: ['request-form'] }), ALPHA, CONSOLE_NOW), /^<a class="tile" href=/);
+  assert.match(renderConsoleTile(consoleTicket({ tags: ['x'], waitingOnOperator: true }), ALPHA, CONSOLE_NOW), /^<a class="tile feature feature-\d+ waiting" data-feature="x" /);
+  assert.match(renderConsoleTile(consoleTicket({ tags: ['<b>"'] }), ALPHA, CONSOLE_NOW), /data-feature="&lt;b&gt;&quot;"/);
+});
+
+test('every feature colour has its rule in app.css, in palette order, and the tile\'s text reads on it', () => {
+  const css = drawnCss();
+  const rules = [...css.matchAll(/^\.feature-(\d+) \{ --feature: (#[0-9a-f]{6}); \}$/gm)].map((m) => [Number(m[1]), m[2]]);
+  assert.deepEqual(rules, FEATURE_PALETTE.map((c, i) => [i, c]));
+  assert.match(css, /\.tile\.feature \{ background: var\(--feature\); \}/);
+  assert.match(css, /\.tile\.dimmed \{ opacity: [0-9.]+; \}/);
+  const ink = /--ink-primary: (#[0-9a-f]{6})/.exec(css)[1];
+  for (const colour of FEATURE_PALETTE) assert.ok(contrast(ink, colour) >= 4.5, `${ink} reads on ${colour}`);
+  // The facts strip stays white, so the stage colours and the quiet age read as before.
+  assert.match(css, /\.tile\.feature \.tile-facts \{ background: #fff(?:fff)?; \}/);
+});
+
+test('the Features key lists each feature on screen with its count, most first, and nothing when there is none', () => {
+  const tickets = [
+    consoleTicket({ id: 'AL-1', tags: ['console'] }),
+    consoleTicket({ id: 'AL-2', tags: ['tracker'] }),
+    consoleTicket({ id: 'AL-3', tags: ['tracker'] }),
+    consoleTicket({ id: 'AL-4', tags: ['request-form'] }),
+    consoleTicket({ id: 'AL-5', tags: ['alpha'] }),
+  ];
+  const key = renderFeatureKey(tickets);
+  assert.match(key, /^<div class="feature-key" role="group" aria-label="Features"><span class="key-title">Features<\/span>/);
+  const listed = [...key.matchAll(/data-feature="([^"]+)" aria-pressed="false"[^>]*><span class="swatch" aria-hidden="true"><\/span>[^<]+<span class="count">(\d+)<\/span>/g)].map((m) => [m[1], Number(m[2])]);
+  assert.deepEqual(listed, [['tracker', 2], ['alpha', 1], ['console', 1]]);
+  assert.match(key, new RegExp(`class="feature-pick feature-${featureColourIndex('tracker')}" data-feature="tracker"`));
+  assert.match(renderFeatureKey(tickets, 'tracker'), /data-feature="tracker" aria-pressed="true"/);
+  assert.equal(renderFeatureKey([consoleTicket({ tags: ['request-form'] })]), '');
+  assert.equal(renderFeatureKey(null), '');
+  assert.match(renderFeatureKey([consoleTicket({ tags: ['<i>'] })]), /data-feature="&lt;i&gt;"[^>]*>.*&lt;i&gt;<span class="count">1/);
+  // The Console draws the key above its stages.
+  assert.match(renderConsole({ tickets, projects: [ALPHA] }, ['Queued'], CONSOLE_NOW), /^<div class="feature-key"[\s\S]*<\/div><div class="console">/);
+});
+
+test('a click on a feature in the key dims every other tile, a second click shows them all, and the minute redraw keeps the pick', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const draw = /async function drawConsole\(\) \{([\s\S]*?)\n\}/.exec(app)[1];
+  assert.match(draw, /pickedFeature = pickedFeature === b\.dataset\.feature \? null : b\.dataset\.feature;/);
+  assert.match(draw, /showFeaturePick\(\);\s*putTrail/, 'the pick is put back after every draw');
+  const show = /function showFeaturePick\(\) \{([\s\S]*?)\n\}/.exec(app)[1];
+  assert.match(show, /tile\.classList\.toggle\('dimmed', pickedFeature !== null && tile\.dataset\.feature !== pickedFeature\)/);
+  assert.match(show, /b\.setAttribute\('aria-pressed', String\(b\.dataset\.feature === pickedFeature\)\)/);
+  assert.match(show, /if \(!picks\.some\(\(b\) => b\.dataset\.feature === pickedFeature\)\) pickedFeature = null;/);
+});
+
+// ── Topics (SP-243) ─────────────────────────────────────────────────────────
+
+test('Topics in the top menu opens /topics, right after Tasks, and is marked current on its own page (SP-243)', () => {
+  const html = readFileSync(WEB('index.html'), 'utf8');
+  assert.match(html, /<a href="\/tasks" data-nav="tasks">Tasks<\/a>\s*<a href="\/topics" data-nav="topics">Topics<\/a>/);
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  assert.match(app, /const topicsPage = location\.pathname === '\/topics';/);
+  assert.match(app, /topicsPage \? 'topics' :/, 'marked current');
+  assert.match(app, /\} else if \(topicsPage\) \{\s*await drawTopics\(\);/);
+});
+
+test('the Topics page lists the picked project\'s topics newest first, every name escaped, says "No topics yet" when there are none, and has a Create Topic form (SP-243)', () => {
+  const projects = [{ slug: 'alpha', name: 'Alpha <One>' }, { slug: 'beta', name: 'Beta' }];
+  const project = projects[0];
+  const html = renderTopics({ projects, project, topics: [
+    { id: 2, name: 'Login <b>', description: 'Signing "in"', createdByName: 'Dane <D>', createdAt: '2026-11-13T12:00:00Z' },
+    { id: 1, name: 'Billing', description: '', createdByName: null, createdAt: '2026-11-12T12:00:00Z' },
+  ] }, { timeOf: (iso) => `at ${iso}` });
+  assert.match(html, /<h1>Topics<\/h1>/);
+  for (const heading of ['Name', 'Description', 'Created By', 'Created']) assert.match(html, new RegExp(`<th>${heading}</th>`), heading);
+  assert.match(html, /<td class="name">Login &lt;b&gt;<\/td>/);
+  assert.match(html, /<td class="about">Signing &quot;in&quot;<\/td>/);
+  assert.match(html, /<td class="by">Dane &lt;D&gt;<\/td>/);
+  assert.match(html, /<td class="when">at 2026-11-13T12:00:00Z<\/td>/);
+  assert.ok(html.indexOf('data-topic="2"') < html.indexOf('data-topic="1"'), 'in the order the server lists them (newest first)');
+  assert.match(html, /<option value="alpha" selected>Alpha &lt;One&gt;<\/option>/, 'the picked project is chosen in the picker');
+  assert.match(html, /<summary><span class="fold" aria-hidden="true"><\/span>Add Topic<\/summary>/);
+  assert.match(html, /<form class="create-topic">[\s\S]*<label for="topic-name">Name<\/label>[\s\S]*<label for="topic-description">Description<\/label>[\s\S]*<button type="submit">Create Topic<\/button>/);
+  assert.doesNotMatch(html, /<b>|<One>|<D>/, 'nothing unescaped');
+  assert.doesNotMatch(html, /No topics yet/);
+  const empty = renderTopics({ projects, project, topics: [] }, { timeOf: String });
+  assert.match(empty, /No topics yet\./);
+  assert.doesNotMatch(empty, /<table/);
+  assert.match(empty, /Create Topic<\/button>/, 'an empty project can still create one');
+  assert.match(renderTopics({ projects, project, topics: [] }, { timeOf: String, problem: 'Not created: a topic needs a name.' }), /<p class="note topic-note error" role="status">Not created: a topic needs a name\.<\/p>/);
+});
+
+test('the Topics page is two equal halves, Topics left and Tags right, stacked Topics first on a narrow screen (SP-307)', () => {
+  const projects = [{ slug: 'alpha', name: 'Alpha' }];
+  const html = renderTopics({ projects, project: projects[0], topics: [], tags: [] }, { timeOf: String });
+  assert.match(html, /<div class="topics-columns">\s*<section class="topics-half"[\s\S]*<\/section>\s*<section class="tags-half"[\s\S]*<\/section>\s*<\/div>$/, 'Topics first, then Tags');
+  assert.match(html, /<h2 id="topics-title">Topics<\/h2>/);
+  assert.match(html, /<h2 id="tags-title">Tags<\/h2>/);
+  const css = readFileSync(WEB('app.css'), 'utf8');
+  assert.match(css, /\.topics-columns \{ display: grid; grid-template-columns: minmax\(0, 1fr\) minmax\(0, 1fr\);/, 'equal halves');
+  assert.match(css, /@media \(max-width: 800px\) \{ \.topics-columns \{ grid-template-columns: minmax\(0, 1fr\); \} \}/, 'stacked when narrow');
+});
+
+test('Add Topic is a colex at the top of the Topics half, closed on arrival and drawn open after a refused create (SP-307)', () => {
+  const projects = [{ slug: 'alpha', name: 'Alpha' }];
+  const topics = [{ id: 1, name: 'Billing', description: '', createdByName: 'Dane', createdAt: 'x' }];
+  const html = renderTopics({ projects, project: projects[0], topics }, { timeOf: String });
+  const half = html.slice(html.indexOf('<section class="topics-half"'), html.indexOf('<section class="tags-half"'));
+  assert.match(half, /<details class="colex add-topic">\s*<summary>[\s\S]*Add Topic<\/summary>\s*<form class="create-topic">[\s\S]*<\/form>\s*<\/details>/, 'closed, holding the form');
+  assert.ok(half.indexOf('<details class="colex add-topic"') < half.indexOf('<h2 id="topics-title">'), 'the form comes before the list');
+  assert.ok(half.indexOf('<h2 id="topics-title">') < half.indexOf('<table class="projects topic-list">'));
+  assert.doesNotMatch(html, /<h2>Create Topic<\/h2>/, 'no separate Create Topic heading any more');
+  const refused = renderTopics({ projects, project: projects[0], topics }, { timeOf: String, problem: 'Not created: no.' });
+  assert.match(refused, /<details class="colex add-topic" open>/);
+  const css = readFileSync(WEB('app.css'), 'utf8');
+  assert.match(css, /details\.colex\[open\] > summary \.fold::before \{ content: '▾'; \}/);
+});
+
+test('the Tags half lists each tag on the project\'s tasks once, alphabetically, with its task count, every tag escaped (SP-307)', () => {
+  const board = { columns: [
+    { tickets: [{ tags: ['zeta', 'alpha'] }, { tags: ['alpha', 'alpha'] }, { tags: [] }] },
+    { tickets: [{ tags: ['Beta', '<b>'] }, { tags: [null, ''] }, {}] },
+  ] };
+  const tags = projectTagCounts(board);
+  assert.deepEqual(tags, [{ tag: '<b>', count: 1 }, { tag: 'alpha', count: 2 }, { tag: 'Beta', count: 1 }, { tag: 'zeta', count: 1 }]);
+  assert.deepEqual(tags.map((t) => t.tag), projectTags(board), 'the same list and order as the List view\'s Add Tag dropdown');
+  for (const bad of [null, undefined, {}, { columns: 'x' }]) assert.deepEqual(projectTagCounts(bad), []);
+  const projects = [{ slug: 'alpha', name: 'Alpha' }];
+  const html = renderTopics({ projects, project: projects[0], topics: [], tags }, { timeOf: String });
+  const half = html.slice(html.indexOf('<section class="tags-half"'));
+  for (const heading of ['Tag', 'Tasks']) assert.match(half, new RegExp(`<th>${heading}</th>`), heading);
+  assert.match(half, /<tr data-tag="alpha">\s*<td class="name"><span class="tag">alpha<\/span><\/td>\s*<td class="count">2 tasks<\/td><\/tr>/);
+  assert.match(half, /<td class="name"><span class="tag">&lt;b&gt;<\/span><\/td>\s*<td class="count">1 task<\/td>/);
+  assert.doesNotMatch(half, /<b>/, 'nothing unescaped');
+  assert.ok(half.indexOf('data-tag="alpha"') < half.indexOf('data-tag="Beta"') && half.indexOf('data-tag="Beta"') < half.indexOf('data-tag="zeta"'), 'alphabetical');
+  assert.match(renderTopics({ projects, project: projects[0], topics: [], tags: [] }, { timeOf: String }), /<p class="quiet no-tags">No tags yet\.<\/p>/);
+  assert.match(renderTopics({ projects, project: projects[0], topics: [], tags: null }, { timeOf: String }), /<p class="note error no-tags">The tags could not be read\./, 'an unread board says so, never "No tags yet"');
+});
+
+test('the Topics page reads the project\'s board for its tags, and an unread board leaves the topics working (SP-307)', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const draw = app.slice(app.indexOf('async function drawTopics'), app.indexOf('/**\n * The Docs page in two columns'));
+  assert.match(draw, /api\('GET', `\/projects\/\$\{encodeURIComponent\(project\.slug\)\}\/board`\)\.then\(projectTagCounts, \(err\) => \{ if \(err instanceof SignedOut\) throw err; return null; \}\)/);
+  assert.match(draw, /renderTopics\(\{ projects, project, topics, tags \}/);
+});
+
+test('the Topics page refuses a blank name before sending, and says a create worked only when the topic reads back in the list (SP-243)', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const draw = app.slice(app.indexOf('async function drawTopics'), app.indexOf('/**\n * The Docs page in two columns'));
+  assert.match(draw, /if \(!name\) return say\('Not created: a topic needs a name\.', true\);/);
+  assert.ok(draw.indexOf("if (!name)") < draw.indexOf("api('POST', topicsPath"), 'refused before anything is sent');
+  assert.match(draw, /api\('GET', topicsPath, undefined, \{ unrecorded: true \}\)/, 'the list is read back');
+  assert.match(draw, /back\?\.topics\?\.some\(\(t\) => t\.id === made\.id\)/);
+  assert.match(draw, /localStorage\.setItem\(PROJECT_KEY, chosen\.slug\)/, 'picking a project here selects it');
+});
+
+test('Settings is two tabs, each project a box that stays open across a Save, every button one look (SP-289)', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const css = readFileSync(WEB('app.css'), 'utf8');
+  // The menu: Pipeline Controls first (and the default), then Styles; the address names the tab.
+  assert.match(app, /const SETTINGS_TABS = \[\s*\{ id: 'pipeline-controls', title: 'Pipeline Controls' \},\s*\{ id: 'styles', title: 'Styles' \},\s*\];/);
+  assert.match(app, /return SETTINGS_TABS\.some\(\(t\) => t\.id === named\) \? named : SETTINGS_TABS\[0\]\.id;/);
+  assert.match(app, /history\.replaceState\(null, '', `\$\{location\.pathname\}\$\{location\.search\}#\$\{a\.dataset\.tab\}`\);/);
+  // Stage Colours sits in the Styles tab, the projects in Pipeline Controls.
+  const settings = app.slice(app.indexOf('async function drawSettings'), app.indexOf('const SETTINGS_TABS'));
+  const styles = settings.indexOf('<div class="settings-tab" data-tab="styles">');
+  assert.ok(styles > settings.indexOf('<div class="settings-tab" data-tab="pipeline-controls">'));
+  assert.ok(settings.indexOf('<h2>Stage Colours</h2>') > styles);
+  assert.ok(settings.indexOf('<div class="pipeline-controls">') < styles);
+  // A box open before a redraw (a Save, Move to Newest, Roll Back) is drawn open again; a whole-page refresh keeps it by project.
+  assert.match(app, /const open = new Set\(\[\.\.\.box\.querySelectorAll\('details\.pipeline-controls\[open\]'\)\]\.map\(\(d\) => d\.dataset\.project\)\);/);
+  assert.match(app, /renderPipelineControls\(v, notes\.get\(v\.project\.slug\) \?\? \{\}, open\.has\(v\.project\.slug\)\)/);
+  assert.match(app, /d\.dataset\.project \? `project\|\$\{d\.dataset\.project\}`/);
+  // The look: reverse-colour header, 1px border, container corners; buttons in button corners, #000077, bold white; disabled dimmed (SP-320 put the corners on tokens).
+  assert.match(css, /details\.pipeline-controls \{[^}]*border: 1px solid var\(--navy\); border-radius: var\(--radius-container\); overflow: hidden;/);
+  assert.match(css, /details\.pipeline-controls > summary \{[^}]*background: var\(--navy\); color: var\(--btn-flat-ink\); font-weight: 700;/);
+  assert.match(css, /div\.settings-tab button \{[^}]*border-radius: var\(--radius-btn\); background: var\(--navy\); color: var\(--btn-flat-ink\); font-weight: 700;/);
+  assert.match(css, /div\.settings-tab button:disabled \{ opacity: 0\.4;/);
+});
+
+// ── Suggest Next Tasks (SP-251) ──────────────────────────────────────────────
+
+/** The page script's Suggest Next Tasks wiring, from its first line to the next comment block. */
+function suggestWire() {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const start = app.indexOf('function wireSuggestNext');
+  return { app, wire: app.slice(start, app.indexOf('/**', start)) };
+}
+
+/** Ask GET /projects/<slug>/suggest-next until the run is not running, at most `ms`. */
+async function settledRun(f, slug, ms = 5000) {
+  const until = Date.now() + ms;
+  for (;;) {
+    const r = await f.call('GET', `/projects/${slug}/suggest-next`);
+    if (r.body?.state !== 'running' || Date.now() > until) return r;
+    await new Promise((res) => setTimeout(res, 20));
+  }
+}
+
+test('moveSuggestion: moving a row by drag, keyboard or dropdown puts it there and the rest close up behind it, numbers 1, 2, 3 ... with no gaps or repeats', () => {
+  const rows = [0, 1, 2, 3, 4];
+  // The spec's own case: pick 2 for the row at 5; it becomes 2, the old 2 to 4 become 3 to 5.
+  assert.deepEqual(moveSuggestion(rows, 4, 1), [0, 4, 1, 2, 3]);
+  // Drag the last to the top; then pick 2 on the top row.
+  const dragged = moveSuggestion(rows, 4, 0);
+  assert.deepEqual(dragged, [4, 0, 1, 2, 3]);
+  assert.deepEqual(moveSuggestion(dragged, 0, 1), [0, 4, 1, 2, 3]);
+  // The arrow keys: one up, one down; past either end it stays put.
+  assert.deepEqual(moveSuggestion(rows, 2, 1), [0, 2, 1, 3, 4]);
+  assert.deepEqual(moveSuggestion(rows, 2, 3), [0, 1, 3, 2, 4]);
+  assert.deepEqual(moveSuggestion(rows, 0, -1), rows);
+  assert.deepEqual(moveSuggestion(rows, 4, 5), rows);
+  assert.deepEqual(moveSuggestion(rows, 9, 0), rows, 'no row there: nothing moves');
+  assert.notEqual(moveSuggestion(rows, 1, 2), rows, 'a new list, the old one untouched');
+  // Any run of moves leaves every row exactly once.
+  let order = rows;
+  for (const [from, to] of [[3, 0], [0, 4], [2, 2], [1, 3], [4, 0]]) {
+    order = moveSuggestion(order, from, to);
+    assert.deepEqual([...order].sort(), rows);
+  }
+  // And the dropdowns drawn from it read 1 to n, each row its own place.
+  const html = renderSuggestRows(DEMO_SUGGESTIONS, { order, dropped: [], filed: {} });
+  const selected = [...html.matchAll(/<option value="(\d)" selected>/g)].map((m) => Number(m[1]));
+  assert.deepEqual(selected, [1, 2, 3, 4, 5]);
+  assert.equal((html.match(/<option /g) ?? []).length, 25, 'five places offered on each of five rows');
+});
+
+test('renderSuggestRows: a handle, a place dropdown, Keep, the title, and the why and description under More; a filed row names its ticket; every word escaped', () => {
+  const suggestions = [
+    { title: 'Fix <b>this</b>', description: 'Line one\nline <i>two</i>', why: 'Because "so"' },
+    { title: 'Second', description: '', why: '' },
+  ];
+  const html = renderSuggestRows(suggestions, { order: [1, 0], dropped: [0], filed: { 1: { id: 'AL-9', project: 'alpha' } } });
+  const rows = html.split('</li>').filter(Boolean);
+  assert.equal(rows.length, 2);
+  assert.match(rows[0], /^<li class="suggestion" data-index="1" draggable="true">/, 'drawn in the order given');
+  assert.match(rows[0], /<button type="button" class="drag-handle" aria-label="Move Second: arrow keys, or drag"/);
+  assert.match(rows[0], /<label class="keep"><input type="checkbox" value="keep" checked> Keep<\/label>/);
+  assert.match(rows[0], /<span class="filed">Filed <a href="\/t\/AL-9">AL-9<\/a><\/span>/);
+  assert.doesNotMatch(rows[0], /class="why"|suggestion-description/, 'nothing empty under More');
+  assert.match(rows[1], /<label class="keep"><input type="checkbox" value="keep"> Keep<\/label>/, 'unticked stays unticked');
+  // Every Keep box carries its value: one with none reads "on" against a drawn "" and holds the page's redraw for good.
+  assert.equal((html.match(/<input type="checkbox"/g) || []).length, (html.match(/<input type="checkbox" value="keep"/g) || []).length);
+  assert.equal(redrawHold({ fields: [{ focused: false, value: 'keep', initial: 'keep' }] }), null, 'a Keep box as drawn does not hold the redraw');
+  assert.equal(redrawHold({ fields: [{ focused: false, value: 'on', initial: '' }] }), 'typing', 'what a box with no value would read');
+  assert.match(rows[1], /<details class="more"><summary>More<\/summary><p class="why"><strong>Why:<\/strong> Because &quot;so&quot;<\/p><p class="suggestion-description">Line one\nline &lt;i&gt;two&lt;\/i&gt;<\/p><\/details>/);
+  assert.ok(!html.includes('<b>') && !html.includes('<i>'), 'a suggestion is text, never markup');
+  assert.equal(renderSuggestRows([], { order: [], dropped: [], filed: {} }), '');
+});
+
+test('renderSuggestRows: each row has an i that names its own suggestion, wherever the row is moved (SP-304)', () => {
+  const suggestions = [{ title: 'A <one>' }, { title: 'B' }, { title: 'C' }];
+  const html = renderSuggestRows(suggestions, { order: [2, 0, 1], dropped: [], filed: {} });
+  const rows = html.split('</li>').filter(Boolean);
+  assert.equal(rows.length, 3);
+  for (const [place, index] of [[0, 2], [1, 0], [2, 1]]) {
+    const i = rows[place].match(/<button type="button" class="suggestion-info-open" data-index="(\d)" aria-label="About ([^"]*)" title="About This Task"><svg [^>]*aria-hidden="true">[\s\S]*?<\/svg><\/button>/);
+    assert.ok(i, `row ${place + 1} has an i button`);
+    assert.equal(Number(i[1]), index, 'the i carries the suggestion\'s own index, not its place');
+    assert.equal(i[2], escapeHtml(suggestions[index].title));
+  }
+  // Moved again, each i still names the same suggestion.
+  const moved = renderSuggestRows(suggestions, { order: moveSuggestion([2, 0, 1], 0, 2), dropped: [], filed: {} });
+  assert.match(moved.split('</li>')[2], /class="suggestion-info-open" data-index="2" aria-label="About C"/);
+  assert.match(html, /<span class="suggestion-title">A &lt;one&gt;<\/span><button type="button" class="suggestion-info-open"/, 'the i sits beside the title');
+  assert.match(html, /<details class="more"><summary>More<\/summary>/, 'the More fold stays');
+});
+
+test('renderSuggestionInfo: the title as heading, Why It Matters and Description, every word escaped (SP-304)', () => {
+  const html = renderSuggestionInfo({ title: 'Fix <b>this</b> & that', why: 'Because <script>x</script> & so', description: 'Line one\nline <i>two</i>' });
+  assert.match(html, /^<h2 id="suggestion-info-title">Fix &lt;b&gt;this&lt;\/b&gt; &amp; that<\/h2>/);
+  assert.match(html, /<h3>Why It Matters<\/h3><p>Because &lt;script&gt;x&lt;\/script&gt; &amp; so<\/p>/);
+  assert.match(html, /<h3>Description<\/h3><p>Line one\nline &lt;i&gt;two&lt;\/i&gt;<\/p>/);
+  assert.ok(!/<(b|i|script)>/.test(html), 'a suggestion is text, never markup');
+  assert.ok(html.indexOf('Why It Matters') < html.indexOf('Description'));
+  // A section the suggestion lacks is left out; one with neither says so.
+  const bare = renderSuggestionInfo({ title: 'Bare', why: '', description: 'Only this' });
+  assert.doesNotMatch(bare, /Why It Matters/);
+  assert.match(bare, /<h3>Description<\/h3><p>Only this<\/p>/);
+  assert.match(renderSuggestionInfo({ title: 'Empty' }), /<p class="quiet">This suggestion came with nothing more to say\.<\/p>/);
+  assert.equal(renderSuggestionInfo(undefined), '<h2 id="suggestion-info-title"></h2><p class="quiet">This suggestion came with nothing more to say.</p>');
+});
+
+test('renderSuggestionInfo shows About This Task, Related Tickets, Topics, Tags and Links, each only when there, every word escaped (SP-305)', () => {
+  const html = renderSuggestionInfo({
+    title: 'T', why: 'W', description: 'D',
+    about: 'About <b>it</b> & more',
+    related: [{ id: 'AL-3', name: 'The <i>board</i>' }],
+    topics: ['Board <x>'], tags: ['fix&go'],
+    links: [{ label: 'The <plan>', path: 'docs/PLAN.md' }, { label: 'Odd name', path: 'docs/a b#c.md' }, { label: 'Board ticket', ticket: 'AL-3' }],
+  }, { repo: 'owner/app' });
+  assert.match(html, /<h3>About This Task<\/h3><p>About &lt;b&gt;it&lt;\/b&gt; &amp; more<\/p>/);
+  assert.match(html, /<h3>Related Tickets<\/h3><ul class="related"><li><a href="\/t\/AL-3">AL-3<\/a> The &lt;i&gt;board&lt;\/i&gt;<\/li><\/ul>/, 'a related ticket links to its page, with its name');
+  assert.match(html, /<h3>Topics<\/h3><p class="chips"><span class="tag topic">Board &lt;x&gt;<\/span><\/p>/);
+  assert.match(html, /<h3>Tags<\/h3><p class="chips"><span class="tag">fix&amp;go<\/span><\/p>/);
+  assert.match(html, /<li><a href="https:\/\/github\.com\/owner\/app\/blob\/main\/docs\/PLAN\.md" target="_blank" rel="noopener noreferrer">The &lt;plan&gt;<\/a> <code>docs\/PLAN\.md<\/code><\/li>/, 'a file opens on GitHub at main');
+  assert.match(html, /href="https:\/\/github\.com\/owner\/app\/blob\/main\/docs\/a%20b%23c\.md"/, 'each part of the path is encoded');
+  assert.match(html, /<li><a href="\/t\/AL-3">Board ticket<\/a><\/li><\/ul>$/, 'a ticket link opens its page');
+  assert.ok(!/<(b|i|x|plan)>/.test(html), 'text, never markup');
+  const order = ['Why It Matters', 'Description', 'About This Task', 'Related Tickets', 'Topics', 'Tags', 'Links'].map((h) => html.indexOf(`<h3>${h}</h3>`));
+  assert.deepEqual([...order].sort((a, b) => a - b), order, 'under the Why and the description, in this order');
+  assert.ok(order.every((i) => i > 0));
+
+  // Empty sections are left out; an older suggestion draws exactly as before.
+  const old = { title: 'Old', why: 'W', description: 'D' };
+  assert.equal(renderSuggestionInfo({ ...old, related: [], topics: [], tags: [], links: [], about: '' }, { repo: 'owner/app' }), renderSuggestionInfo(old));
+  assert.doesNotMatch(renderSuggestionInfo(old), /About This Task|Related Tickets|Topics|Tags|Links/);
+
+  // With no repository, a file is named but not linked; a bad path is never linked.
+  const unlinked = renderSuggestionInfo({ title: 'T', links: [{ label: 'Plan', path: 'docs/PLAN.md' }] });
+  assert.match(unlinked, /<li>Plan <code>docs\/PLAN\.md<\/code><\/li>/);
+  assert.doesNotMatch(unlinked, /<a /);
+  for (const [repo, path] of [['owner/app', '../x'], ['owner/app', '/etc/passwd'], ['owner/app', 'javascript:alert(1)'], ['owner/app', 'a//b'], ['bad repo', 'x.md'], ['owner/app/extra', 'x.md'], [null, 'x.md']]) {
+    assert.equal(suggestionFileHref(repo, path), null, `${repo} ${path}`);
+  }
+  assert.match(renderSuggestionInfo({ title: 'T', links: [{ label: 'Up', path: '../x' }] }, { repo: 'owner/app' }), /<li>Up <code>\.\.\/x<\/code><\/li>/, 'shown as text, never a link');
+});
+
+test('the info box\'s file links use the repository the latest run answers with (SP-305)', () => {
+  const { wire } = suggestWire();
+  assert.match(wire, /repo = typeof latest\.repo === 'string' \? latest\.repo : null;/);
+  assert.match(wire, /renderSuggestionInfo\(suggestion, \{ repo \}\)/);
+});
+
+test('Suggest Next Tasks sends the open tickets\' tags and topics and the project\'s topic and tag names, checks the answer against them, and answers the repository (SP-305)', async () => {
+  const runs = [];
+  const f = await fixture({ suggest: { run: async (o) => { runs.push(o); return DEMO_SUGGESTIONS.map((s) => ({ ...s })); } } });
+  try {
+    const topic = f.store.addTopic({ project: 'alpha', name: 'Board', actor: f.operator.id });
+    f.store.changeTicket('AL-3', { actor: f.operator.id, topics: [topic.id] });
+    f.store.updateProject('alpha', { repo: 'owner/app' });
+    await f.call('POST', '/projects/alpha/suggest-next', { body: {} });
+    const latest = await settledRun(f, 'alpha');
+    assert.equal(latest.body.repo, 'owner/app');
+    const input = JSON.parse(runs[0].input);
+    assert.deepEqual(input.projectTopics, ['Board']);
+    assert.ok(input.projectTags.includes('tracker') && input.projectTags.includes('fix'), input.projectTags.join(', '));
+    assert.deepEqual(input.openTickets.find((t) => t.id === 'AL-3').topics, ['Board']);
+    assert.deepEqual(input.openTickets.find((t) => t.id === 'AL-5').tags, ['tracker', 'fix']);
+    const { known } = runs[0];
+    assert.deepEqual(known.tickets.get('AL-3'), { id: 'AL-3', name: 'The board is missing: draw the seven columns' });
+    assert.equal(known.tickets.has('AL-9'), false, 'a Live ticket is not open, so never related');
+    assert.equal(known.topics.get('board'), 'Board');
+    assert.equal(known.tags.get('tracker'), 'tracker');
+  } finally { await f.cleanup(); }
+});
+
+test('the demo\'s suggestions carry the info box\'s fields, naming only the demo\'s own tickets, topics and tags (SP-305)', () => {
+  const full = DEMO_SUGGESTIONS.filter((s) => s.about && s.related?.length && s.topics?.length && s.tags?.length && s.links?.length);
+  assert.ok(full.length >= 2);
+  const dir = mkdtempSync(join(tmpdir(), 'tracker-demo-sp305-'));
+  const store = openStore(join(dir, 'tracker.db'));
+  try {
+    seedDemo(store);
+    const open = new Map(store.listTickets('alpha', { open: true }).map((t) => [t.id, t.name]));
+    const tags = new Set(store.listTickets('alpha').flatMap((t) => t.tags));
+    for (const s of full) {
+      for (const r of s.related) assert.equal(open.get(r.id), r.name, r.id);
+      for (const t of s.topics) assert.ok(DEMO_TOPICS.includes(t), t);
+      for (const t of s.tags) assert.ok(tags.has(t), t);
+      for (const l of s.links) assert.ok(l.ticket ? open.has(l.ticket) : suggestionFileHref('o/r', l.path), JSON.stringify(l));
+    }
+  } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('suggestState keeps the order, ticks and filed tickets for the same run only; filingPlan files the kept rows not yet filed, and orders every kept one', () => {
+  const fresh = suggestState(null, 't1', 4);
+  assert.deepEqual(fresh, { at: 't1', order: [0, 1, 2, 3], dropped: [], filed: {} });
+  const kept = { at: 't1', order: [2, 0, 3, 1], dropped: [0], filed: { 2: { id: 'AL-7', project: 'alpha' } } };
+  assert.deepEqual(suggestState(kept, 't1', 4), kept);
+  assert.deepEqual(suggestState(kept, 't2', 4), { ...fresh, at: 't2' }, 'a new run starts over');
+  assert.deepEqual(suggestState({ ...kept, order: [0, 0, 1, 2] }, 't1', 4), fresh, 'a broken order starts over');
+  assert.deepEqual(suggestState({ ...kept, order: [0, 1] }, 't1', 4), fresh, 'a different count starts over');
+  assert.deepEqual(suggestState('nonsense', 't1', 4), fresh);
+  // Only the kept rows, in the order shown; the one already filed is not filed again.
+  assert.deepEqual(filingPlan(kept), { kept: [2, 3, 1], file: [3, 1] });
+  assert.deepEqual(filingPlan({ ...kept, filed: { 1: { id: 'a', project: 'x' }, 2: { id: 'b', project: 'x' }, 3: { id: 'c', project: 'x' } } }).file, [], 'a retry after everything filed files nothing');
+  assert.deepEqual(filingPlan({ ...kept, dropped: [0, 1, 2, 3] }), { kept: [], file: [] });
+});
+
+test('orderPlan orders only the kept tickets still in Requested in the project they were filed into; a started one is left alone and a deleted or moved one is gone (SP-251 review)', () => {
+  const filed = { 0: { id: 'AL-1', project: 'alpha' }, 1: { id: 'AL-2', project: 'alpha' }, 2: { id: 'AL-3', project: 'alpha' }, 3: { id: 'AL-4', project: 'alpha' }, 4: { id: 'BE-5', project: 'beta' } };
+  const now = {
+    0: { id: 'AL-1', project: 'alpha', status: 'needs-input' },
+    1: null,
+    2: { id: 'AL-3', project: 'beta', status: 'requested' },
+    3: { id: 'AL-4', project: 'alpha', status: 'requested' },
+  };
+  // Row 4 is missing from `now`: filed by this press, so ordered without a read.
+  const plan = orderPlan([4, 3, 2, 1, 0], filed, now);
+  assert.deepEqual([...plan.byProject], [['beta', ['BE-5']], ['alpha', ['AL-4']]]);
+  assert.deepEqual(plan.leftAlone, [{ index: 0, id: 'AL-1' }]);
+  assert.deepEqual(plan.gone, [{ index: 2, id: 'AL-3' }, { index: 1, id: 'AL-2' }]);
+  assert.deepEqual([...orderPlan([0, 3], filed).byProject], [['alpha', ['AL-1', 'AL-4']]], 'nothing read back: all filed by this press');
+  assert.deepEqual(orderPlan([9], filed).byProject.size, 0, 'a row never filed is not ordered');
+  assert.equal(andList([]), '');
+  assert.equal(andList(['A']), 'A');
+  assert.equal(andList(['A', 'B']), 'A and B');
+  assert.equal(andList(['A', 'B', 'C']), 'A, B and C');
+});
+
+test('File in This Order again, a day later, against the server: a ticket already started keeps its version, a deleted one is dropped, and the order call still works', async () => {
+  const f = await fixture();
+  try {
+    const filed = {};
+    for (const i of [0, 1, 2, 3]) {
+      const r = await f.call('POST', '/projects/alpha/tickets', { body: { name: `Suggestion ${i}`, description: '', status: 'Requested' } });
+      assert.equal(r.status, 201, r.text);
+      filed[i] = { id: r.body.id, project: 'alpha' };
+    }
+    assert.equal((await f.call('POST', '/projects/alpha/tickets/order', { body: { ids: [0, 1, 2, 3].map((i) => filed[i].id) } })).status, 200);
+    // Since then: intake took the first on, and the second was deleted.
+    f.store.changeTicket(filed[0].id, { actor: f.loop.id, status: 'Needs your input' });
+    f.store.deleteTicket(filed[1].id, { actor: f.operator.id });
+    const startedVersion = f.store.getTicket(filed[0].id).version;
+    // He ticks a fifth and presses again: it is filed, then the earlier ones are read back the way the page does.
+    const fifth = await f.call('POST', '/projects/alpha/tickets', { body: { name: 'Suggestion 4', description: '', status: 'Requested' } });
+    filed[4] = { id: fifth.body.id, project: 'alpha' };
+    const now = {};
+    for (const i of [0, 1, 2, 3]) {
+      const r = await f.call('GET', `/tickets/${filed[i].id}`);
+      if (r.status === 404) now[i] = null;
+      else { assert.equal(r.status, 200, r.text); now[i] = r.body; }
+    }
+    const plan = orderPlan([4, 0, 1, 2, 3], filed, now);
+    assert.deepEqual(plan.leftAlone.map((t) => t.id), [filed[0].id]);
+    assert.deepEqual(plan.gone.map((t) => t.id), [filed[1].id]);
+    const ids = plan.byProject.get('alpha');
+    assert.deepEqual(ids, [filed[4].id, filed[2].id, filed[3].id]);
+    // Naming the deleted one would fail the whole call: the old way, shown once.
+    assert.equal((await f.call('POST', '/projects/alpha/tickets/order', { body: { ids: [filed[1].id, ...ids] } })).status, 400);
+    const r = await f.call('POST', '/projects/alpha/tickets/order', { body: { ids } });
+    assert.equal(r.status, 200, r.text);
+    assert.deepEqual(r.body.tickets.map((t) => t.place), [1, 2, 3]);
+    assert.equal(f.store.getTicket(filed[0].id).version, startedVersion, 'the started ticket was not touched: a lane\'s guarded write on it still works');
+  } finally { await f.cleanup(); }
+});
+
+test('suggestRunLine says a run is going or why it failed, plainly', () => {
+  assert.match(suggestRunLine({ state: 'running' }), /^Reading the project for its next tasks/);
+  assert.equal(suggestRunLine({ state: 'failed', message: 'Claude is not set up on this machine.' }), 'No suggestions this time: Claude is not set up on this machine.');
+  assert.equal(suggestRunLine({ state: 'failed' }), 'No suggestions this time: the run failed.');
+  assert.equal(suggestRunLine({ state: 'done', suggestions: [] }), '');
+  assert.equal(suggestRunLine(null), '');
+  assert.equal(SUGGEST_POLL_MS, 10_000, 'it checks back about every 10 seconds');
+});
+
+test('Suggest Next Tasks, against a stubbed suggester: a run answers the list; filing the kept rows in Requested and setting their order puts them in that order on the Tasks page', async () => {
+  const f = await fixture({ suggest: { run: demoSuggest({ ms: 50 }) } });
+  try {
+    assert.equal((await f.call('GET', '/projects/alpha/suggest-next')).status, 404, 'nothing asked for yet: the box shows no list');
+    const started = await f.call('POST', '/projects/alpha/suggest-next', { body: {} });
+    assert.equal(started.status, 202);
+    assert.equal(started.body.run.state, 'running');
+    const latest = await settledRun(f, 'alpha');
+    assert.equal(latest.body.state, 'done');
+    assert.deepEqual(latest.body.suggestions.map((s) => s.title), DEMO_SUGGESTIONS.map((s) => s.title));
+
+    // What the page does: drag the last to the top, untick the third shown, file the rest in order.
+    let state = suggestState(null, latest.body.at, latest.body.suggestions.length);
+    state.order = moveSuggestion(state.order, 4, 0);
+    state.dropped = [state.order[2]];
+    const plan = filingPlan(state);
+    assert.equal(plan.file.length, 4);
+    for (const i of plan.file) {
+      const s = latest.body.suggestions[i];
+      const r = await f.call('POST', '/projects/alpha/tickets', { body: { name: s.title, description: s.description, status: 'Requested' } });
+      assert.equal(r.status, 201, r.text);
+      state.filed[i] = { id: r.body.id, project: 'alpha' };
+    }
+    const ids = plan.kept.map((i) => state.filed[i].id);
+    assert.equal((await f.call('POST', '/projects/alpha/tickets/order', { body: { ids } })).status, 200);
+    // A retry files nothing twice.
+    assert.deepEqual(filingPlan(state).file, []);
+
+    const board = (await f.call('GET', '/projects/alpha/board')).body;
+    const requested = board.columns.find((c) => c.status === 'Requested').tickets;
+    const titles = plan.kept.map((i) => latest.body.suggestions[i].title);
+    assert.deepEqual(requested.filter((t) => ids.includes(t.id)).map((t) => t.name), titles, 'the Requested stage lists them in the order set');
+    assert.ok(!requested.some((t) => t.name === latest.body.suggestions[state.dropped[0]].title), 'the unticked one was not filed');
+  } finally { await f.cleanup(); }
+});
+
+test('Suggest Next Tasks, against a stubbed suggester that fails: the run says why, and Try Again starts another', async () => {
+  let calls = 0;
+  const f = await fixture({ suggest: { run: async () => { calls += 1; if (calls === 1) throw new Error('the copy could not be made'); return DEMO_SUGGESTIONS.map((s) => ({ ...s })); } } });
+  try {
+    await f.call('POST', '/projects/alpha/suggest-next', { body: {} });
+    const failed = await settledRun(f, 'alpha');
+    assert.equal(failed.body.state, 'failed');
+    assert.match(suggestRunLine(failed.body), /^No suggestions this time: the run failed \(the copy could not be made\)\.$/);
+    await f.call('POST', '/projects/alpha/suggest-next', { body: {} });
+    assert.equal((await settledRun(f, 'alpha')).body.state, 'done', 'Try Again is just another run');
+  } finally { await f.cleanup(); }
+});
+
+test('the Suggest Next Tasks box sits beside Add Task, in Title Case, and its button runs the suggester and checks back while it runs', () => {
+  const { app, wire } = suggestWire();
+  const draw = app.slice(app.indexOf('async function drawProject'), app.indexOf('function wireListPickers'));
+  // SP-303: inside the Add Task box, after its form; no box of its own.
+  assert.ok(draw.indexOf('</form>', draw.indexOf('<details class="add-task">')) < draw.indexOf('<div class="suggest-next"'), 'inside the Add Task box, after the form');
+  assert.ok(draw.indexOf('<div class="suggest-next"') < draw.indexOf('</details>', draw.indexOf('<details class="add-task">')), 'inside the Add Task box');
+  assert.doesNotMatch(draw, /<details class="suggest-next">|<summary>Suggest Next Tasks<\/summary>/, 'no separate Suggest Next Tasks bar');
+  assert.match(draw, /<button type="button" class="suggest-run">Suggest Next Tasks<\/button>/);
+  assert.match(draw, /<div class="row file-row" hidden><button type="button" class="file-order">File in This Order<\/button>/);
+  assert.match(draw, /wireSuggestNext\(board\.project, view\);/);
+  assert.match(wire, /run\.textContent = latest\?\.state === 'failed' \? 'Try Again' : latest\?\.state === 'done' \? 'Suggest Again' : 'Suggest Next Tasks';/);
+  // POST starts it; GET reads it, unrecorded so a finished run never redraws the whole page under him.
+  assert.match(wire, /api\('POST', path, \{\}\)/);
+  assert.match(wire, /api\('GET', path, undefined, \{ unrecorded: true \}\)/);
+  assert.match(wire, /const path = `\/projects\/\$\{encodeURIComponent\(slug\)\}\/suggest-next`;/);
+  assert.match(wire, /setTimeout\(async \(\) => \{[\s\S]*?\}, SUGGEST_POLL_MS\);/, 'checks back about every 10 seconds');
+  assert.match(wire, /if \(!box\.isConnected\) return;/, 'a page drawn over stops checking back');
+  // The page opens on the last list, on its own.
+  assert.match(wire, /\/\/ On opening the page: the last list, on its own\.\s*\(async \(\) => \{\s*const latest = await read\(\);/);
+  const css = readFileSync(WEB('app.css'), 'utf8');
+  assert.match(css, /details\.add-task \[hidden\] \{ display: none; \}/, 'the hidden side stays hidden');
+  assert.doesNotMatch(css, /details\.suggest-next/, 'no rule for the old separate box');
+});
+
+test('the Suggest Next Tasks rows move by dropdown, by the arrow keys on the handle, and by dragging, all through moveSuggestion, and the state is kept for a redraw', () => {
+  const { wire } = suggestWire();
+  assert.match(wire, /if \(e\.target\.matches\('select\.place'\)\) move\(placeOf\(li\), Number\(e\.target\.value\) - 1\);/);
+  assert.match(wire, /const to = \{ ArrowUp: from - 1, ArrowDown: from \+ 1, Home: 0, End: state\.order\.length - 1 \}\[e\.key\];/);
+  assert.match(wire, /move\(from, to, true\);/, 'the keyboard keeps focus on the moved handle');
+  assert.match(wire, /list\.addEventListener\('drop', /);
+  assert.match(wire, /move\(from, placeOf\(li\)\);/);
+  assert.match(wire, /state\.order = moveSuggestion\(state\.order, from, to\);\s*save\(\);\s*drawRows\(/);
+  assert.match(wire, /state = suggestState\(savedSuggestState\(slug\), latest\.at, suggestions\.length\);/);
+});
+
+test('a run that answers while File in This Order is filing waits until filing ends, File in This Order is off while a run goes, and the box opens on its own only on the page\'s first draw', () => {
+  const { wire } = suggestWire();
+  const show = wire.slice(wire.indexOf('const show = (latest) => {'), wire.indexOf('const read = async'));
+  // A finished (or failed) run never swaps suggestions and state under the filing loop: it is held.
+  assert.match(show, /if \(!box\.isConnected\) return;\s*if \(filing\) \{ held = latest; return; \}\s*say\(runNote/, 'held before anything is drawn or replaced');
+  assert.ok(show.indexOf('held = latest') < show.indexOf('suggestions = latest.suggestions'), 'held before the rows are replaced');
+  assert.ok(show.indexOf('held = latest') < show.indexOf('state = null'), 'held before a failed run clears the state');
+  // While a run is going, nothing is filed from the rows it is about to replace.
+  assert.match(show, /running = latest\?\.state === 'running';\s*run\.disabled = running;[\s\S]*?fileButton\.disabled = running;/);
+  const file = wire.slice(wire.indexOf("fileButton.addEventListener('click'"));
+  assert.match(file, /if \(!state \|\| filing \|\| running\) return;/);
+  // When filing ends, the held answer is drawn, and File in This Order stays off if it is a run still going.
+  assert.match(file, /filing = false;\s*fileButton\.disabled = running;\s*run\.disabled = running;\s*\/\/[^\n]*\n\s*if \(held !== undefined\) \{\s*const latest = held;\s*held = undefined;\s*show\(latest\);\s*\} else drawRows\(\);/);
+  // A failed start while filing leaves Suggest off until filing ends.
+  assert.match(wire, /run\.textContent = 'Try Again';\s*run\.disabled = filing;/);
+  // The box opens on its own only on the page's first draw: a minute's redraw keeps his fold.
+  assert.match(wire, /const mayOpen = !refreshing;/);
+  assert.doesNotMatch(show, /(box|fold)\.open = true/, 'a check-back never opens a box he closed');
+  const opening = wire.slice(wire.indexOf('// On opening the page'));
+  // SP-303: and only while the Suggest checkbox is ticked; it never ticks the checkbox itself.
+  assert.match(opening, /show\(latest\);\s*\/\/[^\n]*\n\s*if \(mayOpen && savedSuggestSwitch\(\) && \(running \|\| \(latest\.state === 'done' && state && filingPlan\(state\)\.file\.length\)\)\) fold\.open = true;/);
+  assert.equal((wire.match(/(box|fold)\.open = true/g) || []).length, 1, 'only the first draw opens it');
+  assert.doesNotMatch(wire, /SUGGEST_SWITCH_KEY|\.checked = true/, 'never flips the checkbox');
+});
+
+test('File in This Order files only the kept rows not yet filed, in Requested, after the project check; keeps each at once; then sets the order; a failed step says which', () => {
+  const { wire } = suggestWire();
+  const file = wire.slice(wire.indexOf("fileButton.addEventListener('click'"));
+  assert.match(file, /const plan = filingPlan\(state\);/);
+  assert.match(file, /for \(const i of plan\.file\) \{/);
+  const check = file.indexOf('/tickets/check`');
+  const post = file.indexOf("status: 'Requested'");
+  const order = file.indexOf('/tickets/order`');
+  assert.ok(check > 0 && check < post && post < order, 'checked, then filed, then ordered');
+  assert.match(file, /\{ name: s\.title, description: s\.description \?\? '', status: 'Requested' \}/, 'title and description as shown');
+  assert.match(file, /state\.filed\[i\] = \{ id: ticket\.id, project: into \};\s*save\(\);/, 'each filed ticket is kept at once: a retry never files it again');
+  assert.match(file, /for \(const i of plan\.kept\) \{\s*if \(fresh\.has\(i\) \|\| !state\.filed\[i\]\) continue;/, 'each ticket an earlier press filed is read back first');
+  assert.match(file, /const order = orderPlan\(plan\.kept, state\.filed, now\);/, 'only the ones still in Requested are ordered');
+  assert.match(file, /for \(const \[project, ids\] of order\.byProject\)/);
+  assert.match(file, /if \(err instanceof Refused && err\.status === 404\) \{ now\[i\] = null; continue; \}/, 'a deleted ticket is gone, not a failure');
+  assert.match(file, /state\.dropped = \[\.\.\.new Set\(\[\.\.\.state\.dropped, \.\.\.order\.gone\.map/, 'a gone ticket is unticked, so a later press never names it');
+  assert.match(file, /so \$\{order\.leftAlone\.length === 1 \? 'its' : 'their'\} place was left alone/);
+  assert.match(file, /no longer in this project \(deleted or moved\)/);
+  // The project check that cannot run says so, as Add Task does.
+  assert.match(file, /unchecked\.push\(s\.title\);/);
+  assert.match(file, /The project check could not run for /);
+  assert.doesNotMatch(file, /'the tracker did not answer\.'/, 'the words live in SUGGEST_NEXT_UNANSWERED');
+  // The smaller ones: Keep and the dropdown hold still while filing; the end of filing leaves a running run's button off.
+  assert.match(wire, /if \(filing\) \{ e\.target\.checked = !e\.target\.checked; return; \}/);
+  assert.match(wire, /if \(filing\) \{ drawRows\(\); return; \}/);
+  assert.match(file, /run\.disabled = running;/);
+  assert.match(file, /Not filed: "\$\{s\.title\}"/);
+  assert.match(file, /Their order was not set \(/);
+  assert.match(file, /Press File in This Order again: nothing is filed twice\./);
 });

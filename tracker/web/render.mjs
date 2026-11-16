@@ -338,6 +338,11 @@ export function lowerMeridiem(text) {
   return String(text).replace(/\b(AM|PM)\b/g, (m) => m.toLowerCase());
 }
 
+/** Why a stage is paused, in words: "the whole pipeline is paused", "Build is paused". */
+function pausedWords(s) {
+  return s.paused === 'pipeline' ? 'the whole pipeline is paused' : `${s.name} is paused`;
+}
+
 /** What the Pipeline Status pod says when GET /pipeline could not be read. */
 export const PIPELINE_UNAVAILABLE = 'Pipeline Status unavailable';
 
@@ -353,7 +358,10 @@ export const PIPELINE_UNAVAILABLE = 'Pipeline Status unavailable';
  * carry `running`, which app.css draws green. A stage whose next time is
  * less than PIPELINE_SOON_MS from `now` (or already past: a pass that is due)
  * carries `soon` instead, which app.css draws gold (SP-222); a running stage
- * is never `soon`. `now` is a time in milliseconds, given so a test can fix
+ * is never `soon`. A stage paused on the Settings page (`paused`, SP-237)
+ * shows "Paused" and carries `paused` instead of a next time, never `soon`;
+ * one still running its last pass shows "running", its title saying the
+ * pause lets it finish. `now` is a time in milliseconds, given so a test can fix
  * the clock. A missing or malformed answer says PIPELINE_UNAVAILABLE.
  */
 export function renderPipelinePod(answer, timeOf, now = Date.now()) {
@@ -365,7 +373,10 @@ export function renderPipelinePod(answer, timeOf, now = Date.now()) {
     let soon = false;
     if (s.running) {
       shown = 'running';
-      title = `${s.name}: a pass is running now`;
+      title = `${s.name}: a pass is running now${s.paused ? `; ${pausedWords(s)}, so it finishes and no new one starts` : ''}`;
+    } else if (s.paused) {
+      shown = 'Paused';
+      title = `${s.name}: ${pausedWords(s)} on the Settings page`;
     } else if (!s.logged) {
       shown = '–';
       title = `${s.name}: no passes logged yet`;
@@ -378,7 +389,7 @@ export function renderPipelinePod(answer, timeOf, now = Date.now()) {
       soon = away < PIPELINE_SOON_MS;
       title = `${s.name}: next pass due ${shown}${away <= 0 ? ' (due now)' : soon ? ' (due within 3 minutes)' : ''}`;
     }
-    const cls = s.running ? ' running' : soon ? ' soon' : '';
+    const cls = s.running ? ' running' : s.paused ? ' paused' : soon ? ' soon' : '';
     const tip = escapeHtml(title);
     return `<span class="stage${cls}" title="${tip}">${escapeHtml(s.name)}</span><span class="time${cls}" title="${tip}">${escapeHtml(shown)}</span>`;
   };
@@ -418,7 +429,7 @@ export function renderHealth(answer, timeOf) {
 export function pipelinePodLabel(answer, timeOf) {
   const stages = Array.isArray(answer?.stages) ? answer.stages : null;
   if (!stages || !stages.length) return PIPELINE_UNAVAILABLE;
-  const shown = (s) => (s.running ? 'running' : s.logged && s.nextDue ? timeOf(s.nextDue) : '–');
+  const shown = (s) => (s.running ? 'running' : s.paused ? 'paused' : s.logged && s.nextDue ? timeOf(s.nextDue) : '–');
   return `Pipeline Status: ${stages.map((s) => `${s.name} ${shown(s)}`).join(', ')}`;
 }
 
@@ -460,9 +471,10 @@ export function renderPipelineDetails(answer, timeOf) {
   const row = (s) => {
     const name = `<th scope="row">${escapeHtml(s.name)}</th>`;
     const wakes = `<td>${escapeHtml(wakesEvery(s.interval))}</td>`;
-    if (!s.logged) return `<tr>${name}<td colspan="3" class="quiet">No passes logged yet</td>${wakes}</tr>`;
+    if (!s.logged) return `<tr>${name}<td colspan="3" class="quiet">${s.paused ? `Paused (${escapeHtml(pausedWords(s))}); ` : ''}No passes logged yet</td>${wakes}</tr>`;
     let next;
-    if (s.running) next = s.lastStart ? `Running now, since ${timeOf(s.lastStart)}` : 'Running now';
+    if (s.running) next = `${s.lastStart ? `Running now, since ${timeOf(s.lastStart)}` : 'Running now'}${s.paused ? ` (paused: this pass finishes, no new one starts)` : ''}`;
+    else if (s.paused) next = `Paused (${pausedWords(s)})`;
     else next = s.nextDue ? timeOf(s.nextDue) : 'Not known yet';
     const started = s.lastStart ? timeOf(s.lastStart) : '–';
     // While a pass runs, the last END belongs to the pass before it: say so, so
@@ -494,6 +506,36 @@ export function controlValueText(control, models = []) {
   return v;
 }
 
+/** Seconds in words, as the page writes a wake time: "1,800 seconds". */
+const secondsText = (n) => `${Number(n).toLocaleString('en-US')} seconds`;
+
+/**
+ * Under a wake time (SP-236): the seconds its lane last actually woke on and
+ * whether that is the set value. The lane reads the set value before its
+ * next sleep (the relay after its next pass), so for a while after a change
+ * the two differ, and the page says so in plain words rather than claiming
+ * the change has taken effect.
+ */
+export function wakeInEffectText(control) {
+  if (control?.used == null) return 'Last used: not known on this machine yet.';
+  if (control.inEffect) return `In effect: the lane last used ${secondsText(control.used)}.`;
+  return `Last used: ${secondsText(control.used)}. Waiting for the lane's next pass to pick this up.`;
+}
+
+/**
+ * Under a lane's model (SP-239): the model its last pass ran on, read from
+ * the START line its runner writes. The runner reads the setting before each
+ * pass, so after a change the next pass shows it; until then this names the
+ * one the lane is still on.
+ */
+export function modelLastPassText(control, models = []) {
+  const last = control?.lastModel;
+  if (last == null) return 'Last pass ran on: not known on this machine yet.';
+  const label = models.find((m) => m.id === last)?.label ?? last;
+  if (last === control.value) return `In effect: the last pass ran on ${label}.`;
+  return `Last pass ran on: ${label}. The lane's next pass picks this up.`;
+}
+
 /** One control's input, named by its key: a number box, an On/Off choice or a model choice. */
 function controlInput(c, models, id, locked) {
   const off = locked ? ' disabled' : '';
@@ -505,16 +547,60 @@ function controlInput(c, models, id, locked) {
 }
 
 /**
+ * What a pause is waiting on (SP-237), under the pause switches, from the
+ * view's `inFlight` tickets (all of them for the whole pipeline; a lane's
+ * own kind for one lane, so a paused intake or relay has nothing to drain):
+ * nothing while no switch is on; "Draining: N
+ * ticket(s) still finishing" and each one (linked) while a lane still works
+ * on one; "Paused: nothing in flight" once none is left. A pause stops new
+ * passes and never a running one, so this is what Dane waits for before the
+ * deck is clear.
+ */
+const DRAIN_KINDS = Object.freeze({ 'paused.loop-build': 'a build', 'paused.loop-review': 'a review' });
+
+export function drainLine(view) {
+  const on = (view?.controls ?? []).filter((c) => c.group === 'pause' && c.value === 'on').map((c) => c.key);
+  if (!on.length) return '';
+  // The whole pipeline waits on every ticket in flight; one lane only on its own kind of pass.
+  const whole = on.includes('paused');
+  const kinds = new Set(on.map((k) => DRAIN_KINDS[k]).filter(Boolean));
+  const tickets = (Array.isArray(view.inFlight) ? view.inFlight : []).filter((t) => whole || kinds.has(t.kind));
+  if (!tickets.length) return '<p class="drain paused">Paused: nothing in flight.</p>';
+  const item = (t) => `<li><a href="/t/${encodeURIComponent(t.id)}">${escapeHtml(t.id)}</a> ${escapeHtml(t.name)} <span class="quiet">(${escapeHtml(t.kind)})</span></li>`;
+  return `<div class="drain draining"><p>Draining: ${tickets.length} ticket(s) still finishing.</p><ul>${tickets.map(item).join('')}</ul></div>`;
+}
+
+/**
+ * Beside the work-in-progress cap (SP-238): how many tickets are in flight
+ * now (in Building or In review, `view.capInFlight`), so a stalled build lane
+ * is easy to see; marked when the count has reached the cap. Nothing when
+ * the count is not known.
+ */
+export function capInFlightText(c, capInFlight) {
+  const count = capInFlight?.count;
+  if (!Number.isInteger(count)) return '';
+  const full = count >= Number(c.value);
+  const words = `${count} in flight now${full ? ': full, loop-build is not claiming new tickets' : ''}.`;
+  return `<span class="in-flight${full ? ' full' : ''}">${escapeHtml(words)}</span>`;
+}
+
+/**
  * One project's Pipeline Controls section on the Settings page (SP-224),
  * from GET /pipeline-controls: each group of controls under its heading, each
  * control with its value, a "default" mark while it has its default, and a
  * Save button (none, and the inputs locked, for a reader who may not change
- * them), then the line saying the lanes do not use that group yet, naming
- * the ticket that wires it in. Under them, the change log, newest first, in
+ * them), then, for a group the lanes do not use yet, a line saying so,
+ * naming the ticket that wires it in, and under the pause switches, while
+ * any is on, the drain line (drainLine). Each wake time also says what its
+ * lane last used (wakeInEffectText), and each model what its lane's last
+ * pass ran on (modelLastPassText). Quiet Days Before Moving comes after the
+ * release group, the setting that moves it (SP-277). Under them, the change log, newest first, in
  * Mountain time. `notes` is `{ key: { ok, text } }`, a Save's outcome to show
- * beside its control.
+ * beside its control. The section is a box that opens and closes (SP-289),
+ * the project's name its header; it starts closed unless `open` is true (the
+ * page passes the box's state from before a redraw, so a Save keeps it open).
  */
-export function renderPipelineControls(view, notes = {}) {
+export function renderPipelineControls(view, notes = {}, open = false) {
   const slug = view.project.slug;
   const locked = view.canChange !== true;
   const models = view.models ?? [];
@@ -525,7 +611,7 @@ export function renderPipelineControls(view, notes = {}) {
     return `<tr data-control="${escapeHtml(c.key)}" data-kind="${escapeHtml(c.kind)}">
       <td class="label"><label for="${id}">${escapeHtml(c.label)}</label>${mark}</td>
       <td class="input">${controlInput(c, models, id, locked)}</td>
-      <td class="value">${escapeHtml(controlValueText(c, models))}</td>
+      <td class="value">${escapeHtml(controlValueText(c, models))}${c.group === 'wake' ? `<span class="in-effect${c.inEffect === false ? ' waiting' : ''}">${escapeHtml(wakeInEffectText(c))}</span>` : ''}${c.group === 'model' ? `<span class="in-effect${c.lastModel != null && c.lastModel !== c.value ? ' waiting' : ''}">${escapeHtml(modelLastPassText(c, models))}</span>` : ''}${c.key === 'wip-cap' ? capInFlightText(c, view.capInFlight) : ''}</td>
       <td class="save">${locked ? '' : '<button type="button">Save</button>'}<span class="note${note ? (note.ok ? ' quiet' : ' error') : ''}">${note ? escapeHtml(note.text) : ''}</span></td>
     </tr>`;
   };
@@ -533,9 +619,10 @@ export function renderPipelineControls(view, notes = {}) {
     if (g.notOnOwnProject && view.own) return '';
     const controls = view.controls.filter((c) => c.group === g.key);
     if (!controls.length) return '';
+    const notYet = g.wiredBy ? `<p class="quiet not-yet">Saved, but the lanes do not use this yet (${escapeHtml(g.wiredBy)}).</p>` : '';
     return `<h4>${escapeHtml(g.title)}</h4>
     <table class="controls"><tbody>${controls.map(row).join('')}</tbody></table>
-    ${g.wiredBy ? `<p class="quiet not-yet">Saved, but the lanes do not use this yet (${escapeHtml(g.wiredBy)}).</p>` : ''}`;
+    ${notYet}${g.key === 'pause' ? `<div class="drain-box">${drainLine(view)}</div>` : ''}`;
   };
   const who = view.operator ? escapeHtml(view.operator.name) : 'nobody (this project has no operator)';
   const lockedLine = locked ? `<p class="quiet">Only ${who}, the project's operator, may change these.</p>` : '';
@@ -543,13 +630,59 @@ export function renderPipelineControls(view, notes = {}) {
   const log = changes.length
     ? `<table class="control-changes"><thead><tr><th>When</th><th>Who</th><th>Setting</th><th>Old Value</th><th>New Value</th></tr></thead><tbody>${changes.map((x) => `<tr><td>${escapeHtml(mountainTime(x.at))}</td><td>${escapeHtml(x.actorName)}</td><td>${escapeHtml(x.label)}</td><td>${escapeHtml(x.from)}</td><td>${escapeHtml(x.to)}</td></tr>`).join('')}</tbody></table>`
     : '<p class="quiet">No changes yet.</p>';
-  return `<section class="pipeline-controls" data-project="${escapeHtml(slug)}">
-    <h3>${escapeHtml(view.project.name)}</h3>
+  return `<details class="pipeline-controls" data-project="${escapeHtml(slug)}"${open ? ' open' : ''}>
+    <summary>${escapeHtml(view.project.name)}</summary>
+    <div class="project-body">
     ${lockedLine}
-    ${(view.groups ?? []).map(group).join('')}
+    ${(view.groups ?? []).filter((g) => g.key !== 'release-move').map(group).join('')}
+    ${view.release ? renderReleaseGroup(view.release, notes.release) : ''}
+    ${(view.groups ?? []).filter((g) => g.key === 'release-move').map(group).join('')}
     <h4>Change Log</h4>
     ${log}
-  </section>`;
+    </div>
+  </details>`;
+}
+
+/**
+ * One project's release group on the Settings page (SP-275), from
+ * the `release` part of GET /pipeline-controls: the release it runs, when
+ * and who named it, and the one before it; a Move to Newest button (names
+ * the newest release cut) and a Roll Back button (names the earlier one
+ * again), for the operator only. The tracker's home project shows its
+ * `ownLine` and no buttons. A project with no release named shows
+ * "No release named yet" and only Move to Newest. Under it, the line saying
+ * the lanes do not run from it yet, naming the ticket that wires it in.
+ * `note` is `{ ok, text }`, a button's outcome.
+ */
+export function renderReleaseGroup(r, note = null) {
+  const notYet = `<p class="quiet not-yet">Named, but the lanes do not run from it yet (${escapeHtml(r.wiredBy)}).</p>`;
+  const head = `<h4>${escapeHtml(r.title)}</h4>`;
+  if (r.own) return `<div class="release-group">${head}<p class="release-own">${escapeHtml(r.ownLine)}</p></div>`;
+  const when = (e) => `${escapeHtml(e.release)}</strong>, named ${escapeHtml(mountainTime(e.at))} by ${escapeHtml(e.actorName)}`;
+  const lines = [];
+  if (!r.known) lines.push('<p class="quiet">This tracker cannot tell which project is its home (its project config was not usable when it started), so no release can be named here.</p>');
+  lines.push(r.current
+    ? `<p class="release-current">Runs <strong>${when(r.current)}.</p>`
+    : '<p class="release-current">No release named yet.</p>');
+  if (r.previous) lines.push(`<p class="release-previous quiet">Before that: <strong>${when(r.previous)}.</p>`);
+  const newestLine = r.newestProblem
+    ? `The newest release could not be read: ${escapeHtml(r.newestProblem)}`
+    : r.newest ? `The newest release is <strong>${escapeHtml(r.newest)}</strong>.` : 'No release has been cut yet.';
+  lines.push(`<p class="release-newest quiet">${newestLine}</p>`);
+  let buttons = '';
+  if (r.canChange) {
+    const upToDate = r.newest != null && r.current?.release === r.newest;
+    const canMove = r.newest != null && !upToDate;
+    const move = `<button type="button" data-release-action="newest"${canMove ? '' : ' disabled'}>Move to Newest</button>`;
+    const back = r.current
+      ? (r.rollBackTo
+        ? `<button type="button" data-release-action="back">Roll Back to ${escapeHtml(r.rollBackTo)}</button>`
+        : '<span class="quiet">No earlier release to roll back to.</span>')
+      : '';
+    const why = upToDate ? '<span class="quiet">It runs the newest release.</span>' : '';
+    buttons = `<div class="row release-actions">${move}${back}${why}<span class="note${note ? (note.ok ? ' quiet' : ' error') : ''}">${note ? escapeHtml(note.text) : ''}</span></div>`;
+  }
+  return `<div class="release-group">${head}${lines.join('')}${buttons}${notYet}</div>`;
 }
 
 const CONTEXT_HEADING = "WHAT'S GOING ON";
@@ -651,6 +784,71 @@ export function originalRequest(description) {
     }
   }
   return { title, words, slicedFrom };
+}
+
+/** The tag a website visitor's bug report is filed with (StarCaster's composeBugReportTask). */
+export const BUG_REPORT_TAG = 'bug-report';
+
+/**
+ * A website visitor's bug report, read off a ticket (SP-286): only for a
+ * ticket tagged BUG_REPORT_TAG whose description has a `## What the reporter
+ * said` section with a fenced block under it, and no `## Asked` section (a
+ * report intake has rewritten shows his request instead). Returns
+ * `{ words, facts, screenshots }`: the visitor's words exactly as typed
+ * (line breaks kept), the `## Where and who` bullets as `{ label, value }`
+ * (`- **Page:** …`, the value's code backticks taken off), and whether the
+ * `## Screenshots` section holds anything but "(none attached)". Null
+ * otherwise. Headings inside a fence are never read as sections. Text only:
+ * nothing is escaped here.
+ */
+export function bugReport({ tags = [], description } = {}) {
+  if (!(tags ?? []).includes(BUG_REPORT_TAG)) return null;
+  const lines = String(description ?? '').replace(/\r\n?/g, '\n').split('\n');
+  const sections = new Map();
+  let run = null;
+  lines.forEach((line, i) => {
+    if (run) { if (closesFence(line, run)) run = null; return; }
+    const fence = FENCE.exec(line);
+    if (fence) { run = fence[1]; return; }
+    const h = /^##\s+(.+?)\s*$/.exec(line);
+    if (h && !sections.has(h[1].toLowerCase())) sections.set(h[1].toLowerCase(), i);
+  });
+  if (sections.has('asked') || !sections.has('what the reporter said')) return null;
+  // A section's lines: up to the next heading that is not inside a fence.
+  const starts = [...sections.values()].sort((a, b) => a - b);
+  const sectionLines = (name) => {
+    if (!sections.has(name)) return [];
+    const from = sections.get(name);
+    const to = starts.find((s) => s > from) ?? lines.length;
+    return lines.slice(from + 1, to);
+  };
+  const said = sectionLines('what the reporter said');
+  let i = 0;
+  while (i < said.length && !said[i].trim()) i += 1;
+  const open = FENCE.exec(said[i] ?? '');
+  if (!open) return null;
+  const body = [];
+  for (i += 1; i < said.length && !closesFence(said[i], open[1]); i += 1) body.push(said[i]);
+  if (i >= said.length) return null;
+  while (body.length && !body[0].trim()) body.shift();
+  while (body.length && !body.at(-1).trim()) body.pop();
+  const facts = [];
+  for (const line of sectionLines('where and who')) {
+    const m = /^\s*[-*+]\s+\*\*([^*]+?):?\*\*:?\s*(.*)$/.exec(line);
+    if (m) facts.push({ label: m[1].replace(/:$/, '').trim(), value: m[2].trim().replace(/^`([^`]*)`$/, '$1') });
+  }
+  const shots = sectionLines('screenshots').map((l) => l.trim())
+    .filter((l) => l && !RULE.test(l) && !/^_.*_$/.test(l) && l !== '(none attached)');
+  return { words: body.join('\n'), facts, screenshots: shots.length > 0 };
+}
+
+/** One `## Where and who` fact as a list row: a page is a link, a submitted time reads in Mountain time. */
+function bugReportFact({ label, value }) {
+  const key = label.toLowerCase();
+  let shown = escapeHtml(value);
+  if (key === 'page' && /^https?:\/\/\S+$/.test(value)) shown = link(value, escapeHtml(value));
+  else if (key === 'submitted' && !Number.isNaN(Date.parse(value)) && /\d{4}-\d{2}-\d{2}T/.test(value)) shown = escapeHtml(mountainTime(value));
+  return `<li><span class="fact-label">${escapeHtml(label)}:</span> ${shown}</li>`;
 }
 
 /** The newest comment that carries an operator card, or undefined. */
@@ -807,18 +1005,87 @@ export function renderFilesMade({ comments = [] }) {
 }
 
 /**
- * Where a ticket sits, in one quiet line, for each status that is the
- * machine's turn (SP-118): shown in place of a card's ask, which is only his
- * move while the ticket is in one of his two statuses.
+ * What each status means for him, in one line (SP-118, SP-290): shown behind
+ * the information icon beside "Status: <status>" under the ticket's heading.
+ * The machine's statuses say nothing is needed; his two say what is.
  */
 export const STATUS_LINES = {
-  requested: 'In Requested: the intake loop is writing it up as a spec. Nothing is needed from you.',
-  queued: 'In Queued: it waits for the build loop to pick it up. Nothing is needed from you.',
-  building: 'In Building: the build loop is working on it. Nothing is needed from you.',
-  'in review': 'In review: the review loop is checking the pull request. Nothing is needed from you.',
-  rework: 'In Rework: the build loop is fixing what review found. Nothing is needed from you.',
-  live: 'Live: it is done. Nothing is needed from you.',
+  requested: 'The intake loop is writing it up as a spec. Nothing is needed from you.',
+  queued: 'It waits for the build loop to pick it up. Nothing is needed from you.',
+  building: 'The build loop is working on it. Nothing is needed from you.',
+  'in review': 'The review loop is checking the pull request. Nothing is needed from you.',
+  rework: 'The build loop is fixing what review found. Nothing is needed from you.',
+  'needs your input': 'The loop is waiting on your answer below.',
+  'ready to launch': 'The work is built and checked, and waits on your Merge.',
+  live: 'It is done. Nothing is needed from you.',
 };
+
+/**
+ * The information line once his move is made (SP-290 send-back): his answer
+ * is in, or his merge word stands, so the page has dropped the ask and the
+ * Merge, and the line must not ask him again. Wins over STATUS_LINES, in the
+ * order statusLabel names them.
+ */
+export const ANSWER_IN_LINE = 'Your answer is in; the loop takes it from here. Nothing is needed from you.';
+export const MERGE_STANDS_LINE = 'Your merge word is in; the relay merges it on its next pass. Nothing is needed from you.';
+
+/**
+ * The information line once a Ready to launch ticket's pull request is past
+ * the merge (SP-290 second send-back, SP-226's prSettled): merged, or closed
+ * without merging. Wins over the merge word and the bare status, because the
+ * page has dropped the Merge in both cases.
+ */
+export const PR_MERGED_LINE = 'The pull request is merged; the relay moves this to Live on its next pass. Nothing is needed from you.';
+export const PR_CLOSED_LINE = 'The pull request was closed without merging; see the note below.';
+
+/** The information icon: a ring with an "i" in it, drawn here, never from ticket text. */
+const INFO_ICON = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v6"/><path d="M12 7.5v.01"/></svg>';
+
+/**
+ * The information line for one of his two statuses while his move is still
+ * to make (SP-290 third send-back): it names the move the page's own buttons
+ * offer, decided by the same tests the buttons use (offersMerge,
+ * offersClose), never by the bare status. Close wins over the status's own
+ * line; a Ready to launch ticket with no Merge to offer (no pull request,
+ * no merge word, or a card asking for a reply) points at the reply box.
+ */
+export const CLOSE_LINE = 'It waits on your Close; the card below says why.';
+export const REPLY_LINE = 'It waits on your reply below.';
+
+/** The line for his statuses, from the move the page offers (see CLOSE_LINE). */
+function hisMoveLine(t, state) {
+  if (heldBugReport(t)) return HELD_REPORT_STATUS_LINE;
+  if (offersClose(t)) return CLOSE_LINE;
+  if (state === READY_TO_LAUNCH) return offersMerge(t) ? STATUS_LINES[state] : REPLY_LINE;
+  return STATUS_LINES[state];
+}
+
+/**
+ * The ticket's status, first under its heading (SP-290): "Status: Queued" in
+ * the page's own type, the status as statusLabel writes it, and beside it an
+ * information button whose line (STATUS_LINES, or ANSWER_IN_LINE /
+ * MERGE_STANDS_LINE once his move is made, or PR_MERGED_LINE /
+ * PR_CLOSED_LINE once the pull request is past the merge, or on his two
+ * statuses the move the page's buttons offer, hisMoveLine) shows on hover,
+ * on tap (the page toggles aria-expanded) and from the keyboard. Takes the
+ * page's whole ticket, as the buttons do. '' with no status; no button for
+ * a status with no line.
+ */
+export function renderStatusLine(t) {
+  const { status, answerIn = false, mergeStands = false, pullRequestState = null } = t;
+  const state = String(status ?? '').trim().toLowerCase();
+  if (!state) return '';
+  const settled = prSettled({ status, pullRequestState })
+    ? (pullRequestState.state === 'MERGED' ? PR_MERGED_LINE : PR_CLOSED_LINE)
+    : null;
+  const line = settled ?? (answerIn ? ANSWER_IN_LINE : mergeStands ? MERGE_STANDS_LINE
+    : HIS_STATUSES.includes(state) ? hisMoveLine(t, state) : STATUS_LINES[state]);
+  const info = line
+    ? `<button type="button" class="status-info" title="Status Information" aria-label="Status Information" aria-expanded="false" aria-describedby="status-tip">${INFO_ICON}</button>`
+      + `<span class="status-tip" id="status-tip" role="tooltip">${escapeHtml(line)}</span>`
+    : '';
+  return `<p class="status-line">Status: <span class="status-name">${escapeHtml(statusLabel({ status, answerIn, mergeStands }))}</span>${info}</p>`;
+}
 
 /** Where `line`'s inline code spans sit, as [start, end) pairs: nothing inside one is ever split. */
 const codeRanges = (line) => [...line.matchAll(CODE_SPAN)].map((m) => [m.index, m.index + m[0].length]);
@@ -892,36 +1159,52 @@ export function askParagraphs(ask) {
  * needed is that newest card's ask, drawn only while the ticket is in one of
  * his two statuses and his answer is not in (renderAnswerIn); a card stays in
  * the thread after he answers, and its ask is no longer his move (SP-118).
- * On a machine status, one quiet line says where it is instead.
+ * Under the heading (and the Ticket name line) comes renderStatusLine.
  *
  * When the description carries his `## Asked` request (SP-213), his own
  * words come first: his title is the heading (the ticket's current name on a
  * quiet line under it when a loop renamed it), then his words exactly as he
  * typed them under "Original Request", a link to the ticket a slice was cut
  * from, and only then the summary, under "How the Loop Understood It".
+ *
+ * A website visitor's bug report (bugReport, SP-286) has no `## Asked`:
+ * its heading is "Bug Report:" in place of the name the sending app cut off,
+ * then the visitor's words in bold, then the `## Where and who` facts, and
+ * the description's first paragraph (its "(none attached)" line) is never
+ * the summary.
  */
-export function renderQuickAction({ name, description, status, comments = [], answerIn = false, pullRequestState = null }) {
+export function renderQuickAction(t) {
+  const { name, description, status, tags = [], comments = [], answerIn = false, mergeStands = false, pullRequestState = null } = t;
   const card = newestCard(comments);
-  const summary = card ? cardContext(card.body) ?? firstParagraph(description) : firstParagraph(description);
+  const report = bugReport({ tags, description });
+  // A bug report's first paragraph is its "(none attached)" screenshots line (SP-286): only a card's context is a summary.
+  const fallback = report ? '' : firstParagraph(description);
+  const summary = card ? cardContext(card.body) ?? fallback : fallback;
   const state = String(status ?? '').toLowerCase();
   const his = HIS_STATUSES.includes(state);
   // SP-226: a merged or closed PR is past the card's "Your move: Merge".
-  const ask = card && his && !answerIn && !prSettled({ status, pullRequestState }) ? cardAsk(card.body) : null;
-  const where = his ? null : STATUS_LINES[state] ?? null;
+  // SP-285: nor is it his move while his merge word still stands.
+  const ask = card && his && !answerIn && !mergeStands && !prSettled({ status, pullRequestState }) ? cardAsk(card.body) : null;
   const asked = originalRequest(description);
   const top = asked ? [
     `<h1>${escapeHtml(asked.title)}</h1>`,
     String(name ?? '').trim() !== asked.title ? `<p class="ticket-name quiet">Ticket name: ${escapeHtml(name)}</p>` : '',
+    renderStatusLine(t),
     '<h2 class="request-heading">Original Request</h2>',
     `<p class="original-request">${escapeHtml(asked.words)}</p>`,
     asked.slicedFrom ? `<p class="sliced-from">Sliced from <a href="/t/${escapeHtml(asked.slicedFrom)}">${escapeHtml(asked.slicedFrom)}</a></p>` : '',
     summary ? '<h2 class="request-heading">How the Loop Understood It</h2>' : '',
-  ] : [`<h1>${escapeHtml(name)}</h1>`];
+  ] : report ? [
+    '<h1>Bug Report:</h1>',
+    renderStatusLine(t),
+    `<p class="bug-words">${escapeHtml(report.words)}</p>`,
+    report.facts.length ? `<ul class="bug-facts">${report.facts.map(bugReportFact).join('')}</ul>` : '',
+    report.screenshots ? '<p class="bug-shots quiet">Screenshots are attached: see the description under Details.</p>' : '',
+  ] : [`<h1>${escapeHtml(name)}</h1>`, renderStatusLine(t)];
   return [
     ...top,
     summary ? `<p class="summary">${renderInline(summary)}</p>` : '',
     ask ? askParagraphs(ask).map((p) => `<p class="needed">${p.map(renderInline).join('<br>')}</p>`).join('\n') : '',
-    where ? `<p class="where quiet">${escapeHtml(where)}</p>` : '',
   ].filter(Boolean).join('\n');
 }
 
@@ -973,12 +1256,21 @@ export function cardMove(body) {
 export const ANSWER_IN_NOTE = 'your answer is in';
 
 /**
- * A ticket's status as the page writes it, with ANSWER_IN_NOTE after it
- * when his answer is in: "Ready to launch · your answer is in". Plain text.
+ * The short note beside the status of a Ready to launch ticket whose merge
+ * word still stands (SP-285): he said it, a machine has written since (a
+ * conflict hand-off), and the relay merges on its own once it can.
  */
-export function statusLabel({ status, answerIn = false }) {
+export const MERGE_STANDS_NOTE = 'your merge word stands';
+
+/**
+ * A ticket's status as the page writes it, with ANSWER_IN_NOTE after it
+ * when his answer is in: "Ready to launch · your answer is in", or
+ * MERGE_STANDS_NOTE when his merge word still stands. Plain text.
+ */
+export function statusLabel({ status, answerIn = false, mergeStands = false }) {
   const name = String(status ?? '').replace(/^./, (c) => c.toUpperCase());
-  return answerIn ? `${name} · ${ANSWER_IN_NOTE}` : name;
+  if (answerIn) return `${name} · ${ANSWER_IN_NOTE}`;
+  return mergeStands ? `${name} · ${MERGE_STANDS_NOTE}` : name;
 }
 
 /**
@@ -1007,8 +1299,11 @@ export function renderHeldUp(t, timeOf) {
  * server stops saying so. No minutes are spelled out; the relay's interval
  * lives in the installer.
  */
-export function renderAnswerIn({ answerIn = false }) {
-  return answerIn ? '<p class="answer-in">Your answer is in. The relay acts on it at its next pass.</p>' : '';
+export function renderAnswerIn({ answerIn = false, mergeStands = false }) {
+  if (answerIn) return '<p class="answer-in">Your answer is in. The relay acts on it at its next pass.</p>';
+  // SP-285: said, then a machine wrote (a conflict hand-off). Still his answer.
+  if (mergeStands) return '<p class="answer-in">Your merge word stands. The relay merges this on its own as soon as it can; you do not need to say it again.</p>';
+  return '';
 }
 
 /**
@@ -1017,13 +1312,48 @@ export function renderAnswerIn({ answerIn = false }) {
  * acts on it at its next pass, so a second reply typed in that gap would
  * quietly overrule the first. The box comes back with the relay's comment,
  * exactly as Merge, Close and Go do. `name` is who the reply posts as.
+ * Never on a held bug report (heldBugReport, SP-287): nothing reads a
+ * reply there, so its Approve and Reject stand in its place.
  */
-export function renderReplyForm({ answerIn = false }, name) {
+export function renderReplyForm(t, name) {
+  const { answerIn = false } = t ?? {};
   if (answerIn) return '';
+  // SP-291: while a loop has the ticket nothing asks him for a reply; renderCommentForm stands in.
+  if (loopHasIt(t)) return '';
+  // SP-287: no loop reads a reply on a held bug report; renderBugReportActions stands in.
+  if (heldBugReport(t)) return '';
   return `<form class="reply">
         <label for="reply">Reply as ${escapeHtml(name ?? 'you')}</label>
         <textarea id="reply" required></textarea>
         <div class="row"><button type="submit">Post Reply</button><span class="note"></span></div>
+      </form>`;
+}
+
+/**
+ * The six statuses in which a loop has the ticket (SP-291): nothing on its
+ * page asks him for a reply, so the right column shows the ticket itself.
+ * His two (Needs your input, Ready to launch) are not here, nor is a status
+ * the page does not know, which keeps today's layout.
+ */
+export const LOOP_HAS_STATUSES = Object.freeze(['requested', 'queued', 'building', 'in review', 'rework', 'live']);
+
+/** Does a loop have this ticket (LOOP_HAS_STATUSES)? */
+export function loopHasIt({ status } = {}) {
+  return LOOP_HAS_STATUSES.includes(String(status ?? '').toLowerCase());
+}
+
+/**
+ * The Add Comment box under a loop ticket's comments (SP-291), as HTML, or
+ * '' on any other ticket (his two statuses keep the reply box). It posts
+ * through the same comments route as the reply box, so a note on a Queued
+ * ticket is there when the build loop reads it.
+ */
+export function renderCommentForm(t) {
+  if (!loopHasIt(t)) return '';
+  return `<form class="add-comment">
+        <label for="add-comment">Add a note for the loop</label>
+        <textarea id="add-comment" required></textarea>
+        <div class="row"><button type="submit">Add Comment</button><span class="note"></span></div>
       </form>`;
 }
 
@@ -1036,19 +1366,31 @@ export function renderReplyForm({ answerIn = false }, name) {
  * entry); the button posts it as his reply and the relay does the merge,
  * exactly as if he had typed it. Never once his answer is in (renderAnswerIn).
  */
-export function renderMergeAction({ status, mergePhrase, pullRequest, pullRequestState = null, comments = [], answerIn = false }) {
+export function renderMergeAction({ status, mergePhrase, pullRequest, pullRequestState = null, comments = [], answerIn = false, mergeStands = false }) {
   const line = renderPullRequestState({ status, pullRequest, pullRequestState });
   if (prSettled({ status, pullRequestState })) return line;
-  if (answerIn) return line;
+  if (answerIn || mergeStands) return line;
   if (String(status ?? '').toLowerCase() !== READY_TO_LAUNCH || !mergePhrase || !pullRequest) return line;
-  const card = newestCard(comments);
-  const move = card ? cardMove(card.body) : null;
-  // A regex, not a quoted word: the page's code spells no merge phrase.
-  if (move && !/^Merge$/.test(move)) return '';
+  if (!offersMerge({ status, mergePhrase, pullRequest, pullRequestState, comments, answerIn, mergeStands })) return '';
   return `${line}<form class="merge-action">
         <button type="submit">Merge</button><span class="note"></span>
         <p class="quiet">Posts &ldquo;${escapeHtml(mergePhrase)}&rdquo; as your reply; the relay merges it within a few minutes.</p>
       </form>`;
+}
+
+/**
+ * Does the page offer the Merge button (renderMergeAction)? A Ready to
+ * launch ticket with a pull request, a merge word from the server, nothing
+ * settled or said yet, and a newest card that names no other move. The
+ * status line's "i" asks the same (hisMoveLine), so the two never disagree.
+ */
+export function offersMerge({ status, mergePhrase, pullRequest, pullRequestState = null, comments = [], answerIn = false, mergeStands = false }) {
+  if (prSettled({ status, pullRequestState }) || answerIn || mergeStands) return false;
+  if (String(status ?? '').toLowerCase() !== READY_TO_LAUNCH || !mergePhrase || !pullRequest) return false;
+  const card = newestCard(comments);
+  const move = card ? cardMove(card.body) : null;
+  // A regex, not a quoted word: the page's code spells no merge phrase.
+  return !move || /^Merge$/.test(move);
 }
 
 /**
@@ -1091,10 +1433,7 @@ export function mergeQuestion({ name, pullRequest }) {
  * Never once his answer is in (renderAnswerIn).
  */
 export function renderCloseAction({ status, closePhrase, comments = [], answerIn = false }) {
-  if (answerIn) return '';
-  if (!HIS_STATUSES.includes(String(status ?? '').toLowerCase()) || !closePhrase) return '';
-  const card = newestCard(comments);
-  if (!card || cardMove(card.body) !== 'Close') return '';
+  if (!offersClose({ status, closePhrase, comments, answerIn })) return '';
   // The relay's two close paths differ: on Ready to launch it waits for the
   // work to be merged; on Needs your input the hand-back closes it at once.
   const when = String(status).toLowerCase() === READY_TO_LAUNCH
@@ -1104,6 +1443,18 @@ export function renderCloseAction({ status, closePhrase, comments = [], answerIn
         <button type="submit">Close</button><span class="note"></span>
         <p class="quiet">Posts &ldquo;${escapeHtml(closePhrase)}&rdquo; as your reply; ${when}.</p>
       </form>`;
+}
+
+/**
+ * Does the page offer the Close button (renderCloseAction)? One of his two
+ * statuses, a close word from the server, his answer not in, and a newest
+ * card whose move is Close. The status line's "i" asks the same.
+ */
+export function offersClose({ status, closePhrase, comments = [], answerIn = false }) {
+  if (answerIn) return false;
+  if (!HIS_STATUSES.includes(String(status ?? '').toLowerCase()) || !closePhrase) return false;
+  const card = newestCard(comments);
+  return Boolean(card) && cardMove(card.body) === 'Close';
 }
 
 /** The one question the Close button asks before it posts. Plain text, for confirm(). */
@@ -1135,6 +1486,77 @@ export function renderGoAction({ status, goPhrase, comments = [], answerIn = fal
 /** The one question the Go button asks before it posts. Plain text, for confirm(). */
 export function goQuestion({ name }) {
   return `Send ${name} to the build queue?`;
+}
+
+/**
+ * Is this a held bug report (SP-287)? A ticket tagged BUG_REPORT_TAG, in
+ * Needs your input, with no operator card anywhere in its thread. A
+ * visitor's report arrives that way: the hold itself is the approval gate,
+ * and no loop reads a reply to it (the relay acts only on an answer to a
+ * card). Once a loop has asked about it, the card's own buttons and the
+ * reply box are back, exactly as on any other ticket.
+ */
+export function heldBugReport({ status, tags = [], comments = [] } = {}) {
+  if (!(tags ?? []).includes(BUG_REPORT_TAG)) return false;
+  if (String(status ?? '').toLowerCase() !== NEEDS_YOUR_INPUT) return false;
+  return !(comments ?? []).some((c) => cardAsk(c?.body) !== null);
+}
+
+/** The tag a rejected ticket carries: the contract's "killing a ticket" (docs/LOOP_CONTRACT.md). */
+export const WONT_DO_TAG = 'wont-do';
+
+/** The note Reject posts on the ticket, after moving it: why it is Live with nothing shipped. */
+export const REJECT_COMMENT = 'Rejected from the ticket page: this bug report will not be worked on, and nothing shipped for it.';
+
+/** The one line that stands where the reply box was on a held bug report. */
+export const HELD_REPORT_LINE = 'No loop reads a reply on a bug report held for you, so there is no reply box here. Approve or Reject it; the Change panel under Details still works for anything else.';
+
+/** The status line's "i" on a held bug report: its move is a button, not an answer. */
+export const HELD_REPORT_STATUS_LINE = 'It waits on you to Approve or Reject it below.';
+
+/**
+ * The Approve and Reject buttons on a held bug report (heldBugReport), and
+ * the line that stands in for its reply box, as HTML, or '' on any other
+ * ticket. Approve moves it to Requested, so the intake lane writes it up;
+ * Reject moves it to Live with the wont-do tag and posts REJECT_COMMENT.
+ * The page writes both itself (they are his own status changes, the same
+ * ones the Change panel makes), and reads each one back.
+ */
+export function renderBugReportActions(t) {
+  if (!heldBugReport(t)) return '';
+  return `<form class="approve-action">
+        <button type="submit">Approve</button><span class="note"></span>
+        <p class="quiet">Moves it to Requested; the intake lane writes it up as a spec for you to say go to.</p>
+      </form>
+      <form class="reject-action">
+        <button type="submit">Reject</button><span class="note"></span>
+        <p class="quiet">Moves it to Live with the ${escapeHtml(WONT_DO_TAG)} tag and a note that nothing shipped.</p>
+      </form>
+      <p class="held-report quiet">${escapeHtml(HELD_REPORT_LINE)}</p>`;
+}
+
+/** The one question Approve asks before it writes. Plain text, for confirm(). */
+export function approveQuestion({ name }) {
+  return `Approve ${name} and send it to intake?`;
+}
+
+/** The one question Reject asks before it writes. Plain text, for confirm(). */
+export function rejectQuestion({ name }) {
+  return `Reject ${name}? It moves to Live with the ${WONT_DO_TAG} tag, and nothing is built.`;
+}
+
+/**
+ * Did a page write stick? The server's answer to a change (`{ ticket }`)
+ * read against what was asked: the status, and every tag asked for.
+ * Answers '' when it did, or what did not, in plain words.
+ */
+export function changeProblem(answer, { status, tags = [] } = {}) {
+  const t = answer?.ticket;
+  if (!t) return 'the tracker did not answer with the ticket.';
+  const missing = [];
+  if (status && String(t.status ?? '').toLowerCase() !== status) missing.push(`the status reads "${t.status}", not "${status}"`);
+  for (const tag of tags) if (!(t.tags ?? []).includes(tag)) missing.push(`the ${tag} tag is not on it`);
+  return missing.length ? `${missing.join(' and ')}.` : '';
 }
 
 /** A stage colour the page will use: `#rrggbb` only, anything else is no colour. */
@@ -1763,12 +2185,130 @@ export function renderListPriority({ id, priority }) {
   return `<select class="list-priority" data-priority-of="${escapeHtml(id)}" aria-label="Priority of ${escapeHtml(id)}">${options}</select><span class="note" data-priority-note="${escapeHtml(id)}" role="status"></span>`;
 }
 
+/**
+ * SP-244: a List view row's Assigned To cell, a dropdown that saves on change
+ * (app.mjs wireListPickers). The same choices and rule as the Change panel's
+ * picker: the project's operator, the current assignee marked "(now)" when
+ * it is someone else, and Nobody. `operator` is the board's `{ id, name }`,
+ * or null. Beside it, the note that says "Saving…", "Saved" or a refusal.
+ */
+export function renderListAssignee({ id, assignee, assigneeId }, operator) {
+  const options = [
+    ...(operator ? [option(String(operator.id), operator.name, assigneeId === operator.id)] : []),
+    ...(assigneeId != null && assigneeId !== operator?.id ? [option(String(assigneeId), `${assignee ?? `actor ${assigneeId}`} (now)`, true)] : []),
+    option('', 'Nobody', assigneeId == null),
+  ].join('');
+  return `<select class="list-assignee" data-assignee-of="${escapeHtml(id)}" aria-label="Assignee of ${escapeHtml(id)}">${options}</select><span class="note" data-assignee-note="${escapeHtml(id)}" role="status"></span>`;
+}
+
+/**
+ * SP-246: every tag used on a board's tickets, each once, alphabetical
+ * (case aside), for the List view's Add Tag dropdowns. `board` is the
+ * server's board answer; anything unreadable in it is skipped.
+ */
+export function projectTags(board) {
+  const seen = new Set();
+  for (const c of Array.isArray(board?.columns) ? board.columns : []) {
+    for (const t of Array.isArray(c?.tickets) ? c.tickets : []) {
+      for (const tag of Array.isArray(t?.tags) ? t.tags : []) if (typeof tag === 'string' && tag) seen.add(tag);
+    }
+  }
+  return [...seen].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }) || (a < b ? -1 : a > b ? 1 : 0));
+}
+
+/**
+ * SP-307: every tag on a board's tickets with how many tickets carry it,
+ * `[{ tag, count }]`, in projectTags' order (the List view's Add Tag list).
+ * A tag a ticket lists twice counts that ticket once.
+ */
+export function projectTagCounts(board) {
+  const counts = new Map();
+  for (const c of Array.isArray(board?.columns) ? board.columns : []) {
+    for (const t of Array.isArray(c?.tickets) ? c.tickets : []) {
+      const own = new Set((Array.isArray(t?.tags) ? t.tags : []).filter((tag) => typeof tag === 'string' && tag));
+      for (const tag of own) counts.set(tag, (counts.get(tag) ?? 0) + 1);
+    }
+  }
+  return projectTags(board).map((tag) => ({ tag, count: counts.get(tag) }));
+}
+
+/**
+ * SP-246: a List view row's Tags cell (app.mjs wireListPickers). Each tag a
+ * chip with a × that removes it; then an Add Tag dropdown of the project's
+ * other tags (`known`, from projectTags), never one the ticket already has,
+ * with New Tag… last, which opens the hidden text box beside it (Enter adds,
+ * Escape cancels). Beside them, the note that says "Saving…", "Saved" or a
+ * refusal.
+ */
+export function renderListTags({ id, tags = [] }, known = []) {
+  const own = Array.isArray(tags) ? tags : [];
+  const chips = own.map((tag) => `<span class="tag">${escapeHtml(tag)}<button type="button" class="remove-tag" data-untag-of="${escapeHtml(id)}" data-tag="${escapeHtml(tag)}" title="Remove ${escapeHtml(tag)}" aria-label="Remove tag ${escapeHtml(tag)} from ${escapeHtml(id)}">×</button></span>`).join('');
+  const options = [
+    option('', 'Add Tag', true),
+    ...known.filter((tag) => !own.includes(tag)).map((tag) => option(tag, tag, false)),
+    '<option value="" data-new-tag>New Tag…</option>',
+  ].join('');
+  return `${chips}<select class="list-tags" data-tags-of="${escapeHtml(id)}" aria-label="Add a tag to ${escapeHtml(id)}">${options}</select><input type="text" class="new-tag" data-new-tag-of="${escapeHtml(id)}" aria-label="New tag for ${escapeHtml(id)}" placeholder="New tag, then Enter" hidden><span class="note" data-tags-note="${escapeHtml(id)}" role="status"></span>`;
+}
+
+/**
+ * SP-247: a List view row's Topics cell (app.mjs wireListPickers). Each of
+ * the ticket's topics a chip with a × that removes it (a quiet dash when it
+ * has none); then an Add Topic dropdown of the project's other topics
+ * (`known`, the board's `topics`, each `{ id, name }`), never one the ticket
+ * already has. A project with no topics says where they are made. Beside
+ * them, the note that says "Saving…", "Saved" or a refusal.
+ */
+export function renderListTopics({ id, topics = [] }, known = []) {
+  const own = Array.isArray(topics) ? topics.filter((t) => t && Number.isInteger(t.id)) : [];
+  const all = Array.isArray(known) ? known.filter((t) => t && Number.isInteger(t.id)) : [];
+  const ownIds = new Set(own.map((t) => t.id));
+  const chips = own.length
+    ? own.map((t) => `<span class="tag topic">${escapeHtml(t.name)}<button type="button" class="remove-tag" data-untopic-of="${escapeHtml(id)}" data-topic="${t.id}" title="Remove ${escapeHtml(t.name)}" aria-label="Remove topic ${escapeHtml(t.name)} from ${escapeHtml(id)}">×</button></span>`).join('')
+    : '<span class="quiet">–</span>';
+  const options = [
+    option('', 'Add Topic', true),
+    ...all.filter((t) => !ownIds.has(t.id)).map((t) => option(String(t.id), t.name, false)),
+    ...(all.length ? [] : ['<option value="" disabled>No topics yet: make one on the Topics page</option>']),
+  ].join('');
+  return `${chips}<select class="list-topics" data-topics-of="${escapeHtml(id)}" aria-label="Add a topic to ${escapeHtml(id)}">${options}</select><span class="note" data-topics-note="${escapeHtml(id)}" role="status"></span>`;
+}
+
+/**
+ * The Add Task box's two ways to name a task (SP-248): `suggest`, where the
+ * title is picked from suggestions made from the description alone, and
+ * `own`, where he types a title first and it is offered beside them.
+ */
+export const TITLE_MODES = Object.freeze(['suggest', 'own']);
+
+/** A kept title mode read back from the browser: `own` only when it says so, else `suggest`. */
+export function titleModeOf(text) {
+  return text === 'own' ? 'own' : 'suggest';
+}
+
+/**
+ * The Add Task box's choice list: in Write My Own Title his own title first
+ * ("Keep my title: ..."), then the suggested ones, each a radio button whose
+ * value is the title exactly as it is filed. A suggestion that repeats his
+ * own title is not offered twice. The first choice starts picked. Every
+ * title is escaped; an empty list draws nothing.
+ */
+export function renderTitleChoices({ own = null, titles = [] } = {}) {
+  const mine = typeof own === 'string' && own.trim() ? own : null;
+  const choices = [
+    ...(mine == null ? [] : [{ value: mine, text: `Keep my title: ${mine}` }]),
+    ...titles.filter((t) => typeof t === 'string' && t.trim() && t !== mine).map((t) => ({ value: t, text: t })),
+  ];
+  return choices.map((c, i) => `<label class="title-choice"><input type="radio" name="title-choice" value="${escapeHtml(c.value)}"${i === 0 ? ' checked' : ''}> <span>${escapeHtml(c.text)}</span></label>`).join('');
+}
+
 /** The columns a stage's table sorts on, in the order they are drawn, with the class each cell wears. */
 export const SORT_COLUMNS = Object.freeze([
   { key: 'id', label: 'Ticket #' },
   { key: 'name', label: 'Ticket' },
   { key: 'priority', label: 'Priority' },
   { key: 'tags', label: 'Tags' },
+  { key: 'topics', label: 'Topics' },
   { key: 'assignee', label: 'Assigned To' },
   { key: 'when', label: 'Last Change' },
 ]);
@@ -1790,6 +2330,7 @@ const COMPARE = {
   name: (a, b) => byText(String(a.name ?? ''), String(b.name ?? '')),
   priority: (a, b) => lastIfMissing((x, y) => x - y)(rankOf(a.priority), rankOf(b.priority)),
   tags: (a, b) => lastIfMissing(byText)(a.tags?.[0] ?? null, b.tags?.[0] ?? null),
+  topics: (a, b) => lastIfMissing(byText)(a.topics?.[0]?.name ?? null, b.topics?.[0]?.name ?? null),
   assignee: (a, b) => lastIfMissing(byText)(a.assignee || null, b.assignee || null),
   when: (a, b) => {
     const x = Date.parse(a.updatedAt);
@@ -1866,14 +2407,72 @@ export function renderContextDocs({ project, docs = [] }, { size, timeOf }) {
 }
 
 /**
+ * The Topics page (SP-243), in two equal halves (SP-307): Topics on the
+ * left, Tags on the right; a narrow screen stacks them, Topics first
+ * (app.css). The Topics half opens with the Add Topic form folded shut (a
+ * "colex", a <details>), then the picked project's topics, newest first,
+ * each with its description, maker and time. The form is drawn open when
+ * `problem` is set, so a refused create is not hidden away. The Tags half
+ * lists every tag on the project's tasks once, with how many carry it
+ * (`tags`, from projectTagCounts; null when they could not be read).
+ * `done` and `problem` are the line the last create left. `timeOf` puts a
+ * time in words. Every name, description and tag is escaped.
+ */
+export function renderTopics({ projects, project, topics = [], tags = [] }, { timeOf, done = '', problem = '' } = {}) {
+  const row = (t) => `<tr data-topic="${escapeHtml(t.id)}">
+      <td class="name">${escapeHtml(t.name)}</td>
+      <td class="about">${t.description ? escapeHtml(t.description) : '<span class="quiet">none</span>'}</td>
+      <td class="by">${t.createdByName ? escapeHtml(t.createdByName) : '<span class="quiet">unknown</span>'}</td>
+      <td class="when">${escapeHtml(timeOf(t.createdAt))}</td></tr>`;
+  const tagRow = ({ tag, count }) => `<tr data-tag="${escapeHtml(tag)}">
+      <td class="name"><span class="tag">${escapeHtml(tag)}</span></td>
+      <td class="count">${count} ${count === 1 ? 'task' : 'tasks'}</td></tr>`;
+  const tagList = tags === null
+    ? '<p class="note error no-tags">The tags could not be read. Reload the page to try again.</p>'
+    : tags.length
+      ? `<table class="projects tag-list"><thead><tr><th>Tag</th><th>Tasks</th></tr></thead>
+        <tbody>${tags.map(tagRow).join('')}</tbody></table>`
+      : '<p class="quiet no-tags">No tags yet.</p>';
+  return `<h1>Topics</h1>
+    <div class="toolbar">${renderProjectPicker(projects, project.slug)}</div>
+    <p class="quiet">The key aspects of ${escapeHtml(project.name)}: its features, mostly. Each topic belongs to one project. Tags are the labels on its tasks.</p>
+    <p class="note topic-note${problem ? ' error' : ' quiet'}" role="status">${escapeHtml(problem || done)}</p>
+    <div class="topics-columns">
+      <section class="topics-half" aria-labelledby="topics-title">
+        <details class="colex add-topic"${problem ? ' open' : ''}>
+          <summary><span class="fold" aria-hidden="true"></span>Add Topic</summary>
+          <form class="create-topic">
+            <label for="topic-name">Name</label>
+            <input id="topic-name" name="name" maxlength="200" autocomplete="off">
+            <label for="topic-description">Description</label>
+            <textarea id="topic-description" name="description" rows="3" maxlength="5000"></textarea>
+            <div class="row"><button type="submit">Create Topic</button></div>
+          </form>
+        </details>
+        <h2 id="topics-title">Topics</h2>
+        ${topics.length
+    ? `<table class="projects topic-list"><thead><tr><th>Name</th><th>Description</th><th>Created By</th><th>Created</th></tr></thead>
+        <tbody>${topics.map(row).join('')}</tbody></table>`
+    : '<p class="quiet no-topics">No topics yet.</p>'}
+      </section>
+      <section class="tags-half" aria-labelledby="tags-title">
+        <h2 id="tags-title">Tags</h2>
+        ${tagList}
+      </section>
+    </div>`;
+}
+
+/**
  * SP-195: the Docs page's Reference Docs and Work Log section. Every file
  * there is one of the repository's docs/ Markdown files; its kind comes
  * from its folder and its date from the `YYYY-MM-DD` a file name starts
  * with (every work-log entry has one). Worked out here from the path, so
  * the server's /documentation answer stays as it is.
  */
-export const DOC_KINDS = ['Reference', 'Onboarding', 'Work Log'];
-const DOC_FOLDERS = { onboarding: 'Onboarding', 'work-log': 'Work Log' };
+export const DOC_KINDS = ['Reference', 'Onboarding', 'Work Log', 'Operator Prompts'];
+/** SP-293: operator-prompts/ holds one file per hand-run thread, dated like the work log. */
+const DOC_FOLDERS = { onboarding: 'Onboarding', 'work-log': 'Work Log', 'operator-prompts': 'Operator Prompts' };
+const NEWEST_FIRST = new Set(['Work Log', 'Operator Prompts']);
 
 /** A docs/ file's kind and date from its path (relative to docs/): `{ kind, date }`, date 'YYYY-MM-DD' or null. */
 export function docInfo(path) {
@@ -1901,9 +2500,9 @@ const DOC_COMPARE = {
   kind: (a, b) => kindRank(a.kind) - kindRank(b.kind) || byText(a.kind, b.kind),
   date: (a, b) => lastIfMissing(byText)(a.date, b.date),
 };
-/** The order the section opens in: Reference, then Onboarding, then Work Log newest first, then any other folder; title within a kind. */
+/** The order the section opens in: Reference, then Onboarding, then Work Log and Operator Prompts newest first, then any other folder; title within a kind. */
 const docStart = (a, b) => DOC_COMPARE.kind(a, b)
-  || (a.kind === 'Work Log' ? lastIfMissing(byText)(b.date, a.date) : 0)
+  || (NEWEST_FIRST.has(a.kind) ? lastIfMissing(byText)(b.date, a.date) : 0)
   || DOC_COMPARE.title(a, b) || byText(a.path, b.path);
 
 /** The /documentation files as the section's rows: `{ path, title, kind, date }`, in the order it opens in. Never changes `files`. */
@@ -1983,4 +2582,381 @@ export function renderDocumentation(files, address) {
     <table class="projects spirality-docs sortable"><thead>${renderDocHeadings(null)}</thead>
       <tbody>${renderDocBody(rows, address)}</tbody></table>
   </details>`;
+}
+
+/**
+ * The Console view (SP-233): every ticket in flight as an icon tile, from
+ * GET /in-flight (pageData.consoleOf). Everything below is pure, so the
+ * tests draw exactly what the page draws.
+ */
+
+/** What a Console tile shows when a fact is not known. */
+export const CONSOLE_UNKNOWN = '—';
+
+/**
+ * A ticket's next change as a tile's short fact and its hover text, from
+ * the answer's `nextChange`: `You` when it is the operator's move, `Now`
+ * while Building (or while the lane that acts on it runs), `in 12 min` /
+ * `in 2 h` until the lane's next pass (its clock time in Mountain time on
+ * hover), `Now` for a pass already due, and CONSOLE_UNKNOWN when no time is
+ * known. `now` is a time in milliseconds, given so a test can fix the clock.
+ */
+export function consoleNextChange(nextChange, now = Date.now()) {
+  const lane = typeof nextChange?.lane === 'string' ? nextChange.lane : 'The lane';
+  if (nextChange?.kind === 'operator') return { text: 'You', title: 'Your move: no lane acts on it until you do' };
+  if (nextChange?.kind === 'running') return { text: 'Now', title: `${lane} is working on it now` };
+  if (nextChange?.kind !== 'lane') return { text: CONSOLE_UNKNOWN, title: 'When the next pass picks it up is not known' };
+  if (nextChange.running) return { text: 'Now', title: `${lane} is running now` };
+  const due = Date.parse(nextChange.due);
+  if (Number.isNaN(due)) return { text: CONSOLE_UNKNOWN, title: 'When the next pass picks it up is not known' };
+  const away = due - now;
+  const at = `${lane}'s next pass is due ${mountainTime(nextChange.due)}`;
+  if (away <= 0) return { text: 'Now', title: at };
+  const minutes = Math.ceil(away / 60_000);
+  // Whole hours count down the same way minutes do: 89 minutes is still "in 1 h", never rounded up to 2.
+  return { text: minutes < 60 ? `in ${minutes} min` : `in ${Math.floor(minutes / 60)} h`, title: at };
+}
+
+/**
+ * How long a ticket has sat in its stage, short: `5m`, `3h`, `2d` (under a
+ * minute is `0m`), or CONSOLE_UNKNOWN for a time that cannot be read.
+ */
+export function consoleAge(since, now = Date.now()) {
+  const at = Date.parse(since);
+  if (Number.isNaN(at)) return CONSOLE_UNKNOWN;
+  const minutes = Math.max(0, Math.floor((now - at) / 60_000));
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  return hours < 48 ? `${hours}h` : `${Math.floor(hours / 24)}d`;
+}
+
+/**
+ * True when a tile is ringed as waiting on the operator: the loop's own
+ * verdict (`waitingOnOperator`), one of his two statuses (`nextChange` of
+ * kind `operator`), or an answer of his that is in (`answerIn`).
+ */
+export function consoleWaiting(t) {
+  return t?.waitingOnOperator === true || t?.answerIn === true || t?.nextChange?.kind === 'operator';
+}
+
+/**
+ * The tag a ticket from the tracker page carries (SP-221): it says where the
+ * request came from, not what feature it is part of.
+ */
+export const REQUEST_FORM_TAG = 'request-form';
+
+/**
+ * The Console's feature colours (SP-234): light backgrounds, so the ticket
+ * number (the page's ink) reads on every one of them. app.css has one
+ * `.tile.feature-<n>` rule per colour, in this order; a test holds the two
+ * together and checks each colour's contrast.
+ */
+export const FEATURE_PALETTE = Object.freeze([
+  '#ffd6d6', '#ffe2c2', '#fff3b0', '#d9f2c4', '#c8f0e4',
+  '#cfe8ff', '#dcd6ff', '#f5d0f0', '#e6dccb', '#d5dde6',
+]);
+
+/**
+ * A ticket's feature: its first tag (the loops tag each ticket with its
+ * epic's name), passing over `request-form`, which says only where the
+ * request came from. Null for a ticket with no such tag, which keeps the
+ * plain tile.
+ */
+export function consoleFeature(t) {
+  const tags = Array.isArray(t?.tags) ? t.tags : [];
+  const tag = tags.find((x) => typeof x === 'string' && x.trim() && x.trim() !== REQUEST_FORM_TAG);
+  return tag ? tag.trim() : null;
+}
+
+/**
+ * Which FEATURE_PALETTE colour a feature gets: a pure function of the tag
+ * (an FNV-1a hash of its characters), so the same tag has the same colour on
+ * every load and every machine. Two tags can share a colour, more often once
+ * there are more features than colours.
+ */
+export function featureColourIndex(tag) {
+  let hash = 0x811c9dc5;
+  for (const ch of String(tag)) {
+    hash ^= ch.codePointAt(0);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash % FEATURE_PALETTE.length;
+}
+
+/**
+ * The Console's Features key as HTML (SP-234): each feature on screen, with
+ * its colour swatch and how many tickets in flight carry it, most tickets
+ * first (ties by name). Each is a button; the page dims every other tile
+ * while one is picked (`picked`, the feature's tag, shown pressed). Nothing
+ * when no ticket on screen has a feature.
+ */
+export function renderFeatureKey(tickets, picked = null) {
+  const counts = new Map();
+  for (const t of Array.isArray(tickets) ? tickets : []) {
+    const feature = consoleFeature(t);
+    if (feature) counts.set(feature, (counts.get(feature) ?? 0) + 1);
+  }
+  if (!counts.size) return '';
+  const order = [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  const pick = ([feature, n]) => {
+    const on = feature === picked;
+    const say = `${feature}: ${n} ticket${n === 1 ? '' : 's'}`;
+    return `<button type="button" class="feature-pick feature-${featureColourIndex(feature)}" data-feature="${escapeHtml(feature)}" aria-pressed="${on}" title="${escapeHtml(on ? `Show every ticket again` : `Show only ${feature}`)}" aria-label="${escapeHtml(say)}">`
+      + `<span class="swatch" aria-hidden="true"></span>${escapeHtml(feature)}<span class="count">${n}</span></button>`;
+  };
+  return `<div class="feature-key" role="group" aria-label="Features"><span class="key-title">Features</span>${order.map(pick).join('')}</div>`;
+}
+
+/**
+ * One Console tile as HTML: a link to the ticket, its full name on hover;
+ * the project's logo as its picture (only an http(s) address is drawn), or
+ * the project's ticket prefix in large letters when it has none; the ticket
+ * number over it; and along the bottom the stage, the next change
+ * (consoleNextChange) and the time in stage (consoleAge). A ticket waiting
+ * on the operator carries `waiting` (the ring). A ticket with a feature
+ * (consoleFeature) carries `feature feature-<n>` (its colour, from app.css)
+ * and `data-feature`, which the Features key's pick dims by. The stage fact carries
+ * `data-stage`, so the page puts the Settings page's stage colour on it
+ * after drawing (no inline style). Every piece of ticket and project text
+ * is escaped.
+ */
+export function renderConsoleTile(t, project = null, now = Date.now()) {
+  const id = String(t?.id ?? '');
+  const prefix = project?.prefix ?? id.replace(/-.*$/, '');
+  const logo = typeof project?.logo === 'string' && /^https?:\/\//i.test(project.logo) ? project.logo : null;
+  const picture = logo
+    ? `<img class="tile-logo" src="${escapeHtml(logo)}" alt="" referrerpolicy="no-referrer">`
+    : `<span class="tile-prefix" aria-hidden="true">${escapeHtml(prefix)}</span>`;
+  const next = consoleNextChange(t?.nextChange, now);
+  const age = consoleAge(t?.stageSince, now);
+  const waiting = consoleWaiting(t);
+  const feature = consoleFeature(t);
+  const status = String(t?.status ?? '');
+  const label = `${id}: ${t?.name ?? ''}`;
+  const spoken = `${label}. ${status}; next change ${next.text}; in this stage ${age}${feature ? `; feature ${feature}` : ''}${waiting ? '; waiting on you' : ''}.`;
+  const classes = `tile${feature ? ` feature feature-${featureColourIndex(feature)}` : ''}${waiting ? ' waiting' : ''}`;
+  const marked = feature ? ` data-feature="${escapeHtml(feature)}"` : '';
+  return `<a class="${classes}"${marked} href="/t/${encodeURIComponent(id)}" title="${escapeHtml(label)}" aria-label="${escapeHtml(spoken)}">`
+    + `<span class="tile-picture">${picture}</span>`
+    + `<span class="tile-number">${escapeHtml(id)}</span>`
+    + '<span class="tile-facts">'
+    + `<span class="fact stage" data-stage="${escapeHtml(status)}">${escapeHtml(status)}</span>`
+    + `<span class="fact next" title="${escapeHtml(next.title)}">${escapeHtml(next.text)}</span>`
+    + `<span class="fact age" title="${escapeHtml(`In ${status} for ${age}`)}">${escapeHtml(age)}</span>`
+    + '</span></a>';
+}
+
+/**
+ * The Console's stages as HTML, left to right in `stages` order (the
+ * Settings page's stage list, GET /stage-colours, in pipeline order), each
+ * a column with its name, its count and its tiles; an empty stage still
+ * shows its heading. A ticket whose status is not in `stages` (the list
+ * could not be read) gets a column of its own after them, in the answer's
+ * order, so no ticket is ever left off. Live is never drawn: nothing in
+ * flight is Live. The Features key (renderFeatureKey) goes above the stages.
+ */
+export function renderConsole(answer, stages = [], now = Date.now()) {
+  const tickets = Array.isArray(answer?.tickets) ? answer.tickets : [];
+  const projects = new Map((Array.isArray(answer?.projects) ? answer.projects : []).map((p) => [p.slug, p]));
+  const order = stages.filter((s) => typeof s === 'string' && s !== 'Live');
+  for (const t of tickets) if (!order.includes(t.status)) order.push(t.status);
+  const column = (status) => {
+    const here = tickets.filter((t) => t.status === status);
+    return `<section class="console-stage" data-stage="${escapeHtml(status)}">`
+      + `<h2><span class="stage-name">${escapeHtml(status)}</span><span class="count quiet">${here.length}</span></h2>`
+      + `<div class="tiles">${here.map((t) => renderConsoleTile(t, projects.get(t.project), now)).join('')}</div></section>`;
+  };
+  return `${renderFeatureKey(tickets)}<div class="console">${order.map(column).join('')}</div>`;
+}
+
+// ── Suggest Next Tasks (SP-251) ──────────────────────────────────────────────
+
+/** How often the Suggest Next Tasks box checks back while a run is going. */
+export const SUGGEST_POLL_MS = 10_000;
+
+/**
+ * `order` (the suggestions' keys, first place first) with the one at `from`
+ * moved to `to` (both 0-based, `to` held inside the list), the rest closing
+ * up behind it: moving the fifth to second makes the old second to fourth
+ * the third to fifth. A new array; the numbers shown are always place + 1,
+ * so they stay 1, 2, 3 ... with no gaps or repeats.
+ */
+export function moveSuggestion(order, from, to) {
+  const list = [...order];
+  if (!Number.isInteger(from) || from < 0 || from >= list.length) return list;
+  const at = Math.max(0, Math.min(list.length - 1, Number.isInteger(to) ? to : from));
+  const [moved] = list.splice(from, 1);
+  list.splice(at, 0, moved);
+  return list;
+}
+
+/**
+ * The Suggest Next Tasks box's kept state for a run that finished at `at`
+ * with `count` suggestions: `saved` when it is for that same run and still
+ * holds every suggestion once, else a fresh one (the list order, all kept,
+ * none filed). `order` holds each suggestion's index in the run's list,
+ * `dropped` the indexes unticked, `filed` index -> `{ id, project }`.
+ */
+export function suggestState(saved, at, count) {
+  const fresh = { at, order: Array.from({ length: count }, (_, i) => i), dropped: [], filed: {} };
+  if (!saved || typeof saved !== 'object' || saved.at !== at || !Array.isArray(saved.order)) return fresh;
+  const order = saved.order;
+  if (order.length !== count || [...order].sort((a, b) => a - b).some((v, i) => v !== i)) return fresh;
+  const dropped = Array.isArray(saved.dropped) ? saved.dropped.filter((i) => Number.isInteger(i) && i >= 0 && i < count) : [];
+  const filed = {};
+  for (const [k, v] of Object.entries(saved.filed ?? {})) {
+    if (Number(k) >= 0 && Number(k) < count && typeof v?.id === 'string' && typeof v?.project === 'string') filed[k] = { id: v.id, project: v.project };
+  }
+  return { at, order: [...order], dropped, filed };
+}
+
+/**
+ * What "File in This Order" does with `state` (suggestState): `file`, the
+ * kept suggestions not yet filed, in the order shown; `kept`, every kept
+ * one in that order (filed before or now), whose tickets get places 1, 2,
+ * 3 ... A suggestion already filed is never in `file`, so a retry files
+ * nothing twice.
+ */
+export function filingPlan(state) {
+  const dropped = new Set(state.dropped);
+  const kept = state.order.filter((i) => !dropped.has(i));
+  return { kept, file: kept.filter((i) => !state.filed[i]) };
+}
+
+/**
+ * Which kept rows' tickets File in This Order puts in order (SP-251).
+ * `kept` is filingPlan's kept rows in the order shown, `filed` the state's
+ * filed tickets (`{ id, project }` by row), and `now` the tickets filed by
+ * an earlier press as read back just now, by row: the ticket, or null when
+ * it no longer answers. A row missing from `now` was filed by this press.
+ *
+ * Only a ticket still waiting (Requested, in the project it was filed into)
+ * is ordered: placing a started one bumps its version, and a lane's or the
+ * page's guarded write on it then fails (orderTickets, tracker/store.mjs).
+ * A started one is left alone; one deleted or moved to another project is
+ * `gone`, since naming it would make the whole order call fail.
+ * Answers `{ byProject, leftAlone, gone }`: byProject maps a project to its
+ * ids in the order shown; the other two are lists of `{ index, id }`.
+ */
+export function orderPlan(kept, filed, now = {}) {
+  const byProject = new Map();
+  const leftAlone = [];
+  const gone = [];
+  for (const index of kept) {
+    const f = filed[index];
+    if (!f) continue;
+    if (Object.hasOwn(now, index)) {
+      const t = now[index];
+      if (!t || t.project !== f.project) { gone.push({ index, id: f.id }); continue; }
+      if (t.status !== 'requested') { leftAlone.push({ index, id: f.id }); continue; }
+    }
+    byProject.set(f.project, [...(byProject.get(f.project) ?? []), f.id]);
+  }
+  return { byProject, leftAlone, gone };
+}
+
+/** "SP-1", "SP-1 and SP-2", "SP-1, SP-2 and SP-3". */
+export function andList(items) {
+  if (items.length < 2) return items.join('');
+  return `${items.slice(0, -1).join(', ')} and ${items.at(-1)}`;
+}
+
+/** The box's line for a run: what is going on, or why it failed. Empty for a finished one. */
+export function suggestRunLine(run) {
+  if (!run) return '';
+  if (run.state === 'running') return 'Reading the project for its next tasks… This takes a few minutes; the list shows here when it is done.';
+  if (run.state === 'failed') return `No suggestions this time: ${run.message ?? 'the run failed.'}`;
+  return '';
+}
+
+/**
+ * The Suggest Next Tasks rows for `suggestions` in `state`'s order (suggestState):
+ * each a drag handle (arrow keys move it too), its place as a dropdown of
+ * 1 to the number of rows, a Keep checkbox, the title, an i button that
+ * opens the row's About box (SP-304, renderSuggestionInfo), and the why and
+ * description under More. The i carries the suggestion's own index, not its
+ * place, so a moved row's i still opens its own suggestion. A filed row names its ticket. Every word is
+ * escaped: a suggestion is text, never markup.
+ */
+export function renderSuggestRows(suggestions, state) {
+  const n = state.order.length;
+  const dropped = new Set(state.dropped);
+  return state.order.map((i, place) => {
+    const s = suggestions[i] ?? {};
+    const title = escapeHtml(s.title ?? '');
+    const options = Array.from({ length: n }, (_, k) => `<option value="${k + 1}"${k === place ? ' selected' : ''}>${k + 1}</option>`).join('');
+    const filed = state.filed[i];
+    return `<li class="suggestion" data-index="${i}" draggable="true">`
+      + `<button type="button" class="drag-handle" aria-label="Move ${title}: arrow keys, or drag" title="Drag, or use the arrow keys">⠿</button>`
+      + `<select class="place" aria-label="Place of ${title}">${options}</select>`
+      // The value is written out: a checkbox without one reads "on" against a
+      // drawn value of "", which the page's redraw hold takes for typing, and
+      // the minute's redraw would never run while the list shows.
+      + `<label class="keep"><input type="checkbox" value="keep"${dropped.has(i) ? '' : ' checked'}> Keep</label>`
+      + `<span class="suggestion-title">${title}</span>`
+      + `<button type="button" class="suggestion-info-open" data-index="${i}" aria-label="About ${title}" title="About This Task">${INFO_ICON}</button>`
+      + (filed ? `<span class="filed">Filed <a href="/t/${encodeURIComponent(filed.id)}">${escapeHtml(filed.id)}</a></span>` : '')
+      + `<details class="more"><summary>More</summary>`
+      + (s.why ? `<p class="why"><strong>Why:</strong> ${escapeHtml(s.why)}</p>` : '')
+      + (s.description ? `<p class="suggestion-description">${escapeHtml(s.description)}</p>` : '')
+      + `</details></li>`;
+  }).join('');
+}
+
+/** A GitHub repository's `owner/name`, the store's own shape; anything else links no file. */
+const GITHUB_REPO = /^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/;
+
+/**
+ * A suggested file's address on GitHub, at `main` (SP-305), or null when
+ * `repo` is not an `owner/name` or `path` is not a plain relative path (the
+ * server checks it too: no `..`, no leading `/`, no scheme or `:`).
+ */
+export function suggestionFileHref(repo, path) {
+  if (typeof repo !== 'string' || !GITHUB_REPO.test(repo) || typeof path !== 'string' || !path) return null;
+  if (path.startsWith('/') || /[\u0000-\u001f\u007f\\:]/.test(path)) return null;
+  const parts = path.split('/');
+  if (parts.some((p) => p === '' || p === '..')) return null;
+  return `https://github.com/${repo}/blob/main/${parts.map(encodeURIComponent).join('/')}`;
+}
+
+/**
+ * What a suggestion's About box holds (SP-304): its title as the heading,
+ * Why It Matters and Description, then (SP-305) About This Task, Related
+ * Tickets (each a link to its ticket, with its name), Topics and Tags as
+ * chips, and Links: a file opens on the project's GitHub repository
+ * (`repo`) at main, a ticket opens its page. Each only when the suggestion
+ * has it; a file with no repository to link it to is named, unlinked.
+ * Every word is escaped: a suggestion is text, never markup.
+ */
+export function renderSuggestionInfo(suggestion, { repo = null } = {}) {
+  const s = suggestion ?? {};
+  const list = (v) => (Array.isArray(v) ? v : []);
+  const section = (heading, text) => (text
+    ? `<h3>${heading}</h3><p>${escapeHtml(text)}</p>`
+    : '');
+  const ticketLink = (id, label) => `<a href="/t/${encodeURIComponent(id)}">${escapeHtml(label)}</a>`;
+  const related = list(s.related).filter((r) => typeof r?.id === 'string' && r.id)
+    .map((r) => `<li>${ticketLink(r.id, r.id)}${r.name ? ` ${escapeHtml(r.name)}` : ''}</li>`).join('');
+  const chips = (heading, cls, names) => {
+    const shown = list(names).filter((n) => typeof n === 'string' && n);
+    return shown.length ? `<h3>${heading}</h3><p class="chips">${shown.map((n) => `<span class="${cls}">${escapeHtml(n)}</span>`).join('')}</p>` : '';
+  };
+  const links = list(s.links).map((l) => {
+    if (typeof l?.ticket === 'string' && l.ticket) return `<li>${ticketLink(l.ticket, l.label || l.ticket)}</li>`;
+    if (typeof l?.path !== 'string' || !l.path) return '';
+    const href = suggestionFileHref(repo, l.path);
+    const label = escapeHtml(l.label || l.path);
+    const where = l.label && l.label !== l.path ? ` <code>${escapeHtml(l.path)}</code>` : '';
+    return href
+      ? `<li><a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">${label}</a>${where}</li>`
+      : `<li>${label}${where}</li>`;
+  }).join('');
+  const body = section('Why It Matters', s.why) + section('Description', s.description)
+    + section('About This Task', s.about)
+    + (related ? `<h3>Related Tickets</h3><ul class="related">${related}</ul>` : '')
+    + chips('Topics', 'tag topic', s.topics)
+    + chips('Tags', 'tag', s.tags)
+    + (links ? `<h3>Links</h3><ul class="links">${links}</ul>` : '');
+  return `<h2 id="suggestion-info-title">${escapeHtml(s.title ?? '')}</h2>`
+    + (body || '<p class="quiet">This suggestion came with nothing more to say.</p>');
 }

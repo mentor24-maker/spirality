@@ -20,6 +20,7 @@
     "CLAUDE.md",
     "docs/LOOP_ENGINEERING.md",
     "docs/DOCTRINE.md",
+    "docs/UI_DOCTRINE.md",
     ".claude/skills/",
     ".claude/settings.json",
     ".github/workflows/"
@@ -30,6 +31,7 @@
   "legacyMachinePrefixes": [],
   "projectScripts": {},
   "trackerPrefix": "SP",
+  "busProject": "spirality-bus",
   "trackerPort": 4180,
   "trackerHost": "0.0.0.0",
   "trackerDataDir": "~/spirality-tracker",

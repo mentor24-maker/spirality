@@ -14,7 +14,9 @@ about: >
 # Loop: Review
 
 Step 3 of 3 in the Spirality development loop (spec → build → review).
-See `docs/LOOP_ENGINEERING.md` for the whole system.
+See Spirality's `docs/LOOP_ENGINEERING.md` (in Spirality's folder, three folders
+up from this skill's base directory, not in a project's checkout)
+for the whole system.
 
 Each run verifies **one** task's PR, so Dane only ever sees PRs that already
 passed an independent check.
@@ -170,11 +172,31 @@ look at; this is a check that runs in CI"*).
      `> ` lines.) Then end `@@NEEDED` with **`Your move: Merge — PR #N`**: the
      ticket page draws the Merge button from that line. Do **NOT** merge.
 
-     **A ticket with nothing of its own to merge** (a catch-up ticket whose
-     work landed when the PR it unstuck merged, as SP-64's did) is not a merge
-     approval. Say what landed, then end with **`Your move: Close — <why its
-     work is live>`**; the page shows a Close button and the relay moves it to
+     **A catch-up ticket whose PR already merged is never his** (a "Find out
+     why PR #N ... will not merge" ticket, no PR of its own): asking him to
+     press Close on work he already approved only clutters his list. Before
+     any `ask` on a ticket with no `PR opened:` line, run:
+
+     ```bash
+     npm run clickup -- fixup-live --task <id> --if-status "In review"
+     ```
+
+     Exit 0: it read GitHub, found that PR merged, moved the ticket to Live
+     and posted one note naming the merge. Your verdict stands; report it and
+     finish, with no card. Exit 4: it is not one (its own PR, none named, or
+     that PR not merged yet): carry on below. Exit 3: it moved meanwhile,
+     stand down. Exit 1: GitHub or the tracker could not be read: say so in
+     your report and carry on below. `ask` refuses (exit 2) a ticket that
+     `fixup-live` would close, and names the command.
+
+     **A ticket with nothing of its own to merge whose PR is still open** is
+     not a merge approval. Say what will land, then end with **`Your move:
+     Close — <why>`**; the page shows a Close button and the relay moves it to
      Live once that PR is merged. Never tell him to move the ticket himself.
+
+     **One card per question.** `ask` refuses (exit 2) a second card on a
+     ticket already in that status whose card he has not answered: post a
+     plain `comment` to add something.
    - **Fail, and a machine can fix it** → `verdict --fail` first (its FIRST
      LINE is the reason the board shows — one short clause), then
      `status --status Rework --if-status "In review"`. Do not fix it yourself

@@ -15,7 +15,8 @@
  * prints its token, so the Users page can send an invite's link there and
  * "Forgot password?" can be tried through it (docs/OUTSIDE_SITE_API.md).
  * The Tasks page's Pipeline Status pod reads scratch loop logs written to
- * the same folder. All of it is for this throwaway store only and dies with it.
+ * the same folder. The Suggest Next Tasks box answers five made-up tasks
+ * from a stand-in, without running Claude. All of it is for this throwaway store only and dies with it.
  * Ctrl-C stops it and deletes the folder.
  */
 import { randomBytes } from 'node:crypto';
@@ -24,7 +25,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openStore } from './store.mjs';
 import { CLOSE_PHRASE, GO_PHRASE, startServer } from './server.mjs';
-import { demoPrState, seedDemo, tickingClock, writeDemoLogs } from './demoData.mjs';
+import { DEMO_OWN_PROJECT, DEMO_TOPICS, demoNewestRelease, demoPrState, demoSuggest, seedDemo, tickingClock, writeDemoLogs } from './demoData.mjs';
 import { setPasswordUrl } from './account.mjs';
 import { loadProjectConfig } from '../lib/projectConfig.mjs';
 
@@ -52,13 +53,26 @@ const printEmail = async ({ to, subject, text, kind, link }) => {
 const port = Number(process.env.TRACKER_PORT ?? 0);
 // The Merge button posts the project config's first merge phrase, as on the real server.
 let mergePhrase = null;
-try { mergePhrase = loadProjectConfig().mergePhrases[0] ?? null; } catch (err) { console.log(`no Merge button: the project config is not usable (${err.message}).`); }
+let config = null;
+try { config = loadProjectConfig(); mergePhrase = config.mergePhrases[0] ?? null; } catch (err) { console.log(`no Merge button: the project config is not usable (${err.message}).`); }
+// The Suggest Next Tasks info box (SP-305): Alpha gets this repository as
+// its GitHub repository, so a suggested file opens a real file there, and
+// the topics the stand-in suggestions name.
+if (config?.githubRepo) store.updateProject('alpha', { repo: config.githubRepo });
+for (const name of DEMO_TOPICS) store.addTopic({ project: 'alpha', name, actor: operator.id });
 const accountMail = { send: printEmail, pageUrl: null, projectName: 'Demo' };
-// The Pipeline Status pod reads scratch logs in the demo's own folder, never the Mini's real ones.
-writeDemoLogs(dir, 'demo');
-const pipeline = { logDir: dir, slug: 'demo' };
+// The Pipeline Status pod reads scratch logs in the demo's own folder, never
+// the Mini's real ones, written as Alpha's, so the Settings page shows what
+// Alpha's lanes last used beside each wake time (SP-236) and Alpha's pause
+// switches show in the pod (SP-237).
+writeDemoLogs(dir, 'alpha');
+const pipeline = { logDir: dir, slug: 'alpha' };
 // The pull requests' state on GitHub is a stand-in (SP-226): the demo never calls GitHub.
-const server = await startServer({ store, port, log: (line) => console.log(line), mergePhrase, closePhrase: CLOSE_PHRASE, goPhrase: GO_PHRASE, accountMail, pipeline, readPrState: demoPrState });
+const server = await startServer({ store, port, log: (line) => console.log(line), mergePhrase, closePhrase: CLOSE_PHRASE, goPhrase: GO_PHRASE, accountMail, pipeline, readPrState: demoPrState,
+  // The Settings page's Spirality Release group: Alpha stands in for Spirality's own project, and the newest release is a stand-in too (SP-275).
+  ownProject: DEMO_OWN_PROJECT, newestRelease: demoNewestRelease,
+  // The Tasks page's Suggest Next Tasks box: a quick stand-in that answers five made-up tasks, never Claude (SP-251).
+  suggest: { run: demoSuggest() } });
 accountMail.pageUrl = `http://127.0.0.1:${server.address().port}`;
 
 console.log(`\nDemo tracker (test data only) at http://127.0.0.1:${server.address().port}/`);

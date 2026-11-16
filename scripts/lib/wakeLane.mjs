@@ -18,6 +18,10 @@
  * `launchctl kickstart` WITHOUT `-k`, which never starts a second copy of a
  * running job. A relay pass already holding its lock (scripts/run_relay.sh)
  * is left alone and said so; that pass reads the tracker afresh anyway.
+ * launchd starts the relay on a one-minute tick that skips until its wake
+ * time is up (SP-236), so the kickstart is preceded by the relay's own wake
+ * file, `<logDir>/<projectSlug>-relay.wake`: the tick it starts sees the file
+ * and runs a pass, and should the kickstart fail, the next tick does.
  *
  * The timers stay as they are, as the fallback. Every name comes from the
  * project config (CLAUDE.md engineering rule 2).
@@ -81,10 +85,16 @@ export function wakeLane(job, {
     const lock = join(logDir, `${slug}-${RELAY}.lock`);
     const pid = lockHolder(lock, isAlive);
     if (pid) return { code: 0, line: `relay: a pass is already running (pid ${pid}) — not starting a second; it reads the tracker afresh` };
+    const relayWake = join(logDir, `${slug}-${RELAY}.wake`);
+    try {
+      writeFileSync(relayWake, `${now.toISOString()}\n`);
+    } catch (err) {
+      return { code: 1, line: `relay: NOT WOKEN — the wake file ${relayWake} could not be written (${err.code || err.message}), so a kickstart's tick would skip` };
+    }
     const target = `gui/${uid}/${config.launchdPrefix}.${RELAY}`;
     const r = launchctl(['kickstart', target]);
     if (r.status !== 0) {
-      return { code: 1, line: `relay: NOT WOKEN — launchctl kickstart ${target} exited ${r.status ?? 'without a code'}${r.output ? ` (${r.output.split('\n')[0]})` : ''}` };
+      return { code: 1, line: `relay: NOT WOKEN — launchctl kickstart ${target} exited ${r.status ?? 'without a code'}${r.output ? ` (${r.output.split('\n')[0]})` : ''}; the wake file ${relayWake} is written, so the next tick runs a pass` };
     }
     return { code: 0, line: `relay: woken — launchctl kickstart ${target} started a pass` };
   }

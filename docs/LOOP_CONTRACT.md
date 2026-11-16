@@ -117,9 +117,10 @@ checks on it. Every write is read back before the command reports success.
 | `Building` | `In review` | loop-build | *(Skill rule.)* Only after the PR is open, its body links the ticket, and `pr-opened` has recorded it on the ticket (see "Markers"). `status` does not check for a PR. |
 | `Building` | `Needs your input` | loop-build | `ask`, with an operator card. Used when the gates fail and the fix is out of scope, the ticket is too vague, or the work is too big for one pass. |
 | `In review` | `Ready to launch` | loop-review | `verdict --pass --if-status "In review"`, then `ask --status "Ready to launch"`. `ask` refuses unless the newest review verdict on the ticket is a PASS. |
+| `Rework`, `Queued`, `Building` or `In review` | `Live` | loop-build or loop-review | `fixup-live --if-status <status>`, for a catch-up ticket only ("Find out why PR #N ... will not merge": no `PR opened:` line of its own, a `- PR:` line under `## The branch`) whose PR GitHub reads as merged. It moves the ticket, reads it back, clears assignees and posts one note naming the merge; Dane is never asked (SP-288). `ask` refuses such a ticket, and refuses a second card on a ticket already in that status of his whose card he has not answered. |
 | `In review` | `Rework` | loop-review | `verdict --fail --if-status "In review"`, then `status --status Rework --if-status "In review"`. |
 | `In review` | `Needs your input` | loop-review | `ask`. Required instead of a fourth send-back (see "Four rounds, then ask"). |
-| `Needs your input` | `Queued`, `Rework` or `Live` | Dane, by replying | The relay moves it on his reply. The relay reads the ticket's PR state first, then decides. If his reply answers a machine-written question card and is a close phrase ("close it") → `Live`, whatever that PR state says: it closes the ticket even when its PR is still open (that PR is left untouched and the note says so) or its state could not be read. With no card on the ticket (for example one parked by `status --no-card`), a close phrase is not treated specially and goes by the PR like any other reply (Spirality's relay does not move a ticket with no card at all; see "Known differences today"). Any other reply goes by the ticket's PR: none, or closed unmerged → `Queued`; still open → `Rework`; already merged → `Live`; state cannot be read → nothing moves. |
+| `Needs your input` | `Queued`, `Rework` or `Live` | Dane, or anyone else on the project, by replying | The relay moves it on his reply, or on a teammate's: any person's reply (an author of kind `human`) to the card is the answer, except after an answer already acted on, when only his own reply moves it again (SP-302). The relay reads the ticket's PR state first, then decides. If his reply answers a machine-written question card and is a close phrase ("close it") → `Live`, whatever that PR state says: it closes the ticket even when its PR is still open (that PR is left untouched and the note says so) or its state could not be read. With no card on the ticket (for example one parked by `status --no-card`), a close phrase is not treated specially and goes by the PR like any other reply (Spirality's relay does not move a ticket with no card at all; see "Known differences today"). Any other reply goes by the ticket's PR: none, or closed unmerged → `Queued`; still open → `Rework`; already merged → `Live`; state cannot be read → nothing moves. |
 | `Ready to launch` | `Live` | Dane, by a merge phrase | The relay merges the PR and closes the ticket, after re-checking every gate (see "Merge phrases"). |
 | `Ready to launch` | `Live` | StarCaster's relay, with no word from Dane | **StarCaster only: auto-merge Lanes A and B** (see "StarCaster's auto-merge lanes"). |
 | any | `Live` + `wont-do` tag | Dane's decision | Killing a ticket. *(Convention.)* |
@@ -177,7 +178,17 @@ loop-build takes **every `Rework` ticket before any `Queued` one**:
   *start*; rework is not started, it is finished. Ordering it by priority
   recreated the same starvation one tier down.
 - `Queued`: priority first (urgent, high, normal, low; anything else last),
-  then oldest first.
+  then place, then oldest first. A ticket's **place** is its place in the
+  queue (1, 2, 3 ...), set by `POST /projects/<slug>/tickets/order` (SP-249):
+  at the same priority, a ticket with a place comes before one without, lower
+  place first. Ordering some tickets moves the project's other placed
+  tickets nobody has started (`Requested`, `Queued`) down after them,
+  keeping their order, so no two waiting tickets share a place; a started
+  ticket is never rewritten by a reorder.
+  Place never beats priority, and a ClickUp task has none.
+
+Every list of tickets in one status (`queue --status`, the Tasks page) uses
+the same rule: priority, then place, then oldest.
 
 `npm run clickup -- queue --claimable` prints them in exactly that order;
 the first line is the one to take. A `Rework` ticket is finished on its
@@ -193,6 +204,12 @@ Waits on: <ticket id or link>[, <ticket id or link> ...]
 ```
 
 The line may sit in a list item, a quote or bold (`- **Waits on:** <id>`).
+An id or link may be followed by the ticket's title, in quotes or in
+brackets around quotes (`Waits on: SP-265, SP-271 ("Run a project's lanes
+from Spirality's folder")`); the title is ignored and a comma inside it does
+not split the line. A title is refused (the ticket held back) when it has a
+link or any digit in it, since it might be naming another ticket, and inside
+single quotes an apostrophe may sit only between two letters (SP-313).
 Both `queue --claimable` and `claim` read it from the same text, the
 markdown description, and apply the same rule:
 
@@ -237,54 +254,61 @@ not the builder. The round count is never stored; it is counted from the
 `REVIEW:` verdict comments already on the ticket. `verdict --fail` refuses
 the fourth send-back. Written override: `verdict --fourth-round-anyway`.
 
-## Who is talking: the machine stamp
+## Who is talking: the author
 
-**What the code does today:** every loop and script posts to ClickUp under
-**Dane's own API token**, so every comment a machine writes comes back from
-ClickUp with Dane's user id on it. The user id therefore does **not** say who
-wrote a comment.
+**What the code does today (SP-26, 2026-11-14):** in the tracker every
+comment carries its author, and every author is either a **person** or a
+**machine** (an actor of kind `human` or `machine`). Each loop signs in with
+its own machine seat (`loop-build`, `loop-review`, `relay`, `hand-run`, ...),
+never with Dane's, so who wrote a comment is a fact read off the comment,
+not a guess.
 
-> StarCaster's `docs/LOOP_ENGINEERING.md` still describes a two-account
-> model, where the machine posts as a separate "Pulse" service account. The
-> code does not do that. This contract states what the code does. A separate
-> machine identity is still the better long-term fix; until it exists, the
-> stamp below is the rule.
+- A comment is **machine-written** when its author is a machine actor.
+- A comment is **Dane's** when its author is his actor (the project's
+  operator) and that actor is a person. Nothing in the text changes that:
+  if he quotes or pastes a machine card, above or below his words, the
+  comment is still his.
+- The door hands every comment to the readers with its author's kind
+  (`user.kind`, `human` or `machine`), and the readers ask that and nothing
+  else (`isMachineAuthored`, `isOperatorAuthored` and `isPersonAuthored` in
+  `lib/machineComment.js`). A comment whose author's kind could not be read
+  is not counted as a machine's, and not as a teammate's either: it counts
+  as a person's only when it is Dane's.
+- A comment is **a teammate's** when its author is a person other than
+  Dane. In `Needs your input` a teammate's reply answers the card the same
+  as his: it takes the ticket off every Waiting on You list and the relay
+  hands the ticket back on it. Two limits keep the list and the relay
+  agreeing: a teammate's comment counts only when it answers a
+  machine-written question card (a ticket parked with no card stays on his
+  list, because the relay never moves it), and once an answer after the card
+  has been acted on (its `[bus-relay-handback-done]` reply) and the ticket is
+  parked there again by hand, only Dane's own word moves it, and only a word
+  of his newer than that answer (an older one was overtaken by it). `ask`
+  refuses a new card over a teammate's answer the relay would act on, as it
+  does over his. Only Dane's own merge phrase merges, so in
+  `Ready to launch` a teammate's comment changes nothing (SP-302, Dane's
+  choice A, 2026-11-14: "Their reply is the answer: it leaves every list at
+  once and the loop acts on it, but only your own merge merges a pull
+  request.").
+- No stamp is written. Comments imported from ClickUp keep the old
+  `[machine] posted by a loop under Dane's token — not his word` line as
+  history: the importer gave each one the author its stamp named, the
+  readers ignore the line, and the tracker page leaves it off when it shows
+  the comment.
+- The ClickUp door, kept for a project still on ClickUp, posts every comment
+  under Dane's token, so there the author cannot say who wrote it. That door
+  alone still writes the stamp as the last line of each comment it posts,
+  and turns it back into the same author kind on every read, so the readers
+  ask one question on either tracker.
 
-So every comment a machine posts carries a **stamp** as its last non-empty
-line:
-
-```
-[machine] posted by a loop under Dane's token — not his word
-```
-
-- The stamp is added where requests are sent, not by each caller, so a newly
-  added caller cannot forget it. In StarCaster that is more than one place:
-  the ClickUp script's request function (`callOnce` in `clickup_direct.mjs`),
-  the pipeline runner's own request function (`scripts/pipeline.mjs`), and
-  the pipeline sweep's note (`pipelineSweep.js`), which stamps explicitly. It
-  is added whether the comment is plain text or ClickUp's rich-text form, and
-  adding it twice is impossible: a body already stamped is left unchanged.
-- A comment is **machine-written** if its last non-empty line starts with
-  `[machine]`. Comments from before the stamp existed are recognised by a
-  bracketed tag at the very start (`[CC-starcaster ...]`, `[auto-merge]`,
-  `[bus-relay]`, `[reconciler]` and similar).
-- A comment is **Dane's** only if it carries his user id **and** is not
-  machine-written.
-- If Dane quotes a machine card and types his words *under* it, it is still
-  his. If he types *above* a pasted card, the stamp ends up last and the
-  comment reads as a machine's. The same goes for quoting an **old** card
-  that opens with a bracketed tag: his comment then starts with that tag and
-  reads as a machine's, wherever he types. At the escalation that fails safe (his
-  ticket stays with him, loudly). Anywhere a misreading would cause an
-  action instead of a stall, the caller must ask a second question; the
-  stamp alone is not enough there.
-
-**Why (2026-09-01):** before the stamp, an `ask` card posted under Dane's
-token was read ten minutes later as Dane replying. The relay handed the
-ticket back to `Queued`, it vanished from his "Assigned to me", and a build
-loop would have built the very thing that had been escalated. The same
-mistake made `waiting` say "not waiting on Dane" while five approved merges
-sat parked.
+**Why (2026-09-01, then 2026-11-14):** on ClickUp, every loop posted under
+Dane's token, so an `ask` card was read ten minutes later as Dane replying.
+The relay handed the ticket back to `Queued`, it vanished from his "Assigned
+to me", and a build loop would have built the very thing that had been
+escalated. The stamp fixed that, but read the other way it could silence
+him: a card he pasted under his own words made his whole comment read as a
+machine's, and the auto-merge lane needed a second test (`quotesMachineText`)
+to tell. In the tracker the author answers both, so the stamp was retired.
 
 ## Markers: the exact lines the loop reads back
 
@@ -368,6 +392,37 @@ The note moves no status by itself.
 the same `main`; the second learned the first had merged only at review or at
 Dane's merge word, then went round the whole cycle again.
 
+**`Ready to launch` is kept current too (SP-294).** Right after the same
+merge, the relay checks every `Ready to launch` ticket whose recorded PR is
+open against the same base, with the same in-memory `git merge-tree`. It
+writes no `MAIN MOVED:` note there (his inbox is not a log); the only comment
+it ever writes on his ticket is the `CONFLICT TICKET FILED:` line below:
+
+- **Merges cleanly:** it catches the branch up through GitHub
+  (`gh pr update-branch`, an ordinary merge of `main` in, never a force
+  push), so CI re-runs and the PR is current and green when he says merge.
+  No comment is written. While another PR holds the merge window it leaves
+  the branch for his word, and a window that cannot be read is reported; it
+  never takes the window, because a PR that lands only on his word would
+  hold it for the full 45 minutes. While a catch-up ticket for that PR is
+  still with the loops (Queued, Building, Rework or In review), its builder
+  owns the branch and it is not touched.
+- **Conflicts:** it files the catch-up ticket now ("Resolve the merge
+  conflict on PR #N", since `git merge-tree` found the overlap), and writes
+  the same `CONFLICT TICKET FILED:` comment on his ticket that the merge step
+  writes at his word, so that step finds it on file and files no second. The
+  branch is not touched.
+- **Cannot tell:** nothing is done, and the pass reports it.
+
+It moves no status and never resolves a conflict. His merge word, if already
+given, still stands. A ticket that left `Ready to launch` during the pass is
+skipped.
+
+**Why (2026-11-13, SP-294):** a PR waiting on his word went stale silently,
+and the conflict showed only when he said merge. Since 10/29 that happened to
+70 of the 281 PRs that went live; his merge wait has a p90 of 8.6 hours, all
+of it time the fix could have been under way.
+
 ### `[merge-on-comment]`: spent and unspent authorizations
 
 When the relay acts on Dane's merge phrase, it writes a threaded reply on his
@@ -400,7 +455,8 @@ comment so the same answer is never posted twice:
   only gets its `[merge-on-comment]` marker re-stamped with a fresh time, and
   only if the bus post succeeded, so the next reminder is a day away and a
   failed post is retried next pass.
-- The **newest** marker on the thread decides. The machine stamp is removed
+- The **newest** marker on the thread decides. A machine stamp (on a
+  marker imported from ClickUp, or posted by the ClickUp door) is removed
   before the marker is read.
 
 **Why (2026-08-22, 2026-08-23):** two tickets refused for a missing
@@ -526,8 +582,8 @@ Before merging, the relay checks, on that pass, that:
 
 1. the ticket is in `Ready to launch` **now** (the same word on any other
    status does nothing);
-2. the comment carries Dane's user id (a machine comment always ends in the
-   stamp, so it can never be exactly a merge phrase);
+2. the comment is Dane's: his actor wrote it, and it is not a machine's (see
+   "Who is talking");
 3. the newest review verdict on the ticket is a PASS, **and his comment is
    not older than it** (one with the very same timestamp passes), so a
    "merge" from an earlier round cannot release a PR rebuilt since;
@@ -684,7 +740,7 @@ which Lane A did not cover, went seven hours with no merge while he slept:
 
 - **Governance first, in both lanes.** A PR that touches any governance path
   is refused outright, whatever else it holds: `.github/`, `.claude/`,
-  skills, any `CLAUDE.md`, `docs/DOCTRINE.md`, `docs/LOOP_ENGINEERING.md`,
+  skills, any `CLAUDE.md`, `docs/DOCTRINE.md`, `docs/UI_DOCTRINE.md`, `docs/LOOP_ENGINEERING.md`,
   `scripts/check_*`, `scripts/install_*`, `scripts/git-hooks/`, and the
   merge machinery itself with its tests. A machine may never auto-merge a
   change to the rules that govern machines. Since SP-199 the list has two
@@ -709,10 +765,9 @@ So "every file is a test, a document or a script" is necessary, not
 sufficient: the governance check comes first.
 
 The relay announces the ticket, waits a **one-hour** window, and merges
-unless Dane comments in that hour. A comment cancels unless it is
-positively recognised as machine-written by the tail stamp; the older
-bracketed tags do not count here, so an unstamped comment carrying his id
-is always read as his objection. Nothing else is loosened: the PASS
+unless Dane comments in that hour. A comment cancels unless its author is a
+machine actor, so anything his actor wrote, whatever it quotes, is always
+read as his objection. Nothing else is loosened: the PASS
 verdict and every PR check in the list above are still required. It is
 capped per hour and per day, turns itself off on trouble, and can be stopped
 with a switch phrase on any ticket or the bus. Spirality and WaveCenter have
@@ -726,8 +781,8 @@ writes nothing more than before. With lanes listed it runs
 
 - It announces an eligible ticket, and the hour runs from the tracker's own
   time for that comment.
-- An unstamped comment from Dane in the hour cancels it; a comment with the
-  machine stamp does not.
+- A comment from Dane in the hour cancels it; a comment by a machine actor
+  does not.
 - At the end of the hour it reads the PR from GitHub and asks the same gate
   a merge phrase does (`githubGate`): a PASS verdict on file and no newer
   send-back, an open PR, green checks, current with main, no conflict.
@@ -777,7 +832,7 @@ The checks run in this order, and the first that applies decides:
 | Order | Verdict | Exit code | When |
 |---|---|---|---|
 | 1 | **CANNOT TELL** | 1 | The ticket could not be read, it has no readable status, or its assignees or its comments could not be read. A failed read decides before anything else, even if Dane's comment would have been newest. |
-| 2 | **NOT waiting on Dane** | 0 | His own comment is the newest word on it: a machine owes the next move, whatever the status says. |
+| 2 | **NOT waiting on Dane** | 0 | His own comment is the newest word on it: a machine owes the next move, whatever the status says. In `Needs your input` a teammate's comment as the newest word counts the same when it is the answer the relay acts on: it answers a question card, and no answer after that card was already acted on (SP-302). |
 | 3 | **NOT waiting on Dane** | 0 | The status is a machine status. |
 | 4 | **NOT waiting on Dane** | 0 | It is `Ready to launch` and its pull request is already merged or closed: a machine owes the move to Live (or the next move), not Dane. |
 | 5 | **WAITING ON DANE** | 3 | The status is one of his two, he is assigned, and the newest comment is not his. |
@@ -844,8 +899,7 @@ Written down so nobody mistakes them for the contract:
   machine-written card is reported and left where it is, where StarCaster's
   bus-relay would move it on a fresh reply. On every project nothing merges
   without Dane's word.
-- **Spirality's relay files the conflict ticket but checks nothing locally
-  and announces no stall.** On a conflict it files the `Queued` catch-up
+- **Spirality's relay files the conflict ticket but checks nothing locally.** On a conflict it files the `Queued` catch-up
   ticket and records it (`CONFLICT TICKET FILED: PR #<n>`) on the waiting
   ticket, as above. That record counts as "on file" only while its ticket
   is in `Queued`, `Rework`, `Building` or `In review`: once the catch-up has
@@ -855,8 +909,9 @@ Written down so nobody mistakes them for the contract:
   that cannot be read is reported as unchecked, never as on file. It runs
   no `git merge-tree` cross-check, so every
   hand-off reads "no local check was attempted" and the ticket asks its
-  builder to find out first. It has no bus, so a stalled hand-off is not
-  announced; a filing that fails is retried on the next pass.
+  builder to find out first. A stalled hand-off is announced on the bus
+  (`spirality-bus` since SP-281), at most once a day; a filing that fails
+  is retried on the next pass.
 - **Any reply to an intake card queues the ticket.** The relay does not
   read what Dane said on a ticket `loop-intake` handed over: "go", "change
   the title" and an answer to a question all move it to `Queued` (no PR, so

@@ -1,11 +1,10 @@
-// scripts/onboard/manifest.json against Spirality as it stands: every file is
-// there, every edit still matches exactly once, nothing the door or the
-// runners need is left out, and every file Normie's setup received is
-// accounted for (SP-110).
+// scripts/onboard/manifest.json against Spirality as it stands (SP-110): any
+// file it names is there, any edit still matches exactly once, and, since
+// SP-273, no loop file is copied into a project at all.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, existsSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join, dirname, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { needs, planCopies, templateVars, render } from '../../lib/onboardCopy.mjs';
 
@@ -56,145 +55,80 @@ test('nothing the ticket door, the runners or the copied tests need is left out'
   assert.deepEqual(left, [], 'these are needed by a copied file but not in the manifest: add them');
 });
 
-test('the door\'s commands are among the copies the npm scripts run', () => {
-  for (const command of Object.values(manifest.npmScripts)) {
-    for (const m of command.matchAll(/node (loop\/\S+\.mjs)/g)) assert.ok(to.has(m[1]), `${m[1]} is run but not copied`);
-  }
+// SP-273: loop code lives only in Spirality (docs/INTEGRATION.md). A
+// project's setup pull request holds its manifest and its gate, plus the
+// .gitignore line and CLAUDE.md sections its lanes need; never the door, the
+// runners, the libraries, the watchdogs, the skills or the hooks.
+const LOOP_PATH = /^(?:loop\/|\.claude\/|scripts\/|lib\/|plugin\/)/;
+
+test('the setup copies no loop file: no door, runner, library, watchdog, skill or hook (SP-273)', () => {
+  assert.deepEqual(manifest.files.map((f) => f.to), [], 'a file the manifest copies');
+  assert.deepEqual([...to].filter((p) => LOOP_PATH.test(p)), [], 'a loop path the setup writes');
+  assert.deepEqual(manifest.npmScripts, {}, 'no npm command runs a copied loop file');
+  assert.equal(manifest.made.filter((m) => m.mergeFrom).length, 0, '.claude/settings.json is neither copied nor merged: a lane\'s pass gets Spirality\'s hooks');
+  assert.deepEqual([...to].sort(), ['.github/workflows/verify.yml', '.gitignore', 'CLAUDE.md', 'package.json', 'spirality.project.json']);
+  assert.deepEqual(planCopies(manifest, { readSpirality: read, vars }), [], 'the dry run lists nothing to copy');
+});
+
+test('the gate a new project gets is its own check, with no copied loop tests (SP-121, SP-273)', () => {
+  assert.equal(render(manifest.verifyIfAbsent, vars), 'npm run verify:full');
+  assert.doesNotMatch(JSON.stringify(manifest), /test:loop/);
+  assert.match(render(read('scripts/onboard/templates/CLAUDE-sections.md'), vars), /`npm run verify` is the definition of done\./);
 });
 
 // Every file Normie's setup pull requests wrote (gh pr view <n> --repo
-// mentor24-maker/normie --json files, for #62, #64, #65 and #66), and where
-// each one comes from now.
+// mentor24-maker/normie --json files, for #62, #64, #65 and #66). Those were
+// the wizard copy; a new project now gets only the files below from them.
 const NORMIE_RECEIVED = {
   62: ['spirality.project.json'],
-  64: ['eslint.config.mjs', 'loop/README.md', 'loop/lib/branchCatchUp.js', 'loop/lib/busFallback.js', 'loop/lib/busRelayPlan.js',
-    'loop/lib/clickupTicketLink.js', 'loop/lib/commentPages.js', 'loop/lib/commentPages.test.js', 'loop/lib/conflictWork.js',
-    'loop/lib/costlyAsk.js', 'loop/lib/costlyAsk.test.js', 'loop/lib/humanHours.js', 'loop/lib/loopStatuses.js',
-    'loop/lib/machineComment.js', 'loop/lib/mainMoved.js', 'loop/lib/mergeOnComment.js', 'loop/lib/nextSlice.js',
-    'loop/lib/operatorCard.js', 'loop/lib/package.json', 'loop/lib/projectConfig.mjs', 'loop/lib/refusalClass.js',
-    'loop/lib/relayLane.js', 'loop/lib/relayLane.test.js', 'loop/lib/substrateConfig.js', 'loop/lib/waitsOn.js',
-    'loop/lib/waitsOn.test.js', 'loop/scripts/clickup.mjs', 'loop/scripts/doctor.mjs', 'loop/scripts/lib/expectedSecrets.mjs',
-    'loop/scripts/lib/loopStatuses.mjs', 'loop/scripts/lib/loopStatuses.test.mjs', 'loop/scripts/lib/loopTrail.mjs',
-    'loop/scripts/lib/loopTrail.test.mjs', 'loop/scripts/lib/machineComment.mjs', 'loop/scripts/lib/machineComment.test.mjs',
-    'loop/scripts/lib/operatorCard.mjs', 'loop/scripts/lib/operatorCard.test.mjs', 'loop/scripts/lib/repoCheck.mjs',
-    'loop/scripts/lib/repoCheck.test.mjs', 'loop/scripts/tracker/apiTracker.mjs', 'loop/scripts/tracker/clickupTracker.mjs',
-    'loop/scripts/tracker/clickupTracker.test.mjs', 'loop/scripts/with_doppler.mjs', 'package.json'],
+  64: ['eslint.config.mjs', 'loop/README.md', 'loop/lib/branchCatchUp.js', 'loop/scripts/clickup.mjs', 'loop/scripts/with_doppler.mjs', 'package.json'],
   65: ['.claude/settings.json', '.claude/skills/loop-build/SKILL.md', '.claude/skills/loop-intake/SKILL.md',
     '.claude/skills/loop-review/SKILL.md', '.claude/skills/loop-spec/SKILL.md', 'CLAUDE.md', 'docs/LOOP_ENGINEERING.md',
-    'docs/work-log/2026-11-03-no-5-loop.md', 'docs/work-log/README.md', 'scripts/hooks/block_edits_on_main.cjs'],
-  66: ['docs/work-log/2026-11-03-no-6-lanes.md', 'scripts/install_loop_runner.sh', 'scripts/lib/launchd_reload.sh',
-    'scripts/loop_runner.sh', 'scripts/project_config.mjs', 'scripts/run_relay.sh', 'scripts/run_with_time_limit.sh'],
+    'scripts/hooks/block_edits_on_main.cjs'],
+  66: ['scripts/install_loop_runner.sh', 'scripts/lib/launchd_reload.sh', 'scripts/loop_runner.sh', 'scripts/project_config.mjs',
+    'scripts/run_relay.sh', 'scripts/run_with_time_limit.sh'],
 };
-// Normie's own, not the loop's: its lint settings learned to skip loop/, and
-// the work log is written by each pull request about itself.
-const NOT_THE_LOOPS = new Set(['eslint.config.mjs', 'docs/work-log/2026-11-03-no-5-loop.md', 'docs/work-log/README.md', 'docs/work-log/2026-11-03-no-6-lanes.md']);
 
-test('every file Normie received is in the manifest, or is Normie\'s own', () => {
-  const checked = [];
-  for (const [pr, paths] of Object.entries(NORMIE_RECEIVED)) {
-    for (const p of paths) {
-      if (NOT_THE_LOOPS.has(p)) continue;
-      assert.ok(to.has(p), `Normie PR #${pr} received ${p}, and the manifest writes nothing there`);
-      checked.push(p);
-    }
+test('of what Normie\'s wizard copy received, a new project gets only its settings, package.json and CLAUDE.md', () => {
+  const still = Object.values(NORMIE_RECEIVED).flat().filter((p) => to.has(p)).sort();
+  assert.deepEqual(still, ['CLAUDE.md', 'package.json', 'spirality.project.json']);
+  for (const p of Object.values(NORMIE_RECEIVED).flat().filter((x) => LOOP_PATH.test(x))) {
+    assert.ok(!to.has(p), `${p} is the loop's, and Spirality runs it from its own folder`);
   }
-  assert.equal(checked.length, 58, 'the number of Normie files checked against the manifest');
 });
 
-test('the review and build skills tell a lane\'s pass it is the lane (hold-up 14)', () => {
-  const planned = planCopies(manifest, { readSpirality: read, vars });
-  for (const skill of ['loop-build', 'loop-review']) {
-    const text = planned.find((f) => f.to === `.claude/skills/${skill}/SKILL.md`).content;
-    assert.match(text, /LOOP_RUNNER_PID/, `${skill} checks the runner's mark`);
-    assert.match(text, new RegExp(`\\$LOG_DIR/\\$SLUG-${skill}\\.lock`), `${skill} names its own lock`);
-    assert.match(text, /^- \*\*Whenever you stop for this reason\*\*, the first line of your report is\n {2}exactly `LANE STOOD DOWN: /m, `${skill} prints the fixed stand-down line`);
-    assert.doesNotMatch(text, /Spirality (?:queue|development loop|has no scheduled runner)/, `${skill} still speaks as Spirality`);
+test('the files the wizard copy carried are still Spirality\'s, where its lanes run them for a project', () => {
+  for (const p of ['scripts/install_loop_runner.sh', 'scripts/loop_runner.sh', 'scripts/run_relay.sh', 'scripts/clickup.mjs',
+    'scripts/with_doppler.mjs', 'scripts/heartbeat.mjs', 'scripts/hooks/block_edits_on_main.cjs', 'scripts/hooks/door_from_spirality.cjs',
+    'plugin/hooks/hooks.json', '.claude/skills/loop-build/SKILL.md']) {
+    assert.ok(read(p) != null, `${p} is not in Spirality`);
   }
-  const review = planned.find((f) => f.to === '.claude/skills/loop-review/SKILL.md').content;
-  assert.match(review, /com\.normie\.loop-review/);
-  assert.match(review, /Re-run the gates: `npm run verify`\./, 'every project has npm run verify after the setup (SP-121)');
-  assert.match(review, /Normie is a website, so the surface is usually a page/);
 });
 
-test('rendered for another project, no adapted or made file keeps Spirality\'s own names', () => {
+test('rendered for another project, the CLAUDE.md sections keep none of Spirality\'s own names', () => {
   const pressplay = {
     ...NORMIE, projectName: 'PressPlay', projectSlug: 'pressplay', trackerPrefix: 'PP', dopplerProject: 'pressplay',
     launchdPrefix: 'com.pressplay', checkoutDir: '~/WebApps/pressplay', checkCommand: 'npm run build',
     mergePhrases: ['merge', 'ship it'], hosting: null,
   };
   const v = templateVars(pressplay, HOME, { spiralityCommit: 'abc1234', visibility: 'PRIVATE' });
-  const rendered = planCopies(manifest, { readSpirality: read, vars: v }).filter((f) => f.kind !== 'copy');
-  rendered.push({ to: 'CLAUDE.md', content: render(read('scripts/onboard/templates/CLAUDE-sections.md'), v) });
-  for (const f of rendered) {
-    assert.doesNotMatch(f.content, /com\.spirality\./, `${f.to} still names one of Spirality's own launchd jobs`);
-    assert.doesNotMatch(f.content, /`merge it`|`approve`/, `${f.to} still lists Spirality's merge phrases`);
-    assert.doesNotMatch(f.content, /spirality-loop-|~\/WebApps\/spirality\b/, `${f.to} still names Spirality's logs or folder`);
-  }
-  const review = rendered.find((f) => f.to === '.claude/skills/loop-review/SKILL.md').content;
-  assert.match(review, /`merge` or `ship it` \(the/);
-  assert.match(review, /\(`com\.pressplay\.relay`, every 10 minutes\)/);
-});
-
-test('every copied skill and made file names npm run verify, which the setup makes true (SP-121)', () => {
-  assert.equal(render(manifest.verifyIfAbsent, vars), 'npm run verify:full && npm run test:loop');
-  const planned = planCopies(manifest, { readSpirality: read, vars });
-  const build = planned.find((f) => f.to === '.claude/skills/loop-build/SKILL.md').content;
-  assert.match(build, /```bash\n {3}npm run verify\n {3}```/);
-  const docs = planned.find((f) => f.to === 'docs/LOOP_ENGINEERING.md').content;
-  assert.match(docs, /`npm run verify` is the definition of done\. It runs `npm run verify:full`, then the copied loop tests/);
-  assert.match(render(read('scripts/onboard/templates/CLAUDE-sections.md'), vars), /`npm run verify` is the definition of done\./);
-});
-
-test('the templates type no repository address: it comes from the settings file', () => {
-  for (const t of ['CLAUDE-sections.md', 'loop-README.md', 'LOOP_ENGINEERING.md']) {
-    assert.doesNotMatch(read(`scripts/onboard/templates/${t}`), /github\.com\/[\w-]+\/[\w-]+/, `${t} types a repository address`);
-  }
-});
-
-// What a copied skill may say about Spirality's own tickets and docs (SP-122):
-// an id of Spirality's is history, so it says whose it is; a doc the setup
-// does not write is linked in Spirality's repository, where it exists.
-function skillLeaks(text, { written, spiralityRepo, readSpirality }) {
-  const leaks = [];
-  const unmarked = text.replace(/Spirality's SP-\d+/g, '');
-  for (const m of unmarked.matchAll(/\bSP-\d+\b/g)) leaks.push(`an unmarked Spirality id ${m[0]}`);
-  const linkRe = /\[`(docs\/[\w./-]+\.md)`\]\(https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/blob\/main\/(docs\/[\w./-]+\.md)\)/g;
-  for (const m of text.matchAll(linkRe)) {
-    if (m[1] !== m[3]) leaks.push(`a link named ${m[1]} that opens ${m[3]}`);
-    if (m[2] !== spiralityRepo) leaks.push(`a link to ${m[1]} in ${m[2]}, not Spirality's ${spiralityRepo}`);
-    if (readSpirality(m[3]) == null) leaks.push(`a link to ${m[3]}, which Spirality does not have`);
-  }
-  for (const m of text.replace(linkRe, '').matchAll(/(?<![\w/.-])docs\/[\w./-]+\.md\b/g)) {
-    if (!written.has(m[0])) leaks.push(`${m[0]}, which the setup does not write`);
-  }
-  return leaks;
-}
-
-test('rendered for another project, no copied skill cites Spirality\'s ids unmarked or a doc the project lacks', () => {
-  const v = templateVars({ ...NORMIE, projectName: 'PressPlay', trackerPrefix: 'PP', launchdPrefix: 'com.pressplay' }, HOME,
-    { spiralityCommit: 'abc1234', visibility: 'PRIVATE' });
-  const skills = planCopies(manifest, { readSpirality: read, vars: v }).filter((f) => f.to.startsWith('.claude/skills/'));
-  assert.equal(skills.length, 4, 'the four loop skills are copied');
-  const opts = { written: to, spiralityRepo: HOME.githubRepo, readSpirality: read };
-  for (const f of skills) {
-    assert.deepEqual(skillLeaks(f.content, opts), [], `${f.to} leaks Spirality's own references`);
-    assert.doesNotMatch(f.content, /"Engineering rules"|engineering rule/, `${f.to} names a CLAUDE.md section the project's lacks`);
-  }
   const claude = render(read('scripts/onboard/templates/CLAUDE-sections.md'), v);
-  assert.match(claude, /^## Loop rules$/m, 'the section the skills name is the one the setup writes');
-  const build = skills.find((f) => f.to === '.claude/skills/loop-build/SKILL.md').content;
-  assert.match(build, /`Ticket: http:\/\/mac-mini\.local:4180\/t\/PP-12`/);
-  assert.match(build, /"Loop rules"/);
+  assert.doesNotMatch(claude, /com\.spirality\./, 'names one of Spirality\'s own launchd jobs');
+  assert.doesNotMatch(claude, /`merge it`|`approve`/, 'lists Spirality\'s merge phrases');
+  assert.doesNotMatch(claude, /spirality-loop-|~\/WebApps\/spirality\b/, 'names Spirality\'s logs or folder');
+  assert.doesNotMatch(claude, /\bSP-\d+\b/, 'cites one of Spirality\'s own tickets');
+  assert.doesNotMatch(claude, /`loop\/`|loop\/README\.md/, 'names a copy of the loop the project no longer has');
+  assert.match(claude, /^## Loop rules$/m, 'the section the loop skills name');
+  assert.match(claude, /SPIRALITY_PROJECT=~\/WebApps\/pressplay/, 'says how to reach Spirality\'s door by hand');
+  for (const m of claude.matchAll(/\[`(docs\/[\w./-]+\.md)`\]\(https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/blob\/main\/(docs\/[\w./-]+\.md)\)/g)) {
+    assert.equal(m[1], m[3], `a link named ${m[1]} opens ${m[3]}`);
+    assert.equal(m[2], HOME.githubRepo, `a link to ${m[1]} is not in Spirality's repository`);
+    assert.ok(read(m[3]) != null, `a link to ${m[3]}, which Spirality does not have`);
+  }
 });
 
-test('the leak check catches an unmarked id, a missing doc and a link to nowhere', () => {
-  const opts = { written: new Set(['docs/LOOP_ENGINEERING.md']), spiralityRepo: 'o/spirality', readSpirality: read };
-  assert.deepEqual(skillLeaks('Spirality\'s SP-101 and `docs/LOOP_ENGINEERING.md`, `docs/work-log/<date>.md`', opts), []);
-  assert.deepEqual(skillLeaks('ids like `SP-12`', opts), ['an unmarked Spirality id SP-12']);
-  assert.deepEqual(skillLeaks('see `docs/LOOP_CONTRACT.md`', opts), ['docs/LOOP_CONTRACT.md, which the setup does not write']);
-  assert.deepEqual(skillLeaks('[`docs/NOPE.md`](https://github.com/o/spirality/blob/main/docs/NOPE.md)', opts),
-    ['a link to docs/NOPE.md, which Spirality does not have']);
-  assert.deepEqual(skillLeaks('[`docs/LOOP_CONTRACT.md`](https://github.com/o/spirality/blob/main/docs/LOOP_CONTRACT.md)', opts), []);
+test('the template types no repository address: it comes from the settings file', () => {
+  assert.doesNotMatch(read('scripts/onboard/templates/CLAUDE-sections.md'), /github\.com\/[\w-]+\/[\w-]+/);
 });
 
 test('the setup makes the project ignore the lanes\' working copies (SP-120)', () => {
@@ -202,11 +136,4 @@ test('the setup makes the project ignore the lanes\' working copies (SP-120)', (
   assert.ok(entry, 'the manifest makes a .gitignore');
   assert.ok(entry.ignoreLines.includes('.claude/worktrees/'));
   assert.ok(read('.gitignore').split('\n').includes('.claude/worktrees/'), 'Spirality ignores it too');
-});
-
-test('.claude/settings.json is merged into the project\'s own, never copied over it (SP-254)', () => {
-  assert.ok(!manifest.files.some((f) => f.to === '.claude/settings.json'), 'a plain copy would drop the project\'s own hooks');
-  const entry = manifest.made.find((m) => m.to === '.claude/settings.json');
-  assert.equal(entry?.mergeFrom, '.claude/settings.json');
-  assert.equal(manifest.made.filter((m) => m.mergeFrom).length, 1, 'the copy step merges one settings file');
 });

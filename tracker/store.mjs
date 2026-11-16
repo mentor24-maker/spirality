@@ -116,6 +116,18 @@
  *    table, so the nightly backup holds it too. It is never edited; it is
  *    removed one at a time (removeProjectDoc), and a project that still
  *    holds any is not deleted (`has-docs`).
+ *  - A topic is a key aspect of one project, mostly a feature: a
+ *    name (required, at most MAX_TOPIC_NAME characters), a description
+ *    (may be blank), who made it and when, in the `topics` table. A project
+ *    has many topics; a topic belongs to exactly one project. This first
+ *    version only adds and lists them; a deleted project's topics go with it.
+ *  - A ticket carries any number of its own project's topics, and a topic
+ *    any number of tickets, in the `ticket_topics` link table.
+ *    They change through changeTicket's `topics` (the whole new list of
+ *    topic ids), with the same guards and version step as any other field,
+ *    and one `topics` event naming the ids before and after. A topic from
+ *    another project, or none at all, is refused (`bad-topic`) and nothing
+ *    changes. A deleted ticket's links go with it.
  */
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
@@ -142,6 +154,9 @@ const MIN_PASSWORD = 12;
 export const MAX_ATTACHMENT = 10 * 1024 * 1024;
 /** The longest file name kept, in characters. */
 const MAX_FILE_NAME = 255;
+/** The longest a topic's name and description may be, in characters. */
+export const MAX_TOPIC_NAME = 200;
+export const MAX_TOPIC_DESCRIPTION = 5000;
 
 /** The statuses a ticket may be deleted from: nobody has started it yet. */
 const DELETABLE = Object.freeze(['requested', 'queued']);
@@ -194,6 +209,7 @@ CREATE TABLE IF NOT EXISTS tickets (
   created_at  TEXT NOT NULL,
   updated_at  TEXT NOT NULL,
   version     INTEGER NOT NULL DEFAULT 1,
+  place       INTEGER,
   UNIQUE (project, number)
 );
 CREATE TABLE IF NOT EXISTS comments (
@@ -260,6 +276,19 @@ CREATE TABLE IF NOT EXISTS project_docs (
   added_by    INTEGER NOT NULL REFERENCES actors(id),
   created_at  TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS topics (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  project     TEXT NOT NULL REFERENCES projects(slug),
+  name        TEXT NOT NULL,
+  description TEXT NOT NULL,
+  created_by  INTEGER NOT NULL REFERENCES actors(id),
+  created_at  TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS ticket_topics (
+  ticket      TEXT NOT NULL REFERENCES tickets(id),
+  topic       INTEGER NOT NULL REFERENCES topics(id),
+  PRIMARY KEY (ticket, topic)
+);
 CREATE TABLE IF NOT EXISTS roles (
   name        TEXT PRIMARY KEY,
   description TEXT NOT NULL,
@@ -319,9 +348,18 @@ CREATE TABLE IF NOT EXISTS project_releases (
   at          TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS project_releases_by_project ON project_releases (project, id);
+CREATE TABLE IF NOT EXISTS next_suggestions (
+  project     TEXT PRIMARY KEY REFERENCES projects(slug),
+  state       TEXT NOT NULL,
+  suggestions TEXT,
+  message     TEXT,
+  at          TEXT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS project_members_by_actor ON project_members (actor, project);
 CREATE INDEX IF NOT EXISTS attachments_by_ticket ON attachments (ticket, id);
 CREATE INDEX IF NOT EXISTS project_docs_by_project ON project_docs (project, id);
+CREATE INDEX IF NOT EXISTS topics_by_project ON topics (project, id);
+CREATE INDEX IF NOT EXISTS ticket_topics_by_topic ON ticket_topics (topic, ticket);
 CREATE UNIQUE INDEX IF NOT EXISTS actors_by_token ON actors (token_hash);
 CREATE UNIQUE INDEX IF NOT EXISTS actors_by_email ON actors (email);
 CREATE INDEX IF NOT EXISTS sessions_by_actor ON sessions (actor);
@@ -364,6 +402,18 @@ function canonicalPriority(priority) {
     throw new StoreError('unknown-priority', `"${priority}" is not a priority: ${PRIORITIES.join(', ')}.`);
   }
   return p;
+}
+
+/**
+ * A ticket's new topics as sent: a list of topic ids (whole numbers above
+ * 0), each kept once, smallest first. Whether each is a topic of the
+ * ticket's project is checked in the write's transaction.
+ */
+function canonicalTopicIds(topics) {
+  if (!Array.isArray(topics) || topics.some((t) => !Number.isInteger(t) || t < 1)) {
+    throw new StoreError('bad-topics', "a ticket's topics are a list of topic ids (whole numbers); nothing was saved.");
+  }
+  return [...new Set(topics)].sort((a, b) => a - b);
 }
 
 function canonicalTags(tags) {
@@ -470,6 +520,13 @@ export function checkSiteUrl(value) {
 
 /** The columns a project gained after the first databases were made, and their types. */
 const LATER_PROJECT_COLUMNS = Object.freeze({ url: 'TEXT', logo: 'TEXT', owner: 'INTEGER REFERENCES actors(id)', repo: 'TEXT', alert_email: 'TEXT', alert_phone: 'TEXT' });
+
+/**
+ * The columns a ticket gained after the first databases were made. `place`
+ * is its place in its queue (1, 2, 3 ...), empty for none: the order rule is
+ * priority, then place, then oldest (docs/LOOP_CONTRACT.md, "The claim order").
+ */
+const LATER_TICKET_COLUMNS = Object.freeze({ place: 'INTEGER' });
 
 /**
  * The five roles, in the order the Users page lists them, each with its
@@ -599,6 +656,7 @@ function ticketFromRow(row) {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     version: num(row.version),
+    place: num(row.place ?? null),
   };
 }
 
@@ -637,6 +695,19 @@ function canonicalFileName(name) {
   const clean = name.split(/[\\/]/).pop().replace(/[\u0000-\u001f\u007f"]/g, '').trim().slice(0, MAX_FILE_NAME);
   if (!clean || clean === '.' || clean === '..') throw new StoreError('bad-name', 'an attachment needs a file name.');
   return clean;
+}
+
+/** A topic as listed. */
+function topicFromRow(row) {
+  return {
+    id: num(row.id),
+    project: row.project,
+    name: row.name,
+    description: row.description,
+    createdBy: num(row.created_by),
+    createdByName: row.created_by_name ?? null,
+    createdAt: row.created_at,
+  };
 }
 
 /** A project's context document as listed: everything but its bytes. */
@@ -722,6 +793,12 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
   const projectColumns = new Set(db.prepare('PRAGMA table_info(projects)').all().map((c) => c.name));
   for (const [column, type] of Object.entries(LATER_PROJECT_COLUMNS)) {
     if (!projectColumns.has(column)) db.exec(`ALTER TABLE projects ADD COLUMN ${column} ${type}`);
+  }
+  // A database made before tickets had a place gains the column, empty for
+  // every ticket; no other column is touched.
+  const ticketColumns = new Set(db.prepare('PRAGMA table_info(tickets)').all().map((c) => c.name));
+  for (const [column, type] of Object.entries(LATER_TICKET_COLUMNS)) {
+    if (!ticketColumns.has(column)) db.exec(`ALTER TABLE tickets ADD COLUMN ${column} ${type}`);
   }
   // The roles and permissions are the lists above, written in on every open,
   // so a new permission or role reaches an old database as a new row.
@@ -874,6 +951,11 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
 
   function endSessionsOf(actorId) {
     return num(db.prepare('DELETE FROM sessions WHERE actor = ?').run(actorId).changes);
+  }
+
+  /** The ids of the topics a ticket carries, smallest first. */
+  function topicIdsOf(ticket) {
+    return db.prepare('SELECT topic FROM ticket_topics WHERE ticket = ? ORDER BY topic').all(ticket).map((r) => num(r.topic));
   }
 
   function ticketRow(id) {
@@ -1501,6 +1583,9 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
         db.prepare('DELETE FROM pipeline_settings WHERE project = ?').run(slug);
         db.prepare('DELETE FROM pipeline_setting_changes WHERE project = ?').run(slug);
         db.prepare('DELETE FROM project_releases WHERE project = ?').run(slug);
+        db.prepare('DELETE FROM next_suggestions WHERE project = ?').run(slug);
+        // Its topics go too: there is no other way to remove them yet.
+        db.prepare('DELETE FROM topics WHERE project = ?').run(slug);
         const r = db.prepare('DELETE FROM projects WHERE slug = ?').run(slug);
         if (num(r.changes) !== 1 || this.getProject(slug)) {
           throw new StoreError('write-failed', `project "${slug}" was not deleted.`);
@@ -1658,11 +1743,13 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
      * transaction. Fields given with their current value are not changes:
      * no version bump, no event.
      */
-    changeTicket(id, { actor, ifStatus, ifVersion, ...fields }) {
+    changeTicket(id, { actor, ifStatus, ifVersion, topics, ...fields }) {
       const unknown = Object.keys(fields).filter((k) => !(k in CHANGEABLE));
       if (unknown.length) {
-        throw new StoreError('bad-field', `cannot change ${unknown.join(', ')}; changeable: ${Object.keys(CHANGEABLE).join(', ')}.`);
+        throw new StoreError('bad-field', `cannot change ${unknown.join(', ')}; changeable: ${[...Object.keys(CHANGEABLE), 'topics'].join(', ')}.`);
       }
+      // Topics live in their own link table, not a ticket column.
+      const wantedTopics = topics === undefined ? undefined : canonicalTopicIds(topics);
       const wanted = {};
       for (const [key, value] of Object.entries(fields)) {
         if (value === undefined) continue;
@@ -1692,12 +1779,23 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
           const before = column === 'assignee' ? num(row[column]) : row[column];
           return before !== wanted[column];
         });
-        if (!changed.length) return { ok: true, ticket: ticketFromRow(row), changed };
+        let topicsBefore = null;
+        if (wantedTopics !== undefined) {
+          for (const topic of wantedTopics) {
+            const owner = db.prepare('SELECT project FROM topics WHERE id = ?').get(topic);
+            if (!owner || owner.project !== row.project) {
+              throw new StoreError('bad-topic', `topic ${topic} is not a topic of ${row.id}'s project; nothing was saved.`);
+            }
+          }
+          topicsBefore = topicIdsOf(row.id);
+        }
+        const topicsChanged = topicsBefore != null && JSON.stringify(topicsBefore) !== JSON.stringify(wantedTopics);
+        if (!changed.length && !topicsChanged) return { ok: true, ticket: ticketFromRow(row), changed };
 
         const at = now();
         const sets = changed.map((column) => `${column} = ?`);
         const r = db.prepare(
-          `UPDATE tickets SET ${sets.join(', ')}, updated_at = ?, version = version + 1 WHERE id = ? AND version = ?`,
+          `UPDATE tickets SET ${[...sets, 'updated_at = ?'].join(', ')}, version = version + 1 WHERE id = ? AND version = ?`,
         ).run(...changed.map((c) => wanted[c]), at, row.id, version);
         if (num(r.changes) !== 1) {
           // Cannot happen while the write lock is held; if it ever does, say so.
@@ -1706,11 +1804,108 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
         for (const column of changed) {
           writeEvent(row.id, actor, column, eventValue(column, row[column]), eventValue(column, wanted[column]), at);
         }
+        if (topicsChanged) {
+          db.prepare('DELETE FROM ticket_topics WHERE ticket = ?').run(row.id);
+          const link = db.prepare('INSERT INTO ticket_topics (ticket, topic) VALUES (?, ?)');
+          for (const topic of wantedTopics) link.run(row.id, topic);
+          if (JSON.stringify(topicIdsOf(row.id)) !== JSON.stringify(wantedTopics)) {
+            throw new StoreError('write-failed', `ticket ${row.id}'s topics did not read back as saved.`);
+          }
+          writeEvent(row.id, actor, 'topics', JSON.stringify(topicsBefore), JSON.stringify(wantedTopics), at);
+        }
         const after = ticketFromRow(ticketRow(row.id));
         if (after.version !== version + 1) {
           throw new StoreError('write-failed', `ticket ${row.id} read back at version ${after.version}, expected ${version + 1}.`);
         }
-        return { ok: true, ticket: after, changed: changed.map((c) => Object.keys(CHANGEABLE).find((k) => CHANGEABLE[k] === c)) };
+        return {
+          ok: true,
+          ticket: after,
+          changed: [
+            ...changed.map((c) => Object.keys(CHANGEABLE).find((k) => CHANGEABLE[k] === c)),
+            ...(topicsChanged ? ['topics'] : []),
+          ],
+        };
+      });
+    },
+
+    /**
+     * Put tickets in order in their queue: `ids[0]` gets place 1, `ids[1]`
+     * place 2, and so on, all in one transaction (all or none). Every id must
+     * be a ticket of `project`, named once; anything else is refused with
+     * `bad-order` and nothing changes. Each ticket whose place moves gets a
+     * version bump and a `place` event, as a priority change does; one
+     * already in its place is left alone. The project's other placed
+     * tickets nobody has started (`Requested`, `Queued`) follow on, n+1,
+     * n+2 ..., in the order they already had (place, then oldest), so the
+     * others adjust and no two waiting tickets share a place; an unplaced
+     * ticket not named stays unplaced, and a started ticket not named is
+     * not touched at all (no version bump, no event). Answers
+     * `{ project, tickets, changed }`: the named tickets read back in the
+     * order given, and the ids that moved (named or not).
+     */
+    orderTickets(project, { ids, actor }) {
+      const slug = String(project ?? '');
+      if (!Array.isArray(ids) || !ids.length) {
+        throw new StoreError('bad-order', 'name the tickets to put in order, as a list of ids, first place first.');
+      }
+      const given = ids.map((id) => String(id ?? '').trim());
+      const seen = new Set();
+      for (const id of given) {
+        if (!id) throw new StoreError('bad-order', 'a ticket id in the list is empty; nothing was changed.');
+        if (seen.has(id.toUpperCase())) throw new StoreError('bad-order', `ticket ${id} is named twice; nothing was changed.`);
+        seen.add(id.toUpperCase());
+      }
+      return transaction(() => {
+        requireActor(actor, 'the actor');
+        if (!db.prepare('SELECT 1 FROM projects WHERE slug = ?').get(slug)) {
+          throw new StoreError('unknown-project', `no project "${slug}".`);
+        }
+        const rows = given.map((id) => {
+          const row = ticketRow(id) ?? ticketRow(id.toUpperCase());
+          if (!row || row.project !== slug) {
+            throw new StoreError('bad-order', `${id} is not a ticket of project "${slug}"; nothing was changed.`);
+          }
+          return row;
+        });
+        // The rest of the project's placed tickets nobody has started, in
+        // their current order, follow the named ones: "the others adjust",
+        // in Dane's words. A started ticket (Building, In review, Live ...)
+        // keeps its old place untouched: rewriting it would bump its version
+        // (a lane's or the page's guarded write on it then fails) and its
+        // updated_at, which pulse, wip-check and the pipeline pause read as
+        // its time in the stage.
+        const named = new Set(rows.map((row) => row.id));
+        const unstarted = DELETABLE.map(() => '?').join(', ');
+        const others = db.prepare(`SELECT * FROM tickets WHERE project = ? AND place IS NOT NULL AND status IN (${unstarted}) ORDER BY place, created_at, number`)
+          .all(slug, ...DELETABLE)
+          .filter((row) => !named.has(row.id));
+        const all = [...rows, ...others];
+        const at = now();
+        const changed = [];
+        all.forEach((row, i) => {
+          const place = i + 1;
+          if (num(row.place) === place) return;
+          const version = num(row.version);
+          const r = db.prepare('UPDATE tickets SET place = ?, updated_at = ?, version = version + 1 WHERE id = ? AND version = ?')
+            .run(place, at, row.id, version);
+          if (num(r.changes) !== 1) throw new StoreError('write-failed', `ticket ${row.id} was not updated.`);
+          writeEvent(row.id, actor, 'place', eventValue('place', row.place), String(place), at);
+          changed.push(row.id);
+        });
+        const tickets = rows.map((row, i) => {
+          const after = ticketFromRow(ticketRow(row.id));
+          if (after.place !== i + 1) {
+            throw new StoreError('write-failed', `ticket ${row.id} read back at place ${after.place}, expected ${i + 1}.`);
+          }
+          return after;
+        });
+        others.forEach((row, i) => {
+          const after = num(ticketRow(row.id).place);
+          if (after !== rows.length + i + 1) {
+            throw new StoreError('write-failed', `ticket ${row.id} read back at place ${after}, expected ${rows.length + i + 1}.`);
+          }
+        });
+        return { project: slug, tickets, changed };
       });
     },
 
@@ -1737,6 +1932,7 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
         db.prepare('DELETE FROM comments WHERE ticket = ?').run(row.id);
         db.prepare('DELETE FROM attachments WHERE ticket = ?').run(row.id);
         db.prepare('DELETE FROM seen_marks WHERE ticket = ?').run(row.id);
+        db.prepare('DELETE FROM ticket_topics WHERE ticket = ?').run(row.id);
         const r = db.prepare('DELETE FROM tickets WHERE id = ? AND status = ?').run(row.id, row.status);
         if (num(r.changes) !== 1 || ticketRow(row.id)) {
           throw new StoreError('write-failed', `ticket ${row.id} was not deleted.`);
@@ -1933,6 +2129,40 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
       const n = Number.isInteger(limit) && limit > 0 ? limit : 200;
       return db.prepare('SELECT * FROM pipeline_setting_changes WHERE project = ? ORDER BY id DESC LIMIT ?').all(String(project), n)
         .map((r) => ({ id: num(r.id), setting: r.setting, label: controlOf(r.setting)?.label ?? r.setting, from: r.from_value, to: r.to_value, actor: num(r.actor), at: r.at }));
+    },
+
+    /**
+     * Keep a project's latest finished next-tasks run (tracker/nextSuggest.mjs),
+     * in place of the one before: `state` is `done` with its `suggestions`
+     * (`[{ title, description, why }]`) or `failed` with a `message`. Read
+     * back; answers what nextSuggestions reads. Writes no ticket.
+     */
+    saveNextSuggestions({ project, state, suggestions = null, message = null, at = now() }) {
+      if (state !== 'done' && state !== 'failed') throw new StoreError('bad-field', `a finished run is done or failed, not "${state}".`);
+      if (state === 'done' && !Array.isArray(suggestions)) throw new StoreError('bad-field', 'a done run keeps its list of suggestions.');
+      if (state === 'failed') requireText(message, 'a failed run\'s message');
+      return transaction(() => {
+        if (!this.getProject(project)) throw new StoreError('unknown-project', `no project "${project}".`);
+        const list = state === 'done' ? JSON.stringify(suggestions) : null;
+        db.prepare('INSERT INTO next_suggestions (project, state, suggestions, message, at) VALUES (?, ?, ?, ?, ?) ON CONFLICT (project) DO UPDATE SET state = excluded.state, suggestions = excluded.suggestions, message = excluded.message, at = excluded.at')
+          .run(String(project), state, list, state === 'failed' ? message : null, at);
+        const back = this.nextSuggestions(project);
+        if (!back || back.state !== state || back.at !== at || JSON.stringify(back.suggestions) !== (list ?? 'null')) {
+          throw new StoreError('write-failed', `the next-tasks run for ${project} did not read back.`);
+        }
+        return back;
+      });
+    },
+
+    /**
+     * A project's latest finished next-tasks run, `{ state, suggestions,
+     * message, at }` (suggestions null when it failed, message null when it
+     * did not), or null when none was ever kept.
+     */
+    nextSuggestions(project) {
+      const r = db.prepare('SELECT * FROM next_suggestions WHERE project = ?').get(String(project));
+      if (!r) return null;
+      return { state: r.state, suggestions: r.suggestions == null ? null : JSON.parse(r.suggestions), message: r.message, at: r.at };
     },
 
     /**
@@ -2170,6 +2400,60 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
         }
         return projectDocFromRow(row);
       });
+    },
+
+    /**
+     * Make a topic on a project: `name` (trimmed, required),
+     * `description` (trimmed, may be blank), made by `actor`. Refused
+     * (`bad-name`, `bad-description`, `unknown-project`) with nothing written;
+     * read back in the same transaction, else nothing is kept
+     * (`write-failed`). Answers the topic as listed.
+     */
+    addTopic({ project, name, description = '', actor }) {
+      const cleanName = typeof name === 'string' ? name.trim() : '';
+      if (!cleanName) throw new StoreError('bad-name', 'a topic needs a name; nothing was saved.');
+      if (cleanName.length > MAX_TOPIC_NAME) throw new StoreError('bad-name', `a topic's name is at most ${MAX_TOPIC_NAME} characters; nothing was saved.`);
+      if (description != null && typeof description !== 'string') throw new StoreError('bad-description', "a topic's description is text; nothing was saved.");
+      const cleanDescription = (description ?? '').trim();
+      if (cleanDescription.length > MAX_TOPIC_DESCRIPTION) throw new StoreError('bad-description', `a topic's description is at most ${MAX_TOPIC_DESCRIPTION} characters; nothing was saved.`);
+      return transaction(() => {
+        requireActor(actor, 'the actor');
+        const p = this.getProject(project);
+        if (!p) throw new StoreError('unknown-project', `no project "${project}".`);
+        const r = db.prepare('INSERT INTO topics (project, name, description, created_by, created_at) VALUES (?, ?, ?, ?, ?)')
+          .run(p.slug, cleanName, cleanDescription, actor, now());
+        const back = db.prepare(`SELECT t.*, ac.name AS created_by_name FROM topics t LEFT JOIN actors ac ON ac.id = t.created_by WHERE t.id = ?`)
+          .get(num(r.lastInsertRowid));
+        if (!back || back.project !== p.slug || back.name !== cleanName || back.description !== cleanDescription) {
+          throw new StoreError('write-failed', `the topic ${cleanName} did not read back from the database.`);
+        }
+        return topicFromRow(back);
+      });
+    },
+
+    /**
+     * Every ticket of `project` that carries a topic, with its
+     * topics as `{ id, name }`, alphabetical (case aside): a Map keyed by
+     * ticket id. A ticket with none is not in it.
+     */
+    ticketTopicsOf(project) {
+      const rows = db.prepare(`SELECT tt.ticket, tp.id, tp.name FROM ticket_topics tt
+        JOIN topics tp ON tp.id = tt.topic JOIN tickets tk ON tk.id = tt.ticket
+        WHERE tk.project = ? ORDER BY tp.name COLLATE NOCASE, tp.id`).all(project);
+      const byTicket = new Map();
+      for (const r of rows) {
+        if (!byTicket.has(r.ticket)) byTicket.set(r.ticket, []);
+        byTicket.get(r.ticket).push({ id: num(r.id), name: r.name });
+      }
+      return byTicket;
+    },
+
+    /** A project's topics, newest first, each with its maker's name. */
+    listTopics(project) {
+      return db.prepare(`SELECT t.*, ac.name AS created_by_name FROM topics t LEFT JOIN actors ac ON ac.id = t.created_by
+        WHERE t.project = ? ORDER BY t.created_at DESC, t.id DESC`)
+        .all(String(project))
+        .map(topicFromRow);
     },
 
     /** A ticket's history, oldest first. */

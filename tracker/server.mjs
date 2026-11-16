@@ -43,6 +43,9 @@
  * way, listed by `GET /projects/<slug>/docs` and removed one at a time by
  * `DELETE /projects/<slug>/docs/<n>`; only someone who can see the project
  * reaches any of them.
+ * A project's topics are listed by `GET /projects/<slug>/topics`
+ * and made one at a time by `POST /projects/<slug>/topics` (`{ name,
+ * description }`, a name required), behind the same project check.
  * A refused write writes nothing. A token never appears in an answer or a
  * log line: the log names the actor id, never the header.
  *
@@ -74,7 +77,8 @@ import { resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { MAX_ATTACHMENT, openStore, StoreError } from './store.mjs';
-import { OWN_PROJECT_RELEASE } from '../lib/releases.mjs';
+import { claudeCommandOf, CLAUDE_COMMAND_VAR, suggestTitles, TIME_LIMIT_MS as SUGGEST_TIME_LIMIT_MS, TitleSuggestError } from './titleSuggest.mjs';
+import { newestReleaseReader, OWN_PROJECT_RELEASE, releaseRemote } from '../lib/releases.mjs';
 import { controlOf, GROUPS } from './pipelineControls.mjs';
 import { SOURCE as IMPORT_SOURCE } from './import.mjs';
 import { boardOf, consoleOf, lookupTickets, PRIORITIES, prToCheck, prsToCheck, projectDetailsOf, projectsList, readSearchFilters, reportsOf, searchTickets, stageColoursOf, threadOf, waitingFor, busUnseen, pipelineControlsOf } from './pageData.mjs';
@@ -82,10 +86,12 @@ import { ghPrState, prStateCache } from './prState.mjs';
 import { createNotifier, DEFAULT_FROM, MAIL_FROM, MAIL_KEY, mailEnvFromDoppler, mailSettingsFromEnv, resendSender, textSettings } from './notify.mjs';
 import { sendInvite, sendResetLink } from './account.mjs';
 import { guessProject } from './projectGuess.mjs';
+import { createSuggester, suggestKnown, ticketsInput } from './nextSuggest.mjs';
 import { findConfigFile, loadProjectConfig } from '../lib/projectConfig.mjs';
 import { saveAnswers, setupFields, setupList, setupOf, SetupError } from './setup.mjs';
 import busRelayPlan from '../lib/busRelayPlan.js';
-import { pipelineOf } from './pipeline.mjs';
+import { pipelineOf, wakeTimesOf } from './pipeline.mjs';
+import { createLaneWaker } from './wakeLanes.mjs';
 import { listCommands, REPO_ROOT } from './commands.mjs';
 import { listDocs, readDoc } from './docsFolder.mjs';
 import loopStatuses from '../lib/loopStatuses.js';
@@ -165,6 +171,18 @@ const INVITE_REFUSALS = Object.freeze({ 'duplicate-email': 409, 'duplicate-invit
 const FILE_FIELDS = Object.freeze(['name', 'description', 'status', 'priority', 'tags', 'assignee', 'loopNote']);
 /** What the Add Task box's project check reads: the words about to be filed. */
 const CHECK_FIELDS = Object.freeze(['name', 'description']);
+/** What the title suggester reads: the description, and the title when one was typed. */
+const SUGGEST_FIELDS = Object.freeze(['description', 'title']);
+/** What the page shows for each refused suggestion: plain words, never the run's own output. */
+const SUGGEST_MESSAGES = Object.freeze({
+  'no-description': 'Write a description first: the titles are suggested from it.',
+  'no-claude': 'Title suggestions are not available: Claude is not set up on the tracker\'s machine. Write your own title.',
+  'too-slow': 'The title suggestions took too long and were stopped. Try again, or write your own.',
+  'bad-answer': 'The title suggestions came back garbled. Try again, or write your own.',
+  failed: 'No titles could be suggested this time. Try again, or write your own.',
+});
+/** The answer each refused suggestion gets (tracker/titleSuggest.mjs); any other code is 502. */
+const SUGGEST_REFUSALS = Object.freeze({ 'no-description': 400, 'no-claude': 503, 'too-slow': 504, 'bad-answer': 502, failed: 502 });
 
 /** The fields a new project may carry. */
 const PROJECT_FIELDS = Object.freeze(['name', 'slug', 'prefix', 'url', 'logo', 'owner', 'repo', 'alertEmail', 'alertPhone']);
@@ -182,7 +200,8 @@ const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const RESERVED_SLUGS = Object.freeze(['new']);
 
 /** The fields a change may carry, besides its guards. */
-const CHANGE_FIELDS = Object.freeze(['name', 'description', 'status', 'priority', 'tags', 'assignee', 'loopNote']);
+// `topics` is the whole new list of the ticket's topic ids.
+const CHANGE_FIELDS = Object.freeze(['name', 'description', 'status', 'priority', 'tags', 'assignee', 'loopNote', 'topics']);
 
 /**
  * The statuses a person may move a ticket to from the ticket page, in the
@@ -197,7 +216,8 @@ const PERSON_STATUSES = Object.freeze(['requested', 'rework', 'queued', 'live']
  * Dane's page (tracker/web/): the only files served without a token, and the
  * only ones served at all, by name. The page holds no data; everything it
  * shows comes through the API below with his token. `/`, `/t/<id>`, `/board`,
- * `/board/<project>`, `/list`, `/list/<project>`, `/new` (the New request
+ * `/board/<project>`, `/list`, `/list/<project>`, `/console` (every
+ * ticket in flight), `/new` (the New request
  * form), `/settings` (the stage colours) and `/set-password` (an emailed
  * link's page, `?link=<token>`, which the page reads and never sends back
  * in an address) all answer the page itself, so each address opens its own view;
@@ -245,7 +265,7 @@ const PAGE_HEADERS = Object.freeze({
  */
 function pageFile(pathname, accept = '') {
   if (/^\/(?:projects(?:\/[^/]+)?|search|setup\/(?!fields$)[^/]+)$/.test(pathname)) return /\btext\/html\b/.test(accept) ? 'index.html' : null;
-  if (pathname === '/' || /^\/(?:tasks|board|list|new|settings|set-password|reporting|users|docs)$/.test(pathname) || /^\/(?:t|board|list)\/[^/]+$/.test(pathname)) return 'index.html';
+  if (pathname === '/' || /^\/(?:tasks|board|list|console|new|settings|set-password|reporting|users|docs|topics)$/.test(pathname) || /^\/(?:t|board|list)\/[^/]+$/.test(pathname)) return 'index.html';
   if (/^\/projects\/[^/]+\/edit$/.test(pathname)) return 'index.html';
   // A page under the Docs page, such as one of the substrate's own
   // documentation files: the page itself draws what the rest names.
@@ -489,6 +509,31 @@ function flag(value) {
   throw new HttpError(400, 'bad-field', `open must be true or false, not "${value}".`);
 }
 
+/** An ISO date or date-time: what `from` and `to` on GET /reports accept. */
+const ISO_DATE_TIME = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})?)?$/;
+
+/**
+ * GET /reports' custom range as `{ from, to }` in ms, or null when
+ * neither is given. One without the other, one that is not an ISO date-time,
+ * or `from` after `to` is a 400 naming the problem.
+ */
+function readReportRange(fromText, toText) {
+  const given = (v) => v != null && v !== '';
+  if (!given(fromText) && !given(toText)) return null;
+  if (!given(fromText) || !given(toText)) {
+    throw new HttpError(400, 'bad-field', `from and to go together: ${given(fromText) ? 'to' : 'from'} is missing.`);
+  }
+  const read = (name, text) => {
+    const ms = ISO_DATE_TIME.test(text) ? Date.parse(text) : Number.NaN;
+    if (Number.isNaN(ms)) throw new HttpError(400, 'bad-field', `${name} must be an ISO date-time, not "${text}".`);
+    return ms;
+  };
+  const from = read('from', fromText);
+  const to = read('to', toText);
+  if (from > to) throw new HttpError(400, 'bad-field', `from (${fromText}) is after to (${toText}).`);
+  return { from, to };
+}
+
 /**
  * Build the request handler around an open store. `log` gets one line per
  * request (method, path, status, actor id); it is never handed a token.
@@ -519,6 +564,13 @@ function flag(value) {
  * `commandsRoot` is the checkout the Commands section's list reads
  * (tracker/commands.mjs): this one, unless a test names another. Only a
  * `SKILL.md` inside its `commands/` and `.claude/skills/` folders is read.
+ * `waker` (tracker/wakeLanes.mjs) hears every write after its answer has
+ * gone back, like the notifier, and wakes the lane the ticket was handed
+ * to; it is not waited on, and a wake that fails never fails the write.
+ * Null means no lane is ever woken from here.
+ * `claudeCommand` is the `claude` the title suggester runs:
+ * TRACKER_CLAUDE when the server starts, else `claude` on the PATH; a test
+ * names a stub. `suggestTimeoutMs` is how long one suggestion may take.
  */
 /**
  * The word the ticket page's Close button posts: the first of the relay's
@@ -529,22 +581,72 @@ export const CLOSE_PHRASE = busRelayPlan.CLOSE_PHRASES[0];
 /** The word the Go button posts: the one an intake card asks for (GO_PHRASE in lib/busRelayPlan.js). */
 export const GO_PHRASE = busRelayPlan.GO_PHRASE;
 
-export function createHandler(store, { log = () => {}, notifier = null, defaultProject = null, mergePhrase = null, closePhrase = null, goPhrase = null, accountMail = null, setup = null, now = Date.now, publicUrl = null, pipeline = null, docsDir = DOCS_DIR, commandsRoot = REPO_ROOT, readPrState = null, ownProject = null } = {}) {
+export function createHandler(store, { log = () => {}, notifier = null, defaultProject = null, mergePhrase = null, closePhrase = null, goPhrase = null, accountMail = null, setup = null, now = Date.now, publicUrl = null, pipeline = null, docsDir = DOCS_DIR, commandsRoot = REPO_ROOT, readPrState = null, ownProject = null, newestRelease = null, waker = null, suggest = {}, claudeCommand = 'claude', suggestTimeoutMs = SUGGEST_TIME_LIMIT_MS } = {}) {
   /**
    * This machine's lanes as the page data reads them, `{ slug, stages }`
    * (pipelineOf), or null when this tracker reads no logs or they cannot be
    * read; `call` names the caller in the log line. Read per call, so a lane
    * that passes again shows at once (a held-up ticket, pageData.heldUpBy).
    */
+  /**
+   * The project's pipeline controls, so a stage paused on the Settings page
+   * shows as paused; null, and nothing shown paused, when its
+   * project is not in this tracker.
+   */
+  const controlsNow = () => {
+    try {
+      return store.getProject(pipeline.slug) ? store.pipelineSettings(pipeline.slug) : null;
+    } catch {
+      return null;
+    }
+  };
+  /**
+   * pipelineOf with the wake times set on the Settings page for the project
+   * whose logs these are, and its pause switches.
+   */
+  const lanesOf = () => pipelineOf(pipeline, { wake: wakeTimesOf(store, pipeline.slug), controls: controlsNow() });
+  /**
+   * The lanes for `slug`'s Settings page, or null: only the project whose
+   * logs this tracker reads has any, and a read that fails shows none.
+   */
+  const lanesFor = (slug) => {
+    if (!pipeline || slug !== pipeline.slug) return null;
+    return lanesNow('pipeline-controls')?.stages ?? null;
+  };
   const lanesNow = (call) => {
     if (!pipeline) return null;
     try {
-      return { slug: pipeline.slug, stages: pipelineOf(pipeline).stages };
+      return { slug: pipeline.slug, stages: lanesOf().stages };
     } catch (err) {
       log(`${call}: the loop logs could not be read, so no lane's times or health are shown (${err.message}).`);
       return null;
     }
   };
+  // Next-task suggestions: at most one run per project at a time, each
+  // reading a fresh copy of the project and its open tickets
+  // (tracker/nextSuggest.mjs). `suggest` holds the run's settings
+  // (claudeBin, source, timeLimitMs), or a whole `run` in a test.
+  // The run's claude defaults to the handler's own claudeCommand, so a test
+  // that gives a stub claudeCommand can never start the real claude here.
+  const { run: suggestRun, ...suggestOptions } = suggest ?? {};
+  const suggester = createSuggester({
+    store,
+    options: { claudeBin: claudeCommand, ...suggestOptions },
+    ...(suggestRun ? { run: suggestRun } : {}),
+    // The open tickets with their tags and topics, and the project's own
+    // topic and tag names: the only ones an answer may name.
+    inputOf: (project) => {
+      const open = store.listTickets(project.slug, { open: true });
+      const topicsByTicket = store.ticketTopicsOf(project.slug);
+      const topics = [...new Set(store.listTopics(project.slug).map((t) => t.name))].sort((a, b) => a.localeCompare(b));
+      const tags = [...new Set(store.listTickets(project.slug).flatMap((t) => t.tags ?? []))].sort((a, b) => a.localeCompare(b));
+      return {
+        input: ticketsInput(open, (id) => store.listComments(id), { topicsOf: (id) => (topicsByTicket.get(id) ?? []).map((t) => t.name), topics, tags }),
+        known: suggestKnown(open, { topics, tags }),
+      };
+    },
+    log,
+  });
   const failures = failureCounter(now);
   // Each pull request's live state on GitHub, kept a minute. With no
   // reader (tests, the switch check) the page goes by status alone, as before.
@@ -605,6 +707,19 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     return scope == null
       ? new HttpError(404, code, `no ${what}.`)
       : new HttpError(404, code, `no ${what} that you can see: there is none, or you are not on its project.`, { yourProjectsOnly: true });
+  }
+
+  /**
+   * The newest release cut, `{ newest, problem }` (lib/releases.mjs
+   * newestReleaseReader), or a problem when this tracker reads no tags.
+   */
+  async function newestNow(options) {
+    if (!newestRelease) return { newest: null, problem: 'this tracker does not read the release tags.' };
+    try {
+      return await newestRelease(options);
+    } catch (err) {
+      return { newest: null, problem: err.message };
+    }
   }
 
   /**
@@ -724,7 +839,7 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     // runners' logs (tracker/pipeline.mjs). Times and flags only, never log text.
     if (parts.length === 1 && parts[0] === 'pipeline' && method === 'GET') {
       if (!pipeline) throw new HttpError(503, 'no-pipeline', 'this tracker cannot read the loop logs: the project config was not usable when it started (its log says why).');
-      return [200, pipelineOf(pipeline)];
+      return [200, lanesOf()];
     }
 
     // Dane's page: the Console view, every ticket in flight on every
@@ -851,15 +966,18 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     // its own project's (`npm run clickup -- settings`); only the project's
     // operator, signed in as a person, changes one, never a loop. The answer
     // to a change is the control as stored, read back, with the whole view.
+    // Each project's view carries its release group, with the newest
+    // release read from the tags (kept a few minutes).
     if (parts[0] === 'pipeline-controls' && parts.length === 1 && method === 'GET') {
       const scope = scopeOf(me);
+      const newest = await newestNow();
       const projects = store.listProjects().filter((p) => scope == null || scope.has(p.slug))
-        .map((p) => pipelineControlsOf(store, p.slug, { reader: me.id, ownProject }));
+        .map((p) => pipelineControlsOf(store, p.slug, { reader: me.id, lanes: lanesFor(p.slug), ownProject, newest }));
       return [200, { projects }];
     }
     if (parts[0] === 'pipeline-controls' && parts.length === 2) {
       const project = requireProject(parts[1], me);
-      if (method === 'GET') return [200, pipelineControlsOf(store, project.slug, { reader: me.id, ownProject })];
+      if (method === 'GET') return [200, pipelineControlsOf(store, project.slug, { reader: me.id, lanes: lanesFor(project.slug), ownProject, newest: await newestNow() })];
       if (method === 'PUT') {
         if (me.kind !== 'human' || project.operator !== me.id) {
           throw new HttpError(403, 'not-operator', `only ${project.name}'s operator, signed in as a person, may change its pipeline controls; ${me.kind === 'human' ? 'you are not its operator' : 'a loop sign-in may not'}.`);
@@ -878,7 +996,7 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
           if (err instanceof StoreError && err.code === 'not-operator') throw new HttpError(403, err.code, err.message);
           throw err;
         }
-        const view = pipelineControlsOf(store, project.slug, { reader: me.id, ownProject });
+        const view = pipelineControlsOf(store, project.slug, { reader: me.id, lanes: lanesFor(project.slug), ownProject, newest: await newestNow() });
         const stored = view.controls.find((c) => c.key === saved.setting)?.value;
         if (stored !== saved.to) throw new HttpError(500, 'write-failed', `the ${saved.setting} setting read back as ${stored}, not ${saved.to}; treat it as not saved.`);
         log(`pipeline control ${project.slug} ${saved.setting} ${saved.changed ? `${saved.from} -> ${saved.to}` : `unchanged (${saved.to})`} actor=${me.id}`);
@@ -897,37 +1015,53 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
       const projects = store.listProjects().filter((p) => scope == null || scope.has(p.slug)).map((p) => releasesOf(p));
       return [200, { ownProject, ownRelease: OWN_PROJECT_RELEASE, projects }];
     }
-    if (parts[0] === 'releases' && (parts.length === 2 || (parts.length === 3 && parts[2] === 'back'))) {
+    // POST .../newest (the Settings page's Move to Newest) names the
+    // newest release cut, read fresh from the tags at that moment, through
+    // the same store call as PUT.
+    if (parts[0] === 'releases' && (parts.length === 2 || (parts.length === 3 && (parts[2] === 'back' || parts[2] === 'newest')))) {
       const project = requireProject(parts[1], me);
       if (method === 'GET' && parts.length === 2) return [200, releasesOf(project)];
       const naming = method === 'PUT' && parts.length === 2;
-      const rolling = method === 'POST' && parts.length === 3;
-      if (naming || rolling) {
+      const rolling = method === 'POST' && parts.length === 3 && parts[2] === 'back';
+      const newestly = method === 'POST' && parts.length === 3 && parts[2] === 'newest';
+      if (naming || rolling || newestly) {
         if (!ownProject) throw new HttpError(503, 'no-own-project', 'this tracker cannot tell which project is its home (the project config was not usable when it started; its log says why), so no release can be named.');
         const body = await readJson(req);
         checkBody(body, me, naming ? ['release'] : []);
+        let release = naming ? body.release : null;
+        if (newestly) {
+          if (project.slug === ownProject) throw new HttpError(409, 'own-project', `${project.name} is the tracker's home project: its lanes always run main, so no release is named for it.`);
+          const read = await newestNow({ fresh: true });
+          if (read.problem) throw new HttpError(503, 'no-release-tags', `the newest release could not be read, so nothing was named: ${read.problem}`);
+          if (!read.newest) throw new HttpError(409, 'no-release', 'no release has been cut yet (npm run release -- cut), so there is nothing to move to.');
+          release = read.newest.name;
+        }
         let saved;
         try {
-          saved = naming
-            ? store.nameRelease({ project: project.slug, release: body.release, actor: me.id, ownProject })
-            : store.rollBackRelease({ project: project.slug, actor: me.id, ownProject });
+          saved = rolling
+            ? store.rollBackRelease({ project: project.slug, actor: me.id, ownProject })
+            : store.nameRelease({ project: project.slug, release, actor: me.id, ownProject });
         } catch (err) {
           if (err instanceof StoreError && RELEASE_REFUSALS[err.code]) throw new HttpError(RELEASE_REFUSALS[err.code], err.code, err.message);
           throw err;
         }
         const view = releasesOf(project);
         if (view.release !== saved.to) throw new HttpError(500, 'write-failed', `${project.name}'s release read back as ${view.release ?? 'none'}, not ${saved.to}; treat it as not saved.`);
-        log(`release ${project.slug} ${saved.changed ? `${saved.from ?? 'none'} -> ${saved.to}` : `unchanged (${saved.to})`}${rolling ? ' (roll-back)' : ''} actor=${me.id}`);
+        log(`release ${project.slug} ${saved.changed ? `${saved.from ?? 'none'} -> ${saved.to}` : `unchanged (${saved.to})`}${rolling ? ' (roll-back)' : newestly ? ' (move to newest)' : ''} actor=${me.id}`);
         return [200, { saved, ...view }];
       }
     }
 
     // Dane's page: the Reporting page's figures, for one project
     // (`?project=<slug>`) or, with none named, every project. Read-only.
+    // `from` and `to` (ISO date-times, both or neither) add the Task
+    // Productivity table's own range; one alone, an unreadable
+    // one, or `from` after `to` is refused, never answered as zero.
     if (parts.length === 1 && parts[0] === 'reports' && method === 'GET') {
       const slug = url.searchParams.get('project');
       const scope = scopeOf(me);
-      const reports = reportsOf(store, { project: slug == null || slug === '' ? null : slug, only: scope });
+      const custom = readReportRange(url.searchParams.get('from'), url.searchParams.get('to'));
+      const reports = reportsOf(store, { project: slug == null || slug === '' ? null : slug, only: scope, custom });
       if (!reports) throw notFound('unknown-project', `project "${slug}"`, scope);
       return [200, reports];
     }
@@ -1043,6 +1177,18 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
       return [200, { project: project.slug, attachments: store.listProjectAttachments(project.slug) }];
     }
 
+    // A project's topics: key aspects of the project, mostly
+    // features. The list, newest first, and one create (a name is
+    // required), behind the same project check as the Docs page.
+    if (parts.length === 3 && parts[0] === 'projects' && parts[2] === 'topics' && (method === 'GET' || method === 'POST')) {
+      const project = requireProject(parts[1], me);
+      if (method === 'GET') return [200, { project: project.slug, topics: store.listTopics(project.slug) }];
+      const body = await readJson(req);
+      const made = store.addTopic({ project: project.slug, name: body?.name, description: body?.description ?? '', actor: me.id });
+      log(`made topic ${made.id} on ${project.slug} actor=${me.id}`);
+      return [201, made];
+    }
+
     // A project's context documents: files kept on the project,
     // not on one ticket. The list (no bytes), one upload (the raw file as
     // the body, as a ticket's attachment), one download (always saved) and
@@ -1107,6 +1253,29 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
       return [200, doc];
     }
 
+    // A queue's order (docs/LOOP_CONTRACT.md, "The claim order"): `{ ids: [...] }` gives those tickets places
+    // 1, 2, 3 ... in one write, all or none. Every id must be a ticket of
+    // this project; any other is a 400 and nothing changes. Same sign-in and
+    // project rules as changing a ticket's priority (PATCH /tickets/<id>).
+    if (parts.length === 4 && parts[0] === 'projects' && parts[2] === 'tickets' && parts[3] === 'order' && method === 'POST') {
+      const project = requireProject(parts[1], me);
+      const body = await readJson(req);
+      checkBody(body, me, ['ids']);
+      if (!Array.isArray(body.ids) || !body.ids.length || body.ids.some((id) => typeof id !== 'string')) {
+        throw new HttpError(400, 'bad-order', 'ids is a list of ticket ids, first place first; nothing was changed.');
+      }
+      let r;
+      try {
+        r = store.orderTickets(project.slug, { ids: body.ids, actor: me.id });
+      } catch (err) {
+        // A failed read-back is the tracker's fault, not the caller's: 500, not 400.
+        if (err instanceof StoreError && err.code === 'write-failed') throw new HttpError(500, err.code, err.message);
+        throw err;
+      }
+      log(`ordered ${r.tickets.length} ticket(s) in ${project.slug} (${r.changed.length} moved) actor=${me.id}`);
+      return [200, r];
+    }
+
     // Dane's page: the Add Task box asks, before it files, whether the words
     // fit another project better (tracker/projectGuess.mjs). Plain
     // word matching on the tickets already here; it writes nothing.
@@ -1122,6 +1291,44 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
       const projects = store.listProjects().filter((p) => scope == null || scope.has(p.slug))
         .map((p) => ({ slug: p.slug, name: p.name, tickets: store.listTickets(p.slug) }));
       return [200, { suggest: guessProject({ name: body.name ?? '', description: body.description ?? '' }, project.slug, projects) }];
+    }
+
+    // Next-task suggestions (tracker/nextSuggest.mjs): POST starts a run and
+    // answers at once, or answers the run already going; GET answers the
+    // latest. Same sign-in and project rules as the check above; no
+    // ticket is written.
+    if (parts.length === 3 && parts[0] === 'projects' && parts[2] === 'suggest-next' && (method === 'POST' || method === 'GET')) {
+      const project = requireProject(parts[1], me);
+      if (method === 'POST') {
+        checkBody(await readJson(req), me, []);
+        return [202, { run: suggester.start(project) }];
+      }
+      const latest = suggester.latest(project.slug);
+      if (!latest) throw new HttpError(404, 'no-run', `nobody has asked for ${project.name}'s next tasks yet.`);
+      // The project's repository, so the page links a suggestion's files on GitHub.
+      return [200, { ...latest, repo: project.repo ?? null }];
+    }
+
+    // The Add Task box's title suggester: five titles from the
+    // description, and the title typed when there is one, by a Claude run on
+    // this machine (tracker/titleSuggest.mjs). The same sign-in and project
+    // rules as the check above; it writes nothing.
+    if (parts.length === 4 && parts[0] === 'projects' && parts[2] === 'tickets' && parts[3] === 'suggest-titles' && method === 'POST') {
+      requireProject(parts[1], me);
+      const body = await readJson(req);
+      checkBody(body, me, SUGGEST_FIELDS);
+      for (const key of SUGGEST_FIELDS) {
+        if (body[key] != null && typeof body[key] !== 'string') throw new HttpError(400, 'bad-field', `${key} must be text.`);
+      }
+      if (!body.description?.trim()) throw new HttpError(400, 'no-description', 'Write a description first: the titles are suggested from it.');
+      try {
+        const titles = await suggestTitles({ description: body.description, title: body.title ?? null }, { command: claudeCommand, timeoutMs: suggestTimeoutMs });
+        return [200, { titles }];
+      } catch (err) {
+        if (!(err instanceof TitleSuggestError)) throw err;
+        log(`suggest-titles: no suggestions (${err.code}): ${err.message}`);
+        throw new HttpError(SUGGEST_REFUSALS[err.code] ?? 502, err.code, SUGGEST_MESSAGES[err.code] ?? 'No titles could be suggested this time. Try again, or write your own.');
+      }
     }
 
     if (parts.length === 3 && parts[0] === 'projects' && parts[2] === 'tickets') {
@@ -1457,13 +1664,14 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
       }
     }
     log(`${req.method} ${url.pathname} ${status} actor=${me ? me.id : '-'}`);
+    if (wrote && waker) waker.afterWrite(wrote, { actor: me });
     if (wrote && notifier) await notifier.afterWrite(wrote.ticket, wrote.changed, wrote.comment ? { comment: wrote.comment, on: wrote.on } : {});
   };
 }
 
 /** Start a server on `port` (0 = any free port) against an open store. Resolves to the http.Server. */
-export function startServer({ store, port, host = '127.0.0.1', log, notifier, defaultProject, mergePhrase, closePhrase, goPhrase, accountMail, setup, now, publicUrl, pipeline, docsDir, commandsRoot, readPrState, ownProject }) {
-  const server = createServer(createHandler(store, { log, notifier, defaultProject, mergePhrase, closePhrase, goPhrase, accountMail, setup, now, publicUrl, pipeline, docsDir, commandsRoot, readPrState, ownProject }));
+export function startServer({ store, port, host = '127.0.0.1', log, notifier, defaultProject, mergePhrase, closePhrase, goPhrase, accountMail, setup, now, publicUrl, pipeline, docsDir, commandsRoot, readPrState, ownProject, newestRelease, waker, suggest, claudeCommand, suggestTimeoutMs }) {
+  const server = createServer(createHandler(store, { log, notifier, defaultProject, mergePhrase, closePhrase, goPhrase, accountMail, setup, now, publicUrl, pipeline, docsDir, commandsRoot, readPrState, ownProject, newestRelease, waker, suggest, claudeCommand, suggestTimeoutMs }));
   return new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(port, host, () => {
@@ -1612,9 +1820,20 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     const accountMail = mail.account && { ...mail.account, projectName: store.getProject(defaultProject)?.name ?? 'tracker' };
     const { setup, why: noSetup } = setupSettingsOf({ db: resolve(db) });
     log(setup ? `set up a project: on, reading ${setup.homeConfig.logDir}/onboard.` : `set up a project: off. ${noSetup}.`);
+    // A ticket handed to a lane wakes it at once; the timers stay as the fallback.
+    const waker = ownProject ? createLaneWaker({ project: ownProject, log }) : null;
+    log(waker ? `wake lanes: on, for ${ownProject}'s tickets; a ticket handed to a lane starts its next pass, the timers stay as the fallback.` : 'wake lanes: off, because the project config is not usable; the lanes wake on their timers alone.');
     log(publicUrl ? `public address: ${publicUrl} serves the page and the API, with a Secure cookie.` : 'public address: none set (trackerPublicUrl).');
     // The bell, Waiting on You and the Merge button check each pull request on GitHub.
-    const server = await startServer({ store, port, host, log, notifier, defaultProject, mergePhrase, closePhrase: CLOSE_PHRASE, goPhrase: GO_PHRASE, accountMail, setup, publicUrl, pipeline, readPrState: ghPrState(), ownProject });
+    // The Add Task box's title suggester and the next-task suggestions run this claude.
+    const claudeCommand = claudeCommandOf();
+    log(`title and next-task suggestions: through "${claudeCommand}" on this machine${process.env[CLAUDE_COMMAND_VAR] ? ` (${CLAUDE_COMMAND_VAR})` : `; set ${CLAUDE_COMMAND_VAR} to name another`}.`);
+    const server = await startServer({ store, port, host, log, claudeCommand, notifier, defaultProject, mergePhrase, closePhrase: CLOSE_PHRASE, goPhrase: GO_PHRASE, accountMail, setup, publicUrl, pipeline, readPrState: ghPrState(), ownProject,
+      // The Settings page's Move to Newest reads the release tags from this checkout's remote.
+      newestRelease: newestReleaseReader({ run: promisify(execFile), cwd: REPO_ROOT, remote: releaseRemote() }),
+      waker,
+      // Next-task suggestions run the same `claude` (TRACKER_CLAUDE, else the one on the PATH).
+      suggest: { claudeBin: claudeCommand } });
     console.log(`tracker listening on http://${host}:${server.address().port}/`);
   } catch (err) {
     console.error(`tracker server did not start: ${err.message}`);

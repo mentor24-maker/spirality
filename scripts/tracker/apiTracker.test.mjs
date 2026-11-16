@@ -296,6 +296,26 @@ test('queue --claimable lists every Rework ticket first (oldest first), then Que
   } finally { await f.cleanup(); }
 });
 
+test('queue --claimable orders same-priority Queued tickets by place: 1, 2, then unplaced; priority still beats place; rework ignores it (SP-249)', async () => {
+  const f = await fixture();
+  try {
+    f.file({ name: 'unplaced, filed first', priority: 'normal' });
+    f.file({ name: 'placed 2', priority: 'normal' });
+    f.file({ name: 'placed 1', priority: 'normal' });
+    f.file({ name: 'high, unplaced', priority: 'high' });
+    f.file({ name: 'rework, filed before the placed one', status: 'rework' });
+    f.file({ name: 'rework placed 1', status: 'rework' });
+    f.store.orderTickets('alpha', { ids: ['AL-3', 'AL-2', 'AL-6'], actor: f.human.id });
+    const r = await f.door(['queue', '--claimable']);
+    assert.equal(r.code, 0, r.err);
+    assert.deepEqual(r.out.trim().split('\n').map((l) => l.split('\t')[0]), ['AL-5', 'AL-6', 'AL-4', 'AL-3', 'AL-2', 'AL-1']);
+    // `queue --status` lists one status in the same order.
+    const queued = await f.door(['queue', '--status', 'Queued']);
+    assert.equal(queued.code, 0, queued.err);
+    assert.deepEqual(queued.out.trim().split('\n').map((l) => l.split('\t')[0]), ['AL-4', 'AL-3', 'AL-2', 'AL-1']);
+  } finally { await f.cleanup(); }
+});
+
 test('a Requested ticket is never claimable and never waiting on Dane, even assigned to him with the newest word a loop\'s', async () => {
   const f = await fixture();
   try {
@@ -489,7 +509,8 @@ test('ask posts the card, moves to Needs your input and assigns the operator; wa
     // The card keeps its marks as markdown: his words fenced, the headings bold.
     assert.ok(card.body.includes("**DANE'S WORDS — the instruction behind this ticket**\n\n```\nbuild the to-do list\n```\n"), card.body);
     assert.ok(card.body.includes("**WHAT'S GOING ON**\n\n"), card.body);
-    assert.ok(isMachineComment(card.body), 'the card carries the machine stamp');
+    // SP-26: no stamp; the author is the machine, and that is what says so.
+    assert.ok(!isMachineComment(card.body), 'the tracker\'s door writes no machine stamp');
     assert.equal(card.author, f.machine.id);
 
     const waiting = await f.door(['waiting', '--task', 'AL-1']);
@@ -504,6 +525,37 @@ test('ask posts the card, moves to Needs your input and assigns the operator; wa
     const again = await f.door(['ask', '--task', 'AL-1', '--body-file', '-'], { stdin: CARD });
     assert.equal(again.code, 2);
     assert.match(again.err, /REFUSED — Dane's own comment is the NEWEST one on AL-1/);
+  } finally { await f.cleanup(); }
+});
+
+test('ask refuses a new card over a teammate\'s answer to the card in Needs your input (SP-302 round 2)', async () => {
+  const f = await fixture();
+  try {
+    const rich = f.store.createActor({ kind: 'human', name: 'Rich' });
+    f.file({ name: 'one', status: 'building' });
+    const r = await f.door(['ask', '--task', 'AL-1', '--body-file', '-'], { stdin: CARD });
+    assert.equal(r.code, 0, r.err);
+    f.store.postComment({ ticket: 'AL-1', author: rich.id, body: 'UPI ok' });
+
+    const again = await f.door(['ask', '--task', 'AL-1', '--body-file', '-'], { stdin: CARD });
+    assert.equal(again.code, 2, again.err);
+    assert.match(again.err, /REFUSED — Rich's answer to the card is the NEWEST one on AL-1/);
+    assert.equal(f.store.listComments('AL-1').length, 2, 'no second card was posted');
+
+    // Said on the record to be a new question, it goes through.
+    const said = await f.door(['ask', '--task', 'AL-1', '--after-his-answer', '--body-file', '-'], { stdin: CARD });
+    assert.equal(said.code, 0, said.err);
+  } finally { await f.cleanup(); }
+});
+
+test('ask is not refused by a teammate\'s comment on a ticket outside Needs your input', async () => {
+  const f = await fixture();
+  try {
+    const rich = f.store.createActor({ kind: 'human', name: 'Rich' });
+    f.file({ name: 'one', status: 'building' });
+    f.store.postComment({ ticket: 'AL-1', author: rich.id, body: 'looks fine to me' });
+    const r = await f.door(['ask', '--task', 'AL-1', '--body-file', '-'], { stdin: CARD });
+    assert.equal(r.code, 0, r.err);
   } finally { await f.cleanup(); }
 });
 
@@ -705,7 +757,8 @@ test('relay hands a ticket back on his answer: the move and the reply marker are
     assert.equal(t.assignee, null);
     const replies = f.store.listComments('AL-1').filter((c) => c.parent === answer.id);
     assert.equal(replies.length, 1);
-    assert.ok(isMachineComment(replies[0].body), 'the reply carries the machine stamp');
+    assert.ok(!isMachineComment(replies[0].body), 'the reply carries no machine stamp (SP-26)');
+    assert.equal(f.store.getActor(replies[0].author).kind, 'machine', 'its author is a machine');
 
     const quiet = await f.door(['relay']);
     assert.equal(quiet.code, 0, quiet.err);
@@ -744,6 +797,99 @@ test('relay merges on his word and the merge marker lands as a reply, even after
     assert.equal(replies.length, 1, 'the marker is a reply on his word');
     assert.match(replies[0].body, /merged PR #7/);
     assert.equal(f.store.getTicket('AL-1').status, 'live');
+  } finally { await f.cleanup(); }
+});
+
+/** A catch-up ticket shaped like SP-284: no PR of its own, filed to unstick PR #7. */
+function fileCatchUp(f, status) {
+  return f.file({ name: 'Find out why PR #7 (fix) will not merge', status, description: '## The branch\n\n- PR: https://github.com/owner/repo/pull/7\n- Branch: `fix`\n- Waiting ticket: AL-9' });
+}
+
+test('a catch-up ticket whose PR already merged is never handed to Dane: ask refuses, fixup-live moves it to Live with one note (SP-288)', async () => {
+  const f = await fixture();
+  try {
+    fileCatchUp(f, 'in review');
+    f.prJson = { number: 7, state: 'MERGED', mergedAt: '2026-11-13T17:39:00Z' };
+
+    const ask = await f.door(['ask', '--task', 'AL-1', '--body-file', '-'], { stdin: CARD });
+    assert.equal(ask.code, 2, ask.err);
+    assert.match(ask.err, /REFUSED — AL-1 is a catch-up ticket and PR #7, the pull request it was filed to unstick, is merged \(11\/13, 10:39 AM MT\)/);
+    assert.match(ask.err, /npm run clickup -- fixup-live --task AL-1 --if-status "in review"/);
+    assert.equal(f.store.getTicket('AL-1').status, 'in review', 'nothing moved');
+    assert.equal(f.store.listComments('AL-1').length, 0, 'no card posted');
+
+    const r = await f.door(['fixup-live', '--task', 'AL-1', '--if-status', 'In review']);
+    assert.equal(r.code, 0, r.err);
+    assert.match(r.out, /^Task AL-1: "in review" -> "live" \(read back\), note \d+ posted \(read back\): PR #7, the pull request it was filed to unstick, is merged\.\n$/);
+    const t = f.store.getTicket('AL-1');
+    assert.equal(t.status, 'live');
+    assert.equal(t.assignee, null, 'never assigned to Dane');
+    const notes = f.store.listComments('AL-1');
+    assert.equal(notes.length, 1, 'one note, no card');
+    assert.match(notes[0].body, /CLOSED, WORK ALREADY LIVE: PR #7 \(https:\/\/github\.com\/owner\/repo\/pull\/7\), the pull request this ticket was filed to unstick, was merged into main at 11\/13, 10:39 AM MT\./);
+    assert.match(notes[0].body, /moved from "in review" to Live by itself/);
+    assert.doesNotMatch(notes[0].body, /Your move/);
+    assert.ok(!isMachineComment(notes[0].body), 'the note carries no machine stamp (SP-26)');
+    assert.equal(f.store.getActor(notes[0].author).kind, 'machine', 'its author is a machine');
+
+    const again = await f.door(['fixup-live', '--task', 'AL-1']);
+    assert.equal(again.code, 4);
+    assert.match(again.out, /left as it is — it is already Live/);
+    assert.equal(f.store.listComments('AL-1').length, 1, 'a second run writes nothing');
+  } finally { await f.cleanup(); }
+});
+
+test('a catch-up ticket whose PR is still open goes to Dane as today, and only once; fixup-live leaves it (SP-288)', async () => {
+  const f = await fixture();
+  try {
+    fileCatchUp(f, 'building');
+    f.prJson = { number: 7, state: 'OPEN' };
+    const stay = await f.door(['fixup-live', '--task', 'AL-1', '--if-status', 'Building']);
+    assert.equal(stay.code, 4, stay.err);
+    assert.match(stay.out, /left as it is — PR #7 is open, not merged\. Carry on as before\./);
+    assert.equal(f.store.getTicket('AL-1').status, 'building');
+    assert.equal(f.store.listComments('AL-1').length, 0);
+
+    const ask = await f.door(['ask', '--task', 'AL-1', '--body-file', '-'], { stdin: CARD });
+    assert.equal(ask.code, 0, ask.err);
+    assert.equal(f.store.getTicket('AL-1').status, 'needs your input');
+
+    // The review posted its card twice on SP-284; the second is refused.
+    const twice = await f.door(['ask', '--task', 'AL-1', '--body-file', '-'], { stdin: CARD });
+    assert.equal(twice.code, 2);
+    assert.match(twice.err, /REFUSED — AL-1 is already in "needs your input" with a card Dane has not answered yet/);
+    assert.equal(f.store.listComments('AL-1').length, 1, 'one card, not two');
+    const forced = await f.door(['ask', '--task', 'AL-1', '--ask-again', '--body-file', '-'], { stdin: CARD });
+    assert.equal(forced.code, 0, forced.err);
+
+    // Once in his status, even a merge does not take it out: that is his move.
+    f.prJson = { number: 7, state: 'MERGED' };
+    const his = await f.door(['fixup-live', '--task', 'AL-1']);
+    assert.equal(his.code, 4);
+    assert.match(his.out, /it is in "needs your input", not a status a loop moves/);
+    assert.equal(f.store.getTicket('AL-1').status, 'needs your input');
+  } finally { await f.cleanup(); }
+});
+
+test('fixup-live: a failed GitHub read moves nothing (exit 1), a ticket with its own PR is not a catch-up (exit 4), and a stale guard exits 3 (SP-288)', async () => {
+  const f = await fixture();
+  try {
+    fileCatchUp(f, 'in review');
+    writeFileSync(join(f.bin, 'gh'), '#!/bin/sh\necho "gh: not signed in" >&2\nexit 1\n');
+    const blind = await f.door(['fixup-live', '--task', 'AL-1']);
+    assert.equal(blind.code, 1);
+    assert.match(blind.err, /NOT moved — GitHub could not be read for PR #7/);
+    assert.equal(f.store.getTicket('AL-1').status, 'in review');
+
+    const stale = await f.door(['fixup-live', '--task', 'AL-1', '--if-status', 'Building']);
+    assert.equal(stale.code, 3);
+    assert.match(stale.err, /NOT moved: expected status "Building" but the task is "in review"/);
+
+    f.file({ name: 'own work', status: 'in review' });
+    f.store.postComment({ ticket: 'AL-2', author: f.machine.id, body: 'PR opened: https://github.com/owner/repo/pull/8' });
+    const own = await f.door(['fixup-live', '--task', 'AL-2']);
+    assert.equal(own.code, 4, own.err);
+    assert.match(own.out, /it has a pull request of its own \(#8\)/);
   } finally { await f.cleanup(); }
 });
 
@@ -822,7 +968,9 @@ test('replies: posted under a comment, listed apart from the top-level trail, an
     assert.deepEqual(paged.comments.map((c) => c.id), [top.json.id]);
     const replies = await t.listReplies(top.json.id);
     assert.deepEqual(replies.json.comments.map((c) => c.id), [reply.json.id]);
-    assert.ok(replies.json.comments.every((c) => isMachineComment(c.comment_text)));
+    // SP-26: the door says each author's kind, and writes no stamp.
+    assert.ok(replies.json.comments.every((c) => c.user.kind === 'machine' && !isMachineComment(c.comment_text)));
+    assert.ok(paged.comments.every((c) => c.user.kind === 'machine'));
   } finally { await f.cleanup(); }
 });
 

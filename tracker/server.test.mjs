@@ -1,11 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { openStore } from './store.mjs';
+import { openStore, StoreError } from './store.mjs';
 import { SOURCE as IMPORT_SOURCE } from './import.mjs';
 import { startServer, settingsFromEnv, setupSettingsOf, viaPublicAddress, failureCounter, outsidePageUrl } from './server.mjs';
 import { DANE_FIELDS, STEPS } from '../scripts/onboard/onboard.mjs';
@@ -121,6 +121,83 @@ test('POST /projects/:slug/tickets files a ticket under the caller, and GET list
   } finally { await f.cleanup(); }
 });
 
+/**
+ * A stand-in `claude` for the title suggester: it saves its arguments and
+ * standard input beside itself, then runs `body` (plain Node).
+ */
+function stubClaude(dir, name, body) {
+  const command = join(dir, name);
+  writeFileSync(command, `#!/usr/bin/env node
+let input = '';
+process.stdin.on('data', (c) => { input += c; });
+process.stdin.on('end', () => {
+  require('node:fs').writeFileSync(${JSON.stringify(`${command}.seen.json`)}, JSON.stringify({ args: process.argv.slice(2), input }));
+  ${body}
+});
+`);
+  chmodSync(command, 0o755);
+  return { command, seen: () => (existsSync(`${command}.seen.json`) ? JSON.parse(readFileSync(`${command}.seen.json`, 'utf8')) : null) };
+}
+
+test('POST /projects/:slug/tickets/suggest-titles answers five titles from a stub claude, and writes nothing', async () => {
+  const f = await fixture();
+  try {
+    const five = ['Add a title suggester', 'Suggest titles from a description', 'Offer five titles on Add Task', 'Let the tracker name tasks', 'Show title choices when adding'];
+    const good = stubClaude(f.dir, 'good', `process.stdout.write(${JSON.stringify(five.join('\n'))});`);
+    const three = stubClaude(f.dir, 'three', `process.stdout.write('a\\nb\\nc\\n');`);
+    const silent = stubClaude(f.dir, 'silent', '');
+    const hang = stubClaude(f.dir, 'hang', 'setInterval(() => {}, 1000);');
+    const at = (command, extra = {}) => f.serve(f.store, { claudeCommand: command, suggestTimeoutMs: 400, ...extra });
+    const path = '/projects/alpha/tickets/suggest-titles';
+    f.store.fileTicket({ project: 'alpha', name: 'Existing', status: 'queued', actor: f.machine.id });
+    const before = JSON.stringify([f.store.listTickets('alpha'), f.store.listEvents('AL-1')]);
+
+    const goodAt = await at(good.command);
+    const ok = await f.call('POST', path, { at: goodAt, token: f.humanToken, body: { description: 'On the Add Task form, suggest titles: quokka-77', title: 'Title helper' } });
+    assert.equal(ok.status, 200, ok.text);
+    assert.deepEqual(ok.body, { titles: five });
+    const seen = good.seen();
+    assert.equal(seen.input, 'Description: On the Add Task form, suggest titles: quokka-77\nTitle: Title helper\n', 'the words arrive on standard input');
+    assert.ok(!seen.args.some((a) => a.includes('quokka-77') || a.includes('Title helper')), `never in its arguments: ${JSON.stringify(seen.args)}`);
+    assert.equal((await f.call('POST', path, { at: goodAt, body: { description: 'From a loop' } })).status, 200, 'a loop\'s token may ask too, as with /tickets/check');
+
+    // Three lines, or nothing: a bad answer. A hang: stopped at the limit. No claude at all: 503.
+    const r3 = await f.call('POST', path, { at: await at(three.command), body: { description: 'x' } });
+    assert.equal(r3.status, 502, r3.text);
+    assert.equal(r3.body.error, 'bad-answer');
+    assert.match(r3.body.message, /Try again, or write your own/);
+    assert.equal((await f.call('POST', path, { at: await at(silent.command), body: { description: 'x' } })).status, 502);
+    const started = Date.now();
+    const slow = await f.call('POST', path, { at: await at(hang.command), body: { description: 'x' } });
+    assert.equal(slow.status, 504, slow.text);
+    assert.ok(Date.now() - started < 3000, 'answered at the limit');
+    const none = await f.call('POST', path, { at: await at(join(f.dir, 'no-such-claude')), body: { description: 'x' } });
+    assert.equal(none.status, 503, none.text);
+    assert.equal(none.body.error, 'no-claude');
+    assert.ok(f.lines.some((l) => l.includes('suggest-titles: no suggestions (no-claude)')), 'the log says why');
+
+    // An empty description is 400 and runs nothing; so is a field it does not read, or words that are not text.
+    const spy = stubClaude(f.dir, 'spy', `process.stdout.write(${JSON.stringify(five.join('\n'))});`);
+    const spyAt = await at(spy.command);
+    for (const body of [{}, { description: '' }, { description: '   ', title: 'Only a title' }]) {
+      const r = await f.call('POST', path, { at: spyAt, body });
+      assert.equal(r.status, 400, JSON.stringify(body));
+      assert.equal(r.body.error, 'no-description');
+    }
+    assert.equal((await f.call('POST', path, { at: spyAt, body: { description: 'x', status: 'queued' } })).status, 400);
+    assert.equal((await f.call('POST', path, { at: spyAt, body: { description: 7 } })).status, 400);
+    assert.equal((await f.call('POST', path, { at: spyAt, body: { description: 'x', title: 7 } })).status, 400);
+    assert.equal(spy.seen(), null, 'a refused call never runs claude');
+
+    // No token, an unknown project.
+    assert.equal((await f.call('POST', path, { at: spyAt, token: null, body: { description: 'x' } })).status, 401);
+    assert.equal((await f.call('POST', '/projects/nowhere/tickets/suggest-titles', { at: spyAt, body: { description: 'x' } })).status, 404);
+    assert.equal(spy.seen(), null);
+
+    assert.equal(JSON.stringify([f.store.listTickets('alpha'), f.store.listEvents('AL-1')]), before, 'nothing was written');
+  } finally { await f.cleanup(); }
+});
+
 test('POST /projects/:slug/tickets/check names the project the words fit better, or none, and writes nothing', async () => {
   const f = await fixture();
   try {
@@ -148,6 +225,129 @@ test('POST /projects/:slug/tickets/check names the project the words fit better,
     assert.equal((await f.call('POST', '/projects/alpha/tickets/check', { token: null, body: { name: 'x' } })).status, 401);
 
     assert.equal(JSON.stringify([f.store.listTickets('alpha'), f.store.listTickets('game'), f.store.listEvents('AL-1')]), before, 'the check wrote nothing');
+  } finally { await f.cleanup(); }
+});
+
+/**
+ * A local git repository with one commit on main, and a stub `claude` that
+ * writes its arguments and standard input to `record.json` beside it and
+ * prints `out` (or hangs, with STUB_HANG). For the suggest-next calls.
+ */
+function suggestScratch(dir, out) {
+  const repo = join(dir, 'repo');
+  mkdirSync(repo);
+  const git = (...args) => spawnSync('git', args, { cwd: repo, stdio: 'pipe' });
+  git('init', '--quiet', '-b', 'main');
+  writeFileSync(join(repo, 'CLAUDE.md'), '# A test project\n');
+  git('add', '.');
+  git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '--quiet', '-m', 'first');
+  const stub = join(dir, 'claude-stub');
+  const record = join(dir, 'record.json');
+  writeFileSync(stub, `#!/usr/bin/env node
+const fs = require('node:fs');
+let input = '';
+process.stdin.on('data', (d) => { input += d; });
+process.stdin.on('end', () => {
+  fs.writeFileSync(${JSON.stringify(record)}, JSON.stringify({ args: process.argv.slice(2), input }));
+  setTimeout(() => { process.stdout.write(${JSON.stringify(out)}); }, 300);
+});
+`);
+  spawnSync('chmod', ['+x', stub]);
+  const tmpRoot = join(dir, 'suggest-tmp');
+  mkdirSync(tmpRoot);
+  return { repo, stub, tmpRoot, recorded: () => JSON.parse(readFileSync(record, 'utf8')) };
+}
+
+/** Ask GET /projects/<slug>/suggest-next until the run is not running, at most `ms`. */
+async function settledSuggest(f, at, slug, ms = 10000) {
+  const until = Date.now() + ms;
+  for (;;) {
+    const r = await f.call('GET', `/projects/${slug}/suggest-next`, { at });
+    if (r.body.state !== 'running' || Date.now() > until) return r;
+    await new Promise((res) => setTimeout(res, 100));
+  }
+}
+
+test('POST then GET /projects/:slug/suggest-next runs claude on a fresh copy and answers its five suggestions; two starts give one run; no ticket is written', async () => {
+  const f = await fixture();
+  try {
+    const five = [1, 2, 3, 4, 5].map((n) => ({ title: `Add thing ${n}`, description: `Do thing ${n}.`, why: `Plan step ${n}.` }));
+    const x = suggestScratch(f.dir, JSON.stringify(five));
+    f.store.updateProject('alpha', { repo: 'me/app' });
+    const t = f.store.fileTicket({ project: 'alpha', name: 'Unmistakable open ticket', status: 'queued', actor: f.machine.id });
+    f.store.postComment({ ticket: t.id, author: f.machine.id, body: 'a comment worth reading', parent: null });
+    const before = JSON.stringify([f.store.listTickets('alpha'), f.store.listComments(t.id), f.store.listEvents(t.id)]);
+    const at = await f.serve(f.store, { suggest: { claudeBin: x.stub, source: () => x.repo, tmpRoot: x.tmpRoot } });
+
+    assert.equal((await f.call('GET', '/projects/alpha/suggest-next', { at })).status, 404, 'none asked for yet');
+    const first = await f.call('POST', '/projects/alpha/suggest-next', { at, token: f.humanToken, body: {} });
+    assert.equal(first.status, 202, first.text);
+    assert.equal(first.body.run.state, 'running');
+    const second = await f.call('POST', '/projects/alpha/suggest-next', { at });
+    assert.equal(second.status, 202);
+    assert.equal(second.body.run.id, first.body.run.id, 'a second start answers the run already going');
+    assert.equal((await f.call('GET', '/projects/alpha/suggest-next', { at })).body.state, 'running');
+
+    const done = await settledSuggest(f, at, 'alpha');
+    assert.equal(done.status, 200, done.text);
+    assert.equal(done.body.state, 'done', done.text);
+    assert.deepEqual(done.body.suggestions, five);
+    assert.equal(f.lines.filter((l) => /suggest-next: started run/.test(l)).length, 1, 'one run');
+    const r = x.recorded();
+    assert.ok(r.input.includes('Unmistakable open ticket') && r.input.includes('a comment worth reading'), 'the open tickets went in on standard input');
+    assert.ok(!r.args.join(' ').includes('Unmistakable open ticket'), 'never in the arguments');
+    assert.deepEqual(readdirSync(x.tmpRoot), [], 'the copy is gone');
+    assert.equal(JSON.stringify([f.store.listTickets('alpha'), f.store.listComments(t.id), f.store.listEvents(t.id)]), before, 'no ticket was created or changed');
+
+    // The list is kept: a restart (a new server on the same store) still answers it.
+    const again = await f.serve(f.store);
+    assert.deepEqual((await f.call('GET', '/projects/alpha/suggest-next', { at: again })).body.suggestions, five);
+
+    // Refused: an unknown project, a field it does not read, no token.
+    assert.equal((await f.call('POST', '/projects/nowhere/suggest-next', { at })).status, 404);
+    assert.equal((await f.call('POST', '/projects/alpha/suggest-next', { at, body: { repo: 'other/repo' } })).status, 400);
+    assert.equal((await f.call('POST', '/projects/alpha/suggest-next', { at, token: null })).status, 401);
+  } finally { await f.cleanup(); }
+});
+
+test('suggest-next fails with a plain message for a project with no repository, a bad answer, or no claude', async () => {
+  const f = await fixture();
+  try {
+    const x = suggestScratch(f.dir, JSON.stringify([{ title: 'Add one' }, { title: 'Add two' }]));
+    const at = await f.serve(f.store, { suggest: { claudeBin: x.stub, source: () => x.repo, tmpRoot: x.tmpRoot } });
+    await f.call('POST', '/projects/alpha/suggest-next', { at });
+    const noRepo = await settledSuggest(f, at, 'alpha');
+    assert.equal(noRepo.body.state, 'failed');
+    assert.match(noRepo.body.message, /no GitHub repository/);
+
+    f.store.updateProject('alpha', { repo: 'me/app' });
+    await f.call('POST', '/projects/alpha/suggest-next', { at });
+    const two = await settledSuggest(f, at, 'alpha');
+    assert.equal(two.body.state, 'failed');
+    assert.match(two.body.message, /Claude gave 2 suggestions; a good answer has 3 to 7/);
+    assert.equal(two.body.suggestions, undefined, 'never a half list');
+
+    const missing = await f.serve(f.store, { suggest: { claudeBin: join(f.dir, 'no-claude-here'), source: () => x.repo, tmpRoot: x.tmpRoot } });
+    await f.call('POST', '/projects/alpha/suggest-next', { at: missing });
+    const none = await settledSuggest(f, missing, 'alpha');
+    assert.equal(none.body.state, 'failed');
+    assert.match(none.body.message, /Claude was not found/);
+    assert.deepEqual(readdirSync(x.tmpRoot), [], 'no copy left behind');
+  } finally { await f.cleanup(); }
+});
+
+test('suggest-next runs the server\'s own claudeCommand when no claude is named for it, so a stub there can never start the real claude', async () => {
+  const f = await fixture();
+  try {
+    const three = [1, 2, 3].map((n) => ({ title: `Add thing ${n}`, description: '', why: '' }));
+    const x = suggestScratch(f.dir, JSON.stringify(three));
+    f.store.updateProject('alpha', { repo: 'me/app' });
+    const at = await f.serve(f.store, { claudeCommand: x.stub, suggest: { source: () => x.repo, tmpRoot: x.tmpRoot } });
+    await f.call('POST', '/projects/alpha/suggest-next', { at });
+    const done = await settledSuggest(f, at, 'alpha');
+    assert.equal(done.body.state, 'done', done.text);
+    assert.deepEqual(done.body.suggestions, three);
+    assert.ok(x.recorded().args.includes('--restricted'), 'the stub claude ran, confined');
   } finally { await f.cleanup(); }
 });
 
@@ -214,6 +414,78 @@ test('PATCH /tickets/:id changes fields; a guard that still holds wins, one that
     const after = f.store.getTicket(t.id);
     assert.equal(after.version, 2);
     assert.equal(after.priority, null);
+  } finally { await f.cleanup(); }
+});
+
+test("PATCH /tickets/:id changes a ticket's topics (SP-247): the board shows them and the project's own, a topic of another project is refused, a stale version gets 409", async () => {
+  const f = await fixture();
+  try {
+    f.store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE' });
+    const login = f.store.addTopic({ project: 'alpha', name: 'Login', actor: f.human.id });
+    const billing = f.store.addTopic({ project: 'alpha', name: 'billing', actor: f.human.id });
+    const theirs = f.store.addTopic({ project: 'beta', name: 'Theirs', actor: f.human.id });
+    const one = f.store.fileTicket({ project: 'alpha', actor: f.machine.id, name: 'One', status: 'queued' });
+    const two = f.store.fileTicket({ project: 'alpha', actor: f.machine.id, name: 'Two', status: 'queued' });
+
+    const r = await f.call('PATCH', `/tickets/${one.id}`, { token: f.humanToken, body: { topics: [login.id, billing.id], ifVersion: one.version } });
+    assert.equal(r.status, 200);
+    assert.deepEqual(r.body.changed, ['topics']);
+    assert.equal((await f.call('PATCH', `/tickets/${two.id}`, { token: f.humanToken, body: { topics: [login.id], ifVersion: two.version } })).status, 200);
+
+    const board = (await f.call('GET', '/projects/alpha/board', { token: f.humanToken })).body;
+    assert.deepEqual(board.topics, [{ id: billing.id, name: 'billing' }, { id: login.id, name: 'Login' }], "the project's own, alphabetical, never another project's");
+    const byId = new Map(board.columns.flatMap((c) => c.tickets).map((t) => [t.id, t]));
+    assert.deepEqual(byId.get(one.id).topics, [{ id: billing.id, name: 'billing' }, { id: login.id, name: 'Login' }]);
+    assert.deepEqual(byId.get(two.id).topics, [{ id: login.id, name: 'Login' }]);
+
+    const refused = await f.call('PATCH', `/tickets/${two.id}`, { token: f.humanToken, body: { topics: [login.id, theirs.id], ifVersion: two.version + 1 } });
+    assert.equal(refused.status, 400);
+    assert.equal(refused.body.error, 'bad-topic');
+    const stale = await f.call('PATCH', `/tickets/${two.id}`, { token: f.humanToken, body: { topics: [], ifVersion: two.version } });
+    assert.equal(stale.status, 409);
+    assert.equal(stale.body.error, 'moved');
+    assert.deepEqual(f.store.ticketTopicsOf('alpha').get(two.id), [{ id: login.id, name: 'Login' }], 'neither changed anything');
+  } finally { await f.cleanup(); }
+});
+
+test('POST /projects/:slug/tickets/order gives places 1..n in one write; an id from another project is 400 and changes nothing', async () => {
+  const f = await fixture();
+  try {
+    f.store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE', operator: f.human.id });
+    for (const name of ['a', 'b', 'c']) f.store.fileTicket({ project: 'alpha', actor: f.machine.id, name, status: 'queued' });
+    f.store.fileTicket({ project: 'beta', actor: f.machine.id, name: 'x', status: 'queued' });
+
+    const ok = await f.call('POST', '/projects/alpha/tickets/order', { token: f.humanToken, body: { ids: ['AL-2', 'AL-3', 'AL-1'] } });
+    assert.equal(ok.status, 200);
+    assert.deepEqual(ok.body.tickets.map((t) => [t.id, t.place]), [['AL-2', 1], ['AL-3', 2], ['AL-1', 3]]);
+    assert.deepEqual(ok.body.changed, ['AL-2', 'AL-3', 'AL-1']);
+    // Each move is in the ticket's history, under the caller, like a priority change.
+    const events = await f.call('GET', '/tickets/AL-2/events');
+    const place = events.body.events.find((e) => e.field === 'place');
+    assert.equal(place.to, '1');
+    assert.equal(place.actor, f.human.id);
+
+    const versions = () => ['AL-1', 'AL-2', 'AL-3', 'BE-1'].map((id) => [id, f.store.getTicket(id).place, f.store.getTicket(id).version]);
+    const before = versions();
+    for (const body of [{ ids: ['AL-1', 'BE-1'] }, { ids: ['AL-1', 'AL-9'] }, { ids: [] }, { ids: 'AL-1' }, { ids: ['AL-1'], place: 1 }]) {
+      const bad = await f.call('POST', '/projects/alpha/tickets/order', { token: f.humanToken, body });
+      assert.equal(bad.status, 400, JSON.stringify(body));
+    }
+    assert.deepEqual(versions(), before, 'nothing changed');
+    assert.equal((await f.call('POST', '/projects/nope/tickets/order', { body: { ids: ['AL-1'] } })).status, 404);
+    // A loop's token may order too, the same as it may change a priority.
+    assert.equal((await f.call('POST', '/projects/alpha/tickets/order', { body: { ids: ['AL-1'] } })).status, 200);
+  } finally { await f.cleanup(); }
+});
+
+test('POST /projects/:slug/tickets/order answers 500, not 400, when the store\'s read-back fails', async () => {
+  const f = await fixture();
+  try {
+    f.store.fileTicket({ project: 'alpha', actor: f.machine.id, name: 'a', status: 'queued' });
+    f.store.orderTickets = () => { throw new StoreError('write-failed', 'ticket AL-1 read back at place 2, expected 1.'); };
+    const r = await f.call('POST', '/projects/alpha/tickets/order', { token: f.humanToken, body: { ids: ['AL-1'] } });
+    assert.equal(r.status, 500);
+    assert.equal(r.body.error, 'write-failed');
   } finally { await f.cleanup(); }
 });
 
@@ -903,6 +1175,8 @@ test('strict membership: a person who is not an admin sees only their own projec
       ['GET', '/projects/beta'], ['GET', '/projects/beta/board'], ['GET', '/projects/beta/tickets'],
       ['POST', '/projects/beta/tickets', { name: 'Sneak in', status: 'Requested' }],
       ['POST', '/projects/beta/tickets/check', { name: 'x' }], ['GET', '/reports?project=beta'],
+      ['POST', '/projects/beta/suggest-next'], ['GET', '/projects/beta/suggest-next'],
+      ['POST', '/projects/beta/tickets/suggest-titles', { description: 'x' }],
       ['GET', `/tickets/${theirs.id}`], ['GET', `/tickets/${theirs.id}/thread`], ['GET', `/tickets/${theirs.id}/events`],
       ['GET', `/tickets/${theirs.id}/attachments`], ['GET', `/tickets/${theirs.id}/attachments/1`], ['GET', '/projects/beta/attachments'],
       ['PATCH', `/tickets/${theirs.id}/attachments/${theirFile.id}`, { name: 'renamed.txt' }], ['DELETE', `/tickets/${theirs.id}/attachments/${theirFile.id}`],
@@ -1495,10 +1769,45 @@ test('GET /reports answers the Reporting figures for every project or one, 404 f
       assert.deepEqual(r.body.humanHours.week, { finished: 1, estimated: 0, notEstimated: 1, hours: null, days: 7, perDay: null }, path);
     }
     assert.equal((await f.call('GET', '/reports?project=alpha')).body.projectName, 'Alpha');
+    // Growth Rate (SP-241): the answer carries all three timeframes; one ticket filed today is too young to compare.
+    const growth = (await f.call('GET', '/reports?project=alpha')).body;
+    assert.deepEqual(growth.growthPeriods.map((g) => g.label), ['Weekly', 'Monthly', 'Annual']);
+    assert.deepEqual(growth.growth.week.started, { current: 1, previous: 0, change: null, reason: 'too-young' });
+    assert.deepEqual(Object.keys(growth.growth), ['week', 'month', 'year']);
     const unknown = await f.call('GET', '/reports?project=nope');
     assert.equal(unknown.status, 404);
     assert.equal(unknown.body.error, 'unknown-project');
     assert.equal(f.store.getTicket(t.id).version, 2);
+  } finally { await f.cleanup(); }
+});
+
+test('GET /reports with from and to answers the custom range; one alone, an unreadable one or from after to is a 400 (SP-240)', async () => {
+  const f = await fixture();
+  try {
+    const t = f.store.fileTicket({ project: 'alpha', actor: f.machine.id, name: 'x', status: 'queued' });
+    f.store.changeTicket(t.id, { actor: f.machine.id, status: 'live' });
+    const from = new Date(Date.parse(t.createdAt) - 60_000).toISOString();
+    const to = new Date(Date.now() + 3_600_000).toISOString();
+    const r = await f.call('GET', `/reports?project=alpha&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+    assert.equal(r.status, 200);
+    assert.deepEqual(r.body.custom, { from, to, started: 1, finished: 1 });
+    assert.deepEqual(r.body.finished, { week: 1, month: 1, all: 1 });
+    assert.equal('custom' in (await f.call('GET', '/reports')).body, false);
+    const later = new Date(Date.parse(to) + 60_000).toISOString();
+    const empty = await f.call('GET', `/reports?from=${encodeURIComponent(to)}&to=${encodeURIComponent(later)}`);
+    assert.deepEqual(empty.body.custom, { from: to, to: later, started: 0, finished: 0 });
+    for (const [query, says] of [
+      [`from=${encodeURIComponent(from)}`, /to is missing/],
+      [`to=${encodeURIComponent(to)}`, /from is missing/],
+      [`from=yesterday&to=${encodeURIComponent(to)}`, /from must be an ISO date-time, not "yesterday"/],
+      [`from=${encodeURIComponent(from)}&to=2026-13-45`, /to must be an ISO date-time/],
+      [`from=${encodeURIComponent(to)}&to=${encodeURIComponent(from)}`, /is after to/],
+    ]) {
+      const bad = await f.call('GET', `/reports?${query}`);
+      assert.equal(bad.status, 400, query);
+      assert.equal(bad.body.error, 'bad-field', query);
+      assert.match(bad.body.message ?? JSON.stringify(bad.body), says, query);
+    }
   } finally { await f.cleanup(); }
 });
 
@@ -1542,10 +1851,13 @@ test('GET /search ranks title over description over people\'s comments over loop
     assert.equal(r.status, 200);
     assert.equal(r.body.query, 'widget');
     const ids = r.body.results.map((x) => x.id);
-    assert.deepEqual(ids.slice(0, 3), [titled.id, described.id, discussed.id]);
-    assert.deepEqual(ids.slice(3).sort(), [loopsOnly.id, stamped.id].sort());
+    // A person's comment ending in a [machine] line is still a person's
+    // (SP-26): the author decides, and the stamp is history.
+    assert.deepEqual(ids.slice(0, 2), [titled.id, described.id]);
+    assert.deepEqual(ids.slice(2, 4).sort(), [discussed.id, stamped.id].sort());
+    assert.deepEqual(ids.slice(4), [loopsOnly.id]);
     const byId = Object.fromEntries(r.body.results.map((x) => [x.id, x]));
-    assert.deepEqual([titled, described, discussed, loopsOnly, stamped].map((t) => byId[t.id].score), [8, 4, 2, 1, 1]);
+    assert.deepEqual([titled, described, discussed, stamped, loopsOnly].map((t) => byId[t.id].score), [8, 4, 2, 2, 1]);
     assert.equal(byId[titled.id].place, null);
     assert.equal(byId[titled.id].excerpt, null);
     assert.equal(byId[described.id].place, 'description');
@@ -1555,7 +1867,7 @@ test('GET /search ranks title over description over people\'s comments over loop
     assert.ok(byId[described.id].excerpt.length <= 162);
     assert.equal(byId[discussed.id].place, 'discussion');
     assert.equal(byId[loopsOnly.id].place, 'development');
-    assert.equal(byId[stamped.id].place, 'development');
+    assert.equal(byId[stamped.id].place, 'discussion');
     assert.equal(byId[stamped.id].excerpt, 'Built the widget.');
 
     // One phrase, as typed, any case; regular-expression characters are plain text.
@@ -2004,8 +2316,10 @@ test('GET /projects/:slug/board keeps the shape outside sites read: the eight co
     f.store.fileTicket({ project: 'alpha', actor: f.machine.id, name: 'One', status: 'queued', priority: 'high', tags: ['x'] });
     const r = await f.call('GET', '/projects/alpha/board', { token: f.humanToken });
     assert.equal(r.status, 200);
-    assert.deepEqual(Object.keys(r.body), ['project', 'projectName', 'columns']);
+    assert.deepEqual(Object.keys(r.body), ['project', 'projectName', 'columns', 'operator', 'topics']);
+    assert.deepEqual(r.body.topics, [], "SP-247: the project's topics to pick from");
     assert.deepEqual([r.body.project, r.body.projectName], ['alpha', 'Alpha']);
+    assert.deepEqual(r.body.operator, { id: f.human.id, name: 'Operator' }, 'SP-244: the one person a ticket may be assigned to');
     assert.deepEqual(r.body.columns.map((c) => c.status), [...loopStatuses.STAGE_ORDER]);
     assert.deepEqual(r.body.columns.map((c) => c.status), ['Requested', 'Rework', 'Queued', 'Building', 'In review', 'Needs your input', 'Ready to launch', 'Live']);
     for (const c of r.body.columns) {
@@ -2013,7 +2327,9 @@ test('GET /projects/:slug/board keeps the shape outside sites read: the eight co
       assert.ok(Array.isArray(c.tickets));
     }
     const [ticket] = r.body.columns.find((c) => c.status === 'Queued').tickets;
-    assert.deepEqual(Object.keys(ticket), ['id', 'name', 'priority', 'tags', 'assignee', 'updatedAt', 'pullRequest', 'answerIn', 'waiting', 'version']);
+    assert.deepEqual(Object.keys(ticket), ['id', 'name', 'priority', 'tags', 'assignee', 'updatedAt', 'pullRequest', 'answerIn', 'mergeStands', 'waiting', 'version', 'assigneeId', 'topics']);
+    assert.equal(ticket.assigneeId, null, 'SP-244: the assignee by id, beside its name');
+    assert.deepEqual(ticket.topics, [], "SP-247: the ticket's topics");
     assert.equal(ticket.version, f.store.getTicket('AL-1').version, 'the version the list saves with is the stored one');
     assert.deepEqual([ticket.id, ticket.name, ticket.priority, ticket.tags, ticket.assignee, ticket.pullRequest], ['AL-1', 'One', 'high', ['x'], null, null]);
     assert.equal(typeof ticket.updatedAt, 'string');
@@ -2805,7 +3121,13 @@ test('pipeline controls: anyone signed in reads them, defaults marked; the opera
     assert.equal(read.status, 200);
     assert.deepEqual(control(read.body, 'wake.loop-build'), { ...control(read.body, 'wake.loop-build'), value: '1800', isDefault: true });
     assert.equal(read.body.canChange, false, 'a loop may never change its own controls');
-    assert.deepEqual(read.body.groups.map((g) => g.wiredBy), ['SP-236', 'SP-237', 'SP-238', 'SP-239', null], 'Quiet Days Before Moving is in use already (SP-277)');
+    assert.deepEqual(read.body.groups.map((g) => g.wiredBy), [null, null, null, null, null]);
+    // This tracker reads no loop logs, so no wake time claims what its lane used (SP-236).
+    assert.deepEqual([control(read.body, 'wake.loop-build').used, control(read.body, 'wake.loop-build').inEffect], [null, null]);
+    assert.equal(control(read.body, 'wip-cap').used, undefined, 'only a wake time has a value last used');
+    // Nor does any model claim what its lane's last pass ran on (SP-239).
+    assert.equal(control(read.body, 'model.loop-build').lastModel, null);
+    assert.equal(control(read.body, 'wip-cap').lastModel, undefined, 'only a model has a last pass\'s model');
     assert.equal((await f.call('GET', '/pipeline-controls/alpha', { token: f.humanToken })).body.canChange, true);
     assert.equal((await f.call('GET', '/pipeline-controls/alpha', { token: otherToken })).body.canChange, false);
     assert.equal((await f.call('GET', '/pipeline-controls/nope')).status, 404);
@@ -2860,6 +3182,49 @@ test('Quiet Days Before Moving: 0 to 30, default 0; set for another project, ref
   } finally { await f.cleanup(); }
 });
 
+test('the wake times set on the Settings page reach the Pipeline Status pod, and each says what its lane last used and whether that is the set value (SP-236)', async () => {
+  const f = await fixture();
+  try {
+    const logs = join(f.dir, 'logs');
+    mkdirSync(logs);
+    const stamp = (d) => d.toLocaleString('sv-SE').replace('T', ' ');
+    const clock = (d) => d.toLocaleTimeString('en-GB', { hour12: false });
+    const began = new Date('2026-11-09T18:22:34');
+    const ended = new Date('2026-11-09T18:25:36');
+    writeFileSync(join(logs, 'alpha-loop-build.log'), [
+      `===== ${stamp(began)} START /loop-build =====`,
+      `===== ${stamp(ended)} END /loop-build (exit 0 — not a verdict; the pass's report above is) =====`,
+      `[loop-runner] ${clock(ended)} sleeping 1800s before the next /loop-build (a wake ends it early)`,
+    ].join('\n'));
+    writeFileSync(join(logs, 'alpha-relay.log'), `===== ${stamp(began)} START relay — /repo =====\n===== ${stamp(ended)} END relay — pass complete (exit 0) =====\n`);
+    writeFileSync(join(logs, 'alpha-relay.interval'), '300\n');
+    const server = await startServer({ store: f.store, port: 0, pipeline: { logDir: logs, slug: 'alpha' } });
+    try {
+      const at = `http://127.0.0.1:${server.address().port}`;
+      const control = (view, key) => view.controls.find((c) => c.key === key);
+      const saved = await f.call('PUT', '/pipeline-controls/alpha', { at, token: f.humanToken, body: { setting: 'wake.loop-build', value: '600' } });
+      assert.equal(saved.status, 200, saved.text);
+      // Set to 600; the lane is sleeping its 1800 still, so not in effect, and the pod says when it really wakes.
+      assert.deepEqual([control(saved.body, 'wake.loop-build').used, control(saved.body, 'wake.loop-build').inEffect], [1800, false]);
+      const stages = Object.fromEntries((await f.call('GET', '/pipeline', { at })).body.stages.map((s) => [s.job, s]));
+      assert.deepEqual([stages['loop-build'].set, stages['loop-build'].used], [600, 1800]);
+      assert.equal(stages['loop-build'].nextDue, new Date(ended.getTime() + 1800 * 1000).toISOString());
+      // The relay goes by the 300 it kept; set to 300, it is in effect, and its next pass is 300s after its start.
+      assert.equal((await f.call('PUT', '/pipeline-controls/alpha', { at, token: f.humanToken, body: { setting: 'wake.relay', value: '300' } })).status, 200);
+      const read = (await f.call('GET', '/pipeline-controls/alpha', { at })).body;
+      assert.deepEqual([control(read, 'wake.relay').used, control(read, 'wake.relay').inEffect], [300, true]);
+      const relay = (await f.call('GET', '/pipeline', { at })).body.stages.find((s) => s.job === 'relay');
+      assert.deepEqual([relay.set, relay.used, relay.nextDue], [300, 300, new Date(began.getTime() + 300 * 1000).toISOString()]);
+      // A lane with no log here says nothing it does not know.
+      assert.deepEqual([control(read, 'wake.loop-intake').used, control(read, 'wake.loop-intake').inEffect], [null, null]);
+      // The lane slept the new value: in effect.
+      writeFileSync(join(logs, 'alpha-loop-build.log'), `\n[loop-runner] ${clock(new Date(ended.getTime() + 1000))} sleeping 600s before the next /loop-build (a wake ends it early)\n`, { flag: 'a' });
+      const after = (await f.call('GET', '/pipeline-controls', { at })).body.projects.find((p) => p.project.slug === 'alpha');
+      assert.deepEqual([control(after, 'wake.loop-build').used, control(after, 'wake.loop-build').inEffect], [600, true]);
+    } finally { await new Promise((r) => server.close(r)); }
+  } finally { await f.cleanup(); }
+});
+
 test('releases: GET answers each project\'s release, Spirality\'s own as main; a loop or the operator names one and rolls it back, read back (SP-265)', async () => {
   const f = await fixture();
   try {
@@ -2885,6 +3250,78 @@ test('releases: GET answers each project\'s release, Spirality\'s own as main; a
     assert.deepEqual(back.body.saved, { project: 'alpha', from: 'release-2', to: 'release-1', changed: true });
     assert.equal((await f.call('GET', '/releases/alpha', { at })).body.release, 'release-1');
     assert.ok(f.lines.some((l) => l === `release alpha release-2 -> release-1 (roll-back) actor=${f.machine.id}`));
+  } finally { await f.cleanup(); }
+});
+
+test('the Settings page\'s release group: each project\'s release, when and by whom, the one before it and the newest; Move to Newest names the newest, read fresh; Roll Back goes back; Spirality\'s own has no buttons (SP-275)', async () => {
+  const f = await fixture();
+  try {
+    f.store.createProject({ slug: 'home', name: 'Home', prefix: 'HO', operator: f.human.id });
+    let newest = 'release-2';
+    let reads = 0;
+    const newestRelease = async ({ fresh = false } = {}) => { reads += 1; return { newest: { name: fresh ? newest : 'release-2', number: 2, commit: 'a'.repeat(40) }, problem: null }; };
+    const at = await f.serve(f.store, { ownProject: 'home', newestRelease });
+    const group = async (slug, token = f.humanToken) => (await f.call('GET', `/pipeline-controls/${slug}`, { at, token })).body.release;
+
+    const none = await group('alpha');
+    assert.deepEqual({ ...none, ownLine: undefined }, {
+      key: 'release', title: 'Spirality Release', wiredBy: 'SP-276', known: true, own: false, ownLine: undefined,
+      current: null, previous: null, rollBackTo: null, newest: 'release-2', newestProblem: null, canChange: true,
+    });
+    const home = await group('home');
+    assert.equal(home.own, true);
+    assert.equal(home.canChange, false, 'Spirality\'s own project has no buttons');
+    assert.equal(home.ownLine, "Always the newest release: Spirality's own lanes meet every change first.");
+    assert.equal((await group('alpha', f.machineToken)).canChange, false, 'the page\'s buttons are the operator\'s, as a person');
+    const all = await f.call('GET', '/pipeline-controls', { at });
+    assert.deepEqual(all.body.projects.map((p) => [p.project.slug, p.release.own]), [['alpha', false], ['home', true]]);
+
+    f.store.nameRelease({ project: 'alpha', release: 'release-1', actor: f.machine.id, ownProject: 'home' });
+    newest = 'release-3';
+    const moved = await f.call('POST', '/releases/alpha/newest', { at, token: f.humanToken, body: {} });
+    assert.equal(moved.status, 200, moved.text);
+    assert.deepEqual(moved.body.saved, { project: 'alpha', from: 'release-1', to: 'release-3', changed: true }, 'the newest read fresh at the click, not the kept one');
+    const after = await group('alpha');
+    assert.deepEqual([after.current.release, after.current.actorName, after.previous.release, after.previous.actorName, after.rollBackTo], ['release-3', 'Operator', 'release-1', 'Loop', 'release-1']);
+    assert.ok(after.current.at);
+    assert.ok(f.lines.some((l) => l === `release alpha release-1 -> release-3 (move to newest) actor=${f.human.id}`));
+
+    const back = await f.call('POST', '/releases/alpha/back', { at, token: f.humanToken, body: {} });
+    assert.equal(back.status, 200, back.text);
+    assert.equal((await group('alpha')).current.release, 'release-1');
+    assert.ok(reads >= 1);
+  } finally { await f.cleanup(); }
+});
+
+test('Move to Newest refuses Spirality\'s own project, a release that cannot be read, none cut yet, and someone else, writing nothing (SP-275)', async () => {
+  const f = await fixture();
+  try {
+    f.store.createProject({ slug: 'home', name: 'Home', prefix: 'HO', operator: f.human.id });
+    let answer = { newest: null, problem: 'git ls-remote --tags origin failed: offline' };
+    const at = await f.serve(f.store, { ownProject: 'home', newestRelease: async () => answer });
+    const own = await f.call('POST', '/releases/home/newest', { at, token: f.humanToken, body: {} });
+    assert.equal(own.status, 409);
+    assert.equal(own.body.error, 'own-project');
+    const blind = await f.call('POST', '/releases/alpha/newest', { at, token: f.humanToken, body: {} });
+    assert.equal(blind.status, 503);
+    assert.match(blind.body.message, /could not be read, so nothing was named: git ls-remote --tags origin failed: offline/);
+    assert.equal((await f.call('GET', '/pipeline-controls/alpha', { at, token: f.humanToken })).body.release.newestProblem, answer.problem);
+    answer = { newest: null, problem: null };
+    const empty = await f.call('POST', '/releases/alpha/newest', { at, token: f.humanToken, body: {} });
+    assert.equal(empty.status, 409);
+    assert.equal(empty.body.error, 'no-release');
+    answer = { newest: { name: 'release-1', number: 1, commit: 'a'.repeat(40) }, problem: null };
+    const someone = f.store.createActor({ kind: 'human', name: 'Someone Else' });
+    f.store.addMember({ project: 'alpha', actor: someone.id, by: f.human.id });
+    const other = await f.call('POST', '/releases/alpha/newest', { at, token: f.store.issueToken(someone.id), body: {} });
+    assert.equal(other.status, 403);
+    assert.equal(other.body.error, 'not-allowed');
+    assert.equal((await f.call('POST', '/releases/alpha/newest', { at, token: f.humanToken, body: { release: 'release-9' } })).body.error, 'bad-field');
+    assert.deepEqual(f.store.projectReleases('alpha'), []);
+    // A tracker that reads no tags says so, on the page and to the button.
+    const plain = await f.call('GET', '/pipeline-controls/alpha', { token: f.humanToken });
+    assert.equal(plain.body.release.newestProblem, 'this tracker does not read the release tags.');
+    assert.equal(plain.body.release.known, false);
   } finally { await f.cleanup(); }
 });
 
@@ -2918,5 +3355,74 @@ test('releases: Spirality\'s own project, a bad name, a roll-back with nowhere t
     assert.equal(blind.status, 503);
     assert.equal(blind.body.error, 'no-own-project');
     assert.deepEqual(f.store.projectReleases('alpha'), []);
+  } finally { await f.cleanup(); }
+});
+
+// ── Topics (SP-243) ─────────────────────────────────────────────────────────
+
+test('a project\'s topics are made by POST and listed by GET for that project only, newest first; a blank name is refused with 400 and nothing is kept', async () => {
+  const f = await fixture();
+  try {
+    f.store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE', operator: f.human.id });
+    const h = (method, path, body) => f.call(method, path, { token: f.humanToken, body });
+    assert.deepEqual((await h('GET', '/projects/alpha/topics')).body, { project: 'alpha', topics: [] });
+    const made = await h('POST', '/projects/alpha/topics', { name: 'Login', description: 'Signing in' });
+    assert.equal(made.status, 201, made.text);
+    assert.equal(made.body.name, 'Login');
+    assert.equal(made.body.description, 'Signing in');
+    assert.equal(made.body.project, 'alpha');
+    assert.equal(made.body.createdByName, 'Operator');
+    const second = await h('POST', '/projects/alpha/topics', { name: 'Billing' });
+    assert.equal(second.status, 201, second.text);
+    assert.equal(second.body.description, '');
+    assert.deepEqual((await h('GET', '/projects/alpha/topics')).body.topics.map((t) => t.name), ['Billing', 'Login']);
+    assert.deepEqual((await h('GET', '/projects/beta/topics')).body.topics, [], 'another project has its own list');
+    for (const body of [{ name: '' }, { name: '   ' }, {}, { name: 7 }]) {
+      const r = await h('POST', '/projects/beta/topics', body);
+      assert.equal(r.status, 400, JSON.stringify(body));
+      assert.equal(r.body.error, 'bad-name');
+      assert.match(r.body.message, /a topic needs a name/);
+    }
+    assert.deepEqual(f.store.listTopics('beta'), [], 'nothing was kept');
+  } finally { await f.cleanup(); }
+});
+
+test('someone who is not on the project gets the same 404 from both topic calls as from the Docs page\'s call; signed out is 401; nothing is made', async () => {
+  const f = await fixture();
+  try {
+    const base = await f.serve();
+    f.store.addTopic({ project: 'alpha', name: 'Secret plan', actor: f.human.id });
+    const viewer = f.store.createActor({ kind: 'human', name: 'Viewer' });
+    const vt = f.store.issueToken(viewer.id);
+    f.store.setRole({ actor: viewer.id, role: 'viewer', by: f.human.id });
+    const auth = { authorization: `Bearer ${vt}` };
+    const docs = await fetch(`${base}/projects/alpha/docs`, { headers: auth });
+    const docsText = await docs.text();
+    assert.equal(docs.status, 404);
+    const calls = [
+      (p, h) => fetch(`${base}/projects/${p}/topics`, { headers: h }),
+      (p, h) => fetch(`${base}/projects/${p}/topics`, { method: 'POST', headers: { ...h, 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Mine' }) }),
+    ];
+    for (const [i, call] of calls.entries()) {
+      const r = await call('alpha', auth);
+      const text = await r.text();
+      assert.equal(r.status, 404, `call ${i}: ${text}`);
+      assert.equal(text, docsText, `call ${i}: the same refusal as the Docs page's call`);
+      assert.ok(!text.includes('Secret'), `call ${i} gives nothing away`);
+      assert.equal((await call('alpha', {})).status, 401, `call ${i} signed out`);
+    }
+    assert.deepEqual(f.store.listTopics('alpha').map((t) => t.name), ['Secret plan'], 'nothing was made');
+    f.store.addMember({ project: 'alpha', actor: viewer.id, by: f.human.id });
+    assert.equal((await fetch(`${base}/projects/alpha/topics`, { headers: auth })).status, 200, 'made a member, they reach it');
+  } finally { await f.cleanup(); }
+});
+
+test('/topics is the page itself', async () => {
+  const f = await fixture();
+  try {
+    const base = await f.serve();
+    const r = await fetch(`${base}/topics`, { headers: { accept: 'text/html' } });
+    assert.equal(r.status, 200);
+    assert.match(await r.text(), /<nav class="site" hidden>/);
   } finally { await f.cleanup(); }
 });

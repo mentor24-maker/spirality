@@ -680,6 +680,29 @@ test('updateProject refuses a new slug, prefix or operator, a machine owner, a b
   } finally { cleanup(); }
 });
 
+test('saveNextSuggestions keeps a project\'s latest finished next-tasks run, read back, replacing the one before; deleting the project removes it', () => {
+  const { store, cleanup } = fixture();
+  try {
+    assert.equal(store.nextSuggestions('alpha'), null);
+    const list = [{ title: 'Add x', description: 'd', why: 'w' }];
+    assert.deepEqual(store.saveNextSuggestions({ project: 'alpha', state: 'done', suggestions: list, at: '2026-11-13T20:00:00.000Z' }),
+      { state: 'done', suggestions: list, message: null, at: '2026-11-13T20:00:00.000Z' });
+    store.saveNextSuggestions({ project: 'alpha', state: 'failed', message: 'Claude gave 2 suggestions.', at: '2026-11-13T21:00:00.000Z' });
+    assert.deepEqual(store.nextSuggestions('alpha'), { state: 'failed', suggestions: null, message: 'Claude gave 2 suggestions.', at: '2026-11-13T21:00:00.000Z' });
+    // Refused, nothing written: a state that is not finished, a done run with no list, a failure with no message, an unknown project.
+    assert.throws(() => store.saveNextSuggestions({ project: 'alpha', state: 'running' }), { code: 'bad-field' });
+    assert.throws(() => store.saveNextSuggestions({ project: 'alpha', state: 'done' }), { code: 'bad-field' });
+    assert.throws(() => store.saveNextSuggestions({ project: 'alpha', state: 'failed' }));
+    assert.throws(() => store.saveNextSuggestions({ project: 'nope', state: 'done', suggestions: list }), { code: 'unknown-project' });
+    assert.equal(store.nextSuggestions('alpha').state, 'failed');
+
+    store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE' });
+    store.saveNextSuggestions({ project: 'beta', state: 'done', suggestions: list });
+    store.deleteProject('beta');
+    assert.equal(store.nextSuggestions('beta'), null);
+  } finally { cleanup(); }
+});
+
 test('deleteProject removes a project with no tickets, and refuses one with tickets, naming how many, removing nothing', () => {
   const { store, human, cleanup } = fixture();
   try {
@@ -1045,9 +1068,134 @@ test('a database made before projects had a web address, logo and owner gains th
     try {
       assert.deepEqual(raw.prepare('PRAGMA table_info(projects)').all().map((c) => c.name),
         ['slug', 'name', 'prefix', 'operator', 'next_number', 'url', 'logo', 'owner', 'repo', 'alert_email', 'alert_phone']);
-      assert.deepEqual(raw.prepare("SELECT * FROM tickets WHERE id IN ('OL-1', 'OL-2') ORDER BY id").all(), ticketsBefore);
+      // Every old column byte-for-byte; the one new column, place (SP-249), empty.
+      assert.deepEqual(raw.prepare("SELECT * FROM tickets WHERE id IN ('OL-1', 'OL-2') ORDER BY id").all().map((r) => ({ ...r })),
+        ticketsBefore.map((r) => ({ ...r, place: null })));
     } finally { raw.close(); }
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('a database made before tickets had a place gains the column, every ticket\'s place empty, nothing else touched', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tracker-store-'));
+  const path = join(dir, 'old.db');
+  try {
+    const first = openStore(path);
+    const human = first.createActor({ kind: 'human', name: 'Operator' });
+    first.createProject({ slug: 'alpha', name: 'Alpha', prefix: 'AL', operator: human.id });
+    first.fileTicket({ project: 'alpha', actor: human.id, name: 'One', status: 'queued', priority: 'high' });
+    first.fileTicket({ project: 'alpha', actor: human.id, name: 'Two', status: 'live' });
+    first.close();
+    // Make it the shape it had before: no place column.
+    const old = new DatabaseSync(path);
+    old.exec('ALTER TABLE tickets DROP COLUMN place');
+    const before = old.prepare('SELECT * FROM tickets ORDER BY id').all().map((r) => ({ ...r }));
+    old.close();
+    assert.equal('place' in before[0], false);
+
+    const store = openStore(path);
+    try {
+      assert.deepEqual(store.listTickets('alpha').map((t) => [t.id, t.place]), [['AL-1', null], ['AL-2', null]]);
+    } finally { store.close(); }
+    const raw = new DatabaseSync(path);
+    try {
+      assert.deepEqual(raw.prepare('SELECT * FROM tickets ORDER BY id').all().map((r) => ({ ...r })),
+        before.map((r) => ({ ...r, place: null })));
+    } finally { raw.close(); }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('orderTickets: places 1..n in one write, each move an event and a version bump, read back', () => {
+  const { store, human, machine, cleanup } = fixture();
+  try {
+    for (const name of ['A', 'B', 'C', 'D']) store.fileTicket({ project: 'alpha', actor: machine.id, name, status: 'queued' });
+    assert.equal(store.getTicket('AL-1').place, null);
+    const r = store.orderTickets('alpha', { ids: ['AL-3', 'al-1', 'AL-2'], actor: human.id });
+    assert.deepEqual(r.tickets.map((t) => [t.id, t.place]), [['AL-3', 1], ['AL-1', 2], ['AL-2', 3]]);
+    assert.deepEqual(r.changed, ['AL-3', 'AL-1', 'AL-2']);
+    assert.equal(store.getTicket('AL-4').place, null, 'a ticket not named keeps its place');
+    assert.equal(store.getTicket('AL-3').version, 2);
+    const ev = store.listEvents('AL-3').find((e) => e.field === 'place');
+    assert.equal(ev.from, null);
+    assert.equal(ev.to, '1');
+    assert.equal(ev.actor, human.id);
+
+    // The same order again moves nothing: no event, no version bump.
+    const again = store.orderTickets('alpha', { ids: ['AL-3', 'AL-1', 'AL-2'], actor: human.id });
+    assert.deepEqual(again.changed, []);
+    assert.equal(store.getTicket('AL-3').version, 2);
+    // A new order moves only the ones whose place changed.
+    const swap = store.orderTickets('alpha', { ids: ['AL-1', 'AL-3'], actor: human.id });
+    assert.deepEqual(swap.changed, ['AL-1', 'AL-3']);
+    assert.equal(store.listEvents('AL-1').filter((e) => e.field === 'place').at(-1).from, '2');
+  } finally { cleanup(); }
+});
+
+test('orderTickets: a partial order on top of an existing one renumbers the others after it, no two sharing a place', () => {
+  const { store, human, machine, cleanup } = fixture();
+  try {
+    for (const name of ['A', 'B', 'C', 'D', 'E']) store.fileTicket({ project: 'alpha', actor: machine.id, name, status: 'queued' });
+    store.orderTickets('alpha', { ids: ['AL-1', 'AL-2', 'AL-3'], actor: human.id });
+    // The review's example: AL-4 alone, sent after AL-1..3 hold places 1..3.
+    const r = store.orderTickets('alpha', { ids: ['AL-4'], actor: human.id });
+    const placed = store.listTickets('alpha').map((t) => [t.id, t.place]);
+    assert.deepEqual(placed, [['AL-1', 2], ['AL-2', 3], ['AL-3', 4], ['AL-4', 1], ['AL-5', null]],
+      'the others keep their order, one place down; an unplaced ticket stays unplaced');
+    assert.deepEqual(r.tickets.map((t) => [t.id, t.place]), [['AL-4', 1]]);
+    assert.deepEqual(r.changed, ['AL-4', 'AL-1', 'AL-2', 'AL-3']);
+    const ev = store.listEvents('AL-1').filter((e) => e.field === 'place').at(-1);
+    assert.equal(ev.from, '1');
+    assert.equal(ev.to, '2');
+    assert.equal(store.getTicket('AL-1').version, 3, 'one version bump per move');
+
+    // Moving one from the middle to the front closes its gap.
+    store.orderTickets('alpha', { ids: ['AL-3'], actor: human.id });
+    const places = store.listTickets('alpha').map((t) => t.place).filter((p) => p !== null);
+    assert.deepEqual([...places].sort((a, b) => a - b), [1, 2, 3, 4], 'places stay 1..n, none shared');
+    assert.deepEqual(store.listTickets('alpha').map((t) => [t.id, t.place]),
+      [['AL-1', 3], ['AL-2', 4], ['AL-3', 1], ['AL-4', 2], ['AL-5', null]]);
+  } finally { cleanup(); }
+});
+
+test('orderTickets: a started ticket that still has a place is not touched when the waiting ones are reordered', () => {
+  const { store, human, machine, cleanup } = fixture();
+  try {
+    for (const name of ['A', 'B', 'C']) store.fileTicket({ project: 'alpha', actor: machine.id, name, status: 'queued' });
+    store.orderTickets('alpha', { ids: ['AL-1', 'AL-2', 'AL-3'], actor: human.id });
+    // AL-1 is claimed: it keeps place 1 after it leaves Queued.
+    store.changeTicket('AL-1', { actor: machine.id, ifStatus: 'queued', status: 'building' });
+    const before = store.getTicket('AL-1');
+    const eventsBefore = store.listEvents('AL-1').length;
+    const r = store.orderTickets('alpha', { ids: ['AL-3'], actor: human.id });
+    const after = store.getTicket('AL-1');
+    assert.equal(after.version, before.version, 'no version bump on the Building ticket');
+    assert.equal(after.updatedAt, before.updatedAt, 'its time in the stage is not reset');
+    assert.equal(after.place, before.place, 'its old place is left as it was');
+    assert.equal(store.listEvents('AL-1').length, eventsBefore, 'no place event on it');
+    assert.ok(!r.changed.includes('AL-1'));
+    // The waiting ones still adjust: AL-3 first, AL-2 after it.
+    assert.equal(store.getTicket('AL-3').place, 1);
+    assert.equal(store.getTicket('AL-2').place, 2);
+  } finally { cleanup(); }
+});
+
+test('orderTickets: an id from another project, an unknown or a repeated id changes nothing', () => {
+  const { store, human, machine, cleanup } = fixture();
+  try {
+    store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE', operator: human.id });
+    store.fileTicket({ project: 'alpha', actor: machine.id, name: 'A', status: 'queued' });
+    store.fileTicket({ project: 'alpha', actor: machine.id, name: 'B', status: 'queued' });
+    store.fileTicket({ project: 'beta', actor: machine.id, name: 'X', status: 'queued' });
+    for (const ids of [['AL-1', 'BE-1'], ['AL-2', 'AL-9'], ['AL-1', 'AL-1'], [], ['AL-1', '']]) {
+      assert.throws(() => store.orderTickets('alpha', { ids, actor: human.id }),
+        (err) => err instanceof StoreError && err.code === 'bad-order', JSON.stringify(ids));
+    }
+    for (const id of ['AL-1', 'AL-2', 'BE-1']) {
+      const t = store.getTicket(id);
+      assert.equal(t.place, null, id);
+      assert.equal(t.version, 1, id);
+    }
+    assert.throws(() => store.orderTickets('nope', { ids: ['AL-1'], actor: human.id }), (err) => err.code === 'unknown-project');
+  } finally { cleanup(); }
 });
 
 test('stage colours: set, read back, cleared, kept across a reopen; a bad colour or status writes nothing', () => {
@@ -1418,7 +1566,10 @@ test('today\'s database gains emails, passwords, sessions and links, and every e
       assert.deepEqual(raw.prepare('PRAGMA table_info(actors)').all().map((c) => c.name), ['id', 'kind', 'name', 'token_hash', 'email', 'password_hash', 'site_url']);
       assert.deepEqual(raw.prepare('SELECT id, kind, name, token_hash FROM actors ORDER BY id').all(), before.actors);
       assert.deepEqual(raw.prepare('SELECT slug, name, prefix, operator, next_number, url, logo, owner FROM projects ORDER BY rowid').all(), before.projects);
-      for (const t of ['tickets', 'comments', 'stage_colours']) {
+      // Tickets also gain place (SP-249), empty; every old column is unchanged.
+      assert.deepEqual(raw.prepare('SELECT * FROM tickets ORDER BY rowid').all().map((r) => ({ ...r })),
+        before.tickets.map((r) => ({ ...r, place: null })), 'tickets');
+      for (const t of ['comments', 'stage_colours']) {
         assert.deepEqual(raw.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all(), before[t], t);
       }
     } finally { raw.close(); }
@@ -1802,5 +1953,118 @@ test('deleting a project takes its release record with it (SP-265)', () => {
     store.deleteProject('beta');
     store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE', operator: human.id });
     assert.deepEqual(store.projectReleases('beta'), []);
+  } finally { cleanup(); }
+});
+
+// ── Topics (SP-243) ─────────────────────────────────────────────────────────
+
+test('a topic is made on one project with its name, description and maker, listed newest first, and never shows on another project', () => {
+  const { store, human, machine, cleanup } = fixture();
+  try {
+    store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE' });
+    assert.deepEqual(store.listTopics('alpha'), [], 'none yet');
+    const a = store.addTopic({ project: 'alpha', name: '  Login  ', description: ' Signing in. ', actor: human.id });
+    assert.deepEqual(a, { id: a.id, project: 'alpha', name: 'Login', description: 'Signing in.', createdBy: human.id, createdByName: 'Operator', createdAt: a.createdAt });
+    const b = store.addTopic({ project: 'alpha', name: 'Billing', actor: machine.id });
+    assert.equal(b.description, '', 'a description may be left out');
+    store.addTopic({ project: 'beta', name: 'Theirs', description: '', actor: human.id });
+    assert.deepEqual(store.listTopics('alpha').map((t) => [t.name, t.createdByName]), [['Billing', 'Loop'], ['Login', 'Operator']], 'newest first, maker named');
+    assert.deepEqual(store.listTopics('alpha')[1], a);
+    assert.deepEqual(store.listTopics('beta').map((t) => t.name), ['Theirs']);
+    assert.deepEqual(store.listTopics('nope'), []);
+  } finally { cleanup(); }
+});
+
+test('a topic with no name, too long a name or description, on an unknown project or by an unknown actor is refused and nothing is kept', () => {
+  const { store, human, cleanup } = fixture();
+  try {
+    const add = (over) => () => store.addTopic({ project: 'alpha', name: 'Login', description: '', actor: human.id, ...over });
+    for (const name of ['', '   ', undefined, null, 42]) assert.throws(add({ name }), { code: 'bad-name', message: 'a topic needs a name; nothing was saved.' }, String(name));
+    assert.throws(add({ name: 'x'.repeat(201) }), { code: 'bad-name' });
+    assert.throws(add({ description: 'x'.repeat(5001) }), { code: 'bad-description' });
+    assert.throws(add({ description: 42 }), { code: 'bad-description' });
+    assert.throws(add({ project: 'nope' }), { code: 'unknown-project' });
+    assert.throws(add({ actor: 999 }), { code: 'unknown-actor' });
+    assert.deepEqual(store.listTopics('alpha'), []);
+    assert.equal(add({ name: 'x'.repeat(200), description: 'y'.repeat(5000) })().name.length, 200, 'exactly at the limits still goes in');
+  } finally { cleanup(); }
+});
+
+test('a deleted project takes its topics with it, so a project made later under the same slug starts with none', () => {
+  const { store, human, cleanup } = fixture();
+  try {
+    store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE' });
+    store.addTopic({ project: 'beta', name: 'Login', actor: human.id });
+    assert.deepEqual(store.deleteProject('beta'), { slug: 'beta', prefix: 'BE' });
+    store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE' });
+    assert.deepEqual(store.listTopics('beta'), []);
+  } finally { cleanup(); }
+});
+
+// ── A ticket's topics (SP-247) ──────────────────────────────────────────────
+
+test("a ticket's topics change through changeTicket: one ticket carries two topics, one topic sits on two tickets, each change steps the version and writes one event", () => {
+  const { store, human, machine, cleanup } = fixture();
+  try {
+    const login = store.addTopic({ project: 'alpha', name: 'login', actor: human.id });
+    const billing = store.addTopic({ project: 'alpha', name: 'Billing', actor: human.id });
+    const one = store.fileTicket({ project: 'alpha', actor: machine.id, name: 'One', status: 'queued' });
+    const two = store.fileTicket({ project: 'alpha', actor: machine.id, name: 'Two', status: 'queued' });
+    assert.deepEqual(store.ticketTopicsOf('alpha'), new Map(), 'none yet');
+
+    const r = store.changeTicket(one.id, { actor: human.id, topics: [login.id, billing.id, login.id], ifVersion: one.version });
+    assert.equal(r.ok, true);
+    assert.deepEqual(r.changed, ['topics']);
+    assert.equal(r.ticket.version, one.version + 1);
+    store.changeTicket(two.id, { actor: human.id, topics: [login.id] });
+    assert.deepEqual(store.ticketTopicsOf('alpha'), new Map([
+      [one.id, [{ id: billing.id, name: 'Billing' }, { id: login.id, name: 'login' }]],
+      [two.id, [{ id: login.id, name: 'login' }]],
+    ]), 'alphabetical, case aside');
+    const event = store.listEvents(one.id).find((e) => e.field === 'topics');
+    assert.deepEqual([event.actor, event.from, event.to], [human.id, '[]', JSON.stringify([login.id, billing.id].sort((a, b) => a - b))]);
+
+    const same = store.changeTicket(one.id, { actor: human.id, topics: [billing.id, login.id] });
+    assert.deepEqual([same.changed, same.ticket.version], [[], one.version + 1], 'the same topics again are not a change');
+
+    store.changeTicket(one.id, { actor: human.id, topics: [billing.id] });
+    assert.deepEqual(store.ticketTopicsOf('alpha').get(one.id), [{ id: billing.id, name: 'Billing' }], 'removed');
+    store.changeTicket(one.id, { actor: human.id, topics: [], priority: 'high' });
+    assert.equal(store.ticketTopicsOf('alpha').has(one.id), false);
+    assert.equal(store.getTicket(one.id).priority, 'high', 'other fields change in the same write');
+    assert.equal(store.getTicket(one.id).version, one.version + 3, 'one step per write');
+  } finally { cleanup(); }
+});
+
+test("a topic of another project, an unknown topic or a bad list is refused and changes nothing; a moved ticket is refused at its version guard", () => {
+  const { store, human, machine, cleanup } = fixture();
+  try {
+    store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE' });
+    const theirs = store.addTopic({ project: 'beta', name: 'Theirs', actor: human.id });
+    const ours = store.addTopic({ project: 'alpha', name: 'Ours', actor: human.id });
+    const t = store.fileTicket({ project: 'alpha', actor: machine.id, name: 'One', status: 'queued' });
+    assert.throws(() => store.changeTicket(t.id, { actor: human.id, topics: [ours.id, theirs.id], priority: 'high' }), { code: 'bad-topic' });
+    assert.throws(() => store.changeTicket(t.id, { actor: human.id, topics: [9999] }), { code: 'bad-topic' });
+    for (const topics of ['Ours', [String(ours.id)], [0], [1.5], null]) {
+      assert.throws(() => store.changeTicket(t.id, { actor: human.id, topics }), { code: 'bad-topics' }, JSON.stringify(topics));
+    }
+    const after = store.getTicket(t.id);
+    assert.deepEqual([after.version, after.priority], [t.version, null], 'nothing changed');
+    assert.equal(store.ticketTopicsOf('alpha').size, 0);
+    const moved = store.changeTicket(t.id, { actor: human.id, topics: [ours.id], ifVersion: t.version + 5 });
+    assert.deepEqual([moved.ok, moved.refused], [false, 'moved']);
+    assert.equal(store.ticketTopicsOf('alpha').size, 0);
+  } finally { cleanup(); }
+});
+
+test("a deleted ticket takes its topic links with it, and the topic stays", () => {
+  const { store, human, machine, cleanup } = fixture();
+  try {
+    const login = store.addTopic({ project: 'alpha', name: 'Login', actor: human.id });
+    const t = store.fileTicket({ project: 'alpha', actor: machine.id, name: 'One', status: 'queued' });
+    store.changeTicket(t.id, { actor: human.id, topics: [login.id] });
+    store.deleteTicket(t.id, { actor: human.id });
+    assert.equal(store.ticketTopicsOf('alpha').size, 0);
+    assert.deepEqual(store.listTopics('alpha').map((x) => x.name), ['Login']);
   } finally { cleanup(); }
 });

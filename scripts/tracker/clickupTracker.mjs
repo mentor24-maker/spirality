@@ -15,7 +15,7 @@
  * The token is handed in, never printed and never logged.
  */
 
-import { stampCommentBody, isCommentPostPath } from '../lib/machineComment.mjs';
+import { stampCommentBody, isCommentPostPath, isMachineComment } from '../lib/machineComment.mjs';
 import { commentsReadable } from '../lib/loopTrail.mjs';
 import { pageComments } from '../../lib/commentPages.js';
 
@@ -57,6 +57,24 @@ export function clickupHost(target, apiBase = 'https://api.clickup.com') {
  * in the door's environment). `log` takes the retry notices and the limit
  * line; it is stderr in the door.
  */
+/**
+ * Every comment ClickUp hands back is under Dane's own id, so the readers'
+ * one question, "was this written by a machine?" (`user.kind`, SP-26), is
+ * answered here from the stamp this door writes on every comment it posts.
+ * The tracker's door reads the same answer off the author's actor instead.
+ */
+function kindFromStamp(c) {
+  if (!c || typeof c !== 'object' || !('comment_text' in c)) return c;
+  const kind = isMachineComment(c.comment_text) ? 'machine' : 'human';
+  return { ...c, user: { ...(c.user || {}), kind } };
+}
+
+export function withAuthorKind(json) {
+  if (!json || typeof json !== 'object') return json;
+  if (Array.isArray(json.comments)) return { ...json, comments: json.comments.map(kindFromStamp) };
+  return json;
+}
+
 export function createClickupTracker({ token, apiBase, timeoutMs, log = console.error } = {}) {
   const API = apiBase || 'https://api.clickup.com';
   const HTTP_TIMEOUT_MS = Number(timeoutMs) || 60 * 1000;
@@ -66,7 +84,9 @@ export function createClickupTracker({ token, apiBase, timeoutMs, log = console.
   async function callOnce(method, path, body) {
     requests += 1;
     // THE ONE PLACE A MACHINE COMMENT IS MARKED. The loops post under Dane's own
-    // seat, so a reader cannot tell their writing from his by author alone.
+    // seat, so a reader cannot tell their writing from his by author alone;
+    // `withAuthorKind` turns this stamp back into `user.kind` on every read.
+    // Only this door stamps: the tracker's records the author (SP-26).
     const sendBody = (method === 'POST' && isCommentPostPath(path)) ? stampCommentBody(body) : body;
     let res;
     try {
@@ -85,7 +105,7 @@ export function createClickupTracker({ token, apiBase, timeoutMs, log = console.
     const text = await res.text();
     let json = null;
     try { json = text ? JSON.parse(text) : null; } catch { json = null; }
-    return { res, json, text };
+    return { res, json: withAuthorKind(json), text };
   }
 
   /** A 429 is ClickUp itself throttling; it clears within a minute and is safe to repeat. */

@@ -18,15 +18,18 @@ import loopStatuses from '../lib/loopStatuses.js';
 import mergeOnComment from '../lib/mergeOnComment.js';
 import humanHours from '../lib/humanHours.js';
 import busFallback from '../lib/busFallback.js';
+import pipelinePause from '../lib/pipelinePause.js';
 import { compareWithinStatus } from '../scripts/lib/loopStatuses.mjs';
 import { searchPattern } from './web/render.mjs';
-import { GROUPS, MODELS, DEFAULT_MODEL } from './pipelineControls.mjs';
+import { GROUPS, MODELS, DEFAULT_MODEL, RELEASE_GROUP } from './pipelineControls.mjs';
+import { OWN_RELEASE_LINE, rollBackTarget } from '../lib/releases.mjs';
 import { STAGES } from './pipeline.mjs';
+import { conflictReportOf } from './conflictReport.mjs';
 
-const { OPERATOR_LANE, WAITING, CANNOT_TELL, waitingVerdict, operatorSpokeLast } = waitingOnOperator;
+const { OPERATOR_LANE, WAITING, CANNOT_TELL, waitingVerdict, answeredLast, standingMergeWord } = waitingOnOperator;
 const { isMachineComment, stripMachineMarker } = machineComment;
 const { STAGE_ORDER, LIVE, QUEUED, BUILDING, REWORK, OPERATOR_HELD_STATUSES, TERMINAL_STATUSES, DISPLAY, PRIORITY_RANK, statusOf } = loopStatuses;
-const { findPullRequest } = mergeOnComment;
+const { findPullRequest, isMergeCommand, isReviewVerdict, isReviewPassed } = mergeOnComment;
 const { findHumanHours } = humanHours;
 const { isTeamChatTask } = busFallback;
 
@@ -49,6 +52,27 @@ function trailComments(store, ticketId) {
 }
 
 /**
+ * Each actor's kind ('human' or 'machine'), read once per store: an actor is
+ * created with its kind and it never changes.
+ */
+const actorKinds = new WeakMap();
+function kindOfActor(store, id) {
+  if (!actorKinds.has(store)) actorKinds.set(store, new Map());
+  const kinds = actorKinds.get(store);
+  if (!kinds.has(id)) kinds.set(id, store.getActor(id)?.kind ?? null);
+  return kinds.get(id);
+}
+
+/**
+ * A ticket's comments, each with its author's kind as `authorKind` (SP-26).
+ * "Machine or Dane" is read off the author, never off a stamp, so every
+ * comment the waiting verdict reads comes through here.
+ */
+function commentsOf(store, ticketId) {
+  return store.listComments(ticketId).map((c) => ({ ...c, authorKind: kindOfActor(store, c.author) }));
+}
+
+/**
  * A ticket and its comments in the shape waitingVerdict reads. Comments go
  * newest first: the verdict sorts by date, and two comments in the same
  * millisecond must resolve to the later one, not the earlier. `prStates`
@@ -65,7 +89,11 @@ function verdictInput(ticket, comments, prStates = null) {
       assignees: ticket.assignee == null ? [] : [{ id: ticket.assignee }],
     },
     comments: comments.slice().reverse().map((c) => ({
-      user: { id: c.author },
+      id: c.id,
+      // A reply's thread, so a spent answer (the relay's done reply under
+      // it) is read here the way the relay reads it (SP-302).
+      parent: c.parent ?? null,
+      user: { id: c.author, kind: c.authorKind ?? null },
       comment_text: c.body,
       date: String(Date.parse(c.createdAt)),
     })),
@@ -75,13 +103,28 @@ function verdictInput(ticket, comments, prStates = null) {
 /**
  * Is his answer in? The ticket sits in one of his two statuses and his own
  * comment is the newest word on it, so the relay owes the next move (SP-93).
- * The same rule the Waiting on you list drops a ticket by (operatorSpokeLast,
- * rule 1 of waitingVerdict), so the page and that list cannot disagree.
+ * In Needs your input a teammate's reply counts too (SP-302). The same rule
+ * the Waiting on you list drops a ticket by (answeredLast, rules 1 and 1b of
+ * waitingVerdict), so the page and that list cannot disagree.
  * `operatorId` is the project's operator; with none, never.
  */
 function answerIsIn(ticket, comments, operatorId) {
   if (operatorId == null || !OPERATOR_LANE.includes(ticket.status)) return false;
-  return operatorSpokeLast(verdictInput(ticket, comments).comments, { operatorId });
+  return answeredLast(verdictInput(ticket, comments).comments, { operatorId, status: ticket.status });
+}
+
+/**
+ * Does his merge word still stand (SP-285)? A Ready to launch ticket on
+ * which he has said a merge phrase since the newest review PASS: the relay
+ * keeps re-trying that merge on every pass, so the page shows no Merge
+ * button and no "Your move" for it, even after a machine note (a conflict
+ * hand-off) has become the newest comment. The same rule the verdict drops
+ * the ticket from Waiting on You by (standingMergeWord, rule 3b of
+ * waitingVerdict), so the page and that list cannot disagree.
+ */
+function mergeStands(ticket, comments, operatorId) {
+  if (operatorId == null || ticket.status !== 'ready to launch') return false;
+  return Boolean(standingMergeWord(verdictInput(ticket, comments).comments, { operatorId }));
 }
 
 /**
@@ -139,7 +182,8 @@ export function prsToCheck(store, { only = null } = {}) {
  *
  * - One of his two statuses: held up only when the loop's own verdict
  *   (waitingVerdict) says it is NOT waiting on him and his comment is the
- *   newest word (operatorSpokeLast), so the relay owes the next move. A
+ *   newest word (answeredLast: a teammate's, too, in Needs your input,
+ *   SP-302), so the relay owes the next move. A
  *   ticket that truly waits on him is never held up, whatever is failing:
  *   hiding a real wait would be worse than today.
  * - Requested, Queued, Rework, In review: held up when the lane that acts
@@ -158,7 +202,8 @@ export function heldUpBy(ticket, comments, operatorId, lanes, prStates = null) {
     if (operatorId == null) return null;
     const input = verdictInput(ticket, comments, prStates);
     if (waitingVerdict(input, { operatorId }).verdict === WAITING) return null;
-    if (!operatorSpokeLast(input.comments, { operatorId })) return null;
+    if (!answeredLast(input.comments, { operatorId, status: ticket.status })
+      && !(ticket.status === 'ready to launch' && standingMergeWord(input.comments, { operatorId }))) return null;
     job = 'relay';
   } else {
     job = NEXT_LANE.has(ticket.status) ? laneOf(NEXT_LANE.get(ticket.status)).job : null;
@@ -216,7 +261,7 @@ export function waitingFor(store, operatorId, { only = null, pipeline = null, pr
     const lanes = lanesOf(pipeline, project.slug);
     for (const status of OPERATOR_LANE) {
       for (const ticket of store.listTickets(project.slug, { status })) {
-        const comments = store.listComments(ticket.id);
+        const comments = commentsOf(store, ticket.id);
         if (heldUpBy(ticket, comments, project.operator, lanes, prStates)) continue;
         const result = waitingVerdict(verdictInput(ticket, comments, prStates), { operatorId });
         const row = {
@@ -259,13 +304,14 @@ export function threadOf(store, ticketId, { pipeline = null, prStates = null } =
   };
   const comments = store.listComments(ticket.id).map((c) => {
     const author = actor(c.author);
-    const stamped = isMachineComment(c.body);
+    // Machine or not is the author's kind (SP-26). A stamp line on a comment
+    // imported from ClickUp is history, and is only taken off for display.
     return {
       id: c.id,
       parent: c.parent,
       author,
-      machine: author.kind === 'machine' || stamped,
-      body: stamped ? stripMachineMarker(c.body) : c.body,
+      machine: author.kind === 'machine',
+      body: isMachineComment(c.body) ? stripMachineMarker(c.body) : c.body,
       createdAt: c.createdAt,
     };
   });
@@ -276,8 +322,9 @@ export function threadOf(store, ticketId, { pipeline = null, prStates = null } =
     // The one person the ticket may be assigned to, for the ticket page's picker.
     operator: namedActor(store, project?.operator),
     comments,
-    answerIn: answerIsIn(ticket, store.listComments(ticket.id), project?.operator),
-    heldUp: heldUpBy(ticket, store.listComments(ticket.id), project?.operator, lanesOf(pipeline, ticket.project), prStates),
+    answerIn: answerIsIn(ticket, commentsOf(store, ticket.id), project?.operator),
+    mergeStands: mergeStands(ticket, commentsOf(store, ticket.id), project?.operator),
+    heldUp: heldUpBy(ticket, commentsOf(store, ticket.id), project?.operator, lanesOf(pipeline, ticket.project), prStates),
     pullRequest: findPullRequest(trailComments(store, ticket.id))?.url ?? null,
     // SP-226: its live state on GitHub, for the Merge button. Absent when it was not asked.
     ...(prStates?.has(ticket.id) ? { pullRequestState: prStates.get(ticket.id) } : {}),
@@ -350,7 +397,7 @@ export function projectDetailsOf(store, slug, { withAlerts = false } = {}) {
  * One project's board: the eight statuses as columns, left to right in the
  * contract's STAGE_ORDER, each holding its tickets in the order `npm run
  * clickup -- queue --status <S>` prints them. The order is the door's own
- * comparator (compareWithinStatus: priority, then oldest), fed each ticket
+ * comparator (compareWithinStatus: priority, then place, then oldest), fed each ticket
  * in the ClickUp shape it reads, so the board and `queue` cannot disagree.
  * The list view draws the same object as rows, so each ticket also carries
  * its assignee's name, its last change, and its pull request's address (or
@@ -371,6 +418,7 @@ export function boardOf(store, slug, { viewerId = null, prStates = null } = {}) 
   const queueShape = (t) => ({
     priority: t.priority ? { priority: t.priority } : null,
     date_created: String(Date.parse(t.createdAt)),
+    place: t.place ?? null,
   });
   const inQueueOrder = (a, b) => compareWithinStatus(queueShape(a), queueShape(b));
   const pullRequestOf = (id) => findPullRequest(trailComments(store, id))?.url ?? null;
@@ -380,6 +428,8 @@ export function boardOf(store, slug, { viewerId = null, prStates = null } = {}) 
     if (!names.has(id)) names.set(id, store.getActor(id)?.name ?? `actor ${id}`);
     return names.get(id);
   };
+  // SP-247: each ticket's topics, and the project's own to pick from.
+  const topicsOf = store.ticketTopicsOf(project.slug);
   return {
     project: project.slug,
     projectName: project.name,
@@ -393,12 +443,23 @@ export function boardOf(store, slug, { viewerId = null, prStates = null } = {}) 
         assignee: nameOf(t.assignee),
         updatedAt: t.updatedAt,
         pullRequest: pullRequestOf(t.id),
-        answerIn: answerIsIn(t, store.listComments(t.id), project.operator),
-        waiting: waitsOn(t, store.listComments(t.id), viewerId, prStates),
+        answerIn: answerIsIn(t, commentsOf(store, t.id), project.operator),
+        mergeStands: mergeStands(t, commentsOf(store, t.id), project.operator),
+        waiting: waitsOn(t, commentsOf(store, t.id), viewerId, prStates),
         // SP-208: the List view's priority dropdown saves with it (ifVersion).
         version: t.version,
+        // SP-244: the List view's Assigned To dropdown selects by id; `assignee` stays a name.
+        assigneeId: t.assignee ?? null,
+        // SP-247: the ticket's topics, `{ id, name }`, alphabetical.
+        topics: topicsOf.get(t.id) ?? [],
       })),
     })),
+    // SP-244: the one person a ticket may be assigned to, for the List view's dropdown.
+    operator: project.operator == null ? null : { id: project.operator, name: nameOf(project.operator) },
+    // SP-247: the project's topics, `{ id, name }`, alphabetical, for the List view's Add Topic dropdown.
+    topics: store.listTopics(project.slug)
+      .map((t) => ({ id: t.id, name: t.name }))
+      .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }) || a.id - b.id),
   };
 }
 
@@ -487,6 +548,7 @@ export function consoleOf(store, { only = null, pipeline = null, prStates = null
   const queueShape = (t) => ({
     priority: t.priority ? { priority: t.priority } : null,
     date_created: String(Date.parse(t.createdAt)),
+    place: t.place ?? null,
   });
   const names = new Map();
   const nameOf = (id) => {
@@ -499,7 +561,7 @@ export function consoleOf(store, { only = null, pipeline = null, prStates = null
     const projectLanes = pipeline && project.slug === pipeline.slug ? lanes : null;
     for (const t of store.listTickets(project.slug)) {
       if (TERMINAL_STATUSES.includes(t.status) || !rank.has(t.status)) continue;
-      const comments = store.listComments(t.id);
+      const comments = commentsOf(store, t.id);
       rows.push({
         ticket: t,
         out: {
@@ -544,24 +606,92 @@ export function stageColoursOf(store) {
  * fall in (each naming the ticket that makes the lanes use it), the models
  * a lane may choose, the change log newest first with each changer's name,
  * and `canChange`: whether this reader may change them (the project's
- * operator, signed in as a person). `own` is true for the tracker's home
+ * operator, signed in as a person), `own`, true for the tracker's home
  * project (`ownProject`), whose page leaves out the groups marked
- * `notOnOwnProject`. Null for a project that does not exist.
+ * `notOnOwnProject`, `release`, its release group
+ * (releaseGroupOf; `ownProject` and `newest` come from the server), and
+ * `inFlight`: the tickets a lane is working on now,
+ * `[{ id, name, status, kind }]` (in Building, or in review under a review
+ * pass's claim note: lib/pipelinePause.js classifyTicket), which a pause
+ * waits on to drain (SP-237), and `capInFlight`, `{ count, ids }`: the
+ * tickets in Building or In review, which the cap row shows beside the cap
+ * (SP-238; loop-build's `wip-check` counts the same tickets, by their open
+ * pull requests). Null for a project that does not exist.
+ *
+ * `lanes` is this machine's Pipeline Status stages for the project
+ * (pipelineOf), or null when it reads no logs of it. With them, each wake
+ * time carries `used`, the seconds its job last actually woke on (null when
+ * its log does not say yet), and `inEffect`, whether that is the set value;
+ * without them both are null, never a guess (SP-236). Each model carries
+ * `lastModel`, the model its lane's last pass ran on (the lane's START line:
+ * an id or `default`), null when the log does not say (SP-239).
  */
-export function pipelineControlsOf(store, slug, { reader = null, ownProject = null } = {}) {
+export function pipelineControlsOf(store, slug, { reader = null, lanes = null, ownProject = null, newest = null } = {}) {
   const project = store.getProject(slug);
   if (!project) return null;
   const nameOf = (id) => store.getActor(id)?.name ?? `actor ${id}`;
   const who = reader == null ? null : store.getActor(reader);
+  const canChange = who != null && who.kind === 'human' && who.id === project.operator;
   return {
     project: { slug: project.slug, name: project.name },
     operator: project.operator == null ? null : { id: project.operator, name: nameOf(project.operator) },
-    canChange: who != null && who.kind === 'human' && who.id === project.operator,
+    canChange,
     own: ownProject != null && project.slug === ownProject,
+    release: releaseGroupOf(store, project, { canChange, ownProject, newest, nameOf }),
     groups: GROUPS.map((g) => ({ ...g })),
     models: [{ id: DEFAULT_MODEL, label: "Claude's default" }, ...MODELS.map((m) => ({ ...m }))],
-    controls: store.pipelineSettings(project.slug).map((c) => ({ ...c })),
+    controls: store.pipelineSettings(project.slug).map((c) => {
+      if (c.group === 'model') return { ...c, lastModel: lanes?.find((l) => `model.${l.job}` === c.key)?.model ?? null };
+      if (c.group !== 'wake') return { ...c };
+      const used = lanes?.find((l) => `wake.${l.job}` === c.key)?.used ?? null;
+      return { ...c, used, inEffect: used == null ? null : String(used) === c.value };
+    }),
     changes: store.pipelineSettingChanges(project.slug).map((c) => ({ ...c, actorName: nameOf(c.actor) })),
+    inFlight: store.listTickets(project.slug)
+      .map((t) => pipelinePause.classifyTicket(t))
+      .filter(Boolean)
+      .map(({ id, name, status, kind }) => ({ id, name, status, kind })),
+    capInFlight: capInFlightOf(store.listTickets(project.slug)),
+  };
+}
+
+/** The tickets the work-in-progress cap counts (SP-238): in Building or In review, `{ count, ids }`. */
+function capInFlightOf(tickets) {
+  const counted = [loopStatuses.BUILDING, loopStatuses.IN_REVIEW];
+  const ids = tickets
+    .filter((t) => counted.includes(String(t.status?.status ?? t.status ?? '').trim().toLowerCase()))
+    .map((t) => String(t.id));
+  return { count: ids.length, ids };
+}
+
+/**
+ * The Settings page's release group (SP-275) for one project:
+ * the release it runs (`current`, with when and who named it), the one
+ * named before it (`previous`), the release Roll Back would name
+ * (`rollBackTo`, lib/releases.mjs rollBackTarget) and the newest release
+ * cut (`newest`, from `newest`: the server's newestRelease answer, or null
+ * when it reads none, with `newestProblem` saying why). `own` is true for
+ * the tracker's home project, which always runs main and has no buttons;
+ * `known` is false when the tracker cannot tell which project that is, and
+ * then nothing can be named. `canChange` is the operator, signed in as a
+ * person, on a project a release can be named for.
+ */
+function releaseGroupOf(store, project, { canChange, ownProject, newest, nameOf }) {
+  const known = typeof ownProject === 'string' && ownProject !== '';
+  const own = known && project.slug === ownProject;
+  const history = own ? [] : store.projectReleases(project.slug);
+  const entry = (h) => (h ? { release: h.release, at: h.at, actor: h.actor, actorName: nameOf(h.actor) } : null);
+  return {
+    ...RELEASE_GROUP,
+    known,
+    own,
+    ownLine: OWN_RELEASE_LINE,
+    current: entry(history[0]),
+    previous: entry(history[1]),
+    rollBackTo: rollBackTarget(history),
+    newest: newest?.newest?.name ?? null,
+    newestProblem: newest == null ? 'this tracker does not read the release tags.' : newest.problem ?? null,
+    canChange: canChange && known && !own,
   };
 }
 
@@ -573,6 +703,31 @@ export const REPORT_RANGES = Object.freeze([
 ]);
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * The Task Productivity table's Growth Rate timeframes (SP-241): each
+ * compares the last `days` days before now with the `days` days before
+ * those.
+ */
+export const GROWTH_PERIODS = Object.freeze([
+  Object.freeze({ key: 'week', label: 'Weekly', days: 7 }),
+  Object.freeze({ key: 'month', label: 'Monthly', days: 30 }),
+  Object.freeze({ key: 'year', label: 'Annual', days: 365 }),
+]);
+
+/**
+ * One growth figure: `current` and `previous` counts, and `change`, the
+ * percentage change from previous to current rounded to a whole number, or
+ * null with `reason`: 'too-young' when the first ticket in scope was filed
+ * after the earlier period began (not a whole period to compare), else
+ * 'none-before' when the earlier period had no tasks. `reason` is null
+ * whenever `change` is a number.
+ */
+export function growthFigure(current, previous, { firstFiled, start }) {
+  if (firstFiled == null || firstFiled > start) return { current, previous, change: null, reason: 'too-young' };
+  if (previous === 0) return { current, previous, change: null, reason: 'none-before' };
+  return { current, previous, change: Math.round(((current - previous) / previous) * 100), reason: null };
+}
 
 /**
  * When a ticket last entered Live, from its history: the newest event that
@@ -658,7 +813,9 @@ export function isFailureNote(text) {
  *     status change or the next comment from the operator, whichever first;
  *  2. operator: in Needs your input or Ready to launch while the newest
  *     comment is not the operator's own (the contract's "Is this waiting on
- *     Dane?" rule, operatorSpokeLast);
+ *     Dane?" rule, operatorSpokeLast), and, in Ready to launch, his merge
+ *     word does not still stand (SP-285: said since the newest review PASS;
+ *     the relay holds it while a conflict is worked, standingMergeWord);
  *  3. working: in Building;
  *  4. lane: every other stage but Live (Requested, Queued, Rework, In
  *     review, and the operator's two once his reply is the newest word).
@@ -666,7 +823,9 @@ export function isFailureNote(text) {
  *
  * `steps` are the ticket's [ms, status] steps oldest first (statusSteps);
  * `comments` are `{ at, byMachine, byOperator }`, `at` in ms, and
- * `failure` when it is a machine's failure note. Answers the stretches as
+ * `failure` when it is a machine's failure note, `verdict` ('pass' or
+ * 'fail') when it is a review verdict, `mergeWord` when it is his merge
+ * phrase. Answers the stretches as
  * `{ from, to, bucket }`, oldest first, touching end to end; none before the
  * ticket's first step.
  */
@@ -683,10 +842,13 @@ export function timeSplitOf(steps, comments, { now }) {
   let status = null;
   let broken = false;
   let operatorLast = false;
+  let passed = false;
+  let mergeStanding = false;
   const bucketNow = () => {
     if (status == null || status === LIVE) return null;
     if (broken) return 'broken';
-    if (OPERATOR_HELD_STATUSES.includes(status) && !operatorLast) return 'operator';
+    const merging = status === 'ready to launch' && mergeStanding;
+    if (OPERATOR_HELD_STATUSES.includes(status) && !operatorLast && !merging) return 'operator';
     if (status === BUILDING) return 'working';
     return 'lane';
   };
@@ -709,6 +871,11 @@ export function timeSplitOf(steps, comments, { now }) {
     } else {
       const c = e.comment;
       operatorLast = Boolean(c.byOperator);
+      if (c.verdict) {
+        passed = c.verdict === 'pass';
+        mergeStanding = false;
+      }
+      if (c.byOperator && c.mergeWord && passed) mergeStanding = true;
       if (c.byOperator) broken = false;
       else if (c.byMachine && c.failure) broken = true;
     }
@@ -781,6 +948,38 @@ function humanHoursFigures(estimates, days) {
 }
 
 /**
+ * Merge Conflicts (SP-295): every merge conflict in these projects, with the
+ * pipeline settings in force at the time, and conflicts per merged pull
+ * request by those settings. conflictReport.mjs works it out from plain
+ * rows; this reads them: each ticket's status steps and comments, and each
+ * project's settings changes and current values. All time, not by range:
+ * the comparison is between settings, and each setting has its own dates.
+ */
+function conflictsOf(store, projects) {
+  const tickets = [];
+  const settings = {};
+  for (const p of projects) {
+    settings[p.slug] = {
+      changes: store.pipelineSettingChanges(p.slug, { limit: 100000 }),
+      current: Object.fromEntries(store.pipelineSettings(p.slug).map((c) => [c.key, c.value])),
+    };
+    for (const ticket of store.listTickets(p.slug)) {
+      tickets.push({
+        id: ticket.id,
+        name: ticket.name,
+        project: p.slug,
+        description: ticket.description ?? '',
+        steps: statusSteps(store, ticket),
+        comments: store.listComments(ticket.id)
+          .map((c) => ({ at: Date.parse(c.createdAt), body: c.body }))
+          .filter((c) => !Number.isNaN(c.at)),
+      });
+    }
+  }
+  return conflictReportOf({ tickets, settings });
+}
+
+/**
  * The Reporting page's figures for one project (`project`, a slug) or, with
  * none, every project:
  *  - finished: how many tickets entered Live in each REPORT_RANGES range,
@@ -809,8 +1008,18 @@ function humanHoursFigures(estimates, days) {
  * Null when `project` names no project. `only` narrows "every project" to
  * the ones the reader may see (visibleProjects), and a `project` outside it
  * is answered as no project, the same as one that does not exist.
+ *
+ * `custom` (SP-240), `{ from, to }` in ms, is the Task Productivity table's
+ * own date range: the answer then carries `custom: { from, to, started,
+ * finished }` (times as ISO strings), counted the same way as the fixed
+ * ranges, with both ends included. Without it the answer has no `custom`.
+ *
+ * `growth` (SP-241): per GROWTH_PERIODS key, `{ started, finished }`, each a
+ * growthFigure comparing the last `days` days before `now` with the `days`
+ * before those, counted the same way as the fixed ranges; `growthPeriods`
+ * names them for the page's picker, Weekly first.
  */
-export function reportsOf(store, { project = null, now = Date.now(), only = null } = {}) {
+export function reportsOf(store, { project = null, now = Date.now(), only = null, custom = null } = {}) {
   let projects = visibleProjects(store, only);
   if (project != null) {
     projects = projects.filter((p) => p.slug === project);
@@ -820,11 +1029,21 @@ export function reportsOf(store, { project = null, now = Date.now(), only = null
   const finished = zero();
   const started = zero();
   const inRange = (r, when) => r.days == null || (when > now - r.days * DAY_MS && when <= now);
-  const tally = (counts, at) => {
+  const customCounts = { started: 0, finished: 0 };
+  const growthCounts = Object.fromEntries(GROWTH_PERIODS.map((g) => [g.key, {
+    started: { current: 0, previous: 0 }, finished: { current: 0, previous: 0 },
+  }]));
+  const tally = (counts, at, kind) => {
     const when = Date.parse(at);
     if (Number.isNaN(when)) return;
     for (const r of REPORT_RANGES) {
       if (inRange(r, when)) counts[r.key] += 1;
+    }
+    if (custom && when >= custom.from && when <= custom.to) customCounts[kind] += 1;
+    for (const g of GROWTH_PERIODS) {
+      const span = g.days * DAY_MS;
+      if (when > now - span && when <= now) growthCounts[g.key][kind].current += 1;
+      else if (when > now - 2 * span && when <= now - span) growthCounts[g.key][kind].previous += 1;
     }
   };
   const flows = Object.fromEntries(REPORT_RANGES.map((r) => [r.key, []]));
@@ -843,12 +1062,15 @@ export function reportsOf(store, { project = null, now = Date.now(), only = null
   for (const p of projects) {
     for (const ticket of store.listTickets(p.slug)) {
       const comments = store.listComments(ticket.id).map((c) => {
-        const byMachine = isMachineActor(c.author) || isMachineComment(c.body);
+        const byMachine = isMachineActor(c.author);
+        const byOperator = p.operator != null && c.author === p.operator && !byMachine;
         return {
           at: Date.parse(c.createdAt),
           byMachine,
-          byOperator: p.operator != null && c.author === p.operator && !byMachine,
+          byOperator,
           failure: byMachine && isFailureNote(c.body),
+          verdict: isReviewVerdict(c.body) ? (isReviewPassed(c.body) ? 'pass' : 'fail') : null,
+          mergeWord: byOperator && isMergeCommand(c.body),
         };
       });
       const stretches = timeSplitOf(statusSteps(store, ticket), comments, { now });
@@ -857,12 +1079,12 @@ export function reportsOf(store, { project = null, now = Date.now(), only = null
         const total = TIME_BUCKETS.reduce((n, b) => n + totals[b], 0);
         if (total > 0) split[r.key].push({ id: ticket.id, name: ticket.name, project: p.slug, total, ...totals });
       }
-      tally(started, ticket.createdAt);
+      tally(started, ticket.createdAt, 'started');
       const filed = Date.parse(ticket.createdAt);
       if (!Number.isNaN(filed) && (firstFiled == null || filed < firstFiled)) firstFiled = filed;
       const done = finishedAt(store, ticket);
       if (done) {
-        tally(finished, done);
+        tally(finished, done, 'finished');
         const doneAt = Date.parse(done);
         if (!Number.isNaN(doneAt)) {
           const flow = flowOf(statusSteps(store, ticket), doneAt);
@@ -891,6 +1113,14 @@ export function reportsOf(store, { project = null, now = Date.now(), only = null
       return [r.key, humanHoursFigures(estimates[r.key], days)];
     })),
     waitingNow,
+    conflicts: conflictsOf(store, projects),
+    ...(custom ? { custom: { from: new Date(custom.from).toISOString(), to: new Date(custom.to).toISOString(), ...customCounts } } : {}),
+    growthPeriods: GROWTH_PERIODS.map(({ key, label }) => ({ key, label })),
+    growth: Object.fromEntries(GROWTH_PERIODS.map((g) => {
+      const start = now - 2 * g.days * DAY_MS;
+      const figure = (kind) => growthFigure(growthCounts[g.key][kind].current, growthCounts[g.key][kind].previous, { firstFiled, start });
+      return [g.key, { started: figure('started'), finished: figure('finished') }];
+    })),
     timeSplit: Object.fromEntries(REPORT_RANGES.map((r) => {
       const rows = split[r.key];
       const total = rows.reduce((n, t) => n + t.total, 0);
@@ -1034,7 +1264,7 @@ export function searchTickets(store, query, filters = null, { only = null } = {}
   const kinds = new Map();
   const isMachine = (c) => {
     if (!kinds.has(c.author)) kinds.set(c.author, store.getActor(c.author)?.kind);
-    return kinds.get(c.author) === 'machine' || isMachineComment(c.body);
+    return kinds.get(c.author) === 'machine';
   };
   const results = [];
   for (const project of visibleProjects(store, only)) {
@@ -1044,8 +1274,11 @@ export function searchTickets(store, query, filters = null, { only = null } = {}
       const discussion = [];
       const development = [];
       for (const c of store.listComments(ticket.id)) {
-        if (isMachine(c)) development.push(isMachineComment(c.body) ? stripMachineMarker(c.body) : c.body);
-        else discussion.push(c.body);
+        // Who wrote it decides which it is (SP-26); a stamp line on an
+        // imported comment is history, taken off whoever wrote it.
+        const text = isMachineComment(c.body) ? stripMachineMarker(c.body) : c.body;
+        if (isMachine(c)) development.push(text);
+        else discussion.push(text);
       }
       const places = [
         ['title', [ticket.name]],

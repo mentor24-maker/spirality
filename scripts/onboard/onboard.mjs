@@ -119,7 +119,7 @@ import { CONFIG_FILE, findConfigFile, loadProjectConfig, ProjectConfigError, wit
 import { AnswersError, answersFile, expandHome, loadAnswers, onboardDir, resolveAnswers, slugFromName } from '../../lib/onboardAnswers.mjs';
 import { machineUserPending } from '../../lib/onboardSettings.mjs';
 import { ciVerdict, SETUP_BRANCH } from '../../lib/onboardCopy.mjs';
-import { LANES, parseStatus } from '../../lib/onboardLanes.mjs';
+import { LANES, installerCommand, parseStatus } from '../../lib/onboardLanes.mjs';
 import { normalRepo } from '../lib/repoCheck.mjs';
 import { readEmptiness, starterFiles, starterMessage } from '../../lib/onboardStarter.mjs';
 import {
@@ -1031,7 +1031,8 @@ export async function onboard(opts, deps) {
       return findTicketId(v.json?.body || '', linkOpts);
     };
     const lanesLoaded = () => {
-      const s = run('bash', [join(checkout, 'scripts', 'install_loop_runner.sh'), '--status'], { cwd: checkout });
+      // Spirality's installer, for the project (SP-273): the project holds none of its own.
+      const s = run('bash', installerCommand(spiralityDir, checkout, '--status'));
       const jobs = parseStatus(s.out);
       return LANES.filter((l) => !jobs[l]?.installed || !jobs[l]?.loaded);
     };

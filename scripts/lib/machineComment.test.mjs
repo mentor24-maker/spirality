@@ -28,10 +28,10 @@ test('only task comment posts and threaded replies are stamped', () => {
   assert.equal(stampCommentBody({ status: 'Queued' }).status, 'Queued');
 });
 
-test("a stamped comment under Dane's seat does not count as Dane speaking", () => {
+test("a machine actor's comment under Dane's id does not count as Dane speaking, with no stamp involved (SP-26)", () => {
   const dane = 48012725;
-  const machine = { id: 1, comment_text: stampCommentBody({ comment_text: 'REVIEW: PASSED' }).comment_text, date: '20', user: { id: dane } };
-  const his = { id: 2, comment_text: 'merge', date: '10', user: { id: dane } };
+  const machine = { id: 1, comment_text: 'REVIEW: PASSED', date: '20', user: { id: dane, kind: 'machine' } };
+  const his = { id: 2, comment_text: 'merge', date: '10', user: { id: dane, kind: 'human' } };
   assert.equal(operatorSpokeLast([his, machine], dane), false);
   assert.equal(operatorSpokeLast([machine, { ...his, date: '30' }], dane), true);
 });
