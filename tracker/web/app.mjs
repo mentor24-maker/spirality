@@ -581,10 +581,15 @@ function savedTasksView() {
   return savedView();
 }
 
-/** The Tasks page's view switch: Board and List for project `slug`, then the Console (every project), `current` marked. */
+/**
+ * The Tasks page's view switch: Board and List for project `slug`, then the
+ * Console (every project), `current` marked. A tab bar of its own under the
+ * title row (UI_DOCTRINE 5, SP-322): each tab is its own address, so a link
+ * with `aria-current`.
+ */
 function viewSwitch(slug, current) {
   const views = [['board', 'Board', `/board/${encodeURIComponent(slug)}`], ['list', 'List', `/list/${encodeURIComponent(slug)}`], ['console', 'Console', '/console']];
-  return `<nav class="views" aria-label="View">${views.map(([v, label, href]) => `<a href="${href}"${v === current ? ' class="current" aria-current="page"' : ''}>${label}</a>`).join('')}</nav>`;
+  return `<nav class="tabs" aria-label="View">${views.map(([v, label, href]) => `<a href="${href}"${v === current ? ' aria-current="page"' : ''}>${label}</a>`).join('')}</nav>`;
 }
 
 /** The selected project's slug, or null when none is remembered. */
@@ -702,8 +707,8 @@ async function drawProjects(done = '', problem = '') {
     : ''}</td>
     </tr>`;
   main.innerHTML = `
-    <h1>Projects</h1>
-    ${me?.kind === 'human' ? '<div class="toolbar"><a class="button" href="/setup/new">Set Up a Project</a></div>' : ''}
+    <div class="title-row"><h1>Projects</h1>
+    ${me?.kind === 'human' ? '<div class="toolbar"><a class="button" href="/setup/new">Set Up a Project</a></div>' : ''}</div>
     <p class="note${problem ? ' error' : (done ? ' quiet' : '')}" role="status">${escapeHtml(problem || done)}</p>
     ${renderSetupList(setups)}
     ${projects.length
@@ -808,11 +813,11 @@ async function drawProjectDetails(slug, done = '', problem = '') {
       <td class="added">${escapeHtml(when(m.addedAt))}</td>
       ${editing ? `<td class="actions">${fixedAs(m).length ? '' : `<button type="button" data-remove="${escapeHtml(m.id)}" data-name="${escapeHtml(m.name)}">Remove</button>`}</td>` : ''}</tr>`;
   main.innerHTML = `
-    <h1 class="project">${logoOf(p, 'logo big')}${escapeHtml(p.name)}</h1>
+    <div class="title-row"><h1 class="project">${logoOf(p, 'logo big')}${escapeHtml(p.name)}</h1>
     <div class="toolbar">
       <a href="/projects">All projects</a>
-      <nav class="views" aria-label="Open"><a href="${at('board')}">Board</a><a href="${at('list')}">List</a></nav>
-    </div>
+      <a href="${at('board')}">Board</a><a href="${at('list')}">List</a>
+    </div></div>
     <dl class="details">
       <dt>Slug</dt><dd>${escapeHtml(p.slug)}</dd>
       <dt>Ticket prefix</dt><dd>${escapeHtml(p.prefix)}</dd>
@@ -1136,8 +1141,8 @@ async function drawSetup(slug) {
   setTitle(`Set Up ${name} · Tracker`);
   main.innerHTML = `
     <section class="setup">
-      <h1>Set Up ${escapeHtml(name)}</h1>
-      <div class="toolbar"><a href="/projects">All projects</a>${setup.locked ? '' : `<a href="/setup/${encodeURIComponent(setup.project)}/answers">Change the answers</a>`}</div>
+      <div class="title-row"><h1>Set Up ${escapeHtml(name)}</h1>
+      <div class="toolbar"><a href="/projects">All projects</a>${setup.locked ? '' : `<a href="/setup/${encodeURIComponent(setup.project)}/answers">Change the answers</a>`}</div></div>
       ${setup.answersError ? `<p class="note error">The answers do not check: ${escapeHtml(setup.answersError)}</p>` : ''}
       <h2>Steps</h2>
       ${renderSetupSteps(setup.state)}
@@ -1210,10 +1215,8 @@ async function drawConsole() {
   const slug = answer.projects.some((p) => p.slug === project) ? project : answer.projects[0]?.slug;
   setTitle('Console · Tracker');
   main.innerHTML = `
-    <div class="tasks-head"><h1>Tasks</h1></div>
-    <div class="toolbar">
-      ${slug ? viewSwitch(slug, 'console') : ''}
-    </div>
+    <div class="tasks-head title-row"><h1>Tasks</h1></div>
+    ${slug ? viewSwitch(slug, 'console') : ''}
     ${answer.tickets.length ? '' : '<p class="quiet">Nothing is in flight.</p>'}
     ${renderConsole(answer, stages)}`;
   for (const el of main.querySelectorAll('[data-stage]')) {
@@ -1382,13 +1385,14 @@ async function drawProject(slug, view, { adding = false, filed = null, unchecked
   // Which side of the Add Task box shows: its Suggest checkbox, kept in this browser (SP-303).
   const suggesting = savedSuggestSwitch();
   main.innerHTML = `
-    <div class="tasks-head"><h1>Tasks</h1>${filed ? filedPod(filed, uploaded) : ''}</div>
-    <div class="toolbar">
-      ${renderProjectPicker(projects, board.project)}
-      ${searchForm('')}
-      <button type="button" class="pipeline-pod" aria-haspopup="dialog" title="Open Pipeline Status"></button>
-      ${viewSwitch(board.project, view)}
+    <div class="tasks-head title-row"><h1>Tasks</h1>${filed ? filedPod(filed, uploaded) : ''}
+      <div class="toolbar">
+        ${renderProjectPicker(projects, board.project)}
+        ${searchForm('')}
+        <button type="button" class="pipeline-pod" aria-haspopup="dialog" title="Open Pipeline Status"></button>
+      </div>
     </div>
+    ${viewSwitch(board.project, view)}
     ${filed && (unchecked || notUploaded.length) ? `<p class="filed-note">${unchecked ? UNCHECKED_NOTE : ''}${notUploadedNote(notUploaded)}</p>` : ''}
     <details class="add-task">
       <summary>Add Task<label class="suggest-switch">Suggest <input type="checkbox" value="on" aria-label="Suggest Next Tasks"${suggesting ? ' checked' : ''}></label></summary>
@@ -1764,8 +1768,8 @@ async function drawSearch(params) {
   }
   setTitle(answer.query ? `Search: ${answer.query} · Tracker` : 'Search · Tracker');
   main.innerHTML = `
-    <h1>Search</h1>
-    <div class="toolbar">${searchForm(answer.query)}</div>
+    <div class="title-row"><h1>Search</h1>
+    <div class="toolbar">${searchForm(answer.query)}</div></div>
     ${renderSearchFilters(answer.filters, { tickets: answer.tickets ?? [] })}
     <div class="search-answer">${refusal ? `<p class="error">${escapeHtml(refusal)}</p>` : `
     ${answer.results.length ? `<p class="quiet">${answer.results.length} ${answer.results.length === 1 ? 'ticket matches' : 'tickets match'}</p>` : ''}
@@ -3254,7 +3258,7 @@ async function drawSettings() {
     </tr>`;
   main.innerHTML = `
     <h1>Settings</h1>
-    <nav class="settings-tabs">${SETTINGS_TABS.map((t) => `<a href="#${t.id}" data-tab="${t.id}">${t.title}</a>`).join('')}</nav>
+    <nav class="tabs settings-tabs" aria-label="Settings">${SETTINGS_TABS.map((t) => `<a href="#${t.id}" data-tab="${t.id}">${t.title}</a>`).join('')}</nav>
     <div class="settings-tab" data-tab="pipeline-controls">
       <p class="quiet">How each project's loop runs, for experimenting with the pipeline. Everyone can see them; only a project's operator can change them. Every change is logged below its project.</p>
       <div class="pipeline-controls">${controls.length ? '' : '<p class="quiet">No projects to show.</p>'}</div>

@@ -37,6 +37,7 @@
   --status-warn-bg: #fef3c7;
   --status-warn-ink: #b45309;
   --focus-ring-color: #2563eb;
+  --tab-selected: #0b82d4;
   --mark-bg: #fff3b0;
   /* Buttons (UI_DOCTRINE 3; SP-321 gives every button one of the four kinds). */
   --btn-bg: #000000;
@@ -138,6 +139,19 @@ header button:hover { border-color: var(--header-ink); }
 /* One body width on every page (SP-184): 1440px to the column's outer edge, padding included, centred. */
 main { box-sizing: border-box; max-width: 1440px; margin: 0 auto; padding: 1.5rem 2rem 4rem; }
 a { color: var(--link-ink); }
+/* The title row and the headings under it (UI_DOCTRINE 4, SP-322): one 24px title, buttons at its right, the trail above it. */
+h1 { font-size: var(--page-title-size); font-weight: 800; line-height: var(--leading-tight); margin: 0 0 var(--space-5); }
+h2 { font-size: var(--text-lg); font-weight: 700; line-height: var(--leading-tight); }
+h3, h4, h5, h6 { font-size: var(--text-base); font-weight: 700; line-height: var(--leading-tight); }
+.title-row { display: flex; flex-wrap: wrap; gap: var(--space-5) var(--space-7); align-items: center; justify-content: space-between; margin-bottom: var(--space-5); }
+.title-row > h1 { margin: 0; }
+.title-row > .toolbar { margin-bottom: 0; }
+p.page-desc { margin: calc(-1 * var(--space-3)) 0 var(--space-5); font-size: var(--page-desc-size); color: var(--ink-secondary); }
+/* Tabs (UI_DOCTRINE 5, SP-322): Board / List / Console and the Settings tabs, a row of their own under the title. */
+nav.tabs { display: flex; margin: 0 0 var(--space-5); border-bottom: 2px solid var(--border-strong); }
+nav.tabs a { padding: var(--space-3) var(--space-5); margin-bottom: -2px; border-bottom: 3px solid transparent; background: transparent; color: var(--ink-secondary); font-size: var(--text-base); font-weight: 500; text-decoration: none; }
+nav.tabs a:hover { color: var(--ink-primary); }
+nav.tabs a[aria-current] { color: var(--tab-selected); font-weight: 700; border-bottom-color: var(--tab-selected); }
 .quiet { color: var(--ink-secondary); }
 .error { color: var(--ink-error); font-weight: 600; }
 table { width: 100%; border-collapse: collapse; }
@@ -265,10 +279,6 @@ th.count, td.count, th.open, td.open { text-align: right; font-variant-numeric: 
 dl.details { display: grid; grid-template-columns: max-content 1fr; gap: var(--space-2) var(--space-6); margin: 0 0 1.5rem; }
 dl.details dt { color: var(--ink-secondary); }
 dl.details dd { margin: 0; }
-.views { display: inline-flex; border: 1px solid var(--border-black); border-radius: var(--radius-input); overflow: hidden; }
-.views a { padding: 0.3rem 1rem; color: var(--ink-primary); text-decoration: none; font-size: var(--text-base); }
-.views a + a { border-left: 1px solid var(--border-black); }
-.views a.current { background: var(--btn-bg); color: var(--btn-text); }
 .board { display: flex; gap: var(--space-4); align-items: flex-start; overflow-x: auto; padding-bottom: 1rem; }
 /* SP-214: the seven working stages share the page's width equally (each grows and shrinks from zero),
    so all seven fit across the 1440px body; below a 10rem floor per column the board scrolls sideways. */
@@ -403,11 +413,7 @@ table.colours td.value { color: var(--ink-secondary); font-family: var(--font-mo
 table.colours tr.unset input { opacity: 0.25; }
 table.colours input[type="color"] { width: 3rem; height: 2rem; padding: 0; border: 1px solid var(--border-black); border-radius: var(--radius-sm); cursor: pointer; }
 form.colours .row { display: flex; gap: var(--space-5); align-items: center; margin-top: 1rem; }
-/* The Settings page (SP-289): a menu of two tabs under the heading, each project a box that opens and closes, and one look for every button. */
-nav.settings-tabs { display: flex; gap: var(--space-7); margin: 0 0 1.5rem; border-bottom: 1px solid var(--border-light); }
-nav.settings-tabs a { padding: 0.5rem 0; margin-bottom: -1px; color: var(--ink-secondary); font-weight: 600; text-decoration: none; border-bottom: 3px solid transparent; }
-nav.settings-tabs a:hover { color: var(--ink-primary); }
-nav.settings-tabs a[aria-current] { color: var(--navy); border-bottom-color: var(--navy); }
+/* The Settings page (SP-289): two tabs under the heading (nav.tabs, SP-322), each project a box that opens and closes, and one look for every button. */
 div.settings-tab button { border: 0; border-radius: var(--radius-btn); background: var(--navy); color: var(--btn-flat-ink); font-weight: 700; cursor: pointer; }
 div.settings-tab button:disabled { opacity: 0.4; cursor: default; }
 details.pipeline-controls { margin-bottom: 1rem; border: 1px solid var(--navy); border-radius: var(--radius-container); overflow: hidden; }
@@ -493,7 +499,7 @@ details.add-task .suggest-next button.suggestion-info-open:hover, details.add-ta
 dialog.suggestion-info { border: 1px solid var(--border-black); border-radius: var(--radius-input); padding: 1rem 1.25rem; max-width: min(36rem, 95vw); color: var(--ink-primary); }
 dialog.suggestion-info::backdrop { background: var(--backdrop); }
 dialog.suggestion-info h2 { margin: 0 2rem 0.25rem 0; font-size: var(--text-lg); }
-dialog.suggestion-info h3 { margin: 0.75rem 0 0.25rem; font-size: var(--text-md); }
+dialog.suggestion-info h3 { margin: 0.75rem 0 0.25rem; font-size: var(--text-base); }
 dialog.suggestion-info p { margin: 0; white-space: pre-wrap; }
 dialog.suggestion-info p.chips { white-space: normal; }
 dialog.suggestion-info p.chips .tag { margin: 0 0.3rem 0.2rem 0; }
