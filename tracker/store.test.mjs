@@ -2112,6 +2112,97 @@ test('deleting a topic takes it off every ticket carrying it, each with one topi
   } finally { cleanup(); }
 });
 
+// ── Renaming and deleting a tag (SP-310) ────────────────────────────────────
+
+test('renaming a tag rewrites it on every ticket of the project carrying it, each with one tags event and a version step, and keeps or sets its description', () => {
+  const { store, human, machine, cleanup } = fixture();
+  try {
+    store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE' });
+    const one = store.fileTicket({ project: 'alpha', actor: machine.id, name: 'One', status: 'queued', tags: ['tracker', 'ui'] });
+    const two = store.fileTicket({ project: 'alpha', actor: machine.id, name: 'Two', status: 'queued', tags: ['ui'] });
+    const three = store.fileTicket({ project: 'alpha', actor: machine.id, name: 'Three', status: 'queued', tags: ['tracker'] });
+    const theirs = store.fileTicket({ project: 'beta', actor: machine.id, name: 'Theirs', status: 'queued', tags: ['ui'] });
+    const versions = new Map([one, two, three, theirs].map((t) => [t.id, store.getTicket(t.id).version]));
+    const renamed = store.renameTag({ project: 'alpha', name: 'ui', newName: '  page  ', actor: human.id });
+    assert.deepEqual([renamed.tag.name, renamed.tag.count, renamed.tag.description, renamed.tickets], ['page', 2, '', [one.id, two.id]]);
+    assert.deepEqual(store.listTags('alpha').map((t) => [t.name, t.count]), [['page', 2], ['tracker', 2]], 'the old name is gone');
+    assert.deepEqual(store.getTicket(one.id).tags, ['tracker', 'page'], 'in the same place');
+    assert.deepEqual(store.getTicket(two.id).tags, ['page']);
+    assert.equal(store.getTicket(one.id).version, versions.get(one.id) + 1);
+    assert.equal(store.getTicket(three.id).version, versions.get(three.id), 'a ticket without it is untouched');
+    assert.deepEqual(store.getTicket(theirs.id).tags, ['ui'], "another project's tag of the same name is never touched");
+    assert.equal(store.getTicket(theirs.id).version, versions.get(theirs.id));
+    const last = store.listEvents(one.id).filter((e) => e.field === 'tags').at(-1);
+    assert.deepEqual([last.from, last.to, last.actor], [JSON.stringify(['tracker', 'ui']), JSON.stringify(['tracker', 'page']), human.id]);
+
+    const described = store.renameTag({ project: 'alpha', name: 'page', description: ' The page. ', actor: human.id });
+    assert.deepEqual([described.tag.name, described.tag.description, described.tickets], ['page', 'The page.', []], 'a description alone touches no ticket');
+    assert.equal(store.getTicket(one.id).version, versions.get(one.id) + 1);
+    assert.equal(described.tag.createdBy, human.id, 'a tag only in use is saved when it is given a description');
+    const recased = store.renameTag({ project: 'alpha', name: 'page', newName: 'Page', actor: human.id });
+    assert.deepEqual([recased.tag.name, recased.tag.description, recased.tag.count], ['Page', 'The page.', 2], 'a change of case alone is a rename of the tag itself, keeping its saved description');
+    const saved = store.addTag({ project: 'alpha', name: 'design', description: 'Looks.', actor: human.id });
+    const moved = store.renameTag({ project: 'alpha', name: 'design', newName: 'style', actor: human.id });
+    assert.deepEqual([moved.tag.name, moved.tag.description, moved.tag.createdAt, moved.tag.count, moved.tickets], ['style', 'Looks.', saved.createdAt, 0, []], 'a saved tag no ticket carries is renamed on the list');
+  } finally { cleanup(); }
+});
+
+test('renaming a tag onto a name another tag has, in any case, is refused and nothing changes; so is an unknown tag, another project, a bad name or actor', () => {
+  const { store, human, machine, cleanup } = fixture();
+  try {
+    store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE' });
+    const one = store.fileTicket({ project: 'alpha', actor: machine.id, name: 'One', status: 'queued', tags: ['ui'] });
+    store.addTag({ project: 'alpha', name: 'design', actor: human.id });
+    store.fileTicket({ project: 'beta', actor: machine.id, name: 'Theirs', status: 'queued', tags: ['other'] });
+    const version = store.getTicket(one.id).version;
+    const rename = (over) => () => store.renameTag({ project: 'alpha', name: 'ui', newName: 'page', actor: human.id, ...over });
+    for (const newName of ['design', 'DESIGN', ' Design ']) {
+      assert.throws(rename({ newName }), { code: 'tag-exists', message: 'a tag named design already exists in Alpha; nothing was changed.' }, newName);
+    }
+    for (const newName of ['', '   ', null, 42, '.', '..', 'x'.repeat(101)]) assert.throws(rename({ newName }), { code: 'bad-name' }, String(newName));
+    assert.throws(rename({ description: 'x'.repeat(5001) }), { code: 'bad-description' });
+    assert.throws(rename({ actor: 999 }), { code: 'unknown-actor' });
+    for (const name of ['UI', 'nope', 'other', undefined, 7]) assert.throws(rename({ name }), { code: 'unknown-tag' }, String(name));
+    assert.throws(rename({ project: 'beta' }), { code: 'unknown-tag' }, "a tag of another project");
+    assert.throws(rename({ project: 'nope' }), { code: 'unknown-project' });
+    assert.deepEqual(store.listTags('alpha').map((t) => [t.name, t.count]), [['design', 0], ['ui', 1]], 'nothing changed');
+    assert.deepEqual(store.getTicket(one.id).tags, ['ui']);
+    assert.equal(store.getTicket(one.id).version, version);
+    assert.throws(() => store.addTag({ project: 'alpha', name: '..', actor: human.id }), { code: 'bad-name' }, 'addTag refuses a dot-only name too');
+  } finally { cleanup(); }
+});
+
+test('deleting a tag takes it off every ticket of the project carrying it and off the saved list, each ticket with one tags event and a version step', () => {
+  const { store, human, machine, cleanup } = fixture();
+  try {
+    store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE' });
+    store.addTag({ project: 'alpha', name: 'ui', description: 'Screens.', actor: human.id });
+    const one = store.fileTicket({ project: 'alpha', actor: machine.id, name: 'One', status: 'queued', tags: ['ui', 'tracker', 'ui'] });
+    const two = store.fileTicket({ project: 'alpha', actor: machine.id, name: 'Two', status: 'queued', tags: ['ui'] });
+    const three = store.fileTicket({ project: 'alpha', actor: machine.id, name: 'Three', status: 'queued', tags: ['tracker'] });
+    const theirs = store.fileTicket({ project: 'beta', actor: machine.id, name: 'Theirs', status: 'queued', tags: ['ui'] });
+    const versions = new Map([one, two, three, theirs].map((t) => [t.id, store.getTicket(t.id).version]));
+    assert.throws(() => store.removeTag({ project: 'alpha', name: 'UI', actor: human.id }), { code: 'unknown-tag' }, 'found by its exact name');
+    assert.throws(() => store.removeTag({ project: 'alpha', name: 'ui', actor: 999 }), { code: 'unknown-actor' });
+    const gone = store.removeTag({ project: 'alpha', name: 'ui', actor: human.id });
+    assert.deepEqual([gone.tag.name, gone.tag.description, gone.tag.count, gone.tickets], ['ui', 'Screens.', 2, [one.id, two.id]]);
+    assert.deepEqual(store.listTags('alpha').map((t) => t.name), ['tracker']);
+    assert.deepEqual(store.getTicket(one.id).tags, ['tracker']);
+    assert.deepEqual(store.getTicket(two.id).tags, []);
+    assert.equal(store.getTicket(one.id).version, versions.get(one.id) + 1);
+    assert.equal(store.getTicket(two.id).version, versions.get(two.id) + 1);
+    assert.equal(store.getTicket(three.id).version, versions.get(three.id), 'a ticket without it is untouched');
+    assert.deepEqual(store.getTicket(theirs.id).tags, ['ui'], "another project's tag is never touched");
+    assert.deepEqual(store.listTags('beta').map((t) => t.name), ['ui']);
+    const last = store.listEvents(two.id).filter((e) => e.field === 'tags').at(-1);
+    assert.deepEqual([last.from, last.to], [JSON.stringify(['ui']), '[]']);
+    assert.throws(() => store.removeTag({ project: 'alpha', name: 'ui', actor: human.id }), { code: 'unknown-tag' }, 'gone is gone');
+    const savedOnly = store.addTag({ project: 'alpha', name: 'later', actor: human.id });
+    assert.deepEqual(store.removeTag({ project: 'alpha', name: 'later', actor: human.id }), { tag: savedOnly, tickets: [] }, 'a saved tag no ticket carries');
+    assert.deepEqual(store.listTags('alpha').map((t) => t.name), ['tracker']);
+  } finally { cleanup(); }
+});
+
 // ── A ticket's topics (SP-247) ──────────────────────────────────────────────
 
 test("a ticket's topics change through changeTicket: one ticket carries two topics, one topic sits on two tickets, each change steps the version and writes one event", () => {

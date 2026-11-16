@@ -2451,6 +2451,39 @@ export function topicDeleteQuestion(t) {
 }
 
 /**
+ * SP-310: a Tags row being edited, drawn in place of the row: Name and
+ * Description boxes holding the tag's words, then Save and Cancel. The row
+ * keeps its `data-tag`, so the page finds it again. Every word escaped; the
+ * boxes' ids are numbered by `index` (a tag's name may hold any character).
+ */
+export function renderTagEditRow(t, index = 0) {
+  const n = Number.isInteger(index) && index >= 0 ? index : 0;
+  return `<td colspan="4" class="edit-tag-cell"><form class="edit-tag fields" data-tag="${escapeHtml(t.name)}">
+      <label for="tag-name-${n}">Name</label>
+      <input id="tag-name-${n}" name="name" maxlength="100" autocomplete="off" value="${escapeHtml(t.name)}">
+      <label for="tag-description-${n}">Description</label>
+      <textarea id="tag-description-${n}" name="description" rows="3" maxlength="5000">${escapeHtml(t.description ?? '')}</textarea>
+      <div class="row"><button type="submit" class="btn btn-save btn-sm">Save</button><button type="button" class="btn btn-sm cancel-edit">Cancel</button></div>
+    </form></td>`;
+}
+
+/** SP-310: the question asked before a tag is deleted, naming how many tasks carry it. */
+export function tagDeleteQuestion(t) {
+  const n = Number.isInteger(t?.count) && t.count > 0 ? t.count : 0;
+  const carried = n === 0 ? 'No task carries it.' : `It comes off the ${n === 1 ? '1 task' : `${n} tasks`} that ${n === 1 ? 'carries' : 'carry'} it.`;
+  return `Delete the tag ${t?.name ?? ''}? ${carried}`;
+}
+
+/**
+ * Whether a tag's name can be sent in an address: "." and ".." are folded
+ * away by the browser (a request for one would reach another address), so
+ * the page refuses to change or delete them by address.
+ */
+export function tagAddressable(name) {
+  return typeof name === 'string' && name !== '' && name !== '.' && name !== '..';
+}
+
+/**
  * The Topics page (SP-243), in two equal halves (SP-307): Topics on the
  * left, Tags on the right; a narrow screen stacks them, Topics first
  * (app.css). Each half opens with its add form folded shut (a "colex", a
@@ -2475,11 +2508,13 @@ export function renderTopics({ projects, project, topics = [], tags = [] }, { ti
   const tagRow = ({ name, description, count }) => `<tr data-tag="${escapeHtml(name)}">
       <td class="name"><span class="tag">${escapeHtml(name)}</span></td>
       <td class="about">${description ? escapeHtml(description) : '<span class="quiet">none</span>'}</td>
-      <td class="count">${count} ${count === 1 ? 'task' : 'tasks'}</td></tr>`;
+      <td class="count">${count} ${count === 1 ? 'task' : 'tasks'}</td>
+      <td class="actions"><button type="button" class="btn btn-sm edit-tag" data-edit-tag="${escapeHtml(name)}" aria-label="Edit ${escapeHtml(name)}">Edit</button>
+        <button type="button" class="btn btn-danger btn-sm delete-tag" data-delete-tag="${escapeHtml(name)}" aria-label="Delete ${escapeHtml(name)}">Delete</button></td></tr>`;
   const tagList = tags === null
     ? '<p class="note error no-tags">The tags could not be read. Reload the page to try again.</p>'
     : tags.length
-      ? `<div class="table-wrap"><table class="projects tag-list"><thead><tr><th>Tag</th><th>Description</th><th>Tasks</th></tr></thead>
+      ? `<div class="table-wrap"><table class="projects tag-list"><thead><tr><th>Tag</th><th>Description</th><th>Tasks</th><th></th></tr></thead>
         <tbody>${tags.map(tagRow).join('')}</tbody></table></div>`
       : '<p class="quiet no-tags">No tags yet.</p>';
   return `<div class="title-row"><h1>Topics</h1>

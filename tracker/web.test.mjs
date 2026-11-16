@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { DEMO_NEWEST_RELEASE, DEMO_OWN_PROJECT, DEMO_SUGGESTIONS, DEMO_TOPICS, demoNewestRelease, demoSuggest, seedDemo, tickingClock } from './demoData.mjs';
 import { reportsOf, REPORT_RANGES, GROWTH_PERIODS, searchTickets, PRIORITIES, timeSplitOf, isFailureNote, TIME_BUCKETS, pipelineControlsOf } from './pageData.mjs';
-import { escapeHtml, renderStatusLine, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, CLOSE_LINE, REPLY_LINE, offersMerge, offersClose, bugReport, BUG_REPORT_TAG, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, heldBugReport, renderBugReportActions, approveQuestion, rejectQuestion, changeProblem, REJECT_COMMENT, WONT_DO_TAG, HELD_REPORT_LINE, HELD_REPORT_STATUS_LINE, cardMove, renderTrail, renderProjectPicker, renderTopicPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, loopHasIt, renderCommentForm, LOOP_HAS_STATUSES, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, renderTopics, renderTopicEditRow, topicDeleteQuestion, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, renderListTopics, projectTags, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, renderReleaseGroup, controlValueText, mountainTime, wakeInEffectText, modelLastPassText, renderConsole, renderConsoleTile, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, consoleFeature, featureColourIndex, renderFeatureKey, FEATURE_PALETTE, drainLine, capInFlightText, renderTitleChoices, titleModeOf, TITLE_MODES, SUGGEST_POLL_MS, moveSuggestion, suggestState, filingPlan, orderPlan, andList, suggestRunLine, renderSuggestRows, renderSuggestionInfo, suggestionFileHref } from './web/render.mjs';
+import { escapeHtml, renderStatusLine, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, CLOSE_LINE, REPLY_LINE, offersMerge, offersClose, bugReport, BUG_REPORT_TAG, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, heldBugReport, renderBugReportActions, approveQuestion, rejectQuestion, changeProblem, REJECT_COMMENT, WONT_DO_TAG, HELD_REPORT_LINE, HELD_REPORT_STATUS_LINE, cardMove, renderTrail, renderProjectPicker, renderTopicPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, loopHasIt, renderCommentForm, LOOP_HAS_STATUSES, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, renderTopics, renderTopicEditRow, topicDeleteQuestion, renderTagEditRow, tagDeleteQuestion, tagAddressable, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, renderListTopics, projectTags, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, renderReleaseGroup, controlValueText, mountainTime, wakeInEffectText, modelLastPassText, renderConsole, renderConsoleTile, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, consoleFeature, featureColourIndex, renderFeatureKey, FEATURE_PALETTE, drainLine, capInFlightText, renderTitleChoices, titleModeOf, TITLE_MODES, SUGGEST_POLL_MS, moveSuggestion, suggestState, filingPlan, orderPlan, andList, suggestRunLine, renderSuggestRows, renderSuggestionInfo, suggestionFileHref } from './web/render.mjs';
 import { startServer, setupSettingsOf } from './server.mjs';
 import { saveAnswers, setupFields, setupOf } from './setup.mjs';
 import { DANE_FIELDS as SETUP_FIELDS, STEPS as SETUP_STEPS } from '../scripts/onboard/onboard.mjs';
@@ -5769,9 +5769,9 @@ test('the Tags half lists the tags it is given in their order, each with its des
   const html = renderTopics({ projects, project: projects[0], topics: [], tags }, { timeOf: String });
   const half = html.slice(html.indexOf('<section class="tags-half"'));
   for (const heading of ['Tag', 'Description', 'Tasks']) assert.match(half, new RegExp(`<th>${heading}</th>`), heading);
-  assert.match(half, /<tr data-tag="alpha">\s*<td class="name"><span class="tag">alpha<\/span><\/td>\s*<td class="about">First &quot;one&quot;<\/td>\s*<td class="count">2 tasks<\/td><\/tr>/);
+  assert.match(half, /<tr data-tag="alpha">\s*<td class="name"><span class="tag">alpha<\/span><\/td>\s*<td class="about">First &quot;one&quot;<\/td>\s*<td class="count">2 tasks<\/td>\s*<td class="actions">/);
   assert.match(half, /<td class="name"><span class="tag">&lt;b&gt;<\/span><\/td>\s*<td class="about"><span class="quiet">none<\/span><\/td>\s*<td class="count">1 task<\/td>/);
-  assert.match(half, /<tr data-tag="design">[\s\S]*?<td class="count">0 tasks<\/td><\/tr>/, 'a saved tag no task carries yet');
+  assert.match(half, /<tr data-tag="design">[\s\S]*?<td class="count">0 tasks<\/td>\s*<td class="actions">/, 'a saved tag no task carries yet');
   assert.doesNotMatch(half, /<b>/, 'nothing unescaped');
   assert.ok(half.indexOf('data-tag="alpha"') < half.indexOf('data-tag="Beta"') && half.indexOf('data-tag="Beta"') < half.indexOf('data-tag="zeta"'), 'alphabetical');
   assert.match(renderTopics({ projects, project: projects[0], topics: [], tags: [] }, { timeOf: String }), /<p class="quiet no-tags">No tags yet\.<\/p>/);
@@ -5811,6 +5811,42 @@ test('Add Tag refuses a blank name before sending, and says a create worked only
   assert.match(draw, /const listed = back\?\.tags\?\.some\(\(t\) => t\.name === made\.name && t\.count === 0\);/);
   assert.match(draw, /again\(listed \? `Created the tag \$\{made\.name\} in \$\{project\.name\}\.` : `The tracker said the tag \$\{made\.name\} was created, but /);
   assert.match(draw, /, !listed, 'tag'\);/, 'a failed read-back opens Add Tag again');
+});
+
+test('each Tags row has Edit and Delete; Edit draws the row as Name and Description boxes with Save and Cancel; Delete asks first, naming how many tasks carry it (SP-310)', () => {
+  const projects = [{ slug: 'alpha', name: 'Alpha' }];
+  const tag = { name: 'ui <b>', description: 'Looks "good"', count: 2 };
+  const html = renderTopics({ projects, project: projects[0], topics: [], tags: [tag] }, { timeOf: String });
+  const half = html.slice(html.indexOf('<section class="tags-half"'));
+  assert.match(half, /<th>Tasks<\/th><th><\/th><\/tr>/, 'a heading for the buttons column');
+  assert.match(half, /<td class="actions"><button type="button" class="btn btn-sm edit-tag" data-edit-tag="ui &lt;b&gt;" aria-label="Edit ui &lt;b&gt;">Edit<\/button>\s*<button type="button" class="btn btn-danger btn-sm delete-tag" data-delete-tag="ui &lt;b&gt;" aria-label="Delete ui &lt;b&gt;">Delete<\/button><\/td><\/tr>/);
+  const edit = renderTagEditRow(tag, 3);
+  assert.match(edit, /^<td colspan="4" class="edit-tag-cell"><form class="edit-tag fields" data-tag="ui &lt;b&gt;">/, 'fills the whole row');
+  assert.match(edit, /<label for="tag-name-3">Name<\/label>\s*<input id="tag-name-3" name="name" maxlength="100" autocomplete="off" value="ui &lt;b&gt;">/);
+  assert.match(edit, /<label for="tag-description-3">Description<\/label>\s*<textarea id="tag-description-3" name="description" rows="3" maxlength="5000">Looks &quot;good&quot;<\/textarea>/);
+  assert.match(edit, /<button type="submit" class="btn btn-save btn-sm">Save<\/button><button type="button" class="btn btn-sm cancel-edit">Cancel<\/button>/);
+  assert.doesNotMatch(edit, /<b>/, 'nothing unescaped');
+  assert.match(renderTagEditRow({ name: 'x' }, -1), /id="tag-name-0"/, 'a bad index falls back to 0');
+  assert.equal(tagDeleteQuestion(tag), 'Delete the tag ui <b>? It comes off the 2 tasks that carry it.');
+  assert.equal(tagDeleteQuestion({ name: 'page', count: 1 }), 'Delete the tag page? It comes off the 1 task that carries it.');
+  assert.equal(tagDeleteQuestion({ name: 'page', count: 0 }), 'Delete the tag page? No task carries it.');
+  assert.equal(tagDeleteQuestion({ name: 'page' }), 'Delete the tag page? No task carries it.');
+  for (const name of ['ui', '...', 'a/b', '.x']) assert.equal(tagAddressable(name), true, name);
+  for (const name of ['.', '..', '', null]) assert.equal(tagAddressable(name), false, String(name));
+});
+
+test('the Tags rows refuse a blank name before sending, ask before a delete, and say it worked only when the read-back shows it (SP-310)', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const wire = app.slice(app.indexOf('function wireTagRows'), app.indexOf('/**\n * SP-308: each Topics row'));
+  assert.match(app, /if \(Array\.isArray\(tags\)\) wireTagRows\(project, tags, tagsPath, say, again\);/, 'wired only when the tags were read');
+  assert.ok(wire.indexOf("if (!name) return say('Not saved: a tag needs a name.', true);") < wire.indexOf("api('PATCH'"), 'a blank name is refused before anything is sent');
+  assert.ok(wire.indexOf('confirm(tagDeleteQuestion(tag))') < wire.indexOf("api('DELETE'"), 'asks before deleting');
+  assert.ok(wire.indexOf('if (unsendable(tag))') < wire.indexOf("api('PATCH'") && wire.lastIndexOf('if (unsendable(tag))') < wire.indexOf("api('DELETE'"), 'a dot-only name is never sent');
+  assert.match(wire, /const pathOf = \(name\) => `\$\{tagsPath\}\/\$\{encodeURIComponent\(name\)\}`;/, 'the name is encoded into the address');
+  assert.match(wire, /listed && oldGone && listed\.description === description && listed\.count === tag\.count/, 'an edit is checked against the list read back');
+  assert.match(wire, /const stillThere = !back \|\| back\.tags\?\.some\(\(x\) => x\.name === tag\.name\);/, 'a delete is checked against the list read back');
+  assert.match(wire, /again\(stillThere[\s\S]*, stillThere, 'tag'\);/);
+  assert.match(wire, /addEventListener\('click', \(\) => again\('', false, 'tag'\)\)/, 'Cancel draws the page again');
 });
 
 test('the List view\'s Add Tag dropdown also offers the project\'s saved tags, the board\'s `tags` (SP-309)', () => {
