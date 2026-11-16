@@ -58,10 +58,10 @@ export function withClickupSteps(steps) {
  * names a list, and then the two ids are needed (`requiredWith`).
  */
 export const CLICKUP_FIELDS = Object.freeze([
-  { key: 'clickupListId', question: 'Does this project already run a loop on ClickUp? Its Loop Queue list id (digits), or blank for no' },
-  { key: 'clickupOperatorId', question: 'Your own ClickUp user id, so your old comments are filed under you (the old loop\'s scripts/clickup.mjs names it)', requiredWith: 'clickupListId' },
-  { key: 'clickupMachineUserId', question: 'The old loop\'s ClickUp machine user id, so its comments are filed under the loops (the old loop\'s scripts/clickup.mjs names it)', requiredWith: 'clickupListId' },
-  { key: 'clickupExtraLists', question: 'Other ClickUp lists to keep a copy of, as list ids (comma between)', list: true, fallback: () => 'none' },
+  { key: 'clickupListId', label: 'ClickUp Loop Queue List', question: 'Does this project already run a loop on ClickUp? Its Loop Queue list id (digits), or blank for no' },
+  { key: 'clickupOperatorId', label: 'Your ClickUp User Id', question: 'Your own ClickUp user id, so your old comments are filed under you (the old loop\'s scripts/clickup.mjs names it)', requiredWith: 'clickupListId' },
+  { key: 'clickupMachineUserId', label: 'Old Loop\'s ClickUp User Id', question: 'The old loop\'s ClickUp machine user id, so its comments are filed under the loops (the old loop\'s scripts/clickup.mjs names it)', requiredWith: 'clickupListId' },
+  { key: 'clickupExtraLists', label: 'Other ClickUp Lists', question: 'Other ClickUp lists to keep a copy of, as list ids (comma between)', list: true, fallback: () => 'none' },
 ]);
 
 /**
