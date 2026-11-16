@@ -26,7 +26,7 @@
  * an emailed link's own page. The link's token is sent only in a JSON body,
  * never in an address.
  */
-import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, loopHasIt, renderCommentForm, MOVED_MESSAGE, renderMarkdown, unwrapDoc, renderCloseAction, renderGoAction, goQuestion, renderBugReportActions, approveQuestion, rejectQuestion, changeProblem, REJECT_COMMENT, WONT_DO_TAG, renderMergeAction, renderAnswerIn, renderHeldUp, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, lookupTicket, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, pipelinePodLabel, renderHealth, healthLines, renderCommandList, renderCommandView, renderCommandDetails, renderContextDocs, renderTopics, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, renderListTopics, projectTags, sortTickets, nextSort, renderDocumentation, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, lowerMeridiem, renderPipelineControls, renderConsole, drainLine, renderTitleChoices, titleModeOf, SUGGEST_POLL_MS, moveSuggestion, suggestState, filingPlan, orderPlan, andList, suggestRunLine, renderSuggestRows, renderSuggestionInfo, renderMessage, renderSavedCard, MESSAGE_CLOSES_MS, SAVED_CARD_MS } from './render.mjs';
+import { canDelete, closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, loopHasIt, renderCommentForm, MOVED_MESSAGE, renderMarkdown, unwrapDoc, renderCloseAction, renderGoAction, goQuestion, renderBugReportActions, approveQuestion, rejectQuestion, changeProblem, REJECT_COMMENT, WONT_DO_TAG, renderMergeAction, renderAnswerIn, renderHeldUp, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, renderQuickAction, renderProjectPicker, renderTrail, stageLooks, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, renderSearchFilters, renderSearchResults, lookupTicket, redrawHold, drawnChoice, renderSetupSteps, renderSetupNext, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupName, setupFollows, firstTicket, renderPipelinePod, renderPipelineDetails, pipelinePodLabel, renderHealth, healthLines, renderCommandList, renderCommandView, renderCommandDetails, renderContextDocs, renderTopics, renderTopicEditRow, topicDeleteQuestion, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, renderListTopics, projectTags, sortTickets, nextSort, renderDocumentation, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, lowerMeridiem, renderPipelineControls, renderConsole, drainLine, renderTitleChoices, titleModeOf, SUGGEST_POLL_MS, moveSuggestion, suggestState, filingPlan, orderPlan, andList, suggestRunLine, renderSuggestRows, renderSuggestionInfo, renderMessage, renderSavedCard, MESSAGE_CLOSES_MS, SAVED_CARD_MS } from './render.mjs';
 
 /** Where an earlier version of the page kept a pasted token; removed on load, never read. */
 const OLD_TOKEN_KEY = 'tracker-token';
@@ -583,9 +583,9 @@ function savedTasksView() {
 
 /**
  * The Tasks page's view switch: Board and List for project `slug`, then the
- * Console (every project), `current` marked. A tab bar of its own under the
- * title row (UI_DOCTRINE 5, SP-322): each tab is its own address, so a link
- * with `aria-current`.
+ * Console (every project), `current` marked. A tab bar (UI_DOCTRINE 5,
+ * SP-322) drawn as the last item of the Tasks title row, at its right-hand
+ * end (SP-326): each tab is its own address, so a link with `aria-current`.
  */
 function viewSwitch(slug, current) {
   const views = [['board', 'Board', `/board/${encodeURIComponent(slug)}`], ['list', 'List', `/list/${encodeURIComponent(slug)}`], ['console', 'Console', '/console']];
@@ -1214,8 +1214,7 @@ async function drawConsole() {
   const slug = answer.projects.some((p) => p.slug === project) ? project : answer.projects[0]?.slug;
   setTitle('Console · Tracker');
   main.innerHTML = `
-    <div class="tasks-head title-row"><h1>Tasks</h1></div>
-    ${slug ? viewSwitch(slug, 'console') : ''}
+    <div class="tasks-head title-row"><h1>Tasks</h1>${slug ? viewSwitch(slug, 'console') : ''}</div>
     ${answer.tickets.length ? '' : '<p class="quiet">Nothing is in flight.</p>'}
     ${renderConsole(answer, stages)}`;
   for (const el of main.querySelectorAll('[data-stage]')) {
@@ -1390,8 +1389,8 @@ async function drawProject(slug, view, { adding = false, filed = null, unchecked
         ${searchForm('')}
         <button type="button" class="pipeline-pod" aria-haspopup="dialog" title="Open Pipeline Status"></button>
       </div>
+      ${viewSwitch(board.project, view)}
     </div>
-    ${viewSwitch(board.project, view)}
     ${filed && (unchecked || notUploaded.length) ? `<p class="filed-note">${unchecked ? UNCHECKED_NOTE : ''}${notUploadedNote(notUploaded)}</p>` : ''}
     <details class="add-task">
       <summary>Add Task<label class="suggest-switch">Suggest <input type="checkbox" value="on" aria-label="Suggest Next Tasks"${suggesting ? ' checked' : ''}></label></summary>
@@ -1417,7 +1416,7 @@ async function drawProject(slug, view, { adding = false, filed = null, unchecked
       </form>
       <div class="suggest-next"${suggesting ? '' : ' hidden'}>
         <p class="hint quiet">Reads the project (its plans, documents and code) and its open tickets, and suggests what to do next. Put them in order, untick any you do not want, and file the rest as requests.</p>
-        <div class="row"><button type="button" class="btn btn-primary suggest-run">Suggest Next Tasks</button><span class="run-note note" role="status"></span></div>
+        <div class="row run-row"><button type="button" class="btn btn-primary suggest-run">Suggest Next Tasks</button><span class="run-note note" role="status"></span></div>
         <ol class="suggestions"></ol>
         <div class="row file-row" hidden><button type="button" class="btn btn-primary file-order">File in This Order</button><span class="file-note note" role="status"></span></div>
       </div>
@@ -2610,6 +2609,7 @@ function wireSuggestNext(slug, view) {
   const fold = box.closest('details.add-task');
   const run = box.querySelector('button.suggest-run');
   const runNote = box.querySelector('.run-note');
+  const runRow = box.querySelector('.run-row');
   const list = box.querySelector('ol.suggestions');
   const fileRow = box.querySelector('.file-row');
   const fileButton = box.querySelector('button.file-order');
@@ -2641,6 +2641,11 @@ function wireSuggestNext(slug, view) {
   const drawRows = (focusIndex = null) => {
     list.innerHTML = state ? renderSuggestRows(suggestions, state) : '';
     fileRow.hidden = !state;
+    // SP-319: with suggestions showing, the one run button (Suggest Again)
+    // sits at the right of the bottom row, across from File in This Order;
+    // with none, it is back at the top. Its status line stays at the top.
+    if (state) { if (run.parentNode !== fileRow) fileRow.append(run); }
+    else if (run.parentNode !== runRow) runRow.prepend(run);
     if (focusIndex != null) list.querySelector(`li[data-index="${focusIndex}"] .drag-handle`)?.focus();
   };
   const move = (from, to, focus = false) => {
@@ -3849,6 +3854,74 @@ async function drawTopics(done = '', problem = '', problemIn = 'topic') {
     const listed = back?.tags?.some((t) => t.name === made.name && t.count === 0);
     again(listed ? `Created the tag ${made.name} in ${project.name}.` : `The tracker said the tag ${made.name} was created, but ${back ? 'it is not listed when read back' : 'the list could not be read back'}.`, !listed, 'tag');
   });
+  wireTopicRows(project, topics, topicsPath, say, again);
+}
+
+/**
+ * SP-308: each Topics row's Edit and Delete. Edit draws the row as Name and
+ * Description boxes (a blank name is refused before anything is sent);
+ * Cancel draws the page again. Delete asks first, naming how many tasks
+ * carry the topic. After either, the list is read again and the page says
+ * it worked only when the read-back shows it: the new words for an edit,
+ * the topic gone for a delete.
+ */
+function wireTopicRows(project, topics, topicsPath, say, again) {
+  const byId = new Map(topics.map((t) => [String(t.id), t]));
+  const readBack = () => api('GET', topicsPath, undefined, { unrecorded: true }).catch((err) => { if (err instanceof SignedOut) throw err; return null; });
+  for (const button of main.querySelectorAll('button[data-edit-topic]')) {
+    button.addEventListener('click', () => {
+      const topic = byId.get(button.dataset.editTopic);
+      const row = button.closest('tr');
+      if (!topic || !row) return;
+      row.innerHTML = renderTopicEditRow(topic);
+      const form = row.querySelector('form.edit-topic');
+      form.querySelector('input').focus();
+      form.querySelector('.cancel-edit').addEventListener('click', () => again('', false));
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const name = form.querySelector('input[name="name"]').value.trim();
+        const description = form.querySelector('textarea[name="description"]').value.trim();
+        if (!name) return say('Not saved: a topic needs a name.', true);
+        for (const control of form.querySelectorAll('button')) control.disabled = true;
+        say(`Saving ${name}…`);
+        try {
+          await api('PATCH', `${topicsPath}/${encodeURIComponent(topic.id)}`, { name, description });
+        } catch (err) {
+          if (err instanceof SignedOut) return drawSignIn(`You were signed out; ${topic.name} was not saved.`);
+          for (const control of form.querySelectorAll('button')) control.disabled = false;
+          return say(`Not saved: ${err.message}`, true);
+        }
+        let back;
+        try { back = await readBack(); } catch { return drawSignIn(); }
+        const listed = back?.topics?.find((x) => x.id === topic.id);
+        const ok = listed && listed.name === name && listed.description === description;
+        again(ok ? `Saved ${name}.` : `The tracker said ${name} was saved, but ${back ? 'the list does not show the new words when read back' : 'the list could not be read back'}.`, !ok);
+      });
+    });
+  }
+  for (const button of main.querySelectorAll('button[data-delete-topic]')) {
+    button.addEventListener('click', async () => {
+      const topic = byId.get(button.dataset.deleteTopic);
+      if (!topic || !confirm(topicDeleteQuestion(topic))) return;
+      button.disabled = true;
+      say(`Deleting ${topic.name}…`);
+      let gone;
+      try {
+        gone = await api('DELETE', `${topicsPath}/${encodeURIComponent(topic.id)}`);
+      } catch (err) {
+        if (err instanceof SignedOut) return drawSignIn(`You were signed out; ${topic.name} was not deleted.`);
+        button.disabled = false;
+        return say(`Not deleted: ${err.message}`, true);
+      }
+      let back;
+      try { back = await readBack(); } catch { return drawSignIn(); }
+      const stillThere = !back || back.topics?.some((x) => x.id === topic.id);
+      const n = gone?.tickets?.length ?? 0;
+      again(stillThere
+        ? `The tracker said ${topic.name} was deleted, but ${back ? 'it is still listed when read back' : 'the list could not be read back'}.`
+        : `Deleted ${topic.name} from ${project.name}${n ? ` and from the ${n === 1 ? '1 task' : `${n} tasks`} that carried it` : ''}.`, stillThere);
+    });
+  }
 }
 
 /**

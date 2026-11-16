@@ -350,11 +350,12 @@ export const PIPELINE_UNAVAILABLE = 'Pipeline Status unavailable';
 
 /**
  * The Pipeline Status pod's contents on the Tasks page (SP-168), from GET
- * /pipeline, as HTML: the heading "Pipeline Stages", then one row per stage
- * (SP-194), its name on the left and its next time (or "running") on the
- * right, "Relay 10:45 / Build running / Review 11:10 / Intake 11:04". The pod
- * is a button, and a table is not allowed inside one, so the two columns are
- * a CSS grid of spans (`.stages` in app.css). `timeOf` turns an ISO time into
+ * /pipeline, as HTML: the heading "Pipeline Stages", then one column per
+ * stage, name above time (SP-326): the names "Relay Build Review Intake"
+ * along the top and each one's next time (or "running") under it. The pod is
+ * a button, and a table is not allowed inside one, so the columns are a CSS
+ * grid of spans (`.stages` in app.css), each stage's name then its time, which
+ * the grid turns into columns. `timeOf` turns an ISO time into
  * the page's own clock time. A stage with no pass logged yet, or no next time
  * known, shows a dash, its title saying which. A running stage's two cells
  * carry `running`, which app.css draws green. A stage whose next time is
@@ -2408,6 +2409,29 @@ export function renderContextDocs({ project, docs = [] }, { size, timeOf }) {
 }
 
 /**
+ * SP-308: a Topics row being edited, drawn in place of the row: Name and
+ * Description boxes holding the topic's words, then Save and Cancel. The
+ * row keeps its `data-topic`, so the page finds it again. Every word escaped.
+ */
+export function renderTopicEditRow(t) {
+  const id = escapeHtml(t.id);
+  return `<td colspan="5" class="edit-topic-cell"><form class="edit-topic fields" data-topic="${id}">
+      <label for="topic-name-${id}">Name</label>
+      <input id="topic-name-${id}" name="name" maxlength="200" autocomplete="off" value="${escapeHtml(t.name)}">
+      <label for="topic-description-${id}">Description</label>
+      <textarea id="topic-description-${id}" name="description" rows="3" maxlength="5000">${escapeHtml(t.description ?? '')}</textarea>
+      <div class="row"><button type="submit" class="btn btn-save btn-sm">Save</button><button type="button" class="btn btn-sm cancel-edit">Cancel</button></div>
+    </form></td>`;
+}
+
+/** SP-308: the question asked before a topic is deleted, naming how many tasks carry it. */
+export function topicDeleteQuestion(t) {
+  const n = Number.isInteger(t?.tickets) && t.tickets > 0 ? t.tickets : 0;
+  const carried = n === 0 ? 'No task carries it.' : `It comes off the ${n === 1 ? '1 task' : `${n} tasks`} that ${n === 1 ? 'carries' : 'carry'} it.`;
+  return `Delete the topic ${t?.name ?? ''}? ${carried}`;
+}
+
+/**
  * The Topics page (SP-243), in two equal halves (SP-307): Topics on the
  * left, Tags on the right; a narrow screen stacks them, Topics first
  * (app.css). Each half opens with its add form folded shut (a "colex", a
@@ -2426,7 +2450,9 @@ export function renderTopics({ projects, project, topics = [], tags = [] }, { ti
       <td class="name">${escapeHtml(t.name)}</td>
       <td class="about">${t.description ? escapeHtml(t.description) : '<span class="quiet">none</span>'}</td>
       <td class="by">${t.createdByName ? escapeHtml(t.createdByName) : '<span class="quiet">unknown</span>'}</td>
-      <td class="when">${escapeHtml(timeOf(t.createdAt))}</td></tr>`;
+      <td class="when">${escapeHtml(timeOf(t.createdAt))}</td>
+      <td class="actions"><button type="button" class="btn btn-sm edit-topic" data-edit-topic="${escapeHtml(t.id)}" aria-label="Edit ${escapeHtml(t.name)}">Edit</button>
+        <button type="button" class="btn btn-danger btn-sm delete-topic" data-delete-topic="${escapeHtml(t.id)}" aria-label="Delete ${escapeHtml(t.name)}">Delete</button></td></tr>`;
   const tagRow = ({ name, description, count }) => `<tr data-tag="${escapeHtml(name)}">
       <td class="name"><span class="tag">${escapeHtml(name)}</span></td>
       <td class="about">${description ? escapeHtml(description) : '<span class="quiet">none</span>'}</td>
@@ -2455,7 +2481,7 @@ export function renderTopics({ projects, project, topics = [], tags = [] }, { ti
         </details>
         <h2 id="topics-title">Topics</h2>
         ${topics.length
-    ? `<div class="table-wrap"><table class="projects topic-list"><thead><tr><th>Name</th><th>Description</th><th>Created By</th><th>Created</th></tr></thead>
+    ? `<div class="table-wrap"><table class="projects topic-list"><thead><tr><th>Name</th><th>Description</th><th>Created By</th><th>Created</th><th></th></tr></thead>
         <tbody>${topics.map(row).join('')}</tbody></table></div>`
     : '<p class="quiet no-topics">No topics yet.</p>'}
       </section>

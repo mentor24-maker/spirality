@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { DEMO_NEWEST_RELEASE, DEMO_OWN_PROJECT, DEMO_SUGGESTIONS, DEMO_TOPICS, demoNewestRelease, demoSuggest, seedDemo, tickingClock } from './demoData.mjs';
 import { reportsOf, REPORT_RANGES, GROWTH_PERIODS, searchTickets, PRIORITIES, timeSplitOf, isFailureNote, TIME_BUCKETS, pipelineControlsOf } from './pageData.mjs';
-import { escapeHtml, renderStatusLine, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, CLOSE_LINE, REPLY_LINE, offersMerge, offersClose, bugReport, BUG_REPORT_TAG, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, heldBugReport, renderBugReportActions, approveQuestion, rejectQuestion, changeProblem, REJECT_COMMENT, WONT_DO_TAG, HELD_REPORT_LINE, HELD_REPORT_STATUS_LINE, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, loopHasIt, renderCommentForm, LOOP_HAS_STATUSES, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, renderTopics, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, renderListTopics, projectTags, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, renderReleaseGroup, controlValueText, mountainTime, wakeInEffectText, modelLastPassText, renderConsole, renderConsoleTile, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, consoleFeature, featureColourIndex, renderFeatureKey, FEATURE_PALETTE, drainLine, capInFlightText, renderTitleChoices, titleModeOf, TITLE_MODES, SUGGEST_POLL_MS, moveSuggestion, suggestState, filingPlan, orderPlan, andList, suggestRunLine, renderSuggestRows, renderSuggestionInfo, suggestionFileHref } from './web/render.mjs';
+import { escapeHtml, renderStatusLine, renderComment, renderInline, renderMarkdown, unwrapDoc, renderQuickAction, CLOSE_LINE, REPLY_LINE, offersMerge, offersClose, bugReport, BUG_REPORT_TAG, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, heldBugReport, renderBugReportActions, approveQuestion, rejectQuestion, changeProblem, REJECT_COMMENT, WONT_DO_TAG, HELD_REPORT_LINE, HELD_REPORT_STATUS_LINE, cardMove, renderTrail, renderProjectPicker, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, loopHasIt, renderCommentForm, LOOP_HAS_STATUSES, MOVED_MESSAGE, bellColour, busLink, stageLook, stageLooks, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, boldMatches, searchPattern, renderSearchResults, renderSearchFilters, renderTicketLookup, lookupTicket, activeFilters, redrawHold, drawnChoice, renderSetupNext, renderSetupSteps, renderSetupList, renderSetupForm, setupBody, setupSlug, setupSlugProblem, setupFollows, firstTicket, renderPipelinePod, healthLines, renderHealth, PIPELINE_UNAVAILABLE, renderPipelineDetails, passOutcome, wakesEvery, pipelinePodLabel, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, renderTopics, renderTopicEditRow, topicDeleteQuestion, PRIORITY_ORDER, SORT_COLUMNS, sortTickets, nextSort, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, renderListTopics, projectTags, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS, PIPELINE_SOON_MS, lowerMeridiem, renderPipelineControls, renderReleaseGroup, controlValueText, mountainTime, wakeInEffectText, modelLastPassText, renderConsole, renderConsoleTile, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, consoleFeature, featureColourIndex, renderFeatureKey, FEATURE_PALETTE, drainLine, capInFlightText, renderTitleChoices, titleModeOf, TITLE_MODES, SUGGEST_POLL_MS, moveSuggestion, suggestState, filingPlan, orderPlan, andList, suggestRunLine, renderSuggestRows, renderSuggestionInfo, suggestionFileHref } from './web/render.mjs';
 import { startServer, setupSettingsOf } from './server.mjs';
 import { saveAnswers, setupFields, setupOf } from './setup.mjs';
 import { DANE_FIELDS as SETUP_FIELDS, STEPS as SETUP_STEPS } from '../scripts/onboard/onboard.mjs';
@@ -4275,7 +4275,7 @@ test('the Tasks toolbar picks a project from a dropdown, "Project: ", the one in
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   const draw = app.slice(app.indexOf('async function drawProject'), app.indexOf('async function copyText'));
   assert.match(draw, /api\('GET', '\/projects'\),\n  \]\);/);
-  assert.match(draw, /<div class="toolbar">\s*\$\{renderProjectPicker\(projects, board\.project\)\}\s*\$\{searchForm\(''\)\}\s*<button type="button" class="pipeline-pod"[^>]*><\/button>\s*<\/div>\s*<\/div>\s*\$\{viewSwitch\(board\.project, view\)\}/);
+  assert.match(draw, /<div class="toolbar">\s*\$\{renderProjectPicker\(projects, board\.project\)\}\s*\$\{searchForm\(''\)\}\s*<button type="button" class="pipeline-pod"[^>]*><\/button>\s*<\/div>\s*\$\{viewSwitch\(board\.project, view\)\}\s*<\/div>/, 'the tabs close the title row, after the toolbar (SP-326)');
   assert.doesNotMatch(app, /Change project/);
   assert.match(draw, /querySelector\('\.project-picker select'\)\.addEventListener\('change', \(e\) => \{\s*history\.pushState\(null, '', at\(view, e\.target\.value\)\);\s*route\(\);/);
   assert.match(readFileSync(WEB('app.css'), 'utf8'), /\.toolbar \.project-picker \{[^}]*display: flex;/);
@@ -4723,7 +4723,7 @@ test('the Pipeline Status pod: each stage\'s next time or "running", a dash for 
   assert.doesNotMatch(renderPipelinePod({ stages: [{ name: '<b>x', logged: false }] }, timeOf), /<b>x/);
 });
 
-test('the pod reads as a small table (SP-194): a "Pipeline Stages" heading, one stage per row in two columns, bold names, a running stage green, on light blue', () => {
+test('the pod reads as a small table (SP-194, SP-326): a "Pipeline Stages" heading, one column per stage with its name above its time, bold names, a running stage green, on light blue', () => {
   const timeOf = (iso) => `[${iso.slice(11, 16)}]`;
   const html = renderPipelinePod({ stages: [
     { name: 'Relay', logged: true, running: false, nextDue: '2026-11-09T17:45:00.000Z' },
@@ -4735,7 +4735,7 @@ test('the pod reads as a small table (SP-194): a "Pipeline Stages" heading, one 
   assert.match(html, /^<span class="heading">Pipeline Stages<\/span><span class="stages">/);
   // No table inside the button: HTML does not allow one there.
   assert.doesNotMatch(html, /<(table|tr|td|th|div|h[1-6]|p)\b/);
-  // Two cells per stage, name then time, in Relay, Build, Review, Intake order.
+  // Two cells per stage, name then time, in Relay, Build, Review, Intake order; the grid turns them into columns.
   const grid = html.slice(html.indexOf('<span class="stages">') + '<span class="stages">'.length, -'</span>'.length);
   const cells = [...grid.matchAll(/<span class="([^"]*)"[^>]*>([^<]*)<\/span>/g)].map((m) => [m[1], m[2]]);
   assert.deepEqual(cells, [
@@ -4755,7 +4755,11 @@ test('the pod reads as a small table (SP-194): a "Pipeline Stages" heading, one 
   const pod = rule('.toolbar .pipeline-pod');
   assert.match(pod, /background: #cceeff;/, 'Dane\'s light blue (SP-222)');
   assert.match(pod, /flex-direction: column;/, 'the heading sits above the stages');
-  assert.match(rule('.toolbar .pipeline-pod .stages'), /display: grid; grid-template-columns: auto auto;/, 'two lined-up columns');
+  const stages = rule('.toolbar .pipeline-pod .stages');
+  assert.match(stages, /display: grid; grid-template-rows: auto auto; grid-auto-flow: column;/, 'one column per stage, name above time (SP-326)');
+  assert.doesNotMatch(stages, /grid-template-columns/, 'no fixed column count: however many stages there are');
+  assert.match(pod, /flex-grow: 1;/, 'the pod widens into the free space of the title row (SP-326)');
+  assert.match(css, /\.tasks-head > \.toolbar \{ flex-grow: 1;/, 'the toolbar grows with it, so the tabs still end at the right edge');
   assert.match(rule('.toolbar .pipeline-pod .stage'), /font-weight: 700;/, 'stage names are bold');
   const green = rule('.toolbar .pipeline-pod .running').match(/color: (#[0-9a-fA-F]{6});/);
   assert.ok(green, 'a running stage has its own colour');
@@ -4823,8 +4827,9 @@ test('the Tasks page puts the pod between the search field and Board/List, fills
   const search = head.indexOf("${searchForm('')}");
   const pod = head.indexOf('class="pipeline-pod"');
   const views = head.indexOf('${viewSwitch(board.project, view)}');
-  // SP-322: Board/List left the toolbar for a tab bar of its own, under the title row the pod sits in.
+  // SP-322: Board/List left the toolbar for a tab bar; SP-326 put it at the right end of the title row the pod sits in.
   assert.ok(search !== -1 && search < pod && pod < views, 'search field, then the pod, then the Board/List tabs');
+  assert.match(head, /<\/div>\s*\$\{viewSwitch\(board\.project, view\)\}\s*<\/div>/, 'the tabs are the title row\'s last item, after the toolbar (SP-326)');
   const draw = app.slice(app.indexOf('async function drawProject('), app.indexOf('async function drawProject(') + 12000);
   assert.match(draw, /refreshPipeline\(\);/);
   assert.match(app, /const PIPELINE_REFRESH_EVERY_MS = 60_000;/);
@@ -5519,7 +5524,7 @@ test('the Console page: /in-flight and the stage colours drawn, a Console link b
   assert.match(draw, /api\('GET', '\/stage-colours'\)/);
   assert.match(draw, /localStorage\.setItem\(VIEW_KEY, 'console'\)/);
   assert.match(draw, /renderConsole\(answer, stages\)/);
-  assert.match(draw, /viewSwitch\(slug, 'console'\)/);
+  assert.match(draw, /<div class="tasks-head title-row"><h1>Tasks<\/h1>\$\{slug \? viewSwitch\(slug, 'console'\) : ''\}<\/div>/, 'the tabs at the right of the title row, as on Board and List (SP-326)');
   // The view switch names all three in Title Case, the current one marked.
   const sw = /function viewSwitch\(slug, current\) \{([\s\S]*?)\n\}/.exec(app)[1];
   assert.match(sw, /\['board', 'Board', [^\]]+\], \['list', 'List', [^\]]+\], \['console', 'Console', '\/console'\]/);
@@ -5673,6 +5678,36 @@ test('the Topics page lists the picked project\'s topics newest first, every nam
   assert.doesNotMatch(empty, /<table/);
   assert.match(empty, /Create Topic<\/button>/, 'an empty project can still create one');
   assert.match(renderTopics({ projects, project, topics: [] }, { timeOf: String, problem: 'Not created: a topic needs a name.' }), /<p class="note topic-note error" role="status">Not created: a topic needs a name\.<\/p>/);
+});
+
+test('each Topics row has Edit and Delete; Edit draws the row as Name and Description boxes with Save and Cancel; Delete asks first, naming how many tasks carry it (SP-308)', () => {
+  const projects = [{ slug: 'alpha', name: 'Alpha' }];
+  const topic = { id: 7, name: 'Login <b>', description: 'Signing "in"', createdByName: 'Dane', createdAt: 'x', tickets: 2 };
+  const html = renderTopics({ projects, project: projects[0], topics: [topic] }, { timeOf: String });
+  assert.match(html, /<th>Created<\/th><th><\/th><\/tr>/, 'a heading for the buttons column');
+  assert.match(html, /<td class="actions"><button type="button" class="btn btn-sm edit-topic" data-edit-topic="7" aria-label="Edit Login &lt;b&gt;">Edit<\/button>\s*<button type="button" class="btn btn-danger btn-sm delete-topic" data-delete-topic="7" aria-label="Delete Login &lt;b&gt;">Delete<\/button><\/td><\/tr>/);
+  const edit = renderTopicEditRow(topic);
+  assert.match(edit, /^<td colspan="5" class="edit-topic-cell"><form class="edit-topic fields" data-topic="7">/, 'fills the whole row');
+  assert.match(edit, /<label for="topic-name-7">Name<\/label>\s*<input id="topic-name-7" name="name" maxlength="200" autocomplete="off" value="Login &lt;b&gt;">/);
+  assert.match(edit, /<label for="topic-description-7">Description<\/label>\s*<textarea id="topic-description-7" name="description" rows="3" maxlength="5000">Signing &quot;in&quot;<\/textarea>/);
+  assert.match(edit, /<button type="submit" class="btn btn-save btn-sm">Save<\/button><button type="button" class="btn btn-sm cancel-edit">Cancel<\/button>/);
+  assert.doesNotMatch(edit, /<b>/, 'nothing unescaped');
+  assert.equal(topicDeleteQuestion(topic), 'Delete the topic Login <b>? It comes off the 2 tasks that carry it.');
+  assert.equal(topicDeleteQuestion({ name: 'Billing', tickets: 1 }), 'Delete the topic Billing? It comes off the 1 task that carries it.');
+  assert.equal(topicDeleteQuestion({ name: 'Billing', tickets: 0 }), 'Delete the topic Billing? No task carries it.');
+  assert.equal(topicDeleteQuestion({ name: 'Billing' }), 'Delete the topic Billing? No task carries it.');
+});
+
+test('the Topics page refuses a blank name before sending, asks before a delete, and says it worked only when the read-back shows it (SP-308)', () => {
+  const app = readFileSync(WEB('app.mjs'), 'utf8');
+  const wire = app.slice(app.indexOf('function wireTopicRows'), app.indexOf('/**\n * The Docs page in two columns'));
+  assert.match(app, /wireTopicRows\(project, topics, topicsPath, say, again\);/);
+  assert.ok(wire.indexOf("if (!name) return say('Not saved: a topic needs a name.', true);") < wire.indexOf("api('PATCH'"), 'a blank name is refused before anything is sent');
+  assert.ok(wire.indexOf('confirm(topicDeleteQuestion(topic))') < wire.indexOf("api('DELETE'"), 'asks before deleting');
+  assert.match(wire, /listed\.name === name && listed\.description === description/, 'an edit is checked against the list read back');
+  assert.match(wire, /const stillThere = !back \|\| back\.topics\?\.some\(\(x\) => x\.id === topic\.id\);/, 'a delete is checked against the list read back');
+  assert.match(wire, /again\(stillThere[\s\S]*, stillThere\);/);
+  assert.match(wire, /addEventListener\('click', \(\) => again\('', false\)\)/, 'Cancel draws the page again');
 });
 
 test('the Topics page is two equal halves, Topics left and Tags right, stacked Topics first on a narrow screen (SP-307)', () => {
@@ -6120,9 +6155,14 @@ test('the Suggest Next Tasks box sits beside Add Task, in Title Case, and its bu
   assert.ok(draw.indexOf('</form>', draw.indexOf('<details class="add-task">')) < draw.indexOf('<div class="suggest-next"'), 'inside the Add Task box, after the form');
   assert.ok(draw.indexOf('<div class="suggest-next"') < draw.indexOf('</details>', draw.indexOf('<details class="add-task">')), 'inside the Add Task box');
   assert.doesNotMatch(draw, /<details class="suggest-next">|<summary>Suggest Next Tasks<\/summary>/, 'no separate Suggest Next Tasks bar');
-  assert.match(draw, /<button type="button" class="btn btn-primary suggest-run">Suggest Next Tasks<\/button>/);
+  assert.match(draw, /<div class="row run-row"><button type="button" class="btn btn-primary suggest-run">Suggest Next Tasks<\/button><span class="run-note note" role="status"><\/span><\/div>/, 'before any suggestions, the run button is at the top');
   assert.match(draw, /<div class="row file-row" hidden><button type="button" class="btn btn-primary file-order">File in This Order<\/button>/);
   assert.match(draw, /wireSuggestNext\(board\.project, view\);/);
+  // SP-319: with suggestions showing, the one run button moves to the right of
+  // the bottom row, across from File in This Order; with none, back to the top.
+  const drawRows = wire.slice(wire.indexOf('const drawRows = '), wire.indexOf('const move = '));
+  assert.match(drawRows, /fileRow\.hidden = !state;\s*[\s\S]*?if \(state\) \{ if \(run\.parentNode !== fileRow\) fileRow\.append\(run\); \}\s*else if \(run\.parentNode !== runRow\) runRow\.prepend\(run\);/, 'the run button follows the file row');
+  assert.match(wire, /const runRow = box\.querySelector\('\.run-row'\);/);
   assert.match(wire, /run\.textContent = latest\?\.state === 'failed' \? 'Try Again' : latest\?\.state === 'done' \? 'Suggest Again' : 'Suggest Next Tasks';/);
   // POST starts it; GET reads it, unrecorded so a finished run never redraws the whole page under him.
   assert.match(wire, /api\('POST', path, \{\}\)/);
@@ -6135,6 +6175,9 @@ test('the Suggest Next Tasks box sits beside Add Task, in Title Case, and its bu
   const css = readFileSync(WEB('app.css'), 'utf8');
   assert.match(css, /details\.add-task \[hidden\] \{ display: none; \}/, 'the hidden side stays hidden');
   assert.doesNotMatch(css, /details\.suggest-next/, 'no rule for the old separate box');
+  // SP-319: the rows lay out as rows (never un-hiding the hidden file row), Suggest Again pushed right, wrapping on a narrow window.
+  assert.match(css, /details\.add-task \.suggest-next \.row:not\(\[hidden\]\) \{ display: flex; flex-wrap: wrap; gap: var\(--space-4\); align-items: center; \}/);
+  assert.match(css, /details\.add-task \.suggest-next \.file-row button\.suggest-run \{ margin-left: auto; \}/);
 });
 
 test('the Suggest Next Tasks rows move by dropdown, by the arrow keys on the handle, and by dragging, all through moveSuggestion, and the state is kept for a redraw', () => {

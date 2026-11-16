@@ -45,7 +45,9 @@
  * reaches any of them.
  * A project's topics are listed by `GET /projects/<slug>/topics`
  * and made one at a time by `POST /projects/<slug>/topics` (`{ name,
- * description }`, a name required), behind the same project check.
+ * description }`, a name required), behind the same project check;
+ * one is changed by `PATCH /projects/<slug>/topics/<n>` and deleted (taken
+ * off every ticket carrying it) by `DELETE /projects/<slug>/topics/<n>`.
  * A refused write writes nothing. A token never appears in an answer or a
  * log line: the log names the actor id, never the header.
  *
@@ -156,7 +158,7 @@ const NO_MATCH = 'That email and password do not match.';
 const MAX_BODY = 1024 * 1024;
 
 /** Store refusals that mean "no such thing", answered 404 rather than 400. */
-const NOT_FOUND_CODES = new Set(['unknown-ticket', 'unknown-project', 'unknown-invite', 'unknown-attachment']);
+const NOT_FOUND_CODES = new Set(['unknown-ticket', 'unknown-project', 'unknown-invite', 'unknown-attachment', 'unknown-topic']);
 /** setRole's refusals that are not a bad field: a non-admin is forbidden, and the last admin's change conflicts with the tracker's state. */
 const ROLE_REFUSALS = Object.freeze({ 'not-admin': 403, 'last-admin': 409 });
 /** addMember's and removeMember's refusals that are not a bad field. */
@@ -1206,6 +1208,23 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
       }
       log(`made tag on ${project.slug} actor=${me.id}`);
       return [201, made];
+    }
+
+    // One topic changed (a new name and/or description) or deleted
+    // behind the same project check. A topic of another project is
+    // `unknown-topic` (404) and nothing changes. A delete takes the topic off
+    // every ticket carrying it and names them.
+    if (parts.length === 4 && parts[0] === 'projects' && parts[2] === 'topics' && (method === 'PATCH' || method === 'DELETE')) {
+      const project = requireProject(parts[1], me);
+      if (method === 'DELETE') {
+        const gone = store.removeTopic({ project: project.slug, id: parts[3], actor: me.id });
+        log(`deleted topic ${gone.topic.id} on ${project.slug} from ${gone.tickets.length} ticket(s) actor=${me.id}`);
+        return [200, gone];
+      }
+      const body = await readJson(req);
+      const changed = store.changeTopic({ project: project.slug, id: parts[3], name: body?.name, description: body?.description, actor: me.id });
+      log(`changed topic ${changed.id} on ${project.slug} actor=${me.id}`);
+      return [200, changed];
     }
 
     // A project's context documents: files kept on the project,

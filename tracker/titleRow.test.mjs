@@ -86,4 +86,11 @@ test('Board / List / Console and the Settings tabs are one tab bar (UI_DOCTRINE 
   }
   assert.match(SOURCES['app.mjs'], /<nav class="tabs" aria-label="View">/);
   assert.match(SOURCES['app.mjs'], /<nav class="tabs settings-tabs" aria-label="Settings">/);
+  // SP-326: in a title row (the Tasks page's) the bar has no gap under it,
+  // and as a flex item its line is only as wide as the tabs. Settings' tabs
+  // stay a row of their own, outside any title row.
+  assert.equal(rule('.title-row > nav.tabs').margin, '0');
+  const settings = SOURCES['app.mjs'].indexOf('<nav class="tabs settings-tabs"');
+  const rowOpen = SOURCES['app.mjs'].lastIndexOf('class="title-row"', settings);
+  assert.ok(SOURCES['app.mjs'].indexOf('</div>', rowOpen) < settings, 'the Settings tabs sit under the title row, not in it');
 });
