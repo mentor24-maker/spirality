@@ -42,6 +42,8 @@ const DRAFT_KEY = 'tracker-request-draft';
 const TITLE_MODE_KEY = 'tracker-request-title-mode';
 /** The Suggest Next Tasks box's order, ticks and filed tickets, per project (SP-251), so a redraw or a retry keeps them. */
 const SUGGEST_STATE_KEY = 'tracker-suggest-next';
+/** The Add Task bar's Suggest checkbox (SP-303): '1' shows Suggest Next Tasks in the box, anything else the Add Task form. */
+const SUGGEST_SWITCH_KEY = 'tracker-add-task-suggest';
 const main = document.getElementById('main');
 const who = document.getElementById('who');
 const headerProject = document.getElementById('project');
@@ -1377,6 +1379,8 @@ async function drawProject(slug, view, { adding = false, filed = null, unchecked
   const liveColumn = board.columns.find((c) => c.status === 'Live');
   const live = liveColumn && { ...liveColumn, tickets: liveColumn.tickets.slice().sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0)) };
 
+  // Which side of the Add Task box shows: its Suggest checkbox, kept in this browser (SP-303).
+  const suggesting = savedSuggestSwitch();
   main.innerHTML = `
     <div class="tasks-head"><h1>Tasks</h1>${filed ? filedPod(filed, uploaded) : ''}</div>
     <div class="toolbar">
@@ -1387,8 +1391,8 @@ async function drawProject(slug, view, { adding = false, filed = null, unchecked
     </div>
     ${filed && (unchecked || notUploaded.length) ? `<p class="filed-note">${unchecked ? UNCHECKED_NOTE : ''}${notUploadedNote(notUploaded)}</p>` : ''}
     <details class="add-task">
-      <summary>Add Task</summary>
-      <form class="request">
+      <summary>Add Task<label class="suggest-switch">Suggest <input type="checkbox" value="on" aria-label="Suggest Next Tasks"${suggesting ? ' checked' : ''}></label></summary>
+      <form class="request"${suggesting ? ' hidden' : ''}>
         <div class="title-mode" role="radiogroup" aria-label="How the Title Is Chosen">
           <label><input type="radio" name="title-mode" value="suggest"> Suggest a Title</label>
           <label><input type="radio" name="title-mode" value="own"> Write My Own Title</label>
@@ -1408,13 +1412,12 @@ async function drawProject(slug, view, { adding = false, filed = null, unchecked
         </fieldset>
         <div class="row"><button type="submit" class="submit-task">Suggest Titles</button><button type="button" class="suggest-again" hidden>Suggest Again</button><span class="note"></span></div>
       </form>
-    </details>
-    <details class="suggest-next">
-      <summary>Suggest Next Tasks</summary>
-      <p class="hint quiet">Reads the project (its plans, documents and code) and its open tickets, and suggests what to do next. Put them in order, untick any you do not want, and file the rest as requests.</p>
-      <div class="row"><button type="button" class="suggest-run">Suggest Next Tasks</button><span class="run-note note" role="status"></span></div>
-      <ol class="suggestions"></ol>
-      <div class="row file-row" hidden><button type="button" class="file-order">File in This Order</button><span class="file-note note" role="status"></span></div>
+      <div class="suggest-next"${suggesting ? '' : ' hidden'}>
+        <p class="hint quiet">Reads the project (its plans, documents and code) and its open tickets, and suggests what to do next. Put them in order, untick any you do not want, and file the rest as requests.</p>
+        <div class="row"><button type="button" class="suggest-run">Suggest Next Tasks</button><span class="run-note note" role="status"></span></div>
+        <ol class="suggestions"></ol>
+        <div class="row file-row" hidden><button type="button" class="file-order">File in This Order</button><span class="file-note note" role="status"></span></div>
+      </div>
     </details>
     <dialog class="suggestion-info" aria-labelledby="suggestion-info-title">
       <form method="dialog">
@@ -1458,6 +1461,7 @@ async function drawProject(slug, view, { adding = false, filed = null, unchecked
   wireSearch();
   wireAddTask(board.project, view, adding);
   wireSuggestNext(board.project, view);
+  wireSuggestSwitch();
   wireFiledPod();
   wirePipeline();
   refreshPipeline();
@@ -2370,8 +2374,24 @@ function wireAddTask(slug, view, adding) {
   };
   const firstField = () => (mode === 'own' ? title : description);
   show();
-  box.addEventListener('toggle', () => { if (box.open) firstField().focus(); });
-  if (adding || draft.title || draft.description) box.open = true;
+  // Opened from the bar (a click or Enter, which focus the <summary>), the
+  // form's first field takes focus; opened by the Suggest checkbox, which
+  // marks the box first (wireSuggestSwitch), focus stays on the checkbox.
+  box.addEventListener('toggle', () => {
+    const bySwitch = box.dataset.openedBySwitch === '1';
+    delete box.dataset.openedBySwitch;
+    if (box.open && !form.hidden && !bySwitch) firstField().focus();
+  });
+  // The old New request address (adding) always opens on the form: it
+  // unticks Suggest and keeps that, so the page and the checkbox agree (SP-303).
+  if (adding) {
+    box.querySelector('summary .suggest-switch input').checked = false;
+    form.hidden = false;
+    box.querySelector('.suggest-next').hidden = true;
+    try { localStorage.setItem(SUGGEST_SWITCH_KEY, '0'); } catch { /* the form still shows; a reload shows the kept side */ }
+  }
+  // A kept draft opens the box only on the Add Task side; it never flips the checkbox (SP-303).
+  if (adding || ((draft.title || draft.description) && !savedSuggestSwitch())) box.open = true;
   const keep = () => {
     try {
       localStorage.setItem(DRAFT_KEY, JSON.stringify({ title: title.value, description: description.value }));
@@ -2510,6 +2530,36 @@ function wireAddTask(slug, view, adding) {
   });
 }
 
+/** The Add Task bar's kept Suggest checkbox (SP-303): ticked only when it was left ticked. */
+function savedSuggestSwitch() {
+  try { return localStorage.getItem(SUGGEST_SWITCH_KEY) === '1'; } catch { return false; }
+}
+
+/**
+ * SP-303: the Suggest checkbox at the right of the Add Task bar. Ticked, the
+ * box shows the Suggest Next Tasks part; unticked, the Add Task form. Both
+ * stay drawn and are only hidden, so a typed draft, a picked title, the
+ * suggestions' order and ticks, and a run already going are all still there
+ * on switching back. Either way the box opens if it was shut, and the click
+ * never folds it: a click on a control inside a <summary> (the checkbox, or
+ * its label's word) works that control and does not fold the box. The tick is kept in this browser, as the title toggle
+ * is, so the minute's redraw and a reload keep the side he picked.
+ */
+function wireSuggestSwitch() {
+  const box = main.querySelector('details.add-task');
+  const tick = box.querySelector('summary .suggest-switch input');
+  const form = box.querySelector('form.request');
+  const part = box.querySelector('.suggest-next');
+  tick.addEventListener('change', () => {
+    try { localStorage.setItem(SUGGEST_SWITCH_KEY, tick.checked ? '1' : '0'); } catch { /* the box still works; a reload shows the Add Task side */ }
+    form.hidden = tick.checked;
+    part.hidden = !tick.checked;
+    // A shut box opened by the checkbox leaves focus on the checkbox (wireAddTask's toggle).
+    if (!box.open) box.dataset.openedBySwitch = '1';
+    box.open = true;
+  });
+}
+
 /** The Suggest Next Tasks box's kept state for `slug`, or null. */
 function savedSuggestState(slug) {
   try { return JSON.parse(localStorage.getItem(SUGGEST_STATE_KEY) ?? '{}')[slug] ?? null; } catch { return null; }
@@ -2550,7 +2600,9 @@ const SUGGEST_NEXT_UNANSWERED = 'the tracker did not answer.';
  * A failed run says why and offers Try Again.
  */
 function wireSuggestNext(slug, view) {
-  const box = main.querySelector('details.suggest-next');
+  // The Suggest Next Tasks part of the Add Task box (SP-303), and the box it folds in.
+  const box = main.querySelector('details.add-task .suggest-next');
+  const fold = box.closest('details.add-task');
   const run = box.querySelector('button.suggest-run');
   const runNote = box.querySelector('.run-note');
   const list = box.querySelector('ol.suggestions');
@@ -2837,9 +2889,9 @@ function wireSuggestNext(slug, view) {
     const noteKind = fileNote.classList.contains('error') ? 'error' : 'quiet';
     try {
       await drawAgain(() => drawProject(slug, view));
-      const again = main.querySelector('details.suggest-next');
+      const again = main.querySelector('details.add-task .suggest-next');
       if (again) {
-        again.open = true;
+        again.closest('details.add-task').open = true;
         const n = again.querySelector('.file-note');
         n.classList.remove('quiet', 'error');
         n.classList.add(noteKind);
@@ -2855,7 +2907,8 @@ function wireSuggestNext(slug, view) {
     const latest = await read();
     if (!latest || !box.isConnected) return;
     show(latest);
-    if (mayOpen && (running || (latest.state === 'done' && state && filingPlan(state).file.length))) box.open = true;
+    // Only on the Suggest side: a run or unfiled rows never flip the checkbox (SP-303).
+    if (mayOpen && savedSuggestSwitch() && (running || (latest.state === 'done' && state && filingPlan(state).file.length))) fold.open = true;
   })();
 }
 
