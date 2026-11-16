@@ -314,7 +314,7 @@ button { font: inherit; padding: 0.4rem 1rem; }
 /* On the Tasks title row the toolbar takes the free space, so the pod can widen into it and the tabs still end at the right edge (SP-326). */
 .tasks-head > .toolbar { flex-grow: 1; flex-wrap: wrap; }
 .tasks-head > .toolbar form.search { min-width: 12rem; }
-.toolbar .project-picker { font-weight: 600; display: flex; align-items: center; gap: var(--space-3); }
+.toolbar .project-picker, .toolbar .topic-picker { font-weight: 600; display: flex; align-items: center; gap: var(--space-3); }
 /* The Pipeline Status pod (SP-168): when each loop stage runs next, between the search field and Board/List. */
 .toolbar .pipeline-pod { flex-grow: 1; display: flex; flex-direction: column; align-items: flex-start; margin: 10px 20px; padding: 0.3rem 0.75rem; border: 1px solid var(--navy); border-radius: var(--radius-input); background: var(--pod-bg); font-size: var(--text-sm); color: var(--ink-primary); white-space: nowrap; cursor: pointer; text-align: left; font-family: inherit; }
 .toolbar .pipeline-pod:hover { background: var(--pod-bg-hover); }
