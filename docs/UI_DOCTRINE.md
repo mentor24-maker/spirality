@@ -141,6 +141,7 @@ Line height: `--leading-tight` 1.25 for headings and one-line controls,
 | Status | `--status-ok #16a34a` (bg `#dcfce7`, ink `#15803d`); `--status-warn #d97706` (bg `#fef3c7`, ink `#b45309`) |
 | Buttons | section 3 |
 | Focus | `--focus-ring-color #2563eb` |
+| Tabs | `--tab-selected #0b82d4` (the selected tab, section 5) |
 | Highlight | `--mark-bg #fff3b0` (a search match) |
 
 **Space.** `--space-1` to `--space-8`: 4, 6, 8, 12, 16, 24, 32, 48px. Gaps and
@@ -386,8 +387,8 @@ Measured 2026-11-15 on `tracker/web/app.css`, `app.mjs` and `render.mjs`.
 | 1 Capital letters | Buttons, headings, toggles, columns, tab titles and trail: followed and checked. Field labels and tabs: sentence case in places, not checked. | SP-325 |
 | 2 Tokens | Followed and checked (SP-320, 2026-11-15): every colour, font size, corner and gap is a token in `:root`, StarCaster's where it has one. Padding and margins are still literal lengths, near the steps. | SP-320 |
 | 3 Buttons | Followed and checked (SP-321, 2026-11-15): every button is `btn` plus a kind, or a listed exception; 32px and 24px; disabled is a colour; focus ring on every kind. The ticket page's green, Settings' dark blue and the black link are gone. | SP-321 |
-| 4 Title row | Default-size `<h1>`; buttons on a separate row below it. | SP-322 |
-| 5 Tabs | Board / List / Console is a black segmented control; Settings tabs are close but dark blue. | SP-322 |
+| 4 Title row | Followed and checked (SP-322, 2026-11-15): a 24px, weight 800 `<h1>` on every page, and every toolbar in the title row at its right, the trail above it; headings under it at `--text-lg` (h2) and `--text-base` (h3 to h6), with board columns and Console stages at `--text-base`. The ticket page keeps its two-column top, whose actions sit in the right column. | SP-322 |
+| 5 Tabs | Followed and checked (SP-322, 2026-11-15): Board / List / Console and the Settings tabs are one tab bar (`nav.tabs`), links with `aria-current`. | SP-322 |
 | 6 Forms | Every label above its box; boxes full width; tag boxes use the text inside the box as the instruction. | SP-325 |
 | 7 Messages | Notes beside each button and under the title; no single strip. Empty states: followed, but for a bare "None." | SP-323 |
 | 8 Tables | Grey or bold headings; no fixed heading row. Names, ids, actions and sideways scroll: followed. | SP-324 |
@@ -396,7 +397,8 @@ Measured 2026-11-15 on `tracker/web/app.css`, `app.mjs` and `render.mjs`.
 
 **The checks.** `tracker/style.test.mjs` checks section 1;
 `tracker/cssTokens.test.mjs` checks section 2 and the icon strokes of section 10;
-`tracker/buttonKinds.test.mjs` checks section 3.
+`tracker/buttonKinds.test.mjs` checks section 3;
+`tracker/titleRow.test.mjs` checks sections 4 and 5.
 Each ticket above
 adds the check for its part to `npm run verify`, as StarCaster's
 `scripts/check_ui_doctrine.cjs` does for its screens: every `<button>` has a

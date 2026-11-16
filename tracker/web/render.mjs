@@ -496,12 +496,13 @@ export function mountainTime(iso) {
   return d.toLocaleString('en-US', { timeZone: 'America/Denver', month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
 }
 
-/** A pipeline control's value in words: "1,800 seconds (Every 30 minutes)", "On", "Claude's default". */
+/** A pipeline control's value in words: "1,800 seconds (Every 30 minutes)", "On", "Claude's default", "7 days". */
 export function controlValueText(control, models = []) {
   const v = String(control?.value ?? '');
   if (control?.kind === 'seconds') return `${Number(v).toLocaleString('en-US')} seconds (${wakesEvery(Number(v))})`;
   if (control?.kind === 'switch') return v === 'on' ? 'On' : 'Off';
   if (control?.kind === 'model') return models.find((m) => m.id === v)?.label ?? v;
+  if (control?.kind === 'days') return v === '0' ? '0 (moves only when named by hand)' : `${v} day${v === '1' ? '' : 's'}`;
   return v;
 }
 
@@ -538,7 +539,7 @@ export function modelLastPassText(control, models = []) {
 /** One control's input, named by its key: a number box, an On/Off choice or a model choice. */
 function controlInput(c, models, id, locked) {
   const off = locked ? ' disabled' : '';
-  if (c.kind === 'seconds' || c.kind === 'count') {
+  if (c.kind === 'seconds' || c.kind === 'count' || c.kind === 'days') {
     return `<input id="${id}" type="number" min="${c.min}" max="${c.max}" step="1" value="${escapeHtml(c.value)}"${off}>`;
   }
   const options = c.kind === 'switch' ? [{ id: 'off', label: 'Off' }, { id: 'on', label: 'On' }] : models;
@@ -592,7 +593,8 @@ export function capInFlightText(c, capInFlight) {
  * naming the ticket that wires it in, and under the pause switches, while
  * any is on, the drain line (drainLine). Each wake time also says what its
  * lane last used (wakeInEffectText), and each model what its lane's last
- * pass ran on (modelLastPassText). Under them, the change log, newest first, in
+ * pass ran on (modelLastPassText). Quiet Days Before Moving comes after the
+ * release group, the setting that moves it (SP-277). Under them, the change log, newest first, in
  * Mountain time. `notes` is `{ key: { ok, text } }`, a Save's outcome to show
  * beside its control. The section is a box that opens and closes (SP-289),
  * the project's name its header; it starts closed unless `open` is true (the
@@ -614,6 +616,7 @@ export function renderPipelineControls(view, notes = {}, open = false) {
     </tr>`;
   };
   const group = (g) => {
+    if (g.notOnOwnProject && view.own) return '';
     const controls = view.controls.filter((c) => c.group === g.key);
     if (!controls.length) return '';
     const notYet = g.wiredBy ? `<p class="quiet not-yet">Saved, but the lanes do not use this yet (${escapeHtml(g.wiredBy)}).</p>` : '';
@@ -631,8 +634,9 @@ export function renderPipelineControls(view, notes = {}, open = false) {
     <summary>${escapeHtml(view.project.name)}</summary>
     <div class="project-body">
     ${lockedLine}
-    ${(view.groups ?? []).map(group).join('')}
+    ${(view.groups ?? []).filter((g) => g.key !== 'release-move').map(group).join('')}
     ${view.release ? renderReleaseGroup(view.release, notes.release) : ''}
+    ${(view.groups ?? []).filter((g) => g.key === 'release-move').map(group).join('')}
     <h4>Change Log</h4>
     ${log}
     </div>
@@ -2429,9 +2433,9 @@ export function renderTopics({ projects, project, topics = [], tags = [] }, { ti
       ? `<table class="projects tag-list"><thead><tr><th>Tag</th><th>Tasks</th></tr></thead>
         <tbody>${tags.map(tagRow).join('')}</tbody></table>`
       : '<p class="quiet no-tags">No tags yet.</p>';
-  return `<h1>Topics</h1>
-    <div class="toolbar">${renderProjectPicker(projects, project.slug)}</div>
-    <p class="quiet">The key aspects of ${escapeHtml(project.name)}: its features, mostly. Each topic belongs to one project. Tags are the labels on its tasks.</p>
+  return `<div class="title-row"><h1>Topics</h1>
+    <div class="toolbar">${renderProjectPicker(projects, project.slug)}</div></div>
+    <p class="page-desc">The key aspects of ${escapeHtml(project.name)}: its features, mostly. Each topic belongs to one project. Tags are the labels on its tasks.</p>
     <p class="note topic-note${problem ? ' error' : ' quiet'}" role="status">${escapeHtml(problem || done)}</p>
     <div class="topics-columns">
       <section class="topics-half" aria-labelledby="topics-title">
