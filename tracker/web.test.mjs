@@ -829,7 +829,11 @@ test('the Add Task box has a Suggest a Title / Write My Own Title toggle: Sugges
   // Opening the box puts the cursor in the first field the mode shows.
   assert.match(wire, /const firstField = \(\) => \(mode === 'own' \? title : description\);/);
   // Not when the form is hidden behind the Suggest side, nor when the Suggest checkbox opened it (SP-303).
-  assert.match(wire, /if \(box\.open && !form\.hidden && !box\.querySelector\('summary'\)\.contains\(document\.activeElement\)\) firstField\(\)\.focus\(\);/);
+  // Only a mark the checkbox sets says so: clicking the bar or Enter on it focuses the <summary> too, and must still land in the form.
+  assert.match(wire, /const bySwitch = box\.dataset\.openedBySwitch === '1';\s*delete box\.dataset\.openedBySwitch;\s*if \(box\.open && !form\.hidden && !bySwitch\) firstField\(\)\.focus\(\);/);
+  assert.doesNotMatch(wire, /contains\(document\.activeElement\)/, 'the bar focusing itself is no reason to skip the form');
+  // The old New request address opens on the form even with Suggest ticked, and unticks it.
+  assert.match(wire, /if \(adding\) \{\s*box\.querySelector\('summary \.suggest-switch input'\)\.checked = false;\s*form\.hidden = false;\s*box\.querySelector\('\.suggest-next'\)\.hidden = true;\s*try \{ localStorage\.setItem\(SUGGEST_SWITCH_KEY, '0'\); \}/);
   const css = readFileSync(WEB('app.css'), 'utf8');
   assert.match(css, /details\.add-task \[hidden\] \{ display: none; \}/, 'a hidden part stays hidden whatever else styles it');
   assert.match(css, /details\.add-task \.title-mode label:has\(input:checked\) \{/, 'the picked side of the toggle stands out');
@@ -854,7 +858,7 @@ test('SP-303: the Add Task bar has a Suggest checkbox at its right; ticked shows
   const wire = /function wireSuggestSwitch\(\) \{[\s\S]*?\n\}/.exec(app)[0];
   assert.match(wire, /localStorage\.setItem\(SUGGEST_SWITCH_KEY, tick\.checked \? '1' : '0'\)/, 'kept at once');
   // Switching only hides one side and shows the other: nothing is redrawn, so a draft, a picked title, the rows and a run all stay.
-  assert.match(wire, /form\.hidden = tick\.checked;\s*part\.hidden = !tick\.checked;\s*box\.open = true;/, 'opens a shut box, never folds an open one');
+  assert.match(wire, /form\.hidden = tick\.checked;\s*part\.hidden = !tick\.checked;[\s\S]*?if \(!box\.open\) box\.dataset\.openedBySwitch = '1';\s*box\.open = true;/, 'opens a shut box, never folds an open one, and marks the opening as its own');
   assert.doesNotMatch(wire, /innerHTML|box\.open = false|\.value = /, 'switching wipes nothing');
   const css = readFileSync(WEB('app.css'), 'utf8');
   assert.match(css, /details\.add-task > summary \.suggest-switch \{[^}]*float: right;/, 'right-aligned on the bar');

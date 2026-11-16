@@ -2367,9 +2367,22 @@ function wireAddTask(slug, view, adding) {
   };
   const firstField = () => (mode === 'own' ? title : description);
   show();
-  // Opened from the bar, the form's first field takes focus; opened by the
-  // Suggest checkbox, focus stays on the checkbox.
-  box.addEventListener('toggle', () => { if (box.open && !form.hidden && !box.querySelector('summary').contains(document.activeElement)) firstField().focus(); });
+  // Opened from the bar (a click or Enter, which focus the <summary>), the
+  // form's first field takes focus; opened by the Suggest checkbox, which
+  // marks the box first (wireSuggestSwitch), focus stays on the checkbox.
+  box.addEventListener('toggle', () => {
+    const bySwitch = box.dataset.openedBySwitch === '1';
+    delete box.dataset.openedBySwitch;
+    if (box.open && !form.hidden && !bySwitch) firstField().focus();
+  });
+  // The old New request address (adding) always opens on the form: it
+  // unticks Suggest and keeps that, so the page and the checkbox agree (SP-303).
+  if (adding) {
+    box.querySelector('summary .suggest-switch input').checked = false;
+    form.hidden = false;
+    box.querySelector('.suggest-next').hidden = true;
+    try { localStorage.setItem(SUGGEST_SWITCH_KEY, '0'); } catch { /* the form still shows; a reload shows the kept side */ }
+  }
   // A kept draft opens the box only on the Add Task side; it never flips the checkbox (SP-303).
   if (adding || ((draft.title || draft.description) && !savedSuggestSwitch())) box.open = true;
   const keep = () => {
@@ -2534,6 +2547,8 @@ function wireSuggestSwitch() {
     try { localStorage.setItem(SUGGEST_SWITCH_KEY, tick.checked ? '1' : '0'); } catch { /* the box still works; a reload shows the Add Task side */ }
     form.hidden = tick.checked;
     part.hidden = !tick.checked;
+    // A shut box opened by the checkbox leaves focus on the checkbox (wireAddTask's toggle).
+    if (!box.open) box.dataset.openedBySwitch = '1';
     box.open = true;
   });
 }

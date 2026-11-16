@@ -12,3 +12,12 @@ both halves stay on the page and only one is hidden at a time. The browser
 remembers which side was picked, so a reload or the page's once-a-minute
 refresh keeps it. Clicking the checkbox opens a closed box and never folds an
 open one, and it works from the keyboard too.
+
+Review sent it back for two slips, both fixed. Clicking the Add Task bar had
+stopped putting the cursor in the form: the check meant to leave the cursor
+on the checkbox also caught a click on the bar itself, because that click
+lands on the bar too. Now only the checkbox marks the box as opened by it, so
+the bar's own click (or Enter) lands in the form again. And the old New
+request address opened the box on whichever side was last picked, so with
+Suggest ticked it showed suggestions and no form; it now always opens the
+Add Task form and unticks Suggest to match.
