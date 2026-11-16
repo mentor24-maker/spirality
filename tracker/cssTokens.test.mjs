@@ -25,7 +25,7 @@ const DOCTRINE_TOKENS = {
   '--bg-page': '#ffffff', '--bg-surface': '#ffffff', '--bg-input': '#f7f9fc', '--bg-hover': '#f1f5f9',
   '--status-ok': '#16a34a', '--status-ok-bg': '#dcfce7', '--status-ok-ink': '#15803d',
   '--status-warn': '#d97706', '--status-warn-bg': '#fef3c7', '--status-warn-ink': '#b45309',
-  '--focus-ring-color': '#2563eb', '--mark-bg': '#fff3b0',
+  '--focus-ring-color': '#2563eb', '--tab-selected': '#0b82d4', '--mark-bg': '#fff3b0',
   '--space-1': '4px', '--space-2': '6px', '--space-3': '8px', '--space-4': '12px',
   '--space-5': '16px', '--space-6': '24px', '--space-7': '32px', '--space-8': '48px',
   '--radius-btn': '10px', '--radius-input': '8px', '--radius-container': '20px',

@@ -748,7 +748,7 @@ test('a filed task shows a larger pod centred on the Tasks heading row, above th
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   const draw = app.slice(app.indexOf('async function drawProject'), app.indexOf('async function copyText'));
   // The pod sits in the heading's own row, drawn only after a filing.
-  assert.match(draw, /<div class="tasks-head"><h1>Tasks<\/h1>\$\{filed \? filedPod\(filed, uploaded\) : ''\}<\/div>/);
+  assert.match(draw, /<div class="tasks-head title-row"><h1>Tasks<\/h1>\$\{filed \? filedPod\(filed, uploaded\) : ''\}\s*<div class="toolbar">/);
   const pod = /function filedPod[\s\S]*?\n\}/.exec(app)[0];
   assert.match(pod, /<output class="filed-pod">Filed <a href="\/t\/\$\{encodeURIComponent\(filed\)\}">\$\{escapeHtml\(filed\)\}<\/a>/, 'the id is still a link');
   // The old line under the toolbar is drawn only for a warning, and never says Filed.
@@ -2280,7 +2280,7 @@ test('/projects/new is the page to a browser, and its logo can be drawn: the loc
 test('the New project button and form are a person\'s only; a refused save keeps what was typed and says why; success opens the details page', () => {
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   // SP-127: the Projects page's button is Set up a project; the bare form is a link on its page.
-  assert.match(app, /me\?\.kind === 'human' \? '<div class="toolbar"><a class="button" href="\/setup\/new">Set Up a Project<\/a><\/div>' : ''/);
+  assert.match(app, /<div class="title-row"><h1>Projects<\/h1>\s*\$\{me\?\.kind === 'human' \? '<div class="toolbar"><a class="button" href="\/setup\/new">Set Up a Project<\/a><\/div>' : ''\}<\/div>/);
   assert.match(app, /<a href="\/projects\/new">New project<\/a>/);
   const form = app.slice(app.indexOf('async function drawCreateProject'), app.indexOf('/**', app.indexOf('async function drawCreateProject')));
   assert.match(form, /if \(me\?\.kind !== 'human'\)[\s\S]{0,200}Only a person signed in to the tracker can add a project\./);
@@ -4221,7 +4221,7 @@ test('the Tasks toolbar picks a project from a dropdown, "Project: ", the one in
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   const draw = app.slice(app.indexOf('async function drawProject'), app.indexOf('async function copyText'));
   assert.match(draw, /api\('GET', '\/projects'\),\n  \]\);/);
-  assert.match(draw, /<div class="toolbar">\s*\$\{renderProjectPicker\(projects, board\.project\)\}\s*\$\{searchForm\(''\)\}\s*<button type="button" class="pipeline-pod"[^>]*><\/button>\s*\$\{viewSwitch\(board\.project, view\)\}/);
+  assert.match(draw, /<div class="toolbar">\s*\$\{renderProjectPicker\(projects, board\.project\)\}\s*\$\{searchForm\(''\)\}\s*<button type="button" class="pipeline-pod"[^>]*><\/button>\s*<\/div>\s*<\/div>\s*\$\{viewSwitch\(board\.project, view\)\}/);
   assert.doesNotMatch(app, /Change project/);
   assert.match(draw, /querySelector\('\.project-picker select'\)\.addEventListener\('change', \(e\) => \{\s*history\.pushState\(null, '', at\(view, e\.target\.value\)\);\s*route\(\);/);
   assert.match(readFileSync(WEB('app.css'), 'utf8'), /\.toolbar \.project-picker select \{/);
@@ -4762,11 +4762,12 @@ test('the pod restyled (SP-222): a larger heading, #cceeff with a #000077 border
 test('the Tasks page puts the pod between the search field and Board/List, fills it on draw and once a minute, and a failed read touches only the pod (SP-168)', () => {
   const app = readFileSync(WEB('app.mjs'), 'utf8');
   const tasks = app.indexOf('<h1>Tasks</h1>', app.indexOf('async function drawProject('));
-  const toolbar = app.slice(app.indexOf('<div class="toolbar">', tasks), app.indexOf('</div>', app.indexOf('<div class="toolbar">', tasks)));
-  const search = toolbar.indexOf("${searchForm('')}");
-  const pod = toolbar.indexOf('class="pipeline-pod"');
-  const views = toolbar.indexOf('${viewSwitch(board.project, view)}');
-  assert.ok(search !== -1 && search < pod && pod < views, 'search field, then the pod, then the Board/List toggle');
+  const head = app.slice(tasks, app.indexOf('<details class="add-task">', tasks));
+  const search = head.indexOf("${searchForm('')}");
+  const pod = head.indexOf('class="pipeline-pod"');
+  const views = head.indexOf('${viewSwitch(board.project, view)}');
+  // SP-322: Board/List left the toolbar for a tab bar of its own, under the title row the pod sits in.
+  assert.ok(search !== -1 && search < pod && pod < views, 'search field, then the pod, then the Board/List tabs');
   const draw = app.slice(app.indexOf('async function drawProject('), app.indexOf('async function drawProject(') + 12000);
   assert.match(draw, /refreshPipeline\(\);/);
   assert.match(app, /const PIPELINE_REFRESH_EVERY_MS = 60_000;/);
@@ -5465,7 +5466,8 @@ test('the Console page: /in-flight and the stage colours drawn, a Console link b
   // The view switch names all three in Title Case, the current one marked.
   const sw = /function viewSwitch\(slug, current\) \{([\s\S]*?)\n\}/.exec(app)[1];
   assert.match(sw, /\['board', 'Board', [^\]]+\], \['list', 'List', [^\]]+\], \['console', 'Console', '\/console'\]/);
-  assert.match(sw, /v === current \? ' class="current" aria-current="page"' : ''/);
+  assert.match(sw, /<nav class="tabs" aria-label="View">/, 'a tab bar (UI_DOCTRINE 5, SP-322), not a segmented control');
+  assert.match(sw, /v === current \? ' aria-current="page"' : ''/);
   assert.match(/async function drawProject\(([^)]*)\) \{([\s\S]*?)\n\}/.exec(app)[2], /\$\{viewSwitch\(board\.project, view\)\}/);
   // "Tasks" in the header reopens the Console when it was chosen last.
   assert.match(app, /await drawTasks\(tasks \? savedTasksView\(\) : project\[1\]\);/);

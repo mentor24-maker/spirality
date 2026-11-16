@@ -2433,9 +2433,9 @@ export function renderTopics({ projects, project, topics = [], tags = [] }, { ti
       ? `<div class="table-wrap"><table class="projects tag-list"><thead><tr><th>Tag</th><th>Tasks</th></tr></thead>
         <tbody>${tags.map(tagRow).join('')}</tbody></table></div>`
       : '<p class="quiet no-tags">No tags yet.</p>';
-  return `<h1>Topics</h1>
-    <div class="toolbar">${renderProjectPicker(projects, project.slug)}</div>
-    <p class="quiet">The key aspects of ${escapeHtml(project.name)}: its features, mostly. Each topic belongs to one project. Tags are the labels on its tasks.</p>
+  return `<div class="title-row"><h1>Topics</h1>
+    <div class="toolbar">${renderProjectPicker(projects, project.slug)}</div></div>
+    <p class="page-desc">The key aspects of ${escapeHtml(project.name)}: its features, mostly. Each topic belongs to one project. Tags are the labels on its tasks.</p>
     <p class="note topic-note${problem ? ' error' : ' quiet'}" role="status">${escapeHtml(problem || done)}</p>
     <div class="topics-columns">
       <section class="topics-half" aria-labelledby="topics-title">
