@@ -117,8 +117,9 @@ loop makes:
 ```bash
 npm run clickup -- pass-reconcile                                      # FIRST: hand back the ticket a dead pass left in Building
 npm run clickup -- wip-check                                           # THEN: room under the Settings page's cap? exit 3 = full, claim nothing
-npm run clickup -- queue --claimable                                   # FIRST LINE is the task to claim (all Rework, then Queued)
-npm run clickup -- claim --task <id>                                   # safe claim; exit 3 = moved or still waits on a ticket, take the next
+npm run clickup -- queue --claimable --note-holds                      # FIRST LINE is the task to claim (all Rework, then Queued)
+npm run clickup -- claim --task <id>                                   # safe claim; exit 3 = moved, waits on a ticket or shares a file: take the next
+npm run clickup -- likely-files --task <id> --files <path>,<path>      # an older ticket naming no files: add its Likely files: line first
 npm run clickup -- get --task <id>                                     # header + body; also shows any recorded PR, send-back rounds and attachments
 npm run clickup -- attachments --task <id> --to /tmp/<id>-attachments  # save the ticket's files, to read before building
 npm run clickup -- comments --task <id>                                # the review notes live here on a Rework ticket
@@ -167,7 +168,7 @@ Exit **0** nothing of his / **3** something IS his / **1** could not tell.
    ```bash
    npm run clickup -- pass-reconcile
    npm run clickup -- wip-check
-   npm run clickup -- queue --claimable
+   npm run clickup -- queue --claimable --note-holds
    npm run clickup -- claim --task <id>
    ```
 
@@ -185,6 +186,23 @@ Exit **0** nothing of his / **3** something IS his / **1** could not tell.
    still open (or a line it cannot read) — take the next task. Exit 1 on a
    `Waits on:` ticket that cannot be read: say so on the ticket, take the
    next.
+
+   **Same files as work in flight (SP-351).** A `Queued` ticket that shares
+   any file with an open pull request, or with a ticket in `Building` that
+   has no pull request yet, is held: `--claimable` leaves it out
+   (`skipped <id>: held for shared files: ...`), `claim` refuses it with
+   exit 3, and `--note-holds` tells the held ticket once which tickets and
+   files hold it. Take the next ticket in its place; the held one takes its
+   normal place in line the moment those pull requests merge or close. It is
+   not waiting on Dane and needs no `ask`. A `Rework` ticket and a merge
+   fix-up ticket are never held: their pull request already exists. The
+   files are the ticket's `Likely files:` line (`docs/LOOP_CONTRACT.md`).
+   When the queue prints `note <id>: names no files it will change` for the
+   ticket you are about to claim (or `claim` exits 2 saying so), read its
+   spec, work out the repository files it will change, write them with
+   `likely-files --task <id> --files <path>,<path>`, then run `claim` again,
+   which checks them. When the queue prints `same-file check NOT applied`,
+   carry on and say so in your report, as for the cap.
 
    **A `Queued` ticket for a hand-run session only.** When the ticket at the
    head of the queue says in its description that only a hand-run session may

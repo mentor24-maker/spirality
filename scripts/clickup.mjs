@@ -95,6 +95,8 @@ import waitingOnOperator from '../lib/waitingOnOperator.js';
 import { ticketLine, findTicketId } from '../lib/clickupTicketLink.js';
 // Which files each open pull request changes (SP-349).
 import { parseRestFiles, sharedWith, refreshPlan, sharedLine, normalFiles } from '../lib/prFiles.js';
+// Holding a ticket back while open work changes the same files (SP-351).
+import { fileHolds, holdApplies, holdReason, holdNote, holdNoteDue, readLikelyFiles, withLikelyFilesLine } from '../lib/fileHold.js';
 // Telling in-flight tickets that main moved under them (task 86bctjffu).
 import {
   checkBranch, branchContains, tellTickets, latestMainMoved,
@@ -223,7 +225,9 @@ npm run clickup -- <command> [flags]      (Loop Queue: list ${LOOP_QUEUE_LIST}, 
   whoami                                          prove the token works and say who it acts as
   repo-check                                      does the tracker project's GitHub repository agree with githubRepo? (exit 1 if not)
   lists [--space <id>]                            resolve list ids by name (default: the project's space)
-  queue [--list <id>] [--claimable | --status S]  the tickets, one per line: id, status, priority, created, name
+  queue [--list <id>] [--claimable [--note-holds] | --status S]  the tickets, one per line: id, status, priority, created, name.
+                                                  --claimable leaves out a Queued ticket that shares a file with an open pull
+                                                  request or a ticket in Building (SP-351); --note-holds tells it why, once
   pass-reconcile                                  FIRST in every build pass: the ticket the last runner pass claimed and left
                                                   in Building goes back (Rework if it has a PR, else Queued), with a note.
                                                   Exit 0 nothing to do / 3 handed one back / 1 a write failed / 2 could not tell
@@ -235,8 +239,10 @@ npm run clickup -- <command> [flags]      (Loop Queue: list ${LOOP_QUEUE_LIST}, 
   waiting [--task <id>]                           read-only: is this ACTUALLY waiting on Dane? exit 0 no / 3 yes / 1 could not tell
   task --name "..." --body-file <f|-> [--list <id>] [--status S] [--priority p] [--tags a,b] [--id-out <file>]
   describe --task <id> --body-file <f|->          REPLACE the description (the left column)
+  likely-files --task <id> --files a,b,...        add the Likely files: line to a ticket that has none, read back (SP-351)
   comment --task <id> --body-file <f|->           a plain note
-  claim --task <id>                               safe claim: reads the status and guards the write on it
+  claim --task <id>                               safe claim: reads the status and guards the write on it; exit 3 if it
+                                                  waits on a ticket or shares a file with work in flight, 2 if it names no files
   status --task <id> --status S [--if-status S] [--assign <uid>] [--clear-assignees] [--no-auto-assign] [--no-card]
   ask --task <id> [--status "Needs your input"|"Ready to launch"] --body-file <f|-> [--no-move] [--after-his-answer]
                                                   [--ask-anyway] [--ask-again]
@@ -347,6 +353,29 @@ async function prerequisiteStates(tickets, openIds = []) {
     }
   }
   return states;
+}
+
+/**
+ * The same-file hold (lib/fileHold.js) for every ticket in `candidates`,
+ * against `tasks` (the project's open tickets, markdown descriptions) and the
+ * tracker's record of each open pull request's files. Answers `{ holds }`, a
+ * Map from ticket id to fileHolds' answer, or `{ skipped }` with why the
+ * check could not run: a tracker that keeps no files (ClickUp), or one that
+ * did not answer. It fails open, as the work-in-progress cap does, and the
+ * caller says so: refusing on a passing outage would stop all work.
+ */
+async function sharedFileHolds(candidates, tasks) {
+  let out;
+  try { out = await tracker.prFiles(); } catch (err) { return { skipped: `the open pull requests' files could not be read (${err?.message || err})` }; }
+  if (out.unsupported) return { skipped: out.json?.err || 'this tracker keeps no pull request files' };
+  if (!out.res.ok || !Array.isArray(out.json?.pullRequests)) return { skipped: `the open pull requests' files could not be read (HTTP ${out.res.status})` };
+  const holds = new Map();
+  for (const t of candidates) {
+    holds.set(t.id, fileHolds({
+      ticket: t, tickets: tasks, records: out.json.pullRequests, repo: project.githubRepo, buildingStatus: BUILDING, queuedStatus: QUEUED,
+    }));
+  }
+  return { holds };
 }
 
 /** Every comment on the ticket, newest first, across ALL pages: ClickUp
@@ -1090,6 +1119,23 @@ if (cmd === 'claim') {
     console.error(`NOT claimed: "${task}" ${held.reasons.join('; ')}. Nothing was written.${held.unreadable ? '' : ' Take the next task.'}`);
     process.exit(held.unreadable ? 1 : 3);
   }
+  // Same files as work in flight (SP-351): the same rule queue --claimable
+  // applies, so the two never disagree.
+  if (holdApplies(seen, { queuedStatus: QUEUED })) {
+    const open = await fetchAllTasks(LOOP_QUEUE_LIST, { markdown: true });
+    const listed = open.some((t) => String(t.id).toUpperCase() === String(seen.id).toUpperCase());
+    const files = await sharedFileHolds([seen], listed ? open : [...open, seen]);
+    const hold = files.holds?.get(seen.id);
+    if (files.skipped) console.error(`  (same-file check NOT applied: ${files.skipped})`);
+    else if (hold?.applies && !hold.source && hold.inFlight) {
+      console.error(`NOT claimed: "${task}" names no files it will change (no Likely files: line, no paths under ## Affected files / artifacts), so it cannot be checked against the ${hold.inFlight} pull request(s) and ticket(s) in flight. Nothing was written.`);
+      console.error(`Work them out from its spec and write them first: npm run clickup -- likely-files --task ${task} --files <path>,<path>   then claim again.`);
+      process.exit(2);
+    } else if (hold?.holders.length) {
+      console.error(`NOT claimed: "${task}" ${holdReason(hold.holders)}. Nothing was written. Take the next task.`);
+      process.exit(3);
+    }
+  }
   // Only a claim made under the build runner arms the marker (SP-101): a
   // hand-run session never does, so no loop pass can take its ticket back.
   const lock = buildLock();
@@ -1177,6 +1223,31 @@ if (cmd === 'whoami') {
       if (held.reasons.length) console.error(`skipped ${t.id}: ${held.reasons.join('; ')}`);
       return !held.reasons.length;
     });
+    // Same files as work in flight (SP-351). With --note-holds (the build
+    // lane), a held ticket is told once which tickets and files hold it.
+    const files = await sharedFileHolds(wanted, tasks);
+    if (files.skipped) console.error(`same-file check NOT applied this time: ${files.skipped}`);
+    else {
+      const kept = [];
+      for (const t of wanted) {
+        const hold = files.holds.get(t.id);
+        if (hold.applies && !hold.source && hold.inFlight) console.error(`note ${t.id}: names no files it will change; write them before claiming (npm run clickup -- likely-files --task ${t.id} --files ...)`);
+        if (!hold.holders.length) { kept.push(t); continue; }
+        console.error(`skipped ${t.id}: ${holdReason(hold.holders)}`);
+        if (!flag('note-holds')) continue;
+        const read = await readCommentsOrProblem(t.id);
+        if (read.problem) { console.error(`  ${t.id}: its comments could not be read (${read.problem}), so no hold note was written; the next pass tries again.`); continue; }
+        if (!holdNoteDue(read.comments, hold.holders)) continue;
+        // Not postComment: it ends the command on a failed write, and one
+        // note that did not land must not stop the queue being listed.
+        const posted = await tracker.postComment(t.id, { comment_text: holdNote(hold.holders) });
+        const noteId = String(posted.json?.id ?? '');
+        const back = posted.res.ok ? await readCommentsOrProblem(t.id) : null;
+        if (back?.comments?.some((c) => String(c.id) === noteId && String(c.comment_text || '').trim())) console.error(`  ${t.id}: hold note ${noteId} written and read back.`);
+        else console.error(`  ${t.id}: the hold note did NOT land (${posted.res.ok ? (back?.problem || 'not found on the ticket when read back') : `HTTP ${posted.res.status}`}); the next pass tries again.`);
+      }
+      wanted = kept;
+    }
   } else {
     wanted = status ? tasks.filter((t) => (t.status?.status ?? '').toLowerCase() === status.toLowerCase()) : tasks.slice();
     wanted.sort(compareWithinStatus);
@@ -1288,6 +1359,11 @@ if (cmd === 'whoami') {
     console.error(`\nread the attachments FAILED — ${files.problem.replace(/\.$/, '')}. The ticket may have files this pass cannot see; say so before speccing or building from it.`);
   } else if (!files.files.length) console.log('attachments: (none)');
   else for (const a of files.files) console.log(`attachments: ${attachmentLine(a)}`);
+  {
+    const likely = readLikelyFiles(t.markdown_description ?? t.description ?? '');
+    const from = likely.source === 'line' ? 'its Likely files: line' : 'the paths under ## Affected files / artifacts';
+    console.log(`likely:   ${likely.source ? `${likely.files.join(', ')} (from ${from})` : '(names no files: write them with likely-files before claiming)'}`);
+  }
   console.log(`url:      ${t.url}`);
   console.log('---');
   console.log(t.markdown_description || t.description || '(no body)');
@@ -1467,6 +1543,31 @@ if (cmd === 'whoami') {
   const chars = (t.description || '').length;
   if (chars === 0) { console.error('The description came back EMPTY after the write.'); process.exit(1); }
   console.log(`Task ${task}: description replaced (${chars} characters, read back).`);
+  reportLimits();
+
+} else if (cmd === 'likely-files') {
+  // Add the Likely files: line to a ticket that has none (SP-351): an older
+  // ticket the same-file hold cannot check until it names its files. Only
+  // adds the line, never rewrites the rest, and reads it back.
+  const task = arg('task');
+  const files = arg('files') != null ? normalFiles(String(arg('files')).split(',')) : null;
+  if (!task || !files?.length) { console.error('likely-files --task <id> --files <path>,<path>   (repository-relative paths, comma-separated)'); process.exit(2); }
+  const t = await readTask(task);
+  const now = t.markdown_description ?? t.description ?? '';
+  const next = withLikelyFilesLine(now, files);
+  if (next.error) { console.error(`likely-files: ${task} was not changed: ${next.error}.`); process.exit(2); }
+  if (project.tracker !== 'api') {
+    const quoted = findBlockquoteLines(next.description);
+    if (quoted.length) { console.error(`likely-files: ${task}'s description has "> " blockquote lines (${quoted.join(', ')}), which ClickUp deletes on a write. Nothing was written.`); process.exit(2); }
+  }
+  const out = await tracker.updateTask(task, { markdown_description: next.description });
+  if (!out.res.ok) die('add the Likely files: line', out);
+  const back = readLikelyFiles((await readTask(task)).markdown_description ?? '');
+  if (back.source !== 'line' || back.files.join(',') !== files.join(',')) {
+    console.error(`likely-files: the line did NOT read back as written on ${task} (read: ${back.files.join(', ') || 'nothing'}).`);
+    process.exit(1);
+  }
+  console.log(`Task ${task}: Likely files: ${back.files.join(', ')} (added and read back).`);
   reportLimits();
 
 } else if (cmd === 'comment') {
