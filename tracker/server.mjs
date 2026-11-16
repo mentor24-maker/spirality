@@ -79,6 +79,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { MAX_ATTACHMENT, openStore, StoreError } from './store.mjs';
 import { claudeCommandOf, CLAUDE_COMMAND_VAR, suggestTitles, TIME_LIMIT_MS as SUGGEST_TIME_LIMIT_MS, TitleSuggestError } from './titleSuggest.mjs';
 import { newestReleaseReader, OWN_PROJECT_RELEASE, releaseRemote } from '../lib/releases.mjs';
+import { controlOf, GROUPS } from './pipelineControls.mjs';
 import { SOURCE as IMPORT_SOURCE } from './import.mjs';
 import { boardOf, consoleOf, lookupTickets, PRIORITIES, prToCheck, prsToCheck, projectDetailsOf, projectsList, readSearchFilters, reportsOf, searchTickets, stageColoursOf, threadOf, waitingFor, busUnseen, pipelineControlsOf } from './pageData.mjs';
 import { ghPrState, prStateCache } from './prState.mjs';
@@ -983,6 +984,11 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
         }
         const body = await readJson(req);
         checkBody(body, me, ['setting', 'value']);
+        // The tracker's home project always runs main: no release setting there.
+        const group = GROUPS.find((g) => g.key === controlOf(body.setting)?.group);
+        if (group?.notOnOwnProject && ownProject != null && project.slug === ownProject) {
+          throw new HttpError(409, 'own-project', `${project.name} is the tracker's home project: its lanes always run main, so "${group.title}" is not set for it.`);
+        }
         let saved;
         try {
           saved = store.setPipelineSetting({ project: project.slug, setting: body.setting, value: body.value, actor: me.id });
