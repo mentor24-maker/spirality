@@ -204,6 +204,12 @@ Waits on: <ticket id or link>[, <ticket id or link> ...]
 ```
 
 The line may sit in a list item, a quote or bold (`- **Waits on:** <id>`).
+An id or link may be followed by the ticket's title, in quotes or in
+brackets around quotes (`Waits on: SP-265, SP-271 ("Run a project's lanes
+from Spirality's folder")`); the title is ignored and a comma inside it does
+not split the line. A title is refused (the ticket held back) when it has a
+link or any digit in it, since it might be naming another ticket, and inside
+single quotes an apostrophe may sit only between two letters (SP-313).
 Both `queue --claimable` and `claim` read it from the same text, the
 markdown description, and apply the same rule:
 
