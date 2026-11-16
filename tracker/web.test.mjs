@@ -239,9 +239,10 @@ test('"your answer is in" and "Waiting on you" never disagree: an answered ticke
       }
     }
     assert.ok(answered >= 1, 'the demo data holds an answered ticket');
-    // The rule is the waiting module's own, not a second copy of it.
+    // The rule is the waiting module's own, not a second copy of it
+    // (answeredLast since SP-302: a teammate's answer counts in Needs your input).
     const source = readFileSync(fileURLToPath(new URL('./pageData.mjs', import.meta.url)), 'utf8');
-    assert.match(source, /operatorSpokeLast\(/);
+    assert.match(source, /answeredLast\(/);
   } finally { await f.cleanup(); }
 });
 

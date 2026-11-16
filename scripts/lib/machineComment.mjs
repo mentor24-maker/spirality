@@ -85,4 +85,4 @@ export function stripMachineMarker(text) {
  * back, and the ClickUp door derives it from the stamp. The one definition is
  * lib/machineComment.js; these re-export it for the door's ES modules.
  */
-export const { authorKind, isMachineAuthored, isOperatorAuthored } = machineCommentCjs;
+export const { authorKind, isMachineAuthored, isOperatorAuthored, isPersonAuthored } = machineCommentCjs;

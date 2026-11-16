@@ -244,3 +244,28 @@ test('nothing project-specific is written into the watchdog files (rule 2)', () 
     }
   }
 });
+
+// SP-302 round 3: a teammate's answer the relay already acted on, then the
+// ticket parked again by hand. Read the relay's way: only a word of his NEWER
+// than that spent answer is an answer, never an older one.
+test('stale-answer (SP-302): after a spent teammate answer, only his newer word raises the alarm', async () => {
+  const { createRequire } = await import('node:module');
+  const require = createRequire(import.meta.url);
+  const { handbackDoneText } = require('../lib/busRelayPlan.js');
+  const done = { ok: true, json: { comments: [{ id: 'r1', comment_text: handbackDoneText({ target: 'Queued', at: '2026-11-14T16:30:00Z' }), user: { id: 2, kind: 'machine' }, date: String(NOW - 2 * HOUR) }] } };
+  const readReplies = ({ commentId }) => (commentId === 'rich' ? done : { ok: true, json: { comments: [] } });
+  const ticket = (his) => new Map([['EX-9', [
+    { id: 'a1', comment_text: CARD, user: { id: 2, kind: 'machine' }, date: String(NOW - 5 * HOUR) },
+    { id: 'dane', comment_text: his.text, user: { id: 1, kind: 'human' }, date: String(NOW - his.agoHours * HOUR) },
+    { id: 'rich', comment_text: 'A', user: { id: 3, kind: 'human' }, date: String(NOW - 3 * HOUR) },
+    { id: 'upd', comment_text: 'any update?', user: { id: 3, kind: 'human' }, date: String(NOW - 1 * HOUR) },
+  ]]]);
+
+  const older = harness({ tickets: PARKED, comments: ticket({ text: 'let me think', agoHours: 4 }) });
+  assert.equal(runStaleAnswer({ ...older.deps, ...scratch(), readReplies, argv: ['--check'] }), 0);
+  assert.equal(older.posts.length, 0, 'his word older than the spent answer is no answer');
+
+  const newer = harness({ tickets: PARKED, comments: ticket({ text: 'go again', agoHours: 2 }) });
+  assert.equal(runStaleAnswer({ ...newer.deps, ...scratch(), readReplies, argv: ['--check'] }), 0);
+  assert.equal(newer.posts.length, 1, 'his word newer than the spent answer is the answer that has sat');
+});
