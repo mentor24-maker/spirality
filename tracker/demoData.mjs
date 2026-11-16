@@ -228,6 +228,27 @@ export function seedDemo(store, { operatorName = substrateConfig.operatorName(),
     ].join('\n'),
   }, 'waiting');
 
+  // SP-314: a third held bug report in the older shape ClickUp imported
+  // (SC-111, SC-446 to SC-479): the page as a markdown link, and a spaced
+  // `* * *` divider, which is a rule, not a screenshot.
+  file('beta', 'Bug report: The search box on the blog returns nothing for two-word searches. — Demo Site', 'needs your input', {
+    assigned: true,
+    tags: ['bug-report', 'demo-site'],
+    description: [
+      '## What the reporter said', '',
+      '```', 'The search box on the blog returns nothing for two-word searches.', '```', '',
+      '## Where and who', '',
+      '- **Page:** [https://example.com/blog](https://example.com/blog)',
+      '- **Project:** Demo Site (proj_demo)',
+      '- **Viewer tier:** public',
+      '- **Submitted:** 2026-11-12T18:15:00.000Z',
+      '- **Report id:** `br_demo_3`', '',
+      '## Screenshots', '', '(none attached)', '',
+      '* * *', '',
+      '_Filed automatically from a public bug report. Held for the operator: nothing in the build loops will touch this until you move it._',
+    ].join('\n'),
+  }, 'waiting');
+
   // Two Pipeline Controls changes on Alpha (SP-224), so the Settings page's
   // change log shows rows: the cap tried at 3 and put back, which leaves every
   // control on its default.
