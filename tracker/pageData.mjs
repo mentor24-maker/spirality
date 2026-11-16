@@ -606,7 +606,9 @@ export function stageColoursOf(store) {
  * fall in (each naming the ticket that makes the lanes use it), the models
  * a lane may choose, the change log newest first with each changer's name,
  * and `canChange`: whether this reader may change them (the project's
- * operator, signed in as a person), `release`, its release group
+ * operator, signed in as a person), `own`, true for the tracker's home
+ * project (`ownProject`), whose page leaves out the groups marked
+ * `notOnOwnProject`, `release`, its release group
  * (releaseGroupOf; `ownProject` and `newest` come from the server), and
  * `inFlight`: the tickets a lane is working on now,
  * `[{ id, name, status, kind }]` (in Building, or in review under a review
@@ -634,6 +636,7 @@ export function pipelineControlsOf(store, slug, { reader = null, lanes = null, o
     project: { slug: project.slug, name: project.name },
     operator: project.operator == null ? null : { id: project.operator, name: nameOf(project.operator) },
     canChange,
+    own: ownProject != null && project.slug === ownProject,
     release: releaseGroupOf(store, project, { canChange, ownProject, newest, nameOf }),
     groups: GROUPS.map((g) => ({ ...g })),
     models: [{ id: DEFAULT_MODEL, label: "Claude's default" }, ...MODELS.map((m) => ({ ...m }))],
