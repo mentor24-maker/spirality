@@ -33,9 +33,14 @@ export const ALLOWED = Object.freeze([
   { text: `searchParams.get('${WORD}')`, why: 'the setup page\'s old address parameter, read' },
 ]);
 
-/** True for files that are history, which keep the words they were written in. */
+/**
+ * True for files that are history, which keep the words they were written in:
+ * the work log, and the operator prompt log (`docs/operator-prompts/`), which
+ * holds Dane's prompts word for word (CLAUDE.md), so it cannot change a word
+ * he typed.
+ */
 export function isExempt(path) {
-  return path.startsWith('docs/work-log/') || path === 'docs/WORK-LOG.md';
+  return path.startsWith('docs/work-log/') || path === 'docs/WORK-LOG.md' || path.startsWith('docs/operator-prompts/');
 }
 
 /**

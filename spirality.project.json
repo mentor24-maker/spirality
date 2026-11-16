@@ -20,6 +20,7 @@
     "CLAUDE.md",
     "docs/LOOP_ENGINEERING.md",
     "docs/DOCTRINE.md",
+    "docs/UI_DOCTRINE.md",
     ".claude/skills/",
     ".claude/settings.json",
     ".github/workflows/"

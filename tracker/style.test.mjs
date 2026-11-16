@@ -1,4 +1,4 @@
-// The tracker page's words follow docs/DOCTRINE.md (SP-138): every button,
+// The tracker page's words follow docs/UI_DOCTRINE.md (SP-138): every button,
 // heading, table column heading, tab title and page trail step is in Title
 // Case. This reads the page's own source and names every label that is not,
 // so a new "Add thing" button fails `npm run verify` instead of reaching Dane.
@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 
 const read = (path) => readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8');
 
-/** Words that stay lower case inside a title (docs/DOCTRINE.md lists the same ones). */
+/** Words that stay lower case inside a title (docs/UI_DOCTRINE.md lists the same ones). */
 const SMALL_WORDS = new Set(['a', 'an', 'the', 'and', 'but', 'or', 'nor', 'for', 'so', 'yet', 'as', 'at', 'by', 'in', 'of', 'on', 'to', 'up', 'via', 'per', 'vs', 'with', 'from', 'into', 'onto']);
 
 /**
@@ -77,7 +77,7 @@ function labelsOf(source) {
 
 const SOURCES = ['./web/app.mjs', './web/render.mjs', './web/index.html', './pageData.mjs'];
 
-test('every button, heading, column heading, tab title and trail step on the page is in Title Case (docs/DOCTRINE.md)', () => {
+test('every button, heading, column heading, tab title and trail step on the page is in Title Case (docs/UI_DOCTRINE.md)', () => {
   const problems = [];
   let seen = 0;
   for (const path of SOURCES) {
@@ -89,7 +89,7 @@ test('every button, heading, column heading, tab title and trail step on the pag
   }
   // A pattern that stopped matching would pass silently; the page has well over a hundred.
   assert.ok(seen > 100, `only ${seen} labels found: a pattern in labelsOf no longer matches the page's source`);
-  assert.deepEqual(problems, [], 'see docs/DOCTRINE.md, "Capital letters on the page"');
+  assert.deepEqual(problems, [], 'see docs/UI_DOCTRINE.md, "Capital letters on the page"');
 });
 
 test('the Title Case rule: big words capitalised, small words free inside, the first word and the word after a colon always capitalised', () => {
