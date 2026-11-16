@@ -62,6 +62,17 @@ test('the store refuses a person, a ticket in another project, and files that ar
   } finally { f.cleanup(); }
 });
 
+test('deleting an unstarted ticket takes its pull request record with it', () => {
+  const f = fixture();
+  try {
+    f.store.recordPrFiles({ project: 'alpha', number: 99, ticket: f.c, repo: 'owner/app', head: HEAD, files: ['a.js'], actor: f.machine.id });
+    f.store.recordPrFiles({ project: 'alpha', number: 98, ticket: f.b, repo: 'owner/app', head: HEAD, files: ['a.js'], actor: f.machine.id });
+    assert.deepEqual(f.store.deleteTicket(f.c, { actor: f.human.id }), { id: f.c, status: 'queued' });
+    assert.equal(f.store.getTicket(f.c), null);
+    assert.deepEqual(f.store.prFiles('alpha').map((r) => [r.number, r.ticket]), [[98, f.b]], 'only the deleted ticket\'s record went');
+  } finally { f.cleanup(); }
+});
+
 test('the ticket page names each other open pull request sharing a file, and only the shared files', () => {
   const f = fixture();
   try {

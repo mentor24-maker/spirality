@@ -443,15 +443,27 @@ function readPrFilesFromGitHub(repo, number) {
   return { ok: true, files, head: pr.headRefOid, state: pr.state };
 }
 
+/** True when `repo` is the project's own repository (owner/name, any case). */
+function isProjectRepo(repo) {
+  return String(repo || '').trim().toLowerCase() === String(project.githubRepo || '').trim().toLowerCase();
+}
+
 /**
  * Read PR #number's files from GitHub and record them on the tracker for
  * `ticket`, read back (SP-349). `{ ok, line }` on a record that stuck;
- * `{ ok: false, unsupported?, why }` otherwise, nothing stored. `read` is
- * an already-made GitHub read, to save a second one.
+ * `{ ok: false, unsupported?, notOpen?, otherRepo?, why }` otherwise,
+ * nothing stored. Only the project's own repository is kept: records are
+ * keyed by pull request number alone, and the relay's refresh lists only
+ * that repository, so another repository's #7 would be read back as this
+ * one's. Only an open pull request is kept: a merged or closed one would
+ * show other tickets a false shared-files line until the next refresh.
+ * `read` is an already-made GitHub read, to save a second one.
  */
 async function recordPrFiles(ticket, repo, number, read = null) {
+  if (!isProjectRepo(repo)) return { ok: false, otherRepo: true, why: `PR #${number} is in ${repo}, not this project's repository (${project.githubRepo}), so its files are not kept` };
   const got = read || readPrFilesFromGitHub(repo, number);
   if (!got.ok) return { ok: false, why: got.why };
+  if (got.state !== 'OPEN') return { ok: false, notOpen: true, why: `PR #${number} is ${String(got.state || 'not open').toLowerCase()}, so its files are not kept` };
   const out = await tracker.recordPrFiles(number, { ticket: String(ticket).toUpperCase(), repo, head: got.head, files: got.files });
   if (out.unsupported) return { ok: false, unsupported: true, why: out.json?.err || 'not kept on this tracker' };
   if (out.res.status === 404 && out.json?.error === 'unknown-ticket') return { ok: false, unknownTicket: true, why: `${String(ticket).toUpperCase()} is not a ticket on this project` };
@@ -1602,6 +1614,7 @@ if (cmd === 'whoami') {
   const filesKept = await recordPrFiles(task, repo, prNumber);
   if (filesKept.ok) console.log(`Task ${task}: ${filesKept.line}`);
   else if (filesKept.unsupported) console.error(`Task ${task}: changed files not recorded: ${filesKept.why}`);
+  else if (filesKept.notOpen || filesKept.otherRepo) console.log(`Task ${task}: ${filesKept.why}.`);
   else console.error(`Task ${task}: PR #${prNumber}'s changed files were NOT recorded: ${filesKept.why}. Nothing was stored for them; the relay's next pr-files-refresh tries again.`);
   reportLimits();
 
@@ -1654,7 +1667,11 @@ if (cmd === 'whoami') {
   const out = await tracker.prFiles();
   if (out.unsupported) { console.log(`pr-files-refresh: nothing to do — ${out.json?.err}`); process.exit(0); }
   if (!out.res.ok) { console.error(`pr-files-refresh FAILED: the records could not be read (HTTP ${out.res.status}). Nothing was changed.`); process.exit(1); }
-  const records = out.json.pullRequests;
+  // A record from another repository (kept before pr-opened refused them)
+  // is left alone: this project's open list says nothing about it.
+  const records = out.json.pullRequests.filter((r) => isProjectRepo(r.repo));
+  const elsewhere = out.json.pullRequests.length - records.length;
+  if (elsewhere) console.log(`pr-files-refresh: ${elsewhere} record(s) from a repository other than ${repo} left alone.`);
   const listed = gh(['pr', 'list', '--repo', repo, '--state', 'open', '--json', 'number,headRefOid,body', '--limit', '500']);
   let openPrs = null;
   if (listed.ok) { try { openPrs = JSON.parse(listed.stdout); } catch { openPrs = null; } }
@@ -1671,7 +1688,7 @@ if (cmd === 'whoami') {
     if (!ticket) { untracked += 1; console.log(`PR #${pr.number}: its body links no ticket, so its files are not kept.`); continue; }
     if (dryRun) { console.log(`PR #${pr.number} (${String(ticket).toUpperCase()}): would read its files (${had ? 'branch moved' : 'none recorded'}).`); continue; }
     const kept = await recordPrFiles(ticket, repo, pr.number);
-    if (kept.ok) { recorded += 1; console.log(kept.line); } else if (kept.unknownTicket) { untracked += 1; console.log(`PR #${pr.number}: ${kept.why}, so its files are not kept.`); } else { failed.push(`PR #${pr.number}: ${kept.why}`); }
+    if (kept.ok) { recorded += 1; console.log(kept.line); } else if (kept.unknownTicket) { untracked += 1; console.log(`PR #${pr.number}: ${kept.why}, so its files are not kept.`); } else if (kept.notOpen) { console.log(`${kept.why} (it closed since GitHub listed it).`); } else { failed.push(`PR #${pr.number}: ${kept.why}`); }
   }
   for (const r of plan.forget) {
     if (dryRun) { console.log(`PR #${r.number} (${r.ticket}): would forget its files (no longer open).`); continue; }

@@ -2111,6 +2111,7 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
         db.prepare('DELETE FROM attachments WHERE ticket = ?').run(row.id);
         db.prepare('DELETE FROM seen_marks WHERE ticket = ?').run(row.id);
         db.prepare('DELETE FROM ticket_topics WHERE ticket = ?').run(row.id);
+        db.prepare('DELETE FROM pr_files WHERE ticket = ?').run(row.id);
         const r = db.prepare('DELETE FROM tickets WHERE id = ? AND status = ?').run(row.id, row.status);
         if (num(r.changes) !== 1 || ticketRow(row.id)) {
           throw new StoreError('write-failed', `ticket ${row.id} was not deleted.`);

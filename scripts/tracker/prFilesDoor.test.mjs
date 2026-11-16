@@ -66,7 +66,7 @@ async function fixture() {
   chmodSync(join(bin, 'gh'), 0o755);
   const worldFile = join(dir, 'world.json');
   const f = {
-    store, url,
+    store, url, machine,
     world(w) { writeFileSync(worldFile, JSON.stringify(w)); },
     ticket: (name) => store.fileTicket({ project: 'alpha', actor: machine.id, status: 'building', name }).id,
     body: (id) => `Does the thing.\n\nTicket: ${url}/t/${id}\n`,
@@ -196,5 +196,40 @@ test('pr-files-refresh says a failed read and changes nothing when GitHub cannot
     const down = await f.door(['pr-files-refresh']);
     assert.equal(down.code, 1);
     assert.match(down.err, /could not be listed .*Nothing was changed, nothing forgotten/);
+  } finally { await f.cleanup(); }
+});
+
+test('pr-opened keeps no files for a pull request that has merged or closed, or one in another repository', async () => {
+  const f = await fixture();
+  try {
+    const a = f.ticket('First');
+    f.world({ prs: { 7: { body: f.body(a), state: 'MERGED', headRefOid: SHA('a'), changedFiles: 1, files: [['a.js']] } } });
+    const merged = await f.door(['pr-opened', '--task', a, '--pr', 'https://github.com/owner/repo/pull/7']);
+    assert.equal(merged.code, 0, merged.err);
+    assert.match(merged.out, /PR #7 recorded/);
+    assert.match(merged.out, /PR #7 is merged, so its files are not kept\./);
+    assert.deepEqual(f.store.prFiles('alpha'), []);
+
+    f.world({ prs: { 7: { body: f.body(a), state: 'OPEN', headRefOid: SHA('a'), changedFiles: 1, files: [['a.js']] } } });
+    const elsewhere = await f.door(['pr-opened', '--task', a, '--pr', 'https://github.com/someone/fork/pull/7']);
+    assert.equal(elsewhere.code, 0, elsewhere.err);
+    assert.match(elsewhere.out, /PR #7 is in someone\/fork, not this project's repository \(owner\/repo\), so its files are not kept\./);
+    assert.deepEqual(f.store.prFiles('alpha'), []);
+  } finally { await f.cleanup(); }
+});
+
+test('pr-files-refresh leaves alone a record kept from another repository', async () => {
+  const f = await fixture();
+  try {
+    const a = f.ticket('First');
+    const b = f.ticket('Second');
+    f.store.recordPrFiles({ project: 'alpha', number: 7, ticket: b, repo: 'someone/fork', head: SHA('f'), files: ['x.js'], actor: f.machine.id });
+    f.world({ prs: { 7: { body: f.body(a), state: 'OPEN', headRefOid: SHA('a'), changedFiles: 1, files: [['a.js']] } } });
+    const r = await f.door(['pr-files-refresh']);
+    assert.equal(r.code, 0, r.err);
+    assert.match(r.out, /1 record\(s\) from a repository other than owner\/repo left alone/);
+    // Upserting this repository's #7 replaces the stray row: the record names
+    // this repository's ticket, never the fork's.
+    assert.deepEqual(f.store.prFiles('alpha').map((x) => [x.number, x.ticket, x.repo, x.files]), [[7, a, 'owner/repo', ['a.js']]]);
   } finally { await f.cleanup(); }
 });

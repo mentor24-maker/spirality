@@ -17,3 +17,12 @@ these files?" in one command (`npm run clickup -- pr-files`), and each ticket
 page shows "Changes the same files as SP-xxx (PR #n)", naming the files.
 The next ticket (SP-351) uses this record to hold a ticket back from building
 while another open pull request changes the same files.
+
+After review: deleting an unstarted ticket that had a pull request on record
+failed with a database error, because the record still pointed at the
+ticket. Deleting the ticket now removes its record too. The loop also no
+longer saves files for a pull request that has already merged or closed (it
+would have shown other tickets a false "same files" line), or for one in a
+repository other than the project's own, since records are kept by pull
+request number and another repository's number could be mistaken for one of
+ours.
