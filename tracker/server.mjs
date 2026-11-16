@@ -85,7 +85,7 @@ import { ghPrState, prStateCache } from './prState.mjs';
 import { createNotifier, DEFAULT_FROM, MAIL_FROM, MAIL_KEY, mailEnvFromDoppler, mailSettingsFromEnv, resendSender, textSettings } from './notify.mjs';
 import { sendInvite, sendResetLink } from './account.mjs';
 import { guessProject } from './projectGuess.mjs';
-import { createSuggester, ticketsInput } from './nextSuggest.mjs';
+import { createSuggester, suggestKnown, ticketsInput } from './nextSuggest.mjs';
 import { findConfigFile, loadProjectConfig } from '../lib/projectConfig.mjs';
 import { saveAnswers, setupFields, setupList, setupOf, SetupError } from './setup.mjs';
 import busRelayPlan from '../lib/busRelayPlan.js';
@@ -632,7 +632,18 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     store,
     options: { claudeBin: claudeCommand, ...suggestOptions },
     ...(suggestRun ? { run: suggestRun } : {}),
-    inputOf: (project) => ticketsInput(store.listTickets(project.slug, { open: true }), (id) => store.listComments(id)),
+    // The open tickets with their tags and topics, and the project's own
+    // topic and tag names: the only ones an answer may name.
+    inputOf: (project) => {
+      const open = store.listTickets(project.slug, { open: true });
+      const topicsByTicket = store.ticketTopicsOf(project.slug);
+      const topics = [...new Set(store.listTopics(project.slug).map((t) => t.name))].sort((a, b) => a.localeCompare(b));
+      const tags = [...new Set(store.listTickets(project.slug).flatMap((t) => t.tags ?? []))].sort((a, b) => a.localeCompare(b));
+      return {
+        input: ticketsInput(open, (id) => store.listComments(id), { topicsOf: (id) => (topicsByTicket.get(id) ?? []).map((t) => t.name), topics, tags }),
+        known: suggestKnown(open, { topics, tags }),
+      };
+    },
     log,
   });
   const failures = failureCounter(now);
@@ -1288,7 +1299,8 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
       }
       const latest = suggester.latest(project.slug);
       if (!latest) throw new HttpError(404, 'no-run', `nobody has asked for ${project.name}'s next tasks yet.`);
-      return [200, latest];
+      // The project's repository, so the page links a suggestion's files on GitHub.
+      return [200, { ...latest, repo: project.repo ?? null }];
     }
 
     // The Add Task box's title suggester: five titles from the

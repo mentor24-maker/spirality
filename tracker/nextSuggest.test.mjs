@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { openStore } from './store.mjs';
-import { claudeArgs, createSuggester, FIELD_LIMITS, FOLDER_PREFIX, readSuggestions, runSuggest, skillPrompt, stripNumbering, SuggestError, sweepOldFolders, ticketsInput } from './nextSuggest.mjs';
+import { claudeArgs, createSuggester, FIELD_LIMITS, FOLDER_PREFIX, plainPath, readSuggestions, runSuggest, skillPrompt, stripNumbering, SuggestError, suggestKnown, sweepOldFolders, ticketsInput } from './nextSuggest.mjs';
 
 const five = (prefix = 'Add') => [1, 2, 3, 4, 5].map((n) => ({ title: `${prefix} thing ${n}`, description: `Do thing ${n}.`, why: `docs/PLAN.md says ${n}.` }));
 
@@ -122,9 +122,89 @@ test('ticketsInput sends each open ticket with its newest five comments, long te
   const comments = Array.from({ length: 8 }, (_, i) => ({ id: i + 1, body: `comment ${i + 1}`, createdAt: `2026-11-1${i}` }));
   const input = JSON.parse(ticketsInput(tickets, () => comments));
   const t = input.openTickets[0];
-  assert.deepEqual(Object.keys(t), ['id', 'name', 'status', 'priority', 'description', 'recentComments']);
+  assert.deepEqual(Object.keys(t), ['id', 'name', 'status', 'priority', 'tags', 'topics', 'description', 'recentComments']);
   assert.deepEqual(t.recentComments.map((c) => c.body), ['comment 4', 'comment 5', 'comment 6', 'comment 7', 'comment 8']);
   assert.ok(t.description.length <= 4000);
+  assert.deepEqual([input.projectTopics, input.projectTags], [[], []], 'no topics or tags given: empty lists');
+});
+
+test('ticketsInput sends each ticket\'s tags and topics, and the project\'s own topic and tag names (SP-305)', () => {
+  const tickets = [{ id: 'AL-1', name: 'Add x', status: 'queued', description: '', tags: ['tracker'] }, { id: 'AL-2', name: 'Add y', status: 'queued', description: '' }];
+  const input = JSON.parse(ticketsInput(tickets, () => [], { topicsOf: (id) => (id === 'AL-1' ? ['Board'] : []), topics: ['Board', 'Mail'], tags: ['fix', 'tracker'] }));
+  assert.deepEqual(input.openTickets.map((t) => [t.tags, t.topics]), [[['tracker'], ['Board']], [[], []]]);
+  assert.deepEqual(input.projectTopics, ['Board', 'Mail']);
+  assert.deepEqual(input.projectTags, ['fix', 'tracker']);
+});
+
+/** Three plain suggestions, the first carrying `extra`. */
+const withExtras = (extra) => JSON.stringify([{ title: 'Add a', description: 'd', why: 'w', ...extra }, { title: 'Add b' }, { title: 'Add c' }]);
+const known = () => suggestKnown([{ id: 'AL-1', name: 'The board' }, { id: 'AL-2', name: 'The mail' }], { topics: ['Board', 'Mail'], tags: ['tracker', 'fix'] });
+
+test('readSuggestions keeps a suggestion\'s about, related tickets, topics, tags and links when they are real (SP-305)', () => {
+  const [got] = readSuggestions(withExtras({
+    about: 'A clear description.',
+    related: ['AL-2', 'al-1', 'AL-2'],
+    topics: ['board', 'Mail'],
+    tags: ['TRACKER'],
+    links: [{ label: 'The plan', path: 'docs/PLAN.md' }, { label: 'Same plan', path: './docs/PLAN.md' }, { ticket: 'AL-1' }, { label: 'Mail ticket', ticket: 'AL-2' }, { path: 'lib/a.js' }],
+  }), known());
+  assert.equal(got.about, 'A clear description.');
+  assert.deepEqual(got.related, [{ id: 'AL-2', name: 'The mail' }, { id: 'AL-1', name: 'The board' }], 'each once, as the project spells the id, with its name');
+  assert.deepEqual(got.topics, ['Board', 'Mail'], 'as the project spells them');
+  assert.deepEqual(got.tags, ['tracker']);
+  assert.deepEqual(got.links, [
+    { path: 'docs/PLAN.md', label: 'The plan' },
+    { ticket: 'AL-1', label: 'The board' },
+    { ticket: 'AL-2', label: 'Mail ticket' },
+    { path: 'lib/a.js', label: 'lib/a.js' },
+  ], 'a repeat is dropped; a link with no label is named by its path or ticket');
+});
+
+test('readSuggestions drops a ticket, topic or tag the project does not have, and any link that is not a plain path or an open ticket (SP-305)', () => {
+  const [got] = readSuggestions(withExtras({
+    about: 42,
+    related: ['AL-9', 'SC-1', 7, null, 'AL-1'],
+    topics: ['Nope', 3, 'board'],
+    tags: ['secret', { x: 1 }],
+    links: [
+      { label: 'up', path: '../outside.txt' },
+      { label: 'deep up', path: 'docs/../../etc/passwd' },
+      { label: 'root', path: '/etc/passwd' },
+      { label: 'web', path: 'https://evil.example/x' },
+      { label: 'web bare', path: 'http.example' },
+      { label: 'scheme', path: 'javascript:alert(1)' },
+      { label: 'windows', path: 'docs\\x.md' },
+      { label: 'folder', path: 'docs/' },
+      { label: 'empty part', path: 'docs//x.md' },
+      { label: 'url field', url: 'https://evil.example' },
+      { label: 'closed ticket', ticket: 'AL-9' },
+      'docs/PLAN.md',
+      { label: 'kept', path: 'docs/PLAN.md' },
+    ],
+  }), known());
+  assert.equal(got.about, undefined, 'about that is not text is left out');
+  assert.deepEqual(got.related, [{ id: 'AL-1', name: 'The board' }]);
+  assert.deepEqual(got.topics, ['Board']);
+  assert.equal(got.tags, undefined, 'nothing real: no tags field at all');
+  assert.deepEqual(got.links, [{ path: 'docs/PLAN.md', label: 'kept' }]);
+  for (const bad of ['../x', 'a/../b', '/x', 'https://x', 'HTTP://x', 'httpdocs/x', 'c:/x', 'a\\b', 'a/', '', '   ', null, 3, 'a\u0000b']) assert.equal(plainPath(bad), null, String(bad));
+  assert.equal(plainPath('docs/PLAN.md'), 'docs/PLAN.md');
+  assert.equal(plainPath('./README.md'), 'README.md');
+});
+
+test('readSuggestions with nothing to check against keeps only about and file links; an old-style answer reads as before (SP-305)', () => {
+  const [got] = readSuggestions(withExtras({ about: 'A', related: ['AL-1'], topics: ['Board'], tags: ['tracker'], links: [{ ticket: 'AL-1' }, { path: 'README.md' }] }));
+  assert.deepEqual(got, { title: 'Add a', description: 'd', why: 'w', about: 'A', links: [{ path: 'README.md', label: 'README.md' }] });
+  const plain = readSuggestions(JSON.stringify(five()), known());
+  assert.deepEqual(plain, five(), 'title, description and why only: exactly as before, no empty new fields');
+});
+
+test('readSuggestions caps about and each list (SP-305)', () => {
+  const many = Array.from({ length: 20 }, (_, i) => `docs/f${i}.md`);
+  const [got] = readSuggestions(withExtras({ about: 'a'.repeat(5000), links: many.map((path) => ({ path, label: 'l'.repeat(500) })) }), known());
+  assert.equal(got.about.length, FIELD_LIMITS.about);
+  assert.equal(got.links.length, FIELD_LIMITS.links);
+  assert.equal(got.links[0].label.length, FIELD_LIMITS.label);
 });
 
 test('skillPrompt is the suggest-next skill\'s steps, without its front matter', () => {
@@ -182,6 +262,21 @@ test('a bad answer, two items, a crash, a missing claude and a failed copy each 
   } finally { s.cleanup(); }
 });
 
+test('a run checks the answer against what went in: inputOf\'s { input, known } reaches runSuggest, which drops what is not real (SP-305)', async () => {
+  const s = scratch();
+  try {
+    const answer = [{ title: 'Add a', about: 'Why it matters.', related: ['AL-1', 'AL-99'], topics: ['Board', 'Made up'], tags: ['fix'], links: [{ path: 'README.md' }, { path: '../x' }, { ticket: 'AL-99' }] }, { title: 'Add b' }, { title: 'Add c' }];
+    const got = await runSuggest({ repo: 'me/app', input: '{}', known: known(), claudeBin: s.stub, source: s.source, tmpRoot: s.tmpRoot, env: s.env({ STUB_OUT: JSON.stringify(answer) }) });
+    assert.deepEqual(got[0], { title: 'Add a', description: '', why: '', about: 'Why it matters.', related: [{ id: 'AL-1', name: 'The board' }], topics: ['Board'], tags: ['fix'], links: [{ path: 'README.md', label: 'README.md' }] });
+  } finally { s.cleanup(); }
+  const calls = [];
+  const fakeStore = { saveNextSuggestions: () => {}, nextSuggestions: () => null };
+  const sug = createSuggester({ store: fakeStore, run: async (o) => { calls.push(o); return five(); }, inputOf: () => ({ input: 'the tickets', known: 'the known' }) });
+  sug.start({ slug: 'alpha', repo: 'me/app' });
+  await sug.settled('alpha');
+  assert.deepEqual([calls[0].input, calls[0].known], ['the tickets', 'the known']);
+});
+
 test('a claude that hangs is stopped at the time limit, the run fails, and the folder is gone', async () => {
   const s = scratch();
   try {
@@ -211,7 +306,7 @@ test('the suggester keeps one run per project, answers it while it runs, and kee
     assert.equal(first.state, 'running');
     assert.equal(second.id, first.id, 'two starts in a row give one run');
     assert.equal(calls.length, 1);
-    assert.deepEqual(calls[0], { claudeBin: 'stub', repo: 'me/app', input: 'the tickets' });
+    assert.deepEqual(calls[0], { claudeBin: 'stub', repo: 'me/app', input: 'the tickets', known: null });
     assert.equal(sug.latest('alpha').state, 'running');
     release(five());
     await sug.settled('alpha');
