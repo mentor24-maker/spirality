@@ -835,7 +835,7 @@ async function drawProjectDetails(slug, done = '', problem = '') {
     ? `<div class="table-wrap"><table class="projects people members"><thead><tr><th class="name">Name</th><th class="by">Added By</th><th class="added">Added</th>${editing ? '<th class="actions"><span class="hidden">Actions</span></th>' : ''}</tr></thead><tbody>${members.map(memberRow).join('')}</tbody></table></div>`
     : '<p class="quiet">Nobody is a member of this project yet.</p>'}
     ${editing ? (addable.length
-    ? `<form class="invite members">
+    ? `<form class="invite members fields">
       <div class="row"><label for="add-member">Add a Member</label><select id="add-member">${addable.map((x) => `<option value="${escapeHtml(x.id)}">${escapeHtml(x.name)}</option>`).join('')}</select><button type="submit" class="btn btn-primary">Add Member</button></div>
     </form>`
     : '<p class="quiet">Everyone with an account is a member.</p>') : ''}

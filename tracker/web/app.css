@@ -176,8 +176,10 @@ input[type="number"] { width: var(--field-w-number); }
 textarea { display: block; width: var(--field-w-long); min-height: 7rem; line-height: var(--leading-normal); resize: vertical; }
 select { width: auto; }
 :is(input, select, textarea):focus { outline: none; border-color: var(--ink-primary); }
-:is(input, select, textarea):focus-visible { outline: none; border-color: var(--ink-primary); }
-input[readonly] { background: var(--bg-hover); color: var(--ink-secondary); }
+/* Moved to by the keyboard: the same black border, and the focus ring round it so it is seen. */
+:is(input, select, textarea):focus-visible { box-shadow: 0 0 0 2px var(--focus-ring-color); }
+/* A locked box (read-only or disabled) is muted, so it never looks like one to type in. */
+:is(input, select, textarea):is([readonly], :disabled) { background: var(--bg-hover); color: var(--ink-secondary); cursor: default; }
 input[type="checkbox"], input[type="radio"] { margin: 0; }
 /* A box's width class, as specific as the rules above so it wins: long for a title, a name or an address. */
 :is(input, select, textarea).field-long { width: var(--field-w-long); }
@@ -200,7 +202,7 @@ label, .label { font-size: var(--text-sm); font-weight: 600; }
 .hint { display: block; font-size: var(--text-sm); font-weight: 400; color: var(--ink-secondary); }
 /* A radio button or checkbox: the control on the left, its words on the right, one per line. */
 label.check { display: flex; align-items: center; gap: var(--space-3); font-weight: 400; font-size: var(--text-base); }
-/* A box in a table row fills its column, which the table's own widths size. */
+/* A box in a table row: the table's smaller type. It keeps its own width, so a table holding one is as wide as the box. */
 td :is(select, input:not([type="checkbox"], [type="radio"], [type="color"])) { font-size: var(--text-sm); }
 /* Tables (UI_DOCTRINE 8, StarCaster's UI_RULES T11, SP-324): one look everywhere. A black heading row with
    bold white text; a light-blue filter row where a table has one; body rows 0.5rem top and bottom. Every
@@ -286,8 +288,7 @@ button { font: inherit; padding: 0.4rem 1rem; }
 .btn-danger:disabled, .btn-danger[aria-disabled="true"] { background: var(--btn-danger-flat-disabled); border-color: var(--btn-danger-flat-disabled); color: var(--btn-flat-ink); }
 .btn-sm { height: var(--btn-height-sm); padding: 0 0.625rem; font-size: var(--text-xs); }
 .toolbar { display: flex; gap: var(--space-7); align-items: center; justify-content: space-between; margin-bottom: 1rem; }
-.toolbar .project-picker { font-weight: 600; }
-.toolbar .project-picker { display: flex; align-items: center; gap: var(--space-3); }
+.toolbar .project-picker { font-weight: 600; display: flex; align-items: center; gap: var(--space-3); }
 /* The Pipeline Status pod (SP-168): when each loop stage runs next, between the search field and Board/List. */
 .toolbar .pipeline-pod { display: flex; flex-direction: column; align-items: flex-start; margin: 10px 20px; padding: 0.3rem 0.75rem; border: 1px solid var(--navy); border-radius: var(--radius-input); background: var(--pod-bg); font-size: var(--text-sm); color: var(--ink-primary); white-space: nowrap; cursor: pointer; text-align: left; font-family: inherit; }
 .toolbar .pipeline-pod:hover { background: var(--pod-bg-hover); }
@@ -327,7 +328,8 @@ table.projects td.actions { white-space: nowrap; width: 1%; }
 .table-wrap:has(> table.counts.report.productivity) { max-width: 56rem; }
 table.counts th.custom-range { vertical-align: top; }
 table.counts th.custom-range label { display: block; }
-table.counts th.custom-range :is(input, select) { font-weight: normal; margin-top: var(--space-1); }
+/* The custom range's date boxes: the browser's own date width and the table's smaller type, so the counts columns stay on one line. */
+table.counts th.custom-range :is(input, select) { width: auto; padding: var(--space-1) var(--space-2); font-size: var(--text-sm); font-weight: normal; margin-top: var(--space-1); }
 /* Where the Time Goes' task list (SP-220): wide enough for a name, the id and the durations on one line each. */
 .table-wrap:has(> table.counts.report.time-split-tickets) { max-width: 64rem; }
 table.time-split-tickets td:first-child, table.time-split-tickets td.count { white-space: nowrap; }
@@ -603,8 +605,7 @@ table.projects td select.add-member { display: block; margin-top: 0.3rem; font-s
 table.roles .hint { display: block; font-size: var(--text-sm); }
 table.roles .has { text-align: center; }
 /* The Search field (Tasks page toolbar, search results page) and its results. */
-form.search { flex: 1; max-width: 24rem; }
-form.search { display: flex; align-items: center; gap: var(--space-3); }
+form.search { flex: 1; max-width: 24rem; display: flex; align-items: center; gap: var(--space-3); }
 form.search input { flex: 1 1 auto; }
 .search-filters { display: flex; flex-wrap: wrap; gap: var(--space-3) var(--space-5); margin: 0 0 0.75rem; }
 .search-filters label { display: flex; align-items: center; gap: var(--space-3); }

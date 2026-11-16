@@ -78,7 +78,8 @@ function labelsOf(source) {
     found.push({ kind: 'field label', text: own.trim() });
   }
   add('field label', /\bfield\('[^']+', '([^']+)'/g);
-  add('field label', /\blabel: '([^']+)', question:/g);
+  // A setup answer's label may hold an escaped apostrophe ("Old Loop\'s ClickUp User Id"): read past it, then unescape it.
+  for (const m of source.matchAll(/\blabel: '((?:[^'\\]|\\.)+)', question:/g)) found.push({ kind: 'field label', text: m[1].replace(/\\'/g, "'").trim() });
   add('field label', /\{ key: '[^']+', label: '([^']+)', options:/g);
   add('field label', /\btitle: [`']([^`']+)[`'],/g);
   // SP-325: tabs, the Tasks page's view switch and the Settings tabs.
@@ -120,10 +121,10 @@ test('the label finder sees buttons, headings, toggles, column headings, field l
     <th class="x">Last change</th>setTitle('New project · Tracker'); putTrail([{ label: 'Set up a project' }]); actionButton('Delete ticket', ICONS.delete)
     <label for="a">Invite someone</label><label for="b">${'${escapeHtml(f.label)}'}</label><label class="p">Project: <select><option>all projects</option></select></label>
     <label><input type="radio" value="x"> Write my own title</label>\${field('url', 'Web address', '')}{ key: 'k', label: 'Ticket prefix', question: 'q' }
-    control({ key: 'c', title: 'Work cap', default: '0' }) ['board', 'Board view', \`/board\`] { id: 'styles', title: 'Page styles' }`);
+    { key: 'o', label: 'Old loop\\'s user id', question: 'q' } control({ key: 'c', title: 'Work cap', default: '0' }) ['board', 'Board view', \`/board\`] { id: 'styles', title: 'Page styles' }`);
   assert.deepEqual(labels.map((l) => `${l.kind}: ${l.text}`), [
     'button: Post reply', 'toggle: Add Task', 'column heading: Last change', 'icon button: Delete ticket', 'tab title: New project', 'trail step: Set up a project',
     'field label: Invite someone', 'field label: Project:', 'field label: Write my own title', 'field label: Web address', 'field label: Ticket prefix',
-    'field label: Work cap', 'tab: Board view', 'tab: Page styles',
+    "field label: Old loop's user id", 'field label: Work cap', 'tab: Board view', 'tab: Page styles',
   ]);
 });

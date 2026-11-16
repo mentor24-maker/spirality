@@ -89,3 +89,17 @@ test('the label check: a box needs a label for it, a label round it or an aria-l
   assert.ok(!INSTRUCTION.test('their@email.com'));
   assert.ok(!INSTRUCTION.test('docs'));
 });
+
+test('forms whose own layout rules were removed are .fields forms, and a locked box looks locked (SP-325 review)', () => {
+  const page = SOURCES.map(read).join('\n');
+  // Add Topic and Add a Member lost their own label and row rules in SP-325, so the .fields grid lays them out.
+  assert.match(page, /<form class="create-topic fields">/);
+  assert.match(page, /<form class="invite members fields">/);
+  const css = read('./web/app.css');
+  // Slug and Ticket Prefix on Edit Project are disabled: muted like a read-only box, never the white typing box.
+  assert.match(css, /:is\(input, select, textarea\):is\(\[readonly\], :disabled\) \{[^}]*background: var\(--bg-hover\)/);
+  // Keyboard focus shows the focus ring, not only the border a click gives.
+  assert.match(css, /:is\(input, select, textarea\):focus-visible \{[^}]*var\(--focus-ring-color\)/);
+  // The Reporting custom range's date boxes keep their own width, so the counts table does not widen.
+  assert.match(css, /table\.counts th\.custom-range :is\(input, select\) \{[^}]*width: auto;/);
+});

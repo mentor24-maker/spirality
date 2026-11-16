@@ -2070,14 +2070,16 @@ export function renderSetupForm(fields, answers = null) {
   const box = (f) => {
     const id = `setup-${escapeHtml(f.key)}`;
     const value = setupFieldText(f, answers);
-    const attrs = `name="${escapeHtml(f.key)}" data-default="${escapeHtml(f.default ?? '')}"${f.required ? ' required' : ''} autocapitalize="off" spellcheck="false"`;
+    // A list's question ends "(comma between)" for the command-line wizard; the hint says it once, so drop it there.
+    const question = f.list ? String(f.question ?? '').replace(/\s*\(comma between\)$/, '') : f.question;
+    const hint = [f.label && f.label !== f.question ? question : '', f.list ? 'Commas between; "none" for none.' : ''].filter(Boolean).join('. ');
+    const attrs = `name="${escapeHtml(f.key)}" data-default="${escapeHtml(f.default ?? '')}"${f.required ? ' required' : ''}${hint ? ` aria-describedby="${id}-hint"` : ''} autocapitalize="off" spellcheck="false"`;
     const input = f.key === 'description'
       ? `<textarea id="${id}" ${attrs}>${escapeHtml(value)}</textarea>`
       : `<input type="text" id="${id}" ${attrs} value="${escapeHtml(value)}">`;
-    const hint = [f.label && f.label !== f.question ? f.question : '', f.list ? 'Commas between; "none" for none.' : ''].filter(Boolean).join('. ');
     return `
       <label for="${id}">${escapeHtml(f.label ?? f.question)}</label>
-      ${hint ? `<span class="hint">${escapeHtml(hint)}</span>` : ''}
+      ${hint ? `<span class="hint" id="${id}-hint">${escapeHtml(hint)}</span>` : ''}
       ${input}
       <span class="note field-note" data-for="${escapeHtml(f.key)}"></span>`;
   };
@@ -2448,7 +2450,7 @@ export function renderTopics({ projects, project, topics = [], tags = [] }, { ti
       <section class="topics-half" aria-labelledby="topics-title">
         <details class="colex add-topic"${problem ? ' open' : ''}>
           <summary><span class="fold" aria-hidden="true"></span>Add Topic</summary>
-          <form class="create-topic">
+          <form class="create-topic fields">
             <label for="topic-name">Name</label>
             <input id="topic-name" name="name" maxlength="200" autocomplete="off">
             <label for="topic-description">Description</label>

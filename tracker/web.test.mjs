@@ -4219,7 +4219,7 @@ test('the Tasks toolbar picks a project from a dropdown, "Project: ", the one in
   assert.match(draw, /<div class="toolbar">\s*\$\{renderProjectPicker\(projects, board\.project\)\}\s*\$\{searchForm\(''\)\}\s*<button type="button" class="pipeline-pod"[^>]*><\/button>\s*<\/div>\s*<\/div>\s*\$\{viewSwitch\(board\.project, view\)\}/);
   assert.doesNotMatch(app, /Change project/);
   assert.match(draw, /querySelector\('\.project-picker select'\)\.addEventListener\('change', \(e\) => \{\s*history\.pushState\(null, '', at\(view, e\.target\.value\)\);\s*route\(\);/);
-  assert.match(readFileSync(WEB('app.css'), 'utf8'), /\.toolbar \.project-picker \{ display: flex;/);
+  assert.match(readFileSync(WEB('app.css'), 'utf8'), /\.toolbar \.project-picker \{[^}]*display: flex;/);
 });
 
 test('search bolds every occurrence of the term, any case, after escaping the ticket\'s own text', () => {
@@ -4476,8 +4476,11 @@ test('the setup form asks the wizard\'s own questions with their defaults, and s
     const fields = setupFields(h.setup, 'press-play');
     const html = renderSetupForm(fields);
     assert.deepEqual([...html.matchAll(/name="([A-Za-z]+)"/g)].map((m) => m[1]), SETUP_FIELDS.map((f) => f.key));
-    assert.match(html, /<label for="setup-projectName">Project Name<\/label>\s*<span class="hint">Project name, as the tracker shows it<\/span>/, 'a Title Case label, the wizard\'s question under it (SP-325)');
-    assert.match(html, /name="trackerPrefix" data-default="PR" autocapitalize="off" spellcheck="false" value="PR">/);
+    assert.match(html, /<label for="setup-projectName">Project Name<\/label>\s*<span class="hint" id="setup-projectName-hint">Project name, as the tracker shows it<\/span>/, 'a Title Case label, the wizard\'s question under it (SP-325)');
+    assert.match(html, /name="trackerPrefix" data-default="PR" aria-describedby="setup-trackerPrefix-hint" autocapitalize="off" spellcheck="false" value="PR">/);
+    // A list's hint says "commas between" once, and its box points a screen reader at the hint.
+    assert.match(html, /<span class="hint" id="setup-autoMergeLanes-hint">Lanes that may merge without you\. Commas between; &quot;none&quot; for none\.<\/span>/);
+    assert.doesNotMatch(html, /\(comma between\)/);
     assert.match(html, /<textarea id="setup-description"/);
     assert.match(html, /<span class="note field-note" data-for="githubRepo"><\/span>/);
     // Saved answers fill it in: a list with commas, an empty list as "none".
@@ -4518,7 +4521,7 @@ test('the setup form asks the ClickUp questions only for a project whose checkou
     assert.deepEqual(keys('wave-thing'), [...SETUP_FIELDS.map((f) => f.key), ...clickupKeys]);
     const fields = setupFields(h.setup, 'wave-thing');
     const html = renderSetupForm(fields);
-    assert.match(html, /<label for="setup-clickupListId">ClickUp Loop Queue List<\/label>\s*<span class="hint">Does this project already run a loop on ClickUp\?/);
+    assert.match(html, /<label for="setup-clickupListId">ClickUp Loop Queue List<\/label>\s*<span class="hint" id="setup-clickupListId-hint">Does this project already run a loop on ClickUp\?/);
     assert.ok(!/name="clickupOperatorId"[^>]*required/.test(html), 'needed only with a list, which the checker says by name');
 
     // A list without the seats: refused, naming the field, nothing written.
@@ -5603,7 +5606,7 @@ test('the Topics page lists the picked project\'s topics newest first, every nam
   assert.ok(html.indexOf('data-topic="2"') < html.indexOf('data-topic="1"'), 'in the order the server lists them (newest first)');
   assert.match(html, /<option value="alpha" selected>Alpha &lt;One&gt;<\/option>/, 'the picked project is chosen in the picker');
   assert.match(html, /<summary><span class="fold" aria-hidden="true"><\/span>Add Topic<\/summary>/);
-  assert.match(html, /<form class="create-topic">[\s\S]*<label for="topic-name">Name<\/label>[\s\S]*<label for="topic-description">Description<\/label>[\s\S]*<button type="submit" class="btn btn-primary">Create Topic<\/button>/);
+  assert.match(html, /<form class="create-topic fields">[\s\S]*<label for="topic-name">Name<\/label>[\s\S]*<label for="topic-description">Description<\/label>[\s\S]*<button type="submit" class="btn btn-primary">Create Topic<\/button>/);
   assert.doesNotMatch(html, /<b>|<One>|<D>/, 'nothing unescaped');
   assert.doesNotMatch(html, /No topics yet/);
   const empty = renderTopics({ projects, project, topics: [] }, { timeOf: String });
@@ -5629,7 +5632,7 @@ test('Add Topic is a colex at the top of the Topics half, closed on arrival and 
   const topics = [{ id: 1, name: 'Billing', description: '', createdByName: 'Dane', createdAt: 'x' }];
   const html = renderTopics({ projects, project: projects[0], topics }, { timeOf: String });
   const half = html.slice(html.indexOf('<section class="topics-half"'), html.indexOf('<section class="tags-half"'));
-  assert.match(half, /<details class="colex add-topic">\s*<summary>[\s\S]*Add Topic<\/summary>\s*<form class="create-topic">[\s\S]*<\/form>\s*<\/details>/, 'closed, holding the form');
+  assert.match(half, /<details class="colex add-topic">\s*<summary>[\s\S]*Add Topic<\/summary>\s*<form class="create-topic fields">[\s\S]*<\/form>\s*<\/details>/, 'closed, holding the form');
   assert.ok(half.indexOf('<details class="colex add-topic"') < half.indexOf('<h2 id="topics-title">'), 'the form comes before the list');
   assert.ok(half.indexOf('<h2 id="topics-title">') < half.indexOf('<table class="projects topic-list">'));
   assert.doesNotMatch(html, /<h2>Create Topic<\/h2>/, 'no separate Create Topic heading any more');
