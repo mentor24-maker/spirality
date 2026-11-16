@@ -6,7 +6,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { contrast, renderConsole, renderConsoleTile, MAP_AREAS, MAP_UNITS, placeArea, driftOf, liveFade, slotShare, moreOpens, moreFeatures, tileSizeClass, TILE_MAX, TILE_MIN, TILE_COMPACT, TILE_TINY, LIVE_FADE_FLOOR, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, consoleFeature, featureColourIndex, renderFeatureKey, FEATURE_PALETTE, capInFlightText } from './web/render.mjs';
+import { contrast, renderConsole, renderDetours, detourPathData, MAP_DETOURS, DETOURS_KEY, renderConsoleTile, MAP_AREAS, MAP_UNITS, placeArea, driftOf, liveFade, slotShare, moreOpens, moreFeatures, tileSizeClass, TILE_MAX, TILE_MIN, TILE_COMPACT, TILE_TINY, LIVE_FADE_FLOOR, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, consoleFeature, featureColourIndex, renderFeatureKey, FEATURE_PALETTE, capInFlightText } from './web/render.mjs';
 import { pageScript } from './pageScripts.mjs';
 import { WEB, drawnCss } from './webTestKit.mjs';
 
@@ -112,7 +112,7 @@ test('the Console map: an area per stage in the loop\'s order, each with its nam
   assert.match(area('Needs your input'), /<a class="tile waiting" data-x=[^>]*href="\/t\/BE-1"/);
   assert.match(html, /<section class="console-other"><h2>Other Statuses<\/h2><div class="tiles"><a class="tile" href="\/t\/AL-2"/);
   assert.doesNotMatch(html, /style="/, 'places are data, never a style attribute');
-  assert.match(renderConsole(null, CONSOLE_NOW), /^<div class="console"><div class="console-map"[^>]*>(<section class="map-area"[\s\S]*?<\/section>){8}<\/div><\/div>$/);
+  assert.match(renderConsole(null, CONSOLE_NOW), /^<div class="console"><div class="console-map"[^>]*>(<section class="map-area"[\s\S]*?<\/section>){8}<svg class="map-detours"[\s\S]*?<\/svg><\/div><p class="map-detours-key quiet">[^<]+<\/p><\/div>$/);
 });
 
 test('the Console map\'s areas tile the map with no overlap, the main path round the edge and the two detours inside it (SP-333)', () => {
@@ -135,6 +135,56 @@ test('the Console map\'s areas tile the map with no overlap, the main path round
   const eps = 1e-9;
   for (const a of drawn) for (const b of drawn) if (a !== b) assert.ok(!(a.x + eps < b.x + b.w && b.x + eps < a.x + a.w && a.y + eps < b.y + b.h && b.y + eps < a.y + a.h), `${a.status} drawn over ${b.status}`);
   assert.deepEqual(MAP_AREAS.map((a) => a.status).sort(), ['Building', 'In review', 'Live', 'Needs your input', 'Queued', 'Ready to launch', 'Requested', 'Rework']);
+});
+
+test('the detours are drawn as arrows for every route the code sends a ticket by, into and out of Needs your input and Rework, and no other (SP-334)', () => {
+  const routes = MAP_DETOURS.map((d) => `${d.from} -> ${d.to}`).sort();
+  assert.deepEqual(routes, [
+    'Building -> Needs your input',
+    'In review -> Needs your input',
+    'In review -> Rework',
+    'Needs your input -> Live',
+    'Needs your input -> Queued',
+    'Needs your input -> Rework',
+    'Requested -> Needs your input',
+    'Rework -> Building',
+  ]);
+  const detours = ['Needs your input', 'Rework'];
+  for (const d of MAP_DETOURS) assert.ok(detours.includes(d.from) || detours.includes(d.to), `${d.from} -> ${d.to} touches a detour`);
+  assert.ok(!MAP_DETOURS.some((d) => d.from === 'Ready to launch' || d.to === 'Ready to launch'), 'Ready to launch is on the main path, not a detour');
+  // Each arrow starts in the area it leaves and its point lands in the area it enters.
+  const at = Object.fromEntries(MAP_AREAS.map((a) => [a.status, a]));
+  const inArea = ([x, y], a) => x > a.x && x < a.x + a.w && y > a.y && y < a.y + a.h;
+  for (const d of MAP_DETOURS) {
+    assert.ok(inArea(d.path[0], at[d.from]), `${d.from} -> ${d.to} starts in ${d.from}`);
+    assert.ok(inArea(d.path[d.path.length - 1], at[d.to]), `${d.from} -> ${d.to} ends in ${d.to}`);
+    assert.ok(['input', 'rework'].includes(d.kind));
+    assert.equal(d.kind, d.from === 'Rework' || d.to === 'Rework' ? 'rework' : 'input', `${d.from} -> ${d.to} is coloured by its detour`);
+  }
+});
+
+test('the detours SVG: in map units over the map, one titled group per route, the head pointing along the last stretch, and a line under the map (SP-334)', () => {
+  const svg = renderDetours();
+  assert.match(svg, /^<svg class="map-detours" viewBox="0 0 160 100" role="img" aria-label="Detours: Requested to Needs your input; [^"]+">/);
+  const groups = [...svg.matchAll(/<g class="detour detour-(input|rework)" data-from="([^"]+)" data-to="([^"]+)"><title>([^<]+)<\/title><path class="detour-line" d="([^"]+)"\/><path class="detour-head" d="([^"]+)"\/><\/g>/g)];
+  assert.equal(groups.length, MAP_DETOURS.length);
+  assert.match(groups[0][4], /^Requested → Needs your input: /);
+  assert.doesNotMatch(svg, /style="/);
+  // A rightward arrow from (33, 58) to (43, 58): the line stops at the head's base, the head points right.
+  const { line, head } = detourPathData([[33, 58], [43, 58]]);
+  assert.equal(line, 'M33 58 L40.8 58');
+  assert.equal(head, 'M43 58 L40.8 59.3 L40.8 56.7 Z');
+  const up = detourPathData([[70, 37.5], [70, 28]]);
+  assert.match(up.head, /^M70 28 L/);
+  const html = renderConsole(null, CONSOLE_NOW);
+  assert.ok(html.indexOf('<svg class="map-detours"') > html.lastIndexOf('<section class="map-area"'), 'drawn after the areas, so over their backgrounds');
+  assert.ok(html.includes(`<p class="map-detours-key quiet">${DETOURS_KEY}</p>`));
+  const css = readFileSync(WEB('app.css'), 'utf8');
+  assert.match(css, /\.map-detours \{ position: absolute; inset: 0;[^}]*z-index: 1;[^}]*pointer-events: none; \}/);
+  assert.match(css, /\.console-map \.tile \{[^}]*z-index: 2; \}/, 'tiles sit over the arrows');
+  assert.match(css, /\.console-map \.tile\.more\[open\] \{ z-index: 3; \}/, 'an open More list rises over the other tiles');
+  assert.match(css, /\.map-detours \.detour-rework \{ --detour: var\(--map-rework\); \}/);
+  assert.match(css, /@media \(max-width: 700px\) \{[\s\S]*?\.map-detours, \.map-detours-key \{ display: none; \}/, 'a stacked phone view has no map for arrows to cross');
 });
 
 test('in Queued the next to build sits nearest the exit toward Building, the rest in build order; the same answer always draws the same places (SP-333)', () => {

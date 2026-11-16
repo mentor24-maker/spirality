@@ -741,8 +741,17 @@ table.spirality-docs td.date { white-space: nowrap; }
 .map-area h2 .count { margin-left: auto; }
 .map-area.coloured h2, .map-area.coloured h2 .quiet { color: var(--stage-text); }
 .map-area > .tiles { position: absolute; inset: 0; display: block; pointer-events: none; }
-.console-map .tile { position: absolute; left: calc(var(--at-x) * 100%); top: calc(var(--at-y) * 100%); width: calc(var(--at-size) * 100%); height: auto; aspect-ratio: 1; box-sizing: border-box; pointer-events: auto; }
+.console-map .tile { position: absolute; left: calc(var(--at-x) * 100%); top: calc(var(--at-y) * 100%); width: calc(var(--at-size) * 100%); height: auto; aspect-ratio: 1; box-sizing: border-box; pointer-events: auto; z-index: 2; }
 .console-map .tile[data-fade] { opacity: var(--at-fade); }
+/* SP-334: the detours' arrows (render.mjs MAP_DETOURS) lie over the areas in the map's own units and under the tiles;
+   an open +N More list rises over every other tile. Each arrow is the colour of the detour it enters or leaves. */
+.console-map .tile.more[open] { z-index: 3; }
+.map-detours { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 1; overflow: visible; pointer-events: none; }
+.map-detours .detour { --detour: var(--map-needs-input); pointer-events: visiblePainted; cursor: help; }
+.map-detours .detour-rework { --detour: var(--map-rework); }
+.map-detours .detour-line { fill: none; stroke: var(--detour); stroke-width: 0.6; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 1.6 1; }
+.map-detours .detour-head { fill: var(--detour); stroke: none; }
+.map-detours-key { margin: 0.5rem 0 0; font-size: var(--text-sm); }
 .tile-compact .tile-facts, .tile-tiny .tile-facts { display: none; }
 .tile-compact .tile-number, .tile-tiny .tile-number { top: 0; bottom: 0; display: flex; align-items: center; justify-content: center; font-size: var(--text-sm); }
 .tile-compact .tile-prefix { display: none; }
@@ -766,6 +775,7 @@ table.spirality-docs td.date { white-space: nowrap; }
   .map-area { position: static; width: auto; height: auto; padding-bottom: 0.5rem; }
   .map-area > .tiles { position: static; display: flex; flex-wrap: wrap; gap: var(--space-3); padding: 0 0.5rem; pointer-events: auto; }
   .console-map .tile { position: relative; left: auto; top: auto; width: 8rem; }
+  .map-detours, .map-detours-key { display: none; }
 }
 .tiles { display: flex; flex-wrap: wrap; gap: var(--space-3); }
 .tile { position: relative; display: flex; flex-direction: column; width: 8rem; height: 8rem; background: var(--bg-surface); border: 1px solid var(--border-black); border-radius: var(--radius-btn); overflow: hidden; color: var(--ink-primary); text-decoration: none; }

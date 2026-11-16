@@ -3153,13 +3153,87 @@ export function moreFeatures(hidden) {
 }
 
 /**
+ * The detours (SP-334): every route a ticket takes into or out of Needs your
+ * input and Rework, drawn as arrows over the map, in map units. Each route is
+ * the code's, not a picture's:
+ *  - Requested → Needs your input: loop-intake writes the spec and asks for
+ *    the operator's go; every new ticket takes this route once.
+ *  - Building / In review → Needs your input: `ask` mid-build or mid-review.
+ *  - Needs your input → Queued, Rework or Live: the relay's hand-back of his
+ *    answer (lib/busRelayPlan.js handbackDestination): no pull request yet,
+ *    Queued ("go" is one such answer); an open one, Rework; a close word or a
+ *    merged one, Live.
+ *  - In review → Rework: loop-review's send-back.
+ *  - Rework → Building: loop-build claims Rework before fresh work
+ *    (lib/loopStatuses.js CLAIMABLE_BY_BUILD).
+ * Ready to launch is not a detour: every pull request waits there for his
+ * merge word. A dead pass's ticket handed back from Building (pass-reconcile)
+ * is a repair, not a route work is meant to take, so it is not drawn.
+ * `via` is the points between, `kind` which detour the arrow belongs to (its
+ * colour). Short arrows cross the border two areas share, in its padding and
+ * header, so they stay clear of the tiles.
+ */
+export const MAP_DETOURS = Object.freeze([
+  { from: 'Requested', to: 'Needs your input', kind: 'input', why: 'A new request: its spec waits for your go', path: [[33, 58], [43, 58]] },
+  { from: 'Needs your input', to: 'Queued', kind: 'input', why: 'Your go, or an answer before anything is built: back to Queued', path: [[70, 37.5], [70, 28]] },
+  { from: 'Building', to: 'Needs your input', kind: 'input', why: 'A question for you mid-build', path: [[90, 28], [83, 31.2], [75, 34.5]] },
+  { from: 'In review', to: 'Needs your input', kind: 'input', why: 'A question for you mid-review', path: [[128, 61], [126, 63], [79, 63]] },
+  { from: 'Needs your input', to: 'Rework', kind: 'rework', why: 'Your answer on a ticket with an open pull request: back to Rework', path: [[77, 59], [87, 59]] },
+  { from: 'Needs your input', to: 'Live', kind: 'input', why: 'Your close word, or its pull request already merged: Live', path: [[56, 59], [56, 69]] },
+  { from: 'In review', to: 'Rework', kind: 'rework', why: 'Review sends it back', path: [[129, 45], [119, 45]] },
+  { from: 'Rework', to: 'Building', kind: 'rework', why: 'The build loop takes Rework before fresh work', path: [[108, 37.5], [108, 28]] },
+].map((d) => Object.freeze({ ...d, path: Object.freeze(d.path.map((p) => Object.freeze(p))) })));
+
+/** An arrowhead's length and half its width, in map units. */
+const HEAD_LONG = 2.2;
+const HEAD_HALF = 1.3;
+
+/** An arrow's line and its head as SVG path data, the head pointing along the last stretch. */
+export function detourPathData(path) {
+  const pts = path.map(([x, y]) => [tidy(x), tidy(y)]);
+  const [tx, ty] = pts[pts.length - 1];
+  const [px, py] = pts[pts.length - 2];
+  const len = Math.hypot(tx - px, ty - py) || 1;
+  const ux = (tx - px) / len;
+  const uy = (ty - py) / len;
+  const bx = tx - ux * HEAD_LONG;
+  const by = ty - uy * HEAD_LONG;
+  // The line stops at the head's base, so its end does not poke through the point.
+  const line = [...pts.slice(0, -1), [bx, by]].map(([x, y], i) => `${i ? 'L' : 'M'}${tidy(x)} ${tidy(y)}`).join(' ');
+  const head = `M${tx} ${ty} L${tidy(bx - uy * HEAD_HALF)} ${tidy(by + ux * HEAD_HALF)} L${tidy(bx + uy * HEAD_HALF)} ${tidy(by - ux * HEAD_HALF)} Z`;
+  return { line, head };
+}
+
+/**
+ * The detours as one SVG laid over the map (SP-334), in the map's own units
+ * (viewBox MAP_UNITS), so each arrow stays on the border it crosses as the
+ * map scales. Each arrow is a `detour detour-<kind>` group naming its route
+ * (`data-from`, `data-to`) with a hover title saying when a ticket takes it.
+ */
+export function renderDetours() {
+  const arrows = MAP_DETOURS.map((d) => {
+    const { line, head } = detourPathData(d.path);
+    return `<g class="detour detour-${d.kind}" data-from="${escapeHtml(d.from)}" data-to="${escapeHtml(d.to)}">`
+      + `<title>${escapeHtml(`${d.from} → ${d.to}: ${d.why}`)}</title>`
+      + `<path class="detour-line" d="${line}"/><path class="detour-head" d="${head}"/></g>`;
+  });
+  const said = MAP_DETOURS.map((d) => `${d.from} to ${d.to}`).join('; ');
+  return `<svg class="map-detours" viewBox="0 0 ${MAP_UNITS.width} ${MAP_UNITS.height}" role="img" aria-label="${escapeHtml(`Detours: ${said}`)}">${arrows.join('')}</svg>`;
+}
+
+/** The line under the map saying what the arrows are. */
+export const DETOURS_KEY = 'Arrows mark the detours, Needs your input and Rework: every ticket in them costs a round trip, so a healthy board keeps them small.';
+
+/**
  * The Console as HTML (SP-333, replacing SP-233's stage columns): the
  * Features key (renderFeatureKey) over the map, MAP_AREAS each a
  * `map-area` with its name, its count and its tiles placed by placeArea. The
  * map's areas come in the loop's own order, so a narrow screen, which stacks
  * them, reads the same path. Live shows the launches /in-flight sends (the last day's, on the server's clock), each
- * fading with age. A ticket whose status is not on the map is listed under
- * it ("Other Statuses"), so no ticket is ever left off.
+ * fading with age. The detours' arrows (renderDetours, SP-334) lie over the
+ * areas, with a line under the map saying what they are. A ticket whose
+ * status is not on the map is listed under it ("Other Statuses"), so no
+ * ticket is ever left off.
  */
 export function renderConsole(answer, now = Date.now()) {
   const tickets = Array.isArray(answer?.tickets) ? answer.tickets : [];
@@ -3191,7 +3265,8 @@ export function renderConsole(answer, now = Date.now()) {
   const other = others.length
     ? `<section class="console-other"><h2>Other Statuses</h2><div class="tiles">${others.map((t) => tile(t)).join('')}</div></section>`
     : '';
-  return `${renderFeatureKey(shown)}<div class="console"><div class="console-map" role="group" aria-label="The loop">${MAP_AREAS.map(areaHtml).join('')}</div>${other}</div>`;
+  return `${renderFeatureKey(shown)}<div class="console"><div class="console-map" role="group" aria-label="The loop">${MAP_AREAS.map(areaHtml).join('')}${renderDetours()}</div>`
+    + `<p class="map-detours-key quiet">${escapeHtml(DETOURS_KEY)}</p>${other}</div>`;
 }
 
 // ── Suggest Next Tasks (SP-251) ──────────────────────────────────────────────
