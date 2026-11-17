@@ -14,15 +14,21 @@
  * under that project's Doppler project, for its hand-run tracker sign-in.
  *
  * It prints one row per thing it checked, each naming what it checked and
- * ending `ready`, `will do` (the setup does it later), `BLOCKED: <why>` or
+ * ending `ready`, `will do` (the setup does it later), `noted: <why>` (a
+ * known limit, said plainly, that stops nothing), `BLOCKED: <why>` or
  * `could not tell: <why>`. A check that could not run is never `ready`.
  *
  *   GitHub   the repository exists; this Mac's gh can push to it; whether
- *            GitHub will protect its main branch (`not protected` is fine,
- *            a "403 Upgrade" is BLOCKED). An empty repository (no commit,
- *            no branch) is `will do`: the setup's start step makes its first
- *            commit (SP-154), and the protect, Node and check rows say they
- *            wait for it.
+ *            GitHub will protect its main branch (`not protected` is fine).
+ *            GitHub's "403 Upgrade to GitHub Pro or make this repository
+ *            public" (a private repository on the Free plan) is `noted`, not
+ *            BLOCKED: main is not locked, the loop's merge gate still needs a
+ *            green verify, and a later run locks it once GitHub allows.
+ *            An empty repository (no commit, no branch) is `will do`: the
+ *            setup's start step makes its first commit (SP-154), and the
+ *            Node and check rows say they wait for it; its protect row asks
+ *            GitHub's rulesets, which answer with no branch, so the plan's
+ *            refusal shows up front, not at the last step.
  *   The Mini the checkout folder (absent, or on a clean main of the right
  *            repository); this Mac's Node against what the project needs;
  *            `claude` and `doppler` signed in.
@@ -63,6 +69,8 @@ export const READY = 'ready';
 export const WILL_DO = 'will do';
 export const BLOCKED = 'blocked';
 export const UNKNOWN = 'unknown';
+/** A known limit, said in plain words, that stops nothing (a private repository GitHub will not protect). */
+export const NOTED = 'noted';
 
 const row = (item, verdict, why, detail = []) => ({ item, verdict, why, detail });
 
@@ -71,6 +79,7 @@ export function formatRow(r) {
   const head = {
     [READY]: `ready (${r.why})`,
     [WILL_DO]: `will do (${r.why})`,
+    [NOTED]: `noted: ${r.why}`,
     [BLOCKED]: `BLOCKED: ${r.why}`,
     [UNKNOWN]: `could not tell: ${r.why}`,
   }[r.verdict];
@@ -91,7 +100,8 @@ export function summaryLine(rows) {
   const code = exitCodeFor(rows);
   if (code === 3) return `look: ${count(BLOCKED)} BLOCKED (above). Nothing should be set up until they are cleared.`;
   if (code === 1) return `look: nothing BLOCKED, but ${count(UNKNOWN)} could not be told (above), so this is not a clean bill.`;
-  return `look: nothing is BLOCKED. ${count(WILL_DO)} item(s) the setup will do, ${count(READY)} already ready.`;
+  const noted = count(NOTED);
+  return `look: nothing is BLOCKED. ${count(WILL_DO)} item(s) the setup will do, ${count(READY)} already ready${noted ? `, ${noted} noted (above)` : ''}.`;
 }
 
 /** Terminal colour and cursor codes, which a test runner prints and a log should not keep. */
@@ -148,6 +158,24 @@ export function readRepo(r, repo) {
   return { rows, info: { branch, visibility, permission } };
 }
 
+/**
+ * GitHub refusing to protect a branch because of the repository's plan: a
+ * private repository on GitHub Free ("Upgrade to GitHub Pro or make this
+ * repository public to enable this feature."). Held to the 403 and that
+ * message, so no other refusal is taken for it (DOCTRINE: a step that fails
+ * says so).
+ */
+export function planRefusesProtection({ status, message } = {}) {
+  return status === 403 && /upgrade to github pro|make this repository public/i.test(String(message ?? ''));
+}
+
+/** What the look and the protect step say when GitHub's plan will not protect `branch`. */
+export function planNote(branch, message) {
+  return `GitHub will not lock ${branch} on this repository's plan, a private repository on GitHub Free ("${message}"). `
+    + `The loop's merge gate still merges only a pull request whose verify is green; only a direct push to ${branch} goes unchecked. `
+    + `Making the repository public, or GitHub Pro (a billing screen), lets a later run of the setup lock it`;
+}
+
 /** `gh api repos/<repo>/branches/<branch>/protection` -> the protection row. */
 export function readProtection(r, branch) {
   const item = `GitHub: protecting ${branch}`;
@@ -170,10 +198,23 @@ export function readProtection(r, branch) {
     return row(item, WILL_DO, `not protected yet, which is fine; the setup protects it once verify passes on ${branch}`);
   }
   if (status === 404 && /branch not found/i.test(message)) return row(item, BLOCKED, `GitHub has no branch ${branch}`);
-  if (status === 403 && /upgrade/i.test(message)) {
-    return row(item, BLOCKED, `GitHub will not protect ${branch} on this repository's plan ("${message}"). Upgrading is a billing screen; making the repository public is a decision`);
-  }
+  if (planRefusesProtection({ status, message })) return row(item, NOTED, planNote(branch, message));
   return row(item, UNKNOWN, `GitHub answered ${status ?? 'with an error'}: ${message}`);
+}
+
+/**
+ * `gh api repos/<repo>/rulesets` on an empty repository -> the protection
+ * row. With no branch there is no branch protection to read, but the
+ * rulesets answer anyway, and give the same plan 403 (SP-382), so a private
+ * repository on GitHub Free is told now, not at the setup's last step.
+ */
+export function readEmptyProtection(r) {
+  const item = 'GitHub: protecting main';
+  if (r.error) return row(item, UNKNOWN, `could not run gh (${r.error.code || r.error.message})`);
+  if (r.status === 0) return row(item, WILL_DO, `the repository is empty, so there is no main yet; it waits for the first commit the setup's start step makes, then the protect step protects main once verify passes on it`);
+  const { status, message } = ghApiFailure(r);
+  if (planRefusesProtection({ status, message })) return row(item, NOTED, planNote('main', message));
+  return row(item, UNKNOWN, `GitHub answered ${status ?? 'with an error'} asking for the repository's rulesets: ${message}`);
 }
 
 // --- The Mini -------------------------------------------------------------
@@ -533,7 +574,7 @@ export async function look({ answers, homeConfig, runCheck = true, deps }) {
   const branch = repoView.info?.branch ?? null;
   if (!repoView.info) rows.push(row('GitHub: protecting the main branch', UNKNOWN, 'the repository could not be read'));
   else if (!branch && repoView.info.permission !== 'ADMIN') rows.push(row('GitHub: protecting main', BLOCKED, 'protecting a branch needs an admin of the repository, and this Mac\'s gh is not one'));
-  else if (!branch) rows.push(row('GitHub: protecting main', WILL_DO, `the repository is empty, so there is no main yet; it waits for the first commit the setup's start step makes, then the protect step protects main once verify passes on it`));
+  else if (!branch) rows.push(readEmptyProtection(run('gh', ['api', `repos/${repo}/rulesets`])));
   else if (repoView.info.permission !== 'ADMIN') rows.push(row(`GitHub: protecting ${branch}`, BLOCKED, 'protecting a branch needs an admin of the repository, and this Mac\'s gh is not one'));
   else rows.push(readProtection(run('gh', ['api', `repos/${repo}/branches/${branch}/protection`]), branch));
 

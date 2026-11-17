@@ -334,8 +334,8 @@ The items below marked **missing**, gathered here so they can become tickets:
   exist, is Dane's decision.
 - **An empty repository** (SP-154). A repository made on GitHub with no
   files has no `main` branch yet. The look says so as `will do`, not
-  BLOCKED: protecting `main`, the Node version and the check all wait for
-  the first commit. The wizard's `start` step, right after the look, makes
+  BLOCKED: protecting `main` (unless GitHub's plan refuses it, below), the
+  Node version and the check all wait for the first commit. The wizard's `start` step, right after the look, makes
   that commit and pushes it to `main`: the minimum the setup runs on, from
   `scripts/onboard/templates/starter/` (a `package.json` whose
   `npm run verify` runs the tests, with `engines.node` from the answers'
@@ -358,6 +358,33 @@ The items below marked **missing**, gathered here so they can become tickets:
   pull request failed CI that way). The fix it names: in a checkout of
   `main`, run `npm install --package-lock-only`, commit the
   `package-lock.json` it makes, push it, and run the setup again.
+- **A private repository on GitHub Free** (SP-382, Cassidy). GitHub will
+  not protect a branch on a private repository on the Free plan: it answers
+  `403 Upgrade to GitHub Pro or make this repository public to enable this
+  feature.` The setup treats that as a known outcome, not a stop. The look
+  shows the `GitHub: protecting main` row as `noted`, not BLOCKED; on an
+  empty repository it asks GitHub's rulesets (`gh api
+  repos/<owner>/<name>/rulesets`), which answer with no branch, so the
+  refusal shows before anything is set up, not at the last step. The
+  `protect` step finishes with the note `main NOT locked: ...` in its output,
+  the step log and the state file, so the setup ends `finished` and its
+  closing lines say `main` is not locked. It never says "main protected".
+  - **Why it is still safe.** The relay's merge gate
+    (`lib/mergeOnComment.js`) refuses a pull request with no checks, or with
+    a check that is not green, so the loop still merges only work whose
+    `verify` passed. GitHub's lock is a second guard, not the only one. What
+    goes unchecked is a direct push to `main`, which no loop makes.
+  - **Getting the lock later.** Make the repository public (a decision), or
+    move the account to GitHub Pro, about $4 a month (a billing screen).
+    Then run the setup again: the note never counts as done, so the rerun
+    tries the `protect` step again, protects `main` and reads it back.
+  - **The next limit.** A private repository on Free gets 2,000 GitHub
+    Actions minutes a month, and every pull request's and every merge's
+    `verify` spends them (for scale, Spirality used about 330 minutes in one
+    day of runs). Past that, CI stops until the month turns or the plan
+    changes.
+  - Any other answer still fails the step as before: another 403, a 404
+    other than "not protected", a refused PUT, or a read-back missing a rule.
 - **Check.**
   - `gh api repos/<owner>/<name>/branches/main/protection` shows
     `"contexts":["verify"]` and `"allow_force_pushes":{"enabled":false}`.
