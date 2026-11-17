@@ -80,7 +80,7 @@ test('every font size, corner and gap outside :root is a token', () => {
 
 test('every token used is defined in :root, or is one the page sets at run time', () => {
   const tokens = rootTokens(CSS);
-  const runTime = new Set(['--stage-tint', '--stage-text', '--stage-border', '--feature', '--area', '--at-x', '--at-y', '--at-w', '--at-h', '--at-size', '--at-fade']);
+  const runTime = new Set(['--stage-tint', '--stage-text', '--stage-border', '--feature', '--area', '--at-x', '--at-y', '--at-w', '--at-h', '--at-size', '--at-fade', '--detour']);
   const used = new Set([...CSS.matchAll(/var\((--[\w-]+)/g)].map((m) => m[1]));
   assert.deepEqual([...used].filter((name) => !tokens.has(name) && !runTime.has(name)), []);
 });
