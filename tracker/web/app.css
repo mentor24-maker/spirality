@@ -363,6 +363,25 @@ table.projects td.actions { white-space: nowrap; width: 1%; }
 .table-wrap:has(> table.counts) { max-width: 24rem; }
 .table-wrap:has(> table.counts.report) { max-width: 40rem; }
 .table-wrap:has(> table.counts.report.productivity) { max-width: 56rem; }
+/* Task Productivity (SP-368): the table on the left, its by-day chart right-aligned across from it; on a narrow window the chart drops below. */
+.productivity-row { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--space-5); }
+.productivity-row > .table-wrap { flex: 0 1 auto; min-width: 0; }
+.productivity-chart { flex: 1 1 20rem; max-width: 36rem; margin: 0 0 0 auto; padding: var(--space-3); border: 1px solid var(--border-strong); border-radius: var(--radius-input); background: var(--bg-surface); }
+.productivity-chart[hidden] { display: none; }
+.productivity-chart figcaption { display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--space-3); margin-bottom: var(--space-2); font-size: var(--text-sm); }
+.productivity-chart .chart-title { font-weight: 700; }
+.productivity-chart .chart-key { display: flex; gap: var(--space-4); color: var(--ink-secondary); }
+.productivity-chart .key::before { content: ""; display: inline-block; width: 0.7em; height: 0.7em; margin-right: var(--space-1); border-radius: var(--radius-sm); vertical-align: baseline; }
+.productivity-chart .key.started::before { background: var(--brand-blue); }
+.productivity-chart .key.finished::before { background: var(--status-ok); }
+.productivity-chart svg.chart { display: block; width: 100%; height: auto; }
+.productivity-chart rect.bar.started { fill: var(--brand-blue); }
+.productivity-chart rect.bar.finished { fill: var(--status-ok); }
+.productivity-chart .chart-label { font-size: var(--text-sm); fill: var(--ink-secondary); }
+.productivity-chart .chart-axis { stroke: var(--ink-secondary); stroke-width: 1; }
+.productivity-chart .chart-grid { stroke: var(--border-strong); stroke-width: 1; stroke-dasharray: 3 3; }
+.productivity-chart .chart-empty { margin: var(--space-5) 0; text-align: center; }
+@media (max-width: 800px) { .productivity-chart { flex-basis: 100%; max-width: none; margin-left: 0; } }
 table.counts th.custom-range { vertical-align: top; }
 table.counts th.custom-range label { display: block; }
 /* The custom range's date boxes: the browser's own date width and the table's smaller type, so the counts columns stay on one line. */
