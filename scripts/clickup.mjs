@@ -91,7 +91,7 @@ import { CLASS_FIELDS, classValue, LOOP_FILING_CLASS } from '../lib/ticketClass.
 import stageCounts from '../lib/stageCounts.js';
 // A ticket's `Waits on:` line (task 86bctfun6): the claim leaves it alone
 // until every ticket it names is closed.
-import { waitsOn, waitsOnText, holdReasons } from '../lib/waitsOn.js';
+import { waitsOn, waitsOnText, holdReasons, readWaitsOn } from '../lib/waitsOn.js';
 import { isNoticeboard } from '../lib/loopNoticeboards.js';
 import waitingOnOperator from '../lib/waitingOnOperator.js';
 import { ticketLine, findTicketId } from '../lib/clickupTicketLink.js';
@@ -753,6 +753,26 @@ function refuseBranchLinks(text, nothing) {
   const links = findBranchLinks(text);
   if (!links.length) return;
   console.error(`\n${branchLinkRefusal(links, nothing)}\n`);
+  process.exit(2);
+}
+
+/**
+ * Exit 2, before any write, when `text` has a `Waits on:` line with a piece
+ * that is not a ticket id or link. The claim reads that same line, and a
+ * piece it cannot read holds the ticket back for good, unseen until the
+ * ticket sits unclaimed; refusing it here says so while the writer is
+ * still at the keyboard.
+ */
+function refuseUnreadableWaitsOn(text, nothing) {
+  const { unparsed } = readWaitsOn(text);
+  if (!unparsed.length) return;
+  console.error('\nThe body has a "Waits on:" line the build loop cannot read, so the ticket would never be claimed.');
+  for (const piece of unparsed) console.error(`  not a ticket id or link: "${piece}"`);
+  console.error('Write each ticket it waits on as an id, optionally with its title in quotes, separated by commas:');
+  console.error('  Waits on: SP-333');
+  console.error('  Waits on: SP-333 ("title"), SP-334');
+  console.error('Move anything else (why it waits, what the other ticket does) to a line of its own.');
+  console.error(`${nothing}\n`);
   process.exit(2);
 }
 
@@ -1609,6 +1629,7 @@ if (cmd === 'whoami') {
     process.exit(2);
   }
   refuseBranchLinks(body, 'Nothing was created.');
+  refuseUnreadableWaitsOn(body, 'Nothing was created.');
   const classWanted = classFlags('Nothing was created.');
   const tags = arg('tags') ? arg('tags').split(',').map((s) => s.trim()).filter(Boolean) : undefined;
   const boardProblem = trackerBus.noticeboardFilingProblem({ status: arg('status'), tags });
@@ -1657,6 +1678,7 @@ if (cmd === 'whoami') {
   const quoted = findBlockquoteLines(body);
   if (quoted.length) { console.error(`The body has "> " blockquote lines (${quoted.join(', ')}). ClickUp DELETES them. Nothing was written.`); process.exit(2); }
   refuseBranchLinks(body, 'Nothing was written.');
+  refuseUnreadableWaitsOn(body, 'Nothing was written.');
   const out = await tracker.updateTask(task, { markdown_description: body });
   if (!out.res.ok) die('replace description', out);
   const t = await readTask(task);
