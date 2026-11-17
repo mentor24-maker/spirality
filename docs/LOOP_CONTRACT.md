@@ -354,7 +354,12 @@ which is never a person).
 back out of `Live` loses the ending it had in the same write. Before these
 fields, a dropped ticket closed as `Live` with a `wont-do` or `deferred`
 tag, and a test ticket carried `synthetic` or `loop-dryrun`, so every
-report counted them as finished.
+report counted them as finished. Now no count of finished work counts a
+`wont-do`, `duplicate` or `test` ending (`countsAsFinished` in
+`lib/ticketClass.js`, SP-347): the Reporting page counts them apart, as
+Closed Without Finishing, `stage-counts` as `notFinishedInWindow`, and the
+throughput watchdog not at all, since a dropped ticket closing is not the
+queue moving. A ticket with no ending recorded still counts as finished.
 
 Where they are set and read:
 
