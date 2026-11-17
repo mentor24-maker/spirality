@@ -614,6 +614,40 @@ test('comment, ask, describe and task refuse a GitHub branch link with exit 2 an
   } finally { await f.cleanup(); }
 });
 
+test('describe and task refuse a Waits on line the claim cannot read, naming the piece, and write nothing; a readable line files as before', async () => {
+  const f = await fixture();
+  try {
+    f.file({ name: 'one', status: 'building', body: 'the spec' });
+    const before = (await f.door(['get', '--task', 'AL-1'])).out;
+    const bad = '## Scope\n- the work\n\nWaits on: SP-333 ("x"), which draws the map\n';
+    const desc = await f.door(['describe', '--task', 'AL-1', '--body-file', '-'], { stdin: bad });
+    assert.equal(desc.code, 2, desc.err);
+    assert.ok(desc.err.includes('"which draws the map"'), desc.err);
+    assert.ok(desc.err.includes('Waits on: SP-333') && desc.err.includes('("title")'), desc.err);
+    assert.match(desc.err, /Nothing was written/);
+    assert.equal((await f.door(['get', '--task', 'AL-1'])).out, before);
+
+    const made = await f.door(['task', '--name', 'two', '--body-file', '-'], { stdin: bad });
+    assert.equal(made.code, 2, made.err);
+    assert.ok(made.err.includes('"which draws the map"'), made.err);
+    assert.match(made.err, /Nothing was created/);
+    const empty = await f.door(['task', '--name', 'three', '--body-file', '-'], { stdin: 'the spec\n\nWaits on:\n' });
+    assert.equal(empty.code, 2, empty.err);
+    assert.ok(empty.err.includes('(nothing named)'), empty.err);
+    assert.equal(f.store.listTickets('alpha').length, 1);
+
+    // A plain id and an id with a quoted title (a comma inside it) both file and describe as before.
+    for (const line of ['Waits on: SP-333', 'Waits on: SP-333 ("A title, with a comma")']) {
+      const ok = await f.door(['describe', '--task', 'AL-1', '--body-file', '-'], { stdin: `the spec\n\n${line}\n` });
+      assert.equal(ok.code, 0, ok.err);
+      assert.ok(f.store.getTicket('AL-1').description.includes(line));
+      const filed = await f.door(['task', '--name', `filed ${line}`, '--body-file', '-'], { stdin: `the spec\n\n${line}\n` });
+      assert.equal(filed.code, 0, filed.err);
+    }
+    assert.equal(f.store.listTickets('alpha').length, 3);
+  } finally { await f.cleanup(); }
+});
+
 test('pr-opened records the PR and reads it back; then verdict --pass reads back through the gate', async () => {
   const f = await fixture();
   try {
