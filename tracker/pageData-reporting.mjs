@@ -7,12 +7,14 @@ import loopStatuses from '../lib/loopStatuses.js';
 import mergeOnComment from '../lib/mergeOnComment.js';
 import humanHours from '../lib/humanHours.js';
 import ticketClass from '../lib/ticketClass.js';
+import loopNoticeboards from '../lib/loopNoticeboards.js';
 import { conflictReportOf } from './conflictReport.mjs';
 import { visibleProjects, trailComments } from './pageData-common.mjs';
 
 const { STAGE_ORDER, LIVE, QUEUED, BUILDING, REWORK, OPERATOR_HELD_STATUSES, TERMINAL_STATUSES, statusOf } = loopStatuses;
 const { isMergeCommand, isReviewVerdict, isReviewPassed } = mergeOnComment;
 const { findHumanHours } = humanHours;
+const { workTickets } = loopNoticeboards;
 const { KINDS, KIND_LABELS, STARTERS, STARTER_LABELS, NOT_FINISHED_OUTCOMES, OUTCOME_LABELS, countsAsFinished } = ticketClass;
 
 /**
@@ -42,6 +44,17 @@ function kindKey(ticket) {
 /** Who started it, as REPORT_STARTERS keys it. */
 function starterKey(ticket) {
   return STARTERS.includes(ticket.startedBy) ? ticket.startedBy : 'none';
+}
+
+/**
+ * A project's tickets the Reporting page counts: every one but its
+ * noticeboards (the Team chat and anything tagged `noticeboard`), which sit
+ * in Live as standing boards and would read as finished work, and every post
+ * to them as time spent. lib/loopNoticeboards.js alone decides which they
+ * are.
+ */
+function reportedTickets(store, slug) {
+  return workTickets(store.listTickets(slug));
 }
 
 /** The Reporting page's time ranges, newest first; `days: null` is all time. */
@@ -321,7 +334,7 @@ function conflictsOf(store, projects) {
       changes: store.pipelineSettingChanges(p.slug, { limit: 100000 }),
       current: Object.fromEntries(store.pipelineSettings(p.slug).map((c) => [c.key, c.value])),
     };
-    for (const ticket of store.listTickets(p.slug)) {
+    for (const ticket of reportedTickets(store, p.slug)) {
       tickets.push({
         id: ticket.id,
         name: ticket.name,
@@ -363,6 +376,7 @@ function conflictsOf(store, projects) {
  *    exact name, project, `total` and its ms per bucket. A stretch that
  *    starts before the range counts only its part inside it.
  * A range counts what happened in the last `days` days before `now`.
+ * Noticeboards are left out of every figure (reportedTickets).
  * Null when `project` names no project. `only` narrows "every project" to
  * the ones the reader may see (visibleProjects), and a `project` outside it
  * is answered as no project, the same as one that does not exist.
@@ -446,7 +460,7 @@ export function reportsOf(store, { project = null, now = Date.now(), only = null
     return machineActor.get(id);
   };
   for (const p of projects) {
-    for (const ticket of store.listTickets(p.slug)) {
+    for (const ticket of reportedTickets(store, p.slug)) {
       const comments = store.listComments(ticket.id).map((c) => {
         const byMachine = isMachineActor(c.author);
         const byOperator = p.operator != null && c.author === p.operator && !byMachine;
