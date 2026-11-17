@@ -361,6 +361,16 @@ export function createApiTracker({ token, baseUrl, project, listId, timeoutMs, l
     rollBackRelease: (slug) => call('POST', `/releases/${encodeURIComponent(slug)}/back`, {}),
 
     /**
+     * Move a ticket, with every comment, file and event on it, into project
+     * `slug` under that project's next id; the answer names the new id
+     * (`ticket.id`), the old one (`from`) and the comment count. The old id
+     * keeps finding the ticket.
+     */
+    moveTicket: (task, slug) => call('POST', `${ticketPath(task)}/move`, { project: slug }),
+    /** The ticket as the tracker stores it, with every comment (replies too), for a read-back. */
+    ticketRecord: (task) => readTicket(task),
+
+    /**
      * Which files each open pull request on the configured project changes
      * (SP-349): `{ project, pullRequests: [{ number, ticket, repo, head,
      * files, readAt }] }`. Read-only.

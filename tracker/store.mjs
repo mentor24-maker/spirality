@@ -277,6 +277,14 @@ CREATE TABLE IF NOT EXISTS imported_ids (
   new_id      TEXT NOT NULL,
   PRIMARY KEY (source, kind, source_id)
 );
+CREATE TABLE IF NOT EXISTS moved_ids (
+  old_id      TEXT PRIMARY KEY,
+  new_id      TEXT NOT NULL,
+  from_project TEXT NOT NULL,
+  to_project  TEXT NOT NULL,
+  actor       INTEGER NOT NULL REFERENCES actors(id),
+  at          TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS stage_colours (
   status      TEXT PRIMARY KEY,
   colour      TEXT NOT NULL
@@ -716,6 +724,9 @@ function projectFromRow(row) {
   };
 }
 
+/** The tables whose rows belong to one ticket and go with it when it moves to another project. */
+const MOVED_WITH_TICKET = Object.freeze(['comments', 'events', 'attachments', 'seen_marks', 'pr_files']);
+
 function ticketFromRow(row) {
   if (!row) return null;
   return {
@@ -1048,6 +1059,20 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
     const row = db.prepare("SELECT a.kind, r.role FROM actors a LEFT JOIN user_roles r ON r.actor = a.id WHERE a.id = ?").get(actorId);
     if (!row || row.kind !== 'human') return null;
     return row.role ?? DEFAULT_ROLE;
+  }
+
+  /**
+   * Whether an actor may change tickets in a project: a loop (a machine)
+   * always; a person when they see the project (a member, or an admin) and
+   * their role carries ticket.edit.
+   */
+  function canChangeTickets(actorId, slug) {
+    const row = db.prepare('SELECT kind FROM actors WHERE id = ?').get(actorId);
+    if (!row) return false;
+    if (row.kind !== 'human') return true;
+    const role = roleOf(actorId);
+    if (!ROLE_PERMISSIONS[role]?.includes('ticket.edit')) return false;
+    return role === 'admin' || isMember(slug, actorId);
   }
 
   function adminCount() {
@@ -1918,6 +1943,92 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
         insertComment({ ticket: copy.id, author: actor, body: `Copied from ${from.id} in ${source.name}.`, parent: null }, at);
         return copy;
       });
+    },
+
+    /**
+     * Move a ticket into another project with everything on it: it gets the
+     * target project's next id and keeps its name, description, status,
+     * priority, tags, assignee, kind, loop note, created time, comments
+     * (authors and times), events, attachments, seen marks and pull request
+     * files, all re-pointed at the new id. Its place in the old queue and its
+     * topics (each topic belongs to one project) do not travel; the answer
+     * names the topics dropped. A tag the target project does not have is
+     * saved there first, with the old project's description for it. The old
+     * id goes in `moved_ids`, so it still finds the ticket (movedId), and any
+     * old id that already led to this ticket (an earlier move, an import) is
+     * pointed at the new one. One `moved` event records the old id and the
+     * new. Refused, with nothing changed: an unknown ticket, project or
+     * actor, the same project (`same-project`), and an actor who cannot
+     * change tickets in both projects (`cannot-edit`). Read back inside the
+     * transaction (`write-failed`). Answers `{ ticket, from, droppedTopics,
+     * addedTags }`.
+     */
+    moveTicket(id, { project, actor }) {
+      return transaction(() => {
+        requireActor(actor, 'the actor');
+        const row = requireTicketRow(id);
+        const from = ticketFromRow(row);
+        const target = this.getProject(project);
+        if (!target) throw new StoreError('unknown-project', `no project "${project}".`);
+        if (target.slug === from.project) {
+          throw new StoreError('same-project', `ticket ${from.id} is already in project "${target.slug}"; nothing was moved.`);
+        }
+        for (const slug of [from.project, target.slug]) {
+          if (!canChangeTickets(actor, slug)) {
+            throw new StoreError('cannot-edit', `${this.getActor(actor).name} cannot change tickets in project "${slug}", so ${from.id} was not moved.`);
+          }
+        }
+        const counts = (ticket) => Object.fromEntries(MOVED_WITH_TICKET.map((t) => [t, num(db.prepare(`SELECT COUNT(*) AS n FROM ${t} WHERE ticket = ?`).get(ticket).n)]));
+        const before = counts(from.id);
+        const droppedTopics = topicIdsOf(from.id);
+        const at = now();
+        const addedTags = [];
+        const have = new Set(this.listTags(target.slug).map((t) => t.name.toLowerCase()));
+        for (const tag of from.tags) {
+          if (have.has(tag.toLowerCase())) continue;
+          const saved = db.prepare('SELECT description FROM project_tags WHERE project = ? AND name = ? ORDER BY created_at, id').get(from.project, tag);
+          db.prepare('INSERT INTO project_tags (project, name, description, created_by, created_at) VALUES (?, ?, ?, ?, ?)')
+            .run(target.slug, tag, saved?.description ?? '', actor, at);
+          have.add(tag.toLowerCase());
+          addedTags.push(tag);
+        }
+        const number = num(db.prepare('SELECT next_number FROM projects WHERE slug = ?').get(target.slug).next_number);
+        const newId = `${target.prefix}-${number}`;
+        db.prepare('UPDATE projects SET next_number = ? WHERE slug = ?').run(number + 1, target.slug);
+        db.prepare(
+          `INSERT INTO tickets (id, project, number, name, description, status, priority, tags, assignee, loop_note, kind, started_by, outcome, created_at, updated_at, version, place)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+        ).run(newId, target.slug, number, row.name, row.description, row.status, row.priority, row.tags, row.assignee, row.loop_note,
+          row.kind ?? null, row.started_by ?? null, row.outcome ?? null, row.created_at, at, num(row.version) + 1);
+        for (const t of MOVED_WITH_TICKET) db.prepare(`UPDATE ${t} SET ticket = ? WHERE ticket = ?`).run(newId, from.id);
+        db.prepare('DELETE FROM ticket_topics WHERE ticket = ?').run(from.id);
+        db.prepare("UPDATE imported_ids SET new_id = ? WHERE kind = 'ticket' AND new_id = ?").run(newId, from.id);
+        db.prepare('UPDATE moved_ids SET new_id = ? WHERE new_id = ?').run(newId, from.id);
+        db.prepare('INSERT INTO moved_ids (old_id, new_id, from_project, to_project, actor, at) VALUES (?, ?, ?, ?, ?, ?)')
+          .run(from.id, newId, from.project, target.slug, actor, at);
+        writeEvent(newId, actor, 'moved', from.id, newId, at);
+        const gone = db.prepare('DELETE FROM tickets WHERE id = ?').run(from.id);
+        if (num(gone.changes) !== 1) throw new StoreError('write-failed', `ticket ${from.id} was not taken out of ${from.project}; nothing was moved.`);
+
+        const moved = ticketFromRow(ticketRow(newId));
+        const after = counts(newId);
+        after.events -= 1;
+        const same = moved && moved.project === target.slug && moved.name === from.name && moved.status === from.status
+          && JSON.stringify(moved.tags) === JSON.stringify(from.tags)
+          && MOVED_WITH_TICKET.every((t) => after[t] === before[t])
+          && !ticketRow(from.id) && this.movedId(from.id) === newId;
+        if (!same) throw new StoreError('write-failed', `ticket ${from.id} did not read back whole as ${newId}; nothing was moved.`);
+        return { ticket: moved, from: from.id, droppedTopics, addedTags };
+      });
+    },
+
+    /**
+     * The id a moved ticket has now, following every later move, or null
+     * for an id that was never moved away.
+     */
+    movedId(oldId) {
+      const row = db.prepare('SELECT new_id FROM moved_ids WHERE old_id = ?').get(String(oldId ?? ''));
+      return row ? row.new_id : null;
     },
 
     /** One ticket, or null. */
