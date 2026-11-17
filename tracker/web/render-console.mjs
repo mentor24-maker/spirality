@@ -139,6 +139,16 @@ export function renderFeatureKey(tickets, picked = null) {
  * is escaped. On the map (SP-333), `size` is its size class (tileSizeClass)
  * and `attrs` its place (placeAttrs), both written by the map itself.
  */
+/**
+ * Why a Queued ticket is held from the build loop (SP-377): the reasons in
+ * its answer's `hold` (pageData.mjs holdOf), joined by "; ", or '' when
+ * nothing holds it. Its own word, never "waiting on you" (consoleWaiting).
+ */
+export function consoleHeld(t) {
+  const reasons = Array.isArray(t?.hold?.reasons) ? t.hold.reasons.map(String).filter(Boolean) : [];
+  return reasons.join('; ');
+}
+
 export function renderConsoleTile(t, project = null, now = Date.now(), { attrs = '', size = '' } = {}) {
   const id = String(t?.id ?? '');
   const prefix = project?.prefix ?? id.replace(/-.*$/, '');
@@ -150,16 +160,18 @@ export function renderConsoleTile(t, project = null, now = Date.now(), { attrs =
   const age = consoleAge(t?.stageSince, now);
   const waiting = consoleWaiting(t);
   const feature = consoleFeature(t);
+  const held = consoleHeld(t);
   const status = String(t?.status ?? '');
   const label = `${id}: ${t?.name ?? ''}`;
   // A launched ticket has no next change (SP-333's Live area): finished work says only how long ago.
   const done = status === 'Live';
-  const spoken = `${label}. ${status}${done ? '' : `; next change ${next.text}`}; in this stage ${age}${feature ? `; feature ${feature}` : ''}${waiting ? '; waiting on you' : ''}.`;
-  const classes = `tile${size ? ` ${size}` : ''}${feature ? ` feature feature-${featureColourIndex(feature)}` : ''}${waiting ? ' waiting' : ''}`;
+  const spoken = `${label}. ${status}${done ? '' : `; next change ${next.text}`}; in this stage ${age}${feature ? `; feature ${feature}` : ''}${held ? `; held: ${held}` : ''}${waiting ? '; waiting on you' : ''}.`;
+  const classes = `tile${size ? ` ${size}` : ''}${feature ? ` feature feature-${featureColourIndex(feature)}` : ''}${waiting ? ' waiting' : ''}${held ? ' held' : ''}`;
   const marked = feature ? ` data-feature="${escapeHtml(feature)}"` : '';
   return `<a class="${classes}"${marked}${attrs} href="/t/${encodeURIComponent(id)}" title="${escapeHtml(label)}" aria-label="${escapeHtml(spoken)}">`
     + `<span class="tile-picture">${picture}</span>`
     + `<span class="tile-number">${escapeHtml(id)}</span>`
+    + (held ? `<span class="tile-held" title="${escapeHtml(held)}">Waiting</span>` : '')
     + '<span class="tile-facts">'
     + `<span class="fact stage" data-stage="${escapeHtml(status)}">${escapeHtml(status)}</span>`
     + (done ? '' : `<span class="fact next" title="${escapeHtml(next.title)}">${escapeHtml(next.text)}</span>`)

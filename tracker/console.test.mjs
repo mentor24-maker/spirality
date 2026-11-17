@@ -52,7 +52,7 @@ test('consoleOf lists every ticket but one Live for more than a day, in STAGE_OR
   assert.ok(!answer.tickets.some((t) => t.name === 'Done'), 'a ticket Live for two days is off the map');
   assert.deepEqual(answer.tickets.map((t) => t.status), ['Requested', 'Rework', 'Queued', 'Queued', 'Building', 'In review', 'Needs your input', 'Ready to launch']);
   for (const t of answer.tickets) {
-    assert.deepEqual(Object.keys(t).sort(), ['answerIn', 'assignee', 'id', 'name', 'nextChange', 'priority', 'project', 'pullRequest', 'stageSince', 'status', 'tags', 'updatedAt', 'waitingOnOperator'].sort());
+    assert.deepEqual(Object.keys(t).sort(), ['answerIn', 'assignee', 'id', 'name', 'nextChange', 'priority', 'project', 'pullRequest', 'stageSince', 'status', 'tags', 'updatedAt', 'waitingOnOperator', 'hold'].sort());
   }
   const b = answer.tickets.find((t) => t.id === beta.id);
   assert.deepEqual([b.project, b.priority, b.assignee, b.pullRequest], ['beta', 'high', 'Operator', null]);
@@ -139,6 +139,27 @@ test('consoleOf reads no events for a ticket last edited before the Live window:
   const names = consoleOf(watched, { now: Date.parse(old.updatedAt) + 2 * CONSOLE_LIVE_MS }).tickets.map((t) => t.name);
   assert.deepEqual(names, ['In flight']);
   assert.ok(!read.includes(old.id), 'the old launch\'s events were never read');
+});
+
+test('consoleOf: a Queued ticket carries what holds it from the build loop, the reasons holdReasons gives, and every other ticket hold: null (SP-377)', () => {
+  const { store, machine } = fixture();
+  const open = store.fileTicket({ project: 'alpha', actor: machine.id, name: 'Still open', status: 'Building' });
+  const live = store.fileTicket({ project: 'alpha', actor: machine.id, name: 'Shipped', status: 'Live' });
+  const file = (name, description, status = 'Queued') => store.fileTicket({ project: 'alpha', actor: machine.id, name, status, description });
+  const held = file('Held', `Waits on: ${open.id}`);
+  const typo = file('Odd line', 'Waits on: the API ticket');
+  const missing = file('Missing', 'Waits on: AL-999');
+  const free = file('Free', `Waits on: ${live.id}`);
+  const plain = file('No line', 'Nothing to wait on.');
+  const rework = file('Rework', `Waits on: ${open.id}`, 'Rework');
+  const byId = new Map(consoleOf(store).tickets.map((t) => [t.id, t]));
+  assert.deepEqual(byId.get(held.id).hold, { reasons: [`waits on ${open.id.toLowerCase()} (still open)`] });
+  assert.deepEqual(byId.get(typo.id).hold, { reasons: ['its Waits on: line names "the API ticket", which is not a ticket id or link'] });
+  assert.deepEqual(byId.get(missing.id).hold, { reasons: ['waits on al-999 (could not be read)'] });
+  assert.equal(byId.get(free.id).hold, null, 'its prerequisite is Live');
+  assert.equal(byId.get(plain.id).hold, null, 'no Waits on: line');
+  assert.equal(byId.get(rework.id).hold, null, 'only Queued tickets are held');
+  assert.equal(byId.get(open.id).hold, null);
 });
 
 test('consoleOf narrows to the projects `only` lets through', () => {
