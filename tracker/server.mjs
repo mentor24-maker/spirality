@@ -171,6 +171,8 @@ const ROLE_REFUSALS = Object.freeze({ 'not-admin': 403, 'last-admin': 409 });
 /** The release writes' refusals that are not a bad field; `write-failed` is the store's read-back. */
 const RELEASE_REFUSALS = Object.freeze({ 'own-project': 409, 'not-allowed': 403, 'nothing-to-roll-back-to': 409, 'write-failed': 500 });
 const MEMBER_REFUSALS = Object.freeze({ 'not-admin': 403, 'already-member': 409, 'required-member': 409, 'not-member': 404, 'unknown-project': 404 });
+/** moveTicket's refusals that are not a bad field; `write-failed` is the store's read-back. */
+const MOVE_REFUSALS = Object.freeze({ 'cannot-edit': 403, 'same-project': 409, 'write-failed': 500 });
 
 /** The HTTP status each refused invite answers with (tracker/account.mjs sendInvite); any other is 400. */
 const INVITE_REFUSALS = Object.freeze({ 'duplicate-email': 409, 'duplicate-invite': 409, 'no-mail': 503, 'no-address': 503, 'not-sent': 502 });
@@ -774,15 +776,28 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
 
   /**
    * A ticket on a project the caller may see, or 404 (notFound). An id the
-   * tracker never gave out but the importer mapped (an old ClickUp id on an
-   * imported `Waits on:` line) answers the ticket it became; an id
-   * in neither place is still a 404.
+   * ticket had before it moved to another project, and an id the tracker
+   * never gave out but the importer mapped (an old ClickUp id on an
+   * imported `Waits on:` line), answer the ticket it became; an id
+   * in none of those places is still a 404.
    */
   function requireTicket(id, me) {
     const scope = scopeOf(me);
-    const ticket = store.getTicket(id) ?? importedTicket(id);
+    const ticket = store.getTicket(id) ?? movedTicket(id) ?? importedTicket(id);
     if (!ticket || (scope && !scope.has(ticket.project))) throw notFound('unknown-ticket', `ticket ${id}`, scope);
     return ticket;
+  }
+
+  /**
+   * The ticket an id that moved to another project is now, or null (never a
+   * throw): `/t/<old id>`, and an alarm text or a `Waits on:` line naming
+   * it, keep reaching it. The door upper-cases ids, and so does every prefix.
+   */
+  function movedTicket(id) {
+    const given = String(id ?? '').trim();
+    if (!given) return null;
+    const mapped = store.movedId(given) ?? store.movedId(given.toUpperCase());
+    return mapped == null ? null : store.getTicket(mapped);
   }
 
   /**
@@ -1623,6 +1638,28 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
       requireProject(body.project, me);
       const copy = store.cloneTicket(ticket.id, { project: body.project, actor: me.id });
       return [201, copy, { ticket: copy, changed: ['status'] }];
+    }
+
+    // The door's `move`: take a ticket, with every comment, file and event on
+    // it, into another project under that project's next id. The caller must
+    // be able to change tickets in both projects; the old id keeps finding it.
+    if (parts.length === 3 && parts[0] === 'tickets' && parts[2] === 'move' && method === 'POST') {
+      const body = await readJson(req);
+      checkBody(body, me, ['project']);
+      const ticket = requireTicket(parts[1], me);
+      if (typeof body.project !== 'string' || !body.project) {
+        throw new HttpError(400, 'bad-field', 'project must name the project to move into.');
+      }
+      requireProject(body.project, me);
+      let moved;
+      try {
+        moved = store.moveTicket(ticket.id, { project: body.project, actor: me.id });
+      } catch (err) {
+        if (err instanceof StoreError && MOVE_REFUSALS[err.code]) throw new HttpError(MOVE_REFUSALS[err.code], err.code, err.message);
+        throw err;
+      }
+      log(`moved ${moved.from} to ${moved.ticket.id} actor=${me.id}`);
+      return [200, { ...moved, comments: store.listComments(moved.ticket.id).length }];
     }
 
     // Dane's page: one ticket with each comment's author named and machine

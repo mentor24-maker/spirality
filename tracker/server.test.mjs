@@ -1182,6 +1182,7 @@ test('strict membership: a person who is not an admin sees only their own projec
       ['PATCH', `/tickets/${theirs.id}/attachments/${theirFile.id}`, { name: 'renamed.txt' }], ['DELETE', `/tickets/${theirs.id}/attachments/${theirFile.id}`],
       ['PATCH', `/tickets/${theirs.id}`, { name: 'Renamed' }], ['DELETE', `/tickets/${theirs.id}`],
       ['POST', `/tickets/${theirs.id}/comments`, { body: 'hello' }], ['POST', `/tickets/${theirs.id}/clone`, { project: 'alpha' }],
+      ['POST', `/tickets/${theirs.id}/move`, { project: 'alpha' }],
     ];
     for (const [method, path, body] of reads) {
       const r = await v(method, path, body);
@@ -1194,6 +1195,7 @@ test('strict membership: a person who is not an admin sees only their own projec
     }
     // Copying their own ticket into another project is refused the same way.
     assert.equal((await v('POST', `/tickets/${mine.id}/clone`, { project: 'beta' })).status, 404);
+    assert.equal((await v('POST', `/tickets/${mine.id}/move`, { project: 'beta' })).status, 404, 'and so is moving it');
     // Nothing those refusals asked for happened.
     assert.deepEqual(f.store.listTickets('beta').map((t) => [t.id, t.name]), [[theirs.id, 'Hidden comet']]);
     assert.equal(f.store.listComments(theirs.id).length, 1);
@@ -1376,6 +1378,40 @@ test('a ticket\'s kind, who started it and how it ended: filed, changed, read ba
     const live = board.body.columns.find((c) => c.status === 'Live').tickets[0];
     assert.deepEqual([live.kind, live.startedBy, live.outcome], ['fix', 'agent', 'duplicate']);
     assert.deepEqual(board.body.classes.map((c) => c.label), ['Kind', 'Started By', 'How It Ended']);
+  } finally { await f.cleanup(); }
+});
+
+test('moving a ticket answers its new id and comment count, its old id still opens it, and a refused move changes nothing', async () => {
+  const f = await fixture();
+  try {
+    f.store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE', operator: f.human.id });
+    const t = f.store.fileTicket({ project: 'alpha', actor: f.machine.id, name: 'Team chat', status: 'queued', tags: ['chat'] });
+    f.store.postComment({ ticket: t.id, author: f.human.id, body: 'one' });
+    f.store.postComment({ ticket: t.id, author: f.machine.id, body: 'two' });
+
+    const same = await f.call('POST', `/tickets/${t.id}/move`, { body: { project: 'alpha' } });
+    assert.equal(same.status, 409, same.text);
+    assert.equal(same.body.code ?? same.body.error, 'same-project');
+    const viewer = f.store.createActor({ kind: 'human', name: 'Vic' });
+    f.store.addMember({ project: 'alpha', actor: viewer.id, by: f.human.id });
+    f.store.addMember({ project: 'beta', actor: viewer.id, by: f.human.id });
+    f.store.setRole({ actor: viewer.id, role: 'viewer', by: f.human.id });
+    const refused = await f.call('POST', `/tickets/${t.id}/move`, { token: f.store.issueToken(viewer.id), body: { project: 'beta' } });
+    assert.equal(refused.status, 403, refused.text);
+    assert.equal(f.store.getTicket(t.id).project, 'alpha', 'nothing moved');
+    assert.equal((await f.call('POST', `/tickets/${t.id}/move`, { body: {} })).status, 400);
+
+    const moved = await f.call('POST', `/tickets/${t.id}/move`, { token: f.humanToken, body: { project: 'beta' } });
+    assert.equal(moved.status, 200, moved.text);
+    assert.equal(moved.body.ticket.id, 'BE-1');
+    assert.equal(moved.body.from, t.id);
+    assert.equal(moved.body.comments, 2);
+    const old = await f.call('GET', `/tickets/${t.id}/thread`, { token: f.humanToken });
+    assert.equal(old.status, 200, old.text);
+    assert.equal(old.body.id, 'BE-1', 'the old id opens the moved ticket');
+    assert.equal(old.body.comments.length, 2);
+    assert.equal((await f.call('GET', `/tickets/${t.id.toLowerCase()}`)).body.id, 'BE-1', 'in any case');
+    assert.ok(f.lines.some((l) => l.includes(`moved ${t.id} to BE-1`)), 'the move is logged');
   } finally { await f.cleanup(); }
 });
 

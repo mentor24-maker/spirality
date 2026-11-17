@@ -179,6 +179,9 @@ export function createClickupTracker({ token, apiBase, timeoutMs, log = console.
     projectRelease: async () => unsupported('which Spirality release each project runs is kept only in the tracker; this project\'s tickets are on ClickUp.'),
     nameRelease: async () => unsupported('which Spirality release each project runs is kept only in the tracker; this project\'s tickets are on ClickUp.'),
     rollBackRelease: async () => unsupported('which Spirality release each project runs is kept only in the tracker; this project\'s tickets are on ClickUp.'),
+    // Moving a ticket between projects is the tracker's; ClickUp's lists are not projects.
+    moveTicket: async () => unsupported('moving a ticket into another project is done only in the tracker; this project\'s tickets are on ClickUp.'),
+    ticketRecord: async () => unsupported('moving a ticket into another project is done only in the tracker; this project\'s tickets are on ClickUp.'),
     prFiles: async () => unsupported(NO_PR_FILES_ON_CLICKUP),
     recordPrFiles: async () => unsupported(NO_PR_FILES_ON_CLICKUP),
     forgetPrFiles: async () => unsupported(NO_PR_FILES_ON_CLICKUP),
