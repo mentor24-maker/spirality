@@ -1,0 +1,493 @@
+/**
+ * The Console page (page-console.mjs): the map of stage areas, its tiles,
+ * the detours and the feature key.
+ *
+ * Split out of render.mjs (SP-364), which re-exports it, so every importer
+ * still names render.mjs. Its rule holds here too: every character of
+ * ticket text is escaped before it is drawn.
+ */
+import { escapeHtml, mountainTime, share } from './render-common.mjs';
+
+/** What a Console tile shows when a fact is not known. */
+export const CONSOLE_UNKNOWN = '—';
+
+/**
+ * A ticket's next change as a tile's short fact and its hover text, from
+ * the answer's `nextChange`: `You` when it is the operator's move, `Now`
+ * while Building (or while the lane that acts on it runs), `in 12 min` /
+ * `in 2 h` until the lane's next pass (its clock time in Mountain time on
+ * hover), `Now` for a pass already due, and CONSOLE_UNKNOWN when no time is
+ * known. `now` is a time in milliseconds, given so a test can fix the clock.
+ */
+export function consoleNextChange(nextChange, now = Date.now()) {
+  const lane = typeof nextChange?.lane === 'string' ? nextChange.lane : 'The lane';
+  if (nextChange?.kind === 'operator') return { text: 'You', title: 'Your move: no lane acts on it until you do' };
+  if (nextChange?.kind === 'running') return { text: 'Now', title: `${lane} is working on it now` };
+  if (nextChange?.kind !== 'lane') return { text: CONSOLE_UNKNOWN, title: 'When the next pass picks it up is not known' };
+  if (nextChange.running) return { text: 'Now', title: `${lane} is running now` };
+  const due = Date.parse(nextChange.due);
+  if (Number.isNaN(due)) return { text: CONSOLE_UNKNOWN, title: 'When the next pass picks it up is not known' };
+  const away = due - now;
+  const at = `${lane}'s next pass is due ${mountainTime(nextChange.due)}`;
+  if (away <= 0) return { text: 'Now', title: at };
+  const minutes = Math.ceil(away / 60_000);
+  // Whole hours count down the same way minutes do: 89 minutes is still "in 1 h", never rounded up to 2.
+  return { text: minutes < 60 ? `in ${minutes} min` : `in ${Math.floor(minutes / 60)} h`, title: at };
+}
+
+/**
+ * How long a ticket has sat in its stage, short: `5m`, `3h`, `2d` (under a
+ * minute is `0m`), or CONSOLE_UNKNOWN for a time that cannot be read.
+ */
+export function consoleAge(since, now = Date.now()) {
+  const at = Date.parse(since);
+  if (Number.isNaN(at)) return CONSOLE_UNKNOWN;
+  const minutes = Math.max(0, Math.floor((now - at) / 60_000));
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  return hours < 48 ? `${hours}h` : `${Math.floor(hours / 24)}d`;
+}
+
+/**
+ * True when a tile is ringed as waiting on the operator: the loop's own
+ * verdict (`waitingOnOperator`), one of his two statuses (`nextChange` of
+ * kind `operator`), or an answer of his that is in (`answerIn`).
+ */
+export function consoleWaiting(t) {
+  return t?.waitingOnOperator === true || t?.answerIn === true || t?.nextChange?.kind === 'operator';
+}
+
+/**
+ * The tag a ticket from the tracker page carries (SP-221): it says where the
+ * request came from, not what feature it is part of.
+ */
+export const REQUEST_FORM_TAG = 'request-form';
+
+/**
+ * The Console's feature colours (SP-234): light backgrounds, so the ticket
+ * number (the page's ink) reads on every one of them. app.css has one
+ * `.tile.feature-<n>` rule per colour, in this order; a test holds the two
+ * together and checks each colour's contrast.
+ */
+export const FEATURE_PALETTE = Object.freeze([
+  '#ffd6d6', '#ffe2c2', '#fff3b0', '#d9f2c4', '#c8f0e4',
+  '#cfe8ff', '#dcd6ff', '#f5d0f0', '#e6dccb', '#d5dde6',
+]);
+
+/**
+ * A ticket's feature: its first tag (the loops tag each ticket with its
+ * epic's name), passing over `request-form`, which says only where the
+ * request came from. Null for a ticket with no such tag, which keeps the
+ * plain tile.
+ */
+export function consoleFeature(t) {
+  const tags = Array.isArray(t?.tags) ? t.tags : [];
+  const tag = tags.find((x) => typeof x === 'string' && x.trim() && x.trim() !== REQUEST_FORM_TAG);
+  return tag ? tag.trim() : null;
+}
+
+/**
+ * Which FEATURE_PALETTE colour a feature gets: a pure function of the tag
+ * (an FNV-1a hash of its characters), so the same tag has the same colour on
+ * every load and every machine. Two tags can share a colour, more often once
+ * there are more features than colours.
+ */
+export function featureColourIndex(tag) {
+  let hash = 0x811c9dc5;
+  for (const ch of String(tag)) {
+    hash ^= ch.codePointAt(0);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash % FEATURE_PALETTE.length;
+}
+
+/**
+ * The Console's Features key as HTML (SP-234): each feature on screen, with
+ * its colour swatch and how many tickets in flight carry it, most tickets
+ * first (ties by name). Each is a button; the page dims every other tile
+ * while one is picked (`picked`, the feature's tag, shown pressed). Nothing
+ * when no ticket on screen has a feature.
+ */
+export function renderFeatureKey(tickets, picked = null) {
+  const counts = new Map();
+  for (const t of Array.isArray(tickets) ? tickets : []) {
+    const feature = consoleFeature(t);
+    if (feature) counts.set(feature, (counts.get(feature) ?? 0) + 1);
+  }
+  if (!counts.size) return '';
+  const order = [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  const pick = ([feature, n]) => {
+    const on = feature === picked;
+    const say = `${feature}: ${n} ticket${n === 1 ? '' : 's'}`;
+    return `<button type="button" class="feature-pick feature-${featureColourIndex(feature)}" data-feature="${escapeHtml(feature)}" aria-pressed="${on}" title="${escapeHtml(on ? `Show every ticket again` : `Show only ${feature}`)}" aria-label="${escapeHtml(say)}">`
+      + `<span class="swatch" aria-hidden="true"></span>${escapeHtml(feature)}<span class="count">${n}</span></button>`;
+  };
+  return `<div class="feature-key" role="group" aria-label="Features"><span class="key-title">Features</span>${order.map(pick).join('')}</div>`;
+}
+
+/**
+ * One Console tile as HTML: a link to the ticket, its full name on hover;
+ * the project's logo as its picture (only an http(s) address is drawn), or
+ * the project's ticket prefix in large letters when it has none; the ticket
+ * number over it; and along the bottom the stage, the next change
+ * (consoleNextChange) and the time in stage (consoleAge); a Live tile has no next change. A ticket waiting
+ * on the operator carries `waiting` (the ring). A ticket with a feature
+ * (consoleFeature) carries `feature feature-<n>` (its colour, from app.css)
+ * and `data-feature`, which the Features key's pick dims by. The stage fact carries
+ * `data-stage`, so the page puts the Settings page's stage colour on it
+ * after drawing (no inline style). Every piece of ticket and project text
+ * is escaped. On the map (SP-333), `size` is its size class (tileSizeClass)
+ * and `attrs` its place (placeAttrs), both written by the map itself.
+ */
+export function renderConsoleTile(t, project = null, now = Date.now(), { attrs = '', size = '' } = {}) {
+  const id = String(t?.id ?? '');
+  const prefix = project?.prefix ?? id.replace(/-.*$/, '');
+  const logo = typeof project?.logo === 'string' && /^https?:\/\//i.test(project.logo) ? project.logo : null;
+  const picture = logo
+    ? `<img class="tile-logo" src="${escapeHtml(logo)}" alt="" referrerpolicy="no-referrer">`
+    : `<span class="tile-prefix" aria-hidden="true">${escapeHtml(prefix)}</span>`;
+  const next = consoleNextChange(t?.nextChange, now);
+  const age = consoleAge(t?.stageSince, now);
+  const waiting = consoleWaiting(t);
+  const feature = consoleFeature(t);
+  const status = String(t?.status ?? '');
+  const label = `${id}: ${t?.name ?? ''}`;
+  // A launched ticket has no next change (SP-333's Live area): finished work says only how long ago.
+  const done = status === 'Live';
+  const spoken = `${label}. ${status}${done ? '' : `; next change ${next.text}`}; in this stage ${age}${feature ? `; feature ${feature}` : ''}${waiting ? '; waiting on you' : ''}.`;
+  const classes = `tile${size ? ` ${size}` : ''}${feature ? ` feature feature-${featureColourIndex(feature)}` : ''}${waiting ? ' waiting' : ''}`;
+  const marked = feature ? ` data-feature="${escapeHtml(feature)}"` : '';
+  return `<a class="${classes}"${marked}${attrs} href="/t/${encodeURIComponent(id)}" title="${escapeHtml(label)}" aria-label="${escapeHtml(spoken)}">`
+    + `<span class="tile-picture">${picture}</span>`
+    + `<span class="tile-number">${escapeHtml(id)}</span>`
+    + '<span class="tile-facts">'
+    + `<span class="fact stage" data-stage="${escapeHtml(status)}">${escapeHtml(status)}</span>`
+    + (done ? '' : `<span class="fact next" title="${escapeHtml(next.title)}">${escapeHtml(next.text)}</span>`)
+    + `<span class="fact age" title="${escapeHtml(`In ${status} for ${age}`)}">${escapeHtml(age)}</span>`
+    + '</span></a>';
+}
+
+/**
+ * The Console's map (SP-333): the loop drawn as areas of the screen, one per
+ * stage, each tile placed by its status. The main path runs clockwise round
+ * the edge, Requested → Queued → Building → In review → Ready to launch →
+ * Live, and Live sits at the bottom left, under Requested, where the loop
+ * closes; Needs your input and Rework, the two detours, sit inside the ring
+ * (Needs your input between Requested and Queued, because every new ticket
+ * stops there once for the operator's "go"; Rework between In review and
+ * Building). Areas are in map units, MAP_UNITS wide and high; the page draws
+ * every place as a share of the map, so the layout scales to the window.
+ * `exit` is the side of an area its tickets leave by, toward the next stage.
+ */
+export const MAP_UNITS = Object.freeze({ width: 160, height: 100 });
+export const MAP_AREAS = Object.freeze([
+  { status: 'Requested', x: 0, y: 0, w: 38, h: 64, exit: 'right', place: 'order' },
+  { status: 'Needs your input', x: 38, y: 32, w: 44, h: 32, exit: 'up', place: 'order' },
+  { status: 'Queued', x: 38, y: 0, w: 48, h: 32, exit: 'right', place: 'order' },
+  { status: 'Building', x: 86, y: 0, w: 38, h: 32, exit: 'right', place: 'drift' },
+  { status: 'In review', x: 124, y: 0, w: 36, h: 64, exit: 'down', place: 'drift' },
+  { status: 'Rework', x: 82, y: 32, w: 42, h: 32, exit: 'up', place: 'order' },
+  { status: 'Ready to launch', x: 72, y: 64, w: 88, h: 36, exit: 'left', place: 'order' },
+  { status: 'Live', x: 0, y: 64, w: 72, h: 36, exit: 'up', place: 'newest' },
+].map((a) => Object.freeze(a)));
+
+/** Space round an area's tiles and above them for its name, in map units. */
+const AREA_PAD = 1.5;
+const AREA_HEAD = 6;
+/** The largest and smallest tile, in map units: tiles shrink as an area fills. */
+export const TILE_MAX = 16;
+export const TILE_MIN = 6;
+/** Below this size a tile drops its facts strip; below TILE_TINY, its picture too. */
+export const TILE_COMPACT = 14;
+export const TILE_TINY = 9;
+/**
+ * How long a ticket sits in Building or In review before it is pressed
+ * against its area's exit (SP-333 "drift"): a build pass takes about an hour,
+ * a review about the same, so three hours in Building and six in review is
+ * stuck.
+ */
+export const DRIFT_FULL_MS = Object.freeze({ Building: 3 * 3_600_000, 'In review': 6 * 3_600_000 });
+/** Live shows the last day's launches, fading with age down to LIVE_FADE_FLOOR. */
+export const LIVE_SHOWN_MS = 24 * 3_600_000;
+export const LIVE_FADE_FLOOR = 0.3;
+
+/** Round to 0.01 of a unit, so the same data always writes the same number. */
+const tidy = (n) => Math.round(n * 100) / 100;
+/**
+ * The tile size an area of `n` tiles draws at, and its grid: the largest
+ * size from TILE_MAX down to TILE_MIN (half-unit steps) whose grid holds all
+ * `n`; at TILE_MIN, the most it holds. `{ size, gap, cols, rows }`.
+ */
+export function areaGrid(area, n) {
+  const w = area.w - 2 * AREA_PAD;
+  const h = area.h - AREA_PAD - AREA_HEAD;
+  let fit = null;
+  for (let size = TILE_MAX; size >= TILE_MIN; size -= 0.5) {
+    const gap = Math.max(0.8, size * 0.08);
+    const cols = Math.max(1, Math.floor((w + gap) / (size + gap)));
+    const rows = Math.max(1, Math.floor((h + gap) / (size + gap)));
+    fit = { size, gap: tidy(gap), cols, rows };
+    if (cols * rows >= n) break;
+  }
+  return fit;
+}
+
+/**
+ * An area's slots, nearest its exit first: for an exit on the right, the
+ * right-hand column top to bottom, then the one left of it; down, the bottom
+ * row first; left, the left-hand column first; up, the top row first (reading
+ * order). Each `{ col, row }`.
+ */
+export function slotsByExit(grid, exit) {
+  const slots = [];
+  for (let row = 0; row < grid.rows; row++) for (let col = 0; col < grid.cols; col++) slots.push({ col, row });
+  const by = {
+    right: (a, b) => b.col - a.col || a.row - b.row,
+    left: (a, b) => a.col - b.col || a.row - b.row,
+    down: (a, b) => b.row - a.row || a.col - b.col,
+    up: (a, b) => a.row - b.row || a.col - b.col,
+  }[exit] ?? ((a, b) => a.row - b.row || a.col - b.col);
+  return slots.sort(by);
+}
+
+/** How far a ticket has drifted toward its area's exit, 0 (just in) to 1 (stuck). */
+export function driftOf(t, now = Date.now()) {
+  const full = DRIFT_FULL_MS[t?.status];
+  const at = Date.parse(t?.stageSince);
+  if (!full || Number.isNaN(at)) return 0;
+  return Math.min(1, Math.max(0, (now - at) / full));
+}
+
+/** How solid a Live tile is drawn: 1 just launched, down to LIVE_FADE_FLOOR a day on. */
+export function liveFade(t, now = Date.now()) {
+  const at = Date.parse(t?.stageSince);
+  if (Number.isNaN(at)) return LIVE_FADE_FLOOR;
+  const age = Math.min(1, Math.max(0, (now - at) / LIVE_SHOWN_MS));
+  return tidy(1 - age * (1 - LIVE_FADE_FLOOR));
+}
+
+/**
+ * Where each of an area's tickets sits: `{ status, tiles: [{ ticket, col,
+ * row }], more: null | { col, row, hidden: [tickets] }, grid }`, the same
+ * answer for the same data, so the minute's redraw moves nothing that did
+ * not change.
+ *  - `order` (Requested, Queued, Needs your input, Rework, Ready to launch):
+ *    the answer's order (in Queued, the order they will be built), the first
+ *    nearest the exit.
+ *  - `newest` (Live): the newest launch nearest the exit, back toward Requested.
+ *  - `drift` (Building, In review): each ticket's line across the area is
+ *    its drift (driftOf), from the entrance to the exit, so one that has sat
+ *    longest is pressed against the exit; the oldest are placed first, and a
+ *    ticket whose line is full takes the nearest line with room.
+ * More tickets than the grid holds at TILE_MIN: the slot furthest from the
+ * exit is a "+N more" tile holding the rest (the last in order; in a drift
+ * area, the newest in).
+ */
+export function placeArea(area, tickets, now = Date.now()) {
+  const list = Array.isArray(tickets) ? tickets.slice() : [];
+  if (area.place === 'newest') list.sort((a, b) => (Date.parse(b.stageSince) || 0) - (Date.parse(a.stageSince) || 0));
+  if (area.place === 'drift') {
+    const index = new Map(list.map((t, i) => [t, i]));
+    list.sort((a, b) => driftOf(b, now) - driftOf(a, now) || index.get(a) - index.get(b));
+  }
+  const grid = areaGrid(area, list.length);
+  const ranked = slotsByExit(grid, area.exit);
+  const room = ranked.length;
+  let more = null;
+  let shown = list;
+  if (list.length > room) {
+    const slot = ranked[room - 1];
+    shown = list.slice(0, room - 1);
+    more = { col: slot.col, row: slot.row, hidden: list.slice(room - 1) };
+  }
+  if (area.place !== 'drift') return { status: area.status, grid, tiles: shown.map((ticket, i) => ({ ticket, ...ranked[i] })), more };
+
+  // Lines run across the exit: columns for an exit right or left, rows for one up or down.
+  const across = area.exit === 'right' || area.exit === 'left';
+  const lines = across ? grid.cols : grid.rows;
+  const depth = across ? grid.rows : grid.cols;
+  const toward = (d) => (area.exit === 'right' || area.exit === 'down' ? d : lines - 1 - d);
+  const taken = new Set(more ? [`${more.col},${more.row}`] : []);
+  const tiles = [];
+  for (const ticket of shown) {
+    const want = Math.round(driftOf(ticket, now) * (lines - 1));
+    let put = null;
+    for (let step = 0; step < 2 * lines && !put; step++) {
+      const d = want + (step % 2 ? -Math.ceil(step / 2) : Math.ceil(step / 2));
+      if (d < 0 || d >= lines) continue;
+      for (let k = 0; k < depth && !put; k++) {
+        const slot = across ? { col: toward(d), row: k } : { col: k, row: toward(d) };
+        if (!taken.has(`${slot.col},${slot.row}`)) put = slot;
+      }
+    }
+    taken.add(`${put.col},${put.row}`);
+    tiles.push({ ticket, ...put });
+  }
+  return { status: area.status, grid, tiles, more };
+}
+
+/** A slot's place inside its area, as shares of the area: `{ x, y, size }`, size a share of the area's width. */
+export function slotShare(area, grid, { col, row }) {
+  const x = area.x + AREA_PAD + col * (grid.size + grid.gap);
+  const y = area.y + AREA_HEAD + row * (grid.size + grid.gap);
+  return { x: share((x - area.x) / area.w), y: share((y - area.y) / area.h), size: share(grid.size / area.w) };
+}
+
+/**
+ * Which way a "+N More" tile's list opens, so it stays on the map (SP-333):
+ * a tile in the left half of the map opens its list to the right
+ * (`opens-right`, anchored on the tile's left edge), one in the right half
+ * to the left; a tile whose middle is in the bottom half opens upward
+ * (`opens-up`), one in the top half downward. Returned as the classes to add.
+ */
+export function moreOpens(area, grid, { col, row }) {
+  const left = area.x + AREA_PAD + col * (grid.size + grid.gap);
+  const middle = area.y + AREA_HEAD + row * (grid.size + grid.gap) + grid.size / 2;
+  const across = left / MAP_UNITS.width < 0.5 ? 'opens-right' : 'opens-left';
+  const down = middle / MAP_UNITS.height > 0.5 ? 'opens-up' : 'opens-down';
+  return `${across} ${down}`;
+}
+
+/** A tile's size class: `tile-compact` (no facts strip) or `tile-tiny` (the number alone), or ''. */
+export function tileSizeClass(size) {
+  if (size < TILE_TINY) return 'tile-tiny';
+  return size < TILE_COMPACT ? 'tile-compact' : '';
+}
+
+/**
+ * Where a tile sits, as data the page turns into its place after drawing
+ * (no `style=""`: the page's rules forbid it): `data-x`, `data-y` and
+ * `data-size`, shares of its area, and `data-fade` on a Live tile.
+ */
+function placeAttrs(area, grid, slot, fade = null) {
+  const { x, y, size } = slotShare(area, grid, slot);
+  return ` data-x="${x}" data-y="${y}" data-size="${size}"${fade === null ? '' : ` data-fade="${fade}"`}`;
+}
+
+/**
+ * The features of the tickets a "+N More" tile holds, one per line, each
+ * once: its `data-features`, so a pick in the Features key dims the More
+ * tile only when none of its hidden tickets is the picked feature.
+ */
+export function moreFeatures(hidden) {
+  return [...new Set((Array.isArray(hidden) ? hidden : []).map(consoleFeature).filter(Boolean))].join('\n');
+}
+
+/**
+ * The detours (SP-334): every route a ticket takes into or out of Needs your
+ * input and Rework, drawn as arrows over the map, in map units. Each route is
+ * the code's, not a picture's:
+ *  - Requested → Needs your input: loop-intake writes the spec and asks for
+ *    the operator's go; every new ticket takes this route once.
+ *  - Building / In review → Needs your input: `ask` mid-build or mid-review.
+ *  - Needs your input → Queued, Rework or Live: the relay's hand-back of his
+ *    answer (lib/busRelayPlan.js handbackDestination): no pull request yet,
+ *    Queued ("go" is one such answer); an open one, Rework; a close word or a
+ *    merged one, Live.
+ *  - In review → Rework: loop-review's send-back.
+ *  - Rework → Building: loop-build claims Rework before fresh work
+ *    (lib/loopStatuses.js CLAIMABLE_BY_BUILD).
+ * Ready to launch is not a detour: every pull request waits there for his
+ * merge word. A dead pass's ticket handed back from Building (pass-reconcile)
+ * is a repair, not a route work is meant to take, so it is not drawn.
+ * `via` is the points between, `kind` which detour the arrow belongs to (its
+ * colour). Short arrows cross the border two areas share, in its padding and
+ * header, so they stay clear of the tiles.
+ */
+export const MAP_DETOURS = Object.freeze([
+  { from: 'Requested', to: 'Needs your input', kind: 'input', why: 'A new request: its spec waits for your go', path: [[33, 58], [43, 58]] },
+  { from: 'Needs your input', to: 'Queued', kind: 'input', why: 'Your go, or an answer before anything is built: back to Queued', path: [[70, 37.5], [70, 28]] },
+  { from: 'Building', to: 'Needs your input', kind: 'input', why: 'A question for you mid-build', path: [[90, 28], [83, 31.2], [75, 34.5]] },
+  { from: 'In review', to: 'Needs your input', kind: 'input', why: 'A question for you mid-review', path: [[128, 61], [126, 63], [79, 63]] },
+  { from: 'Needs your input', to: 'Rework', kind: 'rework', why: 'Your answer on a ticket with an open pull request: back to Rework', path: [[77, 59], [87, 59]] },
+  { from: 'Needs your input', to: 'Live', kind: 'input', why: 'Your close word, or its pull request already merged: Live', path: [[56, 59], [56, 69]] },
+  { from: 'In review', to: 'Rework', kind: 'rework', why: 'Review sends it back', path: [[129, 45], [119, 45]] },
+  { from: 'Rework', to: 'Building', kind: 'rework', why: 'The build loop takes Rework before fresh work', path: [[108, 37.5], [108, 28]] },
+].map((d) => Object.freeze({ ...d, path: Object.freeze(d.path.map((p) => Object.freeze(p))) })));
+
+/** An arrowhead's length and half its width, in map units. */
+const HEAD_LONG = 2.2;
+const HEAD_HALF = 1.3;
+
+/** An arrow's line and its head as SVG path data, the head pointing along the last stretch. */
+export function detourPathData(path) {
+  const pts = path.map(([x, y]) => [tidy(x), tidy(y)]);
+  const [tx, ty] = pts[pts.length - 1];
+  const [px, py] = pts[pts.length - 2];
+  const len = Math.hypot(tx - px, ty - py) || 1;
+  const ux = (tx - px) / len;
+  const uy = (ty - py) / len;
+  const bx = tx - ux * HEAD_LONG;
+  const by = ty - uy * HEAD_LONG;
+  // The line stops at the head's base, so its end does not poke through the point.
+  const line = [...pts.slice(0, -1), [bx, by]].map(([x, y], i) => `${i ? 'L' : 'M'}${tidy(x)} ${tidy(y)}`).join(' ');
+  const head = `M${tx} ${ty} L${tidy(bx - uy * HEAD_HALF)} ${tidy(by + ux * HEAD_HALF)} L${tidy(bx + uy * HEAD_HALF)} ${tidy(by - ux * HEAD_HALF)} Z`;
+  return { line, head };
+}
+
+/**
+ * The detours as one SVG laid over the map (SP-334), in the map's own units
+ * (viewBox MAP_UNITS), so each arrow stays on the border it crosses as the
+ * map scales. Each arrow is a `detour detour-<kind>` group naming its route
+ * (`data-from`, `data-to`) with a hover title saying when a ticket takes it.
+ */
+export function renderDetours() {
+  const arrows = MAP_DETOURS.map((d) => {
+    const { line, head } = detourPathData(d.path);
+    return `<g class="detour detour-${d.kind}" data-from="${escapeHtml(d.from)}" data-to="${escapeHtml(d.to)}">`
+      + `<title>${escapeHtml(`${d.from} → ${d.to}: ${d.why}`)}</title>`
+      + `<path class="detour-line" d="${line}"/><path class="detour-head" d="${head}"/></g>`;
+  });
+  const said = MAP_DETOURS.map((d) => `${d.from} to ${d.to}`).join('; ');
+  return `<svg class="map-detours" viewBox="0 0 ${MAP_UNITS.width} ${MAP_UNITS.height}" role="img" aria-label="${escapeHtml(`Detours: ${said}`)}">${arrows.join('')}</svg>`;
+}
+
+/** The line under the map saying what the arrows are. */
+export const DETOURS_KEY = 'Arrows mark the detours, Needs your input and Rework: every ticket in them costs a round trip, so a healthy board keeps them small.';
+
+/**
+ * The Console as HTML (SP-333, replacing SP-233's stage columns): the
+ * Features key (renderFeatureKey) over the map, MAP_AREAS each a
+ * `map-area` with its name, its count and its tiles placed by placeArea. The
+ * map's areas come in the loop's own order, so a narrow screen, which stacks
+ * them, reads the same path. Live shows the launches /in-flight sends (the last day's, on the server's clock), each
+ * fading with age. The detours' arrows (renderDetours, SP-334) lie over the
+ * areas, with a line under the map saying what they are. A ticket whose
+ * status is not on the map is listed under it ("Other Statuses"), so no
+ * ticket is ever left off.
+ */
+export function renderConsole(answer, now = Date.now()) {
+  const tickets = Array.isArray(answer?.tickets) ? answer.tickets : [];
+  const projects = new Map((Array.isArray(answer?.projects) ? answer.projects : []).map((p) => [p.slug, p]));
+  const onMap = new Set(MAP_AREAS.map((a) => a.status));
+  // Which Live tickets are recent enough to show is the server's answer (consoleOf, on its clock); the page only fades them.
+  const shown = tickets;
+  const tile = (t, opts) => renderConsoleTile(t, projects.get(t.project), now, opts);
+  const areaHtml = (area) => {
+    const here = shown.filter((t) => t.status === area.status);
+    const placed = placeArea(area, here, now);
+    const sizeClass = tileSizeClass(placed.grid.size);
+    const tiles = placed.tiles.map(({ ticket, col, row }) => {
+      const fade = area.status === 'Live' ? liveFade(ticket, now) : null;
+      return tile(ticket, { attrs: placeAttrs(area, placed.grid, { col, row }, fade), size: sizeClass });
+    });
+    if (placed.more) {
+      const n = placed.more.hidden.length;
+      tiles.push(`<details class="tile more ${moreOpens(area, placed.grid, placed.more)}${sizeClass ? ` ${sizeClass}` : ''}" data-stage="${escapeHtml(area.status)}" data-features="${escapeHtml(moreFeatures(placed.more.hidden))}"${placeAttrs(area, placed.grid, placed.more)}>`
+        + `<summary aria-label="${escapeHtml(`${n} more in ${area.status}`)}">+${n} More</summary>`
+        + `<ul class="more-list">${placed.more.hidden.map((t) => `<li><a href="/t/${encodeURIComponent(String(t.id ?? ''))}">${escapeHtml(String(t.id ?? ''))}</a> ${escapeHtml(t.name ?? '')}</li>`).join('')}</ul></details>`);
+    }
+    return `<section class="map-area" data-stage="${escapeHtml(area.status)}" data-area="${escapeHtml(area.status)}"`
+      + ` data-x="${share(area.x / MAP_UNITS.width)}" data-y="${share(area.y / MAP_UNITS.height)}" data-w="${share(area.w / MAP_UNITS.width)}" data-h="${share(area.h / MAP_UNITS.height)}">`
+      + `<h2><span class="stage-name">${escapeHtml(area.status)}</span><span class="count quiet">${here.length}</span></h2>`
+      + `<div class="tiles">${tiles.join('')}</div></section>`;
+  };
+  const others = shown.filter((t) => !onMap.has(t.status));
+  const other = others.length
+    ? `<section class="console-other"><h2>Other Statuses</h2><div class="tiles">${others.map((t) => tile(t)).join('')}</div></section>`
+    : '';
+  return `${renderFeatureKey(shown)}<div class="console"><div class="console-map" role="group" aria-label="The loop">${MAP_AREAS.map(areaHtml).join('')}${renderDetours()}</div>`
+    + `<p class="map-detours-key quiet">${escapeHtml(DETOURS_KEY)}</p>${other}</div>`;
+}
+
+// ── Suggest Next Tasks (SP-251) ──────────────────────────────────────────────

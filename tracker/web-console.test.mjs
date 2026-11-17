@@ -7,7 +7,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { contrast, renderConsole, renderDetours, detourPathData, MAP_DETOURS, DETOURS_KEY, renderConsoleTile, MAP_AREAS, MAP_UNITS, placeArea, driftOf, liveFade, slotShare, moreOpens, moreFeatures, tileSizeClass, TILE_MAX, TILE_MIN, TILE_COMPACT, TILE_TINY, LIVE_FADE_FLOOR, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, consoleFeature, featureColourIndex, renderFeatureKey, FEATURE_PALETTE, capInFlightText } from './web/render.mjs';
-import { pageScript } from './pageScripts.mjs';
+import { pageScript, renderScript } from './pageScripts.mjs';
 import { WEB, drawnCss } from './webTestKit.mjs';
 
 // ── The Console view (SP-233) ────────────────────────────────────────────────
@@ -296,7 +296,7 @@ test('Live shows the launches the server sends, newest nearest Requested, each f
   const html = renderConsole({ projects: [ALPHA], tickets }, CONSOLE_NOW);
   // The server (consoleOf, on its own clock) leaves out launches over a day old; the page does not filter again on the browser's clock.
   assert.match(html, /\/t\/AL-3"/, 'sent by the server: drawn, at the fade floor');
-  assert.doesNotMatch(/export function renderConsole\([\s\S]*?\n\}/.exec(readFileSync(WEB('render.mjs'), 'utf8'))[0], /LIVE_SHOWN_MS/);
+  assert.doesNotMatch(/export function renderConsole\([\s\S]*?\n\}/.exec(renderScript())[0], /LIVE_SHOWN_MS/);
   const live = html.slice(html.indexOf('data-stage="Live" data-area'));
   assert.ok(live.indexOf('/t/AL-2"') < live.indexOf('/t/AL-1"'), 'newest first, nearest the exit toward Requested');
   assert.match(live, /data-fade="0\.97" href="\/t\/AL-2"/);

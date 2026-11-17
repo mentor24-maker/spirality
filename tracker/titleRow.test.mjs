@@ -9,11 +9,11 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { declarationsOf, rootTokens } from './cssTokens.mjs';
-import { PAGE_SCRIPTS, pageScript } from './pageScripts.mjs';
+import { PAGE_SCRIPTS, RENDER_SCRIPTS, pageScript } from './pageScripts.mjs';
 
 const read = (path) => readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8');
 const CSS = read('./web/app.css');
-const SOURCES = { ...Object.fromEntries(PAGE_SCRIPTS.map((name) => [name, read(`./web/${name}`)])), 'render.mjs': read('./web/render.mjs') };
+const SOURCES = { ...Object.fromEntries(PAGE_SCRIPTS.map((name) => [name, read(`./web/${name}`)])), ...Object.fromEntries(RENDER_SCRIPTS.map((name) => [name, read(`./web/${name}`)])) };
 const declarations = declarationsOf(CSS);
 
 /** The declarations of the rule whose selector is exactly `selector`, as { property: value }. */
