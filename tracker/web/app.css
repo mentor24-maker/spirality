@@ -854,6 +854,9 @@ table.spirality-docs td.date { white-space: nowrap; }
 .tile { position: relative; display: flex; flex-direction: column; width: 8rem; height: 8rem; background: var(--bg-surface); border: 1px solid var(--border-black); border-radius: var(--radius-btn); overflow: hidden; color: var(--ink-primary); text-decoration: none; }
 .tile:hover, .tile:focus-visible { outline: 2px solid var(--focus-ring-color); outline-offset: 1px; }
 .tile.waiting { box-shadow: 0 0 0 3px var(--status-warn); }
+/* SP-377: a Queued ticket the build loop will not claim yet (its Waits on: line) carries a small mark in its top corner; its title says why. Not .waiting, which is "waiting on you". A compact tile keeps it; a tiny one has no room. */
+.tile-held { position: absolute; top: 0.25rem; right: 0.25rem; z-index: 1; padding: 0 0.3rem; border: 1px solid var(--status-warn-ink); border-radius: var(--radius-sm); background: var(--status-warn-bg); color: var(--status-warn-ink); font-size: var(--text-xs); font-weight: 600; line-height: var(--leading-tight); }
+.tile-tiny .tile-held { display: none; }
 .tile-picture { flex: 1; display: flex; align-items: center; justify-content: center; min-height: 0; }
 .tile-logo { max-width: 70%; max-height: 4.5rem; object-fit: contain; opacity: 0.45; }
 .tile-prefix { font-size: var(--tile-prefix-size); font-weight: 800; letter-spacing: 0.05em; color: var(--border-light); }

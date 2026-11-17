@@ -6,7 +6,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { contrast, renderConsole, renderDetours, renderFunnel, detourPathData, MAP_DETOURS, DETOURS_KEY, renderConsoleTile, MAP_AREAS, MAP_UNITS, placeArea, driftOf, liveFade, slotShare, moreOpens, moreFeatures, tileSizeClass, TILE_MAX, TILE_MIN, TILE_COMPACT, TILE_TINY, LIVE_FADE_FLOOR, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, consoleFeature, featureColourIndex, renderFeatureKey, FEATURE_PALETTE, capInFlightText, glidesOf, buildRunning, laneRunning, runningAreas, GLIDE_AREA, GLIDE_AREAS, DRIFT_FULL_MS, tileMoves, MOVE_MIN } from './web/render.mjs';
+import { contrast, renderConsole, renderDetours, renderFunnel, detourPathData, MAP_DETOURS, DETOURS_KEY, renderConsoleTile, consoleHeld, MAP_AREAS, MAP_UNITS, placeArea, driftOf, liveFade, slotShare, moreOpens, moreFeatures, tileSizeClass, TILE_MAX, TILE_MIN, TILE_COMPACT, TILE_TINY, LIVE_FADE_FLOOR, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, consoleFeature, featureColourIndex, renderFeatureKey, FEATURE_PALETTE, capInFlightText, glidesOf, buildRunning, laneRunning, runningAreas, GLIDE_AREA, GLIDE_AREAS, DRIFT_FULL_MS, tileMoves, MOVE_MIN } from './web/render.mjs';
 import { pageScript, renderScript } from './pageScripts.mjs';
 import { WEB, drawnCss } from './webTestKit.mjs';
 
@@ -16,7 +16,7 @@ const CONSOLE_NOW = Date.parse('2026-11-12T18:00:00.000Z');
 const consoleTicket = (over = {}) => ({
   id: 'AL-7', project: 'alpha', name: 'Fix the thing', status: 'Queued', tags: [], priority: null, assignee: null,
   updatedAt: '2026-11-12T15:00:00.000Z', stageSince: '2026-11-12T15:00:00.000Z',
-  waitingOnOperator: false, answerIn: false, pullRequest: null,
+  waitingOnOperator: false, answerIn: false, pullRequest: null, hold: null,
   nextChange: { kind: 'lane', lane: 'Build', job: 'loop-build', running: false, due: '2026-11-12T18:12:00.000Z' },
   ...over,
 });
@@ -54,6 +54,26 @@ test('a Console tile waiting on the operator is ringed, and its next change is "
   assert.equal(consoleWaiting(consoleTicket({ nextChange: { kind: 'operator' } })), true, 'one of his statuses');
   assert.equal(consoleWaiting(consoleTicket()), false);
   assert.match(renderConsoleTile(consoleTicket(), ALPHA, CONSOLE_NOW), /^<a class="tile" /);
+});
+
+test('a Console tile the build loop will not claim yet carries a "Waiting" mark titled with why; one next to build carries none, and a tile waiting on you keeps its ring (SP-377)', () => {
+  const reasons = ['waits on al-3 (still open)', 'its Waits on: line names "x", which is not a ticket id or link'];
+  const held = renderConsoleTile(consoleTicket({ hold: { reasons } }), ALPHA, CONSOLE_NOW);
+  assert.match(held, /^<a class="tile held" /);
+  assert.match(held, /<span class="tile-held" title="waits on al-3 \(still open\); its Waits on: line names &quot;x&quot;, which is not a ticket id or link">Waiting<\/span>/);
+  assert.match(held, /aria-label="[^"]*; held: waits on al-3 \(still open\); [^"]*\.">/);
+  assert.doesNotMatch(held, /class="tile[^"]*\bwaiting\b/, 'held is not "waiting on you"');
+  const next = renderConsoleTile(consoleTicket(), ALPHA, CONSOLE_NOW);
+  assert.doesNotMatch(next, /tile-held|held/);
+  assert.equal(consoleHeld(consoleTicket()), '');
+  assert.equal(consoleHeld(consoleTicket({ hold: { reasons: [] } })), '');
+  const his = renderConsoleTile(consoleTicket({ status: 'Needs your input', waitingOnOperator: true, nextChange: { kind: 'operator' } }), ALPHA, CONSOLE_NOW);
+  assert.match(his, /^<a class="tile waiting"/);
+  assert.doesNotMatch(his, /tile-held/);
+  const css = readFileSync(WEB('app.css'), 'utf8');
+  assert.match(css, /\.tile\.waiting \{ box-shadow: 0 0 0 3px var\(--status-warn\); \}/, 'the ring on a tile waiting on you is unchanged');
+  assert.match(css, /\.tile-held \{[^}]*position: absolute;/);
+  assert.match(css, /\.tile-tiny \.tile-held \{ display: none; \}/);
 });
 
 test('a Console tile whose next change is unknown shows a dash; Building and a running lane show "Now"', () => {
