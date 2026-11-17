@@ -6,7 +6,7 @@
  * still names render.mjs. Its rule holds here too: every character of
  * ticket text is escaped before it is drawn.
  */
-import { escapeHtml, renderInline, headingId, renderMarkdown, option, byText, lastIfMissing } from './render-common.mjs';
+import { escapeHtml, renderInline, headingId, renderMarkdown, unwrapDoc, option, byText, lastIfMissing } from './render-common.mjs';
 
 /**
  * A command's short line in the Quick Claude Commands pod (SP-212): its own
@@ -265,6 +265,9 @@ export const LOOP_QUEUE_DIAGRAM = Object.freeze({
   ].map((b) => Object.freeze({ ...b, anchor: headingId(b.label) }))),
 });
 
+/** The Loop Queue diagram's id on the Docs page (SP-361): the anatomy page's cut-outs link to `/docs#loop-queue-diagram`. */
+export const LOOP_QUEUE_FIGURE_ID = 'loop-queue-diagram';
+
 /**
  * The Loop Queue diagram for the top of the Docs page's right-hand column
  * (SP-337): the picture at the column's width, and over each status box a
@@ -281,5 +284,60 @@ export function renderLoopQueueDiagram(docAddress) {
     const href = escapeHtml(`${docAddress(d.page)}#${anchor}`);
     return `<a class="diagram-box" href="${href}" aria-label="${escapeHtml(label)}"><title>${escapeHtml(label)}</title><rect x="${l}" y="${t}" width="${r - l}" height="${b - t}" rx="24"></rect></a>`;
   }).join('');
-  return `<figure class="loop-diagram"><img src="${d.src}" alt="${escapeHtml(d.alt)}" width="${d.width}" height="${d.height}"><svg class="loop-diagram-links" viewBox="0 0 ${d.width} ${d.height}" role="group" aria-label="Loop Queue statuses">${links}</svg></figure>`;
+  return `<figure class="loop-diagram" id="${LOOP_QUEUE_FIGURE_ID}"><img src="${d.src}" alt="${escapeHtml(d.alt)}" width="${d.width}" height="${d.height}"><svg class="loop-diagram-links" viewBox="0 0 ${d.width} ${d.height}" role="group" aria-label="Loop Queue statuses">${links}</svg></figure>`;
+}
+
+/** The margin, in the picture's pixels, kept around a status box cut from the diagram (SP-361). */
+const CUT_MARGIN = 24;
+/** How many of the picture's pixels make one pixel of a cut-out on the page: every box drawn at the same scale (SP-361). */
+const CUT_SCALE = 2.75;
+
+/**
+ * One status box cut from the Loop Queue diagram (SP-361): an SVG whose
+ * viewBox is the box's area plus a small margin (kept inside the picture),
+ * holding the whole picture, so only the box shows. Its width and height
+ * attributes draw every box at the same scale, and app.css lets it shrink
+ * with its column; an inline style would size it too, but the page's lock
+ * forbids it. Decorative: the link around it carries the name.
+ */
+export function renderDiagramCut([l, t, r, b]) {
+  const d = LOOP_QUEUE_DIAGRAM;
+  const x = Math.max(0, l - CUT_MARGIN);
+  const y = Math.max(0, t - CUT_MARGIN);
+  const w = Math.min(d.width, r + CUT_MARGIN) - x;
+  const h = Math.min(d.height, b + CUT_MARGIN) - y;
+  return `<svg class="anatomy-cut" viewBox="${x} ${y} ${w} ${h}" width="${Math.round(w / CUT_SCALE)}" height="${Math.round(h / CUT_SCALE)}" aria-hidden="true" focusable="false"><image href="${d.src}" x="0" y="0" width="${d.width}" height="${d.height}"></image></svg>`;
+}
+
+/**
+ * The Loop Queue Anatomy page's drawing on the tracker (SP-361). `body` is
+ * the file's text with its "# " title already taken off (drawDoc draws it
+ * as the page's heading). The opening paragraph is drawn as before; then
+ * one table row per "## " section, in the file's order: on the left that
+ * status's box cut from the diagram, a link to the diagram on the Docs page;
+ * on the right the section's copy, drawn by the same Markdown drawing. The
+ * box shows the status's name, so no heading is drawn, but the row carries
+ * the heading's old id, so the diagram's links into this page (SP-337) still
+ * land on their status. A section with no box on the diagram keeps its name
+ * as text in the left cell, so nothing in the file is lost.
+ */
+export function renderLoopQueueAnatomy(body) {
+  const [intro, ...sections] = unwrapDoc(String(body ?? '')).split(/^## /m);
+  const used = new Map();
+  const rows = sections.map((section) => {
+    const [heading, ...rest] = section.split('\n');
+    const words = heading.trim();
+    const base = headingId(words);
+    const n = (used.get(base) ?? 0) + 1;
+    used.set(base, n);
+    const id = n === 1 ? base : `${base}-${n}`;
+    const found = LOOP_QUEUE_DIAGRAM.boxes.find((b) => b.anchor === base);
+    const left = found
+      ? `<a class="anatomy-box" href="/docs#${LOOP_QUEUE_FIGURE_ID}" aria-label="${escapeHtml(`${found.label}: show it on the Loop Queue diagram`)}">${renderDiagramCut(found.box)}</a>`
+      : `<strong>${renderInline(words)}</strong>`;
+    return `<tr id="${escapeHtml(id)}"><td class="anatomy-cut-cell">${left}</td><td class="anatomy-copy">${renderMarkdown(rest.join('\n'))}</td></tr>`;
+  });
+  const opening = renderMarkdown(intro);
+  if (!rows.length) return opening;
+  return `${opening}\n<table class="anatomy"><tbody>${rows.join('')}</tbody></table>`;
 }

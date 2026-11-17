@@ -6,7 +6,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { renderMarkdown, unwrapDoc, headingId, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, renderLoopQueueDiagram, LOOP_QUEUE_DIAGRAM, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS } from './web/render.mjs';
+import { renderMarkdown, unwrapDoc, headingId, renderLoopQueueAnatomy, renderDiagramCut, LOOP_QUEUE_FIGURE_ID, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, renderLoopQueueDiagram, LOOP_QUEUE_DIAGRAM, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS } from './web/render.mjs';
 import { pageScript } from './pageScripts.mjs';
 import { WEB, fixture } from './webTestKit.mjs';
 
@@ -452,4 +452,60 @@ test('the Docs page opens with the Loop Queue diagram, each status box a link to
   const css = readFileSync(WEB('app.css'), 'utf8');
   assert.match(css, /a\.diagram-box:focus-visible rect \{[^}]*stroke: var\(--focus-ring-color\)/);
   assert.match(css, /a\.diagram-box \{[^}]*cursor: pointer/);
+});
+
+test('the Loop Queue Anatomy page is a table: each status box cut from the diagram beside its copy, linking to the diagram (SP-361)', () => {
+  const text = readFileSync(new URL('../docs/LOOP_QUEUE_ANATOMY.md', import.meta.url), 'utf8');
+  const body = text.replace(/^(?:[ \t]*\n)*#[ \t]+.*\n?/, '');
+  const html = renderLoopQueueAnatomy(body);
+  // The opening paragraph first, drawn as before, then the table.
+  assert.ok(html.startsWith('<p>The Spirality Loop Queue diagram shows the eight statuses'), html.slice(0, 80));
+  assert.ok(html.indexOf('<table class="anatomy">') > html.indexOf('</p>'));
+  assert.doesNotMatch(html, /<h\d/, 'no heading per section: the box carries the name');
+  assert.doesNotMatch(html, /style=/, 'the page\'s lock refuses inline styles');
+  const rows = [...html.matchAll(/<tr id="([^"]+)"><td class="anatomy-cut-cell">(.*?)<\/td><td class="anatomy-copy">(.*?)<\/td><\/tr>/gs)];
+  assert.equal(rows.length, 8);
+  assert.deepEqual(rows.map((r) => r[1]), LOOP_QUEUE_DIAGRAM.boxes.map((b) => b.anchor), 'each row carries the id the diagram links to, in order');
+  assert.deepEqual(rows.map((r) => r[1]), ['requested', 'needs-your-input', 'queued', 'rework', 'building', 'in-review', 'ready-to-launch', 'live']);
+  rows.forEach(([, , left, copy], i) => {
+    const { label, box: [l, t, r, b] } = LOOP_QUEUE_DIAGRAM.boxes[i];
+    const link = /^<a class="anatomy-box" href="([^"]+)" aria-label="([^"]+)"><svg class="anatomy-cut" viewBox="(\d+) (\d+) (\d+) (\d+)"[^>]*aria-hidden="true"[^>]*><image href="\/web\/loop-queue-diagram\.png" x="0" y="0" width="3200" height="1800"><\/image><\/svg><\/a>$/.exec(left);
+    assert.ok(link, `${label}: ${left}`);
+    assert.equal(link[1], `/docs#${LOOP_QUEUE_FIGURE_ID}`);
+    assert.equal(link[1], '/docs#loop-queue-diagram');
+    assert.equal(link[2], `${label}: show it on the Loop Queue diagram`);
+    const [x, y, w, h] = link.slice(3, 7).map(Number);
+    assert.ok(x <= l && y <= t && x + w >= r && y + h >= b, `${label}: the cut holds its whole box`);
+    assert.ok(x >= 0 && y >= 0 && x + w <= 3200 && y + h <= 1800, `${label}: the cut stays inside the picture`);
+    assert.ok(l - x <= 40 && r - (x + w) >= -40, `${label}: only a small margin`);
+    // The copy is the section's own words, drawn by the same Markdown drawing.
+    const section = text.split(/^## /m)[i + 1].split('\n').slice(1).join('\n');
+    assert.equal(copy, renderMarkdown(unwrapDoc(section)));
+  });
+  // The links are drawn the same in Markdown: code and links survive.
+  assert.match(html, /<a href="LOOP_CONTRACT\.md"|<code>/);
+  // Every box is drawn at one scale: width over viewBox width is the same for all eight.
+  const scales = [...html.matchAll(/viewBox="\d+ \d+ (\d+) \d+" width="(\d+)"/g)].map((m) => Number(m[1]) / Number(m[2]));
+  for (const s of scales) assert.ok(Math.abs(s - scales[0]) < 0.05, `scale ${s} vs ${scales[0]}`);
+  // A cut keeps inside the picture at its edges.
+  assert.match(renderDiagramCut([0, 0, 3200, 1800]), /viewBox="0 0 3200 1800"/);
+  // A section the diagram has no box for keeps its name as text; a file with no sections is drawn as plain Markdown.
+  assert.match(renderLoopQueueAnatomy('Intro.\n\n## Odd one\n\nWords.'), /<tr id="odd-one"><td class="anatomy-cut-cell"><strong>Odd one<\/strong><\/td><td class="anatomy-copy"><p>Words\.<\/p><\/td><\/tr>/);
+  assert.equal(renderLoopQueueAnatomy('Just words.'), '<p>Just words.</p>');
+  assert.match(renderLoopQueueAnatomy('<b>x</b>\n\n## Live\n\n<i>y</i>'), /&lt;b&gt;x.*&lt;i&gt;y/s, 'every character escaped');
+});
+
+test('the Docs page draws the anatomy file as that table, gives the diagram its id and scrolls to the address\'s id after drawing (SP-361)', () => {
+  assert.match(renderLoopQueueDiagram((p) => `/docs/spirality/${p}`), /^<figure class="loop-diagram" id="loop-queue-diagram">/);
+  const app = pageScript();
+  const one = app.slice(app.indexOf('async function drawDoc('), app.indexOf('function scrollToNamed('));
+  assert.match(one, /doc\.path === LOOP_QUEUE_DIAGRAM\.page \? renderLoopQueueAnatomy\(body\) : renderMarkdown\(unwrapDoc\(body\), \{ headingIds: true \}\)/);
+  assert.match(one, /scrollToNamed\(\);/);
+  const docs = app.slice(app.indexOf('async function drawDocs('), app.indexOf('const docsColumns ='));
+  assert.match(docs, /const firstDraw = !done && !problem;/, 'a redraw after a change does not jump back to the diagram');
+  assert.equal(docs.match(/if \(firstDraw\) scrollToNamed\(\);/g)?.length, 2, 'both of the Docs page\'s screens scroll to the id');
+  const css = readFileSync(WEB('app.css'), 'utf8');
+  assert.match(css, /table\.anatomy td \{[^}]*vertical-align: top/);
+  assert.match(css, /a\.anatomy-box:focus-visible \{[^}]*outline: 2px solid var\(--focus-ring-color\)/);
+  assert.match(css, /svg\.anatomy-cut \{[^}]*max-width: 100%/);
 });

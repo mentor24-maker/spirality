@@ -7,7 +7,7 @@
  * (Spirality SP-352), so a ticket that changes one page no longer edits the
  * same file as a ticket that changes another.
  */
-import { escapeHtml, renderMarkdown, unwrapDoc, renderCommandList, renderCommandView, renderCommandDetails, renderContextDocs, renderLoopQueueDiagram, nextSort, renderDocumentation, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine } from './render.mjs';
+import { escapeHtml, renderMarkdown, unwrapDoc, renderCommandList, renderCommandView, renderCommandDetails, renderContextDocs, renderLoopQueueDiagram, renderLoopQueueAnatomy, LOOP_QUEUE_DIAGRAM, nextSort, renderDocumentation, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine } from './render.mjs';
 import { api, setTitle, main, putTrail, savedProject, sizeOf, when, drawAgain, SignedOut, drawSignIn, showError, MAX_FILE, uploadFile, Refused } from './app.mjs';
 
 /**
@@ -38,12 +38,15 @@ export async function drawDocs(done = '', problem = '', section = 'files') {
     api('GET', '/commands').then((r) => r.commands, () => null),
   ]);
   setTitle('Docs · Tracker');
+  // SP-361: `/docs#loop-queue-diagram` (the anatomy page's boxes) opens with the diagram in view; a redraw after a change stays put.
+  const firstDraw = !done && !problem;
   const documentation = renderDocumentation(files, docAddress);
   if (!projects.length) {
     main.innerHTML = `<h1>Docs</h1>${docsColumns(`<h2>Task Files</h2><p class="quiet">There are no projects yet.</p>${documentation}`)}`;
     showCommands(commands);
     wireDocumentation(files);
     putTrail([{ label: 'Docs' }]);
+    if (firstDraw) scrollToNamed();
     return;
   }
   const project = projects.find((p) => p.slug === savedProject()) ?? projects[0];
@@ -158,6 +161,7 @@ export async function drawDocs(done = '', problem = '', section = 'files') {
   showCommands(commands);
   wireDocumentation(files);
   putTrail([{ label: 'Docs' }]);
+  if (firstDraw) scrollToNamed();
 }
 
 /**
@@ -377,14 +381,21 @@ export async function drawDoc(path) {
   }
   setTitle(`${doc.title} · Docs · Tracker`);
   const body = doc.text.replace(/^(?:[ \t]*\n)*#[ \t]+.*\n?/, '');
+  // SP-361: the Loop Queue Anatomy page is a table of the diagram's boxes beside their copy; every other file is drawn as written.
+  const drawn = doc.path === LOOP_QUEUE_DIAGRAM.page ? renderLoopQueueAnatomy(body) : renderMarkdown(unwrapDoc(body), { headingIds: true });
   main.innerHTML = `
     ${back}
     <h1>${escapeHtml(doc.title)}</h1>
     <p class="quiet"><code>docs/${escapeHtml(doc.path)}</code></p>
-    <section class="description doc">${renderMarkdown(unwrapDoc(body), { headingIds: true }) || '<p class="quiet">This file is empty.</p>'}</section>
+    <section class="description doc">${drawn || '<p class="quiet">This file is empty.</p>'}</section>
     ${back}`;
   putTrail([{ label: 'Docs', href: '/docs' }, { label: doc.title }]);
   // SP-331: the page is drawn after it loads, so the browser cannot jump to `#rework` itself; scroll to the heading the address names.
+  scrollToNamed();
+}
+
+/** Scroll to the id the address names (`#rework`, `#loop-queue-diagram`): a page drawn after it loads cannot jump there itself (SP-331, SP-361). */
+function scrollToNamed() {
   const named = location.hash.slice(1);
   if (named) document.getElementById(named)?.scrollIntoView({ block: 'start' });
 }
