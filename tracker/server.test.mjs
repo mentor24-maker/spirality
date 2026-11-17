@@ -593,6 +593,76 @@ test('DELETE /tickets/:id needs ticket.delete: an editor deletes, a contributor,
   } finally { await f.cleanup(); }
 });
 
+test('PATCH /tickets/:id needs ticket.edit on the project: a reviewer or viewer member is 403 cannot-edit, a non-member is 404, the ticket stays; a contributor, editor, admin or loop edits', async () => {
+  const f = await fixture();
+  try {
+    f.store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE', operator: f.human.id });
+    const person = (name, role, project = 'alpha') => {
+      const a = f.store.createActor({ kind: 'human', name });
+      if (project) f.store.addMember({ project, actor: a.id, by: f.human.id });
+      if (role) f.store.setRole({ actor: a.id, role, by: f.human.id });
+      return { ...a, token: f.store.issueToken(a.id) };
+    };
+    const t = f.store.fileTicket({ project: 'alpha', actor: f.machine.id, name: 'original', status: 'queued' });
+    f.store.postComment({ ticket: t.id, author: f.human.id, body: 'stays' });
+
+    // A member whose role lacks ticket.edit: refused, nothing changed.
+    for (const [name, role] of [['Rita', 'reviewer'], ['Vera', 'viewer']]) {
+      const p = person(name, role);
+      const before = (await f.call('GET', `/tickets/${t.id}`)).body;
+      const r = await f.call('PATCH', `/tickets/${t.id}`, { token: p.token, body: { name: `renamed by ${name}`, ifVersion: before.version } });
+      assert.equal(r.status, 403, `${name}: ${r.text}`);
+      assert.equal(r.body.error, 'cannot-edit');
+      assert.equal(r.body.ticket, t.id);
+      assert.equal(r.body.project, 'alpha');
+      assert.equal(r.body.role, role);
+      assert.match(r.body.message ?? r.text, new RegExp(`${name} \\(${role}\\)`));
+      const after = await f.call('GET', `/tickets/${t.id}`);
+      assert.deepEqual(after.body, before, name);
+    }
+
+    // A contributor on another project only: the ticket is not theirs to
+    // see, so 404 with the not-found words, and it stays as it was.
+    const outsider = person('Otto', 'contributor', 'beta');
+    const before = (await f.call('GET', `/tickets/${t.id}`)).body;
+    const out = await f.call('PATCH', `/tickets/${t.id}`, { token: outsider.token, body: { name: 'renamed by Otto' } });
+    assert.equal(out.status, 404, out.text);
+    assert.equal(out.body.error, 'unknown-ticket');
+    assert.deepEqual((await f.call('GET', `/tickets/${t.id}`)).body, before);
+    // The store's check says no too, so the refusal holds without the scope.
+    assert.equal(f.store.canChangeTickets(outsider.id, 'alpha'), false);
+    assert.equal(f.store.canChangeTickets(outsider.id, 'beta'), true);
+
+    // Allowed: a contributor (and a person with no role row), an editor, an
+    // admin, a loop. Each change lands and bumps the version.
+    const allowed = [
+      ['Carl', person('Carl', 'contributor').token],
+      ['Cora', person('Cora', null).token],
+      ['Edna', person('Edna', 'editor').token],
+      ['Ada', person('Ada', 'admin', null).token],
+      ['Loop', f.machineToken],
+    ];
+    for (const [name, token] of allowed) {
+      const was = (await f.call('GET', `/tickets/${t.id}`)).body;
+      const r = await f.call('PATCH', `/tickets/${t.id}`, { token, body: { name: `renamed by ${name}`, ifVersion: was.version } });
+      assert.equal(r.status, 200, `${name}: ${r.text}`);
+      assert.equal(r.body.ticket.name, `renamed by ${name}`);
+      assert.deepEqual(r.body.changed, ['name']);
+      assert.ok(r.body.ticket.version > was.version, name);
+    }
+
+    // Someone allowed still meets the old answers: a stale version is 409
+    // moved, an unknown ticket 404.
+    const editor = person('Eve', 'editor');
+    const stale = await f.call('PATCH', `/tickets/${t.id}`, { token: editor.token, body: { name: 'late', ifVersion: 1 } });
+    assert.equal(stale.status, 409, stale.text);
+    assert.equal(stale.body.error, 'moved');
+    const unknown = await f.call('PATCH', '/tickets/AL-999', { token: editor.token, body: { name: 'nobody' } });
+    assert.equal(unknown.status, 404);
+    assert.equal(unknown.body.error, 'unknown-ticket');
+  } finally { await f.cleanup(); }
+});
+
 test('an old ClickUp id the importer mapped reads, changes and deletes the ticket it became; an unmapped id is still a 404 (SP-157)', async () => {
   const f = await fixture();
   try {

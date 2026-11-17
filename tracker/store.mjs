@@ -1679,6 +1679,11 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
       return canDeleteTickets(actorId);
     },
 
+    /** Whether an actor may change tickets in a project: a machine always, a person who sees it (a member, or an admin) and whose role carries ticket.edit. */
+    canChangeTickets(actorId, slug) {
+      return canChangeTickets(actorId, slug);
+    },
+
     /**
      * Change a person's role: the one way a role changes. `by` must be a
      * person who is an admin (`not-admin`); `actor` a person (a machine has

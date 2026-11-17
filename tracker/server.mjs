@@ -29,7 +29,9 @@
  *   403  a write only a person may make, asked by a loop's token, or a
  *        role or member change asked by someone who is not an admin,
  *        or a ticket delete by a person whose role lacks ticket.delete:
- *        `{ error: 'cannot-delete', ticket, role }`
+ *        `{ error: 'cannot-delete', ticket, role }`, or a ticket edit by a
+ *        person whose role lacks ticket.edit or who is not on its project:
+ *        `{ error: 'cannot-edit', ticket, project, role }`
  * A ticket's attachments are the one call whose body is not JSON: `POST
  * /tickets/<id>/attachments` takes the file's raw bytes
  * (`content-type: application/octet-stream`), its name in `x-file-name`
@@ -1508,6 +1510,15 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
         const body = await readJson(req);
         checkBody(body, me, [...CHANGE_FIELDS, 'ifStatus', 'ifVersion']);
         const ticket = requireTicket(parts[1], me);
+        // Editing needs ticket.edit and the project (a member, or an admin);
+        // a loop always may. Checked before anything else is read from the
+        // body, so a refused edit changes nothing and bumps no version.
+        if (!store.canChangeTickets(me.id, ticket.project)) {
+          const role = store.roleOf(me.id);
+          throw new HttpError(403, 'cannot-edit',
+            `${me.name} (${role}) cannot change tickets in project "${ticket.project}", so ${ticket.id} was left as it was; an admin, editor or contributor on the project can change it.`,
+            { ticket: ticket.id, project: ticket.project, role });
+        }
         // The contract's hand-off signal: a ticket is assigned to its
         // project's operator or to nobody. A person's change is held to it
         // here; a loop's goes through the door, which already keeps it.
