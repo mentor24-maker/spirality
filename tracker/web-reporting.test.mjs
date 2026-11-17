@@ -112,6 +112,44 @@ test('Reporting: one project or all of them; an unknown project is null; open co
   } finally { r.done(); }
 });
 
+// ── Noticeboards (SP-357) ────────────────────────────────────────────────────
+
+test('Reporting: a Team chat and a ticket tagged noticeboard, both in Live, count in no figure; the work beside them still does', () => {
+  const r = reportingStore();
+  try {
+    r.clock.moveTo(r.now - 10 * DAY);
+    const chat = r.store.fileTicket({ project: 'alpha', actor: r.loop.id, name: 'Team chat', status: 'live' });
+    const board = r.store.fileTicket({ project: 'alpha', actor: r.loop.id, name: 'Pipeline pulse', status: 'live', tags: ['noticeboard'] });
+    // A post to each, as the bus makes, so the boards have time and notes to count if they were counted.
+    r.clock.moveTo(r.now - 1 * DAY);
+    r.store.postComment({ ticket: chat.id, author: r.loop.id, body: 'MAIN MOVED: a post on the bus' });
+    r.store.postComment({ ticket: board.id, author: r.loop.id, body: 'pulse: all quiet' });
+    r.ticket('alpha', 5, [2, 'live']);
+    const rep = reportsOf(r.store, { now: r.now });
+    assert.deepEqual(rep.finished, { week: 1, month: 1, all: 1 }, 'only the work ticket finished');
+    assert.deepEqual(rep.started, { week: 1, month: 1, all: 1 });
+    assert.equal(rep.byKind.none.started.all, 1);
+    assert.ok(rep.timeSplit.all.tickets.every((t) => t.id !== chat.id && t.id !== board.id), 'no board in the time split');
+    assert.equal(rep.efficiency.all.operationalTime.total, rep.timeSplit.all.total);
+    const alone = reportingStore();
+    try {
+      alone.clock.moveTo(alone.now - 10 * DAY);
+      alone.store.fileTicket({ project: 'alpha', actor: alone.loop.id, name: 'Team chat', status: 'live' });
+      const none = reportsOf(alone.store, { now: alone.now });
+      assert.deepEqual(none.finished, { week: 0, month: 0, all: 0 });
+      assert.deepEqual(none.started, { week: 0, month: 0, all: 0 });
+      assert.equal(none.timeSplit.all.total, 0);
+    } finally { alone.done(); }
+  } finally { r.done(); }
+});
+
+test('Reporting: what a noticeboard is comes only from lib/loopNoticeboards.js', () => {
+  const src = readFileSync(new URL('./pageData-reporting.mjs', import.meta.url), 'utf8');
+  assert.match(src, /from '\.\.\/lib\/loopNoticeboards\.js'/);
+  assert.doesNotMatch(src, /'Team chat'|'noticeboard'/i, 'no second list of names or tags here');
+  assert.doesNotMatch(src, /store\.listTickets\(p\.slug\)/, 'every ticket loop goes through reportedTickets');
+});
+
 // ── By kind (SP-347) ─────────────────────────────────────────────────────────
 
 /**
