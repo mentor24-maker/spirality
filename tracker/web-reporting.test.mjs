@@ -348,15 +348,99 @@ test('Reporting: a custom range counts tasks started and finished on its start a
     finishAt('2026-10-09T23:00:00Z');
     finishAt('2026-10-16T01:00:00Z');
     const rep = reportsOf(r.store, { now: r.now, custom });
-    assert.deepEqual(rep.custom, { from: '2026-10-10T00:00:00.000Z', to: '2026-10-15T23:59:59.999Z', started: 2, finished: 2 });
+    const { days, ...totals } = rep.custom;
+    assert.deepEqual(totals, { from: '2026-10-10T00:00:00.000Z', to: '2026-10-15T23:59:59.999Z', started: 2, finished: 2 });
+    assert.equal(days.length, 6, 'one day each, Oct 10 to Oct 15 (SP-368)');
     // The fixed ranges are counted as before, and with no range there is no custom figure.
     const plain = reportsOf(r.store, { now: r.now });
     assert.equal('custom' in plain, false);
     assert.deepEqual(rep.started, plain.started);
     assert.deepEqual(rep.finished, plain.finished);
     // One project only: beta has none of them.
-    assert.deepEqual(reportsOf(r.store, { project: 'beta', now: r.now, custom }).custom, { ...rep.custom, started: 0, finished: 0 });
+    const beta = reportsOf(r.store, { project: 'beta', now: r.now, custom }).custom;
+    assert.deepEqual({ ...beta, days: undefined }, { ...totals, days: undefined, started: 0, finished: 0 });
+    assert.ok(beta.days.every((d) => d.started === 0 && d.finished === 0));
   } finally { r.done(); }
+});
+
+test('Reporting: the custom range splits started and finished by day, one entry per day in order, adding up to the totals (SP-368)', () => {
+  const r = reportingStore();
+  try {
+    const at = (iso) => Date.parse(iso);
+    const fileAt = (iso) => {
+      r.clock.moveTo(at(iso));
+      return r.store.fileTicket({ project: 'alpha', actor: r.loop.id, name: `filed ${iso}`, status: 'queued' }).id;
+    };
+    // Three days in the range, Oct 10 to Oct 14, and one outside it.
+    const a = fileAt('2026-10-10T03:00:00Z');
+    fileAt('2026-10-12T12:00:00Z');
+    fileAt('2026-10-12T13:00:00Z');
+    fileAt('2026-10-14T23:59:00Z');
+    fileAt('2026-10-15T01:00:00Z');
+    r.clock.moveTo(at('2026-10-12T20:00:00Z'));
+    r.store.changeTicket(a, { actor: r.loop.id, status: 'live' });
+    const custom = { from: at('2026-10-10T00:00:00Z'), to: at('2026-10-14T23:59:59.999Z') };
+    const rep = reportsOf(r.store, { now: r.now, custom });
+    assert.deepEqual(rep.custom.days, [
+      { day: '2026-10-10T00:00:00.000Z', started: 1, finished: 0 },
+      { day: '2026-10-11T00:00:00.000Z', started: 0, finished: 0 },
+      { day: '2026-10-12T00:00:00.000Z', started: 2, finished: 1 },
+      { day: '2026-10-13T00:00:00.000Z', started: 0, finished: 0 },
+      { day: '2026-10-14T00:00:00.000Z', started: 1, finished: 0 },
+    ]);
+    const sum = (k) => rep.custom.days.reduce((n, d) => n + d[k], 0);
+    assert.equal(sum('started'), rep.custom.started);
+    assert.equal(sum('finished'), rep.custom.finished);
+    assert.equal(rep.custom.started, 4, 'the one filed Oct 15 is outside the range');
+    // A range across a clock change (an hour longer) still has one entry per date, the last one taking the spare hour.
+    const longer = reportsOf(r.store, { now: r.now, custom: { from: custom.from, to: custom.to + 3_600_000 } });
+    assert.equal(longer.custom.days.length, 5);
+    assert.equal(longer.custom.days.reduce((n, d) => n + d.started, 0), longer.custom.started);
+  } finally { r.done(); }
+});
+
+test('Reporting: a bar chart sits right of the Task Productivity table, redrawn with the custom cells and gone on a bad range (SP-368)', () => {
+  const app = pageScript();
+  const fn = app.slice(app.indexOf('async function drawReporting('), app.indexOf('function productivityChart('));
+  // Its place: one row, the table first, the chart after it.
+  assert.match(fn, /<div class="productivity-row">\s*<div class="table-wrap"><table class="counts report productivity">[\s\S]*?<\/table><\/div>\s*<figure class="productivity-chart" hidden><\/figure>\s*<\/div>/);
+  // Redrawn wherever the custom cells are: on arrival, on a picker change from that answer, emptied on a bad range.
+  const show = fn.slice(fn.indexOf('const showCustom'), fn.indexOf('const rangeProblem'));
+  assert.match(show, /chart\.innerHTML = figures \? productivityChart\(figures\.days, from\) : '';/);
+  assert.match(show, /chart\.hidden = !figures;/);
+  assert.match(fn, /if \(problem\) \{ showCustom\(null, problem\); return; \}/);
+  assert.match(fn, /showCustom\(again\.custom, null, picked\.from\)/);
+  const css = readFileSync(new URL('./web/app.css', import.meta.url), 'utf8');
+  assert.match(css, /\.productivity-row \{ display: flex; flex-wrap: wrap;/);
+  assert.match(css, /\.productivity-chart \{[^}]*margin: 0 0 0 auto;/, 'right-aligned');
+  assert.match(css, /@media \(max-width: 800px\) \{ \.productivity-chart \{ flex-basis: 100%;/, 'drops below on a narrow window');
+
+  // The chart itself, run here.
+  const chartSrc = app.slice(app.indexOf('function productivityChart('), app.indexOf('/** A share as a figure'));
+  const helpers = app.slice(app.indexOf('function localDay('), app.indexOf('function dayLabel('));
+  const escapeHtml = (v) => String(v).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+  const productivityChart = new Function('escapeHtml', `${helpers}\n${chartSrc}\nreturn productivityChart;`)(escapeHtml);
+  const days = [
+    { day: 'x', started: 3, finished: 1 },
+    { day: 'x', started: 0, finished: 0 },
+    { day: 'x', started: 1, finished: 2 },
+  ];
+  const svg = productivityChart(days, '2026-11-14');
+  assert.match(svg, /<span class="key started">Tasks Started<\/span><span class="key finished">Tasks Finished<\/span>/);
+  assert.match(svg, /<span class="chart-title">Tasks by Day<\/span>/);
+  assert.match(svg, /<svg class="chart" viewBox="0 0 600 220"/);
+  assert.equal((svg.match(/<rect class="bar started"/g) ?? []).length, 2, 'a day with none draws no bar');
+  assert.equal((svg.match(/<rect class="bar finished"/g) ?? []).length, 2);
+  const nov14 = new Date(2026, 10, 14, 12).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  const nov16 = new Date(2026, 10, 16, 12).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  assert.ok(svg.includes(`<title>${nov14}: 3 started</title>`), 'each bar says its day and count on hover');
+  assert.ok(svg.includes(`>${nov14}</text>`) && svg.includes(`>${nov16}</text>`), 'the first and last dates are under the bars');
+  assert.match(svg, /text-anchor="end">3<\/text>/, 'the scale tops out at the tallest bar');
+  assert.doesNotMatch(svg, /style=/, 'no inline style: the page CSP drops it');
+  const empty = productivityChart([{ day: 'x', started: 0, finished: 0 }], '2026-11-14');
+  assert.match(empty, /<p class="quiet chart-empty">No tasks started or finished in this range\.<\/p>/);
+  assert.match(empty, /Tasks Started/, 'the frame and key stay');
+  assert.doesNotMatch(empty, /<svg/);
 });
 
 test('Reporting: Task Productivity has Start Date and End Date pickers after the fixed ranges, 30 days ago to today, redrawn in place (SP-240)', () => {
@@ -581,6 +665,35 @@ test('the demo spreads its finished tasks over the last month, so every range ha
       assert.ok(h.hours > 0 && h.perDay > 0 && h.notEstimated > 0, `${key} ${JSON.stringify(h)}`);
     }
   } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('the demo gives open tasks a kind too, so picking Feature changes Open Now as well as the finished figures (SP-367)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tracker-demo-kinds-'));
+  const clock = tickingClock();
+  const store = openStore(join(dir, 'tracker.db'), { now: clock });
+  try {
+    seedDemo(store, { operatorName: 'Dane', clock });
+    const openCount = (r) => r.open.reduce((n, s) => n + s.count, 0);
+    const all = reportsOf(store, { now: clock.time() });
+    const feature = reportsOf(store, { now: clock.time(), kind: 'feature' });
+    const none = reportsOf(store, { now: clock.time(), kind: 'none' });
+    assert.equal(feature.kind, 'feature');
+    assert.ok(feature.finished.all > 0 && feature.finished.all < all.finished.all, JSON.stringify(feature.finished));
+    assert.ok(openCount(feature) > 0 && openCount(feature) < openCount(all), `Feature open ${openCount(feature)} of ${openCount(all)}`);
+    for (const kind of ['fix', 'operational']) {
+      assert.ok(openCount(reportsOf(store, { now: clock.time(), kind })) > 0, `an open ${kind}`);
+    }
+    // Every ticket is one kind or none, so the kinds add up to every kind.
+    const sum = REPORT_KINDS.reduce((n, k) => n + openCount(reportsOf(store, { now: clock.time(), kind: k.key })), 0);
+    assert.equal(sum, openCount(all));
+    assert.ok(openCount(none) > 0, 'the rest are No Kind Yet');
+  } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('the Merge Conflicts explanation says the Kind picker does not apply to it (SP-367)', () => {
+  const app = pageScript();
+  const section = app.slice(app.indexOf('function conflictSection'), app.indexOf('function conflictSection') + 1500);
+  assert.match(section, /<h2>Merge Conflicts<\/h2>\s*<p class="quiet">[^<]*All time\. Counted per pull request, so the Kind picker above does not apply here: every kind is counted\.<\/p>/);
 });
 
 // ── Where the Time Goes (SP-220) ────────────────────────────────────────────

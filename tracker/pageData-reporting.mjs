@@ -67,6 +67,20 @@ export const REPORT_RANGES = Object.freeze([
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
+ * The custom range's days (SP-368), oldest first, each `{ day, started:
+ * 0, finished: 0 }` with `day` the ISO time it starts. A day is 24 hours
+ * from the range's start forward; the range from the start of one date to
+ * the end of another is a whole number of them, give or take the hour a
+ * clock change adds or takes away, which the last day absorbs. So every
+ * moment in the range falls in exactly one day, and the days add up to the
+ * range's totals. At least one day.
+ */
+export function customDaysOf({ from, to }) {
+  const count = Math.max(1, Math.round((to - from + 1) / DAY_MS));
+  return Array.from({ length: count }, (_, i) => ({ day: new Date(from + i * DAY_MS).toISOString(), started: 0, finished: 0 }));
+}
+
+/**
  * The Task Productivity table's Growth Rate timeframes (SP-241): each
  * compares the last `days` days before now with the `days` days before
  * those.
@@ -385,6 +399,8 @@ function conflictsOf(store, projects) {
  * own date range: the answer then carries `custom: { from, to, started,
  * finished }` (times as ISO strings), counted the same way as the fixed
  * ranges, with both ends included. Without it the answer has no `custom`.
+ * `custom.days` (SP-368) splits those two counts by day for the Task
+ * Productivity chart (customDaysOf), so the days add up to the totals.
  *
  * `growth` (SP-241): per GROWTH_PERIODS key, `{ started, finished }`, each a
  * growthFigure comparing the last `days` days before `now` with the `days`
@@ -420,6 +436,7 @@ export function reportsOf(store, { project = null, now = Date.now(), only = null
   const started = zero();
   const inRange = (r, when) => r.days == null || (when > now - r.days * DAY_MS && when <= now);
   const customCounts = { started: 0, finished: 0 };
+  const customDays = custom ? customDaysOf(custom) : [];
   const growthCounts = Object.fromEntries(GROWTH_PERIODS.map((g) => [g.key, {
     started: { current: 0, previous: 0 }, finished: { current: 0, previous: 0 },
   }]));
@@ -429,7 +446,10 @@ export function reportsOf(store, { project = null, now = Date.now(), only = null
     for (const r of REPORT_RANGES) {
       if (inRange(r, when)) counts[r.key] += 1;
     }
-    if (custom && when >= custom.from && when <= custom.to) customCounts[kind] += 1;
+    if (custom && when >= custom.from && when <= custom.to) {
+      customCounts[kind] += 1;
+      customDays[Math.min(Math.floor((when - custom.from) / DAY_MS), customDays.length - 1)][kind] += 1;
+    }
     for (const g of GROWTH_PERIODS) {
       const span = g.days * DAY_MS;
       if (when > now - span && when <= now) growthCounts[g.key][kind].current += 1;
@@ -544,7 +564,7 @@ export function reportsOf(store, { project = null, now = Date.now(), only = null
     endings: REPORT_NOT_FINISHED.map(({ key, label }) => ({ key, label })),
     notFinished,
     conflicts: conflictsOf(store, projects),
-    ...(custom ? { custom: { from: new Date(custom.from).toISOString(), to: new Date(custom.to).toISOString(), ...customCounts } } : {}),
+    ...(custom ? { custom: { from: new Date(custom.from).toISOString(), to: new Date(custom.to).toISOString(), ...customCounts, days: customDays } } : {}),
     growthPeriods: GROWTH_PERIODS.map(({ key, label }) => ({ key, label })),
     growth: Object.fromEntries(GROWTH_PERIODS.map((g) => {
       const start = now - 2 * g.days * DAY_MS;

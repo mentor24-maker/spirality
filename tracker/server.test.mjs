@@ -1886,12 +1886,12 @@ test('GET /reports with from and to answers the custom range; one alone, an unre
     const to = new Date(Date.now() + 3_600_000).toISOString();
     const r = await f.call('GET', `/reports?project=alpha&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
     assert.equal(r.status, 200);
-    assert.deepEqual(r.body.custom, { from, to, started: 1, finished: 1 });
+    assert.deepEqual(r.body.custom, { from, to, started: 1, finished: 1, days: [{ day: from, started: 1, finished: 1 }] });
     assert.deepEqual(r.body.finished, { week: 1, month: 1, all: 1 });
     assert.equal('custom' in (await f.call('GET', '/reports')).body, false);
     const later = new Date(Date.parse(to) + 60_000).toISOString();
     const empty = await f.call('GET', `/reports?from=${encodeURIComponent(to)}&to=${encodeURIComponent(later)}`);
-    assert.deepEqual(empty.body.custom, { from: to, to: later, started: 0, finished: 0 });
+    assert.deepEqual(empty.body.custom, { from: to, to: later, started: 0, finished: 0, days: [{ day: to, started: 0, finished: 0 }] });
     for (const [query, says] of [
       [`from=${encodeURIComponent(from)}`, /to is missing/],
       [`to=${encodeURIComponent(to)}`, /from is missing/],

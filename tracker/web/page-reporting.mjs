@@ -131,7 +131,10 @@ export async function drawReporting(chosen, range = defaultReportRange(), kind =
     ${scopeNote}
     <h2>Task Productivity</h2>
     <p class="quiet">Started: filed in that time. Finished: moved to Live in that time and still Live, and not closed as Won't Do, Duplicate or Test.</p>
-    <div class="table-wrap"><table class="counts report productivity"><thead>${productivityHead}</thead><tbody>${line('Tasks started', r.started)}${line('Tasks finished', r.finished)}</tbody></table></div>
+    <div class="productivity-row">
+      <div class="table-wrap"><table class="counts report productivity"><thead>${productivityHead}</thead><tbody>${line('Tasks started', r.started)}${line('Tasks finished', r.finished)}</tbody></table></div>
+      <figure class="productivity-chart" hidden></figure>
+    </div>
     <p class="quiet custom-range-note" hidden></p>
     <h2>By Kind</h2>
     <p class="quiet">Every kind, whichever kind is picked above, counted the same way as Task Productivity. A task not given a kind yet is counted as No Kind Yet, never guessed.</p>
@@ -196,10 +199,14 @@ export async function drawReporting(chosen, range = defaultReportRange(), kind =
   const fromPicker = main.querySelector('#report-from');
   const toPicker = main.querySelector('#report-to');
   let asked = 0;
-  const showCustom = (figures, note) => {
+  const showCustom = (figures, note, from = fromPicker.value) => {
     for (const cell of main.querySelectorAll('[data-custom-from]')) {
       cell.innerHTML = figures ? `<span class="quiet">from ${escapeHtml(dayLabel(fromPicker.value))}</span>` : '';
     }
+    // The chart beside the table (SP-368): drawn from the same answer, gone with a bad range.
+    const chart = main.querySelector('.productivity-chart');
+    chart.innerHTML = figures ? productivityChart(figures.days, from) : '';
+    chart.hidden = !figures;
     for (const cell of main.querySelectorAll('[data-custom]')) {
       cell.textContent = figures ? String(Number(figures[cell.dataset.custom])) : '';
     }
@@ -218,7 +225,7 @@ export async function drawReporting(chosen, range = defaultReportRange(), kind =
     const problem = rangeProblem(picked);
     if (problem) { showCustom(null, problem); return; }
     const again = await api('GET', reportsPath(r.project ?? '', picked, r.kind ?? ''));
-    if (ask === asked) showCustom(again.custom, null);
+    if (ask === asked) showCustom(again.custom, null, picked.from);
   };
   for (const picker of [fromPicker, toPicker]) {
     picker.addEventListener('change', () => {
@@ -232,6 +239,66 @@ export async function drawReporting(chosen, range = defaultReportRange(), kind =
     drawReporting(r.project ?? '', { from: fromPicker.value, to: toPicker.value }, e.target.value).catch((err) => (err instanceof SignedOut ? drawSignIn() : showError(err)));
   });
   putTrail([{ label: 'Reporting' }]);
+}
+
+/**
+ * The Task Productivity chart (SP-368): the server's `custom.days`, two
+ * bars a day, Tasks Started then Tasks Finished, as SVG in a viewBox so it
+ * scales to its box, coloured by classes in app.css (the page's CSP drops
+ * inline styles). Each bar's title is its hover text ("Nov 14: 3
+ * started"); dates go under the first and last day and enough between to
+ * read; the tallest bar's figure tops the scale on the left. Days are
+ * named from the Start Date picker's value, one calendar day each, so a
+ * clock change never shifts a label. A range with nothing in it keeps the
+ * frame and says so.
+ */
+function productivityChart(days, from) {
+  const list = Array.isArray(days) ? days : [];
+  const head = `<figcaption><span class="chart-title">Tasks by Day</span>
+      <span class="chart-key"><span class="key started">Tasks Started</span><span class="key finished">Tasks Finished</span></span></figcaption>`;
+  const top = list.reduce((m, d) => Math.max(m, Number(d.started) || 0, Number(d.finished) || 0), 0);
+  if (!list.length || top === 0) return `${head}<p class="quiet chart-empty">No tasks started or finished in this range.</p>`;
+  const W = 600;
+  const H = 220;
+  const left = 32;
+  const right = 8;
+  const topPad = 10;
+  const bottom = 22;
+  const plotW = W - left - right;
+  const plotH = H - topPad - bottom;
+  const slot = plotW / list.length;
+  const bar = Math.max(1, slot * 0.38);
+  const start = localDay(from, 12, 0, 0, 0);
+  const label = (i) => {
+    if (!start) return '';
+    const d = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i, 12);
+    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  };
+  const fix = (n) => Number(n.toFixed(2));
+  const step = Math.max(1, Math.ceil(list.length / 6));
+  const bars = list.map((d, i) => {
+    const x = left + i * slot + (slot - 2 * bar) / 2;
+    const one = (kind, at) => {
+      const count = Number(d[kind]) || 0;
+      if (!count) return '';
+      const h = (count / top) * plotH;
+      return `<rect class="bar ${kind}" x="${fix(at)}" y="${fix(topPad + plotH - h)}" width="${fix(bar)}" height="${fix(h)}"><title>${escapeHtml(label(i))}: ${count} ${kind}</title></rect>`;
+    };
+    return one('started', x) + one('finished', x + bar);
+  }).join('');
+  const dates = list.map((_, i) => {
+    const last = i === list.length - 1;
+    if (i % step !== 0 && !last) return '';
+    if (!last && i > 0 && list.length - 1 - i <= step / 2) return '';
+    const anchor = i === 0 ? 'start' : last ? 'end' : 'middle';
+    const x = i === 0 ? left : last ? W - right : left + (i + 0.5) * slot;
+    return `<text class="chart-label" x="${fix(x)}" y="${H - 6}" text-anchor="${anchor}">${escapeHtml(label(i))}</text>`;
+  }).join('');
+  const scale = `<text class="chart-label" x="${left - 4}" y="${topPad + 4}" text-anchor="end">${top}</text>`
+    + `<text class="chart-label" x="${left - 4}" y="${topPad + plotH}" text-anchor="end">0</text>`
+    + `<line class="chart-axis" x1="${left}" y1="${topPad + plotH}" x2="${W - right}" y2="${topPad + plotH}"></line>`
+    + `<line class="chart-grid" x1="${left}" y1="${topPad}" x2="${W - right}" y2="${topPad}"></line>`;
+  return `${head}<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Tasks started and finished each day, ${list.length} day${list.length === 1 ? '' : 's'}">${scale}${bars}${dates}</svg>`;
 }
 
 /** A share as a figure to two places: "0.29", or a quiet phrase when nothing merged. */
@@ -250,7 +317,7 @@ const CONFLICT_KINDS = { 'main-moved': 'after a merge', 'merge-refused': 'merge 
 function conflictSection(c) {
   if (!c) return '';
   const intro = `<h2>Merge Conflicts</h2>
-    <p class="quiet">A conflict: a pull request that stopped merging into main, from the loops' notes (a merge that left it conflicting, a merge word refused for a conflict, or a catch-up ticket filed). Notes on one pull request count once until it merges cleanly again. Each is counted under the wake times and work-in-progress cap in force when it happened; merges are counted the same way, so the last column compares settings fairly. All time.</p>`;
+    <p class="quiet">A conflict: a pull request that stopped merging into main, from the loops' notes (a merge that left it conflicting, a merge word refused for a conflict, or a catch-up ticket filed). Notes on one pull request count once until it merges cleanly again. Each is counted under the wake times and work-in-progress cap in force when it happened; merges are counted the same way, so the last column compares settings fairly. All time. Counted per pull request, so the Kind picker above does not apply here: every kind is counted.</p>`;
   if (!c.merged && !c.total) return `${intro}<p class="quiet">No merges or conflicts recorded yet.</p>`;
   const range = (g) => (g.since ? `${escapeHtml(when(g.since))} to ${escapeHtml(when(g.until))}` : '');
   const settingRows = c.bySetting.map((g) => `<tr><td class="name">${escapeHtml(g.setting)}</td><td>${range(g)}</td><td class="count">${Number(g.merged)}</td><td class="count">${Number(g.conflicts)}</td><td class="count">${perMerge(g.rate)}</td></tr>`).join('');
