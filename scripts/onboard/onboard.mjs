@@ -77,6 +77,15 @@
  *   protect   main protected: the required check `verify`, up to date,
  *             admins included, no force pushes or deletion, no review
  *             required. Read back with `gh api .../branches/main/protection`.
+ *             SP-382: a private repository on GitHub Free, where GitHub
+ *             answers the read or the PUT with its "403 Upgrade to GitHub
+ *             Pro or make this repository public", is a known outcome, not
+ *             a stop: the step finishes with a note that main is NOT locked
+ *             (the loop's merge gate still needs a green verify; only a
+ *             direct push goes unchecked), in the step log and the state
+ *             file. The note is never "already done", so a rerun tries
+ *             again and locks main once GitHub allows it. Any other
+ *             failure still fails the step.
  *
  * Every step first checks whether it is already done and skips it if so, so
  * a rerun resumes where a failed one stopped and asks nothing twice. Once the
@@ -121,6 +130,7 @@ import { machineUserPending } from '../../lib/onboardSettings.mjs';
 import { ciVerdict, SETUP_BRANCH } from '../../lib/onboardCopy.mjs';
 import { LANES, installerCommand, parseStatus } from '../../lib/onboardLanes.mjs';
 import { normalRepo } from '../lib/repoCheck.mjs';
+import { ghApiFailure, planNote, planRefusesProtection } from './look.mjs';
 import { readEmptiness, starterFiles, starterMessage } from '../../lib/onboardStarter.mjs';
 import {
   CLICKUP_FIELDS, CLICKUP_STEPS, installerPath, lanesStepBegun, logSinceOldLanesBack, OLD_LANES_BACK, oldLanesBack, passInFlight,
@@ -459,6 +469,8 @@ export async function onboard(opts, deps) {
   };
 
   let step = 'answers';
+  // The protect step's note when GitHub's plan will not lock main (SP-382), else null.
+  let unlocked = null;
   try {
     // ── answers ──────────────────────────────────────────────────────────
     begin(step);
@@ -1110,15 +1122,32 @@ export async function onboard(opts, deps) {
     // ── protect ──────────────────────────────────────────────────────────
     step = 'protect';
     begin(step);
+    // GitHub's plan refusing protection (SP-382): its message, else null.
+    const planRefused = (r) => {
+      const seen = ghApiFailure({ status: r.code, stdout: r.out, stderr: r.err });
+      return planRefusesProtection(seen) ? seen.message : null;
+    };
     const protection = () => {
       const r = gh('api', `repos/${answers.githubRepo}/branches/main/protection`);
       if (r.code === 0) {
-        try { return JSON.parse(r.out); } catch { fail(step, 'GitHub answered, but not with the protection settings'); }
+        try { return { body: JSON.parse(r.out) }; } catch { fail(step, 'GitHub answered, but not with the protection settings'); }
       }
-      if (/not protected/i.test(`${r.out} ${r.err}`)) return null;
+      const refused = planRefused(r);
+      if (refused) return { refused };
+      if (/not protected/i.test(`${r.out} ${r.err}`)) return { body: null };
       fail(step, `could not read main's protection: ${last(r.err || r.out)}`);
     };
-    const before = protection();
+    // Finished, not done: the note says main is NOT locked, and a rerun tries again.
+    const notLocked = (message) => {
+      unlocked = `main NOT locked: ${planNote('main', message)}`;
+      say(step, unlocked);
+      record(step, 'note', unlocked);
+      mark(step, 'done', unlocked);
+    };
+    const first = protection();
+    if (first.refused) notLocked(first.refused);
+    else {
+    const before = first.body;
     const gaps = protectionGaps(before);
     if (!gaps.length) skip(step, `main requires verify, up to date, admins included, no force pushes or deletion`);
     else {
@@ -1141,10 +1170,17 @@ export async function onboard(opts, deps) {
         record(step, 'note', `switched off: ${dropped.join('; ')}`);
       }
       const put = run('gh', ['api', '-X', 'PUT', `repos/${answers.githubRepo}/branches/main/protection`, '--input', '-'], { input: JSON.stringify(protectionRequest(before)) });
-      if (put.code !== 0) fail(step, `protecting main: ${last(put.err || put.out)}`);
-      const still = protectionGaps(protection());
-      if (still.length) fail(step, `main's protection reads back without: ${still.join('; ')}`);
-      done(step, `main protected (was: ${gaps.join('; ')}), read back`);
+      const putRefused = put.code !== 0 ? planRefused(put) : null;
+      if (putRefused) notLocked(putRefused);
+      else {
+        if (put.code !== 0) fail(step, `protecting main: ${last(put.err || put.out)}`);
+        const after = protection();
+        if (after.refused) fail(step, `main was protected, but reading it back GitHub said: ${after.refused}`);
+        const still = protectionGaps(after.body);
+        if (still.length) fail(step, `main's protection reads back without: ${still.join('; ')}`);
+        done(step, `main protected (was: ${gaps.join('; ')}), read back`);
+      }
+    }
     }
   } catch (thrown) {
     let err = thrown;
@@ -1183,6 +1219,7 @@ export async function onboard(opts, deps) {
   const trackerUrl = String(homeConfig.trackerUrl).replace(/\/+$/, '');
   deps.print('');
   deps.print(`Done: ${slug} is set up. Its tickets: ${trackerUrl}/list/${slug}`);
+  if (unlocked) deps.print(`Note: ${slug}'s main is not locked on GitHub (the protect step above says why); a rerun locks it once GitHub allows.`);
   record('done', 'done', `${slug} is set up`);
   return 0;
 }

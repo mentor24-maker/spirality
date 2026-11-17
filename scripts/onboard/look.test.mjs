@@ -4,7 +4,7 @@ import { validateProjectConfig } from '../../lib/projectConfig.mjs';
 import { resolveAnswers } from '../../lib/onboardAnswers.mjs';
 import { seatsForConfig } from '../../tracker/signins.mjs';
 import {
-  BLOCKED, READY, UNKNOWN, WILL_DO, checkEnv, cloneFolder, exitCodeFor, formatRow, ghApiFailure, lastLines, look,
+  BLOCKED, NOTED, READY, UNKNOWN, WILL_DO, checkEnv, planRefusesProtection, readEmptyProtection, cloneFolder, exitCodeFor, formatRow, ghApiFailure, lastLines, look,
   busRow, readCheck, readCheckout, readClaude, readDoppler, readDopplerMe, readNode, readProtection,
   projectMismatch, readRepo, withoutSignIn, nodeNeedOf, samePathOnDisk, summaryLine, trackerRows,
 } from './look.mjs';
@@ -36,6 +36,7 @@ test('every row names what it checked, and its verdict reads as the ticket says'
   assert.equal(formatRow({ item: 'A', verdict: WILL_DO, why: 'absent', detail: [] }), 'A: will do (absent)');
   assert.equal(formatRow({ item: 'A', verdict: BLOCKED, why: 'no', detail: ['last'] }), 'A: BLOCKED: no\n      | last');
   assert.equal(formatRow({ item: 'A', verdict: UNKNOWN, why: 'down', detail: [] }), 'A: could not tell: down');
+  assert.equal(formatRow({ item: 'A', verdict: NOTED, why: 'not locked', detail: [] }), 'A: noted: not locked');
   assert.throws(() => formatRow({ item: 'A', verdict: 'fine', why: '', detail: [] }), /unknown verdict/);
 });
 
@@ -47,6 +48,9 @@ test('exit 3 for anything BLOCKED, else 1 for anything unknown, else 0', () => {
   assert.match(summaryLine([r(READY), r(WILL_DO)]), /nothing is BLOCKED\. 1 item\(s\) the setup will do, 1 already ready/);
   assert.match(summaryLine([r(UNKNOWN)]), /not a clean bill/);
   assert.match(summaryLine([r(BLOCKED)]), /1 BLOCKED/);
+  // A noted row stops nothing (SP-382).
+  assert.equal(exitCodeFor([r(READY), r(NOTED)]), 0);
+  assert.equal(summaryLine([r(READY), r(NOTED)]), 'look: nothing is BLOCKED. 0 item(s) the setup will do, 1 already ready, 1 noted (above).');
 });
 
 test('the last lines of output lose their colour codes and blank lines', () => {
@@ -100,19 +104,49 @@ test('the repository: exists and can push; missing is BLOCKED; gh not installed 
   assert.equal(readRepo(failed(1, 'HTTP 502'), 'a/b').rows[0].verdict, UNKNOWN);
 });
 
-test('protection: protected with verify is ready, not protected is fine, "403 Upgrade" is BLOCKED', () => {
+// GitHub's answer on a private repository on the Free plan (checked live on Cassidy's, 2026-11-17).
+const UPGRADE_MESSAGE = 'Upgrade to GitHub Pro or make this repository public to enable this feature.';
+const upgrade403 = () => failed(1, `gh: ${UPGRADE_MESSAGE} (HTTP 403)`, JSON.stringify({ message: UPGRADE_MESSAGE, status: '403' }));
+
+test('protection: protected with verify is ready, not protected is fine, "403 Upgrade" is noted, not BLOCKED (SP-382)', () => {
   assert.equal(readProtection(ok(JSON.stringify({ required_status_checks: { contexts: ['verify'] } })), 'main').verdict, READY);
   assert.equal(readProtection(ok(JSON.stringify({ required_status_checks: { checks: [{ context: 'build' }] } })), 'main').verdict, WILL_DO);
   const notProtected = failed(1, 'gh: Branch not protected (HTTP 404)', '{"message":"Branch not protected","status":"404"}');
   assert.deepEqual(ghApiFailure(notProtected), { status: 404, message: 'Branch not protected' });
   assert.equal(readProtection(notProtected, 'main').verdict, WILL_DO);
-  const upgrade = failed(1, 'gh: Upgrade to GitHub Pro or make this repository public to enable this feature. (HTTP 403)',
-    '{"message":"Upgrade to GitHub Pro or make this repository public to enable this feature.","status":"403"}');
-  const r = readProtection(upgrade, 'main');
-  assert.equal(r.verdict, BLOCKED);
-  assert.match(r.why, /billing screen/);
+  const r = readProtection(upgrade403(), 'main');
+  assert.equal(r.verdict, NOTED);
+  assert.match(r.why, /GitHub will not lock main/);
+  assert.match(r.why, /merge gate still merges only a pull request whose verify is green/);
+  assert.match(r.why, /only a direct push to main goes unchecked/);
+  assert.match(r.why, /public, or GitHub Pro \(a billing screen\), lets a later run of the setup lock it/);
+  // Any other 403 is not the plan: could not tell, as before.
+  const otherForbidden = failed(1, 'gh: Resource not accessible by integration (HTTP 403)', '{"message":"Resource not accessible by integration","status":"403"}');
+  assert.equal(readProtection(otherForbidden, 'main').verdict, UNKNOWN);
   assert.equal(readProtection(failed(1, 'gh: Branch not found (HTTP 404)'), 'main').verdict, BLOCKED);
   assert.equal(readProtection(failed(1, 'gh: Server Error (HTTP 500)'), 'main').verdict, UNKNOWN);
+});
+
+test('the plan refusal is held to a 403 and GitHub\'s upgrade words', () => {
+  assert.equal(planRefusesProtection({ status: 403, message: UPGRADE_MESSAGE }), true);
+  assert.equal(planRefusesProtection({ status: 404, message: UPGRADE_MESSAGE }), false);
+  assert.equal(planRefusesProtection({ status: 403, message: 'Must have admin rights to Repository.' }), false);
+  assert.equal(planRefusesProtection({ status: 403, message: 'Please upgrade your gh' }), false);
+  assert.equal(planRefusesProtection({}), false);
+});
+
+test('an empty repository\'s protect row asks the rulesets: open is will do, the plan 403 is noted, anything else could not tell', () => {
+  const open = readEmptyProtection(ok('[]'));
+  assert.equal(open.verdict, WILL_DO);
+  assert.match(open.why, /waits for the first commit/);
+  const plan = readEmptyProtection(upgrade403());
+  assert.equal(plan.item, 'GitHub: protecting main');
+  assert.equal(plan.verdict, NOTED);
+  assert.doesNotMatch(plan.why, /waits for the first commit/);
+  assert.match(plan.why, /merge gate still merges only a pull request whose verify is green; only a direct push to main goes unchecked/);
+  assert.equal(readEmptyProtection(failed(1, 'gh: Server Error (HTTP 500)')).verdict, UNKNOWN);
+  assert.equal(readEmptyProtection(failed(1, 'gh: Must have admin rights to Repository. (HTTP 403)', '{"message":"Must have admin rights to Repository.","status":"403"}')).verdict, UNKNOWN);
+  assert.equal(readEmptyProtection({ status: null, stdout: '', stderr: '', error: { code: 'ENOENT' } }).verdict, UNKNOWN);
 });
 
 test('the checkout: absent will do; a clean main of the repository is ready; anything else says why', () => {
@@ -284,14 +318,15 @@ function readOnlyCall({ cmd, args, cwd }, scratch) {
   return false;
 }
 
-function fakeWorld({ checkoutPresent = true, project = true, empty = false, noLock = false } = {}) {
+function fakeWorld({ checkoutPresent = true, project = true, empty = false, noLock = false, privateFree = false } = {}) {
   const calls = [];
   const requests = [];
   const removed = [];
   const scratch = '/tmp/onboard-normie-abc';
   const answer = (cmd, args) => {
     const a = args.join(' ');
-    if (cmd === 'gh' && a.startsWith('repo view')) return ok(JSON.stringify({ name: 'normie', visibility: 'PUBLIC', viewerPermission: empty === 'write' ? 'WRITE' : 'ADMIN', defaultBranchRef: empty ? null : { name: 'main' } }));
+    if (cmd === 'gh' && a.startsWith('repo view')) return ok(JSON.stringify({ name: 'normie', visibility: privateFree ? 'PRIVATE' : 'PUBLIC', viewerPermission: empty === 'write' ? 'WRITE' : 'ADMIN', defaultBranchRef: empty ? null : { name: 'main' } }));
+    if (cmd === 'gh' && args[0] === 'api' && privateFree) return upgrade403();
     if (cmd === 'gh' && args[0] === 'api') return ok(JSON.stringify({ required_status_checks: { contexts: ['verify'] } }));
     if (cmd === 'gh' && a.startsWith('repo clone')) return ok();
     if (cmd === 'git' && a.endsWith('rev-parse --abbrev-ref HEAD')) return ok('main\n');
@@ -450,6 +485,30 @@ test('an empty repository: nothing BLOCKED, exit 0; the protect, Node and check 
   assert.match(by('Check:').why, /waits for the first commit the start step makes/);
   // Nothing to copy, so nothing is cloned and nothing installed or run.
   assert.ok(!w.calls.some((c) => c.cmd === 'npm' || c.cmd === 'sh' || (c.cmd === 'gh' && c.args[1] === 'clone')));
+});
+
+test('a private repository on GitHub Free with a main: the protect row is noted, nothing BLOCKED, exit 0 (SP-382)', async () => {
+  const w = fakeWorld({ privateFree: true });
+  const rows = await look({ answers, homeConfig, deps: w.deps });
+  const protect = rows.find((r) => r.item === 'GitHub: protecting main');
+  assert.equal(protect.verdict, NOTED);
+  assert.deepEqual(rows.filter((r) => r.verdict !== READY && r.verdict !== NOTED).map(formatRow), []);
+  assert.equal(exitCodeFor(rows), 0);
+  assert.match(summaryLine(rows), /^look: nothing is BLOCKED\. .*, 1 noted \(above\)\.$/);
+  assert.ok(w.calls.some((c) => c.cmd === 'gh' && c.args.join(' ') === 'api repos/mentor24-maker/normie/branches/main/protection'));
+});
+
+test('an empty private repository on GitHub Free: the plan 403 is said up front, not "waits for the first commit" (SP-382)', async () => {
+  const w = fakeWorld({ checkoutPresent: false, project: false, empty: true, privateFree: true });
+  const rows = await look({ answers: freshAnswers(), homeConfig, deps: w.deps });
+  const protect = rows.find((r) => r.item.startsWith('GitHub: protecting'));
+  assert.equal(protect.verdict, NOTED);
+  assert.doesNotMatch(protect.why, /waits for the first commit/);
+  assert.match(formatRow(protect), /^GitHub: protecting main: noted: GitHub will not lock main/);
+  assert.ok(w.calls.some((c) => c.cmd === 'gh' && c.args.join(' ') === 'api repos/mentor24-maker/upwork-blaster/rulesets'), 'the rulesets were asked');
+  assert.deepEqual(rows.filter((r) => r.verdict === BLOCKED || r.verdict === UNKNOWN).map(formatRow), []);
+  assert.equal(exitCodeFor(rows), 0);
+  for (const call of w.calls) assert.ok(readOnlyCall(call, w.scratch), `not a read-only call: ${call.cmd} ${call.args.join(' ')}`);
 });
 
 test('an empty repository whose answers name a Node version: that version is checked against this Mac, as for any project', async () => {

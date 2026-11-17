@@ -13,6 +13,9 @@ import {
 } from './onboard.mjs';
 import { CLICKUP_STEPS, lanesStepBegun, logSinceOldLanesBack, oldLanesBack, passInFlight, readInstallerStatus, runsOldLoop, safeToSwitch, snapshotArgs, withClickupSteps } from './fromClickup.mjs';
 
+// GitHub's answer on a private repository on the Free plan (Cassidy's, 2026-11-17): the body on stdout, gh's line on stderr.
+const PLAN_MESSAGE = 'Upgrade to GitHub Pro or make this repository public to enable this feature.';
+const PLAN_403 = Object.freeze({ code: 1, out: JSON.stringify({ message: PLAN_MESSAGE, status: '403' }), err: `gh: ${PLAN_MESSAGE} (HTTP 403)` });
 const GOOD_PROTECTION = {
   required_status_checks: { strict: true, contexts: ['verify'], checks: [{ context: 'verify' }] },
   enforce_admins: { enabled: true },
@@ -190,6 +193,9 @@ function makeWorld(t) {
     dir, homeConfig, homeRoot, checkout, fail: null,
     signinsMade: false, prOpen: false, ticket: null, lanesLoaded: false, merged: false,
     protection: null, mergeAfterPolls: 1, polls: 0, dopplerProject: false,
+    // SP-382: 'read' or 'put' answers GitHub's plan 403 there; readFails and
+    // putFails are any other answer; protectAs is what the PUT leaves on main.
+    plan: null, readFails: null, putFails: null, protectAs: null,
     calls: [], asked: [], printed: [], signinsEnv: [],
     // SP-204: the bus project on the tracker, and each tracker:bus run.
     busMade: false, busFails: false, busRuns: [],
@@ -354,9 +360,13 @@ function makeWorld(t) {
       }
       if (args[0] === 'api' && args[1] === '-X') {
         if (breaks('protect')) return no('HTTP 403');
-        w.protection = GOOD_PROTECTION;
+        if (w.plan === 'put' || w.plan === 'read') return PLAN_403;
+        if (w.putFails) return w.putFails;
+        w.protection = w.protectAs ?? GOOD_PROTECTION;
         return ok('{}');
       }
+      if (args[0] === 'api' && args[1].endsWith('/protection') && w.plan === 'read') return PLAN_403;
+      if (args[0] === 'api' && args[1].endsWith('/protection') && w.readFails) return w.readFails;
       if (args[0] === 'api' && args[1].endsWith('/protection')) return w.protection ? ok(JSON.stringify(w.protection)) : no('gh: Branch not protected (HTTP 404)');
       if (args[0] === 'api' && args[1].endsWith('/check-runs')) return ok(JSON.stringify({ check_runs: [{ name: 'verify', status: 'completed', conclusion: 'success' }] }));
     }
@@ -1635,3 +1645,71 @@ test('the lanes step loads the new lanes, then fails: the rerun does not read th
   assert.ok(!w.calls.some((x) => x.includes(`${installer} --uninstall`)), 'the new lanes are not uninstalled');
   assert.ok(!/\| again \|/.test(readFileSync(logFile, 'utf8')));
 });
+
+// --- A private repository on GitHub Free (SP-382) ------------------------
+
+for (const where of ['read', 'put']) {
+  test(`GitHub's plan 403 on the protect step's ${where}: the setup finishes, saying main is NOT locked, never "main protected"`, async (t) => {
+    const { w, go, statePath, logFile } = makeWorld(t);
+    w.plan = where;
+    assert.equal(await go(), 0, out(w));
+    assert.match(out(w), /^protect\s+main NOT locked: GitHub will not lock main on this repository's plan, a private repository on GitHub Free \("Upgrade to GitHub Pro/m);
+    assert.match(out(w), /merge gate still merges only a pull request whose verify is green; only a direct push to main goes unchecked/);
+    assert.ok(!/main protected/.test(out(w)), out(w));
+    assert.match(out(w), /Done: pressplay is set up/);
+    assert.match(out(w), /^Note: pressplay's main is not locked on GitHub/m);
+    const state = readState(statePath);
+    assert.equal(state.finished, true);
+    assert.equal(state.stop, null);
+    const protect = state.steps.find((s) => s.step === 'protect');
+    assert.equal(protect.outcome, 'done');
+    assert.match(protect.why, /^main NOT locked: /);
+    assert.ok(!/main protected/.test(protect.why));
+    const log = readFileSync(logFile, 'utf8');
+    assert.match(log, /\| protect \| note \| main NOT locked: /);
+    assert.ok(!/main protected/.test(log));
+    // Read refused: nothing was written. PUT refused: it was tried once.
+    assert.equal(w.calls.filter((c) => c.includes('-X PUT')).length, where === 'read' ? 0 : 1);
+  });
+}
+
+test('a setup finished with main not locked tries the protect step again on a rerun, and locks main once GitHub allows', async (t) => {
+  const { w, go, reset, statePath } = makeWorld(t);
+  w.plan = 'read';
+  assert.equal(await go(), 0, out(w));
+  // A rerun on the same plan: still not locked, and still not "already done".
+  reset();
+  assert.equal(await go(), 0, out(w));
+  assert.ok(!/^protect\s+already done/m.test(out(w)), 'the note is never counted as done');
+  assert.match(out(w), /^protect\s+main NOT locked/m);
+  // The repository goes public (or the account to Pro): the rerun protects main and reads it back.
+  w.plan = null;
+  reset();
+  assert.equal(await go(), 0, out(w));
+  assert.match(out(w), /^protect\s+main protected \(was: no protection\), read back/m);
+  assert.ok(!/main NOT locked|^Note:/m.test(out(w)), out(w));
+  const put = w.calls.findIndex((c) => c.includes('-X PUT'));
+  assert.ok(put >= 0 && w.calls.slice(put + 1).some((c) => c.endsWith('/branches/main/protection')), 'read back after the PUT');
+  const protect = readState(statePath).steps.find((s) => s.step === 'protect');
+  assert.equal(protect.outcome, 'done');
+  assert.match(protect.why, /^main protected/);
+});
+
+const OTHER_FAILURES = {
+  'another 403 on the read': (w) => { w.readFails = { code: 1, out: '{"message":"Must have admin rights to Repository.","status":"403"}', err: 'gh: Must have admin rights to Repository. (HTTP 403)' }; },
+  'another 404 on the read': (w) => { w.readFails = { code: 1, out: '{"message":"Not Found","status":"404"}', err: 'gh: Not Found (HTTP 404)' }; },
+  'a failed PUT': (w) => { w.putFails = { code: 1, out: '{"message":"Validation Failed","status":"422"}', err: 'gh: Validation Failed (HTTP 422)' }; },
+  'a read-back missing a rule': (w) => { w.protectAs = { ...GOOD_PROTECTION, enforce_admins: { enabled: false } }; },
+};
+for (const [name, set] of Object.entries(OTHER_FAILURES)) {
+  test(`${name} still fails the protect step, never noted as the plan (SP-382)`, async (t) => {
+    const { w, go, statePath } = makeWorld(t);
+    set(w);
+    assert.equal(await go(), 1, out(w));
+    assert.match(out(w), /^FAILED: protect: /m);
+    assert.ok(!/NOT locked|Done:/.test(out(w)), out(w));
+    const state = readState(statePath);
+    assert.equal(state.finished, false);
+    assert.equal(state.steps.find((s) => s.step === 'protect').outcome, 'failed');
+  });
+}
