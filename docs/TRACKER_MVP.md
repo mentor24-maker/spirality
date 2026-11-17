@@ -1356,21 +1356,36 @@ bus", tickets `SPBUS-…`), named as `busProject` in `spirality.project.json`
 (SP-281), so its relay's notices and any `ALARM:` line land on its "Team
 chat" ticket.
 
-The tracker's bus is **a project of its own**, named in the project config
-as `busProject` (for example `starcaster-bus`). It holds the same
-standing "Team chat" ticket, found by its name (the oldest wins, so two
-machines that both created one still agree), in Live, and any ticket the
-steward files for Dane. No loop claims from it: the build and review lanes
-read `projectSlug` only. Each comment carries its author's own actor, so
-"only Dane's words" is read off the comment, not guessed from a stamp.
+A project is normally **its own bus** (SP-356): `busProject` in its
+project config is its own `projectSlug` (for example `starcaster`), so its
+Team chat and other noticeboards sit in its own queue and the project list
+holds one project, not two. The bus is then the queue's **noticeboard**
+tickets only: the standing "Team chat" ticket, found by its name (the
+oldest wins, so two machines that both created one still agree), and any
+ticket tagged `noticeboard` (StarCaster's Pipeline pulse, Node roll call,
+SQL waiting for you, Broken links on client sites, and the steward's
+questions for Dane). Each sits in Live, which no loop claims from, and the
+throughput watchdog leaves them out of its counts (`lib/loopNoticeboards.js`).
+`bus-read` and the relay read only those tickets' comments, never a work
+ticket's, so a word of Dane's on a work ticket is never taken for a stop
+word.
+
+A project set up before SP-356 may still name **a project of its own**,
+`<slug>-bus`, as its bus (Spirality's is `spirality-bus` until its own
+ticket moves it). There every ticket is the bus, as before, and no loop
+claims from it because the build and review lanes read `projectSlug` only.
+Either way each comment carries its author's own actor, so "only Dane's
+words" is read off the comment, not guessed from a stamp.
 
 ```bash
 echo "the heartbeat stopped at 09:10" | npm run clickup -- bus-post --body-file -   # one comment, read back
 npm run clickup -- bus-read --operator --since 2026-11-09T16:00:00Z                  # Dane's words since then
 ```
 
-`bus-post` creates the Team chat ticket the first time, and exits 1 saying
-so on any write it could not read back; there is no plan limit to fall back
+`bus-post` creates the Team chat ticket the first time, in Live and tagged
+`noticeboard` (saving the tag on the project first if it is missing), and
+exits 1 saying so on any write it could not read back, the status and the
+tag included; there is no plan limit to fall back
 from. Each post opens with `**From <machine>** · <time>`, the time in
 Mountain time, because that header is what Dane reads on the page.
 `bus-read` prints one tab-separated line per comment, oldest first, for a
@@ -1383,14 +1398,20 @@ list leaves threaded replies out, and the page cannot post a reply today, so
 nothing is missed yet; a reply feature on the page would need `bus-read`
 taught to follow it.
 
-A steward question is two commands: `task --list <busProject>` files it,
-and it lands in Queued, which is not on Dane's Waiting on You list; then
-`ask --task <id> --status "Needs your input"` with the operator card is
-what puts it in front of him. Setting it up
-for a project: the setup wizard does it when its answers say the project
-has a bus (SP-204, `hasBus`): its `bus` step makes the tracker project
-`<slug>-bus` (`npm run tracker:bus`), checks every loop of the project sees
-it, and the settings file it writes names it as `busProject`
+A steward question is two commands: `task --list <busProject> --status
+Live --tags noticeboard` files it where no loop claims it (in the project's
+own queue the default, Queued, is claimable, so `task` refuses a
+`noticeboard` ticket in any status but Live); then `ask --task <id>
+--status "Needs your input"` with the operator card is what puts it in
+front of him. When he answers, the relay's hand-back sends a noticeboard
+back to Live, not to Queued or Rework as it would a work ticket, and the
+build lane never claims a noticeboard in any status, so his question never
+becomes work. Setting it up for a project: the setup wizard does it when
+its answers say the project has a bus (SP-204, `hasBus`): the settings file
+it writes names the project itself as `busProject`, and its `bus` step
+(`npm run tracker:bus`) makes no second project; it saves the
+`noticeboard` tag on the project and checks every loop of the project sees
+it
 ([ONBOARDING_A_PROJECT.md](ONBOARDING_A_PROJECT.md#a-project-with-a-bus-starcaster)).
 
 Two of StarCaster's watchdogs are Spirality's own (SP-267), and the relay
@@ -1413,15 +1434,15 @@ together):
 
 | StarCaster today | In the tracker |
 |---|---|
-| Alarms and reports posted to the party line (`postBusMessage`, the `chat` command): heartbeat, throughput, report_job_failure, reconcile, stale_answer, stale_ready, checkout_currency, ai_keys_check, site_import_watch, unapplied_sql_watch, pulse_publish, weekly_report, repair | `npm run clickup -- bus-post --body-file -`: one comment on the bus project's "Team chat" ticket, read back. The heartbeat is Spirality's own (SP-266): the relay runs `npm run heartbeat -- --check` on every wake, which reads each lane's log and posts one `ALARM:` per lane that has gone quiet, at most once every 6 hours per lane, and one closing line when it runs again |
+| Alarms and reports posted to the party line (`postBusMessage`, the `chat` command): heartbeat, throughput, report_job_failure, reconcile, stale_answer, stale_ready, checkout_currency, ai_keys_check, site_import_watch, unapplied_sql_watch, pulse_publish, weekly_report, repair | `npm run clickup -- bus-post --body-file -`: one comment on the bus's "Team chat" ticket, read back; made in Live and tagged `noticeboard` when missing, both read back. The heartbeat is Spirality's own (SP-266): the relay runs `npm run heartbeat -- --check` on every wake, which reads each lane's log and posts one `ALARM:` per lane that has gone quiet, at most once every 6 hours per lane, and one closing line when it runs again |
 | Direct chat posts that skip `postBusMessage`: the pause switch's `announce` (pipeline.mjs), the review gate's `announceWaiver`, the reconciler's `postBus` | `bus-post`, the same one command |
 | The relay's own notices (`postToBus` / `postOrSaveToBus`): merged, merge refused or deferred, stalled hand-off, auto-merge latched off, lane armed, "<operator> replied on ..." | The relay posts them itself, through the same read-back post as `bus-post`, when the project names a `busProject` (SP-207): one line for each merge it makes, each refusal and each conflict hand-off the first time it is written on the ticket (a quiet pass posts nothing), and the lanes' own notices (SP-202). A post that does not land is an UNCHECKED line and the pass exits 1; the merge is never undone or retried for it. A conflict hand-off still stuck a day later (or at once, with nothing filed to fix it) is said again, at most once a day: StarCaster's stall rule, without its "failed N times" alarm, because this relay's markers count reminders, not tries. Not carried over: the "replied on" relay, because the steward reads the operator's replies with `bus-read --operator` |
 | The fallback when the party line refuses (`saveUndeliveredAlarm`): a comment on the "Team chat" ticket in the Loop Queue, created if missing, oldest wins | `bus-post` IS that ticket, in the bus project: there is no plan limit to fall back from, and a refused write exits 1 and says so |
 | A relay receipt on the ticket a message was about (`deliverToBus` with a hand-back target) | `npm run clickup -- comment --task <id>`, unchanged |
-| The steward filing a question for the operator as a ticket in the Agent Response list | Two commands, both needed: `npm run clickup -- task --list <busProject>` files it (it lands in Queued, which is NOT on the operator's Waiting on You list), then `ask --task <id> --status "Needs your input"` with the operator card puts it there |
+| The steward filing a question for the operator as a ticket in the Agent Response list | Two commands, both needed: `npm run clickup -- task --list <busProject> --status Live --tags noticeboard` files it where no loop claims (Live; `task` refuses a `noticeboard` ticket in any other status, because in the project's own queue Queued is claimable, SP-356), then `ask --task <id> --status "Needs your input"` with the operator card puts it on the operator's Waiting on You list, and when the operator answers, the relay sends it back to Live, never to Queued or Rework (a noticeboard is not work, `handbackPlan` in lib/relayLane.js), and the build lane's `queue --claimable` and `claim` skip any noticeboard |
 | Reading the party line for the operator's stop and resume words (`readBusSwitchSignals`) | `bus-read --operator`: only comments whose author is the operator's own actor, no machine-stamp guess |
-| The relay watching Agent Response tickets ("pending response", "responding") for the operator's comments | `bus-read --operator --since <time>`, across every ticket in the bus project |
-| `waiting` sweeping the Agent Response list for "what actually needs me?" | The page's Waiting on You list, which reads every project the operator is on, the bus project included, but shows only tickets in the operator's statuses: a steward question shows there once it has been through `ask`, never straight after `task` |
+| The relay watching Agent Response tickets ("pending response", "responding") for the operator's comments | `bus-read --operator --since <time>`, across every noticeboard ticket of the bus (the steward's questions carry the tag), or every ticket when the bus is a project of its own |
+| `waiting` sweeping the Agent Response list for "what actually needs me?" | The page's Waiting on You list, which reads every project the operator is on, but shows only tickets in the operator's statuses: a steward question shows there once it has been through `ask`, never straight after `task` |
 | The operator seeing a new post: the "Team chat" ticket puts itself in their ClickUp "Assigned to me" list | An alarm (a post whose message starts with `ALARM:`) is texted to the bus project's alert phone; every post, alarm or not, counts in the "New on the Bus" number in the page's header until the operator opens "Team chat" (SP-163, the operator's choice D) |
 
 Which of those alarms are pipeline watchdogs that move into Spirality for
