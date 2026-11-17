@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { declarationsOf, rootTokens, resolveColour } from './cssTokens.mjs';
-import { PAGE_SCRIPTS, pageScript } from './pageScripts.mjs';
+import { PAGE_SCRIPTS, RENDER_SCRIPTS, pageScript } from './pageScripts.mjs';
 
 const read = (path) => readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8');
 const CSS = read('./web/app.css');
@@ -93,7 +93,7 @@ test('the token reader resolves a token to its colour, through another token', (
 
 test('every icon is drawn at stroke 1 (UI_DOCTRINE section 10)', () => {
   const found = [];
-  for (const name of [...PAGE_SCRIPTS.map((page) => `web/${page}`), 'web/render.mjs', 'web/index.html']) {
+  for (const name of [...PAGE_SCRIPTS.map((page) => `web/${page}`), ...RENDER_SCRIPTS.map((name) => `web/${name}`), 'web/index.html']) {
     for (const m of read(`./${name}`).matchAll(/stroke-width="([^"]*)"/g)) if (m[1] !== '1') found.push(`${name}: stroke-width="${m[1]}"`);
   }
   assert.deepEqual(found, []);

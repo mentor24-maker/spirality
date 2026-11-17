@@ -18,7 +18,7 @@ import machineComment from '../lib/machineComment.js';
 import loopStatuses from '../lib/loopStatuses.js';
 import mergeOnComment from '../lib/mergeOnComment.js';
 import busRelayPlan from '../lib/busRelayPlan.js';
-import { pageScript } from './pageScripts.mjs';
+import { RENDER_SCRIPTS, pageScript, renderScript } from './pageScripts.mjs';
 import { WEB, drawnCss, fixture, boardTickets, codes } from './webTestKit.mjs';
 
 test('pressing Merge puts "your answer is in" on the ticket page and the board, until a machine comment is newest', async () => {
@@ -1231,11 +1231,11 @@ test('the Go button posts the substrate\'s one go word, handed to the page by th
 
 test('no go word is written into the page\'s code, and the Go button is the same main-action kind as Merge (UI_DOCTRINE 3, SP-321)', () => {
   const code = (name) => readFileSync(WEB(name), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
-  for (const name of ['app.mjs', 'render.mjs', 'index.html']) {
+  for (const name of ['app.mjs', ...RENDER_SCRIPTS, 'index.html']) {
     assert.doesNotMatch(code(name), new RegExp(`['"\`]${busRelayPlan.GO_PHRASE}['"\`]`, 'i'), name);
   }
   // Both are the screen's main action, blue; neither sets its own size or corners (SP-86's 10px are every button's now).
-  const render = readFileSync(WEB('render.mjs'), 'utf8');
+  const render = renderScript();
   assert.match(render, /<form class="merge-action">\s*<button type="submit" class="btn btn-primary">Merge<\/button>/);
   assert.match(render, /<form class="go-action">\s*<button type="submit" class="btn btn-primary">Go<\/button>/);
   assert.doesNotMatch(code('app.css'), /form\.(?:merge|go)-action button/);
@@ -1323,7 +1323,7 @@ test('after a reply, Merge, Close or Go posts, the page stays at the top with no
 
 test('no merge phrase is written into the page\'s code', () => {
   const code = (name) => readFileSync(WEB(name), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
-  for (const name of ['app.mjs', 'render.mjs', 'index.html']) {
+  for (const name of ['app.mjs', ...RENDER_SCRIPTS, 'index.html']) {
     for (const phrase of loadProjectConfig().mergePhrases) {
       const quoted = new RegExp(`['"\`]${phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}['"\`]`, 'i');
       assert.doesNotMatch(code(name), quoted, `${name} spells "${phrase}"`);

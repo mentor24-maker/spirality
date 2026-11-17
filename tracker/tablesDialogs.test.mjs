@@ -11,11 +11,11 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { declarationsOf, resolveColour } from './cssTokens.mjs';
-import { PAGE_SCRIPTS } from './pageScripts.mjs';
+import { PAGE_SCRIPTS, RENDER_SCRIPTS, renderScript } from './pageScripts.mjs';
 
 const read = (path) => readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8');
 const CSS = read('./web/app.css');
-const SOURCES = { ...Object.fromEntries(PAGE_SCRIPTS.map((name) => [`tracker/web/${name}`, read(`./web/${name}`)])), 'tracker/web/render.mjs': read('./web/render.mjs') };
+const SOURCES = { ...Object.fromEntries(PAGE_SCRIPTS.map((name) => [`tracker/web/${name}`, read(`./web/${name}`)])), ...Object.fromEntries(RENDER_SCRIPTS.map((name) => [`tracker/web/${name}`, read(`./web/${name}`)])) };
 const DECLS = declarationsOf(CSS).filter((d) => d.selector !== ':root');
 
 /** The value of `property` in the one rule whose selector is exactly `selector`, or undefined. */
@@ -73,7 +73,7 @@ test('the wrap scrolls both ways, stops short of the screen, and keeps the headi
 });
 
 test('sorting stays a button in the heading cell, with aria-sort: the one recorded exception (UI_DOCTRINE 8)', () => {
-  const render = SOURCES['tracker/web/render.mjs'];
+  const render = renderScript();
   assert.match(render, /return `<th class="\$\{key\}"\$\{on \? ` aria-sort=/, 'the sorted heading cell carries aria-sort');
   assert.match(render, /<button type="button" class="sort"/);
   assert.equal(valueOf('thead th button.sort', 'color'), 'inherit', 'the button takes the heading\'s white');

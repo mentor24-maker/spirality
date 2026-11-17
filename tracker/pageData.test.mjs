@@ -140,3 +140,19 @@ test('SP-302: after an answer the relay already acted on, a teammate\'s "any upd
     assert.equal(threadOf(store, t.id).answerIn, false);
   } finally { done(); }
 });
+
+// SP-364: the page's data is split one file per page. pageData.mjs, the one
+// name every importer uses, re-exports each page's file; pageData-common.mjs
+// holds only what they share and is not re-exported.
+test('pageData.mjs re-exports every page\'s data file, and the style check reads them all', async () => {
+  const { readdirSync, readFileSync } = await import('node:fs');
+  const { fileURLToPath } = await import('node:url');
+  const here = fileURLToPath(new URL('.', import.meta.url));
+  const pages = readdirSync(here).filter((n) => /^pageData-[a-z-]+\.mjs$/.test(n) && n !== 'pageData-common.mjs').sort();
+  assert.ok(pages.length >= 2, 'the Reporting and search files');
+  const hub = readFileSync(`${here}/pageData.mjs`, 'utf8');
+  const gathered = [...hub.matchAll(/^export \* from '\.\/(pageData-[\w-]+\.mjs)';$/gm)].map((m) => m[1]).sort();
+  assert.deepEqual(gathered, pages);
+  const style = readFileSync(`${here}/style.test.mjs`, 'utf8');
+  for (const name of [...pages, 'pageData-common.mjs']) assert.ok(style.includes(`'./${name}'`), `style.test.mjs reads ${name}`);
+});
