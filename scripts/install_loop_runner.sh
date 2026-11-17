@@ -302,6 +302,9 @@ status_tracker() {
   log="$(log_of "$BACKUP")"
   if [ -f "$log" ]; then echo "last run: $(grep -E 'backup (OK|FAILED)' "$log" | tail -1 || echo '(none yet)')"
   else echo "last run: (none yet)"; fi
+  # The copy off the Mini (tracker/offMiniCopy.mjs, docs/OFF_MINI_BACKUP.md).
+  if [ -f "$log" ]; then echo "off-Mini: $(grep -E 'off-Mini copy (OK|FAILED|skipped)' "$log" | tail -1 || echo '(none yet)')"
+  else echo "off-Mini: (none yet)"; fi
 }
 
 # The Spirality release this project's lanes run on (SP-276), and the release
