@@ -106,7 +106,7 @@ test('a filed task shows a larger pod centred on the Tasks heading row, above th
   const app = pageScript();
   const draw = app.slice(app.indexOf('async function drawProject'), app.indexOf('async function copyText'));
   // The pod sits in the heading's own row, drawn only after a filing.
-  assert.match(draw, /<div class="tasks-head title-row"><h1>Tasks<\/h1>\$\{filed \? filedPod\(filed, uploaded\) : ''\}\s*<div class="toolbar">/);
+  assert.match(draw, /<div class="tasks-head title-row"><h1>Tasks<\/h1>\$\{filed \? filedPod\(filed, uploaded\) : ''\}\$\{viewSwitch\(board\.project, view\)\}<\/div>/);
   const pod = /function filedPod[\s\S]*?\n\}/.exec(app)[0];
   assert.match(pod, /<output class="filed-pod">Filed <a href="\/t\/\$\{encodeURIComponent\(filed\)\}">\$\{escapeHtml\(filed\)\}<\/a>/, 'the id is still a link');
   // The old line under the toolbar is drawn only for a warning, and never says Filed.

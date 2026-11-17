@@ -3,7 +3,8 @@
 // same row, at most three heading sizes under it, and every switch between
 // views of the same thing a tab bar, never a segmented control. This reads
 // the stylesheet and the page's own source and names what breaks it, so a
-// toolbar drawn on a row of its own under the title fails `npm run verify`.
+// toolbar drawn on a row of its own under the title fails `npm run verify`,
+// on every page but Tasks (SP-362).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -38,10 +39,22 @@ test('the title and the toolbar share one row, buttons at the right (UI_DOCTRINE
   assert.equal(row['align-items'], 'center');
   assert.equal(rule('.title-row > h1').margin, '0');
   // Every toolbar sits in the title row of the page it is on: its page's
-  // <h1> is the row's first child, the toolbar its last.
+  // <h1> is the row's first child, the toolbar its last. One exception, at
+  // Dane's word (SP-362): the Tasks page's toolbar is the row directly under
+  // its title row, which holds only the title and the Board / List / Console
+  // tabs. Any other toolbar, however it is classed, still counts.
   const loose = [];
+  let tasksBars = 0;
   for (const [file, source] of Object.entries(SOURCES)) {
-    for (const m of source.matchAll(/<div class="toolbar">/g)) {
+    for (const m of source.matchAll(/<div class="toolbar(?: [\w -]*)?">/g)) {
+      if (m[0] === '<div class="toolbar tasks-bar">' && file === 'page-tasks.mjs') {
+        const row = source.lastIndexOf('<div class="tasks-head title-row"><h1>Tasks</h1>', m.index);
+        const between = source.slice(row, m.index);
+        assert.ok(row !== -1 && /^<div class="tasks-head title-row"><h1>Tasks<\/h1>\$\{filed \? filedPod\(filed, uploaded\) : ''\}\$\{viewSwitch\(board\.project, view\)\}<\/div>\s*$/.test(between),
+          'the Tasks toolbar sits directly under a title row holding only the title, the Filed pod and the tabs');
+        tasksBars += 1;
+        continue;
+      }
       const h1 = source.lastIndexOf('<h1', m.index);
       const before = source.slice(Math.max(0, h1 - 40), h1);
       if (h1 === -1 || m.index - h1 > 300 || !/class="(?:[\w-]+ )*title-row"/.test(before)) {
@@ -50,6 +63,7 @@ test('the title and the toolbar share one row, buttons at the right (UI_DOCTRINE
     }
   }
   assert.deepEqual(loose, [], 'a toolbar outside a title row');
+  assert.equal(tasksBars, 1, 'the Tasks page draws its second row once');
 });
 
 test('headings under the title use only the three sizes, none bigger than it (UI_DOCTRINE 4)', () => {

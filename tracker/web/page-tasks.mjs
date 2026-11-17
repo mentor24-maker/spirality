@@ -189,17 +189,17 @@ export async function drawProject(slug, view, { adding = false, filed = null, un
 
   // Which side of the Add Task box shows: its Suggest checkbox, kept in this browser (SP-303).
   const suggesting = savedSuggestSwitch();
+  // SP-362: the title row holds only the title and the Board / List / Console
+  // tabs, as on the Console; the pickers, search, pod and filters are the row under it.
   main.innerHTML = `
-    <div class="tasks-head title-row"><h1>Tasks</h1>${filed ? filedPod(filed, uploaded) : ''}
-      <div class="toolbar">
-        ${renderProjectPicker(projects, board.project)}
-        ${renderTopicPicker(board.topics ?? [])}
-        ${searchForm('')}
-        <button type="button" class="pipeline-pod" aria-haspopup="dialog" title="Open Pipeline Status"></button>
-      </div>
-      ${viewSwitch(board.project, view)}
+    <div class="tasks-head title-row"><h1>Tasks</h1>${filed ? filedPod(filed, uploaded) : ''}${viewSwitch(board.project, view)}</div>
+    <div class="toolbar tasks-bar">
+      ${renderProjectPicker(projects, board.project)}
+      ${renderTopicPicker(board.topics ?? [])}
+      ${searchForm('')}
+      <button type="button" class="pipeline-pod" aria-haspopup="dialog" title="Open Pipeline Status"></button>
+      ${renderClassFilters(board.classes, pickedClass)}
     </div>
-    ${renderClassFilters(board.classes, pickedClass)}
     ${filed && (unchecked || notUploaded.length) ? `<p class="filed-note">${unchecked ? UNCHECKED_NOTE : ''}${notUploadedNote(notUploaded)}</p>` : ''}
     <details class="add-task">
       <summary>Add Task<label class="suggest-switch">Suggest <input type="checkbox" value="on" aria-label="Suggest Next Tasks"${suggesting ? ' checked' : ''}></label></summary>
