@@ -70,7 +70,7 @@ import {
 } from '../lib/mergeOnComment.js';
 import {
   PR_VIEW_FIELDS, markerBookkeeping, recordBookkeeping, emptyBooks, mergeDestination, relayLine,
-  handbackAnswer, earlierAnswerIds, handbackPlan, closePlan, conflictFilingPlan, CATCH_UP_WORKED_STATUSES,
+  handbackAnswer, earlierAnswerIds, handbackPlan, closePlan, questionCardMove, conflictFilingPlan, CATCH_UP_WORKED_STATUSES,
   mergeWithPreMergeStep, commandLine, mergedBusLine, conflictBusLine, busAnnouncer, stalledHandOffPlan, remindStalledHandOff,
 } from '../lib/relayLane.js';
 import {
@@ -2271,7 +2271,8 @@ if (cmd === 'whoami') {
 
   // ── His close word on a Ready to launch ticket (SP-68) ──────────────────
   // Live once its work is merged (its own PR, or the PR a catch-up ticket
-  // was filed to unstick); otherwise the reason, said once under his word.
+  // was filed to unstick), or, with no PR anywhere, when the card he answered
+  // is a Close card (SP-375); otherwise the reason, said once under his word.
   // The decision is closePlan's (lib/relayLane.js). Returns true when it
   // decided this ticket, so the merge step does not also act on it.
   const relayCloseReadyToLaunch = async (task, comments) => {
@@ -2296,7 +2297,9 @@ if (cmd === 'whoami') {
       }
       unstuckPr = prStateOf(unstuckPullRequest(out.json.markdown_description || out.json.description || ''));
     }
-    const plan = closePlan({ verdict, answerReplies: replies, ownPr, unstuckPr });
+    // With no PR anywhere, the card he answered decides (SP-375): a Close card closes it.
+    const questionMove = questionCardMove({ comments, isMachine: isMachineAuthored });
+    const plan = closePlan({ verdict, answerReplies: replies, ownPr, unstuckPr, questionMove });
     if (plan.act === 'not-close') return false;
     if (plan.act === 'cannot-tell') {
       unchecked.push(`${task.id}: ${who} said to close it, but ${plan.why}`);
