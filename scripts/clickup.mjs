@@ -237,6 +237,9 @@ npm run clickup -- <command> [flags]      (Loop Queue: list ${LOOP_QUEUE_LIST}, 
   attachments --task <id> --to <folder>           save every file on the ticket into the folder, each checked against its
                                                   size; exit 1 if any did not save (or the tracker keeps no files)
   task-name --task <id>                           the name and nothing else (for a PR title)
+  move --task <id> --to <project slug>            move a ticket, with every comment, file, tag and event, into another
+                                                  tracker project under its next id; the old id keeps opening it. Read
+                                                  back: exit 1 if the comment count differs, 2 if refused (nothing moved)
   comments --task <id>                            the comments, oldest first
   waiting [--task <id>]                           read-only: is this ACTUALLY waiting on Dane? exit 0 no / 3 yes / 1 could not tell
   task --name "..." --body-file <f|-> [--list <id>] [--status S] [--priority p] [--tags a,b] [--id-out <file>]
@@ -1506,6 +1509,44 @@ if (cmd === 'whoami') {
   const name = String(t.name ?? '');
   if (!name.trim()) { console.error(`Task ${task} has an empty name.`); process.exit(1); }
   process.stdout.write(`${name}\n`);
+
+} else if (cmd === 'move') {
+  // Take a ticket into another project with all it carries (the buses' Team
+  // chat tickets into their own projects). The tracker does the move in one
+  // transaction; this reads the ticket before and after, and the comment
+  // count must match, else the move is reported as failed (rule 5).
+  const task = arg('task');
+  const to = arg('to');
+  if (!task || !to) usage();
+  const refuse = (why) => { console.error(`move: refused — ${why}`); reportLimits(); process.exit(2); };
+  const fail = (why) => { console.error(`move FAILED — ${why}`); reportLimits(); process.exit(1); };
+  const before = await tracker.ticketRecord(task);
+  if (!before.res.ok) {
+    if (before.unsupported) refuse(before.json.err);
+    die(`read ${task}`, before);
+  }
+  if (!Array.isArray(before.json?.comments)) fail(`the tracker answered ${task} without its comments, so the move could not be checked; nothing was moved.`);
+  if (before.json.project === to) refuse(`${before.json.id} is already in project "${to}"; nothing was moved.`);
+  const want = before.json.comments.length;
+  const out = await tracker.moveTicket(before.json.id, to);
+  if (!out.res.ok) {
+    if (out.res.status >= 400 && out.res.status < 500) refuse(`${out.json?.err || out.text} (HTTP ${out.res.status}); nothing was moved.`);
+    die(`move ${task} to ${to}`, out);
+  }
+  const newId = out.json?.ticket?.id;
+  if (!newId) fail(`the tracker answered the move of ${task} without the new id; read ${task} to see where it is.`);
+  const back = await tracker.ticketRecord(newId);
+  if (!back.res.ok || !Array.isArray(back.json?.comments)) fail(`the tracker said ${task} is now ${newId}, but reading ${newId} back failed (HTTP ${back.res.status}); treat the move as unchecked.`);
+  const got = back.json.comments.length;
+  if (back.json.id !== newId || back.json.project !== to) fail(`${newId} read back as ${back.json.id} in project "${back.json.project}", not in "${to}".`);
+  if (got !== want) fail(`${task} had ${want} comment(s); ${newId} reads back with ${got}.`);
+  const old = await tracker.ticketRecord(task);
+  if (!old.res.ok || old.json?.id !== newId) fail(`${newId} read back whole, but the old id ${task} does not open it (HTTP ${old.res.status}${old.json?.id ? `, it opens ${old.json.id}` : ''}).`);
+  console.log(`${before.json.id}\t${newId}`);
+  console.error(`Moved ${before.json.id} to ${newId} in ${to} with its ${got} comment(s), verified by reading it back; ${task} still opens it.`);
+  if (out.json.addedTags?.length) console.error(`  tag(s) made in ${to}: ${out.json.addedTags.join(', ')}`);
+  if (out.json.droppedTopics?.length) console.error(`  topic(s) left behind (a topic belongs to its own project): ${out.json.droppedTopics.join(', ')}`);
+  reportLimits();
 
 } else if (cmd === 'comments') {
   const task = arg('task');

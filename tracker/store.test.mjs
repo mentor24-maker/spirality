@@ -327,6 +327,103 @@ test('copying into the ticket\'s own project, an unknown project or from an unkn
   } finally { cleanup(); }
 });
 
+test('moving a ticket gives it the next id in the other project and takes every comment, event, file, tag and seen mark with it', () => {
+  const { store, human, machine, cleanup } = fixture();
+  try {
+    store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE' });
+    store.fileTicket({ project: 'beta', actor: machine.id, name: 'already there', status: 'queued' });
+    store.addTag({ project: 'alpha', name: 'chat', description: 'the team chat', actor: human.id });
+    store.addTag({ project: 'beta', name: 'Shared', actor: human.id });
+    const t = store.fileTicket({
+      project: 'alpha', actor: machine.id, name: 'Team chat', description: 'All of it.',
+      status: 'building', priority: 'high', tags: ['chat', 'shared'], assignee: human.id, loopNote: 'note',
+      kind: 'fix', startedBy: 'client',
+    });
+    const first = store.postComment({ ticket: t.id, author: human.id, body: 'first' });
+    store.postComment({ ticket: t.id, author: machine.id, body: 'a reply', parent: first.id });
+    store.changeTicket(t.id, { actor: machine.id, priority: 'urgent' });
+    store.addAttachment({ ticket: t.id, name: 'a.txt', type: 'text/plain', bytes: Buffer.from('hello'), actor: human.id });
+    store.markSeen({ actor: human.id, ticket: t.id });
+    const topic = store.addTopic({ project: 'alpha', name: 'Chat', actor: human.id });
+    store.changeTicket(t.id, { actor: machine.id, topics: [topic.id] });
+    const before = { ticket: store.getTicket(t.id), comments: store.listComments(t.id), events: store.listEvents(t.id), files: store.listAttachments(t.id) };
+
+    const moved = store.moveTicket(t.id, { project: 'beta', actor: human.id });
+    assert.equal(moved.ticket.id, 'BE-2');
+    assert.equal(moved.from, 'AL-1');
+    assert.deepEqual(moved.droppedTopics, [topic.id], 'a topic belongs to its own project, so it stays behind and is named');
+    assert.deepEqual(moved.addedTags, ['chat'], 'only the tag beta lacked is made there (Shared matches shared)');
+    const read = store.getTicket('BE-2');
+    assert.deepEqual(read, moved.ticket);
+    assert.deepEqual(
+      [read.project, read.number, read.name, read.description, read.status, read.priority, read.tags, read.assignee, read.loopNote, read.kind, read.startedBy, read.createdAt],
+      ['beta', 2, 'Team chat', 'All of it.', 'building', 'urgent', ['chat', 'shared'], human.id, 'note', 'fix', 'client', before.ticket.createdAt],
+    );
+    assert.equal(read.version, before.ticket.version + 1);
+    assert.equal(store.getTicket('AL-1'), null, 'the old id holds no ticket');
+    assert.equal(store.movedId('AL-1'), 'BE-2');
+    assert.equal(store.movedId('AL-2'), null);
+
+    assert.deepEqual(store.listComments('BE-2').map(({ ticket, ...c }) => c), before.comments.map(({ ticket, ...c }) => c), 'every comment, author, time and reply kept');
+    assert.deepEqual(store.listAttachments('BE-2').map(({ ticket, ...f }) => f), before.files.map(({ ticket, ...f }) => f));
+    const events = store.listEvents('BE-2');
+    assert.deepEqual(events.slice(0, -1).map(({ ticket, ...e }) => e), before.events.map(({ ticket, ...e }) => e), 'the history is kept');
+    assert.deepEqual([events.at(-1).field, events.at(-1).from, events.at(-1).to, events.at(-1).actor], ['moved', 'AL-1', 'BE-2', human.id]);
+    assert.equal(store.listTags('beta').find((x) => x.name === 'chat').description, 'the team chat');
+    assert.deepEqual(store.listTickets('alpha'), []);
+    assert.equal(store.fileTicket({ project: 'alpha', actor: machine.id, name: 'n', status: 'queued' }).id, 'AL-2', 'the old number is never given out again');
+
+    const third = store.createProject({ slug: 'gamma', name: 'Gamma', prefix: 'GA' });
+    assert.equal(third.slug, 'gamma');
+    const again = store.moveTicket('BE-2', { project: 'gamma', actor: machine.id });
+    assert.equal(again.ticket.id, 'GA-1');
+    assert.equal(store.movedId('AL-1'), 'GA-1', 'the first old id follows the second move');
+    assert.equal(store.movedId('BE-2'), 'GA-1');
+    assert.equal(store.listComments('GA-1').length, 2);
+  } finally { cleanup(); }
+});
+
+test('an imported ticket that moves keeps its old ClickUp id leading to it', () => {
+  const { store, machine, cleanup } = fixture();
+  try {
+    store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE' });
+    store.importTicket({ source: 'clickup', sourceId: '86abc', createdAt: '2026-10-01T00:00:00.000Z', project: 'alpha', actor: machine.id, name: 'Old', status: 'queued' });
+    store.moveTicket('AL-1', { project: 'beta', actor: machine.id });
+    assert.equal(store.importedId({ source: 'clickup', kind: 'ticket', sourceId: '86abc' }), 'BE-1');
+  } finally { cleanup(); }
+});
+
+test('moving into the same project, into one the actor cannot change, or as a viewer is refused, and nothing changes', () => {
+  const { store, human, machine, cleanup } = fixture();
+  try {
+    store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE' });
+    const t = store.fileTicket({ project: 'alpha', actor: machine.id, name: 'Stay', status: 'queued', tags: ['x'] });
+    store.postComment({ ticket: t.id, author: machine.id, body: 'kept' });
+    const before = { ticket: store.getTicket(t.id), comments: store.listComments(t.id), events: store.listEvents(t.id) };
+    const member = store.createActor({ kind: 'human', name: 'Member' });
+    store.addMember({ project: 'alpha', actor: member.id, by: human.id });
+
+    assert.throws(() => store.moveTicket(t.id, { project: 'alpha', actor: human.id }), { code: 'same-project' });
+    assert.throws(() => store.moveTicket(t.id, { project: 'gamma', actor: human.id }), { code: 'unknown-project' });
+    assert.throws(() => store.moveTicket('AL-9', { project: 'beta', actor: human.id }), { code: 'unknown-ticket' });
+    assert.throws(() => store.moveTicket(t.id, { project: 'beta', actor: 999 }), { code: 'unknown-actor' });
+    assert.throws(() => store.moveTicket(t.id, { project: 'beta', actor: member.id }), { code: 'cannot-edit' }, 'not a member of beta');
+    store.addMember({ project: 'beta', actor: member.id, by: human.id });
+    store.setRole({ actor: member.id, role: 'viewer', by: human.id });
+    assert.throws(() => store.moveTicket(t.id, { project: 'beta', actor: member.id }), { code: 'cannot-edit' }, 'a viewer changes no ticket');
+
+    assert.deepEqual(store.getTicket(t.id), before.ticket);
+    assert.deepEqual(store.listComments(t.id), before.comments);
+    assert.deepEqual(store.listEvents(t.id), before.events);
+    assert.equal(store.movedId(t.id), null);
+    assert.deepEqual(store.listTags('beta'), []);
+    assert.equal(store.fileTicket({ project: 'beta', actor: machine.id, name: 'b', status: 'queued' }).id, 'BE-1', 'a refused move used up no number');
+
+    store.setRole({ actor: member.id, role: 'contributor', by: human.id });
+    assert.equal(store.moveTicket(t.id, { project: 'beta', actor: member.id }).ticket.id, 'BE-2', 'a contributor on both projects may move it');
+  } finally { cleanup(); }
+});
+
 test('listing filters by status, and "open only" drops Live tickets', () => {
   const { store, machine, cleanup } = fixture();
   try {

@@ -118,6 +118,23 @@ account_links  token hash, purpose (setup|invite|reset), email, actor,
 - **Comments are append-only.** Nothing edits or deletes one, so the trail
   the loop reads can never shift under it. A comment is deleted only with
   its ticket, by the call above.
+- **A ticket can move to another project, everything on it with it.**
+  `npm run clickup -- move --task <id> --to <project slug>` gives it that
+  project's next id and keeps its name, description, status, priority, tags,
+  assignee, kind, comments (authors and times), history, files, seen marks
+  and pull request files. Its place in the old queue and its topics (a topic
+  belongs to one project) stay behind, and the command names any topic it
+  dropped; a tag the new project lacks is made there first. The move is one
+  transaction, so it happens whole or not at all. The old id is kept in
+  `moved_ids`, so `<tracker>/t/<old id>`, an alarm text naming it and a
+  `Waits on:` line still reach the ticket, through any later move too, and
+  the old number is never given out again. The history gets one `moved`
+  event (old id to new). The door reads the ticket before and after: it
+  prints `<old id>\t<new id>` and "verified by reading it back", and exits 1
+  when the comment count differs or the old id does not open it, 2 when the
+  move is refused (the same project, an unknown one, or someone who cannot
+  change tickets in both: a loop always can; a person must see both
+  projects and have a role that changes tickets), with nothing moved.
 - **`version`** goes up by one on every change to a ticket. A write may say
   "only if the version (or status) is still X", and is refused if not. This
   is the atomic claim.
@@ -290,6 +307,7 @@ answers are JSON (structured text programs read).
 | `DELETE /tickets/:id/attachments/:n` | remove one file, bytes and all: answers `{ removed, ticket, name }`, checked gone, with an `attachment` event (from its name to nothing). A file not on that ticket is 404 |
 | `GET /tickets/:id/attachments/:n` | one file, byte for byte, always as a download (`Content-Disposition: attachment`, `X-Content-Type-Options: nosniff`, a sandboxing `Content-Security-Policy`), so an uploaded HTML file can never run as the tracker's page |
 | `POST /tickets/:id/clone` | for Dane's page: copy a ticket into another project (`{ project }`), as a new ticket in `Requested` there with one comment naming where it came from; the original does not change |
+| `POST /tickets/:id/move` | move a ticket into another project (`{ project }`) under that project's next id, with every comment, event, file, tag and seen mark; answers `{ ticket, from, droppedTopics, addedTags, comments }`. The old id keeps answering every `/tickets/:id` call with the moved ticket. The same project is 409 `same-project`; a caller who cannot change tickets in both projects 403 `cannot-edit`; a project the caller cannot see 404; nothing changes on a refusal. `npm run clickup -- move` is its door |
 | `POST /projects/:slug/suggest-next` | ask for the project's next few tasks (SP-250): starts a run and answers at once, 202 `{ run: { id, state: 'running', at } }`; a second start while one is running answers the running one, never a second run. The run makes a shallow copy of the project's `main` from its `repo` into a fresh folder under the system's temp folder (removed afterwards whatever happens), and runs `claude -p` there with the `suggest-next` skill, read-only tools only (Read, Grep, Glob), in restricted mode (`--restricted`, which confines those tools to the copy: without it they read any file on the machine; `npm run check:suggest-confinement` proves it with the real `claude`) and a 10-minute limit; the open tickets (id, name, status, priority, tags, topics, description, newest comments) and the project's own topic and tag names go in on standard input, never on the command line. Which `claude` comes from `TRACKER_CLAUDE`, the same setting the title suggester reads (default: the one on the PATH). The same sign-in and project rules as `/tickets/check`; a project the caller is not on is 404, the same as one that does not exist. No ticket is written (`tracker/nextSuggest.mjs`) |
 | `GET /projects/:slug/suggest-next` | the latest run: `{ state: 'running' \| 'done' \| 'failed', suggestions?, message?, at }`, `suggestions` being 3 to 7 `{ title, description, why }`, most useful first, each with any of `about`, `related` (`[{ id, name }]`), `topics`, `tags` and `links` (`[{ label, path }]` or `[{ label, ticket }]`) that checked out against the open tickets, the project's topics and tags, and plain paths (SP-305: anything else is dropped), and `repo` the project's GitHub repository, which the page links a suggestion's files to, and `message` a plain reason for a failed run (no `repo` set, no `claude` found, a bad answer, the time limit). The latest finished run is kept in the store, so a reload or a restart still answers it; 404 `no-run` before anyone has asked |
 | `GET /pr-files/:slug` | which files each open pull request on the project changes (SP-349, `lib/prFiles.js`): `{ project, pullRequests: [{ project, number, ticket, repo, head, files, actor, readAt }] }`, by number, `files` sorted. Any sign-in that may see the project. `npm run clickup -- pr-files` reads it, with `--files a,b` or `--task <id>` naming the open pull requests that share a file (exit 3), `--json` for the lanes; the ticket page shows "Changes the same files as SP-12 (PR #40): …" for each |
@@ -1352,10 +1370,11 @@ StarCaster raises its alarms on **the bus**: a ClickUp chat channel (the
 a standing **Team chat** ticket instead, plus a second ClickUp list, **Agent
 Response**, where the steward asks Dane things and the relay watches for his
 replies. StarCaster cannot move to the tracker without a bus (SP-24).
-Spirality's own bus is the tracker project `spirality-bus` ("Spirality
-bus", tickets `SPBUS-…`), named as `busProject` in `spirality.project.json`
-(SP-281), so its relay's notices and any `ALARM:` line land on its "Team
-chat" ticket.
+Spirality's own bus is the Spirality project itself: `busProject` in
+`spirality.project.json` is `spirality` (SP-359), so its relay's notices and
+any `ALARM:` line land on the "Team chat" ticket in its own queue. That
+ticket was SPBUS-1 in the older `spirality-bus` project (SP-281) and kept
+its whole history when it moved; `/t/SPBUS-1` still opens it.
 
 A project is normally **its own bus** (SP-356): `busProject` in its
 project config is its own `projectSlug` (for example `starcaster`), so its
@@ -1372,9 +1391,8 @@ ticket's, so a word of Dane's on a work ticket is never taken for a stop
 word.
 
 A project set up before SP-356 may still name **a project of its own**,
-`<slug>-bus`, as its bus (Spirality's is `spirality-bus` until its own
-ticket moves it). There every ticket is the bus, as before, and no loop
-claims from it because the build and review lanes read `projectSlug` only.
+`<slug>-bus`, as its bus (Spirality's was `spirality-bus` until SP-359).
+There every ticket is the bus, as before, and no loop claims from it because the build and review lanes read `projectSlug` only.
 Either way each comment carries its author's own actor, so "only Dane's
 words" is read off the comment, not guessed from a stamp.
 
