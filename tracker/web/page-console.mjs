@@ -7,8 +7,8 @@
  * (Spirality SP-352), so a ticket that changes one page no longer edits the
  * same file as a ticket that changes another.
  */
-import { stageLooks, renderConsole } from './render.mjs';
-import { main, api, SignedOut, VIEW_KEY, savedProject, setTitle, viewSwitch, putTrail } from './app.mjs';
+import { stageLooks, renderConsole, buildRunning, GLIDE_AREA, PIPELINE_READ } from './render.mjs';
+import { main, api, SignedOut, VIEW_KEY, savedProject, setTitle, viewSwitch, putTrail, lastPipeline } from './app.mjs';
 
 /**
  * The Console view (SP-233): every ticket in flight on every project he can
@@ -49,11 +49,29 @@ function showFeaturePick() {
  * values (--at-x and the rest), because the page's rules forbid a style attribute in the HTML itself.
  */
 function placeOnMap() {
-  const put = { x: '--at-x', y: '--at-y', w: '--at-w', h: '--at-h', size: '--at-size', fade: '--at-fade' };
+  const put = { x: '--at-x', y: '--at-y', w: '--at-w', h: '--at-h', size: '--at-size', fade: '--at-fade', glideFrom: '--glide-from', glideTo: '--glide-to' };
   for (const el of main.querySelectorAll('.console-map [data-x]')) {
     for (const [key, prop] of Object.entries(put)) if (el.dataset[key] !== undefined) el.style.setProperty(prop, el.dataset[key]);
+    if (el.dataset.glideMs !== undefined) el.style.setProperty('--glide-ms', `${el.dataset.glideMs}ms`);
   }
 }
+
+/** One pulse of the Building area, lighter to darker and back, in app.css's area-pulse (two 4s halves). */
+const PULSE_MS = 8000;
+
+/**
+ * Keep the Building area's `running` class in step with the last GET
+ * /pipeline read (SP-365): on, its background pulses and its tiles glide
+ * (app.css); off, or the answer unreadable, it is still. The pulse is set
+ * to the clock's place in its cycle, so the minute's redraw does not restart it.
+ */
+function showBuildRunning() {
+  const area = main.querySelector(`.console-map .map-area[data-area="${GLIDE_AREA}"]`);
+  if (!area) return;
+  area.style.setProperty('--pulse-delay', `-${Date.now() % PULSE_MS}ms`);
+  area.classList.toggle('running', buildRunning(lastPipeline()));
+}
+document.addEventListener(PIPELINE_READ, showBuildRunning);
 
 export async function drawConsole() {
   const [answer, colours] = await Promise.all([
@@ -68,8 +86,9 @@ export async function drawConsole() {
   main.innerHTML = `
     <div class="tasks-head title-row"><h1>Tasks</h1>${slug ? viewSwitch(slug, 'console') : ''}</div>
     ${answer.tickets.some((t) => t.status !== 'Live') ? '' : '<p class="quiet">Nothing is in flight.</p>'}
-    ${renderConsole(answer)}`;
+    ${renderConsole(answer, Date.now(), { running: buildRunning(lastPipeline()) })}`;
   placeOnMap();
+  showBuildRunning();
   for (const el of main.querySelectorAll('[data-stage]')) {
     const look = looks[el.dataset.stage];
     if (!look) continue;
