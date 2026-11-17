@@ -250,7 +250,7 @@ const CONFLICT_KINDS = { 'main-moved': 'after a merge', 'merge-refused': 'merge 
 function conflictSection(c) {
   if (!c) return '';
   const intro = `<h2>Merge Conflicts</h2>
-    <p class="quiet">A conflict: a pull request that stopped merging into main, from the loops' notes (a merge that left it conflicting, a merge word refused for a conflict, or a catch-up ticket filed). Notes on one pull request count once until it merges cleanly again. Each is counted under the wake times and work-in-progress cap in force when it happened; merges are counted the same way, so the last column compares settings fairly. All time.</p>`;
+    <p class="quiet">A conflict: a pull request that stopped merging into main, from the loops' notes (a merge that left it conflicting, a merge word refused for a conflict, or a catch-up ticket filed). Notes on one pull request count once until it merges cleanly again. Each is counted under the wake times and work-in-progress cap in force when it happened; merges are counted the same way, so the last column compares settings fairly. All time. Counted per pull request, so the Kind picker above does not apply here: every kind is counted.</p>`;
   if (!c.merged && !c.total) return `${intro}<p class="quiet">No merges or conflicts recorded yet.</p>`;
   const range = (g) => (g.since ? `${escapeHtml(when(g.since))} to ${escapeHtml(when(g.until))}` : '');
   const settingRows = c.bySetting.map((g) => `<tr><td class="name">${escapeHtml(g.setting)}</td><td>${range(g)}</td><td class="count">${Number(g.merged)}</td><td class="count">${Number(g.conflicts)}</td><td class="count">${perMerge(g.rate)}</td></tr>`).join('');

@@ -87,8 +87,8 @@ export function seedDemo(store, { operatorName = substrateConfig.operatorName(),
   store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE', operator: op.id });
 
   const expect = {};
-  const file = (project, name, status, { assigned = false, description = '', priority = null, tags = [] } = {}, outcome) => {
-    const t = store.fileTicket({ project, actor: loop.id, name, status, description, priority, tags, assignee: assigned ? op.id : null });
+  const file = (project, name, status, { assigned = false, description = '', priority = null, tags = [], kind = null } = {}, outcome) => {
+    const t = store.fileTicket({ project, actor: loop.id, name, status, description, priority, tags, kind, assignee: assigned ? op.id : null });
     expect[t.id] = outcome;
     return t.id;
   };
@@ -122,10 +122,12 @@ export function seedDemo(store, { operatorName = substrateConfig.operatorName(),
   // One of each machine status, and Live, for the board. Queued holds three
   // of mixed priority, filed out of order, so its column shows `queue` order
   // (priority, then oldest) rather than filing order.
-  file('alpha', 'A low-priority chore filed first', 'queued', { priority: 'low', tags: ['chore'] }, 'machine');
-  file('alpha', 'An urgent fix filed after it', 'queued', { priority: 'urgent', tags: ['tracker', 'fix'] }, 'machine');
-  file('alpha', 'A send-back with review notes', 'rework', { priority: 'normal' }, 'machine');
-  file('alpha', 'A ticket a build loop is on', 'building', { priority: 'high' }, 'machine');
+  // Four of them have a kind (SP-367), so the Reporting page's Kind picker
+  // changes Open Now as well as the finished figures.
+  file('alpha', 'A low-priority chore filed first', 'queued', { priority: 'low', tags: ['chore'], kind: 'operational' }, 'machine');
+  file('alpha', 'An urgent fix filed after it', 'queued', { priority: 'urgent', tags: ['tracker', 'fix'], kind: 'fix' }, 'machine');
+  file('alpha', 'A send-back with review notes', 'rework', { priority: 'normal', kind: 'feature' }, 'machine');
+  file('alpha', 'A ticket a build loop is on', 'building', { priority: 'high', kind: 'feature' }, 'machine');
   file('alpha', 'A pull request waiting for review', 'in review', { tags: ['tracker'] }, 'machine');
   const merged = file('alpha', 'Finished and merged', 'live', { priority: 'normal' }, 'machine');
   // The relay's merge note, with the files the pull request made: its page shows the Files Made box (SP-170).

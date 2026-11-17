@@ -583,6 +583,35 @@ test('the demo spreads its finished tasks over the last month, so every range ha
   } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
 });
 
+test('the demo gives open tasks a kind too, so picking Feature changes Open Now as well as the finished figures (SP-367)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tracker-demo-kinds-'));
+  const clock = tickingClock();
+  const store = openStore(join(dir, 'tracker.db'), { now: clock });
+  try {
+    seedDemo(store, { operatorName: 'Dane', clock });
+    const openCount = (r) => r.open.reduce((n, s) => n + s.count, 0);
+    const all = reportsOf(store, { now: clock.time() });
+    const feature = reportsOf(store, { now: clock.time(), kind: 'feature' });
+    const none = reportsOf(store, { now: clock.time(), kind: 'none' });
+    assert.equal(feature.kind, 'feature');
+    assert.ok(feature.finished.all > 0 && feature.finished.all < all.finished.all, JSON.stringify(feature.finished));
+    assert.ok(openCount(feature) > 0 && openCount(feature) < openCount(all), `Feature open ${openCount(feature)} of ${openCount(all)}`);
+    for (const kind of ['fix', 'operational']) {
+      assert.ok(openCount(reportsOf(store, { now: clock.time(), kind })) > 0, `an open ${kind}`);
+    }
+    // Every ticket is one kind or none, so the kinds add up to every kind.
+    const sum = REPORT_KINDS.reduce((n, k) => n + openCount(reportsOf(store, { now: clock.time(), kind: k.key })), 0);
+    assert.equal(sum, openCount(all));
+    assert.ok(openCount(none) > 0, 'the rest are No Kind Yet');
+  } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('the Merge Conflicts explanation says the Kind picker does not apply to it (SP-367)', () => {
+  const app = pageScript();
+  const section = app.slice(app.indexOf('function conflictSection'), app.indexOf('function conflictSection') + 1500);
+  assert.match(section, /<h2>Merge Conflicts<\/h2>\s*<p class="quiet">[^<]*All time\. Counted per pull request, so the Kind picker above does not apply here: every kind is counted\.<\/p>/);
+});
+
 // ── Where the Time Goes (SP-220) ────────────────────────────────────────────
 
 const HOUR = 60 * 60_000;
