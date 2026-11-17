@@ -1067,6 +1067,98 @@ not a career programmer, and his stated bottleneck is attention, not
 willingness. Every chore surfaced for approval spends the scarcest resource he
 has on something he has already said yes to.
 
+### 6.5 SQL for the operator goes in the SQL handoff block, as a GitHub link by commit
+
+**Standing instruction from the operator, 2026-08-12, given verbatim as a
+template.** When he has SQL to run, do not print the statements. Emit exactly
+this block and nothing else in its place, spaced exactly as shown here:
+
+#################### RUN SQL IN SUPABASE ####################
+
+[github url]
+
+##########################################################
+
+**Two blank lines above and below each SQL handoff block** (operator,
+2026-08-12: "add two paragraph breaks above and below each SQL set so they
+stand out clearly"). A single break lets the block sit flush against the
+sentence introducing it, and in a long reply the block stops reading as a
+block, which is the one thing it exists to do. Two breaks on each side, every
+time, including between two blocks in a row.
+
+**Emit it as plain text, never inside a code fence** (operator, 2026-08-12:
+"can you make that link clickable?"). A fenced block shows the link as dead
+text and he cannot click it, which defeats a handoff whose whole job is to get
+him to that file. Outside a fence the terminal and the tracker page both make
+it a link.
+
+The block survives being unfenced: a heading takes at most six `#`, so a run
+of twenty shows as the literal text it looks like. Do not shorten the rows to
+six or fewer or they turn into a heading. (Measured 2026-11-17 against the
+tracker page's own renderer, `renderMarkdown` in
+`tracker/web/render-common.mjs`: each row is a plain paragraph and the link
+is clickable, inside an `ask` card's `@@NEEDED` too. The page shows one blank
+line where two were written; write two anyway, for the terminal and for
+GitHub.)
+
+**Why a link and not the SQL itself.** Applying SQL by hand is a schema step
+no agent can do (StarCaster: the Supabase command line on the Mini has no
+access token, and no session carries a database connection string), so this
+block is the whole handoff, and it has to be unmissable. A wall of pasted SQL
+buries the ask; the block can be found in a long message and says what to do
+in its own first line. He opens the link and copies from GitHub.
+
+**The link names a commit, never a branch.** Two traps, one after the other:
+
+- **A repository path is broken for him** (StarCaster, 2026-08-12). The first
+  handoff gave `docs/SQL/assets_renditions.sql`. A new file lives on a branch
+  inside `.claude/worktrees/<topic>/`, and his editor is open on `main`, where
+  the file does not exist yet: the link went nowhere and cost a round trip.
+- **A branch link breaks on merge** (SC-826, 2026-11-17). StarCaster's version
+  of this rule said link the file on its branch. The branch is deleted when
+  the pull request merges, and every link naming it 404s from then on, so
+  `comment`, `ask` and `describe` refuse a branch link (exit 2). The build
+  pass on SC-826 wrote its link by that rule, and `ask` refused it.
+
+So:
+
+- **A file already on `main`** links by `main`:
+  `https://github.com/<owner>/<repo>/blob/main/docs/SQL/<file>.sql`
+- **A file only on the pull request's branch** links by the pushed commit,
+  from `git rev-parse HEAD` after the push:
+  `https://github.com/<owner>/<repo>/blob/<commit>/docs/SQL/<file>.sql`
+  Check the commit is pushed before writing the block: an unpushed commit's
+  link 404s as surely as a deleted branch's.
+
+**An `ask` card carries the block too** (SC-826, 2026-11-17). StarCaster's
+rule was checked by a Stop hook (`scripts/hooks/require_sql_handoff.cjs`
+there), and a Stop hook reads a session's reply in the chat, not a card on the
+tracker. Unattended passes hand SQL over through `ask` cards, which nothing
+checked, and the first card on SC-826 listed the files as bold numbered paths.
+Dane's answer, on that ticket: *"This is the wrong format to hand me SQL to
+run. Check Spirality doctrine for the methodology, and if it isn't there,
+investigate Starcaster for the methodology and incorporate it into Spirality
+procedures."* The block goes in `@@NEEDED`, above the `Your move:` line, which
+stays the last line. `.claude/skills/loop-build/SKILL.md` shows a whole card.
+
+**In Spirality now:** (2026-11-17) nothing checks a card for the block yet;
+`ask` refusing a card that names a `docs/SQL/` file without it is SP-381. Until
+then this rule is the control, so apply it every time.
+
+**Also:**
+
+- Still write the file to `docs/SQL/` (StarCaster: that is the schema's source
+  of truth, its §7), and to `supabase/migrations/` when it belongs there.
+- Say in one line, outside the block, what it changes and whether anything
+  existing is touched. "It only adds two new fields; it changes nothing that
+  exists" is what tells him it is safe to run.
+- One block per file. Two files means two blocks, in the order they run.
+
+**The general rule behind it:** he has told us the shape he wants a handoff in.
+When he gives a template verbatim, reproduce it exactly rather than improving
+it: the point is that it looks the same every time, so he can find it without
+reading.
+
 ### 6.6 Never spend an operator decision on something already decided
 
 **Enforcement: `scripts/hooks/explain_denied_commands.cjs` (PreToolUse on Bash,
