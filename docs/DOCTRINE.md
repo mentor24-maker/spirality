@@ -1141,9 +1141,18 @@ investigate Starcaster for the methodology and incorporate it into Spirality
 procedures."* The block goes in `@@NEEDED`, above the `Your move:` line, which
 stays the last line. `.claude/skills/loop-build/SKILL.md` shows a whole card.
 
-**In Spirality now:** (2026-11-17) nothing checks a card for the block yet;
-`ask` refusing a card that names a `docs/SQL/` file without it is SP-381. Until
-then this rule is the control, so apply it every time.
+**Enforcement:** (SP-381, 2026-11-17) `ask` and `comment` refuse, with exit 2
+and before anything is posted or moved, a body that names a `.sql` file outside
+a fence (a repository path or a GitHub file link) without this block for that
+file: the head line, a blank line, a link to the file by commit or by `main`
+alone on its line, a blank line, a row of more than six `#`, all outside a
+fence. The refusal names each file and prints its block ready to paste, with
+`<commit>` to fill in. A bare path, a bold numbered list, a fenced block, a
+branch link and one block for two files are all refused
+(`sqlFilesWithoutBlock` in `scripts/lib/operatorCard.mjs`). `describe` and
+`task` do not check: a spec may name a `.sql` file without handing it over.
+Nothing checks a chat reply in a session started by hand, so there this rule
+is still the control.
 
 **Also:**
 

@@ -117,6 +117,80 @@ export function branchLinkRefusal(links, nothing) {
   ].join('\n');
 }
 
+/** The run block's first line, exactly as DOCTRINE 6.5 gives it. */
+export const SQL_BLOCK_HEAD = '#################### RUN SQL IN SUPABASE ####################';
+const SQL_BLOCK_FOOT = '#'.repeat(58);
+// More than six #, so the page cannot read the row as a heading (DOCTRINE 6.5).
+const SQL_BLOCK_ROW = /^#{7,}$/;
+const GITHUB_SQL_LINK = /https:\/\/github\.com\/[^\s/]+\/[^\s/]+\/(?:blob|tree|raw)\/([^\s/)\]>"'`<*]+)\/([^\s)\]>"'`<*]+\.sql)\b/gi;
+const SQL_PATH = /(?:[\w.-]+\/)*[\w.-]+\.sql\b/gi;
+const isCommitOrMain = (ref) => ref === 'main' || /^[0-9a-f]{7,40}$/i.test(ref);
+
+/**
+ * Every `.sql` file `text` names outside a fence, as the repository path it
+ * names (a GitHub file link counts by the path after its ref), in the order
+ * first named. A fenced mention is quoting, not a handoff, so it is left out.
+ */
+export function findSqlFiles(text) {
+  const found = [];
+  const add = (p) => { if (!found.includes(p)) found.push(p); };
+  for (const { line, role } of fenceLines(text)) {
+    if (role !== 'prose') continue;
+    for (const m of line.matchAll(GITHUB_SQL_LINK)) add(m[2]);
+    for (const m of line.replace(GITHUB_SQL_LINK, ' ').replace(/https?:\/\/\S+/g, ' ').matchAll(SQL_PATH)) add(m[0]);
+  }
+  return found;
+}
+
+/**
+ * The repository paths that carry a correct run block in `text` (DOCTRINE
+ * 6.5): the head line, a blank line, a GitHub link to the file by commit or
+ * by `main` and nothing else, a blank line, a row of `#`, all outside a fence.
+ */
+export function sqlBlockFiles(text) {
+  const lines = fenceLines(text);
+  const covered = [];
+  const prose = (i) => (lines[i] && lines[i].role === 'prose' ? lines[i].line.trim() : null);
+  for (let i = 0; i < lines.length; i += 1) {
+    if (prose(i) !== SQL_BLOCK_HEAD) continue;
+    if (prose(i + 1) !== '' || prose(i + 3) !== '' || !SQL_BLOCK_ROW.test(prose(i + 4) ?? '')) continue;
+    const link = prose(i + 2) ?? '';
+    const m = new RegExp(`^${GITHUB_SQL_LINK.source}$`, 'i').exec(link);
+    if (m && isCommitOrMain(m[1])) covered.push(m[2]);
+  }
+  return covered;
+}
+
+/**
+ * The `.sql` files `text` names that have no run block of their own: a bare
+ * path, a bold numbered list, a fenced block, a branch link or one block for
+ * two files all leave a file here. A bare file name counts as covered by a
+ * block for a path ending in it.
+ */
+export function sqlFilesWithoutBlock(text) {
+  const covered = sqlBlockFiles(text);
+  return findSqlFiles(text).filter((file) => !covered.some((c) => c === file || c.endsWith(`/${file}`)));
+}
+
+/** The run block for one file, ready to paste, with `<commit>` for what cannot be known. */
+export function sqlBlockFor(file, repo) {
+  const slug = repo && /^[^\s/]+\/[^\s/]+$/.test(repo) ? repo : '<owner>/<repo>';
+  return [SQL_BLOCK_HEAD, '', `https://github.com/${slug}/blob/<commit>/${file}`, '', SQL_BLOCK_FOOT].join('\n');
+}
+
+/** The refusal for a body handing over SQL files without their run blocks. */
+export function sqlHandoffRefusal(files, nothing, repo) {
+  const blocks = files.map((f) => `\n\n${sqlBlockFor(f, repo)}\n\n`).join('');
+  return [
+    `The body hands over SQL to run without the run block DOCTRINE 6.5 asks for, so there is no link to click. ${nothing}`,
+    ...files.map((f) => `  no block for: ${f}`),
+    'Put one block per file in the body, in the order they run, outside any fence, with two blank lines above and below each.',
+    'Replace <commit> with `git rev-parse HEAD` on the pushed branch, or with `main` for a file already on main:',
+    blocks,
+    'Add one line outside each block saying what the file changes and whether it touches anything that exists.',
+  ].join('\n');
+}
+
 /**
  * A backtick fence that `text` cannot close: one longer than its longest
  * backtick run, and never shorter than three. Dane's words may carry their
