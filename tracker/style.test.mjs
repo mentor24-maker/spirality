@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { PAGE_SCRIPTS } from './pageScripts.mjs';
+import { PAGE_SCRIPTS, RENDER_SCRIPTS } from './pageScripts.mjs';
 
 const read = (path) => readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8');
 
@@ -89,7 +89,7 @@ function labelsOf(source) {
   return found.filter((l) => l.text && !/^\$\{[^}]*\}$/.test(l.text));
 }
 
-const SOURCES = [...PAGE_SCRIPTS.map((name) => `./web/${name}`), './web/render.mjs', './web/index.html', './pageData.mjs', './pipelineControls.mjs', '../scripts/onboard/onboard.mjs', '../scripts/onboard/fromClickup.mjs'];
+const SOURCES = [...PAGE_SCRIPTS.map((name) => `./web/${name}`), ...RENDER_SCRIPTS.map((name) => `./web/${name}`), './web/index.html', './pageData.mjs', './pageData-common.mjs', './pageData-reporting.mjs', './pageData-search.mjs', './pipelineControls.mjs', '../scripts/onboard/onboard.mjs', '../scripts/onboard/fromClickup.mjs'];
 
 test('every button, heading, column heading, tab, field label, tab title and trail step on the page is in Title Case (docs/UI_DOCTRINE.md)', () => {
   const problems = [];

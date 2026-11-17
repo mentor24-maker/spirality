@@ -9,7 +9,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { renderMessage, renderSavedCard, MESSAGE_CLOSES_MS, SAVED_CARD_MS } from './web/render.mjs';
 import { withTokensResolved } from './cssTokens.mjs';
-import { PAGE_SCRIPTS, pageScript } from './pageScripts.mjs';
+import { PAGE_SCRIPTS, RENDER_SCRIPTS, pageScript } from './pageScripts.mjs';
 
 const WEB = (name) => readFileSync(fileURLToPath(new URL(`./web/${name}`, import.meta.url)), 'utf8');
 
@@ -110,7 +110,17 @@ const NOTE_SITES = {
   'page-users.mjs': 4,
   'page-docs.mjs': 5,
   'page-topics.mjs': 1,
-  'render.mjs': 26,
+  'render.mjs': 0,
+  'render-common.mjs': 0,
+  'render-shell.mjs': 2,
+  'render-ticket.mjs': 16,
+  'render-tasks.mjs': 4,
+  'render-console.mjs': 0,
+  'render-add-task.mjs': 0,
+  'render-settings.mjs': 0,
+  'render-projects.mjs': 1,
+  'render-docs.mjs': 1,
+  'render-topics.mjs': 2,
 };
 
 test('no new note is added beside a button: a button reports in the message strip', () => {

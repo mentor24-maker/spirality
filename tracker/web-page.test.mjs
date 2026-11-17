@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { renderTrail, bellColour, busLink, contrast, linkProblem, passwordProblem, renderSetPassword, renderPasswordSet, renderSignIn, renderForgot, MIN_PASSWORD, redrawHold, drawnChoice, healthLines, renderHealth, passOutcome, wakesEvery } from './web/render.mjs';
-import { PAGE_SCRIPTS, pageScript } from './pageScripts.mjs';
+import { PAGE_SCRIPTS, RENDER_SCRIPTS, pageScript, renderScript } from './pageScripts.mjs';
 import { WEB, drawnCss, fixture } from './webTestKit.mjs';
 
 // ── The page itself ──────────────────────────────────────────────────────────
@@ -35,6 +35,29 @@ test('the page script is app.mjs and one file per page, every one listed, served
   } finally {
     await f.cleanup();
   }
+});
+
+test('the drawing is render.mjs and one file per page, every one listed, re-exported and served (SP-364)', async () => {
+  const onDisk = readdirSync(fileURLToPath(new URL('./web/', import.meta.url))).filter((n) => /^render-[a-z-]+\.mjs$/.test(n)).sort();
+  assert.deepEqual(RENDER_SCRIPTS.filter((n) => n !== 'render.mjs').sort(), onDisk, 'every drawing file is in RENDER_SCRIPTS, and nothing listed is missing');
+  assert.equal(RENDER_SCRIPTS[0], 'render.mjs');
+  const hub = readFileSync(WEB('render.mjs'), 'utf8');
+  const gathered = [...hub.matchAll(/^export \* from '\.\/([\w-]+\.mjs)';$/gm)].map((m) => m[1]).sort();
+  assert.deepEqual(gathered, onDisk, 'render.mjs re-exports every drawing file, so every importer still names render.mjs');
+  assert.doesNotMatch(hub.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\/\/.*$/gm, ''), /\bfunction\b|\bconst\b/, 'render.mjs only gathers: what it draws lives in its page\'s file');
+  const f = await fixture();
+  try {
+    for (const name of RENDER_SCRIPTS) {
+      const r = await f.call('GET', `/web/${name}`, { token: null });
+      assert.equal(r.status, 200, name);
+      assert.equal(r.headers.get('content-type'), 'text/javascript; charset=utf-8', name);
+      assert.equal(r.text, readFileSync(WEB(name), 'utf8'), name);
+    }
+    assert.notEqual((await f.call('GET', '/web/render-nothing.mjs', { token: null })).status, 200, 'a drawing file not listed is not served');
+  } finally {
+    await f.cleanup();
+  }
+  assert.ok(renderScript().includes('export function renderConsole('), 'renderScript() reads every drawing file');
 });
 
 test('the page is served at /, at a ticket\'s address, at Projects, at Tasks, at the board, at the list, at the Console and at the old New request address without a token, locked to its own scripts', async () => {
@@ -328,7 +351,7 @@ test('no page paints its buttons its own way: the ticket page\'s green (SP-76), 
   assert.doesNotMatch(css, /\.quick button|details\.edit button:not|div\.settings-tab button|^header button|^a\.button/m);
   assert.doesNotMatch(css, /--ticket-btn-/, 'the ticket page\'s green tokens are gone with its rule');
   // Delete is red again, as a removal (UI_DOCTRINE 3), and Reject with it.
-  const render = readFileSync(WEB('render.mjs'), 'utf8');
+  const render = renderScript();
   assert.match(render, /<form class="delete-action">\s*<button type="submit" class="btn btn-danger">Delete<\/button>/);
   // The plain button rule only sets the font and a padding for the listed exceptions; .btn overrides it.
   assert.match(css, /^button \{ font: inherit; padding: 0\.4rem 1rem; \}$/m);
