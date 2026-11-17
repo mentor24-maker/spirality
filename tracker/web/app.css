@@ -788,6 +788,21 @@ table.spirality-docs td.date { white-space: nowrap; }
 @media (prefers-reduced-motion: reduce) {
   .map-area.running[data-area="Building"], .map-area.running .tile[data-glide-ms] { animation: none; }
 }
+/* SP-335: when the minute's redraw finds a tile somewhere new, page-console.mjs slideTiles offsets it back to where it
+   was and this transition carries it home; a ticket new to the board fades in, and one gone from it fades out where it
+   was (its old tile, laid over the map). Each takes 450ms (SLIDE_MS there), settled long before the next redraw. */
+.console-map .tile.tile-moving { z-index: 4; transition: transform 450ms ease-in-out; }
+.console-map .tile.tile-arriving { animation: tile-arrive 450ms ease-out; }
+.map-area.running .tile[data-glide-ms].tile-arriving { animation: tile-glide var(--glide-ms) linear forwards, tile-arrive 450ms ease-out; }
+.map-area.running .tile[data-glide="down"].tile-arriving { animation-name: tile-glide-down, tile-arrive; }
+.console-map > .tile.tile-leaving { position: absolute; left: calc(var(--at-x) * 100%); top: calc(var(--at-y) * 100%); width: calc(var(--at-size) * 100%); z-index: 2; pointer-events: none; animation: tile-leave 450ms ease-in forwards; }
+@keyframes tile-arrive { from { opacity: 0; } }
+@keyframes tile-leave { to { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .console-map .tile.tile-moving { transition: none; }
+  .console-map .tile.tile-arriving, .map-area.running .tile[data-glide-ms].tile-arriving { animation: none; }
+  .console-map > .tile.tile-leaving { display: none; }
+}
 /* SP-334: the detours' arrows (render.mjs MAP_DETOURS) lie over the areas in the map's own units and under the tiles;
    an open +N More list rises over every other tile. Each arrow is the colour of the detour it enters or leaves. */
 .console-map .tile.more[open] { z-index: 3; }
@@ -821,6 +836,7 @@ table.spirality-docs td.date { white-space: nowrap; }
   .map-area > .tiles { position: static; display: flex; flex-wrap: wrap; gap: var(--space-3); padding: 0 0.5rem; pointer-events: auto; }
   .console-map .tile { position: relative; left: auto; top: auto; width: 8rem; }
   .map-area.running .tile[data-glide-ms] { animation: none; }
+  .map-area.running .tile[data-glide-ms].tile-arriving { animation: tile-arrive 450ms ease-out; }
   .map-detours, .map-detours-key { display: none; }
 }
 .tiles { display: flex; flex-wrap: wrap; gap: var(--space-3); }
