@@ -44,6 +44,21 @@ const FINISHED_DAYS_AGO = Object.freeze([1, 3, 6, 12, 20, 27, 45]);
 /** The human-hours estimate on each of those tasks' pull requests; null is a task with none. */
 const FINISHED_HUMAN_HOURS = Object.freeze([6, 2.5, null, 12, 4, 8, null]);
 
+/**
+ * Each of those tasks' kind and who started it (SP-347), so the Reporting
+ * page's By Kind, Efficiency and Who Started sections have figures; the
+ * last has none, counted as No Kind Yet.
+ */
+const FINISHED_CLASSES = Object.freeze([
+  { kind: 'feature', startedBy: 'operator' },
+  { kind: 'operational', startedBy: 'agent' },
+  { kind: 'feature', startedBy: 'operator' },
+  { kind: 'fix', startedBy: 'client' },
+  { kind: 'documentation', startedBy: 'operator' },
+  { kind: 'operational', startedBy: 'agent' },
+  {},
+]);
+
 /** The demo's home project: the one that always runs main, as Spirality's own does (SP-275). */
 export const DEMO_OWN_PROJECT = 'alpha';
 
@@ -288,6 +303,7 @@ export function seedDemo(store, { operatorName = substrateConfig.operatorName(),
         clock.moveTo(live - hoursBefore * HOUR);
         store.changeTicket(id, { actor: loop.id, status });
       }
+      if (FINISHED_CLASSES[i].kind) store.changeTicket(id, { actor: loop.id, ...FINISHED_CLASSES[i] });
       const estimate = FINISHED_HUMAN_HOURS[i];
       const pr = `PR opened: https://github.com/example/repo/pull/${100 + i}`;
       say(id, loop.id, estimate == null ? pr : `${pr}\n${humanHours.humanHoursLine(estimate)}`);
