@@ -6,7 +6,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { contrast, renderConsole, renderDetours, detourPathData, MAP_DETOURS, DETOURS_KEY, renderConsoleTile, MAP_AREAS, MAP_UNITS, placeArea, driftOf, liveFade, slotShare, moreOpens, moreFeatures, tileSizeClass, TILE_MAX, TILE_MIN, TILE_COMPACT, TILE_TINY, LIVE_FADE_FLOOR, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, consoleFeature, featureColourIndex, renderFeatureKey, FEATURE_PALETTE, capInFlightText, glidesOf, buildRunning, laneRunning, runningAreas, GLIDE_AREA, GLIDE_AREAS, DRIFT_FULL_MS } from './web/render.mjs';
+import { contrast, renderConsole, renderDetours, detourPathData, MAP_DETOURS, DETOURS_KEY, renderConsoleTile, MAP_AREAS, MAP_UNITS, placeArea, driftOf, liveFade, slotShare, moreOpens, moreFeatures, tileSizeClass, TILE_MAX, TILE_MIN, TILE_COMPACT, TILE_TINY, LIVE_FADE_FLOOR, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, consoleFeature, featureColourIndex, renderFeatureKey, FEATURE_PALETTE, capInFlightText, glidesOf, buildRunning, laneRunning, runningAreas, GLIDE_AREA, GLIDE_AREAS, DRIFT_FULL_MS, tileMoves, MOVE_MIN } from './web/render.mjs';
 import { pageScript, renderScript } from './pageScripts.mjs';
 import { WEB, drawnCss } from './webTestKit.mjs';
 
@@ -629,4 +629,68 @@ test('the In review area carries "running" only while GET /pipeline says Review 
   // The page toggles every glide area on each /pipeline read.
   const app = pageScript();
   assert.match(app, /for \(const status of Object\.keys\(GLIDE_AREAS\)\)/);
+});
+
+// ── Tiles slide when their status changes (SP-335) ───────────────────────────
+
+test('tileMoves: a tile in both draws that changed place moved, by how far; one that stayed is still', () => {
+  const before = [{ id: 'a', x: 10, y: 20 }, { id: 'b', x: 50, y: 50 }];
+  const after = [{ id: 'a', x: 210, y: 5 }, { id: 'b', x: 50, y: 50 }];
+  assert.deepEqual(tileMoves(before, after), { moved: [{ id: 'a', dx: 200, dy: -15 }], still: ['b'], added: [], gone: [] });
+});
+
+test('tileMoves: a ticket new to the board is added; one gone from it is gone, with its old place', () => {
+  const before = [{ id: 'a', x: 1, y: 2 }, { id: 'old', x: 30, y: 40 }];
+  const after = [{ id: 'a', x: 1, y: 2 }, { id: 'new', x: 70, y: 80 }];
+  assert.deepEqual(tileMoves(before, after), { moved: [], still: ['a'], added: ['new'], gone: [{ id: 'old', x: 30, y: 40 }] });
+});
+
+test('tileMoves: a shift inside its area (the queue moved up) slides too; a wobble under MOVE_MIN does not', () => {
+  const before = [{ id: 'a', x: 0, y: 40 }, { id: 'b', x: 0, y: 80 }];
+  const after = [{ id: 'a', x: 0, y: 40 + MOVE_MIN / 2 }, { id: 'b', x: 0, y: 40 + 40 / 2 }];
+  assert.deepEqual(tileMoves(before, after).moved, [{ id: 'b', dx: 0, dy: -20 }]);
+  assert.deepEqual(tileMoves(before, after).still, ['a']);
+});
+
+test('tileMoves: an empty board before fades every tile in; an empty board after fades every tile out', () => {
+  const tiles = [{ id: 'a', x: 1, y: 2 }, { id: 'b', x: 3, y: 4 }];
+  assert.deepEqual(tileMoves([], tiles), { moved: [], still: [], added: ['a', 'b'], gone: [] });
+  assert.deepEqual(tileMoves(tiles, []), { moved: [], still: [], added: [], gone: tiles });
+  assert.deepEqual(tileMoves([], []), { moved: [], still: [], added: [], gone: [] });
+});
+
+test('tileMoves: the first draw (no map before) moves and fades nothing', () => {
+  const tiles = [{ id: 'a', x: 1, y: 2 }];
+  assert.deepEqual(tileMoves(null, tiles), { moved: [], still: ['a'], added: [], gone: [] });
+  assert.deepEqual(tileMoves(undefined, []), { moved: [], still: [], added: [], gone: [] });
+});
+
+test('tileMoves: an id listed twice counts once, at its first place', () => {
+  const before = [{ id: 'a', x: 0, y: 0 }];
+  const after = [{ id: 'a', x: 0, y: 0 }, { id: 'a', x: 99, y: 99 }];
+  assert.deepEqual(tileMoves(before, after), { moved: [], still: ['a'], added: [], gone: [] });
+});
+
+test('the Console reads every tile\'s place before it redraws and slides them after, never on a first draw or with reduced motion', () => {
+  const app = pageScript();
+  const draw = /async function drawConsole\(\) \{([\s\S]*?)\n\}/.exec(app)[1];
+  assert.ok(draw.includes('const before = mapTiles()'));
+  assert.ok(draw.indexOf('const before = mapTiles()') < draw.indexOf('main.innerHTML'), 'the places are read before the map is replaced');
+  assert.ok(draw.indexOf('slideTiles(before)') > draw.indexOf('placeOnMap()'), 'the slide runs once the new tiles are placed');
+  const slide = /function slideTiles\(before\) \{([\s\S]*?)\n\}/.exec(app)[1];
+  assert.match(slide, /if \(!before \|\| !after \|\| stillPlease\(\)\) return;/);
+  assert.match(app, /matchMedia\?\.\('\(prefers-reduced-motion: reduce\)'\)/);
+});
+
+test('the slide, fade in and fade out are short, and reduced motion turns each of them off', () => {
+  const css = readFileSync(WEB('app.css'), 'utf8');
+  assert.match(css, /\.console-map \.tile\.tile-moving \{[^}]*transition: transform 450ms/);
+  assert.match(css, /\.console-map \.tile\.tile-arriving \{[^}]*animation: tile-arrive 450ms/);
+  assert.match(css, /\.console-map > \.tile\.tile-leaving \{[^}]*animation: tile-leave 450ms/);
+  assert.match(pageScript(), /const SLIDE_MS = 450;/);
+  const reduced = css.slice(css.indexOf('/* SP-335'), css.indexOf('/* SP-334'));
+  const media = reduced.slice(reduced.indexOf('@media (prefers-reduced-motion: reduce)'));
+  assert.match(media, /\.tile-moving \{ transition: none; \}/);
+  assert.match(media, /\.tile-arriving[^{]*\{ animation: none; \}/);
+  assert.match(media, /\.tile-leaving \{ display: none; \}/);
 });

@@ -592,3 +592,46 @@ export function renderConsole(answer, now = Date.now(), { running = [] } = {}) {
 }
 
 // ── Suggest Next Tasks (SP-251) ──────────────────────────────────────────────
+
+// ── Tiles that moved between two redraws (SP-335) ─────────────────────────────
+/**
+ * How far a tile must have shifted, in the units its places are given in (the
+ * page gives pixels from the map's corner), before it slides: less is a
+ * rounding wobble, drawn in place.
+ */
+export const MOVE_MIN = 1;
+
+/**
+ * What changed on the Console's map between two redraws (SP-335), from two
+ * lists of `{ id, x, y }`, each tile's place by ticket id: `moved` the tiles in
+ * both whose place changed (each with `dx`, `dy`, how far it went), `still`
+ * the ids in both that stayed put, `added` the ids new to the board, `gone`
+ * the tiles that left it (with their old place, where they fade out). A
+ * `before` of null is the page's first draw: every tile is `still`, so nothing
+ * moves or fades on arrival. An id listed twice counts once, its first place.
+ */
+export function tileMoves(before, after, min = MOVE_MIN) {
+  const byId = (list) => {
+    const out = new Map();
+    for (const t of Array.isArray(list) ? list : []) {
+      if (t && t.id != null && !out.has(String(t.id))) out.set(String(t.id), t);
+    }
+    return out;
+  };
+  const now = byId(after);
+  if (before == null) return { moved: [], still: [...now.keys()], added: [], gone: [] };
+  const was = byId(before);
+  const moved = [];
+  const still = [];
+  const added = [];
+  for (const [id, t] of now) {
+    const old = was.get(id);
+    if (!old) { added.push(id); continue; }
+    const dx = Number(t.x) - Number(old.x);
+    const dy = Number(t.y) - Number(old.y);
+    if (Math.abs(dx) >= min || Math.abs(dy) >= min) moved.push({ id, dx, dy });
+    else still.push(id);
+  }
+  const gone = [...was].filter(([id]) => !now.has(id)).map(([id, t]) => ({ id, x: t.x, y: t.y }));
+  return { moved, still, added, gone };
+}
