@@ -75,17 +75,21 @@ One of the questions is whether the project raises its alarms on a bus
 StarCaster does; WaveCenter and Normie do not, and the default is no. The
 answer is `hasBus` in the answers file. On yes:
 
-- the settings file names `"busProject": "<slug>-bus"`, so the copy puts it
-  in the project's repository;
+- the settings file names the project itself as its bus,
+  `"busProject": "<slug>"` (SP-356): its Team chat and other noticeboards
+  sit in its own queue, and no second tracker project is made. The copy
+  puts the file in the project's repository;
 - the `bus` step, after the sign-ins, runs `npm run tracker:bus` with
-  `TRACKER_DB` set to the tracker's own database. It makes the tracker
-  project `<slug>-bus` ("<project name> bus", tickets `<PREFIX>BUS-1`
-  onwards, the operator as its operator), reads it back, and checks that
-  every loop sign-in of the project sees it. A loop sees every project, so
-  there is nothing to grant, only that check;
-- a bus project that is there already is left alone, so a rerun makes
-  nothing new; one there under another operator is refused, because it may
-  be another project's.
+  `TRACKER_DB` set to the tracker's own database. It checks the project is
+  there under the operator, saves the `noticeboard` tag on its tag list
+  unless it is there (read back), and checks that every loop sign-in of the
+  project sees it. A loop sees every project, so there is nothing to grant,
+  only that check. The first `bus-post` makes Team chat, in Live, tagged
+  `noticeboard`;
+- a rerun changes nothing. A project set up before SP-356 whose settings
+  still name `"<slug>-bus"` keeps that second project: the step leaves one
+  that is there alone, makes one that is missing, and refuses one there
+  under another operator, because it may be another project's.
 
 With no bus the step is skipped, and the settings file has no `busProject`.
 An answers file written before the question was asked, with every other
@@ -110,7 +114,7 @@ project's checkout). `scripts/onboard/manifest.test.mjs` checks that the
 setup copies none of them.
 
 They post only to a bus. The look says where: `Bus: where the pipeline
-watchdogs post: ready (<slug>-bus, ...)`, or, with no bus, that they have
+watchdogs post: ready (<slug>'s own queue, ...)`, or, with no bus, that they have
 nowhere to post. Without one the relay still starts them on every wake,
 and each that has something to say finds no bus and says so in the relay's
 log, naming the missing `busProject`; nothing reaches
