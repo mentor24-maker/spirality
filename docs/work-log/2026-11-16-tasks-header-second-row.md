@@ -17,3 +17,10 @@ on its title row, so the rules now name the Tasks page as the one exception,
 at Dane's word. The automatic check that enforces that rule was changed to
 allow only this one exception, so any other page that moves its buttons
 under its title still fails.
+
+Review found a hole in that check: it only asked whether a toolbar came
+shortly after a page title, not whether the title's row was still open, so a
+page could close its title row and draw its buttons on a row underneath
+without the check noticing. It now counts the row's opening and closing tags
+up to the toolbar, and a new test plants exactly that mistake on the Search
+page and expects the check to catch it.

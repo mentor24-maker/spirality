@@ -24,6 +24,40 @@ function rule(selector) {
   return Object.fromEntries(found.map((d) => [d.property, d.value]));
 }
 
+/**
+ * Every toolbar in `sources` ({ file: text }) not inside an open title row,
+ * as "file:line", and how many Tasks second rows were seen. A toolbar is in a
+ * title row when the nearest <h1> before it (within 300 characters) is in a
+ * div classed title-row and that div is still open at the toolbar: counting
+ * from the row's opening tag, more <div than </div>. A row closed after its
+ * h1 with the toolbar drawn under it is loose (SP-362's send-back).
+ */
+function looseToolbars(sources) {
+  const loose = [];
+  let tasksBars = 0;
+  for (const [file, source] of Object.entries(sources)) {
+    for (const m of source.matchAll(/<div class="toolbar(?: [\w -]*)?">/g)) {
+      if (m[0] === '<div class="toolbar tasks-bar">' && file === 'page-tasks.mjs') {
+        const row = source.lastIndexOf('<div class="tasks-head title-row"><h1>Tasks</h1>', m.index);
+        const between = source.slice(row, m.index);
+        assert.ok(row !== -1 && /^<div class="tasks-head title-row"><h1>Tasks<\/h1>\$\{filed \? filedPod\(filed, uploaded\) : ''\}\$\{viewSwitch\(board\.project, view\)\}<\/div>\s*$/.test(between),
+          'the Tasks toolbar sits directly under a title row holding only the title, the Filed pod and the tabs');
+        tasksBars += 1;
+        continue;
+      }
+      const h1 = source.lastIndexOf('<h1', m.index);
+      const rows = h1 === -1 ? [] : [...source.slice(Math.max(0, h1 - 40), h1).matchAll(/<div class="(?:[\w-]+ )*title-row"/g)];
+      const rowStart = rows.length ? Math.max(0, h1 - 40) + rows.at(-1).index : -1;
+      const inside = rowStart === -1 ? '' : source.slice(rowStart, m.index);
+      const open = (inside.match(/<div\b/g) || []).length - (inside.match(/<\/div>/g) || []).length;
+      if (h1 === -1 || m.index - h1 > 300 || rowStart === -1 || open < 1) {
+        loose.push(`${file}:${source.slice(0, m.index).split('\n').length}`);
+      }
+    }
+  }
+  return { loose, tasksBars };
+}
+
 test('the page title is 24px, weight 800, tight line height (UI_DOCTRINE 4)', () => {
   const h1 = rule('h1');
   assert.equal(h1['font-size'], 'var(--page-title-size)');
@@ -43,27 +77,19 @@ test('the title and the toolbar share one row, buttons at the right (UI_DOCTRINE
   // Dane's word (SP-362): the Tasks page's toolbar is the row directly under
   // its title row, which holds only the title and the Board / List / Console
   // tabs. Any other toolbar, however it is classed, still counts.
-  const loose = [];
-  let tasksBars = 0;
-  for (const [file, source] of Object.entries(SOURCES)) {
-    for (const m of source.matchAll(/<div class="toolbar(?: [\w -]*)?">/g)) {
-      if (m[0] === '<div class="toolbar tasks-bar">' && file === 'page-tasks.mjs') {
-        const row = source.lastIndexOf('<div class="tasks-head title-row"><h1>Tasks</h1>', m.index);
-        const between = source.slice(row, m.index);
-        assert.ok(row !== -1 && /^<div class="tasks-head title-row"><h1>Tasks<\/h1>\$\{filed \? filedPod\(filed, uploaded\) : ''\}\$\{viewSwitch\(board\.project, view\)\}<\/div>\s*$/.test(between),
-          'the Tasks toolbar sits directly under a title row holding only the title, the Filed pod and the tabs');
-        tasksBars += 1;
-        continue;
-      }
-      const h1 = source.lastIndexOf('<h1', m.index);
-      const before = source.slice(Math.max(0, h1 - 40), h1);
-      if (h1 === -1 || m.index - h1 > 300 || !/class="(?:[\w-]+ )*title-row"/.test(before)) {
-        loose.push(`${file}:${source.slice(0, m.index).split('\n').length}`);
-      }
-    }
-  }
+  const { loose, tasksBars } = looseToolbars(SOURCES);
   assert.deepEqual(loose, [], 'a toolbar outside a title row');
   assert.equal(tasksBars, 1, 'the Tasks page draws its second row once');
+});
+
+test('a toolbar on its own row under a closed title row is loose (SP-362)', () => {
+  const inRow = '<div class="title-row"><h1>Search</h1><div class="toolbar">${searchForm(q)}</div></div>';
+  const under = '<div class="title-row"><h1>Search</h1></div>\n<div class="toolbar">${searchForm(q)}</div>';
+  assert.deepEqual(looseToolbars({ 'page-search.mjs': inRow }).loose, []);
+  assert.deepEqual(looseToolbars({ 'page-search.mjs': under }).loose, ['page-search.mjs:2']);
+  // The Tasks page's second row is allowed only on the Tasks page.
+  const tasksLike = '<div class="tasks-head title-row"><h1>Tasks</h1></div><div class="toolbar tasks-bar">x</div>';
+  assert.deepEqual(looseToolbars({ 'page-search.mjs': tasksLike }).loose, ['page-search.mjs:1']);
 });
 
 test('headings under the title use only the three sizes, none bigger than it (UI_DOCTRINE 4)', () => {
