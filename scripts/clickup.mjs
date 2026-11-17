@@ -3042,7 +3042,8 @@ if (cmd === 'whoami') {
   const histories = new Map();
   const problems = [];
   if (window.cutoff != null) {
-    for (const t of tickets) {
+    // A noticeboard is left out of the counts (SP-357), so its history is not read.
+    for (const t of tickets.filter((x) => !isNoticeboard(x))) {
       const read = await tracker.getStatusHistory(t.id);
       if (read.res.ok && Array.isArray(read.json?.moves)) histories.set(String(t.id), read.json.moves);
       else problems.push({ id: t.id, problem: read.res.ok ? 'no status moves in the answer' : `HTTP ${read.res.status}${read.json?.err ? `: ${read.json.err}` : ''}` });
@@ -3055,7 +3056,8 @@ if (cmd === 'whoami') {
     process.exit(1);
   }
   console.log(JSON.stringify(stageCounts.countStages(tickets, { list: where, since, until, window, histories }), null, 2));
-  console.error(`stage-counts: ${tickets.length} ticket(s) in ${where}${window.cutoff == null ? ', no window' : `, window ${since} to ${until || 'now'} (UTC days)`}.`);
+  const boards = tickets.filter((x) => isNoticeboard(x)).length;
+  console.error(`stage-counts: ${tickets.length - boards} ticket(s) in ${where}${boards ? ` (${boards} noticeboard(s) left out)` : ''}${window.cutoff == null ? ', no window' : `, window ${since} to ${until || 'now'} (UTC days)`}.`);
   reportLimits();
 
 } else if (cmd === 'settings') {
