@@ -560,7 +560,7 @@ test('the Tasks toolbar picks a project from a dropdown, "Project: ", the one in
   const app = pageScript();
   const draw = app.slice(app.indexOf('async function drawProject'), app.indexOf('async function copyText'));
   assert.match(draw, /api\('GET', '\/projects'\),\n  \]\);/);
-  assert.match(draw, /<div class="toolbar">\s*\$\{renderProjectPicker\(projects, board\.project\)\}\s*\$\{renderTopicPicker\(board\.topics \?\? \[\]\)\}\s*\$\{searchForm\(''\)\}\s*<button type="button" class="pipeline-pod"[^>]*><\/button>\s*<\/div>\s*\$\{viewSwitch\(board\.project, view\)\}\s*<\/div>/, 'the tabs close the title row, after the toolbar (SP-326)');
+  assert.match(draw, /\$\{viewSwitch\(board\.project, view\)\}<\/div>\s*<div class="toolbar tasks-bar">\s*\$\{renderProjectPicker\(projects, board\.project\)\}\s*\$\{renderTopicPicker\(board\.topics \?\? \[\]\)\}\s*\$\{searchForm\(''\)\}\s*<button type="button" class="pipeline-pod"[^>]*><\/button>\s*\$\{renderClassFilters\(board\.classes, pickedClass\)\}\s*<\/div>/, 'the tabs close the title row; the pickers, search, pod and filters are the row under it (SP-362)');
   assert.doesNotMatch(app, /Change project/);
   assert.match(draw, /querySelector\('\.project-picker select'\)\.addEventListener\('change', \(e\) => \{\s*history\.pushState\(null, '', at\(view, e\.target\.value\)\);\s*route\(\);/);
   assert.match(readFileSync(WEB('app.css'), 'utf8'), /\.toolbar \.project-picker(, \.toolbar \.topic-picker)? \{[^}]*display: flex;/);
@@ -775,8 +775,8 @@ test('the pod reads as a small table (SP-194, SP-326): a "Pipeline Stages" headi
   const stages = rule('.toolbar .pipeline-pod .stages');
   assert.match(stages, /display: grid; grid-template-rows: auto auto; grid-auto-flow: column;/, 'one column per stage, name above time (SP-326)');
   assert.doesNotMatch(stages, /grid-template-columns/, 'no fixed column count: however many stages there are');
-  assert.match(pod, /flex-grow: 1;/, 'the pod widens into the free space of the title row (SP-326)');
-  assert.match(css, /\.tasks-head > \.toolbar \{ flex-grow: 1;/, 'the toolbar grows with it, so the tabs still end at the right edge');
+  assert.match(pod, /flex-grow: 1;/, 'the pod widens into the free space of its row (SP-326, SP-362)');
+  assert.match(css, /\.tasks-bar \{ flex-wrap: wrap;/, 'the row under the title wraps on a narrow window (SP-362)');
   assert.match(rule('.toolbar .pipeline-pod .stage'), /font-weight: 700;/, 'stage names are bold');
   const green = rule('.toolbar .pipeline-pod .running').match(/color: (#[0-9a-fA-F]{6});/);
   assert.ok(green, 'a running stage has its own colour');
@@ -844,9 +844,9 @@ test('the Tasks page puts the pod between the search field and Board/List, fills
   const search = head.indexOf("${searchForm('')}");
   const pod = head.indexOf('class="pipeline-pod"');
   const views = head.indexOf('${viewSwitch(board.project, view)}');
-  // SP-322: Board/List left the toolbar for a tab bar; SP-326 put it at the right end of the title row the pod sits in.
-  assert.ok(search !== -1 && search < pod && pod < views, 'search field, then the pod, then the Board/List tabs');
-  assert.match(head, /<\/div>\s*\$\{viewSwitch\(board\.project, view\)\}\s*<\/div>/, 'the tabs are the title row\'s last item, after the toolbar (SP-326)');
+  // SP-322: Board/List left the toolbar for a tab bar; SP-326 put it at the right end of the title row; SP-362 moved the toolbar, pod and all, to the row under it.
+  assert.ok(views !== -1 && views < search && search < pod, 'the Board/List tabs on the title row, then the search field, then the pod');
+  assert.match(head, /^<h1>Tasks<\/h1>\$\{filed \? filedPod\(filed, uploaded\) : ''\}\$\{viewSwitch\(board\.project, view\)\}<\/div>/, 'the tabs are the title row\'s last item, and nothing else is on it (SP-362)');
   const draw = app.slice(app.indexOf('async function drawProject('), app.indexOf('async function drawProject(') + 12000);
   assert.match(draw, /refreshPipeline\(\);/);
   assert.match(app, /const PIPELINE_REFRESH_EVERY_MS = 60_000;/);

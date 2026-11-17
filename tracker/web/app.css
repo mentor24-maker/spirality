@@ -320,9 +320,10 @@ button { font: inherit; padding: 0.4rem 1rem; }
 .btn-danger:disabled, .btn-danger[aria-disabled="true"] { background: var(--btn-danger-flat-disabled); border-color: var(--btn-danger-flat-disabled); color: var(--btn-flat-ink); }
 .btn-sm { height: var(--btn-height-sm); padding: 0 0.625rem; font-size: var(--text-xs); }
 .toolbar { display: flex; gap: var(--space-7); align-items: center; justify-content: space-between; margin-bottom: 1rem; }
-/* On the Tasks title row the toolbar takes the free space, so the pod can widen into it and the tabs still end at the right edge (SP-326). */
-.tasks-head > .toolbar { flex-grow: 1; flex-wrap: wrap; }
-.tasks-head > .toolbar form.search { min-width: 12rem; }
+/* The Tasks page's second row, under its title and tabs (SP-362, UI_DOCTRINE 4): pickers, search, the pod widening into the free space, then the filters, wrapping on a narrow window. */
+.tasks-bar { flex-wrap: wrap; justify-content: flex-start; gap: var(--space-5) var(--space-7); }
+.tasks-bar form.search { min-width: 12rem; }
+.tasks-bar .class-filters { margin: 0; }
 .toolbar .project-picker, .toolbar .topic-picker { font-weight: 600; display: flex; align-items: center; gap: var(--space-3); }
 /* The Pipeline Status pod (SP-168): when each loop stage runs next, between the search field and Board/List. */
 .toolbar .pipeline-pod { flex-grow: 1; display: flex; flex-direction: column; align-items: flex-start; margin: 10px 20px; padding: 0.3rem 0.75rem; border: 1px solid var(--navy); border-radius: var(--radius-input); background: var(--pod-bg); font-size: var(--text-sm); color: var(--ink-primary); white-space: nowrap; cursor: pointer; text-align: left; font-family: inherit; }
