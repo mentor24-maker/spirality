@@ -1302,7 +1302,7 @@ test('stage-counts prints StarCaster\'s weekly-report shape, and its figures are
     const r = await f.door(['stage-counts', '--since', since, '--until', until]);
     assert.equal(r.code, 0, r.err);
     const out = JSON.parse(r.out);
-    assert.deepEqual(Object.keys(out), ['list', 'total', 'byStatus', 'since', 'until', 'closedInWindow', 'startedInWindow', 'enteredInWindow']);
+    assert.deepEqual(Object.keys(out), ['list', 'total', 'byStatus', 'since', 'until', 'closedInWindow', 'startedInWindow', 'notFinishedInWindow', 'enteredInWindow']);
     assert.equal(out.list, 'alpha', 'the project by name, not the list id that stands for it');
     assert.equal(out.total, 4);
     assert.equal(out.byStatus.queued, 1);

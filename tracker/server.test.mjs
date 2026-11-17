@@ -1871,6 +1871,32 @@ test('GET /reports with from and to answers the custom range; one alone, an unre
   } finally { await f.cleanup(); }
 });
 
+test('GET /reports with kind narrows the figures to that kind, none for no kind yet; an unknown kind is a 400 (SP-347)', async () => {
+  const f = await fixture();
+  try {
+    for (const kind of ['feature', 'operational', null]) {
+      const t = f.store.fileTicket({ project: 'alpha', actor: f.machine.id, name: `a ${kind}`, status: 'queued', kind });
+      f.store.changeTicket(t.id, { actor: f.machine.id, status: 'live' });
+    }
+    const all = (await f.call('GET', '/reports')).body;
+    assert.equal(all.kind, null);
+    assert.equal(all.finished.all, 3);
+    assert.equal(all.byKind.feature.finished.all, 1);
+    for (const [kind, finished] of [['feature', 1], ['operational', 1], ['fix', 0], ['none', 1]]) {
+      const r = await f.call('GET', `/reports?kind=${kind}`);
+      assert.equal(r.status, 200, kind);
+      assert.equal(r.body.kind, kind);
+      assert.equal(r.body.finished.all, finished, kind);
+      assert.equal(r.body.byKind.feature.finished.all, 1, `${kind}: the split by kind is always over every kind`);
+    }
+    assert.equal((await f.call('GET', '/reports?kind=')).body.kind, null);
+    const bad = await f.call('GET', '/reports?kind=chore');
+    assert.equal(bad.status, 400);
+    assert.equal(bad.body.error, 'bad-field');
+    assert.match(bad.body.message ?? JSON.stringify(bad.body), /kind must be one of feature, fix, operational, documentation, none, not "chore"/);
+  } finally { await f.cleanup(); }
+});
+
 test('GET /reports answers Where the Time Goes: the four buckets per range and the open ticket by its exact name (SP-220)', async () => {
   const f = await fixture();
   try {

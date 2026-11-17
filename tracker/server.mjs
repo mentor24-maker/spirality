@@ -87,7 +87,7 @@ import { claudeCommandOf, CLAUDE_COMMAND_VAR, suggestTitles, TIME_LIMIT_MS as SU
 import { newestReleaseReader, OWN_PROJECT_RELEASE, releaseRemote } from '../lib/releases.mjs';
 import { controlOf, GROUPS } from './pipelineControls.mjs';
 import { SOURCE as IMPORT_SOURCE } from './import.mjs';
-import { boardOf, consoleOf, lookupTickets, PRIORITIES, prToCheck, prsToCheck, projectDetailsOf, projectsList, readSearchFilters, reportsOf, searchTickets, stageColoursOf, threadOf, waitingFor, busUnseen, pipelineControlsOf } from './pageData.mjs';
+import { boardOf, consoleOf, lookupTickets, PRIORITIES, prToCheck, prsToCheck, projectDetailsOf, projectsList, readSearchFilters, reportsOf, REPORT_KINDS, searchTickets, stageColoursOf, threadOf, waitingFor, busUnseen, pipelineControlsOf } from './pageData.mjs';
 import { ghPrState, prStateCache } from './prState.mjs';
 import { createNotifier, DEFAULT_FROM, MAIL_FROM, MAIL_KEY, mailEnvFromDoppler, mailSettingsFromEnv, resendSender, textSettings } from './notify.mjs';
 import { sendInvite, sendResetLink } from './account.mjs';
@@ -550,6 +550,19 @@ function readReportRange(fromText, toText) {
   const to = read('to', toText);
   if (from > to) throw new HttpError(400, 'bad-field', `from (${fromText}) is after to (${toText}).`);
   return { from, to };
+}
+
+/**
+ * GET /reports' `kind`: one of the Reporting page's kinds (REPORT_KINDS,
+ * `none` for a ticket with no kind yet), or null for every kind when it is
+ * missing or empty. Anything else is a 400 naming the choices, never an
+ * answer counted as zero.
+ */
+function readReportKind(text) {
+  if (text == null || text === '') return null;
+  const keys = REPORT_KINDS.map((k) => k.key);
+  if (keys.includes(text)) return text;
+  throw new HttpError(400, 'bad-field', `kind must be one of ${keys.join(', ')}, not "${text}".`);
 }
 
 /**
@@ -1105,12 +1118,14 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     // (`?project=<slug>`) or, with none named, every project. Read-only.
     // `from` and `to` (ISO date-times, both or neither) add the Task
     // Productivity table's own range; one alone, an unreadable
-    // one, or `from` after `to` is refused, never answered as zero.
+    // one, or `from` after `to` is refused, never answered as zero. `kind`
+    // narrows the figures to one kind of ticket; an unknown one is refused.
     if (parts.length === 1 && parts[0] === 'reports' && method === 'GET') {
       const slug = url.searchParams.get('project');
       const scope = scopeOf(me);
       const custom = readReportRange(url.searchParams.get('from'), url.searchParams.get('to'));
-      const reports = reportsOf(store, { project: slug == null || slug === '' ? null : slug, only: scope, custom });
+      const kind = readReportKind(url.searchParams.get('kind'));
+      const reports = reportsOf(store, { project: slug == null || slug === '' ? null : slug, only: scope, custom, kind });
       if (!reports) throw notFound('unknown-project', `project "${slug}"`, scope);
       return [200, reports];
     }

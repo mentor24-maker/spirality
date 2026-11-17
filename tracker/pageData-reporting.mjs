@@ -6,12 +6,43 @@
 import loopStatuses from '../lib/loopStatuses.js';
 import mergeOnComment from '../lib/mergeOnComment.js';
 import humanHours from '../lib/humanHours.js';
+import ticketClass from '../lib/ticketClass.js';
 import { conflictReportOf } from './conflictReport.mjs';
 import { visibleProjects, trailComments } from './pageData-common.mjs';
 
 const { STAGE_ORDER, LIVE, QUEUED, BUILDING, REWORK, OPERATOR_HELD_STATUSES, TERMINAL_STATUSES, statusOf } = loopStatuses;
 const { isMergeCommand, isReviewVerdict, isReviewPassed } = mergeOnComment;
 const { findHumanHours } = humanHours;
+const { KINDS, KIND_LABELS, STARTERS, STARTER_LABELS, NOT_FINISHED_OUTCOMES, OUTCOME_LABELS, countsAsFinished } = ticketClass;
+
+/**
+ * The kinds the Reporting page splits by (SP-347): lib/ticketClass.js's four,
+ * in its order, then `none`, a ticket not given one yet, counted as such and
+ * never guessed.
+ */
+export const REPORT_KINDS = Object.freeze([
+  ...KINDS.map((key) => Object.freeze({ key, label: KIND_LABELS[key] })),
+  Object.freeze({ key: 'none', label: 'No Kind Yet' }),
+]);
+
+/** Who started a ticket, the same way: the three starters, then `none`. */
+export const REPORT_STARTERS = Object.freeze([
+  ...STARTERS.map((key) => Object.freeze({ key, label: STARTER_LABELS[key] })),
+  Object.freeze({ key: 'none', label: 'Not Recorded' }),
+]);
+
+/** The endings that close a ticket without finishing it, as the page lists them. */
+export const REPORT_NOT_FINISHED = Object.freeze(NOT_FINISHED_OUTCOMES.map((key) => Object.freeze({ key, label: OUTCOME_LABELS[key] })));
+
+/** A ticket's kind as REPORT_KINDS keys it: its kind, or `none`. */
+function kindKey(ticket) {
+  return KINDS.includes(ticket.kind) ? ticket.kind : 'none';
+}
+
+/** Who started it, as REPORT_STARTERS keys it. */
+function starterKey(ticket) {
+  return STARTERS.includes(ticket.startedBy) ? ticket.startedBy : 'none';
+}
 
 /** The Reporting page's time ranges, newest first; `days: null` is all time. */
 export const REPORT_RANGES = Object.freeze([
@@ -55,13 +86,22 @@ export function growthFigure(current, previous, { firstFiled, start }) {
  * Live (an import from ClickUp) has only its filing event, at its original
  * time, to go by.
  */
-function finishedAt(store, ticket) {
+function closedLiveAt(store, ticket) {
   if (ticket.status !== LIVE) return null;
   let at = null;
   for (const e of store.listEvents(ticket.id)) {
     if ((e.field === 'status' || e.field === 'created') && e.to === LIVE) at = e.at;
   }
   return at;
+}
+
+/**
+ * When a ticket finished: when it last entered Live (closedLiveAt), unless
+ * it ended Won't do, Duplicate or Test (lib/ticketClass.js
+ * `countsAsFinished`), which closes it without finishing anything.
+ */
+function finishedAt(store, ticket) {
+  return countsAsFinished(ticket.outcome) ? closedLiveAt(store, ticket) : null;
 }
 
 /**
@@ -336,8 +376,26 @@ function conflictsOf(store, projects) {
  * growthFigure comparing the last `days` days before `now` with the `days`
  * before those, counted the same way as the fixed ranges; `growthPeriods`
  * names them for the page's picker, Weekly first.
+ *
+ * By kind (SP-347). A ticket finished only when it entered Live and did not
+ * end Won't do, Duplicate or Test (finishedAt); those three are counted
+ * apart, per range, by when they last entered Live, in `notFinished` (keyed
+ * by ending, `endings` names them). `kind`, a REPORT_KINDS key ('none' for a
+ * ticket with no kind yet), narrows every figure above to that kind's
+ * tickets, all but `conflicts`, which stays every conflict; null is every
+ * kind. Whatever `kind` is, the answer also carries, over every kind:
+ *  - kinds: REPORT_KINDS, for the page's picker and rows;
+ *  - byKind: per kind, `{ started, finished }` per range, counted as above;
+ *  - efficiency: per range, the operational and feature tickets finished,
+ *    `operationalPerFeature` (null when no feature finished) and
+ *    `operationalTime`, the ms of the time split (timeSplitOf, every
+ *    bucket) spent on operational tickets, the `total` over all tickets and
+ *    its `share` (null when the total is 0).
+ * And, for the tickets `kind` picks: `startedBy`, per REPORT_STARTERS key
+ * (`starters` names them), how many of those finished in each range were
+ * started by each.
  */
-export function reportsOf(store, { project = null, now = Date.now(), only = null, custom = null } = {}) {
+export function reportsOf(store, { project = null, now = Date.now(), only = null, custom = null, kind = null } = {}) {
   let projects = visibleProjects(store, only);
   if (project != null) {
     projects = projects.filter((p) => p.slug === project);
@@ -372,6 +430,16 @@ export function reportsOf(store, { project = null, now = Date.now(), only = null
   const openStages = STAGE_ORDER.filter((name) => !TERMINAL_STATUSES.includes(statusOf(name)));
   const open = new Map(openStages.map((name) => [statusOf(name), 0]));
   const split = Object.fromEntries(REPORT_RANGES.map((r) => [r.key, []]));
+  const byKind = Object.fromEntries(REPORT_KINDS.map((k) => [k.key, { started: zero(), finished: zero() }]));
+  const startedBy = Object.fromEntries(REPORT_STARTERS.map((k) => [k.key, zero()]));
+  const notFinished = Object.fromEntries(REPORT_NOT_FINISHED.map((k) => [k.key, zero()]));
+  const kindTime = Object.fromEntries(REPORT_RANGES.map((r) => [r.key, { operational: 0, total: 0 }]));
+  /** Add one to `counts` for every fixed range `at` (ISO) falls in. */
+  const inRanges = (counts, at) => {
+    const when = Date.parse(at);
+    if (Number.isNaN(when)) return;
+    for (const r of REPORT_RANGES) if (inRange(r, when)) counts[r.key] += 1;
+  };
   const machineActor = new Map();
   const isMachineActor = (id) => {
     if (!machineActor.has(id)) machineActor.set(id, store.getActor(id)?.kind === 'machine');
@@ -391,18 +459,30 @@ export function reportsOf(store, { project = null, now = Date.now(), only = null
           mergeWord: byOperator && isMergeCommand(c.body),
         };
       });
+      const ofKind = kindKey(ticket);
+      const picked = kind == null || ofKind === kind;
       const stretches = timeSplitOf(statusSteps(store, ticket), comments, { now });
       for (const r of REPORT_RANGES) {
         const totals = bucketTotals(stretches, r.days == null ? null : now - r.days * DAY_MS, now);
         const total = TIME_BUCKETS.reduce((n, b) => n + totals[b], 0);
-        if (total > 0) split[r.key].push({ id: ticket.id, name: ticket.name, project: p.slug, total, ...totals });
+        kindTime[r.key].total += total;
+        if (ofKind === 'operational') kindTime[r.key].operational += total;
+        if (total > 0 && picked) split[r.key].push({ id: ticket.id, name: ticket.name, project: p.slug, total, ...totals });
+      }
+      const done = finishedAt(store, ticket);
+      inRanges(byKind[ofKind].started, ticket.createdAt);
+      if (done) inRanges(byKind[ofKind].finished, done);
+      if (!picked) continue;
+      if (!done && ticket.status === LIVE) {
+        const closed = closedLiveAt(store, ticket);
+        if (closed && notFinished[ticket.outcome]) inRanges(notFinished[ticket.outcome], closed);
       }
       tally(started, ticket.createdAt, 'started');
       const filed = Date.parse(ticket.createdAt);
       if (!Number.isNaN(filed) && (firstFiled == null || filed < firstFiled)) firstFiled = filed;
-      const done = finishedAt(store, ticket);
       if (done) {
         tally(finished, done, 'finished');
+        inRanges(startedBy[starterKey(ticket)], done);
         const doneAt = Date.parse(done);
         if (!Number.isNaN(doneAt)) {
           const flow = flowOf(statusSteps(store, ticket), doneAt);
@@ -431,6 +511,24 @@ export function reportsOf(store, { project = null, now = Date.now(), only = null
       return [r.key, humanHoursFigures(estimates[r.key], days)];
     })),
     waitingNow,
+    kind,
+    kinds: REPORT_KINDS.map(({ key, label }) => ({ key, label })),
+    byKind,
+    efficiency: Object.fromEntries(REPORT_RANGES.map((r) => {
+      const features = byKind.feature.finished[r.key];
+      const operational = byKind.operational.finished[r.key];
+      const t = kindTime[r.key];
+      return [r.key, {
+        features,
+        operational,
+        operationalPerFeature: features ? Math.round((operational / features) * 100) / 100 : null,
+        operationalTime: { ms: t.operational, total: t.total, share: t.total > 0 ? t.operational / t.total : null },
+      }];
+    })),
+    starters: REPORT_STARTERS.map(({ key, label }) => ({ key, label })),
+    startedBy,
+    endings: REPORT_NOT_FINISHED.map(({ key, label }) => ({ key, label })),
+    notFinished,
     conflicts: conflictsOf(store, projects),
     ...(custom ? { custom: { from: new Date(custom.from).toISOString(), to: new Date(custom.to).toISOString(), ...customCounts } } : {}),
     growthPeriods: GROWTH_PERIODS.map(({ key, label }) => ({ key, label })),

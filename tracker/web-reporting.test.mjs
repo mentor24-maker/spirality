@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openStore } from './store.mjs';
 import { seedDemo, tickingClock } from './demoData.mjs';
-import { reportsOf, REPORT_RANGES, GROWTH_PERIODS, timeSplitOf, isFailureNote, TIME_BUCKETS } from './pageData.mjs';
+import { reportsOf, REPORT_RANGES, GROWTH_PERIODS, timeSplitOf, isFailureNote, TIME_BUCKETS, REPORT_KINDS, REPORT_STARTERS } from './pageData.mjs';
 import loopStatuses from '../lib/loopStatuses.js';
 import { prOpenedComment } from '../scripts/lib/loopTrail.mjs';
 import { pageScript } from './pageScripts.mjs';
@@ -112,6 +112,146 @@ test('Reporting: one project or all of them; an unknown project is null; open co
   } finally { r.done(); }
 });
 
+// ── By kind (SP-347) ─────────────────────────────────────────────────────────
+
+/**
+ * File a classed ticket in alpha `filedDaysAgo` before `now`, queue it, and
+ * move it Live `liveDaysAgo` ago with `outcome` (or leave it open with null).
+ * Two hours in Building on the way, so it has working time.
+ */
+function classedTicket(r, { kind = null, startedBy = null, outcome = null, filedDaysAgo = 10, liveDaysAgo = null, project = 'alpha' } = {}) {
+  r.clock.moveTo(r.now - filedDaysAgo * DAY);
+  const { id } = r.store.fileTicket({ project, actor: r.loop.id, name: `${kind ?? 'no kind'} ${outcome ?? 'open'}`, status: 'queued', kind, startedBy });
+  r.clock.moveTo(r.now - filedDaysAgo * DAY + 60 * 60_000);
+  r.store.changeTicket(id, { actor: r.loop.id, status: 'building' });
+  r.clock.moveTo(r.now - filedDaysAgo * DAY + 3 * 60 * 60_000);
+  r.store.changeTicket(id, { actor: r.loop.id, status: 'in review' });
+  if (liveDaysAgo != null) {
+    r.clock.moveTo(r.now - liveDaysAgo * DAY);
+    r.store.changeTicket(id, { actor: r.loop.id, status: 'live', ...(outcome ? { outcome } : {}) });
+  }
+  return id;
+}
+
+test('Reporting by kind: a ticket that ended Won\'t do, Duplicate or Test is not finished anywhere; it is counted apart by its ending', () => {
+  const r = reportingStore();
+  try {
+    classedTicket(r, { kind: 'feature', liveDaysAgo: 2, outcome: 'done' });
+    classedTicket(r, { kind: 'feature', liveDaysAgo: 2 });
+    classedTicket(r, { kind: 'feature', liveDaysAgo: 2, outcome: 'wont-do' });
+    classedTicket(r, { kind: 'fix', liveDaysAgo: 20, outcome: 'duplicate' });
+    classedTicket(r, { kind: 'operational', liveDaysAgo: 3, outcome: 'test' });
+    const rep = reportsOf(r.store, { now: r.now });
+    assert.deepEqual(rep.finished, { week: 2, month: 2, all: 2 }, 'Done, and no ending recorded');
+    assert.equal(rep.flow.all.finished, 2, 'flow counts only the finished ones');
+    assert.equal(rep.humanHours.all.finished, 2);
+    assert.deepEqual(rep.byKind.feature.finished, { week: 2, month: 2, all: 2 });
+    assert.deepEqual(rep.byKind.fix.finished, { week: 0, month: 0, all: 0 });
+    assert.deepEqual(rep.notFinished, {
+      'wont-do': { week: 1, month: 1, all: 1 },
+      duplicate: { week: 0, month: 1, all: 1 },
+      test: { week: 1, month: 1, all: 1 },
+    });
+    assert.deepEqual(rep.endings.map((e) => e.label), ["Won't Do", 'Duplicate', 'Test']);
+    assert.deepEqual(rep.started, { week: 0, month: 5, all: 5 }, 'every one was still started');
+  } finally { r.done(); }
+});
+
+test('Reporting by kind: started and finished per kind, a ticket with no kind counted as No Kind Yet, never guessed', () => {
+  const r = reportingStore();
+  try {
+    classedTicket(r, { kind: 'feature', liveDaysAgo: 2 });
+    classedTicket(r, { kind: 'feature', filedDaysAgo: 40, liveDaysAgo: 35 });
+    classedTicket(r, { kind: 'fix', filedDaysAgo: 3 });
+    classedTicket(r, { kind: 'documentation', liveDaysAgo: 1 });
+    classedTicket(r, { liveDaysAgo: 1 });
+    const rep = reportsOf(r.store, { now: r.now });
+    assert.deepEqual(rep.kinds, REPORT_KINDS.map(({ key, label }) => ({ key, label })));
+    assert.deepEqual(rep.kinds.map((k) => k.label), ['Feature', 'Fix', 'Operational', 'Documentation', 'No Kind Yet']);
+    assert.deepEqual(rep.byKind.feature, { started: { week: 0, month: 1, all: 2 }, finished: { week: 1, month: 1, all: 2 } });
+    assert.deepEqual(rep.byKind.fix, { started: { week: 1, month: 1, all: 1 }, finished: { week: 0, month: 0, all: 0 } });
+    assert.deepEqual(rep.byKind.documentation.finished, { week: 1, month: 1, all: 1 });
+    assert.deepEqual(rep.byKind.none.finished, { week: 1, month: 1, all: 1 });
+    assert.deepEqual(rep.byKind.operational.started, { week: 0, month: 0, all: 0 });
+    const sum = (key) => Object.values(rep.byKind).reduce((n, k) => n + k.finished[key], 0);
+    for (const range of REPORT_RANGES) assert.equal(sum(range.key), rep.finished[range.key], `${range.key}: the kinds add up to the whole`);
+  } finally { r.done(); }
+});
+
+test('Reporting by kind: operational tickets per feature finished, and the share of ticket time on operational tickets', () => {
+  const r = reportingStore();
+  try {
+    classedTicket(r, { kind: 'feature', liveDaysAgo: 2 });
+    classedTicket(r, { kind: 'feature', liveDaysAgo: 2 });
+    classedTicket(r, { kind: 'operational', liveDaysAgo: 2 });
+    classedTicket(r, { kind: 'operational', filedDaysAgo: 40, liveDaysAgo: 39 });
+    const rep = reportsOf(r.store, { now: r.now });
+    assert.deepEqual(
+      { features: rep.efficiency.week.features, operational: rep.efficiency.week.operational, per: rep.efficiency.week.operationalPerFeature },
+      { features: 2, operational: 1, per: 0.5 },
+    );
+    assert.equal(rep.efficiency.all.operationalPerFeature, 1);
+    const t = rep.efficiency.all.operationalTime;
+    assert.equal(t.total, rep.timeSplit.all.total, 'the same time the split counts');
+    assert.ok(t.ms > 0 && t.ms < t.total);
+    assert.equal(t.share, t.ms / t.total);
+    const empty = reportingStore();
+    try {
+      classedTicket(empty, { kind: 'operational', filedDaysAgo: 40, liveDaysAgo: 39 });
+      const none = reportsOf(empty.store, { now: empty.now }).efficiency.week;
+      assert.equal(none.operationalPerFeature, null, 'no feature finished: no ratio, never a division by zero');
+      assert.deepEqual(none.operationalTime, { ms: 0, total: 0, share: null });
+    } finally { empty.done(); }
+  } finally { r.done(); }
+});
+
+test('Reporting by kind: who started what finished, the operator, a client or an agent session, Not Recorded where none', () => {
+  const r = reportingStore();
+  try {
+    classedTicket(r, { kind: 'feature', startedBy: 'operator', liveDaysAgo: 2 });
+    classedTicket(r, { kind: 'feature', startedBy: 'operator', liveDaysAgo: 2 });
+    classedTicket(r, { kind: 'fix', startedBy: 'client', liveDaysAgo: 2 });
+    classedTicket(r, { kind: 'operational', startedBy: 'agent', liveDaysAgo: 2 });
+    classedTicket(r, { kind: 'feature', startedBy: 'agent', filedDaysAgo: 2 });
+    const rep = reportsOf(r.store, { now: r.now });
+    assert.deepEqual(rep.starters, REPORT_STARTERS.map(({ key, label }) => ({ key, label })));
+    assert.deepEqual(rep.starters.map((k) => k.label), ['Operator', 'Client', 'Agent Session', 'Not Recorded']);
+    assert.deepEqual(Object.fromEntries(Object.entries(rep.startedBy).map(([k, v]) => [k, v.week])), { operator: 2, client: 1, agent: 1, none: 0 });
+    const features = reportsOf(r.store, { now: r.now, kind: 'feature' });
+    assert.deepEqual(Object.fromEntries(Object.entries(features.startedBy).map(([k, v]) => [k, v.week])), { operator: 2, client: 0, agent: 0, none: 0 });
+  } finally { r.done(); }
+});
+
+test('Reporting by kind: picking a kind narrows every figure but the split by kind, the efficiency and the conflicts', () => {
+  const r = reportingStore();
+  try {
+    classedTicket(r, { kind: 'feature', liveDaysAgo: 2 });
+    classedTicket(r, { kind: 'operational', liveDaysAgo: 2 });
+    classedTicket(r, { kind: 'operational', filedDaysAgo: 3 });
+    classedTicket(r, { kind: 'operational', liveDaysAgo: 2, outcome: 'wont-do' });
+    const all = reportsOf(r.store, { now: r.now });
+    const op = reportsOf(r.store, { now: r.now, kind: 'operational' });
+    assert.equal(all.kind, null);
+    assert.equal(op.kind, 'operational');
+    assert.equal(op.finished.week, 1);
+    assert.deepEqual(op.started, { week: 1, month: 3, all: 3 }, 'the three operational ones, the dropped one too');
+    assert.equal(op.flow.week.finished, 1);
+    assert.equal(op.humanHours.week.finished, 1);
+    assert.equal(op.notFinished['wont-do'].week, 1);
+    assert.equal(op.open.find((o) => o.status === 'In review').count, 1);
+    assert.equal(all.open.find((o) => o.status === 'In review').count, 1);
+    assert.ok(op.timeSplit.all.tickets.every((t) => !/^feature/.test(t.name)), 'only operational tickets in the time split');
+    assert.ok(op.timeSplit.all.total < all.timeSplit.all.total);
+    assert.deepEqual(op.byKind, all.byKind, 'the split by kind is over every kind');
+    assert.deepEqual(op.efficiency, all.efficiency);
+    assert.deepEqual(op.conflicts, all.conflicts);
+    const feature = reportsOf(r.store, { now: r.now, kind: 'feature' });
+    assert.equal(feature.finished.week, 1);
+    assert.equal(feature.notFinished['wont-do'].week, 0);
+    assert.equal(reportsOf(r.store, { now: r.now, kind: 'none' }).finished.all, 0);
+  } finally { r.done(); }
+});
+
 test('Reporting is in the header after Tasks and Topics, served at /reporting, and its figures need a sign-in; the demo holds finished tasks', async () => {
   const html = readFileSync(WEB('index.html'), 'utf8');
   assert.match(html, /<a href="\/tasks" data-nav="tasks">Tasks<\/a>\s*<a href="\/topics" data-nav="topics">Topics<\/a>\s*<a href="\/reporting" data-nav="reporting">Reporting<\/a>/);
@@ -142,7 +282,7 @@ test('Reporting: the first table is Task Productivity, Tasks started above Tasks
   const firstHeading = page.match(/<h2>([^<]*)<\/h2>/);
   assert.equal(firstHeading[1], 'Task Productivity');
   assert.doesNotMatch(app, /Tasks Finished and Started/);
-  assert.match(page, /<p class="quiet">Started: filed in that time\. Finished: moved to Live in that time and still Live\.<\/p>/);
+  assert.match(page, /<p class="quiet">Started: filed in that time\. Finished: moved to Live in that time and still Live, and not closed as Won't Do, Duplicate or Test\.<\/p>/);
   assert.match(page, /<tbody>\$\{line\('Tasks started', r\.started\)\}\$\{line\('Tasks finished', r\.finished\)\}<\/tbody>/);
 });
 
@@ -190,7 +330,7 @@ test('Reporting: Task Productivity has Start Date and End Date pickers after the
   assert.match(fn, /<span class="quiet">from \$\{escapeHtml\(dayLabel\(fromPicker\.value\)\)\}<\/span>/);
   assert.match(fn, /'The start date is after the end date\.'/);
   // A picker change asks /reports again for the same project and redraws only the custom cells.
-  assert.match(fn, /api\('GET', reportsPath\(r\.project \?\? '', picked\)\)/);
+  assert.match(fn, /api\('GET', reportsPath\(r\.project \?\? '', picked, r\.kind \?\? ''\)\)/);
   assert.doesNotMatch(fn.slice(fn.indexOf('const repick')), /main\.innerHTML/);
   // The helpers, run here: the default range, and the local-day edges sent to the server.
   const helpers = app.slice(app.indexOf('function pickerDay('), app.indexOf('function reportsPath('));
@@ -204,6 +344,8 @@ test('Reporting: Task Productivity has Start Date and End Date pickers after the
   assert.equal(path.searchParams.get('to'), new Date(2026, 10, 13, 23, 59, 59, 999).toISOString());
   assert.equal(reportsPath('', { from: '2026-11-14', to: '2026-11-13' }), '/reports', 'a start after the end is never asked for');
   assert.equal(reportsPath('', { from: '', to: '2026-11-13' }), '/reports');
+  assert.equal(new URL(`http://x${reportsPath('alpha', {}, 'operational')}`).searchParams.get('kind'), 'operational', 'the Kind picker rides along (SP-347)');
+  assert.equal(reportsPath('', {}, ''), '/reports', 'every kind asks for none');
 });
 
 test('Reporting growth: 4 started this week against 2 the week before is +100%, 2 against 4 is -50%, none before or too young says so (SP-241)', () => {
@@ -527,11 +669,34 @@ test('the Reporting page draws Where the Time Goes from the server: four buckets
   for (const heading of ['Task', 'Name', 'Total']) assert.match(draw, new RegExp(`<th(?: class="count")?>${heading}</th>`), heading);
 });
 
+test('the Reporting page draws the by-kind sections from the server: a Kind picker, By Kind, Efficiency, Who Started, Closed Without Finishing (SP-347)', () => {
+  const app = pageScript();
+  const draw = app.slice(app.indexOf('async function drawReporting'), app.indexOf('/** A share as a figure'));
+  assert.match(draw, /<label for="report-kind">Kind<\/label>\s*<select id="report-kind"><option value="">All Kinds<\/option>\$\{r\.kinds\.map/);
+  assert.match(draw, /#report-kind'\)\.addEventListener\('change', \(e\) => \{\s*drawReporting\(r\.project \?\? '', \{ from: fromPicker\.value, to: toPicker\.value \}, e\.target\.value\)/);
+  assert.match(draw, /drawReporting\(e\.target\.value, \{ from: fromPicker\.value, to: toPicker\.value \}, r\.kind \?\? ''\)/, 'a project change keeps the kind');
+  const order = ['Task Productivity', 'By Kind', 'Efficiency', 'Who Started the Finished Tasks', 'Closed Without Finishing', 'Human Hours of Work Done'];
+  const at = order.map((h) => draw.indexOf(`<h2>${h}</h2>`));
+  assert.ok(at.every((i) => i > 0), 'every section is drawn');
+  assert.deepEqual(at.slice().sort((a, b) => a - b), at, 'in this order, after Task Productivity');
+  for (const h of order.slice(1, 5)) assert.match(draw, new RegExp(`<h2>${h}</h2>\\s*<p class="quiet">[^<]+</p>`), `${h} says how it is counted`);
+  assert.match(draw, /<h2>By Kind<\/h2>\s*<p class="quiet">Every kind[^<]*No Kind Yet, never guessed\.<\/p>/);
+  assert.match(draw, /r\.byKind\[k\.key\]/);
+  assert.match(draw, /Operational per Feature Finished/);
+  assert.match(draw, /no feature finished in this range/, 'no feature is said in words, never a division by zero');
+  assert.match(draw, /Time on Operational Tasks/);
+  assert.match(draw, /countRows\(r\.starters, r\.startedBy\)/);
+  assert.match(draw, /countRows\(r\.endings, r\.notFinished\)/);
+  assert.match(draw, /Showing \$\{escapeHtml\(kindPicked\.label\)\} tasks only, except By Kind, Efficiency and Merge Conflicts, which count every kind\./);
+  assert.doesNotMatch(draw, /'Feature'|'Operational'|'Agent Session'|"Won't Do"/, 'the kinds, starters and endings come from the server, never typed out');
+  assert.doesNotMatch(draw, /style="/, 'no inline style: the page\'s rules drop them');
+});
+
 test('the Reporting page draws only the server\'s figures: ranges and stages from its answer, colours as properties, the selected project first', () => {
   const app = pageScript();
   const draw = app.slice(app.indexOf('async function drawReporting'), app.indexOf('/**\n * The Settings page'));
   assert.ok(draw.length > 0);
-  assert.match(draw, /api\('GET', reportsPath\(slug, range\)\)/);
+  assert.match(draw, /api\('GET', reportsPath\(slug, range, kind\)\)/);
   assert.match(draw, /if \(slug\) query\.set\('project', slug\);/);
   assert.match(draw, /r\.ranges\.map/);
   assert.match(draw, /r\.open\.map/);
