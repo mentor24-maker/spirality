@@ -168,27 +168,28 @@ export function renderConsoleTile(t, project = null, now = Date.now(), { attrs =
 }
 
 /**
- * The Console's map (SP-333): the loop drawn as areas of the screen, one per
- * stage, each tile placed by its status. The main path runs clockwise round
- * the edge, Requested → Queued → Building → In review → Ready to launch →
- * Live, and Live sits at the bottom left, under Requested, where the loop
- * closes; Needs your input and Rework, the two detours, sit inside the ring
- * (Needs your input between Requested and Queued, because every new ticket
- * stops there once for the operator's "go"; Rework between In review and
- * Building). Areas are in map units, MAP_UNITS wide and high; the page draws
- * every place as a share of the map, so the layout scales to the window.
- * `exit` is the side of an area its tickets leave by, toward the next stage.
+ * The Console's map (SP-333, laid out as the operator drew it in SP-374): the
+ * loop drawn as areas of the screen, one per stage, each tile placed by its
+ * status. Requested is one tall area on the left; the main path runs left to
+ * right along the top row, Queued → Building → In review; each stop off it
+ * sits under the stage it comes back to or leads on to (Needs your input under
+ * Queued, Rework under Building, Ready to launch under In review); and Live is
+ * one strip along the whole bottom, where every route ends. Areas are in map
+ * units, MAP_UNITS wide and high; the page draws every place as a share of the
+ * map, so the layout scales to the window. `exit` is the side of an area its
+ * tickets leave by, toward the next stage (Live, where nothing leaves, keeps
+ * its newest launch on the right, under Ready to launch, where they arrive).
  */
 export const MAP_UNITS = Object.freeze({ width: 160, height: 100 });
 export const MAP_AREAS = Object.freeze([
-  { status: 'Requested', x: 0, y: 0, w: 38, h: 64, exit: 'right', place: 'order' },
-  { status: 'Needs your input', x: 38, y: 32, w: 44, h: 32, exit: 'up', place: 'order' },
-  { status: 'Queued', x: 38, y: 0, w: 48, h: 32, exit: 'right', place: 'order' },
-  { status: 'Building', x: 86, y: 0, w: 38, h: 32, exit: 'right', place: 'drift' },
-  { status: 'In review', x: 124, y: 0, w: 36, h: 64, exit: 'down', place: 'drift' },
-  { status: 'Rework', x: 82, y: 32, w: 42, h: 32, exit: 'up', place: 'order' },
-  { status: 'Ready to launch', x: 72, y: 64, w: 88, h: 36, exit: 'left', place: 'order' },
-  { status: 'Live', x: 0, y: 64, w: 72, h: 36, exit: 'up', place: 'newest' },
+  { status: 'Requested', x: 0, y: 0, w: 32, h: 80, exit: 'right', place: 'order' },
+  { status: 'Needs your input', x: 32, y: 40, w: 52, h: 40, exit: 'up', place: 'order' },
+  { status: 'Queued', x: 32, y: 0, w: 52, h: 40, exit: 'right', place: 'order' },
+  { status: 'Building', x: 84, y: 0, w: 38, h: 40, exit: 'right', place: 'drift' },
+  { status: 'In review', x: 122, y: 0, w: 38, h: 40, exit: 'down', place: 'drift' },
+  { status: 'Rework', x: 84, y: 40, w: 38, h: 40, exit: 'up', place: 'order' },
+  { status: 'Ready to launch', x: 122, y: 40, w: 38, h: 40, exit: 'down', place: 'order' },
+  { status: 'Live', x: 0, y: 80, w: 160, h: 20, exit: 'right', place: 'newest' },
 ].map((a) => Object.freeze(a)));
 
 /** Space round an area's tiles and above them for its name, in map units. */
@@ -216,13 +217,16 @@ const tidy = (n) => Math.round(n * 100) / 100;
 /**
  * The tile size an area of `n` tiles draws at, and its grid: the largest
  * size from TILE_MAX down to TILE_MIN (half-unit steps) whose grid holds all
- * `n`; at TILE_MIN, the most it holds. `{ size, gap, cols, rows }`.
+ * `n`; at TILE_MIN, the most it holds. Never a tile taller or wider than the
+ * area's room for tiles (Live's strip is shorter than TILE_MAX), so no tile
+ * hangs out of its area. `{ size, gap, cols, rows }`.
  */
 export function areaGrid(area, n) {
   const w = area.w - 2 * AREA_PAD;
   const h = area.h - AREA_PAD - AREA_HEAD;
+  const biggest = Math.max(TILE_MIN, Math.floor(Math.min(TILE_MAX, w, h) * 2) / 2);
   let fit = null;
-  for (let size = TILE_MAX; size >= TILE_MIN; size -= 0.5) {
+  for (let size = biggest; size >= TILE_MIN; size -= 0.5) {
     const gap = Math.max(0.8, size * 0.08);
     const cols = Math.max(1, Math.floor((w + gap) / (size + gap)));
     const rows = Math.max(1, Math.floor((h + gap) / (size + gap)));
@@ -369,7 +373,8 @@ export function runningAreas(pipeline) {
  * data-x is, for an exit right; its top as data-y is, for an exit down),
  * `ms` how long the move takes. A tile starts where its time in the area
  * puts it on a straight line from the entrance line (just in) to the exit
- * line (DRIFT_FULL_MS in), and moves at (distance left) / (time left), so it
+ * line (DRIFT_FULL_MS in; the exit line is where the tile meets the far
+ * side of the area's room), and moves at (distance left) / (time left), so it
  * reaches the exit at three hours in Building, six in review. That is the
  * same speed for every tile, so tiles in one lane keep their gaps; the same
  * answer for a later clock is where the glide had brought them, so the
@@ -389,7 +394,9 @@ export function glidesOf(area, placed, now = Date.now()) {
   if (!grid || !way) return [];
   const pitch = grid.size + grid.gap;
   const first = way.lead;
-  const last = way.lead + (way.count - 1) * pitch;
+  // The way out ends where a tile touches the far side of the area's room, not at its last slot: In review's
+  // row (SP-374) holds a single row of full-size tiles, and a glide that ended at the last slot would not move.
+  const last = Math.max(way.lead + (way.count - 1) * pitch, way.span - AREA_PAD - grid.size);
   const full = DRIFT_FULL_MS[area.status];
   const speed = full ? (last - first) / full : 0;
   const lanes = new Map();
@@ -468,11 +475,17 @@ export function moreFeatures(hidden) {
 }
 
 /**
- * The detours (SP-334): every route a ticket takes into or out of Needs your
- * input and Rework, drawn as arrows over the map, in map units. Each route is
- * the code's, not a picture's:
+ * The routes (SP-334, every one drawn since SP-374): each way a ticket moves
+ * from one stage to another, drawn as an arrow over the map, in map units.
+ * `kind` is `forward` (green: a step on toward Live) or `back` (red: work
+ * stops for a question, or goes back to be built again). Each route is the
+ * code's, not a picture's:
  *  - Requested → Needs your input: loop-intake writes the spec and asks for
- *    the operator's go; every new ticket takes this route once.
+ *    the operator's go; every new ticket takes this route once. There is no
+ *    route from Requested straight to Queued.
+ *  - Queued → Building: loop-build claims it. Building → In review: its pull
+ *    request is open. In review → Ready to launch: review passes it. Ready to
+ *    launch → Live: his merge word.
  *  - Building / In review → Needs your input: `ask` mid-build or mid-review.
  *  - Needs your input → Queued, Rework or Live: the relay's hand-back of his
  *    answer (lib/busRelayPlan.js handbackDestination): no pull request yet,
@@ -481,27 +494,34 @@ export function moreFeatures(hidden) {
  *  - In review → Rework: loop-review's send-back.
  *  - Rework → Building: loop-build claims Rework before fresh work
  *    (lib/loopStatuses.js CLAIMABLE_BY_BUILD).
- * Ready to launch is not a detour: every pull request waits there for his
- * merge word. A dead pass's ticket handed back from Building (pass-reconcile)
- * is a repair, not a route work is meant to take, so it is not drawn.
- * `via` is the points between, `kind` which detour the arrow belongs to (its
- * colour). Short arrows cross the border two areas share, in its padding and
- * header, so they stay clear of the tiles.
+ * A dead pass's ticket handed back from Building (pass-reconcile) is a
+ * repair, not a route work is meant to take, so it is not drawn. `path` is
+ * the arrow's points, tail first. Each is short and crosses the border its
+ * two areas share where tiles never sit: a header's band under its name, the
+ * padding along an area's foot, or the bottom of an area that fills from the
+ * top, and clear of each area's name and count. In review's two red arrows
+ * leave from one corner: one runs down the border and turns into Rework under
+ * its count, the other runs along the border between the rows (its areas do
+ * not touch) and joins Building → Needs your input for its last stretch.
  */
 export const MAP_DETOURS = Object.freeze([
-  { from: 'Requested', to: 'Needs your input', kind: 'input', why: 'A new request: its spec waits for your go', path: [[33, 58], [43, 58]] },
-  { from: 'Needs your input', to: 'Queued', kind: 'input', why: 'Your go, or an answer before anything is built: back to Queued', path: [[70, 37.5], [70, 28]] },
-  { from: 'Building', to: 'Needs your input', kind: 'input', why: 'A question for you mid-build', path: [[90, 28], [83, 31.2], [75, 34.5]] },
-  { from: 'In review', to: 'Needs your input', kind: 'input', why: 'A question for you mid-review', path: [[128, 61], [126, 63], [79, 63]] },
-  { from: 'Needs your input', to: 'Rework', kind: 'rework', why: 'Your answer on a ticket with an open pull request: back to Rework', path: [[77, 59], [87, 59]] },
-  { from: 'Needs your input', to: 'Live', kind: 'input', why: 'Your close word, or its pull request already merged: Live', path: [[56, 59], [56, 69]] },
-  { from: 'In review', to: 'Rework', kind: 'rework', why: 'Review sends it back', path: [[129, 45], [119, 45]] },
-  { from: 'Rework', to: 'Building', kind: 'rework', why: 'The build loop takes Rework before fresh work', path: [[108, 37.5], [108, 28]] },
+  { from: 'Requested', to: 'Needs your input', kind: 'forward', why: 'A new request: its spec waits for your go', path: [[25, 76], [32.8, 76]] },
+  { from: 'Queued', to: 'Building', kind: 'forward', why: 'The build loop takes the next queued ticket', path: [[77.8, 5], [84.8, 5]] },
+  { from: 'Building', to: 'In review', kind: 'forward', why: 'Built: its pull request is open for review', path: [[115.8, 5], [122.8, 5]] },
+  { from: 'In review', to: 'Ready to launch', kind: 'forward', why: 'Review passes it: it waits for your merge', path: [[143, 38.6], [143, 45.6]] },
+  { from: 'Ready to launch', to: 'Live', kind: 'forward', why: 'Your merge word: Live', path: [[143, 78.6], [143, 85.6]] },
+  { from: 'Needs your input', to: 'Queued', kind: 'forward', why: 'Your go, or an answer before anything is built: back to Queued', path: [[60, 45.6], [60, 38.6]] },
+  { from: 'Needs your input', to: 'Rework', kind: 'forward', why: 'Your answer on a ticket with an open pull request: back to Rework', path: [[77, 76], [84.8, 76]] },
+  { from: 'Needs your input', to: 'Live', kind: 'forward', why: 'Your close word, or its pull request already merged: Live', path: [[58, 78.6], [58, 85.6]] },
+  { from: 'Rework', to: 'Building', kind: 'forward', why: 'The build loop takes Rework before fresh work', path: [[108, 45.6], [108, 38.6]] },
+  { from: 'Building', to: 'Needs your input', kind: 'back', why: 'A question for you mid-build', path: [[90, 37], [86, 40], [72, 44]] },
+  { from: 'In review', to: 'Needs your input', kind: 'back', why: 'A question for you mid-review', path: [[125, 36], [122, 40], [86, 40], [72, 44]] },
+  { from: 'In review', to: 'Rework', kind: 'back', why: 'Review sends it back', path: [[125, 36], [122, 40], [122, 44.6], [114, 44.6]] },
 ].map((d) => Object.freeze({ ...d, path: Object.freeze(d.path.map((p) => Object.freeze(p))) })));
 
 /** An arrowhead's length and half its width, in map units. */
-const HEAD_LONG = 2.2;
-const HEAD_HALF = 1.3;
+const HEAD_LONG = 2.6;
+const HEAD_HALF = 1.8;
 
 /** An arrow's line and its head as SVG path data, the head pointing along the last stretch. */
 export function detourPathData(path) {
@@ -520,10 +540,11 @@ export function detourPathData(path) {
 }
 
 /**
- * The detours as one SVG laid over the map (SP-334), in the map's own units
+ * The routes as one SVG laid over the map (SP-334), in the map's own units
  * (viewBox MAP_UNITS), so each arrow stays on the border it crosses as the
- * map scales. Each arrow is a `detour detour-<kind>` group naming its route
- * (`data-from`, `data-to`) with a hover title saying when a ticket takes it.
+ * map scales. Each arrow is a `detour detour-<kind>` group (`forward` green,
+ * `back` red) naming its route (`data-from`, `data-to`) with a hover title
+ * saying when a ticket takes it.
  */
 export function renderDetours() {
   const arrows = MAP_DETOURS.map((d) => {
@@ -533,20 +554,32 @@ export function renderDetours() {
       + `<path class="detour-line" d="${line}"/><path class="detour-head" d="${head}"/></g>`;
   });
   const said = MAP_DETOURS.map((d) => `${d.from} to ${d.to}`).join('; ');
-  return `<svg class="map-detours" viewBox="0 0 ${MAP_UNITS.width} ${MAP_UNITS.height}" role="img" aria-label="${escapeHtml(`Detours: ${said}`)}">${arrows.join('')}</svg>`;
+  return `<svg class="map-detours" viewBox="0 0 ${MAP_UNITS.width} ${MAP_UNITS.height}" role="img" aria-label="${escapeHtml(`Routes: ${said}`)}">${arrows.join('')}</svg>`;
 }
 
 /** The line under the map saying what the arrows are. */
-export const DETOURS_KEY = 'Arrows mark the detours, Needs your input and Rework: every ticket in them costs a round trip, so a healthy board keeps them small.';
+export const DETOURS_KEY = 'Green arrows move a ticket forward; red arrows send it back, to wait on your answer or to be built again. Hover an arrow to see when a ticket takes it.';
+
+/**
+ * Where every request comes from (SP-374): a funnel over Requested, as wide as
+ * it (app.css), linking to the Add Task page. It sits above the map, outside
+ * its areas, so every part of the map is still a stage.
+ */
+export function renderFunnel() {
+  return '<a class="map-funnel" href="/new" title="Add a task: every request starts here, in Requested">'
+    + '<svg class="map-funnel-shape" viewBox="0 0 32 10" preserveAspectRatio="none" aria-hidden="true"><polygon points="0.5,0.5 31.5,0.5 24,9.5 8,9.5"/></svg>'
+    + '<span class="map-funnel-label">Task Submitted</span></a>';
+}
 
 /**
  * The Console as HTML (SP-333, replacing SP-233's stage columns): the
  * Features key (renderFeatureKey) over the map, MAP_AREAS each a
  * `map-area` with its name, its count and its tiles placed by placeArea. The
  * map's areas come in the loop's own order, so a narrow screen, which stacks
- * them, reads the same path. Live shows the launches /in-flight sends (the last day's, on the server's clock), each
- * fading with age. The detours' arrows (renderDetours, SP-334) lie over the
- * areas, with a line under the map saying what they are. A ticket whose
+ * them, reads the same path. The "Task Submitted" funnel (renderFunnel) sits
+ * over Requested, above the map. Live shows the launches /in-flight sends (the last day's, on the server's clock), each
+ * fading with age. The routes' arrows (renderDetours, SP-334) lie over the
+ * areas, with a line under the map saying what green and red mean. A ticket whose
  * status is not on the map is listed under it ("Other Statuses"), so no
  * ticket is ever left off. `running` lists the glide areas whose lane is
  * running a pass (runningAreas): each carries `running`, and its tiles glide
@@ -587,7 +620,7 @@ export function renderConsole(answer, now = Date.now(), { running = [] } = {}) {
   const other = others.length
     ? `<section class="console-other"><h2>Other Statuses</h2><div class="tiles">${others.map((t) => tile(t)).join('')}</div></section>`
     : '';
-  return `${renderFeatureKey(shown)}<div class="console"><div class="console-map" role="group" aria-label="The loop">${MAP_AREAS.map(areaHtml).join('')}${renderDetours()}</div>`
+  return `${renderFeatureKey(shown)}<div class="console">${renderFunnel()}<div class="console-map" role="group" aria-label="The loop">${MAP_AREAS.map(areaHtml).join('')}${renderDetours()}</div>`
     + `<p class="map-detours-key quiet">${escapeHtml(DETOURS_KEY)}</p>${other}</div>`;
 }
 
