@@ -821,7 +821,10 @@ card withholds it; an answer already carrying the done reply is spent), with
 one rule more, because that status waits on a merge: the ticket moves to
 `Live` only when its work **is merged**. That is its own PR, or, when it has
 no PR of its own, the PR it was filed to unstick (the `- PR:` line under
-`## The branch` in a catch-up ticket's description). Otherwise the relay
+`## The branch` in a catch-up ticket's description). A ticket with no pull
+request anywhere (an operational step) moves to `Live` on his close phrase
+when the card he answered is a `Your move: Close` card, the review loop's
+word that the work is done and read back (SP-375). Otherwise the relay
 replies under his word once, saying why (`[bus-relay-close-refused]`), and
 leaves the ticket where it is; the same word closes it on the first pass
 after the merge. The ticket page's **Close** button, shown when the newest
