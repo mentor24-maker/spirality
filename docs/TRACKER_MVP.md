@@ -1328,8 +1328,9 @@ It prints one JSON object:
 | `total` | every ticket, Live included |
 | `byStatus` | tickets in each status now, keyed in lower case (`in review`); all eight are there, zero or not |
 | `since`, `until` | the window as given, or `null` |
-| `closedInWindow` | tickets that shipped in the window: Live now, and last moved to Live inside it; `null` without `--since` |
+| `closedInWindow` | tickets that shipped in the window: Live now, last moved to Live inside it, and not ended Won't do, Duplicate or Test; `null` without `--since` |
 | `startedInWindow` | tickets filed in the window (only with `--since`) |
+| `notFinishedInWindow` | tickets that moved to Live in the window but ended Won't do, Duplicate or Test, left out of `closedInWindow` (only with `--since`, SP-347) |
 | `enteredInWindow` | for each of the eight statuses, how many tickets moved into it (or were filed in it) inside the window, from each ticket's history; a ticket that entered one twice counts once (only with `--since`) |
 
 The window is whole days in UTC, `--since` from midnight to the end of

@@ -41,11 +41,20 @@ function spanOf(ms) {
  * (Weekly on arrival), redrawn from the same answer. Merge Conflicts
  * (SP-295, conflictSection) shows conflicts per merged pull request by the
  * pipeline settings in force, and lists each conflict.
+ *
+ * By kind (SP-347): a Kind picker beside the project (`kind`, '' for every
+ * kind) asks the server again for that kind's figures; By Kind,
+ * Efficiency (operational tasks per feature finished, and the share of task
+ * time on operational ones) and the merge conflicts are always over every
+ * kind, and say so. Who Started counts the finished tasks by who started
+ * them, and Closed Without Finishing the ones that ended Won't Do,
+ * Duplicate or Test, which no other figure counts as finished. The kinds,
+ * starters and endings, with their labels, come from the server's answer.
  */
-export async function drawReporting(chosen, range = defaultReportRange()) {
+export async function drawReporting(chosen, range = defaultReportRange(), kind = '') {
   const { projects } = await api('GET', '/projects');
   const slug = chosen !== undefined ? chosen : (projects.some((p) => p.slug === savedProject()) ? savedProject() : '');
-  const r = await api('GET', reportsPath(slug, range));
+  const r = await api('GET', reportsPath(slug, range, kind));
   setTitle('Reporting · Tracker');
   const head = `<tr><th>Report</th>${r.ranges.map((g) => `<th class="count">${escapeHtml(g.label)}</th>`).join('')}</tr>`;
   // Task Productivity's own range (SP-240): a Start Date and an End Date column after the fixed ones, a picker in each header.
@@ -94,17 +103,48 @@ export async function drawReporting(chosen, range = defaultReportRange()) {
     return `<div class="table-wrap"><table class="counts report time-split-tickets"><thead><tr><th>Task</th><th>Name</th><th class="count">Total</th>${BUCKET_LABELS.map(([, label]) => `<th class="count">${label}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table></div>`;
   };
   const conflictsHtml = conflictSection(r.conflicts);
+  // By kind (SP-347): one row per kind, finished and started in each range, over every kind.
+  const kindRows = r.kinds.map((k) => `<tr><td class="name">${escapeHtml(k.label)}</td>${r.ranges.map((g) => {
+    const c = r.byKind[k.key];
+    return `<td class="count">${Number(c.finished[g.key])} finished, ${Number(c.started[g.key])} started</td>`;
+  }).join('')}</tr>`).join('');
+  const perFeatureLine = `<tr><td class="name">Operational per Feature Finished</td>${r.ranges.map((g) => {
+    const e = r.efficiency[g.key];
+    return `<td class="count">${e.operationalPerFeature == null ? '<span class="quiet">no feature finished in this range</span>' : `${escapeHtml(Number(e.operationalPerFeature).toFixed(2))} (${Number(e.operational)} to ${Number(e.features)})`}</td>`;
+  }).join('')}</tr>`;
+  const opTimeLine = `<tr><td class="name">Time on Operational Tasks</td>${r.ranges.map((g) => {
+    const t = r.efficiency[g.key].operationalTime;
+    return `<td class="count">${t.share == null ? '<span class="quiet">none in this range</span>' : `${escapeHtml(bucketSpan(t.ms))} (${Math.round(Number(t.share) * 100)}%)`}</td>`;
+  }).join('')}</tr>`;
+  const countRows = (rows, counts) => rows.map((k) => `<tr><td class="name">${escapeHtml(k.label)}</td>${r.ranges.map((g) => `<td class="count">${Number(counts[k.key][g.key])}</td>`).join('')}</tr>`).join('');
+  const kindPicked = r.kinds.find((k) => k.key === r.kind);
+  const scopeNote = kindPicked ? `<p class="kind-scope">Showing ${escapeHtml(kindPicked.label)} tasks only, except By Kind, Efficiency and Merge Conflicts, which count every kind.</p>` : '';
   const open = r.open.map((s) => `<tr data-stage="${escapeHtml(s.status)}"><td class="status">${escapeHtml(s.status)}</td><td class="count">${Number(s.count)}</td></tr>`).join('');
   main.innerHTML = `
     <h1>Reporting</h1>
     <form class="report-scope">
       <label for="report-project">Project</label>
       <select id="report-project"><option value="">All projects</option>${projects.map((p) => `<option value="${escapeHtml(p.slug)}"${p.slug === r.project ? ' selected' : ''}>${escapeHtml(p.name)}</option>`).join('')}</select>
+      <label for="report-kind">Kind</label>
+      <select id="report-kind"><option value="">All Kinds</option>${r.kinds.map((k) => `<option value="${escapeHtml(k.key)}"${k.key === r.kind ? ' selected' : ''}>${escapeHtml(k.label)}</option>`).join('')}</select>
     </form>
+    ${scopeNote}
     <h2>Task Productivity</h2>
-    <p class="quiet">Started: filed in that time. Finished: moved to Live in that time and still Live.</p>
+    <p class="quiet">Started: filed in that time. Finished: moved to Live in that time and still Live, and not closed as Won't Do, Duplicate or Test.</p>
     <div class="table-wrap"><table class="counts report productivity"><thead>${productivityHead}</thead><tbody>${line('Tasks started', r.started)}${line('Tasks finished', r.finished)}</tbody></table></div>
     <p class="quiet custom-range-note" hidden></p>
+    <h2>By Kind</h2>
+    <p class="quiet">Every kind, whichever kind is picked above, counted the same way as Task Productivity. A task not given a kind yet is counted as No Kind Yet, never guessed.</p>
+    <div class="table-wrap"><table class="counts report by-kind"><thead>${head}</thead><tbody>${kindRows}</tbody></table></div>
+    <h2>Efficiency</h2>
+    <p class="quiet">Every kind. Operational tasks keep things running and add nothing new (merge-conflict fix-ups, unsticking a task, setting up a machine). Operational per Feature Finished: operational tasks finished for each feature finished in that time. Time on Operational Tasks: their share of all task time in that range, counted as in Where the Time Goes.</p>
+    <div class="table-wrap"><table class="counts report efficiency"><thead>${head}</thead><tbody>${perFeatureLine}${opTimeLine}</tbody></table></div>
+    <h2>Who Started the Finished Tasks</h2>
+    <p class="quiet">Of the tasks finished in that time, how many you, a client or an agent session started. Not Recorded: tasks that do not say.</p>
+    <div class="table-wrap"><table class="counts report started-by"><thead>${head}</thead><tbody>${countRows(r.starters, r.startedBy)}</tbody></table></div>
+    <h2>Closed Without Finishing</h2>
+    <p class="quiet">Tasks moved to Live in that time that ended Won't Do, Duplicate or Test. No other figure on this page counts them as finished.</p>
+    <div class="table-wrap"><table class="counts report not-finished"><thead>${head}</thead><tbody>${countRows(r.endings, r.notFinished)}</tbody></table></div>
     <h2>Human Hours of Work Done</h2>
     <p class="quiet">For tasks finished in that time: the build loop's estimate, recorded on each pull request, of the hours an experienced programmer new to the code would take to do the same work. An estimate, not a measurement; tasks with none are left out of the total, and counted here.</p>
     <div class="table-wrap"><table class="counts report human-hours"><thead>${head}</thead><tbody>${hoursLine('Total', (h) => hoursOf(h.hours))}${estimatedLine}${hoursLine('Per day', (h) => `about ${Number(h.perDay)} human hour${Number(h.perDay) === 1 ? '' : 's'} a day`)}</tbody></table></div>
@@ -177,7 +217,7 @@ export async function drawReporting(chosen, range = defaultReportRange()) {
     const ask = ++asked;
     const problem = rangeProblem(picked);
     if (problem) { showCustom(null, problem); return; }
-    const again = await api('GET', reportsPath(r.project ?? '', picked));
+    const again = await api('GET', reportsPath(r.project ?? '', picked, r.kind ?? ''));
     if (ask === asked) showCustom(again.custom, null);
   };
   for (const picker of [fromPicker, toPicker]) {
@@ -186,7 +226,10 @@ export async function drawReporting(chosen, range = defaultReportRange()) {
     });
   }
   main.querySelector('#report-project').addEventListener('change', (e) => {
-    drawReporting(e.target.value, { from: fromPicker.value, to: toPicker.value }).catch((err) => (err instanceof SignedOut ? drawSignIn() : showError(err)));
+    drawReporting(e.target.value, { from: fromPicker.value, to: toPicker.value }, r.kind ?? '').catch((err) => (err instanceof SignedOut ? drawSignIn() : showError(err)));
+  });
+  main.querySelector('#report-kind').addEventListener('change', (e) => {
+    drawReporting(r.project ?? '', { from: fromPicker.value, to: toPicker.value }, e.target.value).catch((err) => (err instanceof SignedOut ? drawSignIn() : showError(err)));
   });
   putTrail([{ label: 'Reporting' }]);
 }
@@ -290,13 +333,15 @@ function dayLabel(value) {
 }
 
 /**
- * GET /reports for a project ('' for all) and, when both pickers hold a
+ * GET /reports for a project ('' for all), a kind ('' for every kind,
+ * SP-347) and, when both pickers hold a
  * date with the start not after the end, the custom range from the start of
  * the start date to the end of the end date, local time (SP-240).
  */
-function reportsPath(slug, range) {
+function reportsPath(slug, range, kind = '') {
   const query = new URLSearchParams();
   if (slug) query.set('project', slug);
+  if (kind) query.set('kind', kind);
   const from = localDay(range?.from, 0, 0, 0, 0);
   const to = localDay(range?.to, 23, 59, 59, 999);
   if (from && to && from <= to) {
