@@ -17,11 +17,21 @@
  * integrity check says "ok", it is a standalone file with no log beside it),
  * and only then renamed into place. A copy that fails a check is deleted and
  * the run fails saying why; older backups are only pruned after a good one.
+ *
+ * Then, for the project's own database only (the one in its config's
+ * trackerDataDir, never a test's or another copy), the night's backup and the
+ * Mini's launch agents are copied off the Mini (tracker/offMiniCopy.mjs,
+ * docs/OFF_MINI_BACKUP.md). That step logs its own `off-Mini copy OK` or
+ * `off-Mini copy FAILED` line; a failure there fails the run, but the backup
+ * on the Mini's disk is already made and stays.
  */
 import { existsSync, readdirSync, renameSync, rmSync } from 'node:fs';
-import { basename, extname, join } from 'node:path';
+import { homedir } from 'node:os';
+import { basename, extname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
+import { loadProjectConfig, namedProjectFolder } from '../lib/projectConfig.mjs';
+import { copyOffMini } from './offMiniCopy.mjs';
 
 /** How many dated backups are kept when nothing else is said. */
 export const DEFAULT_KEEP = 14;
@@ -104,19 +114,52 @@ export function backupDatabase({ db, dir, keep = DEFAULT_KEEP, now = new Date() 
   return { file, tickets, removed };
 }
 
+/**
+ * Whether tonight's backup of `db` goes off the Mini, and where from: only
+ * the project's own database (its config's trackerDataDir/tracker.db), so a
+ * test's or a scratch copy never leaves the machine. `TRACKER_OFF_MINI=off`
+ * turns it off. Returns `{ skip }` with the reason, or `{ githubRepo, clone }`.
+ */
+export function offMiniPlan({ db, env = process.env, config, home = homedir() }) {
+  if (env.TRACKER_OFF_MINI === 'off') return { skip: 'TRACKER_OFF_MINI=off' };
+  const dataDir = config.trackerDataDir?.replace(/^~(?=\/|$)/, home);
+  if (!dataDir) return { skip: 'the project config names no trackerDataDir' };
+  if (resolve(db) !== resolve(dataDir, 'tracker.db')) return { skip: `${db} is not the project's own tracker database` };
+  return { githubRepo: config.githubRepo, clone: join(dataDir, 'off-mini-clone') };
+}
+
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   const stamp = () => new Date().toString();
+  const keepText = process.env.TRACKER_BACKUP_KEEP;
+  const keep = keepText ? Number(keepText) : DEFAULT_KEEP;
+  let made;
   try {
-    const keepText = process.env.TRACKER_BACKUP_KEEP;
-    const keep = keepText ? Number(keepText) : DEFAULT_KEEP;
-    const { file, tickets, removed } = backupDatabase({
+    made = backupDatabase({
       db: process.env.TRACKER_DB,
       dir: process.env.TRACKER_BACKUP_DIR,
       keep,
     });
-    console.log(`${stamp()} backup OK: ${file} (${tickets} ticket(s)); kept the newest ${keep}, removed ${removed.length}.`);
+    console.log(`${stamp()} backup OK: ${made.file} (${made.tickets} ticket(s)); kept the newest ${keep}, removed ${made.removed.length}.`);
   } catch (err) {
     console.error(`${stamp()} backup FAILED: ${err.message} No new backup was made; older ones are untouched.`);
+    process.exit(1);
+  }
+  try {
+    const plan = offMiniPlan({ db: process.env.TRACKER_DB, config: loadProjectConfig({ project: namedProjectFolder() }) });
+    if (plan.skip) {
+      console.log(`${stamp()} off-Mini copy skipped: ${plan.skip}.`);
+    } else {
+      const line = await copyOffMini({
+        githubRepo: plan.githubRepo,
+        backupFile: made.file,
+        clone: plan.clone,
+        agentsDir: join(homedir(), 'Library', 'LaunchAgents'),
+        keep,
+      });
+      console.log(`${stamp()} ${line}`);
+    }
+  } catch (err) {
+    console.error(`${stamp()} off-Mini copy FAILED: ${err.message}. Tonight's backup on the Mini (${made.file}) is made and kept.`);
     process.exit(1);
   }
 }
