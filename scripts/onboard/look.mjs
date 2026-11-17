@@ -436,7 +436,7 @@ export async function trackerRows({ get, apiUrl, pageUrl, answers, operatorName,
  */
 export function busRow(answers) {
   const item = 'Bus: where the pipeline watchdogs post';
-  if (answers.busProject) return row(item, READY, `${answers.busProject}, which the setup's bus step makes if it is missing`);
+  if (answers.busProject) return row(item, READY, `${answers.busProject}'s own queue, whose noticeboard tag the setup's bus step saves if it is missing`);
   return row(item, READY, 'none, since hasBus is not true, so the watchdogs have nowhere to post: '
     + 'a lane that stops or a ticket that sticks is said nowhere. Answer hasBus "yes" to give it one');
 }

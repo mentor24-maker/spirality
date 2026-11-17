@@ -275,7 +275,8 @@ project moves it to the newest release once all of these hold:
   Spirality's `spirality.project.json`) since then.
 
 The move is the same record write as `release name`, read back, and the
-project's bus (`<slug>-bus`, the name the setup wizard gives it) hears one
+project's bus (its own queue's Team chat, as the setup wizard makes it
+since SP-356, or an older `<slug>-bus` project) hears one
 plain line naming the old and new release and how to roll back. When
 Spirality's bus, or the release's time, cannot be read, nobody can tell
 whether the release was quiet: nothing moves, and the relay pass lists

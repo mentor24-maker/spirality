@@ -159,7 +159,7 @@ export const DANE_FIELDS = Object.freeze([
   // SP-204. `added`: a question added after setups were already under way,
   // so an answers file that has every other answer is not stopped for it
   // (its default, no bus, stands); it is asked whenever anything else is.
-  { key: 'hasBus', label: 'Bus Project', question: 'Does it raise its alarms on a bus, a tracker project of its own? (yes or no)', yesNo: true, added: true, fallback: () => 'no' },
+  { key: 'hasBus', label: 'Bus Project', question: 'Does it raise its alarms on a bus, a Team chat ticket in its own queue? (yes or no)', yesNo: true, added: true, fallback: () => 'no' },
   { key: 'description', label: 'What the Project Is', question: 'What the project is, in two or three sentences, for its CLAUDE.md', required: true },
 ]);
 
@@ -794,8 +794,11 @@ export async function onboard(opts, deps) {
       const r = npm('tracker:bus', ['--config', busFile, '--name', answers.projectName], { env: { TRACKER_DB: trackerDb } });
       for (const line of `${r.out}\n${r.err}`.split('\n').map((l) => l.trim()).filter(Boolean)) say(step, line);
       if (r.code !== 0) fail(step, `tracker:bus exit ${r.code}: ${last(r.err || r.out)}`);
-      if (/: made, /.test(r.out)) done(step, `bus project "${answers.busProject}" made on the tracker, read back, and every ${slug} loop sees it`);
-      else skip(step, `bus project "${answers.busProject}" is on the tracker and every ${slug} loop sees it`);
+      const own = answers.busProject === slug;
+      const what = own ? `bus "${answers.busProject}" (the project's own queue)` : `bus project "${answers.busProject}"`;
+      if (/: made, /.test(r.out)) done(step, `${what} made on the tracker, read back, and every ${slug} loop sees it`);
+      else if (/ tag saved on its tag list/.test(r.out)) done(step, `${what}: its noticeboard tag saved and read back, and every ${slug} loop sees it`);
+      else skip(step, `${what} is on the tracker and every ${slug} loop sees it`);
     }
 
     // ── setup-check, stop, snapshot, import, switch-check (SP-159) ───────

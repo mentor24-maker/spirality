@@ -7,6 +7,7 @@
 # Runs, each under its own time limit, one after the other:
 #   node <repo>/scripts/stale_ready.mjs --check    a ticket stuck in Ready to launch
 #   node <repo>/scripts/stale_answer.mjs --check   an answer in Needs your input nothing acted on
+#   node <repo>/scripts/reconcile.mjs --check      an open ticket whose pull request GitHub merged or closed (SP-354)
 # Each reads the tickets through the door and says what it finds on the bus,
 # once per ticket per reason every 6 hours. A dry run passes --dry-run too:
 # each reads and prints what it would post, and writes nothing.
@@ -18,7 +19,7 @@ run_relay_watchdogs() {
   local repo="$1" limit="$2" dry="${3:-}" name file status
   local args=(--check)
   [ "$dry" = "--dry-run" ] && args+=(--dry-run)
-  for name in stale-ready stale-answer; do
+  for name in stale-ready stale-answer reconcile; do
     file="$repo/scripts/${name//-/_}.mjs"
     # A project's own copy of the runners (the setup wizard's, until its
     # lanes run from Spirality's folder) may not carry the watchdog yet: one

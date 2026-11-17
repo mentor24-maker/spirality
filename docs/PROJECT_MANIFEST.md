@@ -378,12 +378,20 @@ The socket Tailscale's background half listens on, on the tracker's machine
 
 The tracker project that is this project's bus (SP-24): its standing "Team
 chat" ticket takes the alarms and reports `npm run clickup -- bus-post`
-sends, and `bus-read` reads them back. No loop claims from it.
+sends, and `bus-read` reads them back.
+
+A project is normally **its own bus** (SP-356): `busProject` is the
+project's own `projectSlug`, and the setup wizard writes that for a project
+with a bus. The bus is then its noticeboard tickets only (Team chat, and any
+ticket tagged `noticeboard`), each in Live, which no loop claims from;
+`bus-read` reads their comments and never the work beside them. A project
+set up before then may still name a second tracker project, `"<slug>-bus"`;
+there every ticket is the bus, and no loop claims from it.
 
 - **Kind**: slug; `null` is the same as left out
 - **Required**: no
 - **Default**: none: the project has no bus
-- **Example**: Spirality's is `"spirality-bus"` (SP-281); StarCaster's is `"starcaster-bus"`
+- **Example**: `"starcaster"` for StarCaster's own queue; Spirality's is still the older `"spirality-bus"` (SP-281) until its own ticket moves it
 
 ### `projectLanes`
 
