@@ -6,7 +6,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { contrast, renderConsole, renderDetours, detourPathData, MAP_DETOURS, DETOURS_KEY, renderConsoleTile, MAP_AREAS, MAP_UNITS, placeArea, driftOf, liveFade, slotShare, moreOpens, moreFeatures, tileSizeClass, TILE_MAX, TILE_MIN, TILE_COMPACT, TILE_TINY, LIVE_FADE_FLOOR, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, consoleFeature, featureColourIndex, renderFeatureKey, FEATURE_PALETTE, capInFlightText, glidesOf, buildRunning, laneRunning, runningAreas, GLIDE_AREA, GLIDE_AREAS, DRIFT_FULL_MS } from './web/render.mjs';
+import { contrast, renderConsole, renderDetours, renderFunnel, detourPathData, MAP_DETOURS, DETOURS_KEY, renderConsoleTile, MAP_AREAS, MAP_UNITS, placeArea, driftOf, liveFade, slotShare, moreOpens, moreFeatures, tileSizeClass, TILE_MAX, TILE_MIN, TILE_COMPACT, TILE_TINY, LIVE_FADE_FLOOR, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, consoleFeature, featureColourIndex, renderFeatureKey, FEATURE_PALETTE, capInFlightText, glidesOf, buildRunning, laneRunning, runningAreas, GLIDE_AREA, GLIDE_AREAS, DRIFT_FULL_MS, tileMoves, MOVE_MIN } from './web/render.mjs';
 import { pageScript, renderScript } from './pageScripts.mjs';
 import { WEB, drawnCss } from './webTestKit.mjs';
 
@@ -105,29 +105,45 @@ test('the Console map: an area per stage in the loop\'s order, each with its nam
   const order = [...html.matchAll(/<section class="map-area" data-stage="([^"]+)"/g)].map((m) => m[1]);
   assert.deepEqual(order, ['Requested', 'Needs your input', 'Queued', 'Building', 'In review', 'Rework', 'Ready to launch', 'Live']);
   assert.ok(!order.includes('Go'), '"Go" is the operator\'s answer, not a stage');
-  assert.match(html, /<div class="console"><div class="console-map" role="group" aria-label="The loop">/);
-  assert.match(html, /data-area="Requested" data-x="0" data-y="0" data-w="0\.2375" data-h="0\.64"><h2><span class="stage-name">Requested<\/span><span class="count quiet">0<\/span><\/h2><div class="tiles"><\/div>/);
+  assert.match(html, /<div class="console"><a class="map-funnel" href="\/new"[^>]*>[\s\S]*?<\/a><div class="console-map" role="group" aria-label="The loop">/);
+  assert.match(html, /data-area="Requested" data-x="0" data-y="0" data-w="0\.2" data-h="0\.8"><h2><span class="stage-name">Requested<\/span><span class="count quiet">0<\/span><\/h2><div class="tiles"><\/div>/);
   const area = (s) => html.slice(html.indexOf(`<section class="map-area" data-stage="${s}"`), html.indexOf('</section>', html.indexOf(`<section class="map-area" data-stage="${s}"`)));
   assert.match(area('Queued'), /<a class="tile" data-x="[\d.]+" data-y="[\d.]+" data-size="[\d.]+" href="\/t\/AL-1"/);
   assert.match(area('Needs your input'), /<a class="tile waiting" data-x=[^>]*href="\/t\/BE-1"/);
   assert.match(html, /<section class="console-other"><h2>Other Statuses<\/h2><div class="tiles"><a class="tile" href="\/t\/AL-2"/);
   assert.doesNotMatch(html, /style="/, 'places are data, never a style attribute');
-  assert.match(renderConsole(null, CONSOLE_NOW), /^<div class="console"><div class="console-map"[^>]*>(<section class="map-area"[\s\S]*?<\/section>){8}<svg class="map-detours"[\s\S]*?<\/svg><\/div><p class="map-detours-key quiet">[^<]+<\/p><\/div>$/);
+  assert.match(renderConsole(null, CONSOLE_NOW), /^<div class="console"><a class="map-funnel" href="\/new"[\s\S]*?<\/a><div class="console-map"[^>]*>(<section class="map-area"[\s\S]*?<\/section>){8}<svg class="map-detours"[\s\S]*?<\/svg><\/div><p class="map-detours-key quiet">[^<]+<\/p><\/div>$/);
 });
 
-test('the Console map\'s areas tile the map with no overlap, the main path round the edge and the two detours inside it (SP-333)', () => {
+test('the Console map\'s areas tile the map with no overlap, in the layout the operator drew (SP-333, SP-374)', () => {
   const inside = (a) => a.x >= 0 && a.y >= 0 && a.x + a.w <= MAP_UNITS.width && a.y + a.h <= MAP_UNITS.height;
   const overlap = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
   assert.ok(MAP_AREAS.every(inside));
   for (const a of MAP_AREAS) for (const b of MAP_AREAS) if (a !== b) assert.ok(!overlap(a, b), `${a.status} overlaps ${b.status}`);
   assert.equal(MAP_AREAS.reduce((n, a) => n + a.w * a.h, 0), MAP_UNITS.width * MAP_UNITS.height, 'every part of the map belongs to a stage');
   const at = Object.fromEntries(MAP_AREAS.map((a) => [a.status, a]));
-  const edge = (a) => a.x === 0 || a.y === 0 || a.x + a.w === MAP_UNITS.width || a.y + a.h === MAP_UNITS.height;
-  for (const s of ['Requested', 'Queued', 'Building', 'In review', 'Ready to launch', 'Live']) assert.ok(edge(at[s]), `${s} is on the main path round the edge`);
-  for (const s of ['Needs your input', 'Rework']) assert.ok(!edge(at[s]), `${s} is a detour inside the ring`);
-  // Live closes the loop under Requested.
-  assert.equal(at.Live.x, at.Requested.x);
-  assert.equal(at.Live.y, at.Requested.y + at.Requested.h);
+  // SP-374, the operator's picture: Requested tall on the left, spanning both rows.
+  assert.deepEqual([at.Requested.x, at.Requested.y], [0, 0]);
+  assert.equal(at.Requested.h, at.Queued.h + at['Needs your input'].h);
+  // The top row, left to right: Queued, Building, In review, meeting edge to edge.
+  const top = ['Queued', 'Building', 'In review'];
+  const bottom = ['Needs your input', 'Rework', 'Ready to launch'];
+  assert.equal(at.Queued.x, at.Requested.x + at.Requested.w);
+  for (const s of top) assert.equal(at[s].y, 0, `${s} is on the top row`);
+  for (let i = 1; i < top.length; i++) assert.equal(at[top[i]].x, at[top[i - 1]].x + at[top[i - 1]].w, `${top[i]} right of ${top[i - 1]}`);
+  // Each stop off the path under the stage above it, the same width.
+  bottom.forEach((s, i) => {
+    assert.equal(at[s].x, at[top[i]].x, `${s} under ${top[i]}`);
+    assert.equal(at[s].w, at[top[i]].w);
+    assert.equal(at[s].y, at[top[i]].y + at[top[i]].h);
+  });
+  // Live: one strip across the whole width, under both rows, about a third the height of a row.
+  assert.deepEqual([at.Live.x, at.Live.w, at.Live.y], [0, MAP_UNITS.width, at.Requested.h]);
+  assert.ok(at.Live.h <= at.Queued.h / 2, 'Live is a short strip');
+  // Exits follow the layout.
+  assert.deepEqual(Object.fromEntries(MAP_AREAS.map((a) => [a.status, a.exit])), {
+    Requested: 'right', 'Needs your input': 'up', Queued: 'right', Building: 'right', 'In review': 'down', Rework: 'up', 'Ready to launch': 'down', Live: 'right',
+  });
   // The shares the page draws by meet exactly too: rounding must not push one area onto its neighbour.
   const drawn = [...renderConsole(null, CONSOLE_NOW).matchAll(/data-area="([^"]+)" data-x="([\d.]+)" data-y="([\d.]+)" data-w="([\d.]+)" data-h="([\d.]+)"/g)]
     .map(([, status, x, y, w, h]) => ({ status, x: +x, y: +y, w: +w, h: +h }));
@@ -137,43 +153,56 @@ test('the Console map\'s areas tile the map with no overlap, the main path round
   assert.deepEqual(MAP_AREAS.map((a) => a.status).sort(), ['Building', 'In review', 'Live', 'Needs your input', 'Queued', 'Ready to launch', 'Requested', 'Rework']);
 });
 
-test('the detours are drawn as arrows for every route the code sends a ticket by, into and out of Needs your input and Rework, and no other (SP-334)', () => {
-  const routes = MAP_DETOURS.map((d) => `${d.from} -> ${d.to}`).sort();
+test('the routes are drawn as arrows for every way the code moves a ticket between stages, green forward and red back, and none from Requested straight to Queued (SP-334, SP-374)', () => {
+  const routes = MAP_DETOURS.map((d) => `${d.kind}: ${d.from} -> ${d.to}`).sort();
   assert.deepEqual(routes, [
-    'Building -> Needs your input',
-    'In review -> Needs your input',
-    'In review -> Rework',
-    'Needs your input -> Live',
-    'Needs your input -> Queued',
-    'Needs your input -> Rework',
-    'Requested -> Needs your input',
-    'Rework -> Building',
+    'back: Building -> Needs your input',
+    'back: In review -> Needs your input',
+    'back: In review -> Rework',
+    'forward: Building -> In review',
+    'forward: In review -> Ready to launch',
+    'forward: Needs your input -> Live',
+    'forward: Needs your input -> Queued',
+    'forward: Needs your input -> Rework',
+    'forward: Queued -> Building',
+    'forward: Ready to launch -> Live',
+    'forward: Requested -> Needs your input',
+    'forward: Rework -> Building',
   ]);
-  const detours = ['Needs your input', 'Rework'];
-  for (const d of MAP_DETOURS) assert.ok(detours.includes(d.from) || detours.includes(d.to), `${d.from} -> ${d.to} touches a detour`);
-  assert.ok(!MAP_DETOURS.some((d) => d.from === 'Ready to launch' || d.to === 'Ready to launch'), 'Ready to launch is on the main path, not a detour');
-  // Each arrow starts in the area it leaves and its point lands in the area it enters.
+  assert.ok(!MAP_DETOURS.some((d) => d.from === 'Requested' && d.to === 'Queued'), 'every new request stops in Needs your input for "go" first');
   const at = Object.fromEntries(MAP_AREAS.map((a) => [a.status, a]));
   const inArea = ([x, y], a) => x > a.x && x < a.x + a.w && y > a.y && y < a.y + a.h;
+  // Two areas share a border when they meet edge to edge along some length.
+  const span = (a0, a1, b0, b1) => Math.min(a1, b1) - Math.max(a0, b0);
+  const touch = (a, b) => ((a.x + a.w === b.x || b.x + b.w === a.x) && span(a.y, a.y + a.h, b.y, b.y + b.h) > 0)
+    || ((a.y + a.h === b.y || b.y + b.h === a.y) && span(a.x, a.x + a.w, b.x, b.x + b.w) > 0);
+  const rowLine = at.Queued.y + at.Queued.h;
   for (const d of MAP_DETOURS) {
     assert.ok(inArea(d.path[0], at[d.from]), `${d.from} -> ${d.to} starts in ${d.from}`);
     assert.ok(inArea(d.path[d.path.length - 1], at[d.to]), `${d.from} -> ${d.to} ends in ${d.to}`);
-    assert.ok(['input', 'rework'].includes(d.kind));
-    assert.equal(d.kind, d.from === 'Rework' || d.to === 'Rework' ? 'rework' : 'input', `${d.from} -> ${d.to} is coloured by its detour`);
+    assert.ok(d.why && d.why.length > 10, `${d.from} -> ${d.to} says when a ticket takes it`);
+    if (touch(at[d.from], at[d.to])) continue;
+    // Areas that do not share a border (In review meets Rework only at a corner): the arrow bends along the borders
+    // between areas to get there, each bend on the line between the rows or between two columns.
+    const columns = new Set(MAP_AREAS.filter((x) => x.y === 0).map((x) => x.x).filter((x) => x > 0));
+    assert.ok(d.path.length > 2, `${d.from} -> ${d.to} bends to get there`);
+    assert.ok(d.path.slice(1, -1).every(([x, y]) => y === rowLine || columns.has(x)), `${d.from} -> ${d.to} bends only on the borders between areas`);
   }
+  // Short arrows, so each covers little of either area.
+  for (const d of MAP_DETOURS) if (d.path.length === 2) assert.ok(Math.hypot(d.path[1][0] - d.path[0][0], d.path[1][1] - d.path[0][1]) <= 15, `${d.from} -> ${d.to} is short`);
 });
 
 test('the detours SVG: in map units over the map, one titled group per route, the head pointing along the last stretch, and a line under the map (SP-334)', () => {
   const svg = renderDetours();
-  assert.match(svg, /^<svg class="map-detours" viewBox="0 0 160 100" role="img" aria-label="Detours: Requested to Needs your input; [^"]+">/);
-  const groups = [...svg.matchAll(/<g class="detour detour-(input|rework)" data-from="([^"]+)" data-to="([^"]+)"><title>([^<]+)<\/title><path class="detour-line" d="([^"]+)"\/><path class="detour-head" d="([^"]+)"\/><\/g>/g)];
+  assert.match(svg, /^<svg class="map-detours" viewBox="0 0 160 100" role="img" aria-label="Routes: Requested to Needs your input; [^"]+">/);
+  const groups = [...svg.matchAll(/<g class="detour detour-(forward|back)" data-from="([^"]+)" data-to="([^"]+)"><title>([^<]+)<\/title><path class="detour-line" d="([^"]+)"\/><path class="detour-head" d="([^"]+)"\/><\/g>/g)];
   assert.equal(groups.length, MAP_DETOURS.length);
   assert.match(groups[0][4], /^Requested → Needs your input: /);
   assert.doesNotMatch(svg, /style="/);
   // A rightward arrow from (33, 58) to (43, 58): the line stops at the head's base, the head points right.
   const { line, head } = detourPathData([[33, 58], [43, 58]]);
-  assert.equal(line, 'M33 58 L40.8 58');
-  assert.equal(head, 'M43 58 L40.8 59.3 L40.8 56.7 Z');
+  assert.equal(line, 'M33 58 L40.4 58');
+  assert.equal(head, 'M43 58 L40.4 59.8 L40.4 56.2 Z');
   const up = detourPathData([[70, 37.5], [70, 28]]);
   assert.match(up.head, /^M70 28 L/);
   const html = renderConsole(null, CONSOLE_NOW);
@@ -183,7 +212,10 @@ test('the detours SVG: in map units over the map, one titled group per route, th
   assert.match(css, /\.map-detours \{ position: absolute; inset: 0;[^}]*z-index: 1;[^}]*pointer-events: none; \}/);
   assert.match(css, /\.console-map \.tile \{[^}]*z-index: 2; \}/, 'tiles sit over the arrows');
   assert.match(css, /\.console-map \.tile\.more\[open\] \{ z-index: 3; \}/, 'an open More list rises over the other tiles');
-  assert.match(css, /\.map-detours \.detour-rework \{ --detour: var\(--map-rework\); \}/);
+  assert.match(css, /\.map-detours \.detour \{ --detour: var\(--map-arrow-forward\);/, 'forward is green');
+  assert.match(css, /\.map-detours \.detour-back \{ --detour: var\(--map-arrow-back\); \}/, 'back is red');
+  assert.match(css, /--map-arrow-forward: #16a34a;/);
+  assert.match(css, /--map-arrow-back: #dc2626;/);
   assert.match(css, /@media \(max-width: 700px\) \{[\s\S]*?\.map-detours, \.map-detours-key \{ display: none; \}/, 'a stacked phone view has no map for arrows to cross');
 });
 
@@ -265,10 +297,17 @@ test('a "+N More" list opens toward the middle of the map, so Requested\'s, at t
     // At the map's narrowest (60rem) the 22rem list must fit on the side it opens toward.
     if (opens[area.status].includes('opens-right')) assert.ok((1 - left) * 60 >= 22, `${area.status} opens right with room`);
     else assert.ok(right * 60 >= 22, `${area.status} opens left with room`);
+    // And the list, up to 15rem tall, fits above or below it on the map (60rem wide, so 37.5rem tall).
+    const tall = 60 * MAP_UNITS.height / MAP_UNITS.width;
+    const topAt = (area.y + slotShare(area, placed.grid, placed.more).y * area.h) / MAP_UNITS.height;
+    const bottomAt = topAt + placed.grid.size / MAP_UNITS.height;
+    if (opens[area.status].includes('opens-up')) assert.ok(topAt * tall >= 15, `${area.status} opens up with room`);
+    else assert.ok((1 - bottomAt) * tall >= 15, `${area.status} opens down with room`);
   }
   assert.equal(opens.Requested, 'opens-right opens-up', 'far left, low: rightward and up');
   assert.match(opens.Live, /opens-right opens-up/);
-  assert.match(opens['Ready to launch'], /opens-up/);
+  // Ready to launch's More tile is its top row (its exit is down), just above the middle: its list opens down, over Live.
+  assert.match(opens['Ready to launch'], /opens-down/);
   assert.match(opens.Queued, /opens-down/);
   const html = renderConsole({ projects: [ALPHA], tickets: many('Requested') }, CONSOLE_NOW);
   assert.match(html, /<details class="tile more opens-right opens-up tile-tiny" data-stage="Requested"/);
@@ -286,7 +325,7 @@ test('a Live tile shows no next change, and says none aloud: it is finished (SP-
   assert.match(renderConsoleTile(consoleTicket({ status: 'Queued' }), ALPHA, CONSOLE_NOW), /class="fact next"/, 'in flight: still shown');
 });
 
-test('Live shows the launches the server sends, newest nearest Requested, each fading with age (SP-333)', () => {
+test('Live shows the launches the server sends, newest on the right where they arrive, each fading with age (SP-333)', () => {
   const ago = (h) => new Date(CONSOLE_NOW - h * 3_600_000).toISOString();
   const tickets = [
     consoleTicket({ id: 'AL-1', status: 'Live', stageSince: ago(20), nextChange: null }),
@@ -298,7 +337,7 @@ test('Live shows the launches the server sends, newest nearest Requested, each f
   assert.match(html, /\/t\/AL-3"/, 'sent by the server: drawn, at the fade floor');
   assert.doesNotMatch(/export function renderConsole\([\s\S]*?\n\}/.exec(renderScript())[0], /LIVE_SHOWN_MS/);
   const live = html.slice(html.indexOf('data-stage="Live" data-area'));
-  assert.ok(live.indexOf('/t/AL-2"') < live.indexOf('/t/AL-1"'), 'newest first, nearest the exit toward Requested');
+  assert.ok(live.indexOf('/t/AL-2"') < live.indexOf('/t/AL-1"'), 'newest first, on the right under Ready to launch, where launches arrive');
   assert.match(live, /data-fade="0\.97" href="\/t\/AL-2"/);
   assert.match(live, /data-fade="0\.42" href="\/t\/AL-1"/);
   assert.equal(liveFade(consoleTicket({ stageSince: ago(0) }), CONSOLE_NOW), 1);
@@ -470,7 +509,9 @@ test('the glide: a tile starts where its time in Building puts it and reaches th
   const glideFor = (hours) => {
     const placed = placeArea(building, [consoleTicket({ status: 'Building', stageSince: ago(hours) })], CONSOLE_NOW);
     const entrance = slotShare(building, placed.grid, { col: 0, row: 0 }).x;
-    const exit = slotShare(building, placed.grid, { col: placed.grid.cols - 1, row: 0 }).x;
+    // The exit line: where the tile's right edge meets the far side of the area's room (1.5 units of padding, AREA_PAD).
+    const exit = Math.round(((building.w - 1.5 - placed.grid.size) / building.w) * 10_000) / 10_000;
+    assert.ok(exit >= slotShare(building, placed.grid, { col: placed.grid.cols - 1, row: 0 }).x, 'never short of the last slot');
     return { glide: glidesOf(building, placed, CONSOLE_NOW)[0], entrance, exit };
   };
   const fresh = glideFor(0);
@@ -490,8 +531,9 @@ test('the glide: a tile starts where its time in Building puts it and reaches th
   assert.ok(Math.abs(later.from - moved) < 0.0002, `a minute on: ${later.from} where the glide put it, ${moved}`);
   assert.equal(later.ms, now.ms - 60_000);
   // An area leaving any way but right or down has none.
-  const ready = MAP_AREAS.find((a) => a.status === 'Ready to launch');
-  assert.deepEqual(glidesOf(ready, placeArea(ready, [consoleTicket({ status: 'Ready to launch' })], CONSOLE_NOW), CONSOLE_NOW), []);
+  const rework = MAP_AREAS.find((a) => a.status === 'Rework');
+  assert.equal(rework.exit, 'up');
+  assert.deepEqual(glidesOf(rework, placeArea(rework, [consoleTicket({ status: 'Rework' })], CONSOLE_NOW), CONSOLE_NOW), []);
 });
 
 test('gliding tiles never end up on top of each other, and none runs into one stopped at the exit (SP-365)', () => {
@@ -553,7 +595,9 @@ test('the glide down: an In review tile starts where its time in review puts it 
   const glideFor = (hours) => {
     const placed = placeArea(review, [consoleTicket({ status: 'In review', stageSince: ago(hours) })], CONSOLE_NOW);
     const top = slotShare(review, placed.grid, { col: 0, row: 0 }).y;
-    const bottom = slotShare(review, placed.grid, { col: 0, row: placed.grid.rows - 1 }).y;
+    // The bottom: where the tile meets the foot of the area's room (SP-374: In review is one row of full-size tiles tall).
+    const bottom = Math.round(((review.h - 1.5 - placed.grid.size) / review.h) * 10_000) / 10_000;
+    assert.ok(bottom >= slotShare(review, placed.grid, { col: 0, row: placed.grid.rows - 1 }).y, 'never short of the last slot');
     return { glide: glidesOf(review, placed, CONSOLE_NOW)[0], top, bottom };
   };
   const fresh = glideFor(0);
@@ -629,4 +673,113 @@ test('the In review area carries "running" only while GET /pipeline says Review 
   // The page toggles every glide area on each /pipeline read.
   const app = pageScript();
   assert.match(app, /for \(const status of Object\.keys\(GLIDE_AREAS\)\)/);
+});
+
+// ── Tiles slide when their status changes (SP-335) ───────────────────────────
+
+test('tileMoves: a tile in both draws that changed place moved, by how far; one that stayed is still', () => {
+  const before = [{ id: 'a', x: 10, y: 20 }, { id: 'b', x: 50, y: 50 }];
+  const after = [{ id: 'a', x: 210, y: 5 }, { id: 'b', x: 50, y: 50 }];
+  assert.deepEqual(tileMoves(before, after), { moved: [{ id: 'a', dx: 200, dy: -15 }], still: ['b'], added: [], gone: [] });
+});
+
+test('tileMoves: a ticket new to the board is added; one gone from it is gone, with its old place', () => {
+  const before = [{ id: 'a', x: 1, y: 2 }, { id: 'old', x: 30, y: 40 }];
+  const after = [{ id: 'a', x: 1, y: 2 }, { id: 'new', x: 70, y: 80 }];
+  assert.deepEqual(tileMoves(before, after), { moved: [], still: ['a'], added: ['new'], gone: [{ id: 'old', x: 30, y: 40 }] });
+});
+
+test('tileMoves: a shift inside its area (the queue moved up) slides too; a wobble under MOVE_MIN does not', () => {
+  const before = [{ id: 'a', x: 0, y: 40 }, { id: 'b', x: 0, y: 80 }];
+  const after = [{ id: 'a', x: 0, y: 40 + MOVE_MIN / 2 }, { id: 'b', x: 0, y: 40 + 40 / 2 }];
+  assert.deepEqual(tileMoves(before, after).moved, [{ id: 'b', dx: 0, dy: -20 }]);
+  assert.deepEqual(tileMoves(before, after).still, ['a']);
+});
+
+test('tileMoves: an empty board before fades every tile in; an empty board after fades every tile out', () => {
+  const tiles = [{ id: 'a', x: 1, y: 2 }, { id: 'b', x: 3, y: 4 }];
+  assert.deepEqual(tileMoves([], tiles), { moved: [], still: [], added: ['a', 'b'], gone: [] });
+  assert.deepEqual(tileMoves(tiles, []), { moved: [], still: [], added: [], gone: tiles });
+  assert.deepEqual(tileMoves([], []), { moved: [], still: [], added: [], gone: [] });
+});
+
+test('tileMoves: the first draw (no map before) moves and fades nothing', () => {
+  const tiles = [{ id: 'a', x: 1, y: 2 }];
+  assert.deepEqual(tileMoves(null, tiles), { moved: [], still: ['a'], added: [], gone: [] });
+  assert.deepEqual(tileMoves(undefined, []), { moved: [], still: [], added: [], gone: [] });
+});
+
+test('tileMoves: an id listed twice counts once, at its first place', () => {
+  const before = [{ id: 'a', x: 0, y: 0 }];
+  const after = [{ id: 'a', x: 0, y: 0 }, { id: 'a', x: 99, y: 99 }];
+  assert.deepEqual(tileMoves(before, after), { moved: [], still: ['a'], added: [], gone: [] });
+});
+
+test('the Console reads every tile\'s place before it redraws and slides them after, never on a first draw or with reduced motion', () => {
+  const app = pageScript();
+  const draw = /async function drawConsole\(\) \{([\s\S]*?)\n\}/.exec(app)[1];
+  assert.ok(draw.includes('const before = mapTiles()'));
+  assert.ok(draw.indexOf('const before = mapTiles()') < draw.indexOf('main.innerHTML'), 'the places are read before the map is replaced');
+  assert.ok(draw.indexOf('slideTiles(before)') > draw.indexOf('placeOnMap()'), 'the slide runs once the new tiles are placed');
+  const slide = /function slideTiles\(before\) \{([\s\S]*?)\n\}/.exec(app)[1];
+  assert.match(slide, /if \(!before \|\| !after \|\| stillPlease\(\)\) return;/);
+  assert.match(app, /matchMedia\?\.\('\(prefers-reduced-motion: reduce\)'\)/);
+});
+
+test('the slide, fade in and fade out are short, and reduced motion turns each of them off', () => {
+  const css = readFileSync(WEB('app.css'), 'utf8');
+  assert.match(css, /\.console-map \.tile\.tile-moving \{[^}]*transition: transform 450ms/);
+  assert.match(css, /\.console-map \.tile\.tile-arriving \{[^}]*animation: tile-arrive 450ms/);
+  assert.match(css, /\.console-map > \.tile\.tile-leaving \{[^}]*animation: tile-leave 450ms/);
+  assert.match(pageScript(), /const SLIDE_MS = 450;/);
+  const reduced = css.slice(css.indexOf('/* SP-335'), css.indexOf('/* SP-334'));
+  const media = reduced.slice(reduced.indexOf('@media (prefers-reduced-motion: reduce)'));
+  assert.match(media, /\.tile-moving \{ transition: none; \}/);
+  assert.match(media, /\.tile-arriving[^{]*\{ animation: none; \}/);
+  assert.match(media, /\.tile-leaving \{ display: none; \}/);
+});
+
+// ── The layout the operator drew (SP-374) ────────────────────────────────────
+
+test('a "Task Submitted" funnel sits over Requested, as wide as it, outside the map\'s areas, and opens the Add Task page (SP-374)', () => {
+  const funnel = renderFunnel();
+  assert.match(funnel, /^<a class="map-funnel" href="\/new" title="[^"]+">/);
+  assert.match(funnel, /<span class="map-funnel-label">Task Submitted<\/span><\/a>$/);
+  assert.match(funnel, /<svg class="map-funnel-shape" [^>]*aria-hidden="true">/);
+  const html = renderConsole(null, CONSOLE_NOW);
+  assert.ok(html.indexOf('class="map-funnel"') < html.indexOf('class="console-map"'), 'above the map, not one of its areas');
+  assert.doesNotMatch(funnel, /style="/);
+  // As wide as Requested: its share of the map, never under the map's 60rem floor.
+  const requested = MAP_AREAS.find((a) => a.status === 'Requested');
+  const pct = (100 * requested.w) / MAP_UNITS.width;
+  assert.equal(requested.x, 0, 'Requested is the left-hand area the funnel sits over');
+  const css = readFileSync(WEB('app.css'), 'utf8');
+  assert.match(css, new RegExp(`\\.map-funnel \\{[^}]*width: max\\(${pct}%, ${(60 * pct) / 100}rem\\);`));
+  assert.match(css, /\.map-funnel-shape polygon \{ fill: var\(--map-funnel-bg\); stroke: var\(--map-funnel-line\);/);
+});
+
+test('no tile is drawn taller than its area\'s room, so Live\'s short strip keeps its tiles inside it (SP-374)', () => {
+  for (const area of MAP_AREAS) {
+    for (const n of [1, 3, 12, 60]) {
+      const placed = placeArea(area, Array.from({ length: n }, (_, i) => consoleTicket({ id: `AL-${i + 1}`, status: area.status })), CONSOLE_NOW);
+      for (const slot of [...placed.tiles, ...(placed.more ? [placed.more] : [])]) {
+        const { x, y, size } = slotShare(area, placed.grid, slot);
+        const tall = (size * area.w) / area.h;
+        assert.ok(y + tall <= 1 + 1e-9, `${area.status} with ${n}: a tile hangs out of the bottom`);
+        assert.ok(x + size <= 1 + 1e-9, `${area.status} with ${n}: a tile hangs out of the side`);
+      }
+    }
+  }
+  const live = MAP_AREAS.find((a) => a.status === 'Live');
+  assert.ok(placeArea(live, [consoleTicket({ status: 'Live' })], CONSOLE_NOW).grid.size < TILE_MAX, 'Live\'s tiles are smaller than the largest');
+});
+
+test('every arrow\'s point lands where no tile can sit, in a header band or an area\'s padding, so no tile ever hides where a route leads (SP-374)', () => {
+  const at = Object.fromEntries(MAP_AREAS.map((a) => [a.status, a]));
+  // An area's room for tiles: inside its padding (1.5 units) and under its name (6 units), as areaGrid lays them.
+  const inRoom = ([x, y], a) => x > a.x + 1.5 && x < a.x + a.w - 1.5 && y > a.y + 6 && y < a.y + a.h - 1.5;
+  for (const d of MAP_DETOURS) {
+    const tip = d.path[d.path.length - 1];
+    assert.ok(!inRoom(tip, at[d.to]), `${d.from} -> ${d.to} points into ${d.to}'s tiles at ${tip}`);
+  }
 });
