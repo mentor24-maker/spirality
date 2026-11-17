@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseCard, validateCard, buildCard, renderCard, cardSurvived, findBlockquoteLines, findBranchLinks, branchLinkRefusal, countWords, fenceFor, fenceLines, splitFences, renderCardComment } from './operatorCard.mjs';
+import { parseCard, validateCard, buildCard, renderCard, cardSurvived, findBlockquoteLines, findBranchLinks, branchLinkRefusal, findSqlFiles, sqlBlockFiles, sqlFilesWithoutBlock, sqlBlockFor, sqlHandoffRefusal, SQL_BLOCK_HEAD, countWords, fenceFor, fenceLines, splitFences, renderCardComment } from './operatorCard.mjs';
 
 const sixty = Array.from({ length: 60 }, (_, i) => `word${i}`).join(' ');
 
@@ -118,4 +118,67 @@ test('findBranchLinks flags branch links and passes main and commit links (SP-17
   const msg = branchLinkRefusal(two, 'Nothing was posted.');
   assert.match(msg, /Nothing was posted\./);
   assert.ok(msg.includes(`  ${gh}/blob/a/x.md`) && msg.includes('git rev-parse HEAD') && msg.includes('/files'), msg);
+});
+
+// DOCTRINE 6.5: SQL handed to Dane goes in the run block, one per file (SP-381).
+const ROW = '#'.repeat(58);
+const C = '0123456789abcdef0123456789abcdef01234567';
+const block = (ref, file) => `${SQL_BLOCK_HEAD}\n\nhttps://github.com/o/r/blob/${ref}/${file}\n\n${ROW}`;
+const handoff = (body) => `Run this file in the SQL editor, then reply here.\n\nIt adds two fields; it changes nothing that exists.\n\n\n${body}\n\n\nYour move: Reply "ran it".`;
+
+test('a correct run block, by commit or by main, passes (SP-381)', () => {
+  for (const ref of [C, C.slice(0, 7), 'main']) {
+    const text = handoff(block(ref, 'docs/SQL/0042_add_field.sql'));
+    assert.deepEqual(findSqlFiles(text), ['docs/SQL/0042_add_field.sql']);
+    assert.deepEqual(sqlBlockFiles(text), ['docs/SQL/0042_add_field.sql']);
+    assert.deepEqual(sqlFilesWithoutBlock(text), []);
+  }
+  const two = handoff(`${block(C, 'docs/SQL/a.sql')}\n\n\n${block(C, 'docs/SQL/b.sql')}`);
+  assert.deepEqual(sqlFilesWithoutBlock(two), []);
+});
+
+test('a bare path, a bold numbered path, a fenced block and a branch link are refused (SP-381)', () => {
+  assert.deepEqual(sqlFilesWithoutBlock(handoff('Run docs/SQL/x.sql in the editor.')), ['docs/SQL/x.sql']);
+  assert.deepEqual(sqlFilesWithoutBlock(handoff('**1. docs/SQL/a.sql**\n**2. `docs/SQL/b.sql`**')), ['docs/SQL/a.sql', 'docs/SQL/b.sql']);
+  const fenced = handoff(`\`\`\`\n${block(C, 'docs/SQL/x.sql')}\n\`\`\`\nThe file is docs/SQL/x.sql.`);
+  assert.deepEqual(sqlBlockFiles(fenced), [], 'a fenced block is dead text, so it covers nothing');
+  assert.deepEqual(sqlFilesWithoutBlock(fenced), ['docs/SQL/x.sql']);
+  const branch = handoff(block('sql-handoff-check', 'docs/SQL/x.sql'));
+  assert.deepEqual(sqlBlockFiles(branch), []);
+  assert.deepEqual(sqlFilesWithoutBlock(branch), ['docs/SQL/x.sql']);
+  const bareLink = handoff(`https://github.com/o/r/blob/${C}/docs/SQL/x.sql`);
+  assert.deepEqual(sqlFilesWithoutBlock(bareLink), ['docs/SQL/x.sql'], 'a link with no block round it is not the handoff');
+});
+
+test('two files with one block leave the other refused; a block missing a line covers nothing (SP-381)', () => {
+  const text = handoff(`${block(C, 'docs/SQL/a.sql')}\n\nThen also docs/SQL/b.sql.`);
+  assert.deepEqual(findSqlFiles(text), ['docs/SQL/a.sql', 'docs/SQL/b.sql']);
+  assert.deepEqual(sqlFilesWithoutBlock(text), ['docs/SQL/b.sql']);
+  const squashed = `${SQL_BLOCK_HEAD}\nhttps://github.com/o/r/blob/${C}/docs/SQL/a.sql\n${ROW}`;
+  assert.deepEqual(sqlFilesWithoutBlock(squashed), ['docs/SQL/a.sql']);
+  const shortRow = `${SQL_BLOCK_HEAD}\n\nhttps://github.com/o/r/blob/${C}/docs/SQL/a.sql\n\n######`;
+  assert.deepEqual(sqlFilesWithoutBlock(shortRow), ['docs/SQL/a.sql'], 'six # is a heading, not the row');
+  assert.deepEqual(sqlFilesWithoutBlock(`${block(C, 'docs/SQL/a.sql')}\nSee a.sql above.`), [], 'a bare name is covered by its block');
+});
+
+test('a card naming no .sql file, or one only inside a fence, is untouched (SP-381)', () => {
+  assert.deepEqual(findSqlFiles(good), []);
+  assert.deepEqual(sqlFilesWithoutBlock('Nothing about SQL here; a `.sql` file is mentioned only by kind.'), []);
+  assert.deepEqual(sqlFilesWithoutBlock('The review read:\n```\nsee docs/SQL/x.sql\n```\nnothing else.'), []);
+  assert.deepEqual(sqlFilesWithoutBlock(`See https://github.com/o/r/pull/12/files for the change.`), []);
+});
+
+test('the refusal names each file and prints its block ready to paste (SP-381)', () => {
+  const ready = sqlBlockFor('docs/SQL/x.sql', 'owner/repo');
+  assert.equal(ready, `${SQL_BLOCK_HEAD}\n\nhttps://github.com/owner/repo/blob/<commit>/docs/SQL/x.sql\n\n${ROW}`);
+  assert.ok(sqlBlockFor('docs/SQL/x.sql').includes('github.com/<owner>/<repo>/blob/<commit>/'));
+  const msg = sqlHandoffRefusal(['docs/SQL/x.sql', 'docs/SQL/y.sql'], 'Nothing was posted.', 'owner/repo');
+  assert.match(msg, /DOCTRINE 6\.5/);
+  assert.match(msg, /Nothing was posted\./);
+  assert.match(msg, /no block for: docs\/SQL\/x\.sql/);
+  assert.match(msg, /no block for: docs\/SQL\/y\.sql/);
+  assert.ok(msg.includes(`\n\n\n${ready}\n\n`), 'the block sits with two blank lines round it');
+  // The ready-made block, once <commit> is filled in, passes the check it came from.
+  const filled = handoff(sqlBlockFor('docs/SQL/x.sql', 'owner/repo').replace('<commit>', C));
+  assert.deepEqual(sqlFilesWithoutBlock(filled), []);
 });

@@ -41,7 +41,7 @@ import {
   readyToLaunchGate, nextRound, wouldEscalate, roundSummaryLines, sendBackRounds, operatorSpokeLast,
   findPullRequest, newestFirst, ESCALATE_AT_ROUND,
 } from './lib/loopTrail.mjs';
-import { buildCard, cardSurvived, findBlockquoteLines, findBranchLinks, branchLinkRefusal, CONTEXT_MIN_WORDS, CONTEXT_MAX_WORDS } from './lib/operatorCard.mjs';
+import { buildCard, cardSurvived, findBlockquoteLines, findBranchLinks, branchLinkRefusal, sqlFilesWithoutBlock, sqlHandoffRefusal, CONTEXT_MIN_WORDS, CONTEXT_MAX_WORDS } from './lib/operatorCard.mjs';
 import { isMachineAuthored, isOperatorAuthored, stripMachineMarker } from './lib/machineComment.mjs';
 import { parseHumanHours, findHumanHours } from '../lib/humanHours.js';
 import { createClickupTracker } from './tracker/clickupTracker.mjs';
@@ -753,6 +753,18 @@ function refuseBranchLinks(text, nothing) {
   const links = findBranchLinks(text);
   if (!links.length) return;
   console.error(`\n${branchLinkRefusal(links, nothing)}\n`);
+  process.exit(2);
+}
+
+/**
+ * Exit 2, before any write, when `text` names a `.sql` file without the run
+ * block DOCTRINE 6.5 gives for it, printing the block ready to paste. Only
+ * `ask` and `comment` check: they hand SQL over; a spec only names it.
+ */
+function refuseSqlWithoutBlock(text, nothing) {
+  const files = sqlFilesWithoutBlock(text);
+  if (!files.length) return;
+  console.error(`\n${sqlHandoffRefusal(files, nothing, project.githubRepo)}\n`);
   process.exit(2);
 }
 
@@ -1719,6 +1731,7 @@ if (cmd === 'whoami') {
   const quoted = findBlockquoteLines(sent);
   if (quoted.length) { console.error(`The comment has "> " blockquote lines (${quoted.join(', ')}). ClickUp DELETES them. Nothing was posted.`); process.exit(2); }
   refuseBranchLinks(sent, 'Nothing was posted.');
+  refuseSqlWithoutBlock(sent, 'Nothing was posted.');
   const { id, stored } = await postComment(task, { comment_text: sent });
   console.log(`Comment ${id} added to task ${task} (${stored.comment_text.length} characters, verified by reading it back).`);
   reportLimits();
@@ -2023,6 +2036,7 @@ if (cmd === 'whoami') {
   try { ({ card, comment: commentBody } = buildCard(readBody(bodyFile))); } catch (err) { console.error(`\n${err.message}\n`); process.exit(2); }
   // @@ASKED is exempt: it is his own words, fenced on the card.
   refuseBranchLinks([card.context, card.needed, card.evidence].join('\n'), 'Nothing was posted and the status has NOT moved.');
+  refuseSqlWithoutBlock([card.context, card.needed, card.evidence].join('\n'), 'Nothing was posted and the status has NOT moved.');
   if (!noMove) { const stop = await alreadyAnsweredRefused(task, status); if (stop !== null) process.exit(stop); }
   if (!noMove) { const stop = await catchUpMergedRefused(task); if (stop !== null) process.exit(stop); }
   if (!noMove) { const stop = await alreadyAskedRefused(task, status); if (stop !== null) process.exit(stop); }

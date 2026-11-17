@@ -614,6 +614,33 @@ test('comment, ask, describe and task refuse a GitHub branch link with exit 2 an
   } finally { await f.cleanup(); }
 });
 
+test('ask and comment refuse SQL handed over without the run block, print the block, and write nothing (SP-381)', async () => {
+  const f = await fixture();
+  try {
+    f.file({ name: 'one', status: 'building', body: 'the spec' });
+    const before = (await f.door(['get', '--task', 'AL-1'])).out;
+    const card = CARD.replace('Pick option A or B.', 'Run **1. docs/SQL/0042_add_field.sql** in the SQL editor.');
+    const ask = await f.door(['ask', '--task', 'AL-1', '--body-file', '-'], { stdin: card });
+    assert.equal(ask.code, 2, ask.err);
+    assert.match(ask.err, /no block for: docs\/SQL\/0042_add_field\.sql/);
+    assert.ok(ask.err.includes('#################### RUN SQL IN SUPABASE ####################'), ask.err);
+    assert.match(ask.err, /blob\/<commit>\/docs\/SQL\/0042_add_field\.sql/);
+    assert.match(ask.err, /Nothing was posted and the status has NOT moved/);
+    const note = await f.door(['comment', '--task', 'AL-1', '--body-file', '-'], { stdin: 'Please run docs/SQL/0042_add_field.sql.\n' });
+    assert.equal(note.code, 2, note.err);
+    assert.match(note.err, /Nothing was posted/);
+    assert.equal(f.store.listComments('AL-1').length, 0);
+    assert.equal((await f.door(['get', '--task', 'AL-1'])).out, before);
+
+    // The same card with the block posts; so does a card naming no SQL file.
+    const runBlock = '#################### RUN SQL IN SUPABASE ####################\n\nhttps://github.com/owner/repo/blob/a78628c/docs/SQL/0042_add_field.sql\n\n' + '#'.repeat(58);
+    const good = CARD.replace('Pick option A or B.', `Run this file in the SQL editor.\n\nIt adds one field; it changes nothing that exists.\n\n\n${runBlock}\n\n`);
+    const posted = await f.door(['ask', '--task', 'AL-1', '--no-move', '--body-file', '-'], { stdin: good });
+    assert.equal(posted.code, 0, posted.err);
+    assert.equal(f.store.listComments('AL-1').length, 1);
+  } finally { await f.cleanup(); }
+});
+
 test('describe and task refuse a Waits on line the claim cannot read, naming the piece, and write nothing; a readable line files as before', async () => {
   const f = await fixture();
   try {
