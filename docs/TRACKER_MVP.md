@@ -1370,10 +1370,11 @@ StarCaster raises its alarms on **the bus**: a ClickUp chat channel (the
 a standing **Team chat** ticket instead, plus a second ClickUp list, **Agent
 Response**, where the steward asks Dane things and the relay watches for his
 replies. StarCaster cannot move to the tracker without a bus (SP-24).
-Spirality's own bus is the tracker project `spirality-bus` ("Spirality
-bus", tickets `SPBUS-…`), named as `busProject` in `spirality.project.json`
-(SP-281), so its relay's notices and any `ALARM:` line land on its "Team
-chat" ticket.
+Spirality's own bus is the Spirality project itself: `busProject` in
+`spirality.project.json` is `spirality` (SP-359), so its relay's notices and
+any `ALARM:` line land on the "Team chat" ticket in its own queue. That
+ticket was SPBUS-1 in the older `spirality-bus` project (SP-281) and kept
+its whole history when it moved; `/t/SPBUS-1` still opens it.
 
 A project is normally **its own bus** (SP-356): `busProject` in its
 project config is its own `projectSlug` (for example `starcaster`), so its
@@ -1390,9 +1391,8 @@ ticket's, so a word of Dane's on a work ticket is never taken for a stop
 word.
 
 A project set up before SP-356 may still name **a project of its own**,
-`<slug>-bus`, as its bus (Spirality's is `spirality-bus` until its own
-ticket moves it). There every ticket is the bus, as before, and no loop
-claims from it because the build and review lanes read `projectSlug` only.
+`<slug>-bus`, as its bus (Spirality's was `spirality-bus` until SP-359).
+There every ticket is the bus, as before, and no loop claims from it because the build and review lanes read `projectSlug` only.
 Either way each comment carries its author's own actor, so "only Dane's
 words" is read off the comment, not guessed from a stamp.
 

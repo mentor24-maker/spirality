@@ -391,7 +391,7 @@ there every ticket is the bus, and no loop claims from it.
 - **Kind**: slug; `null` is the same as left out
 - **Required**: no
 - **Default**: none: the project has no bus
-- **Example**: `"starcaster"` for StarCaster's own queue; Spirality's is still the older `"spirality-bus"` (SP-281) until its own ticket moves it
+- **Example**: `"spirality"` for Spirality's own queue (SP-359), `"starcaster"` for StarCaster's
 
 ### `projectLanes`
 
