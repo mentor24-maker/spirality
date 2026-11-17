@@ -13,7 +13,15 @@
  * Projects page).
  *
  * When the settings file names no busProject, the project has no bus and
- * nothing is done. Otherwise:
+ * nothing is done.
+ *
+ * When busProject is the project's own slug (SP-356, what the wizard writes
+ * now), the bus is the project's own queue: no second project is made. The
+ * project must already be there (the sign-ins step makes it) under this
+ * operator, and the `noticeboard` tag is saved on its tag list unless it is
+ * there, read back. The loop sign-ins are checked as below.
+ *
+ * Otherwise (an older "<slug>-bus"):
  *
  *   - The bus project is made unless it is there: slug busProject, name
  *     "<project name> bus", ticket prefix "<trackerPrefix>BUS", operator the
@@ -38,6 +46,33 @@ import { pathToFileURL } from 'node:url';
 import { openStore } from './store.mjs';
 import { loadProjectConfig } from '../lib/projectConfig.mjs';
 import { seatsForConfig } from './signins.mjs';
+import trackerBus from '../lib/trackerBus.js';
+
+const TAG_DESCRIPTION = 'A standing ticket that is not work: Team chat and other boards. No loop builds it.';
+
+/**
+ * The bus in the project's own queue: the project is there under this
+ * operator, and its tag list has `noticeboard` (saved now if missing, read
+ * back). Answers `{ ok, made: false, tagged, lines }`.
+ */
+function ensureOwnQueueBus({ store, config, person }) {
+  const slug = config.projectSlug;
+  const tag = trackerBus.NOTICEBOARD_TAG;
+  const there = store.getProject(slug);
+  if (!there) return { ok: false, made: false, tagged: false, lines: [`bus "${slug}" (the project's own queue): NOT ready. The project is not on this tracker yet (the sign-ins step makes it).`] };
+  if (there.operator !== person.id) {
+    return { ok: false, made: false, tagged: false, lines: [`bus "${slug}" (the project's own queue): REFUSED. Its operator is actor ${there.operator ?? '(none)'}, not ${person.name} (actor ${person.id}). Nothing changed.`] };
+  }
+  const has = () => store.listTags(slug).some((t) => t.name.toLowerCase() === tag);
+  if (has()) return { ok: true, made: false, tagged: false, lines: [`bus "${slug}": the project's own queue, no second project; the ${tag} tag is already on its tag list, left alone.`] };
+  try {
+    store.addTag({ project: slug, name: tag, description: TAG_DESCRIPTION, actor: person.id });
+  } catch (err) {
+    return { ok: false, made: false, tagged: false, lines: [`bus "${slug}": the ${tag} tag was NOT saved: ${err.message}`] };
+  }
+  if (!has()) return { ok: false, made: false, tagged: false, lines: [`bus "${slug}": the ${tag} tag was written but does NOT read back on its tag list.`] };
+  return { ok: true, made: false, tagged: true, lines: [`bus "${slug}": the project's own queue, no second project; ${tag} tag saved on its tag list (read back).`] };
+}
 
 /** The bus project's name and ticket prefix, made from the project's own. */
 export function busShape(config, projectName) {
@@ -48,7 +83,8 @@ export function busShape(config, projectName) {
  * Make the bus project if it is missing, and check the loops can use it.
  * `config` is the project's checked settings (loadProjectConfig);
  * `projectName` what the tracker shows for the project. Returns
- * `{ ok, made, lines }`: `made` true only when this run made the project.
+ * `{ ok, made, tagged, lines }`: `made` true only when this run made a bus
+ * project, `tagged` only when it saved the noticeboard tag on the project's own queue.
  */
 export function ensureBusProject({ store, config, projectName }) {
   const lines = [];
@@ -60,8 +96,14 @@ export function ensureBusProject({ store, config, projectName }) {
     return { ok: false, made: false, lines: [`bus project "${want.slug}": NOT made. operatorUserId ${config.operatorUserId} is not a person on this tracker.`] };
   }
   let made = false;
+  let tagged = false;
   const there = store.getProject(want.slug);
-  if (there) {
+  if (trackerBus.busIsOwnQueue(config)) {
+    const own = ensureOwnQueueBus({ store, config, person });
+    if (!own.ok) return own;
+    lines.push(...own.lines);
+    tagged = own.tagged;
+  } else if (there) {
     if (there.operator !== operator) {
       return { ok: false, made, lines: [`bus project "${want.slug}": REFUSED. It is there, but its operator is actor ${there.operator ?? '(none)'}, not ${person.name} (actor ${operator}): it may be another project's. Nothing changed; give this project another busProject, or correct it on the Projects page.`] };
     }
@@ -97,7 +139,7 @@ export function ensureBusProject({ store, config, projectName }) {
       lines.push(`${seat.name}: sees "${want.slug}" (actor ${found[0].id}).`);
     }
   }
-  return { ok, made, lines };
+  return { ok, made, tagged, lines };
 }
 
 const USAGE = 'usage: TRACKER_DB=<database> npm run tracker:bus -- --config <settings file> --name <project name>';

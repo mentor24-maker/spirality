@@ -298,10 +298,10 @@ function makeWorld(t) {
       if (script === 'tracker:bus') {
         // As the real one does (tracker/busProject.mjs): made once, then left alone.
         w.busRuns.push({ args: rest, db: o.env?.TRACKER_DB ?? null });
-        if (w.busFails) return no('bus project "pressplay-bus": NOT made: a project with slug "pressplay-bus" or prefix "PPBUS" already exists.\nbus: SOMETHING ABOVE FAILED.');
-        if (w.busMade) return ok('bus project "pressplay-bus": already there ("PressPlay bus", tickets PPBUS-…, operator Dana), left alone.\nbus: in order.');
+        if (w.busFails) return no('bus "pressplay": the noticeboard tag was NOT saved: a tag named noticeboard already exists.\nbus: SOMETHING ABOVE FAILED.');
+        if (w.busMade) return ok('bus "pressplay": the project\'s own queue, no second project; the noticeboard tag is already on its tag list, left alone.\nbus: in order.');
         w.busMade = true;
-        return ok('bus project "pressplay-bus": made, "PressPlay bus", tickets PPBUS-1 onwards, operator Dana (read back).\nbus: in order.');
+        return ok('bus "pressplay": the project\'s own queue, no second project; noticeboard tag saved on its tag list (read back).\nbus: in order.');
       }
       if (script === 'onboard:copy') {
         if (breaks('copy')) return no();
@@ -764,7 +764,7 @@ test('the state file follows every step: running when it starts, its outcome whe
   }
 });
 
-test('a project with a bus: the bus step makes its tracker project once, the settings name it, and a rerun makes nothing new (SP-204)', async (t) => {
+test('a project with a bus: the bus step readies its own queue once, the settings name the project itself, and a rerun changes nothing (SP-204, SP-356)', async (t) => {
   const { w, go, reset, seedAnswers, answersFile, settingsFile, logFile } = makeWorld(t);
   seedAnswers();
   const raw = JSON.parse(readFileSync(answersFile, 'utf8'));
@@ -773,12 +773,12 @@ test('a project with a bus: the bus step makes its tracker project once, the set
   w.fail = 'copy';
   assert.equal(await go(), 1, out(w));
   // The settings file the copy step puts in the project's repository names the bus.
-  assert.equal(JSON.parse(readFileSync(settingsFile, 'utf8')).busProject, 'pressplay-bus');
+  assert.equal(JSON.parse(readFileSync(settingsFile, 'utf8')).busProject, 'pressplay');
   assert.equal(w.busRuns.length, 1);
   assert.deepEqual(w.busRuns[0].args, ['--config', settingsFile, '--name', 'PressPlay']);
   assert.equal(w.busRuns[0].db, join(w.homeConfig.trackerDataDir, 'tracker.db'), 'the tracker home\'s own database');
-  assert.match(out(w), /^bus\s+bus project "pressplay-bus": made, "PressPlay bus"/m);
-  assert.match(readFileSync(logFile, 'utf8'), /\| bus \| done \| bus project "pressplay-bus" made on the tracker, read back/);
+  assert.match(out(w), /^bus\s+bus "pressplay": the project's own queue, no second project; noticeboard tag saved/m);
+  assert.match(readFileSync(logFile, 'utf8'), /\| bus \| done \| bus "pressplay" \(the project's own queue\): its noticeboard tag saved and read back/);
   // The bus is made after the sign-ins (its loops must exist to be checked) and before the copy.
   const at = (re) => w.calls.findIndex((c) => re.test(c));
   assert.ok(at(/tracker:signins -- check/) < at(/tracker:bus/));
@@ -790,7 +790,7 @@ test('a project with a bus: the bus step makes its tracker project once, the set
   w.mergeAfterPolls = 1;
   assert.equal(await go(), 0, out(w));
   assert.equal(w.busRuns.length, 2);
-  assert.match(out(w), /^bus\s+already done \(bus project "pressplay-bus" is on the tracker/m);
+  assert.match(out(w), /^bus\s+already done \(bus "pressplay" \(the project's own queue\) is on the tracker/m);
 });
 
 test('a bus the tracker refuses fails the bus step, and nothing after it runs (SP-204)', async (t) => {

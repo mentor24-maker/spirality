@@ -92,6 +92,7 @@ import stageCounts from '../lib/stageCounts.js';
 // A ticket's `Waits on:` line (task 86bctfun6): the claim leaves it alone
 // until every ticket it names is closed.
 import { waitsOn, waitsOnText, holdReasons } from '../lib/waitsOn.js';
+import { isNoticeboard } from '../lib/loopNoticeboards.js';
 import waitingOnOperator from '../lib/waitingOnOperator.js';
 import { ticketLine, findTicketId } from '../lib/clickupTicketLink.js';
 // Which files each open pull request changes (SP-349).
@@ -793,7 +794,11 @@ function autoMergeLedgerPath() {
   return dir ? joinPath(dir, 'auto-merge-ledger.json') : null;
 }
 
-/** Every message on the bus project, or why it could not be read. One unread ticket is unreadable. */
+/**
+ * Every message on the bus, or why it could not be read. One unread ticket
+ * is unreadable. In the project's own queue the bus is its noticeboards
+ * only (SP-356): a comment on a work ticket is never a stop word.
+ */
 async function readBusMessages() {
   if (project.tracker !== 'api') return { ok: false, why: `the bus is a tracker project, and this project's tracker is "${project.tracker}"` };
   const bus = project.busProject;
@@ -801,7 +806,7 @@ async function readBusMessages() {
   const listed = await tracker.listTasksPage(bus, 0, { includeClosed: true });
   if (!listed.res.ok || !Array.isArray(listed.json?.tasks)) return { ok: false, why: `the bus project ${bus} could not be listed (HTTP ${listed.res.status})` };
   const messages = [];
-  for (const t of listed.json.tasks) {
+  for (const t of trackerBus.busTickets(listed.json.tasks, { ownQueue: trackerBus.busIsOwnQueue(project) })) {
     const read = await readCommentsOrProblem(t.id);
     if (read.problem) return { ok: false, why: `the comments on ${t.id} "${t.name}" could not be read (${read.problem})` };
     for (const c of read.comments) {
@@ -820,7 +825,7 @@ async function postBusMessage(text, bus = project.busProject) {
   if (project.tracker !== 'api' || !bus) return { ok: false, why: 'this project has no bus' };
   const listed = await tracker.listTasksPage(bus, 0, { includeClosed: true });
   if (!listed.res.ok || !Array.isArray(listed.json?.tasks)) return { ok: false, why: `the bus project ${bus} could not be listed (HTTP ${listed.res.status})` };
-  const chat = trackerBus.pickTeamChat(listed.json.tasks);
+  const chat = trackerBus.pickTeamChat(trackerBus.busTickets(listed.json.tasks, { ownQueue: true }));
   if (!chat) return { ok: false, why: `there is no "${FALLBACK_TASK_NAME}" ticket in ${bus} (npm run clickup -- bus-post makes one)` };
   const post = trackerBus.renderBusPost({ text, node: hostname(), at: trackerBus.mountainTime(Date.now()) });
   if (!post) return { ok: false, why: 'the message was empty' };
@@ -889,7 +894,14 @@ async function releaseFollowStep({ dryRun }) {
         if (!back.res.ok) return { ok: false, problem: `named, but the record could not be read back (HTTP ${back.res.status})` };
         return { ok: true, release: back.json.release ?? null };
       },
-      busOf: (slug) => (slugs.has(trackerBus.busProjectFor(slug)) ? trackerBus.busProjectFor(slug) : null),
+      // Its "<slug>-bus" project, else itself when its own queue holds a
+      // Team chat (SP-356); a queue that cannot be read is no bus, said.
+      busOf: async (slug) => {
+        if (slugs.has(trackerBus.separateBusSlug(slug))) return trackerBus.separateBusSlug(slug);
+        const listed = await tracker.listTasksPage(slug, 0, { includeClosed: true });
+        if (!listed.res.ok || !Array.isArray(listed.json?.tasks)) return { problem: `its queue could not be read to find its bus (HTTP ${listed.res.status})` };
+        return trackerBus.busOfProject(slug, { slugs, tasks: listed.json.tasks });
+      },
       postBus: async (bus, text) => {
         const out = await postBusMessage(text, bus);
         return out.ok ? { ok: true } : { ok: false, problem: out.why };
@@ -1162,6 +1174,13 @@ if (cmd === 'claim') {
     console.error(`Claimable statuses, in drain order: ${CLAIMABLE_BY_BUILD.map((x) => DISPLAY[x]).join(', ')}. Take the next task.`);
     process.exit(3);
   }
+  // A noticeboard is not work (SP-356): with the bus in the project's own
+  // queue, a steward's question parked in a claimable status by hand must
+  // still never be built.
+  if (isNoticeboard(seen)) {
+    console.error(`NOT claimed: "${task}" is a noticeboard (Team chat, the pause switch, or tagged noticeboard), not work. Nothing was written. Take the next task.`);
+    process.exit(3);
+  }
   const states = await prerequisiteStates([seen]);
   const held = holdReasons(seen, (id) => states.get(id));
   if (held.reasons.length) {
@@ -1265,7 +1284,10 @@ if (cmd === 'whoami') {
   if (claimable) {
     // A ticket from this (open-only) list is open; any other prerequisite
     // is read on its own, so queue and claim apply the same rule.
-    const ordered = claimOrder(tasks);
+    const ordered = claimOrder(tasks).filter((t) => {
+      if (isNoticeboard(t)) console.error(`skipped ${t.id}: a noticeboard, not work (SP-356)`);
+      return !isNoticeboard(t);
+    });
     const states = await prerequisiteStates(ordered, tasks.map((t) => t.id));
     wanted = ordered.filter((t) => {
       const held = holdReasons(t, (id) => states.get(id));
@@ -1548,6 +1570,8 @@ if (cmd === 'whoami') {
   refuseBranchLinks(body, 'Nothing was created.');
   const classWanted = classFlags('Nothing was created.');
   const tags = arg('tags') ? arg('tags').split(',').map((s) => s.trim()).filter(Boolean) : undefined;
+  const boardProblem = trackerBus.noticeboardFilingProblem({ status: arg('status'), tags });
+  if (boardProblem) { console.error(`task: ${boardProblem}. Nothing was created.`); process.exit(2); }
   const out = await tracker.createTask(list, {
     name,
     markdown_description: body,
@@ -2611,7 +2635,9 @@ if (cmd === 'whoami') {
       }
       description = out.json.markdown_description || out.json.description || '';
     }
-    const plan = handbackPlan({ status: task.status?.status, verdict, answerReplies: replies, pr, description });
+    const plan = handbackPlan({
+      status: task.status?.status, verdict, answerReplies: replies, pr, description, noticeboard: isNoticeboard(task),
+    });
     if (plan.act === 'waiting') { say(task, 'waiting', `waiting on ${who}: ${plan.why}`); return; }
     if (plan.act === 'cannot-tell') {
       unchecked.push(`${task.id}: ${who} answered, but ${plan.why}`);
@@ -2851,11 +2877,25 @@ if (cmd === 'whoami') {
     if (!bodyFile) usage();
     const post = trackerBus.renderBusPost({ text: readBody(bodyFile), node: arg('from') || hostname(), at: trackerBus.mountainTime(Date.now()) });
     if (!post) { console.error('bus-post: the message is empty. Nothing was posted.'); process.exit(2); }
-    let chat = trackerBus.pickTeamChat(listed.json.tasks);
+    let chat = trackerBus.pickTeamChat(trackerBus.busTickets(listed.json.tasks, { ownQueue: true }));
     if (!chat) {
+      // The tag that keeps it off the work counts and in what bus-read reads
+      // (SP-356): saved on the project first, so the Tags page lists it.
+      const tagWord = trackerBus.NOTICEBOARD_TAG;
+      const saved = await tracker.listProjectTags(bus);
+      if (!saved.res.ok || !Array.isArray(saved.json?.tags)) die(`read the tags of ${bus}`, saved);
+      if (!saved.json.tags.some((g) => String(g.name).toLowerCase() === tagWord)) {
+        const add = await tracker.addProjectTag(bus, tagWord, 'A standing ticket that is not work: Team chat and other boards. No loop builds it.');
+        if (!add.res.ok && add.res.status !== 409) die(`save the ${tagWord} tag on ${bus}`, add);
+        const again = await tracker.listProjectTags(bus);
+        if (!again.res.ok || !Array.isArray(again.json?.tags) || !again.json.tags.some((g) => String(g.name).toLowerCase() === tagWord)) {
+          console.error(`bus-post: the ${tagWord} tag did NOT read back on ${bus}'s tag list. Nothing was created or posted.`);
+          process.exit(1);
+        }
+      }
       const made = await tracker.createTask(bus, {
         name: FALLBACK_TASK_NAME, markdown_description: trackerBus.renderTeamChatSeed(), status: trackerBus.TEAM_CHAT_STATUS,
-        ...LOOP_FILING_CLASS,
+        tags: [tagWord], ...LOOP_FILING_CLASS,
       });
       if (!made.res.ok) die(`create the "${FALLBACK_TASK_NAME}" ticket in ${bus}`, made);
       chat = await readTask(made.json.id);
@@ -2863,14 +2903,16 @@ if (cmd === 'whoami') {
         console.error(`bus-post: created ${made.json.id}, but it read back named ${JSON.stringify(chat.name)}. Nothing was posted.`);
         process.exit(1);
       }
-      // Live is the only thing keeping a loop from claiming it (rule 5: read it back).
-      if (statusOf(chat) !== trackerBus.TEAM_CHAT_STATUS.toLowerCase()) {
-        console.error(`bus-post: created ${chat.id} "${chat.name}", but it read back in status ${JSON.stringify(statusOf(chat))}, not "${trackerBus.TEAM_CHAT_STATUS}", so a loop could claim it. Nothing was posted; move it to ${trackerBus.TEAM_CHAT_STATUS} on the page.`);
+      // Live keeps every loop from claiming it, the tag keeps it off the
+      // work counts and in what bus-read reads (rule 5: read both back).
+      const unstuck = trackerBus.teamChatReadBackProblems(chat);
+      if (unstuck.length) {
+        console.error(`bus-post: created ${chat.id} "${chat.name}", but ${unstuck.join('; and ')}. Nothing was posted; put that right on the page.`);
         process.exit(1);
       }
       const classWrong = classMismatches(chat, LOOP_FILING_CLASS);
       if (classWrong.length) console.error(`bus-post: created ${chat.id}, but its class did not stick (${classWrong.join('; ')}); set it with classify.`);
-      console.error(`bus-post: there was no "${FALLBACK_TASK_NAME}" ticket in ${bus}; created ${chat.id} in ${trackerBus.TEAM_CHAT_STATUS} (read back).`);
+      console.error(`bus-post: there was no "${FALLBACK_TASK_NAME}" ticket in ${bus}; created ${chat.id} in ${trackerBus.TEAM_CHAT_STATUS}, tagged ${trackerBus.NOTICEBOARD_TAG} (both read back).`);
     }
     const { id } = await postComment(chat.id, { comment_text: post });
     console.log(`Posted to the bus: comment ${id} on ${chat.id} "${chat.name}" in ${bus} (verified by reading it back).`);
@@ -2886,14 +2928,15 @@ if (cmd === 'whoami') {
     // chat above all): name it, carry on, and fail at the end.
     const tickets = [];
     const unread = [];
-    for (const t of listed.json.tasks) {
+    const ownQueue = trackerBus.busIsOwnQueue(project);
+    for (const t of trackerBus.busTickets(listed.json.tasks, { ownQueue })) {
       const read = await readCommentsOrProblem(t.id);
       if (read.problem) { unread.push(t); console.error(`bus-read: could NOT read the comments on ${t.id} "${t.name}" (${read.problem}); its messages are missing below.`); continue; }
       tickets.push({ id: t.id, name: t.name, comments: read.comments });
     }
     const messages = trackerBus.busMessages(tickets, { operatorId: OPERATOR_ID, operatorOnly: flag('operator'), since });
     for (const m of messages) console.log(trackerBus.busLine(m));
-    console.error(`${messages.length} message(s) on the bus (${bus}, ${tickets.length} ticket(s) read in full)${flag('operator') ? ', the operator\'s only' : ''}${since != null ? ` after ${trackerBus.mountainTime(since)}` : ''}.`);
+    console.error(`${messages.length} message(s) on the bus (${bus}, ${tickets.length} ${ownQueue ? 'noticeboard ' : ''}ticket(s) read in full)${flag('operator') ? ', the operator\'s only' : ''}${since != null ? ` after ${trackerBus.mountainTime(since)}` : ''}.`);
     if (unread.length) {
       console.error(`bus-read FAILED on ${unread.length} ticket(s): ${unread.map((t) => t.id).join(', ')}. The list above is incomplete.`);
       reportLimits();
