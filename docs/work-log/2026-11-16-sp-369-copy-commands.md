@@ -1,4 +1,4 @@
-## 2026-11-16 — Add why-stuck and others in the Quick Claude Commands in Docs
+## 2026-11-16 — Add why-stuck and others in the Quick Claude Commands in Docs (#297)
 
 The Docs page's Quick Claude Commands pod lists Dane's own slash commands from
 this repository's copy in `commands/`, but that copy was empty, so none of his
