@@ -1075,6 +1075,18 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
     return role === 'admin' || isMember(slug, actorId);
   }
 
+  /**
+   * Whether an actor may delete tickets: a loop (a machine) always; a person
+   * when their role carries ticket.delete (a person with no role row is a
+   * contributor, so is refused). Role only, not project membership.
+   */
+  function canDeleteTickets(actorId) {
+    const row = db.prepare('SELECT kind FROM actors WHERE id = ?').get(actorId);
+    if (!row) return false;
+    if (row.kind !== 'human') return true;
+    return Boolean(ROLE_PERMISSIONS[roleOf(actorId)]?.includes('ticket.delete'));
+  }
+
   function adminCount() {
     return num(db.prepare("SELECT COUNT(*) AS n FROM user_roles r JOIN actors a ON a.id = r.actor WHERE r.role = 'admin' AND a.kind = 'human'").get().n);
   }
@@ -1660,6 +1672,11 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
     /** A person's role (contributor if none was ever set); null for a machine or an unknown id. Machines have no role. */
     roleOf(actorId) {
       return roleOf(actorId);
+    },
+
+    /** Whether an actor may delete tickets: a machine always, a person whose role carries ticket.delete. */
+    canDeleteTickets(actorId) {
+      return canDeleteTickets(actorId);
     },
 
     /**

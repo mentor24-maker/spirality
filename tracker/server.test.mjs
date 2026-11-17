@@ -545,6 +545,54 @@ test('DELETE /tickets/:id removes an unstarted ticket with its comments; a start
   } finally { await f.cleanup(); }
 });
 
+test('DELETE /tickets/:id needs ticket.delete: an editor deletes, a contributor, reviewer or viewer is 403 cannot-delete and the ticket stays, a loop deletes', async () => {
+  const f = await fixture();
+  try {
+    const person = (name, role) => {
+      const a = f.store.createActor({ kind: 'human', name });
+      f.store.addMember({ project: 'alpha', actor: a.id, by: f.human.id });
+      if (role) f.store.setRole({ actor: a.id, role, by: f.human.id });
+      return { ...a, token: f.store.issueToken(a.id) };
+    };
+    const editor = person('Edna', 'editor');
+    const t = f.store.fileTicket({ project: 'alpha', actor: f.machine.id, name: 'editor deletes', status: 'requested' });
+    const ok = await f.call('DELETE', `/tickets/${t.id}`, { token: editor.token });
+    assert.equal(ok.status, 200, ok.text);
+    assert.deepEqual(ok.body, { deleted: t.id, status: 'requested' });
+    assert.equal((await f.call('GET', `/tickets/${t.id}`)).status, 404);
+
+    // No role row is a contributor; the others are set.
+    for (const [name, role, shown] of [['Cora', null, 'contributor'], ['Carl', 'contributor', 'contributor'], ['Rita', 'reviewer', 'reviewer'], ['Vera', 'viewer', 'viewer']]) {
+      const p = person(name, role);
+      const kept = f.store.fileTicket({ project: 'alpha', actor: f.machine.id, name: `kept from ${name}`, status: 'requested' });
+      f.store.postComment({ ticket: kept.id, author: f.human.id, body: 'stays' });
+      const before = (await f.call('GET', `/tickets/${kept.id}`)).body;
+      const r = await f.call('DELETE', `/tickets/${kept.id}`, { token: p.token });
+      assert.equal(r.status, 403, `${name}: ${r.text}`);
+      assert.equal(r.body.error, 'cannot-delete');
+      assert.equal(r.body.ticket, kept.id);
+      assert.equal(r.body.role, shown);
+      assert.match(r.body.message ?? r.text, new RegExp(shown));
+      const after = await f.call('GET', `/tickets/${kept.id}`);
+      assert.equal(after.status, 200);
+      assert.deepEqual(after.body, before);
+      assert.equal(after.body.comments.length, 1);
+      assert.ok(!f.lines.some((l) => l.startsWith(`deleted ticket ${kept.id} `)), name);
+    }
+    // A started ticket is still 409 for someone allowed, an unknown one 404.
+    const started = f.store.fileTicket({ project: 'alpha', actor: f.machine.id, name: 'started', status: 'building' });
+    const busy = await f.call('DELETE', `/tickets/${started.id}`, { token: editor.token });
+    assert.equal(busy.status, 409);
+    assert.equal(busy.body.error, 'not-deletable');
+    assert.equal((await f.call('DELETE', '/tickets/AL-999', { token: editor.token })).status, 404);
+
+    const byLoop = f.store.fileTicket({ project: 'alpha', actor: f.machine.id, name: 'loop deletes', status: 'queued' });
+    const gone = await f.call('DELETE', `/tickets/${byLoop.id}`, { token: f.machineToken });
+    assert.equal(gone.status, 200, gone.text);
+    assert.deepEqual(gone.body, { deleted: byLoop.id, status: 'queued' });
+  } finally { await f.cleanup(); }
+});
+
 test('an old ClickUp id the importer mapped reads, changes and deletes the ticket it became; an unmapped id is still a 404 (SP-157)', async () => {
   const f = await fixture();
   try {

@@ -27,7 +27,9 @@
  *   503  an invite with no mail sender or no tracker address (nothing made)
  *   400  a bad field, or a body that names another author
  *   403  a write only a person may make, asked by a loop's token, or a
- *        role or member change asked by someone who is not an admin
+ *        role or member change asked by someone who is not an admin,
+ *        or a ticket delete by a person whose role lacks ticket.delete:
+ *        `{ error: 'cannot-delete', ticket, role }`
  * A ticket's attachments are the one call whose body is not JSON: `POST
  * /tickets/<id>/attachments` takes the file's raw bytes
  * (`content-type: application/octet-stream`), its name in `x-file-name`
@@ -1529,6 +1531,12 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
       // The log line names the ticket and the actor, the deletion's record.
       if (method === 'DELETE') {
         const { id } = requireTicket(parts[1], me);
+        if (!store.canDeleteTickets(me.id)) {
+          const role = store.roleOf(me.id);
+          throw new HttpError(403, 'cannot-delete',
+            `your role (${role}) does not allow deleting tickets, so ${id} was left as it was; an admin or editor can delete it.`,
+            { ticket: id, role });
+        }
         let gone;
         try {
           gone = store.deleteTicket(id, { actor: me.id });
