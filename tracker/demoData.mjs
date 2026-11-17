@@ -347,7 +347,8 @@ export function writeDemoLogs(folder, slug, now = new Date()) {
   const files = {
     relay: [`===== ${logDate(ago(4))} START relay — demo =====`, `===== ${logDate(ago(3.9))} END relay — pass complete (exit 0) =====`].join('\n'),
     'loop-build': [lane('loop-build', ago(36), ago(32), 1800), lane('loop-build', ago(2), null, 1800)].join('\n'),
-    'loop-review': lane('loop-review', ago(20), ago(17), 1800),
+    // Review is mid-pass too (SP-366), so the demo's Console shows In review's tiles gliding as well as Building's.
+    'loop-review': [lane('loop-review', ago(20), ago(17), 1800), lane('loop-review', ago(3), null, 1800)].join('\n'),
     'loop-intake': lane('loop-intake', ago(9), ago(8), 1800),
   };
   for (const [job, text] of Object.entries(files)) writeFileSync(join(folder, `${slug}-${job}.log`), `${text}\n`);

@@ -6,7 +6,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { contrast, renderConsole, renderDetours, detourPathData, MAP_DETOURS, DETOURS_KEY, renderConsoleTile, MAP_AREAS, MAP_UNITS, placeArea, driftOf, liveFade, slotShare, moreOpens, moreFeatures, tileSizeClass, TILE_MAX, TILE_MIN, TILE_COMPACT, TILE_TINY, LIVE_FADE_FLOOR, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, consoleFeature, featureColourIndex, renderFeatureKey, FEATURE_PALETTE, capInFlightText, glidesOf, buildRunning, GLIDE_AREA, DRIFT_FULL_MS } from './web/render.mjs';
+import { contrast, renderConsole, renderDetours, detourPathData, MAP_DETOURS, DETOURS_KEY, renderConsoleTile, MAP_AREAS, MAP_UNITS, placeArea, driftOf, liveFade, slotShare, moreOpens, moreFeatures, tileSizeClass, TILE_MAX, TILE_MIN, TILE_COMPACT, TILE_TINY, LIVE_FADE_FLOOR, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, consoleFeature, featureColourIndex, renderFeatureKey, FEATURE_PALETTE, capInFlightText, glidesOf, buildRunning, laneRunning, runningAreas, GLIDE_AREA, GLIDE_AREAS, DRIFT_FULL_MS } from './web/render.mjs';
 import { pageScript, renderScript } from './pageScripts.mjs';
 import { WEB, drawnCss } from './webTestKit.mjs';
 
@@ -313,7 +313,7 @@ test('the Console page: /in-flight and the stage colours drawn, a Console link b
   assert.match(draw, /api\('GET', '\/in-flight'\)/);
   assert.match(draw, /api\('GET', '\/stage-colours'\)/);
   assert.match(draw, /localStorage\.setItem\(VIEW_KEY, 'console'\)/);
-  assert.match(draw, /renderConsole\(answer, Date\.now\(\), \{ running: buildRunning\(lastPipeline\(\)\) \}\)\}`;\s*placeOnMap\(\);\s*showBuildRunning\(\);/);
+  assert.match(draw, /renderConsole\(answer, Date\.now\(\), \{ running: runningAreas\(lastPipeline\(\)\) \}\)\}`;\s*placeOnMap\(\);\s*showLanesRunning\(\);/);
   assert.match(draw, /answer\.tickets\.some\(\(t\) => t\.status !== 'Live'\) \? '' : '<p class="quiet">Nothing is in flight\.<\/p>'/, 'the last day\'s launches are not work in flight');
   // Each place becomes a CSS value set from the page's code, never a style attribute.
   const place = /function placeOnMap\(\) \{([\s\S]*?)\n\}/.exec(app)[1];
@@ -489,9 +489,9 @@ test('the glide: a tile starts where its time in Building puts it and reaches th
   const moved = now.from + (now.to - now.from) * (60_000 / now.ms);
   assert.ok(Math.abs(later.from - moved) < 0.0002, `a minute on: ${later.from} where the glide put it, ${moved}`);
   assert.equal(later.ms, now.ms - 60_000);
-  // Only Building glides: an area leaving any other way has none.
-  const review = MAP_AREAS.find((a) => a.status === 'In review');
-  assert.deepEqual(glidesOf(review, placeArea(review, [consoleTicket({ status: 'In review' })], CONSOLE_NOW), CONSOLE_NOW), []);
+  // An area leaving any way but right or down has none.
+  const ready = MAP_AREAS.find((a) => a.status === 'Ready to launch');
+  assert.deepEqual(glidesOf(ready, placeArea(ready, [consoleTicket({ status: 'Ready to launch' })], CONSOLE_NOW), CONSOLE_NOW), []);
 });
 
 test('gliding tiles never end up on top of each other, and none runs into one stopped at the exit (SP-365)', () => {
@@ -522,23 +522,111 @@ test('the Building area carries "running" only while GET /pipeline says Build is
   assert.equal(buildRunning(null), false, 'a failed read');
   assert.equal(buildRunning({}), false);
   const tickets = [consoleTicket({ status: 'Building', stageSince: '2026-11-12T17:00:00.000Z' })];
-  const on = renderConsole({ projects: [ALPHA], tickets }, CONSOLE_NOW, { running: true });
+  const on = renderConsole({ projects: [ALPHA], tickets }, CONSOLE_NOW, { running: runningAreas(stages(true)) });
   const off = renderConsole({ projects: [ALPHA], tickets }, CONSOLE_NOW);
   assert.match(on, /<section class="map-area running" data-stage="Building"/);
-  assert.equal((on.match(/map-area running/g) ?? []).length, 1, 'only Building');
+  assert.match(on, /<section class="map-area running" data-stage="In review"/, 'Review is running in this answer too');
+  assert.equal((on.match(/map-area running/g) ?? []).length, 2, 'only the two glide areas');
   assert.doesNotMatch(off, /map-area running/);
-  assert.match(off, /data-glide-from="[\d.]+" data-glide-to="[\d.]+" data-glide-ms="\d+"/);
+  assert.match(off, /data-glide="right" data-glide-from="[\d.]+" data-glide-to="[\d.]+" data-glide-ms="\d+"/);
   assert.doesNotMatch(on, /style=/, 'no style attribute: the page sets the glide after drawing');
   // The page follows every /pipeline read, and sets the glide as CSS values, as placeOnMap places tiles.
   const app = pageScript();
   assert.match(app, /document\.dispatchEvent\(new Event\(PIPELINE_READ\)\)/);
-  assert.match(app, /document\.addEventListener\(PIPELINE_READ, showBuildRunning\)/);
-  assert.match(app, /area\.classList\.toggle\('running', buildRunning\(lastPipeline\(\)\)\)/);
+  assert.match(app, /document\.addEventListener\(PIPELINE_READ, showLanesRunning\)/);
+  assert.match(app, /area\.classList\.toggle\('running', running\.includes\(status\)\)/);
   assert.match(app, /glideFrom: '--glide-from', glideTo: '--glide-to'/);
   // The pulse, the glide, and neither under reduced motion or on a phone's stacked areas.
   const css = readFileSync(WEB('app.css'), 'utf8');
-  assert.match(css, /\.map-area\.running \{ animation: area-pulse /);
+  assert.match(css, /\.map-area\.running\[data-area="Building"\] \{ animation: area-pulse /);
   assert.match(css, /@keyframes area-pulse \{ from \{ background: color-mix\(in srgb, var\(--area\) 20%, var\(--bg-surface\)\); \} to \{ background: color-mix\(in srgb, var\(--area\) 30%, var\(--bg-surface\)\); \} \}/);
   assert.match(css, /\.map-area\.running \.tile\[data-glide-ms\] \{ animation: tile-glide var\(--glide-ms\) linear forwards; \}/);
-  assert.match(css, /@media \(prefers-reduced-motion: reduce\) \{\s*\.map-area\.running, \.map-area\.running \.tile\[data-glide-ms\] \{ animation: none; \}/);
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\) \{\s*\.map-area\.running\[data-area="Building"\], \.map-area\.running \.tile\[data-glide-ms\] \{ animation: none; \}/);
+});
+
+// ── Review running: the In review area's tiles glide down (SP-366) ─────────
+
+test('the glide down: an In review tile starts where its time in review puts it and reaches the bottom at six hours; one past six hours does not move (SP-366)', () => {
+  const review = MAP_AREAS.find((a) => a.status === 'In review');
+  assert.equal(review.exit, 'down');
+  const ago = (h) => new Date(CONSOLE_NOW - h * 3_600_000).toISOString();
+  const glideFor = (hours) => {
+    const placed = placeArea(review, [consoleTicket({ status: 'In review', stageSince: ago(hours) })], CONSOLE_NOW);
+    const top = slotShare(review, placed.grid, { col: 0, row: 0 }).y;
+    const bottom = slotShare(review, placed.grid, { col: 0, row: placed.grid.rows - 1 }).y;
+    return { glide: glidesOf(review, placed, CONSOLE_NOW)[0], top, bottom };
+  };
+  const fresh = glideFor(0);
+  assert.ok(fresh.bottom > fresh.top, 'In review is tall enough to cross');
+  assert.deepEqual(fresh.glide, { ticket: fresh.glide.ticket, from: fresh.top, to: fresh.bottom, ms: DRIFT_FULL_MS['In review'] });
+  const half = glideFor(3);
+  assert.ok(Math.abs(half.glide.from - (half.top + half.bottom) / 2) < 0.001, 'three hours in: halfway down');
+  assert.equal(half.glide.to, half.bottom);
+  assert.equal(half.glide.ms, DRIFT_FULL_MS['In review'] / 2, 'and at the bottom at the six-hour mark');
+  const stuck = glideFor(8);
+  assert.deepEqual([stuck.glide.from, stuck.glide.to, stuck.glide.ms], [stuck.bottom, stuck.bottom, 0], 'past six hours: at the bottom, still');
+  // A minute on, the redraw carries on from where the glide had brought it.
+  const at = (now) => glidesOf(review, placeArea(review, [consoleTicket({ status: 'In review', stageSince: ago(2) })], now), now)[0];
+  const now = at(CONSOLE_NOW);
+  const later = at(CONSOLE_NOW + 60_000);
+  const moved = now.from + (now.to - now.from) * (60_000 / now.ms);
+  assert.ok(Math.abs(later.from - moved) < 0.0002, `a minute on: ${later.from} where the glide put it, ${moved}`);
+  assert.equal(later.ms, now.ms - 60_000);
+});
+
+test('In review tiles gliding down never end up on top of each other (SP-366)', () => {
+  const review = MAP_AREAS.find((a) => a.status === 'In review');
+  const ago = (h) => new Date(CONSOLE_NOW - h * 3_600_000).toISOString();
+  for (const hours of [[0, 0.1], [2.4, 3.6], [9, 5.8, 0.4], [9, 9, 9, 9, 9, 9], [0, 1, 2, 3, 4, 5, 6, 7, 0.5, 1.5, 4.5, 0.2, 2.2, 3.3]]) {
+    const tickets = hours.map((h, i) => consoleTicket({ id: `AL-${40 + i}`, status: 'In review', stageSince: ago(h) }));
+    const placed = placeArea(review, tickets, CONSOLE_NOW);
+    const glides = glidesOf(review, placed, CONSOLE_NOW);
+    // Shares of the area's height: a tile's height is its width's share scaled by the area's shape.
+    const tall = slotShare(review, placed.grid, { col: 0, row: 0 }).size * review.w / review.h;
+    const byCol = new Map();
+    placed.tiles.forEach((t, i) => byCol.set(t.col, [...(byCol.get(t.col) ?? []), glides[i]]));
+    for (const col of byCol.values()) {
+      for (const g of col) assert.ok(g.from <= g.to && g.ms >= 0, 'only ever down');
+      const at = (g, ms) => g.from + (g.to - g.from) * Math.min(1, g.ms ? ms / g.ms : 1);
+      for (const ms of [0, 3_600_000, 10_800_000, DRIFT_FULL_MS['In review']]) {
+        const ys = col.map((g) => at(g, ms)).sort((a, b) => a - b);
+        for (let i = 1; i < ys.length; i++) assert.ok(ys[i] - ys[i - 1] >= tall - 0.0003, `${hours}: two tiles overlap ${ms / 60_000} min on`);
+      }
+    }
+  }
+});
+
+test('the In review area carries "running" only while GET /pipeline says Review is running, and glides down without the pulse (SP-366)', () => {
+  assert.deepEqual(GLIDE_AREAS, { Building: 'Build', 'In review': 'Review' });
+  const stages = (build, review) => ({ stages: [{ name: 'Build', running: build }, { name: 'Review', running: review }] });
+  assert.equal(laneRunning(stages(false, true), 'Review'), true);
+  assert.deepEqual(runningAreas(stages(false, true)), ['In review']);
+  assert.deepEqual(runningAreas(stages(true, true)), ['Building', 'In review']);
+  assert.deepEqual(runningAreas(stages(true, false)), ['Building']);
+  assert.deepEqual(runningAreas(null), [], 'an unreadable answer: nothing runs');
+  const tickets = [
+    consoleTicket({ id: 'AL-1', status: 'Building', stageSince: '2026-11-12T17:00:00.000Z' }),
+    consoleTicket({ id: 'AL-2', status: 'In review', stageSince: '2026-11-12T16:00:00.000Z' }),
+  ];
+  const html = (pipeline) => renderConsole({ projects: [ALPHA], tickets }, CONSOLE_NOW, { running: runningAreas(pipeline) });
+  const reviewOnly = html(stages(false, true));
+  assert.match(reviewOnly, /<section class="map-area running" data-stage="In review"/, 'In review runs, and never pulses');
+  assert.match(reviewOnly, /<section class="map-area" data-stage="Building"/, 'Building still while Build sleeps');
+  assert.match(reviewOnly, /data-glide="down" data-glide-from="[\d.]+" data-glide-to="[\d.]+" data-glide-ms="\d+" href="\/t\/AL-2"/);
+  const both = html(stages(true, true));
+  assert.match(both, /<section class="map-area running" data-stage="Building"/);
+  assert.match(both, /<section class="map-area running" data-stage="In review"/);
+  const neither = html(null);
+  assert.doesNotMatch(neither, /map-area running/);
+  // Only Building pulses: no pulse rule names In review.
+  assert.doesNotMatch(readFileSync(WEB('app.css'), 'utf8'), /data-area="In review"\][^{]*\{ animation/);
+  assert.doesNotMatch(both, /style=/, 'no style attribute');
+  // In review's tiles glide on top, under the same reduced-motion and phone rules as Building's.
+  const css = readFileSync(WEB('app.css'), 'utf8');
+  assert.match(css, /\.map-area\.running \.tile\[data-glide="down"\] \{ animation-name: tile-glide-down; \}/);
+  assert.match(css, /@keyframes tile-glide-down \{ from \{ top: calc\(var\(--glide-from\) \* 100%\); \} to \{ top: calc\(var\(--glide-to\) \* 100%\); \} \}/);
+  assert.ok(css.indexOf('tile-glide-down;') < css.indexOf('@media (prefers-reduced-motion: reduce)'), 'reduced motion comes later, so it wins');
+  // The page toggles every glide area on each /pipeline read.
+  const app = pageScript();
+  assert.match(app, /for \(const status of Object\.keys\(GLIDE_AREAS\)\)/);
 });

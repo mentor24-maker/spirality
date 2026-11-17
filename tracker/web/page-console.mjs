@@ -7,7 +7,7 @@
  * (Spirality SP-352), so a ticket that changes one page no longer edits the
  * same file as a ticket that changes another.
  */
-import { stageLooks, renderConsole, buildRunning, GLIDE_AREA, PIPELINE_READ } from './render.mjs';
+import { stageLooks, renderConsole, runningAreas, GLIDE_AREAS, GLIDE_AREA, PIPELINE_READ } from './render.mjs';
 import { main, api, SignedOut, VIEW_KEY, savedProject, setTitle, viewSwitch, putTrail, lastPipeline } from './app.mjs';
 
 /**
@@ -60,18 +60,22 @@ function placeOnMap() {
 const PULSE_MS = 8000;
 
 /**
- * Keep the Building area's `running` class in step with the last GET
- * /pipeline read (SP-365): on, its background pulses and its tiles glide
- * (app.css); off, or the answer unreadable, it is still. The pulse is set
- * to the clock's place in its cycle, so the minute's redraw does not restart it.
+ * Keep each glide area's `running` class in step with the last GET
+ * /pipeline read: Building with Build (SP-365), In review with Review
+ * (SP-366). On, its tiles glide toward its exit (and Building's background
+ * pulses, app.css); off, or the answer unreadable, it is still. The pulse is
+ * set to the clock's place in its cycle, so the minute's redraw does not restart it.
  */
-function showBuildRunning() {
-  const area = main.querySelector(`.console-map .map-area[data-area="${GLIDE_AREA}"]`);
-  if (!area) return;
-  area.style.setProperty('--pulse-delay', `-${Date.now() % PULSE_MS}ms`);
-  area.classList.toggle('running', buildRunning(lastPipeline()));
+function showLanesRunning() {
+  const running = runningAreas(lastPipeline());
+  for (const status of Object.keys(GLIDE_AREAS)) {
+    const area = main.querySelector(`.console-map .map-area[data-area="${status}"]`);
+    if (!area) continue;
+    if (status === GLIDE_AREA) area.style.setProperty('--pulse-delay', `-${Date.now() % PULSE_MS}ms`);
+    area.classList.toggle('running', running.includes(status));
+  }
 }
-document.addEventListener(PIPELINE_READ, showBuildRunning);
+document.addEventListener(PIPELINE_READ, showLanesRunning);
 
 export async function drawConsole() {
   const [answer, colours] = await Promise.all([
@@ -86,9 +90,9 @@ export async function drawConsole() {
   main.innerHTML = `
     <div class="tasks-head title-row"><h1>Tasks</h1>${slug ? viewSwitch(slug, 'console') : ''}</div>
     ${answer.tickets.some((t) => t.status !== 'Live') ? '' : '<p class="quiet">Nothing is in flight.</p>'}
-    ${renderConsole(answer, Date.now(), { running: buildRunning(lastPipeline()) })}`;
+    ${renderConsole(answer, Date.now(), { running: runningAreas(lastPipeline()) })}`;
   placeOnMap();
-  showBuildRunning();
+  showLanesRunning();
   for (const el of main.querySelectorAll('[data-stage]')) {
     const look = looks[el.dataset.stage];
     if (!look) continue;
