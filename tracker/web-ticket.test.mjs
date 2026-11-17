@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { seedDemo } from './demoData.mjs';
-import { escapeHtml, renderStatusLine, renderComment, renderInline, renderMarkdown, renderQuickAction, CLOSE_LINE, REPLY_LINE, offersMerge, offersClose, bugReport, BUG_REPORT_TAG, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, heldBugReport, renderBugReportActions, approveQuestion, rejectQuestion, changeProblem, REJECT_COMMENT, WONT_DO_TAG, HELD_REPORT_LINE, HELD_REPORT_STATUS_LINE, cardMove, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, loopHasIt, renderCommentForm, LOOP_HAS_STATUSES, MOVED_MESSAGE, contrast } from './web/render.mjs';
+import { escapeHtml, renderStatusLine, renderComment, renderInline, renderMarkdown, renderQuickAction, CLOSE_LINE, REPLY_LINE, offersMerge, offersClose, bugReport, BUG_REPORT_TAG, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, heldBugReport, renderBugReportActions, approveQuestion, rejectQuestion, changeProblem, REJECT_COMMENT, WONT_DO_TAG, HELD_REPORT_LINE, HELD_REPORT_STATUS_LINE, cardMove, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, uploadEach, loopHasIt, renderCommentForm, LOOP_HAS_STATUSES, MOVED_MESSAGE, contrast } from './web/render.mjs';
 import { loadProjectConfig } from '../lib/projectConfig.mjs';
 import operatorCard from '../lib/operatorCard.js';
 import machineComment from '../lib/machineComment.js';
@@ -1392,6 +1392,64 @@ test('the Change panel offers the server\'s priorities and person statuses, keep
   const bare = renderEditPanel({ name: 'n', status: 'queued', priority: null, assignee: null, operator, choices });
   assert.match(bare, /<option value="" selected>None<\/option>/);
   assert.match(bare, /<option value="" selected>Nobody<\/option>/);
+});
+
+test('SP-373: the Change panel has a Files row: a multi-file picker, the Add Task hint and an Upload button, with no inline style', () => {
+  for (const status of ['queued', 'live']) {
+    const html = renderEditPanel({ name: 'n', status });
+    assert.match(html, /<label for="edit-files">Files<\/label>/);
+    assert.match(html, /<input id="edit-files" type="file" multiple aria-describedby="edit-files-hint"><button type="button" class="btn edit-upload">Upload<\/button>/);
+    assert.match(html, /<span class="hint" id="edit-files-hint">Screenshots, PDFs or notes, up to 10 MB each\.<\/span>/);
+    // Below How It Ended, inside the fields form; a plain button, so it never submits the form.
+    assert.ok(html.indexOf('edit-outcome') < html.indexOf('edit-files'));
+    assert.ok(html.indexOf('edit-files') < html.indexOf('<form class="edit-name">'));
+    assert.doesNotMatch(html, /style=/);
+  }
+});
+
+test('SP-373: uploadEach sends each file on its own, skips one over the limit, names every failure with why, and never calls a failure success', async () => {
+  const file = (name, size) => ({ name, size });
+  const sent = [];
+  const seen = [];
+  const send = async (f) => {
+    sent.push(f.name);
+    if (f.name === 'bad.png') throw new Error('that file type is not kept.');
+  };
+  const all = await uploadEach([file('a.png', 10), file('big.mov', 11), file('bad.png', 5), file('b.pdf', 3)], send, { max: 10, onEach: (f) => seen.push(f.name) });
+  assert.deepEqual(sent, ['a.png', 'bad.png', 'b.pdf'], 'the big one is never sent; the rest still go after a failure');
+  assert.deepEqual(seen, sent);
+  assert.deepEqual(all.uploaded, ['a.png', 'b.pdf']);
+  assert.deepEqual(all.notUploaded, [{ name: 'big.mov', why: 'over 10 MB' }, { name: 'bad.png', why: 'that file type is not kept' }]);
+  assert.deepEqual(all.message, { kind: 'error', text: 'Uploaded a.png, b.pdf. Not uploaded: big.mov (over 10 MB), bad.png (that file type is not kept).' });
+  assert.equal(all.signedOut, false);
+  // All went up: success, naming them.
+  const ok = await uploadEach([file('a.png', 1), file('b.png', 1)], async () => {}, { max: 10 });
+  assert.deepEqual(ok.message, { kind: 'success', text: 'Uploaded a.png, b.png.' });
+  // None went up: an error that says nothing was uploaded.
+  const none = await uploadEach([file('x.png', 1)], async () => { throw new Error('the tracker answered 500.'); }, { max: 10 });
+  assert.deepEqual(none.message, { kind: 'error', text: 'Not uploaded: x.png (the tracker answered 500).' });
+  assert.doesNotMatch(none.message.text, /Uploaded/);
+  // Signed out mid-way: stop, and name that file and every one after it.
+  class Out extends Error {}
+  const tried = [];
+  const out = await uploadEach([file('a.png', 1), file('b.png', 1), file('c.png', 1)], async (f) => { tried.push(f.name); if (f.name === 'b.png') throw new Out('x'); }, { max: 10, isSignedOut: (e) => e instanceof Out });
+  assert.deepEqual(tried, ['a.png', 'b.png']);
+  assert.equal(out.signedOut, true);
+  assert.equal(out.message.text, 'Uploaded a.png. Not uploaded: b.png (signed out), c.png (signed out).');
+});
+
+test('SP-373: Upload sends through uploadFile to this ticket, holds the panel, reports in the message strip after the redraw, and asks for a file when none is picked', () => {
+  const app = pageScript();
+  const wire = app.slice(app.indexOf('function wireEditPanel'), app.indexOf('return {', app.indexOf('function wireEditPanel')));
+  const up = wire.slice(wire.indexOf("panel.querySelector('.edit-upload')"));
+  assert.match(up, /if \(!files\.length\) return showMessage\(\{ kind: 'error', text: 'Pick a file first: nothing was uploaded\.' \}\);/);
+  assert.match(up, /uploadEach\(files, \(file\) => uploadFile\(t\.id, file\), \{\s*max: MAX_FILE,\s*isSignedOut: \(err\) => err instanceof SignedOut,/);
+  assert.match(up, /if \(saving\) return;[\s\S]*saving = true;[\s\S]*c\.disabled = true;/, 'one write at a time, the panel held');
+  assert.match(up, /if \(signedOut\) return drawSignIn\(`You were signed out\. \$\{message\.text\}`\);/);
+  assert.match(up, /drawAgain\(\(\) => drawTicket\(t\.id, \{ message \}, typed\('files'\)\)\)/, 'drawn again so the files show, keeping what was typed');
+  assert.doesNotMatch(up, /note\.(?:className|textContent)/, 'nothing beside the button');
+  const draw = app.slice(app.indexOf('async function drawTicket'), app.indexOf('function stripNote'));
+  assert.match(draw, /if \(said\.message\) \{\s*showMessage\(said\.message\);/);
 });
 
 test('the name is locked, with the reason, once a pull request is recorded', () => {

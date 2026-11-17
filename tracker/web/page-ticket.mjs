@@ -7,8 +7,8 @@
  * (Spirality SP-352), so a ticket that changes one page no longer edits the
  * same file as a ticket that changes another.
  */
-import { closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, loopHasIt, renderCommentForm, MOVED_MESSAGE, renderMarkdown, renderCloseAction, renderGoAction, goQuestion, renderBugReportActions, approveQuestion, rejectQuestion, changeProblem, REJECT_COMMENT, WONT_DO_TAG, renderMergeAction, renderAnswerIn, renderHeldUp, renderSharedFiles, renderReplyForm, statusLabel, renderQuickAction } from './render.mjs';
-import { api, setTitle, when, me, renderAttachments, main, sinceTime, refreshing, putTrail, savedView, route, SignedOut, drawSignIn, drawAgain, Refused, showMessage } from './app.mjs';
+import { closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, loopHasIt, renderCommentForm, MOVED_MESSAGE, renderMarkdown, renderCloseAction, renderGoAction, goQuestion, renderBugReportActions, approveQuestion, rejectQuestion, changeProblem, REJECT_COMMENT, WONT_DO_TAG, renderMergeAction, renderAnswerIn, renderHeldUp, renderSharedFiles, renderReplyForm, statusLabel, renderQuickAction, uploadEach } from './render.mjs';
+import { api, setTitle, when, me, renderAttachments, main, sinceTime, refreshing, putTrail, savedView, route, SignedOut, drawSignIn, drawAgain, Refused, showMessage, MAX_FILE, uploadFile } from './app.mjs';
 import { field } from './page-projects.mjs';
 import { wireCopyButtons } from './page-tasks.mjs';
 
@@ -18,7 +18,8 @@ import { wireCopyButtons } from './page-tasks.mjs';
  * `ifVersion`, and the page is then drawn again from the server, so what it
  * shows is what was stored. `said` is a line to show after that redraw:
  * `{ field, text, error }`, `field` naming the note it goes in (none: the
- * panel's own note at its top). `kept` is what was typed and not saved
+ * panel's own note at its top), or `{ message }`, a message for the strip
+ * (showMessage's own shape), as Upload reports. `kept` is what was typed and not saved
  * when a save redrew the page (wireEditPanel's `typed`), put back as it was.
  */
 export async function drawTicket(id, said = null, kept = null) {
@@ -257,8 +258,10 @@ export async function drawTicket(id, said = null, kept = null) {
   }
   if (said) {
     openDetails();
-    const where = main.querySelector(said.field ? `.edit [data-note="${said.field}"]` : '.edit-note');
-    if (where) {
+    const where = said.message ? null : main.querySelector(said.field ? `.edit [data-note="${said.field}"]` : '.edit-note');
+    if (said.message) {
+      showMessage(said.message);
+    } else if (where) {
       where.className = `note${said.error ? ' error' : ' quiet'}${said.field ? '' : ' edit-note'}`;
       where.textContent = said.text;
     } else if (STRIP_FIELDS[said.field]) {
@@ -461,6 +464,32 @@ function wireEditPanel(t) {
   descForm.addEventListener('submit', (e) => {
     e.preventDefault();
     save('description', area.value, descForm.querySelector('[data-note="description"]'));
+  });
+  // Files (SP-373): each picked file goes up on its own, the same way as the
+  // Add Task box, so one that fails is named and the rest still go up. The
+  // outcome goes to the message strip (UI_DOCTRINE 7) after the page is drawn
+  // again, so the new files show under Attachments; nothing failed is ever
+  // reported as uploaded.
+  const fileBox = panel.querySelector('#edit-files');
+  panel.querySelector('.edit-upload').addEventListener('click', async () => {
+    if (saving) return;
+    const files = [...(fileBox.files ?? [])];
+    if (!files.length) return showMessage({ kind: 'error', text: 'Pick a file first: nothing was uploaded.' });
+    saving = true;
+    const held = [...panel.querySelectorAll('input, select, textarea, button')].filter((c) => !c.disabled);
+    for (const c of held) c.disabled = true;
+    const { message, signedOut } = await uploadEach(files, (file) => uploadFile(t.id, file), {
+      max: MAX_FILE,
+      isSignedOut: (err) => err instanceof SignedOut,
+      onEach: (file) => showMessage({ kind: 'info', text: `Uploading ${file.name}…` }),
+    });
+    if (signedOut) return drawSignIn(`You were signed out. ${message.text}`);
+    try {
+      await drawAgain(() => drawTicket(t.id, { message }, typed('files')));
+    } catch (err) {
+      if (err instanceof SignedOut) return drawSignIn(`You were signed out; ${message.text} The page could not show it.`);
+      showMessage({ kind: 'error', text: `${message.text} The page could not refresh (${err.message}): reload to see the ticket as stored.` });
+    }
   });
   return {
     // Put back what `typed` kept from the page before this redraw.

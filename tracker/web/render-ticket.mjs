@@ -943,6 +943,8 @@ export function renderDeleteAction({ status }) {
  * (`choices`, `operator`); none is written here. The current status and
  * assignee always show, even when a person could not choose them. The name
  * is locked once a pull request is recorded: its title must match the name.
+ * Files (SP-373) adds files to the ticket after it is filed: Upload sends
+ * each picked file on its own and reports in the message strip.
  */
 export function renderEditPanel({ name, description, status, priority, tags = [], assignee, operator, pullRequest, choices = {}, kind = null, startedBy = null, outcome = null }) {
   const statuses = choices.statuses ?? [];
@@ -1001,6 +1003,9 @@ export function renderEditPanel({ name, description, status, priority, tags = []
         <div class="row"><select id="edit-started-by" data-field="startedBy">${classOptions('startedBy', startedBy)}</select></div></div>
         <div class="beside"><label for="edit-outcome">How It Ended</label>
         <div class="row">${endedPicker}</div></div>
+        <div class="beside"><label for="edit-files">Files</label>
+        <div class="row"><input id="edit-files" type="file" multiple aria-describedby="edit-files-hint"><button type="button" class="btn edit-upload">Upload</button></div>
+        <span class="hint" id="edit-files-hint">Screenshots, PDFs or notes, up to 10 MB each.</span></div>
       </form>
       <form class="edit-name">
         <label for="edit-name">Name</label>
@@ -1015,6 +1020,44 @@ export function renderEditPanel({ name, description, status, priority, tags = []
         </div>
       </form>
     </details>`;
+}
+
+/**
+ * The Change panel's Upload (SP-373): send each file on its own through
+ * `send(file)`, so one that fails is named and the rest still go up. A file
+ * over `max` bytes is never sent. Answers `{ uploaded, notUploaded, message }`:
+ * the names that went up, each that did not with why, and the message for the
+ * strip, an error whenever any did not, so a failure never reads as success.
+ * A signed-out answer stops at once: `signedOut` is set and `notUploaded`
+ * names that file and every one after it.
+ */
+export async function uploadEach(files, send, { max, isSignedOut = () => false, onEach = () => {} }) {
+  const uploaded = [];
+  const notUploaded = [];
+  let signedOut = false;
+  for (const [i, file] of files.entries()) {
+    if (file.size > max) {
+      notUploaded.push({ name: file.name, why: 'over 10 MB' });
+      continue;
+    }
+    onEach(file);
+    try {
+      await send(file);
+      uploaded.push(file.name);
+    } catch (err) {
+      if (isSignedOut(err)) {
+        signedOut = true;
+        for (const left of files.slice(i)) notUploaded.push({ name: left.name, why: 'signed out' });
+        break;
+      }
+      notUploaded.push({ name: file.name, why: String(err?.message ?? err).replace(/\.$/, '') });
+    }
+  }
+  const text = [
+    uploaded.length ? `Uploaded ${uploaded.join(', ')}.` : '',
+    notUploaded.length ? `Not uploaded: ${notUploaded.map((f) => `${f.name} (${f.why})`).join(', ')}.` : '',
+  ].filter(Boolean).join(' ');
+  return { uploaded, notUploaded, signedOut, message: { kind: notUploaded.length ? 'error' : 'success', text } };
 }
 
 /** What a save that found the ticket moved says: nothing was overwritten, and it is not tried again. */
