@@ -759,6 +759,14 @@ table.spirality-docs td.date { white-space: nowrap; }
 .map-area > .tiles { position: absolute; inset: 0; display: block; pointer-events: none; }
 .console-map .tile { position: absolute; left: calc(var(--at-x) * 100%); top: calc(var(--at-y) * 100%); width: calc(var(--at-size) * 100%); height: auto; aspect-ratio: 1; box-sizing: border-box; pointer-events: auto; z-index: 2; }
 .console-map .tile[data-fade] { opacity: var(--at-fade); }
+/* While the build lane runs a pass (SP-365, page-console.mjs showBuildRunning): the Building area breathes between its 20% tint and a slightly darker 30%, and its tiles glide toward In review at the pace render.mjs glidesOf works out. */
+.map-area.running { animation: area-pulse 4s ease-in-out var(--pulse-delay, 0s) infinite alternate; }
+.map-area.running .tile[data-glide-ms] { animation: tile-glide var(--glide-ms) linear forwards; }
+@keyframes area-pulse { from { background: color-mix(in srgb, var(--area) 20%, var(--bg-surface)); } to { background: color-mix(in srgb, var(--area) 30%, var(--bg-surface)); } }
+@keyframes tile-glide { from { left: calc(var(--glide-from) * 100%); } to { left: calc(var(--glide-to) * 100%); } }
+@media (prefers-reduced-motion: reduce) {
+  .map-area.running, .map-area.running .tile[data-glide-ms] { animation: none; }
+}
 /* SP-334: the detours' arrows (render.mjs MAP_DETOURS) lie over the areas in the map's own units and under the tiles;
    an open +N More list rises over every other tile. Each arrow is the colour of the detour it enters or leaves. */
 .console-map .tile.more[open] { z-index: 3; }
@@ -791,6 +799,7 @@ table.spirality-docs td.date { white-space: nowrap; }
   .map-area { position: static; width: auto; height: auto; padding-bottom: 0.5rem; }
   .map-area > .tiles { position: static; display: flex; flex-wrap: wrap; gap: var(--space-3); padding: 0 0.5rem; pointer-events: auto; }
   .console-map .tile { position: relative; left: auto; top: auto; width: 8rem; }
+  .map-area.running .tile[data-glide-ms] { animation: none; }
   .map-detours, .map-detours-key { display: none; }
 }
 .tiles { display: flex; flex-wrap: wrap; gap: var(--space-3); }

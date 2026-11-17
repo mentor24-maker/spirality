@@ -326,6 +326,75 @@ export function placeArea(area, tickets, now = Date.now()) {
   return { status: area.status, grid, tiles, more };
 }
 
+/**
+ * Whether the build lane is running a pass now (SP-365), from GET /pipeline's
+ * answer: its stage named `Build` says `running: true`. An answer not read,
+ * or one without that stage, is not running.
+ */
+export function buildRunning(pipeline) {
+  return Array.isArray(pipeline?.stages) && pipeline.stages.some((s) => s?.name === 'Build' && s.running === true);
+}
+
+/**
+ * The event app.mjs's refreshPipeline sends on the document after every GET
+ * /pipeline read, failed ones too, which the Console follows (SP-365). Here,
+ * not in app.mjs, because page-console.mjs listens as it loads, before
+ * app.mjs (which imports it) has run.
+ */
+export const PIPELINE_READ = 'pipeline-read';
+
+/** The area that glides while Build runs (SP-365). */
+export const GLIDE_AREA = 'Building';
+
+/**
+ * How each tile in Building glides toward In review while Build runs
+ * (SP-365): `[{ ticket, from, to, ms }]`, `from` and `to` its left edge as a
+ * share of the area (as data-x is), `ms` how long the move takes. A tile
+ * starts where its time in Building puts it on a straight line from the
+ * entrance column (just in) to the exit column (DRIFT_FULL_MS in), and moves
+ * at (distance left) / (time left), so it reaches the exit at three hours.
+ * That is the same speed for every tile, so tiles in one row keep their gaps;
+ * the same answer for a later clock is where the glide had brought them, so
+ * the minute's redraw carries on with no jump back. Never on top of another:
+ * in each row (placeArea keeps rows apart) tiles are kept a whole slot apart,
+ * and the nth from the exit stops n slots short of it, so none runs into one
+ * that has stopped. A "+N More" tile in the row stays put at the entrance.
+ * A tile past three hours sits at the exit with `ms` 0.
+ */
+export function glidesOf(area, placed, now = Date.now()) {
+  const grid = placed?.grid;
+  if (!grid || area?.exit !== 'right') return [];
+  const pitch = grid.size + grid.gap;
+  const first = AREA_PAD;
+  const last = AREA_PAD + (grid.cols - 1) * pitch;
+  const full = DRIFT_FULL_MS[area.status];
+  const speed = full ? (last - first) / full : 0;
+  const rows = new Map();
+  for (const tile of placed.tiles) {
+    if (!rows.has(tile.row)) rows.set(tile.row, []);
+    rows.get(tile.row).push({ tile, x: first + driftOf(tile.ticket, now) * (last - first) });
+  }
+  const glides = new Map();
+  for (const [row, list] of rows) {
+    list.sort((a, b) => a.x - b.x || a.tile.col - b.tile.col);
+    // From the exit back: each a slot behind the one ahead, never past the exit.
+    let ahead = last + pitch;
+    for (let i = list.length - 1; i >= 0; i--) ahead = list[i].x = Math.min(list[i].x, ahead - pitch);
+    // From the entrance on: each a slot past the one behind (or the +N More tile), never before the entrance.
+    let behind = placed.more && placed.more.row === row ? first : first - pitch;
+    for (const item of list) behind = item.x = Math.max(item.x, behind + pitch);
+    list.forEach((item, i) => {
+      const to = last - (list.length - 1 - i) * pitch;
+      const from = Math.min(item.x, to);
+      glides.set(item.tile, { from, to, ms: speed > 0 ? Math.round((to - from) / speed) : 0 });
+    });
+  }
+  return placed.tiles.map((tile) => {
+    const g = glides.get(tile);
+    return { ticket: tile.ticket, from: share(g.from / area.w), to: share(g.to / area.w), ms: g.ms };
+  });
+}
+
 /** A slot's place inside its area, as shares of the area: `{ x, y, size }`, size a share of the area's width. */
 export function slotShare(area, grid, { col, row }) {
   const x = area.x + AREA_PAD + col * (grid.size + grid.gap);
@@ -359,9 +428,10 @@ export function tileSizeClass(size) {
  * (no `style=""`: the page's rules forbid it): `data-x`, `data-y` and
  * `data-size`, shares of its area, and `data-fade` on a Live tile.
  */
-function placeAttrs(area, grid, slot, fade = null) {
+function placeAttrs(area, grid, slot, fade = null, glide = null) {
   const { x, y, size } = slotShare(area, grid, slot);
-  return ` data-x="${x}" data-y="${y}" data-size="${size}"${fade === null ? '' : ` data-fade="${fade}"`}`;
+  const moves = glide ? ` data-glide-from="${glide.from}" data-glide-to="${glide.to}" data-glide-ms="${glide.ms}"` : '';
+  return ` data-x="${x}" data-y="${y}" data-size="${size}"${fade === null ? '' : ` data-fade="${fade}"`}${moves}`;
 }
 
 /**
@@ -454,9 +524,13 @@ export const DETOURS_KEY = 'Arrows mark the detours, Needs your input and Rework
  * fading with age. The detours' arrows (renderDetours, SP-334) lie over the
  * areas, with a line under the map saying what they are. A ticket whose
  * status is not on the map is listed under it ("Other Statuses"), so no
- * ticket is ever left off.
+ * ticket is ever left off. With `running` (the build lane is running a pass,
+ * buildRunning, SP-365) the Building area carries `running`, which app.css
+ * pulses, and its tiles glide toward In review by their data-glide-from,
+ * data-glide-to and data-glide-ms (glidesOf); the page keeps the class in
+ * step with GET /pipeline between redraws.
  */
-export function renderConsole(answer, now = Date.now()) {
+export function renderConsole(answer, now = Date.now(), { running = false } = {}) {
   const tickets = Array.isArray(answer?.tickets) ? answer.tickets : [];
   const projects = new Map((Array.isArray(answer?.projects) ? answer.projects : []).map((p) => [p.slug, p]));
   const onMap = new Set(MAP_AREAS.map((a) => a.status));
@@ -467,9 +541,10 @@ export function renderConsole(answer, now = Date.now()) {
     const here = shown.filter((t) => t.status === area.status);
     const placed = placeArea(area, here, now);
     const sizeClass = tileSizeClass(placed.grid.size);
-    const tiles = placed.tiles.map(({ ticket, col, row }) => {
+    const glides = area.status === GLIDE_AREA ? glidesOf(area, placed, now) : [];
+    const tiles = placed.tiles.map(({ ticket, col, row }, i) => {
       const fade = area.status === 'Live' ? liveFade(ticket, now) : null;
-      return tile(ticket, { attrs: placeAttrs(area, placed.grid, { col, row }, fade), size: sizeClass });
+      return tile(ticket, { attrs: placeAttrs(area, placed.grid, { col, row }, fade, glides[i] ?? null), size: sizeClass });
     });
     if (placed.more) {
       const n = placed.more.hidden.length;
@@ -477,7 +552,8 @@ export function renderConsole(answer, now = Date.now()) {
         + `<summary aria-label="${escapeHtml(`${n} more in ${area.status}`)}">+${n} More</summary>`
         + `<ul class="more-list">${placed.more.hidden.map((t) => `<li><a href="/t/${encodeURIComponent(String(t.id ?? ''))}">${escapeHtml(String(t.id ?? ''))}</a> ${escapeHtml(t.name ?? '')}</li>`).join('')}</ul></details>`);
     }
-    return `<section class="map-area" data-stage="${escapeHtml(area.status)}" data-area="${escapeHtml(area.status)}"`
+    const runs = running && area.status === GLIDE_AREA ? ' running' : '';
+    return `<section class="map-area${runs}" data-stage="${escapeHtml(area.status)}" data-area="${escapeHtml(area.status)}"`
       + ` data-x="${share(area.x / MAP_UNITS.width)}" data-y="${share(area.y / MAP_UNITS.height)}" data-w="${share(area.w / MAP_UNITS.width)}" data-h="${share(area.h / MAP_UNITS.height)}">`
       + `<h2><span class="stage-name">${escapeHtml(area.status)}</span><span class="count quiet">${here.length}</span></h2>`
       + `<div class="tiles">${tiles.join('')}</div></section>`;

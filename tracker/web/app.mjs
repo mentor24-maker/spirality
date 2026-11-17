@@ -35,7 +35,7 @@
  * an emailed link's own page. The link's token is sent only in a JSON body,
  * never in an address.
  */
-import { escapeHtml, renderTrail, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, redrawHold, drawnChoice, renderPipelinePod, renderPipelineDetails, pipelinePodLabel, renderHealth, healthLines, lowerMeridiem, renderMessage, renderSavedCard, MESSAGE_CLOSES_MS, SAVED_CARD_MS } from './render.mjs';
+import { PIPELINE_READ, escapeHtml, renderTrail, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, redrawHold, drawnChoice, renderPipelinePod, renderPipelineDetails, pipelinePodLabel, renderHealth, healthLines, lowerMeridiem, renderMessage, renderSavedCard, MESSAGE_CLOSES_MS, SAVED_CARD_MS } from './render.mjs';
 import { field, drawSetupNew, drawSetup, drawProjects, drawCreateProject, drawEditProject, drawProjectDetails } from './page-projects.mjs';
 import { drawSearch, drawTasks, drawProject, sortableTables, sorted } from './page-tasks.mjs';
 import { drawConsole } from './page-console.mjs';
@@ -199,7 +199,12 @@ export async function refreshPipeline() {
     pipelineState = null;
   }
   showPipeline(true);
+  // The Console's Building area follows each read (SP-365), between its own minute redraws.
+  document.dispatchEvent(new Event(PIPELINE_READ));
 }
+
+/** The last Pipeline Status answer read, or null (before any, or after a failed read). */
+export const lastPipeline = () => pipelineState;
 
 /** The header's health lines from the last answer: one per failing stage, hidden when none is (or signed out). */
 function showHealth() {

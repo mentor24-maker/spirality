@@ -6,7 +6,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { contrast, renderConsole, renderDetours, detourPathData, MAP_DETOURS, DETOURS_KEY, renderConsoleTile, MAP_AREAS, MAP_UNITS, placeArea, driftOf, liveFade, slotShare, moreOpens, moreFeatures, tileSizeClass, TILE_MAX, TILE_MIN, TILE_COMPACT, TILE_TINY, LIVE_FADE_FLOOR, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, consoleFeature, featureColourIndex, renderFeatureKey, FEATURE_PALETTE, capInFlightText } from './web/render.mjs';
+import { contrast, renderConsole, renderDetours, detourPathData, MAP_DETOURS, DETOURS_KEY, renderConsoleTile, MAP_AREAS, MAP_UNITS, placeArea, driftOf, liveFade, slotShare, moreOpens, moreFeatures, tileSizeClass, TILE_MAX, TILE_MIN, TILE_COMPACT, TILE_TINY, LIVE_FADE_FLOOR, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, consoleFeature, featureColourIndex, renderFeatureKey, FEATURE_PALETTE, capInFlightText, glidesOf, buildRunning, GLIDE_AREA, DRIFT_FULL_MS } from './web/render.mjs';
 import { pageScript, renderScript } from './pageScripts.mjs';
 import { WEB, drawnCss } from './webTestKit.mjs';
 
@@ -313,7 +313,7 @@ test('the Console page: /in-flight and the stage colours drawn, a Console link b
   assert.match(draw, /api\('GET', '\/in-flight'\)/);
   assert.match(draw, /api\('GET', '\/stage-colours'\)/);
   assert.match(draw, /localStorage\.setItem\(VIEW_KEY, 'console'\)/);
-  assert.match(draw, /renderConsole\(answer\)\}`;\s*placeOnMap\(\);/);
+  assert.match(draw, /renderConsole\(answer, Date\.now\(\), \{ running: buildRunning\(lastPipeline\(\)\) \}\)\}`;\s*placeOnMap\(\);\s*showBuildRunning\(\);/);
   assert.match(draw, /answer\.tickets\.some\(\(t\) => t\.status !== 'Live'\) \? '' : '<p class="quiet">Nothing is in flight\.<\/p>'/, 'the last day\'s launches are not work in flight');
   // Each place becomes a CSS value set from the page's code, never a style attribute.
   const place = /function placeOnMap\(\) \{([\s\S]*?)\n\}/.exec(app)[1];
@@ -460,4 +460,85 @@ test('a click on a feature in the key dims every other tile, a second click show
   assert.match(show, /const has = tile\.dataset\.features !== undefined\s*\? tile\.dataset\.features\.split\('\\n'\)\.includes\(pickedFeature\)\s*: tile\.dataset\.feature === pickedFeature;/);
   assert.match(show, /b\.setAttribute\('aria-pressed', String\(b\.dataset\.feature === pickedFeature\)\)/);
   assert.match(show, /if \(!picks\.some\(\(b\) => b\.dataset\.feature === pickedFeature\)\) pickedFeature = null;/);
+});
+
+// ── Build running: the Building area pulses and its tiles glide (SP-365) ─────
+
+test('the glide: a tile starts where its time in Building puts it and reaches the exit at three hours; one past three hours does not move (SP-365)', () => {
+  const building = MAP_AREAS.find((a) => a.status === GLIDE_AREA);
+  const ago = (h) => new Date(CONSOLE_NOW - h * 3_600_000).toISOString();
+  const glideFor = (hours) => {
+    const placed = placeArea(building, [consoleTicket({ status: 'Building', stageSince: ago(hours) })], CONSOLE_NOW);
+    const entrance = slotShare(building, placed.grid, { col: 0, row: 0 }).x;
+    const exit = slotShare(building, placed.grid, { col: placed.grid.cols - 1, row: 0 }).x;
+    return { glide: glidesOf(building, placed, CONSOLE_NOW)[0], entrance, exit };
+  };
+  const fresh = glideFor(0);
+  assert.ok(fresh.exit > fresh.entrance, 'Building is wide enough to cross');
+  assert.deepEqual(fresh.glide, { ticket: fresh.glide.ticket, from: fresh.entrance, to: fresh.exit, ms: DRIFT_FULL_MS.Building });
+  const half = glideFor(1.5);
+  assert.ok(Math.abs(half.glide.from - (half.entrance + half.exit) / 2) < 0.001, 'an hour and a half in: halfway across');
+  assert.equal(half.glide.to, half.exit);
+  assert.equal(half.glide.ms, DRIFT_FULL_MS.Building / 2, 'and at the exit at the three-hour mark');
+  const stuck = glideFor(5);
+  assert.deepEqual([stuck.glide.from, stuck.glide.to, stuck.glide.ms], [stuck.exit, stuck.exit, 0], 'past three hours: at the exit, still');
+  // A minute on, the answer is where the glide had brought the tile: the redraw carries on, no jump back.
+  const placedNow = placeArea(building, [consoleTicket({ status: 'Building', stageSince: ago(1) })], CONSOLE_NOW);
+  const now = glidesOf(building, placedNow, CONSOLE_NOW)[0];
+  const later = glidesOf(building, placeArea(building, [consoleTicket({ status: 'Building', stageSince: ago(1) })], CONSOLE_NOW + 60_000), CONSOLE_NOW + 60_000)[0];
+  const moved = now.from + (now.to - now.from) * (60_000 / now.ms);
+  assert.ok(Math.abs(later.from - moved) < 0.0002, `a minute on: ${later.from} where the glide put it, ${moved}`);
+  assert.equal(later.ms, now.ms - 60_000);
+  // Only Building glides: an area leaving any other way has none.
+  const review = MAP_AREAS.find((a) => a.status === 'In review');
+  assert.deepEqual(glidesOf(review, placeArea(review, [consoleTicket({ status: 'In review' })], CONSOLE_NOW), CONSOLE_NOW), []);
+});
+
+test('gliding tiles never end up on top of each other, and none runs into one stopped at the exit (SP-365)', () => {
+  const building = MAP_AREAS.find((a) => a.status === GLIDE_AREA);
+  const ago = (h) => new Date(CONSOLE_NOW - h * 3_600_000).toISOString();
+  for (const hours of [[0, 0.1], [1.2, 1.8], [5, 2.9, 0.4], [9, 9, 9, 9, 9, 9], [0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5, 0.2, 0.7, 2.2]]) {
+    const tickets = hours.map((h, i) => consoleTicket({ id: `AL-${20 + i}`, status: 'Building', stageSince: ago(h) }));
+    const placed = placeArea(building, tickets, CONSOLE_NOW);
+    const glides = glidesOf(building, placed, CONSOLE_NOW);
+    const size = slotShare(building, placed.grid, { col: 0, row: 0 }).size;
+    const byRow = new Map();
+    placed.tiles.forEach((t, i) => byRow.set(t.row, [...(byRow.get(t.row) ?? []), glides[i]]));
+    for (const row of byRow.values()) {
+      for (const g of row) assert.ok(g.from <= g.to && g.ms >= 0, 'only ever toward the exit');
+      const at = (g, ms) => g.from + (g.to - g.from) * Math.min(1, g.ms ? ms / g.ms : 1);
+      for (const ms of [0, 1_800_000, 5_400_000, DRIFT_FULL_MS.Building]) {
+        const xs = row.map((g) => at(g, ms)).sort((a, b) => a - b);
+        for (let i = 1; i < xs.length; i++) assert.ok(xs[i] - xs[i - 1] >= size - 0.0002, `${hours}: two tiles overlap ${ms / 60_000} min on`);
+      }
+    }
+  }
+});
+
+test('the Building area carries "running" only while GET /pipeline says Build is running; an unreadable answer is not running (SP-365)', () => {
+  const stages = (running) => ({ stages: [{ name: 'Intake', running: true }, { name: 'Build', running }, { name: 'Review', running: true }] });
+  assert.equal(buildRunning(stages(true)), true);
+  assert.equal(buildRunning(stages(false)), false, 'another lane running is not Build running');
+  assert.equal(buildRunning(null), false, 'a failed read');
+  assert.equal(buildRunning({}), false);
+  const tickets = [consoleTicket({ status: 'Building', stageSince: '2026-11-12T17:00:00.000Z' })];
+  const on = renderConsole({ projects: [ALPHA], tickets }, CONSOLE_NOW, { running: true });
+  const off = renderConsole({ projects: [ALPHA], tickets }, CONSOLE_NOW);
+  assert.match(on, /<section class="map-area running" data-stage="Building"/);
+  assert.equal((on.match(/map-area running/g) ?? []).length, 1, 'only Building');
+  assert.doesNotMatch(off, /map-area running/);
+  assert.match(off, /data-glide-from="[\d.]+" data-glide-to="[\d.]+" data-glide-ms="\d+"/);
+  assert.doesNotMatch(on, /style=/, 'no style attribute: the page sets the glide after drawing');
+  // The page follows every /pipeline read, and sets the glide as CSS values, as placeOnMap places tiles.
+  const app = pageScript();
+  assert.match(app, /document\.dispatchEvent\(new Event\(PIPELINE_READ\)\)/);
+  assert.match(app, /document\.addEventListener\(PIPELINE_READ, showBuildRunning\)/);
+  assert.match(app, /area\.classList\.toggle\('running', buildRunning\(lastPipeline\(\)\)\)/);
+  assert.match(app, /glideFrom: '--glide-from', glideTo: '--glide-to'/);
+  // The pulse, the glide, and neither under reduced motion or on a phone's stacked areas.
+  const css = readFileSync(WEB('app.css'), 'utf8');
+  assert.match(css, /\.map-area\.running \{ animation: area-pulse /);
+  assert.match(css, /@keyframes area-pulse \{ from \{ background: color-mix\(in srgb, var\(--area\) 20%, var\(--bg-surface\)\); \} to \{ background: color-mix\(in srgb, var\(--area\) 30%, var\(--bg-surface\)\); \} \}/);
+  assert.match(css, /\.map-area\.running \.tile\[data-glide-ms\] \{ animation: tile-glide var\(--glide-ms\) linear forwards; \}/);
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\) \{\s*\.map-area\.running, \.map-area\.running \.tile\[data-glide-ms\] \{ animation: none; \}/);
 });
