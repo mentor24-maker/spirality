@@ -20,6 +20,7 @@ import humanHours from '../lib/humanHours.js';
 import busFallback from '../lib/busFallback.js';
 import pipelinePause from '../lib/pipelinePause.js';
 import prFiles from '../lib/prFiles.js';
+import waitsOnLine from '../lib/waitsOn.js';
 import { compareWithinStatus } from '../scripts/lib/loopStatuses.mjs';
 import { GROUPS, MODELS, DEFAULT_MODEL, RELEASE_GROUP } from './pipelineControls.mjs';
 import { OWN_RELEASE_LINE, rollBackTarget } from '../lib/releases.mjs';
@@ -564,19 +565,39 @@ export const CONSOLE_LIVE_MS = 24 * 3_600_000;
  *
  * `{ projects: [{ slug, name, prefix, logo }], tickets: [{ id, project,
  * name, status, tags, priority, assignee, updatedAt, stageSince,
- * waitingOnOperator, answerIn, pullRequest, nextChange }] }`. Tickets go
+ * waitingOnOperator, answerIn, pullRequest, nextChange, hold }] }`. Tickets go
  * in the contract's STAGE_ORDER, then `queue` order within a status (as
  * boardOf). `status` is the contract's own spelling; `assignee` is by name;
  * `waitingOnOperator` is the loop's own verdict (waitingVerdict) for the
  * ticket's project operator, the same rule his Waiting on You page lists by;
  * `answerIn` says his answer is in (answerIsIn); `pullRequest` is the merge
- * step's own answer (findPullRequest), or null.
+ * step's own answer (findPullRequest), or null; `hold` is what keeps a
+ * Queued ticket from the build loop (holdOf), or null.
  *
  * `pipeline` is `{ slug, stages }`: GET /pipeline's answer (pipelineOf) and
  * the project whose logs it read. Only that project's tickets get a lane's
  * time (nextChangeOf); null, or another project, gets none. `prStates` is
  * the server's GitHub read (SP-226), as waitingFor takes it.
  */
+/**
+ * What holds a Queued ticket back from the build loop (SP-377): its Waits on:
+ * line, read by lib/waitsOn.js holdReasons with each named ticket looked up
+ * in this store, `closed` when it is in a TERMINAL_STATUSES status, `open` in
+ * any other, `unreadable` when the store has no such ticket. The same three
+ * answers `claim` and `queue --claimable` give, so the Console and the build
+ * loop agree. `{ reasons }` when anything holds it, else null; null for every
+ * ticket not in Queued.
+ */
+function holdOf(store, ticket) {
+  if (ticket.status !== QUEUED) return null;
+  const { reasons } = waitsOnLine.holdReasons(ticket, (id) => {
+    const pre = store.getTicket(String(id).toUpperCase());
+    if (!pre) return 'unreadable';
+    return TERMINAL_STATUSES.includes(pre.status) ? 'closed' : 'open';
+  });
+  return reasons.length ? { reasons } : null;
+}
+
 export function consoleOf(store, { only = null, pipeline = null, prStates = null, now = Date.now() } = {}) {
   const projects = visibleProjects(store, only);
   const lanes = pipeline?.stages ? new Map(pipeline.stages.map((s) => [s.job, s])) : null;
@@ -621,6 +642,7 @@ export function consoleOf(store, { only = null, pipeline = null, prStates = null
           answerIn: answerIsIn(t, comments, project.operator),
           pullRequest: findPullRequest(trailComments(store, t.id))?.url ?? null,
           nextChange: nextChangeOf(t.status, projectLanes),
+          hold: holdOf(store, t),
         },
       });
     }
