@@ -1051,7 +1051,7 @@ Written down so nobody mistakes them for the contract:
   no `git merge-tree` cross-check, so every
   hand-off reads "no local check was attempted" and the ticket asks its
   builder to find out first. A stalled hand-off is announced on the bus
-  (`spirality-bus` since SP-281), at most once a day; a filing that fails
+  (Spirality's own queue since SP-359), at most once a day; a filing that fails
   is retried on the next pass.
 - **Any reply to an intake card queues the ticket.** The relay does not
   read what Dane said on a ticket `loop-intake` handed over: "go", "change
