@@ -329,6 +329,7 @@ button { font: inherit; padding: 0.4rem 1rem; }
 .tasks-bar { flex-wrap: wrap; justify-content: flex-start; gap: var(--space-5) var(--space-7); }
 .tasks-bar form.search { min-width: 12rem; }
 .tasks-bar .class-filters { margin: 0; }
+.tasks-bar .feature-key { margin: 0; }
 .toolbar .project-picker, .toolbar .topic-picker { font-weight: 600; display: flex; align-items: center; gap: var(--space-3); }
 /* The Pipeline Status pod (SP-168): when each loop stage runs next, between the search field and Board/List. */
 .toolbar .pipeline-pod { flex-grow: 1; display: flex; flex-direction: column; align-items: flex-start; margin: 10px 20px; padding: 0.3rem 0.75rem; border: 1px solid var(--navy); border-radius: var(--radius-input); background: var(--pod-bg); font-size: var(--text-sm); color: var(--ink-primary); white-space: nowrap; cursor: pointer; text-align: left; font-family: inherit; }

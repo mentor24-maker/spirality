@@ -6,7 +6,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { contrast, renderConsole, renderDetours, renderFunnel, detourPathData, MAP_DETOURS, DETOURS_KEY, renderConsoleTile, consoleHeld, MAP_AREAS, MAP_UNITS, placeArea, driftOf, liveFade, slotShare, moreOpens, moreFeatures, tileSizeClass, TILE_MAX, TILE_MIN, TILE_COMPACT, TILE_TINY, LIVE_FADE_FLOOR, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, consoleFeature, featureColourIndex, renderFeatureKey, FEATURE_PALETTE, capInFlightText, glidesOf, buildRunning, laneRunning, runningAreas, GLIDE_AREA, GLIDE_AREAS, DRIFT_FULL_MS, tileMoves, MOVE_MIN } from './web/render.mjs';
+import { contrast, renderConsole, renderDetours, renderFunnel, detourPathData, MAP_DETOURS, DETOURS_KEY, renderConsoleTile, consoleHeld, MAP_AREAS, MAP_UNITS, placeArea, driftOf, liveFade, slotShare, moreOpens, moreFeatures, tileSizeClass, TILE_MAX, TILE_MIN, TILE_COMPACT, TILE_TINY, LIVE_FADE_FLOOR, consoleNextChange, consoleAge, consoleWaiting, CONSOLE_UNKNOWN, consoleFeature, featureColourIndex, renderFeatureKey, consoleForProject, renderProjectPicker, FEATURE_PALETTE, capInFlightText, glidesOf, buildRunning, laneRunning, runningAreas, GLIDE_AREA, GLIDE_AREAS, DRIFT_FULL_MS, tileMoves, MOVE_MIN } from './web/render.mjs';
 import { pageScript, renderScript } from './pageScripts.mjs';
 import { WEB, drawnCss } from './webTestKit.mjs';
 
@@ -372,8 +372,8 @@ test('the Console page: /in-flight and the stage colours drawn, a Console link b
   assert.match(draw, /api\('GET', '\/in-flight'\)/);
   assert.match(draw, /api\('GET', '\/stage-colours'\)/);
   assert.match(draw, /localStorage\.setItem\(VIEW_KEY, 'console'\)/);
-  assert.match(draw, /renderConsole\(answer, Date\.now\(\), \{ running: runningAreas\(lastPipeline\(\)\) \}\)\}`;\s*placeOnMap\(\);\s*showLanesRunning\(\);/);
-  assert.match(draw, /answer\.tickets\.some\(\(t\) => t\.status !== 'Live'\) \? '' : '<p class="quiet">Nothing is in flight\.<\/p>'/, 'the last day\'s launches are not work in flight');
+  assert.match(draw, /renderConsole\(shown, Date\.now\(\), \{ running: runningAreas\(lastPipeline\(\)\) \}\)\}`;[\s\S]*?placeOnMap\(\);\s*showLanesRunning\(\);/);
+  assert.match(draw, /shown\.tickets\.some\(\(t\) => t\.status !== 'Live'\) \? '' : '<p class="quiet">Nothing is in flight\.<\/p>'/, 'the last day\'s launches are not work in flight');
   // Each place becomes a CSS value set from the page's code, never a style attribute.
   const place = /function placeOnMap\(\) \{([\s\S]*?)\n\}/.exec(app)[1];
   assert.match(place, /el\.style\.setProperty\(prop, el\.dataset\[key\]\)/);
@@ -495,8 +495,85 @@ test('the Features key lists each feature on screen with its count, most first, 
   assert.equal(renderFeatureKey([consoleTicket({ tags: ['request-form'] })]), '');
   assert.equal(renderFeatureKey(null), '');
   assert.match(renderFeatureKey([consoleTicket({ tags: ['<i>'] })]), /data-feature="&lt;i&gt;"[^>]*>.*&lt;i&gt;<span class="count">1/);
-  // The Console draws the key above its stages.
-  assert.match(renderConsole({ tickets, projects: [ALPHA] }, ['Queued'], CONSOLE_NOW), /^<div class="feature-key"[\s\S]*<\/div><div class="console">/);
+  // The key is no longer drawn over the map (SP-383): the page puts it in the row under the title.
+  const map = renderConsole({ tickets, projects: [ALPHA] }, CONSOLE_NOW);
+  assert.match(map, /^<div class="console">/);
+  assert.doesNotMatch(map, /feature-key|feature-pick/);
+});
+
+// ── The Console's row under the title (SP-383) ───────────────────────────────
+
+/** The template drawConsole puts in the page, from its first line to its last. */
+const consoleDraw = () => /async function drawConsole\(\) \{([\s\S]*?)\n\}/.exec(pageScript())[1];
+
+test('the Console has a row under its title: Project picker, Pipeline Stages pod, then the Features key, in that order (SP-383)', () => {
+  const draw = consoleDraw();
+  assert.match(draw, /\$\{slug \? viewSwitch\(slug, 'console'\) : ''\}<\/div>\s*<div class="toolbar tasks-bar">\s*\$\{renderProjectPicker\(answer\.projects, pickedProject, \{ all: 'All Projects' \}\)\}\s*<button type="button" class="pipeline-pod" aria-haspopup="dialog" title="Open Pipeline Status"><\/button>\s*\$\{renderFeatureKey\(shown\.tickets\)\}\s*<\/div>/);
+  // The pod is filled and opens Pipeline Status as on Board and List.
+  assert.match(draw, /<dialog class="pipeline-status" aria-labelledby="pipeline-status-title">[\s\S]*<div class="pipeline-details"><\/div>/);
+  assert.match(draw, /wirePipeline\(\);\s*refreshPipeline\(\);/);
+  const css = readFileSync(WEB('app.css'), 'utf8');
+  assert.match(css, /\.tasks-bar \.feature-key \{ margin: 0; \}/);
+});
+
+test('the Console\'s row has no Topic picker, no Search box and no Kind / Started By / How It Ended filters (SP-383)', () => {
+  const draw = consoleDraw();
+  for (const absent of ['renderTopicPicker', 'searchForm', 'renderClassFilters', 'topic-picker', 'class-filters', 'form class="search"']) {
+    assert.ok(!draw.includes(absent), `the Console draws no ${absent}`);
+  }
+  assert.equal((draw.match(/<select|renderProjectPicker/g) || []).length, 1, 'one picker: the Project picker');
+});
+
+test('the Project picker starts on All Projects; choosing a project leaves only its tickets on the map, its counts and its Features key (SP-383)', () => {
+  const picker = renderProjectPicker([ALPHA, BETA], '', { all: 'All Projects' });
+  assert.match(picker, /^<label class="project-picker">Project: <select name="project"><option value="" selected>All Projects<\/option><option value="alpha">Alpha<\/option><option value="beta">Beta<\/option><\/select><\/label>$/);
+  assert.match(renderProjectPicker([ALPHA, BETA], 'beta', { all: 'All Projects' }), /<option value="">All Projects<\/option><option value="alpha">Alpha<\/option><option value="beta" selected>Beta/);
+  // Board and List's picker is unchanged: no All Projects.
+  assert.doesNotMatch(renderProjectPicker([ALPHA, BETA], 'alpha'), /All Projects|value=""/);
+  const answer = {
+    projects: [ALPHA, BETA],
+    tickets: [
+      consoleTicket({ id: 'AL-1', tags: ['console'] }),
+      consoleTicket({ id: 'AL-2', status: 'Building', tags: ['console'] }),
+      consoleTicket({ id: 'BE-1', project: 'beta', tags: ['mail'] }),
+      consoleTicket({ id: 'BE-2', project: 'beta', status: 'Odd status', tags: ['mail'] }),
+    ],
+  };
+  const all = consoleForProject(answer, '');
+  assert.deepEqual(all.tickets.map((t) => t.id), ['AL-1', 'AL-2', 'BE-1', 'BE-2']);
+  assert.deepEqual(consoleForProject(answer, 'gone').tickets.map((t) => t.id), ['AL-1', 'AL-2', 'BE-1', 'BE-2'], 'a project not in the answer is All Projects');
+  const beta = consoleForProject(answer, 'beta');
+  assert.deepEqual(beta.tickets.map((t) => t.id), ['BE-1', 'BE-2']);
+  assert.deepEqual(beta.projects, [ALPHA, BETA], 'every project stays in the picker');
+  const map = renderConsole(beta, CONSOLE_NOW);
+  assert.doesNotMatch(map, /AL-1|AL-2/);
+  assert.match(map, /href="\/t\/BE-1"/);
+  assert.match(map, /<section class="console-other"><h2>Other Statuses<\/h2>[\s\S]*BE-2/);
+  assert.match(map, /data-area="Queued"[^>]*><h2><span class="stage-name">Queued<\/span><span class="count quiet">1<\/span>/);
+  assert.match(map, /data-area="Building"[^>]*><h2><span class="stage-name">Building<\/span><span class="count quiet">0<\/span>/);
+  const key = renderFeatureKey(beta.tickets);
+  assert.match(key, /data-feature="mail"/);
+  assert.match(key, /<span class="count">2<\/span>/);
+  assert.doesNotMatch(key, /data-feature="console"/);
+  // The page filters before it draws, and draws the map, the empty line and the key from that.
+  const draw = consoleDraw();
+  assert.match(draw, /const shown = consoleForProject\(answer, pickedProject\);/);
+  assert.ok(draw.indexOf('consoleForProject(answer, pickedProject)') < draw.indexOf('main.innerHTML'));
+});
+
+test('the picked project survives the minute redraw, is the Console\'s own, and a pick whose feature is gone is let go (SP-383)', () => {
+  const app = pageScript();
+  const draw = consoleDraw();
+  // Kept in the page, not saved where Board and List read their project.
+  assert.match(app, /\nlet pickedProject = '';/);
+  assert.match(draw, /pickedProject = e\.target\.value;\s*route\(\);/);
+  assert.doesNotMatch(draw, /PROJECT_KEY|localStorage\.setItem\(PROJECT/);
+  assert.match(draw, /if \(!answer\.projects\.some\(\(p\) => p\.slug === pickedProject\)\) pickedProject = '';/);
+  // After a project change the Features key is drawn afresh; a pick it no longer lists is released.
+  assert.match(draw, /showFeaturePick\(\);\s*putTrail/);
+  const show = /function showFeaturePick\(\) \{([\s\S]*?)\n\}/.exec(app)[1];
+  assert.match(show, /if \(!picks\.some\(\(b\) => b\.dataset\.feature === pickedFeature\)\) pickedFeature = null;/);
+  assert.match(show, /main\.querySelectorAll\('\.feature-pick'\)/);
 });
 
 test('a "+N More" tile names the features of the tickets it holds, so a pick dims it only when none of them match (SP-333)', () => {
