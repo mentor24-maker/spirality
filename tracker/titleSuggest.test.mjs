@@ -4,7 +4,7 @@ import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  claudeArgs, claudeCommandOf, MAX_TITLE_LENGTH, readTitles, SKILL_FILE, skillPrompt, suggestInput, suggestTitles, TitleSuggestError,
+  claudeArgs, claudeCommandOf, claudeEnv, hideToken, MAX_TITLE_LENGTH, readTitles, SKILL_FILE, skillPrompt, suggestInput, suggestTitles, TitleSuggestError,
 } from './titleSuggest.mjs';
 import { parseSkill } from './commands.mjs';
 
@@ -110,4 +110,20 @@ test('suggestTitles: a short answer, a failed run, no command and a hang each fa
     for (const s of [three, empty, broken, hang]) s.cleanup();
   }
   await assert.rejects(suggestTitles({ description: '   ' }, { command: '/bin/echo' }), (err) => err.code === 'no-description');
+});
+
+test('with no token the run spawns exactly as before; with one, only its environment gains CLAUDE_CODE_OAUTH_TOKEN', async () => {
+  const seen = [];
+  const fake = (command, args, options) => {
+    seen.push(options);
+    throw Object.assign(new Error('stop here'), { code: 'ENOENT' });
+  };
+  await assert.rejects(suggestTitles({ description: 'x' }, { run: fake }), TitleSuggestError);
+  assert.deepEqual(Object.keys(seen[0]).sort(), ['cwd', 'stdio'], 'no env given: the child inherits the server\'s, as it always did');
+  await assert.rejects(suggestTitles({ description: 'x' }, { run: fake, token: 'tok-123' }), TitleSuggestError);
+  assert.equal(seen[1].env.CLAUDE_CODE_OAUTH_TOKEN, 'tok-123');
+  assert.equal(seen[1].env.PATH, process.env.PATH, 'the rest of the environment is kept');
+  assert.equal(claudeEnv(null, { A: '1' }).CLAUDE_CODE_OAUTH_TOKEN, undefined);
+  assert.equal(hideToken('a tok-123 b tok-123', 'tok-123'), 'a [token] b [token]');
+  assert.equal(hideToken('unchanged', null), 'unchanged');
 });

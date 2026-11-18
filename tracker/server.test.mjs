@@ -7,7 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { openStore, StoreError } from './store.mjs';
 import { SOURCE as IMPORT_SOURCE } from './import.mjs';
-import { startServer, settingsFromEnv, setupSettingsOf, viaPublicAddress, failureCounter, outsidePageUrl } from './server.mjs';
+import { startServer, settingsFromEnv, setupSettingsOf, viaPublicAddress, failureCounter, outsidePageUrl, loadClaudeToken } from './server.mjs';
 import { DANE_FIELDS, STEPS } from '../scripts/onboard/onboard.mjs';
 import loopStatuses from '../lib/loopStatuses.js';
 
@@ -349,6 +349,119 @@ test('suggest-next runs the server\'s own claudeCommand when no claude is named 
     assert.deepEqual(done.body.suggestions, three);
     assert.ok(x.recorded().args.includes('--restricted'), 'the stub claude ran, confined');
   } finally { await f.cleanup(); }
+});
+
+/** A token-shaped value no real sign-in has, for the long-lived sign-in tests. */
+const SIGN_IN = 'sk-ant-oat01-test-only-zebra-4417';
+
+/**
+ * A stand-in `claude` that saves what CLAUDE_CODE_OAUTH_TOKEN it was given
+ * to `<name>.token` beside itself, then prints `out` and, with `fail`, puts
+ * the token on its error output and exits 1, so a test can prove the
+ * token never comes back out in a log line or an answer.
+ */
+function tokenClaude(dir, name, out, { fail = false } = {}) {
+  const command = join(dir, name);
+  const seen = `${command}.token`;
+  writeFileSync(command, `#!/usr/bin/env node
+process.stdin.resume();
+process.stdin.on('end', () => {
+  const t = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+  require('node:fs').writeFileSync(${JSON.stringify(seen)}, t === undefined ? '(none)' : t);
+  process.stdout.write(${JSON.stringify(out)});
+  if (${fail}) { process.stderr.write('refused sign-in ' + t + '\\n'); process.exit(1); }
+});
+`);
+  chmodSync(command, 0o755);
+  return { command, token: () => (existsSync(seen) ? readFileSync(seen, 'utf8') : null) };
+}
+
+test('with the long-lived sign-in given, both suggestion runs hand CLAUDE_CODE_OAUTH_TOKEN to their claude; without it they run as before; the value is in no log line or answer', async () => {
+  const f = await fixture();
+  try {
+    const five = ['Add one', 'Add two', 'Add three', 'Add four', 'Add five'];
+    const titlePath = '/projects/alpha/tickets/suggest-titles';
+
+    // Titles, with the token: it reaches the child; a failing run's error output is scrubbed.
+    const good = tokenClaude(f.dir, 'title-good', five.join('\n'));
+    const withAt = await f.serve(f.store, { claudeCommand: good.command, claudeToken: SIGN_IN, suggestTimeoutMs: 5000 });
+    const ok = await f.call('POST', titlePath, { at: withAt, body: { description: 'x' } });
+    assert.equal(ok.status, 200, ok.text);
+    assert.equal(good.token(), SIGN_IN, 'the title run got the token');
+    const bad = tokenClaude(f.dir, 'title-bad', '', { fail: true });
+    const badRes = await f.call('POST', titlePath, { at: await f.serve(f.store, { claudeCommand: bad.command, claudeToken: SIGN_IN, suggestTimeoutMs: 5000 }), body: { description: 'x' } });
+    assert.equal(badRes.status, 502, badRes.text);
+    assert.equal(bad.token(), SIGN_IN);
+    assert.ok(!badRes.text.includes(SIGN_IN), 'not in the answer');
+    assert.ok(f.lines.some((l) => l.includes('refused sign-in [token]')), `the failure is logged with the token cut out: ${f.lines.filter((l) => l.includes('suggest-titles')).join(' | ')}`);
+
+    // Titles, without it: the child gets whatever the server itself has, never this token.
+    const plain = tokenClaude(f.dir, 'title-plain', five.join('\n'));
+    const plainRes = await f.call('POST', titlePath, { at: await f.serve(f.store, { claudeCommand: plain.command, suggestTimeoutMs: 5000 }), body: { description: 'x' } });
+    assert.equal(plainRes.status, 200, plainRes.text);
+    assert.equal(plain.token(), process.env.CLAUDE_CODE_OAUTH_TOKEN ?? '(none)', 'unchanged: the server\'s own environment');
+
+    // Next-task suggestions, with the token, failing on purpose: the child got it; the kept message hides it.
+    const x = suggestScratch(f.dir, '[]');
+    f.store.updateProject('alpha', { repo: 'me/app' });
+    const next = tokenClaude(f.dir, 'next-bad', '', { fail: true });
+    const nextAt = await f.serve(f.store, { claudeCommand: next.command, claudeToken: SIGN_IN, suggest: { source: () => x.repo, tmpRoot: x.tmpRoot } });
+    await f.call('POST', '/projects/alpha/suggest-next', { at: nextAt });
+    const failed = await settledSuggest(f, nextAt, 'alpha');
+    assert.equal(failed.body.state, 'failed', failed.text);
+    assert.equal(next.token(), SIGN_IN, 'the next-task run got the token');
+    assert.match(failed.body.message, /refused sign-in \[token\]/);
+    assert.ok(!failed.text.includes(SIGN_IN), 'not in the answer');
+
+    // Next-task suggestions, succeeding with the token, and without it.
+    const three = [1, 2, 3].map((n) => ({ title: `Add thing ${n}`, description: '', why: '' }));
+    const nextGood = tokenClaude(f.dir, 'next-good', JSON.stringify(three));
+    const goodAt = await f.serve(f.store, { claudeCommand: nextGood.command, claudeToken: SIGN_IN, suggest: { source: () => x.repo, tmpRoot: x.tmpRoot } });
+    await f.call('POST', '/projects/alpha/suggest-next', { at: goodAt });
+    assert.equal((await settledSuggest(f, goodAt, 'alpha')).body.state, 'done');
+    assert.equal(nextGood.token(), SIGN_IN);
+    const nextPlain = tokenClaude(f.dir, 'next-plain', JSON.stringify(three));
+    const plainNextAt = await f.serve(f.store, { claudeCommand: nextPlain.command, suggest: { source: () => x.repo, tmpRoot: x.tmpRoot } });
+    await f.call('POST', '/projects/alpha/suggest-next', { at: plainNextAt });
+    assert.equal((await settledSuggest(f, plainNextAt, 'alpha')).body.state, 'done');
+    assert.equal(nextPlain.token(), process.env.CLAUDE_CODE_OAUTH_TOKEN ?? '(none)');
+
+    assert.ok(!f.lines.some((l) => l.includes(SIGN_IN)), 'no log line carries the token');
+  } finally { await f.cleanup(); }
+});
+
+test('loadClaudeToken reads CLAUDE_CODE_OAUTH_TOKEN from the project\'s Doppler, and every way there is none says why in one line without the value', async () => {
+  const config = () => ({ dopplerProject: 'proj', dopplerConfig: 'prd' });
+  const calls = [];
+  const answering = (fn) => async (cmd, args) => { calls.push([cmd, ...args].join(' ')); return fn(); };
+  const got = await loadClaudeToken({ env: {}, loadConfig: config, run: answering(() => ({ stdout: `${SIGN_IN}\n` })) });
+  assert.equal(got.token, SIGN_IN);
+  assert.equal(got.line, 'title and next-task suggestions: signed in with the long-lived CLAUDE_CODE_OAUTH_TOKEN from Doppler proj/prd (the value is not shown).');
+  assert.equal(calls[0], 'doppler secrets get CLAUDE_CODE_OAUTH_TOKEN --plain --project proj --config prd --no-check-version');
+
+  const fail = (stderr, code = 1) => async () => { throw Object.assign(new Error('doppler failed'), { stderr, code }); };
+  const cases = [
+    [{ run: fail('Doppler Error: Could not find requested secret: CLAUDE_CODE_OAUTH_TOKEN') }, /no CLAUDE_CODE_OAUTH_TOKEN in Doppler proj\/prd; they use this machine's own Claude sign-in\.$/],
+    [{ run: fail('Unable to reach Doppler', 'ETIMEDOUT') }, /Doppler proj\/prd could not be read for CLAUDE_CODE_OAUTH_TOKEN \(ETIMEDOUT\); they use/],
+    [{ run: answering(() => ({ stdout: '' })) }, /CLAUDE_CODE_OAUTH_TOKEN in Doppler proj\/prd is empty; they use/],
+    [{ run: answering(() => ({ stdout: `${SIGN_IN} oops\n` })) }, /has a space or line break in it, so it is not used; they use/],
+    [{ loadConfig: () => { throw new Error('no manifest'); } }, /the project config is not usable \(no manifest\), so no CLAUDE_CODE_OAUTH_TOKEN was read/],
+    [{ loadConfig: () => ({}) }, /names no Doppler project and config/],
+  ];
+  for (const [over, line] of cases) {
+    const r = await loadClaudeToken({ env: {}, loadConfig: config, run: answering(() => { throw new Error('not asked'); }), ...over });
+    assert.equal(r.token, null);
+    assert.match(r.line, line);
+    assert.ok(!r.line.includes(SIGN_IN), r.line);
+  }
+
+  // A token already in the server's environment: nothing is read, and its children inherit it as always.
+  const before = calls.length;
+  const own = await loadClaudeToken({ env: { CLAUDE_CODE_OAUTH_TOKEN: SIGN_IN }, loadConfig: config, run: answering(() => ({ stdout: 'other' })) });
+  assert.equal(own.token, null);
+  assert.match(own.line, /from the server's own environment/);
+  assert.ok(!own.line.includes(SIGN_IN));
+  assert.equal(calls.length, before, 'Doppler was not asked');
 });
 
 test('GET /tickets/:id answers the ticket with its comments, oldest first, replies linked', async () => {

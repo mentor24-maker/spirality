@@ -236,9 +236,21 @@ bash scripts/claude_token_to_doppler.sh     # paste it when asked; it is not sho
 The second prints `Stored: CLAUDE_CODE_OAUTH_TOKEN is set in Doppler
 spirality/dev and reads back the same`, never the value, and exits non-zero
 saying why if the write or the read-back fails. Each lane's next pass reads
-the new token; nothing needs restarting. A setup-token lasts about a year:
-make the next one before it ends, and whenever the account the loops run on
-changes.
+the new token; nothing needs restarting for the lanes. A setup-token lasts
+about a year: make the next one before it ends, and whenever the account the
+loops run on changes.
+
+The tracker's own Claude runs, the Add Task box's title suggestions and the
+next-task suggestions (`tracker/titleSuggest.mjs`, `tracker/nextSuggest.mjs`),
+use the same token (SP-390). The tracker reads it from the same Doppler
+project and config **once, when it starts** (`loadClaudeToken` in
+`tracker/server.mjs`), and hands it to those runs only. Its log says
+`title and next-task suggestions: signed in with the long-lived
+CLAUDE_CODE_OAUTH_TOKEN from Doppler spirality/dev (the value is not shown).`
+or why not, and then they use the machine's own sign-in as before. A token
+stored after the tracker started reaches it at its next restart (any merge
+that changes the tracker restarts it; by hand,
+`launchctl kickstart -k gui/$(id -u)/com.spirality.tracker`).
 
 So the question is never "shall I start one", it is "what is it doing":
 
