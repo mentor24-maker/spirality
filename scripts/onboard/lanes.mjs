@@ -30,7 +30,16 @@
  *   4. lanes     `--status` shows every lane loaded, and each lane's first
  *                pass did its lane's work rather than stand down
  *                (lib/onboardLanes.mjs, hold-up 14). On a rerun with every
- *                lane already loaded, each lane's newest pass is judged.
+ *                lane already loaded, each lane's newest pass is judged,
+ *                except a relay pass that did not run because no release
+ *                was named (SP-387): the relay is woken
+ *                (scripts/lib/wakeLane.mjs, from the checkout) and the pass
+ *                after the wake is judged instead.
+ *
+ * Before the install, the project must have a Spirality release named
+ * (SP-387): its lanes run only the release named for it. `npm run onboard`
+ * names the newest before this runs; run on its own with none named, this
+ * stops there with the command that names one, never a relay failure later.
  *
  * The branch and pull request come from SP-110's copy step; SP-112's wizard
  * passes them in. When the pull request merges, the runners put the checkout
@@ -55,7 +64,8 @@ import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { loadProjectConfig, CONFIG_FILE } from '../../lib/projectConfig.mjs';
 import { expandHome } from '../../lib/onboardAnswers.mjs';
-import { LANES, spiralityInstallerPath, installerCommand, parseStatus, readPasses, judgeFirstPass, rerunSince, ticketsNamed, waitMinutesFrom, setupTicketBody, withLine } from '../../lib/onboardLanes.mjs';
+import { LANES, spiralityInstallerPath, installerCommand, parseStatus, readPasses, judgeFirstPass, rerunSince, ticketsNamed, waitMinutesFrom, setupTicketBody, withLine, endedForNoRelease } from '../../lib/onboardLanes.mjs';
+import { namedFor, readRecord } from '../lib/releaseCheckout.mjs';
 import { LOOP_FILING_CLASS } from '../../lib/ticketClass.js';
 
 const require = createRequire(import.meta.url);
@@ -226,6 +236,20 @@ if (!dryRun) {
     : `${ticket} is in "${status}", where a lane has put it since; left there`);
 }
 
+// ── the release (SP-387) ───────────────────────────────────────────────────
+// Spirality's own door, from its folder, with its own settings: the release
+// record is Spirality's, whatever project the lanes are for.
+const ownDoor = (args) => {
+  const r = spawnSync('npm', ['run', '--silent', 'clickup', '--', ...args], { cwd: SPIRALITY, encoding: 'utf8', env: Object.fromEntries(Object.entries(process.env).filter(([k]) => k !== 'SPIRALITY_PROJECT')) });
+  return { status: r.status, stdout: r.stdout, stderr: r.stderr, error: r.error };
+};
+const release = namedFor(readRecord(ownDoor), config.projectSlug);
+if (release.problem) fail('release', `${config.projectSlug}'s Spirality release could not be read: ${release.problem}`);
+if (release.none) {
+  fail('release', `${config.projectSlug} has no Spirality release named, so its lanes would have nothing to run on. npm run onboard names the newest; by hand: npm run clickup -- release name --project ${config.projectSlug} --to release-<n> (npm run release -- cut makes one if none exists)`);
+}
+say('release', release.own ? `${config.projectSlug} is Spirality's own project and runs main` : `${config.projectSlug} runs Spirality's ${release.release}`);
+
 // ── 3. install ─────────────────────────────────────────────────────────────
 const installer = spiralityInstallerPath(SPIRALITY);
 if (!existsSync(installer)) fail('install', `Spirality's installer ${installer} is not there`);
@@ -270,6 +294,17 @@ const passesOf = (lane) => readPasses(existsSync(logOf(lane)) ? readFileSync(log
 // already loaded: each lane's newest pass, so a lane that stood down before
 // is checked again rather than taken on trust (rule 6).
 const sinceOf = Object.fromEntries(LANES.map((l) => [l, before.length ? installedAt : rerunSince(passesOf(l))]));
+// SP-387: a rerun whose newest relay pass did not run for want of a release
+// (named since, above) would only judge that pass again. Wake the relay and
+// judge the pass after the wake; a wake that fails leaves its timer to start
+// one, still judged from now.
+if (!before.length && endedForNoRelease(passesOf('relay').at(-1))) {
+  sinceOf.relay = new Date();
+  const woke = run('node', [join(SPIRALITY, 'scripts', 'lib', 'wakeLane.mjs'), 'relay'], { cwd: checkout });
+  say('lanes', woke.ok
+    ? `relay: its newest pass did not run (no Spirality release was named then); woke it: ${last(woke.out, 1)}. Judging the pass after now`
+    : `relay: its newest pass did not run (no Spirality release was named then), and waking it failed (${last(woke.err || woke.out)}); judging the next pass its timer starts`);
+}
 const deadline = Date.now() + waitMinutes * 60 * 1000;
 const verdicts = {};
 for (;;) {

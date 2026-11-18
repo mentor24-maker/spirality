@@ -69,6 +69,37 @@ the stop (`kind` `answers`, `paste` with the block's lines in `commands`,
 `merge` with the setup ticket's `link`, or `failed`), and `finished`. It holds
 commands and links only, never a secret value.
 
+### The lanes step names the project's Spirality release
+
+A project with no copy of the loop runs only the Spirality release named for
+it ([INTEGRATION.md](INTEGRATION.md)). With none named, its relay's first
+pass ends `not run: no Spirality release to run on`, and on Cassidy's setup
+(11/17) the lanes step failed for it two steps after the setup could have
+said why. So (SP-387):
+
+- **The look** has a `Release:` row: `ready` when a release is named for the
+  project, `will do` when none is but one has been cut (the lanes step names
+  the newest), and `BLOCKED` when no release has ever been cut, with the
+  command that cuts one, `npm run release -- cut`. A BLOCKED row stops the
+  setup at the look, before anything is written.
+- **The lanes step**, before `onboard:lanes` installs or judges anything,
+  reads the record (`npm run clickup -- release list`). A project with a
+  release named keeps it (`lanes  <slug> runs Spirality's release-<n>; left
+  as it is`). One with none gets the newest named (`release name --project
+  <slug> --to release-<n>`), read back with `release list` and written to
+  the step log (`| lanes | release | ...`). Naming a new project's first
+  release is part of Dane running the setup: it has no lanes on an older
+  release yet, so the quiet period that guards moving a running project
+  (SP-261) is not at stake. With no release cut at all, the step stops with
+  one plain line, `FAILED: lanes: no Spirality release has been cut yet,
+  ... Cut one with npm run release -- cut, then rerun`, and nothing is
+  installed. Cutting a release stays a separate, deliberate step.
+- **A fresh relay pass.** A rerun whose relay's newest pass ended `not run:
+  no Spirality release` wakes the relay (`scripts/lib/wakeLane.mjs relay`,
+  from the project's checkout) and judges the pass after the wake, never the
+  old one. `onboard:lanes` run on its own, with no release named, stops at
+  its `release` line with the command that names one.
+
 ### The last step: the checkout back on `main`
 
 The lanes step runs the new lanes from the setup branch, `spirality-setup`,
