@@ -23,6 +23,10 @@
  *   npm run throughput                  read everything, print the report, write nothing
  *   npm run throughput -- --check       the same, and post to the bus on STALLED or UNKNOWN
  *   npm run throughput -- --check --dry-run   say what it WOULD post, send nothing
+ *   npm run throughput -- --check --no-post   for a project with no bus (SP-386):
+ *      read on the hourly limit and print the verdict, post nothing. Unlike
+ *      --dry-run it keeps the hourly read stamp, so the relay's ten-minute
+ *      wake still reads at most once an hour; it writes or clears no post stamp.
  *
  * Exit codes, because scripts branch on this:
  *   0  MOVING or IDLE — the pipeline is fine, or had nothing to do
@@ -80,6 +84,14 @@ const arg = (name, fallback = '') => {
 
 const CHECK = flag('check');
 const DRY = flag('dry-run');
+// No bus to post to (SP-386): every post path behaves as a dry run, but the
+// hourly READ stamp is still written (writeStamp only refuses under DRY), so
+// the read limit holds. NOT_POSTING covers both, for every post-stamp path.
+const NO_POST = flag('no-post');
+const NOT_POSTING = DRY || NO_POST;
+const NOT_POSTING_LINE = DRY
+  ? '--dry-run — this is what would go to the bus, and nothing was sent:'
+  : '--no-post — this project has no bus, so this was not sent anywhere:';
 const DAYS = Number(arg('days', String(throughput.REPORT_DAYS))) || throughput.REPORT_DAYS;
 const NOW = Date.now();
 const NODE = { name: nodeName() };
@@ -215,7 +227,7 @@ function readStamp() {
 // A dry run reads and prints, and writes nothing: no stamp is written or
 // cleared (Spirality's addition, so a relay --dry-run leaves no trace).
 function clearStamp() {
-  if (DRY) return;
+  if (NOT_POSTING) return;
   try { fs.rmSync(stampFile, { force: true }); } catch { /* nothing to clear */ }
 }
 
@@ -242,7 +254,7 @@ if (CHECK && !flag('force')
 // One definition of "tear this window up", so the two callers below cannot
 // drift apart on what clearing a stamp means.
 function clearUnknownStamp(kind) {
-  if (DRY) return;
+  if (NOT_POSTING) return;
   try { fs.rmSync(unknownStampFileFor(kind), { force: true }); } catch { /* nothing to clear */ }
 }
 
@@ -281,9 +293,9 @@ function announceUnknown(v, evidence = null) {
   const text = throughput.renderUnknownPost({
     verdict: v, now: NOW, node: NODE.name || 'an unnamed machine', evidence, hasHeartbeat: HAS_HEARTBEAT,
   });
-  if (DRY) {
+  if (NOT_POSTING) {
     console.log('');
-    console.log('--dry-run — this is what would go to the bus, and nothing was sent:');
+    console.log(NOT_POSTING_LINE);
     console.log('');
     console.log(text);
     return;
@@ -492,9 +504,9 @@ const text = throughput.renderStallPost({
   reworkUnreadable: prRead.why, node: NODE.name || 'an unnamed machine', hasHeartbeat: HAS_HEARTBEAT,
 });
 
-if (DRY) {
+if (NOT_POSTING) {
   console.log('');
-  console.log('--dry-run — this is what would go to the bus, and nothing was sent:');
+  console.log(NOT_POSTING_LINE);
   console.log('');
   console.log(text);
   exitWith(v.exitCode);

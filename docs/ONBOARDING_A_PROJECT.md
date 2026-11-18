@@ -143,9 +143,11 @@ setup copies none of them.
 
 They post only to a bus. The look says where: `Bus: where the pipeline
 watchdogs post: ready (<slug>'s own queue, ...)`, or, with no bus, that they have
-nowhere to post. Without one the relay still starts them on every wake,
-and each that has something to say finds no bus and says so in the relay's
-log, naming the missing `busProject`; nothing reaches
+nowhere to post. Without one, each relay pass says so in one line of its
+log (`[relay] bus watchdogs skipped: <slug> has no bus ...`, SP-386) and
+never as a failure: the ticket watchdogs do not run, and the heartbeat,
+throughput and checkout-currency checks only report in the log. A watchdog
+that fails for any other reason still reads `FAILED`. Nothing reaches
 Dane. Giving the project a bus is above.
 
 **A project already set up** (WaveCenter, Normie, PressPlay) does not get
