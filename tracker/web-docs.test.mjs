@@ -6,7 +6,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { renderMarkdown, unwrapDoc, headingId, renderLoopQueueAnatomy, renderDiagramCut, LOOP_QUEUE_FIGURE_ID, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, renderLoopQueueDiagram, LOOP_QUEUE_DIAGRAM, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS } from './web/render.mjs';
+import { renderMarkdown, unwrapDoc, headingId, renderLoopQueueAnatomy, renderDiagramCut, LOOP_QUEUE_FIGURE_ID, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, renderLoopQueueDiagram, LOOP_QUEUE_DIAGRAM, LOOP_QUEUE_ARROWS, DIAGRAM_ARROW_HIT_WIDTH, renderArrowDetails, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS } from './web/render.mjs';
 import { pageScript } from './pageScripts.mjs';
 import { WEB, fixture } from './webTestKit.mjs';
 
@@ -452,6 +452,68 @@ test('the Docs page opens with the Loop Queue diagram, each status box a link to
   const css = readFileSync(WEB('app.css'), 'utf8');
   assert.match(css, /a\.diagram-box:focus-visible rect \{[^}]*stroke: var\(--focus-ring-color\)/);
   assert.match(css, /a\.diagram-box \{[^}]*cursor: pointer/);
+});
+
+test('every arrow and note on the Loop Queue diagram opens a pop-up of 50 to 100 words, and none covers a status box (SP-391)', () => {
+  const html = renderLoopQueueDiagram((path) => `/docs/spirality/${path}`);
+  assert.doesNotMatch(html, /style=/);
+  const labels = LOOP_QUEUE_DIAGRAM.boxes.map((b) => b.label);
+  // The ten arrows on the picture and its two notes under boxes, each once, in the picture's order.
+  assert.deepEqual(LOOP_QUEUE_ARROWS.map((a) => a.heading), [
+    'Written Up as a Spec', 'Operator Says Go', 'Build Pass Claims the Next Ticket', 'Rework Is Always Taken First',
+    'Pull Request Opened', 'Passes', 'Operator Merges', 'Sent Back', 'Judgment Call',
+    'Oldest First (Priority Ignored)', 'Highest Priority First, Then Oldest',
+  ]);
+  assert.equal(new Set(LOOP_QUEUE_ARROWS.map((a) => a.id)).size, LOOP_QUEUE_ARROWS.length, 'ids are unique');
+  const rects = [];
+  for (const a of LOOP_QUEUE_ARROWS) {
+    const words = a.copy.trim().split(/\s+/).length;
+    assert.ok(words >= 50 && words <= 100, `${a.heading} has ${words} words, not 50 to 100`);
+    assert.ok(labels.includes(a.from) && labels.includes(a.to), `${a.heading} joins two statuses on the diagram`);
+    assert.ok(a.line || a.words, `${a.heading} has something to click`);
+    // Its target: one keyboard-reachable button, with the line and the words rectangle it is measured to.
+    const target = new RegExp(`<g class="diagram-arrow" role="button" tabindex="0" aria-haspopup="dialog" data-arrow="${a.id}" aria-label="([^"]+)"><title>[^<]+</title>(.*?)</g>`).exec(html);
+    assert.ok(target, a.id);
+    assert.equal(target[1], `${a.heading}: from ${a.from} to ${a.to}`.replace(/&/g, '&amp;'));
+    if (a.line) assert.match(target[2], new RegExp(`<polyline points="${a.line.map((p) => p.join(',')).join(' ')}">`));
+    if (a.words) {
+      const [l, t, r, b] = a.words;
+      assert.match(target[2], new RegExp(`<rect x="${l}" y="${t}" width="${r - l}" height="${b - t}"`));
+      rects.push([a.heading, a.words]);
+    }
+    // Every leg of the line, widened by half the line's width all round, is a rectangle to keep off the boxes.
+    const half = DIAGRAM_ARROW_HIT_WIDTH / 2;
+    for (let i = 1; i < (a.line?.length ?? 0); i += 1) {
+      const [[x1, y1], [x2, y2]] = [a.line[i - 1], a.line[i]];
+      assert.ok(x1 === x2 || y1 === y2, `${a.heading}: each leg runs straight across or down`);
+      rects.push([a.heading, [Math.min(x1, x2) - half, Math.min(y1, y2) - half, Math.max(x1, x2) + half, Math.max(y1, y2) + half]]);
+    }
+  }
+  for (const [heading, [l, t, r, b]] of rects) {
+    assert.ok(l >= 0 && t >= 0 && r <= 3200 && b <= 1800 && l < r && t < b, `${heading} lies inside the picture`);
+    for (const { label, box } of LOOP_QUEUE_DIAGRAM.boxes) {
+      assert.ok(r <= box[0] || box[2] <= l || b <= box[1] || box[3] <= t, `${heading} covers part of the ${label} box`);
+    }
+  }
+  // One pop-up for them all, shaped like a command's: heading, the two statuses, the copy, and Close.
+  assert.match(html, /<dialog class="arrow-details" aria-labelledby="arrow-details-title">\s*<form method="dialog">\s*<button type="submit" class="close" aria-label="Close">×<\/button>\s*<div class="arrow-details-body"><\/div>\s*<div class="row"><button type="submit" class="btn">Close<\/button><\/div>/);
+  const sent = renderArrowDetails(LOOP_QUEUE_ARROWS.find((a) => a.id === 'sent-back'));
+  assert.match(sent, /<h2 id="arrow-details-title">Sent Back<\/h2>/);
+  assert.match(sent, /<p class="quiet">From In review to Rework<\/p>/);
+  assert.match(renderArrowDetails({ heading: '<b>', from: 'A', to: 'B', copy: '<i>' }), /&lt;b&gt;[\s\S]*&lt;i&gt;/, 'escaped');
+  // The page opens it on a click, or Enter or Space, on a target, and hands focus back when it shuts.
+  const docs = readFileSync(WEB('page-docs.mjs'), 'utf8');
+  const wire = docs.slice(docs.indexOf('function wireDiagramArrows()'));
+  assert.match(wire, /svg\.addEventListener\('click'/);
+  assert.match(wire, /e\.key !== 'Enter' && e\.key !== ' '/);
+  assert.match(wire, /dialog\.showModal\(\);/);
+  assert.match(wire, /dialog\.addEventListener\('close', \(\) => opener\?\.focus\(\)\);/);
+  assert.equal((docs.match(/^\s+wireDiagramArrows\(\);$/gm) ?? []).length, 2, 'wired on both of the page\'s screens');
+  const css = readFileSync(WEB('app.css'), 'utf8');
+  assert.match(css, /g\.diagram-arrow:focus-visible rect \{[^}]*stroke: var\(--focus-ring-color\)/);
+  assert.match(css, /g\.diagram-arrow \{[^}]*cursor: pointer/);
+  assert.match(css, /g\.diagram-arrow polyline \{[^}]*stroke: transparent/);
+  assert.match(css, new RegExp(`g\\.diagram-arrow polyline \\{[^}]*stroke-width: ${DIAGRAM_ARROW_HIT_WIDTH};`), 'the line is as wide as the boxes are kept clear of');
 });
 
 test('the Loop Queue Anatomy page is a table: each status box cut from the diagram beside its copy, linking to the diagram (SP-361)', () => {
