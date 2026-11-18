@@ -25,6 +25,15 @@ function rule(selector) {
 }
 
 /**
+ * The Tasks page's views that draw the second row (SP-362; the Console's,
+ * SP-383), each with the title row it must sit directly under.
+ */
+const TASKS_ROWS = {
+  'page-tasks.mjs': /^<div class="tasks-head title-row"><h1>Tasks<\/h1>\$\{filed \? filedPod\(filed, uploaded\) : ''\}\$\{viewSwitch\(board\.project, view\)\}<\/div>\s*$/,
+  'page-console.mjs': /^<div class="tasks-head title-row"><h1>Tasks<\/h1>\$\{slug \? viewSwitch\(slug, 'console'\) : ''\}<\/div>\s*$/,
+};
+
+/**
  * Every toolbar in `sources` ({ file: text }) not inside an open title row,
  * as "file:line", and how many Tasks second rows were seen. A toolbar is in a
  * title row when the nearest <h1> before it (within 300 characters) is in a
@@ -37,11 +46,11 @@ function looseToolbars(sources) {
   let tasksBars = 0;
   for (const [file, source] of Object.entries(sources)) {
     for (const m of source.matchAll(/<div class="toolbar(?: [\w -]*)?">/g)) {
-      if (m[0] === '<div class="toolbar tasks-bar">' && file === 'page-tasks.mjs') {
+      if (m[0] === '<div class="toolbar tasks-bar">' && Object.hasOwn(TASKS_ROWS, file)) {
         const row = source.lastIndexOf('<div class="tasks-head title-row"><h1>Tasks</h1>', m.index);
         const between = source.slice(row, m.index);
-        assert.ok(row !== -1 && /^<div class="tasks-head title-row"><h1>Tasks<\/h1>\$\{filed \? filedPod\(filed, uploaded\) : ''\}\$\{viewSwitch\(board\.project, view\)\}<\/div>\s*$/.test(between),
-          'the Tasks toolbar sits directly under a title row holding only the title, the Filed pod and the tabs');
+        assert.ok(row !== -1 && TASKS_ROWS[file].test(between),
+          `the Tasks toolbar in ${file} sits directly under a title row holding only the title, the Filed pod and the tabs`);
         tasksBars += 1;
         continue;
       }
@@ -79,7 +88,7 @@ test('the title and the toolbar share one row, buttons at the right (UI_DOCTRINE
   // tabs. Any other toolbar, however it is classed, still counts.
   const { loose, tasksBars } = looseToolbars(SOURCES);
   assert.deepEqual(loose, [], 'a toolbar outside a title row');
-  assert.equal(tasksBars, 1, 'the Tasks page draws its second row once');
+  assert.equal(tasksBars, 2, 'the Tasks page draws its second row once on Board and List, once on the Console');
 });
 
 test('a toolbar on its own row under a closed title row is loose (SP-362)', () => {

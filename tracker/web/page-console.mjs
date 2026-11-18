@@ -7,8 +7,8 @@
  * (Spirality SP-352), so a ticket that changes one page no longer edits the
  * same file as a ticket that changes another.
  */
-import { stageLooks, renderConsole, runningAreas, tileMoves, GLIDE_AREAS, GLIDE_AREA, PIPELINE_READ } from './render.mjs';
-import { main, api, SignedOut, VIEW_KEY, savedProject, setTitle, viewSwitch, putTrail, lastPipeline } from './app.mjs';
+import { stageLooks, renderConsole, consoleForProject, renderFeatureKey, renderProjectPicker, runningAreas, tileMoves, GLIDE_AREAS, GLIDE_AREA, PIPELINE_READ } from './render.mjs';
+import { main, api, SignedOut, VIEW_KEY, savedProject, setTitle, viewSwitch, putTrail, lastPipeline, wirePipeline, refreshPipeline, route } from './app.mjs';
 
 /**
  * The Console view (SP-233): every ticket in flight on every project he can
@@ -24,6 +24,14 @@ import { main, api, SignedOut, VIEW_KEY, savedProject, setTitle, viewSwitch, put
  * here so the minute's redraw keeps it. A reload clears it.
  */
 let pickedFeature = null;
+
+/**
+ * The project picked in the Console's Project picker (SP-383), a slug, or ''
+ * for "All Projects": kept here so the minute's redraw keeps it. It is the
+ * Console's own, never saved as Board and List's project, and a reload
+ * starts again on All Projects.
+ */
+let pickedProject = '';
 
 /**
  * Show the Console's pick: every tile of another feature (or of none) dims,
@@ -161,12 +169,36 @@ export async function drawConsole() {
   const project = savedProject();
   const slug = answer.projects.some((p) => p.slug === project) ? project : answer.projects[0]?.slug;
   setTitle('Console · Tracker');
+  // SP-383: only the picked project's tickets, everywhere on the page; a project no longer listed is let go.
+  if (!answer.projects.some((p) => p.slug === pickedProject)) pickedProject = '';
+  const shown = consoleForProject(answer, pickedProject);
   // Where each tile was, read the moment before the map is drawn again (SP-335).
   const before = mapTiles();
+  // SP-383: the row under the title holds only the Project picker, the Pipeline Stages pod and the Features key.
   main.innerHTML = `
     <div class="tasks-head title-row"><h1>Tasks</h1>${slug ? viewSwitch(slug, 'console') : ''}</div>
-    ${answer.tickets.some((t) => t.status !== 'Live') ? '' : '<p class="quiet">Nothing is in flight.</p>'}
-    ${renderConsole(answer, Date.now(), { running: runningAreas(lastPipeline()) })}`;
+    <div class="toolbar tasks-bar">
+      ${renderProjectPicker(answer.projects, pickedProject, { all: 'All Projects' })}
+      <button type="button" class="pipeline-pod" aria-haspopup="dialog" title="Open Pipeline Status"></button>
+      ${renderFeatureKey(shown.tickets)}
+    </div>
+    <dialog class="pipeline-status" aria-labelledby="pipeline-status-title">
+      <form method="dialog">
+        <button type="submit" class="close" aria-label="Close">×</button>
+        <h2 id="pipeline-status-title">Pipeline Status</h2>
+        <div class="pipeline-details"></div>
+        <div class="row"><button type="submit" class="btn">Close</button></div>
+      </form>
+    </dialog>
+    ${shown.tickets.some((t) => t.status !== 'Live') ? '' : '<p class="quiet">Nothing is in flight.</p>'}
+    ${renderConsole(shown, Date.now(), { running: runningAreas(lastPipeline()) })}`;
+  wirePipeline();
+  refreshPipeline();
+  // Picking a project draws the Console again for it; Board and List keep their own project.
+  main.querySelector('.project-picker select').addEventListener('change', (e) => {
+    pickedProject = e.target.value;
+    route();
+  });
   placeOnMap();
   showLanesRunning();
   for (const el of main.querySelectorAll('[data-stage]')) {

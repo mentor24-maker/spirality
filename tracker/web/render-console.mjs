@@ -584,8 +584,22 @@ export function renderFunnel() {
 }
 
 /**
- * The Console as HTML (SP-333, replacing SP-233's stage columns): the
- * Features key (renderFeatureKey) over the map, MAP_AREAS each a
+ * The /in-flight answer as the Console shows it for one project (its
+ * Project picker): only that project's tickets, every project still listed
+ * for the picker. `slug` empty, or naming no project in the answer, is "All
+ * Projects": the answer as it came. The map, its counts, the funnel and the
+ * Features key are all drawn from what this returns, so they agree.
+ */
+export function consoleForProject(answer, slug) {
+  const projects = Array.isArray(answer?.projects) ? answer.projects : [];
+  const tickets = Array.isArray(answer?.tickets) ? answer.tickets : [];
+  if (!slug || !projects.some((p) => p.slug === slug)) return { ...answer, projects, tickets };
+  return { ...answer, projects, tickets: tickets.filter((t) => t.project === slug) };
+}
+
+/**
+ * The Console as HTML (SP-333, replacing SP-233's stage columns): the map,
+ * MAP_AREAS each a
  * `map-area` with its name, its count and its tiles placed by placeArea. The
  * map's areas come in the loop's own order, so a narrow screen, which stacks
  * them, reads the same path. The "Task Submitted" funnel (renderFunnel) sits
@@ -632,7 +646,7 @@ export function renderConsole(answer, now = Date.now(), { running = [] } = {}) {
   const other = others.length
     ? `<section class="console-other"><h2>Other Statuses</h2><div class="tiles">${others.map((t) => tile(t)).join('')}</div></section>`
     : '';
-  return `${renderFeatureKey(shown)}<div class="console">${renderFunnel()}<div class="console-map" role="group" aria-label="The loop">${MAP_AREAS.map(areaHtml).join('')}${renderDetours()}</div>`
+  return `<div class="console">${renderFunnel()}<div class="console-map" role="group" aria-label="The loop">${MAP_AREAS.map(areaHtml).join('')}${renderDetours()}</div>`
     + `<p class="map-detours-key quiet">${escapeHtml(DETOURS_KEY)}</p>${other}</div>`;
 }
 

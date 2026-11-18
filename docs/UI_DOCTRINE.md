@@ -239,7 +239,9 @@ all-green buttons (SP-76) and the Settings page's rounded dark-blue ones
   holds only "Tasks" and the Board / List / Console tabs, the same on all
   three views, and its toolbar (project and topic pickers, search, the
   Pipeline Stages pod and the filters) is the row directly under it. The
-  Console has none of those, so it has no second row.
+  Console's row holds only the Project picker (All Projects first), the
+  Pipeline Stages pod and, where Board and List put their filters, the
+  Features key (Dane, SP-383: "Don't add any of the other filters").
 - **The trail stays.** The tracker's trail above the title (`nav.trail`:
   "Projects › Spirality › SP-12") does the job of StarCaster's "Section:" prefix,
   so the title itself is the bare name: "Tasks", not "Spirality: Tasks". Dane,

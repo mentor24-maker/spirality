@@ -12,10 +12,13 @@ import { escapeHtml, capital, option, byText, lastIfMissing } from './render-com
  * The project picker on the Tasks page's toolbar: "Project: " and a
  * dropdown of every project by name, `current` (a slug) selected. Each
  * option's value is its slug, which the page opens on a change. Names are
- * typed by people, so every one is escaped.
+ * typed by people, so every one is escaped. With `all` (the Console's "All
+ * Projects"), that comes first, its value empty, chosen when `current` is
+ * none of the projects.
  */
-export function renderProjectPicker(projects, current) {
+export function renderProjectPicker(projects, current, { all = null } = {}) {
   const options = projects.map((p) => `<option value="${escapeHtml(p.slug)}"${p.slug === current ? ' selected' : ''}>${escapeHtml(p.name)}</option>`);
+  if (all !== null) options.unshift(`<option value=""${projects.some((p) => p.slug === current) ? '' : ' selected'}>${escapeHtml(all)}</option>`);
   return `<label class="project-picker">Project: <select name="project">${options.join('')}</select></label>`;
 }
 
