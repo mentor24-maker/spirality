@@ -13,3 +13,9 @@ the queue is moving, whether the checkout is up to date) still print their
 readings, and only post nothing. A watchdog that fails for a real reason
 still says FAILED, and a project whose settings cannot be read is treated
 as having a bus, so this can never hide a real alarm.
+
+Review caught one slip in the first version: the queue check on a bus-less
+project ran as a rehearsal, and a rehearsal skips the note that limits it to
+one read an hour, so it would have read the whole queue and GitHub every ten
+minutes. It now has its own "post nothing" mode that keeps that once-an-hour
+limit, with a test that two passes in a row read only once.

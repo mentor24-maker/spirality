@@ -20,10 +20,11 @@
 #
 # A project with no bus (--no-bus, SP-386) has nowhere for an alarm to go, so
 # a due post could only fail (throughput exit 3, checkout-currency exit 1) and
-# read as a FAILED line. There the throughput check runs as a dry run (its
-# hourly read limit and its verdict in the log are kept, nothing is posted)
-# and the checkout-currency check without --check (it reports the checkout
-# here and posts nothing). Any other failure still reads FAILED.
+# read as a FAILED line. There the throughput check runs with --no-post (its
+# hourly read limit and its verdict in the log are kept, nothing is posted;
+# not --dry-run, which skips the read stamp and so the limit) and the
+# checkout-currency check without --check (it reports the checkout here and
+# posts nothing). Any other failure still reads FAILED.
 #
 # It NEVER fails the relay: whatever the watchdogs do, this returns 0. A
 # failure is one line naming the watchdog and its exit code, so the relay
@@ -38,7 +39,7 @@ run_relay_queue_watchdogs() {
     esac
   done
   local extra=()
-  if [ -n "$dry" ] || [ -n "$nobus" ]; then extra+=(--dry-run); fi
+  if [ -n "$dry" ]; then extra+=(--dry-run); elif [ -n "$nobus" ]; then extra+=(--no-post); fi
 
   if [ -f "$repo/scripts/loop_throughput.mjs" ]; then
     # Posts on a STALLED verdict (an ALARM) and on an UNKNOWN one (a reading

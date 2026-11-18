@@ -149,6 +149,34 @@ test('a stalled queue under --check is one ALARM, then quiet inside the window; 
   } finally { b.cleanup(); }
 });
 
+test('--no-post (a project with no bus, SP-386) posts nothing and still reads only once an hour', () => {
+  // Review round 1 on SP-386: the relay ran a bus-less project's check as a
+  // --dry-run, which skips the hourly read stamp, so every ten-minute wake
+  // read the whole queue and GitHub again.
+  const b = bench();
+  try {
+    const tasks = path.join(b.dir, 'tasks.json');
+    fs.writeFileSync(tasks, JSON.stringify([
+      ticket('SP-1', 'live', 9 * DAY, 3 * DAY),
+      ticket('SP-2', 'queued', 9 * DAY, 3 * DAY),
+    ]));
+    // FAKE_POST_FAILS: a post attempted here would exit 3, so exit 1 proves none was.
+    const first = b.run('loop_throughput.mjs', ['--check', '--no-post'], { env: { STUB_TASKS: tasks, FAKE_POST_FAILS: '1' } });
+    assert.equal(first.status, 1, `STALLED is still the verdict: ${first.out}`);
+    assert.match(first.out, /--no-post — this project has no bus, so this was not sent anywhere:/);
+    assert.match(first.out, /The queue is not getting shorter/);
+    assert.equal(b.postCount(), 0, 'nothing posted');
+    assert.equal(fs.existsSync(path.join(b.stamps, 'throughput-read.stamp')), true, 'the hourly read stamp is written');
+    assert.equal(fs.existsSync(path.join(b.stamps, 'stalled-loop-queue.stamp')), false, 'no post stamp is written');
+
+    const second = b.run('loop_throughput.mjs', ['--check', '--no-post'], { env: { STUB_TASKS: tasks } });
+    assert.equal(second.status, 0, second.out);
+    assert.match(second.out, /Read within the last hour — not asking the tracker or GitHub again\./);
+    assert.doesNotMatch(second.out, /STALLED/, 'the second pass did not read');
+    assert.equal(b.postCount(), 0);
+  } finally { b.cleanup(); }
+});
+
 // --- the failed-pass report ------------------------------------------------------
 
 test('a failed pass is one bus line naming the lane and its exit; a failed post exits 1', () => {

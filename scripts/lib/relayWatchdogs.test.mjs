@@ -89,8 +89,8 @@ function busScratch() {
 const args = process.argv.slice(2);
 appendFileSync(${JSON.stringify(join(s.repo, 'calls'))}, ${JSON.stringify(name)} + ' ' + args.join(' ') + '\\n');
 if (process.env.${name.toUpperCase()}_EXIT) process.exit(Number(process.env.${name.toUpperCase()}_EXIT));
-// With no bus a post is due and cannot land; a dry run or a report posts nothing.
-process.exit(!process.env.BUS && args.includes('--check') && !args.includes('--dry-run') ? ${code} : 0);
+// With no bus a post is due and cannot land; a dry run, --no-post or a report posts nothing.
+process.exit(!process.env.BUS && args.includes('--check') && !args.includes('--dry-run') && !args.includes('--no-post') ? ${code} : 0);
 `;
   for (const [name, code] of [['heartbeat', 2], ['stale_ready', 2], ['stale_answer', 2], ['reconcile', 2], ['loop_throughput', 3], ['checkout_currency', 1]]) {
     writeFileSync(join(s.repo, 'scripts', `${name}.mjs`), nowhere(name, code));
@@ -133,8 +133,8 @@ test('no bus: one skip line, no FAILED line, and the watchdogs only report', () 
   assert.equal(r.stdout.split('\n').filter((l) => /bus watchdogs skipped/.test(l)).length, 1, r.stdout);
   assert.match(r.stdout, /\[relay\] bus watchdogs skipped: example has no bus \(no busProject in its project config\)/);
   assert.doesNotMatch(r.stdout, /FAILED/);
-  assert.deepEqual(s.calls(), ['heartbeat ', 'loop_throughput --check --dry-run', 'checkout_currency --before abc123'],
-    'the heartbeat lists the lanes, throughput reads as a dry run, the currency check reports; the ticket watchdogs do not run');
+  assert.deepEqual(s.calls(), ['heartbeat ', 'loop_throughput --check --no-post', 'checkout_currency --before abc123'],
+    'the heartbeat lists the lanes, throughput reads (on its hourly limit) and posts nothing, the currency check reports; the ticket watchdogs do not run');
   assert.match(r.stdout, /===== END relay/);
 });
 
