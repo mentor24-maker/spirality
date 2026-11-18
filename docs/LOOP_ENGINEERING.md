@@ -272,6 +272,11 @@ Three things the log can say that need a person:
   Screen Sharing (an ssh sign-in does not reach launchd) and restart the
   jobs: `launchctl kickstart -k gui/$(id -u)/com.spirality.loop-build` and
   the same for `loop-review` and `loop-intake`.
+- **"ALARM: the Claude sign-in the lanes on … use ends as early as …"**, on
+  the bus, not only in the log (SP-388): Claude printed its warning that this
+  sign-in has an end date, and that date is a week away or less. Same fix as
+  above, before the date: `claude setup-token`, then
+  `bash scripts/claude_token_to_doppler.sh`. Said at most once a day.
 - **"hit the time limit"** twice on one ticket: a gate that will not go green.
   Read the ticket and hand it back or `ask`.
 - **Nothing written for hours** while the queue has work: `--status` says
