@@ -36,6 +36,13 @@ export const MAX_TITLE_LENGTH = 120;
 export const TIME_LIMIT_MS = 60_000;
 /** The environment variable that names the `claude` command; `claude` on the PATH without it. */
 export const CLAUDE_COMMAND_VAR = 'TRACKER_CLAUDE';
+/**
+ * The long-lived Claude sign-in made for unattended jobs (`claude setup-token`),
+ * the one the lanes read from Doppler (scripts/loop_runner.sh). The tracker
+ * reads it from its own project's Doppler at start and hands it to the
+ * suggestion runs only, so they outlive the machine's browser sign-in.
+ */
+export const CLAUDE_TOKEN_VAR = 'CLAUDE_CODE_OAUTH_TOKEN';
 /** The skill whose steps are the run's prompt. */
 export const SKILL_FILE = fileURLToPath(new URL('../.claude/skills/suggest-titles/SKILL.md', import.meta.url));
 
@@ -55,6 +62,44 @@ export class TitleSuggestError extends Error {
 export function claudeCommandOf(env = process.env) {
   const named = env[CLAUDE_COMMAND_VAR];
   return named && named.trim() ? named.trim() : 'claude';
+}
+
+/**
+ * The environment a suggestion's `claude` runs with: `env` with the token
+ * added when there is one, else `env` itself, exactly as before.
+ */
+export function claudeEnv(token, env = process.env) {
+  return token ? { ...env, [CLAUDE_TOKEN_VAR]: token } : env;
+}
+
+/** `text` with every copy of `token` cut out, so a run's own output can never put it in a log or a page. */
+export function hideToken(text, token) {
+  const s = String(text ?? '');
+  return token ? s.split(token).join('[token]') : s;
+}
+
+/**
+ * The token from Doppler `project`/`config`: `{ token }`, or `{ token: null,
+ * why }` saying in plain words why there is none (never the value). `run`
+ * is execFile, promised. A value with a space in it is a paste gone wrong
+ * and is not used, as on the lanes.
+ */
+export async function claudeTokenFromDoppler({ project, config, run }) {
+  if (!project || !config) return { token: null, why: `the project config names no Doppler project and config to read ${CLAUDE_TOKEN_VAR} from` };
+  let out;
+  try {
+    ({ stdout: out } = await run('doppler', [
+      'secrets', 'get', CLAUDE_TOKEN_VAR, '--plain',
+      '--project', project, '--config', config, '--no-check-version',
+    ], { timeout: 20_000, maxBuffer: 64 * 1024 }));
+  } catch (err) {
+    if (/could not find requested secret/i.test(String(err?.stderr ?? ''))) return { token: null, why: `no ${CLAUDE_TOKEN_VAR} in Doppler ${project}/${config}` };
+    return { token: null, why: `Doppler ${project}/${config} could not be read for ${CLAUDE_TOKEN_VAR} (${err?.code ?? 'failed'})` };
+  }
+  const token = String(out ?? '').replace(/\r?\n$/, '');
+  if (!token) return { token: null, why: `${CLAUDE_TOKEN_VAR} in Doppler ${project}/${config} is empty` };
+  if (/\s/.test(token)) return { token: null, why: `${CLAUDE_TOKEN_VAR} in Doppler ${project}/${config} has a space or line break in it, so it is not used` };
+  return { token };
 }
 
 /**
@@ -119,9 +164,11 @@ export function skillPrompt(file = SKILL_FILE, read = (p) => readFileSync(p, 'ut
 /**
  * Run `claude -p` with the skill and answer the five titles. `command` is
  * the `claude` to run (claudeCommandOf), `timeoutMs` the limit, `run` the
- * spawn to use (a test may watch it). Rejects with a TitleSuggestError.
+ * spawn to use (a test may watch it), `token` the long-lived sign-in
+ * (CLAUDE_TOKEN_VAR) for the run's environment, or null to run on the
+ * machine's own sign-in as before. Rejects with a TitleSuggestError.
  */
-export function suggestTitles({ description, title = null }, { command = 'claude', timeoutMs = TIME_LIMIT_MS, skillFile = SKILL_FILE, run = spawn } = {}) {
+export function suggestTitles({ description, title = null }, { command = 'claude', timeoutMs = TIME_LIMIT_MS, skillFile = SKILL_FILE, run = spawn, token = null } = {}) {
   if (typeof description !== 'string' || !description.trim()) {
     return Promise.reject(new TitleSuggestError('no-description', 'a description is needed to suggest titles from.'));
   }
@@ -144,7 +191,7 @@ export function suggestTitles({ description, title = null }, { command = 'claude
       fn(value);
     };
     try {
-      child = run(command, claudeArgs(prompt), { cwd: tmpdir(), stdio: ['pipe', 'pipe', 'pipe'] });
+      child = run(command, claudeArgs(prompt), { cwd: tmpdir(), stdio: ['pipe', 'pipe', 'pipe'], ...(token ? { env: claudeEnv(token) } : {}) });
     } catch (e) {
       finish(reject, startError(command, e));
       return;
@@ -160,12 +207,12 @@ export function suggestTitles({ description, title = null }, { command = 'claude
     child.stderr.on('data', (chunk) => { if (err.length < MAX_OUTPUT) err += chunk; });
     child.on('close', (code, signal) => {
       if (code !== 0) {
-        const why = err.trim().split(/\r?\n/).filter(Boolean).pop();
+        const why = hideToken(err, token).trim().split(/\r?\n/).filter(Boolean).pop();
         finish(reject, new TitleSuggestError('failed', `the suggester stopped with ${code == null ? `signal ${signal}` : `exit ${code}`}${why ? ` (${why.slice(0, 200)})` : ''}.`));
         return;
       }
       try {
-        finish(resolve, readTitles(out));
+        finish(resolve, readTitles(hideToken(out, token)));
       } catch (e) {
         finish(reject, e);
       }

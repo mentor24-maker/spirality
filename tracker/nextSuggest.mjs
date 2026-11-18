@@ -38,7 +38,7 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:f
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseSkill, REPO_ROOT } from './commands.mjs';
-import { CLAUDE_COMMAND_VAR } from './titleSuggest.mjs';
+import { CLAUDE_COMMAND_VAR, claudeEnv, hideToken } from './titleSuggest.mjs';
 
 /** The time limit for one whole run: the copy and Claude together. */
 export const SUGGEST_TIME_LIMIT_MS = 10 * 60 * 1000;
@@ -366,9 +366,11 @@ export function sweepOldFolders({ tmpRoot = tmpdir(), olderThanMs = SUGGEST_TIME
  * from (GitHub unless a test says otherwise); `timeLimitMs` covers the
  * whole run; `onFolder(path)` is told the temp folder (for tests).
  * `known` (suggestKnown) is what the answer's tickets, topics and tags are
- * checked against.
+ * checked against. `claudeToken` is the long-lived sign-in
+ * (titleSuggest.mjs's CLAUDE_TOKEN_VAR) for Claude's environment only,
+ * never the copy's; null runs Claude on the machine's own sign-in as before.
  */
-export async function runSuggest({ repo, input, known = null, claudeBin = 'claude', source = githubSource, timeLimitMs = SUGGEST_TIME_LIMIT_MS, skillFile = SKILL_FILE, tmpRoot = tmpdir(), env = process.env, now = Date.now, onFolder = () => {} }) {
+export async function runSuggest({ repo, input, known = null, claudeBin = 'claude', source = githubSource, timeLimitMs = SUGGEST_TIME_LIMIT_MS, skillFile = SKILL_FILE, tmpRoot = tmpdir(), env = process.env, claudeToken = null, now = Date.now, onFolder = () => {} }) {
   if (!repo) throw new SuggestError('no-repo', 'this project has no GitHub repository set, so there is nothing to read; set one on its Edit Project page.');
   const deadline = now() + timeLimitMs;
   const prompt = skillPrompt(skillFile);
@@ -381,12 +383,12 @@ export async function runSuggest({ repo, input, known = null, claudeBin = 'claud
     const gitEnv = { ...env, GIT_TERMINAL_PROMPT: '0' };
     const git = await runProcess('git', ['clone', '--quiet', '--depth', '1', '--single-branch', '--branch', 'main', source(repo), copy], { cwd: folder, deadline, limitMs: timeLimitMs, env: gitEnv, what: 'Copying the project', now });
     if (git.code !== 0) throw new SuggestError('copy-failed', `the project's main branch could not be copied from ${repo}${quote(git.stderr)}.`);
-    const claude = await runProcess(claudeBin, claudeArgs(prompt), { cwd: copy, input, deadline, limitMs: timeLimitMs, env, what: 'Claude', now }).catch((err) => {
+    const claude = await runProcess(claudeBin, claudeArgs(prompt), { cwd: copy, input, deadline, limitMs: timeLimitMs, env: claudeEnv(claudeToken, env), what: 'Claude', now }).catch((err) => {
       if (err.code === 'not-found') throw new SuggestError('not-found', `Claude was not found on this machine (no "${claudeBin}"); install Claude Code there, or set ${CLAUDE_BIN_SETTING} to where it is.`);
       throw err;
     });
-    if (claude.code !== 0) throw new SuggestError('claude-failed', `Claude stopped with exit ${claude.code}${quote(claude.stderr || claude.stdout)}.`);
-    return readSuggestions(claude.stdout, known);
+    if (claude.code !== 0) throw new SuggestError('claude-failed', `Claude stopped with exit ${claude.code}${quote(hideToken(claude.stderr || claude.stdout, claudeToken))}.`);
+    return readSuggestions(hideToken(claude.stdout, claudeToken), known);
   } finally {
     rmSync(folder, { recursive: true, force: true });
   }

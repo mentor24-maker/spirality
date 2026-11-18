@@ -87,7 +87,7 @@ import { resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { MAX_ATTACHMENT, openStore, StoreError } from './store.mjs';
-import { claudeCommandOf, CLAUDE_COMMAND_VAR, suggestTitles, TIME_LIMIT_MS as SUGGEST_TIME_LIMIT_MS, TitleSuggestError } from './titleSuggest.mjs';
+import { claudeCommandOf, CLAUDE_COMMAND_VAR, CLAUDE_TOKEN_VAR, claudeTokenFromDoppler, suggestTitles, TIME_LIMIT_MS as SUGGEST_TIME_LIMIT_MS, TitleSuggestError } from './titleSuggest.mjs';
 import { newestReleaseReader, OWN_PROJECT_RELEASE, releaseRemote } from '../lib/releases.mjs';
 import { controlOf, GROUPS } from './pipelineControls.mjs';
 import { SOURCE as IMPORT_SOURCE } from './import.mjs';
@@ -608,6 +608,9 @@ function readReportKind(text) {
  * `claudeCommand` is the `claude` the title suggester runs:
  * TRACKER_CLAUDE when the server starts, else `claude` on the PATH; a test
  * names a stub. `suggestTimeoutMs` is how long one suggestion may take.
+ * `claudeToken` is the long-lived Claude sign-in (loadClaudeToken) the
+ * title and next-task suggestions run with, and nothing else is given; null
+ * runs them on the machine's own sign-in, as before. It is never logged.
  */
 /**
  * The word the ticket page's Close button posts: the first of the relay's
@@ -618,7 +621,7 @@ export const CLOSE_PHRASE = busRelayPlan.CLOSE_PHRASES[0];
 /** The word the Go button posts: the one an intake card asks for (GO_PHRASE in lib/busRelayPlan.js). */
 export const GO_PHRASE = busRelayPlan.GO_PHRASE;
 
-export function createHandler(store, { log = () => {}, notifier = null, defaultProject = null, mergePhrase = null, closePhrase = null, goPhrase = null, accountMail = null, setup = null, now = Date.now, publicUrl = null, pipeline = null, docsDir = DOCS_DIR, commandsRoot = REPO_ROOT, readPrState = null, ownProject = null, newestRelease = null, waker = null, suggest = {}, claudeCommand = 'claude', suggestTimeoutMs = SUGGEST_TIME_LIMIT_MS } = {}) {
+export function createHandler(store, { log = () => {}, notifier = null, defaultProject = null, mergePhrase = null, closePhrase = null, goPhrase = null, accountMail = null, setup = null, now = Date.now, publicUrl = null, pipeline = null, docsDir = DOCS_DIR, commandsRoot = REPO_ROOT, readPrState = null, ownProject = null, newestRelease = null, waker = null, suggest = {}, claudeCommand = 'claude', suggestTimeoutMs = SUGGEST_TIME_LIMIT_MS, claudeToken = null } = {}) {
   /**
    * This machine's lanes as the page data reads them, `{ slug, stages }`
    * (pipelineOf), or null when this tracker reads no logs or they cannot be
@@ -668,7 +671,7 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
   const { run: suggestRun, ...suggestOptions } = suggest ?? {};
   const suggester = createSuggester({
     store,
-    options: { claudeBin: claudeCommand, ...suggestOptions },
+    options: { claudeBin: claudeCommand, ...suggestOptions, ...(claudeToken ? { claudeToken } : {}) },
     ...(suggestRun ? { run: suggestRun } : {}),
     // The open tickets with their tags and topics, and the project's own
     // topic and tag names: the only ones an answer may name.
@@ -1465,7 +1468,7 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
       }
       if (!body.description?.trim()) throw new HttpError(400, 'no-description', 'Write a description first: the titles are suggested from it.');
       try {
-        const titles = await suggestTitles({ description: body.description, title: body.title ?? null }, { command: claudeCommand, timeoutMs: suggestTimeoutMs });
+        const titles = await suggestTitles({ description: body.description, title: body.title ?? null }, { command: claudeCommand, timeoutMs: suggestTimeoutMs, token: claudeToken });
         return [200, { titles }];
       } catch (err) {
         if (!(err instanceof TitleSuggestError)) throw err;
@@ -1859,8 +1862,8 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
 }
 
 /** Start a server on `port` (0 = any free port) against an open store. Resolves to the http.Server. */
-export function startServer({ store, port, host = '127.0.0.1', log, notifier, defaultProject, mergePhrase, closePhrase, goPhrase, accountMail, setup, now, publicUrl, pipeline, docsDir, commandsRoot, readPrState, ownProject, newestRelease, waker, suggest, claudeCommand, suggestTimeoutMs }) {
-  const server = createServer(createHandler(store, { log, notifier, defaultProject, mergePhrase, closePhrase, goPhrase, accountMail, setup, now, publicUrl, pipeline, docsDir, commandsRoot, readPrState, ownProject, newestRelease, waker, suggest, claudeCommand, suggestTimeoutMs }));
+export function startServer({ store, port, host = '127.0.0.1', log, notifier, defaultProject, mergePhrase, closePhrase, goPhrase, accountMail, setup, now, publicUrl, pipeline, docsDir, commandsRoot, readPrState, ownProject, newestRelease, waker, suggest, claudeCommand, suggestTimeoutMs, claudeToken }) {
+  const server = createServer(createHandler(store, { log, notifier, defaultProject, mergePhrase, closePhrase, goPhrase, accountMail, setup, now, publicUrl, pipeline, docsDir, commandsRoot, readPrState, ownProject, newestRelease, waker, suggest, claudeCommand, suggestTimeoutMs, claudeToken }));
   return new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(port, host, () => {
@@ -1953,6 +1956,30 @@ export async function loadMailSettings({ host, port, log = () => {} }) {
 }
 
 /**
+ * The long-lived Claude sign-in for the title and next-task suggestions
+ * (CLAUDE_TOKEN_VAR, made by `claude setup-token`): read from the project's
+ * Doppler, as the lanes read it, because launchd starts the server without
+ * Doppler and the machine's browser sign-in ends on a fixed date. Answers
+ * `{ token, line }`: the token or null, and the one log line saying where
+ * the suggestions' sign-in comes from (never the value). Any failure leaves
+ * them on the machine's own sign-in and never stops the server. `env` is
+ * the server's own; a token already in it reaches the runs as it always did.
+ */
+export async function loadClaudeToken({ env = process.env, loadConfig = loadProjectConfig, run = promisify(execFile) } = {}) {
+  const fallback = "they use this machine's own Claude sign-in";
+  if (env[CLAUDE_TOKEN_VAR]) return { token: null, line: `title and next-task suggestions: signed in with ${CLAUDE_TOKEN_VAR} from the server's own environment.` };
+  let config;
+  try {
+    config = loadConfig();
+  } catch (err) {
+    return { token: null, line: `title and next-task suggestions: the project config is not usable (${err.message}), so no ${CLAUDE_TOKEN_VAR} was read; ${fallback}.` };
+  }
+  const { token, why } = await claudeTokenFromDoppler({ project: config.dopplerProject, config: config.dopplerConfig, run });
+  if (!token) return { token: null, line: `title and next-task suggestions: ${why}; ${fallback}.` };
+  return { token, line: `title and next-task suggestions: signed in with the long-lived ${CLAUDE_TOKEN_VAR} from Doppler ${config.dopplerProject}/${config.dopplerConfig} (the value is not shown).` };
+}
+
+/**
  * What the "Set up a project" calls read: the settings file in the folder
  * this server runs from (it must be the tracker home's, the one that sets
  * trackerPort), that folder, and the database it opened. The answers file's
@@ -2017,7 +2044,9 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     // The Add Task box's title suggester and the next-task suggestions run this claude.
     const claudeCommand = claudeCommandOf();
     log(`title and next-task suggestions: through "${claudeCommand}" on this machine${process.env[CLAUDE_COMMAND_VAR] ? ` (${CLAUDE_COMMAND_VAR})` : `; set ${CLAUDE_COMMAND_VAR} to name another`}.`);
-    const server = await startServer({ store, port, host, log, claudeCommand, notifier, defaultProject, mergePhrase, closePhrase: CLOSE_PHRASE, goPhrase: GO_PHRASE, accountMail, setup, publicUrl, pipeline, readPrState: ghPrState(), ownProject,
+    const claudeSignIn = await loadClaudeToken();
+    log(claudeSignIn.line);
+    const server = await startServer({ store, port, host, log, claudeCommand, claudeToken: claudeSignIn.token, notifier, defaultProject, mergePhrase, closePhrase: CLOSE_PHRASE, goPhrase: GO_PHRASE, accountMail, setup, publicUrl, pipeline, readPrState: ghPrState(), ownProject,
       // The Settings page's Move to Newest reads the release tags from this checkout's remote.
       newestRelease: newestReleaseReader({ run: promisify(execFile), cwd: REPO_ROOT, remote: releaseRemote() }),
       waker,
