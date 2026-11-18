@@ -219,6 +219,10 @@ function makeWorld(t) {
     // test says so; `pushFails` refuses the start step's push, `readBack`
     // makes GitHub answer something else after it.
     repoEmpty: false, bare: join(dir, 'github', 'pressplay.git'), pushedTo: null, pushFails: false, readBack: null, viewFails: false,
+    // SP-387: the release named for pressplay (null: none), the releases cut
+    // (newest first), and each `release name` run; `nameSticks` false makes
+    // the tracker answer but keep the old record.
+    release: null, cut: ['release-2', 'release-1'], namedRuns: [], nameSticks: true,
   };
   const startDir = join(homeConfig.logDir, 'onboard', 'pressplay-start');
   const realGit = (args, cwd) => {
@@ -286,6 +290,9 @@ function makeWorld(t) {
         w.head = ORIGIN_SHA;
         return ok();
       }
+      if (args[0] === 'ls-remote' && args[1] === '--tags') {
+        return ok(w.cut.map((name, i) => `${String(i + 1).repeat(40)}\trefs/tags/${name}`).join('\n'));
+      }
       if (args[0] === 'ls-remote') return w.remoteSetup ? ok(`${SETUP_TIP}\trefs/heads/spirality-setup`) : no('', 2);
       if (args[0] === 'branch' && args[1] === '-D' && args[2] === 'spirality-setup') { w.localSetup = false; return ok(); }
       if (args[0] === 'worktree' && args[1] === 'list') {
@@ -302,6 +309,14 @@ function makeWorld(t) {
     if (cmd === 'npm') {
       const [, script, , ...rest] = args.filter((a) => a !== '--silent');
       if (script === 'onboard:look') return breaks('look') ? no('BLOCKED', 3) : ok();
+      if (script === 'clickup' && rest[0] === 'release' && rest[1] === 'list') {
+        return ok(`spirality\tmain (always the newest)\npressplay\t${w.release ?? 'none named'}`);
+      }
+      if (script === 'clickup' && rest[0] === 'release' && rest[1] === 'name') {
+        w.namedRuns.push(rest.slice(2).join(' '));
+        if (w.nameSticks) w.release = rest[rest.indexOf('--to') + 1];
+        return ok(`pressplay\t${w.release}`);
+      }
       if (script === 'onboard:settings' && rest[0] === 'write') {
         if (breaks('settings')) return no();
         mkdirSync(dirname(settingsFile), { recursive: true });
@@ -768,6 +783,69 @@ test('a setup worktree git will not remove: FAILED at lanes naming it, lanes not
   assert.equal(await go(), 0, out(w));
   assert.match(out(w), /^copy\s+already done/m);
   assert.equal(w.asked.length, 0);
+});
+
+// --- The release (SP-387) ---------------------------------------------------
+
+test('a new project with no release named: the lanes step names the newest, reads it back and logs it, before onboard:lanes', async (t) => {
+  const { w, go, logFile } = makeWorld(t);
+  assert.equal(await go(), 0, out(w));
+  assert.deepEqual(w.namedRuns, ['--project pressplay --to release-2'], 'the newest release, once');
+  assert.equal(w.release, 'release-2');
+  const named = w.calls.findIndex((c) => c.includes('clickup -- release name'));
+  const lanes = w.calls.findIndex((c) => c.includes('onboard:lanes'));
+  assert.ok(named >= 0 && named < lanes, 'named before onboard:lanes judges the relay');
+  assert.ok(w.calls.slice(named + 1, lanes).some((c) => c.includes('clickup -- release list')), 'read back with release list');
+  assert.match(out(w), /^lanes\s+named Spirality's newest release, release-2, for pressplay \(it had none\), read back with release list$/m);
+  assert.match(readFileSync(logFile, 'utf8'), /\| lanes \| release \| named Spirality's newest release, release-2, for pressplay/);
+});
+
+test('a project that already has a release named is left as it is', async (t) => {
+  const { w, go } = makeWorld(t);
+  w.release = 'release-1';
+  assert.equal(await go(), 0, out(w));
+  assert.deepEqual(w.namedRuns, [], 'nothing named');
+  assert.equal(w.release, 'release-1');
+  assert.match(out(w), /^lanes\s+pressplay runs Spirality's release-1; left as it is$/m);
+});
+
+test('no release ever cut: the setup stops at lanes with one plain line naming npm run release -- cut, before onboard:lanes, and the rerun goes on once one is cut', async (t) => {
+  const { w, go, reset } = makeWorld(t);
+  w.cut = [];
+  assert.equal(await go(), 1, out(w));
+  const failed = out(w).split('\n').filter((l) => l.startsWith('FAILED'));
+  assert.deepEqual(failed, ['FAILED: lanes: no Spirality release has been cut yet, so pressplay\'s lanes would have nothing to run on. Cut one with npm run release -- cut, then rerun']);
+  assert.ok(!w.calls.some((c) => c.includes('onboard:lanes')), 'the lanes were never installed or judged');
+  assert.doesNotMatch(out(w), /relay: FAILED/);
+  assert.deepEqual(w.namedRuns, []);
+  w.cut = ['release-1'];
+  reset();
+  assert.equal(await go(), 0, out(w));
+  assert.equal(w.release, 'release-1');
+});
+
+test('a release name that does not read back fails the lanes step, never a success line', async (t) => {
+  const { w, go } = makeWorld(t);
+  w.nameSticks = false;
+  assert.equal(await go(), 1, out(w));
+  assert.match(out(w), /^FAILED: lanes: pressplay's release read back as none named, not release-2, after naming it$/m);
+  assert.ok(!w.calls.some((c) => c.includes('onboard:lanes')));
+});
+
+test('a rerun with the lanes loaded but no release named then: it names one and runs onboard:lanes again, so a fresh relay pass is judged', async (t) => {
+  const { w, go, reset } = makeWorld(t);
+  // Cassidy's day: the lanes were installed and the ticket filed, then the relay's first pass found no release.
+  w.lanesLoadThenFail = true;
+  assert.equal(await go(), 1, out(w));
+  w.lanesLoadThenFail = false;
+  w.release = null;
+  w.ticket = 'PP-1';
+  w.setupWorktree = false;
+  reset();
+  assert.equal(await go(), 0, out(w));
+  assert.equal(w.release, 'release-2');
+  assert.ok(w.calls.some((c) => c.includes('onboard:lanes')), 'not skipped as already done');
+  assert.doesNotMatch(out(w), /^lanes\s+already done/m);
 });
 
 test('a stop after a run started with a longer merge wait: the rerun line keeps it', async (t) => {
