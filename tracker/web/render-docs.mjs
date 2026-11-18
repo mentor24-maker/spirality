@@ -384,6 +384,60 @@ export const LOOP_QUEUE_ARROWS = Object.freeze([
   },
 ].map((a) => Object.freeze(a)));
 
+/**
+ * The four pipeline stages, in the Pipeline Stages box's order and with its
+ * names (tracker/pipeline.mjs STAGES), tied to the Loop Queue diagram
+ * (SP-392): each names the arrows in LOOP_QUEUE_ARROWS it moves a ticket
+ * along, by id, and carries 50 to 100 words on what it is (agreeing with
+ * docs/LOOP_CONTRACT.md and docs/LOOP_ENGINEERING.md). Every arrow belongs to
+ * exactly one stage; the two notes, which have no line, belong to none.
+ */
+export const LOOP_QUEUE_STAGES = Object.freeze([
+  {
+    id: 'relay',
+    name: 'Relay',
+    arrows: Object.freeze(['operator-says-go', 'operator-merges']),
+    copy: 'The relay is the pass that carries out Dane\'s replies. Its launchd job runs a pass every 10 minutes unless the Settings page sets another wake time. It reads his answers on tickets in Needs your input and moves each on, along Operator Says Go, to Queued, Rework or Live by the state of its pull request. On a Ready to launch ticket his merge phrase makes it check every gate again, merge the pull request and close the ticket along Operator Merges. It never writes code.',
+  },
+  {
+    id: 'build',
+    name: 'Build',
+    arrows: Object.freeze(['claimed-for-building', 'rework-is-always-taken-first', 'pull-request-opened']),
+    copy: 'The build lane runs the loop-build skill: one pass at a time, then a 30-minute sleep. Each pass claims one ticket, every Rework ticket before any Queued one (Rework Is Always Taken First, then Build Pass Claims the Next Ticket), and builds it in its own worktree until npm run verify passes. It then opens a pull request named for the ticket, records it with pr-opened and moves the ticket along Pull Request Opened to In review. It never merges anything.',
+  },
+  {
+    id: 'review',
+    name: 'Review',
+    arrows: Object.freeze(['passes', 'sent-back', 'judgment-call']),
+    copy: 'The review lane runs the loop-review skill, one pass at a time with a 30-minute sleep, and never reviews code it wrote. It takes the next In review ticket, runs npm run verify itself, reads the change against the acceptance criteria and walks the test steps. Then it moves the ticket one of three ways: Passes, to Ready to launch for Dane\'s word to merge; Sent Back, to Rework with notes naming what to fix; or Judgment Call, to Needs your input with a card.',
+  },
+  {
+    id: 'intake',
+    name: 'Intake',
+    arrows: Object.freeze(['written-up-as-a-spec']),
+    copy: 'The intake lane runs the loop-intake skill every 30 minutes. It takes the oldest Requested ticket, the words Dane typed on the tracker page, and writes it up as a spec: goal, scope, non-goals, acceptance criteria, test steps and the files it will change, with his words kept verbatim. A request too big for one pull request is sliced. Each ticket then goes along Written Up as a Spec to Needs your input for his approval. It never writes code and never queues anything itself.',
+  },
+].map((s) => Object.freeze(s)));
+
+/** One stage's pop-up body (SP-392): its name, the arrows it drives as the picture writes them, and its copy. */
+export function renderStageDetails(stage) {
+  const names = stage.arrows.map((id) => LOOP_QUEUE_ARROWS.find((a) => a.id === id)?.heading ?? id);
+  return `
+    <h2 id="arrow-details-title">${escapeHtml(stage.name)}</h2>
+    <p class="quiet">Moves tickets along: ${escapeHtml(names.join(', '))}</p>
+    <p>${escapeHtml(stage.copy)}</p>`;
+}
+
+/**
+ * The row of stage buttons under the diagram (SP-392): hovering or focusing
+ * one outlines its arrows on the picture, and a click opens its pop-up in
+ * the diagram's one dialog.
+ */
+function renderStageRow() {
+  const buttons = LOOP_QUEUE_STAGES.map((s) => `<button type="button" class="btn diagram-stage" aria-haspopup="dialog" data-stage="${escapeHtml(s.id)}">${escapeHtml(s.name)}</button>`).join('');
+  return `<div class="diagram-stages" role="group" aria-label="Pipeline Stages"><span class="quiet">Pipeline Stages:</span>${buttons}</div>`;
+}
+
 /** One arrow's pop-up body (SP-391): its heading, the two statuses it joins and its copy. */
 export function renderArrowDetails(arrow) {
   return `
@@ -416,7 +470,8 @@ export const LOOP_QUEUE_FIGURE_ID = 'loop-queue-diagram';
  * box keeps its pixel place in the original and scales with it at any width.
  * (An inline style would place them too, but the page's lock forbids it.)
  * Over each arrow and note, in the same SVG, a target that opens its pop-up
- * (SP-391), drawn with the one dialog they share.
+ * (SP-391), drawn with the one dialog they share; under the picture, the
+ * four pipeline stages' buttons, which open the same dialog (SP-392).
  * `docAddress` turns a docs/ path into the page's address for it.
  */
 export function renderLoopQueueDiagram(docAddress) {
@@ -433,7 +488,7 @@ export function renderLoopQueueDiagram(docAddress) {
         <div class="row"><button type="submit" class="btn">Close</button></div>
       </form>
     </dialog>`;
-  return `<figure class="loop-diagram" id="${LOOP_QUEUE_FIGURE_ID}"><img src="${d.src}" alt="${escapeHtml(d.alt)}" width="${d.width}" height="${d.height}"><svg class="loop-diagram-links" viewBox="0 0 ${d.width} ${d.height}" role="group" aria-label="Loop Queue statuses and arrows">${links}${arrows}</svg>${dialog}</figure>`;
+  return `<figure class="loop-diagram" id="${LOOP_QUEUE_FIGURE_ID}"><img src="${d.src}" alt="${escapeHtml(d.alt)}" width="${d.width}" height="${d.height}"><svg class="loop-diagram-links" viewBox="0 0 ${d.width} ${d.height}" role="group" aria-label="Loop Queue statuses and arrows">${links}${arrows}</svg>${dialog}</figure>${renderStageRow()}`;
 }
 
 /** The margin, in the picture's pixels, kept around a status box cut from the diagram (SP-361). */

@@ -25,7 +25,11 @@ case "$*" in
     /bin/cat "$STUB_TASKS" ;;
   *" bus-post "*)
     if [ -n "$FAKE_POST_FAILS" ]; then echo "bus-post: the tracker is down (stub)" >&2; exit 1; fi
-    echo "--- POST ---" >> "$STUB_POSTS"; /bin/cat >> "$STUB_POSTS"; echo >> "$STUB_POSTS" ;;
+    # The message comes on stdin (--body-file -) or in the file it names.
+    body=-; prev=; for a in "$@"; do [ "$prev" = "--body-file" ] && body="$a"; prev="$a"; done
+    echo "--- POST ---" >> "$STUB_POSTS"
+    if [ "$body" = "-" ]; then /bin/cat >> "$STUB_POSTS"; else /bin/cat "$body" >> "$STUB_POSTS"; fi
+    echo >> "$STUB_POSTS" ;;
   *) echo "fake npm: not expected: $*" >&2; exit 9 ;;
 esac
 `;
@@ -345,6 +349,59 @@ test('the lane runner\'s hook reports a failed pass, clears the reminder on a go
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
+test('the lane runner\'s sign-in hook posts one ALARM a day from a week before the end, and never fails (SP-388)', () => {
+  const b = bench();
+  try {
+    const repo = fakeRepo(b.dir, {});
+    const hook = path.join(REPO, 'scripts', 'lib', 'signin_warning.sh');
+    const stamp = path.join(b.stamps, 'claude-signin-warning.stamp');
+    const out = path.join(b.dir, 'pass.txt');
+    const warning = (from, to) => `Some pass output\nWarning: this sign-in ends between ${from} and ${to} (in N days at the earliest). Renewing it does not move those dates. Run claude auth login before then, or use claude setup-token for unattended jobs.\nREPORT: done\n`;
+    const run = (today, extra = {}) => bash(`source "${hook}"; report_signin_warning "${repo}" "${stamp}" "${out}"; echo "returned $?"`, b.env({ SIGNIN_WARNING_TODAY: today, ...extra }));
+
+    fs.writeFileSync(out, warning('2026-11-22', '2026-11-25'));
+    const first = run('2026-11-17');
+    assert.match(first.stdout, /returned 0/);
+    assert.equal(b.postCount(), 1, 'five days out: one alarm');
+    assert.match(b.posts(), /^ALARM: the Claude sign-in the lanes on .+ use ends as early as 2026-11-22 \(in 5 days\), and every loop there stops with it\. Make a long-lived one on that machine: claude setup-token, then bash scripts\/claude_token_to_doppler\.sh\.$/m);
+    assert.equal(fs.readFileSync(stamp, 'utf8').trim(), '2026-11-17');
+
+    const again = run('2026-11-17');
+    assert.match(again.stdout, /returned 0/);
+    assert.equal(b.postCount(), 1, 'a second pass the same day posts nothing');
+
+    run('2026-11-18');
+    assert.equal(b.postCount(), 2, 'the next day says it again');
+    assert.match(b.posts(), /ends as early as 2026-11-22 \(in 4 days\)/);
+
+    fs.writeFileSync(out, warning('2026-11-28', '2026-12-01'));
+    run('2026-11-18');
+    assert.equal(b.postCount(), 2, 'ten days out: nothing');
+
+    fs.writeFileSync(out, 'A pass with no warning at all\n');
+    run('2026-11-30');
+    assert.equal(b.postCount(), 2, 'no warning line: nothing');
+
+    fs.writeFileSync(out, warning('2026-11-22', '2026-11-25'));
+    const downed = run('2026-11-19', { FAKE_POST_FAILS: '1' });
+    assert.match(downed.stdout, /the alarm that Claude's sign-in ends as early as 2026-11-22 \(in 3 days\) did NOT reach the bus \(exit 1/);
+    assert.match(downed.stdout, /returned 0/, 'a post that did not land never fails the runner');
+    assert.equal(b.postCount(), 2);
+    assert.equal(fs.readFileSync(stamp, 'utf8').trim(), '2026-11-18', 'a post that did not land leaves no stamp');
+    run('2026-11-19');
+    assert.equal(b.postCount(), 3, 'so the next pass tries again');
+    assert.match(b.posts(), /\(in 3 days\)/);
+
+    const gone = run('2026-11-21');
+    assert.match(gone.stdout, /returned 0/);
+    assert.match(b.posts(), /2026-11-22 \(tomorrow\)/);
+
+    fs.rmSync(out);
+    assert.match(run('2026-11-22').stdout, /returned 0/, 'no pass output: nothing, and no failure');
+    assert.equal(b.postCount(), 4);
+  } finally { fs.rmSync(b.dir, { recursive: true, force: true }); }
+});
+
 test('the relay\'s hook runs both watchdogs, passes the pull\'s readings, and never fails the relay', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sp268-relay-'));
   try {
@@ -377,6 +434,10 @@ test('the runners source the hooks only when present and never let them change a
   const runner = fs.readFileSync(path.join(REPO, 'scripts', 'loop_runner.sh'), 'utf8');
   assert.match(runner, /\[ -f "\$REPO\/scripts\/lib\/lane_failure\.sh" \] && source "\$REPO\/scripts\/lib\/lane_failure\.sh"/);
   assert.match(runner, /report_lane_pass "\$RUN_DIR" "\$FAILURE_STAMP" "\$SKILL" "\$CODE" "\$LOG" >> "\$LOG" 2>&1 \|\| true/);
+  assert.match(runner, /\[ -f "\$REPO\/scripts\/lib\/signin_warning\.sh" \] && source "\$REPO\/scripts\/lib\/signin_warning\.sh"/);
+  assert.match(runner, /report_signin_warning "\$RUN_DIR" "\$SIGNIN_WARNING_STAMP" "\$PASS_OUT" >> "\$LOG" 2>&1 \|\| true/);
+  // After the pass's output is written and before the next pass overwrites it.
+  assert.ok(runner.indexOf('tee "$PASS_OUT"') < runner.indexOf('report_signin_warning "$RUN_DIR"'));
   const relay = fs.readFileSync(path.join(REPO, 'scripts', 'run_relay.sh'), 'utf8');
   assert.match(relay, /\[ -f "\$REPO\/scripts\/lib\/relay_queue_watchdogs\.sh" \] && source/);
   assert.match(relay, /if declare -F run_relay_queue_watchdogs >\/dev\/null; then/);
