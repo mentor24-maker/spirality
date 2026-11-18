@@ -3,7 +3,7 @@
 # watchdogs (SP-268), sourced by scripts/run_relay.sh and by its test
 # (scripts/watchdogScripts.test.mjs).
 #
-#   run_relay_queue_watchdogs <repo> <limit-seconds> <sha-before-pull> <pull-output-file> [--dry-run]
+#   run_relay_queue_watchdogs <repo> <limit-seconds> <sha-before-pull> <pull-output-file> [--dry-run] [--no-bus]
 #
 # Runs, each under its own time limit, one after the other:
 #   node <repo>/scripts/loop_throughput.mjs --check
@@ -18,13 +18,28 @@
 # A dry run passes --dry-run to both: each reads and prints what it would
 # post, and writes nothing.
 #
+# A project with no bus (--no-bus, SP-386) has nowhere for an alarm to go, so
+# a due post could only fail (throughput exit 3, checkout-currency exit 1) and
+# read as a FAILED line. There the throughput check runs with --no-post (its
+# hourly read limit and its verdict in the log are kept, nothing is posted;
+# not --dry-run, which skips the read stamp and so the limit) and the
+# checkout-currency check without --check (it reports the checkout here and
+# posts nothing). Any other failure still reads FAILED.
+#
 # It NEVER fails the relay: whatever the watchdogs do, this returns 0. A
 # failure is one line naming the watchdog and its exit code, so the relay
 # pass carries on to its END line with its own verdict unchanged.
 run_relay_queue_watchdogs() {
-  local repo="$1" limit="$2" before="$3" pull_output="$4" dry="${5:-}" status
+  local repo="$1" limit="$2" before="$3" pull_output="$4" dry="" nobus="" flag status
+  shift 4
+  for flag in "$@"; do
+    case "$flag" in
+      --dry-run) dry=yes ;;
+      --no-bus) nobus=yes ;;
+    esac
+  done
   local extra=()
-  [ "$dry" = "--dry-run" ] && extra+=(--dry-run)
+  if [ -n "$dry" ]; then extra+=(--dry-run); elif [ -n "$nobus" ]; then extra+=(--no-post); fi
 
   if [ -f "$repo/scripts/loop_throughput.mjs" ]; then
     # Posts on a STALLED verdict (an ALARM) and on an UNKNOWN one (a reading
@@ -43,10 +58,12 @@ run_relay_queue_watchdogs() {
   fi
 
   if [ -f "$repo/scripts/checkout_currency.mjs" ]; then
-    local args=(--check)
+    local args=(--check) currency_extra=()
+    # No bus: a report only, never a post that cannot land.
+    if [ -n "$nobus" ]; then args=(); elif [ -n "$dry" ]; then currency_extra+=(--dry-run); fi
     [ -n "$before" ] && args+=(--before "$before")
     [ -n "$pull_output" ] && [ -s "$pull_output" ] && args+=(--pull-output "$pull_output")
-    "$repo/scripts/run_with_time_limit.sh" "$limit" -- node "$repo/scripts/checkout_currency.mjs" "${args[@]}" ${extra[@]+"${extra[@]}"}
+    "$repo/scripts/run_with_time_limit.sh" "$limit" -- node "$repo/scripts/checkout_currency.mjs" ${args[@]+"${args[@]}"} ${currency_extra[@]+"${currency_extra[@]}"}
     status=$?
     if [ "$status" -ne 0 ]; then
       echo "[relay] the checkout-currency check FAILED (exit $status; its lines above say why). The relay pass carries on and its verdict is unchanged."
