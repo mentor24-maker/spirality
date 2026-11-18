@@ -12,7 +12,10 @@
 # it arrived whole. It never prints the token, and nothing it runs carries
 # the token on a command line (`ps` shows those): the value goes to doppler
 # on standard input. Every lane's next pass reads it (scripts/loop_runner.sh,
-# read_claude_token), so nothing needs restarting.
+# read_claude_token), so nothing needs restarting for the lanes. The
+# tracker's title and next-task suggestions read it once, when the tracker
+# starts (tracker/server.mjs, loadClaudeToken), so they use it from its next
+# restart.
 #
 # Agent sessions are refused Doppler writes, so this is the operator's step.
 # Exits 0 when the key is set and reads back the same; 1 when anything
@@ -72,3 +75,4 @@ fi
 
 echo "Stored: $KEY is set in Doppler $PROJECT/$CONFIG and reads back the same (the value is not shown)."
 echo "Every lane's next pass signs in with it; its log says \"signs in to Claude with $KEY from Doppler $PROJECT/$CONFIG\"."
+echo "The tracker's title and next-task suggestions use it from the tracker's next restart."
