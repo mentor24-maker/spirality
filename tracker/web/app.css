@@ -719,6 +719,14 @@ svg.loop-diagram-links a.diagram-box { cursor: pointer; outline: none; }
 svg.loop-diagram-links a.diagram-box rect { fill: transparent; stroke: transparent; stroke-width: 12; }
 svg.loop-diagram-links a.diagram-box:hover rect { stroke: var(--navy-soft); }
 svg.loop-diagram-links a.diagram-box:focus-visible rect { stroke: var(--focus-ring-color); stroke-width: 16; }
+/* The diagram's arrows and notes (SP-391): an invisible wide line along each arrow and a rectangle round its words open its pop-up; hover and keyboard focus show them as the boxes do. */
+svg.loop-diagram-links g.diagram-arrow { cursor: pointer; outline: none; }
+svg.loop-diagram-links g.diagram-arrow polyline { fill: none; stroke: transparent; stroke-width: 40; stroke-linejoin: round; }
+svg.loop-diagram-links g.diagram-arrow rect { fill: transparent; stroke: transparent; stroke-width: 12; }
+svg.loop-diagram-links g.diagram-arrow:hover polyline { stroke: var(--navy-soft); stroke-opacity: 0.35; }
+svg.loop-diagram-links g.diagram-arrow:hover rect { stroke: var(--navy-soft); }
+svg.loop-diagram-links g.diagram-arrow:focus-visible polyline { stroke: var(--focus-ring-color); stroke-opacity: 0.5; }
+svg.loop-diagram-links g.diagram-arrow:focus-visible rect { stroke: var(--focus-ring-color); stroke-width: 16; }
 /* The Loop Queue Anatomy page (SP-361): one row per status, its box cut from the diagram on the left (a link to the diagram), its copy on the right, both from the top. Every box is drawn at one scale and shrinks with its column; a narrow screen stacks the box above its copy, never scrolling sideways. */
 table.anatomy { width: 100%; border-collapse: collapse; table-layout: fixed; }
 table.anatomy td { vertical-align: top; padding: var(--space-4) 0; }
@@ -751,6 +759,12 @@ dialog.command-details::backdrop { background: var(--backdrop); }
 dialog.command-details h2 { margin: 0 2rem 0.25rem 0; font-size: var(--text-lg); }
 dialog.command-details button.close { float: right; border: 0; background: transparent; cursor: pointer; padding: 0 0.25rem; font-size: var(--text-xl); line-height: 1; color: var(--ink-secondary); }
 dialog.command-details .row { display: flex; justify-content: flex-end; }
+/* An arrow's pop-up on the Loop Queue diagram (SP-391), the same look as a command's. */
+dialog.arrow-details { border: 1px solid var(--border-black); border-radius: var(--radius-input); padding: 1rem 1.25rem; min-width: min(420px, 100%); color: var(--ink-primary); }
+dialog.arrow-details::backdrop { background: var(--backdrop); }
+dialog.arrow-details h2 { margin: 0 2rem 0.25rem 0; font-size: var(--text-lg); }
+dialog.arrow-details button.close { float: right; border: 0; background: transparent; cursor: pointer; padding: 0 0.25rem; font-size: var(--text-xl); line-height: 1; color: var(--ink-secondary); }
+dialog.arrow-details .row { display: flex; justify-content: flex-end; }
 .command-steps { max-width: 48rem; }
 
 /* The Docs page's Context Documents (SP-176): Download and Remove side by side. */

@@ -7,7 +7,7 @@
  * (Spirality SP-352), so a ticket that changes one page no longer edits the
  * same file as a ticket that changes another.
  */
-import { escapeHtml, renderMarkdown, unwrapDoc, renderCommandList, renderCommandView, renderCommandDetails, renderContextDocs, renderLoopQueueDiagram, renderLoopQueueAnatomy, LOOP_QUEUE_DIAGRAM, nextSort, renderDocumentation, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine } from './render.mjs';
+import { escapeHtml, renderMarkdown, unwrapDoc, renderCommandList, renderCommandView, renderCommandDetails, renderArrowDetails, LOOP_QUEUE_ARROWS, renderContextDocs, renderLoopQueueDiagram, renderLoopQueueAnatomy, LOOP_QUEUE_DIAGRAM, nextSort, renderDocumentation, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine } from './render.mjs';
 import { api, setTitle, main, putTrail, savedProject, sizeOf, when, drawAgain, SignedOut, drawSignIn, showError, MAX_FILE, uploadFile, Refused } from './app.mjs';
 
 /**
@@ -45,6 +45,7 @@ export async function drawDocs(done = '', problem = '', section = 'files') {
     main.innerHTML = `<h1>Docs</h1>${docsColumns(`<h2>Task Files</h2><p class="quiet">There are no projects yet.</p>${documentation}`)}`;
     showCommands(commands);
     wireDocumentation(files);
+    wireDiagramArrows();
     putTrail([{ label: 'Docs' }]);
     if (firstDraw) scrollToNamed();
     return;
@@ -160,6 +161,7 @@ export async function drawDocs(done = '', problem = '', section = 'files') {
   wireContextDocs(project, docsPath, section === 'docs' ? done : '', section === 'docs' ? problem : '');
   showCommands(commands);
   wireDocumentation(files);
+  wireDiagramArrows();
   putTrail([{ label: 'Docs' }]);
   if (firstDraw) scrollToNamed();
 }
@@ -227,6 +229,37 @@ function showCommands(commands) {
     opener = link;
     dialog.querySelector('.command-details-body').innerHTML = renderCommandDetails(command);
     dialog.showModal();
+  });
+  dialog.addEventListener('close', () => opener?.focus());
+}
+
+/**
+ * The Loop Queue diagram's arrows and notes (SP-391): a click on one, or
+ * Enter or Space on it once the keyboard reaches it, opens its pop-up, the
+ * same shape as a command's. Escape or Close shuts it, and focus goes back
+ * to the arrow it came from.
+ */
+function wireDiagramArrows() {
+  const svg = main.querySelector('svg.loop-diagram-links');
+  const dialog = main.querySelector('dialog.arrow-details');
+  if (!svg || !dialog) return;
+  let opener = null;
+  const open = (target) => {
+    const arrow = LOOP_QUEUE_ARROWS.find((a) => a.id === target.dataset.arrow);
+    if (!arrow) return;
+    opener = target;
+    dialog.querySelector('.arrow-details-body').innerHTML = renderArrowDetails(arrow);
+    dialog.showModal();
+  };
+  svg.addEventListener('click', (e) => {
+    const target = e.target.closest('g.diagram-arrow');
+    if (target) open(target);
+  });
+  svg.addEventListener('keydown', (e) => {
+    const target = e.target.closest('g.diagram-arrow');
+    if (!target || (e.key !== 'Enter' && e.key !== ' ')) return;
+    e.preventDefault();
+    open(target);
   });
   dialog.addEventListener('close', () => opener?.focus());
 }
