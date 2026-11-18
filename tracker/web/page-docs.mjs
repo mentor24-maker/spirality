@@ -7,7 +7,7 @@
  * (Spirality SP-352), so a ticket that changes one page no longer edits the
  * same file as a ticket that changes another.
  */
-import { escapeHtml, renderMarkdown, unwrapDoc, renderCommandList, renderCommandView, renderCommandDetails, renderArrowDetails, LOOP_QUEUE_ARROWS, renderContextDocs, renderLoopQueueDiagram, renderLoopQueueAnatomy, LOOP_QUEUE_DIAGRAM, nextSort, renderDocumentation, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine } from './render.mjs';
+import { escapeHtml, renderMarkdown, unwrapDoc, renderCommandList, renderCommandView, renderCommandDetails, renderArrowDetails, LOOP_QUEUE_ARROWS, renderStageDetails, LOOP_QUEUE_STAGES, renderContextDocs, renderLoopQueueDiagram, renderLoopQueueAnatomy, LOOP_QUEUE_DIAGRAM, nextSort, renderDocumentation, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine } from './render.mjs';
 import { api, setTitle, main, putTrail, savedProject, sizeOf, when, drawAgain, SignedOut, drawSignIn, showError, MAX_FILE, uploadFile, Refused } from './app.mjs';
 
 /**
@@ -261,6 +261,26 @@ function wireDiagramArrows() {
     e.preventDefault();
     open(target);
   });
+  // The four pipeline stages under the picture (SP-392): hovering or
+  // focusing one outlines exactly its arrows, using the arrows' own targets
+  // above; moving away clears them; a click opens its pop-up in the same
+  // dialog, and focus comes back to the button when it shuts.
+  for (const button of main.querySelectorAll('button.diagram-stage')) {
+    const stage = LOOP_QUEUE_STAGES.find((s) => s.id === button.dataset.stage);
+    if (!stage) continue;
+    const light = (on) => {
+      for (const g of svg.querySelectorAll('g.diagram-arrow')) g.classList.toggle('stage-lit', on && stage.arrows.includes(g.dataset.arrow));
+    };
+    button.addEventListener('pointerenter', () => light(true));
+    button.addEventListener('pointerleave', () => light(false));
+    button.addEventListener('focus', () => light(true));
+    button.addEventListener('blur', () => light(false));
+    button.addEventListener('click', () => {
+      opener = button;
+      dialog.querySelector('.arrow-details-body').innerHTML = renderStageDetails(stage);
+      dialog.showModal();
+    });
+  }
   dialog.addEventListener('close', () => opener?.focus());
 }
 
