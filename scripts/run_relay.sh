@@ -354,7 +354,21 @@ fi
 # is one line naming the heartbeat and its exit code. A dry run asks only,
 # posting nothing. (The relay cannot report itself quiet from here; this
 # check is for the lanes that run on their own.)
-run_relay_heartbeat "$RUN_DIR" "${RELAY_HEARTBEAT_LIMIT_SECONDS:-180}" ${DRY_RUN:+--dry-run}
+#
+# A project with no bus (its setup answered "no": no busProject in its
+# project config) gives every watchdog below nowhere to post, so each would
+# exit with "nowhere to post" and read as a FAILED line on every pass
+# (SP-386). Asked once here: with no bus, one line says so, the heartbeat,
+# throughput and checkout-currency checks only report, and the ticket
+# watchdogs do not run. A config that cannot be read is "unknown", and every
+# watchdog runs as before, so this can never silence a project with a bus.
+BUS_STATE="$(relay_bus_state "$REPO")"
+NO_BUS=""
+if [ "$BUS_STATE" = "no" ]; then
+  NO_BUS=yes
+  relay_no_bus_line "$SLUG"
+fi
+run_relay_heartbeat "$RUN_DIR" "${RELAY_HEARTBEAT_LIMIT_SECONDS:-180}" ${DRY_RUN:+--dry-run} ${NO_BUS:+--no-bus}
 
 # Then the ticket watchdogs (SP-267): a ticket stuck in Ready to launch, and
 # an answer in Needs your input that nothing acted on, each said on the bus at
@@ -363,7 +377,7 @@ run_relay_heartbeat "$RUN_DIR" "${RELAY_HEARTBEAT_LIMIT_SECONDS:-180}" ${DRY_RUN
 # did, each under its own time limit, and they never change this pass's
 # verdict or stop it: a failure is one line naming the watchdog and its exit
 # code. A dry run reads and prints only.
-run_relay_watchdogs "$RUN_DIR" "${RELAY_WATCHDOG_LIMIT_SECONDS:-180}" ${DRY_RUN:+--dry-run}
+run_relay_watchdogs "$RUN_DIR" "${RELAY_WATCHDOG_LIMIT_SECONDS:-180}" ${DRY_RUN:+--dry-run} ${NO_BUS:+--no-bus}
 
 # Then which files each open pull request changes (SP-349): a pull request
 # whose branch moved since its files were read is read again, and one that
@@ -388,7 +402,7 @@ if declare -F run_relay_queue_watchdogs >/dev/null; then
   # $BEFORE was read in: the currency check reads the checkout it runs in,
   # and a release checkout is detached at a tag and behind main on purpose,
   # so read there it would cry STALE CHECKOUT on every pass (SP-276).
-  (cd "$PROJECT" && run_relay_queue_watchdogs "$RUN_DIR" "${RELAY_QUEUE_WATCHDOG_LIMIT_SECONDS:-180}" "$BEFORE" "$PULL_OUTPUT" ${DRY_RUN:+--dry-run})
+  (cd "$PROJECT" && run_relay_queue_watchdogs "$RUN_DIR" "${RELAY_QUEUE_WATCHDOG_LIMIT_SECONDS:-180}" "$BEFORE" "$PULL_OUTPUT" ${DRY_RUN:+--dry-run} ${NO_BUS:+--no-bus})
 fi
 
 # A project's pass is over: its release checkout is no longer in use by this
