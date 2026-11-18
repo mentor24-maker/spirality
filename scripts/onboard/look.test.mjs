@@ -5,7 +5,7 @@ import { resolveAnswers } from '../../lib/onboardAnswers.mjs';
 import { seatsForConfig } from '../../tracker/signins.mjs';
 import {
   BLOCKED, NOTED, READY, UNKNOWN, WILL_DO, checkEnv, planRefusesProtection, readEmptyProtection, cloneFolder, exitCodeFor, formatRow, ghApiFailure, lastLines, look,
-  busRow, releaseRow, readCheck, readCheckout, readClaude, readDoppler, readDopplerMe, readNode, readProtection,
+  busRow, releaseRow, readCheck, readCheckout, readClaude, inSsh, readDoppler, readDopplerMe, readNode, readProtection,
   projectMismatch, readRepo, withoutSignIn, nodeNeedOf, samePathOnDisk, summaryLine, trackerRows,
 } from './look.mjs';
 import { normalRepo } from '../lib/repoCheck.mjs';
@@ -219,6 +219,42 @@ test('claude and doppler: signed in is ready, signed out is BLOCKED, never an em
   assert.equal(readDopplerMe(ok(JSON.stringify({ workplace: { name: 'Alphire' }, token_preview: 'dp.ct.xxx' }))).why, 'signed in to Alphire');
   assert.equal(readDopplerMe(failed(1, 'Doppler Error: you must log in')).verdict, BLOCKED);
   assert.equal(readDopplerMe(failed(1, 'Doppler Error: network down')).verdict, UNKNOWN);
+});
+
+test('claude: the lanes\' long-lived token is ready without the keychain, and a signed-out answer over ssh names the cause and the fix (SP-389)', () => {
+  const secret = 'sk-ant-oat01-not-a-real-token';
+  const byToken = readClaude(null, { token: secret, ssh: true });
+  assert.equal(byToken.verdict, READY);
+  assert.match(formatRow(byToken), /long-lived token from Doppler/);
+  assert.ok(!formatRow(byToken).includes(secret));
+  // The token wins even when claude auth status, asked anyway, says signed out.
+  assert.equal(readClaude(failed(1, '', JSON.stringify({ loggedIn: false })), { token: secret }).verdict, READY);
+  // A blank token is no token.
+  assert.equal(readClaude(failed(1, '', JSON.stringify({ loggedIn: false })), { token: '  ' }).verdict, BLOCKED);
+
+  const overSsh = readClaude(failed(1, '', JSON.stringify({ loggedIn: false })), { ssh: true });
+  assert.equal(overSsh.verdict, BLOCKED);
+  assert.match(overSsh.why, /keychain, which an ssh session cannot read/);
+  assert.match(overSsh.why, /claude setup-token/);
+  assert.match(overSsh.why, /CLAUDE_CODE_OAUTH_TOKEN/);
+  const local = readClaude(failed(1, '', JSON.stringify({ loggedIn: false })));
+  assert.doesNotMatch(local.why, /ssh/);
+  assert.match(local.why, /claude auth login/);
+
+  assert.equal(inSsh({ SSH_CONNECTION: '10.0.0.2 50000 10.0.0.3 22' }), true);
+  assert.equal(inSsh({ SSH_TTY: '/dev/ttys001' }), true);
+  assert.equal(inSsh({ PATH: '/bin' }), false);
+});
+
+test('a look run carrying the lanes\' token reports it and never asks claude auth status (SP-389)', async () => {
+  const w = fakeWorld();
+  w.deps.env = { ...w.deps.env, CLAUDE_CODE_OAUTH_TOKEN: 'sk-ant-oat01-not-a-real-token', SSH_CONNECTION: '10.0.0.2 50000 10.0.0.3 22' };
+  const rows = await look({ answers, homeConfig, deps: w.deps });
+  const claude = rows.find((r) => r.item === 'Mini: claude signed in');
+  assert.equal(claude.verdict, READY);
+  assert.match(claude.why, /long-lived token from Doppler/);
+  assert.ok(!rows.map(formatRow).join('\n').includes('sk-ant-oat01'));
+  assert.ok(!w.calls.some((c) => c.cmd === 'claude'));
 });
 
 test('Doppler: a missing project or config will be made; an unreadable list could not tell', () => {

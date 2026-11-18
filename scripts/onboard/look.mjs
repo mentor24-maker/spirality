@@ -31,7 +31,8 @@
  *            refusal shows up front, not at the last step.
  *   The Mini the checkout folder (absent, or on a clean main of the right
  *            repository); this Mac's Node against what the project needs;
- *            `claude` and `doppler` signed in.
+ *            `claude` and `doppler` signed in (`claude` by the lanes' long-lived
+            token from Doppler when this run carries it, SP-389).
  *   Tracker  reachable at the tracker home's trackerApiUrl; whether the
  *            project, its prefix and its `<slug> …` loop sign-ins exist;
  *            that the prefix is not another project's; the operator found
@@ -342,16 +343,39 @@ export function readStarterNode(version) {
   return row(item, WILL_DO, `the repository is empty; the start step's first commit names Node ${node.engine} (.nvmrc ${node.major}), from this Mac's ${version}`);
 }
 
-/** `claude auth status` -> signed in or not. Never prints the account's email. */
-export function readClaude(r) {
+/**
+ * Whether the lanes' Claude is signed in. The lanes sign in with the
+ * long-lived token `claude setup-token` makes, kept in Doppler as
+ * CLAUDE_CODE_OAUTH_TOKEN (scripts/loop_runner.sh): when this run's
+ * environment carries it (the npm script runs under Doppler), that is the
+ * lanes' sign-in, and no keychain is needed. Without it, `claude auth
+ * status` answers; over ssh it reads `loggedIn: false` even when the Mini's
+ * own session is signed in, because an ssh session cannot read the Mini's
+ * keychain, so that answer names the cause and the fix. Never prints the
+ * token or the account's email.
+ */
+export function readClaude(r, { token = null, ssh = false } = {}) {
   const item = 'Mini: claude signed in';
+  if (typeof token === 'string' && token.trim()) {
+    return row(item, READY, `signed in by the lanes' long-lived token from Doppler, ${CLAUDE_TOKEN_KEY}`);
+  }
+  if (!r) return row(item, UNKNOWN, 'claude auth status was not asked');
   if (r.error) return row(item, UNKNOWN, `could not run claude (${r.error.code || r.error.message})`);
   let s;
   try { s = JSON.parse(r.stdout); } catch { s = null; }
   if (!s || typeof s.loggedIn !== 'boolean') return row(item, UNKNOWN, `claude auth status answered ${r.status}, not with a sign-in state`);
-  return s.loggedIn
-    ? row(item, READY, `signed in${s.authMethod ? `, by ${s.authMethod}` : ''}`)
-    : row(item, BLOCKED, 'not signed in: `claude auth login` on the Mini (a browser login)');
+  if (s.loggedIn) return row(item, READY, `signed in${s.authMethod ? `, by ${s.authMethod}` : ''}`);
+  return ssh
+    ? row(item, BLOCKED, `not signed in, as this ssh session sees it: the sign-in may be in the Mini's keychain, which an ssh session cannot read. The fix is the lanes' long-lived token: \`claude setup-token\` on the Mini (a browser login), stored as ${CLAUDE_TOKEN_KEY} in Doppler with scripts/claude_token_to_doppler.sh`)
+    : row(item, BLOCKED, `not signed in: \`claude auth login\` on the Mini (a browser login), or the lanes' long-lived token: \`claude setup-token\`, stored as ${CLAUDE_TOKEN_KEY} in Doppler`);
+}
+
+/** The Doppler key the lanes' long-lived Claude sign-in lives under (scripts/loop_runner.sh). */
+export const CLAUDE_TOKEN_KEY = 'CLAUDE_CODE_OAUTH_TOKEN';
+
+/** Whether this process runs in an ssh session (sshd sets these). */
+export function inSsh(env) {
+  return Boolean(env && (env.SSH_CONNECTION || env.SSH_CLIENT || env.SSH_TTY));
 }
 
 /** `doppler me --json` -> signed in or not. Prints only the workplace name. */
@@ -666,7 +690,9 @@ export async function look({ answers, homeConfig, runCheck = true, deps }) {
     rows.push(emptyRepo && !answers.nodeVersion
       ? readStarterNode(deps.nodeVersion)
       : readNode(deps.nodeVersion, nodeNeedOf(answers, readText, root), { looked: root != null }));
-    rows.push(readClaude(run('claude', ['auth', 'status', '--json'])));
+    const lookEnv = deps.env ?? process.env;
+    const claudeToken = lookEnv[CLAUDE_TOKEN_KEY] || null;
+    rows.push(readClaude(claudeToken ? null : run('claude', ['auth', 'status', '--json']), { token: claudeToken, ssh: inSsh(lookEnv) }));
     rows.push(readDopplerMe(run('doppler', ['me', '--json', '--no-check-version'])));
 
     // The tracker.
