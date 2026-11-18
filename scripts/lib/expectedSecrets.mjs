@@ -16,6 +16,12 @@
  * tracker service (its config sets `trackerPort`): the operator's own
  * sign-in and the hand-over email. Any other project never needs them.
  *
+ * A key marked `lanesHome` is needed only by the project whose folder every
+ * lane on the machine runs from (scripts/loop_runner.sh): Spirality's. That is
+ * the same project that runs the tracker, so it is told the same way, by
+ * `trackerPort`. The lanes' long-lived Claude sign-in (SP-385) is one: one
+ * token, read by the runner in that folder, serves every project's lanes.
+ *
  * A key marked `clickup` is needed only by a project that still talks to
  * ClickUp (usesClickUp): its `tracker` is `"clickup"`, or its
  * `loopQueueListId` names a real ClickUp list (not `"0"`). A project never
@@ -87,6 +93,7 @@ export const EXPECTED_SECRETS = [
   ...TRACKER_SEATS.map(({ secret, kind, what }) => ({ name: secret, what, ...(kind === 'human' ? { trackerHome: true } : {}) })),
   { name: 'RESEND_API_KEY', trackerHome: true, what: 'the Resend key the tracker sends the hand-over email with' },
   { name: 'TRACKER_NOTIFY_TO', trackerHome: true, what: "the operator's address for the hand-over email" },
+  { name: 'CLAUDE_CODE_OAUTH_TOKEN', lanesHome: true, what: "the lanes' long-lived Claude sign-in (claude setup-token), stored by scripts/claude_token_to_doppler.sh" },
 ];
 
 /**
@@ -102,8 +109,9 @@ export function usesClickUp(config) {
 /**
  * What doctor checks for one project, from its project config: the Doppler
  * project and config to look in, and the keys that project needs there
- * (the `trackerHome` ones only when it runs the tracker, `trackerPort` set;
- * the `clickup` ones only when usesClickUp), and one sign-in per lane its
+ * (the `trackerHome` and `lanesHome` ones only when it runs the tracker,
+ * `trackerPort` set; the `clickup` ones only when usesClickUp), and one
+ * sign-in per lane its
  * `projectLanes` names (laneSeats).
  * Returns `{ project, configs, expected }` for doctorReport and formatReport.
  */
@@ -113,7 +121,7 @@ export function doctorTarget(config, secrets = EXPECTED_SECRETS) {
   const configs = [config.dopplerConfig];
   const lanes = laneSeats(config).map(({ secret, what }) => ({ name: secret, what }));
   const expected = [...secrets, ...lanes]
-    .filter((s) => (home || !s.trackerHome) && (clickup || !s.clickup))
+    .filter((s) => (home || (!s.trackerHome && !s.lanesHome)) && (clickup || !s.clickup))
     .map(({ name, what }) => ({ name, what, configs }));
   return { project: config.dopplerProject, configs, expected };
 }
