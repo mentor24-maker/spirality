@@ -51,7 +51,8 @@ the commands and asks `Run these now? [y/N]`; on Dane's y it runs them in his
 Terminal, on anything else it prints them and stops), the bus (below), the setup
 pull request in the project's repository (its settings file and its `verify`
 gate, nothing of the loop's: SP-273), the lanes and the setup ticket, the merge (Dane's merge
-phrase on that ticket: **a decision**) and protecting `main`. Each step
+phrase on that ticket: **a decision**), protecting `main`, and last the
+checkout (below). Each step
 checks first whether it is already done, so a rerun after a failed step
 picks up there and asks nothing twice. A failed step prints
 `FAILED: <step>: <what was seen>` and the rerun command; the step log is
@@ -67,6 +68,33 @@ step's outcome (`done`, `skip`, `failed`, `stopped`, `running`, `pending`),
 the stop (`kind` `answers`, `paste` with the block's lines in `commands`,
 `merge` with the setup ticket's `link`, or `failed`), and `finished`. It holds
 commands and links only, never a secret value.
+
+### The last step: the checkout back on `main`
+
+The lanes step runs the new lanes from the setup branch, `spirality-setup`,
+so it leaves the project's checkout on that branch. The merge deletes the
+branch on GitHub, and the relay will not pull a checkout that is not on a
+clean `main` (every pass would run stale code). So the `checkout` step
+(SP-384), after `protect` and before `Done`, fetches, switches the checkout
+to `main`, runs `git pull --ff-only`, and reads it back: on `main`, nothing
+unsaved, `HEAD` at `origin/main`. Only then does the wizard print
+`Done: <slug> is set up`.
+
+- **Unsaved changes in the checkout** stop it with
+  `FAILED: checkout: <folder> is on <branch> with unsaved changes (...)`,
+  nothing switched, and the state file records the step as `failed`. Save
+  them or put them aside, then rerun. A switch or a pull git refuses fails
+  the same way, with git's own reason. A checkout on any branch other than
+  `main` or `spirality-setup` is not the setup's doing, so it is left as it
+  is and the step fails naming the branch.
+- **A rerun** on a checkout already on a clean, current `main` says
+  `checkout  already done (...)`.
+- **The local `spirality-setup` branch.** The merge is a squash, so git
+  calls the branch "not fully merged". The step deletes it (`git branch -D`)
+  only on proof: GitHub has no `spirality-setup` branch any more, and a
+  merged setup pull request on `main` was made from that very commit.
+  Otherwise it leaves the branch and says why, in its output and the step
+  log (`| checkout | note | ...`); that is not a failure.
 
 ### A project with a bus (StarCaster)
 
