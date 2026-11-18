@@ -88,7 +88,7 @@ test('loop_runner.sh names its log, lock, sync lock and restart label from the s
 
     const runner = spawn('bash', [join(scratch, 'scripts/loop_runner.sh'), 'loop-build', '3600'], {
       // The runner pulls main with git: never into a repository a commit hook named (SP-104).
-      cwd: scratch, detached: true, stdio: 'ignore', env: { ...scratchGit.scratchGitEnv(), CLAUDE_BIN: fakeClaude, RUN_WITH_TIME_LIMIT_POLL: '1' },
+      cwd: scratch, detached: true, stdio: 'ignore', env: { ...scratchGit.scratchGitEnv(), CLAUDE_BIN: fakeClaude, DOPPLER_BIN: join(scratch, 'no-doppler'), RUN_WITH_TIME_LIMIT_POLL: '1' },
     });
     const log = join(logDir, 'normie-loop-build.log');
     try {
@@ -120,7 +120,7 @@ test('loop_runner.sh names no project of its own', () => {
 // file, ends on time without one, and a wake sent during a pass neither stops
 // nor doubles it. Each test runs the real runner in a scratch copy, as above,
 // with the wake file looked for every second.
-async function withRunner({ interval, claude, wakeSetting = null, modelSetting = null }, body) {
+async function withRunner({ interval, claude, wakeSetting = null, modelSetting = null, doppler = null }, body) {
   const scratch = mkdtempSync(join(tmpdir(), 'runner-wake-'));
   const logDir = mkdtempSync(join(tmpdir(), 'runner-wake-logs-'));
   let runner;
@@ -139,6 +139,10 @@ async function withRunner({ interval, claude, wakeSetting = null, modelSetting =
       ...spirality, projectSlug: 'normie', launchdPrefix: 'com.normie', logDir,
     }));
     const wake = join(logDir, 'normie-loop-build.wake');
+    // A stand-in doppler when the test gives one (SP-385); otherwise none at
+    // all, so no test ever reads the machine's real Doppler.
+    const fakeDoppler = join(scratch, 'fake-doppler');
+    if (doppler) writeFileSync(fakeDoppler, `#!/bin/bash\n${doppler({ logDir })}\n`, { mode: 0o755 });
     const fakeClaude = join(scratch, 'fake-claude');
     writeFileSync(fakeClaude, `#!/bin/bash\n${claude({ wake, logDir })}\n`, { mode: 0o755 });
     const git = (...args) => scratchGit.git(scratch, ...args);
@@ -147,7 +151,7 @@ async function withRunner({ interval, claude, wakeSetting = null, modelSetting =
     git('commit', '-q', '-m', 'scratch');
     runner = spawn('bash', [join(scratch, 'scripts/loop_runner.sh'), 'loop-build', String(interval)], {
       cwd: scratch, detached: true, stdio: 'ignore',
-      env: { ...scratchGit.scratchGitEnv(), CLAUDE_BIN: fakeClaude, RUN_WITH_TIME_LIMIT_POLL: '1', LOOP_WAKE_POLL_SECONDS: '1' },
+      env: { ...scratchGit.scratchGitEnv(), CLAUDE_BIN: fakeClaude, DOPPLER_BIN: fakeDoppler, RUN_WITH_TIME_LIMIT_POLL: '1', LOOP_WAKE_POLL_SECONDS: '1' },
     });
     const log = join(logDir, 'normie-loop-build.log');
     const read = () => (existsSync(log) ? readFileSync(log, 'utf8') : '');
@@ -284,6 +288,84 @@ test('settings that cannot be read, or a model not on the list, run the pass on 
     assert.equal((text.match(/could not read \/loop-build's model/g) || []).length, 1, text);
     assert.match(text, /START \/loop-build \(model: default\) =====/);
     assert.equal(text.split('\n').filter((l) => l.startsWith('ARGS: ')).join('\n'), TODAYS_ARGS);
+  }
+});
+
+// The lanes' long-lived Claude sign-in (SP-385): read from Doppler before
+// every pass and handed to the claude process alone. The stand-in claude
+// says whether it got the token and writes what it got to a file, never to
+// the log; the wake-time reader, which runs after the pass, says whether it
+// saw the token too (it must not).
+const TOKEN = 'standin-claude-lane-token-5f3a';
+const tokenClaude = ({ logDir }) => [
+  `printf '%s' "\${CLAUDE_CODE_OAUTH_TOKEN-}" > "${logDir}/token-seen"`,
+  'if [ -n "${CLAUDE_CODE_OAUTH_TOKEN+x}" ]; then echo "PASS HAS A TOKEN"; else echo "PASS HAS NO TOKEN"; fi',
+].join('\n');
+const tokenWakeSetting = ({ logDir }) => [
+  "import { writeFileSync } from 'node:fs';",
+  `writeFileSync(${JSON.stringify(join(logDir, 'wake-saw'))}, process.env.CLAUDE_CODE_OAUTH_TOKEN === undefined ? 'no' : 'yes');`,
+  "console.log('3600');",
+].join('\n');
+/** A stand-in doppler that records its arguments, then runs `then`. */
+const standInDoppler = (then) => ({ logDir }) => `printf '%s\\n' "$*" >> "${logDir}/doppler-args"\n${then}`;
+
+async function tokenPass(doppler) {
+  let out;
+  await withRunner({ interval: 3600, claude: tokenClaude, wakeSetting: tokenWakeSetting, doppler }, async ({ logDir, read, until }) => {
+    await until('the pass never finished', () => /sleeping 3600s/.test(read()), 30);
+    const file = (name) => (existsSync(join(logDir, name)) ? readFileSync(join(logDir, name), 'utf8') : null);
+    out = { text: read(), seen: file('token-seen'), wakeSaw: file('wake-saw'), dopplerArgs: file('doppler-args') };
+  });
+  return out;
+}
+
+const OWN_SIGNIN = /^\[loop-runner\] \d\d:\d\d:\d\d .*; this pass uses this machine's own Claude sign-in$/m;
+
+test('with CLAUDE_CODE_OAUTH_TOKEN in Doppler, the pass\'s claude gets it in its environment, and the value is nowhere in the log (SP-385)', { timeout: 60_000 }, async () => {
+  const spirality = JSON.parse(readFileSync(join(REPO, 'spirality.project.json'), 'utf8'));
+  const r = await tokenPass(standInDoppler(`[ "$1 $2 $3" = "secrets get CLAUDE_CODE_OAUTH_TOKEN" ] && printf '%s\\n' '${TOKEN}'`));
+  assert.equal(r.seen, TOKEN, 'claude did not get the token');
+  assert.match(r.text, /^PASS HAS A TOKEN$/m);
+  assert.ok(!r.text.includes(TOKEN), 'the token reached the log');
+  assert.ok(!r.text.includes('lane-token'), 'part of the token reached the log');
+  assert.equal(r.wakeSaw, 'no', 'a script the runner starts after the pass saw the token');
+  assert.equal(r.dopplerArgs.trim(), `secrets get CLAUDE_CODE_OAUTH_TOKEN --plain --project ${spirality.dopplerProject} --config ${spirality.dopplerConfig}`);
+  assert.match(r.text, new RegExp(`START /loop-build \\(model: default\\) =====\\n\\[loop-runner\\] \\d\\d:\\d\\d:\\d\\d this pass signs in to Claude with CLAUDE_CODE_OAUTH_TOKEN from Doppler ${spirality.dopplerProject}/${spirality.dopplerConfig}$`, 'm'));
+  assert.doesNotMatch(r.text, OWN_SIGNIN);
+});
+
+test('with the token missing, doppler failing, or no doppler at all, the pass still runs on the machine\'s own sign-in, said in one line (SP-385)', { timeout: 120_000 }, async () => {
+  const cases = [
+    [standInDoppler('echo "Doppler Error: Could not find requested secret: CLAUDE_CODE_OAUTH_TOKEN" >&2; exit 1'), /\] \d\d:\d\d:\d\d no CLAUDE_CODE_OAUTH_TOKEN in Doppler [^/ ]+\/[^ ]+; this pass uses/],
+    [standInDoppler('echo "Doppler Error: unable to reach the API" >&2; exit 1'), /Doppler [^/ ]+\/[^ ]+ could not be read for CLAUDE_CODE_OAUTH_TOKEN \(doppler exited 1\); this pass uses/],
+    [standInDoppler('echo ""'), /CLAUDE_CODE_OAUTH_TOKEN in Doppler [^ ]+ is empty; this pass uses/],
+    [standInDoppler("printf 'two words\\n'"), /CLAUDE_CODE_OAUTH_TOKEN in Doppler [^ ]+ is not a single word \(a paste gone wrong\?\), so it is not used; this pass uses/],
+    [null, /no doppler on this machine to read CLAUDE_CODE_OAUTH_TOKEN with; this pass uses/],
+  ];
+  for (const [doppler, said] of cases) {
+    const r = await tokenPass(doppler);
+    assert.match(r.text, /^PASS HAS NO TOKEN$/m, r.text);
+    assert.equal(r.seen, '');
+    assert.equal((r.text.match(OWN_SIGNIN) || []).length, 1, r.text);
+    assert.match(r.text, said);
+    assert.match(r.text, /END \/loop-build \(exit 0/);
+    assert.doesNotMatch(r.text, /two words/);
+  }
+});
+
+test('a pass that could not sign in names the fix for the sign-in it used: a new setup-token, or claude login (SP-385)', { timeout: 90_000 }, async () => {
+  const failing = () => 'echo "Failed to authenticate. API Error: 401"';
+  for (const [doppler, said] of [
+    [standInDoppler(`printf '%s\\n' '${TOKEN}'`), /THIS PASS COULD NOT SIGN IN TO CLAUDE with CLAUDE_CODE_OAUTH_TOKEN from Doppler [^ ]+\. .*\(claude setup-token\) and stores it \(bash .*\/scripts\/claude_token_to_doppler\.sh\)/],
+    [null, /THIS PASS COULD NOT SIGN IN TO CLAUDE\. .*\(claude setup-token\) and store it \(bash .*\/scripts\/claude_token_to_doppler\.sh\).*\(claude login\)/],
+  ]) {
+    let text = '';
+    await withRunner({ interval: 3600, claude: failing, doppler }, async ({ read, until }) => {
+      await until('the pass never finished', () => /sleeping 3600s/.test(read()), 30);
+      text = read();
+    });
+    assert.match(text, said);
+    assert.ok(!text.includes(TOKEN));
   }
 });
 
@@ -557,7 +639,9 @@ function scratchPair() {
   // release-1 (SP-276), tagged on Spirality's first commit below.
   const door = join(root, 'door');
   writeFileSync(door, '#!/bin/bash\n[ "$1 $2" = "release list" ] && printf "spirality\\tmain (always the newest)\\nnormie\\trelease-1\\n"\n', { mode: 0o755 });
-  writeFileSync(join(projectDir, 'spirality.project.json'), JSON.stringify({ ...spirality, projectSlug: 'normie', launchdPrefix: 'com.normie', logDir }));
+  // The project's own Doppler project differs from Spirality's, so a test can
+  // see which one the lanes' Claude sign-in is read from (SP-385).
+  writeFileSync(join(projectDir, 'spirality.project.json'), JSON.stringify({ ...spirality, projectSlug: 'normie', launchdPrefix: 'com.normie', logDir, dopplerProject: 'normie', dopplerConfig: 'prd' }));
   const heads = {};
   for (const dir of [spiralityDir, projectDir]) {
     git(dir, 'add', '-A');
@@ -579,7 +663,8 @@ function scratchPair() {
     git(dir, 'branch', '-q', '--set-upstream-to=origin/main', 'main');
     heads[dir] = { before: git(dir, 'rev-parse', 'HEAD').trim(), origin: git(other, 'rev-parse', 'HEAD').trim() };
   }
-  const env = { ...scratchGit.scratchGitEnv(), SPIRALITY_PROJECT: projectDir, SPIRALITY_RELEASE_DOOR: door };
+  // No doppler at all unless a test hands one in, so no test reads the machine's real Doppler (SP-385).
+  const env = { ...scratchGit.scratchGitEnv(), SPIRALITY_PROJECT: projectDir, SPIRALITY_RELEASE_DOOR: door, DOPPLER_BIN: join(root, 'no-doppler') };
   return { root, spiralityDir, projectDir, logDir, heads, env, release: join(logDir, 'releases', 'release-1'), head: (dir) => git(dir, 'rev-parse', 'HEAD').trim() };
 }
 
@@ -613,6 +698,38 @@ test('a runner for a named project starts its pass in the project\'s checkout an
     assert.match(text, new RegExp(`release: this pass runs on release-1 \\(${pair.release}\\)`));
     assert.equal(pair.head(pair.projectDir), pair.heads[pair.projectDir].origin, 'the project\'s main was not pulled');
     assert.equal(pair.head(pair.spiralityDir), pair.heads[pair.spiralityDir].before, 'Spirality\'s own main was pulled by a project\'s lane');
+  } finally {
+    rmSync(pair.root, { recursive: true, force: true });
+  }
+});
+
+test('a project\'s lane reads the Claude token from Spirality\'s own Doppler project, never the project\'s, and hands it to the pass (SP-385)', { timeout: 60_000 }, async () => {
+  const pair = scratchPair();
+  try {
+    const spirality = JSON.parse(readFileSync(join(pair.spiralityDir, 'spirality.project.json'), 'utf8'));
+    const fakeClaude = join(pair.root, 'fake-claude');
+    writeFileSync(fakeClaude, `#!/bin/bash\nprintf '%s' "\${CLAUDE_CODE_OAUTH_TOKEN-}" > "${pair.root}/token-seen"\necho "PASS FOR: $SPIRALITY_PROJECT"\n`, { mode: 0o755 });
+    const fakeDoppler = join(pair.root, 'fake-doppler');
+    writeFileSync(fakeDoppler, `#!/bin/bash\nprintf '%s\\n' "$*" >> "${pair.root}/doppler-args"\nprintf '%s\\n' '${TOKEN}'\n`, { mode: 0o755 });
+    const runner = spawn('bash', [join(pair.spiralityDir, 'scripts/loop_runner.sh'), 'loop-build', '3600'], {
+      cwd: pair.spiralityDir, detached: true, stdio: 'ignore',
+      env: { ...pair.env, CLAUDE_BIN: fakeClaude, DOPPLER_BIN: fakeDoppler, RUN_WITH_TIME_LIMIT_POLL: '1' },
+    });
+    const log = join(pair.logDir, 'normie-loop-build.log');
+    try {
+      for (let i = 0; !(existsSync(log) && readFileSync(log, 'utf8').includes('sleeping 3600s')); i++) {
+        assert.ok(i < 400, `the runner never finished its first pass (log so far:\n${existsSync(log) ? readFileSync(log, 'utf8') : ''})`);
+        await new Promise((r) => setTimeout(r, 100));
+      }
+    } finally {
+      try { process.kill(-runner.pid, 'SIGKILL'); } catch { /* already gone */ }
+    }
+    const text = readFileSync(log, 'utf8');
+    assert.match(text, /PASS FOR: .*normie/);
+    assert.equal(readFileSync(join(pair.root, 'token-seen'), 'utf8'), TOKEN);
+    assert.equal(readFileSync(join(pair.root, 'doppler-args'), 'utf8').trim(), `secrets get CLAUDE_CODE_OAUTH_TOKEN --plain --project ${spirality.dopplerProject} --config ${spirality.dopplerConfig}`);
+    assert.notEqual(spirality.dopplerProject, 'normie');
+    assert.ok(!text.includes(TOKEN), 'the token reached the log');
   } finally {
     rmSync(pair.root, { recursive: true, force: true });
   }

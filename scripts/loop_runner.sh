@@ -155,6 +155,58 @@ LAST_REAL_PASS=0
 mkdir -p "$LOG_DIR"
 CLAUDE_BIN="${CLAUDE_BIN:-$(command -v claude || echo "$HOME/.local/bin/claude")}"
 
+# The lanes' long-lived Claude sign-in (SP-385). A browser sign-in kept in the
+# keychain ends on a fixed date and every lane stops with it, so each pass
+# signs in with the token `claude setup-token` makes for unattended jobs
+# (about a year), stored as CLAUDE_CODE_OAUTH_TOKEN in Doppler by
+# scripts/claude_token_to_doppler.sh. It is read from the Doppler project and
+# config of THIS folder's own manifest, never the project's a runner works
+# for: every project's lanes run from here, so one token serves them all.
+# The value lives in a shell variable that is never exported, printed or put
+# on a command line (ps shows command lines, not environments); only the
+# claude process, and what it starts, gets it. A token that cannot be read
+# leaves the pass on this machine's own sign-in, as before, said in one line.
+CLAUDE_TOKEN_KEY=CLAUDE_CODE_OAUTH_TOKEN
+DOPPLER_BIN="${DOPPLER_BIN:-$(command -v doppler || true)}"
+TOKEN_PROJECT="$(cd "$REPO" && SPIRALITY_PROJECT='' node "$REPO/scripts/project_config.mjs" dopplerProject 2>/dev/null)"
+TOKEN_CONFIG="$(cd "$REPO" && SPIRALITY_PROJECT='' node "$REPO/scripts/project_config.mjs" dopplerConfig 2>/dev/null)"
+# Sets CLAUDE_TOKEN (empty when there is none to use) and TOKEN_LINE, the one
+# log line saying where this pass's sign-in comes from. Run in this shell,
+# never in $( ), so CLAUDE_TOKEN sticks without passing through stdout.
+read_claude_token() {
+  CLAUDE_TOKEN=""
+  local where="$TOKEN_PROJECT/$TOKEN_CONFIG" got code err
+  local fallback="this pass uses this machine's own Claude sign-in"
+  if [ -z "$TOKEN_PROJECT" ] || [ -z "$TOKEN_CONFIG" ]; then
+    TOKEN_LINE="the project config in $REPO names no Doppler project and config to read $CLAUDE_TOKEN_KEY from; $fallback"
+    return 0
+  fi
+  if [ -z "$DOPPLER_BIN" ] || [ ! -x "$DOPPLER_BIN" ]; then
+    TOKEN_LINE="no doppler on this machine to read $CLAUDE_TOKEN_KEY with; $fallback"
+    return 0
+  fi
+  err="$(mktemp "${TMPDIR:-/tmp}/$SLUG-token-err.XXXXXX")"
+  got="$("$DOPPLER_BIN" secrets get "$CLAUDE_TOKEN_KEY" --plain --project "$TOKEN_PROJECT" --config "$TOKEN_CONFIG" 2>"$err")"
+  code=$?
+  if [ "$code" -ne 0 ]; then
+    if grep -qi "could not find requested secret" "$err" 2>/dev/null; then
+      TOKEN_LINE="no $CLAUDE_TOKEN_KEY in Doppler $where; $fallback"
+    else
+      TOKEN_LINE="Doppler $where could not be read for $CLAUDE_TOKEN_KEY (doppler exited $code); $fallback"
+    fi
+  elif [ -z "$got" ]; then
+    TOKEN_LINE="$CLAUDE_TOKEN_KEY in Doppler $where is empty; $fallback"
+  elif [[ "$got" =~ [[:space:]] ]]; then
+    # A token is one word. Anything else is a paste gone wrong; never logged.
+    TOKEN_LINE="$CLAUDE_TOKEN_KEY in Doppler $where is not a single word (a paste gone wrong?), so it is not used; $fallback"
+  else
+    CLAUDE_TOKEN="$got"
+    TOKEN_LINE="this pass signs in to Claude with $CLAUDE_TOKEN_KEY from Doppler $where"
+  fi
+  rm -f "$err"
+  got=""
+}
+
 # This loop's own tracker sign-in (docs/TRACKER_MVP.md, "Running it"): the
 # NAME of its Doppler secret, e.g. loop-build -> TRACKER_TOKEN_LOOP_BUILD.
 # The door reads the value inside its own `doppler run`, so the token never
@@ -403,10 +455,12 @@ while true; do
 
   LAST_REAL_PASS="$(date +%s)"
   read_model
+  read_claude_token
   echo "" >> "$LOG"
   # The START line names the model, so the Settings page (tracker/pipeline.mjs)
   # and the time-in-status report can tell which pass ran on what.
   echo "===== $(date "+%Y-%m-%d %H:%M:%S") START /$SKILL (model: $PASS_MODEL) =====" >> "$LOG"
+  echo "[loop-runner] $(date "+%H:%M:%S") $TOKEN_LINE" >> "$LOG"
   # The pass's output goes to the log as it happens AND to its own file, so
   # the sign-in check below reads this pass only, not an older one.
   # The time limit writes what the pass was running into this file when it has
@@ -414,13 +468,22 @@ while true; do
   # first, so a stop never reports the previous stop's snapshot.
   SNAPSHOT="$LOG_DIR/$SLUG-$SKILL.timeout-snapshot"
   rm -f "$SNAPSHOT"
-  RUN_WITH_TIME_LIMIT_SNAPSHOT="$SNAPSHOT" \
-  "$RUN_DIR/scripts/run_with_time_limit.sh" "${LOOP_PASS_LIMIT_SECONDS:-7200}" -- \
-    "$CLAUDE_BIN" -p "$PROMPT" ${MODEL_ARGS[@]+"${MODEL_ARGS[@]}"} \
-    ${SESSION_ARGS[@]+"${SESSION_ARGS[@]}"} \
-    --allowedTools Bash Edit Write Read Glob Grep Task TodoWrite WebFetch \
-    2>&1 | tee "$PASS_OUT" >> "$LOG"
+  # The token is exported inside this subshell only, so the pass gets it in
+  # its environment and nothing else the runner starts ever does.
+  (
+    if [ -n "$CLAUDE_TOKEN" ]; then export CLAUDE_CODE_OAUTH_TOKEN="$CLAUDE_TOKEN"; fi
+    CLAUDE_TOKEN=""
+    RUN_WITH_TIME_LIMIT_SNAPSHOT="$SNAPSHOT" \
+    "$RUN_DIR/scripts/run_with_time_limit.sh" "${LOOP_PASS_LIMIT_SECONDS:-7200}" -- \
+      "$CLAUDE_BIN" -p "$PROMPT" ${MODEL_ARGS[@]+"${MODEL_ARGS[@]}"} \
+      ${SESSION_ARGS[@]+"${SESSION_ARGS[@]}"} \
+      --allowedTools Bash Edit Write Read Glob Grep Task TodoWrite WebFetch
+  ) 2>&1 | tee "$PASS_OUT" >> "$LOG"
   CODE=${PIPESTATUS[0]}
+  # Which sign-in the pass ran on, for the line below; the value is dropped.
+  USED_TOKEN=""
+  [ -n "$CLAUDE_TOKEN" ] && USED_TOKEN=yes
+  CLAUDE_TOKEN=""
   # `claude -p` exits 0 whenever it produced output, so the code is a fact
   # about the process, not a verdict on the pass. The pass's own report is.
   echo "===== $(date "+%Y-%m-%d %H:%M:%S") END /$SKILL (exit $CODE — not a verdict; the pass's report above is) =====" >> "$LOG"
@@ -446,7 +509,14 @@ while true; do
   # Only Claude's own sign-in errors, and only in this pass's last lines: a
   # pass that merely mentions "not logged in" (gh, supabase) is not one.
   if tail -20 "$PASS_OUT" | grep -qiE "OAuth session expired|Failed to authenticate|Invalid API key|Please run /login"; then
-    echo "[loop-runner] $(date "+%H:%M:%S") THIS PASS COULD NOT SIGN IN TO CLAUDE. Nothing will change until a person signs in on this machine (claude login) and restarts this job: launchctl kickstart -k gui/$(id -u)/$PREFIX.$SKILL" >> "$LOG"
+    # The fix depends on which sign-in failed (SP-385): a lost or ended
+    # long-lived token is replaced, and the next pass reads the new one with no
+    # restart; this machine's own sign-in is renewed in a browser.
+    if [ -n "$USED_TOKEN" ]; then
+      echo "[loop-runner] $(date "+%H:%M:%S") THIS PASS COULD NOT SIGN IN TO CLAUDE with $CLAUDE_TOKEN_KEY from Doppler $TOKEN_PROJECT/$TOKEN_CONFIG. Nothing will change until the account holder makes a new token on this machine (claude setup-token) and stores it (bash $REPO/scripts/claude_token_to_doppler.sh); the next pass reads it, or restart this job now: launchctl kickstart -k gui/$(id -u)/$PREFIX.$SKILL" >> "$LOG"
+    else
+      echo "[loop-runner] $(date "+%H:%M:%S") THIS PASS COULD NOT SIGN IN TO CLAUDE. Nothing will change until a person signs in on this machine. Best: make a long-lived token for unattended jobs (claude setup-token) and store it (bash $REPO/scripts/claude_token_to_doppler.sh), which the next pass reads; or sign in again (claude login) and restart this job: launchctl kickstart -k gui/$(id -u)/$PREFIX.$SKILL" >> "$LOG"
+    fi
   fi
 
   # A project's pass is over: its release checkout is no longer in use by
