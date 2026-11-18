@@ -5,7 +5,7 @@ import { resolveAnswers } from '../../lib/onboardAnswers.mjs';
 import { seatsForConfig } from '../../tracker/signins.mjs';
 import {
   BLOCKED, NOTED, READY, UNKNOWN, WILL_DO, checkEnv, planRefusesProtection, readEmptyProtection, cloneFolder, exitCodeFor, formatRow, ghApiFailure, lastLines, look,
-  busRow, readCheck, readCheckout, readClaude, readDoppler, readDopplerMe, readNode, readProtection,
+  busRow, releaseRow, readCheck, readCheckout, readClaude, readDoppler, readDopplerMe, readNode, readProtection,
   projectMismatch, readRepo, withoutSignIn, nodeNeedOf, samePathOnDisk, summaryLine, trackerRows,
 } from './look.mjs';
 import { normalRepo } from '../lib/repoCheck.mjs';
@@ -232,9 +232,10 @@ test('Doppler: a missing project or config will be made; an unreadable list coul
 });
 
 /** A fake tracker answering the four GETs the look makes. */
-function fakeTracker({ projects = [], actors = [], people = [{ id: 1, name: 'Dane' }], down = false } = {}) {
+function fakeTracker({ projects = [], actors = [], people = [{ id: 1, name: 'Dane' }], down = false, releases = null } = {}) {
   return async (path) => {
     if (down) throw new Error('connect ECONNREFUSED');
+    if (path === '/releases' && releases) return { status: 200, json: { ownProject: 'spirality', projects: releases } };
     if (path === '/me') return { status: 200, json: { id: 9, name: 'hand-run', kind: 'machine' } };
     if (path === '/projects') return { status: 200, json: { projects } };
     if (path === '/search') return { status: 200, json: { filters: [{ key: 'createdBy', options: actors.map((name, i) => ({ value: String(i + 1), label: name })) }] } };
@@ -309,6 +310,8 @@ function readOnlyCall({ cmd, args, cwd }, scratch) {
     return args.length === 2 && !/^-/.test(args[1]); // no --method, -X, -f, -F or --input: a GET
   }
   if (cmd === 'gh' && args[0] === 'repo' && args[1] === 'clone') return inScratch(args[3]);
+  // The release tags (SP-387), asked of the tracker home's remote: a read.
+  if (cmd === 'git' && args[0] === '-C' && args.slice(2).join(' ') === 'ls-remote --tags origin refs/tags/release-*') return true;
   if (cmd === 'git' && args[0] === '--no-optional-locks' && args[1] === '-C') {
     return ['rev-parse --abbrev-ref HEAD', 'rev-parse --show-toplevel', 'remote get-url origin', 'status --porcelain'].includes(args.slice(3).join(' '));
   }
@@ -318,7 +321,10 @@ function readOnlyCall({ cmd, args, cwd }, scratch) {
   return false;
 }
 
-function fakeWorld({ checkoutPresent = true, project = true, empty = false, noLock = false, privateFree = false } = {}) {
+// A release tag line as `git ls-remote --tags` prints one.
+const tagLine = (n) => `${String(n).repeat(40).slice(0, 40)}\trefs/tags/release-${n}`;
+
+function fakeWorld({ checkoutPresent = true, project = true, empty = false, noLock = false, privateFree = false, named = project ? 'release-1' : null, cut = [1] } = {}) {
   const calls = [];
   const requests = [];
   const removed = [];
@@ -338,10 +344,12 @@ function fakeWorld({ checkoutPresent = true, project = true, empty = false, noLo
     if (cmd === 'doppler' && args[0] === 'projects') return ok(JSON.stringify(project ? [{ slug: 'normie' }] : [{ slug: 'spirality' }]));
     if (cmd === 'doppler' && args[0] === 'configs') return ok(JSON.stringify([{ name: 'dev' }]));
     if (cmd === 'npm' || cmd === 'sh') return ok('done\n');
+    if (cmd === 'git' && args.includes('ls-remote')) return ok(cut.map(tagLine).join('\n'));
     return failed(1, `unexpected ${cmd} ${a}`);
   };
   const projects = [{ slug: 'spirality', name: 'Spirality', prefix: 'SP' }, ...(project ? [{ slug: 'normie', name: 'Normie', prefix: 'NO', repo: 'mentor24-maker/normie' }] : [])];
-  const tracker = fakeTracker({ projects, actors: project ? ['Dane', ...seatNames] : ['Dane'] });
+  const releases = projects.map((p) => ({ slug: p.slug, own: p.slug === 'spirality', release: p.slug === 'normie' ? named : null }));
+  const tracker = fakeTracker({ projects, actors: project ? ['Dane', ...seatNames] : ['Dane'], releases });
   const deps = {
     run: (cmd, args, opts = {}) => { calls.push({ cmd, args, cwd: opts.cwd, env: opts.env }); return answer(cmd, args); },
     fetch: async (url, init) => {
@@ -365,7 +373,7 @@ test('a project already set up: every row ready, exit 0', async () => {
   const rows = await look({ answers, homeConfig, deps: w.deps });
   assert.deepEqual(rows.filter((r) => r.verdict !== READY).map(formatRow), []);
   assert.equal(exitCodeFor(rows), 0);
-  assert.equal(rows.length, 16);
+  assert.equal(rows.length, 17);
 });
 
 test('the bus row: a project with a bus names it; one with none is told plainly the watchdogs have nowhere to post (SP-269)', async () => {
@@ -392,8 +400,39 @@ test('a new project: the tracker, Doppler and checkout rows say will do, exit 0'
     `Tracker: loop sign-ins (${seatNames.join(', ')})`,
     'Doppler: project normie',
     'Doppler: config normie/dev',
+    "Release: the Spirality release normie's lanes run",
   ]);
   assert.equal(exitCodeFor(rows), 0);
+});
+
+// --- The release (SP-387) ----------------------------------------------------
+
+test('the release row: ready when one is named, will do when one is cut, BLOCKED with the cut command when none is', async () => {
+  const named = await look({ answers, homeConfig, deps: fakeWorld().deps });
+  assert.equal(formatRow(named.find((r) => r.item.startsWith('Release:'))),
+    "Release: the Spirality release normie's lanes run: ready (release-1 is named for it; the setup leaves it as it is)");
+  const willName = await look({ answers, homeConfig, deps: fakeWorld({ named: null, cut: [2, 1] }).deps });
+  assert.equal(formatRow(willName.find((r) => r.item.startsWith('Release:'))),
+    "Release: the Spirality release normie's lanes run: will do (none is named for it yet; the setup's lanes step names the newest, release-2 today)");
+  assert.equal(exitCodeFor(willName), 0);
+  const none = await look({ answers, homeConfig, deps: fakeWorld({ named: null, cut: [] }).deps });
+  const row = none.find((r) => r.item.startsWith('Release:'));
+  assert.equal(row.verdict, BLOCKED);
+  assert.match(row.why, /no release has ever been cut/);
+  assert.match(row.why, /npm run release -- cut/);
+  assert.equal(exitCodeFor(none), 3, 'BLOCKED stops the setup at the look, before anything is written');
+});
+
+test('the release row on its own: Spirality\'s own project, no sign-in, and an unreadable record or tags are never ready', () => {
+  const rec = (projects) => ({ status: 200, json: { projects } });
+  const tags = { tags: [{ name: 'release-3', number: 3, commit: 'c' }] };
+  assert.equal(releaseRow({ releases: rec([{ slug: 'spirality', own: true, release: null }]), tags, slug: 'spirality' }).verdict, READY);
+  assert.equal(releaseRow({ releases: null, tags: null, slug: 'normie', hasToken: false }).verdict, UNKNOWN);
+  assert.equal(releaseRow({ releases: { down: 'ECONNREFUSED' }, tags, slug: 'normie' }).verdict, UNKNOWN);
+  assert.equal(releaseRow({ releases: { status: 403, json: null }, tags, slug: 'normie' }).verdict, UNKNOWN);
+  assert.equal(releaseRow({ releases: rec([]), tags: { problem: 'git ls-remote failed' }, slug: 'normie' }).verdict, UNKNOWN);
+  // A project the tracker does not have yet (made at the sign-ins step) has no release named.
+  assert.equal(releaseRow({ releases: rec([]), tags, slug: 'normie' }).verdict, WILL_DO);
 });
 
 test('the look makes no write call: tracker, Doppler, gh, git or claude', async () => {
