@@ -727,6 +727,10 @@ svg.loop-diagram-links g.diagram-arrow:hover polyline { stroke: var(--navy-soft)
 svg.loop-diagram-links g.diagram-arrow:hover rect { stroke: var(--navy-soft); }
 svg.loop-diagram-links g.diagram-arrow:focus-visible polyline { stroke: var(--focus-ring-color); stroke-opacity: 0.5; }
 svg.loop-diagram-links g.diagram-arrow:focus-visible rect { stroke: var(--focus-ring-color); stroke-width: 16; }
+/* The four pipeline stages under the diagram (SP-392): a row of buttons; hovering or focusing one outlines its arrows on the picture. */
+.diagram-stages { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin: 0 0 var(--space-5); }
+svg.loop-diagram-links g.diagram-arrow.stage-lit polyline { stroke: var(--focus-ring-color); stroke-opacity: 0.5; }
+svg.loop-diagram-links g.diagram-arrow.stage-lit rect { stroke: var(--focus-ring-color); stroke-width: 16; }
 /* The Loop Queue Anatomy page (SP-361): one row per status, its box cut from the diagram on the left (a link to the diagram), its copy on the right, both from the top. Every box is drawn at one scale and shrinks with its column; a narrow screen stacks the box above its copy, never scrolling sideways. */
 table.anatomy { width: 100%; border-collapse: collapse; table-layout: fixed; }
 table.anatomy td { vertical-align: top; padding: var(--space-4) 0; }

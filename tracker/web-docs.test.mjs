@@ -6,7 +6,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { renderMarkdown, unwrapDoc, headingId, renderLoopQueueAnatomy, renderDiagramCut, LOOP_QUEUE_FIGURE_ID, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, renderLoopQueueDiagram, LOOP_QUEUE_DIAGRAM, LOOP_QUEUE_ARROWS, DIAGRAM_ARROW_HIT_WIDTH, renderArrowDetails, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS } from './web/render.mjs';
+import { renderMarkdown, unwrapDoc, headingId, renderLoopQueueAnatomy, renderDiagramCut, LOOP_QUEUE_FIGURE_ID, matchCommands, renderCommandList, renderCommandView, renderCommandDetails, commandSummary, commandAbout, commandHref, renderContextDocs, renderLoopQueueDiagram, LOOP_QUEUE_DIAGRAM, LOOP_QUEUE_ARROWS, DIAGRAM_ARROW_HIT_WIDTH, renderArrowDetails, LOOP_QUEUE_STAGES, renderStageDetails, docInfo, docDay, docRows, sortDocs, filterDocs, renderDocHeadings, renderDocBody, docCountLine, renderDocumentation, DOC_KINDS } from './web/render.mjs';
 import { pageScript } from './pageScripts.mjs';
 import { WEB, fixture } from './webTestKit.mjs';
 
@@ -514,6 +514,57 @@ test('every arrow and note on the Loop Queue diagram opens a pop-up of 50 to 100
   assert.match(css, /g\.diagram-arrow \{[^}]*cursor: pointer/);
   assert.match(css, /g\.diagram-arrow polyline \{[^}]*stroke: transparent/);
   assert.match(css, new RegExp(`g\\.diagram-arrow polyline \\{[^}]*stroke-width: ${DIAGRAM_ARROW_HIT_WIDTH};`), 'the line is as wide as the boxes are kept clear of');
+});
+
+test('under the Loop Queue diagram, the four pipeline stages each outline their arrows and open a pop-up of 50 to 100 words (SP-392)', () => {
+  const html = renderLoopQueueDiagram((path) => `/docs/spirality/${path}`);
+  assert.doesNotMatch(html, /style=/);
+  // The Pipeline Stages box's names, in its order, as buttons under the picture.
+  assert.deepEqual(LOOP_QUEUE_STAGES.map((s) => s.name), ['Relay', 'Build', 'Review', 'Intake']);
+  const row = /<\/figure><div class="diagram-stages" role="group" aria-label="Pipeline Stages">(.*?)<\/div>$/.exec(html);
+  assert.ok(row, 'the row sits directly under the diagram');
+  assert.deepEqual([...row[1].matchAll(/<button type="button" class="btn diagram-stage" aria-haspopup="dialog" data-stage="([^"]+)">([^<]+)<\/button>/g)].map((m) => [m[1], m[2]]),
+    LOOP_QUEUE_STAGES.map((s) => [s.id, s.name]));
+  // Exactly the arrows the spec names, each a real arrow (not a note), and every arrow in exactly one stage.
+  const byId = Object.fromEntries(LOOP_QUEUE_ARROWS.map((a) => [a.id, a]));
+  const owners = {};
+  for (const s of LOOP_QUEUE_STAGES) {
+    const words = s.copy.trim().split(/\s+/).length;
+    assert.ok(words >= 50 && words <= 100, `${s.name} has ${words} words, not 50 to 100`);
+    for (const id of s.arrows) {
+      assert.ok(byId[id], `${s.name} names ${id}, which is not in slice 1's list`);
+      assert.ok(byId[id].line, `${s.name} names ${id}, a note, not an arrow`);
+      assert.ok(s.copy.includes(byId[id].heading), `${s.name}'s copy names ${byId[id].heading} as the picture writes it`);
+      owners[id] = [...(owners[id] ?? []), s.name];
+    }
+  }
+  for (const a of LOOP_QUEUE_ARROWS.filter((x) => x.line)) assert.equal(owners[a.id]?.length, 1, `${a.heading} belongs to exactly one stage, not ${owners[a.id] ?? 'none'}`);
+  const arrowsOf = Object.fromEntries(LOOP_QUEUE_STAGES.map((s) => [s.name, s.arrows.map((id) => byId[id].heading)]));
+  assert.deepEqual(arrowsOf, {
+    Relay: ['Operator Says Go', 'Operator Merges'],
+    Build: ['Build Pass Claims the Next Ticket', 'Rework Is Always Taken First', 'Pull Request Opened'],
+    Review: ['Passes', 'Sent Back', 'Judgment Call'],
+    Intake: ['Written Up as a Spec'],
+  });
+  // Its pop-up: the stage's name as the heading, the arrows it drives, its copy, escaped.
+  const review = renderStageDetails(LOOP_QUEUE_STAGES.find((s) => s.id === 'review'));
+  assert.match(review, /<h2 id="arrow-details-title">Review<\/h2>/);
+  assert.match(review, /<p class="quiet">Moves tickets along: Passes, Sent Back, Judgment Call<\/p>/);
+  assert.match(renderStageDetails({ name: '<b>', arrows: [], copy: '<i>' }), /&lt;b&gt;[\s\S]*&lt;i&gt;/, 'escaped');
+  // The page outlines on hover and focus, clears on leaving, opens the shared dialog and hands focus back.
+  const docs = readFileSync(WEB('page-docs.mjs'), 'utf8');
+  const wire = docs.slice(docs.indexOf('function wireDiagramArrows()'));
+  assert.match(wire, /querySelectorAll\('button\.diagram-stage'\)/);
+  assert.match(wire, /classList\.toggle\('stage-lit', on && stage\.arrows\.includes\(g\.dataset\.arrow\)\)/, 'only its own arrows, from the arrows\' own targets');
+  for (const [ev, on] of [['pointerenter', true], ['pointerleave', false], ['focus', true], ['blur', false]]) {
+    assert.match(wire, new RegExp(`button\\.addEventListener\\('${ev}', \\(\\) => light\\(${on}\\)\\)`));
+  }
+  assert.match(wire, /opener = button;[\s\S]*?renderStageDetails\(stage\);\s*dialog\.showModal\(\);/);
+  assert.equal((wire.match(/dialog\.addEventListener\('close'/g) ?? []).length, 1, 'one close handler, so focus goes back only to what opened it');
+  const css = readFileSync(WEB('app.css'), 'utf8');
+  assert.match(css, /g\.diagram-arrow\.stage-lit polyline \{[^}]*stroke: var\(--focus-ring-color\)/);
+  assert.match(css, /g\.diagram-arrow\.stage-lit rect \{[^}]*stroke: var\(--focus-ring-color\)/);
+  assert.match(css, /\.diagram-stages \{[^}]*display: flex/);
 });
 
 test('the Loop Queue Anatomy page is a table: each status box cut from the diagram beside its copy, linking to the diagram (SP-361)', () => {
