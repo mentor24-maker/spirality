@@ -326,6 +326,12 @@ source "$REPO/scripts/lib/tracker_restart.sh"
 # next good pass: lib/watchdogPosts.js failureStampFile names the same file.
 WATCHDOG_DIR="$LOG_DIR/$SLUG-watchdogs"
 FAILURE_STAMP="$WATCHDOG_DIR/failed-$(printf '%s' "$SKILL" | tr -c 'A-Za-z0-9-' '-').stamp"
+# Claude's warning that its sign-in ends soon is said on the bus a week ahead,
+# at most once a day across this project's lanes (SP-388). A copy of this
+# runner without the file runs on without it.
+# shellcheck source=lib/signin_warning.sh
+[ -f "$REPO/scripts/lib/signin_warning.sh" ] && source "$REPO/scripts/lib/signin_warning.sh"
+SIGNIN_WARNING_STAMP="$WATCHDOG_DIR/claude-signin-warning.stamp"
 
 while true; do
   # Where main was before this pass synced: noted BEFORE step 0, because that
@@ -505,6 +511,11 @@ while true; do
   # CODE, the runner's exit or the next pass.
   if declare -F report_lane_pass >/dev/null; then
     report_lane_pass "$RUN_DIR" "$FAILURE_STAMP" "$SKILL" "$CODE" "$LOG" >> "$LOG" 2>&1 || true
+  fi
+  # The sign-in this pass used ends within a week: one ALARM a day (SP-388).
+  # Never allowed to change CODE, the runner's exit or the next pass.
+  if declare -F report_signin_warning >/dev/null; then
+    report_signin_warning "$RUN_DIR" "$SIGNIN_WARNING_STAMP" "$PASS_OUT" >> "$LOG" 2>&1 || true
   fi
   # Only Claude's own sign-in errors, and only in this pass's last lines: a
   # pass that merely mentions "not logged in" (gh, supabase) is not one.
