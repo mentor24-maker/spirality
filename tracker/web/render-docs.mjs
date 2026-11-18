@@ -265,6 +265,145 @@ export const LOOP_QUEUE_DIAGRAM = Object.freeze({
   ].map((b) => Object.freeze({ ...b, anchor: headingId(b.label) }))),
 });
 
+/**
+ * How wide, in the picture's pixels, the invisible line laid along each
+ * arrow is (SP-391), set in app.css: wide enough that a thin arrow is easy to hit. Every
+ * line stops short of the boxes it joins by more than half this, so a click
+ * on a box still reaches the box's own link.
+ */
+export const DIAGRAM_ARROW_HIT_WIDTH = 40;
+
+/**
+ * The arrows and notes on the Loop Queue diagram that open a pop-up (SP-391),
+ * each with its heading, the two statuses it joins, 50 to 100 words on what
+ * it does between them (agreeing with docs/LOOP_CONTRACT.md and
+ * docs/LOOP_QUEUE_ANATOMY.md), and its place in the 3200 x 1800 picture:
+ * `line`, the points an invisible wide line follows along the arrow (none
+ * for a note), and `words`, the rectangle (left, top, right, bottom) round
+ * its label. Measured from the picture's own pixels.
+ */
+export const LOOP_QUEUE_ARROWS = Object.freeze([
+  {
+    id: 'written-up-as-a-spec',
+    heading: 'Written Up as a Spec',
+    from: 'Requested',
+    to: 'Needs your input',
+    line: [[265, 1189], [265, 850]],
+    words: [140, 965, 390, 1070],
+    copy: 'loop-intake, its own lane on the Mini, takes the oldest Requested ticket and writes it up as a spec: a goal, a scope, what it must not do, acceptance criteria, test steps and the files it will change, with Dane\'s own words kept verbatim under an Asked heading. A request too big for one pull request is sliced, and each further slice is filed in Requested so no build loop reaches it early. The ticket then goes to Needs your input with a card asking him to approve it as written, or to say what to change.',
+  },
+  {
+    id: 'operator-says-go',
+    heading: 'Operator Says Go',
+    from: 'Needs your input',
+    to: 'Queued',
+    line: [[521, 740], [600, 740], [600, 1099], [678, 1099]],
+    words: [500, 870, 698, 970],
+    copy: 'Dane answers the card on a ticket in Needs your input, often with a single word of approval, and the relay, the pass that carries out his comments every few minutes, moves the ticket on. With no pull request yet it goes to Queued, into line for a build pass. With a pull request still open it goes to Rework instead, and if he says to close it, or its pull request already merged, it goes to Live. No loop takes a ticket out of Needs your input any other way.',
+  },
+  {
+    id: 'claimed-for-building',
+    heading: 'Build Pass Claims the Next Ticket',
+    from: 'Queued',
+    to: 'Building',
+    line: [[1223, 1300], [1417, 1300]],
+    words: null,
+    copy: 'This arrow has no label because it is one step: a build pass claims the ticket at the head of the queue with the claim command, which reads the ticket\'s status and refuses if it moved first. Only one build lane runs per project, and its passes run one after another, so two passes never build the same ticket. A ticket whose "Waits on:" line names an open ticket, or that shares a file with work in flight, is held back and the next one is taken.',
+  },
+  {
+    id: 'rework-is-always-taken-first',
+    heading: 'Rework Is Always Taken First',
+    from: 'Rework',
+    to: 'Building',
+    line: [[1223, 724], [1615, 724], [1615, 1189]],
+    words: [1450, 925, 1870, 1030],
+    copy: 'A build pass takes every Rework ticket before any Queued one, because finishing half-built work comes before starting new work. The same claim command moves it to Building, but the pass does not start again: it checks out the branch that already exists, reads the reviewer\'s notes, fixes what they named and pushes to the same pull request. A Rework ticket is never held back for sharing files with other work in flight, since its pull request already exists.',
+  },
+  {
+    id: 'pull-request-opened',
+    heading: 'Pull Request Opened',
+    from: 'Building',
+    to: 'In review',
+    line: [[1813, 1300], [1917, 1300]],
+    words: [1735, 1095, 1995, 1192],
+    copy: 'When the code is built and npm run verify passes, the build pass writes a plain-English work-log entry, opens a pull request titled with the ticket\'s exact name and linking back to the ticket, and records it with the pr-opened command, which checks both links. Only then does it move the ticket to In review. A pass may never end with its ticket still in Building, since no loop claims from there: a ticket left behind would be unreachable.',
+  },
+  {
+    id: 'passes',
+    heading: 'Passes',
+    from: 'In review',
+    to: 'Ready to launch',
+    line: [[2312, 1300], [2418, 1300]],
+    words: [2285, 1135, 2445, 1192],
+    copy: 'loop-review, a separate lane that did not write the code, runs npm run verify itself, reads the change against the spec\'s acceptance criteria and walks the ticket\'s test steps for real. When everything holds, it writes a passing verdict on the ticket and hands it to Dane in Ready to launch with a card asking for his word to merge. The ask command refuses Ready to launch unless the newest verdict on the ticket is a pass.',
+  },
+  {
+    id: 'operator-merges',
+    heading: 'Operator Merges',
+    from: 'Ready to launch',
+    to: 'Live',
+    line: [[2881, 1300], [2977, 1300]],
+    words: [2848, 1095, 3045, 1192],
+    copy: 'Dane replies on a Ready to launch ticket with a merge phrase, and the relay checks every gate again, the green verify check, the passing review and the pull request\'s state, before it merges the pull request and closes the ticket as Live. No build or review loop ever merges anything. On StarCaster alone, two auto-merge lanes may merge after an hour in which he did not object, under a standing policy he ruled on.',
+  },
+  {
+    id: 'sent-back',
+    heading: 'Sent Back',
+    from: 'In review',
+    to: 'Rework',
+    line: [[2114, 1189], [2114, 450], [950, 450], [950, 628]],
+    words: [1355, 415, 1645, 485],
+    copy: 'When review finds a real problem, it writes a failing verdict naming what to fix and moves the ticket from In review to Rework, guarded on the status it expects, so nothing is written if the ticket has moved. The branch, the open pull request and the notes all survive, and the next build pass fixes what was named and pushes to the same pull request. A ticket may be sent back three times; after that the spec is the problem, not the builder.',
+  },
+  {
+    id: 'judgment-call',
+    heading: 'Judgment Call',
+    from: 'In review',
+    to: 'Needs your input',
+    line: [[2220, 1189], [2220, 281], [281, 281], [281, 628]],
+    words: [1320, 250, 1675, 312],
+    copy: 'Some questions only Dane can settle: what a feature should do, whether a cost is worth it, or a spec that has proved wrong. When review meets one, it hands the ticket to him in Needs your input with an operator card ending in his move, instead of passing it or sending it back. A fourth send-back is never made: after three rounds review asks him here, because failing again and again means the spec needs his judgment.',
+  },
+  {
+    id: 'oldest-first',
+    heading: 'Oldest First (Priority Ignored)',
+    from: 'Rework',
+    to: 'Building',
+    line: null,
+    words: [765, 803, 1135, 897],
+    copy: 'Rework tickets are taken in the order they were created, and their priority is not consulted. Priority says what to start, and rework is not started: it is half-built work with a branch, an open pull request and review notes already waiting. Taking the oldest first keeps send-backs from going stale behind fresh high-priority work, which is what happened before Rework became its own status on 31 August 2026.',
+  },
+  {
+    id: 'highest-priority-first',
+    heading: 'Highest Priority First, Then Oldest',
+    from: 'Queued',
+    to: 'Building',
+    line: null,
+    words: [725, 1420, 1175, 1520],
+    copy: 'A build pass takes the most urgent Queued ticket first: urgent before high before normal before low. Within one priority, a ticket given a place in the queue on the tracker page comes before one without, lower place first, but place never beats priority. After that the oldest goes first. No Queued ticket is taken at all while any Rework ticket waits, because finishing half-built work comes before starting new work.',
+  },
+].map((a) => Object.freeze(a)));
+
+/** One arrow's pop-up body (SP-391): its heading, the two statuses it joins and its copy. */
+export function renderArrowDetails(arrow) {
+  return `
+    <h2 id="arrow-details-title">${escapeHtml(arrow.heading)}</h2>
+    <p class="quiet">From ${escapeHtml(arrow.from)} to ${escapeHtml(arrow.to)}</p>
+    <p>${escapeHtml(arrow.copy)}</p>`;
+}
+
+/**
+ * One arrow or note's clickable target over the diagram (SP-391): a button
+ * the keyboard reaches, holding an invisible wide line along the arrow and
+ * an invisible rectangle round its words, so either opens its pop-up.
+ */
+function renderArrowTarget(arrow) {
+  const label = `${arrow.heading}: from ${arrow.from} to ${arrow.to}`;
+  const line = arrow.line ? `<polyline points="${arrow.line.map(([x, y]) => `${x},${y}`).join(' ')}"></polyline>` : '';
+  const words = arrow.words ? (([l, t, r, b]) => `<rect x="${l}" y="${t}" width="${r - l}" height="${b - t}" rx="16"></rect>`)(arrow.words) : '';
+  return `<g class="diagram-arrow" role="button" tabindex="0" aria-haspopup="dialog" data-arrow="${escapeHtml(arrow.id)}" aria-label="${escapeHtml(label)}"><title>${escapeHtml(arrow.heading)}</title>${line}${words}</g>`;
+}
+
 /** The Loop Queue diagram's id on the Docs page (SP-361): the anatomy page's cut-outs link to `/docs#loop-queue-diagram`. */
 export const LOOP_QUEUE_FIGURE_ID = 'loop-queue-diagram';
 
@@ -276,6 +415,8 @@ export const LOOP_QUEUE_FIGURE_ID = 'loop-queue-diagram';
  * SVG laid over the picture with the picture's own size as its viewBox: each
  * box keeps its pixel place in the original and scales with it at any width.
  * (An inline style would place them too, but the page's lock forbids it.)
+ * Over each arrow and note, in the same SVG, a target that opens its pop-up
+ * (SP-391), drawn with the one dialog they share.
  * `docAddress` turns a docs/ path into the page's address for it.
  */
 export function renderLoopQueueDiagram(docAddress) {
@@ -284,7 +425,15 @@ export function renderLoopQueueDiagram(docAddress) {
     const href = escapeHtml(`${docAddress(d.page)}#${anchor}`);
     return `<a class="diagram-box" href="${href}" aria-label="${escapeHtml(label)}"><title>${escapeHtml(label)}</title><rect x="${l}" y="${t}" width="${r - l}" height="${b - t}" rx="24"></rect></a>`;
   }).join('');
-  return `<figure class="loop-diagram" id="${LOOP_QUEUE_FIGURE_ID}"><img src="${d.src}" alt="${escapeHtml(d.alt)}" width="${d.width}" height="${d.height}"><svg class="loop-diagram-links" viewBox="0 0 ${d.width} ${d.height}" role="group" aria-label="Loop Queue statuses">${links}</svg></figure>`;
+  const arrows = LOOP_QUEUE_ARROWS.map(renderArrowTarget).join('');
+  const dialog = `<dialog class="arrow-details" aria-labelledby="arrow-details-title">
+      <form method="dialog">
+        <button type="submit" class="close" aria-label="Close">×</button>
+        <div class="arrow-details-body"></div>
+        <div class="row"><button type="submit" class="btn">Close</button></div>
+      </form>
+    </dialog>`;
+  return `<figure class="loop-diagram" id="${LOOP_QUEUE_FIGURE_ID}"><img src="${d.src}" alt="${escapeHtml(d.alt)}" width="${d.width}" height="${d.height}"><svg class="loop-diagram-links" viewBox="0 0 ${d.width} ${d.height}" role="group" aria-label="Loop Queue statuses and arrows">${links}${arrows}</svg>${dialog}</figure>`;
 }
 
 /** The margin, in the picture's pixels, kept around a status box cut from the diagram (SP-361). */
