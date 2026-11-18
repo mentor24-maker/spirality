@@ -211,6 +211,35 @@ project's lanes run on their release"). `--status` prints a `release:` line
 saying which. Nobody starts a loop by hand while those are loaded: a
 second claimant makes the check-then-act claim unsound.
 
+**Where the lanes' Claude sign-in comes from (SP-385).** A browser sign-in
+(`claude login`) is kept in the Mini's keychain and ends on a fixed date that
+renewing does not move; when it ends, every lane in every project stops.
+So before each pass the runner reads `CLAUDE_CODE_OAUTH_TOKEN`, a long-lived
+token made for unattended jobs, from the Doppler project and config named in
+Spirality's own `spirality.project.json` (`dopplerProject`,
+`dopplerConfig`), and hands it to that pass's `claude` process only. Every
+project's lanes run from Spirality's folder, so this one token serves them
+all. The value never reaches a log or a command line; the log says, under
+each START line, either `this pass signs in to Claude with
+CLAUDE_CODE_OAUTH_TOKEN from Doppler spirality/dev` or why it could not and
+that `this pass uses this machine's own Claude sign-in` (the old way, kept as
+the fallback). `npm run doctor` reports the key present or missing.
+
+To make and store a new one (a **browser login** on the Mini, by whoever
+holds the Claude account the loops run on, then a **real secret value**):
+
+```bash
+claude setup-token                          # opens the browser; prints the token
+bash scripts/claude_token_to_doppler.sh     # paste it when asked; it is not shown
+```
+
+The second prints `Stored: CLAUDE_CODE_OAUTH_TOKEN is set in Doppler
+spirality/dev and reads back the same`, never the value, and exits non-zero
+saying why if the write or the read-back fails. Each lane's next pass reads
+the new token; nothing needs restarting. A setup-token lasts about a year:
+make the next one before it ends, and whenever the account the loops run on
+changes.
+
 So the question is never "shall I start one", it is "what is it doing":
 
 ```bash
@@ -222,11 +251,15 @@ ssh mac-mini 'tail -40 ~/loop-logs/spirality-loop-intake.log'
 
 Three things the log can say that need a person:
 
-- **"THIS PASS COULD NOT SIGN IN TO CLAUDE."** The Mini's Claude sign-in
-  expired. Only Dane can sign in, at the Mini's own screen or Screen Sharing
-  (an ssh sign-in does not reach launchd). Then restart the jobs:
-  `launchctl kickstart -k gui/$(id -u)/com.spirality.loop-build` and the same
-  for `loop-review` and `loop-intake`.
+- **"THIS PASS COULD NOT SIGN IN TO CLAUDE."** The sign-in that pass used
+  ended or was revoked; the line says which. With the Doppler token: make a
+  new one (`claude setup-token`) and store it
+  (`bash scripts/claude_token_to_doppler.sh`), above; the next pass reads it.
+  With the Mini's own sign-in: best is the same two steps, so it does not
+  happen again; or sign in again (`claude login`) at the Mini's own screen or
+  Screen Sharing (an ssh sign-in does not reach launchd) and restart the
+  jobs: `launchctl kickstart -k gui/$(id -u)/com.spirality.loop-build` and
+  the same for `loop-review` and `loop-intake`.
 - **"hit the time limit"** twice on one ticket: a gate that will not go green.
   Read the ticket and hand it back or `ask`.
 - **Nothing written for hours** while the queue has work: `--status` says
