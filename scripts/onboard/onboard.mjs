@@ -86,6 +86,17 @@
  *             file. The note is never "already done", so a rerun tries
  *             again and locks main once GitHub allows it. Any other
  *             failure still fails the step.
+ *   checkout  SP-384: the project's checkout back on a clean main at
+ *             origin's commit (the lanes step left it on the setup branch,
+ *             which the merge deleted, and the relay will not pull off a
+ *             clean main), read back, before Done. Unsaved changes, a
+ *             branch other than main or the setup branch, or a
+ *             switch git refuses, fail the step with git's reason. A
+ *             checkout already on a clean, current main skips it. The
+ *             local setup branch is deleted (`git branch -D`, as the squash
+ *             merge leaves git calling it unmerged) only when origin has no
+ *             such branch and a merged setup pull request was made from its
+ *             very commit; otherwise it is left, with a note saying why.
  *
  * Every step first checks whether it is already done and skips it if so, so
  * a rerun resumes where a failed one stopped and asks nothing twice. Once the
@@ -142,7 +153,7 @@ const { findTicketId, ticketLink } = require('../../lib/clickupTicketLink.js');
 
 export const DEFAULT_MERGE_WAIT_MINUTES = 60;
 
-export const STEPS = Object.freeze(['answers', 'look', 'start', 'clone', 'settings', 'signins', 'bus', 'copy', 'lanes', 'merge', 'protect']);
+export const STEPS = Object.freeze(['answers', 'look', 'start', 'clone', 'settings', 'signins', 'bus', 'copy', 'lanes', 'merge', 'protect', 'checkout']);
 
 /** The steps of a project already on ClickUp (SP-159): STEPS with setup-check, stop, snapshot, import and switch-check before copy. */
 export const CLICKUP_RUN_STEPS = Object.freeze(withClickupSteps(STEPS));
@@ -1182,6 +1193,71 @@ export async function onboard(opts, deps) {
       }
     }
     }
+
+    // ── checkout ─────────────────────────────────────────────────────────
+    // SP-384: the lanes step left the checkout on the setup branch, which the
+    // merge deleted on GitHub, and the relay will not pull a checkout off a
+    // clean main. Put it back, read it back, and only then say Done.
+    step = 'checkout';
+    begin(step);
+    const g = (...args) => run('git', args, { cwd: checkout });
+    const must = (r, what) => { if (r.code !== 0) fail(step, `${what} in ${checkout} failed: ${last(r.err || r.out) || `exit ${r.code}`}`); return r.out.trim(); };
+    const where = () => ({
+      branch: must(g('rev-parse', '--abbrev-ref', 'HEAD'), 'git rev-parse --abbrev-ref HEAD'),
+      dirty: must(g('status', '--porcelain'), 'git status --porcelain'),
+      head: must(g('rev-parse', 'HEAD'), 'git rev-parse HEAD'),
+      origin: must(g('rev-parse', 'origin/main'), 'git rev-parse origin/main'),
+    });
+    must(g('fetch', '-q', 'origin'), 'git fetch origin');
+    const was = where();
+    const onCleanMain = (s) => s.branch === 'main' && !s.dirty && s.head === s.origin;
+    const didHere = [];
+    if (!onCleanMain(was)) {
+      if (was.dirty) fail(step, `${checkout} is on ${was.branch} with unsaved changes (${last(was.dirty)}), so it was not switched to main. Save or put them aside, then rerun`);
+      // Only the branch the setup itself left there is switched away from.
+      if (was.branch !== 'main' && was.branch !== SETUP_BRANCH) fail(step, `${checkout} is on ${was.branch}, not main or ${SETUP_BRANCH}, so it was left as it is. Put it back on main by hand, then rerun`);
+      if (was.branch !== 'main') {
+        const sw = g('checkout', '--quiet', 'main');
+        if (sw.code !== 0) fail(step, `git would not switch ${checkout} from ${was.branch} to main: ${last(sw.err || sw.out) || `exit ${sw.code}`}`);
+      }
+      const pull = g('pull', '--quiet', '--ff-only', 'origin', 'main');
+      if (pull.code !== 0) fail(step, `git pull --ff-only in ${checkout} failed: ${last(pull.err || pull.out) || `exit ${pull.code}`}`);
+      const now = where();
+      if (!onCleanMain(now)) {
+        fail(step, `${checkout} reads back on ${now.branch}${now.dirty ? ', with changes' : ''} at ${now.head.slice(0, 7)}, not a clean main at origin's ${now.origin.slice(0, 7)}`);
+      }
+      didHere.push(`${checkout} put back on main from ${was.branch}, read back clean at origin's ${now.origin.slice(0, 7)}`);
+    }
+    // The setup branch was squashed, so git calls it unmerged. It goes only
+    // on proof: GitHub has no such branch any more, and a merged setup pull
+    // request on main was made from this very commit. Otherwise it stays.
+    const local = g('rev-parse', '--verify', '--quiet', `refs/heads/${SETUP_BRANCH}`);
+    let kept = null;
+    if (local.code === 0) {
+      const tip = local.out.trim();
+      const remote = g('ls-remote', '--exit-code', '--heads', 'origin', SETUP_BRANCH);
+      const merged = ghJson('pr', 'list', '--repo', answers.githubRepo, '--head', SETUP_BRANCH, '--state', 'merged', '--json', 'url,headRefOid,mergeCommit');
+      const pr = merged.ok && Array.isArray(merged.json) ? merged.json.find((p) => p?.headRefOid === tip) : null;
+      const onOriginMain = pr?.mergeCommit?.oid && g('merge-base', '--is-ancestor', pr.mergeCommit.oid, 'origin/main').code === 0;
+      if (remote.code === 0) kept = `origin still has ${SETUP_BRANCH}`;
+      else if (remote.code !== 2) kept = `could not tell whether origin still has ${SETUP_BRANCH}: ${last(remote.err || remote.out) || `exit ${remote.code}`}`;
+      else if (!merged.ok) kept = `could not read ${answers.githubRepo}'s merged pull requests: ${last(merged.r.err || merged.r.out)}`;
+      else if (!pr) kept = `no merged pull request from ${SETUP_BRANCH} was made from its commit ${tip.slice(0, 7)}`;
+      else if (!onOriginMain) kept = `${pr.url}'s merge commit is not on origin/main`;
+      else {
+        const del = g('branch', '-D', SETUP_BRANCH);
+        const gone = g('rev-parse', '--verify', '--quiet', `refs/heads/${SETUP_BRANCH}`).code !== 0;
+        if (del.code !== 0 || !gone) kept = `git would not delete it: ${last(del.err || del.out) || 'it is still there'}`;
+        else didHere.push(`the local ${SETUP_BRANCH} branch deleted (its remote branch is gone and ${pr.url} merged it), read back`);
+      }
+      if (kept) {
+        const note = `the local ${SETUP_BRANCH} branch was left in ${checkout}: ${kept}`;
+        say(step, note);
+        record(step, 'note', note);
+      }
+    }
+    if (didHere.length) done(step, didHere.join('; '));
+    else skip(step, `${checkout} is on a clean main at origin's ${was.origin.slice(0, 7)}`);
   } catch (thrown) {
     let err = thrown;
     // Any other error is the running step failing (rule 6): the state file
