@@ -319,3 +319,91 @@ test('the config refuses every built-in seat as a lane: RESERVED_LANE_NAMES cove
     assert.throws(() => laneSeats({ projectLanes: [taken] }), ProjectConfigError, taken);
   }
 });
+
+// The lanes' long-lived Claude sign-in (SP-385): one token, in the Doppler
+// project of the folder every lane runs from, which is Spirality's.
+test('doctor asks Spirality for CLAUDE_CODE_OAUTH_TOKEN, and never a project whose lanes run from Spirality\'s folder', async () => {
+  assert.ok(home.expected.some((s) => s.name === 'CLAUDE_CODE_OAUTH_TOKEN'));
+  for (const project of [GUEST, NEVER_CLICKUP]) {
+    assert.ok(!doctorTarget(project).expected.some((s) => s.name === 'CLAUDE_CODE_OAUTH_TOKEN'), project.projectSlug);
+  }
+  // Run for real against Spirality's own config, the key missing: doctor names it and fails.
+  const t = await standInTracker(SPIRALITY, SPIRALITY.githubRepo);
+  const f = projectFolder(t.config, expected.map((s) => s.name).filter((n) => n !== 'CLAUDE_CODE_OAUTH_TOKEN'));
+  try {
+    const r = await f.runAsync([join(ROOT, 'scripts/doctor.mjs')]);
+    assert.notEqual(r.status, 0, r.stdout);
+    assert.match(r.stdout, /^CLAUDE_CODE_OAUTH_TOKEN\s+MISSING$/m);
+  } finally { f.cleanup(); await t.close(); }
+});
+
+/**
+ * scripts/claude_token_to_doppler.sh with a stand-in doppler (DOPPLER_BIN)
+ * that keeps what `secrets set` is given on stdin in a file and answers
+ * `secrets get` from it, printing a table holding the value on a set, as the
+ * real one does. `set` and `get` say how each answers: 'ok', 'fail', or
+ * (get only) 'other' for a different value.
+ */
+function storeToken(input, { set = 'ok', get = 'ok' } = {}) {
+  const dir = mkdtempSync(join(tmpdir(), 'token-store-'));
+  try {
+    const stored = join(dir, 'stored');
+    const doppler = join(dir, 'doppler');
+    writeFileSync(doppler, [
+      '#!/bin/bash',
+      `printf '%s\\n' "$*" >> "${join(dir, 'calls')}"`,
+      'if [ "$1 $2" = "secrets set" ]; then',
+      `  [ "${set}" = ok ] || { echo "Doppler Error: forbidden" >&2; exit 1; }`,
+      `  cat > "${stored}"; echo "| NAME | VALUE |"; echo "| $3 | $(cat "${stored}") |"; exit 0`,
+      'fi',
+      'if [ "$1 $2" = "secrets get" ]; then',
+      `  [ "${get}" = fail ] && { echo "Doppler Error: unable to reach" >&2; exit 1; }`,
+      `  [ "${get}" = other ] && { echo "something-else"; exit 0; }`,
+      `  cat "${stored}"; echo; exit 0`,
+      'fi',
+      'exit 9',
+    ].join('\n'), { mode: 0o755 });
+    const r = spawnSync('bash', [join(ROOT, 'scripts/claude_token_to_doppler.sh')], {
+      cwd: ROOT, input, encoding: 'utf8', env: { ...process.env, DOPPLER_BIN: doppler, SPIRALITY_PROJECT: '' },
+    });
+    const read = (f) => { try { return readFileSync(join(dir, f), 'utf8'); } catch { return ''; } };
+    return { ...r, calls: read('calls'), stored: read('stored') };
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+}
+
+const STORE_TOKEN = 'standin-claude-store-token-9c1d';
+
+test('claude_token_to_doppler.sh stores the pasted token in Spirality\'s Doppler on stdin, reads it back, and never prints it (SP-385)', () => {
+  const r = storeToken(`  ${STORE_TOKEN}\r\n`);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(r.stored, STORE_TOKEN, 'what reached Doppler is not the pasted token, trimmed');
+  assert.match(r.stdout, new RegExp(`^Stored: CLAUDE_CODE_OAUTH_TOKEN is set in Doppler ${SPIRALITY.dopplerProject}/${SPIRALITY.dopplerConfig} and reads back the same \\(the value is not shown\\)\\.$`, 'm'));
+  assert.ok(!(r.stdout + r.stderr).includes(STORE_TOKEN), 'the token was printed');
+  assert.ok(!r.calls.includes(STORE_TOKEN), 'the token went on a command line');
+  assert.deepEqual(r.calls.trim().split('\n'), [
+    `secrets set CLAUDE_CODE_OAUTH_TOKEN --project ${SPIRALITY.dopplerProject} --config ${SPIRALITY.dopplerConfig} --silent`,
+    `secrets get CLAUDE_CODE_OAUTH_TOKEN --plain --project ${SPIRALITY.dopplerProject} --config ${SPIRALITY.dopplerConfig}`,
+  ]);
+});
+
+test('claude_token_to_doppler.sh exits non-zero, saying so and never printing the token, when the write or the read-back fails (SP-385)', () => {
+  for (const [how, said] of [
+    [{ set: 'fail' }, /^NOT stored: Doppler refused the write to /m],
+    [{ get: 'fail' }, /^NOT stored: the write was sent, but CLAUDE_CODE_OAUTH_TOKEN could not be read back from Doppler .* \(doppler exited 1\)/m],
+    [{ get: 'other' }, /^NOT stored: CLAUDE_CODE_OAUTH_TOKEN in Doppler .* reads back different from what was pasted\./m],
+  ]) {
+    const r = storeToken(`${STORE_TOKEN}\n`, how);
+    assert.equal(r.status, 1, JSON.stringify(how));
+    assert.match(r.stderr, said);
+    assert.doesNotMatch(r.stdout, /^Stored:/m);
+    assert.ok(!(r.stdout + r.stderr).includes(STORE_TOKEN), `the token was printed (${JSON.stringify(how)})`);
+  }
+  const empty = storeToken('\n');
+  assert.equal(empty.status, 2);
+  assert.match(empty.stderr, /^NOT stored: no token was pasted\./m);
+  assert.equal(empty.calls, '', 'doppler was called with nothing to store');
+  const spaced = storeToken('two words\n');
+  assert.equal(spaced.status, 1);
+  assert.match(spaced.stderr, /is not one token/);
+  assert.equal(spaced.calls, '');
+});
