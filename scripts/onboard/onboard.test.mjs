@@ -159,6 +159,10 @@ test('protectionDropped names the stricter settings the PUT switches off', () =>
 // --- The wizard, against a fake world ------------------------------------
 
 const PR = 'https://github.com/mentor24-maker/pressplay/pull/1';
+// SP-384: origin/main's commit, the setup branch's commit, and local main's before the pull.
+const ORIGIN_SHA = 'abc1234def';
+const SETUP_TIP = 'def5678abc';
+const MAIN_BEFORE = '0123456aaa';
 const DANE_ANSWERS = {
   'Project name': 'PressPlay',
   'GitHub repository': 'mentor24-maker/pressplay',
@@ -207,6 +211,10 @@ function makeWorld(t) {
     // The tracker home's origin, with a sign-in token in it as a real one can carry.
     homeOrigin: 'https://x-access-token:SECRET-TOKEN@github.com/mentor24-maker/spirality.git',
     clonedFrom: null, cloneOrigin: 'https://github.com/mentor24-maker/pressplay.git', cloneBranch: 'main', cloneDirty: '',
+    // SP-384: the lanes step leaves the checkout on the setup branch, a local
+    // branch at SETUP_TIP; `head` is the checkout's commit, origin/main ORIGIN_SHA.
+    // `remoteSetup` origin still has the setup branch; `switchRefused` git's refusal.
+    localSetup: false, remoteSetup: true, head: ORIGIN_SHA, switchRefused: null, pullFails: null, mergedFrom: SETUP_TIP,
     // SP-154: GitHub's repository, a real bare one here. Not empty unless a
     // test says so; `pushFails` refuses the start step's push, `readBack`
     // makes GitHub answer something else after it.
@@ -264,7 +272,22 @@ function makeWorld(t) {
       if (args[0] === 'fetch') return ok();
       if (args[0] === 'show') return w.merged ? ok(JSON.stringify(settings('9'))) : no('fatal: path does not exist', 128);
       if (args[0] === 'merge-base') return w.merged ? ok() : no();
-      if (args[0] === 'rev-parse') return ok('abc1234def');
+      if (args[0] === 'rev-parse' && args[1] === '--verify') return w.localSetup ? ok(SETUP_TIP) : no('', 1);
+      if (args[0] === 'rev-parse' && args[1] === 'HEAD') return ok(w.head);
+      if (args[0] === 'rev-parse') return ok(ORIGIN_SHA);
+      if (args[0] === 'checkout' && args.at(-1) === 'main') {
+        if (w.switchRefused) return no(w.switchRefused, 1);
+        w.cloneBranch = 'main';
+        w.head = MAIN_BEFORE;
+        return ok();
+      }
+      if (args[0] === 'pull') {
+        if (w.pullFails) return no(w.pullFails, 128);
+        w.head = ORIGIN_SHA;
+        return ok();
+      }
+      if (args[0] === 'ls-remote') return w.remoteSetup ? ok(`${SETUP_TIP}\trefs/heads/spirality-setup`) : no('', 2);
+      if (args[0] === 'branch' && args[1] === '-D' && args[2] === 'spirality-setup') { w.localSetup = false; return ok(); }
       if (args[0] === 'worktree' && args[1] === 'list') {
         const blocks = [`worktree ${checkout}\nHEAD abc\nbranch refs/heads/main`];
         if (w.setupWorktree) blocks.push(`worktree ${setupWorktreePath}\nHEAD def\nbranch refs/heads/spirality-setup`);
@@ -323,6 +346,11 @@ function makeWorld(t) {
         if (w.setupWorktree) return no(`fatal: 'spirality-setup' is already used by worktree at '${setupWorktreePath}'`, 128);
         w.ticket = 'PP-1';
         w.lanesLoaded = true;
+        // As the real one does: the checkout is left on the setup branch.
+        w.cloneBranch = 'spirality-setup';
+        w.localSetup = true;
+        w.head = SETUP_TIP;
+        if (w.dirtyAfterLanes) w.cloneDirty = w.dirtyAfterLanes;
         return ok();
       }
     }
@@ -348,6 +376,9 @@ function makeWorld(t) {
         const parents = realGit(['rev-list', '--parents', '-n', '1', 'main'], w.bare).out.split(' ').slice(1);
         return ok(JSON.stringify({ sha: sha.out, parents: parents.map((p) => ({ sha: p })) }));
       }
+      if (args[0] === 'pr' && args[1] === 'list' && args.includes('merged')) {
+        return ok(JSON.stringify(w.merged ? [{ url: PR, headRefOid: w.mergedFrom, mergeCommit: { oid: 'abc1234def' } }] : []));
+      }
       if (args[0] === 'pr' && args[1] === 'list') return ok(JSON.stringify(w.prOpen && !w.merged ? [{ url: PR }] : []));
       if (args[0] === 'pr' && args[1] === 'checks') return ok(JSON.stringify([{ name: 'verify', bucket: 'pass', state: 'SUCCESS' }]));
       if (args[0] === 'pr' && args[1] === 'view' && args.includes('body')) {
@@ -355,7 +386,7 @@ function makeWorld(t) {
       }
       if (args[0] === 'pr' && args[1] === 'view') {
         w.polls += 1;
-        if (!breaks('merge') && w.polls >= w.mergeAfterPolls) w.merged = true;
+        if (!breaks('merge') && w.polls >= w.mergeAfterPolls) { w.merged = true; if (!w.keepRemote) w.remoteSetup = false; }
         return ok(JSON.stringify({ state: w.merged ? 'MERGED' : 'OPEN', mergeCommit: w.merged ? { oid: 'abc1234def' } : null }));
       }
       if (args[0] === 'api' && args[1] === '-X') {
@@ -471,7 +502,7 @@ test('a project already set up (its settings on main, main protected) with an an
 });
 
 // A failure at each step, then a rerun that resumes there.
-const LATER = { look: 'onboard:look', clone: 'git clone', settings: 'onboard:settings -- write', copy: 'onboard:copy', lanes: 'onboard:lanes', protect: '-X PUT' };
+const LATER = { look: 'onboard:look', clone: 'git clone', settings: 'onboard:settings -- write', copy: 'onboard:copy', lanes: 'onboard:lanes', protect: '-X PUT', checkout: 'git checkout --quiet main' };
 for (const failing of ['look', 'clone', 'settings', 'copy', 'lanes', 'protect']) {
   test(`a failure at ${failing}: FAILED, nothing after it runs, and the rerun resumes there asking nothing again`, async (t) => {
     const { w, go, reset } = makeWorld(t);
@@ -493,6 +524,116 @@ for (const failing of ['look', 'clone', 'settings', 'copy', 'lanes', 'protect'])
     assert.ok(!new RegExp(`^${failing}\\s+already done`, 'm').test(out(w)), `${failing} runs again`);
   });
 }
+
+// --- SP-384: the checkout back on main before Done --------------------
+
+const checkoutLine = (w) => w.printed.find((l) => /^checkout\s/.test(l)) ?? '';
+
+test('after the merge, the checkout is put back on a clean main at origin\'s commit and read back before Done', async (t) => {
+  const { w, go, logFile, statePath } = makeWorld(t);
+  assert.equal(await go(), 0, out(w));
+  const protect = w.calls.findIndex((c) => c.includes('-X PUT'));
+  const sw = w.calls.indexOf('git checkout --quiet main');
+  const pull = w.calls.indexOf('git pull --quiet --ff-only origin main');
+  assert.ok(protect >= 0 && sw > protect && pull > sw, 'switched, then pulled, after protect');
+  for (const readBack of ['git rev-parse --abbrev-ref HEAD', 'git status --porcelain', 'git rev-parse HEAD', 'git rev-parse origin/main']) {
+    assert.ok(w.calls.slice(pull + 1).includes(readBack), `read back with ${readBack}`);
+  }
+  assert.equal(w.cloneBranch, 'main');
+  assert.equal(w.head, ORIGIN_SHA);
+  assert.match(checkoutLine(w), /put back on main from spirality-setup, read back clean at origin's abc1234/);
+  // The squashed setup branch goes, on proof: no remote branch, and a merged pull request from its commit.
+  assert.ok(w.calls.includes('git branch -D spirality-setup'));
+  assert.equal(w.localSetup, false);
+  assert.match(checkoutLine(w), /local spirality-setup branch deleted/);
+  const done = w.printed.findIndex((l) => l.startsWith('Done:'));
+  assert.ok(done > w.printed.indexOf(checkoutLine(w)), 'Done only after the checkout reads back on main');
+  assert.match(readFileSync(logFile, 'utf8'), /\| checkout \| done \| .*put back on main/);
+  assert.equal(readState(statePath).steps.find((s) => s.step === 'checkout').outcome, 'done');
+});
+
+test('a dirty checkout stops the setup with FAILED naming why, nothing switched, and the state file records it', async (t) => {
+  const { w, go, reset, statePath } = makeWorld(t);
+  w.dirtyAfterLanes = ' M notes.txt';
+  assert.equal(await go(), 1, out(w));
+  assert.match(out(w), /^FAILED: checkout: .* is on spirality-setup with unsaved changes \(M notes\.txt\), so it was not switched to main/m);
+  assert.ok(!out(w).includes('Done:'), 'no success line over a failed step');
+  assert.ok(!w.calls.some((c) => c.startsWith('git checkout') || c.startsWith('git pull') || c.startsWith('git branch -D')), 'nothing switched, pulled or deleted');
+  const state = readState(statePath);
+  const entry = state.steps.find((s) => s.step === 'checkout');
+  assert.equal(entry.outcome, 'failed');
+  assert.match(entry.why, /unsaved changes/);
+  assert.equal(state.stop.step, 'checkout');
+  assert.equal(state.finished, false);
+  // Once the changes are put aside, the rerun finishes the step.
+  w.cloneDirty = '';
+  reset();
+  assert.equal(await go(), 0, out(w));
+  assert.match(checkoutLine(w), /put back on main/);
+});
+
+test('a switch git refuses, or a pull that will not fast-forward, fails the step with git\'s reason', async (t) => {
+  for (const [what, set, seen] of [
+    ['switch', (w) => { w.switchRefused = 'error: Your local changes to the following files would be overwritten by checkout'; }, /git would not switch .* from spirality-setup to main: error: Your local changes/],
+    ['pull', (w) => { w.pullFails = 'fatal: Not possible to fast-forward, aborting.'; }, /git pull --ff-only in .* failed: fatal: Not possible to fast-forward/],
+  ]) {
+    const { w, go } = makeWorld(t);
+    set(w);
+    assert.equal(await go(), 1, `${what}: ${out(w)}`);
+    assert.match(out(w), new RegExp(`^FAILED: checkout: ${seen.source}`, 'm'), what);
+    assert.ok(!out(w).includes('Done:'), what);
+  }
+});
+
+test('a checkout that does not read back at origin\'s commit after the pull fails, never Done', async (t) => {
+  const { w, go, run } = makeWorld(t);
+  // A pull that says it worked but leaves main behind origin.
+  const behind = (cmd, args, o) => {
+    const r = run(cmd, args, o);
+    if (cmd === 'git' && args[0] === 'pull') w.head = MAIN_BEFORE;
+    return r;
+  };
+  assert.equal(await go({ run: behind }), 1, out(w));
+  assert.match(out(w), /^FAILED: checkout: .* reads back on main at 0123456, not a clean main at origin's abc1234/m);
+  assert.ok(!out(w).includes('Done:'));
+});
+
+test('a checkout on a branch the setup did not leave there is not switched: FAILED, left as it is', async (t) => {
+  const { w, go, reset } = makeWorld(t);
+  assert.equal(await go(), 0, out(w));
+  w.cloneBranch = 'my-work';
+  w.head = MAIN_BEFORE;
+  reset();
+  assert.equal(await go(), 1, out(w));
+  assert.match(out(w), /^FAILED: checkout: .* is on my-work, not main or spirality-setup, so it was left as it is/m);
+  assert.ok(!w.calls.some((c) => c.startsWith('git checkout') || c.startsWith('git pull')));
+  assert.equal(w.cloneBranch, 'my-work');
+});
+
+test('a rerun on a clean, current main skips the step: nothing switched, pulled or deleted', async (t) => {
+  const { w, go, reset } = makeWorld(t);
+  assert.equal(await go(), 0, out(w));
+  reset();
+  assert.equal(await go(), 0, out(w));
+  assert.match(checkoutLine(w), /^checkout\s+already done \(.* is on a clean main at origin's abc1234\)/);
+  assert.ok(!w.calls.some((c) => c.startsWith('git checkout') || c.startsWith('git pull') || c.startsWith('git branch -D')));
+});
+
+test('the local setup branch stays, with a note saying why, without the proof it was merged', async (t) => {
+  for (const [what, set, why] of [
+    ['origin still has it', (w) => { w.keepRemote = true; }, /origin still has spirality-setup/],
+    ['no merged pull request from its commit', (w) => { w.mergedFrom = 'fff0000aaa'; }, /no merged pull request from spirality-setup was made from its commit def5678/],
+  ]) {
+    const { w, go, logFile } = makeWorld(t);
+    set(w);
+    assert.equal(await go(), 0, `${what}: ${out(w)}`);
+    assert.ok(!w.calls.includes('git branch -D spirality-setup'), what);
+    assert.equal(w.localSetup, true, what);
+    assert.equal(w.cloneBranch, 'main', `${what}: the checkout is still put back on main`);
+    assert.ok(w.printed.some((l) => /^checkout\s/.test(l) && why.test(l) && /was left in/.test(l)), what);
+    assert.match(readFileSync(logFile, 'utf8'), /\| checkout \| note \| the local spirality-setup branch was left/, what);
+  }
+});
 
 test('a failure at answers: an answer that does not check out is taken back out, and the rerun asks only that one', async (t) => {
   const { w, go, reset, answersFile } = makeWorld(t);
@@ -854,7 +995,7 @@ test('--no-prompt: answers filled in, the rerun stops for the paste block, then 
   assert.equal(state.stop.commands[1], 'doppler projects create pressplay');
   assert.match(state.stop.commands[2], /^TRACKER_DB=.* npm run tracker:signins -- create --name PressPlay --prefix PP --config /);
   for (const line of state.stop.commands) assert.ok(out(w).includes(`  ${line}`), 'the same block is printed');
-  assert.deepEqual(outcomes(state), { answers: 'skip', look: 'done', start: 'skip', clone: 'done', settings: 'done', signins: 'stopped', bus: 'pending', copy: 'pending', lanes: 'pending', merge: 'pending', protect: 'pending' });
+  assert.deepEqual(outcomes(state), { answers: 'skip', look: 'done', start: 'skip', clone: 'done', settings: 'done', signins: 'stopped', bus: 'pending', copy: 'pending', lanes: 'pending', merge: 'pending', protect: 'pending', checkout: 'pending' });
 
   // Dane pastes the block. Stop 2: the merge, the setup ticket's link in the stop.
   w.signinsMade = true;
@@ -1251,7 +1392,7 @@ test('fromClickup: a lockless job (lock none) is in flight while launchd shows i
 });
 
 test('fromClickup: the ClickUp steps go before copy; only a checkout with its own installer and no settings file is an old loop', (t) => {
-  assert.deepEqual(withClickupSteps(STEPS), ['answers', 'look', 'start', 'clone', 'settings', 'signins', 'bus', 'setup-check', 'stop', 'snapshot', 'import', 'switch-check', 'copy', 'lanes', 'merge', 'protect']);
+  assert.deepEqual(withClickupSteps(STEPS), ['answers', 'look', 'start', 'clone', 'settings', 'signins', 'bus', 'setup-check', 'stop', 'snapshot', 'import', 'switch-check', 'copy', 'lanes', 'merge', 'protect', 'checkout']);
   assert.deepEqual(CLICKUP_RUN_STEPS, withClickupSteps(STEPS));
   const have = new Set(['/p/scripts/install_loop_runner.sh']);
   assert.equal(runsOldLoop('/p', (p) => have.has(p)), true);
