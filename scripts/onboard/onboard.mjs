@@ -68,9 +68,15 @@
  *   copy      SP-110's one pull request in the project's repository
  *             (`onboard:copy`), CI's verify green on it.
  *   lanes     SP-111 installs the project's lanes from the setup branch and
- *             files its setup ticket (`onboard:lanes`). First it removes
- *             onboard:copy's worktree, which still holds the setup branch
- *             (git checks a branch out in one place only), read back.
+ *             files its setup ticket (`onboard:lanes`). First (SP-387) the
+ *             project's Spirality release: one named is left as it is; with
+ *             none, the newest cut is named and read back, and with none ever
+ *             cut the step stops with one line naming `npm run release --
+ *             cut`, nothing installed. A release named on a rerun runs
+ *             `onboard:lanes` again (it wakes the relay and judges a pass
+ *             after the naming). Then it removes onboard:copy's worktree,
+ *             which still holds the setup branch (git checks a branch out in
+ *             one place only), read back.
  *   merge     STOP FOR DANE (a decision): his merge phrase on the setup
  *             ticket; the project's own relay merges. The wizard waits for the
  *             merge and reads it back on the project's main.
@@ -139,7 +145,9 @@ import { CONFIG_FILE, findConfigFile, loadProjectConfig, ProjectConfigError, wit
 import { AnswersError, answersFile, expandHome, loadAnswers, onboardDir, resolveAnswers, slugFromName } from '../../lib/onboardAnswers.mjs';
 import { machineUserPending } from '../../lib/onboardSettings.mjs';
 import { ciVerdict, SETUP_BRANCH } from '../../lib/onboardCopy.mjs';
-import { LANES, installerCommand, parseStatus } from '../../lib/onboardLanes.mjs';
+import { LANES, installerCommand, parseStatus, releasePlan } from '../../lib/onboardLanes.mjs';
+import { readReleaseTags, releaseRemote } from '../../lib/releases.mjs';
+import { namedFor, readRecord } from '../lib/releaseCheckout.mjs';
 import { normalRepo } from '../lib/repoCheck.mjs';
 import { ghApiFailure, planNote, planRefusesProtection } from './look.mjs';
 import { readEmptiness, starterFiles, starterMessage } from '../../lib/onboardStarter.mjs';
@@ -1064,12 +1072,40 @@ export async function onboard(opts, deps) {
       const jobs = parseStatus(s.out);
       return LANES.filter((l) => !jobs[l]?.installed || !jobs[l]?.loaded);
     };
+    // SP-387: the project's Spirality release, before its lanes are judged.
+    // A project with no copy of the loop runs only the release named for it,
+    // so with none its relay's first pass does not run and the lanes fail
+    // two steps later. Named here, read back; a project with one keeps it.
+    // Spirality's own door, from its folder: the release record is its.
+    const asSpawn = (r) => ({ status: r.code, stdout: r.out, stderr: r.err });
+    const releaseNamed = () => namedFor(readRecord((args) => asSpawn(npm('clickup', args))), slug);
+    const ensureRelease = () => {
+      const plan = releasePlan({
+        named: releaseNamed(),
+        tags: readReleaseTags({ git: (args) => asSpawn(run('git', args)), remote: releaseRemote() }),
+      }, slug);
+      if (plan.action === 'unknown') fail(step, plan.why);
+      if (plan.action === 'cut') fail(step, plan.why);
+      if (plan.action === 'own') return null;
+      if (plan.action === 'keep') { say(step, `${slug} runs Spirality's ${plan.release}; left as it is`); return null; }
+      const named = npm('clickup', ['release', 'name', '--project', slug, '--to', plan.to]);
+      if (named.code !== 0) fail(step, `naming ${plan.to} for ${slug} failed: ${last(named.err || named.out)}`);
+      const back = releaseNamed();
+      if (back.release !== plan.to) fail(step, `${slug}'s release read back as ${back.release ?? back.problem ?? 'none named'}, not ${plan.to}, after naming it`);
+      const line = `named Spirality's newest release, ${plan.to}, for ${slug} (it had none), read back with release list`;
+      say(step, line);
+      record(step, 'release', line);
+      return plan.to;
+    };
     let ticket = null;
     if (setup.on) skip(step, `the setup is merged: ${setup.why}`);
     else {
+      const newlyNamed = ensureRelease();
       ticket = linkedTicket();
       const notLoaded = ticket ? lanesLoaded() : LANES;
-      if (ticket && !notLoaded.length) skip(step, `${prUrl} links ${ticket}, and every lane is loaded`);
+      // A release named just now: the lanes step runs again, so the relay is
+      // woken and a pass after the naming is the one judged (onboard:lanes).
+      if (ticket && !notLoaded.length && !newlyNamed) skip(step, `${prUrl} links ${ticket}, and every lane is loaded`);
       else {
         // onboard:copy keeps its worktree on the setup branch; git lets a
         // branch be checked out in one place only, so it goes before lanes

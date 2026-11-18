@@ -37,6 +37,10 @@
  *            that the prefix is not another project's; the operator found
  *            by name.
  *   Doppler  whether the project's Doppler project and config exist.
+ *   Release  the Spirality release the project's lanes will run (SP-387):
+ *            `ready` when one is named for it, `will do` when none is but one
+ *            has been cut (the setup's lanes step names the newest), BLOCKED
+ *            when none has ever been cut (`npm run release -- cut`).
  *   Bus      where the pipeline watchdogs will post: the project's bus, or,
  *            with none, a plain line that they have nowhere to post.
  *   Check    the project's own check, run on a clean scratch clone of its
@@ -64,6 +68,8 @@ import { compareRepo, normalRepo, projectEditUrl } from '../lib/repoCheck.mjs';
 import { trackerTokenEnv } from '../tracker/apiTracker.mjs';
 import { seatsForConfig } from '../../tracker/signins.mjs';
 import { STARTER_CHECK, starterNode } from '../../lib/onboardStarter.mjs';
+import { CUT_A_RELEASE } from '../../lib/onboardLanes.mjs';
+import { readReleaseTags, releaseRemote } from '../../lib/releases.mjs';
 
 export const READY = 'ready';
 export const WILL_DO = 'will do';
@@ -465,6 +471,33 @@ export async function trackerRows({ get, apiUrl, pageUrl, answers, operatorName,
   return rows;
 }
 
+// --- The release -----------------------------------------------------------
+
+/**
+ * The Spirality release the project's lanes will run (SP-387). A project
+ * with no copy of the loop runs only the release named for it
+ * (docs/INTEGRATION.md); with none, its relay's first pass does not run and
+ * the setup failed at its lanes step (Cassidy, 2026-11-17). `releases` is
+ * the tracker's GET /releases (`{ status, json }` or `{ down }`), `tags`
+ * readReleaseTags() (`{ tags }`, newest first, or `{ problem }`), `hasToken`
+ * whether this look has a tracker sign-in.
+ */
+export function releaseRow({ releases, tags, slug, hasToken = true }) {
+  const item = `Release: the Spirality release ${slug}'s lanes run`;
+  if (!hasToken) return row(item, UNKNOWN, 'no tracker sign-in in this environment to read the release record');
+  if (!releases || releases.down || releases.status !== 200 || !Array.isArray(releases.json?.projects)) {
+    return row(item, UNKNOWN, `the tracker's release record could not be read (${releases?.down ? `it did not answer: ${releases.down}` : `it answered ${releases?.status ?? 'nothing'}`})`);
+  }
+  const ours = releases.json.projects.find((p) => p.slug === slug);
+  if (ours?.own) return row(item, READY, "it is Spirality's own project, whose lanes always run main");
+  if (ours?.release) return row(item, READY, `${ours.release} is named for it; the setup leaves it as it is`);
+  if (!tags || tags.problem) return row(item, UNKNOWN, `none is named for it, and the releases cut could not be read (${tags?.problem ?? 'no answer'})`);
+  if (!tags.tags.length) {
+    return row(item, BLOCKED, `none is named for it and no release has ever been cut, so its lanes would have nothing to run on: cut one with ${CUT_A_RELEASE}, then look again`);
+  }
+  return row(item, WILL_DO, `none is named for it yet; the setup's lanes step names the newest, ${tags.tags[0].name} today`);
+}
+
 // --- The bus ---------------------------------------------------------------
 
 /**
@@ -661,6 +694,18 @@ export async function look({ answers, homeConfig, runCheck = true, deps }) {
     const known = Array.isArray(projectList) && projectList.some((p) => p.slug === answers.dopplerProject || p.name === answers.dopplerProject);
     const configsRun = known ? run('doppler', ['configs', '--project', answers.dopplerProject, '--json', '--no-check-version']) : null;
     rows.push(...readDoppler(projectsRun, configsRun, { project: answers.dopplerProject, config: answers.dopplerConfig }));
+
+    // The release (SP-387): the record from the tracker, the tags from the
+    // remote of the tracker home's own checkout, never a local copy.
+    let releases = null;
+    if (deps.token) {
+      try { releases = await get('/releases'); } catch (err) { releases = { down: err.message || String(err) }; }
+    }
+    const homeDir = deps.homeRoot ?? process.cwd();
+    const tags = deps.token && releases?.status === 200
+      ? readReleaseTags({ git: (args) => run('git', ['-C', homeDir, ...args]), remote: releaseRemote(deps.env ?? process.env) })
+      : null;
+    rows.push(releaseRow({ releases, tags, slug: answers.projectSlug, hasToken: Boolean(deps.token) }));
     rows.push(busRow(answers));
   } finally {
     if (scratch) deps.removeScratch(scratch);
@@ -765,6 +810,7 @@ async function main(argv) {
       makeScratch: () => mkdtempSync(join(tmpdir(), `onboard-${answers.projectSlug}-`)),
       removeScratch: (dir) => rmSync(dir, { recursive: true, force: true }),
       nodeVersion: process.version,
+      homeRoot,
       samePath: samePathOnDisk,
       env: process.env,
       progress: (line) => console.error(`  ... ${line}`),
