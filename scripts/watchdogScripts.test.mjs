@@ -24,7 +24,9 @@ case "$*" in
     if [ -z "$STUB_TASKS" ]; then echo "tickets FAILED: stubbed outage" >&2; exit 1; fi
     /bin/cat "$STUB_TASKS" ;;
   *" bus-post "*)
-    if [ -n "$FAKE_POST_FAILS" ]; then echo "bus-post: the tracker is down (stub)" >&2; exit 1; fi
+    # Read the message first, as the real bus-post does: exiting with it unread
+    # races the writer into EPIPE on a slow runner (CI, 2026-11-18, PR #326).
+    if [ -n "$FAKE_POST_FAILS" ]; then /bin/cat >/dev/null; echo "bus-post: the tracker is down (stub)" >&2; exit 1; fi
     # The message comes on stdin (--body-file -) or in the file it names.
     body=-; prev=; for a in "$@"; do [ "$prev" = "--body-file" ] && body="$a"; prev="$a"; done
     echo "--- POST ---" >> "$STUB_POSTS"

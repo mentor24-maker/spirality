@@ -153,6 +153,36 @@ value, a billing screen, a browser login, or a decision only he can make.
 Each of those is an `ask`, saying which of the four it is. Anything else, you
 run yourself.
 
+**A real secret value goes in on the Doppler dashboard, never by a command
+(`DOCTRINE 4.1`, SP-394).** The Doppler command that sets or uploads a secret
+shows the value: with no value it echoes what he types and waits for a line
+holding only `.`, and with one it prints the value back, `--silent` or not.
+On 11/18 that line on UB-7 stored nothing, he replied "done", and the ticket
+went on with no keys. `ask` refuses a card whose `@@CONTEXT` or `@@NEEDED`
+carries it (exit 2). The card instead:
+
+- **Names each key, and says per key who makes the value.** "You make this
+  one up: any long random string; a password manager can make one", or "You
+  get this from <where>, under <which page>". Never leave him waiting for a
+  value nobody will give him.
+- **Links the dashboard page** for the project's `dopplerProject` and
+  `dopplerConfig` in `spirality.project.json`:
+  `https://dashboard.doppler.com/workplace/<workplace>/projects/<project>/configs/<config>`.
+  `<workplace>` is the one field
+  `doppler me --json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).workplace.slug))'`
+  prints (only that field, never the token preview).
+- **Says what happens after his "done":** the lane checks the names.
+
+**When the ticket comes back after his reply,** check before building:
+
+```bash
+doppler secrets --only-names --project <project> --config <config>
+```
+
+It prints names, never values. Every key the card named is there: build. Any
+is missing: build nothing; a fresh `ask` naming the missing keys, with the
+same dashboard link, and the ticket waits on him again.
+
 **SQL for Dane to run goes in the SQL handoff block (`DOCTRINE 6.5`).** Never
 paste the SQL and never list bare paths. One block per file, in the order they
 run, in `@@NEEDED` above the `Your move:` line; plain text, never in a code
