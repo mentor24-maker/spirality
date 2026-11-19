@@ -175,3 +175,36 @@ test('both runners source the helper before their pull', () => {
     assert.match(text, /back to main/, `${name} says what the step is for`);
   }
 });
+
+// SP-393 review: both runners used to guard step 0 on `git status --porcelain`
+// being empty, which counts untracked files, so the fixed helper was never
+// reached for an untracked-only checkout. Run each runner's real guard.
+function stepZeroGuard(name) {
+  const lines = readFileSync(join(HERE, '..', name), 'utf8').split('\n');
+  const call = lines.findIndex((l) => l.includes('MOVED="$(back_to_main_if_merged)"'));
+  assert.ok(call > 0, `${name} calls back_to_main_if_merged`);
+  const guard = lines.slice(0, call).reverse().find((l) => /^\s*if \[/.test(l));
+  const m = guard && guard.match(/^\s*if (.*); then\s*$/);
+  assert.ok(m, `${name} has an if-guard before the call`);
+  return m[1];
+}
+
+for (const name of ['loop_runner.sh', 'run_relay.sh']) {
+  test(`${name}'s step-0 guard reaches the helper on a gone branch with untracked files only, or a tracked change`, () => {
+    const guard = stepZeroGuard(name);
+    assert.doesNotMatch(guard, /git status/, `${name} leaves the tree check to the helper`);
+    const { origin, checkout } = scratch();
+    git(origin, 'branch', '-D', 'setup');
+    mkdirSync(join(checkout, '.claude', 'worktrees'), { recursive: true });
+    writeFileSync(join(checkout, '.claude', 'worktrees', 'x.txt'), 'x\n');
+    const passes = () => spawnSync('bash', ['-c', guard], { cwd: checkout, env: scratchGitEnv() }).status;
+    assert.equal(passes(), 0, 'untracked-only checkout reaches the helper');
+    writeFileSync(join(checkout, 'b.txt'), 'changed\n');
+    assert.equal(passes(), 0, 'a tracked change reaches the helper, which names it');
+    const r = run(checkout);
+    assert.equal(r.out, 'setup no longer exists on origin, but the tree has changes (b.txt) — staying on it');
+    git(checkout, 'checkout', '-q', '--', 'b.txt');
+    assert.equal(run(checkout).branch, 'main');
+    assert.equal(passes(), 1, 'a checkout on main skips step 0');
+  });
+}

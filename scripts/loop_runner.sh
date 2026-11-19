@@ -341,8 +341,10 @@ while true; do
 
   # 0. A checkout left on a branch that has merged and gone from origin (a new
   #    project's lanes run from its setup branch until it merges) goes
-  #    back to main, under the sync lock, so the pull below can run.
-  if [ "$(git rev-parse --abbrev-ref HEAD 2>/dev/null)" != "main" ] && [ -z "$(git status --porcelain)" ]; then
+  #    back to main, under the sync lock, so the pull below can run. No
+  #    dirty-tree check here: the helper decides, so untracked files alone do
+  #    not keep it on the branch and a tracked change is named (SP-393).
+  if [ "$(git rev-parse --abbrev-ref HEAD 2>/dev/null)" != "main" ]; then
     if take_sync_lock; then
       MOVED="$(back_to_main_if_merged)"
       [ -n "$MOVED" ] && echo "[loop-runner] $(date "+%H:%M:%S") $MOVED" >> "$LOG"

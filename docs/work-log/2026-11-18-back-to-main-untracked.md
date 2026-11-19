@@ -12,3 +12,9 @@ git does track does, since that is someone's work. When the step stays put on a
 branch that is gone, it writes one line saying why and naming the file. An
 untracked file that would be overwritten by moving still stops the move, and
 that is said too. Nothing is ever stashed or deleted.
+
+Review caught that the fix sat behind a second, identical check: both runners
+(the lanes' runner and the relay) only called the step at all when the folder
+had no untracked files, so PressPlay's case would never have reached it. Both
+runners now leave that judgement to the step, and a new test runs each
+runner's real check against a folder holding only untracked files.
