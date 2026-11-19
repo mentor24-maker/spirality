@@ -4,9 +4,10 @@
 #   loop_runner.sh <skill-name> [interval-seconds]
 #
 # A seed-sized copy of StarCaster's scripts/loop_runner.sh: the lock, the
-# pull-before-pass, the time limit and the honest END line are kept; the
-# queue-paced sleeping, heartbeat and usage-limit guard are left out until
-# Spirality has an incident that needs them.
+# pull-before-pass, the time limit and the honest END line are kept. A
+# project's own pause switch and its lane environment (`lanePauseCommand`,
+# `laneEnv` in its manifest, SP-395) are asked and exported here too; the
+# heartbeat and usage-limit guard are still left out (SP-396, SP-397).
 #
 # Each iteration is a FRESH headless Claude Code session started in the main
 # checkout (Spirality's own, or the project's that SPIRALITY_PROJECT names,
@@ -231,6 +232,26 @@ echo "$$" > "$LOCK/pid"
 # the next pass hand back a ticket a dead pass left in Building (SP-101).
 export LOOP_RUNNER_PID="$$"
 
+# The project's own lane environment (SP-395): the manifest's `laneEnv`, a few
+# plain NAME=value settings (never a secret; lib/projectConfig.mjs refuses a
+# name that reads like one, or one the runner, git or node already owns),
+# exported once, here, so every pass and the project's pause command below
+# see them. A project with none exports nothing and logs nothing. A copy of
+# this runner without scripts/lib/laneSettings.mjs runs on without either.
+LANE_SETTINGS="$REPO/scripts/lib/laneSettings.mjs"
+[ -f "$LANE_SETTINGS" ] || LANE_SETTINGS=""
+if [ -n "$LANE_SETTINGS" ]; then
+  LANE_ENV_FILE="$(mktemp "${TMPDIR:-/tmp}/$SLUG-lane-env.XXXXXX")"
+  node "$LANE_SETTINGS" env > "$LANE_ENV_FILE" 2>>"$LOG" || { echo "[loop-runner] could not read laneEnv from the project config (see $LOG). Stopping." | tee -a "$LOG" >&2; rm -f "$LANE_ENV_FILE"; rm -rf "$LOCK"; exit 1; }
+  LANE_ENV_NAMES=""
+  while IFS= read -r -d '' pair; do
+    export "$pair"
+    LANE_ENV_NAMES="$LANE_ENV_NAMES ${pair%%=*}"
+  done < "$LANE_ENV_FILE"
+  rm -f "$LANE_ENV_FILE"
+  [ -n "$LANE_ENV_NAMES" ] && echo "[loop-runner] $(date "+%H:%M:%S") the project's laneEnv is set for every pass:$LANE_ENV_NAMES" >> "$LOG"
+fi
+
 # The sync lock every lane takes around pull + npm ci (the only lock the lanes
 # share; each lane's own lock above is its alone). Wait up to 10 minutes
 # for another lane; a lock whose pid is gone is cleared, as above.
@@ -264,6 +285,58 @@ sleep_until_woken() {
     [ $((INTERVAL - slept)) -lt "$step" ] && step=$((INTERVAL - slept))
     sleep "$step"; slept=$((slept + step))
   done
+}
+
+# A pause, from either switch: its one line, the dated PAUSED line (SP-266:
+# the runner is alive and holding off on purpose, and the heartbeat,
+# lib/heartbeat.js, reads it as a beat, so a lane just unpaused is not called
+# quiet on the last pass from before the pause; never START or END, so no
+# reader counts it as a pass), the wake file cleared (a wake sent while paused
+# is answered by this check, not kept: kept, it would end every sleep at once
+# and ask again every few seconds), and the normal sleep.
+sleep_paused() {
+  echo "[loop-runner] $(date "+%H:%M:%S") $1" >> "$LOG"
+  echo "===== $(date "+%Y-%m-%d %H:%M:%S") PAUSED /$SKILL =====" >> "$LOG"
+  rm -f "$WAKE"
+  echo "[loop-runner] $(date "+%H:%M:%S") sleeping ${INTERVAL}s before the next /$SKILL (a wake ends it early)" >> "$LOG"
+  sleep_until_woken
+}
+
+# The project's own pause switch (SP-395): the manifest's `lanePauseCommand`,
+# the program then each argument, run with no shell in the project's checkout
+# under a time limit. Exit 0 means run. Any other exit, a command that cannot
+# start, one that runs past the limit, or a config that cannot be read means
+# paused (it fails safe, as StarCaster's own runner does): returns 1 with
+# PROJECT_PAUSE_WHY saying which. No command set: returns 0 at once, saying
+# nothing. Run in this shell, never in $( ), so PROJECT_PAUSE_WHY sticks.
+PAUSE_COMMAND_LIMIT="${LOOP_PAUSE_COMMAND_LIMIT_SECONDS:-120}"
+case "$PAUSE_COMMAND_LIMIT" in ""|*[!0-9]*|0) PAUSE_COMMAND_LIMIT=120 ;; esac
+project_pause_check() {
+  PROJECT_PAUSE_WHY=""
+  local list code arg out first cmd=()
+  [ -n "$LANE_SETTINGS" ] || return 0
+  list="$(mktemp "${TMPDIR:-/tmp}/$SLUG-pause-command.XXXXXX")"
+  node "$LANE_SETTINGS" pause-command > "$list" 2>>"$LOG"
+  code=$?
+  if [ "$code" -ne 0 ]; then
+    rm -f "$list"
+    PROJECT_PAUSE_WHY="could not read the project's lanePauseCommand from its config (exit $code; its errors are above), so /$SKILL is treated as PAUSED and not starting (it fails safe)"
+    return 1
+  fi
+  while IFS= read -r -d '' arg; do cmd+=("$arg"); done < "$list"
+  rm -f "$list"
+  [ "${#cmd[@]}" -eq 0 ] && return 0
+  # Polled every second, not the pass's 15, so a quick answer costs no wait.
+  out="$(RUN_WITH_TIME_LIMIT_POLL=1 "$REPO/scripts/run_with_time_limit.sh" "$PAUSE_COMMAND_LIMIT" -- "${cmd[@]}" 2>&1 < /dev/null)"
+  code=$?
+  [ "$code" -eq 0 ] && return 0
+  first="$(printf '%s\n' "$out" | grep -m1 '[^[:space:]]')"
+  case "$code" in
+    124) PROJECT_PAUSE_WHY="the project's pause command (${cmd[*]}) ran past ${PAUSE_COMMAND_LIMIT}s and was stopped, so /$SKILL is treated as PAUSED and not starting (it fails safe)" ;;
+    126|127) PROJECT_PAUSE_WHY="the project's pause command (${cmd[*]}) could not be started (exit $code${first:+: $first}), so /$SKILL is treated as PAUSED and not starting (it fails safe)" ;;
+    *) PROJECT_PAUSE_WHY="the project's pause command (${cmd[*]}) exited $code, so /$SKILL is PAUSED and not starting${first:+ — it said: $first}" ;;
+  esac
+  return 1
 }
 
 # The wake time Dane set for this lane on the tracker's Settings page
@@ -372,26 +445,22 @@ while true; do
     echo "[loop-runner] $(date "+%H:%M:%S") main checkout is not on a clean main — not pulling. Every pass runs stale code until it is put back on main." >> "$LOG"
   fi
 
-  # 2. Paused? (SP-237) The Settings page's switches, the whole pipeline and
-  #    this lane, asked here, between passes, so a pause never stops a pass
-  #    already running: it drains. Asked after the pull, so the check is the
-  #    newest code. ANY non-zero exit counts as paused, a check that could not
-  #    run included (it fails safe), and the line it printed says which.
+  # 2. Paused? First the project's own switch (SP-395, project_pause_check
+  #    above; nothing at all when its manifest names none), then the Settings
+  #    page's (SP-237), the whole pipeline and this lane. Both are asked here,
+  #    between passes, so a pause never stops a pass already running: it
+  #    drains. Asked after the pull, so the check is the newest code. ANY
+  #    non-zero exit counts as paused, a check that could not run included
+  #    (it fails safe), and the line logged says which.
+  if ! project_pause_check; then
+    sleep_paused "$PROJECT_PAUSE_WHY"
+    continue
+  fi
   PAUSE_LINE="$("$REPO/scripts/pause_check.sh" "$SKILL" 2>>"$LOG")"
   PAUSE_CODE=$?
   if [ "$PAUSE_CODE" -ne 0 ]; then
     [ -n "$PAUSE_LINE" ] || PAUSE_LINE="could not read the pipeline settings (the check exited $PAUSE_CODE and said nothing; its errors are above), so /$SKILL is treated as PAUSED and not starting (it fails safe)"
-    echo "[loop-runner] $(date "+%H:%M:%S") $PAUSE_LINE" >> "$LOG"
-    # A dated PAUSED line (SP-266): the runner is alive and holding off on
-    # purpose. The heartbeat (lib/heartbeat.js) reads it as a beat, so a lane
-    # just unpaused is not called quiet on the last pass from before the
-    # pause. Never START or END, so no reader counts it as a pass.
-    echo "===== $(date "+%Y-%m-%d %H:%M:%S") PAUSED /$SKILL =====" >> "$LOG"
-    # A wake sent while paused is answered by this check, not kept: kept, it
-    # would end every sleep at once and ask again every few seconds.
-    rm -f "$WAKE"
-    echo "[loop-runner] $(date "+%H:%M:%S") sleeping ${INTERVAL}s before the next /$SKILL (a wake ends it early)" >> "$LOG"
-    sleep_until_woken
+    sleep_paused "$PAUSE_LINE"
     continue
   fi
 

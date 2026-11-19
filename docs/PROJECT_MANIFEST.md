@@ -454,6 +454,54 @@ tracker project, so on a ClickUp project every post would be refused.
 - **Default**: `[]`
 - **Example**: `[{ "name": "broken-links", "command": "node scripts/broken_links.mjs", "everyMinutes": 60, "alarm": false }]` (Spirality has none)
 
+### `lanePauseCommand`
+
+The project's own pause switch for its lanes (SP-395), for a project that
+already has one of its own besides the Settings page's switches. A command,
+the program then each argument as its own string (no shell), run by
+`scripts/loop_runner.sh` in the project's checkout before every pass, just
+after the pull and just before the Settings page's pause check. It is given
+the project's `laneEnv`.
+
+Exit 0 means run. Any other exit means paused: so does a command that cannot
+start, one still running after 2 minutes (it is stopped), and a manifest that
+cannot be read at that moment, so a broken switch stops passes rather than
+letting them through. A paused lane logs one line naming the command, its exit
+and the first line it printed, then a dated `PAUSED` line (the heartbeat reads
+it as the lane alive), and sleeps its usual wake time. A pass already running
+is never stopped: the switch is asked between passes.
+
+- **Kind**: list of text, the program first, at least one; `null` is the same
+  as left out
+- **Required**: no
+- **Default**: none: only the Settings page's switches are asked
+- **Example**: `["npm", "run", "pipeline", "--", "check"]` (a project whose
+  own pause check exits 3 when paused; Spirality has none)
+
+### `laneEnv`
+
+Settings the project's lanes export for every pass (SP-395), and for
+`lanePauseCommand`: an object of variable name to plain text. Read once, when
+the lane's runner starts, so a change takes effect when the lane is next
+reloaded. The runner's log names the variables it set, never their values.
+
+This file is public, so nothing here is ever a secret: a name that reads like
+one (holding the word `TOKEN`, `SECRET`, `PASSWORD`, `PASSWD`, `KEY`, `AUTH`,
+`CREDENTIAL` or `CREDENTIALS` between underscores) is refused, and secrets
+come from Doppler. A name is capital letters, digits and underscores,
+starting with a capital. Names the runner, git, node or the shell already set
+are refused too: `PATH`, `HOME`, `USER`, `SHELL`, `TMPDIR`, `PWD`, `IFS`,
+`LANG`, and any starting `LOOP_`, `TRACKER_`, `SPIRALITY_`, `CLAUDE_`,
+`ANTHROPIC_`, `DOPPLER_`, `GIT_`, `GH_`, `NODE_`, `NPM_` or `RUN_WITH_`. A
+value is one line of text. A wrong entry is refused, naming it.
+
+- **Kind**: an object of name to text
+- **Required**: no
+- **Default**: `{}`
+- **Example**: `{ "EXAMPLE_CALLER": "scheduled" }` (a project whose own
+  scripts leave a shared reserve to the sessions a person is talking to when
+  they run in the background; Spirality has none)
+
 ## Old names that still load (SP-130)
 
 Until November 2026 two fields were called `productSlug` and
