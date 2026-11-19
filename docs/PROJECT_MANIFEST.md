@@ -53,6 +53,10 @@ What each version added:
   optional.
   - Added to version 2 later, both optional (SP-395, 2026-11-19):
     `lanePauseCommand` and `laneEnv`. A version 2 manifest needs no change.
+  - Added to version 2 later, optional (SP-396, 2026-11-19):
+    `usageLimitSleep`. A version 2 manifest needs no change.
+  - Added to version 2 later, optional (SP-397, 2026-11-19):
+    `laneHeartbeatCommand`. A version 2 manifest needs no change.
 
 ## What each entry below says
 
@@ -64,6 +68,7 @@ What each version added:
   - *list of text*: a JSON list of non-empty strings.
   - *address*: an `http://` or `https://` address with nothing after the
     host and port (no path, query or sign-in).
+  - *true or false*: the JSON word `true` or `false`, never in quotes.
 - **Required**: *yes* means the file is refused without it. *no* means it may
   be left out, and then has the default shown.
 - **Overridden by**: an environment variable (from Doppler) that, when set,
@@ -515,6 +520,71 @@ value is one line of text. A wrong entry is refused, naming it.
 - **Example**: `{ "EXAMPLE_CALLER": "scheduled" }` (a project whose own
   scripts leave a shared reserve to the sessions a person is talking to when
   they run in the background; Spirality has none)
+
+### `usageLimitSleep`
+
+Whether the project's lanes sleep through a Claude usage limit instead of
+retrying into it (SP-396, moved from StarCaster's runner, where a closed
+window at 2:05am on 2026-09-02 took three passes in a row). With it `true`,
+`scripts/loop_runner.sh`:
+
+- hands every pass that exits non-zero to `scripts/loop_runner_delay.mjs`,
+  which reads that pass's own lines for Claude's "hit your … limit · resets
+  <time>" message. A pass that exited 0 is never read this way, so a pass
+  that only writes about limits never backs the lane off;
+- on a limit, logs `usage limit — sleeping <n>s` and sleeps until the stated
+  reset plus two minutes (half an hour when no time can be read, never more
+  than 8 hours), longer than the lane's wake time if need be, and records the
+  limit in `<logDir>/<projectSlug>-standdown` for the project's other lanes;
+- before every pass, after the pause checks, asks `scripts/loop_policy.mjs
+  check`: while that stand-down holds, or inside a quiet window written in
+  `<logDir>/<projectSlug>-loops.policy`, it starts no pass and logs why,
+  asking again within 15 minutes.
+
+Both files are the project's own, like every file its lanes keep, so one
+project's limit never sleeps another project's lanes. Delete the stand-down
+file to lift it early. A guard that cannot run or answers nothing never stops
+the lane: that pass is counted as blocked and the lane sleeps its usual wake
+time. With it `false`, the runner does none of this.
+
+- **Kind**: true or false
+- **Required**: no
+- **Default**: `false`
+- **Example**: `true` (a project that moved from its own runner, which had
+  this guard; Spirality's own lanes leave it off for now)
+
+### `laneHeartbeatCommand`
+
+The project's own heartbeat (SP-397), for a project whose watchdog reads beats
+its own command records, as StarCaster's does. A command, the program then
+each argument as its own string (no shell), run by `scripts/loop_runner.sh` in
+the project's checkout once every turn of the loop, given the project's
+`laneEnv`. The runner adds `--role <skill>` (`loop-build`, `loop-review`, …)
+and, for anything but a pass that ran, one of these and a sentence saying why:
+
+- `--stood-down "<why>"`: the lane was paused (the project's own
+  `lanePauseCommand`, or the Settings page), a usage limit another lane
+  recorded or a quiet window held it (`usageLimitSleep`), or a usage limit
+  closed the pass;
+- `--blocked "<why>"`: the pass exited non-zero for any other reason, or no
+  Spirality release could be readied for it;
+- `--timed-out "<why>"`: the pass's time limit stopped it.
+
+A pass that ran, and a turn skipped because the queue was empty, get no flag:
+the lane is alive and did what there was. The beat runs under a 60-second
+limit and its output goes to the lane's log. A beat that fails, runs past the
+limit, or whose manifest cannot be read at that moment is one log line and is
+lost: it never changes the pass's exit, stops the runner or delays the next
+pass. Read afresh at every beat, so a change takes effect at the next one.
+Spirality's own heartbeat (`scripts/heartbeat.mjs`), which reads the lane
+logs, is separate and unchanged.
+
+- **Kind**: list of text, the program first, at least one; `null` is the same
+  as left out
+- **Required**: no
+- **Default**: none: no beat is run, and the runner logs nothing new
+- **Example**: `["npm", "run", "--silent", "heartbeat", "--", "--beat"]`
+  (StarCaster's heartbeat command; Spirality has none)
 
 ## Old names that still load (SP-130)
 
