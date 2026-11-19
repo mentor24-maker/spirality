@@ -6,8 +6,9 @@
 # A seed-sized copy of StarCaster's scripts/loop_runner.sh: the lock, the
 # pull-before-pass, the time limit and the honest END line are kept. A
 # project's own pause switch and its lane environment (`lanePauseCommand`,
-# `laneEnv` in its manifest, SP-395) are asked and handed to each pass too; the
-# heartbeat and usage-limit guard are still left out (SP-396, SP-397).
+# `laneEnv` in its manifest, SP-395) are asked and handed to each pass too, and
+# a project whose manifest turns on `usageLimitSleep` gets StarCaster's
+# usage-limit guard (SP-396, below); the heartbeat is still left out (SP-397).
 #
 # Each iteration is a FRESH headless Claude Code session started in the main
 # checkout (Spirality's own, or the project's that SPIRALITY_PROJECT names,
@@ -238,6 +239,38 @@ export LOOP_RUNNER_PID="$$"
 LANE_SETTINGS="$REPO/scripts/lib/laneSettings.mjs"
 [ -f "$LANE_SETTINGS" ] || LANE_SETTINGS=""
 
+# The usage-limit guard (SP-396), moved from StarCaster's runner, on only for
+# a project whose manifest says `"usageLimitSleep": true`. On, a pass that
+# exits non-zero is read by scripts/loop_runner_delay.mjs; one a Claude usage
+# limit closed sleeps the lane until the limit says it resets, and records the
+# limit in the project's stand-down file (scripts/loop_policy.mjs), which
+# every lane of the project asks before each pass. Read before every pass, so
+# a change takes effect at the next one. A config that cannot be read leaves
+# the guard off: a guard is never a reason a lane stops. Off, the runner does
+# exactly what it did before, and its log says nothing new. Both guard scripts
+# answer on stdout and never fail; an answer the runner cannot use counts the
+# pass as blocked and the lane sleeps its usual wake time. Run in this shell,
+# never in $( ), so USAGE_LIMIT_SLEEP sticks.
+USAGE_LIMIT_SLEEP=""
+read_usage_limit_sleep() {
+  local said was="$USAGE_LIMIT_SLEEP"
+  said="$(node "$REPO/scripts/project_config.mjs" usageLimitSleep 2>/dev/null)"
+  if [ "$said" = "true" ]; then USAGE_LIMIT_SLEEP=yes; else USAGE_LIMIT_SLEEP=""; fi
+  if [ "$USAGE_LIMIT_SLEEP" != "$was" ]; then
+    if [ -n "$USAGE_LIMIT_SLEEP" ]; then
+      echo "[loop-runner] $(date "+%H:%M:%S") usageLimitSleep is on: a pass a usage limit closes sleeps /$SKILL until the limit resets, and the project's other lanes are told" >> "$LOG"
+    else
+      echo "[loop-runner] $(date "+%H:%M:%S") usageLimitSleep is now off (or the config could not say): /$SKILL sleeps its usual wake time after every pass" >> "$LOG"
+    fi
+  fi
+}
+# What the guard made of the last pass: ran, stood-down, blocked or
+# timed-out, the seconds to sleep for a limit, and its sentence. The heartbeat
+# after each pass (SP-397) hands these on.
+PASS_KIND=ran
+GUARD_SECONDS=0
+GUARD_WHY=""
+
 # The sync lock every lane takes around pull + npm ci (the only lock the lanes
 # share; each lane's own lock above is its alone). Wait up to 10 minutes
 # for another lane; a lock whose pid is gone is cleared, as above.
@@ -260,15 +293,17 @@ take_sync_lock() {
 # (they are all the same file). The file is cleared as a pass starts, never
 # here, so a wake that lands just as the timer runs out is not left over to
 # start a second pass behind it.
+# $1, when given, is how long to sleep in place of the wake time (the
+# usage-limit guard's sleep, SP-396).
 sleep_until_woken() {
-  local slept=0 step
-  while [ "$slept" -lt "$INTERVAL" ]; do
+  local slept=0 step total="${1:-$INTERVAL}"
+  while [ "$slept" -lt "$total" ]; do
     if [ -e "$WAKE" ]; then
-      echo "[loop-runner] $(date "+%H:%M:%S") woken early after ${slept}s of ${INTERVAL}s (wake file $WAKE) — starting the next /$SKILL now" >> "$LOG"
+      echo "[loop-runner] $(date "+%H:%M:%S") woken early after ${slept}s of ${total}s (wake file $WAKE) — starting the next /$SKILL now" >> "$LOG"
       return 0
     fi
     step=$WAKE_POLL
-    [ $((INTERVAL - slept)) -lt "$step" ] && step=$((INTERVAL - slept))
+    [ $((total - slept)) -lt "$step" ] && step=$((total - slept))
     sleep "$step"; slept=$((slept + step))
   done
 }
@@ -498,6 +533,29 @@ while true; do
     sleep_paused "$PAUSE_LINE"
     continue
   fi
+  # 2b. A usage limit another lane of this project recorded, or a quiet
+  #     window (SP-396, only with usageLimitSleep on): `loop_policy.mjs check`
+  #     answers `run 0`, or `stand-down|quiet <seconds> <sentence>`, the
+  #     seconds capped at 15 minutes so a lifted stand-down is noticed. Held,
+  #     the lane writes a dated SKIP line (the heartbeat and the Pipeline
+  #     Status pod read it as the lane alive, never as a pass), clears the
+  #     wake file (answered by this check, as a pause does) and sleeps; any
+  #     other answer runs the pass, because the rule fails open.
+  read_usage_limit_sleep
+  if [ -n "$USAGE_LIMIT_SLEEP" ]; then
+    POLICY_SAID="$(node "$REPO/scripts/loop_policy.mjs" check --lane "$SLUG/$SKILL" --dir "$LOG_DIR" --slug "$SLUG" 2>>"$LOG" < /dev/null)"
+    read -r POLICY_ACTION POLICY_SECONDS POLICY_LINE <<< "$POLICY_SAID"
+    # Its sentence ends "— not starting a pass…"; the SKIP line says that already.
+    POLICY_LINE="${POLICY_LINE%% — not starting a pass*}"
+    case "$POLICY_SECONDS" in ""|*[!0-9]*) POLICY_SECONDS=0 ;; esac
+    if { [ "$POLICY_ACTION" = "stand-down" ] || [ "$POLICY_ACTION" = "quiet" ]; } && [ "$POLICY_SECONDS" -gt 0 ]; then
+      echo "===== $(date "+%Y-%m-%d %H:%M:%S") SKIP /$SKILL (${POLICY_LINE:-$POLICY_ACTION}; Claude not started) =====" >> "$LOG"
+      rm -f "$WAKE"
+      echo "[loop-runner] $(date "+%H:%M:%S") sleeping ${POLICY_SECONDS}s before asking again whether /$SKILL may start (a wake ends it early)" >> "$LOG"
+      sleep_until_woken "$POLICY_SECONDS"
+      continue
+    fi
+  fi
 
   # This pass reads the queue afresh (the work check below, then the pass), so
   # every wake sent before now is answered by it. A wake sent from here on is
@@ -611,6 +669,29 @@ while true; do
       >> "$LOG" 2>&1 || true
     echo "[loop-runner] the pass hit the ${LOOP_PASS_LIMIT_SECONDS:-7200}s time limit and was stopped; its ticket may still be in Building — the next pass or a person should hand it back." >> "$LOG"
   fi
+  # What the pass was, by the usage-limit guard (SP-396, with usageLimitSleep
+  # on): only a pass that exited non-zero is read, so a pass that merely
+  # writes about limits never backs the lane off, and it reads this pass's own
+  # output, never an older pass's. Run in the project's checkout, where the
+  # claim marker naming a stopped pass's ticket is. A limit is recorded for
+  # the project's other lanes. Never allowed to change CODE or stop the runner.
+  PASS_KIND=ran
+  GUARD_SECONDS=0
+  GUARD_WHY=""
+  if [ -n "$USAGE_LIMIT_SLEEP" ] && [ "$CODE" -ne 0 ]; then
+    GUARD_SAID="$(node "$REPO/scripts/loop_runner_delay.mjs" "$PASS_OUT" --exit "$CODE" --skill "$SKILL" --limit "${LOOP_PASS_LIMIT_SECONDS:-7200}" 2>>"$LOG" < /dev/null)"
+    read -r PASS_KIND GUARD_SECONDS GUARD_WHY <<< "$GUARD_SAID"
+    case "$PASS_KIND" in
+      ran|stood-down|blocked|timed-out) ;;
+      *) echo "[loop-runner] $(date "+%H:%M:%S") the usage-limit guard gave no answer the runner can use (${GUARD_SAID:-nothing}) — counting this pass as blocked and sleeping the usual wake time" >> "$LOG"
+         PASS_KIND=blocked; GUARD_SECONDS=0; GUARD_WHY="" ;;
+    esac
+    case "$GUARD_SECONDS" in ""|*[!0-9]*) GUARD_SECONDS=0 ;; esac
+    if [ "$PASS_KIND" = "stood-down" ] && [ "$GUARD_SECONDS" -gt 0 ]; then
+      node "$REPO/scripts/loop_policy.mjs" stand-down --lane "$SLUG/$SKILL" --dir "$LOG_DIR" --slug "$SLUG" \
+        --seconds "$GUARD_SECONDS" --reason "a usage limit closed a /$SKILL pass" >> "$LOG" 2>&1 < /dev/null || true
+    fi
+  fi
   # A pass that exited non-zero: one ALARM on the bus naming the lane and its
   # exit, at most once every 6 hours; a good pass clears that reminder
   # (SP-268). Under its own short time limit, and never allowed to change
@@ -646,6 +727,16 @@ while true; do
   fi
 
   read_wake_time
+  # A usage limit outranks the wake time (SP-396): the lane sleeps until the
+  # limit says it resets. A wake sent during the pass is cleared, since the
+  # closed window cannot answer it; one sent during the sleep ends it, and the
+  # stand-down check above then decides.
+  if [ "$PASS_KIND" = "stood-down" ] && [ "$GUARD_SECONDS" -gt 0 ]; then
+    rm -f "$WAKE"
+    echo "[loop-runner] $(date "+%H:%M:%S") usage limit — sleeping ${GUARD_SECONDS}s before the next /$SKILL, until the limit resets (in place of the ${INTERVAL}s wake time; a wake ends it early)" >> "$LOG"
+    sleep_until_woken "$GUARD_SECONDS"
+    continue
+  fi
   echo "[loop-runner] $(date "+%H:%M:%S") sleeping ${INTERVAL}s before the next /$SKILL (a wake ends it early)" >> "$LOG"
   sleep_until_woken
 done
