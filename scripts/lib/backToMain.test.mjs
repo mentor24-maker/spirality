@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -81,23 +81,60 @@ test('back on main, the checkout is at origin\'s main, not the stale one from be
   assert.equal(readFileSync(join(checkout, 'b.txt'), 'utf8'), 'two\n');
 });
 
-test('a branch gone from origin with a dirty tree is left alone, and the change is kept', () => {
+test('a branch gone from origin with a changed tracked file stays put, says so naming the file, and keeps the change', () => {
   const { origin, checkout } = scratch();
   git(origin, 'branch', '-D', 'setup');
   writeFileSync(join(checkout, 'b.txt'), 'somebody is working here\n');
   const r = run(checkout);
   assert.equal(r.status, 1);
-  assert.equal(r.out, '');
+  assert.equal(r.out, 'setup no longer exists on origin, but the tree has changes (b.txt) — staying on it');
   assert.equal(r.branch, 'setup');
   assert.equal(readFileSync(join(checkout, 'b.txt'), 'utf8'), 'somebody is working here\n');
 });
 
-test('an untracked file counts as a dirty tree', () => {
-  const { origin, checkout } = scratch();
+// SP-393: PressPlay's checkout sat on its merged setup branch for 13 days over
+// nothing but an untracked .claude/worktrees/ folder.
+test('a branch gone from origin with only an untracked folder goes back to main at origin\'s latest, and the folder is kept', () => {
+  const { dir, origin, checkout } = scratch();
+  const merger = join(dir, 'merger');
+  git(dir, 'clone', '-q', origin, merger);
+  git(merger, 'merge', '-q', '--ff-only', 'origin/setup');
+  git(merger, 'push', '-q', 'origin', 'main');
   git(origin, 'branch', '-D', 'setup');
+  mkdirSync(join(checkout, '.claude', 'worktrees', 'some-task'), { recursive: true });
+  writeFileSync(join(checkout, '.claude', 'worktrees', 'some-task', 'work.txt'), 'kept\n');
+  const r = run(checkout);
+  assert.equal(r.status, 0, r.err);
+  assert.equal(r.branch, 'main');
+  assert.equal(git(checkout, 'rev-parse', 'HEAD'), git(origin, 'rev-parse', 'main'));
+  assert.match(r.out, /^setup no longer exists on origin and the tree is clean — back to main$/);
+  assert.equal(readFileSync(join(checkout, '.claude', 'worktrees', 'some-task', 'work.txt'), 'utf8'), 'kept\n');
+});
+
+test('an untracked file that main tracks makes the checkout refuse: it stays put, says it failed, and the file is kept', () => {
+  const { origin, checkout } = scratch();
+  // The local main gains c.txt; the setup branch never had it.
+  git(checkout, 'checkout', '-q', 'main');
+  writeFileSync(join(checkout, 'c.txt'), 'main\'s copy\n');
+  git(checkout, 'add', 'c.txt');
+  git(checkout, 'commit', '-q', '-m', 'three');
+  git(checkout, 'checkout', '-q', 'setup');
+  writeFileSync(join(checkout, 'c.txt'), 'untracked here\n');
+  git(origin, 'branch', '-D', 'setup');
+  const r = run(checkout);
+  assert.equal(r.status, 1);
+  assert.equal(r.branch, 'setup');
+  assert.equal(r.out, 'setup no longer exists on origin, but checking out main FAILED — staying on setup');
+  assert.equal(readFileSync(join(checkout, 'c.txt'), 'utf8'), 'untracked here\n');
+});
+
+test('a branch still on origin with changes, tracked or untracked, is left alone, silently', () => {
+  const { checkout } = scratch();
+  writeFileSync(join(checkout, 'b.txt'), 'somebody is working here\n');
   writeFileSync(join(checkout, 'new.txt'), 'x\n');
   const r = run(checkout);
   assert.equal(r.status, 1);
+  assert.equal(r.out, '');
   assert.equal(r.branch, 'setup');
 });
 
@@ -138,3 +175,36 @@ test('both runners source the helper before their pull', () => {
     assert.match(text, /back to main/, `${name} says what the step is for`);
   }
 });
+
+// SP-393 review: both runners used to guard step 0 on `git status --porcelain`
+// being empty, which counts untracked files, so the fixed helper was never
+// reached for an untracked-only checkout. Run each runner's real guard.
+function stepZeroGuard(name) {
+  const lines = readFileSync(join(HERE, '..', name), 'utf8').split('\n');
+  const call = lines.findIndex((l) => l.includes('MOVED="$(back_to_main_if_merged)"'));
+  assert.ok(call > 0, `${name} calls back_to_main_if_merged`);
+  const guard = lines.slice(0, call).reverse().find((l) => /^\s*if \[/.test(l));
+  const m = guard && guard.match(/^\s*if (.*); then\s*$/);
+  assert.ok(m, `${name} has an if-guard before the call`);
+  return m[1];
+}
+
+for (const name of ['loop_runner.sh', 'run_relay.sh']) {
+  test(`${name}'s step-0 guard reaches the helper on a gone branch with untracked files only, or a tracked change`, () => {
+    const guard = stepZeroGuard(name);
+    assert.doesNotMatch(guard, /git status/, `${name} leaves the tree check to the helper`);
+    const { origin, checkout } = scratch();
+    git(origin, 'branch', '-D', 'setup');
+    mkdirSync(join(checkout, '.claude', 'worktrees'), { recursive: true });
+    writeFileSync(join(checkout, '.claude', 'worktrees', 'x.txt'), 'x\n');
+    const passes = () => spawnSync('bash', ['-c', guard], { cwd: checkout, env: scratchGitEnv() }).status;
+    assert.equal(passes(), 0, 'untracked-only checkout reaches the helper');
+    writeFileSync(join(checkout, 'b.txt'), 'changed\n');
+    assert.equal(passes(), 0, 'a tracked change reaches the helper, which names it');
+    const r = run(checkout);
+    assert.equal(r.out, 'setup no longer exists on origin, but the tree has changes (b.txt) — staying on it');
+    git(checkout, 'checkout', '-q', '--', 'b.txt');
+    assert.equal(run(checkout).branch, 'main');
+    assert.equal(passes(), 1, 'a checkout on main skips step 0');
+  });
+}

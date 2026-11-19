@@ -202,7 +202,9 @@ take_sync_lock() {
 }
 # A checkout left on a branch that has merged and gone from origin (a new
 # project's lanes run from its setup branch until it merges) goes back to main
-# first, under the same lock, so the pull below can run.
+# first, under the same lock, so the pull below can run. No dirty-tree check
+# before it: the helper decides, so untracked files alone do not keep it on the
+# branch and a tracked change is named (SP-393).
 # shellcheck source=lib/back_to_main.sh
 source "$REPO/scripts/lib/back_to_main.sh"
 # A pull that changes a file the tracker server loads restarts it, so it runs the new code (SP-150).
@@ -211,7 +213,7 @@ source "$REPO/scripts/lib/tracker_restart.sh"
 # Where main was before this pass synced: noted before the back-to-main step,
 # which can fast-forward main itself (SP-150).
 BEFORE="$(git rev-parse HEAD 2>/dev/null)"
-if [ "$(git rev-parse --abbrev-ref HEAD 2>/dev/null)" != "main" ] && [ -z "$(git status --porcelain)" ]; then
+if [ "$(git rev-parse --abbrev-ref HEAD 2>/dev/null)" != "main" ]; then
   if take_sync_lock; then
     MOVED="$(back_to_main_if_merged)"
     [ -n "$MOVED" ] && echo "[relay] $MOVED"
