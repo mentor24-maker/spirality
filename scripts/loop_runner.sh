@@ -8,7 +8,8 @@
 # project's own pause switch and its lane environment (`lanePauseCommand`,
 # `laneEnv` in its manifest, SP-395) are asked and handed to each pass too, and
 # a project whose manifest turns on `usageLimitSleep` gets StarCaster's
-# usage-limit guard (SP-396, below); the heartbeat is still left out (SP-397).
+# usage-limit guard (SP-396, below), and a project that names a
+# `laneHeartbeatCommand` gets one beat after every turn of the loop (SP-397).
 #
 # Each iteration is a FRESH headless Claude Code session started in the main
 # checkout (Spirality's own, or the project's that SPIRALITY_PROJECT names,
@@ -271,6 +272,50 @@ PASS_KIND=ran
 GUARD_SECONDS=0
 GUARD_WHY=""
 
+# The project's own heartbeat (SP-397): the manifest's `laneHeartbeatCommand`,
+# for a project whose watchdog reads beats its own command records (as
+# StarCaster's runner gives them: `npm run heartbeat -- --beat --role <skill>`).
+# Run once every turn of the loop, the pass's or the reason it did not run, in
+# the project's checkout with no shell, given the project's laneEnv and
+# `--role <skill>`, and for anything but a pass that ran, one of
+# `--stood-down`, `--blocked` or `--timed-out` and a sentence saying why, the
+# flags StarCaster's runner passes. Read afresh at every beat, so a change
+# takes effect at the next one. Under a short time limit, its output in the
+# log; a beat that fails, runs past the limit or cannot be read is one log
+# line and is lost, and never changes a pass's exit, the runner's or the next
+# pass. No command named: nothing is run and nothing is logged.
+# Spirality's own heartbeat (scripts/heartbeat.mjs) reads the lane logs and is
+# not this. $1 is the flag (empty for a pass that ran), $2 its sentence.
+HEARTBEAT_LIMIT="${LOOP_HEARTBEAT_LIMIT_SECONDS:-60}"
+case "$HEARTBEAT_LIMIT" in ""|*[!0-9]*|0) HEARTBEAT_LIMIT=60 ;; esac
+lane_heartbeat() {
+  local list code arg what cmd=() kind=()
+  [ -n "$LANE_SETTINGS" ] || return 0
+  list="$(mktemp "${TMPDIR:-/tmp}/$SLUG-heartbeat-command.XXXXXX")"
+  node "$LANE_SETTINGS" heartbeat-command > "$list" 2>>"$LOG"
+  code=$?
+  if [ "$code" -ne 0 ]; then
+    rm -f "$list"
+    echo "[loop-runner] $(date "+%H:%M:%S") could not read the project's laneHeartbeatCommand from its config (exit $code; its errors are above) — no heartbeat for this turn of /$SKILL" >> "$LOG"
+    return 0
+  fi
+  while IFS= read -r -d '' arg; do cmd+=("$arg"); done < "$list"
+  rm -f "$list"
+  [ "${#cmd[@]}" -eq 0 ] && return 0
+  [ -n "${1:-}" ] && kind=("$1" "${2:-}")
+  (cd "$PROJECT" && RUN_WITH_TIME_LIMIT_POLL=1 "$REPO/scripts/run_with_time_limit.sh" "$HEARTBEAT_LIMIT" -- \
+    env ${LANE_ENV_PAIRS[@]+"${LANE_ENV_PAIRS[@]}"} "${cmd[@]}" --role "$SKILL" ${kind[@]+"${kind[@]}"}) >> "$LOG" 2>&1 < /dev/null
+  code=$?
+  [ "$code" -eq 0 ] && return 0
+  case "$code" in
+    124) what="ran past ${HEARTBEAT_LIMIT}s and was stopped" ;;
+    126|127) what="could not be started (exit $code)" ;;
+    *) what="exited $code" ;;
+  esac
+  echo "[loop-runner] $(date "+%H:%M:%S") the project's heartbeat command (${cmd[*]}) $what — this turn's beat${1:+ ($1)} is lost; /$SKILL carries on" >> "$LOG"
+  return 0
+}
+
 # The sync lock every lane takes around pull + npm ci (the only lock the lanes
 # share; each lane's own lock above is its alone). Wait up to 10 minutes
 # for another lane; a lock whose pid is gone is cleared, as above.
@@ -314,10 +359,12 @@ sleep_until_woken() {
 # quiet on the last pass from before the pause; never START or END, so no
 # reader counts it as a pass), the wake file cleared (a wake sent while paused
 # is answered by this check, not kept: kept, it would end every sleep at once
-# and ask again every few seconds), and the normal sleep.
+# and ask again every few seconds), the project's stood-down beat (SP-397),
+# and the normal sleep.
 sleep_paused() {
   echo "[loop-runner] $(date "+%H:%M:%S") $1" >> "$LOG"
   echo "===== $(date "+%Y-%m-%d %H:%M:%S") PAUSED /$SKILL =====" >> "$LOG"
+  lane_heartbeat --stood-down "$1"
   rm -f "$WAKE"
   echo "[loop-runner] $(date "+%H:%M:%S") sleeping ${INTERVAL}s before the next /$SKILL (a wake ends it early)" >> "$LOG"
   sleep_until_woken
@@ -550,6 +597,7 @@ while true; do
     case "$POLICY_SECONDS" in ""|*[!0-9]*) POLICY_SECONDS=0 ;; esac
     if { [ "$POLICY_ACTION" = "stand-down" ] || [ "$POLICY_ACTION" = "quiet" ]; } && [ "$POLICY_SECONDS" -gt 0 ]; then
       echo "===== $(date "+%Y-%m-%d %H:%M:%S") SKIP /$SKILL (${POLICY_LINE:-$POLICY_ACTION}; Claude not started) =====" >> "$LOG"
+      lane_heartbeat --stood-down "${POLICY_LINE:-$POLICY_ACTION}"
       rm -f "$WAKE"
       echo "[loop-runner] $(date "+%H:%M:%S") sleeping ${POLICY_SECONDS}s before asking again whether /$SKILL may start (a wake ends it early)" >> "$LOG"
       sleep_until_woken "$POLICY_SECONDS"
@@ -581,6 +629,8 @@ while true; do
     WORK_CODE=$?
     if [ "$WORK_CODE" -eq 3 ]; then
       echo "===== $(date "+%Y-%m-%d %H:%M:%S") SKIP /$SKILL (${WORK_LINE:-no work}; Claude not started) =====" >> "$LOG"
+      # A lane that honestly found nothing to do is alive and done: a plain beat.
+      lane_heartbeat
       read_wake_time
       echo "[loop-runner] $(date "+%H:%M:%S") sleeping ${INTERVAL}s before the next /$SKILL (a wake ends it early)" >> "$LOG"
       sleep_until_woken
@@ -614,6 +664,7 @@ while true; do
     if [ -n "$WHY_NOT" ]; then
       RUN_DIR="$REPO"
       echo "===== $(date "+%Y-%m-%d %H:%M:%S") SKIP /$SKILL ($WHY_NOT; Claude not started) =====" >> "$LOG"
+      lane_heartbeat --blocked "$WHY_NOT"
       read_wake_time
       echo "[loop-runner] $(date "+%H:%M:%S") sleeping ${INTERVAL}s before the next /$SKILL (a wake ends it early)" >> "$LOG"
       sleep_until_woken
@@ -725,6 +776,27 @@ while true; do
       [ -n "$line" ] && echo "[loop-runner] $(date "+%H:%M:%S") release: $line" >> "$LOG"
     done < <(node "$REPO/scripts/lib/releaseCheckout.mjs" finish --root "$REPO" --pid "$$" 2>>"$LOG")
   fi
+
+  # The project's beat for this pass (SP-397), with the kind the usage-limit
+  # guard read. With the guard off it reads nothing, so a pass that exited
+  # non-zero is still told apart here by its exit alone: 124 is the time
+  # limit, anything else blocked. Only the beat sees that; the sleep below
+  # goes on PASS_KIND as before.
+  BEAT_KIND="$PASS_KIND"
+  if [ "$CODE" -ne 0 ] && [ "$BEAT_KIND" = "ran" ] && [ -z "$USAGE_LIMIT_SLEEP" ]; then
+    if [ "$CODE" -eq 124 ]; then BEAT_KIND=timed-out; else BEAT_KIND=blocked; fi
+  fi
+  case "$BEAT_KIND" in
+    stood-down)
+      if [ "$GUARD_SECONDS" -gt 0 ]; then
+        lane_heartbeat --stood-down "a usage limit closed this pass; the runner is sleeping ${GUARD_SECONDS}s until it resets"
+      else
+        lane_heartbeat --stood-down "${GUARD_WHY:-the pass stood down (exit $CODE); see $LOG}"
+      fi ;;
+    blocked) lane_heartbeat --blocked "${GUARD_WHY:-the pass exited $CODE; see $LOG for its report}" ;;
+    timed-out) lane_heartbeat --timed-out "${GUARD_WHY:-the pass ran the full ${LOOP_PASS_LIMIT_SECONDS:-7200}s time limit and was stopped; see $LOG}" ;;
+    *) lane_heartbeat ;;
+  esac
 
   read_wake_time
   # A usage limit outranks the wake time (SP-396): the lane sleeps until the
