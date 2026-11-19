@@ -24,6 +24,7 @@ function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 /** Files on a ticket are kept only by the tracker (docs/TRACKER_MVP.md, "Attachments"). */
 export const NO_ATTACHMENTS_ON_CLICKUP = 'Attachments are kept only in the tracker; this project\'s tickets are on ClickUp, where this door reads no files. Nothing was saved.';
 /** SP-349: which files each open pull request changes is kept only in the tracker. */
+export const NO_USAGE_ON_CLICKUP = 'What each Claude run spent is kept only in the tracker (the API Usage report); this project\'s tickets are on ClickUp, where none is kept.';
 export const NO_PR_FILES_ON_CLICKUP = 'Which files each open pull request changes is kept only in the tracker; this project\'s tickets are on ClickUp, where none is kept.';
 
 /** An answer made here, not by ClickUp: this door has no way to do what was asked. */
@@ -182,6 +183,9 @@ export function createClickupTracker({ token, apiBase, timeoutMs, log = console.
     // Moving a ticket between projects is the tracker's; ClickUp's lists are not projects.
     moveTicket: async () => unsupported('moving a ticket into another project is done only in the tracker; this project\'s tickets are on ClickUp.'),
     ticketRecord: async () => unsupported('moving a ticket into another project is done only in the tracker; this project\'s tickets are on ClickUp.'),
+    // The API usage report (SP-398) is the tracker's; ClickUp keeps none.
+    listUsage: async () => unsupported(NO_USAGE_ON_CLICKUP),
+    recordUsage: async () => unsupported(NO_USAGE_ON_CLICKUP),
     prFiles: async () => unsupported(NO_PR_FILES_ON_CLICKUP),
     recordPrFiles: async () => unsupported(NO_PR_FILES_ON_CLICKUP),
     forgetPrFiles: async () => unsupported(NO_PR_FILES_ON_CLICKUP),

@@ -1,0 +1,5 @@
+## 2026-11-19: SP-398, the API Usage report, fast-tracked
+
+1. > I need a report under Reporting for API usage. This will be a CRUD table that displays all the actions that required quota and how much was spent. Let's include columns for the model and the ticket it's associated with. Fast track this one.
+
+   Led to: [SP-398](http://mac-mini.local:4180/t/SP-398), "Add an API Usage report to Reporting that lists each Claude run's tokens, model and ticket", filed and built by this hand-run session: the `api_usage` table, `/projects/<slug>/usage` (list, add, change, remove, each read back), `npm run clickup -- usage-record` (a session's tokens per model from its transcript, with the ticket it claimed), and the report at `/reporting/usage`, linked from Reporting. Spend is counted in tokens, because transcripts carry no dollars. Its claim was held at first: SP-396 (PR #328) changes `scripts/loop_runner.sh`. So the runner hookup became [SP-399](http://mac-mini.local:4180/t/SP-399), "Record every lane pass's Claude usage on the API Usage report", which waits on SP-398 and SP-396.

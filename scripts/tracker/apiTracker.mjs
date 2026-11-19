@@ -386,6 +386,19 @@ export function createApiTracker({ token, baseUrl, project, listId, timeoutMs, l
     /** Forget pull request `number`'s files (it merged or closed); `{ forgotten }` says whether there was a record. */
     forgetPrFiles: (number) => call('DELETE', `/pr-files/${encodeURIComponent(project)}/${encodeURIComponent(String(number))}`),
 
+    /**
+     * The configured project's API usage rows (SP-398): `{ project, rows,
+     * byModel }`, newest first. Read-only.
+     */
+    async listUsage() {
+      const out = await call('GET', `/projects/${encodeURIComponent(project)}/usage`);
+      if (!out.res.ok) return out;
+      if (!Array.isArray(out.json?.rows)) return refused(502, 'the tracker answered the API usage without a list of rows.');
+      return out;
+    },
+    /** Record one API usage row (`{ at, action, model, ticket, input, output, cacheWrite, cacheRead, session }`); the answer is the row as stored, 409 when the session already has one for that model. */
+    recordUsage: (body) => call('POST', `/projects/${encodeURIComponent(project)}/usage`, body),
+
     /** The tracker has no spaces: its one "list" is the configured project. */
     listsInSpace: async () => ({ res: { ok: true, status: 200, headers: { get: () => null } }, json: { lists: [{ id: project, name: `${project} (tracker project)` }] }, text: '' }),
     foldersInSpace: async () => ({ res: { ok: true, status: 200, headers: { get: () => null } }, json: { folders: [] }, text: '' }),

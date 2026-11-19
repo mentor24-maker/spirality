@@ -130,6 +130,18 @@
  *    added, listed, changed (changeTopic) and deleted (removeTopic, which
  *    takes the topic off every ticket carrying it, each with a `topics`
  *    event and a version step); a deleted project's topics go with it.
+ *  - An API usage row is what one action that used the Claude
+ *    plan's quota spent on one model: the project, when, the action (a lane
+ *    pass such as `/loop-build`, or anything a person names), the model, the
+ *    ticket it worked on (or none), and four token counts (input, output,
+ *    cache write, cache read; whole numbers, 0 or more), in the `api_usage`
+ *    table. The ticket is kept as its id and not checked against the
+ *    tickets, so a ticket deleted or moved later never takes its spend with
+ *    it. A row made from a Claude session carries the session id; one
+ *    session records one row per model, never two (`usage-exists`), so
+ *    recording a pass again cannot count it twice. Rows are added, listed,
+ *    changed (changeUsage) and removed (removeUsage), each read back in the
+ *    same transaction; a deleted project's rows go with it.
  *  - A ticket carries any number of its own project's topics, and a topic
  *    any number of tickets, in the `ticket_topics` link table.
  *    They change through changeTicket's `topics` (the whole new list of
@@ -346,6 +358,23 @@ CREATE TABLE IF NOT EXISTS project_tags (
   created_by  INTEGER NOT NULL REFERENCES actors(id),
   created_at  TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS api_usage (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  project      TEXT NOT NULL REFERENCES projects(slug),
+  at           TEXT NOT NULL,
+  action       TEXT NOT NULL,
+  model        TEXT NOT NULL,
+  ticket       TEXT,
+  input        INTEGER NOT NULL,
+  output       INTEGER NOT NULL,
+  cache_write  INTEGER NOT NULL,
+  cache_read   INTEGER NOT NULL,
+  session      TEXT,
+  created_by   INTEGER NOT NULL REFERENCES actors(id),
+  created_at   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS api_usage_by_project ON api_usage (project, at);
+CREATE UNIQUE INDEX IF NOT EXISTS api_usage_by_session ON api_usage (project, session, model) WHERE session IS NOT NULL;
 CREATE TABLE IF NOT EXISTS roles (
   name        TEXT PRIMARY KEY,
   description TEXT NOT NULL,
@@ -838,6 +867,69 @@ function topicDescription(description) {
   return clean;
 }
 
+/** The token counts an API usage row carries, in the order the page shows them. */
+export const USAGE_COUNTS = Object.freeze(['input', 'output', 'cacheWrite', 'cacheRead']);
+/** The longest an API usage row's action, model, ticket and session may be, in characters. */
+const MAX_USAGE_TEXT = 200;
+
+/**
+ * An API usage row's fields as sent, cleaned, for addUsage and changeUsage.
+ * `partial` lets a field be left out (undefined) to keep it. Refused
+ * (`bad-usage`) with nothing written: a blank or too long action or model, a
+ * time that does not read as one, a ticket that is not text, a count that is
+ * not a whole number 0 or more.
+ */
+function usageFields(fields, { partial = false } = {}) {
+  const out = {};
+  const text = (key, label, { required }) => {
+    const v = fields[key];
+    if (v === undefined && partial) return;
+    if (v == null || v === '') {
+      if (required) throw new StoreError('bad-usage', `an API usage row needs ${label}; nothing was saved.`);
+      out[key] = null;
+      return;
+    }
+    if (typeof v !== 'string' || !v.trim()) throw new StoreError('bad-usage', `an API usage row's ${label} is text; nothing was saved.`);
+    if (v.trim().length > MAX_USAGE_TEXT) throw new StoreError('bad-usage', `an API usage row's ${label} is at most ${MAX_USAGE_TEXT} characters; nothing was saved.`);
+    out[key] = v.trim();
+  };
+  text('action', 'an action', { required: true });
+  text('model', 'a model', { required: true });
+  text('ticket', 'ticket', { required: false });
+  if (fields.at !== undefined || !partial) {
+    const when = Date.parse(fields.at);
+    if (typeof fields.at !== 'string' || Number.isNaN(when)) throw new StoreError('bad-usage', 'an API usage row needs a time it happened; nothing was saved.');
+    out.at = new Date(when).toISOString();
+  }
+  for (const key of USAGE_COUNTS) {
+    const v = fields[key];
+    if (v === undefined && partial) continue;
+    const n = v === undefined || v === null || v === '' ? 0 : v;
+    if (!Number.isSafeInteger(n) || n < 0) throw new StoreError('bad-usage', `an API usage row's ${key} is a whole number of tokens, 0 or more; nothing was saved.`);
+    out[key] = n;
+  }
+  return out;
+}
+
+/** An API usage row as listed: `total` is its four counts added up. */
+function usageFromRow(row) {
+  const counts = { input: num(row.input), output: num(row.output), cacheWrite: num(row.cache_write), cacheRead: num(row.cache_read) };
+  return {
+    id: num(row.id),
+    project: row.project,
+    at: row.at,
+    action: row.action,
+    model: row.model,
+    ticket: row.ticket ?? null,
+    ...counts,
+    total: counts.input + counts.output + counts.cacheWrite + counts.cacheRead,
+    session: row.session ?? null,
+    createdBy: num(row.created_by),
+    createdByName: row.created_by_name ?? null,
+    createdAt: row.created_at,
+  };
+}
+
 /** A topic as listed: `tickets` is how many tickets carry it. */
 function topicFromRow(row) {
   return {
@@ -1192,6 +1284,25 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
     const row = Number.isInteger(n) && n > 0 ? db.prepare('SELECT * FROM topics WHERE id = ?').get(n) : undefined;
     if (!row || row.project !== String(project)) throw new StoreError('unknown-topic', `project "${project}" has no topic ${id}; nothing was changed.`);
     return row;
+  }
+
+  /** An API usage row as listed, by id, or null. */
+  function usageRow(id) {
+    const row = db.prepare('SELECT u.*, ac.name AS created_by_name FROM api_usage u LEFT JOIN actors ac ON ac.id = u.created_by WHERE u.id = ?').get(id);
+    return row ? usageFromRow(row) : null;
+  }
+
+  /** `project`'s API usage row `id`, as listed; `unknown-usage` when the project has no such row. */
+  function projectUsageRow(project, id) {
+    const n = Number(id);
+    const row = Number.isInteger(n) && n > 0 ? usageRow(n) : null;
+    if (!row || row.project !== String(project)) throw new StoreError('unknown-usage', `project "${project}" has no API usage row ${id}; nothing was changed.`);
+    return row;
+  }
+
+  /** Whether a read-back API usage row holds every field `wanted` names. */
+  function usageMatches(back, wanted) {
+    return ['project', 'at', 'action', 'model', 'ticket', ...USAGE_COUNTS].every((key) => wanted[key] === undefined || back[key] === wanted[key]);
   }
 
   function ticketRow(id) {
@@ -1838,6 +1949,8 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
         db.prepare('DELETE FROM topics WHERE project = ?').run(slug);
         // And its saved tags, for the same reason.
         db.prepare('DELETE FROM project_tags WHERE project = ?').run(slug);
+        // And its API usage rows (the API Usage report): they are about this project only.
+        db.prepare('DELETE FROM api_usage WHERE project = ?').run(slug);
         const r = db.prepare('DELETE FROM projects WHERE slug = ?').run(slug);
         if (num(r.changes) !== 1 || this.getProject(slug)) {
           throw new StoreError('write-failed', `project "${slug}" was not deleted.`);
@@ -2917,6 +3030,78 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
         byTicket.get(r.ticket).push({ id: num(r.id), name: r.name });
       }
       return byTicket;
+    },
+
+    /**
+     * Record what one action spent (the API Usage report): `{ project, at, action, model,
+     * ticket, input, output, cacheWrite, cacheRead, session }` by `actor`
+     * (usageFields says what is refused). A session that already has a row
+     * for that model on the project is refused (`usage-exists`), so a pass
+     * recorded twice is counted once. Read back in the same transaction,
+     * else nothing is kept (`write-failed`). Answers the row as listed.
+     */
+    addUsage({ project, session = null, actor, ...fields }) {
+      const clean = usageFields(fields);
+      const sessionId = session == null || session === '' ? null : String(session).trim().slice(0, MAX_USAGE_TEXT);
+      return transaction(() => {
+        requireActor(actor, 'the actor');
+        const p = this.getProject(project);
+        if (!p) throw new StoreError('unknown-project', `no project "${project}".`);
+        if (sessionId && db.prepare('SELECT 1 FROM api_usage WHERE project = ? AND session = ? AND model = ?').get(p.slug, sessionId, clean.model)) {
+          throw new StoreError('usage-exists', `session ${sessionId} already has a row for ${clean.model} on ${p.slug}; nothing was saved.`);
+        }
+        const r = db.prepare(`INSERT INTO api_usage (project, at, action, model, ticket, input, output, cache_write, cache_read, session, created_by, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+          .run(p.slug, clean.at, clean.action, clean.model, clean.ticket, clean.input, clean.output, clean.cacheWrite, clean.cacheRead, sessionId, actor, now());
+        const back = usageRow(num(r.lastInsertRowid));
+        if (!back || !usageMatches(back, { project: p.slug, ...clean })) {
+          throw new StoreError('write-failed', 'the API usage row did not read back from the database.');
+        }
+        return back;
+      });
+    },
+
+    /**
+     * Change an API usage row of `project`: any of addUsage's fields, each
+     * left out to keep it, with the same refusals. A row that is not
+     * `project`'s, or no row at all, is refused (`unknown-usage`) and nothing
+     * changes. Read back in the same transaction, else nothing is kept
+     * (`write-failed`). Answers the row as listed.
+     */
+    changeUsage({ project, id, actor, ...fields }) {
+      const clean = usageFields(fields, { partial: true });
+      return transaction(() => {
+        requireActor(actor, 'the actor');
+        const row = projectUsageRow(project, id);
+        const wanted = { ...row, ...clean };
+        db.prepare(`UPDATE api_usage SET at = ?, action = ?, model = ?, ticket = ?, input = ?, output = ?, cache_write = ?, cache_read = ? WHERE id = ?`)
+          .run(wanted.at, wanted.action, wanted.model, wanted.ticket, wanted.input, wanted.output, wanted.cacheWrite, wanted.cacheRead, row.id);
+        const back = usageRow(row.id);
+        if (!back || !usageMatches(back, wanted)) throw new StoreError('write-failed', 'the API usage row did not read back as saved.');
+        return back;
+      });
+    },
+
+    /**
+     * Remove an API usage row of `project`, by `actor`. A row that is not
+     * `project`'s is refused (`unknown-usage`). Read back gone in the same
+     * transaction, else nothing is removed (`write-failed`). Answers the row
+     * as it was listed.
+     */
+    removeUsage({ project, id, actor }) {
+      return transaction(() => {
+        requireActor(actor, 'the actor');
+        const row = projectUsageRow(project, id);
+        const r = db.prepare('DELETE FROM api_usage WHERE id = ?').run(row.id);
+        if (num(r.changes) !== 1 || usageRow(row.id)) throw new StoreError('write-failed', 'the API usage row was not removed.');
+        return row;
+      });
+    },
+
+    /** A project's API usage rows, newest first, each with its maker's name. */
+    listUsage(project) {
+      return db.prepare(`SELECT u.*, ac.name AS created_by_name FROM api_usage u LEFT JOIN actors ac ON ac.id = u.created_by
+        WHERE u.project = ? ORDER BY u.at DESC, u.id DESC`).all(String(project)).map(usageFromRow);
     },
 
     /** A project's topics, newest first, each with its maker's name and how many tickets carry it. */

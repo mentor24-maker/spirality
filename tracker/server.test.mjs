@@ -4026,3 +4026,40 @@ test('/topics is the page itself', async () => {
     assert.match(await r.text(), /<nav class="site" hidden>/);
   } finally { await f.cleanup(); }
 });
+
+test('the API usage rows (SP-398): a loop records one, a session recorded twice is a 409, the list carries totals per model, and a person changes and removes one, each read back', async () => {
+  const f = await fixture();
+  try {
+    f.store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE' });
+    const row = { at: '2026-11-19T18:00:00Z', action: '/loop-build', model: 'claude-opus-5-5', ticket: 'AL-4', input: 10, output: 20, cacheWrite: 30, cacheRead: 40, session: 's1' };
+    const made = await f.call('POST', '/projects/alpha/usage', { body: row });
+    assert.equal(made.status, 201);
+    assert.equal(made.body.total, 100);
+    assert.equal((await f.call('POST', '/projects/alpha/usage', { body: row })).status, 409, 'the same session and model twice');
+    assert.equal((await f.call('POST', '/projects/alpha/usage', { token: f.humanToken, body: { at: '2026-11-19T19:00:00Z', action: 'Hand-run session', model: 'claude-opus-5-5', output: 5 } })).status, 201);
+    await f.call('POST', '/projects/alpha/usage', { body: { ...row, model: 'claude-haiku-5-5', session: 's1', input: 1, output: 0, cacheWrite: 0, cacheRead: 0 } });
+    const bad = await f.call('POST', '/projects/alpha/usage', { body: { ...row, session: 's2', project: 'beta' } });
+    assert.deepEqual([bad.status, bad.body.error], [400, 'bad-field'], 'a body may not name another project');
+    assert.equal((await f.call('POST', '/projects/alpha/usage', { body: { ...row, session: 's3', output: -1 } })).status, 400);
+    assert.equal((await f.call('POST', '/projects/alpha/usage', { body: [] })).status, 400);
+
+    const list = await f.call('GET', '/projects/alpha/usage', { token: f.humanToken });
+    assert.equal(list.status, 200);
+    assert.deepEqual(list.body.rows.map((r) => [r.action, r.model]), [['Hand-run session', 'claude-opus-5-5'], ['/loop-build', 'claude-haiku-5-5'], ['/loop-build', 'claude-opus-5-5']], 'newest first; at the same time, the later recorded first');
+    assert.deepEqual(list.body.byModel, [
+      { model: 'claude-opus-5-5', actions: 2, input: 10, output: 25, cacheWrite: 30, cacheRead: 40, total: 105 },
+      { model: 'claude-haiku-5-5', actions: 1, input: 1, output: 0, cacheWrite: 0, cacheRead: 0, total: 1 },
+    ]);
+    assert.deepEqual((await f.call('GET', '/projects/beta/usage')).body.rows, []);
+
+    const id = made.body.id;
+    const changed = await f.call('PATCH', `/projects/alpha/usage/${id}`, { token: f.humanToken, body: { ticket: 'AL-5', output: 200 } });
+    assert.deepEqual([changed.status, changed.body.ticket, changed.body.total], [200, 'AL-5', 280]);
+    assert.equal((await f.call('PATCH', `/projects/alpha/usage/${id}`, { token: f.humanToken, body: { session: 'x' } })).status, 400, 'a session is set only when recorded');
+    assert.equal((await f.call('PATCH', `/projects/beta/usage/${id}`, { token: f.humanToken, body: { output: 1 } })).status, 404, "another project's row");
+    assert.equal((await f.call('DELETE', `/projects/alpha/usage/${id}`, { token: f.humanToken })).status, 200);
+    assert.equal((await f.call('DELETE', `/projects/alpha/usage/${id}`, { token: f.humanToken })).status, 404, 'already gone');
+    assert.equal((await f.call('GET', '/projects/alpha/usage')).body.rows.length, 2);
+    assert.equal((await f.call('GET', '/projects/nope/usage')).status, 404);
+  } finally { await f.cleanup(); }
+});

@@ -97,6 +97,7 @@ import waitingOnOperator from '../lib/waitingOnOperator.js';
 import { ticketLine, findTicketId } from '../lib/clickupTicketLink.js';
 // Which files each open pull request changes (SP-349).
 import { parseRestFiles, sharedWith, refreshPlan, sharedLine, normalFiles } from '../lib/prFiles.js';
+import { readSession, SESSION_ID, transcriptsRoot } from './lib/usageRecord.mjs';
 // Holding a ticket back while open work changes the same files (SP-351).
 import { fileHolds, holdApplies, holdReason, holdNote, holdNoteDue, readLikelyFiles, withLikelyFilesLine } from '../lib/fileHold.js';
 // Telling in-flight tickets that main moved under them (task 86bctjffu).
@@ -260,6 +261,10 @@ npm run clickup -- <command> [flags]      (Loop Queue: list ${LOOP_QUEUE_LIST}, 
   pr-files [--task <id>] [--files a,b,...] [--json]   which files each open pull request changes (SP-349); with --files or
                                                   --task, the open pull requests sharing any of them. Exit 0 none shared /
                                                   3 some shared / 1 could not tell
+  usage-record --session <id> --action <name> [--ticket <id>] [--transcripts <folder>] [--dry-run]
+                                                  what one Claude session spent, per model, from its transcript, onto the API
+                                                  Usage report (SP-398), read back. Exit 0 recorded (or already was) / 2 no
+                                                  transcript or nothing spent / 1 a write failed
   pr-files-refresh [--dry-run]                    the relay's step: re-read each open pull request's files when its branch
                                                   moved, forget merged or closed ones. Exit 1 if any read or write failed
   verdict --task <id> --pass|--fail --if-status "In review" [--body-file <f|->] [--no-guard] [--fourth-round-anyway]
@@ -1892,6 +1897,49 @@ if (cmd === 'whoami') {
   else if (filesKept.notOpen || filesKept.otherRepo) console.log(`Task ${task}: ${filesKept.why}.`);
   else console.error(`Task ${task}: PR #${prNumber}'s changed files were NOT recorded: ${filesKept.why}. Nothing was stored for them; the relay's next pr-files-refresh tries again.`);
   reportLimits();
+
+} else if (cmd === 'usage-record') {
+  // SP-398: what one Claude session spent, onto the project's API Usage
+  // report (Reporting). Reads the session's transcript and its subagents'
+  // (scripts/lib/usageRecord.mjs), adds up the tokens per model, and records
+  // one row per model with the action, the ticket (--ticket, else the one
+  // the session claimed or named) and when the session started. A model the
+  // session already has a row for is left alone, so a second run never counts
+  // a pass twice. Every row is read back from the report's list.
+  const session = String(arg('session') ?? '');
+  const action = String(arg('action') ?? '').trim();
+  if (!SESSION_ID.test(session) || !action) {
+    console.error('usage-record: name the session (--session <id>, as claude --session-id took it) and what it was (--action, e.g. /loop-build).');
+    process.exit(2);
+  }
+  const root = arg('transcripts') ? resolvePath(String(arg('transcripts'))) : transcriptsRoot();
+  const read = readSession(root, session);
+  if (!read.files.length) { console.error(`usage-record: no transcript of session ${session} under ${root}; nothing recorded.`); process.exit(2); }
+  if (!read.models.length) { console.log(`usage-record: session ${session} spent no tokens (${read.files.length} transcript file(s)); nothing recorded.`); process.exit(2); }
+  const ticket = arg('ticket') ? String(arg('ticket')) : read.ticket;
+  const at = read.startedAt ?? new Date().toISOString();
+  const rows = read.models.map((m) => ({ at, action, model: m.model, ticket, input: m.input, output: m.output, cacheWrite: m.cacheWrite, cacheRead: m.cacheRead, session }));
+  const what = (r) => `${r.model}: ${r.input + r.output + r.cacheWrite + r.cacheRead} tokens (input ${r.input}, output ${r.output}, cache write ${r.cacheWrite}, cache read ${r.cacheRead})`;
+  if (flag('dry-run')) {
+    for (const r of rows) console.log(`usage-record (dry run, nothing written): ${action} on ${ticket ?? 'no ticket'}, ${what(r)}`);
+    process.exit(0);
+  }
+  let failed = 0;
+  for (const r of rows) {
+    const out = await tracker.recordUsage(r);
+    if (out.unsupported) { console.error(`usage-record: ${out.json?.err}`); process.exit(1); }
+    if (out.res.status === 409) console.log(`usage-record: ${action}, ${r.model} was already recorded for session ${session}; left as it was.`);
+    else if (!out.res.ok) { failed += 1; console.error(`usage-record FAILED: ${action}, ${r.model} was NOT recorded (HTTP ${out.res.status}: ${out.json?.message ?? out.json?.error ?? 'no answer'}).`); }
+  }
+  const back = await tracker.listUsage();
+  if (!back.res?.ok) { console.error(`usage-record FAILED: the report could not be read back (HTTP ${back.res?.status}); treat the rows as not recorded.`); process.exit(1); }
+  for (const r of rows) {
+    const found = back.json.rows.find((x) => x.session === session && x.model === r.model);
+    if (!found) { failed += 1; console.error(`usage-record FAILED: ${action}, ${r.model} is not on the report when read back.`); continue; }
+    console.log(`usage-record: ${found.action} on ${found.ticket ?? 'no ticket'}, ${what(found)} (row ${found.id}, read back).`);
+  }
+  reportLimits();
+  process.exit(failed ? 1 : 0);
 
 } else if (cmd === 'pr-files') {
   // Read-only (SP-349): which files each open pull request changes, as the

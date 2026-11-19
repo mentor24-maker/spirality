@@ -31,3 +31,4 @@ export * from './render-settings.mjs';
 export * from './render-projects.mjs';
 export * from './render-docs.mjs';
 export * from './render-topics.mjs';
+export * from './render-usage.mjs';
