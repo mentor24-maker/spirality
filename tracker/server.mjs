@@ -56,6 +56,13 @@
  * one is renamed or given a description by `PATCH
  * /projects/<slug>/tags/<name>` (`{ name, description }`) and deleted by
  * `DELETE /projects/<slug>/tags/<name>`, on every ticket carrying it.
+ * Its API usage rows (the Reporting page's API Usage report) are
+ * listed by `GET /projects/<slug>/usage` and recorded one at a time by
+ * `POST /projects/<slug>/usage` (`{ at, action, model, ticket, input,
+ * output, cacheWrite, cacheRead, session }`; a session already recorded for
+ * that model is a 409); one is changed by `PATCH /projects/<slug>/usage/<n>`
+ * and removed by `DELETE /projects/<slug>/usage/<n>`, behind the same
+ * project check.
  * A refused write writes nothing. A token never appears in an answer or a
  * log line: the log names the actor id, never the header.
  *
@@ -168,7 +175,7 @@ const NO_MATCH = 'That email and password do not match.';
 const MAX_BODY = 1024 * 1024;
 
 /** Store refusals that mean "no such thing", answered 404 rather than 400. */
-const NOT_FOUND_CODES = new Set(['unknown-ticket', 'unknown-project', 'unknown-invite', 'unknown-attachment', 'unknown-topic', 'unknown-tag']);
+const NOT_FOUND_CODES = new Set(['unknown-ticket', 'unknown-project', 'unknown-invite', 'unknown-attachment', 'unknown-topic', 'unknown-tag', 'unknown-usage']);
 /** setRole's refusals that are not a bad field: a non-admin is forbidden, and the last admin's change conflicts with the tracker's state. */
 const ROLE_REFUSALS = Object.freeze({ 'not-admin': 403, 'last-admin': 409 });
 /** addMember's and removeMember's refusals that are not a bad field. */
@@ -183,6 +190,31 @@ const INVITE_REFUSALS = Object.freeze({ 'duplicate-email': 409, 'duplicate-invit
 
 /** The fields a new ticket may carry. */
 const FILE_FIELDS = Object.freeze(['name', 'description', 'status', 'priority', 'tags', 'assignee', 'loopNote', 'kind', 'startedBy', 'outcome']);
+/** The fields an API usage row may carry; `session` only when it is recorded. */
+const USAGE_FIELDS = Object.freeze(['at', 'action', 'model', 'ticket', 'input', 'output', 'cacheWrite', 'cacheRead', 'session']);
+
+/** An API usage write's body: a JSON object, else refused (`bad-body`). */
+function usageBody(body) {
+  if (body == null || typeof body !== 'object' || Array.isArray(body)) throw new HttpError(400, 'bad-body', 'send the API usage row as a JSON object; nothing was saved.');
+  return body;
+}
+
+/**
+ * API usage rows' totals per model, most tokens first: `{ model,
+ * actions, input, output, cacheWrite, cacheRead, total }`, `actions` being
+ * how many rows name it.
+ */
+export function usageByModel(rows) {
+  const by = new Map();
+  for (const r of rows) {
+    const m = by.get(r.model) ?? { model: r.model, actions: 0, input: 0, output: 0, cacheWrite: 0, cacheRead: 0, total: 0 };
+    m.actions += 1;
+    for (const k of ['input', 'output', 'cacheWrite', 'cacheRead', 'total']) m[k] += r[k];
+    by.set(r.model, m);
+  }
+  return [...by.values()].sort((a, b) => b.total - a.total || a.model.localeCompare(b.model));
+}
+
 /** What the Add Task box's project check reads: the words about to be filed. */
 const CHECK_FIELDS = Object.freeze(['name', 'description']);
 /** What the title suggester reads: the description, and the title when one was typed. */
@@ -289,7 +321,7 @@ const PAGE_HEADERS = Object.freeze({
  */
 function pageFile(pathname, accept = '') {
   if (/^\/(?:projects(?:\/[^/]+)?|search|setup\/(?!fields$)[^/]+)$/.test(pathname)) return /\btext\/html\b/.test(accept) ? 'index.html' : null;
-  if (pathname === '/' || /^\/(?:tasks|board|list|console|new|settings|set-password|reporting|users|docs|topics)$/.test(pathname) || /^\/(?:t|board|list)\/[^/]+$/.test(pathname)) return 'index.html';
+  if (pathname === '/' || /^\/(?:tasks|board|list|console|new|settings|set-password|reporting|reporting\/usage|users|docs|topics)$/.test(pathname) || /^\/(?:t|board|list)\/[^/]+$/.test(pathname)) return 'index.html';
   if (/^\/projects\/[^/]+\/edit$/.test(pathname)) return 'index.html';
   // A page under the Docs page, such as one of the substrate's own
   // documentation files: the page itself draws what the rest names.
@@ -1316,6 +1348,50 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
       }
       log(`changed a tag on ${project.slug} on ${changed.tickets.length} ticket(s) actor=${me.id}`);
       return [200, changed];
+    }
+
+    // A project's API usage rows (the API Usage report): what each action that used the
+    // Claude plan's quota spent, per model. The list, newest first, with the
+    // totals per model worked out here so the page only draws them; one
+    // record (a lane pass, by `npm run clickup -- usage-record`, or a person
+    // on the page); one change; one removal. Each write is read back by the
+    // store before it answers.
+    if (parts.length === 3 && parts[0] === 'projects' && parts[2] === 'usage' && (method === 'GET' || method === 'POST')) {
+      const project = requireProject(parts[1], me);
+      if (method === 'GET') {
+        const rows = store.listUsage(project.slug);
+        return [200, { project: project.slug, projectName: project.name, rows, byModel: usageByModel(rows) }];
+      }
+      const body = usageBody(await readJson(req));
+      checkBody(body, me, USAGE_FIELDS);
+      let made;
+      try {
+        made = store.addUsage({ project: project.slug, ...body, actor: me.id });
+      } catch (err) {
+        if (err instanceof StoreError && err.code === 'usage-exists') throw new HttpError(409, err.code, err.message);
+        if (err instanceof StoreError && err.code === 'write-failed') throw new HttpError(500, err.code, err.message);
+        throw err;
+      }
+      log(`recorded usage ${made.id} on ${project.slug} (${made.model}, ${made.total} tokens) actor=${me.id}`);
+      return [201, made];
+    }
+    if (parts.length === 4 && parts[0] === 'projects' && parts[2] === 'usage' && (method === 'PATCH' || method === 'DELETE')) {
+      const project = requireProject(parts[1], me);
+      const body = method === 'PATCH' ? usageBody(await readJson(req)) : null;
+      if (body) checkBody(body, me, USAGE_FIELDS.filter((f) => f !== 'session'));
+      try {
+        if (method === 'DELETE') {
+          const gone = store.removeUsage({ project: project.slug, id: parts[3], actor: me.id });
+          log(`removed usage ${gone.id} on ${project.slug} actor=${me.id}`);
+          return [200, gone];
+        }
+        const changed = store.changeUsage({ project: project.slug, id: parts[3], ...body, actor: me.id });
+        log(`changed usage ${changed.id} on ${project.slug} actor=${me.id}`);
+        return [200, changed];
+      } catch (err) {
+        if (err instanceof StoreError && err.code === 'write-failed') throw new HttpError(500, err.code, err.message);
+        throw err;
+      }
     }
 
     // One topic changed (a new name and/or description) or deleted

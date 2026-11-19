@@ -122,6 +122,7 @@ export async function drawReporting(chosen, range = defaultReportRange(), kind =
   const open = r.open.map((s) => `<tr data-stage="${escapeHtml(s.status)}"><td class="status">${escapeHtml(s.status)}</td><td class="count">${Number(s.count)}</td></tr>`).join('');
   main.innerHTML = `
     <h1>Reporting</h1>
+    <p class="page-desc">Also here: <a href="/reporting/usage">API Usage</a>, the tokens each Claude run spent, by model and ticket.</p>
     <form class="report-scope">
       <label for="report-project">Project</label>
       <select id="report-project"><option value="">All projects</option>${projects.map((p) => `<option value="${escapeHtml(p.slug)}"${p.slug === r.project ? ' selected' : ''}>${escapeHtml(p.name)}</option>`).join('')}</select>

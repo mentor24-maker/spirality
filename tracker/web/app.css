@@ -404,6 +404,13 @@ table.conflict-list td.files { min-width: 18rem; }
 table.conflict-list td.settings { min-width: 9rem; }
 table.conflict-list td.files code { display: block; white-space: nowrap; }
 form.report-scope { display: flex; gap: var(--space-4); align-items: center; margin: 0.5rem 0 1rem; }
+/* The API Usage report (SP-398): its filters in one row, counts never wrapped, the All Models row bold, and token boxes wide enough for millions. */
+form.usage-filter { display: flex; flex-wrap: wrap; gap: var(--space-3) var(--space-4); align-items: center; margin: var(--space-3) 0; }
+table.usage-list td.count, table.usage-list td.at, table.usage-list td.ticket, table.usage-by-model td.count { white-space: nowrap; }
+table.usage-list td.action, table.usage-list td.model { overflow-wrap: anywhere; }
+table.usage-by-model tr.all td { font-weight: 700; }
+section.add-usage { margin-bottom: var(--space-6); }
+form.create-usage input[type="number"], form.edit-usage input[type="number"] { width: var(--field-w-short); }
 /* A stage's colour from the Settings page (app.mjs drawReporting sets the properties). */
 table.counts tr.coloured td { background: var(--stage-tint); color: var(--stage-text); }
 table.counts tr.coloured td.status { box-shadow: inset 4px 0 0 var(--stage-border); }

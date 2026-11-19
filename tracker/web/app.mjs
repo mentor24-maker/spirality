@@ -41,6 +41,7 @@ import { drawSearch, drawTasks, drawProject, sortableTables, sorted } from './pa
 import { drawConsole } from './page-console.mjs';
 import { drawTicket } from './page-ticket.mjs';
 import { drawReporting } from './page-reporting.mjs';
+import { drawUsage } from './page-usage.mjs';
 import { drawSettings } from './page-settings.mjs';
 import { drawUsers } from './page-users.mjs';
 import { docAt, commandAt, underDocs, drawDocs, drawCommand, drawDoc } from './page-docs.mjs';
@@ -681,7 +682,9 @@ export async function route({ place = null } = {}) {
     const consolePage = location.pathname === '/console';
     const isNew = location.pathname === '/new';
     const settings = location.pathname === '/settings';
-    const reporting = location.pathname === '/reporting';
+    // The API Usage report is under Reporting, so Reporting stays marked on it.
+    const usagePage = location.pathname === '/reporting/usage';
+    const reporting = location.pathname === '/reporting' || usagePage;
     const usersPage = location.pathname === '/users';
     const docsPage = location.pathname === '/docs';
     const topicsPage = location.pathname === '/topics';
@@ -704,6 +707,8 @@ export async function route({ place = null } = {}) {
       following = await drawSetup(decodeURIComponent(setupPage[1]));
     } else if (search) {
       await drawSearch(new URLSearchParams(location.search));
+    } else if (usagePage) {
+      await drawUsage();
     } else if (reporting) {
       await drawReporting();
     } else if (settings) {

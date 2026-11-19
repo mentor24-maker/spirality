@@ -20,6 +20,7 @@ export const PAGE_SCRIPTS = Object.freeze([
   'page-users.mjs',
   'page-docs.mjs',
   'page-topics.mjs',
+  'page-usage.mjs',
 ]);
 
 /**
@@ -53,6 +54,7 @@ export const RENDER_SCRIPTS = Object.freeze([
   'render-projects.mjs',
   'render-docs.mjs',
   'render-topics.mjs',
+  'render-usage.mjs',
 ]);
 
 /**

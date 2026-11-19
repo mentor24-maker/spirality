@@ -2441,3 +2441,82 @@ test('a database made before tickets had a class gains the three columns, empty,
     } finally { store.close(); }
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+// ── API usage rows (SP-398) ─────────────────────────────────────────────────
+
+test('an API usage row is recorded with its action, model, ticket and four token counts, listed newest first with its total, and never shows on another project', () => {
+  const { store, human, machine, cleanup } = fixture();
+  try {
+    store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE' });
+    assert.deepEqual(store.listUsage('alpha'), [], 'none yet');
+    const a = store.addUsage({ project: 'alpha', at: '2026-11-19T10:00:00-07:00', action: ' /loop-build ', model: 'claude-opus-5-5', ticket: 'AL-3',
+      input: 10, output: 200, cacheWrite: 3000, cacheRead: 40000, session: 'abc', actor: machine.id });
+    assert.deepEqual(a, {
+      id: a.id, project: 'alpha', at: '2026-11-19T17:00:00.000Z', action: '/loop-build', model: 'claude-opus-5-5', ticket: 'AL-3',
+      input: 10, output: 200, cacheWrite: 3000, cacheRead: 40000, total: 43210, session: 'abc',
+      createdBy: machine.id, createdByName: 'Loop', createdAt: a.createdAt,
+    });
+    const b = store.addUsage({ project: 'alpha', at: '2026-11-19T18:00:00Z', action: 'Hand-run session', model: 'claude-sonnet-5-5', actor: human.id });
+    assert.deepEqual([b.ticket, b.input, b.output, b.cacheWrite, b.cacheRead, b.total, b.session], [null, 0, 0, 0, 0, 0, null], 'ticket, counts and session may be left out');
+    store.addUsage({ project: 'beta', at: '2026-11-19T18:00:00Z', action: 'Theirs', model: 'm', actor: human.id });
+    assert.deepEqual(store.listUsage('alpha').map((u) => u.action), ['Hand-run session', '/loop-build'], 'newest first');
+    assert.deepEqual(store.listUsage('alpha')[1], a);
+    assert.deepEqual(store.listUsage('beta').map((u) => u.action), ['Theirs']);
+  } finally { cleanup(); }
+});
+
+test('one session records one row per model, so a pass recorded twice is counted once; another model of it, or the same session on another project, still goes in', () => {
+  const { store, machine, cleanup } = fixture();
+  try {
+    store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE' });
+    const row = { project: 'alpha', at: '2026-11-19T18:00:00Z', action: '/loop-review', model: 'claude-opus-5-5', session: 's1', input: 5, actor: machine.id };
+    store.addUsage(row);
+    assert.throws(() => store.addUsage(row), { code: 'usage-exists' });
+    store.addUsage({ ...row, model: 'claude-haiku-5-5' });
+    store.addUsage({ ...row, project: 'beta' });
+    assert.equal(store.listUsage('alpha').length, 2);
+  } finally { cleanup(); }
+});
+
+test('an API usage row with no action or model, no readable time, a bad count, on an unknown project or by an unknown actor is refused and nothing is kept', () => {
+  const { store, human, cleanup } = fixture();
+  try {
+    const add = (over) => () => store.addUsage({ project: 'alpha', at: '2026-11-19T18:00:00Z', action: 'x', model: 'm', actor: human.id, ...over });
+    for (const over of [{ action: '' }, { action: '  ' }, { model: undefined }, { model: 42 }, { at: 'soon' }, { at: undefined },
+      { input: -1 }, { output: 1.5 }, { cacheRead: '12' }, { action: 'x'.repeat(201) }, { ticket: 7 }]) {
+      assert.throws(add(over), { code: 'bad-usage' }, JSON.stringify(over));
+    }
+    assert.throws(add({ project: 'nope' }), { code: 'unknown-project' });
+    assert.throws(add({ actor: 999 }), { code: 'unknown-actor' });
+    assert.deepEqual(store.listUsage('alpha'), []);
+  } finally { cleanup(); }
+});
+
+test("an API usage row's fields change one by one and read back; one of another project, or none, is refused and nothing changes; a removed row is gone", () => {
+  const { store, human, cleanup } = fixture();
+  try {
+    store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE' });
+    const a = store.addUsage({ project: 'alpha', at: '2026-11-19T18:00:00Z', action: '/loop-build', model: 'claude-opus-5-5', ticket: 'AL-1', input: 1, output: 2, actor: human.id });
+    const changed = store.changeUsage({ project: 'alpha', id: a.id, ticket: 'AL-2', output: 20, actor: human.id });
+    assert.deepEqual([changed.action, changed.model, changed.ticket, changed.input, changed.output, changed.total], ['/loop-build', 'claude-opus-5-5', 'AL-2', 1, 20, 21], 'what was left out is kept');
+    assert.equal(store.changeUsage({ project: 'alpha', id: a.id, ticket: null, actor: human.id }).ticket, null, 'the ticket can be cleared');
+    assert.throws(() => store.changeUsage({ project: 'alpha', id: a.id, model: '', actor: human.id }), { code: 'bad-usage' });
+    assert.throws(() => store.changeUsage({ project: 'beta', id: a.id, output: 1, actor: human.id }), { code: 'unknown-usage' });
+    assert.throws(() => store.changeUsage({ project: 'alpha', id: 999, output: 1, actor: human.id }), { code: 'unknown-usage' });
+    assert.equal(store.listUsage('alpha')[0].output, 20);
+    assert.throws(() => store.removeUsage({ project: 'beta', id: a.id, actor: human.id }), { code: 'unknown-usage' });
+    assert.equal(store.removeUsage({ project: 'alpha', id: a.id, actor: human.id }).id, a.id);
+    assert.deepEqual(store.listUsage('alpha'), []);
+  } finally { cleanup(); }
+});
+
+test('a deleted project takes its API usage rows with it', () => {
+  const { store, human, cleanup } = fixture();
+  try {
+    store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE' });
+    store.addUsage({ project: 'beta', at: '2026-11-19T18:00:00Z', action: 'x', model: 'm', actor: human.id });
+    store.deleteProject('beta');
+    store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE' });
+    assert.deepEqual(store.listUsage('beta'), []);
+  } finally { cleanup(); }
+});
