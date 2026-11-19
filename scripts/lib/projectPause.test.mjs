@@ -239,7 +239,9 @@ test("laneEnv never reaches the runner's own shell: names like LOCK and LOG leav
 const steady = (log, s) => log
   .replaceAll(s.dir, '<dir>')
   .replace(/\d{4}-\d\d-\d\d \d\d:\d\d:\d\d/g, '<date>')
-  .replace(/\d\d:\d\d:\d\d/g, '<time>');
+  .replace(/\d\d:\d\d:\d\d/g, '<time>')
+  // Each pass's own Claude session id (SP-399) is new every run.
+  .replace(/Claude session [0-9a-f-]{36}/g, 'Claude session <id>');
 
 test('with neither field set the log is exactly what the runner wrote before SP-395', async () => {
   const before = scratch({ settings: false });

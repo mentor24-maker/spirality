@@ -272,6 +272,7 @@ test('with no laneHeartbeatCommand nothing is run and the log is the same as bef
     assert.deepEqual(beatsOf(s), []);
     const shape = log.split(s.repo).join('REPO')
       .replace(/\d{4}-\d\d-\d\d \d\d:\d\d:\d\d/g, 'DATE').replace(/\d\d:\d\d:\d\d/g, 'TIME')
+      .replace(/Claude session [0-9a-f-]{36}/g, 'Claude session ID')
       .split('\n').filter((l) => l && !/not pulling/.test(l));
     // Every line of the turn, exactly as the runner wrote it before SP-397.
     assert.deepEqual(shape, [
@@ -279,6 +280,8 @@ test('with no laneHeartbeatCommand nothing is run and the log is the same as bef
       "[loop-runner] TIME could not read /loop-build's model from the tracker (no answer) — this pass runs on Claude's default",
       '===== DATE START /loop-build (model: default) =====',
       "[loop-runner] TIME the project config in REPO names no Doppler project and config to read CLAUDE_CODE_OAUTH_TOKEN from; this pass uses this machine's own Claude sign-in",
+      // The pass's own session id, added by SP-399.
+      '[loop-runner] TIME Claude session ID',
       'pass report',
       "===== DATE END /loop-build (exit 0 — not a verdict; the pass's report above is) =====",
       "[loop-runner] TIME could not read /loop-build's wake time from the tracker (no answer) — keeping the last good value, 3600s",

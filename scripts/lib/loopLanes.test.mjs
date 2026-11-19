@@ -250,7 +250,9 @@ test('the runner sleeps the wake time set on the Settings page, read before ever
 // The stand-in claude prints the arguments it was given, so the log shows
 // the exact command each pass ran.
 const modelAnswer = (code, line) => () => `console.log(${JSON.stringify(line)}); process.exit(${code});\n`;
-const TODAYS_ARGS = 'ARGS: -p /loop-build --allowedTools Bash Edit Write Read Glob Grep Task TodoWrite WebFetch';
+// Every pass names its own Claude session (SP-399), a fresh lower-case id each time.
+const SESSION = '--session-id [0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
+const TODAYS_ARGS = new RegExp(`^ARGS: -p /loop-build ${SESSION} --allowedTools Bash Edit Write Read Glob Grep Task TodoWrite WebFetch$`);
 
 async function onePass(modelSetting) {
   let text = '';
@@ -264,14 +266,14 @@ async function onePass(modelSetting) {
 test('a model chosen for the lane goes on the claude line as --model <id>, and the START line names it (SP-239)', { timeout: 60_000 }, async () => {
   const text = await onePass(modelAnswer(0, 'claude-sonnet-5-5'));
   assert.match(text, /^===== \d{4}-\d\d-\d\d \d\d:\d\d:\d\d START \/loop-build \(model: claude-sonnet-5-5\) =====$/m);
-  assert.match(text, /^ARGS: -p \/loop-build --model claude-sonnet-5-5 --allowedTools Bash Edit Write Read Glob Grep Task TodoWrite WebFetch$/m);
+  assert.match(text, new RegExp(`^ARGS: -p /loop-build --model claude-sonnet-5-5 ${SESSION} --allowedTools Bash Edit Write Read Glob Grep Task TodoWrite WebFetch$`, 'm'));
   assert.doesNotMatch(text, /could not read \/loop-build's model/);
 });
 
 test('with Claude\'s default chosen, the claude line is today\'s, byte for byte, with no --model (SP-239)', { timeout: 60_000 }, async () => {
   const text = await onePass(modelAnswer(0, 'default'));
   assert.match(text, /START \/loop-build \(model: default\) =====/);
-  assert.equal(text.split('\n').filter((l) => l.startsWith('ARGS: ')).join('\n'), TODAYS_ARGS);
+  assert.match(text.split('\n').filter((l) => l.startsWith('ARGS: ')).join('\n'), TODAYS_ARGS);
   assert.doesNotMatch(text, /could not read \/loop-build's model/);
 });
 
@@ -287,7 +289,7 @@ test('settings that cannot be read, or a model not on the list, run the pass on 
     assert.match(text, said);
     assert.equal((text.match(/could not read \/loop-build's model/g) || []).length, 1, text);
     assert.match(text, /START \/loop-build \(model: default\) =====/);
-    assert.equal(text.split('\n').filter((l) => l.startsWith('ARGS: ')).join('\n'), TODAYS_ARGS);
+    assert.match(text.split('\n').filter((l) => l.startsWith('ARGS: ')).join('\n'), TODAYS_ARGS);
   }
 });
 
@@ -693,8 +695,8 @@ test('a runner for a named project starts its pass in the project\'s checkout an
     // Spirality's skills and hooks, by its plugin's name, so a project's own
     // copy of /loop-build cannot win over Spirality's (SP-272), from the
     // checkout of the release the tracker names for the project (SP-276).
-    assert.equal(text.match(/^ARGS: (.*)$/m)[1],
-      `-p /spirality:loop-build --plugin-dir ${pair.release}/plugin --allowedTools Bash Edit Write Read Glob Grep Task TodoWrite WebFetch`);
+    assert.equal(text.match(/^ARGS: (.*)$/m)[1].replace(/--session-id [0-9a-f-]{36} /, '--session-id <id> '),
+      `-p /spirality:loop-build --session-id <id> --plugin-dir ${pair.release}/plugin --allowedTools Bash Edit Write Read Glob Grep Task TodoWrite WebFetch`);
     assert.match(text, new RegExp(`release: this pass runs on release-1 \\(${pair.release}\\)`));
     assert.equal(pair.head(pair.projectDir), pair.heads[pair.projectDir].origin, 'the project\'s main was not pulled');
     assert.equal(pair.head(pair.spiralityDir), pair.heads[pair.spiralityDir].before, 'Spirality\'s own main was pulled by a project\'s lane');
