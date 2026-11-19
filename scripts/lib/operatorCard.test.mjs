@@ -99,6 +99,23 @@ test('the card `ask` posts needs the same one-line move as the shared module (SP
   assert.throws(() => mjs.buildCard(`@@ASKED\nx\n@@CONTEXT\n${sixty}\n@@NEEDED\nmove this ticket to Live yourself\nYour move: Reply — ok`), /move the ticket himself/);
 });
 
+test('the card `ask` posts refuses a Doppler write command, as the shared module does', async () => {
+  const shared = (await import('../../lib/operatorCard.js')).default;
+  const mjs = await import('./operatorCard.mjs');
+  const sixty = Array.from({ length: 60 }, (_, i) => `w${i}`).join(' ');
+  const ub7 = [
+    'doppler secrets set APP_PASSWORD --project upwork-blaster --config dev',
+    'openssl rand -base64 48 | doppler secrets set APP_SESSION_SECRET --project upwork-blaster --config dev --silent',
+  ];
+  assert.equal(mjs.dopplerWriteProblems, shared.dopplerWriteProblems, 'one rule, not a copy');
+  for (const line of ub7) {
+    const text = `@@ASKED\nx\n@@CONTEXT\n${sixty}\n@@NEEDED\nRun this on the Mini:\n${line}\nYour move: Reply — "done"`;
+    assert.throws(() => mjs.buildCard(text), /doppler secrets set[\s\S]*DOCTRINE 4\.1[\s\S]*Nothing was posted/, line);
+  }
+  const asked = `@@ASKED\nI ran ${ub7.join(' and then ')}\n@@CONTEXT\n${sixty}\n@@NEEDED\nOpen the Doppler dashboard and add the key.\nYour move: Reply — "done"`;
+  assert.doesNotThrow(() => mjs.buildCard(asked));
+});
+
 test('findBranchLinks flags branch links and passes main and commit links (SP-178)', () => {
   const gh = 'https://github.com/mentor24-maker/spirality';
   assert.deepEqual(findBranchLinks(`Read ${gh}/blob/setup-review/docs/onboarding/SETUP_REVIEW.md now`),
