@@ -677,11 +677,29 @@ while true; do
   LAST_REAL_PASS="$(date +%s)"
   read_model
   read_claude_token
+  # The pass's own Claude session id (SP-399), so what it spent can be read
+  # from its transcript afterwards and put on the API Usage report. Lower
+  # case, as Claude writes it; Node's when uuidgen is missing. With neither,
+  # the pass runs as before and only its usage goes unrecorded.
+  PASS_SESSION="$(uuidgen 2>/dev/null | tr 'A-Z' 'a-z')"
+  case "$PASS_SESSION" in
+    [0-9a-f]*-*-*-*-*) ;;
+    *) PASS_SESSION="$(node -e 'console.log(require("crypto").randomUUID())' 2>/dev/null < /dev/null)" ;;
+  esac
+  case "$PASS_SESSION" in
+    [0-9a-f]*-*-*-*-*) PASS_SESSION_ARGS=(--session-id "$PASS_SESSION") ;;
+    *) PASS_SESSION=""; PASS_SESSION_ARGS=() ;;
+  esac
   echo "" >> "$LOG"
   # The START line names the model, so the Settings page (tracker/pipeline.mjs)
   # and the time-in-status report can tell which pass ran on what.
   echo "===== $(date "+%Y-%m-%d %H:%M:%S") START /$SKILL (model: $PASS_MODEL) =====" >> "$LOG"
   echo "[loop-runner] $(date "+%H:%M:%S") $TOKEN_LINE" >> "$LOG"
+  if [ -n "$PASS_SESSION" ]; then
+    echo "[loop-runner] $(date "+%H:%M:%S") Claude session $PASS_SESSION" >> "$LOG"
+  else
+    echo "[loop-runner] $(date "+%H:%M:%S") no session id could be made (uuidgen and node both failed), so this pass's usage will not be recorded" >> "$LOG"
+  fi
   # The pass's output goes to the log as it happens AND to its own file, so
   # the sign-in check below reads this pass only, not an older one.
   # The time limit writes what the pass was running into this file when it has
@@ -697,7 +715,7 @@ while true; do
     RUN_WITH_TIME_LIMIT_SNAPSHOT="$SNAPSHOT" \
     "$RUN_DIR/scripts/run_with_time_limit.sh" "${LOOP_PASS_LIMIT_SECONDS:-7200}" -- \
       env ${LANE_ENV_PAIRS[@]+"${LANE_ENV_PAIRS[@]}"} "$CLAUDE_BIN" -p "$PROMPT" ${MODEL_ARGS[@]+"${MODEL_ARGS[@]}"} \
-      ${SESSION_ARGS[@]+"${SESSION_ARGS[@]}"} \
+      ${PASS_SESSION_ARGS[@]+"${PASS_SESSION_ARGS[@]}"} ${SESSION_ARGS[@]+"${SESSION_ARGS[@]}"} \
       --allowedTools Bash Edit Write Read Glob Grep Task TodoWrite WebFetch
   ) 2>&1 | tee "$PASS_OUT" >> "$LOG"
   CODE=${PIPESTATUS[0]}
@@ -719,6 +737,16 @@ while true; do
       --limit "${LOOP_PASS_LIMIT_SECONDS:-7200}" --snapshot "$SNAPSHOT") \
       >> "$LOG" 2>&1 || true
     echo "[loop-runner] the pass hit the ${LOOP_PASS_LIMIT_SECONDS:-7200}s time limit and was stopped; its ticket may still be in Building — the next pass or a person should hand it back." >> "$LOG"
+  fi
+  # What the pass spent, onto the project's API Usage report (SP-399): one
+  # row per model, with the lane and the ticket the pass claimed or named,
+  # read from the pass's own transcript (scripts/lib/usageRecord.mjs). From
+  # the Spirality folder the pass ran, as pass-timeout is. It never changes
+  # CODE, the runner's exit or the next pass: an older release's door
+  # answers "Unknown command", which is logged, and the runner carries on.
+  if [ -n "$PASS_SESSION" ]; then
+    (cd "$RUN_DIR" && npm run --silent clickup -- usage-record --session "$PASS_SESSION" --action "/$SKILL") \
+      >> "$LOG" 2>&1 < /dev/null || true
   fi
   # What the pass was, by the usage-limit guard (SP-396, with usageLimitSleep
   # on): only a pass that exited non-zero is read, so a pass that merely
