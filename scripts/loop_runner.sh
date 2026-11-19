@@ -6,7 +6,7 @@
 # A seed-sized copy of StarCaster's scripts/loop_runner.sh: the lock, the
 # pull-before-pass, the time limit and the honest END line are kept. A
 # project's own pause switch and its lane environment (`lanePauseCommand`,
-# `laneEnv` in its manifest, SP-395) are asked and exported here too; the
+# `laneEnv` in its manifest, SP-395) are asked and handed to each pass too; the
 # heartbeat and usage-limit guard are still left out (SP-396, SP-397).
 #
 # Each iteration is a FRESH headless Claude Code session started in the main
@@ -232,25 +232,11 @@ echo "$$" > "$LOCK/pid"
 # the next pass hand back a ticket a dead pass left in Building (SP-101).
 export LOOP_RUNNER_PID="$$"
 
-# The project's own lane environment (SP-395): the manifest's `laneEnv`, a few
-# plain NAME=value settings (never a secret; lib/projectConfig.mjs refuses a
-# name that reads like one, or one the runner, git or node already owns),
-# exported once, here, so every pass and the project's pause command below
-# see them. A project with none exports nothing and logs nothing. A copy of
-# this runner without scripts/lib/laneSettings.mjs runs on without either.
+# The project's own lane settings (SP-395): `lanePauseCommand` and `laneEnv`
+# in its manifest, read by scripts/lib/laneSettings.mjs. A copy of this runner
+# without that script runs on without either.
 LANE_SETTINGS="$REPO/scripts/lib/laneSettings.mjs"
 [ -f "$LANE_SETTINGS" ] || LANE_SETTINGS=""
-if [ -n "$LANE_SETTINGS" ]; then
-  LANE_ENV_FILE="$(mktemp "${TMPDIR:-/tmp}/$SLUG-lane-env.XXXXXX")"
-  node "$LANE_SETTINGS" env > "$LANE_ENV_FILE" 2>>"$LOG" || { echo "[loop-runner] could not read laneEnv from the project config (see $LOG). Stopping." | tee -a "$LOG" >&2; rm -f "$LANE_ENV_FILE"; rm -rf "$LOCK"; exit 1; }
-  LANE_ENV_NAMES=""
-  while IFS= read -r -d '' pair; do
-    export "$pair"
-    LANE_ENV_NAMES="$LANE_ENV_NAMES ${pair%%=*}"
-  done < "$LANE_ENV_FILE"
-  rm -f "$LANE_ENV_FILE"
-  [ -n "$LANE_ENV_NAMES" ] && echo "[loop-runner] $(date "+%H:%M:%S") the project's laneEnv is set for every pass:$LANE_ENV_NAMES" >> "$LOG"
-fi
 
 # The sync lock every lane takes around pull + npm ci (the only lock the lanes
 # share; each lane's own lock above is its alone). Wait up to 10 minutes
@@ -302,11 +288,54 @@ sleep_paused() {
   sleep_until_woken
 }
 
+# The project's lane environment (SP-395): the manifest's `laneEnv`, a few
+# plain NAME=value settings (never a secret; lib/projectConfig.mjs refuses a
+# name that reads like one, or one the runner, git, node or the shell owns).
+# Read before every pass into LANE_ENV_PAIRS and handed, with `env`, to the
+# pass and the project's pause command ONLY: never exported here, so a name
+# like LOCK or LOG can never replace the runner's own (the exit trap removes
+# $LOCK), and Spirality's own steps (the pull, npm ci, the Settings page's
+# checks) never see a project's variables. A config that cannot be read
+# returns 1 with LANE_ENV_WHY saying so: the lane is treated as paused (it
+# fails safe), the same as a pause command that cannot be read. The names are
+# logged when they first reach a pass or change, never their values. Run in
+# this shell, never in $( ), so the array sticks.
+LANE_ENV_PAIRS=()
+LANE_ENV_LOGGED=""
+load_lane_env() {
+  LANE_ENV_WHY=""
+  LANE_ENV_PAIRS=()
+  local list code pair names=""
+  [ -n "$LANE_SETTINGS" ] || return 0
+  list="$(mktemp "${TMPDIR:-/tmp}/$SLUG-lane-env.XXXXXX")"
+  node "$LANE_SETTINGS" env > "$list" 2>>"$LOG"
+  code=$?
+  if [ "$code" -ne 0 ]; then
+    rm -f "$list"
+    LANE_ENV_WHY="could not read the project's laneEnv from its config (exit $code; its errors are above), so /$SKILL is treated as PAUSED and not starting (it fails safe)"
+    return 1
+  fi
+  while IFS= read -r -d '' pair; do
+    LANE_ENV_PAIRS+=("$pair")
+    names="$names ${pair%%=*}"
+  done < "$list"
+  rm -f "$list"
+  if [ "$names" != "$LANE_ENV_LOGGED" ]; then
+    if [ -n "$names" ]; then
+      echo "[loop-runner] $(date "+%H:%M:%S") the project's laneEnv is given to every pass and its pause command:$names" >> "$LOG"
+    else
+      echo "[loop-runner] $(date "+%H:%M:%S") the project's laneEnv is now empty" >> "$LOG"
+    fi
+    LANE_ENV_LOGGED="$names"
+  fi
+  return 0
+}
+
 # The project's own pause switch (SP-395): the manifest's `lanePauseCommand`,
 # the program then each argument, run with no shell in the project's checkout
 # under a time limit. Exit 0 means run. Any other exit, a command that cannot
 # start, one that runs past the limit, or a config that cannot be read means
-# paused (it fails safe, as StarCaster's own runner does): returns 1 with
+# paused (it fails safe, as a project's own runner does): returns 1 with
 # PROJECT_PAUSE_WHY saying which. No command set: returns 0 at once, saying
 # nothing. Run in this shell, never in $( ), so PROJECT_PAUSE_WHY sticks.
 PAUSE_COMMAND_LIMIT="${LOOP_PAUSE_COMMAND_LIMIT_SECONDS:-120}"
@@ -327,7 +356,8 @@ project_pause_check() {
   rm -f "$list"
   [ "${#cmd[@]}" -eq 0 ] && return 0
   # Polled every second, not the pass's 15, so a quick answer costs no wait.
-  out="$(RUN_WITH_TIME_LIMIT_POLL=1 "$REPO/scripts/run_with_time_limit.sh" "$PAUSE_COMMAND_LIMIT" -- "${cmd[@]}" 2>&1 < /dev/null)"
+  # The project's laneEnv goes to the command alone, through `env`.
+  out="$(RUN_WITH_TIME_LIMIT_POLL=1 "$REPO/scripts/run_with_time_limit.sh" "$PAUSE_COMMAND_LIMIT" -- env ${LANE_ENV_PAIRS[@]+"${LANE_ENV_PAIRS[@]}"} "${cmd[@]}" 2>&1 < /dev/null)"
   code=$?
   [ "$code" -eq 0 ] && return 0
   first="$(printf '%s\n' "$out" | grep -m1 '[^[:space:]]')"
@@ -445,13 +475,18 @@ while true; do
     echo "[loop-runner] $(date "+%H:%M:%S") main checkout is not on a clean main — not pulling. Every pass runs stale code until it is put back on main." >> "$LOG"
   fi
 
-  # 2. Paused? First the project's own switch (SP-395, project_pause_check
-  #    above; nothing at all when its manifest names none), then the Settings
+  # 2. Paused? First the project's own lane settings and switch (SP-395,
+  #    load_lane_env and project_pause_check above; nothing at all when its
+  #    manifest names neither), then the Settings
   #    page's (SP-237), the whole pipeline and this lane. Both are asked here,
   #    between passes, so a pause never stops a pass already running: it
   #    drains. Asked after the pull, so the check is the newest code. ANY
   #    non-zero exit counts as paused, a check that could not run included
   #    (it fails safe), and the line logged says which.
+  if ! load_lane_env; then
+    sleep_paused "$LANE_ENV_WHY"
+    continue
+  fi
   if ! project_pause_check; then
     sleep_paused "$PROJECT_PAUSE_WHY"
     continue
@@ -552,7 +587,7 @@ while true; do
     CLAUDE_TOKEN=""
     RUN_WITH_TIME_LIMIT_SNAPSHOT="$SNAPSHOT" \
     "$RUN_DIR/scripts/run_with_time_limit.sh" "${LOOP_PASS_LIMIT_SECONDS:-7200}" -- \
-      "$CLAUDE_BIN" -p "$PROMPT" ${MODEL_ARGS[@]+"${MODEL_ARGS[@]}"} \
+      env ${LANE_ENV_PAIRS[@]+"${LANE_ENV_PAIRS[@]}"} "$CLAUDE_BIN" -p "$PROMPT" ${MODEL_ARGS[@]+"${MODEL_ARGS[@]}"} \
       ${SESSION_ARGS[@]+"${SESSION_ARGS[@]}"} \
       --allowedTools Bash Edit Write Read Glob Grep Task TodoWrite WebFetch
   ) 2>&1 | tee "$PASS_OUT" >> "$LOG"

@@ -161,7 +161,7 @@ test('a project pause command that exits 0 lets the pass start, and laneEnv reac
     assert.match(log, /START \/loop-build/);
     assert.match(log, /END \/loop-build/);
     assert.doesNotMatch(log, /PAUSED \/loop-build/);
-    assert.match(log, /\[loop-runner\] \d\d:\d\d:\d\d the project's laneEnv is set for every pass: EXAMPLE_CALLER$/m, 'names, never values');
+    assert.match(log, /\[loop-runner\] \d\d:\d\d:\d\d the project's laneEnv is given to every pass and its pause command: EXAMPLE_CALLER$/m, 'names, never values');
     assert.match(read(s, 'claude-called'), /^-p \/loop-build .* caller=scheduled$/m, 'the pass is given the variable');
     assert.match(read(s, 'pause-asked'), /caller=scheduled args=check/, 'the pause command is given it too');
   } finally {
@@ -179,7 +179,9 @@ test('a manifest that cannot be read pauses the lane rather than letting the pas
     + `echo '{ not json' > ${JSON.stringify(file)}\ntouch ${JSON.stringify(join(s.logs, 'proj-loop-build.wake'))}\necho "pass report"\n`);
   try {
     const log = await oneWake(s, 'loop-build', /PAUSED \/loop-build/);
-    assert.match(log, /could not read the project's lanePauseCommand from its config \(exit 1; its errors are above\), so \/loop-build is treated as PAUSED and not starting \(it fails safe\)/);
+    // The manifest is read for laneEnv first, before the pause command, and
+    // that read fails safe the same way.
+    assert.match(log, /could not read the project's laneEnv from its config \(exit 1; its errors are above\), so \/loop-build is treated as PAUSED and not starting \(it fails safe\)/);
     assert.match(log, PAUSED_LINE);
     assert.equal(read(s, 'claude-called').trim().split('\n').length, 1, 'only the first pass ran');
   } finally {
@@ -187,16 +189,48 @@ test('a manifest that cannot be read pauses the lane rather than letting the pas
   }
 });
 
-test('a manifest whose laneEnv cannot be read stops the runner before any pass', () => {
+test('a manifest whose laneEnv cannot be read when the runner starts pauses the lane, the same as later on', async () => {
   const s = scratch();
   writeFileSync(join(s.repo, 'spirality.project.json'), '{ not json');
   try {
-    const r = spawnSync('bash', [join(s.repo, 'scripts', 'loop_runner.sh'), 'loop-build', '3600'], { cwd: s.repo, env: s.env, encoding: 'utf8', timeout: 20_000 });
-    assert.equal(r.status, 1);
-    assert.match(r.stderr, /could not read laneEnv from the project config .* Stopping\./);
+    const log = await oneWake(s);
+    assert.match(log, /could not read the project's laneEnv from its config \(exit 1; its errors are above\), so \/loop-build is treated as PAUSED and not starting \(it fails safe\)/);
+    assert.match(log, PAUSED_LINE, 'the lane stays visibly alive, not a runner launchd restarts into the same failure');
     assert.equal(read(s, 'claude-called'), '');
-    assert.equal(existsSync(join(s.logs, 'proj-loop-build.lock')), false, 'the lock is let go');
   } finally {
+    s.cleanup();
+  }
+});
+
+test("laneEnv never reaches the runner's own shell: names like LOCK and LOG leave its lock and log alone", async () => {
+  const s = scratch({ pauseExit: 0 });
+  const decoy = join(s.dir, 'not-the-lock');
+  mkdirSync(decoy);
+  writeFileSync(join(decoy, 'keep'), 'x');
+  writeFileSync(join(s.repo, 'spirality.project.json'), JSON.stringify(manifest({
+    lanePauseCommand: [s.pause, 'check'],
+    laneEnv: { LOCK: decoy, LOG: '/dev/null', WAKE: join(s.dir, 'not-the-wake'), EXAMPLE_CALLER: 'scheduled' },
+  })));
+  const lock = join(s.logs, 'proj-loop-build.lock');
+  const child = spawn('bash', [join(s.repo, 'scripts', 'loop_runner.sh'), 'loop-build', '3600'], { cwd: s.repo, env: s.env, detached: true, stdio: 'ignore' });
+  const exited = new Promise((r) => child.on('exit', r));
+  const log = join(s.logs, 'proj-loop-build.log');
+  try {
+    const deadline = Date.now() + 20_000;
+    while (Date.now() < deadline && !(existsSync(log) && /sleeping 3600s before the next/.test(readFileSync(log, 'utf8')))) {
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    const text = readFileSync(log, 'utf8');
+    assert.match(text, /END \/loop-build/, 'the lane wrote its pass to its own log, not to the LOG laneEnv named');
+    assert.match(read(s, 'claude-called'), /caller=scheduled$/m, 'the pass still got the settings');
+    assert.equal(existsSync(lock), true, 'the real lock is held while the runner runs');
+    // Stopped the way launchd stops a job: the exit trap removes $LOCK.
+    process.kill(child.pid, 'SIGTERM');
+    await Promise.race([exited, new Promise((r) => setTimeout(r, 10_000))]);
+    assert.equal(existsSync(lock), false, 'the exit trap let go of the real lock');
+    assert.equal(existsSync(join(decoy, 'keep')), true, 'and never touched the folder laneEnv named LOCK');
+  } finally {
+    try { process.kill(-child.pid, 'SIGKILL'); } catch { /* already gone */ }
     s.cleanup();
   }
 });
@@ -250,5 +284,6 @@ test('the runner names no project: no project command, variable or name is writt
   assert.doesNotMatch(runner, /STARCASTER|starcaster|pipeline -- check|WaveCenter|wavecenter/);
   assert.ok(runner.indexOf('project_pause_check; then') < runner.indexOf('scripts/pause_check.sh" "$SKILL"'), 'the project\'s switch is asked just before the Settings page\'s');
   assert.ok(runner.indexOf('git pull -q --ff-only origin main') < runner.indexOf('project_pause_check; then'), 'and after the pull');
-  assert.ok(runner.indexOf('node "$LANE_SETTINGS" env') < runner.indexOf('while true; do'), 'laneEnv is exported before the loop starts');
+  assert.ok(runner.indexOf('load_lane_env; then') < runner.indexOf('project_pause_check; then'), 'laneEnv is read before every pass, before the project\'s switch');
+  assert.doesNotMatch(runner, /export "\$pair"|export "\$\{LANE_ENV_PAIRS/, 'laneEnv is never exported into the runner\'s own shell');
 });

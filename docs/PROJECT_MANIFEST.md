@@ -33,9 +33,13 @@ Every manifest says which version it is written to, as its first field:
 }
 ```
 
-The version goes up by one whenever a field is **added**, **removed** or
-**given a new meaning**. A change that only rewords this document leaves it
-alone. Raising it is one pull request that changes `MANIFEST_VERSION` in
+The version goes up by one whenever a **required** field is added, any field
+is **removed**, or a field is **given a new meaning**. An **optional** field
+with a default, which every existing manifest already satisfies by leaving it
+out, is added to the current version instead and named under it below:
+raising the version for one would make Spirality refuse every other project's
+manifest, and stop its lanes, until each was edited for a field it does not
+use. A change that only rewords this document leaves it alone. Raising it is one pull request that changes `MANIFEST_VERSION` in
 `lib/projectConfig.mjs`, this document, and Spirality's own manifest; each
 other project's manifest then gets its one-line change as a ticket in that
 project's queue. Until it does, Spirality refuses to run that project's
@@ -47,6 +51,8 @@ What each version added:
 - **2** (SP-264, 2026-11-12): `applicationChecks`. A version 1 manifest
   becomes version 2 by changing its first line alone: the new field is
   optional.
+  - Added to version 2 later, both optional (SP-395, 2026-11-19):
+    `lanePauseCommand` and `laneEnv`. A version 2 manifest needs no change.
 
 ## What each entry below says
 
@@ -480,19 +486,27 @@ is never stopped: the switch is asked between passes.
 
 ### `laneEnv`
 
-Settings the project's lanes export for every pass (SP-395), and for
-`lanePauseCommand`: an object of variable name to plain text. Read once, when
-the lane's runner starts, so a change takes effect when the lane is next
-reloaded. The runner's log names the variables it set, never their values.
+Settings the project's lanes give every pass (SP-395), and
+`lanePauseCommand`: an object of variable name to plain text. They are handed
+to those two programs alone, never set in the runner itself, so nothing here
+can change the runner's own lock, log or folders, or what Spirality's own
+steps (the pull, `npm ci`, the Settings page's checks) see. Read before every
+pass, so a change takes effect at the next one; a manifest that cannot be
+read then counts as paused, like `lanePauseCommand`. The runner's log names
+the variables when they first reach a pass or change, never their values.
 
 This file is public, so nothing here is ever a secret: a name that reads like
 one (holding the word `TOKEN`, `SECRET`, `PASSWORD`, `PASSWD`, `KEY`, `AUTH`,
 `CREDENTIAL` or `CREDENTIALS` between underscores) is refused, and secrets
 come from Doppler. A name is capital letters, digits and underscores,
 starting with a capital. Names the runner, git, node or the shell already set
-are refused too: `PATH`, `HOME`, `USER`, `SHELL`, `TMPDIR`, `PWD`, `IFS`,
-`LANG`, and any starting `LOOP_`, `TRACKER_`, `SPIRALITY_`, `CLAUDE_`,
-`ANTHROPIC_`, `DOPPLER_`, `GIT_`, `GH_`, `NODE_`, `NPM_` or `RUN_WITH_`. A
+are refused too, and so are the shell's read-only names and the ones that
+change how a shell or program behaves: `PATH`, `HOME`, `USER`, `LOGNAME`,
+`SHELL`, `TMPDIR`, `PWD`, `OLDPWD`, `IFS`, `LANG`, `TZ`, `UID`, `EUID`,
+`PPID`, `SHELLOPTS`, `BASHOPTS`, `ENV`, `POSIXLY_CORRECT`, `CDPATH`, `PS4`,
+`GLOBIGNORE`, and any starting `LOOP_`, `TRACKER_`, `SPIRALITY_`, `CLAUDE_`,
+`ANTHROPIC_`, `DOPPLER_`, `GIT_`, `GH_`, `NODE_`, `NPM_`, `RUN_WITH_`,
+`BASH_` (`BASH_ENV`, `BASH_XTRACEFD`), `LC_`, `DYLD_` or `LD_`. A
 value is one line of text. A wrong entry is refused, naming it.
 
 - **Kind**: an object of name to text
