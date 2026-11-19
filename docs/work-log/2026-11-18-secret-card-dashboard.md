@@ -1,0 +1,5 @@
+## 2026-11-18 — Secret-request cards give Dane a Doppler command that saves nothing and shows the value: send him to the dashboard instead (#326)
+
+When a loop needs a real password or key from Dane, it asks him on a card. On Upwork Blaster's UB-7 the card gave him a Doppler command to type. That command does not hide anything and does not finish on its own: it just shows what you type and waits. Nothing was saved, he said "done", and the ticket carried on with no password in place. The card also never said that he was meant to make the password up himself, so he was waiting to be given one.
+
+Now a card that tells him to run that command is refused before it is posted. The build lane's instructions say how to ask instead: name each key, say whether he makes it up or gets it from somewhere, and link the Doppler website page where he types it in. When he replies, the lane checks that the names really arrived (a check that shows names only, never the values) and asks again for any that are missing, rather than building on keys that are not there. The loop's contract says the same in plain words.
