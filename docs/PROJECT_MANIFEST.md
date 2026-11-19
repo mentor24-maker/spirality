@@ -33,9 +33,13 @@ Every manifest says which version it is written to, as its first field:
 }
 ```
 
-The version goes up by one whenever a field is **added**, **removed** or
-**given a new meaning**. A change that only rewords this document leaves it
-alone. Raising it is one pull request that changes `MANIFEST_VERSION` in
+The version goes up by one whenever a **required** field is added, any field
+is **removed**, or a field is **given a new meaning**. An **optional** field
+with a default, which every existing manifest already satisfies by leaving it
+out, is added to the current version instead and named under it below:
+raising the version for one would make Spirality refuse every other project's
+manifest, and stop its lanes, until each was edited for a field it does not
+use. A change that only rewords this document leaves it alone. Raising it is one pull request that changes `MANIFEST_VERSION` in
 `lib/projectConfig.mjs`, this document, and Spirality's own manifest; each
 other project's manifest then gets its one-line change as a ticket in that
 project's queue. Until it does, Spirality refuses to run that project's
@@ -47,6 +51,8 @@ What each version added:
 - **2** (SP-264, 2026-11-12): `applicationChecks`. A version 1 manifest
   becomes version 2 by changing its first line alone: the new field is
   optional.
+  - Added to version 2 later, both optional (SP-395, 2026-11-19):
+    `lanePauseCommand` and `laneEnv`. A version 2 manifest needs no change.
 
 ## What each entry below says
 
@@ -453,6 +459,62 @@ tracker project, so on a ClickUp project every post would be refused.
 - **Required**: no
 - **Default**: `[]`
 - **Example**: `[{ "name": "broken-links", "command": "node scripts/broken_links.mjs", "everyMinutes": 60, "alarm": false }]` (Spirality has none)
+
+### `lanePauseCommand`
+
+The project's own pause switch for its lanes (SP-395), for a project that
+already has one of its own besides the Settings page's switches. A command,
+the program then each argument as its own string (no shell), run by
+`scripts/loop_runner.sh` in the project's checkout before every pass, just
+after the pull and just before the Settings page's pause check. It is given
+the project's `laneEnv`.
+
+Exit 0 means run. Any other exit means paused: so does a command that cannot
+start, one still running after 2 minutes (it is stopped), and a manifest that
+cannot be read at that moment, so a broken switch stops passes rather than
+letting them through. A paused lane logs one line naming the command, its exit
+and the first line it printed, then a dated `PAUSED` line (the heartbeat reads
+it as the lane alive), and sleeps its usual wake time. A pass already running
+is never stopped: the switch is asked between passes.
+
+- **Kind**: list of text, the program first, at least one; `null` is the same
+  as left out
+- **Required**: no
+- **Default**: none: only the Settings page's switches are asked
+- **Example**: `["npm", "run", "pipeline", "--", "check"]` (a project whose
+  own pause check exits 3 when paused; Spirality has none)
+
+### `laneEnv`
+
+Settings the project's lanes give every pass (SP-395), and
+`lanePauseCommand`: an object of variable name to plain text. They are handed
+to those two programs alone, never set in the runner itself, so nothing here
+can change the runner's own lock, log or folders, or what Spirality's own
+steps (the pull, `npm ci`, the Settings page's checks) see. Read before every
+pass, so a change takes effect at the next one; a manifest that cannot be
+read then counts as paused, like `lanePauseCommand`. The runner's log names
+the variables when they first reach a pass or change, never their values.
+
+This file is public, so nothing here is ever a secret: a name that reads like
+one (holding the word `TOKEN`, `SECRET`, `PASSWORD`, `PASSWD`, `KEY`, `AUTH`,
+`CREDENTIAL` or `CREDENTIALS` between underscores) is refused, and secrets
+come from Doppler. A name is capital letters, digits and underscores,
+starting with a capital. Names the runner, git, node or the shell already set
+are refused too, and so are the shell's read-only names and the ones that
+change how a shell or program behaves: `PATH`, `HOME`, `USER`, `LOGNAME`,
+`SHELL`, `TMPDIR`, `PWD`, `OLDPWD`, `IFS`, `LANG`, `TZ`, `UID`, `EUID`,
+`PPID`, `SHELLOPTS`, `BASHOPTS`, `ENV`, `POSIXLY_CORRECT`, `CDPATH`, `PS4`,
+`GLOBIGNORE`, and any starting `LOOP_`, `TRACKER_`, `SPIRALITY_`, `CLAUDE_`,
+`ANTHROPIC_`, `DOPPLER_`, `GIT_`, `GH_`, `NODE_`, `NPM_`, `RUN_WITH_`,
+`BASH_` (`BASH_ENV`, `BASH_XTRACEFD`), `LC_`, `DYLD_` or `LD_`. A
+value is one line of text. A wrong entry is refused, naming it.
+
+- **Kind**: an object of name to text
+- **Required**: no
+- **Default**: `{}`
+- **Example**: `{ "EXAMPLE_CALLER": "scheduled" }` (a project whose own
+  scripts leave a shared reserve to the sessions a person is talking to when
+  they run in the background; Spirality has none)
 
 ## Old names that still load (SP-130)
 
