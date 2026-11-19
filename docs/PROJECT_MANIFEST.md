@@ -55,6 +55,8 @@ What each version added:
     `lanePauseCommand` and `laneEnv`. A version 2 manifest needs no change.
   - Added to version 2 later, optional (SP-396, 2026-11-19):
     `usageLimitSleep`. A version 2 manifest needs no change.
+  - Added to version 2 later, optional (SP-397, 2026-11-19):
+    `laneHeartbeatCommand`. A version 2 manifest needs no change.
 
 ## What each entry below says
 
@@ -550,6 +552,39 @@ time. With it `false`, the runner does none of this.
 - **Default**: `false`
 - **Example**: `true` (a project that moved from its own runner, which had
   this guard; Spirality's own lanes leave it off for now)
+
+### `laneHeartbeatCommand`
+
+The project's own heartbeat (SP-397), for a project whose watchdog reads beats
+its own command records, as StarCaster's does. A command, the program then
+each argument as its own string (no shell), run by `scripts/loop_runner.sh` in
+the project's checkout once every turn of the loop, given the project's
+`laneEnv`. The runner adds `--role <skill>` (`loop-build`, `loop-review`, …)
+and, for anything but a pass that ran, one of these and a sentence saying why:
+
+- `--stood-down "<why>"`: the lane was paused (the project's own
+  `lanePauseCommand`, or the Settings page), a usage limit another lane
+  recorded or a quiet window held it (`usageLimitSleep`), or a usage limit
+  closed the pass;
+- `--blocked "<why>"`: the pass exited non-zero for any other reason, or no
+  Spirality release could be readied for it;
+- `--timed-out "<why>"`: the pass's time limit stopped it.
+
+A pass that ran, and a turn skipped because the queue was empty, get no flag:
+the lane is alive and did what there was. The beat runs under a 60-second
+limit and its output goes to the lane's log. A beat that fails, runs past the
+limit, or whose manifest cannot be read at that moment is one log line and is
+lost: it never changes the pass's exit, stops the runner or delays the next
+pass. Read afresh at every beat, so a change takes effect at the next one.
+Spirality's own heartbeat (`scripts/heartbeat.mjs`), which reads the lane
+logs, is separate and unchanged.
+
+- **Kind**: list of text, the program first, at least one; `null` is the same
+  as left out
+- **Required**: no
+- **Default**: none: no beat is run, and the runner logs nothing new
+- **Example**: `["npm", "run", "--silent", "heartbeat", "--", "--beat"]`
+  (StarCaster's heartbeat command; Spirality has none)
 
 ## Old names that still load (SP-130)
 
