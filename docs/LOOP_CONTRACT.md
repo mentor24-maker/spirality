@@ -682,6 +682,14 @@ Only four kinds of thing: a **real secret value**, a **billing screen**, a
 **browser login**, or a **decision that is genuinely his**. The card says
 which. Everything else, a loop does itself.
 
+A real secret value is entered by Dane on the Doppler dashboard page for the
+project and config, which the card links; never by a command, because the
+Doppler command that sets a secret shows the value (`DOCTRINE 4.1`; `ask`
+refuses a card that carries it). The card says, key by key, whether he makes
+the value up or gets it from somewhere. His "done" is checked by name
+(`doppler secrets --only-names`, which shows no values) before work goes on,
+and a missing name gets a fresh card, not a build (2026-11-18, UB-7).
+
 ### A file link names a commit, never a branch (2026-11-09)
 
 Every GitHub file link a loop writes on a ticket (a card, a test step, a
