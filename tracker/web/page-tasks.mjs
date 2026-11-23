@@ -7,7 +7,7 @@
  * (Spirality SP-352), so a ticket that changes one page no longer edits the
  * same file as a ticket that changes another.
  */
-import { canDelete, deleteQuestion, deleteRefusal, escapeHtml, MOVED_MESSAGE, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, renderProjectPicker, renderTopicPicker, stageLooks, renderSearchFilters, renderSearchResults, lookupTicket, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, renderListTopics, projectTags, renderClassFilters, filterByClass, sortTickets, nextSort } from './render.mjs';
+import { canDelete, deleteQuestion, deleteRefusal, escapeHtml, MOVED_MESSAGE, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, renderProjectPicker, renderFilterBar, renderTopicPicker, stageLooks, renderSearchFilters, renderSearchResults, lookupTicket, renderSortHeadings, renderListPriority, renderListAssignee, renderListTags, renderListTopics, projectTags, renderClassFilters, filterByClass, sortTickets, nextSort } from './render.mjs';
 import { api, setTitle, main, putTrail, savedProject, VIEW_KEY, PROJECT_KEY, PROJECT_NAME_KEY, showProject, statusIcon, action, ICONS, actionButton, statusName, when, viewSwitch, SignedOut, drawSignIn, showError, wirePipeline, refreshPipeline, route, drawAgain, Refused } from './app.mjs';
 import { field } from './page-projects.mjs';
 import { drawConsole } from './page-console.mjs';
@@ -19,8 +19,6 @@ import { savedSuggestSwitch, filedPod, UNCHECKED_NOTE, notUploadedNote, wireAddT
  * mistaken. All Projects' own address is `/board` or `/list` with no project.
  */
 export const ALL_PROJECTS = '*';
-/** The Project picker's first choice, every project at once. */
-const ALL_PROJECTS_LABEL = 'All Projects';
 
 /**
  * "Tasks" in the header: the selected project, or All Projects when that
@@ -226,16 +224,15 @@ export async function drawProject(slug, view, { adding = false, filed = null, un
   // All Projects has no Suggest side: it reads one project (SP-402).
   const suggesting = !all && savedSuggestSwitch();
   // SP-362: the title row holds only the title and the Board / List / Console
-  // tabs, as on the Console; the pickers, search, pod and filters are the row under it.
+  // tabs, as on the Console; the row under it is the filter bar, in the one order every bar uses (SP-403).
   main.innerHTML = `
     <div class="tasks-head title-row"><h1>Tasks</h1>${filed ? filedPod(filed, uploaded) : ''}${viewSwitch(board.project, view)}</div>
-    <div class="toolbar tasks-bar">
-      ${renderProjectPicker(projects, board.project, { all: ALL_PROJECTS_LABEL })}
-      ${renderTopicPicker(board.topics ?? [])}
-      ${searchForm('')}
-      <button type="button" class="pipeline-pod" aria-haspopup="dialog" title="Open Pipeline Status"></button>
-      ${renderClassFilters(board.classes, pickedClass)}
-    </div>
+    <div class="toolbar tasks-bar">${renderFilterBar({
+    project: renderProjectPicker(projects, board.project, { all: true }),
+    pickers: [renderTopicPicker(board.topics ?? []), renderClassFilters(board.classes, pickedClass)],
+    search: searchForm(''),
+    pod: '<button type="button" class="pipeline-pod" aria-haspopup="dialog" title="Open Pipeline Status"></button>',
+  })}</div>
     ${filed && (unchecked || notUploaded.length) ? `<p class="filed-note">${unchecked ? UNCHECKED_NOTE : ''}${notUploadedNote(notUploaded)}</p>` : ''}
     <details class="add-task">
       <summary>Add Task${all ? '' : `<label class="suggest-switch">Suggest <input type="checkbox" value="on" aria-label="Suggest Next Tasks"${suggesting ? ' checked' : ''}></label>`}</summary>
@@ -535,7 +532,7 @@ function wireListTags(tickets, save, noteOf) {
 /** The Search field, holding `term`. The page allows no form to submit itself; wireSearch sends it. */
 const searchForm = (term) => `
   <form class="search" role="search">
-    <label for="search-q">Search</label>
+    <label for="search-q">Search:</label>
     <input type="search" id="search-q" name="q" placeholder="merge conflict" value="${escapeHtml(term)}">
   </form>`;
 

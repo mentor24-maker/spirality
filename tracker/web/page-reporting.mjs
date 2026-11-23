@@ -7,7 +7,7 @@
  * (Spirality SP-352), so a ticket that changes one page no longer edits the
  * same file as a ticket that changes another.
  */
-import { escapeHtml, stageLooks } from './render.mjs';
+import { escapeHtml, stageLooks, renderProjectPicker, renderFilterBar } from './render.mjs';
 import { api, savedProject, setTitle, main, SignedOut, drawSignIn, showError, putTrail, when, statusName } from './app.mjs';
 
 /**
@@ -123,12 +123,10 @@ export async function drawReporting(chosen, range = defaultReportRange(), kind =
   main.innerHTML = `
     <h1>Reporting</h1>
     <p class="page-desc">Also here: <a href="/reporting/usage">API Usage</a>, the tokens each Claude run spent, by model and ticket.</p>
-    <form class="report-scope">
-      <label for="report-project">Project</label>
-      <select id="report-project"><option value="">All projects</option>${projects.map((p) => `<option value="${escapeHtml(p.slug)}"${p.slug === r.project ? ' selected' : ''}>${escapeHtml(p.name)}</option>`).join('')}</select>
-      <label for="report-kind">Kind</label>
-      <select id="report-kind"><option value="">All Kinds</option>${r.kinds.map((k) => `<option value="${escapeHtml(k.key)}"${k.key === r.kind ? ' selected' : ''}>${escapeHtml(k.label)}</option>`).join('')}</select>
-    </form>
+    <form class="report-scope">${renderFilterBar({
+    project: renderProjectPicker(projects, r.project, { all: true }),
+    pickers: `<label class="kind-picker">Kind: <select id="report-kind"><option value="">Any</option>${r.kinds.map((k) => `<option value="${escapeHtml(k.key)}"${k.key === r.kind ? ' selected' : ''}>${escapeHtml(k.label)}</option>`).join('')}</select></label>`,
+  })}</form>
     ${scopeNote}
     <h2>Task Productivity</h2>
     <p class="quiet">Started: filed in that time. Finished: moved to Live in that time and still Live, and not closed as Won't Do, Duplicate or Test.</p>
@@ -233,7 +231,7 @@ export async function drawReporting(chosen, range = defaultReportRange(), kind =
       repick().catch((err) => (err instanceof SignedOut ? drawSignIn() : showError(err)));
     });
   }
-  main.querySelector('#report-project').addEventListener('change', (e) => {
+  main.querySelector('.report-scope .project-picker select').addEventListener('change', (e) => {
     drawReporting(e.target.value, { from: fromPicker.value, to: toPicker.value }, r.kind ?? '').catch((err) => (err instanceof SignedOut ? drawSignIn() : showError(err)));
   });
   main.querySelector('#report-kind').addEventListener('change', (e) => {

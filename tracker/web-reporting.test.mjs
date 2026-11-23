@@ -823,7 +823,7 @@ test('the Reporting page draws Where the Time Goes from the server: four buckets
 test('the Reporting page draws the by-kind sections from the server: a Kind picker, By Kind, Efficiency, Who Started, Closed Without Finishing (SP-347)', () => {
   const app = pageScript();
   const draw = app.slice(app.indexOf('async function drawReporting'), app.indexOf('/** A share as a figure'));
-  assert.match(draw, /<label for="report-kind">Kind<\/label>\s*<select id="report-kind"><option value="">All Kinds<\/option>\$\{r\.kinds\.map/);
+  assert.match(draw, /<label class="kind-picker">Kind: <select id="report-kind"><option value="">Any<\/option>\$\{r\.kinds\.map/, 'Kind reads as on the Tasks bar: "Kind: ", "Any" for no filter (SP-403)');
   assert.match(draw, /#report-kind'\)\.addEventListener\('change', \(e\) => \{\s*drawReporting\(r\.project \?\? '', \{ from: fromPicker\.value, to: toPicker\.value \}, e\.target\.value\)/);
   assert.match(draw, /drawReporting\(e\.target\.value, \{ from: fromPicker\.value, to: toPicker\.value \}, r\.kind \?\? ''\)/, 'a project change keeps the kind');
   const order = ['Task Productivity', 'By Kind', 'Efficiency', 'Who Started the Finished Tasks', 'Closed Without Finishing', 'Human Hours of Work Done'];
@@ -852,7 +852,7 @@ test('the Reporting page draws only the server\'s figures: ranges and stages fro
   assert.match(draw, /r\.ranges\.map/);
   assert.match(draw, /r\.open\.map/);
   assert.match(draw, /savedProject\(\)/, 'it opens on the selected project');
-  assert.match(draw, /<option value="">All projects<\/option>/);
+  assert.match(draw, /project: renderProjectPicker\(projects, r\.project, \{ all: true \}\)/, 'the shared picker, All Projects first (SP-403)');
   assert.doesNotMatch(draw, /'Queued'|'Requested'|'Building'|'Live'/, 'the stages come from the server, never typed out');
   assert.match(draw, /el\.style\.setProperty\('--stage-border', look\.border\);/);
   assert.match(draw, /escapeHtml\(s\.status\)/);
