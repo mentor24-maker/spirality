@@ -98,7 +98,7 @@ import { claudeCommandOf, CLAUDE_COMMAND_VAR, CLAUDE_TOKEN_VAR, claudeTokenFromD
 import { newestReleaseReader, OWN_PROJECT_RELEASE, releaseRemote } from '../lib/releases.mjs';
 import { controlOf, GROUPS } from './pipelineControls.mjs';
 import { SOURCE as IMPORT_SOURCE } from './import.mjs';
-import { boardOf, consoleOf, lookupTickets, PRIORITIES, prToCheck, prsToCheck, projectDetailsOf, projectsList, readSearchFilters, reportsOf, REPORT_KINDS, searchTickets, stageColoursOf, threadOf, waitingFor, busUnseen, pipelineControlsOf } from './pageData.mjs';
+import { boardOf, everyProjectBoardOf, consoleOf, lookupTickets, PRIORITIES, prToCheck, prsToCheck, projectDetailsOf, projectsList, readSearchFilters, reportsOf, REPORT_KINDS, searchTickets, stageColoursOf, threadOf, waitingFor, busUnseen, pipelineControlsOf } from './pageData.mjs';
 import { ghPrState, prStateCache } from './prState.mjs';
 import { createNotifier, DEFAULT_FROM, MAIL_FROM, MAIL_KEY, mailEnvFromDoppler, mailSettingsFromEnv, resendSender, textSettings } from './notify.mjs';
 import { sendInvite, sendResetLink } from './account.mjs';
@@ -1308,6 +1308,16 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
       const prStates = await prStatesOf(prsToCheck(store, { only: new Set([slug]) }));
       const board = boardOf(store, slug, { viewerId: me.id, prStates });
       return [200, board];
+    }
+
+    // Dane's page: All Projects on Board and List, every project's board at
+    // once, narrowed to the projects the caller may see (an admin or a loop
+    // sees all, anyone else only the projects they are on), each ticket
+    // naming its project.
+    if (parts.length === 2 && parts[0] === 'all-projects' && parts[1] === 'board' && method === 'GET') {
+      const only = scopeOf(me);
+      const prStates = await prStatesOf(prsToCheck(store, { only }));
+      return [200, everyProjectBoardOf(store, { only, viewerId: me.id, prStates })];
     }
 
     // The Docs page's Task Files table: every file on the project's

@@ -26,11 +26,16 @@ export function renderProjectPicker(projects, current, { all = null } = {}) {
  * The Topic picker on the Tasks page's toolbar, beside the project picker:
  * "Topic: " and a dropdown of "Any" then `topics` (the board's, `{ id, name }`,
  * already alphabetical), each by its id. It changes nothing on the board:
- * the topic chosen goes into the search as its Topic filter. Names are
- * typed by people, so every one is escaped.
+ * the topic chosen goes into the search as its Topic filter. In All
+ * Projects each topic also carries its `project` and `projectName`: it is
+ * shown as "Docs (Spirality)", and holds its project's slug, which the
+ * search takes as its Project filter, a topic belonging to one project.
+ * Names are typed by people, so every one is escaped.
  */
 export function renderTopicPicker(topics = []) {
-  const options = topics.map((t) => option(String(t.id), t.name, false));
+  const options = topics.map((t) => (t.project == null
+    ? option(String(t.id), t.name, false)
+    : `<option value="${escapeHtml(String(t.id))}" data-project="${escapeHtml(t.project)}">${escapeHtml(`${t.name} (${t.projectName})`)}</option>`));
   return `<label class="topic-picker">Topic: <select name="topic">${option('', 'Any', true)}${options.join('')}</select></label>`;
 }
 

@@ -418,6 +418,13 @@ export function projectDetailsOf(store, slug, { withAlerts = false } = {}) {
   };
 }
 
+/** A stored ticket in the ClickUp shape the door's comparator (compareWithinStatus) reads. */
+const queueShapeOf = (t) => ({
+  priority: t.priority ? { priority: t.priority } : null,
+  date_created: String(Date.parse(t.createdAt)),
+  place: t.place ?? null,
+});
+
 /**
  * One project's board: the eight statuses as columns, left to right in the
  * contract's STAGE_ORDER, each holding its tickets in the order `npm run
@@ -440,12 +447,7 @@ export function boardOf(store, slug, { viewerId = null, prStates = null } = {}) 
   if (!project) return null;
   const byStatus = new Map(STAGE_ORDER.map((name) => [statusOf(name), []]));
   for (const ticket of store.listTickets(project.slug)) byStatus.get(ticket.status)?.push(ticket);
-  const queueShape = (t) => ({
-    priority: t.priority ? { priority: t.priority } : null,
-    date_created: String(Date.parse(t.createdAt)),
-    place: t.place ?? null,
-  });
-  const inQueueOrder = (a, b) => compareWithinStatus(queueShape(a), queueShape(b));
+  const inQueueOrder = (a, b) => compareWithinStatus(queueShapeOf(a), queueShapeOf(b));
   const pullRequestOf = (id) => findPullRequest(trailComments(store, id))?.url ?? null;
   const names = new Map();
   const nameOf = (id) => {
@@ -492,6 +494,41 @@ export function boardOf(store, slug, { viewerId = null, prStates = null } = {}) 
     // SP-309: the project's tags, saved or in use, by name, for the List view's Add Tag dropdown.
     tags: store.listTags(project.slug).map((t) => t.name),
     // SP-345: the Tasks page's Kind, Started By and How It Ended filters, each with its choices.
+    classes: CLASS_FILTERS,
+  };
+}
+
+/** What the Tasks page calls the board of every project at once. */
+export const ALL_PROJECTS_NAME = 'All Projects';
+
+/**
+ * Every project's board at once (Dane's All Projects on Board and List):
+ * boardOf for each project `only` lets through (visibleProjects; null is
+ * every one), merged column by column. Each ticket carries its project's
+ * slug and name. Inside a column the tickets keep boardOf's own order, the
+ * door's comparator over every project's tickets together, so the order
+ * cannot drift from one project's board; a tie keeps the projects' order.
+ * `projects` holds what each List row's dropdowns offer, by slug: the
+ * project's operator, topics and saved tags. `topics` is every project's
+ * topics, each with its project's slug and name, for the Topic picker.
+ */
+export function everyProjectBoardOf(store, { only = null, viewerId = null, prStates = null } = {}) {
+  const boards = visibleProjects(store, only).map((p) => boardOf(store, p.slug, { viewerId, prStates }));
+  const raw = new Map(boards.flatMap((b) => store.listTickets(b.project)).map((t) => [t.id, t]));
+  const inOrder = (a, b) => compareWithinStatus(queueShapeOf(raw.get(a.id)), queueShapeOf(raw.get(b.id)));
+  const own = (b) => (x) => ({ ...x, project: b.project, projectName: b.projectName });
+  return {
+    project: null,
+    projectName: ALL_PROJECTS_NAME,
+    all: true,
+    projects: boards.map((b) => ({ slug: b.project, name: b.projectName, operator: b.operator, topics: b.topics, tags: b.tags })),
+    columns: STAGE_ORDER.map((name, i) => ({
+      status: name,
+      tickets: boards.flatMap((b) => b.columns[i].tickets.map(own(b))).sort(inOrder),
+    })),
+    operator: null,
+    topics: boards.flatMap((b) => b.topics.map(own(b))),
+    tags: [],
     classes: CLASS_FILTERS,
   };
 }

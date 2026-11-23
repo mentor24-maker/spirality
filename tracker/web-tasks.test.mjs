@@ -207,8 +207,11 @@ test('the list and the board draw one object: the toggle keeps the project and o
   const app = pageScript();
   // One fetch serves both views, so they cannot disagree about what is where.
   assert.equal(app.match(/\/board`\)[;,]/g)?.length, 1);
+  assert.match(app, /api\('GET', slug == null \? '\/all-projects\/board' : `\/projects\/\$\{encodeURIComponent\(slug\)\}\/board`\),/, 'one read: All Projects or the project, never both');
   assert.match(app, /\$\{viewSwitch\(board\.project, view\)\}/);
-  assert.match(/function viewSwitch\(slug, current\) \{([\s\S]*?)\n\}/.exec(app)[1], /\['board', 'Board', `\/board\/\$\{encodeURIComponent\(slug\)\}`\], \['list', 'List', `\/list\/\$\{encodeURIComponent\(slug\)\}`\]/);
+  const views = /function viewSwitch\(slug, current\) \{([\s\S]*?)\n\}/.exec(app)[1];
+  assert.match(views, /const at = \(v\) => \(slug == null \? `\/\$\{v\}` : `\/\$\{v\}\/\$\{encodeURIComponent\(slug\)\}`\);/);
+  assert.match(views, /\['board', 'Board', at\('board'\)\], \['list', 'List', at\('list'\)\]/);
 });
 
 test('each ticket on the board carries its assignee\'s name and its last change, for the list', async () => {
@@ -356,7 +359,7 @@ test('a List row\'s Assigned To is a dropdown with the Change panel\'s choices: 
 test('the List view draws the assignee dropdown in every row; the Board view\'s Live rows and cards stay as text', () => {
   const app = pageScript();
   const draw = app.slice(app.indexOf('async function drawProject('), app.indexOf('async function copyText'));
-  assert.match(draw, /<td class="assignee">\$\{view === 'list' \? renderListAssignee\(t, board\.operator\) : t\.assignee \? escapeHtml\(t\.assignee\)/);
+  assert.match(draw, /<td class="assignee">\$\{view === 'list' \? renderListAssignee\(t, choicesOf\(t\)\.operator\) : t\.assignee \? escapeHtml\(t\.assignee\)/);
   const card = /const card = \(t\) => `([\s\S]*?)`;/.exec(app)[1];
   assert.doesNotMatch(card, /select|renderListAssignee/);
 });
@@ -415,7 +418,7 @@ test('the List view draws the tag controls in every row from the project\'s tags
   const app = pageScript();
   const draw = app.slice(app.indexOf('async function drawProject('), app.indexOf('async function copyText'));
   assert.match(draw, /const known = projectTags\(board\);/);
-  assert.match(draw, /<td class="tags">\$\{view === 'list' \? renderListTags\(t, known\) : t\.tags\.map/);
+  assert.match(draw, /<td class="tags">\$\{view === 'list' \? renderListTags\(t, choicesOf\(t\)\.tags\) : t\.tags\.map/);
   const card = /const card = \(t\) => `([\s\S]*?)`;/.exec(app)[1];
   assert.doesNotMatch(card, /select|renderListTags|remove-tag/);
   assert.match(app, /wireListTags\(tickets, save, noteOf\);/);
@@ -480,7 +483,7 @@ test('a List row\'s topics are chips with a × each (a quiet dash when none), th
 test('the List view draws a Topics cell after Tags from the board\'s topics; picking or × sends the whole new id list through the shared save', () => {
   const app = pageScript();
   const row = /const row = \(status\) => \(t\) => `[\s\S]*?<\/tr>`;/.exec(app)[0];
-  assert.match(row, /<td class="tags">[^\n]*<\/td>\s*<td class="topics">\$\{view === 'list' \? renderListTopics\(t, board\.topics\) :/);
+  assert.match(row, /<td class="tags">[^\n]*<\/td>\s*<td class="topics">\$\{view === 'list' \? renderListTopics\(t, choicesOf\(t\)\.topics\) :/);
   const card = /const card = \(t\) => `([\s\S]*?)`;/.exec(app)[1];
   assert.doesNotMatch(card, /topic/i, 'the Board view\'s cards show no topics');
   assert.match(app, /wireListTopics\(tickets, save\);/);
@@ -560,7 +563,7 @@ test('the Tasks toolbar picks a project from a dropdown, "Project: ", the one in
   const app = pageScript();
   const draw = app.slice(app.indexOf('async function drawProject'), app.indexOf('async function copyText'));
   assert.match(draw, /api\('GET', '\/projects'\),\n  \]\);/);
-  assert.match(draw, /\$\{viewSwitch\(board\.project, view\)\}<\/div>\s*<div class="toolbar tasks-bar">\s*\$\{renderProjectPicker\(projects, board\.project\)\}\s*\$\{renderTopicPicker\(board\.topics \?\? \[\]\)\}\s*\$\{searchForm\(''\)\}\s*<button type="button" class="pipeline-pod"[^>]*><\/button>\s*\$\{renderClassFilters\(board\.classes, pickedClass\)\}\s*<\/div>/, 'the tabs close the title row; the pickers, search, pod and filters are the row under it (SP-362)');
+  assert.match(draw, /\$\{viewSwitch\(board\.project, view\)\}<\/div>\s*<div class="toolbar tasks-bar">\s*\$\{renderProjectPicker\(projects, board\.project, \{ all: ALL_PROJECTS_LABEL \}\)\}\s*\$\{renderTopicPicker\(board\.topics \?\? \[\]\)\}\s*\$\{searchForm\(''\)\}\s*<button type="button" class="pipeline-pod"[^>]*><\/button>\s*\$\{renderClassFilters\(board\.classes, pickedClass\)\}\s*<\/div>/, 'the tabs close the title row; the pickers, search, pod and filters are the row under it (SP-362)');
   assert.doesNotMatch(app, /Change project/);
   assert.match(draw, /querySelector\('\.project-picker select'\)\.addEventListener\('change', \(e\) => \{\s*history\.pushState\(null, '', at\(view, e\.target\.value\)\);\s*route\(\);/);
   assert.match(readFileSync(WEB('app.css'), 'utf8'), /\.toolbar \.project-picker(, \.toolbar \.topic-picker)? \{[^}]*display: flex;/);
@@ -617,7 +620,7 @@ test('the search finds the demo\'s tickets in every project and names its status
 
 test('the Tasks page\'s toolbar holds the Search field, and Enter opens the results page', () => {
   const app = pageScript();
-  assert.match(app, /\$\{renderProjectPicker\(projects, board\.project\)\}\s*\$\{renderTopicPicker\(board\.topics \?\? \[\]\)\}\s*\$\{searchForm\(''\)\}/);
+  assert.match(app, /\$\{renderProjectPicker\(projects, board\.project, \{ all: ALL_PROJECTS_LABEL \}\)\}\s*\$\{renderTopicPicker\(board\.topics \?\? \[\]\)\}\s*\$\{searchForm\(''\)\}/);
   assert.match(app, /history\.pushState\(null, '', searchAddress\(form\.elements\.q\.value\.trim\(\)\)\)/);
   assert.match(app, /renderSearchResults\(answer\)/);
 });
@@ -847,7 +850,7 @@ test('the Tasks page puts the pod between the search field and Board/List, fills
   // SP-322: Board/List left the toolbar for a tab bar; SP-326 put it at the right end of the title row; SP-362 moved the toolbar, pod and all, to the row under it.
   assert.ok(views !== -1 && views < search && search < pod, 'the Board/List tabs on the title row, then the search field, then the pod');
   assert.match(head, /^<h1>Tasks<\/h1>\$\{filed \? filedPod\(filed, uploaded\) : ''\}\$\{viewSwitch\(board\.project, view\)\}<\/div>/, 'the tabs are the title row\'s last item, and nothing else is on it (SP-362)');
-  const draw = app.slice(app.indexOf('async function drawProject('), app.indexOf('async function drawProject(') + 12000);
+  const draw = app.slice(app.indexOf('async function drawProject('), app.indexOf('function wireListPickers('));
   assert.match(draw, /refreshPipeline\(\);/);
   assert.match(app, /const PIPELINE_REFRESH_EVERY_MS = 60_000;/);
   assert.match(app, /setInterval\(refreshPipeline, PIPELINE_REFRESH_EVERY_MS\);/);
@@ -1062,4 +1065,96 @@ test('the List view\'s Add Tag dropdown also offers the project\'s saved tags, t
   const board = { tags: ['design', 'tracker', 7, ''], columns: [{ tickets: [{ tags: ['tracker', 'Beta'] }] }] };
   assert.deepEqual(projectTags(board), ['Beta', 'design', 'tracker']);
   assert.match(renderListTags({ id: 'SP-1', tags: [] }, projectTags(board)), /<option value="design">design<\/option>/);
+});
+
+// ── All Projects on Board and List (SP-402) ──────────────────────────────────
+
+test('Board and List offer All Projects first in the Project picker, at /board and /list with no project, remembered for "Tasks" (SP-402)', () => {
+  const projects = [{ slug: 'alpha', name: 'Alpha' }, { slug: 'beta', name: 'Beta' }];
+  assert.equal(renderProjectPicker(projects, null, { all: 'All Projects' }),
+    '<label class="project-picker">Project: <select name="project"><option value="" selected>All Projects</option>'
+    + '<option value="alpha">Alpha</option><option value="beta">Beta</option></select></label>');
+  assert.match(renderProjectPicker(projects, 'beta', { all: 'All Projects' }), /<option value="">All Projects<\/option><option value="alpha">Alpha<\/option><option value="beta" selected>Beta<\/option>/);
+  const app = pageScript();
+  const draw = app.slice(app.indexOf('async function drawProject('), app.indexOf('function wireListPickers('));
+  assert.match(draw, /renderProjectPicker\(projects, board\.project, \{ all: ALL_PROJECTS_LABEL \}\)/);
+  assert.match(app, /const ALL_PROJECTS_LABEL = 'All Projects';/);
+  // A pick of All Projects (value '') opens /board or /list; a project opens its own address.
+  assert.match(draw, /const at = \(v, s\) => \(s \? `\/\$\{v\}\/\$\{encodeURIComponent\(s\)\}` : `\/\$\{v\}`\);/);
+  // Remembered like a project, by a value no slug can be.
+  assert.match(app, /const ALL_PROJECTS = '\*';/);
+  assert.match(draw, /localStorage\.setItem\(PROJECT_KEY, board\.project \?\? ALL_PROJECTS\);/);
+  const tasks = app.slice(app.indexOf('async function drawTasks('), app.indexOf('const sorted = new WeakMap'));
+  assert.match(tasks, /if \(savedProject\(\) === ALL_PROJECTS\) \{\s*history\.replaceState\(null, '', `\/\$\{view\}`\);\s*return drawProject\(null, view, opts\);/);
+  // The address: /board and /list with no project draw All Projects; "Tasks" goes through drawTasks.
+  assert.match(app, /\} else if \(tasks\) \{[^}]*await drawTasks\(savedTasksView\(\)\);\s*\} else if \(project && project\[2\] == null\) \{[^}]*await drawProject\(null, project\[1\]\);/);
+});
+
+test('in All Projects each card and List row names its project, and each row offers its own project\'s operator, tags and topics (SP-402)', () => {
+  const app = pageScript();
+  const card = /const card = \(t\) => `([\s\S]*?)`;/.exec(app)[1];
+  assert.match(card, /\$\{projectName\(t\)\}/);
+  const row = /const row = \(status\) => \(t\) => `[\s\S]*?<\/tr>`;/.exec(app)[0];
+  assert.match(row, /<td class="name"><a [^\n]*<\/a>\$\{projectName\(t\)\}<\/td>/);
+  assert.match(app, /const projectName = \(t\) => \(all \? `<span class="project-of quiet">\$\{escapeHtml\(t\.projectName \?\? t\.project \?\? ''\)\}<\/span>` : ''\);/);
+  assert.match(app, /\? \{ tags: knownOf\.get\(t\.project\) \?\? \[\], topics: projectOf\.get\(t\.project\)\?\.topics \?\? \[\], operator: projectOf\.get\(t\.project\)\?\.operator \?\? null \}/);
+  assert.match(drawnCss(), /td\.name \.project-of \{ display: block;/);
+});
+
+test('in All Projects the Topic picker lists every project\'s topics with its project\'s name, and a search from one carries that project (SP-402)', () => {
+  assert.equal(renderTopicPicker([{ id: 4, name: 'Docs', project: 'beta', projectName: 'B&B' }]),
+    '<label class="topic-picker">Topic: <select name="topic"><option value="" selected>Any</option>'
+    + '<option value="4" data-project="beta">Docs (B&amp;B)</option></select></label>');
+  const app = pageScript();
+  const address = app.slice(app.indexOf('function searchAddress('), app.indexOf('/** Enter in the Search field'));
+  assert.match(address, /const owner = main\.querySelector\('\.topic-picker select'\)\?\.selectedOptions\[0\]\?\.dataset\.project;\s*if \(owner && !params\.has\('project'\)\) params\.set\('project', owner\);/);
+});
+
+test('in All Projects the Add Task box asks which project first and never guesses; its Suggest side is left out (SP-402)', () => {
+  const app = pageScript();
+  const draw = app.slice(app.indexOf('async function drawProject('), app.indexOf('function wireListPickers('));
+  assert.match(draw, /<select id="add-project" required><option value="" selected>Pick a Project<\/option>/);
+  assert.match(draw, /const suggesting = !all && savedSuggestSwitch\(\);/);
+  assert.match(draw, /if \(!all\) \{\s*wireSuggestNext\(board\.project, view\);\s*wireSuggestSwitch\(\);\s*\}/);
+  const add = readFileSync(WEB('page-add-task.mjs'), 'utf8');
+  const wire = add.slice(add.indexOf('export function wireAddTask('), add.indexOf('export function savedSuggestSwitch('));
+  assert.match(wire, /const target = \(\) => shown \?\? \(pickProject\?\.value \|\| null\);/);
+  assert.match(wire, /if \(target\(\)\) return false;\s*say\('Pick the project this task is for first\.', 'error'\);/);
+  // Both ways in check first: asking for titles, and filing.
+  assert.match(wire, /const askTitles = async \(\) => \{\s*if \(noProject\(\)\) return;/);
+  assert.match(wire, /if \(stage === 'ask' && mode === 'suggest'\) return askTitles\(\);\s*if \(noProject\(\)\) return;/);
+  assert.match(wire, /drawProject\(shown == null \? null : into, view,/);
+});
+
+test('a List row\'s save in All Projects goes to that ticket in its own project and reads back on both boards (SP-402)', async () => {
+  const f = await fixture();
+  try {
+    const docs = f.store.addTopic({ project: 'beta', name: 'Docs', actor: f.operator.id });
+    const every = async () => (await f.call('GET', '/all-projects/board')).body;
+    let board = await every();
+    const theirs = board.columns.flatMap((c) => c.tickets).find((t) => t.project === 'beta');
+    assert.ok(theirs, 'the demo data holds a beta ticket');
+    assert.ok(board.columns.flatMap((c) => c.tickets).some((t) => t.project === 'alpha'), 'and an alpha one');
+    const beta = board.projects.find((p) => p.slug === 'beta');
+    assert.deepEqual(beta.topics, [{ id: docs.id, name: 'Docs' }], 'the row is offered its own project\'s topics');
+    assert.equal(beta.operator.id, f.operator.id);
+    const priority = theirs.priority === 'low' ? 'high' : 'low';
+    const patch = async (field, value) => {
+      const t = (await every()).columns.flatMap((c) => c.tickets).find((x) => x.id === theirs.id);
+      const r = await f.call('PATCH', `/tickets/${theirs.id}`, { body: { [field]: value, ifVersion: t.version } });
+      assert.equal(r.status, 200, r.text);
+    };
+    await patch('priority', priority);
+    await patch('assignee', beta.operator.id);
+    await patch('tags', [...theirs.tags, 'all-projects']);
+    await patch('topics', [docs.id]);
+    board = await every();
+    const after = board.columns.flatMap((c) => c.tickets).find((t) => t.id === theirs.id);
+    assert.equal(after.priority, priority);
+    assert.equal(after.assigneeId, beta.operator.id);
+    assert.ok(after.tags.includes('all-projects'));
+    assert.deepEqual(after.topics, [{ id: docs.id, name: 'Docs' }]);
+    const own = (await boardTickets(f, 'beta')).get(theirs.id);
+    assert.deepEqual([own.priority, own.assigneeId, own.tags, own.topics], [after.priority, after.assigneeId, after.tags, after.topics]);
+  } finally { await f.cleanup(); }
 });

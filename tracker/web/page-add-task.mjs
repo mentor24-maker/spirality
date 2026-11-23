@@ -63,7 +63,7 @@ const SUGGEST_UNANSWERED = 'No titles could be suggested: the tracker did not an
 
 /**
  * The Tasks page's Add Task box: a title and a description, filed into
- * `slug`, the project the page is showing, in `Requested`, which no loop
+ * `shown`, the project the page is showing, in `Requested`, which no loop
  * builds from, unassigned and under the signed-in person. What he types is
  * kept in this browser as he types it, so a refused submit, a sign-out or a
  * reload never loses it, and a kept draft with text in it opens the box on
@@ -92,8 +92,12 @@ const SUGGEST_UNANSWERED = 'No titles could be suggested: the tracker did not an
  * closing it files nothing and leaves the text in the form. A check that
  * fails never stops the filing: the task goes into the project shown and
  * the note says the check could not run.
+ *
+ * With no `shown` (All Projects, SP-402) the box has a Project picker of its
+ * own, and asks for one before it suggests a title or files: it never
+ * guesses. Filed, the page draws All Projects again with the new ticket.
  */
-export function wireAddTask(slug, view, adding) {
+export function wireAddTask(shown, view, adding) {
   const box = main.querySelector('details.add-task');
   const form = box.querySelector('form.request');
   const title = form.querySelector('#title');
@@ -105,6 +109,9 @@ export function wireAddTask(slug, view, adding) {
   const choiceList = choices.querySelector('.choices');
   const button = form.querySelector('button.submit-task');
   const again = form.querySelector('button.suggest-again');
+  const pickProject = form.querySelector('#add-project');
+  // The project the task goes into: the one shown, or the one picked in All Projects (null until one is).
+  const target = () => shown ?? (pickProject?.value || null);
   const draft = savedDraft();
   title.value = draft.title;
   description.value = draft.description;
@@ -139,9 +146,11 @@ export function wireAddTask(slug, view, adding) {
   // The old New request address (adding) always opens on the form: it
   // unticks Suggest and keeps that, so the page and the checkbox agree (SP-303).
   if (adding) {
-    box.querySelector('summary .suggest-switch input').checked = false;
+    const tick = box.querySelector('summary .suggest-switch input');
+    if (tick) tick.checked = false;
     form.hidden = false;
-    box.querySelector('.suggest-next').hidden = true;
+    const part = box.querySelector('.suggest-next');
+    if (part) part.hidden = true;
     try { localStorage.setItem(SUGGEST_SWITCH_KEY, '0'); } catch { /* the form still shows; a reload shows the kept side */ }
   }
   // A kept draft opens the box only on the Add Task side; it never flips the checkbox (SP-303).
@@ -179,8 +188,17 @@ export function wireAddTask(slug, view, adding) {
     again.disabled = on;
   };
 
+  // In All Projects, no project picked yet: say so and send him to the picker.
+  const noProject = () => {
+    if (target()) return false;
+    say('Pick the project this task is for first.', 'error');
+    pickProject?.focus();
+    return true;
+  };
   // Ask for five titles from the words as typed; show them, or say why not and show the Title field.
   const askTitles = async () => {
+    if (noProject()) return;
+    const slug = target();
     busy(true);
     say('Suggesting titles…');
     let titles;
@@ -210,6 +228,8 @@ export function wireAddTask(slug, view, adding) {
     e.preventDefault();
     keep();
     if (stage === 'ask' && mode === 'suggest') return askTitles();
+    if (noProject()) return;
+    const slug = target();
     // The title as shown: the picked choice, or what he typed (Write My Own Title, or after a failed suggestion).
     const picked = stage === 'pick' ? choiceList.querySelector('input[name="title-choice"]:checked')?.value : title.value;
     if (!picked) {
@@ -231,7 +251,7 @@ export function wireAddTask(slug, view, adding) {
     }
     let into = slug;
     if (suggest) {
-      const choice = await askProject(question, suggest);
+      const choice = await askProject(question, suggest, shown == null ? pickProject.selectedOptions[0]?.textContent : null);
       if (choice === 'move') into = suggest.slug;
       else if (choice !== 'keep') {
         // Closed: nothing filed, the text and the choice stay in the form.
@@ -273,10 +293,10 @@ export function wireAddTask(slug, view, adding) {
         notUploaded.push({ name: file.name, why: err.message });
       }
     }
-    // Filed in another project: open its board, where the new ticket is.
-    if (into !== slug) history.pushState(null, '', `/${view}/${encodeURIComponent(into)}`);
+    // Filed in another project: open its board, where the new ticket is. All Projects shows it where it is.
+    if (shown != null && into !== shown) history.pushState(null, '', `/${view}/${encodeURIComponent(into)}`);
     try {
-      await drawAgain(() => drawProject(into, view, { filed: ticket.id, unchecked, uploaded, notUploaded }));
+      await drawAgain(() => drawProject(shown == null ? null : into, view, { filed: ticket.id, unchecked, uploaded, notUploaded }));
     } catch (err) {
       if (err instanceof SignedOut) return drawSignIn(`You were signed out; ${ticket.id} was filed.`);
       say(`Filed ${ticket.id}, but the page could not be drawn again: ${err.message}`, 'error');
@@ -680,9 +700,11 @@ export function wireSuggestNext(slug, view) {
  * `suggest`, the project its words fit better. Answers 'move' (File in X),
  * 'keep' (Keep in the project shown) or '' (closed: file nothing).
  */
-function askProject(question, suggest) {
+function askProject(question, suggest, keepName = null) {
   question.querySelector('.project-name').textContent = suggest.name;
   question.querySelector('button[value="move"]').textContent = `File in ${suggest.name}`;
+  // All Projects: Keep names the project picked in the box, not the page's.
+  if (keepName) question.querySelector('button[value="keep"]').textContent = `Keep in ${keepName}`;
   question.returnValue = '';
   return new Promise((resolve) => {
     question.addEventListener('close', () => resolve(question.returnValue), { once: true });

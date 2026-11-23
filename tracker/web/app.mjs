@@ -610,9 +610,12 @@ function savedTasksView() {
  * Console (every project), `current` marked. A tab bar (UI_DOCTRINE 5,
  * SP-322) drawn as the last item of the Tasks title row, at its right-hand
  * end (SP-326): each tab is its own address, so a link with `aria-current`.
+ * With no `slug` (All Projects, SP-402), Board and List are `/board` and
+ * `/list`, with no project after them.
  */
 export function viewSwitch(slug, current) {
-  const views = [['board', 'Board', `/board/${encodeURIComponent(slug)}`], ['list', 'List', `/list/${encodeURIComponent(slug)}`], ['console', 'Console', '/console']];
+  const at = (v) => (slug == null ? `/${v}` : `/${v}/${encodeURIComponent(slug)}`);
+  const views = [['board', 'Board', at('board')], ['list', 'List', at('list')], ['console', 'Console', '/console']];
   return `<nav class="tabs" aria-label="View">${views.map(([v, label, href]) => `<a href="${href}"${v === current ? ' aria-current="page"' : ''}>${label}</a>`).join('')}</nav>`;
 }
 
@@ -738,9 +741,12 @@ export async function route({ place = null } = {}) {
       await drawEditProject(decodeURIComponent(editProject[1]));
     } else if (details) {
       await drawProjectDetails(decodeURIComponent(details[1]));
-    } else if (tasks || (project && project[2] == null)) {
-      // "Tasks" in the header: the selected project, in the view last used.
-      await drawTasks(tasks ? savedTasksView() : project[1]);
+    } else if (tasks) {
+      // "Tasks" in the header: the selected project (or All Projects), in the view last used.
+      await drawTasks(savedTasksView());
+    } else if (project && project[2] == null) {
+      // `/board` and `/list` with no project after them: All Projects (SP-402).
+      await drawProject(null, project[1]);
     } else if (project) {
       await drawProject(decodeURIComponent(project[2]), project[1]);
     } else {
