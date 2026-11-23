@@ -156,3 +156,43 @@ test('pageData.mjs re-exports every page\'s data file, and the style check reads
   const style = readFileSync(`${here}/style.test.mjs`, 'utf8');
   for (const name of [...pages, 'pageData-common.mjs']) assert.ok(style.includes(`'./${name}'`), `style.test.mjs reads ${name}`);
 });
+
+// everyProjectBoardOf (SP-402): All Projects on Board and List.
+test('every project\'s board is each project\'s board merged: the same eight columns, each column in the door\'s order across projects, each ticket naming its project (SP-402)', async () => {
+  const { mkdtempSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { openStore } = await import('./store.mjs');
+  const { boardOf, everyProjectBoardOf } = await import('./pageData.mjs');
+  const dir = mkdtempSync(join(tmpdir(), 'every-board-'));
+  const store = openStore(join(dir, 'tracker.db'));
+  try {
+    const op = store.createActor({ kind: 'human', name: 'Operator' });
+    store.createProject({ slug: 'alpha', name: 'Alpha', prefix: 'AL', operator: op.id });
+    store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE', operator: op.id });
+    const file = (project, name, priority = null) => store.fileTicket({ project, name, status: 'queued', priority, actor: op.id });
+    const a1 = file('alpha', 'alpha normal', 'normal');
+    const b1 = file('beta', 'beta urgent', 'urgent');
+    const a2 = file('alpha', 'alpha none');
+    const b2 = file('beta', 'beta high', 'high');
+    store.addTopic({ project: 'beta', name: 'Docs', actor: op.id });
+    const every = everyProjectBoardOf(store);
+    const queued = every.columns.find((c) => c.status === 'Queued').tickets;
+    // Urgent, high, normal, then none: one order for both projects' tickets together.
+    assert.deepEqual(queued.map((t) => t.id), [b1.id, b2.id, a1.id, a2.id]);
+    // Inside each project, the same order as that project's own board.
+    for (const slug of ['alpha', 'beta']) {
+      const own = boardOf(store, slug).columns.find((c) => c.status === 'Queued').tickets.map((t) => t.id);
+      assert.deepEqual(queued.filter((t) => t.project === slug).map((t) => t.id), own, slug);
+    }
+    assert.deepEqual(queued.map((t) => t.projectName), ['Beta', 'Beta', 'Alpha', 'Alpha']);
+    assert.deepEqual(every.columns.map((c) => c.status), boardOf(store, 'alpha').columns.map((c) => c.status));
+    assert.deepEqual(every.topics.map((t) => [t.name, t.project, t.projectName]), [['Docs', 'beta', 'Beta']]);
+    assert.deepEqual(every.projects.map((p) => [p.slug, p.operator?.id]), [['alpha', op.id], ['beta', op.id]]);
+    // `only` narrows it, as on the server.
+    assert.deepEqual(everyProjectBoardOf(store, { only: new Set(['alpha']) }).columns.flatMap((c) => c.tickets).map((t) => t.id).sort(), [a1.id, a2.id].sort());
+  } finally {
+    store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
