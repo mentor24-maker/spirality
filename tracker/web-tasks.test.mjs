@@ -563,10 +563,10 @@ test('the Tasks toolbar picks a project from a dropdown, "Project: ", the one in
   const app = pageScript();
   const draw = app.slice(app.indexOf('async function drawProject'), app.indexOf('async function copyText'));
   assert.match(draw, /api\('GET', '\/projects'\),\n  \]\);/);
-  assert.match(draw, /\$\{viewSwitch\(board\.project, view\)\}<\/div>\s*<div class="toolbar tasks-bar">\s*\$\{renderProjectPicker\(projects, board\.project, \{ all: ALL_PROJECTS_LABEL \}\)\}\s*\$\{renderTopicPicker\(board\.topics \?\? \[\]\)\}\s*\$\{searchForm\(''\)\}\s*<button type="button" class="pipeline-pod"[^>]*><\/button>\s*\$\{renderClassFilters\(board\.classes, pickedClass\)\}\s*<\/div>/, 'the tabs close the title row; the pickers, search, pod and filters are the row under it (SP-362)');
+  assert.match(draw, /\$\{viewSwitch\(board\.project, view\)\}<\/div>\s*<div class="toolbar tasks-bar">\$\{renderFilterBar\(\{\s*project: renderProjectPicker\(projects, board\.project, \{ all: true \}\),\s*pickers: \[renderTopicPicker\(board\.topics \?\? \[\]\), renderClassFilters\(board\.classes, pickedClass\)\],\s*search: searchForm\(''\),\s*pod: '<button type="button" class="pipeline-pod"[^>]*><\/button>',\s*\}\)\}<\/div>/, 'the tabs close the title row; the row under it is the one filter bar: Project, Topic and the class filters, search, then the pod (SP-362, SP-403)');
   assert.doesNotMatch(app, /Change project/);
   assert.match(draw, /querySelector\('\.project-picker select'\)\.addEventListener\('change', \(e\) => \{\s*history\.pushState\(null, '', at\(view, e\.target\.value\)\);\s*route\(\);/);
-  assert.match(readFileSync(WEB('app.css'), 'utf8'), /\.toolbar \.project-picker(, \.toolbar \.topic-picker)? \{[^}]*display: flex;/);
+  assert.match(readFileSync(WEB('app.css'), 'utf8'), /\.project-picker, \.topic-picker, \.kind-picker, \.class-filters label(, form\.search label)? \{[^}]*display: flex;/);
 });
 
 test('search bolds every occurrence of the term, any case, after escaping the ticket\'s own text', () => {
@@ -620,7 +620,7 @@ test('the search finds the demo\'s tickets in every project and names its status
 
 test('the Tasks page\'s toolbar holds the Search field, and Enter opens the results page', () => {
   const app = pageScript();
-  assert.match(app, /\$\{renderProjectPicker\(projects, board\.project, \{ all: ALL_PROJECTS_LABEL \}\)\}\s*\$\{renderTopicPicker\(board\.topics \?\? \[\]\)\}\s*\$\{searchForm\(''\)\}/);
+  assert.match(app, /pickers: \[renderTopicPicker\(board\.topics \?\? \[\]\), renderClassFilters\(board\.classes, pickedClass\)\],\s*search: searchForm\(''\),/);
   assert.match(app, /history\.pushState\(null, '', searchAddress\(form\.elements\.q\.value\.trim\(\)\)\)/);
   assert.match(app, /renderSearchResults\(answer\)/);
 });
@@ -693,7 +693,7 @@ test('the Tasks toolbar\'s Topic picker offers "Any" then the project\'s topics,
     + '<option value="4">Board</option><option value="2">R&amp;D &lt;b&gt;</option></select></label>');
   assert.equal(renderTopicPicker([]), '<label class="topic-picker">Topic: <select name="topic"><option value="" selected>Any</option></select></label>', 'a project with no topics: "Any" only');
   const app = pageScript();
-  assert.match(readFileSync(WEB('app.css'), 'utf8'), /\.toolbar \.project-picker, \.toolbar \.topic-picker \{[^}]*display: flex;/);
+  assert.match(readFileSync(WEB('app.css'), 'utf8'), /\.project-picker, \.topic-picker, \.kind-picker, \.class-filters label(, form\.search label)? \{[^}]*display: flex;/);
   // Changing Project on the Search page drops the topic before searching again.
   const wire = app.slice(app.indexOf('function wireSearch('), app.indexOf('function wireTicketLookup('));
   assert.match(wire, /if \(select\.name === 'project' && topic\) topic\.value = '';\s*go\(\);/);
@@ -779,7 +779,7 @@ test('the pod reads as a small table (SP-194, SP-326): a "Pipeline Stages" headi
   assert.match(stages, /display: grid; grid-template-rows: auto auto; grid-auto-flow: column;/, 'one column per stage, name above time (SP-326)');
   assert.doesNotMatch(stages, /grid-template-columns/, 'no fixed column count: however many stages there are');
   assert.match(pod, /flex-grow: 1;/, 'the pod widens into the free space of its row (SP-326, SP-362)');
-  assert.match(css, /\.tasks-bar \{ flex-wrap: wrap;/, 'the row under the title wraps on a narrow window (SP-362)');
+  assert.match(css, /\.tasks-bar, form\.report-scope \{ flex-wrap: wrap;/, 'the row under the title wraps on a narrow window (SP-362)');
   assert.match(rule('.toolbar .pipeline-pod .stage'), /font-weight: 700;/, 'stage names are bold');
   const green = rule('.toolbar .pipeline-pod .running').match(/color: (#[0-9a-fA-F]{6});/);
   assert.ok(green, 'a running stage has its own colour');
@@ -844,7 +844,7 @@ test('the Tasks page puts the pod between the search field and Board/List, fills
   const app = pageScript();
   const tasks = app.indexOf('<h1>Tasks</h1>', app.indexOf('async function drawProject('));
   const head = app.slice(tasks, app.indexOf('<details class="add-task">', tasks));
-  const search = head.indexOf("${searchForm('')}");
+  const search = head.indexOf("search: searchForm('')");
   const pod = head.indexOf('class="pipeline-pod"');
   const views = head.indexOf('${viewSwitch(board.project, view)}');
   // SP-322: Board/List left the toolbar for a tab bar; SP-326 put it at the right end of the title row; SP-362 moved the toolbar, pod and all, to the row under it.
@@ -1071,14 +1071,13 @@ test('the List view\'s Add Tag dropdown also offers the project\'s saved tags, t
 
 test('Board and List offer All Projects first in the Project picker, at /board and /list with no project, remembered for "Tasks" (SP-402)', () => {
   const projects = [{ slug: 'alpha', name: 'Alpha' }, { slug: 'beta', name: 'Beta' }];
-  assert.equal(renderProjectPicker(projects, null, { all: 'All Projects' }),
+  assert.equal(renderProjectPicker(projects, null, { all: true }),
     '<label class="project-picker">Project: <select name="project"><option value="" selected>All Projects</option>'
     + '<option value="alpha">Alpha</option><option value="beta">Beta</option></select></label>');
-  assert.match(renderProjectPicker(projects, 'beta', { all: 'All Projects' }), /<option value="">All Projects<\/option><option value="alpha">Alpha<\/option><option value="beta" selected>Beta<\/option>/);
+  assert.match(renderProjectPicker(projects, 'beta', { all: true }), /<option value="">All Projects<\/option><option value="alpha">Alpha<\/option><option value="beta" selected>Beta<\/option>/);
   const app = pageScript();
   const draw = app.slice(app.indexOf('async function drawProject('), app.indexOf('function wireListPickers('));
-  assert.match(draw, /renderProjectPicker\(projects, board\.project, \{ all: ALL_PROJECTS_LABEL \}\)/);
-  assert.match(app, /const ALL_PROJECTS_LABEL = 'All Projects';/);
+  assert.match(draw, /renderProjectPicker\(projects, board\.project, \{ all: true \}\)/);
   // A pick of All Projects (value '') opens /board or /list; a project opens its own address.
   assert.match(draw, /const at = \(v, s\) => \(s \? `\/\$\{v\}\/\$\{encodeURIComponent\(s\)\}` : `\/\$\{v\}`\);/);
   // Remembered like a project, by a value no slug can be.

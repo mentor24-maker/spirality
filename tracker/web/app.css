@@ -325,12 +325,13 @@ button { font: inherit; padding: 0.4rem 1rem; }
 .btn-danger:disabled, .btn-danger[aria-disabled="true"] { background: var(--btn-danger-flat-disabled); border-color: var(--btn-danger-flat-disabled); color: var(--btn-flat-ink); }
 .btn-sm { height: var(--btn-height-sm); padding: 0 0.625rem; font-size: var(--text-xs); }
 .toolbar { display: flex; gap: var(--space-7); align-items: center; justify-content: space-between; margin-bottom: 1rem; }
-/* The Tasks page's second row, under its title and tabs (SP-362, UI_DOCTRINE 4): pickers, search, the pod widening into the free space, then the filters, wrapping on a narrow window. */
-.tasks-bar { flex-wrap: wrap; justify-content: flex-start; gap: var(--space-5) var(--space-7); }
+/* Every filter bar (SP-362, SP-403, UI_DOCTRINE 4): the Tasks page's second row and Reporting's. Project first, the other pickers, search, then the pod widening into the free space, wrapping the same way on a narrow window. */
+.tasks-bar, form.report-scope { flex-wrap: wrap; justify-content: flex-start; gap: var(--space-5) var(--space-7); }
 .tasks-bar form.search { min-width: 12rem; }
 .tasks-bar .class-filters { margin: 0; }
 .tasks-bar .feature-key { margin: 0; }
-.toolbar .project-picker, .toolbar .topic-picker { font-weight: 600; display: flex; align-items: center; gap: var(--space-3); }
+/* Every filter bar's labels look the same: bold, "Project:" then its dropdown (SP-403). */
+.project-picker, .topic-picker, .kind-picker, .class-filters label, form.search label { font-weight: 600; display: flex; align-items: center; gap: var(--space-3); }
 /* The Pipeline Status pod (SP-168): when each loop stage runs next, between the search field and Board/List. */
 .toolbar .pipeline-pod { flex-grow: 1; display: flex; flex-direction: column; align-items: flex-start; margin: 10px 20px; padding: 0.3rem 0.75rem; border: 1px solid var(--navy); border-radius: var(--radius-input); background: var(--pod-bg); font-size: var(--text-sm); color: var(--ink-primary); white-space: nowrap; cursor: pointer; text-align: left; font-family: inherit; }
 .toolbar .pipeline-pod:hover { background: var(--pod-bg-hover); }
@@ -403,7 +404,7 @@ table.conflict-list td.when, table.conflict-list td.ticket, table.conflict-list 
 table.conflict-list td.files { min-width: 18rem; }
 table.conflict-list td.settings { min-width: 9rem; }
 table.conflict-list td.files code { display: block; white-space: nowrap; }
-form.report-scope { display: flex; gap: var(--space-4); align-items: center; margin: 0.5rem 0 1rem; }
+form.report-scope { display: flex; align-items: center; margin: 0.5rem 0 1rem; }
 /* The API Usage report (SP-398): its filters in one row, counts never wrapped, the All Models row bold, and token boxes wide enough for millions. */
 form.usage-filter { display: flex; flex-wrap: wrap; gap: var(--space-3) var(--space-4); align-items: center; margin: var(--space-3) 0; }
 table.usage-list td.count, table.usage-list td.at, table.usage-list td.ticket, table.usage-by-model td.count { white-space: nowrap; }
@@ -685,7 +686,6 @@ form.search input { flex: 1 1 auto; }
 .search-filters { display: flex; flex-wrap: wrap; gap: var(--space-3) var(--space-5); margin: 0 0 0.75rem; }
 .search-filters label { display: flex; align-items: center; gap: var(--space-3); }
 .class-filters { display: flex; flex-wrap: wrap; gap: var(--space-3) var(--space-5); margin: 0 0 var(--space-3); }
-.class-filters label { display: flex; align-items: center; gap: var(--space-3); font-weight: 600; }
 .search-filters form.ticket-lookup { margin: 0; }
 .search-filters input[name="ticket"] { width: calc(9ch + 2rem); }
 ol.search-results { list-style: none; padding: 0; margin: 0; max-width: 48rem; }

@@ -7,7 +7,7 @@
  * (Spirality SP-352), so a ticket that changes one page no longer edits the
  * same file as a ticket that changes another.
  */
-import { stageLooks, renderConsole, consoleForProject, renderFeatureKey, renderProjectPicker, runningAreas, tileMoves, GLIDE_AREAS, GLIDE_AREA, PIPELINE_READ } from './render.mjs';
+import { stageLooks, renderConsole, consoleForProject, renderFeatureKey, renderProjectPicker, renderFilterBar, runningAreas, tileMoves, GLIDE_AREAS, GLIDE_AREA, PIPELINE_READ } from './render.mjs';
 import { main, api, SignedOut, VIEW_KEY, savedProject, setTitle, viewSwitch, putTrail, lastPipeline, wirePipeline, refreshPipeline, route } from './app.mjs';
 
 /**
@@ -177,11 +177,11 @@ export async function drawConsole() {
   // SP-383: the row under the title holds only the Project picker, the Pipeline Stages pod and the Features key.
   main.innerHTML = `
     <div class="tasks-head title-row"><h1>Tasks</h1>${slug ? viewSwitch(slug, 'console') : ''}</div>
-    <div class="toolbar tasks-bar">
-      ${renderProjectPicker(answer.projects, pickedProject, { all: 'All Projects' })}
-      <button type="button" class="pipeline-pod" aria-haspopup="dialog" title="Open Pipeline Status"></button>
-      ${renderFeatureKey(shown.tickets)}
-    </div>
+    <div class="toolbar tasks-bar">${renderFilterBar({
+    project: renderProjectPicker(answer.projects, pickedProject, { all: true }),
+    pod: '<button type="button" class="pipeline-pod" aria-haspopup="dialog" title="Open Pipeline Status"></button>',
+    after: renderFeatureKey(shown.tickets),
+  })}</div>
     <dialog class="pipeline-status" aria-labelledby="pipeline-status-title">
       <form method="dialog">
         <button type="submit" class="close" aria-label="Close">×</button>

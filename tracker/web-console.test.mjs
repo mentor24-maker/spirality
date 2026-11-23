@@ -508,7 +508,7 @@ const consoleDraw = () => /async function drawConsole\(\) \{([\s\S]*?)\n\}/.exec
 
 test('the Console has a row under its title: Project picker, Pipeline Stages pod, then the Features key, in that order (SP-383)', () => {
   const draw = consoleDraw();
-  assert.match(draw, /\$\{slug \? viewSwitch\(slug, 'console'\) : ''\}<\/div>\s*<div class="toolbar tasks-bar">\s*\$\{renderProjectPicker\(answer\.projects, pickedProject, \{ all: 'All Projects' \}\)\}\s*<button type="button" class="pipeline-pod" aria-haspopup="dialog" title="Open Pipeline Status"><\/button>\s*\$\{renderFeatureKey\(shown\.tickets\)\}\s*<\/div>/);
+  assert.match(draw, /\$\{slug \? viewSwitch\(slug, 'console'\) : ''\}<\/div>\s*<div class="toolbar tasks-bar">\$\{renderFilterBar\(\{\s*project: renderProjectPicker\(answer\.projects, pickedProject, \{ all: true \}\),\s*pod: '<button type="button" class="pipeline-pod" aria-haspopup="dialog" title="Open Pipeline Status"><\/button>',\s*after: renderFeatureKey\(shown\.tickets\),\s*\}\)\}<\/div>/);
   // The pod is filled and opens Pipeline Status as on Board and List.
   assert.match(draw, /<dialog class="pipeline-status" aria-labelledby="pipeline-status-title">[\s\S]*<div class="pipeline-details"><\/div>/);
   assert.match(draw, /wirePipeline\(\);\s*refreshPipeline\(\);/);
@@ -525,9 +525,9 @@ test('the Console\'s row has no Topic picker, no Search box and no Kind / Starte
 });
 
 test('the Project picker starts on All Projects; choosing a project leaves only its tickets on the map, its counts and its Features key (SP-383)', () => {
-  const picker = renderProjectPicker([ALPHA, BETA], '', { all: 'All Projects' });
+  const picker = renderProjectPicker([ALPHA, BETA], '', { all: true });
   assert.match(picker, /^<label class="project-picker">Project: <select name="project"><option value="" selected>All Projects<\/option><option value="alpha">Alpha<\/option><option value="beta">Beta<\/option><\/select><\/label>$/);
-  assert.match(renderProjectPicker([ALPHA, BETA], 'beta', { all: 'All Projects' }), /<option value="">All Projects<\/option><option value="alpha">Alpha<\/option><option value="beta" selected>Beta/);
+  assert.match(renderProjectPicker([ALPHA, BETA], 'beta', { all: true }), /<option value="">All Projects<\/option><option value="alpha">Alpha<\/option><option value="beta" selected>Beta/);
   // Board and List's picker is unchanged: no All Projects.
   assert.doesNotMatch(renderProjectPicker([ALPHA, BETA], 'alpha'), /All Projects|value=""/);
   const answer = {

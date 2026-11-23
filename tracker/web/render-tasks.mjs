@@ -9,17 +9,36 @@
 import { escapeHtml, capital, option, byText, lastIfMissing } from './render-common.mjs';
 
 /**
- * The project picker on the Tasks page's toolbar: "Project: " and a
- * dropdown of every project by name, `current` (a slug) selected. Each
- * option's value is its slug, which the page opens on a change. Names are
- * typed by people, so every one is escaped. With `all` (the Console's "All
- * Projects"), that comes first, its value empty, chosen when `current` is
- * none of the projects.
+ * The words every filter bar's project picker offers for "every project"
+ * (SP-403): spelled here once, Title Case (UI_DOCTRINE), so no page can
+ * spell it its own way.
  */
-export function renderProjectPicker(projects, current, { all = null } = {}) {
+export const ALL_PROJECTS_CHOICE = 'All Projects';
+
+/**
+ * The one project picker every filter bar draws (SP-403): Board, List,
+ * Console, Topics, API Usage and Reporting. "Project: " and a dropdown of
+ * every project by name, `current` (a slug) selected. Each option's value is
+ * its slug, which the page opens on a change. Names are typed by people, so
+ * every one is escaped. With `all` (a page that can show every project),
+ * ALL_PROJECTS_CHOICE comes first, its value empty, chosen when `current` is none
+ * of the projects.
+ */
+export function renderProjectPicker(projects, current, { all = false } = {}) {
   const options = projects.map((p) => `<option value="${escapeHtml(p.slug)}"${p.slug === current ? ' selected' : ''}>${escapeHtml(p.name)}</option>`);
-  if (all !== null) options.unshift(`<option value=""${projects.some((p) => p.slug === current) ? '' : ' selected'}>${escapeHtml(all)}</option>`);
+  if (all) options.unshift(`<option value=""${projects.some((p) => p.slug === current) ? '' : ' selected'}>${ALL_PROJECTS_CHOICE}</option>`);
   return `<label class="project-picker">Project: <select name="project">${options.join('')}</select></label>`;
+}
+
+/**
+ * A filter bar's controls in the one order every bar uses (SP-403): the
+ * project picker first, then the page's other pickers (Topic, Kind, Started
+ * By, How It Ended), then the search, then the Pipeline Status pod, then
+ * anything the page keeps after them (the Console's Features key). Each part
+ * is already-drawn HTML; a part a page does not have is left out.
+ */
+export function renderFilterBar({ project = '', pickers = [], search = '', pod = '', after = '' } = {}) {
+  return [project, ...[].concat(pickers), search, pod, after].filter(Boolean).join('');
 }
 
 /**
