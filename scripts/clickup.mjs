@@ -297,6 +297,8 @@ npm run clickup -- <command> [flags]      (Loop Queue: list ${LOOP_QUEUE_LIST}, 
                                                   (enteredInWindow). Exit 2 on a bad date; 1, printing nothing, on any failed read
   bus-post --body-file <f|-> [--from <name>]      post an alarm or report to the bus project's "Team chat" ticket, read back; a message starting ALARM: is texted
   bus-read [--operator] [--since <time>]          the bus's comments, oldest first: time (ISO, UTC: feeds --since), ticket, operator|machine, author, first line
+  project-lanes                                   send the project config's projectLanes to the tracker, so each gets its own
+                                                  pause switch on the Settings page; read back, one paused.<lane>=<value> line each
   settings                                        read-only: this project's pipeline controls (the Settings page), one
                                                   name=value line each, defaults included. Exit 1 saying why when they cannot be read
   pause-check --lane <lane>                       read-only: may this lane start a pass? One line; exit 0 run, 3 paused (the Settings
@@ -3203,6 +3205,37 @@ if (cmd === 'whoami') {
   for (const l of lines) console.log(l);
   const changed = out.json.controls.filter((c) => !c.isDefault).length;
   console.error(`settings: ${lines.length} pipeline control(s) for ${project.projectSlug}, ${changed} changed from the default.`);
+  reportLimits();
+
+} else if (cmd === 'project-lanes') {
+  // A project's own lanes (its config's `projectLanes`, SP-401) to the
+  // tracker, which cannot read the config for itself: each lane it keeps
+  // gets a `paused.<lane>` switch on the project's Settings page. Run by
+  // onboarding and by hand. Sends the whole list (an empty one too), then
+  // reads the controls back and checks every lane has its switch.
+  const lanes = [...project.projectLanes];
+  const sent = await tracker.setProjectLanes(lanes);
+  if (sent.unsupported) {
+    console.error(`project-lanes: refused — ${sent.json?.err || 'this project keeps no pipeline controls'}`);
+    reportLimits();
+    process.exit(2);
+  }
+  if (!sent.res.ok) die('send the project\'s lanes', sent);
+  const kept = Array.isArray(sent.json?.lanes) ? sent.json.lanes : null;
+  if (!kept || JSON.stringify(kept) !== JSON.stringify(lanes)) {
+    console.error(`send the project's lanes FAILED — the tracker answered ${kept ? kept.join(', ') || 'none' : 'without a list'}, not ${lanes.join(', ') || 'none'}.`);
+    process.exit(1);
+  }
+  const read = await tracker.pipelineSettings();
+  if (!read.res.ok) die('read the pipeline controls back', read);
+  const missing = lanes.filter((l) => !read.json.controls.some((c) => c.key === `paused.${l}`));
+  if (missing.length) {
+    console.error(`send the project's lanes FAILED — the lanes were kept, but the controls read back with no switch for ${missing.join(', ')}.`);
+    process.exit(1);
+  }
+  for (const l of lanes) console.log(`paused.${l}=${read.json.controls.find((c) => c.key === `paused.${l}`).value}`);
+  const said = (xs) => xs.join(', ') || 'none';
+  console.error(`project-lanes: ${project.projectSlug} runs ${lanes.length} lane(s) of its own (${said(lanes)}), read back${sent.json.changed ? `: added ${said(sent.json.added ?? [])}, removed ${said(sent.json.removed ?? [])}` : ', unchanged'}.`);
   reportLimits();
 
 } else if (cmd === 'wip-check') {

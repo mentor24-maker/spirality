@@ -1956,6 +1956,47 @@ test('pipeline controls: every one reads as its default until the operator chang
   } finally { cleanup(); }
 });
 
+test('a project\'s own lanes: kept in order, checked with the config\'s rule, each one a pause switch of that project only; a dropped lane takes its switch with it (SP-401)', () => {
+  const { store, human, machine, path, cleanup } = fixture();
+  try {
+    store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE', operator: human.id });
+    const keys = (p) => store.pipelineSettings(p).map((c) => c.key);
+    const builtIn = keys('alpha');
+    assert.deepEqual(store.projectLanes('alpha'), []);
+    assert.deepEqual(store.setProjectLanes({ project: 'alpha', lanes: ['loop-handoff'], actor: machine.id }),
+      { project: 'alpha', lanes: ['loop-handoff'], added: ['loop-handoff'], removed: [], changed: true });
+    assert.equal(store.setProjectLanes({ project: 'alpha', lanes: ['loop-handoff'], actor: human.id }).changed, false, 'the operator may send them too');
+    assert.deepEqual(keys('alpha').filter((k) => !builtIn.includes(k)), ['paused.loop-handoff']);
+    assert.deepEqual(keys('beta'), builtIn, 'another project is untouched');
+    assert.throws(() => store.setPipelineSetting({ project: 'beta', setting: 'paused.loop-handoff', value: 'on', actor: human.id }), { code: 'unknown-setting' });
+
+    store.setPipelineSetting({ project: 'alpha', setting: 'paused.loop-handoff', value: 'on', actor: human.id });
+    assert.equal(store.pipelineSettings('alpha').find((c) => c.key === 'paused.loop-handoff').value, 'on');
+    const [row] = store.pipelineSettingChanges('alpha');
+    assert.deepEqual([row.setting, row.label, row.from, row.to, row.actor], ['paused.loop-handoff', 'loop-handoff paused', 'off', 'on', human.id]);
+
+    // Refused, nothing written: a bad name, a name twice, a built-in seat's name, someone else.
+    const other = store.createActor({ kind: 'human', name: 'Someone Else' });
+    assert.throws(() => store.setProjectLanes({ project: 'alpha', lanes: ['Loop_Handoff'], actor: machine.id }), { code: 'bad-lanes', message: /is not a lane name/ });
+    assert.throws(() => store.setProjectLanes({ project: 'alpha', lanes: ['a-b', 'a-b'], actor: machine.id }), { code: 'bad-lanes', message: /twice/ });
+    assert.throws(() => store.setProjectLanes({ project: 'alpha', lanes: ['loop-build'], actor: machine.id }), { code: 'bad-lanes', message: /is taken/ });
+    assert.throws(() => store.setProjectLanes({ project: 'alpha', lanes: 'loop-handoff', actor: machine.id }), { code: 'bad-lanes' });
+    assert.throws(() => store.setProjectLanes({ project: 'alpha', lanes: [], actor: other.id }), { code: 'not-allowed' });
+    assert.throws(() => store.setProjectLanes({ project: 'nope', lanes: [], actor: machine.id }), { code: 'unknown-project' });
+    assert.deepEqual(store.projectLanes('alpha'), ['loop-handoff']);
+
+    // Dropped: the switch goes, and its stored value with it; the log stays.
+    assert.deepEqual(store.setProjectLanes({ project: 'alpha', lanes: [], actor: machine.id }),
+      { project: 'alpha', lanes: [], added: [], removed: ['loop-handoff'], changed: true });
+    assert.deepEqual(keys('alpha'), builtIn);
+    const db = new DatabaseSync(path);
+    try { assert.equal(db.prepare("SELECT COUNT(*) AS n FROM pipeline_settings WHERE setting = 'paused.loop-handoff'").get().n, 0); } finally { db.close(); }
+    assert.equal(store.pipelineSettingChanges('alpha')[0].setting, 'paused.loop-handoff');
+    store.setProjectLanes({ project: 'alpha', lanes: ['loop-handoff'], actor: machine.id });
+    assert.equal(store.pipelineSettings('alpha').find((c) => c.key === 'paused.loop-handoff').value, 'off', 'listed again, it starts from the default');
+  } finally { cleanup(); }
+});
+
 test('pipeline controls: only the project\'s operator, as a person, may change one; a bad value is refused in plain words; nothing is written or logged (SP-224)', () => {
   const { store, human, machine, cleanup } = fixture();
   try {

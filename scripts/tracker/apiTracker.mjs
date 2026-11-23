@@ -330,6 +330,11 @@ export function createApiTracker({ token, baseUrl, project, listId, timeoutMs, l
       return out;
     },
 
+    /** The configured project's own lanes as the tracker keeps them, `{ project, lanes }`. Read-only. */
+    projectLanes: () => call('GET', `/pipeline-controls/${encodeURIComponent(project)}/lanes`),
+    /** Send the project config's own lanes (its `projectLanes`); the answer is the list as stored. */
+    setProjectLanes: (lanes) => call('PUT', `/pipeline-controls/${encodeURIComponent(project)}/lanes`, { lanes }),
+
     /**
      * Every project's pipeline controls this sign-in may see, `{ projects:
      * [{ project: { slug, name }, own, controls }] }`: what the relay reads

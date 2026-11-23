@@ -169,6 +169,25 @@ test('Quiet Days Before Moving: a number box from 0 to 30 with no not-yet line, 
   assert.match(app, /const numeric = \['seconds', 'count', 'days'\]\.includes\(tr\.dataset\.kind\);/);
 });
 
+test('a project\'s own lane\'s switch shows under Pause and Resume, titled like the others, and its change log names who turned it on (SP-401)', async () => {
+  const f = await fixture();
+  try {
+    const operator = f.store.getProject('alpha').operator;
+    const loop = f.store.createActor({ kind: 'machine', name: 'Lane' });
+    f.store.setProjectLanes({ project: 'alpha', lanes: ['loop-handoff'], actor: loop.id });
+    f.store.setPipelineSetting({ project: 'alpha', setting: 'paused.loop-handoff', value: 'on', actor: operator });
+    const html = renderPipelineControls(pipelineControlsOf(f.store, 'alpha', { reader: operator }));
+    const pause = html.slice(html.indexOf('<h4>Pause and Resume</h4>'), html.indexOf('<h4>Work-in-Progress Cap</h4>'));
+    assert.match(pause, /data-control="paused\.relay"[\s\S]*data-control="paused\.loop-handoff"/, 'after the built-in lanes');
+    assert.match(pause, /<label for="[^"]+">loop-handoff Paused<\/label>/);
+    const log = html.slice(html.indexOf('<h4>Change Log</h4>'));
+    assert.match(log, /loop-handoff paused/);
+    assert.match(log, new RegExp(f.store.getActor(operator).name));
+    const others = renderPipelineControls(pipelineControlsOf(f.store, 'beta', { reader: operator }) ?? { controls: [], groups: [] });
+    assert.doesNotMatch(others, /loop-handoff/);
+  } finally { await f.cleanup(); }
+});
+
 test('each model on the Settings page says what its lane\'s last pass ran on, read from the lane\'s START line, and says plainly while the next pass has yet to pick up a change (SP-239)', async () => {
   const f = await fixture();
   try {

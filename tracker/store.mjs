@@ -64,6 +64,13 @@
  *    value, new value, who, when) in that transaction, and the value is read
  *    back before it returns. Setting a control to the value it already has
  *    writes nothing and logs nothing.
+ *  - A project's own lanes (its config's `projectLanes`, which the tracker
+ *    cannot read for itself) are one `project_lanes` row per lane, in the
+ *    config's order, sent by the project's door (`project-lanes`) and
+ *    checked with the config's own rule (lib/projectConfig.mjs). Each one
+ *    gives the project a `paused.<lane>` control. Sending a list replaces
+ *    the one kept, read back in the same transaction; a lane dropped from it
+ *    takes its stored switch value with it (its change log stays).
  *  - A project's release (docs/INTEGRATION.md, "How a change reaches the projects") is a
  *    record, next to its pipeline controls: one `project_releases` row each
  *    time a release (`release-<n>`, lib/releases.mjs) is named for it, with
@@ -166,6 +173,7 @@ import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypt
 import { DatabaseSync } from 'node:sqlite';
 import loopStatuses from '../lib/loopStatuses.js';
 import { checkControl, ControlError, controlOf, withValues } from './pipelineControls.mjs';
+import { projectLanesProblem } from '../lib/projectConfig.mjs';
 import { isReleaseName, rollBackTarget } from '../lib/releases.mjs';
 import { normalFiles } from '../lib/prFiles.js';
 import { classValue } from '../lib/ticketClass.js';
@@ -426,6 +434,12 @@ CREATE TABLE IF NOT EXISTS pipeline_setting_changes (
   at          TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS pipeline_setting_changes_by_project ON pipeline_setting_changes (project, id);
+CREATE TABLE IF NOT EXISTS project_lanes (
+  project     TEXT NOT NULL REFERENCES projects(slug),
+  lane        TEXT NOT NULL,
+  position    INTEGER NOT NULL,
+  PRIMARY KEY (project, lane)
+);
 CREATE TABLE IF NOT EXISTS project_releases (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   project     TEXT NOT NULL REFERENCES projects(slug),
@@ -1942,6 +1956,7 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
         // made later under the same slug starts from the defaults.
         db.prepare('DELETE FROM pipeline_settings WHERE project = ?').run(slug);
         db.prepare('DELETE FROM pipeline_setting_changes WHERE project = ?').run(slug);
+        db.prepare('DELETE FROM project_lanes WHERE project = ?').run(slug);
         db.prepare('DELETE FROM project_releases WHERE project = ?').run(slug);
         db.prepare('DELETE FROM pr_files WHERE project = ?').run(slug);
         db.prepare('DELETE FROM next_suggestions WHERE project = ?').run(slug);
@@ -2539,7 +2554,51 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
       if (!this.getProject(project)) throw new StoreError('unknown-project', `no project "${project}".`);
       const stored = Object.fromEntries(db.prepare('SELECT setting, value FROM pipeline_settings WHERE project = ?').all(String(project))
         .map((r) => [r.setting, r.value]));
-      return withValues(stored);
+      return withValues(stored, this.projectLanes(project));
+    },
+
+    /** A project's own lanes, as its door last sent them, in that order; [] for none or no project. */
+    projectLanes(project) {
+      return db.prepare('SELECT lane FROM project_lanes WHERE project = ? ORDER BY position').all(String(project)).map((r) => r.lane);
+    },
+
+    /**
+     * Keep `lanes` as the project's own lanes, in place of the list kept
+     * before: the project's door sends its config's `projectLanes`. Only a
+     * loop sign-in or the project's operator, as a person, may
+     * (`not-allowed`); the names are checked with the config's own rule
+     * (`bad-lanes`, nothing written). A lane no longer listed loses its
+     * stored `paused.<lane>` value. Read back in the same transaction;
+     * answers `{ project, lanes, added, removed, changed }`.
+     */
+    setProjectLanes({ project, lanes, actor }) {
+      const problem = projectLanesProblem(lanes);
+      if (problem) throw new StoreError('bad-lanes', `the project's lanes: "projectLanes" ${problem}; nothing was stored.`);
+      return transaction(() => {
+        const p = this.getProject(project);
+        if (!p) throw new StoreError('unknown-project', `no project "${project}".`);
+        requireActor(actor, 'the sender');
+        const who = this.getActor(actor);
+        if (who.kind !== 'machine' && p.operator !== who.id) {
+          throw new StoreError('not-allowed', `only a loop sign-in or ${p.name}'s operator may say which lanes ${p.name} runs of its own.`);
+        }
+        const before = this.projectLanes(p.slug);
+        const added = lanes.filter((l) => !before.includes(l));
+        const removed = before.filter((l) => !lanes.includes(l));
+        if (JSON.stringify(before) === JSON.stringify(lanes)) return { project: p.slug, lanes: before, added, removed, changed: false };
+        db.prepare('DELETE FROM project_lanes WHERE project = ?').run(p.slug);
+        lanes.forEach((lane, i) => db.prepare('INSERT INTO project_lanes (project, lane, position) VALUES (?, ?, ?)').run(p.slug, lane, i + 1));
+        // A dropped lane's switch would come back as it was if the lane
+        // were listed again later; it starts from the default instead.
+        for (const lane of removed) {
+          if (!controlOf(`paused.${lane}`)) db.prepare('DELETE FROM pipeline_settings WHERE project = ? AND setting = ?').run(p.slug, `paused.${lane}`);
+        }
+        const after = this.projectLanes(p.slug);
+        if (JSON.stringify(after) !== JSON.stringify(lanes)) {
+          throw new StoreError('write-failed', `${p.name}'s lanes read back as ${after.join(', ') || 'none'}, not ${lanes.join(', ') || 'none'}.`);
+        }
+        return { project: p.slug, lanes: after, added, removed, changed: true };
+      });
     },
 
     /**
@@ -2553,13 +2612,14 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
      */
     setPipelineSetting({ project, setting, value, actor }) {
       let to;
+      const lanes = this.projectLanes(project);
       try {
-        to = checkControl(setting, value);
+        to = checkControl(setting, value, lanes);
       } catch (err) {
         if (err instanceof ControlError) throw new StoreError(err.code, err.message);
         throw err;
       }
-      const c = controlOf(setting);
+      const c = controlOf(setting, lanes);
       return transaction(() => {
         const p = this.getProject(project);
         if (!p) throw new StoreError('unknown-project', `no project "${project}".`);
@@ -2587,8 +2647,9 @@ export function openStore(path, { now = () => new Date().toISOString() } = {}) {
      */
     pipelineSettingChanges(project, { limit = 200 } = {}) {
       const n = Number.isInteger(limit) && limit > 0 ? limit : 200;
+      const lanes = this.projectLanes(project);
       return db.prepare('SELECT * FROM pipeline_setting_changes WHERE project = ? ORDER BY id DESC LIMIT ?').all(String(project), n)
-        .map((r) => ({ id: num(r.id), setting: r.setting, label: controlOf(r.setting)?.label ?? r.setting, from: r.from_value, to: r.to_value, actor: num(r.actor), at: r.at }));
+        .map((r) => ({ id: num(r.id), setting: r.setting, label: controlOf(r.setting, lanes)?.label ?? r.setting, from: r.from_value, to: r.to_value, actor: num(r.actor), at: r.at }));
     },
 
     /**

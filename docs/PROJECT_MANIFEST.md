@@ -415,6 +415,14 @@ has no sign-in and its passes are refused. The names `operator`,
 `loop-build`, `loop-review`, `loop-intake`, `relay`, `hand-run` and `name` are
 taken.
 
+The tracker cannot read this file, so `npm run clickup -- project-lanes`
+sends it the list (SP-401), checked with the same rule and read back. Each
+lane it keeps gets its own pause switch on the project's Settings page,
+`paused.<lane>` (titled `<lane> Paused`, under Pause and Resume), which the
+lane's runner obeys beside the whole-pipeline switch. Until the list is sent,
+the lane obeys the whole-pipeline switch alone (SP-400). Send it again after
+any change to this list: a lane dropped from it loses its switch.
+
 - **Kind**: list of lane names
 - **Required**: no
 - **Default**: `[]`

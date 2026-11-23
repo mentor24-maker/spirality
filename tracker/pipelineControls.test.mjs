@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { CONTROLS, GROUPS, RELEASE_GROUP, LANES, MODEL_LANES, MODELS, checkControl, settingLines, withValues } from './pipelineControls.mjs';
+import { CONTROLS, GROUPS, RELEASE_GROUP, LANES, MODEL_LANES, MODELS, checkControl, controlOf, controlsFor, settingLines, withValues } from './pipelineControls.mjs';
 import { intervalOf } from '../scripts/lib/loopSchedule.mjs';
 import wipCap from '../lib/wipCap.js';
 
@@ -41,6 +41,29 @@ test('the settings lines are every control, name=value, defaults included', () =
   assert.equal(lines.length, CONTROLS.length);
   assert.ok(lines.includes('wake.loop-build=900'));
   assert.ok(lines.includes('wip-cap=5'));
+});
+
+test('a project\'s own lanes each add one pause switch after the built-in ones, on that project only, and never hide or change a built-in control (SP-401)', () => {
+  assert.equal(controlsFor([]), CONTROLS);
+  assert.equal(controlsFor(), CONTROLS);
+  const mine = controlsFor(['loop-handoff', 'loop-tidy']);
+  const keys = mine.map((c) => c.key);
+  assert.deepEqual(keys.filter((k) => !CONTROLS.some((c) => c.key === k)), ['paused.loop-handoff', 'paused.loop-tidy']);
+  for (const c of CONTROLS) assert.deepEqual(mine.find((m) => m.key === c.key), c, `${c.key} is the same control`);
+  assert.equal(keys.indexOf('paused.loop-handoff'), keys.indexOf(`paused.${LANES.at(-1)}`) + 1, 'right after the built-in lanes\' switches');
+  assert.deepEqual(controlOf('paused.loop-handoff', ['loop-handoff']), {
+    key: 'paused.loop-handoff', group: 'pause', kind: 'switch', label: 'loop-handoff paused', title: 'loop-handoff Paused', default: 'off', ownLane: true,
+  });
+  // A built-in lane named again adds nothing, and a name twice adds one.
+  assert.equal(controlsFor(['loop-build', 'relay']), CONTROLS);
+  assert.equal(controlsFor(['loop-handoff', 'loop-handoff']).length, CONTROLS.length + 1);
+  assert.equal(controlOf('paused.loop-handoff'), null);
+  assert.equal(checkControl('paused.loop-handoff', 'on', ['loop-handoff']), 'on');
+  assert.throws(() => checkControl('paused.loop-handoff', 'on'), { code: 'unknown-setting' });
+  assert.throws(() => checkControl('paused.loop-handoff', 'on', ['loop-other']), { code: 'unknown-setting', message: /paused\.loop-other/ });
+  const values = withValues({ 'paused.loop-handoff': 'on' }, ['loop-handoff']);
+  assert.equal(values.find((c) => c.key === 'paused.loop-handoff').value, 'on');
+  assert.equal(withValues({ 'paused.loop-handoff': 'on' }).find((c) => c.key === 'paused.loop-handoff'), undefined, 'a stored value for a lane not listed is not a control');
 });
 
 test('no project id, slug or name is written into the controls (engineering rule 2)', () => {
