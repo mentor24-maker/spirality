@@ -60,18 +60,21 @@ export function passLimitMs(lane, env = process.env) {
  * settingsPauseVerdict, which scripts/pause_check.sh asks through the door),
  * so the heartbeat and the lane never disagree: a page that cannot be read,
  * or that lacks a lane's switch, is PAUSED to the runner (it fails safe), so
- * the lane is deliberately not starting and is never called quiet here. Bus
+ * the lane is deliberately not starting and is never called quiet here. A
+ * lane the project config names in `projectLanes` (pass them in) obeys the
+ * whole-pipeline switch alone while it has no switch of its own, as the
+ * runner's pause-check reads it. Bus
  * posts go through the same tracker, so an outage that hides the page could
  * not carry an alarm either. The interval falls back to the lane's default
  * (scripts/lib/loopSchedule.mjs), as the lanes themselves do.
  */
-export function laneSettings(settings, lane) {
+export function laneSettings(settings, lane, { projectLanes = [] } = {}) {
   const ok = Boolean(settings && settings.ok);
   const controls = ok
     ? String(settings.text).split('\n').map((l) => l.trim()).filter((l) => l.includes('='))
       .map((l) => ({ key: l.slice(0, l.indexOf('=')), value: l.slice(l.indexOf('=') + 1) }))
     : [];
-  const verdict = settingsPauseVerdict(ok ? { ok: true, controls } : { ok: false, why: (settings && settings.why) || 'the Settings page could not be read' }, lane);
+  const verdict = settingsPauseVerdict(ok ? { ok: true, controls } : { ok: false, why: (settings && settings.why) || 'the Settings page could not be read' }, lane, { projectLanes });
   const pause = { paused: verdict.paused, pausedWhy: verdict.paused ? verdict.line : null };
   const { seconds } = ok ? wakeFrom(settings.text, lane) : {};
   return seconds
@@ -147,7 +150,7 @@ export function runHeartbeat({ config, check = false, now = Date.now(), readLog,
   const emitters = {};
   const entries = [];
   for (const lane of LANES) {
-    const set = laneSettings(settings, lane);
+    const set = laneSettings(settings, lane, { projectLanes: config.projectLanes ?? [] });
     if (!installed(lane)) { rows.push({ lane, word: 'not installed', note: `no launchd job ${config.launchdPrefix}.${lane}` }); continue; }
     if (set.paused) { rows.push({ lane, word: 'paused', note: `${set.pausedWhy}; a quiet log is expected` }); continue; }
     const log = readLog(lane);

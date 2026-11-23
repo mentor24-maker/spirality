@@ -3261,7 +3261,9 @@ if (cmd === 'whoami') {
   // that did not work is exit 3, paused, in words that say so; only a project
   // whose tickets are not on the tracker (no controls exist) runs unasked.
   // A lane the controls do not list is not refused here: the verdict finds
-  // no switch for it and counts it as paused, saying which setting is missing.
+  // no switch for it and counts it as paused, saying which setting is missing,
+  // unless the project config names it in projectLanes: then it obeys the
+  // whole-pipeline switch alone until it has a switch of its own.
   const lane = arg('lane');
   if (!lane || !/^[a-z][a-z-]*$/.test(lane)) {
     console.error(`pause-check: refused — --lane names the lane asking, e.g. loop-build or relay; got ${lane == null ? 'none' : `"${lane}"`}.`);
@@ -3276,7 +3278,7 @@ if (cmd === 'whoami') {
   } catch (err) {
     read = { ok: false, why: err.message };
   }
-  const verdict = settingsPauseVerdict(read, lane);
+  const verdict = settingsPauseVerdict(read, lane, { projectLanes: project.projectLanes });
   console.log(verdict.line);
   reportLimits();
   process.exit(verdict.code);

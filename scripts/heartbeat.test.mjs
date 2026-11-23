@@ -7,6 +7,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, unlink
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 import { runHeartbeat, laneSettings, passLimitMs, readLaneLog, clearStamp } from './heartbeat.mjs';
 import { LANES } from '../lib/onboardLanes.mjs';
 
@@ -227,4 +228,19 @@ test('no list id, project name or label is written in the heartbeat\'s code: eve
     }
     assert.doesNotMatch(code, /~\/loop-logs|com\.(spirality|starcaster)\b/i, `${file} names a log folder or label of its own`);
   }
+});
+
+test('a lane the project config names in projectLanes gets the same paused/running answer as pause-check (SP-400)', () => {
+  const { settingsPauseVerdict } = createRequire(import.meta.url)('../lib/pipelinePause.js');
+  const opts = { projectLanes: ['loop-handoff'] };
+  const asControls = (text) => text.split('\n').map((l) => ({ key: l.slice(0, l.indexOf('=')), value: l.slice(l.indexOf('=') + 1) }));
+  for (const text of [SETTINGS, SETTINGS.replace('paused=off', 'paused=on')]) {
+    const set = laneSettings({ ok: true, text }, 'loop-handoff', opts);
+    const check = settingsPauseVerdict({ ok: true, controls: asControls(text), changes: [] }, 'loop-handoff', opts);
+    assert.equal(set.paused, check.paused, text);
+    assert.equal(set.pausedWhy, check.paused ? check.line : null);
+  }
+  assert.equal(laneSettings({ ok: true, text: SETTINGS }, 'loop-handoff', opts).paused, false, 'the whole pipeline is not paused: it runs');
+  assert.equal(laneSettings({ ok: true, text: SETTINGS }, 'loop-handoff').paused, true, 'not named in projectLanes: still fails safe');
+  assert.equal(laneSettings({ ok: false, why: 'down' }, 'loop-handoff', opts).paused, true, 'an unreadable page still pauses it');
 });
