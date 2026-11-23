@@ -11,7 +11,12 @@
  *   wake.<lane>    seconds between one pass of the lane and the next,
  *                  60 to 86,400; default scripts/lib/loopSchedule.mjs
  *   paused         the whole pipeline, on or off; default off
- *   paused.<lane>  one lane, on or off; default off
+ *   paused.<lane>  one lane, on or off; default off. Besides the built-in
+ *                  lanes, each lane a project names in its config's
+ *                  `projectLanes` (a hand-off lane, say) has one, on
+ *                  that project only, once the door has sent the tracker
+ *                  those names (`npm run clickup -- project-lanes`): see
+ *                  controlsFor below
  *   wip-cap        the most tickets in flight at once, 1 to 50;
  *                  default lib/wipCap.js (DEFAULT_WIP_CAP)
  *   model.<lane>   the model a lane's passes run on: `default` (Claude's
@@ -96,9 +101,31 @@ export const CONTROLS = Object.freeze([
 
 const BY_KEY = new Map(CONTROLS.map((c) => [c.key, c]));
 
-/** The control named `key`, or null. */
-export function controlOf(key) {
-  return BY_KEY.get(String(key ?? '')) ?? null;
+/** A project's own lane's pause switch: the same switch the built-in lanes have. */
+const ownLaneSwitch = (lane) => control({ key: `paused.${lane}`, group: 'pause', kind: 'switch', label: `${lane} paused`, title: `${lane} Paused`, default: 'off', ownLane: true });
+
+/**
+ * One project's controls: CONTROLS, with a pause switch for each of the
+ * project's own lanes (`projectLanes`, the names the tracker keeps for it)
+ * right after the built-in lanes' switches. A name that is a built-in lane
+ * adds nothing (it has its switch already), so no built-in control is ever
+ * hidden or changed by a project's list. With no lanes, CONTROLS itself.
+ */
+export function controlsFor(projectLanes = []) {
+  const extra = (Array.isArray(projectLanes) ? projectLanes : [])
+    .filter((lane, i, all) => typeof lane === 'string' && lane !== '' && !LANES.includes(lane) && all.indexOf(lane) === i)
+    .filter((lane) => !BY_KEY.has(`paused.${lane}`));
+  if (!extra.length) return CONTROLS;
+  const at = CONTROLS.findLastIndex((c) => c.group === 'pause') + 1;
+  return Object.freeze([...CONTROLS.slice(0, at), ...extra.map(ownLaneSwitch), ...CONTROLS.slice(at)]);
+}
+
+/** The control named `key` (among a project's, given its own lanes), or null. */
+export function controlOf(key, projectLanes = []) {
+  const k = String(key ?? '');
+  const builtIn = BY_KEY.get(k);
+  if (builtIn) return builtIn;
+  return controlsFor(projectLanes).find((c) => c.key === k) ?? null;
 }
 
 /** A refusal with a plain message, which the store and server pass on as it is. */
@@ -119,11 +146,12 @@ function wholeNumber(value) {
  * `value` as `key` stores it (always text), or a ControlError saying what is
  * wrong in words Dane can act on. Seconds, days and the cap are whole
  * numbers in range; a switch is `on` or `off` (true and false are read as those); a
- * model is `default` or one of MODELS.
+ * model is `default` or one of MODELS. `projectLanes` is the project's own
+ * lanes: their switches are its settings too, and no other project's.
  */
-export function checkControl(key, value) {
-  const c = controlOf(key);
-  if (!c) throw new ControlError('unknown-setting', `there is no pipeline setting "${key}"; the settings are ${CONTROLS.map((x) => x.key).join(', ')}.`);
+export function checkControl(key, value, projectLanes = []) {
+  const c = controlOf(key, projectLanes);
+  if (!c) throw new ControlError('unknown-setting', `there is no pipeline setting "${key}"; the settings are ${controlsFor(projectLanes).map((x) => x.key).join(', ')}.`);
   if (c.kind === 'seconds' || c.kind === 'count' || c.kind === 'days') {
     const n = wholeNumber(value);
     const unit = c.kind === 'seconds' ? ' seconds' : c.kind === 'days' ? ' days' : '';
@@ -144,10 +172,10 @@ export function checkControl(key, value) {
 /**
  * Every control with its value: the stored one, or its default when none is
  * stored. `stored` is `{ key: value }`. Answers `[{ ...control, value,
- * isDefault }]` in CONTROLS order.
+ * isDefault }]` in controlsFor(projectLanes) order.
  */
-export function withValues(stored = {}) {
-  return CONTROLS.map((c) => {
+export function withValues(stored = {}, projectLanes = []) {
+  return controlsFor(projectLanes).map((c) => {
     const value = Object.hasOwn(stored, c.key) ? stored[c.key] : c.default;
     return { ...c, value, isDefault: value === c.default };
   });

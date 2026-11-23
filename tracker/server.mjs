@@ -1060,6 +1060,29 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
         .map((p) => pipelineControlsOf(store, p.slug, { reader: me.id, lanes: lanesFor(p.slug), ownProject, newest }));
       return [200, { projects }];
     }
+    // A project's own lanes (its config's `projectLanes`), which this
+    // tracker cannot read for itself: the project's door sends them
+    // (`npm run clickup -- project-lanes`), a loop sign-in or the project's
+    // operator, and each one gets a pause switch of its own in the
+    // project's controls. The answer is the list as stored, read back.
+    if (parts[0] === 'pipeline-controls' && parts.length === 3 && parts[2] === 'lanes') {
+      const project = requireProject(parts[1], me);
+      if (method === 'GET') return [200, { project: project.slug, lanes: store.projectLanes(project.slug) }];
+      if (method === 'PUT') {
+        const body = await readJson(req);
+        checkBody(body, me, ['lanes']);
+        let saved;
+        try {
+          saved = store.setProjectLanes({ project: project.slug, lanes: body.lanes, actor: me.id });
+        } catch (err) {
+          if (err instanceof StoreError && err.code === 'not-allowed') throw new HttpError(403, err.code, err.message);
+          if (err instanceof StoreError && err.code === 'write-failed') throw new HttpError(500, err.code, err.message);
+          throw err;
+        }
+        log(`project lanes ${project.slug} ${saved.changed ? `now ${saved.lanes.join(',') || 'none'}` : 'unchanged'} actor=${me.id}`);
+        return [200, saved];
+      }
+    }
     if (parts[0] === 'pipeline-controls' && parts.length === 2) {
       const project = requireProject(parts[1], me);
       if (method === 'GET') return [200, pipelineControlsOf(store, project.slug, { reader: me.id, lanes: lanesFor(project.slug), ownProject, newest: await newestNow() })];
@@ -1070,7 +1093,7 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
         const body = await readJson(req);
         checkBody(body, me, ['setting', 'value']);
         // The tracker's home project always runs main: no release setting there.
-        const group = GROUPS.find((g) => g.key === controlOf(body.setting)?.group);
+        const group = GROUPS.find((g) => g.key === controlOf(body.setting, store.projectLanes(project.slug))?.group);
         if (group?.notOnOwnProject && ownProject != null && project.slug === ownProject) {
           throw new HttpError(409, 'own-project', `${project.name} is the tracker's home project: its lanes always run main, so "${group.title}" is not set for it.`);
         }

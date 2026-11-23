@@ -174,6 +174,8 @@ export function createClickupTracker({ token, apiBase, timeoutMs, log = console.
     // window to count on a ClickUp project (SP-206).
     // The pipeline controls live in the tracker's own data (SP-224); ClickUp keeps none.
     pipelineSettings: async () => unsupported('the pipeline controls are kept only in the tracker; this project\'s tickets are on ClickUp, where there are none to read.'),
+    projectLanes: async () => unsupported('the pipeline controls are kept only in the tracker; this project\'s tickets are on ClickUp, where there are none to read.'),
+    setProjectLanes: async () => unsupported('the pipeline controls are kept only in the tracker; this project\'s tickets are on ClickUp, where there is nothing to send its lanes to.'),
     allPipelineControls: async () => unsupported('the pipeline controls are kept only in the tracker; this project\'s tickets are on ClickUp, where there are none to read.'),
     // Spirality's releases are a record in the tracker (SP-265); ClickUp keeps none.
     releases: async () => unsupported('which Spirality release each project runs is kept only in the tracker; this project\'s tickets are on ClickUp.'),

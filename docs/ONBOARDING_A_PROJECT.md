@@ -612,6 +612,14 @@ post rules are in [PROJECT_MANIFEST.md](PROJECT_MANIFEST.md) and
      `TRACKER_TOKEN_NAME must name a loop's own tracker secret (...), not
      "TRACKER_TOKEN_LOOP_HANDOFF". A lane of this project's own signs in
      only once its name is in the project config's "projectLanes".`
+  5. Send the lane's name to the tracker, so it gets its own pause switch
+     on the project's Settings page (SP-401). From Spirality's folder,
+     with `SPIRALITY_PROJECT` naming the project's checkout:
+     `SPIRALITY_PROJECT=~/WebApps/<slug> npm run clickup -- project-lanes`.
+     It prints one line per lane,
+     `paused.loop-handoff=off`, read back from the tracker; `settings`
+     lists the same line from then on. Run it again whenever
+     `projectLanes` changes.
 
   A lane name is lower-case words joined by single dashes, listed once, and
   never a built-in seat's name (`operator`, `loop-build`, `loop-review`,
