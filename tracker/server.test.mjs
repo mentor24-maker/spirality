@@ -4064,39 +4064,14 @@ test('the API usage rows (SP-398): a loop records one, a session recorded twice 
   } finally { await f.cleanup(); }
 });
 
-test('GET /all-projects/board: every project an admin or a loop may see, only their own projects for anyone else, each ticket naming its project (SP-402)', async () => {
+test('there is no GET /all-projects/board: every project\'s board at once froze the Tasks page, so SP-404 took it out', async () => {
   const f = await fixture();
   try {
-    f.store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE', operator: f.human.id });
-    const a = f.store.fileTicket({ project: 'alpha', name: 'In alpha', status: 'queued', actor: f.machine.id });
-    const b = f.store.fileTicket({ project: 'beta', name: 'In beta', status: 'queued', actor: f.machine.id });
-    const ids = (board) => board.columns.flatMap((c) => c.tickets).map((t) => t.id).sort();
-    for (const token of [f.humanToken, f.machineToken]) {
-      const all = await f.call('GET', '/all-projects/board', { token });
-      assert.equal(all.status, 200, all.text);
-      assert.equal(all.body.project, null);
-      assert.equal(all.body.all, true);
-      assert.deepEqual(all.body.columns.map((c) => c.status), ['Requested', 'Rework', 'Queued', 'Building', 'In review', 'Needs your input', 'Ready to launch', 'Live']);
-      assert.deepEqual(ids(all.body), [a.id, b.id].sort());
-      const queued = all.body.columns.find((c) => c.status === 'Queued').tickets;
-      assert.deepEqual(queued.map((t) => [t.id, t.project, t.projectName]).sort(), [[a.id, 'alpha', 'Alpha'], [b.id, 'beta', 'Beta']].sort());
-      assert.deepEqual(all.body.projects.map((p) => p.slug), ['alpha', 'beta']);
-    }
-    // Someone on alpha only: alpha's tickets, never beta's, and beta named nowhere.
-    const other = f.store.createActor({ kind: 'human', name: 'Other' });
-    const otherToken = f.store.issueToken(other.id);
-    f.store.addMember({ project: 'alpha', actor: other.id, by: f.human.id });
-    const theirs = await f.call('GET', '/all-projects/board', { token: otherToken });
-    assert.equal(theirs.status, 200, theirs.text);
-    assert.deepEqual(ids(theirs.body), [a.id]);
-    assert.deepEqual(theirs.body.projects.map((p) => p.slug), ['alpha']);
-    assert.doesNotMatch(theirs.text, /beta|Beta|In beta/);
-    // On no project at all: an empty board, never someone else's.
-    const none = f.store.createActor({ kind: 'human', name: 'Nobody Yet' });
-    const empty = await f.call('GET', '/all-projects/board', { token: f.store.issueToken(none.id) });
-    assert.equal(empty.status, 200);
-    assert.deepEqual(ids(empty.body), []);
-    // Signed out: refused.
-    assert.equal((await f.call('GET', '/all-projects/board', { token: null })).status, 401);
+    f.store.fileTicket({ project: 'alpha', name: 'In alpha', status: 'queued', actor: f.machine.id });
+    const gone = await f.call('GET', '/all-projects/board', { token: f.humanToken });
+    assert.equal(gone.status, 404, gone.text);
+    assert.doesNotMatch(gone.text, /In alpha/);
+    // One project's board still answers.
+    assert.equal((await f.call('GET', '/projects/alpha/board', { token: f.humanToken })).status, 200);
   } finally { await f.cleanup(); }
 });
