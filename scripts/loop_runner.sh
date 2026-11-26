@@ -216,19 +216,76 @@ read_claude_token() {
 # enters this session's environment or its log.
 export TRACKER_TOKEN_NAME="TRACKER_TOKEN_$(printf '%s' "$SKILL" | tr 'a-z-' 'A-Z_')"
 
-# One runner per skill. A stale lock (its pid gone) is announced and taken over,
-# so a reboot never leaves the loop dead behind a lock nobody holds.
+# Who holds a lock (SP-407). A pid alone is not enough: when the Mini froze
+# and restarted on 2026-11-26, four lanes' locks named pids that, after the
+# boot, belonged to unrelated programs (remindd, AirPlayUIAgent, another
+# lane's runner), so `kill -0` said "alive" and every start refused for hours.
+# A lock therefore records the boot it was taken in and its holder's start
+# time beside the pid, and a holder counts only while it is the very process
+# that wrote the lock, or, for a lock written before these were recorded, a
+# loop_runner.sh for this lane. LOOP_RUNNER_BOOT_ID stands in for the boot in
+# the tests.
+current_boot() {
+  if [ -n "${LOOP_RUNNER_BOOT_ID:-}" ]; then echo "$LOOP_RUNNER_BOOT_ID"; return 0; fi
+  local boot
+  boot="$(sysctl -n kern.boottime 2>/dev/null | sed -n 's/^{ sec = \([0-9][0-9]*\),.*/\1/p')"
+  [ -n "$boot" ] || boot="$(cat /proc/sys/kernel/random/boot_id 2>/dev/null || true)"
+  echo "$boot"
+}
+process_started() { ps -p "$1" -o lstart= 2>/dev/null | sed 's/^ *//; s/ *$//'; }
+process_command() { ps -p "$1" -o command= 2>/dev/null | sed 's/^ *//; s/ *$//'; }
+
+# Write this process's ownership into the lock folder it has just made.
+claim_lock() {
+  echo "$$" > "$1/pid"
+  current_boot > "$1/boot"
+  process_started "$$" > "$1/started"
+}
+
+# lock_holder_live <lock dir> <runner pattern>...: exit 0 when the lock's
+# holder is real; otherwise exit 1 with why it is stale in LOCK_STALE_WHY.
+# A pattern is a shell glob the holder's command line must match (only asked
+# of a lock with no start time recorded).
+lock_holder_live() {
+  local lock="$1"; shift
+  local pid boot now started cmd pattern
+  LOCK_HOLDER_PID="$(cat "$lock/pid" 2>/dev/null || true)"
+  pid="$LOCK_HOLDER_PID"
+  if [ -z "$pid" ]; then LOCK_STALE_WHY="no pid recorded"; return 1; fi
+  if ! kill -0 "$pid" 2>/dev/null; then LOCK_STALE_WHY="pid $pid, no such process"; return 1; fi
+  boot="$(cat "$lock/boot" 2>/dev/null || true)"
+  now="$(current_boot)"
+  if [ -n "$boot" ] && [ -n "$now" ] && [ "$boot" != "$now" ]; then
+    LOCK_STALE_WHY="pid $pid, written before the machine last started (boot $boot, now $now)"; return 1
+  fi
+  started="$(cat "$lock/started" 2>/dev/null || true)"
+  if [ -n "$started" ]; then
+    [ "$started" = "$(process_started "$pid")" ] && return 0
+    LOCK_STALE_WHY="pid $pid is now a different process, started $(process_started "$pid"), not the holder started $started"; return 1
+  fi
+  cmd="$(process_command "$pid")"
+  for pattern in "$@"; do
+    # shellcheck disable=SC2053
+    [[ " $cmd " == $pattern ]] && return 0
+  done
+  LOCK_STALE_WHY="pid $pid is ${cmd:-a process ps cannot name}, not this lane's runner"
+  return 1
+}
+
+# One runner per skill. A stale lock (its holder gone, from an earlier boot, or
+# its pid now some other program) is announced and taken over, so a reboot
+# never leaves the loop dead behind a lock nobody holds.
+LANE_RUNNER_PATTERN="*loop_runner.sh $SKILL *"
 if ! mkdir "$LOCK" 2>/dev/null; then
-  OLD_PID="$(cat "$LOCK/pid" 2>/dev/null || true)"
-  if [ -n "$OLD_PID" ] && kill -0 "$OLD_PID" 2>/dev/null; then
-    echo "[loop-runner] $SKILL is already running (pid $OLD_PID, lock: $LOCK). Refusing to start a second."
+  if lock_holder_live "$LOCK" "$LANE_RUNNER_PATTERN"; then
+    echo "[loop-runner] $SKILL is already running (pid $LOCK_HOLDER_PID, lock: $LOCK). Refusing to start a second."
     exit 1
   fi
-  echo "[loop-runner] found a STALE lock (pid ${OLD_PID:-unrecorded}, no such process) — clearing it and taking over." | tee -a "$LOG"
+  echo "[loop-runner] found a STALE lock ($LOCK_STALE_WHY) — clearing it and taking over." | tee -a "$LOG"
   rm -rf "$LOCK"
   mkdir "$LOCK" 2>/dev/null || { echo "[loop-runner] the lock could not be retaken. Stopping."; exit 1; }
 fi
-echo "$$" > "$LOCK/pid"
+claim_lock "$LOCK"
 # The pass reads this to know it is the runner's pass, not a hand-run session:
 # only a claim made under the build runner writes the claim marker that lets
 # the next pass hand back a ticket a dead pass left in Building (SP-101).
@@ -318,17 +375,21 @@ lane_heartbeat() {
 
 # The sync lock every lane takes around pull + npm ci (the only lock the lanes
 # share; each lane's own lock above is its alone). Wait up to 10 minutes
-# for another lane; a lock whose pid is gone is cleared, as above.
+# for another lane; a stale lock is cleared, as above.
 SYNC_LOCK="$LOG_DIR/$SLUG-sync.lock"
 take_sync_lock() {
   local waited=0 holder
   until mkdir "$SYNC_LOCK" 2>/dev/null; do
+    # Any lane's runner or the relay may hold it; anything else is stale.
     holder="$(cat "$SYNC_LOCK/pid" 2>/dev/null || true)"
-    if [ -n "$holder" ] && ! kill -0 "$holder" 2>/dev/null; then rm -rf "$SYNC_LOCK"; continue; fi
+    if [ -n "$holder" ] && ! lock_holder_live "$SYNC_LOCK" "*loop_runner.sh *" "*run_relay.sh*"; then
+      echo "[loop-runner] $(date "+%H:%M:%S") cleared a STALE sync lock ($LOCK_STALE_WHY)" >> "$LOG"
+      rm -rf "$SYNC_LOCK"; continue
+    fi
     [ "$waited" -ge 600 ] && return 1
     sleep 5; waited=$((waited + 5))
   done
-  echo "$$" > "$SYNC_LOCK/pid"
+  claim_lock "$SYNC_LOCK"
 }
 
 # The sleep between passes, in steps of WAKE_POLL seconds, so a wake file
