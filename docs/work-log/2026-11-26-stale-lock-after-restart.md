@@ -1,0 +1,5 @@
+## 2026-11-26 — After the Mini restarts, some work lanes never start again because their old lock looks taken (#339)
+
+Each work lane keeps a "lock", a small note saying "I'm running, process number N", so two copies never run at once. When the Mini froze and restarted this morning, four lanes' notes still named processes that had died in the freeze. After the restart those numbers had been handed to unrelated programs, so each lane looked, saw "N is alive", believed its own old note and refused to start, every five minutes, for hours, without telling anyone.
+
+The note now also says when the machine last started and when its writer started. A lane obeys the note only while the very process that wrote it is still running; a note from before a restart, or whose number now belongs to some other program, is cleared with a line in the log saying why. The same goes for the lock all lanes share while they update the code. A lane's real runner still keeps a second copy out. The tests check this against real running processes.
