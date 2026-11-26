@@ -46,11 +46,12 @@ export async function drawTasks(view, opts = {}) {
  */
 export const sorted = new WeakMap();
 /** Each sortable table on the page, with its stage: what keepPlace reads and restores. */
-export const sortableTables = () => [...main.querySelectorAll('[data-stage] table.sortable')]
+export const sortableTables = (root = main) => [...root.querySelectorAll('[data-stage] table.sortable')]
   .map((table) => ({ table, stage: table.closest('[data-stage]').dataset.stage }));
-function wireSortHeadings(stages) {
+/** `root` is where the tables to wire are: the page, or one folded stage as it opens (SP-405). */
+function wireSortHeadings(stages, root = main) {
   const ticketsOf = new Map(stages.map((c) => [c.status, c.tickets]));
-  for (const { table, stage } of sortableTables()) {
+  for (const { table, stage } of sortableTables(root)) {
     const tickets = ticketsOf.get(stage);
     if (!tickets) continue;
     const apply = (sort) => {
@@ -140,8 +141,20 @@ export async function drawProject(slug, view, { adding = false, filed = null, un
   const head = (c) => `<h2><span class="stage-name">${escapeHtml(c.status)}</span><span class="count quiet">${c.tickets.length}</span></h2><span class="fold" aria-hidden="true"></span>`;
   /** Whether a stage starts open: every one but Live, which only grows. */
   const startsOpen = (c) => c.status !== 'Live';
+  /**
+   * SP-405: a stage that starts folded is drawn with its heading only; its
+   * rows wait here, by stage, and are built the first time it opens
+   * (fillStage). StarCaster's 914 Live tickets were 118,931 page elements
+   * nobody could see, built on every visit and every minute's redraw, and
+   * Chrome said "Page Unresponsive".
+   */
+  const folded = new Map();
   /** A status's block: every stage folds; its heading is the summary that folds it. */
-  const block = (c, cls, body) => `<details class="${cls}" data-stage="${escapeHtml(c.status)}"${startsOpen(c) ? ' open' : ''}><summary>${head(c)}</summary>${body}</details>`;
+  const block = (c, cls, body) => {
+    if (startsOpen(c)) return `<details class="${cls}" data-stage="${escapeHtml(c.status)}" open><summary>${head(c)}</summary>${body}</details>`;
+    folded.set(c.status, body);
+    return `<details class="${cls}" data-stage="${escapeHtml(c.status)}"><summary>${head(c)}</summary></details>`;
+  };
 
   const card = (t) => `
     <a class="card" href="/t/${encodeURIComponent(t.id)}">
@@ -267,7 +280,8 @@ export async function drawProject(slug, view, { adding = false, filed = null, un
     el.style.setProperty('--stage-text', look.text);
   }
   putTrail([{ label: board.projectName, href: '/projects' }, { label: view === 'board' ? 'Board' : 'List' }]);
-  wireSortHeadings(view === 'board' ? (live ? [live] : []) : columns);
+  const sortable = view === 'board' ? (live ? [live] : []) : columns;
+  wireSortHeadings(sortable);
   // A class filter changed: keep it, and draw the project again through it.
   for (const select of main.querySelectorAll('.class-filters select')) {
     select.addEventListener('change', () => {
@@ -287,12 +301,34 @@ export async function drawProject(slug, view, { adding = false, filed = null, un
     history.pushState(null, '', at(view, e.target.value));
     route();
   });
-  wireListPickers(slug, view, board, said);
+  const wireRows = wireListPickers(slug, view, board, said);
   // Delete: ask first, naming the ticket; then redraw from the server. A
   // refusal is said in words and nothing leaves the list until a redraw.
   const listNote = main.querySelector('.list-note');
   const names = new Map(board.columns.flatMap((c) => c.tickets).map((t) => [t.id, t.name]));
-  for (const button of main.querySelectorAll('button[data-delete]')) {
+  wireDeletes(main);
+  // SP-405: a folded stage's rows are built, and wired like the rest, the
+  // first time it opens: by a click on its heading, or by the minute's
+  // redraw putting back a stage he had opened (keepPlace calls fillStage).
+  for (const el of main.querySelectorAll('details[data-stage]')) {
+    if (!folded.has(el.dataset.stage)) continue;
+    let body = folded.get(el.dataset.stage);
+    const fill = () => {
+      if (body === null) return;
+      el.insertAdjacentHTML('beforeend', body);
+      body = null;
+      wireSortHeadings(sortable.filter((c) => c.status === el.dataset.stage), el);
+      wireRows(el);
+      wireDeletes(el);
+    };
+    fillers.set(el, fill);
+    el.addEventListener('toggle', () => { if (el.open) fill(); });
+  }
+
+  function wireDeletes(root) {
+    for (const button of root.querySelectorAll('button[data-delete]')) wireDelete(button);
+  }
+  function wireDelete(button) {
     button.addEventListener('click', async () => {
       const id = button.dataset.delete;
       if (!confirm(deleteQuestion({ id, name: names.get(id) }))) return;
@@ -310,6 +346,13 @@ export async function drawProject(slug, view, { adding = false, filed = null, un
       await drawAgain(() => drawProject(slug, view));
     });
   }
+}
+
+/** SP-405: each folded stage's builder, by its block, until it has been opened once. */
+const fillers = new WeakMap();
+/** Build a folded stage's rows now if they are not built yet (keepPlace, before it puts the sorts back). */
+export function fillStage(el) {
+  fillers.get(el)?.();
 }
 
 /**
@@ -335,17 +378,11 @@ const LIST_PICKERS = Object.freeze({
  */
 function wireListPickers(slug, view, board, said) {
   const fields = Object.keys(LIST_PICKERS);
-  const selects = [...main.querySelectorAll(fields.map((f) => `select[data-${f}-of]`).join(', '))];
-  const controls = [...selects, ...main.querySelectorAll('select[data-tags-of], button[data-untag-of], input[data-new-tag-of], select[data-topics-of], button[data-untopic-of]')];
+  const selectsIn = (root) => [...root.querySelectorAll(fields.map((f) => `select[data-${f}-of]`).join(', '))];
+  // Read when a save starts, so a folded stage opened since (SP-405) is held too.
+  const controls = () => [...selectsIn(main), ...main.querySelectorAll('select[data-tags-of], button[data-untag-of], input[data-new-tag-of], select[data-topics-of], button[data-untopic-of]')];
   const fieldOf = (select) => fields.find((f) => select.hasAttribute(`data-${f}-of`));
   const noteOf = (field, id) => [...main.querySelectorAll(`[data-${field}-note]`)].find((n) => n.getAttribute(`data-${field}-note`) === id);
-  if (said) {
-    const note = noteOf(said.field, said.id);
-    if (note) {
-      note.className = `note${said.error ? ' error' : ' quiet'}`;
-      note.textContent = said.text;
-    }
-  }
   const tickets = new Map(board.columns.flatMap((c) => c.tickets).map((t) => [t.id, t]));
   let saving = false;
   /** Sends `value` as `field` of ticket `id`; `undo` puts the control back when nothing is sent or it is refused. */
@@ -359,7 +396,7 @@ function wireListPickers(slug, view, board, said) {
     saving = true;
     const was = field === 'tags' || field === 'topics' ? 'were' : 'was';
     const note = noteOf(field, id);
-    const held = controls.filter((c) => !c.disabled);
+    const held = controls().filter((c) => !c.disabled);
     for (const c of held) c.disabled = true;
     note.className = 'note quiet';
     note.textContent = 'Saving…';
@@ -388,18 +425,35 @@ function wireListPickers(slug, view, board, said) {
       note.textContent = `The page could not refresh (${err.message}): the ${field} ${was} ${after.error ? 'not ' : ''}saved. Reload to see the list as stored.`;
     }
   };
-  for (const select of selects) {
-    const field = fieldOf(select);
-    const picker = LIST_PICKERS[field];
-    select.addEventListener('change', () => {
-      const t = tickets.get(select.getAttribute(`data-${field}-of`));
-      if (!t) return;
-      const before = picker.before(t);
-      save(t.id, field, picker.value(select), () => { select.value = before; });
-    });
-  }
-  wireListTags(tickets, save, noteOf);
-  wireListTopics(tickets, save);
+  /**
+   * Wires the controls under `root`: the whole page as it is drawn, then each
+   * folded stage as it opens (SP-405). The note a save left (`said`) goes
+   * beside its control wherever that is drawn, so one in Live shows once
+   * Live is open again.
+   */
+  const wire = (root) => {
+    if (said) {
+      const note = [...root.querySelectorAll(`[data-${said.field}-note]`)].find((n) => n.getAttribute(`data-${said.field}-note`) === said.id);
+      if (note) {
+        note.className = `note${said.error ? ' error' : ' quiet'}`;
+        note.textContent = said.text;
+      }
+    }
+    for (const select of selectsIn(root)) {
+      const field = fieldOf(select);
+      const picker = LIST_PICKERS[field];
+      select.addEventListener('change', () => {
+        const t = tickets.get(select.getAttribute(`data-${field}-of`));
+        if (!t) return;
+        const before = picker.before(t);
+        save(t.id, field, picker.value(select), () => { select.value = before; });
+      });
+    }
+    wireListTags(root, tickets, save, noteOf);
+    wireListTopics(root, tickets, save);
+  };
+  wire(main);
+  return wire;
 }
 
 /**
@@ -407,9 +461,9 @@ function wireListPickers(slug, view, board, said) {
  * with the whole new list of topic ids. Picking a topic from Add Topic adds
  * it; a chip's × removes that topic.
  */
-function wireListTopics(tickets, save) {
+function wireListTopics(root, tickets, save) {
   const idsOf = (t) => (t.topics ?? []).map((topic) => topic.id);
-  for (const select of main.querySelectorAll('select[data-topics-of]')) {
+  for (const select of root.querySelectorAll('select[data-topics-of]')) {
     select.addEventListener('change', () => {
       const t = tickets.get(select.getAttribute('data-topics-of'));
       const topic = Number(select.value);
@@ -417,7 +471,7 @@ function wireListTopics(tickets, save) {
       save(t.id, 'topics', [...idsOf(t), topic], () => { select.value = ''; });
     });
   }
-  for (const button of main.querySelectorAll('button[data-untopic-of]')) {
+  for (const button of root.querySelectorAll('button[data-untopic-of]')) {
     button.addEventListener('click', () => {
       const t = tickets.get(button.getAttribute('data-untopic-of'));
       if (!t) return;
@@ -434,7 +488,7 @@ function wireListTopics(tickets, save) {
  * closes it); a chip's × removes that tag. A tag the ticket already has is
  * said, not sent.
  */
-function wireListTags(tickets, save, noteOf) {
+function wireListTags(root, tickets, save, noteOf) {
   const boxOf = (id) => [...main.querySelectorAll('input[data-new-tag-of]')].find((b) => b.getAttribute('data-new-tag-of') === id);
   const add = (t, tag, undo) => {
     if (t.tags.includes(tag)) {
@@ -446,7 +500,7 @@ function wireListTags(tickets, save, noteOf) {
     }
     save(t.id, 'tags', [...t.tags, tag], undo);
   };
-  for (const select of main.querySelectorAll('select[data-tags-of]')) {
+  for (const select of root.querySelectorAll('select[data-tags-of]')) {
     select.addEventListener('change', () => {
       const t = tickets.get(select.getAttribute('data-tags-of'));
       if (!t) return;
@@ -462,7 +516,7 @@ function wireListTags(tickets, save, noteOf) {
       add(t, select.value, reset);
     });
   }
-  for (const box of main.querySelectorAll('input[data-new-tag-of]')) {
+  for (const box of root.querySelectorAll('input[data-new-tag-of]')) {
     const t = tickets.get(box.getAttribute('data-new-tag-of'));
     if (!t) continue;
     const close = () => {
@@ -482,7 +536,7 @@ function wireListTags(tickets, save, noteOf) {
       add(t, tag, () => {});
     });
   }
-  for (const button of main.querySelectorAll('button[data-untag-of]')) {
+  for (const button of root.querySelectorAll('button[data-untag-of]')) {
     button.addEventListener('click', () => {
       const t = tickets.get(button.getAttribute('data-untag-of'));
       if (!t) return;

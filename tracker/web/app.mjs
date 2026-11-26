@@ -37,7 +37,7 @@
  */
 import { PIPELINE_READ, escapeHtml, renderTrail, tabTitle, bellColour, busLink, linkProblem, passwordProblem, renderPasswordSet, renderSetPassword, renderSignIn, renderForgot, redrawHold, drawnChoice, renderPipelinePod, renderPipelineDetails, pipelinePodLabel, renderHealth, healthLines, lowerMeridiem, renderMessage, renderSavedCard, MESSAGE_CLOSES_MS, SAVED_CARD_MS } from './render.mjs';
 import { field, drawSetupNew, drawSetup, drawProjects, drawCreateProject, drawEditProject, drawProjectDetails } from './page-projects.mjs';
-import { drawSearch, drawTasks, drawProject, sortableTables, sorted } from './page-tasks.mjs';
+import { drawSearch, drawTasks, drawProject, sortableTables, sorted, fillStage } from './page-tasks.mjs';
 import { drawConsole } from './page-console.mjs';
 import { drawTicket } from './page-ticket.mjs';
 import { drawReporting } from './page-reporting.mjs';
@@ -824,7 +824,8 @@ function keepPlace() {
   const across = [...main.querySelectorAll(SIDEWAYS)].map((el) => el.scrollLeft);
   return {
     restore() {
-      for (const d of main.querySelectorAll('details')) if (open.has(key(d))) d.open = open.get(key(d));
+      // A folded stage he had opened is built again before its sort goes back (SP-405).
+      for (const d of main.querySelectorAll('details')) if (open.has(key(d))) { d.open = open.get(key(d)); if (d.open) fillStage(d); }
       for (const { table, stage } of sortableTables()) if (sorts.has(stage)) sorted.get(table)?.apply(sorts.get(stage));
       [...main.querySelectorAll(SIDEWAYS)].forEach((el, i) => { if (i < across.length) el.scrollLeft = across[i]; });
       window.scrollTo(0, y);
