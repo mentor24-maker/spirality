@@ -14,16 +14,8 @@ import { drawConsole } from './page-console.mjs';
 import { savedSuggestSwitch, filedPod, UNCHECKED_NOTE, notUploadedNote, wireAddTask, wireSuggestNext, wireSuggestSwitch, wireFiledPod } from './page-add-task.mjs';
 
 /**
- * SP-402: what the saved project holds when All Projects was picked last:
- * never a slug (a slug is letters, digits and dashes), so the two cannot be
- * mistaken. All Projects' own address is `/board` or `/list` with no project.
- */
-export const ALL_PROJECTS = '*';
-
-/**
- * "Tasks" in the header: the selected project, or All Projects when that
- * was picked last, in the view last used. With none selected, or one that
- * no longer exists, the first project.
+ * "Tasks" in the header: the selected project, in the view last used. With
+ * none selected, or one that no longer exists, the first project.
  */
 export async function drawTasks(view, opts = {}) {
   if (view === 'console') {
@@ -36,10 +28,6 @@ export async function drawTasks(view, opts = {}) {
     main.innerHTML = '<h1>Tasks</h1><p class="quiet">There are no projects yet.</p>';
     putTrail([{ label: 'Tasks' }]);
     return;
-  }
-  if (savedProject() === ALL_PROJECTS) {
-    history.replaceState(null, '', `/${view}`);
-    return drawProject(null, view, opts);
   }
   const slug = projects.some((p) => p.slug === savedProject()) ? savedProject() : projects[0].slug;
   history.replaceState(null, '', `/${view}/${encodeURIComponent(slug)}`);
@@ -129,33 +117,21 @@ function wireSortHeadings(stages) {
  */
 const pickedClass = {};
 
-/**
- * SP-402: with no `slug`, All Projects: the server's every-project board
- * (pageData.mjs everyProjectBoardOf), drawn the same way. Each card and row
- * names its project, and each List row's dropdowns offer that row's own
- * project's operator, tags and topics. The Add Task box asks which project
- * the task is for before it files it, and its Suggest side, which reads one
- * project, is left out.
- */
 export async function drawProject(slug, view, { adding = false, filed = null, unchecked = false, uploaded = [], notUploaded = [], said = null } = {}) {
   const [board, looks, { projects }] = await Promise.all([
-    api('GET', slug == null ? '/all-projects/board' : `/projects/${encodeURIComponent(slug)}/board`),
+    api('GET', `/projects/${encodeURIComponent(slug)}/board`),
     api('GET', '/stage-colours').then(stageLooks, () => ({})),
     api('GET', '/projects'),
   ]);
   // Opening a project selects it, and remembers the view: "Tasks" comes back here.
   try {
     localStorage.setItem(VIEW_KEY, view);
-    localStorage.setItem(PROJECT_KEY, board.project ?? ALL_PROJECTS);
+    localStorage.setItem(PROJECT_KEY, board.project);
     localStorage.setItem(PROJECT_NAME_KEY, board.projectName);
   } catch { /* the page still works; it is only not remembered */ }
   showProject();
   setTitle(`${board.projectName} ${view} · Tracker`);
-  const at = (v, s) => (s ? `/${v}/${encodeURIComponent(s)}` : `/${v}`);
-  const all = board.project == null;
-  // All Projects: each ticket's own project, by slug, for its name and its List row's choices.
-  const projectOf = new Map((board.projects ?? []).map((p) => [p.slug, p]));
-  const projectName = (t) => (all ? `<span class="project-of quiet">${escapeHtml(t.projectName ?? t.project ?? '')}</span>` : '');
+  const at = (v, s) => `/${v}/${encodeURIComponent(s)}`;
   /**
    * A stage's heading (SP-196): its name on the left, its count right-aligned,
    * then the fold arrow, which the stylesheet draws from the block's open
@@ -170,7 +146,6 @@ export async function drawProject(slug, view, { adding = false, filed = null, un
   const card = (t) => `
     <a class="card" href="/t/${encodeURIComponent(t.id)}">
       <span class="name">${escapeHtml(t.name)}</span>
-      ${projectName(t)}
       <span class="quiet">${escapeHtml(t.id)}${t.priority ? ` · ${escapeHtml(t.priority)}` : ''}</span>
       ${t.answerIn ? `<span class="answer-in">${escapeHtml(ANSWER_IN_NOTE)}</span>` : t.mergeStands ? `<span class="answer-in">${escapeHtml(MERGE_STANDS_NOTE)}</span>` : ''}
       ${t.tags.length ? `<span class="tags">${t.tags.map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join('')}</span>` : ''}
@@ -187,24 +162,16 @@ export async function drawProject(slug, view, { adding = false, filed = null, un
       canDelete(status) ? actionButton('Delete Ticket', ICONS.delete, { delete: t.id }) : '',
     ].join('');
   };
-  // The project's tags, for each List row's Add Tag dropdown (SP-246); in
-  // All Projects, each row's own project's, its operator and its topics.
+  // The project's tags, for each List row's Add Tag dropdown (SP-246).
   const known = projectTags(board);
-  const knownOf = new Map([...projectOf.values()].map((p) => [p.slug, projectTags({
-    tags: p.tags,
-    columns: board.columns.map((c) => ({ tickets: c.tickets.filter((t) => t.project === p.slug) })),
-  })]));
-  const choicesOf = (t) => (all
-    ? { tags: knownOf.get(t.project) ?? [], topics: projectOf.get(t.project)?.topics ?? [], operator: projectOf.get(t.project)?.operator ?? null }
-    : { tags: known, topics: board.topics, operator: board.operator });
   const row = (status) => (t) => `
     <tr data-id="${escapeHtml(t.id)}">
       <td class="id"><a href="/t/${encodeURIComponent(t.id)}">${escapeHtml(t.id)}</a></td>
-      <td class="name"><a href="/t/${encodeURIComponent(t.id)}">${escapeHtml(t.name)}</a>${projectName(t)}</td>
+      <td class="name"><a href="/t/${encodeURIComponent(t.id)}">${escapeHtml(t.name)}</a></td>
       <td class="priority">${view === 'list' ? renderListPriority(t) : t.priority ? escapeHtml(statusName(t.priority)) : '<span class="quiet">–</span>'}</td>
-      <td class="tags">${view === 'list' ? renderListTags(t, choicesOf(t).tags) : t.tags.map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join('')}</td>
-      <td class="topics">${view === 'list' ? renderListTopics(t, choicesOf(t).topics) : (t.topics ?? []).map((topic) => `<span class="tag topic">${escapeHtml(topic.name)}</span>`).join('') || '<span class="quiet">–</span>'}</td>
-      <td class="assignee">${view === 'list' ? renderListAssignee(t, choicesOf(t).operator) : t.assignee ? escapeHtml(t.assignee) : '<span class="quiet">nobody</span>'}</td>
+      <td class="tags">${view === 'list' ? renderListTags(t, known) : t.tags.map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join('')}</td>
+      <td class="topics">${view === 'list' ? renderListTopics(t, board.topics) : (t.topics ?? []).map((topic) => `<span class="tag topic">${escapeHtml(topic.name)}</span>`).join('') || '<span class="quiet">–</span>'}</td>
+      <td class="assignee">${view === 'list' ? renderListAssignee(t, board.operator) : t.assignee ? escapeHtml(t.assignee) : '<span class="quiet">nobody</span>'}</td>
       <td class="when">${escapeHtml(when(t.updatedAt))}</td>
       <td class="actions">${actions(t, status)}</td>
     </tr>`;
@@ -221,24 +188,21 @@ export async function drawProject(slug, view, { adding = false, filed = null, un
   const live = liveColumn && { ...liveColumn, tickets: liveColumn.tickets.slice().sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0)) };
 
   // Which side of the Add Task box shows: its Suggest checkbox, kept in this browser (SP-303).
-  // All Projects has no Suggest side: it reads one project (SP-402).
-  const suggesting = !all && savedSuggestSwitch();
+  const suggesting = savedSuggestSwitch();
   // SP-362: the title row holds only the title and the Board / List / Console
   // tabs, as on the Console; the row under it is the filter bar, in the one order every bar uses (SP-403).
   main.innerHTML = `
     <div class="tasks-head title-row"><h1>Tasks</h1>${filed ? filedPod(filed, uploaded) : ''}${viewSwitch(board.project, view)}</div>
     <div class="toolbar tasks-bar">${renderFilterBar({
-    project: renderProjectPicker(projects, board.project, { all: true }),
+    project: renderProjectPicker(projects, board.project),
     pickers: [renderTopicPicker(board.topics ?? []), renderClassFilters(board.classes, pickedClass)],
     search: searchForm(''),
     pod: '<button type="button" class="pipeline-pod" aria-haspopup="dialog" title="Open Pipeline Status"></button>',
   })}</div>
     ${filed && (unchecked || notUploaded.length) ? `<p class="filed-note">${unchecked ? UNCHECKED_NOTE : ''}${notUploadedNote(notUploaded)}</p>` : ''}
     <details class="add-task">
-      <summary>Add Task${all ? '' : `<label class="suggest-switch">Suggest <input type="checkbox" value="on" aria-label="Suggest Next Tasks"${suggesting ? ' checked' : ''}></label>`}</summary>
+      <summary>Add Task<label class="suggest-switch">Suggest <input type="checkbox" value="on" aria-label="Suggest Next Tasks"${suggesting ? ' checked' : ''}></label></summary>
       <form class="request fields"${suggesting ? ' hidden' : ''}>
-        ${all ? `<div class="beside"><label for="add-project">Project</label>
-        <select id="add-project" required><option value="" selected>Pick a Project</option>${projects.map((p) => `<option value="${escapeHtml(p.slug)}">${escapeHtml(p.name)}</option>`).join('')}</select></div>` : ''}
         <div class="title-mode" role="radiogroup" aria-label="How the Title Is Chosen">
           <label><input type="radio" name="title-mode" value="suggest"> Suggest a Title</label>
           <label><input type="radio" name="title-mode" value="own"> Write My Own Title</label>
@@ -258,12 +222,12 @@ export async function drawProject(slug, view, { adding = false, filed = null, un
         </fieldset>
         <div class="row"><button type="submit" class="btn btn-primary submit-task">Suggest Titles</button><button type="button" class="btn suggest-again" hidden>Suggest Again</button><span class="note"></span></div>
       </form>
-      ${all ? '' : `<div class="suggest-next"${suggesting ? '' : ' hidden'}>
+      <div class="suggest-next"${suggesting ? '' : ' hidden'}>
         <p class="hint quiet">Reads the project (its plans, documents and code) and its open tickets, and suggests what to do next. Put them in order, untick any you do not want, and file the rest as requests.</p>
         <div class="row run-row"><button type="button" class="btn btn-primary suggest-run">Suggest Next Tasks</button><span class="run-note note" role="status"></span></div>
         <ol class="suggestions"></ol>
         <div class="row file-row" hidden><button type="button" class="btn btn-primary file-order">File in This Order</button><span class="file-note note" role="status"></span></div>
-      </div>`}
+      </div>
     </details>
     <dialog class="suggestion-info" aria-labelledby="suggestion-info-title">
       <form method="dialog">
@@ -313,10 +277,8 @@ export async function drawProject(slug, view, { adding = false, filed = null, un
   }
   wireSearch();
   wireAddTask(board.project, view, adding);
-  if (!all) {
-    wireSuggestNext(board.project, view);
-    wireSuggestSwitch();
-  }
+  wireSuggestNext(board.project, view);
+  wireSuggestSwitch();
   wireFiledPod();
   wirePipeline();
   refreshPipeline();
@@ -548,9 +510,6 @@ function searchAddress(term) {
   for (const select of main.querySelectorAll('.project-picker select, .topic-picker select, .search-filters select')) {
     if (select.value) params.set(select.name, select.value);
   }
-  // All Projects: a topic belongs to one project, so its project goes in as the Project filter (SP-402).
-  const owner = main.querySelector('.topic-picker select')?.selectedOptions[0]?.dataset.project;
-  if (owner && !params.has('project')) params.set('project', owner);
   return `/search?${params}`;
 }
 

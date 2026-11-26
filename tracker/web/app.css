@@ -432,8 +432,6 @@ dl.details dd { margin: 0; }
 .card .tag { margin-left: 0; margin-right: 0.3rem; }
 /* A long ticket name or tag wraps inside its card rather than widening the column. */
 .card .name, .card .tags { overflow-wrap: anywhere; min-width: 0; }
-/* All Projects: the project a card or a List row's ticket belongs to, small, under its name. */
-td.name .project-of { display: block; font-size: var(--text-sm); }
 details.group { border: 1px solid var(--border-black); border-radius: var(--radius-input); }
 .group { margin-bottom: 1rem; overflow: hidden; }
 .group h2 { font-size: var(--text-base); margin: 0; }

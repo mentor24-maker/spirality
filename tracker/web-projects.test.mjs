@@ -87,7 +87,7 @@ test('the Projects screen is a table whose View icon opens the details page; a n
   assert.match(app, /action\(`\/projects\/\$\{encodeURIComponent\(p\.slug\)\}`, 'View Project', ICONS\.view\)/);
   // SP-42's behaviour: the name goes to the project's tasks in the last view, and opening it selects it.
   assert.match(app, /<td class="name"><a href="\/\$\{savedView\(\)\}\/\$\{encodeURIComponent\(p\.slug\)\}"/);
-  assert.match(app, /localStorage\.setItem\(PROJECT_KEY, board\.project \?\? ALL_PROJECTS\)/);
+  assert.match(app, /localStorage\.setItem\(PROJECT_KEY, board\.project\)/);
   // The details page links to the project's board and list, and says plainly when there is no such project.
   assert.match(app, /<a href="\$\{at\('board'\)\}">Board<\/a><a href="\$\{at\('list'\)\}">List<\/a>/);
   assert.match(app, /err\.status !== 404[\s\S]{0,200}There is no project \$\{escapeHtml\(slug\)\}\./);

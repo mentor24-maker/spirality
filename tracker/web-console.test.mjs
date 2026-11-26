@@ -385,7 +385,7 @@ test('the Console page: /in-flight and the stage colours drawn, a Console link b
   assert.match(sw, /v === current \? ' aria-current="page"' : ''/);
   assert.match(/async function drawProject\(([^)]*)\) \{([\s\S]*?)\n\}/.exec(app)[2], /\$\{viewSwitch\(board\.project, view\)\}/);
   // "Tasks" in the header reopens the Console when it was chosen last.
-  assert.match(app, /await drawTasks\(savedTasksView\(\)\);/);
+  assert.match(app, /await drawTasks\(tasks \? savedTasksView\(\) : project\[1\]\);/);
   assert.match(/async function drawTasks\(view, opts = \{\}\) \{([\s\S]*?)\n\}/.exec(app)[1], /if \(view === 'console'\) \{\s*history\.replaceState\(null, '', '\/console'\);\s*return drawConsole\(\);/);
   // The minute's beat draws it again whether or not the answer changed, so "in 12 min" counts down.
   assert.match(app, /lastDrawn = \{ address: here\(\), reads, ticking: true \}/);

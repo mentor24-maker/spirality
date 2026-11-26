@@ -21,8 +21,13 @@ const PICKER_PAGES = Object.freeze({
   Reporting: 'page-reporting.mjs',
 });
 
-/** The pages that can show every project, so offer All Projects first. */
-const ALL_PROJECT_PAGES = Object.freeze(['page-tasks.mjs', 'page-console.mjs', 'page-reporting.mjs']);
+/**
+ * The pages that can show every project, so offer All Projects first. Not
+ * Board and List: every ticket of every project at once froze the page, so
+ * SP-404 took it out there; the Console and Reporting draw work in flight
+ * and counts, which stay small.
+ */
+const ALL_PROJECT_PAGES = Object.freeze(['page-console.mjs', 'page-reporting.mjs']);
 
 const PROJECTS = [{ slug: 'alpha', name: 'Alpha' }, { slug: 'beta', name: 'Beta' }];
 const POD = '<button type="button" class="pipeline-pod" aria-haspopup="dialog" title="Open Pipeline Status"></button>';
@@ -37,15 +42,13 @@ test('every page with a project picker draws it through the one shared renderPro
   for (const [page, file] of Object.entries(PICKER_PAGES)) {
     assert.match(source(file), /renderProjectPicker\(/, `${page} (${file}) draws the shared picker`);
   }
-  // A <select> whose options are a list of projects, built by hand. The one
-  // allowed is the Add Task box's "which project does this go into" field
-  // (id add-project), which is a form field, not a filter.
+  // A <select> whose options are a list of projects, built by hand.
   const handBuilt = /<select\b([^>]*)>(?:<option[^>]*>[^<]*<\/option>)*\$\{[\w.]*projects\.map\(/g;
   for (const [file, text] of Object.entries(webSources())) {
-    for (const m of text.matchAll(handBuilt)) {
-      assert.match(m[1], /id="add-project"/, `${file} builds its own project picker: ${m[0].slice(0, 80)}`);
-    }
+    for (const m of text.matchAll(handBuilt)) assert.fail(`${file} builds its own project picker: ${m[0].slice(0, 80)}`);
   }
+  // SP-404: Board and List draw one project at a time; their picker offers no All Projects.
+  assert.doesNotMatch(source('page-tasks.mjs'), /renderProjectPicker\([^)]*\{ all: true \}\)/, 'Board and List offer no All Projects (SP-404)');
   assert.doesNotMatch(source('page-reporting.mjs'), /report-project/, 'Reporting\'s own picker is gone');
 });
 
