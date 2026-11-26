@@ -15,3 +15,10 @@ back, and leaves one note saying it was merged elsewhere. An open pull
 request, one GitHub can't read, or an older slice's merge leaves the ticket
 exactly where it is. The review step's tidy-up command (`fixup-live`) now
 closes such a ticket itself, so it never reaches Dane in the first place.
+
+Review caught one hole in that tidy-up: a ticket built in slices, whose last
+slice's pull request had merged and which was back in Queued for one more
+question, looked "already live" too, so the tidy-up would have closed it with
+its final slice never built. Now any record on the ticket that its pull
+request already merged means "a later round": the tidy-up leaves it alone and
+the question to Dane goes through.

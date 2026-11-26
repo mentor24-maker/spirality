@@ -66,7 +66,7 @@ import { followReleases, QUIET_DAYS_KEY } from '../lib/releaseFollow.mjs';
 // from the package, so every project's relay decides the same way.
 import {
   mergeDecision, githubGate, isMergeCommand, MERGE_MARKER, parseMergeMarker,
-  refusalNotice, refusalBusLine, conflictHandOffNotice, mergedNotice, alreadyMergedPlan, unaskedMergePlan, mergeRecordedInEarlierRound, filesMadeLines, REFUSAL_CODES,
+  refusalNotice, refusalBusLine, conflictHandOffNotice, mergedNotice, alreadyMergedPlan, unaskedMergePlan, mergeRecordedOnTicket, filesMadeLines, REFUSAL_CODES,
 } from '../lib/mergeOnComment.js';
 import {
   PR_VIEW_FIELDS, markerBookkeeping, recordBookkeeping, emptyBooks, mergeDestination, relayLine,
@@ -688,7 +688,10 @@ async function catchUpReading(task) {
   const description = t.markdown_description || t.description || '';
   const unstuck = ownPr ? null : unstuckPullRequest(description);
   const status = t.status?.status ?? '';
-  const earlierRound = ownPr ? mergeRecordedInEarlierRound({ comments, prNumber: ownPr.number }) : false;
+  // Any merge record for its own PR, newer verdict or not: a ticket back in a
+  // loop status with its PR's merge recorded is in a later round (a next
+  // slice, a question between slices), never live work to close (SP-406).
+  const earlierRound = ownPr ? mergeRecordedOnTicket({ comments, prNumber: ownPr.number }) : false;
   const nextSlice = ownPr ? statusOf(mergeDestination(description).status) !== LIVE : false;
   const facts = { status, ownPr, unstuck, earlierRound, nextSlice };
   let live = null;

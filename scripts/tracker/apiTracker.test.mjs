@@ -994,6 +994,28 @@ test('fixup-live leaves a ticket whose own merged PR has a next slice to build (
   } finally { await f.cleanup(); }
 });
 
+test('a ticket back in Queued whose own PR\'s merge is already recorded is a later round: fixup-live leaves it, ask is not refused (SP-406)', async () => {
+  const f = await fixture();
+  try {
+    // The last slice's PR merged and the relay recorded it; the build pass
+    // narrowed the description to "Next slice: none" and asks a question.
+    fileOwnPr(f, 'queued', '## Goal\nthe last slice\n\nNext slice: none');
+    f.store.postComment({ ticket: 'AL-1', author: f.machine.id, body: 'REVIEW VERDICT: PASS' });
+    f.store.postComment({ ticket: 'AL-1', author: f.machine.id, body: 'Merged: PR #7 (https://github.com/owner/repo/pull/7) squash-merged into main. This ticket goes back to Queued for the next build pass.' });
+    f.prJson = { number: 7, state: 'MERGED', mergedAt: '2026-11-24T17:00:00Z' };
+
+    const r = await f.door(['fixup-live', '--task', 'AL-1']);
+    assert.equal(r.code, 4, r.err);
+    assert.match(r.out, /already recorded on this ticket/);
+    assert.equal(f.store.getTicket('AL-1').status, 'queued', 'never Live with its last slice unbuilt');
+
+    const ask = await f.door(['ask', '--task', 'AL-1', '--body-file', '-'], { stdin: CARD });
+    assert.doesNotMatch(ask.err, /REFUSED — AL-1: PR #7/);
+    assert.equal(ask.code, 0, ask.err);
+    assert.equal(f.store.getTicket('AL-1').status, 'needs your input');
+  } finally { await f.cleanup(); }
+});
+
 test('relay: a Ready to launch ticket whose own PR merged elsewhere, with no word of his, goes Live on the next pass (SP-406)', async () => {
   const f = await fixture();
   try {
