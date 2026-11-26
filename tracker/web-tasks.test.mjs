@@ -121,7 +121,9 @@ test('every stage on the board and the list folds, Live starts folded and the re
   const app = pageScript();
   const draw = /async function drawProject\(([^)]*)\) \{([\s\S]*?)\n\}/.exec(app)[2];
   // One block for every stage: a folding section whose summary is its heading. No stage is drawn unfoldable.
-  assert.match(draw, /const block = \(c, cls, body\) => `<details class="\$\{cls\}" data-stage="\$\{escapeHtml\(c\.status\)\}"\$\{startsOpen\(c\) \? ' open' : ''\}><summary>\$\{head\(c\)\}<\/summary>\$\{body\}<\/details>`;/);
+  // SP-405: a stage that starts open is drawn whole; one that starts folded is drawn as its heading only, its rows kept to be built when it opens.
+  assert.match(draw, /if \(startsOpen\(c\)\) return `<details class="\$\{cls\}" data-stage="\$\{escapeHtml\(c\.status\)\}" open><summary>\$\{head\(c\)\}<\/summary>\$\{body\}<\/details>`;/);
+  assert.match(draw, /folded\.set\(c\.status, body\);\s*return `<details class="\$\{cls\}" data-stage="\$\{escapeHtml\(c\.status\)\}"><summary>\$\{head\(c\)\}<\/summary><\/details>`;/);
   assert.match(draw, /const startsOpen = \(c\) => c\.status !== 'Live';/, 'every stage but Live starts open');
   assert.doesNotMatch(draw, /<section class="\$\{cls\}"/, 'no stage is a plain section any more');
   assert.match(draw, /block\(c, 'column',/);
@@ -129,7 +131,7 @@ test('every stage on the board and the list folds, Live starts folded and the re
   assert.match(app, /<a class="card" href="\/t\/\$\{encodeURIComponent\(t\.id\)\}">/);
   assert.match(app, /<td class="name"><a href="\/t\/\$\{encodeURIComponent\(t\.id\)\}">/);
   // Only a stage's block may be drawn open: no other folding section starts open.
-  assert.deepEqual(app.match(/<details[^>]*\bopen\b[^>]*>/g), ['<details class="${cls}" data-stage="${escapeHtml(c.status)}"${startsOpen(c) ? \' open\' : \'\'}>']);
+  assert.deepEqual(app.match(/<details[^>]*\bopen\b[^>]*>/g), ['<details class="${cls}" data-stage="${escapeHtml(c.status)}" open>']);
 });
 
 test('a stage heading reads its name, then the count right-aligned, then one arrow that shows open or folded (SP-196)', () => {
@@ -162,7 +164,37 @@ test('a stage folded or opened by hand stays that way through the page\'s own re
   const place = /function keepPlace\(\) \{[\s\S]*?\n\}/.exec(app)[0];
   assert.match(place, /const key = \(d\) => \(d\.dataset\.stage \? `stage\|\$\{d\.dataset\.stage\}` : d\.dataset\.project \? `project\|\$\{d\.dataset\.project\}` : d\.className\);/, 'a stage is known by its name, not its classes (and a Settings project box by its project, SP-289)');
   assert.match(place, /const open = new Map\(\[\.\.\.main\.querySelectorAll\('details'\)\]\.map\(\(d\) => \[key\(d\), d\.open\]\)\);/, 'every stage is a details, so every stage is kept');
-  assert.match(place, /for \(const d of main\.querySelectorAll\('details'\)\) if \(open\.has\(key\(d\)\)\) d\.open = open\.get\(key\(d\)\);/);
+  assert.match(place, /for \(const d of main\.querySelectorAll\('details'\)\) if \(open\.has\(key\(d\)\)\) \{ d\.open = open\.get\(key\(d\)\); if \(d\.open\) fillStage\(d\); \}/, 'a folded stage he had opened is built again before its sort goes back (SP-405)');
+});
+
+test('a folded stage builds no rows until it opens; opening it, or the redraw putting it back open, builds and wires them (SP-405)', () => {
+  const app = pageScript();
+  const draw = /async function drawProject\(([^)]*)\) \{([\s\S]*?)\n\}/.exec(app)[2];
+  // Folded: the heading only. StarCaster's 914 Live rows were 118,931 elements nobody could see.
+  const block = /const block = \(c, cls, body\) => \{([\s\S]*?)\n  \};/.exec(draw)?.[1];
+  assert.ok(block, 'one block for every stage');
+  assert.match(block, /if \(startsOpen\(c\)\) return [^\n]*\$\{body\}<\/details>`;/, 'an open stage carries its rows');
+  const foldedReturn = /folded\.set\(c\.status, body\);\s*return (`[^\n]*`);/.exec(block)?.[1];
+  assert.ok(foldedReturn, 'a folded stage keeps its rows aside');
+  assert.doesNotMatch(foldedReturn, /body|tickets|<tr/, 'and draws none of them');
+  // Opening builds them once, then wires them like the rest of the page, in that stage only.
+  const fill = /const fill = \(\) => \{([\s\S]*?)\n    \};/.exec(draw)?.[1];
+  assert.ok(fill, 'each folded stage has a builder');
+  assert.match(fill, /if \(body === null\) return;\s*el\.insertAdjacentHTML\('beforeend', body\);\s*body = null;/, 'built once');
+  assert.match(fill, /wireSortHeadings\(sortable\.filter\(\(c\) => c\.status === el\.dataset\.stage\), el\);/);
+  assert.match(fill, /wireRows\(el\);/);
+  assert.match(fill, /wireDeletes\(el\);/);
+  assert.match(draw, /el\.addEventListener\('toggle', \(\) => \{ if \(el\.open\) fill\(\); \}\);/, 'a click on its heading builds it');
+  assert.match(draw, /fillers\.set\(el, fill\);/);
+  assert.match(app, /\nfunction fillStage\(el\) \{\s*fillers\.get\(el\)\?\.\(\);\s*\}/);
+  // The redraw builds an opened stage before it puts the sorts back, so Live keeps its sort.
+  const place = /function keepPlace\(\) \{[\s\S]*?\n\}/.exec(app)[0];
+  const restore = /restore\(\) \{([\s\S]*?)\n    \},/.exec(place)[1];
+  assert.ok(restore.indexOf('fillStage(d)') > -1 && restore.indexOf('fillStage(d)') < restore.indexOf('sortableTables()'), 'built before the sorts are applied');
+  // A save holds every control drawn when it starts, a Live one opened since included.
+  const wire = /function wireListPickers\(slug, view, board, said\) \{([\s\S]*?)\n\}/.exec(app)[1];
+  assert.match(wire, /const held = controls\(\)\.filter/);
+  assert.match(wire, /wire\(main\);\s*return wire;/);
 });
 
 test('the board has no Live column: Live is a list section below the columns, newest change first, with its count (SP-165)', () => {
@@ -303,9 +335,9 @@ test('picking a priority or assignee sends only that field with the board\'s ver
   assert.match(app, /assignee: \{ value: \(select\) => \(select\.value \? Number\(select\.value\) : null\), before: \(t\) => String\(t\.assigneeId \?\? ''\) \}/, 'assignee goes as an id, or null for Nobody, as the Change panel sends it');
   assert.match(wire, /api\('PATCH', `\/tickets\/\$\{encodeURIComponent\(id\)\}`, \{ \[field\]: value, ifVersion: t\.version \}\)/);
   assert.match(wire, /save\(t\.id, field, picker\.value\(select\), \(\) => \{ select\.value = before; \}\);/, 'a dropdown sends its value and puts the old one back on a refusal');
-  assert.match(wire, /const selects = \[\.\.\.main\.querySelectorAll\(fields\.map/, 'one save at a time across both kinds of dropdown');
-  assert.match(wire, /const controls = \[\.\.\.selects, \.\.\.main\.querySelectorAll\('select\[data-tags-of\], button\[data-untag-of\], input\[data-new-tag-of\], select\[data-topics-of\], button\[data-untopic-of\]'\)\];/, 'the tag and topic controls are held with the dropdowns');
-  assert.match(wire, /const held = controls\.filter/);
+  assert.match(wire, /const selectsIn = \(root\) => \[\.\.\.root\.querySelectorAll\(fields\.map/, 'one save at a time across both kinds of dropdown');
+  assert.match(wire, /const controls = \(\) => \[\.\.\.selectsIn\(main\), \.\.\.main\.querySelectorAll\('select\[data-tags-of\], button\[data-untag-of\], input\[data-new-tag-of\], select\[data-topics-of\], button\[data-untopic-of\]'\)\];/, 'the tag and topic controls are held with the dropdowns');
+  assert.match(wire, /const held = controls\(\)\.filter/);
   assert.match(wire, /for \(const c of held\) c\.disabled = true;\s*note\.className = 'note quiet';\s*note\.textContent = 'Saving…';/);
   assert.match(wire, /after = \{ id, field, text: 'Saved' \};/);
   assert.match(wire, /err instanceof Refused && err\.status === 409\) \{\s*after = \{ id, field, text: MOVED_MESSAGE, error: true \};/, 'a 409 redraws as stored, with the moved message');
@@ -418,14 +450,14 @@ test('the List view draws the tag controls in every row from the project\'s tags
   assert.match(draw, /<td class="tags">\$\{view === 'list' \? renderListTags\(t, known\) : t\.tags\.map/);
   const card = /const card = \(t\) => `([\s\S]*?)`;/.exec(app)[1];
   assert.doesNotMatch(card, /select|renderListTags|remove-tag/);
-  assert.match(app, /wireListTags\(tickets, save, noteOf\);/);
+  assert.match(app, /wireListTags\(root, tickets, save, noteOf\);/);
   const css = readFileSync(WEB('app.css'), 'utf8');
   assert.match(css, /\.group td\.tags input\.new-tag\[hidden\] \{ display: none; \}/, 'the box stays hidden until New Tag… opens it');
 });
 
 test('a tag picked, typed or removed sends the whole new list through the shared save; a blank entry or a tag already there sends nothing', () => {
   const app = pageScript();
-  const wire = /function wireListTags\(tickets, save, noteOf\) \{([\s\S]*?)\n\}/.exec(app)?.[1];
+  const wire = /function wireListTags\(root, tickets, save, noteOf\) \{([\s\S]*?)\n\}/.exec(app)?.[1];
   assert.ok(wire, 'the tag controls are wired');
   assert.match(wire, /save\(t\.id, 'tags', \[\.\.\.t\.tags, tag\], undo\);/, 'adding sends the old tags plus the new one');
   assert.match(wire, /if \(t\.tags\.includes\(tag\)\) \{[\s\S]*?is already a tag\.`;\s*undo\(\);\s*return;/, 'a tag already there is said, not sent');
@@ -483,9 +515,9 @@ test('the List view draws a Topics cell after Tags from the board\'s topics; pic
   assert.match(row, /<td class="tags">[^\n]*<\/td>\s*<td class="topics">\$\{view === 'list' \? renderListTopics\(t, board\.topics\) :/);
   const card = /const card = \(t\) => `([\s\S]*?)`;/.exec(app)[1];
   assert.doesNotMatch(card, /topic/i, 'the Board view\'s cards show no topics');
-  assert.match(app, /wireListTopics\(tickets, save\);/);
+  assert.match(app, /wireListTopics\(root, tickets, save\);/);
   assert.match(app, /select\[data-topics-of\], button\[data-untopic-of\]'\)\]/, 'held while a save is in flight');
-  const wire = /function wireListTopics\(tickets, save\) \{([\s\S]*?)\n\}/.exec(app)?.[1];
+  const wire = /function wireListTopics\(root, tickets, save\) \{([\s\S]*?)\n\}/.exec(app)?.[1];
   assert.ok(wire, 'the topic controls are wired');
   assert.match(wire, /save\(t\.id, 'topics', \[\.\.\.idsOf\(t\), topic\], \(\) => \{ select\.value = ''; \}\);/);
   assert.match(wire, /save\(t\.id, 'topics', idsOf\(t\)\.filter\(\(id\) => id !== topic\), \(\) => \{\}\);/);
@@ -1004,8 +1036,8 @@ test('the pod button is named for what it opens and still reads each stage (SP-1
     // Read by stage before the redraw, put back on that stage's new table after it.
     assert.match(place, /const sorts = new Map\(sortableTables\(\)\.filter\(\(\{ table \}\) => sorted\.get\(table\)\?\.sort\)\.map\(\(\{ table, stage \}\) => \[stage, sorted\.get\(table\)\.sort\]\)\);/);
     assert.match(place, /restore\(\) \{[\s\S]*for \(const \{ table, stage \} of sortableTables\(\)\) if \(sorts\.has\(stage\)\) sorted\.get\(table\)\?\.apply\(sorts\.get\(stage\)\);[\s\S]*window\.scrollTo/);
-    assert.match(app, /const sortableTables = \(\) => \[\.\.\.main\.querySelectorAll\('\[data-stage\] table\.sortable'\)\]\s*\.map\(\(table\) => \(\{ table, stage: table\.closest\('\[data-stage\]'\)\.dataset\.stage \}\)\);/);
-    const wire = /function wireSortHeadings\(stages\) \{[\s\S]*?\n\}/.exec(app)[0];
+    assert.match(app, /const sortableTables = \(root = main\) => \[\.\.\.root\.querySelectorAll\('\[data-stage\] table\.sortable'\)\]\s*\.map\(\(table\) => \(\{ table, stage: table\.closest\('\[data-stage\]'\)\.dataset\.stage \}\)\);/);
+    const wire = /function wireSortHeadings\(stages, root = main\) \{[\s\S]*?\n\}/.exec(app)[0];
     // Every new table can take a sort back before he clicks it, and a click starts from what it shows.
     assert.match(wire, /sorted\.set\(table, \{ sort: null, apply \}\);/);
     assert.match(wire, /sorted\.set\(table, \{ sort, apply \}\);/);
