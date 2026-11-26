@@ -66,7 +66,7 @@ import { followReleases, QUIET_DAYS_KEY } from '../lib/releaseFollow.mjs';
 // from the package, so every project's relay decides the same way.
 import {
   mergeDecision, githubGate, isMergeCommand, MERGE_MARKER, parseMergeMarker,
-  refusalNotice, refusalBusLine, conflictHandOffNotice, mergedNotice, alreadyMergedPlan, filesMadeLines, REFUSAL_CODES,
+  refusalNotice, refusalBusLine, conflictHandOffNotice, mergedNotice, alreadyMergedPlan, unaskedMergePlan, mergeRecordedInEarlierRound, filesMadeLines, REFUSAL_CODES,
 } from '../lib/mergeOnComment.js';
 import {
   PR_VIEW_FIELDS, markerBookkeeping, recordBookkeeping, emptyBooks, mergeDestination, relayLine,
@@ -253,10 +253,10 @@ npm run clickup -- <command> [flags]      (Loop Queue: list ${LOOP_QUEUE_LIST}, 
   status --task <id> --status S [--if-status S] [--assign <uid>] [--clear-assignees] [--no-auto-assign] [--no-card]
   ask --task <id> [--status "Needs your input"|"Ready to launch"] --body-file <f|-> [--no-move] [--after-his-answer]
                                                   [--ask-anyway] [--ask-again]
-  fixup-live --task <id> [--if-status S]         a catch-up ticket ("Find out why PR #N ... will not merge") whose PR already
-                                                  merged: move it to Live with a note, never ask Dane (SP-288). Exit 0 moved /
-                                                  4 not one (its own PR, none named, or not merged): carry on / 3 moved meanwhile /
-                                                  1 a read or write failed
+  fixup-live --task <id> [--if-status S]         a ticket whose work already merged (a catch-up ticket's PR, SP-288, or its own
+                                                  PR, SP-406): move it to Live with a note, never ask Dane. Exit 0 moved /
+                                                  4 not one (no PR, not merged, an earlier round's or a next slice): carry on /
+                                                  3 moved meanwhile / 1 a read or write failed
   pr-opened --task <id> --pr <url|number> [--repo owner/name] [--if-missing] [--human-hours <N>] [--body-file <f|->]
   pr-files [--task <id>] [--files a,b,...] [--json]   which files each open pull request changes (SP-349); with --files or
                                                   --task, the open pull requests sharing any of them. Exit 0 none shared /
@@ -676,22 +676,28 @@ async function alreadyAnsweredRefused(task, status) {
 }
 
 /**
- * A catch-up ticket and whether its work already landed (SP-288): the
- * ticket, its comments, the PR it was filed to unstick and catchUpClosePlan's
- * answer. GitHub is asked only when the answer turns on it.
+ * A ticket and whether its work already landed (SP-288; its own PR, SP-406):
+ * the ticket, its comments, its own recorded PR or the PR it was filed to
+ * unstick, and catchUpClosePlan's answer. GitHub is asked only when the
+ * answer turns on it.
  */
 async function catchUpReading(task) {
   const t = await readTask(task);
   const comments = await readComments(task);
   const ownPr = findPullRequest(comments);
-  const unstuck = ownPr ? null : unstuckPullRequest(t.markdown_description || t.description || '');
+  const description = t.markdown_description || t.description || '';
+  const unstuck = ownPr ? null : unstuckPullRequest(description);
   const status = t.status?.status ?? '';
+  const earlierRound = ownPr ? mergeRecordedInEarlierRound({ comments, prNumber: ownPr.number }) : false;
+  const nextSlice = ownPr ? statusOf(mergeDestination(description).status) !== LIVE : false;
+  const facts = { status, ownPr, unstuck, earlierRound, nextSlice };
   let live = null;
-  let plan = catchUpClosePlan({ status, ownPr, unstuck, live });
+  let plan = catchUpClosePlan({ ...facts, live });
   if (plan.act === 'cannot-tell') {
     live = { state: null, mergedAt: null };
-    if (`${unstuck.owner}/${unstuck.repo}`.toLowerCase() === String(project.githubRepo).toLowerCase()) {
-      const view = gh(['pr', 'view', String(unstuck.number), '--repo', project.githubRepo, '--json', 'state,mergedAt']);
+    const pr = plan.pr;
+    if (`${pr.owner}/${pr.repo}`.toLowerCase() === String(project.githubRepo).toLowerCase()) {
+      const view = gh(['pr', 'view', String(pr.number), '--repo', project.githubRepo, '--json', 'state,mergedAt']);
       if (view.ok) {
         try {
           const got = JSON.parse(view.stdout);
@@ -699,9 +705,9 @@ async function catchUpReading(task) {
         } catch { /* non-JSON: left unread */ }
       }
     }
-    plan = catchUpClosePlan({ status, ownPr, unstuck, live });
+    plan = catchUpClosePlan({ ...facts, live });
   }
-  return { t, comments, unstuck, live, plan };
+  return { t, comments, ownPr, unstuck, live, plan };
 }
 
 /** A merge time from GitHub, in Mountain time, or '' when there is none. */
@@ -711,8 +717,9 @@ function mergedAtText(iso) {
 }
 
 /**
- * `ask` must not hand Dane a catch-up ticket whose pull request already
- * merged (SP-288): there is nothing for him to do, and `fixup-live` closes it.
+ * `ask` must not hand Dane a ticket whose work already merged (a catch-up
+ * ticket's PR, SP-288, or its own, SP-406): there is nothing for him to do,
+ * and `fixup-live` closes it.
  * Returns the exit code, or null to carry on. A failed GitHub read carries on:
  * the ask stands as it did before this guard.
  */
@@ -723,7 +730,7 @@ async function catchUpMergedRefused(task) {
   }
   const r = await catchUpReading(task);
   if (r.plan.act !== 'close') return null;
-  console.error(`\nREFUSED — ${task} is a catch-up ticket and ${r.plan.why}${r.live?.mergedAt ? ` (${mergedAtText(r.live.mergedAt)})` : ''}.`);
+  console.error(`\nREFUSED — ${task}: ${r.plan.why}${r.live?.mergedAt ? ` (${mergedAtText(r.live.mergedAt)})` : ''}.`);
   console.error('Its work is already live, so there is nothing to ask Dane. Close it yourself, with a note:');
   console.error(`  npm run clickup -- fixup-live --task ${task} --if-status "${r.t.status?.status ?? ''}"`);
   console.error('Nothing was posted and the status has NOT moved.');
@@ -2105,8 +2112,9 @@ if (cmd === 'whoami') {
   reportLimits();
 
 } else if (cmd === 'fixup-live') {
-  // A catch-up ticket whose PR already merged closes itself (SP-288): the
-  // pass that finds it moves it to Live with one note, and Dane is never asked.
+  // A catch-up ticket whose PR already merged closes itself (SP-288), and so
+  // does a ticket whose own PR merged under another ticket's merge (SP-406):
+  // the pass that finds it moves it to Live with one note, and Dane is never asked.
   const task = arg('task');
   if (!task) usage();
   const ifStatus = arg('if-status');
@@ -2127,7 +2135,7 @@ if (cmd === 'whoami') {
   if (statusOf(now) !== LIVE) { console.error(`Status did NOT stick: asked for "${DISPLAY[LIVE]}", the ticket reads back "${now}". No note was posted.`); process.exit(1); }
   if ((back.assignees || []).length) { console.error(`Moved to "${now}", but assignees did NOT clear: ${assigneeNames(back)}.`); process.exit(1); }
   clearPassMarkerFor(task, now);
-  const note = fixupLiveNote({ unstuck: r.unstuck, mergedAt: mergedAtText(r.live?.mergedAt), from: was });
+  const note = fixupLiveNote({ unstuck: r.unstuck, own: r.ownPr, mergedAt: mergedAtText(r.live?.mergedAt), from: was });
   const { id } = await postComment(task, { comment_text: note });
   console.log(`Task ${task}: "${was}" -> "${now}" (read back), note ${id} posted (read back): ${r.plan.why}.`);
   reportLimits();
@@ -2439,6 +2447,73 @@ if (cmd === 'whoami') {
     return true;
   };
 
+  // ── A Ready to launch ticket whose own PR merged with no word of his (SP-406)
+  // Its PR went in under another ticket's merge, or by hand: finished the way
+  // the SP-216 path finishes one (move first, then the note, the bus line and
+  // main-moved), decided by unaskedMergePlan. An open PR, an earlier slice's
+  // PR or one GitHub cannot read leaves the ticket exactly where it is.
+  // Returns true when this pass decided the ticket (moved it, or said why it
+  // could not), so the caller says nothing more.
+  const finishUnaskedMerge = async (task, comments) => {
+    const ownPr = findPullRequest(comments);
+    if (!ownPr) return false;
+    let prJson = null;
+    let unread = '';
+    if (`${ownPr.owner}/${ownPr.repo}`.toLowerCase() !== String(repo).toLowerCase()) {
+      unread = `the recorded PR is in ${ownPr.owner}/${ownPr.repo}, not ${repo}`;
+    } else {
+      const view = gh(['pr', 'view', String(ownPr.number), '--repo', repo, '--json', 'state,mergedAt,baseRefName']);
+      if (!view.ok) unread = view.stderr.trim().slice(0, 200) || 'gh failed';
+      else {
+        try { prJson = JSON.parse(view.stdout); } catch { unread = 'gh returned non-JSON'; }
+      }
+    }
+    // Where it goes hangs on the description's "Next slice:" line; read only
+    // once GitHub says merged, so an open PR costs no tracker read.
+    let dest = null;
+    if (String(prJson?.state || '').toUpperCase() === 'MERGED') {
+      const out = await tracker.getTask(task.id, { markdown: true });
+      if (!out.res.ok || !out.json) {
+        unchecked.push(`${task.id}: PR #${ownPr.number} is merged with no merge word on this ticket, but the description could not be read (HTTP ${out.res.status}) to see whether a next slice remains — not moved this pass; the next pass tries again`);
+        say(task, 'unchecked', `could not read the description (HTTP ${out.res.status})`);
+        return true;
+      }
+      dest = mergeDestination(out.json.markdown_description || out.json.description);
+    }
+    const plan = unaskedMergePlan({ ownPr, prJson, comments, dest, mergedAtLabel: mergedAtText(prJson?.mergedAt) });
+    if (plan.act === 'none' || plan.act === 'open') return false;
+    if (plan.act === 'cannot-tell') {
+      unchecked.push(`${task.id}: could not read PR #${ownPr.number} from GitHub (${unread || plan.why}) to see whether it is already merged — left in Ready to launch`);
+      say(task, 'unchecked', `could not read PR #${ownPr.number}: ${unread || plan.why}`);
+      return true;
+    }
+    if (plan.act === 'earlier-round') { say(task, 'nothing', plan.why); return true; }
+    // plan.act === 'finish'
+    if (dryRun) {
+      say(task, 'would-finish-merged', `PR #${ownPr.number} is already merged with no merge word here; would move the ticket to "${dest.status}" because ${dest.why}, then record it and tell in-flight tickets main moved`);
+      return true;
+    }
+    // Re-read right before the write: if he moved it meanwhile, his move stands.
+    const fresh = await readTaskOrNull(task.id);
+    const before = String(fresh?.status?.status ?? '');
+    if (!fresh || !isReadyToLaunch(before)) {
+      if (!fresh) unchecked.push(`${task.id}: PR #${ownPr.number} is merged, but the ticket could not be re-read before the move — not moved this pass`);
+      say(task, fresh ? 'skip' : 'unchecked', fresh ? `it moved to "${before || '?'}" during this pass — left where it is` : 'could not re-read the ticket before the move');
+      return true;
+    }
+    settled.add(task.id);
+    const moved = await moveMergedTicket(fresh, ownPr.number, dest, { nextPassRetries: true });
+    if (!moved) {
+      say(task, 'unchecked', `PR #${ownPr.number} is already merged, but the move to "${dest.status}" FAILED — nothing recorded; the next pass tries again`);
+      return true;
+    }
+    const noteId = await postNote(task, plan.body, `PR #${ownPr.number} merged elsewhere and the ticket moved to ${dest.status}`);
+    say(task, 'merged-elsewhere', `PR #${ownPr.number}${plan.mergedAt ? ` merged at ${plan.mergedAt}` : ''} with no merge word here; ticket -> ${dest.status} (verified)${noteId ? '' : ' (note FAILED, see below)'} (${dest.why})`);
+    await announce(task, mergedBusLine({ tag: busTag, task, url: ticketUrl(task), pr: ownPr, dest, already: true }), `PR #${ownPr.number} merged elsewhere`);
+    await afterMainMoved(task, ownPr.number);
+    return true;
+  };
+
   const relayReadyToLaunch = async (task) => {
     const comments = await readComments(task.id);
     seen.set(task.id, { task, comments });
@@ -2457,7 +2532,13 @@ if (cmd === 'whoami') {
       recordBookkeeping(books, c.id, markerBookkeeping(out.json?.comments || out.json?.replies || []));
     }
     const decision = mergeDecision({ status: task.status?.status, comments, operatorId: OPERATOR_ID, ...books });
-    if (decision.act === 'ignore') { say(task, 'nothing', decision.reason); return; }
+    if (decision.act === 'ignore') {
+      // No word of his to act on, but its own PR may be merged already, under
+      // another ticket's merge or by hand (SP-406): then it is finished here.
+      if (await finishUnaskedMerge(task, comments)) return;
+      say(task, 'nothing', decision.reason);
+      return;
+    }
 
     // A refusal already given, for a reason that is still the true one, is not
     // news: quiet. Anything else is written on the ticket once, with its marker.
