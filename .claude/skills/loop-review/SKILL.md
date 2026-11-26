@@ -172,10 +172,13 @@ look at; this is a check that runs in CI"*).
      `> ` lines.) Then end `@@NEEDED` with **`Your move: Merge — PR #N`**: the
      ticket page draws the Merge button from that line. Do **NOT** merge.
 
-     **A catch-up ticket whose PR already merged is never his** (a "Find out
-     why PR #N ... will not merge" ticket, no PR of its own): asking him to
-     press Close on work he already approved only clutters his list. Before
-     any `ask` on a ticket with no `PR opened:` line, run:
+     **A ticket whose work already merged is never his**: a catch-up ticket
+     ("Find out why PR #N ... will not merge") whose PR merged, or any ticket
+     whose own `PR opened:` PR merged under another ticket's merge or by hand
+     (SP-406: seventeen WaveCenter catch-up tickets sat on him two days that
+     way). Asking him to press Merge or Close on work already in only
+     clutters his list. Before any `ask --status "Ready to launch"`, and
+     before any `ask` on a ticket with no `PR opened:` line, run:
 
      ```bash
      npm run clickup -- fixup-live --task <id> --if-status "In review"
@@ -183,8 +186,9 @@ look at; this is a check that runs in CI"*).
 
      Exit 0: it read GitHub, found that PR merged, moved the ticket to Live
      and posted one note naming the merge. Your verdict stands; report it and
-     finish, with no card. Exit 4: it is not one (its own PR, none named, or
-     that PR not merged yet): carry on below. Exit 3: it moved meanwhile,
+     finish, with no card. Exit 4: it is not one (no PR named, its PR not
+     merged yet, an earlier round's merge, or a next slice to build): carry
+     on below. Exit 3: it moved meanwhile,
      stand down. Exit 1: GitHub or the tracker could not be read: say so in
      your report and carry on below. `ask` refuses (exit 2) a ticket that
      `fixup-live` would close, and names the command.
