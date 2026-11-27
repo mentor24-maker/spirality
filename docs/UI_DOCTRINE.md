@@ -185,8 +185,8 @@ never sets its own height, padding or colour; it takes a kind.
 | Kind | Class | Fill | Hover | Disabled | Use |
 |---|---|---|---|---|---|
 | Secondary | `btn` | white, `#000` text, `--border-strong` border | `--bg-hover`, `--ink-secondary` border | `--ink-muted` text, `--border-light` border | everything that is not one of the three below: Back, Cancel, Refresh, Import |
-| Main action | `btn btn-primary` | blue `#0000cc` | `#0000a3` | `#aaaacc` | the one main action on the screen: "Add…", "Create…", Merge, Go |
-| Save | `btn btn-save` | green `#00cc00` | `#00a300` | `#aaccaa` | every Save |
+| Main action | `btn btn-primary` | blue `#0000cc` | `#0000a3` | `#aaaacc` | the one main action on the screen: "Add…", "Create…", Sign In |
+| Save and go-ahead | `btn btn-save` | green `#00cc00` | `#00a300` | `#aaccaa` | every Save, and every button that gives the answer a ticket is waiting on Dane for: Merge, Go, Approve, Close |
 | Delete | `btn btn-danger` | red `#cc0000` | `#a30000` | `#ccaaaa` | anything that removes |
 
 - Text on a filled kind is white. Font `--text-sm`, weight 600, line height
@@ -206,12 +206,21 @@ never sets its own height, padding or colour; it takes a kind.
   (section 1.1).
 - **A choice inside a dialog** ("Overwrite", "Save & Publish") is the main
   action, blue, not green.
-- **Which kind on the tracker** (SP-321): Merge, Go, Approve, Sign In, Email
-  Me a Link, Upload Document, File in This Order, File in and the "Add…",
-  "Create…", "Send…" and "Suggest…" buttons are the main action; every
-  Save is a Save; Delete, Reject and every Remove are Delete; Post Reply, Add
-  Comment, Close, Cancel, Copy, Edit and the rest are secondary. A button in a
-  table row is small (`btn-sm`).
+- **Which kind on the tracker** (SP-321): Sign In, Email Me a Link, Upload
+  Document, File in This Order, File in and the "Add…", "Create…", "Send…"
+  and "Suggest…" buttons are the main action; every Save is a Save; Delete,
+  Reject and every Remove are Delete; Post Reply, Add Comment, a dialog's
+  Close, Cancel, Copy, Edit and the rest are secondary. A button in a table
+  row is small (`btn-sm`).
+- **An answer is green** (SP-415, 2026-11-26, Dane: "the same bright green
+  color as Save and other affirmative steps"). A button that gives the answer
+  a ticket is waiting on him for is the Save kind, `btn btn-save`, because it
+  is the step he is expected to take: Merge, Go, Approve and Close on the
+  ticket page, and Merge, Close, Go and the pick list's Send on the mlist page.
+  This reverses SP-321, which had Merge, Go and Approve blue. A free-text
+  reply (Post Reply, the mlist page's Something Else Send) stays secondary:
+  it is not the answer the card asked for. `tracker/buttonKinds.test.mjs`
+  checks every one of them.
 
 **Not a kind.** These buttons draw themselves in rules of their own, and are
 the only ones the check lets through without `btn` (`EXCEPTIONS` in
@@ -416,7 +425,7 @@ Measured 2026-11-15 on `tracker/web/app.css`, `app.mjs` and `render.mjs`.
 |---|---|---|
 | 1 Capital letters | Followed and checked (SP-325, 2026-11-16): buttons, headings, toggles, columns, tabs, field labels, tab titles and trail. A Settings control has a Title Case `title` for its label and keeps its lower-case `label` for sentences; a setup answer has a Title Case `label` over the wizard's question. | SP-325 |
 | 2 Tokens | Followed and checked (SP-320, 2026-11-15): every colour, font size, corner and gap is a token in `:root`, StarCaster's where it has one. Padding and margins are still literal lengths, near the steps. | SP-320 |
-| 3 Buttons | Followed and checked (SP-321, 2026-11-15): every button is `btn` plus a kind, or a listed exception; 32px and 24px; disabled is a colour; focus ring on every kind. The ticket page's green, Settings' dark blue and the black link are gone. | SP-321 |
+| 3 Buttons | Followed and checked (SP-321, 2026-11-15): every button is `btn` plus a kind, or a listed exception; 32px and 24px; disabled is a colour; focus ring on every kind. The ticket page's green, Settings' dark blue and the black link are gone. The answer buttons are the Save green (SP-415, 2026-11-26). | SP-321, SP-415 |
 | 4 Title row | Followed and checked (SP-322, 2026-11-15): a 24px, weight 800 `<h1>` on every page, and every toolbar in the title row at its right, the trail above it, except the Tasks page's, which is the row under its title and tabs (SP-362, 2026-11-16); headings under it at `--text-lg` (h2) and `--text-base` (h3 to h6), with board columns and Console stages at `--text-base`. The ticket page keeps its two-column top, whose actions sit in the right column. | SP-322, SP-362 |
 | 5 Tabs | Followed and checked (SP-322, 2026-11-15): Board / List / Console and the Settings tabs are one tab bar (`nav.tabs`), links with `aria-current`. Board / List / Console sit at the right of the Tasks title row (SP-326, 2026-11-16), with nothing but the title beside them (SP-362); the Settings tabs on a row of their own. | SP-322, SP-326, SP-362 |
 | 6 Forms | Followed and checked (SP-325, 2026-11-16): one box style from the tokens; boxes sized by `--field-w-number`, `--field-w-short` and `--field-w-long`, none full width, and a box in a table keeps its own width in the table's smaller type; a locked box (read-only or disabled) muted; forms laid out as `.fields`, a short setting's label beside it (`.beside`), a text box's above; every box labelled, and the text inside an empty box an example. The search boxes have a visible label now. | SP-325 |
