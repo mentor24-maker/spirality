@@ -540,7 +540,7 @@ export function renderQuickAction(t) {
     renderStatusLine(t),
     `<p class="bug-words">${escapeHtml(report.words)}</p>`,
     report.facts.length ? `<ul class="bug-facts">${report.facts.map(bugReportFact).join('')}</ul>` : '',
-    report.screenshots ? '<p class="bug-shots quiet">Screenshots are attached: see the description under Details.</p>' : '',
+    report.screenshots ? '<p class="bug-shots quiet">Screenshots are attached: see the description on the right.</p>' : '',
   ] : [`<h1>${escapeHtml(name)}</h1>`, renderStatusLine(t)];
   return [
     ...top,
@@ -719,7 +719,7 @@ export function renderReplyForm(t, name) {
   return `<form class="reply">
         <label for="reply">Reply as ${escapeHtml(name ?? 'you')}</label>
         <textarea id="reply" required></textarea>
-        <div class="row"><button type="submit" class="btn">Post Reply</button><span class="note"></span></div>
+        <div class="row"><button type="submit" class="btn btn-save">Post Reply</button><span class="note"></span></div>
       </form>`;
 }
 
@@ -914,7 +914,7 @@ export const WONT_DO_TAG = 'wont-do';
 export const REJECT_COMMENT = 'Rejected from the ticket page: this bug report will not be worked on, and nothing shipped for it.';
 
 /** The one line that stands where the reply box was on a held bug report. */
-export const HELD_REPORT_LINE = 'No loop reads a reply on a bug report held for you, so there is no reply box here. Approve or Reject it; the Change panel under Details still works for anything else.';
+export const HELD_REPORT_LINE = 'No loop reads a reply on a bug report held for you, so there is no reply box here. Approve or Reject it; the Change panel on the right still works for anything else.';
 
 /** The status line's "i" on a held bug report: its move is a button, not an answer. */
 export const HELD_REPORT_STATUS_LINE = 'It waits on you to Approve or Reject it below.';

@@ -37,10 +37,12 @@ export async function drawTicket(id, said = null, kept = null) {
       </div>
       ${renderComment(c.body, { operatorName: me?.name })}
     </article>`).join('');
-  // The ticket itself: what Details holds. While a loop has it (SP-291) nothing
-  // asks him for a reply, so this goes in the right column, open, with the
-  // Add Comment box under the comments; in his two statuses it stays folded
-  // under Details, closed until he opens it, below the ask and the reply box.
+  // The ticket itself, always open in the right column. While a loop has it
+  // (SP-291) nothing asks him for a reply, so the right column also carries
+  // any actions and the Add Comment box sits under the comments. In his two
+  // statuses (SP-416) everything he needs to act sits on the left, in one
+  // pod: his title, his words, the loop's brief and the actions; the right
+  // column holds the commands, the files made and the rest of the ticket.
   const inline = loopHasIt(t);
   const ticketBody = `
       <p class="meta">
@@ -65,35 +67,28 @@ export async function drawTicket(id, said = null, kept = null) {
           <button type="submit" class="btn">Copy</button><span class="note"></span>
         </div>
       </form>` : '<p class="quiet">There is no other project to copy into yet.</p>'}`;
-  main.innerHTML = `
-    <section class="quick${inline ? ' loop-has' : ''}">
-      ${renderHeldUp(t, sinceTime)}
-      <div class="ask">${renderQuickAction(t)}</div>
-      <div class="act">
-      ${renderCommands(t)}
+  const actions = `
       ${renderAnswerIn(t)}
       ${renderMergeAction(t)}
       ${renderCloseAction(t)}
       ${renderGoAction(t)}
       ${renderBugReportActions(t)}
-      ${renderReplyForm(t, me?.name)}
-      ${inline ? `<div class="details">${ticketBody}</div>` : ''}
+      ${renderReplyForm(t, me?.name)}`;
+  main.innerHTML = `
+    <section class="quick${inline ? ' loop-has' : ' his-move'}">
+      ${renderHeldUp(t, sinceTime)}
+      <div class="ask${inline ? '' : ' action-pod'}">${renderQuickAction(t)}${inline ? '' : actions}</div>
+      <div class="act">
+      ${renderCommands(t)}
+      ${inline ? actions : renderFilesMade(t)}
+      <div class="details">${ticketBody}</div>
       ${renderDeleteAction(t)}
       </div>
     </section>
-    ${renderFilesMade(t)}
-    ${inline ? '' : `<details class="details">
-      <summary>Details</summary>${ticketBody}
-    </details>`}`;
-  // Details, when it is a fold (his two statuses), opened; while a loop has it there is nothing to open.
-  const openDetails = () => {
-    const fold = main.querySelector('details.details');
-    if (fold) fold.open = true;
-  };
+    ${inline ? renderFilesMade(t) : ''}`;
   wireCopyButtons();
-  // Arrived by the bus count in the header: open the fold at the comments, where the posts are.
+  // Arrived by the bus count in the header: go to the comments, where the posts are.
   if (location.hash === '#comments' && !refreshing) {
-    openDetails();
     document.getElementById('comments').scrollIntoView({ block: 'start' });
   }
   // The ticket's own project, in the view last used; then the ticket; then this page of it.
@@ -126,10 +121,9 @@ export async function drawTicket(id, said = null, kept = null) {
     }
   });
   // After any successful post from this page (the reply box, Merge, Close,
-  // Go): Details open so the new reply is there when he scrolls down, and
-  // the page kept at the top.
+  // Go): the page kept at the top. The new reply is already in the open
+  // comments on the right (SP-416: there is no fold to open).
   const afterPost = () => {
-    openDetails();
     window.scrollTo(0, 0);
   };
   // Merge, Close and Go: his word from the server (the project config's merge
@@ -257,7 +251,6 @@ export async function drawTicket(id, said = null, kept = null) {
     panel?.restore(kept);
   }
   if (said) {
-    openDetails();
     const where = said.message ? null : main.querySelector(said.field ? `.edit [data-note="${said.field}"]` : '.edit-note');
     if (said.message) {
       showMessage(said.message);
