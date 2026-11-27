@@ -1406,10 +1406,17 @@ exception (`Exception: secret value | billing | browser login | decision`).
 Its design, its two brakes and its measurements are in StarCaster's
 `docs/DOCTRINE.md` §6.9, beside the hook.
 
-**In Spirality now:** "CC" is an agent session. Spirality does not have the tripwire: in
-this repository the rule is written down (CLAUDE.md, "Agent sessions run the
-commands"; `docs/LOOP_CONTRACT.md`, "What may be handed to Dane at all") and
-not yet enforced.
+**In Spirality now:** "CC" is an agent session. The rule is written down
+(CLAUDE.md, "Agent sessions run the commands"; `docs/LOOP_CONTRACT.md`, "What
+may be handed to Dane at all") and, since SP-418, enforced here by the same
+tripwire, moved across from StarCaster: `scripts/hooks/check_operator_handoff.cjs`
+(with `scripts/lib/operator_handoff.cjs` and `scripts/lib/hook_state_dir.cjs`),
+registered as a `Stop` hook in `.claude/settings.json`. It trips only in a
+session started at a terminal (the lanes run headless), steps aside when it
+cannot read the transcript, and stands down after three refusals in a session.
+Its cd-preamble rule names the folder of the repository the session is in, not
+StarCaster's. To step around it once on purpose, start the session with
+`SKIP_OPERATOR_HANDOFF=1` and say in the reply why.
 
 ### 6.10 A behaviour proven in an uncommitted file does not move when its job moves
 

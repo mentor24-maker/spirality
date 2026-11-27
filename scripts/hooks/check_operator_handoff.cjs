@@ -3,23 +3,27 @@
 
 /**
  * Claude Code Stop hook -- the operator hand-off tripwire.
- * Enforces CLAUDE.md "CC runs the operational commands" / DOCTRINE.md §6.9.
+ * Enforces CLAUDE.md "Agent sessions run the commands, not Dane" /
+ * docs/DOCTRINE.md 6.9. Moved from StarCaster (SP-418); the incidents and
+ * measurements below are StarCaster's.
  *
- * If the reply about to be delivered hands Dane a fenced command that CC could
- * have run itself, and does not name one of the four exceptions, refuse the
- * stop and say so. Exit 2 blocks the stop and shows stderr to the agent.
+ * If the reply about to be delivered hands Dane a fenced command that the
+ * session could have run itself, and does not name one of the four
+ * exceptions, refuse the stop and say so. Exit 2 blocks the stop and shows
+ * stderr to the agent.
  *
  * WHY A STOP HOOK AND NOT A PRE-COMMIT CHECK
  * The failure is "the turn ended with a command block in it". Pre-commit
  * cannot see the message and neither can CI; the reply is the only place that
- * fact exists. Same reasoning as require_sql_handoff.cjs, and the same shape.
+ * fact exists. Same reasoning as StarCaster's require_sql_handoff.cjs, and the
+ * same shape.
  *
  * `cli` SESSIONS ONLY -- WHICH IS NOT THE SAME AS "SOMEBODY IS READING"
  * A hand-off is only a hand-off if somebody is being handed something. The
  * loops run headless (`entrypoint: "sdk-cli"`) and report to a ticket, so
  * there is no operator at the other end and nothing to protect. Only `cli`
  * can trip this. But `cli` means "started at a terminal", not "watched": the
- * one `cli` session in this project's entire history (measured 2026-09-01 over
+ * one `cli` session in StarCaster's entire history (measured 2026-09-01 over
  * 1,615 transcripts) is a `/loop 30m loop-build` that ran unattended for seven
  * days. See isInteractive() in ../lib/operator_handoff.cjs. The brakes below
  * are what make that survivable, so treat them as load-bearing.
@@ -44,6 +48,7 @@ const {
   lastAssistantTurn,
   isInteractive,
   stateDir,
+  repoFolderName,
   refusalMessage,
 } = require('../lib/operator_handoff.cjs');
 
@@ -122,7 +127,7 @@ function main(input) {
   // two independent limits, so neither one failing can wedge the session.
   //
   // Both Stop hooks honour it as of 2026-09-04 (task 86bbt7mxe).
-  // require_sql_handoff.cjs -- the other hook in the same settings array -- did
+  // StarCaster's require_sql_handoff.cjs -- the other hook in its settings -- did
   // not, and this comment used to record the consequence as permanent: when it
   // blocked first, the next Stop carried the flag, this hook exited right here,
   // and a reply with BOTH problems only ever got the SQL complaint. That is
@@ -137,7 +142,7 @@ function main(input) {
   // `handedOff` across the session, and a continuation is exactly where the
   // hand-off block arrives -- so its stand-down sits AFTER the reply is read
   // and recorded, not before. Placing it here by analogy is the defect that
-  // sent PR #609 back on 2026-09-05.
+  // sent StarCaster's PR #609 back on 2026-09-05.
   if (payload && payload.stop_hook_active) process.exit(0);
 
   // Only the main agent's Stop event. A subagent's reply is read by this
@@ -162,13 +167,14 @@ function main(input) {
 
   if (!message.trim()) process.exit(0);
 
-  const offenders = offendingCommands(message);
+  const cwd = String((payload && payload.cwd) || process.env.CLAUDE_PROJECT_DIR || process.cwd());
+
+  const offenders = offendingCommands(message, { repoName: repoFolderName(cwd) });
   if (!offenders.length) process.exit(0);
 
   // The exception line is the sanctioned way through.
   if (statedException(message)) process.exit(0);
 
-  const cwd = String((payload && payload.cwd) || process.env.CLAUDE_PROJECT_DIR || process.cwd());
   if (!takeRefusalSlot(cwd, payload && payload.session_id)) process.exit(0);
 
   process.stderr.write(refusalMessage(offenders) + '\n');

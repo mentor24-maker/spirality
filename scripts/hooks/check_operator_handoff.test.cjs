@@ -15,10 +15,14 @@ const {
   stripEnvPrefix,
   lastAssistantTurn,
   isInteractive,
+  repoFolderName,
 } = require('../lib/operator_handoff.cjs');
 
 /**
- * The Stop hook that enforces CLAUDE.md "CC runs the operational commands".
+ * The Stop hook that enforces CLAUDE.md "Agent sessions run the commands, not
+ * Dane" (docs/DOCTRINE.md 6.9). Moved from StarCaster with the hook (SP-418);
+ * the cases are StarCaster's, plus the three SP-418 names and the
+ * cd-preamble's repository name, which Spirality reads instead of hard-coding.
  *
  * The point of this file is the FAILING case. A guard that only proves it
  * stays quiet has proved nothing -- the rule it replaces was "enforced" by
@@ -88,12 +92,37 @@ function fiveTurns(message, opts) {
 }
 
 // ---------------------------------------------------------------------------
-// The four cases the ticket names, driven through the real hook.
+// The three cases SP-418 names, driven through the real hook.
+// ---------------------------------------------------------------------------
+
+test('SP-418: a fenced npm run with no exception is refused, naming the rule', () => {
+  const { code, stderr } = runHook(`Run this:\n\n${fenced('npm run verify', 'bash')}`);
+  assert.equal(code, 2, 'must refuse the stop');
+  assert.match(stderr, /Agent sessions run the commands, not Dane/);
+  assert.match(stderr, /docs\/DOCTRINE\.md 6\.9/);
+  assert.match(stderr, /npm run verify/);
+});
+
+test('SP-418: the same reply with an exception line outside the fence is allowed', () => {
+  for (const word of ['secret value', 'billing', 'browser login', 'decision']) {
+    const { code } = runHook(`Exception: ${word}\n\nRun this:\n\n${fenced('npm run verify', 'bash')}`);
+    assert.equal(code, 0, `"Exception: ${word}" is the sanctioned way through`);
+  }
+});
+
+test('SP-418: a reply with no command is allowed', () => {
+  assert.equal(runHook('Built SP-418 and opened the pull request; verify is green.').code, 0);
+  assert.equal(runHook(`Here is what it printed:\n\n${fenced('check:syntax: 120 of 120 files parse.')}`).code, 0,
+    'a fence with no command in it is not a hand-off');
+});
+
+// ---------------------------------------------------------------------------
+// StarCaster's four cases, driven through the real hook.
 // ---------------------------------------------------------------------------
 
 test('a fenced doppler block fails the stop', () => {
   const { code, stderr } = runHook(
-    `Here is how to list the Delray pages:\n\n${fenced('doppler run -- node scripts/list_pages.mjs', 'bash')}`
+    `Here is how to list the pages:\n\n${fenced('doppler run -- node scripts/list_pages.mjs', 'bash')}`
   );
   assert.equal(code, 2, 'must refuse the stop');
   assert.match(stderr, /hands the operator a command/i);
@@ -145,16 +174,16 @@ test('removing the exception line turns the same reply into a refusal', () => {
 
 test('each handed-over command shape is caught', () => {
   const caught = [
-    'doppler run --project starcaster -- node scripts/x.mjs',
+    'doppler run --project spirality -- node scripts/x.mjs',
     'ssh mac-mini',
     'ssh -p 22 dane@mini',
     'npm run db:refresh',
     'node scripts/check_conventions.cjs',
-    'cd ~/WebApps/starcaster && npm run build',
+    'cd ~/WebApps/spirality && npm run build',
   ];
   for (const command of caught) {
     assert.equal(
-      offendingCommands(fenced(command)).length, 1,
+      offendingCommands(fenced(command), { repoName: 'spirality' }).length, 1,
       `should have been caught: ${command}`
     );
   }
@@ -171,7 +200,7 @@ test('near-misses are left alone', () => {
   ];
   for (const command of allowed) {
     assert.deepEqual(
-      offendingCommands(fenced(command)), [],
+      offendingCommands(fenced(command), { repoName: 'spirality' }), [],
       `should NOT have been caught: ${command}`
     );
   }
@@ -202,8 +231,8 @@ test('pasted npm OUTPUT is not read as a hand-off', () => {
   // no longer treats `>` as a shell prompt: `>` is npm's own log marker, so a
   // pasted run log looked like a hand-off of the command it was REPORTING.
   const log = fenced(
-    '> starcaster@1.0.0 clickup\n'
-    + '> doppler run --project starcaster -- node scripts/clickup_direct.mjs queue'
+    '> spirality@0.1.0 clickup\n'
+    + '> doppler run --project spirality -- node scripts/clickup.mjs queue'
   );
   assert.deepEqual(
     offendingCommands(log), [],
@@ -245,6 +274,40 @@ test('an unterminated fence still counts', () => {
 
 test('a tilde fence counts too', () => {
   assert.equal(offendingCommands('~~~\nnpm run db:refresh\n~~~').length, 1);
+});
+
+// ---------------------------------------------------------------------------
+// The cd-preamble names the repository the session is in, never a fixed one.
+// ---------------------------------------------------------------------------
+
+test('the cd-preamble follows the repository name it is given', () => {
+  const line = fenced('cd ~/WebApps/wavecenter && npm run build');
+  assert.equal(offendingCommands(line, { repoName: 'wavecenter' })[0].rule, 'the cd-preamble');
+  assert.equal(offendingCommands(fenced('cd ~/WebApps/wavecenter && ls'), { repoName: 'spirality' }).length, 0,
+    "another repository's folder is not this one's preamble");
+  assert.equal(offendingCommands(fenced('cd ~/WebApps/spirality && ls')).length, 0,
+    'with no repository name the rule stays quiet rather than guess');
+});
+
+test('repoFolderName reads the main checkout name, also from inside a worktree', () => {
+  const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'ophandoff-name-'));
+  const dir = path.join(parent, 'myrepo');
+  fs.mkdirSync(dir);
+  const git = (args, cwd) => spawnSync('git', args, { cwd, stdio: 'ignore' });
+  git(['init', '-b', 'main'], dir);
+  git(['config', 'user.email', 'test@example.com'], dir);
+  git(['config', 'user.name', 'test'], dir);
+  fs.writeFileSync(path.join(dir, 'seed.txt'), 'seed\n');
+  git(['add', '-A'], dir);
+  git(['commit', '-m', 'seed'], dir);
+  const wt = path.join(dir, '.claude', 'worktrees', 'some-thread');
+  git(['worktree', 'add', wt, '-b', 'topic'], dir);
+
+  assert.equal(repoFolderName(dir), 'myrepo');
+  assert.equal(repoFolderName(wt), 'myrepo', 'a worktree folder is named for the thread, not the repository');
+
+  const msg = fenced('cd ~/WebApps/myrepo && npm run build');
+  assert.equal(runHook(msg, { cwd: wt }).code, 2, 'through the real hook, from the worktree');
 });
 
 // ---------------------------------------------------------------------------

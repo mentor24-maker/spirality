@@ -1,26 +1,33 @@
 'use strict';
 
 /**
- * Shared logic for the operator hand-off tripwire (CLAUDE.md "CC runs the
- * operational commands"; DOCTRINE.md §6.9).
+ * Shared logic for the operator hand-off tripwire (CLAUDE.md "Agent sessions
+ * run the commands, not Dane"; docs/DOCTRINE.md 6.9).
+ *
+ * Moved from StarCaster (SP-418, "move, don't rewrite"): the behaviour is
+ * StarCaster's, and the incidents and measurements in these comments are
+ * StarCaster's, kept because they are why each brake exists. What changed
+ * here: the refusal names Spirality's rules, and the cd-preamble rule names
+ * whichever repository the session is in instead of StarCaster's folder.
  *
  * WHY THIS IS CODE AND NOT A REMINDER
- * "CC runs the operational commands; handing Dane a command is itself a claim
- * that CC cannot run it" has been written down three times -- 2026-08-07,
- * 08-23 and 08-30 -- and broken three times, twice by sessions that had read
- * the rule that day. A rule that depends on being remembered is not a control,
- * it is a hope. This module is the tripwire, in the same family as
- * check_conventions, check:syntax and the terminology guard.
+ * "An agent session runs the operational commands; handing Dane a command is
+ * itself a claim that it cannot run it" was written down in StarCaster three
+ * times -- 2026-08-07, 08-23 and 08-30 -- and broken three times, twice by
+ * sessions that had read the rule that day. A rule that depends on being
+ * remembered is not a control, it is a hope. This module is the tripwire, in
+ * the same family as check:syntax and check:wording.
  *
  * Used by:
  *   - scripts/hooks/check_operator_handoff.cjs   (Stop hook -- refuses the turn)
  *
  * The logic lives here rather than in the hook so the tests can drive the
- * decision directly as well as through the real hook process, the same split
- * as lib/sql_handoff.cjs.
+ * decision directly as well as through the real hook process.
  */
 
 const fs = require('fs');
+const path = require('path');
+const { execFileSync } = require('child_process');
 const { gitStateDir } = require('./hook_state_dir.cjs');
 
 /**
@@ -31,10 +38,11 @@ const { gitStateDir } = require('./hook_state_dir.cjs');
 const EXCEPTIONS = ['secret value', 'billing', 'browser login', 'decision'];
 
 /**
- * `npm run pipeline -- resume` is operator-only by doctrine: an agent may
- * PAUSE the line (a safety move anyone should be able to make) but only Dane
- * hands the deck back. Handing him that one command is correct, so it must
- * never trip the wire.
+ * `npm run pipeline -- resume` is operator-only by StarCaster's doctrine: an
+ * agent may PAUSE the line (a safety move anyone should be able to make) but
+ * only Dane hands the deck back. Handing him that one command is correct, so
+ * it must never trip the wire. Spirality has no such script, so here it never
+ * matches; it stays so the hook reaches StarCaster unchanged later.
  */
 function isOperatorOnlyNpm(line) {
   return /^npm\s+run\s+pipeline\s+--\s+resume\b/.test(line);
@@ -42,7 +50,10 @@ function isOperatorOnlyNpm(line) {
 
 /**
  * The command shapes that mean "an operational command was handed over".
- * Each one is something CC runs itself in this repo every day.
+ * Each one is something an agent session runs itself every day.
+ *
+ * Each test takes the line and a context, `{ repoName }`: the folder name of
+ * the repository the session is in (repoFolderName below).
  */
 const HANDOFF_RULES = [
   { name: 'doppler run', test: (l) => /^doppler\s+run\b/.test(l) },
@@ -53,8 +64,42 @@ const HANDOFF_RULES = [
   { name: 'node scripts/', test: (l) => /^node\s+scripts\//.test(l) },
   // The copy-paste preamble. Any path that names the repo counts -- the point
   // is the shape "cd somewhere && do a thing", not one machine's layout.
-  { name: 'the cd-preamble', test: (l) => /^cd\s+[^\s&|;]*starcaster[^\s&|;]*\s*&&/.test(l) },
+  // StarCaster wrote its own folder name here; in Spirality the name comes
+  // from the repository the session is in (engineering rule 2), and with no
+  // name known the rule stays quiet rather than guess.
+  { name: 'the cd-preamble', test: (l, ctx) => cdPreamblePattern(ctx && ctx.repoName).test(l) },
 ];
+
+function escapeRegExp(text) {
+  return String(text).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** `cd <a path naming the repository> && ...`; never matches with no name. */
+function cdPreamblePattern(repoName) {
+  if (!repoName) return /(?!)/;
+  return new RegExp(`^cd\\s+[^\\s&|;]*${escapeRegExp(repoName)}[^\\s&|;]*\\s*&&`);
+}
+
+/**
+ * The folder name of the repository `cwd` is in: the main checkout's folder,
+ * also from inside one of its worktrees (whose own folder is the thread's
+ * name, not the repository's). Falls back to CLAUDE_PROJECT_DIR's folder, and
+ * to '' when neither can be read (then the cd-preamble rule stays quiet).
+ */
+function repoFolderName(cwd) {
+  try {
+    const common = execFileSync('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], {
+      cwd,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    if (common) return path.basename(common.replace(/\/\.git\/?$/, ''));
+  } catch {
+    // fall through
+  }
+  const dir = process.env.CLAUDE_PROJECT_DIR;
+  return dir ? path.basename(dir) : '';
+}
 
 /**
  * Split a message into fenced code blocks and the prose around them.
@@ -112,7 +157,7 @@ function firstCommandLine(block) {
  *
  * `$` and `%` only. `>` used to be in this set and had to come out: it is
  * npm's own output marker, so with every line of a fence now judged, a pasted
- * run log ("> starcaster@1.0.0 clickup" / "> doppler run --project ...") read
+ * run log ("> spirality@0.1.0 clickup" / "> doppler run --project ...") read
  * as a hand-off of the very command whose OUTPUT was being reported. Nobody
  * hands over a command wearing a `>` prompt, so this costs nothing real.
  */
@@ -125,8 +170,8 @@ function stripPrompt(line) {
  * gets judged.
  *
  * `UI_HARNESS_BASE_URL=http://localhost:3057 npm run check:panels` is a
- * hand-off wearing a hat -- and it is the exact shape CLAUDE.md itself prints,
- * so it is among the likeliest to be pasted at Dane. Every rule below is
+ * hand-off wearing a hat -- and it is the exact shape StarCaster's CLAUDE.md
+ * prints, so it is among the likeliest to be pasted at Dane. Every rule below is
  * start-anchored, so without this peel the prefix hides the command completely.
  *
  * Peeled one assignment at a time rather than with one greedy pattern, so
@@ -147,7 +192,7 @@ function stripEnvPrefix(line) {
  *
  * EVERY LINE OF A BLOCK IS JUDGED, NOT ONLY THE FIRST.
  * The first draft keyed off the first non-blank line, which let the exact
- * hand-off shape CLAUDE.md itself prints walk straight through -- a setup line
+ * hand-off shape StarCaster's CLAUDE.md prints walk straight through -- a setup line
  * followed by the real command:
  *
  *     PORT=3058 node server.js
@@ -158,8 +203,8 @@ function stripEnvPrefix(line) {
  *
  * The worry about widening it is false positives on pasted OUTPUT, so it was
  * measured rather than argued -- and the measurement has to say WHICH
- * POPULATION it read, because the first one did not (DOCTRINE §3.11).
- * Re-measured 2026-09-01 over all 1,615 transcripts in this project, 11,325
+ * POPULATION it read, because the first one did not (DOCTRINE 3.11).
+ * Re-measured 2026-09-01 over all 1,615 transcripts in StarCaster, 11,325
  * assistant messages: every-line scanning flagged 151, first-line scanning
  * flagged the same 151, zero newly refused. (Control first: on the three
  * synthetic shapes above the two rules disagree 3/3, so the instrument can
@@ -177,14 +222,14 @@ function stripEnvPrefix(line) {
  * The one output shape that did read as a hand-off was npm's `>` log prefix,
  * which is why stripPrompt no longer treats `>` as a shell prompt.
  */
-function offendingCommands(message) {
+function offendingCommands(message, context = {}) {
   const { blocks } = splitFences(message);
   const found = [];
   for (const block of blocks) {
     for (const raw of String(block == null ? '' : block).split(/\r?\n/)) {
       const line = stripEnvPrefix(stripPrompt(raw.trim()));
       if (!line) continue;
-      const rule = HANDOFF_RULES.find((r) => r.test(line));
+      const rule = HANDOFF_RULES.find((r) => r.test(line, context));
       if (rule) found.push({ command: line, rule: rule.name });
     }
   }
@@ -291,11 +336,11 @@ function lastAssistantTurn(transcriptPath) {
  * Which sessions this hook fires in at all.
  *
  * `cli` is a session started at a terminal; `sdk-cli` is a headless run, whose
- * reply goes to a ClickUp ticket rather than to a prompt somebody is watching.
+ * reply goes to a ticket rather than to a prompt somebody is watching.
  * Only `cli` fires the wire.
  *
  * `cli` DOES NOT MEAN A PERSON IS READING, and an earlier draft of this
- * comment said it did. Measured across all 1,615 transcripts in this project
+ * comment said it did. Measured across all 1,615 transcripts in StarCaster
  * on 2026-09-01: there is exactly ONE `cli` session in the whole history, and
  * it is a `/loop 30m loop-build` Dane typed at his own terminal on 23 August
  * that then ran unattended until 30 August -- seven days, 10,083 records. So
@@ -319,25 +364,25 @@ function isInteractive(entrypoint) {
 /**
  * Where the per-session refusal counter lives. Kept as a named export because
  * this hook and its tests have always called it `stateDir`; the resolver itself
- * moved to lib/hook_state_dir.cjs, which explains why it is NOT
+ * moved to hook_state_dir.cjs, which explains why it is NOT
  * `<toplevel>/.git/` and carries the incident.
  *
- * It moved because the SQL hook needed the identical answer and copying it a
- * second time is how the first copy drifted -- this bug was fixed here in
- * PR #499 and stayed live in require_sql_handoff.cjs for another week. One
- * function, two callers, no drift.
+ * It moved (in StarCaster) because the SQL hook needed the identical answer
+ * and copying it a second time is how the first copy drifted -- this bug was
+ * fixed in StarCaster's PR #499 and stayed live in its require_sql_handoff.cjs
+ * for another week. One function, every caller, no drift.
  */
 const stateDir = gitStateDir;
 
 /** The refusal the agent reads. Named so the test can assert on its shape. */
 function refusalMessage(offenders) {
   const lines = [
-    'BLOCKED: this reply hands the operator a command CC could have run itself.',
+    'BLOCKED: this reply hands the operator a command the session could have run itself.',
     '',
-    'CLAUDE.md, "CC runs the operational commands": handing Dane a command to',
-    'paste is itself a claim that CC cannot run it, and he reads it that way',
-    'every time. He has raised this three times (2026-08-07, 08-23, 08-30);',
-    'the incident is DOCTRINE.md §6.9.',
+    'CLAUDE.md, "Agent sessions run the commands, not Dane": handing Dane a',
+    'command to paste is itself a claim that the session cannot run it, and he',
+    'reads it that way every time. The rule and its incident are',
+    'docs/DOCTRINE.md 6.9.',
     '',
     'Handed over:',
   ];
@@ -385,5 +430,6 @@ module.exports = {
   lastAssistantTurn,
   isInteractive,
   stateDir,
+  repoFolderName,
   refusalMessage,
 };
