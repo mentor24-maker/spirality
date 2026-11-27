@@ -828,6 +828,23 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
   }
 
   /**
+   * The one check every write that changes a ticket, or a project's
+   * tickets, makes before it writes: ticket.edit on the project (a member,
+   * or an admin), and a loop always may (`store.canChangeTickets`). A
+   * refusal is the same 403 `cannot-edit` everywhere, naming the caller,
+   * their role, the project and the ticket when there is one; nothing has
+   * been written when it throws.
+   */
+  function requireCanChange(me, project, ticket = null) {
+    if (store.canChangeTickets(me.id, project)) return;
+    const role = store.roleOf(me.id);
+    const what = ticket ? `${ticket} was left as it was` : 'nothing was changed';
+    throw new HttpError(403, 'cannot-edit',
+      `${me.name} (${role}) cannot change tickets in project "${project}", so ${what}; an admin, editor or contributor on the project can change it.`,
+      { ...(ticket ? { ticket } : {}), project, role });
+  }
+
+  /**
    * The ticket an id that moved to another project is now, or null (never a
    * throw): `/t/<old id>`, and an alarm text or a `Waits on:` line naming
    * it, keep reaching it. The door upper-cases ids, and so does every prefix.
@@ -1324,6 +1341,7 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     if (parts.length === 3 && parts[0] === 'projects' && parts[2] === 'topics' && (method === 'GET' || method === 'POST')) {
       const project = requireProject(parts[1], me);
       if (method === 'GET') return [200, { project: project.slug, topics: store.listTopics(project.slug) }];
+      requireCanChange(me, project.slug);
       const body = await readJson(req);
       const made = store.addTopic({ project: project.slug, name: body?.name, description: body?.description ?? '', actor: me.id });
       log(`made topic ${made.id} on ${project.slug} actor=${me.id}`);
@@ -1337,6 +1355,7 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     if (parts.length === 3 && parts[0] === 'projects' && parts[2] === 'tags' && (method === 'GET' || method === 'POST')) {
       const project = requireProject(parts[1], me);
       if (method === 'GET') return [200, { project: project.slug, tags: store.listTags(project.slug) }];
+      requireCanChange(me, project.slug);
       const body = await readJson(req);
       let made;
       try {
@@ -1356,6 +1375,7 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     // already has, in any case, is a 409 and nothing changes.
     if (parts.length === 4 && parts[0] === 'projects' && parts[2] === 'tags' && (method === 'PATCH' || method === 'DELETE')) {
       const project = requireProject(parts[1], me);
+      requireCanChange(me, project.slug);
       if (method === 'DELETE') {
         const gone = store.removeTag({ project: project.slug, name: parts[3], actor: me.id });
         log(`deleted a tag on ${project.slug} from ${gone.tickets.length} ticket(s) actor=${me.id}`);
@@ -1423,6 +1443,7 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     // every ticket carrying it and names them.
     if (parts.length === 4 && parts[0] === 'projects' && parts[2] === 'topics' && (method === 'PATCH' || method === 'DELETE')) {
       const project = requireProject(parts[1], me);
+      requireCanChange(me, project.slug);
       if (method === 'DELETE') {
         const gone = store.removeTopic({ project: project.slug, id: parts[3], actor: me.id });
         log(`deleted topic ${gone.topic.id} on ${project.slug} from ${gone.tickets.length} ticket(s) actor=${me.id}`);
@@ -1504,6 +1525,7 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
     // project rules as changing a ticket's priority (PATCH /tickets/<id>).
     if (parts.length === 4 && parts[0] === 'projects' && parts[2] === 'tickets' && parts[3] === 'order' && method === 'POST') {
       const project = requireProject(parts[1], me);
+      requireCanChange(me, project.slug);
       const body = await readJson(req);
       checkBody(body, me, ['ids']);
       if (!Array.isArray(body.ids) || !body.ids.length || body.ids.some((id) => typeof id !== 'string')) {
@@ -1615,12 +1637,7 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
         // Editing needs ticket.edit and the project (a member, or an admin);
         // a loop always may. Checked before anything else is read from the
         // body, so a refused edit changes nothing and bumps no version.
-        if (!store.canChangeTickets(me.id, ticket.project)) {
-          const role = store.roleOf(me.id);
-          throw new HttpError(403, 'cannot-edit',
-            `${me.name} (${role}) cannot change tickets in project "${ticket.project}", so ${ticket.id} was left as it was; an admin, editor or contributor on the project can change it.`,
-            { ticket: ticket.id, project: ticket.project, role });
-        }
+        requireCanChange(me, ticket.project, ticket.id);
         // The contract's hand-off signal: a ticket is assigned to its
         // project's operator or to nobody. A person's change is held to it
         // here; a loop's goes through the door, which already keeps it.
@@ -1684,6 +1701,7 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
         if (!name.trim()) throw new HttpError(400, 'bad-name', "say the file's name in x-file-name; nothing was saved.");
         const bytes = await readFile(req);
         const ticket = requireTicket(parts[1], me);
+        requireCanChange(me, ticket.project, ticket.id);
         const made = store.addAttachment({ ticket: ticket.id, name, type: req.headers['x-file-type'], bytes, actor: me.id });
         log(`attached ${made.name} (${made.size} bytes) to ${ticket.id} actor=${me.id}`);
         return [201, made];
@@ -1701,6 +1719,7 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
         }
       }
       const ticket = requireTicket(parts[1], me);
+      requireCanChange(me, ticket.project, ticket.id);
       if (!/^[0-9]+$/.test(parts[3])) throw new HttpError(404, 'unknown-attachment', `ticket ${ticket.id} has no attachment ${parts[3]}.`);
       const id = Number(parts[3]);
       if (body) {
@@ -1731,6 +1750,7 @@ export function createHandler(store, { log = () => {}, notifier = null, defaultP
       const body = await readJson(req);
       checkBody(body, me, ['body', 'parent']);
       const ticket = requireTicket(parts[1], me);
+      requireCanChange(me, ticket.project, ticket.id);
       if (body.parent != null && !Number.isInteger(body.parent)) {
         throw new HttpError(400, 'bad-parent', `parent must be a comment id, not "${body.parent}".`);
       }

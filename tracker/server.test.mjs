@@ -776,6 +776,113 @@ test('PATCH /tickets/:id needs ticket.edit on the project: a reviewer or viewer 
   } finally { await f.cleanup(); }
 });
 
+test('cannot-edit: comments, queue order, attachments, tags and topics need ticket.edit on the project; a reviewer or viewer member is 403 and nothing changes, a non-member is 404; a contributor, editor, admin or loop writes', async () => {
+  const f = await fixture();
+  try {
+    f.store.createProject({ slug: 'beta', name: 'Beta', prefix: 'BE', operator: f.human.id });
+    const person = (name, role, project = 'alpha') => {
+      const a = f.store.createActor({ kind: 'human', name });
+      if (project) f.store.addMember({ project, actor: a.id, by: f.human.id });
+      if (role) f.store.setRole({ actor: a.id, role, by: f.human.id });
+      return { ...a, token: f.store.issueToken(a.id) };
+    };
+    const t1 = f.store.fileTicket({ project: 'alpha', actor: f.machine.id, name: 'first', status: 'queued' });
+    const t2 = f.store.fileTicket({ project: 'alpha', actor: f.machine.id, name: 'second', status: 'queued' });
+    const bytes = new Uint8Array([137, 80, 78, 71]);
+    /** Upload a file as the page does, signed in as `token`. */
+    async function upload(token, ticket) {
+      const res = await fetch(`${base}/tickets/${ticket}/attachments`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${token}`, 'content-type': 'application/octet-stream', 'x-file-name': 'shot.png', 'x-file-type': 'image/png' },
+        body: bytes,
+      });
+      const text = await res.text();
+      return { status: res.status, body: JSON.parse(text), text };
+    }
+    const base = await f.serve();
+    const call = (method, path, token, body) => f.call(method, path, { token, body, at: base });
+
+    // Everything a refused write could touch, read straight from the store.
+    const snapshot = () => JSON.stringify({
+      tickets: f.store.listTickets('alpha'),
+      comments: [t1, t2].map((t) => f.store.listComments(t.id)),
+      files: [t1, t2].map((t) => f.store.listAttachments(t.id)),
+      tags: f.store.listTags('alpha'),
+      topics: f.store.listTopics('alpha'),
+    });
+
+    // Each route in turn: `prep` makes what the write targets (a spare
+    // file, tag or topic to rename or remove) before the tracker is read,
+    // and `go` makes the write as the caller, with a name of their own.
+    let spare = 0;
+    const file = f.store.addAttachment({ ticket: t1.id, name: 'kept.png', type: 'image/png', bytes, actor: f.machine.id });
+    const topic = f.store.addTopic({ project: 'alpha', name: 'Kept', actor: f.machine.id });
+    const spareFile = () => f.store.addAttachment({ ticket: t1.id, name: `spare-${++spare}.png`, type: 'image/png', bytes, actor: f.machine.id }).id;
+    const spareTag = () => encodeURIComponent(f.store.addTag({ project: 'alpha', name: `spare-${++spare}`, actor: f.machine.id }).name);
+    const spareTopic = () => f.store.addTopic({ project: 'alpha', name: `Spare ${++spare}`, actor: f.machine.id }).id;
+    const none = () => null;
+    const routes = [
+      ['POST comment', t1.id, none, (tok, n) => call('POST', `/tickets/${t1.id}/comments`, tok, { body: `note ${n}` })],
+      ['POST order', null, none, (tok) => call('POST', '/projects/alpha/tickets/order', tok, { ids: [t2.id, t1.id] })],
+      ['POST attachment', t1.id, none, (tok) => upload(tok, t1.id)],
+      ['PATCH attachment', t1.id, none, (tok, n) => call('PATCH', `/tickets/${t1.id}/attachments/${file.id}`, tok, { name: `renamed-${n}.png` })],
+      ['DELETE attachment', t1.id, spareFile, (tok, n, id) => call('DELETE', `/tickets/${t1.id}/attachments/${id}`, tok)],
+      ['POST tag', null, none, (tok, n) => call('POST', '/projects/alpha/tags', tok, { name: `tag-${n}` })],
+      ['PATCH tag', null, spareTag, (tok, n, tag) => call('PATCH', `/projects/alpha/tags/${tag}`, tok, { name: `${tag}-${n}` })],
+      ['DELETE tag', null, spareTag, (tok, n, tag) => call('DELETE', `/projects/alpha/tags/${tag}`, tok)],
+      ['POST topic', null, none, (tok, n) => call('POST', '/projects/alpha/topics', tok, { name: `topic ${n}` })],
+      ['PATCH topic', null, none, (tok, n) => call('PATCH', `/projects/alpha/topics/${topic.id}`, tok, { name: `topic renamed ${n}` })],
+      ['DELETE topic', null, spareTopic, (tok, n, id) => call('DELETE', `/projects/alpha/topics/${id}`, tok)],
+    ];
+
+    // A member whose role lacks ticket.edit: refused with the same answer
+    // the ticket edit route gives, and the tracker is exactly as before.
+    for (const [name, role] of [['Rita', 'reviewer'], ['Vera', 'viewer']]) {
+      const p = person(name, role);
+      for (const [label, ticket, prep, go] of routes) {
+        const target = prep();
+        const before = snapshot();
+        const r = await go(p.token, name, target);
+        assert.equal(r.status, 403, `${name} ${label}: ${r.text}`);
+        assert.equal(r.body.error, 'cannot-edit', `${name} ${label}`);
+        assert.equal(r.body.project, 'alpha', `${name} ${label}`);
+        assert.equal(r.body.role, role, `${name} ${label}`);
+        assert.equal(r.body.ticket, ticket ?? undefined, `${name} ${label}`);
+        assert.match(r.body.message ?? r.text, new RegExp(`${name} \\(${role}\\) cannot change tickets in project "alpha"`), `${name} ${label}`);
+        assert.equal(snapshot(), before, `${name} ${label}: nothing changed`);
+      }
+    }
+
+    // A contributor on another project only: the ticket and the project are
+    // not theirs to see, so 404 as before, never 403.
+    const outsider = person('Otto', 'contributor', 'beta');
+    for (const [label, , prep, go] of routes) {
+      const r = await go(outsider.token, 'Otto', prep());
+      assert.equal(r.status, 404, `Otto ${label}: ${r.text}`);
+    }
+
+    // Allowed: a contributor (and a person with no role row), an editor, an
+    // admin, a loop. Each write lands as it does today.
+    const allowed = [
+      ['Carl', person('Carl', 'contributor').token],
+      ['Cora', person('Cora', null).token],
+      ['Edna', person('Edna', 'editor').token],
+      ['Ada', person('Ada', 'admin', null).token],
+      ['Loop', f.machineToken],
+    ];
+    for (const [name, token] of allowed) {
+      for (const [label, , prep, go] of routes) {
+        const target = prep();
+        const before = snapshot();
+        const r = await go(token, name, target);
+        assert.ok(r.status === 200 || r.status === 201, `${name} ${label}: ${r.status} ${r.text}`);
+        if (label !== 'POST order' || name === 'Carl') assert.notEqual(snapshot(), before, `${name} ${label}: the write landed`);
+      }
+    }
+    assert.ok(f.store.listComments(t1.id).some((c) => c.body === 'note Loop'), 'the loop\'s comment landed');
+  } finally { await f.cleanup(); }
+});
+
 test('an old ClickUp id the importer mapped reads, changes and deletes the ticket it became; an unmapped id is still a 404 (SP-157)', async () => {
   const f = await fixture();
   try {

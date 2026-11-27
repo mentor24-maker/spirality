@@ -220,7 +220,7 @@ account_links  token hash, purpose (setup|invite|reset), email, actor,
   is not an admin and a change that would leave the tracker with no admin,
   checked in the same transaction as the write. **Two permissions are
   enforced so far: `ticket.delete` on deleting a ticket, and `ticket.edit`
-  on editing one.** `DELETE
+  on every write that changes a ticket or a project's tickets.** `DELETE
   /tickets/<id>` from a person whose role lacks it (a contributor, reviewer
   or viewer, so anyone with no role row) answers 403 `cannot-delete`, naming
   their role and the ticket, and the ticket is left exactly as it was; an
@@ -236,9 +236,15 @@ account_links  token hash, purpose (setup|invite|reset), email, actor,
   unknown ticket is still 404, a stale `ifVersion` still 409 `moved`), and
   a loop's sign-in always may (`canChangeTickets` in `tracker/store.mjs`,
   the same check moving a ticket to another project uses). The other routes
-  that change a ticket (comments, queue order, attachments, tags, topics)
-  do not check it yet, and the rest of the permissions are still recorded
-  only; later tickets make them count.
+  that change a ticket or a project's tickets make the same check before
+  they write and give the same 403 `cannot-edit` (the ticket is named
+  when there is one): posting a comment, the queue order, uploading,
+  renaming and removing a file, and making, renaming and deleting a tag or
+  a topic. So a reviewer or viewer can read all of these but no longer
+  comment. Reading them is open to anyone who sees the project, as before.
+  The project's context documents, API usage rows, copying a ticket, the
+  seen mark and pipeline controls do not check it yet, and the rest of the
+  permissions are still recorded only; later tickets make them count.
 - **Project members** (SP-144): `project_members` holds one row per project
   and person, with who added them (`added_by`, empty when the tracker did it
   itself) and when, the shape of StarCaster's `app_project_memberships`
@@ -265,8 +271,9 @@ account_links  token hash, purpose (setup|invite|reset), email, actor,
   from `seesEveryProject` on `GET /people`), and every machine sign-in (each
   loop, `hand-run`) reads and writes exactly as before: a loop is never
   narrowed. Besides membership, the role permissions enforced are
-  `ticket.delete` on deleting a ticket and `ticket.edit` on editing one
-  (above); the other roles' permissions are still recorded only.
+  `ticket.delete` on deleting a ticket and `ticket.edit` on editing one,
+  commenting on it, its files, the queue order, tags and topics (above);
+  the other roles' permissions are still recorded only.
 
 ### The API
 
@@ -396,7 +403,8 @@ person's **Role**; an admin gets a picker there instead, whose change is read
 back before the page says it worked, and a refusal (the last admin stepping
 down) shows the server's reason. Under the invites, **Roles and Permissions**
 shows which role has which permission. The roles are recorded and, apart
-from deleting a ticket (`ticket.delete`) and editing one (`ticket.edit`), both
+from deleting a ticket (`ticket.delete`) and changing one (`ticket.edit`:
+editing, commenting, files, queue order, tags and topics), both
 enforced (anyone else is refused with their role named), not enforced: every
 person signed in may still invite (Dane's decision).
 **Docs** in the header, between Users and Settings, opens `/docs`. Under Spirality's own documentation (below),
