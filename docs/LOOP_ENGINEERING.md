@@ -355,6 +355,36 @@ loop makes its own worktree per task):
 /loop 30m loop-review
 ```
 
+### Which leftover worktrees can go
+
+Every build and review pass makes a worktree under `.claude/worktrees/`, and
+nothing removes one. To see which are finished (SP-421):
+
+```bash
+npm run clickup -- stale-worktrees
+```
+
+One tab-separated line per worktree: folder, branch (or `(detached)`),
+pushed or not, uncommitted edits or clean, its pull request and that pull
+request's state, its ticket and the ticket's status, then a flag and why.
+
+- `STALE`: the pull request is merged or closed, or the ticket is Live, Done
+  or closed, or the ticket sits where nothing builds on the branch. A clean
+  worktree with no pull request whose commit is already on `main` is STALE
+  too. A review pass's `<branch>-review` checkout counts as `<branch>`'s.
+- `UNPUSHED`: the branch never reached GitHub and has no pull request: what
+  a dead pass leaves behind.
+- `ACTIVE`: anything else, including an open pull request that names no
+  ticket.
+- `UNKNOWN`: something could not be read, and the line says what. Never
+  STALE.
+
+A count line ends the list. The pull requests come from one
+`gh pr list --state all`, and a ticket is read only for an open pull request.
+The command **deletes nothing and writes nothing**. Removing what it lists is
+a person's call, or a later ticket's. Exit 0 when the list finished; 1 when
+the worktrees or the pull requests could not be listed at all.
+
 ### Installing or moving the runner
 
 `./scripts/install_loop_runner.sh` on the machine that will own the loops,

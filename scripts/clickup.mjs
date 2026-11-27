@@ -114,6 +114,7 @@ import { capInForce, wipCheckVerdict, unknownVerdict } from '../lib/wipCheck.js'
 import {
   BUILD_SKILL, buildLockPath, lockState, writesMarker, seatGate, handbackDestination, leftoverWorktrees, markerBlocksClaim, handbackNote,
 } from '../lib/passHandback.js';
+import { parseWorktreeList, passWorktrees, prForBranch, worktreeFlag, worktreeLine, countLine } from '../lib/staleWorktrees.js';
 
 // ── The ids, written down once ───────────────────────────────────────────────
 // They live in spirality.project.json at the repository root (see
@@ -303,6 +304,10 @@ npm run clickup -- <command> [flags]      (Loop Queue: list ${LOOP_QUEUE_LIST}, 
                                                   name=value line each, defaults included. Exit 1 saying why when they cannot be read
   pause-check --lane <lane>                       read-only: may this lane start a pass? One line; exit 0 run, 3 paused (the Settings
                                                   page's switches, SP-237). Settings that cannot be read count as paused (exit 3)
+  stale-worktrees                                 read-only: every worktree under .claude/worktrees/, one tab-separated line each
+                                                  (folder, branch, pushed, uncommitted edits, pull request, ticket and its status,
+                                                  then STALE, UNPUSHED, ACTIVE or UNKNOWN and why), then a count line (SP-421).
+                                                  Deletes nothing, writes nothing. Exit 1 when the worktrees or pull requests could not be listed
   wip-check                                       read-only: may loop-build claim another ticket? One line, "room: N of CAP in flight"
                                                   (exit 0) or "full: N of CAP in flight (<ids>)" (exit 3), the cap from the Settings page
                                                   (SP-238). Exit 1 when it could not tell: the pass goes on without the cap
@@ -1129,14 +1134,7 @@ function ancestorPids() {
 function listWorktrees() {
   const out = spawnSync('git', ['worktree', 'list', '--porcelain'], { cwd: GIT_CWD, encoding: 'utf8' });
   if (out.status !== 0) return { problem: String(out.stderr || '').trim().slice(0, 200) || 'git worktree list failed', worktrees: [] };
-  const entries = String(out.stdout).split(/\n\n+/).map((block) => {
-    const e = {};
-    for (const line of block.split('\n')) {
-      if (line.startsWith('worktree ')) e.path = line.slice(9);
-      else if (line.startsWith('branch ')) e.branch = line.slice(7).replace(/^refs\/heads\//, '');
-    }
-    return e;
-  }).filter((e) => e.path);
+  const entries = parseWorktreeList(out.stdout);
   // The first entry is the main checkout itself, never a pass's worktree.
   const worktrees = entries.slice(1).map((e) => {
     let createdMs = NaN;
@@ -1383,6 +1381,69 @@ if (cmd === 'whoami') {
   console.error(`${wanted.length} task(s)${scope} in list ${list} (first line is the one to take)`);
   if (claimable && wanted.length) console.error(`  claim it: npm run clickup -- claim --task ${wanted[0].id}`);
   reportLimits();
+
+} else if (cmd === 'stale-worktrees') {
+  // Which worktrees under .claude/worktrees/ can go? (SP-421, lib/staleWorktrees.js
+  // decides.) READ-ONLY: this branch runs git and gh only to list and to
+  // read, and makes no tracker write. Pull requests come from ONE
+  // `gh pr list --state all`, never one call per branch; a ticket is read
+  // only for an open pull request, and each ticket once.
+  const listed = spawnSync('git', ['worktree', 'list', '--porcelain'], { cwd: GIT_CWD, encoding: 'utf8' });
+  if (listed.status !== 0) {
+    console.log(`the worktrees could not be listed: ${String(listed.stderr || '').trim().split('\n')[0] || 'git worktree list failed'}`);
+    process.exit(1);
+  }
+  const prsOut = gh(['pr', 'list', '--repo', project.githubRepo, '--state', 'all', '--json', 'number,state,headRefName,headRefOid,body', '--limit', '5000']);
+  let prs = null;
+  if (prsOut.ok) { try { prs = JSON.parse(prsOut.stdout); } catch { prs = null; } }
+  if (!Array.isArray(prs)) {
+    console.log(`the pull requests for ${project.githubRepo} could not be listed: ${prsOut.ok ? 'GitHub answered with something that is not a list' : prsOut.stderr.trim().split('\n')[0] || 'gh failed'}`);
+    process.exit(1);
+  }
+  // Which branches reached the remote: one reading, not one per worktree.
+  const refs = spawnSync('git', ['for-each-ref', '--format=%(refname)', 'refs/remotes/origin/'], { cwd: GIT_CWD, encoding: 'utf8' });
+  const remote = refs.status === 0
+    ? new Set(String(refs.stdout).split('\n').filter(Boolean).map((r) => r.replace(/^refs\/remotes\/origin\//, '')))
+    : null;
+  if (!remote) console.error('  (the remote branches could not be listed, so every branch reads "not pushed")');
+  // Which local branches' commits are already on the remote's main: one reading.
+  const merged = spawnSync('git', ['branch', '--merged', 'origin/main', '--format=%(refname:short)'], { cwd: GIT_CWD, encoding: 'utf8' });
+  const onMainBranches = merged.status === 0 ? new Set(String(merged.stdout).split('\n').filter(Boolean)) : null;
+  if (!onMainBranches) console.error('  (the branches already on main could not be listed, so none reads as on main)');
+  const onMain = (e) => {
+    if (e.branch) return Boolean(onMainBranches?.has(e.branch));
+    return Boolean(e.head) && spawnSync('git', ['merge-base', '--is-ancestor', e.head, 'origin/main'], { cwd: GIT_CWD }).status === 0;
+  };
+  const tickets = new Map();
+  const ticketFor = async (id) => {
+    const key = id.toLowerCase();
+    if (!tickets.has(key)) {
+      let reading;
+      try {
+        const out = await tracker.getTask(id);
+        reading = out.res.ok && out.json?.status ? { id, status: out.json.status } : { id, problem: `HTTP ${out.res.status}` };
+      } catch (err) {
+        reading = { id, problem: err.message };
+      }
+      tickets.set(key, reading);
+    }
+    return tickets.get(key);
+  };
+  const flags = [];
+  for (const e of passWorktrees(parseWorktreeList(listed.stdout))) {
+    const st = spawnSync('git', ['-C', e.path, 'status', '--porcelain'], { encoding: 'utf8' });
+    const w = { ...e, pushed: Boolean(e.branch) && Boolean(remote?.has(e.branch)), dirty: st.status === 0 && String(st.stdout).trim() !== '', onMain: onMain(e) };
+    const pr = prForBranch(prs, e);
+    const id = pr ? findTicketId(pr.body) : '';
+    // A finished pull request settles the flag on its own; its ticket is named, not read.
+    const ticket = id && String(pr.state).toUpperCase() === 'OPEN' ? await ticketFor(id) : { id, unread: Boolean(id) };
+    const verdict = worktreeFlag(w, pr, ticket);
+    flags.push(verdict.flag);
+    console.log(worktreeLine(w, pr, ticket, verdict));
+  }
+  console.log(countLine(flags));
+  reportLimits();
+  process.exit(0);
 
 } else if (cmd === 'pass-reconcile') {
   // THE FIRST THING A LOOP-BUILD PASS DOES (SP-101; StarCaster's command of
