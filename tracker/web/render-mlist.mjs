@@ -52,11 +52,15 @@ export function openTasks(boards = []) {
   return rows;
 }
 
-/** The two toggles at the top, the one showing drawn as the main action. */
+/**
+ * The two lists at the top as tabs, the same markup as the Tasks and Settings
+ * tabs: they are two views of one page, not actions, so neither is a button.
+ * The one showing carries aria-current and takes the tab blue from nav.tabs.
+ */
 function renderToggle(view) {
-  return `<nav class="mlist-toggle" aria-label="Lists">${MLIST_VIEWS.map((v) => (v.view === view
-    ? `<a class="btn btn-primary" href="${escapeHtml(mlistHref({ view: v.view }))}" aria-current="page">${v.label}</a>`
-    : `<a class="btn" href="${escapeHtml(mlistHref({ view: v.view }))}">${v.label}</a>`)).join('')}</nav>`;
+  return `<nav class="tabs mlist-tabs" aria-label="Lists">${MLIST_VIEWS.map((v) => (v.view === view
+    ? `<a href="${escapeHtml(mlistHref({ view: v.view }))}" aria-current="page">${v.label}</a>`
+    : `<a href="${escapeHtml(mlistHref({ view: v.view }))}">${v.label}</a>`)).join('')}</nav>`;
 }
 
 /** One ticket's row: its id, name and status on one line, the whole row a link to its ask. */
