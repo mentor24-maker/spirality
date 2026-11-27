@@ -46,6 +46,7 @@ import { drawSettings } from './page-settings.mjs';
 import { drawUsers } from './page-users.mjs';
 import { docAt, commandAt, underDocs, drawDocs, drawCommand, drawDoc } from './page-docs.mjs';
 import { drawTopics } from './page-topics.mjs';
+import { drawMlist, phoneLayout } from './page-mlist.mjs';
 
 /** Where an earlier version of the page kept a pasted token; removed on load, never read. */
 const OLD_TOKEN_KEY = 'tracker-token';
@@ -688,6 +689,8 @@ export async function route({ place = null } = {}) {
     const usersPage = location.pathname === '/users';
     const docsPage = location.pathname === '/docs';
     const topicsPage = location.pathname === '/topics';
+    const mlist = location.pathname === '/mlist';
+    phoneLayout(mlist);
     const docPath = docAt();
     const docsCommand = commandAt();
     const docAny = underDocs();
@@ -697,9 +700,11 @@ export async function route({ place = null } = {}) {
     const setupPage = !setupNew && /^\/setup\/([^/]+)$/.exec(location.pathname);
     const setupAny = setupNew || setupAnswers || setupPage;
     let following = false;
-    const waiting = !(setupAny || search || reporting || settings || usersPage || docsPage || topicsPage || docAny || isNew || ticket || projects || newProject || editProject || details || tasks || consolePage || project);
+    const waiting = !(mlist || setupAny || search || reporting || settings || usersPage || docsPage || topicsPage || docAny || isNew || ticket || projects || newProject || editProject || details || tasks || consolePage || project);
     markNav(reporting ? 'reporting' : settings ? 'settings' : usersPage ? 'users' : topicsPage ? 'topics' : docsPage || docAny ? 'docs' : projects || newProject || details || editProject || setupAny ? 'projects' : ticket || project || tasks || consolePage || isNew || search ? 'tasks' : 'waiting');
-    if (setupNew) {
+    if (mlist) {
+      await drawMlist();
+    } else if (setupNew) {
       await drawSetupNew(null);
     } else if (setupAnswers) {
       await drawSetupNew(decodeURIComponent(setupAnswers[1]));
@@ -751,7 +756,7 @@ export async function route({ place = null } = {}) {
     if (kept) recording = null;
     // Waiting on you read the count as it drew; every other page reads it now.
     if (!waiting) await refreshCount();
-    if (kept) lastDrawn = ticket || project || tasks || isNew || waiting ? { address: here(), reads } : null;
+    if (kept) lastDrawn = ticket || project || tasks || isNew || waiting || mlist ? { address: here(), reads } : null;
     // The Console's "in 12 min" counts down on its own, so the beat draws it every time, changed or not.
     if (kept && (consolePage || (tasks && here() === '/console'))) lastDrawn = { address: here(), reads, ticking: true };
     // Waiting on you skipped refreshCount, so the bus count in the header is read here.
@@ -909,7 +914,7 @@ document.addEventListener('click', (e) => {
   const a = e.target.closest('a');
   if (!a || a.target === '_blank' || a.origin !== location.origin || e.metaKey || e.ctrlKey) return;
   e.preventDefault();
-  history.pushState(null, '', a.pathname + a.hash);
+  history.pushState(null, '', a.pathname + a.search + a.hash);
   route();
 });
 window.addEventListener('popstate', route);

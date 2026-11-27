@@ -74,6 +74,8 @@
   --field-pad-x: 0.75rem;
   --field-label-min: 140px;
   --field-label-max: 16rem;
+  /* The phone page (/mlist): the smallest a finger can hit (Apple's 44 points). */
+  --tap-target: 44px;
 
   /* The tracker's own: parts of the page StarCaster has no token for (UI_DOCTRINE 2, The Tracker's Own Tokens). */
   --text-code: 0.9em;
@@ -915,3 +917,20 @@ table.spirality-docs td.date { white-space: nowrap; }
 .feature-pick .count { color: var(--ink-secondary); }
 .feature-pick[aria-pressed="true"] { background: var(--feature); outline: 2px solid var(--focus-ring-color); outline-offset: 1px; }
 .feature-pick[aria-pressed="true"] .count { color: var(--ink-primary); }
+
+/* The phone page (/mlist, SP-408): a phone held sideways. Buttons keep their kind and grow through the
+   height token, the header keeps only the brand and who is signed in, and nothing is wider than the window. */
+body.mlist-page { --btn-height: var(--tap-target); overflow-x: hidden; }
+body.mlist-page header { gap: var(--space-5); padding: 0 var(--space-5); }
+body.mlist-page header nav.site, body.mlist-page header .health, body.mlist-page header #project, body.mlist-page header #bus { display: none; }
+body.mlist-page main { padding: var(--space-4) var(--space-5) var(--space-7); }
+.mlist { min-width: 0; max-width: 100%; }
+.mlist-toggle { display: flex; gap: var(--space-3); margin-bottom: var(--space-4); }
+.mlist-toggle .btn { flex: 1 1 0; width: auto; min-width: 0; }
+.mlist-rows { list-style: none; margin: 0 0 var(--space-5); padding: 0; border-top: 1px solid var(--border-light); }
+.mlist-row { display: flex; align-items: center; gap: var(--space-4); min-height: var(--tap-target); padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--border-light); color: var(--ink-primary); text-decoration: none; }
+.mlist-row:hover, .mlist-row:focus-visible { background: var(--bg-hover); }
+.mlist-id { flex: 0 0 auto; margin: 0; color: var(--ink-secondary); font-size: var(--text-sm); }
+.mlist-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.mlist-status { flex: 0 0 auto; color: var(--ink-secondary); font-size: var(--text-sm); }
+.quick.mlist-ticket { grid-template-columns: minmax(0, 1fr); overflow-wrap: anywhere; }
