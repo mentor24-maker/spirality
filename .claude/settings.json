@@ -12,6 +12,17 @@
           }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/scripts/hooks/check_operator_handoff.cjs\"",
+            "timeout": 15
+          }
+        ]
+      }
     ]
   }
 }
