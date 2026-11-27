@@ -45,13 +45,17 @@ test('the address holds where he is: Waiting on You by default, Tasks as ?view=t
   assert.equal(mlistHref({ view: 'tasks', ticket: 'A&B' }), '/mlist?view=tasks&ticket=A%26B');
 });
 
-test('the toggle: two big buttons, the list showing marked as the main action, each a link that keeps its view', () => {
+test('the lists are tabs: the nav.tabs markup, the list showing marked current, no button class on either, each a link that keeps its view', () => {
   const waiting = renderMlist({ view: 'waiting', waiting: [] });
-  assert.match(waiting, /<a class="btn btn-primary" href="\/mlist" aria-current="page">Waiting on You<\/a><a class="btn" href="\/mlist\?view=tasks">Tasks<\/a>/);
+  assert.match(waiting, /^<div class="mlist"><nav class="tabs mlist-tabs" aria-label="Lists"><a href="\/mlist" aria-current="page">Waiting on You<\/a><a href="\/mlist\?view=tasks">Tasks<\/a><\/nav>/);
   assert.match(waiting, /Nothing is waiting on you\./);
   const tasks = renderMlist({ view: 'tasks', tasks: [] });
-  assert.match(tasks, /<a class="btn" href="\/mlist">Waiting on You<\/a><a class="btn btn-primary" href="\/mlist\?view=tasks" aria-current="page">Tasks<\/a>/);
+  assert.match(tasks, /^<div class="mlist"><nav class="tabs mlist-tabs" aria-label="Lists"><a href="\/mlist">Waiting on You<\/a><a href="\/mlist\?view=tasks" aria-current="page">Tasks<\/a><\/nav>/);
   assert.match(tasks, /No tickets are open right now\./);
+  for (const html of [waiting, tasks]) {
+    const nav = html.match(/<nav class="tabs mlist-tabs"[^]*?<\/nav>/)[0];
+    assert.doesNotMatch(nav, /\bbtn\b/, 'a tab is a view, not an action: no button class');
+  }
   assert.doesNotMatch(waiting + tasks, /style="/, 'no inline styles: the page\'s security rule drops them');
 });
 
@@ -97,6 +101,8 @@ test('the phone layout: 44 px tap targets through the button height token, the h
   assert.equal(rule('body.mlist-page')['--btn-height'], 'var(--tap-target)', 'buttons keep their kind and grow');
   assert.equal(rule('body.mlist-page')['overflow-x'], 'hidden');
   assert.equal(rule('.mlist-row')['min-height'], 'var(--tap-target)');
+  assert.equal(rule('nav.tabs.mlist-tabs a')['min-height'], 'var(--tap-target)', 'each tab is as easy to hit as the buttons were');
+  assert.equal(rule('nav.tabs.mlist-tabs a').flex, '1 1 0', 'the two tabs split the row evenly');
   assert.equal(rule('.mlist-name')['text-overflow'], 'ellipsis', 'a long name ends in … rather than pushing the row wider');
   assert.equal(rule('body.mlist-page header nav.site, body.mlist-page header .health, body.mlist-page header #project, body.mlist-page header #bus').display, 'none');
   assert.equal(rule('.quick.mlist-ticket')['grid-template-columns'], 'minmax(0, 1fr)', 'one column, not the ticket page\'s two');
