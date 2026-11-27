@@ -195,10 +195,10 @@ account_links  token hash, purpose (setup|invite|reset), email, actor,
   Each topic belongs to exactly one project, and a project has many: a name
   (required), a description, who made it and when, in the `topics` table.
   The **Topics** page (`/topics`, in the top menu after Tasks) lists the
-  picked project's topics, newest first, with how many tickets carry each,
-  and has a **Create Topic** form; each row has **Edit** (its Name and
-  Description) and **Delete**, which asks first, naming how many tasks carry
-  it (`tracker/web/page-topics.mjs`, SP-308). Behind it, `GET` and
+  picked project's topics, newest first (Name, Description, Created By,
+  Created), and has a **Create Topic** form; each row has **Edit** (its Name
+  and Description) and **Delete**, which asks first, naming how many tasks
+  carry it (`tracker/web/page-topics.mjs`, SP-308). Behind it, `GET` and
   `POST /projects/<slug>/topics` list and make them, and `PATCH` and
   `DELETE /projects/<slug>/topics/<n>` change and delete one, all behind the
   same project check as the Docs page; a topic of another project is
