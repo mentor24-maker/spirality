@@ -9,7 +9,7 @@
  * `&ticket=<id>` for one ticket's ask.
  */
 import { escapeHtml } from './render-common.mjs';
-import { askOptions, cardMove, newestCard, offersClose, offersGo, offersMerge, renderQuickAction, shownAsk, statusLabel } from './render-ticket.mjs';
+import { answerControl, renderAnswerOptions, renderQuickAction, statusLabel } from './render-ticket.mjs';
 
 /** The two lists the page flips between, the first being where it opens. */
 export const MLIST_VIEWS = Object.freeze([
@@ -105,26 +105,11 @@ export function renderMlistTicket(t, view) {
 }
 
 /**
- * How the phone page answers a ticket, or null when it offers no answer:
- * Merge or Close whenever the ticket page offers them, and otherwise only
- * while the red ask shows (shownAsk: his status, his answer not in, no
- * settled pull request). `{ kind, word, options }`: `kind` is `merge-button`
- * or `close-button` (the ticket page's own offersMerge / offersClose,
- * posting the server's word), `pick` (lettered options, as a list or
- * inline like "A (the Mini) or B (a hosted server)", posting the letter),
- * `go-button` (only where the ticket page offers Go, offersGo, posting the
- * server's go word) or `other` (only the folded Something Else box).
+ * How the phone page answers a ticket, or null: the one rule the ticket
+ * page uses too (answerControl in render-ticket.mjs), under the name the
+ * phone page has always called it, so the two pages cannot drift (SP-423).
  */
-export function mlistAnswer(t = {}) {
-  if (offersMerge(t)) return { kind: 'merge-button', word: t.mergePhrase, options: [] };
-  if (offersClose(t)) return { kind: 'close-button', word: t.closePhrase, options: [] };
-  const ask = shownAsk(t);
-  if (!ask) return null;
-  if (cardMove(newestCard(t.comments).body) !== 'Reply') return { kind: 'other', word: null, options: [] };
-  const options = askOptions(ask);
-  if (options.length) return { kind: 'pick', word: null, options };
-  return offersGo(t) ? { kind: 'go-button', word: t.goPhrase, options: [] } : { kind: 'other', word: null, options: [] };
-}
+export { answerControl as mlistAnswer } from './render-ticket.mjs';
 
 /**
  * The phone page's answer to a ticket's ask, as HTML, or '' when there is
@@ -135,7 +120,7 @@ export function mlistAnswer(t = {}) {
  * and reports in the message strip (UI_DOCTRINE 7), never a note beside it.
  */
 export function renderMlistAnswer(t = {}) {
-  const answer = mlistAnswer(t);
+  const answer = answerControl(t);
   if (!answer) return '';
   // The labels sit inside the HTML, never quoted on their own: the page's code spells no merge or go word.
   const button = (kind, html) => `<form class="mlist-answer mlist-${kind}">${html}</form>`;
@@ -144,7 +129,7 @@ export function renderMlistAnswer(t = {}) {
       : answer.kind === 'go-button' ? button(answer.kind, '<button type="submit" class="btn btn-save">Go</button>')
         : answer.kind === 'pick' ? `<form class="mlist-answer mlist-pick">`
           + '<label for="mlist-pick">Your Answer</label>'
-          + `<select id="mlist-pick" required>${answer.options.map((o) => `<option value="${escapeHtml(o.letter)}">${escapeHtml(`${o.letter}) ${o.words}`)}</option>`).join('')}</select>`
+          + `<select id="mlist-pick" required>${renderAnswerOptions(answer.options)}</select>`
           + `<button type="submit" class="btn btn-save">Send</button></form>`
           : '';
   const other = '<details class="mlist-other"><summary class="btn">Something Else</summary>'
