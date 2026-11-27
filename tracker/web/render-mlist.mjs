@@ -135,13 +135,13 @@ export function renderMlistAnswer(t = {}) {
   if (!answer) return '';
   // The labels sit inside the HTML, never quoted on their own: the page's code spells no merge or go word.
   const button = (kind, html) => `<form class="mlist-answer mlist-${kind}">${html}</form>`;
-  const main = answer.kind === 'merge-button' ? button(answer.kind, '<button type="submit" class="btn btn-primary">Merge</button>')
-    : answer.kind === 'close-button' ? button(answer.kind, '<button type="submit" class="btn btn-primary">Close</button>')
-      : answer.kind === 'go-button' ? button(answer.kind, '<button type="submit" class="btn btn-primary">Go</button>')
+  const main = answer.kind === 'merge-button' ? button(answer.kind, '<button type="submit" class="btn btn-save">Merge</button>')
+    : answer.kind === 'close-button' ? button(answer.kind, '<button type="submit" class="btn btn-save">Close</button>')
+      : answer.kind === 'go-button' ? button(answer.kind, '<button type="submit" class="btn btn-save">Go</button>')
         : answer.kind === 'pick' ? `<form class="mlist-answer mlist-pick">`
           + '<label for="mlist-pick">Your Answer</label>'
           + `<select id="mlist-pick" required>${answer.options.map((o) => `<option value="${escapeHtml(o.letter)}">${escapeHtml(`${o.letter}) ${o.words}`)}</option>`).join('')}</select>`
-          + `<button type="submit" class="btn btn-primary">Send</button></form>`
+          + `<button type="submit" class="btn btn-save">Send</button></form>`
           : '';
   const other = '<details class="mlist-other"><summary class="btn">Something Else</summary>'
     + '<form class="mlist-answer mlist-text"><label for="mlist-text">Your Reply</label>'

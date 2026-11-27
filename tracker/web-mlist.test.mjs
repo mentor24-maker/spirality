@@ -130,7 +130,7 @@ test('three lettered options: one dropdown listing each by letter and words, a S
   assert.equal(mlistAnswer(t).kind, 'pick');
   const html = renderMlistAnswer(t);
   assert.equal((html.match(/<select /g) ?? []).length, 1);
-  assert.match(html, /<option value="A">A\) keep it as it is\.<\/option><option value="B">B\) the smaller one\.<\/option><option value="C">C\) the bigger one\.<\/option><\/select><button type="submit" class="btn btn-primary">Send<\/button>/);
+  assert.match(html, /<option value="A">A\) keep it as it is\.<\/option><option value="B">B\) the smaller one\.<\/option><option value="C">C\) the bigger one\.<\/option><\/select><button type="submit" class="btn btn-save">Send<\/button>/);
   const [beforeFold] = html.split('<details');
   assert.doesNotMatch(beforeFold, /<input|<textarea/, 'buttons and a dropdown only, by default');
   assert.match(html, /<details class="mlist-other"><summary class="btn">Something Else<\/summary><form class="mlist-answer mlist-text"><label for="mlist-text">Your Reply<\/label><input id="mlist-text" type="text" required/);
@@ -145,13 +145,13 @@ test('three lettered options: one dropdown listing each by letter and words, a S
 test('a Reply with no options is a Go button posting the go word; Merge and Close post the ticket page\'s words', () => {
   const go = asking(['Reply "go" to queue it as written, or reply with what to change.', 'Your move: Reply: "go", or what to change.']);
   assert.deepEqual(mlistAnswer(go), { kind: 'go-button', word: 'go', options: [] });
-  assert.match(renderMlistAnswer(go), /^<div class="mlist-answers"><form class="mlist-answer mlist-go-button"><button type="submit" class="btn btn-primary">Go<\/button><\/form><details/);
+  assert.match(renderMlistAnswer(go), /^<div class="mlist-answers"><form class="mlist-answer mlist-go-button"><button type="submit" class="btn btn-save">Go<\/button><\/form><details/);
   const close = asking(['Nothing to merge: PR #7 has already landed.', 'Your move: Close: its work is live.'], { status: 'Ready to launch' });
   assert.deepEqual(mlistAnswer(close), { kind: 'close-button', word: 'close', options: [] });
-  assert.match(renderMlistAnswer(close), /<form class="mlist-answer mlist-close-button"><button type="submit" class="btn btn-primary">Close<\/button><\/form>/);
+  assert.match(renderMlistAnswer(close), /<form class="mlist-answer mlist-close-button"><button type="submit" class="btn btn-save">Close<\/button><\/form>/);
   const merge = asking(['Review passed.', 'Your move: Merge, once you have looked.'], { status: 'Ready to launch', pullRequest: 'https://github.com/o/r/pull/3' });
   assert.deepEqual(mlistAnswer(merge), { kind: 'merge-button', word: 'merge', options: [] });
-  assert.match(renderMlistAnswer(merge), /<form class="mlist-answer mlist-merge-button"><button type="submit" class="btn btn-primary">Merge<\/button><\/form>/);
+  assert.match(renderMlistAnswer(merge), /<form class="mlist-answer mlist-merge-button"><button type="submit" class="btn btn-save">Merge<\/button><\/form>/);
   // Nothing to answer: not his status, or his answer already in.
   assert.equal(renderMlistAnswer({ ...go, status: 'Queued' }), '');
   assert.equal(renderMlistAnswer({ ...go, answerIn: true }), '');

@@ -1,6 +1,7 @@
 // Every button on the tracker page is one of StarCaster's four kinds, in one
 // of two sizes (docs/UI_DOCTRINE.md section 3, SP-321): `btn` (secondary),
-// `btn btn-primary` (the main action), `btn btn-save` (every Save) or
+// `btn btn-primary` (the main action), `btn btn-save` (every Save, and every
+// answer a ticket waits on him for, SP-415) or
 // `btn btn-danger` (anything that removes), `btn-sm` inside a table row. A
 // button never sets its own height, padding or colour. This reads the page's
 // source and its stylesheet and names each button or rule that breaks it, so
@@ -11,6 +12,8 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { declarationsOf, rootTokens } from './cssTokens.mjs';
 import { PAGE_SCRIPTS, RENDER_SCRIPTS } from './pageScripts.mjs';
+import { renderMergeAction, renderGoAction, renderCloseAction, renderBugReportActions, renderMlistAnswer } from './web/render.mjs';
+import operatorCard from '../lib/operatorCard.js';
 
 const read = (path) => readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8');
 const SOURCES = [...PAGE_SCRIPTS.map((name) => `./web/${name}`), ...RENDER_SCRIPTS.map((name) => `./web/${name}`), './web/index.html'];
@@ -193,4 +196,39 @@ test('the check itself: a rule drawing a button is refused unless its class is a
   assert.deepEqual(at('button.close { background: none }'), []);
   assert.deepEqual(at('dialog .close { color: red }'), []);
   assert.deepEqual(at('th button.sort:hover { color: red }'), []);
+});
+
+const CARD_CONTEXT = 'The answer buttons are drawn green, the Save kind, because each is the step he is expected to take. '
+  + 'This card is here to test it: each move draws its own button, and every one of them must carry the Save kind and never '
+  + 'the blue main action, so a later change back to blue fails the check before it reaches the page.';
+const card = (...needed) => ({ body: operatorCard.buildCard(['@@ASKED', 'make them green', '@@CONTEXT', CARD_CONTEXT, '@@NEEDED', ...needed].join('\n')).rendered });
+const WORDS = { mergePhrase: 'merge', closePhrase: 'close', goPhrase: 'go' };
+const ready = { status: 'Ready to launch', pullRequest: 'https://github.com/o/r/pull/3', ...WORDS };
+const waiting = { status: 'Needs your input', ...WORDS };
+
+/** The opening tag of the first button inside the form whose class is `form`, in `html`. */
+function answerButton(html, form) {
+  const m = new RegExp(`<form class="${form}">[^]*?(<button\\b[^>]*>)`).exec(html);
+  assert.ok(m, `no ${form} form drawn in: ${html}`);
+  return m[1];
+}
+
+test('every answer button is the Save green, never the blue main action (UI_DOCTRINE 3, SP-415)', () => {
+  const answers = [
+    ['ticket page Merge', renderMergeAction({ ...ready, comments: [card('Review passed.', 'Your move: Merge, once you have looked.')] }), 'merge-action'],
+    ['ticket page Close', renderCloseAction({ ...waiting, comments: [card('Nothing left to do.', 'Your move: Close: its work is live.')] }), 'close-action'],
+    ['ticket page Go', renderGoAction({ ...waiting, comments: [card('Reply "go" to queue it as written.', 'Your move: Reply: "go", or what to change.')] }), 'go-action'],
+    ['ticket page Approve', renderBugReportActions({ name: 'Bug report: x', tags: ['bug-report'], status: 'needs your input', comments: [] }), 'approve-action'],
+    ['mlist Merge', renderMlistAnswer({ ...ready, comments: [card('Review passed.', 'Your move: Merge, once you have looked.')] }), 'mlist-answer mlist-merge-button'],
+    ['mlist Close', renderMlistAnswer({ ...ready, pullRequest: null, comments: [card('Nothing to merge: PR #7 has already landed.', 'Your move: Close: its work is live.')] }), 'mlist-answer mlist-close-button'],
+    ['mlist Go', renderMlistAnswer({ ...waiting, comments: [card('Reply "go" to queue it as written.', 'Your move: Reply: "go", or what to change.')] }), 'mlist-answer mlist-go-button'],
+    ['mlist pick-list Send', renderMlistAnswer({ ...waiting, comments: [card('Options: A) keep it. B) the smaller one.', 'Your move: Reply A or B.')] }), 'mlist-answer mlist-pick'],
+  ];
+  for (const [name, html, form] of answers) {
+    const tag = answerButton(html, form);
+    assert.deepEqual(classesOf(tag), ['btn', 'btn-save'], `${name}: ${tag}`);
+  }
+  // A free-text reply is not the answer the card asked for: it stays secondary.
+  const other = renderMlistAnswer({ ...waiting, comments: [card('Reply "go" to queue it as written.', 'Your move: Reply: "go", or what to change.')] });
+  assert.deepEqual(classesOf(answerButton(other, 'mlist-answer mlist-text')), ['btn']);
 });
