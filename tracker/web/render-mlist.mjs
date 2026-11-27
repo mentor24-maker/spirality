@@ -9,7 +9,7 @@
  * `&ticket=<id>` for one ticket's ask.
  */
 import { escapeHtml } from './render-common.mjs';
-import { renderQuickAction, statusLabel } from './render-ticket.mjs';
+import { askOptions, cardMove, newestCard, offersClose, offersMerge, renderQuickAction, shownAsk, statusLabel } from './render-ticket.mjs';
 
 /** The two lists the page flips between, the first being where it opens. */
 export const MLIST_VIEWS = Object.freeze([
@@ -88,13 +88,63 @@ export function renderMlist({ view, waiting = [], unsure = [], tasks = [] }) {
 /**
  * One ticket on the phone page: Back to the list it came from and Open Full
  * Page, then the same title, status, "what's going on" and red ask as the
- * ticket page's Quick Action (renderQuickAction), so the two never differ.
+ * ticket page's Quick Action (renderQuickAction), so the two never differ,
+ * and under the ask the controls that answer it (renderMlistAnswer).
  */
 export function renderMlistTicket(t, view) {
   return `<div class="mlist">`
     + `<nav class="mlist-toggle" aria-label="Ticket">`
     + `<a class="btn" href="${escapeHtml(mlistHref({ view }))}">Back</a>`
     + `<a class="btn" href="/t/${encodeURIComponent(t.id)}">Open Full Page</a></nav>`
-    + `<section class="quick mlist-ticket"><div class="ask"><p class="mlist-id">${escapeHtml(t.id)}</p>${renderQuickAction(t)}</div></section>`
+    + `<section class="quick mlist-ticket"><div class="ask"><p class="mlist-id">${escapeHtml(t.id)}</p>${renderQuickAction(t)}${renderMlistAnswer(t)}</div></section>`
     + `</div>`;
+}
+
+/**
+ * How the phone page answers a ticket, or null when it offers no answer:
+ * Merge or Close whenever the ticket page offers them, and otherwise only
+ * while the red ask shows (shownAsk: his status, his answer not in, no
+ * settled pull request). `{ kind, word, options }`: `kind` is `merge-button`
+ * or `close-button` (the ticket page's own offersMerge / offersClose,
+ * posting the server's word), `pick` (lettered options, posting the
+ * letter), `go-button` (a Reply with no options, posting the server's go
+ * word) or `other` (only
+ * the folded Something Else box).
+ */
+export function mlistAnswer(t = {}) {
+  if (offersMerge(t)) return { kind: 'merge-button', word: t.mergePhrase, options: [] };
+  if (offersClose(t)) return { kind: 'close-button', word: t.closePhrase, options: [] };
+  const ask = shownAsk(t);
+  if (!ask) return null;
+  if (cardMove(newestCard(t.comments).body) !== 'Reply') return { kind: 'other', word: null, options: [] };
+  const options = askOptions(ask);
+  if (options.length) return { kind: 'pick', word: null, options };
+  return t.goPhrase ? { kind: 'go-button', word: t.goPhrase, options: [] } : { kind: 'other', word: null, options: [] };
+}
+
+/**
+ * The phone page's answer to a ticket's ask, as HTML, or '' when there is
+ * nothing to answer: one control for the card's move (a Merge, Close or Go
+ * button, or a dropdown of its lettered options and Send), then a folded
+ * Something Else box for any other reply. Every control posts exactly what
+ * he would have typed, through the comments route the ticket page uses,
+ * and reports in the message strip (UI_DOCTRINE 7), never a note beside it.
+ */
+export function renderMlistAnswer(t = {}) {
+  const answer = mlistAnswer(t);
+  if (!answer) return '';
+  // The labels sit inside the HTML, never quoted on their own: the page's code spells no merge or go word.
+  const button = (kind, html) => `<form class="mlist-answer mlist-${kind}">${html}</form>`;
+  const main = answer.kind === 'merge-button' ? button(answer.kind, '<button type="submit" class="btn btn-primary">Merge</button>')
+    : answer.kind === 'close-button' ? button(answer.kind, '<button type="submit" class="btn btn-primary">Close</button>')
+      : answer.kind === 'go-button' ? button(answer.kind, '<button type="submit" class="btn btn-primary">Go</button>')
+        : answer.kind === 'pick' ? `<form class="mlist-answer mlist-pick">`
+          + '<label for="mlist-pick">Your Answer</label>'
+          + `<select id="mlist-pick" required>${answer.options.map((o) => `<option value="${escapeHtml(o.letter)}">${escapeHtml(`${o.letter}) ${o.words}`)}</option>`).join('')}</select>`
+          + `<button type="submit" class="btn btn-primary">Send</button></form>`
+          : '';
+  const other = '<details class="mlist-other"><summary class="btn">Something Else</summary>'
+    + '<form class="mlist-answer mlist-text"><label for="mlist-text">Your Reply</label>'
+    + `<input id="mlist-text" type="text" required autocomplete="off"><button type="submit" class="btn">Send</button></form></details>`;
+  return `<div class="mlist-answers">${main}${other}</div>`;
 }

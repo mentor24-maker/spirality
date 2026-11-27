@@ -934,3 +934,13 @@ body.mlist-page main { padding: var(--space-4) var(--space-5) var(--space-7); }
 .mlist-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .mlist-status { flex: 0 0 auto; color: var(--ink-secondary); font-size: var(--text-sm); }
 .quick.mlist-ticket { grid-template-columns: minmax(0, 1fr); overflow-wrap: anywhere; }
+/* SP-409: the controls that answer a ticket's ask, under the red ask. One column, every control a full
+   thumb tall; Something Else stays folded until tapped, so the default is buttons and a dropdown only. */
+.mlist-answers { display: flex; flex-direction: column; gap: var(--space-3); margin-top: var(--space-4); }
+.mlist-answer { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); margin: 0; }
+.mlist-answer label { flex: 1 0 100%; font-weight: 600; }
+.mlist-answer select, .mlist-answer input { flex: 1 1 12rem; min-width: 0; min-height: var(--tap-target); box-sizing: border-box; font-size: var(--text-md); }
+.mlist-answer .btn { min-width: 6rem; }
+.mlist-other summary { list-style: none; }
+.mlist-other summary::-webkit-details-marker { display: none; }
+.mlist-other[open] summary { margin-bottom: var(--space-3); }
