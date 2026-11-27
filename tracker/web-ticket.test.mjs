@@ -339,23 +339,50 @@ test('an operator card draws its NEEDED FROM DANE banner in the red box, as `ask
 
 // ── The ticket page's Quick Action section ───────────────────────────────────
 
-test('the ticket page opens on the Quick Action section, with everything it showed before in a closed Details box', () => {
+test('the ticket page opens on the Quick Action section: in his two statuses one pod on the left to act from, the ticket open on the right (SP-416)', () => {
   const app = pageScript();
-  const page = /main\.innerHTML = `\s*<section class="quick\$\{inline \? ' loop-has' : ''\}">([\s\S]*?)<\/section>\s*(?:\$\{renderFilesMade\(t\)\}\s*)?\$\{inline \? '' : `<details class="details">([\s\S]*?)<\/details>`\}`;/.exec(app);
-  assert.ok(page, 'Quick Action first, then Details (folded in his two statuses, SP-291)');
-  const [, quick, fold] = page;
-  // What Details holds is one block, drawn folded or, while a loop has the ticket, open in the right column.
-  const details = fold + (/const ticketBody = `([\s\S]*?)`;\n  main\.innerHTML/.exec(app)?.[1] ?? '');
-  assert.match(quick, /renderQuickAction\(t\)/);
-  assert.match(quick, /\$\{renderReplyForm\(t, me\?\.name\)\}/, 'the reply box is on the right of Quick Action');
-  assert.match(renderReplyForm({}, 'Dane'), /<form class="reply">[\s\S]*<label for="reply">Reply as Dane<\/label>[\s\S]*<textarea id="reply" required>/);
-  assert.match(fold, /^\s*<summary>Details<\/summary>\$\{ticketBody\}\s*$/);
-  // The status line, the description and the comments, all inside Details.
+  const page = /const actions = `([\s\S]*?)`;\n  main\.innerHTML = `\s*<section class="quick\$\{inline \? ' loop-has' : ' his-move'\}">([\s\S]*?)<\/section>\s*\$\{inline \? renderFilesMade\(t\) : ''\}`;/.exec(app);
+  assert.ok(page, 'Quick Action is the whole page: no Details fold after it');
+  const [, actions, quick] = page;
+  // His move, in order: the answer-is-in line, Merge, Close, Go, a held bug report's Approve and Reject, the reply box.
+  assert.match(actions, /^\s*\$\{renderAnswerIn\(t\)\}\s*\$\{renderMergeAction\(t\)\}\s*\$\{renderCloseAction\(t\)\}\s*\$\{renderGoAction\(t\)\}\s*\$\{renderBugReportActions\(t\)\}\s*\$\{renderReplyForm\(t, me\?\.name\)\}\s*$/);
+  // Left: the pod, his title, words and brief (renderQuickAction), then the actions; right: commands, files made, the ticket open, Delete.
+  assert.match(quick, /<div class="ask\$\{inline \? '' : ' action-pod'\}">\$\{renderQuickAction\(t\)\}\$\{inline \? '' : actions\}<\/div>/);
+  assert.match(quick, /<div class="act">\s*\$\{renderCommands\(t\)\}\s*\$\{inline \? actions : renderFilesMade\(t\)\}\s*<div class="details">\$\{ticketBody\}<\/div>\s*\$\{renderDeleteAction\(t\)\}\s*<\/div>\s*$/);
+  // The status line, the description and the comments are all in the open block.
+  const details = /const ticketBody = `([\s\S]*?)`;\n  const actions/.exec(app)?.[1] ?? '';
   for (const part of [/statusLabel\(t\)/, /renderMarkdown\(t\.description\)/, /\$\{comments \|\|/]) assert.match(details, part);
-  assert.ok(!/<details class="details"[^>]*\bopen\b/.test(app), 'Details is never drawn open');
-  // The reply posts exactly as typed, and #reply still lands in the box (it is outside Details, so focusable).
+  assert.doesNotMatch(app, /<details class="details"|<summary>Details<\/summary>/, 'no Details fold to open');
+  assert.match(renderReplyForm({}, 'Dane'), /<form class="reply">[\s\S]*<label for="reply">Reply as Dane<\/label>[\s\S]*<textarea id="reply" required>/);
+  // The reply posts exactly as typed, and #reply still lands in the box.
   assert.match(app, /\/comments`, \{ body: box\.value \}\)/);
   assert.match(app, /location\.hash === '#reply'[\s\S]{0,120}box\.focus\(\)/);
+  // The pod: his numbers, a class (the page's policy drops inline styles), and the columns stack, pod first, under 800px.
+  const css = readFileSync(WEB('app.css'), 'utf8');
+  const pod = /^\.quick \.action-pod \{([^}]*)\}/m.exec(css)?.[1] ?? '';
+  assert.match(pod, /padding: 40px;/);
+  assert.match(pod, /border: 1px solid var\(--navy\);/);
+  assert.match(pod, /border-radius: var\(--radius-container\);/);
+  assert.match(pod, /background: var\(--pod-bg\);/);
+  assert.match(css, /--navy: #000077;/);
+  assert.match(css, /--radius-container: 20px;/);
+  assert.match(css, /--pod-bg: #cceeff;/, 'light blue');
+  assert.match(css, /^\.quick\.his-move \{ grid-template-columns: minmax\(0, 1fr\) minmax\(0, 1fr\); \}/m);
+  assert.match(css, /@media \(max-width: 800px\) \{ \.quick\.his-move \{ grid-template-columns: minmax\(0, 1fr\); \} \}/);
+  assert.doesNotMatch(app, /style="/);
+});
+
+test('every action in the pod that does his move is the green action colour; Reject and Delete are not (SP-416)', () => {
+  const green = /<button type="submit" class="btn btn-save">/;
+  assert.match(renderReplyForm({ status: 'needs your input' }, 'Dane'), /<button type="submit" class="btn btn-save">Post Reply<\/button>/);
+  const ready = { status: 'ready to launch', mergePhrase: 'ship it', pullRequest: 'https://github.com/x/y/pull/3', comments: [] };
+  assert.match(renderMergeAction(ready), /class="btn btn-save">Merge</);
+  assert.match(renderCloseAction({ status: 'needs your input', closePhrase: 'close', comments: [{ body: moveCard('Close') }] }), green);
+  assert.match(renderGoAction({ status: 'needs your input', goPhrase: 'go', comments: [{ body: intakeCard() }] }), green);
+  const held = { name: 'x', tags: ['bug-report'], status: 'needs your input', comments: [], description: bugDescription() };
+  assert.match(renderBugReportActions(held), /class="btn btn-save">Approve</);
+  assert.match(renderBugReportActions(held), /class="btn btn-danger">Reject</);
+  assert.match(renderDeleteAction({ status: 'queued' }), /class="btn btn-danger">Delete</);
 });
 
 test('Quick Action\'s left side: the title, the newest card\'s context and its ask in bold red', () => {
@@ -454,9 +481,9 @@ test('Quick Action on a bug report: "Bug Report:", the visitor\'s words in bold,
   assert.match(html, /<li><span class="fact-label">Submitted:<\/span> Nov 13, 2026, 2:04 PM MST<\/li>/, 'Mountain time, not UTC');
   assert.match(html, /<li><span class="fact-label">Report id:<\/span> br_1<\/li><\/ul>/);
   assert.doesNotMatch(html, /bug-shots/);
-  // Screenshots that did come get one line pointing at Details, at any status.
+  // Screenshots that did come get one line pointing at the description on the right, at any status.
   const shots = renderQuickAction({ name: 'x', tags: ['bug-report'], status: 'live', description: bugDescription({ shots: '- [Screenshot 1](https://x.test/1.png)' }) });
-  assert.match(shots, /<p class="bug-shots quiet">Screenshots are attached: see the description under Details\.<\/p>/);
+  assert.match(shots, /<p class="bug-shots quiet">Screenshots are attached: see the description on the right\.<\/p>/);
   assert.match(shots, /^<h1>Bug Report:<\/h1>/);
   assert.match(shots, /^<h1>Bug Report:<\/h1>\n<p class="status-line">Status: <span class="status-name">Live<\/span>/, 'the status line sits under "Bug Report:" too (SP-290)');
   // A page that is not a web address is shown as text, not a link.
@@ -612,15 +639,15 @@ test('the ticket page puts the details in the right column, open, while a loop h
   const draw = /\nasync function drawTicket\(id, said = null, kept = null\) \{[\s\S]*?\n\}\n/.exec(app)?.[0] ?? '';
   assert.ok(draw, 'drawTicket found');
   assert.match(draw, /const inline = loopHasIt\(t\);/);
-  const body = /const ticketBody = `([\s\S]*?)`;\n  main\.innerHTML/.exec(draw)?.[1] ?? '';
+  const body = /const ticketBody = `([\s\S]*?)`;\n  const actions/.exec(draw)?.[1] ?? '';
   // Everything Details held, the Add Comment box under the comments, Copy at the end.
   const order = ['<p class="meta">', 'renderEditPanel(t)', '<section class="description">', 'renderAttachments(t)', '<h2 id="comments">Comments</h2>', '${comments ||', '${renderCommentForm(t)}', '<h2>Copy to Another Project</h2>'];
   const at = order.map((part) => body.indexOf(part));
   assert.ok(at.every((i) => i >= 0), `all in the one block: ${order.filter((_, i) => at[i] < 0)}`);
   assert.deepEqual([...at].sort((a, b) => a - b), at, 'in that order');
-  // In the right column (no fold, so already open) on a loop ticket; folded below on his.
-  assert.match(draw, /\$\{renderReplyForm\(t, me\?\.name\)\}\s*\$\{inline \? `<div class="details">\$\{ticketBody\}<\/div>` : ''\}\s*\$\{renderDeleteAction\(t\)\}\s*<\/div>/);
-  assert.match(draw, /\$\{inline \? '' : `<details class="details">\s*<summary>Details<\/summary>\$\{ticketBody\}\s*<\/details>`\}/);
+  // In the right column, open, under any actions, on a loop ticket; on his, open on the right too (SP-416).
+  assert.match(draw, /\$\{inline \? actions : renderFilesMade\(t\)\}\s*<div class="details">\$\{ticketBody\}<\/div>\s*\$\{renderDeleteAction\(t\)\}\s*<\/div>/);
+  assert.doesNotMatch(draw, /<details class="details">/);
   // The box posts its words untouched; a failed post says so and keeps them; a post that landed never says it did not.
   const wire = draw.slice(draw.indexOf("const commentForm = main.querySelector('form.add-comment');"), draw.indexOf("const form = main.querySelector('form.reply');"));
   assert.match(wire, /api\('POST', `\/tickets\/\$\{encodeURIComponent\(t\.id\)\}\/comments`, \{ body: commentBox\.value \}\)/);
@@ -645,7 +672,7 @@ test('a held bug report shows Approve and Reject and a quiet line in place of th
   assert.match(html, /Moves it to Requested; the intake lane writes it up/);
   assert.match(html, /Moves it to Live with the wont-do tag and a note that nothing shipped/);
   assert.ok(html.includes(`<p class="held-report quiet">${escapeHtml(HELD_REPORT_LINE)}</p>`));
-  assert.match(HELD_REPORT_LINE, /No loop reads a reply[\s\S]*Approve or Reject[\s\S]*Change panel under Details/);
+  assert.match(HELD_REPORT_LINE, /No loop reads a reply[\s\S]*Approve or Reject[\s\S]*Change panel on the right/);
   assert.equal(renderReplyForm(held, 'Dane'), '', 'no reply box on a held bug report');
   // Nothing else on it offers a move: no card, so no Go, Close or Merge.
   assert.equal(renderGoAction({ ...held, goPhrase: 'go' }), '');
@@ -930,7 +957,7 @@ test('Copy copies exactly the block\'s text: no fence, no extra spaces or line b
   assert.match(app, /document\.execCommand\('copy'\)/);
   assert.match(app, /'Copied'/);
   const quick = /<section class="quick[^"]*">([\s\S]*?)<\/section>/.exec(app)[1];
-  assert.match(quick, /\$\{renderCommands\(t\)\}[\s\S]*\$\{renderReplyForm\(t, me\?\.name\)\}/, 'the commands sit on the right, above the reply box');
+  assert.match(quick, /<div class="act">\s*\$\{renderCommands\(t\)\}/, 'the commands sit first on the right');
 });
 
 test('a card with no command block, or no card at all, shows no Copy buttons', () => {
@@ -1291,7 +1318,7 @@ test('clicking Merge and confirming posts exactly the merge phrase as Dane\'s ow
   const draw = /\nasync function drawTicket\(id(?:, said = null(?:, kept = null)?)?\) \{[\s\S]*?\n\}\n/.exec(app)?.[0] ?? '';
   assert.match(draw, /const wordButton = [\s\S]*wordButton\('form\.merge-action'[\s\S]*wordButton\('form\.close-action'/);
   assert.equal(app.match(/const wordButton = /g).length, 1);
-  assert.match(app, /<div class="act">\s*(?:\$\{renderCommands\(t\)\}\s*)?\$\{renderAnswerIn\(t\)\}\s*\$\{renderMergeAction\(t\)\}\s*\$\{renderCloseAction\(t\)\}\s*\$\{renderGoAction\(t\)\}\s*(?:\$\{renderBugReportActions\(t\)\}\s*)?\$\{renderReplyForm\(t, me\?\.name\)\}/, 'the answer-is-in line, then Merge, Close and Go, sit above the reply box on the right');
+  assert.match(app, /const actions = `\s*\$\{renderAnswerIn\(t\)\}\s*\$\{renderMergeAction\(t\)\}\s*\$\{renderCloseAction\(t\)\}\s*\$\{renderGoAction\(t\)\}\s*(?:\$\{renderBugReportActions\(t\)\}\s*)?\$\{renderReplyForm\(t, me\?\.name\)\}`;/, 'the answer-is-in line, then Merge, Close and Go, sit above the reply box (in the pod, SP-416)');
 });
 
 test('after a reply, Merge, Close or Go posts, the page stays at the top with no confirmation box', () => {
@@ -1303,11 +1330,11 @@ test('after a reply, Merge, Close or Go posts, the page stays at the top with no
   assert.doesNotMatch(html, /id="posted"|posted-text/);
   assert.doesNotMatch(css, /dialog#posted/);
   assert.doesNotMatch(app, /getElementById\('posted'\)|posted\.showModal/);
-  // One helper: Details open, the page at the top.
+  // One helper: the page at the top. The comments are already open on the right (SP-416), so there is no fold to open.
   const helper = /const afterPost = \(\) => \{([\s\S]*?)\n  \};/.exec(app)?.[1];
   assert.ok(helper, 'one shared helper');
-  assert.match(helper, /^\s*openDetails\(\);\s*window\.scrollTo\(0, 0\);\s*$/);
-  assert.match(app, /const openDetails = \(\) => \{\s*const fold = main\.querySelector\('details\.details'\);\s*if \(fold\) fold\.open = true;\s*\};/, 'opens the fold only when there is one (SP-291)');
+  assert.match(helper, /^\s*window\.scrollTo\(0, 0\);\s*$/);
+  assert.doesNotMatch(app, /openDetails/);
   assert.doesNotMatch(helper, /showModal/, 'the helper opens no box');
   // Nothing scrolls to the last comment any more.
   assert.doesNotMatch(app, /\.comment:last-of-type/);
@@ -1631,7 +1658,9 @@ test.describe('Files Made: the files a ticket made, from its newest merge note',
 
   test('the ticket page draws the box between the Quick Action section and the Details fold', () => {
     const app = pageScript();
-    assert.match(app, /<\/section>\s*\$\{renderFilesMade\(t\)\}\s*\$\{inline \? '' : `<details class="details">/);
+    // Below the section while a loop has it; in his two statuses, in the right column above the ticket (SP-416).
+    assert.match(app, /<\/section>\s*\$\{inline \? renderFilesMade\(t\) : ''\}`;/);
+    assert.match(app, /\$\{inline \? actions : renderFilesMade\(t\)\}\s*<div class="details">/);
     assert.match(readFileSync(WEB('app.css'), 'utf8'), /\.files-made \{[^}]*background:[^}]*border:/);
   });
 });

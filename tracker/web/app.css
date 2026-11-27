@@ -543,6 +543,11 @@ form.add-comment textarea { min-height: 5rem; }
 form.add-comment .row { display: flex; gap: var(--space-5); align-items: center; margin-top: 0.5rem; }
 .quick.loop-has { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
 @media (max-width: 800px) { .quick.loop-has { grid-template-columns: minmax(0, 1fr); } }
+/* SP-416: in his two statuses, everything he needs to act sits in one pod on the left (his numbers: 1px navy, 20px corners, light blue, 40px inside); the ticket itself is open on the right. Stacks, pod first, under 800px. */
+.quick.his-move { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.quick .action-pod { min-width: 0; padding: 40px; border: 1px solid var(--navy); border-radius: var(--radius-container); background: var(--pod-bg); }
+.quick .action-pod > :last-child { margin-bottom: 0; }
+@media (max-width: 800px) { .quick.his-move { grid-template-columns: minmax(0, 1fr); } }
 nav.trail { font-size: var(--text-sm); color: var(--ink-secondary); margin: -0.5rem 0 1rem; }
 nav.trail a { color: var(--ink-secondary); }
 nav.trail a:hover { color: var(--ink-primary); }
