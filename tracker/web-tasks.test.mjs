@@ -231,7 +231,7 @@ test('the list\'s actions only go where the page already goes: the ticket, its r
   assert.match(app, /t\.pullRequest \? action\(t\.pullRequest, '[^']+', ICONS\.pullRequest, true\) : ''/);
   assert.match(app, /target="_blank" rel="noopener noreferrer"/);
   // The address keeps #reply when the page moves to it, and the ticket page acts on it.
-  assert.match(app, /history\.pushState\(null, '', a\.pathname \+ a\.hash\)/);
+  assert.match(app, /history\.pushState\(null, '', a\.pathname \+ a\.search \+ a\.hash\)/);
   assert.match(app, /location\.hash === '#reply'[\s\S]{0,120}box\.focus\(\)/);
 });
 

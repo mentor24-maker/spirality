@@ -209,7 +209,7 @@ test('an open page reads again once a minute and on coming back to the tab, neve
   assert.match(refresh, /catch \(err\) \{\s*if \(err instanceof SignedOut\) drawSignIn\(\);\s*\}/, 'a failed read leaves the page as it is');
   // Only Waiting on you, the board and list, and a ticket keep themselves current.
   const route = /async function route\(\{ place = null \} = \{\}\) \{[\s\S]*?\n\}/.exec(app)[0];
-  assert.match(route, /lastDrawn = ticket \|\| project \|\| tasks \|\| isNew \|\| waiting \? \{ address: here\(\), reads \} : null;/);
+  assert.match(route, /lastDrawn = ticket \|\| project \|\| tasks \|\| isNew \|\| waiting \|\| mlist \? \{ address: here\(\), reads \} : null;/);
   assert.match(route, /place\?\.restore\(\);\s*const kept = recording === reads;\s*if \(kept\) recording = null;\s*\/\/[^\n]*\n\s*if \(!waiting\) await refreshCount\(\);\s*if \(kept\) lastDrawn = /, 'his place is back before the page is shown, and the count is not part of what it was drawn from');
   assert.match(route, /me = await api\('GET', '\/me'\);\s*\/\/[^\n]*\n\s*recording = reads;/, 'who is signed in is not part of it either');
   // A save's own redraw keeps what the beat compares against, so the next beat does not undo its "Saved" note.

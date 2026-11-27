@@ -321,7 +321,7 @@ const PAGE_HEADERS = Object.freeze({
  */
 function pageFile(pathname, accept = '') {
   if (/^\/(?:projects(?:\/[^/]+)?|search|setup\/(?!fields$)[^/]+)$/.test(pathname)) return /\btext\/html\b/.test(accept) ? 'index.html' : null;
-  if (pathname === '/' || /^\/(?:tasks|board|list|console|new|settings|set-password|reporting|reporting\/usage|users|docs|topics)$/.test(pathname) || /^\/(?:t|board|list)\/[^/]+$/.test(pathname)) return 'index.html';
+  if (pathname === '/' || /^\/(?:tasks|board|list|console|new|settings|mlist|set-password|reporting|reporting\/usage|users|docs|topics)$/.test(pathname) || /^\/(?:t|board|list)\/[^/]+$/.test(pathname)) return 'index.html';
   if (/^\/projects\/[^/]+\/edit$/.test(pathname)) return 'index.html';
   // A page under the Docs page, such as one of the substrate's own
   // documentation files: the page itself draws what the rest names.
