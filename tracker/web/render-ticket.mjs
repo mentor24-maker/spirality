@@ -200,7 +200,7 @@ function bugReportFact({ label, value }) {
 }
 
 /** The newest comment that carries an operator card, or undefined. */
-const newestCard = (comments = []) => [...comments].reverse().find((c) => cardAsk(c.body) !== null);
+export const newestCard = (comments = []) => [...comments].reverse().find((c) => cardAsk(c.body) !== null);
 
 /**
  * The words an inline `code` span must start with to read as a command he
@@ -519,17 +519,13 @@ export function askParagraphs(ask) {
  * the summary.
  */
 export function renderQuickAction(t) {
-  const { name, description, status, tags = [], comments = [], answerIn = false, mergeStands = false, pullRequestState = null } = t;
+  const { name, description, tags = [], comments = [] } = t;
   const card = newestCard(comments);
   const report = bugReport({ tags, description });
   // A bug report's first paragraph is its "(none attached)" screenshots line (SP-286): only a card's context is a summary.
   const fallback = report ? '' : firstParagraph(description);
   const summary = card ? cardContext(card.body) ?? fallback : fallback;
-  const state = String(status ?? '').toLowerCase();
-  const his = HIS_STATUSES.includes(state);
-  // SP-226: a merged or closed PR is past the card's "Your move: Merge".
-  // SP-285: nor is it his move while his merge word still stands.
-  const ask = card && his && !answerIn && !mergeStands && !prSettled({ status, pullRequestState }) ? cardAsk(card.body) : null;
+  const ask = shownAsk(t);
   const asked = originalRequest(description);
   const top = asked ? [
     `<h1>${escapeHtml(asked.title)}</h1>`,
@@ -551,6 +547,63 @@ export function renderQuickAction(t) {
     summary ? `<p class="summary">${renderInline(summary)}</p>` : '',
     ask ? askParagraphs(ask).map((p) => `<p class="needed">${p.map(renderInline).join('<br>')}</p>`).join('\n') : '',
   ].filter(Boolean).join('\n');
+}
+
+/**
+ * The red ask the page shows him, as the card wrote it, or null: the newest
+ * card's ask, only while the ticket is in one of his two statuses and his
+ * answer is not in. A merged or closed pull request is past the card's
+ * "Your move: Merge" (SP-226), and so is a merge word that still stands
+ * (SP-285). renderQuickAction draws it; the phone page's answer controls
+ * (renderMlistAnswer) are offered only while it is there.
+ */
+export function shownAsk(t = {}) {
+  const { status, comments = [], answerIn = false, mergeStands = false, pullRequestState = null } = t;
+  const card = newestCard(comments);
+  const his = HIS_STATUSES.includes(String(status ?? '').toLowerCase());
+  return card && his && !answerIn && !mergeStands && !prSettled({ status, pullRequestState }) ? cardAsk(card.body) : null;
+}
+
+/**
+ * The lettered options an ask offers (`A) …`, `B) …`), read off the lines
+ * askParagraphs lays out, as `[{ letter, words }]` in order, or [] when it
+ * offers fewer than two. Only a run lettered A, B, C… counts; a fresh A
+ * starts the run again, so a stray "A)" earlier in the ask does not.
+ */
+export function askOptions(ask) {
+  let run = [];
+  for (const line of askParagraphs(ask).flat()) {
+    const m = /^([A-Z])\)\s+(.*)$/s.exec(line.trim());
+    if (!m) continue;
+    const want = String.fromCharCode('A'.charCodeAt(0) + run.length);
+    if (m[1] === want) run.push({ letter: m[1], words: m[2].trim() });
+    else if (m[1] === 'A') run = [{ letter: 'A', words: m[2].trim() }];
+  }
+  return run.length > 1 ? run : inlineOptions(ask);
+}
+
+/**
+ * Choices written inside a sentence, a capital letter and its words in
+ * brackets ("Reply A (the Mini) or B (a hosted server)."), as askOptions
+ * returns them, or [] when fewer than two. Only a run lettered A, B, C… in
+ * order counts, read outside inline code and fenced blocks.
+ */
+function inlineOptions(ask) {
+  let run = [];
+  let fence = null;
+  for (const raw of String(ask ?? '').split('\n')) {
+    if (fence) { if (closesFence(raw, fence)) fence = null; continue; }
+    const open = FENCE.exec(raw);
+    if (open) { fence = open[1]; continue; }
+    const ranges = codeRanges(raw);
+    for (const m of raw.matchAll(/(?<![\w(])([A-Z]) \(([^()]+)\)/g)) {
+      if (inCode(ranges, m.index)) continue;
+      const want = String.fromCharCode('A'.charCodeAt(0) + run.length);
+      if (m[1] === want) run.push({ letter: m[1], words: m[2].trim() });
+      else if (m[1] === 'A') run = [{ letter: 'A', words: m[2].trim() }];
+    }
+  }
+  return run.length > 1 ? run : [];
 }
 
 /** The status the relay merges from, as the tracker stores it (lib/mergeOnComment.js). */
@@ -812,16 +865,27 @@ export function closeQuestion({ name }) {
  * his answer is in (renderAnswerIn).
  */
 export function renderGoAction({ status, goPhrase, comments = [], answerIn = false }) {
-  if (answerIn) return '';
-  if (String(status ?? '').toLowerCase() !== NEEDS_YOUR_INPUT || !goPhrase) return '';
-  const card = newestCard(comments);
-  if (!card || cardMove(card.body) !== 'Reply') return '';
-  const word = goPhrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  if (!new RegExp(`["\u201c]${word}["\u201d]`, 'i').test(cardAsk(card.body) ?? '')) return '';
+  if (!offersGo({ status, goPhrase, comments, answerIn })) return '';
   return `<form class="go-action">
         <button type="submit" class="btn btn-primary">Go</button><span class="note"></span>
         <p class="quiet">Posts &ldquo;${escapeHtml(goPhrase)}&rdquo; as your reply; the relay queues it on its next pass.</p>
       </form>`;
+}
+
+/**
+ * Does this ticket offer the Go button? Needs your input, a go word from
+ * the server, his answer not in, and a newest card whose move is Reply and
+ * whose ask quotes that word. renderGoAction draws it on the ticket page and
+ * the phone page (mlistAnswer) offers Go by the same test, so a Reply card
+ * asking "A or B" never gets a one-tap go.
+ */
+export function offersGo({ status, goPhrase, comments = [], answerIn = false }) {
+  if (answerIn) return false;
+  if (String(status ?? '').toLowerCase() !== NEEDS_YOUR_INPUT || !goPhrase) return false;
+  const card = newestCard(comments);
+  if (!card || cardMove(card.body) !== 'Reply') return false;
+  const word = goPhrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`["\u201c]${word}["\u201d]`, 'i').test(cardAsk(card.body) ?? '');
 }
 
 /** The one question the Go button asks before it posts. Plain text, for confirm(). */
