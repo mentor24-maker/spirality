@@ -195,11 +195,27 @@ account_links  token hash, purpose (setup|invite|reset), email, actor,
   Each topic belongs to exactly one project, and a project has many: a name
   (required), a description, who made it and when, in the `topics` table.
   The **Topics** page (`/topics`, in the top menu after Tasks) lists the
-  picked project's topics, newest first, and has a **Create Topic** form;
-  `GET` and `POST /projects/<slug>/topics` sit behind the same project check
-  as the Docs page. This first page only adds and lists topics. Linking them
-  to tasks (many to many), to each other, and editing or deleting them come
-  in later tickets. A deleted project's topics go with it.
+  picked project's topics, newest first, with how many tickets carry each,
+  and has a **Create Topic** form; each row has **Edit** (its Name and
+  Description) and **Delete**, which asks first, naming how many tasks carry
+  it (`tracker/web/page-topics.mjs`, SP-308). Behind it, `GET` and
+  `POST /projects/<slug>/topics` list and make them, and `PATCH` and
+  `DELETE /projects/<slug>/topics/<n>` change and delete one, all behind the
+  same project check as the Docs page; a topic of another project is
+  `unknown-topic`. A delete takes the topic off every ticket carrying it,
+  each with a `topics` event, and names those tickets (`removeTopic` in
+  `tracker/store.mjs`). Tickets carry topics, many to many, in the
+  `ticket_topics` table: a ticket's `topics` field is the whole new list of
+  topic ids, saved with the same version guard as any other field and one
+  `topics` event naming the ids before and after, and a topic of another
+  project is refused (`bad-topic`). On the Tasks page each ticket's topics
+  show as chips on the Board and the List; the List adds them (Add Topic)
+  and removes them (a chip's ×) (`tracker/web/page-tasks.mjs`, SP-247). The
+  Tasks page's Topic picker does not filter the board: the topic chosen
+  goes into a search as its Topic filter, and the search page has a Topic
+  filter of its own. Not built yet: linking topics to each other (there is
+  no column or table for it), and showing a ticket's topics on the ticket
+  page, which does not show them. A deleted project's topics go with it.
 - **Roles and permissions** (SP-143): every person has one of five roles,
   **admin**, **editor**, **contributor**, **reviewer** and **viewer**, each
   with a plain-words description, and each role a set of permissions. The
