@@ -7,7 +7,7 @@
  * (Spirality SP-352), so a ticket that changes one page no longer edits the
  * same file as a ticket that changes another.
  */
-import { closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, loopHasIt, renderCommentForm, MOVED_MESSAGE, renderMarkdown, renderCloseAction, renderGoAction, goQuestion, renderBugReportActions, approveQuestion, rejectQuestion, changeProblem, REJECT_COMMENT, WONT_DO_TAG, renderMergeAction, renderAnswerIn, renderHeldUp, renderSharedFiles, renderReplyForm, statusLabel, renderQuickAction, uploadEach } from './render.mjs';
+import { closeQuestion, deleteQuestion, deleteRefusal, escapeHtml, mergeQuestion, renderCommands, renderComment, renderFilesMade, renderDeleteAction, renderEditPanel, loopHasIt, renderCommentForm, MOVED_MESSAGE, renderMarkdown, renderCloseAction, renderGoAction, goQuestion, renderPickAction, renderBugReportActions, approveQuestion, rejectQuestion, changeProblem, REJECT_COMMENT, WONT_DO_TAG, renderMergeAction, renderAnswerIn, renderHeldUp, renderSharedFiles, renderReplyForm, statusLabel, renderQuickAction, uploadEach } from './render.mjs';
 import { api, setTitle, when, me, renderAttachments, main, sinceTime, refreshing, putTrail, savedView, route, SignedOut, drawSignIn, drawAgain, Refused, showMessage, MAX_FILE, uploadFile } from './app.mjs';
 import { field } from './page-projects.mjs';
 import { wireCopyButtons } from './page-tasks.mjs';
@@ -72,6 +72,7 @@ export async function drawTicket(id, said = null, kept = null) {
       ${renderMergeAction(t)}
       ${renderCloseAction(t)}
       ${renderGoAction(t)}
+      ${renderPickAction(t)}
       ${renderBugReportActions(t)}
       ${renderReplyForm(t, me?.name)}`;
   main.innerHTML = `
@@ -155,6 +156,34 @@ export async function drawTicket(id, said = null, kept = null) {
   wordButton('form.merge-action', mergeQuestion(t), t.mergePhrase, 'You were signed out; the merge word was not posted.');
   wordButton('form.close-action', closeQuestion(t), t.closePhrase, 'You were signed out; the close word was not posted.');
   wordButton('form.go-action', goQuestion(t), t.goPhrase, 'You were signed out; your go was not posted.');
+  // Your Answer (SP-423): the letter he picks, posted as his reply through
+  // the same call the reply box uses, as the phone page's dropdown does. It
+  // reports in the message strip (UI_DOCTRINE 7): a failed post says so and
+  // keeps the page as it was; nothing is called posted that did not save.
+  const pickForm = main.querySelector('form.pick-action');
+  pickForm?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const letter = pickForm.querySelector('select').value;
+    if (!letter) return showMessage({ kind: 'error', text: 'Not posted: there is nothing to send.' });
+    const button = pickForm.querySelector('button');
+    button.disabled = true;
+    showMessage({ kind: 'info', text: 'Posting…' });
+    try {
+      await api('POST', `/tickets/${encodeURIComponent(t.id)}/comments`, { body: letter });
+    } catch (err) {
+      if (err instanceof SignedOut) return drawSignIn('You were signed out; your answer was not posted.');
+      button.disabled = false;
+      return showMessage({ kind: 'error', text: `Not posted: ${err.message}` });
+    }
+    try {
+      await drawAgain(() => drawTicket(t.id));
+      afterPost();
+      showMessage({ kind: 'success', text: `Posted \u201c${letter}\u201d as your answer.` });
+    } catch (err) {
+      if (err instanceof SignedOut) return drawSignIn('You were signed out; your answer was posted, but the page could not show it.');
+      showMessage({ kind: 'error', text: `Posted, but the page could not refresh (${err.message}). Reload to see it.` });
+    }
+  });
   // A held bug report's Approve and Reject (SP-287): his own status changes,
   // the same PATCH the Change panel sends, guarded on the status and version
   // the page was drawn with, and each read back. Reject is two writes: the

@@ -215,7 +215,7 @@ test('an open page reads again once a minute and on coming back to the tab, neve
   // A save's own redraw keeps what the beat compares against, so the next beat does not undo its "Saved" note.
   assert.match(/async function drawAgain\(draw\) \{[\s\S]*?\n\}/.exec(app)[0], /await draw\(\);\s*if \(recording === reads && lastDrawn\?\.address === here\(\)\) lastDrawn = \{ address: here\(\), reads \};/);
   assert.equal(app.match(/await drawTicket\(t\.id/g), null, 'every in-page ticket redraw goes through drawAgain');
-  assert.equal((app.match(/await drawAgain\(\(\) => draw(Ticket|Project)\(/g) ?? []).length, 10, 'SP-208 added the List view priority save; SP-251 the Suggest Next Tasks filing; SP-287 the bug report buttons; SP-291 the Add Comment box; SP-373 the Change panel Upload');
+  assert.equal((app.match(/await drawAgain\(\(\) => draw(Ticket|Project)\(/g) ?? []).length, 11, 'SP-208 added the List view priority save; SP-251 the Suggest Next Tasks filing; SP-287 the bug report buttons; SP-291 the Add Comment box; SP-373 the Change panel Upload; SP-423 the Your Answer dropdown');
   assert.match(route, /if \(place && !\(err instanceof SignedOut\)\) return;/, "a beat's failed draw does not replace the page with an error");
   assert.match(app, /if \(location\.hash === '#reply' && !refreshing\) \{/, 'a beat does not jump to the reply box again');
   assert.match(/function keepPlace\(\) \{[\s\S]*?\n\}/.exec(app)[0], /main\.querySelectorAll\('details'\)[\s\S]*window\.scrollTo\(0, y\);/);

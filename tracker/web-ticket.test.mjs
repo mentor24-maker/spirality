@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { seedDemo } from './demoData.mjs';
-import { escapeHtml, renderStatusLine, renderComment, renderInline, renderMarkdown, renderQuickAction, CLOSE_LINE, REPLY_LINE, offersMerge, offersClose, bugReport, BUG_REPORT_TAG, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, heldBugReport, renderBugReportActions, approveQuestion, rejectQuestion, changeProblem, REJECT_COMMENT, WONT_DO_TAG, HELD_REPORT_LINE, HELD_REPORT_STATUS_LINE, cardMove, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, uploadEach, loopHasIt, renderCommentForm, LOOP_HAS_STATUSES, MOVED_MESSAGE, contrast } from './web/render.mjs';
+import { escapeHtml, renderStatusLine, renderComment, renderInline, renderMarkdown, renderQuickAction, CLOSE_LINE, REPLY_LINE, offersMerge, offersClose, bugReport, BUG_REPORT_TAG, renderCommands, renderFilesMade, filesMade, cardCommands, isCommand, askParagraphs, cardAsk, renderMergeAction, renderAnswerIn, renderHeldUp, heldUpLine, renderReplyForm, statusLabel, ANSWER_IN_NOTE, MERGE_STANDS_NOTE, mergeQuestion, renderCloseAction, closeQuestion, renderGoAction, goQuestion, renderPickAction, answerControl, mlistAnswer, heldBugReport, renderBugReportActions, approveQuestion, rejectQuestion, changeProblem, REJECT_COMMENT, WONT_DO_TAG, HELD_REPORT_LINE, HELD_REPORT_STATUS_LINE, cardMove, cardContext, firstParagraph, originalRequest, canDelete, deleteQuestion, deleteRefusal, renderDeleteAction, renderEditPanel, uploadEach, loopHasIt, renderCommentForm, LOOP_HAS_STATUSES, MOVED_MESSAGE, contrast } from './web/render.mjs';
 import { loadProjectConfig } from '../lib/projectConfig.mjs';
 import operatorCard from '../lib/operatorCard.js';
 import machineComment from '../lib/machineComment.js';
@@ -344,8 +344,8 @@ test('the ticket page opens on the Quick Action section: in his two statuses one
   const page = /const actions = `([\s\S]*?)`;\n  main\.innerHTML = `\s*<section class="quick\$\{inline \? ' loop-has' : ' his-move'\}">([\s\S]*?)<\/section>\s*\$\{inline \? renderFilesMade\(t\) : ''\}`;/.exec(app);
   assert.ok(page, 'Quick Action is the whole page: no Details fold after it');
   const [, actions, quick] = page;
-  // His move, in order: the answer-is-in line, Merge, Close, Go, a held bug report's Approve and Reject, the reply box.
-  assert.match(actions, /^\s*\$\{renderAnswerIn\(t\)\}\s*\$\{renderMergeAction\(t\)\}\s*\$\{renderCloseAction\(t\)\}\s*\$\{renderGoAction\(t\)\}\s*\$\{renderBugReportActions\(t\)\}\s*\$\{renderReplyForm\(t, me\?\.name\)\}\s*$/);
+  // His move, in order: the answer-is-in line, Merge, Close, Go, Your Answer (SP-423), a held bug report's Approve and Reject, the reply box.
+  assert.match(actions, /^\s*\$\{renderAnswerIn\(t\)\}\s*\$\{renderMergeAction\(t\)\}\s*\$\{renderCloseAction\(t\)\}\s*\$\{renderGoAction\(t\)\}\s*\$\{renderPickAction\(t\)\}\s*\$\{renderBugReportActions\(t\)\}\s*\$\{renderReplyForm\(t, me\?\.name\)\}\s*$/);
   // Left: the pod, his title, words and brief (renderQuickAction), then the actions; right: commands, files made, the ticket open, Delete.
   assert.match(quick, /<div class="ask\$\{inline \? '' : ' action-pod'\}">\$\{renderQuickAction\(t\)\}\$\{inline \? '' : actions\}<\/div>/);
   assert.match(quick, /<div class="act">\s*\$\{renderCommands\(t\)\}\s*\$\{inline \? actions : renderFilesMade\(t\)\}\s*<div class="details">\$\{ticketBody\}<\/div>\s*\$\{renderDeleteAction\(t\)\}\s*<\/div>\s*$/);
@@ -704,7 +704,7 @@ test('Approve and Reject ask first, naming the ticket, and changeProblem says wh
 
 test('the page wires Approve and Reject to guarded changes it reads back, and never says done over a failed write', () => {
   const app = pageScript();
-  assert.match(app, /\$\{renderGoAction\(t\)\}\s*\$\{renderBugReportActions\(t\)\}\s*\$\{renderReplyForm\(t, me\?\.name\)\}/, 'in the Quick Action column, where the reply box was');
+  assert.match(app, /\$\{renderGoAction\(t\)\}\s*\$\{renderPickAction\(t\)\}\s*\$\{renderBugReportActions\(t\)\}\s*\$\{renderReplyForm\(t, me\?\.name\)\}/, 'in the Quick Action column, where the reply box was');
   assert.match(app, /api\('PATCH', `\/tickets\/\$\{encodeURIComponent\(t\.id\)\}`, \{ \.\.\.fields, ifStatus: t\.status, ifVersion: t\.version \}\)/, 'guarded on what the page was drawn with');
   assert.match(app, /bugButton\('form\.approve-action', approveQuestion\(t\), \[\s*\{ what: 'the move to Requested', write: async \(\) => changeProblem\(await patch\(\{ status: 'requested' \}\), \{ status: 'requested' \}\) \}/);
   assert.match(app, /bugButton\('form\.reject-action', rejectQuestion\(t\), \[[\s\S]*patch\(\{ status: 'live', tags: \[\.\.\.new Set\(\[\.\.\.t\.tags, WONT_DO_TAG\]\)\] \}\)[\s\S]*body: REJECT_COMMENT[\s\S]*posted\?\.body === REJECT_COMMENT/);
@@ -1253,7 +1253,7 @@ test('the Go button posts the substrate\'s one go word, handed to the page by th
   } finally { await none.cleanup(); }
   const app = pageScript();
   assert.match(app, /wordButton\('form\.go-action', goQuestion\(t\), t\.goPhrase,/);
-  assert.match(app, /\$\{renderCloseAction\(t\)\}\s*\$\{renderGoAction\(t\)\}\s*(?:\$\{renderBugReportActions\(t\)\}\s*)?\$\{renderReplyForm\(t, me\?\.name\)\}/, 'Go sits between Close and the reply box');
+  assert.match(app, /\$\{renderCloseAction\(t\)\}\s*\$\{renderGoAction\(t\)\}\s*\$\{renderPickAction\(t\)\}\s*(?:\$\{renderBugReportActions\(t\)\}\s*)?\$\{renderReplyForm\(t, me\?\.name\)\}/, 'Go sits between Close and the reply box');
 });
 
 test('no go word is written into the page\'s code, and the Go button is the same Save-green kind as Merge (UI_DOCTRINE 3, SP-415)', () => {
@@ -1318,7 +1318,7 @@ test('clicking Merge and confirming posts exactly the merge phrase as Dane\'s ow
   const draw = /\nasync function drawTicket\(id(?:, said = null(?:, kept = null)?)?\) \{[\s\S]*?\n\}\n/.exec(app)?.[0] ?? '';
   assert.match(draw, /const wordButton = [\s\S]*wordButton\('form\.merge-action'[\s\S]*wordButton\('form\.close-action'/);
   assert.equal(app.match(/const wordButton = /g).length, 1);
-  assert.match(app, /const actions = `\s*\$\{renderAnswerIn\(t\)\}\s*\$\{renderMergeAction\(t\)\}\s*\$\{renderCloseAction\(t\)\}\s*\$\{renderGoAction\(t\)\}\s*(?:\$\{renderBugReportActions\(t\)\}\s*)?\$\{renderReplyForm\(t, me\?\.name\)\}`;/, 'the answer-is-in line, then Merge, Close and Go, sit above the reply box (in the pod, SP-416)');
+  assert.match(app, /const actions = `\s*\$\{renderAnswerIn\(t\)\}\s*\$\{renderMergeAction\(t\)\}\s*\$\{renderCloseAction\(t\)\}\s*\$\{renderGoAction\(t\)\}\s*\$\{renderPickAction\(t\)\}\s*(?:\$\{renderBugReportActions\(t\)\}\s*)?\$\{renderReplyForm\(t, me\?\.name\)\}`;/, 'the answer-is-in line, then Merge, Close and Go, sit above the reply box (in the pod, SP-416)');
 });
 
 test('after a reply, Merge, Close or Go posts, the page stays at the top with no confirmation box', () => {
@@ -1663,4 +1663,48 @@ test.describe('Files Made: the files a ticket made, from its newest merge note',
     assert.match(app, /\$\{inline \? actions : renderFilesMade\(t\)\}\s*<div class="details">/);
     assert.match(readFileSync(WEB('app.css'), 'utf8'), /\.files-made \{[^}]*background:[^}]*border:/);
   });
+});
+
+// ── Your Answer: a card's lettered options as a dropdown (SP-423) ────────────
+
+test('a card offering A) and B) shows a Your Answer dropdown and a green Send in the pod, with the reply box still under it (SP-423)', () => {
+  const t = { status: 'needs your input', goPhrase: 'go', comments: [{ body: intakeCard({ needed: 'Pick one.\nA) keep it as it is.\nB) the smaller one.' }) }] };
+  assert.equal(answerControl(t).kind, 'pick');
+  const html = renderPickAction(t);
+  assert.match(html, /^<form class="pick-action">/);
+  assert.match(html, /<label for="pick-answer">Your Answer<\/label>/);
+  assert.match(html, /<select id="pick-answer" required><option value="A">A\) keep it as it is\.<\/option><option value="B">B\) the smaller one\.<\/option><\/select><button type="submit" class="btn btn-save">Send<\/button>/);
+  assert.doesNotMatch(html, /style="|class="note/, 'no inline styles, and no note beside the button: it reports in the message strip');
+  assert.match(renderReplyForm(t, 'Dane'), /<form class="reply">/, 'the reply box stays for any other answer');
+  assert.equal(renderGoAction(t), '', 'a lettered card is never a one-tap Go');
+});
+
+test('no lettered options, or his answer in, or not his status: no dropdown (SP-423)', () => {
+  const plain = { status: 'needs your input', comments: [{ body: intakeCard({ needed: 'Tell me which folder the logs go in.' }) }] };
+  assert.equal(renderPickAction(plain), '');
+  assert.match(renderReplyForm(plain, 'Dane'), /<form class="reply">/, 'the reply box is still there');
+  const picked = { status: 'needs your input', comments: [{ body: intakeCard({ needed: 'A) one.\nB) two.' }) }] };
+  assert.notEqual(renderPickAction(picked), '');
+  assert.equal(renderPickAction({ ...picked, answerIn: true }), '', 'gone once his answer is in');
+  assert.equal(renderReplyForm({ ...picked, answerIn: true }, 'Dane'), '', 'and so is the reply box (SP-160)');
+  assert.equal(renderPickAction({ ...picked, status: 'queued' }), '', 'a loop has it: nothing to answer');
+  assert.equal(renderPickAction({ ...picked, comments: [{ body: moveCard('Close') }], closePhrase: 'close' }), '', 'a Close card is answered by Close');
+});
+
+test('the ticket page and the phone page decide by one helper, never a copy (SP-423)', () => {
+  assert.equal(mlistAnswer, answerControl, 'the phone page\'s name is the same function');
+  const mlist = readFileSync(new URL('./web/render-mlist.mjs', import.meta.url), 'utf8');
+  assert.doesNotMatch(mlist, /export function mlistAnswer|askOptions\(/, 'the rule is not written a second time in the phone page');
+});
+
+test('Send posts the picked letter through the comments route and reports in the message strip, never as sent over a failure (SP-423)', () => {
+  const app = pageScript();
+  const wiring = /const pickForm = main\.querySelector\('form\.pick-action'\);([\s\S]*?)\n  \}\);\n/.exec(app)?.[1];
+  assert.ok(wiring, 'the dropdown is wired');
+  assert.match(wiring, /const letter = pickForm\.querySelector\('select'\)\.value;/);
+  assert.match(wiring, /api\('POST', `\/tickets\/\$\{encodeURIComponent\(t\.id\)\}\/comments`, \{ body: letter \}\)/);
+  const [posting, after] = wiring.split('await drawAgain');
+  assert.match(posting, /catch \(err\) \{[\s\S]*return showMessage\(\{ kind: 'error', text: `Not posted: \$\{err\.message\}` \}\);/, 'a failed post says so and stops');
+  assert.doesNotMatch(posting, /kind: 'success'/, 'nothing is called posted before the post answers');
+  assert.match(after, /kind: 'success'/);
 });

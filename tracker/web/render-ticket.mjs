@@ -894,6 +894,52 @@ export function goQuestion({ name }) {
 }
 
 /**
+ * How a ticket's ask is answered, or null when it offers no answer: the one
+ * rule the ticket page (renderPickAction) and the phone page (mlistAnswer,
+ * the same function) both decide by, so they cannot drift (SP-423).
+ * Merge or Close whenever the ticket page offers them, and otherwise only
+ * while the red ask shows (shownAsk: his status, his answer not in, no
+ * settled pull request). `{ kind, word, options }`: `kind` is `merge-button`
+ * or `close-button` (offersMerge / offersClose, posting the server's word),
+ * `pick` (lettered options, as a list or inline like "A (the Mini) or B
+ * (a hosted server)", posting the letter), `go-button` (only where offersGo,
+ * posting the server's go word) or `other` (only a free reply).
+ */
+export function answerControl(t = {}) {
+  if (offersMerge(t)) return { kind: 'merge-button', word: t.mergePhrase, options: [] };
+  if (offersClose(t)) return { kind: 'close-button', word: t.closePhrase, options: [] };
+  const ask = shownAsk(t);
+  if (!ask) return null;
+  if (cardMove(newestCard(t.comments).body) !== 'Reply') return { kind: 'other', word: null, options: [] };
+  const options = askOptions(ask);
+  if (options.length) return { kind: 'pick', word: null, options };
+  return offersGo(t) ? { kind: 'go-button', word: t.goPhrase, options: [] } : { kind: 'other', word: null, options: [] };
+}
+
+/** A dropdown's options for an ask's lettered choices, `A) the Mini`, each posting its letter. Both pages draw them with this. */
+export function renderAnswerOptions(options = []) {
+  return options.map((o) => `<option value="${escapeHtml(o.letter)}">${escapeHtml(`${o.letter}) ${o.words}`)}</option>`).join('');
+}
+
+/**
+ * The ticket page's Your Answer dropdown, as HTML, or '' (SP-423): only
+ * when answerControl offers a pick, the same test the phone page's dropdown
+ * uses. Send is green (UI_DOCTRINE's action colour) and posts the letter as
+ * his reply through the comments route the reply box uses; the reply box
+ * stays under it for any answer the options do not cover. Gone once his
+ * answer is in, as the reply box is (SP-160): shownAsk is then null.
+ */
+export function renderPickAction(t = {}) {
+  const answer = answerControl(t);
+  if (answer?.kind !== 'pick') return '';
+  return `<form class="pick-action">
+        <label for="pick-answer">Your Answer</label>
+        <div class="row"><select id="pick-answer" required>${renderAnswerOptions(answer.options)}</select><button type="submit" class="btn btn-save">Send</button></div>
+        <p class="quiet">Posts the letter you pick as your reply; the relay acts on it at its next pass.</p>
+      </form>`;
+}
+
+/**
  * Is this a held bug report (SP-287)? A ticket tagged BUG_REPORT_TAG, in
  * Needs your input, with no operator card anywhere in its thread. A
  * visitor's report arrives that way: the hold itself is the approval gate,

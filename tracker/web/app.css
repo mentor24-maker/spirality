@@ -527,9 +527,13 @@ span.action.answer-in-icon { color: var(--status-ok-ink); }
 .quick .command { display: flex; gap: var(--space-3); align-items: flex-start; margin-bottom: 0.5rem; }
 .quick .command pre { flex: 1; min-width: 0; margin: 0; }
 .offscreen { position: fixed; left: -9999px; top: 0; }
-.quick form.merge-action, .quick form.close-action, .quick form.go-action, .quick form.approve-action, .quick form.reject-action { margin-bottom: 1.25rem; }
-.quick form.merge-action p, .quick form.close-action p, .quick form.go-action p, .quick form.approve-action p, .quick form.reject-action p { margin: 0.4rem 0 0; font-size: var(--text-base); }
+.quick form.merge-action, .quick form.close-action, .quick form.go-action, .quick form.pick-action, .quick form.approve-action, .quick form.reject-action { margin-bottom: 1.25rem; }
+.quick form.merge-action p, .quick form.close-action p, .quick form.go-action p, .quick form.pick-action p, .quick form.approve-action p, .quick form.reject-action p { margin: 0.4rem 0 0; font-size: var(--text-base); }
 .quick .held-report { margin: 0; font-size: var(--text-base); }
+/* SP-423: the ticket page's Your Answer dropdown, its letter and Send on one row. */
+.quick form.pick-action label { display: block; font-weight: 600; margin-bottom: var(--space-3); }
+.quick form.pick-action .row { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: center; }
+.quick form.pick-action select { flex: 1 1 12rem; min-width: 0; }
 details.details { border-top: 1px solid var(--border-black); padding-top: 0.75rem; }
 details.details > summary { cursor: pointer; font-weight: 600; margin-bottom: 0.5rem; }
 /* SP-291: while a loop has the ticket its details sit in the right column, open, under any actions. */
