@@ -99,52 +99,6 @@ function verdictInput(ticket, comments, prStates = null) {
 }
 
 /**
- * Is his answer in? The ticket sits in one of his two statuses and his own
- * comment is the newest word on it, so the relay owes the next move (SP-93).
- * In Needs your input a teammate's reply counts too (SP-302). The same rule
- * the Waiting on you list drops a ticket by (answeredLast, rules 1 and 1b of
- * waitingVerdict), so the page and that list cannot disagree.
- * `operatorId` is the project's operator; with none, never.
- */
-function answerIsIn(ticket, comments, operatorId) {
-  if (operatorId == null || !OPERATOR_LANE.includes(ticket.status)) return false;
-  return answeredLast(verdictInput(ticket, comments).comments, { operatorId, status: ticket.status });
-}
-
-/**
- * Does his merge word still stand (SP-285)? A Ready to launch ticket on
- * which he has said a merge phrase since the newest review PASS: the relay
- * keeps re-trying that merge on every pass, so the page shows no Merge
- * button and no "Your move" for it, even after a machine note (a conflict
- * hand-off) has become the newest comment. The same rule the verdict drops
- * the ticket from Waiting on You by (standingMergeWord, rule 3b of
- * waitingVerdict), so the page and that list cannot disagree.
- */
-function mergeStands(ticket, comments, operatorId) {
-  if (operatorId == null || ticket.status !== 'ready to launch') return false;
-  return Boolean(standingMergeWord(verdictInput(ticket, comments).comments, { operatorId }));
-}
-
-/**
- * Does the ticket wait on `viewerId`? Exactly the test waitingFor lists a
- * ticket by: one of the operator's two statuses and a WAITING verdict for
- * that person. With no viewer, never.
- */
-function waitsOn(ticket, comments, viewerId, prStates = null) {
-  return verdictOf(ticket, comments, viewerId, prStates) === WAITING;
-}
-
-/**
- * The loop's own verdict (waitingVerdict) on whether the ticket waits on
- * `viewerId`: WAITING, NOT_WAITING or CANNOT_TELL; null for a ticket in
- * none of the operator's two statuses, or with no viewer.
- */
-function verdictOf(ticket, comments, viewerId, prStates = null) {
-  if (viewerId == null || !OPERATOR_LANE.includes(ticket.status)) return null;
-  return waitingVerdict(verdictInput(ticket, comments, prStates), { operatorId: viewerId }).verdict;
-}
-
-/**
  * The pull request the page asks GitHub about for one ticket (SP-226), or
  * null: only a ticket in the operator's two statuses, and only the PR its
  * trail records (findPullRequest, the one a merge would act on). `repo` is
@@ -204,20 +158,71 @@ export function prsToCheck(store, { only = null } = {}) {
  */
 export function heldUpBy(ticket, comments, operatorId, lanes, prStates = null) {
   if (!lanes || !ticket) return null;
-  let job;
-  if (OPERATOR_LANE.includes(ticket.status)) {
-    if (operatorId == null) return null;
-    const input = verdictInput(ticket, comments, prStates);
-    if (waitingVerdict(input, { operatorId }).verdict === WAITING) return null;
-    if (!answeredLast(input.comments, { operatorId, status: ticket.status })
-      && !(ticket.status === 'ready to launch' && standingMergeWord(input.comments, { operatorId }))) return null;
-    job = 'relay';
-  } else {
-    job = NEXT_LANE.has(ticket.status) ? laneOf(NEXT_LANE.get(ticket.status)).job : null;
+  return whoseMove(ticket, comments, { operatorId, prStates, lanes }).heldUp;
+}
+
+/**
+ * Whose move a ticket is, worked out once (SP-419): every page that asks
+ * "is it Dane's move?" (the Console, the bell and Waiting on You through
+ * waitingFor, the mlist page, the ticket page, the Tasks page) takes its
+ * answer from here, so no two of them can build the verdict's input
+ * differently. `comments` is commentsOf's answer for the ticket.
+ *
+ * `operatorId` is the project's operator; `viewerId` (default
+ * `operatorId`) is the person the verdict is asked for, the signed-in
+ * reader on the Tasks page and Waiting on You. `prStates` is the server's
+ * GitHub read (SP-226); `lanes` is the ticket's project's lanes
+ * (lanesOf), or null.
+ *
+ * - `verdict`, `why`: the loop's own verdict (waitingVerdict) for the
+ *   viewer, WAITING, NOT_WAITING or CANNOT_TELL; null (and `why` null) for
+ *   a ticket in none of the operator's two statuses, or with no viewer.
+ * - `waiting`: `verdict === WAITING`.
+ * - `answerIn`: his answer is in. The ticket sits in one of his two
+ *   statuses and his own comment is the newest word on it, so the relay
+ *   owes the next move (SP-93); in Needs your input a teammate's reply
+ *   counts too (SP-302). Rules 1 and 1b of waitingVerdict (answeredLast).
+ * - `mergeStands`: his merge word still stands (SP-285). A Ready to launch
+ *   ticket on which he has said a merge phrase since the newest review
+ *   PASS: the relay keeps re-trying that merge, so the page shows no Merge
+ *   button and no "Your move" for it, even after a machine note has become
+ *   the newest comment. Rule 3b of waitingVerdict (standingMergeWord).
+ * - `heldUp`: heldUpBy's answer (SP-228); null with no `lanes`.
+ */
+export function whoseMove(ticket, comments, { operatorId = null, viewerId = operatorId, prStates = null, lanes = null } = {}) {
+  const inLane = OPERATOR_LANE.includes(ticket.status);
+  const input = verdictInput(ticket, comments, prStates);
+  const judged = new Map();
+  const judge = (id) => {
+    if (!judged.has(id)) judged.set(id, waitingVerdict(input, { operatorId: id }));
+    return judged.get(id);
+  };
+  const result = viewerId != null && inLane ? judge(viewerId) : null;
+  const answerIn = operatorId != null && inLane
+    && answeredLast(input.comments, { operatorId, status: ticket.status });
+  const mergeStands = operatorId != null && ticket.status === 'ready to launch'
+    && Boolean(standingMergeWord(input.comments, { operatorId }));
+  let heldUp = null;
+  if (lanes) {
+    let job = null;
+    if (inLane) {
+      if (operatorId != null && judge(operatorId).verdict !== WAITING && (answerIn || mergeStands)) job = 'relay';
+    } else if (NEXT_LANE.has(ticket.status)) {
+      job = laneOf(NEXT_LANE.get(ticket.status)).job;
+    }
+    const stage = job ? lanes.get(job) : null;
+    if (stage && stage.failing === true) {
+      heldUp = { stage: stage.name, job, reason: stage.failingReason ?? 'keeps failing', since: stage.failingSince ?? null };
+    }
   }
-  const stage = job ? lanes.get(job) : null;
-  if (!stage || stage.failing !== true) return null;
-  return { stage: stage.name, job, reason: stage.failingReason ?? 'keeps failing', since: stage.failingSince ?? null };
+  return {
+    verdict: result?.verdict ?? null,
+    why: result?.why ?? null,
+    waiting: result?.verdict === WAITING,
+    answerIn: Boolean(answerIn),
+    mergeStands,
+    heldUp,
+  };
 }
 
 /** `pipeline` (`{ slug, stages }`) as heldUpBy's lanes for `slug`; null for another project or none. */
@@ -268,9 +273,8 @@ export function waitingFor(store, operatorId, { only = null, pipeline = null, pr
     const lanes = lanesOf(pipeline, project.slug);
     for (const status of OPERATOR_LANE) {
       for (const ticket of store.listTickets(project.slug, { status })) {
-        const comments = commentsOf(store, ticket.id);
-        if (heldUpBy(ticket, comments, project.operator, lanes, prStates)) continue;
-        const result = waitingVerdict(verdictInput(ticket, comments, prStates), { operatorId });
+        const result = whoseMove(ticket, commentsOf(store, ticket.id), { operatorId: project.operator, viewerId: operatorId, prStates, lanes });
+        if (result.heldUp) continue;
         const row = {
           id: ticket.id,
           project: project.slug,
@@ -294,11 +298,12 @@ export function waitingFor(store, operatorId, { only = null, pipeline = null, pr
  * and kind, and `machine`: true when a machine actor wrote it, or when it
  * carries the machine stamp (a loop posting under Dane's own token). The
  * stamp line itself is taken off the shown text; `machine` says it instead.
- * `answerIn` says his answer is in (answerIsIn). `heldUp` says a failing
+ * `answerIn` says his answer is in (whoseMove). `heldUp` says a failing
  * lane owes the next move (heldUpBy, SP-228), from `pipeline` (`{ slug,
  * stages }`), or null. `pullRequestState`, there only when `prStates` holds
  * the ticket (SP-226), is `{ number, state }`, state OPEN, MERGED, CLOSED or
- * null for could not check. Null when there is no such ticket.
+ * null for could not check. `waitingOnOperator` is whoseMove's verdict for the
+ * project's operator, which the page does not draw. Null when there is no such ticket.
  */
 export function threadOf(store, ticketId, { pipeline = null, prStates = null } = {}) {
   const ticket = store.getTicket(ticketId);
@@ -322,6 +327,7 @@ export function threadOf(store, ticketId, { pipeline = null, prStates = null } =
       createdAt: c.createdAt,
     };
   });
+  const move = whoseMove(ticket, commentsOf(store, ticket.id), { operatorId: project?.operator ?? null, prStates, lanes: lanesOf(pipeline, ticket.project) });
   return {
     ...ticket,
     projectName: project?.name ?? ticket.project,
@@ -329,9 +335,11 @@ export function threadOf(store, ticketId, { pipeline = null, prStates = null } =
     // The one person the ticket may be assigned to, for the ticket page's picker.
     operator: namedActor(store, project?.operator),
     comments,
-    answerIn: answerIsIn(ticket, commentsOf(store, ticket.id), project?.operator),
-    mergeStands: mergeStands(ticket, commentsOf(store, ticket.id), project?.operator),
-    heldUp: heldUpBy(ticket, commentsOf(store, ticket.id), project?.operator, lanesOf(pipeline, ticket.project), prStates),
+    answerIn: move.answerIn,
+    mergeStands: move.mergeStands,
+    heldUp: move.heldUp,
+    // SP-419: the same verdict the Console and Waiting on You read, for the parity test; the page does not draw it.
+    waitingOnOperator: move.waiting,
     pullRequest: findPullRequest(trailComments(store, ticket.id))?.url ?? null,
     // SP-226: its live state on GitHub, for the Merge button. Absent when it was not asked.
     ...(prStates?.has(ticket.id) ? { pullRequestState: prStates.get(ticket.id) } : {}),
@@ -437,7 +445,7 @@ export function projectDetailsOf(store, slug, { withAlerts = false } = {}) {
  * its assignee's name, its last change, and its pull request's address (or
  * null). The pull request is the merge step's own answer, findPullRequest
  * over the ticket's comments, so the list's link and the PR a "merge" would
- * act on cannot differ. `answerIn` says his answer is in (answerIsIn, the
+ * act on cannot differ. `answerIn` says his answer is in (whoseMove, the
  * same as the ticket page). `waiting` says the ticket waits on `viewerId`,
  * the person signed in: the same verdict, for the same person, that puts it
  * on their Waiting on You page (waitingFor), so the list's clock and that
@@ -469,7 +477,7 @@ export function boardOf(store, slug, { viewerId = null, prStates = null } = {}) 
     projectName: project.name,
     columns: STAGE_ORDER.map((name) => ({
       status: name,
-      tickets: byStatus.get(statusOf(name)).slice().sort(inQueueOrder).map((t) => ({
+      tickets: byStatus.get(statusOf(name)).slice().sort(inQueueOrder).map((t) => ({ t, move: whoseMove(t, commentsOf(store, t.id), { operatorId: project.operator, viewerId, prStates }) })).map(({ t, move }) => ({
         id: t.id,
         name: t.name,
         priority: t.priority,
@@ -477,9 +485,9 @@ export function boardOf(store, slug, { viewerId = null, prStates = null } = {}) 
         assignee: nameOf(t.assignee),
         updatedAt: t.updatedAt,
         pullRequest: pullRequestOf(t.id),
-        answerIn: answerIsIn(t, commentsOf(store, t.id), project.operator),
-        mergeStands: mergeStands(t, commentsOf(store, t.id), project.operator),
-        waiting: waitsOn(t, commentsOf(store, t.id), viewerId, prStates),
+        answerIn: move.answerIn,
+        mergeStands: move.mergeStands,
+        waiting: move.waiting,
         // SP-208: the List view's priority dropdown saves with it (ifVersion).
         version: t.version,
         // SP-244: the List view's Assigned To dropdown selects by id; `assignee` stays a name.
@@ -590,7 +598,7 @@ export const CONSOLE_LIVE_MS = 24 * 3_600_000;
  * boardOf). `status` is the contract's own spelling; `assignee` is by name;
  * `waitingOnOperator` is the loop's own verdict (waitingVerdict) for the
  * ticket's project operator, the same rule his Waiting on You page lists by;
- * `answerIn` says his answer is in (answerIsIn); `pullRequest` is the merge
+ * `answerIn` says his answer is in (whoseMove); `pullRequest` is the merge
  * step's own answer (findPullRequest), or null; `hold` is what keeps a
  * Queued ticket from the build loop (holdOf), or null.
  *
@@ -645,9 +653,8 @@ export function consoleOf(store, { only = null, pipeline = null, prStates = null
       const stageSince = stageSinceOf(store, t);
       // The map's Live area shows the last day's launches only (SP-333).
       if (done && !(now - Date.parse(stageSince) <= CONSOLE_LIVE_MS)) continue;
-      const comments = commentsOf(store, t.id);
       // One verdict for the ring and the next change, so a tile says "You" exactly when Waiting on You lists it.
-      const verdict = verdictOf(t, comments, project.operator, prStates);
+      const move = whoseMove(t, commentsOf(store, t.id), { operatorId: project.operator, prStates });
       rows.push({
         ticket: t,
         out: {
@@ -660,10 +667,10 @@ export function consoleOf(store, { only = null, pipeline = null, prStates = null
           assignee: nameOf(t.assignee),
           updatedAt: t.updatedAt,
           stageSince,
-          waitingOnOperator: verdict === WAITING,
-          answerIn: answerIsIn(t, comments, project.operator),
+          waitingOnOperator: move.waiting,
+          answerIn: move.answerIn,
           pullRequest: findPullRequest(trailComments(store, t.id))?.url ?? null,
-          nextChange: nextChangeOf(t.status, projectLanes, verdict),
+          nextChange: nextChangeOf(t.status, projectLanes, move.verdict),
           hold: holdOf(store, t),
         },
       });
