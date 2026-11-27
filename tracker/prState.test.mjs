@@ -182,7 +182,7 @@ test('a PR that is open: exactly as before, counted and with its Merge button', 
     assert.ok((await f.call('/waiting')).body.waiting.some((t) => t.id === id));
     const t = await f.thread(id);
     const html = renderMergeAction(t);
-    assert.match(html, /<button type="submit" class="btn btn-primary">Merge<\/button>/);
+    assert.match(html, /<button type="submit" class="btn btn-save">Merge<\/button>/);
     assert.doesNotMatch(html, /pr-state/, 'an open PR adds no line');
     assert.match(renderQuickAction(t), /Your move: Merge/);
   } finally { await f.cleanup(); }
@@ -198,7 +198,7 @@ test('a PR whose state cannot be read: nothing hidden, plus the "Could not check
       const t = await f.thread(id);
       assert.deepEqual(t.pullRequestState, { number: 12, state: null });
       const html = renderMergeAction(t);
-      assert.match(html, /<button type="submit" class="btn btn-primary">Merge<\/button>/);
+      assert.match(html, /<button type="submit" class="btn btn-save">Merge<\/button>/);
       assert.match(html, /Could not check PR #12 on GitHub just now\./);
     } finally { await f.cleanup(); }
   }

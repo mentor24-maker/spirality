@@ -639,7 +639,7 @@ test('the ticket page puts the details in the right column, open, while a loop h
 test('a held bug report shows Approve and Reject and a quiet line in place of the reply box; anything else is unchanged', () => {
   const held = { name: 'Bug report: x', tags: ['bug-report'], status: 'needs your input', comments: [], description: bugDescription() };
   const html = renderBugReportActions(held);
-  assert.match(html, /<form class="approve-action">\s*<button type="submit" class="btn btn-primary">Approve<\/button><span class="note"><\/span>/);
+  assert.match(html, /<form class="approve-action">\s*<button type="submit" class="btn btn-save">Approve<\/button><span class="note"><\/span>/);
   assert.match(html, /<form class="reject-action">\s*<button type="submit" class="btn btn-danger">Reject<\/button><span class="note"><\/span>/);
   assert.ok(html.indexOf('approve-action') < html.indexOf('reject-action'), 'Approve first');
   assert.match(html, /Moves it to Requested; the intake lane writes it up/);
@@ -1084,7 +1084,7 @@ const PR = 'https://github.com/o/r/pull/41';
 test('only a Ready to launch ticket gets the Merge button, and only when the server named a merge phrase', () => {
   for (const name of loopStatuses.STAGE_ORDER) {
     const html = renderMergeAction({ status: loopStatuses.statusOf(name), mergePhrase: 'merge', pullRequest: PR });
-    if (loopStatuses.statusOf(name) === loopStatuses.READY_TO_LAUNCH) assert.match(html, /<form class="merge-action">\s*<button type="submit" class="btn btn-primary">Merge<\/button>/, name);
+    if (loopStatuses.statusOf(name) === loopStatuses.READY_TO_LAUNCH) assert.match(html, /<form class="merge-action">\s*<button type="submit" class="btn btn-save">Merge<\/button>/, name);
     else assert.equal(html, '', name);
   }
   assert.equal(renderMergeAction({ status: 'ready to launch', mergePhrase: null, pullRequest: PR }), '', 'no phrase, no button');
@@ -1124,7 +1124,7 @@ test('Close shows on his two statuses when the newest card\'s move is Close, and
   for (const name of loopStatuses.STAGE_ORDER) {
     const status = loopStatuses.statusOf(name);
     const html = renderCloseAction({ status, closePhrase: 'close', comments });
-    if (loopStatuses.OPERATOR_HELD_STATUSES.includes(status)) assert.match(html, /<form class="close-action">\s*<button type="submit" class="btn">Close<\/button>/, name);
+    if (loopStatuses.OPERATOR_HELD_STATUSES.includes(status)) assert.match(html, /<form class="close-action">\s*<button type="submit" class="btn btn-save">Close<\/button>/, name);
     else assert.equal(html, '', name);
   }
   assert.equal(renderCloseAction({ status: 'ready to launch', closePhrase: null, comments }), '', 'no word, no button');
@@ -1189,7 +1189,7 @@ test('Go shows only on Needs your input, under an intake card, with a go word fr
   for (const name of loopStatuses.STAGE_ORDER) {
     const status = loopStatuses.statusOf(name);
     const html = renderGoAction({ status, goPhrase: 'go', comments });
-    if (status === loopStatuses.NEEDS_YOUR_INPUT) assert.match(html, /<form class="go-action">\s*<button type="submit" class="btn btn-primary">Go<\/button>/, name);
+    if (status === loopStatuses.NEEDS_YOUR_INPUT) assert.match(html, /<form class="go-action">\s*<button type="submit" class="btn btn-save">Go<\/button>/, name);
     else assert.equal(html, '', name);
   }
   const nyi = { status: 'needs your input', goPhrase: 'go' };
@@ -1229,15 +1229,15 @@ test('the Go button posts the substrate\'s one go word, handed to the page by th
   assert.match(app, /\$\{renderCloseAction\(t\)\}\s*\$\{renderGoAction\(t\)\}\s*(?:\$\{renderBugReportActions\(t\)\}\s*)?\$\{renderReplyForm\(t, me\?\.name\)\}/, 'Go sits between Close and the reply box');
 });
 
-test('no go word is written into the page\'s code, and the Go button is the same main-action kind as Merge (UI_DOCTRINE 3, SP-321)', () => {
+test('no go word is written into the page\'s code, and the Go button is the same Save-green kind as Merge (UI_DOCTRINE 3, SP-415)', () => {
   const code = (name) => readFileSync(WEB(name), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
   for (const name of ['app.mjs', ...RENDER_SCRIPTS, 'index.html']) {
     assert.doesNotMatch(code(name), new RegExp(`['"\`]${busRelayPlan.GO_PHRASE}['"\`]`, 'i'), name);
   }
-  // Both are the screen's main action, blue; neither sets its own size or corners (SP-86's 10px are every button's now).
+  // Both are answers, the Save green (SP-415); neither sets its own size or corners (SP-86's 10px are every button's now).
   const render = renderScript();
-  assert.match(render, /<form class="merge-action">\s*<button type="submit" class="btn btn-primary">Merge<\/button>/);
-  assert.match(render, /<form class="go-action">\s*<button type="submit" class="btn btn-primary">Go<\/button>/);
+  assert.match(render, /<form class="merge-action">\s*<button type="submit" class="btn btn-save">Merge<\/button>/);
+  assert.match(render, /<form class="go-action">\s*<button type="submit" class="btn btn-save">Go<\/button>/);
   assert.doesNotMatch(code('app.css'), /form\.(?:merge|go)-action button/);
   assert.match(code('app.css'), /^\.btn \{[^}]*border-radius: var\(--radius-btn\);/m);
 });

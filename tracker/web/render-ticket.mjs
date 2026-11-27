@@ -767,7 +767,7 @@ export function renderMergeAction({ status, mergePhrase, pullRequest, pullReques
   if (String(status ?? '').toLowerCase() !== READY_TO_LAUNCH || !mergePhrase || !pullRequest) return line;
   if (!offersMerge({ status, mergePhrase, pullRequest, pullRequestState, comments, answerIn, mergeStands })) return '';
   return `${line}<form class="merge-action">
-        <button type="submit" class="btn btn-primary">Merge</button><span class="note"></span>
+        <button type="submit" class="btn btn-save">Merge</button><span class="note"></span>
         <p class="quiet">Posts &ldquo;${escapeHtml(mergePhrase)}&rdquo; as your reply; the relay merges it within a few minutes.</p>
       </form>`;
 }
@@ -834,7 +834,7 @@ export function renderCloseAction({ status, closePhrase, comments = [], answerIn
     ? 'the relay closes it within a few minutes once its work is merged'
     : 'the relay closes it on its next pass, a few minutes from now';
   return `<form class="close-action">
-        <button type="submit" class="btn">Close</button><span class="note"></span>
+        <button type="submit" class="btn btn-save">Close</button><span class="note"></span>
         <p class="quiet">Posts &ldquo;${escapeHtml(closePhrase)}&rdquo; as your reply; ${when}.</p>
       </form>`;
 }
@@ -867,7 +867,7 @@ export function closeQuestion({ name }) {
 export function renderGoAction({ status, goPhrase, comments = [], answerIn = false }) {
   if (!offersGo({ status, goPhrase, comments, answerIn })) return '';
   return `<form class="go-action">
-        <button type="submit" class="btn btn-primary">Go</button><span class="note"></span>
+        <button type="submit" class="btn btn-save">Go</button><span class="note"></span>
         <p class="quiet">Posts &ldquo;${escapeHtml(goPhrase)}&rdquo; as your reply; the relay queues it on its next pass.</p>
       </form>`;
 }
@@ -930,7 +930,7 @@ export const HELD_REPORT_STATUS_LINE = 'It waits on you to Approve or Reject it 
 export function renderBugReportActions(t) {
   if (!heldBugReport(t)) return '';
   return `<form class="approve-action">
-        <button type="submit" class="btn btn-primary">Approve</button><span class="note"></span>
+        <button type="submit" class="btn btn-save">Approve</button><span class="note"></span>
         <p class="quiet">Moves it to Requested; the intake lane writes it up as a spec for you to say go to.</p>
       </form>
       <form class="reject-action">
