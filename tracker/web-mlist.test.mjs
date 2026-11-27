@@ -8,7 +8,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fixture, WEB } from './webTestKit.mjs';
-import { mlistPlace, mlistHref, openTasks, renderMlist, renderMlistRow, renderMlistTicket, renderQuickAction, mlistAnswer, renderMlistAnswer, askOptions, shownAsk } from './web/render.mjs';
+import { mlistPlace, mlistHref, openTasks, renderMlist, renderMlistRow, renderMlistTicket, renderQuickAction, mlistAnswer, renderMlistAnswer, askOptions, shownAsk, offersGo, renderGoAction } from './web/render.mjs';
 import operatorCard from '../lib/operatorCard.js';
 import { pageScript } from './pageScripts.mjs';
 import { declarationsOf, rootTokens } from './cssTokens.mjs';
@@ -158,6 +158,30 @@ test('a Reply with no options is a Go button posting the go word; Merge and Clos
   assert.equal(renderMlistAnswer({ ...merge, mergeStands: true }), '');
 });
 
+test('a Reply that asks A or B inline is a dropdown, and Go is offered only where the ticket page offers it', () => {
+  // The demo's AL-1 wording: an A-or-B question, never a one-tap "go".
+  const inline = asking(['Reply A (the Mini) or B (a hosted server).', 'Your move: Reply — A or B.']);
+  assert.deepEqual(mlistAnswer(inline), { kind: 'pick', word: null, options: [{ letter: 'A', words: 'the Mini' }, { letter: 'B', words: 'a hosted server' }] });
+  const html = renderMlistAnswer(inline);
+  assert.doesNotMatch(html, /mlist-go-button|>Go</, 'no Go button on an A-or-B question');
+  assert.match(html, /<option value="A">A\) the Mini<\/option><option value="B">B\) a hosted server<\/option><\/select>/);
+  // A Reply card whose ask quotes no go word: only the Something Else box, as the ticket page offers no Go.
+  const open = asking(['Tell me which folder the logs should go in.', 'Your move: Reply with the folder.']);
+  assert.equal(offersGo(open), false);
+  assert.equal(renderGoAction(open), '');
+  assert.deepEqual(mlistAnswer(open), { kind: 'other', word: null, options: [] });
+  assert.doesNotMatch(renderMlistAnswer(open), /mlist-go-button/);
+  // Go is the ticket page's own rule: Needs your input only, and the word quoted.
+  const go = asking(['Reply "go" to queue it as written, or reply with what to change.', 'Your move: Reply: "go", or what to change.']);
+  assert.equal(offersGo(go), true);
+  assert.match(renderGoAction(go), /go-action/);
+  assert.equal(mlistAnswer({ ...go, status: 'Ready to launch' }).kind, 'other', 'no Go in Ready to launch, as on the ticket page');
+  // Inline choices must run A, B… in order; a lone one or code is no list.
+  assert.deepEqual(askOptions('Plan A (the cheap one) only.'), []);
+  assert.deepEqual(askOptions('Run `A (x) or B (y)` first.'), []);
+  assert.deepEqual(askOptions('A (one), B (two) or C (three).').map((o) => o.letter), ['A', 'B', 'C']);
+});
+
 test('each control posts what he would have typed through the comments route, and the answered ticket leaves Waiting on You', async () => {
   const f = await fixture(PHRASES);
   try {
@@ -168,6 +192,10 @@ test('each control posts what he would have typed through the comments route, an
     const waiting = (await f.call('GET', '/waiting')).body.waiting.map((t) => t.id);
     assert.ok(!waiting.includes(pick.id), 'answered, so off Waiting on You');
     assert.equal(renderMlistAnswer((await f.call('GET', `/tickets/${pick.id}/thread`)).body), '', 'and nothing to answer again');
+
+    const al1 = await threadNamed(f, 'The tracker has nowhere to run: choose where it lives');
+    assert.equal(mlistAnswer(al1).kind, 'pick', 'the demo\'s A-or-B card is a dropdown, never a Go button');
+    assert.deepEqual(mlistAnswer(al1).options.map((o) => o.letter), ['A', 'B']);
 
     const intake = await threadNamed(f, 'A request written up as a spec, waiting for your go');
     const go = mlistAnswer(intake);

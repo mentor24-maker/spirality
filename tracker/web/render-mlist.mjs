@@ -9,7 +9,7 @@
  * `&ticket=<id>` for one ticket's ask.
  */
 import { escapeHtml } from './render-common.mjs';
-import { askOptions, cardMove, newestCard, offersClose, offersMerge, renderQuickAction, shownAsk, statusLabel } from './render-ticket.mjs';
+import { askOptions, cardMove, newestCard, offersClose, offersGo, offersMerge, renderQuickAction, shownAsk, statusLabel } from './render-ticket.mjs';
 
 /** The two lists the page flips between, the first being where it opens. */
 export const MLIST_VIEWS = Object.freeze([
@@ -106,10 +106,10 @@ export function renderMlistTicket(t, view) {
  * while the red ask shows (shownAsk: his status, his answer not in, no
  * settled pull request). `{ kind, word, options }`: `kind` is `merge-button`
  * or `close-button` (the ticket page's own offersMerge / offersClose,
- * posting the server's word), `pick` (lettered options, posting the
- * letter), `go-button` (a Reply with no options, posting the server's go
- * word) or `other` (only
- * the folded Something Else box).
+ * posting the server's word), `pick` (lettered options, as a list or
+ * inline like "A (the Mini) or B (a hosted server)", posting the letter),
+ * `go-button` (only where the ticket page offers Go, offersGo, posting the
+ * server's go word) or `other` (only the folded Something Else box).
  */
 export function mlistAnswer(t = {}) {
   if (offersMerge(t)) return { kind: 'merge-button', word: t.mergePhrase, options: [] };
@@ -119,7 +119,7 @@ export function mlistAnswer(t = {}) {
   if (cardMove(newestCard(t.comments).body) !== 'Reply') return { kind: 'other', word: null, options: [] };
   const options = askOptions(ask);
   if (options.length) return { kind: 'pick', word: null, options };
-  return t.goPhrase ? { kind: 'go-button', word: t.goPhrase, options: [] } : { kind: 'other', word: null, options: [] };
+  return offersGo(t) ? { kind: 'go-button', word: t.goPhrase, options: [] } : { kind: 'other', word: null, options: [] };
 }
 
 /**

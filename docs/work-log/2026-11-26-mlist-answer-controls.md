@@ -12,3 +12,10 @@ route the full ticket page already uses, so nothing new can go wrong on the
 tracker's side. After a send the page goes back to the list, and the
 answered ticket is gone from Waiting on You. If a send fails, the red
 message strip at the top says so and the ticket stays open.
+
+After review: the first version showed a one-tap Go button on any reply
+question without lettered choices, including one that asked "Reply A (the
+Mini) or B (a hosted server)". One tap would have answered an A-or-B
+question with "go". Now the phone page offers Go only where the full ticket
+page does (the question quotes the go word), and choices written inside a
+sentence like that one become the same dropdown as a lettered list.

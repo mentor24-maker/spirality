@@ -579,6 +579,30 @@ export function askOptions(ask) {
     if (m[1] === want) run.push({ letter: m[1], words: m[2].trim() });
     else if (m[1] === 'A') run = [{ letter: 'A', words: m[2].trim() }];
   }
+  return run.length > 1 ? run : inlineOptions(ask);
+}
+
+/**
+ * Choices written inside a sentence, a capital letter and its words in
+ * brackets ("Reply A (the Mini) or B (a hosted server)."), as askOptions
+ * returns them, or [] when fewer than two. Only a run lettered A, B, C… in
+ * order counts, read outside inline code and fenced blocks.
+ */
+function inlineOptions(ask) {
+  let run = [];
+  let fence = null;
+  for (const raw of String(ask ?? '').split('\n')) {
+    if (fence) { if (closesFence(raw, fence)) fence = null; continue; }
+    const open = FENCE.exec(raw);
+    if (open) { fence = open[1]; continue; }
+    const ranges = codeRanges(raw);
+    for (const m of raw.matchAll(/(?<![\w(])([A-Z]) \(([^()]+)\)/g)) {
+      if (inCode(ranges, m.index)) continue;
+      const want = String.fromCharCode('A'.charCodeAt(0) + run.length);
+      if (m[1] === want) run.push({ letter: m[1], words: m[2].trim() });
+      else if (m[1] === 'A') run = [{ letter: 'A', words: m[2].trim() }];
+    }
+  }
   return run.length > 1 ? run : [];
 }
 
@@ -841,16 +865,27 @@ export function closeQuestion({ name }) {
  * his answer is in (renderAnswerIn).
  */
 export function renderGoAction({ status, goPhrase, comments = [], answerIn = false }) {
-  if (answerIn) return '';
-  if (String(status ?? '').toLowerCase() !== NEEDS_YOUR_INPUT || !goPhrase) return '';
-  const card = newestCard(comments);
-  if (!card || cardMove(card.body) !== 'Reply') return '';
-  const word = goPhrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  if (!new RegExp(`["\u201c]${word}["\u201d]`, 'i').test(cardAsk(card.body) ?? '')) return '';
+  if (!offersGo({ status, goPhrase, comments, answerIn })) return '';
   return `<form class="go-action">
         <button type="submit" class="btn btn-primary">Go</button><span class="note"></span>
         <p class="quiet">Posts &ldquo;${escapeHtml(goPhrase)}&rdquo; as your reply; the relay queues it on its next pass.</p>
       </form>`;
+}
+
+/**
+ * Does this ticket offer the Go button? Needs your input, a go word from
+ * the server, his answer not in, and a newest card whose move is Reply and
+ * whose ask quotes that word. renderGoAction draws it on the ticket page and
+ * the phone page (mlistAnswer) offers Go by the same test, so a Reply card
+ * asking "A or B" never gets a one-tap go.
+ */
+export function offersGo({ status, goPhrase, comments = [], answerIn = false }) {
+  if (answerIn) return false;
+  if (String(status ?? '').toLowerCase() !== NEEDS_YOUR_INPUT || !goPhrase) return false;
+  const card = newestCard(comments);
+  if (!card || cardMove(card.body) !== 'Reply') return false;
+  const word = goPhrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`["\u201c]${word}["\u201d]`, 'i').test(cardAsk(card.body) ?? '');
 }
 
 /** The one question the Go button asks before it posts. Plain text, for confirm(). */
