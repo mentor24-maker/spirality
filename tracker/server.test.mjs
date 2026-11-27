@@ -3406,7 +3406,9 @@ test('GET /in-flight lists every ticket in flight, and those Live in the last da
     f.store.setRole({ actor: viewer.id, role: 'viewer', by: f.human.id });
     f.store.addMember({ project: 'alpha', actor: viewer.id, by: f.human.id });
     const statuses = loopStatuses.STAGE_ORDER;
-    for (const status of statuses) f.store.fileTicket({ project: 'alpha', actor: f.machine.id, name: `Alpha ${status}`, status });
+    // His two statuses carry his name, as a real hand-off does, so the verdict says they wait on him.
+    const his = (status) => (['Needs your input', 'Ready to launch'].includes(status) ? { assignee: f.human.id } : {});
+    for (const status of statuses) f.store.fileTicket({ project: 'alpha', actor: f.machine.id, name: `Alpha ${status}`, status, ...his(status) });
     const hidden = f.store.fileTicket({ project: 'beta', actor: f.machine.id, name: 'Hidden comet', status: 'Queued' });
 
     const logs = join(f.dir, 'logs');

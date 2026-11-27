@@ -50,11 +50,12 @@ export function consoleAge(since, now = Date.now()) {
 
 /**
  * True when a tile is ringed as waiting on the operator: the loop's own
- * verdict (`waitingOnOperator`), one of his two statuses (`nextChange` of
- * kind `operator`), or an answer of his that is in (`answerIn`).
+ * verdict (`waitingOnOperator`), the rule his Waiting on You list goes by,
+ * and nothing else. Not his status alone, and not an answer of his that is
+ * in: those are the relay's move, and the tile says when it comes.
  */
 export function consoleWaiting(t) {
-  return t?.waitingOnOperator === true || t?.answerIn === true || t?.nextChange?.kind === 'operator';
+  return t?.waitingOnOperator === true;
 }
 
 /**

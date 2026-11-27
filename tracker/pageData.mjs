@@ -131,8 +131,17 @@ function mergeStands(ticket, comments, operatorId) {
  * that person. With no viewer, never.
  */
 function waitsOn(ticket, comments, viewerId, prStates = null) {
-  if (viewerId == null || !OPERATOR_LANE.includes(ticket.status)) return false;
-  return waitingVerdict(verdictInput(ticket, comments, prStates), { operatorId: viewerId }).verdict === WAITING;
+  return verdictOf(ticket, comments, viewerId, prStates) === WAITING;
+}
+
+/**
+ * The loop's own verdict (waitingVerdict) on whether the ticket waits on
+ * `viewerId`: WAITING, NOT_WAITING or CANNOT_TELL; null for a ticket in
+ * none of the operator's two statuses, or with no viewer.
+ */
+function verdictOf(ticket, comments, viewerId, prStates = null) {
+  if (viewerId == null || !OPERATOR_LANE.includes(ticket.status)) return null;
+  return waitingVerdict(verdictInput(ticket, comments, prStates), { operatorId: viewerId }).verdict;
 }
 
 /**
@@ -509,6 +518,8 @@ const NEXT_LANE = new Map([
   [statusOf('In review'), 'Review'],
 ]);
 const BUILDING_LANE = 'Build';
+/** The lane that moves a ticket in one of his statuses once it no longer waits on him: the relay merges, sends back or goes Live. */
+const OPERATOR_NEXT_LANE = 'Relay';
 
 /** A lane by its name in STAGES: `{ lane, job }`. */
 function laneOf(name) {
@@ -534,18 +545,27 @@ function stageSinceOf(store, ticket) {
  * whose loop logs this tracker reads (`lanes`, keyed by job, or null for
  * any other project or when the logs cannot be read):
  *  - Building: `{ kind: 'running', lane, job }`, a build pass has it now;
- *  - the operator's two statuses: `{ kind: 'operator' }`, no lane is due;
+ *  - the operator's two statuses: `{ kind: 'operator' }` only when the
+ *    loop's own verdict (`verdict`, waitingVerdict, the rule Waiting on You
+ *    lists by) is WAITING; on any other answer (his word is in, his merge
+ *    word stands, the pull request merged or closed) the relay moves it
+ *    next, so it gets the Relay's pass as below; CANNOT_TELL, or no verdict,
+ *    gets null, never a ring and never a guessed time;
  *  - Requested, Queued, Rework, In review: `{ kind: 'lane', lane, job,
  *    running, due }`, the lane that acts on it, whether a pass of it runs
  *    now, and when its next pass is due (ISO, null while one runs);
  *  - null when that lane's time cannot be read (no logs for this project,
  *    a lane with no pass logged, or one idle with no next time), never a guess.
  */
-function nextChangeOf(status, lanes) {
-  if (OPERATOR_LANE.includes(status)) return { kind: 'operator' };
+function nextChangeOf(status, lanes, verdict = null) {
+  if (OPERATOR_LANE.includes(status)) {
+    if (verdict === WAITING) return { kind: 'operator' };
+    if (verdict == null || verdict === CANNOT_TELL) return null;
+  }
   if (status === BUILDING) return { kind: 'running', ...laneOf(BUILDING_LANE) };
-  if (!NEXT_LANE.has(status) || !lanes) return null;
-  const { lane, job } = laneOf(NEXT_LANE.get(status));
+  const next = OPERATOR_LANE.includes(status) ? OPERATOR_NEXT_LANE : NEXT_LANE.get(status);
+  if (!next || !lanes) return null;
+  const { lane, job } = laneOf(next);
   const stage = lanes.get(job);
   if (!stage || !stage.logged) return null;
   if (stage.running) return { kind: 'lane', lane, job, running: true, due: null };
@@ -626,6 +646,8 @@ export function consoleOf(store, { only = null, pipeline = null, prStates = null
       // The map's Live area shows the last day's launches only (SP-333).
       if (done && !(now - Date.parse(stageSince) <= CONSOLE_LIVE_MS)) continue;
       const comments = commentsOf(store, t.id);
+      // One verdict for the ring and the next change, so a tile says "You" exactly when Waiting on You lists it.
+      const verdict = verdictOf(t, comments, project.operator, prStates);
       rows.push({
         ticket: t,
         out: {
@@ -638,10 +660,10 @@ export function consoleOf(store, { only = null, pipeline = null, prStates = null
           assignee: nameOf(t.assignee),
           updatedAt: t.updatedAt,
           stageSince,
-          waitingOnOperator: waitsOn(t, comments, project.operator, prStates),
+          waitingOnOperator: verdict === WAITING,
           answerIn: answerIsIn(t, comments, project.operator),
           pullRequest: findPullRequest(trailComments(store, t.id))?.url ?? null,
-          nextChange: nextChangeOf(t.status, projectLanes),
+          nextChange: nextChangeOf(t.status, projectLanes, verdict),
           hold: holdOf(store, t),
         },
       });
