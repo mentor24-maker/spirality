@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { openStore } from './store.mjs';
-import { boardOf, consoleOf, CONSOLE_LIVE_MS } from './pageData.mjs';
+import { boardOf, consoleOf, waitingFor, CONSOLE_LIVE_MS } from './pageData.mjs';
+import { consoleWaiting } from './web/render-console.mjs';
 import { STAGES } from './pipeline.mjs';
 import loopStatuses from '../lib/loopStatuses.js';
 
@@ -29,10 +30,12 @@ function pipelineFor(slug, lanes) {
 
 const BUILD_DUE = '2026-11-12T11:30:00.000Z';
 const REVIEW_DUE = '2026-11-12T11:45:00.000Z';
+const RELAY_DUE = '2026-11-12T10:03:00.000Z';
 const ALL_KNOWN = {
   'loop-build': { logged: true, nextDue: BUILD_DUE },
   'loop-review': { logged: true, nextDue: REVIEW_DUE },
   'loop-intake': { logged: true, running: true },
+  relay: { logged: true, nextDue: RELAY_DUE },
 };
 
 test('consoleOf lists every ticket but one Live for more than a day, in STAGE_ORDER, each with the fields a Console tile shows, and every project with its logo', () => {
@@ -62,8 +65,10 @@ test('consoleOf lists every ticket but one Live for more than a day, in STAGE_OR
 });
 
 test('consoleOf: next change follows each stage to the lane that acts on it, from the Pipeline Status answer', () => {
-  const { store, machine } = fixture();
-  for (const status of IN_FLIGHT) store.fileTicket({ project: 'alpha', actor: machine.id, name: status, status });
+  const { store, human, machine } = fixture();
+  // His two statuses with him assigned and no word of his: the verdict says they wait on him.
+  const his = new Set(['Needs your input', 'Ready to launch']);
+  for (const status of IN_FLIGHT) store.fileTicket({ project: 'alpha', actor: machine.id, name: status, status, ...(his.has(status) ? { assignee: human.id } : {}) });
   const next = Object.fromEntries(consoleOf(store, { pipeline: pipelineFor('alpha', ALL_KNOWN) }).tickets.map((t) => [t.status, t.nextChange]));
   assert.deepEqual(next, {
     Requested: { kind: 'lane', lane: 'Intake', job: 'loop-intake', running: true, due: null },
@@ -74,6 +79,73 @@ test('consoleOf: next change follows each stage to the lane that acts on it, fro
     'Needs your input': { kind: 'operator' },
     'Ready to launch': { kind: 'operator' },
   });
+});
+
+/**
+ * The incident's three tiles (11/26): an answer of his is the newest word, a
+ * merge word stands on a pull request behind main, and the pull request has
+ * already merged; beside two that truly wait on him and one the verdict
+ * cannot tell (his lane, nobody assigned).
+ */
+function incidentStore() {
+  const { store, human, machine, tick } = fixture();
+  const file = (name, status) => store.fileTicket({ project: 'alpha', actor: machine.id, name, status, assignee: human.id });
+  const say = (t, author, body) => { tick(); store.postComment({ ticket: t.id, author: author.id, body }); };
+  const asked = file('Asked, not answered', 'needs your input');
+  say(asked, machine, 'Which of the two?');
+  const answered = file('Answered', 'needs your input');
+  say(answered, machine, 'Which of the two?');
+  say(answered, human, 'copy');
+  const ready = file('Ready, no word yet', 'ready to launch');
+  say(ready, machine, 'PR opened: https://github.com/example/repo/pull/20');
+  say(ready, machine, 'REVIEW: PASSED — all green.');
+  const standing = file('Merge word stands', 'ready to launch');
+  say(standing, machine, 'PR opened: https://github.com/example/repo/pull/21');
+  say(standing, machine, 'REVIEW: PASSED — all green.');
+  say(standing, human, 'merge');
+  say(standing, machine, 'The pull request is behind main; your approval is still standing.');
+  const merged = file('Already merged', 'ready to launch');
+  say(merged, machine, 'PR opened: https://github.com/example/repo/pull/22');
+  say(merged, machine, 'REVIEW: PASSED — all green.');
+  const unsure = store.fileTicket({ project: 'alpha', actor: machine.id, name: 'Nobody assigned', status: 'needs your input' });
+  const prStates = new Map([
+    [ready.id, { number: 20, state: 'OPEN' }],
+    [standing.id, { number: 21, state: 'OPEN' }],
+    [merged.id, { number: 22, state: 'MERGED' }],
+  ]);
+  return { store, human, prStates, ids: { asked: asked.id, answered: answered.id, ready: ready.id, standing: standing.id, merged: merged.id, unsure: unsure.id } };
+}
+
+test('consoleOf: the Console rings exactly the tickets Waiting on You lists, from one store; the rest name the Relay\'s next pass (SP-414)', () => {
+  const { store, human, prStates, ids } = incidentStore();
+  const pipeline = pipelineFor('alpha', ALL_KNOWN);
+  const tiles = consoleOf(store, { pipeline, prStates }).tickets;
+  const ringed = tiles.filter(consoleWaiting).map((t) => t.id).sort();
+  const listed = waitingFor(store, human.id, { pipeline, prStates }).waiting.map((r) => r.id).sort();
+  assert.deepEqual(ringed, listed, 'a ringed tile is on Waiting on You, and nothing else is ringed');
+  assert.deepEqual(ringed, [ids.asked, ids.ready].sort());
+  const tile = (id) => tiles.find((t) => t.id === id);
+  for (const id of [ids.asked, ids.ready]) assert.deepEqual(tile(id).nextChange, { kind: 'operator' });
+  const relay = { kind: 'lane', lane: 'Relay', job: 'relay', running: false, due: RELAY_DUE };
+  for (const id of [ids.answered, ids.standing, ids.merged]) {
+    assert.equal(tile(id).waitingOnOperator, false, id);
+    assert.deepEqual(tile(id).nextChange, relay, `${id}: the relay moves it next`);
+  }
+  // The old rule would ring these: his answer is in, and the status is his.
+  assert.equal(tile(ids.answered).answerIn, true);
+  for (const id of [ids.standing, ids.merged]) assert.equal(tile(id).status, 'Ready to launch');
+  // CANNOT_TELL: never ringed, and the dash rather than a guessed time.
+  assert.equal(consoleWaiting(tile(ids.unsure)), false);
+  assert.equal(tile(ids.unsure).nextChange, null);
+});
+
+test('consoleOf: a ticket off his list shows the Relay running now, or null when the relay\'s time is not known (SP-414)', () => {
+  const { store, prStates, ids } = incidentStore();
+  const next = (pipeline) => consoleOf(store, { pipeline, prStates }).tickets.find((t) => t.id === ids.answered).nextChange;
+  assert.deepEqual(next(pipelineFor('alpha', { relay: { logged: true, running: true } })), { kind: 'lane', lane: 'Relay', job: 'relay', running: true, due: null });
+  assert.equal(next(pipelineFor('alpha', {})), null, 'the relay logged nothing');
+  assert.equal(next(pipelineFor('alpha', { relay: { logged: true } })), null, 'idle with no next time');
+  assert.equal(next(null), null, 'no logs at all');
 });
 
 test('consoleOf: next change is null, never a guess, when the lane\'s time cannot be read', () => {
