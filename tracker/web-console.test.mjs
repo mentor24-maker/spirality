@@ -50,8 +50,14 @@ test('a Console tile waiting on the operator is ringed, and its next change is "
   assert.match(his, /^<a class="tile waiting"/);
   assert.match(his, /<span class="fact next" title="Your move: no lane acts on it until you do">You<\/span>/);
   assert.match(his, /waiting on you\.">/);
-  assert.equal(consoleWaiting(consoleTicket({ answerIn: true })), true, 'an answer of his that is in');
-  assert.equal(consoleWaiting(consoleTicket({ nextChange: { kind: 'operator' } })), true, 'one of his statuses');
+  // Only the loop's verdict rings a tile (SP-414): his answer being in, or his status alone, is the relay's move.
+  assert.equal(consoleWaiting(consoleTicket({ status: 'Needs your input', answerIn: true })), false, 'an answer of his that is in');
+  assert.equal(consoleWaiting(consoleTicket({ status: 'Ready to launch', nextChange: { kind: 'operator' } })), false, 'one of his statuses, with no verdict');
+  assert.equal(consoleWaiting(consoleTicket({ status: 'Ready to launch', waitingOnOperator: true })), true, 'the verdict says it waits on him');
+  const relay = renderConsoleTile(consoleTicket({ status: 'Needs your input', answerIn: true, nextChange: { kind: 'lane', lane: 'Relay', job: 'relay', running: false, due: '2026-11-12T18:03:00.000Z' } }), ALPHA, CONSOLE_NOW);
+  assert.match(relay, /^<a class="tile" /);
+  assert.match(relay, />in 3 min<\/span>/);
+  assert.doesNotMatch(relay, />You<|waiting on you/);
   assert.equal(consoleWaiting(consoleTicket()), false);
   assert.match(renderConsoleTile(consoleTicket(), ALPHA, CONSOLE_NOW), /^<a class="tile" /);
 });
@@ -117,7 +123,7 @@ test('the Console map: an area per stage in the loop\'s order, each with its nam
     projects: [ALPHA, BETA],
     tickets: [
       consoleTicket({ id: 'AL-1', status: 'Queued' }),
-      consoleTicket({ id: 'BE-1', project: 'beta', status: 'Needs your input', nextChange: { kind: 'operator' } }),
+      consoleTicket({ id: 'BE-1', project: 'beta', status: 'Needs your input', waitingOnOperator: true, nextChange: { kind: 'operator' } }),
       consoleTicket({ id: 'AL-2', status: 'Odd' }),
     ],
   };
