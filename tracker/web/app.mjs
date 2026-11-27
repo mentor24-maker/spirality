@@ -657,6 +657,8 @@ export async function route({ place = null } = {}) {
   drawing += 1;
   // A page opened anew starts with nothing said; a page that only read itself again keeps its message.
   if (!refreshing) clearMessage();
+  // Before anything is drawn, the sign-in form too: a phone opening /mlist signed out gets it at the phone's width.
+  phoneLayout(location.pathname === '/mlist');
   try {
     if (location.pathname === '/set-password') {
       await drawSetPassword();
@@ -690,7 +692,6 @@ export async function route({ place = null } = {}) {
     const docsPage = location.pathname === '/docs';
     const topicsPage = location.pathname === '/topics';
     const mlist = location.pathname === '/mlist';
-    phoneLayout(mlist);
     const docPath = docAt();
     const docsCommand = commandAt();
     const docAny = underDocs();

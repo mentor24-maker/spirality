@@ -16,7 +16,8 @@ const rule = (selector) => Object.fromEntries(declarationsOf(CSS).filter((d) => 
 
 test('/mlist is served as the page and drawn by drawMlist, the phone layout on only there', async () => {
   const app = pageScript();
-  assert.match(app, /const mlist = location\.pathname === '\/mlist';\s*phoneLayout\(mlist\);/, 'every page sets the layout, so leaving /mlist turns it off');
+  assert.match(app, /phoneLayout\(location\.pathname === '\/mlist'\);\s*try \{\s*if \(location\.pathname === '\/set-password'\)/, 'every page sets the layout before anything draws, the sign-in form included, so leaving /mlist turns it off');
+  assert.match(app, /const mlist = location\.pathname === '\/mlist';/);
   assert.match(app, /if \(mlist\) \{\s*await drawMlist\(\);/);
   assert.match(app, /const waiting = !\(mlist \|\|/, '/mlist is not the home page');
   assert.match(app, /isNew \|\| waiting \|\| mlist \? \{ address: here\(\), reads \}/, 'it keeps itself current like Waiting on You');
