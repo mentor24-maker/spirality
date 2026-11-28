@@ -164,7 +164,7 @@ test('a ticket held up by a failing lane says so in one line above the card, wit
   const draw = /\nasync function drawTicket\(id[^)]*\) \{[\s\S]*?\n\}\n/.exec(app)?.[0] ?? '';
   const line = draw.indexOf('${renderHeldUp(t, sinceTime)}');
   assert.ok(line > 0, 'the ticket page draws the line, with the header health line\'s times');
-  assert.ok(line < draw.indexOf('${renderQuickAction(t)}'), 'above the card, so it is read first');
+  assert.ok(line < draw.indexOf('renderQuickAction(t'), 'above the card, so it is read first');
   const css = drawnCss();
   const rule = /\n\.quick \.held-up \{([^}]*)\}/.exec(css)?.[1] ?? '';
   assert.match(rule, /grid-column: 1 \/ -1/, 'across the whole top, not in one column');
@@ -346,8 +346,8 @@ test('the ticket page opens on the Quick Action section: in his two statuses one
   const [, actions, quick] = page;
   // His move, in order: the answer-is-in line, Merge, Close, Go, Your Answer (SP-423), a held bug report's Approve and Reject, the reply box.
   assert.match(actions, /^\s*\$\{renderAnswerIn\(t\)\}\s*\$\{renderMergeAction\(t\)\}\s*\$\{renderCloseAction\(t\)\}\s*\$\{renderGoAction\(t\)\}\s*\$\{renderPickAction\(t\)\}\s*\$\{renderBugReportActions\(t\)\}\s*\$\{renderReplyForm\(t, me\?\.name\)\}\s*$/);
-  // Left: the pod, his title, words and brief (renderQuickAction), then the actions; right: commands, files made, the ticket open, Delete.
-  assert.match(quick, /<div class="ask\$\{inline \? '' : ' action-pod'\}">\$\{renderQuickAction\(t\)\}\$\{inline \? '' : actions\}<\/div>/);
+  // Left: the pod, his title and status, then the actions (SP-424), then his words and brief (renderQuickAction); right: commands, files made, the ticket open, Delete.
+  assert.match(quick, /<div class="ask\$\{inline \? '' : ' action-pod'\}">\$\{inline \? renderQuickAction\(t\) : renderQuickAction\(t, \{ actions \}\)\}<\/div>/);
   assert.match(quick, /<div class="act">\s*\$\{renderCommands\(t\)\}\s*\$\{inline \? actions : renderFilesMade\(t\)\}\s*<div class="details">\$\{ticketBody\}<\/div>\s*\$\{renderDeleteAction\(t\)\}\s*<\/div>\s*$/);
   // The status line, the description and the comments are all in the open block.
   const details = /const ticketBody = `([\s\S]*?)`;\n  const actions/.exec(app)?.[1] ?? '';
@@ -812,6 +812,93 @@ test('every word of ticket text in Quick Action is escaped', () => {
   });
   assert.doesNotMatch(html, /<script|<img/);
   assert.equal(html.match(/&lt;script&gt;alert\(1\)&lt;\/script&gt;/g).length, 3);
+});
+
+// ── SP-424: his move first, and only the headline in red ─────────────────────
+
+const SP424_CONTEXT = Array.from({ length: 60 }, (_, i) => `w${i}`).join(' ');
+const sp424Card = (needed) => machineComment.stripMachineMarker(machineComment.stampMachineComment(
+  operatorCard.buildCard(`@@ASKED\nbuild it\n@@CONTEXT\n${SP424_CONTEXT}\n@@NEEDED\n${needed}`).rendered));
+const REVIEW_ASK = [
+  'Approve the merge of PR #7: https://github.com/o/r/pull/7',
+  'PR: https://github.com/o/r/pull/7',
+  'To check it after the merge:',
+  '- Open the ticket page.',
+  '- The Merge button sits under the status.',
+  '',
+  'To merge: reply with one of the merge phrases as the whole comment and nothing else.',
+  'Your move: Merge — PR #7',
+].join('\n');
+
+test('the ticket page draws his move straight under the status line, above his words and the ask (SP-424)', () => {
+  const description = '## Asked\n```\nTweak the page\n\nmove the button\n```\n\n## Goal\nThe goal.';
+  const t = { id: 'SP-7', name: 'Tweak the page', description, status: 'Ready to launch', mergePhrase: 'merge',
+    pullRequest: 'https://github.com/o/r/pull/7', comments: [{ body: sp424Card(REVIEW_ASK) }] };
+  const actions = renderMergeAction(t);
+  assert.match(actions, /merge-action/);
+  const html = renderQuickAction(t, { actions });
+  const order = ['<h1>Tweak the page</h1>', 'class="status-line">Status: <span class="status-name">Ready to launch',
+    '<div class="quick-actions">', 'class="btn btn-save">Merge</button>', 'as your reply', 'Original Request',
+    'How the Loop Understood It', 'class="summary"', 'class="needed"'];
+  let at = -1;
+  for (const part of order) { const next = html.indexOf(part); assert.ok(next > at, `${part} comes next`); at = next; }
+  // Needs your input: the reply box and its hint come first too; a bug report's heading keeps the same order.
+  const asking = { ...t, status: 'needs your input', comments: [{ body: sp424Card('Reply A or B.\nYour move: Reply — A or B.') }] };
+  const nyi = renderQuickAction(asking, { actions: renderReplyForm(asking, 'Dane') });
+  assert.ok(nyi.indexOf('class="status-line"') < nyi.indexOf('<form class="reply">'));
+  assert.ok(nyi.indexOf('<form class="reply">') < nyi.indexOf('Original Request'));
+  const report = renderQuickAction({ name: 'x', tags: ['bug-report'], status: 'needs your input', description: '## What they said\nIt broke.' }, { actions: '<form class="go-action"></form>' });
+  assert.ok(report.indexOf('class="status-line"') < report.indexOf('go-action'));
+  // No controls, no empty box; the phone page (no actions given) keeps its one red block.
+  assert.doesNotMatch(renderQuickAction(t, { actions: '  ' }), /quick-actions/);
+  assert.doesNotMatch(renderQuickAction(t), /quick-actions|ask-plain|Test Instructions/);
+  assert.match(renderQuickAction(t), /<p class="needed">Approve the merge[^<]*<a [^>]*>[^<]*<\/a><br>PR: /);
+  const css = drawnCss();
+  assert.match(css, /\n\.quick \.quick-actions \{ margin: 0 0 1\.25rem; \}/);
+});
+
+test('on the ticket page only the ask\'s headline is bold red; PR: is bold, the checking steps sit under Test Instructions (SP-424)', () => {
+  const t = { name: 'x', description: '', status: 'Ready to launch', comments: [{ body: sp424Card(REVIEW_ASK) }] };
+  const html = renderQuickAction(t, { actions: '' });
+  assert.equal((html.match(/class="needed"/g) ?? []).length, 1, 'one red paragraph, no more');
+  assert.match(html, /<p class="needed">Approve the merge of PR #7: <a [^>]*>https:\/\/github\.com\/o\/r\/pull\/7<\/a><\/p>/);
+  assert.match(html, /<p class="ask-pr">PR: <a [^>]*>https:\/\/github\.com\/o\/r\/pull\/7<\/a><\/p>/, 'its own paragraph');
+  assert.match(html, /<\/p>\n<h2 class="request-heading">Test Instructions<\/h2>\n<p class="ask-plain">To check it after the merge:<br>- Open the ticket page\.<br>- The Merge button sits under the status\.<\/p>/);
+  assert.match(html, /<p class="ask-plain">To merge: reply with one of the merge phrases[^<]*<br>Your move: Merge — PR #7<\/p>/);
+  // Every word of the ask is still there, in order.
+  const text = html.slice(html.indexOf('class="needed"')).replace(/<h2[^>]*>Test Instructions<\/h2>/, '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+  for (const line of REVIEW_ASK.split('\n').filter(Boolean)) assert.ok(text.includes(line.replace(/\s+/g, ' ').trim()), line);
+  // The colours: red bold headline, bold PR line in the page's ink, plain steps.
+  const css = drawnCss();
+  assert.match(readFileSync(WEB('app.css'), 'utf8'), /\.quick \.needed \{ color: var\(--ink-error\); font-weight: 700;/);
+  const pr = /\n\.quick \.ask-pr \{([^}]*)\}/.exec(css)?.[1] ?? '';
+  assert.match(pr, /font-weight: 700/);
+  assert.doesNotMatch(pr, /color/, 'bold, not red');
+  const plain = /\n\.quick \.ask-plain \{([^}]*)\}/.exec(css)?.[1] ?? '';
+  assert.doesNotMatch(plain, /color|font-weight/, 'regular weight, the page\'s own colour');
+  assert.doesNotMatch(html, /style="/, 'classes only: the page\'s CSP drops inline styles');
+});
+
+test('an ask with no checking steps keeps only its red headline, with no empty Test Instructions (SP-424)', () => {
+  const go = renderQuickAction({ name: 'x', description: '', status: 'needs your input',
+    comments: [{ body: sp424Card('Reply with the word to queue it as written, or with what to change.\nYour move: Reply — the word, or what to change.') }] }, { actions: '' });
+  assert.equal(go.match(/class="needed"/g)?.length, 1);
+  assert.match(go, /<p class="needed">Reply with the word to queue it as written, or with what to change\.<\/p>\n<p class="ask-plain">Your move: Reply/);
+  assert.doesNotMatch(go, /Test Instructions|ask-pr/);
+  const options = renderQuickAction({ name: 'x', description: '', status: 'needs your input',
+    comments: [{ body: sp424Card('Which host? Options: A) the Mini B) a hosted server\nYour move: Reply — A or B.') }] }, { actions: '' });
+  assert.equal(options.match(/class="needed"/g)?.length, 1);
+  assert.match(options, /<p class="needed">Which host\?<\/p>\n<p class="ask-plain">Options:<br>A\) the Mini<br>B\) a hosted server<br>Your move: Reply — A or B\.<\/p>/);
+  assert.doesNotMatch(options, /Test Instructions/);
+  // A PR: line with no To merge: paragraph is bold on its own, and still no heading.
+  const pr = renderQuickAction({ name: 'x', description: '', status: 'Ready to launch',
+    comments: [{ body: sp424Card('Read the plan.\nPR: https://github.com/o/r/pull/8\nTell me when ready.\nYour move: Merge — PR #8') }] }, { actions: '' });
+  assert.match(pr, /<p class="ask-pr">PR: /);
+  assert.doesNotMatch(pr, /Test Instructions/);
+  // A PR: or To merge: inside a fenced block is the card's text, not its shape.
+  const fenced = renderQuickAction({ name: 'x', description: '', status: 'needs your input',
+    comments: [{ body: sp424Card('Run this:\n```\nPR: x\nTo merge: y\n```\nYour move: Reply — done.') }] }, { actions: '' });
+  assert.doesNotMatch(fenced, /ask-pr|Test Instructions/);
 });
 
 test('Quick Action asks for his move only while the ticket waits on him (SP-118)', () => {
