@@ -41,8 +41,9 @@ export async function drawTicket(id, said = null, kept = null) {
   // (SP-291) nothing asks him for a reply, so the right column also carries
   // any actions and the Add Comment box sits under the comments. In his two
   // statuses (SP-416) everything he needs to act sits on the left, in one
-  // pod: his title, his words, the loop's brief and the actions; the right
-  // column holds the commands, the files made and the rest of the ticket.
+  // pod: his title, the status line and straight under it the actions
+  // (SP-424), then his words and the loop's brief; the right column holds
+  // the commands, the files made and the rest of the ticket.
   const inline = loopHasIt(t);
   const ticketBody = `
       <p class="meta">
@@ -78,7 +79,7 @@ export async function drawTicket(id, said = null, kept = null) {
   main.innerHTML = `
     <section class="quick${inline ? ' loop-has' : ' his-move'}">
       ${renderHeldUp(t, sinceTime)}
-      <div class="ask${inline ? '' : ' action-pod'}">${renderQuickAction(t)}${inline ? '' : actions}</div>
+      <div class="ask${inline ? '' : ' action-pod'}">${inline ? renderQuickAction(t) : renderQuickAction(t, { actions })}</div>
       <div class="act">
       ${renderCommands(t)}
       ${inline ? actions : renderFilesMade(t)}

@@ -504,7 +504,10 @@ export function askParagraphs(ask) {
  * needed is that newest card's ask, drawn only while the ticket is in one of
  * his two statuses and his answer is not in (renderAnswerIn); a card stays in
  * the thread after he answers, and its ask is no longer his move (SP-118).
- * Under the heading (and the Ticket name line) comes renderStatusLine.
+ * Under the heading (and the Ticket name line) comes renderStatusLine. On
+ * the ticket page, `actions` (his move's controls, SP-424) come straight
+ * under that line and the ask is drawn by renderAskLayout, only its headline
+ * red; the phone page gives no `actions` and keeps the ask in one red block.
  *
  * When the description carries his `## Asked` request (SP-213), his own
  * words come first: his title is the heading (the ticket's current name on a
@@ -518,8 +521,13 @@ export function askParagraphs(ask) {
  * the description's first paragraph (its "(none attached)" line) is never
  * the summary.
  */
-export function renderQuickAction(t) {
+export function renderQuickAction(t, { actions = null } = {}) {
   const { name, description, tags = [], comments = [] } = t;
+  // The ticket page passes his move's controls (SP-424): they sit straight
+  // under the status line, and the ask is laid out by renderAskLayout. The
+  // phone page passes none and keeps the ask as one red block.
+  const page = typeof actions === 'string';
+  const status = page && actions.trim() ? `${renderStatusLine(t)}\n<div class="quick-actions">${actions}</div>` : renderStatusLine(t);
   const card = newestCard(comments);
   const report = bugReport({ tags, description });
   // A bug report's first paragraph is its "(none attached)" screenshots line (SP-286): only a card's context is a summary.
@@ -530,23 +538,80 @@ export function renderQuickAction(t) {
   const top = asked ? [
     `<h1>${escapeHtml(asked.title)}</h1>`,
     String(name ?? '').trim() !== asked.title ? `<p class="ticket-name quiet">Ticket name: ${escapeHtml(name)}</p>` : '',
-    renderStatusLine(t),
+    status,
     '<h2 class="request-heading">Original Request</h2>',
     `<p class="original-request">${escapeHtml(asked.words)}</p>`,
     asked.slicedFrom ? `<p class="sliced-from">Sliced from <a href="/t/${escapeHtml(asked.slicedFrom)}">${escapeHtml(asked.slicedFrom)}</a></p>` : '',
     summary ? '<h2 class="request-heading">How the Loop Understood It</h2>' : '',
   ] : report ? [
     '<h1>Bug Report:</h1>',
-    renderStatusLine(t),
+    status,
     `<p class="bug-words">${escapeHtml(report.words)}</p>`,
     report.facts.length ? `<ul class="bug-facts">${report.facts.map(bugReportFact).join('')}</ul>` : '',
     report.screenshots ? '<p class="bug-shots quiet">Screenshots are attached: see the description on the right.</p>' : '',
-  ] : [`<h1>${escapeHtml(name)}</h1>`, renderStatusLine(t)];
+  ] : [`<h1>${escapeHtml(name)}</h1>`, status];
   return [
     ...top,
     summary ? `<p class="summary">${renderInline(summary)}</p>` : '',
-    ask ? askParagraphs(ask).map((p) => `<p class="needed">${p.map(renderInline).join('<br>')}</p>`).join('\n') : '',
+    !ask ? '' : page ? renderAskLayout(ask)
+      : askParagraphs(ask).map((p) => `<p class="needed">${p.map(renderInline).join('<br>')}</p>`).join('\n'),
   ].filter(Boolean).join('\n');
+}
+
+/** A line of the ask that names the pull request, `PR: <link>` (bold markers allowed). */
+const PR_LINE = /^(\*\*)?PR:/;
+/** The review card's paragraph on how to answer it, `To merge: …` (bold markers allowed). */
+const TO_MERGE_LINE = /^(\*\*)?To merge:/;
+
+/**
+ * The ask as the ticket page lays it out (SP-424), as HTML. Only its first
+ * line, the headline after `NEEDED FROM …:`, is bold red. A `PR:` line is a
+ * bold paragraph of its own in the page's own colour. When the card is a
+ * review card, with a `To merge:` paragraph, the lines between the headline
+ * (or the `PR:` line) and that paragraph are its checking steps, under a
+ * "Test Instructions" heading. Everything else is plain text. The lines are
+ * found by the card's shape; a card worded another way is drawn plain, with
+ * every word kept. A blank line, or `Options:` (askParagraphs), starts a new
+ * paragraph; nothing inside a fenced block is ever read as a marker. Lines
+ * before the headline (a doubled banner's row of #) are drawn plain.
+ */
+export function renderAskLayout(ask) {
+  const lines = [];
+  let fence = null;
+  askParagraphs(ask).forEach((paragraph, at) => {
+    for (const line of paragraph) {
+      const inFence = fence !== null;
+      if (fence !== null) { if (closesFence(line, fence)) fence = null; }
+      else { const open = FENCE.exec(line); if (open) fence = open[1]; }
+      const outside = !inFence && fence === null;
+      lines.push({ line, paragraph: at, outside, marker: outside ? line.trim() : '' });
+    }
+  });
+  // A card that doubled its banner opens on a row of #: the headline is the first line of words.
+  const words = (l) => l.marker && !BANNER_RULE.test(unbold(l.marker));
+  const first = lines.findIndex(words);
+  const head = first !== -1 ? first : lines.findIndex((l) => l.line.trim());
+  if (head === -1) return '';
+  const pr = lines.findIndex((l, i) => i > head && PR_LINE.test(l.marker));
+  const toMerge = lines.findIndex((l, i) => i > head && TO_MERGE_LINE.test(l.marker));
+  const stepsFrom = (pr !== -1 && (toMerge === -1 || pr < toMerge) ? pr : head) + 1;
+  const kindOf = (i) => (i === head ? 'needed' : i === pr ? 'ask-pr'
+    : toMerge !== -1 && i >= stepsFrom && i < toMerge ? 'ask-step' : 'ask-plain');
+  const groups = [];
+  lines.forEach((l, i) => {
+    const kind = kindOf(i);
+    if (!l.line.trim() && l.outside) { groups.push(null); return; }
+    const last = groups.at(-1);
+    if (last && last.kind === kind && last.paragraph === l.paragraph && kind !== 'needed' && kind !== 'ask-pr') last.lines.push(l.line);
+    else groups.push({ kind, paragraph: l.paragraph, lines: [l.line] });
+  });
+  const out = [];
+  let headed = false;
+  for (const g of groups.filter(Boolean)) {
+    if (g.kind === 'ask-step' && !headed) { out.push('<h2 class="request-heading">Test Instructions</h2>'); headed = true; }
+    out.push(`<p class="${g.kind === 'ask-step' ? 'ask-plain' : g.kind}">${g.lines.map(renderInline).join('<br>')}</p>`);
+  }
+  return out.join('\n');
 }
 
 /**
