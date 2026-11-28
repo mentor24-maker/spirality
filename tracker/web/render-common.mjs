@@ -224,9 +224,19 @@ function endOutsideFences(lines, from, isEnd, peel, run = null) {
  * the ask as written, without its label: one `**…**` layer off each line when
  * the tracker stored the banner bold, and nothing else touched, so a fenced
  * command inside it reads exactly as it was posted.
+ *
+ * A banner is never inside a fence: a fenced block quotes, so a `NEEDED
+ * FROM …:` line or `@@NEEDED` marker there is someone's words, not the card
+ * (SP-425: Dane's request quoted that very line, and the page drew it as the
+ * ask, with no Go button). Only a fence left open falls back to the first
+ * one anywhere, so a broken card is still found where it used to be.
  */
 export function findBanner(lines, operatorName) {
-  const label = lines.findIndex((l) => BANNER_LABEL.test(unbold(l)));
+  const outside = (isIt) => {
+    const i = endOutsideFences(lines, 0, isIt, unwrap);
+    return i < lines.length ? i : -1;
+  };
+  const label = outside((l) => BANNER_LABEL.test(unbold(l)));
   if (label !== -1) {
     const start = label > 0 && BANNER_RULE.test(unbold(lines[label - 1])) ? label - 1 : label;
     const peel = /^\s*\*\*[\s\S]*\*\*\s*$/.test(lines[label]) ? unwrap : (l) => l;
@@ -235,7 +245,7 @@ export function findBanner(lines, operatorName) {
     const ask = [first, ...lines.slice(label + 1, end).map(peel)];
     return { start, end: Math.min(end + 1, lines.length), lines: lines.slice(label, end).map(unbold), ask };
   }
-  const raw = lines.findIndex((l) => RAW_SECTION.exec(l.trim())?.[1] === 'NEEDED');
+  const raw = outside((l) => RAW_SECTION.exec(l.trim())?.[1] === 'NEEDED');
   if (raw === -1) return null;
   const end = endOutsideFences(lines, raw + 1, (l) => RAW_SECTION.test(l.trim()), (l) => l);
   const ask = lines.slice(raw + 1, end).map((l) => l.trim()).filter(Boolean);
